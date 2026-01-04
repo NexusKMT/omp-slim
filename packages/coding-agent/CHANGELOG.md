@@ -5,6 +5,8 @@
 ### Changed
 
 - Changed default for `lsp.formatOnWrite` setting from `true` to `false`
+- Updated status line thinking level display to use emoji icons instead of abbreviated text
+- Changed auto-compact indicator from "(auto)" text to icon
 
 ### Fixed
 

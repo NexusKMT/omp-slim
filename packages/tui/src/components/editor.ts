@@ -235,10 +235,11 @@ export class Editor implements Component {
 					displayText = before + cursor + restAfter;
 					// lineVisibleWidth stays the same - we're replacing, not adding
 				} else {
-					// Cursor is at the end - check if we have room for the space
+					// Cursor is at the end - check if we have room for the cursor
 					if (lineVisibleWidth < lineContentWidth) {
-						// We have room - add highlighted space
-						const cursor = "\x1b[7m \x1b[0m";
+						// We have room - add thin bar cursor (▏) with blink
+						// \x1b[5m = slow blink, no reverse video so it's a thin line
+						const cursor = "\x1b[5m▏\x1b[0m";
 						displayText = before + cursor;
 						// lineVisibleWidth increases by 1 - we're adding a space
 						lineVisibleWidth = lineVisibleWidth + 1;
@@ -261,17 +262,15 @@ export class Editor implements Component {
 				}
 			}
 
-			// Each line gets: "│ " prefix (2 chars) and " │" suffix (2 chars) for middle lines
-			// Last line gets: "╰─" prefix (2 chars) and "─╯" suffix (2 chars)
+			// All lines get 1 char padding on each side for consistent alignment
 			const isLastLine = layoutLine === layoutLines[layoutLines.length - 1];
-			const padding = " ".repeat(Math.max(0, lineContentWidth - lineVisibleWidth));
+			const padding = " ".repeat(Math.max(0, lineContentWidth - lineVisibleWidth - 2));
 
 			if (isLastLine) {
-				result.push(bottomLeft + displayText + padding + bottomRight);
+				result.push(`${bottomLeft} ${displayText}${padding} ${bottomRight}`);
 			} else {
-				// Middle lines: use vertical bar borders
-				const leftBorder = this.borderColor("│ ");
-				const rightBorder = this.borderColor(" │");
+				const leftBorder = this.borderColor("│  ");
+				const rightBorder = this.borderColor("  │");
 				result.push(leftBorder + displayText + padding + rightBorder);
 			}
 		}

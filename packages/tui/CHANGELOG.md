@@ -10,6 +10,7 @@
 ### Changed
 
 - Changed Editor component to use proper box borders with vertical side borders instead of horizontal-only borders
+- Changed cursor style from block to thin blinking bar (▏) at end of line
 
 ## [3.8.1337] - 2026-01-04
 
