@@ -150,16 +150,48 @@ run(["git", "push", "origin", "main"]);
 run(["git", "push", "origin", `v${VERSION}`]);
 console.log();
 
-// 7. Watch CI
+// 7. Watch CI - wait for all workflow runs on current commit
 console.log("Watching CI...");
-const runListOutput = run(["gh", "run", "list", "--limit", "1", "--json", "databaseId"], { capture: true, silent: true });
-const runs = JSON.parse(runListOutput);
-if (runs.length > 0) {
-	const runId = runs[0].databaseId;
-	console.log(`  Watching run ${runId}...`);
-	run(["gh", "run", "watch", String(runId), "--exit-status"], { ignoreError: true });
+const commitSha = run(["git", "rev-parse", "HEAD"], { capture: true, silent: true });
+console.log(`  Commit: ${commitSha.slice(0, 8)}`);
+
+// Poll until all runs complete
+let allPassed = false;
+while (!allPassed) {
+	const runsOutput = run(
+		["gh", "run", "list", "--commit", commitSha, "--json", "databaseId,status,conclusion,name"],
+		{ capture: true, silent: true },
+	);
+	const runs: Array<{ databaseId: number; status: string; conclusion: string | null; name: string }> =
+		JSON.parse(runsOutput);
+
+	if (runs.length === 0) {
+		console.log("  Waiting for CI to start...");
+		await Bun.sleep(3000);
+		continue;
+	}
+
+	const pending = runs.filter((r) => r.status !== "completed");
+	const failed = runs.filter((r) => r.status === "completed" && r.conclusion !== "success");
+	const passed = runs.filter((r) => r.status === "completed" && r.conclusion === "success");
+
+	console.log(`  ${passed.length} passed, ${pending.length} pending, ${failed.length} failed`);
+
+	if (failed.length > 0) {
+		console.error("\nCI failed:");
+		for (const r of failed) {
+			console.error(`  - ${r.name}: ${r.conclusion}`);
+		}
+		process.exit(1);
+	}
+
+	if (pending.length === 0) {
+		allPassed = true;
+	} else {
+		await Bun.sleep(5000);
+	}
 }
-console.log();
+console.log("  All CI checks passed!\n");
 
 console.log(`=== Released v${VERSION} ===`);
 console.log();
