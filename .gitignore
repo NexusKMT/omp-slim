@@ -38,3 +38,4 @@ out.html
 !.claude/
 .claude/*
 !.claude/commands/
+packages/ai/test/.temp-images/
