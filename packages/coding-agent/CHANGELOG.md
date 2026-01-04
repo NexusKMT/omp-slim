@@ -1,9 +1,6 @@
 # Changelog
 
 ## [Unreleased]
-### Fixed
-
-- Fixed status line not updating token counts and cost after starting a new session
 
 ## [3.9.1337] - 2026-01-04
 
@@ -15,6 +12,7 @@
 
 ### Fixed
 
+- Fixed status line not updating token counts and cost after starting a new session
 - Fixed stale diagnostics persisting after file content changes in LSP client
 
 ## [3.8.1337] - 2026-01-04
