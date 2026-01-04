@@ -2408,6 +2408,10 @@ export class InteractiveMode {
 		// New session via session (emits hook and tool session events)
 		await this.session.newSession();
 
+		// Update status line (token counts, cost reset)
+		this.statusLine.invalidate();
+		this.updateEditorTopBorder();
+
 		// Clear UI state
 		this.chatContainer.clear();
 		this.pendingMessagesContainer.clear();
