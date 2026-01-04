@@ -26,7 +26,7 @@ import {
 	isTab,
 } from "../keys";
 import type { Component } from "../tui";
-import { getSegmenter, isPunctuationChar, isWhitespaceChar, visibleWidth } from "../utils";
+import { getSegmenter, isPunctuationChar, isWhitespaceChar, truncateToWidth, visibleWidth } from "../utils";
 import { SelectList, type SelectListTheme } from "./select-list";
 
 const segmenter = getSegmenter();
@@ -46,6 +46,13 @@ interface LayoutLine {
 export interface EditorTheme {
 	borderColor: (str: string) => string;
 	selectList: SelectListTheme;
+}
+
+export interface EditorTopBorder {
+	/** The status content (already styled) */
+	content: string;
+	/** Visible width of the content */
+	width: number;
 }
 
 export class Editor implements Component {
@@ -85,6 +92,9 @@ export class Editor implements Component {
 	public onChange?: (text: string) => void;
 	public disableSubmit: boolean = false;
 
+	// Custom top border (for status line integration)
+	private topBorderContent?: EditorTopBorder;
+
 	constructor(theme: EditorTheme) {
 		this.theme = theme;
 		this.borderColor = theme.borderColor;
@@ -92,6 +102,14 @@ export class Editor implements Component {
 
 	setAutocompleteProvider(provider: AutocompleteProvider): void {
 		this.autocompleteProvider = provider;
+	}
+
+	/**
+	 * Set custom content for the top border (e.g., status line).
+	 * Pass undefined to use the default plain border.
+	 */
+	setTopBorder(content: EditorTopBorder | undefined): void {
+		this.topBorderContent = content;
 	}
 
 	/**
@@ -162,17 +180,42 @@ export class Editor implements Component {
 		// Store width for cursor navigation
 		this.lastWidth = width;
 
+		// Box-drawing characters for rounded corners
+		const topLeft = this.borderColor("╭─");
+		const topRight = this.borderColor("─╮");
+		const bottomLeft = this.borderColor("╰─");
+		const bottomRight = this.borderColor("─╯");
 		const horizontal = this.borderColor("─");
 
-		// Layout the text - use full width
-		const layoutLines = this.layoutText(width);
+		// Layout the text - content area is width minus 4 for borders (2 left + 2 right)
+		const contentAreaWidth = width - 4;
+		const layoutLines = this.layoutText(contentAreaWidth);
 
 		const result: string[] = [];
 
-		// Render top border
-		result.push(horizontal.repeat(width));
+		// Render top border: ╭─ [status content] ────────────────╮
+		// Reserve: 2 for "╭─", 2 for "─╮" = 4 total for corners
+		const topFillWidth = width - 4;
+		if (this.topBorderContent) {
+			const { content, width: statusWidth } = this.topBorderContent;
+			if (statusWidth <= topFillWidth) {
+				// Status fits - add fill after it
+				const fillWidth = topFillWidth - statusWidth;
+				result.push(topLeft + content + this.borderColor("─".repeat(fillWidth)) + topRight);
+			} else {
+				// Status too long - truncate it
+				const truncated = truncateToWidth(content, topFillWidth - 1, this.borderColor("…"));
+				const truncatedWidth = visibleWidth(truncated);
+				const fillWidth = Math.max(0, topFillWidth - truncatedWidth);
+				result.push(topLeft + truncated + this.borderColor("─".repeat(fillWidth)) + topRight);
+			}
+		} else {
+			result.push(topLeft + horizontal.repeat(topFillWidth) + topRight);
+		}
 
 		// Render each layout line
+		// Content area is width - 4 (for prefix and suffix borders)
+		const lineContentWidth = width - 4;
 		for (const layoutLine of layoutLines) {
 			let displayText = layoutLine.text;
 			let lineVisibleWidth = visibleWidth(layoutLine.text);
@@ -193,7 +236,7 @@ export class Editor implements Component {
 					// lineVisibleWidth stays the same - we're replacing, not adding
 				} else {
 					// Cursor is at the end - check if we have room for the space
-					if (lineVisibleWidth < width) {
+					if (lineVisibleWidth < lineContentWidth) {
 						// We have room - add highlighted space
 						const cursor = "\x1b[7m \x1b[0m";
 						displayText = before + cursor;
@@ -218,15 +261,20 @@ export class Editor implements Component {
 				}
 			}
 
-			// Calculate padding based on actual visible width
-			const padding = " ".repeat(Math.max(0, width - lineVisibleWidth));
+			// Each line gets: "│ " prefix (2 chars) and " │" suffix (2 chars) for middle lines
+			// Last line gets: "╰─" prefix (2 chars) and "─╯" suffix (2 chars)
+			const isLastLine = layoutLine === layoutLines[layoutLines.length - 1];
+			const padding = " ".repeat(Math.max(0, lineContentWidth - lineVisibleWidth));
 
-			// Render the line (no side borders, just horizontal lines above and below)
-			result.push(displayText + padding);
+			if (isLastLine) {
+				result.push(bottomLeft + displayText + padding + bottomRight);
+			} else {
+				// Middle lines: use vertical bar borders
+				const leftBorder = this.borderColor("│ ");
+				const rightBorder = this.borderColor(" │");
+				result.push(leftBorder + displayText + padding + rightBorder);
+			}
 		}
-
-		// Render bottom border
-		result.push(horizontal.repeat(width));
 
 		// Add autocomplete list if active
 		if (this.isAutocompleting && this.autocompleteList) {
@@ -1284,7 +1332,7 @@ export class Editor implements Component {
 https://github.com/EsotericSoftware/spine-runtimes/actions/runs/19536643416/job/559322883
 17 this job fails with https://github.com/EsotericSoftware/spine-runtimes/actions/runs/19
 536643416/job/55932288317 havea  look at .gi
-	 */
+    */
 	private forceFileAutocomplete(): void {
 		if (!this.autocompleteProvider) return;
 

@@ -85,20 +85,20 @@ const ThemeJsonSchema = Type.Object({
 		thinkingXhigh: ColorValueSchema,
 		// Bash Mode (1 color)
 		bashMode: ColorValueSchema,
-		// Footer Status Line (10 colors)
-		footerIcon: ColorValueSchema,
-		footerSep: ColorValueSchema,
-		footerModel: ColorValueSchema,
-		footerPath: ColorValueSchema,
-		footerBranch: ColorValueSchema,
-		footerStaged: ColorValueSchema,
-		footerDirty: ColorValueSchema,
-		footerUntracked: ColorValueSchema,
-		footerInput: ColorValueSchema,
-		footerOutput: ColorValueSchema,
-		footerCacheRead: ColorValueSchema,
-		footerCacheWrite: ColorValueSchema,
-		footerCost: ColorValueSchema,
+		// Footer Status Line
+		statusLineBg: ColorValueSchema,
+		statusLineSep: ColorValueSchema,
+		statusLineModel: ColorValueSchema,
+		statusLinePath: ColorValueSchema,
+		statusLineGitClean: ColorValueSchema,
+		statusLineGitDirty: ColorValueSchema,
+		statusLineContext: ColorValueSchema,
+		statusLineSpend: ColorValueSchema,
+		statusLineStaged: ColorValueSchema,
+		statusLineDirty: ColorValueSchema,
+		statusLineUntracked: ColorValueSchema,
+		statusLineOutput: ColorValueSchema,
+		statusLineCost: ColorValueSchema,
 	}),
 	export: Type.Optional(
 		Type.Object({
@@ -160,19 +160,18 @@ export type ThemeColor =
 	| "thinkingHigh"
 	| "thinkingXhigh"
 	| "bashMode"
-	| "footerIcon"
-	| "footerSep"
-	| "footerModel"
-	| "footerPath"
-	| "footerBranch"
-	| "footerStaged"
-	| "footerDirty"
-	| "footerUntracked"
-	| "footerInput"
-	| "footerOutput"
-	| "footerCacheRead"
-	| "footerCacheWrite"
-	| "footerCost";
+	| "statusLineSep"
+	| "statusLineModel"
+	| "statusLinePath"
+	| "statusLineGitClean"
+	| "statusLineGitDirty"
+	| "statusLineContext"
+	| "statusLineSpend"
+	| "statusLineStaged"
+	| "statusLineDirty"
+	| "statusLineUntracked"
+	| "statusLineOutput"
+	| "statusLineCost";
 
 export type ThemeBg =
 	| "selectedBg"
@@ -180,7 +179,8 @@ export type ThemeBg =
 	| "customMessageBg"
 	| "toolPendingBg"
 	| "toolSuccessBg"
-	| "toolErrorBg";
+	| "toolErrorBg"
+	| "statusLineBg";
 
 type ColorMode = "truecolor" | "256color";
 
@@ -536,6 +536,7 @@ function createTheme(themeJson: ThemeJson, mode?: ColorMode): Theme {
 		"toolPendingBg",
 		"toolSuccessBg",
 		"toolErrorBg",
+		"statusLineBg",
 	]);
 	for (const [key, value] of Object.entries(resolvedColors)) {
 		if (bgColorKeys.has(key)) {

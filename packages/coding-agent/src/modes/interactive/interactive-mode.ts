@@ -43,7 +43,6 @@ import { CompactionSummaryMessageComponent } from "./components/compaction-summa
 import { CustomEditor } from "./components/custom-editor";
 import { DynamicBorder } from "./components/dynamic-border";
 import { ExtensionDashboard } from "./components/extensions";
-import { FooterComponent } from "./components/footer";
 import { HookEditorComponent } from "./components/hook-editor";
 import { HookInputComponent } from "./components/hook-input";
 import { HookMessageComponent } from "./components/hook-message";
@@ -52,6 +51,7 @@ import { ModelSelectorComponent } from "./components/model-selector";
 import { OAuthSelectorComponent } from "./components/oauth-selector";
 import { SessionSelectorComponent } from "./components/session-selector";
 import { SettingsSelectorComponent } from "./components/settings-selector";
+import { StatusLineComponent } from "./components/status-line";
 import { ToolExecutionComponent } from "./components/tool-execution";
 import { TreeSelectorComponent } from "./components/tree-selector";
 import { TtsrNotificationComponent } from "./components/ttsr-notification";
@@ -85,7 +85,7 @@ export class InteractiveMode {
 	private statusContainer: Container;
 	private editor: CustomEditor;
 	private editorContainer: Container;
-	private footer: FooterComponent;
+	private statusLine: StatusLineComponent;
 	private version: string;
 	private isInitialized = false;
 	private onInputCallback?: (input: { text: string; images?: ImageContent[] }) => void;
@@ -176,8 +176,8 @@ export class InteractiveMode {
 		this.editor = new CustomEditor(getEditorTheme());
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor);
-		this.footer = new FooterComponent(session);
-		this.footer.setAutoCompactEnabled(session.autoCompactionEnabled);
+		this.statusLine = new StatusLineComponent(session);
+		this.statusLine.setAutoCompactEnabled(session.autoCompactionEnabled);
 
 		// Define slash commands for autocomplete
 		const slashCommands: SlashCommand[] = [
@@ -287,7 +287,7 @@ export class InteractiveMode {
 		this.ui.addChild(this.statusContainer);
 		this.ui.addChild(new Spacer(1));
 		this.ui.addChild(this.editorContainer);
-		this.ui.addChild(this.footer);
+		this.ui.addChild(this.statusLine); // Only renders hook statuses (main status in editor border)
 		this.ui.setFocus(this.editor);
 
 		this.setupKeyHandlers();
@@ -311,9 +311,13 @@ export class InteractiveMode {
 		});
 
 		// Set up git branch watcher
-		this.footer.watchBranch(() => {
+		this.statusLine.watchBranch(() => {
+			this.updateEditorTopBorder();
 			this.ui.requestRender();
 		});
+
+		// Initial top border update
+		this.updateEditorTopBorder();
 	}
 
 	// =========================================================================
@@ -492,7 +496,7 @@ export class InteractiveMode {
 	 * Set hook status text in the footer.
 	 */
 	private setHookStatus(key: string, text: string | undefined): void {
-		this.footer.setHookStatus(key, text);
+		this.statusLine.setHookStatus(key, text);
 		this.ui.requestRender();
 	}
 
@@ -934,7 +938,8 @@ export class InteractiveMode {
 			await this.init();
 		}
 
-		this.footer.invalidate();
+		this.statusLine.invalidate();
+		this.updateEditorTopBorder();
 
 		switch (event.type) {
 			case "agent_start":
@@ -1039,7 +1044,8 @@ export class InteractiveMode {
 					}
 					this.streamingComponent = undefined;
 					this.streamingMessage = undefined;
-					this.footer.invalidate();
+					this.statusLine.invalidate();
+					this.updateEditorTopBorder();
 				}
 				this.ui.requestRender();
 				break;
@@ -1147,7 +1153,8 @@ export class InteractiveMode {
 						summary: event.result.summary,
 						timestamp: Date.now(),
 					});
-					this.footer.invalidate();
+					this.statusLine.invalidate();
+					this.updateEditorTopBorder();
 				}
 				this.ui.requestRender();
 				break;
@@ -1324,7 +1331,7 @@ export class InteractiveMode {
 		this.pendingTools.clear();
 
 		if (options.updateFooter) {
-			this.footer.invalidate();
+			this.statusLine.invalidate();
 			this.updateEditorBorderColor();
 		}
 
@@ -1492,7 +1499,15 @@ export class InteractiveMode {
 			const level = this.session.thinkingLevel || "off";
 			this.editor.borderColor = theme.getThinkingBorderColor(level);
 		}
+		// Update footer content in editor's top border
+		this.updateEditorTopBorder();
 		this.ui.requestRender();
+	}
+
+	private updateEditorTopBorder(): void {
+		const width = this.ui.getWidth();
+		const topBorder = this.statusLine.getTopBorder(width);
+		this.editor.setTopBorder(topBorder);
 	}
 
 	private cycleThinkingLevel(): void {
@@ -1500,9 +1515,8 @@ export class InteractiveMode {
 		if (newLevel === undefined) {
 			this.showStatus("Current model does not support thinking");
 		} else {
-			this.footer.invalidate();
+			this.statusLine.invalidate();
 			this.updateEditorBorderColor();
-			this.showStatus(`Thinking level: ${newLevel}`);
 		}
 	}
 
@@ -1513,7 +1527,7 @@ export class InteractiveMode {
 				const msg = this.session.scopedModels.length > 0 ? "Only one model in scope" : "Only one model available";
 				this.showStatus(msg);
 			} else {
-				this.footer.invalidate();
+				this.statusLine.invalidate();
 				this.updateEditorBorderColor();
 				const thinkingStr =
 					result.model.reasoning && result.thinkingLevel !== "off" ? ` (thinking: ${result.thinkingLevel})` : "";
@@ -1749,7 +1763,7 @@ export class InteractiveMode {
 			// Session-managed settings (not in SettingsManager)
 			case "autoCompact":
 				this.session.setAutoCompactionEnabled(value as boolean);
-				this.footer.setAutoCompactEnabled(value as boolean);
+				this.statusLine.setAutoCompactEnabled(value as boolean);
 				break;
 			case "queueMode":
 				this.session.setQueueMode(value as "all" | "one-at-a-time");
@@ -1759,7 +1773,7 @@ export class InteractiveMode {
 				break;
 			case "thinkingLevel":
 				this.session.setThinkingLevel(value as ThinkingLevel);
-				this.footer.invalidate();
+				this.statusLine.invalidate();
 				this.updateEditorBorderColor();
 				break;
 
@@ -1808,7 +1822,7 @@ export class InteractiveMode {
 						// Only update agent state for default role
 						if (role === "default") {
 							await this.session.setModel(model, role);
-							this.footer.invalidate();
+							this.statusLine.invalidate();
 							this.updateEditorBorderColor();
 						}
 						// For other roles (small), just show status - settings already updated by selector
@@ -2533,7 +2547,8 @@ export class InteractiveMode {
 			const msg = createCompactionSummaryMessage(result.summary, result.tokensBefore, new Date().toISOString());
 			this.addMessageToChat(msg);
 
-			this.footer.invalidate();
+			this.statusLine.invalidate();
+			this.updateEditorTopBorder();
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			if (message === "Compaction cancelled" || (error instanceof Error && error.name === "AbortError")) {
@@ -2553,7 +2568,7 @@ export class InteractiveMode {
 			this.loadingAnimation.stop();
 			this.loadingAnimation = undefined;
 		}
-		this.footer.dispose();
+		this.statusLine.dispose();
 		if (this.unsubscribe) {
 			this.unsubscribe();
 		}

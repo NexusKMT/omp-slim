@@ -76,19 +76,19 @@
 
 		"bashMode": "green",
 
-		"footerIcon": 31,
-		"footerSep": 246,
-		"footerModel": 236,
-		"footerPath": 31,
-		"footerBranch": 28,
-		"footerStaged": 28,
-		"footerDirty": 136,
-		"footerUntracked": 31,
-		"footerInput": 28,
-		"footerOutput": 133,
-		"footerCacheRead": 28,
-		"footerCacheWrite": 28,
-		"footerCost": 133
+		"statusLineBg": "#e0e0e0",
+		"statusLineSep": "#808080",
+		"statusLineModel": "#875f87",
+		"statusLinePath": "#005f87",
+		"statusLineGitClean": "#005f00",
+		"statusLineGitDirty": "#af5f00",
+		"statusLineContext": "#5f5f87",
+		"statusLineSpend": "#005f5f",
+		"statusLineStaged": 28,
+		"statusLineDirty": 136,
+		"statusLineUntracked": 31,
+		"statusLineOutput": 133,
+		"statusLineCost": 133
 	},
 	"export": {
 		"pageBg": "#f8f8f8",

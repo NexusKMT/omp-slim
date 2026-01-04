@@ -1,6 +1,15 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added `setTopBorder()` method to Editor component for displaying custom status content in the top border
+- Added `getWidth()` method to TUI class for retrieving terminal width
+- Added rounded corner box-drawing characters to Editor component borders
+
+### Changed
+
+- Changed Editor component to use proper box borders with vertical side borders instead of horizontal-only borders
 
 ## [3.8.1337] - 2026-01-04
 

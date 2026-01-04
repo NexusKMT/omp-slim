@@ -123,6 +123,10 @@ export class TUI extends Container {
 		this.terminal.stop();
 	}
 
+	getWidth(): number {
+		return this.terminal.columns;
+	}
+
 	requestRender(force = false): void {
 		if (force) {
 			this.previousLines = [];

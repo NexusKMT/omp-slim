@@ -10,7 +10,7 @@ export {
 // Components
 export { Box } from "./components/box";
 export { CancellableLoader } from "./components/cancellable-loader";
-export { Editor, type EditorTheme } from "./components/editor";
+export { Editor, type EditorTheme, type EditorTopBorder } from "./components/editor";
 export { Image, type ImageOptions, type ImageTheme } from "./components/image";
 export { Input } from "./components/input";
 export { Loader } from "./components/loader";
