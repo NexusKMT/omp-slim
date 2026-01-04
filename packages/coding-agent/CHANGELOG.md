@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [3.8.1337] - 2026-01-04
 ### Added
 
 - Added automatic browser opening after exporting session to HTML
