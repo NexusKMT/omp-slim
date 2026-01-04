@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+
+- Fixed stale diagnostics persisting after file content changes in LSP client
 
 ## [3.8.1337] - 2026-01-04
 ### Added

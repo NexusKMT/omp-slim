@@ -526,6 +526,9 @@ export async function syncContent(client: LspClient, filePath: string, content: 
 	}
 
 	const syncPromise = (async () => {
+		// Clear stale diagnostics before syncing new content
+		client.diagnostics.delete(uri);
+
 		const info = client.openFiles.get(uri);
 
 		if (!info) {
