@@ -1,6 +1,10 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added automatic browser opening after exporting session to HTML
+- Added automatic browser opening after sharing session as a Gist
 
 ## [3.7.1337] - 2026-01-04
 ### Added

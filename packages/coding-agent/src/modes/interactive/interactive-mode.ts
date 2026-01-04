@@ -2044,13 +2044,7 @@ export class InteractiveMode {
 									}
 									this.ui.requestRender();
 
-									const openCmd =
-										process.platform === "darwin"
-											? "open"
-											: process.platform === "win32"
-												? "start"
-												: "xdg-open";
-									Bun.spawn([openCmd, info.url], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+									this.openInBrowser(info.url);
 								},
 								onPrompt: async (prompt: { message: string; placeholder?: string }) => {
 									this.chatContainer.addChild(new Spacer(1));
@@ -2124,6 +2118,11 @@ export class InteractiveMode {
 	// Command handlers
 	// =========================================================================
 
+	private openInBrowser(urlOrPath: string): void {
+		const openCmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+		Bun.spawn([openCmd, urlOrPath], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+	}
+
 	private async handleExportCommand(text: string): Promise<void> {
 		const parts = text.split(/\s+/);
 		const arg = parts.length > 1 ? parts[1] : undefined;
@@ -2148,6 +2147,7 @@ export class InteractiveMode {
 		try {
 			const filePath = await this.session.exportToHtml(arg);
 			this.showStatus(`Session exported to: ${filePath}`);
+			this.openInBrowser(filePath);
 		} catch (error: unknown) {
 			this.showError(`Failed to export session: ${error instanceof Error ? error.message : "Unknown error"}`);
 		}
@@ -2261,6 +2261,7 @@ export class InteractiveMode {
 			// Create the preview URL
 			const previewUrl = `https://gistpreview.github.io/?${gistId}`;
 			this.showStatus(`Share URL: ${previewUrl}\nGist: ${gistUrl}`);
+			this.openInBrowser(previewUrl);
 		} catch (error: unknown) {
 			if (!loader.signal.aborted) {
 				restoreEditor();
