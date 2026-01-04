@@ -31,10 +31,7 @@ If CI fails, the script exits with an error. Fix the issue, then:
 git commit --amend --no-edit
 git push origin main --force
 git tag -f v$ARGUMENTS && git push origin v$ARGUMENTS --force
+bun scripts/release.ts watch
 ```
 
-Then re-watch CI:
-
-```bash
-gh run list --commit $(git rev-parse HEAD) --json name,status,conclusion
-```
+The `watch` subcommand re-watches CI for the current commit until all checks pass.
