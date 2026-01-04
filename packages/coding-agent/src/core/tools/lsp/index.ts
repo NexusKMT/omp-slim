@@ -2,10 +2,9 @@ import * as fs from "node:fs";
 import path from "node:path";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { BunFile } from "bun";
-import { utils } from "packages/coding-agent/src/core";
 import type { Theme } from "../../../modes/interactive/theme/theme";
 import { logger } from "../../logger";
-import { untilAborted } from "../../utils";
+import { once, untilAborted } from "../../utils";
 import { resolveToCwd } from "../path-utils";
 import {
 	ensureFileOpen,
@@ -564,7 +563,7 @@ export function createLspWritethrough(cwd: string, options?: WritethroughOptions
 		}
 
 		let finalContent = content;
-		const getWritePromise = utils.once(() => (file ? file.write(finalContent) : Bun.write(dst, finalContent)));
+		const getWritePromise = once(() => (file ? file.write(finalContent) : Bun.write(dst, finalContent)));
 
 		let formatter: FileFormatResult | undefined;
 		let diagnostics: FileDiagnosticsResult | undefined;
