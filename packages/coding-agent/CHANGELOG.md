@@ -6,6 +6,10 @@
 - Added automatic browser opening after exporting session to HTML
 - Added automatic browser opening after sharing session as a Gist
 
+### Fixed
+
+- Fixed session titles not persisting to file when set before first flush
+
 ## [3.7.1337] - 2026-01-04
 ### Added
 

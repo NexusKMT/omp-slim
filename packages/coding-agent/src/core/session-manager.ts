@@ -708,16 +708,23 @@ export class SessionManager {
 
 	setSessionTitle(title: string): void {
 		this.sessionTitle = title;
-		// Update the session file header with the title
+
+		// Update the in-memory header (so first flush includes title)
+		const header = this.fileEntries.find((e) => e.type === "session") as SessionHeader | undefined;
+		if (header) {
+			header.title = title;
+		}
+
+		// Update the session file header with the title (if already flushed)
 		if (this.persist && this.sessionFile && existsSync(this.sessionFile)) {
 			try {
 				const content = readFileSync(this.sessionFile, "utf-8");
 				const lines = content.split("\n");
 				if (lines.length > 0) {
-					const header = JSON.parse(lines[0]) as SessionHeader;
-					if (header.type === "session") {
-						header.title = title;
-						lines[0] = JSON.stringify(header);
+					const fileHeader = JSON.parse(lines[0]) as SessionHeader;
+					if (fileHeader.type === "session") {
+						fileHeader.title = title;
+						lines[0] = JSON.stringify(fileHeader);
 						writeFileSync(this.sessionFile, lines.join("\n"));
 					}
 				}
