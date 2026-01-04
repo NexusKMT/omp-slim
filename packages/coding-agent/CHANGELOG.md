@@ -1,6 +1,11 @@
 # Changelog
 
 ## [Unreleased]
+
+### Changed
+
+- Changed default for `lsp.formatOnWrite` setting from `true` to `false`
+
 ### Fixed
 
 - Fixed stale diagnostics persisting after file content changes in LSP client
