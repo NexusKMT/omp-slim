@@ -64,7 +64,7 @@ export class HookMessageComponent extends Container {
 		this.box.clear();
 
 		// Default rendering: label + content
-		const label = theme.fg("customMessageLabel", `\x1b[1m[${this.message.customType}]\x1b[22m`);
+		const label = theme.fg("customMessageLabel", theme.bold(`[${this.message.customType}]`));
 		this.box.addChild(new Text(label, 0, 0));
 		this.box.addChild(new Spacer(1));
 
@@ -83,7 +83,7 @@ export class HookMessageComponent extends Container {
 		if (!this._expanded) {
 			const lines = text.split("\n");
 			if (lines.length > 5) {
-				text = `${lines.slice(0, 5).join("\n")}\n...`;
+				text = `${lines.slice(0, 5).join("\n")}\n${theme.format.ellipsis}`;
 			}
 		}
 

@@ -15,9 +15,13 @@ export class Loader extends Text {
 		private spinnerColorFn: (str: string) => string,
 		private messageColorFn: (str: string) => string,
 		private message: string = "Loading...",
+		spinnerFrames?: string[],
 	) {
 		super("", 1, 0);
 		this.ui = ui;
+		if (spinnerFrames && spinnerFrames.length > 0) {
+			this.frames = spinnerFrames;
+		}
 		this.start();
 	}
 

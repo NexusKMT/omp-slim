@@ -15,14 +15,6 @@ import type { Theme } from "../../../modes/interactive/theme/theme";
 import type { LspParams, LspToolDetails } from "./types";
 
 // =============================================================================
-// Tree Drawing Characters
-// =============================================================================
-
-const TREE_MID = "├─";
-const TREE_END = "└─";
-const TREE_PIPE = "│";
-
-// =============================================================================
 // Call Rendering
 // =============================================================================
 
@@ -75,7 +67,7 @@ export function renderResult(
 
 	const errorMatch = text.match(/(\d+)\s+error\(s\)/);
 	const warningMatch = text.match(/(\d+)\s+warning\(s\)/);
-	if (errorMatch || warningMatch || text.includes("✗")) {
+	if (errorMatch || warningMatch || text.includes(theme.status.error)) {
 		return renderDiagnostics(errorMatch, warningMatch, lines, expanded, theme);
 	}
 
@@ -112,16 +104,20 @@ function renderHover(
 	const afterCode = fullText.slice(fullText.indexOf("```", 3) + 3).trim();
 
 	const codeLines = highlightCode(code, lang, theme);
-	const icon = theme.fg("accent", "●");
+	const icon = theme.styledSymbol("status.info", "accent");
 	const langLabel = lang ? theme.fg("mdCodeBlockBorder", ` ${lang}`) : "";
 
 	if (expanded) {
+		const h = theme.boxSharp.horizontal;
+		const v = theme.boxSharp.vertical;
+		const top = `${theme.boxSharp.topLeft}${h.repeat(3)}`;
+		const bottom = `${theme.boxSharp.bottomLeft}${h.repeat(3)}`;
 		let output = `${icon} ${theme.fg("toolTitle", "Hover")}${langLabel}`;
-		output += `\n ${theme.fg("mdCodeBlockBorder", "┌───")}`;
+		output += `\n ${theme.fg("mdCodeBlockBorder", top)}`;
 		for (const line of codeLines) {
-			output += `\n ${theme.fg("mdCodeBlockBorder", "│")} ${line}`;
+			output += `\n ${theme.fg("mdCodeBlockBorder", v)} ${line}`;
 		}
-		output += `\n ${theme.fg("mdCodeBlockBorder", "└───")}`;
+		output += `\n ${theme.fg("mdCodeBlockBorder", bottom)}`;
 		if (afterCode) {
 			output += `\n ${theme.fg("muted", afterCode)}`;
 		}
@@ -133,17 +129,25 @@ function renderHover(
 	const expandHint = theme.fg("dim", " (Ctrl+O to expand)");
 
 	let output = `${icon} ${theme.fg("toolTitle", "Hover")}${langLabel}${expandHint}`;
-	output += `\n ${theme.fg("mdCodeBlockBorder", "│")} ${firstCodeLine}`;
+	const h = theme.boxSharp.horizontal;
+	const v = theme.boxSharp.vertical;
+	const bottom = `${theme.boxSharp.bottomLeft}${h.repeat(3)}`;
+	output += `\n ${theme.fg("mdCodeBlockBorder", v)} ${firstCodeLine}`;
 
 	if (codeLines.length > 1) {
-		output += `\n ${theme.fg("mdCodeBlockBorder", "│")} ${theme.fg("muted", `… ${codeLines.length - 1} more lines`)}`;
+		output += `\n ${theme.fg("mdCodeBlockBorder", v)} ${theme.fg(
+			"muted",
+			`${theme.format.ellipsis} ${codeLines.length - 1} more lines`,
+		)}`;
 	}
 
 	if (afterCode) {
-		const docPreview = afterCode.length > 60 ? `${afterCode.slice(0, 60)}…` : afterCode;
-		output += `\n ${theme.fg("dim", TREE_END)} ${theme.fg("muted", docPreview)}`;
+		const ellipsis = theme.format.ellipsis;
+		const sliceLen = Math.max(0, 60 - ellipsis.length);
+		const docPreview = afterCode.length > 60 ? `${afterCode.slice(0, sliceLen)}${ellipsis}` : afterCode;
+		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", docPreview)}`;
 	} else {
-		output += `\n ${theme.fg("mdCodeBlockBorder", "└───")}`;
+		output += `\n ${theme.fg("mdCodeBlockBorder", bottom)}`;
 	}
 
 	return new Text(output, 0, 0);
@@ -196,20 +200,24 @@ function renderDiagnostics(
 	const warnCount = warningMatch ? Number.parseInt(warningMatch[1], 10) : 0;
 
 	const icon =
-		errorCount > 0 ? theme.fg("error", "●") : warnCount > 0 ? theme.fg("warning", "●") : theme.fg("success", "●");
+		errorCount > 0
+			? theme.styledSymbol("status.error", "error")
+			: warnCount > 0
+				? theme.styledSymbol("status.warning", "warning")
+				: theme.styledSymbol("status.success", "success");
 
 	const meta: string[] = [];
 	if (errorCount > 0) meta.push(`${errorCount} error${errorCount !== 1 ? "s" : ""}`);
 	if (warnCount > 0) meta.push(`${warnCount} warning${warnCount !== 1 ? "s" : ""}`);
 	if (meta.length === 0) meta.push("No issues");
 
-	const diagLines = lines.filter((l) => l.includes("✗") || /:\d+:\d+/.test(l));
+	const diagLines = lines.filter((l) => l.includes(theme.status.error) || /:\d+:\d+/.test(l));
 
 	if (expanded) {
 		let output = `${icon} ${theme.fg("toolTitle", "Diagnostics")} ${theme.fg("dim", meta.join(", "))}`;
 		for (let i = 0; i < diagLines.length; i++) {
 			const isLast = i === diagLines.length - 1;
-			const branch = isLast ? TREE_END : TREE_MID;
+			const branch = isLast ? theme.tree.last : theme.tree.branch;
 			const line = diagLines[i].trim();
 			const color = line.includes("[error]") ? "error" : line.includes("[warning]") ? "warning" : "dim";
 			output += `\n ${theme.fg("dim", branch)} ${theme.fg(color, line)}`;
@@ -224,11 +232,14 @@ function renderDiagnostics(
 	const previewLines = diagLines.length > 0 ? diagLines.slice(0, 4) : lines.slice(0, 4);
 	for (let i = 0; i < previewLines.length; i++) {
 		const isLast = i === previewLines.length - 1 && diagLines.length <= 4;
-		const branch = isLast ? TREE_END : TREE_MID;
+		const branch = isLast ? theme.tree.last : theme.tree.branch;
 		output += `\n ${theme.fg("dim", branch)} ${previewLines[i].trim()}`;
 	}
 	if (diagLines.length > 4) {
-		output += `\n ${theme.fg("dim", TREE_END)} ${theme.fg("muted", `… ${diagLines.length - 4} more`)}`;
+		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+			"muted",
+			`${theme.format.ellipsis} ${diagLines.length - 4} more`,
+		)}`;
 	}
 
 	return new Text(output, 0, 0);
@@ -243,7 +254,8 @@ function renderDiagnostics(
  */
 function renderReferences(refMatch: RegExpMatchArray, lines: string[], expanded: boolean, theme: Theme): Text {
 	const refCount = Number.parseInt(refMatch[1], 10);
-	const icon = refCount > 0 ? theme.fg("success", "●") : theme.fg("warning", "●");
+	const icon =
+		refCount > 0 ? theme.styledSymbol("status.success", "success") : theme.styledSymbol("status.warning", "warning");
 
 	const locLines = lines.filter((l) => /^\s*\S+:\d+:\d+/.test(l));
 
@@ -269,8 +281,8 @@ function renderReferences(refMatch: RegExpMatchArray, lines: string[], expanded:
 			const file = filesToShow[fi];
 			const locs = byFile.get(file)!;
 			const isLastFile = fi === filesToShow.length - 1 && files.length <= maxFiles;
-			const fileBranch = isLastFile ? TREE_END : TREE_MID;
-			const fileCont = isLastFile ? "   " : `${TREE_PIPE}  `;
+			const fileBranch = isLastFile ? theme.tree.last : theme.tree.branch;
+			const fileCont = isLastFile ? "   " : `${theme.tree.vertical}  `;
 
 			if (locs.length === 1) {
 				output += `\n ${theme.fg("dim", fileBranch)} ${theme.fg("accent", file)}:${theme.fg(
@@ -285,15 +297,18 @@ function renderReferences(refMatch: RegExpMatchArray, lines: string[], expanded:
 				const locsText = locStrs.join(", ");
 				const hasMore = locs.length > maxLocsPerFile;
 
-				output += `\n ${theme.fg("dim", fileCont)}${theme.fg("dim", TREE_END)} ${theme.fg("muted", locsText)}`;
+				output += `\n ${theme.fg("dim", fileCont)}${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", locsText)}`;
 				if (hasMore) {
-					output += theme.fg("dim", ` … +${locs.length - maxLocsPerFile} more`);
+					output += theme.fg("dim", ` ${theme.format.ellipsis} +${locs.length - maxLocsPerFile} more`);
 				}
 			}
 		}
 
 		if (files.length > maxFiles) {
-			output += `\n ${theme.fg("dim", TREE_END)} ${theme.fg("muted", `… ${files.length - maxFiles} more files`)}`;
+			output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+				"muted",
+				`${theme.format.ellipsis} ${files.length - maxFiles} more files`,
+			)}`;
 		}
 
 		return output;
@@ -315,7 +330,7 @@ function renderReferences(refMatch: RegExpMatchArray, lines: string[], expanded:
  */
 function renderSymbols(symbolsMatch: RegExpMatchArray, lines: string[], expanded: boolean, theme: Theme): Text {
 	const fileName = symbolsMatch[1];
-	const icon = theme.fg("accent", "●");
+	const icon = theme.styledSymbol("status.info", "accent");
 
 	interface SymbolInfo {
 		name: string;
@@ -360,7 +375,7 @@ function renderSymbols(symbolsMatch: RegExpMatchArray, lines: string[], expanded
 			if (ancestorIdx >= 0 && isLastSibling(ancestorIdx)) {
 				prefix += "   ";
 			} else {
-				prefix += `${TREE_PIPE}  `;
+				prefix += `${theme.tree.vertical}  `;
 			}
 		}
 		return prefix;
@@ -374,7 +389,7 @@ function renderSymbols(symbolsMatch: RegExpMatchArray, lines: string[], expanded
 		for (let i = 0; i < symbols.length; i++) {
 			const sym = symbols[i];
 			const prefix = getPrefix(i);
-			const branch = isLastSibling(i) ? TREE_END : TREE_MID;
+			const branch = isLastSibling(i) ? theme.tree.last : theme.tree.branch;
 			output += `\n${prefix}${theme.fg("dim", branch)} ${theme.fg("accent", sym.name)} ${theme.fg(
 				"muted",
 				`@${sym.line}`,
@@ -391,11 +406,14 @@ function renderSymbols(symbolsMatch: RegExpMatchArray, lines: string[], expanded
 	for (let i = 0; i < topLevel.length; i++) {
 		const sym = topLevel[i];
 		const isLast = i === topLevel.length - 1 && topLevelCount <= 4;
-		const branch = isLast ? TREE_END : TREE_MID;
+		const branch = isLast ? theme.tree.last : theme.tree.branch;
 		output += `\n ${theme.fg("dim", branch)} ${theme.fg("accent", sym.name)} ${theme.fg("muted", `@${sym.line}`)}`;
 	}
 	if (topLevelCount > 4) {
-		output += `\n ${theme.fg("dim", TREE_END)} ${theme.fg("muted", `… ${topLevelCount - 4} more`)}`;
+		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+			"muted",
+			`${theme.format.ellipsis} ${topLevelCount - 4} more`,
+		)}`;
 	}
 
 	return new Text(output, 0, 0);
@@ -409,15 +427,15 @@ function renderSymbols(symbolsMatch: RegExpMatchArray, lines: string[], expanded
  * Generic fallback rendering for unknown result types.
  */
 function renderGeneric(text: string, lines: string[], expanded: boolean, theme: Theme): Text {
-	const hasError = text.includes("Error:") || text.includes("✗");
-	const hasSuccess = text.includes("✓") || text.includes("Applied");
+	const hasError = text.includes("Error:") || text.includes(theme.status.error);
+	const hasSuccess = text.includes(theme.status.success) || text.includes("Applied");
 
 	const icon =
 		hasError && !hasSuccess
-			? theme.fg("error", "●")
+			? theme.styledSymbol("status.error", "error")
 			: hasSuccess && !hasError
-				? theme.fg("success", "●")
-				: theme.fg("accent", "●");
+				? theme.styledSymbol("status.success", "success")
+				: theme.styledSymbol("status.info", "accent");
 
 	if (expanded) {
 		let output = `${icon} ${theme.fg("toolTitle", "LSP")}`;
@@ -435,11 +453,14 @@ function renderGeneric(text: string, lines: string[], expanded: boolean, theme: 
 		const previewLines = lines.slice(1, 4);
 		for (let i = 0; i < previewLines.length; i++) {
 			const isLast = i === previewLines.length - 1 && lines.length <= 4;
-			const branch = isLast ? TREE_END : TREE_MID;
+			const branch = isLast ? theme.tree.last : theme.tree.branch;
 			output += `\n ${theme.fg("dim", branch)} ${theme.fg("dim", previewLines[i].trim().slice(0, 80))}`;
 		}
 		if (lines.length > 4) {
-			output += `\n ${theme.fg("dim", TREE_END)} ${theme.fg("muted", `… ${lines.length - 4} more lines`)}`;
+			output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+				"muted",
+				`${theme.format.ellipsis} ${lines.length - 4} more lines`,
+			)}`;
 		}
 	}
 

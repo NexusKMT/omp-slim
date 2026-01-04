@@ -13,6 +13,7 @@ import {
 	Spacer,
 	Text,
 	type TUI,
+	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import type { ModelRegistry } from "../../../core/model-registry";
 import { parseModelString } from "../../../core/model-resolver";
@@ -276,7 +277,7 @@ export class ModelSelectorComponent extends Container {
 		}
 
 		parts.push("  ");
-		parts.push(theme.fg("dim", "(←/→ or Tab to switch)"));
+		parts.push(theme.fg("dim", `(${theme.nav.back}/${theme.nav.cursor} or Tab to switch)`));
 
 		this.headerContainer.addChild(new Text(parts.join(""), 0, 0));
 	}
@@ -341,14 +342,14 @@ export class ModelSelectorComponent extends Container {
 
 			// Build role badges (right-aligned style)
 			const badges: string[] = [];
-			if (isDefault) badges.push(theme.fg("success", "[ DEFAULT ]"));
-			if (isSmol) badges.push(theme.fg("warning", "[ SMOL ]"));
-			if (isSlow) badges.push(theme.fg("accent", "[ SLOW ]"));
+			if (isDefault) badges.push(theme.fg("success", `${theme.sep.pipe}DEFAULT${theme.sep.pipe}`));
+			if (isSmol) badges.push(theme.fg("warning", `${theme.sep.pipe}SMOL${theme.sep.pipe}`));
+			if (isSlow) badges.push(theme.fg("accent", `${theme.sep.pipe}SLOW${theme.sep.pipe}`));
 			const badgeText = badges.length > 0 ? ` ${badges.join(" ")}` : "";
 
 			let line = "";
 			if (isSelected) {
-				const prefix = theme.fg("accent", "→ ");
+				const prefix = theme.fg("accent", `${theme.nav.cursor} `);
 				const modelText = item.id;
 				if (showProvider) {
 					const providerBadge = theme.fg("muted", `[${item.provider}]`);
@@ -405,9 +406,21 @@ export class ModelSelectorComponent extends Container {
 		const selectedModel = this.filteredModels[this.selectedIndex];
 		if (!selectedModel) return;
 
+		const headerText = `  Action for: ${selectedModel.id}`;
+		const hintText = "  Enter: confirm  Esc: cancel";
+		const actionLines = MENU_ACTIONS.map((action, index) => {
+			const prefix = index === this.menuSelectedIndex ? `  ${theme.nav.cursor} ` : "    ";
+			return `${prefix}${action.label}`;
+		});
+		const menuWidth = Math.max(
+			visibleWidth(headerText),
+			visibleWidth(hintText),
+			...actionLines.map((line) => visibleWidth(line)),
+		);
+
 		// Menu header
 		this.menuContainer.addChild(new Spacer(1));
-		this.menuContainer.addChild(new Text(theme.fg("border", "─".repeat(40)), 0, 0));
+		this.menuContainer.addChild(new Text(theme.fg("border", theme.boxSharp.horizontal.repeat(menuWidth)), 0, 0));
 		this.menuContainer.addChild(new Text(theme.fg("text", `  Action for: ${theme.bold(selectedModel.id)}`), 0, 0));
 		this.menuContainer.addChild(new Spacer(1));
 
@@ -418,7 +431,7 @@ export class ModelSelectorComponent extends Container {
 
 			let line: string;
 			if (isSelected) {
-				line = theme.fg("accent", `  → ${action.label}`);
+				line = theme.fg("accent", `  ${theme.nav.cursor} ${action.label}`);
 			} else {
 				line = theme.fg("muted", `    ${action.label}`);
 			}
@@ -426,8 +439,8 @@ export class ModelSelectorComponent extends Container {
 		}
 
 		this.menuContainer.addChild(new Spacer(1));
-		this.menuContainer.addChild(new Text(theme.fg("dim", "  Enter: confirm  Esc: cancel"), 0, 0));
-		this.menuContainer.addChild(new Text(theme.fg("border", "─".repeat(40)), 0, 0));
+		this.menuContainer.addChild(new Text(theme.fg("dim", hintText), 0, 0));
+		this.menuContainer.addChild(new Text(theme.fg("border", theme.boxSharp.horizontal.repeat(menuWidth)), 0, 0));
 	}
 
 	handleInput(keyData: string): void {

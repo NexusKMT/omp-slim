@@ -317,6 +317,28 @@ export interface Hover {
 }
 
 // =============================================================================
+// Linter Client Interface
+// =============================================================================
+
+/**
+ * Interface for linter/formatter clients.
+ * Can be implemented using LSP protocol or CLI tools.
+ */
+export interface LinterClient {
+	/** Format file content. Returns formatted content. */
+	format(filePath: string, content: string): Promise<string>;
+
+	/** Get diagnostics for a file. Content should already be written to disk. */
+	lint(filePath: string): Promise<Diagnostic[]>;
+
+	/** Dispose of any resources (e.g., LSP connection) */
+	dispose?(): void;
+}
+
+/** Factory function to create a LinterClient */
+export type LinterClientFactory = (config: ServerConfig, cwd: string) => LinterClient;
+
+// =============================================================================
 // Server Configuration
 // =============================================================================
 
@@ -341,6 +363,11 @@ export interface ServerConfig {
 	isLinter?: boolean;
 	/** Resolved absolute path to the command binary (set during config loading) */
 	resolvedCommand?: string;
+	/**
+	 * Custom linter client factory. If provided, creates a custom client instead of using LSP.
+	 * The client handles format/lint operations. Useful for tools with buggy LSP implementations.
+	 */
+	createClient?: LinterClientFactory;
 }
 
 // =============================================================================

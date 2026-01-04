@@ -20,6 +20,6 @@ export class DynamicBorder implements Component {
 	}
 
 	render(width: number): string[] {
-		return [this.color("─".repeat(Math.max(1, width)))];
+		return [this.color(theme.boxSharp.horizontal.repeat(Math.max(1, width)))];
 	}
 }

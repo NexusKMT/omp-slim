@@ -17,6 +17,7 @@
 
 import type { AgentTool, AgentToolContext, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import { Type } from "@sinclair/typebox";
+import { theme } from "../../modes/interactive/theme/theme";
 
 // =============================================================================
 // Types
@@ -53,7 +54,9 @@ export interface AskToolDetails {
 // =============================================================================
 
 const OTHER_OPTION = "Other (type your own)";
-const DONE_OPTION = "✓ Done selecting";
+function getDoneOptionLabel(): string {
+	return `${theme.status.success} Done selecting`;
+}
 
 const DESCRIPTION = `Use this tool when you need to ask the user questions during execution. This allows you to:
 1. Gather user preferences or requirements
@@ -104,6 +107,7 @@ export function createAskTool(_cwd: string): AgentTool<typeof askSchema, AskTool
 		) {
 			const { question, options, multi = false } = params;
 			const optionLabels = options.map((o) => o.label);
+			const doneLabel = getDoneOptionLabel();
 
 			// Headless fallback - return error if no UI available
 			if (!context?.hasUI || !context.ui) {
@@ -137,12 +141,12 @@ export function createAskTool(_cwd: string): AgentTool<typeof askSchema, AskTool
 
 					// Add "Done" option if any selected
 					if (selected.size > 0) {
-						opts.push(DONE_OPTION);
+						opts.push(doneLabel);
 					}
 
-					// Add all options with [X] or [ ] prefix
+					// Add all options with checkbox prefix
 					for (const opt of optionLabels) {
-						const checkbox = selected.has(opt) ? "[X]" : "[ ]";
+						const checkbox = selected.has(opt) ? theme.checkbox.checked : theme.checkbox.unchecked;
 						opts.push(`${checkbox} ${opt}`);
 					}
 
@@ -152,7 +156,7 @@ export function createAskTool(_cwd: string): AgentTool<typeof askSchema, AskTool
 					const prefix = selected.size > 0 ? `(${selected.size} selected) ` : "";
 					const choice = await ui.select(`${prefix}${question}`, opts);
 
-					if (choice === undefined || choice === DONE_OPTION) break;
+					if (choice === undefined || choice === doneLabel) break;
 
 					if (choice === OTHER_OPTION) {
 						const input = await ui.input("Enter your response:");
@@ -161,9 +165,15 @@ export function createAskTool(_cwd: string): AgentTool<typeof askSchema, AskTool
 					}
 
 					// Toggle selection - extract the actual option name
-					const optMatch = choice.match(/^\[.\] (.+)$/);
-					if (optMatch) {
-						const opt = optMatch[1];
+					const checkedPrefix = `${theme.checkbox.checked} `;
+					const uncheckedPrefix = `${theme.checkbox.unchecked} `;
+					let opt: string | undefined;
+					if (choice.startsWith(checkedPrefix)) {
+						opt = choice.slice(checkedPrefix.length);
+					} else if (choice.startsWith(uncheckedPrefix)) {
+						opt = choice.slice(uncheckedPrefix.length);
+					}
+					if (opt) {
 						if (selected.has(opt)) {
 							selected.delete(opt);
 						} else {

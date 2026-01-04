@@ -12,6 +12,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import chalk from "chalk";
 import { APP_NAME, VERSION } from "../config";
+import { theme } from "../modes/interactive/theme/theme";
 
 /**
  * Detect if we're running as a Bun compiled binary.
@@ -142,7 +143,7 @@ async function updateViaBun(): Promise<void> {
 
 	try {
 		execSync(`bun update -g ${PACKAGE}`, { stdio: "inherit" });
-		console.log(chalk.green("\n✓ Update complete"));
+		console.log(chalk.green(`\n${theme.status.success} Update complete`));
 	} catch {
 		throw new Error("bun update failed");
 	}
@@ -192,7 +193,7 @@ async function updateViaBinary(release: ReleaseInfo): Promise<void> {
 		// Clean up backup
 		unlinkSync(backupPath);
 
-		console.log(chalk.green(`\n✓ Updated to ${release.version}`));
+		console.log(chalk.green(`\n${theme.status.success} Updated to ${release.version}`));
 		console.log(chalk.dim(`Restart ${APP_NAME} to use the new version`));
 	} catch (err) {
 		// Restore from backup if possible
@@ -224,7 +225,7 @@ export async function runUpdateCommand(opts: { force: boolean; check: boolean })
 	const comparison = compareVersions(release.version, VERSION);
 
 	if (comparison <= 0 && !opts.force) {
-		console.log(chalk.green("✓ Already up to date"));
+		console.log(chalk.green(`${theme.status.success} Already up to date`));
 		return;
 	}
 

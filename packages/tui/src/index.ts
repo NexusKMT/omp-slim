@@ -61,6 +61,7 @@ export {
 	isTab,
 	Keys,
 } from "./keys";
+export type { BoxSymbols, SymbolTheme } from "./symbols";
 // Terminal interface and implementations
 export { emergencyTerminalRestore, ProcessTerminal, type Terminal } from "./terminal";
 // Terminal image support

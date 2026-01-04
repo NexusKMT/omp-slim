@@ -2205,19 +2205,14 @@ export const webFetchTool = createWebFetchTool(process.cwd());
 
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Text } from "@oh-my-pi/pi-tui";
-import type { Theme } from "../../modes/interactive/theme/theme";
+import { type Theme, theme } from "../../modes/interactive/theme/theme";
 import type { CustomTool, CustomToolContext, RenderResultOptions } from "../custom-tools/types";
 
-// Tree formatting constants
-const TREE_MID = "├─";
-const TREE_END = "└─";
-const TREE_PIPE = "│";
-const TREE_HOOK = "⎿";
-
 /** Truncate text to max length with ellipsis */
-function truncate(text: string, maxLen: number): string {
+function truncate(text: string, maxLen: number, ellipsis: string): string {
 	if (text.length <= maxLen) return text;
-	return `${text.slice(0, maxLen - 1)}…`;
+	const sliceLen = Math.max(0, maxLen - ellipsis.length);
+	return `${text.slice(0, sliceLen)}${ellipsis}`;
 }
 
 /** Extract domain from URL */
@@ -2231,16 +2226,19 @@ function getDomain(url: string): string {
 }
 
 /** Get first N lines of text as preview */
-function getPreviewLines(text: string, maxLines: number, maxLineLen: number): string[] {
+function getPreviewLines(text: string, maxLines: number, maxLineLen: number, ellipsis: string): string[] {
 	const lines = text.split("\n").filter((l) => l.trim());
-	return lines.slice(0, maxLines).map((l) => truncate(l.trim(), maxLineLen));
+	return lines.slice(0, maxLines).map((l) => truncate(l.trim(), maxLineLen, ellipsis));
 }
 
 /** Render web fetch call (URL preview) */
-export function renderWebFetchCall(args: { url: string; timeout?: number; raw?: boolean }, theme: Theme): Component {
+export function renderWebFetchCall(
+	args: { url: string; timeout?: number; raw?: boolean },
+	uiTheme: Theme = theme,
+): Component {
 	const domain = getDomain(args.url);
-	const path = truncate(args.url.replace(/^https?:\/\/[^/]+/, ""), 50);
-	const text = `${theme.fg("toolTitle", "Web Fetch")} ${theme.fg("accent", domain)}${theme.fg("dim", path)}`;
+	const path = truncate(args.url.replace(/^https?:\/\/[^/]+/, ""), 50, uiTheme.format.ellipsis);
+	const text = `${uiTheme.fg("toolTitle", "Web Fetch")} ${uiTheme.fg("accent", domain)}${uiTheme.fg("dim", path)}`;
 	return new Text(text, 0, 0);
 }
 
@@ -2248,26 +2246,25 @@ export function renderWebFetchCall(args: { url: string; timeout?: number; raw?: 
 export function renderWebFetchResult(
 	result: { content: Array<{ type: string; text?: string }>; details?: WebFetchToolDetails },
 	options: RenderResultOptions,
-	theme: Theme,
+	uiTheme: Theme = theme,
 ): Component {
 	const { expanded } = options;
 	const details = result.details;
 
 	if (!details) {
-		return new Text(theme.fg("error", "No response data"), 0, 0);
+		return new Text(uiTheme.fg("error", "No response data"), 0, 0);
 	}
 
 	const domain = getDomain(details.finalUrl);
 	const hasRedirect = details.url !== details.finalUrl;
 	const hasNotes = details.notes.length > 0;
 
-	// Build header: ● Web Fetch (domain) · method
-	const icon = details.truncated ? theme.fg("warning", "●") : theme.fg("success", "●");
-	const expandHint = expanded ? "" : theme.fg("dim", " (Ctrl+O to expand)");
-	let text = `${icon} ${theme.fg("toolTitle", "Web Fetch")} ${theme.fg("accent", `(${domain})`)} · ${theme.fg(
-		"dim",
-		details.method,
-	)}${expandHint}`;
+	// Build header: bullet Web Fetch (domain) · method
+	const icon = details.truncated
+		? uiTheme.fg("warning", uiTheme.format.bullet)
+		: uiTheme.fg("success", uiTheme.format.bullet);
+	const expandHint = expanded ? "" : uiTheme.fg("dim", " (Ctrl+O to expand)");
+	let text = `${icon} ${uiTheme.fg("toolTitle", "Web Fetch")} ${uiTheme.fg("accent", `(${domain})`)}${uiTheme.sep.dot}${uiTheme.fg("dim", details.method)}${expandHint}`;
 
 	// Get content text
 	const contentText = result.content[0]?.text ?? "";
@@ -2279,21 +2276,27 @@ export function renderWebFetchResult(
 	if (!expanded) {
 		// Collapsed view: show metadata + 3 preview lines
 		if (hasRedirect) {
-			text += `\n ${theme.fg("dim", TREE_PIPE)}  ${theme.fg("muted", "→")} ${theme.fg("mdLinkUrl", details.finalUrl)}`;
+			text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg(
+				"muted",
+				uiTheme.nav.selected,
+			)} ${uiTheme.fg("mdLinkUrl", details.finalUrl)}`;
 		}
 		if (details.truncated) {
-			text += `\n ${theme.fg("dim", TREE_PIPE)}  ${theme.fg("warning", "⚠ truncated")}`;
+			text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg("warning", `${uiTheme.status.warning} truncated`)}`;
 		}
 
-		const previewLines = getPreviewLines(contentBody, 3, 100);
+		const previewLines = getPreviewLines(contentBody, 3, 100, uiTheme.format.ellipsis);
 		for (const line of previewLines) {
-			text += `\n ${theme.fg("dim", TREE_PIPE)}  ${theme.fg("dim", line)}`;
+			text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg("dim", line)}`;
 		}
 		const totalLines = contentBody.split("\n").filter((l) => l.trim()).length;
 		if (totalLines > 3) {
-			text += `\n ${theme.fg("dim", TREE_END)} ${theme.fg("muted", `… ${totalLines - 3} more lines`)}`;
+			text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg(
+				"muted",
+				`${uiTheme.format.ellipsis} ${totalLines - 3} more lines`,
+			)}`;
 		} else {
-			text += `\n ${theme.fg("dim", TREE_END)} ${theme.fg("muted", details.contentType)}`;
+			text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg("muted", details.contentType)}`;
 		}
 	} else {
 		// Expanded view: full metadata tree + content
@@ -2301,29 +2304,29 @@ export function renderWebFetchResult(
 
 		if (hasMeta) {
 			// Metadata section
-			text += `\n ${theme.fg("dim", TREE_MID)} ${theme.fg("accent", "Metadata")}`;
-			text += `\n ${theme.fg("dim", TREE_PIPE)}  ${theme.fg("dim", TREE_MID)} ${theme.fg("muted", "Content-Type:")} ${
+			text += `\n ${uiTheme.fg("dim", uiTheme.tree.branch)} ${uiTheme.fg("accent", "Metadata")}`;
+			text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg("dim", uiTheme.tree.branch)} ${uiTheme.fg("muted", "Content-Type:")} ${
 				details.contentType
 			}`;
 			if (hasRedirect) {
-				text += `\n ${theme.fg("dim", TREE_PIPE)}  ${theme.fg("dim", TREE_MID)} ${theme.fg(
+				text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg("dim", uiTheme.tree.branch)} ${uiTheme.fg(
 					"muted",
 					"Redirected from:",
-				)} ${theme.fg("mdLinkUrl", details.url)}`;
-				text += `\n ${theme.fg("dim", TREE_PIPE)}  ${theme.fg("dim", `${TREE_PIPE}  ${TREE_HOOK} `)}${theme.fg(
+				)} ${uiTheme.fg("mdLinkUrl", details.url)}`;
+				text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg("dim", `${uiTheme.tree.vertical}  ${uiTheme.tree.hook} `)}${uiTheme.fg(
 					"mdLinkUrl",
 					details.finalUrl,
 				)}`;
 			}
 			if (details.truncated) {
-				text += `\n ${theme.fg("dim", TREE_PIPE)}  ${theme.fg("dim", TREE_MID)} ${theme.fg(
+				text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg("dim", uiTheme.tree.branch)} ${uiTheme.fg(
 					"warning",
-					"⚠ Output was truncated",
+					`${uiTheme.status.warning} Output was truncated`,
 				)}`;
 			}
 			if (hasNotes) {
-				const notesBranch = TREE_END;
-				text += `\n ${theme.fg("dim", TREE_PIPE)}  ${theme.fg("dim", notesBranch)} ${theme.fg(
+				const notesBranch = uiTheme.tree.last;
+				text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg("dim", notesBranch)} ${uiTheme.fg(
 					"muted",
 					"Notes:",
 				)} ${details.notes.join("; ")}`;
@@ -2331,12 +2334,12 @@ export function renderWebFetchResult(
 		}
 
 		// Content section
-		text += `\n ${theme.fg("dim", TREE_END)} ${theme.fg("accent", "Content")}`;
+		text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg("accent", "Content")}`;
 		const contentLines = contentBody.split("\n");
 		for (let i = 0; i < contentLines.length; i++) {
 			const line = contentLines[i];
 			const isLast = i === contentLines.length - 1;
-			text += `\n    ${isLast ? " " : theme.fg("dim", " ")} ${line}`;
+			text += `\n    ${isLast ? " " : uiTheme.fg("dim", " ")} ${line}`;
 		}
 	}
 
@@ -2362,11 +2365,11 @@ export const webFetchCustomTool: CustomTool<typeof webFetchSchema, WebFetchToolD
 		return webFetchTool.execute(toolCallId, params);
 	},
 
-	renderCall(args: WebFetchParams, theme: Theme) {
-		return renderWebFetchCall(args, theme);
+	renderCall(args: WebFetchParams, uiTheme: Theme) {
+		return renderWebFetchCall(args, uiTheme);
 	},
 
-	renderResult(result, options: RenderResultOptions, theme: Theme) {
-		return renderWebFetchResult(result, options, theme);
+	renderResult(result, options: RenderResultOptions, uiTheme: Theme) {
+		return renderWebFetchResult(result, options, uiTheme);
 	},
 };

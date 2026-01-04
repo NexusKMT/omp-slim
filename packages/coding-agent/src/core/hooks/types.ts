@@ -129,7 +129,7 @@ export interface HookUIContext {
 	 *
 	 * @example
 	 * const theme = ctx.ui.theme;
-	 * ctx.ui.setStatus("my-hook", theme.fg("success", "✓") + " Ready");
+	 * ctx.ui.setStatus("my-hook", theme.fg("success", theme.status.success) + " Ready");
 	 */
 	readonly theme: Theme;
 }

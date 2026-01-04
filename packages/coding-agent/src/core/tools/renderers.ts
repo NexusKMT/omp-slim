@@ -22,13 +22,6 @@ import { renderWebFetchCall, renderWebFetchResult, type WebFetchToolDetails } fr
 import { renderWebSearchCall, renderWebSearchResult, type WebSearchRenderDetails } from "./web-search/render";
 
 // Tree drawing characters
-const TREE_MID = "├─";
-const TREE_END = "└─";
-
-// Icons
-const ICON_SUCCESS = "●";
-const ICON_WARNING = "●";
-const ICON_ERROR = "●";
 
 interface ToolRenderer<TArgs = any, TDetails = any> {
 	renderCall(args: TArgs, theme: Theme): Component;
@@ -86,7 +79,7 @@ const grepRenderer: ToolRenderer<GrepArgs, GrepToolDetails> = {
 
 		// Error case
 		if (details?.error) {
-			return new Text(`${theme.fg("error", ICON_ERROR)} ${theme.fg("error", details.error)}`, 0, 0);
+			return new Text(`${theme.styledSymbol("status.error", "error")} ${theme.fg("error", details.error)}`, 0, 0);
 		}
 
 		// Check for detailed rendering data - fall back to raw output if not available
@@ -96,7 +89,11 @@ const grepRenderer: ToolRenderer<GrepArgs, GrepToolDetails> = {
 			// Fall back to showing raw text content
 			const textContent = result.content?.find((c) => c.type === "text")?.text;
 			if (!textContent || textContent === "No matches found") {
-				return new Text(`${theme.fg("warning", ICON_WARNING)} ${theme.fg("muted", "No matches found")}`, 0, 0);
+				return new Text(
+					`${theme.styledSymbol("status.warning", "warning")} ${theme.fg("muted", "No matches found")}`,
+					0,
+					0,
+				);
 			}
 
 			// Show abbreviated output
@@ -105,10 +102,10 @@ const grepRenderer: ToolRenderer<GrepArgs, GrepToolDetails> = {
 			const displayLines = lines.slice(0, maxLines);
 			const remaining = lines.length - maxLines;
 
-			let text = `${theme.fg("success", ICON_SUCCESS)} ${theme.fg("toolTitle", "grep")}`;
+			let text = `${theme.styledSymbol("status.success", "success")} ${theme.fg("toolTitle", "grep")}`;
 			text += `\n${displayLines.map((l) => theme.fg("toolOutput", l)).join("\n")}`;
 			if (remaining > 0) {
-				text += `\n${theme.fg("muted", `... ${remaining} more lines`)}`;
+				text += `\n${theme.fg("muted", `${theme.format.ellipsis} ${remaining} more lines`)}`;
 			}
 			return new Text(text, 0, 0);
 		}
@@ -121,11 +118,15 @@ const grepRenderer: ToolRenderer<GrepArgs, GrepToolDetails> = {
 
 		// No matches
 		if (matchCount === 0) {
-			return new Text(`${theme.fg("warning", ICON_WARNING)} ${theme.fg("muted", "No matches found")}`, 0, 0);
+			return new Text(
+				`${theme.styledSymbol("status.warning", "warning")} ${theme.fg("muted", "No matches found")}`,
+				0,
+				0,
+			);
 		}
 
 		// Build summary
-		const icon = theme.fg("success", ICON_SUCCESS);
+		const icon = theme.styledSymbol("status.success", "success");
 		let summary: string;
 		if (mode === "files_with_matches") {
 			summary = `${fileCount} file${fileCount !== 1 ? "s" : ""}`;
@@ -147,12 +148,15 @@ const grepRenderer: ToolRenderer<GrepArgs, GrepToolDetails> = {
 			const maxFiles = expanded ? files.length : Math.min(files.length, 8);
 			for (let i = 0; i < maxFiles; i++) {
 				const isLast = i === maxFiles - 1 && (expanded || files.length <= 8);
-				const branch = isLast ? TREE_END : TREE_MID;
+				const branch = isLast ? theme.tree.last : theme.tree.branch;
 				text += `\n ${theme.fg("dim", branch)} ${theme.fg("accent", files[i])}`;
 			}
 
 			if (!expanded && files.length > 8) {
-				text += `\n ${theme.fg("dim", TREE_END)} ${theme.fg("muted", `… ${files.length - 8} more files`)}`;
+				text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+					"muted",
+					`${theme.format.ellipsis} ${files.length - 8} more files`,
+				)}`;
 			}
 		}
 
@@ -195,7 +199,7 @@ const findRenderer: ToolRenderer<FindArgs, FindToolDetails> = {
 
 		// Error case
 		if (details?.error) {
-			return new Text(`${theme.fg("error", ICON_ERROR)} ${theme.fg("error", details.error)}`, 0, 0);
+			return new Text(`${theme.styledSymbol("status.error", "error")} ${theme.fg("error", details.error)}`, 0, 0);
 		}
 
 		// Check for detailed rendering data - fall back to parsing raw output if not available
@@ -206,7 +210,11 @@ const findRenderer: ToolRenderer<FindArgs, FindToolDetails> = {
 
 		if (!hasDetailedData) {
 			if (!textContent || textContent.includes("No files matching") || textContent.trim() === "") {
-				return new Text(`${theme.fg("warning", ICON_WARNING)} ${theme.fg("muted", "No files found")}`, 0, 0);
+				return new Text(
+					`${theme.styledSymbol("status.warning", "warning")} ${theme.fg("muted", "No files found")}`,
+					0,
+					0,
+				);
 			}
 
 			// Parse the raw output as file list
@@ -215,17 +223,20 @@ const findRenderer: ToolRenderer<FindArgs, FindToolDetails> = {
 			const displayLines = lines.slice(0, maxLines);
 			const remaining = lines.length - maxLines;
 
-			let text = `${theme.fg("success", ICON_SUCCESS)} ${theme.fg("toolTitle", "find")} ${theme.fg(
+			let text = `${theme.styledSymbol("status.success", "success")} ${theme.fg("toolTitle", "find")} ${theme.fg(
 				"dim",
 				`${lines.length} file${lines.length !== 1 ? "s" : ""}`,
 			)}`;
 			for (let i = 0; i < displayLines.length; i++) {
 				const isLast = i === displayLines.length - 1 && remaining === 0;
-				const branch = isLast ? TREE_END : TREE_MID;
+				const branch = isLast ? theme.tree.last : theme.tree.branch;
 				text += `\n ${theme.fg("dim", branch)} ${theme.fg("accent", displayLines[i])}`;
 			}
 			if (remaining > 0) {
-				text += `\n ${theme.fg("dim", TREE_END)} ${theme.fg("muted", `… ${remaining} more files`)}`;
+				text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+					"muted",
+					`${theme.format.ellipsis} ${remaining} more files`,
+				)}`;
 			}
 			return new Text(text, 0, 0);
 		}
@@ -236,11 +247,15 @@ const findRenderer: ToolRenderer<FindArgs, FindToolDetails> = {
 
 		// No matches
 		if (fileCount === 0) {
-			return new Text(`${theme.fg("warning", ICON_WARNING)} ${theme.fg("muted", "No files found")}`, 0, 0);
+			return new Text(
+				`${theme.styledSymbol("status.warning", "warning")} ${theme.fg("muted", "No files found")}`,
+				0,
+				0,
+			);
 		}
 
 		// Build summary
-		const icon = theme.fg("success", ICON_SUCCESS);
+		const icon = theme.styledSymbol("status.success", "success");
 		let summary = `${fileCount} file${fileCount !== 1 ? "s" : ""}`;
 
 		if (truncated) {
@@ -255,12 +270,15 @@ const findRenderer: ToolRenderer<FindArgs, FindToolDetails> = {
 			const maxFiles = expanded ? files.length : Math.min(files.length, 8);
 			for (let i = 0; i < maxFiles; i++) {
 				const isLast = i === maxFiles - 1 && (expanded || files.length <= 8);
-				const branch = isLast ? TREE_END : TREE_MID;
+				const branch = isLast ? theme.tree.last : theme.tree.branch;
 				text += `\n ${theme.fg("dim", branch)} ${theme.fg("accent", files[i])}`;
 			}
 
 			if (!expanded && files.length > 8) {
-				text += `\n ${theme.fg("dim", TREE_END)} ${theme.fg("muted", `… ${files.length - 8} more files`)}`;
+				text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+					"muted",
+					`${theme.format.ellipsis} ${files.length - 8} more files`,
+				)}`;
 			}
 		}
 
@@ -303,7 +321,7 @@ const notebookRenderer: ToolRenderer<NotebookArgs, NotebookToolDetails> = {
 		// Error case - check for error in content
 		const content = result.content?.[0];
 		if (content?.type === "text" && content.text?.startsWith("Error:")) {
-			return new Text(`${theme.fg("error", ICON_ERROR)} ${theme.fg("error", content.text)}`, 0, 0);
+			return new Text(`${theme.styledSymbol("status.error", "error")} ${theme.fg("error", content.text)}`, 0, 0);
 		}
 
 		const action = details?.action ?? "edit";
@@ -312,7 +330,7 @@ const notebookRenderer: ToolRenderer<NotebookArgs, NotebookToolDetails> = {
 		const totalCells = details?.totalCells;
 
 		// Build summary
-		const icon = theme.fg("success", ICON_SUCCESS);
+		const icon = theme.styledSymbol("status.success", "success");
 		let summary: string;
 
 		switch (action) {
@@ -355,9 +373,9 @@ const askRenderer: ToolRenderer<AskArgs, AskToolDetails> = {
 
 		if (args.options?.length) {
 			for (const opt of args.options) {
-				text += `\n${theme.fg("dim", "  ○ ")}${theme.fg("muted", opt.label)}`;
+				text += `\n${theme.fg("dim", `  ${theme.checkbox.unchecked} `)}${theme.fg("muted", opt.label)}`;
 			}
-			text += `\n${theme.fg("dim", "  ○ ")}${theme.fg("muted", "Other (custom input)")}`;
+			text += `\n${theme.fg("dim", `  ${theme.checkbox.unchecked} `)}${theme.fg("muted", "Other (custom input)")}`;
 		}
 
 		return new Text(text, 0, 0);
@@ -374,22 +392,22 @@ const askRenderer: ToolRenderer<AskArgs, AskToolDetails> = {
 
 		if (details.customInput) {
 			// Custom input provided
-			text += `\n${theme.fg("dim", "  ⎿ ")}${theme.fg("success", details.customInput)}`;
+			text += `\n${theme.fg("dim", `   `)}${theme.fg("success", details.customInput)}`;
 		} else if (details.selectedOptions.length > 0) {
 			// Show only selected options
 			const selected = details.selectedOptions;
 			if (selected.length === 1) {
-				text += `\n${theme.fg("dim", "  ⎿ ")}${theme.fg("success", selected[0])}`;
+				text += `\n${theme.fg("dim", `   `)}${theme.fg("success", selected[0])}`;
 			} else {
 				// Multiple selections - tree format
 				for (let i = 0; i < selected.length; i++) {
 					const isLast = i === selected.length - 1;
-					const branch = isLast ? TREE_END : TREE_MID;
+					const branch = isLast ? theme.tree.last : theme.tree.branch;
 					text += `\n${theme.fg("dim", `  ${branch} `)}${theme.fg("success", selected[i])}`;
 				}
 			}
 		} else {
-			text += `\n${theme.fg("dim", "  ⎿ ")}${theme.fg("warning", "Cancelled")}`;
+			text += `\n${theme.fg("dim", `   `)}${theme.fg("warning", "Cancelled")}`;
 		}
 
 		return new Text(text, 0, 0);
@@ -446,7 +464,7 @@ const outputRenderer: ToolRenderer<OutputArgs, OutputToolDetails> = {
 
 		// Error case: some IDs not found
 		if (details?.notFound?.length) {
-			let text = `${theme.fg("error", ICON_ERROR)} Not found: ${details.notFound.join(", ")}`;
+			let text = `${theme.styledSymbol("status.error", "error")} Not found: ${details.notFound.join(", ")}`;
 			if (details.availableIds?.length) {
 				text += `\n${theme.fg("dim", "Available:")} ${details.availableIds.join(", ")}`;
 			} else {
@@ -461,7 +479,7 @@ const outputRenderer: ToolRenderer<OutputArgs, OutputToolDetails> = {
 		if (outputs.length === 0) {
 			const textContent = result.content?.find((c: any) => c.type === "text")?.text;
 			return new Text(
-				`${theme.fg("warning", ICON_WARNING)} ${theme.fg("muted", textContent || "No outputs")}`,
+				`${theme.styledSymbol("status.warning", "warning")} ${theme.fg("muted", textContent || "No outputs")}`,
 				0,
 				0,
 			);
@@ -471,23 +489,26 @@ const outputRenderer: ToolRenderer<OutputArgs, OutputToolDetails> = {
 		if (outputs.length === 1) {
 			const o = outputs[0];
 			const summary = `read ${o.id}.out.md (${o.lineCount} lines, ${formatBytes(o.charCount)})`;
-			return new Text(`${theme.fg("success", ICON_SUCCESS)} ${theme.fg("dim", summary)}`, 0, 0);
+			return new Text(`${theme.styledSymbol("status.success", "success")} ${theme.fg("dim", summary)}`, 0, 0);
 		}
 
 		// Success: multiple outputs (tree display)
 		const expandHint = expanded ? "" : theme.fg("dim", " (Ctrl+O to expand)");
-		let text = `${theme.fg("success", ICON_SUCCESS)} ${theme.fg("dim", `read ${outputs.length} outputs`)}${expandHint}`;
+		let text = `${theme.styledSymbol("status.success", "success")} ${theme.fg("dim", `read ${outputs.length} outputs`)}${expandHint}`;
 
 		const maxOutputs = expanded ? outputs.length : Math.min(outputs.length, 5);
 		for (let i = 0; i < maxOutputs; i++) {
 			const o = outputs[i];
 			const isLast = i === maxOutputs - 1 && (expanded || outputs.length <= 5);
-			const branch = isLast ? TREE_END : TREE_MID;
+			const branch = isLast ? theme.tree.last : theme.tree.branch;
 			text += `\n ${theme.fg("dim", branch)} ${theme.fg("accent", o.id)} ${theme.fg("dim", `(${o.lineCount} lines)`)}`;
 		}
 
 		if (!expanded && outputs.length > 5) {
-			text += `\n ${theme.fg("dim", TREE_END)} ${theme.fg("muted", `… ${outputs.length - 5} more outputs`)}`;
+			text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+				"muted",
+				`${theme.format.ellipsis} ${outputs.length - 5} more outputs`,
+			)}`;
 		}
 
 		return new Text(text, 0, 0);
@@ -527,7 +548,11 @@ const lsRenderer: ToolRenderer<LsArgs, LsToolDetails> = {
 		const textContent = result.content?.find((c: any) => c.type === "text")?.text;
 
 		if (!textContent || textContent.trim() === "") {
-			return new Text(`${theme.fg("warning", ICON_WARNING)} ${theme.fg("muted", "Empty directory")}`, 0, 0);
+			return new Text(
+				`${theme.styledSymbol("status.warning", "warning")} ${theme.fg("muted", "Empty directory")}`,
+				0,
+				0,
+			);
 		}
 
 		const entries = textContent.split("\n").filter((l: string) => l.trim());
@@ -535,7 +560,9 @@ const lsRenderer: ToolRenderer<LsArgs, LsToolDetails> = {
 		const files = entries.filter((e: string) => !e.endsWith("/"));
 
 		const truncated = details?.truncation?.truncated || details?.entryLimitReached;
-		const icon = truncated ? theme.fg("warning", ICON_WARNING) : theme.fg("success", ICON_SUCCESS);
+		const icon = truncated
+			? theme.styledSymbol("status.warning", "warning")
+			: theme.styledSymbol("status.success", "success");
 
 		let summary = `${dirs.length} dir${dirs.length !== 1 ? "s" : ""}, ${files.length} file${
 			files.length !== 1 ? "s" : ""
@@ -551,14 +578,17 @@ const lsRenderer: ToolRenderer<LsArgs, LsToolDetails> = {
 		for (let i = 0; i < maxEntries; i++) {
 			const entry = entries[i];
 			const isLast = i === maxEntries - 1 && (expanded || entries.length <= 12);
-			const branch = isLast ? TREE_END : TREE_MID;
+			const branch = isLast ? theme.tree.last : theme.tree.branch;
 			const isDir = entry.endsWith("/");
 			const color = isDir ? "accent" : "toolOutput";
 			text += `\n ${theme.fg("dim", branch)} ${theme.fg(color, entry)}`;
 		}
 
 		if (!expanded && entries.length > 12) {
-			text += `\n ${theme.fg("dim", TREE_END)} ${theme.fg("muted", `… ${entries.length - 12} more entries`)}`;
+			text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+				"muted",
+				`${theme.format.ellipsis} ${entries.length - 12} more entries`,
+			)}`;
 		}
 
 		return new Text(text, 0, 0);

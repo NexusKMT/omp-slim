@@ -117,18 +117,17 @@ export class ExtensionDashboard extends Container {
 				label += ` (${tab.count})`;
 			}
 
-			// Apply strikethrough for disabled providers
-			const displayLabel = isDisabled ? `${label.split("").join("\u0336")}\u0336` : label;
+			const displayLabel = isDisabled ? `${theme.status.disabled} ${label}` : label;
 
 			if (isActive) {
 				// Active tab: background highlight
 				parts.push(theme.bg("selectedBg", ` ${displayLabel} `));
 			} else if (isDisabled) {
-				// Disabled provider: strikethrough + dim
+				// Disabled provider: dim
 				parts.push(theme.fg("dim", ` ${displayLabel} `));
 			} else if (isEmpty) {
 				// Empty enabled provider: very dim, unselectable
-				parts.push(`\x1b[38;5;238m ${label} \x1b[0m`);
+				parts.push(theme.fg("dim", ` ${label} `));
 			} else {
 				// Normal enabled provider
 				parts.push(theme.fg("muted", ` ${label} `));
@@ -278,7 +277,7 @@ class TwoColumnBody implements Component {
 
 		const maxLines = Math.max(leftLines.length, rightLines.length);
 		const combined: string[] = [];
-		const separator = theme.fg("dim", " │ ");
+		const separator = theme.fg("dim", ` ${theme.boxSharp.vertical} `);
 
 		for (let i = 0; i < maxLines; i++) {
 			const left = truncateToWidth(leftLines[i] ?? "", leftWidth);

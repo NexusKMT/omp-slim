@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `inputCursor` symbol for customizing the text input cursor character
+- Added `symbols` property to `EditorTheme`, `MarkdownTheme`, and `SelectListTheme` interfaces for component-level symbol customization
+- Added `SymbolTheme` interface for customizing UI symbols including cursors, borders, spinners, and box-drawing characters
+- Added support for custom spinner frames in the Loader component
+
 ## [3.14.0] - 2026-01-04
 
 ## [3.13.1337] - 2026-01-04

@@ -3,9 +3,52 @@
  */
 
 import { Chalk } from "chalk";
-import type { EditorTheme, MarkdownTheme, SelectListTheme } from "../src/index";
+import type { EditorTheme, MarkdownTheme, SelectListTheme, SymbolTheme } from "../src/index";
 
 const chalk = new Chalk({ level: 3 });
+
+const defaultSymbols: SymbolTheme = {
+	cursor: ">",
+	inputCursor: "|",
+	ellipsis: "...",
+	boxRound: {
+		topLeft: "+",
+		topRight: "+",
+		bottomLeft: "+",
+		bottomRight: "+",
+		horizontal: "-",
+		vertical: "|",
+	},
+	boxSharp: {
+		topLeft: "+",
+		topRight: "+",
+		bottomLeft: "+",
+		bottomRight: "+",
+		horizontal: "-",
+		vertical: "|",
+		teeDown: "+",
+		teeUp: "+",
+		teeLeft: "+",
+		teeRight: "+",
+		cross: "+",
+	},
+	table: {
+		topLeft: "+",
+		topRight: "+",
+		bottomLeft: "+",
+		bottomRight: "+",
+		horizontal: "-",
+		vertical: "|",
+		teeDown: "+",
+		teeUp: "+",
+		teeLeft: "+",
+		teeRight: "+",
+		cross: "+",
+	},
+	quoteBorder: "|",
+	hrChar: "-",
+	spinnerFrames: ["-", "\\", "|", "/"],
+};
 
 export const defaultSelectListTheme: SelectListTheme = {
 	selectedPrefix: (text: string) => chalk.blue(text),
@@ -13,6 +56,7 @@ export const defaultSelectListTheme: SelectListTheme = {
 	description: (text: string) => chalk.dim(text),
 	scrollInfo: (text: string) => chalk.dim(text),
 	noMatch: (text: string) => chalk.dim(text),
+	symbols: defaultSymbols,
 };
 
 export const defaultMarkdownTheme: MarkdownTheme = {
@@ -30,9 +74,11 @@ export const defaultMarkdownTheme: MarkdownTheme = {
 	italic: (text: string) => chalk.italic(text),
 	strikethrough: (text: string) => chalk.strikethrough(text),
 	underline: (text: string) => chalk.underline(text),
+	symbols: defaultSymbols,
 };
 
 export const defaultEditorTheme: EditorTheme = {
 	borderColor: (text: string) => chalk.dim(text),
 	selectList: defaultSelectListTheme,
+	symbols: defaultSymbols,
 };

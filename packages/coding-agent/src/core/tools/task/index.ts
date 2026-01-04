@@ -415,7 +415,7 @@ export function createTaskTool(
 						? ` [${r.outputMeta.lineCount} lines, ${formatBytes(r.outputMeta.charCount)}]`
 						: "";
 					const pathInfo = !hasOutputTool && r.artifactPaths?.outputPath ? ` (${r.artifactPaths.outputPath})` : "";
-					return `[${r.agent}] ${status}${meta} → ${outputId}${pathInfo}\n${preview}`;
+					return `[${r.agent}] ${status}${meta} ${outputId}${pathInfo}\n${preview}`;
 				});
 
 				const skippedNote =

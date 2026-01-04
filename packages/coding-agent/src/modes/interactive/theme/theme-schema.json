@@ -45,6 +45,8 @@
 				"muted",
 				"dim",
 				"text",
+				"thinkingText",
+				"selectedBg",
 				"userMessageBg",
 				"userMessageText",
 				"customMessageBg",
@@ -53,9 +55,11 @@
 				"toolPendingBg",
 				"toolSuccessBg",
 				"toolErrorBg",
-				"toolText",
+				"toolTitle",
+				"toolOutput",
 				"mdHeading",
 				"mdLink",
+				"mdLinkUrl",
 				"mdCode",
 				"mdCodeBlock",
 				"mdCodeBlockBorder",
@@ -74,7 +78,28 @@
 				"syntaxNumber",
 				"syntaxType",
 				"syntaxOperator",
-				"syntaxPunctuation"
+				"syntaxPunctuation",
+				"thinkingOff",
+				"thinkingMinimal",
+				"thinkingLow",
+				"thinkingMedium",
+				"thinkingHigh",
+				"thinkingXhigh",
+				"bashMode",
+				"statusLineBg",
+				"statusLineSep",
+				"statusLineModel",
+				"statusLinePath",
+				"statusLineGitClean",
+				"statusLineGitDirty",
+				"statusLineContext",
+				"statusLineSpend",
+				"statusLineStaged",
+				"statusLineDirty",
+				"statusLineUntracked",
+				"statusLineOutput",
+				"statusLineCost",
+				"statusLineSubagents"
 			],
 			"properties": {
 				"accent": {
@@ -117,6 +142,14 @@
 					"$ref": "#/$defs/colorValue",
 					"description": "Default text color (usually empty string)"
 				},
+				"thinkingText": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Thinking text color"
+				},
+				"selectedBg": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Selected background (list highlight)"
+				},
 				"userMessageBg": {
 					"$ref": "#/$defs/colorValue",
 					"description": "User message background"
@@ -149,9 +182,13 @@
 					"$ref": "#/$defs/colorValue",
 					"description": "Tool execution box (error state)"
 				},
-				"toolText": {
+				"toolTitle": {
 					"$ref": "#/$defs/colorValue",
-					"description": "Tool execution box text color"
+					"description": "Tool title text"
+				},
+				"toolOutput": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Tool output text"
 				},
 				"mdHeading": {
 					"$ref": "#/$defs/colorValue",
@@ -160,6 +197,10 @@
 				"mdLink": {
 					"$ref": "#/$defs/colorValue",
 					"description": "Markdown link text"
+				},
+				"mdLinkUrl": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Markdown link URL text"
 				},
 				"mdCode": {
 					"$ref": "#/$defs/colorValue",
@@ -264,6 +305,62 @@
 				"bashMode": {
 					"$ref": "#/$defs/colorValue",
 					"description": "Editor border color in bash mode"
+				},
+				"statusLineBg": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Status line background"
+				},
+				"statusLineSep": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Status line separator color"
+				},
+				"statusLineModel": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Status line model segment"
+				},
+				"statusLinePath": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Status line path segment"
+				},
+				"statusLineGitClean": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Status line git clean"
+				},
+				"statusLineGitDirty": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Status line git dirty"
+				},
+				"statusLineContext": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Status line context segment"
+				},
+				"statusLineSpend": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Status line spend segment"
+				},
+				"statusLineStaged": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Status line git staged"
+				},
+				"statusLineDirty": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Status line git dirty count"
+				},
+				"statusLineUntracked": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Status line git untracked"
+				},
+				"statusLineOutput": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Status line output segment"
+				},
+				"statusLineCost": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Status line cost segment"
+				},
+				"statusLineSubagents": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Status line subagents segment"
 				}
 			},
 			"additionalProperties": false
@@ -283,6 +380,25 @@
 				"infoBg": {
 					"$ref": "#/$defs/colorValue",
 					"description": "Info sections background (system prompt, notices)"
+				}
+			},
+			"additionalProperties": false
+		},
+		"symbols": {
+			"type": "object",
+			"description": "Symbol configuration for UI glyphs and icons",
+			"properties": {
+				"preset": {
+					"type": "string",
+					"enum": ["unicode", "nerd", "ascii"],
+					"description": "Default symbol preset for this theme (can be overridden by user setting)"
+				},
+				"overrides": {
+					"type": "object",
+					"description": "Override individual symbol keys (e.g., 'status.success': '✔')",
+					"additionalProperties": {
+						"type": "string"
+					}
 				}
 			},
 			"additionalProperties": false

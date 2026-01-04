@@ -1,4 +1,5 @@
 import { marked, type Token } from "marked";
+import type { SymbolTheme } from "../symbols";
 import type { Component } from "../tui";
 import { applyBackgroundToLine, visibleWidth, wrapTextWithAnsi } from "../utils";
 
@@ -41,6 +42,7 @@ export interface MarkdownTheme {
 	strikethrough: (text: string) => string;
 	underline: (text: string) => string;
 	highlightCode?: (code: string, lang?: string) => string[];
+	symbols: SymbolTheme;
 }
 
 export class Markdown implements Component {
@@ -301,7 +303,10 @@ export class Markdown implements Component {
 				const quoteText = this.renderInlineTokens(token.tokens || []);
 				const quoteLines = quoteText.split("\n");
 				for (const quoteLine of quoteLines) {
-					lines.push(this.theme.quoteBorder("│ ") + this.theme.quote(this.theme.italic(quoteLine)));
+					lines.push(
+						this.theme.quoteBorder(`${this.theme.symbols.quoteBorder} `) +
+							this.theme.quote(this.theme.italic(quoteLine)),
+					);
 				}
 				if (nextTokenType !== "space") {
 					lines.push(""); // Add spacing after blockquotes (unless space token follows)
@@ -310,7 +315,7 @@ export class Markdown implements Component {
 			}
 
 			case "hr":
-				lines.push(this.theme.hr("─".repeat(Math.min(width, 80))));
+				lines.push(this.theme.hr(this.theme.symbols.hrChar.repeat(Math.min(width, 80))));
 				if (nextTokenType !== "space") {
 					lines.push(""); // Add spacing after horizontal rules (unless space token follows)
 				}
@@ -595,9 +600,13 @@ export class Markdown implements Component {
 			}
 		}
 
+		const t = this.theme.symbols.table;
+		const h = t.horizontal;
+		const v = t.vertical;
+
 		// Render top border
-		const topBorderCells = columnWidths.map((w) => "─".repeat(w));
-		lines.push(`┌─${topBorderCells.join("─┬─")}─┐`);
+		const topBorderCells = columnWidths.map((w) => h.repeat(w));
+		lines.push(`${t.topLeft}${h}${topBorderCells.join(`${h}${t.teeDown}${h}`)}${h}${t.topRight}`);
 
 		// Render header with wrapping
 		const headerCellLines: string[][] = token.header.map((cell, i) => {
@@ -612,12 +621,12 @@ export class Markdown implements Component {
 				const padded = text + " ".repeat(Math.max(0, columnWidths[colIdx] - visibleWidth(text)));
 				return this.theme.bold(padded);
 			});
-			lines.push(`│ ${rowParts.join(" │ ")} │`);
+			lines.push(`${v} ${rowParts.join(` ${v} `)} ${v}`);
 		}
 
 		// Render separator
-		const separatorCells = columnWidths.map((w) => "─".repeat(w));
-		lines.push(`├─${separatorCells.join("─┼─")}─┤`);
+		const separatorCells = columnWidths.map((w) => h.repeat(w));
+		lines.push(`${t.teeRight}${h}${separatorCells.join(`${h}${t.cross}${h}`)}${h}${t.teeLeft}`);
 
 		// Render rows with wrapping
 		for (const row of token.rows) {
@@ -632,13 +641,13 @@ export class Markdown implements Component {
 					const text = cellLines[lineIdx] || "";
 					return text + " ".repeat(Math.max(0, columnWidths[colIdx] - visibleWidth(text)));
 				});
-				lines.push(`│ ${rowParts.join(" │ ")} │`);
+				lines.push(`${v} ${rowParts.join(` ${v} `)} ${v}`);
 			}
 		}
 
 		// Render bottom border
-		const bottomBorderCells = columnWidths.map((w) => "─".repeat(w));
-		lines.push(`└─${bottomBorderCells.join("─┴─")}─┘`);
+		const bottomBorderCells = columnWidths.map((w) => h.repeat(w));
+		lines.push(`${t.bottomLeft}${h}${bottomBorderCells.join(`${h}${t.teeUp}${h}`)}${h}${t.bottomRight}`);
 
 		lines.push(""); // Add spacing after table
 		return lines;

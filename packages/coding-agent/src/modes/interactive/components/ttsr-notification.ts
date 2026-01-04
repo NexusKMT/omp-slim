@@ -38,13 +38,13 @@ export class TtsrNotificationComponent extends Container {
 	private rebuild(): void {
 		this.box.clear();
 
-		// Build header: ⚠ Injecting <bold>rule-name</bold>    ↩
+		// Build header: warning symbol + rule name + rewind icon
 		const ruleNames = this.rules.map((r) => theme.bold(r.name)).join(", ");
 		const label = this.rules.length === 1 ? "rule" : "rules";
-		const header = `\u26A0 Injecting ${label}: ${ruleNames}`;
+		const header = `${theme.icon.warning} Injecting ${label}: ${ruleNames}`;
 
 		// Create header with rewind icon on the right
-		const rewindIcon = "\u21A9"; // ↩
+		const rewindIcon = theme.icon.rewind;
 
 		this.box.addChild(new Text(`${header}  ${rewindIcon}`, 0, 0));
 
@@ -59,7 +59,7 @@ export class TtsrNotificationComponent extends Container {
 					// Truncate to first 2 lines
 					const lines = displayText.split("\n");
 					if (lines.length > 2) {
-						displayText = `${lines.slice(0, 2).join("\n")}...`;
+						displayText = `${lines.slice(0, 2).join("\n")}${theme.format.ellipsis}`;
 					}
 				}
 

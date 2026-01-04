@@ -3,15 +3,6 @@ import { type Static, Type } from "@sinclair/typebox";
 /** Source of an agent definition */
 export type AgentSource = "bundled" | "user" | "project";
 
-/** Single task item for parallel execution */
-export const taskItemSchema = Type.Object({
-	agent: Type.String({ description: "Agent name" }),
-	task: Type.String({ description: "Task description for the agent" }),
-	model: Type.Optional(Type.String({ description: "Model override for this task" })),
-});
-
-export type TaskItem = Static<typeof taskItemSchema>;
-
 /** Maximum tasks per call */
 export const MAX_PARALLEL_TASKS = 32;
 
@@ -35,6 +26,15 @@ export const OMP_BLOCKED_AGENT_ENV = "OMP_BLOCKED_AGENT";
 
 /** Environment variable containing allowed spawn list (propagated to subprocesses) */
 export const OMP_SPAWNS_ENV = "OMP_SPAWNS";
+
+/** Single task item for parallel execution */
+export const taskItemSchema = Type.Object({
+	agent: Type.String({ description: "Agent name" }),
+	task: Type.String({ description: "Task description for the agent" }),
+	model: Type.Optional(Type.String({ description: "Model override for this task" })),
+});
+
+export type TaskItem = Static<typeof taskItemSchema>;
 
 /** Task tool parameters */
 export const taskSchema = Type.Object({

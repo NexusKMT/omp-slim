@@ -25,6 +25,7 @@ import {
 	isShiftEnter,
 	isTab,
 } from "../keys";
+import type { SymbolTheme } from "../symbols";
 import type { Component } from "../tui";
 import { getSegmenter, isPunctuationChar, isWhitespaceChar, truncateToWidth, visibleWidth } from "../utils";
 import { SelectList, type SelectListTheme } from "./select-list";
@@ -46,6 +47,7 @@ interface LayoutLine {
 export interface EditorTheme {
 	borderColor: (str: string) => string;
 	selectList: SelectListTheme;
+	symbols: SymbolTheme;
 }
 
 export interface EditorTopBorder {
@@ -181,11 +183,12 @@ export class Editor implements Component {
 		this.lastWidth = width;
 
 		// Box-drawing characters for rounded corners
-		const topLeft = this.borderColor("╭─");
-		const topRight = this.borderColor("─╮");
-		const bottomLeft = this.borderColor("╰─");
-		const bottomRight = this.borderColor("─╯");
-		const horizontal = this.borderColor("─");
+		const box = this.theme.symbols.boxRound;
+		const topLeft = this.borderColor(`${box.topLeft}${box.horizontal}`);
+		const topRight = this.borderColor(`${box.horizontal}${box.topRight}`);
+		const bottomLeft = this.borderColor(`${box.bottomLeft}${box.horizontal}`);
+		const bottomRight = this.borderColor(`${box.horizontal}${box.bottomRight}`);
+		const horizontal = this.borderColor(box.horizontal);
 
 		// Layout the text - content area is width minus 6 for borders (3 left + 3 right)
 		const contentAreaWidth = width - 6;
@@ -201,13 +204,13 @@ export class Editor implements Component {
 			if (statusWidth <= topFillWidth) {
 				// Status fits - add fill after it
 				const fillWidth = topFillWidth - statusWidth;
-				result.push(topLeft + content + this.borderColor("─".repeat(fillWidth)) + topRight);
+				result.push(topLeft + content + this.borderColor(box.horizontal.repeat(fillWidth)) + topRight);
 			} else {
 				// Status too long - truncate it
-				const truncated = truncateToWidth(content, topFillWidth - 1, this.borderColor("…"));
+				const truncated = truncateToWidth(content, topFillWidth - 1, this.borderColor(this.theme.symbols.ellipsis));
 				const truncatedWidth = visibleWidth(truncated);
 				const fillWidth = Math.max(0, topFillWidth - truncatedWidth);
-				result.push(topLeft + truncated + this.borderColor("─".repeat(fillWidth)) + topRight);
+				result.push(topLeft + truncated + this.borderColor(box.horizontal.repeat(fillWidth)) + topRight);
 			}
 		} else {
 			result.push(topLeft + horizontal.repeat(topFillWidth) + topRight);
@@ -236,10 +239,10 @@ export class Editor implements Component {
 					// displayWidth stays the same - we're replacing, not adding
 				} else {
 					// Cursor is at the end - add thin blinking bar cursor
-					// The ▏ character has width 1
-					const cursor = "\x1b[5m▏\x1b[0m";
+					const cursorChar = this.theme.symbols.inputCursor;
+					const cursor = `\x1b[5m${cursorChar}\x1b[0m`;
 					displayText = before + cursor;
-					displayWidth += 1; // Account for cursor width
+					displayWidth += visibleWidth(cursorChar);
 					if (displayWidth > lineContentWidth) {
 						// Line is at full width - use reverse video on last grapheme if possible
 						// or just show cursor at the end without adding space
@@ -267,8 +270,8 @@ export class Editor implements Component {
 				// Last line: "╰─ " (3) + content + padding + " ─╯" (3) = 6 chars border
 				result.push(`${bottomLeft} ${displayText}${padding} ${bottomRight}`);
 			} else {
-				const leftBorder = this.borderColor("│  ");
-				const rightBorder = this.borderColor("  │");
+				const leftBorder = this.borderColor(`${box.vertical}  `);
+				const rightBorder = this.borderColor(`  ${box.vertical}`);
 				result.push(leftBorder + displayText + padding + rightBorder);
 			}
 		}

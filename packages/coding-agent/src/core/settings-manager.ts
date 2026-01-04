@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { type Settings as SettingsItem, settingsCapability } from "../capability/settings";
 import { getAgentDir } from "../config";
 import { loadSync } from "../discovery";
+import type { SymbolPreset } from "../modes/interactive/theme/theme";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -68,6 +69,8 @@ export interface EditSettings {
 	fuzzyMatch?: boolean; // default: true (accept high-confidence fuzzy matches for whitespace/indentation)
 }
 
+export type { SymbolPreset };
+
 export interface TtsrSettings {
 	enabled?: boolean; // default: true
 	/** What to do with partial output when TTSR triggers: "keep" shows interrupted attempt, "discard" removes it */
@@ -78,6 +81,45 @@ export interface TtsrSettings {
 	repeatGap?: number; // default: 10
 }
 
+export type StatusLineSegmentId =
+	| "pi"
+	| "model"
+	| "path"
+	| "git"
+	| "subagents"
+	| "token_in"
+	| "token_out"
+	| "token_total"
+	| "cost"
+	| "context_pct"
+	| "context_total"
+	| "time_spent"
+	| "time"
+	| "session"
+	| "hostname"
+	| "cache_read"
+	| "cache_write";
+
+export type StatusLineSeparatorStyle = "powerline" | "powerline-thin" | "slash" | "pipe" | "block" | "none" | "ascii";
+
+export type StatusLinePreset = "default" | "minimal" | "compact" | "full" | "nerd" | "ascii" | "custom";
+
+export interface StatusLineSegmentOptions {
+	model?: { showThinkingLevel?: boolean };
+	path?: { abbreviate?: boolean; maxLength?: number; stripWorkPrefix?: boolean };
+	git?: { showBranch?: boolean; showStaged?: boolean; showUnstaged?: boolean; showUntracked?: boolean };
+	time?: { format?: "12h" | "24h"; showSeconds?: boolean };
+}
+
+export interface StatusLineSettings {
+	preset?: StatusLinePreset;
+	leftSegments?: StatusLineSegmentId[];
+	rightSegments?: StatusLineSegmentId[];
+	separator?: StatusLineSeparatorStyle;
+	segmentOptions?: StatusLineSegmentOptions;
+	showHookStatus?: boolean;
+}
+
 export interface Settings {
 	lastChangelogVersion?: string;
 	/** Model roles map: { default: "provider/modelId", small: "provider/modelId", ... } */
@@ -86,6 +128,7 @@ export interface Settings {
 	queueMode?: "all" | "one-at-a-time";
 	interruptMode?: "immediate" | "wait";
 	theme?: string;
+	symbolPreset?: SymbolPreset; // default: uses theme's preset or "unicode"
 	compaction?: CompactionSettings;
 	branchSummary?: BranchSummarySettings;
 	retry?: RetrySettings;
@@ -106,6 +149,7 @@ export interface Settings {
 	ttsr?: TtsrSettings;
 	disabledProviders?: string[]; // Discovery provider IDs that are disabled
 	disabledExtensions?: string[]; // Individual extension IDs that are disabled (e.g., "skill:commit")
+	statusLine?: StatusLineSettings; // Status line configuration
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
@@ -295,6 +339,15 @@ export class SettingsManager {
 
 	setTheme(theme: string): void {
 		this.globalSettings.theme = theme;
+		this.save();
+	}
+
+	getSymbolPreset(): SymbolPreset | undefined {
+		return this.settings.symbolPreset;
+	}
+
+	setSymbolPreset(preset: SymbolPreset): void {
+		this.globalSettings.symbolPreset = preset;
 		this.save();
 	}
 
@@ -681,6 +734,127 @@ export class SettingsManager {
 			this.globalSettings.ttsr = {};
 		}
 		this.globalSettings.ttsr.repeatGap = gap;
+		this.save();
+	}
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Status Line Settings
+	// ═══════════════════════════════════════════════════════════════════════════
+
+	getStatusLineSettings(): StatusLineSettings {
+		return this.settings.statusLine ? { ...this.settings.statusLine } : {};
+	}
+
+	getStatusLinePreset(): StatusLinePreset {
+		return this.settings.statusLine?.preset ?? "default";
+	}
+
+	setStatusLinePreset(preset: StatusLinePreset): void {
+		if (!this.globalSettings.statusLine) {
+			this.globalSettings.statusLine = {};
+		}
+		if (preset !== "custom") {
+			delete this.globalSettings.statusLine.leftSegments;
+			delete this.globalSettings.statusLine.rightSegments;
+			delete this.globalSettings.statusLine.segmentOptions;
+		}
+		this.globalSettings.statusLine.preset = preset;
+		this.save();
+	}
+
+	getStatusLineSeparator(): StatusLineSeparatorStyle {
+		return this.settings.statusLine?.separator ?? "powerline-thin";
+	}
+
+	setStatusLineSeparator(separator: StatusLineSeparatorStyle): void {
+		if (!this.globalSettings.statusLine) {
+			this.globalSettings.statusLine = {};
+		}
+		this.globalSettings.statusLine.separator = separator;
+		this.save();
+	}
+
+	getStatusLineLeftSegments(): StatusLineSegmentId[] {
+		return [...(this.settings.statusLine?.leftSegments ?? [])];
+	}
+
+	setStatusLineLeftSegments(segments: StatusLineSegmentId[]): void {
+		if (!this.globalSettings.statusLine) {
+			this.globalSettings.statusLine = {};
+		}
+		this.globalSettings.statusLine.leftSegments = segments;
+		// Setting segments explicitly implies custom preset
+		if (this.globalSettings.statusLine.preset !== "custom") {
+			this.globalSettings.statusLine.preset = "custom";
+		}
+		this.save();
+	}
+
+	getStatusLineRightSegments(): StatusLineSegmentId[] {
+		return [...(this.settings.statusLine?.rightSegments ?? [])];
+	}
+
+	setStatusLineRightSegments(segments: StatusLineSegmentId[]): void {
+		if (!this.globalSettings.statusLine) {
+			this.globalSettings.statusLine = {};
+		}
+		this.globalSettings.statusLine.rightSegments = segments;
+		// Setting segments explicitly implies custom preset
+		if (this.globalSettings.statusLine.preset !== "custom") {
+			this.globalSettings.statusLine.preset = "custom";
+		}
+		this.save();
+	}
+
+	getStatusLineSegmentOptions(): StatusLineSegmentOptions {
+		return { ...this.settings.statusLine?.segmentOptions };
+	}
+
+	setStatusLineSegmentOption<K extends keyof StatusLineSegmentOptions>(
+		segment: K,
+		option: keyof NonNullable<StatusLineSegmentOptions[K]>,
+		value: boolean | number | string,
+	): void {
+		if (!this.globalSettings.statusLine) {
+			this.globalSettings.statusLine = {};
+		}
+		if (!this.globalSettings.statusLine.segmentOptions) {
+			this.globalSettings.statusLine.segmentOptions = {};
+		}
+		if (!this.globalSettings.statusLine.segmentOptions[segment]) {
+			this.globalSettings.statusLine.segmentOptions[segment] = {} as NonNullable<StatusLineSegmentOptions[K]>;
+		}
+		(this.globalSettings.statusLine.segmentOptions[segment] as Record<string, unknown>)[option as string] = value;
+		this.save();
+	}
+
+	clearStatusLineSegmentOption<K extends keyof StatusLineSegmentOptions>(
+		segment: K,
+		option: keyof NonNullable<StatusLineSegmentOptions[K]>,
+	): void {
+		const segmentOptions = this.globalSettings.statusLine?.segmentOptions;
+		if (!segmentOptions || !segmentOptions[segment]) {
+			return;
+		}
+		delete (segmentOptions[segment] as Record<string, unknown>)[option as string];
+		if (Object.keys(segmentOptions[segment] as Record<string, unknown>).length === 0) {
+			delete segmentOptions[segment];
+		}
+		if (Object.keys(segmentOptions).length === 0) {
+			delete this.globalSettings.statusLine?.segmentOptions;
+		}
+		this.save();
+	}
+
+	getStatusLineShowHookStatus(): boolean {
+		return this.settings.statusLine?.showHookStatus ?? true;
+	}
+
+	setStatusLineShowHookStatus(show: boolean): void {
+		if (!this.globalSettings.statusLine) {
+			this.globalSettings.statusLine = {};
+		}
+		this.globalSettings.statusLine.showHookStatus = show;
 		this.save();
 	}
 }

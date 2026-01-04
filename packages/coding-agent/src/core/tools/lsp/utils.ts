@@ -1,4 +1,5 @@
 import path from "node:path";
+import { type Theme, theme } from "../../../modes/interactive/theme/theme";
 import type {
 	Diagnostic,
 	DiagnosticSeverity,
@@ -197,13 +198,6 @@ const SEVERITY_NAMES: Record<DiagnosticSeverity, string> = {
 	4: "hint",
 };
 
-const SEVERITY_ICONS: Record<DiagnosticSeverity, string> = {
-	1: "✖",
-	2: "⚠",
-	3: "ℹ",
-	4: "💡",
-};
-
 /**
  * Convert diagnostic severity number to string name.
  */
@@ -215,7 +209,21 @@ export function severityToString(severity?: DiagnosticSeverity): string {
  * Get icon for diagnostic severity.
  */
 export function severityToIcon(severity?: DiagnosticSeverity): string {
-	return SEVERITY_ICONS[severity ?? 1] ?? "?";
+	const currentTheme = theme as Theme | undefined;
+	const fallback = currentTheme?.format?.bullet ?? "*";
+	const status = currentTheme?.status;
+	switch (severity ?? 1) {
+		case 1:
+			return status?.error ?? fallback;
+		case 2:
+			return status?.warning ?? fallback;
+		case 3:
+			return status?.info ?? fallback;
+		case 4:
+			return currentTheme?.format?.bullet ?? fallback;
+		default:
+			return status?.error ?? fallback;
+	}
 }
 
 /**
@@ -305,7 +313,7 @@ export function formatWorkspaceEdit(edit: WorkspaceEdit, cwd: string): string[] 
 						break;
 					case "rename":
 						results.push(
-							`RENAME: ${path.relative(cwd, uriToFile(change.oldUri))} → ${path.relative(cwd, uriToFile(change.newUri))}`,
+							`RENAME: ${path.relative(cwd, uriToFile(change.oldUri))} ${theme.nav.cursor} ${path.relative(cwd, uriToFile(change.newUri))}`,
 						);
 						break;
 					case "delete":
@@ -328,30 +336,62 @@ export function formatTextEdit(edit: TextEdit, maxLength = 50): string {
 		edit.newText.length > maxLength
 			? `${edit.newText.slice(0, maxLength).replace(/\n/g, "\\n")}...`
 			: edit.newText.replace(/\n/g, "\\n");
-	return `line ${range} → "${preview}"`;
+	return `line ${range} ${theme.nav.cursor} "${preview}"`;
 }
 
 // =============================================================================
 // Symbol Formatting
 // =============================================================================
 
-const SYMBOL_KIND_ICONS: Partial<Record<SymbolKind, string>> = {
-	5: "○", // Class
-	6: "ƒ", // Method
-	11: "◇", // Interface
-	12: "ƒ", // Function
-	13: "◆", // Variable
-	14: "◆", // Constant
-	10: "◎", // Enum
-	23: "□", // Struct
-	2: "◫", // Module
-};
+function getSymbolKindIcons(): Record<SymbolKind, string> {
+	const currentTheme = theme as Theme | undefined;
+	const fallback = currentTheme?.format?.bullet ?? "*";
+	const dash = currentTheme?.format?.dash ?? fallback;
+	const icon = currentTheme?.icon;
+
+	const file = icon?.file ?? fallback;
+	const folder = icon?.folder ?? fallback;
+	const pkg = icon?.package ?? folder;
+	const model = icon?.model ?? fallback;
+	const func = icon?.auto ?? dash;
+
+	return {
+		1: file, // File
+		2: folder, // Module
+		3: folder, // Namespace
+		4: pkg, // Package
+		5: model, // Class
+		6: func, // Method
+		7: fallback, // Property
+		8: fallback, // Field
+		9: func, // Constructor
+		10: fallback, // Enum
+		11: model, // Interface
+		12: func, // Function
+		13: fallback, // Variable
+		14: fallback, // Constant
+		15: fallback, // String
+		16: fallback, // Number
+		17: fallback, // Boolean
+		18: fallback, // Array
+		19: fallback, // Object
+		20: fallback, // Key
+		21: fallback, // Null
+		22: fallback, // EnumMember
+		23: folder, // Struct
+		24: fallback, // Event
+		25: fallback, // Operator
+		26: fallback, // TypeParameter
+	};
+}
 
 /**
  * Get icon for symbol kind.
  */
 export function symbolKindToIcon(kind: SymbolKind): string {
-	return SYMBOL_KIND_ICONS[kind] ?? "•";
+	const currentTheme = theme as Theme | undefined;
+	const bullet = currentTheme?.format?.bullet ?? "*";
+	return getSymbolKindIcons()[kind] ?? bullet;
 }
 
 /**

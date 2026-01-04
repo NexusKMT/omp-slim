@@ -1,5 +1,5 @@
 {
-	"$schema": "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/theme-schema.json",
+	"$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/theme-schema.json",
 	"name": "dark",
 	"vars": {
 		"cyan": "#0088fa",
@@ -91,7 +91,8 @@
 		"statusLineDirty": 178,
 		"statusLineUntracked": 39,
 		"statusLineOutput": 205,
-		"statusLineCost": 205
+		"statusLineCost": 205,
+		"statusLineSubagents": "accent"
 	},
 	"export": {
 		"pageBg": "#18181e",

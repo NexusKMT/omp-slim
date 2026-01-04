@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Biome CLI-based linter client as alternative to LSP for more reliable diagnostics
+- Added LinterClient interface for pluggable formatter/linter implementations
+- Added status line segment editor for arranging and toggling status line components
+- Added status line presets (default, minimal, compact, developer, balanced) for quick configuration
+- Added status line separator styles (powerline, powerline-thin, arrow, slash, pipe, space)
+- Added configurable status line segments including time, hostname, and subagent count
+- Added symbol customization via theme overrides for icons, separators, and glyphs
+- Added 30+ built-in color themes including Catppuccin, Dracula, Nord, Gruvbox, Tokyo Night, and more
+- Added configurable status line with customizable segments, presets, and separators
+- Added status line segment editor for arranging and toggling status line components
+- Added symbol preset setting to switch between Unicode, Nerd Font, and ASCII glyphs
+- Added file size limit (20MB) for image files to prevent memory issues during serialization
+
+### Changed
+
+- Changed Biome integration to use CLI instead of LSP to avoid stale diagnostics issues
+- Changed hardcoded UI symbols throughout codebase to use theme-configurable glyphs
+- Changed tree drawing characters to use theme-defined box-drawing symbols
+- Changed status line rendering to support left/right segment positioning with separators
+- Changed hardcoded UI symbols to use theme-configurable glyphs throughout the interface
+- Changed tree drawing characters to use theme-defined box-drawing symbols
+
+### Fixed
+
+- Fixed image file handling by adding 20MB size limit to prevent memory issues during serialization
+
 ## [3.14.0] - 2026-01-04
 ### Added
 

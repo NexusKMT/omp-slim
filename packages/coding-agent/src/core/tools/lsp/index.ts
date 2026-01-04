@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import path from "node:path";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { BunFile } from "bun";
-import type { Theme } from "../../../modes/interactive/theme/theme";
+import { type Theme, theme } from "../../../modes/interactive/theme/theme";
 import { logger } from "../../logger";
 import { once, untilAborted } from "../../utils";
 import { resolveToCwd } from "../path-utils";
@@ -17,7 +17,8 @@ import {
 	setIdleTimeout,
 	syncContent,
 } from "./client";
-import { getServerForFile, getServersForFile, hasCapability, type LspConfig, loadConfig } from "./config";
+import { getLinterClient } from "./clients";
+import { getServersForFile, hasCapability, type LspConfig, loadConfig } from "./config";
 import { applyTextEditsToString, applyWorkspaceEdit } from "./edits";
 import { renderCall, renderResult } from "./render";
 import * as rustAnalyzer from "./rust-analyzer";
@@ -79,10 +80,11 @@ export async function warmupLspServers(cwd: string): Promise<LspWarmupResult> {
 	const config = loadConfig(cwd);
 	setIdleTimeout(config.idleTimeoutMs);
 	const servers: LspWarmupResult["servers"] = [];
+	const lspServers = getLspServers(config);
 
 	// Start all detected servers in parallel
 	const results = await Promise.allSettled(
-		Object.entries(config.servers).map(async ([name, serverConfig]) => {
+		lspServers.map(async ([name, serverConfig]) => {
 			const client = await getOrCreateClient(serverConfig, cwd);
 			return { name, client, fileTypes: serverConfig.fileTypes };
 		}),
@@ -134,6 +136,9 @@ async function syncFileContent(
 ): Promise<void> {
 	await Promise.allSettled(
 		servers.map(async ([_serverName, serverConfig]) => {
+			if (serverConfig.createClient) {
+				return;
+			}
 			const client = await getOrCreateClient(serverConfig, cwd);
 			await syncContent(client, absolutePath, content);
 		}),
@@ -155,6 +160,9 @@ async function notifyFileSaved(
 ): Promise<void> {
 	await Promise.allSettled(
 		servers.map(async ([_serverName, serverConfig]) => {
+			if (serverConfig.createClient) {
+				return;
+			}
 			const client = await getOrCreateClient(serverConfig, cwd);
 			await notifySaved(client, absolutePath);
 		}),
@@ -172,6 +180,41 @@ function getConfig(cwd: string): LspConfig {
 		configCache.set(cwd, config);
 	}
 	return config;
+}
+
+function isCustomLinter(serverConfig: ServerConfig): boolean {
+	return Boolean(serverConfig.createClient);
+}
+
+function splitServers(servers: Array<[string, ServerConfig]>): {
+	lspServers: Array<[string, ServerConfig]>;
+	customLinterServers: Array<[string, ServerConfig]>;
+} {
+	const lspServers: Array<[string, ServerConfig]> = [];
+	const customLinterServers: Array<[string, ServerConfig]> = [];
+	for (const entry of servers) {
+		if (isCustomLinter(entry[1])) {
+			customLinterServers.push(entry);
+		} else {
+			lspServers.push(entry);
+		}
+	}
+	return { lspServers, customLinterServers };
+}
+
+function getLspServers(config: LspConfig): Array<[string, ServerConfig]> {
+	return (Object.entries(config.servers) as Array<[string, ServerConfig]>).filter(
+		([, serverConfig]) => !isCustomLinter(serverConfig),
+	);
+}
+
+function getLspServersForFile(config: LspConfig, filePath: string): Array<[string, ServerConfig]> {
+	return getServersForFile(config, filePath).filter(([, serverConfig]) => !isCustomLinter(serverConfig));
+}
+
+function getLspServerForFile(config: LspConfig, filePath: string): [string, ServerConfig] | null {
+	const servers = getLspServersForFile(config, filePath);
+	return servers.length > 0 ? servers[0] : null;
 }
 
 const FILE_SEARCH_MAX_DEPTH = 5;
@@ -214,7 +257,7 @@ function findFileForServer(cwd: string, serverConfig: ServerConfig): string | nu
 }
 
 function getRustServer(config: LspConfig): [string, ServerConfig] | null {
-	const entries = Object.entries(config.servers) as Array<[string, ServerConfig]>;
+	const entries = getLspServers(config);
 	const byName = entries.find(([name, server]) => name === "rust-analyzer" || server.command === "rust-analyzer");
 	if (byName) return byName;
 
@@ -234,7 +277,7 @@ function getRustServer(config: LspConfig): [string, ServerConfig] | null {
 }
 
 function getServerForWorkspaceAction(config: LspConfig, action: string): [string, ServerConfig] | null {
-	const entries = Object.entries(config.servers) as Array<[string, ServerConfig]>;
+	const entries = getLspServers(config);
 	if (entries.length === 0) return null;
 
 	if (action === "workspace_symbols") {
@@ -379,8 +422,7 @@ export interface FileDiagnosticsResult {
 }
 
 /**
- * Get LSP diagnostics for a file.
- * Assumes content was synced and didSave was sent - just waits for diagnostics.
+ * Get diagnostics for a file using LSP or custom linter client.
  *
  * @param absolutePath - Absolute path to the file
  * @param cwd - Working directory for LSP config resolution
@@ -404,6 +446,14 @@ async function getDiagnosticsForFile(
 	// Wait for diagnostics from all servers in parallel
 	const results = await Promise.allSettled(
 		servers.map(async ([serverName, serverConfig]) => {
+			// Use custom linter client if configured
+			if (serverConfig.createClient) {
+				const linterClient = getLinterClient(serverName, serverConfig, cwd);
+				const diagnostics = await linterClient.lint(absolutePath);
+				return { serverName, diagnostics };
+			}
+
+			// Default: use LSP
 			const client = await getOrCreateClient(serverConfig, cwd);
 			// Content already synced + didSave sent, just wait for diagnostics
 			const diagnostics = await waitForDiagnostics(client, uri);
@@ -469,9 +519,7 @@ const DEFAULT_FORMAT_OPTIONS = {
 };
 
 /**
- * Format content in-memory using LSP.
- * Assumes content was already synced to all servers via syncFileContent.
- * Requests formatting from first capable server, applies edits in-memory.
+ * Format content using LSP or custom linter client.
  *
  * @param absolutePath - Absolute path (for URI)
  * @param content - Content to format
@@ -491,8 +539,15 @@ async function formatContent(
 
 	const uri = fileToUri(absolutePath);
 
-	for (const [_serverName, serverConfig] of servers) {
+	for (const [serverName, serverConfig] of servers) {
 		try {
+			// Use custom linter client if configured
+			if (serverConfig.createClient) {
+				const linterClient = getLinterClient(serverName, serverConfig, cwd);
+				return await linterClient.format(absolutePath, content);
+			}
+
+			// Default: use LSP
 			const client = await getOrCreateClient(serverConfig, cwd);
 
 			const caps = client.serverCapabilities;
@@ -561,36 +616,48 @@ export function createLspWritethrough(cwd: string, options?: WritethroughOptions
 		if (servers.length === 0) {
 			return writethroughNoop(dst, content, signal, file);
 		}
+		const { lspServers, customLinterServers } = splitServers(servers);
 
 		let finalContent = content;
-		const getWritePromise = once(() => (file ? file.write(finalContent) : Bun.write(dst, finalContent)));
+		const writeContent = async (value: string) => (file ? file.write(value) : Bun.write(dst, value));
+		const getWritePromise = once(() => writeContent(finalContent));
+		const useCustomFormatter = enableFormat && customLinterServers.length > 0;
 
 		let formatter: FileFormatResult | undefined;
 		let diagnostics: FileDiagnosticsResult | undefined;
 		try {
 			signal ??= AbortSignal.timeout(10_000);
 			await untilAborted(signal, async () => {
-				// 1. Sync original content to ALL servers
-				await syncFileContent(dst, content, cwd, servers);
-
-				// 2. Format in-memory (servers already have content)
-				if (enableFormat) {
-					finalContent = await formatContent(dst, content, cwd, servers);
+				if (useCustomFormatter) {
+					// Custom linters (e.g. Biome CLI) require on-disk input.
+					await writeContent(content);
+					finalContent = await formatContent(dst, content, cwd, customLinterServers);
 					formatter = finalContent !== content ? FileFormatResult.FORMATTED : FileFormatResult.UNCHANGED;
+					await writeContent(finalContent);
+					await syncFileContent(dst, finalContent, cwd, lspServers);
+				} else {
+					// 1. Sync original content to LSP servers
+					await syncFileContent(dst, content, cwd, lspServers);
+
+					// 2. Format in-memory via LSP
+					if (enableFormat) {
+						finalContent = await formatContent(dst, content, cwd, lspServers);
+						formatter = finalContent !== content ? FileFormatResult.FORMATTED : FileFormatResult.UNCHANGED;
+					}
+
+					// 3. If formatted, sync formatted content to LSP servers
+					if (finalContent !== content) {
+						await syncFileContent(dst, finalContent, cwd, lspServers);
+					}
+
+					// 4. Write to disk
+					await getWritePromise();
 				}
 
-				// 3. If formatted, sync formatted content to ALL servers
-				if (finalContent !== content) {
-					await syncFileContent(dst, finalContent, cwd, servers);
-				}
+				// 5. Notify saved to LSP servers
+				await notifyFileSaved(dst, cwd, lspServers);
 
-				// 4. Write to disk
-				await getWritePromise();
-
-				// 5. Notify saved to ALL servers
-				await notifyFileSaved(dst, cwd, servers);
-
-				// 6. Get diagnostics from ALL servers
+				// 6. Get diagnostics from all servers
 				if (enableDiagnostics) {
 					diagnostics = await getDiagnosticsForFile(dst, cwd, servers);
 				}
@@ -709,7 +776,7 @@ Rust-analyzer specific (require rust-analyzer):
 					const resolved = resolveToCwd(target, cwd);
 					const servers = getServersForFile(config, resolved);
 					if (servers.length === 0) {
-						results.push(`✗ ${target}: No language server found`);
+						results.push(`${theme.status.error} ${target}: No language server found`);
 						continue;
 					}
 
@@ -721,6 +788,12 @@ Rust-analyzer specific (require rust-analyzer):
 					for (const [serverName, serverConfig] of servers) {
 						allServerNames.add(serverName);
 						try {
+							if (serverConfig.createClient) {
+								const linterClient = getLinterClient(serverName, serverConfig, cwd);
+								const diagnostics = await linterClient.lint(resolved);
+								allDiagnostics.push(...diagnostics);
+								continue;
+							}
 							const client = await getOrCreateClient(serverConfig, cwd);
 							await refreshFile(client, resolved);
 							const diagnostics = await waitForDiagnostics(client, uri);
@@ -759,10 +832,10 @@ Rust-analyzer specific (require rust-analyzer):
 					}
 
 					if (uniqueDiagnostics.length === 0) {
-						results.push(`✓ ${relPath}: no issues`);
+						results.push(`${theme.status.success} ${relPath}: no issues`);
 					} else {
 						const summary = formatDiagnosticsSummary(uniqueDiagnostics);
-						results.push(`✗ ${relPath}: ${summary}`);
+						results.push(`${theme.status.error} ${relPath}: ${summary}`);
 						for (const diag of uniqueDiagnostics) {
 							results.push(`  ${formatDiagnostic(diag, relPath)}`);
 						}
@@ -792,7 +865,7 @@ Rust-analyzer specific (require rust-analyzer):
 
 			const resolvedFile = file ? resolveToCwd(file, cwd) : null;
 			const serverInfo = resolvedFile
-				? getServerForFile(config, resolvedFile)
+				? getLspServerForFile(config, resolvedFile)
 				: getServerForWorkspaceAction(config, action);
 
 			if (!serverInfo) {

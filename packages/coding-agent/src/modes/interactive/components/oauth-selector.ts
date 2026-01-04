@@ -15,6 +15,7 @@ export class OAuthSelectorComponent extends Container {
 	private authStorage: AuthStorage;
 	private onSelectCallback: (providerId: string) => void;
 	private onCancelCallback: () => void;
+	private statusMessage: string | undefined;
 
 	constructor(
 		mode: "login" | "logout",
@@ -71,11 +72,11 @@ export class OAuthSelectorComponent extends Container {
 			// Check if user is logged in for this provider
 			const credentials = this.authStorage.get(provider.id);
 			const isLoggedIn = credentials?.type === "oauth";
-			const statusIndicator = isLoggedIn ? theme.fg("success", " ✓ logged in") : "";
+			const statusIndicator = isLoggedIn ? theme.fg("success", ` ${theme.status.success} logged in`) : "";
 
 			let line = "";
 			if (isSelected) {
-				const prefix = theme.fg("accent", "→ ");
+				const prefix = theme.fg("accent", `${theme.nav.cursor} `);
 				const text = isAvailable ? theme.fg("accent", provider.name) : theme.fg("dim", provider.name);
 				line = prefix + text + statusIndicator;
 			} else {
@@ -92,24 +93,39 @@ export class OAuthSelectorComponent extends Container {
 				this.mode === "login" ? "No OAuth providers available" : "No OAuth providers logged in. Use /login first.";
 			this.listContainer.addChild(new TruncatedText(theme.fg("muted", `  ${message}`), 0, 0));
 		}
+
+		if (this.statusMessage) {
+			this.listContainer.addChild(new Spacer(1));
+			this.listContainer.addChild(new TruncatedText(theme.fg("warning", `  ${this.statusMessage}`), 0, 0));
+		}
 	}
 
 	handleInput(keyData: string): void {
 		// Up arrow
 		if (isArrowUp(keyData)) {
-			this.selectedIndex = Math.max(0, this.selectedIndex - 1);
+			if (this.allProviders.length > 0) {
+				this.selectedIndex = this.selectedIndex === 0 ? this.allProviders.length - 1 : this.selectedIndex - 1;
+			}
+			this.statusMessage = undefined;
 			this.updateList();
 		}
 		// Down arrow
 		else if (isArrowDown(keyData)) {
-			this.selectedIndex = Math.min(this.allProviders.length - 1, this.selectedIndex + 1);
+			if (this.allProviders.length > 0) {
+				this.selectedIndex = this.selectedIndex === this.allProviders.length - 1 ? 0 : this.selectedIndex + 1;
+			}
+			this.statusMessage = undefined;
 			this.updateList();
 		}
 		// Enter
 		else if (isEnter(keyData)) {
 			const selectedProvider = this.allProviders[this.selectedIndex];
 			if (selectedProvider?.available) {
+				this.statusMessage = undefined;
 				this.onSelectCallback(selectedProvider.id);
+			} else if (selectedProvider) {
+				this.statusMessage = "Provider unavailable in this environment.";
+				this.updateList();
 			}
 		}
 		// Escape

@@ -10,6 +10,7 @@ import type { Component } from "@oh-my-pi/pi-tui";
 import { Container, Spacer, Text } from "@oh-my-pi/pi-tui";
 import { Type } from "@sinclair/typebox";
 import type { Theme } from "../../modes/interactive/theme/theme";
+import { theme } from "../../modes/interactive/theme/theme";
 
 const PRIORITY_LABELS: Record<number, string> = {
 	0: "P0",
@@ -101,7 +102,7 @@ export const reportFindingTool: AgentTool<typeof ReportFindingParams, ReportFind
 		const location = `${details.file_path}:${details.line_start}${details.line_end !== details.line_start ? `-${details.line_end}` : ""}`;
 
 		return new Text(
-			`${theme.fg("success", "✓")} ${theme.fg(color, `[${priority}]`)} ${theme.fg("dim", location)}`,
+			`${theme.fg("success", theme.status.success)} ${theme.fg(color, `[${priority}]`)} ${theme.fg("dim", location)}`,
 			0,
 			0,
 		);
@@ -140,7 +141,7 @@ export const submitReviewTool: AgentTool<typeof SubmitReviewParams, SubmitReview
 		const { overall_correctness, explanation, confidence } = params;
 
 		let summary = `## Review Summary\n\n`;
-		summary += `**Verdict:** ${overall_correctness === "correct" ? "✓ Patch is correct" : "✗ Patch is incorrect"}\n`;
+		summary += `**Verdict:** ${overall_correctness === "correct" ? `${theme.status.success} Patch is correct` : `${theme.status.error} Patch is incorrect`}\n`;
 		summary += `**Confidence:** ${(confidence * 100).toFixed(0)}%\n\n`;
 		summary += explanation;
 
@@ -169,7 +170,7 @@ export const submitReviewTool: AgentTool<typeof SubmitReviewParams, SubmitReview
 
 		const container = new Container();
 		const verdictColor = details.overall_correctness === "correct" ? "success" : "error";
-		const verdictIcon = details.overall_correctness === "correct" ? "✓" : "✗";
+		const verdictIcon = details.overall_correctness === "correct" ? theme.status.success : theme.status.error;
 
 		container.addChild(
 			new Text(
@@ -239,7 +240,13 @@ subprocessToolRegistry.register<ReportFindingDetails>("report_finding", {
 		}
 
 		if (allData.length > displayCount) {
-			container.addChild(new Text(theme.fg("dim", `  ... ${allData.length - displayCount} more findings`), 0, 0));
+			container.addChild(
+				new Text(
+					theme.fg("dim", `  ${theme.format.ellipsis} ${allData.length - displayCount} more findings`),
+					0,
+					0,
+				),
+			);
 		}
 
 		return container;
@@ -255,7 +262,7 @@ subprocessToolRegistry.register<SubmitReviewDetails>("submit_review", {
 
 	renderInline: (data, theme) => {
 		const verdictColor = data.overall_correctness === "correct" ? "success" : "error";
-		const verdictIcon = data.overall_correctness === "correct" ? "✓" : "✗";
+		const verdictIcon = data.overall_correctness === "correct" ? theme.status.success : theme.status.error;
 		return new Text(
 			`${theme.fg(verdictColor, verdictIcon)} Review: ${theme.fg(verdictColor, data.overall_correctness)} (${(data.confidence * 100).toFixed(0)}%)`,
 			0,

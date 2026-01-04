@@ -10,7 +10,13 @@
 
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { getCapabilities } from "@oh-my-pi/pi-tui";
-import type { SettingsManager } from "../../../core/settings-manager";
+import type {
+	SettingsManager,
+	StatusLinePreset,
+	StatusLineSeparatorStyle,
+	SymbolPreset,
+} from "../../../core/settings-manager";
+import { getPreset } from "./status-line/presets";
 
 // Setting value types
 export type SettingValue = boolean | string;
@@ -208,6 +214,20 @@ export const SETTINGS_DEFS: SettingDef[] = [
 		set: (sm, v) => sm.setTheme(v),
 		getOptions: () => [], // Filled dynamically from context
 	},
+	{
+		id: "symbolPreset",
+		tab: "config",
+		type: "submenu",
+		label: "Symbol preset",
+		description: "Icon/symbol style (overrides theme default)",
+		get: (sm) => sm.getSymbolPreset() ?? "unicode",
+		set: (sm, v) => sm.setSymbolPreset(v as SymbolPreset),
+		getOptions: () => [
+			{ value: "unicode", label: "Unicode", description: "Standard Unicode symbols (default)" },
+			{ value: "nerd", label: "Nerd Font", description: "Nerd Font icons (requires Nerd Font)" },
+			{ value: "ascii", label: "ASCII", description: "ASCII-only characters (maximum compatibility)" },
+		],
+	},
 
 	// LSP tab
 	{
@@ -292,6 +312,270 @@ export const SETTINGS_DEFS: SettingDef[] = [
 		description: "Webset management and enrichment tools",
 		get: (sm) => sm.getExaSettings().enableWebsets,
 		set: (sm, v) => sm.setExaWebsetsEnabled(v),
+	},
+
+	// Status Line tab
+	{
+		id: "statusLinePreset",
+		tab: "status",
+		type: "submenu",
+		label: "Preset",
+		description: "Pre-built status line configurations",
+		get: (sm) => sm.getStatusLinePreset(),
+		set: (sm, v) => sm.setStatusLinePreset(v as StatusLinePreset),
+		getOptions: () => [
+			{ value: "default", label: "Default", description: "Model, path, git, context, tokens, cost" },
+			{ value: "minimal", label: "Minimal", description: "Path and git only" },
+			{ value: "compact", label: "Compact", description: "Model, git, cost, context" },
+			{ value: "full", label: "Full", description: "All segments including time" },
+			{ value: "nerd", label: "Nerd", description: "Maximum info with Nerd Font icons" },
+			{ value: "ascii", label: "ASCII", description: "No special characters" },
+			{ value: "custom", label: "Custom", description: "User-defined segments" },
+		],
+	},
+	{
+		id: "statusLineSeparator",
+		tab: "status",
+		type: "submenu",
+		label: "Separator style",
+		description: "Style of separators between segments",
+		get: (sm) => {
+			const settings = sm.getStatusLineSettings();
+			if (settings.separator) return settings.separator;
+			return getPreset(sm.getStatusLinePreset()).separator;
+		},
+		set: (sm, v) => sm.setStatusLineSeparator(v as StatusLineSeparatorStyle),
+		getOptions: () => [
+			{ value: "powerline", label: "Powerline", description: "Solid arrows (requires Nerd Font)" },
+			{ value: "powerline-thin", label: "Thin chevron", description: "Thin arrows (requires Nerd Font)" },
+			{ value: "slash", label: "Slash", description: "Forward slashes" },
+			{ value: "pipe", label: "Pipe", description: "Vertical pipes" },
+			{ value: "block", label: "Block", description: "Solid blocks" },
+			{ value: "none", label: "None", description: "Space only" },
+			{ value: "ascii", label: "ASCII", description: "Greater-than signs" },
+		],
+	},
+	{
+		id: "statusLineShowHooks",
+		tab: "status",
+		type: "boolean",
+		label: "Show hook status",
+		description: "Display hook status messages below status line",
+		get: (sm) => sm.getStatusLineShowHookStatus(),
+		set: (sm, v) => sm.setStatusLineShowHookStatus(v),
+	},
+	{
+		id: "statusLineSegments",
+		tab: "status",
+		type: "submenu",
+		label: "Configure segments",
+		description: "Choose and arrange status line segments",
+		get: () => "configure...",
+		set: () => {}, // Handled specially
+		getOptions: () => [{ value: "open", label: "Open segment editor..." }],
+	},
+	{
+		id: "statusLineModelThinking",
+		tab: "status",
+		type: "enum",
+		label: "Model thinking level",
+		description: "Show thinking level in the model segment",
+		values: ["default", "on", "off"],
+		get: (sm) => {
+			const value = sm.getStatusLineSegmentOptions().model?.showThinkingLevel;
+			if (value === undefined) return "default";
+			return value ? "on" : "off";
+		},
+		set: (sm, v) => {
+			if (v === "default") {
+				sm.clearStatusLineSegmentOption("model", "showThinkingLevel");
+			} else {
+				sm.setStatusLineSegmentOption("model", "showThinkingLevel", v === "on");
+			}
+		},
+	},
+	{
+		id: "statusLinePathAbbreviate",
+		tab: "status",
+		type: "enum",
+		label: "Path abbreviate",
+		description: "Use ~ and strip home prefix in path segment",
+		values: ["default", "on", "off"],
+		get: (sm) => {
+			const value = sm.getStatusLineSegmentOptions().path?.abbreviate;
+			if (value === undefined) return "default";
+			return value ? "on" : "off";
+		},
+		set: (sm, v) => {
+			if (v === "default") {
+				sm.clearStatusLineSegmentOption("path", "abbreviate");
+			} else {
+				sm.setStatusLineSegmentOption("path", "abbreviate", v === "on");
+			}
+		},
+	},
+	{
+		id: "statusLinePathMaxLength",
+		tab: "status",
+		type: "submenu",
+		label: "Path max length",
+		description: "Maximum length for displayed path",
+		get: (sm) => {
+			const value = sm.getStatusLineSegmentOptions().path?.maxLength;
+			return typeof value === "number" ? String(value) : "default";
+		},
+		set: (sm, v) => {
+			if (v === "default") {
+				sm.clearStatusLineSegmentOption("path", "maxLength");
+			} else {
+				sm.setStatusLineSegmentOption("path", "maxLength", Number.parseInt(v, 10));
+			}
+		},
+		getOptions: () => [
+			{ value: "default", label: "Preset default" },
+			{ value: "20", label: "20" },
+			{ value: "30", label: "30" },
+			{ value: "40", label: "40" },
+			{ value: "50", label: "50" },
+			{ value: "60", label: "60" },
+			{ value: "80", label: "80" },
+		],
+	},
+	{
+		id: "statusLinePathStripWorkPrefix",
+		tab: "status",
+		type: "enum",
+		label: "Path strip /work",
+		description: "Strip /work prefix in path segment",
+		values: ["default", "on", "off"],
+		get: (sm) => {
+			const value = sm.getStatusLineSegmentOptions().path?.stripWorkPrefix;
+			if (value === undefined) return "default";
+			return value ? "on" : "off";
+		},
+		set: (sm, v) => {
+			if (v === "default") {
+				sm.clearStatusLineSegmentOption("path", "stripWorkPrefix");
+			} else {
+				sm.setStatusLineSegmentOption("path", "stripWorkPrefix", v === "on");
+			}
+		},
+	},
+	{
+		id: "statusLineGitShowBranch",
+		tab: "status",
+		type: "enum",
+		label: "Git show branch",
+		description: "Show branch name in git segment",
+		values: ["default", "on", "off"],
+		get: (sm) => {
+			const value = sm.getStatusLineSegmentOptions().git?.showBranch;
+			if (value === undefined) return "default";
+			return value ? "on" : "off";
+		},
+		set: (sm, v) => {
+			if (v === "default") {
+				sm.clearStatusLineSegmentOption("git", "showBranch");
+			} else {
+				sm.setStatusLineSegmentOption("git", "showBranch", v === "on");
+			}
+		},
+	},
+	{
+		id: "statusLineGitShowStaged",
+		tab: "status",
+		type: "enum",
+		label: "Git show staged",
+		description: "Show staged file count in git segment",
+		values: ["default", "on", "off"],
+		get: (sm) => {
+			const value = sm.getStatusLineSegmentOptions().git?.showStaged;
+			if (value === undefined) return "default";
+			return value ? "on" : "off";
+		},
+		set: (sm, v) => {
+			if (v === "default") {
+				sm.clearStatusLineSegmentOption("git", "showStaged");
+			} else {
+				sm.setStatusLineSegmentOption("git", "showStaged", v === "on");
+			}
+		},
+	},
+	{
+		id: "statusLineGitShowUnstaged",
+		tab: "status",
+		type: "enum",
+		label: "Git show unstaged",
+		description: "Show unstaged file count in git segment",
+		values: ["default", "on", "off"],
+		get: (sm) => {
+			const value = sm.getStatusLineSegmentOptions().git?.showUnstaged;
+			if (value === undefined) return "default";
+			return value ? "on" : "off";
+		},
+		set: (sm, v) => {
+			if (v === "default") {
+				sm.clearStatusLineSegmentOption("git", "showUnstaged");
+			} else {
+				sm.setStatusLineSegmentOption("git", "showUnstaged", v === "on");
+			}
+		},
+	},
+	{
+		id: "statusLineGitShowUntracked",
+		tab: "status",
+		type: "enum",
+		label: "Git show untracked",
+		description: "Show untracked file count in git segment",
+		values: ["default", "on", "off"],
+		get: (sm) => {
+			const value = sm.getStatusLineSegmentOptions().git?.showUntracked;
+			if (value === undefined) return "default";
+			return value ? "on" : "off";
+		},
+		set: (sm, v) => {
+			if (v === "default") {
+				sm.clearStatusLineSegmentOption("git", "showUntracked");
+			} else {
+				sm.setStatusLineSegmentOption("git", "showUntracked", v === "on");
+			}
+		},
+	},
+	{
+		id: "statusLineTimeFormat",
+		tab: "status",
+		type: "enum",
+		label: "Time format",
+		description: "Clock segment time format",
+		values: ["default", "12h", "24h"],
+		get: (sm) => sm.getStatusLineSegmentOptions().time?.format ?? "default",
+		set: (sm, v) => {
+			if (v === "default") {
+				sm.clearStatusLineSegmentOption("time", "format");
+			} else {
+				sm.setStatusLineSegmentOption("time", "format", v);
+			}
+		},
+	},
+	{
+		id: "statusLineTimeShowSeconds",
+		tab: "status",
+		type: "enum",
+		label: "Time show seconds",
+		description: "Include seconds in clock segment",
+		values: ["default", "on", "off"],
+		get: (sm) => {
+			const value = sm.getStatusLineSegmentOptions().time?.showSeconds;
+			if (value === undefined) return "default";
+			return value ? "on" : "off";
+		},
+		set: (sm, v) => {
+			if (v === "default") {
+				sm.clearStatusLineSegmentOption("time", "showSeconds");
+			} else {
+				sm.setStatusLineSegmentOption("time", "showSeconds", v === "on");
+			}
+		},
 	},
 ];
 

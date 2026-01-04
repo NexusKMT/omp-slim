@@ -11,17 +11,11 @@ import type { RenderResultOptions } from "../../custom-tools/types";
 import { logger } from "../../logger";
 import type { ExaRenderDetails } from "./types";
 
-// Tree formatting constants
-const TREE_MID = "├─";
-const TREE_END = "└─";
-const TREE_PIPE = "│";
-const TREE_SPACE = " ";
-const TREE_HOOK = "⎿";
-
 /** Truncate text to max length with ellipsis */
-function truncate(text: string, maxLen: number): string {
+function truncate(text: string, maxLen: number, ellipsis: string): string {
 	if (text.length <= maxLen) return text;
-	return `${text.slice(0, maxLen - 1)}…`;
+	const sliceLen = Math.max(0, maxLen - ellipsis.length);
+	return `${text.slice(0, sliceLen)}${ellipsis}`;
 }
 
 /** Extract domain from URL */
@@ -35,16 +29,16 @@ function getDomain(url: string): string {
 }
 
 /** Get first N lines of text as preview */
-function getPreviewLines(text: string, maxLines: number, maxLineLen: number): string[] {
+function getPreviewLines(text: string, maxLines: number, maxLineLen: number, ellipsis: string): string[] {
 	const lines = text.split("\n").filter((l) => l.trim());
-	return lines.slice(0, maxLines).map((l) => truncate(l.trim(), maxLineLen));
+	return lines.slice(0, maxLines).map((l) => truncate(l.trim(), maxLineLen, ellipsis));
 }
 
 /** Render Exa result with tree-based layout */
 export function renderExaResult(
 	result: { content: Array<{ type: string; text?: string }>; details?: ExaRenderDetails },
 	options: RenderResultOptions,
-	theme: Theme,
+	uiTheme: Theme,
 ): Component {
 	const { expanded } = options;
 	const details = result.details;
@@ -52,7 +46,7 @@ export function renderExaResult(
 	// Handle error case
 	if (details?.error) {
 		logger.error("Exa render error", { error: details.error, toolName: details.toolName });
-		return new Text(theme.fg("error", `Error: ${details.error}`), 0, 0);
+		return new Text(uiTheme.fg("error", `Error: ${details.error}`), 0, 0);
 	}
 
 	const response = details?.response;
@@ -60,15 +54,15 @@ export function renderExaResult(
 		// Non-search response: show raw result
 		if (details?.raw) {
 			const rawText = typeof details.raw === "string" ? details.raw : JSON.stringify(details.raw, null, 2);
-			const preview = expanded ? rawText : truncate(rawText, 200);
+			const preview = expanded ? rawText : truncate(rawText, 200, uiTheme.format.ellipsis);
 			const toolLabel = details?.toolName ?? "Exa";
 			return new Text(
-				`${theme.fg("success", "●")} ${theme.fg("toolTitle", toolLabel)}\n ${theme.fg("dim", TREE_PIPE)}  ${preview}`,
+				`${uiTheme.fg("success", uiTheme.format.bullet)} ${uiTheme.fg("toolTitle", toolLabel)}\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${preview}`,
 				0,
 				0,
 			);
 		}
-		return new Text(theme.fg("error", "No response data"), 0, 0);
+		return new Text(uiTheme.fg("error", "No response data"), 0, 0);
 	}
 
 	const results = response.results ?? [];
@@ -76,21 +70,22 @@ export function renderExaResult(
 	const cost = response.costDollars?.total;
 	const time = response.searchTime;
 
-	// Build header: ● Exa Search · N results · $X.XX · Xs
-	const icon = resultCount > 0 ? theme.fg("success", "●") : theme.fg("warning", "●");
-	const expandHint = expanded ? "" : theme.fg("dim", " (Ctrl+O to expand)");
+	// Build header: Exa Search · N results · $X.XX · Xs
+	const icon =
+		resultCount > 0 ? uiTheme.fg("success", uiTheme.format.bullet) : uiTheme.fg("warning", uiTheme.format.bullet);
+	const expandHint = expanded ? "" : uiTheme.fg("dim", " (Ctrl+O to expand)");
 	const toolLabel = details?.toolName ?? "Exa Search";
 
-	let headerParts = `${icon} ${theme.fg("toolTitle", toolLabel)} · ${theme.fg(
+	let headerParts = `${icon} ${uiTheme.fg("toolTitle", toolLabel)}${uiTheme.sep.dot}${uiTheme.fg(
 		"dim",
 		`${resultCount} result${resultCount !== 1 ? "s" : ""}`,
 	)}`;
 
 	if (cost !== undefined) {
-		headerParts += ` · ${theme.fg("muted", `$${cost.toFixed(4)}`)}`;
+		headerParts += `${uiTheme.sep.dot}${uiTheme.fg("muted", `$${cost.toFixed(4)}`)}`;
 	}
 	if (time !== undefined) {
-		headerParts += ` · ${theme.fg("muted", `${time.toFixed(2)}s`)}`;
+		headerParts += `${uiTheme.sep.dot}${uiTheme.fg("muted", `${time.toFixed(2)}s`)}`;
 	}
 
 	let text = headerParts + expandHint;
@@ -100,19 +95,22 @@ export function renderExaResult(
 		if (resultCount > 0) {
 			const first = results[0];
 			const previewText = first.text ?? first.title ?? "";
-			const previewLines = getPreviewLines(previewText, 3, 100);
+			const previewLines = getPreviewLines(previewText, 3, 100, uiTheme.format.ellipsis);
 
 			for (const line of previewLines) {
-				text += `\n ${theme.fg("dim", TREE_PIPE)}  ${theme.fg("dim", line)}`;
+				text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg("dim", line)}`;
 			}
 
 			const totalLines = previewText.split("\n").filter((l) => l.trim()).length;
 			if (totalLines > 3) {
-				text += `\n ${theme.fg("dim", TREE_PIPE)}  ${theme.fg("muted", `… ${totalLines - 3} more lines`)}`;
+				text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg(
+					"muted",
+					`${uiTheme.format.ellipsis} ${totalLines - 3} more lines`,
+				)}`;
 			}
 
 			if (resultCount > 1) {
-				text += `\n ${theme.fg("dim", TREE_END)} ${theme.fg(
+				text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg(
 					"muted",
 					`${resultCount - 1} more result${resultCount !== 2 ? "s" : ""}`,
 				)}`;
@@ -121,38 +119,35 @@ export function renderExaResult(
 	} else {
 		// Expanded view: full results tree
 		if (resultCount > 0) {
-			text += `\n ${theme.fg("dim", TREE_PIPE)}`;
-			text += `\n ${theme.fg("dim", TREE_END)} ${theme.fg("accent", "Results")}`;
+			text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}`;
+			text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg("accent", "Results")}`;
 
 			for (let i = 0; i < results.length; i++) {
 				const res = results[i];
 				const isLast = i === results.length - 1;
-				const branch = isLast ? TREE_END : TREE_MID;
-				const cont = isLast ? TREE_SPACE : TREE_PIPE;
+				const branch = isLast ? uiTheme.tree.last : uiTheme.tree.branch;
+				const cont = isLast ? " " : uiTheme.tree.vertical;
 
 				// Title + domain
-				const title = truncate(res.title ?? "Untitled", 60);
+				const title = truncate(res.title ?? "Untitled", 60, uiTheme.format.ellipsis);
 				const domain = res.url ? getDomain(res.url) : "";
-				const domainPart = domain ? theme.fg("dim", ` (${domain})`) : "";
+				const domainPart = domain ? uiTheme.fg("dim", ` (${domain})`) : "";
 
-				text += `\n ${theme.fg("dim", TREE_SPACE)} ${theme.fg("dim", branch)} ${theme.fg(
-					"accent",
-					title,
-				)}${domainPart}`;
+				text += `\n ${uiTheme.fg("dim", " ")} ${uiTheme.fg("dim", branch)} ${uiTheme.fg("accent", title)}${domainPart}`;
 
 				// URL
 				if (res.url) {
-					text += `\n ${theme.fg("dim", cont)}   ${theme.fg("dim", TREE_HOOK)} ${theme.fg("mdLinkUrl", res.url)}`;
+					text += `\n ${uiTheme.fg("dim", cont)}   ${uiTheme.fg("dim", uiTheme.tree.hook)} ${uiTheme.fg("mdLinkUrl", res.url)}`;
 				}
 
 				// Author
 				if (res.author) {
-					text += `\n ${theme.fg("dim", cont)}   ${theme.fg("muted", `Author: ${res.author}`)}`;
+					text += `\n ${uiTheme.fg("dim", cont)}   ${uiTheme.fg("muted", `Author: ${res.author}`)}`;
 				}
 
 				// Published date
 				if (res.publishedDate) {
-					text += `\n ${theme.fg("dim", cont)}   ${theme.fg("muted", `Published: ${res.publishedDate}`)}`;
+					text += `\n ${uiTheme.fg("dim", cont)}   ${uiTheme.fg("muted", `Published: ${res.publishedDate}`)}`;
 				}
 
 				// Text content
@@ -160,22 +155,31 @@ export function renderExaResult(
 					const textLines = res.text.split("\n").filter((l) => l.trim());
 					const displayLines = textLines.slice(0, 5); // Show first 5 lines
 					for (const line of displayLines) {
-						text += `\n ${theme.fg("dim", cont)}   ${truncate(line.trim(), 90)}`;
+						text += `\n ${uiTheme.fg("dim", cont)}   ${truncate(line.trim(), 90, uiTheme.format.ellipsis)}`;
 					}
 					if (textLines.length > 5) {
-						text += `\n ${theme.fg("dim", cont)}   ${theme.fg("muted", `… ${textLines.length - 5} more lines`)}`;
+						text += `\n ${uiTheme.fg("dim", cont)}   ${uiTheme.fg(
+							"muted",
+							`${uiTheme.format.ellipsis} ${textLines.length - 5} more lines`,
+						)}`;
 					}
 				}
 
 				// Highlights
 				if (res.highlights?.length) {
-					text += `\n ${theme.fg("dim", cont)}   ${theme.fg("accent", "Highlights:")}`;
+					text += `\n ${uiTheme.fg("dim", cont)}   ${uiTheme.fg("accent", "Highlights:")}`;
 					for (let j = 0; j < Math.min(res.highlights.length, 3); j++) {
 						const h = res.highlights[j];
-						text += `\n ${theme.fg("dim", cont)}   ${theme.fg("muted", `• ${truncate(h, 80)}`)}`;
+						text += `\n ${uiTheme.fg("dim", cont)}   ${uiTheme.fg(
+							"muted",
+							`${uiTheme.format.bullet} ${truncate(h, 80, uiTheme.format.ellipsis)}`,
+						)}`;
 					}
 					if (res.highlights.length > 3) {
-						text += `\n ${theme.fg("dim", cont)}   ${theme.fg("muted", `… ${res.highlights.length - 3} more`)}`;
+						text += `\n ${uiTheme.fg("dim", cont)}   ${uiTheme.fg(
+							"muted",
+							`${uiTheme.format.ellipsis} ${res.highlights.length - 3} more`,
+						)}`;
 					}
 				}
 			}
@@ -186,11 +190,11 @@ export function renderExaResult(
 }
 
 /** Render Exa call (query/args preview) */
-export function renderExaCall(args: Record<string, unknown>, toolName: string, theme: Theme): Component {
-	const query = typeof args.query === "string" ? truncate(args.query, 80) : "";
+export function renderExaCall(args: Record<string, unknown>, toolName: string, uiTheme: Theme): Component {
+	const query = typeof args.query === "string" ? truncate(args.query, 80, uiTheme.format.ellipsis) : "";
 	const numResults = typeof args.num_results === "number" ? args.num_results : undefined;
-	const detail = numResults ? theme.fg("dim", ` (${numResults} results)`) : "";
+	const detail = numResults ? uiTheme.fg("dim", ` (${numResults} results)`) : "";
 
-	const text = `${theme.fg("toolTitle", toolName)} ${theme.fg("muted", query)}${detail}`;
+	const text = `${uiTheme.fg("toolTitle", toolName)} ${uiTheme.fg("muted", query)}${detail}`;
 	return new Text(text, 0, 0);
 }

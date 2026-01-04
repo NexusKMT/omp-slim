@@ -152,8 +152,10 @@ export class ExtensionList implements Component {
 	}
 
 	private renderMasterSwitch(item: ListItem & { type: "master" }, isSelected: boolean, width: number): string {
-		const checkbox = item.enabled ? theme.fg("success", "[x]") : theme.fg("dim", "[ ]");
-		const icon = "📦";
+		const checkbox = item.enabled
+			? theme.fg("success", theme.checkbox.checked)
+			: theme.fg("dim", theme.checkbox.unchecked);
+		const icon = theme.icon.package;
 		const label = `Enable ${item.providerName}`;
 		const badge = theme.fg("warning", "(Master Switch)");
 
@@ -229,39 +231,39 @@ export class ExtensionList implements Component {
 	private getKindIcon(kind: ExtensionKind): string {
 		switch (kind) {
 			case "skill":
-				return "⚡";
+				return theme.icon.extensionSkill;
 			case "tool":
-				return "🔧";
+				return theme.icon.extensionTool;
 			case "slash-command":
-				return "🔗";
+				return theme.icon.extensionSlashCommand;
 			case "mcp":
-				return "🔄";
+				return theme.icon.extensionMcp;
 			case "rule":
-				return "📋";
+				return theme.icon.extensionRule;
 			case "hook":
-				return "🪝";
+				return theme.icon.extensionHook;
 			case "prompt":
-				return "💬";
+				return theme.icon.extensionPrompt;
 			case "context-file":
-				return "📄";
+				return theme.icon.extensionContextFile;
 			case "instruction":
-				return "📌";
+				return theme.icon.extensionInstruction;
 			default:
-				return "•";
+				return theme.format.bullet;
 		}
 	}
 
 	private getStateIcon(state: ExtensionState, masterDisabled: boolean): string {
 		if (masterDisabled) {
-			return theme.fg("dim", "○");
+			return theme.fg("dim", theme.status.disabled);
 		}
 		switch (state) {
 			case "active":
-				return theme.fg("success", "●");
+				return theme.fg("success", theme.status.enabled);
 			case "disabled":
-				return theme.fg("dim", "⊘");
+				return theme.fg("dim", theme.status.aborted);
 			case "shadowed":
-				return theme.fg("warning", "◐");
+				return theme.fg("warning", theme.status.running);
 		}
 	}
 

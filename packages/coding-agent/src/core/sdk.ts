@@ -32,6 +32,7 @@
 import { join } from "node:path";
 import { Agent, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
+import chalk from "chalk";
 // Import discovery to register all providers on startup
 import "../discovery";
 import { loadSync as loadCapability } from "../capability/index";
@@ -684,7 +685,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		const mcpResult = await discoverAndLoadMCPTools(cwd, {
 			onConnecting: (serverNames) => {
 				if (options.hasUI && serverNames.length > 0) {
-					process.stderr.write(`\x1b[90mConnecting to MCP servers: ${serverNames.join(", ")}...\x1b[0m\n`);
+					process.stderr.write(chalk.gray(`Connecting to MCP servers: ${serverNames.join(", ")}...\n`));
 				}
 			},
 			enableProjectConfig: settingsManager.getMCPProjectConfigEnabled(),

@@ -63,13 +63,15 @@ export class PluginListComponent extends Container {
 		}
 
 		const items: SelectItem[] = plugins.map((p) => {
-			const status = p.enabled ? theme.fg("success", "●") : theme.fg("muted", "○");
+			const status = p.enabled
+				? theme.fg("success", theme.status.enabled)
+				: theme.fg("muted", theme.status.disabled);
 			const featureCount = p.manifest.features ? Object.keys(p.manifest.features).length : 0;
 			const enabledCount = p.enabledFeatures?.length ?? featureCount;
 
 			let details = `v${p.version}`;
 			if (featureCount > 0) {
-				details += ` · ${enabledCount}/${featureCount} features`;
+				details += ` ${theme.sep.dot} ${enabledCount}/${featureCount} features`;
 			}
 
 			return {

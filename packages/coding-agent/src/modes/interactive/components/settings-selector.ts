@@ -16,11 +16,13 @@ import {
 	type TabBarTheme,
 	Text,
 } from "@oh-my-pi/pi-tui";
-import type { SettingsManager } from "../../../core/settings-manager";
+import type { SettingsManager, StatusLineSettings } from "../../../core/settings-manager";
 import { getSelectListTheme, getSettingsListTheme, theme } from "../theme/theme";
 import { DynamicBorder } from "./dynamic-border";
 import { PluginSettingsComponent } from "./plugin-settings";
 import { getSettingsForTab, type SettingDef } from "./settings-defs";
+import { getPreset } from "./status-line/presets";
+import { StatusLineSegmentEditorComponent } from "./status-line-segment-editor";
 
 function getTabBarTheme(): TabBarTheme {
 	return {
@@ -36,6 +38,8 @@ function getTabBarTheme(): TabBarTheme {
  */
 class SelectSubmenu extends Container {
 	private selectList: SelectList;
+	private previewText: Text | null = null;
+	private getPreview: (() => string) | undefined;
 
 	constructor(
 		title: string,
@@ -45,8 +49,10 @@ class SelectSubmenu extends Container {
 		onSelect: (value: string) => void,
 		onCancel: () => void,
 		onSelectionChange?: (value: string) => void,
+		getPreview?: () => string,
 	) {
 		super();
+		this.getPreview = getPreview;
 
 		// Title
 		this.addChild(new Text(theme.bold(theme.fg("accent", title)), 0, 0));
@@ -55,6 +61,14 @@ class SelectSubmenu extends Container {
 		if (description) {
 			this.addChild(new Spacer(1));
 			this.addChild(new Text(theme.fg("muted", description), 0, 0));
+		}
+
+		// Preview (if provided)
+		if (getPreview) {
+			this.addChild(new Spacer(1));
+			this.addChild(new Text(theme.fg("muted", "Preview:"), 0, 0));
+			this.previewText = new Text(getPreview(), 0, 0);
+			this.addChild(this.previewText);
 		}
 
 		// Spacer
@@ -78,6 +92,8 @@ class SelectSubmenu extends Container {
 		if (onSelectionChange) {
 			this.selectList.onSelectionChange = (item) => {
 				onSelectionChange(item.value);
+				// Update preview after the preview callback has applied changes
+				this.updatePreview();
 			};
 		}
 
@@ -86,6 +102,12 @@ class SelectSubmenu extends Container {
 		// Hint
 		this.addChild(new Spacer(1));
 		this.addChild(new Text(theme.fg("dim", "  Enter to select · Esc to go back"), 0, 0));
+	}
+
+	private updatePreview(): void {
+		if (this.previewText && this.getPreview) {
+			this.previewText.setText(this.getPreview());
+		}
 	}
 
 	handleInput(data: string): void {
@@ -97,6 +119,7 @@ type TabId = string;
 
 const SETTINGS_TABS: Tab[] = [
 	{ id: "config", label: "Config" },
+	{ id: "status", label: "Status" },
 	{ id: "lsp", label: "LSP" },
 	{ id: "exa", label: "Exa" },
 	{ id: "plugins", label: "Plugins" },
@@ -128,6 +151,10 @@ export interface SettingsCallbacks {
 	onChange: SettingChangeHandler;
 	/** Called for theme preview while browsing */
 	onThemePreview?: (theme: string) => void;
+	/** Called for status line preview while configuring - updates actual status line */
+	onStatusLinePreview?: (settings: Partial<StatusLineSettings>) => void;
+	/** Get current rendered status line for inline preview */
+	getStatusLinePreview?: () => string;
 	/** Called when plugins change */
 	onPluginsChanged?: () => void;
 	/** Called when settings panel is closed */
@@ -143,6 +170,9 @@ export class SettingsSelectorComponent extends Container {
 	private currentList: SettingsList | null = null;
 	private currentSubmenu: Container | null = null;
 	private pluginComponent: PluginSettingsComponent | null = null;
+	private statusPreviewContainer: Container | null = null;
+	private statusPreviewText: Text | null = null;
+	private currentTabId: TabId = "config";
 
 	private settingsManager: SettingsManager;
 	private context: SettingsRuntimeContext;
@@ -176,6 +206,8 @@ export class SettingsSelectorComponent extends Container {
 	}
 
 	private switchToTab(tabId: TabId): void {
+		this.currentTabId = tabId;
+
 		// Remove current content
 		if (this.currentList) {
 			this.removeChild(this.currentList);
@@ -184,6 +216,11 @@ export class SettingsSelectorComponent extends Container {
 		if (this.pluginComponent) {
 			this.removeChild(this.pluginComponent);
 			this.pluginComponent = null;
+		}
+		if (this.statusPreviewContainer) {
+			this.removeChild(this.statusPreviewContainer);
+			this.statusPreviewContainer = null;
+			this.statusPreviewText = null;
 		}
 
 		// Remove bottom border temporarily
@@ -262,6 +299,11 @@ export class SettingsSelectorComponent extends Container {
 		currentValue: string,
 		done: (value?: string) => void,
 	): Container {
+		// Special case: segment editor
+		if (def.id === "statusLineSegments") {
+			return this.createSegmentEditor(done);
+		}
+
 		let options = def.getOptions(this.settingsManager);
 
 		// Special case: inject runtime options
@@ -274,8 +316,55 @@ export class SettingsSelectorComponent extends Container {
 			options = this.context.availableThemes.map((t) => ({ value: t, label: t }));
 		}
 
-		const onPreview = def.id === "theme" ? this.callbacks.onThemePreview : undefined;
-		const onPreviewCancel = def.id === "theme" ? () => this.callbacks.onThemePreview?.(currentValue) : undefined;
+		// Preview handlers
+		let onPreview: ((value: string) => void) | undefined;
+		let onPreviewCancel: (() => void) | undefined;
+
+		if (def.id === "theme") {
+			onPreview = this.callbacks.onThemePreview;
+			onPreviewCancel = () => this.callbacks.onThemePreview?.(currentValue);
+		} else if (def.id === "statusLinePreset") {
+			onPreview = (value) => {
+				const presetDef = getPreset((value as StatusLineSettings["preset"]) ?? "default");
+				this.callbacks.onStatusLinePreview?.({
+					preset: value as StatusLineSettings["preset"],
+					leftSegments: presetDef.leftSegments,
+					rightSegments: presetDef.rightSegments,
+					separator: presetDef.separator,
+				});
+				this.updateStatusPreview();
+			};
+			onPreviewCancel = () => {
+				const currentPreset = this.settingsManager.getStatusLinePreset();
+				const presetDef = getPreset(currentPreset);
+				this.callbacks.onStatusLinePreview?.({
+					preset: currentPreset,
+					leftSegments: presetDef.leftSegments,
+					rightSegments: presetDef.rightSegments,
+					separator: presetDef.separator,
+				});
+				this.updateStatusPreview();
+			};
+		} else if (def.id === "statusLineSeparator") {
+			onPreview = (value) => {
+				this.callbacks.onStatusLinePreview?.({
+					separator: value as StatusLineSettings["separator"],
+				});
+				this.updateStatusPreview();
+			};
+			onPreviewCancel = () => {
+				const currentSettings = this.settingsManager.getStatusLineSettings();
+				const separator =
+					currentSettings.separator ?? getPreset(this.settingsManager.getStatusLinePreset()).separator;
+				this.callbacks.onStatusLinePreview?.({
+					separator,
+				});
+				this.updateStatusPreview();
+			};
+		}
+
+		// Provide status line preview for theme selection
+		const getPreview = def.id === "theme" ? this.callbacks.getStatusLinePreview : undefined;
 
 		return new SelectSubmenu(
 			def.label,
@@ -294,7 +383,46 @@ export class SettingsSelectorComponent extends Container {
 				done();
 			},
 			onPreview,
+			getPreview,
 		);
+	}
+
+	/**
+	 * Create the segment editor component.
+	 */
+	private createSegmentEditor(done: (value?: string) => void): Container {
+		const currentSettings = this.settingsManager.getStatusLineSettings();
+		const preset = currentSettings.preset ?? "default";
+		const presetDef = getPreset(preset);
+
+		const leftSegments = currentSettings.leftSegments ?? presetDef.leftSegments;
+		const rightSegments = currentSettings.rightSegments ?? presetDef.rightSegments;
+
+		return new StatusLineSegmentEditorComponent(leftSegments, rightSegments, {
+			onSave: (left, right) => {
+				this.settingsManager.setStatusLineLeftSegments(left);
+				this.settingsManager.setStatusLineRightSegments(right);
+				this.callbacks.onChange("statusLineSegments", "saved");
+				this.callbacks.onStatusLinePreview?.({ leftSegments: left, rightSegments: right });
+				this.updateStatusPreview();
+				done("saved");
+			},
+			onCancel: () => {
+				// Restore preview to saved state
+				const saved = this.settingsManager.getStatusLineSettings();
+				const savedPreset = getPreset(saved.preset ?? "default");
+				this.callbacks.onStatusLinePreview?.({
+					leftSegments: saved.leftSegments ?? savedPreset.leftSegments,
+					rightSegments: saved.rightSegments ?? savedPreset.rightSegments,
+				});
+				this.updateStatusPreview();
+				done();
+			},
+			onPreview: (left, right) => {
+				this.callbacks.onStatusLinePreview?.({ leftSegments: left, rightSegments: right });
+				this.updateStatusPreview();
+			},
+		});
 	}
 
 	/**
@@ -311,6 +439,17 @@ export class SettingsSelectorComponent extends Container {
 			}
 		}
 
+		// Add status line preview for status tab
+		if (tabId === "status") {
+			this.statusPreviewContainer = new Container();
+			this.statusPreviewContainer.addChild(new Spacer(1));
+			this.statusPreviewContainer.addChild(new Text(theme.fg("muted", "Preview:"), 0, 0));
+			this.statusPreviewText = new Text(this.getStatusPreviewString(), 0, 0);
+			this.statusPreviewContainer.addChild(this.statusPreviewText);
+			this.statusPreviewContainer.addChild(new Spacer(1));
+			this.addChild(this.statusPreviewContainer);
+		}
+
 		this.currentList = new SettingsList(
 			items,
 			10,
@@ -324,6 +463,11 @@ export class SettingsSelectorComponent extends Container {
 					const boolValue = newValue === "true";
 					def.set(this.settingsManager, boolValue);
 					this.callbacks.onChange(id, boolValue);
+
+					// Trigger status line preview for status tab boolean settings
+					if (tabId === "status") {
+						this.triggerStatusLinePreview();
+					}
 				} else if (def.type === "enum") {
 					def.set(this.settingsManager, newValue);
 					this.callbacks.onChange(id, newValue);
@@ -334,6 +478,35 @@ export class SettingsSelectorComponent extends Container {
 		);
 
 		this.addChild(this.currentList);
+	}
+
+	/**
+	 * Get the status line preview string.
+	 */
+	private getStatusPreviewString(): string {
+		if (this.callbacks.getStatusLinePreview) {
+			return this.callbacks.getStatusLinePreview();
+		}
+		return theme.fg("dim", "(preview not available)");
+	}
+
+	/**
+	 * Trigger status line preview with current settings.
+	 */
+	private triggerStatusLinePreview(): void {
+		const settings = this.settingsManager.getStatusLineSettings();
+		this.callbacks.onStatusLinePreview?.(settings);
+		// Update inline preview
+		this.updateStatusPreview();
+	}
+
+	/**
+	 * Update the inline status preview text.
+	 */
+	private updateStatusPreview(): void {
+		if (this.statusPreviewText && this.currentTabId === "status") {
+			this.statusPreviewText.setText(this.getStatusPreviewString());
+		}
 	}
 
 	private showPluginsTab(): void {

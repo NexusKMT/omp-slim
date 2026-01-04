@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { constants } from "node:fs";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import { extname } from "node:path";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
@@ -12,6 +12,9 @@ import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult
 
 // Document types convertible via markitdown
 const CONVERTIBLE_EXTENSIONS = new Set([".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".rtf", ".epub"]);
+
+// Maximum image file size (20MB) - larger images will be rejected to prevent OOM during serialization
+const MAX_IMAGE_SIZE = 20 * 1024 * 1024;
 
 function convertWithMarkitdown(filePath: string): { content: string; ok: boolean; error?: string } {
 	const cmd = Bun.which("markitdown");
@@ -82,14 +85,27 @@ Usage:
 				let details: ReadToolDetails | undefined;
 
 				if (mimeType) {
-					// Read as image (binary)
-					const buffer = await readFile(absolutePath);
-					const base64 = buffer.toString("base64");
+					// Check image file size before reading to prevent OOM during serialization
+					const fileStat = await stat(absolutePath);
+					if (fileStat.size > MAX_IMAGE_SIZE) {
+						const sizeStr = formatSize(fileStat.size);
+						const maxStr = formatSize(MAX_IMAGE_SIZE);
+						content = [
+							{
+								type: "text",
+								text: `[Image file too large: ${sizeStr} exceeds ${maxStr} limit. Use an image viewer or resize the image.]`,
+							},
+						];
+					} else {
+						// Read as image (binary)
+						const buffer = await readFile(absolutePath);
+						const base64 = buffer.toString("base64");
 
-					content = [
-						{ type: "text", text: `Read image file [${mimeType}]` },
-						{ type: "image", data: base64, mimeType },
-					];
+						content = [
+							{ type: "text", text: `Read image file [${mimeType}]` },
+							{ type: "image", data: base64, mimeType },
+						];
+					}
 				} else if (CONVERTIBLE_EXTENSIONS.has(ext)) {
 					// Convert document via markitdown
 					const result = convertWithMarkitdown(absolutePath);

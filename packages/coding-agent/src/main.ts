@@ -294,6 +294,10 @@ async function buildSessionOptions(
 export async function main(args: string[]) {
 	time("start");
 
+	// Initialize theme early with defaults (CLI commands need symbols)
+	// Will be re-initialized with user preferences later
+	initTheme();
+
 	// Handle plugin subcommand before regular parsing
 	const pluginCmd = parsePluginArgs(args);
 	if (pluginCmd) {
@@ -385,7 +389,7 @@ export async function main(args: string[]) {
 		settingsManager.applyOverrides({ modelRoles: roleOverrides });
 	}
 
-	initTheme(settingsManager.getTheme(), isInteractive);
+	initTheme(settingsManager.getTheme(), isInteractive, settingsManager.getSymbolPreset());
 	time("initTheme");
 
 	let scopedModels: ScopedModel[] = [];

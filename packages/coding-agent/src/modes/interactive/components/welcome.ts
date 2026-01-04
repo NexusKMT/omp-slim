@@ -1,4 +1,4 @@
-import { type Component, visibleWidth } from "@oh-my-pi/pi-tui";
+import { type Component, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import { APP_NAME } from "../../../config";
 import { theme } from "../theme/theme";
 
@@ -80,7 +80,7 @@ export class WelcomeComponent implements Component {
 
 		// Right column separator
 		const separatorWidth = rightCol - 2; // padding on each side
-		const separator = ` ${theme.fg("dim", "─".repeat(separatorWidth))}`;
+		const separator = ` ${theme.fg("dim", theme.boxRound.horizontal.repeat(separatorWidth))}`;
 
 		// Recent sessions content
 		const sessionLines: string[] = [];
@@ -89,7 +89,7 @@ export class WelcomeComponent implements Component {
 		} else {
 			for (const session of this.recentSessions.slice(0, 3)) {
 				sessionLines.push(
-					` ${theme.fg("dim", "▪ ")}${theme.fg("muted", session.name)}${theme.fg("dim", ` (${session.timeAgo})`)}`,
+					` ${theme.fg("dim", `${theme.md.bullet} `)}${theme.fg("muted", session.name)}${theme.fg("dim", ` (${session.timeAgo})`)}`,
 				);
 			}
 		}
@@ -102,10 +102,10 @@ export class WelcomeComponent implements Component {
 			for (const server of this.lspServers) {
 				const icon =
 					server.status === "ready"
-						? theme.fg("success", "●")
+						? theme.styledSymbol("status.success", "success")
 						: server.status === "connecting"
-							? theme.fg("warning", "○")
-							: theme.fg("error", "●");
+							? theme.styledSymbol("status.disabled", "warning")
+							: theme.styledSymbol("status.error", "error");
 				const exts = server.fileTypes.slice(0, 3).join(" ");
 				lspLines.push(` ${icon} ${theme.fg("muted", server.name)} ${theme.fg("dim", exts)}`);
 			}
@@ -127,21 +127,24 @@ export class WelcomeComponent implements Component {
 		];
 
 		// Border characters (dim)
-		const h = theme.fg("dim", "─");
-		const v = theme.fg("dim", "│");
-		const tl = theme.fg("dim", "╭");
-		const tr = theme.fg("dim", "╮");
-		const bl = theme.fg("dim", "╰");
-		const br = theme.fg("dim", "╯");
+		const hChar = theme.boxRound.horizontal;
+		const h = theme.fg("dim", hChar);
+		const v = theme.fg("dim", theme.boxRound.vertical);
+		const tl = theme.fg("dim", theme.boxRound.topLeft);
+		const tr = theme.fg("dim", theme.boxRound.topRight);
+		const bl = theme.fg("dim", theme.boxRound.bottomLeft);
+		const br = theme.fg("dim", theme.boxRound.bottomRight);
 
 		const lines: string[] = [];
 
 		// Top border with embedded title
 		const title = ` ${APP_NAME} v${this.version} `;
-		const titleStyled = theme.fg("dim", "───") + theme.fg("muted", title);
-		const titleVisLen = 3 + title.length;
+		const titlePrefixRaw = hChar.repeat(3);
+		const titleStyled = theme.fg("dim", titlePrefixRaw) + theme.fg("muted", title);
+		const titleVisLen = visibleWidth(titlePrefixRaw) + visibleWidth(title);
 		const afterTitle = boxWidth - 2 - titleVisLen;
-		lines.push(tl + titleStyled + h.repeat(Math.max(0, afterTitle)) + tr);
+		const afterTitleText = afterTitle > 0 ? theme.fg("dim", hChar.repeat(afterTitle)) : "";
+		lines.push(tl + titleStyled + afterTitleText + tr);
 
 		// Content rows
 		const maxRows = Math.max(leftLines.length, rightLines.length);
@@ -152,7 +155,7 @@ export class WelcomeComponent implements Component {
 		}
 
 		// Bottom border
-		lines.push(bl + h.repeat(leftCol) + theme.fg("dim", "┴") + h.repeat(rightCol) + br);
+		lines.push(bl + h.repeat(leftCol) + theme.fg("dim", theme.boxSharp.teeUp) + h.repeat(rightCol) + br);
 
 		return lines;
 	}
@@ -160,7 +163,9 @@ export class WelcomeComponent implements Component {
 	/** Center text within a given width */
 	private centerText(text: string, width: number): string {
 		const visLen = visibleWidth(text);
-		if (visLen >= width) return text;
+		if (visLen >= width) {
+			return truncateToWidth(text, width, theme.format.ellipsis);
+		}
 		const leftPad = Math.floor((width - visLen) / 2);
 		const rightPad = width - visLen - leftPad;
 		return " ".repeat(leftPad) + text + " ".repeat(rightPad);
@@ -200,6 +205,9 @@ export class WelcomeComponent implements Component {
 	private fitToWidth(str: string, width: number): string {
 		const visLen = visibleWidth(str);
 		if (visLen > width) {
+			const ellipsis = theme.format.ellipsis;
+			const ellipsisWidth = visibleWidth(ellipsis);
+			const maxWidth = Math.max(0, width - ellipsisWidth);
 			let truncated = "";
 			let currentWidth = 0;
 			let inEscape = false;
@@ -208,12 +216,12 @@ export class WelcomeComponent implements Component {
 				if (inEscape) {
 					truncated += char;
 					if (char === "m") inEscape = false;
-				} else if (currentWidth < width - 1) {
+				} else if (currentWidth < maxWidth) {
 					truncated += char;
 					currentWidth++;
 				}
 			}
-			return `${truncated}…`;
+			return `${truncated}${ellipsis}`;
 		}
 		return str + " ".repeat(width - visLen);
 	}

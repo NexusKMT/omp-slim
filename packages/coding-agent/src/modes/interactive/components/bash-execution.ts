@@ -10,7 +10,7 @@ import {
 	type TruncationResult,
 	truncateTail,
 } from "../../../core/tools/truncate";
-import { theme } from "../theme/theme";
+import { getSymbolTheme, theme } from "../theme/theme";
 import { DynamicBorder } from "./dynamic-border";
 import { truncateToVisualLines } from "./visual-truncate";
 
@@ -56,6 +56,7 @@ export class BashExecutionComponent extends Container {
 			(spinner) => theme.fg("bashMode", spinner),
 			(text) => theme.fg("muted", text),
 			"Running... (esc to cancel)",
+			getSymbolTheme().spinnerFrames,
 		);
 		this.contentContainer.addChild(this.loader);
 

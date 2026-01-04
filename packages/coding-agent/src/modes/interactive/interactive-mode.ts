@@ -62,7 +62,9 @@ import {
 	getAvailableThemes,
 	getEditorTheme,
 	getMarkdownTheme,
+	getSymbolTheme,
 	onThemeChange,
+	setSymbolPreset,
 	setTheme,
 	type Theme,
 	theme,
@@ -403,7 +405,9 @@ export class InteractiveMode {
 				this.pendingTools.clear();
 
 				this.chatContainer.addChild(new Spacer(1));
-				this.chatContainer.addChild(new Text(`${theme.fg("accent", "✓ New session started")}`, 1, 1));
+				this.chatContainer.addChild(
+					new Text(`${theme.fg("accent", `${theme.status.success} New session started`)}`, 1, 1),
+				);
 				this.ui.requestRender();
 
 				return { cancelled: false };
@@ -952,6 +956,7 @@ export class InteractiveMode {
 					(spinner) => theme.fg("accent", spinner),
 					(text) => theme.fg("muted", text),
 					"Working... (esc to interrupt)",
+					getSymbolTheme().spinnerFrames,
 				);
 				this.statusContainer.addChild(this.loadingAnimation);
 				this.ui.requestRender();
@@ -1119,6 +1124,7 @@ export class InteractiveMode {
 					(spinner) => theme.fg("accent", spinner),
 					(text) => theme.fg("muted", text),
 					`${reasonText}Auto-compacting... (esc to cancel)`,
+					getSymbolTheme().spinnerFrames,
 				);
 				this.statusContainer.addChild(this.autoCompactionLoader);
 				this.ui.requestRender();
@@ -1174,6 +1180,7 @@ export class InteractiveMode {
 					(spinner) => theme.fg("warning", spinner),
 					(text) => theme.fg("muted", text),
 					`Retrying (${event.attempt}/${event.maxAttempts}) in ${delaySeconds}s... (esc to cancel)`,
+					getSymbolTheme().spinnerFrames,
 				);
 				this.statusContainer.addChild(this.retryLoader);
 				this.ui.requestRender();
@@ -1287,7 +1294,7 @@ export class InteractiveMode {
 			case "fileMention": {
 				// Render compact file mention display
 				for (const file of message.files) {
-					const text = `${theme.fg("dim", "⎿ ")}${theme.fg("muted", "Read")} ${theme.fg("accent", file.path)} ${theme.fg("dim", `(${file.lineCount} lines)`)}`;
+					const text = `${theme.fg("dim", `${theme.tree.hook} `)}${theme.fg("muted", "Read")} ${theme.fg("accent", file.path)} ${theme.fg("dim", `(${file.lineCount} lines)`)}`;
 					this.chatContainer.addChild(new Text(text, 0, 0));
 				}
 				break;
@@ -1714,11 +1721,26 @@ export class InteractiveMode {
 							this.ui.requestRender();
 						}
 					},
+					onStatusLinePreview: (settings) => {
+						// Update status line with preview settings
+						const currentSettings = this.settingsManager.getStatusLineSettings();
+						this.statusLine.updateSettings({ ...currentSettings, ...settings });
+						this.updateEditorTopBorder();
+						this.ui.requestRender();
+					},
+					getStatusLinePreview: () => {
+						// Return the rendered status line for inline preview
+						const width = this.ui.getWidth();
+						return this.statusLine.getTopBorder(width).content;
+					},
 					onPluginsChanged: () => {
 						this.ui.requestRender();
 					},
 					onCancel: () => {
 						done();
+						// Restore status line to saved settings
+						this.statusLine.updateSettings(this.settingsManager.getStatusLineSettings());
+						this.updateEditorTopBorder();
 						this.ui.requestRender();
 					},
 				},
@@ -1797,10 +1819,38 @@ export class InteractiveMode {
 				break;
 			case "theme": {
 				const result = setTheme(value as string, true);
+				this.statusLine.invalidate();
+				this.updateEditorTopBorder();
 				this.ui.invalidate();
 				if (!result.success) {
 					this.showError(`Failed to load theme "${value}": ${result.error}\nFell back to dark theme.`);
 				}
+				break;
+			}
+			case "symbolPreset": {
+				setSymbolPreset(value as "unicode" | "nerd" | "ascii");
+				this.statusLine.invalidate();
+				this.updateEditorTopBorder();
+				this.ui.invalidate();
+				break;
+			}
+			case "statusLinePreset":
+			case "statusLineSeparator":
+			case "statusLineShowHooks":
+			case "statusLineSegments":
+			case "statusLineModelThinking":
+			case "statusLinePathAbbreviate":
+			case "statusLinePathMaxLength":
+			case "statusLinePathStripWorkPrefix":
+			case "statusLineGitShowBranch":
+			case "statusLineGitShowStaged":
+			case "statusLineGitShowUnstaged":
+			case "statusLineGitShowUntracked":
+			case "statusLineTimeFormat":
+			case "statusLineTimeShowSeconds": {
+				this.statusLine.updateSettings(this.settingsManager.getStatusLineSettings());
+				this.updateEditorTopBorder();
+				this.ui.requestRender();
 				break;
 			}
 
@@ -1930,6 +1980,7 @@ export class InteractiveMode {
 							(spinner) => theme.fg("accent", spinner),
 							(text) => theme.fg("muted", text),
 							"Summarizing branch... (esc to cancel)",
+							getSymbolTheme().spinnerFrames,
 						);
 						this.statusContainer.addChild(summaryLoader);
 						this.ui.requestRender();
@@ -2092,7 +2143,11 @@ export class InteractiveMode {
 							this.session.modelRegistry.refresh();
 							this.chatContainer.addChild(new Spacer(1));
 							this.chatContainer.addChild(
-								new Text(theme.fg("success", `✓ Successfully logged in to ${providerId}`), 1, 0),
+								new Text(
+									theme.fg("success", `${theme.status.success} Successfully logged in to ${providerId}`),
+									1,
+									0,
+								),
 							);
 							this.chatContainer.addChild(
 								new Text(theme.fg("dim", `Credentials saved to ${getAuthPath()}`), 1, 0),
@@ -2108,7 +2163,11 @@ export class InteractiveMode {
 							this.session.modelRegistry.refresh();
 							this.chatContainer.addChild(new Spacer(1));
 							this.chatContainer.addChild(
-								new Text(theme.fg("success", `✓ Successfully logged out of ${providerId}`), 1, 0),
+								new Text(
+									theme.fg("success", `${theme.status.success} Successfully logged out of ${providerId}`),
+									1,
+									0,
+								),
 							);
 							this.chatContainer.addChild(
 								new Text(theme.fg("dim", `Credentials removed from ${getAuthPath()}`), 1, 0),
@@ -2346,8 +2405,8 @@ export class InteractiveMode {
 
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new DynamicBorder());
-		this.ui.addChild(new Text(theme.bold(theme.fg("accent", "What's New")), 1, 0));
-		this.ui.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(theme.bold(theme.fg("accent", "What's New")), 1, 0));
+		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Markdown(changelogMarkdown, 1, 1, getMarkdownTheme()));
 		this.chatContainer.addChild(new DynamicBorder());
 		this.ui.requestRender();
@@ -2420,7 +2479,9 @@ export class InteractiveMode {
 		this.pendingTools.clear();
 
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Text(`${theme.fg("accent", "✓ New session started")}`, 1, 1));
+		this.chatContainer.addChild(
+			new Text(`${theme.fg("accent", `${theme.status.success} New session started`)}`, 1, 1),
+		);
 		this.ui.requestRender();
 	}
 
@@ -2451,7 +2512,11 @@ export class InteractiveMode {
 
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(
-			new Text(`${theme.fg("accent", "✓ Debug log written")}\n${theme.fg("muted", debugLogPath)}`, 1, 1),
+			new Text(
+				`${theme.fg("accent", `${theme.status.success} Debug log written`)}\n${theme.fg("muted", debugLogPath)}`,
+				1,
+				1,
+			),
 		);
 		this.ui.requestRender();
 	}
@@ -2537,6 +2602,7 @@ export class InteractiveMode {
 			(spinner) => theme.fg("accent", spinner),
 			(text) => theme.fg("muted", text),
 			label,
+			getSymbolTheme().spinnerFrames,
 		);
 		this.statusContainer.addChild(compactingLoader);
 		this.ui.requestRender();

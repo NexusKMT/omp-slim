@@ -7,6 +7,7 @@
 import chalk from "chalk";
 import { APP_NAME } from "../config";
 import { PluginManager, parseSettingValue, validateSetting } from "../core/plugins/index";
+import { theme } from "../modes/interactive/theme/theme";
 
 // =============================================================================
 // Types
@@ -173,7 +174,7 @@ async function handleInstall(
 				if (flags.dryRun) {
 					console.log(chalk.dim(`[dry-run] Would install ${spec}`));
 				} else {
-					console.log(chalk.green(`✓ Installed ${result.name}@${result.version}`));
+					console.log(chalk.green(`${theme.status.success} Installed ${result.name}@${result.version}`));
 					if (result.enabledFeatures && result.enabledFeatures.length > 0) {
 						console.log(chalk.dim(`  Features: ${result.enabledFeatures.join(", ")}`));
 					}
@@ -183,7 +184,7 @@ async function handleInstall(
 				}
 			}
 		} catch (err) {
-			console.error(chalk.red(`✗ Failed to install ${spec}: ${err}`));
+			console.error(chalk.red(`${theme.status.error} Failed to install ${spec}: ${err}`));
 			process.exit(1);
 		}
 	}
@@ -202,10 +203,10 @@ async function handleUninstall(manager: PluginManager, packages: string[], flags
 			if (flags.json) {
 				console.log(JSON.stringify({ uninstalled: name }));
 			} else {
-				console.log(chalk.green(`✓ Uninstalled ${name}`));
+				console.log(chalk.green(`${theme.status.success} Uninstalled ${name}`));
 			}
 		} catch (err) {
-			console.error(chalk.red(`✗ Failed to uninstall ${name}: ${err}`));
+			console.error(chalk.red(`${theme.status.error} Failed to uninstall ${name}: ${err}`));
 			process.exit(1);
 		}
 	}
@@ -226,8 +227,9 @@ async function handleList(manager: PluginManager, flags: { json?: boolean }): Pr
 	}
 
 	console.log(chalk.bold("Installed Plugins:\n"));
+
 	for (const plugin of plugins) {
-		const status = plugin.enabled ? chalk.green("●") : chalk.dim("○");
+		const status = plugin.enabled ? chalk.green(theme.status.enabled) : chalk.dim(theme.status.disabled);
 		const nameVersion = `${plugin.name}@${plugin.version}`;
 		console.log(`${status} ${nameVersion}`);
 
@@ -265,10 +267,10 @@ async function handleLink(manager: PluginManager, paths: string[], flags: { json
 		if (flags.json) {
 			console.log(JSON.stringify(result, null, 2));
 		} else {
-			console.log(chalk.green(`✓ Linked ${result.name} from ${paths[0]}`));
+			console.log(chalk.green(`${theme.status.success} Linked ${result.name} from ${paths[0]}`));
 		}
 	} catch (err) {
-		console.error(chalk.red(`✗ Failed to link: ${err}`));
+		console.error(chalk.red(`${theme.status.error} Failed to link: ${err}`));
 		process.exit(1);
 	}
 }
@@ -285,10 +287,14 @@ async function handleDoctor(manager: PluginManager, flags: { json?: boolean; fix
 
 	for (const check of checks) {
 		const icon =
-			check.status === "ok" ? chalk.green("✓") : check.status === "warning" ? chalk.yellow("!") : chalk.red("✗");
+			check.status === "ok"
+				? chalk.green(theme.status.success)
+				: check.status === "warning"
+					? chalk.yellow(theme.status.warning)
+					: chalk.red(theme.status.error);
 		console.log(`${icon} ${check.name}: ${check.message}`);
 		if (check.fixed) {
-			console.log(chalk.dim(`  → Fixed`));
+			console.log(chalk.dim(`  ${theme.nav.cursor} Fixed`));
 		}
 	}
 
@@ -361,7 +367,7 @@ async function handleFeatures(
 		}
 
 		await manager.setEnabledFeatures(pluginName, [...currentFeatures]);
-		console.log(chalk.green(`✓ Updated features for ${pluginName}`));
+		console.log(chalk.green(`${theme.status.success} Updated features for ${pluginName}`));
 	}
 
 	// Display current state
@@ -392,7 +398,7 @@ async function handleFeatures(
 	const enabledSet = new Set(updatedFeatures ?? []);
 	for (const [name, feat] of Object.entries(plugin.manifest.features)) {
 		const enabled = enabledSet.has(name);
-		const icon = enabled ? chalk.green("●") : chalk.dim("○");
+		const icon = enabled ? chalk.green(theme.status.enabled) : chalk.dim(theme.status.disabled);
 		const defaultLabel = feat.default ? chalk.dim(" (default)") : "";
 		console.log(`${icon} ${name}${defaultLabel}`);
 		if (feat.description) {
@@ -507,7 +513,7 @@ async function handleConfig(
 			}
 
 			manager.setPluginSetting(pluginName, key, value);
-			console.log(chalk.green(`✓ Set ${key}`));
+			console.log(chalk.green(`${theme.status.success} Set ${key}`));
 			break;
 		}
 
@@ -518,7 +524,7 @@ async function handleConfig(
 			}
 
 			manager.deletePluginSetting(pluginName, key);
-			console.log(chalk.green(`✓ Deleted ${key}`));
+			console.log(chalk.green(`${theme.status.success} Deleted ${key}`));
 			break;
 		}
 
@@ -554,10 +560,10 @@ async function handleConfigValidate(manager: PluginManager, flags: { json?: bool
 	}
 
 	if (results.length === 0) {
-		console.log(chalk.green("✓ All settings valid"));
+		console.log(chalk.green(`${theme.status.success} All settings valid`));
 	} else {
 		for (const { plugin, key, error } of results) {
-			console.log(chalk.red(`✗ ${plugin}.${key}: ${error}`));
+			console.log(chalk.red(`${theme.status.error} ${plugin}.${key}: ${error}`));
 		}
 		process.exit(1);
 	}
@@ -576,10 +582,10 @@ async function handleEnable(manager: PluginManager, plugins: string[], flags: { 
 			if (flags.json) {
 				console.log(JSON.stringify({ enabled: name }));
 			} else {
-				console.log(chalk.green(`✓ Enabled ${name}`));
+				console.log(chalk.green(`${theme.status.success} Enabled ${name}`));
 			}
 		} catch (err) {
-			console.error(chalk.red(`✗ Failed to enable ${name}: ${err}`));
+			console.error(chalk.red(`${theme.status.error} Failed to enable ${name}: ${err}`));
 			process.exit(1);
 		}
 	}
@@ -598,10 +604,10 @@ async function handleDisable(manager: PluginManager, plugins: string[], flags: {
 			if (flags.json) {
 				console.log(JSON.stringify({ disabled: name }));
 			} else {
-				console.log(chalk.green(`✓ Disabled ${name}`));
+				console.log(chalk.green(`${theme.status.success} Disabled ${name}`));
 			}
 		} catch (err) {
-			console.error(chalk.red(`✗ Failed to disable ${name}: ${err}`));
+			console.error(chalk.red(`${theme.status.error} Failed to disable ${name}: ${err}`));
 			process.exit(1);
 		}
 	}

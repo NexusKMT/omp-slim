@@ -1,3 +1,4 @@
+import { theme } from "../../modes/interactive/theme/theme";
 import type { DoctorCheck } from "./types";
 
 export async function runDoctorChecks(): Promise<DoctorCheck[]> {
@@ -42,10 +43,17 @@ export async function runDoctorChecks(): Promise<DoctorCheck[]> {
 }
 
 export function formatDoctorResults(checks: DoctorCheck[]): string {
+	// Note: This function returns plain text without theming as it may be called outside TUI context.
+	// For TUI usage, the plugin CLI handler applies theme colors.
 	const lines: string[] = ["System Health Check", "=".repeat(40), ""];
 
 	for (const check of checks) {
-		const icon = check.status === "ok" ? "✓" : check.status === "warning" ? "!" : "✗";
+		const icon =
+			check.status === "ok"
+				? theme.status.success
+				: check.status === "warning"
+					? theme.status.warning
+					: theme.status.error;
 		lines.push(`${icon} ${check.name}: ${check.message}`);
 	}
 

@@ -438,7 +438,11 @@ class TreeList implements Component {
 			// Build prefix with gutters at their correct positions
 			// Each gutter has a position (displayIndent where its connector was shown)
 			const connector =
-				flatNode.showConnector && !flatNode.isVirtualRootChild ? (flatNode.isLast ? "└─ " : "├─ ") : "";
+				flatNode.showConnector && !flatNode.isVirtualRootChild
+					? flatNode.isLast
+						? `${theme.boxSharp.bottomLeft}${theme.boxSharp.horizontal} `
+						: `${theme.boxSharp.teeRight}${theme.boxSharp.horizontal} `
+					: "";
 			const connectorPosition = connector ? displayIndent - 1 : -1;
 
 			// Build prefix char by char, placing gutters and connector at their positions
@@ -452,16 +456,16 @@ class TreeList implements Component {
 				const gutter = flatNode.gutters.find((g) => g.position === level);
 				if (gutter) {
 					if (posInLevel === 0) {
-						prefixChars.push(gutter.show ? "│" : " ");
+						prefixChars.push(gutter.show ? theme.boxSharp.vertical : " ");
 					} else {
 						prefixChars.push(" ");
 					}
 				} else if (connector && level === connectorPosition) {
 					// Connector at this level
 					if (posInLevel === 0) {
-						prefixChars.push(flatNode.isLast ? "└" : "├");
+						prefixChars.push(flatNode.isLast ? theme.boxSharp.bottomLeft : theme.boxSharp.teeRight);
 					} else if (posInLevel === 1) {
-						prefixChars.push("─");
+						prefixChars.push(theme.boxSharp.horizontal);
 					} else {
 						prefixChars.push(" ");
 					}
@@ -473,7 +477,7 @@ class TreeList implements Component {
 
 			// Active path marker - shown right before the entry text
 			const isOnActivePath = this.activePathIds.has(entry.id);
-			const pathMarker = isOnActivePath ? theme.fg("accent", "• ") : "";
+			const pathMarker = isOnActivePath ? theme.fg("accent", `${theme.md.bullet} `) : "";
 
 			const label = flatNode.node.label ? theme.fg("warning", `[${flatNode.node.label}] `) : "";
 			const content = this.getEntryDisplayText(flatNode.node, isSelected);
@@ -816,7 +820,14 @@ export class TreeSelectorComponent extends Container {
 		this.addChild(new DynamicBorder());
 		this.addChild(new Text(theme.bold("  Session Tree"), 1, 0));
 		this.addChild(
-			new TruncatedText(theme.fg("muted", "  ↑/↓: move. ←/→: page. l: label. ^O/⇧^O: filter. Type to search"), 0, 0),
+			new TruncatedText(
+				theme.fg(
+					"muted",
+					"  Up/Down: move. Left/Right: page. l: label. Ctrl+O/Shift+Ctrl+O: filter. Type to search",
+				),
+				0,
+				0,
+			),
 		);
 		this.addChild(new SearchLine(this.treeList));
 		this.addChild(new DynamicBorder());

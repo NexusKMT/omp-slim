@@ -10,6 +10,7 @@ import {
 	Spacer,
 	Text,
 	truncateToWidth,
+	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import type { SessionInfo } from "../../../core/session-manager";
 import { fuzzyFilter } from "../../../utils/fuzzy";
@@ -99,21 +100,23 @@ class SessionList implements Component {
 			const normalizedMessage = session.firstMessage.replace(/\n/g, " ").trim();
 
 			// First line: cursor + title (or first message if no title)
-			const cursor = isSelected ? theme.fg("accent", "› ") : "  ";
-			const maxWidth = width - 2; // Account for cursor (2 visible chars)
+			const cursorSymbol = `${theme.nav.cursor} `;
+			const cursorWidth = visibleWidth(cursorSymbol);
+			const cursor = isSelected ? theme.fg("accent", cursorSymbol) : " ".repeat(cursorWidth);
+			const maxWidth = width - cursorWidth; // Account for cursor width
 
 			if (session.title) {
 				// Has title: show title on first line, dimmed first message on second line
-				const truncatedTitle = truncateToWidth(session.title, maxWidth, "...");
+				const truncatedTitle = truncateToWidth(session.title, maxWidth, theme.format.ellipsis);
 				const titleLine = cursor + (isSelected ? theme.bold(truncatedTitle) : truncatedTitle);
 				lines.push(titleLine);
 
 				// Second line: dimmed first message preview
-				const truncatedPreview = truncateToWidth(normalizedMessage, maxWidth, "...");
+				const truncatedPreview = truncateToWidth(normalizedMessage, maxWidth, theme.format.ellipsis);
 				lines.push(`  ${theme.fg("dim", truncatedPreview)}`);
 			} else {
 				// No title: show first message as main line
-				const truncatedMsg = truncateToWidth(normalizedMessage, maxWidth, "...");
+				const truncatedMsg = truncateToWidth(normalizedMessage, maxWidth, theme.format.ellipsis);
 				const messageLine = cursor + (isSelected ? theme.bold(truncatedMsg) : truncatedMsg);
 				lines.push(messageLine);
 			}
@@ -121,7 +124,7 @@ class SessionList implements Component {
 			// Metadata line: date + message count
 			const modified = formatDate(session.modified);
 			const msgCount = `${session.messageCount} message${session.messageCount !== 1 ? "s" : ""}`;
-			const metadata = `  ${modified} · ${msgCount}`;
+			const metadata = `  ${modified} ${theme.sep.dot} ${msgCount}`;
 			const metadataLine = theme.fg("dim", truncateToWidth(metadata, width, ""));
 
 			lines.push(metadataLine);

@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { EditorTheme, MarkdownTheme, SelectListTheme } from "@oh-my-pi/pi-tui";
+import type { EditorTheme, MarkdownTheme, SelectListTheme, SymbolTheme } from "@oh-my-pi/pi-tui";
 import { type Static, Type } from "@sinclair/typebox";
 import { TypeCompiler } from "@sinclair/typebox/compiler";
 import chalk from "chalk";
@@ -9,7 +9,638 @@ import { getCustomThemesDir } from "../../../config";
 import { logger } from "../../../core/logger";
 // Embed theme JSON files at build time
 import darkThemeJson from "./dark.json" with { type: "json" };
+import { defaultThemes } from "./defaults";
 import lightThemeJson from "./light.json" with { type: "json" };
+
+// ============================================================================
+// Symbol Presets
+// ============================================================================
+
+export type SymbolPreset = "unicode" | "nerd" | "ascii";
+
+/**
+ * All available symbol keys organized by category.
+ */
+export type SymbolKey =
+	// Status Indicators
+	| "status.success"
+	| "status.error"
+	| "status.warning"
+	| "status.info"
+	| "status.pending"
+	| "status.disabled"
+	| "status.enabled"
+	| "status.running"
+	| "status.aborted"
+	// Navigation
+	| "nav.cursor"
+	| "nav.selected"
+	| "nav.expand"
+	| "nav.collapse"
+	| "nav.back"
+	// Tree Connectors
+	| "tree.branch"
+	| "tree.last"
+	| "tree.vertical"
+	| "tree.horizontal"
+	| "tree.hook"
+	// Box Drawing - Rounded
+	| "boxRound.topLeft"
+	| "boxRound.topRight"
+	| "boxRound.bottomLeft"
+	| "boxRound.bottomRight"
+	| "boxRound.horizontal"
+	| "boxRound.vertical"
+	// Box Drawing - Sharp
+	| "boxSharp.topLeft"
+	| "boxSharp.topRight"
+	| "boxSharp.bottomLeft"
+	| "boxSharp.bottomRight"
+	| "boxSharp.horizontal"
+	| "boxSharp.vertical"
+	| "boxSharp.cross"
+	| "boxSharp.teeDown"
+	| "boxSharp.teeUp"
+	| "boxSharp.teeRight"
+	| "boxSharp.teeLeft"
+	// Separators
+	| "sep.powerline"
+	| "sep.powerlineThin"
+	| "sep.powerlineLeft"
+	| "sep.powerlineRight"
+	| "sep.powerlineThinLeft"
+	| "sep.powerlineThinRight"
+	| "sep.block"
+	| "sep.space"
+	| "sep.asciiLeft"
+	| "sep.asciiRight"
+	| "sep.dot"
+	| "sep.slash"
+	| "sep.pipe"
+	// Icons
+	| "icon.model"
+	| "icon.folder"
+	| "icon.file"
+	| "icon.git"
+	| "icon.branch"
+	| "icon.tokens"
+	| "icon.context"
+	| "icon.cost"
+	| "icon.time"
+	| "icon.pi"
+	| "icon.agents"
+	| "icon.cache"
+	| "icon.input"
+	| "icon.output"
+	| "icon.host"
+	| "icon.session"
+	| "icon.package"
+	| "icon.warning"
+	| "icon.rewind"
+	| "icon.auto"
+	| "icon.extensionSkill"
+	| "icon.extensionTool"
+	| "icon.extensionSlashCommand"
+	| "icon.extensionMcp"
+	| "icon.extensionRule"
+	| "icon.extensionHook"
+	| "icon.extensionPrompt"
+	| "icon.extensionContextFile"
+	| "icon.extensionInstruction"
+	// Thinking Levels
+	| "thinking.minimal"
+	| "thinking.low"
+	| "thinking.medium"
+	| "thinking.high"
+	| "thinking.xhigh"
+	// Checkboxes
+	| "checkbox.checked"
+	| "checkbox.unchecked"
+	// Text Formatting
+	| "format.ellipsis"
+	| "format.bullet"
+	| "format.dash"
+	| "format.bracketLeft"
+	| "format.bracketRight"
+	// Markdown-specific
+	| "md.quoteBorder"
+	| "md.hrChar"
+	| "md.bullet";
+
+type SymbolMap = Record<SymbolKey, string>;
+
+const UNICODE_SYMBOLS: SymbolMap = {
+	// Status Indicators
+	// pick: ✓ | alt: ✔ ✅ ☑ ✚
+	"status.success": "✓",
+	// pick: ✗ | alt: ✘ ✖ ❌ ⨯
+	"status.error": "✗",
+	// pick: ⚠ | alt: ‼ ⁉ ▲ △
+	"status.warning": "⚠",
+	// pick: ℹ | alt: ⓘ 🛈 ⅈ
+	"status.info": "ℹ",
+	// pick: ◔ | alt: ● ◐ ◑ ◒ ◓ ⏳ …
+	"status.pending": "◔",
+	// pick: ○ | alt: ◌ ◯ ⃠
+	"status.disabled": "○",
+	// pick: ● | alt: ◉ ◎ ⬤
+	"status.enabled": "●",
+	// pick: ↻ | alt: ↺ ⟳ ⟲ ◐ ▶
+	"status.running": "↻",
+	// pick: ⊗ | alt: ⊘ ⛔ ⏹ ⨂
+	"status.aborted": "⊗",
+	// Navigation
+	// pick: ❯ | alt: › ▸ ▹
+	"nav.cursor": "❯",
+	// pick: ➜ | alt: → ➤ ➔ ⇒
+	"nav.selected": "➜",
+	// pick: ▸ | alt: ▶ ▹ ⯈
+	"nav.expand": "▸",
+	// pick: ▾ | alt: ▼ ▽ ⯆
+	"nav.collapse": "▾",
+	// pick: ← | alt: ↩ ↫ ⇦
+	"nav.back": "←",
+	// Tree Connectors
+	// pick: ├─ | alt: ├╴ ├╌ ├┄ ╠═
+	"tree.branch": "├─",
+	// pick: └─ | alt: └╴ └╌ └┄ ╚═
+	"tree.last": "└─",
+	// pick: │ | alt: ┃ ║ ▏ ▕
+	"tree.vertical": "│",
+	// pick: ─ | alt: ━ ═ ╌ ┄
+	"tree.horizontal": "─",
+	// pick: └ | alt: ⎿ ╰ ↳
+	"tree.hook": "└",
+	// Box Drawing - Rounded
+	// pick: ╭ | alt: ┌ ┏ ╔
+	"boxRound.topLeft": "╭",
+	// pick: ╮ | alt: ┐ ┓ ╗
+	"boxRound.topRight": "╮",
+	// pick: ╰ | alt: └ ┗ ╚
+	"boxRound.bottomLeft": "╰",
+	// pick: ╯ | alt: ┘ ┛ ╝
+	"boxRound.bottomRight": "╯",
+	// pick: ─ | alt: ━ ═ ╌
+	"boxRound.horizontal": "─",
+	// pick: │ | alt: ┃ ║ ▏
+	"boxRound.vertical": "│",
+	// Box Drawing - Sharp
+	// pick: ┌ | alt: ┏ ╭ ╔
+	"boxSharp.topLeft": "┌",
+	// pick: ┐ | alt: ┓ ╮ ╗
+	"boxSharp.topRight": "┐",
+	// pick: └ | alt: ┗ ╰ ╚
+	"boxSharp.bottomLeft": "└",
+	// pick: ┘ | alt: ┛ ╯ ╝
+	"boxSharp.bottomRight": "┘",
+	// pick: ─ | alt: ━ ═ ╌
+	"boxSharp.horizontal": "─",
+	// pick: │ | alt: ┃ ║ ▏
+	"boxSharp.vertical": "│",
+	// pick: ┼ | alt: ╋ ╬ ┿
+	"boxSharp.cross": "┼",
+	// pick: ┬ | alt: ╦ ┯ ┳
+	"boxSharp.teeDown": "┬",
+	// pick: ┴ | alt: ╩ ┷ ┻
+	"boxSharp.teeUp": "┴",
+	// pick: ├ | alt: ╠ ┝ ┣
+	"boxSharp.teeRight": "├",
+	// pick: ┤ | alt: ╣ ┥ ┫
+	"boxSharp.teeLeft": "┤",
+	// Separators
+	// pick: │ | alt: ┃ ║ ▏
+	"sep.powerline": "│",
+	// pick: │ | alt: ┆ ┊
+	"sep.powerlineThin": "│",
+	// pick: > | alt: › ▸ »
+	"sep.powerlineLeft": ">",
+	// pick: < | alt: ‹ ◂ «
+	"sep.powerlineRight": "<",
+	// pick: > | alt: › ▸
+	"sep.powerlineThinLeft": ">",
+	// pick: < | alt: ‹ ◂
+	"sep.powerlineThinRight": "<",
+	// pick: █ | alt: ▓ ▒ ░ ▉ ▌
+	"sep.block": "█",
+	// pick: space | alt: ␠ ·
+	"sep.space": " ",
+	// pick: > | alt: › » ▸
+	"sep.asciiLeft": ">",
+	// pick: < | alt: ‹ « ◂
+	"sep.asciiRight": "<",
+	// pick: · | alt: • ⋅
+	"sep.dot": " · ",
+	// pick: / | alt: ／ ∕ ⁄
+	"sep.slash": " / ",
+	// pick: | | alt: │ ┃ ║
+	"sep.pipe": " | ",
+	// Icons
+	// pick: ◈ | alt: ◆ ⬢ ◇
+	"icon.model": "◈",
+	// pick: 📁 | alt: 📂 🗂 🗃
+	"icon.folder": "📁",
+	// pick: 📄 | alt: 📃 📝
+	"icon.file": "📄",
+	// pick: ⎇ | alt: 🔀 ⑂
+	"icon.git": "⎇",
+	// pick: ⎇ | alt: 🌿 ⑂
+	"icon.branch": "⎇",
+	// pick: ⊛ | alt: ◎ ◍ ⊙
+	"icon.tokens": "⊛",
+	// pick: ◫ | alt: ◧ ▣ ▦
+	"icon.context": "◫",
+	// pick: $ | alt: 💲 💰
+	"icon.cost": "$",
+	// pick: ◷ | alt: ⏱ ⏲ ⌛
+	"icon.time": "◷",
+	// pick: π | alt: ∏ ∑
+	"icon.pi": "π",
+	// pick: AG | alt: 👥 👤
+	"icon.agents": "AG",
+	// pick: cache | alt: 💾 🗄
+	"icon.cache": "cache",
+	// pick: in: | alt: ⤵ ↲
+	"icon.input": "in:",
+	// pick: out: | alt: ⤴ ↱
+	"icon.output": "out:",
+	// pick: host | alt: 🖥 💻
+	"icon.host": "host",
+	// pick: id | alt: 🧭 🧩
+	"icon.session": "id",
+	// pick: 📦 | alt: 🧰
+	"icon.package": "📦",
+	// pick: ⚠ | alt: ❗
+	"icon.warning": "⚠",
+	// pick: ↩ | alt: ↺ ⟲
+	"icon.rewind": "↩",
+	// pick: ⚡ | alt: ✨ ✦
+	"icon.auto": "⚡",
+	// pick: SK | alt: 🧠 🎓
+	"icon.extensionSkill": "SK",
+	// pick: TL | alt: 🛠 ⚙
+	"icon.extensionTool": "TL",
+	// pick: / | alt: ⌘ ⌥
+	"icon.extensionSlashCommand": "/",
+	// pick: MCP | alt: 🔌 🧩
+	"icon.extensionMcp": "MCP",
+	// pick: RL | alt: ⚖ 📏
+	"icon.extensionRule": "RL",
+	// pick: HK | alt: 🪝 ⚓
+	"icon.extensionHook": "HK",
+	// pick: PR | alt: 💬 ✎
+	"icon.extensionPrompt": "PR",
+	// pick: CF | alt: 📄 📎
+	"icon.extensionContextFile": "CF",
+	// pick: IN | alt: 📘 ℹ
+	"icon.extensionInstruction": "IN",
+	// Thinking Levels
+	// pick: [min] | alt: · ◔ min
+	"thinking.minimal": "[min]",
+	// pick: [low] | alt: ◑ low ▪ low
+	"thinking.low": "[low]",
+	// pick: [med] | alt: ◒ med ▪ med
+	"thinking.medium": "[med]",
+	// pick: [high] | alt: ◕ high ▪ high
+	"thinking.high": "[high]",
+	// pick: [xhi] | alt: ◉ xhi ▪ xhi
+	"thinking.xhigh": "[xhi]",
+	// Checkboxes
+	// pick: ☑ | alt: ✓ ✔ ✅
+	"checkbox.checked": "☑",
+	// pick: ☐ | alt: □ ▢
+	"checkbox.unchecked": "☐",
+	// Text Formatting
+	// pick: … | alt: ⋯ ...
+	"format.ellipsis": "…",
+	// pick: • | alt: · ▪ ◦
+	"format.bullet": "•",
+	// pick: – | alt: — ― -
+	"format.dash": "–",
+	// pick: [ | alt: ⟦ ⟨
+	"format.bracketLeft": "[",
+	// pick: ] | alt: ⟧ ⟩
+	"format.bracketRight": "]",
+	// Markdown-specific
+	// pick: │ | alt: ┃ ║
+	"md.quoteBorder": "│",
+	// pick: ─ | alt: ━ ═
+	"md.hrChar": "─",
+	// pick: • | alt: · ▪ ◦
+	"md.bullet": "•",
+};
+
+const NERD_SYMBOLS: SymbolMap = {
+	// Status Indicators
+	// pick:  | alt:   
+	"status.success": "\uf00c",
+	// pick:  | alt:   
+	"status.error": "\uf00d",
+	// pick:  | alt:  
+	"status.warning": "\uf12a",
+	// pick:  | alt: 
+	"status.info": "\uf129",
+	// pick:  | alt:   
+	"status.pending": "\uf254",
+	// pick:  | alt:  
+	"status.disabled": "\uf05e",
+	// pick:  | alt:  
+	"status.enabled": "\uf111",
+	// pick:  | alt:   
+	"status.running": "\uf110",
+	// pick:  | alt:  
+	"status.aborted": "\uf04d",
+	// Navigation
+	// pick:  | alt:  
+	"nav.cursor": "\uf054",
+	// pick:  | alt:  
+	"nav.selected": "\uf178",
+	// pick:  | alt:  
+	"nav.expand": "\uf0da",
+	// pick:  | alt:  
+	"nav.collapse": "\uf0d7",
+	// pick:  | alt:  
+	"nav.back": "\uf060",
+	// Tree Connectors (same as unicode)
+	// pick: ├─ | alt: ├╴ ├╌ ╠═ ┣━
+	"tree.branch": "\u251c\u2500",
+	// pick: └─ | alt: └╴ └╌ ╚═ ┗━
+	"tree.last": "\u2514\u2500",
+	// pick: │ | alt: ┃ ║ ▏ ▕
+	"tree.vertical": "\u2502",
+	// pick: ─ | alt: ━ ═ ╌ ┄
+	"tree.horizontal": "\u2500",
+	// pick: └ | alt: ╰ ⎿ ↳
+	"tree.hook": "\u2514",
+	// Box Drawing - Rounded (same as unicode)
+	// pick: ╭ | alt: ┌ ┏ ╔
+	"boxRound.topLeft": "\u256d",
+	// pick: ╮ | alt: ┐ ┓ ╗
+	"boxRound.topRight": "\u256e",
+	// pick: ╰ | alt: └ ┗ ╚
+	"boxRound.bottomLeft": "\u2570",
+	// pick: ╯ | alt: ┘ ┛ ╝
+	"boxRound.bottomRight": "\u256f",
+	// pick: ─ | alt: ━ ═ ╌
+	"boxRound.horizontal": "\u2500",
+	// pick: │ | alt: ┃ ║ ▏
+	"boxRound.vertical": "\u2502",
+	// Box Drawing - Sharp (same as unicode)
+	// pick: ┌ | alt: ┏ ╭ ╔
+	"boxSharp.topLeft": "\u250c",
+	// pick: ┐ | alt: ┓ ╮ ╗
+	"boxSharp.topRight": "\u2510",
+	// pick: └ | alt: ┗ ╰ ╚
+	"boxSharp.bottomLeft": "\u2514",
+	// pick: ┘ | alt: ┛ ╯ ╝
+	"boxSharp.bottomRight": "\u2518",
+	// pick: ─ | alt: ━ ═ ╌
+	"boxSharp.horizontal": "\u2500",
+	// pick: │ | alt: ┃ ║ ▏
+	"boxSharp.vertical": "\u2502",
+	// pick: ┼ | alt: ╋ ╬ ┿
+	"boxSharp.cross": "\u253c",
+	// pick: ┬ | alt: ╦ ┯ ┳
+	"boxSharp.teeDown": "\u252c",
+	// pick: ┴ | alt: ╩ ┷ ┻
+	"boxSharp.teeUp": "\u2534",
+	// pick: ├ | alt: ╠ ┝ ┣
+	"boxSharp.teeRight": "\u251c",
+	// pick: ┤ | alt: ╣ ┥ ┫
+	"boxSharp.teeLeft": "\u2524",
+	// Separators - Nerd Font specific
+	// pick:  | alt:   
+	"sep.powerline": "\ue0b0",
+	// pick:  | alt:  
+	"sep.powerlineThin": "\ue0b1",
+	// pick:  | alt:  
+	"sep.powerlineLeft": "\ue0b0",
+	// pick:  | alt:  
+	"sep.powerlineRight": "\ue0b2",
+	// pick:  | alt: 
+	"sep.powerlineThinLeft": "\ue0b1",
+	// pick:  | alt: 
+	"sep.powerlineThinRight": "\ue0b3",
+	// pick: █ | alt: ▓ ▒ ░ ▉ ▌
+	"sep.block": "\u2588",
+	// pick: space | alt: ␠ ·
+	"sep.space": " ",
+	// pick: > | alt: › » ▸
+	"sep.asciiLeft": ">",
+	// pick: < | alt: ‹ « ◂
+	"sep.asciiRight": "<",
+	// pick: · | alt: • ⋅
+	"sep.dot": " \u00b7 ",
+	// pick:  | alt: / ∕ ⁄
+	"sep.slash": "\ue0bb",
+	// pick:  | alt: │ ┃ |
+	"sep.pipe": "\ue0b3",
+	// Icons - Nerd Font specific
+	// pick:  | alt:   ◆
+	"icon.model": "\uec19",
+	// pick:  | alt:  
+	"icon.folder": "\uf115",
+	// pick:  | alt:  
+	"icon.file": "\uf15b",
+	// pick:  | alt:  ⎇
+	"icon.git": "\uf1d3",
+	// pick:  | alt:  ⎇
+	"icon.branch": "\uf126",
+	// pick:  | alt: ⊛ ◍ 
+	"icon.tokens": "\ue26b",
+	// pick:  | alt: ◫ ▦
+	"icon.context": "\ue70f",
+	// pick:  | alt: $ ¢
+	"icon.cost": "\uf155",
+	// pick:  | alt: ◷ ◴
+	"icon.time": "\uf017",
+	// pick:  | alt: π ∏ ∑
+	"icon.pi": "\ue22c",
+	// pick:  | alt: 
+	"icon.agents": "\uf0c0",
+	// pick:  | alt:  
+	"icon.cache": "\uf1c0",
+	// pick:  | alt:  →
+	"icon.input": "\uf090",
+	// pick:  | alt:  →
+	"icon.output": "\uf08b",
+	// pick:  | alt:  
+	"icon.host": "\uf109",
+	// pick:  | alt:  
+	"icon.session": "\uf550",
+	// pick:  | alt: 
+	"icon.package": "\uf487",
+	// pick:  | alt:  
+	"icon.warning": "\uf071",
+	// pick:  | alt:  ↺
+	"icon.rewind": "\uf0e2",
+	// pick: 󰁨 | alt:   
+	"icon.auto": "\u{f0068}",
+	// pick:  | alt:  
+	"icon.extensionSkill": "\uf0eb",
+	// pick:  | alt:  
+	"icon.extensionTool": "\uf0ad",
+	// pick:  | alt: 
+	"icon.extensionSlashCommand": "\uf120",
+	// pick:  | alt:  
+	"icon.extensionMcp": "\uf1e6",
+	// pick:  | alt:  
+	"icon.extensionRule": "\uf0e3",
+	// pick:  | alt: 
+	"icon.extensionHook": "\uf0c1",
+	// pick:  | alt:  
+	"icon.extensionPrompt": "\uf075",
+	// pick:  | alt:  
+	"icon.extensionContextFile": "\uf0f6",
+	// pick:  | alt:  
+	"icon.extensionInstruction": "\uf02d",
+	// Thinking Levels - emoji labels
+	// pick: 🤨 min | alt:  min  min
+	"thinking.minimal": "🤨 min",
+	// pick: 🤔 low | alt:  low  low
+	"thinking.low": "🤔 low",
+	// pick: 🤓 med | alt:  med  med
+	"thinking.medium": "🤓 med",
+	// pick: 🤯 high | alt:  high  high
+	"thinking.high": "🤯 high",
+	// pick: 🧠 xhi | alt:  xhi  xhi
+	"thinking.xhigh": "🧠 xhi",
+	// Checkboxes
+	// pick:  | alt:  
+	"checkbox.checked": "\uf14a",
+	// pick:  | alt: 
+	"checkbox.unchecked": "\uf096",
+	// Text Formatting
+	// pick: … | alt: ⋯ ...
+	"format.ellipsis": "\u2026",
+	// pick:  | alt:   •
+	"format.bullet": "\uf111",
+	// pick: – | alt: — ― -
+	"format.dash": "\u2013",
+	// pick: [ | alt: ⟦ ⟨
+	"format.bracketLeft": "[",
+	// pick: ] | alt: ⟧ ⟩
+	"format.bracketRight": "]",
+	// Markdown-specific
+	// pick: │ | alt: ┃ ║
+	"md.quoteBorder": "\u2502",
+	// pick: ─ | alt: ━ ═
+	"md.hrChar": "\u2500",
+	// pick:  | alt:  •
+	"md.bullet": "\uf111",
+};
+
+const ASCII_SYMBOLS: SymbolMap = {
+	// Status Indicators
+	"status.success": "[ok]",
+	"status.error": "[!!]",
+	"status.warning": "[!]",
+	"status.info": "[i]",
+	"status.pending": "[*]",
+	"status.disabled": "[ ]",
+	"status.enabled": "[x]",
+	"status.running": "[~]",
+	"status.aborted": "[-]",
+	// Navigation
+	"nav.cursor": ">",
+	"nav.selected": "->",
+	"nav.expand": "+",
+	"nav.collapse": "-",
+	"nav.back": "<-",
+	// Tree Connectors
+	"tree.branch": "|--",
+	"tree.last": "'--",
+	"tree.vertical": "|",
+	"tree.horizontal": "-",
+	"tree.hook": "`-",
+	// Box Drawing - Rounded (ASCII fallback)
+	"boxRound.topLeft": "+",
+	"boxRound.topRight": "+",
+	"boxRound.bottomLeft": "+",
+	"boxRound.bottomRight": "+",
+	"boxRound.horizontal": "-",
+	"boxRound.vertical": "|",
+	// Box Drawing - Sharp (ASCII fallback)
+	"boxSharp.topLeft": "+",
+	"boxSharp.topRight": "+",
+	"boxSharp.bottomLeft": "+",
+	"boxSharp.bottomRight": "+",
+	"boxSharp.horizontal": "-",
+	"boxSharp.vertical": "|",
+	"boxSharp.cross": "+",
+	"boxSharp.teeDown": "+",
+	"boxSharp.teeUp": "+",
+	"boxSharp.teeRight": "+",
+	"boxSharp.teeLeft": "+",
+	// Separators
+	"sep.powerline": ">",
+	"sep.powerlineThin": ">",
+	"sep.powerlineLeft": ">",
+	"sep.powerlineRight": "<",
+	"sep.powerlineThinLeft": ">",
+	"sep.powerlineThinRight": "<",
+	"sep.block": "#",
+	"sep.space": " ",
+	"sep.asciiLeft": ">",
+	"sep.asciiRight": "<",
+	"sep.dot": " - ",
+	"sep.slash": " / ",
+	"sep.pipe": " | ",
+	// Icons
+	"icon.model": "[M]",
+	"icon.folder": "[D]",
+	"icon.file": "[F]",
+	"icon.git": "git:",
+	"icon.branch": "@",
+	"icon.tokens": "tok:",
+	"icon.context": "ctx:",
+	"icon.cost": "$",
+	"icon.time": "t:",
+	"icon.pi": "pi",
+	"icon.agents": "AG",
+	"icon.cache": "cache",
+	"icon.input": "in:",
+	"icon.output": "out:",
+	"icon.host": "host",
+	"icon.session": "id",
+	"icon.package": "[P]",
+	"icon.warning": "[!]",
+	"icon.rewind": "<-",
+	"icon.auto": "[A]",
+	"icon.extensionSkill": "SK",
+	"icon.extensionTool": "TL",
+	"icon.extensionSlashCommand": "/",
+	"icon.extensionMcp": "MCP",
+	"icon.extensionRule": "RL",
+	"icon.extensionHook": "HK",
+	"icon.extensionPrompt": "PR",
+	"icon.extensionContextFile": "CF",
+	"icon.extensionInstruction": "IN",
+	// Thinking Levels
+	"thinking.minimal": "[min]",
+	"thinking.low": "[low]",
+	"thinking.medium": "[med]",
+	"thinking.high": "[high]",
+	"thinking.xhigh": "[xhi]",
+	// Checkboxes
+	"checkbox.checked": "[x]",
+	"checkbox.unchecked": "[ ]",
+	// Text Formatting
+	"format.ellipsis": "...",
+	"format.bullet": "*",
+	"format.dash": "-",
+	"format.bracketLeft": "[",
+	"format.bracketRight": "]",
+	// Markdown-specific
+	"md.quoteBorder": "|",
+	"md.hrChar": "-",
+	"md.bullet": "*",
+};
+
+const SYMBOL_PRESETS: Record<SymbolPreset, SymbolMap> = {
+	unicode: UNICODE_SYMBOLS,
+	nerd: NERD_SYMBOLS,
+	ascii: ASCII_SYMBOLS,
+};
 
 // ============================================================================
 // Types & Schema
@@ -21,6 +652,15 @@ const ColorValueSchema = Type.Union([
 ]);
 
 type ColorValue = Static<typeof ColorValueSchema>;
+
+const SymbolPresetSchema = Type.Union([Type.Literal("unicode"), Type.Literal("nerd"), Type.Literal("ascii")]);
+
+const SymbolsSchema = Type.Optional(
+	Type.Object({
+		preset: Type.Optional(SymbolPresetSchema),
+		overrides: Type.Optional(Type.Record(Type.String(), Type.String())),
+	}),
+);
 
 const ThemeJsonSchema = Type.Object({
 	$schema: Type.Optional(Type.String()),
@@ -99,6 +739,7 @@ const ThemeJsonSchema = Type.Object({
 		statusLineUntracked: ColorValueSchema,
 		statusLineOutput: ColorValueSchema,
 		statusLineCost: ColorValueSchema,
+		statusLineSubagents: ColorValueSchema,
 	}),
 	export: Type.Optional(
 		Type.Object({
@@ -107,6 +748,7 @@ const ThemeJsonSchema = Type.Object({
 			infoBg: Type.Optional(ColorValueSchema),
 		}),
 	),
+	symbols: SymbolsSchema,
 });
 
 type ThemeJson = Static<typeof ThemeJsonSchema>;
@@ -171,7 +813,8 @@ export type ThemeColor =
 	| "statusLineDirty"
 	| "statusLineUntracked"
 	| "statusLineOutput"
-	| "statusLineCost";
+	| "statusLineCost"
+	| "statusLineSubagents";
 
 export type ThemeBg =
 	| "selectedBg"
@@ -363,13 +1006,18 @@ export class Theme {
 	private fgColors: Map<ThemeColor, string>;
 	private bgColors: Map<ThemeBg, string>;
 	private mode: ColorMode;
+	private symbols: SymbolMap;
+	private symbolPreset: SymbolPreset;
 
 	constructor(
 		fgColors: Record<ThemeColor, string | number>,
 		bgColors: Record<ThemeBg, string | number>,
 		mode: ColorMode,
+		symbolPreset: SymbolPreset = "unicode",
+		symbolOverrides: Record<string, string> = {},
 	) {
 		this.mode = mode;
+		this.symbolPreset = symbolPreset;
 		this.fgColors = new Map();
 		for (const [key, value] of Object.entries(fgColors) as [ThemeColor, string | number][]) {
 			this.fgColors.set(key, fgAnsi(value, mode));
@@ -377,6 +1025,16 @@ export class Theme {
 		this.bgColors = new Map();
 		for (const [key, value] of Object.entries(bgColors) as [ThemeBg, string | number][]) {
 			this.bgColors.set(key, bgAnsi(value, mode));
+		}
+		// Build symbol map from preset + overrides
+		const baseSymbols = SYMBOL_PRESETS[symbolPreset];
+		this.symbols = { ...baseSymbols };
+		for (const [key, value] of Object.entries(symbolOverrides)) {
+			if (key in this.symbols) {
+				this.symbols[key as SymbolKey] = value;
+			} else {
+				logger.debug("Invalid symbol key in override", { key, availableKeys: Object.keys(this.symbols) });
+			}
 		}
 	}
 
@@ -447,6 +1105,183 @@ export class Theme {
 	getBashModeBorderColor(): (str: string) => string {
 		return (str: string) => this.fg("bashMode", str);
 	}
+
+	// -------------------------------------------------------------------------
+	// Symbol Methods
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Get a symbol by key.
+	 */
+	symbol(key: SymbolKey): string {
+		return this.symbols[key];
+	}
+
+	/**
+	 * Get a symbol styled with a color.
+	 */
+	styledSymbol(key: SymbolKey, color: ThemeColor): string {
+		return this.fg(color, this.symbols[key]);
+	}
+
+	/**
+	 * Get the current symbol preset.
+	 */
+	getSymbolPreset(): SymbolPreset {
+		return this.symbolPreset;
+	}
+
+	// -------------------------------------------------------------------------
+	// Symbol Category Accessors
+	// -------------------------------------------------------------------------
+
+	get status() {
+		return {
+			success: this.symbols["status.success"],
+			error: this.symbols["status.error"],
+			warning: this.symbols["status.warning"],
+			info: this.symbols["status.info"],
+			pending: this.symbols["status.pending"],
+			disabled: this.symbols["status.disabled"],
+			enabled: this.symbols["status.enabled"],
+			running: this.symbols["status.running"],
+			aborted: this.symbols["status.aborted"],
+		};
+	}
+
+	get nav() {
+		return {
+			cursor: this.symbols["nav.cursor"],
+			selected: this.symbols["nav.selected"],
+			expand: this.symbols["nav.expand"],
+			collapse: this.symbols["nav.collapse"],
+			back: this.symbols["nav.back"],
+		};
+	}
+
+	get tree() {
+		return {
+			branch: this.symbols["tree.branch"],
+			last: this.symbols["tree.last"],
+			vertical: this.symbols["tree.vertical"],
+			horizontal: this.symbols["tree.horizontal"],
+			hook: this.symbols["tree.hook"],
+		};
+	}
+
+	get boxRound() {
+		return {
+			topLeft: this.symbols["boxRound.topLeft"],
+			topRight: this.symbols["boxRound.topRight"],
+			bottomLeft: this.symbols["boxRound.bottomLeft"],
+			bottomRight: this.symbols["boxRound.bottomRight"],
+			horizontal: this.symbols["boxRound.horizontal"],
+			vertical: this.symbols["boxRound.vertical"],
+		};
+	}
+
+	get boxSharp() {
+		return {
+			topLeft: this.symbols["boxSharp.topLeft"],
+			topRight: this.symbols["boxSharp.topRight"],
+			bottomLeft: this.symbols["boxSharp.bottomLeft"],
+			bottomRight: this.symbols["boxSharp.bottomRight"],
+			horizontal: this.symbols["boxSharp.horizontal"],
+			vertical: this.symbols["boxSharp.vertical"],
+			cross: this.symbols["boxSharp.cross"],
+			teeDown: this.symbols["boxSharp.teeDown"],
+			teeUp: this.symbols["boxSharp.teeUp"],
+			teeRight: this.symbols["boxSharp.teeRight"],
+			teeLeft: this.symbols["boxSharp.teeLeft"],
+		};
+	}
+
+	get sep() {
+		return {
+			powerline: this.symbols["sep.powerline"],
+			powerlineThin: this.symbols["sep.powerlineThin"],
+			powerlineLeft: this.symbols["sep.powerlineLeft"],
+			powerlineRight: this.symbols["sep.powerlineRight"],
+			powerlineThinLeft: this.symbols["sep.powerlineThinLeft"],
+			powerlineThinRight: this.symbols["sep.powerlineThinRight"],
+			block: this.symbols["sep.block"],
+			space: this.symbols["sep.space"],
+			asciiLeft: this.symbols["sep.asciiLeft"],
+			asciiRight: this.symbols["sep.asciiRight"],
+			dot: this.symbols["sep.dot"],
+			slash: this.symbols["sep.slash"],
+			pipe: this.symbols["sep.pipe"],
+		};
+	}
+
+	get icon() {
+		return {
+			model: this.symbols["icon.model"],
+			folder: this.symbols["icon.folder"],
+			file: this.symbols["icon.file"],
+			git: this.symbols["icon.git"],
+			branch: this.symbols["icon.branch"],
+			tokens: this.symbols["icon.tokens"],
+			context: this.symbols["icon.context"],
+			cost: this.symbols["icon.cost"],
+			time: this.symbols["icon.time"],
+			pi: this.symbols["icon.pi"],
+			agents: this.symbols["icon.agents"],
+			cache: this.symbols["icon.cache"],
+			input: this.symbols["icon.input"],
+			output: this.symbols["icon.output"],
+			host: this.symbols["icon.host"],
+			session: this.symbols["icon.session"],
+			package: this.symbols["icon.package"],
+			warning: this.symbols["icon.warning"],
+			rewind: this.symbols["icon.rewind"],
+			auto: this.symbols["icon.auto"],
+			extensionSkill: this.symbols["icon.extensionSkill"],
+			extensionTool: this.symbols["icon.extensionTool"],
+			extensionSlashCommand: this.symbols["icon.extensionSlashCommand"],
+			extensionMcp: this.symbols["icon.extensionMcp"],
+			extensionRule: this.symbols["icon.extensionRule"],
+			extensionHook: this.symbols["icon.extensionHook"],
+			extensionPrompt: this.symbols["icon.extensionPrompt"],
+			extensionContextFile: this.symbols["icon.extensionContextFile"],
+			extensionInstruction: this.symbols["icon.extensionInstruction"],
+		};
+	}
+
+	get thinking() {
+		return {
+			minimal: this.symbols["thinking.minimal"],
+			low: this.symbols["thinking.low"],
+			medium: this.symbols["thinking.medium"],
+			high: this.symbols["thinking.high"],
+			xhigh: this.symbols["thinking.xhigh"],
+		};
+	}
+
+	get checkbox() {
+		return {
+			checked: this.symbols["checkbox.checked"],
+			unchecked: this.symbols["checkbox.unchecked"],
+		};
+	}
+
+	get format() {
+		return {
+			ellipsis: this.symbols["format.ellipsis"],
+			bullet: this.symbols["format.bullet"],
+			dash: this.symbols["format.dash"],
+			bracketLeft: this.symbols["format.bracketLeft"],
+			bracketRight: this.symbols["format.bracketRight"],
+		};
+	}
+
+	get md() {
+		return {
+			quoteBorder: this.symbols["md.quoteBorder"],
+			hrChar: this.symbols["md.hrChar"],
+			bullet: this.symbols["md.bullet"],
+		};
+	}
 }
 
 // ============================================================================
@@ -456,6 +1291,7 @@ export class Theme {
 const BUILTIN_THEMES: Record<string, ThemeJson> = {
 	dark: darkThemeJson as ThemeJson,
 	light: lightThemeJson as ThemeJson,
+	...(defaultThemes as Record<string, ThemeJson>),
 };
 
 function getBuiltinThemes(): Record<string, ThemeJson> {
@@ -524,7 +1360,7 @@ function loadThemeJson(name: string): ThemeJson {
 	return json as ThemeJson;
 }
 
-function createTheme(themeJson: ThemeJson, mode?: ColorMode): Theme {
+function createTheme(themeJson: ThemeJson, mode?: ColorMode, symbolPresetOverride?: SymbolPreset): Theme {
 	const colorMode = mode ?? detectColorMode();
 	const resolvedColors = resolveThemeColors(themeJson.colors, themeJson.vars);
 	const fgColors: Record<ThemeColor, string | number> = {} as Record<ThemeColor, string | number>;
@@ -545,12 +1381,15 @@ function createTheme(themeJson: ThemeJson, mode?: ColorMode): Theme {
 			fgColors[key as ThemeColor] = value;
 		}
 	}
-	return new Theme(fgColors, bgColors, colorMode);
+	// Extract symbol configuration - settings override takes precedence over theme
+	const symbolPreset: SymbolPreset = symbolPresetOverride ?? themeJson.symbols?.preset ?? "unicode";
+	const symbolOverrides = themeJson.symbols?.overrides ?? {};
+	return new Theme(fgColors, bgColors, colorMode, symbolPreset, symbolOverrides);
 }
 
-function loadTheme(name: string, mode?: ColorMode): Theme {
+function loadTheme(name: string, mode?: ColorMode, symbolPresetOverride?: SymbolPreset): Theme {
 	const themeJson = loadThemeJson(name);
-	return createTheme(themeJson, mode);
+	return createTheme(themeJson, mode, symbolPresetOverride);
 }
 
 function detectTerminalBackground(): "dark" | "light" {
@@ -578,21 +1417,23 @@ function getDefaultTheme(): string {
 
 export let theme: Theme;
 let currentThemeName: string | undefined;
+let currentSymbolPresetOverride: SymbolPreset | undefined;
 let themeWatcher: fs.FSWatcher | undefined;
 let onThemeChangeCallback: (() => void) | undefined;
 
-export function initTheme(themeName?: string, enableWatcher: boolean = false): void {
+export function initTheme(themeName?: string, enableWatcher: boolean = false, symbolPreset?: SymbolPreset): void {
 	const name = themeName ?? getDefaultTheme();
 	currentThemeName = name;
+	currentSymbolPresetOverride = symbolPreset;
 	try {
-		theme = loadTheme(name);
+		theme = loadTheme(name, undefined, symbolPreset);
 		if (enableWatcher) {
 			startThemeWatcher();
 		}
 	} catch (err) {
 		logger.debug("Theme loading failed, falling back to dark theme", { error: String(err) });
 		currentThemeName = "dark";
-		theme = loadTheme("dark");
+		theme = loadTheme("dark", undefined, symbolPreset);
 		// Don't start watcher for fallback theme
 	}
 }
@@ -600,15 +1441,18 @@ export function initTheme(themeName?: string, enableWatcher: boolean = false): v
 export function setTheme(name: string, enableWatcher: boolean = false): { success: boolean; error?: string } {
 	currentThemeName = name;
 	try {
-		theme = loadTheme(name);
+		theme = loadTheme(name, undefined, currentSymbolPresetOverride);
 		if (enableWatcher) {
 			startThemeWatcher();
+		}
+		if (onThemeChangeCallback) {
+			onThemeChangeCallback();
 		}
 		return { success: true };
 	} catch (error) {
 		// Theme is invalid - fall back to dark theme
 		currentThemeName = "dark";
-		theme = loadTheme("dark");
+		theme = loadTheme("dark", undefined, currentSymbolPresetOverride);
 		// Don't start watcher for fallback theme
 		return {
 			success: false,
@@ -617,8 +1461,47 @@ export function setTheme(name: string, enableWatcher: boolean = false): { succes
 	}
 }
 
+/**
+ * Set the symbol preset override, recreating the theme with the new preset.
+ */
+export function setSymbolPreset(preset: SymbolPreset): void {
+	currentSymbolPresetOverride = preset;
+	if (currentThemeName) {
+		try {
+			theme = loadTheme(currentThemeName, undefined, preset);
+		} catch {
+			// Fall back to dark theme with new preset
+			theme = loadTheme("dark", undefined, preset);
+		}
+		if (onThemeChangeCallback) {
+			onThemeChangeCallback();
+		}
+	}
+}
+
+/**
+ * Get the current symbol preset override.
+ */
+export function getSymbolPresetOverride(): SymbolPreset | undefined {
+	return currentSymbolPresetOverride;
+}
+
 export function onThemeChange(callback: () => void): void {
 	onThemeChangeCallback = callback;
+}
+
+/**
+ * Get available symbol presets.
+ */
+export function getAvailableSymbolPresets(): SymbolPreset[] {
+	return ["unicode", "nerd", "ascii"];
+}
+
+/**
+ * Check if a string is a valid symbol preset.
+ */
+export function isValidSymbolPreset(preset: string): preset is SymbolPreset {
+	return preset === "unicode" || preset === "nerd" || preset === "ascii";
 }
 
 function startThemeWatcher(): void {
@@ -647,8 +1530,8 @@ function startThemeWatcher(): void {
 				// Debounce rapid changes
 				setTimeout(() => {
 					try {
-						// Reload the theme
-						theme = loadTheme(currentThemeName!);
+						// Reload the theme with current symbol preset override
+						theme = loadTheme(currentThemeName!, undefined, currentSymbolPresetOverride);
 						// Notify callback (to invalidate UI)
 						if (onThemeChangeCallback) {
 							onThemeChangeCallback();
@@ -936,6 +1819,24 @@ export function getLanguageFromPath(filePath: string): string | undefined {
 	return extToLang[ext];
 }
 
+export function getSymbolTheme(): SymbolTheme {
+	const preset = theme.getSymbolPreset();
+	const spinnerFrames =
+		preset === "ascii" ? ["-", "\\", "|", "/"] : ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+	return {
+		cursor: theme.nav.cursor,
+		inputCursor: preset === "ascii" ? "|" : "▏",
+		ellipsis: theme.format.ellipsis,
+		boxRound: theme.boxRound,
+		boxSharp: theme.boxSharp,
+		table: theme.boxSharp,
+		quoteBorder: theme.md.quoteBorder,
+		hrChar: theme.md.hrChar,
+		spinnerFrames,
+	};
+}
+
 export function getMarkdownTheme(): MarkdownTheme {
 	return {
 		heading: (text: string) => theme.fg("mdHeading", text),
@@ -952,6 +1853,7 @@ export function getMarkdownTheme(): MarkdownTheme {
 		italic: (text: string) => theme.italic(text),
 		underline: (text: string) => theme.underline(text),
 		strikethrough: (text: string) => chalk.strikethrough(text),
+		symbols: getSymbolTheme(),
 		highlightCode: (code: string, lang?: string): string[] => {
 			// Validate language before highlighting to avoid stderr spam from cli-highlight
 			const validLang = lang && supportsLanguage(lang) ? lang : undefined;
@@ -976,6 +1878,7 @@ export function getSelectListTheme(): SelectListTheme {
 		description: (text: string) => theme.fg("muted", text),
 		scrollInfo: (text: string) => theme.fg("muted", text),
 		noMatch: (text: string) => theme.fg("muted", text),
+		symbols: getSymbolTheme(),
 	};
 }
 
@@ -983,6 +1886,7 @@ export function getEditorTheme(): EditorTheme {
 	return {
 		borderColor: (text: string) => theme.fg("borderMuted", text),
 		selectList: getSelectListTheme(),
+		symbols: getSymbolTheme(),
 	};
 }
 
@@ -991,7 +1895,7 @@ export function getSettingsListTheme(): import("@oh-my-pi/pi-tui").SettingsListT
 		label: (text: string, selected: boolean) => (selected ? theme.fg("accent", text) : text),
 		value: (text: string, selected: boolean) => (selected ? theme.fg("accent", text) : theme.fg("muted", text)),
 		description: (text: string) => theme.fg("dim", text),
-		cursor: theme.fg("accent", "→ "),
+		cursor: theme.fg("accent", `${theme.nav.cursor} `),
 		hint: (text: string) => theme.fg("dim", text),
 	};
 }

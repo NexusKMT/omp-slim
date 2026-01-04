@@ -1,6 +1,7 @@
 import { isArrowDown, isArrowUp, isCtrlC, isEnter, isEscape } from "../keys";
+import type { SymbolTheme } from "../symbols";
 import type { Component } from "../tui";
-import { truncateToWidth } from "../utils";
+import { truncateToWidth, visibleWidth } from "../utils";
 
 export interface SelectItem {
 	value: string;
@@ -14,6 +15,7 @@ export interface SelectListTheme {
 	description: (text: string) => string;
 	scrollInfo: (text: string) => string;
 	noMatch: (text: string) => string;
+	symbols: SymbolTheme;
 }
 
 export class SelectList implements Component {
@@ -74,7 +76,8 @@ export class SelectList implements Component {
 			let line = "";
 			if (isSelected) {
 				// Use arrow indicator for selection - entire line uses selectedText color
-				const prefixWidth = 2; // "→ " is 2 characters visually
+				const prefix = `${this.theme.symbols.cursor} `;
+				const prefixWidth = visibleWidth(prefix);
 				const displayValue = item.label || item.value;
 
 				if (item.description && width > 40) {
@@ -90,20 +93,20 @@ export class SelectList implements Component {
 					if (remainingWidth > 10) {
 						const truncatedDesc = truncateToWidth(item.description, remainingWidth, "");
 						// Apply selectedText to entire line content
-						line = this.theme.selectedText(`→ ${truncatedValue}${spacing}${truncatedDesc}`);
+						line = this.theme.selectedText(`${prefix}${truncatedValue}${spacing}${truncatedDesc}`);
 					} else {
 						// Not enough space for description
 						const maxWidth = width - prefixWidth - 2;
-						line = this.theme.selectedText(`→ ${truncateToWidth(displayValue, maxWidth, "")}`);
+						line = this.theme.selectedText(`${prefix}${truncateToWidth(displayValue, maxWidth, "")}`);
 					}
 				} else {
 					// No description or not enough width
 					const maxWidth = width - prefixWidth - 2;
-					line = this.theme.selectedText(`→ ${truncateToWidth(displayValue, maxWidth, "")}`);
+					line = this.theme.selectedText(`${prefix}${truncateToWidth(displayValue, maxWidth, "")}`);
 				}
 			} else {
 				const displayValue = item.label || item.value;
-				const prefix = "  ";
+				const prefix = " ".repeat(visibleWidth(`${this.theme.symbols.cursor} `));
 
 				if (item.description && width > 40) {
 					// Calculate how much space we have for value + description

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { extname, join } from "node:path";
 import { getConfigDirPaths } from "../../../config.js";
+import { createBiomeClient } from "./clients/biome-client";
 import type { ServerConfig } from "./types";
 
 export interface LspConfig {
@@ -110,6 +111,8 @@ export const SERVERS: Record<string, ServerConfig> = {
 		fileTypes: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".jsonc"],
 		rootMarkers: ["biome.json", "biome.jsonc"],
 		isLinter: true,
+		// Use CLI instead of LSP - Biome's LSP has known stale diagnostics issues
+		createClient: createBiomeClient,
 	},
 
 	eslint: {

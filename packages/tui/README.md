@@ -154,9 +154,52 @@ input.getValue();
 Multi-line text editor with autocomplete, file completion, and paste handling.
 
 ```typescript
+interface SymbolTheme {
+	cursor: string;
+	ellipsis: string;
+	boxRound: {
+		topLeft: string;
+		topRight: string;
+		bottomLeft: string;
+		bottomRight: string;
+		horizontal: string;
+		vertical: string;
+	};
+	boxSharp: {
+		topLeft: string;
+		topRight: string;
+		bottomLeft: string;
+		bottomRight: string;
+		horizontal: string;
+		vertical: string;
+		teeDown: string;
+		teeUp: string;
+		teeLeft: string;
+		teeRight: string;
+		cross: string;
+	};
+	table: {
+		topLeft: string;
+		topRight: string;
+		bottomLeft: string;
+		bottomRight: string;
+		horizontal: string;
+		vertical: string;
+		teeDown: string;
+		teeUp: string;
+		teeLeft: string;
+		teeRight: string;
+		cross: string;
+	};
+	quoteBorder: string;
+	hrChar: string;
+	spinnerFrames: string[];
+}
+
 interface EditorTheme {
 	borderColor: (str: string) => string;
 	selectList: SelectListTheme;
+	symbols: SymbolTheme;
 }
 
 const editor = new Editor(theme);
@@ -206,6 +249,7 @@ interface MarkdownTheme {
 	strikethrough: (text: string) => string;
 	underline: (text: string) => string;
 	highlightCode?: (code: string, lang?: string) => string[];
+	symbols: SymbolTheme;
 }
 
 interface DefaultTextStyle {
@@ -289,6 +333,7 @@ interface SelectListTheme {
 	description: (text: string) => string;
 	scrollInfo: (text: string) => string;
 	noMatch: (text: string) => string;
+	symbols: SymbolTheme;
 }
 
 const list = new SelectList(

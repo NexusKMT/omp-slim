@@ -95,7 +95,7 @@ export class InspectorPanel implements Component {
 	private renderFilePreview(path: string, width: number): string[] {
 		const lines: string[] = [];
 		lines.push(theme.fg("muted", "Preview:"));
-		lines.push(theme.fg("dim", "─".repeat(Math.min(width - 2, 40))));
+		lines.push(theme.fg("dim", theme.boxSharp.horizontal.repeat(Math.min(width - 2, 40))));
 
 		try {
 			const content = readFileSync(path, "utf-8");
@@ -144,7 +144,7 @@ export class InspectorPanel implements Component {
 	private renderToolArgs(raw: unknown, width: number): string[] {
 		const lines: string[] = [];
 		lines.push(theme.fg("muted", "Arguments:"));
-		lines.push(theme.fg("dim", "─".repeat(Math.min(width - 2, 40))));
+		lines.push(theme.fg("dim", theme.boxSharp.horizontal.repeat(Math.min(width - 2, 40))));
 
 		try {
 			const tool = raw as any;
@@ -183,7 +183,7 @@ export class InspectorPanel implements Component {
 	private renderSkillContent(raw: unknown, width: number): string[] {
 		const lines: string[] = [];
 		lines.push(theme.fg("muted", "Instruction:"));
-		lines.push(theme.fg("dim", "─".repeat(Math.min(width - 2, 40))));
+		lines.push(theme.fg("dim", theme.boxSharp.horizontal.repeat(Math.min(width - 2, 40))));
 
 		try {
 			const skill = raw as any;
@@ -212,7 +212,7 @@ export class InspectorPanel implements Component {
 	private renderMcpDetails(raw: unknown, width: number): string[] {
 		const lines: string[] = [];
 		lines.push(theme.fg("muted", "Connection:"));
-		lines.push(theme.fg("dim", "─".repeat(Math.min(width - 2, 40))));
+		lines.push(theme.fg("dim", theme.boxSharp.horizontal.repeat(Math.min(width - 2, 40))));
 
 		try {
 			const mcp = raw as any;
@@ -251,7 +251,7 @@ export class InspectorPanel implements Component {
 		// Show trigger pattern if present
 		if (ext.trigger) {
 			lines.push(theme.fg("muted", "Trigger:"));
-			lines.push(theme.fg("dim", "─".repeat(Math.min(width - 2, 40))));
+			lines.push(theme.fg("dim", theme.boxSharp.horizontal.repeat(Math.min(width - 2, 40))));
 			lines.push(`  ${theme.fg("accent", ext.trigger)}`);
 			lines.push("");
 		}
@@ -279,7 +279,7 @@ export class InspectorPanel implements Component {
 	private getStatusBadge(state: ExtensionState, reason?: string, shadowedBy?: string): string {
 		switch (state) {
 			case "active":
-				return theme.fg("success", "● Active");
+				return theme.fg("success", `${theme.status.enabled} Active`);
 			case "disabled": {
 				const reasonText =
 					reason === "provider-disabled"
@@ -287,10 +287,10 @@ export class InspectorPanel implements Component {
 						: reason === "item-disabled"
 							? "manually disabled"
 							: "unknown";
-				return theme.fg("dim", `○ Disabled (${reasonText})`);
+				return theme.fg("dim", `${theme.status.disabled} Disabled (${reasonText})`);
 			}
 			case "shadowed":
-				return theme.fg("warning", `◐ Shadowed${shadowedBy ? ` by ${shadowedBy}` : ""}`);
+				return theme.fg("warning", `${theme.status.running} Shadowed${shadowedBy ? ` by ${shadowedBy}` : ""}`);
 		}
 	}
 

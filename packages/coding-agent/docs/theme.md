@@ -132,7 +132,7 @@ Themes are defined in JSON files with the following structure:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/theme-schema.json",
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/theme-schema.json",
   "name": "my-theme",
   "vars": {
     "blue": "#0066cc",
@@ -148,6 +148,39 @@ Themes are defined in JSON files with the following structure:
   }
 }
 ```
+
+## Symbols
+
+Themes can also customize specific UI symbols (icons, separators, bullets, etc.). Use `symbols.preset` to set a theme default (overridden by user settings), and `symbols.overrides` to override individual keys.
+
+Example:
+
+```json
+{
+  "symbols": {
+    "preset": "ascii",
+    "overrides": {
+      "icon.model": "[M]",
+      "sep.powerlineLeft": ">",
+      "sep.powerlineRight": "<"
+    }
+  }
+}
+```
+
+Symbol keys by category:
+
+- Status: `status.success`, `status.error`, `status.warning`, `status.info`, `status.pending`, `status.disabled`, `status.enabled`, `status.running`, `status.aborted`
+- Navigation: `nav.cursor`, `nav.selected`, `nav.expand`, `nav.collapse`, `nav.back`
+- Tree: `tree.branch`, `tree.last`, `tree.vertical`, `tree.horizontal`, `tree.hook`
+- Boxes (rounded): `boxRound.topLeft`, `boxRound.topRight`, `boxRound.bottomLeft`, `boxRound.bottomRight`, `boxRound.horizontal`, `boxRound.vertical`
+- Boxes (sharp): `boxSharp.topLeft`, `boxSharp.topRight`, `boxSharp.bottomLeft`, `boxSharp.bottomRight`, `boxSharp.horizontal`, `boxSharp.vertical`, `boxSharp.cross`, `boxSharp.teeDown`, `boxSharp.teeUp`, `boxSharp.teeRight`, `boxSharp.teeLeft`
+- Separators: `sep.powerline`, `sep.powerlineThin`, `sep.powerlineLeft`, `sep.powerlineRight`, `sep.powerlineThinLeft`, `sep.powerlineThinRight`, `sep.dot`, `sep.slash`, `sep.pipe`
+- Icons: `icon.model`, `icon.folder`, `icon.file`, `icon.git`, `icon.branch`, `icon.tokens`, `icon.context`, `icon.cost`, `icon.time`, `icon.pi`, `icon.agents`, `icon.cache`, `icon.input`, `icon.output`, `icon.host`, `icon.session`, `icon.package`, `icon.warning`, `icon.rewind`, `icon.auto`, `icon.extensionSkill`, `icon.extensionTool`, `icon.extensionSlashCommand`, `icon.extensionMcp`, `icon.extensionRule`, `icon.extensionHook`, `icon.extensionPrompt`, `icon.extensionContextFile`, `icon.extensionInstruction`
+- Thinking: `thinking.minimal`, `thinking.low`, `thinking.medium`, `thinking.high`, `thinking.xhigh`
+- Checkboxes: `checkbox.checked`, `checkbox.unchecked`
+- Formatting: `format.ellipsis`, `format.bullet`, `format.dash`
+- Markdown: `md.quoteBorder`, `md.hrChar`, `md.bullet`
 
 ### Color Values
 
@@ -253,7 +286,7 @@ Custom themes are loaded from `~/.omp/agent/themes/*.json`.
 
    ```json
    {
-   	"$schema": "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/theme-schema.json",
+   	"$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/theme-schema.json",
    	"name": "my-theme",
    	"vars": {
    		"primary": "#00aaff",
@@ -448,14 +481,14 @@ Error loading theme 'my-theme':
 For editor support, the JSON schema is available at:
 
 ```
-https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/theme-schema.json
+https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/theme-schema.json
 ```
 
 Add to your theme file for auto-completion and validation:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/theme-schema.json",
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/theme-schema.json",
   ...
 }
 ```
@@ -552,7 +585,7 @@ function getMarkdownTheme(): MarkdownTheme {
 }
 
 // Create markdown with theme
-const md = new Markdown(text, 1, 1, { bgColor: theme.bg("userMessageBg") }, getMarkdownTheme());
+const md = new Markdown(text, 1, 1, getMarkdownTheme(), { bgColor: theme.bg("userMessageBg") });
 ```
 
 This approach:

@@ -23,6 +23,10 @@ import { truncateToVisualLines } from "./visual-truncate";
 // Preview line limit for bash when not expanded
 const BASH_PREVIEW_LINES = 5;
 
+function wrapBrackets(text: string): string {
+	return `${theme.format.bracketLeft}${text}${theme.format.bracketRight}`;
+}
+
 /**
  * Convert absolute path to tilde notation if it's in home directory
  */
@@ -314,7 +318,11 @@ export class ToolExecutionComponent extends Container {
 
 		// Header
 		this.contentBox.addChild(
-			new Text(theme.fg("toolTitle", theme.bold(`$ ${command || theme.fg("toolOutput", "...")}`)), 0, 0),
+			new Text(
+				theme.fg("toolTitle", theme.bold(`$ ${command || theme.fg("toolOutput", theme.format.ellipsis)}`)),
+				0,
+				0,
+			),
 		);
 
 		if (this.result) {
@@ -341,7 +349,11 @@ export class ToolExecutionComponent extends Container {
 
 					if (skippedCount > 0) {
 						this.contentBox.addChild(
-							new Text(theme.fg("toolOutput", `\n... (${skippedCount} earlier lines)`), 0, 0),
+							new Text(
+								theme.fg("toolOutput", `\n${theme.format.ellipsis} (${skippedCount} earlier lines)`),
+								0,
+								0,
+							),
 						);
 					}
 
@@ -372,7 +384,7 @@ export class ToolExecutionComponent extends Container {
 						);
 					}
 				}
-				this.contentBox.addChild(new Text(`\n${theme.fg("warning", `[${warnings.join(". ")}]`)}`, 0, 0));
+				this.contentBox.addChild(new Text(`\n${theme.fg("warning", wrapBrackets(warnings.join(". ")))}`, 0, 0));
 			}
 		}
 	}
@@ -412,7 +424,7 @@ export class ToolExecutionComponent extends Container {
 			const offset = this.args?.offset;
 			const limit = this.args?.limit;
 
-			let pathDisplay = path ? theme.fg("accent", path) : theme.fg("toolOutput", "...");
+			let pathDisplay = path ? theme.fg("accent", path) : theme.fg("toolOutput", theme.format.ellipsis);
 			if (offset !== undefined || limit !== undefined) {
 				const startLine = offset ?? 1;
 				const endLine = limit !== undefined ? startLine + limit - 1 : "";
@@ -437,7 +449,7 @@ export class ToolExecutionComponent extends Container {
 						.map((line: string) => (lang ? replaceTabs(line) : theme.fg("toolOutput", replaceTabs(line))))
 						.join("\n");
 				if (remaining > 0) {
-					text += theme.fg("toolOutput", `\n... (${remaining} more lines)`);
+					text += theme.fg("toolOutput", `\n${theme.format.ellipsis} (${remaining} more lines)`);
 				}
 
 				const truncation = this.result.details?.truncation;
@@ -447,25 +459,31 @@ export class ToolExecutionComponent extends Container {
 							"\n" +
 							theme.fg(
 								"warning",
-								`[First line exceeds ${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit]`,
+								wrapBrackets(
+									`First line exceeds ${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit`,
+								),
 							);
 					} else if (truncation.truncatedBy === "lines") {
 						text +=
 							"\n" +
 							theme.fg(
 								"warning",
-								`[Truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines (${
-									truncation.maxLines ?? DEFAULT_MAX_LINES
-								} line limit)]`,
+								wrapBrackets(
+									`Truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines (${
+										truncation.maxLines ?? DEFAULT_MAX_LINES
+									} line limit)`,
+								),
 							);
 					} else {
 						text +=
 							"\n" +
 							theme.fg(
 								"warning",
-								`[Truncated: ${truncation.outputLines} lines shown (${formatSize(
-									truncation.maxBytes ?? DEFAULT_MAX_BYTES,
-								)} limit)]`,
+								wrapBrackets(
+									`Truncated: ${truncation.outputLines} lines shown (${formatSize(
+										truncation.maxBytes ?? DEFAULT_MAX_BYTES,
+									)} limit)`,
+								),
 							);
 					}
 				}
@@ -485,7 +503,7 @@ export class ToolExecutionComponent extends Container {
 			text =
 				theme.fg("toolTitle", theme.bold("write")) +
 				" " +
-				(path ? theme.fg("accent", path) : theme.fg("toolOutput", "..."));
+				(path ? theme.fg("accent", path) : theme.fg("toolOutput", theme.format.ellipsis));
 
 			if (fileContent) {
 				const maxLines = this.expanded ? lines.length : 10;
@@ -498,7 +516,10 @@ export class ToolExecutionComponent extends Container {
 						.map((line: string) => (lang ? replaceTabs(line) : theme.fg("toolOutput", replaceTabs(line))))
 						.join("\n");
 				if (remaining > 0) {
-					text += theme.fg("toolOutput", `\n... (${remaining} more lines, ${totalLines} total)`);
+					text += theme.fg(
+						"toolOutput",
+						`\n${theme.format.ellipsis} (${remaining} more lines, ${totalLines} total)`,
+					);
 				}
 			}
 
@@ -506,7 +527,9 @@ export class ToolExecutionComponent extends Container {
 			if (this.result?.details?.diagnostics) {
 				const diag = this.result.details.diagnostics;
 				if (diag.messages.length > 0) {
-					const icon = diag.errored ? theme.fg("error", "●") : theme.fg("warning", "●");
+					const icon = diag.errored
+						? theme.styledSymbol("status.error", "error")
+						: theme.styledSymbol("status.warning", "warning");
 					text += `\n\n${icon} ${theme.fg("toolTitle", "LSP Diagnostics")} ${theme.fg("dim", `(${diag.summary})`)}`;
 					const maxDiags = this.expanded ? diag.messages.length : 5;
 					const displayDiags = diag.messages.slice(0, maxDiags);
@@ -515,7 +538,7 @@ export class ToolExecutionComponent extends Container {
 						text += `\n  ${theme.fg(color, d)}`;
 					}
 					if (diag.messages.length > maxDiags) {
-						text += theme.fg("dim", `\n  ... (${diag.messages.length - maxDiags} more)`);
+						text += theme.fg("dim", `\n  ${theme.format.ellipsis} (${diag.messages.length - maxDiags} more)`);
 					}
 				}
 			}
@@ -524,7 +547,7 @@ export class ToolExecutionComponent extends Container {
 			const path = shortenPath(rawPath);
 
 			// Build path display, appending :line if we have diff info
-			let pathDisplay = path ? theme.fg("accent", path) : theme.fg("toolOutput", "...");
+			let pathDisplay = path ? theme.fg("accent", path) : theme.fg("toolOutput", theme.format.ellipsis);
 			const firstChangedLine =
 				(this.editDiffPreview && "firstChangedLine" in this.editDiffPreview
 					? this.editDiffPreview.firstChangedLine
@@ -555,7 +578,9 @@ export class ToolExecutionComponent extends Container {
 			if (this.result?.details?.diagnostics) {
 				const diag = this.result.details.diagnostics;
 				if (diag.messages.length > 0) {
-					const icon = diag.errored ? theme.fg("error", "●") : theme.fg("warning", "●");
+					const icon = diag.errored
+						? theme.styledSymbol("status.error", "error")
+						: theme.styledSymbol("status.warning", "warning");
 					text += `\n\n${icon} ${theme.fg("toolTitle", "LSP Diagnostics")} ${theme.fg("dim", `(${diag.summary})`)}`;
 					const maxDiags = this.expanded ? diag.messages.length : 5;
 					const displayDiags = diag.messages.slice(0, maxDiags);
@@ -564,7 +589,7 @@ export class ToolExecutionComponent extends Container {
 						text += `\n  ${theme.fg(color, d)}`;
 					}
 					if (diag.messages.length > maxDiags) {
-						text += theme.fg("dim", `\n  ... (${diag.messages.length - maxDiags} more)`);
+						text += theme.fg("dim", `\n  ${theme.format.ellipsis} (${diag.messages.length - maxDiags} more)`);
 					}
 				}
 			}
@@ -587,7 +612,7 @@ export class ToolExecutionComponent extends Container {
 
 					text += `\n\n${displayLines.map((line: string) => theme.fg("toolOutput", line)).join("\n")}`;
 					if (remaining > 0) {
-						text += theme.fg("toolOutput", `\n... (${remaining} more lines)`);
+						text += theme.fg("toolOutput", `\n${theme.format.ellipsis} (${remaining} more lines)`);
 					}
 				}
 
@@ -601,7 +626,7 @@ export class ToolExecutionComponent extends Container {
 					if (truncation?.truncated) {
 						warnings.push(`${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit`);
 					}
-					text += `\n${theme.fg("warning", `[Truncated: ${warnings.join(", ")}]`)}`;
+					text += `\n${theme.fg("warning", wrapBrackets(`Truncated: ${warnings.join(", ")}`))}`;
 				}
 			}
 		} else if (this.toolName === "find") {
@@ -628,7 +653,7 @@ export class ToolExecutionComponent extends Container {
 
 					text += `\n\n${displayLines.map((line: string) => theme.fg("toolOutput", line)).join("\n")}`;
 					if (remaining > 0) {
-						text += theme.fg("toolOutput", `\n... (${remaining} more lines)`);
+						text += theme.fg("toolOutput", `\n${theme.format.ellipsis} (${remaining} more lines)`);
 					}
 				}
 
@@ -642,7 +667,7 @@ export class ToolExecutionComponent extends Container {
 					if (truncation?.truncated) {
 						warnings.push(`${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit`);
 					}
-					text += `\n${theme.fg("warning", `[Truncated: ${warnings.join(", ")}]`)}`;
+					text += `\n${theme.fg("warning", wrapBrackets(`Truncated: ${warnings.join(", ")}`))}`;
 				}
 			}
 		} else if (this.toolName === "grep") {
@@ -673,7 +698,7 @@ export class ToolExecutionComponent extends Container {
 
 					text += `\n\n${displayLines.map((line: string) => theme.fg("toolOutput", line)).join("\n")}`;
 					if (remaining > 0) {
-						text += theme.fg("toolOutput", `\n... (${remaining} more lines)`);
+						text += theme.fg("toolOutput", `\n${theme.format.ellipsis} (${remaining} more lines)`);
 					}
 				}
 
@@ -691,7 +716,7 @@ export class ToolExecutionComponent extends Container {
 					if (linesTruncated) {
 						warnings.push("some lines truncated");
 					}
-					text += `\n${theme.fg("warning", `[Truncated: ${warnings.join(", ")}]`)}`;
+					text += `\n${theme.fg("warning", wrapBrackets(`Truncated: ${warnings.join(", ")}`))}`;
 				}
 			}
 		} else {
