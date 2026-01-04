@@ -16,7 +16,6 @@
  * 7. Watch CI
  */
 
-import type { Subprocess } from "bun";
 import { Glob } from "bun";
 
 const VERSION = process.argv[2];
@@ -50,29 +49,13 @@ function run(cmd: string[], options: RunOptions = {}): string {
 	return result.stdout?.toString().trim() ?? "";
 }
 
-async function getChangelogs(): Promise<string[]> {
-	const glob = new Glob("packages/*/CHANGELOG.md");
-	const paths: string[] = [];
-	for await (const path of glob.scan(".")) {
-		paths.push(path);
-	}
-	return paths;
-}
-
-async function getPackageJsonPaths(): Promise<string[]> {
-	const glob = new Glob("packages/*/package.json");
-	const paths: string[] = [];
-	for await (const path of glob.scan(".")) {
-		paths.push(path);
-	}
-	return paths;
-}
+const changelogGlob = new Glob("packages/*/CHANGELOG.md");
+const packageJsonGlob = new Glob("packages/*/package.json");
 
 async function updateChangelogsForRelease(version: string): Promise<void> {
 	const date = new Date().toISOString().split("T")[0];
-	const changelogs = await getChangelogs();
 
-	for (const changelog of changelogs) {
+	for await (const changelog of changelogGlob.scan(".")) {
 		let content = await Bun.file(changelog).text();
 
 		if (!content.includes("## [Unreleased]")) {
@@ -115,7 +98,7 @@ console.log("  Working directory clean\n");
 
 // 2. Update package versions
 console.log(`Updating package versions to ${VERSION}...`);
-const pkgJsonPaths = await getPackageJsonPaths();
+const pkgJsonPaths = await Array.fromAsync(packageJsonGlob.scan("."));
 run(["sd", '"version": "[^"]+"', `"version": "${VERSION}"`, ...pkgJsonPaths]);
 
 // Verify
