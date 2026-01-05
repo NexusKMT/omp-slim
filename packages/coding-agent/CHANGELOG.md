@@ -1,9 +1,10 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Added
 
+- Added streaming NDJSON writer for session persistence with proper backpressure handling
+- Added `flush()` method to SessionManager for explicit control over pending write completion
 - Added `/exit` slash command to exit the application from interactive mode
 - Added fuzzy path matching suggestions when read tool encounters file-not-found errors, showing closest matches using Levenshtein distance
 - Added `status.shadowed` symbol for theme customization to properly indicate shadowed extension state
@@ -22,6 +23,7 @@
 
 ### Changed
 
+- Changed session persistence to use streaming writes instead of synchronous file appends for better performance
 - Changed read tool to automatically redirect to ls when given a directory path instead of a file
 - Changed tool description prompts to be more concise with clearer usage guidelines and structured formatting
 - Moved tool description prompts from inline strings to external markdown files in `src/prompts/tools/` directory for better maintainability
@@ -50,6 +52,7 @@
 
 ### Fixed
 
+- Fixed session persistence to truncate oversized content blocks before writing to prevent memory exhaustion
 - Fixed extension list and inspector panel to use correct symbols for disabled and shadowed states instead of reusing unrelated status icons
 - Fixed token counting for subagent progress to handle different usage object formats (camelCase and snake_case)
 - Fixed image file handling by adding 20MB size limit to prevent memory issues during serialization

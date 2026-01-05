@@ -1447,6 +1447,9 @@ export class InteractiveMode {
 	 * Emits shutdown event to hooks and tools, then exits.
 	 */
 	private async shutdown(): Promise<void> {
+		// Flush pending session writes before shutdown
+		await this.sessionManager.flush();
+
 		// Emit shutdown event to hooks
 		const hookRunner = this.session.hookRunner;
 		if (hookRunner?.hasHandlers("session_shutdown")) {

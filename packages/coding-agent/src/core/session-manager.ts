@@ -1,6 +1,7 @@
 import {
 	appendFileSync,
 	closeSync,
+	createWriteStream,
 	existsSync,
 	mkdirSync,
 	openSync,
@@ -9,11 +10,13 @@ import {
 	readSync,
 	statSync,
 	writeFileSync,
+	type WriteStream,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { ImageContent, Message, TextContent } from "@oh-my-pi/pi-ai";
+import type { ImageContent, Message, TextContent, ThinkingContent, ToolCall } from "@oh-my-pi/pi-ai";
 import { nanoid } from "nanoid";
+import ndjson from "ndjson";
 import { getAgentDir as getDefaultAgentDir } from "../config";
 import {
 	type BashExecutionMessage,
@@ -571,6 +574,350 @@ function formatTimeAgo(date: Date): string {
 	return date.toLocaleDateString();
 }
 
+const MAX_PERSIST_CONTENT_CHARS = 500_000;
+const PERSIST_TRUNCATION_NOTICE = "\n\n[Session persistence truncated large content]";
+
+type TextOrImageContent = TextContent | ImageContent;
+type AssistantContent = TextContent | ThinkingContent | ToolCall;
+type FileMentionFile = { path: string; content: string; lineCount: number };
+
+function truncateStringForPersistence(
+	text: string,
+	maxChars: number = MAX_PERSIST_CONTENT_CHARS,
+): { text: string; truncated: boolean } {
+	if (text.length <= maxChars) {
+		return { text, truncated: false };
+	}
+	const limit = Math.max(0, maxChars - PERSIST_TRUNCATION_NOTICE.length);
+	return {
+		text: `${text.slice(0, limit)}${PERSIST_TRUNCATION_NOTICE}`,
+		truncated: true,
+	};
+}
+
+function textImageContentExceedsLimit(content: TextOrImageContent[], maxChars: number): boolean {
+	let total = 0;
+	for (const block of content) {
+		if (block.type === "text") {
+			total += block.text.length;
+		} else if (block.type === "image") {
+			total += block.data.length;
+		}
+		if (total > maxChars) return true;
+	}
+	return false;
+}
+
+function truncateTextImageContent(
+	content: TextOrImageContent[],
+	maxChars: number,
+): { content: TextOrImageContent[]; truncated: boolean } {
+	if (!textImageContentExceedsLimit(content, maxChars)) {
+		return { content, truncated: false };
+	}
+
+	const result: TextOrImageContent[] = [];
+	let remaining = maxChars;
+
+	for (const block of content) {
+		if (block.type === "text") {
+			if (block.text.length <= remaining) {
+				result.push(block);
+				remaining -= block.text.length;
+				continue;
+			}
+
+			const limit = Math.max(0, remaining - PERSIST_TRUNCATION_NOTICE.length);
+			result.push({
+				...block,
+				text: `${block.text.slice(0, limit)}${PERSIST_TRUNCATION_NOTICE}`,
+			});
+			return { content: result, truncated: true };
+		}
+
+		if (block.type === "image") {
+			if (block.data.length <= remaining) {
+				result.push(block);
+				remaining -= block.data.length;
+				continue;
+			}
+
+			result.push({
+				type: "text",
+				text: `[Image omitted in session persistence]${PERSIST_TRUNCATION_NOTICE}`,
+			});
+			return { content: result, truncated: true };
+		}
+	}
+
+	return { content: result, truncated: true };
+}
+
+function assistantContentExceedsLimit(content: AssistantContent[], maxChars: number): boolean {
+	let total = 0;
+	for (const block of content) {
+		if (block.type === "text") {
+			total += block.text.length;
+		} else if (block.type === "thinking") {
+			total += block.thinking.length;
+		}
+		if (total > maxChars) return true;
+	}
+	return false;
+}
+
+function truncateAssistantContent(
+	content: AssistantContent[],
+	maxChars: number,
+): { content: AssistantContent[]; truncated: boolean } {
+	if (!assistantContentExceedsLimit(content, maxChars)) {
+		return { content, truncated: false };
+	}
+
+	const result: AssistantContent[] = [];
+	let remaining = maxChars;
+
+	for (const block of content) {
+		if (block.type === "text") {
+			if (block.text.length <= remaining) {
+				result.push(block);
+				remaining -= block.text.length;
+				continue;
+			}
+
+			const limit = Math.max(0, remaining - PERSIST_TRUNCATION_NOTICE.length);
+			result.push({
+				...block,
+				text: `${block.text.slice(0, limit)}${PERSIST_TRUNCATION_NOTICE}`,
+			});
+			return { content: result, truncated: true };
+		}
+
+		if (block.type === "thinking") {
+			if (block.thinking.length <= remaining) {
+				result.push(block);
+				remaining -= block.thinking.length;
+				continue;
+			}
+
+			const limit = Math.max(0, remaining - PERSIST_TRUNCATION_NOTICE.length);
+			result.push({
+				...block,
+				thinking: `${block.thinking.slice(0, limit)}${PERSIST_TRUNCATION_NOTICE}`,
+			});
+			return { content: result, truncated: true };
+		}
+
+		if (block.type === "toolCall") {
+			if (remaining <= 0) {
+				result.push({ type: "text", text: PERSIST_TRUNCATION_NOTICE });
+				return { content: result, truncated: true };
+			}
+			result.push(block);
+		}
+	}
+
+	return { content: result, truncated: true };
+}
+
+function truncateContentValue(
+	content: string | TextOrImageContent[],
+	maxChars: number,
+): { content: string | TextOrImageContent[]; truncated: boolean } {
+	if (typeof content === "string") {
+		const result = truncateStringForPersistence(content, maxChars);
+		return { content: result.text, truncated: result.truncated };
+	}
+	return truncateTextImageContent(content, maxChars);
+}
+
+function fileMentionsExceedLimit(files: FileMentionFile[], maxChars: number): boolean {
+	let total = 0;
+	for (const file of files) {
+		total += file.content.length;
+		if (total > maxChars) return true;
+	}
+	return false;
+}
+
+function truncateFileMentions(
+	files: FileMentionFile[],
+	maxChars: number,
+): { files: FileMentionFile[]; truncated: boolean } {
+	if (!fileMentionsExceedLimit(files, maxChars)) {
+		return { files, truncated: false };
+	}
+
+	const result: FileMentionFile[] = [];
+	let remaining = maxChars;
+
+	for (const file of files) {
+		if (file.content.length <= remaining) {
+			result.push(file);
+			remaining -= file.content.length;
+			continue;
+		}
+
+		const limit = Math.max(0, remaining - PERSIST_TRUNCATION_NOTICE.length);
+		const truncatedContent = `${file.content.slice(0, limit)}${PERSIST_TRUNCATION_NOTICE}`;
+		result.push({
+			...file,
+			content: truncatedContent,
+			lineCount: truncatedContent.split("\n").length,
+		});
+		return { files: result, truncated: true };
+	}
+
+	return { files: result, truncated: true };
+}
+
+function truncateDetailsForPersistence(details: unknown, maxChars: number): unknown {
+	if (!details || typeof details !== "object" || Array.isArray(details)) {
+		return details;
+	}
+
+	let changed = false;
+	const result: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(details as Record<string, unknown>)) {
+		if (typeof value === "string") {
+			const truncated = truncateStringForPersistence(value, maxChars);
+			result[key] = truncated.text;
+			if (truncated.truncated) changed = true;
+		} else {
+			result[key] = value;
+		}
+	}
+
+	return changed ? result : details;
+}
+
+function truncateAgentMessageForPersistence(message: AgentMessage): AgentMessage {
+	if (message.role === "user") {
+		const result = truncateContentValue(message.content, MAX_PERSIST_CONTENT_CHARS);
+		if (!result.truncated) return message;
+		return { ...message, content: result.content };
+	}
+
+	if (message.role === "assistant") {
+		const result = truncateAssistantContent(message.content, MAX_PERSIST_CONTENT_CHARS);
+		if (!result.truncated) return message;
+		return { ...message, content: result.content };
+	}
+
+	if (message.role === "toolResult") {
+		const contentResult = truncateTextImageContent(message.content, MAX_PERSIST_CONTENT_CHARS);
+		const detailsResult = truncateDetailsForPersistence(message.details, MAX_PERSIST_CONTENT_CHARS);
+		const contentChanged = contentResult.truncated;
+		const detailsChanged = detailsResult !== message.details;
+
+		if (!contentChanged && !detailsChanged) return message;
+
+		if (contentChanged && detailsChanged) {
+			return { ...message, content: contentResult.content, details: detailsResult };
+		}
+		if (contentChanged) {
+			return { ...message, content: contentResult.content };
+		}
+		return { ...message, details: detailsResult };
+	}
+
+	if (message.role === "hookMessage") {
+		const result = truncateContentValue(message.content, MAX_PERSIST_CONTENT_CHARS);
+		if (!result.truncated) return message;
+		return { ...message, content: result.content };
+	}
+
+	if (message.role === "bashExecution") {
+		const result = truncateStringForPersistence(message.output, MAX_PERSIST_CONTENT_CHARS);
+		if (!result.truncated) return message;
+		return { ...message, output: result.text };
+	}
+
+	if (message.role === "fileMention") {
+		const result = truncateFileMentions(message.files, MAX_PERSIST_CONTENT_CHARS);
+		if (!result.truncated) return message;
+		return { ...message, files: result.files };
+	}
+
+	return message;
+}
+
+function prepareEntryForPersistence(entry: FileEntry): FileEntry {
+	if (entry.type === "message") {
+		const message = truncateAgentMessageForPersistence(entry.message);
+		if (message === entry.message) return entry;
+		return { ...entry, message };
+	}
+
+	if (entry.type === "custom_message") {
+		const result = truncateContentValue(entry.content, MAX_PERSIST_CONTENT_CHARS);
+		if (!result.truncated) return entry;
+		return { ...entry, content: result.content };
+	}
+
+	if (entry.type === "compaction" || entry.type === "branch_summary") {
+		const result = truncateStringForPersistence(entry.summary, MAX_PERSIST_CONTENT_CHARS);
+		if (!result.truncated) return entry;
+		return { ...entry, summary: result.text };
+	}
+
+	return entry;
+}
+
+class NdjsonFileWriter {
+	private encoder: ReturnType<typeof ndjson.stringify>;
+	private writeStream: WriteStream;
+	private closed = false;
+	private error: Error | undefined;
+
+	constructor(path: string) {
+		this.encoder = ndjson.stringify();
+		this.writeStream = createWriteStream(path, { flags: "a" });
+		this.encoder.pipe(this.writeStream);
+
+		this.encoder.on("error", (err: Error) => {
+			this.error = err;
+		});
+		this.writeStream.on("error", (err: Error) => {
+			this.error = err;
+		});
+	}
+
+	write(entry: FileEntry): void {
+		if (this.closed) throw new Error("Writer closed");
+		if (this.error) throw this.error;
+		this.encoder.write(entry);
+	}
+
+	flush(): Promise<void> {
+		if (this.error) return Promise.reject(this.error);
+		return new Promise((resolve) => {
+			// Cork/uncork forces immediate flush through transform
+			this.encoder.cork();
+			process.nextTick(() => {
+				this.encoder.uncork();
+				// Wait for writeStream to drain
+				if (this.writeStream.writableNeedDrain) {
+					this.writeStream.once("drain", resolve);
+				} else {
+					resolve();
+				}
+			});
+		});
+	}
+
+	close(): Promise<void> {
+		if (this.closed) return Promise.resolve();
+		this.closed = true;
+
+		return new Promise((resolve, reject) => {
+			this.writeStream.on("finish", resolve);
+			this.writeStream.on("error", reject);
+			this.encoder.end();
+		});
+	}
+}
+
 /** Get recent sessions for display in welcome screen */
 export function getRecentSessions(sessionDir: string, limit = 3): RecentSessionInfo[] {
 	return getSortedSessions(sessionDir).slice(0, limit);
@@ -608,6 +955,8 @@ export class SessionManager {
 	private labelsById: Map<string, string> = new Map();
 	private leafId: string | null = null;
 	private usageStatistics: UsageStatistics = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+	private persistWriter: NdjsonFileWriter | undefined;
+	private persistWriterPath: string | undefined;
 
 	private constructor(cwd: string, sessionDir: string, sessionFile: string | undefined, persist: boolean) {
 		this.cwd = cwd;
@@ -626,6 +975,7 @@ export class SessionManager {
 
 	/** Switch to a different session file (used for resume and branching) */
 	setSessionFile(sessionFile: string): void {
+		this._closePersistWriterSync();
 		this.sessionFile = resolve(sessionFile);
 		if (existsSync(this.sessionFile)) {
 			this.fileEntries = loadEntriesFromFile(this.sessionFile);
@@ -645,6 +995,7 @@ export class SessionManager {
 	}
 
 	newSession(options?: NewSessionOptions): string | undefined {
+		this._closePersistWriterSync();
 		this.sessionId = nanoid();
 		const timestamp = new Date().toISOString();
 		const header: SessionHeader = {
@@ -696,14 +1047,53 @@ export class SessionManager {
 		}
 	}
 
+	private _ensurePersistWriter(): NdjsonFileWriter | undefined {
+		if (!this.persist || !this.sessionFile) return undefined;
+		if (this.persistWriter && this.persistWriterPath === this.sessionFile) return this.persistWriter;
+		this._closePersistWriterSync();
+		this.persistWriter = new NdjsonFileWriter(this.sessionFile);
+		this.persistWriterPath = this.sessionFile;
+		return this.persistWriter;
+	}
+
+	private _closePersistWriterSync(): void {
+		if (this.persistWriter) {
+			// Fire-and-forget close - use flush() for guaranteed completion
+			this.persistWriter.close();
+			this.persistWriter = undefined;
+		}
+		this.persistWriterPath = undefined;
+	}
+
+	private async _closePersistWriter(): Promise<void> {
+		if (this.persistWriter) {
+			await this.persistWriter.close();
+			this.persistWriter = undefined;
+		}
+		this.persistWriterPath = undefined;
+	}
+
 	private _rewriteFile(): void {
 		if (!this.persist || !this.sessionFile) return;
-		const content = `${this.fileEntries.map((e) => JSON.stringify(e)).join("\n")}\n`;
-		writeFileSync(this.sessionFile, content);
+		this._closePersistWriterSync();
+		writeFileSync(this.sessionFile, "");
+		const writer = this._ensurePersistWriter();
+		if (!writer) return;
+		for (const entry of this.fileEntries) {
+			const persistedEntry = prepareEntryForPersistence(entry);
+			writer.write(persistedEntry);
+		}
 	}
 
 	isPersisted(): boolean {
 		return this.persist;
+	}
+
+	/** Flush pending writes to disk. Call before switching sessions or on shutdown. */
+	async flush(): Promise<void> {
+		if (this.persistWriter) {
+			await this.persistWriter.flush();
+		}
 	}
 
 	getCwd(): string {
@@ -742,6 +1132,8 @@ export class SessionManager {
 
 		// Update the session file header with the title (if already flushed)
 		if (this.persist && this.sessionFile && existsSync(this.sessionFile)) {
+			// Close writer to flush pending writes before modifying file
+			this._closePersistWriterSync();
 			try {
 				const content = readFileSync(this.sessionFile, "utf-8");
 				const lines = content.split("\n");
@@ -765,13 +1157,18 @@ export class SessionManager {
 		const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
 		if (!hasAssistant) return;
 
+		const writer = this._ensurePersistWriter();
+		if (!writer) return;
+
 		if (!this.flushed) {
 			for (const e of this.fileEntries) {
-				appendFileSync(this.sessionFile, `${JSON.stringify(e)}\n`);
+				const persistedEntry = prepareEntryForPersistence(e);
+				writer.write(persistedEntry);
 			}
 			this.flushed = true;
 		} else {
-			appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`);
+			const persistedEntry = prepareEntryForPersistence(entry);
+			writer.write(persistedEntry);
 		}
 	}
 

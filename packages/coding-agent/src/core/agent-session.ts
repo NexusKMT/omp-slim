@@ -841,6 +841,7 @@ export class AgentSession {
 		this._disconnectFromAgent();
 		await this.abort();
 		this.agent.reset();
+		await this.sessionManager.flush();
 		this.sessionManager.newSession(options);
 		this._queuedMessages = [];
 		this._reconnectToAgent();
@@ -1636,6 +1637,9 @@ export class AgentSession {
 		await this.abort();
 		this._queuedMessages = [];
 
+		// Flush pending writes before switching
+		await this.sessionManager.flush();
+
 		// Set new session
 		this.sessionManager.setSessionFile(sessionPath);
 
@@ -1713,6 +1717,9 @@ export class AgentSession {
 			}
 			skipConversationRestore = result?.skipConversationRestore ?? false;
 		}
+
+		// Flush pending writes before branching
+		await this.sessionManager.flush();
 
 		if (!selectedEntry.parentId) {
 			this.sessionManager.newSession();
