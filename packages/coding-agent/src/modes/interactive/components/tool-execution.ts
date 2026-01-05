@@ -22,7 +22,6 @@ import { truncateToVisualLines } from "./visual-truncate";
 
 // Preview line limit for bash when not expanded
 const BASH_PREVIEW_LINES = 5;
-const LIST_PREVIEW_LINES = 15;
 const GENERIC_PREVIEW_LINES = 6;
 const GENERIC_ARG_PREVIEW = 6;
 const GENERIC_VALUE_MAX = 80;
@@ -39,39 +38,15 @@ function countLines(text: string): number {
 }
 
 function formatMetadataLine(lineCount: number, language: string): string {
-	return theme.fg("dim", wrapBrackets(`Lines: ${lineCount}, Language: ${language}`));
+	return theme.fg("dim", wrapBrackets(`${lineCount} lines, ${language}`));
 }
 
-type TreeListResult = {
-	text: string;
-	shown: number;
-	total: number;
-	remaining: number;
-};
-
-function buildTreeList(lines: string[], maxLines: number): TreeListResult {
-	const total = lines.length;
-	const shown = Math.min(total, maxLines);
-	const remaining = total - shown;
-	if (shown === 0) {
-		return { text: "", shown, total, remaining };
-	}
-
-	const displayLines = lines.slice(0, shown);
-	const hasMore = remaining > 0;
-	const treeLines = displayLines.map((line, index) => {
-		const isLast = index === displayLines.length - 1 && !hasMore;
-		const connector = isLast ? theme.tree.last : theme.tree.branch;
-		return `${theme.fg("dim", connector)} ${theme.fg("toolOutput", line)}`;
-	});
-
-	return { text: treeLines.join("\n"), shown, total, remaining };
-}
-
-function formatListSummary(label: string, total: number, shown: number, remaining: number, expanded: boolean): string {
-	if (total === 0) return `0 ${label}`;
-	if (expanded || remaining === 0) return `${total} ${label}`;
-	return `showing ${shown} of ${total} ${label}`;
+function formatDiffStats(added: number, removed: number, hunks: number): string {
+	const parts: string[] = [];
+	if (added > 0) parts.push(theme.fg("success", `+${added}`));
+	if (removed > 0) parts.push(theme.fg("error", `-${removed}`));
+	if (hunks > 0) parts.push(theme.fg("dim", `${hunks} hunk${hunks !== 1 ? "s" : ""}`));
+	return parts.join(theme.fg("dim", " / "));
 }
 
 type DiffStats = {
@@ -153,22 +128,108 @@ function truncateDiffByHunk(
 	};
 }
 
+interface ParsedDiagnostic {
+	filePath: string;
+	line: number;
+	col: number;
+	severity: "error" | "warning" | "info" | "hint";
+	source?: string;
+	message: string;
+	code?: string;
+}
+
+function parseDiagnosticMessage(msg: string): ParsedDiagnostic | null {
+	// Format: filePath:line:col [severity] [source] message (code)
+	const match = msg.match(/^(.+?):(\d+):(\d+)\s+\[(\w+)\]\s+(?:\[([^\]]+)\]\s+)?(.+?)(?:\s+\(([^)]+)\))?$/);
+	if (!match) return null;
+	return {
+		filePath: match[1],
+		line: parseInt(match[2], 10),
+		col: parseInt(match[3], 10),
+		severity: match[4] as ParsedDiagnostic["severity"],
+		source: match[5],
+		message: match[6],
+		code: match[7],
+	};
+}
+
 function formatDiagnostics(diag: { errored: boolean; summary: string; messages: string[] }, expanded: boolean): string {
 	if (diag.messages.length === 0) return "";
-	const icon = diag.errored
+
+	// Parse and group diagnostics by file
+	const byFile = new Map<string, ParsedDiagnostic[]>();
+	const unparsed: string[] = [];
+
+	for (const msg of diag.messages) {
+		const parsed = parseDiagnosticMessage(msg);
+		if (parsed) {
+			const existing = byFile.get(parsed.filePath) ?? [];
+			existing.push(parsed);
+			byFile.set(parsed.filePath, existing);
+		} else {
+			unparsed.push(msg);
+		}
+	}
+
+	const headerIcon = diag.errored
 		? theme.styledSymbol("status.error", "error")
 		: theme.styledSymbol("status.warning", "warning");
-	let output = `\n\n${icon} ${theme.fg("toolTitle", "Diagnostics")} ${theme.fg("dim", `(${diag.summary})`)}`;
+	let output = `\n\n${headerIcon} ${theme.fg("toolTitle", "Diagnostics")} ${theme.fg("dim", `(${diag.summary})`)}`;
+
 	const maxDiags = expanded ? diag.messages.length : 5;
-	const displayDiags = diag.messages.slice(0, maxDiags);
-	for (const d of displayDiags) {
-		const color = d.includes("[error]") ? "error" : d.includes("[warning]") ? "warning" : "dim";
-		output += `\n  ${theme.fg(color, d)}`;
+	let shown = 0;
+
+	// Render grouped diagnostics with file icons
+	const files = Array.from(byFile.entries());
+	for (let fi = 0; fi < files.length && shown < maxDiags; fi++) {
+		const [filePath, diagnostics] = files[fi];
+		const isLastFile = fi === files.length - 1 && unparsed.length === 0;
+		const fileBranch = isLastFile ? theme.tree.last : theme.tree.branch;
+
+		// File header with icon
+		output += `\n ${theme.fg("dim", fileBranch)} ${theme.fg("muted", theme.icon.file)} ${theme.fg("accent", filePath)}`;
+		shown++;
+
+		// Render diagnostics for this file
+		for (let di = 0; di < diagnostics.length && shown < maxDiags; di++) {
+			const d = diagnostics[di];
+			const isLastDiag = di === diagnostics.length - 1;
+			const diagBranch = isLastFile
+				? isLastDiag
+					? `   ${theme.tree.last}`
+					: `   ${theme.tree.branch}`
+				: isLastDiag
+					? ` ${theme.tree.vertical} ${theme.tree.last}`
+					: ` ${theme.tree.vertical} ${theme.tree.branch}`;
+
+			const sevIcon =
+				d.severity === "error"
+					? theme.styledSymbol("status.error", "error")
+					: d.severity === "warning"
+						? theme.styledSymbol("status.warning", "warning")
+						: theme.styledSymbol("status.info", "muted");
+			const location = theme.fg("dim", `:${d.line}:${d.col}`);
+			const codeTag = d.code ? theme.fg("dim", ` (${d.code})`) : "";
+			const msgColor = d.severity === "error" ? "error" : d.severity === "warning" ? "warning" : "toolOutput";
+
+			output += `\n ${theme.fg("dim", diagBranch)} ${sevIcon}${location} ${theme.fg(msgColor, d.message)}${codeTag}`;
+			shown++;
+		}
 	}
-	if (diag.messages.length > maxDiags) {
-		const remaining = diag.messages.length - maxDiags;
-		output += theme.fg("dim", `\n  ${theme.format.ellipsis} (${remaining} more). Ctrl+O to expand diagnostics`);
+
+	// Render unparsed messages (fallback)
+	for (const msg of unparsed) {
+		if (shown >= maxDiags) break;
+		const color = msg.includes("[error]") ? "error" : msg.includes("[warning]") ? "warning" : "dim";
+		output += `\n ${theme.fg("dim", theme.tree.branch)} ${theme.fg(color, msg)}`;
+		shown++;
 	}
+
+	if (diag.messages.length > shown) {
+		const remaining = diag.messages.length - shown;
+		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", `${theme.format.ellipsis} ${remaining} more`)} ${theme.fg("dim", "(Ctrl+O to expand)")}`;
+	}
+
 	return output;
 }
 
@@ -645,60 +706,34 @@ export class ToolExecutionComponent extends Container {
 				const rawPath = this.args?.file_path || this.args?.path || "";
 				const lang = getLanguageFromPath(rawPath);
 				const languageLabel = lang ?? "text";
+				const lineCount = countLines(output);
 				const lines = lang ? highlightCode(replaceTabs(output), lang) : output.split("\n");
 
-				text += `\n${formatMetadataLine(countLines(output), languageLabel)}`;
+				// Metadata line with line count and language
+				text += `\n${theme.fg("dim", wrapBrackets(`${lineCount} lines, ${languageLabel}`))}`;
 
-				const maxLines = this.expanded ? lines.length : 10;
-				const displayLines = lines.slice(0, maxLines);
-				const remaining = lines.length - maxLines;
-
-				text +=
-					"\n\n" +
-					displayLines
-						.map((line: string) => (lang ? replaceTabs(line) : theme.fg("toolOutput", replaceTabs(line))))
-						.join("\n");
-				if (remaining > 0) {
-					text += theme.fg(
-						"toolOutput",
-						`\n${theme.format.ellipsis} (${remaining} more lines) ${wrapBrackets("Ctrl+O to expand")}`,
-					);
+				// Content is hidden by default, only shown when expanded
+				if (this.expanded) {
+					text +=
+						"\n\n" +
+						lines.map((line: string) => (lang ? replaceTabs(line) : theme.fg("toolOutput", replaceTabs(line)))).join("\n");
+				} else {
+					// Show expand hint
+					text += `\n${theme.fg("dim", `${theme.nav.expand} Ctrl+O to show content`)}`;
 				}
 
+				// Truncation warning (if content was truncated during reading)
 				const truncation = this.result.details?.truncation;
 				if (truncation?.truncated) {
+					let warning: string;
 					if (truncation.firstLineExceedsLimit) {
-						text +=
-							"\n" +
-							theme.fg(
-								"warning",
-								wrapBrackets(
-									`First line exceeds ${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit`,
-								),
-							);
+						warning = `First line exceeds ${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit`;
 					} else if (truncation.truncatedBy === "lines") {
-						text +=
-							"\n" +
-							theme.fg(
-								"warning",
-								wrapBrackets(
-									`Truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines (${
-										truncation.maxLines ?? DEFAULT_MAX_LINES
-									} line limit)`,
-								),
-							);
+						warning = `Truncated: ${truncation.outputLines} of ${truncation.totalLines} lines (${truncation.maxLines ?? DEFAULT_MAX_LINES} line limit)`;
 					} else {
-						text +=
-							"\n" +
-							theme.fg(
-								"warning",
-								wrapBrackets(
-									`Truncated: ${truncation.outputLines} lines shown (${formatSize(
-										truncation.maxBytes ?? DEFAULT_MAX_BYTES,
-									)} limit)`,
-								),
-							);
+						warning = `Truncated: ${truncation.outputLines} lines (${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit)`;
 					}
+					text += `\n${theme.fg("warning", wrapBrackets(warning))}`;
 				}
 			}
 		} else if (this.toolName === "write") {
@@ -775,10 +810,7 @@ export class ToolExecutionComponent extends Container {
 					text += `\n\n${theme.fg("error", this.editDiffPreview.error)}`;
 				} else if (this.editDiffPreview.diff) {
 					const diffStats = getDiffStats(this.editDiffPreview.diff);
-					text += `\n${theme.fg(
-						"dim",
-						wrapBrackets(`Changes: +${diffStats.added} -${diffStats.removed}, ${diffStats.hunks} hunks`),
-					)}`;
+					text += `\n${theme.fg("dim", theme.format.bracketLeft)}${formatDiffStats(diffStats.added, diffStats.removed, diffStats.hunks)}${theme.fg("dim", theme.format.bracketRight)}`;
 
 					const {
 						text: diffText,
@@ -804,168 +836,6 @@ export class ToolExecutionComponent extends Container {
 			// Show LSP diagnostics if available
 			if (this.result?.details?.diagnostics) {
 				text += formatDiagnostics(this.result.details.diagnostics, this.expanded);
-			}
-		} else if (this.toolName === "ls") {
-			const path = shortenPath(this.args?.path || ".");
-			const limit = this.args?.limit;
-
-			text = `${theme.fg("toolTitle", theme.bold("ls"))} ${theme.fg("accent", path)}`;
-			if (limit !== undefined) {
-				text += theme.fg("toolOutput", ` (limit ${limit})`);
-			}
-
-			if (this.result) {
-				const output = this.getTextOutput().trim();
-				if (output) {
-					const lines = output.split("\n");
-					const maxLines = this.expanded ? lines.length : LIST_PREVIEW_LINES;
-					const { text: treeText, shown, total, remaining } = buildTreeList(lines, maxLines);
-					const summary = formatListSummary("entries", total, shown, remaining, this.expanded);
-					const expandHint =
-						!this.expanded && remaining > 0 ? theme.fg("dim", ` ${theme.nav.expand} Ctrl+O to expand`) : "";
-
-					text += `\n\n${theme.fg("dim", wrapBrackets(summary))}${expandHint}`;
-					if (treeText) {
-						text += `\n${treeText}`;
-					}
-					if (!this.expanded && remaining > 0) {
-						text += `\n${theme.fg("dim", theme.tree.last)} ${theme.fg(
-							"toolOutput",
-							`${theme.format.ellipsis} (${remaining} more)`,
-						)}`;
-					}
-				} else {
-					text += `\n\n${theme.fg("dim", wrapBrackets("0 entries"))}`;
-				}
-
-				const entryLimit = this.result.details?.entryLimitReached;
-				const truncation = this.result.details?.truncation;
-				if (entryLimit || truncation?.truncated) {
-					const warnings: string[] = [];
-					if (entryLimit) {
-						warnings.push(
-							typeof entryLimit === "number" ? `entry limit reached (${entryLimit})` : "entry limit reached",
-						);
-					}
-					if (truncation?.truncated) {
-						warnings.push(`output bytes limit (${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)})`);
-					}
-					text += `\n${theme.fg("warning", wrapBrackets(`Truncated: ${warnings.join(", ")}`))}`;
-				}
-			}
-		} else if (this.toolName === "find") {
-			const pattern = this.args?.pattern || "";
-			const path = shortenPath(this.args?.path || ".");
-			const limit = this.args?.limit;
-
-			text =
-				theme.fg("toolTitle", theme.bold("find")) +
-				" " +
-				theme.fg("accent", pattern) +
-				theme.fg("toolOutput", ` in ${path}`);
-			if (limit !== undefined) {
-				text += theme.fg("toolOutput", ` (limit ${limit})`);
-			}
-
-			if (this.result) {
-				const output = this.getTextOutput().trim();
-				if (output) {
-					const lines = output.split("\n");
-					const maxLines = this.expanded ? lines.length : LIST_PREVIEW_LINES;
-					const { text: treeText, shown, total, remaining } = buildTreeList(lines, maxLines);
-					const summary = formatListSummary("results", total, shown, remaining, this.expanded);
-					const expandHint =
-						!this.expanded && remaining > 0 ? theme.fg("dim", ` ${theme.nav.expand} Ctrl+O to expand`) : "";
-
-					text += `\n\n${theme.fg("dim", wrapBrackets(summary))}${expandHint}`;
-					if (treeText) {
-						text += `\n${treeText}`;
-					}
-					if (!this.expanded && remaining > 0) {
-						text += `\n${theme.fg("dim", theme.tree.last)} ${theme.fg(
-							"toolOutput",
-							`${theme.format.ellipsis} (${remaining} more)`,
-						)}`;
-					}
-				} else {
-					text += `\n\n${theme.fg("dim", wrapBrackets("0 results"))}`;
-				}
-
-				const resultLimit = this.result.details?.resultLimitReached;
-				const truncation = this.result.details?.truncation;
-				if (resultLimit || truncation?.truncated) {
-					const warnings: string[] = [];
-					if (resultLimit) {
-						warnings.push(
-							typeof resultLimit === "number" ? `result limit reached (${resultLimit})` : "result limit reached",
-						);
-					}
-					if (truncation?.truncated) {
-						warnings.push(`output bytes limit (${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)})`);
-					}
-					text += `\n${theme.fg("warning", wrapBrackets(`Truncated: ${warnings.join(", ")}`))}`;
-				}
-			}
-		} else if (this.toolName === "grep") {
-			const pattern = this.args?.pattern || "";
-			const path = shortenPath(this.args?.path || ".");
-			const glob = this.args?.glob;
-			const limit = this.args?.limit;
-
-			text =
-				theme.fg("toolTitle", theme.bold("grep")) +
-				" " +
-				theme.fg("accent", `/${pattern}/`) +
-				theme.fg("toolOutput", ` in ${path}`);
-			if (glob) {
-				text += theme.fg("toolOutput", ` (${glob})`);
-			}
-			if (limit !== undefined) {
-				text += theme.fg("toolOutput", ` limit ${limit}`);
-			}
-
-			if (this.result) {
-				const output = this.getTextOutput().trim();
-				if (output) {
-					const lines = output.split("\n");
-					const maxLines = this.expanded ? lines.length : LIST_PREVIEW_LINES;
-					const { text: treeText, shown, total, remaining } = buildTreeList(lines, maxLines);
-					const summary = formatListSummary("matches", total, shown, remaining, this.expanded);
-					const expandHint =
-						!this.expanded && remaining > 0 ? theme.fg("dim", ` ${theme.nav.expand} Ctrl+O to expand`) : "";
-
-					text += `\n\n${theme.fg("dim", wrapBrackets(summary))}${expandHint}`;
-					if (treeText) {
-						text += `\n${treeText}`;
-					}
-					if (!this.expanded && remaining > 0) {
-						text += `\n${theme.fg("dim", theme.tree.last)} ${theme.fg(
-							"toolOutput",
-							`${theme.format.ellipsis} (${remaining} more)`,
-						)}`;
-					}
-				} else {
-					text += `\n\n${theme.fg("dim", wrapBrackets("0 matches"))}`;
-				}
-
-				const matchLimit = this.result.details?.matchLimitReached;
-				const truncation = this.result.details?.truncation;
-				const linesTruncated = this.result.details?.linesTruncated;
-				if (matchLimit || truncation?.truncated || linesTruncated) {
-					const warnings: string[] = [];
-					if (matchLimit) {
-						warnings.push(
-							typeof matchLimit === "number" ? `match limit reached (${matchLimit})` : "match limit reached",
-						);
-					}
-					if (truncation?.truncated) {
-						warnings.push(`output bytes limit (${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)})`);
-					}
-					if (linesTruncated) {
-						warnings.push("line length truncated");
-					}
-					text += `\n${theme.fg("warning", wrapBrackets(`Truncated: ${warnings.join(", ")}`))}`;
-				}
 			}
 		} else {
 			// Generic tool (shouldn't reach here for custom tools)

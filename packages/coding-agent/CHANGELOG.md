@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Added
 
 - Added streaming NDJSON writer for session persistence with proper backpressure handling
@@ -23,6 +24,9 @@
 
 ### Changed
 
+- Changed read tool result display to hide content by default with expand hint, showing only metadata until expanded
+- Changed diagnostics display to group messages by file with tree structure and severity icons
+- Changed diff stats formatting to use colored +/- indicators with slash separators
 - Changed session persistence to use streaming writes instead of synchronous file appends for better performance
 - Changed read tool to automatically redirect to ls when given a directory path instead of a file
 - Changed tool description prompts to be more concise with clearer usage guidelines and structured formatting
@@ -49,6 +53,10 @@
 - Changed status line rendering to support left/right segment positioning with separators
 - Changed hardcoded UI symbols to use theme-configurable glyphs throughout the interface
 - Changed tree drawing characters to use theme-defined box-drawing symbols
+
+### Removed
+
+- Removed custom renderers for ls, find, and grep tools in favor of generic tool display
 
 ### Fixed
 
