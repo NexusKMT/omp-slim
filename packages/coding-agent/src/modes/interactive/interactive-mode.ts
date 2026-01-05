@@ -29,6 +29,7 @@ import type { CustomToolSessionEvent, LoadedCustomTool } from "../../core/custom
 import type { HookUIContext } from "../../core/hooks/index";
 import { createCompactionSummaryMessage } from "../../core/messages";
 import { getRecentSessions, type SessionContext, SessionManager } from "../../core/session-manager";
+import { registerAsyncCleanup } from "../cleanup";
 import { generateSessionTitle, setTerminalTitle } from "../../core/title-generator";
 import type { TruncationResult } from "../../core/tools/truncate";
 import { disableProvider, enableProvider } from "../../discovery";
@@ -116,6 +117,9 @@ export class InteractiveMode {
 
 	// Agent subscription unsubscribe function
 	private unsubscribe?: () => void;
+
+	// Signal cleanup unsubscribe function (for SIGINT/SIGTERM flush)
+	private cleanupUnsubscribe?: () => void;
 
 	// Track if editor is in bash mode (text starts with !)
 	private isBashMode = false;
@@ -235,6 +239,9 @@ export class InteractiveMode {
 
 	async init(): Promise<void> {
 		if (this.isInitialized) return;
+
+		// Register session manager flush for signal handlers (SIGINT, SIGTERM, SIGHUP)
+		this.cleanupUnsubscribe = registerAsyncCleanup(() => this.sessionManager.flush());
 
 		// Get current model info for welcome screen
 		const modelName = this.session.model?.name ?? "Unknown";
@@ -918,9 +925,9 @@ export class InteractiveMode {
 				const registry = this.session.modelRegistry;
 				const smolModel = this.settingsManager.getModelRole("smol");
 				generateSessionTitle(text, registry, smolModel)
-					.then((title) => {
+					.then(async (title) => {
 						if (title) {
-							this.sessionManager.setSessionTitle(title);
+							await this.sessionManager.setSessionTitle(title);
 							setTerminalTitle(`omp: ${title}`);
 						}
 					})
@@ -1129,7 +1136,7 @@ export class InteractiveMode {
 					this.ui,
 					(spinner) => theme.fg("accent", spinner),
 					(text) => theme.fg("muted", text),
-					`${reasonText}Auto-compacting... (esc to cancel)`,
+					`${reasonText}Auto-compacting${theme.format.ellipsis} (esc to cancel)`,
 					getSymbolTheme().spinnerFrames,
 				);
 				this.statusContainer.addChild(this.autoCompactionLoader);
@@ -1185,7 +1192,7 @@ export class InteractiveMode {
 					this.ui,
 					(spinner) => theme.fg("warning", spinner),
 					(text) => theme.fg("muted", text),
-					`Retrying (${event.attempt}/${event.maxAttempts}) in ${delaySeconds}s... (esc to cancel)`,
+					`Retrying (${event.attempt}/${event.maxAttempts}) in ${delaySeconds}s${theme.format.ellipsis} (esc to cancel)`,
 					getSymbolTheme().spinnerFrames,
 				);
 				this.statusContainer.addChild(this.retryLoader);
@@ -2650,6 +2657,9 @@ export class InteractiveMode {
 		this.statusLine.dispose();
 		if (this.unsubscribe) {
 			this.unsubscribe();
+		}
+		if (this.cleanupUnsubscribe) {
+			this.cleanupUnsubscribe();
 		}
 		if (this.isInitialized) {
 			this.ui.stop();
