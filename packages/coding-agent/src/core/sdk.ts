@@ -67,6 +67,7 @@ import {
 } from "./system-prompt";
 import { time } from "./timings";
 import { createToolContextStore } from "./tools/context";
+import { getGeminiImageTools } from "./tools/gemini-image";
 import {
 	allTools,
 	applyBashInterception,
@@ -737,6 +738,22 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			};
 		}
 		time("getWebSearchTools");
+	}
+
+	// Add Gemini image tools if GEMINI_API_KEY (or GOOGLE_API_KEY) is available
+	const geminiImageTools = await getGeminiImageTools();
+	if (geminiImageTools.length > 0) {
+		const loadedGeminiTools: LoadedCustomTool[] = geminiImageTools.map((tool) => ({
+			path: "<gemini-image>",
+			resolvedPath: "<gemini-image>",
+			tool: tool as unknown as CustomTool,
+			source: { provider: "builtin", providerName: "builtin", level: "user" },
+		}));
+		customToolsResult = {
+			...customToolsResult,
+			tools: [...customToolsResult.tools, ...loadedGeminiTools],
+		};
+		time("getGeminiImageTools");
 	}
 
 	let agent: Agent;

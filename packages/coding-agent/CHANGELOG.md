@@ -5,6 +5,7 @@
 ### Added
 
 - Added voice mode with Caps Lock toggle for speech-to-text input and text-to-speech response summaries using OpenAI Whisper and TTS APIs
+- Added `gemini_image` tool for Gemini Nano Banana image generation when `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) is set
 - Added `description` field to task tool for displaying short user-facing summaries in progress output
 - Added `getApiKeyForProvider()` method to ModelRegistry for retrieving API keys by provider name
 - Added voice settings configuration for transcription model, TTS model, voice, and audio format
