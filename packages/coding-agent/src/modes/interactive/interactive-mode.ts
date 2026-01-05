@@ -143,7 +143,6 @@ export class InteractiveMode {
 
 	// Voice mode state
 	private voiceRecording: VoiceRecordingHandle | undefined = undefined;
-	private pendingVoiceResponses = 0;
 	private voiceOutputQueue: Promise<void> = Promise.resolve();
 
 	// Auto-compaction state
@@ -1135,8 +1134,7 @@ export class InteractiveMode {
 					this.streamingMessage = undefined;
 				}
 				this.pendingTools.clear();
-				if (this.pendingVoiceResponses > 0 && this.settingsManager.getVoiceEnabled()) {
-					this.pendingVoiceResponses = Math.max(0, this.pendingVoiceResponses - 1);
+				if (this.settingsManager.getVoiceEnabled()) {
 					const lastAssistant = this.findLastAssistantMessage();
 					if (lastAssistant && lastAssistant.stopReason !== "aborted" && lastAssistant.stopReason !== "error") {
 						const text = this.extractAssistantText(lastAssistant);
@@ -1620,7 +1618,6 @@ export class InteractiveMode {
 			return;
 		}
 
-		this.pendingVoiceResponses += 1;
 		this.editor.addToHistory(cleaned);
 
 		if (this.session.isStreaming) {
@@ -2023,7 +2020,6 @@ export class InteractiveMode {
 			}
 			case "voiceEnabled": {
 				if (!value) {
-					this.pendingVoiceResponses = 0;
 					if (this.voiceRecording) {
 						void this.cancelVoiceRecording();
 					}
