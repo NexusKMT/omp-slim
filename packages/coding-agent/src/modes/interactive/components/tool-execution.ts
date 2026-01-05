@@ -37,8 +37,21 @@ function countLines(text: string): number {
 	return text.split("\n").length;
 }
 
-function formatMetadataLine(lineCount: number, language: string): string {
-	return theme.fg("dim", wrapBrackets(`${lineCount} lines, ${language}`));
+function formatMetadataLine(lineCount: number, language: string | undefined): string {
+	const icon = theme.getLangIcon(language);
+	const langLabel = language ?? "text";
+	return theme.fg("dim", `${icon} ${lineCount} lines`);
+}
+
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "ico", "bmp", "tiff"]);
+const BINARY_EXTENSIONS = new Set(["pdf", "zip", "tar", "gz", "exe", "dll", "so", "dylib", "wasm"]);
+
+function getFileType(filePath: string): "image" | "binary" | "text" {
+	const ext = filePath.split(".").pop()?.toLowerCase();
+	if (!ext) return "text";
+	if (IMAGE_EXTENSIONS.has(ext)) return "image";
+	if (BINARY_EXTENSIONS.has(ext)) return "binary";
+	return "text";
 }
 
 function formatDiffStats(added: number, removed: number, hunks: number): string {
@@ -337,6 +350,9 @@ export class ToolExecutionComponent extends Container {
 	// Cached edit diff preview (computed when args arrive, before tool executes)
 	private editDiffPreview?: EditDiffResult | EditDiffError;
 	private editDiffArgsKey?: string; // Track which args the preview is for
+	// Spinner animation for partial task results
+	private spinnerFrame = 0;
+	private spinnerInterval: ReturnType<typeof setInterval> | null = null;
 
 	constructor(
 		toolName: string,
@@ -427,7 +443,35 @@ export class ToolExecutionComponent extends Container {
 	): void {
 		this.result = result;
 		this.isPartial = isPartial;
+		this.updateSpinnerAnimation();
 		this.updateDisplay();
+	}
+
+	/**
+	 * Start or stop spinner animation based on whether this is a partial task result.
+	 */
+	private updateSpinnerAnimation(): void {
+		const needsSpinner = this.isPartial && this.toolName === "task";
+		if (needsSpinner && !this.spinnerInterval) {
+			this.spinnerInterval = setInterval(() => {
+				this.spinnerFrame = (this.spinnerFrame + 1) % 10;
+				this.updateDisplay();
+				this.ui.requestRender();
+			}, 80);
+		} else if (!needsSpinner && this.spinnerInterval) {
+			clearInterval(this.spinnerInterval);
+			this.spinnerInterval = null;
+		}
+	}
+
+	/**
+	 * Stop spinner animation and cleanup resources.
+	 */
+	stopAnimation(): void {
+		if (this.spinnerInterval) {
+			clearInterval(this.spinnerInterval);
+			this.spinnerInterval = null;
+		}
 	}
 
 	setExpanded(expanded: boolean): void {
@@ -475,7 +519,7 @@ export class ToolExecutionComponent extends Container {
 				try {
 					const resultComponent = this.customTool.renderResult(
 						{ content: this.result.content as any, details: this.result.details },
-						{ expanded: this.expanded, isPartial: this.isPartial },
+						{ expanded: this.expanded, isPartial: this.isPartial, spinnerFrame: this.spinnerFrame },
 						theme,
 					);
 					if (resultComponent) {
@@ -522,7 +566,7 @@ export class ToolExecutionComponent extends Container {
 				try {
 					const resultComponent = renderer.renderResult(
 						{ content: this.result.content as any, details: this.result.details },
-						{ expanded: this.expanded, isPartial: this.isPartial },
+						{ expanded: this.expanded, isPartial: this.isPartial, spinnerFrame: this.spinnerFrame },
 						theme,
 					);
 					if (resultComponent) {
@@ -688,9 +732,11 @@ export class ToolExecutionComponent extends Container {
 		let text = "";
 
 		if (this.toolName === "read") {
-			const path = shortenPath(this.args?.file_path || this.args?.path || "");
+			const rawPath = this.args?.file_path || this.args?.path || "";
+			const path = shortenPath(rawPath);
 			const offset = this.args?.offset;
 			const limit = this.args?.limit;
+			const fileType = getFileType(rawPath);
 
 			let pathDisplay = path ? theme.fg("accent", path) : theme.fg("toolOutput", theme.format.ellipsis);
 			if (offset !== undefined || limit !== undefined) {
@@ -703,37 +749,50 @@ export class ToolExecutionComponent extends Container {
 
 			if (this.result) {
 				const output = this.getTextOutput();
-				const rawPath = this.args?.file_path || this.args?.path || "";
-				const lang = getLanguageFromPath(rawPath);
-				const languageLabel = lang ?? "text";
-				const lineCount = countLines(output);
-				const lines = lang ? highlightCode(replaceTabs(output), lang) : output.split("\n");
 
-				// Metadata line with line count and language
-				text += `\n${theme.fg("dim", wrapBrackets(`${lineCount} lines, ${languageLabel}`))}`;
-
-				// Content is hidden by default, only shown when expanded
-				if (this.expanded) {
-					text +=
-						"\n\n" +
-						lines.map((line: string) => (lang ? replaceTabs(line) : theme.fg("toolOutput", replaceTabs(line)))).join("\n");
+				if (fileType === "image") {
+					// Image file - use image icon
+					const ext = rawPath.split(".").pop()?.toLowerCase() ?? "image";
+					text += `${theme.sep.dot}${theme.fg("dim", theme.getLangIcon(ext))}`;
+					// Images are rendered by the image component, just show hint
+					text += `\n${theme.fg("muted", "Image rendered below")}`;
+				} else if (fileType === "binary") {
+					// Binary file - use binary/pdf/archive icon based on extension
+					const ext = rawPath.split(".").pop()?.toLowerCase() ?? "binary";
+					text += `${theme.sep.dot}${theme.fg("dim", theme.getLangIcon(ext))}`;
 				} else {
-					// Show expand hint
-					text += `\n${theme.fg("dim", `${theme.nav.expand} Ctrl+O to show content`)}`;
-				}
+					// Text file - show line count and language on same line
+					const lang = getLanguageFromPath(rawPath);
+					const lineCount = countLines(output);
+					const lines = lang ? highlightCode(replaceTabs(output), lang) : output.split("\n");
+					const langIcon = theme.getLangIcon(lang);
 
-				// Truncation warning (if content was truncated during reading)
-				const truncation = this.result.details?.truncation;
-				if (truncation?.truncated) {
-					let warning: string;
-					if (truncation.firstLineExceedsLimit) {
-						warning = `First line exceeds ${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit`;
-					} else if (truncation.truncatedBy === "lines") {
-						warning = `Truncated: ${truncation.outputLines} of ${truncation.totalLines} lines (${truncation.maxLines ?? DEFAULT_MAX_LINES} line limit)`;
+					text += `${theme.sep.dot}${theme.fg("dim", `${langIcon} ${lineCount} lines`)}`;
+
+					// Content is hidden by default, only shown when expanded
+					if (this.expanded) {
+						text +=
+							"\n\n" +
+							lines
+								.map((line: string) => (lang ? replaceTabs(line) : theme.fg("toolOutput", replaceTabs(line))))
+								.join("\n");
 					} else {
-						warning = `Truncated: ${truncation.outputLines} lines (${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit)`;
+						text += `\n${theme.fg("dim", `${theme.nav.expand} Ctrl+O to show content`)}`;
 					}
-					text += `\n${theme.fg("warning", wrapBrackets(warning))}`;
+
+					// Truncation warning
+					const truncation = this.result.details?.truncation;
+					if (truncation?.truncated) {
+						let warning: string;
+						if (truncation.firstLineExceedsLimit) {
+							warning = `First line exceeds ${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit`;
+						} else if (truncation.truncatedBy === "lines") {
+							warning = `Truncated: ${truncation.outputLines} of ${truncation.totalLines} lines (${truncation.maxLines ?? DEFAULT_MAX_LINES} line limit)`;
+						} else {
+							warning = `Truncated: ${truncation.outputLines} lines (${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit)`;
+						}
+						text += `\n${theme.fg("warning", wrapBrackets(warning))}`;
+					}
 				}
 			}
 		} else if (this.toolName === "write") {

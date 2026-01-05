@@ -126,7 +126,46 @@ export type SymbolKey =
 	// Markdown-specific
 	| "md.quoteBorder"
 	| "md.hrChar"
-	| "md.bullet";
+	| "md.bullet"
+	// Spinner frames (array stored as comma-separated string)
+	| "spinner.frames"
+	// Language/file type icons
+	| "lang.default"
+	| "lang.typescript"
+	| "lang.javascript"
+	| "lang.python"
+	| "lang.rust"
+	| "lang.go"
+	| "lang.java"
+	| "lang.c"
+	| "lang.cpp"
+	| "lang.csharp"
+	| "lang.ruby"
+	| "lang.php"
+	| "lang.swift"
+	| "lang.kotlin"
+	| "lang.shell"
+	| "lang.html"
+	| "lang.css"
+	| "lang.json"
+	| "lang.yaml"
+	| "lang.markdown"
+	| "lang.sql"
+	| "lang.docker"
+	| "lang.lua"
+	| "lang.text"
+	| "lang.env"
+	| "lang.toml"
+	| "lang.xml"
+	| "lang.ini"
+	| "lang.conf"
+	| "lang.log"
+	| "lang.csv"
+	| "lang.tsv"
+	| "lang.image"
+	| "lang.pdf"
+	| "lang.archive"
+	| "lang.binary";
 
 type SymbolMap = Record<SymbolKey, string>;
 
@@ -330,6 +369,45 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	"md.hrChar": "─",
 	// pick: • | alt: · ▪ ◦
 	"md.bullet": "•",
+	// Spinner frames (pulsing dot)
+	"spinner.frames": "·,•,●,•",
+	// Language icons (unicode uses code symbol prefix)
+	"lang.default": "❖",
+	"lang.typescript": "❖ ts",
+	"lang.javascript": "❖ js",
+	"lang.python": "❖ py",
+	"lang.rust": "❖ rs",
+	"lang.go": "❖ go",
+	"lang.java": "❖ java",
+	"lang.c": "❖ c",
+	"lang.cpp": "❖ c++",
+	"lang.csharp": "❖ c#",
+	"lang.ruby": "❖ rb",
+	"lang.php": "❖ php",
+	"lang.swift": "❖ swift",
+	"lang.kotlin": "❖ kt",
+	"lang.shell": "❖ sh",
+	"lang.html": "❖ html",
+	"lang.css": "❖ css",
+	"lang.json": "❖ json",
+	"lang.yaml": "❖ yaml",
+	"lang.markdown": "❖ md",
+	"lang.sql": "❖ sql",
+	"lang.docker": "❖ docker",
+	"lang.lua": "❖ lua",
+	"lang.text": "❖ txt",
+	"lang.env": "❖ env",
+	"lang.toml": "❖ toml",
+	"lang.xml": "❖ xml",
+	"lang.ini": "❖ ini",
+	"lang.conf": "❖ conf",
+	"lang.log": "❖ log",
+	"lang.csv": "❖ csv",
+	"lang.tsv": "❖ tsv",
+	"lang.image": "❖ img",
+	"lang.pdf": "❖ pdf",
+	"lang.archive": "❖ zip",
+	"lang.binary": "❖ bin",
 };
 
 const NERD_SYMBOLS: SymbolMap = {
@@ -532,6 +610,45 @@ const NERD_SYMBOLS: SymbolMap = {
 	"md.hrChar": "\u2500",
 	// pick:  | alt:  •
 	"md.bullet": "\uf111",
+	// Spinner frames (nerd font circles)
+	"spinner.frames": "󰪥,󰪤,󰪣,󰪢,󰪡,󰪠,󰪟,󰪞,󰪝,󰪜,󰪛,󰪥",
+	// Language icons (nerd font devicons)
+	"lang.default": "",
+	"lang.typescript": "",
+	"lang.javascript": "",
+	"lang.python": "",
+	"lang.rust": "",
+	"lang.go": "",
+	"lang.java": "",
+	"lang.c": "",
+	"lang.cpp": "",
+	"lang.csharp": "",
+	"lang.ruby": "",
+	"lang.php": "",
+	"lang.swift": "",
+	"lang.kotlin": "",
+	"lang.shell": "",
+	"lang.html": "",
+	"lang.css": "",
+	"lang.json": "",
+	"lang.yaml": "",
+	"lang.markdown": "",
+	"lang.sql": "",
+	"lang.docker": "",
+	"lang.lua": "",
+	"lang.text": "",
+	"lang.env": "",
+	"lang.toml": "",
+	"lang.xml": "󰗀",
+	"lang.ini": "",
+	"lang.conf": "",
+	"lang.log": "󰌱",
+	"lang.csv": "󰈛",
+	"lang.tsv": "󰈛",
+	"lang.image": "󰈟",
+	"lang.pdf": "󰈦",
+	"lang.archive": "",
+	"lang.binary": "󰆚",
 };
 
 const ASCII_SYMBOLS: SymbolMap = {
@@ -640,6 +757,45 @@ const ASCII_SYMBOLS: SymbolMap = {
 	"md.quoteBorder": "|",
 	"md.hrChar": "-",
 	"md.bullet": "*",
+	// Spinner frames (ASCII)
+	"spinner.frames": "|,/,-,\\",
+	// Language icons (ASCII uses abbreviations)
+	"lang.default": "code",
+	"lang.typescript": "ts",
+	"lang.javascript": "js",
+	"lang.python": "py",
+	"lang.rust": "rs",
+	"lang.go": "go",
+	"lang.java": "java",
+	"lang.c": "c",
+	"lang.cpp": "cpp",
+	"lang.csharp": "cs",
+	"lang.ruby": "rb",
+	"lang.php": "php",
+	"lang.swift": "swift",
+	"lang.kotlin": "kt",
+	"lang.shell": "sh",
+	"lang.html": "html",
+	"lang.css": "css",
+	"lang.json": "json",
+	"lang.yaml": "yaml",
+	"lang.markdown": "md",
+	"lang.sql": "sql",
+	"lang.docker": "docker",
+	"lang.lua": "lua",
+	"lang.text": "txt",
+	"lang.env": "env",
+	"lang.toml": "toml",
+	"lang.xml": "xml",
+	"lang.ini": "ini",
+	"lang.conf": "conf",
+	"lang.log": "log",
+	"lang.csv": "csv",
+	"lang.tsv": "tsv",
+	"lang.image": "img",
+	"lang.pdf": "pdf",
+	"lang.archive": "zip",
+	"lang.binary": "bin",
 };
 
 const SYMBOL_PRESETS: Record<SymbolPreset, SymbolMap> = {
@@ -1008,6 +1164,95 @@ function resolveThemeColors<T extends Record<string, ColorValue>>(
 // Theme Class
 // ============================================================================
 
+const langMap: Record<string, SymbolKey> = {
+	typescript: "lang.typescript",
+	ts: "lang.typescript",
+	tsx: "lang.typescript",
+	javascript: "lang.javascript",
+	js: "lang.javascript",
+	jsx: "lang.javascript",
+	mjs: "lang.javascript",
+	cjs: "lang.javascript",
+	python: "lang.python",
+	py: "lang.python",
+	rust: "lang.rust",
+	rs: "lang.rust",
+	go: "lang.go",
+	java: "lang.java",
+	c: "lang.c",
+	cpp: "lang.cpp",
+	"c++": "lang.cpp",
+	cc: "lang.cpp",
+	cxx: "lang.cpp",
+	csharp: "lang.csharp",
+	cs: "lang.csharp",
+	ruby: "lang.ruby",
+	rb: "lang.ruby",
+	php: "lang.php",
+	swift: "lang.swift",
+	kotlin: "lang.kotlin",
+	kt: "lang.kotlin",
+	bash: "lang.shell",
+	sh: "lang.shell",
+	zsh: "lang.shell",
+	fish: "lang.shell",
+	shell: "lang.shell",
+	html: "lang.html",
+	htm: "lang.html",
+	css: "lang.css",
+	scss: "lang.css",
+	sass: "lang.css",
+	less: "lang.css",
+	json: "lang.json",
+	yaml: "lang.yaml",
+	yml: "lang.yaml",
+	markdown: "lang.markdown",
+	md: "lang.markdown",
+	sql: "lang.sql",
+	dockerfile: "lang.docker",
+	docker: "lang.docker",
+	lua: "lang.lua",
+	text: "lang.text",
+	txt: "lang.text",
+	plain: "lang.text",
+	log: "lang.log",
+	env: "lang.env",
+	dotenv: "lang.env",
+	toml: "lang.toml",
+	xml: "lang.xml",
+	ini: "lang.ini",
+	conf: "lang.conf",
+	cfg: "lang.conf",
+	config: "lang.conf",
+	properties: "lang.conf",
+	csv: "lang.csv",
+	tsv: "lang.tsv",
+	image: "lang.image",
+	img: "lang.image",
+	png: "lang.image",
+	jpg: "lang.image",
+	jpeg: "lang.image",
+	gif: "lang.image",
+	webp: "lang.image",
+	svg: "lang.image",
+	ico: "lang.image",
+	bmp: "lang.image",
+	tiff: "lang.image",
+	pdf: "lang.pdf",
+	zip: "lang.archive",
+	tar: "lang.archive",
+	gz: "lang.archive",
+	tgz: "lang.archive",
+	bz2: "lang.archive",
+	xz: "lang.archive",
+	"7z": "lang.archive",
+	exe: "lang.binary",
+	dll: "lang.binary",
+	so: "lang.binary",
+	dylib: "lang.binary",
+	wasm: "lang.binary",
+	bin: "lang.binary",
+};
 export class Theme {
 	private fgColors: Map<ThemeColor, string>;
 	private bgColors: Map<ThemeBg, string>;
@@ -1288,6 +1533,24 @@ export class Theme {
 			hrChar: this.symbols["md.hrChar"],
 			bullet: this.symbols["md.bullet"],
 		};
+	}
+
+	/**
+	 * Get spinner frames as an array (stored as comma-separated string in symbols).
+	 */
+	get spinnerFrames(): string[] {
+		return this.symbols["spinner.frames"].split(",");
+	}
+
+	/**
+	 * Get language icon for a language name.
+	 * Maps common language names to their corresponding symbol keys.
+	 */
+	getLangIcon(lang: string | undefined): string {
+		if (!lang) return this.symbols["lang.default"];
+		const normalized = lang.toLowerCase();
+		const key = langMap[normalized];
+		return key ? this.symbols[key] : this.symbols["lang.default"];
 	}
 }
 
@@ -1759,6 +2022,20 @@ export function highlightCode(code: string, lang?: string): string[] {
  * Get language identifier from file path extension.
  */
 export function getLanguageFromPath(filePath: string): string | undefined {
+	const baseName = path.basename(filePath).toLowerCase();
+	if (baseName === ".env" || baseName.startsWith(".env.")) return "env";
+	if (
+		baseName === ".gitignore" ||
+		baseName === ".gitattributes" ||
+		baseName === ".gitmodules" ||
+		baseName === ".editorconfig" ||
+		baseName === ".npmrc" ||
+		baseName === ".prettierrc" ||
+		baseName === ".eslintrc"
+	) {
+		return "conf";
+	}
+
 	const ext = filePath.split(".").pop()?.toLowerCase();
 	if (!ext) return undefined;
 
@@ -1821,6 +2098,17 @@ export function getLanguageFromPath(filePath: string): string | undefined {
 		proto: "protobuf",
 		tf: "hcl",
 		hcl: "hcl",
+		txt: "text",
+		text: "text",
+		log: "log",
+		csv: "csv",
+		tsv: "tsv",
+		ini: "ini",
+		cfg: "conf",
+		conf: "conf",
+		config: "conf",
+		properties: "conf",
+		env: "env",
 	};
 
 	return extToLang[ext];

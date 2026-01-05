@@ -76,6 +76,8 @@ export interface RenderResultOptions {
 	expanded: boolean;
 	/** Whether this is a partial/streaming result */
 	isPartial: boolean;
+	/** Current spinner frame index for animated elements (0-9, only provided during partial results) */
+	spinnerFrame?: number;
 }
 
 export type CustomToolResult<TDetails = any> = AgentToolResult<TDetails>;

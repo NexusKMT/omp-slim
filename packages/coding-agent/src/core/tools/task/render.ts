@@ -52,13 +52,18 @@ function truncate(text: string, maxLen: number, ellipsis: string): string {
 
 /**
  * Get status icon for agent state.
+ * For running status, uses animated spinner if spinnerFrame is provided.
  */
-function getStatusIcon(status: AgentProgress["status"], theme: Theme): string {
+function getStatusIcon(status: AgentProgress["status"], theme: Theme, spinnerFrame?: number): string {
 	switch (status) {
 		case "pending":
 			return theme.status.pending;
-		case "running":
-			return theme.status.running;
+		case "running": {
+			// Use animated spinner if frame is provided, otherwise static icon
+			if (spinnerFrame === undefined) return theme.status.running;
+			const frames = theme.spinnerFrames;
+			return frames[spinnerFrame % frames.length];
+		}
 		case "completed":
 			return theme.status.success;
 		case "failed":
@@ -149,14 +154,20 @@ export function renderCall(args: TaskParams, theme: Theme): Component {
 /**
  * Render streaming progress for a single agent.
  */
-function renderAgentProgress(progress: AgentProgress, isLast: boolean, expanded: boolean, theme: Theme): string[] {
+function renderAgentProgress(
+	progress: AgentProgress,
+	isLast: boolean,
+	expanded: boolean,
+	theme: Theme,
+	spinnerFrame?: number,
+): string[] {
 	const lines: string[] = [];
 	const prefix = isLast
 		? `${theme.boxSharp.bottomLeft}${theme.boxSharp.horizontal}`
 		: `${theme.boxSharp.teeRight}${theme.boxSharp.horizontal}`;
 	const continuePrefix = isLast ? "   " : `${theme.boxSharp.vertical}  `;
 
-	const icon = getStatusIcon(progress.status, theme);
+	const icon = getStatusIcon(progress.status, theme, spinnerFrame);
 	const iconColor =
 		progress.status === "completed"
 			? "success"
@@ -164,20 +175,22 @@ function renderAgentProgress(progress: AgentProgress, isLast: boolean, expanded:
 				? "error"
 				: "accent";
 
-	const statusLabel =
-		progress.status === "running"
-			? "running"
-			: progress.status === "completed"
+	// Main status line - include index for Output tool ID derivation
+	const agentId = `${progress.agent}(${progress.index})`;
+	let statusLine = `${prefix} ${theme.fg(iconColor, icon)} ${theme.fg("accent", agentId)}`;
+
+	// Only show badge for non-running states (spinner already indicates running)
+	if (progress.status !== "running") {
+		const statusLabel =
+			progress.status === "completed"
 				? "done"
 				: progress.status === "failed"
 					? "failed"
 					: progress.status === "aborted"
 						? "aborted"
 						: "pending";
-
-	// Main status line - include index for Output tool ID derivation
-	const agentId = `${progress.agent}(${progress.index})`;
-	let statusLine = `${prefix} ${theme.fg(iconColor, icon)} ${theme.fg("accent", agentId)} ${formatBadge(statusLabel, iconColor, theme)}`;
+		statusLine += ` ${formatBadge(statusLabel, iconColor, theme)}`;
+	}
 
 	if (progress.status === "running") {
 		const taskPreview = truncate(progress.task, 40, theme.format.ellipsis);
@@ -435,7 +448,7 @@ export function renderResult(
 	options: RenderResultOptions,
 	theme: Theme,
 ): Component {
-	const { expanded, isPartial } = options;
+	const { expanded, isPartial, spinnerFrame } = options;
 	const details = result.details;
 
 	if (!details) {
@@ -450,7 +463,7 @@ export function renderResult(
 		// Streaming progress view
 		details.progress.forEach((progress, i) => {
 			const isLast = i === details.progress!.length - 1;
-			lines.push(...renderAgentProgress(progress, isLast, expanded, theme));
+			lines.push(...renderAgentProgress(progress, isLast, expanded, theme, spinnerFrame));
 		});
 	} else if (details.results.length > 0) {
 		// Final results view
