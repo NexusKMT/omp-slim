@@ -19,6 +19,133 @@ export interface Attachment {
 	preview?: string; // base64 image preview (first page for PDFs, or same as content for images)
 }
 
+const RESIZE_TRIGGER_MAX_DIMENSION = 2048;
+const MAX_RESIZE_WIDTH = 1920;
+const MAX_RESIZE_HEIGHT = 1080;
+const JPEG_CONVERT_THRESHOLD_BYTES = 2 * 1024 * 1024;
+const JPEG_QUALITY = 0.85;
+
+function arrayBufferToBase64(arrayBuffer: ArrayBuffer): string {
+	const uint8Array = new Uint8Array(arrayBuffer);
+	let binary = "";
+	const chunkSize = 0x8000;
+	for (let i = 0; i < uint8Array.length; i += chunkSize) {
+		const chunk = uint8Array.slice(i, i + chunkSize);
+		binary += String.fromCharCode(...chunk);
+	}
+	return btoa(binary);
+}
+
+function getResizedDimensions(width: number, height: number): { width: number; height: number } {
+	const maxDim = Math.max(width, height);
+	if (maxDim <= RESIZE_TRIGGER_MAX_DIMENSION) {
+		return { width, height };
+	}
+	const scale = Math.min(MAX_RESIZE_WIDTH / width, MAX_RESIZE_HEIGHT / height);
+	return {
+		width: Math.max(1, Math.round(width * scale)),
+		height: Math.max(1, Math.round(height * scale)),
+	};
+}
+
+function updateFileNameForJpeg(fileName: string): string {
+	const lower = fileName.toLowerCase();
+	if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+		return fileName;
+	}
+	const dotIndex = fileName.lastIndexOf(".");
+	if (dotIndex > 0) {
+		return `${fileName.slice(0, dotIndex)}.jpg`;
+	}
+	return `${fileName}.jpg`;
+}
+
+async function decodeImage(arrayBuffer: ArrayBuffer, mimeType: string) {
+	const blob = new Blob([arrayBuffer], { type: mimeType });
+	if (typeof createImageBitmap === "function") {
+		const bitmap = await createImageBitmap(blob);
+		return {
+			width: bitmap.width,
+			height: bitmap.height,
+			draw: (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+				ctx.drawImage(bitmap, 0, 0, width, height);
+				bitmap.close?.();
+			},
+		};
+	}
+
+	const url = URL.createObjectURL(blob);
+	try {
+		const img = new Image();
+		img.src = url;
+		await img.decode();
+		return {
+			width: img.naturalWidth,
+			height: img.naturalHeight,
+			draw: (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+				ctx.drawImage(img, 0, 0, width, height);
+			},
+		};
+	} finally {
+		URL.revokeObjectURL(url);
+	}
+}
+
+async function processImageAttachment(
+	arrayBuffer: ArrayBuffer,
+	fileName: string,
+	mimeType: string,
+): Promise<{ base64: string; mimeType: string; size: number; fileName: string }> {
+	const shouldConvertToJpeg = arrayBuffer.byteLength > JPEG_CONVERT_THRESHOLD_BYTES;
+	const outputMimeType = shouldConvertToJpeg ? "image/jpeg" : mimeType;
+
+	const { width, height, draw } = await decodeImage(arrayBuffer, mimeType);
+	const resized = getResizedDimensions(width, height);
+	const shouldResize = resized.width !== width || resized.height !== height;
+
+	if (!shouldResize && !shouldConvertToJpeg) {
+		return {
+			base64: arrayBufferToBase64(arrayBuffer),
+			mimeType,
+			size: arrayBuffer.byteLength,
+			fileName,
+		};
+	}
+
+	const canvas = document.createElement("canvas");
+	canvas.width = resized.width;
+	canvas.height = resized.height;
+	const ctx = canvas.getContext("2d");
+	if (!ctx) {
+		throw new Error("Failed to create canvas context");
+	}
+
+	if (outputMimeType === "image/jpeg") {
+		ctx.fillStyle = "#ffffff";
+		ctx.fillRect(0, 0, canvas.width, canvas.height);
+	}
+	draw(ctx, resized.width, resized.height);
+
+	const blob = await new Promise<Blob>((resolve, reject) => {
+		canvas.toBlob(
+			(result) => {
+				if (result) resolve(result);
+				else reject(new Error("Failed to encode image"));
+			},
+			outputMimeType,
+			outputMimeType === "image/jpeg" ? JPEG_QUALITY : undefined,
+		);
+	});
+
+	const outputBuffer = await blob.arrayBuffer();
+	return {
+		base64: arrayBufferToBase64(outputBuffer),
+		mimeType: outputMimeType,
+		size: blob.size,
+		fileName: shouldConvertToJpeg ? updateFileNameForJpeg(fileName) : fileName,
+	};
+}
+
 /**
  * Load an attachment from various sources
  * @param source - URL string, File, Blob, or ArrayBuffer
@@ -67,14 +194,7 @@ export async function loadAttachment(
 	}
 
 	// Convert ArrayBuffer to base64 - handle large files properly
-	const uint8Array = new Uint8Array(arrayBuffer);
-	let binary = "";
-	const chunkSize = 0x8000; // Process in 32KB chunks to avoid stack overflow
-	for (let i = 0; i < uint8Array.length; i += chunkSize) {
-		const chunk = uint8Array.slice(i, i + chunkSize);
-		binary += String.fromCharCode(...chunk);
-	}
-	const base64Content = btoa(binary);
+	const base64Content = arrayBufferToBase64(arrayBuffer);
 
 	// Detect type and process accordingly
 	const id = `${detectedFileName}_${Date.now()}_${Math.random()}`;
@@ -154,15 +274,29 @@ export async function loadAttachment(
 
 	// Check if it's an image
 	if (mimeType.startsWith("image/")) {
-		return {
-			id,
-			type: "image",
-			fileName: detectedFileName,
-			mimeType,
-			size,
-			content: base64Content,
-			preview: base64Content, // For images, preview is the same as content
-		};
+		try {
+			const processed = await processImageAttachment(arrayBuffer, detectedFileName, mimeType);
+			return {
+				id,
+				type: "image",
+				fileName: processed.fileName,
+				mimeType: processed.mimeType,
+				size: processed.size,
+				content: processed.base64,
+				preview: processed.base64, // For images, preview is the same as content
+			};
+		} catch (error) {
+			console.error("Error processing image:", error);
+			return {
+				id,
+				type: "image",
+				fileName: detectedFileName,
+				mimeType,
+				size,
+				content: base64Content,
+				preview: base64Content, // For images, preview is the same as content
+			};
+		}
 	}
 
 	// Check if it's a text document
