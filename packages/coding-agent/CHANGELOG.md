@@ -32,6 +32,10 @@
 - Updated grep and find tool output to display language-specific icons for files and folder icons for directories
 - Updated file listing to display language-specific icons based on file extension instead of generic file icons
 
+### Fixed
+
+- Fixed cross-platform browser opening to work on Windows (via cmd /c start) and fail gracefully when unavailable
+
 ## [3.15.1] - 2026-01-05
 
 ### Added

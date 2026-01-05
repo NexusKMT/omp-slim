@@ -2400,8 +2400,17 @@ export class InteractiveMode {
 	// =========================================================================
 
 	private openInBrowser(urlOrPath: string): void {
-		const openCmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-		Bun.spawn([openCmd, urlOrPath], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+		try {
+			const args =
+				process.platform === "darwin"
+					? ["open", urlOrPath]
+					: process.platform === "win32"
+						? ["cmd", "/c", "start", "", urlOrPath]
+						: ["xdg-open", urlOrPath];
+			Bun.spawn(args, { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+		} catch {
+			// Best-effort: browser opening is non-critical
+		}
 	}
 
 	private async handleExportCommand(text: string): Promise<void> {
