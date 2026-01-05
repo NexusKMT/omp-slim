@@ -1,28 +1,24 @@
-Use this tool when you need to ask the user questions during execution. This allows you to:
-1. Gather user preferences or requirements
-2. Clarify ambiguous instructions
-3. Get decisions on implementation choices as you work
-4. Offer choices to the user about what direction to take.
+Ask the user a question when you need clarification or input during task execution.
 
-Usage notes:
-- Users will always be able to select "Other" to provide custom text input
-- Use multi: true to allow multiple answers to be selected for a question
-- If you recommend a specific option, make that the first option in the list and add "(Recommended)" at the end of the label
+## When to use
 
-Example usage:
+Use this tool to:
+- Clarify ambiguous requirements before implementing
+- Get decisions on implementation approach when multiple valid options exist
+- Request user preferences (styling, naming conventions, architecture patterns)
+- Offer meaningful choices about task direction
+
+Do NOT use for:
+- Questions resolvable by reading files or docs
+- Permission for normal dev tasks (just proceed)
+- Decisions you should make from codebase context
+
+Tips:
+- Place recommended option first with " (Recommended)" suffix
+- 2-5 concise, distinct options
+- Users can always select "Other" for custom input
 
 <example>
-assistant: Let me ask which features you want to include.
-assistant: Uses the ask tool:
-{
-  "question": "Which features should I implement?",
-  "options": [
-    {"label": "Authentication"},
-    {"label": "API endpoints"},
-    {"label": "Database models"},
-    {"label": "Unit tests"},
-    {"label": "Documentation"}
-  ],
-  "multi": true
-}
+question: "Which authentication method should this API use?"
+options: [{"label": "JWT (Recommended)"}, {"label": "OAuth2"}, {"label": "Session cookies"}]
 </example>

@@ -1,8 +1,10 @@
-Writes a file to the local filesystem.
+Creates or overwrites a file at the specified path.
 
-Usage:
-- This tool will overwrite the existing file if there is one at the provided path.
-- If this is an existing file, you MUST use the read tool first to read the file's contents. This tool will fail if you did not read the file first.
-- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
-- NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
-- Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked.
+When to use:
+- Creating new files explicitly required by the task
+- Replacing entire file contents when editing would be more complex
+
+Critical requirements:
+- Prefer Edit tool for modifying existing files (more precise, preserves formatting)
+- Create documentation files (*.md, README) only when explicitly requested
+- Include emojis only when explicitly requested
