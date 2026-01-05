@@ -31,6 +31,7 @@ export type SymbolKey =
 	| "status.disabled"
 	| "status.enabled"
 	| "status.running"
+	| "status.shadowed"
 	| "status.aborted"
 	// Navigation
 	| "nav.cursor"
@@ -147,6 +148,8 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	"status.enabled": "●",
 	// pick: ↻ | alt: ↺ ⟳ ⟲ ◐ ▶
 	"status.running": "↻",
+	// pick: ◐ | alt: ◑ ◒ ◓ ◔
+	"status.shadowed": "◐",
 	// pick: ⊗ | alt: ⊘ ⛔ ⏹ ⨂
 	"status.aborted": "⊗",
 	// Navigation
@@ -169,8 +172,8 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	"tree.vertical": "│",
 	// pick: ─ | alt: ━ ═ ╌ ┄
 	"tree.horizontal": "─",
-	// pick: └ | alt: ⎿ ╰ ↳
-	"tree.hook": "└",
+	// pick: ⎿ | alt: └ ╰ ↳
+	"tree.hook": "⎿",
 	// Box Drawing - Rounded
 	// pick: ╭ | alt: ┌ ┏ ╔
 	"boxRound.topLeft": "╭",
@@ -347,6 +350,8 @@ const NERD_SYMBOLS: SymbolMap = {
 	"status.enabled": "\uf111",
 	// pick:  | alt:   
 	"status.running": "\uf110",
+	// pick: ◐ | alt: ◑ ◒ ◓ ◔
+	"status.shadowed": "◐",
 	// pick:  | alt:  
 	"status.aborted": "\uf04d",
 	// Navigation
@@ -539,6 +544,7 @@ const ASCII_SYMBOLS: SymbolMap = {
 	"status.disabled": "[ ]",
 	"status.enabled": "[x]",
 	"status.running": "[~]",
+	"status.shadowed": "[/]",
 	"status.aborted": "[-]",
 	// Navigation
 	"nav.cursor": ">",
@@ -1145,6 +1151,7 @@ export class Theme {
 			disabled: this.symbols["status.disabled"],
 			enabled: this.symbols["status.enabled"],
 			running: this.symbols["status.running"],
+			shadowed: this.symbols["status.shadowed"],
 			aborted: this.symbols["status.aborted"],
 		};
 	}

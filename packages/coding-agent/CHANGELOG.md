@@ -1,8 +1,10 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Added
 
+- Added `status.shadowed` symbol for theme customization to properly indicate shadowed extension state
 - Added Biome CLI-based linter client as alternative to LSP for more reliable diagnostics
 - Added LinterClient interface for pluggable formatter/linter implementations
 - Added status line segment editor for arranging and toggling status line components
@@ -27,6 +29,7 @@
 
 ### Fixed
 
+- Fixed extension list and inspector panel to use correct symbols for disabled and shadowed states instead of reusing unrelated status icons
 - Fixed token counting for subagent progress to handle different usage object formats (camelCase and snake_case)
 - Fixed image file handling by adding 20MB size limit to prevent memory issues during serialization
 

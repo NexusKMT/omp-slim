@@ -170,7 +170,7 @@ Example:
 
 Symbol keys by category:
 
-- Status: `status.success`, `status.error`, `status.warning`, `status.info`, `status.pending`, `status.disabled`, `status.enabled`, `status.running`, `status.aborted`
+- Status: `status.success`, `status.error`, `status.warning`, `status.info`, `status.pending`, `status.disabled`, `status.enabled`, `status.running`, `status.shadowed`, `status.aborted`
 - Navigation: `nav.cursor`, `nav.selected`, `nav.expand`, `nav.collapse`, `nav.back`
 - Tree: `tree.branch`, `tree.last`, `tree.vertical`, `tree.horizontal`, `tree.hook`
 - Boxes (rounded): `boxRound.topLeft`, `boxRound.topRight`, `boxRound.bottomLeft`, `boxRound.bottomRight`, `boxRound.horizontal`, `boxRound.vertical`

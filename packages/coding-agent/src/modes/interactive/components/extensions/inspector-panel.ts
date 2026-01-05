@@ -290,7 +290,7 @@ export class InspectorPanel implements Component {
 				return theme.fg("dim", `${theme.status.disabled} Disabled (${reasonText})`);
 			}
 			case "shadowed":
-				return theme.fg("warning", `${theme.status.running} Shadowed${shadowedBy ? ` by ${shadowedBy}` : ""}`);
+				return theme.fg("warning", `${theme.status.shadowed} Shadowed${shadowedBy ? ` by ${shadowedBy}` : ""}`);
 		}
 	}
 

@@ -261,9 +261,9 @@ export class ExtensionList implements Component {
 			case "active":
 				return theme.fg("success", theme.status.enabled);
 			case "disabled":
-				return theme.fg("dim", theme.status.aborted);
+				return theme.fg("dim", theme.status.disabled);
 			case "shadowed":
-				return theme.fg("warning", theme.status.running);
+				return theme.fg("warning", theme.status.shadowed);
 		}
 	}
 
