@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [3.15.0] - 2026-01-05
+
 ### Changed
 
 - Resize large image attachments before sending (max 1920x1080 if dimension exceeds 2048) and convert >2MB images to JPEG

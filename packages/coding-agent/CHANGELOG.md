@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [3.15.0] - 2026-01-05
+
 ### Added
 
 - Added spinner type variants (status and activity) with distinct animation frames per symbol preset

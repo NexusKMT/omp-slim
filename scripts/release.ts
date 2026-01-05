@@ -88,6 +88,20 @@ async function cmdWatch(): Promise<void> {
 	process.exit(success ? 0 : 1);
 }
 
+function parseVersion(v: string): [number, number, number] {
+	const match = v.replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)/);
+	if (!match) throw new Error(`Invalid version: ${v}`);
+	return [parseInt(match[1]), parseInt(match[2]), parseInt(match[3])];
+}
+
+function compareVersions(a: string, b: string): number {
+	const [aMajor, aMinor, aPatch] = parseVersion(a);
+	const [bMajor, bMinor, bPatch] = parseVersion(b);
+	if (aMajor !== bMajor) return aMajor - bMajor;
+	if (aMinor !== bMinor) return aMinor - bMinor;
+	return aPatch - bPatch;
+}
+
 async function cmdRelease(version: string): Promise<void> {
 	console.log("\n=== Release Script ===\n");
 
@@ -107,7 +121,14 @@ async function cmdRelease(version: string): Promise<void> {
 		console.error(status);
 		process.exit(1);
 	}
-	console.log("  Working directory clean\n");
+	console.log("  Working directory clean");
+
+	const latestTag = (await $`git describe --tags --abbrev=0`.text()).trim();
+	if (compareVersions(version, latestTag) <= 0) {
+		console.error(`Error: Version ${version} must be greater than latest tag ${latestTag}`);
+		process.exit(1);
+	}
+	console.log(`  Version ${version} > ${latestTag}\n`);
 
 	// 2. Update package versions
 	console.log(`Updating package versions to ${version}...`);

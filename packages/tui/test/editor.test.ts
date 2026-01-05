@@ -531,8 +531,8 @@ describe("Editor component", () => {
 			});
 			expect(contentLines.length).toBe(2);
 			expect(contentLines[0]).toBe("日本語テス"); // 5 chars = 10 columns
-			// Last line has cursor (▏) which we need to strip
-			expect(contentLines[1]?.replace("▏", "")).toBe("ト"); // 1 char = 2 columns (+ cursor + padding)
+			// Last line has cursor (|) which we need to strip
+			expect(contentLines[1]?.replace("|", "")).toBe("ト"); // 1 char = 2 columns (+ cursor + padding)
 		});
 
 		it("handles mixed ASCII and wide characters in wrapping", () => {
@@ -561,7 +561,7 @@ describe("Editor component", () => {
 
 			// The cursor (blinking thin bar) should be visible
 			const contentLine = lines[1]!;
-			expect(contentLine.includes("\x1b[5m▏")).toBeTruthy();
+			expect(contentLine.includes("\x1b[5m|")).toBeTruthy();
 
 			// Line should still be correct width
 			expect(visibleWidth(contentLine)).toBe(width);

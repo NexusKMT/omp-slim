@@ -117,8 +117,8 @@ describe("Markdown component", () => {
 			expect(plainLines.some((line) => line.includes("Alice"))).toBeTruthy();
 			expect(plainLines.some((line) => line.includes("Bob"))).toBeTruthy();
 			// Check for table borders
-			expect(plainLines.some((line) => line.includes("│"))).toBeTruthy();
-			expect(plainLines.some((line) => line.includes("─"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("|"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("-"))).toBeTruthy();
 		});
 
 		it("should render table with alignment", () => {
@@ -207,7 +207,7 @@ describe("Markdown component", () => {
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
 
 			// Should have multiple data rows due to wrapping
-			const dataRows = plainLines.filter((line) => line.startsWith("│") && !line.includes("─"));
+			const dataRows = plainLines.filter((line) => line.startsWith("|") && !line.includes("-"));
 			expect(dataRows.length > 2).toBeTruthy();
 
 			// All content should be preserved (may be split across lines)
@@ -240,15 +240,15 @@ describe("Markdown component", () => {
 			}
 
 			// Borders should stay intact (exactly 2 vertical borders for a 1-col table)
-			const tableLines = plainLines.filter((line) => line.startsWith("│"));
+			const tableLines = plainLines.filter((line) => line.startsWith("|"));
 			for (const line of tableLines) {
-				const borderCount = line.split("│").length - 1;
+				const borderCount = line.split("|").length - 1;
 				expect(borderCount).toBe(2);
 			}
 
 			// Strip box drawing characters + whitespace so we can assert the URL is preserved
 			// even if it was split across multiple wrapped lines.
-			const extracted = plainLines.join("").replace(/[│├┤─\s]/g, "");
+			const extracted = plainLines.join("").replace(/[|++-\s]/g, "");
 			expect(extracted.includes("prefix")).toBeTruthy();
 			expect(extracted.includes(url)).toBeTruthy();
 		});
@@ -276,9 +276,9 @@ describe("Markdown component", () => {
 				);
 			}
 
-			const tableLines = plainLines.filter((line) => line.startsWith("│"));
+			const tableLines = plainLines.filter((line) => line.startsWith("|"));
 			for (const line of tableLines) {
-				const borderCount = line.split("│").length - 1;
+				const borderCount = line.split("|").length - 1;
 				expect(borderCount).toBe(2);
 			}
 		});
@@ -323,9 +323,9 @@ describe("Markdown component", () => {
 			// Should have proper table structure
 			const headerLine = plainLines.find((line) => line.includes("A") && line.includes("B"));
 			expect(headerLine).toBeTruthy();
-			expect(headerLine?.includes("│")).toBeTruthy();
+			expect(headerLine?.includes("|")).toBeTruthy();
 
-			const separatorLine = plainLines.find((line) => line.includes("├") && line.includes("┼"));
+			const separatorLine = plainLines.find((line) => line.includes("+") && line.includes("+"));
 			expect(separatorLine).toBeTruthy();
 
 			const dataLine = plainLines.find((line) => line.includes("1") && line.includes("2"));
@@ -352,7 +352,7 @@ describe("Markdown component", () => {
 			}
 
 			// Table rows should have left padding
-			const tableRow = plainLines.find((line) => line.includes("│"));
+			const tableRow = plainLines.find((line) => line.includes("|"));
 			expect(tableRow?.startsWith("  ")).toBeTruthy();
 		});
 	});
@@ -384,7 +384,7 @@ describe("Markdown component", () => {
 			expect(plainLines.some((line) => line.includes("  - Nested item"))).toBeTruthy();
 			// Check table
 			expect(plainLines.some((line) => line.includes("Col1"))).toBeTruthy();
-			expect(plainLines.some((line) => line.includes("│"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("|"))).toBeTruthy();
 		});
 	});
 
@@ -488,7 +488,7 @@ again, hello world`,
 			const lines = markdown.render(80);
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
 
-			const dividerIndex = plainLines.findIndex((line) => line.includes("─"));
+			const dividerIndex = plainLines.findIndex((line) => line.includes("-"));
 			expect(dividerIndex !== -1).toBeTruthy();
 
 			const afterDivider = plainLines.slice(dividerIndex + 1);

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [3.15.0] - 2026-01-05
+
 ### Added
 
 - Added `inputCursor` symbol for customizing the text input cursor character

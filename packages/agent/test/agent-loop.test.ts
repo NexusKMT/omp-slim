@@ -303,7 +303,7 @@ describe("agentLoop with AgentMessage", () => {
 		expect(toolStart).toBeDefined();
 		expect(toolEnd).toBeDefined();
 		if (toolEnd?.type === "tool_execution_end") {
-			expect(toolEnd.isError).toBe(false);
+			expect(toolEnd.isError).toBeFalsy();
 		}
 	});
 
@@ -393,7 +393,7 @@ describe("agentLoop with AgentMessage", () => {
 			(e): e is Extract<AgentEvent, { type: "tool_execution_end" }> => e.type === "tool_execution_end",
 		);
 		expect(toolEnds.length).toBe(2);
-		expect(toolEnds[0].isError).toBe(false);
+		expect(toolEnds[0].isError).toBeFalsy();
 		expect(toolEnds[1].isError).toBe(true);
 		if (toolEnds[1].result.content[0]?.type === "text") {
 			expect(toolEnds[1].result.content[0].text).toContain("Skipped due to queued user message");

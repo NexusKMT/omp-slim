@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [3.15.0] - 2026-01-05
 ### Changed
 
 - Made `isError` field optional in `ToolResultMessage` interface, defaulting to non-error state
