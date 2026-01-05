@@ -6,6 +6,12 @@ Release all packages with the specified version.
 
 - `$ARGUMENTS`: The version number (semver, e.g., `3.13.0`)
 
+## Version Guidance
+
+- Find the last release version by checking the latest git tag (`vX.Y.Z`) and confirm it matches `packages/*/package.json` versions.
+- If no version is specified, review commits since the last tag, decide major/minor/patch, then bump accordingly.
+- If the user specifies `major`, `minor`, or `patch`, bump from the last tag: major -> X+1.0.0, minor -> X.Y+1.0, patch -> X.Y.Z+1.
+
 ## Usage
 
 Run the release script:

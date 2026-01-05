@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Changed
+
+- Updated file listing to display language-specific icons based on file extension instead of generic file icons
 
 ## [3.15.1] - 2026-01-05
 

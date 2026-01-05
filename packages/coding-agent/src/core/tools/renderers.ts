@@ -6,7 +6,7 @@
 
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Text } from "@oh-my-pi/pi-tui";
-import type { Theme } from "../../modes/interactive/theme/theme";
+import { getLanguageFromPath, type Theme } from "../../modes/interactive/theme/theme";
 import type { RenderResultOptions } from "../custom-tools/types";
 import type { AskToolDetails } from "./ask";
 import type { FindToolDetails } from "./find";
@@ -750,7 +750,11 @@ const lsRenderer: ToolRenderer<LsArgs, LsToolDetails> = {
 			const isLast = i === maxEntries - 1 && (expanded || entries.length <= 12);
 			const branch = isLast ? theme.tree.last : theme.tree.branch;
 			const isDir = entry.endsWith("/");
-			const entryIcon = isDir ? theme.fg("accent", theme.icon.folder) : theme.fg("muted", theme.icon.file);
+			const entryPath = isDir ? entry.slice(0, -1) : entry;
+			const lang = isDir ? undefined : getLanguageFromPath(entryPath);
+			const entryIcon = isDir
+				? theme.fg("accent", theme.icon.folder)
+				: theme.fg("muted", theme.getLangIcon(lang));
 			const entryColor = isDir ? "accent" : "toolOutput";
 			text += `\n ${theme.fg("dim", branch)} ${entryIcon} ${theme.fg(entryColor, entry)}`;
 		}
