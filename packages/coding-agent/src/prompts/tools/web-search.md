@@ -1,0 +1,10 @@
+Allows OMP to search the web and use the results to inform responses
+- Provides up-to-date information for current events and recent data
+- Returns search result information formatted as search result blocks, including links as markdown hyperlinks
+- Use this tool for accessing information beyond Claude's knowledge cutoff
+- Searches are performed automatically within a single API call
+
+Common: system_prompt (guides response style)
+Anthropic-specific: max_tokens
+Perplexity-specific: model (sonar/sonar-pro), search_recency_filter, search_domain_filter, search_context_size, return_related_questions
+Exa-specific: num_results

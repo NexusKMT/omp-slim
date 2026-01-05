@@ -15,6 +15,7 @@
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import type { Theme } from "../../../modes/interactive/theme/theme";
+import webSearchDescription from "../../../prompts/tools/web-search.md" with { type: "text" };
 import type { CustomTool, CustomToolContext, RenderResultOptions } from "../../custom-tools/types";
 import { callExaTool, findApiKey as findExaKey, formatSearchResults, isSearchResponse } from "../exa/mcp-client";
 import { renderExaCall, renderExaResult } from "../exa/render";
@@ -240,22 +241,11 @@ async function executeWebSearch(
 	}
 }
 
-const WEB_SEARCH_DESCRIPTION = `Allows OMP to search the web and use the results to inform responses
-- Provides up-to-date information for current events and recent data
-- Returns search result information formatted as search result blocks, including links as markdown hyperlinks
-- Use this tool for accessing information beyond Claude's knowledge cutoff
-- Searches are performed automatically within a single API call
-
-Common: system_prompt (guides response style)
-Anthropic-specific: max_tokens
-Perplexity-specific: model (sonar/sonar-pro), search_recency_filter, search_domain_filter, search_context_size, return_related_questions
-Exa-specific: num_results`;
-
 /** Web search tool as AgentTool (for allTools export) */
 export const webSearchTool: AgentTool<typeof webSearchSchema> = {
 	name: "web_search",
 	label: "Web Search",
-	description: WEB_SEARCH_DESCRIPTION,
+	description: webSearchDescription,
 	parameters: webSearchSchema,
 	execute: async (toolCallId, params) => {
 		return executeWebSearch(toolCallId, params as WebSearchParams);
@@ -266,7 +256,7 @@ export const webSearchTool: AgentTool<typeof webSearchSchema> = {
 export const webSearchCustomTool: CustomTool<typeof webSearchSchema, WebSearchRenderDetails> = {
 	name: "web_search",
 	label: "Web Search",
-	description: WEB_SEARCH_DESCRIPTION,
+	description: webSearchDescription,
 	parameters: webSearchSchema,
 
 	async execute(

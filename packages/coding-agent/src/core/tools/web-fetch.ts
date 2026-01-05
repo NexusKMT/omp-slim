@@ -5,6 +5,7 @@ import * as path from "node:path";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import { parse as parseHtml } from "node-html-parser";
+import webFetchDescription from "../../prompts/tools/web-fetch.md" with { type: "text" };
 import { logger } from "../logger";
 
 // =============================================================================
@@ -1643,11 +1644,7 @@ async function handleCratesIo(url: string, timeout: number): Promise<RenderResul
 
 		// Format download counts
 		const formatDownloads = (n: number): string =>
-			n >= 1_000_000
-				? `${(n / 1_000_000).toFixed(1)}M`
-				: n >= 1_000
-					? `${(n / 1_000).toFixed(1)}K`
-					: String(n);
+			n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(1)}K` : String(n);
 
 		let md = `# ${crate.name}\n\n`;
 		if (crate.description) md += `${crate.description}\n\n`;
@@ -2273,30 +2270,7 @@ export function createWebFetchTool(_cwd: string): AgentTool<typeof webFetchSchem
 	return {
 		name: "web_fetch",
 		label: "web_fetch",
-		description: `Fetches content from a specified URL and processes it using an AI model
-- Takes a URL and a prompt as input
-- Fetches the URL content, converts HTML to markdown
-- Processes the content with the prompt using a small, fast model
-- Returns the model's response about the content
-- Use this tool when you need to retrieve and analyze web content
-
-Features:
-- Site-specific handlers for GitHub (issues, PRs, repos, gists), Stack Overflow, Wikipedia, Reddit, NPM, crates.io, arXiv, IACR, and Twitter/X
-- Automatic detection and use of LLM-friendly endpoints (llms.txt, .md suffixes)
-- Binary file conversion (PDF, DOCX, etc.) via markitdown if available
-- HTML to text rendering via lynx if available
-- RSS/Atom feed parsing
-- JSON pretty-printing
-
-Usage notes:
-- IMPORTANT: If an MCP-provided web fetch tool is available, prefer using that tool instead of this one, as it may have fewer restrictions.
-- The URL must be a fully-formed valid URL
-- HTTP URLs will be automatically upgraded to HTTPS
-- The prompt should describe what information you want to extract from the page
-- This tool is read-only and does not modify any files
-- Results may be summarized if the content is very large
-- Includes a self-cleaning 15-minute cache for faster responses when repeatedly accessing the same URL
-- When a URL redirects to a different host, the tool will inform you and provide the redirect URL in a special format. You should then make a new WebFetch request with the redirect URL to fetch the content.`,
+		description: webFetchDescription,
 		parameters: webFetchSchema,
 		execute: async (
 			_toolCallId: string,
@@ -2514,7 +2488,7 @@ type WebFetchParams = { url: string; timeout?: number; raw?: boolean };
 export const webFetchCustomTool: CustomTool<typeof webFetchSchema, WebFetchToolDetails> = {
 	name: "web_fetch",
 	label: "Web Fetch",
-	description: webFetchTool.description,
+	description: webFetchDescription,
 	parameters: webFetchSchema,
 
 	async execute(

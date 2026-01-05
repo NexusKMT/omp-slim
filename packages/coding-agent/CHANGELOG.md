@@ -1,7 +1,6 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Added
 
 - Added `status.shadowed` symbol for theme customization to properly indicate shadowed extension state
@@ -20,6 +19,7 @@
 
 ### Changed
 
+- Moved tool description prompts from inline strings to external markdown files in `src/prompts/tools/` directory for better maintainability
 - Changed Exa web search provider from MCP protocol to direct REST API for simpler integration
 - Changed web search result rendering to handle malformed response data with fallback text display
 - Changed compaction prompts to preserve tool outputs, command results, and repository state in context summaries
@@ -42,6 +42,7 @@
 - Changed status line rendering to support left/right segment positioning with separators
 - Changed hardcoded UI symbols to use theme-configurable glyphs throughout the interface
 - Changed tree drawing characters to use theme-defined box-drawing symbols
+- Changed session persistence to use ndjson streaming writer for JSONL appends
 
 ### Fixed
 
