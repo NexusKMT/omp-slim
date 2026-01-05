@@ -1,7 +1,6 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Added
 
 - Added Biome CLI-based linter client as alternative to LSP for more reliable diagnostics
@@ -28,6 +27,7 @@
 
 ### Fixed
 
+- Fixed token counting for subagent progress to handle different usage object formats (camelCase and snake_case)
 - Fixed image file handling by adding 20MB size limit to prevent memory issues during serialization
 
 ## [3.14.0] - 2026-01-04

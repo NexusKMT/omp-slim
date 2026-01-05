@@ -100,6 +100,38 @@ function extractToolArgsPreview(args: Record<string, unknown>): string {
 	return "";
 }
 
+function getNumberField(record: Record<string, unknown>, key: string): number | undefined {
+	if (!Object.hasOwn(record, key)) return undefined;
+	const value = record[key];
+	return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function firstNumberField(record: Record<string, unknown>, keys: string[]): number | undefined {
+	for (const key of keys) {
+		const value = getNumberField(record, key);
+		if (value !== undefined) return value;
+	}
+	return undefined;
+}
+
+/**
+ * Normalize usage objects from different event formats.
+ */
+function getUsageTokens(usage: unknown): number {
+	if (!usage || typeof usage !== "object") return 0;
+	const record = usage as Record<string, unknown>;
+
+	const totalTokens = firstNumberField(record, ["totalTokens", "total_tokens"]);
+	if (totalTokens !== undefined && totalTokens > 0) return totalTokens;
+
+	const input = firstNumberField(record, ["input", "input_tokens", "inputTokens"]) ?? 0;
+	const output = firstNumberField(record, ["output", "output_tokens", "outputTokens"]) ?? 0;
+	const cacheRead = firstNumberField(record, ["cacheRead", "cache_read", "cacheReadTokens"]) ?? 0;
+	const cacheWrite = firstNumberField(record, ["cacheWrite", "cache_write", "cacheWriteTokens"]) ?? 0;
+
+	return input + output + cacheRead + cacheWrite;
+}
+
 /**
  * Run a single agent as a subprocess.
  */
@@ -369,7 +401,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					const messageUsage = event.message?.usage || event.usage;
 					if (messageUsage) {
 						// Accumulate tokens across messages (not overwrite)
-						progress.tokens += (messageUsage.input_tokens || 0) + (messageUsage.output_tokens || 0);
+						progress.tokens += getUsageTokens(messageUsage);
 					}
 					// If pending termination, now we have tokens - terminate
 					if (pendingTermination && !resolved) {
