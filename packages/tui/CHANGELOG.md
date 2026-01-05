@@ -1,8 +1,10 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Added
 
+- Added `isCapsLock` helper function for detecting Caps Lock key press via Kitty protocol
 - Added `isCtrlY` helper function for detecting Ctrl+Y keyboard input
 
 ## [3.15.1] - 2026-01-05

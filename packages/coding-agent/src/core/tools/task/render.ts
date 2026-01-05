@@ -106,7 +106,8 @@ export function renderCall(args: TaskParams, theme: Theme): Component {
 	if (args.tasks.length === 1) {
 		// Single task - show agent and task preview
 		const task = args.tasks[0];
-		const taskPreview = truncate(task.task, 60, theme.format.ellipsis);
+		const summary = task.description?.trim() || task.task;
+		const taskPreview = truncate(summary, 60, theme.format.ellipsis);
 		return new Text(`${label} ${theme.fg("accent", task.agent)}: ${theme.fg("muted", taskPreview)}`, 0, 0);
 	}
 
@@ -146,6 +147,10 @@ function renderAgentProgress(
 	// Main status line - include index for Output tool ID derivation
 	const agentId = `${progress.agent}(${progress.index})`;
 	let statusLine = `${prefix} ${theme.fg(iconColor, icon)} ${theme.fg("accent", agentId)}`;
+	const description = progress.description?.trim();
+	if (description) {
+		statusLine += ` ${theme.fg("muted", truncate(description, 40, theme.format.ellipsis))}`;
+	}
 
 	// Only show badge for non-running states (spinner already indicates running)
 	if (progress.status !== "running") {
@@ -161,8 +166,10 @@ function renderAgentProgress(
 	}
 
 	if (progress.status === "running") {
-		const taskPreview = truncate(progress.task, 40, theme.format.ellipsis);
-		statusLine += ` ${theme.fg("muted", taskPreview)}`;
+		if (!description) {
+			const taskPreview = truncate(progress.task, 40, theme.format.ellipsis);
+			statusLine += ` ${theme.fg("muted", taskPreview)}`;
+		}
 		statusLine += `${theme.sep.dot}${theme.fg("dim", `${progress.toolCount} tools`)}`;
 		if (progress.tokens > 0) {
 			statusLine += `${theme.sep.dot}${theme.fg("dim", `${formatTokens(progress.tokens)} tokens`)}`;
@@ -328,6 +335,10 @@ function renderAgentResult(result: SingleResult, isLast: boolean, expanded: bool
 	// Main status line - include index for Output tool ID derivation
 	const agentId = `${result.agent}(${result.index})`;
 	let statusLine = `${prefix} ${theme.fg(iconColor, icon)} ${theme.fg("accent", agentId)} ${formatBadge(statusText, iconColor, theme)}`;
+	const description = result.description?.trim();
+	if (description) {
+		statusLine += ` ${theme.fg("muted", truncate(description, 40, theme.format.ellipsis))}`;
+	}
 	if (result.tokens > 0) {
 		statusLine += `${theme.sep.dot}${theme.fg("dim", `${formatTokens(result.tokens)} tokens`)}`;
 	}

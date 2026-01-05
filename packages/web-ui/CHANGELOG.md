@@ -1,6 +1,13 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added voice input and output support using OpenAI Whisper for transcription and TTS for speech synthesis
+- Added `enableVoice` property to toggle voice features in the agent interface
+- Added Caps Lock key as push-to-talk trigger for voice capture
+- Added automatic voice summarization and playback of assistant responses
+- Added silence detection to automatically stop voice recording after speech ends
 
 ## [3.15.1] - 2026-01-05
 

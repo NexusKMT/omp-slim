@@ -29,6 +29,7 @@ export interface ExecutorOptions {
 	cwd: string;
 	agent: AgentDefinition;
 	task: string;
+	description?: string;
 	index: number;
 	context?: string;
 	modelOverride?: string;
@@ -141,6 +142,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		agentSource: agent.source,
 		status: "running",
 		task,
+		description: options.description,
 		recentTools: [],
 		recentOutput: [],
 		toolCount: 0,
@@ -156,6 +158,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			agent: agent.name,
 			agentSource: agent.source,
 			task,
+			description: options.description,
 			exitCode: 1,
 			output: "",
 			stderr: "Aborted before start",
@@ -182,6 +185,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			agent: agent.name,
 			agentSource: agent.source,
 			task,
+			description: options.description,
 			exitCode: 1,
 			output: "",
 			stderr: `Failed to write prompt file: ${err}`,
@@ -510,6 +514,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		agent: agent.name,
 		agentSource: agent.source,
 		task,
+		description: options.description,
 		exitCode,
 		output: truncatedOutput,
 		stderr,

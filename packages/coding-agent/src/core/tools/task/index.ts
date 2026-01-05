@@ -195,7 +195,7 @@ function buildDescription(cwd: string): string {
 	lines.push("");
 	lines.push("Parameters:");
 	lines.push(
-		`- tasks: Array of {agent, task, model?} - tasks to run in parallel (max ${MAX_PARALLEL_TASKS}, ${MAX_CONCURRENCY} concurrent)`,
+		`- tasks: Array of {agent, task, description?, model?} - tasks to run in parallel (max ${MAX_PARALLEL_TASKS}, ${MAX_CONCURRENCY} concurrent)`,
 	);
 	lines.push(
 		'  - model: (optional) Override the agent\'s default model with fuzzy matching (e.g., "sonnet", "codex", "5.2"). Supports comma-separated fallbacks: "gpt, opus" tries gpt first, then opus. Use "default" for omp\'s default model',
@@ -436,6 +436,7 @@ export function createTaskTool(
 						tokens: 0,
 						durationMs: 0,
 						modelOverride: tasks[i].model,
+						description: tasks[i].description,
 					});
 				}
 				emitProgress();
@@ -445,6 +446,7 @@ export function createTaskTool(
 					agent: t.agent,
 					task: context ? `${context}\n\n${t.task}` : t.task,
 					model: t.model,
+					description: t.description,
 				}));
 
 				// Execute in parallel with concurrency limit
@@ -454,6 +456,7 @@ export function createTaskTool(
 						cwd,
 						agent,
 						task: task.task,
+						description: task.description,
 						index,
 						context: undefined, // Already prepended above
 						modelOverride: task.model,

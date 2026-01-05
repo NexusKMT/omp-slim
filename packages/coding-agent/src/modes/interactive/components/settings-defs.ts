@@ -96,6 +96,15 @@ export const SETTINGS_DEFS: SettingDef[] = [
 		condition: () => !!getCapabilities().images,
 	},
 	{
+		id: "voiceEnabled",
+		tab: "config",
+		type: "boolean",
+		label: "Voice mode",
+		description: "Enable Caps Lock voice input and spoken summaries",
+		get: (sm) => sm.getVoiceEnabled(),
+		set: (sm, v) => sm.setVoiceEnabled(v),
+	},
+	{
 		id: "queueMode",
 		tab: "config",
 		type: "enum",

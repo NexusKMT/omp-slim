@@ -81,6 +81,15 @@ export interface TtsrSettings {
 	repeatGap?: number; // default: 10
 }
 
+export interface VoiceSettings {
+	enabled?: boolean; // default: false
+	transcriptionModel?: string; // default: "whisper-1"
+	transcriptionLanguage?: string; // optional language hint (e.g., "en")
+	ttsModel?: string; // default: "gpt-4o-mini-tts"
+	ttsVoice?: string; // default: "alloy"
+	ttsFormat?: "wav" | "mp3" | "opus" | "aac" | "flac"; // default: "wav"
+}
+
 export type StatusLineSegmentId =
 	| "pi"
 	| "model"
@@ -147,6 +156,7 @@ export interface Settings {
 	lsp?: LspSettings;
 	edit?: EditSettings;
 	ttsr?: TtsrSettings;
+	voice?: VoiceSettings;
 	disabledProviders?: string[]; // Discovery provider IDs that are disabled
 	disabledExtensions?: string[]; // Individual extension IDs that are disabled (e.g., "skill:commit")
 	statusLine?: StatusLineSettings; // Status line configuration
@@ -734,6 +744,34 @@ export class SettingsManager {
 			this.globalSettings.ttsr = {};
 		}
 		this.globalSettings.ttsr.repeatGap = gap;
+		this.save();
+	}
+
+	getVoiceSettings(): Required<VoiceSettings> {
+		return {
+			enabled: this.settings.voice?.enabled ?? false,
+			transcriptionModel: this.settings.voice?.transcriptionModel ?? "whisper-1",
+			transcriptionLanguage: this.settings.voice?.transcriptionLanguage ?? "",
+			ttsModel: this.settings.voice?.ttsModel ?? "gpt-4o-mini-tts",
+			ttsVoice: this.settings.voice?.ttsVoice ?? "alloy",
+			ttsFormat: this.settings.voice?.ttsFormat ?? "wav",
+		};
+	}
+
+	setVoiceSettings(settings: VoiceSettings): void {
+		this.globalSettings.voice = { ...this.globalSettings.voice, ...settings };
+		this.save();
+	}
+
+	getVoiceEnabled(): boolean {
+		return this.settings.voice?.enabled ?? false;
+	}
+
+	setVoiceEnabled(enabled: boolean): void {
+		if (!this.globalSettings.voice) {
+			this.globalSettings.voice = {};
+		}
+		this.globalSettings.voice.enabled = enabled;
 		this.save();
 	}
 

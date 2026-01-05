@@ -31,6 +31,14 @@ import { createCompactionSummaryMessage } from "../../core/messages";
 import { getRecentSessions, type SessionContext, SessionManager } from "../../core/session-manager";
 import { generateSessionTitle, setTerminalTitle } from "../../core/title-generator";
 import type { TruncationResult } from "../../core/tools/truncate";
+import {
+	playAudio,
+	startVoiceRecording,
+	summarizeForVoice,
+	synthesizeSpeech,
+	transcribeAudio,
+	type VoiceRecordingHandle,
+} from "../../core/voice";
 import { disableProvider, enableProvider } from "../../discovery";
 import { getChangelogPath, parseChangelog } from "../../utils/changelog";
 import { copyToClipboard, readImageFromClipboard } from "../../utils/clipboard";
@@ -132,6 +140,11 @@ export class InteractiveMode {
 
 	// Track pending images from clipboard paste (attached to next message)
 	private pendingImages: ImageContent[] = [];
+
+	// Voice mode state
+	private voiceRecording: VoiceRecordingHandle | undefined = undefined;
+	private pendingVoiceResponses = 0;
+	private voiceOutputQueue: Promise<void> = Promise.resolve();
 
 	// Auto-compaction state
 	private autoCompactionLoader: Loader | undefined = undefined;
@@ -739,6 +752,9 @@ export class InteractiveMode {
 		this.editor.onCtrlG = () => this.openExternalEditor();
 		this.editor.onQuestionMark = () => this.handleHotkeysCommand();
 		this.editor.onCtrlV = () => this.handleImagePaste();
+		this.editor.onCapsLock = () => {
+			void this.toggleVoiceListening();
+		};
 
 		this.editor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
@@ -1119,6 +1135,16 @@ export class InteractiveMode {
 					this.streamingMessage = undefined;
 				}
 				this.pendingTools.clear();
+				if (this.pendingVoiceResponses > 0 && this.settingsManager.getVoiceEnabled()) {
+					this.pendingVoiceResponses = Math.max(0, this.pendingVoiceResponses - 1);
+					const lastAssistant = this.findLastAssistantMessage();
+					if (lastAssistant && lastAssistant.stopReason !== "aborted" && lastAssistant.stopReason !== "error") {
+						const text = this.extractAssistantText(lastAssistant);
+						if (text) {
+							this.enqueueVoiceOutput(text);
+						}
+					}
+				}
 				this.ui.requestRender();
 				break;
 
@@ -1455,6 +1481,11 @@ export class InteractiveMode {
 	 * Emits shutdown event to hooks and tools, then exits.
 	 */
 	private async shutdown(): Promise<void> {
+		if (this.voiceRecording) {
+			await this.voiceRecording.cancel();
+			this.voiceRecording = undefined;
+		}
+
 		// Flush pending session writes before shutdown
 		await this.sessionManager.flush();
 
@@ -1513,6 +1544,145 @@ export class InteractiveMode {
 		} catch {
 			this.showStatus("Failed to read clipboard");
 			return false;
+		}
+	}
+
+	private setVoiceStatus(text: string | undefined): void {
+		this.statusLine.setHookStatus("voice", text);
+		this.ui.requestRender();
+	}
+
+	private async toggleVoiceListening(): Promise<void> {
+		if (!this.settingsManager.getVoiceEnabled()) {
+			this.showStatus("Voice mode is disabled. Enable it in /settings.");
+			return;
+		}
+
+		if (this.voiceRecording) {
+			await this.stopVoiceListening();
+			return;
+		}
+
+		await this.startVoiceListening();
+	}
+
+	private async startVoiceListening(): Promise<void> {
+		if (this.voiceRecording) return;
+		try {
+			this.voiceRecording = await startVoiceRecording(this.settingsManager.getVoiceSettings());
+			this.setVoiceStatus("Listening... (Caps Lock to stop)");
+		} catch (error) {
+			this.voiceRecording = undefined;
+			this.setVoiceStatus(undefined);
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private async stopVoiceListening(): Promise<void> {
+		const recording = this.voiceRecording;
+		if (!recording) return;
+		this.voiceRecording = undefined;
+		this.setVoiceStatus("Transcribing...");
+
+		try {
+			await recording.stop();
+			const apiKey = await this.session.modelRegistry.getApiKeyForProvider("openai");
+			if (!apiKey) {
+				throw new Error("OpenAI API key not found (set OPENAI_API_KEY or login).");
+			}
+
+			const { text } = await transcribeAudio(recording.filePath, apiKey, this.settingsManager.getVoiceSettings());
+			if (!text) {
+				this.showWarning("No speech detected. Try again.");
+				return;
+			}
+			await this.submitVoiceText(text);
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		} finally {
+			recording.cleanup();
+			this.setVoiceStatus(undefined);
+		}
+	}
+
+	private async cancelVoiceRecording(): Promise<void> {
+		const recording = this.voiceRecording;
+		if (!recording) return;
+		this.voiceRecording = undefined;
+		await recording.cancel();
+		this.setVoiceStatus(undefined);
+	}
+
+	private async submitVoiceText(text: string): Promise<void> {
+		const cleaned = text.trim();
+		if (!cleaned) {
+			this.showWarning("No speech detected. Try again.");
+			return;
+		}
+
+		this.pendingVoiceResponses += 1;
+		this.editor.addToHistory(cleaned);
+
+		if (this.session.isStreaming) {
+			await this.session.queueMessage(cleaned);
+			this.updatePendingMessagesDisplay();
+			return;
+		}
+
+		if (this.onInputCallback) {
+			this.onInputCallback({ text: cleaned });
+		}
+	}
+
+	private findLastAssistantMessage(): AssistantMessage | undefined {
+		for (let i = this.session.messages.length - 1; i >= 0; i--) {
+			const message = this.session.messages[i];
+			if (message?.role === "assistant") {
+				return message as AssistantMessage;
+			}
+		}
+		return undefined;
+	}
+
+	private extractAssistantText(message: AssistantMessage): string {
+		let text = "";
+		for (const content of message.content) {
+			if (content.type === "text") {
+				text += content.text;
+			}
+		}
+		return text.trim();
+	}
+
+	private enqueueVoiceOutput(text: string): void {
+		this.voiceOutputQueue = this.voiceOutputQueue
+			.then(() => this.speakVoiceSummary(text))
+			.catch((error) => {
+				this.showError(error instanceof Error ? error.message : String(error));
+			});
+	}
+
+	private async speakVoiceSummary(text: string): Promise<void> {
+		if (!this.settingsManager.getVoiceEnabled()) {
+			return;
+		}
+		const apiKey = await this.session.modelRegistry.getApiKeyForProvider("openai");
+		if (!apiKey) {
+			this.showWarning("OpenAI API key not found for voice playback.");
+			return;
+		}
+
+		const smolModel = this.settingsManager.getModelRole("smol");
+		const summary = (await summarizeForVoice(text, this.session.modelRegistry, smolModel)) ?? text;
+		const cleaned = summary.trim();
+		if (!cleaned) return;
+
+		this.setVoiceStatus("Speaking...");
+		try {
+			const synthesis = await synthesizeSpeech(cleaned, apiKey, this.settingsManager.getVoiceSettings());
+			await playAudio(synthesis.audio, synthesis.format);
+		} finally {
+			this.setVoiceStatus(undefined);
 		}
 	}
 
@@ -1849,6 +2019,16 @@ export class InteractiveMode {
 				this.statusLine.invalidate();
 				this.updateEditorTopBorder();
 				this.ui.invalidate();
+				break;
+			}
+			case "voiceEnabled": {
+				if (!value) {
+					this.pendingVoiceResponses = 0;
+					if (this.voiceRecording) {
+						void this.cancelVoiceRecording();
+					}
+					this.setVoiceStatus(undefined);
+				}
 				break;
 			}
 			case "statusLinePreset":
@@ -2460,6 +2640,7 @@ export class InteractiveMode {
 | \`Ctrl+P\` | Cycle models |
 | \`Ctrl+O\` | Toggle tool output expansion |
 | \`Ctrl+T\` | Toggle thinking block visibility |
+| \`Caps Lock\` | Voice input (start/stop) |
 | \`Ctrl+G\` | Edit message in external editor |
 | \`/\` | Slash commands |
 | \`!\` | Run bash command |

@@ -32,6 +32,7 @@ export const OMP_SPAWNS_ENV = "OMP_SPAWNS";
 export const taskItemSchema = Type.Object({
 	agent: Type.String({ description: "Agent name" }),
 	task: Type.String({ description: "Task description for the agent" }),
+	description: Type.Optional(Type.String({ description: "Short description for UI display" })),
 	model: Type.Optional(Type.String({ description: "Model override for this task" })),
 });
 
@@ -92,6 +93,7 @@ export interface AgentProgress {
 	agentSource: AgentSource;
 	status: "pending" | "running" | "completed" | "failed" | "aborted";
 	task: string;
+	description?: string;
 	currentTool?: string;
 	currentToolArgs?: string;
 	currentToolStartMs?: number;
@@ -111,6 +113,7 @@ export interface SingleResult {
 	agent: string;
 	agentSource: AgentSource;
 	task: string;
+	description?: string;
 	exitCode: number;
 	output: string;
 	stderr: string;

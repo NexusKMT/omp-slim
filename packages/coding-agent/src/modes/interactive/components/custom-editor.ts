@@ -1,5 +1,6 @@
 import {
 	Editor,
+	isCapsLock,
 	isCtrlC,
 	isCtrlD,
 	isCtrlG,
@@ -30,10 +31,16 @@ export class CustomEditor extends Editor {
 	public onCtrlG?: () => void;
 	public onCtrlZ?: () => void;
 	public onQuestionMark?: () => void;
+	public onCapsLock?: () => void;
 	/** Called when Ctrl+V is pressed. Returns true if handled (image found), false to fall through to text paste. */
 	public onCtrlV?: () => Promise<boolean>;
 
 	handleInput(data: string): void {
+		if (isCapsLock(data) && this.onCapsLock) {
+			this.onCapsLock();
+			return;
+		}
+
 		// Intercept Ctrl+V for image paste (async - fires and handles result)
 		if (isCtrlV(data) && this.onCtrlV) {
 			void this.onCtrlV();

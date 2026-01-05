@@ -1,8 +1,13 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Added
 
+- Added voice mode with Caps Lock toggle for speech-to-text input and text-to-speech response summaries using OpenAI Whisper and TTS APIs
+- Added `description` field to task tool for displaying short user-facing summaries in progress output
+- Added `getApiKeyForProvider()` method to ModelRegistry for retrieving API keys by provider name
+- Added voice settings configuration for transcription model, TTS model, voice, and audio format
 - Added shared render utilities module with standardized formatting functions for truncation, byte/token/duration display, and tree rendering
 - Added `resolveOmpCommand()` helper to resolve subprocess command from environment or entry point
 - Added `cycleRoleModels()` method to cycle through configured role-based models in a fixed order with deduplication

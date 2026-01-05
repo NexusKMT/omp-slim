@@ -32,6 +32,7 @@ export {
 	isArrowRight,
 	isArrowUp,
 	isBackspace,
+	isCapsLock,
 	isCtrlA,
 	isCtrlC,
 	isCtrlD,

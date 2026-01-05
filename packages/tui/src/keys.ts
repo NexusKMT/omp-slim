@@ -47,6 +47,9 @@ const CODEPOINTS = {
 	backspace: 127,
 } as const;
 
+// Kitty protocol codepoint for Caps Lock key
+const CAPS_LOCK_CODEPOINT = 57358;
+
 // Lock key bits to ignore when matching (Caps Lock + Num Lock)
 const LOCK_MASK = 64 + 128; // 192
 
@@ -216,6 +219,14 @@ export function isKittyKey(data: string, codepoint: number, modifier: number): b
 	if (data === kittySequence(codepoint, modifier)) return true;
 	// Check with lock bits masked out
 	return matchesKittySequence(data, codepoint, modifier);
+}
+
+/**
+ * Check if input matches a Caps Lock key press (Kitty protocol).
+ * Ignores lock key bits in modifiers.
+ */
+export function isCapsLock(data: string): boolean {
+	return isKittyKey(data, CAPS_LOCK_CODEPOINT, 0);
 }
 
 // Raw control character codes
