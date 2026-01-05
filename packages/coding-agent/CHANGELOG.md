@@ -1,8 +1,10 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Added
 
+- Added `/exit` slash command to exit the application from interactive mode
 - Added fuzzy path matching suggestions when read tool encounters file-not-found errors, showing closest matches using Levenshtein distance
 - Added `status.shadowed` symbol for theme customization to properly indicate shadowed extension state
 - Added Biome CLI-based linter client as alternative to LSP for more reliable diagnostics
