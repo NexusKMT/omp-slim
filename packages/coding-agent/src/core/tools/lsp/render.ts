@@ -11,7 +11,7 @@
 import type { AgentToolResult, RenderResultOptions } from "@oh-my-pi/pi-agent-core";
 import { Text } from "@oh-my-pi/pi-tui";
 import { highlight, supportsLanguage } from "cli-highlight";
-import type { Theme } from "../../../modes/interactive/theme/theme";
+import { getLanguageFromPath, type Theme } from "../../../modes/interactive/theme/theme";
 import type { LspParams, LspToolDetails } from "./types";
 
 // =============================================================================
@@ -186,6 +186,12 @@ function highlightCode(codeText: string, language: string, theme: Theme): string
 // Diagnostics Rendering
 // =============================================================================
 
+function formatDiagnosticLocation(file: string, line: string | number, col: string | number, theme: Theme): string {
+	const lang = getLanguageFromPath(file);
+	const icon = theme.fg("muted", theme.getLangIcon(lang));
+	return `${icon} ${file}:${line}:${col}`;
+}
+
 /**
  * Render diagnostics with color-coded severity.
  */
@@ -230,7 +236,7 @@ function renderDiagnostics(
 				continue;
 			}
 			const severityColor = severityToColor(item.severity);
-			const location = `${item.file}:${item.line}:${item.col}`;
+			const location = formatDiagnosticLocation(item.file, item.line, item.col, theme);
 			output += `\n ${theme.fg("dim", branch)} ${theme.fg(severityColor, location)} ${theme.fg(
 				"dim",
 				`[${item.severity}]`,
@@ -259,7 +265,7 @@ function renderDiagnostics(
 			continue;
 		}
 		const severityColor = severityToColor(item.severity);
-		const location = `${item.file}:${item.line}:${item.col}`;
+		const location = formatDiagnosticLocation(item.file, item.line, item.col, theme);
 		const message = item.message ? ` ${theme.fg("muted", trimTo(item.message, 80, theme))}` : "";
 		output += `\n ${theme.fg("dim", branch)} ${theme.fg(severityColor, location)}${message}`;
 	}

@@ -1,6 +1,10 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added language-specific file icons to LSP diagnostics output showing file locations
+- Added language-specific file icon to edit tool header display
 
 ### Changed
 

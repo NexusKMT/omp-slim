@@ -202,7 +202,9 @@ function formatDiagnostics(diag: { errored: boolean; summary: string; messages: 
 		const fileBranch = isLastFile ? theme.tree.last : theme.tree.branch;
 
 		// File header with icon
-		output += `\n ${theme.fg("dim", fileBranch)} ${theme.fg("muted", theme.icon.file)} ${theme.fg("accent", filePath)}`;
+		const fileLang = getLanguageFromPath(filePath);
+		const fileIcon = theme.fg("muted", theme.getLangIcon(fileLang));
+		output += `\n ${theme.fg("dim", fileBranch)} ${fileIcon} ${theme.fg("accent", filePath)}`;
 		shown++;
 
 		// Render diagnostics for this file
@@ -840,6 +842,8 @@ export class ToolExecutionComponent extends Container {
 		} else if (this.toolName === "edit") {
 			const rawPath = this.args?.file_path || this.args?.path || "";
 			const path = shortenPath(rawPath);
+			const editLanguage = getLanguageFromPath(rawPath) ?? "text";
+			const editIcon = theme.fg("muted", theme.getLangIcon(editLanguage));
 
 			// Build path display, appending :line if we have diff info
 			let pathDisplay = path ? theme.fg("accent", path) : theme.fg("toolOutput", theme.format.ellipsis);
@@ -852,9 +856,8 @@ export class ToolExecutionComponent extends Container {
 				pathDisplay += theme.fg("warning", `:${firstChangedLine}`);
 			}
 
-			text = `${theme.fg("toolTitle", theme.bold("edit"))} ${pathDisplay}`;
+			text = `${theme.fg("toolTitle", theme.bold("edit"))} ${editIcon} ${pathDisplay}`;
 
-			const editLanguage = getLanguageFromPath(rawPath) ?? "text";
 			const editLineCount = countLines(this.args?.newText ?? this.args?.oldText ?? "");
 			text += `\n${formatMetadataLine(editLineCount, editLanguage)}`;
 
