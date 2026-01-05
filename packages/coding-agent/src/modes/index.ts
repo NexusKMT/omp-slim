@@ -3,6 +3,7 @@
  */
 
 import { emergencyTerminalRestore } from "@oh-my-pi/pi-tui";
+import { runAsyncCleanup } from "./cleanup";
 
 /**
  * Install handlers that restore terminal state on crash/signal.
@@ -13,17 +14,21 @@ export function installTerminalCrashHandlers(): void {
 		emergencyTerminalRestore();
 	};
 
-	// Signals
+	// Signals - run async cleanup before exit
+	process.on("SIGINT", () => {
+		cleanup();
+		void runAsyncCleanup().finally(() => process.exit(128 + 2));
+	});
 	process.on("SIGTERM", () => {
 		cleanup();
-		process.exit(128 + 15);
+		void runAsyncCleanup().finally(() => process.exit(128 + 15));
 	});
 	process.on("SIGHUP", () => {
 		cleanup();
-		process.exit(128 + 1);
+		void runAsyncCleanup().finally(() => process.exit(128 + 1));
 	});
 
-	// Crashes
+	// Crashes - exit immediately (async cleanup may not be safe in corrupted state)
 	process.on("uncaughtException", (err) => {
 		cleanup();
 		console.error("Uncaught exception:", err);
