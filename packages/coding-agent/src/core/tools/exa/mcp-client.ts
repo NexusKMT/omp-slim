@@ -4,6 +4,8 @@
  * Client for interacting with Exa MCP servers via JSON-RPC 2.0 over HTTPS.
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import type { TSchema } from "@sinclair/typebox";
 import type { CustomTool } from "../../custom-tools/types";
 import { logger } from "../../logger";
@@ -26,14 +28,13 @@ export async function findApiKey(): Promise<string | null> {
 
 	// Try loading from .env files in cwd and home
 	const cwd = process.cwd();
-	const home = process.env.HOME ?? process.env.USERPROFILE ?? "~";
+	const home = homedir();
 
 	for (const dir of [cwd, home]) {
 		const envPath = `${dir}/.env`;
 		try {
-			const file = Bun.file(envPath);
-			if (await file.exists()) {
-				const content = await file.text();
+			if (existsSync(envPath)) {
+				const content = readFileSync(envPath, "utf-8");
 				const match = content.match(/^EXA_API_KEY=(.+)$/m);
 				if (match?.[1]) {
 					return match[1].trim().replace(/^["']|["']$/g, "");

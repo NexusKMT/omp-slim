@@ -21,6 +21,9 @@ afterEach(() => {
 
 describe("git-tool safety", () => {
 	it("blocks force push to protected branch", async () => {
+		writeFile(join(repoDir, "init.txt"), "init");
+		runGit(["add", "."], repoDir);
+		runGit(["commit", "-m", "init"], repoDir);
 		runGit(["branch", "-M", "main"], repoDir);
 		const result = await checkSafety("push", { force: true });
 		expect(result.blocked).toBe(true);

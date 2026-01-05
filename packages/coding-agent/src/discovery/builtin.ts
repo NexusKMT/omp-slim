@@ -5,9 +5,10 @@
  * .pi is an alias for backwards compatibility.
  */
 
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "path";
 import { type ContextFile, contextFileCapability } from "../capability/context-file";
 import { type Extension, type ExtensionManifest, extensionCapability } from "../capability/extension";
+import { type ExtensionModule, extensionModuleCapability } from "../capability/extension-module";
 import { type Hook, hookCapability } from "../capability/hook";
 import { registerProvider } from "../capability/index";
 import { type Instruction, instructionCapability } from "../capability/instruction";
@@ -22,7 +23,9 @@ import { type CustomTool, toolCapability } from "../capability/tool";
 import type { LoadContext, LoadResult } from "../capability/types";
 import {
 	createSourceMeta,
+	discoverExtensionModulePaths,
 	expandEnvVarsDeep,
+	getExtensionNameFromPath,
 	loadFilesFromDir,
 	parseFrontmatter,
 	parseJSON,
@@ -359,6 +362,77 @@ registerProvider<Prompt>(promptCapability.id, {
 	description: DESCRIPTION,
 	priority: PRIORITY,
 	load: loadPrompts,
+});
+
+// Extension Modules
+function loadExtensionModules(ctx: LoadContext): LoadResult<ExtensionModule> {
+	const items: ExtensionModule[] = [];
+	const warnings: string[] = [];
+
+	const resolveExtensionPath = (rawPath: string): string => {
+		if (rawPath.startsWith("~/")) {
+			return join(ctx.home, rawPath.slice(2));
+		}
+		if (rawPath.startsWith("~")) {
+			return join(ctx.home, rawPath.slice(1));
+		}
+		if (isAbsolute(rawPath)) {
+			return rawPath;
+		}
+		return resolve(ctx.cwd, rawPath);
+	};
+
+	const addExtensionPath = (extPath: string, level: "user" | "project"): void => {
+		items.push({
+			name: getExtensionNameFromPath(extPath),
+			path: extPath,
+			level,
+			_source: createSourceMeta(PROVIDER_ID, extPath, level),
+		});
+	};
+
+	for (const { dir, level } of getConfigDirs(ctx)) {
+		const extensionsDir = join(dir, "extensions");
+		const discovered = discoverExtensionModulePaths(ctx, extensionsDir);
+		for (const extPath of discovered) {
+			addExtensionPath(extPath, level);
+		}
+
+		const settingsPath = join(dir, "settings.json");
+		const settingsContent = ctx.fs.readFile(settingsPath);
+		if (settingsContent) {
+			const settingsData = parseJSON<{ extensions?: unknown }>(settingsContent);
+			const extensions = settingsData?.extensions;
+			if (Array.isArray(extensions)) {
+				for (const entry of extensions) {
+					if (typeof entry !== "string") {
+						warnings.push(`Invalid extension path in ${settingsPath}: ${String(entry)}`);
+						continue;
+					}
+					const resolvedPath = resolveExtensionPath(entry);
+					if (ctx.fs.isDir(resolvedPath)) {
+						for (const extPath of discoverExtensionModulePaths(ctx, resolvedPath)) {
+							addExtensionPath(extPath, level);
+						}
+					} else if (ctx.fs.isFile(resolvedPath)) {
+						addExtensionPath(resolvedPath, level);
+					} else {
+						warnings.push(`Extension path not found: ${resolvedPath}`);
+					}
+				}
+			}
+		}
+	}
+
+	return { items, warnings };
+}
+
+registerProvider<ExtensionModule>(extensionModuleCapability.id, {
+	id: PROVIDER_ID,
+	displayName: DISPLAY_NAME,
+	description: DESCRIPTION,
+	priority: PRIORITY,
+	load: loadExtensionModules,
 });
 
 // Extensions

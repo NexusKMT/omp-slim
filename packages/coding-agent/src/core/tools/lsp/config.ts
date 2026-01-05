@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { extname, join } from "node:path";
-import { getConfigDirPaths } from "../../../config.js";
+import { getConfigDirPaths } from "../../../config";
 import { createBiomeClient } from "./clients/biome-client";
 import type { ServerConfig } from "./types";
 
@@ -618,7 +618,7 @@ export function hasRootMarkers(cwd: string, markers: string[]): boolean {
 		// Handle glob-like patterns (e.g., "*.cabal")
 		if (marker.includes("*")) {
 			try {
-				const { globSync } = require("node:fs");
+				const { globSync } = require("glob");
 				const matches = globSync(join(cwd, marker));
 				return matches.length > 0;
 			} catch {
@@ -626,7 +626,8 @@ export function hasRootMarkers(cwd: string, markers: string[]): boolean {
 				return false;
 			}
 		}
-		return existsSync(join(cwd, marker));
+		const filePath = join(cwd, marker);
+		return existsSync(filePath);
 	});
 }
 
@@ -741,7 +742,7 @@ function getConfigPaths(cwd: string): string[] {
  * }
  * ```
  */
-export function loadConfig(cwd: string): LspConfig {
+export async function loadConfig(cwd: string): Promise<LspConfig> {
 	const configPaths = getConfigPaths(cwd);
 
 	for (const configPath of configPaths) {

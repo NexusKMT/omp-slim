@@ -5,11 +5,9 @@
  * Parses JSON events for progress tracking.
  */
 
-import { spawn } from "node:child_process";
-import * as fs from "node:fs";
-import * as os from "node:os";
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
-import * as readline from "node:readline";
 import { ensureArtifactsDir, getArtifactPaths } from "./artifacts";
 import { resolveModelPattern } from "./model-resolver";
 import { resolveOmpCommand } from "./omp-command";
@@ -171,14 +169,14 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	}
 
 	// Write system prompt to temp file
-	const tempDir = os.tmpdir();
+	const tempDir = tmpdir();
 	const promptFile = path.join(
 		tempDir,
 		`omp-agent-${agent.name}-${Date.now()}-${Math.random().toString(36).slice(2)}.md`,
 	);
 
 	try {
-		fs.writeFileSync(promptFile, agent.systemPrompt, "utf-8");
+		writeFileSync(promptFile, agent.systemPrompt, "utf-8");
 	} catch (err) {
 		return {
 			index,
@@ -211,7 +209,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 
 		// Write input file immediately (real-time visibility)
 		try {
-			fs.writeFileSync(artifactPaths.inputPath, fullTask, "utf-8");
+			writeFileSync(artifactPaths.inputPath, fullTask, "utf-8");
 		} catch {
 			// Non-fatal, continue without input artifact
 		}
@@ -268,10 +266,11 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 
 	// Spawn subprocess
 	const ompCommand = resolveOmpCommand();
-	const proc = spawn(ompCommand.cmd, [...ompCommand.args, ...args], {
+	const proc = Bun.spawn([ompCommand.cmd, ...ompCommand.args, ...args], {
 		cwd,
-		stdio: ["ignore", "pipe", "pipe"],
-		shell: ompCommand.shell,
+		stdin: "ignore",
+		stdout: "pipe",
+		stderr: "pipe",
 		env,
 	});
 
@@ -285,7 +284,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	// Handle abort signal
 	const onAbort = () => {
 		if (!resolved) {
-			proc.kill("SIGTERM");
+			proc.kill(15); // SIGTERM
 		}
 	};
 	if (signal) {
@@ -293,9 +292,11 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	}
 
 	// Parse JSON events from stdout
-	const rl = readline.createInterface({ input: proc.stdout! });
+	const reader = proc.stdout.getReader();
+	const decoder = new TextDecoder();
+	let buffer = "";
 
-	rl.on("line", (line) => {
+	const processLine = (line: string) => {
 		if (resolved) return;
 
 		try {
@@ -362,7 +363,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 							setTimeout(() => {
 								if (!resolved) {
 									resolved = true;
-									proc.kill("SIGTERM");
+									proc.kill(15); // SIGTERM
 								}
 							}, 2000);
 						}
@@ -406,7 +407,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					// If pending termination, now we have tokens - terminate
 					if (pendingTermination && !resolved) {
 						resolved = true;
-						proc.kill("SIGTERM");
+						proc.kill(15); // SIGTERM
 					}
 					break;
 				}
@@ -433,45 +434,48 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		} catch {
 			// Ignore non-JSON lines
 		}
-	});
+	};
 
-	// Capture stderr
-	const stderrDecoder = new TextDecoder();
-	proc.stderr?.on("data", (chunk: Buffer) => {
-		stderr += stderrDecoder.decode(chunk, { stream: true });
-	});
-
-	// Wait for readline to finish BEFORE resolving
-	const exitCode = await new Promise<number>((resolve) => {
-		let code: number | null = null;
-		let rlClosed = false;
-		let procClosed = false;
-
-		const maybeResolve = () => {
-			if (rlClosed && procClosed) {
-				resolved = true;
-				resolve(code ?? 1);
+	// Read stdout asynchronously
+	(async () => {
+		try {
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				buffer += decoder.decode(value, { stream: true });
+				const lines = buffer.split("\n");
+				buffer = lines.pop() || "";
+				for (const line of lines) {
+					processLine(line);
+				}
 			}
-		};
+			// Process remaining buffer
+			if (buffer.trim()) {
+				processLine(buffer);
+			}
+		} catch {
+			// Ignore read errors
+		}
+	})();
 
-		rl.on("close", () => {
-			rlClosed = true;
-			maybeResolve();
-		});
+	// Capture stderr - Bun.spawn returns ReadableStream, convert to text
+	(async () => {
+		try {
+			const reader = proc.stderr.getReader();
+			const decoder = new TextDecoder();
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				stderr += decoder.decode(value, { stream: true });
+			}
+		} catch {
+			// Ignore stderr read errors
+		}
+	})();
 
-		proc.on("close", (c) => {
-			code = c;
-			procClosed = true;
-			maybeResolve();
-		});
-
-		proc.on("error", (err) => {
-			stderr += `\nProcess error: ${err.message}`;
-			code = 1;
-			procClosed = true;
-			maybeResolve();
-		});
-	});
+	// Wait for process to finish
+	resolved = true;
+	const exitCode = await proc.exited;
 
 	// Cleanup
 	if (signal) {
@@ -479,7 +483,9 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	}
 
 	try {
-		fs.unlinkSync(promptFile);
+		if (existsSync(promptFile)) {
+			unlinkSync(promptFile);
+		}
 	} catch {
 		// Ignore cleanup errors
 	}
@@ -493,7 +499,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	let outputMeta: { lineCount: number; charCount: number } | undefined;
 	if (artifactPaths) {
 		try {
-			fs.writeFileSync(artifactPaths.outputPath, rawOutput, "utf-8");
+			writeFileSync(artifactPaths.outputPath, rawOutput, "utf-8");
 			outputMeta = {
 				lineCount: rawOutput.split("\n").length,
 				charCount: rawOutput.length,

@@ -8,25 +8,35 @@
  * - Commands: JSON objects with `type` field, optional `id` for correlation
  * - Responses: JSON objects with `type: "response"`, `command`, `success`, and optional `data`/`error`
  * - Events: AgentSessionEvent objects streamed as they occur
- * - Hook UI: Hook UI requests are emitted, client responds with hook_ui_response
+ * - Extension UI: Extension UI requests are emitted, client responds with extension_ui_response
  */
 
-import { nanoid } from "nanoid";
 import type { AgentSession } from "../../core/agent-session";
-import type { HookUIContext } from "../../core/hooks/index";
-import { logger } from "../../core/logger";
+import type { ExtensionUIContext } from "../../core/extensions/index";
 import { theme } from "../interactive/theme/theme";
-import type { RpcCommand, RpcHookUIRequest, RpcHookUIResponse, RpcResponse, RpcSessionState } from "./rpc-types";
+import type {
+	RpcCommand,
+	RpcExtensionUIRequest,
+	RpcExtensionUIResponse,
+	RpcResponse,
+	RpcSessionState,
+} from "./rpc-types";
 
 // Re-export types for consumers
-export type { RpcCommand, RpcHookUIRequest, RpcHookUIResponse, RpcResponse, RpcSessionState } from "./rpc-types";
+export type {
+	RpcCommand,
+	RpcExtensionUIRequest,
+	RpcExtensionUIResponse,
+	RpcResponse,
+	RpcSessionState,
+} from "./rpc-types";
 
 /**
  * Run in RPC mode.
  * Listens for JSON commands on stdin, outputs events and responses on stdout.
  */
 export async function runRpcMode(session: AgentSession): Promise<never> {
-	const output = (obj: RpcResponse | RpcHookUIRequest | object) => {
+	const output = (obj: RpcResponse | RpcExtensionUIRequest | object) => {
 		console.log(JSON.stringify(obj));
 	};
 
@@ -45,18 +55,21 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 		return { id, type: "response", command, success: false, error: message };
 	};
 
-	// Pending hook UI requests waiting for response
-	const pendingHookRequests = new Map<string, { resolve: (value: any) => void; reject: (error: Error) => void }>();
+	// Pending extension UI requests waiting for response
+	const pendingExtensionRequests = new Map<
+		string,
+		{ resolve: (value: any) => void; reject: (error: Error) => void }
+	>();
 
 	/**
-	 * Create a hook UI context that uses the RPC protocol.
+	 * Create an extension UI context that uses the RPC protocol.
 	 */
-	const createHookUIContext = (): HookUIContext => ({
+	const createExtensionUIContext = (): ExtensionUIContext => ({
 		async select(title: string, options: string[]): Promise<string | undefined> {
-			const id = nanoid();
+			const id = globalThis.crypto.randomUUID();
 			return new Promise((resolve, reject) => {
-				pendingHookRequests.set(id, {
-					resolve: (response: RpcHookUIResponse) => {
+				pendingExtensionRequests.set(id, {
+					resolve: (response: RpcExtensionUIResponse) => {
 						if ("cancelled" in response && response.cancelled) {
 							resolve(undefined);
 						} else if ("value" in response) {
@@ -67,15 +80,15 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 					},
 					reject,
 				});
-				output({ type: "hook_ui_request", id, method: "select", title, options } as RpcHookUIRequest);
+				output({ type: "extension_ui_request", id, method: "select", title, options } as RpcExtensionUIRequest);
 			});
 		},
 
 		async confirm(title: string, message: string): Promise<boolean> {
-			const id = nanoid();
+			const id = globalThis.crypto.randomUUID();
 			return new Promise((resolve, reject) => {
-				pendingHookRequests.set(id, {
-					resolve: (response: RpcHookUIResponse) => {
+				pendingExtensionRequests.set(id, {
+					resolve: (response: RpcExtensionUIResponse) => {
 						if ("cancelled" in response && response.cancelled) {
 							resolve(false);
 						} else if ("confirmed" in response) {
@@ -86,15 +99,15 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 					},
 					reject,
 				});
-				output({ type: "hook_ui_request", id, method: "confirm", title, message } as RpcHookUIRequest);
+				output({ type: "extension_ui_request", id, method: "confirm", title, message } as RpcExtensionUIRequest);
 			});
 		},
 
 		async input(title: string, placeholder?: string): Promise<string | undefined> {
-			const id = nanoid();
+			const id = globalThis.crypto.randomUUID();
 			return new Promise((resolve, reject) => {
-				pendingHookRequests.set(id, {
-					resolve: (response: RpcHookUIResponse) => {
+				pendingExtensionRequests.set(id, {
+					resolve: (response: RpcExtensionUIResponse) => {
 						if ("cancelled" in response && response.cancelled) {
 							resolve(undefined);
 						} else if ("value" in response) {
@@ -105,30 +118,54 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 					},
 					reject,
 				});
-				output({ type: "hook_ui_request", id, method: "input", title, placeholder } as RpcHookUIRequest);
+				output({ type: "extension_ui_request", id, method: "input", title, placeholder } as RpcExtensionUIRequest);
 			});
 		},
 
 		notify(message: string, type?: "info" | "warning" | "error"): void {
 			// Fire and forget - no response needed
 			output({
-				type: "hook_ui_request",
-				id: nanoid(),
+				type: "extension_ui_request",
+				id: globalThis.crypto.randomUUID(),
 				method: "notify",
 				message,
 				notifyType: type,
-			} as RpcHookUIRequest);
+			} as RpcExtensionUIRequest);
 		},
 
 		setStatus(key: string, text: string | undefined): void {
 			// Fire and forget - no response needed
 			output({
-				type: "hook_ui_request",
-				id: nanoid(),
+				type: "extension_ui_request",
+				id: globalThis.crypto.randomUUID(),
 				method: "setStatus",
 				statusKey: key,
 				statusText: text,
-			} as RpcHookUIRequest);
+			} as RpcExtensionUIRequest);
+		},
+
+		setWidget(key: string, content: unknown): void {
+			// Only support string arrays in RPC mode - factory functions are ignored
+			if (content === undefined || Array.isArray(content)) {
+				output({
+					type: "extension_ui_request",
+					id: globalThis.crypto.randomUUID(),
+					method: "setWidget",
+					widgetKey: key,
+					widgetLines: content as string[] | undefined,
+				} as RpcExtensionUIRequest);
+			}
+			// Component factories are not supported in RPC mode - would need TUI access
+		},
+
+		setTitle(title: string): void {
+			// Fire and forget - host can implement terminal title control
+			output({
+				type: "extension_ui_request",
+				id: globalThis.crypto.randomUUID(),
+				method: "setTitle",
+				title,
+			} as RpcExtensionUIRequest);
 		},
 
 		async custom() {
@@ -139,11 +176,11 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 		setEditorText(text: string): void {
 			// Fire and forget - host can implement editor control
 			output({
-				type: "hook_ui_request",
-				id: nanoid(),
+				type: "extension_ui_request",
+				id: globalThis.crypto.randomUUID(),
 				method: "set_editor_text",
 				text,
-			} as RpcHookUIRequest);
+			} as RpcExtensionUIRequest);
 		},
 
 		getEditorText(): string {
@@ -153,10 +190,10 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 		},
 
 		async editor(title: string, prefill?: string): Promise<string | undefined> {
-			const id = nanoid();
+			const id = globalThis.crypto.randomUUID();
 			return new Promise((resolve, reject) => {
-				pendingHookRequests.set(id, {
-					resolve: (response: RpcHookUIResponse) => {
+				pendingExtensionRequests.set(id, {
+					resolve: (response: RpcExtensionUIResponse) => {
 						if ("cancelled" in response && response.cancelled) {
 							resolve(undefined);
 						} else if ("value" in response) {
@@ -167,7 +204,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 					},
 					reject,
 				});
-				output({ type: "hook_ui_request", id, method: "editor", title, prefill } as RpcHookUIRequest);
+				output({ type: "extension_ui_request", id, method: "editor", title, prefill } as RpcExtensionUIRequest);
 			});
 		},
 
@@ -176,65 +213,38 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 		},
 	});
 
-	// Set up hooks with RPC-based UI context
-	const hookRunner = session.hookRunner;
-	if (hookRunner) {
-		hookRunner.initialize({
+	// Set up extensions with RPC-based UI context
+	const extensionRunner = session.extensionRunner;
+	if (extensionRunner) {
+		extensionRunner.initialize({
 			getModel: () => session.agent.state.model,
-			sendMessageHandler: (message, triggerTurn) => {
-				session.sendHookMessage(message, triggerTurn).catch((e) => {
-					output(error(undefined, "hook_send", e.message));
+			sendMessageHandler: (message, options) => {
+				session.sendCustomMessage(message, options).catch((e) => {
+					output(error(undefined, "extension_send", e.message));
 				});
 			},
 			appendEntryHandler: (customType, data) => {
 				session.sessionManager.appendCustomEntry(customType, data);
 			},
-			uiContext: createHookUIContext(),
+			getActiveToolsHandler: () => session.getActiveToolNames(),
+			getAllToolsHandler: () => session.getAllToolNames(),
+			setActiveToolsHandler: (toolNames: string[]) => session.setActiveToolsByName(toolNames),
+			uiContext: createExtensionUIContext(),
 			hasUI: false,
 		});
-		hookRunner.onError((err) => {
-			output({ type: "hook_error", hookPath: err.hookPath, event: err.event, error: err.error });
+		extensionRunner.onError((err) => {
+			output({ type: "extension_error", extensionPath: err.extensionPath, event: err.event, error: err.error });
 		});
 		// Emit session_start event
-		await hookRunner.emit({
+		await extensionRunner.emit({
 			type: "session_start",
 		});
-	}
-
-	// Emit session start event to custom tools
-	// Note: Tools get no-op UI context in RPC mode (host handles UI via protocol)
-	for (const { tool } of session.customTools) {
-		if (tool.onSession) {
-			try {
-				await tool.onSession(
-					{
-						previousSessionFile: undefined,
-						reason: "start",
-					},
-					{
-						sessionManager: session.sessionManager,
-						modelRegistry: session.modelRegistry,
-						model: session.model,
-						isIdle: () => !session.isStreaming,
-						hasQueuedMessages: () => session.queuedMessageCount > 0,
-						abort: () => {
-							session.abort();
-						},
-					},
-				);
-			} catch (err) {
-				logger.warn("Tool onSession error", { error: String(err) });
-			}
-		}
 	}
 
 	// Output all agent events as JSON
 	session.subscribe((event) => {
 		output(event);
 	});
-
-	// Serialize prompt commands to prevent concurrent execution
-	let activePrompt: Promise<void> | null = null;
 
 	// Handle a single command
 	const handleCommand = async (command: RpcCommand): Promise<RpcResponse> => {
@@ -246,24 +256,26 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 			// =================================================================
 
 			case "prompt": {
-				// Serialize prompts to prevent concurrent execution
-				if (activePrompt) {
-					await activePrompt;
-				}
-				activePrompt = session
+				// Don't await - events will stream
+				// Extension commands are executed immediately, file prompt templates are expanded
+				// If streaming and streamingBehavior specified, queues via steer/followUp
+				session
 					.prompt(command.message, {
 						images: command.images,
+						streamingBehavior: command.streamingBehavior,
 					})
-					.catch((e) => output(error(id, "prompt", e.message)))
-					.finally(() => {
-						activePrompt = null;
-					});
+					.catch((e) => output(error(id, "prompt", e.message)));
 				return success(id, "prompt");
 			}
 
-			case "queue_message": {
-				await session.queueMessage(command.message);
-				return success(id, "queue_message");
+			case "steer": {
+				await session.steer(command.message);
+				return success(id, "steer");
+			}
+
+			case "follow_up": {
+				await session.followUp(command.message);
+				return success(id, "follow_up");
 			}
 
 			case "abort": {
@@ -287,7 +299,9 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 					thinkingLevel: session.thinkingLevel,
 					isStreaming: session.isStreaming,
 					isCompacting: session.isCompacting,
-					queueMode: session.queueMode,
+					steeringMode: session.steeringMode,
+					followUpMode: session.followUpMode,
+					interruptMode: session.interruptMode,
 					sessionFile: session.sessionFile,
 					sessionId: session.sessionId,
 					autoCompactionEnabled: session.autoCompactionEnabled,
@@ -302,7 +316,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 			// =================================================================
 
 			case "set_model": {
-				const models = await session.getAvailableModels();
+				const models = session.getAvailableModels();
 				const model = models.find((m) => m.provider === command.provider && m.id === command.modelId);
 				if (!model) {
 					return error(id, "set_model", `Model not found: ${command.provider}/${command.modelId}`);
@@ -320,7 +334,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 			}
 
 			case "get_available_models": {
-				const models = await session.getAvailableModels();
+				const models = session.getAvailableModels();
 				return success(id, "get_available_models", { models });
 			}
 
@@ -342,12 +356,22 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 			}
 
 			// =================================================================
-			// Queue Mode
+			// Queue Modes
 			// =================================================================
 
-			case "set_queue_mode": {
-				session.setQueueMode(command.mode);
-				return success(id, "set_queue_mode");
+			case "set_steering_mode": {
+				session.setSteeringMode(command.mode);
+				return success(id, "set_steering_mode");
+			}
+
+			case "set_follow_up_mode": {
+				session.setFollowUpMode(command.mode);
+				return success(id, "set_follow_up_mode");
+			}
+
+			case "set_interrupt_mode": {
+				session.setInterruptMode(command.mode);
+				return success(id, "set_interrupt_mode");
 			}
 
 			// =================================================================
@@ -441,42 +465,30 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 		}
 	};
 
-	// Listen for JSON input - use Bun's ReadableStream
-	const stdinReader = (Bun.stdin.stream() as ReadableStream<Uint8Array>)
-		.pipeThrough(new TextDecoderStream())
-		.pipeThrough(
-			new TransformStream({
-				transform(chunk, controller) {
-					const lines = chunk.split("\n");
-					for (const line of lines) {
-						if (line.trim()) {
-							controller.enqueue(line);
-						}
-					}
-				},
-			}),
-		)
-		.getReader();
+	// Listen for JSON input using Bun's stdin
+	const decoder = new TextDecoder();
+	let buffer = "";
 
-	// Process lines in background
-	(async () => {
-		while (true) {
-			const { done, value: line } = await stdinReader.read();
-			if (done) break;
+	for await (const chunk of Bun.stdin.stream()) {
+		buffer += decoder.decode(chunk, { stream: true });
+		const lines = buffer.split("\n");
+		buffer = lines.pop() || "";
+
+		for (const line of lines) {
+			if (!line.trim()) continue;
 
 			try {
 				const parsed = JSON.parse(line);
 
-				// Handle hook UI responses
-				if (parsed.type === "hook_ui_response") {
-					const response = parsed as RpcHookUIResponse;
-					const pending = pendingHookRequests.get(response.id);
+				// Handle extension UI responses
+				if (parsed.type === "extension_ui_response") {
+					const response = parsed as RpcExtensionUIResponse;
+					const pending = pendingExtensionRequests.get(response.id);
 					if (pending) {
-						// Atomic delete: remove before resolve to prevent double-resolution
-						pendingHookRequests.delete(response.id);
+						pendingExtensionRequests.delete(response.id);
 						pending.resolve(response);
 					}
-					return;
+					continue;
 				}
 
 				// Handle regular commands
@@ -487,7 +499,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 				output(error(undefined, "parse", `Failed to parse command: ${e.message}`));
 			}
 		}
-	})();
+	}
 
 	// Keep process alive forever
 	return new Promise(() => {});

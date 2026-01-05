@@ -48,13 +48,19 @@ export interface AgentOptions {
 	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
 
 	/**
-	 * Queue mode: "all" = send all queued messages at once, "one-at-a-time" = one per turn
+	 * Steering mode: "all" = send all steering messages at once, "one-at-a-time" = one per turn
 	 */
-	queueMode?: "all" | "one-at-a-time";
+	steeringMode?: "all" | "one-at-a-time";
 
 	/**
-	 * Interrupt mode: "immediate" = check queue after each tool (interrupt remaining),
-	 * "wait" = only process queue after turn completes
+	 * Follow-up mode: "all" = send all follow-up messages at once, "one-at-a-time" = one per turn
+	 */
+	followUpMode?: "all" | "one-at-a-time";
+
+	/**
+	 * When to interrupt tool execution for steering messages.
+	 * - "immediate": check after each tool call (default)
+	 * - "wait": defer steering until the current turn completes
 	 */
 	interruptMode?: "immediate" | "wait";
 
@@ -71,6 +77,7 @@ export interface AgentOptions {
 
 	/**
 	 * Provides tool execution context, resolved per tool call.
+	 * Use for late-bound UI or session state access.
 	 */
 	getToolContext?: () => AgentToolContext | undefined;
 }
@@ -92,8 +99,10 @@ export class Agent {
 	private abortController?: AbortController;
 	private convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	private transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
-	private messageQueue: AgentMessage[] = [];
-	private queueMode: "all" | "one-at-a-time";
+	private steeringQueue: AgentMessage[] = [];
+	private followUpQueue: AgentMessage[] = [];
+	private steeringMode: "all" | "one-at-a-time";
+	private followUpMode: "all" | "one-at-a-time";
 	private interruptMode: "immediate" | "wait";
 	public streamFn: StreamFn;
 	public getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
@@ -105,7 +114,8 @@ export class Agent {
 		this._state = { ...this._state, ...opts.initialState };
 		this.convertToLlm = opts.convertToLlm || defaultConvertToLlm;
 		this.transformContext = opts.transformContext;
-		this.queueMode = opts.queueMode || "one-at-a-time";
+		this.steeringMode = opts.steeringMode || "one-at-a-time";
+		this.followUpMode = opts.followUpMode || "one-at-a-time";
 		this.interruptMode = opts.interruptMode || "immediate";
 		this.streamFn = opts.streamFn || streamSimple;
 		this.getApiKey = opts.getApiKey;
@@ -134,12 +144,20 @@ export class Agent {
 		this._state.thinkingLevel = l;
 	}
 
-	setQueueMode(mode: "all" | "one-at-a-time") {
-		this.queueMode = mode;
+	setSteeringMode(mode: "all" | "one-at-a-time") {
+		this.steeringMode = mode;
 	}
 
-	getQueueMode(): "all" | "one-at-a-time" {
-		return this.queueMode;
+	getSteeringMode(): "all" | "one-at-a-time" {
+		return this.steeringMode;
+	}
+
+	setFollowUpMode(mode: "all" | "one-at-a-time") {
+		this.followUpMode = mode;
+	}
+
+	getFollowUpMode(): "all" | "one-at-a-time" {
+		return this.followUpMode;
 	}
 
 	setInterruptMode(mode: "immediate" | "wait") {
@@ -162,24 +180,49 @@ export class Agent {
 		this._state.messages = [...this._state.messages, m];
 	}
 
-	queueMessage(m: AgentMessage) {
-		this.messageQueue.push(m);
+	popMessage(): AgentMessage | undefined {
+		const messages = this._state.messages.slice(0, -1);
+		const removed = this._state.messages.at(-1);
+		this._state.messages = messages;
+
+		if (removed && this._state.streamMessage === removed) {
+			this._state.streamMessage = null;
+		}
+
+		return removed;
 	}
 
-	clearMessageQueue() {
-		this.messageQueue = [];
+	/**
+	 * Queue a steering message to interrupt the agent mid-run.
+	 * Delivered after current tool execution, skips remaining tools.
+	 */
+	steer(m: AgentMessage) {
+		this.steeringQueue.push(m);
+	}
+
+	/**
+	 * Queue a follow-up message to be processed after the agent finishes.
+	 * Delivered only when agent has no more tool calls or steering messages.
+	 */
+	followUp(m: AgentMessage) {
+		this.followUpQueue.push(m);
+	}
+
+	clearSteeringQueue() {
+		this.steeringQueue = [];
+	}
+
+	clearFollowUpQueue() {
+		this.followUpQueue = [];
+	}
+
+	clearAllQueues() {
+		this.steeringQueue = [];
+		this.followUpQueue = [];
 	}
 
 	clearMessages() {
 		this._state.messages = [];
-	}
-
-	/** Remove and return the last message from the message list */
-	popMessage(): AgentMessage | undefined {
-		if (this._state.messages.length === 0) return undefined;
-		const popped = this._state.messages[this._state.messages.length - 1];
-		this._state.messages = this._state.messages.slice(0, -1);
-		return popped;
 	}
 
 	abort() {
@@ -196,13 +239,20 @@ export class Agent {
 		this._state.streamMessage = null;
 		this._state.pendingToolCalls = new Set<string>();
 		this._state.error = undefined;
-		this.messageQueue = [];
+		this.steeringQueue = [];
+		this.followUpQueue = [];
 	}
 
 	/** Send a prompt with an AgentMessage */
 	async prompt(message: AgentMessage | AgentMessage[]): Promise<void>;
 	async prompt(input: string, images?: ImageContent[]): Promise<void>;
 	async prompt(input: string | AgentMessage | AgentMessage[], images?: ImageContent[]) {
+		if (this._state.isStreaming) {
+			throw new Error(
+				"Agent is already processing a prompt. Use steer() or followUp() to queue messages, or wait for completion.",
+			);
+		}
+
 		const model = this._state.model;
 		if (!model) throw new Error("No model configured");
 
@@ -231,6 +281,10 @@ export class Agent {
 
 	/** Continue from current context (for retry after overflow) */
 	async continue() {
+		if (this._state.isStreaming) {
+			throw new Error("Agent is already processing. Wait for completion before continuing.");
+		}
+
 		const messages = this._state.messages;
 		if (messages.length === 0) {
 			throw new Error("No messages to continue from");
@@ -276,23 +330,37 @@ export class Agent {
 		const config: AgentLoopConfig = {
 			model,
 			reasoning,
+			interruptMode: this.interruptMode,
 			convertToLlm: this.convertToLlm,
 			transformContext: this.transformContext,
 			getApiKey: this.getApiKey,
 			getToolContext: this.getToolContext,
-			interruptMode: this.interruptMode,
-			getQueuedMessages: async () => {
-				if (this.queueMode === "one-at-a-time") {
-					if (this.messageQueue.length > 0) {
-						const first = this.messageQueue[0];
-						this.messageQueue = this.messageQueue.slice(1);
+			getSteeringMessages: async () => {
+				if (this.steeringMode === "one-at-a-time") {
+					if (this.steeringQueue.length > 0) {
+						const first = this.steeringQueue[0];
+						this.steeringQueue = this.steeringQueue.slice(1);
 						return [first];
 					}
 					return [];
 				} else {
-					const queued = this.messageQueue.slice();
-					this.messageQueue = [];
-					return queued;
+					const steering = this.steeringQueue.slice();
+					this.steeringQueue = [];
+					return steering;
+				}
+			},
+			getFollowUpMessages: async () => {
+				if (this.followUpMode === "one-at-a-time") {
+					if (this.followUpQueue.length > 0) {
+						const first = this.followUpQueue[0];
+						this.followUpQueue = this.followUpQueue.slice(1);
+						return [first];
+					}
+					return [];
+				} else {
+					const followUp = this.followUpQueue.slice();
+					this.followUpQueue = [];
+					return followUp;
 				}
 			},
 		};

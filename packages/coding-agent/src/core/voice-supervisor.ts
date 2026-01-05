@@ -764,17 +764,17 @@ export class VoiceSupervisor {
 					continue;
 				}
 
-			const micRms = rms16le(value);
-			const now = Date.now();
-			const playbackActive = now - this.lastPlaybackAt < PLAYBACK_ACTIVE_WINDOW_MS;
+				const micRms = rms16le(value);
+				const now = Date.now();
+				const playbackActive = now - this.lastPlaybackAt < PLAYBACK_ACTIVE_WINDOW_MS;
 
-			// Echo suppression: only skip if playback is active AND mic is very quiet relative to playback
-			// This prevents feedback loops while allowing user to speak over the assistant
-			if (playbackActive && micRms < MIC_NOISE_FLOOR && micRms < this.lastPlaybackRms / ECHO_SUPPRESSION_RATIO) {
-				continue;
-			}
+				// Echo suppression: only skip if playback is active AND mic is very quiet relative to playback
+				// This prevents feedback loops while allowing user to speak over the assistant
+				if (playbackActive && micRms < MIC_NOISE_FLOOR && micRms < this.lastPlaybackRms / ECHO_SUPPRESSION_RATIO) {
+					continue;
+				}
 
-			// Send all audio to realtime API - let semantic_vad handle turn detection
+				// Send all audio to realtime API - let semantic_vad handle turn detection
 				const buffer = toArrayBuffer(value);
 				if (buffer.byteLength === 0) continue;
 				try {
@@ -855,9 +855,9 @@ export class VoiceSupervisor {
 			};
 		} else if ("write" in stdin && typeof (stdin as { write?: unknown }).write === "function") {
 			const sink = stdin as unknown as {
-				write: (chunk: Uint8Array) => void | number | Promise<void | number>;
-				end?: () => void | number | Promise<void | number>;
-				close?: () => void | number | Promise<void | number>;
+				write: (chunk: Uint8Array) => undefined | number | Promise<undefined | number>;
+				end?: () => undefined | number | Promise<undefined | number>;
+				close?: () => undefined | number | Promise<undefined | number>;
 			};
 			this.playbackWriter = {
 				write: async (chunk) => {

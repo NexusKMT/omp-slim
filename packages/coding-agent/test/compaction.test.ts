@@ -1,9 +1,9 @@
+import { beforeEach, describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Usage } from "@oh-my-pi/pi-ai";
 import { getModel } from "@oh-my-pi/pi-ai";
-import { beforeEach, describe, expect, it } from "vitest";
 import {
 	type CompactionSettings,
 	calculateContextTokens,

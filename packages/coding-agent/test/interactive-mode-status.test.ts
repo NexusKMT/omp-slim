@@ -1,5 +1,5 @@
+import { beforeAll, describe, expect, test, vi } from "bun:test";
 import { Container } from "@oh-my-pi/pi-tui";
-import { beforeAll, describe, expect, test, vi } from "vitest";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode";
 import { initTheme } from "../src/modes/interactive/theme/theme";
 

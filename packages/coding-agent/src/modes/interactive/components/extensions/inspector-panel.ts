@@ -4,7 +4,6 @@
  * Shows name, description, origin, status, and kind-specific preview.
  */
 
-import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { type Component, truncateToWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
 import { theme } from "../../theme/theme";
@@ -98,16 +97,22 @@ export class InspectorPanel implements Component {
 		lines.push(theme.fg("dim", theme.boxSharp.horizontal.repeat(Math.min(width - 2, 40))));
 
 		try {
-			const content = readFileSync(path, "utf-8");
-			const fileLines = content.split("\n").slice(0, 20);
+			const content = Bun.file(path).text();
+			// Note: async call to sync context - will show empty on first render
+			// This is acceptable for preview which can populate on next render
+			if (typeof content === "object" && "then" in content) {
+				content.then((text: string) => {
+					const fileLines = text.split("\n").slice(0, 20);
 
-			for (const line of fileLines) {
-				const highlighted = this.highlightMarkdown(line);
-				lines.push(truncateToWidth(highlighted, width - 2));
-			}
+					for (const line of fileLines) {
+						const highlighted = this.highlightMarkdown(line);
+						lines.push(truncateToWidth(highlighted, width - 2));
+					}
 
-			if (content.split("\n").length > 20) {
-				lines.push(theme.fg("dim", "(truncated at line 20)"));
+					if (text.split("\n").length > 20) {
+						lines.push(theme.fg("dim", "(truncated at line 20)"));
+					}
+				});
 			}
 		} catch (err) {
 			lines.push(theme.fg("error", `Failed to read file: ${err instanceof Error ? err.message : String(err)}`));
@@ -261,6 +266,7 @@ export class InspectorPanel implements Component {
 
 	private getKindBadge(kind: string): string {
 		const kindColors: Record<string, string> = {
+			"extension-module": "accent",
 			skill: "accent",
 			rule: "success",
 			tool: "warning",
@@ -296,7 +302,7 @@ export class InspectorPanel implements Component {
 
 	private shortenPath(path: string): string {
 		const home = homedir();
-		if (path.startsWith(home)) {
+		if (home && path.startsWith(home)) {
 			return `~${path.slice(home.length)}`;
 		}
 

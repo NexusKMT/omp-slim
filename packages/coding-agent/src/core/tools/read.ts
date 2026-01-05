@@ -1,12 +1,11 @@
-import { spawnSync } from "node:child_process";
-import { constants, existsSync } from "node:fs";
-import { access, readFile, stat } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
 import { Type } from "@sinclair/typebox";
 import { globSync } from "glob";
 import readDescription from "../../prompts/tools/read.md" with { type: "text" };
+import { formatDimensionNote, resizeImage } from "../../utils/image-resize";
 import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime";
 import { ensureTool } from "../../utils/tools-manager";
 import { untilAborted } from "../utils";
@@ -49,9 +48,14 @@ async function findExistingDirectory(startDir: string): Promise<string | null> {
 
 	while (true) {
 		try {
-			const stats = await stat(current);
-			if (stats.isDirectory()) {
-				return current;
+			if (existsSync(current)) {
+				// Check if directory by trying to read it as dir
+				try {
+					await Bun.$`test -d ${current}`.quiet();
+					return current;
+				} catch {
+					// Not a directory, continue
+				}
 			}
 		} catch {
 			// Keep walking up.
@@ -300,17 +304,17 @@ function convertWithMarkitdown(filePath: string): { content: string; ok: boolean
 		return { content: "", ok: false, error: "markitdown not found" };
 	}
 
-	const result = spawnSync(cmd, [filePath], {
-		encoding: "utf-8",
-		timeout: 60000,
-		maxBuffer: 50 * 1024 * 1024,
+	const result = Bun.spawnSync([cmd, filePath], {
+		stdin: "ignore",
+		stdout: "pipe",
+		stderr: "pipe",
 	});
 
-	if (result.status === 0 && result.stdout && result.stdout.length > 0) {
-		return { content: result.stdout, ok: true };
+	if (result.exitCode === 0 && result.stdout && result.stdout.length > 0) {
+		return { content: result.stdout.toString(), ok: true };
 	}
 
-	return { content: "", ok: false, error: result.stderr || "Conversion failed" };
+	return { content: "", ok: false, error: result.stderr.toString() || "Conversion failed" };
 }
 
 const readSchema = Type.Object({
@@ -324,7 +328,13 @@ export interface ReadToolDetails {
 	redirectedTo?: "ls";
 }
 
-export function createReadTool(cwd: string): AgentTool<typeof readSchema> {
+export interface ReadToolOptions {
+	/** Whether to auto-resize images to 2000x2000 max. Default: true */
+	autoResizeImages?: boolean;
+}
+
+export function createReadTool(cwd: string, options?: ReadToolOptions): AgentTool<typeof readSchema> {
+	const autoResizeImages = options?.autoResizeImages ?? true;
 	const lsTool = createLsTool(cwd);
 	return {
 		name: "read",
@@ -339,9 +349,21 @@ export function createReadTool(cwd: string): AgentTool<typeof readSchema> {
 			const absolutePath = resolveReadPath(readPath, cwd);
 
 			return untilAborted(signal, async () => {
-				let fileStat: Awaited<ReturnType<typeof stat>>;
+				let isDirectory = false;
+				let fileSize = 0;
 				try {
-					fileStat = await stat(absolutePath);
+					if (!existsSync(absolutePath)) {
+						throw { code: "ENOENT" };
+					}
+					const file = Bun.file(absolutePath);
+					fileSize = file.size;
+					// Check if directory
+					try {
+						await Bun.$`test -d ${absolutePath}`.quiet();
+						isDirectory = true;
+					} catch {
+						isDirectory = false;
+					}
 				} catch (error) {
 					if (isNotFoundError(error)) {
 						const suggestions = await findReadPathSuggestions(readPath, cwd);
@@ -366,15 +388,13 @@ export function createReadTool(cwd: string): AgentTool<typeof readSchema> {
 					throw error;
 				}
 
-				if (fileStat.isDirectory()) {
+				if (isDirectory) {
 					const lsResult = await lsTool.execute(toolCallId, { path: readPath, limit }, signal);
 					return {
 						content: lsResult.content,
 						details: { redirectedTo: "ls", truncation: lsResult.details?.truncation },
 					};
 				}
-
-				await access(absolutePath, constants.R_OK);
 
 				const mimeType = await detectSupportedImageMimeTypeFromFile(absolutePath);
 				const ext = path.extname(absolutePath).toLowerCase();
@@ -385,9 +405,8 @@ export function createReadTool(cwd: string): AgentTool<typeof readSchema> {
 
 				if (mimeType) {
 					// Check image file size before reading to prevent OOM during serialization
-					const fileStat = await stat(absolutePath);
-					if (fileStat.size > MAX_IMAGE_SIZE) {
-						const sizeStr = formatSize(fileStat.size);
+					if (fileSize > MAX_IMAGE_SIZE) {
+						const sizeStr = formatSize(fileSize);
 						const maxStr = formatSize(MAX_IMAGE_SIZE);
 						content = [
 							{
@@ -397,13 +416,30 @@ export function createReadTool(cwd: string): AgentTool<typeof readSchema> {
 						];
 					} else {
 						// Read as image (binary)
-						const buffer = await readFile(absolutePath);
-						const base64 = buffer.toString("base64");
+						const file = Bun.file(absolutePath);
+						const buffer = await file.arrayBuffer();
+						const base64 = Buffer.from(buffer).toString("base64");
 
-						content = [
-							{ type: "text", text: `Read image file [${mimeType}]` },
-							{ type: "image", data: base64, mimeType },
-						];
+						if (autoResizeImages) {
+							// Resize image if needed
+							const resized = await resizeImage({ type: "image", data: base64, mimeType });
+							const dimensionNote = formatDimensionNote(resized);
+
+							let textNote = `Read image file [${resized.mimeType}]`;
+							if (dimensionNote) {
+								textNote += `\n${dimensionNote}`;
+							}
+
+							content = [
+								{ type: "text", text: textNote },
+								{ type: "image", data: resized.data, mimeType: resized.mimeType },
+							];
+						} else {
+							content = [
+								{ type: "text", text: `Read image file [${mimeType}]` },
+								{ type: "image", data: base64, mimeType },
+							];
+						}
 					}
 				} else if (CONVERTIBLE_EXTENSIONS.has(ext)) {
 					// Convert document via markitdown
@@ -431,7 +467,8 @@ export function createReadTool(cwd: string): AgentTool<typeof readSchema> {
 					}
 				} else {
 					// Read as text
-					const textContent = await readFile(absolutePath, "utf-8");
+					const file = Bun.file(absolutePath);
+					const textContent = await file.text();
 					const allLines = textContent.split("\n");
 					const totalFileLines = allLines.length;
 

@@ -5,8 +5,9 @@
  * Priority: 80 (tool-specific, below builtin but above shared standards)
  */
 
-import { dirname, join, sep } from "node:path";
+import { dirname, join, sep } from "path";
 import { type ContextFile, contextFileCapability } from "../capability/context-file";
+import { type ExtensionModule, extensionModuleCapability } from "../capability/extension-module";
 import { type Hook, hookCapability } from "../capability/hook";
 import { registerProvider } from "../capability/index";
 import { type MCPServer, mcpCapability } from "../capability/mcp";
@@ -19,7 +20,9 @@ import type { LoadContext, LoadResult } from "../capability/types";
 import {
 	calculateDepth,
 	createSourceMeta,
+	discoverExtensionModulePaths,
 	expandEnvVarsDeep,
+	getExtensionNameFromPath,
 	loadFilesFromDir,
 	parseFrontmatter,
 	parseJSON,
@@ -286,6 +289,41 @@ function loadSkills(ctx: LoadContext): LoadResult<Skill> {
 					_source: createSourceMeta(PROVIDER_ID, skillFile, "project"),
 				});
 			}
+		}
+	}
+
+	return { items, warnings };
+}
+
+// =============================================================================
+// Extension Modules
+// =============================================================================
+
+function loadExtensionModules(ctx: LoadContext): LoadResult<ExtensionModule> {
+	const items: ExtensionModule[] = [];
+	const warnings: string[] = [];
+
+	const userBase = getUserClaude(ctx);
+	const userExtensionsDir = join(userBase, "extensions");
+	for (const extPath of discoverExtensionModulePaths(ctx, userExtensionsDir)) {
+		items.push({
+			name: getExtensionNameFromPath(extPath),
+			path: extPath,
+			level: "user",
+			_source: createSourceMeta(PROVIDER_ID, extPath, "user"),
+		});
+	}
+
+	const projectBase = getProjectClaude(ctx);
+	if (projectBase) {
+		const projectExtensionsDir = join(projectBase, "extensions");
+		for (const extPath of discoverExtensionModulePaths(ctx, projectExtensionsDir)) {
+			items.push({
+				name: getExtensionNameFromPath(extPath),
+				path: extPath,
+				level: "project",
+				_source: createSourceMeta(PROVIDER_ID, extPath, "project"),
+			});
 		}
 	}
 
@@ -580,6 +618,14 @@ registerProvider<Skill>(skillCapability.id, {
 	description: "Load skills from .claude/skills/*/SKILL.md",
 	priority: PRIORITY,
 	load: loadSkills,
+});
+
+registerProvider<ExtensionModule>(extensionModuleCapability.id, {
+	id: PROVIDER_ID,
+	displayName: DISPLAY_NAME,
+	description: "Load extension modules from .claude/extensions",
+	priority: PRIORITY,
+	load: loadExtensionModules,
 });
 
 registerProvider<SlashCommand>(slashCommandCapability.id, {

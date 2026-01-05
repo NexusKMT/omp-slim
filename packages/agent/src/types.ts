@@ -23,6 +23,13 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	model: Model<any>;
 
 	/**
+	 * When to interrupt tool execution for steering messages.
+	 * - "immediate": check after each tool call (default)
+	 * - "wait": defer steering until the current turn completes
+	 */
+	interruptMode?: "immediate" | "wait";
+
+	/**
 	 * Converts AgentMessage[] to LLM-compatible Message[] before each LLM call.
 	 *
 	 * Each AgentMessage must be converted to a UserMessage, AssistantMessage, or ToolResultMessage
@@ -32,7 +39,7 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * @example
 	 * ```typescript
 	 * convertToLlm: (messages) => messages.flatMap(m => {
-	 *   if (m.role === "hookMessage") {
+	 *   if (m.role === "custom") {
 	 *     // Convert custom message to user message
 	 *     return [{ role: "user", content: m.content, timestamp: m.timestamp }];
 	 *   }
@@ -75,20 +82,22 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 
 	/**
-	 * Returns queued messages to inject into the conversation.
+	 * Returns steering messages to inject into the conversation mid-run.
 	 *
-	 * Called after each turn to check for user interruptions or injected messages.
-	 * If messages are returned, they're added to the context before the next LLM call.
+	 * Called after each tool execution to check for user interruptions unless interruptMode is "wait".
+	 * If messages are returned, remaining tool calls are skipped and
+	 * these messages are added to the context before the next LLM call.
 	 */
-	getQueuedMessages?: () => Promise<AgentMessage[]>;
+	getSteeringMessages?: () => Promise<AgentMessage[]>;
 
 	/**
-	 * Controls when queued messages interrupt tool execution.
+	 * Returns follow-up messages to process after the agent would otherwise stop.
 	 *
-	 * - "immediate" (default): Check queue after each tool, interrupt remaining tools if messages exist
-	 * - "wait": Only process queued messages after the entire turn completes
+	 * Called when the agent has no more tool calls and no steering messages.
+	 * If messages are returned, they're added to the context and the agent
+	 * continues with another turn.
 	 */
-	interruptMode?: "immediate" | "wait";
+	getFollowUpMessages?: () => Promise<AgentMessage[]>;
 
 	/**
 	 * Provides tool execution context, resolved per tool call.
@@ -159,6 +168,8 @@ export interface RenderResultOptions {
 	expanded: boolean;
 	/** Whether this is a partial/streaming result */
 	isPartial: boolean;
+	/** Current spinner frame index for animated elements (optional) */
+	spinnerFrame?: number;
 }
 
 /**

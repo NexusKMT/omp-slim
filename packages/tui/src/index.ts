@@ -21,6 +21,15 @@ export { Spacer } from "./components/spacer";
 export { type Tab, TabBar, type TabBarTheme } from "./components/tab-bar";
 export { Text } from "./components/text";
 export { TruncatedText } from "./components/truncated-text";
+// Keybindings
+export {
+	DEFAULT_EDITOR_KEYBINDINGS,
+	type EditorAction,
+	type EditorKeybindingsConfig,
+	EditorKeybindingsManager,
+	getEditorKeybindings,
+	setEditorKeybindings,
+} from "./keybindings";
 // Kitty keyboard protocol helpers
 export {
 	isAltBackspace,
@@ -55,13 +64,19 @@ export {
 	isEnter,
 	isEscape,
 	isHome,
+	isShiftBackspace,
 	isShiftCtrlD,
 	isShiftCtrlO,
 	isShiftCtrlP,
+	isShiftDelete,
 	isShiftEnter,
+	isShiftSpace,
 	isShiftTab,
 	isTab,
-	Keys,
+	Key,
+	type KeyId,
+	matchesKey,
+	parseKey,
 } from "./keys";
 export type { BoxSymbols, SymbolTheme } from "./symbols";
 // Terminal interface and implementations

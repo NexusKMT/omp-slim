@@ -7,10 +7,11 @@
  * User directory: ~/.codex
  */
 
-import { join } from "node:path";
+import { join } from "path";
 import { parse as parseToml } from "smol-toml";
 import type { ContextFile } from "../capability/context-file";
 import { contextFileCapability } from "../capability/context-file";
+import { type ExtensionModule, extensionModuleCapability } from "../capability/extension-module";
 import type { Hook } from "../capability/hook";
 import { hookCapability } from "../capability/hook";
 import { registerProvider } from "../capability/index";
@@ -27,7 +28,14 @@ import { slashCommandCapability } from "../capability/slash-command";
 import type { CustomTool } from "../capability/tool";
 import { toolCapability } from "../capability/tool";
 import type { LoadContext, LoadResult } from "../capability/types";
-import { createSourceMeta, loadFilesFromDir, parseFrontmatter, SOURCE_PATHS } from "./helpers";
+import {
+	createSourceMeta,
+	discoverExtensionModulePaths,
+	getExtensionNameFromPath,
+	loadFilesFromDir,
+	parseFrontmatter,
+	SOURCE_PATHS,
+} from "./helpers";
 
 const PROVIDER_ID = "codex";
 const DISPLAY_NAME = "OpenAI Codex";
@@ -246,6 +254,42 @@ function loadSkills(ctx: LoadContext): LoadResult<Skill> {
 		});
 		items.push(...projectResult.items);
 		warnings.push(...(projectResult.warnings || []));
+	}
+
+	return { items, warnings };
+}
+
+// =============================================================================
+// Extension Modules (extensions/)
+// =============================================================================
+
+function loadExtensionModules(ctx: LoadContext): LoadResult<ExtensionModule> {
+	const items: ExtensionModule[] = [];
+	const warnings: string[] = [];
+
+	// User level: ~/.codex/extensions/
+	const userExtensionsDir = join(ctx.home, SOURCE_PATHS.codex.userBase, "extensions");
+	for (const extPath of discoverExtensionModulePaths(ctx, userExtensionsDir)) {
+		items.push({
+			name: getExtensionNameFromPath(extPath),
+			path: extPath,
+			level: "user",
+			_source: createSourceMeta(PROVIDER_ID, extPath, "user"),
+		});
+	}
+
+	// Project level: .codex/extensions/
+	const codexDir = ctx.fs.walkUp(".codex", { dir: true });
+	if (codexDir) {
+		const projectExtensionsDir = join(codexDir, "extensions");
+		for (const extPath of discoverExtensionModulePaths(ctx, projectExtensionsDir)) {
+			items.push({
+				name: getExtensionNameFromPath(extPath),
+				path: extPath,
+				level: "project",
+				_source: createSourceMeta(PROVIDER_ID, extPath, "project"),
+			});
+		}
 	}
 
 	return { items, warnings };
@@ -528,6 +572,14 @@ registerProvider<Skill>(skillCapability.id, {
 	description: "Load skills from ~/.codex/skills and .codex/skills/",
 	priority: PRIORITY,
 	load: loadSkills,
+});
+
+registerProvider<ExtensionModule>(extensionModuleCapability.id, {
+	id: PROVIDER_ID,
+	displayName: DISPLAY_NAME,
+	description: "Load extension modules from ~/.codex/extensions and .codex/extensions/",
+	priority: PRIORITY,
+	load: loadExtensionModules,
 });
 
 registerProvider<SlashCommand>(slashCommandCapability.id, {

@@ -39,17 +39,21 @@ console.log("Custom tools session created");
 
 // With custom cwd - MUST use factory functions!
 const customCwd = "/path/to/project";
+const customTools = await createCodingTools(customCwd);
 await createAgentSession({
 	cwd: customCwd,
-	tools: createCodingTools(customCwd), // Tools resolve paths relative to customCwd
+	tools: customTools, // Tools resolve paths relative to customCwd
 	sessionManager: SessionManager.inMemory(),
 });
 console.log("Custom cwd session created");
 
 // Or pick specific tools for custom cwd
+const customReadTool = await createReadTool(customCwd);
+const customBashTool = await createBashTool(customCwd);
+const customGrepTool = await createGrepTool(customCwd);
 await createAgentSession({
 	cwd: customCwd,
-	tools: [createReadTool(customCwd), createBashTool(customCwd), createGrepTool(customCwd)],
+	tools: [customReadTool, customBashTool, customGrepTool],
 	sessionManager: SessionManager.inMemory(),
 });
 console.log("Specific tools with custom cwd session created");
@@ -69,7 +73,7 @@ const weatherTool: CustomTool = {
 };
 
 const { session } = await createAgentSession({
-	customTools: [{ tool: weatherTool }],
+	customTools: [weatherTool],
 	sessionManager: SessionManager.inMemory(),
 });
 

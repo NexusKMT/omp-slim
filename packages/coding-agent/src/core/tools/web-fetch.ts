@@ -1,6 +1,4 @@
-import { spawnSync } from "node:child_process";
-import * as fs from "node:fs";
-import * as os from "node:os";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import { Type } from "@sinclair/typebox";
@@ -197,18 +195,15 @@ function exec(
 	args: string[],
 	options?: { timeout?: number; input?: string | Buffer },
 ): { stdout: string; stderr: string; ok: boolean } {
-	const timeout = (options?.timeout ?? DEFAULT_TIMEOUT) * 1000;
-	const result = spawnSync(cmd, args, {
-		encoding: options?.input instanceof Buffer ? "buffer" : "utf-8",
-		timeout,
-		maxBuffer: MAX_BYTES,
-		input: options?.input,
-		shell: true,
+	const result = Bun.spawnSync([cmd, ...args], {
+		stdin: options?.input ? (options.input as any) : "ignore",
+		stdout: "pipe",
+		stderr: "pipe",
 	});
 	return {
 		stdout: result.stdout?.toString() ?? "",
 		stderr: result.stderr?.toString() ?? "",
-		ok: result.status === 0,
+		ok: result.exitCode === 0,
 	};
 }
 
@@ -217,8 +212,12 @@ function exec(
  */
 function hasCommand(cmd: string): boolean {
 	const checkCmd = isWindows ? "where" : "which";
-	const result = spawnSync(checkCmd, [cmd], { encoding: "utf-8", shell: true });
-	return result.status === 0;
+	const result = Bun.spawnSync([checkCmd, cmd], {
+		stdin: "ignore",
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	return result.exitCode === 0;
 }
 
 /**
@@ -299,26 +298,27 @@ function looksLikeHtml(content: string): boolean {
 /**
  * Convert binary file to markdown using markitdown
  */
-function convertWithMarkitdown(
+async function convertWithMarkitdown(
 	content: Buffer,
 	extensionHint: string,
 	timeout: number,
-): { content: string; ok: boolean } {
+): Promise<{ content: string; ok: boolean }> {
 	if (!hasCommand("markitdown")) {
 		return { content: "", ok: false };
 	}
 
 	// Write to temp file with extension hint
 	const ext = extensionHint || ".bin";
-	const tmpFile = path.join(os.tmpdir(), `omp-convert-${Date.now()}${ext}`);
+	const tmpDir = tmpdir();
+	const tmpFile = path.join(tmpDir, `omp-convert-${Date.now()}${ext}`);
 
 	try {
-		fs.writeFileSync(tmpFile, content);
+		await Bun.write(tmpFile, content);
 		const result = exec("markitdown", [tmpFile], { timeout });
 		return { content: result.stdout, ok: result.ok };
 	} finally {
 		try {
-			fs.unlinkSync(tmpFile);
+			await Bun.$`rm ${tmpFile}`.quiet();
 		} catch {}
 	}
 }
@@ -531,10 +531,11 @@ function parseFeedToMarkdown(content: string, maxItems = 10): string {
 /**
  * Render HTML to text using lynx
  */
-function renderWithLynx(html: string, timeout: number): { content: string; ok: boolean } {
-	const tmpFile = path.join(os.tmpdir(), `omp-render-${Date.now()}.html`);
+async function renderWithLynx(html: string, timeout: number): Promise<{ content: string; ok: boolean }> {
+	const tmpDir = tmpdir();
+	const tmpFile = path.join(tmpDir, `omp-render-${Date.now()}.html`);
 	try {
-		fs.writeFileSync(tmpFile, html);
+		await Bun.write(tmpFile, html);
 		// Convert path to file URL (handles Windows paths correctly)
 		const normalizedPath = tmpFile.replace(/\\/g, "/");
 		const fileUrl = normalizedPath.startsWith("/") ? `file://${normalizedPath}` : `file:///${normalizedPath}`;
@@ -542,7 +543,7 @@ function renderWithLynx(html: string, timeout: number): { content: string; ok: b
 		return { content: result.stdout, ok: result.ok };
 	} finally {
 		try {
-			fs.unlinkSync(tmpFile);
+			await Bun.$`rm ${tmpFile}`.quiet();
 		} catch {}
 	}
 }
@@ -1752,7 +1753,7 @@ async function handleArxiv(url: string, timeout: number): Promise<RenderResult |
 				notes.push("Fetching PDF for full content...");
 				const pdfResult = await fetchBinary(pdfLink, timeout);
 				if (pdfResult.ok) {
-					const converted = convertWithMarkitdown(pdfResult.buffer, ".pdf", timeout);
+					const converted = await convertWithMarkitdown(pdfResult.buffer, ".pdf", timeout);
 					if (converted.ok && converted.content.length > 500) {
 						md += `---\n\n## Full Paper\n\n${converted.content}\n`;
 						notes.push("PDF converted via markitdown");
@@ -1835,7 +1836,7 @@ async function handleIacr(url: string, timeout: number): Promise<RenderResult | 
 			notes.push("Fetching PDF for full content...");
 			const pdfResult = await fetchBinary(pdfUrl, timeout);
 			if (pdfResult.ok) {
-				const converted = convertWithMarkitdown(pdfResult.buffer, ".pdf", timeout);
+				const converted = await convertWithMarkitdown(pdfResult.buffer, ".pdf", timeout);
 				if (converted.ok && converted.content.length > 500) {
 					md += `---\n\n## Full Paper\n\n${converted.content}\n`;
 					notes.push("PDF converted via markitdown");
@@ -1992,7 +1993,7 @@ async function renderUrl(url: string, timeout: number, raw: boolean = false): Pr
 		const binary = await fetchBinary(finalUrl, timeout);
 		if (binary.ok) {
 			const ext = getExtensionHint(finalUrl, binary.contentDisposition) || extHint;
-			const converted = convertWithMarkitdown(binary.buffer, ext, timeout);
+			const converted = await convertWithMarkitdown(binary.buffer, ext, timeout);
 			if (converted.ok && converted.content.trim().length > 50) {
 				notes.push(`Converted with markitdown`);
 				const output = finalizeOutput(converted.content);
@@ -2174,7 +2175,7 @@ async function renderUrl(url: string, timeout: number, raw: boolean = false): Pr
 			};
 		}
 
-		const lynxResult = renderWithLynx(rawContent, timeout);
+		const lynxResult = await renderWithLynx(rawContent, timeout);
 		if (!lynxResult.ok) {
 			notes.push("lynx failed");
 			const output = finalizeOutput(rawContent);
@@ -2198,7 +2199,7 @@ async function renderUrl(url: string, timeout: number, raw: boolean = false): Pr
 				const binary = await fetchBinary(docUrl, timeout);
 				if (binary.ok) {
 					const ext = getExtensionHint(docUrl, binary.contentDisposition);
-					const converted = convertWithMarkitdown(binary.buffer, ext, timeout);
+					const converted = await convertWithMarkitdown(binary.buffer, ext, timeout);
 					if (converted.ok && converted.content.trim().length > lynxResult.content.length) {
 						notes.push(`Extracted and converted document: ${docUrl}`);
 						const output = finalizeOutput(converted.content);

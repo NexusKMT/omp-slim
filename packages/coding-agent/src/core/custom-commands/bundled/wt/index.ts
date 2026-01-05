@@ -99,8 +99,8 @@ function formatError(err: unknown): string {
 	return String(err);
 }
 
-function pickAgent(cwd: string): AgentDefinition {
-	const { agents } = discoverAgents(cwd);
+async function pickAgent(cwd: string): Promise<AgentDefinition> {
+	const { agents } = await discoverAgents(cwd);
 	// Use the bundled "task" agent as the general-purpose default.
 	const agent = getAgent(agents, "task") ?? agents[0];
 	if (!agent) {
@@ -256,7 +256,7 @@ async function handleSpawn(args: SpawnArgs, ctx: HookCommandContext): Promise<st
 	});
 	await updateSession(session.id, { status: "active" });
 
-	const agent = pickAgent(ctx.cwd);
+	const agent = await pickAgent(ctx.cwd);
 	const context = args.scope ? `Scope: ${args.scope}` : undefined;
 
 	// Command context doesn't expose a spawn API, so run the task subprocess directly.
@@ -299,7 +299,7 @@ async function handleParallel(args: ParallelTask[], ctx: HookCommandContext): Pr
 	validateDisjointScopes(args.map((t) => t.scope));
 
 	const sessionId = `parallel-${Date.now()}`;
-	const agent = pickAgent(ctx.cwd);
+	const agent = await pickAgent(ctx.cwd);
 
 	const worktrees: Array<{ task: ParallelTask; wt: worktree.Worktree; session: worktree.WorktreeSession }> = [];
 	for (let i = 0; i < args.length; i++) {

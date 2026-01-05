@@ -7,7 +7,7 @@ import type { Context, ImageContent, Model, StopReason, TextContent, Tool } from
 import { sanitizeSurrogates } from "../utils/sanitize-unicode";
 import { transformMessages } from "./transorm-messages";
 
-type GoogleApiType = "google-generative-ai" | "google-gemini-cli";
+type GoogleApiType = "google-generative-ai" | "google-gemini-cli" | "google-vertex";
 
 /**
  * Convert internal messages to Gemini Content[] format.

@@ -8,6 +8,7 @@ import type { SourceMeta } from "../../../../capability/types";
  * Extension kinds matching capability types.
  */
 export type ExtensionKind =
+	| "extension-module"
 	| "skill"
 	| "rule"
 	| "tool"

@@ -7,34 +7,7 @@
  */
 
 import type { AssistantMessage, ImageContent } from "@oh-my-pi/pi-ai";
-import { APP_NAME, VERSION } from "../config";
 import type { AgentSession } from "../core/agent-session";
-import { logger } from "../core/logger";
-
-/**
- * Print session header to stderr (text mode only).
- */
-function printHeader(session: AgentSession): void {
-	const model = session.model;
-	const lines = [
-		`${APP_NAME} v${VERSION}`,
-		"--------",
-		`workdir: ${process.cwd()}`,
-		`model: ${model?.id ?? "unknown"}`,
-		`provider: ${model?.provider ?? "unknown"}`,
-		`thinking: ${session.thinkingLevel}`,
-		`session: ${session.sessionId}`,
-		"--------",
-	];
-	console.error(lines.join("\n"));
-}
-
-/**
- * Print session footer to stderr (text mode only).
- */
-function printFooter(): void {
-	console.error("--------");
-}
 
 /**
  * Run in print (single-shot) mode.
@@ -53,59 +26,31 @@ export async function runPrintMode(
 	initialMessage?: string,
 	initialImages?: ImageContent[],
 ): Promise<void> {
-	// Print header to stderr (text mode only)
-	if (mode === "text") {
-		printHeader(session);
-	}
-
-	// Hook runner already has no-op UI context by default (set in main.ts)
-	// Set up hooks for print mode (no UI)
-	const hookRunner = session.hookRunner;
-	if (hookRunner) {
-		hookRunner.initialize({
+	// Extension runner already has no-op UI context by default (set in loader)
+	// Set up extensions for print mode (no UI)
+	const extensionRunner = session.extensionRunner;
+	if (extensionRunner) {
+		extensionRunner.initialize({
 			getModel: () => session.model,
-			sendMessageHandler: (message, triggerTurn) => {
-				session.sendHookMessage(message, triggerTurn).catch((e) => {
-					console.error(`Hook sendMessage failed: ${e instanceof Error ? e.message : String(e)}`);
+			sendMessageHandler: (message, options) => {
+				session.sendCustomMessage(message, options).catch((e) => {
+					console.error(`Extension sendMessage failed: ${e instanceof Error ? e.message : String(e)}`);
 				});
 			},
 			appendEntryHandler: (customType, data) => {
 				session.sessionManager.appendCustomEntry(customType, data);
 			},
+			getActiveToolsHandler: () => session.getActiveToolNames(),
+			getAllToolsHandler: () => session.getAllToolNames(),
+			setActiveToolsHandler: (toolNames: string[]) => session.setActiveToolsByName(toolNames),
 		});
-		hookRunner.onError((err) => {
-			console.error(`Hook error (${err.hookPath}): ${err.error}`);
+		extensionRunner.onError((err) => {
+			console.error(`Extension error (${err.extensionPath}): ${err.error}`);
 		});
 		// Emit session_start event
-		await hookRunner.emit({
+		await extensionRunner.emit({
 			type: "session_start",
 		});
-	}
-
-	// Emit session start event to custom tools (no UI in print mode)
-	for (const { tool } of session.customTools) {
-		if (tool.onSession) {
-			try {
-				await tool.onSession(
-					{
-						reason: "start",
-						previousSessionFile: undefined,
-					},
-					{
-						sessionManager: session.sessionManager,
-						modelRegistry: session.modelRegistry,
-						model: session.model,
-						isIdle: () => !session.isStreaming,
-						hasQueuedMessages: () => session.queuedMessageCount > 0,
-						abort: () => {
-							session.abort();
-						},
-					},
-				);
-			} catch (err) {
-				logger.warn("Tool onSession error", { error: String(err) });
-			}
-		}
 	}
 
 	// Always subscribe to enable session persistence via _handleAgentEvent
@@ -147,9 +92,6 @@ export async function runPrintMode(
 				}
 			}
 		}
-
-		// Print footer to stderr
-		printFooter();
 	}
 
 	// Ensure stdout is fully flushed before returning

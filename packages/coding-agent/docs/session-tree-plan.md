@@ -150,7 +150,7 @@ Implementation:
 - Uses agent's queue mechanism with `_hookData` marker on AppMessage
 - `message_end` handler routes based on marker presence
 - `AgentSession.sendHookMessage()` handles three cases:
-  - Streaming: queues via `agent.queueMessage()`, loop processes and emits `message_end`
+- Streaming: queues via `agent.steer()` or `agent.followUp()`, loop processes and emits `message_end`
   - Not streaming + triggerTurn: direct append + `agent.continue()`
   - Not streaming + no trigger: direct append only
 - TUI updates via event (streaming) or explicit rebuild (non-streaming)

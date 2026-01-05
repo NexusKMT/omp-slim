@@ -5,6 +5,8 @@
  * Returns structured search results with optional content extraction.
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import type { WebSearchResponse, WebSearchSource } from "../types";
 
 const EXA_API_URL = "https://api.exa.ai/search";
@@ -27,10 +29,9 @@ export interface ExaSearchParams {
 async function parseEnvFile(filePath: string): Promise<Record<string, string>> {
 	const result: Record<string, string> = {};
 	try {
-		const file = Bun.file(filePath);
-		if (!(await file.exists())) return result;
+		if (!existsSync(filePath)) return result;
 
-		const content = await file.text();
+		const content = readFileSync(filePath, "utf-8");
 		for (const line of content.split("\n")) {
 			let trimmed = line.trim();
 			if (!trimmed || trimmed.startsWith("#")) continue;
@@ -57,8 +58,8 @@ async function parseEnvFile(filePath: string): Promise<Record<string, string>> {
 	return result;
 }
 
-function getHomeDir(): string | null {
-	return process.env.HOME ?? process.env.USERPROFILE ?? null;
+function getHomeDir(): string {
+	return homedir();
 }
 
 /** Find EXA_API_KEY from environment or .env files */

@@ -343,11 +343,11 @@ const renderApp = () => {
 						size: "sm",
 						children: icon(Bell, "sm"),
 						onClick: () => {
-							// Demo: Inject custom message (will appear on next agent run)
+							// Demo: Queue custom message for the next turn
 							if (agent) {
-								agent.queueMessage(
+								agent.followUp(
 									createSystemNotification(
-										"This is a custom message! It appears in the UI but is never sent to the LLM.",
+										"This is a custom message! It appears in the UI and is sent to the LLM.",
 									),
 								);
 							}

@@ -77,9 +77,12 @@ const toolDescriptions: Record<ToolName, string> = {
 	ls: "List directory contents",
 	lsp: "PREFERRED for semantic code queries: go-to-definition, find-all-references, hover (type info), call hierarchy. Returns precise, deterministic results. Use BEFORE grep for symbol lookups.",
 	notebook: "Edit Jupyter notebook cells",
+	output: "Output structured data to the user (bypasses tool result formatting)",
 	task: "Spawn a sub-agent to handle complex tasks",
 	web_fetch: "Fetch and render URLs into clean text for LLM consumption",
 	web_search: "Search the web for information",
+	report_finding: "Report a finding during code review",
+	submit_review: "Submit the final code review with all findings",
 };
 
 /**
@@ -231,6 +234,8 @@ export interface BuildSystemPromptOptions {
 	customPrompt?: string;
 	/** Tools to include in prompt. Default: [read, bash, edit, write] */
 	selectedTools?: ToolName[];
+	/** Extra tool descriptions to include in prompt (non built-in tools). */
+	extraToolDescriptions?: Array<{ name: string; description: string }>;
 	/** Text to append to system prompt. */
 	appendSystemPrompt?: string;
 	/** Skills settings for discovery. */
@@ -250,6 +255,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	const {
 		customPrompt,
 		selectedTools,
+		extraToolDescriptions = [],
 		appendSystemPrompt,
 		skillsSettings,
 		cwd,
@@ -304,6 +310,12 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 			}
 		}
 
+		// Append custom tool descriptions if provided
+		if (extraToolDescriptions.length > 0) {
+			prompt += "\n\n# Additional Tools\n\n";
+			prompt += extraToolDescriptions.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n");
+		}
+
 		// Append git context if in a git repo
 		const gitContext = loadGitContext(resolvedCwd);
 		if (gitContext) {
@@ -335,7 +347,12 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 
 	// Build tools list based on selected tools
 	const tools = selectedTools || (["read", "bash", "edit", "write"] as ToolName[]);
-	const toolsList = tools.map((t) => `- ${t}: ${toolDescriptions[t]}`).join("\n");
+	const builtInToolsList = tools.map((t) => `- ${t}: ${toolDescriptions[t]}`).join("\n");
+	const extraToolsList =
+		extraToolDescriptions.length > 0
+			? extraToolDescriptions.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n")
+			: "";
+	const toolsList = [builtInToolsList, extraToolsList].filter(Boolean).join("\n");
 
 	// Generate anti-bash rules (returns null if not applicable)
 	const antiBashSection = generateAntiBashRules(tools);
@@ -411,6 +428,12 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 		for (const { path: filePath, content } of contextFiles) {
 			prompt += `## ${filePath}\n\n${content}\n\n`;
 		}
+	}
+
+	// Append custom tool descriptions if provided
+	if (extraToolDescriptions.length > 0) {
+		prompt += "\n\n# Additional Tools\n\n";
+		prompt += extraToolDescriptions.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n");
 	}
 
 	// Append git context if in a git repo

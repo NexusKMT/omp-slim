@@ -109,73 +109,90 @@ async function runLoop(
 	stream: EventStream<AgentEvent, AgentMessage[]>,
 	streamFn?: StreamFn,
 ): Promise<void> {
-	let hasMoreToolCalls = true;
 	let firstTurn = true;
-	let queuedMessages: AgentMessage[] = (await config.getQueuedMessages?.()) || [];
-	let queuedAfterTools: AgentMessage[] | null = null;
+	// Check for steering messages at start (user may have typed while waiting)
+	let pendingMessages: AgentMessage[] = (await config.getSteeringMessages?.()) || [];
 
-	while (hasMoreToolCalls || queuedMessages.length > 0) {
-		if (!firstTurn) {
-			stream.push({ type: "turn_start" });
-		} else {
-			firstTurn = false;
-		}
+	// Outer loop: continues when queued follow-up messages arrive after agent would stop
+	while (true) {
+		let hasMoreToolCalls = true;
+		let steeringAfterTools: AgentMessage[] | null = null;
 
-		// Process queued messages (inject before next assistant response)
-		if (queuedMessages.length > 0) {
-			for (const message of queuedMessages) {
-				stream.push({ type: "message_start", message });
-				stream.push({ type: "message_end", message });
-				currentContext.messages.push(message);
-				newMessages.push(message);
+		// Inner loop: process tool calls and steering messages
+		while (hasMoreToolCalls || pendingMessages.length > 0) {
+			if (!firstTurn) {
+				stream.push({ type: "turn_start" });
+			} else {
+				firstTurn = false;
 			}
-			queuedMessages = [];
-		}
 
-		// Stream assistant response
-		const message = await streamAssistantResponse(currentContext, config, signal, stream, streamFn);
-		newMessages.push(message);
+			// Process pending messages (inject before next assistant response)
+			if (pendingMessages.length > 0) {
+				for (const message of pendingMessages) {
+					stream.push({ type: "message_start", message });
+					stream.push({ type: "message_end", message });
+					currentContext.messages.push(message);
+					newMessages.push(message);
+				}
+				pendingMessages = [];
+			}
 
-		if (message.stopReason === "error" || message.stopReason === "aborted") {
-			stream.push({ type: "turn_end", message, toolResults: [] });
-			stream.push({ type: "agent_end", messages: newMessages });
-			stream.end(newMessages);
-			return;
-		}
+			// Stream assistant response
+			const message = await streamAssistantResponse(currentContext, config, signal, stream, streamFn);
+			newMessages.push(message);
 
-		// Check for tool calls
-		const toolCalls = message.content.filter((c) => c.type === "toolCall");
-		hasMoreToolCalls = toolCalls.length > 0;
+			if (message.stopReason === "error" || message.stopReason === "aborted") {
+				stream.push({ type: "turn_end", message, toolResults: [] });
+				stream.push({ type: "agent_end", messages: newMessages });
+				stream.end(newMessages);
+				return;
+			}
 
-		const toolResults: ToolResultMessage[] = [];
-		if (hasMoreToolCalls) {
-			const toolExecution = await executeToolCalls(
-				currentContext.tools,
-				message,
-				signal,
-				stream,
-				config.getQueuedMessages,
-				config.getToolContext,
-				config.interruptMode,
-			);
-			toolResults.push(...toolExecution.toolResults);
-			queuedAfterTools = toolExecution.queuedMessages ?? null;
+			// Check for tool calls
+			const toolCalls = message.content.filter((c) => c.type === "toolCall");
+			hasMoreToolCalls = toolCalls.length > 0;
 
-			for (const result of toolResults) {
-				currentContext.messages.push(result);
-				newMessages.push(result);
+			const toolResults: ToolResultMessage[] = [];
+			if (hasMoreToolCalls) {
+				const toolExecution = await executeToolCalls(
+					currentContext.tools,
+					message,
+					signal,
+					stream,
+					config.getSteeringMessages,
+					config.getToolContext,
+					config.interruptMode,
+				);
+				toolResults.push(...toolExecution.toolResults);
+				steeringAfterTools = toolExecution.steeringMessages ?? null;
+
+				for (const result of toolResults) {
+					currentContext.messages.push(result);
+					newMessages.push(result);
+				}
+			}
+
+			stream.push({ type: "turn_end", message, toolResults });
+
+			// Get steering messages after turn completes
+			if (steeringAfterTools && steeringAfterTools.length > 0) {
+				pendingMessages = steeringAfterTools;
+				steeringAfterTools = null;
+			} else {
+				pendingMessages = (await config.getSteeringMessages?.()) || [];
 			}
 		}
 
-		stream.push({ type: "turn_end", message, toolResults });
-
-		// Get queued messages after turn completes
-		if (queuedAfterTools && queuedAfterTools.length > 0) {
-			queuedMessages = queuedAfterTools;
-			queuedAfterTools = null;
-		} else {
-			queuedMessages = (await config.getQueuedMessages?.()) || [];
+		// Agent would stop here. Check for follow-up messages.
+		const followUpMessages = (await config.getFollowUpMessages?.()) || [];
+		if (followUpMessages.length > 0) {
+			// Set as pending so inner loop processes them
+			pendingMessages = followUpMessages;
+			continue;
 		}
+
+		// No more messages, exit
+		break;
 	}
 
 	stream.push({ type: "agent_end", messages: newMessages });
@@ -225,9 +242,35 @@ async function streamAssistantResponse(
 	let addedPartial = false;
 
 	for await (const event of response) {
-		// Check abort early - allows TTSR and other abort sources to break immediately
+		// Check for abort signal before processing each event
 		if (signal?.aborted) {
-			break;
+			const abortedMessage: AssistantMessage = partialMessage
+				? { ...partialMessage, stopReason: "aborted" }
+				: {
+						role: "assistant",
+						content: [],
+						api: config.model.api,
+						provider: config.model.provider,
+						model: config.model.id,
+						usage: {
+							input: 0,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							totalTokens: 0,
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+						},
+						stopReason: "aborted",
+						timestamp: Date.now(),
+					};
+			if (addedPartial) {
+				context.messages[context.messages.length - 1] = abortedMessage;
+			} else {
+				context.messages.push(abortedMessage);
+				stream.push({ type: "message_start", message: { ...abortedMessage } });
+			}
+			stream.push({ type: "message_end", message: abortedMessage });
+			return abortedMessage;
 		}
 
 		switch (event.type) {
@@ -273,22 +316,6 @@ async function streamAssistantResponse(
 				return finalMessage;
 			}
 		}
-
-		// Check abort after processing - allows handlers to abort mid-stream
-		if (signal?.aborted) {
-			break;
-		}
-	}
-
-	// If we broke out due to abort, return an aborted message
-	if (signal?.aborted && partialMessage) {
-		const abortedMessage: AssistantMessage = {
-			...partialMessage,
-			stopReason: "aborted",
-		};
-		context.messages[context.messages.length - 1] = abortedMessage;
-		stream.push({ type: "message_end", message: abortedMessage });
-		return abortedMessage;
 	}
 
 	return await response.result();
@@ -302,13 +329,14 @@ async function executeToolCalls(
 	assistantMessage: AssistantMessage,
 	signal: AbortSignal | undefined,
 	stream: EventStream<AgentEvent, AgentMessage[]>,
-	getQueuedMessages?: AgentLoopConfig["getQueuedMessages"],
+	getSteeringMessages?: AgentLoopConfig["getSteeringMessages"],
 	getToolContext?: AgentLoopConfig["getToolContext"],
-	interruptMode?: AgentLoopConfig["interruptMode"],
-): Promise<{ toolResults: ToolResultMessage[]; queuedMessages?: AgentMessage[] }> {
+	interruptMode: AgentLoopConfig["interruptMode"] = "immediate",
+): Promise<{ toolResults: ToolResultMessage[]; steeringMessages?: AgentMessage[] }> {
 	const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
 	const results: ToolResultMessage[] = [];
-	let queuedMessages: AgentMessage[] | undefined;
+	let steeringMessages: AgentMessage[] | undefined;
+	const shouldInterruptImmediately = interruptMode !== "wait";
 
 	for (let index = 0; index < toolCalls.length; index++) {
 		const toolCall = toolCalls[index];
@@ -322,17 +350,14 @@ async function executeToolCalls(
 		});
 
 		let result: AgentToolResult<any>;
+		let isError = false;
 
-		const details: { toolCallId: string; toolName: string; isError?: boolean } = {
-			toolCallId: toolCall.id,
-			toolName: toolCall.name,
-		};
 		try {
 			if (!tool) throw new Error(`Tool ${toolCall.name} not found`);
 
 			const validatedArgs = validateToolArguments(tool, toolCall);
-			const toolContext = getToolContext?.();
 
+			const toolContext = getToolContext ? getToolContext() : undefined;
 			result = await tool.execute(
 				toolCall.id,
 				validatedArgs,
@@ -353,33 +378,36 @@ async function executeToolCalls(
 				content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }],
 				details: {},
 			};
-			details.isError = true;
+			isError = true;
 		}
 
 		stream.push({
 			type: "tool_execution_end",
+			toolCallId: toolCall.id,
+			toolName: toolCall.name,
 			result,
-			...details,
+			isError,
 		});
 
 		const toolResultMessage: ToolResultMessage = {
 			role: "toolResult",
+			toolCallId: toolCall.id,
+			toolName: toolCall.name,
 			content: result.content,
 			details: result.details,
+			isError,
 			timestamp: Date.now(),
-			...details,
 		};
 
 		results.push(toolResultMessage);
 		stream.push({ type: "message_start", message: toolResultMessage });
 		stream.push({ type: "message_end", message: toolResultMessage });
 
-		// Check for queued messages - skip remaining tools if user interrupted
-		// Only interrupt mid-execution if interruptMode is "immediate" (default)
-		if (interruptMode !== "wait" && getQueuedMessages) {
-			const queued = await getQueuedMessages();
-			if (queued.length > 0) {
-				queuedMessages = queued;
+		// Check for steering messages - skip remaining tools if user interrupted
+		if (shouldInterruptImmediately && getSteeringMessages) {
+			const steering = await getSteeringMessages();
+			if (steering.length > 0) {
+				steeringMessages = steering;
 				const remainingCalls = toolCalls.slice(index + 1);
 				for (const skipped of remainingCalls) {
 					results.push(skipToolCall(skipped, stream));
@@ -389,7 +417,7 @@ async function executeToolCalls(
 		}
 	}
 
-	return { toolResults: results, queuedMessages };
+	return { toolResults: results, steeringMessages };
 }
 
 function skipToolCall(

@@ -3211,8 +3211,8 @@ export const MODELS = {
 				cacheRead: 0,
 				cacheWrite: 0,
 			},
-			contextWindow: 32768,
-			maxTokens: 7168,
+			contextWindow: 163840,
+			maxTokens: 65536,
 		} satisfies Model<"openai-completions">,
 		"deepseek/deepseek-r1": {
 			id: "deepseek/deepseek-r1",
@@ -3240,13 +3240,13 @@ export const MODELS = {
 			reasoning: true,
 			input: ["text"],
 			cost: {
-				input: 0.39999999999999997,
-				output: 1.75,
+				input: 0.32,
+				output: 0.48,
 				cacheRead: 0,
 				cacheWrite: 0,
 			},
-			contextWindow: 163840,
-			maxTokens: 65536,
+			contextWindow: 262144,
+			maxTokens: 4096,
 		} satisfies Model<"openai-completions">,
 		"deepseek/deepseek-r1-distill-llama-70b": {
 			id: "deepseek/deepseek-r1-distill-llama-70b",

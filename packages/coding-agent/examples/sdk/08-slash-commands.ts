@@ -2,24 +2,25 @@
  * Slash Commands
  *
  * File-based commands that inject content when invoked with /commandname.
+ * Note: File-based slash commands are now called "prompt templates".
  */
 
 import {
 	createAgentSession,
-	discoverSlashCommands,
-	type FileSlashCommand,
+	discoverPromptTemplates,
+	type PromptTemplate,
 	SessionManager,
 } from "@oh-my-pi/pi-coding-agent";
 
-// Discover commands from cwd/.omp/commands/ and ~/.omp/agent/commands/
-const discovered = discoverSlashCommands();
-console.log("Discovered slash commands:");
+// Discover prompt templates from cwd/.pi/prompts/ and ~/.pi/agent/prompts/
+const discovered = await discoverPromptTemplates();
+console.log("Discovered prompt templates:");
 for (const cmd of discovered) {
 	console.log(`  /${cmd.name}: ${cmd.description}`);
 }
 
-// Define custom commands
-const deployCommand: FileSlashCommand = {
+// Define custom prompt templates
+const deployCommand: PromptTemplate = {
 	name: "deploy",
 	description: "Deploy the application",
 	source: "(custom)",
@@ -30,13 +31,17 @@ const deployCommand: FileSlashCommand = {
 3. Deploy: npm run deploy`,
 };
 
-// Use discovered + custom commands
+// Note: slashCommands is now managed by the agent session automatically.
+// Custom commands can be loaded via discoverCustomTSCommands() for TypeScript commands.
+// For file-based markdown commands, use promptTemplates instead.
+
+// Convert file-based slash commands to prompt templates
 await createAgentSession({
-	slashCommands: [...discovered, deployCommand],
+	promptTemplates: [...discovered, deployCommand],
 	sessionManager: SessionManager.inMemory(),
 });
 
-console.log(`Session created with ${discovered.length + 1} slash commands`);
+console.log(`Session created with ${discovered.length + 1} prompt templates`);
 
-// Disable slash commands:
-// slashCommands: []
+// Disable prompt templates:
+// promptTemplates: []

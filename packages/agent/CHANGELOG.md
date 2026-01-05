@@ -1,6 +1,19 @@
 # Changelog
 
 ## [Unreleased]
+### Breaking Changes
+
+- Replaced `queueMessage`/`queueMode` with steering + follow-up queues: use `steer`, `setSteeringMode`, and `getSteeringMode` for mid-run interruptions, and `followUp`, `setFollowUpMode`, and `getFollowUpMode` for post-turn messages
+- Agent loop callbacks now use `getSteeringMessages` and `getFollowUpMessages` instead of `getQueuedMessages`
+
+### Added
+
+- Added follow-up message queue support so new user messages can continue a run after the agent would otherwise stop
+- Added `RenderResultOptions.spinnerFrame` for animated tool-result rendering
+
+### Changed
+
+- `prompt()` and `continue()` now throw when the agent is already streaming; use steering or follow-up queues instead
 
 ## [3.15.1] - 2026-01-05
 

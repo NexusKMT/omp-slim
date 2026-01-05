@@ -224,26 +224,31 @@ const unsubscribe = agent.subscribe((event) => {
 unsubscribe();
 ```
 
-## Message Queue
+## Steering & Follow-up
 
-Queue messages to inject during tool execution (for user interruptions):
+Queue messages to inject during tool execution (steering) or after the agent would otherwise stop (follow-up):
 
 ```typescript
-agent.setQueueMode("one-at-a-time");
+agent.setSteeringMode("one-at-a-time");
+agent.setInterruptMode("immediate");
 
 // While agent is running tools
-agent.queueMessage({
+agent.steer({
 	role: "user",
 	content: "Stop! Do this instead.",
 	timestamp: Date.now(),
 });
+
+// Queue a follow-up to run after the current turn completes
+agent.followUp({
+	role: "user",
+	content: "After that, summarize the changes.",
+	timestamp: Date.now(),
+});
 ```
 
-When queued messages are detected after a tool completes:
-
-1. Remaining tools are skipped with error results
-2. Queued message is injected
-3. LLM responds to the interruption
+Steering messages are checked after each tool call by default. Set `interruptMode` to `"wait"` to defer
+steering until the current turn completes.
 
 ## Custom Message Types
 

@@ -13,11 +13,12 @@
  * Modes use this class and add their own I/O layer on top.
  */
 
-import type { Agent, AgentEvent, AgentMessage, AgentState, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import type { Agent, AgentEvent, AgentMessage, AgentState, AgentTool, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, Model, TextContent, Usage } from "@oh-my-pi/pi-ai";
 import { isContextOverflow, modelsAreEqual, supportsXhigh } from "@oh-my-pi/pi-ai";
 import type { Rule } from "../capability/rule";
 import { getAuthPath } from "../config";
+import { theme } from "../modes/interactive/theme/theme";
 import { type BashResult, executeBash as executeBashCommand } from "./bash-executor";
 import {
 	type CompactionResult,
@@ -29,11 +30,11 @@ import {
 	shouldCompact,
 } from "./compaction/index";
 import type { LoadedCustomCommand } from "./custom-commands/index";
-import type { CustomToolContext, CustomToolSessionEvent, LoadedCustomTool } from "./custom-tools/index";
 import { exportSessionToHtml } from "./export-html/index";
-import { extractFileMentions, generateFileMentionMessages } from "./file-mentions";
 import type {
-	HookRunner,
+	ExtensionCommandContext,
+	ExtensionRunner,
+	ExtensionUIContext,
 	SessionBeforeBranchResult,
 	SessionBeforeCompactResult,
 	SessionBeforeSwitchResult,
@@ -41,14 +42,15 @@ import type {
 	TreePreparation,
 	TurnEndEvent,
 	TurnStartEvent,
-} from "./hooks/index";
-import { logger } from "./logger";
-import type { BashExecutionMessage, HookMessage } from "./messages";
+} from "./extensions";
+import { extractFileMentions, generateFileMentionMessages } from "./file-mentions";
+import type { HookCommandContext } from "./hooks/types";
+import type { BashExecutionMessage, CustomMessage } from "./messages";
 import type { ModelRegistry } from "./model-registry";
 import { parseModelString } from "./model-resolver";
+import { expandPromptTemplate, type PromptTemplate, parseCommandArgs } from "./prompt-templates";
 import type { BranchSummaryEntry, CompactionEntry, NewSessionOptions, SessionManager } from "./session-manager";
 import type { SettingsManager, SkillsSettings } from "./settings-manager";
-import { expandSlashCommand, type FileSlashCommand, parseCommandArgs } from "./slash-commands";
 import type { TtsrManager } from "./ttsr";
 
 /** Session-specific events that extend the core AgentEvent */
@@ -73,27 +75,31 @@ export interface AgentSessionConfig {
 	settingsManager: SettingsManager;
 	/** Models to cycle through with Ctrl+P (from --models flag) */
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel: ThinkingLevel }>;
-	/** File-based slash commands for expansion */
-	fileCommands?: FileSlashCommand[];
-	/** Hook runner (created in main.ts with wrapped tools) */
-	hookRunner?: HookRunner;
-	/** Custom tools for session lifecycle events */
-	customTools?: LoadedCustomTool[];
+	/** Prompt templates for expansion */
+	promptTemplates?: PromptTemplate[];
+	/** Extension runner (created in main.ts with wrapped tools) */
+	extensionRunner?: ExtensionRunner;
 	/** Custom commands (TypeScript slash commands) */
 	customCommands?: LoadedCustomCommand[];
 	skillsSettings?: Required<SkillsSettings>;
 	/** Model registry for API key resolution and model discovery */
 	modelRegistry: ModelRegistry;
+	/** Tool registry for LSP and settings */
+	toolRegistry?: Map<string, AgentTool>;
+	/** System prompt builder that can consider tool availability */
+	rebuildSystemPrompt?: (toolNames: string[]) => string;
 	/** TTSR manager for time-traveling stream rules */
 	ttsrManager?: TtsrManager;
 }
 
 /** Options for AgentSession.prompt() */
 export interface PromptOptions {
-	/** Whether to expand file-based slash commands (default: true) */
-	expandSlashCommands?: boolean;
+	/** Whether to expand file-based prompt templates (default: true) */
+	expandPromptTemplates?: boolean;
 	/** Image attachments */
 	images?: ImageContent[];
+	/** When streaming, how to queue the message: "steer" (interrupt) or "followUp" (wait). */
+	streamingBehavior?: "steer" | "followUp";
 }
 
 /** Result from cycleModel() */
@@ -141,6 +147,23 @@ const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "hi
 /** Thinking levels including xhigh (for supported models) */
 const THINKING_LEVELS_WITH_XHIGH: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
+const noOpUIContext: ExtensionUIContext = {
+	select: async () => undefined,
+	confirm: async () => false,
+	input: async () => undefined,
+	notify: () => {},
+	setStatus: () => {},
+	setWidget: () => {},
+	setTitle: () => {},
+	custom: async () => undefined as never,
+	setEditorText: () => {},
+	getEditorText: () => "",
+	editor: async () => undefined,
+	get theme() {
+		return theme;
+	},
+};
+
 // ============================================================================
 // AgentSession Class
 // ============================================================================
@@ -151,14 +174,18 @@ export class AgentSession {
 	readonly settingsManager: SettingsManager;
 
 	private _scopedModels: Array<{ model: Model<any>; thinkingLevel: ThinkingLevel }>;
-	private _fileCommands: FileSlashCommand[];
+	private _promptTemplates: PromptTemplate[];
 
 	// Event subscription state
 	private _unsubscribeAgent?: () => void;
 	private _eventListeners: AgentSessionEventListener[] = [];
 
-	// Message queue state
-	private _queuedMessages: string[] = [];
+	/** Tracks pending steering messages for UI display. Removed when delivered. */
+	private _steeringMessages: string[] = [];
+	/** Tracks pending follow-up messages for UI display. Removed when delivered. */
+	private _followUpMessages: string[] = [];
+	/** Messages queued to be included with the next user prompt as context ("asides"). */
+	private _pendingNextTurnMessages: CustomMessage[] = [];
 
 	// Compaction state
 	private _compactionAbortController: AbortController | undefined = undefined;
@@ -177,12 +204,9 @@ export class AgentSession {
 	private _bashAbortController: AbortController | undefined = undefined;
 	private _pendingBashMessages: BashExecutionMessage[] = [];
 
-	// Hook system
-	private _hookRunner: HookRunner | undefined = undefined;
+	// Extension system
+	private _extensionRunner: ExtensionRunner | undefined = undefined;
 	private _turnIndex = 0;
-
-	// Custom tools for session lifecycle
-	private _customTools: LoadedCustomTool[] = [];
 
 	// Custom commands (TypeScript slash commands)
 	private _customCommands: LoadedCustomCommand[] = [];
@@ -191,6 +215,11 @@ export class AgentSession {
 
 	// Model registry for API key resolution
 	private _modelRegistry: ModelRegistry;
+
+	// Tool registry and prompt builder for extensions
+	private _toolRegistry: Map<string, AgentTool>;
+	private _rebuildSystemPrompt: ((toolNames: string[]) => string) | undefined;
+	private _baseSystemPrompt: string;
 
 	// TTSR manager for time-traveling stream rules
 	private _ttsrManager: TtsrManager | undefined = undefined;
@@ -202,12 +231,14 @@ export class AgentSession {
 		this.sessionManager = config.sessionManager;
 		this.settingsManager = config.settingsManager;
 		this._scopedModels = config.scopedModels ?? [];
-		this._fileCommands = config.fileCommands ?? [];
-		this._hookRunner = config.hookRunner;
-		this._customTools = config.customTools ?? [];
+		this._promptTemplates = config.promptTemplates ?? [];
+		this._extensionRunner = config.extensionRunner;
 		this._customCommands = config.customCommands ?? [];
 		this._skillsSettings = config.skillsSettings;
 		this._modelRegistry = config.modelRegistry;
+		this._toolRegistry = config.toolRegistry ?? new Map();
+		this._rebuildSystemPrompt = config.rebuildSystemPrompt;
+		this._baseSystemPrompt = this.agent.state.systemPrompt;
 		this._ttsrManager = config.ttsrManager;
 
 		// Always subscribe to agent events for internal handling
@@ -248,22 +279,27 @@ export class AgentSession {
 
 	/** Internal handler for agent events - shared by subscribe and reconnect */
 	private _handleAgentEvent = async (event: AgentEvent): Promise<void> => {
-		// When a user message starts, check if it's from the queue and remove it BEFORE emitting
+		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
-		if (event.type === "message_start" && event.message.role === "user" && this._queuedMessages.length > 0) {
-			// Extract text content from the message
+		if (event.type === "message_start" && event.message.role === "user") {
 			const messageText = this._getUserMessageText(event.message);
-			if (messageText && this._queuedMessages.includes(messageText)) {
-				// Remove the first occurrence of this message from the queue
-				const index = this._queuedMessages.indexOf(messageText);
-				if (index !== -1) {
-					this._queuedMessages.splice(index, 1);
+			if (messageText) {
+				// Check steering queue first
+				const steeringIndex = this._steeringMessages.indexOf(messageText);
+				if (steeringIndex !== -1) {
+					this._steeringMessages.splice(steeringIndex, 1);
+				} else {
+					// Check follow-up queue
+					const followUpIndex = this._followUpMessages.indexOf(messageText);
+					if (followUpIndex !== -1) {
+						this._followUpMessages.splice(followUpIndex, 1);
+					}
 				}
 			}
 		}
 
-		// Emit to hooks first
-		await this._emitHookEvent(event);
+		// Emit to extensions first
+		await this._emitExtensionEvent(event);
 
 		// Notify all listeners
 		this._emit(event);
@@ -324,8 +360,8 @@ export class AgentSession {
 
 		// Handle session persistence
 		if (event.type === "message_end") {
-			// Check if this is a hook message
-			if (event.message.role === "hookMessage") {
+			// Check if this is a hook/custom message
+			if (event.message.role === "hookMessage" || event.message.role === "custom") {
 				// Persist as CustomMessageEntry
 				this.sessionManager.appendCustomMessageEntry(
 					event.message.customType,
@@ -420,22 +456,22 @@ export class AgentSession {
 		return undefined;
 	}
 
-	/** Emit hook events based on agent events */
-	private async _emitHookEvent(event: AgentEvent): Promise<void> {
-		if (!this._hookRunner) return;
+	/** Emit extension events based on agent events */
+	private async _emitExtensionEvent(event: AgentEvent): Promise<void> {
+		if (!this._extensionRunner) return;
 
 		if (event.type === "agent_start") {
 			this._turnIndex = 0;
-			await this._hookRunner.emit({ type: "agent_start" });
+			await this._extensionRunner.emit({ type: "agent_start" });
 		} else if (event.type === "agent_end") {
-			await this._hookRunner.emit({ type: "agent_end", messages: event.messages });
+			await this._extensionRunner.emit({ type: "agent_end", messages: event.messages });
 		} else if (event.type === "turn_start") {
 			const hookEvent: TurnStartEvent = {
 				type: "turn_start",
 				turnIndex: this._turnIndex,
 				timestamp: Date.now(),
 			};
-			await this._hookRunner.emit(hookEvent);
+			await this._extensionRunner.emit(hookEvent);
 		} else if (event.type === "turn_end") {
 			const hookEvent: TurnEndEvent = {
 				type: "turn_end",
@@ -443,7 +479,7 @@ export class AgentSession {
 				message: event.message,
 				toolResults: event.toolResults,
 			};
-			await this._hookRunner.emit(hookEvent);
+			await this._extensionRunner.emit(hookEvent);
 			this._turnIndex++;
 		}
 	}
@@ -520,6 +556,53 @@ export class AgentSession {
 		return this.agent.state.isStreaming;
 	}
 
+	/**
+	 * Get the names of currently active tools.
+	 * Returns the names of tools currently set on the agent.
+	 */
+	getActiveToolNames(): string[] {
+		return this.agent.state.tools.map((t) => t.name);
+	}
+
+	/**
+	 * Get a tool by name from the registry.
+	 */
+	getToolByName(name: string): AgentTool | undefined {
+		return this._toolRegistry.get(name);
+	}
+
+	/**
+	 * Get all configured tool names (built-in via --tools or default, plus custom tools).
+	 */
+	getAllToolNames(): string[] {
+		return Array.from(this._toolRegistry.keys());
+	}
+
+	/**
+	 * Set active tools by name.
+	 * Only tools in the registry can be enabled. Unknown tool names are ignored.
+	 * Also rebuilds the system prompt to reflect the new tool set.
+	 * Changes take effect on the next agent turn.
+	 */
+	setActiveToolsByName(toolNames: string[]): void {
+		const tools: AgentTool[] = [];
+		const validToolNames: string[] = [];
+		for (const name of toolNames) {
+			const tool = this._toolRegistry.get(name);
+			if (tool) {
+				tools.push(tool);
+				validToolNames.push(name);
+			}
+		}
+		this.agent.setTools(tools);
+
+		// Rebuild base system prompt with new tool set
+		if (this._rebuildSystemPrompt) {
+			this._baseSystemPrompt = this._rebuildSystemPrompt(validToolNames);
+			this.agent.setSystemPrompt(this._baseSystemPrompt);
+		}
+	}
+
 	/** Whether auto-compaction is currently running */
 	get isCompacting(): boolean {
 		return this._autoCompactionAbortController !== undefined || this._compactionAbortController !== undefined;
@@ -530,9 +613,14 @@ export class AgentSession {
 		return this.agent.state.messages;
 	}
 
-	/** Current queue mode */
-	get queueMode(): "all" | "one-at-a-time" {
-		return this.agent.getQueueMode();
+	/** Current steering mode */
+	get steeringMode(): "all" | "one-at-a-time" {
+		return this.agent.getSteeringMode();
+	}
+
+	/** Current follow-up mode */
+	get followUpMode(): "all" | "one-at-a-time" {
+		return this.agent.getFollowUpMode();
 	}
 
 	/** Current interrupt mode */
@@ -555,9 +643,9 @@ export class AgentSession {
 		return this._scopedModels;
 	}
 
-	/** File-based slash commands */
-	get fileCommands(): ReadonlyArray<FileSlashCommand> {
-		return this._fileCommands;
+	/** Prompt templates */
+	get promptTemplates(): ReadonlyArray<PromptTemplate> {
+		return this._promptTemplates;
 	}
 
 	/** Custom commands (TypeScript slash commands) */
@@ -571,22 +659,20 @@ export class AgentSession {
 
 	/**
 	 * Send a prompt to the agent.
-	 * - Validates model and API key before sending
-	 * - Handles hook commands (registered via pi.registerCommand)
-	 * - Expands file-based slash commands by default
-	 * @throws Error if no model selected or no API key available
+	 * - Handles extension commands (registered via pi.registerCommand) immediately, even during streaming
+	 * - Expands file-based prompt templates by default
+	 * - During streaming, queues via steer() or followUp() based on streamingBehavior option
+	 * - Validates model and API key before sending (when not streaming)
+	 * @throws Error if streaming and no streamingBehavior specified
+	 * @throws Error if no model selected or no API key available (when not streaming)
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<void> {
-		// Flush any pending bash messages before the new prompt
-		this._flushPendingBashMessages();
+		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 
-		const expandCommands = options?.expandSlashCommands ?? true;
-
-		// Handle hook commands first (if enabled and text is a slash command)
-		if (expandCommands && text.startsWith("/")) {
-			const handled = await this._tryExecuteHookCommand(text);
+		// Handle extension commands first (execute immediately, even during streaming)
+		if (expandPromptTemplates && text.startsWith("/")) {
+			const handled = await this._tryExecuteExtensionCommand(text);
 			if (handled) {
-				// Hook command executed, no prompt to send
 				return;
 			}
 
@@ -594,13 +680,32 @@ export class AgentSession {
 			const customResult = await this._tryExecuteCustomCommand(text);
 			if (customResult !== null) {
 				if (customResult === "") {
-					// Command handled, nothing to send
 					return;
 				}
-				// Command returned a prompt - use it instead of the original text
 				text = customResult;
 			}
 		}
+
+		// Expand file-based prompt templates if requested
+		const expandedText = expandPromptTemplates ? expandPromptTemplate(text, [...this._promptTemplates]) : text;
+
+		// If streaming, queue via steer() or followUp() based on option
+		if (this.isStreaming) {
+			if (!options?.streamingBehavior) {
+				throw new Error(
+					"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
+				);
+			}
+			if (options.streamingBehavior === "followUp") {
+				await this._queueFollowUp(expandedText);
+			} else {
+				await this._queueSteer(expandedText);
+			}
+			return;
+		}
+
+		// Flush any pending bash messages before the new prompt
+		this._flushPendingBashMessages();
 
 		// Validate model
 		if (!this.model) {
@@ -626,10 +731,7 @@ export class AgentSession {
 			await this._checkCompaction(lastAssistant, false);
 		}
 
-		// Expand file-based slash commands if requested
-		const expandedText = expandCommands ? expandSlashCommand(text, [...this._fileCommands]) : text;
-
-		// Build messages array (hook message if any, then user message)
+		// Build messages array (custom messages if any, then user message)
 		const messages: AgentMessage[] = [];
 
 		// Add user message
@@ -643,6 +745,12 @@ export class AgentSession {
 			timestamp: Date.now(),
 		});
 
+		// Inject any pending "nextTurn" messages as context alongside the user message
+		for (const msg of this._pendingNextTurnMessages) {
+			messages.push(msg);
+		}
+		this._pendingNextTurnMessages = [];
+
 		// Auto-read @filepath mentions
 		const fileMentions = extractFileMentions(expandedText);
 		if (fileMentions.length > 0) {
@@ -650,18 +758,26 @@ export class AgentSession {
 			messages.push(...fileMentionMessages);
 		}
 
-		// Emit before_agent_start hook event
-		if (this._hookRunner) {
-			const result = await this._hookRunner.emitBeforeAgentStart(expandedText, options?.images);
-			if (result?.message) {
-				messages.push({
-					role: "hookMessage",
-					customType: result.message.customType,
-					content: result.message.content,
-					display: result.message.display,
-					details: result.message.details,
-					timestamp: Date.now(),
-				});
+		// Emit before_agent_start extension event
+		if (this._extensionRunner) {
+			const result = await this._extensionRunner.emitBeforeAgentStart(expandedText, options?.images);
+			if (result?.messages) {
+				for (const msg of result.messages) {
+					messages.push({
+						role: "custom",
+						customType: msg.customType,
+						content: msg.content,
+						display: msg.display,
+						details: msg.details,
+						timestamp: Date.now(),
+					});
+				}
+			}
+
+			if (result?.systemPromptAppend) {
+				this.agent.setSystemPrompt(`${this._baseSystemPrompt}\n\n${result.systemPromptAppend}`);
+			} else {
+				this.agent.setSystemPrompt(this._baseSystemPrompt);
 			}
 		}
 
@@ -670,34 +786,74 @@ export class AgentSession {
 	}
 
 	/**
-	 * Try to execute a hook command. Returns true if command was found and executed.
+	 * Try to execute an extension command. Returns true if command was found and executed.
 	 */
-	private async _tryExecuteHookCommand(text: string): Promise<boolean> {
-		if (!this._hookRunner) return false;
+	private async _tryExecuteExtensionCommand(text: string): Promise<boolean> {
+		if (!this._extensionRunner) return false;
 
 		// Parse command name and args
 		const spaceIndex = text.indexOf(" ");
 		const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
 		const args = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1);
 
-		const command = this._hookRunner.getCommand(commandName);
+		const command = this._extensionRunner.getCommand(commandName);
 		if (!command) return false;
 
-		// Get command context from hook runner (includes session control methods)
-		const ctx = this._hookRunner.createCommandContext();
+		// Get command context from extension runner (includes session control methods)
+		const ctx = this._extensionRunner.createCommandContext();
 
 		try {
 			await command.handler(args, ctx);
 			return true;
 		} catch (err) {
-			// Emit error via hook runner
-			this._hookRunner.emitError({
-				hookPath: `command:${commandName}`,
+			// Emit error via extension runner
+			this._extensionRunner.emitError({
+				extensionPath: `command:${commandName}`,
 				event: "command",
 				error: err instanceof Error ? err.message : String(err),
 			});
 			return true;
 		}
+	}
+
+	private _createCommandContext(): ExtensionCommandContext {
+		if (this._extensionRunner) {
+			return this._extensionRunner.createCommandContext();
+		}
+
+		return {
+			ui: noOpUIContext,
+			hasUI: false,
+			cwd: this.sessionManager.getCwd(),
+			sessionManager: this.sessionManager,
+			modelRegistry: this._modelRegistry,
+			model: this.model ?? undefined,
+			isIdle: () => !this.isStreaming,
+			abort: () => {
+				void this.abort();
+			},
+			hasPendingMessages: () => this.queuedMessageCount > 0,
+			hasQueuedMessages: () => this.queuedMessageCount > 0,
+			waitForIdle: () => this.agent.waitForIdle(),
+			newSession: async (options) => {
+				const success = await this.newSession({ parentSession: options?.parentSession });
+				if (!success) {
+					return { cancelled: true };
+				}
+				if (options?.setup) {
+					await options.setup(this.sessionManager);
+				}
+				return { cancelled: false };
+			},
+			branch: async (entryId) => {
+				const result = await this.branch(entryId);
+				return { cancelled: result.cancelled };
+			},
+			navigateTree: async (targetId, options) => {
+				const result = await this.navigateTree(targetId, { summarize: options?.summarize });
+				return { cancelled: result.cancelled };
+			},
+		};
 	}
 
 	/**
@@ -706,7 +862,6 @@ export class AgentSession {
 	 */
 	private async _tryExecuteCustomCommand(text: string): Promise<string | null> {
 		if (this._customCommands.length === 0) return null;
-		if (!this._hookRunner) return null; // Need hook runner for command context
 
 		// Parse command name and args
 		const spaceIndex = text.indexOf(" ");
@@ -717,8 +872,12 @@ export class AgentSession {
 		const loaded = this._customCommands.find((c) => c.command.name === commandName);
 		if (!loaded) return null;
 
-		// Get command context from hook runner (includes session control methods)
-		const ctx = this._hookRunner.createCommandContext();
+		// Get command context from extension runner (includes session control methods)
+		const baseCtx = this._createCommandContext();
+		const ctx = {
+			...baseCtx,
+			hasQueuedMessages: baseCtx.hasPendingMessages,
+		} as HookCommandContext;
 
 		try {
 			const args = parseCommandArgs(argsString);
@@ -727,23 +886,51 @@ export class AgentSession {
 			// If void/undefined, command handled everything
 			return result ?? "";
 		} catch (err) {
-			// Emit error via hook runner
-			this._hookRunner.emitError({
-				hookPath: `custom-command:${commandName}`,
-				event: "command",
-				error: err instanceof Error ? err.message : String(err),
-			});
+			// Emit error via extension runner
+			if (this._extensionRunner) {
+				this._extensionRunner.emitError({
+					extensionPath: `custom-command:${commandName}`,
+					event: "command",
+					error: err instanceof Error ? err.message : String(err),
+				});
+			} else {
+				const message = err instanceof Error ? err.message : String(err);
+				console.error(`Custom command "${commandName}" failed: ${message}`);
+			}
 			return ""; // Command was handled (with error)
 		}
 	}
 
 	/**
-	 * Queue a message to be sent after the current response completes.
-	 * Use when agent is currently streaming.
+	 * Queue a steering message to interrupt the agent mid-run.
 	 */
-	async queueMessage(text: string): Promise<void> {
-		this._queuedMessages.push(text);
-		await this.agent.queueMessage({
+	async steer(text: string): Promise<void> {
+		if (text.startsWith("/")) {
+			this._throwIfExtensionCommand(text);
+		}
+
+		const expandedText = expandPromptTemplate(text, [...this._promptTemplates]);
+		await this._queueSteer(expandedText);
+	}
+
+	/**
+	 * Queue a follow-up message to process after the agent would otherwise stop.
+	 */
+	async followUp(text: string): Promise<void> {
+		if (text.startsWith("/")) {
+			this._throwIfExtensionCommand(text);
+		}
+
+		const expandedText = expandPromptTemplate(text, [...this._promptTemplates]);
+		await this._queueFollowUp(expandedText);
+	}
+
+	/**
+	 * Internal: Queue a steering message (already expanded, no extension command check).
+	 */
+	private async _queueSteer(text: string): Promise<void> {
+		this._steeringMessages.push(text);
+		this.agent.steer({
 			role: "user",
 			content: [{ type: "text", text }],
 			timestamp: Date.now(),
@@ -751,65 +938,103 @@ export class AgentSession {
 	}
 
 	/**
-	 * Send a hook message to the session. Creates a CustomMessageEntry.
+	 * Internal: Queue a follow-up message (already expanded, no extension command check).
+	 */
+	private async _queueFollowUp(text: string): Promise<void> {
+		this._followUpMessages.push(text);
+		this.agent.followUp({
+			role: "user",
+			content: [{ type: "text", text }],
+			timestamp: Date.now(),
+		});
+	}
+
+	/**
+	 * Throw an error if the text is an extension command.
+	 */
+	private _throwIfExtensionCommand(text: string): void {
+		if (!this._extensionRunner) return;
+
+		const spaceIndex = text.indexOf(" ");
+		const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+		const command = this._extensionRunner.getCommand(commandName);
+
+		if (command) {
+			throw new Error(
+				`Extension command "/${commandName}" cannot be queued. Use prompt() or execute the command when not streaming.`,
+			);
+		}
+	}
+
+	/**
+	 * Send a custom message to the session. Creates a CustomMessageEntry.
 	 *
 	 * Handles three cases:
-	 * - Streaming: queues message, processed when loop pulls from queue
+	 * - Streaming: queue as steer/follow-up or store for next turn
 	 * - Not streaming + triggerTurn: appends to state/session, starts new turn
 	 * - Not streaming + no trigger: appends to state/session, no turn
-	 *
-	 * @param message Hook message with customType, content, display, details
-	 * @param triggerTurn If true and not streaming, triggers a new LLM turn
 	 */
-	async sendHookMessage<T = unknown>(
-		message: Pick<HookMessage<T>, "customType" | "content" | "display" | "details">,
-		triggerTurn?: boolean,
+	async sendCustomMessage<T = unknown>(
+		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">,
+		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
 	): Promise<void> {
-		const appMessage = {
-			role: "hookMessage" as const,
+		const appMessage: CustomMessage<T> = {
+			role: "custom",
 			customType: message.customType,
 			content: message.content,
 			display: message.display,
 			details: message.details,
 			timestamp: Date.now(),
-		} satisfies HookMessage<T>;
+		};
 		if (this.isStreaming) {
-			// Queue for processing by agent loop
-			await this.agent.queueMessage(appMessage);
-		} else if (triggerTurn) {
-			// Send as prompt - agent loop will emit message events
-			await this.agent.prompt(appMessage);
-		} else {
-			// Just append to agent state and session, no turn
-			this.agent.appendMessage(appMessage);
-			this.sessionManager.appendCustomMessageEntry(
-				message.customType,
-				message.content,
-				message.display,
-				message.details,
-			);
+			if (options?.deliverAs === "nextTurn") {
+				this._pendingNextTurnMessages.push(appMessage);
+				return;
+			}
+
+			if (options?.deliverAs === "followUp") {
+				this.agent.followUp(appMessage);
+			} else {
+				this.agent.steer(appMessage);
+			}
+			return;
 		}
+
+		if (options?.triggerTurn) {
+			await this.agent.prompt(appMessage);
+			return;
+		}
+
+		this.agent.appendMessage(appMessage);
+		this.sessionManager.appendCustomMessageEntry(
+			message.customType,
+			message.content,
+			message.display,
+			message.details,
+		);
 	}
 
 	/**
 	 * Clear queued messages and return them.
 	 * Useful for restoring to editor when user aborts.
 	 */
-	clearQueue(): string[] {
-		const queued = [...this._queuedMessages];
-		this._queuedMessages = [];
-		this.agent.clearMessageQueue();
-		return queued;
+	clearQueue(): { steering: string[]; followUp: string[] } {
+		const steering = [...this._steeringMessages];
+		const followUp = [...this._followUpMessages];
+		this._steeringMessages = [];
+		this._followUpMessages = [];
+		this.agent.clearAllQueues();
+		return { steering, followUp };
 	}
 
-	/** Number of messages currently queued */
+	/** Number of pending messages (includes both steering and follow-up) */
 	get queuedMessageCount(): number {
-		return this._queuedMessages.length;
+		return this._steeringMessages.length + this._followUpMessages.length;
 	}
 
-	/** Get queued messages (read-only) */
-	getQueuedMessages(): readonly string[] {
-		return this._queuedMessages;
+	/** Get pending messages (read-only) */
+	getQueuedMessages(): { steering: readonly string[]; followUp: readonly string[] } {
+		return { steering: this._steeringMessages, followUp: this._followUpMessages };
 	}
 
 	get skillsSettings(): Required<SkillsSettings> | undefined {
@@ -836,8 +1061,8 @@ export class AgentSession {
 		const previousSessionFile = this.sessionFile;
 
 		// Emit session_before_switch event with reason "new" (can be cancelled)
-		if (this._hookRunner?.hasHandlers("session_before_switch")) {
-			const result = (await this._hookRunner.emit({
+		if (this._extensionRunner?.hasHandlers("session_before_switch")) {
+			const result = (await this._extensionRunner.emit({
 				type: "session_before_switch",
 				reason: "new",
 			})) as SessionBeforeSwitchResult | undefined;
@@ -852,20 +1077,20 @@ export class AgentSession {
 		this.agent.reset();
 		await this.sessionManager.flush();
 		this.sessionManager.newSession(options);
-		this._queuedMessages = [];
+		this._steeringMessages = [];
+		this._followUpMessages = [];
+		this._pendingNextTurnMessages = [];
 		this._reconnectToAgent();
 
 		// Emit session_switch event with reason "new" to hooks
-		if (this._hookRunner) {
-			await this._hookRunner.emit({
+		if (this._extensionRunner) {
+			await this._extensionRunner.emit({
 				type: "session_switch",
 				reason: "new",
 				previousSessionFile,
 			});
 		}
 
-		// Emit session event to custom tools
-		await this.emitCustomToolSessionEvent("switch", previousSessionFile);
 		return true;
 	}
 
@@ -910,7 +1135,7 @@ export class AgentSession {
 	 * Skips missing roles and deduplicates models.
 	 */
 	async cycleRoleModels(roleOrder: string[]): Promise<RoleModelCycleResult | undefined> {
-		const availableModels = await this._modelRegistry.getAvailable();
+		const availableModels = this._modelRegistry.getAvailable();
 		if (availableModels.length === 0) return undefined;
 
 		const currentModel = this.model;
@@ -983,7 +1208,7 @@ export class AgentSession {
 	}
 
 	private async _cycleAvailableModel(direction: "forward" | "backward"): Promise<ModelCycleResult | undefined> {
-		const availableModels = await this._modelRegistry.getAvailable();
+		const availableModels = this._modelRegistry.getAvailable();
 		if (availableModels.length <= 1) return undefined;
 
 		const currentModel = this.model;
@@ -1012,7 +1237,7 @@ export class AgentSession {
 	/**
 	 * Get all available models with valid API keys.
 	 */
-	async getAvailableModels(): Promise<Model<any>[]> {
+	getAvailableModels(): Model<any>[] {
 		return this._modelRegistry.getAvailable();
 	}
 
@@ -1075,16 +1300,25 @@ export class AgentSession {
 	}
 
 	// =========================================================================
-	// Queue Mode Management
+	// Message Queue Mode Management
 	// =========================================================================
 
 	/**
-	 * Set message queue mode.
+	 * Set steering mode.
 	 * Saves to settings.
 	 */
-	setQueueMode(mode: "all" | "one-at-a-time"): void {
-		this.agent.setQueueMode(mode);
-		this.settingsManager.setQueueMode(mode);
+	setSteeringMode(mode: "all" | "one-at-a-time"): void {
+		this.agent.setSteeringMode(mode);
+		this.settingsManager.setSteeringMode(mode);
+	}
+
+	/**
+	 * Set follow-up mode.
+	 * Saves to settings.
+	 */
+	setFollowUpMode(mode: "all" | "one-at-a-time"): void {
+		this.agent.setFollowUpMode(mode);
+		this.settingsManager.setFollowUpMode(mode);
 	}
 
 	/**
@@ -1134,10 +1368,10 @@ export class AgentSession {
 			}
 
 			let hookCompaction: CompactionResult | undefined;
-			let fromHook = false;
+			let fromExtension = false;
 
-			if (this._hookRunner?.hasHandlers("session_before_compact")) {
-				const result = (await this._hookRunner.emit({
+			if (this._extensionRunner?.hasHandlers("session_before_compact")) {
+				const result = (await this._extensionRunner.emit({
 					type: "session_before_compact",
 					preparation,
 					branchEntries: pathEntries,
@@ -1151,7 +1385,7 @@ export class AgentSession {
 
 				if (result?.compaction) {
 					hookCompaction = result.compaction;
-					fromHook = true;
+					fromExtension = true;
 				}
 			}
 
@@ -1161,7 +1395,7 @@ export class AgentSession {
 			let details: unknown;
 
 			if (hookCompaction) {
-				// Hook provided compaction content
+				// Extension provided compaction content
 				summary = hookCompaction.summary;
 				firstKeptEntryId = hookCompaction.firstKeptEntryId;
 				tokensBefore = hookCompaction.tokensBefore;
@@ -1185,7 +1419,7 @@ export class AgentSession {
 				throw new Error("Compaction cancelled");
 			}
 
-			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromHook);
+			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension);
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.replaceMessages(sessionContext.messages);
@@ -1195,11 +1429,11 @@ export class AgentSession {
 				| CompactionEntry
 				| undefined;
 
-			if (this._hookRunner && savedCompactionEntry) {
-				await this._hookRunner.emit({
+			if (this._extensionRunner && savedCompactionEntry) {
+				await this._extensionRunner.emit({
 					type: "session_compact",
 					compactionEntry: savedCompactionEntry,
-					fromHook,
+					fromExtension,
 				});
 			}
 
@@ -1306,10 +1540,10 @@ export class AgentSession {
 			}
 
 			let hookCompaction: CompactionResult | undefined;
-			let fromHook = false;
+			let fromExtension = false;
 
-			if (this._hookRunner?.hasHandlers("session_before_compact")) {
-				const hookResult = (await this._hookRunner.emit({
+			if (this._extensionRunner?.hasHandlers("session_before_compact")) {
+				const hookResult = (await this._extensionRunner.emit({
 					type: "session_before_compact",
 					preparation,
 					branchEntries: pathEntries,
@@ -1324,7 +1558,7 @@ export class AgentSession {
 
 				if (hookResult?.compaction) {
 					hookCompaction = hookResult.compaction;
-					fromHook = true;
+					fromExtension = true;
 				}
 			}
 
@@ -1334,7 +1568,7 @@ export class AgentSession {
 			let details: unknown;
 
 			if (hookCompaction) {
-				// Hook provided compaction content
+				// Extension provided compaction content
 				summary = hookCompaction.summary;
 				firstKeptEntryId = hookCompaction.firstKeptEntryId;
 				tokensBefore = hookCompaction.tokensBefore;
@@ -1359,7 +1593,7 @@ export class AgentSession {
 				return;
 			}
 
-			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromHook);
+			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension);
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.replaceMessages(sessionContext.messages);
@@ -1369,11 +1603,11 @@ export class AgentSession {
 				| CompactionEntry
 				| undefined;
 
-			if (this._hookRunner && savedCompactionEntry) {
-				await this._hookRunner.emit({
+			if (this._extensionRunner && savedCompactionEntry) {
+				await this._extensionRunner.emit({
 					type: "session_compact",
 					compactionEntry: savedCompactionEntry,
-					fromHook,
+					fromExtension,
 				});
 			}
 
@@ -1590,8 +1824,13 @@ export class AgentSession {
 	 * Adds result to agent context and session.
 	 * @param command The bash command to execute
 	 * @param onChunk Optional streaming callback for output
+	 * @param options.excludeFromContext If true, command output won't be sent to LLM (!! prefix)
 	 */
-	async executeBash(command: string, onChunk?: (chunk: string) => void): Promise<BashResult> {
+	async executeBash(
+		command: string,
+		onChunk?: (chunk: string) => void,
+		options?: { excludeFromContext?: boolean },
+	): Promise<BashResult> {
 		this._bashAbortController = new AbortController();
 
 		try {
@@ -1610,6 +1849,7 @@ export class AgentSession {
 				truncated: result.truncated,
 				fullOutputPath: result.fullOutputPath,
 				timestamp: Date.now(),
+				excludeFromContext: options?.excludeFromContext,
 			};
 
 			// If agent is streaming, defer adding to avoid breaking tool_use/tool_result ordering
@@ -1679,8 +1919,8 @@ export class AgentSession {
 		const previousSessionFile = this.sessionManager.getSessionFile();
 
 		// Emit session_before_switch event (can be cancelled)
-		if (this._hookRunner?.hasHandlers("session_before_switch")) {
-			const result = (await this._hookRunner.emit({
+		if (this._extensionRunner?.hasHandlers("session_before_switch")) {
+			const result = (await this._extensionRunner.emit({
 				type: "session_before_switch",
 				reason: "resume",
 				targetSessionFile: sessionPath,
@@ -1693,7 +1933,9 @@ export class AgentSession {
 
 		this._disconnectFromAgent();
 		await this.abort();
-		this._queuedMessages = [];
+		this._steeringMessages = [];
+		this._followUpMessages = [];
+		this._pendingNextTurnMessages = [];
 
 		// Flush pending writes before switching
 		await this.sessionManager.flush();
@@ -1705,16 +1947,13 @@ export class AgentSession {
 		const sessionContext = this.sessionManager.buildSessionContext();
 
 		// Emit session_switch event to hooks
-		if (this._hookRunner) {
-			await this._hookRunner.emit({
+		if (this._extensionRunner) {
+			await this._extensionRunner.emit({
 				type: "session_switch",
 				reason: "resume",
 				previousSessionFile,
 			});
 		}
-
-		// Emit session event to custom tools
-		await this.emitCustomToolSessionEvent("switch", previousSessionFile);
 
 		this.agent.replaceMessages(sessionContext.messages);
 
@@ -1725,7 +1964,7 @@ export class AgentSession {
 			if (slashIdx > 0) {
 				const provider = defaultModelStr.slice(0, slashIdx);
 				const modelId = defaultModelStr.slice(slashIdx + 1);
-				const availableModels = await this._modelRegistry.getAvailable();
+				const availableModels = this._modelRegistry.getAvailable();
 				const match = availableModels.find((m) => m.provider === provider && m.id === modelId);
 				if (match) {
 					this.agent.setModel(match);
@@ -1764,8 +2003,8 @@ export class AgentSession {
 		let skipConversationRestore = false;
 
 		// Emit session_before_branch event (can be cancelled)
-		if (this._hookRunner?.hasHandlers("session_before_branch")) {
-			const result = (await this._hookRunner.emit({
+		if (this._extensionRunner?.hasHandlers("session_before_branch")) {
+			const result = (await this._extensionRunner.emit({
 				type: "session_before_branch",
 				entryId,
 			})) as SessionBeforeBranchResult | undefined;
@@ -1775,6 +2014,9 @@ export class AgentSession {
 			}
 			skipConversationRestore = result?.skipConversationRestore ?? false;
 		}
+
+		// Clear pending messages (bound to old session state)
+		this._pendingNextTurnMessages = [];
 
 		// Flush pending writes before branching
 		await this.sessionManager.flush();
@@ -1789,15 +2031,12 @@ export class AgentSession {
 		const sessionContext = this.sessionManager.buildSessionContext();
 
 		// Emit session_branch event to hooks (after branch completes)
-		if (this._hookRunner) {
-			await this._hookRunner.emit({
+		if (this._extensionRunner) {
+			await this._extensionRunner.emit({
 				type: "session_branch",
 				previousSessionFile,
 			});
 		}
-
-		// Emit session event to custom tools (with reason "branch")
-		await this.emitCustomToolSessionEvent("branch", previousSessionFile);
 
 		if (!skipConversationRestore) {
 			this.agent.replaceMessages(sessionContext.messages);
@@ -1859,11 +2098,11 @@ export class AgentSession {
 		// Set up abort controller for summarization
 		this._branchSummaryAbortController = new AbortController();
 		let hookSummary: { summary: string; details?: unknown } | undefined;
-		let fromHook = false;
+		let fromExtension = false;
 
 		// Emit session_before_tree event
-		if (this._hookRunner?.hasHandlers("session_before_tree")) {
-			const result = (await this._hookRunner.emit({
+		if (this._extensionRunner?.hasHandlers("session_before_tree")) {
+			const result = (await this._extensionRunner.emit({
 				type: "session_before_tree",
 				preparation,
 				signal: this._branchSummaryAbortController.signal,
@@ -1875,7 +2114,7 @@ export class AgentSession {
 
 			if (result?.summary && options.summarize) {
 				hookSummary = result.summary;
-				fromHook = true;
+				fromExtension = true;
 			}
 		}
 
@@ -1941,7 +2180,7 @@ export class AgentSession {
 		let summaryEntry: BranchSummaryEntry | undefined;
 		if (summaryText) {
 			// Create summary at target position (can be null for root)
-			const summaryId = this.sessionManager.branchWithSummary(newLeafId, summaryText, summaryDetails, fromHook);
+			const summaryId = this.sessionManager.branchWithSummary(newLeafId, summaryText, summaryDetails, fromExtension);
 			summaryEntry = this.sessionManager.getEntry(summaryId) as BranchSummaryEntry;
 		} else if (newLeafId === null) {
 			// No summary, navigating to root - reset leaf
@@ -1956,18 +2195,15 @@ export class AgentSession {
 		this.agent.replaceMessages(sessionContext.messages);
 
 		// Emit session_tree event
-		if (this._hookRunner) {
-			await this._hookRunner.emit({
+		if (this._extensionRunner) {
+			await this._extensionRunner.emit({
 				type: "session_tree",
 				newLeafId: this.sessionManager.getLeafId(),
 				oldLeafId,
 				summaryEntry,
-				fromHook: summaryText ? fromHook : undefined,
+				fromExtension: summaryText ? fromExtension : undefined,
 			});
 		}
-
-		// Emit to custom tools
-		await this.emitCustomToolSessionEvent("tree", this.sessionFile);
 
 		this._branchSummaryAbortController = undefined;
 		return { editorText, cancelled: false, summaryEntry };
@@ -2176,60 +2412,30 @@ export class AgentSession {
 	}
 
 	// =========================================================================
-	// Hook System
+	// Extension System
 	// =========================================================================
 
 	/**
-	 * Check if hooks have handlers for a specific event type.
+	 * Check if extensions have handlers for a specific event type.
 	 */
-	hasHookHandlers(eventType: string): boolean {
-		return this._hookRunner?.hasHandlers(eventType) ?? false;
+	hasExtensionHandlers(eventType: string): boolean {
+		return this._extensionRunner?.hasHandlers(eventType) ?? false;
 	}
 
 	/**
-	 * Get the hook runner (for setting UI context and error handlers).
+	 * Get the extension runner (for setting UI context and error handlers).
 	 */
-	get hookRunner(): HookRunner | undefined {
-		return this._hookRunner;
+	get extensionRunner(): ExtensionRunner | undefined {
+		return this._extensionRunner;
 	}
 
 	/**
-	 * Get custom tools (for setting UI context in modes).
+	 * Emit a custom tool session event (backwards compatibility for older callers).
 	 */
-	get customTools(): LoadedCustomTool[] {
-		return this._customTools;
-	}
-
-	/**
-	 * Emit session event to all custom tools.
-	 * Called on session switch, branch, tree navigation, and shutdown.
-	 */
-	async emitCustomToolSessionEvent(
-		reason: CustomToolSessionEvent["reason"],
-		previousSessionFile?: string | undefined,
-	): Promise<void> {
-		if (!this._customTools) return;
-
-		const event: CustomToolSessionEvent = { reason, previousSessionFile };
-		const ctx: CustomToolContext = {
-			sessionManager: this.sessionManager,
-			modelRegistry: this._modelRegistry,
-			model: this.agent.state.model,
-			isIdle: () => !this.isStreaming,
-			hasQueuedMessages: () => this.queuedMessageCount > 0,
-			abort: () => {
-				this.abort();
-			},
-		};
-
-		for (const { tool } of this._customTools) {
-			if (tool.onSession) {
-				try {
-					await tool.onSession(event, ctx);
-				} catch (err) {
-					logger.warn("Tool onSession error", { error: String(err) });
-				}
-			}
-		}
+	async emitCustomToolSessionEvent(reason: "start" | "switch" | "branch" | "tree" | "shutdown"): Promise<void> {
+		if (!this._extensionRunner) return;
+		if (reason !== "shutdown") return;
+		if (!this._extensionRunner.hasHandlers("session_shutdown")) return;
+		await this._extensionRunner.emit({ type: "session_shutdown" });
 	}
 }

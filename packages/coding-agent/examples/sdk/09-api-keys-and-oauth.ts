@@ -15,8 +15,8 @@ import {
 
 // Default: discoverAuthStorage() uses ~/.omp/agent/auth.json
 // discoverModels() loads built-in + custom models from ~/.omp/agent/models.json
-const authStorage = discoverAuthStorage();
-const modelRegistry = discoverModels(authStorage);
+const authStorage = await discoverAuthStorage();
+const modelRegistry = await discoverModels(authStorage);
 
 await createAgentSession({
 	sessionManager: SessionManager.inMemory(),

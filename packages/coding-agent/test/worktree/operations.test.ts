@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -42,7 +43,7 @@ describe("worktree operations", () => {
 	test("create worktree with new branch", async () => {
 		const wt = await create("feature-test");
 		expect(wt.branch).toBe("feature-test");
-		expect(await Bun.file(wt.path).exists()).toBe(true);
+		expect(existsSync(wt.path)).toBe(true);
 	});
 
 	test("create worktree with existing branch", async () => {
@@ -73,7 +74,7 @@ describe("worktree operations", () => {
 	test("remove worktree", async () => {
 		const wt = await create("to-remove");
 		await remove("to-remove");
-		expect(await Bun.file(wt.path).exists()).toBe(false);
+		expect(existsSync(wt.path)).toBe(false);
 	});
 
 	test("cannot remove main worktree", async () => {

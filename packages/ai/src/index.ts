@@ -1,3 +1,5 @@
+/// <reference path="./bun-imports.d.ts" />
+
 export * from "./models";
 export * from "./providers/anthropic";
 export * from "./providers/google";

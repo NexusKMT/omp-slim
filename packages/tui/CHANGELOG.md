@@ -6,6 +6,12 @@
 
 - Added `isCapsLock` helper function for detecting Caps Lock key press via Kitty protocol
 - Added `isCtrlY` helper function for detecting Ctrl+Y keyboard input
+- Added configurable editor keybindings with typed key identifiers and action matching
+- Added word-wrapped editor rendering for long lines
+
+### Changed
+
+- Settings list descriptions now wrap to the available width instead of truncating
 
 ## [3.15.1] - 2026-01-05
 

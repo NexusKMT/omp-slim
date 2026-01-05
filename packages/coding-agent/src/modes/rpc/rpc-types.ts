@@ -17,8 +17,9 @@ import type { CompactionResult } from "../../core/compaction/index";
 
 export type RpcCommand =
 	// Prompting
-	| { id?: string; type: "prompt"; message: string; images?: ImageContent[] }
-	| { id?: string; type: "queue_message"; message: string }
+	| { id?: string; type: "prompt"; message: string; images?: ImageContent[]; streamingBehavior?: "steer" | "followUp" }
+	| { id?: string; type: "steer"; message: string }
+	| { id?: string; type: "follow_up"; message: string }
 	| { id?: string; type: "abort" }
 	| { id?: string; type: "new_session"; parentSession?: string }
 
@@ -34,8 +35,10 @@ export type RpcCommand =
 	| { id?: string; type: "set_thinking_level"; level: ThinkingLevel }
 	| { id?: string; type: "cycle_thinking_level" }
 
-	// Queue mode
-	| { id?: string; type: "set_queue_mode"; mode: "all" | "one-at-a-time" }
+	// Queue modes
+	| { id?: string; type: "set_steering_mode"; mode: "all" | "one-at-a-time" }
+	| { id?: string; type: "set_follow_up_mode"; mode: "all" | "one-at-a-time" }
+	| { id?: string; type: "set_interrupt_mode"; mode: "immediate" | "wait" }
 
 	// Compaction
 	| { id?: string; type: "compact"; customInstructions?: string }
@@ -69,7 +72,9 @@ export interface RpcSessionState {
 	thinkingLevel: ThinkingLevel;
 	isStreaming: boolean;
 	isCompacting: boolean;
-	queueMode: "all" | "one-at-a-time";
+	steeringMode: "all" | "one-at-a-time";
+	followUpMode: "all" | "one-at-a-time";
+	interruptMode: "immediate" | "wait";
 	sessionFile?: string;
 	sessionId: string;
 	autoCompactionEnabled: boolean;
@@ -85,7 +90,8 @@ export interface RpcSessionState {
 export type RpcResponse =
 	// Prompting (async - events follow)
 	| { id?: string; type: "response"; command: "prompt"; success: true }
-	| { id?: string; type: "response"; command: "queue_message"; success: true }
+	| { id?: string; type: "response"; command: "steer"; success: true }
+	| { id?: string; type: "response"; command: "follow_up"; success: true }
 	| { id?: string; type: "response"; command: "abort"; success: true }
 	| { id?: string; type: "response"; command: "new_session"; success: true; data: { cancelled: boolean } }
 
@@ -125,8 +131,10 @@ export type RpcResponse =
 			data: { level: ThinkingLevel } | null;
 	  }
 
-	// Queue mode
-	| { id?: string; type: "response"; command: "set_queue_mode"; success: true }
+	// Queue modes
+	| { id?: string; type: "response"; command: "set_steering_mode"; success: true }
+	| { id?: string; type: "response"; command: "set_follow_up_mode"; success: true }
+	| { id?: string; type: "response"; command: "set_interrupt_mode"; success: true }
 
 	// Compaction
 	| { id?: string; type: "response"; command: "compact"; success: true; data: CompactionResult }
@@ -167,34 +175,48 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: string; success: false; error: string };
 
 // ============================================================================
-// Hook UI Events (stdout)
+// Extension UI Events (stdout)
 // ============================================================================
 
-/** Emitted when a hook needs user input */
-export type RpcHookUIRequest =
-	| { type: "hook_ui_request"; id: string; method: "select"; title: string; options: string[] }
-	| { type: "hook_ui_request"; id: string; method: "confirm"; title: string; message: string }
-	| { type: "hook_ui_request"; id: string; method: "input"; title: string; placeholder?: string }
-	| { type: "hook_ui_request"; id: string; method: "editor"; title: string; prefill?: string }
+/** Emitted when an extension needs user input */
+export type RpcExtensionUIRequest =
+	| { type: "extension_ui_request"; id: string; method: "select"; title: string; options: string[] }
+	| { type: "extension_ui_request"; id: string; method: "confirm"; title: string; message: string }
+	| { type: "extension_ui_request"; id: string; method: "input"; title: string; placeholder?: string }
+	| { type: "extension_ui_request"; id: string; method: "editor"; title: string; prefill?: string }
 	| {
-			type: "hook_ui_request";
+			type: "extension_ui_request";
 			id: string;
 			method: "notify";
 			message: string;
 			notifyType?: "info" | "warning" | "error";
 	  }
-	| { type: "hook_ui_request"; id: string; method: "setStatus"; statusKey: string; statusText: string | undefined }
-	| { type: "hook_ui_request"; id: string; method: "set_editor_text"; text: string };
+	| {
+			type: "extension_ui_request";
+			id: string;
+			method: "setStatus";
+			statusKey: string;
+			statusText: string | undefined;
+	  }
+	| {
+			type: "extension_ui_request";
+			id: string;
+			method: "setWidget";
+			widgetKey: string;
+			widgetLines: string[] | undefined;
+	  }
+	| { type: "extension_ui_request"; id: string; method: "setTitle"; title: string }
+	| { type: "extension_ui_request"; id: string; method: "set_editor_text"; text: string };
 
 // ============================================================================
-// Hook UI Commands (stdin)
+// Extension UI Commands (stdin)
 // ============================================================================
 
-/** Response to a hook UI request */
-export type RpcHookUIResponse =
-	| { type: "hook_ui_response"; id: string; value: string }
-	| { type: "hook_ui_response"; id: string; confirmed: boolean }
-	| { type: "hook_ui_response"; id: string; cancelled: true };
+/** Response to an extension UI request */
+export type RpcExtensionUIResponse =
+	| { type: "extension_ui_response"; id: string; value: string }
+	| { type: "extension_ui_response"; id: string; confirmed: boolean }
+	| { type: "extension_ui_response"; id: string; cancelled: true };
 
 // ============================================================================
 // Helper type for extracting command types

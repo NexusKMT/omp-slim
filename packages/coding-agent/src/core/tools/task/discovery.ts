@@ -154,7 +154,7 @@ function loadAgentsFromDir(dir: string, source: AgentSource): AgentDefinition[] 
  *
  * @param cwd - Current working directory for project agent discovery
  */
-export function discoverAgents(cwd: string): DiscoveryResult {
+export async function discoverAgents(cwd: string): Promise<DiscoveryResult> {
 	const resolvedCwd = path.resolve(cwd);
 	const agentSources = Array.from(new Set(getConfigDirs("", { project: false }).map((entry) => entry.source)));
 
@@ -167,7 +167,7 @@ export function discoverAgents(cwd: string): DiscoveryResult {
 		}));
 
 	// Get project directories by walking up from cwd (priority order)
-	const projectDirs = findAllNearestProjectConfigDirs("agents", resolvedCwd)
+	const projectDirs = (await findAllNearestProjectConfigDirs("agents", resolvedCwd))
 		.filter((entry) => agentSources.includes(entry.source))
 		.map((entry) => ({
 			...entry,

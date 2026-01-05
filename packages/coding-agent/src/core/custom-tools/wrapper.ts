@@ -3,6 +3,7 @@
  */
 
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
+import type { Theme } from "../../modes/interactive/theme/theme";
 import type { CustomTool, CustomToolContext, LoadedCustomTool } from "./types";
 
 /**
@@ -18,6 +19,10 @@ export function wrapCustomTool(tool: CustomTool, getContext: () => CustomToolCon
 		hidden: tool.hidden,
 		execute: (toolCallId, params, signal, onUpdate, context) =>
 			tool.execute(toolCallId, params, onUpdate, context ?? getContext(), signal),
+		renderCall: tool.renderCall ? (args, theme) => tool.renderCall?.(args, theme as Theme) : undefined,
+		renderResult: tool.renderResult
+			? (result, options, theme) => tool.renderResult?.(result, options, theme as Theme)
+			: undefined,
 	};
 }
 

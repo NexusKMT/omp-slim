@@ -9,7 +9,7 @@
  * - Abort handling during summarization
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { API_KEY, createTestSession, type TestSessionContext } from "./utilities";
 
 describe.skipIf(!API_KEY)("AgentSession tree navigation e2e", () => {
@@ -102,7 +102,7 @@ describe.skipIf(!API_KEY)("AgentSession tree navigation e2e", () => {
 		expect(result.summaryEntry?.parentId).toBeNull();
 
 		// Leaf should be the summary entry
-		expect(sessionManager.getLeafId()).toBe(result.summaryEntry?.id);
+		expect(sessionManager.getLeafId()).toBe(result.summaryEntry?.id ?? null);
 	}, 120000);
 
 	it("should attach summary to correct parent when navigating to nested user message", async () => {
@@ -169,7 +169,7 @@ describe.skipIf(!API_KEY)("AgentSession tree navigation e2e", () => {
 		expect(result.summaryEntry?.parentId).toBe(a1.id);
 
 		// Leaf should be the summary entry
-		expect(sessionManager.getLeafId()).toBe(result.summaryEntry?.id);
+		expect(sessionManager.getLeafId()).toBe(result.summaryEntry?.id ?? null);
 	}, 120000);
 
 	it("should handle abort during summarization", async () => {

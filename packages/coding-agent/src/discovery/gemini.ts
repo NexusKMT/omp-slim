@@ -16,15 +16,25 @@
  * - settings: From settings.json
  */
 
-import { dirname, join, sep } from "node:path";
+import { dirname, join, sep } from "path";
 import { type ContextFile, contextFileCapability } from "../capability/context-file";
 import { type Extension, type ExtensionManifest, extensionCapability } from "../capability/extension";
+import { type ExtensionModule, extensionModuleCapability } from "../capability/extension-module";
 import { registerProvider } from "../capability/index";
 import { type MCPServer, mcpCapability } from "../capability/mcp";
 import { type Settings, settingsCapability } from "../capability/settings";
 import { type SystemPrompt, systemPromptCapability } from "../capability/system-prompt";
 import type { LoadContext, LoadResult } from "../capability/types";
-import { calculateDepth, createSourceMeta, expandEnvVarsDeep, getProjectPath, getUserPath, parseJSON } from "./helpers";
+import {
+	calculateDepth,
+	createSourceMeta,
+	discoverExtensionModulePaths,
+	expandEnvVarsDeep,
+	getExtensionNameFromPath,
+	getProjectPath,
+	getUserPath,
+	parseJSON,
+} from "./helpers";
 
 const PROVIDER_ID = "gemini";
 const DISPLAY_NAME = "Gemini CLI";
@@ -237,6 +247,41 @@ function loadExtensionsFromDir(
 }
 
 // =============================================================================
+// Extension Modules
+// =============================================================================
+
+function loadExtensionModules(ctx: LoadContext): LoadResult<ExtensionModule> {
+	const items: ExtensionModule[] = [];
+	const warnings: string[] = [];
+
+	const userExtensionsDir = getUserPath(ctx, "gemini", "extensions");
+	if (userExtensionsDir) {
+		for (const extPath of discoverExtensionModulePaths(ctx, userExtensionsDir)) {
+			items.push({
+				name: getExtensionNameFromPath(extPath),
+				path: extPath,
+				level: "user",
+				_source: createSourceMeta(PROVIDER_ID, extPath, "user"),
+			});
+		}
+	}
+
+	const projectExtensionsDir = getProjectPath(ctx, "gemini", "extensions");
+	if (projectExtensionsDir) {
+		for (const extPath of discoverExtensionModulePaths(ctx, projectExtensionsDir)) {
+			items.push({
+				name: getExtensionNameFromPath(extPath),
+				path: extPath,
+				level: "project",
+				_source: createSourceMeta(PROVIDER_ID, extPath, "project"),
+			});
+		}
+	}
+
+	return { items, warnings };
+}
+
+// =============================================================================
 // Settings
 // =============================================================================
 
@@ -357,6 +402,14 @@ registerProvider(extensionCapability.id, {
 	description: "Load extensions from ~/.gemini/extensions/ and .gemini/extensions/",
 	priority: PRIORITY,
 	load: loadExtensions,
+});
+
+registerProvider(extensionModuleCapability.id, {
+	id: PROVIDER_ID,
+	displayName: DISPLAY_NAME,
+	description: "Load extension modules from ~/.gemini/extensions/ and .gemini/extensions/",
+	priority: PRIORITY,
+	load: loadExtensionModules,
 });
 
 registerProvider(settingsCapability.id, {

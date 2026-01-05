@@ -4,6 +4,8 @@
 ### Added
 
 - Added support for kwaipilot/kat-coder-pro model via OpenRouter
+- Added OpenAI Codex responses provider with OAuth login support for ChatGPT Plus/Pro accounts
+- Added Google Vertex AI provider (Gemini via Vertex) with Application Default Credentials support
 
 ### Changed
 

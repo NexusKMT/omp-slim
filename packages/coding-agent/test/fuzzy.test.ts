@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "bun:test";
 import { fuzzyFilter, fuzzyMatch } from "../src/utils/fuzzy";
 
 describe("fuzzyMatch", () => {

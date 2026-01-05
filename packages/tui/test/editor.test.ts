@@ -582,4 +582,117 @@ describe("Editor component", () => {
 			}
 		});
 	});
+
+	describe("Word wrapping", () => {
+		it("wraps at word boundaries instead of mid-word", () => {
+			const editor = new Editor(defaultEditorTheme);
+			const width = 40;
+
+			editor.setText("Hello world this is a test of word wrapping functionality");
+			const lines = editor.render(width);
+
+			// Check that all lines fit within width
+			for (const line of lines) {
+				const lineWidth = visibleWidth(line);
+				expect(lineWidth).toBe(width);
+			}
+
+			// Extract text content (strip borders and control characters)
+			const allText = lines
+				.map((l) => stripVTControlCharacters(l))
+				.join("")
+				.replace(/[+\-|]/g, "")
+				.replace(/\s+/g, " ")
+				.trim();
+
+			// Should contain the full text (with normalized whitespace)
+			expect(allText).toBe("Hello world this is a test of word wrapping functionality");
+		});
+
+		it("does not start lines with leading whitespace after word wrap", () => {
+			const editor = new Editor(defaultEditorTheme);
+			const width = 20;
+
+			editor.setText("Word1 Word2 Word3 Word4 Word5 Word6");
+			const lines = editor.render(width);
+
+			// Get content lines (between borders)
+			const contentLines = lines.slice(1, -1);
+
+			// No line should start with whitespace (except for padding at the end)
+			for (let i = 0; i < contentLines.length; i++) {
+				const line = stripVTControlCharacters(contentLines[i]!);
+				const trimmedStart = line.trimStart();
+				// The line should either be all padding or start with a word character
+				if (trimmedStart.length > 0) {
+					expect(/^\s+\S/.test(line.trimEnd())).toBe(false);
+				}
+			}
+		});
+
+		it("breaks long words (URLs) at character level", () => {
+			const editor = new Editor(defaultEditorTheme);
+			const width = 30;
+
+			editor.setText("Check https://example.com/very/long/path/that/exceeds/width here");
+			const lines = editor.render(width);
+
+			// All lines should fit within width
+			for (let i = 1; i < lines.length - 1; i++) {
+				const lineWidth = visibleWidth(lines[i]!);
+				expect(lineWidth).toBe(width);
+			}
+		});
+
+		it("preserves multiple spaces within words on same line", () => {
+			const editor = new Editor(defaultEditorTheme);
+			const width = 50;
+
+			editor.setText("Word1   Word2    Word3");
+			const lines = editor.render(width);
+
+			const contentLine = stripVTControlCharacters(lines[1]!).trim();
+			// Multiple spaces should be preserved
+			expect(contentLine.includes("Word1   Word2")).toBeTruthy();
+		});
+
+		it("handles empty string", () => {
+			const editor = new Editor(defaultEditorTheme);
+			const width = 40;
+
+			editor.setText("");
+			const lines = editor.render(width);
+
+			// Should have at least 2 lines (borders)
+			expect(lines.length).toBeGreaterThanOrEqual(2);
+
+			// All lines should fit within width
+			for (const line of lines) {
+				const lineWidth = visibleWidth(line);
+				expect(lineWidth).toBe(width);
+			}
+		});
+
+		it("handles single word that fits exactly", () => {
+			const editor = new Editor(defaultEditorTheme);
+			const width = 20;
+
+			editor.setText("1234567890");
+			const lines = editor.render(width);
+
+			// Check all lines fit within width
+			for (const line of lines) {
+				const lineWidth = visibleWidth(line);
+				expect(lineWidth).toBe(width);
+			}
+
+			// Extract and verify content
+			const allText = lines
+				.map((l) => stripVTControlCharacters(l))
+				.join("")
+				.replace(/[+\-|]/g, "")
+				.trim();
+			expect(allText).toBe("1234567890");
+		});
+	});
 });

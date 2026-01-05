@@ -2,12 +2,12 @@
  * Tests for compaction hook events (before_compact / compact).
  */
 
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { getModel } from "@oh-my-pi/pi-ai";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AgentSession } from "../src/core/agent-session";
 import { AuthStorage } from "../src/core/auth-storage";
 import {
@@ -20,7 +20,7 @@ import {
 import { ModelRegistry } from "../src/core/model-registry";
 import { SessionManager } from "../src/core/session-manager";
 import { SettingsManager } from "../src/core/settings-manager";
-import { codingTools } from "../src/core/tools/index";
+import { createCodingTools } from "../src/core/tools/index";
 import { theme } from "../src/modes/interactive/theme/theme";
 
 const API_KEY = process.env.ANTHROPIC_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY;
@@ -83,14 +83,15 @@ describe.skipIf(!API_KEY)("Compaction hooks", () => {
 		};
 	}
 
-	function createSession(hooks: LoadedHook[]) {
+	async function createSession(hooks: LoadedHook[]) {
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
+		const tools = await createCodingTools(tempDir);
 		const agent = new Agent({
 			getApiKey: () => API_KEY,
 			initialState: {
 				model,
 				systemPrompt: "You are a helpful assistant. Be concise.",
-				tools: codingTools,
+				tools,
 			},
 		});
 
@@ -125,7 +126,7 @@ describe.skipIf(!API_KEY)("Compaction hooks", () => {
 			agent,
 			sessionManager,
 			settingsManager,
-			hookRunner,
+			extensionRunner: hookRunner as any,
 			modelRegistry,
 		});
 
@@ -134,7 +135,7 @@ describe.skipIf(!API_KEY)("Compaction hooks", () => {
 
 	it("should emit before_compact and compact events", async () => {
 		const hook = createHook();
-		createSession([hook]);
+		await createSession([hook]);
 
 		await session.prompt("What is 2+2? Reply with just the number.");
 		await session.agent.waitForIdle();
@@ -165,12 +166,12 @@ describe.skipIf(!API_KEY)("Compaction hooks", () => {
 		expect(afterEvent.compactionEntry).toBeDefined();
 		expect(afterEvent.compactionEntry.summary.length).toBeGreaterThan(0);
 		expect(afterEvent.compactionEntry.tokensBefore).toBeGreaterThanOrEqual(0);
-		expect(afterEvent.fromHook).toBe(false);
+		expect(afterEvent.fromExtension).toBe(false);
 	}, 120000);
 
 	it("should allow hooks to cancel compaction", async () => {
 		const hook = createHook(() => ({ cancel: true }));
-		createSession([hook]);
+		await createSession([hook]);
 
 		await session.prompt("What is 2+2? Reply with just the number.");
 		await session.agent.waitForIdle();
@@ -196,7 +197,7 @@ describe.skipIf(!API_KEY)("Compaction hooks", () => {
 			}
 			return undefined;
 		});
-		createSession([hook]);
+		await createSession([hook]);
 
 		await session.prompt("What is 2+2? Reply with just the number.");
 		await session.agent.waitForIdle();
@@ -214,13 +215,13 @@ describe.skipIf(!API_KEY)("Compaction hooks", () => {
 		const afterEvent = compactEvents[0];
 		if (afterEvent.type === "session_compact") {
 			expect(afterEvent.compactionEntry.summary).toBe(customSummary);
-			expect(afterEvent.fromHook).toBe(true);
+			expect(afterEvent.fromExtension).toBe(true);
 		}
 	}, 120000);
 
 	it("should include entries in compact event after compaction is saved", async () => {
 		const hook = createHook();
-		createSession([hook]);
+		await createSession([hook]);
 
 		await session.prompt("What is 2+2? Reply with just the number.");
 		await session.agent.waitForIdle();
@@ -269,7 +270,7 @@ describe.skipIf(!API_KEY)("Compaction hooks", () => {
 			setAppendEntryHandler: () => {},
 		};
 
-		createSession([throwingHook]);
+		await createSession([throwingHook]);
 
 		await session.prompt("What is 2+2? Reply with just the number.");
 		await session.agent.waitForIdle();
@@ -281,7 +282,7 @@ describe.skipIf(!API_KEY)("Compaction hooks", () => {
 
 		const compactEvents = capturedEvents.filter((e): e is SessionCompactEvent => e.type === "session_compact");
 		expect(compactEvents.length).toBe(1);
-		expect(compactEvents[0].fromHook).toBe(false);
+		expect(compactEvents[0].fromExtension).toBe(false);
 	}, 120000);
 
 	it("should call multiple hooks in order", async () => {
@@ -345,7 +346,7 @@ describe.skipIf(!API_KEY)("Compaction hooks", () => {
 			setAppendEntryHandler: () => {},
 		};
 
-		createSession([hook1, hook2]);
+		await createSession([hook1, hook2]);
 
 		await session.prompt("What is 2+2? Reply with just the number.");
 		await session.agent.waitForIdle();
@@ -362,7 +363,7 @@ describe.skipIf(!API_KEY)("Compaction hooks", () => {
 			capturedBeforeEvent = event;
 			return undefined;
 		});
-		createSession([hook]);
+		await createSession([hook]);
 
 		await session.prompt("What is 2+2? Reply with just the number.");
 		await session.agent.waitForIdle();
@@ -409,7 +410,7 @@ describe.skipIf(!API_KEY)("Compaction hooks", () => {
 			}
 			return undefined;
 		});
-		createSession([hook]);
+		await createSession([hook]);
 
 		await session.prompt("What is 2+2? Reply with just the number.");
 		await session.agent.waitForIdle();

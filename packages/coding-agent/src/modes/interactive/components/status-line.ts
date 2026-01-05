@@ -1,8 +1,7 @@
-import { execSync } from "node:child_process";
-import { existsSync, type FSWatcher, readFileSync, watch } from "node:fs";
-import { dirname, join } from "node:path";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { type Component, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
+import { type FSWatcher, watch } from "fs";
+import { dirname, join } from "path";
 import type { AgentSession } from "../../../core/agent-session";
 import type { StatusLineSegmentOptions, StatusLineSettings } from "../../../core/settings-manager";
 import { theme } from "../theme/theme";
@@ -23,11 +22,11 @@ function sanitizeStatusText(text: string): string {
 }
 
 /** Find the git root directory by walking up from cwd */
-function findGitHeadPath(): string | null {
+async function findGitHeadPath(): Promise<string | null> {
 	let dir = process.cwd();
 	while (true) {
 		const gitHeadPath = join(dir, ".git", "HEAD");
-		if (existsSync(gitHeadPath)) {
+		if (await Bun.file(gitHeadPath).exists()) {
 			return gitHeadPath;
 		}
 		const parent = dirname(dir);
@@ -98,19 +97,20 @@ export class StatusLineComponent implements Component {
 			this.gitWatcher = null;
 		}
 
-		const gitHeadPath = findGitHeadPath();
-		if (!gitHeadPath) return;
+		findGitHeadPath().then((gitHeadPath) => {
+			if (!gitHeadPath) return;
 
-		try {
-			this.gitWatcher = watch(gitHeadPath, () => {
-				this.cachedBranch = undefined;
-				if (this.onBranchChange) {
-					this.onBranchChange();
-				}
-			});
-		} catch {
-			// Silently fail
-		}
+			try {
+				this.gitWatcher = watch(gitHeadPath, () => {
+					this.cachedBranch = undefined;
+					if (this.onBranchChange) {
+						this.onBranchChange();
+					}
+				});
+			} catch {
+				// Silently fail
+			}
+		});
 	}
 
 	dispose(): void {
@@ -129,24 +129,27 @@ export class StatusLineComponent implements Component {
 			return this.cachedBranch;
 		}
 
-		try {
-			const gitHeadPath = findGitHeadPath();
+		// Note: synchronous call to async function - will return undefined on first call
+		// This is acceptable since it's a cached value that will update on next render
+		findGitHeadPath().then(async (gitHeadPath) => {
 			if (!gitHeadPath) {
 				this.cachedBranch = null;
-				return null;
+				return;
 			}
-			const content = readFileSync(gitHeadPath, "utf8").trim();
+			try {
+				const content = (await Bun.file(gitHeadPath).text()).trim();
 
-			if (content.startsWith("ref: refs/heads/")) {
-				this.cachedBranch = content.slice(16);
-			} else {
-				this.cachedBranch = "detached";
+				if (content.startsWith("ref: refs/heads/")) {
+					this.cachedBranch = content.slice(16);
+				} else {
+					this.cachedBranch = "detached";
+				}
+			} catch {
+				this.cachedBranch = null;
 			}
-		} catch {
-			this.cachedBranch = null;
-		}
+		});
 
-		return this.cachedBranch;
+		return this.cachedBranch ?? null;
 	}
 
 	private getGitStatus(): { staged: number; unstaged: number; untracked: number } | null {
@@ -156,11 +159,18 @@ export class StatusLineComponent implements Component {
 		}
 
 		try {
-			const output = execSync("git status --porcelain 2>/dev/null", {
-				encoding: "utf8",
-				timeout: 1000,
-				stdio: ["pipe", "pipe", "pipe"],
+			const result = Bun.spawnSync(["git", "status", "--porcelain"], {
+				stdout: "pipe",
+				stderr: "pipe",
 			});
+
+			if (!result.success) {
+				this.cachedGitStatus = null;
+				this.gitStatusLastFetch = now;
+				return null;
+			}
+
+			const output = result.stdout.toString("utf8");
 
 			let staged = 0;
 			let unstaged = 0;

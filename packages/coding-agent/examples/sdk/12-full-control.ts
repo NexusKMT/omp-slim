@@ -15,7 +15,7 @@ import {
 	createAgentSession,
 	createBashTool,
 	createReadTool,
-	type HookFactory,
+	type ExtensionFactory,
 	ModelRegistry,
 	SessionManager,
 	SettingsManager,
@@ -33,8 +33,8 @@ if (process.env.MY_ANTHROPIC_KEY) {
 // Model registry with no custom models.json
 const modelRegistry = new ModelRegistry(authStorage);
 
-// Inline hook
-const auditHook: HookFactory = (api) => {
+// Inline extension
+const auditHook: ExtensionFactory = (api) => {
 	api.on("tool_call", async (event) => {
 		console.log(`[Audit] ${event.toolName}`);
 		return undefined;
@@ -76,11 +76,11 @@ const { session } = await createAgentSession({
 Available: read, bash, status. Be concise.`,
 	// Use factory functions with the same cwd to ensure path resolution works correctly
 	tools: [createReadTool(cwd), createBashTool(cwd)],
-	customTools: [{ tool: statusTool }],
-	hooks: [{ factory: auditHook }],
+	customTools: [statusTool],
+	extensions: [auditHook],
 	skills: [],
 	contextFiles: [],
-	slashCommands: [],
+	promptTemplates: [],
 	sessionManager: SessionManager.inMemory(),
 	settingsManager,
 });

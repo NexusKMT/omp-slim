@@ -6,7 +6,6 @@
  * shell experience.
  */
 
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -28,9 +27,11 @@ function getShellConfigFile(shell: string): string {
  * This script sources the user's rc file and extracts functions, aliases, and options.
  * Matches Claude Code's snapshot generation logic.
  */
-function generateSnapshotScript(shell: string, snapshotPath: string, rcFile: string): string {
-	const hasRcFile = existsSync(rcFile);
+async function generateSnapshotScript(shell: string, snapshotPath: string, rcFile: string): Promise<string> {
+	const hasRcFile = await Bun.file(rcFile).exists();
 	const isZsh = shell.includes("zsh");
+	const commonToolsRegex =
+		"^(ls|dir|vdir|cat|head|tail|less|more|grep|egrep|fgrep|rg|find|fd|locate|sed|awk|perl|cp|mv|rm|mkdir|rmdir|touch|chmod|chown|ln|pwd|readlink|stat|cut|sort|uniq|xargs|tee|tr|basename|dirname)$";
 
 	// Escape the snapshot path for shell
 	const escapedPath = snapshotPath.replace(/'/g, "'\\''");
@@ -42,7 +43,7 @@ echo "# Functions" >> "$SNAPSHOT_FILE"
 # Force autoload all functions first
 typeset -f > /dev/null 2>&1
 # Get user function names - filter system/private ones
-typeset +f 2>/dev/null | grep -vE '^(_|__)' | while read func; do
+typeset +f 2>/dev/null | grep -vE '^(_|__)' | grep -vE '${commonToolsRegex}' | while read func; do
    typeset -f "$func" >> "$SNAPSHOT_FILE" 2>/dev/null
 done
 `
@@ -51,7 +52,7 @@ echo "# Functions" >> "$SNAPSHOT_FILE"
 # Force autoload all functions first
 declare -f > /dev/null 2>&1
 # Get user function names - filter system/private ones, use base64 for special chars
-declare -F 2>/dev/null | cut -d' ' -f3 | grep -vE '^(_|__)' | while read func; do
+declare -F 2>/dev/null | cut -d' ' -f3 | grep -vE '^(_|__)' | grep -vE '${commonToolsRegex}' | while read func; do
    encoded_func=$(declare -f "$func" | base64)
    echo "eval \\"\\$(echo '$encoded_func' | base64 -d)\\" > /dev/null 2>&1" >> "$SNAPSHOT_FILE"
 done
@@ -90,9 +91,9 @@ ${optionsScript}
 echo "# Aliases" >> "$SNAPSHOT_FILE"
 # Filter out winpty aliases on Windows to avoid "stdin is not a tty" errors
 if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]]; then
-   alias 2>/dev/null | grep -v "='winpty " | sed 's/^alias //g' | sed 's/^/alias -- /' | head -n 1000 >> "$SNAPSHOT_FILE"
+   alias 2>/dev/null | grep -v "='winpty " | grep -vE '^alias (${commonToolsRegex})=' | sed 's/^alias //g' | sed 's/^/alias -- /' | head -n 1000 >> "$SNAPSHOT_FILE"
 else
-   alias 2>/dev/null | sed 's/^alias //g' | sed 's/^/alias -- /' | head -n 1000 >> "$SNAPSHOT_FILE"
+   alias 2>/dev/null | grep -vE '^alias (${commonToolsRegex})=' | sed 's/^alias //g' | sed 's/^/alias -- /' | head -n 1000 >> "$SNAPSHOT_FILE"
 fi
 
 # Export PATH
@@ -115,7 +116,7 @@ export async function getOrCreateSnapshot(
 	env: Record<string, string | undefined>,
 ): Promise<string | null> {
 	// Return cached snapshot if valid
-	if (cachedSnapshotPath && existsSync(cachedSnapshotPath)) {
+	if (cachedSnapshotPath && (await Bun.file(cachedSnapshotPath).exists())) {
 		return cachedSnapshotPath;
 	}
 
@@ -128,9 +129,8 @@ export async function getOrCreateSnapshot(
 
 	// Create snapshot directory
 	const snapshotDir = join(tmpdir(), "omp-shell-snapshots");
-	try {
-		mkdirSync(snapshotDir, { recursive: true });
-	} catch {
+	const mkdirProc = Bun.spawnSync(["mkdir", "-p", snapshotDir]);
+	if (mkdirProc.exitCode !== 0) {
 		return null;
 	}
 
@@ -141,7 +141,7 @@ export async function getOrCreateSnapshot(
 	const snapshotPath = join(snapshotDir, `snapshot-${shellName}-${timestamp}-${random}.sh`);
 
 	// Generate and execute snapshot script
-	const script = generateSnapshotScript(shell, snapshotPath, rcFile);
+	const script = await generateSnapshotScript(shell, snapshotPath, rcFile);
 
 	try {
 		const result = Bun.spawnSync([shell, "-l", "-c", script], {
@@ -152,7 +152,7 @@ export async function getOrCreateSnapshot(
 			timeout: 10000, // 10 second timeout
 		});
 
-		if (result.exitCode === 0 && existsSync(snapshotPath)) {
+		if (result.exitCode === 0 && (await Bun.file(snapshotPath).exists())) {
 			cachedSnapshotPath = snapshotPath;
 			registerCleanup();
 			return snapshotPath;
@@ -182,17 +182,19 @@ function registerCleanup(): void {
 	if (cleanupRegistered) return;
 	cleanupRegistered = true;
 
-	const cleanup = () => {
-		if (cachedSnapshotPath && existsSync(cachedSnapshotPath)) {
+	const cleanup = async () => {
+		if (cachedSnapshotPath && (await Bun.file(cachedSnapshotPath).exists())) {
 			try {
-				unlinkSync(cachedSnapshotPath);
+				Bun.spawnSync(["rm", cachedSnapshotPath]);
 			} catch {
 				// Ignore cleanup errors
 			}
 		}
 	};
 
-	process.on("exit", cleanup);
+	process.on("exit", () => {
+		cleanup();
+	});
 	process.on("SIGINT", () => {
 		cleanup();
 		process.exit(130);
@@ -206,10 +208,10 @@ function registerCleanup(): void {
 /**
  * Clear the cached snapshot (for testing or forced refresh).
  */
-export function clearSnapshotCache(): void {
-	if (cachedSnapshotPath && existsSync(cachedSnapshotPath)) {
+export async function clearSnapshotCache(): Promise<void> {
+	if (cachedSnapshotPath && (await Bun.file(cachedSnapshotPath).exists())) {
 		try {
-			unlinkSync(cachedSnapshotPath);
+			Bun.spawnSync(["rm", cachedSnapshotPath]);
 		} catch {
 			// Ignore
 		}

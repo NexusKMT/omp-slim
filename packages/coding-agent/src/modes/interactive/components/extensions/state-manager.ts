@@ -4,6 +4,7 @@
  */
 
 import type { ContextFile } from "../../../../capability/context-file";
+import type { ExtensionModule } from "../../../../capability/extension-module";
 import type { Hook } from "../../../../capability/hook";
 import type { MCPServer } from "../../../../capability/mcp";
 import type { Prompt } from "../../../../capability/prompt";
@@ -124,6 +125,15 @@ export function loadAllExtensions(cwd?: string, disabledIds?: string[]): Extensi
 		addItems(tools.all, "tool", {
 			getDescription: (t) => t.description,
 		});
+	} catch {
+		// Capability may not be registered
+	}
+
+	// Load extension modules
+	try {
+		const modules = loadSync<ExtensionModule>("extension-modules", loadOpts);
+		const nativeModules = modules.all.filter((module) => module._source.provider === "native");
+		addItems(nativeModules, "extension-module");
 	} catch {
 		// Capability may not be registered
 	}
@@ -394,6 +404,8 @@ export function applyFilter(extensions: Extension[], query: string): Extension[]
  */
 function getKindDisplayName(kind: ExtensionKind): string {
 	switch (kind) {
+		case "extension-module":
+			return "Extension Modules";
 		case "skill":
 			return "Skills";
 		case "rule":

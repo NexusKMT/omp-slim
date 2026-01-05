@@ -14,27 +14,16 @@ export {
 export { type BashExecutorOptions, type BashResult, executeBash } from "./bash-executor";
 export type { CompactionResult } from "./compaction/index";
 export {
-	type CustomTool,
-	type CustomToolAPI,
-	type CustomToolFactory,
-	type CustomToolsLoadResult,
-	type CustomToolUIContext,
-	discoverAndLoadCustomTools,
-	type ExecResult,
-	type LoadedCustomTool,
-	loadCustomTools,
-	type RenderResultOptions,
-} from "./custom-tools/index";
-export {
-	type HookAPI,
-	type HookContext,
-	type HookError,
-	type HookEvent,
-	type HookFactory,
-	HookRunner,
-	type HookUIContext,
-	loadHooks,
-} from "./hooks/index";
+	discoverAndLoadExtensions,
+	type ExtensionAPI,
+	type ExtensionCommandContext,
+	type ExtensionContext,
+	type ExtensionFactory,
+	ExtensionRunner,
+	type ExtensionUIContext,
+	loadExtensionFromFactory,
+	type ToolDefinition,
+} from "./extensions/index";
 export {
 	createMCPManager,
 	discoverAndLoadMCPTools,

@@ -15,9 +15,8 @@ import { selectSession } from "./cli/session-picker";
 import { parseUpdateArgs, printUpdateHelp, runUpdateCommand } from "./cli/update-cli";
 import { findConfigFile, getModelsPath, VERSION } from "./config";
 import type { AgentSession } from "./core/agent-session";
-import type { LoadedCustomTool } from "./core/custom-tools/index";
 import { exportFromFile } from "./core/export-html/index";
-import type { HookUIContext } from "./core/index";
+import type { ExtensionUIContext } from "./core/index";
 import type { ModelRegistry } from "./core/model-registry";
 import { parseModelPattern, resolveModelScope, type ScopedModel } from "./core/model-resolver";
 import { type CreateAgentSessionOptions, createAgentSession, discoverAuthStorage, discoverModels } from "./core/sdk";
@@ -26,7 +25,7 @@ import { SettingsManager } from "./core/settings-manager";
 import { resolvePromptInput } from "./core/system-prompt";
 import { printTimings, time } from "./core/timings";
 import { allTools } from "./core/tools/index";
-import { runMigrations } from "./migrations";
+import { runMigrations, showDeprecationWarnings } from "./migrations";
 import { InteractiveMode, installTerminalCrashHandlers, runPrintMode, runRpcMode } from "./modes/index";
 import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme";
 import { getChangelogPath, getNewEntries, parseChangelog } from "./utils/changelog";
@@ -59,22 +58,13 @@ async function runInteractiveMode(
 	migratedProviders: string[],
 	versionCheckPromise: Promise<string | undefined>,
 	initialMessages: string[],
-	customTools: LoadedCustomTool[],
-	setToolUIContext: (uiContext: HookUIContext, hasUI: boolean) => void,
+	setExtensionUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void,
 	lspServers: Array<{ name: string; status: "ready" | "error"; fileTypes: string[] }> | undefined,
 	initialMessage?: string,
 	initialImages?: ImageContent[],
 	fdPath: string | undefined = undefined,
 ): Promise<void> {
-	const mode = new InteractiveMode(
-		session,
-		version,
-		changelogMarkdown,
-		customTools,
-		setToolUIContext,
-		lspServers,
-		fdPath,
-	);
+	const mode = new InteractiveMode(session, version, changelogMarkdown, setExtensionUIContext, lspServers, fdPath);
 
 	await mode.init();
 
@@ -127,7 +117,10 @@ async function runInteractiveMode(
 	}
 }
 
-async function prepareInitialMessage(parsed: Args): Promise<{
+async function prepareInitialMessage(
+	parsed: Args,
+	autoResizeImages: boolean,
+): Promise<{
 	initialMessage?: string;
 	initialImages?: ImageContent[];
 }> {
@@ -135,7 +128,7 @@ async function prepareInitialMessage(parsed: Args): Promise<{
 		return {};
 	}
 
-	const { text, images } = await processFileArguments(parsed.fileArgs);
+	const { text, images } = await processFileArguments(parsed.fileArgs, { autoResizeImages });
 
 	let initialMessage: string;
 	if (parsed.messages.length > 0) {
@@ -215,6 +208,7 @@ async function buildSessionOptions(
 	scopedModels: ScopedModel[],
 	sessionManager: SessionManager | undefined,
 	modelRegistry: ModelRegistry,
+	settingsManager: SettingsManager,
 ): Promise<CreateAgentSessionOptions> {
 	const options: CreateAgentSessionOptions = {};
 
@@ -229,7 +223,7 @@ async function buildSessionOptions(
 
 	// Model from CLI (--model) - uses same fuzzy matching as --models
 	if (parsed.model) {
-		const available = await modelRegistry.getAvailable();
+		const available = modelRegistry.getAvailable();
 		const { model, warning } = parseModelPattern(parsed.model, available);
 		if (warning) {
 			console.warn(chalk.yellow(`Warning: ${warning}`));
@@ -276,16 +270,20 @@ async function buildSessionOptions(
 	// Skills
 	if (parsed.noSkills) {
 		options.skills = [];
+	} else if (parsed.skills && parsed.skills.length > 0) {
+		// Override includeSkills in settingsManager for this session
+		settingsManager.applyOverrides({
+			skills: {
+				...settingsManager.getSkillsSettings(),
+				includeSkills: parsed.skills,
+			},
+		});
 	}
 
-	// Additional hook paths from CLI
-	if (parsed.hooks && parsed.hooks.length > 0) {
-		options.additionalHookPaths = parsed.hooks;
-	}
-
-	// Additional custom tool paths from CLI
-	if (parsed.customTools && parsed.customTools.length > 0) {
-		options.additionalCustomToolPaths = parsed.customTools;
+	// Additional extension paths from CLI
+	const cliExtensionPaths = [...(parsed.extensions ?? []), ...(parsed.hooks ?? [])];
+	if (cliExtensionPaths.length > 0) {
+		options.additionalExtensionPaths = cliExtensionPaths;
 	}
 
 	return options;
@@ -320,12 +318,12 @@ export async function main(args: string[]) {
 		return;
 	}
 
-	// Run migrations
-	const { migratedAuthProviders: migratedProviders } = runMigrations();
+	// Run migrations (pass cwd for project-local migrations)
+	const { migratedAuthProviders: migratedProviders, deprecationWarnings } = await runMigrations(process.cwd());
 
 	// Create AuthStorage and ModelRegistry upfront
-	const authStorage = discoverAuthStorage();
-	const modelRegistry = discoverModels(authStorage);
+	const authStorage = await discoverAuthStorage();
+	const modelRegistry = await discoverModels(authStorage);
 	time("discoverModels");
 
 	const parsed = parseArgs(args);
@@ -366,13 +364,12 @@ export async function main(args: string[]) {
 	}
 
 	const cwd = process.cwd();
-	const { initialMessage, initialImages } = await prepareInitialMessage(parsed);
+	const settingsManager = SettingsManager.create(cwd);
+	time("SettingsManager.create");
+	const { initialMessage, initialImages } = await prepareInitialMessage(parsed, settingsManager.getImageAutoResize());
 	time("prepareInitialMessage");
 	const isInteractive = !parsed.print && parsed.mode === undefined;
 	const mode = parsed.mode || "text";
-
-	const settingsManager = SettingsManager.create(cwd);
-	time("SettingsManager.create");
 
 	// Initialize discovery system with settings for provider persistence
 	const { initializeWithSettings } = await import("./discovery");
@@ -391,6 +388,11 @@ export async function main(args: string[]) {
 
 	initTheme(settingsManager.getTheme(), isInteractive, settingsManager.getSymbolPreset());
 	time("initTheme");
+
+	// Show deprecation warnings in interactive mode
+	if (isInteractive && deprecationWarnings.length > 0) {
+		await showDeprecationWarnings(deprecationWarnings);
+	}
 
 	let scopedModels: ScopedModel[] = [];
 	const modelPatterns = parsed.models ?? settingsManager.getEnabledModels();
@@ -420,9 +422,16 @@ export async function main(args: string[]) {
 		sessionManager = await SessionManager.open(selectedPath);
 	}
 
-	const sessionOptions = await buildSessionOptions(parsed, scopedModels, sessionManager, modelRegistry);
+	const sessionOptions = await buildSessionOptions(
+		parsed,
+		scopedModels,
+		sessionManager,
+		modelRegistry,
+		settingsManager,
+	);
 	sessionOptions.authStorage = authStorage;
 	sessionOptions.modelRegistry = modelRegistry;
+	sessionOptions.settingsManager = settingsManager;
 	sessionOptions.hasUI = isInteractive;
 
 	// Handle CLI --api-key as runtime override (not persisted)
@@ -435,8 +444,24 @@ export async function main(args: string[]) {
 	}
 
 	time("buildSessionOptions");
-	const { session, customToolsResult, modelFallbackMessage, lspServers } = await createAgentSession(sessionOptions);
+	const { session, extensionsResult, modelFallbackMessage, lspServers } = await createAgentSession(sessionOptions);
 	time("createAgentSession");
+
+	// Re-parse CLI args with extension flags and apply values
+	if (session.extensionRunner) {
+		const extFlags = session.extensionRunner.getFlags();
+		if (extFlags.size > 0) {
+			const flagDefs = new Map<string, { type: "boolean" | "string" }>();
+			for (const [name, flag] of extFlags) {
+				flagDefs.set(name, { type: flag.type });
+			}
+			const reparsed = parseArgs(args, flagDefs);
+			for (const [name, value] of reparsed.unknownFlags) {
+				session.extensionRunner.setFlagValue(name, value);
+			}
+		}
+	}
+	time("applyExtensionFlags");
 
 	if (!isInteractive && !session.model) {
 		console.error(chalk.red("No models available."));
@@ -489,8 +514,7 @@ export async function main(args: string[]) {
 			migratedProviders,
 			versionCheckPromise,
 			parsed.messages,
-			customToolsResult.tools,
-			customToolsResult.setUIContext,
+			extensionsResult.setUIContext,
 			lspServers,
 			initialMessage,
 			initialImages,

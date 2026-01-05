@@ -209,7 +209,8 @@ agent.abort();
 agent.setModel(newModel);
 agent.setThinkingLevel('medium');
 agent.setTools([...]);
-agent.queueMessage(customMessage);
+agent.steer(customMessage);
+agent.followUp(customMessage);
 ```
 
 ## Message Types

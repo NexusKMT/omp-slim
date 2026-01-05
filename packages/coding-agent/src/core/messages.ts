@@ -35,11 +35,24 @@ export interface BashExecutionMessage {
 	truncated: boolean;
 	fullOutputPath?: string;
 	timestamp: number;
+	/** If true, this message is excluded from LLM context (!! prefix) */
+	excludeFromContext?: boolean;
 }
 
 /**
- * Message type for hook-injected messages via sendMessage().
- * These are custom messages that hooks can inject into the conversation.
+ * Message type for extension-injected messages via sendMessage().
+ */
+export interface CustomMessage<T = unknown> {
+	role: "custom";
+	customType: string;
+	content: string | (TextContent | ImageContent)[];
+	display: boolean;
+	details?: T;
+	timestamp: number;
+}
+
+/**
+ * Legacy hook message type (pre-extensions). Kept for session migration.
  */
 export interface HookMessage<T = unknown> {
 	role: "hookMessage";
@@ -78,9 +91,11 @@ export interface FileMentionMessage {
 }
 
 // Extend CustomAgentMessages via declaration merging
+// Legacy hookMessage is kept for migration; new code should use custom.
 declare module "@oh-my-pi/pi-agent-core" {
 	interface CustomAgentMessages {
 		bashExecution: BashExecutionMessage;
+		custom: CustomMessage;
 		hookMessage: HookMessage;
 		branchSummary: BranchSummaryMessage;
 		compactionSummary: CompactionSummaryMessage;
@@ -125,22 +140,22 @@ export function createCompactionSummaryMessage(
 ): CompactionSummaryMessage {
 	return {
 		role: "compactionSummary",
-		summary: summary,
+		summary,
 		tokensBefore,
 		timestamp: new Date(timestamp).getTime(),
 	};
 }
 
 /** Convert CustomMessageEntry to AgentMessage format */
-export function createHookMessage(
+export function createCustomMessage(
 	customType: string,
 	content: string | (TextContent | ImageContent)[],
 	display: boolean,
 	details: unknown | undefined,
 	timestamp: string,
-): HookMessage {
+): CustomMessage {
 	return {
-		role: "hookMessage",
+		role: "custom",
 		customType,
 		content,
 		display,
@@ -155,18 +170,22 @@ export function createHookMessage(
  * This is used by:
  * - Agent's transormToLlm option (for prompt calls and queued messages)
  * - Compaction's generateSummary (for summarization)
- * - Custom hooks and tools
+ * - Custom extensions and tools
  */
 export function convertToLlm(messages: AgentMessage[]): Message[] {
 	return messages
 		.map((m): Message | undefined => {
 			switch (m.role) {
 				case "bashExecution":
+					if (m.excludeFromContext) {
+						return undefined;
+					}
 					return {
 						role: "user",
 						content: [{ type: "text", text: bashExecutionToText(m) }],
 						timestamp: m.timestamp,
 					};
+				case "custom":
 				case "hookMessage": {
 					const content = typeof m.content === "string" ? [{ type: "text" as const, text: m.content }] : m.content;
 					return {

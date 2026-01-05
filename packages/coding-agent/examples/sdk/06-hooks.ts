@@ -2,12 +2,13 @@
  * Hooks Configuration
  *
  * Hooks intercept agent events for logging, blocking, or modification.
+ * Note: "hooks" is now called "extensions" in the API.
  */
 
-import { createAgentSession, type HookFactory, SessionManager } from "@oh-my-pi/pi-coding-agent";
+import { createAgentSession, type ExtensionFactory, SessionManager } from "@oh-my-pi/pi-coding-agent";
 
-// Logging hook
-const loggingHook: HookFactory = (api) => {
+// Logging hook (now called extension)
+const loggingHook: ExtensionFactory = (api) => {
 	api.on("agent_start", async () => {
 		console.log("[Hook] Agent starting");
 	});
@@ -22,8 +23,8 @@ const loggingHook: HookFactory = (api) => {
 	});
 };
 
-// Blocking hook (returns { block: true, reason: "..." })
-const safetyHook: HookFactory = (api) => {
+// Blocking extension (returns { block: true, reason: "..." })
+const safetyHook: ExtensionFactory = (api) => {
 	api.on("tool_call", async (event) => {
 		if (event.toolName === "bash") {
 			const cmd = (event.input as { command?: string }).command ?? "";
@@ -35,9 +36,9 @@ const safetyHook: HookFactory = (api) => {
 	});
 };
 
-// Use inline hooks
+// Use inline extensions (hooks is now extensions)
 const { session } = await createAgentSession({
-	hooks: [{ factory: loggingHook }, { factory: safetyHook }],
+	extensions: [loggingHook, safetyHook],
 	sessionManager: SessionManager.inMemory(),
 });
 
@@ -50,12 +51,12 @@ session.subscribe((event) => {
 await session.prompt("List files in the current directory.");
 console.log();
 
-// Disable all hooks:
-// hooks: []
+// Disable all extensions:
+// extensions: []
 
-// Merge with discovered hooks:
-// const discovered = await discoverHooks();
-// hooks: [...discovered, { factory: myHook }]
+// Merge with discovered extensions:
+// const discovered = await discoverExtensions();
+// extensions: [...discovered.extensions.map(e => e.factory), myHook]
 
 // Add paths without replacing discovery:
-// additionalHookPaths: ["/extra/hooks"]
+// additionalExtensionPaths: ["/extra/extensions"]

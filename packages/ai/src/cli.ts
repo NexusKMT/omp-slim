@@ -6,6 +6,7 @@ import { loginGitHubCopilot } from "./utils/oauth/github-copilot";
 import { loginAntigravity } from "./utils/oauth/google-antigravity";
 import { loginGeminiCli } from "./utils/oauth/google-gemini-cli";
 import { getOAuthProviders } from "./utils/oauth/index";
+import { loginOpenAICodex } from "./utils/oauth/openai-codex";
 import type { OAuthCredentials, OAuthProvider } from "./utils/oauth/types";
 
 const AUTH_FILE = "auth.json";
@@ -89,6 +90,19 @@ async function login(provider: OAuthProvider): Promise<void> {
 				(msg) => console.log(msg),
 			);
 			break;
+		case "openai-codex":
+			credentials = await loginOpenAICodex({
+				onAuth: (info) => {
+					console.log(`\nOpen this URL in your browser:\n${info.url}`);
+					if (info.instructions) console.log(info.instructions);
+					console.log();
+				},
+				onPrompt: async (p) => {
+					return await promptFn(`${p.message}${p.placeholder ? ` (${p.placeholder})` : ""}:`);
+				},
+				onProgress: (msg) => console.log(msg),
+			});
+			break;
 	}
 
 	const auth = await loadAuth();
@@ -114,6 +128,7 @@ Providers:
   github-copilot    GitHub Copilot
   google-gemini-cli Google Gemini CLI
   google-antigravity Antigravity (Gemini 3, Claude, GPT-OSS)
+  openai-codex      OpenAI Codex (ChatGPT Plus/Pro)
 
 Examples:
   npx @oh-my-pi/pi-ai login              # interactive provider selection
@@ -141,7 +156,7 @@ Examples:
 			}
 			console.log();
 
-			const choice = await prompt("Enter number (1-4): ");
+			const choice = await prompt(`Enter number (1-${PROVIDERS.length}): `);
 
 			const index = parseInt(choice, 10) - 1;
 			if (index < 0 || index >= PROVIDERS.length) {

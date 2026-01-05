@@ -60,6 +60,8 @@ export type {
 	RenderResultOptions,
 } from "./core/custom-tools/index";
 export { discoverAndLoadCustomTools, loadCustomTools } from "./core/custom-tools/index";
+// Extension types
+export type { ExtensionAPI, ExtensionContext, ExtensionFactory } from "./core/extensions/types";
 export type * from "./core/hooks/index";
 // Hook system types and type guards
 export {
@@ -75,6 +77,8 @@ export {
 export { type Logger, logger } from "./core/logger";
 export { convertToLlm } from "./core/messages";
 export { ModelRegistry } from "./core/model-registry";
+// Prompt templates
+export type { PromptTemplate } from "./core/prompt-templates";
 // SDK for programmatic usage
 export {
 	type BuildSystemPromptOptions,
@@ -96,16 +100,12 @@ export {
 	// Discovery
 	discoverAuthStorage,
 	discoverContextFiles,
-	discoverCustomTools,
-	discoverHooks,
+	discoverCustomTSCommands,
+	discoverExtensions,
+	discoverMCPServers,
 	discoverModels,
+	discoverPromptTemplates,
 	discoverSkills,
-	discoverSlashCommands,
-	type FileSlashCommand,
-	// Hook types
-	type HookAPI,
-	type HookContext,
-	type HookFactory,
 	loadSettings,
 	// Pre-built tools (use process.cwd())
 	readOnlyTools,
@@ -134,6 +134,7 @@ export {
 } from "./core/session-manager";
 export {
 	type CompactionSettings,
+	type ImageSettings,
 	type LspSettings,
 	type RetrySettings,
 	type Settings,
@@ -151,6 +152,8 @@ export {
 	type SkillFrontmatter,
 	type SkillWarning,
 } from "./core/skills";
+// Slash commands
+export { type FileSlashCommand, loadSlashCommands as discoverSlashCommands } from "./core/slash-commands";
 // Tools
 export {
 	type BashToolDetails,
@@ -179,7 +182,7 @@ export { main } from "./main";
 // UI components for hooks and custom tools
 export { BorderedLoader } from "./modes/interactive/components/bordered-loader";
 // Theme utilities for custom tools
-export { getMarkdownTheme } from "./modes/interactive/theme/theme";
+export { getMarkdownTheme, getSettingsListTheme, type Theme } from "./modes/interactive/theme/theme";
 
 // TypeBox helper for string enums (convenience for custom tools)
 import { type TSchema, Type } from "@sinclair/typebox";

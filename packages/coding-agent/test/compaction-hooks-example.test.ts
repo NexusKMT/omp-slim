@@ -2,7 +2,7 @@
  * Verify the documentation example from hooks.md compiles and works.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import type { HookAPI, SessionBeforeCompactEvent, SessionCompactEvent } from "../src/core/hooks/index";
 
 describe("Documentation example", () => {
@@ -52,12 +52,12 @@ describe("Documentation example", () => {
 			pi.on("session_compact", async (event: SessionCompactEvent) => {
 				// These should all be accessible
 				const entry = event.compactionEntry;
-				const fromHook = event.fromHook;
+				const fromExtension = event.fromExtension;
 
 				expect(entry.type).toBe("compaction");
 				expect(typeof entry.summary).toBe("string");
 				expect(typeof entry.tokensBefore).toBe("number");
-				expect(typeof fromHook).toBe("boolean");
+				expect(typeof fromExtension).toBe("boolean");
 			});
 		};
 

@@ -13,9 +13,11 @@ import type { ModelRegistry } from "./model-registry";
 export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	anthropic: "claude-sonnet-4-5",
 	openai: "gpt-5.1-codex",
+	"openai-codex": "codex-max",
 	google: "gemini-2.5-pro",
 	"google-gemini-cli": "gemini-2.5-pro",
 	"google-antigravity": "gemini-3-pro-high",
+	"google-vertex": "gemini-2.5-pro",
 	"github-copilot": "gpt-4o",
 	openrouter: "openai/gpt-5.1-codex",
 	xai: "grok-4-fast-non-reasoning",
@@ -192,7 +194,7 @@ export function parseModelPattern(pattern: string, availableModels: Model<Api>[]
  * strips colon-suffixes to find a match.
  */
 export async function resolveModelScope(patterns: string[], modelRegistry: ModelRegistry): Promise<ScopedModel[]> {
-	const availableModels = await modelRegistry.getAvailable();
+	const availableModels = modelRegistry.getAvailable();
 	const scopedModels: ScopedModel[] = [];
 
 	for (const pattern of patterns) {
@@ -321,7 +323,7 @@ export async function findInitialModel(options: {
 	}
 
 	// 4. Try first available model with valid API key
-	const availableModels = await modelRegistry.getAvailable();
+	const availableModels = modelRegistry.getAvailable();
 
 	if (availableModels.length > 0) {
 		// Try to find a default model from known providers
@@ -382,7 +384,7 @@ export async function restoreModelFromSession(
 	}
 
 	// Try to find any available model
-	const availableModels = await modelRegistry.getAvailable();
+	const availableModels = modelRegistry.getAvailable();
 
 	if (availableModels.length > 0) {
 		// Try to find a default model from known providers
@@ -427,7 +429,7 @@ export async function findSmolModel(
 	modelRegistry: ModelRegistry,
 	savedModel?: string,
 ): Promise<Model<Api> | undefined> {
-	const availableModels = await modelRegistry.getAvailable();
+	const availableModels = modelRegistry.getAvailable();
 	if (availableModels.length === 0) return undefined;
 
 	// 1. Try saved model from settings
@@ -466,7 +468,7 @@ export async function findSlowModel(
 	modelRegistry: ModelRegistry,
 	savedModel?: string,
 ): Promise<Model<Api> | undefined> {
-	const availableModels = await modelRegistry.getAvailable();
+	const availableModels = modelRegistry.getAvailable();
 	if (availableModels.length === 0) return undefined;
 
 	// 1. Try saved model from settings

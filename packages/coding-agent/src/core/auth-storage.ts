@@ -3,7 +3,7 @@
  * Handles loading, saving, and refreshing credentials from auth.json.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
 	getEnvApiKey,
@@ -12,6 +12,7 @@ import {
 	loginAntigravity,
 	loginGeminiCli,
 	loginGitHubCopilot,
+	loginOpenAICodex,
 	type OAuthCredentials,
 	type OAuthProvider,
 } from "@oh-my-pi/pi-ai";
@@ -46,9 +47,7 @@ export class AuthStorage {
 	constructor(
 		private authPath: string,
 		private fallbackPaths: string[] = [],
-	) {
-		this.reload();
-	}
+	) {}
 
 	/**
 	 * Set a runtime API key override (not persisted to disk).
@@ -77,7 +76,7 @@ export class AuthStorage {
 	 * Reload credentials from disk.
 	 * Checks primary path first, then fallback paths.
 	 */
-	reload(): void {
+	async reload(): Promise<void> {
 		const pathsToCheck = [this.authPath, ...this.fallbackPaths];
 
 		logger.debug("AuthStorage.reload checking paths", { paths: pathsToCheck });
@@ -105,13 +104,11 @@ export class AuthStorage {
 	/**
 	 * Save credentials to disk.
 	 */
-	private save(): void {
-		const dir = dirname(this.authPath);
-		if (!existsSync(dir)) {
-			mkdirSync(dir, { recursive: true, mode: 0o700 });
-		}
-		Bun.write(this.authPath, JSON.stringify(this.data, null, 2));
+	private async save(): Promise<void> {
+		writeFileSync(this.authPath, JSON.stringify(this.data, null, 2));
 		chmodSync(this.authPath, 0o600);
+		const dir = dirname(this.authPath);
+		chmodSync(dir, 0o700);
 	}
 
 	/**
@@ -124,17 +121,17 @@ export class AuthStorage {
 	/**
 	 * Set credential for a provider.
 	 */
-	set(provider: string, credential: AuthCredential): void {
+	async set(provider: string, credential: AuthCredential): Promise<void> {
 		this.data[provider] = credential;
-		this.save();
+		await this.save();
 	}
 
 	/**
 	 * Remove credential for a provider.
 	 */
-	remove(provider: string): void {
+	async remove(provider: string): Promise<void> {
 		delete this.data[provider];
-		this.save();
+		await this.save();
 	}
 
 	/**
@@ -145,10 +142,22 @@ export class AuthStorage {
 	}
 
 	/**
-	 * Check if credentials exist for a provider.
+	 * Check if credentials exist for a provider in auth.json.
 	 */
 	has(provider: string): boolean {
 		return provider in this.data;
+	}
+
+	/**
+	 * Check if any form of auth is configured for a provider.
+	 * Unlike getApiKey(), this doesn't refresh OAuth tokens.
+	 */
+	hasAuth(provider: string): boolean {
+		if (this.runtimeOverrides.has(provider)) return true;
+		if (this.data[provider]) return true;
+		if (getEnvApiKey(provider)) return true;
+		if (this.fallbackResolver?.(provider)) return true;
+		return false;
 	}
 
 	/**
@@ -191,18 +200,21 @@ export class AuthStorage {
 			case "google-antigravity":
 				credentials = await loginAntigravity(callbacks.onAuth, callbacks.onProgress);
 				break;
+			case "openai-codex":
+				credentials = await loginOpenAICodex(callbacks);
+				break;
 			default:
 				throw new Error(`Unknown OAuth provider: ${provider}`);
 		}
 
-		this.set(provider, { type: "oauth", ...credentials });
+		await this.set(provider, { type: "oauth", ...credentials });
 	}
 
 	/**
 	 * Logout from a provider.
 	 */
-	logout(provider: string): void {
-		this.remove(provider);
+	async logout(provider: string): Promise<void> {
+		await this.remove(provider);
 	}
 
 	/**
@@ -240,11 +252,11 @@ export class AuthStorage {
 				const result = await getOAuthApiKey(provider as OAuthProvider, oauthCreds);
 				if (result) {
 					this.data[provider] = { type: "oauth", ...result.newCredentials };
-					this.save();
+					await this.save();
 					return result.apiKey;
 				}
 			} catch {
-				this.remove(provider);
+				await this.remove(provider);
 			}
 		}
 

@@ -324,7 +324,7 @@ export class AgentInterface extends LitElement {
 			if (this.onBeforeSend) {
 				await this.onBeforeSend();
 			}
-			session.queueMessage({ role: "user", content: text, timestamp: Date.now() });
+			session.steer({ role: "user", content: text, timestamp: Date.now() });
 			return;
 		}
 

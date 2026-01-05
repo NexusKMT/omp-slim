@@ -2,7 +2,7 @@
  * Shared helpers for discovery providers.
  */
 
-import { join, resolve } from "node:path";
+import { join, resolve } from "path";
 import { parse as parseYAML } from "yaml";
 import type { LoadContext, LoadResult, SourceMeta } from "../capability/types";
 
@@ -246,4 +246,103 @@ export function parseJSON<T>(content: string): T | null {
  */
 export function calculateDepth(cwd: string, targetDir: string, separator: string): number {
 	return cwd.split(separator).length - targetDir.split(separator).length;
+}
+
+interface ExtensionModuleManifest {
+	extensions?: string[];
+}
+
+function readExtensionModuleManifest(ctx: LoadContext, packageJsonPath: string): ExtensionModuleManifest | null {
+	const content = ctx.fs.readFile(packageJsonPath);
+	if (!content) return null;
+
+	const pkg = parseJSON<{ omp?: ExtensionModuleManifest; pi?: ExtensionModuleManifest }>(content);
+	const manifest = pkg?.omp ?? pkg?.pi;
+	if (manifest && typeof manifest === "object") {
+		return manifest;
+	}
+	return null;
+}
+
+function isExtensionModuleFile(name: string): boolean {
+	return name.endsWith(".ts") || name.endsWith(".js");
+}
+
+/**
+ * Discover extension module entry points in a directory.
+ *
+ * Discovery rules:
+ * 1. Direct files: `extensions/*.ts` or `*.js` → load
+ * 2. Subdirectory with index: `extensions/<ext>/index.ts` or `index.js` → load
+ * 3. Subdirectory with package.json: `extensions/<ext>/package.json` with "omp"/"pi" field → load declared paths
+ *
+ * No recursion beyond one level. Complex packages must use package.json manifest.
+ */
+export function discoverExtensionModulePaths(ctx: LoadContext, dir: string): string[] {
+	if (!ctx.fs.isDir(dir)) {
+		return [];
+	}
+
+	const discovered: string[] = [];
+
+	for (const name of ctx.fs.readDir(dir)) {
+		if (name.startsWith(".")) continue;
+
+		const entryPath = join(dir, name);
+
+		// 1. Direct files: *.ts or *.js
+		if (ctx.fs.isFile(entryPath) && isExtensionModuleFile(name)) {
+			discovered.push(entryPath);
+			continue;
+		}
+
+		// 2 & 3. Subdirectories
+		if (ctx.fs.isDir(entryPath)) {
+			// Check for package.json with "omp"/"pi" field first
+			const packageJsonPath = join(entryPath, "package.json");
+			if (ctx.fs.isFile(packageJsonPath)) {
+				const manifest = readExtensionModuleManifest(ctx, packageJsonPath);
+				if (manifest?.extensions && Array.isArray(manifest.extensions)) {
+					for (const extPath of manifest.extensions) {
+						const resolvedExtPath = resolve(entryPath, extPath);
+						if (ctx.fs.isFile(resolvedExtPath)) {
+							discovered.push(resolvedExtPath);
+						}
+					}
+					continue;
+				}
+			}
+
+			// Check for index.ts or index.js
+			const indexTs = join(entryPath, "index.ts");
+			const indexJs = join(entryPath, "index.js");
+			if (ctx.fs.isFile(indexTs)) {
+				discovered.push(indexTs);
+			} else if (ctx.fs.isFile(indexJs)) {
+				discovered.push(indexJs);
+			}
+		}
+	}
+
+	return discovered;
+}
+
+/**
+ * Derive a stable extension name from a path.
+ */
+export function getExtensionNameFromPath(extensionPath: string): string {
+	const base = extensionPath.replace(/\\/g, "/").split("/").pop() ?? extensionPath;
+
+	if (base === "index.ts" || base === "index.js") {
+		const parts = extensionPath.replace(/\\/g, "/").split("/");
+		const parent = parts[parts.length - 2];
+		return parent ?? base;
+	}
+
+	const dot = base.lastIndexOf(".");
+	if (dot > 0) {
+		return base.slice(0, dot);
+	}
+
+	return base;
 }

@@ -8,8 +8,8 @@ import { getModel } from "@oh-my-pi/pi-ai";
 import { createAgentSession, discoverAuthStorage, discoverModels } from "@oh-my-pi/pi-coding-agent";
 
 // Set up auth storage and model registry
-const authStorage = discoverAuthStorage();
-const modelRegistry = discoverModels(authStorage);
+const authStorage = await discoverAuthStorage();
+const modelRegistry = await discoverModels(authStorage);
 
 // Option 1: Find a specific built-in model by provider/id
 const opus = getModel("anthropic", "claude-opus-4-5");
@@ -24,7 +24,7 @@ if (customModel) {
 }
 
 // Option 3: Pick from available models (have valid API keys)
-const available = await modelRegistry.getAvailable();
+const available = modelRegistry.getAvailable();
 console.log(
 	"Available models:",
 	available.map((m) => `${m.provider}/${m.id}`),

@@ -11,7 +11,7 @@ import { complete, completeSimple } from "@oh-my-pi/pi-ai";
 import compactionSummaryPrompt from "../../prompts/compaction-summary.md" with { type: "text" };
 import compactionTurnPrefixPrompt from "../../prompts/compaction-turn-prefix.md" with { type: "text" };
 import compactionUpdateSummaryPrompt from "../../prompts/compaction-update-summary.md" with { type: "text" };
-import { convertToLlm, createBranchSummaryMessage, createHookMessage } from "../messages";
+import { convertToLlm, createBranchSummaryMessage, createCustomMessage } from "../messages";
 import type { CompactionEntry, SessionEntry } from "../session-manager";
 import {
 	computeFileLists,
@@ -46,7 +46,7 @@ function extractFileOperations(
 	// Collect from previous compaction's details (if pi-generated)
 	if (prevCompactionIndex >= 0) {
 		const prevCompaction = entries[prevCompactionIndex] as CompactionEntry;
-		if (!prevCompaction.fromHook && prevCompaction.details) {
+		if (!prevCompaction.fromExtension && prevCompaction.details) {
 			const details = prevCompaction.details as CompactionDetails;
 			if (Array.isArray(details.readFiles)) {
 				for (const f of details.readFiles) fileOps.read.add(f);
@@ -78,7 +78,7 @@ function getMessageFromEntry(entry: SessionEntry): AgentMessage | undefined {
 		return entry.message;
 	}
 	if (entry.type === "custom_message") {
-		return createHookMessage(entry.customType, entry.content, entry.display, entry.details, entry.timestamp);
+		return createCustomMessage(entry.customType, entry.content, entry.display, entry.details, entry.timestamp);
 	}
 	if (entry.type === "branch_summary") {
 		return createBranchSummaryMessage(entry.summary, entry.fromId, entry.timestamp);

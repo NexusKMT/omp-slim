@@ -21,7 +21,7 @@ export {
 } from "./lsp/index";
 export { createNotebookTool, type NotebookToolDetails, notebookTool } from "./notebook";
 export { createOutputTool, type OutputToolDetails, outputTool } from "./output";
-export { createReadTool, type ReadToolDetails, readTool } from "./read";
+export { createReadTool, type ReadToolDetails, type ReadToolOptions, readTool } from "./read";
 export { createReportFindingTool, createSubmitReviewTool, reportFindingTool, submitReviewTool } from "./review";
 export {
 	createRulebookTool,
@@ -89,17 +89,22 @@ export interface CodingToolsOptions {
 	lspFormatOnWrite?: boolean;
 	/** Whether to accept high-confidence fuzzy matches in edit tool (default: true) */
 	editFuzzyMatch?: boolean;
+	/** Whether to auto-resize images to 2000x2000 max in read tool (default: true) */
+	readAutoResizeImages?: boolean;
 	/** Set of tool names available to the agent (for cross-tool awareness) */
 	availableTools?: Set<string>;
 }
 
 // Factory function type
-type ToolFactory = (cwd: string, sessionContext?: SessionContext, options?: CodingToolsOptions) => Tool;
+type ToolFactory = (cwd: string, sessionContext?: SessionContext, options?: CodingToolsOptions) => Tool | Promise<Tool>;
 
 // Tool definitions: static tools and their factory functions
 const toolDefs: Record<string, { tool: Tool; create: ToolFactory }> = {
 	ask: { tool: askTool, create: createAskTool },
-	read: { tool: readTool, create: createReadTool },
+	read: {
+		tool: readTool,
+		create: (cwd, _ctx, options) => createReadTool(cwd, { autoResizeImages: options?.readAutoResizeImages ?? true }),
+	},
 	bash: { tool: bashTool, create: createBashTool },
 	edit: {
 		tool: editTool,
@@ -145,7 +150,7 @@ export type ToolName = keyof typeof toolDefs;
 const uiToolNames: ToolName[] = ["ask"];
 
 // Tool sets defined by name (base sets, without UI-only tools)
-const baseCodingToolNames: ToolName[] = [
+export const baseCodingToolNames: ToolName[] = [
 	"read",
 	"bash",
 	"edit",
@@ -182,15 +187,15 @@ export const allTools = Object.fromEntries(Object.entries(toolDefs).map(([name, 
  * @param sessionContext - Optional session context for tools that need it
  * @param options - Options for tool configuration
  */
-export function createCodingTools(
+export async function createCodingTools(
 	cwd: string,
 	hasUI = false,
 	sessionContext?: SessionContext,
 	options?: CodingToolsOptions,
-): Tool[] {
+): Promise<Tool[]> {
 	const names = hasUI ? [...baseCodingToolNames, ...uiToolNames] : baseCodingToolNames;
 	const optionsWithTools = { ...options, availableTools: new Set(names) };
-	return names.map((name) => toolDefs[name].create(cwd, sessionContext, optionsWithTools));
+	return Promise.all(names.map((name) => toolDefs[name].create(cwd, sessionContext, optionsWithTools)));
 }
 
 /**
@@ -200,15 +205,15 @@ export function createCodingTools(
  * @param sessionContext - Optional session context for tools that need it
  * @param options - Options for tool configuration
  */
-export function createReadOnlyTools(
+export async function createReadOnlyTools(
 	cwd: string,
 	hasUI = false,
 	sessionContext?: SessionContext,
 	options?: CodingToolsOptions,
-): Tool[] {
+): Promise<Tool[]> {
 	const names = hasUI ? [...baseReadOnlyToolNames, ...uiToolNames] : baseReadOnlyToolNames;
 	const optionsWithTools = { ...options, availableTools: new Set(names) };
-	return names.map((name) => toolDefs[name].create(cwd, sessionContext, optionsWithTools));
+	return Promise.all(names.map((name) => toolDefs[name].create(cwd, sessionContext, optionsWithTools)));
 }
 
 /**
@@ -217,16 +222,20 @@ export function createReadOnlyTools(
  * @param sessionContext - Optional session context for tools that need it
  * @param options - Options for tool configuration
  */
-export function createAllTools(
+export async function createAllTools(
 	cwd: string,
 	sessionContext?: SessionContext,
 	options?: CodingToolsOptions,
-): Record<ToolName, Tool> {
+): Promise<Record<ToolName, Tool>> {
 	const names = Object.keys(toolDefs);
 	const optionsWithTools = { ...options, availableTools: new Set(names) };
-	return Object.fromEntries(
-		Object.entries(toolDefs).map(([name, def]) => [name, def.create(cwd, sessionContext, optionsWithTools)]),
-	) as Record<ToolName, Tool>;
+	const entries = await Promise.all(
+		Object.entries(toolDefs).map(async ([name, def]) => [
+			name,
+			await def.create(cwd, sessionContext, optionsWithTools),
+		]),
+	);
+	return Object.fromEntries(entries) as Record<ToolName, Tool>;
 }
 
 /**

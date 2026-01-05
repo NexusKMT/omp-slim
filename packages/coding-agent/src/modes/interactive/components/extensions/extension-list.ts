@@ -230,6 +230,8 @@ export class ExtensionList implements Component {
 
 	private getKindIcon(kind: ExtensionKind): string {
 		switch (kind) {
+			case "extension-module":
+				return theme.icon.extensionTool;
 			case "skill":
 				return theme.icon.extensionSkill;
 			case "tool":
@@ -316,6 +318,7 @@ export class ExtensionList implements Component {
 		}
 
 		const kindOrder: ExtensionKind[] = [
+			"extension-module",
 			"skill",
 			"tool",
 			"slash-command",
@@ -347,6 +350,8 @@ export class ExtensionList implements Component {
 
 	private getKindLabel(kind: ExtensionKind): string {
 		switch (kind) {
+			case "extension-module":
+				return "Extension Modules";
 			case "skill":
 				return "Skills";
 			case "tool":

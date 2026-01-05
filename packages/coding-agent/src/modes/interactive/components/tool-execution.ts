@@ -1,4 +1,5 @@
-import * as os from "node:os";
+import { homedir } from "node:os";
+import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import {
 	Box,
 	Container,
@@ -11,10 +12,10 @@ import {
 	type TUI,
 } from "@oh-my-pi/pi-tui";
 import stripAnsi from "strip-ansi";
-import type { CustomTool } from "../../../core/custom-tools/types";
 import { computeEditDiff, type EditDiffError, type EditDiffResult } from "../../../core/tools/edit-diff";
 import { toolRenderers } from "../../../core/tools/renderers";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "../../../core/tools/truncate";
+import { convertToPng } from "../../../utils/image-convert";
 import { sanitizeBinaryOutput } from "../../../utils/shell";
 import { getLanguageFromPath, highlightCode, theme } from "../theme/theme";
 import { renderDiff } from "./diff";
@@ -312,8 +313,8 @@ function formatArgsPreview(
  * Convert absolute path to tilde notation if it's in home directory
  */
 function shortenPath(path: string): string {
-	const home = os.homedir();
-	if (path.startsWith(home)) {
+	const home = homedir();
+	if (home && path.startsWith(home)) {
 		return `~${path.slice(home.length)}`;
 	}
 	return path;
@@ -343,7 +344,7 @@ export class ToolExecutionComponent extends Container {
 	private expanded = false;
 	private showImages: boolean;
 	private isPartial = true;
-	private customTool?: CustomTool;
+	private tool?: AgentTool;
 	private ui: TUI;
 	private cwd: string;
 	private result?: {
@@ -354,6 +355,8 @@ export class ToolExecutionComponent extends Container {
 	// Cached edit diff preview (computed when args arrive, before tool executes)
 	private editDiffPreview?: EditDiffResult | EditDiffError;
 	private editDiffArgsKey?: string; // Track which args the preview is for
+	// Cached converted images for Kitty protocol (which requires PNG), keyed by index
+	private convertedImages: Map<number, { data: string; mimeType: string }> = new Map();
 	// Spinner animation for partial task results
 	private spinnerFrame = 0;
 	private spinnerInterval: ReturnType<typeof setInterval> | null = null;
@@ -362,7 +365,7 @@ export class ToolExecutionComponent extends Container {
 		toolName: string,
 		args: any,
 		options: ToolExecutionOptions = {},
-		customTool: CustomTool | undefined,
+		tool: AgentTool | undefined,
 		ui: TUI,
 		cwd: string = process.cwd(),
 	) {
@@ -370,7 +373,7 @@ export class ToolExecutionComponent extends Container {
 		this.toolName = toolName;
 		this.args = args;
 		this.showImages = options.showImages ?? true;
-		this.customTool = customTool;
+		this.tool = tool;
 		this.ui = ui;
 		this.cwd = cwd;
 
@@ -382,7 +385,8 @@ export class ToolExecutionComponent extends Container {
 
 		// Use Box for custom tools, bash, or built-in tools that have renderers
 		const hasRenderer = toolName in toolRenderers;
-		if (customTool || toolName === "bash" || hasRenderer) {
+		const hasCustomRenderer = !!(tool?.renderCall || tool?.renderResult);
+		if (hasCustomRenderer || toolName === "bash" || hasRenderer) {
 			this.addChild(this.contentBox);
 		} else {
 			this.addChild(this.contentText);
@@ -449,6 +453,39 @@ export class ToolExecutionComponent extends Container {
 		this.isPartial = isPartial;
 		this.updateSpinnerAnimation();
 		this.updateDisplay();
+		// Convert non-PNG images to PNG for Kitty protocol (async)
+		this.maybeConvertImagesForKitty();
+	}
+
+	/**
+	 * Convert non-PNG images to PNG for Kitty graphics protocol.
+	 * Kitty requires PNG format (f=100), so JPEG/GIF/WebP won't display.
+	 */
+	private maybeConvertImagesForKitty(): void {
+		const caps = getCapabilities();
+		// Only needed for Kitty protocol
+		if (caps.images !== "kitty") return;
+		if (!this.result) return;
+
+		const imageBlocks = this.result.content?.filter((c: any) => c.type === "image") || [];
+
+		for (let i = 0; i < imageBlocks.length; i++) {
+			const img = imageBlocks[i];
+			if (!img.data || !img.mimeType) continue;
+			// Skip if already PNG or already converted
+			if (img.mimeType === "image/png") continue;
+			if (this.convertedImages.has(i)) continue;
+
+			// Convert async
+			const index = i;
+			convertToPng(img.data, img.mimeType).then((converted) => {
+				if (converted) {
+					this.convertedImages.set(index, converted);
+					this.updateDisplay();
+					this.ui.requestRender();
+				}
+			});
+		}
 	}
 
 	/**
@@ -499,17 +536,23 @@ export class ToolExecutionComponent extends Container {
 				: (text: string) => theme.bg("toolSuccessBg", text);
 
 		// Check for custom tool rendering
-		if (this.customTool) {
+		if (this.tool && (this.tool.renderCall || this.tool.renderResult)) {
+			const tool = this.tool;
 			// Custom tools use Box for flexible component rendering
 			this.contentBox.setBgFn(bgFn);
 			this.contentBox.clear();
 
 			// Render call component
-			if (this.customTool.renderCall) {
+			if (tool.renderCall) {
 				try {
-					const callComponent = this.customTool.renderCall(this.args, theme);
+					const callComponent = tool.renderCall(this.args, theme);
 					if (callComponent) {
-						this.contentBox.addChild(callComponent);
+						// Ensure component has invalidate() method for Component interface
+						const component = callComponent as any;
+						if (!component.invalidate) {
+							component.invalidate = () => {};
+						}
+						this.contentBox.addChild(component);
 					}
 				} catch {
 					// Fall back to default on error
@@ -521,15 +564,20 @@ export class ToolExecutionComponent extends Container {
 			}
 
 			// Render result component if we have a result
-			if (this.result && this.customTool.renderResult) {
+			if (this.result && tool.renderResult) {
 				try {
-					const resultComponent = this.customTool.renderResult(
+					const resultComponent = tool.renderResult(
 						{ content: this.result.content as any, details: this.result.details },
 						{ expanded: this.expanded, isPartial: this.isPartial, spinnerFrame: this.spinnerFrame },
 						theme,
 					);
 					if (resultComponent) {
-						this.contentBox.addChild(resultComponent);
+						// Ensure component has invalidate() method for Component interface
+						const component = resultComponent as any;
+						if (!component.invalidate) {
+							component.invalidate = () => {};
+						}
+						this.contentBox.addChild(component);
 					}
 				} catch {
 					// Fall back to showing raw output on error
@@ -560,7 +608,12 @@ export class ToolExecutionComponent extends Container {
 			try {
 				const callComponent = renderer.renderCall(this.args, theme);
 				if (callComponent) {
-					this.contentBox.addChild(callComponent);
+					// Ensure component has invalidate() method for Component interface
+					const component = callComponent as any;
+					if (!component.invalidate) {
+						component.invalidate = () => {};
+					}
+					this.contentBox.addChild(component);
 				}
 			} catch {
 				// Fall back to default on error
@@ -576,7 +629,12 @@ export class ToolExecutionComponent extends Container {
 						theme,
 					);
 					if (resultComponent) {
-						this.contentBox.addChild(resultComponent);
+						// Ensure component has invalidate() method for Component interface
+						const component = resultComponent as any;
+						if (!component.invalidate) {
+							component.invalidate = () => {};
+						}
+						this.contentBox.addChild(component);
 					}
 				} catch {
 					// Fall back to showing raw output on error
@@ -606,14 +664,25 @@ export class ToolExecutionComponent extends Container {
 			const imageBlocks = this.result.content?.filter((c: any) => c.type === "image") || [];
 			const caps = getCapabilities();
 
-			for (const img of imageBlocks) {
+			for (let i = 0; i < imageBlocks.length; i++) {
+				const img = imageBlocks[i];
 				if (caps.images && this.showImages && img.data && img.mimeType) {
+					// Use converted PNG for Kitty protocol if available
+					const converted = this.convertedImages.get(i);
+					const imageData = converted?.data ?? img.data;
+					const imageMimeType = converted?.mimeType ?? img.mimeType;
+
+					// For Kitty, skip non-PNG images that haven't been converted yet
+					if (caps.images === "kitty" && imageMimeType !== "image/png") {
+						continue;
+					}
+
 					const spacer = new Spacer(1);
 					this.addChild(spacer);
 					this.imageSpacers.push(spacer);
 					const imageComponent = new Image(
-						img.data,
-						img.mimeType,
+						imageData,
+						imageMimeType,
 						{ fallbackColor: (s: string) => theme.fg("toolOutput", s) },
 						{ maxWidthCells: 60 },
 					);

@@ -4,22 +4,28 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import chalk from "chalk";
 import { getAgentDir } from "./config";
 
 /**
  * Migrate PI_* environment variables to OMP_* equivalents.
  * If PI_XX is set and OMP_XX is not, set OMP_XX to PI_XX's value.
  * This provides backwards compatibility for users with existing PI_* env vars.
+ *
+ * @returns Array of PI_* env var names that were migrated
  */
-export function migrateEnvVars(): void {
+export function migrateEnvVars(): string[] {
+	const migrated: string[] = [];
 	for (const [key, value] of Object.entries(process.env)) {
 		if (key.startsWith("PI_") && value !== undefined) {
 			const ompKey = `OMP_${key.slice(3)}`; // PI_FOO -> OMP_FOO
 			if (process.env[ompKey] === undefined) {
 				process.env[ompKey] = value;
+				migrated.push(key);
 			}
 		}
 	}
+	return migrated;
 }
 
 /**
@@ -122,9 +128,7 @@ export function migrateSessionsFromAgentRoot(): void {
 			const correctDir = join(agentDir, "sessions", safePath);
 
 			// Create directory if needed
-			if (!existsSync(correctDir)) {
-				mkdirSync(correctDir, { recursive: true });
-			}
+			mkdirSync(correctDir, { recursive: true });
 
 			// Move the file
 			const fileName = file.split("/").pop() || file.split("\\").pop();
@@ -142,15 +146,41 @@ export function migrateSessionsFromAgentRoot(): void {
 /**
  * Run all migrations. Called once on startup.
  *
+ * @param _cwd - Current working directory (reserved for future project-local migrations)
  * @returns Object with migration results
  */
-export function runMigrations(): { migratedAuthProviders: string[] } {
+export async function runMigrations(_cwd: string): Promise<{
+	migratedAuthProviders: string[];
+	deprecationWarnings: string[];
+}> {
 	// First: migrate env vars (before anything else reads them)
-	migrateEnvVars();
+	const migratedEnvVars = migrateEnvVars();
 
 	// Then: run data migrations
 	const migratedAuthProviders = migrateAuthToAuthJson();
 	migrateSessionsFromAgentRoot();
 
-	return { migratedAuthProviders };
+	// Collect deprecation warnings
+	const deprecationWarnings: string[] = [];
+	if (migratedEnvVars.length > 0) {
+		for (const envVar of migratedEnvVars) {
+			const ompVar = `OMP_${envVar.slice(3)}`;
+			deprecationWarnings.push(`${envVar} is deprecated. Use ${ompVar} instead.`);
+		}
+	}
+
+	return { migratedAuthProviders, deprecationWarnings };
+}
+
+/**
+ * Display deprecation warnings to the user in interactive mode.
+ *
+ * @param warnings - Array of deprecation warning messages
+ */
+export async function showDeprecationWarnings(warnings: string[]): Promise<void> {
+	console.log(chalk.yellow("\n⚠ Deprecation Warnings:"));
+	for (const warning of warnings) {
+		console.log(chalk.yellow(`  • ${warning}`));
+	}
+	console.log();
 }

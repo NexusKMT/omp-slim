@@ -138,8 +138,8 @@ export { taskSchema } from "./types";
 /**
  * Build dynamic tool description listing available agents.
  */
-function buildDescription(cwd: string): string {
-	const { agents } = discoverAgents(cwd);
+async function buildDescription(cwd: string): Promise<string> {
+	const { agents } = await discoverAgents(cwd);
 
 	const lines: string[] = [];
 
@@ -258,11 +258,11 @@ function buildDescription(cwd: string): string {
 /**
  * Create the task tool configured for a specific working directory.
  */
-export function createTaskTool(
+export async function createTaskTool(
 	cwd: string,
 	sessionContext?: SessionContext,
 	options?: TaskToolOptions,
-): AgentTool<typeof taskSchema, TaskToolDetails, Theme> {
+): Promise<AgentTool<typeof taskSchema, TaskToolDetails, Theme>> {
 	const hasOutputTool = options?.availableTools?.has("output") ?? false;
 	// Check if subagents are completely inhibited (legacy recursion prevention)
 	if (process.env[OMP_NO_SUBAGENTS_ENV]) {
@@ -288,13 +288,13 @@ export function createTaskTool(
 	return {
 		name: "task",
 		label: "Task",
-		description: buildDescription(cwd),
+		description: await buildDescription(cwd),
 		parameters: taskSchema,
 		renderCall,
 		renderResult,
 		execute: async (_toolCallId, params, signal, onUpdate) => {
 			const startTime = Date.now();
-			const { agents, projectAgentsDir } = discoverAgents(cwd);
+			const { agents, projectAgentsDir } = await discoverAgents(cwd);
 			const context = params.context;
 
 			// Handle empty or missing tasks
@@ -548,5 +548,20 @@ export function createTaskTool(
 	};
 }
 
-// Default task tool using process.cwd()
-export const taskTool = createTaskTool(process.cwd());
+// Default task tool using process.cwd() - returns a placeholder sync tool
+// Real implementations should use createTaskTool() which properly initializes the tool
+export const taskTool: AgentTool<typeof taskSchema, TaskToolDetails, Theme> = {
+	name: "task",
+	label: "Task",
+	description:
+		"Launch a new agent to handle complex, multi-step tasks autonomously. (Agent discovery pending - use createTaskTool for full functionality)",
+	parameters: taskSchema,
+	execute: async () => ({
+		content: [{ type: "text", text: "Task tool not properly initialized. Use createTaskTool(cwd) instead." }],
+		details: {
+			projectAgentsDir: null,
+			results: [],
+			totalDurationMs: 0,
+		},
+	}),
+};

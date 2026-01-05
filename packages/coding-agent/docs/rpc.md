@@ -54,22 +54,38 @@ Response:
 ```
 
 The `images` field is optional. Each image uses `ImageContent` format with base64 or URL source.
+When prompting during streaming, set `"streamingBehavior": "steer"` or `"followUp"` to queue the message.
 
-#### queue_message
+#### steer
 
-Queue a message to be injected at the next agent turn. Queued messages are added to the conversation without triggering a new prompt. Useful for injecting context mid-conversation.
+Queue a steering message to interrupt the agent mid-run. Useful for injecting corrections while streaming.
 
 ```json
-{ "type": "queue_message", "message": "Additional context" }
+{ "type": "steer", "message": "Additional context" }
 ```
 
 Response:
 
 ```json
-{ "type": "response", "command": "queue_message", "success": true }
+{ "type": "response", "command": "steer", "success": true }
 ```
 
-See [set_queue_mode](#set_queue_mode) for controlling how queued messages are processed.
+#### follow_up
+
+Queue a follow-up message to be processed after the current run completes.
+
+```json
+{ "type": "follow_up", "message": "Additional context" }
+```
+
+Response:
+
+```json
+{ "type": "response", "command": "follow_up", "success": true }
+```
+
+See [set_steering_mode](#set_steering_mode), [set_follow_up_mode](#set_follow_up_mode), and
+[set_interrupt_mode](#set_interrupt_mode) for controlling queued message handling.
 
 #### abort
 
@@ -133,7 +149,9 @@ Response:
     "thinkingLevel": "medium",
     "isStreaming": false,
     "isCompacting": false,
-    "queueMode": "all",
+    "steeringMode": "all",
+    "followUpMode": "one-at-a-time",
+    "interruptMode": "immediate",
     "sessionFile": "/path/to/session.jsonl",
     "sessionId": "abc123",
     "autoCompactionEnabled": true,
@@ -272,25 +290,63 @@ Response:
 }
 ```
 
-### Queue Mode
+### Queue Modes
 
-#### set_queue_mode
+#### set_steering_mode
 
-Control how queued messages (from `queue_message`) are injected into the conversation.
+Control how steering messages are injected into the conversation.
 
 ```json
-{ "type": "set_queue_mode", "mode": "one-at-a-time" }
+{ "type": "set_steering_mode", "mode": "one-at-a-time" }
 ```
 
 Modes:
 
-- `"all"`: Inject all queued messages at the next turn
-- `"one-at-a-time"`: Inject one queued message per turn (default)
+- `"all"`: Inject all steering messages at the next turn
+- `"one-at-a-time"`: Inject one steering message per turn (default)
 
 Response:
 
 ```json
-{ "type": "response", "command": "set_queue_mode", "success": true }
+{ "type": "response", "command": "set_steering_mode", "success": true }
+```
+
+#### set_follow_up_mode
+
+Control how follow-up messages are injected into the conversation.
+
+```json
+{ "type": "set_follow_up_mode", "mode": "one-at-a-time" }
+```
+
+Modes:
+
+- `"all"`: Inject all follow-up messages at the next turn
+- `"one-at-a-time"`: Inject one follow-up message per turn (default)
+
+Response:
+
+```json
+{ "type": "response", "command": "set_follow_up_mode", "success": true }
+```
+
+#### set_interrupt_mode
+
+Control how the agent handles incoming steering messages while streaming.
+
+```json
+{ "type": "set_interrupt_mode", "mode": "wait" }
+```
+
+Modes:
+
+- `"immediate"`: Interrupt immediately when steering arrives
+- `"wait"`: Wait to apply steering until current tool call completes
+
+Response:
+
+```json
+{ "type": "response", "command": "set_interrupt_mode", "success": true }
 ```
 
 ### Compaction

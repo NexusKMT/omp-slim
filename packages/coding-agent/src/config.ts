@@ -104,6 +104,11 @@ export function getCommandsDir(): string {
 	return join(getAgentDir(), "commands");
 }
 
+/** Get path to prompts directory */
+export function getPromptsDir(): string {
+	return join(getAgentDir(), "prompts");
+}
+
 /** Get path to sessions directory */
 export function getSessionsDir(): string {
 	return join(getAgentDir(), "sessions");
@@ -230,8 +235,8 @@ export function readConfigFile<T = unknown>(
 
 	for (const { path: base, source, level } of dirs) {
 		const filePath = join(base, subpath);
-		if (existsSync(filePath)) {
-			try {
+		try {
+			if (existsSync(filePath)) {
 				const content = readFileSync(filePath, "utf-8");
 				return {
 					path: filePath,
@@ -239,9 +244,9 @@ export function readConfigFile<T = unknown>(
 					level,
 					content: JSON.parse(content) as T,
 				};
-			} catch {
-				// Continue to next file on parse error
 			}
+		} catch {
+			// Continue to next file on parse error
 		}
 	}
 
@@ -261,8 +266,8 @@ export function readAllConfigFiles<T = unknown>(
 
 	for (const { path: base, source, level } of dirs) {
 		const filePath = join(base, subpath);
-		if (existsSync(filePath)) {
-			try {
+		try {
+			if (existsSync(filePath)) {
 				const content = readFileSync(filePath, "utf-8");
 				results.push({
 					path: filePath,
@@ -270,9 +275,9 @@ export function readAllConfigFiles<T = unknown>(
 					level,
 					content: JSON.parse(content) as T,
 				});
-			} catch {
-				// Skip files that fail to parse
 			}
+		} catch {
+			// Skip files that fail to parse
 		}
 	}
 
@@ -319,9 +324,9 @@ export function findConfigFileWithMeta(
 // Walk-Up Config Discovery (for monorepo scenarios)
 // =============================================================================
 
-function isDirectory(p: string): boolean {
+async function isDirectory(p: string): Promise<boolean> {
 	try {
-		return statSync(p).isDirectory();
+		return existsSync(p) && statSync(p).isDirectory();
 	} catch {
 		return false;
 	}
@@ -335,14 +340,17 @@ function isDirectory(p: string): boolean {
  * @param cwd - Starting directory
  * @returns First existing directory found, or undefined
  */
-export function findNearestProjectConfigDir(subpath: string, cwd: string = process.cwd()): ConfigDirEntry | undefined {
+export async function findNearestProjectConfigDir(
+	subpath: string,
+	cwd: string = process.cwd(),
+): Promise<ConfigDirEntry | undefined> {
 	let currentDir = cwd;
 
 	while (true) {
 		// Check all config bases at this level, in priority order
 		for (const { base, name } of PROJECT_CONFIG_BASES) {
 			const candidate = join(currentDir, base, subpath);
-			if (isDirectory(candidate)) {
+			if (await isDirectory(candidate)) {
 				return { path: candidate, source: name, level: "project" };
 			}
 		}
@@ -361,7 +369,10 @@ export function findNearestProjectConfigDir(subpath: string, cwd: string = proce
  * Returns one entry per config base (.omp, .pi, .claude) - the nearest one found.
  * Results are in priority order (highest first).
  */
-export function findAllNearestProjectConfigDirs(subpath: string, cwd: string = process.cwd()): ConfigDirEntry[] {
+export async function findAllNearestProjectConfigDirs(
+	subpath: string,
+	cwd: string = process.cwd(),
+): Promise<ConfigDirEntry[]> {
 	const results: ConfigDirEntry[] = [];
 	const foundBases = new Set<string>();
 
@@ -372,7 +383,7 @@ export function findAllNearestProjectConfigDirs(subpath: string, cwd: string = p
 			if (foundBases.has(name)) continue;
 
 			const candidate = join(currentDir, base, subpath);
-			if (isDirectory(candidate)) {
+			if (await isDirectory(candidate)) {
 				results.push({ path: candidate, source: name, level: "project" });
 				foundBases.add(name);
 			}

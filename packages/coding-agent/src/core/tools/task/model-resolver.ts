@@ -11,7 +11,6 @@
  *   - "omp/slow" → configured slow model from settings
  */
 
-import { spawnSync } from "node:child_process";
 import { type Settings, settingsCapability } from "../../../capability/settings";
 import { loadSync } from "../../../discovery";
 import { resolveOmpCommand } from "./omp-command";
@@ -37,20 +36,20 @@ export function getAvailableModels(): string[] {
 
 	try {
 		const ompCommand = resolveOmpCommand();
-		const result = spawnSync(ompCommand.cmd, [...ompCommand.args, "--list-models"], {
-			encoding: "utf-8",
-			timeout: 5000,
-			shell: ompCommand.shell,
+		const result = Bun.spawnSync([ompCommand.cmd, ...ompCommand.args, "--list-models"], {
+			stdin: "ignore",
+			stdout: "pipe",
+			stderr: "pipe",
 		});
 
-		if (result.status !== 0 || !result.stdout) {
+		if (result.exitCode !== 0 || !result.stdout) {
 			cachedModels = [];
 			cacheExpiry = now + CACHE_TTL_MS;
 			return cachedModels;
 		}
 
 		// Parse output: skip header line, extract provider/model
-		const lines = result.stdout.trim().split("\n");
+		const lines = result.stdout.toString().trim().split("\n");
 		cachedModels = lines
 			.slice(1) // Skip header
 			.map((line) => {

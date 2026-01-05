@@ -3,6 +3,10 @@
 ## [Unreleased]
 ### Added
 
+- Added extensions API with auto-discovery (`.omp/extensions`) and `--extension`/`-e` loading for custom tools, commands, and lifecycle hooks
+- Added prompt templates loaded from global and project `.omp/prompts` directories with `/template` expansion in the input box
+- Built-in provider overrides in `models.json`: override just `baseUrl` to route a built-in provider through a proxy while keeping all its models, or define `models` to fully replace the provider
+- Shell commands without context contribution: use `!!command` to execute a bash command that is shown in the TUI and saved to session history but excluded from LLM context. Useful for running commands you don't want the AI to see
 - Added VoiceSupervisor class for realtime voice mode using OpenAI Realtime API with continuous mic streaming and semantic VAD turn detection
 - Added VoiceController class for steering user input and deciding presentation of assistant responses
 - Added echo suppression and noise floor filtering for microphone input during voice playback
@@ -42,6 +46,7 @@
 
 ### Fixed
 
+- `/model` selector now opens instantly instead of waiting for OAuth token refresh. Token refresh is deferred until a model is actually used
 - Fixed cross-platform browser opening to work on Windows (via cmd /c start) and fail gracefully when unavailable
 
 ## [3.15.1] - 2026-01-05

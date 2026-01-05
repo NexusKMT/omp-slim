@@ -1,4 +1,5 @@
-import * as fs from "node:fs";
+import type { Dirent } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { BunFile } from "bun";
@@ -78,7 +79,7 @@ export interface LspWarmupResult {
  * @returns Status of each server that was started
  */
 export async function warmupLspServers(cwd: string): Promise<LspWarmupResult> {
-	const config = loadConfig(cwd);
+	const config = await loadConfig(cwd);
 	setIdleTimeout(config.idleTimeoutMs);
 	const servers: LspWarmupResult["servers"] = [];
 	const lspServers = getLspServers(config);
@@ -173,10 +174,10 @@ async function notifyFileSaved(
 // Cache config per cwd to avoid repeated file I/O
 const configCache = new Map<string, LspConfig>();
 
-function getConfig(cwd: string): LspConfig {
+async function getConfig(cwd: string): Promise<LspConfig> {
 	let config = configCache.get(cwd);
 	if (!config) {
-		config = loadConfig(cwd);
+		config = await loadConfig(cwd);
 		setIdleTimeout(config.idleTimeoutMs);
 		configCache.set(cwd, config);
 	}
@@ -225,9 +226,13 @@ function findFileByExtensions(baseDir: string, extensions: string[], maxDepth: n
 	const normalized = extensions.map((ext) => ext.toLowerCase());
 	const search = (dir: string, depth: number): string | null => {
 		if (depth > maxDepth) return null;
-		let entries: fs.Dirent[];
+		let entries: Dirent[];
 		try {
-			entries = fs.readdirSync(dir, { withFileTypes: true });
+			entries = Array.from(new Bun.Glob("*").scanSync({ cwd: dir, onlyFiles: false })).map((name) => ({
+				name,
+				isFile: () => !existsSync(path.join(dir, name)) || Bun.file(path.join(dir, name)).type !== "directory",
+				isDirectory: () => existsSync(path.join(dir, name)) && Bun.file(path.join(dir, name)).type === "directory",
+			})) as Dirent[];
 		} catch {
 			return null;
 		}
@@ -312,22 +317,22 @@ interface ProjectType {
 /** Detect project type from root markers */
 function detectProjectType(cwd: string): ProjectType {
 	// Check for Rust (Cargo.toml)
-	if (fs.existsSync(path.join(cwd, "Cargo.toml"))) {
+	if (existsSync(path.join(cwd, "Cargo.toml"))) {
 		return { type: "rust", command: ["cargo", "check", "--message-format=short"], description: "Rust (cargo check)" };
 	}
 
 	// Check for TypeScript (tsconfig.json)
-	if (fs.existsSync(path.join(cwd, "tsconfig.json"))) {
+	if (existsSync(path.join(cwd, "tsconfig.json"))) {
 		return { type: "typescript", command: ["npx", "tsc", "--noEmit"], description: "TypeScript (tsc --noEmit)" };
 	}
 
 	// Check for Go (go.mod)
-	if (fs.existsSync(path.join(cwd, "go.mod"))) {
+	if (existsSync(path.join(cwd, "go.mod"))) {
 		return { type: "go", command: ["go", "build", "./..."], description: "Go (go build)" };
 	}
 
 	// Check for Python (pyproject.toml or pyrightconfig.json)
-	if (fs.existsSync(path.join(cwd, "pyproject.toml")) || fs.existsSync(path.join(cwd, "pyrightconfig.json"))) {
+	if (existsSync(path.join(cwd, "pyproject.toml")) || existsSync(path.join(cwd, "pyrightconfig.json"))) {
 		return { type: "python", command: ["pyright"], description: "Python (pyright)" };
 	}
 
@@ -612,7 +617,7 @@ export function createLspWritethrough(cwd: string, options?: WritethroughOptions
 		return writethroughNoop;
 	}
 	return async (dst: string, content: string, signal?: AbortSignal, file?: BunFile) => {
-		const config = getConfig(cwd);
+		const config = await getConfig(cwd);
 		const servers = getServersForFile(config, dst);
 		if (servers.length === 0) {
 			return writethroughNoop(dst, content, signal, file);
@@ -708,7 +713,7 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 				include_declaration,
 			} = params;
 
-			const config = getConfig(cwd);
+			const config = await getConfig(cwd);
 
 			// Status action doesn't need a file
 			if (action === "status") {

@@ -268,7 +268,7 @@ export interface SessionCompactEvent {
 	type: "session_compact";
 	compactionEntry: CompactionEntry;
 	/** Whether the compaction entry was provided by a hook */
-	fromHook: boolean;
+	fromExtension: boolean;
 }
 
 /** Fired on process exit (SIGINT/SIGTERM) */
@@ -309,7 +309,7 @@ export interface SessionTreeEvent {
 	/** Branch summary entry if one was created */
 	summaryEntry?: BranchSummaryEntry;
 	/** Whether summary came from hook */
-	fromHook?: boolean;
+	fromExtension?: boolean;
 }
 
 /** Union of all session event types */

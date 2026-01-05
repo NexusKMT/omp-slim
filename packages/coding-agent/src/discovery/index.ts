@@ -8,6 +8,7 @@
 // Import capability definitions (ensures capabilities are defined before providers register)
 import "../capability/context-file";
 import "../capability/extension";
+import "../capability/extension-module";
 import "../capability/hook";
 import "../capability/instruction";
 import "../capability/mcp";
@@ -34,6 +35,7 @@ import "./mcp-json";
 
 export type { ContextFile } from "../capability/context-file";
 export type { Extension, ExtensionManifest } from "../capability/extension";
+export type { ExtensionModule } from "../capability/extension-module";
 export type { Hook } from "../capability/hook";
 // Re-export the main API from capability registry
 export {

@@ -93,11 +93,11 @@ describe("Agent", () => {
 		expect(agent.state.messages).toEqual([]);
 	});
 
-	it("should support message queueing", async () => {
+	it("should support steering message queueing", async () => {
 		const agent = new Agent();
 
 		const message = { role: "user" as const, content: "Queued message", timestamp: Date.now() };
-		agent.queueMessage(message);
+		agent.steer(message);
 
 		// The message is queued but not yet in state.messages
 		expect(agent.state.messages).not.toContainEqual(message);

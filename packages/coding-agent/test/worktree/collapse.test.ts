@@ -54,14 +54,14 @@ describe("collapse strategies", () => {
 	test("rebase strategy handles divergent history", async () => {
 		const src = await create("source");
 
-		await Bun.write(path.join(src.path, "feature.txt"), "feature");
-		await git(["add", "feature.txt"], src.path);
-		await git(["commit", "-m", "add feature"], src.path);
-
+		// Make a commit on main to create divergent history
 		const mainPath = await getRepoRoot();
 		await Bun.write(path.join(mainPath, "main-change.txt"), "main");
 		await git(["add", "main-change.txt"], mainPath);
 		await git(["commit", "-m", "main change"], mainPath);
+
+		// Add uncommitted changes on source (collapseRebase stages and commits these)
+		await Bun.write(path.join(src.path, "feature.txt"), "feature");
 
 		await collapse("source", "main", { strategy: "rebase" });
 

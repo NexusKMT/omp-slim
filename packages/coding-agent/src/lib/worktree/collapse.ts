@@ -172,7 +172,7 @@ export async function collapse(
 	await applyDiff(diff, dst.path);
 
 	if (!options?.keepSource) {
-		await remove(src.path);
+		await remove(src.path, { force: true });
 	}
 
 	return stats;

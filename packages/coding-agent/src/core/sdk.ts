@@ -9,12 +9,9 @@
  * // Minimal - everything auto-discovered
  * const session = await createAgentSession();
  *
- * // With custom hooks
+ * // With custom extensions
  * const session = await createAgentSession({
- *   hooks: [
- *     ...await discoverHooks(),
- *     { factory: myHookFactory },
- *   ],
+ *   extensions: [myExtensionFactory],
  * });
  *
  * // Full control
@@ -22,7 +19,7 @@
  *   model: myModel,
  *   getApiKey: async () => process.env.MY_KEY,
  *   tools: [readTool, bashTool],
- *   hooks: [],
+ *   extensions: [],
  *   skills: [],
  *   sessionFile: false,
  * });
@@ -30,37 +27,45 @@
  */
 
 import { join } from "node:path";
-import { Agent, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import { Agent, type AgentTool, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
+import type { Component } from "@oh-my-pi/pi-tui";
 import chalk from "chalk";
 // Import discovery to register all providers on startup
 import "../discovery";
 import { loadSync as loadCapability } from "../capability/index";
 import { type Rule, ruleCapability } from "../capability/rule";
 import { getAgentDir, getConfigDirPaths } from "../config";
+import { initializeWithSettings } from "../discovery";
 import { AgentSession } from "./agent-session";
 import { AuthStorage } from "./auth-storage";
 import {
 	type CustomCommandsLoadResult,
 	loadCustomCommands as loadCustomCommandsInternal,
 } from "./custom-commands/index";
+import type { CustomTool, CustomToolContext, CustomToolSessionEvent } from "./custom-tools/types";
+import { createEventBus, type EventBus } from "./event-bus";
 import {
-	type CustomToolsLoadResult,
-	discoverAndLoadCustomTools,
-	type LoadedCustomTool,
-	wrapCustomTools,
-} from "./custom-tools/index";
-import type { CustomTool } from "./custom-tools/types";
-import { discoverAndLoadHooks, HookRunner, type LoadedHook, wrapToolsWithHooks } from "./hooks/index";
-import type { HookFactory } from "./hooks/types";
+	discoverAndLoadExtensions,
+	type ExtensionContext,
+	type ExtensionFactory,
+	ExtensionRunner,
+	type LoadExtensionsResult,
+	type LoadedExtension,
+	loadExtensionFromFactory,
+	type ToolDefinition,
+	wrapRegisteredTools,
+	wrapToolsWithExtensions,
+} from "./extensions/index";
 import { logger } from "./logger";
 import { discoverAndLoadMCPTools, type MCPManager, type MCPToolsLoadResult } from "./mcp/index";
 import { convertToLlm } from "./messages";
 import { ModelRegistry } from "./model-registry";
+import { parseModelString } from "./model-resolver";
+import { loadPromptTemplates as loadPromptTemplatesInternal, type PromptTemplate } from "./prompt-templates";
 import { SessionManager } from "./session-manager";
-import { type CommandsSettings, type Settings, SettingsManager, type SkillsSettings } from "./settings-manager";
+import { type Settings, SettingsManager, type SkillsSettings } from "./settings-manager";
 import { loadSkills as loadSkillsInternal, type Skill } from "./skills";
-import { type FileSlashCommand, loadSlashCommands as loadSlashCommandsInternal } from "./slash-commands";
 import {
 	buildSystemPrompt as buildSystemPromptInternal,
 	loadProjectContextFiles as loadContextFilesInternal,
@@ -71,8 +76,10 @@ import { getGeminiImageTools } from "./tools/gemini-image";
 import {
 	allTools,
 	applyBashInterception,
+	baseCodingToolNames,
 	bashTool,
 	codingTools,
+	createAllTools,
 	createBashTool,
 	createCodingTools,
 	createEditTool,
@@ -87,12 +94,14 @@ import {
 	editTool,
 	filterRulebookRules,
 	findTool,
+	getWebSearchTools,
 	gitTool,
 	grepTool,
 	lsTool,
 	readOnlyTools,
 	readTool,
 	type Tool,
+	type ToolName,
 	warmupLspServers,
 	writeTool,
 } from "./tools/index";
@@ -121,24 +130,29 @@ export interface CreateAgentSessionOptions {
 	/** System prompt. String replaces default, function receives default and returns final. */
 	systemPrompt?: string | ((defaultPrompt: string) => string);
 
-	/** Built-in tools to use. Default: codingTools [read, bash, edit, write] */
+	/** Built-in tools to use. Default: all coding tools (read, bash, edit, write, grep, find, ls, lsp, notebook, output, task, web_fetch, web_search) */
 	tools?: Tool[];
-	/** Custom tools (replaces discovery). */
-	customTools?: Array<{ path?: string; tool: CustomTool }>;
-	/** Additional custom tool paths to load (merged with discovery). */
-	additionalCustomToolPaths?: string[];
+	/** Custom tools to register (in addition to built-in tools). Accepts both CustomTool and ToolDefinition. */
+	customTools?: (CustomTool | ToolDefinition)[];
+	/** Inline extensions (merged with discovery). */
+	extensions?: ExtensionFactory[];
+	/** Additional extension paths to load (merged with discovery). */
+	additionalExtensionPaths?: string[];
+	/**
+	 * Pre-loaded extensions (skips file discovery).
+	 * @internal Used by CLI when extensions are loaded early to parse custom flags.
+	 */
+	preloadedExtensions?: LoadedExtension[];
 
-	/** Hooks (replaces discovery). */
-	hooks?: Array<{ path?: string; factory: HookFactory }>;
-	/** Additional hook paths to load (merged with discovery). */
-	additionalHookPaths?: string[];
+	/** Shared event bus for tool/extension communication. Default: creates new bus. */
+	eventBus?: EventBus;
 
 	/** Skills. Default: discovered from multiple locations */
 	skills?: Skill[];
 	/** Context files (AGENTS.md content). Default: discovered walking up from cwd */
 	contextFiles?: Array<{ path: string; content: string }>;
-	/** Slash commands. Default: discovered from cwd/.omp/commands/ + agentDir/commands/ */
-	slashCommands?: FileSlashCommand[];
+	/** Prompt templates. Default: discovered from cwd/.omp/prompts/ + agentDir/prompts/ */
+	promptTemplates?: PromptTemplate[];
 
 	/** Enable MCP server discovery from .mcp.json files. Default: true */
 	enableMCP?: boolean;
@@ -160,8 +174,8 @@ export interface CreateAgentSessionOptions {
 export interface CreateAgentSessionResult {
 	/** The created session */
 	session: AgentSession;
-	/** Custom tools result (for UI context setup in interactive mode) */
-	customToolsResult: CustomToolsLoadResult;
+	/** Extensions result (for UI context setup in interactive mode) */
+	extensionsResult: LoadExtensionsResult;
 	/** MCP manager for server lifecycle management (undefined if MCP disabled) */
 	mcpManager?: MCPManager;
 	/** Warning if session was restored with a different model than saved */
@@ -173,12 +187,18 @@ export interface CreateAgentSessionResult {
 // Re-exports
 
 export type { CustomCommand, CustomCommandFactory } from "./custom-commands/types";
-export type { CustomTool } from "./custom-tools/types";
-export type { HookAPI, HookCommandContext, HookContext, HookFactory } from "./hooks/types";
+export type { CustomTool, CustomToolFactory } from "./custom-tools/types";
+export type {
+	ExtensionAPI,
+	ExtensionCommandContext,
+	ExtensionContext,
+	ExtensionFactory,
+	ToolDefinition,
+} from "./extensions/index";
 export type { MCPManager, MCPServerConfig, MCPServerConnection, MCPToolsLoadResult } from "./mcp/index";
+export type { PromptTemplate } from "./prompt-templates";
 export type { Settings, SkillsSettings } from "./settings-manager";
 export type { Skill } from "./skills";
-export type { FileSlashCommand } from "./slash-commands";
 export type { Tool } from "./tools/index";
 
 export {
@@ -219,7 +239,7 @@ function getDefaultAgentDir(): string {
  * Create an AuthStorage instance with fallback support.
  * Reads from primary path first, then falls back to legacy paths (.pi, .claude).
  */
-export function discoverAuthStorage(agentDir: string = getDefaultAgentDir()): AuthStorage {
+export async function discoverAuthStorage(agentDir: string = getDefaultAgentDir()): Promise<AuthStorage> {
 	const primaryPath = join(agentDir, "auth.json");
 	// Get all auth.json paths (user-level only), excluding the primary
 	const allPaths = getConfigDirPaths("auth.json", { project: false });
@@ -227,14 +247,19 @@ export function discoverAuthStorage(agentDir: string = getDefaultAgentDir()): Au
 
 	logger.debug("discoverAuthStorage", { agentDir, primaryPath, allPaths, fallbackPaths });
 
-	return new AuthStorage(primaryPath, fallbackPaths);
+	const storage = new AuthStorage(primaryPath, fallbackPaths);
+	await storage.reload();
+	return storage;
 }
 
 /**
  * Create a ModelRegistry with fallback support.
  * Reads from primary path first, then falls back to legacy paths (.pi, .claude).
  */
-export function discoverModels(authStorage: AuthStorage, agentDir: string = getDefaultAgentDir()): ModelRegistry {
+export async function discoverModels(
+	authStorage: AuthStorage,
+	agentDir: string = getDefaultAgentDir(),
+): Promise<ModelRegistry> {
 	const primaryPath = join(agentDir, "models.json");
 	// Get all models.json paths (user-level only), excluding the primary
 	const allPaths = getConfigDirPaths("models.json", { project: false });
@@ -242,51 +267,18 @@ export function discoverModels(authStorage: AuthStorage, agentDir: string = getD
 
 	logger.debug("discoverModels", { primaryPath, fallbackPaths });
 
-	return new ModelRegistry(authStorage, primaryPath, fallbackPaths);
+	const registry = new ModelRegistry(authStorage, primaryPath, fallbackPaths);
+	await registry.refresh();
+	return registry;
 }
 
 /**
- * Discover hooks from cwd and agentDir.
+ * Discover extensions from cwd.
  */
-export async function discoverHooks(
-	cwd?: string,
-	_agentDir?: string,
-): Promise<Array<{ path: string; factory: HookFactory }>> {
+export async function discoverExtensions(cwd?: string): Promise<LoadExtensionsResult> {
 	const resolvedCwd = cwd ?? process.cwd();
 
-	const { hooks, errors } = await discoverAndLoadHooks([], resolvedCwd);
-
-	// Log errors but don't fail
-	for (const { path, error } of errors) {
-		console.error(`Failed to load hook "${path}": ${error}`);
-	}
-
-	return hooks.map((h) => ({
-		path: h.path,
-		factory: createFactoryFromLoadedHook(h),
-	}));
-}
-
-/**
- * Discover custom tools from cwd and agentDir.
- */
-export async function discoverCustomTools(
-	cwd?: string,
-	_agentDir?: string,
-): Promise<Array<{ path: string; tool: CustomTool }>> {
-	const resolvedCwd = cwd ?? process.cwd();
-
-	const { tools, errors } = await discoverAndLoadCustomTools([], resolvedCwd, Object.keys(allTools));
-
-	// Log errors but don't fail
-	for (const { path, error } of errors) {
-		console.error(`Failed to load custom tool "${path}": ${error}`);
-	}
-
-	return tools.map((t) => ({
-		path: t.path,
-		tool: t.tool,
-	}));
+	return discoverAndLoadExtensions([], resolvedCwd);
 }
 
 /**
@@ -314,15 +306,12 @@ export function discoverContextFiles(
 }
 
 /**
- * Discover slash commands from cwd and agentDir.
+ * Discover prompt templates from cwd and agentDir.
  */
-export function discoverSlashCommands(
-	cwd?: string,
-	_agentDir?: string,
-	_settings?: CommandsSettings,
-): FileSlashCommand[] {
-	return loadSlashCommandsInternal({
+export async function discoverPromptTemplates(cwd?: string, agentDir?: string): Promise<PromptTemplate[]> {
+	return await loadPromptTemplatesInternal({
 		cwd: cwd ?? process.cwd(),
+		agentDir: agentDir ?? getDefaultAgentDir(),
 	});
 }
 
@@ -382,15 +371,16 @@ export function loadSettings(cwd?: string, agentDir?: string): Settings {
 	return {
 		modelRoles: manager.getModelRoles(),
 		defaultThinkingLevel: manager.getDefaultThinkingLevel(),
-		queueMode: manager.getQueueMode(),
+		steeringMode: manager.getSteeringMode(),
+		followUpMode: manager.getFollowUpMode(),
+		interruptMode: manager.getInterruptMode(),
 		theme: manager.getTheme(),
 		compaction: manager.getCompactionSettings(),
 		retry: manager.getRetrySettings(),
 		hideThinkingBlock: manager.getHideThinkingBlock(),
 		shellPath: manager.getShellPath(),
 		collapseChangelog: manager.getCollapseChangelog(),
-		hooks: manager.getHookPaths(),
-		customTools: manager.getCustomToolPaths(),
+		extensions: manager.getExtensionPaths(),
 		skills: manager.getSkillsSettings(),
 		terminal: { showImages: manager.getShowImages() },
 	};
@@ -398,84 +388,85 @@ export function loadSettings(cwd?: string, agentDir?: string): Settings {
 
 // Internal Helpers
 
-/**
- * Create a HookFactory from a LoadedHook.
- * This allows mixing discovered hooks with inline hooks.
- */
-function createFactoryFromLoadedHook(loaded: LoadedHook): HookFactory {
-	return (api) => {
-		for (const [eventType, handlers] of loaded.handlers) {
-			for (const handler of handlers) {
-				api.on(eventType as any, handler as any);
-			}
-		}
+function createCustomToolContext(ctx: ExtensionContext): CustomToolContext {
+	return {
+		sessionManager: ctx.sessionManager,
+		modelRegistry: ctx.modelRegistry,
+		model: ctx.model,
+		isIdle: ctx.isIdle,
+		hasQueuedMessages: ctx.hasPendingMessages,
+		abort: ctx.abort,
 	};
 }
 
-/**
- * Convert hook definitions to LoadedHooks for the HookRunner.
- */
-function createLoadedHooksFromDefinitions(definitions: Array<{ path?: string; factory: HookFactory }>): LoadedHook[] {
-	return definitions.map((def) => {
-		const handlers = new Map<string, Array<(...args: unknown[]) => Promise<unknown>>>();
-		const messageRenderers = new Map<string, any>();
-		const commands = new Map<string, any>();
-		let sendMessageHandler: (message: any, triggerTurn?: boolean) => void = () => {};
-		let appendEntryHandler: (customType: string, data?: any) => void = () => {};
-		let newSessionHandler: (options?: any) => Promise<{ cancelled: boolean }> = async () => ({ cancelled: false });
-		let branchHandler: (entryId: string) => Promise<{ cancelled: boolean }> = async () => ({ cancelled: false });
-		let navigateTreeHandler: (targetId: string, options?: any) => Promise<{ cancelled: boolean }> = async () => ({
-			cancelled: false,
-		});
+function isCustomTool(tool: CustomTool | ToolDefinition): tool is CustomTool {
+	// To distinguish, we mark converted tools with a hidden symbol property.
+	// If the tool doesn't have this marker, it's a CustomTool that needs conversion.
+	return !(tool as any).__isToolDefinition;
+}
 
-		const api = {
-			on: (event: string, handler: (...args: unknown[]) => Promise<unknown>) => {
-				const list = handlers.get(event) ?? [];
-				list.push(handler);
-				handlers.set(event, list);
-			},
-			sendMessage: (message: any, triggerTurn?: boolean) => {
-				sendMessageHandler(message, triggerTurn);
-			},
-			appendEntry: (customType: string, data?: any) => {
-				appendEntryHandler(customType, data);
-			},
-			registerMessageRenderer: (customType: string, renderer: any) => {
-				messageRenderers.set(customType, renderer);
-			},
-			registerCommand: (name: string, options: any) => {
-				commands.set(name, { name, ...options });
-			},
-			newSession: (options?: any) => newSessionHandler(options),
-			branch: (entryId: string) => branchHandler(entryId),
-			navigateTree: (targetId: string, options?: any) => navigateTreeHandler(targetId, options),
+const TOOL_DEFINITION_MARKER = Symbol("__isToolDefinition");
+
+function customToolToDefinition(tool: CustomTool): ToolDefinition {
+	const definition: ToolDefinition & { [TOOL_DEFINITION_MARKER]: true } = {
+		name: tool.name,
+		label: tool.label,
+		description: tool.description,
+		parameters: tool.parameters,
+		hidden: tool.hidden,
+		execute: (toolCallId, params, onUpdate, ctx, signal) =>
+			tool.execute(toolCallId, params, onUpdate, createCustomToolContext(ctx), signal),
+		onSession: tool.onSession ? (event, ctx) => tool.onSession?.(event, createCustomToolContext(ctx)) : undefined,
+		renderCall: tool.renderCall,
+		renderResult: tool.renderResult
+			? (result, options, theme): Component => {
+					const component = tool.renderResult?.(
+						result,
+						{ expanded: options.expanded, isPartial: options.isPartial, spinnerFrame: options.spinnerFrame },
+						theme,
+					);
+					// Return empty component if undefined to match Component type requirement
+					return component ?? ({ render: () => [] } as unknown as Component);
+				}
+			: undefined,
+		[TOOL_DEFINITION_MARKER]: true,
+	};
+	return definition;
+}
+
+function createCustomToolsExtension(tools: CustomTool[]): ExtensionFactory {
+	return (api) => {
+		for (const tool of tools) {
+			api.registerTool(customToolToDefinition(tool));
+		}
+
+		const runOnSession = async (event: CustomToolSessionEvent, ctx: ExtensionContext) => {
+			for (const tool of tools) {
+				if (!tool.onSession) continue;
+				try {
+					await tool.onSession(event, createCustomToolContext(ctx));
+				} catch (err) {
+					logger.warn("Custom tool onSession error", { tool: tool.name, error: String(err) });
+				}
+			}
 		};
 
-		def.factory(api as any);
-
-		return {
-			path: def.path ?? "<inline>",
-			resolvedPath: def.path ?? "<inline>",
-			handlers,
-			messageRenderers,
-			commands,
-			setSendMessageHandler: (handler: (message: any, triggerTurn?: boolean) => void) => {
-				sendMessageHandler = handler;
-			},
-			setAppendEntryHandler: (handler: (customType: string, data?: any) => void) => {
-				appendEntryHandler = handler;
-			},
-			setNewSessionHandler: (handler: (options?: any) => Promise<{ cancelled: boolean }>) => {
-				newSessionHandler = handler;
-			},
-			setBranchHandler: (handler: (entryId: string) => Promise<{ cancelled: boolean }>) => {
-				branchHandler = handler;
-			},
-			setNavigateTreeHandler: (handler: (targetId: string, options?: any) => Promise<{ cancelled: boolean }>) => {
-				navigateTreeHandler = handler;
-			},
-		};
-	});
+		api.on("session_start", async (_event, ctx) =>
+			runOnSession({ reason: "start", previousSessionFile: undefined }, ctx),
+		);
+		api.on("session_switch", async (event, ctx) =>
+			runOnSession({ reason: "switch", previousSessionFile: event.previousSessionFile }, ctx),
+		);
+		api.on("session_branch", async (event, ctx) =>
+			runOnSession({ reason: "branch", previousSessionFile: event.previousSessionFile }, ctx),
+		);
+		api.on("session_tree", async (_event, ctx) =>
+			runOnSession({ reason: "tree", previousSessionFile: undefined }, ctx),
+		);
+		api.on("session_shutdown", async (_event, ctx) =>
+			runOnSession({ reason: "shutdown", previousSessionFile: undefined }, ctx),
+		);
+	};
 }
 
 // Factory
@@ -506,7 +497,6 @@ function createLoadedHooksFromDefinitions(definitions: Array<{ path?: string; fa
  *   getApiKey: async () => process.env.MY_KEY,
  *   systemPrompt: 'You are helpful.',
  *   tools: [readTool, bashTool],
- *   hooks: [],
  *   skills: [],
  *   sessionManager: SessionManager.inMemory(),
  * });
@@ -515,17 +505,15 @@ function createLoadedHooksFromDefinitions(definitions: Array<{ path?: string; fa
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
 	const cwd = options.cwd ?? process.cwd();
 	const agentDir = options.agentDir ?? getDefaultAgentDir();
+	const eventBus = options.eventBus ?? createEventBus();
 
 	// Use provided or create AuthStorage and ModelRegistry
-	const authStorage = options.authStorage ?? discoverAuthStorage(agentDir);
-	const modelRegistry = options.modelRegistry ?? discoverModels(authStorage, agentDir);
+	const authStorage = options.authStorage ?? (await discoverAuthStorage(agentDir));
+	const modelRegistry = options.modelRegistry ?? (await discoverModels(authStorage, agentDir));
 	time("discoverModels");
 
 	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
 	time("settingsManager");
-
-	// Initialize discovery system with settings for provider persistence
-	const { initializeWithSettings } = await import("../discovery");
 	initializeWithSettings(settingsManager);
 	time("initializeWithSettings");
 
@@ -543,17 +531,15 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	// If session has data, try to restore model from it
 	const defaultModelStr = existingSession.models.default;
 	if (!model && hasExistingSession && defaultModelStr) {
-		const slashIdx = defaultModelStr.indexOf("/");
-		if (slashIdx > 0) {
-			const provider = defaultModelStr.slice(0, slashIdx);
-			const modelId = defaultModelStr.slice(slashIdx + 1);
-			const restoredModel = modelRegistry.find(provider, modelId);
+		const parsedModel = parseModelString(defaultModelStr);
+		if (parsedModel) {
+			const restoredModel = modelRegistry.find(parsedModel.provider, parsedModel.id);
 			if (restoredModel && (await modelRegistry.getApiKey(restoredModel))) {
 				model = restoredModel;
 			}
-			if (!model) {
-				modelFallbackMessage = `Could not restore model ${defaultModelStr}`;
-			}
+		}
+		if (!model) {
+			modelFallbackMessage = `Could not restore model ${defaultModelStr}`;
 		}
 	}
 
@@ -561,11 +547,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	if (!model) {
 		const settingsDefaultModel = settingsManager.getModelRole("default");
 		if (settingsDefaultModel) {
-			const slashIdx = settingsDefaultModel.indexOf("/");
-			if (slashIdx > 0) {
-				const provider = settingsDefaultModel.slice(0, slashIdx);
-				const modelId = settingsDefaultModel.slice(slashIdx + 1);
-				const settingsModel = modelRegistry.find(provider, modelId);
+			const parsedModel = parseModelString(settingsDefaultModel);
+			if (parsedModel) {
+				const settingsModel = modelRegistry.find(parsedModel.provider, parsedModel.id);
 				if (settingsModel && (await modelRegistry.getApiKey(settingsModel))) {
 					model = settingsModel;
 				}
@@ -629,68 +613,35 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const contextFiles = options.contextFiles ?? discoverContextFiles(cwd, agentDir);
 	time("discoverContextFiles");
 
-	// Hook runner - always created (needed for custom command context even without hooks)
-	let loadedHooks: LoadedHook[] = [];
-	if (options.hooks !== undefined) {
-		if (options.hooks.length > 0) {
-			loadedHooks = createLoadedHooksFromDefinitions(options.hooks);
-		}
-	} else {
-		// Discover hooks, merging with additional paths
-		const configuredPaths = [...settingsManager.getHookPaths(), ...(options.additionalHookPaths ?? [])];
-		const { hooks, errors } = await discoverAndLoadHooks(configuredPaths, cwd);
-		time("discoverAndLoadHooks");
-		for (const { path, error } of errors) {
-			console.error(`Failed to load hook "${path}": ${error}`);
-		}
-		loadedHooks = hooks;
-	}
-	const hookRunner = new HookRunner(loadedHooks, cwd, sessionManager, modelRegistry);
-
 	const sessionContext = {
 		getSessionFile: () => sessionManager.getSessionFile() ?? null,
 	};
-	const builtInTools =
-		options.tools ??
-		createCodingTools(cwd, options.hasUI ?? false, sessionContext, {
-			lspFormatOnWrite: settingsManager.getLspFormatOnWrite(),
-			lspDiagnosticsOnWrite: settingsManager.getLspDiagnosticsOnWrite(),
-			lspDiagnosticsOnEdit: settingsManager.getLspDiagnosticsOnEdit(),
-			editFuzzyMatch: settingsManager.getEditFuzzyMatch(),
-		});
-	time("createCodingTools");
+	const allBuiltInToolsMap = await createAllTools(cwd, sessionContext, {
+		lspFormatOnWrite: settingsManager.getLspFormatOnWrite(),
+		lspDiagnosticsOnWrite: settingsManager.getLspDiagnosticsOnWrite(),
+		lspDiagnosticsOnEdit: settingsManager.getLspDiagnosticsOnEdit(),
+		editFuzzyMatch: settingsManager.getEditFuzzyMatch(),
+		readAutoResizeImages: settingsManager.getImageAutoResize(),
+	});
+	time("createAllTools");
 
-	let customToolsResult: CustomToolsLoadResult;
-	if (options.customTools !== undefined) {
-		// Use provided custom tools
-		const loadedTools: LoadedCustomTool[] = options.customTools.map((ct) => ({
-			path: ct.path ?? "<inline>",
-			resolvedPath: ct.path ?? "<inline>",
-			tool: ct.tool,
-		}));
-		customToolsResult = {
-			tools: loadedTools,
-			errors: [],
-			setUIContext: () => {},
-		};
-	} else {
-		// Discover custom tools, merging with additional paths
-		const configuredPaths = [...settingsManager.getCustomToolPaths(), ...(options.additionalCustomToolPaths ?? [])];
-		customToolsResult = await discoverAndLoadCustomTools(configuredPaths, cwd, Object.keys(allTools));
-		time("discoverAndLoadCustomTools");
-		for (const { path, error } of customToolsResult.errors) {
-			console.error(`Failed to load custom tool "${path}": ${error}`);
-		}
-	}
+	const initialActiveToolNames: ToolName[] = options.tools
+		? options.tools.map((t) => t.name).filter((n): n is ToolName => n in allBuiltInToolsMap)
+		: baseCodingToolNames;
+	const initialActiveBuiltInTools = initialActiveToolNames.map((name) => allBuiltInToolsMap[name]);
 
 	// Discover MCP tools from .mcp.json files
 	let mcpManager: MCPManager | undefined;
 	const enableMCP = options.enableMCP ?? true;
+	const customTools: CustomTool[] = [];
 	if (enableMCP) {
 		const mcpResult = await discoverAndLoadMCPTools(cwd, {
 			onConnecting: (serverNames) => {
 				if (options.hasUI && serverNames.length > 0) {
-					process.stderr.write(chalk.gray(`Connecting to MCP servers: ${serverNames.join(", ")}...\n`));
+					process.stderr.write(
+						chalk.gray(`Connecting to MCP servers: ${serverNames.join(", ")}...
+`),
+					);
 				}
 			},
 			enableProjectConfig: settingsManager.getMCPProjectConfigEnabled(),
@@ -710,19 +661,22 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			console.error(`MCP "${path}": ${error}`);
 		}
 
-		// Merge MCP tools into custom tools result
 		if (mcpResult.tools.length > 0) {
-			customToolsResult = {
-				...customToolsResult,
-				tools: [...customToolsResult.tools, ...mcpResult.tools],
-			};
+			// MCP tools are LoadedCustomTool, extract the tool property
+			customTools.push(...mcpResult.tools.map((loaded) => loaded.tool));
 		}
 	}
+
+	// Add Gemini image tools if GEMINI_API_KEY (or GOOGLE_API_KEY) is available
+	const geminiImageTools = await getGeminiImageTools();
+	if (geminiImageTools.length > 0) {
+		customTools.push(...(geminiImageTools as unknown as CustomTool[]));
+	}
+	time("getGeminiImageTools");
 
 	// Add specialized Exa web search tools if EXA_API_KEY is available
 	const exaSettings = settingsManager.getExaSettings();
 	if (exaSettings.enabled && exaSettings.enableSearch) {
-		const { getWebSearchTools } = await import("./tools/web-search/index.js");
 		const exaWebSearchTools = await getWebSearchTools({
 			enableLinkedin: exaSettings.enableLinkedin,
 			enableCompany: exaSettings.enableCompany,
@@ -730,34 +684,83 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		// Filter out the base web_search (already in built-in tools), add specialized Exa tools
 		const specializedTools = exaWebSearchTools.filter((t) => t.name !== "web_search");
 		if (specializedTools.length > 0) {
-			const loadedExaTools: LoadedCustomTool[] = specializedTools.map((tool) => ({
-				path: "<exa>",
-				resolvedPath: "<exa>",
-				tool,
-				source: { provider: "builtin", providerName: "builtin", level: "user" },
-			}));
-			customToolsResult = {
-				...customToolsResult,
-				tools: [...customToolsResult.tools, ...loadedExaTools],
-			};
+			customTools.push(...specializedTools);
 		}
 		time("getWebSearchTools");
 	}
 
-	// Add Gemini image tools if GEMINI_API_KEY (or GOOGLE_API_KEY) is available
-	const geminiImageTools = await getGeminiImageTools();
-	if (geminiImageTools.length > 0) {
-		const loadedGeminiTools: LoadedCustomTool[] = geminiImageTools.map((tool) => ({
-			path: "<gemini-image>",
-			resolvedPath: "<gemini-image>",
-			tool: tool as unknown as CustomTool,
-			source: { provider: "builtin", providerName: "builtin", level: "user" },
-		}));
-		customToolsResult = {
-			...customToolsResult,
-			tools: [...customToolsResult.tools, ...loadedGeminiTools],
+	const inlineExtensions: ExtensionFactory[] = options.extensions ? [...options.extensions] : [];
+	if (customTools.length > 0) {
+		inlineExtensions.push(createCustomToolsExtension(customTools));
+	}
+
+	// Load extensions (discovers from standard locations + configured paths)
+	let extensionsResult: LoadExtensionsResult;
+	if (options.preloadedExtensions !== undefined && options.preloadedExtensions.length > 0) {
+		extensionsResult = {
+			extensions: options.preloadedExtensions,
+			errors: [],
+			setUIContext: () => {},
 		};
-		time("getGeminiImageTools");
+	} else {
+		// Merge CLI extension paths with settings extension paths
+		const configuredPaths = [...(options.additionalExtensionPaths ?? []), ...settingsManager.getExtensionPaths()];
+		extensionsResult = await discoverAndLoadExtensions(
+			configuredPaths,
+			cwd,
+			eventBus,
+			settingsManager.getDisabledExtensions(),
+		);
+		time("discoverAndLoadExtensions");
+		for (const { path, error } of extensionsResult.errors) {
+			console.error(`Failed to load extension "${path}": ${error}`);
+		}
+	}
+
+	// Load inline extensions from factories
+	if (inlineExtensions.length > 0) {
+		const uiHolder: { ui: any; hasUI: boolean } = {
+			ui: {
+				select: async () => undefined,
+				confirm: async () => false,
+				input: async () => undefined,
+				notify: () => {},
+				setStatus: () => {},
+				setWidget: () => {},
+				setTitle: () => {},
+				custom: async () => undefined as never,
+				setEditorText: () => {},
+				getEditorText: () => "",
+				editor: async () => undefined,
+				get theme() {
+					return {} as any;
+				},
+			},
+			hasUI: false,
+		};
+		for (let i = 0; i < inlineExtensions.length; i++) {
+			const factory = inlineExtensions[i];
+			const loaded = loadExtensionFromFactory(factory, cwd, eventBus, uiHolder, `<inline-${i}>`);
+			extensionsResult.extensions.push(loaded);
+		}
+		const originalSetUIContext = extensionsResult.setUIContext;
+		extensionsResult.setUIContext = (uiContext, hasUI) => {
+			originalSetUIContext(uiContext, hasUI);
+			uiHolder.ui = uiContext;
+			uiHolder.hasUI = hasUI;
+		};
+	}
+
+	// Discover custom commands (TypeScript slash commands)
+	const customCommandsResult = await loadCustomCommandsInternal({ cwd, agentDir });
+	time("discoverCustomCommands");
+	for (const { path, error } of customCommandsResult.errors) {
+		console.error(`Failed to load custom command "${path}": ${error}`);
+	}
+
+	let extensionRunner: ExtensionRunner | undefined;
+	if (extensionsResult.extensions.length > 0) {
+		extensionRunner = new ExtensionRunner(extensionsResult.extensions, cwd, sessionManager, modelRegistry);
 	}
 
 	let agent: Agent;
@@ -773,90 +776,148 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		},
 	});
 	const toolContextStore = createToolContextStore(getSessionContext);
-	const wrappedCustomTools = wrapCustomTools(customToolsResult.tools, getSessionContext);
-	const baseSetUIContext = customToolsResult.setUIContext;
-	customToolsResult = {
-		...customToolsResult,
-		setUIContext: (uiContext, hasUI) => {
-			toolContextStore.setUIContext(uiContext, hasUI);
-			baseSetUIContext(uiContext, hasUI);
+
+	const registeredTools = extensionRunner?.getAllRegisteredTools() ?? [];
+	const allCustomTools = [
+		...registeredTools,
+		...(options.customTools?.map((tool) => {
+			const definition = isCustomTool(tool) ? customToolToDefinition(tool) : tool;
+			return { definition, extensionPath: "<sdk>" };
+		}) ?? []),
+	];
+	const wrappedExtensionTools = wrapRegisteredTools(allCustomTools, () => ({
+		ui: extensionRunner?.getUIContext() ?? {
+			select: async () => undefined,
+			confirm: async () => false,
+			input: async () => undefined,
+			notify: () => {},
+			setStatus: () => {},
+			setWidget: () => {},
+			setTitle: () => {},
+			custom: async () => undefined as never,
+			setEditorText: () => {},
+			getEditorText: () => "",
+			editor: async () => undefined,
+			get theme() {
+				return {} as any;
+			},
 		},
-	};
+		hasUI: extensionRunner?.getHasUI() ?? false,
+		cwd,
+		sessionManager,
+		modelRegistry,
+		model: agent.state.model,
+		isIdle: () => !session.isStreaming,
+		abort: () => {
+			session.abort();
+		},
+		hasPendingMessages: () => session.queuedMessageCount > 0,
+		hasQueuedMessages: () => session.queuedMessageCount > 0,
+	}));
 
-	let allToolsArray: Tool[] = [...builtInTools, ...wrappedCustomTools];
-
-	// Add rulebook tool if there are rules with descriptions (always enabled, regardless of --tools)
-	if (rulebookRules.length > 0) {
-		allToolsArray.push(createRulebookTool(rulebookRules));
+	const toolRegistry = new Map<string, AgentTool>();
+	for (const [name, tool] of Object.entries(allBuiltInToolsMap)) {
+		toolRegistry.set(name, tool as AgentTool);
+	}
+	for (const tool of wrappedExtensionTools as AgentTool[]) {
+		toolRegistry.set(tool.name, tool);
 	}
 
-	// Filter out hidden tools unless explicitly requested
+	let activeToolsArray: Tool[] = [...initialActiveBuiltInTools, ...wrappedExtensionTools];
+
+	if (rulebookRules.length > 0) {
+		activeToolsArray.push(createRulebookTool(rulebookRules));
+	}
+
 	if (options.explicitTools) {
 		const explicitSet = new Set(options.explicitTools);
-		allToolsArray = allToolsArray.filter((tool) => !tool.hidden || explicitSet.has(tool.name));
+		activeToolsArray = activeToolsArray.filter((tool) => !tool.hidden || explicitSet.has(tool.name));
 	} else {
-		allToolsArray = allToolsArray.filter((tool) => !tool.hidden);
+		activeToolsArray = activeToolsArray.filter((tool) => !tool.hidden);
 	}
 	time("combineTools");
 
-	// Apply bash interception to redirect common shell patterns to proper tools (if enabled)
 	if (settingsManager.getBashInterceptorEnabled()) {
-		allToolsArray = applyBashInterception(allToolsArray);
+		activeToolsArray = applyBashInterception(activeToolsArray);
 	}
 	time("applyBashInterception");
 
-	if (hookRunner) {
-		allToolsArray = wrapToolsWithHooks(allToolsArray, hookRunner) as Tool[];
+	let wrappedToolRegistry: Map<string, AgentTool> | undefined;
+	if (extensionRunner) {
+		activeToolsArray = wrapToolsWithExtensions(activeToolsArray as AgentTool[], extensionRunner);
+		const allRegistryTools = Array.from(toolRegistry.values());
+		const wrappedAllTools = wrapToolsWithExtensions(allRegistryTools, extensionRunner);
+		wrappedToolRegistry = new Map<string, AgentTool>();
+		for (const tool of wrappedAllTools) {
+			wrappedToolRegistry.set(tool.name, tool);
+		}
 	}
 
-	let systemPrompt: string;
-	const defaultPrompt = buildSystemPromptInternal({
-		cwd,
-		skills,
-		contextFiles,
-		rulebookRules,
-	});
-	time("buildSystemPrompt");
-
-	if (options.systemPrompt === undefined) {
-		systemPrompt = defaultPrompt;
-	} else if (typeof options.systemPrompt === "string") {
-		systemPrompt = buildSystemPromptInternal({
+	const rebuildSystemPrompt = (toolNames: string[]): string => {
+		const validToolNames = toolNames.filter((n): n is ToolName => n in allBuiltInToolsMap);
+		const extraToolDescriptions = toolNames
+			.filter((name) => !(name in allBuiltInToolsMap))
+			.map((name) => {
+				const tool = toolRegistry.get(name);
+				if (!tool) return null;
+				return { name, description: tool.description || tool.label || "Custom tool" };
+			})
+			.filter((tool): tool is { name: string; description: string } => tool !== null);
+		const defaultPrompt = buildSystemPromptInternal({
 			cwd,
 			skills,
 			contextFiles,
 			rulebookRules,
-			customPrompt: options.systemPrompt,
+			selectedTools: validToolNames,
+			extraToolDescriptions,
+			skillsSettings: settingsManager.getSkillsSettings(),
 		});
-	} else {
-		systemPrompt = options.systemPrompt(defaultPrompt);
-	}
 
-	const commandsSettings = settingsManager.getCommandsSettings();
-	const slashCommands = options.slashCommands ?? discoverSlashCommands(cwd, agentDir, commandsSettings);
-	time("discoverSlashCommands");
+		if (options.systemPrompt === undefined) {
+			return defaultPrompt;
+		}
+		if (typeof options.systemPrompt === "string") {
+			return buildSystemPromptInternal({
+				cwd,
+				skills,
+				contextFiles,
+				rulebookRules,
+				selectedTools: validToolNames,
+				extraToolDescriptions,
+				skillsSettings: settingsManager.getSkillsSettings(),
+				customPrompt: options.systemPrompt,
+			});
+		}
+		return options.systemPrompt(defaultPrompt);
+	};
 
-	// Discover custom commands (TypeScript slash commands)
-	const customCommandsResult = await loadCustomCommandsInternal({ cwd, agentDir });
-	time("discoverCustomCommands");
-	for (const { path, error } of customCommandsResult.errors) {
-		console.error(`Failed to load custom command "${path}": ${error}`);
-	}
+	const systemPrompt = rebuildSystemPrompt(initialActiveToolNames);
+	time("buildSystemPrompt");
+
+	const promptTemplates = options.promptTemplates ?? (await discoverPromptTemplates(cwd, agentDir));
+	time("discoverPromptTemplates");
+
+	const baseSetUIContext = extensionsResult.setUIContext;
+	extensionsResult.setUIContext = (uiContext, hasUI) => {
+		baseSetUIContext(uiContext, hasUI);
+		toolContextStore.setUIContext(uiContext, hasUI);
+	};
 
 	agent = new Agent({
 		initialState: {
 			systemPrompt,
 			model,
 			thinkingLevel,
-			tools: allToolsArray,
+			tools: activeToolsArray,
 		},
 		convertToLlm,
-		transformContext: hookRunner
+		transformContext: extensionRunner
 			? async (messages) => {
-					return hookRunner.emitContext(messages);
+					return extensionRunner.emitContext(messages);
 				}
 			: undefined,
-		queueMode: settingsManager.getQueueMode(),
+		steeringMode: settingsManager.getSteeringMode(),
+		followUpMode: settingsManager.getFollowUpMode(),
 		interruptMode: settingsManager.getInterruptMode(),
 		getToolContext: toolContextStore.getContext,
 		getApiKey: async () => {
@@ -889,12 +950,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		sessionManager,
 		settingsManager,
 		scopedModels: options.scopedModels,
-		fileCommands: slashCommands,
-		hookRunner,
-		customTools: customToolsResult.tools,
+		promptTemplates,
+		extensionRunner,
 		customCommands: customCommandsResult.commands,
 		skillsSettings: settingsManager.getSkillsSettings(),
 		modelRegistry,
+		toolRegistry: wrappedToolRegistry ?? toolRegistry,
+		rebuildSystemPrompt,
 		ttsrManager,
 	});
 	time("createAgentSession");
@@ -913,7 +975,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	return {
 		session,
-		customToolsResult,
+		extensionsResult,
 		mcpManager,
 		modelFallbackMessage,
 		lspServers,

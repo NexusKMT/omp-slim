@@ -6,6 +6,7 @@ import {
 	isArrowLeft,
 	isArrowRight,
 	isArrowUp,
+	isCtrlC,
 	isEnter,
 	isEscape,
 	isShiftTab,
@@ -202,7 +203,7 @@ export class ModelSelectorComponent extends Container {
 			}));
 		} else {
 			// Refresh to pick up any changes to models.json
-			this.modelRegistry.refresh();
+			await this.modelRegistry.refresh();
 
 			// Check for models.json errors
 			const loadError = this.modelRegistry.getError();
@@ -212,7 +213,7 @@ export class ModelSelectorComponent extends Container {
 
 			// Load available models (built-in models still work even if models.json failed)
 			try {
-				const availableModels = await this.modelRegistry.getAvailable();
+				const availableModels = this.modelRegistry.getAvailable();
 				models = availableModels.map((model: Model<any>) => ({
 					provider: model.provider,
 					id: model.id,
@@ -490,8 +491,8 @@ export class ModelSelectorComponent extends Container {
 			return;
 		}
 
-		// Escape - close selector
-		if (isEscape(keyData)) {
+		// Escape or Ctrl+C - close selector
+		if (isEscape(keyData) || isCtrlC(keyData)) {
 			this.onCancelCallback();
 			return;
 		}
@@ -527,8 +528,8 @@ export class ModelSelectorComponent extends Container {
 			return;
 		}
 
-		// Escape - close menu only
-		if (isEscape(keyData)) {
+		// Escape or Ctrl+C - close menu only
+		if (isEscape(keyData) || isCtrlC(keyData)) {
 			this.closeMenu();
 			return;
 		}

@@ -1,5 +1,5 @@
+import { describe, expect, test } from "bun:test";
 import type { Model } from "@oh-my-pi/pi-ai";
-import { describe, expect, test } from "vitest";
 import { parseModelPattern } from "../src/core/model-resolver";
 
 // Mock models for testing
@@ -100,7 +100,8 @@ describe("parseModelPattern", () => {
 		});
 
 		test("all valid thinking levels work", () => {
-			for (const level of ["off", "minimal", "low", "medium", "high", "xhigh"]) {
+			const levels = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+			for (const level of levels) {
 				const result = parseModelPattern(`sonnet:${level}`, allModels);
 				expect(result.model?.id).toBe("claude-sonnet-4-5");
 				expect(result.thinkingLevel).toBe(level);

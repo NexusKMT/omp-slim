@@ -25,10 +25,10 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { getAuthPath, getDebugLogPath } from "../../config";
 import type { AgentSession, AgentSessionEvent } from "../../core/agent-session";
-import type { CustomToolSessionEvent, LoadedCustomTool } from "../../core/custom-tools/index";
-import type { HookUIContext } from "../../core/hooks/index";
-import { createCompactionSummaryMessage } from "../../core/messages";
+import type { ExtensionUIContext } from "../../core/extensions/index";
+import { type CustomMessage, createCompactionSummaryMessage } from "../../core/messages";
 import { getRecentSessions, type SessionContext, SessionManager } from "../../core/session-manager";
+import { loadSlashCommands } from "../../core/slash-commands";
 import { detectNotificationProtocol, isNotificationSuppressed, sendNotification } from "../../core/terminal-notify";
 import { generateSessionTitle, setTerminalTitle } from "../../core/title-generator";
 import type { TruncationResult } from "../../core/tools/truncate";
@@ -44,11 +44,11 @@ import { BorderedLoader } from "./components/bordered-loader";
 import { BranchSummaryMessageComponent } from "./components/branch-summary-message";
 import { CompactionSummaryMessageComponent } from "./components/compaction-summary-message";
 import { CustomEditor } from "./components/custom-editor";
+import { CustomMessageComponent } from "./components/custom-message";
 import { DynamicBorder } from "./components/dynamic-border";
 import { ExtensionDashboard } from "./components/extensions";
 import { HookEditorComponent } from "./components/hook-editor";
 import { HookInputComponent } from "./components/hook-input";
-import { HookMessageComponent } from "./components/hook-message";
 import { HookSelectorComponent } from "./components/hook-selector";
 import { ModelSelectorComponent } from "./components/model-selector";
 import { OAuthSelectorComponent } from "./components/oauth-selector";
@@ -163,9 +163,6 @@ export class InteractiveMode {
 	private hookInput: HookInputComponent | undefined = undefined;
 	private hookEditor: HookEditorComponent | undefined = undefined;
 
-	// Custom tools for custom rendering
-	private customTools: Map<string, LoadedCustomTool>;
-
 	// Convenience accessors
 	private get agent() {
 		return this.session.agent;
@@ -181,8 +178,7 @@ export class InteractiveMode {
 		session: AgentSession,
 		version: string,
 		changelogMarkdown: string | undefined = undefined,
-		customTools: LoadedCustomTool[] = [],
-		private setToolUIContext: (uiContext: HookUIContext, hasUI: boolean) => void = () => {},
+		private setToolUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void = () => {},
 		private lspServers:
 			| Array<{ name: string; status: "ready" | "error"; fileTypes: string[] }>
 			| undefined = undefined,
@@ -191,7 +187,6 @@ export class InteractiveMode {
 		this.session = session;
 		this.version = version;
 		this.changelogMarkdown = changelogMarkdown;
-		this.customTools = new Map(customTools.map((ct) => [ct.tool.name, ct]));
 		this.ui = new TUI(new ProcessTerminal());
 		this.chatContainer = new Container();
 		this.pendingMessagesContainer = new Container();
@@ -250,14 +245,15 @@ export class InteractiveMode {
 		// Load hide thinking block setting
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 
-		// Convert file commands to SlashCommand format
-		const fileSlashCommands: SlashCommand[] = this.session.fileCommands.map((cmd) => ({
+		// Load and convert file commands to SlashCommand format
+		const fileCommands = loadSlashCommands({ cwd: process.cwd() });
+		const fileSlashCommands: SlashCommand[] = fileCommands.map((cmd) => ({
 			name: cmd.name,
 			description: cmd.description,
 		}));
 
 		// Convert hook commands to SlashCommand format
-		const hookCommands: SlashCommand[] = (this.session.hookRunner?.getRegisteredCommands() ?? []).map((cmd) => ({
+		const hookCommands: SlashCommand[] = (this.session.extensionRunner?.getRegisteredCommands() ?? []).map((cmd) => ({
 			name: cmd.name,
 			description: cmd.description ?? "(hook command)",
 		}));
@@ -347,6 +343,10 @@ export class InteractiveMode {
 		this.ui.start();
 		this.isInitialized = true;
 
+		// Set terminal title
+		const cwdBasename = path.basename(process.cwd());
+		this.ui.terminal.setTitle(`pi - ${cwdBasename}`);
+
 		// Initialize hooks with TUI-based UI context
 		await this.initHooksAndCustomTools();
 
@@ -379,12 +379,14 @@ export class InteractiveMode {
 	 */
 	private async initHooksAndCustomTools(): Promise<void> {
 		// Create and set hook & tool UI context
-		const uiContext: HookUIContext = {
+		const uiContext: ExtensionUIContext = {
 			select: (title, options) => this.showHookSelector(title, options),
 			confirm: (title, message) => this.showHookConfirm(title, message),
 			input: (title, placeholder) => this.showHookInput(title, placeholder),
 			notify: (message, type) => this.showHookNotify(message, type),
 			setStatus: (key, text) => this.setHookStatus(key, text),
+			setWidget: (key, content) => this.setHookWidget(key, content),
+			setTitle: (title) => setTerminalTitle(title),
 			custom: (factory) => this.showHookCustom(factory),
 			setEditorText: (text) => this.editor.setText(text),
 			getEditorText: () => this.editor.getText(),
@@ -395,46 +397,17 @@ export class InteractiveMode {
 		};
 		this.setToolUIContext(uiContext, true);
 
-		// Notify custom tools of session start
-		await this.emitCustomToolSessionEvent({
-			reason: "start",
-			previousSessionFile: undefined,
-		});
-
-		const hookRunner = this.session.hookRunner;
-		if (!hookRunner) {
+		const extensionRunner = this.session.extensionRunner;
+		if (!extensionRunner) {
 			return; // No hooks loaded
 		}
 
-		this.initializeHookRunner(uiContext, true);
-
-		// Subscribe to hook errors
-		hookRunner.onError((error) => {
-			if (this.isBackgrounded) {
-				console.error(`Hook "${error.hookPath}" error: ${error.error}`);
-				return;
-			}
-			this.showHookError(error.hookPath, error.error);
-		});
-
-		// Emit session_start event
-		await hookRunner.emit({
-			type: "session_start",
-		});
-	}
-
-	private initializeHookRunner(uiContext: HookUIContext, hasUI: boolean): void {
-		const hookRunner = this.session.hookRunner;
-		if (!hookRunner) {
-			return;
-		}
-
-		hookRunner.initialize({
+		extensionRunner.initialize({
 			getModel: () => this.session.model,
-			sendMessageHandler: (message, triggerTurn) => {
+			sendMessageHandler: (message, options) => {
 				const wasStreaming = this.session.isStreaming;
 				this.session
-					.sendHookMessage(message, triggerTurn)
+					.sendCustomMessage(message, options)
 					.then(() => {
 						// For non-streaming cases with display=true, update UI
 						// (streaming cases update via message_end event)
@@ -443,7 +416,129 @@ export class InteractiveMode {
 						}
 					})
 					.catch((err) => {
-						const errorText = `Hook sendMessage failed: ${err instanceof Error ? err.message : String(err)}`;
+						this.showError(`Extension sendMessage failed: ${err instanceof Error ? err.message : String(err)}`);
+					});
+			},
+			appendEntryHandler: (customType, data) => {
+				this.sessionManager.appendCustomEntry(customType, data);
+			},
+			getActiveToolsHandler: () => this.session.getActiveToolNames(),
+			getAllToolsHandler: () => this.session.getAllToolNames(),
+			setActiveToolsHandler: (toolNames: string[]) => this.session.setActiveToolsByName(toolNames),
+			newSessionHandler: async (options) => {
+				// Stop any loading animation
+				if (this.loadingAnimation) {
+					this.loadingAnimation.stop();
+					this.loadingAnimation = undefined;
+				}
+				this.statusContainer.clear();
+
+				// Create new session
+				const success = await this.session.newSession({ parentSession: options?.parentSession });
+				if (!success) {
+					return { cancelled: true };
+				}
+
+				// Call setup callback if provided
+				if (options?.setup) {
+					await options.setup(this.sessionManager);
+				}
+
+				// Clear UI state
+				this.chatContainer.clear();
+				this.pendingMessagesContainer.clear();
+				this.streamingComponent = undefined;
+				this.streamingMessage = undefined;
+				this.pendingTools.clear();
+
+				this.chatContainer.addChild(new Spacer(1));
+				this.chatContainer.addChild(
+					new Text(`${theme.fg("accent", `${theme.status.success} New session started`)}`, 1, 1),
+				);
+				this.ui.requestRender();
+
+				return { cancelled: false };
+			},
+			branchHandler: async (entryId) => {
+				const result = await this.session.branch(entryId);
+				if (result.cancelled) {
+					return { cancelled: true };
+				}
+
+				// Update UI
+				this.chatContainer.clear();
+				this.renderInitialMessages();
+				this.editor.setText(result.selectedText);
+				this.showStatus("Branched to new session");
+
+				return { cancelled: false };
+			},
+			navigateTreeHandler: async (targetId, options) => {
+				const result = await this.session.navigateTree(targetId, { summarize: options?.summarize });
+				if (result.cancelled) {
+					return { cancelled: true };
+				}
+
+				// Update UI
+				this.chatContainer.clear();
+				this.renderInitialMessages();
+				if (result.editorText) {
+					this.editor.setText(result.editorText);
+				}
+				this.showStatus("Navigated to selected point");
+
+				return { cancelled: false };
+			},
+			isIdle: () => !this.session.isStreaming,
+			waitForIdle: () => this.session.agent.waitForIdle(),
+			abort: () => {
+				this.session.abort();
+			},
+			hasPendingMessages: () => this.session.queuedMessageCount > 0,
+			uiContext,
+			hasUI: true,
+		});
+
+		// Subscribe to extension errors
+		extensionRunner.onError((error) => {
+			this.showExtensionError(error.extensionPath, error.error);
+		});
+
+		// Emit session_start event
+		await extensionRunner.emit({
+			type: "session_start",
+		});
+	}
+
+	/**
+	 * Set extension widget content.
+	 */
+	private setHookWidget(key: string, content: unknown): void {
+		this.statusLine.setHookStatus(key, String(content));
+		this.ui.requestRender();
+	}
+
+	private initializeHookRunner(uiContext: ExtensionUIContext, hasUI: boolean): void {
+		const extensionRunner = this.session.extensionRunner;
+		if (!extensionRunner) {
+			return;
+		}
+
+		extensionRunner.initialize({
+			getModel: () => this.session.model,
+			sendMessageHandler: (message, options) => {
+				const wasStreaming = this.session.isStreaming;
+				this.session
+					.sendCustomMessage(message, options)
+					.then(() => {
+						// For non-streaming cases with display=true, update UI
+						// (streaming cases update via message_end event)
+						if (!this.isBackgrounded && !wasStreaming && message.display) {
+							this.rebuildChatFromMessages();
+						}
+					})
+					.catch((err: Error) => {
+						const errorText = `Extension sendMessage failed: ${err instanceof Error ? err.message : String(err)}`;
 						if (this.isBackgrounded) {
 							console.error(errorText);
 							return;
@@ -454,6 +549,9 @@ export class InteractiveMode {
 			appendEntryHandler: (customType, data) => {
 				this.sessionManager.appendCustomEntry(customType, data);
 			},
+			getActiveToolsHandler: () => this.session.getActiveToolNames(),
+			getAllToolsHandler: () => this.session.getAllToolNames(),
+			setActiveToolsHandler: (toolNames) => this.session.setActiveToolsByName(toolNames),
 			newSessionHandler: async (options) => {
 				if (this.isBackgrounded) {
 					return { cancelled: true };
@@ -532,19 +630,21 @@ export class InteractiveMode {
 			abort: () => {
 				this.session.abort();
 			},
-			hasQueuedMessages: () => this.session.queuedMessageCount > 0,
+			hasPendingMessages: () => this.session.queuedMessageCount > 0,
 			uiContext,
 			hasUI,
 		});
 	}
 
-	private createBackgroundUiContext(): HookUIContext {
+	private createBackgroundUiContext(): ExtensionUIContext {
 		return {
 			select: async (_title: string, _options: string[]) => undefined,
 			confirm: async (_title: string, _message: string) => false,
 			input: async (_title: string, _placeholder?: string) => undefined,
 			notify: () => {},
 			setStatus: () => {},
+			setWidget: () => {},
+			setTitle: () => {},
 			custom: async <T>(
 				_factory: (
 					tui: TUI,
@@ -562,24 +662,36 @@ export class InteractiveMode {
 	}
 
 	/**
-	 * Emit session event to all custom tools.
+	 * Emit session event to all extension tools.
 	 */
-	private async emitCustomToolSessionEvent(event: CustomToolSessionEvent): Promise<void> {
-		for (const { tool } of this.customTools.values()) {
-			if (tool.onSession) {
+	private async emitCustomToolSessionEvent(
+		reason: "start" | "switch" | "branch" | "tree" | "shutdown",
+		previousSessionFile?: string,
+	): Promise<void> {
+		const event = { reason, previousSessionFile };
+		const uiContext = this.session.extensionRunner?.getUIContext();
+		if (!uiContext) {
+			return;
+		}
+		for (const registeredTool of this.session.extensionRunner?.getAllRegisteredTools() ?? []) {
+			if (registeredTool.definition.onSession) {
 				try {
-					await tool.onSession(event, {
+					await registeredTool.definition.onSession(event, {
+						ui: uiContext,
+						hasUI: !this.isBackgrounded,
+						cwd: this.sessionManager.getCwd(),
 						sessionManager: this.session.sessionManager,
 						modelRegistry: this.session.modelRegistry,
 						model: this.session.model,
 						isIdle: () => !this.session.isStreaming,
+						hasPendingMessages: () => this.session.queuedMessageCount > 0,
 						hasQueuedMessages: () => this.session.queuedMessageCount > 0,
 						abort: () => {
 							this.session.abort();
 						},
 					});
 				} catch (err) {
-					this.showToolError(tool.name, err instanceof Error ? err.message : String(err));
+					this.showToolError(registeredTool.definition.name, err instanceof Error ? err.message : String(err));
 				}
 			}
 		}
@@ -775,14 +887,10 @@ export class InteractiveMode {
 	}
 
 	/**
-	 * Show a hook error in the UI.
+	 * Show an extension error in the UI.
 	 */
-	private showHookError(hookPath: string, error: string): void {
-		if (this.isBackgrounded) {
-			console.error(`Hook "${hookPath}" error: ${error}`);
-			return;
-		}
-		const errorText = new Text(theme.fg("error", `Hook "${hookPath}" error: ${error}`), 1, 0);
+	private showExtensionError(extensionPath: string, error: string): void {
+		const errorText = new Text(theme.fg("error", `Extension "${extensionPath}" error: ${error}`), 1, 0);
 		this.chatContainer.addChild(errorText);
 		this.ui.requestRender();
 	}
@@ -800,7 +908,7 @@ export class InteractiveMode {
 			if (this.loadingAnimation) {
 				// Abort and restore queued messages to editor
 				const queuedMessages = this.session.clearQueue();
-				const queuedText = queuedMessages.join("\n\n");
+				const queuedText = [...queuedMessages.steering, ...queuedMessages.followUp].join("\n\n");
 				const currentText = this.editor.getText();
 				const combinedText = [queuedText, currentText].filter((t) => t.trim()).join("\n\n");
 				this.editor.setText(combinedText);
@@ -813,10 +921,14 @@ export class InteractiveMode {
 				this.isBashMode = false;
 				this.updateEditorBorderColor();
 			} else if (!this.editor.getText().trim()) {
-				// Double-escape with empty editor triggers /branch
+				// Double-escape with empty editor triggers /tree or /branch based on setting
 				const now = Date.now();
 				if (now - this.lastEscapeTime < 500) {
-					this.showUserMessageSelector();
+					if (this.settingsManager.getDoubleEscapeAction() === "tree") {
+						this.showTreeSelector();
+					} else {
+						this.showUserMessageSelector();
+					}
 					this.lastEscapeTime = 0;
 				} else {
 					this.lastEscapeTime = now;
@@ -830,6 +942,7 @@ export class InteractiveMode {
 		this.editor.onShiftTab = () => this.cycleThinkingLevel();
 		this.editor.onCtrlP = () => this.cycleModel("forward");
 		this.editor.onShiftCtrlP = () => this.cycleModel("backward");
+		this.editor.onCtrlY = () => this.cycleRoleModel();
 
 		// Global debug handler on TUI (works regardless of focus)
 		this.ui.onDebug = () => this.handleDebugCommand();
@@ -843,11 +956,33 @@ export class InteractiveMode {
 		this.editor.onQuestionMark = () => this.handleHotkeysCommand();
 		this.editor.onCtrlV = () => this.handleImagePaste();
 
+		// Wire up extension shortcuts
+		this.registerExtensionShortcuts();
+
 		this.editor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
 			this.isBashMode = text.trimStart().startsWith("!");
 			if (wasBashMode !== this.isBashMode) {
 				this.updateEditorBorderColor();
+			}
+		};
+
+		this.editor.onAltEnter = async (text: string) => {
+			text = text.trim();
+			if (!text) return;
+
+			// Alt+Enter queues a follow-up message (waits until agent finishes)
+			// This handles extension commands (execute immediately), prompt template expansion, and queueing
+			if (this.session.isStreaming) {
+				this.editor.addToHistory(text);
+				this.editor.setText("");
+				await this.session.prompt(text, { streamingBehavior: "followUp" });
+				this.updatePendingMessagesDisplay();
+				this.ui.requestRender();
+			}
+			// If not streaming, Alt+Enter acts like regular Enter (trigger onSubmit)
+			else if (this.editor.onSubmit) {
+				this.editor.onSubmit(text);
 			}
 		};
 	}
@@ -904,7 +1039,11 @@ export class InteractiveMode {
 				return;
 			}
 			if (text === "/branch") {
-				this.showUserMessageSelector();
+				if (this.settingsManager.getDoubleEscapeAction() === "tree") {
+					this.showTreeSelector();
+				} else {
+					this.showUserMessageSelector();
+				}
 				this.editor.setText("");
 				return;
 			}
@@ -965,9 +1104,10 @@ export class InteractiveMode {
 				return;
 			}
 
-			// Handle bash command
+			// Handle bash command (! for normal, !! for excluded from context)
 			if (text.startsWith("!")) {
-				const command = text.slice(1).trim();
+				const isExcluded = text.startsWith("!!");
+				const command = isExcluded ? text.slice(2).trim() : text.slice(1).trim();
 				if (command) {
 					if (this.session.isBashRunning) {
 						this.showWarning("A bash command is already running. Press Esc to cancel it first.");
@@ -975,7 +1115,7 @@ export class InteractiveMode {
 						return;
 					}
 					this.editor.addToHistory(text);
-					await this.handleBashCommand(command);
+					await this.handleBashCommand(command, isExcluded);
 					this.isBashMode = false;
 					this.updateEditorBorderColor();
 					return;
@@ -987,39 +1127,13 @@ export class InteractiveMode {
 				return;
 			}
 
-			// Hook commands always run immediately, even during streaming
-			// (if they need to interact with LLM, they use pi.sendMessage which handles queueing)
-			if (text.startsWith("/") && this.session.hookRunner) {
-				const spaceIndex = text.indexOf(" ");
-				const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
-				const command = this.session.hookRunner.getCommand(commandName);
-				if (command) {
-					this.editor.addToHistory(text);
-					this.editor.setText("");
-					await this.session.prompt(text);
-					return;
-				}
-			}
-
-			// Custom commands (TypeScript slash commands) - route through session.prompt()
-			if (text.startsWith("/") && this.session.customCommands.length > 0) {
-				const spaceIndex = text.indexOf(" ");
-				const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
-				const hasCustomCommand = this.session.customCommands.some((c) => c.command.name === commandName);
-				if (hasCustomCommand) {
-					this.editor.addToHistory(text);
-					this.editor.setText("");
-					await this.session.prompt(text);
-					return;
-				}
-			}
-
-			// Queue regular messages if agent is streaming
+			// If streaming, use prompt() with steer behavior
+			// This handles extension commands (execute immediately), prompt template expansion, and queueing
 			if (this.session.isStreaming) {
-				await this.session.queueMessage(text);
-				this.updatePendingMessagesDisplay();
 				this.editor.addToHistory(text);
 				this.editor.setText("");
+				await this.session.prompt(text, { streamingBehavior: "steer" });
+				this.updatePendingMessagesDisplay();
 				this.ui.requestRender();
 				return;
 			}
@@ -1086,7 +1200,7 @@ export class InteractiveMode {
 				break;
 
 			case "message_start":
-				if (event.message.role === "hookMessage") {
+				if (event.message.role === "hookMessage" || event.message.role === "custom") {
 					this.addMessageToChat(event.message);
 					this.ui.requestRender();
 				} else if (event.message.role === "user") {
@@ -1112,14 +1226,16 @@ export class InteractiveMode {
 						if (content.type === "toolCall") {
 							if (!this.pendingTools.has(content.id)) {
 								this.chatContainer.addChild(new Text("", 0, 0));
+								const tool = this.session.getToolByName(content.name);
 								const component = new ToolExecutionComponent(
 									content.name,
 									content.arguments,
 									{
 										showImages: this.settingsManager.getShowImages(),
 									},
-									this.customTools.get(content.name)?.tool,
+									tool,
 									this.ui,
+									this.sessionManager.getCwd(),
 								);
 								component.setExpanded(this.toolOutputExpanded);
 								this.chatContainer.addChild(component);
@@ -1180,14 +1296,16 @@ export class InteractiveMode {
 
 			case "tool_execution_start": {
 				if (!this.pendingTools.has(event.toolCallId)) {
+					const tool = this.session.getToolByName(event.toolName);
 					const component = new ToolExecutionComponent(
 						event.toolName,
 						event.args,
 						{
 							showImages: this.settingsManager.getShowImages(),
 						},
-						this.customTools.get(event.toolName)?.tool,
+						tool,
 						this.ui,
+						this.sessionManager.getCwd(),
 					);
 					component.setExpanded(this.toolOutputExpanded);
 					this.chatContainer.addChild(component);
@@ -1402,7 +1520,7 @@ export class InteractiveMode {
 	private addMessageToChat(message: AgentMessage, options?: { populateHistory?: boolean }): void {
 		switch (message.role) {
 			case "bashExecution": {
-				const component = new BashExecutionComponent(message.command, this.ui);
+				const component = new BashExecutionComponent(message.command, this.ui, message.excludeFromContext);
 				if (message.output) {
 					component.appendOutput(message.output);
 				}
@@ -1415,10 +1533,12 @@ export class InteractiveMode {
 				this.chatContainer.addChild(component);
 				break;
 			}
-			case "hookMessage": {
+			case "hookMessage":
+			case "custom": {
 				if (message.display) {
-					const renderer = this.session.hookRunner?.getMessageRenderer(message.customType);
-					this.chatContainer.addChild(new HookMessageComponent(message, renderer));
+					const renderer = this.session.extensionRunner?.getMessageRenderer(message.customType);
+					// Both HookMessage and CustomMessage have the same structure, cast for compatibility
+					this.chatContainer.addChild(new CustomMessageComponent(message as CustomMessage<unknown>, renderer));
 				}
 				break;
 			}
@@ -1494,12 +1614,14 @@ export class InteractiveMode {
 				// Render tool call components
 				for (const content of message.content) {
 					if (content.type === "toolCall") {
+						const tool = this.session.getToolByName(content.name);
 						const component = new ToolExecutionComponent(
 							content.name,
 							content.arguments,
 							{ showImages: this.settingsManager.getShowImages() },
-							this.customTools.get(content.name)?.tool,
+							tool,
 							this.ui,
+							this.sessionManager.getCwd(),
 						);
 						component.setExpanded(this.toolOutputExpanded);
 						this.chatContainer.addChild(component);
@@ -1593,14 +1715,6 @@ export class InteractiveMode {
 		await this.sessionManager.flush();
 
 		// Emit shutdown event to hooks
-		const hookRunner = this.session.hookRunner;
-		if (hookRunner?.hasHandlers("session_shutdown")) {
-			await hookRunner.emit({
-				type: "session_shutdown",
-			});
-		}
-
-		// Emit shutdown event to custom tools
 		await this.session.emitCustomToolSessionEvent("shutdown");
 
 		this.stop();
@@ -1818,7 +1932,7 @@ export class InteractiveMode {
 
 		if (this.session.isStreaming) {
 			await this.session.abort();
-			await this.session.queueMessage(toSend);
+			await this.session.steer(toSend);
 			this.updatePendingMessagesDisplay();
 			return;
 		}
@@ -1889,6 +2003,25 @@ export class InteractiveMode {
 					result.model.reasoning && result.thinkingLevel !== "off" ? ` (thinking: ${result.thinkingLevel})` : "";
 				this.showStatus(`Switched to ${result.model.name || result.model.id}${thinkingStr}`);
 			}
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private async cycleRoleModel(): Promise<void> {
+		try {
+			const result = await this.session.cycleRoleModels(["slow", "default", "smol"]);
+			if (!result) {
+				this.showStatus("Only one role model available");
+				return;
+			}
+
+			this.statusLine.invalidate();
+			this.updateEditorBorderColor();
+			const roleLabel = result.role === "default" ? "default" : result.role;
+			const thinkingStr =
+				result.model.reasoning && result.thinkingLevel !== "off" ? ` (thinking: ${result.thinkingLevel})` : "";
+			this.showStatus(`Switched to ${roleLabel}: ${result.model.name || result.model.id}${thinkingStr}`);
 		} catch (error) {
 			this.showError(error instanceof Error ? error.message : String(error));
 		}
@@ -2023,10 +2156,13 @@ export class InteractiveMode {
 	private updatePendingMessagesDisplay(): void {
 		this.pendingMessagesContainer.clear();
 		const queuedMessages = this.session.getQueuedMessages();
-		if (queuedMessages.length > 0) {
+		const steeringMessages = queuedMessages.steering.map((message) => ({ message, label: "Steer" }));
+		const followUpMessages = queuedMessages.followUp.map((message) => ({ message, label: "Follow-up" }));
+		const allMessages = [...steeringMessages, ...followUpMessages];
+		if (allMessages.length > 0) {
 			this.pendingMessagesContainer.addChild(new Spacer(1));
-			for (const message of queuedMessages) {
-				const queuedText = theme.fg("dim", `Queued: ${message}`);
+			for (const entry of allMessages) {
+				const queuedText = theme.fg("dim", `${entry.label}: ${entry.message}`);
 				this.pendingMessagesContainer.addChild(new TruncatedText(queuedText, 1, 0));
 			}
 		}
@@ -2147,8 +2283,11 @@ export class InteractiveMode {
 				this.session.setAutoCompactionEnabled(value as boolean);
 				this.statusLine.setAutoCompactEnabled(value as boolean);
 				break;
-			case "queueMode":
-				this.session.setQueueMode(value as "all" | "one-at-a-time");
+			case "steeringMode":
+				this.session.setSteeringMode(value as "all" | "one-at-a-time");
+				break;
+			case "followUpMode":
+				this.session.setFollowUpMode(value as "all" | "one-at-a-time");
 				break;
 			case "interruptMode":
 				this.session.setInterruptMode(value as "immediate" | "wait");
@@ -2509,7 +2648,7 @@ export class InteractiveMode {
 								},
 							});
 							// Refresh models to pick up new baseUrl (e.g., github-copilot)
-							this.session.modelRegistry.refresh();
+							await this.session.modelRegistry.refresh();
 							this.chatContainer.addChild(new Spacer(1));
 							this.chatContainer.addChild(
 								new Text(
@@ -2527,9 +2666,9 @@ export class InteractiveMode {
 						}
 					} else {
 						try {
-							this.session.modelRegistry.authStorage.logout(providerId);
+							await this.session.modelRegistry.authStorage.logout(providerId);
 							// Refresh models to reset baseUrl
-							this.session.modelRegistry.refresh();
+							await this.session.modelRegistry.refresh();
 							this.chatContainer.addChild(new Spacer(1));
 							this.chatContainer.addChild(
 								new Text(
@@ -2740,7 +2879,7 @@ export class InteractiveMode {
 		const stats = this.session.getSessionStats();
 
 		let info = `${theme.bold("Session Info")}\n\n`;
-		info += `${theme.fg("dim", "File:")} ${stats.sessionFile}\n`;
+		info += `${theme.fg("dim", "File:")} ${stats.sessionFile ?? "In-memory"}\n`;
 		info += `${theme.fg("dim", "ID:")} ${stats.sessionId}\n\n`;
 		info += `${theme.bold("Messages")}\n`;
 		info += `${theme.fg("dim", "User:")} ${stats.userMessages}\n`;
@@ -2790,6 +2929,31 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	/**
+	 * Register extension-defined keyboard shortcuts with the editor.
+	 */
+	private registerExtensionShortcuts(): void {
+		const runner = this.session.extensionRunner;
+		if (!runner) return;
+
+		const shortcuts = runner.getShortcuts();
+		for (const [keyId, shortcut] of shortcuts) {
+			this.editor.setCustomKeyHandler(keyId, () => {
+				const ctx = runner.createCommandContext();
+				try {
+					shortcut.handler(ctx);
+				} catch (err) {
+					runner.emitError({
+						extensionPath: shortcut.extensionPath,
+						event: "shortcut",
+						error: err instanceof Error ? err.message : String(err),
+						stack: err instanceof Error ? err.stack : undefined,
+					});
+				}
+			});
+		}
+	}
+
 	private handleHotkeysCommand(): void {
 		const hotkeys = `
 **Navigation**
@@ -2819,9 +2983,9 @@ export class InteractiveMode {
 | \`Ctrl+Z\` | Suspend to background |
 | \`Shift+Tab\` | Cycle thinking level |
 | \`Ctrl+P\` | Cycle models |
+| \`Ctrl+Y\` | Cycle role models (slow/default/smol) |
 | \`Ctrl+O\` | Toggle tool output expansion |
 | \`Ctrl+T\` | Toggle thinking block visibility |
-| \`Ctrl+Y\` | Voice mode toggle (auto-send on silence) |
 | \`Ctrl+G\` | Edit message in external editor |
 | \`/\` | Slash commands |
 | \`!\` | Run bash command |
@@ -2906,9 +3070,9 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private async handleBashCommand(command: string): Promise<void> {
+	private async handleBashCommand(command: string, excludeFromContext = false): Promise<void> {
 		const isDeferred = this.session.isStreaming;
-		this.bashComponent = new BashExecutionComponent(command, this.ui);
+		this.bashComponent = new BashExecutionComponent(command, this.ui, excludeFromContext);
 
 		if (isDeferred) {
 			// Show in pending area when agent is streaming
@@ -2921,12 +3085,16 @@ export class InteractiveMode {
 		this.ui.requestRender();
 
 		try {
-			const result = await this.session.executeBash(command, (chunk) => {
-				if (this.bashComponent) {
-					this.bashComponent.appendOutput(chunk);
-					this.ui.requestRender();
-				}
-			});
+			const result = await this.session.executeBash(
+				command,
+				(chunk) => {
+					if (this.bashComponent) {
+						this.bashComponent.appendOutput(chunk);
+						this.ui.requestRender();
+					}
+				},
+				{ excludeFromContext },
+			);
 
 			if (this.bashComponent) {
 				this.bashComponent.setComplete(
