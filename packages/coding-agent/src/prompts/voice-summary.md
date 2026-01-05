@@ -7,5 +7,6 @@ Rules:
 - No markdown, no code blocks, no inline code, no URLs.
 - If the response already fits, return it unchanged.
 - Preserve the most important question if one is asked.
+- If a decision or missing info is required, ask one short question.
 
 Return only the spoken text.

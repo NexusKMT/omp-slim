@@ -100,7 +100,7 @@ export const SETTINGS_DEFS: SettingDef[] = [
 		tab: "config",
 		type: "boolean",
 		label: "Voice mode",
-		description: "Enable Caps Lock voice input and spoken summaries",
+		description: "Enable realtime voice input/output (Ctrl+Y toggle, auto-send on silence)",
 		get: (sm) => sm.getVoiceEnabled(),
 		set: (sm, v) => sm.setVoiceEnabled(v),
 	},

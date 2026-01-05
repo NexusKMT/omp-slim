@@ -1,10 +1,15 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Added
 
-- Added voice mode with Caps Lock toggle for speech-to-text input and text-to-speech response summaries using OpenAI Whisper and TTS APIs
+- Added VoiceSupervisor class for realtime voice mode using OpenAI Realtime API with continuous mic streaming and semantic VAD turn detection
+- Added VoiceController class for steering user input and deciding presentation of assistant responses
+- Added echo suppression and noise floor filtering for microphone input during voice playback
+- Added fallback transcript handling when realtime assistant produces no tool call or audio output
+- Added voice progress notifications that speak partial results after 15 seconds of streaming
+- Added platform-specific audio tool detection with helpful installation instructions for missing tools
+- Added realtime voice mode using OpenAI gpt-5-realtime with continuous mic streaming, interruptible input, and supervisor-controlled spoken updates
 - Added `gemini_image` tool for Gemini Nano Banana image generation when `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) is set
 - Added `description` field to task tool for displaying short user-facing summaries in progress output
 - Added `getApiKeyForProvider()` method to ModelRegistry for retrieving API keys by provider name
@@ -17,6 +22,11 @@
 
 ### Changed
 
+- Changed voice mode toggle from Caps Lock to Ctrl+Y with auto-send on silence behavior
+- Changed default TTS model from gpt-4o-mini-tts to tts-1
+- Changed voice mode description to reflect realtime input/output with auto-send on silence
+- Updated hotkeys help to show Ctrl+Y for voice mode toggle instead of Caps Lock
+- Voice mode now uses OpenAI Realtime (gpt-5-realtime) with Ctrl+Y toggle and auto-send on silence
 - Updated web search tool to support `auto` as explicit provider option for auto-detection
 - Standardized tool result rendering across grep, find, ls, notebook, ask, output, and web search tools with consistent tree formatting and expand hints
 - Updated grep and find tool output to display language-specific icons for files and folder icons for directories

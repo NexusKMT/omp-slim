@@ -42,6 +42,7 @@
 		"@oh-my-pi/pi-agent-core": "workspace:*",
 		"@oh-my-pi/pi-ai": "workspace:*",
 		"@oh-my-pi/pi-tui": "workspace:*",
+		"@openai/agents": "^0.3.7",
 		"@sinclair/typebox": "^0.34.46",
 		"ajv": "^8.17.1",
 		"chalk": "^5.5.0",
@@ -55,12 +56,13 @@
 		"nanoid": "^5.1.6",
 		"ndjson": "^2.0.0",
 		"node-html-parser": "^6.1.13",
+		"sharp": "^0.34.2",
 		"smol-toml": "^1.6.0",
 		"strip-ansi": "^7.1.2",
-		"sharp": "^0.34.2",
 		"winston": "^3.17.0",
 		"winston-daily-rotate-file": "^5.0.0",
-		"yaml": "^2.8.2"
+		"yaml": "^2.8.2",
+		"zod": "^4.3.5"
 	},
 	"devDependencies": {
 		"@types/diff": "^7.0.2",

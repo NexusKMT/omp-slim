@@ -96,7 +96,7 @@ function buildRecordingCommand(filePath: string, sampleRate: number, channels: n
 	return null;
 }
 
-export async function startVoiceRecording(settings: VoiceSettings): Promise<VoiceRecordingHandle> {
+export async function startVoiceRecording(_settings: VoiceSettings): Promise<VoiceRecordingHandle> {
 	const sampleRate = DEFAULT_SAMPLE_RATE;
 	const channels = DEFAULT_CHANNELS;
 	const filePath = join(tmpdir(), `omp-voice-${Date.now()}.wav`);
@@ -180,7 +180,7 @@ export async function synthesizeSpeech(
 			"Content-Type": "application/json",
 		},
 		body: JSON.stringify({
-			model: settings.ttsModel ?? "gpt-4o-mini-tts",
+			model: settings.ttsModel ?? "tts-1",
 			voice: settings.ttsVoice ?? "alloy",
 			format,
 			input: text,

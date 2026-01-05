@@ -752,7 +752,7 @@ export class SettingsManager {
 			enabled: this.settings.voice?.enabled ?? false,
 			transcriptionModel: this.settings.voice?.transcriptionModel ?? "whisper-1",
 			transcriptionLanguage: this.settings.voice?.transcriptionLanguage ?? "",
-			ttsModel: this.settings.voice?.ttsModel ?? "gpt-4o-mini-tts",
+			ttsModel: this.settings.voice?.ttsModel ?? "tts-1",
 			ttsVoice: this.settings.voice?.ttsVoice ?? "alloy",
 			ttsFormat: this.settings.voice?.ttsFormat ?? "wav",
 		};

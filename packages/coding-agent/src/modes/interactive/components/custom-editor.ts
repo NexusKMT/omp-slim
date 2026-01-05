@@ -9,6 +9,7 @@ import {
 	isCtrlP,
 	isCtrlT,
 	isCtrlV,
+	isCtrlY,
 	isCtrlZ,
 	isEscape,
 	isShiftCtrlP,
@@ -32,6 +33,7 @@ export class CustomEditor extends Editor {
 	public onCtrlZ?: () => void;
 	public onQuestionMark?: () => void;
 	public onCapsLock?: () => void;
+	public onCtrlY?: () => void;
 	/** Called when Ctrl+V is pressed. Returns true if handled (image found), false to fall through to text paste. */
 	public onCtrlV?: () => Promise<boolean>;
 
@@ -50,6 +52,12 @@ export class CustomEditor extends Editor {
 		// Intercept Ctrl+G for external editor
 		if (isCtrlG(data) && this.onCtrlG) {
 			this.onCtrlG();
+			return;
+		}
+
+		// Intercept Ctrl+Y for voice input
+		if (isCtrlY(data) && this.onCtrlY) {
+			this.onCtrlY();
 			return;
 		}
 

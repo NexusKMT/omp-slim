@@ -1,6 +1,19 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added support for kwaipilot/kat-coder-pro model via OpenRouter
+
+### Changed
+
+- Updated model specifications including context windows, max tokens, and pricing for multiple OpenRouter models
+
+### Removed
+
+- Removed alibaba/tongyi-deepresearch-30b-a3b:free model from OpenRouter
+- Removed nousresearch/hermes-4-405b model from OpenRouter
+- Removed tngtech/tng-r1t-chimera:free model from OpenRouter
 
 ## [3.15.1] - 2026-01-05
 

@@ -31,14 +31,7 @@ import { createCompactionSummaryMessage } from "../../core/messages";
 import { getRecentSessions, type SessionContext, SessionManager } from "../../core/session-manager";
 import { generateSessionTitle, setTerminalTitle } from "../../core/title-generator";
 import type { TruncationResult } from "../../core/tools/truncate";
-import {
-	playAudio,
-	startVoiceRecording,
-	summarizeForVoice,
-	synthesizeSpeech,
-	transcribeAudio,
-	type VoiceRecordingHandle,
-} from "../../core/voice";
+import { VoiceSupervisor } from "../../core/voice-supervisor";
 import { disableProvider, enableProvider } from "../../discovery";
 import { getChangelogPath, parseChangelog } from "../../utils/changelog";
 import { copyToClipboard, readImageFromClipboard } from "../../utils/clipboard";
@@ -87,6 +80,10 @@ interface Expandable {
 function isExpandable(obj: unknown): obj is Expandable {
 	return typeof obj === "object" && obj !== null && "setExpanded" in obj && typeof obj.setExpanded === "function";
 }
+
+const VOICE_PROGRESS_DELAY_MS = 15000;
+const VOICE_PROGRESS_MIN_CHARS = 160;
+const VOICE_PROGRESS_DELTA_CHARS = 120;
 
 export class InteractiveMode {
 	private session: AgentSession;
@@ -142,8 +139,12 @@ export class InteractiveMode {
 	private pendingImages: ImageContent[] = [];
 
 	// Voice mode state
-	private voiceRecording: VoiceRecordingHandle | undefined = undefined;
-	private voiceOutputQueue: Promise<void> = Promise.resolve();
+	private voiceSupervisor: VoiceSupervisor;
+	private voiceAutoModeEnabled = false;
+	private voiceProgressTimer: ReturnType<typeof setTimeout> | undefined = undefined;
+	private voiceProgressSpoken = false;
+	private voiceProgressLastLength = 0;
+	private lastVoiceInterruptAt = 0;
 
 	// Auto-compaction state
 	private autoCompactionLoader: Loader | undefined = undefined;
@@ -197,6 +198,26 @@ export class InteractiveMode {
 		this.editorContainer.addChild(this.editor);
 		this.statusLine = new StatusLineComponent(session);
 		this.statusLine.setAutoCompactEnabled(session.autoCompactionEnabled);
+		this.voiceSupervisor = new VoiceSupervisor(this.session.modelRegistry, {
+			onSendToAgent: async (text) => {
+				await this.submitVoiceText(text);
+			},
+			onInterruptAgent: async (reason) => {
+				await this.handleVoiceInterrupt(reason);
+			},
+			onStatus: (status) => {
+				this.setVoiceStatus(status);
+			},
+			onError: (error) => {
+				this.showError(error.message);
+				this.voiceAutoModeEnabled = false;
+				void this.voiceSupervisor.stop();
+				this.setVoiceStatus(undefined);
+			},
+			onWarning: (message) => {
+				this.showWarning(message);
+			},
+		});
 
 		// Define slash commands for autocomplete
 		const slashCommands: SlashCommand[] = [
@@ -749,11 +770,11 @@ export class InteractiveMode {
 		this.editor.onCtrlO = () => this.toggleToolOutputExpansion();
 		this.editor.onCtrlT = () => this.toggleThinkingBlockVisibility();
 		this.editor.onCtrlG = () => this.openExternalEditor();
-		this.editor.onQuestionMark = () => this.handleHotkeysCommand();
-		this.editor.onCtrlV = () => this.handleImagePaste();
-		this.editor.onCapsLock = () => {
+		this.editor.onCtrlY = () => {
 			void this.toggleVoiceListening();
 		};
+		this.editor.onQuestionMark = () => this.handleHotkeysCommand();
+		this.editor.onCtrlV = () => this.handleImagePaste();
 
 		this.editor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
@@ -988,6 +1009,7 @@ export class InteractiveMode {
 					getSymbolTheme().spinnerFrames,
 				);
 				this.statusContainer.addChild(this.loadingAnimation);
+				this.startVoiceProgressTimer();
 				this.ui.requestRender();
 				break;
 
@@ -1123,6 +1145,7 @@ export class InteractiveMode {
 			}
 
 			case "agent_end":
+				this.stopVoiceProgressTimer();
 				if (this.loadingAnimation) {
 					this.loadingAnimation.stop();
 					this.loadingAnimation = undefined;
@@ -1134,12 +1157,12 @@ export class InteractiveMode {
 					this.streamingMessage = undefined;
 				}
 				this.pendingTools.clear();
-				if (this.settingsManager.getVoiceEnabled()) {
+				if (this.settingsManager.getVoiceEnabled() && this.voiceAutoModeEnabled) {
 					const lastAssistant = this.findLastAssistantMessage();
 					if (lastAssistant && lastAssistant.stopReason !== "aborted" && lastAssistant.stopReason !== "error") {
 						const text = this.extractAssistantText(lastAssistant);
 						if (text) {
-							this.enqueueVoiceOutput(text);
+							this.voiceSupervisor.notifyResult(text);
 						}
 					}
 				}
@@ -1479,10 +1502,8 @@ export class InteractiveMode {
 	 * Emits shutdown event to hooks and tools, then exits.
 	 */
 	private async shutdown(): Promise<void> {
-		if (this.voiceRecording) {
-			await this.voiceRecording.cancel();
-			this.voiceRecording = undefined;
-		}
+		this.voiceAutoModeEnabled = false;
+		await this.voiceSupervisor.stop();
 
 		// Flush pending session writes before shutdown
 		await this.sessionManager.flush();
@@ -1550,65 +1571,90 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	private async handleVoiceInterrupt(reason?: string): Promise<void> {
+		const now = Date.now();
+		if (now - this.lastVoiceInterruptAt < 200) return;
+		this.lastVoiceInterruptAt = now;
+		if (this.session.isBashRunning) {
+			this.session.abortBash();
+		}
+		if (this.session.isStreaming) {
+			await this.session.abort();
+		}
+		if (reason) {
+			this.showStatus(reason);
+		}
+	}
+
+	private stopVoiceProgressTimer(): void {
+		if (this.voiceProgressTimer) {
+			clearTimeout(this.voiceProgressTimer);
+			this.voiceProgressTimer = undefined;
+		}
+	}
+
+	private startVoiceProgressTimer(): void {
+		this.stopVoiceProgressTimer();
+		if (!this.settingsManager.getVoiceEnabled() || !this.voiceAutoModeEnabled) return;
+		this.voiceProgressSpoken = false;
+		this.voiceProgressLastLength = 0;
+		this.voiceProgressTimer = setTimeout(() => {
+			void this.maybeSpeakProgress();
+		}, VOICE_PROGRESS_DELAY_MS);
+	}
+
+	private async maybeSpeakProgress(): Promise<void> {
+		if (!this.session.isStreaming || this.voiceProgressSpoken || !this.voiceAutoModeEnabled) return;
+		const streaming = this.streamingMessage;
+		if (!streaming) return;
+		const text = this.extractAssistantText(streaming);
+		if (!text || text.length < VOICE_PROGRESS_MIN_CHARS) {
+			if (this.session.isStreaming) {
+				this.voiceProgressTimer = setTimeout(() => {
+					void this.maybeSpeakProgress();
+				}, VOICE_PROGRESS_DELAY_MS);
+			}
+			return;
+		}
+
+		const delta = text.length - this.voiceProgressLastLength;
+		if (delta < VOICE_PROGRESS_DELTA_CHARS) {
+			if (this.session.isStreaming) {
+				this.voiceProgressTimer = setTimeout(() => {
+					void this.maybeSpeakProgress();
+				}, VOICE_PROGRESS_DELAY_MS);
+			}
+			return;
+		}
+
+		this.voiceProgressLastLength = text.length;
+		this.voiceProgressSpoken = true;
+		this.voiceSupervisor.notifyProgress(text);
+	}
+
 	private async toggleVoiceListening(): Promise<void> {
 		if (!this.settingsManager.getVoiceEnabled()) {
-			this.showStatus("Voice mode is disabled. Enable it in /settings.");
+			this.settingsManager.setVoiceEnabled(true);
+			this.showStatus("Voice mode enabled.");
+		}
+
+		if (this.voiceAutoModeEnabled) {
+			this.voiceAutoModeEnabled = false;
+			this.stopVoiceProgressTimer();
+			await this.voiceSupervisor.stop();
+			this.setVoiceStatus(undefined);
+			this.showStatus("Voice mode disabled.");
 			return;
 		}
 
-		if (this.voiceRecording) {
-			await this.stopVoiceListening();
-			return;
-		}
-
-		await this.startVoiceListening();
-	}
-
-	private async startVoiceListening(): Promise<void> {
-		if (this.voiceRecording) return;
+		this.voiceAutoModeEnabled = true;
 		try {
-			this.voiceRecording = await startVoiceRecording(this.settingsManager.getVoiceSettings());
-			this.setVoiceStatus("Listening... (Caps Lock to stop)");
+			await this.voiceSupervisor.start();
 		} catch (error) {
-			this.voiceRecording = undefined;
+			this.voiceAutoModeEnabled = false;
 			this.setVoiceStatus(undefined);
 			this.showError(error instanceof Error ? error.message : String(error));
 		}
-	}
-
-	private async stopVoiceListening(): Promise<void> {
-		const recording = this.voiceRecording;
-		if (!recording) return;
-		this.voiceRecording = undefined;
-		this.setVoiceStatus("Transcribing...");
-
-		try {
-			await recording.stop();
-			const apiKey = await this.session.modelRegistry.getApiKeyForProvider("openai");
-			if (!apiKey) {
-				throw new Error("OpenAI API key not found (set OPENAI_API_KEY or login).");
-			}
-
-			const { text } = await transcribeAudio(recording.filePath, apiKey, this.settingsManager.getVoiceSettings());
-			if (!text) {
-				this.showWarning("No speech detected. Try again.");
-				return;
-			}
-			await this.submitVoiceText(text);
-		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
-		} finally {
-			recording.cleanup();
-			this.setVoiceStatus(undefined);
-		}
-	}
-
-	private async cancelVoiceRecording(): Promise<void> {
-		const recording = this.voiceRecording;
-		if (!recording) return;
-		this.voiceRecording = undefined;
-		await recording.cancel();
-		this.setVoiceStatus(undefined);
 	}
 
 	private async submitVoiceText(text: string): Promise<void> {
@@ -1617,17 +1663,18 @@ export class InteractiveMode {
 			this.showWarning("No speech detected. Try again.");
 			return;
 		}
-
-		this.editor.addToHistory(cleaned);
+		const toSend = cleaned;
+		this.editor.addToHistory(toSend);
 
 		if (this.session.isStreaming) {
-			await this.session.queueMessage(cleaned);
+			await this.session.abort();
+			await this.session.queueMessage(toSend);
 			this.updatePendingMessagesDisplay();
 			return;
 		}
 
 		if (this.onInputCallback) {
-			this.onInputCallback({ text: cleaned });
+			this.onInputCallback({ text: toSend });
 		}
 	}
 
@@ -1649,38 +1696,6 @@ export class InteractiveMode {
 			}
 		}
 		return text.trim();
-	}
-
-	private enqueueVoiceOutput(text: string): void {
-		this.voiceOutputQueue = this.voiceOutputQueue
-			.then(() => this.speakVoiceSummary(text))
-			.catch((error) => {
-				this.showError(error instanceof Error ? error.message : String(error));
-			});
-	}
-
-	private async speakVoiceSummary(text: string): Promise<void> {
-		if (!this.settingsManager.getVoiceEnabled()) {
-			return;
-		}
-		const apiKey = await this.session.modelRegistry.getApiKeyForProvider("openai");
-		if (!apiKey) {
-			this.showWarning("OpenAI API key not found for voice playback.");
-			return;
-		}
-
-		const smolModel = this.settingsManager.getModelRole("smol");
-		const summary = (await summarizeForVoice(text, this.session.modelRegistry, smolModel)) ?? text;
-		const cleaned = summary.trim();
-		if (!cleaned) return;
-
-		this.setVoiceStatus("Speaking...");
-		try {
-			const synthesis = await synthesizeSpeech(cleaned, apiKey, this.settingsManager.getVoiceSettings());
-			await playAudio(synthesis.audio, synthesis.format);
-		} finally {
-			this.setVoiceStatus(undefined);
-		}
 	}
 
 	private updateEditorBorderColor(): void {
@@ -2020,9 +2035,9 @@ export class InteractiveMode {
 			}
 			case "voiceEnabled": {
 				if (!value) {
-					if (this.voiceRecording) {
-						void this.cancelVoiceRecording();
-					}
+					this.voiceAutoModeEnabled = false;
+					this.stopVoiceProgressTimer();
+					void this.voiceSupervisor.stop();
 					this.setVoiceStatus(undefined);
 				}
 				break;
@@ -2636,7 +2651,7 @@ export class InteractiveMode {
 | \`Ctrl+P\` | Cycle models |
 | \`Ctrl+O\` | Toggle tool output expansion |
 | \`Ctrl+T\` | Toggle thinking block visibility |
-| \`Caps Lock\` | Voice input (start/stop) |
+| \`Ctrl+Y\` | Voice mode toggle (auto-send on silence) |
 | \`Ctrl+G\` | Edit message in external editor |
 | \`/\` | Slash commands |
 | \`!\` | Run bash command |
