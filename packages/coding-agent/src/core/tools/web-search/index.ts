@@ -20,10 +20,11 @@ import type { CustomTool, CustomToolContext, RenderResultOptions } from "../../c
 import { callExaTool, findApiKey as findExaKey, formatSearchResults, isSearchResponse } from "../exa/mcp-client";
 import { renderExaCall, renderExaResult } from "../exa/render";
 import type { ExaRenderDetails } from "../exa/types";
+import { formatAge } from "../render-utils";
 import { searchAnthropic } from "./providers/anthropic";
 import { searchExa } from "./providers/exa";
 import { findApiKey as findPerplexityKey, searchPerplexity } from "./providers/perplexity";
-import { formatAge, renderWebSearchCall, renderWebSearchResult, type WebSearchRenderDetails } from "./render";
+import { renderWebSearchCall, renderWebSearchResult, type WebSearchRenderDetails } from "./render";
 import type { WebSearchProvider, WebSearchResponse } from "./types";
 
 /** Web search parameters schema */
@@ -31,8 +32,8 @@ export const webSearchSchema = Type.Object({
 	// Common
 	query: Type.String({ description: "Search query" }),
 	provider: Type.Optional(
-		Type.Union([Type.Literal("exa"), Type.Literal("anthropic"), Type.Literal("perplexity")], {
-			description: "Search provider (auto-detected if omitted based on API keys)",
+		Type.Union([Type.Literal("auto"), Type.Literal("exa"), Type.Literal("anthropic"), Type.Literal("perplexity")], {
+			description: "Search provider (auto-detected if omitted or set to auto)",
 		}),
 	),
 	num_results: Type.Optional(Type.Number({ description: "Maximum number of results to return" })),
@@ -81,7 +82,7 @@ export const webSearchSchema = Type.Object({
 
 export type WebSearchParams = {
 	query: string;
-	provider?: "exa" | "anthropic" | "perplexity";
+	provider?: "auto" | "exa" | "anthropic" | "perplexity";
 	num_results?: number;
 	// Anthropic
 	system_prompt?: string;
@@ -198,7 +199,7 @@ async function executeWebSearch(
 	params: WebSearchParams,
 ): Promise<{ content: Array<{ type: "text"; text: string }>; details: WebSearchRenderDetails }> {
 	try {
-		const provider = params.provider ?? (await detectProvider());
+		const provider = params.provider && params.provider !== "auto" ? params.provider : await detectProvider();
 
 		let response: WebSearchResponse;
 		if (provider === "exa") {

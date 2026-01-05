@@ -12,6 +12,7 @@ import * as path from "node:path";
 import * as readline from "node:readline";
 import { ensureArtifactsDir, getArtifactPaths } from "./artifacts";
 import { resolveModelPattern } from "./model-resolver";
+import { resolveOmpCommand } from "./omp-command";
 import { subprocessToolRegistry } from "./subprocess-tool-registry";
 import {
 	type AgentDefinition,
@@ -22,12 +23,6 @@ import {
 	OMP_SPAWNS_ENV,
 	type SingleResult,
 } from "./types";
-
-/** omp command: 'omp.cmd' on Windows, 'omp' elsewhere */
-const OMP_CMD = process.platform === "win32" ? "omp.cmd" : "omp";
-
-/** Windows shell option for spawn */
-const OMP_SHELL_OPT = process.platform === "win32";
 
 /** Options for subprocess execution */
 export interface ExecutorOptions {
@@ -268,10 +263,11 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	}
 
 	// Spawn subprocess
-	const proc = spawn(OMP_CMD, args, {
+	const ompCommand = resolveOmpCommand();
+	const proc = spawn(ompCommand.cmd, [...ompCommand.args, ...args], {
 		cwd,
 		stdio: ["ignore", "pipe", "pipe"],
-		shell: OMP_SHELL_OPT,
+		shell: ompCommand.shell,
 		env,
 	});
 

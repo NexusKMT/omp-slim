@@ -18,7 +18,6 @@ import type { AssistantMessage, ImageContent, Message, Model, TextContent, Usage
 import { isContextOverflow, modelsAreEqual, supportsXhigh } from "@oh-my-pi/pi-ai";
 import type { Rule } from "../capability/rule";
 import { getAuthPath } from "../config";
-import { parseModelString } from "./model-resolver";
 import { type BashResult, executeBash as executeBashCommand } from "./bash-executor";
 import {
 	type CompactionResult,
@@ -46,6 +45,7 @@ import type {
 import { logger } from "./logger";
 import type { BashExecutionMessage, HookMessage } from "./messages";
 import type { ModelRegistry } from "./model-registry";
+import { parseModelString } from "./model-resolver";
 import type { BranchSummaryEntry, CompactionEntry, NewSessionOptions, SessionManager } from "./session-manager";
 import type { SettingsManager, SkillsSettings } from "./settings-manager";
 import { expandSlashCommand, type FileSlashCommand, parseCommandArgs } from "./slash-commands";
@@ -921,7 +921,7 @@ export class AgentSession {
 		for (const role of roleOrder) {
 			const roleModelStr =
 				role === "default"
-					? this.settingsManager.getModelRole("default") ?? `${currentModel.provider}/${currentModel.id}`
+					? (this.settingsManager.getModelRole("default") ?? `${currentModel.provider}/${currentModel.id}`)
 					: this.settingsManager.getModelRole(role);
 			if (!roleModelStr) continue;
 

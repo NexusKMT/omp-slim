@@ -2384,7 +2384,7 @@ export function renderWebFetchResult(
 		? uiTheme.styledSymbol("status.warning", "warning")
 		: uiTheme.styledSymbol("status.success", "success");
 	const expandHint = expanded ? "" : uiTheme.fg("dim", " (Ctrl+O to expand)");
-	let text = `${statusIcon} ${uiTheme.fg("toolTitle", "Web Fetch")} ${uiTheme.fg("accent", `(${domain})`)}${uiTheme.sep.dot}${uiTheme.fg("dim", details.method)}${expandHint}`;
+	let text = `${statusIcon} ${uiTheme.fg("accent", `(${domain})`)}${uiTheme.sep.dot}${uiTheme.fg("dim", details.method)}${expandHint}`;
 
 	// Get content text
 	const contentText = result.content[0]?.text ?? "";

@@ -8,62 +8,29 @@ import type { Component } from "@oh-my-pi/pi-tui";
 import { Text } from "@oh-my-pi/pi-tui";
 import type { Theme } from "../../../modes/interactive/theme/theme";
 import type { RenderResultOptions } from "../../custom-tools/types";
+import {
+	formatAge,
+	formatCount,
+	formatExpandHint,
+	formatMoreItems,
+	getDomain,
+	getPreviewLines,
+	getStyledStatusIcon,
+	PREVIEW_LIMITS,
+	TRUNCATE_LENGTHS,
+	truncate,
+} from "../render-utils";
 import type { WebSearchResponse } from "./types";
 
-/** Truncate text to max length with ellipsis */
-export function truncate(text: string, maxLen: number, ellipsis: string): string {
-	if (text.length <= maxLen) return text;
-	const sliceLen = Math.max(0, maxLen - ellipsis.length);
-	return `${text.slice(0, sliceLen)}${ellipsis}`;
-}
-
-/** Extract domain from URL */
-export function getDomain(url: string): string {
-	try {
-		const u = new URL(url);
-		return u.hostname.replace(/^www\./, "");
-	} catch {
-		return url;
-	}
-}
-
-/** Format age string from seconds */
-export function formatAge(ageSeconds: number | null | undefined): string {
-	if (!ageSeconds) return "";
-	const mins = Math.floor(ageSeconds / 60);
-	const hours = Math.floor(mins / 60);
-	const days = Math.floor(hours / 24);
-	const weeks = Math.floor(days / 7);
-	const months = Math.floor(days / 30);
-
-	if (months > 0) return `${months}mo ago`;
-	if (weeks > 0) return `${weeks}w ago`;
-	if (days > 0) return `${days}d ago`;
-	if (hours > 0) return `${hours}h ago`;
-	if (mins > 0) return `${mins}m ago`;
-	return "just now";
-}
-
-/** Get first N lines of text as preview */
-export function getPreviewLines(text: string, maxLines: number, maxLineLen: number, ellipsis: string): string[] {
-	const lines = text.split("\n").filter((l) => l.trim());
-	return lines.slice(0, maxLines).map((l) => truncate(l.trim(), maxLineLen, ellipsis));
-}
-
-const MAX_COLLAPSED_ANSWER_LINES = 3;
-const MAX_EXPANDED_ANSWER_LINES = 12;
-const MAX_ANSWER_LINE_LEN = 110;
+const MAX_COLLAPSED_ANSWER_LINES = PREVIEW_LIMITS.COLLAPSED_LINES;
+const MAX_EXPANDED_ANSWER_LINES = PREVIEW_LIMITS.EXPANDED_LINES;
+const MAX_ANSWER_LINE_LEN = TRUNCATE_LENGTHS.LINE;
 const MAX_SNIPPET_LINES = 2;
-const MAX_SNIPPET_LINE_LEN = 110;
+const MAX_SNIPPET_LINE_LEN = TRUNCATE_LENGTHS.LINE;
 const MAX_RELATED_QUESTIONS = 6;
 const MAX_QUERY_PREVIEW = 2;
 const MAX_QUERY_LEN = 90;
 const MAX_REQUEST_ID_LEN = 36;
-
-function formatCount(label: string, count: number): string {
-	const safeCount = Number.isFinite(count) ? count : 0;
-	return `${safeCount} ${label}${safeCount === 1 ? "" : "s"}`;
-}
 
 function renderFallbackText(contentText: string, expanded: boolean, theme: Theme): Component {
 	const lines = contentText.split("\n").filter((line) => line.trim());
@@ -71,9 +38,9 @@ function renderFallbackText(contentText: string, expanded: boolean, theme: Theme
 	const displayLines = lines.slice(0, maxLines).map((line) => truncate(line.trim(), 110, theme.format.ellipsis));
 	const remaining = lines.length - displayLines.length;
 
-	const headerIcon = theme.fg("warning", theme.status.warning);
-	const expandHint = expanded ? "" : theme.fg("dim", " (Ctrl+O to expand)");
-	let text = `${headerIcon} ${theme.fg("toolTitle", "Web Search")}${expandHint}`;
+	const headerIcon = getStyledStatusIcon("warning", theme);
+	const expandHint = formatExpandHint(expanded, remaining > 0, theme);
+	let text = `${headerIcon} ${theme.fg("dim", "Response")}${expandHint}`;
 
 	if (displayLines.length === 0) {
 		text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", "No response data")}`;
@@ -87,10 +54,7 @@ function renderFallbackText(contentText: string, expanded: boolean, theme: Theme
 	}
 
 	if (!expanded && remaining > 0) {
-		text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
-			"muted",
-			`${theme.format.ellipsis} ${remaining} more line${remaining === 1 ? "" : "s"}`,
-		)}`;
+		text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", formatMoreItems(remaining, "line", theme))}`;
 	}
 
 	return new Text(text, 0, 0);
@@ -134,23 +98,6 @@ export function renderWebSearchResult(
 		: [];
 	const provider = response.provider;
 
-	// Build header: status icon Web Search (provider) · counts
-	const providerLabel =
-		provider === "anthropic"
-			? "Anthropic"
-			: provider === "perplexity"
-				? "Perplexity"
-				: provider === "exa"
-					? "Exa"
-					: "Unknown";
-	const headerIcon =
-		sourceCount > 0 ? theme.fg("success", theme.status.success) : theme.fg("warning", theme.status.warning);
-	const expandHint = expanded ? "" : theme.fg("dim", " (Ctrl+O to expand)");
-	let text = `${headerIcon} ${theme.fg("toolTitle", "Web Search")} ${theme.fg("dim", `(${providerLabel})`)}${theme.sep.dot}${theme.fg(
-		"dim",
-		formatCount("source", sourceCount),
-	)}${expandHint}`;
-
 	// Get answer text
 	const answerText = typeof response.answer === "string" ? response.answer.trim() : "";
 	const contentText = answerText || rawText;
@@ -160,36 +107,57 @@ export function renderWebSearchResult(
 		? getPreviewLines(contentText, answerLimit, MAX_ANSWER_LINE_LEN, theme.format.ellipsis)
 		: [];
 
+	// Build header: status icon Web Search (provider) · counts
+	const providerLabel =
+		provider === "anthropic"
+			? "Anthropic"
+			: provider === "perplexity"
+				? "Perplexity"
+				: provider === "exa"
+					? "Exa"
+					: "Unknown";
+	const headerIcon = getStyledStatusIcon(sourceCount > 0 ? "success" : "warning", theme);
+	const hasMore =
+		totalAnswerLines > answerPreview.length ||
+		sourceCount > 0 ||
+		citationCount > 0 ||
+		relatedCount > 0 ||
+		searchQueries.length > 0;
+	const expandHint = formatExpandHint(expanded, hasMore, theme);
+	let text = `${headerIcon} ${theme.fg("dim", `(${providerLabel})`)}${theme.sep.dot}${theme.fg(
+		"dim",
+		formatCount("source", sourceCount),
+	)}${expandHint}`;
+
 	if (!expanded) {
 		const answerTitle = `${theme.fg("accent", theme.status.info)} ${theme.fg("accent", "Answer")}`;
-		text += `\n ${theme.fg("dim", theme.tree.vertical)} ${answerTitle}`;
-
-		if (answerPreview.length === 0) {
-			text += `\n ${theme.fg("dim", theme.tree.vertical)} ${theme.fg("dim", `${theme.tree.hook} `)}${theme.fg(
-				"muted",
-				"No answer text returned",
-			)}`;
-		} else {
-			for (const line of answerPreview) {
-				text += `\n ${theme.fg("dim", theme.tree.vertical)} ${theme.fg("dim", `${theme.tree.hook} `)}${theme.fg(
-					"dim",
-					line,
-				)}`;
-			}
-		}
+		text += `\n ${theme.fg("dim", theme.tree.branch)} ${answerTitle}`;
 
 		const remaining = totalAnswerLines - answerPreview.length;
+		const allLines: Array<{ text: string; style: "dim" | "muted" }> = [];
+
+		if (answerPreview.length === 0) {
+			allLines.push({ text: "No answer text returned", style: "muted" });
+		} else {
+			for (const line of answerPreview) {
+				allLines.push({ text: line, style: "dim" });
+			}
+		}
 		if (remaining > 0) {
-			text += `\n ${theme.fg("dim", theme.tree.vertical)} ${theme.fg("dim", `${theme.tree.hook} `)}${theme.fg(
-				"muted",
-				`${theme.format.ellipsis} ${remaining} more line${remaining === 1 ? "" : "s"}`,
-			)}`;
+			allLines.push({ text: formatMoreItems(remaining, "line", theme), style: "muted" });
+		}
+
+		for (let i = 0; i < allLines.length; i++) {
+			const { text: lineText, style } = allLines[i];
+			const isLastLine = i === allLines.length - 1;
+			const lineBranch = isLastLine ? theme.tree.last : theme.tree.branch;
+			text += `\n ${theme.fg("dim", theme.tree.vertical)} ${theme.fg("dim", lineBranch)} ${theme.fg(style, lineText)}`;
 		}
 
 		const summary = [
 			formatCount("source", sourceCount),
 			formatCount("citation", citationCount),
-			formatCount("related", relatedCount),
+			formatCount("related question", relatedCount),
 		].join(theme.sep.dot);
 		text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", summary)}`;
 		return new Text(text, 0, 0);
@@ -201,9 +169,7 @@ export function renderWebSearchResult(
 	);
 	const remainingAnswer = totalAnswerLines - answerPreview.length;
 	if (remainingAnswer > 0) {
-		answerSectionLines.push(
-			theme.fg("muted", `${theme.format.ellipsis} ${remainingAnswer} more line${remainingAnswer === 1 ? "" : "s"}`),
-		);
+		answerSectionLines.push(theme.fg("muted", formatMoreItems(remainingAnswer, "line", theme)));
 	}
 
 	const sourceLines: string[] = [];
@@ -263,14 +229,7 @@ export function renderWebSearchResult(
 			relatedLines.push(theme.fg("muted", `${theme.format.dash} ${related[i]}`));
 		}
 		if (relatedCount > maxRelated) {
-			relatedLines.push(
-				theme.fg(
-					"muted",
-					`${theme.format.ellipsis} ${relatedCount - maxRelated} more question${
-						relatedCount - maxRelated === 1 ? "" : "s"
-					}`,
-				),
-			);
+			relatedLines.push(theme.fg("muted", formatMoreItems(relatedCount - maxRelated, "question", theme)));
 		}
 	}
 
@@ -311,36 +270,29 @@ export function renderWebSearchResult(
 			metaLines.push(theme.fg("muted", `${theme.format.dash} ${truncate(q, MAX_QUERY_LEN, theme.format.ellipsis)}`));
 		}
 		if (searchQueries.length > MAX_QUERY_PREVIEW) {
-			metaLines.push(
-				theme.fg(
-					"muted",
-					`${theme.format.ellipsis} ${searchQueries.length - MAX_QUERY_PREVIEW} more query${
-						searchQueries.length - MAX_QUERY_PREVIEW === 1 ? "" : "s"
-					}`,
-				),
-			);
+			metaLines.push(theme.fg("muted", formatMoreItems(searchQueries.length - MAX_QUERY_PREVIEW, "query", theme)));
 		}
 	}
 
 	const sections: Array<{ title: string; icon: string; lines: string[] }> = [
 		{
 			title: "Answer",
-			icon: theme.fg("accent", theme.status.info),
+			icon: getStyledStatusIcon("info", theme),
 			lines: answerSectionLines,
 		},
 		{
 			title: "Sources",
-			icon: sourceCount > 0 ? theme.fg("success", theme.status.success) : theme.fg("warning", theme.status.warning),
+			icon: getStyledStatusIcon(sourceCount > 0 ? "success" : "warning", theme),
 			lines: sourceLines,
 		},
 		{
 			title: "Related",
-			icon: relatedCount > 0 ? theme.fg("accent", theme.status.info) : theme.fg("warning", theme.status.warning),
+			icon: getStyledStatusIcon(relatedCount > 0 ? "info" : "warning", theme),
 			lines: relatedLines,
 		},
 		{
 			title: "Meta",
-			icon: theme.fg("accent", theme.status.info),
+			icon: getStyledStatusIcon("info", theme),
 			lines: metaLines,
 		},
 	];
@@ -349,11 +301,14 @@ export function renderWebSearchResult(
 		const section = sections[i];
 		const isLast = i === sections.length - 1;
 		const branch = isLast ? theme.tree.last : theme.tree.branch;
-		const indent = isLast ? " " : theme.tree.vertical;
+		const indent = isLast ? "  " : `${theme.tree.vertical} `;
 
 		text += `\n ${theme.fg("dim", branch)} ${section.icon} ${theme.fg("accent", section.title)}`;
-		for (const line of section.lines) {
-			text += `\n ${theme.fg("dim", indent)} ${theme.fg("dim", `${theme.tree.hook} `)}${line}`;
+		for (let j = 0; j < section.lines.length; j++) {
+			const line = section.lines[j];
+			const isLastLine = j === section.lines.length - 1;
+			const lineBranch = isLastLine ? theme.tree.last : theme.tree.branch;
+			text += `\n ${theme.fg("dim", indent)}${theme.fg("dim", lineBranch)} ${line}`;
 		}
 	}
 

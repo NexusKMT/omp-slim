@@ -10,6 +10,14 @@ import type { Component } from "@oh-my-pi/pi-tui";
 import { Container, Text } from "@oh-my-pi/pi-tui";
 import type { Theme } from "../../../modes/interactive/theme/theme";
 import type { RenderResultOptions } from "../../custom-tools/types";
+import {
+	formatBadge,
+	formatDuration,
+	formatMoreItems,
+	formatTokens,
+	getStyledStatusIcon,
+	truncate,
+} from "../render-utils";
 import type { ReportFindingDetails, SubmitReviewDetails } from "../review";
 import { subprocessToolRegistry } from "./subprocess-tool-registry";
 import type { AgentProgress, SingleResult, TaskParams, TaskToolDetails } from "./types";
@@ -23,60 +31,23 @@ const PRIORITY_LABELS: Record<number, string> = {
 };
 
 /**
- * Format token count for display (e.g., 1.5k, 25k).
- */
-function formatTokens(tokens: number): string {
-	if (tokens >= 1000) {
-		return `${(tokens / 1000).toFixed(1)}k`;
-	}
-	return String(tokens);
-}
-
-/**
- * Format duration for display.
- */
-export function formatDuration(ms: number): string {
-	if (ms < 1000) return `${ms}ms`;
-	if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-	return `${(ms / 60000).toFixed(1)}m`;
-}
-
-/**
- * Truncate text to max length with ellipsis.
- */
-function truncate(text: string, maxLen: number, ellipsis: string): string {
-	if (text.length <= maxLen) return text;
-	const sliceLen = Math.max(0, maxLen - ellipsis.length);
-	return `${text.slice(0, sliceLen)}${ellipsis}`;
-}
-
-/**
  * Get status icon for agent state.
  * For running status, uses animated spinner if spinnerFrame is provided.
+ * Maps AgentProgress status to styled icon format.
  */
 function getStatusIcon(status: AgentProgress["status"], theme: Theme, spinnerFrame?: number): string {
 	switch (status) {
 		case "pending":
-			return theme.status.pending;
-		case "running": {
-			// Use animated spinner if frame is provided, otherwise static icon
-			if (spinnerFrame === undefined) return theme.status.running;
-			const frames = theme.spinnerFrames;
-			return frames[spinnerFrame % frames.length];
-		}
+			return getStyledStatusIcon("pending", theme);
+		case "running":
+			return getStyledStatusIcon("running", theme, spinnerFrame);
 		case "completed":
-			return theme.status.success;
+			return getStyledStatusIcon("success", theme);
 		case "failed":
-			return theme.status.error;
+			return getStyledStatusIcon("error", theme);
 		case "aborted":
-			return theme.status.aborted;
+			return getStyledStatusIcon("aborted", theme);
 	}
-}
-
-function formatBadge(label: string, color: "success" | "error" | "warning" | "accent" | "muted", theme: Theme): string {
-	const left = theme.format.bracketLeft;
-	const right = theme.format.bracketRight;
-	return theme.fg(color, `${left}${label}${right}`);
 }
 
 function formatFindingSummary(findings: ReportFindingDetails[], theme: Theme): string {
@@ -119,10 +90,7 @@ function renderOutputSection(
 
 	if (outputLines.length > previewCount) {
 		lines.push(
-			`${continuePrefix}  ${theme.fg(
-				"dim",
-				`${theme.format.ellipsis} ${outputLines.length - previewCount} more lines`,
-			)}`,
+			`${continuePrefix}  ${theme.fg("dim", formatMoreItems(outputLines.length - previewCount, "line", theme))}`,
 		);
 	}
 
@@ -133,7 +101,7 @@ function renderOutputSection(
  * Render the tool call arguments.
  */
 export function renderCall(args: TaskParams, theme: Theme): Component {
-	const label = theme.fg("toolTitle", theme.bold("task"));
+	const label = theme.fg("toolTitle", theme.bold("Task"));
 
 	if (args.tasks.length === 1) {
 		// Single task - show agent and task preview
@@ -235,9 +203,7 @@ function renderAgentProgress(
 					}
 				}
 				if (dataArray.length > 3) {
-					lines.push(
-						`${continuePrefix}${theme.fg("dim", `${theme.format.ellipsis} ${dataArray.length - 3} more`)}`,
-					);
+					lines.push(`${continuePrefix}${theme.fg("dim", formatMoreItems(dataArray.length - 3, "item", theme))}`);
 				}
 			}
 		}
@@ -337,9 +303,7 @@ function renderFindings(
 	}
 
 	if (!expanded && findings.length > 3) {
-		lines.push(
-			`${continuePrefix}${theme.fg("dim", `${theme.format.ellipsis} ${findings.length - 3} more findings`)}`,
-		);
+		lines.push(`${continuePrefix}${theme.fg("dim", formatMoreItems(findings.length - 3, "finding", theme))}`);
 	}
 
 	return lines;
@@ -479,11 +443,11 @@ export function renderResult(
 		let summary = `\n${theme.fg("dim", "Total:")} `;
 		if (abortedCount > 0) {
 			summary += theme.fg("error", `${abortedCount} aborted`);
-			if (successCount > 0 || failCount > 0) summary += ", ";
+			if (successCount > 0 || failCount > 0) summary += theme.sep.dot;
 		}
 		if (successCount > 0) {
 			summary += theme.fg("success", `${successCount} succeeded`);
-			if (failCount > 0) summary += ", ";
+			if (failCount > 0) summary += theme.sep.dot;
 		}
 		if (failCount > 0) {
 			summary += theme.fg("error", `${failCount} failed`);

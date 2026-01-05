@@ -16,6 +16,15 @@ import { renderCall as renderLspCall, renderResult as renderLspResult } from "./
 import type { LspToolDetails } from "./lsp/types";
 import type { NotebookToolDetails } from "./notebook";
 import type { OutputToolDetails } from "./output";
+import {
+	formatBytes,
+	formatCount,
+	formatExpandHint,
+	formatMoreItems,
+	PREVIEW_LIMITS,
+	TRUNCATE_LENGTHS,
+	truncate,
+} from "./render-utils";
 import { renderCall as renderTaskCall, renderResult as renderTaskResult } from "./task/render";
 import type { TaskToolDetails } from "./task/types";
 import { renderWebFetchCall, renderWebFetchResult, type WebFetchToolDetails } from "./web-fetch";
@@ -30,6 +39,34 @@ interface ToolRenderer<TArgs = any, TDetails = any> {
 		options: RenderResultOptions,
 		theme: Theme,
 	): Component;
+}
+
+const COLLAPSED_LIST_LIMIT = PREVIEW_LIMITS.COLLAPSED_ITEMS;
+const COLLAPSED_TEXT_LIMIT = PREVIEW_LIMITS.COLLAPSED_LINES * 2;
+
+function formatMeta(meta: string[], theme: Theme): string {
+	return meta.length > 0 ? ` ${theme.fg("muted", meta.join(theme.sep.dot))}` : "";
+}
+
+function formatScope(scopePath: string | undefined, theme: Theme): string {
+	return scopePath ? ` ${theme.fg("muted", `in ${scopePath}`)}` : "";
+}
+
+function formatTruncationSuffix(truncated: boolean, theme: Theme): string {
+	return truncated ? theme.fg("warning", " (truncated)") : "";
+}
+
+function renderErrorMessage(_toolLabel: string, message: string, theme: Theme): Text {
+	const clean = message.replace(/^Error:\s*/, "").trim();
+	return new Text(
+		`${theme.styledSymbol("status.error", "error")} ${theme.fg("error", `Error: ${clean || "Unknown error"}`)}`,
+		0,
+		0,
+	);
+}
+
+function renderEmptyMessage(_toolLabel: string, message: string, theme: Theme): Text {
+	return new Text(`${theme.styledSymbol("status.warning", "warning")} ${theme.fg("muted", message)}`, 0, 0);
 }
 
 // ============================================================================
@@ -52,58 +89,55 @@ interface GrepArgs {
 
 const grepRenderer: ToolRenderer<GrepArgs, GrepToolDetails> = {
 	renderCall(args, theme) {
-		let text = theme.fg("toolTitle", theme.bold("grep "));
-		text += theme.fg("accent", args.pattern || "?");
+		const label = theme.fg("toolTitle", theme.bold("Grep"));
+		let text = `${label} ${theme.fg("accent", args.pattern || "?")}`;
 
 		const meta: string[] = [];
-		if (args.path) meta.push(args.path);
+		if (args.path) meta.push(`in ${args.path}`);
 		if (args.glob) meta.push(`glob:${args.glob}`);
 		if (args.type) meta.push(`type:${args.type}`);
-		if (args.outputMode && args.outputMode !== "files_with_matches") meta.push(args.outputMode);
+		if (args.outputMode && args.outputMode !== "files_with_matches") meta.push(`mode:${args.outputMode}`);
 		if (args.caseSensitive) {
-			meta.push("--case-sensitive");
+			meta.push("case:sensitive");
 		} else if (args.ignoreCase) {
-			meta.push("-i");
+			meta.push("case:insensitive");
 		}
+		if (args.literal) meta.push("literal");
 		if (args.multiline) meta.push("multiline");
+		if (args.context !== undefined) meta.push(`context:${args.context}`);
+		if (args.limit !== undefined) meta.push(`limit:${args.limit}`);
 
-		if (meta.length > 0) {
-			text += ` ${theme.fg("muted", meta.join(" "))}`;
-		}
+		text += formatMeta(meta, theme);
 
 		return new Text(text, 0, 0);
 	},
 
 	renderResult(result, { expanded }, theme) {
+		const label = "Grep";
 		const details = result.details;
 
-		// Error case
 		if (details?.error) {
-			return new Text(`${theme.styledSymbol("status.error", "error")} ${theme.fg("error", details.error)}`, 0, 0);
+			return renderErrorMessage(label, details.error, theme);
 		}
 
-		// Check for detailed rendering data - fall back to structured output if not available
 		const hasDetailedData = details?.matchCount !== undefined || details?.fileCount !== undefined;
 
 		if (!hasDetailedData) {
 			const textContent = result.content?.find((c) => c.type === "text")?.text;
 			if (!textContent || textContent === "No matches found") {
-				return new Text(
-					`${theme.styledSymbol("status.warning", "warning")} ${theme.fg("muted", "No matches found")}`,
-					0,
-					0,
-				);
+				return renderEmptyMessage(label, "No matches found", theme);
 			}
 
 			const lines = textContent.split("\n").filter((line) => line.trim() !== "");
-			const maxLines = expanded ? lines.length : 10;
+			const maxLines = expanded ? lines.length : Math.min(lines.length, COLLAPSED_TEXT_LIMIT);
 			const displayLines = lines.slice(0, maxLines);
 			const remaining = lines.length - maxLines;
+			const hasMore = remaining > 0;
 
-			let text = `${theme.styledSymbol("status.success", "success")} ${theme.fg("toolTitle", "grep")} ${theme.fg(
-				"dim",
-				`${lines.length} item${lines.length !== 1 ? "s" : ""}`,
-			)}`;
+			const icon = theme.styledSymbol("status.success", "success");
+			const summary = formatCount("item", lines.length);
+			const expandHint = formatExpandHint(expanded, hasMore, theme);
+			let text = `${icon} ${theme.fg("dim", summary)}${expandHint}`;
 
 			for (let i = 0; i < displayLines.length; i++) {
 				const isLast = i === displayLines.length - 1 && remaining === 0;
@@ -114,9 +148,10 @@ const grepRenderer: ToolRenderer<GrepArgs, GrepToolDetails> = {
 			if (remaining > 0) {
 				text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
 					"muted",
-					`${theme.format.ellipsis} ${remaining} more items`,
+					formatMoreItems(remaining, "item", theme),
 				)}`;
 			}
+
 			return new Text(text, 0, 0);
 		}
 
@@ -126,33 +161,29 @@ const grepRenderer: ToolRenderer<GrepArgs, GrepToolDetails> = {
 		const truncated = details?.truncated ?? details?.truncation?.truncated ?? false;
 		const files = details?.files ?? [];
 
-		// No matches
 		if (matchCount === 0) {
-			return new Text(
-				`${theme.styledSymbol("status.warning", "warning")} ${theme.fg("muted", "No matches found")}`,
-				0,
-				0,
-			);
+			return renderEmptyMessage(label, "No matches found", theme);
 		}
 
-		// Build summary
 		const icon = theme.styledSymbol("status.success", "success");
-		let summary: string;
-		if (mode === "files_with_matches") {
-			summary = `${fileCount} file${fileCount !== 1 ? "s" : ""}`;
-		} else if (mode === "count") {
-			summary = `${matchCount} match${matchCount !== 1 ? "es" : ""} in ${fileCount} file${fileCount !== 1 ? "s" : ""}`;
-		} else {
-			summary = `${matchCount} match${matchCount !== 1 ? "es" : ""} in ${fileCount} file${fileCount !== 1 ? "s" : ""}`;
-		}
+		const summaryParts =
+			mode === "files_with_matches"
+				? [formatCount("file", fileCount)]
+				: [formatCount("match", matchCount), formatCount("file", fileCount)];
+		const summaryText = summaryParts.join(theme.sep.dot);
+		const scopeLabel = formatScope(details?.scopePath, theme);
 
-		if (truncated) {
-			summary += theme.fg("warning", " (truncated)");
-		}
+		const fileEntries: Array<{ path: string; count?: number }> = details?.fileMatches?.length
+			? details.fileMatches.map((entry) => ({ path: entry.path, count: entry.count }))
+			: files.map((path) => ({ path }));
+		const maxFiles = expanded ? fileEntries.length : Math.min(fileEntries.length, COLLAPSED_LIST_LIMIT);
+		const hasMoreFiles = fileEntries.length > maxFiles;
+		const expandHint = formatExpandHint(expanded, hasMoreFiles, theme);
 
-		const expandHint = expanded ? "" : theme.fg("dim", " (Ctrl+O to expand)");
-		const scopeLabel = details?.scopePath ? ` ${theme.fg("muted", `in ${details.scopePath}`)}` : "";
-		let text = `${icon} ${theme.fg("toolTitle", "grep")} ${theme.fg("dim", summary)}${scopeLabel}${expandHint}`;
+		let text = `${icon} ${theme.fg("dim", summaryText)}${formatTruncationSuffix(
+			truncated,
+			theme,
+		)}${scopeLabel}${expandHint}`;
 
 		const truncationReasons: string[] = [];
 		if (details?.matchLimitReached) {
@@ -168,16 +199,12 @@ const grepRenderer: ToolRenderer<GrepArgs, GrepToolDetails> = {
 			truncationReasons.push("line length");
 		}
 
-		const fileEntries: Array<{ path: string; count?: number }> = details?.fileMatches?.length
-			? details.fileMatches.map((entry) => ({ path: entry.path, count: entry.count }))
-			: files.map((path) => ({ path }));
+		const hasTruncation = truncationReasons.length > 0;
 
-		// Show file tree if we have files
 		if (fileEntries.length > 0) {
-			const maxFiles = expanded ? fileEntries.length : Math.min(fileEntries.length, 8);
 			for (let i = 0; i < maxFiles; i++) {
 				const entry = fileEntries[i];
-				const isLast = i === maxFiles - 1 && (expanded || fileEntries.length <= 8);
+				const isLast = i === maxFiles - 1 && !hasMoreFiles && !hasTruncation;
 				const branch = isLast ? theme.tree.last : theme.tree.branch;
 				const isDir = entry.path.endsWith("/");
 				const entryPath = isDir ? entry.path.slice(0, -1) : entry.path;
@@ -192,15 +219,16 @@ const grepRenderer: ToolRenderer<GrepArgs, GrepToolDetails> = {
 				text += `\n ${theme.fg("dim", branch)} ${entryIcon} ${theme.fg("accent", entry.path)}${countLabel}`;
 			}
 
-			if (!expanded && fileEntries.length > 8) {
-				text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+			if (hasMoreFiles) {
+				const moreFilesBranch = hasTruncation ? theme.tree.branch : theme.tree.last;
+				text += `\n ${theme.fg("dim", moreFilesBranch)} ${theme.fg(
 					"muted",
-					`${theme.format.ellipsis} ${fileEntries.length - 8} more files`,
+					formatMoreItems(fileEntries.length - maxFiles, "file", theme),
 				)}`;
 			}
 		}
 
-		if (truncationReasons.length > 0) {
+		if (hasTruncation) {
 			text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
 				"warning",
 				`truncated: ${truncationReasons.join(", ")}`,
@@ -226,54 +254,48 @@ interface FindArgs {
 
 const findRenderer: ToolRenderer<FindArgs, FindToolDetails> = {
 	renderCall(args, theme) {
-		let text = theme.fg("toolTitle", theme.bold("find "));
-		text += theme.fg("accent", args.pattern || "*");
+		const label = theme.fg("toolTitle", theme.bold("Find"));
+		let text = `${label} ${theme.fg("accent", args.pattern || "*")}`;
 
 		const meta: string[] = [];
-		if (args.path) meta.push(args.path);
+		if (args.path) meta.push(`in ${args.path}`);
 		if (args.type && args.type !== "all") meta.push(`type:${args.type}`);
-		if (args.hidden) meta.push("--hidden");
+		if (args.hidden) meta.push("hidden");
+		if (args.sortByMtime) meta.push("sort:mtime");
+		if (args.limit !== undefined) meta.push(`limit:${args.limit}`);
 
-		if (meta.length > 0) {
-			text += ` ${theme.fg("muted", meta.join(" "))}`;
-		}
+		text += formatMeta(meta, theme);
 
 		return new Text(text, 0, 0);
 	},
 
 	renderResult(result, { expanded }, theme) {
+		const label = "Find";
 		const details = result.details;
 
-		// Error case
 		if (details?.error) {
-			return new Text(`${theme.styledSymbol("status.error", "error")} ${theme.fg("error", details.error)}`, 0, 0);
+			return renderErrorMessage(label, details.error, theme);
 		}
 
-		// Check for detailed rendering data - fall back to parsing raw output if not available
 		const hasDetailedData = details?.fileCount !== undefined;
-
-		// Get text content for fallback or to extract file list
 		const textContent = result.content?.find((c) => c.type === "text")?.text;
 
 		if (!hasDetailedData) {
 			if (!textContent || textContent.includes("No files matching") || textContent.trim() === "") {
-				return new Text(
-					`${theme.styledSymbol("status.warning", "warning")} ${theme.fg("muted", "No files found")}`,
-					0,
-					0,
-				);
+				return renderEmptyMessage(label, "No files found", theme);
 			}
 
-			// Parse the raw output as file list
 			const lines = textContent.split("\n").filter((l) => l.trim());
-			const maxLines = expanded ? lines.length : Math.min(lines.length, 8);
+			const maxLines = expanded ? lines.length : Math.min(lines.length, COLLAPSED_LIST_LIMIT);
 			const displayLines = lines.slice(0, maxLines);
 			const remaining = lines.length - maxLines;
+			const hasMore = remaining > 0;
 
-			let text = `${theme.styledSymbol("status.success", "success")} ${theme.fg("toolTitle", "find")} ${theme.fg(
-				"dim",
-				`${lines.length} file${lines.length !== 1 ? "s" : ""}`,
-			)}`;
+			const icon = theme.styledSymbol("status.success", "success");
+			const summary = formatCount("file", lines.length);
+			const expandHint = formatExpandHint(expanded, hasMore, theme);
+			let text = `${icon} ${theme.fg("dim", summary)}${expandHint}`;
+
 			for (let i = 0; i < displayLines.length; i++) {
 				const isLast = i === displayLines.length - 1 && remaining === 0;
 				const branch = isLast ? theme.tree.last : theme.tree.branch;
@@ -282,7 +304,7 @@ const findRenderer: ToolRenderer<FindArgs, FindToolDetails> = {
 			if (remaining > 0) {
 				text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
 					"muted",
-					`${theme.format.ellipsis} ${remaining} more files`,
+					formatMoreItems(remaining, "file", theme),
 				)}`;
 			}
 			return new Text(text, 0, 0);
@@ -292,26 +314,21 @@ const findRenderer: ToolRenderer<FindArgs, FindToolDetails> = {
 		const truncated = details?.truncated ?? details?.truncation?.truncated ?? false;
 		const files = details?.files ?? [];
 
-		// No matches
 		if (fileCount === 0) {
-			return new Text(
-				`${theme.styledSymbol("status.warning", "warning")} ${theme.fg("muted", "No files found")}`,
-				0,
-				0,
-			);
+			return renderEmptyMessage(label, "No files found", theme);
 		}
 
-		// Build summary
 		const icon = theme.styledSymbol("status.success", "success");
-		let summary = `${fileCount} file${fileCount !== 1 ? "s" : ""}`;
+		const summaryText = formatCount("file", fileCount);
+		const scopeLabel = formatScope(details?.scopePath, theme);
+		const maxFiles = expanded ? files.length : Math.min(files.length, COLLAPSED_LIST_LIMIT);
+		const hasMoreFiles = files.length > maxFiles;
+		const expandHint = formatExpandHint(expanded, hasMoreFiles, theme);
 
-		if (truncated) {
-			summary += theme.fg("warning", " (truncated)");
-		}
-
-		const expandHint = expanded ? "" : theme.fg("dim", " (Ctrl+O to expand)");
-		const scopeLabel = details?.scopePath ? ` ${theme.fg("muted", `in ${details.scopePath}`)}` : "";
-		let text = `${icon} ${theme.fg("toolTitle", "find")} ${theme.fg("dim", summary)}${scopeLabel}${expandHint}`;
+		let text = `${icon} ${theme.fg("dim", summaryText)}${formatTruncationSuffix(
+			truncated,
+			theme,
+		)}${scopeLabel}${expandHint}`;
 
 		const truncationReasons: string[] = [];
 		if (details?.resultLimitReached) {
@@ -321,11 +338,11 @@ const findRenderer: ToolRenderer<FindArgs, FindToolDetails> = {
 			truncationReasons.push("size limit");
 		}
 
-		// Show file tree if we have files
+		const hasTruncation = truncationReasons.length > 0;
+
 		if (files.length > 0) {
-			const maxFiles = expanded ? files.length : Math.min(files.length, 8);
 			for (let i = 0; i < maxFiles; i++) {
-				const isLast = i === maxFiles - 1 && (expanded || files.length <= 8);
+				const isLast = i === maxFiles - 1 && !hasMoreFiles && !hasTruncation;
 				const branch = isLast ? theme.tree.last : theme.tree.branch;
 				const entry = files[i];
 				const isDir = entry.endsWith("/");
@@ -337,15 +354,16 @@ const findRenderer: ToolRenderer<FindArgs, FindToolDetails> = {
 				text += `\n ${theme.fg("dim", branch)} ${entryIcon} ${theme.fg("accent", entry)}`;
 			}
 
-			if (!expanded && files.length > 8) {
-				text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+			if (hasMoreFiles) {
+				const moreFilesBranch = hasTruncation ? theme.tree.branch : theme.tree.last;
+				text += `\n ${theme.fg("dim", moreFilesBranch)} ${theme.fg(
 					"muted",
-					`${theme.format.ellipsis} ${files.length - 8} more files`,
+					formatMoreItems(files.length - maxFiles, "file", theme),
 				)}`;
 			}
 		}
 
-		if (truncationReasons.length > 0) {
+		if (hasTruncation) {
 			text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
 				"warning",
 				`truncated: ${truncationReasons.join(", ")}`,
@@ -378,7 +396,7 @@ function renderCellPreview(lines: string[], expanded: boolean, theme: Theme): st
 		return `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", "(empty cell)")}`;
 	}
 
-	const maxLines = expanded ? normalized.length : Math.min(normalized.length, 6);
+	const maxLines = expanded ? normalized.length : Math.min(normalized.length, COLLAPSED_TEXT_LIMIT);
 	let text = "";
 
 	for (let i = 0; i < maxLines; i++) {
@@ -390,10 +408,7 @@ function renderCellPreview(lines: string[], expanded: boolean, theme: Theme): st
 
 	const remaining = normalized.length - maxLines;
 	if (remaining > 0) {
-		text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
-			"muted",
-			`${theme.format.ellipsis} ${remaining} more lines`,
-		)}`;
+		text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", formatMoreItems(remaining, "line", theme))}`;
 	}
 
 	return text;
@@ -401,28 +416,26 @@ function renderCellPreview(lines: string[], expanded: boolean, theme: Theme): st
 
 const notebookRenderer: ToolRenderer<NotebookArgs, NotebookToolDetails> = {
 	renderCall(args, theme) {
-		let text = theme.fg("toolTitle", theme.bold("notebook "));
-		text += theme.fg("accent", args.action || "?");
+		const label = theme.fg("toolTitle", theme.bold("Notebook"));
+		let text = `${label} ${theme.fg("accent", args.action || "?")}`;
 
 		const meta: string[] = [];
-		meta.push(args.notebookPath || "?");
+		meta.push(`in ${args.notebookPath || "?"}`);
 		if (args.cellNumber !== undefined) meta.push(`cell:${args.cellNumber}`);
-		if (args.cellType) meta.push(args.cellType);
+		if (args.cellType) meta.push(`type:${args.cellType}`);
 
-		if (meta.length > 0) {
-			text += ` ${theme.fg("muted", meta.join(" "))}`;
-		}
+		text += formatMeta(meta, theme);
 
 		return new Text(text, 0, 0);
 	},
 
 	renderResult(result, { expanded }, theme) {
+		const label = "Notebook";
 		const details = result.details;
 
-		// Error case - check for error in content
 		const content = result.content?.[0];
 		if (content?.type === "text" && content.text?.startsWith("Error:")) {
-			return new Text(`${theme.styledSymbol("status.error", "error")} ${theme.fg("error", content.text)}`, 0, 0);
+			return renderErrorMessage(label, content.text, theme);
 		}
 
 		const action = details?.action ?? "edit";
@@ -431,33 +444,18 @@ const notebookRenderer: ToolRenderer<NotebookArgs, NotebookToolDetails> = {
 		const totalCells = details?.totalCells;
 		const cellSource = details?.cellSource;
 		const lineCount = cellSource?.length;
-		const canExpand = cellSource !== undefined && cellSource.length > 6;
+		const canExpand = cellSource !== undefined && cellSource.length > COLLAPSED_TEXT_LIMIT;
 
-		// Build summary
 		const icon = theme.styledSymbol("status.success", "success");
-		let summary: string;
+		const actionLabel = action === "insert" ? "Inserted" : action === "delete" ? "Deleted" : "Edited";
+		const cellLabel = cellType || "cell";
+		const summaryParts = [`${actionLabel} ${cellLabel} at index ${cellIndex ?? "?"}`];
+		if (lineCount !== undefined) summaryParts.push(formatCount("line", lineCount));
+		if (totalCells !== undefined) summaryParts.push(`${totalCells} total`);
+		const summaryText = summaryParts.join(theme.sep.dot);
 
-		switch (action) {
-			case "insert":
-				summary = `Inserted ${cellType || "cell"} at index ${cellIndex}`;
-				break;
-			case "delete":
-				summary = `Deleted cell at index ${cellIndex}`;
-				break;
-			default:
-				summary = `Edited ${cellType || "cell"} at index ${cellIndex}`;
-		}
-
-		if (lineCount !== undefined) {
-			summary += ` (${lineCount} line${lineCount !== 1 ? "s" : ""})`;
-		}
-
-		if (totalCells !== undefined) {
-			summary += ` (${totalCells} total)`;
-		}
-
-		const expandHint = !expanded && canExpand ? theme.fg("dim", " (Ctrl+O to expand)") : "";
-		let text = `${icon} ${theme.fg("toolTitle", "notebook")} ${theme.fg("dim", summary)}${expandHint}`;
+		const expandHint = formatExpandHint(expanded, canExpand, theme);
+		let text = `${icon} ${theme.fg("dim", summaryText)}${expandHint}`;
 
 		if (cellSource) {
 			text += renderCellPreview(cellSource, expanded, theme);
@@ -480,15 +478,26 @@ interface AskArgs {
 const askRenderer: ToolRenderer<AskArgs, AskToolDetails> = {
 	renderCall(args, theme) {
 		if (!args.question) {
-			return new Text(theme.fg("error", "ask: no question provided"), 0, 0);
+			return renderErrorMessage("Ask", "No question provided", theme);
 		}
 
-		const multiTag = args.multi ? theme.fg("muted", " [multi-select]") : "";
-		let text = theme.fg("toolTitle", "? ") + theme.fg("accent", args.question) + multiTag;
+		const label = theme.fg("toolTitle", theme.bold("Ask"));
+		let text = `${label} ${theme.fg("accent", args.question)}`;
+
+		const meta: string[] = [];
+		if (args.multi) meta.push("multi");
+		if (args.options?.length) meta.push(`options:${args.options.length}`);
+		text += formatMeta(meta, theme);
 
 		if (args.options?.length) {
-			for (const opt of args.options) {
-				text += `\n${theme.fg("dim", `  ${theme.checkbox.unchecked} `)}${theme.fg("muted", opt.label)}`;
+			for (let i = 0; i < args.options.length; i++) {
+				const opt = args.options[i];
+				const isLast = i === args.options.length - 1;
+				const branch = isLast ? theme.tree.last : theme.tree.branch;
+				text += `\n ${theme.fg("dim", branch)} ${theme.fg(
+					"dim",
+					theme.checkbox.unchecked,
+				)} ${theme.fg("muted", opt.label)}`;
 			}
 		}
 
@@ -507,7 +516,7 @@ const askRenderer: ToolRenderer<AskArgs, AskToolDetails> = {
 			? theme.styledSymbol("status.success", "success")
 			: theme.styledSymbol("status.warning", "warning");
 
-		let text = `${statusIcon} ${theme.fg("toolTitle", "ask")} ${theme.fg("accent", details.question)}`;
+		let text = `${statusIcon} ${theme.fg("accent", details.question)}`;
 
 		if (details.customInput) {
 			text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.styledSymbol(
@@ -565,23 +574,10 @@ interface OutputArgs {
 	format?: "raw" | "json" | "stripped";
 }
 
-/** Format byte count for display */
-function formatBytes(bytes: number): string {
-	if (bytes < 1024) return `${bytes}B`;
-	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}K`;
-	return `${(bytes / (1024 * 1024)).toFixed(1)}M`;
-}
-
-function truncateLine(text: string, maxLen: number, ellipsis: string): string {
-	if (text.length <= maxLen) return text;
-	const sliceLen = Math.max(0, maxLen - ellipsis.length);
-	return `${text.slice(0, sliceLen)}${ellipsis}`;
-}
-
 type OutputEntry = OutputToolDetails["outputs"][number];
 
 function formatOutputMeta(entry: OutputEntry, theme: Theme): string {
-	const metaParts = [`${entry.lineCount} lines, ${formatBytes(entry.charCount)}`];
+	const metaParts = [formatCount("line", entry.lineCount), formatBytes(entry.charCount)];
 	if (entry.provenance) {
 		metaParts.push(`agent ${entry.provenance.agent}(${entry.provenance.index})`);
 	}
@@ -591,48 +587,56 @@ function formatOutputMeta(entry: OutputEntry, theme: Theme): string {
 const outputRenderer: ToolRenderer<OutputArgs, OutputToolDetails> = {
 	renderCall(args, theme) {
 		const ids = args.ids?.join(", ") ?? "?";
-		const label = theme.fg("toolTitle", theme.bold("output"));
-		const format = args.format && args.format !== "raw" ? theme.fg("muted", ` (${args.format})`) : "";
-		return new Text(`${label} ${theme.fg("dim", ids)}${format}`, 0, 0);
+		const label = theme.fg("toolTitle", theme.bold("Output"));
+		let text = `${label} ${theme.fg("accent", ids)}`;
+
+		const meta: string[] = [];
+		if (args.format && args.format !== "raw") meta.push(`format:${args.format}`);
+		text += formatMeta(meta, theme);
+
+		return new Text(text, 0, 0);
 	},
 
 	renderResult(result, { expanded }, theme) {
+		const label = "Output";
 		const details = result.details;
 
-		// Error case: some IDs not found
 		if (details?.notFound?.length) {
-			let text = `${theme.styledSymbol("status.error", "error")} Not found: ${details.notFound.join(", ")}`;
+			const icon = theme.styledSymbol("status.error", "error");
+			let text = `${icon} ${theme.fg("error", `Error: Not found: ${details.notFound.join(", ")}`)}`;
 			if (details.availableIds?.length) {
-				text += `\n${theme.fg("dim", "Available:")} ${details.availableIds.join(", ")}`;
+				text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+					"muted",
+					`Available: ${details.availableIds.join(", ")}`,
+				)}`;
 			} else {
-				text += `\n${theme.fg("dim", "No outputs available in current session")}`;
+				text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+					"muted",
+					"No outputs available in current session",
+				)}`;
 			}
 			return new Text(text, 0, 0);
 		}
 
 		const outputs = details?.outputs ?? [];
 
-		// No session case
 		if (outputs.length === 0) {
 			const textContent = result.content?.find((c) => c.type === "text")?.text;
-			return new Text(
-				`${theme.styledSymbol("status.warning", "warning")} ${theme.fg("muted", textContent || "No outputs")}`,
-				0,
-				0,
-			);
+			return renderEmptyMessage(label, textContent || "No outputs", theme);
 		}
 
-		// Success: summary + tree display
-		const expandHint = expanded ? "" : theme.fg("dim", " (Ctrl+O to expand)");
 		const icon = theme.styledSymbol("status.success", "success");
-		const summary = `read ${outputs.length} output${outputs.length !== 1 ? "s" : ""}`;
-		let text = `${icon} ${theme.fg("toolTitle", "output")} ${theme.fg("dim", summary)}${expandHint}`;
-
+		const summary = `read ${formatCount("output", outputs.length)}`;
 		const previewLimit = expanded ? 3 : 1;
 		const maxOutputs = expanded ? outputs.length : Math.min(outputs.length, 5);
+		const hasMoreOutputs = outputs.length > maxOutputs;
+		const hasMorePreview = outputs.some((o) => (o.previewLines?.length ?? 0) > previewLimit);
+		const expandHint = formatExpandHint(expanded, hasMoreOutputs || hasMorePreview, theme);
+		let text = `${icon} ${theme.fg("dim", summary)}${expandHint}`;
+
 		for (let i = 0; i < maxOutputs; i++) {
 			const o = outputs[i];
-			const isLast = i === maxOutputs - 1 && (expanded || outputs.length <= 5);
+			const isLast = i === maxOutputs - 1 && !hasMoreOutputs;
 			const branch = isLast ? theme.tree.last : theme.tree.branch;
 			text += `\n ${theme.fg("dim", branch)} ${theme.fg("accent", o.id)} ${formatOutputMeta(o, theme)}`;
 
@@ -641,19 +645,19 @@ const outputRenderer: ToolRenderer<OutputArgs, OutputToolDetails> = {
 			if (shownPreview.length > 0) {
 				const childPrefix = isLast ? "   " : ` ${theme.fg("dim", theme.tree.vertical)} `;
 				for (const line of shownPreview) {
-					const previewText = truncateLine(line, 80, theme.format.ellipsis);
-					text += `\n${childPrefix}${theme.fg("dim", theme.tree.hook)} ${theme.fg("muted", "preview:")} ${theme.fg(
-						"toolOutput",
-						previewText,
-					)}`;
+					const previewText = truncate(line, TRUNCATE_LENGTHS.CONTENT, theme.format.ellipsis);
+					text += `\n${childPrefix}${theme.fg("dim", theme.tree.hook)} ${theme.fg(
+						"muted",
+						"preview:",
+					)} ${theme.fg("toolOutput", previewText)}`;
 				}
 			}
 		}
 
-		if (!expanded && outputs.length > 5) {
+		if (hasMoreOutputs) {
 			text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
 				"muted",
-				`${theme.format.ellipsis} ${outputs.length - 5} more outputs`,
+				formatMoreItems(outputs.length - maxOutputs, "output", theme),
 			)}`;
 		}
 
@@ -681,27 +685,26 @@ interface LsArgs {
 
 const lsRenderer: ToolRenderer<LsArgs, LsToolDetails> = {
 	renderCall(args, theme) {
-		let text = theme.fg("toolTitle", theme.bold("ls "));
-		text += theme.fg("accent", args.path || ".");
-		if (args.limit !== undefined) {
-			text += ` ${theme.fg("muted", `(limit ${args.limit})`)}`;
-		}
+		const label = theme.fg("toolTitle", theme.bold("Ls"));
+		let text = `${label} ${theme.fg("accent", args.path || ".")}`;
+
+		const meta: string[] = [];
+		if (args.limit !== undefined) meta.push(`limit:${args.limit}`);
+		text += formatMeta(meta, theme);
+
 		return new Text(text, 0, 0);
 	},
 
 	renderResult(result, { expanded }, theme) {
+		const label = "Ls";
 		const details = result.details;
-		const textContent = result.content?.find((c: any) => c.type === "text")?.text ?? "";
+		const textContent = result.content?.find((c) => c.type === "text")?.text ?? "";
 
 		if (
 			(!textContent || textContent.trim() === "" || textContent.trim() === "(empty directory)") &&
 			(!details?.entries || details.entries.length === 0)
 		) {
-			return new Text(
-				`${theme.styledSymbol("status.warning", "warning")} ${theme.fg("muted", "Empty directory")}`,
-				0,
-				0,
-			);
+			return renderEmptyMessage(label, "Empty directory", theme);
 		}
 
 		let entries: string[] = details?.entries ? [...details.entries] : [];
@@ -711,11 +714,7 @@ const lsRenderer: ToolRenderer<LsArgs, LsToolDetails> = {
 		}
 
 		if (entries.length === 0) {
-			return new Text(
-				`${theme.styledSymbol("status.warning", "warning")} ${theme.fg("muted", "Empty directory")}`,
-				0,
-				0,
-			);
+			return renderEmptyMessage(label, "Empty directory", theme);
 		}
 
 		let dirCount = details?.dirCount;
@@ -737,45 +736,47 @@ const lsRenderer: ToolRenderer<LsArgs, LsToolDetails> = {
 			? theme.styledSymbol("status.warning", "warning")
 			: theme.styledSymbol("status.success", "success");
 
-		const dirLabel = `${dirCount} dir${dirCount !== 1 ? "s" : ""}`;
-		const fileLabel = `${fileCount} file${fileCount !== 1 ? "s" : ""}`;
-		let text = `${icon} ${theme.fg("toolTitle", "ls")} ${theme.fg("dim", `${dirLabel}, ${fileLabel}`)}`;
+		const summaryText = [formatCount("dir", dirCount ?? 0), formatCount("file", fileCount ?? 0)].join(theme.sep.dot);
+		const maxEntries = expanded ? entries.length : Math.min(entries.length, COLLAPSED_LIST_LIMIT);
+		const hasMoreEntries = entries.length > maxEntries;
+		const expandHint = formatExpandHint(expanded, hasMoreEntries, theme);
 
-		if (truncated) {
-			const reasonParts: string[] = [];
-			if (details?.entryLimitReached) {
-				reasonParts.push(`entry limit ${details.entryLimitReached}`);
-			}
-			if (details?.truncation?.truncated) {
-				reasonParts.push(`output cap ${formatBytes(details.truncation.maxBytes)}`);
-			}
-			const reasonText = reasonParts.length > 0 ? `truncated: ${reasonParts.join(", ")}` : "truncated";
-			text += ` ${theme.fg("warning", `(${reasonText})`)}`;
+		let text = `${icon} ${theme.fg("dim", summaryText)}${formatTruncationSuffix(truncated, theme)}${expandHint}`;
+
+		const truncationReasons: string[] = [];
+		if (details?.entryLimitReached) {
+			truncationReasons.push(`entry limit ${details.entryLimitReached}`);
+		}
+		if (details?.truncation?.truncated) {
+			truncationReasons.push(`output cap ${formatBytes(details.truncation.maxBytes)}`);
 		}
 
-		if (!expanded) {
-			text += `\n${theme.fg("dim", `${theme.nav.expand} Ctrl+O to expand list`)}`;
-		}
+		const hasTruncation = truncationReasons.length > 0;
 
-		const maxEntries = expanded ? entries.length : Math.min(entries.length, 12);
 		for (let i = 0; i < maxEntries; i++) {
 			const entry = entries[i];
-			const isLast = i === maxEntries - 1 && (expanded || entries.length <= 12);
+			const isLast = i === maxEntries - 1 && !hasMoreEntries && !hasTruncation;
 			const branch = isLast ? theme.tree.last : theme.tree.branch;
 			const isDir = entry.endsWith("/");
 			const entryPath = isDir ? entry.slice(0, -1) : entry;
 			const lang = isDir ? undefined : getLanguageFromPath(entryPath);
-			const entryIcon = isDir
-				? theme.fg("accent", theme.icon.folder)
-				: theme.fg("muted", theme.getLangIcon(lang));
+			const entryIcon = isDir ? theme.fg("accent", theme.icon.folder) : theme.fg("muted", theme.getLangIcon(lang));
 			const entryColor = isDir ? "accent" : "toolOutput";
 			text += `\n ${theme.fg("dim", branch)} ${entryIcon} ${theme.fg(entryColor, entry)}`;
 		}
 
-		if (!expanded && entries.length > 12) {
-			text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+		if (hasMoreEntries) {
+			const moreEntriesBranch = hasTruncation ? theme.tree.branch : theme.tree.last;
+			text += `\n ${theme.fg("dim", moreEntriesBranch)} ${theme.fg(
 				"muted",
-				`${theme.format.ellipsis} ${entries.length - 12} more entries`,
+				formatMoreItems(entries.length - maxEntries, "entry", theme),
+			)}`;
+		}
+
+		if (hasTruncation) {
+			text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+				"warning",
+				`truncated: ${truncationReasons.join(", ")}`,
 			)}`;
 		}
 

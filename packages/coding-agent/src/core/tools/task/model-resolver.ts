@@ -14,12 +14,7 @@
 import { spawnSync } from "node:child_process";
 import { type Settings, settingsCapability } from "../../../capability/settings";
 import { loadSync } from "../../../discovery";
-
-/** omp command: 'omp.cmd' on Windows, 'omp' elsewhere */
-const OMP_CMD = process.platform === "win32" ? "omp.cmd" : "omp";
-
-/** Windows shell option for spawn/spawnSync */
-const OMP_SHELL_OPT = process.platform === "win32";
+import { resolveOmpCommand } from "./omp-command";
 
 /** Cache for available models (provider/modelId format) */
 let cachedModels: string[] | null = null;
@@ -41,10 +36,11 @@ export function getAvailableModels(): string[] {
 	}
 
 	try {
-		const result = spawnSync(OMP_CMD, ["--list-models"], {
+		const ompCommand = resolveOmpCommand();
+		const result = spawnSync(ompCommand.cmd, [...ompCommand.args, "--list-models"], {
 			encoding: "utf-8",
 			timeout: 5000,
-			shell: OMP_SHELL_OPT,
+			shell: ompCommand.shell,
 		});
 
 		if (result.status !== 0 || !result.stdout) {

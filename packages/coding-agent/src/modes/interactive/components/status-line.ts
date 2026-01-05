@@ -333,9 +333,7 @@ export class StatusLineComponent implements Component {
 					? separatorDef.endCaps.right
 					: separatorDef.endCaps.left
 				: "";
-			const capPrefix = separatorDef.endCaps?.useBgAsFg
-				? bgAnsi.replace("\x1b[48;", "\x1b[38;")
-				: bgAnsi + sepAnsi;
+			const capPrefix = separatorDef.endCaps?.useBgAsFg ? bgAnsi.replace("\x1b[48;", "\x1b[38;") : bgAnsi + sepAnsi;
 			const capText = cap ? `${capPrefix}${cap}\x1b[0m` : "";
 
 			let content = bgAnsi + fgAnsi;

@@ -1,15 +1,18 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Added
 
+- Added shared render utilities module with standardized formatting functions for truncation, byte/token/duration display, and tree rendering
+- Added `resolveOmpCommand()` helper to resolve subprocess command from environment or entry point
 - Added `cycleRoleModels()` method to cycle through configured role-based models in a fixed order with deduplication
 - Added language-specific file icons to LSP diagnostics output showing file locations
 - Added language-specific file icon to edit tool header display
 
 ### Changed
 
+- Updated web search tool to support `auto` as explicit provider option for auto-detection
+- Standardized tool result rendering across grep, find, ls, notebook, ask, output, and web search tools with consistent tree formatting and expand hints
 - Updated grep and find tool output to display language-specific icons for files and folder icons for directories
 - Updated file listing to display language-specific icons based on file extension instead of generic file icons
 

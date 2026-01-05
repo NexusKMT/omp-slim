@@ -12,6 +12,7 @@ import type { AgentToolResult, RenderResultOptions } from "@oh-my-pi/pi-agent-co
 import { Text } from "@oh-my-pi/pi-tui";
 import { highlight, supportsLanguage } from "cli-highlight";
 import { getLanguageFromPath, type Theme } from "../../../modes/interactive/theme/theme";
+import { formatExpandHint, formatMoreItems, TRUNCATE_LENGTHS, truncate } from "../render-utils";
 import type { LspParams, LspToolDetails } from "./types";
 
 // =============================================================================
@@ -25,8 +26,8 @@ import type { LspParams, LspToolDetails } from "./types";
 export function renderCall(args: unknown, theme: Theme): Text {
 	const p = args as LspParams & { file?: string; files?: string[] };
 
-	let text = theme.fg("toolTitle", theme.bold("LSP "));
-	text += theme.fg("accent", p.action || "?");
+	let text = theme.fg("toolTitle", theme.bold("LSP"));
+	text += ` ${theme.fg("accent", p.action || "?")}`;
 
 	if (p.file) {
 		text += ` ${theme.fg("muted", p.file)}`;
@@ -112,7 +113,7 @@ function renderHover(
 		const v = theme.boxSharp.vertical;
 		const top = `${theme.boxSharp.topLeft}${h.repeat(3)}`;
 		const bottom = `${theme.boxSharp.bottomLeft}${h.repeat(3)}`;
-		let output = `${icon} ${theme.fg("toolTitle", "Hover")}${langLabel}`;
+		let output = `${icon}${langLabel}`;
 		output += `\n ${theme.fg("mdCodeBlockBorder", top)}`;
 		for (const line of codeLines) {
 			output += `\n ${theme.fg("mdCodeBlockBorder", v)} ${line}`;
@@ -126,9 +127,10 @@ function renderHover(
 
 	// Collapsed view
 	const firstCodeLine = codeLines[0] || "";
-	const expandHint = theme.fg("dim", " (Ctrl+O to expand)");
+	const hasMore = codeLines.length > 1 || Boolean(afterCode);
+	const expandHint = formatExpandHint(false, hasMore, theme);
 
-	let output = `${icon} ${theme.fg("toolTitle", "Hover")}${langLabel}${expandHint}`;
+	let output = `${icon}${langLabel}${expandHint}`;
 	const h = theme.boxSharp.horizontal;
 	const v = theme.boxSharp.vertical;
 	const bottom = `${theme.boxSharp.bottomLeft}${h.repeat(3)}`;
@@ -142,9 +144,7 @@ function renderHover(
 	}
 
 	if (afterCode) {
-		const ellipsis = theme.format.ellipsis;
-		const sliceLen = Math.max(0, 60 - ellipsis.length);
-		const docPreview = afterCode.length > 60 ? `${afterCode.slice(0, sliceLen)}${ellipsis}` : afterCode;
+		const docPreview = truncate(afterCode, TRUNCATE_LENGTHS.TITLE, theme.format.ellipsis);
 		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", docPreview)}`;
 	} else {
 		output += `\n ${theme.fg("mdCodeBlockBorder", bottom)}`;
@@ -224,7 +224,7 @@ function renderDiagnostics(
 	const fallbackDiagnostics: RawDiagnostic[] = diagLines.map((line) => ({ raw: line.trim() }));
 
 	if (expanded) {
-		let output = `${icon} ${theme.fg("toolTitle", "Diagnostics")} ${theme.fg("dim", meta.join(", "))}`;
+		let output = `${icon} ${theme.fg("dim", meta.join(theme.sep.dot))}`;
 		const items: DiagnosticItem[] = parsedDiagnostics.length > 0 ? parsedDiagnostics : fallbackDiagnostics;
 		for (let i = 0; i < items.length; i++) {
 			const item = items[i];
@@ -242,20 +242,19 @@ function renderDiagnostics(
 				`[${item.severity}]`,
 			)}`;
 			if (item.message) {
-				output += `\n ${theme.fg("dim", detailPrefix)}${theme.fg("muted", trimTo(item.message, 120, theme))}`;
+				output += `\n ${theme.fg("dim", detailPrefix)}${theme.fg("muted", truncate(item.message, TRUNCATE_LENGTHS.LINE, theme.format.ellipsis))}`;
 			}
 		}
 		return new Text(output, 0, 0);
 	}
 
 	// Collapsed view
-	const expandHint = theme.fg("dim", " (Ctrl+O to expand)");
-	let output = `${icon} ${theme.fg("toolTitle", "Diagnostics")} ${theme.fg("dim", meta.join(", "))}${expandHint}`;
-
 	const previewItems: DiagnosticItem[] =
 		parsedDiagnostics.length > 0 ? parsedDiagnostics.slice(0, 3) : fallbackDiagnostics.slice(0, 3);
 	const remaining =
 		(parsedDiagnostics.length > 0 ? parsedDiagnostics.length : fallbackDiagnostics.length) - previewItems.length;
+	const expandHint = formatExpandHint(false, remaining > 0, theme);
+	let output = `${icon} ${theme.fg("dim", meta.join(theme.sep.dot))}${expandHint}`;
 	for (let i = 0; i < previewItems.length; i++) {
 		const item = previewItems[i];
 		const isLast = i === previewItems.length - 1 && remaining <= 0;
@@ -266,14 +265,13 @@ function renderDiagnostics(
 		}
 		const severityColor = severityToColor(item.severity);
 		const location = formatDiagnosticLocation(item.file, item.line, item.col, theme);
-		const message = item.message ? ` ${theme.fg("muted", trimTo(item.message, 80, theme))}` : "";
+		const message = item.message
+			? ` ${theme.fg("muted", truncate(item.message, TRUNCATE_LENGTHS.CONTENT, theme.format.ellipsis))}`
+			: "";
 		output += `\n ${theme.fg("dim", branch)} ${theme.fg(severityColor, location)}${message}`;
 	}
 	if (remaining > 0) {
-		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
-			"muted",
-			`${theme.format.ellipsis} ${remaining} more`,
-		)}`;
+		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", `${theme.format.ellipsis} ${remaining} more`)}`;
 	}
 
 	return new Text(output, 0, 0);
@@ -307,8 +305,8 @@ function renderReferences(refMatch: RegExpMatchArray, lines: string[], expanded:
 	const files = Array.from(byFile.keys());
 
 	const renderGrouped = (maxFiles: number, maxLocsPerFile: number, showHint: boolean): string => {
-		const expandHint = showHint ? theme.fg("dim", " (Ctrl+O to expand)") : "";
-		let output = `${icon} ${theme.fg("toolTitle", "References")} ${theme.fg("dim", `${refCount} found`)}${expandHint}`;
+		const expandHint = formatExpandHint(false, showHint, theme);
+		let output = `${icon} ${theme.fg("dim", `${refCount} found`)}${expandHint}`;
 
 		const filesToShow = files.slice(0, maxFiles);
 		for (let fi = 0; fi < filesToShow.length; fi++) {
@@ -336,7 +334,7 @@ function renderReferences(refMatch: RegExpMatchArray, lines: string[], expanded:
 						const context = `at ${file}:${line}:${col}`;
 						output += `\n ${theme.fg("dim", fileCont)}${theme.fg("dim", locCont)}${theme.fg(
 							"muted",
-							trimTo(context, 120, theme),
+							truncate(context, TRUNCATE_LENGTHS.LINE, theme.format.ellipsis),
 						)}`;
 					}
 				}
@@ -352,7 +350,7 @@ function renderReferences(refMatch: RegExpMatchArray, lines: string[], expanded:
 		if (files.length > maxFiles) {
 			output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
 				"muted",
-				`${theme.format.ellipsis} ${files.length - maxFiles} more files`,
+				formatMoreItems(files.length - maxFiles, "file", theme),
 			)}`;
 		}
 
@@ -430,7 +428,7 @@ function renderSymbols(symbolsMatch: RegExpMatchArray, lines: string[], expanded
 	const topLevelCount = symbols.filter((s) => s.indent === 0).length;
 
 	if (expanded) {
-		let output = `${icon} ${theme.fg("toolTitle", "Symbols")} ${theme.fg("dim", `in ${fileName}`)}`;
+		let output = `${icon} ${theme.fg("dim", `in ${fileName}`)}`;
 
 		for (let i = 0; i < symbols.length; i++) {
 			const sym = symbols[i];
@@ -448,10 +446,10 @@ function renderSymbols(symbolsMatch: RegExpMatchArray, lines: string[], expanded
 	}
 
 	// Collapsed: show first 3 top-level symbols
-	const expandHint = theme.fg("dim", " (Ctrl+O to expand)");
-	let output = `${icon} ${theme.fg("toolTitle", "Symbols")} ${theme.fg("dim", `in ${fileName}`)}${expandHint}`;
-
 	const topLevel = symbols.filter((s) => s.indent === 0).slice(0, 3);
+	const hasMoreSymbols = symbols.length > topLevel.length;
+	const expandHint = formatExpandHint(false, hasMoreSymbols, theme);
+	let output = `${icon} ${theme.fg("dim", `in ${fileName}`)}${expandHint}`;
 	for (let i = 0; i < topLevel.length; i++) {
 		const sym = topLevel[i];
 		const isLast = i === topLevel.length - 1 && topLevelCount <= 3;
@@ -462,10 +460,7 @@ function renderSymbols(symbolsMatch: RegExpMatchArray, lines: string[], expanded
 		)} ${theme.fg("muted", `line ${sym.line}`)}`;
 	}
 	if (topLevelCount > 3) {
-		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
-			"muted",
-			`${theme.format.ellipsis} ${topLevelCount - 3} more`,
-		)}`;
+		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", `${theme.format.ellipsis} ${topLevelCount - 3} more`)}`;
 	}
 
 	return new Text(output, 0, 0);
@@ -490,7 +485,7 @@ function renderGeneric(text: string, lines: string[], expanded: boolean, theme: 
 				: theme.styledSymbol("status.info", "accent");
 
 	if (expanded) {
-		let output = `${icon} ${theme.fg("toolTitle", "LSP")} ${theme.fg("dim", "Output")}`;
+		let output = `${icon} ${theme.fg("dim", "Output")}`;
 		for (let i = 0; i < lines.length; i++) {
 			const isLast = i === lines.length - 1;
 			const branch = isLast ? theme.tree.last : theme.tree.branch;
@@ -500,21 +495,18 @@ function renderGeneric(text: string, lines: string[], expanded: boolean, theme: 
 	}
 
 	const firstLine = lines[0] || "No output";
-	const expandHint = lines.length > 1 ? theme.fg("dim", " (Ctrl+O to expand)") : "";
-	let output = `${icon} ${theme.fg("toolTitle", "LSP")} ${theme.fg("dim", firstLine.slice(0, 60))}${expandHint}`;
+	const expandHint = formatExpandHint(false, lines.length > 1, theme);
+	let output = `${icon} ${theme.fg("dim", truncate(firstLine, TRUNCATE_LENGTHS.TITLE, theme.format.ellipsis))}${expandHint}`;
 
 	if (lines.length > 1) {
 		const previewLines = lines.slice(1, 4);
 		for (let i = 0; i < previewLines.length; i++) {
 			const isLast = i === previewLines.length - 1 && lines.length <= 4;
 			const branch = isLast ? theme.tree.last : theme.tree.branch;
-			output += `\n ${theme.fg("dim", branch)} ${theme.fg("dim", previewLines[i].trim().slice(0, 80))}`;
+			output += `\n ${theme.fg("dim", branch)} ${theme.fg("dim", truncate(previewLines[i].trim(), TRUNCATE_LENGTHS.CONTENT, theme.format.ellipsis))}`;
 		}
 		if (lines.length > 4) {
-			output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
-				"muted",
-				`${theme.format.ellipsis} ${lines.length - 4} more lines`,
-			)}`;
+			output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", formatMoreItems(lines.length - 4, "line", theme))}`;
 		}
 	}
 
@@ -557,10 +549,4 @@ function severityToColor(severity: string): "error" | "warning" | "accent" | "di
 		default:
 			return "dim";
 	}
-}
-
-function trimTo(value: string, maxLength: number, theme: Theme): string {
-	if (value.length <= maxLength) return value;
-	const sliceLen = Math.max(0, maxLength - theme.format.ellipsis.length);
-	return `${value.slice(0, sliceLen)}${theme.format.ellipsis}`;
 }
