@@ -403,13 +403,13 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 		case "return":
 			if (shift && !ctrl && !alt) {
 				return (
+					data === "\x1b\r" || // Legacy: some terminals send ESC+CR for shift+enter
 					matchesKittySequence(data, CODEPOINTS.enter, MODIFIERS.shift) ||
 					matchesKittySequence(data, CODEPOINTS.kpEnter, MODIFIERS.shift)
 				);
 			}
 			if (alt && !ctrl && !shift) {
 				return (
-					data === "\x1b\r" ||
 					matchesKittySequence(data, CODEPOINTS.enter, MODIFIERS.alt) ||
 					matchesKittySequence(data, CODEPOINTS.kpEnter, MODIFIERS.alt)
 				);
@@ -584,7 +584,7 @@ export function parseKey(data: string): string | undefined {
 	if (data === " ") return "space";
 	if (data === "\x7f" || data === "\x08") return "backspace";
 	if (data === "\x1b[Z") return "shift+tab";
-	if (data === "\x1b\r") return "alt+enter";
+	if (data === "\x1b\r") return "shift+enter"; // Legacy: ESC+CR for shift+enter
 	if (data === "\x1b\x7f") return "alt+backspace";
 	if (data === "\x1b[A") return "up";
 	if (data === "\x1b[B") return "down";

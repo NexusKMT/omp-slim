@@ -31,7 +31,7 @@ export class VoiceCapture {
 	private recorder?: MediaRecorder;
 	private audioContext?: AudioContext;
 	private analyser?: AnalyserNode;
-	private data?: Float32Array<ArrayBuffer>;
+	private data?: Float32Array;
 	private chunks: Blob[] = [];
 	private startedAt = 0;
 	private speechDetectedAt?: number;
@@ -262,7 +262,7 @@ function pickSupportedMimeType(preferred?: string): string | undefined {
 	return undefined;
 }
 
-function getRms(data: Float32Array<ArrayBuffer>): number {
+function getRms(data: Float32Array): number {
 	let sum = 0;
 	for (let i = 0; i < data.length; i += 1) {
 		const sample = data[i] ?? 0;

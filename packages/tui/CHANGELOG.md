@@ -1,7 +1,6 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Added
 
 - Added `isCapsLock` helper function for detecting Caps Lock key press via Kitty protocol
@@ -12,6 +11,10 @@
 ### Changed
 
 - Settings list descriptions now wrap to the available width instead of truncating
+
+### Fixed
+
+- Fixed Shift+Enter detection in legacy terminals that send ESC+CR sequence
 
 ## [3.15.1] - 2026-01-05
 
