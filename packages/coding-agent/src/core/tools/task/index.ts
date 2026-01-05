@@ -14,6 +14,7 @@
  */
 
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
+import type { Usage } from "@oh-my-pi/pi-ai";
 import type { Theme } from "../../../modes/interactive/theme/theme";
 import { cleanupTempDir, createTempArtifactsDir, getArtifactsDir } from "./artifacts";
 import { discoverAgents, getAgent } from "./discovery";
@@ -40,6 +41,79 @@ function formatBytes(bytes: number): string {
 	if (bytes < 1024) return `${bytes}B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}K`;
 	return `${(bytes / (1024 * 1024)).toFixed(1)}M`;
+}
+
+function createUsageTotals(): Usage {
+	return {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: 0,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
+}
+
+function addUsageTotals(target: Usage, usage: Partial<Usage>): void {
+	const input = usage.input ?? 0;
+	const output = usage.output ?? 0;
+	const cacheRead = usage.cacheRead ?? 0;
+	const cacheWrite = usage.cacheWrite ?? 0;
+	const totalTokens = usage.totalTokens ?? input + output + cacheRead + cacheWrite;
+	const cost =
+		usage.cost ??
+		({
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			total: 0,
+		} satisfies Usage["cost"]);
+
+	target.input += input;
+	target.output += output;
+	target.cacheRead += cacheRead;
+	target.cacheWrite += cacheWrite;
+	target.totalTokens += totalTokens;
+	target.cost.input += cost.input;
+	target.cost.output += cost.output;
+	target.cost.cacheRead += cost.cacheRead;
+	target.cost.cacheWrite += cost.cacheWrite;
+	target.cost.total += cost.total;
+}
+
+function parseSubagentUsage(events: string[] | undefined): Usage | undefined {
+	if (!events || events.length === 0) return undefined;
+
+	const totals = createUsageTotals();
+	let hasUsage = false;
+
+	for (const line of events) {
+		let event: unknown;
+		try {
+			event = JSON.parse(line);
+		} catch {
+			continue;
+		}
+
+		if (!event || typeof event !== "object") continue;
+		const record = event as Record<string, unknown>;
+		if (record.type !== "message_end") continue;
+
+		const message = record.message;
+		if (!message || typeof message !== "object") continue;
+		const msgRecord = message as Record<string, unknown>;
+		if (msgRecord.role !== "assistant") continue;
+		if (msgRecord.stopReason === "aborted" || msgRecord.stopReason === "error") continue;
+
+		const usage = msgRecord.usage;
+		if (!usage || typeof usage !== "object") continue;
+
+		addUsageTotals(totals, usage as Partial<Usage>);
+		hasUsage = true;
+	}
+
+	return hasUsage ? totals : undefined;
 }
 
 /** Session context interface */
@@ -393,19 +467,31 @@ export function createTaskTool(
 					});
 				});
 
+				const aggregatedUsage = createUsageTotals();
+				let hasAggregatedUsage = false;
+				const resultsWithUsage = results.map((result) => {
+					const usage = parseSubagentUsage(result.jsonlEvents);
+					if (usage) {
+						addUsageTotals(aggregatedUsage, usage);
+						hasAggregatedUsage = true;
+						return { ...result, usage };
+					}
+					return result;
+				});
+
 				// Collect output paths (artifacts already written by executor in real-time)
 				const outputPaths: string[] = [];
-				for (const result of results) {
+				for (const result of resultsWithUsage) {
 					if (result.artifactPaths) {
 						outputPaths.push(result.artifactPaths.outputPath);
 					}
 				}
 
 				// Build final output - match plugin format
-				const successCount = results.filter((r) => r.exitCode === 0).length;
+				const successCount = resultsWithUsage.filter((r) => r.exitCode === 0).length;
 				const totalDuration = Date.now() - startTime;
 
-				const summaries = results.map((r) => {
+				const summaries = resultsWithUsage.map((r) => {
 					const status = r.exitCode === 0 ? "completed" : `failed (exit ${r.exitCode})`;
 					const output = r.output.trim() || r.stderr.trim() || "(no output)";
 					const preview = output.split("\n").slice(0, 5).join("\n");
@@ -422,7 +508,7 @@ export function createTaskTool(
 					skippedSelfRecursion > 0
 						? ` (${skippedSelfRecursion} ${blockedAgent} task${skippedSelfRecursion > 1 ? "s" : ""} skipped - self-recursion blocked)`
 						: "";
-				const summary = `${successCount}/${results.length} succeeded${skippedNote} [${formatDuration(totalDuration)}]\n\n${summaries.join("\n\n---\n\n")}`;
+				const summary = `${successCount}/${resultsWithUsage.length} succeeded${skippedNote} [${formatDuration(totalDuration)}]\n\n${summaries.join("\n\n---\n\n")}`;
 
 				// Cleanup temp directory if used
 				if (tempArtifactsDir) {
@@ -433,8 +519,9 @@ export function createTaskTool(
 					content: [{ type: "text", text: summary }],
 					details: {
 						projectAgentsDir,
-						results,
+						results: resultsWithUsage,
 						totalDurationMs: totalDuration,
+						usage: hasAggregatedUsage ? aggregatedUsage : undefined,
 						outputPaths,
 					},
 				};

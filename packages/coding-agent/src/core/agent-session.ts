@@ -14,7 +14,7 @@
  */
 
 import type { Agent, AgentEvent, AgentMessage, AgentState, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent, Message, Model, TextContent, Usage } from "@oh-my-pi/pi-ai";
 import { isContextOverflow, modelsAreEqual, supportsXhigh } from "@oh-my-pi/pi-ai";
 import type { Rule } from "../capability/rule";
 import { getAuthPath } from "../config";
@@ -479,10 +479,11 @@ export class AgentSession {
 	}
 
 	/**
-	 * Remove all listeners and disconnect from agent.
+	 * Remove all listeners, flush pending writes, and disconnect from agent.
 	 * Call this when completely done with the session.
 	 */
-	dispose(): void {
+	async dispose(): Promise<void> {
+		await this.sessionManager.flush();
 		this._disconnectFromAgent();
 		this._eventListeners = [];
 	}
@@ -1641,7 +1642,7 @@ export class AgentSession {
 		await this.sessionManager.flush();
 
 		// Set new session
-		this.sessionManager.setSessionFile(sessionPath);
+		await this.sessionManager.setSessionFile(sessionPath);
 
 		// Reload messages
 		const sessionContext = this.sessionManager.buildSessionContext();
@@ -1962,6 +1963,14 @@ export class AgentSession {
 		let totalCacheWrite = 0;
 		let totalCost = 0;
 
+		const getTaskToolUsage = (details: unknown): Usage | undefined => {
+			if (!details || typeof details !== "object") return undefined;
+			const record = details as Record<string, unknown>;
+			const usage = record.usage;
+			if (!usage || typeof usage !== "object") return undefined;
+			return usage as Usage;
+		};
+
 		for (const message of state.messages) {
 			if (message.role === "assistant") {
 				const assistantMsg = message as AssistantMessage;
@@ -1971,6 +1980,17 @@ export class AgentSession {
 				totalCacheRead += assistantMsg.usage.cacheRead;
 				totalCacheWrite += assistantMsg.usage.cacheWrite;
 				totalCost += assistantMsg.usage.cost.total;
+			}
+
+			if (message.role === "toolResult" && message.toolName === "task") {
+				const usage = getTaskToolUsage(message.details);
+				if (usage) {
+					totalInput += usage.input;
+					totalOutput += usage.output;
+					totalCacheRead += usage.cacheRead;
+					totalCacheWrite += usage.cacheWrite;
+					totalCost += usage.cost.total;
+				}
 			}
 		}
 

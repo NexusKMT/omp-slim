@@ -1,3 +1,4 @@
+import type { Usage } from "@oh-my-pi/pi-ai";
 import { type Static, Type } from "@sinclair/typebox";
 
 /** Source of an agent definition */
@@ -121,6 +122,8 @@ export interface SingleResult {
 	aborted?: boolean;
 	jsonlEvents?: string[];
 	artifactPaths?: { inputPath: string; outputPath: string; jsonlPath?: string };
+	/** Aggregated usage from the subprocess, if available. */
+	usage?: Usage;
 	/** Data extracted by registered subprocess tool handlers (keyed by tool name) */
 	extractedToolData?: Record<string, unknown[]>;
 	/** Output metadata for Output tool integration */
@@ -132,6 +135,8 @@ export interface TaskToolDetails {
 	projectAgentsDir: string | null;
 	results: SingleResult[];
 	totalDurationMs: number;
+	/** Aggregated usage across all subagents. */
+	usage?: Usage;
 	outputPaths?: string[];
 	progress?: AgentProgress[];
 }
