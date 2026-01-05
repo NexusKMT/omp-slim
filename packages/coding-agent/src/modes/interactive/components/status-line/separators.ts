@@ -22,8 +22,8 @@ export function getSeparator(style: StatusLineSeparatorStyle, theme: Theme): Sep
 				left: theme.sep.powerlineThinLeft,
 				right: theme.sep.powerlineThinRight,
 				endCaps: {
-					left: theme.sep.powerlineThinRight,
-					right: theme.sep.powerlineThinLeft,
+					left: theme.sep.powerlineRight,
+					right: theme.sep.powerlineLeft,
 					useBgAsFg: true,
 				},
 			};
@@ -46,8 +46,8 @@ export function getSeparator(style: StatusLineSeparatorStyle, theme: Theme): Sep
 				left: theme.sep.powerlineThinLeft,
 				right: theme.sep.powerlineThinRight,
 				endCaps: {
-					left: theme.sep.powerlineThinRight,
-					right: theme.sep.powerlineThinLeft,
+					left: theme.sep.powerlineRight,
+					right: theme.sep.powerlineLeft,
 					useBgAsFg: true,
 				},
 			};
