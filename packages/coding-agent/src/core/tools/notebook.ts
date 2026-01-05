@@ -26,6 +26,8 @@ export interface NotebookToolDetails {
 	cellType?: string;
 	/** Total cell count after operation */
 	totalCells: number;
+	/** Cell content lines after operation (or removed content for delete) */
+	cellSource?: string[];
 }
 
 interface NotebookCell {
@@ -110,12 +112,14 @@ export function createNotebookTool(cwd: string): AgentTool<typeof notebookSchema
 				// Perform the action
 				let resultMessage: string;
 				let finalCellType: string | undefined;
+				let cellSource: string[] | undefined;
 
 				switch (action) {
 					case "edit": {
 						const sourceLines = splitIntoLines(content!);
 						notebook.cells[cell_index].source = sourceLines;
 						finalCellType = notebook.cells[cell_index].cell_type;
+						cellSource = sourceLines;
 						resultMessage = `Replaced cell ${cell_index} (${finalCellType})`;
 						break;
 					}
@@ -133,11 +137,14 @@ export function createNotebookTool(cwd: string): AgentTool<typeof notebookSchema
 						}
 						notebook.cells.splice(cell_index, 0, newCell);
 						finalCellType = newCellType;
+						cellSource = sourceLines;
 						resultMessage = `Inserted ${newCellType} cell at position ${cell_index}`;
 						break;
 					}
 					case "delete": {
-						finalCellType = notebook.cells[cell_index].cell_type;
+						const removedCell = notebook.cells[cell_index];
+						finalCellType = removedCell.cell_type;
+						cellSource = removedCell.source;
 						notebook.cells.splice(cell_index, 1);
 						resultMessage = `Deleted cell ${cell_index} (${finalCellType})`;
 						break;
@@ -163,6 +170,7 @@ export function createNotebookTool(cwd: string): AgentTool<typeof notebookSchema
 						cellIndex: cell_index,
 						cellType: finalCellType,
 						totalCells: newCellCount,
+						cellSource,
 					},
 				};
 			});

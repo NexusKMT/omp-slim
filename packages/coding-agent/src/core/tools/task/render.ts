@@ -68,6 +68,62 @@ function getStatusIcon(status: AgentProgress["status"], theme: Theme): string {
 	}
 }
 
+function formatBadge(label: string, color: "success" | "error" | "warning" | "accent" | "muted", theme: Theme): string {
+	const left = theme.format.bracketLeft;
+	const right = theme.format.bracketRight;
+	return theme.fg(color, `${left}${label}${right}`);
+}
+
+function formatFindingSummary(findings: ReportFindingDetails[], theme: Theme): string {
+	if (findings.length === 0) return theme.fg("dim", "Findings: none");
+
+	const counts = new Map<number, number>();
+	for (const finding of findings) {
+		counts.set(finding.priority, (counts.get(finding.priority) ?? 0) + 1);
+	}
+
+	const parts: string[] = [];
+	for (const priority of [0, 1, 2, 3]) {
+		const label = PRIORITY_LABELS[priority] ?? "P?";
+		const color = priority === 0 ? "error" : priority === 1 ? "warning" : "muted";
+		const count = counts.get(priority) ?? 0;
+		parts.push(theme.fg(color, `${label}:${count}`));
+	}
+
+	return `${theme.fg("dim", "Findings:")} ${parts.join(theme.sep.dot)}`;
+}
+
+function renderOutputSection(
+	output: string,
+	continuePrefix: string,
+	expanded: boolean,
+	theme: Theme,
+	maxCollapsed = 3,
+	maxExpanded = 10,
+): string[] {
+	const lines: string[] = [];
+	const outputLines = output.split("\n").filter((line) => line.trim());
+	if (outputLines.length === 0) return lines;
+
+	lines.push(`${continuePrefix}${theme.fg("dim", "Output")}`);
+
+	const previewCount = expanded ? maxExpanded : maxCollapsed;
+	for (const line of outputLines.slice(0, previewCount)) {
+		lines.push(`${continuePrefix}  ${theme.fg("dim", truncate(line, 70, theme.format.ellipsis))}`);
+	}
+
+	if (outputLines.length > previewCount) {
+		lines.push(
+			`${continuePrefix}  ${theme.fg(
+				"dim",
+				`${theme.format.ellipsis} ${outputLines.length - previewCount} more lines`,
+			)}`,
+		);
+	}
+
+	return lines;
+}
+
 /**
  * Render the tool call arguments.
  */
@@ -108,25 +164,31 @@ function renderAgentProgress(progress: AgentProgress, isLast: boolean, expanded:
 				? "error"
 				: "accent";
 
+	const statusLabel =
+		progress.status === "running"
+			? "running"
+			: progress.status === "completed"
+				? "done"
+				: progress.status === "failed"
+					? "failed"
+					: progress.status === "aborted"
+						? "aborted"
+						: "pending";
+
 	// Main status line - include index for Output tool ID derivation
 	const agentId = `${progress.agent}(${progress.index})`;
-	let statusLine = `${prefix} ${theme.fg(iconColor, icon)} ${theme.fg("accent", agentId)}`;
+	let statusLine = `${prefix} ${theme.fg(iconColor, icon)} ${theme.fg("accent", agentId)} ${formatBadge(statusLabel, iconColor, theme)}`;
 
 	if (progress.status === "running") {
 		const taskPreview = truncate(progress.task, 40, theme.format.ellipsis);
-		statusLine += `: ${theme.fg("muted", taskPreview)}`;
+		statusLine += ` ${theme.fg("muted", taskPreview)}`;
 		statusLine += `${theme.sep.dot}${theme.fg("dim", `${progress.toolCount} tools`)}`;
 		if (progress.tokens > 0) {
 			statusLine += `${theme.sep.dot}${theme.fg("dim", `${formatTokens(progress.tokens)} tokens`)}`;
 		}
 	} else if (progress.status === "completed") {
-		statusLine += `: ${theme.fg("success", "done")}`;
 		statusLine += `${theme.sep.dot}${theme.fg("dim", `${progress.toolCount} tools`)}`;
 		statusLine += `${theme.sep.dot}${theme.fg("dim", `${formatTokens(progress.tokens)} tokens`)}`;
-	} else if (progress.status === "aborted") {
-		statusLine += `: ${theme.fg("error", "aborted")}`;
-	} else if (progress.status === "failed") {
-		statusLine += `: ${theme.fg("error", "failed")}`;
 	}
 
 	lines.push(statusLine);
@@ -170,10 +232,8 @@ function renderAgentProgress(progress: AgentProgress, isLast: boolean, expanded:
 
 	// Expanded view: recent output and tools
 	if (expanded && progress.status === "running") {
-		// Recent output
-		for (const line of progress.recentOutput.slice(0, 3)) {
-			lines.push(`${continuePrefix}  ${theme.fg("dim", truncate(line, 60, theme.format.ellipsis))}`);
-		}
+		const output = progress.recentOutput.join("\n");
+		lines.push(...renderOutputSection(output, continuePrefix, true, theme, 2, 6));
 	}
 
 	return lines;
@@ -201,19 +261,21 @@ function renderReviewResult(
 	// Explanation preview (first ~80 chars when collapsed, full when expanded)
 	if (summary.explanation) {
 		if (expanded) {
-			// Full explanation, wrapped
+			lines.push(`${continuePrefix}${theme.fg("dim", "Summary")}`);
 			const explanationLines = summary.explanation.split("\n");
 			for (const line of explanationLines) {
-				lines.push(`${continuePrefix}${theme.fg("dim", line)}`);
+				lines.push(`${continuePrefix}  ${theme.fg("dim", line)}`);
 			}
 		} else {
 			// Preview: first sentence or ~100 chars
 			const preview = truncate(`${summary.explanation.split(/[.!?]/)[0]}.`, 100, theme.format.ellipsis);
-			lines.push(`${continuePrefix}${theme.fg("dim", preview)}`);
+			lines.push(`${continuePrefix}${theme.fg("dim", `Summary: ${preview}`)}`);
 		}
 	}
 
-	// Findings in tree structure
+	// Findings summary + list
+	lines.push(`${continuePrefix}${formatFindingSummary(findings, theme)}`);
+
 	if (findings.length > 0) {
 		lines.push(`${continuePrefix}`); // Spacing
 		lines.push(...renderFindings(findings, continuePrefix, expanded, theme));
@@ -288,8 +350,7 @@ function renderAgentResult(result: SingleResult, isLast: boolean, expanded: bool
 
 	// Main status line - include index for Output tool ID derivation
 	const agentId = `${result.agent}(${result.index})`;
-	let statusLine = `${prefix} ${theme.fg(iconColor, icon)} ${theme.fg("accent", agentId)}`;
-	statusLine += `: ${theme.fg(iconColor, statusText)}`;
+	let statusLine = `${prefix} ${theme.fg(iconColor, icon)} ${theme.fg("accent", agentId)} ${formatBadge(statusText, iconColor, theme)}`;
 	if (result.tokens > 0) {
 		statusLine += `${theme.sep.dot}${theme.fg("dim", `${formatTokens(result.tokens)} tokens`)}`;
 	}
@@ -316,6 +377,7 @@ function renderAgentResult(result: SingleResult, isLast: boolean, expanded: bool
 		lines.push(
 			`${continuePrefix}${theme.fg("warning", theme.status.warning)} ${theme.fg("dim", "Review summary missing (submit_review not called)")}`,
 		);
+		lines.push(`${continuePrefix}${formatFindingSummary(reportFindingData, theme)}`);
 		lines.push(`${continuePrefix}`); // Spacing
 		lines.push(...renderFindings(reportFindingData, continuePrefix, expanded, theme));
 		return lines;
@@ -354,21 +416,7 @@ function renderAgentResult(result: SingleResult, isLast: boolean, expanded: bool
 
 	// Fallback to output preview if no custom rendering
 	if (!hasCustomRendering) {
-		const outputLines = result.output.split("\n").filter((l) => l.trim());
-		const previewCount = expanded ? 8 : 3;
-
-		for (const line of outputLines.slice(0, previewCount)) {
-			lines.push(`${continuePrefix}${theme.fg("dim", truncate(line, 70, theme.format.ellipsis))}`);
-		}
-
-		if (outputLines.length > previewCount) {
-			lines.push(
-				`${continuePrefix}${theme.fg(
-					"dim",
-					`${theme.format.ellipsis} ${outputLines.length - previewCount} more lines`,
-				)}`,
-			);
-		}
+		lines.push(...renderOutputSection(result.output, continuePrefix, expanded, theme, 3, 12));
 	}
 
 	// Error message

@@ -14,7 +14,11 @@ const lsSchema = Type.Object({
 const DEFAULT_LIMIT = 500;
 
 export interface LsToolDetails {
+	entries?: string[];
+	dirCount?: number;
+	fileCount?: number;
 	truncation?: TruncationResult;
+	truncationReasons?: Array<"entryLimit" | "byteLimit">;
 	entryLimitReached?: number;
 }
 
@@ -58,6 +62,8 @@ export function createLsTool(cwd: string): AgentTool<typeof lsSchema> {
 				// Format entries with directory indicators
 				const results: string[] = [];
 				let entryLimitReached = false;
+				let dirCount = 0;
+				let fileCount = 0;
 
 				for (const entry of entries) {
 					if (results.length >= effectiveLimit) {
@@ -72,6 +78,9 @@ export function createLsTool(cwd: string): AgentTool<typeof lsSchema> {
 						const entryStat = statSync(fullPath);
 						if (entryStat.isDirectory()) {
 							suffix = "/";
+							dirCount += 1;
+						} else {
+							fileCount += 1;
 						}
 					} catch {
 						// Skip entries we can't stat
@@ -90,7 +99,12 @@ export function createLsTool(cwd: string): AgentTool<typeof lsSchema> {
 				const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
 
 				let output = truncation.content;
-				const details: LsToolDetails = {};
+				const details: LsToolDetails = {
+					entries: results,
+					dirCount,
+					fileCount,
+				};
+				const truncationReasons: Array<"entryLimit" | "byteLimit"> = [];
 
 				// Build notices
 				const notices: string[] = [];
@@ -98,11 +112,17 @@ export function createLsTool(cwd: string): AgentTool<typeof lsSchema> {
 				if (entryLimitReached) {
 					notices.push(`${effectiveLimit} entries limit reached. Use limit=${effectiveLimit * 2} for more`);
 					details.entryLimitReached = effectiveLimit;
+					truncationReasons.push("entryLimit");
 				}
 
 				if (truncation.truncated) {
 					notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
 					details.truncation = truncation;
+					truncationReasons.push("byteLimit");
+				}
+
+				if (truncationReasons.length > 0) {
+					details.truncationReasons = truncationReasons;
 				}
 
 				if (notices.length > 0) {
@@ -111,7 +131,7 @@ export function createLsTool(cwd: string): AgentTool<typeof lsSchema> {
 
 				return {
 					content: [{ type: "text", text: output }],
-					details: Object.keys(details).length > 0 ? details : undefined,
+					details,
 				};
 			});
 		},

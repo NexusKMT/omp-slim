@@ -1,7 +1,6 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Added
 
 - Added `status.shadowed` symbol for theme customization to properly indicate shadowed extension state
@@ -20,6 +19,14 @@
 
 ### Changed
 
+- Changed tool result renderers to use structured tree layouts with consistent expand hints and truncation indicators
+- Changed grep, find, and ls tools to show scope path and detailed truncation reasons in output
+- Changed web search and web fetch result rendering to display structured metadata sections with bounded content previews
+- Changed task/subagent progress rendering to use badge-style status labels and structured output sections
+- Changed notebook tool to display cell content preview with line counts
+- Changed ask tool result to show checkbox-style selection indicators
+- Changed output tool to include provenance metadata and content previews for retrieved outputs
+- Changed collapsed tool views to show consistent "Ctrl+O to expand" hints with remaining item counts
 - Changed Biome integration to use CLI instead of LSP to avoid stale diagnostics issues
 - Changed hardcoded UI symbols throughout codebase to use theme-configurable glyphs
 - Changed tree drawing characters to use theme-defined box-drawing symbols

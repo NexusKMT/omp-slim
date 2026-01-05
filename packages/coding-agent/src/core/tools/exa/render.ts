@@ -73,7 +73,7 @@ export function renderExaResult(
 	// Build header: Exa Search · N results · $X.XX · Xs
 	const icon =
 		resultCount > 0 ? uiTheme.fg("success", uiTheme.format.bullet) : uiTheme.fg("warning", uiTheme.format.bullet);
-	const expandHint = expanded ? "" : uiTheme.fg("dim", " (Ctrl+O to expand)");
+	const expandHint = expanded ? "" : uiTheme.fg("dim", " (Ctrl+O for full results)");
 	const toolLabel = details?.toolName ?? "Exa Search";
 
 	let headerParts = `${icon} ${uiTheme.fg("toolTitle", toolLabel)}${uiTheme.sep.dot}${uiTheme.fg(

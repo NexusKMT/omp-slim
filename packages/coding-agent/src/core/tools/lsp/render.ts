@@ -212,15 +212,32 @@ function renderDiagnostics(
 	if (meta.length === 0) meta.push("No issues");
 
 	const diagLines = lines.filter((l) => l.includes(theme.status.error) || /:\d+:\d+/.test(l));
+	const parsedDiagnostics = diagLines
+		.map((line) => parseDiagnosticLine(line))
+		.filter((diag): diag is ParsedDiagnostic => diag !== null);
+	const fallbackDiagnostics: RawDiagnostic[] = diagLines.map((line) => ({ raw: line.trim() }));
 
 	if (expanded) {
 		let output = `${icon} ${theme.fg("toolTitle", "Diagnostics")} ${theme.fg("dim", meta.join(", "))}`;
-		for (let i = 0; i < diagLines.length; i++) {
-			const isLast = i === diagLines.length - 1;
+		const items: DiagnosticItem[] = parsedDiagnostics.length > 0 ? parsedDiagnostics : fallbackDiagnostics;
+		for (let i = 0; i < items.length; i++) {
+			const isLast = i === items.length - 1;
 			const branch = isLast ? theme.tree.last : theme.tree.branch;
-			const line = diagLines[i].trim();
-			const color = line.includes("[error]") ? "error" : line.includes("[warning]") ? "warning" : "dim";
-			output += `\n ${theme.fg("dim", branch)} ${theme.fg(color, line)}`;
+			const detailPrefix = isLast ? "   " : `${theme.tree.vertical}  `;
+			if ("raw" in items[i]) {
+				output += `\n ${theme.fg("dim", branch)} ${theme.fg("muted", items[i].raw)}`;
+				continue;
+			}
+			const diag = items[i];
+			const severityColor = severityToColor(diag.severity);
+			const location = `${diag.file}:${diag.line}:${diag.col}`;
+			output += `\n ${theme.fg("dim", branch)} ${theme.fg(severityColor, location)} ${theme.fg(
+				"dim",
+				`[${diag.severity}]`,
+			)}`;
+			if (diag.message) {
+				output += `\n ${theme.fg("dim", detailPrefix)}${theme.fg("muted", trimTo(diag.message, 120, theme))}`;
+			}
 		}
 		return new Text(output, 0, 0);
 	}
@@ -229,16 +246,27 @@ function renderDiagnostics(
 	const expandHint = theme.fg("dim", " (Ctrl+O to expand)");
 	let output = `${icon} ${theme.fg("toolTitle", "Diagnostics")} ${theme.fg("dim", meta.join(", "))}${expandHint}`;
 
-	const previewLines = diagLines.length > 0 ? diagLines.slice(0, 4) : lines.slice(0, 4);
-	for (let i = 0; i < previewLines.length; i++) {
-		const isLast = i === previewLines.length - 1 && diagLines.length <= 4;
+	const previewItems: DiagnosticItem[] =
+		parsedDiagnostics.length > 0 ? parsedDiagnostics.slice(0, 3) : fallbackDiagnostics.slice(0, 3);
+	const remaining =
+		(parsedDiagnostics.length > 0 ? parsedDiagnostics.length : fallbackDiagnostics.length) - previewItems.length;
+	for (let i = 0; i < previewItems.length; i++) {
+		const isLast = i === previewItems.length - 1 && remaining <= 0;
 		const branch = isLast ? theme.tree.last : theme.tree.branch;
-		output += `\n ${theme.fg("dim", branch)} ${previewLines[i].trim()}`;
+		if ("raw" in previewItems[i]) {
+			output += `\n ${theme.fg("dim", branch)} ${theme.fg("muted", previewItems[i].raw)}`;
+			continue;
+		}
+		const diag = previewItems[i];
+		const severityColor = severityToColor(diag.severity);
+		const location = `${diag.file}:${diag.line}:${diag.col}`;
+		const message = diag.message ? ` ${theme.fg("muted", trimTo(diag.message, 80, theme))}` : "";
+		output += `\n ${theme.fg("dim", branch)} ${theme.fg(severityColor, location)}${message}`;
 	}
-	if (diagLines.length > 4) {
+	if (remaining > 0) {
 		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
 			"muted",
-			`${theme.format.ellipsis} ${diagLines.length - 4} more`,
+			`${theme.format.ellipsis} ${remaining} more`,
 		)}`;
 	}
 
@@ -284,22 +312,33 @@ function renderReferences(refMatch: RegExpMatchArray, lines: string[], expanded:
 			const fileBranch = isLastFile ? theme.tree.last : theme.tree.branch;
 			const fileCont = isLastFile ? "   " : `${theme.tree.vertical}  `;
 
-			if (locs.length === 1) {
-				output += `\n ${theme.fg("dim", fileBranch)} ${theme.fg("accent", file)}:${theme.fg(
-					"muted",
-					`${locs[0][0]}:${locs[0][1]}`,
-				)}`;
-			} else {
-				output += `\n ${theme.fg("dim", fileBranch)} ${theme.fg("accent", file)}`;
+			const fileMeta = `${locs.length} reference${locs.length !== 1 ? "s" : ""}`;
+			output += `\n ${theme.fg("dim", fileBranch)} ${theme.fg("accent", file)} ${theme.fg("dim", fileMeta)}`;
 
+			if (maxLocsPerFile > 0) {
 				const locsToShow = locs.slice(0, maxLocsPerFile);
-				const locStrs = locsToShow.map(([l, c]) => `${l}:${c}`);
-				const locsText = locStrs.join(", ");
-				const hasMore = locs.length > maxLocsPerFile;
-
-				output += `\n ${theme.fg("dim", fileCont)}${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", locsText)}`;
-				if (hasMore) {
-					output += theme.fg("dim", ` ${theme.format.ellipsis} +${locs.length - maxLocsPerFile} more`);
+				for (let li = 0; li < locsToShow.length; li++) {
+					const [line, col] = locsToShow[li];
+					const isLastLoc = li === locsToShow.length - 1 && locs.length <= maxLocsPerFile;
+					const locBranch = isLastLoc ? theme.tree.last : theme.tree.branch;
+					const locCont = isLastLoc ? "   " : `${theme.tree.vertical}  `;
+					output += `\n ${theme.fg("dim", fileCont)}${theme.fg("dim", locBranch)} ${theme.fg(
+						"muted",
+						`line ${line}, col ${col}`,
+					)}`;
+					if (expanded) {
+						const context = `at ${file}:${line}:${col}`;
+						output += `\n ${theme.fg("dim", fileCont)}${theme.fg("dim", locCont)}${theme.fg(
+							"muted",
+							trimTo(context, 120, theme),
+						)}`;
+					}
+				}
+				if (locs.length > maxLocsPerFile) {
+					output += `\n ${theme.fg("dim", fileCont)}${theme.fg("dim", theme.tree.last)} ${theme.fg(
+						"muted",
+						`${theme.format.ellipsis} ${locs.length - maxLocsPerFile} more`,
+					)}`;
 				}
 			}
 		}
@@ -315,10 +354,10 @@ function renderReferences(refMatch: RegExpMatchArray, lines: string[], expanded:
 	};
 
 	if (expanded) {
-		return new Text(renderGrouped(files.length, 30, false), 0, 0);
+		return new Text(renderGrouped(files.length, 3, false), 0, 0);
 	}
 
-	return new Text(renderGrouped(4, 10, true), 0, 0);
+	return new Text(renderGrouped(3, 1, true), 0, 0);
 }
 
 // =============================================================================
@@ -336,6 +375,7 @@ function renderSymbols(symbolsMatch: RegExpMatchArray, lines: string[], expanded
 		name: string;
 		line: string;
 		indent: number;
+		icon: string;
 	}
 
 	const symbolLines = lines.filter((l) => l.includes("@") && l.includes("line"));
@@ -343,9 +383,9 @@ function renderSymbols(symbolsMatch: RegExpMatchArray, lines: string[], expanded
 
 	for (const line of symbolLines) {
 		const indent = line.match(/^(\s*)/)?.[1].length ?? 0;
-		const symMatch = line.trim().match(/^(.+?)\s*@\s*line\s*(\d+)/);
+		const symMatch = line.trim().match(/^(\S+)\s+(.+?)\s*@\s*line\s*(\d+)/);
 		if (symMatch) {
-			symbols.push({ name: symMatch[1], line: symMatch[2], indent });
+			symbols.push({ icon: symMatch[1], name: symMatch[2], line: symMatch[3], indent });
 		}
 	}
 
@@ -389,30 +429,36 @@ function renderSymbols(symbolsMatch: RegExpMatchArray, lines: string[], expanded
 		for (let i = 0; i < symbols.length; i++) {
 			const sym = symbols[i];
 			const prefix = getPrefix(i);
-			const branch = isLastSibling(i) ? theme.tree.last : theme.tree.branch;
-			output += `\n${prefix}${theme.fg("dim", branch)} ${theme.fg("accent", sym.name)} ${theme.fg(
-				"muted",
-				`@${sym.line}`,
+			const isLast = isLastSibling(i);
+			const branch = isLast ? theme.tree.last : theme.tree.branch;
+			const detailPrefix = isLast ? "   " : `${theme.tree.vertical}  `;
+			output += `\n${prefix}${theme.fg("dim", branch)} ${theme.fg("accent", sym.icon)} ${theme.fg(
+				"accent",
+				sym.name,
 			)}`;
+			output += `\n${prefix}${theme.fg("dim", detailPrefix)}${theme.fg("muted", `line ${sym.line}`)}`;
 		}
 		return new Text(output, 0, 0);
 	}
 
-	// Collapsed: show first 4 top-level symbols
+	// Collapsed: show first 3 top-level symbols
 	const expandHint = theme.fg("dim", " (Ctrl+O to expand)");
 	let output = `${icon} ${theme.fg("toolTitle", "Symbols")} ${theme.fg("dim", `in ${fileName}`)}${expandHint}`;
 
-	const topLevel = symbols.filter((s) => s.indent === 0).slice(0, 4);
+	const topLevel = symbols.filter((s) => s.indent === 0).slice(0, 3);
 	for (let i = 0; i < topLevel.length; i++) {
 		const sym = topLevel[i];
-		const isLast = i === topLevel.length - 1 && topLevelCount <= 4;
+		const isLast = i === topLevel.length - 1 && topLevelCount <= 3;
 		const branch = isLast ? theme.tree.last : theme.tree.branch;
-		output += `\n ${theme.fg("dim", branch)} ${theme.fg("accent", sym.name)} ${theme.fg("muted", `@${sym.line}`)}`;
+		output += `\n ${theme.fg("dim", branch)} ${theme.fg("accent", sym.icon)} ${theme.fg(
+			"accent",
+			sym.name,
+		)} ${theme.fg("muted", `line ${sym.line}`)}`;
 	}
-	if (topLevelCount > 4) {
+	if (topLevelCount > 3) {
 		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
 			"muted",
-			`${theme.format.ellipsis} ${topLevelCount - 4} more`,
+			`${theme.format.ellipsis} ${topLevelCount - 3} more`,
 		)}`;
 	}
 
@@ -438,9 +484,11 @@ function renderGeneric(text: string, lines: string[], expanded: boolean, theme: 
 				: theme.styledSymbol("status.info", "accent");
 
 	if (expanded) {
-		let output = `${icon} ${theme.fg("toolTitle", "LSP")}`;
-		for (const line of lines) {
-			output += `\n ${line}`;
+		let output = `${icon} ${theme.fg("toolTitle", "LSP")} ${theme.fg("dim", "Output")}`;
+		for (let i = 0; i < lines.length; i++) {
+			const isLast = i === lines.length - 1;
+			const branch = isLast ? theme.tree.last : theme.tree.branch;
+			output += `\n ${theme.fg("dim", branch)} ${lines[i]}`;
 		}
 		return new Text(output, 0, 0);
 	}
@@ -465,4 +513,48 @@ function renderGeneric(text: string, lines: string[], expanded: boolean, theme: 
 	}
 
 	return new Text(output, 0, 0);
+}
+
+// =============================================================================
+// Parsing Helpers
+// =============================================================================
+
+interface ParsedDiagnostic {
+	file: string;
+	line: string;
+	col: string;
+	severity: string;
+	message: string;
+}
+
+interface RawDiagnostic {
+	raw: string;
+}
+
+type DiagnosticItem = ParsedDiagnostic | RawDiagnostic;
+
+function parseDiagnosticLine(line: string): ParsedDiagnostic | null {
+	const match = line.trim().match(/^(.*):(\d+):(\d+)\s+\[(\w+)\]\s*(.*)$/);
+	if (!match) return null;
+	const [, file, lineNum, colNum, severity, message] = match;
+	return { file, line: lineNum, col: colNum, severity: severity.toLowerCase(), message };
+}
+
+function severityToColor(severity: string): "error" | "warning" | "accent" | "dim" {
+	switch (severity) {
+		case "error":
+			return "error";
+		case "warning":
+			return "warning";
+		case "info":
+			return "accent";
+		default:
+			return "dim";
+	}
+}
+
+function trimTo(value: string, maxLength: number, theme: Theme): string {
+	if (value.length <= maxLength) return value;
+	const sliceLen = Math.max(0, maxLength - theme.format.ellipsis.length);
+	return `${value.slice(0, sliceLen)}${theme.format.ellipsis}`;
 }

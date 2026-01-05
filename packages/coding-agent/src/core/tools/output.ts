@@ -25,11 +25,18 @@ const outputSchema = Type.Object({
 });
 
 /** Metadata for a single output file */
+interface OutputProvenance {
+	agent: string;
+	index: number;
+}
+
 interface OutputEntry {
 	id: string;
 	path: string;
 	lineCount: number;
 	charCount: number;
+	provenance?: OutputProvenance;
+	previewLines?: string[];
 }
 
 export interface OutputToolDetails {
@@ -58,6 +65,26 @@ function formatBytes(bytes: number): string {
 	if (bytes < 1024) return `${bytes}B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}K`;
 	return `${(bytes / (1024 * 1024)).toFixed(1)}M`;
+}
+
+function parseOutputProvenance(id: string): OutputProvenance | undefined {
+	const match = id.match(/^(.*)_(\d+)$/);
+	if (!match) return undefined;
+	const agent = match[1];
+	const index = Number(match[2]);
+	if (!agent || Number.isNaN(index)) return undefined;
+	return { agent, index };
+}
+
+function extractPreviewLines(content: string, maxLines: number): string[] {
+	const lines = content.split("\n");
+	const preview: string[] = [];
+	for (const line of lines) {
+		if (!line.trim()) continue;
+		preview.push(line);
+		if (preview.length >= maxLines) break;
+	}
+	return preview;
 }
 
 export function createOutputTool(
@@ -103,6 +130,7 @@ Example: { "ids": ["reviewer_0"] }`,
 
 			const outputs: OutputEntry[] = [];
 			const notFound: string[] = [];
+			const outputContentById = new Map<string, string>();
 			const format = params.format ?? "raw";
 
 			for (const id of params.ids) {
@@ -114,11 +142,14 @@ Example: { "ids": ["reviewer_0"] }`,
 				}
 
 				const content = fs.readFileSync(outputPath, "utf-8");
+				outputContentById.set(id, content);
 				outputs.push({
 					id,
 					path: outputPath,
 					lineCount: content.split("\n").length,
 					charCount: content.length,
+					provenance: parseOutputProvenance(id),
+					previewLines: extractPreviewLines(content, 4),
 				});
 			}
 
@@ -144,13 +175,15 @@ Example: { "ids": ["reviewer_0"] }`,
 					id: o.id,
 					lineCount: o.lineCount,
 					charCount: o.charCount,
-					content: fs.readFileSync(o.path, "utf-8"),
+					provenance: o.provenance,
+					previewLines: o.previewLines,
+					content: outputContentById.get(o.id) ?? "",
 				}));
 				contentText = JSON.stringify(jsonData, null, 2);
 			} else {
 				// raw or stripped
 				const parts = outputs.map((o) => {
-					let content = fs.readFileSync(o.path, "utf-8");
+					let content = outputContentById.get(o.id) ?? "";
 					if (format === "stripped") {
 						content = stripAnsi(content);
 					}

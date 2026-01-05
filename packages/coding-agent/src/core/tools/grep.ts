@@ -50,11 +50,14 @@ const DEFAULT_LIMIT = 100;
 export interface GrepToolDetails {
 	truncation?: TruncationResult;
 	matchLimitReached?: number;
+	headLimitReached?: number;
 	linesTruncated?: boolean;
 	// Fields for TUI rendering
+	scopePath?: string;
 	matchCount?: number;
 	fileCount?: number;
 	files?: string[];
+	fileMatches?: Array<{ path: string; count: number }>;
 	mode?: "content" | "files_with_matches" | "count";
 	truncated?: boolean;
 	error?: string;
@@ -119,6 +122,10 @@ Usage:
 			}
 
 			const searchPath = resolveToCwd(searchDir || ".", cwd);
+			const scopePath = (() => {
+				const relative = nodePath.relative(cwd, searchPath).replace(/\\/g, "/");
+				return relative.length === 0 ? "." : relative;
+			})();
 			let searchStat: Stats;
 			try {
 				searchStat = statSync(searchPath);
@@ -210,6 +217,7 @@ Usage:
 			const outputLines: string[] = [];
 			const files = new Set<string>();
 			const fileList: string[] = [];
+			const fileMatchCounts = new Map<string, number>();
 
 			const recordFile = (filePath: string) => {
 				const relative = formatPath(filePath);
@@ -217,6 +225,11 @@ Usage:
 					files.add(relative);
 					fileList.push(relative);
 				}
+			};
+
+			const recordFileMatch = (filePath: string) => {
+				const relative = formatPath(filePath);
+				fileMatchCounts.set(relative, (fileMatchCounts.get(relative) ?? 0) + 1);
 			};
 
 			const stopChild = (dueToLimit: boolean = false) => {
@@ -281,6 +294,7 @@ Usage:
 					return {
 						content: [{ type: "text", text: "No matches found" }],
 						details: {
+							scopePath,
 							matchCount: 0,
 							fileCount: 0,
 							files: [],
@@ -303,6 +317,7 @@ Usage:
 				let fileCount = 0;
 				const simpleFiles = new Set<string>();
 				const simpleFileList: string[] = [];
+				const simpleFileMatchCounts = new Map<string, number>();
 
 				const recordSimpleFile = (filePath: string) => {
 					const relative = formatPath(filePath);
@@ -310,6 +325,11 @@ Usage:
 						simpleFiles.add(relative);
 						simpleFileList.push(relative);
 					}
+				};
+
+				const recordSimpleFileMatch = (filePath: string, count: number) => {
+					const relative = formatPath(filePath);
+					simpleFileMatchCounts.set(relative, count);
 				};
 
 				if (effectiveOutputMode === "files_with_matches") {
@@ -327,12 +347,13 @@ Usage:
 						recordSimpleFile(filePart);
 						if (!Number.isNaN(count)) {
 							simpleMatchCount += count;
+							recordSimpleFileMatch(filePart, count);
 						}
 					}
 					fileCount = simpleFiles.size;
 				}
 
-				const truncated = hasHeadLimit && processedLines.length < lines.length;
+				const truncatedByHeadLimit = hasHeadLimit && processedLines.length < lines.length;
 
 				// For count mode, format as "path:count"
 				if (effectiveOutputMode === "count") {
@@ -346,11 +367,17 @@ Usage:
 					return {
 						content: [{ type: "text", text: output }],
 						details: {
+							scopePath,
 							matchCount: simpleMatchCount,
 							fileCount,
-							files: simpleFileList.slice(0, 50),
+							files: simpleFileList,
+							fileMatches: simpleFileList.map((path) => ({
+								path,
+								count: simpleFileMatchCounts.get(path) ?? 0,
+							})),
 							mode: effectiveOutputMode,
-							truncated,
+							truncated: truncatedByHeadLimit,
+							headLimitReached: truncatedByHeadLimit ? headLimit : undefined,
 						},
 					};
 				}
@@ -361,11 +388,13 @@ Usage:
 				return {
 					content: [{ type: "text", text: output }],
 					details: {
+						scopePath,
 						matchCount: simpleMatchCount,
 						fileCount,
-						files: simpleFileList.slice(0, 50),
+						files: simpleFileList,
 						mode: effectiveOutputMode,
-						truncated,
+						truncated: truncatedByHeadLimit,
+						headLimitReached: truncatedByHeadLimit ? headLimit : undefined,
 					},
 				};
 			}
@@ -421,6 +450,7 @@ Usage:
 
 					if (filePath && typeof lineNumber === "number") {
 						recordFile(filePath);
+						recordFileMatch(filePath);
 						outputLines.push(...formatBlock(filePath, lineNumber));
 					}
 
@@ -488,6 +518,7 @@ Usage:
 				return {
 					content: [{ type: "text", text: "No matches found" }],
 					details: {
+						scopePath,
 						matchCount: 0,
 						fileCount: 0,
 						files: [],
@@ -513,11 +544,17 @@ Usage:
 			let output = truncation.content;
 			const truncatedByHeadLimit = hasHeadLimit && processedLines.length < outputLines.length;
 			const details: GrepToolDetails = {
+				scopePath,
 				matchCount,
 				fileCount: files.size,
-				files: fileList.slice(0, 50),
+				files: fileList,
+				fileMatches: fileList.map((path) => ({
+					path,
+					count: fileMatchCounts.get(path) ?? 0,
+				})),
 				mode: effectiveOutputMode,
 				truncated: matchLimitReached || truncation.truncated || truncatedByHeadLimit,
+				headLimitReached: truncatedByHeadLimit ? headLimit : undefined,
 			};
 
 			// Build notices

@@ -32,6 +32,7 @@ export interface FindToolDetails {
 	truncation?: TruncationResult;
 	resultLimitReached?: number;
 	// Fields for TUI rendering
+	scopePath?: string;
 	fileCount?: number;
 	files?: string[];
 	truncated?: boolean;
@@ -76,6 +77,10 @@ export function createFindTool(cwd: string): AgentTool<typeof findSchema> {
 				}
 
 				const searchPath = resolveToCwd(searchDir || ".", cwd);
+				const scopePath = (() => {
+					const relative = path.relative(cwd, searchPath).replace(/\\/g, "/");
+					return relative.length === 0 ? "." : relative;
+				})();
 				const effectiveLimit = limit ?? DEFAULT_LIMIT;
 				const effectiveType = type ?? "all";
 				const includeHidden = hidden ?? false;
@@ -148,7 +153,7 @@ export function createFindTool(cwd: string): AgentTool<typeof findSchema> {
 				if (!output) {
 					return {
 						content: [{ type: "text", text: "No files found matching pattern" }],
-						details: { fileCount: 0, files: [], truncated: false },
+						details: { scopePath, fileCount: 0, files: [], truncated: false },
 					};
 				}
 
@@ -205,8 +210,9 @@ export function createFindTool(cwd: string): AgentTool<typeof findSchema> {
 
 				let resultOutput = truncation.content;
 				const details: FindToolDetails = {
+					scopePath,
 					fileCount: relativized.length,
-					files: relativized.slice(0, 50),
+					files: relativized,
 					truncated: resultLimitReached || truncation.truncated,
 				};
 

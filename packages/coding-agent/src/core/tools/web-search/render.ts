@@ -50,6 +50,20 @@ export function getPreviewLines(text: string, maxLines: number, maxLineLen: numb
 	return lines.slice(0, maxLines).map((l) => truncate(l.trim(), maxLineLen, ellipsis));
 }
 
+const MAX_COLLAPSED_ANSWER_LINES = 3;
+const MAX_EXPANDED_ANSWER_LINES = 12;
+const MAX_ANSWER_LINE_LEN = 110;
+const MAX_SNIPPET_LINES = 2;
+const MAX_SNIPPET_LINE_LEN = 110;
+const MAX_RELATED_QUESTIONS = 6;
+const MAX_QUERY_PREVIEW = 2;
+const MAX_QUERY_LEN = 90;
+const MAX_REQUEST_ID_LEN = 36;
+
+function formatCount(label: string, count: number): string {
+	return `${count} ${label}${count === 1 ? "" : "s"}`;
+}
+
 export interface WebSearchRenderDetails {
 	response: WebSearchResponse;
 	error?: string;
@@ -76,91 +90,213 @@ export function renderWebSearchResult(
 
 	const sources = response.sources ?? [];
 	const sourceCount = sources.length;
-	const _modelName = response.model ?? response.provider;
+	const citations = response.citations ?? [];
+	const citationCount = citations.length;
+	const related = response.relatedQuestions ?? [];
+	const relatedCount = related.length;
 	const provider = response.provider;
 
-	// Build header: status icon Web Search (provider/model) · N sources
-	const icon = sourceCount > 0 ? theme.fg("success", theme.format.bullet) : theme.fg("warning", theme.format.bullet);
+	// Build header: status icon Web Search (provider) · counts
+	const providerLabel = provider === "anthropic" ? "Anthropic" : provider === "perplexity" ? "Perplexity" : "Exa";
+	const headerIcon =
+		sourceCount > 0 ? theme.fg("success", theme.status.success) : theme.fg("warning", theme.status.warning);
 	const expandHint = expanded ? "" : theme.fg("dim", " (Ctrl+O to expand)");
-	const providerLabel = provider === "anthropic" ? "Anthropic" : "Perplexity";
-	let text = `${icon} ${theme.fg("toolTitle", "Web Search")} ${theme.fg("dim", `(${providerLabel})`)}${theme.sep.dot}${theme.fg(
+	let text = `${headerIcon} ${theme.fg("toolTitle", "Web Search")} ${theme.fg("dim", `(${providerLabel})`)}${theme.sep.dot}${theme.fg(
 		"dim",
-		`${sourceCount} source${sourceCount !== 1 ? "s" : ""}`,
+		formatCount("source", sourceCount),
 	)}${expandHint}`;
 
 	// Get answer text
-	const contentText = response.answer ?? result.content[0]?.text ?? "";
+	const contentText = response.answer?.trim() ?? result.content[0]?.text?.trim() ?? "";
+	const totalAnswerLines = contentText ? contentText.split("\n").filter((l) => l.trim()).length : 0;
+	const answerLimit = expanded ? MAX_EXPANDED_ANSWER_LINES : MAX_COLLAPSED_ANSWER_LINES;
+	const answerPreview = contentText
+		? getPreviewLines(contentText, answerLimit, MAX_ANSWER_LINE_LEN, theme.format.ellipsis)
+		: [];
 
 	if (!expanded) {
-		// Collapsed view: show 2-3 preview lines of answer
-		const previewLines = getPreviewLines(contentText, 3, 100, theme.format.ellipsis);
-		for (const line of previewLines) {
-			text += `\n ${theme.fg("dim", theme.tree.vertical)}  ${theme.fg("dim", line)}`;
-		}
-		const totalLines = contentText.split("\n").filter((l) => l.trim()).length;
-		if (totalLines > 3) {
-			text += `\n ${theme.fg("dim", theme.tree.vertical)}  ${theme.fg(
+		const answerTitle = `${theme.fg("accent", theme.status.info)} ${theme.fg("accent", "Answer")}`;
+		text += `\n ${theme.fg("dim", theme.tree.vertical)} ${answerTitle}`;
+
+		if (answerPreview.length === 0) {
+			text += `\n ${theme.fg("dim", theme.tree.vertical)} ${theme.fg("dim", `${theme.tree.hook} `)}${theme.fg(
 				"muted",
-				`${theme.format.ellipsis} ${totalLines - 3} more lines`,
+				"No answer text returned",
 			)}`;
-		}
-
-		// Show source count summary
-		if (sourceCount > 0) {
-			text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
-				"muted",
-				`${sourceCount} source${sourceCount !== 1 ? "s" : ""}`,
-			)}`;
-		}
-	} else {
-		// Expanded view: full answer + source tree
-		const answerLines = contentText.split("\n");
-		for (const line of answerLines) {
-			text += `\n ${theme.fg("dim", theme.tree.vertical)}  ${line}`;
-		}
-
-		// Render sources as tree
-		const hasRelatedQuestions = response.relatedQuestions && response.relatedQuestions.length > 0;
-
-		if (sourceCount > 0) {
-			text += `\n ${theme.fg("dim", theme.tree.vertical)}`;
-			const sourcesBranch = hasRelatedQuestions ? theme.tree.branch : theme.tree.last;
-			text += `\n ${theme.fg("dim", sourcesBranch)} ${theme.fg("accent", "Sources")}`;
-
-			for (let i = 0; i < sources.length; i++) {
-				const src = sources[i];
-				const isLast = i === sources.length - 1;
-				const branch = isLast ? theme.tree.last : theme.tree.branch;
-				const cont = isLast ? " " : theme.tree.vertical;
-				const indent = hasRelatedQuestions ? theme.tree.vertical : " ";
-
-				// Title + domain + age
-				const title = truncate(src.title, 60, theme.format.ellipsis);
-				const domain = getDomain(src.url);
-				const age = formatAge(src.ageSeconds) || src.publishedDate;
-				const agePart = age ? theme.fg("muted", `${theme.sep.dot}${age}`) : "";
-
-				text += `\n ${theme.fg("dim", indent)} ${theme.fg("dim", branch)} ${theme.fg("accent", title)} ${theme.fg(
+		} else {
+			for (const line of answerPreview) {
+				text += `\n ${theme.fg("dim", theme.tree.vertical)} ${theme.fg("dim", `${theme.tree.hook} `)}${theme.fg(
 					"dim",
-					`(${domain})`,
-				)}${agePart}`;
-				text += `\n ${theme.fg("dim", indent)} ${theme.fg("dim", `${cont}  ${theme.tree.hook} `)}${theme.fg(
-					"mdLinkUrl",
-					src.url,
+					line,
 				)}`;
 			}
 		}
 
-		// Render related questions (Perplexity only)
-		if (hasRelatedQuestions) {
-			text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("accent", "Related Questions")}`;
-			const questions = response.relatedQuestions!;
-			for (let i = 0; i < questions.length; i++) {
-				const question = questions[i];
-				const isLast = i === questions.length - 1;
-				const branch = isLast ? theme.tree.last : theme.tree.branch;
-				text += `\n ${theme.fg("dim", " ")} ${theme.fg("dim", branch)} ${theme.fg("muted", question)}`;
+		const remaining = totalAnswerLines - answerPreview.length;
+		if (remaining > 0) {
+			text += `\n ${theme.fg("dim", theme.tree.vertical)} ${theme.fg("dim", `${theme.tree.hook} `)}${theme.fg(
+				"muted",
+				`${theme.format.ellipsis} ${remaining} more line${remaining === 1 ? "" : "s"}`,
+			)}`;
+		}
+
+		const summary = [
+			formatCount("source", sourceCount),
+			formatCount("citation", citationCount),
+			formatCount("related", relatedCount),
+		].join(theme.sep.dot);
+		text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", summary)}`;
+		return new Text(text, 0, 0);
+	}
+
+	const answerLines = answerPreview.length > 0 ? answerPreview : ["No answer text returned"];
+	const answerSectionLines = answerLines.map((line) =>
+		line === "No answer text returned" ? theme.fg("muted", line) : theme.fg("text", line),
+	);
+	const remainingAnswer = totalAnswerLines - answerPreview.length;
+	if (remainingAnswer > 0) {
+		answerSectionLines.push(
+			theme.fg("muted", `${theme.format.ellipsis} ${remainingAnswer} more line${remainingAnswer === 1 ? "" : "s"}`),
+		);
+	}
+
+	const sourceLines: string[] = [];
+	if (sourceCount === 0) {
+		sourceLines.push(theme.fg("muted", "No sources returned"));
+	} else {
+		for (const src of sources) {
+			const title = truncate(src.title, 70, theme.format.ellipsis);
+			const domain = getDomain(src.url);
+			const age = formatAge(src.ageSeconds) || src.publishedDate;
+			const metaParts: string[] = [theme.fg("dim", `(${domain})`)];
+			if (src.author) {
+				metaParts.push(theme.fg("muted", src.author));
 			}
+			if (age) {
+				metaParts.push(theme.fg("muted", age));
+			}
+			const metaSep = theme.fg("dim", theme.sep.dot);
+			const metaSuffix = metaParts.length > 0 ? ` ${metaParts.join(metaSep)}` : "";
+			sourceLines.push(`${theme.fg("accent", title)}${metaSuffix}`);
+
+			if (src.snippet) {
+				const snippetLines = getPreviewLines(
+					src.snippet,
+					MAX_SNIPPET_LINES,
+					MAX_SNIPPET_LINE_LEN,
+					theme.format.ellipsis,
+				);
+				for (const snippetLine of snippetLines) {
+					sourceLines.push(theme.fg("muted", `${theme.format.dash} ${snippetLine}`));
+				}
+			}
+
+			sourceLines.push(theme.fg("mdLinkUrl", src.url));
+		}
+	}
+
+	const relatedLines: string[] = [];
+	if (relatedCount === 0) {
+		relatedLines.push(theme.fg("muted", "No related questions"));
+	} else {
+		const maxRelated = Math.min(MAX_RELATED_QUESTIONS, related.length);
+		for (let i = 0; i < maxRelated; i++) {
+			relatedLines.push(theme.fg("muted", `${theme.format.dash} ${related[i]}`));
+		}
+		if (relatedCount > maxRelated) {
+			relatedLines.push(
+				theme.fg(
+					"muted",
+					`${theme.format.ellipsis} ${relatedCount - maxRelated} more question${
+						relatedCount - maxRelated === 1 ? "" : "s"
+					}`,
+				),
+			);
+		}
+	}
+
+	const metaLines: string[] = [];
+	metaLines.push(`${theme.fg("muted", "Provider:")} ${theme.fg("text", providerLabel)}`);
+	if (response.model) {
+		metaLines.push(`${theme.fg("muted", "Model:")} ${theme.fg("text", response.model)}`);
+	}
+	metaLines.push(`${theme.fg("muted", "Sources:")} ${theme.fg("text", String(sourceCount))}`);
+	if (citationCount > 0) {
+		metaLines.push(`${theme.fg("muted", "Citations:")} ${theme.fg("text", String(citationCount))}`);
+	}
+	if (relatedCount > 0) {
+		metaLines.push(`${theme.fg("muted", "Related:")} ${theme.fg("text", String(relatedCount))}`);
+	}
+	if (response.usage) {
+		const usageParts: string[] = [];
+		if (response.usage.inputTokens !== undefined) usageParts.push(`in ${response.usage.inputTokens}`);
+		if (response.usage.outputTokens !== undefined) usageParts.push(`out ${response.usage.outputTokens}`);
+		if (response.usage.totalTokens !== undefined) usageParts.push(`total ${response.usage.totalTokens}`);
+		if (response.usage.searchRequests !== undefined) usageParts.push(`search ${response.usage.searchRequests}`);
+		if (usageParts.length > 0) {
+			metaLines.push(`${theme.fg("muted", "Usage:")} ${theme.fg("text", usageParts.join(theme.sep.dot))}`);
+		}
+	}
+	if (response.requestId) {
+		metaLines.push(
+			`${theme.fg("muted", "Request:")} ${theme.fg(
+				"text",
+				truncate(response.requestId, MAX_REQUEST_ID_LEN, theme.format.ellipsis),
+			)}`,
+		);
+	}
+	if (response.searchQueries && response.searchQueries.length > 0) {
+		metaLines.push(
+			`${theme.fg("muted", "Search queries:")} ${theme.fg("text", String(response.searchQueries.length))}`,
+		);
+		const queryPreview = response.searchQueries.slice(0, MAX_QUERY_PREVIEW);
+		for (const q of queryPreview) {
+			metaLines.push(theme.fg("muted", `${theme.format.dash} ${truncate(q, MAX_QUERY_LEN, theme.format.ellipsis)}`));
+		}
+		if (response.searchQueries.length > MAX_QUERY_PREVIEW) {
+			metaLines.push(
+				theme.fg(
+					"muted",
+					`${theme.format.ellipsis} ${response.searchQueries.length - MAX_QUERY_PREVIEW} more query${
+						response.searchQueries.length - MAX_QUERY_PREVIEW === 1 ? "" : "s"
+					}`,
+				),
+			);
+		}
+	}
+
+	const sections: Array<{ title: string; icon: string; lines: string[] }> = [
+		{
+			title: "Answer",
+			icon: theme.fg("accent", theme.status.info),
+			lines: answerSectionLines,
+		},
+		{
+			title: "Sources",
+			icon: sourceCount > 0 ? theme.fg("success", theme.status.success) : theme.fg("warning", theme.status.warning),
+			lines: sourceLines,
+		},
+		{
+			title: "Related",
+			icon: relatedCount > 0 ? theme.fg("accent", theme.status.info) : theme.fg("warning", theme.status.warning),
+			lines: relatedLines,
+		},
+		{
+			title: "Meta",
+			icon: theme.fg("accent", theme.status.info),
+			lines: metaLines,
+		},
+	];
+
+	for (let i = 0; i < sections.length; i++) {
+		const section = sections[i];
+		const isLast = i === sections.length - 1;
+		const branch = isLast ? theme.tree.last : theme.tree.branch;
+		const indent = isLast ? " " : theme.tree.vertical;
+
+		text += `\n ${theme.fg("dim", branch)} ${section.icon} ${theme.fg("accent", section.title)}`;
+		for (const line of section.lines) {
+			text += `\n ${theme.fg("dim", indent)} ${theme.fg("dim", `${theme.tree.hook} `)}${line}`;
 		}
 	}
 

@@ -2231,6 +2231,11 @@ function getPreviewLines(text: string, maxLines: number, maxLineLen: number, ell
 	return lines.slice(0, maxLines).map((l) => truncate(l.trim(), maxLineLen, ellipsis));
 }
 
+/** Count non-empty lines */
+function countNonEmptyLines(text: string): number {
+	return text.split("\n").filter((l) => l.trim()).length;
+}
+
 /** Render web fetch call (URL preview) */
 export function renderWebFetchCall(
 	args: { url: string; timeout?: number; raw?: boolean },
@@ -2238,7 +2243,8 @@ export function renderWebFetchCall(
 ): Component {
 	const domain = getDomain(args.url);
 	const path = truncate(args.url.replace(/^https?:\/\/[^/]+/, ""), 50, uiTheme.format.ellipsis);
-	const text = `${uiTheme.fg("toolTitle", "Web Fetch")} ${uiTheme.fg("accent", domain)}${uiTheme.fg("dim", path)}`;
+	const icon = uiTheme.styledSymbol("status.pending", "muted");
+	const text = `${icon} ${uiTheme.fg("toolTitle", "Web Fetch")} ${uiTheme.fg("accent", domain)}${uiTheme.fg("dim", path)}`;
 	return new Text(text, 0, 0);
 }
 
@@ -2258,13 +2264,11 @@ export function renderWebFetchResult(
 	const domain = getDomain(details.finalUrl);
 	const hasRedirect = details.url !== details.finalUrl;
 	const hasNotes = details.notes.length > 0;
-
-	// Build header: bullet Web Fetch (domain) · method
-	const icon = details.truncated
-		? uiTheme.fg("warning", uiTheme.format.bullet)
-		: uiTheme.fg("success", uiTheme.format.bullet);
+	const statusIcon = details.truncated
+		? uiTheme.styledSymbol("status.warning", "warning")
+		: uiTheme.styledSymbol("status.success", "success");
 	const expandHint = expanded ? "" : uiTheme.fg("dim", " (Ctrl+O to expand)");
-	let text = `${icon} ${uiTheme.fg("toolTitle", "Web Fetch")} ${uiTheme.fg("accent", `(${domain})`)}${uiTheme.sep.dot}${uiTheme.fg("dim", details.method)}${expandHint}`;
+	let text = `${statusIcon} ${uiTheme.fg("toolTitle", "Web Fetch")} ${uiTheme.fg("accent", `(${domain})`)}${uiTheme.sep.dot}${uiTheme.fg("dim", details.method)}${expandHint}`;
 
 	// Get content text
 	const contentText = result.content[0]?.text ?? "";
@@ -2272,74 +2276,90 @@ export function renderWebFetchResult(
 	const contentBody = contentText.includes("---\n\n")
 		? contentText.split("---\n\n").slice(1).join("---\n\n")
 		: contentText;
+	const lineCount = countNonEmptyLines(contentBody);
+	const charCount = contentBody.trim().length;
 
 	if (!expanded) {
-		// Collapsed view: show metadata + 3 preview lines
+		// Collapsed view: metadata + preview
+		const metaLines: string[] = [
+			`${uiTheme.fg("muted", "Content-Type:")} ${details.contentType || "unknown"}`,
+			`${uiTheme.fg("muted", "Method:")} ${details.method}`,
+		];
 		if (hasRedirect) {
-			text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg(
-				"muted",
-				uiTheme.nav.selected,
-			)} ${uiTheme.fg("mdLinkUrl", details.finalUrl)}`;
+			metaLines.push(`${uiTheme.fg("muted", "Final URL:")} ${uiTheme.fg("mdLinkUrl", details.finalUrl)}`);
 		}
 		if (details.truncated) {
-			text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg("warning", `${uiTheme.status.warning} truncated`)}`;
+			metaLines.push(uiTheme.fg("warning", `${uiTheme.status.warning} Output truncated`));
+		}
+		if (hasNotes) {
+			metaLines.push(`${uiTheme.fg("muted", "Notes:")} ${details.notes.join("; ")}`);
 		}
 
 		const previewLines = getPreviewLines(contentBody, 3, 100, uiTheme.format.ellipsis);
-		for (const line of previewLines) {
-			text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg("dim", line)}`;
-		}
-		const totalLines = contentBody.split("\n").filter((l) => l.trim()).length;
-		if (totalLines > 3) {
-			text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg(
-				"muted",
-				`${uiTheme.format.ellipsis} ${totalLines - 3} more lines`,
-			)}`;
+		const detailLines: string[] = [...metaLines];
+
+		if (previewLines.length === 0) {
+			detailLines.push(uiTheme.fg("dim", "(no content)"));
 		} else {
-			text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg("muted", details.contentType)}`;
+			for (const line of previewLines) {
+				detailLines.push(uiTheme.fg("dim", line));
+			}
+		}
+
+		const remaining = Math.max(0, lineCount - previewLines.length);
+		if (remaining > 0) {
+			detailLines.push(uiTheme.fg("muted", `${uiTheme.format.ellipsis} ${remaining} more lines`));
+		} else {
+			const lineLabel = `${lineCount} line${lineCount === 1 ? "" : "s"}`;
+			detailLines.push(uiTheme.fg("muted", `${lineLabel}${uiTheme.sep.dot}${charCount} chars`));
+		}
+
+		for (let i = 0; i < detailLines.length; i++) {
+			const isLast = i === detailLines.length - 1;
+			const branch = isLast ? uiTheme.tree.last : uiTheme.tree.vertical;
+			text += `\n ${uiTheme.fg("dim", branch)}  ${detailLines[i]}`;
 		}
 	} else {
-		// Expanded view: full metadata tree + content
-		const hasMeta = hasRedirect || hasNotes || details.truncated;
+		// Expanded view: structured metadata + bounded content preview
+		const metaLines: string[] = [
+			`${uiTheme.fg("muted", "Content-Type:")} ${details.contentType || "unknown"}`,
+			`${uiTheme.fg("muted", "Method:")} ${details.method}`,
+		];
+		if (hasRedirect) {
+			metaLines.push(`${uiTheme.fg("muted", "Final URL:")} ${uiTheme.fg("mdLinkUrl", details.finalUrl)}`);
+		}
+		const lineLabel = `${lineCount} line${lineCount === 1 ? "" : "s"}`;
+		metaLines.push(`${uiTheme.fg("muted", "Lines:")} ${lineLabel}`);
+		metaLines.push(`${uiTheme.fg("muted", "Chars:")} ${charCount}`);
+		if (details.truncated) {
+			metaLines.push(uiTheme.fg("warning", `${uiTheme.status.warning} Output truncated`));
+		}
+		if (hasNotes) {
+			metaLines.push(`${uiTheme.fg("muted", "Notes:")} ${details.notes.join("; ")}`);
+		}
 
-		if (hasMeta) {
-			// Metadata section
-			text += `\n ${uiTheme.fg("dim", uiTheme.tree.branch)} ${uiTheme.fg("accent", "Metadata")}`;
-			text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg("dim", uiTheme.tree.branch)} ${uiTheme.fg("muted", "Content-Type:")} ${
-				details.contentType
-			}`;
-			if (hasRedirect) {
-				text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg("dim", uiTheme.tree.branch)} ${uiTheme.fg(
-					"muted",
-					"Redirected from:",
-				)} ${uiTheme.fg("mdLinkUrl", details.url)}`;
-				text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg("dim", `${uiTheme.tree.vertical}  ${uiTheme.tree.hook} `)}${uiTheme.fg(
-					"mdLinkUrl",
-					details.finalUrl,
-				)}`;
-			}
-			if (details.truncated) {
-				text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg("dim", uiTheme.tree.branch)} ${uiTheme.fg(
-					"warning",
-					`${uiTheme.status.warning} Output was truncated`,
-				)}`;
-			}
-			if (hasNotes) {
-				const notesBranch = uiTheme.tree.last;
-				text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg("dim", notesBranch)} ${uiTheme.fg(
-					"muted",
-					"Notes:",
-				)} ${details.notes.join("; ")}`;
+		text += `\n ${uiTheme.fg("dim", uiTheme.tree.branch)} ${uiTheme.fg("accent", "Metadata")}`;
+		for (let i = 0; i < metaLines.length; i++) {
+			const isLast = i === metaLines.length - 1;
+			const branch = isLast ? uiTheme.tree.last : uiTheme.tree.branch;
+			text += `\n ${uiTheme.fg("dim", uiTheme.tree.vertical)}  ${uiTheme.fg("dim", branch)} ${metaLines[i]}`;
+		}
+
+		text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg("accent", "Content Preview")}`;
+		const previewLines = getPreviewLines(contentBody, 12, 120, uiTheme.format.ellipsis);
+		const remaining = Math.max(0, lineCount - previewLines.length);
+		const contentPrefix = uiTheme.fg("dim", " ");
+
+		if (previewLines.length === 0) {
+			text += `\n ${contentPrefix}   ${uiTheme.fg("dim", "(no content)")}`;
+		} else {
+			for (const line of previewLines) {
+				text += `\n ${contentPrefix}   ${uiTheme.fg("dim", line)}`;
 			}
 		}
 
-		// Content section
-		text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg("accent", "Content")}`;
-		const contentLines = contentBody.split("\n");
-		for (let i = 0; i < contentLines.length; i++) {
-			const line = contentLines[i];
-			const isLast = i === contentLines.length - 1;
-			text += `\n    ${isLast ? " " : uiTheme.fg("dim", " ")} ${line}`;
+		if (remaining > 0) {
+			text += `\n ${contentPrefix}   ${uiTheme.fg("muted", `${uiTheme.format.ellipsis} ${remaining} more lines`)}`;
 		}
 	}
 

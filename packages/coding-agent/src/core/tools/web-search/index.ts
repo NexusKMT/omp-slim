@@ -107,30 +107,84 @@ async function detectProvider(): Promise<WebSearchProvider> {
 	return "anthropic";
 }
 
+/** Truncate text for tool output */
+function truncateText(text: string, maxLen: number): string {
+	if (text.length <= maxLen) return text;
+	return `${text.slice(0, Math.max(0, maxLen - 3))}...`;
+}
+
+function formatCount(label: string, count: number): string {
+	return `${count} ${label}${count === 1 ? "" : "s"}`;
+}
+
 /** Format response for LLM consumption */
 function formatForLLM(response: WebSearchResponse): string {
 	const parts: string[] = [];
 
-	// Add synthesized answer
-	if (response.answer) {
-		parts.push(response.answer);
-	}
+	parts.push("## Answer");
+	parts.push(response.answer ? response.answer : "No answer text returned.");
 
-	// Add sources
 	if (response.sources.length > 0) {
 		parts.push("\n## Sources");
+		parts.push(formatCount("source", response.sources.length));
 		for (const [i, src] of response.sources.entries()) {
 			const age = formatAge(src.ageSeconds) || src.publishedDate;
 			const agePart = age ? ` (${age})` : "";
 			parts.push(`[${i + 1}] ${src.title}${agePart}\n    ${src.url}`);
+			if (src.snippet) {
+				parts.push(`    ${truncateText(src.snippet, 240)}`);
+			}
+		}
+	} else {
+		parts.push("\n## Sources");
+		parts.push("0 sources");
+	}
+
+	if (response.citations && response.citations.length > 0) {
+		parts.push("\n## Citations");
+		parts.push(formatCount("citation", response.citations.length));
+		for (const [i, citation] of response.citations.entries()) {
+			const title = citation.title || citation.url;
+			parts.push(`[${i + 1}] ${title}\n    ${citation.url}`);
+			if (citation.citedText) {
+				parts.push(`    ${truncateText(citation.citedText, 240)}`);
+			}
 		}
 	}
 
-	// Add related questions (Perplexity)
 	if (response.relatedQuestions && response.relatedQuestions.length > 0) {
-		parts.push("\n## Related Questions");
+		parts.push("\n## Related");
+		parts.push(formatCount("question", response.relatedQuestions.length));
 		for (const q of response.relatedQuestions) {
 			parts.push(`- ${q}`);
+		}
+	} else {
+		parts.push("\n## Related");
+		parts.push("0 questions");
+	}
+
+	parts.push("\n## Meta");
+	parts.push(`Provider: ${response.provider}`);
+	if (response.model) {
+		parts.push(`Model: ${response.model}`);
+	}
+	if (response.usage) {
+		const usageParts: string[] = [];
+		if (response.usage.inputTokens !== undefined) usageParts.push(`in ${response.usage.inputTokens}`);
+		if (response.usage.outputTokens !== undefined) usageParts.push(`out ${response.usage.outputTokens}`);
+		if (response.usage.totalTokens !== undefined) usageParts.push(`total ${response.usage.totalTokens}`);
+		if (response.usage.searchRequests !== undefined) usageParts.push(`search ${response.usage.searchRequests}`);
+		if (usageParts.length > 0) {
+			parts.push(`Usage: ${usageParts.join(" | ")}`);
+		}
+	}
+	if (response.requestId) {
+		parts.push(`Request: ${truncateText(response.requestId, 64)}`);
+	}
+	if (response.searchQueries && response.searchQueries.length > 0) {
+		parts.push(`Search queries: ${response.searchQueries.length}`);
+		for (const query of response.searchQueries.slice(0, 3)) {
+			parts.push(`- ${truncateText(query, 120)}`);
 		}
 	}
 
