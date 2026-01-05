@@ -29,6 +29,7 @@ import type { CustomToolSessionEvent, LoadedCustomTool } from "../../core/custom
 import type { HookUIContext } from "../../core/hooks/index";
 import { createCompactionSummaryMessage } from "../../core/messages";
 import { getRecentSessions, type SessionContext, SessionManager } from "../../core/session-manager";
+import { detectNotificationProtocol, isNotificationSuppressed, sendNotification } from "../../core/terminal-notify";
 import { generateSessionTitle, setTerminalTitle } from "../../core/title-generator";
 import type { TruncationResult } from "../../core/tools/truncate";
 import { VoiceSupervisor } from "../../core/voice-supervisor";
@@ -119,6 +120,9 @@ export class InteractiveMode {
 
 	// Thinking block visibility state
 	private hideThinkingBlock = false;
+
+	// Background mode flag (no UI, no interactive prompts)
+	private isBackgrounded = false;
 
 	// Agent subscription unsubscribe function
 	private unsubscribe?: () => void;
@@ -237,6 +241,8 @@ export class InteractiveMode {
 			{ name: "logout", description: "Logout from OAuth provider" },
 			{ name: "new", description: "Start a new session" },
 			{ name: "compact", description: "Manually compact the session context" },
+			{ name: "background", description: "Detach UI and continue running in background" },
+			{ name: "bg", description: "Alias for /background" },
 			{ name: "resume", description: "Resume a different session" },
 			{ name: "exit", description: "Exit the application" },
 		];
@@ -400,6 +406,29 @@ export class InteractiveMode {
 			return; // No hooks loaded
 		}
 
+		this.initializeHookRunner(uiContext, true);
+
+		// Subscribe to hook errors
+		hookRunner.onError((error) => {
+			if (this.isBackgrounded) {
+				console.error(`Hook "${error.hookPath}" error: ${error.error}`);
+				return;
+			}
+			this.showHookError(error.hookPath, error.error);
+		});
+
+		// Emit session_start event
+		await hookRunner.emit({
+			type: "session_start",
+		});
+	}
+
+	private initializeHookRunner(uiContext: HookUIContext, hasUI: boolean): void {
+		const hookRunner = this.session.hookRunner;
+		if (!hookRunner) {
+			return;
+		}
+
 		hookRunner.initialize({
 			getModel: () => this.session.model,
 			sendMessageHandler: (message, triggerTurn) => {
@@ -409,18 +438,26 @@ export class InteractiveMode {
 					.then(() => {
 						// For non-streaming cases with display=true, update UI
 						// (streaming cases update via message_end event)
-						if (!wasStreaming && message.display) {
+						if (!this.isBackgrounded && !wasStreaming && message.display) {
 							this.rebuildChatFromMessages();
 						}
 					})
 					.catch((err) => {
-						this.showError(`Hook sendMessage failed: ${err instanceof Error ? err.message : String(err)}`);
+						const errorText = `Hook sendMessage failed: ${err instanceof Error ? err.message : String(err)}`;
+						if (this.isBackgrounded) {
+							console.error(errorText);
+							return;
+						}
+						this.showError(errorText);
 					});
 			},
 			appendEntryHandler: (customType, data) => {
 				this.sessionManager.appendCustomEntry(customType, data);
 			},
 			newSessionHandler: async (options) => {
+				if (this.isBackgrounded) {
+					return { cancelled: true };
+				}
 				// Stop any loading animation
 				if (this.loadingAnimation) {
 					this.loadingAnimation.stop();
@@ -455,6 +492,9 @@ export class InteractiveMode {
 				return { cancelled: false };
 			},
 			branchHandler: async (entryId) => {
+				if (this.isBackgrounded) {
+					return { cancelled: true };
+				}
 				const result = await this.session.branch(entryId);
 				if (result.cancelled) {
 					return { cancelled: true };
@@ -469,6 +509,9 @@ export class InteractiveMode {
 				return { cancelled: false };
 			},
 			navigateTreeHandler: async (targetId, options) => {
+				if (this.isBackgrounded) {
+					return { cancelled: true };
+				}
 				const result = await this.session.navigateTree(targetId, { summarize: options?.summarize });
 				if (result.cancelled) {
 					return { cancelled: true };
@@ -491,18 +534,31 @@ export class InteractiveMode {
 			},
 			hasQueuedMessages: () => this.session.queuedMessageCount > 0,
 			uiContext,
-			hasUI: true,
+			hasUI,
 		});
+	}
 
-		// Subscribe to hook errors
-		hookRunner.onError((error) => {
-			this.showHookError(error.hookPath, error.error);
-		});
-
-		// Emit session_start event
-		await hookRunner.emit({
-			type: "session_start",
-		});
+	private createBackgroundUiContext(): HookUIContext {
+		return {
+			select: async (_title: string, _options: string[]) => undefined,
+			confirm: async (_title: string, _message: string) => false,
+			input: async (_title: string, _placeholder?: string) => undefined,
+			notify: () => {},
+			setStatus: () => {},
+			custom: async <T>(
+				_factory: (
+					tui: TUI,
+					theme: Theme,
+					done: (result: T) => void,
+				) => (Component & { dispose?(): void }) | Promise<Component & { dispose?(): void }>,
+			) => undefined as T,
+			setEditorText: () => {},
+			getEditorText: () => "",
+			editor: async () => undefined,
+			get theme() {
+				return theme;
+			},
+		};
 	}
 
 	/**
@@ -533,6 +589,10 @@ export class InteractiveMode {
 	 * Show a tool error in the chat.
 	 */
 	private showToolError(toolName: string, error: string): void {
+		if (this.isBackgrounded) {
+			console.error(`Tool "${toolName}" error: ${error}`);
+			return;
+		}
 		const errorText = new Text(theme.fg("error", `Tool "${toolName}" error: ${error}`), 1, 0);
 		this.chatContainer.addChild(errorText);
 		this.ui.requestRender();
@@ -542,6 +602,9 @@ export class InteractiveMode {
 	 * Set hook status text in the footer.
 	 */
 	private setHookStatus(key: string, text: string | undefined): void {
+		if (this.isBackgrounded) {
+			return;
+		}
 		this.statusLine.setHookStatus(key, text);
 		this.ui.requestRender();
 	}
@@ -715,6 +778,10 @@ export class InteractiveMode {
 	 * Show a hook error in the UI.
 	 */
 	private showHookError(hookPath: string, error: string): void {
+		if (this.isBackgrounded) {
+			console.error(`Hook "${hookPath}" error: ${error}`);
+			return;
+		}
 		const errorText = new Text(theme.fg("error", `Hook "${hookPath}" error: ${error}`), 1, 0);
 		this.chatContainer.addChild(errorText);
 		this.ui.requestRender();
@@ -870,6 +937,11 @@ export class InteractiveMode {
 				} finally {
 					this.editor.disableSubmit = false;
 				}
+				return;
+			}
+			if (text === "/background" || text === "/bg") {
+				this.editor.setText("");
+				this.handleBackgroundCommand();
 				return;
 			}
 			if (text === "/debug") {
@@ -1167,6 +1239,7 @@ export class InteractiveMode {
 					}
 				}
 				this.ui.requestRender();
+				this.sendCompletionNotification();
 				break;
 
 			case "auto_compaction_start": {
@@ -1279,6 +1352,14 @@ export class InteractiveMode {
 		}
 	}
 
+	private sendCompletionNotification(): void {
+		if (isNotificationSuppressed()) return;
+		const method = this.settingsManager.getNotificationOnComplete();
+		if (method === "off") return;
+		const protocol = method === "auto" ? detectNotificationProtocol() : method;
+		sendNotification(protocol, "Agent complete");
+	}
+
 	/** Extract text content from a user message */
 	private getUserMessageText(message: Message): string {
 		if (message.role !== "user") return "";
@@ -1296,6 +1377,9 @@ export class InteractiveMode {
 	 * we update the previous status line instead of appending new ones to avoid log spam.
 	 */
 	private showStatus(message: string): void {
+		if (this.isBackgrounded) {
+			return;
+		}
 		const children = this.chatContainer.children;
 		const last = children.length > 0 ? children[children.length - 1] : undefined;
 		const secondLast = children.length > 1 ? children[children.length - 2] : undefined;
@@ -1535,6 +1619,72 @@ export class InteractiveMode {
 
 		// Send SIGTSTP to process group (pid=0 means all processes in group)
 		process.kill(0, "SIGTSTP");
+	}
+
+	private handleBackgroundCommand(): void {
+		if (this.isBackgrounded) {
+			this.showStatus("Background mode already enabled");
+			return;
+		}
+		if (!this.session.isStreaming && this.session.queuedMessageCount === 0) {
+			this.showWarning("Agent is idle; nothing to background");
+			return;
+		}
+
+		this.isBackgrounded = true;
+		const backgroundUiContext = this.createBackgroundUiContext();
+
+		// Background mode disables interactive UI so tools like ask fail fast.
+		this.setToolUIContext(backgroundUiContext, false);
+		this.initializeHookRunner(backgroundUiContext, false);
+
+		if (this.loadingAnimation) {
+			this.loadingAnimation.stop();
+			this.loadingAnimation = undefined;
+		}
+		if (this.autoCompactionLoader) {
+			this.autoCompactionLoader.stop();
+			this.autoCompactionLoader = undefined;
+		}
+		if (this.retryLoader) {
+			this.retryLoader.stop();
+			this.retryLoader = undefined;
+		}
+		this.statusContainer.clear();
+		this.statusLine.dispose();
+
+		if (this.unsubscribe) {
+			this.unsubscribe();
+		}
+		this.unsubscribe = this.session.subscribe(async (event) => {
+			await this.handleBackgroundEvent(event);
+		});
+
+		// Backgrounding keeps the current process to preserve in-flight agent state.
+		if (this.isInitialized) {
+			this.ui.stop();
+			this.isInitialized = false;
+		}
+
+		process.stdout.write("Background mode enabled. Run `bg` to continue in background.\n");
+
+		if (process.platform === "win32" || !process.stdout.isTTY) {
+			process.stdout.write("Backgrounding requires POSIX job control; continuing in foreground.\n");
+			return;
+		}
+
+		process.kill(0, "SIGTSTP");
+	}
+
+	private async handleBackgroundEvent(event: AgentSessionEvent): Promise<void> {
+		if (event.type !== "agent_end") {
+			return;
+		}
+		if (this.session.queuedMessageCount > 0 || this.session.isStreaming) {
+			return;
+		}
+		this.sendCompletionNotification();
+		await this.shutdown();
 	}
 
 	/**
@@ -1825,18 +1975,29 @@ export class InteractiveMode {
 	// =========================================================================
 
 	clearEditor(): void {
+		if (this.isBackgrounded) {
+			return;
+		}
 		this.editor.setText("");
 		this.pendingImages = [];
 		this.ui.requestRender();
 	}
 
 	showError(errorMessage: string): void {
+		if (this.isBackgrounded) {
+			console.error(`Error: ${errorMessage}`);
+			return;
+		}
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(theme.fg("error", `Error: ${errorMessage}`), 1, 0));
 		this.ui.requestRender();
 	}
 
 	showWarning(warningMessage: string): void {
+		if (this.isBackgrounded) {
+			console.error(`Warning: ${warningMessage}`);
+			return;
+		}
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(theme.fg("warning", `Warning: ${warningMessage}`), 1, 0));
 		this.ui.requestRender();

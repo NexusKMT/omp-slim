@@ -11,6 +11,7 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { getCapabilities } from "@oh-my-pi/pi-tui";
 import type {
+	NotificationMethod,
 	SettingsManager,
 	StatusLinePreset,
 	StatusLineSeparatorStyle,
@@ -103,6 +104,16 @@ export const SETTINGS_DEFS: SettingDef[] = [
 		description: "Enable realtime voice input/output (Ctrl+Y toggle, auto-send on silence)",
 		get: (sm) => sm.getVoiceEnabled(),
 		set: (sm, v) => sm.setVoiceEnabled(v),
+	},
+	{
+		id: "completionNotification",
+		tab: "config",
+		type: "enum",
+		label: "Completion notification",
+		description: "Notify when the agent completes",
+		values: ["auto", "bell", "osc99", "osc9", "off"],
+		get: (sm) => sm.getNotificationOnComplete(),
+		set: (sm, v) => sm.setNotificationOnComplete(v as NotificationMethod),
 	},
 	{
 		id: "queueMode",

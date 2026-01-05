@@ -42,6 +42,12 @@ export interface TerminalSettings {
 	showImages?: boolean; // default: true (only relevant if terminal supports images)
 }
 
+export type NotificationMethod = "bell" | "osc99" | "osc9" | "auto" | "off";
+
+export interface NotificationSettings {
+	onComplete?: NotificationMethod; // default: "auto"
+}
+
 export interface ExaSettings {
 	enabled?: boolean; // default: true (master toggle for all Exa tools)
 	enableSearch?: boolean; // default: true (search, deep, code, crawl)
@@ -149,6 +155,7 @@ export interface Settings {
 	skills?: SkillsSettings;
 	commands?: CommandsSettings;
 	terminal?: TerminalSettings;
+	notifications?: NotificationSettings;
 	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
 	exa?: ExaSettings;
 	bashInterceptor?: BashInterceptorSettings;
@@ -511,6 +518,18 @@ export class SettingsManager {
 			this.globalSettings.terminal = {};
 		}
 		this.globalSettings.terminal.showImages = show;
+		this.save();
+	}
+
+	getNotificationOnComplete(): NotificationMethod {
+		return this.settings.notifications?.onComplete ?? "auto";
+	}
+
+	setNotificationOnComplete(method: NotificationMethod): void {
+		if (!this.globalSettings.notifications) {
+			this.globalSettings.notifications = {};
+		}
+		this.globalSettings.notifications.onComplete = method;
 		this.save();
 	}
 
