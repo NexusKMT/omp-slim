@@ -12,6 +12,7 @@ import { getAgentDir, getConfigDirs } from "../../config";
 import * as piCodingAgent from "../../index";
 import { execCommand } from "../exec";
 import { createReviewCommand } from "./bundled/review";
+import { createWorktreeCommand } from "./bundled/wt";
 import type {
 	CustomCommand,
 	CustomCommandAPI,
@@ -148,6 +149,14 @@ function loadBundledCommands(sharedApi: CustomCommandAPI): LoadedCustomCommand[]
 		path: "bundled:review",
 		resolvedPath: "bundled:review",
 		command: reviewCommand,
+		source: "bundled",
+	});
+
+	const worktreeCommand = createWorktreeCommand(sharedApi);
+	bundled.push({
+		path: "bundled:wt",
+		resolvedPath: "bundled:wt",
+		command: worktreeCommand,
 		source: "bundled",
 	});
 

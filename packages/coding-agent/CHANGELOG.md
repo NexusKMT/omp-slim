@@ -20,6 +20,10 @@
 - Added completion notification system with configurable methods (bell, osc99, osc9, auto, off) when agent finishes
 - Added `completionNotification` setting to configure how the agent notifies on completion
 - Added `OMP_NOTIFICATIONS` environment variable to suppress notifications globally
+- Added `/wt` slash command for git worktree management with create, list, merge, remove, status, spawn, and parallel operations
+- Added worktree library with collapse strategies (simple, merge-base, rebase) for merging changes between worktrees
+- Added worktree session tracking for managing agent tasks across isolated worktrees
+- Added structured git tool with safety guards, caching, and GitHub operations
 - Added `cycleRoleModels()` method to cycle through configured role-based models in a fixed order with deduplication
 - Added language-specific file icons to LSP diagnostics output showing file locations
 - Added language-specific file icon to edit tool header display

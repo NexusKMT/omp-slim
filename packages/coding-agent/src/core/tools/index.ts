@@ -5,6 +5,7 @@ export { createEditTool, type EditToolOptions, editTool } from "./edit";
 export { exaTools } from "./exa/index";
 export type { ExaRenderDetails, ExaSearchResponse, ExaSearchResult } from "./exa/types";
 export { createFindTool, type FindToolDetails, findTool } from "./find";
+export { createGitTool, type GitToolDetails, gitTool } from "./git";
 export { createGrepTool, type GrepToolDetails, grepTool } from "./grep";
 export { createLsTool, type LsToolDetails, lsTool } from "./ls";
 export {
@@ -57,6 +58,7 @@ import { bashTool, createBashTool } from "./bash";
 import { checkBashInterception, checkSimpleLsInterception } from "./bash-interceptor";
 import { createEditTool, editTool } from "./edit";
 import { createFindTool, findTool } from "./find";
+import { createGitTool, gitTool } from "./git";
 import { createGrepTool, grepTool } from "./grep";
 import { createLsTool, lsTool } from "./ls";
 import { createLspTool, createLspWritethrough, lspTool } from "./lsp/index";
@@ -125,6 +127,7 @@ const toolDefs: Record<string, { tool: Tool; create: ToolFactory }> = {
 	},
 	grep: { tool: grepTool, create: createGrepTool },
 	find: { tool: findTool, create: createFindTool },
+	git: { tool: gitTool, create: createGitTool },
 	ls: { tool: lsTool, create: createLsTool },
 	lsp: { tool: lspTool, create: createLspTool },
 	notebook: { tool: notebookTool, create: createNotebookTool },
@@ -149,6 +152,7 @@ const baseCodingToolNames: ToolName[] = [
 	"write",
 	"grep",
 	"find",
+	"git",
 	"ls",
 	"lsp",
 	"notebook",

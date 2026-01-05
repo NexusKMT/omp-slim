@@ -77,6 +77,7 @@ import {
 	createCodingTools,
 	createEditTool,
 	createFindTool,
+	createGitTool,
 	createGrepTool,
 	createLsTool,
 	createReadOnlyTools,
@@ -86,6 +87,7 @@ import {
 	editTool,
 	filterRulebookRules,
 	findTool,
+	gitTool,
 	grepTool,
 	lsTool,
 	readOnlyTools,
@@ -187,6 +189,7 @@ export {
 	writeTool,
 	grepTool,
 	findTool,
+	gitTool,
 	lsTool,
 	codingTools,
 	readOnlyTools,
@@ -200,6 +203,7 @@ export {
 	createWriteTool,
 	createGrepTool,
 	createFindTool,
+	createGitTool,
 	createLsTool,
 };
 

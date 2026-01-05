@@ -41,6 +41,7 @@
 	"dependencies": {
 		"@oh-my-pi/pi-agent-core": "workspace:*",
 		"@oh-my-pi/pi-ai": "workspace:*",
+		"@oh-my-pi/pi-git-tool": "workspace:*",
 		"@oh-my-pi/pi-tui": "workspace:*",
 		"@openai/agents": "^0.3.7",
 		"@sinclair/typebox": "^0.34.46",
