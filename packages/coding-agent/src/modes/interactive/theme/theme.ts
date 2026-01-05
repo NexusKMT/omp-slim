@@ -1253,6 +1253,7 @@ const langMap: Record<string, SymbolKey> = {
 	wasm: "lang.binary",
 	bin: "lang.binary",
 };
+
 export class Theme {
 	private fgColors: Map<ThemeColor, string>;
 	private bgColors: Map<ThemeBg, string>;
