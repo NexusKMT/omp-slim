@@ -1,9 +1,12 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Added
 
+- Added animated spinner for task tool progress display during subagent execution
+- Added language/file type icons for read tool output with support for 35+ file types
+- Added async cleanup registry for graceful session flush on SIGINT, SIGTERM, and SIGHUP signals
+- Added subagent token usage aggregation to session statistics and task tool results
 - Added streaming NDJSON writer for session persistence with proper backpressure handling
 - Added `flush()` method to SessionManager for explicit control over pending write completion
 - Added `/exit` slash command to exit the application from interactive mode
@@ -24,6 +27,10 @@
 
 ### Changed
 
+- Changed `SessionManager.open()` and `SessionManager.continueRecent()` to async methods for proper initialization
+- Changed session file writes to use atomic rename pattern with fsync for crash-safe persistence
+- Changed read tool display to show file type icons and metadata inline with path
+- Changed `AgentSession.dispose()` to async method that flushes pending writes before cleanup
 - Changed read tool result display to hide content by default with expand hint, showing only metadata until expanded
 - Changed diagnostics display to group messages by file with tree structure and severity icons
 - Changed diff stats formatting to use colored +/- indicators with slash separators
@@ -60,6 +67,7 @@
 
 ### Fixed
 
+- Fixed session persistence to properly await all queued writes before closing or switching sessions
 - Fixed session persistence to truncate oversized content blocks before writing to prevent memory exhaustion
 - Fixed extension list and inspector panel to use correct symbols for disabled and shadowed states instead of reusing unrelated status icons
 - Fixed token counting for subagent progress to handle different usage object formats (camelCase and snake_case)
