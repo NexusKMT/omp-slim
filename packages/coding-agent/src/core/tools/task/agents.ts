@@ -5,11 +5,11 @@
  */
 
 // Embed agent markdown files at build time
-import browserMd from "./bundled-agents/browser.md" with { type: "text" };
-import exploreMd from "./bundled-agents/explore.md" with { type: "text" };
-import planMd from "./bundled-agents/plan.md" with { type: "text" };
-import reviewerMd from "./bundled-agents/reviewer.md" with { type: "text" };
-import taskMd from "./bundled-agents/task.md" with { type: "text" };
+import browserMd from "../../../prompts/browser.md" with { type: "text" };
+import exploreMd from "../../../prompts/explore.md" with { type: "text" };
+import planMd from "../../../prompts/plan.md" with { type: "text" };
+import reviewerMd from "../../../prompts/reviewer.md" with { type: "text" };
+import taskMd from "../../../prompts/task.md" with { type: "text" };
 import type { AgentDefinition, AgentSource } from "./types";
 
 const EMBEDDED_AGENTS: { name: string; content: string }[] = [

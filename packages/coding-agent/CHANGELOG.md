@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Added
 
 - Added `status.shadowed` symbol for theme customization to properly indicate shadowed extension state
@@ -19,6 +20,7 @@
 
 ### Changed
 
+- Moved all prompt templates from inline strings to external markdown files in `src/prompts/` directory for better maintainability
 - Changed tool result renderers to use structured tree layouts with consistent expand hints and truncation indicators
 - Changed grep, find, and ls tools to show scope path and detailed truncation reasons in output
 - Changed web search and web fetch result rendering to display structured metadata sections with bounded content previews
@@ -39,6 +41,7 @@
 - Fixed extension list and inspector panel to use correct symbols for disabled and shadowed states instead of reusing unrelated status icons
 - Fixed token counting for subagent progress to handle different usage object formats (camelCase and snake_case)
 - Fixed image file handling by adding 20MB size limit to prevent memory issues during serialization
+- Fixed session persistence to truncate oversized entries before writing JSONL to prevent out-of-memory errors
 
 ## [3.14.0] - 2026-01-04
 ### Added

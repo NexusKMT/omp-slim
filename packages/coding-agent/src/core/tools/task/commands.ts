@@ -9,9 +9,9 @@ import { type SlashCommand, slashCommandCapability } from "../../../capability/s
 import { loadSync } from "../../../discovery";
 
 // Embed command markdown files at build time
-import architectPlanMd from "./bundled-commands/architect-plan.md" with { type: "text" };
-import implementMd from "./bundled-commands/implement.md" with { type: "text" };
-import implementWithCriticMd from "./bundled-commands/implement-with-critic.md" with { type: "text" };
+import architectPlanMd from "../../../prompts/architect-plan.md" with { type: "text" };
+import implementMd from "../../../prompts/implement.md" with { type: "text" };
+import implementWithCriticMd from "../../../prompts/implement-with-critic.md" with { type: "text" };
 
 const EMBEDDED_COMMANDS: { name: string; content: string }[] = [
 	{ name: "architect-plan.md", content: architectPlanMd },

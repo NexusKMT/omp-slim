@@ -9,6 +9,7 @@ import type { Rule } from "../capability/rule";
 import { systemPromptCapability } from "../capability/system-prompt";
 import { getDocsPath, getExamplesPath, getReadmePath } from "../config";
 import { type ContextFile, loadSync, type SystemPrompt as SystemPromptFile } from "../discovery/index";
+import systemPromptTemplate from "../prompts/system-prompt.md" with { type: "text" };
 import type { SkillsSettings } from "./settings-manager";
 import { formatSkillsForPrompt, loadSkills, type Skill } from "./skills";
 import type { ToolName } from "./tools/index";
@@ -390,20 +391,14 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
 
 	// Build the prompt with anti-bash rules prominently placed
-	let prompt = `You are an expert coding assistant. You help users with coding tasks by reading files, executing commands, editing code, and writing new files.
-
-Available tools:
-${toolsList}
-${antiBashSection ? `\n${antiBashSection}\n` : ""}
-Guidelines:
-${guidelines}
-
-Documentation:
-- Main documentation: ${readmePath}
-- Additional docs: ${docsPath}
-- Examples: ${examplesPath} (hooks, custom tools, SDK)
-- When asked to create: custom models/providers (README.md), hooks (docs/hooks.md, examples/hooks/), custom tools (docs/custom-tools.md, docs/tui.md, examples/custom-tools/), themes (docs/theme.md), skills (docs/skills.md)
-- Always read the doc, examples, AND follow .md cross-references before implementing`;
+	const antiBashBlock = antiBashSection ? `\n${antiBashSection}\n` : "";
+	let prompt = systemPromptTemplate
+		.replaceAll("{{toolsList}}", toolsList)
+		.replaceAll("{{antiBashSection}}", antiBashBlock)
+		.replaceAll("{{guidelines}}", guidelines)
+		.replaceAll("{{readmePath}}", readmePath)
+		.replaceAll("{{docsPath}}", docsPath)
+		.replaceAll("{{examplesPath}}", examplesPath);
 
 	if (appendSection) {
 		prompt += appendSection;

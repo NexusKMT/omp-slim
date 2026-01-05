@@ -4,18 +4,12 @@
 
 import type { Model } from "@oh-my-pi/pi-ai";
 import { completeSimple } from "@oh-my-pi/pi-ai";
+import titleSystemPrompt from "../prompts/title-system.md" with { type: "text" };
 import { logger } from "./logger";
 import type { ModelRegistry } from "./model-registry";
 import { findSmolModel } from "./model-resolver";
 
-const TITLE_SYSTEM_PROMPT = `Generate a very short title (3-6 words) for a coding session based on the user's first message. The title should capture the main task or topic. Output ONLY the title, nothing else. No quotes, no punctuation at the end.
-
-Examples:
-- "Fix TypeScript compilation errors"
-- "Add user authentication"
-- "Refactor database queries"
-- "Debug payment webhook"
-- "Update React components"`;
+const TITLE_SYSTEM_PROMPT = titleSystemPrompt;
 
 const MAX_INPUT_CHARS = 2000;
 
