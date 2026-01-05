@@ -81,7 +81,6 @@ async function handleToolWithImageResult<TApi extends Api>(model: Model<TApi>, o
 				mimeType: "image/png",
 			},
 		],
-		isError: false,
 		timestamp: Date.now(),
 	};
 
@@ -174,7 +173,6 @@ async function handleToolWithTextAndImageResult<TApi extends Api>(model: Model<T
 				mimeType: "image/png",
 			},
 		],
-		isError: false,
 		timestamp: Date.now(),
 	};
 

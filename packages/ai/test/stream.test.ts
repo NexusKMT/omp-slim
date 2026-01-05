@@ -313,7 +313,6 @@ async function multiTurn<TApi extends Api>(model: Model<TApi>, options?: Options
 					toolCallId: block.id,
 					toolName: block.name,
 					content: [{ type: "text", text: `${result}` }],
-					isError: false,
 					timestamp: Date.now(),
 				});
 			}

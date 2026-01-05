@@ -121,7 +121,6 @@ for (const call of toolCalls) {
 		toolCallId: call.id,
 		toolName: call.name,
 		content: [{ type: "text", text: result }],
-		isError: false,
 		timestamp: Date.now(),
 	});
 }
@@ -209,7 +208,6 @@ for (const block of response.content) {
 			toolCallId: block.id,
 			toolName: block.name,
 			content: [{ type: "text", text: JSON.stringify(result) }],
-			isError: false,
 			timestamp: Date.now(),
 		});
 	}
@@ -225,7 +223,6 @@ context.messages.push({
 		{ type: "text", text: "Generated chart showing temperature trends" },
 		{ type: "image", data: imageBuffer.toString("base64"), mimeType: "image/png" },
 	],
-	isError: false,
 	timestamp: Date.now(),
 });
 ```

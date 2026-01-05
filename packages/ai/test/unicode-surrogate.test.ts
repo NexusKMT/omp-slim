@@ -93,7 +93,6 @@ async function testEmojiInToolResults<TApi extends Api>(llm: Model<TApi>, option
 - Special quotes: "curly" 'quotes'`,
 			},
 		],
-		isError: false,
 		timestamp: Date.now(),
 	};
 
@@ -182,7 +181,6 @@ Unanswered Comments: 2
 }`,
 			},
 		],
-		isError: false,
 		timestamp: Date.now(),
 	};
 
@@ -254,7 +252,6 @@ async function testUnpairedHighSurrogate<TApi extends Api>(llm: Model<TApi>, opt
 		toolCallId: "test_2",
 		toolName: "test_tool",
 		content: [{ type: "text", text: `Text with unpaired surrogate: ${unpairedSurrogate} <- should be sanitized` }],
-		isError: false,
 		timestamp: Date.now(),
 	};
 

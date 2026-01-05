@@ -57,7 +57,6 @@ const providerContexts = {
 			toolCallId: "toolu_01abc123",
 			toolName: "get_weather",
 			content: [{ type: "text", text: "Weather in Tokyo: 18°C, partly cloudy" }],
-			isError: false,
 			timestamp: Date.now(),
 		} satisfies ToolResultMessage,
 		facts: {
@@ -109,7 +108,6 @@ const providerContexts = {
 			toolCallId: "call_gemini_123",
 			toolName: "get_weather",
 			content: [{ type: "text", text: "Weather in Berlin: 22°C, sunny" }],
-			isError: false,
 			timestamp: Date.now(),
 		} satisfies ToolResultMessage,
 		facts: {
@@ -160,7 +158,6 @@ const providerContexts = {
 			toolCallId: "call_abc123",
 			toolName: "get_weather",
 			content: [{ type: "text", text: "Weather in London: 15°C, rainy" }],
-			isError: false,
 			timestamp: Date.now(),
 		} satisfies ToolResultMessage,
 		facts: {
@@ -213,7 +210,6 @@ const providerContexts = {
 			toolCallId: "call_789_item_012", // Match the updated ID format
 			toolName: "get_weather",
 			content: [{ type: "text", text: "Weather in Sydney: 25°C, clear" }],
-			isError: false,
 			timestamp: Date.now(),
 		} satisfies ToolResultMessage,
 		facts: {

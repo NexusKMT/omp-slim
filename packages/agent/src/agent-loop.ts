@@ -322,8 +322,11 @@ async function executeToolCalls(
 		});
 
 		let result: AgentToolResult<any>;
-		let isError = false;
 
+		const details: { toolCallId: string; toolName: string; isError?: boolean } = {
+			toolCallId: toolCall.id,
+			toolName: toolCall.name,
+		};
 		try {
 			if (!tool) throw new Error(`Tool ${toolCall.name} not found`);
 
@@ -350,25 +353,21 @@ async function executeToolCalls(
 				content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }],
 				details: {},
 			};
-			isError = true;
+			details.isError = true;
 		}
 
 		stream.push({
 			type: "tool_execution_end",
-			toolCallId: toolCall.id,
-			toolName: toolCall.name,
 			result,
-			isError,
+			...details,
 		});
 
 		const toolResultMessage: ToolResultMessage = {
 			role: "toolResult",
-			toolCallId: toolCall.id,
-			toolName: toolCall.name,
 			content: result.content,
 			details: result.details,
-			isError,
 			timestamp: Date.now(),
+			...details,
 		};
 
 		results.push(toolResultMessage);

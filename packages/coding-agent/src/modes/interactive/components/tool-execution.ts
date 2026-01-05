@@ -346,7 +346,7 @@ export class ToolExecutionComponent extends Container {
 	private cwd: string;
 	private result?: {
 		content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
-		isError: boolean;
+		isError?: boolean;
 		details?: any;
 	};
 	// Cached edit diff preview (computed when args arrive, before tool executes)
@@ -439,7 +439,7 @@ export class ToolExecutionComponent extends Container {
 		result: {
 			content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
 			details?: any;
-			isError: boolean;
+			isError?: boolean;
 		},
 		isPartial = false,
 	): void {
@@ -456,7 +456,9 @@ export class ToolExecutionComponent extends Container {
 		const needsSpinner = this.isPartial && this.toolName === "task";
 		if (needsSpinner && !this.spinnerInterval) {
 			this.spinnerInterval = setInterval(() => {
-				this.spinnerFrame = (this.spinnerFrame + 1) % 10;
+				const frameCount = theme.spinnerFrames.length;
+				if (frameCount === 0) return;
+				this.spinnerFrame = (this.spinnerFrame + 1) % frameCount;
 				this.updateDisplay();
 				this.ui.requestRender();
 			}, 80);

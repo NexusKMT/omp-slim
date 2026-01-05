@@ -127,8 +127,6 @@ export type SymbolKey =
 	| "md.quoteBorder"
 	| "md.hrChar"
 	| "md.bullet"
-	// Spinner frames (array stored as comma-separated string)
-	| "spinner.frames"
 	// Language/file type icons
 	| "lang.default"
 	| "lang.typescript"
@@ -369,8 +367,6 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	"md.hrChar": "─",
 	// pick: • | alt: · ▪ ◦
 	"md.bullet": "•",
-	// Spinner frames (pulsing dot)
-	"spinner.frames": "·,•,●,•",
 	// Language icons (unicode uses code symbol prefix)
 	"lang.default": "❖",
 	"lang.typescript": "❖ ts",
@@ -610,8 +606,6 @@ const NERD_SYMBOLS: SymbolMap = {
 	"md.hrChar": "\u2500",
 	// pick:  | alt:  •
 	"md.bullet": "\uf111",
-	// Spinner frames (nerd font circles)
-	"spinner.frames": "󰪥,󰪤,󰪣,󰪢,󰪡,󰪠,󰪟,󰪞,󰪝,󰪜,󰪛,󰪥",
 	// Language icons (nerd font devicons)
 	"lang.default": "",
 	"lang.typescript": "",
@@ -757,8 +751,6 @@ const ASCII_SYMBOLS: SymbolMap = {
 	"md.quoteBorder": "|",
 	"md.hrChar": "-",
 	"md.bullet": "*",
-	// Spinner frames (ASCII)
-	"spinner.frames": "|,/,-,\\",
 	// Language icons (ASCII uses abbreviations)
 	"lang.default": "code",
 	"lang.typescript": "ts",
@@ -802,6 +794,23 @@ const SYMBOL_PRESETS: Record<SymbolPreset, SymbolMap> = {
 	unicode: UNICODE_SYMBOLS,
 	nerd: NERD_SYMBOLS,
 	ascii: ASCII_SYMBOLS,
+};
+
+export type SpinnerType = "status" | "activity";
+
+const SPINNER_FRAMES: Record<SymbolPreset, Record<SpinnerType, string[]>> = {
+	unicode: {
+		status: ["·", "•", "●", "•"],
+		activity: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+	},
+	nerd: {
+		status: ["󰪥", "󰪤", "󰪣", "󰪢", "󰪡", "󰪠", "󰪟", "󰪞", "󰪥"],
+		activity: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+	},
+	ascii: {
+		status: ["|", "/", "-", "\\"],
+		activity: ["-", "\\", "|", "/"],
+	},
 };
 
 // ============================================================================
@@ -1537,10 +1546,17 @@ export class Theme {
 	}
 
 	/**
-	 * Get spinner frames as an array (stored as comma-separated string in symbols).
+	 * Default spinner frames (status spinner).
 	 */
 	get spinnerFrames(): string[] {
-		return this.symbols["spinner.frames"].split(",");
+		return this.getSpinnerFrames();
+	}
+
+	/**
+	 * Get spinner frames by type.
+	 */
+	getSpinnerFrames(type: SpinnerType = "status"): string[] {
+		return SPINNER_FRAMES[this.symbolPreset][type];
 	}
 
 	/**
@@ -2117,8 +2133,6 @@ export function getLanguageFromPath(filePath: string): string | undefined {
 
 export function getSymbolTheme(): SymbolTheme {
 	const preset = theme.getSymbolPreset();
-	const spinnerFrames =
-		preset === "ascii" ? ["-", "\\", "|", "/"] : ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 	return {
 		cursor: theme.nav.cursor,
@@ -2129,7 +2143,7 @@ export function getSymbolTheme(): SymbolTheme {
 		table: theme.boxSharp,
 		quoteBorder: theme.md.quoteBorder,
 		hrChar: theme.md.hrChar,
-		spinnerFrames,
+		spinnerFrames: theme.getSpinnerFrames("activity"),
 	};
 }
 

@@ -410,7 +410,7 @@ interface ToolResultEventBase {
 	/** Full content array (text and images) */
 	content: (TextContent | ImageContent)[];
 	/** Whether the tool execution was an error */
-	isError: boolean;
+	isError?: boolean;
 }
 
 /** Tool result event for bash tool */

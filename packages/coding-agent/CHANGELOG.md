@@ -1,8 +1,10 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Added
 
+- Added spinner type variants (status and activity) with distinct animation frames per symbol preset
 - Added animated spinner for task tool progress display during subagent execution
 - Added language/file type icons for read tool output with support for 35+ file types
 - Added async cleanup registry for graceful session flush on SIGINT, SIGTERM, and SIGHUP signals
@@ -27,6 +29,7 @@
 
 ### Changed
 
+- Changed `isError` property in tool result events to be optional instead of required
 - Changed `SessionManager.open()` and `SessionManager.continueRecent()` to async methods for proper initialization
 - Changed session file writes to use atomic rename pattern with fsync for crash-safe persistence
 - Changed read tool display to show file type icons and metadata inline with path
@@ -68,6 +71,7 @@
 
 ### Fixed
 
+- Fixed spinner animation crash when spinner frames array is empty by adding length check
 - Fixed session persistence to properly await all queued writes before closing or switching sessions
 - Fixed session persistence to truncate oversized content blocks before writing to prevent memory exhaustion
 - Fixed extension list and inspector panel to use correct symbols for disabled and shadowed states instead of reusing unrelated status icons

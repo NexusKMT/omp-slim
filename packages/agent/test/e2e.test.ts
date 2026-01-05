@@ -455,7 +455,6 @@ describe("Agent.continue()", () => {
 				toolCallId: "calc-1",
 				toolName: "calculate",
 				content: [{ type: "text", text: "5 + 3 = 8" }],
-				isError: false,
 				timestamp: Date.now(),
 			};
 

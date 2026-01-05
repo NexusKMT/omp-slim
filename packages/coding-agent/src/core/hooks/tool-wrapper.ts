@@ -59,7 +59,6 @@ export function wrapToolWithHooks<T>(tool: AgentTool<any, T>, hookRunner: HookRu
 						input: params,
 						content: result.content,
 						details: result.details,
-						isError: false,
 					})) as ToolResultEventResult | undefined;
 
 					// Apply modifications if any

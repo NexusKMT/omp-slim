@@ -73,7 +73,6 @@ export const simpleHtml = {
 			toolCallId: "toolu_01Tu6wbnPMHtBKj9B7TMos1x",
 			toolName: "artifacts",
 			output: "Created file index.html",
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -180,7 +179,6 @@ export const longSession = {
 			toolCallId: "toolu_01Y3hvzepDjUWnHF8bdmgMSA",
 			toolName: "artifacts",
 			output: "Created file index.html",
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -264,7 +262,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -344,7 +341,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -428,7 +424,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -512,7 +507,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -558,7 +552,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -676,7 +669,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -723,7 +715,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -806,7 +797,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -889,7 +879,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -1002,7 +991,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -1085,7 +1073,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -1161,7 +1148,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -1208,7 +1194,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -1292,7 +1277,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -1339,7 +1323,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -1419,7 +1402,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -1536,7 +1518,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -1583,7 +1564,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -1625,7 +1605,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -1667,7 +1646,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -1714,7 +1692,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -1761,7 +1738,6 @@ export const longSession = {
 			toolCallId: "toolu_01BtH9H2BvwxvKjLw5iHXcZC",
 			toolName: "artifacts",
 			output: "Created file news_today.md",
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -1845,7 +1821,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -1892,7 +1867,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -1939,7 +1913,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -1986,7 +1959,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -2033,7 +2005,6 @@ export const longSession = {
 			details: {
 				files: [],
 			},
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -2080,7 +2051,6 @@ export const longSession = {
 			toolCallId: "toolu_01J26GUEiATmMTYeMDJnmAFN",
 			toolName: "artifacts",
 			output: "Created file liveblog_ukraine.md",
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -2160,7 +2130,6 @@ export const longSession = {
 			toolCallId: "toolu_012E1DjRwg1wgZhD38mBNpSv",
 			toolName: "artifacts",
 			output: "Created file minimal.html",
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -2241,7 +2210,6 @@ export const longSession = {
 			toolName: "artifacts",
 			output:
 				"Updated file index.html\n\nExecution timed out. Partial logs:\n[log] Page loaded successfully!\n[log] Welcome to the simple HTML page",
-			isError: false,
 		},
 		{
 			role: "assistant",
@@ -2323,7 +2291,6 @@ export const longSession = {
 			toolName: "artifacts",
 			output:
 				"Updated file index.html\n\nExecution timed out. Partial logs:\n[log] Page loaded successfully!\n[log] Welcome to the simple HTML page\n[log] Third console log added!",
-			isError: false,
 		},
 		{
 			role: "assistant",

@@ -138,7 +138,7 @@ export interface ToolResultMessage<TDetails = any> {
 	toolName: string;
 	content: (TextContent | ImageContent)[]; // Supports text and images
 	details?: TDetails;
-	isError: boolean;
+	isError?: boolean;
 	timestamp: number; // Unix timestamp in milliseconds
 }
 
