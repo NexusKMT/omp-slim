@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [3.15.1] - 2026-01-05
+
 ### Fixed
 
 - Fixed editor cursor blinking by allowing terminal cursor positioning when enabled.
