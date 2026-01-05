@@ -46,6 +46,7 @@
 
 ### Fixed
 
+- Fixed task tool race condition where subprocess stdout events were skipped due to `resolved` flag being set before stream readers finished, causing completed tasks to display "0 tools · 0 tokens"
 - `/model` selector now opens instantly instead of waiting for OAuth token refresh. Token refresh is deferred until a model is actually used
 - Fixed cross-platform browser opening to work on Windows (via cmd /c start) and fail gracefully when unavailable
 

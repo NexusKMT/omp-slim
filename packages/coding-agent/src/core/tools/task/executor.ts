@@ -437,7 +437,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	};
 
 	// Read stdout asynchronously
-	(async () => {
+	const stdoutDone = (async () => {
 		try {
 			while (true) {
 				const { done, value } = await reader.read();
@@ -459,23 +459,24 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	})();
 
 	// Capture stderr - Bun.spawn returns ReadableStream, convert to text
-	(async () => {
+	const stderrDone = (async () => {
 		try {
-			const reader = proc.stderr.getReader();
-			const decoder = new TextDecoder();
+			const stderrReader = proc.stderr.getReader();
+			const stderrDecoder = new TextDecoder();
 			while (true) {
-				const { done, value } = await reader.read();
+				const { done, value } = await stderrReader.read();
 				if (done) break;
-				stderr += decoder.decode(value, { stream: true });
+				stderr += stderrDecoder.decode(value, { stream: true });
 			}
 		} catch {
 			// Ignore stderr read errors
 		}
 	})();
 
-	// Wait for process to finish
-	resolved = true;
+	// Wait for process and stream readers to finish
 	const exitCode = await proc.exited;
+	await Promise.all([stdoutDone, stderrDone]);
+	resolved = true;
 
 	// Cleanup
 	if (signal) {
