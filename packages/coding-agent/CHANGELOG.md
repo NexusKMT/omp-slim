@@ -1,6 +1,14 @@
 # Changelog
 
 ## [Unreleased]
+### Changed
+
+- Changed subprocess usage tracking to accumulate incrementally from message_end events rather than parsing stored events after completion
+
+### Fixed
+
+- Fixed memory accumulation in task subprocess by streaming events directly to disk instead of storing in memory
+- Fixed session persistence to exclude transient streaming data (partialJson, jsonlEvents) that was causing unnecessary storage bloat
 
 ## [3.21.0] - 2026-01-06
 

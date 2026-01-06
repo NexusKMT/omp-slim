@@ -83,40 +83,6 @@ function addUsageTotals(target: Usage, usage: Partial<Usage>): void {
 	target.cost.total += cost.total;
 }
 
-function parseSubagentUsage(events: string[] | undefined): Usage | undefined {
-	if (!events || events.length === 0) return undefined;
-
-	const totals = createUsageTotals();
-	let hasUsage = false;
-
-	for (const line of events) {
-		let event: unknown;
-		try {
-			event = JSON.parse(line);
-		} catch {
-			continue;
-		}
-
-		if (!event || typeof event !== "object") continue;
-		const record = event as Record<string, unknown>;
-		if (record.type !== "message_end") continue;
-
-		const message = record.message;
-		if (!message || typeof message !== "object") continue;
-		const msgRecord = message as Record<string, unknown>;
-		if (msgRecord.role !== "assistant") continue;
-		if (msgRecord.stopReason === "aborted" || msgRecord.stopReason === "error") continue;
-
-		const usage = msgRecord.usage;
-		if (!usage || typeof usage !== "object") continue;
-
-		addUsageTotals(totals, usage as Partial<Usage>);
-		hasUsage = true;
-	}
-
-	return hasUsage ? totals : undefined;
-}
-
 /** Session context interface */
 interface SessionContext {
 	getSessionFile: () => string | null;
@@ -477,31 +443,29 @@ export async function createTaskTool(
 					});
 				});
 
+				// Aggregate usage from executor results (already accumulated incrementally)
 				const aggregatedUsage = createUsageTotals();
 				let hasAggregatedUsage = false;
-				const resultsWithUsage = results.map((result) => {
-					const usage = parseSubagentUsage(result.jsonlEvents);
-					if (usage) {
-						addUsageTotals(aggregatedUsage, usage);
+				for (const result of results) {
+					if (result.usage) {
+						addUsageTotals(aggregatedUsage, result.usage);
 						hasAggregatedUsage = true;
-						return { ...result, usage };
 					}
-					return result;
-				});
+				}
 
 				// Collect output paths (artifacts already written by executor in real-time)
 				const outputPaths: string[] = [];
-				for (const result of resultsWithUsage) {
+				for (const result of results) {
 					if (result.artifactPaths) {
 						outputPaths.push(result.artifactPaths.outputPath);
 					}
 				}
 
 				// Build final output - match plugin format
-				const successCount = resultsWithUsage.filter((r) => r.exitCode === 0).length;
+				const successCount = results.filter((r) => r.exitCode === 0).length;
 				const totalDuration = Date.now() - startTime;
 
-				const summaries = resultsWithUsage.map((r) => {
+				const summaries = results.map((r) => {
 					const status = r.exitCode === 0 ? "completed" : `failed (exit ${r.exitCode})`;
 					const output = r.output.trim() || r.stderr.trim() || "(no output)";
 					const preview = output.split("\n").slice(0, 5).join("\n");
@@ -520,12 +484,12 @@ export async function createTaskTool(
 								skippedSelfRecursion > 1 ? "s" : ""
 							} skipped - self-recursion blocked)`
 						: "";
-				const outputIds = resultsWithUsage.map((r) => `${r.agent}_${r.index}`);
+				const outputIds = results.map((r) => `${r.agent}_${r.index}`);
 				const outputHint =
 					hasOutputTool && outputIds.length > 0
 						? `\n\nUse output tool for full logs: output ids ${outputIds.join(", ")}`
 						: "";
-				const summary = `${successCount}/${resultsWithUsage.length} succeeded${skippedNote} [${formatDuration(
+				const summary = `${successCount}/${results.length} succeeded${skippedNote} [${formatDuration(
 					totalDuration,
 				)}]\n\n${summaries.join("\n\n---\n\n")}${outputHint}`;
 
@@ -538,7 +502,7 @@ export async function createTaskTool(
 					content: [{ type: "text", text: summary }],
 					details: {
 						projectAgentsDir,
-						results: resultsWithUsage,
+						results: results,
 						totalDurationMs: totalDuration,
 						usage: hasAggregatedUsage ? aggregatedUsage : undefined,
 						outputPaths,

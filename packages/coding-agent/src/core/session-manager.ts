@@ -698,6 +698,13 @@ async function truncateForPersistence<T>(obj: T, key?: string): Promise<T> {
 		let changed = false;
 		const result: Record<string, unknown> = {};
 		for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+			// Strip transient/redundant properties that shouldn't be persisted
+			// - partialJson: streaming accumulator for tool call JSON parsing
+			// - jsonlEvents: raw subprocess streaming events (already saved to artifact files)
+			if (k === "partialJson" || k === "jsonlEvents") {
+				changed = true;
+				continue;
+			}
 			const newV = await truncateForPersistence(v, k);
 			result[k] = newV;
 			if (newV !== v) changed = true;

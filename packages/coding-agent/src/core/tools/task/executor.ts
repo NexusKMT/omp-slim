@@ -279,7 +279,17 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	let finalOutput = "";
 	let resolved = false;
 	let pendingTermination = false; // Set when shouldTerminate fires, wait for message_end
-	const jsonlEvents: string[] = [];
+
+	// Accumulate usage incrementally from message_end events (no memory for streaming events)
+	const accumulatedUsage = {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: 0,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
+	let hasUsage = false;
 
 	// Handle abort signal
 	const onAbort = () => {
@@ -301,7 +311,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 
 		try {
 			const event = JSON.parse(line);
-			jsonlEvents.push(line);
+			// Events are written to subtask session file by subprocess - no need to accumulate in memory
 			const now = Date.now();
 
 			switch (event.type) {
@@ -389,19 +399,43 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				}
 
 				case "message_end": {
-					// Extract final text content from completed message
-					const messageContent = event.message?.content || event.content;
-					if (messageContent && Array.isArray(messageContent)) {
-						for (const block of messageContent) {
-							if (block.type === "text" && block.text) {
-								output += block.text;
+					// Extract text from assistant and toolResult messages (not user prompts)
+					const role = event.message?.role;
+					if (role === "assistant") {
+						const messageContent = event.message?.content || event.content;
+						if (messageContent && Array.isArray(messageContent)) {
+							for (const block of messageContent) {
+								if (block.type === "text" && block.text) {
+									output += block.text;
+								}
 							}
 						}
 					}
-					// Extract usage (prefer message.usage, fallback to event.usage)
+					// Extract and accumulate usage (prefer message.usage, fallback to event.usage)
 					const messageUsage = event.message?.usage || event.usage;
 					if (messageUsage) {
-						// Accumulate tokens across messages (not overwrite)
+						// Only count assistant messages (not tool results, etc.)
+						const role = event.message?.role;
+						if (
+							role === "assistant" &&
+							event.message?.stopReason !== "aborted" &&
+							event.message?.stopReason !== "error"
+						) {
+							hasUsage = true;
+							accumulatedUsage.input += messageUsage.input ?? 0;
+							accumulatedUsage.output += messageUsage.output ?? 0;
+							accumulatedUsage.cacheRead += messageUsage.cacheRead ?? 0;
+							accumulatedUsage.cacheWrite += messageUsage.cacheWrite ?? 0;
+							accumulatedUsage.totalTokens += messageUsage.totalTokens ?? 0;
+							if (messageUsage.cost) {
+								accumulatedUsage.cost.input += messageUsage.cost.input ?? 0;
+								accumulatedUsage.cost.output += messageUsage.cost.output ?? 0;
+								accumulatedUsage.cost.cacheRead += messageUsage.cost.cacheRead ?? 0;
+								accumulatedUsage.cost.cacheWrite += messageUsage.cost.cacheWrite ?? 0;
+								accumulatedUsage.cost.total += messageUsage.cost.total ?? 0;
+							}
+						}
+						// Accumulate tokens for progress display
 						progress.tokens += getUsageTokens(messageUsage);
 					}
 					// If pending termination, now we have tokens - terminate
@@ -531,7 +565,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		modelOverride,
 		error: exitCode !== 0 && stderr ? stderr : undefined,
 		aborted: wasAborted,
-		jsonlEvents,
+		usage: hasUsage ? accumulatedUsage : undefined,
 		artifactPaths,
 		extractedToolData: progress.extractedToolData,
 		outputMeta,
