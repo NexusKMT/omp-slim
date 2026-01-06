@@ -21,11 +21,13 @@ import { callExaTool, findApiKey as findExaKey, formatSearchResults, isSearchRes
 import { renderExaCall, renderExaResult } from "../exa/render";
 import type { ExaRenderDetails } from "../exa/types";
 import { formatAge } from "../render-utils";
+import { findAnthropicAuth } from "./auth";
 import { searchAnthropic } from "./providers/anthropic";
 import { searchExa } from "./providers/exa";
 import { findApiKey as findPerplexityKey, searchPerplexity } from "./providers/perplexity";
 import { renderWebSearchCall, renderWebSearchResult, type WebSearchRenderDetails } from "./render";
 import type { WebSearchProvider, WebSearchResponse } from "./types";
+import { WebSearchProviderError } from "./types";
 
 /** Web search parameters schema */
 export const webSearchSchema = Type.Object({
@@ -95,18 +97,78 @@ export type WebSearchParams = {
 	return_related_questions?: boolean;
 };
 
-/** Detect provider based on available API keys (priority: exa > perplexity > anthropic) */
-async function detectProvider(): Promise<WebSearchProvider> {
-	// Exa takes highest priority if key exists
+/** Preferred provider set via settings (default: auto) */
+let preferredProvider: WebSearchProvider | "auto" = "auto";
+
+/** Set the preferred web search provider from settings */
+export function setPreferredWebSearchProvider(provider: WebSearchProvider | "auto"): void {
+	preferredProvider = provider;
+}
+
+/** Determine which providers are configured (priority order) */
+async function getAvailableProviders(): Promise<WebSearchProvider[]> {
+	const providers: WebSearchProvider[] = [];
+
 	const exaKey = await findExaKey();
-	if (exaKey) return "exa";
+	if (exaKey) providers.push("exa");
 
-	// Perplexity second priority
 	const perplexityKey = await findPerplexityKey();
-	if (perplexityKey) return "perplexity";
+	if (perplexityKey) providers.push("perplexity");
 
-	// Default to Anthropic
-	return "anthropic";
+	const anthropicAuth = await findAnthropicAuth();
+	if (anthropicAuth) providers.push("anthropic");
+
+	return providers;
+}
+
+function formatProviderLabel(provider: WebSearchProvider): string {
+	switch (provider) {
+		case "exa":
+			return "Exa";
+		case "perplexity":
+			return "Perplexity";
+		case "anthropic":
+			return "Anthropic";
+		default:
+			return provider;
+	}
+}
+
+function formatProviderList(providers: WebSearchProvider[]): string {
+	return providers.map((provider) => formatProviderLabel(provider)).join(", ");
+}
+
+function buildNoProviderError(): string {
+	return "No web search provider configured. Set EXA_API_KEY, PERPLEXITY_API_KEY, ANTHROPIC_SEARCH_API_KEY, or ANTHROPIC_API_KEY.";
+}
+
+function formatProviderError(error: unknown, provider: WebSearchProvider): string {
+	if (error instanceof WebSearchProviderError) {
+		if (error.provider === "anthropic" && error.status === 404) {
+			return "Anthropic web search returned 404 (model or endpoint not found). Set ANTHROPIC_SEARCH_MODEL/ANTHROPIC_SEARCH_BASE_URL, or configure EXA_API_KEY or PERPLEXITY_API_KEY.";
+		}
+		if (error.status === 401 || error.status === 403) {
+			return `${formatProviderLabel(error.provider)} authorization failed (${error.status}). Check API key or base URL.`;
+		}
+		return error.message;
+	}
+	if (error instanceof Error) return error.message;
+	return `Unknown error from ${formatProviderLabel(provider)}`;
+}
+
+async function resolveProviderChain(
+	requestedProvider?: WebSearchProvider | "auto",
+): Promise<{ providers: WebSearchProvider[]; allowFallback: boolean }> {
+	if (requestedProvider && requestedProvider !== "auto") {
+		return { providers: [requestedProvider], allowFallback: false };
+	}
+
+	if (preferredProvider !== "auto") {
+		return { providers: [preferredProvider], allowFallback: false };
+	}
+
+	const providers = await getAvailableProviders();
+	return { providers, allowFallback: true };
 }
 
 /** Truncate text for tool output */
@@ -198,48 +260,71 @@ async function executeWebSearch(
 	_toolCallId: string,
 	params: WebSearchParams,
 ): Promise<{ content: Array<{ type: "text"; text: string }>; details: WebSearchRenderDetails }> {
-	try {
-		const provider = params.provider && params.provider !== "auto" ? params.provider : await detectProvider();
+	const { providers, allowFallback } = await resolveProviderChain(params.provider);
 
-		let response: WebSearchResponse;
-		if (provider === "exa") {
-			response = await searchExa({
-				query: params.query,
-				num_results: params.num_results,
-			});
-		} else if (provider === "anthropic") {
-			response = await searchAnthropic({
-				query: params.query,
-				system_prompt: params.system_prompt,
-				max_tokens: params.max_tokens,
-				num_results: params.num_results,
-			});
-		} else {
-			response = await searchPerplexity({
-				query: params.query,
-				model: params.model,
-				system_prompt: params.system_prompt,
-				search_recency_filter: params.search_recency_filter,
-				search_domain_filter: params.search_domain_filter,
-				search_context_size: params.search_context_size,
-				return_related_questions: params.return_related_questions,
-				num_results: params.num_results,
-			});
-		}
-
-		const text = formatForLLM(response);
-
-		return {
-			content: [{ type: "text" as const, text }],
-			details: { response },
-		};
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
+	if (providers.length === 0) {
+		const message = buildNoProviderError();
+		const fallbackProvider = preferredProvider === "auto" ? "anthropic" : preferredProvider;
 		return {
 			content: [{ type: "text" as const, text: `Error: ${message}` }],
-			details: { response: { provider: "anthropic", sources: [] }, error: message },
+			details: { response: { provider: fallbackProvider, sources: [] }, error: message },
 		};
 	}
+
+	let lastError: unknown;
+	let lastProvider = providers[0];
+
+	for (const provider of providers) {
+		lastProvider = provider;
+		try {
+			let response: WebSearchResponse;
+			if (provider === "exa") {
+				response = await searchExa({
+					query: params.query,
+					num_results: params.num_results,
+				});
+			} else if (provider === "anthropic") {
+				response = await searchAnthropic({
+					query: params.query,
+					system_prompt: params.system_prompt,
+					max_tokens: params.max_tokens,
+					num_results: params.num_results,
+				});
+			} else {
+				response = await searchPerplexity({
+					query: params.query,
+					model: params.model,
+					system_prompt: params.system_prompt,
+					search_recency_filter: params.search_recency_filter,
+					search_domain_filter: params.search_domain_filter,
+					search_context_size: params.search_context_size,
+					return_related_questions: params.return_related_questions,
+					num_results: params.num_results,
+				});
+			}
+
+			const text = formatForLLM(response);
+
+			return {
+				content: [{ type: "text" as const, text }],
+				details: { response },
+			};
+		} catch (error) {
+			lastError = error;
+			if (!allowFallback) break;
+		}
+	}
+
+	const baseMessage = formatProviderError(lastError, lastProvider);
+	const message =
+		allowFallback && providers.length > 1
+			? `All web search providers failed (${formatProviderList(providers)}). Last error: ${baseMessage}`
+			: baseMessage;
+
+	return {
+		content: [{ type: "text" as const, text: `Error: ${message}` }],
+		details: { response: { provider: lastProvider, sources: [] }, error: message },
+	};
 }
 
 /** Web search tool as AgentTool (for allTools export) */

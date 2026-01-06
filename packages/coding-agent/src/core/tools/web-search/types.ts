@@ -57,6 +57,19 @@ export interface WebSearchResponse {
 	requestId?: string;
 }
 
+/** Provider-specific error with optional HTTP status */
+export class WebSearchProviderError extends Error {
+	provider: WebSearchProvider;
+	status?: number;
+
+	constructor(provider: WebSearchProvider, message: string, status?: number) {
+		super(message);
+		this.name = "WebSearchProviderError";
+		this.provider = provider;
+		this.status = status;
+	}
+}
+
 /** Auth configuration for Anthropic */
 export interface AnthropicAuthConfig {
 	apiKey: string;

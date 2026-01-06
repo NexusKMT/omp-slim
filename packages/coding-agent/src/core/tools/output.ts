@@ -23,12 +23,30 @@ const outputSchema = Type.Object({
 			description: "Output format: raw (default), json (structured), stripped (no ANSI)",
 		}),
 	),
+	offset: Type.Optional(
+		Type.Number({
+			description: "Line number to start reading from (1-indexed)",
+			minimum: 1,
+		}),
+	),
+	limit: Type.Optional(
+		Type.Number({
+			description: "Maximum number of lines to read",
+			minimum: 1,
+		}),
+	),
 });
 
 /** Metadata for a single output file */
 interface OutputProvenance {
 	agent: string;
 	index: number;
+}
+
+interface OutputRange {
+	startLine: number;
+	endLine: number;
+	totalLines: number;
 }
 
 interface OutputEntry {
@@ -38,6 +56,7 @@ interface OutputEntry {
 	charCount: number;
 	provenance?: OutputProvenance;
 	previewLines?: string[];
+	range?: OutputRange;
 }
 
 export interface OutputToolDetails {
@@ -99,7 +118,7 @@ export function createOutputTool(
 		parameters: outputSchema,
 		execute: async (
 			_toolCallId: string,
-			params: { ids: string[]; format?: "raw" | "json" | "stripped" },
+			params: { ids: string[]; format?: "raw" | "json" | "stripped"; offset?: number; limit?: number },
 		): Promise<{ content: TextContent[]; details: OutputToolDetails }> => {
 			const sessionFile = sessionContext?.getSessionFile();
 
@@ -131,15 +150,37 @@ export function createOutputTool(
 					continue;
 				}
 
-				const content = fs.readFileSync(outputPath, "utf-8");
-				outputContentById.set(id, content);
+				const rawContent = fs.readFileSync(outputPath, "utf-8");
+				const rawLines = rawContent.split("\n");
+				const totalLines = rawLines.length;
+				const totalChars = rawContent.length;
+
+				let selectedContent = rawContent;
+				let range: OutputRange | undefined;
+
+				if (params.offset !== undefined || params.limit !== undefined) {
+					const startLine = Math.max(1, params.offset ?? 1);
+					if (startLine > totalLines) {
+						throw new Error(
+							`Offset ${params.offset ?? startLine} is beyond end of output (${totalLines} lines) for ${id}`,
+						);
+					}
+					const effectiveLimit = params.limit ?? totalLines - startLine + 1;
+					const endLine = Math.min(totalLines, startLine + effectiveLimit - 1);
+					const selectedLines = rawLines.slice(startLine - 1, endLine);
+					selectedContent = selectedLines.join("\n");
+					range = { startLine, endLine, totalLines };
+				}
+
+				outputContentById.set(id, selectedContent);
 				outputs.push({
 					id,
 					path: outputPath,
-					lineCount: content.split("\n").length,
-					charCount: content.length,
+					lineCount: totalLines,
+					charCount: totalChars,
 					provenance: parseOutputProvenance(id),
-					previewLines: extractPreviewLines(content, 4),
+					previewLines: extractPreviewLines(selectedContent, 4),
+					range,
 				});
 			}
 
@@ -167,6 +208,7 @@ export function createOutputTool(
 					charCount: o.charCount,
 					provenance: o.provenance,
 					previewLines: o.previewLines,
+					range: o.range,
 					content: outputContentById.get(o.id) ?? "",
 				}));
 				contentText = JSON.stringify(jsonData, null, 2);
@@ -176,6 +218,10 @@ export function createOutputTool(
 					let content = outputContentById.get(o.id) ?? "";
 					if (format === "stripped") {
 						content = stripAnsi(content);
+					}
+					if (o.range && o.range.endLine < o.range.totalLines) {
+						const nextOffset = o.range.endLine + 1;
+						content += `\n\n[Showing lines ${o.range.startLine}-${o.range.endLine} of ${o.range.totalLines}. Use offset=${nextOffset} to continue]`;
 					}
 					// Add header for multiple outputs
 					if (outputs.length > 1) {

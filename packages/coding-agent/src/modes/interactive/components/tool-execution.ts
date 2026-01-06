@@ -461,6 +461,17 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	/**
+	 * Get all image blocks from result content and details.images.
+	 * Some tools (like generate_image) store images in details to avoid bloating model context.
+	 */
+	private getAllImageBlocks(): Array<{ data?: string; mimeType?: string }> {
+		if (!this.result) return [];
+		const contentImages = this.result.content?.filter((c: any) => c.type === "image") || [];
+		const detailImages = this.result.details?.images || [];
+		return [...contentImages, ...detailImages];
+	}
+
+	/**
 	 * Convert non-PNG images to PNG for Kitty graphics protocol.
 	 * Kitty requires PNG format (f=100), so JPEG/GIF/WebP won't display.
 	 */
@@ -470,7 +481,7 @@ export class ToolExecutionComponent extends Container {
 		if (caps.images !== "kitty") return;
 		if (!this.result) return;
 
-		const imageBlocks = this.result.content?.filter((c: any) => c.type === "image") || [];
+		const imageBlocks = this.getAllImageBlocks();
 
 		for (let i = 0; i < imageBlocks.length; i++) {
 			const img = imageBlocks[i];
@@ -664,7 +675,7 @@ export class ToolExecutionComponent extends Container {
 		this.imageSpacers = [];
 
 		if (this.result) {
-			const imageBlocks = this.result.content?.filter((c: any) => c.type === "image") || [];
+			const imageBlocks = this.getAllImageBlocks();
 			const caps = getCapabilities();
 
 			for (let i = 0; i < imageBlocks.length; i++) {
@@ -783,7 +794,7 @@ export class ToolExecutionComponent extends Container {
 		if (!this.result) return "";
 
 		const textBlocks = this.result.content?.filter((c: any) => c.type === "text") || [];
-		const imageBlocks = this.result.content?.filter((c: any) => c.type === "image") || [];
+		const imageBlocks = this.getAllImageBlocks();
 
 		let output = textBlocks
 			.map((c: any) => {

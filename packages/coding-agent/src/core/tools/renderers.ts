@@ -572,12 +572,20 @@ const lspRenderer: ToolRenderer<LspArgs, LspToolDetails> = {
 interface OutputArgs {
 	ids: string[];
 	format?: "raw" | "json" | "stripped";
+	offset?: number;
+	limit?: number;
 }
 
 type OutputEntry = OutputToolDetails["outputs"][number];
 
 function formatOutputMeta(entry: OutputEntry, theme: Theme): string {
-	const metaParts = [formatCount("line", entry.lineCount), formatBytes(entry.charCount)];
+	const metaParts: string[] = [];
+	if (entry.range) {
+		metaParts.push(`lines ${entry.range.startLine}-${entry.range.endLine} of ${entry.range.totalLines}`);
+	} else {
+		metaParts.push(formatCount("line", entry.lineCount));
+	}
+	metaParts.push(formatBytes(entry.charCount));
 	if (entry.provenance) {
 		metaParts.push(`agent ${entry.provenance.agent}(${entry.provenance.index})`);
 	}
@@ -592,6 +600,8 @@ const outputRenderer: ToolRenderer<OutputArgs, OutputToolDetails> = {
 
 		const meta: string[] = [];
 		if (args.format && args.format !== "raw") meta.push(`format:${args.format}`);
+		if (args.offset !== undefined) meta.push(`offset:${args.offset}`);
+		if (args.limit !== undefined) meta.push(`limit:${args.limit}`);
 		text += formatMeta(meta, theme);
 
 		return new Text(text, 0, 0);

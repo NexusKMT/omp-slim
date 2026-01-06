@@ -1,5 +1,11 @@
 # Development Rules
 
+## Default Context
+
+This repo contains multiple packages, but **`packages/coding-agent/`** is the primary focus. Unless otherwise specified, assume work refers to this package.
+
+**Terminology**: When the user says "agent" or asks "why is agent doing X", they mean the **coding-agent package implementation**, not you (the assistant). The coding-agent is a CLI tool that uses Claude—questions about its behavior refer to the code in `packages/coding-agent/`, not your current session.
+
 ## Code Quality
 
 - No `any` types unless absolutely necessary

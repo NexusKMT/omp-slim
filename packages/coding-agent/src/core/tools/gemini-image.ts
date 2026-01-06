@@ -1,4 +1,7 @@
-import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
+import * as crypto from "node:crypto";
+import * as fs from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { type Static, Type } from "@sinclair/typebox";
 import geminiImageDescription from "../../prompts/tools/gemini-image.md" with { type: "text" };
 import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime";
@@ -42,12 +45,6 @@ export const geminiImageSchema = Type.Object(
 		model: Type.Optional(
 			Type.String({
 				description: `Image model. Default: ${DEFAULT_MODEL} (direct Gemini) or ${DEFAULT_OPENROUTER_MODEL} (OpenRouter).`,
-			}),
-		),
-		response_modalities: Type.Optional(
-			Type.Array(responseModalitySchema, {
-				description: 'Response modalities (default: ["Image"]).',
-				minItems: 1,
 			}),
 		),
 		aspect_ratio: Type.Optional(aspectRatioSchema),
@@ -134,6 +131,8 @@ interface GeminiImageToolDetails {
 	provider: ImageProvider;
 	model: string;
 	imageCount: number;
+	imagePaths: string[];
+	images: InlineImageData[];
 	responseText?: string;
 	promptFeedback?: GeminiPromptFeedback;
 	usage?: GeminiUsageMetadata;
@@ -164,7 +163,7 @@ function toDataUrl(image: InlineImageData): string {
 	return `data:${image.mimeType};base64,${image.data}`;
 }
 
-async function loadImageFromUrl(imageUrl: string): Promise<InlineImageData> {
+async function loadImageFromUrl(imageUrl: string, signal?: AbortSignal): Promise<InlineImageData> {
 	if (imageUrl.startsWith("data:")) {
 		const normalized = normalizeDataUrl(imageUrl.trim());
 		if (!normalized.mimeType) {
@@ -176,7 +175,7 @@ async function loadImageFromUrl(imageUrl: string): Promise<InlineImageData> {
 		return { data: normalized.data, mimeType: normalized.mimeType };
 	}
 
-	const response = await fetch(imageUrl);
+	const response = await fetch(imageUrl, { signal });
 	if (!response.ok) {
 		const rawText = await response.text();
 		throw new Error(`Image download failed (${response.status}): ${rawText}`);
@@ -228,7 +227,29 @@ function extractOpenRouterImageUrls(message: OpenRouterMessage | undefined): str
 	return urls;
 }
 
+/** Preferred provider set via settings (default: auto) */
+let preferredImageProvider: ImageProvider | "auto" = "auto";
+
+/** Set the preferred image provider from settings */
+export function setPreferredImageProvider(provider: ImageProvider | "auto"): void {
+	preferredImageProvider = provider;
+}
+
 async function findImageApiKey(): Promise<ImageApiKey | null> {
+	// If a specific provider is preferred, try it first
+	if (preferredImageProvider === "gemini") {
+		const geminiKey = await getEnv("GEMINI_API_KEY");
+		if (geminiKey) return { provider: "gemini", apiKey: geminiKey };
+		const googleKey = await getEnv("GOOGLE_API_KEY");
+		if (googleKey) return { provider: "gemini", apiKey: googleKey };
+		// Fall through to auto-detect if preferred provider key not found
+	} else if (preferredImageProvider === "openrouter") {
+		const openRouterKey = await getEnv("OPENROUTER_API_KEY");
+		if (openRouterKey) return { provider: "openrouter", apiKey: openRouterKey };
+		// Fall through to auto-detect if preferred provider key not found
+	}
+
+	// Auto-detect: OpenRouter takes priority
 	const openRouterKey = await getEnv("OPENROUTER_API_KEY");
 	if (openRouterKey) return { provider: "openrouter", apiKey: openRouterKey };
 
@@ -280,8 +301,29 @@ async function resolveInputImage(input: ImageInput, cwd: string): Promise<Inline
 	throw new Error("input_images entries must include either path or data.");
 }
 
-function buildResponseSummary(model: string, imageCount: number, responseText: string | undefined): string {
-	const lines = [`Model: ${model}`, `Images: ${imageCount}`];
+function getExtensionForMime(mimeType: string): string {
+	const map: Record<string, string> = {
+		"image/png": "png",
+		"image/jpeg": "jpg",
+		"image/gif": "gif",
+		"image/webp": "webp",
+	};
+	return map[mimeType] ?? "png";
+}
+
+function saveImageToTemp(image: InlineImageData): string {
+	const ext = getExtensionForMime(image.mimeType);
+	const filename = `omp-image-${crypto.randomUUID()}.${ext}`;
+	const filepath = join(tmpdir(), filename);
+	fs.writeFileSync(filepath, Buffer.from(image.data, "base64"));
+	return filepath;
+}
+
+function buildResponseSummary(model: string, imagePaths: string[], responseText: string | undefined): string {
+	const lines = [`Model: ${model}`, `Generated ${imagePaths.length} image(s):`];
+	for (const p of imagePaths) {
+		lines.push(`  ${p}`);
+	}
 	if (responseText) {
 		lines.push("", responseText.trim());
 	}
@@ -352,7 +394,6 @@ export const geminiImageTool: CustomTool<typeof geminiImageSchema, GeminiImageTo
 			const provider = apiKey.provider;
 			const model = params.model ?? (provider === "openrouter" ? DEFAULT_OPENROUTER_MODEL : DEFAULT_MODEL);
 			const resolvedModel = provider === "openrouter" ? resolveOpenRouterModel(model) : model;
-			const responseModalities = params.response_modalities ?? ["Image"];
 			const cwd = ctx.sessionManager.getCwd();
 
 			const resolvedImages: InlineImageData[] = [];
@@ -405,38 +446,34 @@ export const geminiImageTool: CustomTool<typeof geminiImageSchema, GeminiImageTo
 					const imageUrls = extractOpenRouterImageUrls(message);
 					const inlineImages: InlineImageData[] = [];
 					for (const imageUrl of imageUrls) {
-						inlineImages.push(await loadImageFromUrl(imageUrl));
+						inlineImages.push(await loadImageFromUrl(imageUrl, controller.signal));
 					}
 
-					const content: Array<TextContent | ImageContent> = [];
 					if (inlineImages.length === 0) {
 						const messageText = responseText ? `\n\n${responseText}` : "";
-						content.push({ type: "text", text: `No image data returned.${messageText}` });
 						return {
-							content,
+							content: [{ type: "text", text: `No image data returned.${messageText}` }],
 							details: {
 								provider,
 								model: resolvedModel,
 								imageCount: 0,
+								imagePaths: [],
+								images: [],
 								responseText,
 							},
 						};
 					}
 
-					content.push({
-						type: "text",
-						text: buildResponseSummary(resolvedModel, inlineImages.length, responseText),
-					});
-					for (const image of inlineImages) {
-						content.push({ type: "image", data: image.data, mimeType: image.mimeType });
-					}
+					const imagePaths = inlineImages.map(saveImageToTemp);
 
 					return {
-						content,
+						content: [{ type: "text", text: buildResponseSummary(resolvedModel, imagePaths, responseText) }],
 						details: {
 							provider,
 							model: resolvedModel,
 							imageCount: inlineImages.length,
+							imagePaths,
+							images: inlineImages,
 							responseText,
 						},
 					};
@@ -452,7 +489,7 @@ export const geminiImageTool: CustomTool<typeof geminiImageSchema, GeminiImageTo
 					responseModalities: GeminiResponseModality[];
 					imageConfig?: { aspectRatio?: string; imageSize?: string };
 				} = {
-					responseModalities,
+					responseModalities: ["Image"],
 				};
 
 				if (params.aspect_ratio || params.image_size) {
@@ -496,19 +533,19 @@ export const geminiImageTool: CustomTool<typeof geminiImageSchema, GeminiImageTo
 				const responseParts = combineParts(data);
 				const responseText = collectResponseText(responseParts);
 				const inlineImages = collectInlineImages(responseParts);
-				const content: Array<TextContent | ImageContent> = [];
 
 				if (inlineImages.length === 0) {
 					const blocked = data.promptFeedback?.blockReason
 						? `Blocked: ${data.promptFeedback.blockReason}`
 						: "No image data returned.";
-					content.push({ type: "text", text: `${blocked}${responseText ? `\n\n${responseText}` : ""}` });
 					return {
-						content,
+						content: [{ type: "text", text: `${blocked}${responseText ? `\n\n${responseText}` : ""}` }],
 						details: {
 							provider,
 							model,
 							imageCount: 0,
+							imagePaths: [],
+							images: [],
 							responseText,
 							promptFeedback: data.promptFeedback,
 							usage: data.usageMetadata,
@@ -516,20 +553,16 @@ export const geminiImageTool: CustomTool<typeof geminiImageSchema, GeminiImageTo
 					};
 				}
 
-				content.push({
-					type: "text",
-					text: buildResponseSummary(model, inlineImages.length, responseText),
-				});
-				for (const image of inlineImages) {
-					content.push({ type: "image", data: image.data, mimeType: image.mimeType });
-				}
+				const imagePaths = inlineImages.map(saveImageToTemp);
 
 				return {
-					content,
+					content: [{ type: "text", text: buildResponseSummary(model, imagePaths, responseText) }],
 					details: {
 						provider,
 						model,
 						imageCount: inlineImages.length,
+						imagePaths,
+						images: inlineImages,
 						responseText,
 						promptFeedback: data.promptFeedback,
 						usage: data.usageMetadata,

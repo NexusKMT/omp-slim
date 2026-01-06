@@ -36,6 +36,13 @@ const forbiddenPatterns: Array<{
 		tool: "grep",
 		message: "Use the `grep` tool instead of grep/rg. It respects .gitignore and provides structured output.",
 	},
+	// Git operations
+	{
+		pattern: /^\s*git(\s+|$)/,
+		tool: "git",
+		message:
+			"Use the `git` tool instead of running git in bash. It provides structured output and safety confirmations.",
+	},
 	// File finding
 	{
 		pattern: /^\s*(find|fd|locate)\s+.*(-name|-iname|-type|--type|-glob)/,

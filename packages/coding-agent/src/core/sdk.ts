@@ -101,6 +101,8 @@ import {
 	lsTool,
 	readOnlyTools,
 	readTool,
+	setPreferredImageProvider,
+	setPreferredWebSearchProvider,
 	type Tool,
 	type ToolName,
 	warmupLspServers,
@@ -528,6 +530,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	initializeWithSettings(settingsManager);
 	time("initializeWithSettings");
 
+	// Initialize provider preferences from settings
+	setPreferredWebSearchProvider(settingsManager.getWebSearchProvider());
+	setPreferredImageProvider(settingsManager.getImageProvider());
+
 	const sessionManager = options.sessionManager ?? SessionManager.create(cwd);
 	time("sessionManager");
 
@@ -636,9 +642,17 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	});
 	time("createAllTools");
 
-	const initialActiveToolNames: ToolName[] = options.tools
+	// Determine which tools to include based on settings
+	let baseToolNames = options.tools
 		? options.tools.map((t) => t.name).filter((n): n is ToolName => n in allBuiltInToolsMap)
-		: baseCodingToolNames;
+		: [...baseCodingToolNames];
+
+	// Filter out git tool if disabled in settings
+	if (!settingsManager.getGitToolEnabled()) {
+		baseToolNames = baseToolNames.filter((name) => name !== "git");
+	}
+
+	const initialActiveToolNames: ToolName[] = baseToolNames;
 	const initialActiveBuiltInTools = initialActiveToolNames.map((name) => allBuiltInToolsMap[name]);
 
 	// Discover MCP tools from .mcp.json files

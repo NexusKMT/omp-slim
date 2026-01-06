@@ -66,8 +66,6 @@ const CONVERTIBLE_EXTENSIONS = new Set([
 	".ogg",
 ]);
 
-const isWindows = process.platform === "win32";
-
 const USER_AGENTS = [
 	"curl/8.0",
 	"Mozilla/5.0 (compatible; TextBot/1.0)",
@@ -211,13 +209,7 @@ function exec(
  * Check if a command exists (cross-platform)
  */
 function hasCommand(cmd: string): boolean {
-	const checkCmd = isWindows ? "where" : "which";
-	const result = Bun.spawnSync([checkCmd, cmd], {
-		stdin: "ignore",
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	return result.exitCode === 0;
+	return Boolean(Bun.which(cmd));
 }
 
 /**
@@ -626,7 +618,18 @@ async function fetchBinary(
 
 		const contentType = response.headers.get("content-type") ?? "";
 		const contentDisposition = response.headers.get("content-disposition") ?? undefined;
+		const contentLength = response.headers.get("content-length");
+		if (contentLength) {
+			const size = Number.parseInt(contentLength, 10);
+			if (Number.isFinite(size) && size > MAX_BYTES) {
+				return { buffer: Buffer.alloc(0), contentType, contentDisposition, ok: false };
+			}
+		}
+
 		const buffer = Buffer.from(await response.arrayBuffer());
+		if (buffer.length > MAX_BYTES) {
+			return { buffer: Buffer.alloc(0), contentType, contentDisposition, ok: false };
+		}
 
 		return { buffer, contentType, contentDisposition, ok: true };
 	} catch {
@@ -1959,15 +1962,15 @@ async function renderUrl(url: string, timeout: number, raw: boolean = false): Pr
 	const notes: string[] = [];
 	const fetchedAt = new Date().toISOString();
 
-	// Step 0: Try special handlers for known sites (unless raw mode)
+	// Step 0: Normalize URL (ensure scheme for special handlers)
+	url = normalizeUrl(url);
+	const origin = getOrigin(url);
+
+	// Step 1: Try special handlers for known sites (unless raw mode)
 	if (!raw) {
 		const specialResult = await handleSpecialUrls(url, timeout);
 		if (specialResult) return specialResult;
 	}
-
-	// Step 1: Normalize URL
-	url = normalizeUrl(url);
-	const origin = getOrigin(url);
 
 	// Step 2: Fetch page
 	const response = await loadPage(url, { timeout });

@@ -11,11 +11,13 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { getCapabilities } from "@oh-my-pi/pi-tui";
 import type {
+	ImageProviderOption,
 	NotificationMethod,
 	SettingsManager,
 	StatusLinePreset,
 	StatusLineSeparatorStyle,
 	SymbolPreset,
+	WebSearchProviderOption,
 } from "../../../core/settings-manager";
 import { getPreset } from "./status-line/presets";
 
@@ -201,6 +203,15 @@ export const SETTINGS_DEFS: SettingDef[] = [
 		set: (sm, v) => sm.setBashInterceptorEnabled(v),
 	},
 	{
+		id: "gitTool",
+		tab: "config",
+		type: "boolean",
+		label: "Git tool",
+		description: "Enable structured Git tool",
+		get: (sm) => sm.getGitToolEnabled(),
+		set: (sm, v) => sm.setGitToolEnabled(v),
+	},
+	{
 		id: "mcpProjectConfig",
 		tab: "config",
 		type: "boolean",
@@ -284,6 +295,35 @@ export const SETTINGS_DEFS: SettingDef[] = [
 			{ value: "unicode", label: "Unicode", description: "Standard Unicode symbols (default)" },
 			{ value: "nerd", label: "Nerd Font", description: "Nerd Font icons (requires Nerd Font)" },
 			{ value: "ascii", label: "ASCII", description: "ASCII-only characters (maximum compatibility)" },
+		],
+	},
+	{
+		id: "webSearchProvider",
+		tab: "config",
+		type: "submenu",
+		label: "Web search provider",
+		description: "Provider for web search tool",
+		get: (sm) => sm.getWebSearchProvider(),
+		set: (sm, v) => sm.setWebSearchProvider(v as WebSearchProviderOption),
+		getOptions: () => [
+			{ value: "auto", label: "Auto", description: "Priority: Exa > Perplexity > Anthropic" },
+			{ value: "exa", label: "Exa", description: "Use Exa (requires EXA_API_KEY)" },
+			{ value: "perplexity", label: "Perplexity", description: "Use Perplexity (requires PERPLEXITY_API_KEY)" },
+			{ value: "anthropic", label: "Anthropic", description: "Use Anthropic web search" },
+		],
+	},
+	{
+		id: "imageProvider",
+		tab: "config",
+		type: "submenu",
+		label: "Image provider",
+		description: "Provider for image generation tool",
+		get: (sm) => sm.getImageProvider(),
+		set: (sm, v) => sm.setImageProvider(v as ImageProviderOption),
+		getOptions: () => [
+			{ value: "auto", label: "Auto", description: "Priority: OpenRouter > Gemini" },
+			{ value: "gemini", label: "Gemini", description: "Use Gemini API directly (requires GEMINI_API_KEY)" },
+			{ value: "openrouter", label: "OpenRouter", description: "Use OpenRouter (requires OPENROUTER_API_KEY)" },
 		],
 	},
 

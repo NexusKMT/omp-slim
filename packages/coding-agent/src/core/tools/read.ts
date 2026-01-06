@@ -11,7 +11,14 @@ import { ensureTool } from "../../utils/tools-manager";
 import { untilAborted } from "../utils";
 import { createLsTool } from "./ls";
 import { resolveReadPath, resolveToCwd } from "./path-utils";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult, truncateHead } from "./truncate";
+import {
+	DEFAULT_MAX_BYTES,
+	DEFAULT_MAX_LINES,
+	formatSize,
+	type TruncationResult,
+	truncateHead,
+	truncateStringToBytesFromStart,
+} from "./truncate";
 
 // Document types convertible via markitdown
 const CONVERTIBLE_EXTENSIONS = new Set([".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".rtf", ".epub"]);
@@ -450,9 +457,9 @@ export function createReadTool(cwd: string, options?: ReadToolOptions): AgentToo
 						let outputText = truncation.content;
 
 						if (truncation.truncated) {
-							outputText += `\n\n[Document converted via markitdown. Output truncated to $formatSize(
+							outputText += `\n\n[Document converted via markitdown. Output truncated to ${formatSize(
 								DEFAULT_MAX_BYTES,
-							)]`;
+							)}]`;
 							details = { truncation };
 						}
 
@@ -498,11 +505,21 @@ export function createReadTool(cwd: string, options?: ReadToolOptions): AgentToo
 					let outputText: string;
 
 					if (truncation.firstLineExceedsLimit) {
-						// First line at offset exceeds 30KB - tell model to use bash
-						const firstLineSize = formatSize(Buffer.byteLength(allLines[startLine], "utf-8"));
-						outputText = `[Line ${startLineDisplay} is ${firstLineSize}, exceeds ${formatSize(
-							DEFAULT_MAX_BYTES,
-						)} limit. Use bash: sed -n '${startLineDisplay}p' ${readPath} | head -c ${DEFAULT_MAX_BYTES}]`;
+						const firstLine = allLines[startLine] ?? "";
+						const firstLineBytes = Buffer.byteLength(firstLine, "utf-8");
+						const snippet = truncateStringToBytesFromStart(firstLine, DEFAULT_MAX_BYTES);
+						const shownSize = formatSize(snippet.bytes);
+
+						outputText = snippet.text;
+						if (outputText.length > 0) {
+							outputText += `\n\n[Line ${startLineDisplay} is ${formatSize(
+								firstLineBytes,
+							)}, exceeds ${formatSize(DEFAULT_MAX_BYTES)} limit. Showing first ${shownSize} of the line.]`;
+						} else {
+							outputText = `[Line ${startLineDisplay} is ${formatSize(
+								firstLineBytes,
+							)}, exceeds ${formatSize(DEFAULT_MAX_BYTES)} limit. Unable to display a valid UTF-8 snippet.]`;
+						}
 						details = { truncation };
 					} else if (truncation.truncated) {
 						// Truncation occurred - build actionable notice

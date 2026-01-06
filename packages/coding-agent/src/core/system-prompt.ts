@@ -69,11 +69,12 @@ ${commitsText}`;
 const toolDescriptions: Record<ToolName, string> = {
 	ask: "Ask user for input or clarification",
 	read: "Read file contents",
-	bash: "Execute bash commands (git, npm, docker, etc.)",
+	bash: "Execute bash commands (npm, docker, etc.)",
 	edit: "Make surgical edits to files (find exact text and replace)",
 	write: "Create or overwrite files",
 	grep: "Search file contents for patterns (respects .gitignore)",
 	find: "Find files by glob pattern (respects .gitignore)",
+	git: "Structured Git operations with safety guards (status, diff, log, commit, push, pr, etc.)",
 	ls: "List directory contents",
 	lsp: "PREFERRED for semantic code queries: go-to-definition, find-all-references, hover (type info), call hierarchy. Returns precise, deterministic results. Use BEFORE grep for symbol lookups.",
 	notebook: "Edit Jupyter notebook cells",
@@ -99,9 +100,10 @@ function generateAntiBashRules(tools: ToolName[]): string | null {
 	const hasLs = tools.includes("ls");
 	const hasEdit = tools.includes("edit");
 	const hasLsp = tools.includes("lsp");
+	const hasGit = tools.includes("git");
 
 	// Only show rules if we have specialized tools that should be preferred
-	const hasSpecializedTools = hasRead || hasGrep || hasFind || hasLs || hasEdit;
+	const hasSpecializedTools = hasRead || hasGrep || hasFind || hasLs || hasEdit || hasGit;
 	if (!hasSpecializedTools) return null;
 
 	const lines: string[] = [];
@@ -114,6 +116,7 @@ function generateAntiBashRules(tools: ToolName[]): string | null {
 	if (hasFind) lines.push("- **File finding**: Use `find` instead of find/fd/locate");
 	if (hasLs) lines.push("- **Directory listing**: Use `ls` instead of bash ls");
 	if (hasEdit) lines.push("- **File editing**: Use `edit` instead of sed/awk/perl -pi/echo >/cat <<EOF");
+	if (hasGit) lines.push("- **Git operations**: Use `git` tool instead of bash git commands");
 
 	lines.push("\n### Tool Preference (highest → lowest priority)");
 	const ladder: string[] = [];
@@ -122,7 +125,8 @@ function generateAntiBashRules(tools: ToolName[]): string | null {
 	if (hasFind) ladder.push("find (locate files by pattern)");
 	if (hasRead) ladder.push("read (view file contents)");
 	if (hasEdit) ladder.push("edit (precise text replacement)");
-	ladder.push("bash (ONLY for git, npm, docker, make, cargo, etc.)");
+	if (hasGit) ladder.push("git (structured git operations with safety guards)");
+	ladder.push(`bash (ONLY for ${hasGit ? "" : "git, "}npm, docker, make, cargo, etc.)`);
 	lines.push(ladder.map((t, i) => `${i + 1}. ${t}`).join("\n"));
 
 	// Add LSP guidance if available
@@ -135,6 +139,18 @@ function generateAntiBashRules(tools: ToolName[]): string | null {
 		lines.push("- **What type is X?** → `lsp hover`");
 		lines.push("- **What symbols are in this file?** → `lsp symbols`");
 		lines.push("- **Find symbol across codebase** → `lsp workspace_symbols`\n");
+	}
+
+	// Add Git guidance if available
+	if (hasGit) {
+		lines.push("\n### Git Tool — Preferred for Git Operations");
+		lines.push("Use `git` instead of bash git when you need:");
+		lines.push("- **Status/diff/log**: `git { operation: 'status' }`, `git { operation: 'diff' }`, `git { operation: 'log' }`");
+		lines.push("- **Commit workflow**: `git { operation: 'add', paths: [...] }` then `git { operation: 'commit', message: '...' }`");
+		lines.push("- **Branching**: `git { operation: 'branch', action: 'create', name: '...' }`");
+		lines.push("- **GitHub PRs**: `git { operation: 'pr', action: 'create', title: '...', body: '...' }`");
+		lines.push("- **GitHub Issues**: `git { operation: 'issue', action: 'list' }` or `{ operation: 'issue', number: 123 }`");
+		lines.push("The git tool provides typed output, safety guards, and a clean API for all git and GitHub operations.\n");
 	}
 
 	// Add search-first protocol

@@ -13,6 +13,7 @@ import type {
 	WebSearchResponse,
 	WebSearchSource,
 } from "../types";
+import { WebSearchProviderError } from "../types";
 
 const PERPLEXITY_API_URL = "https://api.perplexity.ai/chat/completions";
 
@@ -92,7 +93,11 @@ async function callPerplexity(apiKey: string, request: PerplexityRequest): Promi
 
 	if (!response.ok) {
 		const errorText = await response.text();
-		throw new Error(`Perplexity API error (${response.status}): ${errorText}`);
+		throw new WebSearchProviderError(
+			"perplexity",
+			`Perplexity API error (${response.status}): ${errorText}`,
+			response.status,
+		);
 	}
 
 	return response.json() as Promise<PerplexityResponse>;

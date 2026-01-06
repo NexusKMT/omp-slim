@@ -175,6 +175,12 @@ async function buildDescription(cwd: string): Promise<string> {
 	lines.push("");
 	lines.push("Usage notes:");
 	lines.push("- Always include a short description of the task in the task parameter");
+	lines.push(
+		"- Prefer plan-then-execute: put shared constraints in context, keep each task focused, and specify output format and acceptance criteria",
+	);
+	lines.push(
+		"- Minimize tool chatter: avoid repeating large context and use the Output tool with output ids for full logs",
+	);
 	lines.push("- Launch multiple agents concurrently whenever possible, to maximize performance");
 	lines.push(
 		"- When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.",
@@ -512,7 +518,12 @@ export async function createTaskTool(
 					skippedSelfRecursion > 0
 						? ` (${skippedSelfRecursion} ${blockedAgent} task${skippedSelfRecursion > 1 ? "s" : ""} skipped - self-recursion blocked)`
 						: "";
-				const summary = `${successCount}/${resultsWithUsage.length} succeeded${skippedNote} [${formatDuration(totalDuration)}]\n\n${summaries.join("\n\n---\n\n")}`;
+				const outputIds = resultsWithUsage.map((r) => `${r.agent}_${r.index}`);
+				const outputHint =
+					hasOutputTool && outputIds.length > 0
+						? `\n\nUse output tool for full logs: output ids ${outputIds.join(", ")}`
+						: "";
+				const summary = `${successCount}/${resultsWithUsage.length} succeeded${skippedNote} [${formatDuration(totalDuration)}]\n\n${summaries.join("\n\n---\n\n")}${outputHint}`;
 
 				// Cleanup temp directory if used
 				if (tempArtifactsDir) {

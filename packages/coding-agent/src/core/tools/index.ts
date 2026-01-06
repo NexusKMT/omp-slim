@@ -5,6 +5,7 @@ export { createEditTool, type EditToolOptions, editTool } from "./edit";
 export { exaTools } from "./exa/index";
 export type { ExaRenderDetails, ExaSearchResponse, ExaSearchResult } from "./exa/types";
 export { createFindTool, type FindToolDetails, findTool } from "./find";
+export { setPreferredImageProvider } from "./gemini-image";
 export { createGitTool, type GitToolDetails, gitTool } from "./git";
 export { createGrepTool, type GrepToolDetails, grepTool } from "./grep";
 export { createLsTool, type LsToolDetails, lsTool } from "./ls";
@@ -39,6 +40,7 @@ export {
 	getWebSearchTools,
 	hasExaWebSearch,
 	linkedinWebSearchTools,
+	setPreferredWebSearchProvider,
 	type WebSearchProvider,
 	type WebSearchResponse,
 	type WebSearchToolsOptions,

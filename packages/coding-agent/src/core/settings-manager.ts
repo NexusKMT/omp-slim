@@ -62,8 +62,20 @@ export interface ExaSettings {
 	enableWebsets?: boolean; // default: false
 }
 
+export type WebSearchProviderOption = "auto" | "exa" | "perplexity" | "anthropic";
+export type ImageProviderOption = "auto" | "gemini" | "openrouter";
+
+export interface ProviderSettings {
+	webSearch?: WebSearchProviderOption; // default: "auto" (exa > perplexity > anthropic)
+	image?: ImageProviderOption; // default: "auto" (openrouter > gemini)
+}
+
 export interface BashInterceptorSettings {
 	enabled?: boolean; // default: false (blocks shell commands that have dedicated tools)
+}
+
+export interface GitSettings {
+	enabled?: boolean; // default: false (structured git tool; use bash for git commands when disabled)
 }
 
 export interface MCPSettings {
@@ -167,11 +179,13 @@ export interface Settings {
 	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
 	exa?: ExaSettings;
 	bashInterceptor?: BashInterceptorSettings;
+	git?: GitSettings;
 	mcp?: MCPSettings;
 	lsp?: LspSettings;
 	edit?: EditSettings;
 	ttsr?: TtsrSettings;
 	voice?: VoiceSettings;
+	providers?: ProviderSettings;
 	disabledProviders?: string[]; // Discovery provider IDs that are disabled
 	disabledExtensions?: string[]; // Individual extension IDs that are disabled (e.g., "skill:commit")
 	statusLine?: StatusLineSettings; // Status line configuration
@@ -640,6 +654,31 @@ export class SettingsManager {
 		this.save();
 	}
 
+	// Provider settings
+	getWebSearchProvider(): WebSearchProviderOption {
+		return this.settings.providers?.webSearch ?? "auto";
+	}
+
+	setWebSearchProvider(provider: WebSearchProviderOption): void {
+		if (!this.globalSettings.providers) {
+			this.globalSettings.providers = {};
+		}
+		this.globalSettings.providers.webSearch = provider;
+		this.save();
+	}
+
+	getImageProvider(): ImageProviderOption {
+		return this.settings.providers?.image ?? "auto";
+	}
+
+	setImageProvider(provider: ImageProviderOption): void {
+		if (!this.globalSettings.providers) {
+			this.globalSettings.providers = {};
+		}
+		this.globalSettings.providers.image = provider;
+		this.save();
+	}
+
 	getBashInterceptorEnabled(): boolean {
 		return this.settings.bashInterceptor?.enabled ?? false;
 	}
@@ -649,6 +688,18 @@ export class SettingsManager {
 			this.globalSettings.bashInterceptor = {};
 		}
 		this.globalSettings.bashInterceptor.enabled = enabled;
+		this.save();
+	}
+
+	getGitToolEnabled(): boolean {
+		return this.settings.git?.enabled ?? false;
+	}
+
+	setGitToolEnabled(enabled: boolean): void {
+		if (!this.globalSettings.git) {
+			this.globalSettings.git = {};
+		}
+		this.globalSettings.git.enabled = enabled;
 		this.save();
 	}
 

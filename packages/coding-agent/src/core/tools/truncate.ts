@@ -5,7 +5,8 @@
  * - Line limit (default: 2000 lines)
  * - Byte limit (default: 50KB)
  *
- * Never returns partial lines (except bash tail truncation edge case).
+ * Never returns partial lines (except bash tail truncation edge case
+ * and the read tool's long-line snippet fallback).
  */
 
 export const DEFAULT_MAX_LINES = 2000;
@@ -248,6 +249,31 @@ function truncateStringToBytesFromEnd(str: string, maxBytes: number): string {
 	}
 
 	return buf.slice(start).toString("utf-8");
+}
+
+/**
+ * Truncate a string to fit within a byte limit (from the start).
+ * Handles multi-byte UTF-8 characters correctly.
+ */
+export function truncateStringToBytesFromStart(str: string, maxBytes: number): { text: string; bytes: number } {
+	const buf = Buffer.from(str, "utf-8");
+	if (buf.length <= maxBytes) {
+		return { text: str, bytes: buf.length };
+	}
+
+	let end = maxBytes;
+
+	// Find a valid UTF-8 boundary (start of a character)
+	while (end > 0 && (buf[end] & 0xc0) === 0x80) {
+		end--;
+	}
+
+	if (end <= 0) {
+		return { text: "", bytes: 0 };
+	}
+
+	const text = buf.slice(0, end).toString("utf-8");
+	return { text, bytes: Buffer.byteLength(text, "utf-8") };
 }
 
 /**

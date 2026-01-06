@@ -199,6 +199,10 @@ export function createGitTool(cwd: string): AgentTool<typeof gitSchema, GitToolD
 		description: gitDescription,
 		parameters: gitSchema,
 		execute: async (_toolCallId, params: Static<typeof gitSchema>, _signal?: AbortSignal) => {
+			if (params.operation === "commit" && !params.message) {
+				throw new Error("Git commit requires a message to avoid an interactive editor. Provide `message`.");
+			}
+
 			const result = await gitToolCore(params as GitParams, cwd);
 			if ("error" in result) {
 				const message = result._rendered ?? result.error;

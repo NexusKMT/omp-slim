@@ -3,6 +3,15 @@
 ## [Unreleased]
 ### Added
 
+- Added `webSearchProvider` setting to override auto-detection priority (Exa > Perplexity > Anthropic)
+- Added `imageProvider` setting to override auto-detection priority (OpenRouter > Gemini)
+- Added `git.enabled` setting to enable/disable the structured git tool
+- Added `offset` and `limit` parameters to Output tool for paginated reading of large outputs
+- Added provider fallback chain for web search that tries all configured providers before failing
+- Added `WebSearchProviderError` class with HTTP status for actionable provider error messages
+- Added bash interceptor rule to block git commands when structured git tool is enabled
+- Added validation requiring `message` parameter for git commit operations (prevents interactive editor)
+- Added output ID hints in multi-agent Task results pointing to Output tool for full logs
 - Added fuzzy matching support for `all: true` mode in edit tool, enabling replacement of similar text blocks with whitespace differences
 - Added `all` parameter to edit tool for replacing all occurrences instead of requiring unique matches
 - Added OpenRouter support for image generation when `OPENROUTER_API_KEY` is set
@@ -10,10 +19,17 @@
 - Added slash commands to the extensions inspector panel for visibility and management
 - Added support for file-based slash commands from `commands/` directories
 - Added `$ARGUMENTS` placeholder for slash command argument substitution, aligning with Claude and Codex conventions
-- Added OpenRouter image generation support for `generate_image` when `OPENROUTER_API_KEY` is set
 
 ### Changed
 
+- Changed web search to try all configured providers in sequence with fallback before reporting errors
+- Changed default Anthropic web search model from `claude-sonnet-4-5-20250514` to `claude-haiku-4-5`
+- Changed read tool to show first 50KB of oversized lines instead of directing users to bash sed
+- Changed web_fetch to use `Bun.which()` instead of spawning `which`/`where` for command detection
+- Changed web_fetch to check Content-Length header before downloading to reject oversized files early
+- Changed generate_image tool to save images to temp files and report paths instead of inline base64
+- Changed system prompt with tool usage guidance (ground answers with tools, minimize context, iterate on results)
+- Changed Task tool prompt with plan-then-execute guidance and output tool hints
 - Changed edit tool success message to report count when replacing multiple occurrences with `all: true`
 - Changed default image generation model to `gemini-3-pro-image-preview`
 - Changed error message for multiple occurrences to suggest using `all: true` option
@@ -23,6 +39,9 @@
 
 ### Fixed
 
+- Fixed read tool markitdown truncation message using broken template string (missing `${` around format call)
+- Fixed web_fetch URL normalization order to run before special handlers
+- Fixed TUI image display for generate_image tool by sourcing images from details.images in addition to content blocks
 - Fixed context file preview in inspector panel to display content correctly instead of attempting async file reads
 - Fixed Linux ARM64 installs failing on fresh Debian when the `sharp` module is unavailable during session image compression
 

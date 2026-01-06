@@ -8,6 +8,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import type { WebSearchResponse, WebSearchSource } from "../types";
+import { WebSearchProviderError } from "../types";
 
 const EXA_API_URL = "https://api.exa.ai/search";
 
@@ -142,7 +143,7 @@ async function callExaSearch(apiKey: string, params: ExaSearchParams): Promise<E
 
 	if (!response.ok) {
 		const errorText = await response.text();
-		throw new Error(`Exa API error (${response.status}): ${errorText}`);
+		throw new WebSearchProviderError("exa", `Exa API error (${response.status}): ${errorText}`, response.status);
 	}
 
 	return response.json() as Promise<ExaSearchResponse>;

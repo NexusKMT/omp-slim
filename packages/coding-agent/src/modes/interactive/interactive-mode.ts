@@ -31,6 +31,7 @@ import { getRecentSessions, type SessionContext, SessionManager } from "../../co
 import { loadSlashCommands } from "../../core/slash-commands";
 import { detectNotificationProtocol, isNotificationSuppressed, sendNotification } from "../../core/terminal-notify";
 import { generateSessionTitle, setTerminalTitle } from "../../core/title-generator";
+import { setPreferredImageProvider, setPreferredWebSearchProvider } from "../../core/tools/index";
 import type { TruncationResult } from "../../core/tools/truncate";
 import { VoiceSupervisor } from "../../core/voice-supervisor";
 import { disableProvider, enableProvider } from "../../discovery";
@@ -2361,6 +2362,14 @@ export class InteractiveMode {
 				this.ui.requestRender();
 				break;
 			}
+
+			// Provider settings - update runtime preferences
+			case "webSearchProvider":
+				setPreferredWebSearchProvider(value as "auto" | "exa" | "perplexity" | "anthropic");
+				break;
+			case "imageProvider":
+				setPreferredImageProvider(value as "auto" | "gemini" | "openrouter");
+				break;
 
 			// All other settings are handled by the definitions (get/set on SettingsManager)
 			// No additional side effects needed
