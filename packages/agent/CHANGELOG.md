@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [3.21.0] - 2026-01-06
+
 ### Changed
 
 - Switched from local `@oh-my-pi/pi-ai` to upstream `@mariozechner/pi-ai` package
