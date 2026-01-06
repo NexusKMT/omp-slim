@@ -16,8 +16,8 @@ import { basename, join, resolve } from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, Message, TextContent, Usage } from "@oh-my-pi/pi-ai";
 import { nanoid } from "nanoid";
-import sharp from "sharp";
 import { getAgentDir as getDefaultAgentDir } from "../config";
+import { resizeImage } from "../utils/image-resize";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
@@ -644,28 +644,17 @@ function isImageBlock(value: unknown): value is { type: "image"; data: string; m
 
 async function compressImageForPersistence(image: ImageContent): Promise<ImageContent> {
 	try {
-		const buffer = Buffer.from(image.data, "base64");
-		const pipeline = sharp(buffer, { failOnError: false });
-		const metadata = await pipeline.metadata();
-		const width = metadata.width ?? 0;
-		const height = metadata.height ?? 0;
-		const hasDims = width > 0 && height > 0;
-		const targetWidth = hasDims && width >= height ? 512 : undefined;
-		const targetHeight = hasDims && height > width ? 512 : undefined;
-		const resized = await pipeline
-			.resize({
-				width: hasDims ? targetWidth : 512,
-				height: hasDims ? targetHeight : 512,
-				fit: "inside",
-				withoutEnlargement: true,
-			})
-			.jpeg({ quality: 70 })
-			.toBuffer();
-		const base64 = resized.toString("base64");
-		if (base64.length > MAX_PERSIST_CHARS) {
+		const maxBytes = Math.floor((MAX_PERSIST_CHARS * 3) / 4);
+		const resized = await resizeImage(image, {
+			maxWidth: 512,
+			maxHeight: 512,
+			maxBytes,
+			jpegQuality: 70,
+		});
+		if (resized.data.length > MAX_PERSIST_CHARS) {
 			return { type: "image", data: PLACEHOLDER_IMAGE_DATA, mimeType: "image/jpeg" };
 		}
-		return { type: "image", data: base64, mimeType: "image/jpeg" };
+		return { type: "image", data: resized.data, mimeType: resized.mimeType };
 	} catch {
 		return { type: "image", data: PLACEHOLDER_IMAGE_DATA, mimeType: "image/jpeg" };
 	}

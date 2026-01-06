@@ -10,6 +10,10 @@
 
 - Changed argument substitution order in slash commands to process positional args ($1, $2) before wildcards ($@, $ARGUMENTS) to prevent re-substitution issues
 
+### Fixed
+
+- Fixed Linux ARM64 installs failing on fresh Debian when the `sharp` module is unavailable during session image compression
+
 ## [3.20.1] - 2026-01-06
 ### Fixed
 
