@@ -255,6 +255,99 @@ describe("Coding Agent Tools", () => {
 				}),
 			).rejects.toThrow(/Found 3 occurrences/);
 		});
+
+		it("should replace all occurrences with all: true", async () => {
+			const testFile = join(testDir, "edit-all-test.txt");
+			writeFileSync(testFile, "foo bar foo baz foo");
+
+			const result = await editTool.execute("test-all-1", {
+				path: testFile,
+				oldText: "foo",
+				newText: "qux",
+				all: true,
+			});
+
+			expect(getTextOutput(result)).toContain("Successfully replaced 3 occurrences");
+			const content = readFileSync(testFile, "utf-8");
+			expect(content).toBe("qux bar qux baz qux");
+		});
+
+		it("should replace all with fuzzy matching for multiline whitespace differences", async () => {
+			const testFile = join(testDir, "edit-all-fuzzy.txt");
+			// File has two similar blocks with different indentation
+			writeFileSync(
+				testFile,
+				`function a() {
+  if (x) {
+    doThing();
+  }
+}
+function b() {
+    if (x) {
+        doThing();
+    }
+}
+`,
+			);
+
+			const result = await editTool.execute("test-all-fuzzy", {
+				path: testFile,
+				oldText: "if (x) {\n  doThing();\n}",
+				newText: "if (y) {\n  doOther();\n}",
+				all: true,
+			});
+
+			expect(getTextOutput(result)).toContain("Successfully replaced 2 occurrences");
+			const content = readFileSync(testFile, "utf-8");
+			expect(content).toContain("doOther");
+			expect(content).not.toContain("doThing");
+		});
+
+		it("should fail with all: true if no matches found", async () => {
+			const testFile = join(testDir, "edit-all-nomatch.txt");
+			writeFileSync(testFile, "hello world");
+
+			await expect(
+				editTool.execute("test-all-nomatch", {
+					path: testFile,
+					oldText: "nonexistent",
+					newText: "bar",
+					all: true,
+				}),
+			).rejects.toThrow(/Could not find/);
+		});
+
+		it("should replace multiline text with all: true", async () => {
+			const testFile = join(testDir, "edit-all-multiline.txt");
+			writeFileSync(testFile, "start\nfoo\nbar\nend\nstart\nfoo\nbar\nend");
+
+			const result = await editTool.execute("test-all-multiline", {
+				path: testFile,
+				oldText: "foo\nbar",
+				newText: "replaced",
+				all: true,
+			});
+
+			expect(getTextOutput(result)).toContain("Successfully replaced 2 occurrences");
+			const content = readFileSync(testFile, "utf-8");
+			expect(content).toBe("start\nreplaced\nend\nstart\nreplaced\nend");
+		});
+
+		it("should work with all: true when only one occurrence exists", async () => {
+			const testFile = join(testDir, "edit-all-single.txt");
+			writeFileSync(testFile, "hello world");
+
+			const result = await editTool.execute("test-all-single", {
+				path: testFile,
+				oldText: "world",
+				newText: "universe",
+				all: true,
+			});
+
+			expect(getTextOutput(result)).toContain("Successfully replaced text");
+			const content = readFileSync(testFile, "utf-8");
+			expect(content).toBe("hello universe");
+		});
 	});
 
 	describe("bash tool", () => {

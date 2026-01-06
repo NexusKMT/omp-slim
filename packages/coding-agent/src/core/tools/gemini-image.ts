@@ -7,9 +7,16 @@ import { untilAborted } from "../utils";
 import { resolveReadPath } from "./path-utils";
 import { getEnv } from "./web-search/auth";
 
-const DEFAULT_MODEL = "gemini-2.5-flash-image";
+const DEFAULT_MODEL = "gemini-3-pro-image-preview";
+const DEFAULT_OPENROUTER_MODEL = "google/gemini-3-pro-image-preview";
 const DEFAULT_TIMEOUT_SECONDS = 120;
 const MAX_IMAGE_SIZE = 20 * 1024 * 1024;
+
+type ImageProvider = "gemini" | "openrouter";
+interface ImageApiKey {
+	provider: ImageProvider;
+	apiKey: string;
+}
 
 const responseModalitySchema = Type.Union([Type.Literal("Image"), Type.Literal("Text")]);
 const aspectRatioSchema = Type.Union(
@@ -34,7 +41,7 @@ export const geminiImageSchema = Type.Object(
 		prompt: Type.String({ description: "Text prompt for image generation or editing." }),
 		model: Type.Optional(
 			Type.String({
-				description: `Gemini image model. Default: ${DEFAULT_MODEL} (Nano Banana).`,
+				description: `Image model. Default: ${DEFAULT_MODEL} (direct Gemini) or ${DEFAULT_OPENROUTER_MODEL} (OpenRouter).`,
 			}),
 		),
 		response_modalities: Type.Optional(
@@ -100,7 +107,31 @@ interface GeminiGenerateContentResponse {
 	usageMetadata?: GeminiUsageMetadata;
 }
 
+interface OpenRouterImageUrl {
+	url: string;
+}
+
+interface OpenRouterContentPart {
+	type: "text" | "image_url";
+	text?: string;
+	image_url?: OpenRouterImageUrl;
+}
+
+interface OpenRouterMessage {
+	content?: string | OpenRouterContentPart[];
+	images?: Array<string | { image_url?: OpenRouterImageUrl }>;
+}
+
+interface OpenRouterChoice {
+	message?: OpenRouterMessage;
+}
+
+interface OpenRouterResponse {
+	choices?: OpenRouterChoice[];
+}
+
 interface GeminiImageToolDetails {
+	provider: ImageProvider;
 	model: string;
 	imageCount: number;
 	responseText?: string;
@@ -125,12 +156,87 @@ function normalizeDataUrl(data: string): { data: string; mimeType?: string } {
 	return { data: match[2] ?? "", mimeType: match[1] };
 }
 
-async function findGeminiApiKey(): Promise<string | null> {
+function resolveOpenRouterModel(model: string): string {
+	return model.includes("/") ? model : `google/${model}`;
+}
+
+function toDataUrl(image: InlineImageData): string {
+	return `data:${image.mimeType};base64,${image.data}`;
+}
+
+async function loadImageFromUrl(imageUrl: string): Promise<InlineImageData> {
+	if (imageUrl.startsWith("data:")) {
+		const normalized = normalizeDataUrl(imageUrl.trim());
+		if (!normalized.mimeType) {
+			throw new Error("mime_type is required when providing raw base64 data.");
+		}
+		if (!normalized.data) {
+			throw new Error("Image data is empty.");
+		}
+		return { data: normalized.data, mimeType: normalized.mimeType };
+	}
+
+	const response = await fetch(imageUrl);
+	if (!response.ok) {
+		const rawText = await response.text();
+		throw new Error(`Image download failed (${response.status}): ${rawText}`);
+	}
+	const contentType = response.headers.get("content-type")?.split(";")[0];
+	if (!contentType || !contentType.startsWith("image/")) {
+		throw new Error(`Unsupported image type from URL: ${imageUrl}`);
+	}
+	const buffer = Buffer.from(await response.arrayBuffer());
+	return { data: buffer.toString("base64"), mimeType: contentType };
+}
+
+function collectOpenRouterResponseText(message: OpenRouterMessage | undefined): string | undefined {
+	if (!message) return undefined;
+	if (typeof message.content === "string") {
+		const trimmed = message.content.trim();
+		return trimmed.length > 0 ? trimmed : undefined;
+	}
+	if (Array.isArray(message.content)) {
+		const texts = message.content
+			.filter((part) => part.type === "text")
+			.map((part) => part.text)
+			.filter((text): text is string => Boolean(text));
+		const combined = texts.join("\n").trim();
+		return combined.length > 0 ? combined : undefined;
+	}
+	return undefined;
+}
+
+function extractOpenRouterImageUrls(message: OpenRouterMessage | undefined): string[] {
+	const urls: string[] = [];
+	if (!message) return urls;
+	for (const image of message.images ?? []) {
+		if (typeof image === "string") {
+			urls.push(image);
+			continue;
+		}
+		if (image.image_url?.url) {
+			urls.push(image.image_url.url);
+		}
+	}
+	if (Array.isArray(message.content)) {
+		for (const part of message.content) {
+			if (part.type === "image_url" && part.image_url?.url) {
+				urls.push(part.image_url.url);
+			}
+		}
+	}
+	return urls;
+}
+
+async function findImageApiKey(): Promise<ImageApiKey | null> {
+	const openRouterKey = await getEnv("OPENROUTER_API_KEY");
+	if (openRouterKey) return { provider: "openrouter", apiKey: openRouterKey };
+
 	const geminiKey = await getEnv("GEMINI_API_KEY");
-	if (geminiKey) return geminiKey;
+	if (geminiKey) return { provider: "gemini", apiKey: geminiKey };
 
 	const googleKey = await getEnv("GOOGLE_API_KEY");
-	if (googleKey) return googleKey;
+	if (googleKey) return { provider: "gemini", apiKey: googleKey };
 
 	return null;
 }
@@ -232,60 +338,142 @@ function createAbortController(
 }
 
 export const geminiImageTool: CustomTool<typeof geminiImageSchema, GeminiImageToolDetails> = {
-	name: "gemini_image",
-	label: "Gemini Image",
+	name: "generate_image",
+	label: "GenerateImage",
 	description: geminiImageDescription,
 	parameters: geminiImageSchema,
 	async execute(_toolCallId, params, _onUpdate, ctx, signal) {
 		return untilAborted(signal, async () => {
-			const apiKey = await findGeminiApiKey();
+			const apiKey = await findImageApiKey();
 			if (!apiKey) {
-				throw new Error("GEMINI_API_KEY not found.");
+				throw new Error("OPENROUTER_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY not found.");
 			}
 
-			const model = params.model ?? DEFAULT_MODEL;
+			const provider = apiKey.provider;
+			const model = params.model ?? (provider === "openrouter" ? DEFAULT_OPENROUTER_MODEL : DEFAULT_MODEL);
+			const resolvedModel = provider === "openrouter" ? resolveOpenRouterModel(model) : model;
 			const responseModalities = params.response_modalities ?? ["Image"];
 			const cwd = ctx.sessionManager.getCwd();
 
-			const parts = [] as Array<{ text?: string; inlineData?: InlineImageData }>;
+			const resolvedImages: InlineImageData[] = [];
 			if (params.input_images?.length) {
 				for (const input of params.input_images) {
-					const image = await resolveInputImage(input, cwd);
-					parts.push({ inlineData: image });
+					resolvedImages.push(await resolveInputImage(input, cwd));
 				}
 			}
-			parts.push({ text: params.prompt });
-
-			const generationConfig: {
-				responseModalities: GeminiResponseModality[];
-				imageConfig?: { aspectRatio?: string; imageSize?: string };
-			} = {
-				responseModalities,
-			};
-
-			if (params.aspect_ratio || params.image_size) {
-				generationConfig.imageConfig = {
-					aspectRatio: params.aspect_ratio,
-					imageSize: params.image_size,
-				};
-			}
-
-			const requestBody = {
-				contents: [{ role: "user" as const, parts }],
-				generationConfig,
-			};
 
 			const timeoutSeconds = params.timeout_seconds ?? DEFAULT_TIMEOUT_SECONDS;
 			const { controller, cleanup } = createAbortController(signal, timeoutSeconds);
 
 			try {
+				if (provider === "openrouter") {
+					const contentParts: OpenRouterContentPart[] = [{ type: "text", text: params.prompt }];
+					for (const image of resolvedImages) {
+						contentParts.push({ type: "image_url", image_url: { url: toDataUrl(image) } });
+					}
+
+					const requestBody = {
+						model: resolvedModel,
+						messages: [{ role: "user" as const, content: contentParts }],
+					};
+
+					const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+						method: "POST",
+						headers: {
+							"Content-Type": "application/json",
+							Authorization: `Bearer ${apiKey.apiKey}`,
+						},
+						body: JSON.stringify(requestBody),
+						signal: controller.signal,
+					});
+
+					const rawText = await response.text();
+					if (!response.ok) {
+						let message = rawText;
+						try {
+							const parsed = JSON.parse(rawText) as { error?: { message?: string } };
+							message = parsed.error?.message ?? message;
+						} catch {
+							// Keep raw text.
+						}
+						throw new Error(`OpenRouter image request failed (${response.status}): ${message}`);
+					}
+
+					const data = JSON.parse(rawText) as OpenRouterResponse;
+					const message = data.choices?.[0]?.message;
+					const responseText = collectOpenRouterResponseText(message);
+					const imageUrls = extractOpenRouterImageUrls(message);
+					const inlineImages: InlineImageData[] = [];
+					for (const imageUrl of imageUrls) {
+						inlineImages.push(await loadImageFromUrl(imageUrl));
+					}
+
+					const content: Array<TextContent | ImageContent> = [];
+					if (inlineImages.length === 0) {
+						const messageText = responseText ? `\n\n${responseText}` : "";
+						content.push({ type: "text", text: `No image data returned.${messageText}` });
+						return {
+							content,
+							details: {
+								provider,
+								model: resolvedModel,
+								imageCount: 0,
+								responseText,
+							},
+						};
+					}
+
+					content.push({
+						type: "text",
+						text: buildResponseSummary(resolvedModel, inlineImages.length, responseText),
+					});
+					for (const image of inlineImages) {
+						content.push({ type: "image", data: image.data, mimeType: image.mimeType });
+					}
+
+					return {
+						content,
+						details: {
+							provider,
+							model: resolvedModel,
+							imageCount: inlineImages.length,
+							responseText,
+						},
+					};
+				}
+
+				const parts = [] as Array<{ text?: string; inlineData?: InlineImageData }>;
+				for (const image of resolvedImages) {
+					parts.push({ inlineData: image });
+				}
+				parts.push({ text: params.prompt });
+
+				const generationConfig: {
+					responseModalities: GeminiResponseModality[];
+					imageConfig?: { aspectRatio?: string; imageSize?: string };
+				} = {
+					responseModalities,
+				};
+
+				if (params.aspect_ratio || params.image_size) {
+					generationConfig.imageConfig = {
+						aspectRatio: params.aspect_ratio,
+						imageSize: params.image_size,
+					};
+				}
+
+				const requestBody = {
+					contents: [{ role: "user" as const, parts }],
+					generationConfig,
+				};
+
 				const response = await fetch(
 					`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
 					{
 						method: "POST",
 						headers: {
 							"Content-Type": "application/json",
-							"x-goog-api-key": apiKey,
+							"x-goog-api-key": apiKey.apiKey,
 						},
 						body: JSON.stringify(requestBody),
 						signal: controller.signal,
@@ -318,6 +506,7 @@ export const geminiImageTool: CustomTool<typeof geminiImageSchema, GeminiImageTo
 					return {
 						content,
 						details: {
+							provider,
 							model,
 							imageCount: 0,
 							responseText,
@@ -338,6 +527,7 @@ export const geminiImageTool: CustomTool<typeof geminiImageSchema, GeminiImageTo
 				return {
 					content,
 					details: {
+						provider,
 						model,
 						imageCount: inlineImages.length,
 						responseText,
@@ -355,7 +545,7 @@ export const geminiImageTool: CustomTool<typeof geminiImageSchema, GeminiImageTo
 export async function getGeminiImageTools(): Promise<
 	Array<CustomTool<typeof geminiImageSchema, GeminiImageToolDetails>>
 > {
-	const apiKey = await findGeminiApiKey();
+	const apiKey = await findImageApiKey();
 	if (!apiKey) return [];
 	return [geminiImageTool];
 }

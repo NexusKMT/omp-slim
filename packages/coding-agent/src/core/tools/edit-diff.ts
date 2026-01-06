@@ -422,6 +422,7 @@ export async function computeEditDiff(
 	newText: string,
 	cwd: string,
 	fuzzy = true,
+	all = false,
 ): Promise<EditDiffResult | EditDiffError> {
 	const absolutePath = resolveToCwd(path, cwd);
 
@@ -443,34 +444,82 @@ export async function computeEditDiff(
 		const normalizedOldText = normalizeToLF(oldText);
 		const normalizedNewText = normalizeToLF(newText);
 
-		const matchOutcome = findEditMatch(normalizedContent, normalizedOldText, {
-			allowFuzzy: fuzzy,
-			similarityThreshold: DEFAULT_FUZZY_THRESHOLD,
-		});
+		let normalizedNewContent: string;
 
-		if (matchOutcome.occurrences && matchOutcome.occurrences > 1) {
-			return {
-				error: `Found ${matchOutcome.occurrences} occurrences of the text in ${path}. The text must be unique. Please provide more context to make it unique.`,
-			};
+		if (all) {
+			// Replace all occurrences mode with fuzzy matching
+			normalizedNewContent = normalizedContent;
+			let replacementCount = 0;
+
+			// First check: if exact matches exist, use simple replaceAll
+			const exactCount = normalizedContent.split(normalizedOldText).length - 1;
+			if (exactCount > 0) {
+				normalizedNewContent = normalizedContent.split(normalizedOldText).join(normalizedNewText);
+				replacementCount = exactCount;
+			} else {
+				// No exact matches - try fuzzy matching iteratively
+				while (true) {
+					const matchOutcome = findEditMatch(normalizedNewContent, normalizedOldText, {
+						allowFuzzy: fuzzy,
+						similarityThreshold: DEFAULT_FUZZY_THRESHOLD,
+					});
+
+					// In all mode, use closest match if it passes threshold (even with multiple matches)
+					const match =
+						matchOutcome.match ||
+						(fuzzy && matchOutcome.closest && matchOutcome.closest.confidence >= DEFAULT_FUZZY_THRESHOLD
+							? matchOutcome.closest
+							: undefined);
+
+					if (!match) {
+						if (replacementCount === 0) {
+							return {
+								error: EditMatchError.formatMessage(path, normalizedOldText, matchOutcome.closest, {
+									allowFuzzy: fuzzy,
+									similarityThreshold: DEFAULT_FUZZY_THRESHOLD,
+									fuzzyMatches: matchOutcome.fuzzyMatches,
+								}),
+							};
+						}
+						break;
+					}
+
+					normalizedNewContent =
+						normalizedNewContent.substring(0, match.startIndex) +
+						normalizedNewText +
+						normalizedNewContent.substring(match.startIndex + match.actualText.length);
+					replacementCount++;
+				}
+			}
+		} else {
+			// Single replacement mode with fuzzy matching
+			const matchOutcome = findEditMatch(normalizedContent, normalizedOldText, {
+				allowFuzzy: fuzzy,
+				similarityThreshold: DEFAULT_FUZZY_THRESHOLD,
+			});
+
+			if (matchOutcome.occurrences && matchOutcome.occurrences > 1) {
+				return {
+					error: `Found ${matchOutcome.occurrences} occurrences of the text in ${path}. The text must be unique. Please provide more context to make it unique, or use all: true to replace all.`,
+				};
+			}
+
+			if (!matchOutcome.match) {
+				return {
+					error: EditMatchError.formatMessage(path, normalizedOldText, matchOutcome.closest, {
+						allowFuzzy: fuzzy,
+						similarityThreshold: DEFAULT_FUZZY_THRESHOLD,
+						fuzzyMatches: matchOutcome.fuzzyMatches,
+					}),
+				};
+			}
+
+			const match = matchOutcome.match;
+			normalizedNewContent =
+				normalizedContent.substring(0, match.startIndex) +
+				normalizedNewText +
+				normalizedContent.substring(match.startIndex + match.actualText.length);
 		}
-
-		if (!matchOutcome.match) {
-			return {
-				error: EditMatchError.formatMessage(path, normalizedOldText, matchOutcome.closest, {
-					allowFuzzy: fuzzy,
-					similarityThreshold: DEFAULT_FUZZY_THRESHOLD,
-					fuzzyMatches: matchOutcome.fuzzyMatches,
-				}),
-			};
-		}
-
-		const match = matchOutcome.match;
-
-		// Compute the new content
-		const normalizedNewContent =
-			normalizedContent.substring(0, match.startIndex) +
-			normalizedNewText +
-			normalizedContent.substring(match.startIndex + match.actualText.length);
 
 		// Check if it would actually change anything
 		if (normalizedContent === normalizedNewContent) {

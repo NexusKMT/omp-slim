@@ -3,15 +3,23 @@
 ## [Unreleased]
 ### Added
 
+- Added fuzzy matching support for `all: true` mode in edit tool, enabling replacement of similar text blocks with whitespace differences
+- Added `all` parameter to edit tool for replacing all occurrences instead of requiring unique matches
+- Added OpenRouter support for image generation when `OPENROUTER_API_KEY` is set
 - Added ImageMagick fallback for image processing when sharp module is unavailable
 - Added slash commands to the extensions inspector panel for visibility and management
 - Added support for file-based slash commands from `commands/` directories
 - Added `$ARGUMENTS` placeholder for slash command argument substitution, aligning with Claude and Codex conventions
+- Added OpenRouter image generation support for `generate_image` when `OPENROUTER_API_KEY` is set
 
 ### Changed
 
+- Changed edit tool success message to report count when replacing multiple occurrences with `all: true`
+- Changed default image generation model to `gemini-3-pro-image-preview`
+- Changed error message for multiple occurrences to suggest using `all: true` option
 - Changed web_fetch tool label from `web_fetch` to `Web Fetch` for improved display
 - Changed argument substitution order in slash commands to process positional args ($1, $2) before wildcards ($@, $ARGUMENTS) to prevent re-substitution issues
+- Changed image tool name from `gemini_image` to `generate_image` with label `GenerateImage`
 
 ### Fixed
 
