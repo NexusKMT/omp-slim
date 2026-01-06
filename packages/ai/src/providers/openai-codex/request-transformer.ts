@@ -159,10 +159,10 @@ function getReasoningConfig(modelName: string | undefined, options: CodexRequest
 	const defaultEffort: ReasoningConfig["effort"] = isCodexMini
 		? "medium"
 		: supportsXhigh
-			? "high"
-			: isLightweight
-				? "minimal"
-				: "medium";
+		? "high"
+		: isLightweight
+		? "minimal"
+		: "medium";
 
 	let effort = options.reasoningEffort || defaultEffort;
 
@@ -192,7 +192,7 @@ function getReasoningConfig(modelName: string | undefined, options: CodexRequest
 
 	return {
 		effort,
-		summary: options.reasoningSummary ?? "auto",
+		summary: options.reasoningSummary ?? "detailed",
 	};
 }
 
@@ -213,7 +213,7 @@ function filterInput(input: InputItem[] | undefined): InputItem[] | undefined {
 function addCodexBridgeMessage(
 	input: InputItem[] | undefined,
 	hasTools: boolean,
-	systemPrompt?: string,
+	systemPrompt?: string
 ): InputItem[] | undefined {
 	if (!hasTools || !Array.isArray(input)) return input;
 
@@ -255,7 +255,7 @@ export async function transformRequestBody(
 	codexInstructions: string,
 	options: CodexRequestOptions = {},
 	codexMode = true,
-	systemPrompt?: string,
+	systemPrompt?: string
 ): Promise<RequestBody> {
 	const normalizedModel = normalizeModel(body.model);
 
@@ -277,7 +277,7 @@ export async function transformRequestBody(
 			const functionCallIds = new Set(
 				body.input
 					.filter((item) => item.type === "function_call" && typeof item.call_id === "string")
-					.map((item) => item.call_id as string),
+					.map((item) => item.call_id as string)
 			);
 
 			body.input = body.input.map((item) => {

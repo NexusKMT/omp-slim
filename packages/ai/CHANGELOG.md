@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Changed
+
+- Changed default reasoning summary from `auto` to `detailed` for OpenAI Codex provider
 
 ## [3.20.1] - 2026-01-06
 
