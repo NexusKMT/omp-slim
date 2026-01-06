@@ -340,6 +340,7 @@ export class ToolExecutionComponent extends Container {
 	private imageComponents: Image[] = [];
 	private imageSpacers: Spacer[] = [];
 	private toolName: string;
+	private toolLabel: string;
 	private args: any;
 	private expanded = false;
 	private showImages: boolean;
@@ -371,6 +372,7 @@ export class ToolExecutionComponent extends Container {
 	) {
 		super();
 		this.toolName = toolName;
+		this.toolLabel = tool?.label ?? toolName;
 		this.args = args;
 		this.showImages = options.showImages ?? true;
 		this.tool = tool;
@@ -418,12 +420,13 @@ export class ToolExecutionComponent extends Container {
 		const path = this.args?.path;
 		const oldText = this.args?.oldText;
 		const newText = this.args?.newText;
+		const all = this.args?.all;
 
 		// Need all three params to compute diff
 		if (!path || oldText === undefined || newText === undefined) return;
 
 		// Create a key to track which args this computation is for
-		const argsKey = JSON.stringify({ path, oldText, newText });
+		const argsKey = JSON.stringify({ path, oldText, newText, all });
 
 		// Skip if we already computed for these exact args
 		if (this.editDiffArgsKey === argsKey) return;
@@ -431,7 +434,7 @@ export class ToolExecutionComponent extends Container {
 		this.editDiffArgsKey = argsKey;
 
 		// Compute diff async
-		computeEditDiff(path, oldText, newText, this.cwd).then((result) => {
+		computeEditDiff(path, oldText, newText, this.cwd, true, all).then((result) => {
 			// Only update if args haven't changed since we started
 			if (this.editDiffArgsKey === argsKey) {
 				this.editDiffPreview = result;
@@ -556,11 +559,11 @@ export class ToolExecutionComponent extends Container {
 					}
 				} catch {
 					// Fall back to default on error
-					this.contentBox.addChild(new Text(theme.fg("toolTitle", theme.bold(this.toolName)), 0, 0));
+					this.contentBox.addChild(new Text(theme.fg("toolTitle", theme.bold(this.toolLabel)), 0, 0));
 				}
 			} else {
 				// No custom renderCall, show tool name
-				this.contentBox.addChild(new Text(theme.fg("toolTitle", theme.bold(this.toolName)), 0, 0));
+				this.contentBox.addChild(new Text(theme.fg("toolTitle", theme.bold(this.toolLabel)), 0, 0));
 			}
 
 			// Render result component if we have a result
@@ -617,7 +620,7 @@ export class ToolExecutionComponent extends Container {
 				}
 			} catch {
 				// Fall back to default on error
-				this.contentBox.addChild(new Text(theme.fg("toolTitle", theme.bold(this.toolName)), 0, 0));
+				this.contentBox.addChild(new Text(theme.fg("toolTitle", theme.bold(this.toolLabel)), 0, 0));
 			}
 
 			// Render result component if we have a result
@@ -820,7 +823,7 @@ export class ToolExecutionComponent extends Container {
 				pathDisplay += theme.fg("warning", `:${startLine}${endLine ? `-${endLine}` : ""}`);
 			}
 
-			text = `${theme.fg("toolTitle", theme.bold("read"))} ${pathDisplay}`;
+			text = `${theme.fg("toolTitle", theme.bold(this.toolLabel))} ${pathDisplay}`;
 
 			if (this.result) {
 				const output = this.getTextOutput();
@@ -880,7 +883,7 @@ export class ToolExecutionComponent extends Container {
 			const totalLines = lines.length;
 
 			text =
-				theme.fg("toolTitle", theme.bold("write")) +
+				theme.fg("toolTitle", theme.bold(this.toolLabel)) +
 				" " +
 				(path ? theme.fg("accent", path) : theme.fg("toolOutput", theme.format.ellipsis));
 
@@ -925,7 +928,7 @@ export class ToolExecutionComponent extends Container {
 				pathDisplay += theme.fg("warning", `:${firstChangedLine}`);
 			}
 
-			text = `${theme.fg("toolTitle", theme.bold("edit"))} ${editIcon} ${pathDisplay}`;
+			text = `${theme.fg("toolTitle", theme.bold(this.toolLabel))} ${editIcon} ${pathDisplay}`;
 
 			const editLineCount = countLines(this.args?.newText ?? this.args?.oldText ?? "");
 			text += `\n${formatMetadataLine(editLineCount, editLanguage)}`;
@@ -971,7 +974,7 @@ export class ToolExecutionComponent extends Container {
 			}
 		} else {
 			// Generic tool (shouldn't reach here for custom tools)
-			text = theme.fg("toolTitle", theme.bold(this.toolName));
+			text = theme.fg("toolTitle", theme.bold(this.toolLabel));
 
 			const argTotal =
 				this.args && typeof this.args === "object"
