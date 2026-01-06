@@ -1,6 +1,9 @@
+import { convertToPngWithImageMagick } from "./image-magick.js";
+
 /**
  * Convert image to PNG format for terminal display.
  * Kitty graphics protocol requires PNG format (f=100).
+ * Uses sharp if available, falls back to ImageMagick (magick/convert).
  */
 export async function convertToPng(
 	base64Data: string,
@@ -11,6 +14,7 @@ export async function convertToPng(
 		return { data: base64Data, mimeType };
 	}
 
+	// Try sharp first
 	try {
 		const sharp = (await import("sharp")).default;
 		const buffer = Buffer.from(base64Data, "base64");
@@ -20,7 +24,9 @@ export async function convertToPng(
 			mimeType: "image/png",
 		};
 	} catch {
-		// Sharp not available or conversion failed
-		return null;
+		// Sharp not available, try ImageMagick fallback
 	}
+
+	// Fall back to ImageMagick
+	return convertToPngWithImageMagick(base64Data, mimeType);
 }

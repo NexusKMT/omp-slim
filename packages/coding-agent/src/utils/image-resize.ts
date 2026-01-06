@@ -1,4 +1,5 @@
 import type { ImageContent } from "@oh-my-pi/pi-ai";
+import { getImageDimensionsWithImageMagick, resizeWithImageMagick } from "./image-magick.js";
 
 export interface ImageResizeOptions {
 	maxWidth?: number; // Default: 2000
@@ -26,6 +27,52 @@ const DEFAULT_OPTIONS: Required<ImageResizeOptions> = {
 	maxBytes: DEFAULT_MAX_BYTES,
 	jpegQuality: 80,
 };
+
+/**
+ * Fallback resize using ImageMagick when sharp is unavailable.
+ */
+async function resizeImageWithImageMagick(
+	img: ImageContent,
+	opts: Required<ImageResizeOptions>,
+): Promise<ResizedImage> {
+	// Try to get dimensions first
+	const dims = await getImageDimensionsWithImageMagick(img.data);
+	const originalWidth = dims?.width ?? 0;
+	const originalHeight = dims?.height ?? 0;
+
+	// Try to resize
+	const result = await resizeWithImageMagick(
+		img.data,
+		img.mimeType,
+		opts.maxWidth,
+		opts.maxHeight,
+		opts.maxBytes,
+		opts.jpegQuality,
+	);
+
+	if (result) {
+		return {
+			data: result.data,
+			mimeType: result.mimeType,
+			originalWidth,
+			originalHeight,
+			width: result.width,
+			height: result.height,
+			wasResized: true,
+		};
+	}
+
+	// ImageMagick not available or resize not needed - return original
+	return {
+		data: img.data,
+		mimeType: img.mimeType,
+		originalWidth,
+		originalHeight,
+		width: originalWidth,
+		height: originalHeight,
+		wasResized: false,
+	};
+}
 
 /** Helper to pick the smaller of two buffers */
 function pickSmaller(
@@ -56,17 +103,8 @@ export async function resizeImage(img: ImageContent, options?: ImageResizeOption
 	try {
 		sharp = (await import("sharp")).default;
 	} catch {
-		// Sharp not available - return original image
-		// We can't get dimensions without sharp, so return 0s
-		return {
-			data: img.data,
-			mimeType: img.mimeType,
-			originalWidth: 0,
-			originalHeight: 0,
-			width: 0,
-			height: 0,
-			wasResized: false,
-		};
+		// Sharp not available - try ImageMagick fallback
+		return resizeImageWithImageMagick(img, opts);
 	}
 
 	const sharpImg = sharp(buffer);

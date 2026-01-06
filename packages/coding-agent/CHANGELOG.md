@@ -1,15 +1,16 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Added
 
+- Added ImageMagick fallback for image processing when sharp module is unavailable
 - Added slash commands to the extensions inspector panel for visibility and management
 - Added support for file-based slash commands from `commands/` directories
 - Added `$ARGUMENTS` placeholder for slash command argument substitution, aligning with Claude and Codex conventions
 
 ### Changed
 
+- Changed web_fetch tool label from `web_fetch` to `Web Fetch` for improved display
 - Changed argument substitution order in slash commands to process positional args ($1, $2) before wildcards ($@, $ARGUMENTS) to prevent re-substitution issues
 
 ### Fixed

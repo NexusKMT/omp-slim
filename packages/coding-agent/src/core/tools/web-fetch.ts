@@ -2270,7 +2270,7 @@ export interface WebFetchToolDetails {
 export function createWebFetchTool(_cwd: string): AgentTool<typeof webFetchSchema> {
 	return {
 		name: "web_fetch",
-		label: "web_fetch",
+		label: "Web Fetch",
 		description: webFetchDescription,
 		parameters: webFetchSchema,
 		execute: async (
