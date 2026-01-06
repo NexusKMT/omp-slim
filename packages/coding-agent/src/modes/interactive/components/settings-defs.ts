@@ -87,6 +87,15 @@ export const SETTINGS_DEFS: SettingDef[] = [
 		set: (sm, v) => sm.setCompactionEnabled(v), // Also handled in session
 	},
 	{
+		id: "branchSummaries",
+		tab: "config",
+		type: "boolean",
+		label: "Branch summaries",
+		description: "Prompt to summarize when leaving a branch",
+		get: (sm) => sm.getBranchSummaryEnabled(),
+		set: (sm, v) => sm.setBranchSummaryEnabled(v),
+	},
+	{
 		id: "showImages",
 		tab: "config",
 		type: "boolean",

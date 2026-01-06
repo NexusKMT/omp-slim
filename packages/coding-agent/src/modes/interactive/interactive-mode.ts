@@ -2466,13 +2466,16 @@ export class InteractiveMode {
 						return;
 					}
 
-					// Ask about summarization
+					// Ask about summarization (or skip if disabled in settings)
 					done(); // Close selector first
 
-					const wantsSummary = await this.showHookConfirm(
-						"Summarize branch?",
-						"Create a summary of the branch you're leaving?",
-					);
+					const branchSummariesEnabled = this.settingsManager.getBranchSummaryEnabled();
+					const wantsSummary = branchSummariesEnabled
+						? await this.showHookConfirm(
+								"Summarize branch?",
+								"Create a summary of the branch you're leaving?",
+							)
+						: false;
 
 					// Set up escape handler and loader if summarizing
 					let summaryLoader: Loader | undefined;

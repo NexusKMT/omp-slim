@@ -12,6 +12,7 @@ export interface CompactionSettings {
 }
 
 export interface BranchSummarySettings {
+	enabled?: boolean; // default: false (prompt user to summarize when leaving branch)
 	reserveTokens?: number; // default: 16384 (tokens reserved for prompt + LLM response)
 }
 
@@ -432,8 +433,21 @@ export class SettingsManager {
 		};
 	}
 
-	getBranchSummarySettings(): { reserveTokens: number } {
+	getBranchSummaryEnabled(): boolean {
+		return this.settings.branchSummary?.enabled ?? false;
+	}
+
+	setBranchSummaryEnabled(enabled: boolean): void {
+		if (!this.globalSettings.branchSummary) {
+			this.globalSettings.branchSummary = {};
+		}
+		this.globalSettings.branchSummary.enabled = enabled;
+		this.save();
+	}
+
+	getBranchSummarySettings(): { enabled: boolean; reserveTokens: number } {
 		return {
+			enabled: this.getBranchSummaryEnabled(),
 			reserveTokens: this.settings.branchSummary?.reserveTokens ?? 16384,
 		};
 	}
