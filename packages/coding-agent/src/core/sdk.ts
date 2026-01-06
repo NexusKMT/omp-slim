@@ -66,6 +66,7 @@ import { loadPromptTemplates as loadPromptTemplatesInternal, type PromptTemplate
 import { SessionManager } from "./session-manager";
 import { type Settings, SettingsManager, type SkillsSettings } from "./settings-manager";
 import { loadSkills as loadSkillsInternal, type Skill } from "./skills";
+import { type FileSlashCommand, loadSlashCommands as loadSlashCommandsInternal } from "./slash-commands";
 import {
 	buildSystemPrompt as buildSystemPromptInternal,
 	loadProjectContextFiles as loadContextFilesInternal,
@@ -153,6 +154,8 @@ export interface CreateAgentSessionOptions {
 	contextFiles?: Array<{ path: string; content: string }>;
 	/** Prompt templates. Default: discovered from cwd/.omp/prompts/ + agentDir/prompts/ */
 	promptTemplates?: PromptTemplate[];
+	/** File-based slash commands. Default: discovered from commands/ directories */
+	slashCommands?: FileSlashCommand[];
 
 	/** Enable MCP server discovery from .mcp.json files. Default: true */
 	enableMCP?: boolean;
@@ -199,6 +202,7 @@ export type { MCPManager, MCPServerConfig, MCPServerConnection, MCPToolsLoadResu
 export type { PromptTemplate } from "./prompt-templates";
 export type { Settings, SkillsSettings } from "./settings-manager";
 export type { Skill } from "./skills";
+export type { FileSlashCommand } from "./slash-commands";
 export type { Tool } from "./tools/index";
 
 export {
@@ -313,6 +317,13 @@ export async function discoverPromptTemplates(cwd?: string, agentDir?: string): 
 		cwd: cwd ?? process.cwd(),
 		agentDir: agentDir ?? getDefaultAgentDir(),
 	});
+}
+
+/**
+ * Discover file-based slash commands from commands/ directories.
+ */
+export function discoverSlashCommands(cwd?: string): FileSlashCommand[] {
+	return loadSlashCommandsInternal({ cwd: cwd ?? process.cwd() });
 }
 
 /**
@@ -897,6 +908,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const promptTemplates = options.promptTemplates ?? (await discoverPromptTemplates(cwd, agentDir));
 	time("discoverPromptTemplates");
 
+	const slashCommands = options.slashCommands ?? discoverSlashCommands(cwd);
+	time("discoverSlashCommands");
+
 	const baseSetUIContext = extensionsResult.setUIContext;
 	extensionsResult.setUIContext = (uiContext, hasUI) => {
 		baseSetUIContext(uiContext, hasUI);
@@ -951,6 +965,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		settingsManager,
 		scopedModels: options.scopedModels,
 		promptTemplates,
+		slashCommands,
 		extensionRunner,
 		customCommands: customCommandsResult.commands,
 		skillsSettings: settingsManager.getSkillsSettings(),

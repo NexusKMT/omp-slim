@@ -51,6 +51,7 @@ import { parseModelString } from "./model-resolver";
 import { expandPromptTemplate, type PromptTemplate, parseCommandArgs } from "./prompt-templates";
 import type { BranchSummaryEntry, CompactionEntry, NewSessionOptions, SessionManager } from "./session-manager";
 import type { SettingsManager, SkillsSettings } from "./settings-manager";
+import { expandSlashCommand, type FileSlashCommand } from "./slash-commands";
 import type { TtsrManager } from "./ttsr";
 
 /** Session-specific events that extend the core AgentEvent */
@@ -77,6 +78,8 @@ export interface AgentSessionConfig {
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel: ThinkingLevel }>;
 	/** Prompt templates for expansion */
 	promptTemplates?: PromptTemplate[];
+	/** File-based slash commands for expansion */
+	slashCommands?: FileSlashCommand[];
 	/** Extension runner (created in main.ts with wrapped tools) */
 	extensionRunner?: ExtensionRunner;
 	/** Custom commands (TypeScript slash commands) */
@@ -175,6 +178,7 @@ export class AgentSession {
 
 	private _scopedModels: Array<{ model: Model<any>; thinkingLevel: ThinkingLevel }>;
 	private _promptTemplates: PromptTemplate[];
+	private _slashCommands: FileSlashCommand[];
 
 	// Event subscription state
 	private _unsubscribeAgent?: () => void;
@@ -232,6 +236,7 @@ export class AgentSession {
 		this.settingsManager = config.settingsManager;
 		this._scopedModels = config.scopedModels ?? [];
 		this._promptTemplates = config.promptTemplates ?? [];
+		this._slashCommands = config.slashCommands ?? [];
 		this._extensionRunner = config.extensionRunner;
 		this._customCommands = config.customCommands ?? [];
 		this._skillsSettings = config.skillsSettings;
@@ -683,6 +688,12 @@ export class AgentSession {
 					return;
 				}
 				text = customResult;
+			}
+
+			// Try file-based slash commands (markdown files from commands/ directories)
+			// Only if text still starts with "/" (wasn't transformed by custom command)
+			if (text.startsWith("/")) {
+				text = expandSlashCommand(text, this._slashCommands);
 			}
 		}
 

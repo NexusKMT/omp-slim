@@ -1,6 +1,14 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added support for file-based slash commands from `commands/` directories
+- Added `$ARGUMENTS` placeholder for slash command argument substitution, aligning with Claude and Codex conventions
+
+### Changed
+
+- Changed argument substitution order in slash commands to process positional args ($1, $2) before wildcards ($@, $ARGUMENTS) to prevent re-substitution issues
 
 ## [3.20.1] - 2026-01-06
 ### Fixed
