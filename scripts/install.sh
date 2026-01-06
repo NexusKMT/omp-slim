@@ -5,8 +5,10 @@ set -e
 # Usage: curl -fsSL https://raw.githubusercontent.com/can1357/oh-my-pi/main/scripts/install.sh | sh
 #
 # Options:
-#   --source  Install via bun (installs bun if needed)
-#   --binary  Always install prebuilt binary
+#   --source       Install via bun (installs bun if needed)
+#   --binary       Always install prebuilt binary
+#   --ref <ref>    Install specific tag/commit/branch
+#   -r <ref>       Shorthand for --ref
 
 REPO="can1357/oh-my-pi"
 PACKAGE="@oh-my-pi/omp-coding-agent"
@@ -14,16 +16,58 @@ INSTALL_DIR="${OMP_INSTALL_DIR:-$HOME/.local/bin}"
 
 # Parse arguments
 MODE=""
-for arg in "$@"; do
-    case "$arg" in
-        --source) MODE="source" ;;
-        --binary) MODE="binary" ;;
+REF=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --source)
+            MODE="source"
+            shift
+            ;;
+        --binary)
+            MODE="binary"
+            shift
+            ;;
+        --ref)
+            shift
+            if [ -z "$1" ]; then
+                echo "Missing value for --ref"
+                exit 1
+            fi
+            REF="$1"
+            shift
+            ;;
+        --ref=*)
+            REF="${1#*=}"
+            shift
+            ;;
+        -r)
+            shift
+            if [ -z "$1" ]; then
+                echo "Missing value for -r"
+                exit 1
+            fi
+            REF="$1"
+            shift
+            ;;
+        *)
+            shift
+            ;;
     esac
 done
+
+# If a ref is provided, default to source install
+if [ -n "$REF" ] && [ -z "$MODE" ]; then
+    MODE="source"
+fi
 
 # Check if bun is available
 has_bun() {
     command -v bun >/dev/null 2>&1
+}
+
+# Check if git is available
+has_git() {
+    command -v git >/dev/null 2>&1
 }
 
 # Install bun
@@ -37,7 +81,31 @@ install_bun() {
 # Install via bun
 install_via_bun() {
     echo "Installing via bun..."
-    bun install -g "$PACKAGE"
+    if [ -n "$REF" ]; then
+        if ! has_git; then
+            echo "git is required for --ref when installing from source"
+            exit 1
+        fi
+
+        TMP_DIR="$(mktemp -d)"
+        trap 'rm -rf "$TMP_DIR"' EXIT
+
+        if git clone --depth 1 --branch "$REF" "https://github.com/${REPO}.git" "$TMP_DIR" >/dev/null 2>&1; then
+            :
+        else
+            git clone "https://github.com/${REPO}.git" "$TMP_DIR"
+            (cd "$TMP_DIR" && git checkout "$REF")
+        fi
+
+        if [ ! -d "$TMP_DIR/packages/coding-agent" ]; then
+            echo "Expected package at ${TMP_DIR}/packages/coding-agent"
+            exit 1
+        fi
+
+        bun install -g "$TMP_DIR/packages/coding-agent"
+    else
+        bun install -g "$PACKAGE"
+    fi
     echo ""
     echo "✓ Installed omp via bun"
     echo "Run 'omp' to get started!"
@@ -63,14 +131,26 @@ install_binary() {
 
     BINARY="omp-${PLATFORM}-${ARCH}"
 
-    # Get latest release tag
-    echo "Fetching latest release..."
-    LATEST=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+    # Get release tag
+    if [ -n "$REF" ]; then
+        echo "Fetching release $REF..."
+        if RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/tags/${REF}"); then
+            LATEST=$(echo "$RELEASE_JSON" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+        else
+            echo "Release tag not found: $REF"
+            echo "For branch/commit installs, use --source with --ref."
+            exit 1
+        fi
+    else
+        echo "Fetching latest release..."
+        RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")
+        LATEST=$(echo "$RELEASE_JSON" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+    fi
     if [ -z "$LATEST" ]; then
-        echo "Failed to fetch latest release"
+        echo "Failed to fetch release tag"
         exit 1
     fi
-    echo "Latest version: $LATEST"
+    echo "Using version: $LATEST"
 
     # Download binary
     URL="https://github.com/${REPO}/releases/download/${LATEST}/${BINARY}"

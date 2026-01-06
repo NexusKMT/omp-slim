@@ -48,10 +48,25 @@ By default, the installer uses bun if available, otherwise downloads the prebuil
 Options:
 - `--source` / `-Source`: Install via bun (installs bun first if needed)
 - `--binary` / `-Binary`: Always use prebuilt binary
+- `--ref <ref>` / `-Ref <ref>`: Install a tag/commit/branch (defaults to source install)
 
 ```bash
 # Force bun installation
 curl -fsSL .../install.sh | sh -s -- --source
+
+# Install a tag via binary
+curl -fsSL .../install.sh | sh -s -- --binary --ref v3.20.1
+
+# Install a branch or commit via source
+curl -fsSL .../install.sh | sh -s -- --source --ref main
+```
+
+```powershell
+# Install a tag via binary
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/can1357/oh-my-pi/main/scripts/install.ps1))) -Binary -Ref v3.20.1
+
+# Install a branch or commit via source
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/can1357/oh-my-pi/main/scripts/install.ps1))) -Source -Ref main
 ```
 
 ### Manual download
