@@ -17,7 +17,8 @@ import {
 	restoreLineEndings,
 	stripBom,
 } from "./edit-diff";
-import { type FileDiagnosticsResult, type WritethroughCallback, writethroughNoop } from "./lsp/index";
+import type { ToolSession } from "./index";
+import { createLspWritethrough, type FileDiagnosticsResult } from "./lsp/index";
 import { resolveToCwd } from "./path-utils";
 import {
 	formatDiagnostics,
@@ -46,16 +47,11 @@ export interface EditToolDetails {
 	diagnostics?: FileDiagnosticsResult;
 }
 
-export interface EditToolOptions {
-	/** Whether to accept high-confidence fuzzy matches for whitespace/indentation (default: true) */
-	fuzzyMatch?: boolean;
-	/** Writethrough callback to get LSP diagnostics after editing a file */
-	writethrough?: WritethroughCallback;
-}
-
-export function createEditTool(cwd: string, options: EditToolOptions = {}): AgentTool<typeof editSchema> {
-	const allowFuzzy = options.fuzzyMatch ?? true;
-	const writethrough = options.writethrough ?? writethroughNoop;
+export function createEditTool(session: ToolSession): AgentTool<typeof editSchema> {
+	const allowFuzzy = session.settings?.getEditFuzzyMatch() ?? true;
+	const enableDiagnostics = session.settings?.getLspDiagnosticsOnEdit() ?? false;
+	const enableFormat = session.settings?.getLspFormatOnWrite() ?? true;
+	const writethrough = createLspWritethrough(session.cwd, { enableFormat, enableDiagnostics });
 	return {
 		name: "edit",
 		label: "Edit",
@@ -71,7 +67,7 @@ export function createEditTool(cwd: string, options: EditToolOptions = {}): Agen
 				throw new Error("Cannot edit Jupyter notebooks with the Edit tool. Use the NotebookEdit tool instead.");
 			}
 
-			const absolutePath = resolveToCwd(path, cwd);
+			const absolutePath = resolveToCwd(path, session.cwd);
 
 			const file = Bun.file(absolutePath);
 			if (!(await file.exists())) {
@@ -202,9 +198,6 @@ export function createEditTool(cwd: string, options: EditToolOptions = {}): Agen
 		},
 	};
 }
-
-/** Default edit tool using process.cwd() - for backwards compatibility */
-export const editTool = createEditTool(process.cwd());
 
 // =============================================================================
 // TUI Renderer

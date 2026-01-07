@@ -24,7 +24,6 @@ import { SessionManager } from "./core/session-manager";
 import { SettingsManager } from "./core/settings-manager";
 import { resolvePromptInput } from "./core/system-prompt";
 import { printTimings, time } from "./core/timings";
-import { allTools } from "./core/tools/index";
 import { runMigrations, showDeprecationWarnings } from "./migrations";
 import { InteractiveMode, installTerminalCrashHandlers, runPrintMode, runRpcMode } from "./modes/index";
 import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme";
@@ -210,7 +209,9 @@ async function buildSessionOptions(
 	modelRegistry: ModelRegistry,
 	settingsManager: SettingsManager,
 ): Promise<CreateAgentSessionOptions> {
-	const options: CreateAgentSessionOptions = {};
+	const options: CreateAgentSessionOptions = {
+		cwd: parsed.cwd ?? process.cwd(),
+	};
 
 	// Auto-discover SYSTEM.md if no CLI system prompt provided
 	const systemPromptSource = parsed.systemPrompt ?? discoverSystemPromptFile();
@@ -263,8 +264,7 @@ async function buildSessionOptions(
 
 	// Tools
 	if (parsed.tools) {
-		options.tools = parsed.tools.map((name) => allTools[name]);
-		options.explicitTools = parsed.tools;
+		options.toolNames = parsed.tools;
 	}
 
 	// Skills

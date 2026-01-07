@@ -1,16 +1,16 @@
-# TaskOutput
-
 Retrieves complete output from background tasks spawned with the Task tool.
 
 ## When to Use
 
 Use TaskOutput when:
+
 - Task tool returns truncated preview with "Output truncated" message
 - You need full output to debug errors or analyze detailed results
 - Task tool's summary shows substantial line/character counts but preview is incomplete
 - You're analyzing multi-step task output requiring full context
 
 Do NOT use when:
+
 - Task preview already shows complete output (no truncation indicator)
 - Summary alone answers your question
 

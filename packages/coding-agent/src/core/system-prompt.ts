@@ -256,10 +256,10 @@ export function loadSystemPromptFiles(options: LoadContextFilesOptions = {}): st
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
 	customPrompt?: string;
-	/** Tools to include in prompt. Default: [read, bash, edit, write] */
-	selectedTools?: ToolName[];
-	/** Extra tool descriptions to include in prompt (non built-in tools). */
-	extraToolDescriptions?: Array<{ name: string; description: string }>;
+	/** Tools to include in prompt. */
+	tools?: Map<string, { description: string; label: string }>;
+	/** Tool names to include in prompt. */
+	toolNames?: string[];
 	/** Text to append to system prompt. */
 	appendSystemPrompt?: string;
 	/** Skills settings for discovery. */
@@ -271,21 +271,21 @@ export interface BuildSystemPromptOptions {
 	/** Pre-loaded skills (skips discovery if provided). */
 	skills?: Skill[];
 	/** Pre-loaded rulebook rules (rules with descriptions, excluding TTSR and always-apply). */
-	rulebookRules?: Rule[];
+	rules?: Rule[];
 }
 
 /** Build the system prompt with tools, guidelines, and context */
 export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): string {
 	const {
 		customPrompt,
-		selectedTools,
-		extraToolDescriptions = [],
+		tools,
 		appendSystemPrompt,
 		skillsSettings,
+		toolNames,
 		cwd,
 		contextFiles: providedContextFiles,
 		skills: providedSkills,
-		rulebookRules,
+		rules: rulebookRules,
 	} = options;
 	const resolvedCwd = cwd ?? process.cwd();
 	const resolvedCustomPrompt = resolvePromptInput(customPrompt, "system prompt");
@@ -311,6 +311,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	// Resolve context files: use provided or discover
 	const contextFiles = providedContextFiles ?? loadProjectContextFiles({ cwd: resolvedCwd });
 
+	// Build tools list based on selected tools
+	const toolsList = toolNames?.map((name) => `- ${name}: ${toolDescriptions[name as ToolName]}`).join("\n") ?? "";
+
 	// Resolve skills: use provided or discover
 	const skills =
 		providedSkills ??
@@ -335,9 +338,11 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 		}
 
 		// Append custom tool descriptions if provided
-		if (extraToolDescriptions.length > 0) {
-			prompt += "\n\n# Additional Tools\n\n";
-			prompt += extraToolDescriptions.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n");
+		if (tools && tools.size > 0) {
+			prompt += "\n\n# Tools\n\n";
+			prompt += Array.from(tools.entries())
+				.map(([name, { description }]) => `- ${name}: ${description}`)
+				.join("\n");
 		}
 
 		// Append git context if in a git repo
@@ -347,8 +352,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 		}
 
 		// Append skills section (only if read tool is available)
-		const customPromptHasRead = !selectedTools || selectedTools.includes("read");
-		if (customPromptHasRead && skills.length > 0) {
+		if (tools?.has("read") && skills.length > 0) {
 			prompt += formatSkillsForPrompt(skills);
 		}
 
@@ -369,25 +373,16 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	const docsPath = getDocsPath();
 	const examplesPath = getExamplesPath();
 
-	// Build tools list based on selected tools
-	const tools = selectedTools || (["read", "bash", "edit", "write"] as ToolName[]);
-	const builtInToolsList = tools.map((t) => `- ${t}: ${toolDescriptions[t]}`).join("\n");
-	const extraToolsList =
-		extraToolDescriptions.length > 0
-			? extraToolDescriptions.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n")
-			: "";
-	const toolsList = [builtInToolsList, extraToolsList].filter(Boolean).join("\n");
-
 	// Generate anti-bash rules (returns null if not applicable)
-	const antiBashSection = generateAntiBashRules(tools);
+	const antiBashSection = generateAntiBashRules(Array.from(tools?.keys() ?? []));
 
 	// Build guidelines based on which tools are actually available
 	const guidelinesList: string[] = [];
 
-	const hasBash = tools.includes("bash");
-	const hasEdit = tools.includes("edit");
-	const hasWrite = tools.includes("write");
-	const hasRead = tools.includes("read");
+	const hasBash = tools?.has("bash");
+	const hasEdit = tools?.has("edit");
+	const hasWrite = tools?.has("write");
+	const hasRead = tools?.has("read");
 
 	// Read-only mode notice (no bash, edit, or write)
 	if (!hasBash && !hasEdit && !hasWrite) {
@@ -452,12 +447,6 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 		for (const { path: filePath, content } of contextFiles) {
 			prompt += `## ${filePath}\n\n${content}\n\n`;
 		}
-	}
-
-	// Append custom tool descriptions if provided
-	if (extraToolDescriptions.length > 0) {
-		prompt += "\n\n# Additional Tools\n\n";
-		prompt += extraToolDescriptions.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n");
 	}
 
 	// Append git context if in a git repo

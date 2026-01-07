@@ -29,7 +29,7 @@
 		"CHANGELOG.md"
 	],
 	"scripts": {
-		"check": "tsgo --noEmit",
+		"check": "tsgo -p tsconfig.check.json",
 		"clean": "rm -rf dist",
 		"build": "tsgo -p tsconfig.build.json && chmod +x dist/cli.js",
 		"build:binary": "bun build --compile ./src/cli.ts --outfile dist/omp",

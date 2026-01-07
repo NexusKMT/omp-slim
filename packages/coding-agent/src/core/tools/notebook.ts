@@ -4,6 +4,7 @@ import { Text } from "@oh-my-pi/pi-tui";
 import { Type } from "@sinclair/typebox";
 import type { Theme } from "../../modes/interactive/theme/theme";
 import type { RenderResultOptions } from "../custom-tools/types";
+import type { ToolSession } from "../sdk";
 import { untilAborted } from "../utils";
 import { resolveToCwd } from "./path-utils";
 import {
@@ -61,7 +62,7 @@ function splitIntoLines(content: string): string[] {
 	return content.split("\n").map((line, i, arr) => (i < arr.length - 1 ? `${line}\n` : line));
 }
 
-export function createNotebookTool(cwd: string): AgentTool<typeof notebookSchema> {
+export function createNotebookTool(session: ToolSession): AgentTool<typeof notebookSchema> {
 	return {
 		name: "notebook",
 		label: "Notebook",
@@ -79,7 +80,7 @@ export function createNotebookTool(cwd: string): AgentTool<typeof notebookSchema
 			}: { action: string; notebook_path: string; cell_index: number; content?: string; cell_type?: string },
 			signal?: AbortSignal,
 		) => {
-			const absolutePath = resolveToCwd(notebook_path, cwd);
+			const absolutePath = resolveToCwd(notebook_path, session.cwd);
 
 			return untilAborted(signal, async () => {
 				// Check if file exists
@@ -189,9 +190,6 @@ export function createNotebookTool(cwd: string): AgentTool<typeof notebookSchema
 		},
 	};
 }
-
-/** Default notebook tool using process.cwd() */
-export const notebookTool = createNotebookTool(process.cwd());
 
 // =============================================================================
 // TUI Renderer

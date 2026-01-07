@@ -12,7 +12,7 @@ import { AuthStorage } from "../src/core/auth-storage";
 import { ModelRegistry } from "../src/core/model-registry";
 import { SessionManager } from "../src/core/session-manager";
 import { SettingsManager } from "../src/core/settings-manager";
-import { codingTools } from "../src/core/tools/index";
+import { createTools, type ToolSession } from "../src/core/tools/index";
 
 /**
  * API key for authenticated tests. Tests using this should be wrapped in
@@ -76,9 +76,18 @@ export interface TestSessionContext {
  * Create an AgentSession for testing with proper setup and cleanup.
  * Use this for e2e tests that need real LLM calls.
  */
-export function createTestSession(options: TestSessionOptions = {}): TestSessionContext {
+export async function createTestSession(options: TestSessionOptions = {}): Promise<TestSessionContext> {
 	const tempDir = join(tmpdir(), `omp-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 	mkdirSync(tempDir, { recursive: true });
+
+	const toolSession: ToolSession = {
+		cwd: tempDir,
+		hasUI: false,
+		rulebookRules: [],
+		getSessionFile: () => null,
+		getSessionSpawns: () => "*",
+	};
+	const tools = await createTools(toolSession);
 
 	const model = getModel("anthropic", "claude-sonnet-4-5")!;
 	const agent = new Agent({
@@ -86,7 +95,7 @@ export function createTestSession(options: TestSessionOptions = {}): TestSession
 		initialState: {
 			model,
 			systemPrompt: options.systemPrompt ?? "You are a helpful assistant. Be extremely concise.",
-			tools: codingTools,
+			tools,
 		},
 	});
 

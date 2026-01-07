@@ -5,11 +5,12 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import chalk from "chalk";
 import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR } from "../config";
-import { allTools, type ToolName } from "../core/tools/index";
+import { BUILTIN_TOOLS } from "../core/tools/index";
 
 export type Mode = "text" | "json" | "rpc";
 
 export interface Args {
+	cwd?: string;
 	provider?: string;
 	model?: string;
 	smol?: string;
@@ -27,7 +28,7 @@ export interface Args {
 	session?: string;
 	sessionDir?: string;
 	models?: string[];
-	tools?: ToolName[];
+	tools?: string[];
 	hooks?: string[];
 	extensions?: string[];
 	print?: boolean;
@@ -94,13 +95,15 @@ export function parseArgs(args: string[], extensionFlags?: Map<string, { type: "
 			result.models = args[++i].split(",").map((s) => s.trim());
 		} else if (arg === "--tools" && i + 1 < args.length) {
 			const toolNames = args[++i].split(",").map((s) => s.trim());
-			const validTools: ToolName[] = [];
+			const validTools: string[] = [];
 			for (const name of toolNames) {
-				if (name in allTools) {
-					validTools.push(name as ToolName);
+				if (name in BUILTIN_TOOLS) {
+					validTools.push(name);
 				} else {
 					console.error(
-						chalk.yellow(`Warning: Unknown tool "${name}". Valid tools: ${Object.keys(allTools).join(", ")}`),
+						chalk.yellow(
+							`Warning: Unknown tool "${name}". Valid tools: ${Object.keys(BUILTIN_TOOLS).join(", ")}`,
+						),
 					);
 				}
 			}

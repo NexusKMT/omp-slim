@@ -2,6 +2,7 @@ import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import { type GitParams, gitTool as gitToolCore, type ToolResponse } from "@oh-my-pi/pi-git-tool";
 import { type Static, Type } from "@sinclair/typebox";
 import gitDescription from "../../prompts/tools/git.md" with { type: "text" };
+import type { ToolSession } from "./index";
 
 const gitSchema = Type.Object({
 	operation: Type.Union([
@@ -192,7 +193,10 @@ const gitSchema = Type.Object({
 
 export type GitToolDetails = ToolResponse<unknown>;
 
-export function createGitTool(cwd: string): AgentTool<typeof gitSchema, GitToolDetails> {
+export function createGitTool(session: ToolSession): AgentTool<typeof gitSchema, GitToolDetails> | null {
+	if (session.settings?.getGitToolEnabled() === false) {
+		return null;
+	}
 	return {
 		name: "git",
 		label: "Git",
@@ -203,7 +207,7 @@ export function createGitTool(cwd: string): AgentTool<typeof gitSchema, GitToolD
 				throw new Error("Git commit requires a message to avoid an interactive editor. Provide `message`.");
 			}
 
-			const result = await gitToolCore(params as GitParams, cwd);
+			const result = await gitToolCore(params as GitParams, session.cwd);
 			if ("error" in result) {
 				const message = result._rendered ?? result.error;
 				return { content: [{ type: "text", text: message }], details: result };
@@ -217,4 +221,10 @@ export function createGitTool(cwd: string): AgentTool<typeof gitSchema, GitToolD
 	};
 }
 
-export const gitTool = createGitTool(process.cwd());
+export const gitTool = createGitTool({
+	cwd: process.cwd(),
+	hasUI: false,
+	rulebookRules: [],
+	getSessionFile: () => null,
+	getSessionSpawns: () => null,
+})!;

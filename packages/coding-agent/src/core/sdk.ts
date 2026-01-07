@@ -18,7 +18,7 @@
  * const session = await createAgentSession({
  *   model: myModel,
  *   getApiKey: async () => process.env.MY_KEY,
- *   tools: [readTool, bashTool],
+ *   toolNames: ["read", "bash", "edit", "write"], // Filter tools
  *   extensions: [],
  *   skills: [],
  *   sessionFile: false,
@@ -55,7 +55,7 @@ import {
 	loadExtensionFromFactory,
 	type ToolDefinition,
 	wrapRegisteredTools,
-	wrapToolsWithExtensions,
+	wrapToolWithExtensions,
 } from "./extensions/index";
 import { logger } from "./logger";
 import { discoverAndLoadMCPTools, type MCPManager, type MCPToolsLoadResult } from "./mcp/index";
@@ -75,48 +75,34 @@ import { time } from "./timings";
 import { createToolContextStore } from "./tools/context";
 import { getGeminiImageTools } from "./tools/gemini-image";
 import {
-	allTools,
-	applyBashInterception,
-	baseCodingToolNames,
-	bashTool,
-	codingTools,
-	createAllTools,
+	BUILTIN_TOOLS,
 	createBashTool,
-	createCodingTools,
 	createEditTool,
 	createFindTool,
 	createGitTool,
 	createGrepTool,
 	createLsTool,
-	createReadOnlyTools,
 	createReadTool,
-	createRulebookTool,
+	createTools,
 	createWriteTool,
-	editTool,
 	filterRulebookRules,
-	findTool,
 	getWebSearchTools,
-	gitTool,
-	grepTool,
-	lsTool,
-	readOnlyTools,
-	readTool,
 	setPreferredImageProvider,
 	setPreferredWebSearchProvider,
 	type Tool,
-	type ToolName,
+	type ToolSession,
 	warmupLspServers,
-	writeTool,
 } from "./tools/index";
 import { createTtsrManager } from "./ttsr";
 
 // Types
-
 export interface CreateAgentSessionOptions {
 	/** Working directory for project-local discovery. Default: process.cwd() */
 	cwd?: string;
 	/** Global config directory. Default: ~/.omp/agent */
 	agentDir?: string;
+	/** Spawns to allow. Default: "*" */
+	spawns?: string;
 
 	/** Auth storage for credentials. Default: discoverAuthStorage(agentDir) */
 	authStorage?: AuthStorage;
@@ -133,8 +119,6 @@ export interface CreateAgentSessionOptions {
 	/** System prompt. String replaces default, function receives default and returns final. */
 	systemPrompt?: string | ((defaultPrompt: string) => string);
 
-	/** Built-in tools to use. Default: all coding tools (read, bash, edit, write, grep, find, ls, lsp, notebook, output, task, web_fetch, web_search) */
-	tools?: Tool[];
 	/** Custom tools to register (in addition to built-in tools). Accepts both CustomTool and ToolDefinition. */
 	customTools?: (CustomTool | ToolDefinition)[];
 	/** Inline extensions (merged with discovery). */
@@ -163,7 +147,7 @@ export interface CreateAgentSessionOptions {
 	enableMCP?: boolean;
 
 	/** Tool names explicitly requested (enables disabled-by-default tools) */
-	explicitTools?: string[];
+	toolNames?: string[];
 
 	/** Session manager. Default: SessionManager.create(cwd) */
 	sessionManager?: SessionManager;
@@ -208,21 +192,11 @@ export type { FileSlashCommand } from "./slash-commands";
 export type { Tool } from "./tools/index";
 
 export {
-	// Pre-built tools (use process.cwd())
-	readTool,
-	bashTool,
-	editTool,
-	writeTool,
-	grepTool,
-	findTool,
-	gitTool,
-	lsTool,
-	codingTools,
-	readOnlyTools,
-	allTools as allBuiltInTools,
-	// Tool factories (for custom cwd)
-	createCodingTools,
-	createReadOnlyTools,
+	// Tool factories
+	BUILTIN_TOOLS,
+	createTools,
+	type ToolSession,
+	// Individual tool factories (for custom usage)
 	createReadTool,
 	createBashTool,
 	createEditTool,
@@ -426,7 +400,6 @@ function customToolToDefinition(tool: CustomTool): ToolDefinition {
 		label: tool.label,
 		description: tool.description,
 		parameters: tool.parameters,
-		hidden: tool.hidden,
 		execute: (toolCallId, params, onUpdate, ctx, signal) =>
 			tool.execute(toolCallId, params, onUpdate, createCustomToolContext(ctx), signal),
 		onSession: tool.onSession ? (event, ctx) => tool.onSession?.(event, createCustomToolContext(ctx)) : undefined,
@@ -509,7 +482,7 @@ function createCustomToolsExtension(tools: CustomTool[]): ExtensionFactory {
  *   model: myModel,
  *   getApiKey: async () => process.env.MY_KEY,
  *   systemPrompt: 'You are helpful.',
- *   tools: [readTool, bashTool],
+ *   tools: codingTools({ cwd: process.cwd() }),
  *   skills: [],
  *   sessionManager: SessionManager.inMemory(),
  * });
@@ -630,30 +603,18 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const contextFiles = options.contextFiles ?? discoverContextFiles(cwd, agentDir);
 	time("discoverContextFiles");
 
-	const sessionContext = {
+	const toolSession: ToolSession = {
+		cwd,
+		hasUI: options.hasUI ?? false,
+		rulebookRules,
+		eventBus,
 		getSessionFile: () => sessionManager.getSessionFile() ?? null,
+		getSessionSpawns: () => options.spawns ?? "*",
+		settings: settingsManager,
 	};
-	const allBuiltInToolsMap = await createAllTools(cwd, sessionContext, {
-		lspFormatOnWrite: settingsManager.getLspFormatOnWrite(),
-		lspDiagnosticsOnWrite: settingsManager.getLspDiagnosticsOnWrite(),
-		lspDiagnosticsOnEdit: settingsManager.getLspDiagnosticsOnEdit(),
-		editFuzzyMatch: settingsManager.getEditFuzzyMatch(),
-		readAutoResizeImages: settingsManager.getImageAutoResize(),
-	});
+
+	const builtinTools = await createTools(toolSession, options.toolNames);
 	time("createAllTools");
-
-	// Determine which tools to include based on settings
-	let baseToolNames = options.tools
-		? options.tools.map((t) => t.name).filter((n): n is ToolName => n in allBuiltInToolsMap)
-		: [...baseCodingToolNames];
-
-	// Filter out git tool if disabled in settings
-	if (!settingsManager.getGitToolEnabled()) {
-		baseToolNames = baseToolNames.filter((name) => name !== "git");
-	}
-
-	const initialActiveToolNames: ToolName[] = baseToolNames;
-	const initialActiveBuiltInTools = initialActiveToolNames.map((name) => allBuiltInToolsMap[name]);
 
 	// Discover MCP tools from .mcp.json files
 	let mcpManager: MCPManager | undefined;
@@ -840,61 +801,30 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		hasQueuedMessages: () => session.queuedMessageCount > 0,
 	}));
 
+	// All built-in tools are active (conditional tools like git/ask return null from factory if disabled)
 	const toolRegistry = new Map<string, AgentTool>();
-	for (const [name, tool] of Object.entries(allBuiltInToolsMap)) {
-		toolRegistry.set(name, tool as AgentTool);
+	for (const tool of builtinTools) {
+		toolRegistry.set(tool.name, tool as AgentTool);
 	}
-	for (const tool of wrappedExtensionTools as AgentTool[]) {
+	for (const tool of wrappedExtensionTools) {
 		toolRegistry.set(tool.name, tool);
 	}
-
-	let activeToolsArray: Tool[] = [...initialActiveBuiltInTools, ...wrappedExtensionTools];
-
-	if (rulebookRules.length > 0) {
-		activeToolsArray.push(createRulebookTool(rulebookRules));
-	}
-
-	if (options.explicitTools) {
-		const explicitSet = new Set(options.explicitTools);
-		activeToolsArray = activeToolsArray.filter((tool) => !tool.hidden || explicitSet.has(tool.name));
-	} else {
-		activeToolsArray = activeToolsArray.filter((tool) => !tool.hidden);
+	if (extensionRunner) {
+		for (const tool of toolRegistry.values()) {
+			toolRegistry.set(tool.name, wrapToolWithExtensions(tool, extensionRunner));
+		}
 	}
 	time("combineTools");
 
-	if (settingsManager.getBashInterceptorEnabled()) {
-		activeToolsArray = applyBashInterception(activeToolsArray);
-	}
-	time("applyBashInterception");
-
-	let wrappedToolRegistry: Map<string, AgentTool> | undefined;
-	if (extensionRunner) {
-		activeToolsArray = wrapToolsWithExtensions(activeToolsArray as AgentTool[], extensionRunner);
-		const allRegistryTools = Array.from(toolRegistry.values());
-		const wrappedAllTools = wrapToolsWithExtensions(allRegistryTools, extensionRunner);
-		wrappedToolRegistry = new Map<string, AgentTool>();
-		for (const tool of wrappedAllTools) {
-			wrappedToolRegistry.set(tool.name, tool);
-		}
-	}
-
-	const rebuildSystemPrompt = (toolNames: string[]): string => {
-		const validToolNames = toolNames.filter((n): n is ToolName => n in allBuiltInToolsMap);
-		const extraToolDescriptions = toolNames
-			.filter((name) => !(name in allBuiltInToolsMap))
-			.map((name) => {
-				const tool = toolRegistry.get(name);
-				if (!tool) return null;
-				return { name, description: tool.description || tool.label || "Custom tool" };
-			})
-			.filter((tool): tool is { name: string; description: string } => tool !== null);
+	const rebuildSystemPrompt = (toolNames: string[], tools: Map<string, AgentTool>): string => {
+		toolContextStore.setToolNames(toolNames);
 		const defaultPrompt = buildSystemPromptInternal({
 			cwd,
 			skills,
 			contextFiles,
-			rulebookRules,
-			selectedTools: validToolNames,
-			extraToolDescriptions,
+			tools,
+			toolNames,
+			rules: rulebookRules,
 			skillsSettings: settingsManager.getSkillsSettings(),
 		});
 
@@ -906,9 +836,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				cwd,
 				skills,
 				contextFiles,
-				rulebookRules,
-				selectedTools: validToolNames,
-				extraToolDescriptions,
+				tools,
+				toolNames,
+				rules: rulebookRules,
 				skillsSettings: settingsManager.getSkillsSettings(),
 				customPrompt: options.systemPrompt,
 			});
@@ -916,7 +846,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		return options.systemPrompt(defaultPrompt);
 	};
 
-	const systemPrompt = rebuildSystemPrompt(initialActiveToolNames);
+	const systemPrompt = rebuildSystemPrompt(Array.from(toolRegistry.keys()), toolRegistry);
 	time("buildSystemPrompt");
 
 	const promptTemplates = options.promptTemplates ?? (await discoverPromptTemplates(cwd, agentDir));
@@ -936,7 +866,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			systemPrompt,
 			model,
 			thinkingLevel,
-			tools: activeToolsArray,
+			tools: Array.from(toolRegistry.values()),
 		},
 		convertToLlm,
 		transformContext: extensionRunner
@@ -984,7 +914,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		customCommands: customCommandsResult.commands,
 		skillsSettings: settingsManager.getSkillsSettings(),
 		modelRegistry,
-		toolRegistry: wrappedToolRegistry ?? toolRegistry,
+		toolRegistry,
 		rebuildSystemPrompt,
 		ttsrManager,
 	});

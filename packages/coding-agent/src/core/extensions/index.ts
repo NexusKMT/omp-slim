@@ -92,9 +92,4 @@ export {
 	isReadToolResult,
 	isWriteToolResult,
 } from "./types";
-export {
-	wrapRegisteredTool,
-	wrapRegisteredTools,
-	wrapToolsWithExtensions,
-	wrapToolWithExtensions,
-} from "./wrapper";
+export { wrapRegisteredTool, wrapRegisteredTools, wrapToolWithExtensions } from "./wrapper";

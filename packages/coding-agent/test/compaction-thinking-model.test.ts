@@ -19,7 +19,7 @@ import { AuthStorage } from "../src/core/auth-storage";
 import { ModelRegistry } from "../src/core/model-registry";
 import { SessionManager } from "../src/core/session-manager";
 import { SettingsManager } from "../src/core/settings-manager";
-import { codingTools } from "../src/core/tools/index";
+import { createTools, type ToolSession } from "../src/core/tools/index";
 import { API_KEY } from "./utilities";
 
 // Check for auth
@@ -44,10 +44,19 @@ describe.skipIf(!HAS_ANTIGRAVITY_AUTH)("Compaction with thinking models (Antigra
 		}
 	});
 
-	function createSession(
+	async function createSession(
 		modelId: "claude-opus-4-5-thinking" | "claude-sonnet-4-5",
 		thinkingLevel: ThinkingLevel = "high",
 	) {
+		const toolSession: ToolSession = {
+			cwd: tempDir,
+			hasUI: false,
+			rulebookRules: [],
+			getSessionFile: () => null,
+			getSessionSpawns: () => "*",
+		};
+		const tools = await createTools(toolSession);
+
 		const model = getModel("google-antigravity", modelId);
 		if (!model) {
 			throw new Error(`Model not found: google-antigravity/${modelId}`);
@@ -58,7 +67,7 @@ describe.skipIf(!HAS_ANTIGRAVITY_AUTH)("Compaction with thinking models (Antigra
 			initialState: {
 				model,
 				systemPrompt: "You are a helpful assistant. Be concise.",
-				tools: codingTools,
+				tools,
 				thinkingLevel,
 			},
 		});
@@ -148,13 +157,22 @@ describe.skipIf(!HAS_ANTHROPIC_AUTH)("Compaction with thinking models (Anthropic
 		}
 	});
 
-	function createSession(model: Model<any>, thinkingLevel: ThinkingLevel = "high") {
+	async function createSession(model: Model<any>, thinkingLevel: ThinkingLevel = "high") {
+		const toolSession: ToolSession = {
+			cwd: tempDir,
+			hasUI: false,
+			rulebookRules: [],
+			getSessionFile: () => null,
+			getSessionSpawns: () => "*",
+		};
+		const tools = await createTools(toolSession);
+
 		const agent = new Agent({
 			getApiKey: () => API_KEY,
 			initialState: {
 				model,
 				systemPrompt: "You are a helpful assistant. Be concise.",
-				tools: codingTools,
+				tools,
 				thinkingLevel,
 			},
 		});

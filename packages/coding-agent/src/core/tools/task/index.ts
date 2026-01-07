@@ -16,6 +16,7 @@
 import type { Usage } from "@mariozechner/pi-ai";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { Theme } from "../../../modes/interactive/theme/theme";
+import taskDescriptionTemplate from "../../../prompts/tools/task.md" with { type: "text" };
 import { formatDuration } from "../render-utils";
 import { cleanupTempDir, createTempArtifactsDir, getArtifactsDir } from "./artifacts";
 import { discoverAgents, getAgent } from "./discovery";
@@ -27,15 +28,13 @@ import {
 	MAX_AGENTS_IN_DESCRIPTION,
 	MAX_CONCURRENCY,
 	MAX_PARALLEL_TASKS,
-	OMP_BLOCKED_AGENT_ENV,
-	OMP_NO_SUBAGENTS_ENV,
-	OMP_SPAWNS_ENV,
 	type TaskToolDetails,
 	taskSchema,
 } from "./types";
 
-// Import review tools for side effects (registers subprocess tool handlers)
+// Import review tools for side effects (registers subagent tool handlers)
 import "../review";
+import type { ToolSession } from "..";
 
 /** Format byte count for display */
 function formatBytes(bytes: number): string {
@@ -83,17 +82,6 @@ function addUsageTotals(target: Usage, usage: Partial<Usage>): void {
 	target.cost.total += cost.total;
 }
 
-/** Session context interface */
-interface SessionContext {
-	getSessionFile: () => string | null;
-}
-
-/** Task tool options */
-interface TaskToolOptions {
-	/** Set of available tool names (for cross-tool awareness) */
-	availableTools?: Set<string>;
-}
-
 // Re-export types and utilities
 export { loadBundledAgents as BUNDLED_AGENTS } from "./agents";
 export { discoverCommands, expandCommand, getCommand } from "./commands";
@@ -107,166 +95,45 @@ export { taskSchema } from "./types";
 async function buildDescription(cwd: string): Promise<string> {
 	const { agents } = await discoverAgents(cwd);
 
-	const lines: string[] = [];
-
-	lines.push("Launch a new agent to handle complex, multi-step tasks autonomously.");
-	lines.push("");
-	lines.push(
-		"The Task tool launches specialized agents (subprocesses) that autonomously handle complex tasks. Each agent type has specific capabilities and tools available to it.",
-	);
-	lines.push("");
-	lines.push("Available agent types and the tools they have access to:");
-
+	// Build agents list
+	const agentLines: string[] = [];
 	for (const agent of agents.slice(0, MAX_AGENTS_IN_DESCRIPTION)) {
 		const tools = agent.tools?.join(", ") || "All tools";
-		lines.push(`- ${agent.name}: ${agent.description} (Tools: ${tools})`);
+		agentLines.push(`- ${agent.name}: ${agent.description} (Tools: ${tools})`);
 	}
 	if (agents.length > MAX_AGENTS_IN_DESCRIPTION) {
-		lines.push(`  ...and ${agents.length - MAX_AGENTS_IN_DESCRIPTION} more agents`);
+		agentLines.push(`  ...and ${agents.length - MAX_AGENTS_IN_DESCRIPTION} more agents`);
 	}
 
-	lines.push("");
-	lines.push("When NOT to use the Task tool:");
-	lines.push(
-		"- If you want to read a specific file path, use the Read or Glob tool instead of the Task tool, to find the match more quickly",
-	);
-	lines.push(
-		'- If you are searching for a specific class definition like "class Foo", use the Glob tool instead, to find the match more quickly',
-	);
-	lines.push(
-		"- If you are searching for code within a specific file or set of 2-3 files, use the Read tool instead of the Task tool, to find the match more quickly",
-	);
-	lines.push("- Other tasks that are not related to the agent descriptions above");
-	lines.push("");
-	lines.push("");
-	lines.push("Usage notes:");
-	lines.push("- Always include a short description of the task in the task parameter");
-	lines.push(
-		"- Prefer plan-then-execute: put shared constraints in context, keep each task focused, and specify output format and acceptance criteria",
-	);
-	lines.push(
-		"- Minimize tool chatter: avoid repeating large context and use the Output tool with output ids for full logs",
-	);
-	lines.push("- Launch multiple agents concurrently whenever possible, to maximize performance");
-	lines.push(
-		"- When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.",
-	);
-	lines.push(
-		"- Each agent invocation is stateless. You will not be able to send additional messages to the agent, nor will the agent be able to communicate with you outside of its final report. Therefore, your task should contain a highly detailed task description for the agent to perform autonomously and you should specify exactly what information the agent should return back to you in its final and only message to you.",
-	);
-	lines.push(
-		"- IMPORTANT: Agent results are intermediate data, not task completions. Use the agent's findings to continue executing the user's request. Do not treat agent reports as 'task complete' signals - they provide context for you to perform the actual work.",
-	);
-	lines.push("- The agent's outputs should generally be trusted");
-	lines.push(
-		"- Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.), since it is not aware of the user's intent",
-	);
-	lines.push(
-		"- If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.",
-	);
-	lines.push("");
-	lines.push("Parameters:");
-	lines.push(
-		`- tasks: Array of {agent, task, description?, model?} - tasks to run in parallel (max ${MAX_PARALLEL_TASKS}, ${MAX_CONCURRENCY} concurrent)`,
-	);
-	lines.push(
-		'  - model: (optional) Override the agent\'s default model with fuzzy matching (e.g., "sonnet", "codex", "5.2"). Supports comma-separated fallbacks: "gpt, opus" tries gpt first, then opus. Use "default" for omp\'s default model',
-	);
-	lines.push(
-		"- context: (optional) Shared context string prepended to all task prompts - use this to avoid repeating instructions",
-	);
-	lines.push("");
-	lines.push("Results are always written to {tempdir}/omp-task-{runId}/task_{agent}_{index}.md");
-	lines.push("");
-	lines.push("Example usage:");
-	lines.push("");
-	lines.push("<example_agent_descriptions>");
-	lines.push('"code-reviewer": use this agent after you are done writing a significant piece of code');
-	lines.push('"explore": use this agent for fast codebase exploration and research');
-	lines.push("</example_agent_descriptions>");
-	lines.push("");
-	lines.push("<example>");
-	lines.push('user: "Please write a function that checks if a number is prime"');
-	lines.push("assistant: Sure let me write a function that checks if a number is prime");
-	lines.push("assistant: I'm going to use the Write tool to write the following code:");
-	lines.push("<code>");
-	lines.push("function isPrime(n) {");
-	lines.push("  if (n <= 1) return false");
-	lines.push("  for (let i = 2; i * i <= n; i++) {");
-	lines.push("    if (n % i === 0) return false");
-	lines.push("  }");
-	lines.push("  return true");
-	lines.push("}");
-	lines.push("</code>");
-	lines.push("<commentary>");
-	lines.push(
-		"Since a significant piece of code was written and the task was completed, now use the code-reviewer agent to review the code",
-	);
-	lines.push("</commentary>");
-	lines.push("assistant: Now let me use the code-reviewer agent to review the code");
-	lines.push(
-		'assistant: Uses the Task tool: { tasks: [{ agent: "code-reviewer", task: "Review the isPrime function" }] }',
-	);
-	lines.push("</example>");
-	lines.push("");
-	lines.push("<example>");
-	lines.push('user: "Find all TODO comments in the codebase"');
-	lines.push("assistant: I'll use multiple explore agents to search different directories in parallel");
-	lines.push("assistant: Uses the Task tool:");
-	lines.push("{");
-	lines.push('  "context": "Find all TODO comments. Return file:line:content format.",');
-	lines.push('  "tasks": [');
-	lines.push('    { "agent": "explore", "task": "Search in src/" },');
-	lines.push('    { "agent": "explore", "task": "Search in lib/" },');
-	lines.push('    { "agent": "explore", "task": "Search in tests/" }');
-	lines.push("  ]");
-	lines.push("}");
-	lines.push("Results → {tempdir}/omp-task-{runId}/task_explore_*.md");
-	lines.push("</example>");
-
-	return lines.join("\n");
+	// Fill template placeholders
+	return taskDescriptionTemplate
+		.replace("{{AGENTS_LIST}}", agentLines.join("\n"))
+		.replace("{{MAX_PARALLEL_TASKS}}", String(MAX_PARALLEL_TASKS))
+		.replace("{{MAX_CONCURRENCY}}", String(MAX_CONCURRENCY));
 }
 
 /**
- * Create the task tool configured for a specific working directory.
+ * Create the task tool configured for a specific session.
  */
 export async function createTaskTool(
-	cwd: string,
-	sessionContext?: SessionContext,
-	options?: TaskToolOptions,
+	session: ToolSession,
 ): Promise<AgentTool<typeof taskSchema, TaskToolDetails, Theme>> {
-	const hasOutputTool = options?.availableTools?.has("output") ?? false;
-	// Check if subagents are completely inhibited (legacy recursion prevention)
-	if (process.env[OMP_NO_SUBAGENTS_ENV]) {
-		return {
-			name: "task",
-			label: "Task",
-			description: "Sub-agents disabled (recursion prevention)",
-			parameters: taskSchema,
-			execute: async () => ({
-				content: [{ type: "text", text: "Sub-agents are disabled for this agent (recursion prevention)." }],
-				details: {
-					projectAgentsDir: null,
-					results: [],
-					totalDurationMs: 0,
-				},
-			}),
-		};
-	}
-
 	// Check for same-agent blocking (allows other agent types)
-	const blockedAgent = process.env[OMP_BLOCKED_AGENT_ENV];
+	const blockedAgent = process.env.OMP_BLOCKED_AGENT;
+
+	// Build description upfront
+	const description = await buildDescription(session.cwd);
 
 	return {
 		name: "task",
 		label: "Task",
-		description: await buildDescription(cwd),
+		description,
 		parameters: taskSchema,
 		renderCall,
 		renderResult,
 		execute: async (_toolCallId, params, signal, onUpdate) => {
 			const startTime = Date.now();
-			const { agents, projectAgentsDir } = await discoverAgents(cwd);
+			const { agents, projectAgentsDir } = await discoverAgents(session.cwd);
 			const context = params.context;
 
 			// Handle empty or missing tasks
@@ -305,7 +172,7 @@ export async function createTaskTool(
 			}
 
 			// Derive artifacts directory
-			const sessionFile = sessionContext?.getSessionFile() ?? null;
+			const sessionFile = session.getSessionFile();
 			const artifactsDir = sessionFile ? getArtifactsDir(sessionFile) : null;
 			const tempArtifactsDir = artifactsDir ? null : createTempArtifactsDir();
 			const effectiveArtifactsDir = artifactsDir || tempArtifactsDir!;
@@ -370,13 +237,12 @@ export async function createTaskTool(
 				}
 
 				// Check spawn restrictions from parent
-				const parentSpawns = process.env[OMP_SPAWNS_ENV];
+				const parentSpawns = session.getSessionSpawns() ?? "*";
+				const allowedSpawns = parentSpawns.split(",").map((s) => s.trim());
 				const isSpawnAllowed = (agentName: string): boolean => {
-					if (parentSpawns === undefined) return true; // Root = allow all
 					if (parentSpawns === "") return false; // Empty = deny all
 					if (parentSpawns === "*") return true; // Wildcard = allow all
-					const allowed = new Set(parentSpawns.split(",").map((s) => s.trim()));
-					return allowed.has(agentName);
+					return allowedSpawns.includes(agentName);
 				};
 
 				for (const task of tasks) {
@@ -425,7 +291,7 @@ export async function createTaskTool(
 				const results = await mapWithConcurrencyLimit(tasksWithContext, MAX_CONCURRENCY, async (task, index) => {
 					const agent = getAgent(agents, task.agent)!;
 					return runSubprocess({
-						cwd,
+						cwd: session.cwd,
 						agent,
 						task: task.task,
 						description: task.description,
@@ -436,6 +302,7 @@ export async function createTaskTool(
 						persistArtifacts: !!artifactsDir,
 						artifactsDir: effectiveArtifactsDir,
 						signal,
+						eventBus: undefined,
 						onProgress: (progress) => {
 							progressMap.set(index, structuredClone(progress));
 							emitProgress();
@@ -469,26 +336,21 @@ export async function createTaskTool(
 					const status = r.exitCode === 0 ? "completed" : `failed (exit ${r.exitCode})`;
 					const output = r.output.trim() || r.stderr.trim() || "(no output)";
 					const preview = output.split("\n").slice(0, 5).join("\n");
-					// Include output metadata and ID; include path only if Output tool unavailable (for Read fallback)
+					// Include output metadata and ID
 					const outputId = `${r.agent}_${r.index}`;
 					const meta = r.outputMeta
 						? ` [${r.outputMeta.lineCount} lines, ${formatBytes(r.outputMeta.charCount)}]`
 						: "";
-					const pathInfo = !hasOutputTool && r.artifactPaths?.outputPath ? ` (${r.artifactPaths.outputPath})` : "";
-					return `[${r.agent}] ${status}${meta} ${outputId}${pathInfo}\n${preview}`;
+					return `[${r.agent}] ${status}${meta} ${outputId}\n${preview}`;
 				});
 
 				const skippedNote =
 					skippedSelfRecursion > 0
-						? ` (${skippedSelfRecursion} ${blockedAgent} task${
-								skippedSelfRecursion > 1 ? "s" : ""
-							} skipped - self-recursion blocked)`
+						? ` (${skippedSelfRecursion} ${blockedAgent} task${skippedSelfRecursion > 1 ? "s" : ""} skipped - self-recursion blocked)`
 						: "";
 				const outputIds = results.map((r) => `${r.agent}_${r.index}`);
 				const outputHint =
-					hasOutputTool && outputIds.length > 0
-						? `\n\nUse output tool for full logs: output ids ${outputIds.join(", ")}`
-						: "";
+					outputIds.length > 0 ? `\n\nUse output tool for full logs: output ids ${outputIds.join(", ")}` : "";
 				const summary = `${successCount}/${results.length} succeeded${skippedNote} [${formatDuration(
 					totalDuration,
 				)}]\n\n${summaries.join("\n\n---\n\n")}${outputHint}`;
@@ -527,16 +389,15 @@ export async function createTaskTool(
 	};
 }
 
-// Default task tool using process.cwd() - returns a placeholder sync tool
-// Real implementations should use createTaskTool() which properly initializes the tool
+// Default task tool - returns a placeholder tool
+// Real implementations should use createTaskTool(session) to initialize the tool
 export const taskTool: AgentTool<typeof taskSchema, TaskToolDetails, Theme> = {
 	name: "task",
 	label: "Task",
-	description:
-		"Launch a new agent to handle complex, multi-step tasks autonomously. (Agent discovery pending - use createTaskTool for full functionality)",
+	description: "Launch a new agent to handle complex, multi-step tasks autonomously.",
 	parameters: taskSchema,
 	execute: async () => ({
-		content: [{ type: "text", text: "Task tool not properly initialized. Use createTaskTool(cwd) instead." }],
+		content: [{ type: "text", text: "Task tool not properly initialized. Use createTaskTool(session) instead." }],
 		details: {
 			projectAgentsDir: null,
 			results: [],

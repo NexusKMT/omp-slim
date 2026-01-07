@@ -1,14 +1,14 @@
 export { type AskToolDetails, askTool, createAskTool } from "./ask";
-export { type BashToolDetails, bashTool, createBashTool } from "./bash";
-export { createEditTool, type EditToolOptions, editTool } from "./edit";
+export { type BashToolDetails, createBashTool } from "./bash";
+export { createEditTool } from "./edit";
 // Exa MCP tools (22 tools)
 export { exaTools } from "./exa/index";
 export type { ExaRenderDetails, ExaSearchResponse, ExaSearchResult } from "./exa/types";
-export { createFindTool, type FindToolDetails, findTool } from "./find";
+export { createFindTool, type FindToolDetails } from "./find";
 export { setPreferredImageProvider } from "./gemini-image";
 export { createGitTool, type GitToolDetails, gitTool } from "./git";
-export { createGrepTool, type GrepToolDetails, grepTool } from "./grep";
-export { createLsTool, type LsToolDetails, lsTool } from "./ls";
+export { createGrepTool, type GrepToolDetails } from "./grep";
+export { createLsTool, type LsToolDetails } from "./ls";
 export {
 	createLspTool,
 	type FileDiagnosticsResult,
@@ -20,14 +20,14 @@ export {
 	lspTool,
 	warmupLspServers,
 } from "./lsp/index";
-export { createNotebookTool, type NotebookToolDetails, notebookTool } from "./notebook";
-export { createOutputTool, type OutputToolDetails, outputTool } from "./output";
-export { createReadTool, type ReadToolDetails, type ReadToolOptions, readTool } from "./read";
-export { createReportFindingTool, createSubmitReviewTool, reportFindingTool, submitReviewTool } from "./review";
-export { createRulebookTool, filterRulebookRules, formatRulesForPrompt, type RulebookToolDetails } from "./rulebook";
+export { createNotebookTool, type NotebookToolDetails } from "./notebook";
+export { createOutputTool, type OutputToolDetails } from "./output";
+export { createReadTool, type ReadToolDetails } from "./read";
+export { reportFindingTool, submitReviewTool } from "./review";
+export { filterRulebookRules, formatRulesForPrompt, type RulebookToolDetails } from "./rulebook";
 export { BUNDLED_AGENTS, createTaskTool, taskTool } from "./task/index";
 export type { TruncationResult } from "./truncate";
-export { createWebFetchTool, type WebFetchToolDetails, webFetchCustomTool, webFetchTool } from "./web-fetch";
+export { createWebFetchTool, type WebFetchToolDetails } from "./web-fetch";
 export {
 	companyWebSearchTools,
 	createWebSearchTool,
@@ -47,247 +47,104 @@ export {
 	webSearchLinkedinTool,
 	webSearchTool,
 } from "./web-search/index";
-export { createWriteTool, type WriteToolDetails, type WriteToolOptions, writeTool } from "./write";
+export { createWriteTool, type WriteToolDetails } from "./write";
 
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
-import { askTool, createAskTool } from "./ask";
-import { bashTool, createBashTool } from "./bash";
-import { checkBashInterception, checkSimpleLsInterception } from "./bash-interceptor";
-import { createEditTool, editTool } from "./edit";
-import { createFindTool, findTool } from "./find";
-import { createGitTool, gitTool } from "./git";
-import { createGrepTool, grepTool } from "./grep";
-import { createLsTool, lsTool } from "./ls";
-import { createLspTool, createLspWritethrough, lspTool } from "./lsp/index";
-import { createNotebookTool, notebookTool } from "./notebook";
-import { createOutputTool, outputTool } from "./output";
-import { createReadTool, readTool } from "./read";
-import { createReportFindingTool, createSubmitReviewTool, reportFindingTool, submitReviewTool } from "./review";
-import { createTaskTool, taskTool } from "./task/index";
-import { createWebFetchTool, webFetchTool } from "./web-fetch";
-import { createWebSearchTool, webSearchTool } from "./web-search/index";
-import { createWriteTool, writeTool } from "./write";
+import type { Rule } from "../../capability/rule";
+import type { EventBus } from "../event-bus";
+import { createAskTool } from "./ask";
+import { createBashTool } from "./bash";
+import { createEditTool } from "./edit";
+import { createFindTool } from "./find";
+import { createGitTool } from "./git";
+import { createGrepTool } from "./grep";
+import { createLsTool } from "./ls";
+import { createLspTool } from "./lsp/index";
+import { createNotebookTool } from "./notebook";
+import { createOutputTool } from "./output";
+import { createReadTool } from "./read";
+import { reportFindingTool, submitReviewTool } from "./review";
+import { createRulebookTool } from "./rulebook";
+import { createTaskTool } from "./task/index";
+import { createWebFetchTool } from "./web-fetch";
+import { createWebSearchTool } from "./web-search/index";
+import { createWriteTool } from "./write";
 
 /** Tool type (AgentTool from pi-ai) */
 export type Tool = AgentTool<any, any, any>;
 
-/** Context for tools that need session information */
-export interface SessionContext {
+/** Session context for tool factories */
+export interface ToolSession {
+	/** Current working directory */
+	cwd: string;
+	/** Whether UI is available */
+	hasUI: boolean;
+	/** Rulebook rules */
+	rulebookRules: Rule[];
+	/** Event bus for tool/extension communication */
+	eventBus?: EventBus;
+	/** Get session file */
 	getSessionFile: () => string | null;
-}
-
-/** Options for creating coding tools */
-export interface CodingToolsOptions {
-	/** Whether to fetch LSP diagnostics after write tool writes files (default: true) */
-	lspDiagnosticsOnWrite?: boolean;
-	/** Whether to fetch LSP diagnostics after edit tool edits files (default: false) */
-	lspDiagnosticsOnEdit?: boolean;
-	/** Whether to format files using LSP after write tool writes (default: true) */
-	lspFormatOnWrite?: boolean;
-	/** Whether to accept high-confidence fuzzy matches in edit tool (default: true) */
-	editFuzzyMatch?: boolean;
-	/** Whether to auto-resize images to 2000x2000 max in read tool (default: true) */
-	readAutoResizeImages?: boolean;
-	/** Set of tool names available to the agent (for cross-tool awareness) */
-	availableTools?: Set<string>;
-}
-
-// Factory function type
-type ToolFactory = (cwd: string, sessionContext?: SessionContext, options?: CodingToolsOptions) => Tool | Promise<Tool>;
-
-// Tool definitions: static tools and their factory functions
-const toolDefs: Record<string, { tool: Tool; create: ToolFactory }> = {
-	ask: { tool: askTool, create: createAskTool },
-	read: {
-		tool: readTool,
-		create: (cwd, _ctx, options) => createReadTool(cwd, { autoResizeImages: options?.readAutoResizeImages ?? true }),
-	},
-	bash: { tool: bashTool, create: createBashTool },
-	edit: {
-		tool: editTool,
-		create: (cwd, _ctx, options) => {
-			const enableDiagnostics = options?.lspDiagnosticsOnEdit ?? false;
-			const enableFormat = options?.lspFormatOnWrite ?? true;
-			const writethrough = createLspWritethrough(cwd, {
-				enableFormat,
-				enableDiagnostics,
-			});
-			return createEditTool(cwd, { fuzzyMatch: options?.editFuzzyMatch ?? true, writethrough });
-		},
-	},
-	write: {
-		tool: writeTool,
-		create: (cwd, _ctx, options) => {
-			const enableFormat = options?.lspFormatOnWrite ?? true;
-			const enableDiagnostics = options?.lspDiagnosticsOnWrite ?? true;
-			const writethrough = createLspWritethrough(cwd, {
-				enableFormat,
-				enableDiagnostics,
-			});
-			return createWriteTool(cwd, { writethrough });
-		},
-	},
-	grep: { tool: grepTool, create: createGrepTool },
-	find: { tool: findTool, create: createFindTool },
-	git: { tool: gitTool, create: createGitTool },
-	ls: { tool: lsTool, create: createLsTool },
-	lsp: { tool: lspTool, create: createLspTool },
-	notebook: { tool: notebookTool, create: createNotebookTool },
-	output: { tool: outputTool, create: (cwd, ctx) => createOutputTool(cwd, ctx) },
-	task: { tool: taskTool, create: (cwd, ctx, opts) => createTaskTool(cwd, ctx, opts) },
-	web_fetch: { tool: webFetchTool, create: createWebFetchTool },
-	web_search: { tool: webSearchTool, create: createWebSearchTool },
-	report_finding: { tool: reportFindingTool, create: createReportFindingTool },
-	submit_review: { tool: submitReviewTool, create: createSubmitReviewTool },
-};
-
-export type ToolName = keyof typeof toolDefs;
-
-// Tools that require UI (excluded when hasUI is false)
-const uiToolNames: ToolName[] = ["ask"];
-
-// Tool sets defined by name (base sets, without UI-only tools)
-export const baseCodingToolNames: ToolName[] = [
-	"read",
-	"bash",
-	"edit",
-	"write",
-	"grep",
-	"find",
-	"git",
-	"ls",
-	"lsp",
-	"notebook",
-	"output",
-	"task",
-	"web_fetch",
-	"web_search",
-];
-const baseReadOnlyToolNames: ToolName[] = ["read", "grep", "find", "ls"];
-
-// Default tools for full access mode (using process.cwd(), no UI)
-export const codingTools: Tool[] = baseCodingToolNames.map((name) => toolDefs[name].tool);
-
-// Read-only tools for exploration without modification (using process.cwd(), no UI)
-export const readOnlyTools: Tool[] = baseReadOnlyToolNames.map((name) => toolDefs[name].tool);
-
-// All available tools (using process.cwd(), no UI)
-export const allTools = Object.fromEntries(Object.entries(toolDefs).map(([name, def]) => [name, def.tool])) as Record<
-	ToolName,
-	Tool
->;
-
-/**
- * Create coding tools configured for a specific working directory.
- * @param cwd - Working directory for tools
- * @param hasUI - Whether UI is available (includes ask tool if true)
- * @param sessionContext - Optional session context for tools that need it
- * @param options - Options for tool configuration
- */
-export async function createCodingTools(
-	cwd: string,
-	hasUI = false,
-	sessionContext?: SessionContext,
-	options?: CodingToolsOptions,
-): Promise<Tool[]> {
-	const names = hasUI ? [...baseCodingToolNames, ...uiToolNames] : baseCodingToolNames;
-	const optionsWithTools = { ...options, availableTools: new Set(names) };
-	return Promise.all(names.map((name) => toolDefs[name].create(cwd, sessionContext, optionsWithTools)));
-}
-
-/**
- * Create read-only tools configured for a specific working directory.
- * @param cwd - Working directory for tools
- * @param hasUI - Whether UI is available (includes ask tool if true)
- * @param sessionContext - Optional session context for tools that need it
- * @param options - Options for tool configuration
- */
-export async function createReadOnlyTools(
-	cwd: string,
-	hasUI = false,
-	sessionContext?: SessionContext,
-	options?: CodingToolsOptions,
-): Promise<Tool[]> {
-	const names = hasUI ? [...baseReadOnlyToolNames, ...uiToolNames] : baseReadOnlyToolNames;
-	const optionsWithTools = { ...options, availableTools: new Set(names) };
-	return Promise.all(names.map((name) => toolDefs[name].create(cwd, sessionContext, optionsWithTools)));
-}
-
-/**
- * Create all tools configured for a specific working directory.
- * @param cwd - Working directory for tools
- * @param sessionContext - Optional session context for tools that need it
- * @param options - Options for tool configuration
- */
-export async function createAllTools(
-	cwd: string,
-	sessionContext?: SessionContext,
-	options?: CodingToolsOptions,
-): Promise<Record<ToolName, Tool>> {
-	const names = Object.keys(toolDefs);
-	const optionsWithTools = { ...options, availableTools: new Set(names) };
-	const entries = await Promise.all(
-		Object.entries(toolDefs).map(async ([name, def]) => [
-			name,
-			await def.create(cwd, sessionContext, optionsWithTools),
-		]),
-	);
-	return Object.fromEntries(entries) as Record<ToolName, Tool>;
-}
-
-/**
- * Wrap a bash tool with interception that redirects common patterns to specialized tools.
- * This helps prevent LLMs from falling back to shell commands when better tools exist.
- *
- * @param bashTool - The bash tool to wrap
- * @param availableTools - Set of tool names that are available (for context-aware blocking)
- * @returns Wrapped bash tool with interception
- */
-export function wrapBashWithInterception(bashTool: Tool, availableTools: Set<string>): Tool {
-	const originalExecute = bashTool.execute;
-
-	return {
-		...bashTool,
-		execute: async (toolCallId, params, signal, onUpdate, context) => {
-			const command = (params as { command: string }).command;
-
-			// Check for forbidden patterns
-			const interception = checkBashInterception(command, availableTools);
-			if (interception.block) {
-				throw new Error(interception.message);
-			}
-
-			// Check for simple ls that should use ls tool
-			const lsInterception = checkSimpleLsInterception(command, availableTools);
-			if (lsInterception.block) {
-				throw new Error(lsInterception.message);
-			}
-
-			// Pass through to original bash tool
-			return originalExecute(toolCallId, params, signal, onUpdate, context);
-		},
+	/** Get session spawns */
+	getSessionSpawns: () => string | null;
+	/** Settings manager (optional) */
+	settings?: {
+		getImageAutoResize(): boolean;
+		getLspFormatOnWrite(): boolean;
+		getLspDiagnosticsOnWrite(): boolean;
+		getLspDiagnosticsOnEdit(): boolean;
+		getEditFuzzyMatch(): boolean;
+		getGitToolEnabled(): boolean;
+		getBashInterceptorEnabled(): boolean;
 	};
 }
 
-/**
- * Apply bash interception to a set of tools.
- * Finds the bash tool and wraps it with interception based on other available tools.
- *
- * @param tools - Array of tools to process
- * @returns Tools with bash interception applied
- */
-export function applyBashInterception(tools: Tool[]): Tool[] {
-	const toolNames = new Set(tools.map((t) => t.name));
+type ToolFactory = (session: ToolSession) => Tool | null | Promise<Tool | null>;
 
-	// If bash isn't in the tools, nothing to do
-	if (!toolNames.has("bash")) {
-		return tools;
+export const BUILTIN_TOOLS: Record<string, ToolFactory> = {
+	ask: createAskTool,
+	bash: createBashTool,
+	edit: createEditTool,
+	find: createFindTool,
+	git: createGitTool,
+	grep: createGrepTool,
+	ls: createLsTool,
+	lsp: createLspTool,
+	notebook: createNotebookTool,
+	output: createOutputTool,
+	read: createReadTool,
+	rulebook: createRulebookTool,
+	task: createTaskTool,
+	web_fetch: createWebFetchTool,
+	web_search: createWebSearchTool,
+	write: createWriteTool,
+};
+
+export const HIDDEN_TOOLS: Record<string, ToolFactory> = {
+	report_finding: () => reportFindingTool,
+	submit_review: () => submitReviewTool,
+};
+
+export type ToolName = keyof typeof BUILTIN_TOOLS;
+
+/**
+ * Create tools from BUILTIN_TOOLS registry.
+ */
+export async function createTools(session: ToolSession, toolNames?: string[]): Promise<Tool[]> {
+	const requestedTools = toolNames && toolNames.length > 0 ? toolNames : undefined;
+	const allTools: Record<string, ToolFactory> = { ...BUILTIN_TOOLS, ...HIDDEN_TOOLS };
+	const entries = requestedTools
+		? requestedTools
+				.filter((name, index) => requestedTools.indexOf(name) === index && name in allTools)
+				.map((name) => [name, allTools[name]] as const)
+		: Object.entries(BUILTIN_TOOLS);
+	const results = await Promise.all(entries.map(([, factory]) => factory(session)));
+	const tools = results.filter((t): t is Tool => t !== null);
+
+	if (requestedTools) {
+		const allowed = new Set(requestedTools);
+		return tools.filter((tool) => allowed.has(tool.name));
 	}
 
-	return tools.map((tool) => {
-		if (tool.name === "bash") {
-			return wrapBashWithInterception(tool, toolNames);
-		}
-		return tool;
-	});
+	return tools;
 }

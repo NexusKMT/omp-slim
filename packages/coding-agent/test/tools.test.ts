@@ -2,13 +2,14 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bashTool } from "../src/core/tools/bash";
-import { editTool } from "../src/core/tools/edit";
-import { findTool } from "../src/core/tools/find";
-import { grepTool } from "../src/core/tools/grep";
-import { lsTool } from "../src/core/tools/ls";
-import { readTool } from "../src/core/tools/read";
-import { writeTool } from "../src/core/tools/write";
+import { createBashTool } from "../src/core/tools/bash";
+import { createEditTool } from "../src/core/tools/edit";
+import { createFindTool } from "../src/core/tools/find";
+import { createGrepTool } from "../src/core/tools/grep";
+import type { ToolSession } from "../src/core/tools/index";
+import { createLsTool } from "../src/core/tools/ls";
+import { createReadTool } from "../src/core/tools/read";
+import { createWriteTool } from "../src/core/tools/write";
 
 // Helper to extract text from content blocks
 function getTextOutput(result: any): string {
@@ -20,13 +21,40 @@ function getTextOutput(result: any): string {
 	);
 }
 
+function createTestToolSession(cwd: string): ToolSession {
+	return {
+		cwd,
+		hasUI: false,
+		rulebookRules: [],
+		getSessionFile: () => null,
+		getSessionSpawns: () => "*",
+	};
+}
+
 describe("Coding Agent Tools", () => {
 	let testDir: string;
+	let readTool: ReturnType<typeof createReadTool>;
+	let writeTool: ReturnType<typeof createWriteTool>;
+	let editTool: ReturnType<typeof createEditTool>;
+	let bashTool: ReturnType<typeof createBashTool>;
+	let grepTool: ReturnType<typeof createGrepTool>;
+	let findTool: ReturnType<typeof createFindTool>;
+	let lsTool: ReturnType<typeof createLsTool>;
 
 	beforeEach(() => {
 		// Create a unique temporary directory for each test
 		testDir = join(tmpdir(), `coding-agent-test-${Date.now()}`);
 		mkdirSync(testDir, { recursive: true });
+
+		// Create tools for this test directory
+		const session = createTestToolSession(testDir);
+		readTool = createReadTool(session);
+		writeTool = createWriteTool(session);
+		editTool = createEditTool(session);
+		bashTool = createBashTool(session);
+		grepTool = createGrepTool(session);
+		findTool = createFindTool(session);
+		lsTool = createLsTool(session);
 	});
 
 	afterEach(() => {
@@ -461,10 +489,12 @@ function b() {
 
 describe("edit tool CRLF handling", () => {
 	let testDir: string;
+	let editTool: ReturnType<typeof createEditTool>;
 
 	beforeEach(() => {
 		testDir = join(tmpdir(), `coding-agent-crlf-test-${Date.now()}`);
 		mkdirSync(testDir, { recursive: true });
+		editTool = createEditTool(createTestToolSession(testDir));
 	});
 
 	afterEach(() => {

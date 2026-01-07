@@ -181,19 +181,29 @@ function renderAgentProgress(
 
 	lines.push(statusLine);
 
-	// Current tool (if running)
-	if (progress.status === "running" && progress.currentTool) {
-		let toolLine = `${continuePrefix}${theme.tree.hook} ${theme.fg("muted", progress.currentTool)}`;
-		if (progress.currentToolArgs) {
-			toolLine += `: ${theme.fg("dim", truncate(progress.currentToolArgs, 40, theme.format.ellipsis))}`;
-		}
-		if (progress.currentToolStartMs) {
-			const elapsed = Date.now() - progress.currentToolStartMs;
-			if (elapsed > 5000) {
-				toolLine += `${theme.sep.dot}${theme.fg("warning", formatDuration(elapsed))}`;
+	// Current tool (if running) or most recent completed tool
+	if (progress.status === "running") {
+		if (progress.currentTool) {
+			let toolLine = `${continuePrefix}${theme.tree.hook} ${theme.fg("muted", progress.currentTool)}`;
+			if (progress.currentToolArgs) {
+				toolLine += `: ${theme.fg("dim", truncate(progress.currentToolArgs, 40, theme.format.ellipsis))}`;
 			}
+			if (progress.currentToolStartMs) {
+				const elapsed = Date.now() - progress.currentToolStartMs;
+				if (elapsed > 5000) {
+					toolLine += `${theme.sep.dot}${theme.fg("warning", formatDuration(elapsed))}`;
+				}
+			}
+			lines.push(toolLine);
+		} else if (progress.recentTools.length > 0) {
+			// Show most recent completed tool when idle between tools
+			const recent = progress.recentTools[0];
+			let toolLine = `${continuePrefix}${theme.tree.hook} ${theme.fg("dim", recent.tool)}`;
+			if (recent.args) {
+				toolLine += `: ${theme.fg("dim", truncate(recent.args, 40, theme.format.ellipsis))}`;
+			}
+			lines.push(toolLine);
 		}
-		lines.push(toolLine);
 	}
 
 	// Render extracted tool data inline (e.g., review findings)

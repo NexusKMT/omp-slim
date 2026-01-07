@@ -16,7 +16,6 @@ export function wrapCustomTool(tool: CustomTool, getContext: () => CustomToolCon
 		label: tool.label,
 		description: tool.description,
 		parameters: tool.parameters,
-		hidden: tool.hidden,
 		execute: (toolCallId, params, signal, onUpdate, context) =>
 			tool.execute(toolCallId, params, onUpdate, context ?? getContext(), signal),
 		renderCall: tool.renderCall ? (args, theme) => tool.renderCall?.(args, theme as Theme) : undefined,

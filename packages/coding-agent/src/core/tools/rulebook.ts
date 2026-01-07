@@ -9,6 +9,7 @@
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import type { Rule } from "../../capability/rule";
+import type { ToolSession } from "./index";
 
 export interface RulebookToolDetails {
 	type: "rulebook";
@@ -23,9 +24,14 @@ const rulebookSchema = Type.Object({
 
 /**
  * Create a rulebook tool with access to discovered rules.
- * @param rules - Array of discovered rules (non-TTSR rules with descriptions)
+ * Returns null if no rules available.
  */
-export function createRulebookTool(rules: Rule[]): AgentTool<typeof rulebookSchema> {
+export function createRulebookTool(session: ToolSession): AgentTool<typeof rulebookSchema> | null {
+	const rules = session.rulebookRules;
+	if (!rules || rules.length === 0) {
+		return null;
+	}
+
 	// Build lookup map for O(1) access
 	const ruleMap = new Map<string, Rule>();
 	for (const rule of rules) {

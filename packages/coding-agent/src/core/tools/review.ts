@@ -19,13 +19,6 @@ const PRIORITY_LABELS: Record<number, string> = {
 	3: "P3",
 };
 
-const _PRIORITY_DESCRIPTIONS: Record<number, string> = {
-	0: "Drop everything to fix. Blocking release, operations, or major usage.",
-	1: "Urgent. Should be addressed in the next cycle.",
-	2: "Normal. To be fixed eventually.",
-	3: "Low. Nice to have.",
-};
-
 // report_finding schema
 const ReportFindingParams = Type.Object({
 	title: Type.String({
@@ -62,8 +55,6 @@ export const reportFindingTool: AgentTool<typeof ReportFindingParams, ReportFind
 	label: "Report Finding",
 	description: "Report a code review finding. Use this for each issue found. Call submit_review when done.",
 	parameters: ReportFindingParams,
-	hidden: true,
-
 	async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 		const { title, body, priority, confidence, file_path, line_start, line_end } = params;
 		const location = `${file_path}:${line_start}${line_end !== line_start ? `-${line_end}` : ""}`;
@@ -142,7 +133,6 @@ export const submitReviewTool: AgentTool<typeof SubmitReviewParams, SubmitReview
 	label: "Submit Review",
 	description: "Submit the final review verdict. Call this after all findings have been reported.",
 	parameters: SubmitReviewParams,
-	hidden: true,
 
 	async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 		const { overall_correctness, explanation, confidence } = params;
@@ -205,14 +195,6 @@ export const submitReviewTool: AgentTool<typeof SubmitReviewParams, SubmitReview
 		return container;
 	},
 };
-
-export function createReportFindingTool(): AgentTool<typeof ReportFindingParams, ReportFindingDetails, Theme> {
-	return reportFindingTool;
-}
-
-export function createSubmitReviewTool(): AgentTool<typeof SubmitReviewParams, SubmitReviewDetails, Theme> {
-	return submitReviewTool;
-}
 
 // Re-export types for external use
 export type { ReportFindingDetails, SubmitReviewDetails };

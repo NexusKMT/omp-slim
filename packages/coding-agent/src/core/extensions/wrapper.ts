@@ -138,10 +138,3 @@ export function wrapToolWithExtensions<T>(tool: AgentTool<any, T>, runner: Exten
 		},
 	};
 }
-
-/**
- * Wrap all tools with extension callbacks.
- */
-export function wrapToolsWithExtensions<T>(tools: AgentTool<any, T>[], runner: ExtensionRunner): AgentTool<any, T>[] {
-	return tools.map((tool) => wrapToolWithExtensions(tool, runner));
-}

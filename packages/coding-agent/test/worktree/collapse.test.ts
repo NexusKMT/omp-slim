@@ -1,7 +1,7 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { collapse } from "../../src/lib/worktree/collapse";
 import { WORKTREE_BASE } from "../../src/lib/worktree/constants";
 import { getRepoRoot, git } from "../../src/lib/worktree/git";

@@ -19,14 +19,11 @@ export const MAX_OUTPUT_LINES = 5000;
 /** Maximum agents to show in description */
 export const MAX_AGENTS_IN_DESCRIPTION = 10;
 
-/** Environment variable to inhibit subagent spawning (legacy, still checked for backwards compat) */
-export const OMP_NO_SUBAGENTS_ENV = "OMP_NO_SUBAGENTS";
+/** EventBus channel for raw subagent events */
+export const TASK_SUBAGENT_EVENT_CHANNEL = "task:subagent:event";
 
-/** Environment variable containing blocked agent name (self-recursion prevention) */
-export const OMP_BLOCKED_AGENT_ENV = "OMP_BLOCKED_AGENT";
-
-/** Environment variable containing allowed spawn list (propagated to subprocesses) */
-export const OMP_SPAWNS_ENV = "OMP_SPAWNS";
+/** EventBus channel for aggregated subagent progress */
+export const TASK_SUBAGENT_PROGRESS_CHANNEL = "task:subagent:progress";
 
 /** Single task item for parallel execution */
 export const taskItemSchema = Type.Object({
@@ -81,7 +78,6 @@ export interface AgentDefinition {
 	tools?: string[];
 	spawns?: string[] | "*";
 	model?: string;
-	recursive?: boolean;
 	source: AgentSource;
 	filePath?: string;
 }

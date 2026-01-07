@@ -14,7 +14,7 @@ import { Type } from "@sinclair/typebox";
 import type { Theme } from "../../modes/interactive/theme/theme";
 import outputDescription from "../../prompts/tools/output.md" with { type: "text" };
 import type { RenderResultOptions } from "../custom-tools/types";
-import type { SessionContext } from "./index";
+import type { ToolSession } from "./index";
 import {
 	formatCount,
 	formatEmptyMessage,
@@ -120,10 +120,7 @@ function extractPreviewLines(content: string, maxLines: number): string[] {
 	return preview;
 }
 
-export function createOutputTool(
-	_cwd: string,
-	sessionContext?: SessionContext,
-): AgentTool<typeof outputSchema, OutputToolDetails> {
+export function createOutputTool(session: ToolSession): AgentTool<typeof outputSchema, OutputToolDetails> {
 	return {
 		name: "output",
 		label: "Output",
@@ -133,7 +130,7 @@ export function createOutputTool(
 			_toolCallId: string,
 			params: { ids: string[]; format?: "raw" | "json" | "stripped"; offset?: number; limit?: number },
 		): Promise<{ content: TextContent[]; details: OutputToolDetails }> => {
-			const sessionFile = sessionContext?.getSessionFile();
+			const sessionFile = session.getSessionFile();
 
 			if (!sessionFile) {
 				return {
@@ -253,9 +250,6 @@ export function createOutputTool(
 	};
 }
 
-/** Default output tool using process.cwd() - for backwards compatibility */
-export const outputTool = createOutputTool(process.cwd());
-
 // =============================================================================
 // TUI Renderer
 // =============================================================================
@@ -309,15 +303,9 @@ export const outputToolRenderer = {
 			const icon = uiTheme.styledSymbol("status.error", "error");
 			let text = `${icon} ${uiTheme.fg("error", `Error: Not found: ${details.notFound.join(", ")}`)}`;
 			if (details.availableIds?.length) {
-				text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg(
-					"muted",
-					`Available: ${details.availableIds.join(", ")}`,
-				)}`;
+				text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg("muted", `Available: ${details.availableIds.join(", ")}`)}`;
 			} else {
-				text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg(
-					"muted",
-					"No outputs available in current session",
-				)}`;
+				text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg("muted", "No outputs available in current session")}`;
 			}
 			return new Text(text, 0, 0);
 		}

@@ -5,7 +5,6 @@
  */
 
 // Embed agent markdown files at build time
-import browserMd from "../../../prompts/browser.md" with { type: "text" };
 import exploreMd from "../../../prompts/explore.md" with { type: "text" };
 import planMd from "../../../prompts/plan.md" with { type: "text" };
 import reviewerMd from "../../../prompts/reviewer.md" with { type: "text" };
@@ -13,11 +12,37 @@ import taskMd from "../../../prompts/task.md" with { type: "text" };
 import type { AgentDefinition, AgentSource } from "./types";
 
 const EMBEDDED_AGENTS: { name: string; content: string }[] = [
-	{ name: "browser.md", content: browserMd },
 	{ name: "explore.md", content: exploreMd },
 	{ name: "plan.md", content: planMd },
 	{ name: "reviewer.md", content: reviewerMd },
-	{ name: "task.md", content: taskMd },
+	{
+		name: "task.md",
+		content: `---
+name: task
+description: General-purpose subagent with full capabilities for delegated multi-step tasks
+spawns: explore
+model: default
+---
+${taskMd}`,
+	},
+	{
+		name: "quick_task.md",
+		content: `---
+name: quick_task
+description: Quick task for fast execution
+model: pi/smol
+---
+${taskMd}`,
+	},
+	{
+		name: "deep_task.md",
+		content: `---
+name: deep_task
+description: Deep task for comprehensive reasoning
+model: pi/slow
+---
+${taskMd}`,
+	},
 ];
 
 /**
@@ -88,16 +113,12 @@ function parseAgent(fileName: string, content: string, source: AgentSource): Age
 		spawns = "*";
 	}
 
-	const recursive =
-		frontmatter.recursive === undefined ? false : frontmatter.recursive === "true" || frontmatter.recursive === "1";
-
 	return {
 		name: frontmatter.name,
 		description: frontmatter.description,
 		tools: tools && tools.length > 0 ? tools : undefined,
 		spawns,
 		model: frontmatter.model,
-		recursive,
 		systemPrompt: body,
 		source,
 		filePath: `embedded:${fileName}`,

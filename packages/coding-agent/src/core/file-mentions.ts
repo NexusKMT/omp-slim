@@ -6,9 +6,9 @@
  * so the agent doesn't need to read them manually.
  */
 
+import path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { FileMentionMessage } from "./messages";
-import { createReadTool } from "./tools/read";
 
 /** Regex to match @filepath patterns in text */
 const FILE_MENTION_REGEX = /@((?:[^\s@]+\/)*[^\s@]+\.[a-zA-Z0-9]+)/g;
@@ -26,17 +26,14 @@ export function extractFileMentions(text: string): string[] {
 export async function generateFileMentionMessages(filePaths: string[], cwd: string): Promise<AgentMessage[]> {
 	if (filePaths.length === 0) return [];
 
-	const readTool = createReadTool(cwd);
 	const files: FileMentionMessage["files"] = [];
 
 	for (const filePath of filePaths) {
 		try {
-			const result = await readTool.execute("auto-read", { path: filePath });
-			const textContent = result.content.find((c) => c.type === "text");
-			if (textContent && textContent.type === "text") {
-				const lineCount = textContent.text.split("\n").length;
-				files.push({ path: filePath, content: textContent.text, lineCount });
-			}
+			const absolutePath = path.resolve(cwd, filePath);
+			const content = await Bun.file(absolutePath).text();
+			const lineCount = content.split("\n").length;
+			files.push({ path: filePath, content, lineCount });
 		} catch {
 			// File doesn't exist or isn't readable - skip silently
 		}

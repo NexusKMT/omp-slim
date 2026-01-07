@@ -126,18 +126,12 @@ function loadAgentsFromDir(dir: string, source: AgentSource): AgentDefinition[] 
 			spawns = "*";
 		}
 
-		const recursive =
-			frontmatter.recursive === undefined
-				? undefined
-				: frontmatter.recursive === "true" || frontmatter.recursive === "1";
-
 		agents.push({
 			name: frontmatter.name,
 			description: frontmatter.description,
 			tools: tools && tools.length > 0 ? tools : undefined,
 			spawns,
 			model: frontmatter.model,
-			recursive,
 			systemPrompt: body,
 			source,
 			filePath,

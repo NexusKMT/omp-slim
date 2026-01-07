@@ -81,6 +81,8 @@ export { ModelRegistry } from "./core/model-registry";
 export type { PromptTemplate } from "./core/prompt-templates";
 // SDK for programmatic usage
 export {
+	// Tool factories
+	BUILTIN_TOOLS,
 	type BuildSystemPromptOptions,
 	buildSystemPrompt,
 	type CreateAgentSessionOptions,
@@ -88,14 +90,12 @@ export {
 	// Factory
 	createAgentSession,
 	createBashTool,
-	// Tool factories (for custom cwd)
-	createCodingTools,
 	createEditTool,
 	createFindTool,
 	createGrepTool,
 	createLsTool,
-	createReadOnlyTools,
 	createReadTool,
+	createTools,
 	createWriteTool,
 	// Discovery
 	discoverAuthStorage,
@@ -107,8 +107,7 @@ export {
 	discoverPromptTemplates,
 	discoverSkills,
 	loadSettings,
-	// Pre-built tools (use process.cwd())
-	readOnlyTools,
+	type ToolSession,
 } from "./core/sdk";
 export {
 	type BranchSummaryEntry,
@@ -154,27 +153,17 @@ export {
 } from "./core/skills";
 // Slash commands
 export { type FileSlashCommand, loadSlashCommands as discoverSlashCommands } from "./core/slash-commands";
-// Tools
+// Tools (detail types only - factories exported from sdk)
 export {
 	type BashToolDetails,
-	bashTool,
-	type CodingToolsOptions,
-	codingTools,
-	editTool,
 	type FindToolDetails,
-	findTool,
 	type GitToolDetails,
 	type GrepToolDetails,
 	gitTool,
-	grepTool,
 	type LsToolDetails,
-	lsTool,
 	type ReadToolDetails,
-	readTool,
 	type TruncationResult,
 	type WriteToolDetails,
-	type WriteToolOptions,
-	writeTool,
 } from "./core/tools/index";
 export type { FileDiagnosticsResult } from "./core/tools/lsp/index";
 // Main entry point

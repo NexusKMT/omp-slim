@@ -7,6 +7,7 @@ import { Type } from "@sinclair/typebox";
 import { getLanguageFromPath, type Theme } from "../../modes/interactive/theme/theme";
 import type { RenderResultOptions } from "../custom-tools/types";
 import { untilAborted } from "../utils";
+import type { ToolSession } from "./index";
 import { resolveToCwd } from "./path-utils";
 import {
 	formatAge,
@@ -37,7 +38,7 @@ export interface LsToolDetails {
 	entryLimitReached?: number;
 }
 
-export function createLsTool(cwd: string): AgentTool<typeof lsSchema> {
+export function createLsTool(session: ToolSession): AgentTool<typeof lsSchema> {
 	return {
 		name: "ls",
 		label: "Ls",
@@ -49,7 +50,7 @@ export function createLsTool(cwd: string): AgentTool<typeof lsSchema> {
 			signal?: AbortSignal,
 		) => {
 			return untilAborted(signal, async () => {
-				const dirPath = resolveToCwd(path || ".", cwd);
+				const dirPath = resolveToCwd(path || ".", session.cwd);
 				const effectiveLimit = limit ?? DEFAULT_LIMIT;
 
 				// Check if path exists
@@ -158,9 +159,6 @@ export function createLsTool(cwd: string): AgentTool<typeof lsSchema> {
 		},
 	};
 }
-
-/** Default ls tool using process.cwd() - for backwards compatibility */
-export const lsTool = createLsTool(process.cwd());
 
 // =============================================================================
 // TUI Renderer
@@ -271,10 +269,7 @@ export const lsToolRenderer = {
 		}
 
 		if (hasTruncation) {
-			text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg(
-				"warning",
-				`truncated: ${truncationReasons.join(", ")}`,
-			)}`;
+			text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg("warning", `truncated: ${truncationReasons.join(", ")}`)}`;
 		}
 
 		return new Text(text, 0, 0);

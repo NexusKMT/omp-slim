@@ -5,7 +5,8 @@ import { Type } from "@sinclair/typebox";
 import { getLanguageFromPath, highlightCode, type Theme } from "../../modes/interactive/theme/theme";
 import writeDescription from "../../prompts/tools/write.md" with { type: "text" };
 import type { RenderResultOptions } from "../custom-tools/types";
-import { type FileDiagnosticsResult, type WritethroughCallback, writethroughNoop } from "./lsp/index";
+import type { ToolSession } from "../sdk";
+import { createLspWritethrough, type FileDiagnosticsResult } from "./lsp/index";
 import { resolveToCwd } from "./path-utils";
 import { formatDiagnostics, replaceTabs, shortenPath } from "./render-utils";
 
@@ -14,21 +15,15 @@ const writeSchema = Type.Object({
 	content: Type.String({ description: "Content to write to the file" }),
 });
 
-/** Options for creating the write tool */
-export interface WriteToolOptions {
-	writethrough?: WritethroughCallback;
-}
-
 /** Details returned by the write tool for TUI rendering */
 export interface WriteToolDetails {
 	diagnostics?: FileDiagnosticsResult;
 }
 
-export function createWriteTool(
-	cwd: string,
-	options: WriteToolOptions = {},
-): AgentTool<typeof writeSchema, WriteToolDetails> {
-	const writethrough = options.writethrough ?? writethroughNoop;
+export function createWriteTool(session: ToolSession): AgentTool<typeof writeSchema, WriteToolDetails> {
+	const enableFormat = session.settings?.getLspFormatOnWrite() ?? true;
+	const enableDiagnostics = session.settings?.getLspDiagnosticsOnWrite() ?? true;
+	const writethrough = createLspWritethrough(session.cwd, { enableFormat, enableDiagnostics });
 	return {
 		name: "write",
 		label: "Write",
@@ -39,7 +34,7 @@ export function createWriteTool(
 			{ path, content }: { path: string; content: string },
 			signal?: AbortSignal,
 		) => {
-			const absolutePath = resolveToCwd(path, cwd);
+			const absolutePath = resolveToCwd(path, session.cwd);
 
 			const diagnostics = await writethrough(absolutePath, content, signal);
 
@@ -63,9 +58,6 @@ export function createWriteTool(
 		},
 	};
 }
-
-/** Default write tool using process.cwd() - for backwards compatibility */
-export const writeTool = createWriteTool(process.cwd());
 
 // =============================================================================
 // TUI Renderer

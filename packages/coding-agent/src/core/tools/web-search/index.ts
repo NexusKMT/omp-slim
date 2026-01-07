@@ -20,6 +20,7 @@ import type { CustomTool, CustomToolContext, RenderResultOptions } from "../../c
 import { callExaTool, findApiKey as findExaKey, formatSearchResults, isSearchResponse } from "../exa/mcp-client";
 import { renderExaCall, renderExaResult } from "../exa/render";
 import type { ExaRenderDetails } from "../exa/types";
+import type { ToolSession } from "../index";
 import { formatAge } from "../render-utils";
 import { findAnthropicAuth } from "./auth";
 import { searchAnthropic } from "./providers/anthropic";
@@ -365,7 +366,7 @@ export const webSearchCustomTool: CustomTool<typeof webSearchSchema, WebSearchRe
 };
 
 /** Factory function for backward compatibility */
-export function createWebSearchTool(_cwd: string): AgentTool<typeof webSearchSchema> {
+export function createWebSearchTool(_session: ToolSession): AgentTool<typeof webSearchSchema> {
 	return webSearchTool;
 }
 

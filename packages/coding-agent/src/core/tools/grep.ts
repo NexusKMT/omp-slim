@@ -9,6 +9,7 @@ import { getLanguageFromPath, type Theme } from "../../modes/interactive/theme/t
 import grepDescription from "../../prompts/tools/grep.md" with { type: "text" };
 import { ensureTool } from "../../utils/tools-manager";
 import type { RenderResultOptions } from "../custom-tools/types";
+import type { ToolSession } from "./index";
 import { resolveToCwd } from "./path-utils";
 import {
 	formatCount,
@@ -79,7 +80,7 @@ export interface GrepToolDetails {
 	error?: string;
 }
 
-export function createGrepTool(cwd: string): AgentTool<typeof grepSchema> {
+export function createGrepTool(session: ToolSession): AgentTool<typeof grepSchema> {
 	return {
 		name: "grep",
 		label: "Grep",
@@ -127,9 +128,9 @@ export function createGrepTool(cwd: string): AgentTool<typeof grepSchema> {
 				throw new Error("ripgrep (rg) is not available and could not be downloaded");
 			}
 
-			const searchPath = resolveToCwd(searchDir || ".", cwd);
+			const searchPath = resolveToCwd(searchDir || ".", session.cwd);
 			const scopePath = (() => {
-				const relative = nodePath.relative(cwd, searchPath).replace(/\\/g, "/");
+				const relative = nodePath.relative(session.cwd, searchPath).replace(/\\/g, "/");
 				return relative.length === 0 ? "." : relative;
 			})();
 			let searchStat: Stats;
@@ -595,9 +596,6 @@ export function createGrepTool(cwd: string): AgentTool<typeof grepSchema> {
 	};
 }
 
-/** Default grep tool using process.cwd() - for backwards compatibility */
-export const grepTool = createGrepTool(process.cwd());
-
 // =============================================================================
 // TUI Renderer
 // =============================================================================
@@ -681,10 +679,7 @@ export const grepToolRenderer = {
 			}
 
 			if (remaining > 0) {
-				text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg(
-					"muted",
-					formatMoreItems(remaining, "item", uiTheme),
-				)}`;
+				text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg("muted", formatMoreItems(remaining, "item", uiTheme))}`;
 			}
 
 			return new Text(text, 0, 0);
@@ -715,10 +710,7 @@ export const grepToolRenderer = {
 		const hasMoreFiles = fileEntries.length > maxFiles;
 		const expandHint = formatExpandHint(expanded, hasMoreFiles, uiTheme);
 
-		let text = `${icon} ${uiTheme.fg("dim", summaryText)}${formatTruncationSuffix(
-			truncated,
-			uiTheme,
-		)}${scopeLabel}${expandHint}`;
+		let text = `${icon} ${uiTheme.fg("dim", summaryText)}${formatTruncationSuffix(truncated, uiTheme)}${scopeLabel}${expandHint}`;
 
 		const truncationReasons: string[] = [];
 		if (details?.matchLimitReached) {
@@ -764,10 +756,7 @@ export const grepToolRenderer = {
 		}
 
 		if (hasTruncation) {
-			text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg(
-				"warning",
-				`truncated: ${truncationReasons.join(", ")}`,
-			)}`;
+			text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg("warning", `truncated: ${truncationReasons.join(", ")}`)}`;
 		}
 
 		return new Text(text, 0, 0);

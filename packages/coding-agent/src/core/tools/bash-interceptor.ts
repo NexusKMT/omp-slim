@@ -80,13 +80,13 @@ const forbiddenPatterns: Array<{
  * @param availableTools Set of tool names that are available
  * @returns InterceptionResult indicating if the command should be blocked
  */
-export function checkBashInterception(command: string, availableTools: Set<string>): InterceptionResult {
+export function checkBashInterception(command: string, availableTools: string[]): InterceptionResult {
 	// Normalize command for pattern matching
 	const normalizedCommand = command.trim();
 
 	for (const { pattern, tool, message } of forbiddenPatterns) {
 		// Only block if the suggested tool is actually available
-		if (!availableTools.has(tool)) {
+		if (!availableTools.includes(tool)) {
 			continue;
 		}
 
@@ -106,8 +106,8 @@ export function checkBashInterception(command: string, availableTools: Set<strin
  * Check if a command is a simple directory listing that should use `ls` tool.
  * Only applies to bare `ls` without complex flags.
  */
-export function checkSimpleLsInterception(command: string, availableTools: Set<string>): InterceptionResult {
-	if (!availableTools.has("ls")) {
+export function checkSimpleLsInterception(command: string, availableTools: string[]): InterceptionResult {
+	if (!availableTools.includes("ls")) {
 		return { block: false };
 	}
 

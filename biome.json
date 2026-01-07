@@ -18,10 +18,19 @@
 	},
 	"formatter": {
 		"enabled": true,
-		"formatWithErrors": false,
 		"indentStyle": "tab",
 		"indentWidth": 3,
-		"lineWidth": 120
+		"lineWidth": 120,
+		"lineEnding": "lf"
+	},
+	"javascript": {
+		"formatter": {
+			"semicolons": "always",
+			"quoteStyle": "double",
+			"trailingCommas": "all",
+			"bracketSpacing": true,
+			"arrowParentheses": "always"
+		}
 	},
 	"files": {
 		"includes": [
@@ -38,5 +47,6 @@
 			"!packages/mom/data/**/*",
 			"!!**/node_modules"
 		]
-	}
+	},
+	"assist": { "actions": { "source": { "organizeImports": "on" } } }
 }

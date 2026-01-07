@@ -18,7 +18,7 @@ import { AuthStorage } from "../src/core/auth-storage";
 import { ModelRegistry } from "../src/core/model-registry";
 import { SessionManager } from "../src/core/session-manager";
 import { SettingsManager } from "../src/core/settings-manager";
-import { codingTools } from "../src/core/tools/index";
+import { createTools, type ToolSession } from "../src/core/tools/index";
 import { API_KEY } from "./utilities";
 
 describe.skipIf(!API_KEY)("AgentSession compaction e2e", () => {
@@ -45,14 +45,23 @@ describe.skipIf(!API_KEY)("AgentSession compaction e2e", () => {
 		}
 	});
 
-	function createSession(inMemory = false) {
+	async function createSession(inMemory = false) {
+		const toolSession: ToolSession = {
+			cwd: tempDir,
+			hasUI: false,
+			rulebookRules: [],
+			getSessionFile: () => null,
+			getSessionSpawns: () => "*",
+		};
+		const tools = await createTools(toolSession);
+
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 		const agent = new Agent({
 			getApiKey: () => API_KEY,
 			initialState: {
 				model,
 				systemPrompt: "You are a helpful assistant. Be concise.",
-				tools: codingTools,
+				tools,
 			},
 		});
 

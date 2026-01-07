@@ -10,6 +10,7 @@ import findDescription from "../../prompts/tools/find.md" with { type: "text" };
 import { ensureTool } from "../../utils/tools-manager";
 import type { RenderResultOptions } from "../custom-tools/types";
 import { untilAborted } from "../utils";
+import type { ToolSession } from "./index";
 import { resolveToCwd } from "./path-utils";
 import {
 	formatCount,
@@ -55,7 +56,7 @@ export interface FindToolDetails {
 	error?: string;
 }
 
-export function createFindTool(cwd: string): AgentTool<typeof findSchema> {
+export function createFindTool(session: ToolSession): AgentTool<typeof findSchema> {
 	return {
 		name: "find",
 		label: "Find",
@@ -87,9 +88,9 @@ export function createFindTool(cwd: string): AgentTool<typeof findSchema> {
 					throw new Error("fd is not available and could not be downloaded");
 				}
 
-				const searchPath = resolveToCwd(searchDir || ".", cwd);
+				const searchPath = resolveToCwd(searchDir || ".", session.cwd);
 				const scopePath = (() => {
-					const relative = path.relative(cwd, searchPath).replace(/\\/g, "/");
+					const relative = path.relative(session.cwd, searchPath).replace(/\\/g, "/");
 					return relative.length === 0 ? "." : relative;
 				})();
 				const effectiveLimit = limit ?? DEFAULT_LIMIT;
@@ -261,9 +262,6 @@ export function createFindTool(cwd: string): AgentTool<typeof findSchema> {
 	};
 }
 
-/** Default find tool using process.cwd() - for backwards compatibility */
-export const findTool = createFindTool(process.cwd());
-
 // =============================================================================
 // TUI Renderer
 // =============================================================================
@@ -332,10 +330,7 @@ export const findToolRenderer = {
 				text += `\n ${uiTheme.fg("dim", branch)} ${uiTheme.fg("accent", displayLines[i])}`;
 			}
 			if (remaining > 0) {
-				text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg(
-					"muted",
-					formatMoreItems(remaining, "file", uiTheme),
-				)}`;
+				text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg("muted", formatMoreItems(remaining, "file", uiTheme))}`;
 			}
 			return new Text(text, 0, 0);
 		}
@@ -355,10 +350,7 @@ export const findToolRenderer = {
 		const hasMoreFiles = files.length > maxFiles;
 		const expandHint = formatExpandHint(expanded, hasMoreFiles, uiTheme);
 
-		let text = `${icon} ${uiTheme.fg("dim", summaryText)}${formatTruncationSuffix(
-			truncated,
-			uiTheme,
-		)}${scopeLabel}${expandHint}`;
+		let text = `${icon} ${uiTheme.fg("dim", summaryText)}${formatTruncationSuffix(truncated, uiTheme)}${scopeLabel}${expandHint}`;
 
 		const truncationReasons: string[] = [];
 		if (details?.resultLimitReached) {
@@ -394,10 +386,7 @@ export const findToolRenderer = {
 		}
 
 		if (hasTruncation) {
-			text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg(
-				"warning",
-				`truncated: ${truncationReasons.join(", ")}`,
-			)}`;
+			text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg("warning", `truncated: ${truncationReasons.join(", ")}`)}`;
 		}
 
 		return new Text(text, 0, 0);

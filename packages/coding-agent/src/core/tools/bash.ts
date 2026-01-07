@@ -1,4 +1,4 @@
-import type { AgentTool } from "@oh-my-pi/pi-agent-core";
+import type { AgentTool, AgentToolContext } from "@oh-my-pi/pi-agent-core";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Text } from "@oh-my-pi/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -6,6 +6,8 @@ import type { Theme } from "../../modes/interactive/theme/theme";
 import bashDescription from "../../prompts/tools/bash.md" with { type: "text" };
 import { executeBash } from "../bash-executor";
 import type { RenderResultOptions } from "../custom-tools/types";
+import { checkBashInterception, checkSimpleLsInterception } from "./bash-interceptor";
+import type { ToolSession } from "./index";
 import { formatBytes, wrapBrackets } from "./render-utils";
 import { DEFAULT_MAX_BYTES, formatSize, type TruncationResult, truncateTail } from "./truncate";
 
@@ -19,7 +21,7 @@ export interface BashToolDetails {
 	fullOutputPath?: string;
 }
 
-export function createBashTool(cwd: string): AgentTool<typeof bashSchema> {
+export function createBashTool(session: ToolSession): AgentTool<typeof bashSchema> {
 	return {
 		name: "bash",
 		label: "Bash",
@@ -30,12 +32,25 @@ export function createBashTool(cwd: string): AgentTool<typeof bashSchema> {
 			{ command, timeout }: { command: string; timeout?: number },
 			signal?: AbortSignal,
 			onUpdate?,
+			ctx?: AgentToolContext,
 		) => {
+			// Check interception if enabled and available tools are known
+			if (session.settings?.getBashInterceptorEnabled()) {
+				const interception = checkBashInterception(command, ctx?.toolNames ?? []);
+				if (interception.block) {
+					throw new Error(interception.message);
+				}
+				const lsInterception = checkSimpleLsInterception(command, ctx?.toolNames ?? []);
+				if (lsInterception.block) {
+					throw new Error(lsInterception.message);
+				}
+			}
+
 			// Track output for streaming updates
 			let currentOutput = "";
 
 			const result = await executeBash(command, {
-				cwd,
+				cwd: session.cwd,
 				timeout: timeout ? timeout * 1000 : undefined, // Convert to milliseconds
 				signal,
 				onChunk: (chunk) => {
@@ -91,9 +106,6 @@ export function createBashTool(cwd: string): AgentTool<typeof bashSchema> {
 		},
 	};
 }
-
-/** Default bash tool using process.cwd() - for backwards compatibility */
-export const bashTool = createBashTool(process.cwd());
 
 // =============================================================================
 // TUI Renderer
@@ -183,9 +195,7 @@ export const bashToolRenderer = {
 					warnings.push(`Truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines`);
 				} else {
 					warnings.push(
-						`Truncated: ${truncation.outputLines} lines shown (${formatBytes(
-							truncation.maxBytes ?? DEFAULT_MAX_BYTES,
-						)} limit)`,
+						`Truncated: ${truncation.outputLines} lines shown (${formatBytes(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit)`,
 					);
 				}
 			}

@@ -22,6 +22,7 @@ import { Type } from "@sinclair/typebox";
 import { type Theme, theme } from "../../modes/interactive/theme/theme";
 import askDescription from "../../prompts/tools/ask.md" with { type: "text" };
 import type { RenderResultOptions } from "../custom-tools/types";
+import type { ToolSession } from "./index";
 import { formatErrorMessage, formatMeta } from "./render-utils";
 
 // =============================================================================
@@ -67,7 +68,10 @@ function getDoneOptionLabel(): string {
 // Tool Implementation
 // =============================================================================
 
-export function createAskTool(_cwd: string): AgentTool<typeof askSchema, AskToolDetails> {
+export function createAskTool(session: ToolSession): null | AgentTool<typeof askSchema, AskToolDetails> {
+	if (!session.hasUI) {
+		return null;
+	}
 	return {
 		name: "ask",
 		label: "Ask",
@@ -193,8 +197,14 @@ export function createAskTool(_cwd: string): AgentTool<typeof askSchema, AskTool
 	};
 }
 
-/** Default ask tool using process.cwd() - for backwards compatibility (no UI) */
-export const askTool = createAskTool(process.cwd());
+/** Default ask tool - returns null when no UI */
+export const askTool = createAskTool({
+	cwd: process.cwd(),
+	hasUI: false,
+	rulebookRules: [],
+	getSessionFile: () => null,
+	getSessionSpawns: () => "*",
+});
 
 // =============================================================================
 // TUI Renderer
@@ -225,10 +235,7 @@ export const askToolRenderer = {
 				const opt = args.options[i];
 				const isLast = i === args.options.length - 1;
 				const branch = isLast ? uiTheme.tree.last : uiTheme.tree.branch;
-				text += `\n ${uiTheme.fg("dim", branch)} ${uiTheme.fg(
-					"dim",
-					uiTheme.checkbox.unchecked,
-				)} ${uiTheme.fg("muted", opt.label)}`;
+				text += `\n ${uiTheme.fg("dim", branch)} ${uiTheme.fg("dim", uiTheme.checkbox.unchecked)} ${uiTheme.fg("muted", opt.label)}`;
 			}
 		}
 

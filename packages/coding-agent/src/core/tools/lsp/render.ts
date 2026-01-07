@@ -237,10 +237,7 @@ function renderDiagnostics(
 			}
 			const severityColor = severityToColor(item.severity);
 			const location = formatDiagnosticLocation(item.file, item.line, item.col, theme);
-			output += `\n ${theme.fg("dim", branch)} ${theme.fg(severityColor, location)} ${theme.fg(
-				"dim",
-				`[${item.severity}]`,
-			)}`;
+			output += `\n ${theme.fg("dim", branch)} ${theme.fg(severityColor, location)} ${theme.fg("dim", `[${item.severity}]`)}`;
 			if (item.message) {
 				output += `\n ${theme.fg("dim", detailPrefix)}${theme.fg(
 					"muted",
@@ -274,10 +271,7 @@ function renderDiagnostics(
 		output += `\n ${theme.fg("dim", branch)} ${theme.fg(severityColor, location)}${message}`;
 	}
 	if (remaining > 0) {
-		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
-			"muted",
-			`${theme.format.ellipsis} ${remaining} more`,
-		)}`;
+		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", `${theme.format.ellipsis} ${remaining} more`)}`;
 	}
 
 	return new Text(output, 0, 0);
@@ -332,10 +326,7 @@ function renderReferences(refMatch: RegExpMatchArray, lines: string[], expanded:
 					const isLastLoc = li === locsToShow.length - 1 && locs.length <= maxLocsPerFile;
 					const locBranch = isLastLoc ? theme.tree.last : theme.tree.branch;
 					const locCont = isLastLoc ? "   " : `${theme.tree.vertical}  `;
-					output += `\n ${theme.fg("dim", fileCont)}${theme.fg("dim", locBranch)} ${theme.fg(
-						"muted",
-						`line ${line}, col ${col}`,
-					)}`;
+					output += `\n ${theme.fg("dim", fileCont)}${theme.fg("dim", locBranch)} ${theme.fg("muted", `line ${line}, col ${col}`)}`;
 					if (expanded) {
 						const context = `at ${file}:${line}:${col}`;
 						output += `\n ${theme.fg("dim", fileCont)}${theme.fg("dim", locCont)}${theme.fg(
@@ -354,10 +345,7 @@ function renderReferences(refMatch: RegExpMatchArray, lines: string[], expanded:
 		}
 
 		if (files.length > maxFiles) {
-			output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
-				"muted",
-				formatMoreItems(files.length - maxFiles, "file", theme),
-			)}`;
+			output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", formatMoreItems(files.length - maxFiles, "file", theme))}`;
 		}
 
 		return output;
@@ -463,10 +451,7 @@ function renderSymbols(symbolsMatch: RegExpMatchArray, lines: string[], expanded
 		)}`;
 	}
 	if (topLevelCount > 3) {
-		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
-			"muted",
-			`${theme.format.ellipsis} ${topLevelCount - 3} more`,
-		)}`;
+		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", `${theme.format.ellipsis} ${topLevelCount - 3} more`)}`;
 	}
 
 	return new Text(output, 0, 0);
@@ -502,10 +487,7 @@ function renderGeneric(text: string, lines: string[], expanded: boolean, theme: 
 
 	const firstLine = lines[0] || "No output";
 	const expandHint = formatExpandHint(false, lines.length > 1, theme);
-	let output = `${icon} ${theme.fg(
-		"dim",
-		truncate(firstLine, TRUNCATE_LENGTHS.TITLE, theme.format.ellipsis),
-	)}${expandHint}`;
+	let output = `${icon} ${theme.fg("dim", truncate(firstLine, TRUNCATE_LENGTHS.TITLE, theme.format.ellipsis))}${expandHint}`;
 
 	if (lines.length > 1) {
 		const previewLines = lines.slice(1, 4);
@@ -518,10 +500,7 @@ function renderGeneric(text: string, lines: string[], expanded: boolean, theme: 
 			)}`;
 		}
 		if (lines.length > 4) {
-			output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
-				"muted",
-				formatMoreItems(lines.length - 4, "line", theme),
-			)}`;
+			output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", formatMoreItems(lines.length - 4, "line", theme))}`;
 		}
 	}
 

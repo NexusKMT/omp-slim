@@ -1,8 +1,8 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { WORKTREE_BASE } from "../../src/lib/worktree/constants";
 import { WorktreeError } from "../../src/lib/worktree/errors";
 import { git } from "../../src/lib/worktree/git";

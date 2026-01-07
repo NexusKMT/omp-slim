@@ -10,10 +10,6 @@ Each example uses the `subdirectory/index.ts` structure required for tool discov
 
 Minimal example showing the basic structure of a custom tool.
 
-### question/
-
-Demonstrates `pi.ui.select()` for asking the user questions with options.
-
 ### todo/
 
 Full-featured example demonstrating:
@@ -22,17 +18,6 @@ Full-featured example demonstrating:
 - Custom `renderCall` and `renderResult`
 - Proper branching support via details storage
 - State management without external files
-
-### subagent/
-
-Delegate tasks to specialized subagents with isolated context windows. Includes:
-
-- `index.ts` - The custom tool (single, parallel, and chain modes)
-- `agents.ts` - Agent discovery helper
-- `agents/` - Sample agent definitions (scout, planner, reviewer, worker)
-- `commands/` - Workflow presets (/implement, /scout-and-plan, /implement-and-review)
-
-See [subagent/README.md](subagent/README.md) for full documentation.
 
 ## Usage
 

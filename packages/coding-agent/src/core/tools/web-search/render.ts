@@ -257,10 +257,7 @@ export function renderWebSearchResult(
 	}
 	if (response.requestId) {
 		metaLines.push(
-			`${theme.fg("muted", "Request:")} ${theme.fg(
-				"text",
-				truncate(response.requestId, MAX_REQUEST_ID_LEN, theme.format.ellipsis),
-			)}`,
+			`${theme.fg("muted", "Request:")} ${theme.fg("text", truncate(response.requestId, MAX_REQUEST_ID_LEN, theme.format.ellipsis))}`,
 		);
 	}
 	if (searchQueries.length > 0) {

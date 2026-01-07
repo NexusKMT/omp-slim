@@ -12,6 +12,7 @@ import { formatDimensionNote, resizeImage } from "../../utils/image-resize";
 import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime";
 import { ensureTool } from "../../utils/tools-manager";
 import type { RenderResultOptions } from "../custom-tools/types";
+import type { ToolSession } from "../sdk";
 import { untilAborted } from "../utils";
 import { createLsTool } from "./ls";
 import { resolveReadPath, resolveToCwd } from "./path-utils";
@@ -340,14 +341,9 @@ export interface ReadToolDetails {
 	redirectedTo?: "ls";
 }
 
-export interface ReadToolOptions {
-	/** Whether to auto-resize images to 2000x2000 max. Default: true */
-	autoResizeImages?: boolean;
-}
-
-export function createReadTool(cwd: string, options?: ReadToolOptions): AgentTool<typeof readSchema> {
-	const autoResizeImages = options?.autoResizeImages ?? true;
-	const lsTool = createLsTool(cwd);
+export function createReadTool(session: ToolSession): AgentTool<typeof readSchema> {
+	const autoResizeImages = session.settings?.getImageAutoResize() ?? true;
+	const lsTool = createLsTool(session);
 	return {
 		name: "read",
 		label: "Read",
@@ -358,7 +354,7 @@ export function createReadTool(cwd: string, options?: ReadToolOptions): AgentToo
 			{ path: readPath, offset, limit }: { path: string; offset?: number; limit?: number },
 			signal?: AbortSignal,
 		) => {
-			const absolutePath = resolveReadPath(readPath, cwd);
+			const absolutePath = resolveReadPath(readPath, session.cwd);
 
 			return untilAborted(signal, async () => {
 				let isDirectory = false;
@@ -378,14 +374,12 @@ export function createReadTool(cwd: string, options?: ReadToolOptions): AgentToo
 					}
 				} catch (error) {
 					if (isNotFoundError(error)) {
-						const suggestions = await findReadPathSuggestions(readPath, cwd);
+						const suggestions = await findReadPathSuggestions(readPath, session.cwd);
 						let message = `File not found: ${readPath}`;
 
 						if (suggestions?.suggestions.length) {
 							const scopeLabel = suggestions.scopeLabel ? ` in ${suggestions.scopeLabel}` : "";
-							message += `\n\nClosest matches${scopeLabel}:\n${suggestions.suggestions
-								.map((match) => `- ${match}`)
-								.join("\n")}`;
+							message += `\n\nClosest matches${scopeLabel}:\n${suggestions.suggestions.map((match) => `- ${match}`).join("\n")}`;
 							if (suggestions.truncated) {
 								message += `\n[Search truncated to first ${MAX_FUZZY_CANDIDATES} paths. Refine the path if the match isn't listed.]`;
 							}
@@ -462,9 +456,7 @@ export function createReadTool(cwd: string, options?: ReadToolOptions): AgentToo
 						let outputText = truncation.content;
 
 						if (truncation.truncated) {
-							outputText += `\n\n[Document converted via markitdown. Output truncated to ${formatSize(
-								DEFAULT_MAX_BYTES,
-							)}]`;
+							outputText += `\n\n[Document converted via markitdown. Output truncated to ${formatSize(DEFAULT_MAX_BYTES)}]`;
 							details = { truncation };
 						}
 
@@ -561,9 +553,6 @@ export function createReadTool(cwd: string, options?: ReadToolOptions): AgentToo
 		},
 	};
 }
-
-/** Default read tool using process.cwd() - for backwards compatibility */
-export const readTool = createReadTool(process.cwd());
 
 // =============================================================================
 // TUI Renderer

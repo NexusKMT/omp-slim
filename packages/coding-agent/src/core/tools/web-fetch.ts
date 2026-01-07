@@ -5,6 +5,7 @@ import { Type } from "@sinclair/typebox";
 import { parse as parseHtml } from "node-html-parser";
 import webFetchDescription from "../../prompts/tools/web-fetch.md" with { type: "text" };
 import { logger } from "../logger";
+import type { ToolSession } from "./index";
 
 // =============================================================================
 // Types and Constants
@@ -1239,9 +1240,7 @@ async function handleStackOverflow(url: string, timeout: number): Promise<Render
 		md += `**Score:** ${question.score} · **Answers:** ${question.answer_count}`;
 		md += question.is_answered ? " (Answered)" : "";
 		md += `\n**Tags:** ${question.tags.join(", ")}\n`;
-		md += `**Asked by:** ${question.owner.display_name} · ${
-			new Date(question.creation_date * 1000).toISOString().split("T")[0]
-		}\n\n`;
+		md += `**Asked by:** ${question.owner.display_name} · ${new Date(question.creation_date * 1000).toISOString().split("T")[0]}\n\n`;
 		md += `---\n\n## Question\n\n${htmlToBasicMarkdown(question.body)}\n\n`;
 
 		// Fetch answers
@@ -2270,7 +2269,7 @@ export interface WebFetchToolDetails {
 	notes: string[];
 }
 
-export function createWebFetchTool(_cwd: string): AgentTool<typeof webFetchSchema> {
+export function createWebFetchTool(_session: ToolSession): AgentTool<typeof webFetchSchema> {
 	return {
 		name: "web_fetch",
 		label: "Web Fetch",
@@ -2316,9 +2315,6 @@ export function createWebFetchTool(_cwd: string): AgentTool<typeof webFetchSchem
 	};
 }
 
-/** Default web fetch tool using process.cwd() - for backwards compatibility */
-export const webFetchTool = createWebFetchTool(process.cwd());
-
 // =============================================================================
 // TUI Rendering
 // =============================================================================
@@ -2326,7 +2322,7 @@ export const webFetchTool = createWebFetchTool(process.cwd());
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Text } from "@oh-my-pi/pi-tui";
 import { type Theme, theme } from "../../modes/interactive/theme/theme";
-import type { CustomTool, CustomToolContext, RenderResultOptions } from "../custom-tools/types";
+import type { RenderResultOptions } from "../custom-tools/types";
 
 /** Truncate text to max length with ellipsis */
 function truncate(text: string, maxLen: number, ellipsis: string): string {
@@ -2489,32 +2485,4 @@ export function renderWebFetchResult(
 export const webFetchToolRenderer = {
 	renderCall: renderWebFetchCall,
 	renderResult: renderWebFetchResult,
-};
-
-type WebFetchParams = { url: string; timeout?: number; raw?: boolean };
-
-/** Web fetch tool as CustomTool (for TUI rendering support) */
-export const webFetchCustomTool: CustomTool<typeof webFetchSchema, WebFetchToolDetails> = {
-	name: "web_fetch",
-	label: "Web Fetch",
-	description: webFetchDescription,
-	parameters: webFetchSchema,
-
-	async execute(
-		toolCallId: string,
-		params: WebFetchParams,
-		_onUpdate,
-		_ctx: CustomToolContext,
-		_signal?: AbortSignal,
-	) {
-		return webFetchTool.execute(toolCallId, params);
-	},
-
-	renderCall(args: WebFetchParams, uiTheme: Theme) {
-		return renderWebFetchCall(args, uiTheme);
-	},
-
-	renderResult(result, options: RenderResultOptions, uiTheme: Theme) {
-		return renderWebFetchResult(result, options, uiTheme);
-	},
 };

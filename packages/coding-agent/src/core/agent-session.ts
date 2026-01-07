@@ -90,7 +90,7 @@ export interface AgentSessionConfig {
 	/** Tool registry for LSP and settings */
 	toolRegistry?: Map<string, AgentTool>;
 	/** System prompt builder that can consider tool availability */
-	rebuildSystemPrompt?: (toolNames: string[]) => string;
+	rebuildSystemPrompt?: (toolNames: string[], tools: Map<string, AgentTool>) => string;
 	/** TTSR manager for time-traveling stream rules */
 	ttsrManager?: TtsrManager;
 }
@@ -222,7 +222,7 @@ export class AgentSession {
 
 	// Tool registry and prompt builder for extensions
 	private _toolRegistry: Map<string, AgentTool>;
-	private _rebuildSystemPrompt: ((toolNames: string[]) => string) | undefined;
+	private _rebuildSystemPrompt: ((toolNames: string[], tools: Map<string, AgentTool>) => string) | undefined;
 	private _baseSystemPrompt: string;
 
 	// TTSR manager for time-traveling stream rules
@@ -603,7 +603,7 @@ export class AgentSession {
 
 		// Rebuild base system prompt with new tool set
 		if (this._rebuildSystemPrompt) {
-			this._baseSystemPrompt = this._rebuildSystemPrompt(validToolNames);
+			this._baseSystemPrompt = this._rebuildSystemPrompt(validToolNames, this._toolRegistry);
 			this.agent.setSystemPrompt(this._baseSystemPrompt);
 		}
 	}

@@ -7,6 +7,7 @@ import { type Theme, theme } from "../../../modes/interactive/theme/theme";
 import lspDescription from "../../../prompts/tools/lsp.md" with { type: "text" };
 import { logger } from "../../logger";
 import { once, untilAborted } from "../../utils";
+import type { ToolSession } from "../index";
 import { resolveToCwd } from "../path-utils";
 import {
 	ensureFileOpen,
@@ -687,7 +688,7 @@ export function createLspWritethrough(cwd: string, options?: WritethroughOptions
 }
 
 /** Create an LSP tool */
-export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolDetails, Theme> {
+export function createLspTool(session: ToolSession): AgentTool<typeof lspSchema, LspToolDetails, Theme> {
 	return {
 		name: "lsp",
 		label: "LSP",
@@ -713,7 +714,7 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 				include_declaration,
 			} = params;
 
-			const config = await getConfig(cwd);
+			const config = await getConfig(session.cwd);
 
 			// Status action doesn't need a file
 			if (action === "status") {
@@ -730,7 +731,7 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 
 			// Workspace diagnostics - check entire project
 			if (action === "workspace_diagnostics") {
-				const result = await runWorkspaceDiagnostics(cwd, config);
+				const result = await runWorkspaceDiagnostics(session.cwd, config);
 				return {
 					content: [
 						{
@@ -757,7 +758,7 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 				const allServerNames = new Set<string>();
 
 				for (const target of targets) {
-					const resolved = resolveToCwd(target, cwd);
+					const resolved = resolveToCwd(target, session.cwd);
 					const servers = getServersForFile(config, resolved);
 					if (servers.length === 0) {
 						results.push(`${theme.status.error} ${target}: No language server found`);
@@ -765,7 +766,7 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 					}
 
 					const uri = fileToUri(resolved);
-					const relPath = path.relative(cwd, resolved);
+					const relPath = path.relative(session.cwd, resolved);
 					const allDiagnostics: Diagnostic[] = [];
 
 					// Query all applicable servers for this file
@@ -773,12 +774,12 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 						allServerNames.add(serverName);
 						try {
 							if (serverConfig.createClient) {
-								const linterClient = getLinterClient(serverName, serverConfig, cwd);
+								const linterClient = getLinterClient(serverName, serverConfig, session.cwd);
 								const diagnostics = await linterClient.lint(resolved);
 								allDiagnostics.push(...diagnostics);
 								continue;
 							}
-							const client = await getOrCreateClient(serverConfig, cwd);
+							const client = await getOrCreateClient(serverConfig, session.cwd);
 							await refreshFile(client, resolved);
 							const diagnostics = await waitForDiagnostics(client, uri);
 							allDiagnostics.push(...diagnostics);
@@ -847,7 +848,7 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 				};
 			}
 
-			const resolvedFile = file ? resolveToCwd(file, cwd) : null;
+			const resolvedFile = file ? resolveToCwd(file, session.cwd) : null;
 			const serverInfo = resolvedFile
 				? getLspServerForFile(config, resolvedFile)
 				: getServerForWorkspaceAction(config, action);
@@ -862,10 +863,10 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 			const [serverName, serverConfig] = serverInfo;
 
 			try {
-				const client = await getOrCreateClient(serverConfig, cwd);
+				const client = await getOrCreateClient(serverConfig, session.cwd);
 				let targetFile = resolvedFile;
 				if (action === "runnables" && !targetFile) {
-					targetFile = findFileForServer(cwd, serverConfig);
+					targetFile = findFileForServer(session.cwd, serverConfig);
 					if (!targetFile) {
 						return {
 							content: [{ type: "text", text: "Error: no matching files found for runnables" }],
@@ -914,7 +915,7 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 								output = "No definition found";
 							} else {
 								output = `Found ${locations.length} definition(s):\n${locations
-									.map((loc) => `  ${formatLocation(loc, cwd)}`)
+									.map((loc) => `  ${formatLocation(loc, session.cwd)}`)
 									.join("\n")}`;
 							}
 						}
@@ -931,7 +932,7 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 						if (!result || result.length === 0) {
 							output = "No references found";
 						} else {
-							const lines = result.map((loc) => `  ${formatLocation(loc, cwd)}`);
+							const lines = result.map((loc) => `  ${formatLocation(loc, session.cwd)}`);
 							output = `Found ${result.length} reference(s):\n${lines.join("\n")}`;
 						}
 						break;
@@ -964,7 +965,7 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 								details: { action, serverName, success: false },
 							};
 						} else {
-							const relPath = path.relative(cwd, targetFile);
+							const relPath = path.relative(session.cwd, targetFile);
 							// Check if hierarchical (DocumentSymbol) or flat (SymbolInformation)
 							if ("selectionRange" in result[0]) {
 								// Hierarchical
@@ -998,10 +999,8 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 						if (!result || result.length === 0) {
 							output = `No symbols matching "${query}"`;
 						} else {
-							const lines = result.map((s) => formatSymbolInformation(s, cwd));
-							output = `Found ${result.length} symbol(s) matching "${query}":\n${lines
-								.map((l) => `  ${l}`)
-								.join("\n")}`;
+							const lines = result.map((s) => formatSymbolInformation(s, session.cwd));
+							output = `Found ${result.length} symbol(s) matching "${query}":\n${lines.map((l) => `  ${l}`).join("\n")}`;
 						}
 						break;
 					}
@@ -1025,10 +1024,10 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 						} else {
 							const shouldApply = apply !== false;
 							if (shouldApply) {
-								const applied = await applyWorkspaceEdit(result, cwd);
+								const applied = await applyWorkspaceEdit(result, session.cwd);
 								output = `Applied rename:\n${applied.map((a) => `  ${a}`).join("\n")}`;
 							} else {
-								const preview = formatWorkspaceEdit(result, cwd);
+								const preview = formatWorkspaceEdit(result, session.cwd);
 								output = `Rename preview:\n${preview.map((p) => `  ${p}`).join("\n")}`;
 							}
 						}
@@ -1114,7 +1113,7 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 							}
 
 							if (isCodeAction(resolvedAction) && resolvedAction.edit) {
-								const applied = await applyWorkspaceEdit(resolvedAction.edit, cwd);
+								const applied = await applyWorkspaceEdit(resolvedAction.edit, session.cwd);
 								output = `Applied "${codeAction.title}":\n${applied.map((a) => `  ${a}`).join("\n")}`;
 							} else {
 								const commandPayload = getCommandPayload(resolvedAction);
@@ -1136,9 +1135,7 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 								}
 								return `  [${i}] ${actionItem.title}`;
 							});
-							output = `Available code actions:\n${lines.join(
-								"\n",
-							)}\n\nUse action_index parameter to apply a specific action.`;
+							output = `Available code actions:\n${lines.join("\n")}\n\nUse action_index parameter to apply a specific action.`;
 						}
 						break;
 					}
@@ -1169,7 +1166,7 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 								const lines = calls.map((call) => {
 									const loc = { uri: call.from.uri, range: call.from.selectionRange };
 									const detail = call.from.detail ? ` (${call.from.detail})` : "";
-									return `  ${call.from.name}${detail} @ ${formatLocation(loc, cwd)}`;
+									return `  ${call.from.name}${detail} @ ${formatLocation(loc, session.cwd)}`;
 								});
 								output = `Found ${calls.length} caller(s) of "${item.name}":\n${lines.join("\n")}`;
 							}
@@ -1184,7 +1181,7 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 								const lines = calls.map((call) => {
 									const loc = { uri: call.to.uri, range: call.to.selectionRange };
 									const detail = call.to.detail ? ` (${call.to.detail})` : "";
-									return `  ${call.to.name}${detail} @ ${formatLocation(loc, cwd)}`;
+									return `  ${call.to.name}${detail} @ ${formatLocation(loc, session.cwd)}`;
 								});
 								output = `"${item.name}" calls ${calls.length} function(s):\n${lines.join("\n")}`;
 							}
@@ -1207,7 +1204,7 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 						await rustAnalyzer.flycheck(client, resolvedFile ?? undefined);
 						const collected: Array<{ filePath: string; diagnostic: Diagnostic }> = [];
 						for (const [diagUri, diags] of client.diagnostics.entries()) {
-							const relPath = path.relative(cwd, uriToFile(diagUri));
+							const relPath = path.relative(session.cwd, uriToFile(diagUri));
 							for (const diag of diags) {
 								collected.push({ filePath: relPath, diagnostic: diag });
 							}
@@ -1274,13 +1271,13 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 						const result = await rustAnalyzer.ssr(client, query, replacement, !shouldApply);
 
 						if (shouldApply) {
-							const applied = await applyWorkspaceEdit(result, cwd);
+							const applied = await applyWorkspaceEdit(result, session.cwd);
 							output =
 								applied.length > 0
 									? `Applied SSR:\n${applied.map((a) => `  ${a}`).join("\n")}`
 									: "SSR: no matches found";
 						} else {
-							const preview = formatWorkspaceEdit(result, cwd);
+							const preview = formatWorkspaceEdit(result, session.cwd);
 							output =
 								preview.length > 0
 									? `SSR preview:\n${preview.map((p) => `  ${p}`).join("\n")}`
@@ -1366,4 +1363,10 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 	};
 }
 
-export const lspTool = createLspTool(process.cwd());
+export const lspTool = createLspTool({
+	cwd: process.cwd(),
+	hasUI: false,
+	rulebookRules: [],
+	getSessionFile: () => null,
+	getSessionSpawns: () => null,
+});

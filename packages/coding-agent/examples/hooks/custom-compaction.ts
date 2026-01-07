@@ -42,9 +42,7 @@ export default function (pi: HookAPI) {
 		const allMessages = [...messagesToSummarize, ...turnPrefixMessages];
 
 		ctx.ui.notify(
-			`Custom compaction: summarizing ${allMessages.length} messages (${tokensBefore.toLocaleString()} tokens) with ${
-				model.id
-			}...`,
+			`Custom compaction: summarizing ${allMessages.length} messages (${tokensBefore.toLocaleString()} tokens) with ${model.id}...`,
 			"info",
 		);
 

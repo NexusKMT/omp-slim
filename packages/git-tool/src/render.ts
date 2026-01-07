@@ -33,16 +33,12 @@ export function renderStatus(result: StatusResult): string {
 
 	if (result.staged.length > 0) {
 		parts.push(
-			`Staged (${result.staged.length}):\n${result.staged
-				.map((file) => `- ${file.path} (${file.status})`)
-				.join("\n")}`,
+			`Staged (${result.staged.length}):\n${result.staged.map((file) => `- ${file.path} (${file.status})`).join("\n")}`,
 		);
 	}
 	if (result.modified.length > 0) {
 		parts.push(
-			`Modified (${result.modified.length}):\n${result.modified
-				.map((file) => `- ${file.path} (${file.status})`)
-				.join("\n")}`,
+			`Modified (${result.modified.length}):\n${result.modified.map((file) => `- ${file.path} (${file.status})`).join("\n")}`,
 		);
 	}
 	if (result.untracked.length > 0) {

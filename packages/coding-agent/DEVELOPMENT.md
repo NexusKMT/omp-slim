@@ -80,7 +80,7 @@ src/
 │   │   └── loader.ts         # loadCustomTools() from multiple locations
 │   │
 │   └── tools/                # Built-in tool implementations
-│       ├── index.ts          # Tool exports, allTools, codingTools
+│       ├── index.ts          # Tool exports, BUILTIN_TOOLS, createTools
 │       ├── bash.ts           # Bash command execution
 │       ├── edit.ts           # Surgical file editing
 │       ├── find.ts           # File search by glob
@@ -278,9 +278,9 @@ npm run build:binary
 
 ### Adding a New Tool
 
-1. Create tool in `core/tools/` following existing patterns
-2. Export from `core/tools/index.ts`
-3. Add to `allTools` and optionally `codingTools`
+1. Create tool factory in `core/tools/` following existing patterns (e.g., `createMyTool(session: ToolSession)`)
+2. Export factory from `core/tools/index.ts`
+3. Add to `BUILTIN_TOOLS` map in `core/tools/index.ts`
 4. Add description to `toolDescriptions` in `core/system-prompt.ts`
 
 ### Adding a New Hook Event

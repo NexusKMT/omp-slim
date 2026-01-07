@@ -347,60 +347,60 @@ const { session } = await createAgentSession({
 
 ### Tools
 
+By default, `createAgentSession` creates all built-in tools automatically. You can filter which tools are available using `toolNames`:
+
 ```typescript
-import {
-	codingTools, // read, bash, edit, write (default)
-	readOnlyTools, // read, grep, find, ls
-	readTool,
-	bashTool,
-	editTool,
-	writeTool,
-	grepTool,
-	findTool,
-	lsTool,
-} from "@oh-my-pi/pi-coding-agent";
+// Use all built-in tools (default)
+const { session } = await createAgentSession();
 
-// Use built-in tool set
+// Filter to specific tools
 const { session } = await createAgentSession({
-	tools: readOnlyTools,
-});
-
-// Pick specific tools
-const { session } = await createAgentSession({
-	tools: [readTool, bashTool, grepTool],
+	toolNames: ["read", "grep", "find", "ls"], // Read-only tools
 });
 ```
 
-#### Tools with Custom cwd
+#### Available Built-in Tools
 
-**Important:** The pre-built tool instances (`readTool`, `bashTool`, etc.) use `process.cwd()` for path resolution. When you specify a custom `cwd` AND provide explicit `tools`, you must use the tool factory functions to ensure paths resolve correctly:
+All tools are defined in `BUILTIN_TOOLS`:
+
+- `ask` - Interactive user prompts (requires UI)
+- `bash` - Shell command execution
+- `edit` - Surgical file editing
+- `find` - File search by glob patterns
+- `git` - Git operations (can be disabled via settings)
+- `grep` - Content search with regex
+- `ls` - Directory listing
+- `lsp` - Language server protocol integration
+- `notebook` - Jupyter notebook editing
+- `output` - Task output retrieval
+- `read` - File reading (text and images)
+- `rulebook` - Rule reference (requires rules)
+- `task` - Subagent spawning
+- `web_fetch` - Web page fetching
+- `web_search` - Web search
+- `write` - File writing
+
+#### Creating Tools Manually
+
+For advanced use cases, you can create tools directly using `createTools`:
 
 ```typescript
 import {
-	createCodingTools, // Creates [read, bash, edit, write] for specific cwd
-	createReadOnlyTools, // Creates [read, grep, find, ls] for specific cwd
-	createReadTool,
-	createBashTool,
-	createEditTool,
-	createWriteTool,
-	createGrepTool,
-	createFindTool,
-	createLsTool,
+	BUILTIN_TOOLS,
+	createTools,
+	type ToolSession,
 } from "@oh-my-pi/pi-coding-agent";
 
-const cwd = "/path/to/project";
+const session: ToolSession = {
+	cwd: "/path/to/project",
+	hasUI: false,
+	rulebookRules: [],
+	getSessionFile: () => null,
+	getSessionSpawns: () => "*",
+	getAvailableTools: () => Object.keys(BUILTIN_TOOLS),
+};
 
-// Use factory for tool sets
-const { session } = await createAgentSession({
-	cwd,
-	tools: createCodingTools(cwd), // Tools resolve paths relative to cwd
-});
-
-// Or pick specific tools
-const { session } = await createAgentSession({
-	cwd,
-	tools: [createReadTool(cwd), createBashTool(cwd), createGrepTool(cwd)],
-});
+const tools = await createTools(session);
 ```
 
 **When you don't need factories:**
@@ -943,17 +943,14 @@ buildSystemPrompt
 SessionManager
 SettingsManager
 
-// Built-in tools (use process.cwd())
-codingTools
-readOnlyTools
-readTool, bashTool, editTool, writeTool
-grepTool, findTool, lsTool
+// Tool registry and factory
+BUILTIN_TOOLS              // Map of tool name to factory
+createTools                // Create all tools from ToolSession
+type ToolSession           // Session context for tool creation
 
-// Tool factories (for custom cwd)
-createCodingTools
-createReadOnlyTools
+// Individual tool factories
 createReadTool, createBashTool, createEditTool, createWriteTool
-createGrepTool, createFindTool, createLsTool
+createGrepTool, createFindTool, createLsTool, createGitTool
 
 // Types
 type CreateAgentSessionOptions

@@ -78,10 +78,7 @@ export function renderExaResult(
 			}
 
 			if (remaining > 0) {
-				text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg(
-					"muted",
-					formatMoreItems(remaining, "line", uiTheme),
-				)}`;
+				text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg("muted", formatMoreItems(remaining, "line", uiTheme))}`;
 			}
 
 			return new Text(text, 0, 0);
@@ -168,17 +165,11 @@ export function renderExaResult(
 		text += `\n ${uiTheme.fg("dim", branch)} ${uiTheme.fg("accent", title)}${domainPart}`;
 
 		if (res.url) {
-			text += `\n ${uiTheme.fg("dim", cont)} ${uiTheme.fg("dim", uiTheme.tree.hook)} ${uiTheme.fg(
-				"mdLinkUrl",
-				res.url,
-			)}`;
+			text += `\n ${uiTheme.fg("dim", cont)} ${uiTheme.fg("dim", uiTheme.tree.hook)} ${uiTheme.fg("mdLinkUrl", res.url)}`;
 		}
 
 		if (res.author) {
-			text += `\n ${uiTheme.fg("dim", cont)} ${uiTheme.fg("dim", uiTheme.tree.hook)} ${uiTheme.fg(
-				"muted",
-				`Author: ${res.author}`,
-			)}`;
+			text += `\n ${uiTheme.fg("dim", cont)} ${uiTheme.fg("dim", uiTheme.tree.hook)} ${uiTheme.fg("muted", `Author: ${res.author}`)}`;
 		}
 
 		if (res.publishedDate) {
@@ -206,10 +197,7 @@ export function renderExaResult(
 		}
 
 		if (res.highlights?.length) {
-			text += `\n ${uiTheme.fg("dim", cont)} ${uiTheme.fg("dim", uiTheme.tree.hook)} ${uiTheme.fg(
-				"accent",
-				"Highlights",
-			)}`;
+			text += `\n ${uiTheme.fg("dim", cont)} ${uiTheme.fg("dim", uiTheme.tree.hook)} ${uiTheme.fg("accent", "Highlights")}`;
 			const maxHighlights = Math.min(res.highlights.length, 3);
 			for (let j = 0; j < maxHighlights; j++) {
 				const h = res.highlights[j];

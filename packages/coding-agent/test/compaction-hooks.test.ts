@@ -20,7 +20,7 @@ import {
 import { ModelRegistry } from "../src/core/model-registry";
 import { SessionManager } from "../src/core/session-manager";
 import { SettingsManager } from "../src/core/settings-manager";
-import { createCodingTools } from "../src/core/tools/index";
+import { createTools, type ToolSession } from "../src/core/tools/index";
 import { theme } from "../src/modes/interactive/theme/theme";
 
 const API_KEY = process.env.ANTHROPIC_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY;
@@ -84,8 +84,15 @@ describe.skipIf(!API_KEY)("Compaction hooks", () => {
 	}
 
 	async function createSession(hooks: LoadedHook[]) {
+		const toolSession: ToolSession = {
+			cwd: tempDir,
+			hasUI: false,
+			rulebookRules: [],
+			getSessionFile: () => null,
+			getSessionSpawns: () => "*",
+		};
+		const tools = await createTools(toolSession);
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
-		const tools = await createCodingTools(tempDir);
 		const agent = new Agent({
 			getApiKey: () => API_KEY,
 			initialState: {

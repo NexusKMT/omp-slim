@@ -44,12 +44,8 @@ import {
 	buildSystemPrompt,
 	ModelRegistry,
 	SessionManager,
-	codingTools,
-	readOnlyTools,
-	readTool,
-	bashTool,
-	editTool,
-	writeTool,
+	BUILTIN_TOOLS,
+	createTools,
 } from "@oh-my-pi/pi-coding-agent";
 
 // Auth and models setup
@@ -70,8 +66,8 @@ const { session } = await createAgentSession({
 	modelRegistry,
 });
 
-// Read-only
-const { session } = await createAgentSession({ tools: readOnlyTools, authStorage, modelRegistry });
+// Read-only tools
+const { session } = await createAgentSession({ toolNames: ["read", "grep", "find", "ls"], authStorage, modelRegistry });
 
 // In-memory
 const { session } = await createAgentSession({
@@ -90,7 +86,7 @@ const { session } = await createAgentSession({
 	authStorage: customAuth,
 	modelRegistry: customRegistry,
 	systemPrompt: "You are helpful.",
-	tools: [readTool, bashTool],
+	toolNames: ["read", "bash"],
 	customTools: [{ tool: myTool }],
 	hooks: [{ factory: myHook }],
 	skills: [],
@@ -119,7 +115,7 @@ await session.prompt("Hello");
 | `model`                     | From settings/first available | Model to use                      |
 | `thinkingLevel`             | From settings/"off"           | off, low, medium, high            |
 | `systemPrompt`              | Discovered                    | String or `(default) => modified` |
-| `tools`                     | `codingTools`                 | Built-in tools                    |
+| `toolNames`                 | All built-in tools            | Filter which tools to include     |
 | `customTools`               | Discovered                    | Replaces discovery                |
 | `additionalCustomToolPaths` | `[]`                          | Merge with discovery              |
 | `hooks`                     | Discovered                    | Replaces discovery                |

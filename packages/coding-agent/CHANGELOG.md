@@ -1,14 +1,43 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added `ToolSession` interface to unify tool creation with session context including cwd, UI availability, and rulebook rules
+- Added Bun Worker-based execution for subagent tasks, replacing subprocess spawning for improved performance and event streaming
+- Added `toolNames` option to filter which built-in tools are included in agent sessions
+- Added `BUILTIN_TOOLS` registry constant for programmatic access to available tool factories
+- Added unit tests for `createTools` function covering tool filtering and conditional tool creation
+
 ### Changed
 
+- Changed subagent execution from spawning separate `omp` processes to running in Bun Workers with direct event streaming
+- Changed tool factories to accept `ToolSession` parameter instead of separate cwd and options arguments
+- Changed `createTools` to return tools as a Map and support conditional tool creation based on session context
+- Changed system prompt builder to dynamically generate tool descriptions from the tool registry
+- Changed task tool description to be generated from a template with dynamic agent list injection
+- Changed tool creation to use a unified `ToolSession` interface instead of separate parameters for cwd, options, and callbacks
+- Changed `createTools` to return tools as a Map instead of an array for consistent tool registry access
+- Changed system prompt builder to receive tool registry Map for dynamic tool description generation
 - Changed subprocess usage tracking to accumulate incrementally from message_end events rather than parsing stored events after completion
+
+### Removed
+
+- Removed `browser` embedded agent from task tool agent discovery
+- Removed `recursive` property from agent definitions
+- Removed environment variables `OMP_NO_SUBAGENTS`, `OMP_BLOCKED_AGENT`, and `OMP_SPAWNS` for subagent control
+- Removed pre-instantiated tool exports (`readTool`, `bashTool`, `editTool`, `writeTool`, `grepTool`, `findTool`, `lsTool`) in favor of factory functions
+- Removed `createCodingTools` and `createReadOnlyTools` helper functions
+- Removed `codingTools` and `readOnlyTools` convenience exports
+- Removed `wrapToolsWithExtensions` function from extensions API
+- Removed `hidden` property support from custom tools
+- Removed subagent and question custom tool examples
 
 ### Fixed
 
 - Fixed memory accumulation in task subprocess by streaming events directly to disk instead of storing in memory
 - Fixed session persistence to exclude transient streaming data (partialJson, jsonlEvents) that was causing unnecessary storage bloat
+- Fixed createTools respecting explicit tool lists instead of returning all non-hidden tools
 
 ## [3.21.0] - 2026-01-06
 
