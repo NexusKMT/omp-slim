@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [3.30.0] - 2026-01-07
 ### Added
 
 - Added environment variable configuration for task limits: `OMP_TASK_MAX_PARALLEL`, `OMP_TASK_MAX_CONCURRENCY`, `OMP_TASK_MAX_OUTPUT_BYTES`, `OMP_TASK_MAX_OUTPUT_LINES`, and `OMP_TASK_MAX_AGENTS_IN_DESCRIPTION`
