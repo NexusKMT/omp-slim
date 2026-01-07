@@ -110,9 +110,7 @@ export function createCompleteTool(session: ToolSession) {
 			}
 
 			const responseText =
-				status === "aborted"
-					? `Task aborted: ${params.error || "No reason provided"}`
-					: "Completion recorded.";
+				status === "aborted" ? `Task aborted: ${params.error || "No reason provided"}` : "Completion recorded.";
 
 			return {
 				content: [{ type: "text", text: responseText }],

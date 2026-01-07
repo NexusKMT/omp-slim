@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added YouTube video support with automatic transcript extraction via yt-dlp
 
 ## [3.25.0] - 2026-01-07
 ### Added
