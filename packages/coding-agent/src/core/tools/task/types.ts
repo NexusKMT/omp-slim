@@ -4,20 +4,34 @@ import { type Static, Type } from "@sinclair/typebox";
 /** Source of an agent definition */
 export type AgentSource = "bundled" | "user" | "project";
 
+function getEnv(name: string, defaultValue: number): number {
+	const value = process.env[name];
+	if (value === undefined) {
+		return defaultValue;
+	}
+	try {
+		const number = Number.parseInt(value, 10);
+		if (!Number.isNaN(number) && number > 0) {
+			return number;
+		}
+	} catch {}
+	return defaultValue;
+}
+
 /** Maximum tasks per call */
-export const MAX_PARALLEL_TASKS = 32;
+export const MAX_PARALLEL_TASKS = getEnv("OMP_TASK_MAX_PARALLEL", 32);
 
 /** Maximum concurrent workers */
-export const MAX_CONCURRENCY = 16;
+export const MAX_CONCURRENCY = getEnv("OMP_TASK_MAX_CONCURRENCY", 16);
 
 /** Maximum output bytes per agent */
-export const MAX_OUTPUT_BYTES = 500_000;
+export const MAX_OUTPUT_BYTES = getEnv("OMP_TASK_MAX_OUTPUT_BYTES", 500_000);
 
 /** Maximum output lines per agent */
-export const MAX_OUTPUT_LINES = 5000;
+export const MAX_OUTPUT_LINES = getEnv("OMP_TASK_MAX_OUTPUT_LINES", 5000);
 
 /** Maximum agents to show in description */
-export const MAX_AGENTS_IN_DESCRIPTION = 10;
+export const MAX_AGENTS_IN_DESCRIPTION = getEnv("OMP_TASK_MAX_AGENTS_IN_DESCRIPTION", 10);
 
 /** EventBus channel for raw subagent events */
 export const TASK_SUBAGENT_EVENT_CHANNEL = "task:subagent:event";
@@ -41,7 +55,7 @@ export const taskSchema = Type.Object({
 	output_schema: Type.Optional(
 		Type.Any({
 			description: "JSON schema for structured subagent output (used by the complete tool)",
-		}),
+		})
 	),
 	tasks: Type.Array(taskItemSchema, {
 		description: "Tasks to run in parallel",
