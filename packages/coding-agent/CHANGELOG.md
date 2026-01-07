@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [3.24.0] - 2026-01-07
 ### Added
 
 - Added `ToolSession` interface to unify tool creation with session context including cwd, UI availability, and rulebook rules
