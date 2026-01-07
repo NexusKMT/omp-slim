@@ -128,7 +128,7 @@ export const handleLobsters: SpecialHandler = async (url: string, timeout: numbe
 		// Front page, newest, or tag page
 		if (parsed.pathname === "/" || parsed.pathname === "/newest" || parsed.pathname.startsWith("/t/")) {
 			if (parsed.pathname === "/") {
-				jsonUrl = "https://lobste.rs.json";
+				jsonUrl = "https://lobste.rs/hottest.json";
 			} else if (parsed.pathname === "/newest") {
 				jsonUrl = "https://lobste.rs/newest.json";
 			} else {

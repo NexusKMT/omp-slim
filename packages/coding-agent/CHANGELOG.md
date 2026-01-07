@@ -1,7 +1,6 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Added
 
 - Added environment variable configuration for task limits: `OMP_TASK_MAX_PARALLEL`, `OMP_TASK_MAX_CONCURRENCY`, `OMP_TASK_MAX_OUTPUT_BYTES`, `OMP_TASK_MAX_OUTPUT_LINES`, and `OMP_TASK_MAX_AGENTS_IN_DESCRIPTION`
@@ -15,6 +14,7 @@
 
 ### Fixed
 
+- Fixed Lobsters front page handler to use correct API endpoint (`/hottest.json` instead of invalid `.json`)
 - Fixed task worker error handling to prevent hanging on worker crashes, uncaught errors, and unhandled rejections
 - Fixed double-stringified JSON output from subagents being returned as escaped strings instead of parsed objects
 - Fixed markitdown tool installation to use automatic tool installer instead of requiring manual installation

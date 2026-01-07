@@ -55,7 +55,7 @@ export const taskSchema = Type.Object({
 	output_schema: Type.Optional(
 		Type.Any({
 			description: "JSON schema for structured subagent output (used by the complete tool)",
-		})
+		}),
 	),
 	tasks: Type.Array(taskItemSchema, {
 		description: "Tasks to run in parallel",
