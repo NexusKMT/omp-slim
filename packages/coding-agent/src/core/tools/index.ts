@@ -26,6 +26,7 @@ export { createOutputTool, type OutputToolDetails } from "./output";
 export { createReadTool, type ReadToolDetails } from "./read";
 export { reportFindingTool, type SubmitReviewDetails } from "./review";
 export { filterRulebookRules, formatRulesForPrompt, type RulebookToolDetails } from "./rulebook";
+export { createSshTool, type SSHToolDetails } from "./ssh";
 export { BUNDLED_AGENTS, createTaskTool, taskTool } from "./task/index";
 export type { TruncationResult } from "./truncate";
 export { createWebFetchTool, type WebFetchToolDetails } from "./web-fetch";
@@ -68,6 +69,7 @@ import { createOutputTool } from "./output";
 import { createReadTool } from "./read";
 import { reportFindingTool } from "./review";
 import { createRulebookTool } from "./rulebook";
+import { createSshTool } from "./ssh";
 import { createTaskTool } from "./task/index";
 import { createWebFetchTool } from "./web-fetch";
 import { createWebSearchTool } from "./web-search/index";
@@ -115,6 +117,7 @@ type ToolFactory = (session: ToolSession) => Tool | null | Promise<Tool | null>;
 export const BUILTIN_TOOLS: Record<string, ToolFactory> = {
 	ask: createAskTool,
 	bash: createBashTool,
+	ssh: createSshTool,
 	edit: createEditTool,
 	find: createFindTool,
 	git: createGitTool,

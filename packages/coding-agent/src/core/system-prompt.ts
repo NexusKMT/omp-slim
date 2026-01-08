@@ -70,6 +70,7 @@ const toolDescriptions: Record<ToolName, string> = {
 	ask: "Ask user for input or clarification",
 	read: "Read file contents",
 	bash: "Execute bash commands (npm, docker, etc.)",
+	ssh: "Execute commands on the remote host",
 	edit: "Make surgical edits to files (find exact text and replace)",
 	write: "Create or overwrite files",
 	grep: "Search file contents for patterns (respects .gitignore)",
@@ -199,6 +200,16 @@ function generateAntiBashRules(tools: ToolName[]): string | null {
 		lines.push(
 			"The git tool provides typed output, safety guards, and a clean API for all git and GitHub operations.\n",
 		);
+	}
+
+	// Add SSH remote filesystem guidance if available
+	const hasSSH = tools.includes("ssh");
+	if (hasSSH) {
+		lines.push("\n### SSH Remote Hosts");
+		lines.push("When `ssh` tool is available, remote filesystems may be mounted at `~/.omp/remote/<hostname>/`.");
+		lines.push("If sshfs is installed, you can use `read`, `edit`, `write` on mounted remote files directly.");
+		lines.push("**Windows hosts**: Drive paths include the colon, e.g. `~/.omp/remote/host/C:/Users/...` (not `C/`).");
+		lines.push("Use `ssh` tool for command execution on remote hosts.\n");
 	}
 
 	// Add search-first protocol

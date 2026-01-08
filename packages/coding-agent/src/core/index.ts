@@ -38,5 +38,16 @@ export {
 	type MCPToolsLoadResult,
 	type MCPTransport,
 } from "./mcp/index";
+export {
+	buildRemoteCommand,
+	closeAllConnections,
+	closeConnection,
+	ensureConnection,
+	getControlDir,
+	getControlPathTemplate,
+	type SSHConnectionTarget,
+} from "./ssh/connection-manager";
+export { executeSSH, type SSHExecutorOptions, type SSHResult } from "./ssh/ssh-executor";
+export { hasSshfs, isMounted, mountRemote, unmountAll, unmountRemote } from "./ssh/sshfs-mount";
 
 export * as utils from "./utils";

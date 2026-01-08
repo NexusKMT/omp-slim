@@ -162,6 +162,7 @@ describe("createTools", () => {
 		const expectedTools = [
 			"ask",
 			"bash",
+			"ssh",
 			"edit",
 			"find",
 			"git",

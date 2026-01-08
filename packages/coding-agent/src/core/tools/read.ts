@@ -1,9 +1,11 @@
+import { homedir } from "node:os";
 import path from "node:path";
 import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Text } from "@oh-my-pi/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { CONFIG_DIR_NAME } from "../../config";
 import { getLanguageFromPath, highlightCode, type Theme } from "../../modes/interactive/theme/theme";
 import readDescription from "../../prompts/tools/read.md" with { type: "text" };
 import { formatDimensionNote, resizeImage } from "../../utils/image-resize";
@@ -26,6 +28,13 @@ import {
 
 // Document types convertible via markitdown
 const CONVERTIBLE_EXTENSIONS = new Set([".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".rtf", ".epub"]);
+
+// Remote mount path prefix (sshfs mounts) - skip fuzzy matching to avoid hangs
+const REMOTE_MOUNT_PREFIX = path.join(homedir(), CONFIG_DIR_NAME, "remote") + path.sep;
+
+function isRemoteMountPath(absolutePath: string): boolean {
+	return absolutePath.startsWith(REMOTE_MOUNT_PREFIX);
+}
 
 // Maximum image file size (20MB) - larger images will be rejected to prevent OOM during serialization
 const MAX_IMAGE_SIZE = 20 * 1024 * 1024;
@@ -438,19 +447,23 @@ export function createReadTool(session: ToolSession): AgentTool<typeof readSchem
 					isDirectory = stat.isDirectory();
 				} catch (error) {
 					if (isNotFoundError(error)) {
-						const suggestions = await findReadPathSuggestions(readPath, session.cwd, signal);
 						let message = `File not found: ${readPath}`;
 
-						if (suggestions?.suggestions.length) {
-							const scopeLabel = suggestions.scopeLabel ? ` in ${suggestions.scopeLabel}` : "";
-							message += `\n\nClosest matches${scopeLabel}:\n${suggestions.suggestions.map((match) => `- ${match}`).join("\n")}`;
-							if (suggestions.truncated) {
-								message += `\n[Search truncated to first ${MAX_FUZZY_CANDIDATES} paths. Refine the path if the match isn't listed.]`;
+						// Skip fuzzy matching for remote mounts (sshfs) to avoid hangs
+						if (!isRemoteMountPath(absolutePath)) {
+							const suggestions = await findReadPathSuggestions(readPath, session.cwd, signal);
+
+							if (suggestions?.suggestions.length) {
+								const scopeLabel = suggestions.scopeLabel ? ` in ${suggestions.scopeLabel}` : "";
+								message += `\n\nClosest matches${scopeLabel}:\n${suggestions.suggestions.map((match) => `- ${match}`).join("\n")}`;
+								if (suggestions.truncated) {
+									message += `\n[Search truncated to first ${MAX_FUZZY_CANDIDATES} paths. Refine the path if the match isn't listed.]`;
+								}
+							} else if (suggestions?.error) {
+								message += `\n\nFuzzy match failed: ${suggestions.error}`;
+							} else if (suggestions?.scopeLabel) {
+								message += `\n\nNo similar paths found in ${suggestions.scopeLabel}.`;
 							}
-						} else if (suggestions?.error) {
-							message += `\n\nFuzzy match failed: ${suggestions.error}`;
-						} else if (suggestions?.scopeLabel) {
-							message += `\n\nNo similar paths found in ${suggestions.scopeLabel}.`;
 						}
 
 						throw new Error(message);

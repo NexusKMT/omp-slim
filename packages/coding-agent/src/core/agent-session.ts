@@ -45,6 +45,7 @@ import type {
 } from "./extensions";
 import { extractFileMentions, generateFileMentionMessages } from "./file-mentions";
 import type { HookCommandContext } from "./hooks/types";
+import { logger } from "./logger";
 import type { BashExecutionMessage, CustomMessage } from "./messages";
 import type { ModelRegistry } from "./model-registry";
 import { parseModelString } from "./model-resolver";
@@ -52,6 +53,8 @@ import { expandPromptTemplate, type PromptTemplate, parseCommandArgs } from "./p
 import type { BranchSummaryEntry, CompactionEntry, NewSessionOptions, SessionManager } from "./session-manager";
 import type { SettingsManager, SkillsSettings } from "./settings-manager";
 import { expandSlashCommand, type FileSlashCommand } from "./slash-commands";
+import { closeAllConnections } from "./ssh/connection-manager";
+import { unmountAll } from "./ssh/sshfs-mount";
 import type { TtsrManager } from "./ttsr";
 
 /** Session-specific events that extend the core AgentEvent */
@@ -166,6 +169,15 @@ const noOpUIContext: ExtensionUIContext = {
 		return theme;
 	},
 };
+
+async function cleanupSshResources(): Promise<void> {
+	const results = await Promise.allSettled([closeAllConnections(), unmountAll()]);
+	for (const result of results) {
+		if (result.status === "rejected") {
+			logger.warn("SSH cleanup failed", { error: String(result.reason) });
+		}
+	}
+}
 
 // ============================================================================
 // AgentSession Class
@@ -534,6 +546,7 @@ export class AgentSession {
 	 */
 	async dispose(): Promise<void> {
 		await this.sessionManager.flush();
+		await cleanupSshResources();
 		this._disconnectFromAgent();
 		this._eventListeners = [];
 	}
@@ -2472,9 +2485,10 @@ export class AgentSession {
 	 * Emit a custom tool session event (backwards compatibility for older callers).
 	 */
 	async emitCustomToolSessionEvent(reason: "start" | "switch" | "branch" | "tree" | "shutdown"): Promise<void> {
-		if (!this._extensionRunner) return;
 		if (reason !== "shutdown") return;
-		if (!this._extensionRunner.hasHandlers("session_shutdown")) return;
-		await this._extensionRunner.emit({ type: "session_shutdown" });
+		if (this._extensionRunner?.hasHandlers("session_shutdown")) {
+			await this._extensionRunner.emit({ type: "session_shutdown" });
+		}
+		await cleanupSshResources();
 	}
 }

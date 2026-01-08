@@ -1,0 +1,253 @@
+import type { AgentTool, AgentToolContext } from "@oh-my-pi/pi-agent-core";
+import type { Component } from "@oh-my-pi/pi-tui";
+import { Text } from "@oh-my-pi/pi-tui";
+import { Type } from "@sinclair/typebox";
+import type { SSHHost } from "../../capability/ssh";
+import { sshCapability } from "../../capability/ssh";
+import { loadSync } from "../../discovery/index";
+import type { Theme } from "../../modes/interactive/theme/theme";
+import sshDescriptionBase from "../../prompts/tools/ssh.md" with { type: "text" };
+import type { RenderResultOptions } from "../custom-tools/types";
+import { executeSSH } from "../ssh/ssh-executor";
+import type { ToolSession } from "./index";
+import { createToolUIKit } from "./render-utils";
+import { DEFAULT_MAX_BYTES, formatSize, type TruncationResult, truncateTail } from "./truncate";
+
+const sshSchema = Type.Object({
+	host: Type.String({ description: "Host name from ssh.json or .ssh.json" }),
+	command: Type.String({ description: "Command to execute on the remote host" }),
+	cwd: Type.Optional(Type.String({ description: "Remote working directory (optional)" })),
+	timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
+});
+
+export interface SSHToolDetails {
+	truncation?: TruncationResult;
+	fullOutputPath?: string;
+}
+
+function formatDescription(hosts: SSHHost[]): string {
+	if (hosts.length === 0) {
+		return sshDescriptionBase;
+	}
+	const hostList = hosts
+		.map((host) => {
+			if (host.description) {
+				return `- ${host.name}: ${host.description}`;
+			}
+			return `- ${host.name} (${host.host})`;
+		})
+		.join("\n");
+	return `${sshDescriptionBase}\n\nAvailable hosts:\n${hostList}`;
+}
+
+function quoteRemotePath(value: string): string {
+	if (value.length === 0) {
+		return "''";
+	}
+	const escaped = value.replace(/'/g, "'\\''");
+	return `'${escaped}'`;
+}
+
+function loadHosts(session: ToolSession): {
+	hostNames: string[];
+	hostsByName: Map<string, SSHHost>;
+} {
+	const result = loadSync<SSHHost>(sshCapability.id, { cwd: session.cwd });
+	const hostsByName = new Map<string, SSHHost>();
+	for (const host of result.items) {
+		if (!hostsByName.has(host.name)) {
+			hostsByName.set(host.name, host);
+		}
+	}
+	const hostNames = Array.from(hostsByName.keys()).sort();
+	return { hostNames, hostsByName };
+}
+
+export function createSshTool(session: ToolSession): AgentTool<typeof sshSchema> | null {
+	const { hostNames, hostsByName } = loadHosts(session);
+	if (hostNames.length === 0) {
+		return null;
+	}
+
+	const allowedHosts = new Set(hostNames);
+
+	const descriptionHosts = hostNames
+		.map((name) => hostsByName.get(name))
+		.filter((host): host is SSHHost => host !== undefined);
+
+	return {
+		name: "ssh",
+		label: "SSH",
+		description: formatDescription(descriptionHosts),
+		parameters: sshSchema,
+		execute: async (
+			_toolCallId: string,
+			{ host, command, cwd, timeout }: { host: string; command: string; cwd?: string; timeout?: number },
+			signal?: AbortSignal,
+			onUpdate?,
+			_ctx?: AgentToolContext,
+		) => {
+			if (!allowedHosts.has(host)) {
+				throw new Error(`Unknown SSH host: ${host}. Available hosts: ${hostNames.join(", ")}`);
+			}
+
+			const hostConfig = hostsByName.get(host);
+			if (!hostConfig) {
+				throw new Error(`SSH host not loaded: ${host}`);
+			}
+
+			const remoteCommand = cwd ? `cd -- ${quoteRemotePath(cwd)} && ${command}` : command;
+			let currentOutput = "";
+
+			const result = await executeSSH(hostConfig, remoteCommand, {
+				timeout: timeout ? timeout * 1000 : undefined,
+				signal,
+				onChunk: (chunk) => {
+					currentOutput += chunk;
+					if (onUpdate) {
+						const truncation = truncateTail(currentOutput);
+						onUpdate({
+							content: [{ type: "text", text: truncation.content || "" }],
+							details: {
+								truncation: truncation.truncated ? truncation : undefined,
+							},
+						});
+					}
+				},
+			});
+
+			if (result.cancelled) {
+				throw new Error(result.output || "Command aborted");
+			}
+
+			const truncation = truncateTail(result.output);
+			let outputText = truncation.content || "(no output)";
+
+			let details: SSHToolDetails | undefined;
+
+			if (truncation.truncated) {
+				details = {
+					truncation,
+					fullOutputPath: result.fullOutputPath,
+				};
+
+				const startLine = truncation.totalLines - truncation.outputLines + 1;
+				const endLine = truncation.totalLines;
+
+				if (truncation.lastLinePartial) {
+					const lastLineSize = formatSize(Buffer.byteLength(result.output.split("\n").pop() || "", "utf-8"));
+					outputText += `\n\n[Showing last ${formatSize(truncation.outputBytes)} of line ${endLine} (line is ${lastLineSize}). Full output: ${result.fullOutputPath}]`;
+				} else if (truncation.truncatedBy === "lines") {
+					outputText += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines}. Full output: ${result.fullOutputPath}]`;
+				} else {
+					outputText += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${result.fullOutputPath}]`;
+				}
+			}
+
+			if (result.exitCode !== 0 && result.exitCode !== undefined) {
+				outputText += `\n\nCommand exited with code ${result.exitCode}`;
+				throw new Error(outputText);
+			}
+
+			return { content: [{ type: "text", text: outputText }], details };
+		},
+	};
+}
+
+// =============================================================================
+// TUI Renderer
+// =============================================================================
+
+interface SshRenderArgs {
+	host?: string;
+	command?: string;
+	timeout?: number;
+}
+
+interface SshRenderContext {
+	/** Visual lines for truncated output (pre-computed by tool-execution) */
+	visualLines?: string[];
+	/** Number of lines skipped */
+	skippedCount?: number;
+	/** Total visual lines */
+	totalVisualLines?: number;
+}
+
+export const sshToolRenderer = {
+	renderCall(args: SshRenderArgs, uiTheme: Theme): Component {
+		const ui = createToolUIKit(uiTheme);
+		const host = args.host || uiTheme.format.ellipsis;
+		const command = args.command || uiTheme.format.ellipsis;
+		const text = ui.title(`[${host}] $ ${command}`);
+		return new Text(text, 0, 0);
+	},
+
+	renderResult(
+		result: {
+			content: Array<{ type: string; text?: string }>;
+			details?: SSHToolDetails;
+		},
+		options: RenderResultOptions & { renderContext?: SshRenderContext },
+		uiTheme: Theme,
+	): Component {
+		const ui = createToolUIKit(uiTheme);
+		const { expanded, renderContext } = options;
+		const details = result.details;
+		const lines: string[] = [];
+
+		const textContent = result.content?.find((c) => c.type === "text")?.text ?? "";
+		const output = textContent.trim();
+
+		if (output) {
+			if (expanded) {
+				const styledOutput = output
+					.split("\n")
+					.map((line) => uiTheme.fg("toolOutput", line))
+					.join("\n");
+				lines.push(styledOutput);
+			} else if (renderContext?.visualLines) {
+				const { visualLines, skippedCount = 0, totalVisualLines = visualLines.length } = renderContext;
+				if (skippedCount > 0) {
+					lines.push(
+						uiTheme.fg(
+							"dim",
+							`${uiTheme.format.ellipsis} (${skippedCount} earlier lines, showing ${visualLines.length} of ${totalVisualLines}) (ctrl+o to expand)`,
+						),
+					);
+				}
+				lines.push(...visualLines);
+			} else {
+				const outputLines = output.split("\n");
+				const maxLines = 5;
+				const displayLines = outputLines.slice(0, maxLines);
+				const remaining = outputLines.length - maxLines;
+
+				lines.push(...displayLines.map((line) => uiTheme.fg("toolOutput", line)));
+				if (remaining > 0) {
+					lines.push(uiTheme.fg("dim", `${uiTheme.format.ellipsis} (${remaining} more lines) (ctrl+o to expand)`));
+				}
+			}
+		}
+
+		const truncation = details?.truncation;
+		const fullOutputPath = details?.fullOutputPath;
+		if (truncation?.truncated || fullOutputPath) {
+			const warnings: string[] = [];
+			if (fullOutputPath) {
+				warnings.push(`Full output: ${fullOutputPath}`);
+			}
+			if (truncation?.truncated) {
+				if (truncation.truncatedBy === "lines") {
+					warnings.push(`Truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines`);
+				} else {
+					warnings.push(
+						`Truncated: ${truncation.outputLines} lines shown (${ui.formatBytes(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit)`,
+					);
+				}
+			}
+			lines.push(uiTheme.fg("warning", ui.wrapBrackets(warnings.join(". "))));
+		}
+
+		return new Text(lines.join("\n"), 0, 0);
+	},
+};

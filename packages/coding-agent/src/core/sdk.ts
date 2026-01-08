@@ -37,6 +37,7 @@ import { loadSync as loadCapability } from "../capability/index";
 import { type Rule, ruleCapability } from "../capability/rule";
 import { getAgentDir, getConfigDirPaths } from "../config";
 import { initializeWithSettings } from "../discovery";
+import { registerAsyncCleanup } from "../modes/cleanup";
 import { AgentSession } from "./agent-session";
 import { AuthStorage } from "./auth-storage";
 import {
@@ -67,6 +68,8 @@ import { SessionManager } from "./session-manager";
 import { type Settings, SettingsManager, type SkillsSettings } from "./settings-manager";
 import { loadSkills as loadSkillsInternal, type Skill } from "./skills";
 import { type FileSlashCommand, loadSlashCommands as loadSlashCommandsInternal } from "./slash-commands";
+import { closeAllConnections } from "./ssh/connection-manager";
+import { unmountAll } from "./ssh/sshfs-mount";
 import {
 	buildSystemPrompt as buildSystemPromptInternal,
 	loadProjectContextFiles as loadContextFilesInternal,
@@ -83,6 +86,7 @@ import {
 	createGrepTool,
 	createLsTool,
 	createReadTool,
+	createSshTool,
 	createTools,
 	createWriteTool,
 	filterRulebookRules,
@@ -204,6 +208,7 @@ export {
 	// Individual tool factories (for custom usage)
 	createReadTool,
 	createBashTool,
+	createSshTool,
 	createEditTool,
 	createWriteTool,
 	createGrepTool,
@@ -399,6 +404,23 @@ function isCustomTool(tool: CustomTool | ToolDefinition): tool is CustomTool {
 
 const TOOL_DEFINITION_MARKER = Symbol("__isToolDefinition");
 
+let sshCleanupRegistered = false;
+
+async function cleanupSshResources(): Promise<void> {
+	const results = await Promise.allSettled([closeAllConnections(), unmountAll()]);
+	for (const result of results) {
+		if (result.status === "rejected") {
+			logger.warn("SSH cleanup failed", { error: String(result.reason) });
+		}
+	}
+}
+
+function registerSshCleanup(): void {
+	if (sshCleanupRegistered) return;
+	sshCleanupRegistered = true;
+	registerAsyncCleanup(() => cleanupSshResources());
+}
+
 function customToolToDefinition(tool: CustomTool): ToolDefinition {
 	const definition: ToolDefinition & { [TOOL_DEFINITION_MARKER]: true } = {
 		name: tool.name,
@@ -497,6 +519,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const cwd = options.cwd ?? process.cwd();
 	const agentDir = options.agentDir ?? getDefaultAgentDir();
 	const eventBus = options.eventBus ?? createEventBus();
+
+	registerSshCleanup();
 
 	// Use provided or create AuthStorage and ModelRegistry
 	const authStorage = options.authStorage ?? (await discoverAuthStorage(agentDir));

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- Added SSH tool with project ssh.json/.ssh.json discovery, persistent connections, and optional sshfs mounts
+
 ## [3.33.0] - 2026-01-08
 
 ### Added

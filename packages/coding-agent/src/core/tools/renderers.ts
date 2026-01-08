@@ -17,6 +17,7 @@ import { lspToolRenderer } from "./lsp/render";
 import { notebookToolRenderer } from "./notebook";
 import { outputToolRenderer } from "./output";
 import { readToolRenderer } from "./read";
+import { sshToolRenderer } from "./ssh";
 import { taskToolRenderer } from "./task/render";
 import { webFetchToolRenderer } from "./web-fetch";
 import { webSearchToolRenderer } from "./web-search/render";
@@ -43,6 +44,7 @@ export const toolRenderers: Record<string, ToolRenderer> = {
 	notebook: notebookToolRenderer as ToolRenderer,
 	output: outputToolRenderer as ToolRenderer,
 	read: readToolRenderer as ToolRenderer,
+	ssh: sshToolRenderer as ToolRenderer,
 	task: taskToolRenderer as ToolRenderer,
 	web_fetch: webFetchToolRenderer as ToolRenderer,
 	web_search: webSearchToolRenderer as ToolRenderer,
