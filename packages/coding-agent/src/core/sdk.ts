@@ -61,7 +61,7 @@ import { logger } from "./logger";
 import { discoverAndLoadMCPTools, type MCPManager, type MCPToolsLoadResult } from "./mcp/index";
 import { convertToLlm } from "./messages";
 import { ModelRegistry } from "./model-registry";
-import { parseModelString } from "./model-resolver";
+import { formatModelString, parseModelString } from "./model-resolver";
 import { loadPromptTemplates as loadPromptTemplatesInternal, type PromptTemplate } from "./prompt-templates";
 import { SessionManager } from "./session-manager";
 import { type Settings, SettingsManager, type SkillsSettings } from "./settings-manager";
@@ -520,6 +520,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	time("loadSession");
 	const hasExistingSession = existingSession.messages.length > 0;
 
+	const hasExplicitModel = options.model !== undefined;
 	let model = options.model;
 	let modelFallbackMessage: string | undefined;
 
@@ -617,6 +618,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		requireCompleteTool: options.requireCompleteTool,
 		getSessionFile: () => sessionManager.getSessionFile() ?? null,
 		getSessionSpawns: () => options.spawns ?? "*",
+		getModelString: () => (hasExplicitModel && model ? formatModelString(model) : undefined),
 		settings: settingsManager,
 	};
 

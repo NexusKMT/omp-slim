@@ -135,6 +135,7 @@ export async function createTaskTool(
 			const startTime = Date.now();
 			const { agents, projectAgentsDir } = await discoverAgents(session.cwd);
 			const { agent: agentName, context, model, output: outputSchema } = params;
+			const modelOverride = model ?? session.getModelString?.();
 
 			// Validate agent exists
 			const agent = getAgent(agents, agentName);
@@ -323,7 +324,7 @@ export async function createTaskTool(
 						toolCount: 0,
 						tokens: 0,
 						durationMs: 0,
-						modelOverride: model,
+						modelOverride,
 						description: t.description,
 					});
 				}
@@ -342,7 +343,7 @@ export async function createTaskTool(
 							index,
 							taskId: task.taskId,
 							context: undefined, // Already prepended above
-							modelOverride: model,
+							modelOverride,
 							outputSchema,
 							sessionFile,
 							persistArtifacts: !!artifactsDir,

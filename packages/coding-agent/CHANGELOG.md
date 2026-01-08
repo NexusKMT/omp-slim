@@ -10,6 +10,10 @@
 
 - Changed LSP server warmup to use a 5-second timeout, falling back to lazy initialization for slow servers
 
+### Fixed
+
+- Fixed Task tool subagent model selection to inherit explicit CLI `--model` overrides
+
 ## [3.31.0] - 2026-01-08
 
 ### Added

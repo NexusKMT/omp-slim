@@ -94,6 +94,8 @@ export interface ToolSession {
 	getSessionFile: () => string | null;
 	/** Get session spawns */
 	getSessionSpawns: () => string | null;
+	/** Get resolved model string if explicitly set for this session */
+	getModelString?: () => string | undefined;
 	/** Settings manager (optional) */
 	settings?: {
 		getImageAutoResize(): boolean;
