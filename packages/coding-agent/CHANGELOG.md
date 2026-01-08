@@ -1,10 +1,18 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Added
 
+- Added `compat` option for SSH hosts to wrap commands in a POSIX shell on Windows systems
+- Added automatic working directory handling for PowerShell and cmd.exe on Windows SSH hosts
 - Added automatic environment detection to system prompt including OS, distro, kernel, CPU, GPU, shell, terminal, desktop environment, and window manager information
 - Added SSH tool with project ssh.json/.ssh.json discovery, persistent connections, and optional sshfs mounts
+- Added SSH host OS/shell detection with compat mode and persistent host info cache
+
+### Changed
+
+- Changed SSH tool description to show detected shell type and available commands per host
 
 ## [3.33.0] - 2026-01-08
 

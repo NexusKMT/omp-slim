@@ -8,7 +8,7 @@ import { killProcessTree, sanitizeBinaryOutput } from "../../utils/shell";
 import { logger } from "../logger";
 import { DEFAULT_MAX_BYTES, truncateTail } from "../tools/truncate";
 import { ScopeSignal } from "../utils";
-import { buildRemoteCommand, ensureConnection, type SSHConnectionTarget } from "./connection-manager";
+import { buildRemoteCommand, ensureConnection, ensureHostInfo, type SSHConnectionTarget } from "./connection-manager";
 import { hasSshfs, mountRemote } from "./sshfs-mount";
 
 export interface SSHExecutorOptions {
@@ -20,6 +20,8 @@ export interface SSHExecutorOptions {
 	signal?: AbortSignal;
 	/** Remote path to mount when sshfs is available */
 	remotePath?: string;
+	/** Wrap commands in a POSIX shell for compat mode */
+	compatEnabled?: boolean;
 }
 
 export interface SSHResult {
@@ -97,6 +99,23 @@ function createOutputSink(
 	});
 }
 
+function quoteForCompatShell(command: string): string {
+	if (command.length === 0) {
+		return "''";
+	}
+	const escaped = command.replace(/'/g, "'\\''");
+	return `'${escaped}'`;
+}
+
+async function buildCompatCommand(host: SSHConnectionTarget, command: string): Promise<string> {
+	const hostInfo = await ensureHostInfo(host);
+	const shell = hostInfo.compatShell ?? "bash";
+	if (!hostInfo.compatShell) {
+		logger.warn("SSH compat enabled without detected compat shell", { host: host.name });
+	}
+	return `${shell} -c ${quoteForCompatShell(command)}`;
+}
+
 export async function executeSSH(
 	host: SSHConnectionTarget,
 	command: string,
@@ -113,7 +132,8 @@ export async function executeSSH(
 
 	using signal = new ScopeSignal(options);
 
-	const child: Subprocess = Bun.spawn(["ssh", ...buildRemoteCommand(host, command)], {
+	const resolvedCommand = options?.compatEnabled ? await buildCompatCommand(host, command) : command;
+	const child: Subprocess = Bun.spawn(["ssh", ...buildRemoteCommand(host, resolvedCommand)], {
 		stdin: "ignore",
 		stdout: "pipe",
 		stderr: "pipe",

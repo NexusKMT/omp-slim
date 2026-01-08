@@ -8,6 +8,8 @@ import { loadSync } from "../../discovery/index";
 import type { Theme } from "../../modes/interactive/theme/theme";
 import sshDescriptionBase from "../../prompts/tools/ssh.md" with { type: "text" };
 import type { RenderResultOptions } from "../custom-tools/types";
+import type { SSHHostInfo } from "../ssh/connection-manager";
+import { ensureHostInfo, getHostInfoForHost } from "../ssh/connection-manager";
 import { executeSSH } from "../ssh/ssh-executor";
 import type { ToolSession } from "./index";
 import { createToolUIKit } from "./render-utils";
@@ -25,16 +27,29 @@ export interface SSHToolDetails {
 	fullOutputPath?: string;
 }
 
+function formatHostShell(host: SSHHost): string {
+	const info = getHostInfoForHost(host);
+	if (!info) {
+		return "connecting...";
+	}
+	if (info.compatEnabled || info.os !== "windows") {
+		return "bash: ls, cat, grep, find, ps, uname";
+	}
+	if (info.shell === "powershell") {
+		return "powershell: Get-ChildItem, Get-Content, Select-String";
+	}
+	return "cmd: dir, type, findstr, where, systeminfo";
+}
+
 function formatDescription(hosts: SSHHost[]): string {
 	if (hosts.length === 0) {
 		return sshDescriptionBase;
 	}
 	const hostList = hosts
 		.map((host) => {
-			if (host.description) {
-				return `- ${host.name}: ${host.description}`;
-			}
-			return `- ${host.name} (${host.host})`;
+			const shell = formatHostShell(host);
+			const label = host.description ? `${host.name}: ${host.description}` : host.name;
+			return `- ${label} [${shell}]`;
 		})
 		.join("\n");
 	return `${sshDescriptionBase}\n\nAvailable hosts:\n${hostList}`;
@@ -46,6 +61,32 @@ function quoteRemotePath(value: string): string {
 	}
 	const escaped = value.replace(/'/g, "'\\''");
 	return `'${escaped}'`;
+}
+
+function quotePowerShellPath(value: string): string {
+	if (value.length === 0) {
+		return "''";
+	}
+	const escaped = value.replace(/'/g, "''");
+	return `'${escaped}'`;
+}
+
+function quoteCmdPath(value: string): string {
+	const escaped = value.replace(/"/g, '""');
+	return `"${escaped}"`;
+}
+
+function buildRemoteCommand(command: string, cwd: string | undefined, info: SSHHostInfo): string {
+	if (!cwd) return command;
+
+	if (info.os === "windows" && !info.compatEnabled) {
+		if (info.shell === "powershell") {
+			return `Set-Location -Path ${quotePowerShellPath(cwd)}; ${command}`;
+		}
+		return `cd /d ${quoteCmdPath(cwd)} && ${command}`;
+	}
+
+	return `cd -- ${quoteRemotePath(cwd)} && ${command}`;
 }
 
 function loadHosts(session: ToolSession): {
@@ -96,12 +137,14 @@ export function createSshTool(session: ToolSession): AgentTool<typeof sshSchema>
 				throw new Error(`SSH host not loaded: ${host}`);
 			}
 
-			const remoteCommand = cwd ? `cd -- ${quoteRemotePath(cwd)} && ${command}` : command;
+			const hostInfo = await ensureHostInfo(hostConfig);
+			const remoteCommand = buildRemoteCommand(command, cwd, hostInfo);
 			let currentOutput = "";
 
 			const result = await executeSSH(hostConfig, remoteCommand, {
 				timeout: timeout ? timeout * 1000 : undefined,
 				signal,
+				compatEnabled: hostInfo.compatEnabled,
 				onChunk: (chunk) => {
 					currentOutput += chunk;
 					if (onUpdate) {
