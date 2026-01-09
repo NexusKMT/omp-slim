@@ -414,7 +414,8 @@ describe("Agent.continue()", () => {
 		it("should continue and process tool results", async () => {
 			const agent = new Agent({
 				initialState: {
-					systemPrompt: "You are a helpful assistant. After getting a calculation result, state the answer clearly.",
+					systemPrompt:
+						"You are a helpful assistant. After getting a calculation result, state the answer clearly.",
 					model,
 					thinkingLevel: "off",
 					tools: [calculateTool],

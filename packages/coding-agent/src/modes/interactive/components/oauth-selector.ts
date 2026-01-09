@@ -21,7 +21,7 @@ export class OAuthSelectorComponent extends Container {
 		mode: "login" | "logout",
 		authStorage: AuthStorage,
 		onSelect: (providerId: string) => void,
-		onCancel: () => void
+		onCancel: () => void,
 	) {
 		super();
 

@@ -46,7 +46,7 @@ async function login(provider: OAuthProvider): Promise<void> {
 					},
 					async () => {
 						return await promptFn("Paste the authorization code:");
-					}
+					},
 				);
 				break;
 
@@ -71,7 +71,7 @@ async function login(provider: OAuthProvider): Promise<void> {
 						if (info.instructions) console.log(info.instructions);
 						console.log();
 					},
-					(msg) => console.log(msg)
+					(msg) => console.log(msg),
 				);
 				break;
 
@@ -82,7 +82,7 @@ async function login(provider: OAuthProvider): Promise<void> {
 						if (info.instructions) console.log(info.instructions);
 						console.log();
 					},
-					(msg) => console.log(msg)
+					(msg) => console.log(msg),
 				);
 				break;
 			case "openai-codex":

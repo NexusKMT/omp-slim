@@ -17,7 +17,7 @@ initTheme("dark");
 
 // Load the real fixture that caused the bug
 const fixtureMessage: AssistantMessage = JSON.parse(
-	readFileSync(join(import.meta.dir, "fixtures/assistant-message-with-thinking-code.json"), "utf-8")
+	readFileSync(join(import.meta.dir, "fixtures/assistant-message-with-thinking-code.json"), "utf-8"),
 );
 
 // Extract thinking and text content

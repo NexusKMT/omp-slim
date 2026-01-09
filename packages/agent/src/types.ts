@@ -198,7 +198,7 @@ export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any
 		params: Static<TParameters>,
 		signal?: AbortSignal,
 		onUpdate?: AgentToolUpdateCallback<TDetails>,
-		context?: AgentToolContext
+		context?: AgentToolContext,
 	) => Promise<AgentToolResult<TDetails>>;
 
 	/** Optional custom rendering for tool call display (returns UI component) */

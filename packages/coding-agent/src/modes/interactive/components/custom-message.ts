@@ -89,7 +89,7 @@ export class CustomMessageComponent extends Container {
 		this.box.addChild(
 			new Markdown(text, 0, 0, getMarkdownTheme(), {
 				color: (value: string) => theme.fg("customMessageText", value),
-			})
+			}),
 		);
 	}
 }

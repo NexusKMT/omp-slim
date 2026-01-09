@@ -33,7 +33,9 @@ export class AssistantMessageComponent extends Container {
 
 		if (
 			message.content.length > 0 &&
-			message.content.some((c) => (c.type === "text" && c.text.trim()) || (c.type === "thinking" && c.thinking.trim()))
+			message.content.some(
+				(c) => (c.type === "text" && c.text.trim()) || (c.type === "thinking" && c.thinking.trim()),
+			)
 		) {
 			this.contentContainer.addChild(new Spacer(1));
 		}
@@ -61,7 +63,7 @@ export class AssistantMessageComponent extends Container {
 						new Markdown(content.thinking.trim(), 1, 0, getMarkdownTheme(), {
 							color: (text: string) => theme.fg("thinkingText", text),
 							italic: true,
-						})
+						}),
 					);
 					this.contentContainer.addChild(new Spacer(1));
 				}

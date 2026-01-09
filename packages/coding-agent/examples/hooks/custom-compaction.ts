@@ -45,7 +45,7 @@ export default function (pi: HookAPI) {
 			`Custom compaction: summarizing ${allMessages.length} messages (${tokensBefore.toLocaleString()} tokens) with ${
 				model.id
 			}...`,
-			"info"
+			"info",
 		);
 
 		// Convert messages to readable text format

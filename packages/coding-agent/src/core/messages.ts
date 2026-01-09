@@ -5,8 +5,8 @@
  * and provides a transformer to convert them to LLM-compatible messages.
  */
 
-import type { ImageContent, Message, TextContent } from "@oh-my-pi/pi-ai";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { ImageContent, Message, TextContent } from "@oh-my-pi/pi-ai";
 
 export const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
 
@@ -136,7 +136,7 @@ export function createBranchSummaryMessage(summary: string, fromId: string, time
 export function createCompactionSummaryMessage(
 	summary: string,
 	tokensBefore: number,
-	timestamp: string
+	timestamp: string,
 ): CompactionSummaryMessage {
 	return {
 		role: "compactionSummary",
@@ -152,7 +152,7 @@ export function createCustomMessage(
 	content: string | (TextContent | ImageContent)[],
 	display: boolean,
 	details: unknown | undefined,
-	timestamp: string
+	timestamp: string,
 ): CustomMessage {
 	return {
 		role: "custom",

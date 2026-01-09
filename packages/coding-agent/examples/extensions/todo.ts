@@ -263,7 +263,7 @@ export default function (pi: ExtensionAPI) {
 					return new Text(
 						`${theme.fg("success", "✓ Added ") + theme.fg("accent", `#${added.id}`)} ${theme.fg("muted", added.text)}`,
 						0,
-						0
+						0,
 					);
 				}
 

@@ -90,7 +90,7 @@ export class HookMessageComponent extends Container {
 		this.box.addChild(
 			new Markdown(text, 0, 0, getMarkdownTheme(), {
 				color: (text: string) => theme.fg("customMessageText", text),
-			})
+			}),
 		);
 	}
 }

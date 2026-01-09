@@ -44,7 +44,10 @@ export class AuthStorage {
 	 * @param authPath - Primary path for reading/writing auth.json
 	 * @param fallbackPaths - Additional paths to check when reading (legacy support)
 	 */
-	constructor(private authPath: string, private fallbackPaths: string[] = []) {}
+	constructor(
+		private authPath: string,
+		private fallbackPaths: string[] = [],
+	) {}
 
 	/**
 	 * Set a runtime API key override (not persisted to disk).
@@ -173,7 +176,7 @@ export class AuthStorage {
 			onAuth: (info: { url: string; instructions?: string }) => void;
 			onPrompt: (prompt: { message: string; placeholder?: string }) => Promise<string>;
 			onProgress?: (message: string) => void;
-		}
+		},
 	): Promise<void> {
 		let credentials: OAuthCredentials;
 
@@ -181,7 +184,7 @@ export class AuthStorage {
 			case "anthropic":
 				credentials = await loginAnthropic(
 					(url) => callbacks.onAuth({ url }),
-					() => callbacks.onPrompt({ message: "Paste the authorization code:" })
+					() => callbacks.onPrompt({ message: "Paste the authorization code:" }),
 				);
 				break;
 			case "github-copilot":

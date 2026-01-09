@@ -63,7 +63,7 @@ async function runInteractiveMode(
 	lspServers: Array<{ name: string; status: "ready" | "error"; fileTypes: string[] }> | undefined,
 	initialMessage?: string,
 	initialImages?: ImageContent[],
-	fdPath: string | undefined = undefined
+	fdPath: string | undefined = undefined,
 ): Promise<void> {
 	const mode = new InteractiveMode(session, version, changelogMarkdown, setExtensionUIContext, lspServers, fdPath);
 
@@ -120,7 +120,7 @@ async function runInteractiveMode(
 
 async function prepareInitialMessage(
 	parsed: Args,
-	autoResizeImages: boolean
+	autoResizeImages: boolean,
 ): Promise<{
 	initialMessage?: string;
 	initialImages?: ImageContent[];
@@ -262,7 +262,7 @@ async function buildSessionOptions(
 	scopedModels: ScopedModel[],
 	sessionManager: SessionManager | undefined,
 	modelRegistry: ModelRegistry,
-	settingsManager: SettingsManager
+	settingsManager: SettingsManager,
 ): Promise<CreateAgentSessionOptions> {
 	const options: CreateAgentSessionOptions = {
 		cwd: parsed.cwd ?? process.cwd(),
@@ -484,7 +484,7 @@ export async function main(args: string[]) {
 		scopedModels,
 		sessionManager,
 		modelRegistry,
-		settingsManager
+		settingsManager,
 	);
 	sessionOptions.authStorage = authStorage;
 	sessionOptions.modelRegistry = modelRegistry;
@@ -575,7 +575,7 @@ export async function main(args: string[]) {
 			lspServers,
 			initialMessage,
 			initialImages,
-			fdPath
+			fdPath,
 		);
 	} else {
 		await runPrintMode(session, mode, parsed.messages, initialMessage, initialImages);

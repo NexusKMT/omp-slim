@@ -264,7 +264,7 @@ export class Agent {
 	async prompt(input: string | AgentMessage | AgentMessage[], images?: ImageContent[]) {
 		if (this._state.isStreaming) {
 			throw new Error(
-				"Agent is already processing a prompt. Use steer() or followUp() to queue messages, or wait for completion."
+				"Agent is already processing a prompt. Use steer() or followUp() to queue messages, or wait for completion.",
 			);
 		}
 
@@ -438,7 +438,7 @@ export class Agent {
 					(c) =>
 						(c.type === "thinking" && c.thinking.trim().length > 0) ||
 						(c.type === "text" && c.text.trim().length > 0) ||
-						(c.type === "toolCall" && c.name.trim().length > 0)
+						(c.type === "toolCall" && c.name.trim().length > 0),
 				);
 				if (!onlyEmpty) {
 					this.appendMessage(partial);

@@ -27,7 +27,7 @@ if (customModel) {
 const available = modelRegistry.getAvailable();
 console.log(
 	"Available models:",
-	available.map((m) => `${m.provider}/${m.id}`)
+	available.map((m) => `${m.provider}/${m.id}`),
 );
 
 if (available.length > 0) {

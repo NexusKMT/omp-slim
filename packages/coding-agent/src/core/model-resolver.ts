@@ -2,8 +2,8 @@
  * Model resolution, scoping, and initial selection
  */
 
-import { type Api, type KnownProvider, type Model, modelsAreEqual } from "@oh-my-pi/pi-ai";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import { type Api, type KnownProvider, type Model, modelsAreEqual } from "@oh-my-pi/pi-ai";
 import chalk from "chalk";
 import { minimatch } from "minimatch";
 import { isValidThinkingLevel } from "../cli/args";
@@ -25,6 +25,7 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	cerebras: "zai-glm-4.6",
 	zai: "glm-4.6",
 	mistral: "devstral-medium-latest",
+	opencode: "claude-sonnet-4-5",
 };
 
 export interface ScopedModel {
@@ -79,7 +80,7 @@ function tryMatchModel(modelPattern: string, availableModels: Model<Api>[]): Mod
 		const provider = modelPattern.substring(0, slashIndex);
 		const modelId = modelPattern.substring(slashIndex + 1);
 		const providerMatch = availableModels.find(
-			(m) => m.provider.toLowerCase() === provider.toLowerCase() && m.id.toLowerCase() === modelId.toLowerCase()
+			(m) => m.provider.toLowerCase() === provider.toLowerCase() && m.id.toLowerCase() === modelId.toLowerCase(),
 		);
 		if (providerMatch) {
 			return providerMatch;
@@ -97,7 +98,7 @@ function tryMatchModel(modelPattern: string, availableModels: Model<Api>[]): Mod
 	const matches = availableModels.filter(
 		(m) =>
 			m.id.toLowerCase().includes(modelPattern.toLowerCase()) ||
-			m.name?.toLowerCase().includes(modelPattern.toLowerCase())
+			m.name?.toLowerCase().includes(modelPattern.toLowerCase()),
 	);
 
 	if (matches.length === 0) {
@@ -351,7 +352,7 @@ export async function restoreModelFromSession(
 	savedModelId: string,
 	currentModel: Model<Api> | undefined,
 	shouldPrintMessages: boolean,
-	modelRegistry: ModelRegistry
+	modelRegistry: ModelRegistry,
 ): Promise<{ model: Model<Api> | undefined; fallbackMessage: string | undefined }> {
 	const restoredModel = modelRegistry.find(savedProvider, savedModelId);
 
@@ -427,7 +428,7 @@ export async function restoreModelFromSession(
  */
 export async function findSmolModel(
 	modelRegistry: ModelRegistry,
-	savedModel?: string
+	savedModel?: string,
 ): Promise<Model<Api> | undefined> {
 	const availableModels = modelRegistry.getAvailable();
 	if (availableModels.length === 0) return undefined;
@@ -470,7 +471,7 @@ export async function findSmolModel(
  */
 export async function findSlowModel(
 	modelRegistry: ModelRegistry,
-	savedModel?: string
+	savedModel?: string,
 ): Promise<Model<Api> | undefined> {
 	const availableModels = modelRegistry.getAvailable();
 	if (availableModels.length === 0) return undefined;

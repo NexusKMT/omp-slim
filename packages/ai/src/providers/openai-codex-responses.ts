@@ -35,11 +35,7 @@ import {
 import { getCodexInstructions } from "./openai-codex/prompts/codex";
 import { buildCodexPiBridge } from "./openai-codex/prompts/pi-codex-bridge";
 import { buildCodexSystemPrompt } from "./openai-codex/prompts/system-prompt";
-import {
-	type CodexRequestOptions,
-	type RequestBody,
-	transformRequestBody,
-} from "./openai-codex/request-transformer";
+import { type CodexRequestOptions, type RequestBody, transformRequestBody } from "./openai-codex/request-transformer";
 import { parseCodexError, parseCodexSseStream } from "./openai-codex/response-handler";
 import { transformMessages } from "./transorm-messages";
 

@@ -24,7 +24,7 @@ class ProxyMessageEventStream extends EventStream<AssistantMessageEvent, Assista
 				if (event.type === "done") return event.message;
 				if (event.type === "error") return event.error;
 				throw new Error("Unexpected event type");
-			}
+			},
 		);
 	}
 }
@@ -209,7 +209,7 @@ export function streamProxy(model: Model<any>, context: Context, options: ProxyS
  */
 function processProxyEvent(
 	proxyEvent: ProxyAssistantMessageEvent,
-	partial: AssistantMessage
+	partial: AssistantMessage,
 ): AssistantMessageEvent | undefined {
 	switch (proxyEvent.type) {
 		case "start":

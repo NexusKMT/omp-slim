@@ -6,8 +6,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AssistantMessage, ImageContent, Message, OAuthProvider } from "@oh-my-pi/pi-ai";
 import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import type { AssistantMessage, ImageContent, Message, OAuthProvider } from "@oh-my-pi/pi-ai";
 import type { SlashCommand } from "@oh-my-pi/pi-tui";
 import {
 	CombinedAutocompleteProvider,
@@ -181,8 +181,10 @@ export class InteractiveMode {
 		version: string,
 		changelogMarkdown: string | undefined = undefined,
 		private setToolUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void = () => {},
-		private lspServers: Array<{ name: string; status: "ready" | "error"; fileTypes: string[] }> | undefined = undefined,
-		fdPath: string | undefined = undefined
+		private lspServers:
+			| Array<{ name: string; status: "ready" | "error"; fileTypes: string[] }>
+			| undefined = undefined,
+		fdPath: string | undefined = undefined,
 	) {
 		this.session = session;
 		this.version = version;
@@ -268,7 +270,7 @@ export class InteractiveMode {
 		const autocompleteProvider = new CombinedAutocompleteProvider(
 			[...slashCommands, ...fileSlashCommands, ...hookCommands, ...customCommands],
 			process.cwd(),
-			fdPath
+			fdPath,
 		);
 		this.editor.setAutocompleteProvider(autocompleteProvider);
 	}
@@ -453,7 +455,7 @@ export class InteractiveMode {
 
 				this.chatContainer.addChild(new Spacer(1));
 				this.chatContainer.addChild(
-					new Text(`${theme.fg("accent", `${theme.status.success} New session started`)}`, 1, 1)
+					new Text(`${theme.fg("accent", `${theme.status.success} New session started`)}`, 1, 1),
 				);
 				this.ui.requestRender();
 
@@ -583,7 +585,7 @@ export class InteractiveMode {
 
 				this.chatContainer.addChild(new Spacer(1));
 				this.chatContainer.addChild(
-					new Text(`${theme.fg("accent", `${theme.status.success} New session started`)}`, 1, 1)
+					new Text(`${theme.fg("accent", `${theme.status.success} New session started`)}`, 1, 1),
 				);
 				this.ui.requestRender();
 
@@ -649,8 +651,8 @@ export class InteractiveMode {
 				_factory: (
 					tui: TUI,
 					theme: Theme,
-					done: (result: T) => void
-				) => (Component & { dispose?(): void }) | Promise<Component & { dispose?(): void }>
+					done: (result: T) => void,
+				) => (Component & { dispose?(): void }) | Promise<Component & { dispose?(): void }>,
 			) => undefined as T,
 			setEditorText: () => {},
 			getEditorText: () => "",
@@ -666,7 +668,7 @@ export class InteractiveMode {
 	 */
 	private async emitCustomToolSessionEvent(
 		reason: "start" | "switch" | "branch" | "tree" | "shutdown",
-		previousSessionFile?: string
+		previousSessionFile?: string,
 	): Promise<void> {
 		const event = { reason, previousSessionFile };
 		const uiContext = this.session.extensionRunner?.getUIContext();
@@ -736,7 +738,7 @@ export class InteractiveMode {
 				() => {
 					this.hideHookSelector();
 					resolve(undefined);
-				}
+				},
 			);
 
 			this.editorContainer.clear();
@@ -780,7 +782,7 @@ export class InteractiveMode {
 				() => {
 					this.hideHookInput();
 					resolve(undefined);
-				}
+				},
 			);
 
 			this.editorContainer.clear();
@@ -817,7 +819,7 @@ export class InteractiveMode {
 				() => {
 					this.hideHookEditor();
 					resolve(undefined);
-				}
+				},
 			);
 
 			this.editorContainer.clear();
@@ -858,8 +860,8 @@ export class InteractiveMode {
 		factory: (
 			tui: TUI,
 			theme: Theme,
-			done: (result: T) => void
-		) => (Component & { dispose?(): void }) | Promise<Component & { dispose?(): void }>
+			done: (result: T) => void,
+		) => (Component & { dispose?(): void }) | Promise<Component & { dispose?(): void }>,
 	): Promise<T> {
 		const savedText = this.editor.getText();
 
@@ -1197,7 +1199,7 @@ export class InteractiveMode {
 					(spinner) => theme.fg("accent", spinner),
 					(text) => theme.fg("muted", text),
 					`Working${theme.format.ellipsis} (esc to interrupt)`,
-					getSymbolTheme().spinnerFrames
+					getSymbolTheme().spinnerFrames,
 				);
 				this.statusContainer.addChild(this.loadingAnimation);
 				this.startVoiceProgressTimer();
@@ -1243,7 +1245,7 @@ export class InteractiveMode {
 									},
 									tool,
 									this.ui,
-									this.sessionManager.getCwd()
+									this.sessionManager.getCwd(),
 								);
 								component.setExpanded(this.toolOutputExpanded);
 								this.chatContainer.addChild(component);
@@ -1313,7 +1315,7 @@ export class InteractiveMode {
 						},
 						tool,
 						this.ui,
-						this.sessionManager.getCwd()
+						this.sessionManager.getCwd(),
 					);
 					component.setExpanded(this.toolOutputExpanded);
 					this.chatContainer.addChild(component);
@@ -1384,7 +1386,7 @@ export class InteractiveMode {
 					(spinner) => theme.fg("accent", spinner),
 					(text) => theme.fg("muted", text),
 					`${reasonText}Auto-compacting${theme.format.ellipsis} (esc to cancel)`,
-					getSymbolTheme().spinnerFrames
+					getSymbolTheme().spinnerFrames,
 				);
 				this.statusContainer.addChild(this.autoCompactionLoader);
 				this.ui.requestRender();
@@ -1440,7 +1442,7 @@ export class InteractiveMode {
 					(spinner) => theme.fg("warning", spinner),
 					(text) => theme.fg("muted", text),
 					`Retrying (${event.attempt}/${event.maxAttempts}) in ${delaySeconds}s${theme.format.ellipsis} (esc to cancel)`,
-					getSymbolTheme().spinnerFrames
+					getSymbolTheme().spinnerFrames,
 				);
 				this.statusContainer.addChild(this.retryLoader);
 				this.ui.requestRender();
@@ -1536,7 +1538,7 @@ export class InteractiveMode {
 					message.exitCode,
 					message.cancelled,
 					message.truncated ? ({ truncated: true } as TruncationResult) : undefined,
-					message.fullOutputPath
+					message.fullOutputPath,
 				);
 				this.chatContainer.addChild(component);
 				break;
@@ -1569,7 +1571,7 @@ export class InteractiveMode {
 				for (const file of message.files) {
 					const text = `${theme.fg("dim", `${theme.tree.last} `)}${theme.fg("muted", "Read")} ${theme.fg(
 						"accent",
-						file.path
+						file.path,
 					)} ${theme.fg("dim", `(${file.lineCount} lines)`)}`;
 					this.chatContainer.addChild(new Text(text, 0, 0));
 				}
@@ -1609,7 +1611,7 @@ export class InteractiveMode {
 	 */
 	private renderSessionContext(
 		sessionContext: SessionContext,
-		options: { updateFooter?: boolean; populateHistory?: boolean } = {}
+		options: { updateFooter?: boolean; populateHistory?: boolean } = {},
 	): void {
 		this.pendingTools.clear();
 
@@ -1632,7 +1634,7 @@ export class InteractiveMode {
 							{ showImages: this.settingsManager.getShowImages() },
 							tool,
 							this.ui,
-							this.sessionManager.getCwd()
+							this.sessionManager.getCwd(),
 						);
 						component.setExpanded(this.toolOutputExpanded);
 						this.chatContainer.addChild(component);
@@ -2115,8 +2117,8 @@ export class InteractiveMode {
 					theme.fg("muted", `New version ${newVersion} is available. Run: `) +
 					theme.fg("accent", "omp update"),
 				1,
-				0
-			)
+				0,
+			),
 		);
 		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
 		this.ui.requestRender();
@@ -2208,7 +2210,7 @@ export class InteractiveMode {
 						this.updateEditorTopBorder();
 						this.ui.requestRender();
 					},
-				}
+				},
 			);
 			return { component: selector, focus: selector };
 		});
@@ -2383,7 +2385,7 @@ export class InteractiveMode {
 					done();
 					this.ui.requestRender();
 				},
-				options
+				options,
 			);
 			return { component: selector, focus: selector };
 		});
@@ -2418,7 +2420,7 @@ export class InteractiveMode {
 				() => {
 					done();
 					this.ui.requestRender();
-				}
+				},
 			);
 			return { component: selector, focus: selector.getMessageList() };
 		});
@@ -2477,7 +2479,7 @@ export class InteractiveMode {
 							(spinner) => theme.fg("accent", spinner),
 							(text) => theme.fg("muted", text),
 							"Summarizing branch... (esc to cancel)",
-							getSymbolTheme().spinnerFrames
+							getSymbolTheme().spinnerFrames,
 						);
 						this.statusContainer.addChild(summaryLoader);
 						this.ui.requestRender();
@@ -2521,7 +2523,7 @@ export class InteractiveMode {
 				(entryId, label) => {
 					this.sessionManager.appendLabelChange(entryId, label);
 					this.ui.requestRender();
-				}
+				},
 			);
 			return { component: selector, focus: selector };
 		});
@@ -2542,7 +2544,7 @@ export class InteractiveMode {
 				},
 				() => {
 					void this.shutdown();
-				}
+				},
 			);
 			return { component: selector, focus: selector.getSessionList() };
 		});
@@ -2575,7 +2577,7 @@ export class InteractiveMode {
 		if (mode === "logout") {
 			const providers = this.session.modelRegistry.authStorage.list();
 			const loggedInProviders = providers.filter(
-				(p) => this.session.modelRegistry.authStorage.get(p)?.type === "oauth"
+				(p) => this.session.modelRegistry.authStorage.get(p)?.type === "oauth",
 			);
 			if (loggedInProviders.length === 0) {
 				this.showStatus("No OAuth providers logged in. Use /login first.");
@@ -2640,9 +2642,15 @@ export class InteractiveMode {
 							await this.session.modelRegistry.refresh();
 							this.chatContainer.addChild(new Spacer(1));
 							this.chatContainer.addChild(
-								new Text(theme.fg("success", `${theme.status.success} Successfully logged in to ${providerId}`), 1, 0)
+								new Text(
+									theme.fg("success", `${theme.status.success} Successfully logged in to ${providerId}`),
+									1,
+									0,
+								),
 							);
-							this.chatContainer.addChild(new Text(theme.fg("dim", `Credentials saved to ${getAuthPath()}`), 1, 0));
+							this.chatContainer.addChild(
+								new Text(theme.fg("dim", `Credentials saved to ${getAuthPath()}`), 1, 0),
+							);
 							this.ui.requestRender();
 						} catch (error: unknown) {
 							this.showError(`Login failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -2654,9 +2662,15 @@ export class InteractiveMode {
 							await this.session.modelRegistry.refresh();
 							this.chatContainer.addChild(new Spacer(1));
 							this.chatContainer.addChild(
-								new Text(theme.fg("success", `${theme.status.success} Successfully logged out of ${providerId}`), 1, 0)
+								new Text(
+									theme.fg("success", `${theme.status.success} Successfully logged out of ${providerId}`),
+									1,
+									0,
+								),
 							);
-							this.chatContainer.addChild(new Text(theme.fg("dim", `Credentials removed from ${getAuthPath()}`), 1, 0));
+							this.chatContainer.addChild(
+								new Text(theme.fg("dim", `Credentials removed from ${getAuthPath()}`), 1, 0),
+							);
 							this.ui.requestRender();
 						} catch (error: unknown) {
 							this.showError(`Logout failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -2666,7 +2680,7 @@ export class InteractiveMode {
 				() => {
 					done();
 					this.ui.requestRender();
-				}
+				},
 			);
 			return { component: selector, focus: selector };
 		});
@@ -2682,8 +2696,8 @@ export class InteractiveMode {
 				process.platform === "darwin"
 					? ["open", urlOrPath]
 					: process.platform === "win32"
-					? ["cmd", "/c", "start", "", urlOrPath]
-					: ["xdg-open", urlOrPath];
+						? ["cmd", "/c", "start", "", urlOrPath]
+						: ["xdg-open", urlOrPath];
 			Bun.spawn(args, { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
 		} catch {
 			// Best-effort: browser opening is non-critical
@@ -3001,7 +3015,9 @@ export class InteractiveMode {
 		this.pendingTools.clear();
 
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Text(`${theme.fg("accent", `${theme.status.success} New session started`)}`, 1, 1));
+		this.chatContainer.addChild(
+			new Text(`${theme.fg("accent", `${theme.status.success} New session started`)}`, 1, 1),
+		);
 		this.ui.requestRender();
 	}
 
@@ -3035,8 +3051,8 @@ export class InteractiveMode {
 			new Text(
 				`${theme.fg("accent", `${theme.status.success} Debug log written`)}\n${theme.fg("muted", debugLogPath)}`,
 				1,
-				1
-			)
+				1,
+			),
 		);
 		this.ui.requestRender();
 	}
@@ -3070,7 +3086,7 @@ export class InteractiveMode {
 						this.ui.requestRender();
 					}
 				},
-				{ excludeFromContext }
+				{ excludeFromContext },
 			);
 
 			if (this.bashComponent) {
@@ -3078,7 +3094,7 @@ export class InteractiveMode {
 					result.exitCode,
 					result.cancelled,
 					result.truncated ? ({ truncated: true, content: result.output } as TruncationResult) : undefined,
-					result.fullOutputPath
+					result.fullOutputPath,
 				);
 			}
 		} catch (error) {
@@ -3126,7 +3142,7 @@ export class InteractiveMode {
 			(spinner) => theme.fg("accent", spinner),
 			(text) => theme.fg("muted", text),
 			label,
-			getSymbolTheme().spinnerFrames
+			getSymbolTheme().spinnerFrames,
 		);
 		this.statusContainer.addChild(compactingLoader);
 		this.ui.requestRender();

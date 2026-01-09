@@ -225,9 +225,9 @@ export class StatusLineComponent implements Component {
 
 		const contextTokens = lastAssistantMessage
 			? lastAssistantMessage.usage.input +
-			  lastAssistantMessage.usage.output +
-			  lastAssistantMessage.usage.cacheRead +
-			  lastAssistantMessage.usage.cacheWrite
+				lastAssistantMessage.usage.output +
+				lastAssistantMessage.usage.cacheRead +
+				lastAssistantMessage.usage.cacheWrite
 			: 0;
 		const contextWindow = state.model?.contextWindow || 0;
 		const contextPercent = contextWindow > 0 ? (contextTokens / contextWindow) * 100 : 0;

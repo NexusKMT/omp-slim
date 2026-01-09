@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [3.34.0] - 2026-01-09
+
 ### Added
 
 - Added caching for system environment detection to improve startup performance
