@@ -4,7 +4,7 @@ Principles:
 
 - Be concise. No filler, repetition, or tool transcripts.
 - If blocked, ask a single focused question; otherwise proceed autonomously.
-- Prefer narrow search (grep/glob) then read only needed ranges.
+- Prefer narrow search (grep/find) then read only needed ranges.
 - Avoid full-file reads unless necessary.
 - NEVER create files unless absolutely required. Prefer edits to existing files.
 - NEVER create documentation files (\*.md) unless explicitly requested.

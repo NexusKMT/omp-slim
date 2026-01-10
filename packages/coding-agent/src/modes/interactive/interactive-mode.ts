@@ -26,6 +26,7 @@ import {
 import { nanoid } from "nanoid";
 import { getAuthPath, getDebugLogPath } from "../../config";
 import type { AgentSession, AgentSessionEvent } from "../../core/agent-session";
+import { loadCustomShare } from "../../core/custom-share";
 import type { ExtensionUIContext } from "../../core/extensions/index";
 import { HistoryStorage } from "../../core/history-storage";
 import { KeybindingsManager } from "../../core/keybindings";
@@ -3052,24 +3053,87 @@ export class InteractiveMode {
 	}
 
 	private async handleShareCommand(): Promise<void> {
-		// Check if gh is available and logged in
-		try {
-			const authResult = Bun.spawnSync(["gh", "auth", "status"]);
-			if (authResult.exitCode !== 0) {
-				this.showError("GitHub CLI is not logged in. Run 'gh auth login' first.");
-				return;
-			}
-		} catch {
-			this.showError("GitHub CLI (gh) is not installed. Install it from https://cli.github.com/");
-			return;
-		}
-
 		// Export to a temp file
-		const tmpFile = path.join(os.tmpdir(), "session.html");
+		const tmpFile = path.join(os.tmpdir(), `${nanoid()}.html`);
 		try {
 			await this.session.exportToHtml(tmpFile);
 		} catch (error: unknown) {
 			this.showError(`Failed to export session: ${error instanceof Error ? error.message : "Unknown error"}`);
+			return;
+		}
+
+		// Try custom share script first
+		try {
+			const customShare = await loadCustomShare();
+			if (customShare) {
+				const loader = new BorderedLoader(this.ui, theme, "Sharing...");
+				this.editorContainer.clear();
+				this.editorContainer.addChild(loader);
+				this.ui.setFocus(loader);
+				this.ui.requestRender();
+
+				const restoreEditor = () => {
+					loader.dispose();
+					this.editorContainer.clear();
+					this.editorContainer.addChild(this.editor);
+					this.ui.setFocus(this.editor);
+					try {
+						fs.unlinkSync(tmpFile);
+					} catch {
+						// Ignore cleanup errors
+					}
+				};
+
+				try {
+					const result = await customShare.fn(tmpFile);
+					restoreEditor();
+
+					if (typeof result === "string") {
+						this.showStatus(`Share URL: ${result}`);
+						this.openInBrowser(result);
+					} else if (result) {
+						const parts: string[] = [];
+						if (result.url) parts.push(`Share URL: ${result.url}`);
+						if (result.message) parts.push(result.message);
+						if (parts.length > 0) this.showStatus(parts.join("\n"));
+						if (result.url) this.openInBrowser(result.url);
+					} else {
+						this.showStatus("Session shared");
+					}
+					return;
+				} catch (err) {
+					restoreEditor();
+					this.showError(`Custom share failed: ${err instanceof Error ? err.message : String(err)}`);
+					return;
+				}
+			}
+		} catch (err) {
+			// Custom share script failed to load - show error and abort
+			try {
+				fs.unlinkSync(tmpFile);
+			} catch {
+				// Ignore cleanup errors
+			}
+			this.showError(err instanceof Error ? err.message : String(err));
+			return;
+		}
+
+		// Fall back to GitHub Gist sharing
+		// Check if gh is available and logged in
+		try {
+			const authResult = Bun.spawnSync(["gh", "auth", "status"]);
+			if (authResult.exitCode !== 0) {
+				try {
+					fs.unlinkSync(tmpFile);
+				} catch {}
+				this.showError("GitHub CLI is not logged in. Run 'gh auth login' first.");
+				return;
+			}
+		} catch {
+			try {
+				fs.unlinkSync(tmpFile);
+			} catch {}
+			this.showError("GitHub CLI (gh) is not installed. Install it from https://cli.github.com/");
 			return;
 		}
 

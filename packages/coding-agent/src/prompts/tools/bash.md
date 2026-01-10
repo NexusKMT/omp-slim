@@ -6,7 +6,7 @@ This tool is for terminal operations like git, bun, cargo, python, etc. DO NOT u
 Do NOT use Bash for:
 - Reading file contents → Use Read tool instead
 - Searching file contents → Use Grep tool instead
-- Finding files by pattern → Use Glob tool instead
+- Finding files by pattern → Use Find tool instead
 - Editing files → Use Edit tool instead
 - Writing new files → Use Write tool instead
 </system_reminder>

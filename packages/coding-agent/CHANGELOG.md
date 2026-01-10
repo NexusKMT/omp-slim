@@ -1,8 +1,16 @@
 # Changelog
 
 ## [Unreleased]
+
+### Added
+
+- Added support for custom share scripts at ~/.omp/agent/share.ts to replace default GitHub Gist sharing
+
 ### Changed
 
+- Renamed Glob tool references to Find tool throughout prompts and documentation
+- Updated project context formatting to use XML-style tags for clearer structure
+- Refined bash tool guidance to prefer dedicated tools (read/grep/find/ls) over bash for file operations
 - Updated system prompt with clearer tone guidelines emphasizing directness and conciseness
 - Revised workflow instructions to require explicit planning for non-trivial tasks
 - Enhanced verification guidance to prefer external feedback loops like tests and linters

@@ -109,13 +109,19 @@ function appendSection(prompt: string, title: string, content: string | null | u
 	return `${prompt}\n\n# ${title}\n\n${content}`;
 }
 
+function formatSectionBlock(title: string, content: string | null | undefined): string {
+	if (!content) return "";
+	return `# ${title}\n\n${content}`;
+}
+
 function formatProjectContext(contextFiles: Array<{ path: string; content: string; depth?: number }>): string | null {
 	if (contextFiles.length === 0) return null;
-	const parts: string[] = ["The following project context files have been loaded:", ""];
+	const parts: string[] = ["<project_context_files>"];
 	for (const { path: filePath, content } of contextFiles) {
-		parts.push(`## ${filePath}`, "", content, "");
+		parts.push(`<file path="${filePath}">`, content, "</file>");
 	}
-	return parts.join("\n").trimEnd();
+	parts.push("</project_context_files>");
+	return parts.join("\n");
 }
 
 function formatToolDescriptions(tools: Map<string, { description: string; label: string }> | undefined): string | null {
@@ -822,7 +828,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	// Bash without edit/write = read-only bash mode
 	if (hasBash && !hasEdit && !hasWrite) {
 		guidelinesList.push(
-			"Use bash ONLY for read-only operations (git log, gh issue view, curl, etc.) - do NOT modify any files",
+			"Use bash only for read-only operations (git log, gh issue view, curl, etc.). Use edit/write for file changes.",
 		);
 	}
 
@@ -846,7 +852,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	// Output guideline (only when actually writing/executing)
 	if (hasEdit || hasWrite) {
 		guidelinesList.push(
-			"When summarizing your actions, output plain text directly - do NOT use cat or bash to display what you did",
+			"When summarizing your actions, output plain text directly; reference file paths instead of reprinting content.",
 		);
 	}
 
@@ -858,33 +864,25 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 
 	// Build the prompt with anti-bash rules prominently placed
 	const antiBashBlock = antiBashSection ? `\n${antiBashSection}\n` : "";
-	let prompt = applyTemplate(systemPromptTemplate, {
+	const projectContext = formatSectionBlock("Project Context", formatProjectContext(contextFiles));
+	const gitContext = formatSectionBlock("Git Status", loadGitContext(resolvedCwd));
+	const skillsBlock = hasRead && skills.length > 0 ? formatSkillsForPrompt(skills) : "";
+	const rulesBlock = rulebookRules && rulebookRules.length > 0 ? formatRulesForPrompt(rulebookRules) : "";
+	const appendSystemPromptBlock = resolvedAppendPrompt ? `\n${resolvedAppendPrompt}\n` : "";
+
+	const prompt = applyTemplate(systemPromptTemplate, {
 		toolsList,
 		antiBashSection: antiBashBlock,
 		guidelines,
 		environmentInfo,
+		systemPromptCustomization: systemPromptCustomization ?? "",
+		projectContext,
+		gitContext,
+		skillsBlock,
+		rulesBlock,
+		promptFooter: buildPromptFooter(dateTime, resolvedCwd),
+		appendSystemPrompt: appendSystemPromptBlock,
 	});
-
-	prompt = appendBlock(prompt, resolvedAppendPrompt);
-	prompt = appendSection(prompt, "Project Context", formatProjectContext(contextFiles));
-
-	const gitContext = loadGitContext(resolvedCwd);
-	prompt = appendSection(prompt, "Git Status", gitContext);
-
-	if (hasRead && skills.length > 0) {
-		prompt = appendBlock(prompt, formatSkillsForPrompt(skills));
-	}
-
-	if (rulebookRules && rulebookRules.length > 0) {
-		prompt = appendBlock(prompt, formatRulesForPrompt(rulebookRules));
-	}
-
-	prompt = appendBlock(prompt, buildPromptFooter(dateTime, resolvedCwd), "\n");
-
-	// Prepend SYSTEM.md customization if present
-	if (systemPromptCustomization) {
-		prompt = `${systemPromptCustomization}\n\n${prompt}`;
-	}
 
 	return prompt;
 }

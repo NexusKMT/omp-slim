@@ -8,8 +8,9 @@ The Task tool launches specialized agents (workers) that autonomously handle com
 
 ## When NOT to Use
 
-- Reading a specific file path → Use Read or Glob tool instead
-- Searching for a specific class/function definition → Use Glob tool instead
+- Reading a specific file path → Use Read tool instead
+- Finding files by pattern/name → Use Find tool instead
+- Searching for a specific class/function definition → Use Grep tool instead
 - Searching code within 2-3 specific files → Use Read tool instead
 - Tasks unrelated to the agent descriptions above
 
