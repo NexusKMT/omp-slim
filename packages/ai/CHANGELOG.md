@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [3.37.1] - 2026-01-10
 ### Added
 
 - Added automatic type coercion for tool arguments when LLMs return JSON-encoded strings instead of native types (numbers, booleans, arrays, objects)

@@ -1,5 +1,5 @@
-import { Type } from "@sinclair/typebox";
 import { describe, expect, it } from "bun:test";
+import { Type } from "@sinclair/typebox";
 import type { Tool, ToolCall } from "../src/types.js";
 import { validateToolArguments } from "../src/utils/validation.js";
 
@@ -71,7 +71,7 @@ describe("Tool argument coercion", () => {
 			type: "toolCall",
 			id: "call-4",
 			name: "t4",
-			arguments: { payload: "{\"a\": 1}" },
+			arguments: { payload: '{"a": 1}' },
 		};
 
 		const result = validateToolArguments(tool, toolCall);
@@ -107,11 +107,9 @@ describe("Tool argument coercion", () => {
 			type: "toolCall",
 			id: "call-6",
 			name: "t6",
-			arguments: { timeout: "\"300\"" },
+			arguments: { timeout: '"300"' },
 		};
 
-		expect(() => validateToolArguments(tool, toolCall)).toThrow(
-			"Validation failed for tool \"t6\"",
-		);
+		expect(() => validateToolArguments(tool, toolCall)).toThrow('Validation failed for tool "t6"');
 	});
 });
