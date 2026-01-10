@@ -3,9 +3,11 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import chalk from "chalk";
-import { getAgentDir, getBinDir } from "./config";
+import { getAgentDbPath, getAgentDir, getBinDir } from "./config";
+import { AgentStorage } from "./core/agent-storage";
+import type { AuthCredential } from "./core/auth-storage";
 
 /**
  * Migrate PI_* environment variables to OMP_* equivalents.
@@ -29,28 +31,26 @@ export function migrateEnvVars(): string[] {
 }
 
 /**
- * Migrate legacy oauth.json and settings.json apiKeys to auth.json.
+ * Migrate legacy oauth.json and settings.json apiKeys to agent.db.
  *
  * @returns Array of provider names that were migrated
  */
-export function migrateAuthToAuthJson(): string[] {
+export function migrateAuthToAgentDb(): string[] {
 	const agentDir = getAgentDir();
-	const authPath = join(agentDir, "auth.json");
 	const oauthPath = join(agentDir, "oauth.json");
 	const settingsPath = join(agentDir, "settings.json");
+	const storage = AgentStorage.open(getAgentDbPath(agentDir));
 
-	// Skip if auth.json already exists
-	if (existsSync(authPath)) return [];
+	if (storage.hasAuthCredentials()) return [];
 
-	const migrated: Record<string, unknown> = {};
+	const migrated: Record<string, AuthCredential[]> = {};
 	const providers: string[] = [];
 
-	// Migrate oauth.json
 	if (existsSync(oauthPath)) {
 		try {
 			const oauth = JSON.parse(readFileSync(oauthPath, "utf-8"));
 			for (const [provider, cred] of Object.entries(oauth)) {
-				migrated[provider] = { type: "oauth", ...(cred as object) };
+				migrated[provider] = [{ type: "oauth", ...(cred as object) } as AuthCredential];
 				providers.push(provider);
 			}
 			renameSync(oauthPath, `${oauthPath}.migrated`);
@@ -59,7 +59,6 @@ export function migrateAuthToAuthJson(): string[] {
 		}
 	}
 
-	// Migrate settings.json apiKeys
 	if (existsSync(settingsPath)) {
 		try {
 			const content = readFileSync(settingsPath, "utf-8");
@@ -67,7 +66,7 @@ export function migrateAuthToAuthJson(): string[] {
 			if (settings.apiKeys && typeof settings.apiKeys === "object") {
 				for (const [provider, key] of Object.entries(settings.apiKeys)) {
 					if (!migrated[provider] && typeof key === "string") {
-						migrated[provider] = { type: "api_key", key };
+						migrated[provider] = [{ type: "api_key", key }];
 						providers.push(provider);
 					}
 				}
@@ -79,9 +78,8 @@ export function migrateAuthToAuthJson(): string[] {
 		}
 	}
 
-	if (Object.keys(migrated).length > 0) {
-		mkdirSync(dirname(authPath), { recursive: true });
-		writeFileSync(authPath, JSON.stringify(migrated, null, 2), { mode: 0o600 });
+	for (const [provider, credentials] of Object.entries(migrated)) {
+		storage.replaceAuthCredentialsForProvider(provider, credentials);
 	}
 
 	return providers;
@@ -201,7 +199,7 @@ export async function runMigrations(_cwd: string): Promise<{
 	const migratedEnvVars = migrateEnvVars();
 
 	// Then: run data migrations
-	const migratedAuthProviders = migrateAuthToAuthJson();
+	const migratedAuthProviders = migrateAuthToAgentDb();
 	migrateSessionsFromAgentRoot();
 	migrateToolsToBin();
 

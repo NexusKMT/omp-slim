@@ -4,19 +4,26 @@
  * 4-tier auth resolution:
  *   1. ANTHROPIC_SEARCH_API_KEY / ANTHROPIC_SEARCH_BASE_URL env vars
  *   2. Provider with api="anthropic-messages" in ~/.omp/agent/models.json
- *   3. OAuth credentials in ~/.omp/agent/auth.json (with expiry check)
+ *   3. OAuth credentials in ~/.omp/agent/agent.db (with expiry check)
  *   4. ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL fallback
  */
 
 import * as os from "node:os";
 import * as path from "node:path";
 import { buildBetaHeader, claudeCodeHeaders, claudeCodeVersion } from "@oh-my-pi/pi-ai";
-import { getConfigDirPaths } from "../../../config";
-import type { AnthropicAuthConfig, AnthropicOAuthCredential, AuthJson, ModelsJson } from "./types";
+import { getAgentDbPath, getConfigDirPaths } from "../../../config";
+import { AgentStorage } from "../../agent-storage";
+import type { AuthCredential } from "../../auth-storage";
+import { migrateJsonStorage } from "../../storage-migration";
+import type { AnthropicAuthConfig, AnthropicOAuthCredential, ModelsJson } from "./types";
 
 const DEFAULT_BASE_URL = "https://api.anthropic.com";
 
-/** Parse a .env file and return key-value pairs */
+/**
+ * Parses a .env file and extracts key-value pairs.
+ * @param filePath - Path to the .env file
+ * @returns Object containing parsed environment variables
+ */
 async function parseEnvFile(filePath: string): Promise<Record<string, string>> {
 	const result: Record<string, string> = {};
 	try {
@@ -47,7 +54,11 @@ async function parseEnvFile(filePath: string): Promise<Record<string, string>> {
 	return result;
 }
 
-/** Get env var from process.env or .env files */
+/**
+ * Gets an environment variable from process.env or .env files.
+ * @param key - The environment variable name to look up
+ * @returns The value if found, undefined otherwise
+ */
 export async function getEnv(key: string): Promise<string | undefined> {
 	if (process.env[key]) return process.env[key];
 
@@ -60,7 +71,11 @@ export async function getEnv(key: string): Promise<string | undefined> {
 	return undefined;
 }
 
-/** Read JSON file safely */
+/**
+ * Reads and parses a JSON file safely.
+ * @param filePath - Path to the JSON file
+ * @returns Parsed JSON content, or null if file doesn't exist or parsing fails
+ */
 async function readJson<T>(filePath: string): Promise<T | null> {
 	try {
 		const file = Bun.file(filePath);
@@ -72,22 +87,62 @@ async function readJson<T>(filePath: string): Promise<T | null> {
 	}
 }
 
-/** Check if a token is an OAuth token (sk-ant-oat* prefix) */
+/**
+ * Checks if a token is an OAuth token by looking for sk-ant-oat prefix.
+ * @param apiKey - The API key to check
+ * @returns True if the token is an OAuth token
+ */
 export function isOAuthToken(apiKey: string): boolean {
 	return apiKey.includes("sk-ant-oat");
 }
 
-function normalizeAnthropicOAuthCredentials(entry: AuthJson["anthropic"] | undefined): AnthropicOAuthCredential[] {
-	if (!entry) return [];
-	return Array.isArray(entry) ? entry : [entry];
+/**
+ * Converts a generic AuthCredential to AnthropicOAuthCredential if it's a valid OAuth entry.
+ * @param credential - The credential to convert
+ * @returns The converted OAuth credential, or null if not a valid OAuth type
+ */
+function toAnthropicOAuthCredential(credential: AuthCredential): AnthropicOAuthCredential | null {
+	if (credential.type !== "oauth") return null;
+	if (typeof credential.access !== "string" || typeof credential.expires !== "number") return null;
+	return {
+		type: "oauth",
+		access: credential.access,
+		refresh: credential.refresh,
+		expires: credential.expires,
+	};
 }
 
 /**
- * Find Anthropic auth config using 4-tier priority:
+ * Reads Anthropic OAuth credentials from agent.db, migrating from legacy auth.json if needed.
+ * @param configDir - Path to the config directory containing agent.db
+ * @returns Array of valid Anthropic OAuth credentials
+ */
+async function readAnthropicOAuthCredentials(configDir: string): Promise<AnthropicOAuthCredential[]> {
+	await migrateJsonStorage({
+		agentDir: configDir,
+		settingsPath: path.join(configDir, "settings.json"),
+		authPaths: [path.join(configDir, "auth.json")],
+	});
+
+	const storage = AgentStorage.open(getAgentDbPath(configDir));
+	const records = storage.listAuthCredentials("anthropic");
+	const credentials: AnthropicOAuthCredential[] = [];
+	for (const record of records) {
+		const mapped = toAnthropicOAuthCredential(record.credential);
+		if (mapped) {
+			credentials.push(mapped);
+		}
+	}
+	return credentials;
+}
+
+/**
+ * Finds Anthropic auth config using 4-tier priority:
  *   1. ANTHROPIC_SEARCH_API_KEY / ANTHROPIC_SEARCH_BASE_URL
  *   2. Provider with api="anthropic-messages" in models.json
- *   3. OAuth in auth.json (with 5-minute expiry buffer)
+ *   3. OAuth in agent.db (with 5-minute expiry buffer)
  *   4. ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL fallback
+ * @returns The first valid auth configuration found, or null if none available
  */
 export async function findAnthropicAuth(): Promise<AnthropicAuthConfig | null> {
 	// Get all config directories (user-level only) for fallback support
@@ -131,14 +186,13 @@ export async function findAnthropicAuth(): Promise<AnthropicAuthConfig | null> {
 		}
 	}
 
-	// 3. OAuth credentials in auth.json (with 5-minute expiry buffer, check all config dirs)
+	// 3. OAuth credentials in agent.db (with 5-minute expiry buffer, check all config dirs)
 	const expiryBuffer = 5 * 60 * 1000; // 5 minutes
 	const now = Date.now();
 	for (const configDir of configDirs) {
-		const authJson = await readJson<AuthJson>(path.join(configDir, "auth.json"));
-		const credentials = normalizeAnthropicOAuthCredentials(authJson?.anthropic);
+		const credentials = await readAnthropicOAuthCredentials(configDir);
 		for (const credential of credentials) {
-			if (credential.type !== "oauth" || !credential.access) continue;
+			if (!credential.access) continue;
 			if (credential.expires > now + expiryBuffer) {
 				return {
 					apiKey: credential.access,
@@ -163,6 +217,11 @@ export async function findAnthropicAuth(): Promise<AnthropicAuthConfig | null> {
 	return null;
 }
 
+/**
+ * Checks if a base URL points to the official Anthropic API.
+ * @param baseUrl - The base URL to check
+ * @returns True if the URL is for api.anthropic.com over HTTPS
+ */
 function isAnthropicBaseUrl(baseUrl: string): boolean {
 	try {
 		const url = new URL(baseUrl);
@@ -172,7 +231,11 @@ function isAnthropicBaseUrl(baseUrl: string): boolean {
 	}
 }
 
-/** Build headers for Anthropic API request */
+/**
+ * Builds HTTP headers for Anthropic API requests.
+ * @param auth - The authentication configuration
+ * @returns Headers object ready for use in fetch requests
+ */
 export function buildAnthropicHeaders(auth: AnthropicAuthConfig): Record<string, string> {
 	const baseBetas = auth.isOAuth
 		? [
@@ -205,7 +268,11 @@ export function buildAnthropicHeaders(auth: AnthropicAuthConfig): Record<string,
 	return headers;
 }
 
-/** Build API URL (OAuth requires ?beta=true) */
+/**
+ * Builds the full API URL for Anthropic messages endpoint.
+ * @param auth - The authentication configuration
+ * @returns The complete API URL with beta query parameter
+ */
 export function buildAnthropicUrl(auth: AnthropicAuthConfig): string {
 	const base = `${auth.baseUrl}/v1/messages`;
 	return `${base}?beta=true`;

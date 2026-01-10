@@ -1,23 +1,9 @@
 /**
  * Credential storage for API keys and OAuth tokens.
- * Handles loading, saving, and refreshing credentials from auth.json.
- *
- * Uses file locking to prevent race conditions when multiple pi instances
- * try to refresh tokens simultaneously.
+ * Handles loading, saving, and refreshing credentials from agent.db.
  */
 
-import {
-	chmodSync,
-	closeSync,
-	existsSync,
-	openSync,
-	readFileSync,
-	renameSync,
-	statSync,
-	unlinkSync,
-	writeFileSync,
-} from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import {
 	getEnvApiKey,
 	getOAuthApiKey,
@@ -29,7 +15,10 @@ import {
 	type OAuthCredentials,
 	type OAuthProvider,
 } from "@oh-my-pi/pi-ai";
+import { getAgentDbPath } from "../config";
+import { AgentStorage } from "./agent-storage";
 import { logger } from "./logger";
+import { migrateJsonStorage } from "./storage-migration";
 
 export type ApiKeyCredential = {
 	type: "api_key";
@@ -45,6 +34,12 @@ export type AuthCredential = ApiKeyCredential | OAuthCredential;
 export type AuthCredentialEntry = AuthCredential | AuthCredential[];
 
 export type AuthStorageData = Record<string, AuthCredentialEntry>;
+
+/**
+ * In-memory representation pairing DB row ID with credential.
+ * The ID is required for update/delete operations against agent.db.
+ */
+type StoredCredential = { id: number; credential: AuthCredential };
 
 /** Rate limit window from Codex usage API (primary or secondary quota). */
 type CodexUsageWindow = {
@@ -86,18 +81,18 @@ function toBoolean(value: unknown): boolean | undefined {
 }
 
 /**
- * Credential storage backed by a JSON file.
- * Reads from multiple fallback paths, writes to primary path.
+ * Credential storage backed by agent.db.
+ * Reads from SQLite and migrates legacy auth.json paths.
  */
 export class AuthStorage {
-	// File locking configuration for concurrent access protection
-	private static readonly lockRetryDelayMs = 50; // Polling interval when waiting for lock
-	private static readonly lockTimeoutMs = 5000; // Max wait time before failing
-	private static readonly lockStaleMs = 30000; // Age threshold for auto-removing orphaned locks
 	private static readonly codexUsageCacheTtlMs = 60_000; // Cache usage data for 1 minute
 	private static readonly defaultBackoffMs = 60_000; // Default backoff when no reset time available
 
-	private data: AuthStorageData = {};
+	/** Provider -> credentials cache, populated from agent.db on reload(). */
+	private data: Map<string, StoredCredential[]> = new Map();
+	private storage: AgentStorage;
+	/** Resolved path to agent.db (derived from authPath or used directly if .db). */
+	private dbPath: string;
 	private runtimeOverrides: Map<string, string> = new Map();
 	/** Tracks next credential index per provider:type key for round-robin distribution (non-session use). */
 	private providerRoundRobinIndex: Map<string, number> = new Map();
@@ -110,13 +105,28 @@ export class AuthStorage {
 	private fallbackResolver?: (provider: string) => string | undefined;
 
 	/**
-	 * @param authPath - Primary path for reading/writing auth.json
-	 * @param fallbackPaths - Additional paths to check when reading (legacy support)
+	 * @param authPath - Legacy auth.json path used for migration and locating agent.db
+	 * @param fallbackPaths - Additional auth.json paths to migrate (legacy support)
 	 */
 	constructor(
 		private authPath: string,
 		private fallbackPaths: string[] = [],
-	) {}
+	) {
+		this.dbPath = AuthStorage.resolveDbPath(authPath);
+		this.storage = AgentStorage.open(this.dbPath);
+	}
+
+	/**
+	 * Converts legacy auth.json path to agent.db path, or returns .db path as-is.
+	 * @param authPath - Path to auth.json or agent.db
+	 * @returns Resolved path to agent.db
+	 */
+	private static resolveDbPath(authPath: string): string {
+		if (authPath.endsWith(".db")) {
+			return authPath;
+		}
+		return getAgentDbPath(dirname(authPath));
+	}
 
 	/**
 	 * Set a runtime API key override (not persisted to disk).
@@ -134,7 +144,7 @@ export class AuthStorage {
 	}
 
 	/**
-	 * Set a fallback resolver for API keys not found in auth.json or env vars.
+	 * Set a fallback resolver for API keys not found in agent.db or env vars.
 	 * Used for custom provider keys from models.json.
 	 */
 	setFallbackResolver(resolver: (provider: string) => string | undefined): void {
@@ -142,138 +152,53 @@ export class AuthStorage {
 	}
 
 	/**
-	 * Reload credentials from disk.
-	 * Checks primary path first, then fallback paths.
+	 * Reload credentials from agent.db.
+	 * Migrates legacy auth.json/settings.json on first load.
 	 */
 	async reload(): Promise<void> {
-		const pathsToCheck = [this.authPath, ...this.fallbackPaths];
+		const agentDir = dirname(this.dbPath);
+		await migrateJsonStorage({
+			agentDir,
+			settingsPath: join(agentDir, "settings.json"),
+			authPaths: [this.authPath, ...this.fallbackPaths],
+		});
 
-		logger.debug("AuthStorage.reload checking paths", { paths: pathsToCheck });
-
-		for (const authPath of pathsToCheck) {
-			const exists = existsSync(authPath);
-			logger.debug("AuthStorage.reload path check", { path: authPath, exists });
-
-			if (exists) {
-				try {
-					this.data = JSON.parse(readFileSync(authPath, "utf-8"));
-					logger.debug("AuthStorage.reload loaded", { path: authPath, providers: Object.keys(this.data) });
-					return;
-				} catch (e) {
-					logger.error("AuthStorage failed to parse auth file", { path: authPath, error: String(e) });
-					// Continue to next path on parse error
-				}
-			}
+		const records = this.storage.listAuthCredentials();
+		const grouped = new Map<string, StoredCredential[]>();
+		for (const record of records) {
+			const list = grouped.get(record.provider) ?? [];
+			list.push({ id: record.id, credential: record.credential });
+			grouped.set(record.provider, list);
 		}
-
-		logger.warn("AuthStorage no auth file found", { checkedPaths: pathsToCheck });
-		this.data = {};
+		this.data = grouped;
 	}
 
 	/**
-	 * Save credentials to disk.
+	 * Gets cached credentials for a provider.
+	 * @param provider - Provider name (e.g., "anthropic", "openai")
+	 * @returns Array of stored credentials, empty if none exist
 	 */
-	private async save(): Promise<void> {
-		const lockFd = await this.acquireLock();
-		const tempPath = this.getTempPath();
-
-		try {
-			writeFileSync(tempPath, JSON.stringify(this.data, null, 2), { mode: 0o600 });
-			renameSync(tempPath, this.authPath);
-			chmodSync(this.authPath, 0o600);
-			const dir = dirname(this.authPath);
-			chmodSync(dir, 0o700);
-		} finally {
-			this.safeUnlink(tempPath);
-			this.releaseLock(lockFd);
-		}
-	}
-
-	/** Returns the lock file path (auth.json.lock) */
-	private getLockPath(): string {
-		return `${this.authPath}.lock`;
-	}
-
-	/** Returns a unique temp file path using pid and timestamp to avoid collisions */
-	private getTempPath(): string {
-		return `${this.authPath}.tmp-${process.pid}-${Date.now()}`;
-	}
-
-	/** Checks if lock file is older than lockStaleMs (orphaned by crashed process) */
-	private isLockStale(lockPath: string): boolean {
-		try {
-			const stats = statSync(lockPath);
-			return Date.now() - stats.mtimeMs > AuthStorage.lockStaleMs;
-		} catch {
-			return false;
-		}
+	private getStoredCredentials(provider: string): StoredCredential[] {
+		return this.data.get(provider) ?? [];
 	}
 
 	/**
-	 * Acquires exclusive file lock using O_EXCL atomic create.
-	 * Polls with exponential backoff, removes stale locks from crashed processes.
-	 * @returns File descriptor for the lock (must be passed to releaseLock)
+	 * Updates in-memory credential cache for a provider.
+	 * Removes the provider entry entirely if credentials array is empty.
+	 * @param provider - Provider name (e.g., "anthropic", "openai")
+	 * @param credentials - Array of stored credentials to cache
 	 */
-	private async acquireLock(): Promise<number> {
-		const lockPath = this.getLockPath();
-		const start = Date.now();
-		const timeoutMs = AuthStorage.lockTimeoutMs;
-		const retryDelayMs = AuthStorage.lockRetryDelayMs;
-
-		while (true) {
-			try {
-				// O_EXCL fails if file exists, providing atomic lock acquisition
-				return openSync(lockPath, "wx", 0o600);
-			} catch (error) {
-				const err = error as NodeJS.ErrnoException;
-				if (err.code !== "EEXIST") {
-					throw err;
-				}
-				if (this.isLockStale(lockPath)) {
-					this.safeUnlink(lockPath);
-					logger.warn("AuthStorage lock was stale, removing", { path: lockPath });
-					continue;
-				}
-				if (Date.now() - start > timeoutMs) {
-					throw new Error(`Timed out waiting for auth lock: ${lockPath}`);
-				}
-				await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
-			}
+	private setStoredCredentials(provider: string, credentials: StoredCredential[]): void {
+		if (credentials.length === 0) {
+			this.data.delete(provider);
+		} else {
+			this.data.set(provider, credentials);
 		}
-	}
-
-	/** Releases file lock by closing fd and removing lock file */
-	private releaseLock(lockFd: number): void {
-		const lockPath = this.getLockPath();
-		try {
-			closeSync(lockFd);
-		} catch (error) {
-			logger.warn("AuthStorage failed to close lock file", { error: String(error) });
-		}
-		this.safeUnlink(lockPath);
-	}
-
-	/** Removes file if it exists, ignoring ENOENT errors */
-	private safeUnlink(path: string): void {
-		try {
-			unlinkSync(path);
-		} catch (error) {
-			const err = error as NodeJS.ErrnoException;
-			if (err.code !== "ENOENT") {
-				logger.warn("AuthStorage failed to remove file", { path, error: String(error) });
-			}
-		}
-	}
-
-	/** Normalizes credential storage format: single credential becomes array of one */
-	private normalizeCredentialEntry(entry: AuthCredentialEntry | undefined): AuthCredential[] {
-		if (!entry) return [];
-		return Array.isArray(entry) ? entry : [entry];
 	}
 
 	/** Returns all credentials for a provider as an array */
 	private getCredentialsForProvider(provider: string): AuthCredential[] {
-		return this.normalizeCredentialEntry(this.data[provider]);
+		return this.getStoredCredentials(provider).map((entry) => entry.credential);
 	}
 
 	/** Composite key for round-robin tracking: "anthropic:oauth" or "openai:api_key" */
@@ -423,21 +348,13 @@ export class AuthStorage {
 
 	/** Updates credential at index in-place (used for OAuth token refresh) */
 	private replaceCredentialAt(provider: string, index: number, credential: AuthCredential): void {
-		const entry = this.data[provider];
-		if (!entry) return;
-
-		if (Array.isArray(entry)) {
-			if (index >= 0 && index < entry.length) {
-				const updated = [...entry];
-				updated[index] = credential;
-				this.data[provider] = updated;
-			}
-			return;
-		}
-
-		if (index === 0) {
-			this.data[provider] = credential;
-		}
+		const entries = this.getStoredCredentials(provider);
+		if (index < 0 || index >= entries.length) return;
+		const target = entries[index];
+		this.storage.updateAuthCredential(target.id, credential);
+		const updated = [...entries];
+		updated[index] = { id: target.id, credential };
+		this.setStoredCredentials(provider, updated);
 	}
 
 	/**
@@ -445,20 +362,11 @@ export class AuthStorage {
 	 * Cleans up provider entry if last credential removed.
 	 */
 	private removeCredentialAt(provider: string, index: number): void {
-		const entry = this.data[provider];
-		if (!entry) return;
-
-		if (Array.isArray(entry)) {
-			const updated = entry.filter((_value, idx) => idx !== index);
-			if (updated.length > 0) {
-				this.data[provider] = updated;
-			} else {
-				delete this.data[provider];
-			}
-		} else {
-			delete this.data[provider];
-		}
-
+		const entries = this.getStoredCredentials(provider);
+		if (index < 0 || index >= entries.length) return;
+		this.storage.deleteAuthCredential(entries[index].id);
+		const updated = entries.filter((_value, idx) => idx !== index);
+		this.setStoredCredentials(provider, updated);
 		this.resetProviderAssignments(provider);
 	}
 
@@ -473,29 +381,33 @@ export class AuthStorage {
 	 * Set credential for a provider.
 	 */
 	async set(provider: string, credential: AuthCredentialEntry): Promise<void> {
-		this.data[provider] = credential;
+		const normalized = Array.isArray(credential) ? credential : [credential];
+		const stored = this.storage.replaceAuthCredentialsForProvider(provider, normalized);
+		this.setStoredCredentials(
+			provider,
+			stored.map((record) => ({ id: record.id, credential: record.credential })),
+		);
 		this.resetProviderAssignments(provider);
-		await this.save();
 	}
 
 	/**
 	 * Remove credential for a provider.
 	 */
 	async remove(provider: string): Promise<void> {
-		delete this.data[provider];
+		this.storage.deleteAuthCredentialsForProvider(provider);
+		this.data.delete(provider);
 		this.resetProviderAssignments(provider);
-		await this.save();
 	}
 
 	/**
 	 * List all providers with credentials.
 	 */
 	list(): string[] {
-		return Object.keys(this.data);
+		return [...this.data.keys()];
 	}
 
 	/**
-	 * Check if credentials exist for a provider in auth.json.
+	 * Check if credentials exist for a provider in agent.db.
 	 */
 	has(provider: string): boolean {
 		return this.getCredentialsForProvider(provider).length > 0;
@@ -533,7 +445,16 @@ export class AuthStorage {
 	 * Get all credentials.
 	 */
 	getAll(): AuthStorageData {
-		return { ...this.data };
+		const result: AuthStorageData = {};
+		for (const [provider, entries] of this.data.entries()) {
+			const credentials = entries.map((entry) => entry.credential);
+			if (credentials.length === 1) {
+				result[provider] = credentials[0];
+			} else if (credentials.length > 1) {
+				result[provider] = credentials;
+			}
+		}
+		return result;
 	}
 
 	/**
@@ -887,7 +808,6 @@ export class AuthStorage {
 
 			const updated: OAuthCredential = { type: "oauth", ...result.newCredentials };
 			this.replaceCredentialAt(provider, selection.index, updated);
-			await this.save();
 
 			if (checkUsage) {
 				const usage = await this.getCodexUsage(updated, options?.baseUrl);
@@ -906,7 +826,6 @@ export class AuthStorage {
 			return result.apiKey;
 		} catch {
 			this.removeCredentialAt(provider, selection.index);
-			await this.save();
 			if (this.getCredentialsForProvider(provider).some((credential) => credential.type === "oauth")) {
 				return this.getApiKey(provider, sessionId, options);
 			}
@@ -919,8 +838,8 @@ export class AuthStorage {
 	 * Get API key for a provider.
 	 * Priority:
 	 * 1. Runtime override (CLI --api-key)
-	 * 2. API key from auth.json
-	 * 3. OAuth token from auth.json (auto-refreshed)
+	 * 2. API key from agent.db
+	 * 3. OAuth token from agent.db (auto-refreshed)
 	 * 4. Environment variable
 	 * 5. Fallback resolver (models.json custom providers)
 	 */

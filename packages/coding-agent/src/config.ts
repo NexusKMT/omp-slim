@@ -79,6 +79,15 @@ export function getSettingsPath(): string {
 	return join(getAgentDir(), "settings.json");
 }
 
+/**
+ * Gets the path to agent.db (SQLite database for settings and auth storage).
+ * @param agentDir - Base agent directory, defaults to ~/.omp/agent
+ * @returns Absolute path to the agent.db file
+ */
+export function getAgentDbPath(agentDir: string = getAgentDir()): string {
+	return join(agentDir, "agent.db");
+}
+
 /** Get path to tools directory */
 export function getToolsDir(): string {
 	return join(getAgentDir(), "tools");

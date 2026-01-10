@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { type Settings as SettingsItem, settingsCapability } from "../capability/settings";
-import { getAgentDir } from "../config";
+import { getAgentDbPath, getAgentDir } from "../config";
 import { loadSync } from "../discovery";
 import type { SymbolPreset } from "../modes/interactive/theme/theme";
+import { AgentStorage } from "./agent-storage";
+import { logger } from "./logger";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -377,15 +377,23 @@ function deepMergeSettings(base: Settings, overrides: Settings): Settings {
 }
 
 export class SettingsManager {
-	private settingsPath: string | null;
+	/** SQLite storage for persisted settings (null for in-memory mode) */
+	private storage: AgentStorage | null;
 	private cwd: string | null;
 	private globalSettings: Settings;
 	private overrides: Settings;
 	private settings!: Settings;
 	private persist: boolean;
 
-	private constructor(settingsPath: string | null, cwd: string | null, initialSettings: Settings, persist: boolean) {
-		this.settingsPath = settingsPath;
+	/**
+	 * Private constructor - use static factory methods instead.
+	 * @param storage - SQLite storage instance for persistence, or null for in-memory mode
+	 * @param cwd - Current working directory for project settings discovery
+	 * @param initialSettings - Initial global settings to use
+	 * @param persist - Whether to persist settings changes to storage
+	 */
+	private constructor(storage: AgentStorage | null, cwd: string | null, initialSettings: Settings, persist: boolean) {
+		this.storage = storage;
 		this.cwd = cwd;
 		this.persist = persist;
 		this.globalSettings = initialSettings;
@@ -416,9 +424,14 @@ export class SettingsManager {
 		}
 	}
 
-	/** Create a SettingsManager that loads from files */
+	/**
+	 * Create a SettingsManager that loads from persistent SQLite storage.
+	 * @param cwd - Current working directory for project settings discovery
+	 * @param agentDir - Agent directory containing agent.db
+	 * @returns Configured SettingsManager with merged global and user settings
+	 */
 	static create(cwd: string = process.cwd(), agentDir: string = getAgentDir()): SettingsManager {
-		const settingsPath = join(agentDir, "settings.json");
+		const storage = AgentStorage.open(getAgentDbPath(agentDir));
 
 		// Use capability API to load user-level settings from all providers
 		const result = loadSync(settingsCapability.id, { cwd });
@@ -431,30 +444,36 @@ export class SettingsManager {
 			}
 		}
 
-		// Also load from agentDir for backward compatibility (if not covered by providers)
-		const legacySettings = SettingsManager.loadFromFile(settingsPath);
-		globalSettings = deepMergeSettings(globalSettings, legacySettings);
+		// Load persisted settings from agent.db (legacy settings.json is migrated separately)
+		const storedSettings = SettingsManager.loadFromStorage(storage);
+		globalSettings = deepMergeSettings(globalSettings, storedSettings);
 
-		return new SettingsManager(settingsPath, cwd, globalSettings, true);
+		return new SettingsManager(storage, cwd, globalSettings, true);
 	}
 
-	/** Create an in-memory SettingsManager (no file I/O) */
+	/**
+	 * Create an in-memory SettingsManager without persistence.
+	 * @param settings - Initial settings to use
+	 * @returns SettingsManager that won't persist changes to disk
+	 */
 	static inMemory(settings: Partial<Settings> = {}): SettingsManager {
 		return new SettingsManager(null, null, settings, false);
 	}
 
-	private static loadFromFile(path: string): Settings {
-		if (!existsSync(path)) {
+	/**
+	 * Load settings from SQLite storage, applying any schema migrations.
+	 * @param storage - AgentStorage instance, or null for in-memory mode
+	 * @returns Parsed and migrated settings, or empty object if storage is null/empty
+	 */
+	private static loadFromStorage(storage: AgentStorage | null): Settings {
+		if (!storage) {
 			return {};
 		}
-		try {
-			const content = readFileSync(path, "utf-8");
-			const settings = JSON.parse(content);
-			return SettingsManager.migrateSettings(settings as Record<string, unknown>);
-		} catch (error) {
-			console.error(`Warning: Could not read settings file ${path}: ${error}`);
+		const settings = storage.getSettings();
+		if (!settings) {
 			return {};
 		}
+		return SettingsManager.migrateSettings(settings as Record<string, unknown>);
 	}
 
 	/** Migrate old settings format to new format */
@@ -497,24 +516,19 @@ export class SettingsManager {
 		this.rebuildSettings();
 	}
 
+	/**
+	 * Persist current global settings to SQLite storage and rebuild merged settings.
+	 * Merges with any concurrent changes in storage before saving.
+	 */
 	private save(): void {
-		if (this.persist && this.settingsPath) {
+		if (this.persist && this.storage) {
 			try {
-				const dir = dirname(this.settingsPath);
-				if (!existsSync(dir)) {
-					mkdirSync(dir, { recursive: true });
-				}
-
-				// Re-read current file to preserve any settings added externally while running
-				const currentFileSettings = SettingsManager.loadFromFile(this.settingsPath);
-				// Merge: file settings as base, globalSettings (in-memory changes) as overrides
-				const mergedSettings = deepMergeSettings(currentFileSettings, this.globalSettings);
+				const currentSettings = this.storage.getSettings() ?? {};
+				const mergedSettings = deepMergeSettings(currentSettings, this.globalSettings);
 				this.globalSettings = mergedSettings;
-
-				// Save merged settings (project settings are read-only)
-				writeFileSync(this.settingsPath, JSON.stringify(this.globalSettings, null, 2), "utf-8");
+				this.storage.saveSettings(this.globalSettings);
 			} catch (error) {
-				console.error(`Warning: Could not save settings file: ${error}`);
+				logger.warn("SettingsManager save failed", { error: String(error) });
 			}
 		}
 

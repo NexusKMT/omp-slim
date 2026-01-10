@@ -22,6 +22,12 @@ const DEFAULT_MAX_TOKENS = 4096;
 const WEB_SEARCH_TOOL_NAME = "web_search";
 const WEB_SEARCH_TOOL_TYPE = "web_search_20250305";
 
+/**
+ * Applies OAuth-specific tool prefix to search tool name.
+ * @param name - The base tool name
+ * @param isOAuth - Whether OAuth authentication is being used
+ * @returns Tool name with prefix if OAuth, otherwise unchanged
+ */
 const applySearchToolPrefix = (name: string, isOAuth: boolean): string => {
 	return isOAuth ? applyClaudeToolPrefix(name) : name;
 };
@@ -33,11 +39,21 @@ export interface AnthropicSearchParams {
 	num_results?: number;
 }
 
-/** Get model from env or use default */
+/**
+ * Gets the model to use for web search from environment or default.
+ * @returns Model identifier string
+ */
 async function getModel(): Promise<string> {
 	return (await getEnv("ANTHROPIC_SEARCH_MODEL")) ?? DEFAULT_MODEL;
 }
 
+/**
+ * Builds system instruction blocks for the Anthropic API request.
+ * @param auth - Authentication configuration
+ * @param model - Model identifier (affects whether Claude Code instruction is included)
+ * @param systemPrompt - Optional custom system prompt
+ * @returns Array of system blocks for the API request
+ */
 function buildSystemBlocks(
 	auth: AnthropicAuthConfig,
 	model: string,
@@ -53,7 +69,16 @@ function buildSystemBlocks(
 	});
 }
 
-/** Call Anthropic API with web search */
+/**
+ * Calls the Anthropic API with web search tool enabled.
+ * @param auth - Authentication configuration (API key or OAuth)
+ * @param model - Model identifier to use
+ * @param query - Search query from the user
+ * @param systemPrompt - Optional custom system prompt
+ * @param maxTokens - Maximum tokens for the response
+ * @returns Raw API response from Anthropic
+ * @throws {WebSearchProviderError} If the API request fails
+ */
 async function callWebSearch(
 	auth: AnthropicAuthConfig,
 	model: string,
@@ -100,7 +125,11 @@ async function callWebSearch(
 	return response.json() as Promise<AnthropicApiResponse>;
 }
 
-/** Parse page_age string into seconds (e.g., "2 days ago", "3h ago", "1 week ago") */
+/**
+ * Parses a human-readable page age string into seconds.
+ * @param pageAge - Age string like "2 days ago", "3h ago", "1 week ago"
+ * @returns Age in seconds, or undefined if parsing fails
+ */
 function parsePageAge(pageAge: string | null | undefined): number | undefined {
 	if (!pageAge) return undefined;
 
@@ -132,7 +161,11 @@ function parsePageAge(pageAge: string | null | undefined): number | undefined {
 	return value * (multipliers[unit] ?? 86400);
 }
 
-/** Parse API response into unified WebSearchResponse */
+/**
+ * Parses the Anthropic API response into a unified WebSearchResponse.
+ * @param response - Raw API response containing content blocks
+ * @returns Normalized response with answer, sources, citations, and usage
+ */
 function parseResponse(response: AnthropicApiResponse): WebSearchResponse {
 	const answerParts: string[] = [];
 	const searchQueries: string[] = [];
@@ -193,12 +226,17 @@ function parseResponse(response: AnthropicApiResponse): WebSearchResponse {
 	};
 }
 
-/** Execute Anthropic web search */
+/**
+ * Executes a web search using Anthropic's Claude with built-in web search tool.
+ * @param params - Search parameters including query and optional settings
+ * @returns Search response with synthesized answer, sources, and citations
+ * @throws {Error} If no Anthropic credentials are configured
+ */
 export async function searchAnthropic(params: AnthropicSearchParams): Promise<WebSearchResponse> {
 	const auth = await findAnthropicAuth();
 	if (!auth) {
 		throw new Error(
-			"No Anthropic credentials found. Set ANTHROPIC_API_KEY or configure OAuth in ~/.omp/agent/auth.json",
+			"No Anthropic credentials found. Set ANTHROPIC_API_KEY or configure OAuth in ~/.omp/agent/agent.db",
 		);
 	}
 

@@ -1,13 +1,14 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Added
 
 - Added support for custom share scripts at ~/.omp/agent/share.ts to replace default GitHub Gist sharing
 
 ### Changed
 
+- Migrated settings and auth credential storage from JSON files to SQLite database (agent.db)
+- Updated credential migration message to reference agent.db instead of auth.json
 - Renamed Glob tool references to Find tool throughout prompts and documentation
 - Updated project context formatting to use XML-style tags for clearer structure
 - Refined bash tool guidance to prefer dedicated tools (read/grep/find/ls) over bash for file operations

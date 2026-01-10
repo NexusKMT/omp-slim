@@ -71,6 +71,7 @@ import { loadSkills as loadSkillsInternal, type Skill, type SkillWarning } from 
 import { type FileSlashCommand, loadSlashCommands as loadSlashCommandsInternal } from "./slash-commands";
 import { closeAllConnections } from "./ssh/connection-manager";
 import { unmountAll } from "./ssh/sshfs-mount";
+import { migrateJsonStorage } from "./storage-migration";
 import {
 	buildSystemPrompt as buildSystemPromptInternal,
 	loadProjectContextFiles as loadContextFilesInternal,
@@ -241,6 +242,13 @@ export async function discoverAuthStorage(agentDir: string = getDefaultAgentDir(
 	const fallbackPaths = allPaths.filter((p) => p !== primaryPath);
 
 	logger.debug("discoverAuthStorage", { agentDir, primaryPath, allPaths, fallbackPaths });
+
+	// Migrate legacy JSON files (settings.json, auth.json) to SQLite before loading
+	await migrateJsonStorage({
+		agentDir,
+		settingsPath: join(agentDir, "settings.json"),
+		authPaths: [primaryPath, ...fallbackPaths],
+	});
 
 	const storage = new AuthStorage(primaryPath, fallbackPaths);
 	await storage.reload();

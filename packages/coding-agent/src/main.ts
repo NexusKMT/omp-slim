@@ -76,7 +76,7 @@ async function runInteractiveMode(
 	mode.renderInitialMessages();
 
 	if (migratedProviders.length > 0) {
-		mode.showWarning(`Migrated credentials to auth.json: ${migratedProviders.join(", ")}`);
+		mode.showWarning(`Migrated credentials to agent.db: ${migratedProviders.join(", ")}`);
 	}
 
 	if (modelsJsonError) {
