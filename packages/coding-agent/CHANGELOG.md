@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Removed
+
+- Removed `architect-plan`, `implement`, and `implement-with-critic` built-in agent commands
 
 ## [4.2.0] - 2026-01-10
 

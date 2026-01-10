@@ -95,7 +95,7 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 	) {
 		this.commands = commands;
 		this.basePath = basePath;
-		this.fdPath = fdPath;
+		this.fdPath = fdPath ?? Bun.which("fd") ?? Bun.which("fdfind");
 	}
 
 	getSuggestions(
@@ -111,7 +111,12 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 		if (atMatch) {
 			const prefix = atMatch[1] ?? "@"; // The @... part
 			const query = prefix.slice(1); // Remove the @
-			const suggestions = this.getFuzzyFileSuggestions(query);
+			const suggestions = query.length > 0 ? this.getFuzzyFileSuggestions(query) : this.getFileSuggestions("@");
+			if (suggestions.length === 0 && query.length > 0) {
+				const fallback = this.getFileSuggestions(prefix);
+				if (fallback.length === 0) return null;
+				return { items: fallback, prefix };
+			}
 			if (suggestions.length === 0) return null;
 
 			return {

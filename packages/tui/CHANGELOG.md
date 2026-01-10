@@ -1,6 +1,13 @@
 # Changelog
 
 ## [Unreleased]
+### Changed
+
+- Improved file autocomplete to show directory listing when typing `@` with no query, and fall back to prefix matching when fuzzy search returns no results
+
+### Fixed
+
+- Fixed `fd` tool detection to automatically find `fd` or `fdfind` in PATH when not explicitly configured
 
 ## [4.2.0] - 2026-01-10
 
