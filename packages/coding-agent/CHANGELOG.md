@@ -1,6 +1,12 @@
 # Changelog
 
 ## [Unreleased]
+### Changed
+
+- Updated system prompt with clearer tone guidelines emphasizing directness and conciseness
+- Revised workflow instructions to require explicit planning for non-trivial tasks
+- Enhanced verification guidance to prefer external feedback loops like tests and linters
+- Added explicit alignment and prohibited behavior sections to improve response quality
 
 ## [4.1.0] - 2026-01-10
 ### Added
