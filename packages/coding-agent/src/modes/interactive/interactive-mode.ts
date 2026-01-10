@@ -149,6 +149,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.statusContainer = new Container();
 		this.editor = new CustomEditor(getEditorTheme());
 		this.editor.setUseTerminalCursor(true);
+		this.editor.onAutocompleteCancel = () => {
+			this.ui.requestRender(true);
+		};
 		try {
 			this.historyStorage = HistoryStorage.open();
 			this.editor.setHistoryStorage(this.historyStorage);

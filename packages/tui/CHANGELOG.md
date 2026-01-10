@@ -7,6 +7,7 @@
 
 ### Fixed
 
+- Fixed editor redraw glitch when canceling autocomplete suggestions
 - Fixed `fd` tool detection to automatically find `fd` or `fdfind` in PATH when not explicitly configured
 
 ## [4.2.0] - 2026-01-10

@@ -287,6 +287,7 @@ export class Editor implements Component {
 	public onSubmit?: (text: string) => void;
 	public onAltEnter?: (text: string) => void;
 	public onChange?: (text: string) => void;
+	public onAutocompleteCancel?: () => void;
 	public disableSubmit: boolean = false;
 
 	// Custom top border (for status line integration)
@@ -581,7 +582,7 @@ export class Editor implements Component {
 		if (this.isAutocompleting && this.autocompleteList) {
 			// Escape - cancel autocomplete
 			if (isEscape(data)) {
-				this.cancelAutocomplete();
+				this.cancelAutocomplete(true);
 				return;
 			}
 			// Let the autocomplete list handle navigation and selection
@@ -1571,10 +1572,14 @@ https://github.com/EsotericSoftware/spine-runtimes/actions/runs/19536643416/job/
 		}
 	}
 
-	private cancelAutocomplete(): void {
+	private cancelAutocomplete(notifyCancel: boolean = false): void {
+		const wasAutocompleting = this.isAutocompleting;
 		this.isAutocompleting = false;
 		this.autocompleteList = undefined;
 		this.autocompletePrefix = "";
+		if (notifyCancel && wasAutocompleting) {
+			this.onAutocompleteCancel?.();
+		}
 	}
 
 	public isShowingAutocomplete(): boolean {

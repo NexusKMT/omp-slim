@@ -5,6 +5,10 @@
 
 - Added `planner` built-in agent for comprehensive implementation planning with slow model
 
+### Fixed
+
+- Fixed editor border rendering glitch after canceling slash command autocomplete
+
 ### Removed
 
 - Removed `architect-plan`, `implement`, and `implement-with-critic` built-in agent commands
