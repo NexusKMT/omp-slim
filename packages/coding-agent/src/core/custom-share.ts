@@ -16,7 +16,7 @@ export interface CustomShareResult {
 	message?: string;
 }
 
-export type CustomShareFn = (htmlPath: string) => Promise<CustomShareResult | string | void>;
+export type CustomShareFn = (htmlPath: string) => Promise<CustomShareResult | string | undefined>;
 
 interface LoadedCustomShare {
 	path: string;

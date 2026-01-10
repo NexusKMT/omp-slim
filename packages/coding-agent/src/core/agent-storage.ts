@@ -194,9 +194,7 @@ CREATE TABLE settings (
 		} else if (!hasKey || !hasValue) {
 			// Migrate v1 schema: single JSON blob in `data` column → per-key rows
 			let legacySettings: Record<string, unknown> | null = null;
-			const row = this.db.prepare("SELECT data FROM settings WHERE id = 1").get() as
-				| { data?: string }
-				| undefined;
+			const row = this.db.prepare("SELECT data FROM settings WHERE id = 1").get() as { data?: string } | undefined;
 			if (row?.data) {
 				try {
 					const parsed = JSON.parse(row.data);

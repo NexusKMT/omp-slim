@@ -339,10 +339,36 @@ function normalizeBashInterceptorSettings(
 	return { enabled, simpleLs, patterns };
 }
 
+let cachedNerdFonts: boolean | null = null;
+
+function hasNerdFonts(): boolean {
+	if (cachedNerdFonts !== null) {
+		return cachedNerdFonts;
+	}
+
+	const envOverride = process.env.NERD_FONTS;
+	if (envOverride === "1") {
+		cachedNerdFonts = true;
+		return true;
+	}
+	if (envOverride === "0") {
+		cachedNerdFonts = false;
+		return false;
+	}
+
+	const termProgram = (process.env.TERM_PROGRAM || "").toLowerCase();
+	const term = (process.env.TERM || "").toLowerCase();
+	const nerdTerms = ["iterm", "wezterm", "kitty", "ghostty", "alacritty"];
+	cachedNerdFonts = nerdTerms.some((candidate) => termProgram.includes(candidate) || term.includes(candidate));
+	return cachedNerdFonts;
+}
+
 function normalizeSettings(settings: Settings): Settings {
 	const merged = deepMergeSettings(DEFAULT_SETTINGS, settings);
+	const symbolPreset = merged.symbolPreset ?? (hasNerdFonts() ? "nerd" : "unicode");
 	return {
 		...merged,
+		symbolPreset,
 		bashInterceptor: normalizeBashInterceptorSettings(merged.bashInterceptor),
 	};
 }
