@@ -2008,11 +2008,11 @@ export function getThemeExportColors(themeName?: string): {
 		const resolve = (value: string | number | undefined): string | undefined => {
 			if (value === undefined) return undefined;
 			if (typeof value === "number") return ansi256ToHex(value);
-			if (value.startsWith("$")) {
-				const resolved = vars[value];
-				if (resolved === undefined) return undefined;
-				if (typeof resolved === "number") return ansi256ToHex(resolved);
-				return resolved;
+			if (value === "" || value.startsWith("#")) return value;
+			const varName = value.startsWith("$") ? value.slice(1) : value;
+			if (varName in vars) {
+				const resolved = resolveVarRefs(varName, vars);
+				return typeof resolved === "number" ? ansi256ToHex(resolved) : resolved;
 			}
 			return value;
 		};
