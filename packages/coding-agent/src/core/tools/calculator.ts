@@ -14,8 +14,8 @@ import {
 	formatMeta,
 	formatMoreItems,
 	PREVIEW_LIMITS,
-	truncate,
 	TRUNCATE_LENGTHS,
+	truncate,
 } from "./render-utils";
 
 // =============================================================================

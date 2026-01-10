@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [3.36.0] - 2026-01-10
 ### Added
 
 - Added `calc` tool for basic mathematical calculations with support for arithmetic operators, parentheses, and hex/binary/octal literals
