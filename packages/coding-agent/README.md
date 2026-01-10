@@ -223,7 +223,8 @@ The agent reads, writes, and edits files, and executes commands via bash.
 | ------------------------- | --------------------------------------------------------------------------- |
 | `/settings`               | Open settings menu (thinking, theme, queue mode, toggles)                   |
 | `/model`                  | Switch models mid-session. Use `/model <search>` or `provider/model` to prefilter/disambiguate. |
-| `/export [file\|--copy]`  | Export session to HTML file or copy to clipboard                            |
+| `/export [file]`          | Export session to HTML file                                                 |
+| `/dump`                   | Copy session transcript to clipboard                                        |
 | `/share`                  | Upload session as secret GitHub gist, get shareable URL (requires `gh` CLI) |
 | `/session`                | Show session info: path, message counts, token usage, cost                  |
 | `/hotkeys`                | Show all keyboard shortcuts                                                 |

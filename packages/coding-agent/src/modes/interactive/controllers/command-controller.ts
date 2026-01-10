@@ -38,17 +38,7 @@ export class CommandController {
 		const arg = parts.length > 1 ? parts[1] : undefined;
 
 		if (arg === "--copy" || arg === "clipboard" || arg === "copy") {
-			try {
-				const formatted = this.ctx.session.formatSessionAsText();
-				if (!formatted) {
-					this.ctx.showError("No messages to export yet.");
-					return;
-				}
-				await copyToClipboard(formatted);
-				this.ctx.showStatus("Session copied to clipboard");
-			} catch (error: unknown) {
-				this.ctx.showError(`Failed to copy session: ${error instanceof Error ? error.message : "Unknown error"}`);
-			}
+			this.ctx.showWarning("Use /dump to copy the session to clipboard.");
 			return;
 		}
 
@@ -58,6 +48,20 @@ export class CommandController {
 			this.openInBrowser(filePath);
 		} catch (error: unknown) {
 			this.ctx.showError(`Failed to export session: ${error instanceof Error ? error.message : "Unknown error"}`);
+		}
+	}
+
+	async handleDumpCommand(): Promise<void> {
+		try {
+			const formatted = this.ctx.session.formatSessionAsText();
+			if (!formatted) {
+				this.ctx.showError("No messages to dump yet.");
+				return;
+			}
+			await copyToClipboard(formatted);
+			this.ctx.showStatus("Session copied to clipboard");
+		} catch (error: unknown) {
+			this.ctx.showError(`Failed to copy session: ${error instanceof Error ? error.message : "Unknown error"}`);
 		}
 	}
 

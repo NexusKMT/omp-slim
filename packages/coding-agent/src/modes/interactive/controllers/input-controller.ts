@@ -139,6 +139,11 @@ export class InputController {
 				this.ctx.editor.setText("");
 				return;
 			}
+			if (text === "/dump") {
+				await this.ctx.handleDumpCommand();
+				this.ctx.editor.setText("");
+				return;
+			}
 			if (text === "/share") {
 				await this.ctx.handleShareCommand();
 				this.ctx.editor.setText("");

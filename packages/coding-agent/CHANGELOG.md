@@ -1,9 +1,9 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Added
 
+- Added `/dump` slash command to copy the full session transcript to the clipboard
 - Added automatic Nerd Fonts detection for terminals like iTerm, WezTerm, Kitty, Ghostty, and Alacritty to set appropriate symbol preset
 - Added `NERD_FONTS` environment variable override (`1` or `0`) to manually control Nerd Fonts symbol preset
 - Added Handlebars templating engine for prompt template rendering with `{{arg}}` helper for positional arguments
@@ -11,6 +11,8 @@
 
 ### Changed
 
+- Separated `/export` and `/dump` commands—`/export` now only exports to HTML file, while `/dump` copies session transcript to clipboard
+- Updated `/export` command to no longer accept `--copy` flag (use `/dump` instead)
 - Changed prompt template rendering to use Handlebars instead of simple string replacement
 - Updated prompt layout optimization to normalize indentation and collapse excessive blank lines
 - Changed auth migration to merge credentials per-provider instead of skipping when any credentials exist in database

@@ -186,7 +186,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		const slashCommands: SlashCommand[] = [
 			{ name: "settings", description: "Open settings menu" },
 			{ name: "model", description: "Select model (opens selector UI)" },
-			{ name: "export", description: "Export session to HTML file or clipboard (--copy)" },
+			{ name: "export", description: "Export session to HTML file" },
+			{ name: "dump", description: "Copy session transcript to clipboard" },
 			{ name: "share", description: "Share session as a secret GitHub gist" },
 			{ name: "copy", description: "Copy last agent message to clipboard" },
 			{ name: "session", description: "Show session info and stats" },
@@ -492,6 +493,10 @@ export class InteractiveMode implements InteractiveModeContext {
 	// Command handling
 	handleExportCommand(text: string): Promise<void> {
 		return this.commandController.handleExportCommand(text);
+	}
+
+	handleDumpCommand(): Promise<void> {
+		return this.commandController.handleDumpCommand();
 	}
 
 	handleShareCommand(): Promise<void> {
