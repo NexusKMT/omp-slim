@@ -273,10 +273,65 @@
       color: var(--userMessageText);
       padding: var(--line-height);
       border-radius: 4px;
+      position: relative;
     }
 
     .assistant-message {
       padding: 0;
+      position: relative;
+    }
+
+    /* Copy link button - appears on hover */
+    .copy-link-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 28px;
+      height: 28px;
+      padding: 6px;
+      background: var(--container-bg);
+      border: 1px solid var(--dim);
+      border-radius: 4px;
+      color: var(--muted);
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.15s, background 0.15s, color 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+
+    .user-message:hover .copy-link-btn,
+    .assistant-message:hover .copy-link-btn {
+      opacity: 1;
+    }
+
+    .copy-link-btn:hover {
+      background: var(--accent);
+      color: var(--body-bg);
+      border-color: var(--accent);
+    }
+
+    .copy-link-btn.copied {
+      background: var(--success, #22c55e);
+      color: white;
+      border-color: var(--success, #22c55e);
+    }
+
+    /* Highlight effect for deep-linked messages */
+    .user-message.highlight,
+    .assistant-message.highlight {
+      animation: highlight-pulse 2s ease-out;
+    }
+
+    @keyframes highlight-pulse {
+      0% {
+        box-shadow: 0 0 0 3px var(--accent);
+      }
+      100% {
+        box-shadow: 0 0 0 0 transparent;
+      }
     }
 
     .assistant-message > .message-timestamp {
@@ -446,6 +501,39 @@
       font-weight: bold;
     }
 
+    .codex-bridge-toggle {
+      color: var(--muted);
+      cursor: pointer;
+      text-decoration: underline;
+      font-size: 10px;
+    }
+
+    .codex-bridge-toggle:hover {
+      color: var(--accent);
+    }
+
+    .codex-bridge-content {
+      display: none;
+      margin-top: 8px;
+      padding: 8px;
+      background: var(--exportCardBg, var(--container-bg));
+      border-radius: 4px;
+      font-size: 11px;
+      max-height: 300px;
+      overflow: auto;
+    }
+
+    .codex-bridge-content pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--muted);
+    }
+
+    .model-change.show-bridge .codex-bridge-content {
+      display: block;
+    }
+
     /* Compaction / Branch Summary - matches customMessage colors from TUI */
     .compaction {
       background: var(--customMessageBg);
@@ -499,6 +587,17 @@
       max-height: 200px;
       overflow-y: auto;
       margin-top: var(--line-height);
+    }
+
+    .system-prompt.provider-prompt {
+      border-left: 3px solid var(--warning);
+    }
+
+    .system-prompt-note {
+      font-size: 10px;
+      font-style: italic;
+      color: var(--muted);
+      margin-top: 4px;
     }
 
     /* Tools list */

@@ -1,6 +1,28 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- `EditorComponent` interface for custom editor implementations
+- `StdinBuffer` class to split batched stdin into individual sequences
+- Overlay compositing via `TUI.showOverlay()` and `TUI.hideOverlay()` for `ctx.ui.custom()` with `{ overlay: true }`
+- Kitty keyboard protocol flag 2 support for key release events (`isKeyRelease()`, `isKeyRepeat()`, `KeyEventType`)
+- `setKittyProtocolActive()`, `isKittyProtocolActive()` for Kitty protocol state management
+- `kittyProtocolActive` property on Terminal interface to query Kitty protocol state
+- `Component.wantsKeyRelease` property to opt-in to key release events (default false)
+- Input component `onEscape` callback for handling escape key presses
+
+### Changed
+
+- Terminal startup now queries Kitty protocol support before enabling event reporting
+- Default editor `newLine` binding now uses `shift+enter` only
+
+### Fixed
+
+- Key presses no longer dropped when batched with other events over SSH
+- TUI now filters out key release events by default, preventing double-processing of keys
+- `matchesKey()` now correctly matches Kitty protocol sequences for unmodified letter keys
+- Crash when pasting text with trailing whitespace exceeding terminal width through Markdown rendering
 
 ## [3.37.1] - 2026-01-10
 

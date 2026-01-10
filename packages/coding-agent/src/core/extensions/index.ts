@@ -2,8 +2,14 @@
  * Extension system for lifecycle events and custom tools.
  */
 
-export { discoverAndLoadExtensions, loadExtensionFromFactory, loadExtensions } from "./loader";
-export type { BranchHandler, ExtensionErrorListener, NavigateTreeHandler, NewSessionHandler } from "./runner";
+export { createExtensionRuntime, discoverAndLoadExtensions, loadExtensionFromFactory, loadExtensions } from "./loader";
+export type {
+	BranchHandler,
+	ExtensionErrorListener,
+	NavigateTreeHandler,
+	NewSessionHandler,
+	ShutdownHandler,
+} from "./runner";
 export { ExtensionRunner } from "./runner";
 export type {
 	AgentEndEvent,
@@ -11,6 +17,7 @@ export type {
 	// Re-exports
 	AgentToolResult,
 	AgentToolUpdateCallback,
+	AppAction,
 	AppendEntryHandler,
 	BashToolResultEvent,
 	BeforeAgentStartEvent,
@@ -23,26 +30,32 @@ export type {
 	EditToolResultEvent,
 	ExecOptions,
 	ExecResult,
+	Extension,
+	ExtensionActions,
 	// API
 	ExtensionAPI,
 	ExtensionCommandContext,
+	ExtensionCommandContextActions,
 	// Context
 	ExtensionContext,
+	ExtensionContextActions,
 	// Errors
 	ExtensionError,
 	ExtensionEvent,
 	ExtensionFactory,
 	ExtensionFlag,
 	ExtensionHandler,
+	ExtensionRuntime,
 	ExtensionShortcut,
 	ExtensionUIContext,
+	ExtensionUIDialogOptions,
 	FindToolResultEvent,
 	GetActiveToolsHandler,
 	GetAllToolsHandler,
+	GetThinkingLevelHandler,
 	GrepToolResultEvent,
+	KeybindingsManager,
 	LoadExtensionsResult,
-	// Loaded Extension
-	LoadedExtension,
 	LsToolResultEvent,
 	// Message Rendering
 	MessageRenderer,
@@ -52,6 +65,7 @@ export type {
 	RegisteredCommand,
 	RegisteredTool,
 	SendMessageHandler,
+	SendUserMessageHandler,
 	SessionBeforeBranchEvent,
 	SessionBeforeBranchResult,
 	SessionBeforeCompactEvent,
@@ -69,6 +83,8 @@ export type {
 	SessionSwitchEvent,
 	SessionTreeEvent,
 	SetActiveToolsHandler,
+	SetModelHandler,
+	SetThinkingLevelHandler,
 	// Events - Tool
 	ToolCallEvent,
 	ToolCallEventResult,
@@ -80,6 +96,8 @@ export type {
 	TreePreparation,
 	TurnEndEvent,
 	TurnStartEvent,
+	UserBashEvent,
+	UserBashEventResult,
 	WriteToolResultEvent,
 } from "./types";
 // Type guards

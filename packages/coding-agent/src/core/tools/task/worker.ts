@@ -197,20 +197,43 @@ async function runTask(runState: RunState, payload: SubagentWorkerStartPayload):
 		// Note: Does not support --extension CLI flag or extension CLI flags
 		const extensionRunner = session.extensionRunner;
 		if (extensionRunner) {
-			extensionRunner.initialize({
-				getModel: () => session.model,
-				sendMessageHandler: (message, options) => {
-					session.sendCustomMessage(message, options).catch((e) => {
-						console.error(`Extension sendMessage failed: ${e instanceof Error ? e.message : String(e)}`);
-					});
+			extensionRunner.initialize(
+				// ExtensionActions
+				{
+					sendMessage: (message, options) => {
+						session.sendCustomMessage(message, options).catch((e) => {
+							console.error(`Extension sendMessage failed: ${e instanceof Error ? e.message : String(e)}`);
+						});
+					},
+					sendUserMessage: (content, options) => {
+						session.sendUserMessage(content, options).catch((e) => {
+							console.error(`Extension sendUserMessage failed: ${e instanceof Error ? e.message : String(e)}`);
+						});
+					},
+					appendEntry: (customType, data) => {
+						session.sessionManager.appendCustomEntry(customType, data);
+					},
+					getActiveTools: () => session.getActiveToolNames(),
+					getAllTools: () => session.getAllToolNames(),
+					setActiveTools: (toolNames: string[]) => session.setActiveToolsByName(toolNames),
+					setModel: async (model) => {
+						const key = await session.modelRegistry.getApiKey(model);
+						if (!key) return false;
+						await session.setModel(model);
+						return true;
+					},
+					getThinkingLevel: () => session.thinkingLevel,
+					setThinkingLevel: (level) => session.setThinkingLevel(level),
 				},
-				appendEntryHandler: (customType, data) => {
-					session.sessionManager.appendCustomEntry(customType, data);
+				// ExtensionContextActions
+				{
+					getModel: () => session.model,
+					isIdle: () => !session.isStreaming,
+					abort: () => session.abort(),
+					hasPendingMessages: () => session.queuedMessageCount > 0,
+					shutdown: () => {},
 				},
-				getActiveToolsHandler: () => session.getActiveToolNames(),
-				getAllToolsHandler: () => session.getAllToolNames(),
-				setActiveToolsHandler: (toolNamesList: string[]) => session.setActiveToolsByName(toolNamesList),
-			});
+			);
 			extensionRunner.onError((err) => {
 				console.error(`Extension error (${err.extensionPath}): ${err.error}`);
 			});

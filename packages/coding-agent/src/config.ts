@@ -45,21 +45,6 @@ export function getPackageDir(): string {
 	return process.cwd();
 }
 
-/** Get path to README.md (optional, may not exist in binary) */
-export function getReadmePath(): string {
-	return resolve(join(getPackageDir(), "README.md"));
-}
-
-/** Get path to docs directory (optional, may not exist in binary) */
-export function getDocsPath(): string {
-	return resolve(join(getPackageDir(), "docs"));
-}
-
-/** Get path to examples directory (optional, may not exist in binary) */
-export function getExamplesPath(): string {
-	return resolve(join(getPackageDir(), "examples"));
-}
-
 /** Get path to CHANGELOG.md (optional, may not exist in binary) */
 export function getChangelogPath(): string {
 	return resolve(join(getPackageDir(), "CHANGELOG.md"));
@@ -97,6 +82,11 @@ export function getSettingsPath(): string {
 /** Get path to tools directory */
 export function getToolsDir(): string {
 	return join(getAgentDir(), "tools");
+}
+
+/** Get path to managed binaries directory (fd, rg) */
+export function getBinDir(): string {
+	return join(getAgentDir(), "bin");
 }
 
 /** Get path to slash commands directory */

@@ -11,7 +11,7 @@ export {
 	type PromptOptions,
 	type SessionStats,
 } from "./agent-session";
-export { type BashExecutorOptions, type BashResult, executeBash } from "./bash-executor";
+export { type BashExecutorOptions, type BashResult, executeBash, executeBashWithOperations } from "./bash-executor";
 export type { CompactionResult } from "./compaction/index";
 export {
 	discoverAndLoadExtensions,
@@ -21,6 +21,7 @@ export {
 	type ExtensionFactory,
 	ExtensionRunner,
 	type ExtensionUIContext,
+	type ExtensionUIDialogOptions,
 	loadExtensionFromFactory,
 	type ToolDefinition,
 } from "./extensions/index";

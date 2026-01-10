@@ -21,6 +21,8 @@ export { Spacer } from "./components/spacer";
 export { type Tab, TabBar, type TabBarTheme } from "./components/tab-bar";
 export { Text } from "./components/text";
 export { TruncatedText } from "./components/truncated-text";
+// Editor component interface (for custom editors)
+export type { EditorComponent } from "./editor-component";
 // Keybindings
 export {
 	DEFAULT_EDITOR_KEYBINDINGS,
@@ -64,6 +66,9 @@ export {
 	isEnter,
 	isEscape,
 	isHome,
+	isKeyRelease,
+	isKeyRepeat,
+	isKittyProtocolActive,
 	isShiftBackspace,
 	isShiftCtrlD,
 	isShiftCtrlO,
@@ -74,10 +79,14 @@ export {
 	isShiftTab,
 	isTab,
 	Key,
+	type KeyEventType,
 	type KeyId,
 	matchesKey,
 	parseKey,
+	setKittyProtocolActive,
 } from "./keys";
+// Input buffering for batch splitting
+export { StdinBuffer, type StdinBufferEventMap, type StdinBufferOptions } from "./stdin-buffer";
 export type { BoxSymbols, SymbolTheme } from "./symbols";
 // Terminal interface and implementations
 export { emergencyTerminalRestore, ProcessTerminal, type Terminal } from "./terminal";

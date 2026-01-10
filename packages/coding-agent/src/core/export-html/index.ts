@@ -1,6 +1,7 @@
 import { existsSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
-import type { AgentState } from "@oh-my-pi/pi-agent-core";
+import type { AgentState, AgentTool } from "@oh-my-pi/pi-agent-core";
+import { buildCodexPiBridge, getCodexInstructions } from "@oh-my-pi/pi-ai";
 import { APP_NAME } from "../../config";
 import { getResolvedThemeColors, getThemeExportColors } from "../../modes/interactive/theme/theme";
 import { SessionManager } from "../session-manager";
@@ -11,6 +12,33 @@ import { TEMPLATE } from "./template.generated";
 export interface ExportOptions {
 	outputPath?: string;
 	themeName?: string;
+}
+
+/** Info about Codex injection to show inline with model_change entries. */
+interface CodexInjectionInfo {
+	/** Codex instructions text. */
+	instructions: string;
+	/** Bridge text (tool list). */
+	bridge: string;
+}
+
+/** Build Codex injection info for display inline with model_change entries. */
+async function buildCodexInjectionInfo(tools?: AgentTool[]): Promise<CodexInjectionInfo | undefined> {
+	let instructions: string | null = null;
+	try {
+		instructions = await getCodexInstructions("gpt-5.1-codex");
+	} catch {
+		// Cache miss is expected before the first Codex request.
+	}
+
+	const bridgeText = buildCodexPiBridge(tools);
+	const instructionsText =
+		instructions ?? "(Codex instructions not cached. Run a Codex request to populate the local cache.)";
+
+	return {
+		instructions: instructionsText,
+		bridge: bridgeText,
+	};
 }
 
 /** Parse a color string to RGB values. */
@@ -97,6 +125,8 @@ interface SessionData {
 	entries: ReturnType<SessionManager["getEntries"]>;
 	leafId: string | null;
 	systemPrompt?: string;
+	/** Info for rendering Codex injection inline with model_change entries. */
+	codexInjectionInfo?: CodexInjectionInfo;
 	tools?: { name: string; description: string }[];
 }
 
@@ -128,6 +158,7 @@ export async function exportSessionToHtml(
 		entries: sm.getEntries(),
 		leafId: sm.getLeafId(),
 		systemPrompt: state?.systemPrompt,
+		codexInjectionInfo: await buildCodexInjectionInfo(state?.tools),
 		tools: state?.tools?.map((t) => ({ name: t.name, description: t.description })),
 	};
 
@@ -149,6 +180,7 @@ export async function exportFromFile(inputPath: string, options?: ExportOptions 
 		header: sm.getHeader(),
 		entries: sm.getEntries(),
 		leafId: sm.getLeafId(),
+		codexInjectionInfo: await buildCodexInjectionInfo(),
 	};
 
 	const html = generateHtml(sessionData, opts.themeName);

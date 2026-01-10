@@ -136,6 +136,15 @@ export const SETTINGS_DEFS: SettingDef[] = [
 		set: (sm, v) => sm.setImageAutoResize(v),
 	},
 	{
+		id: "blockImages",
+		tab: "config",
+		type: "boolean",
+		label: "Block images",
+		description: "Prevent images from being sent to LLM providers",
+		get: (sm) => sm.getBlockImages(),
+		set: (sm, v) => sm.setBlockImages(v),
+	},
+	{
 		id: "steeringMode",
 		tab: "config",
 		type: "enum",

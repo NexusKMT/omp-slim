@@ -5,10 +5,10 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { isShiftCtrlD } from "./keys";
+import { isKeyRelease, isShiftCtrlD } from "./keys";
 import type { Terminal } from "./terminal";
 import { getCapabilities, setCellDimensions } from "./terminal-image";
-import { visibleWidth } from "./utils";
+import { extractSegments, sliceByColumn, sliceWithWidth, visibleWidth } from "./utils";
 
 /**
  * Component interface - all components must implement this
@@ -25,6 +25,12 @@ export interface Component {
 	 * Optional handler for keyboard input when component has focus
 	 */
 	handleInput?(data: string): void;
+
+	/**
+	 * If true, component receives key release events (Kitty protocol).
+	 * Default is false - release events are filtered out.
+	 */
+	wantsKeyRelease?: boolean;
 
 	/**
 	 * Optional cursor position within the rendered output (0-based row/col).
@@ -105,6 +111,11 @@ export class TUI extends Container {
 	private previousCursor: { row: number; col: number } | null = null;
 	private inputBuffer = ""; // Buffer for parsing terminal responses
 	private cellSizeQueryPending = false;
+	private overlayStack: {
+		component: Component;
+		options?: { row?: number; col?: number; width?: number };
+		preFocus: Component | null;
+	}[] = [];
 	private inputQueue: string[] = []; // Queue input during cell size query to avoid interleaving
 
 	constructor(terminal: Terminal) {
@@ -114,6 +125,32 @@ export class TUI extends Container {
 
 	setFocus(component: Component | null): void {
 		this.focusedComponent = component;
+	}
+
+	/** Show an overlay component centered (or at specified position). */
+	showOverlay(component: Component, options?: { row?: number; col?: number; width?: number }): void {
+		this.overlayStack.push({ component, options, preFocus: this.focusedComponent });
+		this.setFocus(component);
+		this.terminal.hideCursor();
+		this.requestRender();
+	}
+
+	/** Hide the topmost overlay and restore previous focus. */
+	hideOverlay(): void {
+		const overlay = this.overlayStack.pop();
+		if (!overlay) return;
+		this.setFocus(overlay.preFocus);
+		if (this.overlayStack.length === 0) this.terminal.hideCursor();
+		this.requestRender();
+	}
+
+	hasOverlay(): boolean {
+		return this.overlayStack.length > 0;
+	}
+
+	override invalidate(): void {
+		super.invalidate();
+		for (const overlay of this.overlayStack) overlay.component.invalidate?.();
 	}
 
 	start(): void {
@@ -230,6 +267,9 @@ export class TUI extends Container {
 		// Pass input to focused component (including Ctrl+C)
 		// The focused component can decide how to handle Ctrl+C
 		if (this.focusedComponent?.handleInput) {
+			if (isKeyRelease(data) && !this.focusedComponent.wantsKeyRelease) {
+				return;
+			}
 			this.focusedComponent.handleInput(data);
 			this.requestRender();
 		}
@@ -282,6 +322,77 @@ export class TUI extends Container {
 		return line.includes("\x1b_G") || line.includes("\x1b]1337;File=");
 	}
 
+	/** Composite all overlays into content lines (in stack order, later = on top). */
+	private compositeOverlays(lines: string[], termWidth: number, termHeight: number): string[] {
+		if (this.overlayStack.length === 0) return lines;
+		const result = [...lines];
+		const viewportStart = Math.max(0, result.length - termHeight);
+
+		for (const { component, options } of this.overlayStack) {
+			const w =
+				options?.width !== undefined
+					? Math.max(1, Math.min(options.width, termWidth - 4))
+					: Math.max(1, Math.min(80, termWidth - 4));
+			const overlayLines = component.render(w);
+			const h = overlayLines.length;
+
+			const row = Math.max(0, Math.min(options?.row ?? Math.floor((termHeight - h) / 2), termHeight - h));
+			const col = Math.max(0, Math.min(options?.col ?? Math.floor((termWidth - w) / 2), termWidth - w));
+
+			for (let i = 0; i < h; i++) {
+				const idx = viewportStart + row + i;
+				if (idx >= 0 && idx < result.length) {
+					result[idx] = this.compositeLineAt(result[idx], overlayLines[i], col, w, termWidth);
+				}
+			}
+		}
+		return result;
+	}
+
+	private static readonly SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
+
+	/** Splice overlay content into a base line at a specific column. Single-pass optimized. */
+	private compositeLineAt(
+		baseLine: string,
+		overlayLine: string,
+		startCol: number,
+		overlayWidth: number,
+		totalWidth: number,
+	): string {
+		if (this.containsImage(baseLine)) return baseLine;
+
+		// Single pass through baseLine extracts both before and after segments
+		const afterStart = startCol + overlayWidth;
+		const base = extractSegments(baseLine, startCol, afterStart, totalWidth - afterStart, true);
+
+		// Extract overlay with width tracking
+		const overlay = sliceWithWidth(overlayLine, 0, overlayWidth);
+
+		// Pad segments to target widths
+		const beforePad = Math.max(0, startCol - base.beforeWidth);
+		const overlayPad = Math.max(0, overlayWidth - overlay.width);
+		const actualBeforeWidth = Math.max(startCol, base.beforeWidth);
+		const actualOverlayWidth = Math.max(overlayWidth, overlay.width);
+		const afterTarget = Math.max(0, totalWidth - actualBeforeWidth - actualOverlayWidth);
+		const afterPad = Math.max(0, afterTarget - base.afterWidth);
+
+		// Compose result - widths are tracked so no final visibleWidth check needed
+		const r = TUI.SEGMENT_RESET;
+		const result =
+			base.before +
+			" ".repeat(beforePad) +
+			r +
+			overlay.text +
+			" ".repeat(overlayPad) +
+			r +
+			base.after +
+			" ".repeat(afterPad);
+
+		// Only truncate if wide char at after boundary caused overflow (rare)
+		const resultWidth = actualBeforeWidth + actualOverlayWidth + Math.max(afterTarget, base.afterWidth);
+		return resultWidth <= totalWidth ? result : sliceByColumn(result, 0, totalWidth, true);
+	}
+
 	private doRender(): void {
 		// Capture terminal dimensions at start to ensure consistency throughout render
 		const width = this.terminal.columns;
@@ -290,7 +401,13 @@ export class TUI extends Container {
 		const currentCursorRow = this.cursorRow;
 
 		// Render all components to get new lines
-		const newLines = this.render(width);
+		let newLines = this.render(width);
+
+		// Composite overlays into the rendered lines (before differential compare)
+		if (this.overlayStack.length > 0) {
+			newLines = this.compositeOverlays(newLines, width, height);
+		}
+
 		const cursorInfo = this.getCursorPosition(width);
 
 		// Width changed - need full re-render
@@ -417,7 +534,19 @@ export class TUI extends Container {
 				} catch {
 					// Ignore - crash log is best-effort
 				}
-				throw new Error(`Rendered line ${i} exceeds terminal width. Debug log written to ${crashLogPath}`);
+
+				// Clean up terminal state before throwing
+				this.stop();
+
+				const errorMsg = [
+					`Rendered line ${i} exceeds terminal width (${visibleWidth(line)} > ${width}).`,
+					"",
+					"This is likely caused by a custom TUI component not truncating its output.",
+					"Use visibleWidth() to measure and truncateToWidth() to truncate lines.",
+					"",
+					`Debug log written to: ${crashLogPath}`,
+				].join("\n");
+				throw new Error(errorMsg);
 			}
 			buffer += line;
 		}

@@ -32,12 +32,24 @@ import { transformMessages } from "./transorm-messages";
 // Stealth mode: Mimic Claude Code's tool naming exactly
 const claudeCodeVersion = "2.1.2";
 
-// Prefix all tool names to avoid collisions with Claude Code's built-in tools
-const toolNamePrefix = "cli_";
+// Map pi! tool names to Claude Code's exact tool names
+const claudeCodeToolNames: Record<string, string> = {
+	read: "Read",
+	write: "Write",
+	edit: "Edit",
+	bash: "Bash",
+	grep: "Grep",
+	find: "Glob",
+	ls: "Glob",
+};
 
-const toClaudeCodeName = (name: string) => toolNamePrefix + name;
-const fromClaudeCodeName = (name: string) =>
-	name.startsWith(toolNamePrefix) ? name.slice(toolNamePrefix.length) : name;
+const toClaudeCodeName = (name: string) => claudeCodeToolNames[name] || name;
+const fromClaudeCodeName = (name: string) => {
+	for (const [piName, ccName] of Object.entries(claudeCodeToolNames)) {
+		if (ccName === name) return piName;
+	}
+	return name;
+};
 
 /**
  * Convert content blocks to Anthropic API format

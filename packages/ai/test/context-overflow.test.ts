@@ -11,14 +11,14 @@
  * The isContextOverflow() function must return true for all providers.
  */
 
-import type { ChildProcess } from "child_process";
-import { execSync, spawn } from "child_process";
+import type { ChildProcess } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getModel } from "../src/models.js";
-import { complete } from "../src/stream.js";
-import type { AssistantMessage, Context, Model, Usage } from "../src/types.js";
-import { isContextOverflow } from "../src/utils/overflow.js";
-import { resolveApiKey } from "./oauth.js";
+import { getModel } from "../src/models";
+import { complete } from "../src/stream";
+import type { AssistantMessage, Context, Model, Usage } from "../src/types";
+import { isContextOverflow } from "../src/utils/overflow";
+import { resolveApiKey } from "./oauth";
 
 // Resolve OAuth tokens at module level (async, runs before tests)
 const oauthTokens = await Promise.all([

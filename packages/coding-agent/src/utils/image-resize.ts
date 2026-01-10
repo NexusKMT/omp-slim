@@ -1,5 +1,5 @@
 import type { ImageContent } from "@oh-my-pi/pi-ai";
-import { getImageDimensionsWithImageMagick, resizeWithImageMagick } from "./image-magick.js";
+import { getImageDimensionsWithImageMagick, resizeWithImageMagick } from "./image-magick";
 
 export interface ImageResizeOptions {
 	maxWidth?: number; // Default: 2000

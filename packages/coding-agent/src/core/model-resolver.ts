@@ -25,12 +25,13 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	cerebras: "zai-glm-4.6",
 	zai: "glm-4.6",
 	mistral: "devstral-medium-latest",
-	opencode: "claude-sonnet-4-5",
+	opencode: "claude-opus-4-5",
 };
 
 export interface ScopedModel {
 	model: Model<Api>;
 	thinkingLevel: ThinkingLevel;
+	explicitThinkingLevel?: boolean;
 }
 
 /** Priority chain for auto-discovering smol/fast models */
@@ -124,6 +125,7 @@ export interface ParsedModelResult {
 	model: Model<Api> | undefined;
 	thinkingLevel: ThinkingLevel;
 	warning: string | undefined;
+	explicitThinkingLevel: boolean;
 }
 
 /**
@@ -143,14 +145,14 @@ export function parseModelPattern(pattern: string, availableModels: Model<Api>[]
 	// Try exact match first
 	const exactMatch = tryMatchModel(pattern, availableModels);
 	if (exactMatch) {
-		return { model: exactMatch, thinkingLevel: "off", warning: undefined };
+		return { model: exactMatch, thinkingLevel: "off", warning: undefined, explicitThinkingLevel: false };
 	}
 
 	// No match - try splitting on last colon if present
 	const lastColonIndex = pattern.lastIndexOf(":");
 	if (lastColonIndex === -1) {
 		// No colons, pattern simply doesn't match any model
-		return { model: undefined, thinkingLevel: "off", warning: undefined };
+		return { model: undefined, thinkingLevel: "off", warning: undefined, explicitThinkingLevel: false };
 	}
 
 	const prefix = pattern.substring(0, lastColonIndex);
@@ -162,10 +164,12 @@ export function parseModelPattern(pattern: string, availableModels: Model<Api>[]
 		if (result.model) {
 			// Only use this thinking level if no warning from inner recursion
 			// (if there was an invalid suffix deeper, we already have "off")
+			const isExplicit = !result.warning;
 			return {
 				model: result.model,
-				thinkingLevel: result.warning ? "off" : suffix,
+				thinkingLevel: isExplicit ? suffix : "off",
 				warning: result.warning,
+				explicitThinkingLevel: isExplicit,
 			};
 		}
 		return result;
@@ -176,7 +180,8 @@ export function parseModelPattern(pattern: string, availableModels: Model<Api>[]
 			return {
 				model: result.model,
 				thinkingLevel: "off",
-				warning: `Invalid thinking level "${suffix}" in pattern "${pattern}". Using "off" instead.`,
+				warning: `Invalid thinking level "${suffix}" in pattern "${pattern}". Using default instead.`,
+				explicitThinkingLevel: false,
 			};
 		}
 		return result;
@@ -205,11 +210,13 @@ export async function resolveModelScope(patterns: string[], modelRegistry: Model
 			const colonIdx = pattern.lastIndexOf(":");
 			let globPattern = pattern;
 			let thinkingLevel: ThinkingLevel = "off";
+			let explicitThinkingLevel = false;
 
 			if (colonIdx !== -1) {
 				const suffix = pattern.substring(colonIdx + 1);
 				if (isValidThinkingLevel(suffix)) {
 					thinkingLevel = suffix;
+					explicitThinkingLevel = true;
 					globPattern = pattern.substring(0, colonIdx);
 				}
 			}
@@ -228,13 +235,13 @@ export async function resolveModelScope(patterns: string[], modelRegistry: Model
 
 			for (const model of matchingModels) {
 				if (!scopedModels.find((sm) => modelsAreEqual(sm.model, model))) {
-					scopedModels.push({ model, thinkingLevel });
+					scopedModels.push({ model, thinkingLevel, explicitThinkingLevel });
 				}
 			}
 			continue;
 		}
 
-		const { model, thinkingLevel, warning } = parseModelPattern(pattern, availableModels);
+		const { model, thinkingLevel, warning, explicitThinkingLevel } = parseModelPattern(pattern, availableModels);
 
 		if (warning) {
 			console.warn(chalk.yellow(`Warning: ${warning}`));
@@ -247,7 +254,7 @@ export async function resolveModelScope(patterns: string[], modelRegistry: Model
 
 		// Avoid duplicates
 		if (!scopedModels.find((sm) => modelsAreEqual(sm.model, model))) {
-			scopedModels.push({ model, thinkingLevel });
+			scopedModels.push({ model, thinkingLevel, explicitThinkingLevel });
 		}
 	}
 
@@ -304,9 +311,11 @@ export async function findInitialModel(options: {
 
 	// 2. Use first model from scoped models (skip if continuing/resuming)
 	if (scopedModels.length > 0 && !isContinuing) {
+		const scoped = scopedModels[0];
+		const scopedThinkingLevel = scoped.explicitThinkingLevel ? scoped.thinkingLevel : (defaultThinkingLevel ?? "off");
 		return {
-			model: scopedModels[0].model,
-			thinkingLevel: scopedModels[0].thinkingLevel,
+			model: scoped.model,
+			thinkingLevel: scopedThinkingLevel,
 			fallbackMessage: undefined,
 		};
 	}

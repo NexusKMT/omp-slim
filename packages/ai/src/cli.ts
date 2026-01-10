@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "readline";
 import { loginAnthropic } from "./utils/oauth/anthropic";
 import { loginGitHubCopilot } from "./utils/oauth/github-copilot";

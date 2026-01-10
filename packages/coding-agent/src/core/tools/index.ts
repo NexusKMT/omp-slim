@@ -1,16 +1,16 @@
 export { type AskToolDetails, askTool, createAskTool } from "./ask";
-export { type BashToolDetails, createBashTool } from "./bash";
+export { type BashOperations, type BashToolDetails, createBashTool } from "./bash";
 export { type CalculatorToolDetails, createCalculatorTool } from "./calculator";
 export { createCompleteTool } from "./complete";
-export { createEditTool } from "./edit";
+export { createEditTool, type EditToolDetails } from "./edit";
 // Exa MCP tools (22 tools)
 export { exaTools } from "./exa/index";
 export type { ExaRenderDetails, ExaSearchResponse, ExaSearchResult } from "./exa/types";
-export { createFindTool, type FindToolDetails } from "./find";
+export { createFindTool, type FindOperations, type FindToolDetails, type FindToolOptions } from "./find";
 export { setPreferredImageProvider } from "./gemini-image";
 export { createGitTool, type GitToolDetails, gitTool } from "./git";
-export { createGrepTool, type GrepToolDetails } from "./grep";
-export { createLsTool, type LsToolDetails } from "./ls";
+export { createGrepTool, type GrepOperations, type GrepToolDetails, type GrepToolOptions } from "./grep";
+export { createLsTool, type LsOperations, type LsToolDetails, type LsToolOptions } from "./ls";
 export {
 	createLspTool,
 	type FileDiagnosticsResult,
@@ -29,7 +29,16 @@ export { reportFindingTool, type SubmitReviewDetails } from "./review";
 export { filterRulebookRules, formatRulesForPrompt, type RulebookToolDetails } from "./rulebook";
 export { createSshTool, type SSHToolDetails } from "./ssh";
 export { BUNDLED_AGENTS, createTaskTool, taskTool } from "./task/index";
-export type { TruncationResult } from "./truncate";
+export {
+	DEFAULT_MAX_BYTES,
+	DEFAULT_MAX_LINES,
+	formatSize,
+	type TruncationOptions,
+	type TruncationResult,
+	truncateHead,
+	truncateLine,
+	truncateTail,
+} from "./truncate";
 export { createWebFetchTool, type WebFetchToolDetails } from "./web-fetch";
 export {
 	companyWebSearchTools,
@@ -80,6 +89,19 @@ import { createWriteTool } from "./write";
 /** Tool type (AgentTool from pi-ai) */
 export type Tool = AgentTool<any, any, any>;
 
+/**
+ * Pluggable file operations for tools.
+ * Override these to delegate file editing to remote systems (e.g., SSH).
+ */
+export interface FileOperations {
+	/** Read file contents as text */
+	readFile: (absolutePath: string) => Promise<string>;
+	/** Write content to a file */
+	writeFile: (absolutePath: string, content: string) => Promise<void>;
+	/** Check if file exists */
+	exists: (absolutePath: string) => Promise<boolean>;
+}
+
 /** Session context for tool factories */
 export interface ToolSession {
 	/** Current working directory */
@@ -114,6 +136,8 @@ export interface ToolSession {
 		getBashInterceptorSimpleLsEnabled(): boolean;
 		getBashInterceptorRules(): BashInterceptorRule[];
 	};
+	/** Custom file operations (for remote editing, e.g., SSH) */
+	fileOperations?: FileOperations;
 }
 
 type ToolFactory = (session: ToolSession) => Tool | null | Promise<Tool | null>;
@@ -151,7 +175,7 @@ export type ToolName = keyof typeof BUILTIN_TOOLS;
  */
 export async function createTools(session: ToolSession, toolNames?: string[]): Promise<Tool[]> {
 	const includeComplete = session.requireCompleteTool === true;
-	const requestedTools = toolNames && toolNames.length > 0 ? [...new Set(toolNames)] : undefined;
+	const requestedTools = toolNames ? [...new Set(toolNames)] : undefined;
 	const allTools: Record<string, ToolFactory> = { ...BUILTIN_TOOLS, ...HIDDEN_TOOLS };
 	if (includeComplete && requestedTools && !requestedTools.includes("complete")) {
 		requestedTools.push("complete");

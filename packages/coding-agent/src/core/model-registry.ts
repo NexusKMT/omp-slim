@@ -384,7 +384,7 @@ export class ModelRegistry {
 	 * Find a model by provider and ID.
 	 */
 	find(provider: string, modelId: string): Model<Api> | undefined {
-		return this.models.find((m) => m.provider === provider && m.id === modelId) ?? undefined;
+		return this.models.find((m) => m.provider === provider && m.id === modelId);
 	}
 
 	/**

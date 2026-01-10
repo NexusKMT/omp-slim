@@ -3,6 +3,16 @@
 This guide is a repeatable checklist for porting changes from pi-mono into this repo.
 Use it for any merge: single file, feature branch, or full release sync.
 
+## Last Sync Point
+
+**Commit:** `11dd2f47`
+**Date:** January 2026
+
+When starting a new sync, generate patches from this commit forward:
+```bash
+git format-patch 11dd2f47..HEAD --stdout > changes.patch
+```
+
 ## 0) Define the scope
 
 - Identify the upstream reference (commit, tag, or PR).
@@ -218,3 +228,91 @@ Use this as a final pass before you finish:
 - [ ] Assets load via Bun embed patterns (no copy scripts)
 - [ ] Tests or checks run (or explicitly noted as blocked)
 - [ ] No functionality regressions (see section 11)
+
+## 13) Intentional Divergences
+
+Our fork has architectural decisions that differ from upstream. **Do not port these upstream patterns:**
+
+### UI Architecture
+
+| Upstream | Our Fork | Reason |
+|----------|----------|--------|
+| `FooterDataProvider` class | `StatusLineComponent` | Simpler, integrated status line |
+| `ctx.ui.setHeader()` / `ctx.ui.setFooter()` | Removed | Not implemented; StatusLineComponent handles status |
+| `ctx.ui.setEditorComponent()` | Removed | Not implemented |
+| `InteractiveModeOptions` interface | Positional constructor args | Existing pattern works fine |
+
+### Component Naming
+
+| Upstream | Our Fork |
+|----------|----------|
+| `extension-input.ts` | `hook-input.ts` |
+| `extension-selector.ts` | `hook-selector.ts` |
+| `ExtensionInputComponent` | `HookInputComponent` |
+| `ExtensionSelectorComponent` | `HookSelectorComponent` |
+
+### File Consolidation
+
+| Upstream | Our Fork | Reason |
+|----------|----------|--------|
+| `clipboard.ts` + `clipboard-image.ts` | `clipboard.ts` only | Merged with Bun-native implementation |
+| `@mariozechner/clipboard` dependency | Native platform commands | No external dependency needed |
+
+### Test Framework
+
+| Upstream | Our Fork |
+|----------|----------|
+| `vitest` with `vi.mock()` | `bun:test` with `vi` from bun |
+| `node:test` assertions | `expect()` matchers |
+
+### Tool Architecture
+
+| Upstream | Our Fork |
+|----------|----------|
+| `createTool(cwd: string, options?)` | `createTool(session: ToolSession)` |
+| Per-tool `*Operations` interfaces | Unified `FileOperations` in `ToolSession` |
+| Node.js `fs/promises` | Bun APIs (`Bun.file()`, `Bun.write()`) |
+
+### Auth Storage
+
+| Upstream | Our Fork |
+|----------|----------|
+| `proper-lockfile` library | Native `O_EXCL` atomic file locking |
+| Single credential per provider | Multi-credential with round-robin selection |
+
+### Extensions
+
+| Upstream | Our Fork |
+|----------|----------|
+| `jiti` for TypeScript loading | Native Bun `import()` |
+| `pkg.pi` manifest field | `pkg.omp ?? pkg.pi` (prefer our namespace) |
+
+### Config Paths
+
+| Upstream | Our Fork |
+|----------|----------|
+| `~/.claude/` | `~/.omp/` (with fallback chain) |
+| Single config dir | Multi-config: `.omp`, `.pi`, `.claude`, `.codex`, `.gemini` |
+
+### Skip These Upstream Features
+
+When porting, **skip** these files/features entirely:
+
+- `footer-data-provider.ts` — we use StatusLineComponent
+- `clipboard-image.ts` — merged into clipboard.ts
+- `compaction-extensions.test.ts` — different test architecture
+- GitHub workflow files — we have our own CI
+- `models.generated.ts` — auto-generated, regenerate locally
+
+### Features We Added (Preserve These)
+
+These exist in our fork but not upstream. **Never overwrite:**
+
+- `StatusLineComponent` in interactive mode
+- Multi-credential auth with session affinity
+- Capability-based discovery system (`loadSync`, `skillCapability`, etc.)
+- Voice mode integration
+- MCP/Exa/SSH integrations
+- LSP writethrough for format-on-save
+- Bash interception (`checkBashInterception`)
+- Fuzzy path suggestions in read tool

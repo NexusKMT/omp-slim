@@ -1,6 +1,76 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- `--no-tools` flag to disable all built-in tools, enabling extension-only setups
+- `--no-extensions` flag to disable extension discovery while still allowing explicit `-e` paths
+- `blockImages` setting to prevent images from being sent to LLM providers
+- `thinkingBudgets` setting to customize token budgets per thinking level
+- `PI_SKIP_VERSION_CHECK` environment variable to disable new version notifications at startup
+- Anthropic OAuth support via `/login` to authenticate with Claude Pro/Max subscription
+- OpenCode Zen provider support via `OPENCODE_API_KEY` env var and `opencode/<model-id>` syntax
+- Session picker (`pi -r`) and `--session` flag support searching/resuming by session ID (UUID prefix)
+- Session ID forwarding to LLM providers for session-based caching (used by OpenAI Codex for prompt caching)
+- `dequeue` keybinding (`Alt+Up`) to restore queued steering/follow-up messages back into the editor
+- Pluggable operations for built-in tools enabling remote execution via SSH or other transports (`ReadOperations`, `WriteOperations`, `EditOperations`, `BashOperations`, `LsOperations`, `GrepOperations`, `FindOperations`)
+- `/model <search>` pre-filters the model selector or auto-selects on exact match; use `provider/model` syntax to disambiguate
+- Managed binaries directory (`~/.omp/bin/`) for fd and rg tools
+- `FooterDataProvider` for custom footers with `getGitBranch()`, `getExtensionStatuses()`, and `onBranchChange()`
+- `ctx.ui.custom()` accepts `{ overlay: true }` option for floating modal components
+- `ctx.ui.getAllThemes()`, `ctx.ui.getTheme(name)`, `ctx.ui.setTheme(name | Theme)` for theme management
+- `setActiveTools()` for dynamic tool management
+- `setModel()`, `getThinkingLevel()`, `setThinkingLevel()` methods for runtime model and thinking level changes
+- `ctx.shutdown()` for requesting graceful shutdown
+- `pi.sendUserMessage()` for sending user messages from extensions
+- Extension UI dialogs (`select`, `confirm`, `input`) support `timeout` option with live countdown display
+- Extension UI dialogs accept optional `AbortSignal` to programmatically dismiss dialogs
+- Async extension factories for dynamic imports and lazy-loaded dependencies
+- `user_bash` event for intercepting user `!`/`!!` commands
+- Built-in renderers used automatically for tool overrides without custom `renderCall`/`renderResult`
+- `InteractiveMode`, `runPrintMode()`, `runRpcMode()` exported for building custom run modes
+- Copy link button on messages for deep linking to specific entries
+- Codex injection info display showing system prompt modifications
+- URL parameter support for `leafId` and `targetId` deep linking
+- Wayland clipboard support for `/copy` command using wl-copy with xclip/xsel fallback
+
+### Changed
+
+- Default model for OpenCode provider changed from `claude-sonnet-4-5` to `claude-opus-4-5`
+- Terminal color mode detection defaults to truecolor for modern terminals instead of 256color
+- System prompt restructured with XML tags and clearer instructions format
+- `before_agent_start` event receives `systemPrompt` in the event object and returns `systemPrompt` (full replacement) instead of `systemPromptAppend`
+- `discoverSkills()` returns `{ skills: Skill[], warnings: SkillWarning[] }` instead of `Skill[]`
+- `ctx.ui.custom()` factory signature changed from `(tui, theme, done)` to `(tui, theme, keybindings, done)`
+- `ExtensionRunner.initialize()` signature changed from options object to positional params `(actions, contextActions, commandContextActions?, uiContext?)`
+
+### Fixed
+
+- Bash tool handles spawn errors gracefully instead of crashing the agent
+- Components properly rebuild their content on theme change via `invalidate()` override
+- `setTheme()` triggers a full rerender so previously rendered components update with new theme colors
+- Session ID updates correctly when branching sessions
+- External edits to `settings.json` while pi is running are preserved when pi saves settings
+- Default thinking level from settings applies correctly when `enabledModels` is configured
+- LM Studio compatibility for OpenAI Responses tool strict mapping
+- Symlinked directories in `prompts/` folders are followed when loading prompt templates
+- String `systemPrompt` in `createAgentSession()` works as a full replacement instead of having context files and skills appended
+- Update notification for bun binary installs shows release download URL instead of npm command
+- ESC key works during "Working..." state after auto-retry
+- Abort messages show correct retry attempt count
+- Antigravity provider returning 429 errors despite available quota
+- Malformed thinking text in Gemini/Antigravity responses where thinking content appeared as regular text
+- `--no-skills` flag correctly prevents skills from loading in interactive mode
+- Overflow-based compaction skips if error came from a different model or was already handled
+- OpenAI Codex context window reduced from 400k to 272k tokens to match Codex CLI defaults
+- Context overflow detection recognizes `context_length_exceeded` errors
+- Key presses no longer dropped when input is batched over SSH
+- Clipboard image support works on Alpine Linux and other musl-based distros
+- Queued steering/follow-up messages no longer wipe unsent editor input
+- OAuth token refresh failure no longer crashes app at startup
+- Status bar shows correct git branch when running in a git worktree
+- Ctrl+V clipboard image paste works on Wayland sessions
+- Extension directories in `settings.json` respect `package.json` manifests
 
 ## [3.37.1] - 2026-01-10
 

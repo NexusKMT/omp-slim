@@ -2,63 +2,72 @@
  * Simple text input component for hooks.
  */
 
-import { Container, Input, isEnter, isEscape, Spacer, Text } from "@oh-my-pi/pi-tui";
+import { Container, Input, isEnter, isEscape, Spacer, Text, type TUI } from "@oh-my-pi/pi-tui";
 import { theme } from "../theme/theme";
+import { CountdownTimer } from "./countdown-timer";
 import { DynamicBorder } from "./dynamic-border";
+
+export interface HookInputOptions {
+	tui?: TUI;
+	timeout?: number;
+}
 
 export class HookInputComponent extends Container {
 	private input: Input;
 	private onSubmitCallback: (value: string) => void;
 	private onCancelCallback: () => void;
+	private titleText: Text;
+	private baseTitle: string;
+	private countdown: CountdownTimer | undefined;
 
 	constructor(
 		title: string,
 		_placeholder: string | undefined,
 		onSubmit: (value: string) => void,
 		onCancel: () => void,
+		opts?: HookInputOptions,
 	) {
 		super();
 
 		this.onSubmitCallback = onSubmit;
 		this.onCancelCallback = onCancel;
+		this.baseTitle = title;
 
-		// Add top border
 		this.addChild(new DynamicBorder());
 		this.addChild(new Spacer(1));
 
-		// Add title
-		this.addChild(new Text(theme.fg("accent", title), 1, 0));
+		this.titleText = new Text(theme.fg("accent", title), 1, 0);
+		this.addChild(this.titleText);
 		this.addChild(new Spacer(1));
 
-		// Create input
+		if (opts?.timeout && opts.timeout > 0 && opts.tui) {
+			this.countdown = new CountdownTimer(
+				opts.timeout,
+				opts.tui,
+				(s) => this.titleText.setText(theme.fg("accent", `${this.baseTitle} (${s}s)`)),
+				() => this.onCancelCallback(),
+			);
+		}
+
 		this.input = new Input();
 		this.addChild(this.input);
-
 		this.addChild(new Spacer(1));
-
-		// Add hint
 		this.addChild(new Text(theme.fg("dim", "enter submit  esc cancel"), 1, 0));
-
 		this.addChild(new Spacer(1));
-
-		// Add bottom border
 		this.addChild(new DynamicBorder());
 	}
 
 	handleInput(keyData: string): void {
-		// Enter
 		if (isEnter(keyData) || keyData === "\n") {
 			this.onSubmitCallback(this.input.getValue());
-			return;
-		}
-
-		// Escape to cancel
-		if (isEscape(keyData)) {
+		} else if (isEscape(keyData)) {
 			this.onCancelCallback();
-			return;
+		} else {
+			this.input.handleInput(keyData);
 		}
+	}
 
-		// Forward to input
-		this.input.handleInput(keyData);
+	dispose(): void {
+		this.countdown?.dispose();
 	}
 }

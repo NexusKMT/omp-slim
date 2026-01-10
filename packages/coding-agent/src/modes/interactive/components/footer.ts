@@ -1,4 +1,5 @@
 import { existsSync, type FSWatcher, readFileSync, watch } from "node:fs";
+import { homedir } from "node:os";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { type Component, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import { dirname, join } from "path";
@@ -200,7 +201,7 @@ export class FooterComponent implements Component {
 
 		// Replace home directory with ~
 		let pwd = process.cwd();
-		const home = process.env.HOME || process.env.USERPROFILE;
+		const home = homedir();
 		if (home && pwd.startsWith(home)) {
 			pwd = `~${pwd.slice(home.length)}`;
 		}

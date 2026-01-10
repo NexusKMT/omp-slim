@@ -1,14 +1,14 @@
+import { type ChildProcess, execSync, spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { Type } from "@sinclair/typebox";
-import { type ChildProcess, execSync, spawn } from "child_process";
-import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getModel } from "../src/models.js";
-import { complete, stream } from "../src/stream.js";
-import type { Api, Context, ImageContent, Model, OptionsForApi, Tool, ToolResultMessage } from "../src/types.js";
-import { StringEnum } from "../src/utils/typebox-helpers.js";
-import { resolveApiKey } from "./oauth.js";
+import { getModel } from "../src/models";
+import { complete, stream } from "../src/stream";
+import type { Api, Context, ImageContent, Model, OptionsForApi, Tool, ToolResultMessage } from "../src/types";
+import { StringEnum } from "../src/utils/typebox-helpers";
+import { resolveApiKey } from "./oauth";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -126,7 +126,7 @@ async function handleToolCall<TApi extends Api>(model: Model<TApi>, options?: Op
 				expect(toolCall.arguments).not.toBeUndefined();
 				expect((toolCall.arguments as any).a).toBe(15);
 				expect((toolCall.arguments as any).b).toBe(27);
-				expect((toolCall.arguments as any).operation).oneOf(["add", "subtract", "multiply", "divide"]);
+				expect(["add", "subtract", "multiply", "divide"]).toContain((toolCall.arguments as any).operation);
 			}
 		}
 	}

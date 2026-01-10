@@ -3,7 +3,15 @@
  * No transport abstraction - calls streamSimple via the loop.
  */
 
-import { getModel, type ImageContent, type Message, type Model, streamSimple, type TextContent } from "@oh-my-pi/pi-ai";
+import {
+	getModel,
+	type ImageContent,
+	type Message,
+	type Model,
+	streamSimple,
+	type TextContent,
+	type ThinkingBudgets,
+} from "@oh-my-pi/pi-ai";
 import { agentLoop, agentLoopContinue } from "./agent-loop";
 import type {
 	AgentContext,
@@ -74,6 +82,11 @@ export interface AgentOptions {
 	getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 
 	/**
+	 * Custom token budgets for thinking levels (token-based providers only).
+	 */
+	thinkingBudgets?: ThinkingBudgets;
+
+	/**
 	 * Provides tool execution context, resolved per tool call.
 	 * Use for late-bound UI or session state access.
 	 */
@@ -104,6 +117,7 @@ export class Agent {
 	private interruptMode: "immediate" | "wait";
 	public streamFn: StreamFn;
 	private _sessionId?: string;
+	private _thinkingBudgets?: ThinkingBudgets;
 	public getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 	private getToolContext?: () => AgentToolContext | undefined;
 	private runningPrompt?: Promise<void>;
@@ -118,6 +132,7 @@ export class Agent {
 		this.interruptMode = opts.interruptMode || "immediate";
 		this.streamFn = opts.streamFn || streamSimple;
 		this._sessionId = opts.sessionId;
+		this._thinkingBudgets = opts.thinkingBudgets;
 		this.getApiKey = opts.getApiKey;
 		this.getToolContext = opts.getToolContext;
 	}
@@ -135,6 +150,20 @@ export class Agent {
 	 */
 	set sessionId(value: string | undefined) {
 		this._sessionId = value;
+	}
+
+	/**
+	 * Get the current thinking budgets.
+	 */
+	get thinkingBudgets(): ThinkingBudgets | undefined {
+		return this._thinkingBudgets;
+	}
+
+	/**
+	 * Set custom thinking budgets for token-based providers.
+	 */
+	set thinkingBudgets(value: ThinkingBudgets | undefined) {
+		this._thinkingBudgets = value;
 	}
 
 	get state(): AgentState {
@@ -234,6 +263,22 @@ export class Agent {
 	clearAllQueues() {
 		this.steeringQueue = [];
 		this.followUpQueue = [];
+	}
+
+	/**
+	 * Remove and return the last steering message from the queue (LIFO).
+	 * Used by dequeue keybinding.
+	 */
+	popLastSteer(): AgentMessage | undefined {
+		return this.steeringQueue.pop();
+	}
+
+	/**
+	 * Remove and return the last follow-up message from the queue (LIFO).
+	 * Used by dequeue keybinding.
+	 */
+	popLastFollowUp(): AgentMessage | undefined {
+		return this.followUpQueue.pop();
 	}
 
 	clearMessages() {
@@ -342,6 +387,7 @@ export class Agent {
 			reasoning,
 			interruptMode: this.interruptMode,
 			sessionId: this._sessionId,
+			thinkingBudgets: this._thinkingBudgets,
 			convertToLlm: this.convertToLlm,
 			transformContext: this.transformContext,
 			getApiKey: this.getApiKey,

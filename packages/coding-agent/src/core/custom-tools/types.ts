@@ -40,7 +40,7 @@ export interface CustomToolAPI {
 	/** Injected @sinclair/typebox module */
 	typebox: typeof import("@sinclair/typebox");
 	/** Injected pi-coding-agent exports */
-	pi: typeof import("../../index.js");
+	pi: typeof import("../../index");
 }
 
 /**

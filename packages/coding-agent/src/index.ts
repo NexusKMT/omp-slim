@@ -60,11 +60,40 @@ export type {
 	RenderResultOptions,
 } from "./core/custom-tools/index";
 export { discoverAndLoadCustomTools, loadCustomTools } from "./core/custom-tools/index";
-// Extension types
-export type { ExtensionAPI, ExtensionContext, ExtensionFactory } from "./core/extensions/types";
-export type * from "./core/hooks/index";
-// Hook system types and type guards
+// Extension types and utilities
+export type {
+	AppAction,
+	Extension,
+	ExtensionActions,
+	ExtensionAPI,
+	ExtensionCommandContext,
+	ExtensionCommandContextActions,
+	ExtensionContext,
+	ExtensionContextActions,
+	ExtensionError,
+	ExtensionEvent,
+	ExtensionFactory,
+	ExtensionFlag,
+	ExtensionHandler,
+	ExtensionRuntime,
+	ExtensionShortcut,
+	ExtensionUIContext,
+	ExtensionUIDialogOptions,
+	KeybindingsManager,
+	LoadExtensionsResult,
+	MessageRenderer,
+	MessageRenderOptions,
+	RegisteredCommand,
+	ToolResultEvent,
+	TurnEndEvent,
+	TurnStartEvent,
+	UserBashEvent,
+	UserBashEventResult,
+} from "./core/extensions/index";
 export {
+	createExtensionRuntime,
+	discoverAndLoadExtensions,
+	ExtensionRunner,
 	isBashToolResult,
 	isEditToolResult,
 	isFindToolResult,
@@ -72,7 +101,9 @@ export {
 	isLsToolResult,
 	isReadToolResult,
 	isWriteToolResult,
-} from "./core/hooks/index";
+} from "./core/extensions/index";
+// Hook system types (legacy re-export)
+export type * from "./core/hooks/index";
 // Logging
 export { type Logger, logger } from "./core/logger";
 export { convertToLlm } from "./core/messages";
@@ -153,25 +184,49 @@ export {
 } from "./core/skills";
 // Slash commands
 export { type FileSlashCommand, loadSlashCommands as discoverSlashCommands } from "./core/slash-commands";
-// Tools (detail types only - factories exported from sdk)
+// Tools (detail types and utilities)
 export {
+	type BashOperations,
 	type BashToolDetails,
+	DEFAULT_MAX_BYTES,
+	DEFAULT_MAX_LINES,
+	type FindOperations,
 	type FindToolDetails,
+	type FindToolOptions,
+	formatSize,
 	type GitToolDetails,
+	type GrepOperations,
 	type GrepToolDetails,
+	type GrepToolOptions,
 	gitTool,
+	type LsOperations,
 	type LsToolDetails,
+	type LsToolOptions,
 	type ReadToolDetails,
+	type TruncationOptions,
 	type TruncationResult,
+	truncateHead,
+	truncateLine,
+	truncateTail,
 	type WriteToolDetails,
 } from "./core/tools/index";
 export type { FileDiagnosticsResult } from "./core/tools/lsp/index";
 // Main entry point
 export { main } from "./main";
+// Run modes for programmatic SDK usage
+export { InteractiveMode, type PrintModeOptions, runPrintMode, runRpcMode } from "./modes/index";
 // UI components for hooks and custom tools
 export { BorderedLoader } from "./modes/interactive/components/bordered-loader";
+export { DynamicBorder } from "./modes/interactive/components/dynamic-border";
 // Theme utilities for custom tools
-export { getMarkdownTheme, getSettingsListTheme, type Theme } from "./modes/interactive/theme/theme";
+export {
+	getMarkdownTheme,
+	getSelectListTheme,
+	getSettingsListTheme,
+	initTheme,
+	Theme,
+	type ThemeColor,
+} from "./modes/interactive/theme/theme";
 
 // TypeBox helper for string enums (convenience for custom tools)
 import { type TSchema, Type } from "@sinclair/typebox";

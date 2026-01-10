@@ -1,6 +1,37 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- OpenCode Zen provider support with 26 models (Claude, GPT, Gemini, Grok, Kimi, GLM, Qwen, etc.). Set `OPENCODE_API_KEY` env var to use.
+- `thinkingBudgets` option in `SimpleStreamOptions` for customizing token budgets per thinking level on token-based providers
+- `sessionId` option in `StreamOptions` for providers that support session-based caching. OpenAI Codex provider uses this to set `prompt_cache_key` and routing headers.
+- `supportsUsageInStreaming` compatibility flag for OpenAI-compatible providers that reject `stream_options: { include_usage: true }`. Defaults to `true`. Set to `false` in model config for providers like gatewayz.ai.
+- `GOOGLE_APPLICATION_CREDENTIALS` env var support for Vertex AI credential detection (standard for CI/production)
+- Exported OpenAI Codex utilities: `CacheMetadata`, `getCodexInstructions`, `getModelFamily`, `ModelFamily`, `buildCodexPiBridge`, `buildCodexSystemPrompt`, `CodexSystemPrompt`
+- Headless OAuth support for all callback-server providers (Google Gemini CLI, Antigravity, OpenAI Codex): paste redirect URL when browser callback is unreachable
+- Cancellable GitHub Copilot device code polling via AbortSignal
+- Improved error messages for OpenRouter providers by including raw metadata from upstream errors
+
+### Changed
+
+- Anthropic provider now maps tool names to Claude Code's exact tool names (Read, Write, Edit, Bash, Grep, Glob) instead of using prefixed names
+- OpenAI Completions provider now disables strict mode on tools to allow optional parameters without null unions
+
+### Fixed
+
+- Google Cloud Code Assist OAuth for paid subscriptions: properly handles long-running operations for project provisioning, supports `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_PROJECT_ID` env vars for paid tiers
+- `os.homedir()` calls at module load time; now resolved lazily when needed
+- OpenAI Responses tool strict flag to use a boolean for LM Studio compatibility
+- Gemini CLI abort handling: detect native `AbortError` in retry catch block, cancel SSE reader when abort signal fires
+- Antigravity provider 429 errors by aligning request payload with CLIProxyAPI v6.6.89
+- Thinking block handling for cross-model conversations: thinking blocks are now converted to plain text when switching models
+- OpenAI Codex context window from 400,000 to 272,000 tokens to match Codex CLI defaults
+- Codex SSE error events to surface message, code, and status
+- Context overflow detection for `context_length_exceeded` error codes
+- Codex provider now always includes `reasoning.encrypted_content` even when custom `include` options are passed
+- Codex requests now omit the `reasoning` field entirely when thinking is off
+- Crash when pasting text with trailing whitespace exceeding terminal width
 
 ## [3.37.1] - 2026-01-10
 ### Added

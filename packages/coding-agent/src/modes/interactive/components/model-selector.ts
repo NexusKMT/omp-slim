@@ -93,7 +93,7 @@ export class ModelSelectorComponent extends Container {
 		scopedModels: ReadonlyArray<ScopedModelItem>,
 		onSelect: (model: Model<any>, role: string) => void,
 		onCancel: () => void,
-		options?: { temporaryOnly?: boolean },
+		options?: { temporaryOnly?: boolean; initialSearchInput?: string },
 	) {
 		super();
 
@@ -105,6 +105,7 @@ export class ModelSelectorComponent extends Container {
 		this.onSelectCallback = onSelect;
 		this.onCancelCallback = onCancel;
 		this.temporaryOnly = options?.temporaryOnly ?? false;
+		const initialSearchInput = options?.initialSearchInput;
 
 		// Load current role assignments from settings
 		this._loadRoleModels();
@@ -129,6 +130,9 @@ export class ModelSelectorComponent extends Container {
 
 		// Create search input
 		this.searchInput = new Input();
+		if (initialSearchInput) {
+			this.searchInput.setValue(initialSearchInput);
+		}
 		this.searchInput.onSubmit = () => {
 			// Enter on search input opens menu if we have a selection
 			if (this.filteredModels[this.selectedIndex]) {
@@ -156,7 +160,11 @@ export class ModelSelectorComponent extends Container {
 		this.loadModels().then(() => {
 			this.buildProviderTabs();
 			this.updateTabBar();
-			this.updateList();
+			if (initialSearchInput) {
+				this.filterModels(initialSearchInput);
+			} else {
+				this.updateList();
+			}
 			// Request re-render after models are loaded
 			this.tui.requestRender();
 		});

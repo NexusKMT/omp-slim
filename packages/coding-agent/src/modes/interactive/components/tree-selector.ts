@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import {
 	type Component,
 	Container,
@@ -608,7 +609,7 @@ class TreeList implements Component {
 
 	private formatToolCall(name: string, args: Record<string, unknown>): string {
 		const shortenPath = (p: string): string => {
-			const home = process.env.HOME || process.env.USERPROFILE || "";
+			const home = homedir();
 			if (home && p.startsWith(home)) return `~${p.slice(home.length)}`;
 			return p;
 		};

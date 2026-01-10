@@ -14,6 +14,7 @@ import { nanoid } from "nanoid";
 import stripAnsi from "strip-ansi";
 import { getShellConfig, killProcessTree, sanitizeBinaryOutput } from "../utils/shell";
 import { getOrCreateSnapshot, getSnapshotSourceCommand } from "../utils/shell-snapshot";
+import type { BashOperations } from "./tools/bash";
 import { DEFAULT_MAX_BYTES, truncateTail } from "./tools/truncate";
 import { ScopeSignal } from "./utils";
 
@@ -57,6 +58,19 @@ function createSanitizer(): TransformStream<Uint8Array, string> {
 			controller.enqueue(text);
 		},
 	});
+}
+
+async function pumpStream(readable: ReadableStream<Uint8Array>, writer: WritableStreamDefaultWriter<string>) {
+	const reader = readable.pipeThrough(createSanitizer()).getReader();
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			await writer.write(value);
+		}
+	} finally {
+		reader.releaseLock();
+	}
 }
 
 function createOutputSink(
@@ -156,21 +170,9 @@ export async function executeBash(command: string, options?: BashExecutorOptions
 
 	const writer = sink.getWriter();
 	try {
-		async function pumpStream(readable: ReadableStream<Uint8Array>) {
-			const reader = readable.pipeThrough(createSanitizer()).getReader();
-			try {
-				while (true) {
-					const { done, value } = await reader.read();
-					if (done) break;
-					await writer.write(value);
-				}
-			} finally {
-				reader.releaseLock();
-			}
-		}
 		await Promise.all([
-			pumpStream(child.stdout as ReadableStream<Uint8Array>),
-			pumpStream(child.stderr as ReadableStream<Uint8Array>),
+			pumpStream(child.stdout as ReadableStream<Uint8Array>, writer),
+			pumpStream(child.stderr as ReadableStream<Uint8Array>, writer),
 		]);
 	} finally {
 		await writer.close();
@@ -195,4 +197,67 @@ export async function executeBash(command: string, options?: BashExecutorOptions
 		cancelled,
 		...sink.dump(),
 	};
+}
+
+/**
+ * Execute a bash command using custom BashOperations.
+ * Used for remote execution (SSH, containers, etc.).
+ */
+export async function executeBashWithOperations(
+	command: string,
+	cwd: string,
+	operations: BashOperations,
+	options?: BashExecutorOptions,
+): Promise<BashResult> {
+	const sink = createOutputSink(DEFAULT_MAX_BYTES, DEFAULT_MAX_BYTES * 2, options?.onChunk);
+	const writer = sink.getWriter();
+
+	// Create a ReadableStream from the callback-based operations.exec
+	let streamController: ReadableStreamDefaultController<Uint8Array>;
+	const dataStream = new ReadableStream<Uint8Array>({
+		start(controller) {
+			streamController = controller;
+		},
+	});
+
+	const onData = (data: Buffer) => {
+		streamController.enqueue(new Uint8Array(data));
+	};
+
+	// Start pumping the stream (will complete when stream closes)
+	const pumpPromise = pumpStream(dataStream, writer);
+
+	try {
+		const result = await operations.exec(command, cwd, {
+			onData,
+			signal: options?.signal,
+			timeout: options?.timeout,
+		});
+
+		streamController!.close();
+		await pumpPromise;
+		await writer.close();
+
+		const cancelled = options?.signal?.aborted ?? false;
+
+		return {
+			exitCode: cancelled ? undefined : (result.exitCode ?? undefined),
+			cancelled,
+			...sink.dump(),
+		};
+	} catch (err) {
+		streamController!.close();
+		await pumpPromise;
+		await writer.close();
+
+		if (options?.signal?.aborted) {
+			return {
+				exitCode: undefined,
+				cancelled: true,
+				...sink.dump(),
+			};
+		}
+
+		throw err;
+	}
 }

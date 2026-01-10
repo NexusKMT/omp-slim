@@ -17,10 +17,19 @@ import {
 	restoreLineEndings,
 	stripBom,
 } from "./edit-diff";
-import type { ToolSession } from "./index";
+import type { FileOperations, ToolSession } from "./index";
 import { createLspWritethrough, type FileDiagnosticsResult } from "./lsp/index";
 import { resolveToCwd } from "./path-utils";
 import { createToolUIKit, getDiffStats, shortenPath, truncateDiffByHunk } from "./render-utils";
+
+/** Default file operations using Bun APIs */
+const defaultFileOperations: FileOperations = {
+	readFile: async (path) => Bun.file(path).text(),
+	writeFile: async (path, content) => {
+		await Bun.write(path, content);
+	},
+	exists: async (path) => Bun.file(path).exists(),
+};
 
 const editSchema = Type.Object({
 	path: Type.String({ description: "Path to the file to edit (relative or absolute)" }),
@@ -45,6 +54,8 @@ export function createEditTool(session: ToolSession): AgentTool<typeof editSchem
 	const enableDiagnostics = session.settings?.getLspDiagnosticsOnEdit() ?? false;
 	const enableFormat = session.settings?.getLspFormatOnWrite() ?? true;
 	const writethrough = createLspWritethrough(session.cwd, { enableFormat, enableDiagnostics });
+	const ops = session.fileOperations ?? defaultFileOperations;
+
 	return {
 		name: "edit",
 		label: "Edit",
@@ -62,12 +73,11 @@ export function createEditTool(session: ToolSession): AgentTool<typeof editSchem
 
 			const absolutePath = resolveToCwd(path, session.cwd);
 
-			const file = Bun.file(absolutePath);
-			if (!(await file.exists())) {
+			if (!(await ops.exists(absolutePath))) {
 				throw new Error(`File not found: ${path}`);
 			}
 
-			const rawContent = await file.text();
+			const rawContent = await ops.readFile(absolutePath);
 
 			// Strip BOM before matching (LLM won't include invisible BOM in oldText)
 			const { bom, text: content } = stripBom(rawContent);
@@ -159,7 +169,14 @@ export function createEditTool(session: ToolSession): AgentTool<typeof editSchem
 			}
 
 			const finalContent = bom + restoreLineEndings(normalizedNewContent, originalEnding);
-			const diagnostics = await writethrough(absolutePath, finalContent, signal, file);
+
+			// Use writethrough for local operations (LSP formatting/diagnostics), direct write for custom ops
+			let diagnostics: FileDiagnosticsResult | undefined;
+			if (session.fileOperations) {
+				await ops.writeFile(absolutePath, finalContent);
+			} else {
+				diagnostics = await writethrough(absolutePath, finalContent, signal);
+			}
 
 			const diffResult = generateDiffString(normalizedContent, normalizedNewContent);
 
@@ -170,7 +187,7 @@ export function createEditTool(session: ToolSession): AgentTool<typeof editSchem
 					: `Successfully replaced text in ${path}.`;
 
 			const messages = diagnostics?.messages;
-			if (messages && messages.length > 0) {
+			if (diagnostics && messages && messages.length > 0) {
 				resultText += `\n\nLSP Diagnostics (${diagnostics.summary}):\n`;
 				resultText += messages.map((d) => `  ${d}`).join("\n");
 			}

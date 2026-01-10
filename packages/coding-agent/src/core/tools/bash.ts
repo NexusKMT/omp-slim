@@ -5,10 +5,11 @@ import { Text } from "@oh-my-pi/pi-tui";
 import { Type } from "@sinclair/typebox";
 import type { Theme } from "../../modes/interactive/theme/theme";
 import bashDescription from "../../prompts/tools/bash.md" with { type: "text" };
-import { executeBash } from "../bash-executor";
+import { type BashExecutorOptions, executeBash, executeBashWithOperations } from "../bash-executor";
 import type { RenderResultOptions } from "../custom-tools/types";
 import { checkBashInterception, checkSimpleLsInterception } from "./bash-interceptor";
 import type { ToolSession } from "./index";
+import { resolveToCwd } from "./path-utils";
 import { createToolUIKit } from "./render-utils";
 import { DEFAULT_MAX_BYTES, formatSize, type TruncationResult, truncateTail } from "./truncate";
 
@@ -25,7 +26,28 @@ export interface BashToolDetails {
 	fullOutputPath?: string;
 }
 
-export function createBashTool(session: ToolSession): AgentTool<typeof bashSchema> {
+/**
+ * Pluggable operations for bash execution.
+ * Override to delegate command execution to remote systems.
+ */
+export interface BashOperations {
+	exec: (
+		command: string,
+		cwd: string,
+		options: {
+			onData: (data: Buffer) => void;
+			signal?: AbortSignal;
+			timeout?: number;
+		},
+	) => Promise<{ exitCode: number | null }>;
+}
+
+export interface BashToolOptions {
+	/** Custom operations for command execution. Default: local shell */
+	operations?: BashOperations;
+}
+
+export function createBashTool(session: ToolSession, options?: BashToolOptions): AgentTool<typeof bashSchema> {
 	return {
 		name: "bash",
 		label: "Bash",
@@ -53,11 +75,22 @@ export function createBashTool(session: ToolSession): AgentTool<typeof bashSchem
 				}
 			}
 
+			const commandCwd = workdir ? resolveToCwd(workdir, session.cwd) : session.cwd;
+			let cwdStat: Awaited<ReturnType<Bun.BunFile["stat"]>>;
+			try {
+				cwdStat = await Bun.file(commandCwd).stat();
+			} catch {
+				throw new Error(`Working directory does not exist: ${commandCwd}`);
+			}
+			if (!cwdStat.isDirectory()) {
+				throw new Error(`Working directory is not a directory: ${commandCwd}`);
+			}
+
 			// Track output for streaming updates
 			let currentOutput = "";
 
-			const result = await executeBash(command, {
-				cwd: workdir ?? session.cwd,
+			const executorOptions: BashExecutorOptions = {
+				cwd: commandCwd,
 				timeout: timeout ? timeout * 1000 : undefined, // Convert to milliseconds
 				signal,
 				onChunk: (chunk) => {
@@ -72,7 +105,12 @@ export function createBashTool(session: ToolSession): AgentTool<typeof bashSchem
 						});
 					}
 				},
-			});
+			};
+
+			// Use custom operations if provided, otherwise use default local executor
+			const result = options?.operations
+				? await executeBashWithOperations(command, commandCwd, options.operations, executorOptions)
+				: await executeBash(command, executorOptions);
 
 			// Handle errors
 			if (result.cancelled) {

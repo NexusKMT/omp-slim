@@ -26,13 +26,18 @@ import type {
 	ThinkingLevel,
 } from "./types";
 
-const VERTEX_ADC_CREDENTIALS_PATH = join(homedir(), ".config", "gcloud", "application_default_credentials.json");
-
 let cachedVertexAdcCredentialsExists: boolean | null = null;
 
 function hasVertexAdcCredentials(): boolean {
 	if (cachedVertexAdcCredentialsExists === null) {
-		cachedVertexAdcCredentialsExists = existsSync(VERTEX_ADC_CREDENTIALS_PATH);
+		const gacPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+		if (gacPath) {
+			cachedVertexAdcCredentialsExists = existsSync(gacPath);
+		} else {
+			cachedVertexAdcCredentialsExists = existsSync(
+				join(homedir(), ".config", "gcloud", "application_default_credentials.json"),
+			);
+		}
 	}
 	return cachedVertexAdcCredentialsExists;
 }

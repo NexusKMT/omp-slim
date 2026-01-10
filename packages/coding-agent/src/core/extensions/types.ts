@@ -8,14 +8,17 @@
  * - Interact with the user via UI primitives
  */
 
-import type { AgentMessage, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage, AgentToolResult, AgentToolUpdateCallback, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, Model, TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
 import type { Component, KeyId, TUI } from "@oh-my-pi/pi-tui";
 import type { Static, TSchema } from "@sinclair/typebox";
+import type * as piCodingAgent from "../../index";
 import type { Theme } from "../../modes/interactive/theme/theme";
+import type { BashResult } from "../bash-executor";
 import type { CompactionPreparation, CompactionResult } from "../compaction";
 import type { EventBus } from "../event-bus";
 import type { ExecOptions, ExecResult } from "../exec";
+import type { KeybindingsManager } from "../keybindings";
 import type { CustomMessage } from "../messages";
 import type { ModelRegistry } from "../model-registry";
 import type {
@@ -26,14 +29,24 @@ import type {
 	SessionManager,
 } from "../session-manager";
 import type { BashToolDetails, FindToolDetails, GrepToolDetails, LsToolDetails, ReadToolDetails } from "../tools";
+import type { BashOperations } from "../tools/bash";
 import type { EditToolDetails } from "../tools/edit";
 
 export type { ExecOptions, ExecResult } from "../exec";
 export type { AgentToolResult, AgentToolUpdateCallback };
+export type { AppAction, KeybindingsManager } from "../keybindings";
 
 // ============================================================================
 // UI Context
 // ============================================================================
+
+/**
+ * UI dialog options for extensions.
+ */
+export interface ExtensionUIDialogOptions {
+	signal?: AbortSignal;
+	timeout?: number;
+}
 
 /**
  * UI context for extensions to request interactive UI.
@@ -41,13 +54,13 @@ export type { AgentToolResult, AgentToolUpdateCallback };
  */
 export interface ExtensionUIContext {
 	/** Show a selector and return the user's choice. */
-	select(title: string, options: string[]): Promise<string | undefined>;
+	select(title: string, options: string[], dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined>;
 
 	/** Show a confirmation dialog. */
-	confirm(title: string, message: string): Promise<boolean>;
+	confirm(title: string, message: string, dialogOptions?: ExtensionUIDialogOptions): Promise<boolean>;
 
 	/** Show a text input dialog. */
-	input(title: string, placeholder?: string): Promise<string | undefined>;
+	input(title: string, placeholder?: string, dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined>;
 
 	/** Show a notification to the user. */
 	notify(message: string, type?: "info" | "warning" | "error"): void;
@@ -67,8 +80,10 @@ export interface ExtensionUIContext {
 		factory: (
 			tui: TUI,
 			theme: Theme,
+			keybindings: KeybindingsManager,
 			done: (result: T) => void,
 		) => (Component & { dispose?(): void }) | Promise<Component & { dispose?(): void }>,
+		options?: { overlay?: boolean },
 	): Promise<T>;
 
 	/** Set the text in the core input editor. */
@@ -82,6 +97,15 @@ export interface ExtensionUIContext {
 
 	/** Get the current theme for styling. */
 	readonly theme: Theme;
+
+	/** Get all available themes with names and paths. */
+	getAllThemes(): { name: string; path: string | undefined }[];
+
+	/** Load a theme by name without switching to it. */
+	getTheme(name: string): Theme | undefined;
+
+	/** Set the current theme by name or Theme object. */
+	setTheme(theme: string | Theme): { success: boolean; error?: string };
 }
 
 // ============================================================================
@@ -110,6 +134,8 @@ export interface ExtensionContext {
 	abort(): void;
 	/** Whether there are queued messages waiting */
 	hasPendingMessages(): boolean;
+	/** Gracefully shutdown and exit. */
+	shutdown(): void;
 	/** @deprecated Use hasPendingMessages() instead */
 	hasQueuedMessages(): boolean;
 }
@@ -299,6 +325,7 @@ export interface BeforeAgentStartEvent {
 	type: "before_agent_start";
 	prompt: string;
 	images?: ImageContent[];
+	systemPrompt: string;
 }
 
 /** Fired when an agent loop starts */
@@ -325,6 +352,21 @@ export interface TurnEndEvent {
 	turnIndex: number;
 	message: AgentMessage;
 	toolResults: ToolResultMessage[];
+}
+
+// ============================================================================
+// User Bash Events
+// ============================================================================
+
+/** Fired when user executes a bash command via ! or !! prefix */
+export interface UserBashEvent {
+	type: "user_bash";
+	/** The command to execute */
+	command: string;
+	/** True if !! prefix was used (excluded from LLM context) */
+	excludeFromContext: boolean;
+	/** Current working directory */
+	cwd: string;
 }
 
 // ============================================================================
@@ -430,6 +472,7 @@ export type ExtensionEvent =
 	| AgentEndEvent
 	| TurnStartEvent
 	| TurnEndEvent
+	| UserBashEvent
 	| ToolCallEvent
 	| ToolResultEvent;
 
@@ -446,6 +489,14 @@ export interface ToolCallEventResult {
 	reason?: string;
 }
 
+/** Result from user_bash event handler */
+export interface UserBashEventResult {
+	/** Custom operations to use for execution */
+	operations?: BashOperations;
+	/** Full replacement: extension handled execution, use this result */
+	result?: BashResult;
+}
+
 export interface ToolResultEventResult {
 	content?: (TextContent | ImageContent)[];
 	details?: unknown;
@@ -454,7 +505,8 @@ export interface ToolResultEventResult {
 
 export interface BeforeAgentStartEventResult {
 	message?: Pick<CustomMessage, "customType" | "content" | "display" | "details">;
-	systemPromptAppend?: string;
+	/** Replace the system prompt for this turn. If multiple extensions return this, they are chained. */
+	systemPrompt?: string;
 }
 
 export interface SessionBeforeSwitchResult {
@@ -526,7 +578,7 @@ export interface ExtensionAPI {
 	typebox: typeof import("@sinclair/typebox");
 
 	/** Injected pi-coding-agent exports for accessing SDK utilities */
-	pi: typeof import("../../index.js");
+	pi: typeof piCodingAgent;
 
 	// =========================================================================
 	// Event Subscription
@@ -559,6 +611,7 @@ export interface ExtensionAPI {
 	on(event: "turn_end", handler: ExtensionHandler<TurnEndEvent>): void;
 	on(event: "tool_call", handler: ExtensionHandler<ToolCallEvent, ToolCallEventResult>): void;
 	on(event: "tool_result", handler: ExtensionHandler<ToolResultEvent, ToolResultEventResult>): void;
+	on(event: "user_bash", handler: ExtensionHandler<UserBashEvent, UserBashEventResult>): void;
 
 	// =========================================================================
 	// Tool Registration
@@ -613,6 +666,12 @@ export interface ExtensionAPI {
 		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
 	): void;
 
+	/** Send a user message to the agent. Always triggers a turn. */
+	sendUserMessage(
+		content: string | (TextContent | ImageContent)[],
+		options?: { deliverAs?: "steer" | "followUp" },
+	): void;
+
 	/** Append a custom entry to the session for state persistence (not sent to LLM). */
 	appendEntry<T = unknown>(customType: string, data?: T): void;
 
@@ -628,12 +687,21 @@ export interface ExtensionAPI {
 	/** Set the active tools by name. */
 	setActiveTools(toolNames: string[]): void;
 
+	/** Set the current model. Returns false if no API key available. */
+	setModel(model: Model<any>): Promise<boolean>;
+
+	/** Get current thinking level. */
+	getThinkingLevel(): ThinkingLevel;
+
+	/** Set thinking level (clamped to model capabilities). */
+	setThinkingLevel(level: ThinkingLevel): void;
+
 	/** Shared event bus for extension communication. */
 	events: EventBus;
 }
 
-/** Extension factory function type. */
-export type ExtensionFactory = (pi: ExtensionAPI) => void;
+/** Extension factory function type. Supports both sync and async initialization. */
+export type ExtensionFactory = (pi: ExtensionAPI) => void | Promise<void>;
 
 // ============================================================================
 // Loaded Extension Types
@@ -666,6 +734,11 @@ export type SendMessageHandler = <T = unknown>(
 	options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
 ) => void;
 
+export type SendUserMessageHandler = (
+	content: string | (TextContent | ImageContent)[],
+	options?: { deliverAs?: "steer" | "followUp" },
+) => void;
+
 export type AppendEntryHandler = <T = unknown>(customType: string, data?: T) => void;
 
 export type GetActiveToolsHandler = () => string[];
@@ -674,8 +747,55 @@ export type GetAllToolsHandler = () => string[];
 
 export type SetActiveToolsHandler = (toolNames: string[]) => void;
 
+export type SetModelHandler = (model: Model<any>) => Promise<boolean>;
+
+export type GetThinkingLevelHandler = () => ThinkingLevel;
+
+export type SetThinkingLevelHandler = (level: ThinkingLevel) => void;
+
+/** Shared state created by loader, used during registration and runtime. */
+export interface ExtensionRuntimeState {
+	flagValues: Map<string, boolean | string>;
+}
+
+/** Action implementations for ExtensionAPI methods. */
+export interface ExtensionActions {
+	sendMessage: SendMessageHandler;
+	sendUserMessage: SendUserMessageHandler;
+	appendEntry: AppendEntryHandler;
+	getActiveTools: GetActiveToolsHandler;
+	getAllTools: GetAllToolsHandler;
+	setActiveTools: SetActiveToolsHandler;
+	setModel: SetModelHandler;
+	getThinkingLevel: GetThinkingLevelHandler;
+	setThinkingLevel: SetThinkingLevelHandler;
+}
+
+/** Actions for ExtensionContext (ctx.* in event handlers). */
+export interface ExtensionContextActions {
+	getModel: () => Model<any> | undefined;
+	isIdle: () => boolean;
+	abort: () => void;
+	hasPendingMessages: () => boolean;
+	shutdown: () => void;
+}
+
+/** Actions for ExtensionCommandContext (ctx.* in command handlers). */
+export interface ExtensionCommandContextActions {
+	waitForIdle: () => Promise<void>;
+	newSession: (options?: {
+		parentSession?: string;
+		setup?: (sessionManager: SessionManager) => Promise<void>;
+	}) => Promise<{ cancelled: boolean }>;
+	branch: (entryId: string) => Promise<{ cancelled: boolean }>;
+	navigateTree: (targetId: string, options?: { summarize?: boolean }) => Promise<{ cancelled: boolean }>;
+}
+
+/** Full runtime = state + actions. */
+export interface ExtensionRuntime extends ExtensionRuntimeState, ExtensionActions {}
+
 /** Loaded extension with all registered items. */
-export interface LoadedExtension {
+export interface Extension {
 	path: string;
 	resolvedPath: string;
 	handlers: Map<string, HandlerFn[]>;
@@ -683,21 +803,14 @@ export interface LoadedExtension {
 	messageRenderers: Map<string, MessageRenderer>;
 	commands: Map<string, RegisteredCommand>;
 	flags: Map<string, ExtensionFlag>;
-	flagValues: Map<string, boolean | string>;
 	shortcuts: Map<KeyId, ExtensionShortcut>;
-	setSendMessageHandler: (handler: SendMessageHandler) => void;
-	setAppendEntryHandler: (handler: AppendEntryHandler) => void;
-	setGetActiveToolsHandler: (handler: GetActiveToolsHandler) => void;
-	setGetAllToolsHandler: (handler: GetAllToolsHandler) => void;
-	setSetActiveToolsHandler: (handler: SetActiveToolsHandler) => void;
-	setFlagValue: (name: string, value: boolean | string) => void;
 }
 
 /** Result of loading extensions. */
 export interface LoadExtensionsResult {
-	extensions: LoadedExtension[];
+	extensions: Extension[];
 	errors: Array<{ path: string; error: string }>;
-	setUIContext(uiContext: ExtensionUIContext, hasUI: boolean): void;
+	runtime: ExtensionRuntime;
 }
 
 // ============================================================================

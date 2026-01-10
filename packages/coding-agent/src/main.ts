@@ -145,6 +145,28 @@ async function prepareInitialMessage(
 	};
 }
 
+/**
+ * Resolve a session argument to a file path.
+ * If it looks like a path, use as-is. Otherwise try to match as session ID prefix.
+ */
+function resolveSessionPath(sessionArg: string, cwd: string, sessionDir?: string): string {
+	// If it looks like a file path, use as-is
+	if (sessionArg.includes("/") || sessionArg.includes("\\") || sessionArg.endsWith(".jsonl")) {
+		return sessionArg;
+	}
+
+	// Try to match as session ID (full or partial UUID)
+	const sessions = SessionManager.list(cwd, sessionDir);
+	const matches = sessions.filter((session) => session.id.startsWith(sessionArg));
+
+	if (matches.length >= 1) {
+		return matches[0].path; // Already sorted by modified time (most recent first)
+	}
+
+	// No match - return original (will create new session)
+	return sessionArg;
+}
+
 function getChangelogForDisplay(parsed: Args, settingsManager: SettingsManager): string | undefined {
 	if (parsed.continue || parsed.resume) {
 		return undefined;
@@ -175,7 +197,8 @@ async function createSessionManager(parsed: Args, cwd: string): Promise<SessionM
 		return SessionManager.inMemory();
 	}
 	if (parsed.session) {
-		return await SessionManager.open(parsed.session, parsed.sessionDir);
+		const resolvedPath = resolveSessionPath(parsed.session, cwd, parsed.sessionDir);
+		return await SessionManager.open(resolvedPath, parsed.sessionDir);
 	}
 	if (parsed.continue) {
 		return await SessionManager.continueRecent(cwd, parsed.sessionDir);
@@ -299,13 +322,22 @@ async function buildSessionOptions(
 	// Thinking level
 	if (parsed.thinking) {
 		options.thinkingLevel = parsed.thinking;
-	} else if (scopedModels.length > 0 && !parsed.continue && !parsed.resume) {
+	} else if (
+		scopedModels.length > 0 &&
+		scopedModels[0].explicitThinkingLevel === true &&
+		!parsed.continue &&
+		!parsed.resume
+	) {
 		options.thinkingLevel = scopedModels[0].thinkingLevel;
 	}
 
-	// Scoped models for Ctrl+P cycling
+	// Scoped models for Ctrl+P cycling - fill in default thinking levels when not explicit
 	if (scopedModels.length > 0) {
-		options.scopedModels = scopedModels;
+		const defaultThinkingLevel = settingsManager.getDefaultThinkingLevel() ?? "off";
+		options.scopedModels = scopedModels.map((scopedModel) => ({
+			model: scopedModel.model,
+			thinkingLevel: scopedModel.explicitThinkingLevel ? scopedModel.thinkingLevel : defaultThinkingLevel,
+		}));
 	}
 
 	// API key from CLI - set in authStorage
@@ -321,7 +353,9 @@ async function buildSessionOptions(
 	}
 
 	// Tools
-	if (parsed.tools) {
+	if (parsed.noTools) {
+		options.toolNames = parsed.tools && parsed.tools.length > 0 ? parsed.tools : [];
+	} else if (parsed.tools) {
 		options.toolNames = parsed.tools;
 	}
 
@@ -342,6 +376,10 @@ async function buildSessionOptions(
 	const cliExtensionPaths = [...(parsed.extensions ?? []), ...(parsed.hooks ?? [])];
 	if (cliExtensionPaths.length > 0) {
 		options.additionalExtensionPaths = cliExtensionPaths;
+	}
+
+	if (parsed.noExtensions) {
+		options.disableExtensionDiscovery = true;
 	}
 
 	return options;
@@ -504,7 +542,7 @@ export async function main(args: string[]) {
 	}
 
 	time("buildSessionOptions");
-	const { session, extensionsResult, modelFallbackMessage, lspServers } = await createAgentSession(sessionOptions);
+	const { session, setToolUIContext, modelFallbackMessage, lspServers } = await createAgentSession(sessionOptions);
 	time("createAgentSession");
 
 	// Re-parse CLI args with extension flags and apply values
@@ -550,11 +588,12 @@ export async function main(args: string[]) {
 		const versionCheckPromise = checkForNewVersion(VERSION).catch(() => undefined);
 		const changelogMarkdown = getChangelogForDisplay(parsed, settingsManager);
 
-		if (scopedModels.length > 0) {
-			const modelList = scopedModels
-				.map((sm) => {
-					const thinkingStr = sm.thinkingLevel !== "off" ? `:${sm.thinkingLevel}` : "";
-					return `${sm.model.id}${thinkingStr}`;
+		const scopedModelsForDisplay = sessionOptions.scopedModels ?? scopedModels;
+		if (scopedModelsForDisplay.length > 0) {
+			const modelList = scopedModelsForDisplay
+				.map((scopedModel) => {
+					const thinkingStr = scopedModel.thinkingLevel !== "off" ? `:${scopedModel.thinkingLevel}` : "";
+					return `${scopedModel.model.id}${thinkingStr}`;
 				})
 				.join(", ");
 			console.log(chalk.dim(`Model scope: ${modelList} ${chalk.gray("(Ctrl+P to cycle)")}`));
@@ -574,14 +613,19 @@ export async function main(args: string[]) {
 			migratedProviders,
 			versionCheckPromise,
 			parsed.messages,
-			extensionsResult.setUIContext,
+			setToolUIContext,
 			lspServers,
 			initialMessage,
 			initialImages,
 			fdPath,
 		);
 	} else {
-		await runPrintMode(session, mode, parsed.messages, initialMessage, initialImages);
+		await runPrintMode(session, {
+			mode,
+			messages: parsed.messages,
+			initialMessage,
+			initialImages,
+		});
 		stopThemeWatcher();
 		if (process.stdout.writableLength > 0) {
 			await new Promise<void>((resolve) => process.stdout.once("drain", resolve));

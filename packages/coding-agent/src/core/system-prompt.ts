@@ -9,7 +9,6 @@ import chalk from "chalk";
 import { contextFileCapability } from "../capability/context-file";
 import type { Rule } from "../capability/rule";
 import { systemPromptCapability } from "../capability/system-prompt";
-import { getDocsPath, getExamplesPath, getReadmePath } from "../config";
 import { type ContextFile, loadSync, type SystemPrompt as SystemPromptFile } from "../discovery/index";
 import systemPromptTemplate from "../prompts/system-prompt.md" with { type: "text" };
 import type { SkillsSettings } from "./settings-manager";
@@ -772,7 +771,11 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	const contextFiles = providedContextFiles ?? loadProjectContextFiles({ cwd: resolvedCwd });
 
 	// Build tools list based on selected tools
-	const toolsList = toolNames?.map((name) => `- ${name}: ${toolDescriptions[name as ToolName]}`).join("\n") ?? "";
+	const selectedToolNames = toolNames ?? (["read", "bash", "edit", "write"] as ToolName[]);
+	const toolsList =
+		selectedToolNames.length > 0
+			? selectedToolNames.map((name) => `- ${name}: ${toolDescriptions[name as ToolName]}`).join("\n")
+			: "(none)";
 
 	// Resolve skills: use provided or discover
 	const skills =
@@ -804,11 +807,6 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 		return prompt;
 	}
 
-	// Get absolute paths to documentation and examples
-	const readmePath = getReadmePath();
-	const docsPath = getDocsPath();
-	const examplesPath = getExamplesPath();
-
 	// Generate anti-bash rules (returns null if not applicable)
 	const antiBashSection = generateAntiBashRules(Array.from(tools?.keys() ?? []));
 	const environmentInfo = formatEnvironmentInfo();
@@ -820,11 +818,6 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	const hasEdit = tools?.has("edit");
 	const hasWrite = tools?.has("write");
 	const hasRead = tools?.has("read");
-
-	// Read-only mode notice (no bash, edit, or write)
-	if (!hasBash && !hasEdit && !hasWrite) {
-		guidelinesList.push("You are in READ-ONLY mode - you cannot modify files or execute arbitrary commands");
-	}
 
 	// Bash without edit/write = read-only bash mode
 	if (hasBash && !hasEdit && !hasWrite) {
@@ -870,9 +863,6 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 		antiBashSection: antiBashBlock,
 		guidelines,
 		environmentInfo,
-		readmePath,
-		docsPath,
-		examplesPath,
 	});
 
 	prompt = appendBlock(prompt, resolvedAppendPrompt);

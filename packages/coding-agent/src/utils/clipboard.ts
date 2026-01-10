@@ -1,5 +1,34 @@
+import { unlink } from "node:fs/promises";
 import { platform } from "node:os";
 import { nanoid } from "nanoid";
+
+const PREFERRED_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
+
+function isWaylandSession(env: NodeJS.ProcessEnv = process.env): boolean {
+	return Boolean(env.WAYLAND_DISPLAY) || env.XDG_SESSION_TYPE === "wayland";
+}
+
+function baseMimeType(mimeType: string): string {
+	const base = mimeType.split(";")[0]?.trim().toLowerCase() ?? mimeType.toLowerCase();
+	return base === "image/jpg" ? "image/jpeg" : base;
+}
+
+function selectPreferredImageMimeType(mimeTypes: string[]): string | null {
+	const normalized = mimeTypes
+		.map((t) => t.trim())
+		.filter(Boolean)
+		.map((t) => ({ raw: t, base: baseMimeType(t) }));
+
+	for (const preferred of PREFERRED_IMAGE_MIME_TYPES) {
+		const match = normalized.find((t) => t.base === preferred);
+		if (match) {
+			return match.raw;
+		}
+	}
+
+	const anyImage = normalized.find((t) => t.base.startsWith("image/"));
+	return anyImage?.raw ?? null;
+}
 
 async function spawnWithTimeout(cmd: string[], input: string, timeoutMs: number): Promise<void> {
 	const proc = Bun.spawn(cmd, { stdin: "pipe" });
@@ -22,15 +51,18 @@ async function spawnWithTimeout(cmd: string[], input: string, timeoutMs: number)
 }
 
 async function spawnAndRead(cmd: string[], timeoutMs: number): Promise<Buffer | null> {
-	const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
-
-	const timeoutPromise = new Promise<never>((_, reject) => {
-		setTimeout(() => reject(new Error("Clipboard operation timed out")), timeoutMs);
-	});
+	let proc: ReturnType<typeof Bun.spawn> | null = null;
 
 	try {
+		proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+
+		const timeoutPromise = new Promise<never>((_, reject) => {
+			setTimeout(() => reject(new Error("Clipboard operation timed out")), timeoutMs);
+		});
+
+		const stdoutStream = proc.stdout as ReadableStream<Uint8Array>;
 		const [exitCode, stdout] = await Promise.race([
-			Promise.all([proc.exited, new Response(proc.stdout).arrayBuffer()]),
+			Promise.all([proc.exited, new Response(stdoutStream).arrayBuffer()]),
 			timeoutPromise,
 		]);
 
@@ -42,7 +74,7 @@ async function spawnAndRead(cmd: string[], timeoutMs: number): Promise<Buffer | 
 	} catch {
 		return null;
 	} finally {
-		proc.kill();
+		proc?.kill();
 	}
 }
 
@@ -56,6 +88,19 @@ export async function copyToClipboard(text: string): Promise<void> {
 		} else if (p === "win32") {
 			await spawnWithTimeout(["clip"], text, timeout);
 		} else {
+			const wayland = isWaylandSession();
+			if (wayland) {
+				const wlCopyPath = Bun.which("wl-copy");
+				if (wlCopyPath) {
+					try {
+						await spawnWithTimeout([wlCopyPath], text, timeout);
+						return;
+					} catch {
+						// Fall back to xclip/xsel (works on XWayland)
+					}
+				}
+			}
+
 			// Linux - try xclip first, fall back to xsel
 			try {
 				await spawnWithTimeout(["xclip", "-selection", "clipboard"], text, timeout);
@@ -66,7 +111,8 @@ export async function copyToClipboard(text: string): Promise<void> {
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
 		if (p === "linux") {
-			throw new Error(`Failed to copy to clipboard. Install xclip or xsel: ${msg}`);
+			const tools = isWaylandSession() ? "wl-copy, xclip, or xsel" : "xclip or xsel";
+			throw new Error(`Failed to copy to clipboard. Install ${tools}: ${msg}`);
 		}
 		throw new Error(`Failed to copy to clipboard: ${msg}`);
 	}
@@ -82,7 +128,7 @@ export interface ClipboardImage {
  * Returns null if no image is in clipboard or clipboard access fails.
  *
  * Supported platforms:
- * - Linux: requires xclip
+ * - Linux: requires wl-paste (Wayland) or xclip (X11)
  * - macOS: uses osascript + pbpaste
  * - Windows: uses PowerShell
  */
@@ -106,64 +152,59 @@ export async function readImageFromClipboard(): Promise<ClipboardImage | null> {
 }
 
 async function readImageLinux(timeout: number): Promise<ClipboardImage | null> {
-	// Try Wayland first (wl-paste), then X11 (xclip)
-	const wayland = await readImageWayland(timeout);
-	if (wayland) return wayland;
+	const wayland = isWaylandSession();
+	if (wayland) {
+		const image = await readImageWayland(timeout);
+		if (image) return image;
+	}
 
 	return await readImageX11(timeout);
 }
 
 async function readImageWayland(timeout: number): Promise<ClipboardImage | null> {
-	// wl-paste --list-types shows available MIME types
 	const types = await spawnAndRead(["wl-paste", "--list-types"], timeout);
 	if (!types) return null;
 
-	const typeList = types.toString("utf-8");
+	const typeList = types
+		.toString("utf-8")
+		.split(/\r?\n/)
+		.map((t) => t.trim())
+		.filter(Boolean);
 
-	// Try PNG first, then JPEG
-	const imageTypes = [
-		{ type: "image/png", mimeType: "image/png" },
-		{ type: "image/jpeg", mimeType: "image/jpeg" },
-	];
+	const selectedType = selectPreferredImageMimeType(typeList);
+	if (!selectedType) return null;
 
-	for (const { type, mimeType } of imageTypes) {
-		if (typeList.includes(type)) {
-			const imageData = await spawnAndRead(["wl-paste", "--type", type], timeout);
-			if (imageData && imageData.length > 0) {
-				return {
-					data: imageData.toString("base64"),
-					mimeType,
-				};
-			}
-		}
-	}
+	const imageData = await spawnAndRead(["wl-paste", "--type", selectedType, "--no-newline"], timeout);
+	if (!imageData || imageData.length === 0) return null;
 
-	return null;
+	return {
+		data: imageData.toString("base64"),
+		mimeType: baseMimeType(selectedType),
+	};
 }
 
 async function readImageX11(timeout: number): Promise<ClipboardImage | null> {
-	// Check available targets in clipboard
 	const targets = await spawnAndRead(["xclip", "-selection", "clipboard", "-t", "TARGETS", "-o"], timeout);
-	if (!targets) return null;
 
-	const targetList = targets.toString("utf-8");
+	let candidateTypes: string[] = [];
+	if (targets) {
+		candidateTypes = targets
+			.toString("utf-8")
+			.split(/\r?\n/)
+			.map((t) => t.trim())
+			.filter(Boolean);
+	}
 
-	// Try PNG first (preferred), then JPEG
-	const imageTypes = [
-		{ target: "image/png", mimeType: "image/png" },
-		{ target: "image/jpeg", mimeType: "image/jpeg" },
-		{ target: "image/jpg", mimeType: "image/jpeg" },
-	];
+	const preferred = candidateTypes.length > 0 ? selectPreferredImageMimeType(candidateTypes) : null;
+	const tryTypes = preferred ? [preferred, ...PREFERRED_IMAGE_MIME_TYPES] : [...PREFERRED_IMAGE_MIME_TYPES];
 
-	for (const { target, mimeType } of imageTypes) {
-		if (targetList.includes(target)) {
-			const imageData = await spawnAndRead(["xclip", "-selection", "clipboard", "-t", target, "-o"], timeout);
-			if (imageData && imageData.length > 0) {
-				return {
-					data: imageData.toString("base64"),
-					mimeType,
-				};
-			}
+	for (const mimeType of tryTypes) {
+		const imageData = await spawnAndRead(["xclip", "-selection", "clipboard", "-t", mimeType, "-o"], timeout);
+		if (imageData && imageData.length > 0) {
+			return {
+				data: imageData.toString("base64"),
+				mimeType: baseMimeType(mimeType),
+			};
 		}
 	}
 
@@ -222,7 +263,6 @@ async function readImageMacOS(timeout: number): Promise<ClipboardImage | null> {
 		if (await file.exists()) {
 			const buffer = await file.arrayBuffer();
 			await Bun.write(tempFile, ""); // Clear file
-			const { unlink } = await import("fs/promises");
 			await unlink(tempFile).catch(() => {});
 
 			if (buffer.byteLength > 0) {

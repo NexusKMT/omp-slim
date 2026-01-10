@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,7 @@ import type { ToolSession } from "../src/core/tools/index";
 import { createLsTool } from "../src/core/tools/ls";
 import { createReadTool } from "../src/core/tools/read";
 import { createWriteTool } from "../src/core/tools/write";
+import * as shellModule from "../src/utils/shell";
 
 // Helper to extract text from content blocks
 function getTextOutput(result: any): string {
@@ -397,6 +398,31 @@ function b() {
 			await expect(bashTool.execute("test-call-10", { command: "sleep 5", timeout: 1 })).rejects.toThrow(
 				/timed out/i,
 			);
+		});
+
+		it("should throw error when cwd does not exist", async () => {
+			const nonexistentCwd = "/this/directory/definitely/does/not/exist/12345";
+
+			const bashToolWithBadCwd = createBashTool(createTestToolSession(nonexistentCwd));
+
+			await expect(bashToolWithBadCwd.execute("test-call-11", { command: "echo test" })).rejects.toThrow(
+				/Working directory does not exist/,
+			);
+		});
+
+		it("should handle process spawn errors", async () => {
+			const getShellConfigSpy = vi.spyOn(shellModule, "getShellConfig").mockReturnValueOnce({
+				shell: "/nonexistent-shell-path-xyz123",
+				args: ["-c"],
+				env: {},
+				prefix: undefined,
+			});
+
+			const bashWithBadShell = createBashTool(createTestToolSession(testDir));
+
+			await expect(bashWithBadShell.execute("test-call-12", { command: "echo test" })).rejects.toThrow(/ENOENT/);
+
+			getShellConfigSpy.mockRestore();
 		});
 	});
 

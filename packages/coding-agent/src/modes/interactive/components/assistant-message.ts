@@ -8,6 +8,7 @@ import { getMarkdownTheme, theme } from "../theme/theme";
 export class AssistantMessageComponent extends Container {
 	private contentContainer: Container;
 	private hideThinkingBlock: boolean;
+	private lastMessage?: AssistantMessage;
 
 	constructor(message?: AssistantMessage, hideThinkingBlock = false) {
 		super();
@@ -23,20 +24,28 @@ export class AssistantMessageComponent extends Container {
 		}
 	}
 
+	override invalidate(): void {
+		super.invalidate();
+		if (this.lastMessage) {
+			this.updateContent(this.lastMessage);
+		}
+	}
+
 	setHideThinkingBlock(hide: boolean): void {
 		this.hideThinkingBlock = hide;
 	}
 
 	updateContent(message: AssistantMessage): void {
+		this.lastMessage = message;
+
 		// Clear content container
 		this.contentContainer.clear();
 
-		if (
-			message.content.length > 0 &&
-			message.content.some(
-				(c) => (c.type === "text" && c.text.trim()) || (c.type === "thinking" && c.thinking.trim()),
-			)
-		) {
+		const hasVisibleContent = message.content.some(
+			(c) => (c.type === "text" && c.text.trim()) || (c.type === "thinking" && c.thinking.trim()),
+		);
+
+		if (hasVisibleContent) {
 			this.contentContainer.addChild(new Spacer(1));
 		}
 
@@ -75,7 +84,16 @@ export class AssistantMessageComponent extends Container {
 		const hasToolCalls = message.content.some((c) => c.type === "toolCall");
 		if (!hasToolCalls) {
 			if (message.stopReason === "aborted") {
-				this.contentContainer.addChild(new Text(theme.fg("error", "\nAborted"), 1, 0));
+				const abortMessage =
+					message.errorMessage && message.errorMessage !== "Request was aborted"
+						? message.errorMessage
+						: "Operation aborted";
+				if (hasVisibleContent) {
+					this.contentContainer.addChild(new Spacer(1));
+				} else {
+					this.contentContainer.addChild(new Spacer(1));
+				}
+				this.contentContainer.addChild(new Text(theme.fg("error", abortMessage), 1, 0));
 			} else if (message.stopReason === "error") {
 				const errorMsg = message.errorMessage || "Unknown error";
 				this.contentContainer.addChild(new Spacer(1));

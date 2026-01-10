@@ -1,3 +1,4 @@
+import { getEditorKeybindings } from "../keybindings";
 import {
 	isAltBackspace,
 	isAltLeft,
@@ -13,7 +14,6 @@ import {
 	isCtrlU,
 	isCtrlW,
 	isDelete,
-	isEnter,
 } from "../keys";
 import type { Component } from "../tui";
 import { getSegmenter, isPunctuationChar, isWhitespaceChar, visibleWidth } from "../utils";
@@ -27,6 +27,7 @@ export class Input implements Component {
 	private value: string = "";
 	private cursor: number = 0; // Cursor position in the value
 	public onSubmit?: (value: string) => void;
+	public onEscape?: () => void;
 
 	// Bracketed paste mode buffering
 	private pasteBuffer: string = "";
@@ -78,8 +79,14 @@ export class Input implements Component {
 			}
 			return;
 		}
+		const kb = getEditorKeybindings();
+		if (kb.matches(data, "selectCancel")) {
+			this.onEscape?.();
+			return;
+		}
+
 		// Handle special keys
-		if (isEnter(data) || data === "\n") {
+		if (kb.matches(data, "submit") || data === "\n") {
 			// Enter - submit
 			if (this.onSubmit) {
 				this.onSubmit(this.value);

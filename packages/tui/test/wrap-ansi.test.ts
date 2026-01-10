@@ -11,12 +11,22 @@ describe("wrapTextWithAnsi", () => {
 
 			const wrapped = wrapTextWithAnsi(text, 40);
 
-			// First line should NOT contain underline code - it's just "read this thread "
-			expect(wrapped[0]).toBe("read this thread ");
+			// First line should NOT contain underline code - it's just "read this thread"
+			expect(wrapped[0]).toBe("read this thread");
 
 			// Second line should start with underline, have URL content
 			expect(wrapped[1].startsWith(underlineOn)).toBe(true);
 			expect(wrapped[1].includes("https://")).toBe(true);
+		});
+
+		it("should not have whitespace before underline reset code", () => {
+			const underlineOn = "\x1b[4m";
+			const underlineOff = "\x1b[24m";
+			const textWithUnderlinedTrailingSpace = `${underlineOn}underlined text here ${underlineOff}more`;
+
+			const wrapped = wrapTextWithAnsi(textWithUnderlinedTrailingSpace, 18);
+
+			expect(wrapped[0].includes(` ${underlineOff}`)).toBe(false);
 		});
 
 		it("should not bleed underline to padding - each line should end with reset for underline only", () => {
@@ -98,6 +108,11 @@ describe("wrapTextWithAnsi", () => {
 			for (const line of wrapped) {
 				expect(visibleWidth(line) <= 10).toBeTruthy();
 			}
+		});
+
+		it("should truncate trailing whitespace that exceeds width", () => {
+			const twoSpacesWrappedToWidth1 = wrapTextWithAnsi("  ", 1);
+			expect(visibleWidth(twoSpacesWrappedToWidth1[0]) <= 1).toBeTruthy();
 		});
 
 		it("should preserve color codes across wraps", () => {

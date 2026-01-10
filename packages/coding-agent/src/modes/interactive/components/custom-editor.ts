@@ -38,6 +38,8 @@ export class CustomEditor extends Editor {
 	public onCtrlY?: () => void;
 	/** Called when Ctrl+V is pressed. Returns true if handled (image found), false to fall through to text paste. */
 	public onCtrlV?: () => Promise<boolean>;
+	/** Called when Alt+Up is pressed (dequeue keybinding). */
+	public onAltUp?: () => void;
 
 	/** Custom key handlers from extensions */
 	private customKeyHandlers = new Map<KeyId, () => void>();
@@ -154,6 +156,12 @@ export class CustomEditor extends Editor {
 				this.onCtrlD();
 			}
 			// Always consume Ctrl+D (don't pass to parent)
+			return;
+		}
+
+		// Intercept Alt+Up for dequeue (restore queued message to editor)
+		if (matchesKey(data, "alt+up") && this.onAltUp) {
+			this.onAltUp();
 			return;
 		}
 

@@ -2,8 +2,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { streamOpenAICodexResponses } from "../src/providers/openai-codex-responses.js";
-import type { Context, Model } from "../src/types.js";
+import { streamOpenAICodexResponses } from "../src/providers/openai-codex-responses";
+import type { Context, Model } from "../src/types";
 
 const originalFetch = global.fetch;
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;

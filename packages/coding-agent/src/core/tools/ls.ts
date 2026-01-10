@@ -28,6 +28,22 @@ const lsSchema = Type.Object({
 
 const DEFAULT_LIMIT = 500;
 
+/**
+ * Pluggable operations for the ls tool.
+ * Override these to delegate directory listing to remote systems (e.g., SSH).
+ */
+export interface LsOperations {
+	/** Check if path exists and return stats. Returns undefined if not found. */
+	stat: (absolutePath: string) => Promise<{ isDirectory: () => boolean; mtimeMs: number } | undefined>;
+	/** Read directory entries (names only) */
+	readdir: (absolutePath: string) => Promise<string[]>;
+}
+
+export interface LsToolOptions {
+	/** Custom operations for directory listing. Default: local filesystem via Bun */
+	operations?: LsOperations;
+}
+
 export interface LsToolDetails {
 	entries?: string[];
 	dirCount?: number;
@@ -37,7 +53,24 @@ export interface LsToolDetails {
 	entryLimitReached?: number;
 }
 
-export function createLsTool(session: ToolSession): AgentTool<typeof lsSchema> {
+/** Default operations using Bun APIs */
+const defaultLsOperations: LsOperations = {
+	async stat(absolutePath: string) {
+		try {
+			const s = await Bun.file(absolutePath).stat();
+			return { isDirectory: () => s.isDirectory(), mtimeMs: s.mtimeMs };
+		} catch {
+			return undefined;
+		}
+	},
+	async readdir(absolutePath: string) {
+		return Array.fromAsync(new Bun.Glob("*").scan({ cwd: absolutePath, dot: true, onlyFiles: false }));
+	},
+};
+
+export function createLsTool(session: ToolSession, options?: LsToolOptions): AgentTool<typeof lsSchema> {
+	const ops = options?.operations ?? defaultLsOperations;
+
 	return {
 		name: "ls",
 		label: "Ls",
@@ -53,10 +86,8 @@ export function createLsTool(session: ToolSession): AgentTool<typeof lsSchema> {
 				const effectiveLimit = limit ?? DEFAULT_LIMIT;
 
 				// Check if path exists and is a directory
-				let dirStat: Awaited<ReturnType<Bun.BunFile["stat"]>>;
-				try {
-					dirStat = await Bun.file(dirPath).stat();
-				} catch {
+				const dirStat = await ops.stat(dirPath);
+				if (!dirStat) {
 					throw new Error(`Path not found: ${dirPath}`);
 				}
 
@@ -67,7 +98,7 @@ export function createLsTool(session: ToolSession): AgentTool<typeof lsSchema> {
 				// Read directory entries
 				let entries: string[];
 				try {
-					entries = await Array.fromAsync(new Bun.Glob("*").scan({ cwd: dirPath, dot: true, onlyFiles: false }));
+					entries = await ops.readdir(dirPath);
 				} catch (error) {
 					const message = error instanceof Error ? error.message : String(error);
 					throw new Error(`Cannot read directory: ${message}`);
@@ -93,21 +124,21 @@ export function createLsTool(session: ToolSession): AgentTool<typeof lsSchema> {
 					let suffix = "";
 					let age = "";
 
-					try {
-						const entryStat = await Bun.file(fullPath).stat();
-						if (entryStat.isDirectory()) {
-							suffix = "/";
-							dirCount += 1;
-						} else {
-							fileCount += 1;
-						}
-						// Calculate age from mtime
-						const ageSeconds = Math.floor((Date.now() - entryStat.mtimeMs) / 1000);
-						age = formatAge(ageSeconds);
-					} catch {
+					const entryStat = await ops.stat(fullPath);
+					if (!entryStat) {
 						// Skip entries we can't stat
 						continue;
 					}
+
+					if (entryStat.isDirectory()) {
+						suffix = "/";
+						dirCount += 1;
+					} else {
+						fileCount += 1;
+					}
+					// Calculate age from mtime
+					const ageSeconds = Math.floor((Date.now() - entryStat.mtimeMs) / 1000);
+					age = formatAge(ageSeconds);
 
 					// Format: "name/ (2d ago)" or "name (just now)"
 					const line = age ? `${entry}${suffix} (${age})` : entry + suffix;

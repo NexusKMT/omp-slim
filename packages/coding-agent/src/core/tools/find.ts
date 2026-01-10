@@ -44,6 +44,22 @@ export interface FindToolDetails {
 	error?: string;
 }
 
+/**
+ * Pluggable operations for the find tool.
+ * Override these to delegate file search to remote systems (e.g., SSH).
+ */
+export interface FindOperations {
+	/** Check if path exists */
+	exists: (absolutePath: string) => Promise<boolean> | boolean;
+	/** Find files matching glob pattern. Returns relative paths. */
+	glob: (pattern: string, cwd: string, options: { ignore: string[]; limit: number }) => Promise<string[]> | string[];
+}
+
+export interface FindToolOptions {
+	/** Custom operations for find. Default: local filesystem + fd */
+	operations?: FindOperations;
+}
+
 async function captureCommandOutput(
 	command: string,
 	args: string[],
@@ -91,7 +107,9 @@ async function captureCommandOutput(
 	return { stdout, stderr, exitCode, aborted: scope.aborted };
 }
 
-export function createFindTool(session: ToolSession): AgentTool<typeof findSchema> {
+export function createFindTool(session: ToolSession, options?: FindToolOptions): AgentTool<typeof findSchema> {
+	const customOps = options?.operations;
+
 	return {
 		name: "find",
 		label: "Find",
@@ -117,12 +135,6 @@ export function createFindTool(session: ToolSession): AgentTool<typeof findSchem
 			signal?: AbortSignal,
 		) => {
 			return untilAborted(signal, async () => {
-				// Ensure fd is available
-				const fdPath = await ensureTool("fd", true);
-				if (!fdPath) {
-					throw new Error("fd is not available and could not be downloaded");
-				}
-
 				const searchPath = resolveToCwd(searchDir || ".", session.cwd);
 				const scopePath = (() => {
 					const relative = path.relative(session.cwd, searchPath).replace(/\\/g, "/");
@@ -132,6 +144,73 @@ export function createFindTool(session: ToolSession): AgentTool<typeof findSchem
 				const effectiveType = type ?? "all";
 				const includeHidden = hidden ?? false;
 				const shouldSortByMtime = sortByMtime ?? false;
+
+				// If custom operations provided with glob, use that instead of fd
+				if (customOps?.glob) {
+					if (!(await customOps.exists(searchPath))) {
+						throw new Error(`Path not found: ${searchPath}`);
+					}
+
+					const results = await customOps.glob(pattern, searchPath, {
+						ignore: ["**/node_modules/**", "**/.git/**"],
+						limit: effectiveLimit,
+					});
+
+					if (results.length === 0) {
+						return {
+							content: [{ type: "text", text: "No files found matching pattern" }],
+							details: { scopePath, fileCount: 0, files: [], truncated: false },
+						};
+					}
+
+					// Relativize paths
+					const relativized = results.map((p) => {
+						if (p.startsWith(searchPath)) {
+							return p.slice(searchPath.length + 1);
+						}
+						return path.relative(searchPath, p);
+					});
+
+					const resultLimitReached = relativized.length >= effectiveLimit;
+					const rawOutput = relativized.join("\n");
+					const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
+
+					let resultOutput = truncation.content;
+					const details: FindToolDetails = {
+						scopePath,
+						fileCount: relativized.length,
+						files: relativized,
+						truncated: resultLimitReached || truncation.truncated,
+					};
+					const notices: string[] = [];
+
+					if (resultLimitReached) {
+						notices.push(
+							`${effectiveLimit} results limit reached. Use limit=${effectiveLimit * 2} for more, or refine pattern`,
+						);
+						details.resultLimitReached = effectiveLimit;
+					}
+
+					if (truncation.truncated) {
+						notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
+						details.truncation = truncation;
+					}
+
+					if (notices.length > 0) {
+						resultOutput += `\n\n[${notices.join(". ")}]`;
+					}
+
+					return {
+						content: [{ type: "text", text: resultOutput }],
+						details: Object.keys(details).length > 0 ? details : undefined,
+					};
+				}
+
+				// Default: use fd
+				const fdPath = await ensureTool("fd", true);
+				if (!fdPath) {
+					throw new Error("fd is not available and could not be downloaded");
+				}
 
 				// Build fd arguments
 				// When pattern contains path separators (e.g. "reports/**"), use --full-path

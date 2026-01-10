@@ -193,11 +193,14 @@ src/
 │       │   ├── assistant-message.ts    # Agent response rendering
 │       │   ├── bash-execution.ts       # Bash output display
 │       │   ├── compaction.ts           # Compaction status display
+│       │   ├── countdown-timer.ts      # Reusable countdown for dialogs
 │       │   ├── custom-editor.ts        # Multi-line input editor
 │       │   ├── dynamic-border.ts       # Adaptive border rendering
 │       │   ├── footer.ts               # Status bar / footer
 │       │   ├── hook-input.ts           # Hook input dialog
 │       │   ├── hook-selector.ts        # Hook selection UI
+│       │   ├── index.ts                # Component exports
+│       │   ├── login-dialog.ts         # OAuth login dialog
 │       │   ├── model-selector.ts       # Model picker
 │       │   ├── oauth-selector.ts       # OAuth provider picker
 │       │   ├── queue-mode-selector.ts  # Message queue mode picker
@@ -288,6 +291,8 @@ Handles user preferences:
 - Thinking block visibility
 - Compaction settings
 - Hook/custom tool paths
+- Thinking budgets (`thinkingBudgets` setting for custom token budgets per level)
+- Image blocking (`blockImages` setting to prevent images from being sent to LLM)
 
 ### Hook System (core/hooks/)
 
@@ -296,9 +301,32 @@ Extensibility layer for intercepting agent behavior:
 - **loader.ts**: Discovers and loads hooks from `~/.omp/agent/hooks/`, `.omp/hooks/`, and CLI
 - **runner.ts**: Dispatches events to registered hooks
 - **tool-wrapper.ts**: Wraps tools to emit `tool_call` and `tool_result` events
-- **types.ts**: Event types (`session`, `tool_call`, `tool_result`, `message`, `error`)
+- **types.ts**: Event types (`session`, `tool_call`, `tool_result`, `message`, `error`, `user_bash`)
 
 See [docs/hooks.md](docs/hooks.md) for full documentation.
+
+### Extension System Architecture
+
+The extension system uses a shared runtime pattern:
+
+1. **ExtensionRuntime** (`core/extensions/types.ts`): Shared state and action handlers for all extensions
+2. **Extension**: Per-extension registration data (handlers, tools, commands, shortcuts)
+3. **ExtensionAPI**: Per-extension API that writes registrations to Extension and delegates actions to runtime
+4. **ExtensionRunner**: Orchestrates event dispatch and provides context to handlers
+
+Extension factories can now be async, enabling dynamic imports and lazy loading:
+
+```typescript
+const myExtension: ExtensionFactory = async (pi) => {
+  const dep = await import("heavy-dependency");
+  pi.registerTool({ ... });
+};
+```
+
+Key extension events:
+- `before_agent_start`: Receives `systemPrompt` and can return full replacement (not just append)
+- `user_bash`: Intercept `!`/`!!` commands for custom execution (e.g., remote SSH)
+- `session_shutdown`: Cleanup notification before exit
 
 ### Custom Tools (core/custom-tools/)
 
@@ -383,6 +411,37 @@ bun test --testNamePattern="RPC"
 bun test/rpc-example.ts
 ```
 
+### Pluggable Tool Operations
+
+Built-in tools support pluggable operations for remote execution:
+
+- **BashOperations**: Execute commands on remote systems
+- **LsOperations**: Remote directory listing
+- **GrepOperations**: Remote content search
+- **FindOperations**: Remote file search
+- **FileOperations**: Remote file read/write/edit
+
+Example: SSH extension overriding bash execution:
+
+```typescript
+pi.on("user_bash", async (event) => {
+  if (shouldRunRemotely()) {
+    return {
+      operations: {
+        exec: async (cmd, cwd, opts) => {
+          // Execute via SSH
+          return { exitCode: 0 };
+        },
+      },
+    };
+  }
+});
+```
+
+### Managed Binaries
+
+Tools like `fd` and `rg` are auto-downloaded to `~/.omp/bin/` (migrated from `~/.omp/agent/tools/`).
+
 ## Adding New Features
 
 ### Adding a New Slash Command
@@ -452,6 +511,15 @@ private showMySelector(): void {
 4. Add loader/handler in relevant core module
 5. Update `docs/extensions.md` with the new capability type
 
+### Adding a New Keybinding
+
+1. Add the action name to `AppAction` type in `core/keybindings.ts`
+2. Add default binding to `DEFAULT_APP_KEYBINDINGS`
+3. Add to `APP_ACTIONS` array
+4. Handle the action in `CustomEditor` or `InteractiveMode`
+
+Example: The `dequeue` action (`Alt+Up`) restores queued messages to the editor.
+
 ## Code Style
 
 - TypeScript with strict type checking (tsgo)
@@ -460,6 +528,7 @@ private showMySelector(): void {
 - Formatting via Biome (`bun run check` or `bun run fix`)
 - Keep InteractiveMode focused on UI, delegate logic to AgentSession
 - Use event bus for tool/extension communication
+- Components should override `invalidate()` to rebuild on theme changes
 
 ## Package Structure
 
@@ -470,6 +539,25 @@ This is part of a monorepo with the following packages:
 - `@oh-my-pi/pi-tui` - TUI components
 - `@oh-my-pi/pi-git-tool` - Git tool integration
 - `@oh-my-pi/pi-ai` - External AI provider library
+
+## CLI Flags
+
+Key CLI flags for development:
+
+- `--no-tools`: Disable all built-in tools (extension-only setups)
+- `--no-extensions`: Disable extension discovery (explicit `-e` paths still work)
+- `--no-skills`: Disable skill discovery
+- `--session <id>`: Resume by session ID prefix (UUID match) or path
+
+## SDK Exports
+
+The SDK (`src/index.ts`) exports run modes for programmatic usage:
+
+- `InteractiveMode`: Full TUI mode
+- `runPrintMode()`: Non-interactive, process messages and exit
+- `runRpcMode()`: JSON stdin/stdout protocol
+
+Extension types and utilities are also exported for building custom extensions.
 
 ## Documentation
 

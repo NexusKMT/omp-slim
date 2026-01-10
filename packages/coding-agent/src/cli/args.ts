@@ -30,8 +30,10 @@ export interface Args {
 	sessionDir?: string;
 	models?: string[];
 	tools?: string[];
+	noTools?: boolean;
 	hooks?: string[];
 	extensions?: string[];
+	noExtensions?: boolean;
 	print?: boolean;
 	export?: string;
 	noSkills?: boolean;
@@ -96,6 +98,8 @@ export function parseArgs(args: string[], extensionFlags?: Map<string, { type: "
 			result.sessionDir = args[++i];
 		} else if (arg === "--models" && i + 1 < args.length) {
 			result.models = args[++i].split(",").map((s) => s.trim());
+		} else if (arg === "--no-tools") {
+			result.noTools = true;
 		} else if (arg === "--tools" && i + 1 < args.length) {
 			const toolNames = args[++i].split(",").map((s) => s.trim());
 			const validTools: string[] = [];
@@ -132,6 +136,8 @@ export function parseArgs(args: string[], extensionFlags?: Map<string, { type: "
 		} else if ((arg === "--extension" || arg === "-e") && i + 1 < args.length) {
 			result.extensions = result.extensions ?? [];
 			result.extensions.push(args[++i]);
+		} else if (arg === "--no-extensions") {
+			result.noExtensions = true;
 		} else if (arg === "--no-skills") {
 			result.noSkills = true;
 		} else if (arg === "--skills" && i + 1 < args.length) {
@@ -189,11 +195,13 @@ ${chalk.bold("Options:")}
   --no-session                   Don't save session (ephemeral)
   --models <patterns>            Comma-separated model patterns for Ctrl+P cycling
                                  Supports globs (anthropic/*, *sonnet*) and fuzzy matching
+  --no-tools                     Disable all built-in tools
   --tools <tools>                Comma-separated list of tools to enable (default: read,bash,edit,write)
                                  Available: read, bash, edit, write, grep, find, ls
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh
   --hook <path>                  Load a hook/extension file (can be used multiple times)
   --extension, -e <path>         Load an extension file (can be used multiple times)
+  --no-extensions                Disable extension discovery (explicit -e paths still work)
   --no-skills                    Disable skills discovery and loading
   --skills <patterns>            Comma-separated glob patterns to filter skills (e.g., git-*,docker)
   --export <file>                Export session file to HTML and exit

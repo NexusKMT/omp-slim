@@ -13,7 +13,30 @@
  * - matchesKey(data, keyId) - Check if input matches a key identifier
  * - parseKey(data) - Parse input and return the key identifier
  * - Key - Helper object for creating typed key identifiers
+ * - setKittyProtocolActive(active) - Set global Kitty protocol state
+ * - isKittyProtocolActive() - Query global Kitty protocol state
  */
+
+// =============================================================================
+// Global Kitty Protocol State
+// =============================================================================
+
+let kittyProtocolActive = false;
+
+/**
+ * Set the global Kitty keyboard protocol state.
+ * Called by ProcessTerminal after detecting protocol support.
+ */
+export function setKittyProtocolActive(active: boolean): void {
+	kittyProtocolActive = active;
+}
+
+/**
+ * Query whether Kitty keyboard protocol is currently active.
+ */
+export function isKittyProtocolActive(): boolean {
+	return kittyProtocolActive;
+}
 
 // =============================================================================
 // Type-Safe Key Identifiers
@@ -271,33 +294,85 @@ const FUNCTIONAL_CODEPOINTS = {
 // Kitty Protocol Parsing
 // =============================================================================
 
+/**
+ * Event types from Kitty keyboard protocol (flag 2)
+ * 1 = key press, 2 = key repeat, 3 = key release
+ */
+export type KeyEventType = "press" | "repeat" | "release";
+
 interface ParsedKittySequence {
 	codepoint: number;
 	modifier: number;
+	eventType: KeyEventType;
+}
+
+/**
+ * Check if the last parsed key event was a key release.
+ * Only meaningful when Kitty keyboard protocol with flag 2 is active.
+ */
+export function isKeyRelease(data: string): boolean {
+	return (
+		data.includes(":3u") ||
+		data.includes(":3~") ||
+		data.includes(":3A") ||
+		data.includes(":3B") ||
+		data.includes(":3C") ||
+		data.includes(":3D") ||
+		data.includes(":3H") ||
+		data.includes(":3F")
+	);
+}
+
+/**
+ * Check if the last parsed key event was a key repeat.
+ * Only meaningful when Kitty keyboard protocol with flag 2 is active.
+ */
+export function isKeyRepeat(data: string): boolean {
+	return (
+		data.includes(":2u") ||
+		data.includes(":2~") ||
+		data.includes(":2A") ||
+		data.includes(":2B") ||
+		data.includes(":2C") ||
+		data.includes(":2D") ||
+		data.includes(":2H") ||
+		data.includes(":2F")
+	);
+}
+
+function parseEventType(eventTypeStr: string | undefined): KeyEventType {
+	if (!eventTypeStr) return "press";
+	const eventType = parseInt(eventTypeStr, 10);
+	if (eventType === 2) return "repeat";
+	if (eventType === 3) return "release";
+	return "press";
 }
 
 function parseKittySequence(data: string): ParsedKittySequence | null {
-	// CSI u format: \x1b[<num>u or \x1b[<num>;<mod>u
-	const csiUMatch = data.match(/^\x1b\[(\d+)(?:;(\d+))?u$/);
+	// CSI u format: \x1b[<num>u or \x1b[<num>;<mod>u or \x1b[<num>;<mod>:<event>u
+	const csiUMatch = data.match(/^\x1b\[(\d+)(?:;(\d+))?(?::(\d+))?u$/);
 	if (csiUMatch) {
 		const codepoint = parseInt(csiUMatch[1]!, 10);
 		const modValue = csiUMatch[2] ? parseInt(csiUMatch[2], 10) : 1;
-		return { codepoint, modifier: modValue - 1 };
+		const eventType = parseEventType(csiUMatch[3]);
+		return { codepoint, modifier: modValue - 1, eventType };
 	}
 
-	// Arrow keys with modifier: \x1b[1;<mod>A/B/C/D
-	const arrowMatch = data.match(/^\x1b\[1;(\d+)([ABCD])$/);
+	// Arrow keys with modifier: \x1b[1;<mod>A/B/C/D or \x1b[1;<mod>:<event>A/B/C/D
+	const arrowMatch = data.match(/^\x1b\[1;(\d+)(?::(\d+))?([ABCD])$/);
 	if (arrowMatch) {
 		const modValue = parseInt(arrowMatch[1]!, 10);
+		const eventType = parseEventType(arrowMatch[2]);
 		const arrowCodes: Record<string, number> = { A: -1, B: -2, C: -3, D: -4 };
-		return { codepoint: arrowCodes[arrowMatch[2]!]!, modifier: modValue - 1 };
+		return { codepoint: arrowCodes[arrowMatch[3]!]!, modifier: modValue - 1, eventType };
 	}
 
-	// Functional keys: \x1b[<num>~ or \x1b[<num>;<mod>~
-	const funcMatch = data.match(/^\x1b\[(\d+)(?:;(\d+))?~$/);
+	// Functional keys: \x1b[<num>~ or \x1b[<num>;<mod>~ or \x1b[<num>;<mod>:<event>~
+	const funcMatch = data.match(/^\x1b\[(\d+)(?:;(\d+))?(?::(\d+))?~$/);
 	if (funcMatch) {
 		const keyNum = parseInt(funcMatch[1]!, 10);
 		const modValue = funcMatch[2] ? parseInt(funcMatch[2], 10) : 1;
+		const eventType = parseEventType(funcMatch[3]);
 		const funcCodes: Record<number, number> = {
 			2: FUNCTIONAL_CODEPOINTS.insert,
 			3: FUNCTIONAL_CODEPOINTS.delete,
@@ -308,16 +383,17 @@ function parseKittySequence(data: string): ParsedKittySequence | null {
 		};
 		const codepoint = funcCodes[keyNum];
 		if (codepoint !== undefined) {
-			return { codepoint, modifier: modValue - 1 };
+			return { codepoint, modifier: modValue - 1, eventType };
 		}
 	}
 
-	// Home/End with modifier: \x1b[1;<mod>H/F
-	const homeEndMatch = data.match(/^\x1b\[1;(\d+)([HF])$/);
+	// Home/End with modifier: \x1b[1;<mod>H/F or \x1b[1;<mod>:<event>H/F
+	const homeEndMatch = data.match(/^\x1b\[1;(\d+)(?::(\d+))?([HF])$/);
 	if (homeEndMatch) {
 		const modValue = parseInt(homeEndMatch[1]!, 10);
-		const codepoint = homeEndMatch[2] === "H" ? FUNCTIONAL_CODEPOINTS.home : FUNCTIONAL_CODEPOINTS.end;
-		return { codepoint, modifier: modValue - 1 };
+		const eventType = parseEventType(homeEndMatch[2]);
+		const codepoint = homeEndMatch[3] === "H" ? FUNCTIONAL_CODEPOINTS.home : FUNCTIONAL_CODEPOINTS.end;
+		return { codepoint, modifier: modValue - 1, eventType };
 	}
 
 	return null;
@@ -402,17 +478,28 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 		case "enter":
 		case "return":
 			if (shift && !ctrl && !alt) {
-				return (
-					data === "\x1b\r" || // Legacy: some terminals send ESC+CR for shift+enter
+				if (
 					matchesKittySequence(data, CODEPOINTS.enter, MODIFIERS.shift) ||
 					matchesKittySequence(data, CODEPOINTS.kpEnter, MODIFIERS.shift)
-				);
+				) {
+					return true;
+				}
+				if (kittyProtocolActive) {
+					return data === "\x1b\r" || data === "\n";
+				}
+				return false;
 			}
 			if (alt && !ctrl && !shift) {
-				return (
+				if (
 					matchesKittySequence(data, CODEPOINTS.enter, MODIFIERS.alt) ||
 					matchesKittySequence(data, CODEPOINTS.kpEnter, MODIFIERS.alt)
-				);
+				) {
+					return true;
+				}
+				if (!kittyProtocolActive) {
+					return data === "\x1b\r";
+				}
+				return false;
 			}
 			if (modifier === 0) {
 				return (
@@ -534,7 +621,7 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 			return matchesKittySequence(data, codepoint, modifier);
 		}
 
-		return data === key;
+		return data === key || matchesKittySequence(data, codepoint, 0);
 	}
 
 	return false;
@@ -577,14 +664,22 @@ export function parseKey(data: string): string | undefined {
 		}
 	}
 
-	// Legacy sequences
+	// Mode-aware legacy sequences
+	// When Kitty protocol is active, ambiguous sequences are interpreted as custom terminal mappings:
+	// - \x1b\r = shift+enter (Kitty mapping), not alt+enter
+	// - \n = shift+enter (Ghostty mapping)
+	if (kittyProtocolActive) {
+		if (data === "\x1b\r" || data === "\n") return "shift+enter";
+	}
+
+	// Legacy sequences (used when Kitty protocol is not active, or for unambiguous sequences)
 	if (data === "\x1b") return "escape";
 	if (data === "\t") return "tab";
 	if (data === "\r" || data === "\x1bOM") return "enter";
 	if (data === " ") return "space";
 	if (data === "\x7f" || data === "\x08") return "backspace";
 	if (data === "\x1b[Z") return "shift+tab";
-	if (data === "\x1b\r") return "shift+enter"; // Legacy: ESC+CR for shift+enter
+	if (!kittyProtocolActive && data === "\x1b\r") return "alt+enter";
 	if (data === "\x1b\x7f") return "alt+backspace";
 	if (data === "\x1b[A") return "up";
 	if (data === "\x1b[B") return "down";

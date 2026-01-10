@@ -1,4 +1,4 @@
-import { convertToPngWithImageMagick } from "./image-magick.js";
+import { convertToPngWithImageMagick } from "./image-magick";
 
 /**
  * Convert image to PNG format for terminal display.

@@ -2,9 +2,9 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getCodexInstructions } from "../src/providers/openai-codex/prompts/codex.js";
-import { type RequestBody, transformRequestBody } from "../src/providers/openai-codex/request-transformer.js";
-import { parseCodexError } from "../src/providers/openai-codex/response-handler.js";
+import { getCodexInstructions } from "../src/providers/openai-codex/prompts/codex";
+import { type RequestBody, transformRequestBody } from "../src/providers/openai-codex/request-transformer";
+import { parseCodexError } from "../src/providers/openai-codex/response-handler";
 
 const DEFAULT_PROMPT_PREFIX =
 	"You are an expert coding assistant. You help users with coding tasks by reading files, executing commands";

@@ -6,12 +6,12 @@ import type { AgentTool, AgentToolContext, AgentToolUpdateCallback } from "@oh-m
 import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
 import type { Theme } from "../../modes/interactive/theme/theme";
 import type { ExtensionRunner } from "./runner";
-import type { ExtensionContext, RegisteredTool, ToolCallEventResult, ToolResultEventResult } from "./types";
+import type { RegisteredTool, ToolCallEventResult, ToolResultEventResult } from "./types";
 
 /**
  * Wrap a RegisteredTool into an AgentTool.
  */
-export function wrapRegisteredTool(registeredTool: RegisteredTool, getContext: () => ExtensionContext): AgentTool {
+export function wrapRegisteredTool(registeredTool: RegisteredTool, runner: ExtensionRunner): AgentTool {
 	const { definition } = registeredTool;
 	return {
 		name: definition.name,
@@ -19,7 +19,7 @@ export function wrapRegisteredTool(registeredTool: RegisteredTool, getContext: (
 		description: definition.description,
 		parameters: definition.parameters,
 		execute: (toolCallId, params, signal, onUpdate) =>
-			definition.execute(toolCallId, params, onUpdate, getContext(), signal),
+			definition.execute(toolCallId, params, onUpdate, runner.createContext(), signal),
 		renderCall: definition.renderCall ? (args, theme) => definition.renderCall?.(args, theme as Theme) : undefined,
 		renderResult: definition.renderResult
 			? (result, options, theme) =>
@@ -35,11 +35,8 @@ export function wrapRegisteredTool(registeredTool: RegisteredTool, getContext: (
 /**
  * Wrap all registered tools into AgentTools.
  */
-export function wrapRegisteredTools(
-	registeredTools: RegisteredTool[],
-	getContext: () => ExtensionContext,
-): AgentTool[] {
-	return registeredTools.map((rt) => wrapRegisteredTool(rt, getContext));
+export function wrapRegisteredTools(registeredTools: RegisteredTool[], runner: ExtensionRunner): AgentTool[] {
+	return registeredTools.map((rt) => wrapRegisteredTool(rt, runner));
 }
 
 /**

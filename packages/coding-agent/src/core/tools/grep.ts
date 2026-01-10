@@ -70,7 +70,29 @@ export interface GrepToolDetails {
 	error?: string;
 }
 
-export function createGrepTool(session: ToolSession): AgentTool<typeof grepSchema> {
+/**
+ * Pluggable operations for the grep tool.
+ * Override these to delegate search to remote systems (e.g., SSH).
+ */
+export interface GrepOperations {
+	/** Check if path is a directory. Throws if path doesn't exist. */
+	isDirectory: (absolutePath: string) => Promise<boolean> | boolean;
+	/** Read file contents for context lines */
+	readFile: (absolutePath: string) => Promise<string> | string;
+}
+
+const defaultGrepOperations: GrepOperations = {
+	isDirectory: async (p) => (await Bun.file(p).stat()).isDirectory(),
+	readFile: (p) => Bun.file(p).text(),
+};
+
+export interface GrepToolOptions {
+	/** Custom operations for grep. Default: local filesystem + ripgrep */
+	operations?: GrepOperations;
+}
+
+export function createGrepTool(session: ToolSession, options?: GrepToolOptions): AgentTool<typeof grepSchema> {
+	const ops = options?.operations ?? defaultGrepOperations;
 	return {
 		name: "grep",
 		label: "Grep",
@@ -120,14 +142,13 @@ export function createGrepTool(session: ToolSession): AgentTool<typeof grepSchem
 					const relative = nodePath.relative(session.cwd, searchPath).replace(/\\/g, "/");
 					return relative.length === 0 ? "." : relative;
 				})();
-				let searchStat: Awaited<ReturnType<Bun.BunFile["stat"]>>;
+
+				let isDirectory: boolean;
 				try {
-					searchStat = await Bun.file(searchPath).stat();
+					isDirectory = await ops.isDirectory(searchPath);
 				} catch {
 					throw new Error(`Path not found: ${searchPath}`);
 				}
-
-				const isDirectory = searchStat.isDirectory();
 				const contextValue = context && context > 0 ? context : 0;
 				const effectiveLimit = Math.max(1, limit ?? DEFAULT_LIMIT);
 				const effectiveOutputMode = outputMode ?? "content";
@@ -150,7 +171,7 @@ export function createGrepTool(session: ToolSession): AgentTool<typeof grepSchem
 					if (!linesPromise) {
 						linesPromise = (async () => {
 							try {
-								const content = await Bun.file(filePath).text();
+								const content = await ops.readFile(filePath);
 								return content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
 							} catch {
 								return [];

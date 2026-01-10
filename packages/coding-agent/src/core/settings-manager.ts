@@ -45,6 +45,14 @@ export interface TerminalSettings {
 
 export interface ImageSettings {
 	autoResize?: boolean; // default: true (resize images to 2000x2000 max for better model compatibility)
+	blockImages?: boolean; // default: false - when true, prevents all images from being sent to LLM providers
+}
+
+export interface ThinkingBudgetsSettings {
+	minimal?: number;
+	low?: number;
+	medium?: number;
+	high?: number;
 }
 
 export type NotificationMethod = "bell" | "osc99" | "osc9" | "auto" | "off";
@@ -179,6 +187,7 @@ export interface Settings {
 	shellPath?: string; // Custom shell path (e.g., for Cygwin users on Windows)
 	collapseChangelog?: boolean; // Show condensed changelog after update (use /changelog for full)
 	doubleEscapeAction?: "branch" | "tree"; // Action for double-escape with empty editor (default: "tree")
+	thinkingBudgets?: ThinkingBudgetsSettings; // Custom token budgets for thinking levels
 	/** Environment variables to set automatically on startup */
 	env?: Record<string, string>;
 	extensions?: string[]; // Array of extension file paths
@@ -489,23 +498,29 @@ export class SettingsManager {
 	}
 
 	private save(): void {
-		if (!this.persist || !this.settingsPath) return;
+		if (this.persist && this.settingsPath) {
+			try {
+				const dir = dirname(this.settingsPath);
+				if (!existsSync(dir)) {
+					mkdirSync(dir, { recursive: true });
+				}
 
-		try {
-			const dir = dirname(this.settingsPath);
-			if (!existsSync(dir)) {
-				mkdirSync(dir, { recursive: true });
+				// Re-read current file to preserve any settings added externally while running
+				const currentFileSettings = SettingsManager.loadFromFile(this.settingsPath);
+				// Merge: file settings as base, globalSettings (in-memory changes) as overrides
+				const mergedSettings = deepMergeSettings(currentFileSettings, this.globalSettings);
+				this.globalSettings = mergedSettings;
+
+				// Save merged settings (project settings are read-only)
+				writeFileSync(this.settingsPath, JSON.stringify(this.globalSettings, null, 2), "utf-8");
+			} catch (error) {
+				console.error(`Warning: Could not save settings file: ${error}`);
 			}
-
-			// Save only global settings (project settings are read-only)
-			writeFileSync(this.settingsPath, JSON.stringify(this.globalSettings, null, 2), "utf-8");
-
-			// Re-merge project settings into active settings (preserve overrides)
-			const projectSettings = this.loadProjectSettings();
-			this.rebuildSettings(projectSettings);
-		} catch (error) {
-			console.error(`Warning: Could not save settings file: ${error}`);
 		}
+
+		// Always re-merge to update active settings (needed for both file and inMemory modes)
+		const projectSettings = this.loadProjectSettings();
+		this.rebuildSettings(projectSettings);
 	}
 
 	getLastChangelogVersion(): string | undefined {
@@ -668,6 +683,10 @@ export class SettingsManager {
 		};
 	}
 
+	getThinkingBudgets(): ThinkingBudgetsSettings | undefined {
+		return this.settings.thinkingBudgets;
+	}
+
 	getHideThinkingBlock(): boolean {
 		return this.settings.hideThinkingBlock ?? false;
 	}
@@ -770,6 +789,18 @@ export class SettingsManager {
 			this.globalSettings.images = {};
 		}
 		this.globalSettings.images.autoResize = enabled;
+		this.save();
+	}
+
+	getBlockImages(): boolean {
+		return this.settings.images?.blockImages ?? false;
+	}
+
+	setBlockImages(blocked: boolean): void {
+		if (!this.globalSettings.images) {
+			this.globalSettings.images = {};
+		}
+		this.globalSettings.images.blockImages = blocked;
 		this.save();
 	}
 

@@ -1,4 +1,4 @@
-import { hostname as osHostname } from "node:os";
+import { homedir, hostname as osHostname } from "node:os";
 import { theme } from "../../theme/theme";
 import type { RenderedSegment, SegmentContext, StatusLineSegment, StatusLineSegmentId } from "./types";
 
@@ -76,7 +76,7 @@ const pathSegment: StatusLineSegment = {
 		const opts = ctx.options.path ?? {};
 
 		let pwd = process.cwd();
-		const home = process.env.HOME || process.env.USERPROFILE;
+		const home = homedir();
 
 		if (opts.abbreviate !== false && home && pwd.startsWith(home)) {
 			pwd = `~${pwd.slice(home.length)}`;

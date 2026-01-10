@@ -19,7 +19,7 @@ import { isContextOverflow, modelsAreEqual, supportsXhigh } from "@oh-my-pi/pi-a
 import type { Rule } from "../capability/rule";
 import { getAuthPath } from "../config";
 import { theme } from "../modes/interactive/theme/theme";
-import { type BashResult, executeBash as executeBashCommand } from "./bash-executor";
+import { type BashResult, executeBash as executeBashCommand, executeBashWithOperations } from "./bash-executor";
 import {
 	type CompactionResult,
 	calculateContextTokens,
@@ -52,9 +52,11 @@ import { parseModelString } from "./model-resolver";
 import { expandPromptTemplate, type PromptTemplate, parseCommandArgs } from "./prompt-templates";
 import type { BranchSummaryEntry, CompactionEntry, NewSessionOptions, SessionManager } from "./session-manager";
 import type { SettingsManager, SkillsSettings } from "./settings-manager";
+import type { Skill, SkillWarning } from "./skills";
 import { expandSlashCommand, type FileSlashCommand } from "./slash-commands";
 import { closeAllConnections } from "./ssh/connection-manager";
 import { unmountAll } from "./ssh/sshfs-mount";
+import type { BashOperations } from "./tools/bash";
 import type { TtsrManager } from "./ttsr";
 
 /** Session-specific events that extend the core AgentEvent */
@@ -85,6 +87,10 @@ export interface AgentSessionConfig {
 	slashCommands?: FileSlashCommand[];
 	/** Extension runner (created in main.ts with wrapped tools) */
 	extensionRunner?: ExtensionRunner;
+	/** Loaded skills (already discovered by SDK) */
+	skills?: Skill[];
+	/** Skill loading warnings (already captured by SDK) */
+	skillWarnings?: SkillWarning[];
 	/** Custom commands (TypeScript slash commands) */
 	customCommands?: LoadedCustomCommand[];
 	skillsSettings?: Required<SkillsSettings>;
@@ -154,9 +160,9 @@ const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "hi
 const THINKING_LEVELS_WITH_XHIGH: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
 const noOpUIContext: ExtensionUIContext = {
-	select: async () => undefined,
-	confirm: async () => false,
-	input: async () => undefined,
+	select: async (_title, _options, _dialogOptions) => undefined,
+	confirm: async (_title, _message, _dialogOptions) => false,
+	input: async (_title, _placeholder, _dialogOptions) => undefined,
 	notify: () => {},
 	setStatus: () => {},
 	setWidget: () => {},
@@ -168,6 +174,9 @@ const noOpUIContext: ExtensionUIContext = {
 	get theme() {
 		return theme;
 	},
+	getAllThemes: () => [],
+	getTheme: () => undefined,
+	setTheme: (_theme) => ({ success: false, error: "UI not available" }),
 };
 
 async function cleanupSshResources(): Promise<void> {
@@ -224,6 +233,9 @@ export class AgentSession {
 	private _extensionRunner: ExtensionRunner | undefined = undefined;
 	private _turnIndex = 0;
 
+	private _skills: Skill[];
+	private _skillWarnings: SkillWarning[];
+
 	// Custom commands (TypeScript slash commands)
 	private _customCommands: LoadedCustomCommand[] = [];
 
@@ -250,6 +262,8 @@ export class AgentSession {
 		this._promptTemplates = config.promptTemplates ?? [];
 		this._slashCommands = config.slashCommands ?? [];
 		this._extensionRunner = config.extensionRunner;
+		this._skills = config.skills ?? [];
+		this._skillWarnings = config.skillWarnings ?? [];
 		this._customCommands = config.customCommands ?? [];
 		this._skillsSettings = config.skillsSettings;
 		this._modelRegistry = config.modelRegistry;
@@ -578,6 +592,11 @@ export class AgentSession {
 		return this.agent.state.isStreaming;
 	}
 
+	/** Current retry attempt (0 if not retrying) */
+	get retryAttempt(): number {
+		return this._retryAttempt;
+	}
+
 	/**
 	 * Get the names of currently active tools.
 	 * Returns the names of tools currently set on the agent.
@@ -788,7 +807,11 @@ export class AgentSession {
 
 		// Emit before_agent_start extension event
 		if (this._extensionRunner) {
-			const result = await this._extensionRunner.emitBeforeAgentStart(expandedText, options?.images);
+			const result = await this._extensionRunner.emitBeforeAgentStart(
+				expandedText,
+				options?.images,
+				this._baseSystemPrompt,
+			);
 			if (result?.messages) {
 				for (const msg of result.messages) {
 					messages.push({
@@ -802,8 +825,8 @@ export class AgentSession {
 				}
 			}
 
-			if (result?.systemPromptAppend) {
-				this.agent.setSystemPrompt(`${this._baseSystemPrompt}\n\n${result.systemPromptAppend}`);
+			if (result?.systemPrompt !== undefined) {
+				this.agent.setSystemPrompt(result.systemPrompt);
 			} else {
 				this.agent.setSystemPrompt(this._baseSystemPrompt);
 			}
@@ -861,6 +884,10 @@ export class AgentSession {
 				void this.abort();
 			},
 			hasPendingMessages: () => this.queuedMessageCount > 0,
+			shutdown: () => {
+				void this.dispose();
+				process.exit(0);
+			},
 			hasQueuedMessages: () => this.queuedMessageCount > 0,
 			waitForIdle: () => this.agent.waitForIdle(),
 			newSession: async (options) => {
@@ -905,7 +932,7 @@ export class AgentSession {
 		const ctx = {
 			...baseCtx,
 			hasQueuedMessages: baseCtx.hasPendingMessages,
-		} as HookCommandContext;
+		} as unknown as HookCommandContext;
 
 		try {
 			const args = parseCommandArgs(argsString);
@@ -1053,6 +1080,45 @@ export class AgentSession {
 	}
 
 	/**
+	 * Send a user message to the agent. Always triggers a turn.
+	 * When the agent is streaming, use deliverAs to specify how to queue the message.
+	 *
+	 * @param content User message content (string or content array)
+	 * @param options.deliverAs Delivery mode when streaming: "steer" or "followUp"
+	 */
+	async sendUserMessage(
+		content: string | (TextContent | ImageContent)[],
+		options?: { deliverAs?: "steer" | "followUp" },
+	): Promise<void> {
+		// Normalize content to text string + optional images
+		let text: string;
+		let images: ImageContent[] | undefined;
+
+		if (typeof content === "string") {
+			text = content;
+		} else {
+			const textParts: string[] = [];
+			images = [];
+			for (const part of content) {
+				if (part.type === "text") {
+					textParts.push(part.text);
+				} else {
+					images.push(part);
+				}
+			}
+			text = textParts.join("\n");
+			if (images.length === 0) images = undefined;
+		}
+
+		// Use prompt() with expandPromptTemplates: false to skip command handling and template expansion
+		await this.prompt(text, {
+			expandPromptTemplates: false,
+			streamingBehavior: options?.deliverAs,
+			images,
+		});
+	}
+
+	/**
 	 * Clear queued messages and return them.
 	 * Useful for restoring to editor when user aborts.
 	 */
@@ -1075,8 +1141,38 @@ export class AgentSession {
 		return { steering: this._steeringMessages, followUp: this._followUpMessages };
 	}
 
+	/**
+	 * Pop the last queued message (steering first, then follow-up).
+	 * Used by dequeue keybinding to restore messages to editor one at a time.
+	 */
+	popLastQueuedMessage(): string | undefined {
+		// Pop from steering first (LIFO)
+		if (this._steeringMessages.length > 0) {
+			const message = this._steeringMessages.pop();
+			this.agent.popLastSteer();
+			return message;
+		}
+		// Then from follow-up
+		if (this._followUpMessages.length > 0) {
+			const message = this._followUpMessages.pop();
+			this.agent.popLastFollowUp();
+			return message;
+		}
+		return undefined;
+	}
+
 	get skillsSettings(): Required<SkillsSettings> | undefined {
 		return this._skillsSettings;
+	}
+
+	/** Skills loaded by SDK (empty if --no-skills or skills: [] was passed) */
+	get skills(): readonly Skill[] {
+		return this._skills;
+	}
+
+	/** Skill loading warnings captured by SDK */
+	get skillWarnings(): readonly SkillWarning[] {
+		return this._skillWarnings;
 	}
 
 	/**
@@ -1115,6 +1211,7 @@ export class AgentSession {
 		this.agent.reset();
 		await this.sessionManager.flush();
 		this.sessionManager.newSession(options);
+		this.agent.sessionId = this.sessionManager.getSessionId();
 		this._steeringMessages = [];
 		this._followUpMessages = [];
 		this._pendingNextTurnMessages = [];
@@ -1311,16 +1408,12 @@ export class AgentSession {
 
 	/**
 	 * Set thinking level.
-	 * Clamps to model capabilities: "off" if no reasoning, "high" if xhigh unsupported.
+	 * Clamps to model capabilities based on available thinking levels.
 	 * Saves to session and settings.
 	 */
 	setThinkingLevel(level: ThinkingLevel): void {
-		let effectiveLevel = level;
-		if (!this.supportsThinking()) {
-			effectiveLevel = "off";
-		} else if (level === "xhigh" && !this.supportsXhighThinking()) {
-			effectiveLevel = "high";
-		}
+		const availableLevels = this.getAvailableThinkingLevels();
+		const effectiveLevel = availableLevels.includes(level) ? level : this._clampThinkingLevel(level, availableLevels);
 		this.agent.setThinkingLevel(effectiveLevel);
 		this.sessionManager.appendThinkingLevelChange(effectiveLevel);
 		this.settingsManager.setDefaultThinkingLevel(effectiveLevel);
@@ -1344,8 +1437,10 @@ export class AgentSession {
 
 	/**
 	 * Get available thinking levels for current model.
+	 * The provider will clamp to what the specific model supports internally.
 	 */
 	getAvailableThinkingLevels(): ThinkingLevel[] {
+		if (!this.supportsThinking()) return ["off"];
 		return this.supportsXhighThinking() ? THINKING_LEVELS_WITH_XHIGH : THINKING_LEVELS;
 	}
 
@@ -1361,6 +1456,24 @@ export class AgentSession {
 	 */
 	supportsThinking(): boolean {
 		return !!this.model?.reasoning;
+	}
+
+	private _clampThinkingLevel(level: ThinkingLevel, availableLevels: ThinkingLevel[]): ThinkingLevel {
+		const ordered = THINKING_LEVELS_WITH_XHIGH;
+		const available = new Set(availableLevels);
+		const requestedIndex = ordered.indexOf(level);
+		if (requestedIndex === -1) {
+			return availableLevels[0] ?? "off";
+		}
+		for (let i = requestedIndex; i < ordered.length; i++) {
+			const candidate = ordered[i];
+			if (available.has(candidate)) return candidate;
+		}
+		for (let i = requestedIndex - 1; i >= 0; i--) {
+			const candidate = ordered[i];
+			if (available.has(candidate)) return candidate;
+		}
+		return availableLevels[0] ?? "off";
 	}
 
 	// =========================================================================
@@ -1548,8 +1661,24 @@ export class AgentSession {
 
 		const contextWindow = this.model?.contextWindow ?? 0;
 
+		// Skip overflow check if the message came from a different model.
+		// This handles the case where user switched from a smaller-context model (e.g. opus)
+		// to a larger-context model (e.g. codex) - the overflow error from the old model
+		// shouldn't trigger compaction for the new model.
+		const sameModel =
+			this.model && assistantMessage.provider === this.model.provider && assistantMessage.model === this.model.id;
+
+		// Skip overflow check if the error is from before a compaction in the current path.
+		// This handles the case where an error was kept after compaction (in the "kept" region).
+		// The error shouldn't trigger another compaction since we already compacted.
+		// Example: opus fails → switch to codex → compact → switch back to opus → opus error
+		// is still in context but shouldn't trigger compaction again.
+		const compactionEntry = this.sessionManager.getBranch().find((e) => e.type === "compaction");
+		const errorIsFromBeforeCompaction =
+			compactionEntry && assistantMessage.timestamp < new Date(compactionEntry.timestamp).getTime();
+
 		// Case 1: Overflow - LLM returned context overflow error
-		if (isContextOverflow(assistantMessage, contextWindow)) {
+		if (sameModel && !errorIsFromBeforeCompaction && isContextOverflow(assistantMessage, contextWindow)) {
 			// Remove the error message from agent state (it IS saved to session for history,
 			// but we don't want it in context for the retry)
 			const messages = this.agent.state.messages;
@@ -2005,7 +2134,7 @@ export class AgentSession {
 	 */
 	abortRetry(): void {
 		this._retryAbortController?.abort();
-		this._retryAttempt = 0;
+		// Note: _retryAttempt is reset in the catch block of _autoRetry
 		this._resolveRetry();
 	}
 
@@ -2046,48 +2175,60 @@ export class AgentSession {
 	 * @param command The bash command to execute
 	 * @param onChunk Optional streaming callback for output
 	 * @param options.excludeFromContext If true, command output won't be sent to LLM (!! prefix)
+	 * @param options.operations Custom BashOperations for remote execution
 	 */
 	async executeBash(
 		command: string,
 		onChunk?: (chunk: string) => void,
-		options?: { excludeFromContext?: boolean },
+		options?: { excludeFromContext?: boolean; operations?: BashOperations },
 	): Promise<BashResult> {
 		this._bashAbortController = new AbortController();
 
 		try {
-			const result = await executeBashCommand(command, {
-				onChunk,
-				signal: this._bashAbortController.signal,
-			});
+			const result = options?.operations
+				? await executeBashWithOperations(command, process.cwd(), options.operations, {
+						onChunk,
+						signal: this._bashAbortController.signal,
+					})
+				: await executeBashCommand(command, {
+						onChunk,
+						signal: this._bashAbortController.signal,
+					});
 
-			// Create and save message
-			const bashMessage: BashExecutionMessage = {
-				role: "bashExecution",
-				command,
-				output: result.output,
-				exitCode: result.exitCode,
-				cancelled: result.cancelled,
-				truncated: result.truncated,
-				fullOutputPath: result.fullOutputPath,
-				timestamp: Date.now(),
-				excludeFromContext: options?.excludeFromContext,
-			};
-
-			// If agent is streaming, defer adding to avoid breaking tool_use/tool_result ordering
-			if (this.isStreaming) {
-				// Queue for later - will be flushed on agent_end
-				this._pendingBashMessages.push(bashMessage);
-			} else {
-				// Add to agent state immediately
-				this.agent.appendMessage(bashMessage);
-
-				// Save to session
-				this.sessionManager.appendMessage(bashMessage);
-			}
-
+			this.recordBashResult(command, result, options);
 			return result;
 		} finally {
 			this._bashAbortController = undefined;
+		}
+	}
+
+	/**
+	 * Record a bash execution result in session history.
+	 * Used by executeBash and by extensions that handle bash execution themselves.
+	 */
+	recordBashResult(command: string, result: BashResult, options?: { excludeFromContext?: boolean }): void {
+		const bashMessage: BashExecutionMessage = {
+			role: "bashExecution",
+			command,
+			output: result.output,
+			exitCode: result.exitCode,
+			cancelled: result.cancelled,
+			truncated: result.truncated,
+			fullOutputPath: result.fullOutputPath,
+			timestamp: Date.now(),
+			excludeFromContext: options?.excludeFromContext,
+		};
+
+		// If agent is streaming, defer adding to avoid breaking tool_use/tool_result ordering
+		if (this.isStreaming) {
+			// Queue for later - will be flushed on agent_end
+			this._pendingBashMessages.push(bashMessage);
+		} else {
+			// Add to agent state immediately
+			this.agent.appendMessage(bashMessage);
+
+			// Save to session
+			this.sessionManager.appendMessage(bashMessage);
 		}
 	}
 
@@ -2163,6 +2304,7 @@ export class AgentSession {
 
 		// Set new session
 		await this.sessionManager.setSessionFile(sessionPath);
+		this.agent.sessionId = this.sessionManager.getSessionId();
 
 		// Reload messages
 		const sessionContext = this.sessionManager.buildSessionContext();
@@ -2247,6 +2389,7 @@ export class AgentSession {
 		} else {
 			this.sessionManager.createBranchedSession(selectedEntry.parentId);
 		}
+		this.agent.sessionId = this.sessionManager.getSessionId();
 
 		// Reload messages from entries (works for both file and in-memory mode)
 		const sessionContext = this.sessionManager.buildSessionContext();

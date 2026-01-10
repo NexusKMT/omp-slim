@@ -1,6 +1,53 @@
-import { getModel } from "@oh-my-pi/pi-ai";
+import {
+	type AssistantMessage,
+	type AssistantMessageEvent,
+	EventStream,
+	getModel,
+	type ThinkingBudgets,
+	type Usage,
+} from "@oh-my-pi/pi-ai";
 import { describe, expect, it } from "vitest";
 import { Agent } from "../src/index";
+
+class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
+	constructor() {
+		super(
+			(event) => event.type === "done" || event.type === "error",
+			(event) => {
+				if (event.type === "done") return event.message;
+				if (event.type === "error") return event.error;
+				throw new Error("Unexpected event type");
+			},
+		);
+	}
+}
+
+function createUsage(): Usage {
+	return {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: 0,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
+}
+
+function createAssistantMessage(
+	content: AssistantMessage["content"],
+	stopReason: AssistantMessage["stopReason"] = "stop",
+): AssistantMessage {
+	return {
+		role: "assistant",
+		content,
+		api: "openai-responses",
+		provider: "openai",
+		model: "mock",
+		usage: createUsage(),
+		stopReason,
+		timestamp: Date.now(),
+	};
+}
 
 describe("Agent", () => {
 	it("should create an agent instance with default state", () => {
@@ -108,5 +155,36 @@ describe("Agent", () => {
 
 		// Should not throw even if nothing is running
 		expect(() => agent.abort()).not.toThrow();
+	});
+
+	it("forwards sessionId and thinkingBudgets to streamFn options", async () => {
+		let receivedSessionId: string | undefined;
+		let receivedBudgets: ThinkingBudgets | undefined;
+
+		const agent = new Agent({
+			sessionId: "session-abc",
+			thinkingBudgets: { minimal: 64, low: 256 },
+			streamFn: (_model, _context, options) => {
+				receivedSessionId = options?.sessionId;
+				receivedBudgets = options?.thinkingBudgets;
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					const message = createAssistantMessage([{ type: "text", text: "ok" }]);
+					stream.push({ type: "done", reason: "stop", message });
+				});
+				return stream;
+			},
+		});
+
+		await agent.prompt("hello");
+		expect(receivedSessionId).toBe("session-abc");
+		expect(receivedBudgets).toEqual({ minimal: 64, low: 256 });
+
+		agent.sessionId = "session-def";
+		agent.thinkingBudgets = { medium: 512 };
+
+		await agent.prompt("hello again");
+		expect(receivedSessionId).toBe("session-def");
+		expect(receivedBudgets).toEqual({ medium: 512 });
 	});
 });

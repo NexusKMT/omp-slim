@@ -1,6 +1,15 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added `popLastSteer()` and `popLastFollowUp()` methods to remove and return the last queued message (LIFO) for dequeue operations
+- `thinkingBudgets` option on `Agent` and `AgentOptions` to customize token budgets per thinking level
+- `sessionId` option on `Agent` to forward session identifiers to LLM providers for session-based caching
+
+### Fixed
+
+- `minimal` thinking level now maps to `minimal` reasoning effort instead of being treated as `low`
 
 ## [3.37.1] - 2026-01-10
 

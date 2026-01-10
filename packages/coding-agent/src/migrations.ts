@@ -2,10 +2,10 @@
  * One-time migrations that run on startup.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import chalk from "chalk";
-import { getAgentDir } from "./config";
+import { getAgentDir, getBinDir } from "./config";
 
 /**
  * Migrate PI_* environment variables to OMP_* equivalents.
@@ -144,6 +144,50 @@ export function migrateSessionsFromAgentRoot(): void {
 }
 
 /**
+ * Move fd/rg binaries from tools/ to bin/ if they exist.
+ */
+function migrateToolsToBin(): void {
+	const agentDir = getAgentDir();
+	const toolsDir = join(agentDir, "tools");
+	const binDir = getBinDir();
+
+	if (!existsSync(toolsDir)) return;
+
+	const binaries = ["fd", "rg", "fd.exe", "rg.exe"];
+	let movedAny = false;
+
+	for (const bin of binaries) {
+		const oldPath = join(toolsDir, bin);
+		const newPath = join(binDir, bin);
+
+		if (existsSync(oldPath)) {
+			if (!existsSync(binDir)) {
+				mkdirSync(binDir, { recursive: true });
+			}
+			if (!existsSync(newPath)) {
+				try {
+					renameSync(oldPath, newPath);
+					movedAny = true;
+				} catch {
+					// Ignore errors
+				}
+			} else {
+				// Target exists, just delete the old one
+				try {
+					rmSync(oldPath, { force: true });
+				} catch {
+					// Ignore
+				}
+			}
+		}
+	}
+
+	if (movedAny) {
+		console.log(chalk.green(`Migrated managed binaries tools/ → bin/`));
+	}
+}
+
+/**
  * Run all migrations. Called once on startup.
  *
  * @param _cwd - Current working directory (reserved for future project-local migrations)
@@ -159,6 +203,7 @@ export async function runMigrations(_cwd: string): Promise<{
 	// Then: run data migrations
 	const migratedAuthProviders = migrateAuthToAuthJson();
 	migrateSessionsFromAgentRoot();
+	migrateToolsToBin();
 
 	// Collect deprecation warnings
 	const deprecationWarnings: string[] = [];

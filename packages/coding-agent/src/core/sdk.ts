@@ -27,8 +27,8 @@
  */
 
 import { join } from "node:path";
-import { Agent, type AgentTool, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Model } from "@oh-my-pi/pi-ai";
+import { Agent, type AgentMessage, type AgentTool, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import type { Message, Model } from "@oh-my-pi/pi-ai";
 import type { Component } from "@oh-my-pi/pi-tui";
 import chalk from "chalk";
 // Import discovery to register all providers on startup
@@ -51,9 +51,10 @@ import {
 	type ExtensionContext,
 	type ExtensionFactory,
 	ExtensionRunner,
+	type ExtensionUIContext,
 	type LoadExtensionsResult,
-	type LoadedExtension,
 	loadExtensionFromFactory,
+	loadExtensions,
 	type ToolDefinition,
 	wrapRegisteredTools,
 	wrapToolWithExtensions,
@@ -66,7 +67,7 @@ import { formatModelString, parseModelString } from "./model-resolver";
 import { loadPromptTemplates as loadPromptTemplatesInternal, type PromptTemplate } from "./prompt-templates";
 import { SessionManager } from "./session-manager";
 import { type Settings, SettingsManager, type SkillsSettings } from "./settings-manager";
-import { loadSkills as loadSkillsInternal, type Skill } from "./skills";
+import { loadSkills as loadSkillsInternal, type Skill, type SkillWarning } from "./skills";
 import { type FileSlashCommand, loadSlashCommands as loadSlashCommandsInternal } from "./slash-commands";
 import { closeAllConnections } from "./ssh/connection-manager";
 import { unmountAll } from "./ssh/sshfs-mount";
@@ -129,11 +130,13 @@ export interface CreateAgentSessionOptions {
 	extensions?: ExtensionFactory[];
 	/** Additional extension paths to load (merged with discovery). */
 	additionalExtensionPaths?: string[];
+	/** Disable extension discovery (explicit paths still load). */
+	disableExtensionDiscovery?: boolean;
 	/**
 	 * Pre-loaded extensions (skips file discovery).
 	 * @internal Used by CLI when extensions are loaded early to parse custom flags.
 	 */
-	preloadedExtensions?: LoadedExtension[];
+	preloadedExtensions?: LoadExtensionsResult;
 
 	/** Shared event bus for tool/extension communication. Default: creates new bus. */
 	eventBus?: EventBus;
@@ -172,8 +175,10 @@ export interface CreateAgentSessionOptions {
 export interface CreateAgentSessionResult {
 	/** The created session */
 	session: AgentSession;
-	/** Extensions result (for UI context setup in interactive mode) */
+	/** Extensions result (loaded extensions + runtime) */
 	extensionsResult: LoadExtensionsResult;
+	/** Update tool UI context (interactive mode) */
+	setToolUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
 	/** MCP manager for server lifecycle management (undefined if MCP disabled) */
 	mcpManager?: MCPManager;
 	/** Warning if session was restored with a different model than saved */
@@ -274,12 +279,15 @@ export async function discoverExtensions(cwd?: string): Promise<LoadExtensionsRe
 /**
  * Discover skills from cwd and agentDir.
  */
-export function discoverSkills(cwd?: string, _agentDir?: string, settings?: SkillsSettings): Skill[] {
-	const { skills } = loadSkillsInternal({
+export function discoverSkills(
+	cwd?: string,
+	_agentDir?: string,
+	settings?: SkillsSettings,
+): { skills: Skill[]; warnings: SkillWarning[] } {
+	return loadSkillsInternal({
 		...settings,
 		cwd: cwd ?? process.cwd(),
 	});
-	return skills;
 }
 
 /**
@@ -380,6 +388,7 @@ export function loadSettings(cwd?: string, agentDir?: string): Settings {
 		extensions: manager.getExtensionPaths(),
 		skills: manager.getSkillsSettings(),
 		terminal: { showImages: manager.getShowImages() },
+		images: { autoResize: manager.getImageAutoResize(), blockImages: manager.getBlockImages() },
 	};
 }
 
@@ -614,7 +623,16 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = "off";
 	}
 
-	const skills = options.skills ?? discoverSkills(cwd, agentDir, settingsManager.getSkillsSettings());
+	let skills: Skill[];
+	let skillWarnings: SkillWarning[];
+	if (options.skills !== undefined) {
+		skills = options.skills;
+		skillWarnings = [];
+	} else {
+		const discovered = discoverSkills(cwd, agentDir, settingsManager.getSkillsSettings());
+		skills = discovered.skills;
+		skillWarnings = discovered.warnings;
+	}
 	time("discoverSkills");
 
 	// Discover rules
@@ -723,12 +741,15 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	// Load extensions (discovers from standard locations + configured paths)
 	let extensionsResult: LoadExtensionsResult;
-	if (options.preloadedExtensions !== undefined && options.preloadedExtensions.length > 0) {
-		extensionsResult = {
-			extensions: options.preloadedExtensions,
-			errors: [],
-			setUIContext: () => {},
-		};
+	if (options.disableExtensionDiscovery) {
+		const configuredPaths = options.additionalExtensionPaths ?? [];
+		extensionsResult = await loadExtensions(configuredPaths, cwd, eventBus);
+		time("loadExtensions");
+		for (const { path, error } of extensionsResult.errors) {
+			logger.error("Failed to load extension", { path, error });
+		}
+	} else if (options.preloadedExtensions) {
+		extensionsResult = options.preloadedExtensions;
 	} else {
 		// Merge CLI extension paths with settings extension paths
 		const configuredPaths = [...(options.additionalExtensionPaths ?? []), ...settingsManager.getExtensionPaths()];
@@ -746,36 +767,17 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	// Load inline extensions from factories
 	if (inlineExtensions.length > 0) {
-		const uiHolder: { ui: any; hasUI: boolean } = {
-			ui: {
-				select: async () => undefined,
-				confirm: async () => false,
-				input: async () => undefined,
-				notify: () => {},
-				setStatus: () => {},
-				setWidget: () => {},
-				setTitle: () => {},
-				custom: async () => undefined as never,
-				setEditorText: () => {},
-				getEditorText: () => "",
-				editor: async () => undefined,
-				get theme() {
-					return {} as any;
-				},
-			},
-			hasUI: false,
-		};
 		for (let i = 0; i < inlineExtensions.length; i++) {
 			const factory = inlineExtensions[i];
-			const loaded = loadExtensionFromFactory(factory, cwd, eventBus, uiHolder, `<inline-${i}>`);
+			const loaded = await loadExtensionFromFactory(
+				factory,
+				cwd,
+				eventBus,
+				extensionsResult.runtime,
+				`<inline-${i}>`,
+			);
 			extensionsResult.extensions.push(loaded);
 		}
-		const originalSetUIContext = extensionsResult.setUIContext;
-		extensionsResult.setUIContext = (uiContext, hasUI) => {
-			originalSetUIContext(uiContext, hasUI);
-			uiHolder.ui = uiContext;
-			uiHolder.hasUI = hasUI;
-		};
 	}
 
 	// Discover custom commands (TypeScript slash commands)
@@ -787,7 +789,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	let extensionRunner: ExtensionRunner | undefined;
 	if (extensionsResult.extensions.length > 0) {
-		extensionRunner = new ExtensionRunner(extensionsResult.extensions, cwd, sessionManager, modelRegistry);
+		extensionRunner = new ExtensionRunner(
+			extensionsResult.extensions,
+			extensionsResult.runtime,
+			cwd,
+			sessionManager,
+			modelRegistry,
+		);
 	}
 
 	const getSessionContext = () => ({
@@ -810,35 +818,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			return { definition, extensionPath: "<sdk>" };
 		}) ?? []),
 	];
-	const wrappedExtensionTools = wrapRegisteredTools(allCustomTools, () => ({
-		ui: extensionRunner?.getUIContext() ?? {
-			select: async () => undefined,
-			confirm: async () => false,
-			input: async () => undefined,
-			notify: () => {},
-			setStatus: () => {},
-			setWidget: () => {},
-			setTitle: () => {},
-			custom: async () => undefined as never,
-			setEditorText: () => {},
-			getEditorText: () => "",
-			editor: async () => undefined,
-			get theme() {
-				return {} as any;
-			},
-		},
-		hasUI: extensionRunner?.getHasUI() ?? false,
-		cwd,
-		sessionManager,
-		modelRegistry,
-		model: agent.state.model,
-		isIdle: () => !session.isStreaming,
-		abort: () => {
-			session.abort();
-		},
-		hasPendingMessages: () => session.queuedMessageCount > 0,
-		hasQueuedMessages: () => session.queuedMessageCount > 0,
-	}));
+	const wrappedExtensionTools = extensionRunner ? wrapRegisteredTools(allCustomTools, extensionRunner) : [];
 
 	// All built-in tools are active (conditional tools like git/ask return null from factory if disabled)
 	const toolRegistry = new Map<string, AgentTool>();
@@ -894,9 +874,44 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const slashCommands = options.slashCommands ?? discoverSlashCommands(cwd);
 	time("discoverSlashCommands");
 
-	const baseSetUIContext = extensionsResult.setUIContext;
-	extensionsResult.setUIContext = (uiContext, hasUI) => {
-		baseSetUIContext(uiContext, hasUI);
+	// Create convertToLlm wrapper that filters images if blockImages is enabled (defense-in-depth)
+	const convertToLlmWithBlockImages = (messages: AgentMessage[]): Message[] => {
+		const converted = convertToLlm(messages);
+		// Check setting dynamically so mid-session changes take effect
+		if (!settingsManager.getBlockImages()) {
+			return converted;
+		}
+		// Filter out ImageContent from all messages, replacing with text placeholder
+		return converted.map((msg) => {
+			if (msg.role === "user" || msg.role === "toolResult") {
+				const content = msg.content;
+				if (Array.isArray(content)) {
+					const hasImages = content.some((c) => c.type === "image");
+					if (hasImages) {
+						const filteredContent = content
+							.map((c) =>
+								c.type === "image" ? { type: "text" as const, text: "Image reading is disabled." } : c,
+							)
+							.filter(
+								(c, i, arr) =>
+									// Dedupe consecutive "Image reading is disabled." texts
+									!(
+										c.type === "text" &&
+										c.text === "Image reading is disabled." &&
+										i > 0 &&
+										arr[i - 1].type === "text" &&
+										(arr[i - 1] as { type: "text"; text: string }).text === "Image reading is disabled."
+									),
+							);
+						return { ...msg, content: filteredContent };
+					}
+				}
+			}
+			return msg;
+		});
+	};
+
+	const setToolUIContext = (uiContext: ExtensionUIContext, hasUI: boolean) => {
 		toolContextStore.setUIContext(uiContext, hasUI);
 	};
 
@@ -907,7 +922,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			thinkingLevel,
 			tools: Array.from(toolRegistry.values()),
 		},
-		convertToLlm,
+		convertToLlm: convertToLlmWithBlockImages,
+		sessionId: sessionManager.getSessionId(),
 		transformContext: extensionRunner
 			? async (messages) => {
 					return extensionRunner.emitContext(messages);
@@ -916,6 +932,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		steeringMode: settingsManager.getSteeringMode(),
 		followUpMode: settingsManager.getFollowUpMode(),
 		interruptMode: settingsManager.getInterruptMode(),
+		thinkingBudgets: settingsManager.getThinkingBudgets(),
 		getToolContext: toolContextStore.getContext,
 		getApiKey: async () => {
 			const currentModel = agent.state.model;
@@ -951,6 +968,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		slashCommands,
 		extensionRunner,
 		customCommands: customCommandsResult.commands,
+		skills,
+		skillWarnings,
 		skillsSettings: settingsManager.getSkillsSettings(),
 		modelRegistry,
 		toolRegistry,
@@ -980,6 +999,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	return {
 		session,
 		extensionsResult,
+		setToolUIContext,
 		mcpManager,
 		modelFallbackMessage,
 		lspServers,
