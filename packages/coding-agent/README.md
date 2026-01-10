@@ -114,10 +114,15 @@ Add API keys to `~/.omp/agent/auth.json`:
 
 ```json
 {
-	"anthropic": { "type": "api_key", "key": "sk-ant-..." },
+	"anthropic": [
+		{ "type": "api_key", "key": "sk-ant-..." },
+		{ "type": "api_key", "key": "sk-ant-..." }
+	],
 	"openai": { "type": "api_key", "key": "sk-..." },
 	"google": { "type": "api_key", "key": "..." }
 }
+
+If a provider has multiple credentials, new sessions round robin across them and stay sticky per session.
 ```
 
 **Option 2: Environment variables**
@@ -152,7 +157,7 @@ omp
 /login  # Select provider, authorize in browser
 ```
 
-**Note:** `/login` replaces any existing API key for that provider with OAuth credentials in `auth.json`.
+**Note:** `/login` replaces any existing API keys for that provider with OAuth credentials in `auth.json`. If OAuth credentials already exist, `/login` appends another entry.
 
 **GitHub Copilot notes:**
 

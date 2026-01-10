@@ -90,14 +90,18 @@ export interface ModelsJson {
 }
 
 /** auth.json structure for OAuth credentials */
+export interface AnthropicOAuthCredential {
+	type: "oauth";
+	access: string;
+	refresh?: string;
+	/** Expiry timestamp in milliseconds */
+	expires: number;
+}
+
+export type AnthropicAuthJsonEntry = AnthropicOAuthCredential | AnthropicOAuthCredential[];
+
 export interface AuthJson {
-	anthropic?: {
-		type: "oauth";
-		access: string;
-		refresh?: string;
-		/** Expiry timestamp in milliseconds */
-		expires: number;
-	};
+	anthropic?: AnthropicAuthJsonEntry;
 }
 
 /** Anthropic API response types */

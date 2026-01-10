@@ -9,6 +9,7 @@ import type { Theme } from "../../modes/interactive/theme/theme";
 import type { RenderResultOptions } from "../custom-tools/types";
 import { askToolRenderer } from "./ask";
 import { bashToolRenderer } from "./bash";
+import { calculatorToolRenderer } from "./calculator";
 import { editToolRenderer } from "./edit";
 import { findToolRenderer } from "./find";
 import { grepToolRenderer } from "./grep";
@@ -37,6 +38,7 @@ type ToolRenderer = {
 export const toolRenderers: Record<string, ToolRenderer> = {
 	ask: askToolRenderer as ToolRenderer,
 	bash: bashToolRenderer as ToolRenderer,
+	calc: calculatorToolRenderer as ToolRenderer,
 	edit: editToolRenderer as ToolRenderer,
 	find: findToolRenderer as ToolRenderer,
 	grep: grepToolRenderer as ToolRenderer,

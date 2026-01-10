@@ -20,6 +20,7 @@ describe("createTools", () => {
 
 		// Core tools should always be present
 		expect(names).toContain("bash");
+		expect(names).toContain("calc");
 		expect(names).toContain("read");
 		expect(names).toContain("edit");
 		expect(names).toContain("write");
@@ -162,6 +163,7 @@ describe("createTools", () => {
 		const expectedTools = [
 			"ask",
 			"bash",
+			"calc",
 			"ssh",
 			"edit",
 			"find",

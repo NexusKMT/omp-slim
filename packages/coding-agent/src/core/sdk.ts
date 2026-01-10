@@ -538,6 +538,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	const sessionManager = options.sessionManager ?? SessionManager.create(cwd);
 	time("sessionManager");
+	const sessionId = sessionManager.getSessionId();
 
 	// Check if session has existing data to restore
 	const existingSession = sessionManager.buildSessionContext();
@@ -554,7 +555,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		const parsedModel = parseModelString(defaultModelStr);
 		if (parsedModel) {
 			const restoredModel = modelRegistry.find(parsedModel.provider, parsedModel.id);
-			if (restoredModel && (await modelRegistry.getApiKey(restoredModel))) {
+			if (restoredModel && (await modelRegistry.getApiKey(restoredModel, sessionId))) {
 				model = restoredModel;
 			}
 		}
@@ -570,7 +571,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			const parsedModel = parseModelString(settingsDefaultModel);
 			if (parsedModel) {
 				const settingsModel = modelRegistry.find(parsedModel.provider, parsedModel.id);
-				if (settingsModel && (await modelRegistry.getApiKey(settingsModel))) {
+				if (settingsModel && (await modelRegistry.getApiKey(settingsModel, sessionId))) {
 					model = settingsModel;
 				}
 			}
@@ -580,7 +581,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	// Fall back to first available model with a valid API key
 	if (!model) {
 		for (const m of modelRegistry.getAll()) {
-			if (await modelRegistry.getApiKey(m)) {
+			if (await modelRegistry.getApiKey(m, sessionId)) {
 				model = m;
 				break;
 			}
@@ -921,7 +922,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			if (!currentModel) {
 				throw new Error("No model selected");
 			}
-			const key = await modelRegistry.getApiKey(currentModel);
+			const key = await modelRegistry.getApiKey(currentModel, sessionId);
 			if (!key) {
 				throw new Error(`No API key found for provider "${currentModel.provider}"`);
 			}

@@ -1,9 +1,12 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Added
 
+- Added `calc` tool for basic mathematical calculations with support for arithmetic operators, parentheses, and hex/binary/octal literals
+- Added support for multiple API credentials per provider with round-robin distribution across sessions
+- Added file locking for auth.json to prevent concurrent write corruption
+- Added clickable OAuth login URL display in terminal
 - Added `workdir` parameter to bash tool to execute commands in a specific directory without requiring `cd` commands
 
 ### Changed

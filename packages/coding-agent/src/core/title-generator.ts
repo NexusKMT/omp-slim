@@ -68,11 +68,13 @@ export async function findTitleModel(registry: ModelRegistry, savedSmolModel?: s
  * @param firstMessage The first user message
  * @param registry Model registry
  * @param savedSmolModel Optional saved smol model from settings (provider/modelId format)
+ * @param sessionId Optional session id for sticky API key selection
  */
 export async function generateSessionTitle(
 	firstMessage: string,
 	registry: ModelRegistry,
 	savedSmolModel?: string,
+	sessionId?: string,
 ): Promise<string | null> {
 	const candidates = getTitleModelCandidates(registry, savedSmolModel);
 	if (candidates.length === 0) {
@@ -86,7 +88,7 @@ export async function generateSessionTitle(
 	const userMessage = `<user-message>\n${truncatedMessage}\n</user-message>`;
 
 	for (const model of candidates) {
-		const apiKey = await registry.getApiKey(model);
+		const apiKey = await registry.getApiKey(model, sessionId);
 		if (!apiKey) {
 			logger.debug("title-generator: no API key for model", { provider: model.provider, id: model.id });
 			continue;

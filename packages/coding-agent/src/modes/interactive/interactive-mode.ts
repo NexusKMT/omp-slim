@@ -1157,7 +1157,7 @@ export class InteractiveMode {
 			if (!hasUserMessages && !this.sessionManager.getSessionTitle()) {
 				const registry = this.session.modelRegistry;
 				const smolModel = this.settingsManager.getModelRole("smol");
-				generateSessionTitle(text, registry, smolModel)
+				generateSessionTitle(text, registry, smolModel, this.session.sessionId)
 					.then(async (title) => {
 						if (title) {
 							await this.sessionManager.setSessionTitle(title);
@@ -2613,9 +2613,7 @@ export class InteractiveMode {
 	private async showOAuthSelector(mode: "login" | "logout"): Promise<void> {
 		if (mode === "logout") {
 			const providers = this.session.modelRegistry.authStorage.list();
-			const loggedInProviders = providers.filter(
-				(p) => this.session.modelRegistry.authStorage.get(p)?.type === "oauth",
-			);
+			const loggedInProviders = providers.filter((p) => this.session.modelRegistry.authStorage.hasOAuth(p));
 			if (loggedInProviders.length === 0) {
 				this.showStatus("No OAuth providers logged in. Use /login first.");
 				return;
@@ -2636,6 +2634,7 @@ export class InteractiveMode {
 							await this.session.modelRegistry.authStorage.login(providerId as OAuthProvider, {
 								onAuth: (info: { url: string; instructions?: string }) => {
 									this.chatContainer.addChild(new Spacer(1));
+									this.chatContainer.addChild(new Text(theme.fg("dim", info.url), 1, 0));
 									// Use OSC 8 hyperlink escape sequence for clickable link
 									const hyperlink = `\x1b]8;;${info.url}\x07Click here to login\x1b]8;;\x07`;
 									this.chatContainer.addChild(new Text(theme.fg("accent", hyperlink), 1, 0));

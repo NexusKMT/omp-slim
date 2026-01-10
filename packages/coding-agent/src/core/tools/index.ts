@@ -1,5 +1,6 @@
 export { type AskToolDetails, askTool, createAskTool } from "./ask";
 export { type BashToolDetails, createBashTool } from "./bash";
+export { createCalculatorTool, type CalculatorToolDetails } from "./calculator";
 export { createCompleteTool } from "./complete";
 export { createEditTool } from "./edit";
 // Exa MCP tools (22 tools)
@@ -57,6 +58,7 @@ import type { EventBus } from "../event-bus";
 import type { BashInterceptorRule } from "../settings-manager";
 import { createAskTool } from "./ask";
 import { createBashTool } from "./bash";
+import { createCalculatorTool } from "./calculator";
 import { createCompleteTool } from "./complete";
 import { createEditTool } from "./edit";
 import { createFindTool } from "./find";
@@ -119,6 +121,7 @@ type ToolFactory = (session: ToolSession) => Tool | null | Promise<Tool | null>;
 export const BUILTIN_TOOLS: Record<string, ToolFactory> = {
 	ask: createAskTool,
 	bash: createBashTool,
+	calc: createCalculatorTool,
 	ssh: createSshTool,
 	edit: createEditTool,
 	find: createFindTool,

@@ -187,8 +187,8 @@ export class ModelRegistry {
 		const combined = [...builtInModels, ...customModels];
 
 		// Update github-copilot base URL based on OAuth credentials
-		const copilotCred = this.authStorage.get("github-copilot");
-		if (copilotCred?.type === "oauth") {
+		const copilotCred = this.authStorage.getOAuthCredential("github-copilot");
+		if (copilotCred) {
 			const domain = copilotCred.enterpriseUrl
 				? (normalizeDomain(copilotCred.enterpriseUrl) ?? undefined)
 				: undefined;
@@ -390,22 +390,21 @@ export class ModelRegistry {
 	/**
 	 * Get API key for a model.
 	 */
-	async getApiKey(model: Model<Api>): Promise<string | undefined> {
-		return this.authStorage.getApiKey(model.provider);
+	async getApiKey(model: Model<Api>, sessionId?: string): Promise<string | undefined> {
+		return this.authStorage.getApiKey(model.provider, sessionId);
 	}
 
 	/**
 	 * Get API key for a provider (e.g., "openai").
 	 */
-	async getApiKeyForProvider(provider: string): Promise<string | undefined> {
-		return this.authStorage.getApiKey(provider);
+	async getApiKeyForProvider(provider: string, sessionId?: string): Promise<string | undefined> {
+		return this.authStorage.getApiKey(provider, sessionId);
 	}
 
 	/**
 	 * Check if a model is using OAuth credentials (subscription).
 	 */
 	isUsingOAuth(model: Model<Api>): boolean {
-		const cred = this.authStorage.get(model.provider);
-		return cred?.type === "oauth";
+		return this.authStorage.hasOAuth(model.provider);
 	}
 }

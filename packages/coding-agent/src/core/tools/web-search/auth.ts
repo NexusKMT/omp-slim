@@ -11,7 +11,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import { getConfigDirPaths } from "../../../config";
-import type { AnthropicAuthConfig, AuthJson, ModelsJson } from "./types";
+import type { AnthropicAuthConfig, AnthropicOAuthCredential, AuthJson, ModelsJson } from "./types";
 
 const DEFAULT_BASE_URL = "https://api.anthropic.com";
 
@@ -76,6 +76,11 @@ export function isOAuthToken(apiKey: string): boolean {
 	return apiKey.includes("sk-ant-oat");
 }
 
+function normalizeAnthropicOAuthCredentials(entry: AuthJson["anthropic"] | undefined): AnthropicOAuthCredential[] {
+	if (!entry) return [];
+	return Array.isArray(entry) ? entry : [entry];
+}
+
 /**
  * Find Anthropic auth config using 4-tier priority:
  *   1. ANTHROPIC_SEARCH_API_KEY / ANTHROPIC_SEARCH_BASE_URL
@@ -126,13 +131,16 @@ export async function findAnthropicAuth(): Promise<AnthropicAuthConfig | null> {
 	}
 
 	// 3. OAuth credentials in auth.json (with 5-minute expiry buffer, check all config dirs)
+	const expiryBuffer = 5 * 60 * 1000; // 5 minutes
+	const now = Date.now();
 	for (const configDir of configDirs) {
 		const authJson = await readJson<AuthJson>(path.join(configDir, "auth.json"));
-		if (authJson?.anthropic?.type === "oauth" && authJson.anthropic.access) {
-			const expiryBuffer = 5 * 60 * 1000; // 5 minutes
-			if (authJson.anthropic.expires > Date.now() + expiryBuffer) {
+		const credentials = normalizeAnthropicOAuthCredentials(authJson?.anthropic);
+		for (const credential of credentials) {
+			if (credential.type !== "oauth" || !credential.access) continue;
+			if (credential.expires > now + expiryBuffer) {
 				return {
-					apiKey: authJson.anthropic.access,
+					apiKey: credential.access,
 					baseUrl: DEFAULT_BASE_URL,
 					isOAuth: true,
 				};

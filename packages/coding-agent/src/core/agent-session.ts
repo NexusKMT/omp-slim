@@ -745,7 +745,7 @@ export class AgentSession {
 		}
 
 		// Validate API key
-		const apiKey = await this._modelRegistry.getApiKey(this.model);
+		const apiKey = await this._modelRegistry.getApiKey(this.model, this.sessionId);
 		if (!apiKey) {
 			throw new Error(
 				`No API key found for ${this.model.provider}.\n\n` +
@@ -1142,7 +1142,7 @@ export class AgentSession {
 	 * @throws Error if no API key available for the model
 	 */
 	async setModel(model: Model<any>, role: string = "default"): Promise<void> {
-		const apiKey = await this._modelRegistry.getApiKey(model);
+		const apiKey = await this._modelRegistry.getApiKey(model, this.sessionId);
 		if (!apiKey) {
 			throw new Error(`No API key for ${model.provider}/${model.id}`);
 		}
@@ -1161,7 +1161,7 @@ export class AgentSession {
 	 * @throws Error if no API key available for the model
 	 */
 	async setModelTemporary(model: Model<any>): Promise<void> {
-		const apiKey = await this._modelRegistry.getApiKey(model);
+		const apiKey = await this._modelRegistry.getApiKey(model, this.sessionId);
 		if (!apiKey) {
 			throw new Error(`No API key for ${model.provider}/${model.id}`);
 		}
@@ -1255,7 +1255,7 @@ export class AgentSession {
 		const next = this._scopedModels[nextIndex];
 
 		// Validate API key
-		const apiKey = await this._modelRegistry.getApiKey(next.model);
+		const apiKey = await this._modelRegistry.getApiKey(next.model, this.sessionId);
 		if (!apiKey) {
 			throw new Error(`No API key for ${next.model.provider}/${next.model.id}`);
 		}
@@ -1283,7 +1283,7 @@ export class AgentSession {
 		const nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
 		const nextModel = availableModels[nextIndex];
 
-		const apiKey = await this._modelRegistry.getApiKey(nextModel);
+		const apiKey = await this._modelRegistry.getApiKey(nextModel, this.sessionId);
 		if (!apiKey) {
 			throw new Error(`No API key for ${nextModel.provider}/${nextModel.id}`);
 		}
@@ -1413,7 +1413,7 @@ export class AgentSession {
 				throw new Error("No model selected");
 			}
 
-			const apiKey = await this._modelRegistry.getApiKey(this.model);
+			const apiKey = await this._modelRegistry.getApiKey(this.model, this.sessionId);
 			if (!apiKey) {
 				throw new Error(`No API key for ${this.model.provider}`);
 			}
@@ -1698,7 +1698,7 @@ export class AgentSession {
 				let lastError: unknown;
 
 				for (const candidate of candidates) {
-					const apiKey = await this._modelRegistry.getApiKey(candidate);
+					const apiKey = await this._modelRegistry.getApiKey(candidate, this.sessionId);
 					if (!apiKey) continue;
 
 					let attempt = 0;
@@ -2344,7 +2344,7 @@ export class AgentSession {
 		let summaryDetails: unknown;
 		if (options.summarize && entriesToSummarize.length > 0 && !hookSummary) {
 			const model = this.model!;
-			const apiKey = await this._modelRegistry.getApiKey(model);
+			const apiKey = await this._modelRegistry.getApiKey(model, this.sessionId);
 			if (!apiKey) {
 				throw new Error(`No API key for ${model.provider}`);
 			}

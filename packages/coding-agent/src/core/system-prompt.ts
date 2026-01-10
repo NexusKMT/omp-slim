@@ -72,6 +72,7 @@ const toolDescriptions: Record<ToolName, string> = {
 	ask: "Ask user for input or clarification",
 	read: "Read file contents",
 	bash: "Execute bash commands (npm, docker, etc.)",
+	calc: "{ calculations: array of { expression: string, prefix: string, suffix: string } } Basic calculations.",
 	ssh: "Execute commands on remote hosts via SSH",
 	edit: "Make surgical edits to files (find exact text and replace)",
 	write: "Create or overwrite files",
