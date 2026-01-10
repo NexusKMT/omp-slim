@@ -29,6 +29,9 @@ export class HistoryStorage {
 	private searchStmt: Statement;
 	private lastPromptStmt: Statement;
 
+	// In-memory cache of last prompt to avoid sync DB reads on add
+	private lastPromptCache: string | null = null;
+
 	private constructor(dbPath: string) {
 		this.ensureDir(dbPath);
 
@@ -71,6 +74,9 @@ END;
 			"SELECT h.id, h.prompt, h.created_at, h.cwd FROM history_fts f JOIN history h ON h.id = f.rowid WHERE history_fts MATCH ? ORDER BY h.created_at DESC, h.id DESC LIMIT ?",
 		);
 		this.lastPromptStmt = this.db.prepare("SELECT prompt FROM history ORDER BY id DESC LIMIT 1");
+
+		const last = this.lastPromptStmt.get() as { prompt?: string } | undefined;
+		this.lastPromptCache = last?.prompt ?? null;
 	}
 
 	static open(dbPath: string = join(getAgentDir(), "history.db")): HistoryStorage {
@@ -83,15 +89,17 @@ END;
 	add(prompt: string, cwd?: string): void {
 		const trimmed = prompt.trim();
 		if (!trimmed) return;
+		if (this.lastPromptCache === trimmed) return;
 
-		try {
-			const last = this.lastPromptStmt.get() as { prompt?: string } | undefined;
-			if (last?.prompt === trimmed) return;
+		this.lastPromptCache = trimmed;
 
-			this.insertStmt.run(trimmed, cwd ?? null);
-		} catch (error) {
-			logger.error("HistoryStorage add failed", { error: String(error) });
-		}
+		setImmediate(() => {
+			try {
+				this.insertStmt.run(trimmed, cwd ?? null);
+			} catch (error) {
+				logger.error("HistoryStorage add failed", { error: String(error) });
+			}
+		});
 	}
 
 	getRecent(limit: number): HistoryEntry[] {

@@ -24,6 +24,10 @@
 - Enhanced verification guidance to prefer external feedback loops like tests and linters
 - Added explicit alignment and prohibited behavior sections to improve response quality
 
+### Fixed
+
+- Fixed message submission lag caused by synchronous history database writes by deferring DB operations with setImmediate
+
 ### Security
 
 - Hardened file permissions on agent database directory (700) and database file (600) to restrict access
