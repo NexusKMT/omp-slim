@@ -195,7 +195,9 @@ handlebars.registerHelper(
 		} else if (collection instanceof Map) {
 			found = collection.has(item);
 		} else if (collection && typeof collection === "object") {
-			found = item in collection;
+			if (typeof item === "string" || typeof item === "number" || typeof item === "symbol") {
+				found = item in collection;
+			}
 		}
 		return found ? options.fn(this) : options.inverse(this);
 	},

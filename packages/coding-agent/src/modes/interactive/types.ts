@@ -118,6 +118,7 @@ export interface InteractiveModeContext {
 	handleSessionCommand(): void;
 	handleChangelogCommand(): void;
 	handleHotkeysCommand(): void;
+	handleDumpCommand(): Promise<void>;
 	handleClearCommand(): Promise<void>;
 	handleDebugCommand(): void;
 	handleArminSaysHi(): void;

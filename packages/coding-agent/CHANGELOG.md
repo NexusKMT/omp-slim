@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-01-10
+
 ### Added
 
 - Added `/dump` slash command to copy the full session transcript to the clipboard
