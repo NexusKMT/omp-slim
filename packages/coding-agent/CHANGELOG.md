@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [4.0.1] - 2026-01-10
 ### Added
 
 - Added usage limit error detection to enable automatic credential switching when Codex accounts hit rate limits
