@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+
+- Fixed credential blocking logic to correctly check for remaining available credentials instead of always returning true
 
 ## [4.0.1] - 2026-01-10
 ### Added

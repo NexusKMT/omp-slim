@@ -797,7 +797,15 @@ export class AuthStorage {
 		}
 
 		this.markCredentialBlocked(providerKey, sessionCredential.index, blockedUntil);
-		return true;
+
+		const remainingCredentials = this.getCredentialsForProvider(provider)
+			.map((credential, index) => ({ credential, index }))
+			.filter(
+				(entry): entry is { credential: AuthCredential; index: number } =>
+					entry.credential.type === sessionCredential.type && entry.index !== sessionCredential.index,
+			);
+
+		return remainingCredentials.some((candidate) => !this.isCredentialBlocked(providerKey, candidate.index));
 	}
 
 	/**
