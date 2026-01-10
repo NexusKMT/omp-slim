@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { getAgentDbPath } from "../config";
 import type { AuthCredential } from "./auth-storage";
@@ -131,6 +131,7 @@ export class AgentStorage {
 		this.db = new Database(dbPath);
 
 		this.initializeSchema();
+		this.hardenPermissions(dbPath);
 
 		this.listSettingsStmt = this.db.prepare("SELECT key, value FROM settings");
 		this.insertSettingStmt = this.db.prepare(
@@ -431,5 +432,21 @@ CREATE TABLE settings (
 	 */
 	private ensureDir(dbPath: string): void {
 		mkdirSync(dirname(dbPath), { recursive: true });
+	}
+
+	private hardenPermissions(dbPath: string): void {
+		const dir = dirname(dbPath);
+		try {
+			chmodSync(dir, 0o700);
+		} catch (error) {
+			logger.warn("AgentStorage failed to chmod agent dir", { path: dir, error: String(error) });
+		}
+
+		if (!existsSync(dbPath)) return;
+		try {
+			chmodSync(dbPath, 0o600);
+		} catch (error) {
+			logger.warn("AgentStorage failed to chmod db file", { path: dbPath, error: String(error) });
+		}
 	}
 }

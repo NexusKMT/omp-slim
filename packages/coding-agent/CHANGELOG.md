@@ -1,12 +1,14 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Added
 
 - Added support for custom share scripts at ~/.omp/agent/share.ts to replace default GitHub Gist sharing
 
 ### Changed
 
+- Changed auth migration to merge credentials per-provider instead of skipping when any credentials exist in database
 - Migrated settings and auth credential storage from JSON files to SQLite database (agent.db)
 - Updated credential migration message to reference agent.db instead of auth.json
 - Renamed Glob tool references to Find tool throughout prompts and documentation
@@ -16,6 +18,10 @@
 - Revised workflow instructions to require explicit planning for non-trivial tasks
 - Enhanced verification guidance to prefer external feedback loops like tests and linters
 - Added explicit alignment and prohibited behavior sections to improve response quality
+
+### Security
+
+- Hardened file permissions on agent database directory (700) and database file (600) to restrict access
 
 ## [4.1.0] - 2026-01-10
 ### Added

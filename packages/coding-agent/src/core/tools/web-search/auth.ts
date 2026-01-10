@@ -13,7 +13,7 @@ import * as path from "node:path";
 import { buildBetaHeader, claudeCodeHeaders, claudeCodeVersion } from "@oh-my-pi/pi-ai";
 import { getAgentDbPath, getConfigDirPaths } from "../../../config";
 import { AgentStorage } from "../../agent-storage";
-import type { AuthCredential } from "../../auth-storage";
+import type { AuthCredential, AuthCredentialEntry, AuthStorageData } from "../../auth-storage";
 import { migrateJsonStorage } from "../../storage-migration";
 import type { AnthropicAuthConfig, AnthropicOAuthCredential, ModelsJson } from "./types";
 
@@ -112,6 +112,24 @@ function toAnthropicOAuthCredential(credential: AuthCredential): AnthropicOAuthC
 	};
 }
 
+function normalizeAuthEntry(entry: AuthCredentialEntry | undefined): AuthCredential[] {
+	if (!entry) return [];
+	return Array.isArray(entry) ? entry : [entry];
+}
+
+async function readLegacyAnthropicOAuthCredentials(configDir: string): Promise<AnthropicOAuthCredential[]> {
+	const authJson = await readJson<AuthStorageData>(path.join(configDir, "auth.json"));
+	if (!authJson) return [];
+	const entry = authJson.anthropic as AuthCredentialEntry | undefined;
+	const credentials = normalizeAuthEntry(entry);
+	const results: AnthropicOAuthCredential[] = [];
+	for (const credential of credentials) {
+		const mapped = toAnthropicOAuthCredential(credential);
+		if (mapped) results.push(mapped);
+	}
+	return results;
+}
+
 /**
  * Reads Anthropic OAuth credentials from agent.db, migrating from legacy auth.json if needed.
  * @param configDir - Path to the config directory containing agent.db
@@ -133,6 +151,11 @@ async function readAnthropicOAuthCredentials(configDir: string): Promise<Anthrop
 			credentials.push(mapped);
 		}
 	}
+
+	if (credentials.length === 0) {
+		return readLegacyAnthropicOAuthCredentials(configDir);
+	}
+
 	return credentials;
 }
 

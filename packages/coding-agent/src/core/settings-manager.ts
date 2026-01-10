@@ -1,3 +1,5 @@
+import { existsSync, readFileSync, renameSync } from "node:fs";
+import { join } from "node:path";
 import { type Settings as SettingsItem, settingsCapability } from "../capability/settings";
 import { getAgentDbPath, getAgentDir } from "../config";
 import { loadSync } from "../discovery";
@@ -432,6 +434,7 @@ export class SettingsManager {
 	 */
 	static create(cwd: string = process.cwd(), agentDir: string = getAgentDir()): SettingsManager {
 		const storage = AgentStorage.open(getAgentDbPath(agentDir));
+		SettingsManager.migrateLegacySettingsFile(storage, agentDir);
 
 		// Use capability API to load user-level settings from all providers
 		const result = loadSync(settingsCapability.id, { cwd });
@@ -474,6 +477,29 @@ export class SettingsManager {
 			return {};
 		}
 		return SettingsManager.migrateSettings(settings as Record<string, unknown>);
+	}
+
+	private static migrateLegacySettingsFile(storage: AgentStorage, agentDir: string): void {
+		const settingsPath = join(agentDir, "settings.json");
+		if (!existsSync(settingsPath)) return;
+		if (storage.getSettings() !== null) return;
+
+		try {
+			const content = readFileSync(settingsPath, "utf-8");
+			const parsed = JSON.parse(content);
+			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+				return;
+			}
+			const migrated = SettingsManager.migrateSettings(parsed as Record<string, unknown>);
+			storage.saveSettings(migrated);
+			try {
+				renameSync(settingsPath, `${settingsPath}.bak`);
+			} catch (error) {
+				logger.warn("SettingsManager failed to backup settings.json", { error: String(error) });
+			}
+		} catch (error) {
+			logger.warn("SettingsManager failed to migrate settings.json", { error: String(error) });
+		}
 	}
 
 	/** Migrate old settings format to new format */

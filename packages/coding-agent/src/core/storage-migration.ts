@@ -1,6 +1,6 @@
 /**
  * Migrates legacy JSON storage (settings.json, auth.json) to SQLite-based agent.db.
- * Runs once on startup; skips migration if agent.db already has data (DB is authoritative).
+ * Settings migrate only when the DB has no settings; auth merges per-provider when missing.
  * Original JSON files are backed up to .bak and removed after successful migration.
  */
 
@@ -150,39 +150,49 @@ function isValidCredential(entry: AuthCredential): boolean {
 }
 
 /**
- * Migrates auth.json to SQLite storage if DB has no credentials.
+ * Migrates auth.json to SQLite storage for providers missing in agent.db.
  * @param storage - AgentStorage instance to migrate into
  * @param authPaths - Candidate paths to search for auth.json
  * @param warnings - Array to collect non-fatal warnings
  * @returns True if migration was performed
  */
 async function migrateAuth(storage: AgentStorage, authPaths: string[], warnings: string[]): Promise<boolean> {
-	const hasDbAuth = storage.hasAuthCredentials();
 	const authJson = await findFirstAuthJson(authPaths);
-
 	if (!authJson) return false;
-	if (hasDbAuth) {
-		warnings.push(`auth.json exists but agent.db is authoritative: ${authJson.path}`);
-		return false;
-	}
+
+	let sawValid = false;
+	let migratedAny = false;
 
 	for (const [provider, entry] of Object.entries(authJson.data)) {
 		const credentials = normalizeCredentialEntry(entry)
 			.filter(isValidCredential)
 			.map((credential) => credential);
 
-		if (credentials.length > 0) {
-			storage.replaceAuthCredentialsForProvider(provider, credentials);
+		if (credentials.length === 0) continue;
+		sawValid = true;
+
+		if (storage.listAuthCredentials(provider).length > 0) {
+			continue;
 		}
+
+		storage.replaceAuthCredentialsForProvider(provider, credentials);
+		migratedAny = true;
 	}
 
-	await backupJson(authJson.path);
-	return true;
+	if (sawValid) {
+		await backupJson(authJson.path);
+	}
+
+	if (!migratedAny && sawValid) {
+		warnings.push(`auth.json entries already present in agent.db: ${authJson.path}`);
+	}
+
+	return migratedAny;
 }
 
 /**
  * Migrates legacy JSON files (settings.json, auth.json) to SQLite-based agent.db.
- * Skips migration if DB already contains data (DB is authoritative).
+ * Settings migrate only when the DB has no settings; auth merges per-provider when missing.
  * @param paths - Configuration specifying locations of legacy files and target DB
  * @returns Result indicating what was migrated and any warnings encountered
  */

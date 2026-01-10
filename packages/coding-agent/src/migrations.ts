@@ -41,8 +41,6 @@ export function migrateAuthToAgentDb(): string[] {
 	const settingsPath = join(agentDir, "settings.json");
 	const storage = AgentStorage.open(getAgentDbPath(agentDir));
 
-	if (storage.hasAuthCredentials()) return [];
-
 	const migrated: Record<string, AuthCredential[]> = {};
 	const providers: string[] = [];
 
@@ -50,6 +48,9 @@ export function migrateAuthToAgentDb(): string[] {
 		try {
 			const oauth = JSON.parse(readFileSync(oauthPath, "utf-8"));
 			for (const [provider, cred] of Object.entries(oauth)) {
+				if (storage.listAuthCredentials(provider).length > 0) {
+					continue;
+				}
 				migrated[provider] = [{ type: "oauth", ...(cred as object) } as AuthCredential];
 				providers.push(provider);
 			}
@@ -65,10 +66,11 @@ export function migrateAuthToAgentDb(): string[] {
 			const settings = JSON.parse(content);
 			if (settings.apiKeys && typeof settings.apiKeys === "object") {
 				for (const [provider, key] of Object.entries(settings.apiKeys)) {
-					if (!migrated[provider] && typeof key === "string") {
-						migrated[provider] = [{ type: "api_key", key }];
-						providers.push(provider);
-					}
+					if (typeof key !== "string") continue;
+					if (migrated[provider]) continue;
+					if (storage.listAuthCredentials(provider).length > 0) continue;
+					migrated[provider] = [{ type: "api_key", key }];
+					providers.push(provider);
 				}
 				delete settings.apiKeys;
 				writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
