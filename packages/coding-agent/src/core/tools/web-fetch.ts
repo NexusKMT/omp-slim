@@ -10,6 +10,7 @@ import { type Theme, theme } from "../../modes/interactive/theme/theme";
 import webFetchDescription from "../../prompts/tools/web-fetch.md" with { type: "text" };
 import { ensureTool } from "../../utils/tools-manager";
 import type { RenderResultOptions } from "../custom-tools/types";
+import { renderPromptTemplate } from "../prompt-templates";
 import type { ToolSession } from "./index";
 import { specialHandlers } from "./web-scrapers/index";
 import type { RenderResult } from "./web-scrapers/types";
@@ -836,7 +837,7 @@ export function createWebFetchTool(_session: ToolSession): AgentTool<typeof webF
 	return {
 		name: "web_fetch",
 		label: "Web Fetch",
-		description: webFetchDescription,
+		description: renderPromptTemplate(webFetchDescription),
 		parameters: webFetchSchema,
 		execute: async (
 			_toolCallId: string,

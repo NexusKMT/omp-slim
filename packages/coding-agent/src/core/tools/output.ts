@@ -14,6 +14,7 @@ import { Type } from "@sinclair/typebox";
 import type { Theme } from "../../modes/interactive/theme/theme";
 import outputDescription from "../../prompts/tools/output.md" with { type: "text" };
 import type { RenderResultOptions } from "../custom-tools/types";
+import { renderPromptTemplate } from "../prompt-templates";
 import type { ToolSession } from "./index";
 import {
 	formatCount,
@@ -236,7 +237,7 @@ export function createOutputTool(session: ToolSession): AgentTool<typeof outputS
 	return {
 		name: "output",
 		label: "Output",
-		description: outputDescription,
+		description: renderPromptTemplate(outputDescription),
 		parameters: outputSchema,
 		execute: async (
 			_toolCallId: string,

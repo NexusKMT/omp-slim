@@ -12,6 +12,7 @@ import { formatDimensionNote, resizeImage } from "../../utils/image-resize";
 import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime";
 import { ensureTool } from "../../utils/tools-manager";
 import type { RenderResultOptions } from "../custom-tools/types";
+import { renderPromptTemplate } from "../prompt-templates";
 import type { ToolSession } from "../sdk";
 import { ScopeSignal, untilAborted } from "../utils";
 import { createLsTool } from "./ls";
@@ -429,7 +430,9 @@ export function createReadTool(session: ToolSession): AgentTool<typeof readSchem
 	return {
 		name: "read",
 		label: "Read",
-		description: readDescription.replace("{{DEFAULT_MAX_LINES}}", String(DEFAULT_MAX_LINES)),
+		description: renderPromptTemplate(readDescription, {
+			DEFAULT_MAX_LINES: String(DEFAULT_MAX_LINES),
+		}),
 		parameters: readSchema,
 		execute: async (
 			toolCallId: string,

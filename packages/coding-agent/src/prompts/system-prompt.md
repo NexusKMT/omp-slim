@@ -16,9 +16,11 @@ Get this right. This matters.
 - When asked for “patches”, output *actual* patches (unified diff or SEARCH/REPLACE), not descriptions.
 </critical>
 
+{{#if systemPromptCustomization}}
 <context>
 {{systemPromptCustomization}}
 </context>
+{{/if}}
 
 <environment>
 {{environmentInfo}}

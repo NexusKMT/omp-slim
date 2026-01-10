@@ -2,6 +2,7 @@ import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import { type GitParams, gitTool as gitToolCore, type ToolResponse } from "@oh-my-pi/pi-git-tool";
 import { type Static, Type } from "@sinclair/typebox";
 import gitDescription from "../../prompts/tools/git.md" with { type: "text" };
+import { renderPromptTemplate } from "../prompt-templates";
 import type { ToolSession } from "./index";
 
 const gitSchema = Type.Object({
@@ -200,7 +201,7 @@ export function createGitTool(session: ToolSession): AgentTool<typeof gitSchema,
 	return {
 		name: "git",
 		label: "Git",
-		description: gitDescription,
+		description: renderPromptTemplate(gitDescription),
 		parameters: gitSchema,
 		execute: async (_toolCallId, params: Static<typeof gitSchema>, _signal?: AbortSignal) => {
 			if (params.operation === "commit" && !params.message) {

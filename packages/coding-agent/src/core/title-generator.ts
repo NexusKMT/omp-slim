@@ -8,8 +8,9 @@ import titleSystemPrompt from "../prompts/title-system.md" with { type: "text" }
 import { logger } from "./logger";
 import type { ModelRegistry } from "./model-registry";
 import { parseModelString, SMOL_MODEL_PRIORITY } from "./model-resolver";
+import { renderPromptTemplate } from "./prompt-templates";
 
-const TITLE_SYSTEM_PROMPT = titleSystemPrompt;
+const TITLE_SYSTEM_PROMPT = renderPromptTemplate(titleSystemPrompt);
 
 const MAX_INPUT_CHARS = 2000;
 

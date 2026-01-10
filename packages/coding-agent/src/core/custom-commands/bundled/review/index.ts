@@ -14,6 +14,7 @@
 
 import reviewRequestTemplate from "../../../../prompts/review-request.md" with { type: "text" };
 import type { HookCommandContext } from "../../../hooks/types";
+import { renderPromptTemplate } from "../../../prompt-templates";
 import type { CustomCommand, CustomCommandAPI } from "../../types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -280,20 +281,19 @@ ${formatDiffPreviews(stats.files, linesPerFile)}`;
 		? "Run `git diff` or `git show` to get the diff for assigned files"
 		: "Use the diff hunks provided below (don't re-run git diff)";
 
-	// Replace template variables
-	return reviewRequestTemplate
-		.replace("{MODE}", mode)
-		.replace("{FILE_COUNT}", String(stats.files.length))
-		.replace("{LINES_ADDED}", String(stats.totalAdded))
-		.replace("{LINES_REMOVED}", String(stats.totalRemoved))
-		.replace("{FILE_TABLE}", formatFileTable(stats.files))
-		.replace("{EXCLUDED_SECTION}", stats.excluded.length > 0 ? formatExcluded(stats.excluded) : "")
-		.replace("{DISTRIBUTION_GUIDANCE}", distributionGuidance)
-		.replace("{GROUPING_GUIDANCE}", groupingGuidance)
-		.replace("{DIFF_INSTRUCTION}", diffInstruction)
-		.replace("{DIFF_SECTION}", diffSection)
-		.replace(/\n{3,}/g, "\n\n") // Collapse multiple blank lines
-		.trim();
+	// Render template variables
+	return renderPromptTemplate(reviewRequestTemplate, {
+		MODE: mode,
+		FILE_COUNT: String(stats.files.length),
+		LINES_ADDED: String(stats.totalAdded),
+		LINES_REMOVED: String(stats.totalRemoved),
+		FILE_TABLE: formatFileTable(stats.files),
+		EXCLUDED_SECTION: stats.excluded.length > 0 ? formatExcluded(stats.excluded) : "",
+		DISTRIBUTION_GUIDANCE: distributionGuidance,
+		GROUPING_GUIDANCE: groupingGuidance,
+		DIFF_INSTRUCTION: diffInstruction,
+		DIFF_SECTION: diffSection,
+	});
 }
 
 export function createReviewCommand(api: CustomCommandAPI): CustomCommand {

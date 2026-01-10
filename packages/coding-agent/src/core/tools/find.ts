@@ -7,6 +7,7 @@ import { getLanguageFromPath, type Theme } from "../../modes/interactive/theme/t
 import findDescription from "../../prompts/tools/find.md" with { type: "text" };
 import { ensureTool } from "../../utils/tools-manager";
 import type { RenderResultOptions } from "../custom-tools/types";
+import { renderPromptTemplate } from "../prompt-templates";
 import { ScopeSignal, untilAborted } from "../utils";
 import type { ToolSession } from "./index";
 import { resolveToCwd } from "./path-utils";
@@ -113,7 +114,7 @@ export function createFindTool(session: ToolSession, options?: FindToolOptions):
 	return {
 		name: "find",
 		label: "Find",
-		description: findDescription,
+		description: renderPromptTemplate(findDescription),
 		parameters: findSchema,
 		execute: async (
 			_toolCallId: string,

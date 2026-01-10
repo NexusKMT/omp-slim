@@ -2,6 +2,7 @@ import { slashCommandCapability } from "../capability/slash-command";
 import type { SlashCommand } from "../discovery";
 import { loadSync } from "../discovery";
 import { parseFrontmatter } from "../discovery/helpers";
+import { renderPromptTemplate } from "./prompt-templates";
 import { EMBEDDED_COMMAND_TEMPLATES } from "./tools/task/commands";
 
 /**
@@ -158,7 +159,9 @@ export function expandSlashCommand(text: string, fileCommands: FileSlashCommand[
 	const fileCommand = fileCommands.find((cmd) => cmd.name === commandName);
 	if (fileCommand) {
 		const args = parseCommandArgs(argsString);
-		return substituteArgs(fileCommand.content, args);
+		const argsText = args.join(" ");
+		const substituted = substituteArgs(fileCommand.content, args);
+		return renderPromptTemplate(substituted, { args, ARGUMENTS: argsText, arguments: argsText });
 	}
 
 	return text;

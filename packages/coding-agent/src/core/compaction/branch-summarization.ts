@@ -16,6 +16,7 @@ import {
 	createCompactionSummaryMessage,
 	createCustomMessage,
 } from "../messages";
+import { renderPromptTemplate } from "../prompt-templates";
 import type { ReadonlySessionManager, SessionEntry } from "../session-manager";
 import { estimateTokens } from "./compaction";
 import {
@@ -237,9 +238,9 @@ export function prepareBranchEntries(entries: SessionEntry[], tokenBudget: numbe
 // Summary Generation
 // ============================================================================
 
-const BRANCH_SUMMARY_PREAMBLE = branchSummaryPreamble;
+const BRANCH_SUMMARY_PREAMBLE = renderPromptTemplate(branchSummaryPreamble);
 
-const BRANCH_SUMMARY_PROMPT = branchSummaryPrompt;
+const BRANCH_SUMMARY_PROMPT = renderPromptTemplate(branchSummaryPrompt);
 
 /**
  * Generate a summary of abandoned branch entries.

@@ -22,6 +22,7 @@ import { Type } from "@sinclair/typebox";
 import { type Theme, theme } from "../../modes/interactive/theme/theme";
 import askDescription from "../../prompts/tools/ask.md" with { type: "text" };
 import type { RenderResultOptions } from "../custom-tools/types";
+import { renderPromptTemplate } from "../prompt-templates";
 import type { ToolSession } from "./index";
 import { createToolUIKit } from "./render-utils";
 
@@ -75,7 +76,7 @@ export function createAskTool(session: ToolSession): null | AgentTool<typeof ask
 	return {
 		name: "ask",
 		label: "Ask",
-		description: askDescription,
+		description: renderPromptTemplate(askDescription),
 		parameters: askSchema,
 
 		async execute(

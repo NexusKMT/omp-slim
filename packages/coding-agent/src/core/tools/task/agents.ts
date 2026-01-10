@@ -9,12 +9,13 @@ import exploreMd from "../../../prompts/explore.md" with { type: "text" };
 import planMd from "../../../prompts/plan.md" with { type: "text" };
 import reviewerMd from "../../../prompts/reviewer.md" with { type: "text" };
 import taskMd from "../../../prompts/task.md" with { type: "text" };
+import { renderPromptTemplate } from "../../prompt-templates";
 import type { AgentDefinition, AgentSource } from "./types";
 
 const EMBEDDED_AGENTS: { name: string; content: string }[] = [
-	{ name: "explore.md", content: exploreMd },
-	{ name: "plan.md", content: planMd },
-	{ name: "reviewer.md", content: reviewerMd },
+	{ name: "explore.md", content: renderPromptTemplate(exploreMd) },
+	{ name: "plan.md", content: renderPromptTemplate(planMd) },
+	{ name: "reviewer.md", content: renderPromptTemplate(reviewerMd) },
 	{
 		name: "task.md",
 		content: `---
@@ -23,7 +24,7 @@ description: General-purpose subagent with full capabilities for delegated multi
 spawns: explore
 model: default
 ---
-${taskMd}`,
+${renderPromptTemplate(taskMd)}`,
 	},
 	{
 		name: "quick_task.md",
@@ -32,7 +33,7 @@ name: quick_task
 description: Quick task for fast execution
 model: pi/smol
 ---
-${taskMd}`,
+${renderPromptTemplate(taskMd)}`,
 	},
 	{
 		name: "deep_task.md",
@@ -41,7 +42,7 @@ name: deep_task
 description: Deep task for comprehensive reasoning
 model: pi/slow
 ---
-${taskMd}`,
+${renderPromptTemplate(taskMd)}`,
 	},
 ];
 

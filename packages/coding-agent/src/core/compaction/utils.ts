@@ -5,6 +5,7 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { Message } from "@oh-my-pi/pi-ai";
 import summarizationSystemPrompt from "../../prompts/summarization-system.md" with { type: "text" };
+import { renderPromptTemplate } from "../prompt-templates";
 
 // ============================================================================
 // File Operation Tracking
@@ -150,4 +151,4 @@ export function serializeConversation(messages: Message[]): string {
 // Summarization System Prompt
 // ============================================================================
 
-export const SUMMARIZATION_SYSTEM_PROMPT = summarizationSystemPrompt;
+export const SUMMARIZATION_SYSTEM_PROMPT = renderPromptTemplate(summarizationSystemPrompt);

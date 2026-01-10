@@ -5,6 +5,7 @@ import { Type } from "@sinclair/typebox";
 import { getLanguageFromPath, highlightCode, type Theme } from "../../modes/interactive/theme/theme";
 import writeDescription from "../../prompts/tools/write.md" with { type: "text" };
 import type { RenderResultOptions } from "../custom-tools/types";
+import { renderPromptTemplate } from "../prompt-templates";
 import type { ToolSession } from "../sdk";
 import { untilAborted } from "../utils";
 import { createLspWritethrough, type FileDiagnosticsResult } from "./lsp/index";
@@ -28,7 +29,7 @@ export function createWriteTool(session: ToolSession): AgentTool<typeof writeSch
 	return {
 		name: "write",
 		label: "Write",
-		description: writeDescription,
+		description: renderPromptTemplate(writeDescription),
 		parameters: writeSchema,
 		execute: async (
 			_toolCallId: string,

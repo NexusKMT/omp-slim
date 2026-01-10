@@ -7,12 +7,14 @@ import voiceSummaryPrompt from "../prompts/voice-summary.md" with { type: "text"
 import { logger } from "./logger";
 import type { ModelRegistry } from "./model-registry";
 import { findSmolModel } from "./model-resolver";
+import { renderPromptTemplate } from "./prompt-templates";
 import type { VoiceSettings } from "./settings-manager";
 
 const DEFAULT_SAMPLE_RATE = 16000;
 const DEFAULT_CHANNELS = 1;
 const DEFAULT_BITS = 16;
 const SUMMARY_MAX_CHARS = 6000;
+const VOICE_SUMMARY_PROMPT = renderPromptTemplate(voiceSummaryPrompt);
 
 export interface VoiceRecordingHandle {
 	filePath: string;
@@ -286,7 +288,7 @@ export async function summarizeForVoice(
 	const truncated = text.length > SUMMARY_MAX_CHARS ? `${text.slice(0, SUMMARY_MAX_CHARS)}...` : text;
 	const request = {
 		model: `${model.provider}/${model.id}`,
-		systemPrompt: voiceSummaryPrompt,
+		systemPrompt: VOICE_SUMMARY_PROMPT,
 		userMessage: `<assistant_response>\n${truncated}\n</assistant_response>`,
 	};
 	logger.debug("voice: summary request", request);

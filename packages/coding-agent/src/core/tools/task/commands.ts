@@ -13,12 +13,13 @@ import architectPlanMd from "../../../prompts/architect-plan.md" with { type: "t
 import implementMd from "../../../prompts/implement.md" with { type: "text" };
 import implementWithCriticMd from "../../../prompts/implement-with-critic.md" with { type: "text" };
 import initMd from "../../../prompts/init.md" with { type: "text" };
+import { renderPromptTemplate } from "../../prompt-templates";
 
 const EMBEDDED_COMMANDS: { name: string; content: string }[] = [
-	{ name: "architect-plan.md", content: architectPlanMd },
-	{ name: "implement-with-critic.md", content: implementWithCriticMd },
-	{ name: "implement.md", content: implementMd },
-	{ name: "init.md", content: initMd },
+	{ name: "architect-plan.md", content: renderPromptTemplate(architectPlanMd) },
+	{ name: "implement-with-critic.md", content: renderPromptTemplate(implementWithCriticMd) },
+	{ name: "implement.md", content: renderPromptTemplate(implementMd) },
+	{ name: "init.md", content: renderPromptTemplate(initMd) },
 ];
 
 export const EMBEDDED_COMMAND_TEMPLATES: ReadonlyArray<{ name: string; content: string }> = EMBEDDED_COMMANDS;

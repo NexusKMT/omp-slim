@@ -5,6 +5,7 @@ import { Type } from "@sinclair/typebox";
 import type { Theme } from "../../modes/interactive/theme/theme";
 import calculatorDescription from "../../prompts/tools/calculator.md" with { type: "text" };
 import type { RenderResultOptions } from "../custom-tools/types";
+import { renderPromptTemplate } from "../prompt-templates";
 import { untilAborted } from "../utils";
 import type { ToolSession } from "./index";
 import {
@@ -393,7 +394,7 @@ export function createCalculatorTool(_session: ToolSession): AgentTool<typeof ca
 	return {
 		name: "calc",
 		label: "Calc",
-		description: calculatorDescription,
+		description: renderPromptTemplate(calculatorDescription),
 		parameters: calculatorSchema,
 		execute: async (
 			_toolCallId: string,

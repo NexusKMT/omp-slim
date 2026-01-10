@@ -1,13 +1,15 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Added
 
+- Added Handlebars templating engine for prompt template rendering with `{{arg}}` helper for positional arguments
 - Added support for custom share scripts at ~/.omp/agent/share.ts to replace default GitHub Gist sharing
 
 ### Changed
 
+- Changed prompt template rendering to use Handlebars instead of simple string replacement
+- Updated prompt layout optimization to normalize indentation and collapse excessive blank lines
 - Changed auth migration to merge credentials per-provider instead of skipping when any credentials exist in database
 - Migrated settings and auth credential storage from JSON files to SQLite database (agent.db)
 - Updated credential migration message to reference agent.db instead of auth.json

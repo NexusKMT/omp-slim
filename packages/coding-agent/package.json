@@ -51,6 +51,7 @@
 		"diff": "^8.0.2",
 		"file-type": "^21.1.1",
 		"glob": "^11.0.3",
+		"handlebars": "^4.7.8",
 		"highlight.js": "^11.11.1",
 		"marked": "^15.0.12",
 		"minimatch": "^10.1.1",

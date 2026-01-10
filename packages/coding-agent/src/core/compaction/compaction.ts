@@ -12,6 +12,7 @@ import compactionSummaryPrompt from "../../prompts/compaction-summary.md" with {
 import compactionTurnPrefixPrompt from "../../prompts/compaction-turn-prefix.md" with { type: "text" };
 import compactionUpdateSummaryPrompt from "../../prompts/compaction-update-summary.md" with { type: "text" };
 import { convertToLlm, createBranchSummaryMessage, createCustomMessage } from "../messages";
+import { renderPromptTemplate } from "../prompt-templates";
 import type { CompactionEntry, SessionEntry } from "../session-manager";
 import {
 	computeFileLists,
@@ -386,9 +387,9 @@ export function findCutPoint(
 // Summarization
 // ============================================================================
 
-const SUMMARIZATION_PROMPT = compactionSummaryPrompt;
+const SUMMARIZATION_PROMPT = renderPromptTemplate(compactionSummaryPrompt);
 
-const UPDATE_SUMMARIZATION_PROMPT = compactionUpdateSummaryPrompt;
+const UPDATE_SUMMARIZATION_PROMPT = renderPromptTemplate(compactionUpdateSummaryPrompt);
 
 /**
  * Generate a summary of the conversation using the LLM.
@@ -552,7 +553,7 @@ export function prepareCompaction(
 // Main compaction function
 // ============================================================================
 
-const TURN_PREFIX_SUMMARIZATION_PROMPT = compactionTurnPrefixPrompt;
+const TURN_PREFIX_SUMMARIZATION_PROMPT = renderPromptTemplate(compactionTurnPrefixPrompt);
 
 /**
  * Generate summaries for compaction using prepared data.

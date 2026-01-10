@@ -8,6 +8,7 @@ import { loadSync } from "../../discovery/index";
 import type { Theme } from "../../modes/interactive/theme/theme";
 import sshDescriptionBase from "../../prompts/tools/ssh.md" with { type: "text" };
 import type { RenderResultOptions } from "../custom-tools/types";
+import { renderPromptTemplate } from "../prompt-templates";
 import type { SSHHostInfo } from "../ssh/connection-manager";
 import { ensureHostInfo, getHostInfoForHost } from "../ssh/connection-manager";
 import { executeSSH } from "../ssh/ssh-executor";
@@ -54,11 +55,12 @@ function formatHostEntry(host: SSHHost): string {
 }
 
 function formatDescription(hosts: SSHHost[]): string {
+	const baseDescription = renderPromptTemplate(sshDescriptionBase);
 	if (hosts.length === 0) {
-		return sshDescriptionBase;
+		return baseDescription;
 	}
 	const hostList = hosts.map(formatHostEntry).join("\n");
-	return `${sshDescriptionBase}\n\nAvailable hosts:\n${hostList}`;
+	return `${baseDescription}\n\nAvailable hosts:\n${hostList}`;
 }
 
 function quoteRemotePath(value: string): string {

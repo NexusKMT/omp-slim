@@ -8,6 +8,7 @@ import type { Theme } from "../../modes/interactive/theme/theme";
 import bashDescription from "../../prompts/tools/bash.md" with { type: "text" };
 import { type BashExecutorOptions, executeBash, executeBashWithOperations } from "../bash-executor";
 import type { RenderResultOptions } from "../custom-tools/types";
+import { renderPromptTemplate } from "../prompt-templates";
 import { checkBashInterception, checkSimpleLsInterception } from "./bash-interceptor";
 import type { ToolSession } from "./index";
 import { resolveToCwd } from "./path-utils";
@@ -52,7 +53,7 @@ export function createBashTool(session: ToolSession, options?: BashToolOptions):
 	return {
 		name: "bash",
 		label: "Bash",
-		description: bashDescription,
+		description: renderPromptTemplate(bashDescription),
 		parameters: bashSchema,
 		execute: async (
 			_toolCallId: string,

@@ -8,6 +8,7 @@ import { getLanguageFromPath, type Theme } from "../../modes/interactive/theme/t
 import grepDescription from "../../prompts/tools/grep.md" with { type: "text" };
 import { ensureTool } from "../../utils/tools-manager";
 import type { RenderResultOptions } from "../custom-tools/types";
+import { renderPromptTemplate } from "../prompt-templates";
 import { ScopeSignal, untilAborted } from "../utils";
 import type { ToolSession } from "./index";
 import { resolveToCwd } from "./path-utils";
@@ -96,7 +97,7 @@ export function createGrepTool(session: ToolSession, options?: GrepToolOptions):
 	return {
 		name: "grep",
 		label: "Grep",
-		description: grepDescription,
+		description: renderPromptTemplate(grepDescription),
 		parameters: grepSchema,
 		execute: async (
 			_toolCallId: string,

@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import geminiImageDescription from "../../prompts/tools/gemini-image.md" with { type: "text" };
 import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime";
 import type { CustomTool } from "../custom-tools/types";
+import { renderPromptTemplate } from "../prompt-templates";
 import { untilAborted } from "../utils";
 import { resolveReadPath } from "./path-utils";
 import { getEnv } from "./web-search/auth";
@@ -367,7 +368,7 @@ function createRequestSignal(signal: AbortSignal | undefined, timeoutSeconds: nu
 export const geminiImageTool: CustomTool<typeof geminiImageSchema, GeminiImageToolDetails> = {
 	name: "generate_image",
 	label: "GenerateImage",
-	description: geminiImageDescription,
+	description: renderPromptTemplate(geminiImageDescription),
 	parameters: geminiImageSchema,
 	async execute(_toolCallId, params, _onUpdate, ctx, signal) {
 		return untilAborted(signal, async () => {

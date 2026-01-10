@@ -11,6 +11,7 @@ import type { Rule } from "../capability/rule";
 import { systemPromptCapability } from "../capability/system-prompt";
 import { type ContextFile, loadSync, type SystemPrompt as SystemPromptFile } from "../discovery/index";
 import systemPromptTemplate from "../prompts/system-prompt.md" with { type: "text" };
+import { renderPromptTemplate } from "./prompt-templates";
 import type { SkillsSettings } from "./settings-manager";
 import { formatSkillsForPrompt, loadSkills, type Skill } from "./skills";
 import type { ToolName } from "./tools/index";
@@ -87,14 +88,6 @@ const toolDescriptions: Record<ToolName, string> = {
 	web_search: "Search the web for information",
 	report_finding: "Report a finding during code review",
 };
-
-function applyTemplate(template: string, values: Record<string, string>): string {
-	let output = template;
-	for (const [key, value] of Object.entries(values)) {
-		output = output.replaceAll(`{{${key}}}`, value);
-	}
-	return output;
-}
 
 function appendBlock(prompt: string, block: string | null | undefined, separator = "\n\n"): string {
 	if (!block) return prompt;
@@ -870,7 +863,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	const rulesBlock = rulebookRules && rulebookRules.length > 0 ? formatRulesForPrompt(rulebookRules) : "";
 	const appendSystemPromptBlock = resolvedAppendPrompt ? `\n${resolvedAppendPrompt}\n` : "";
 
-	const prompt = applyTemplate(systemPromptTemplate, {
+	const prompt = renderPromptTemplate(systemPromptTemplate, {
 		toolsList,
 		antiBashSection: antiBashBlock,
 		guidelines,

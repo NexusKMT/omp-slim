@@ -17,6 +17,7 @@ import { Type } from "@sinclair/typebox";
 import type { Theme } from "../../../modes/interactive/theme/theme";
 import webSearchDescription from "../../../prompts/tools/web-search.md" with { type: "text" };
 import type { CustomTool, CustomToolContext, RenderResultOptions } from "../../custom-tools/types";
+import { renderPromptTemplate } from "../../prompt-templates";
 import { callExaTool, findApiKey as findExaKey, formatSearchResults, isSearchResponse } from "../exa/mcp-client";
 import { renderExaCall, renderExaResult } from "../exa/render";
 import type { ExaRenderDetails } from "../exa/types";
@@ -332,7 +333,7 @@ async function executeWebSearch(
 export const webSearchTool: AgentTool<typeof webSearchSchema> = {
 	name: "web_search",
 	label: "Web Search",
-	description: webSearchDescription,
+	description: renderPromptTemplate(webSearchDescription),
 	parameters: webSearchSchema,
 	execute: async (toolCallId, params) => {
 		return executeWebSearch(toolCallId, params as WebSearchParams);
@@ -343,7 +344,7 @@ export const webSearchTool: AgentTool<typeof webSearchSchema> = {
 export const webSearchCustomTool: CustomTool<typeof webSearchSchema, WebSearchRenderDetails> = {
 	name: "web_search",
 	label: "Web Search",
-	description: webSearchDescription,
+	description: renderPromptTemplate(webSearchDescription),
 	parameters: webSearchSchema,
 
 	async execute(

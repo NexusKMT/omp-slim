@@ -5,6 +5,7 @@ import { Type } from "@sinclair/typebox";
 import { getLanguageFromPath, type Theme } from "../../modes/interactive/theme/theme";
 import editDescription from "../../prompts/tools/edit.md" with { type: "text" };
 import type { RenderResultOptions } from "../custom-tools/types";
+import { renderPromptTemplate } from "../prompt-templates";
 import {
 	DEFAULT_FUZZY_THRESHOLD,
 	detectLineEnding,
@@ -48,7 +49,7 @@ export function createEditTool(session: ToolSession): AgentTool<typeof editSchem
 	return {
 		name: "edit",
 		label: "Edit",
-		description: editDescription,
+		description: renderPromptTemplate(editDescription),
 		parameters: editSchema,
 		execute: async (
 			_toolCallId: string,

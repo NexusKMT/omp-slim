@@ -6,6 +6,7 @@ import type { BunFile } from "bun";
 import { type Theme, theme } from "../../../modes/interactive/theme/theme";
 import lspDescription from "../../../prompts/tools/lsp.md" with { type: "text" };
 import { logger } from "../../logger";
+import { renderPromptTemplate } from "../../prompt-templates";
 import { once, untilAborted } from "../../utils";
 import type { ToolSession } from "../index";
 import { resolveToCwd } from "../path-utils";
@@ -737,7 +738,7 @@ export function createLspTool(session: ToolSession): AgentTool<typeof lspSchema,
 	return {
 		name: "lsp",
 		label: "LSP",
-		description: lspDescription,
+		description: renderPromptTemplate(lspDescription),
 		parameters: lspSchema,
 		renderCall,
 		renderResult,
