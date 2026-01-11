@@ -11,6 +11,7 @@ import {
 	type TUI,
 } from "@oh-my-pi/pi-tui";
 import stripAnsi from "strip-ansi";
+import { BASH_DEFAULT_PREVIEW_LINES } from "../../../core/tools/bash";
 import { computeEditDiff, type EditDiffError, type EditDiffResult } from "../../../core/tools/edit-diff";
 import { toolRenderers } from "../../../core/tools/renderers";
 import { convertToPng } from "../../../utils/image-convert";
@@ -19,7 +20,6 @@ import { theme } from "../theme/theme";
 import { renderDiff } from "./diff";
 
 // Preview line limit for bash when not expanded
-const BASH_PREVIEW_LINES = 5;
 const GENERIC_PREVIEW_LINES = 6;
 const GENERIC_ARG_PREVIEW = 6;
 const GENERIC_VALUE_MAX = 80;
@@ -485,7 +485,7 @@ export class ToolExecutionComponent extends Container {
 			const output = this.getTextOutput().trim();
 			context.output = output;
 			context.expanded = this.expanded;
-			context.previewLines = BASH_PREVIEW_LINES;
+			context.previewLines = BASH_DEFAULT_PREVIEW_LINES;
 		} else if (this.toolName === "edit") {
 			// Edit needs diff preview and renderDiff function
 			context.editDiffPreview = this.editDiffPreview;

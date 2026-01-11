@@ -15,6 +15,8 @@ import { resolveToCwd } from "./path-utils";
 import { createToolUIKit } from "./render-utils";
 import { DEFAULT_MAX_BYTES, formatSize, type TruncationResult, truncateTail } from "./truncate";
 
+export const BASH_DEFAULT_PREVIEW_LINES = 10;
+
 const bashSchema = Type.Object({
 	command: Type.String({ description: "Bash command to execute" }),
 	timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
@@ -26,6 +28,7 @@ const bashSchema = Type.Object({
 export interface BashToolDetails {
 	truncation?: TruncationResult;
 	fullOutputPath?: string;
+	fullOutput?: string;
 }
 
 /**
@@ -101,9 +104,12 @@ export function createBashTool(session: ToolSession, options?: BashToolOptions):
 						const truncation = truncateTail(currentOutput);
 						onUpdate({
 							content: [{ type: "text", text: truncation.content || "" }],
-							details: {
-								truncation: truncation.truncated ? truncation : undefined,
-							},
+							details: truncation.truncated
+								? {
+										truncation,
+										fullOutput: currentOutput,
+									}
+								: undefined,
 						});
 					}
 				},
@@ -129,6 +135,7 @@ export function createBashTool(session: ToolSession, options?: BashToolOptions):
 				details = {
 					truncation,
 					fullOutputPath: result.fullOutputPath,
+					fullOutput: currentOutput,
 				};
 
 				const startLine = truncation.totalLines - truncation.outputLines + 1;
@@ -173,6 +180,9 @@ interface BashRenderContext {
 	previewLines?: number;
 }
 
+// Preview line limit when not expanded (matches tool-execution behavior)
+export const BASH_PREVIEW_LINES = 10;
+
 export const bashToolRenderer = {
 	renderCall(args: BashRenderArgs, uiTheme: Theme): Component {
 		const ui = createToolUIKit(uiTheme);
@@ -214,21 +224,25 @@ export const bashToolRenderer = {
 		const { renderContext } = options;
 		const details = result.details;
 
+		const expanded = renderContext?.expanded ?? options.expanded;
+		const previewLines = renderContext?.previewLines ?? BASH_DEFAULT_PREVIEW_LINES;
+
 		// Get output from context (preferred) or fall back to result content
 		const output = renderContext?.output ?? (result.content?.find((c) => c.type === "text")?.text ?? "").trim();
-		const expanded = renderContext?.expanded ?? options.expanded;
-		const previewLines = renderContext?.previewLines ?? 5;
+		const fullOutput = details?.fullOutput;
+		const displayOutput = expanded ? (fullOutput ?? output) : output;
+		const showingFullOutput = expanded && fullOutput !== undefined;
 
 		// Build truncation warning lines (static, doesn't depend on width)
 		const truncation = details?.truncation;
 		const fullOutputPath = details?.fullOutputPath;
 		let warningLine: string | undefined;
-		if (truncation?.truncated || fullOutputPath) {
+		if (fullOutputPath || (truncation?.truncated && !showingFullOutput)) {
 			const warnings: string[] = [];
 			if (fullOutputPath) {
 				warnings.push(`Full output: ${fullOutputPath}`);
 			}
-			if (truncation?.truncated) {
+			if (truncation?.truncated && !showingFullOutput) {
 				if (truncation.truncatedBy === "lines") {
 					warnings.push(`Truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines`);
 				} else {
@@ -237,17 +251,19 @@ export const bashToolRenderer = {
 					);
 				}
 			}
-			warningLine = uiTheme.fg("warning", ui.wrapBrackets(warnings.join(". ")));
+			if (warnings.length > 0) {
+				warningLine = uiTheme.fg("warning", ui.wrapBrackets(warnings.join(". ")));
+			}
 		}
 
-		if (!output) {
+		if (!displayOutput) {
 			// No output - just show warning if any
 			return new Text(warningLine ?? "", 0, 0);
 		}
 
 		if (expanded) {
 			// Show all lines when expanded
-			const styledOutput = output
+			const styledOutput = displayOutput
 				.split("\n")
 				.map((line) => uiTheme.fg("toolOutput", line))
 				.join("\n");
@@ -256,7 +272,7 @@ export const bashToolRenderer = {
 		}
 
 		// Collapsed: use width-aware caching component
-		const styledOutput = output
+		const styledOutput = displayOutput
 			.split("\n")
 			.map((line) => uiTheme.fg("toolOutput", line))
 			.join("\n");
