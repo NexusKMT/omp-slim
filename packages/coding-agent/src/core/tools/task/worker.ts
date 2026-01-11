@@ -180,6 +180,7 @@ async function runTask(runState: RunState, payload: SubagentWorkerStartPayload):
 			hasUI: false,
 			// Pass spawn restrictions to nested tasks
 			spawns: payload.spawnsEnv,
+			enableLsp: payload.enableLsp ?? true,
 		});
 
 		runState.session = session;

@@ -31,6 +31,7 @@ export interface Args {
 	models?: string[];
 	tools?: string[];
 	noTools?: boolean;
+	noLsp?: boolean;
 	hooks?: string[];
 	extensions?: string[];
 	noExtensions?: boolean;
@@ -100,6 +101,8 @@ export function parseArgs(args: string[], extensionFlags?: Map<string, { type: "
 			result.models = args[++i].split(",").map((s) => s.trim());
 		} else if (arg === "--no-tools") {
 			result.noTools = true;
+		} else if (arg === "--no-lsp") {
+			result.noLsp = true;
 		} else if (arg === "--tools" && i + 1 < args.length) {
 			const toolNames = args[++i].split(",").map((s) => s.trim());
 			const validTools: string[] = [];
@@ -196,6 +199,7 @@ ${chalk.bold("Options:")}
   --models <patterns>            Comma-separated model patterns for Ctrl+P cycling
                                  Supports globs (anthropic/*, *sonnet*) and fuzzy matching
   --no-tools                     Disable all built-in tools
+  --no-lsp                       Disable LSP tools, formatting, and diagnostics
   --tools <tools>                Comma-separated list of tools to enable (default: read,bash,edit,write)
                                  Available: read, bash, edit, write, grep, find, ls
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh

@@ -153,6 +153,9 @@ export interface CreateAgentSessionOptions {
 	/** Enable MCP server discovery from .mcp.json files. Default: true */
 	enableMCP?: boolean;
 
+	/** Enable LSP integration (tool, formatting, diagnostics, warmup). Default: true */
+	enableLsp?: boolean;
+
 	/** Tool names explicitly requested (enables disabled-by-default tools) */
 	toolNames?: string[];
 
@@ -667,9 +670,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	let agent: Agent;
 	let session: AgentSession;
 
+	const enableLsp = options.enableLsp ?? true;
+
 	const toolSession: ToolSession = {
 		cwd,
 		hasUI: options.hasUI ?? false,
+		enableLsp,
 		eventBus,
 		outputSchema: options.outputSchema,
 		requireCompleteTool: options.requireCompleteTool,
@@ -991,7 +997,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	// Warm up LSP servers (connects to detected servers)
 	let lspServers: CreateAgentSessionResult["lspServers"];
-	if (settingsManager.getLspDiagnosticsOnWrite()) {
+	if (enableLsp && settingsManager.getLspDiagnosticsOnWrite()) {
 		try {
 			const result = await warmupLspServers(cwd, {
 				onConnecting: (serverNames) => {

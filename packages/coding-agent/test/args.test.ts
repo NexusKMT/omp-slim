@@ -178,6 +178,13 @@ describe("parseArgs", () => {
 		});
 	});
 
+	describe("--no-lsp flag", () => {
+		test("parses --no-lsp flag", () => {
+			const result = parseArgs(["--no-lsp"]);
+			expect(result.noLsp).toBe(true);
+		});
+	});
+
 	describe("messages and file args", () => {
 		test("parses plain text messages", () => {
 			const result = parseArgs(["hello", "world"]);

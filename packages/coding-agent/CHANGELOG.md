@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `--no-lsp` to disable LSP tools, formatting, diagnostics, and warmup for a session
+
 ## [4.2.1] - 2026-01-11
 ### Added
 

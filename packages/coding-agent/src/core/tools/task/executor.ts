@@ -31,6 +31,7 @@ export interface ExecutorOptions {
 	context?: string;
 	modelOverride?: string;
 	outputSchema?: unknown;
+	enableLsp?: boolean;
 	signal?: AbortSignal;
 	onProgress?: (progress: AgentProgress) => void;
 	sessionFile?: string | null;
@@ -137,7 +138,8 @@ function getUsageTokens(usage: unknown): number {
  * Run a single agent in a worker.
  */
 export async function runSubprocess(options: ExecutorOptions): Promise<SingleResult> {
-	const { cwd, agent, task, index, taskId, context, modelOverride, outputSchema, signal, onProgress } = options;
+	const { cwd, agent, task, index, taskId, context, modelOverride, outputSchema, enableLsp, signal, onProgress } =
+		options;
 	const startTime = Date.now();
 
 	// Initialize progress
@@ -535,6 +537,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			outputSchema,
 			sessionFile,
 			spawnsEnv,
+			enableLsp,
 		},
 	};
 

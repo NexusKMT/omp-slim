@@ -92,6 +92,8 @@ export interface ToolSession {
 	cwd: string;
 	/** Whether UI is available */
 	hasUI: boolean;
+	/** Whether LSP integrations are enabled */
+	enableLsp?: boolean;
 	/** Event bus for tool/extension communication */
 	eventBus?: EventBus;
 	/** Output schema for structured completion (subagents) */
@@ -154,23 +156,28 @@ export type ToolName = keyof typeof BUILTIN_TOOLS;
  */
 export async function createTools(session: ToolSession, toolNames?: string[]): Promise<Tool[]> {
 	const includeComplete = session.requireCompleteTool === true;
+	const enableLsp = session.enableLsp ?? true;
 	const requestedTools = toolNames && toolNames.length > 0 ? [...new Set(toolNames)] : undefined;
 	const allTools: Record<string, ToolFactory> = { ...BUILTIN_TOOLS, ...HIDDEN_TOOLS };
+	const isToolAllowed = (name: string) => (name === "lsp" ? enableLsp : true);
 	if (includeComplete && requestedTools && !requestedTools.includes("complete")) {
 		requestedTools.push("complete");
 	}
 
-	const entries = requestedTools
-		? requestedTools.filter((name) => name in allTools).map((name) => [name, allTools[name]] as const)
-		: [
-				...Object.entries(BUILTIN_TOOLS),
-				...(includeComplete ? ([["complete", HIDDEN_TOOLS.complete]] as const) : []),
-			];
+	const filteredRequestedTools = requestedTools?.filter((name) => name in allTools && isToolAllowed(name));
+
+	const entries =
+		filteredRequestedTools !== undefined
+			? filteredRequestedTools.map((name) => [name, allTools[name]] as const)
+			: [
+					...Object.entries(BUILTIN_TOOLS).filter(([name]) => isToolAllowed(name)),
+					...(includeComplete ? ([["complete", HIDDEN_TOOLS.complete]] as const) : []),
+				];
 	const results = await Promise.all(entries.map(([, factory]) => factory(session)));
 	const tools = results.filter((t): t is Tool => t !== null);
 
-	if (requestedTools) {
-		const allowed = new Set(requestedTools);
+	if (filteredRequestedTools !== undefined) {
+		const allowed = new Set(filteredRequestedTools);
 		return tools.filter((tool) => allowed.has(tool.name));
 	}
 

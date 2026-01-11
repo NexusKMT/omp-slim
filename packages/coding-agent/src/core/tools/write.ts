@@ -8,7 +8,7 @@ import type { RenderResultOptions } from "../custom-tools/types";
 import { renderPromptTemplate } from "../prompt-templates";
 import type { ToolSession } from "../sdk";
 import { untilAborted } from "../utils";
-import { createLspWritethrough, type FileDiagnosticsResult } from "./lsp/index";
+import { createLspWritethrough, type FileDiagnosticsResult, writethroughNoop } from "./lsp/index";
 import { resolveToCwd } from "./path-utils";
 import { formatDiagnostics, replaceTabs, shortenPath } from "./render-utils";
 
@@ -23,9 +23,12 @@ export interface WriteToolDetails {
 }
 
 export function createWriteTool(session: ToolSession): AgentTool<typeof writeSchema, WriteToolDetails> {
-	const enableFormat = session.settings?.getLspFormatOnWrite() ?? true;
-	const enableDiagnostics = session.settings?.getLspDiagnosticsOnWrite() ?? true;
-	const writethrough = createLspWritethrough(session.cwd, { enableFormat, enableDiagnostics });
+	const enableLsp = session.enableLsp ?? true;
+	const enableFormat = enableLsp ? (session.settings?.getLspFormatOnWrite() ?? true) : false;
+	const enableDiagnostics = enableLsp ? (session.settings?.getLspDiagnosticsOnWrite() ?? true) : false;
+	const writethrough = enableLsp
+		? createLspWritethrough(session.cwd, { enableFormat, enableDiagnostics })
+		: writethroughNoop;
 	return {
 		name: "write",
 		label: "Write",

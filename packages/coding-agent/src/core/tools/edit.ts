@@ -19,7 +19,7 @@ import {
 	stripBom,
 } from "./edit-diff";
 import type { ToolSession } from "./index";
-import { createLspWritethrough, type FileDiagnosticsResult } from "./lsp/index";
+import { createLspWritethrough, type FileDiagnosticsResult, writethroughNoop } from "./lsp/index";
 import { resolveToCwd } from "./path-utils";
 import { createToolUIKit, getDiffStats, shortenPath, truncateDiffByHunk } from "./render-utils";
 
@@ -43,9 +43,12 @@ export interface EditToolDetails {
 
 export function createEditTool(session: ToolSession): AgentTool<typeof editSchema> {
 	const allowFuzzy = session.settings?.getEditFuzzyMatch() ?? true;
-	const enableDiagnostics = session.settings?.getLspDiagnosticsOnEdit() ?? false;
-	const enableFormat = session.settings?.getLspFormatOnWrite() ?? true;
-	const writethrough = createLspWritethrough(session.cwd, { enableFormat, enableDiagnostics });
+	const enableLsp = session.enableLsp ?? true;
+	const enableDiagnostics = enableLsp ? (session.settings?.getLspDiagnosticsOnEdit() ?? false) : false;
+	const enableFormat = enableLsp ? (session.settings?.getLspFormatOnWrite() ?? true) : false;
+	const writethrough = enableLsp
+		? createLspWritethrough(session.cwd, { enableFormat, enableDiagnostics })
+		: writethroughNoop;
 	return {
 		name: "edit",
 		label: "Edit",

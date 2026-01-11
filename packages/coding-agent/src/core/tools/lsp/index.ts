@@ -734,7 +734,10 @@ export function createLspWritethrough(cwd: string, options?: WritethroughOptions
 }
 
 /** Create an LSP tool */
-export function createLspTool(session: ToolSession): AgentTool<typeof lspSchema, LspToolDetails, Theme> {
+export function createLspTool(session: ToolSession): AgentTool<typeof lspSchema, LspToolDetails, Theme> | null {
+	if (session.enableLsp === false) {
+		return null;
+	}
 	return {
 		name: "lsp",
 		label: "LSP",

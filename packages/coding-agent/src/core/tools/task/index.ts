@@ -349,6 +349,7 @@ export async function createTaskTool(
 							sessionFile,
 							persistArtifacts: !!artifactsDir,
 							artifactsDir: effectiveArtifactsDir,
+							enableLsp: false,
 							signal,
 							eventBus: undefined,
 							onProgress: (progress) => {

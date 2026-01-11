@@ -359,6 +359,10 @@ async function buildSessionOptions(
 		options.toolNames = parsed.tools;
 	}
 
+	if (parsed.noLsp) {
+		options.enableLsp = false;
+	}
+
 	// Skills
 	if (parsed.noSkills) {
 		options.skills = [];

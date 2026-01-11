@@ -7,6 +7,7 @@ export interface SubagentWorkerStartPayload {
 	model?: string;
 	toolNames?: string[];
 	outputSchema?: unknown;
+	enableLsp?: boolean;
 	sessionFile?: string | null;
 	spawnsEnv?: string;
 }

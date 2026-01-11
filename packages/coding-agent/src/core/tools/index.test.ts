@@ -34,6 +34,22 @@ describe("createTools", () => {
 		expect(names).toContain("web_search");
 	});
 
+	it("excludes lsp tool when session disables LSP", async () => {
+		const session = createTestSession({ enableLsp: false });
+		const tools = await createTools(session, ["read", "lsp", "write"]);
+		const names = tools.map((t) => t.name);
+
+		expect(names).toEqual(["read", "write"]);
+	});
+
+	it("excludes lsp tool when disabled", async () => {
+		const session = createTestSession({ enableLsp: false });
+		const tools = await createTools(session);
+		const names = tools.map((t) => t.name);
+
+		expect(names).not.toContain("lsp");
+	});
+
 	it("respects requested tool subset", async () => {
 		const session = createTestSession();
 		const tools = await createTools(session, ["read", "write"]);
