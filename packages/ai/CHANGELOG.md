@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [4.2.1] - 2026-01-11
 ### Changed
 
 - Updated `reasoningSummary` option to accept only `"auto"`, `"concise"`, `"detailed"`, or `null` (removed `"off"` and `"on"` values)
