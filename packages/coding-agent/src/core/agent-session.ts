@@ -17,7 +17,7 @@ import type { Agent, AgentEvent, AgentMessage, AgentState, AgentTool, ThinkingLe
 import type { AssistantMessage, ImageContent, Message, Model, TextContent, Usage } from "@oh-my-pi/pi-ai";
 import { isContextOverflow, modelsAreEqual, supportsXhigh } from "@oh-my-pi/pi-ai";
 import type { Rule } from "../capability/rule";
-import { getAuthPath } from "../config";
+import { getAgentDbPath } from "../config";
 import { theme } from "../modes/interactive/theme/theme";
 import { type BashResult, executeBash as executeBashCommand, executeBashWithOperations } from "./bash-executor";
 import {
@@ -761,7 +761,7 @@ export class AgentSession {
 		if (!this.model) {
 			throw new Error(
 				"No model selected.\n\n" +
-					`Use /login, set an API key environment variable, or create ${getAuthPath()}\n\n` +
+					`Use /login, set an API key environment variable, or create ${getAgentDbPath()}\n\n` +
 					"Then use /model to select a model.",
 			);
 		}
@@ -771,7 +771,7 @@ export class AgentSession {
 		if (!apiKey) {
 			throw new Error(
 				`No API key found for ${this.model.provider}.\n\n` +
-					`Use /login, set an API key environment variable, or create ${getAuthPath()}`,
+					`Use /login, set an API key environment variable, or create ${getAgentDbPath()}`,
 			);
 		}
 

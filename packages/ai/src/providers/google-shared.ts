@@ -189,6 +189,38 @@ export function convertMessages<T extends GoogleApiType>(model: Model<T>, contex
 	return contents;
 }
 
+function sanitizeSchemaForGoogle(value: unknown): unknown {
+	if (Array.isArray(value)) {
+		return value.map((entry) => sanitizeSchemaForGoogle(entry));
+	}
+
+	if (!value || typeof value !== "object") {
+		return value;
+	}
+
+	const result: Record<string, unknown> = {};
+	let constValue: unknown | undefined;
+
+	for (const [key, entry] of Object.entries(value)) {
+		if (key === "const") {
+			constValue = entry;
+			continue;
+		}
+		result[key] = sanitizeSchemaForGoogle(entry);
+	}
+
+	if (constValue !== undefined) {
+		const existingEnum = Array.isArray(result.enum) ? [...result.enum] : undefined;
+		const enumValues = existingEnum ?? [];
+		if (!enumValues.some((item) => Object.is(item, constValue))) {
+			enumValues.push(constValue);
+		}
+		result.enum = enumValues;
+	}
+
+	return result;
+}
+
 /**
  * Convert tools to Gemini function declarations format.
  */
@@ -201,7 +233,7 @@ export function convertTools(
 			functionDeclarations: tools.map((tool) => ({
 				name: tool.name,
 				description: tool.description,
-				parameters: tool.parameters as Schema,
+				parameters: sanitizeSchemaForGoogle(tool.parameters) as Schema,
 			})),
 		},
 	];

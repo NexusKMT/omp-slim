@@ -2,7 +2,7 @@ import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { OAuthProvider } from "@oh-my-pi/pi-ai";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Input, Loader, Spacer, Text } from "@oh-my-pi/pi-tui";
-import { getAuthPath } from "../../../config";
+import { getAgentDbPath } from "../../../config";
 import { SessionManager } from "../../../core/session-manager";
 import { setPreferredImageProvider, setPreferredWebSearchProvider } from "../../../core/tools/index";
 import { disableProvider, enableProvider } from "../../../discovery";
@@ -546,7 +546,7 @@ export class SelectorController {
 								),
 							);
 							this.ctx.chatContainer.addChild(
-								new Text(theme.fg("dim", `Credentials saved to ${getAuthPath()}`), 1, 0),
+								new Text(theme.fg("dim", `Credentials saved to ${getAgentDbPath()}`), 1, 0),
 							);
 							this.ctx.ui.requestRender();
 						} catch (error: unknown) {
@@ -566,7 +566,7 @@ export class SelectorController {
 								),
 							);
 							this.ctx.chatContainer.addChild(
-								new Text(theme.fg("dim", `Credentials removed from ${getAuthPath()}`), 1, 0),
+								new Text(theme.fg("dim", `Credentials removed from ${getAgentDbPath()}`), 1, 0),
 							);
 							this.ctx.ui.requestRender();
 						} catch (error: unknown) {

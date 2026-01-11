@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+
+- Fixed Cloud Code Assist tool schema conversion to avoid unsupported `const` fields
 
 ## [4.2.0] - 2026-01-10
 

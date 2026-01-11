@@ -8,6 +8,7 @@
 ### Fixed
 
 - Fixed editor border rendering glitch after canceling slash command autocomplete
+- Fixed login/logout credential path message to reference agent.db
 
 ### Removed
 
