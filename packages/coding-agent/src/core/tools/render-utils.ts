@@ -359,11 +359,11 @@ export function formatDiagnostics(
 			const isLastDiag = di === diagnostics.length - 1;
 			const diagBranch = isLastFile
 				? isLastDiag
-					? `   ${theme.tree.last}`
-					: `   ${theme.tree.branch}`
+					? `  ${theme.tree.last}`
+					: `  ${theme.tree.branch}`
 				: isLastDiag
-					? ` ${theme.tree.vertical} ${theme.tree.last}`
-					: ` ${theme.tree.vertical} ${theme.tree.branch}`;
+					? `${theme.tree.vertical} ${theme.tree.last}`
+					: `${theme.tree.vertical} ${theme.tree.branch}`;
 
 			const sevIcon =
 				d.severity === "error"
