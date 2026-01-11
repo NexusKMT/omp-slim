@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-01-11
+
 ### Added
 
 - Added debug log filtering and display script for Cursor JSONL logs with follow mode and coalescing support

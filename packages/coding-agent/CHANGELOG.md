@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-01-11
+
 ### Added
 
 - Added Cursor provider support with browser-based OAuth authentication

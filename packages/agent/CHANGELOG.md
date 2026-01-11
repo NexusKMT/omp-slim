@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [4.3.0] - 2026-01-11
 ### Added
 
 - Added `cursorExecHandlers` and `cursorOnToolResult` options for local tool execution with cursor-based streaming
