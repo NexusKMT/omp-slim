@@ -1,5 +1,6 @@
 export * from "./models";
 export * from "./providers/anthropic";
+export * from "./providers/cursor";
 export * from "./providers/google";
 export * from "./providers/google-gemini-cli";
 export * from "./providers/google-vertex";

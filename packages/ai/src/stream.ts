@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { supportsXhigh } from "./models";
 import { type AnthropicOptions, streamAnthropic } from "./providers/anthropic";
+import { type CursorOptions, streamCursor } from "./providers/cursor";
 import { type GoogleOptions, streamGoogle } from "./providers/google";
 import {
 	type GoogleGeminiCliOptions,
@@ -82,6 +83,7 @@ export function getEnvApiKey(provider: any): string | undefined {
 		zai: "ZAI_API_KEY",
 		mistral: "MISTRAL_API_KEY",
 		opencode: "OPENCODE_API_KEY",
+		cursor: "CURSOR_ACCESS_TOKEN",
 	};
 
 	const envVar = envMap[provider];
@@ -127,6 +129,9 @@ export function stream<TApi extends Api>(
 				context,
 				providerOptions as GoogleGeminiCliOptions,
 			);
+
+		case "cursor-agent":
+			return streamCursor(model as Model<"cursor-agent">, context, providerOptions as CursorOptions);
 
 		default: {
 			// This should never be reached if all Api cases are handled
@@ -185,6 +190,7 @@ function mapOptionsForApi<TApi extends Api>(
 		signal: options?.signal,
 		apiKey: apiKey || options?.apiKey,
 		sessionId: options?.sessionId,
+		execHandlers: options?.execHandlers,
 	};
 
 	// Helper to clamp xhigh to high for providers that don't support it
@@ -351,6 +357,16 @@ function mapOptionsForApi<TApi extends Api>(
 					budgetTokens: getGoogleBudget(geminiModel, effort, options?.thinkingBudgets),
 				},
 			} satisfies GoogleVertexOptions;
+		}
+
+		case "cursor-agent": {
+			const execHandlers = options?.cursorExecHandlers ?? options?.execHandlers;
+			const onToolResult = options?.cursorOnToolResult ?? execHandlers?.onToolResult;
+			return {
+				...base,
+				execHandlers,
+				onToolResult,
+			} satisfies CursorOptions;
 		}
 
 		default: {

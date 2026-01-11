@@ -1,6 +1,13 @@
 # Changelog
 
 ## [Unreleased]
+
+### Added
+
+- Added Cursor provider support with browser-based OAuth authentication
+- Added default model configuration for Cursor provider (claude-sonnet-4-5)
+- Added execution bridge for Cursor tool calls including read, ls, grep, write, delete, shell, diagnostics, and MCP operations
+
 ### Fixed
 
 - Improved fuzzy matching accuracy for edit operations when file and target have inconsistent indentation patterns

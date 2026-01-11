@@ -27,7 +27,7 @@
  */
 
 import { join } from "node:path";
-import { Agent, type AgentMessage, type AgentTool, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import { Agent, type AgentEvent, type AgentMessage, type AgentTool, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Message, Model } from "@oh-my-pi/pi-ai";
 import type { Component } from "@oh-my-pi/pi-tui";
 import chalk from "chalk";
@@ -40,6 +40,7 @@ import { initializeWithSettings } from "../discovery";
 import { registerAsyncCleanup } from "../modes/cleanup";
 import { AgentSession } from "./agent-session";
 import { AuthStorage } from "./auth-storage";
+import { createCursorExecHandlers } from "./cursor/exec-bridge";
 import {
 	type CustomCommandsLoadResult,
 	loadCustomCommands as loadCustomCommandsInternal,
@@ -854,6 +855,14 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	}
 	time("combineTools");
 
+	let cursorEventEmitter: ((event: AgentEvent) => void) | undefined;
+	const cursorExecHandlers = createCursorExecHandlers({
+		cwd,
+		tools: toolRegistry,
+		getToolContext: toolContextStore.getContext,
+		emitEvent: (event) => cursorEventEmitter?.(event),
+	});
+
 	const rebuildSystemPrompt = async (toolNames: string[], tools: Map<string, AgentTool>): Promise<string> => {
 		toolContextStore.setToolNames(toolNames);
 		const defaultPrompt = await buildSystemPromptInternal({
@@ -964,7 +973,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			}
 			return key;
 		},
+		cursorExecHandlers,
 	});
+	cursorEventEmitter = (event) => agent.emitExternalEvent(event);
 	time("createAgent");
 
 	// Restore messages if session has existing data

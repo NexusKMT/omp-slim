@@ -1,8 +1,13 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Added
 
+- Added Cursor provider with support for Claude, GPT, and Gemini models via Cursor's agent API
+- Added OAuth authentication flow for Cursor including login, token refresh, and expiry detection
+- Added `cursor-agent` API type with streaming support and tool execution handlers
+- Added Cursor model definitions including Claude 4.5, GPT-5.x, Gemini 3, and Grok variants
 - Added model generation script to automatically fetch and update AI model definitions from models.dev and OpenRouter APIs
 
 ## [4.2.3] - 2026-01-11

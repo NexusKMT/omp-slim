@@ -9,6 +9,7 @@ import {
 	getOAuthApiKey,
 	loginAnthropic,
 	loginAntigravity,
+	loginCursor,
 	loginGeminiCli,
 	loginGitHubCopilot,
 	loginOpenAICodex,
@@ -584,6 +585,12 @@ export class AuthStorage {
 					onProgress: callbacks.onProgress,
 					onManualCodeInput: callbacks.onManualCodeInput,
 				});
+				break;
+			case "cursor":
+				credentials = await loginCursor(
+					(url) => callbacks.onAuth({ url }),
+					callbacks.onProgress ? () => callbacks.onProgress?.("Waiting for browser authentication...") : undefined,
+				);
 				break;
 			default:
 				throw new Error(`Unknown OAuth provider: ${provider}`);

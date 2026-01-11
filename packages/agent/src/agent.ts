@@ -4,6 +4,8 @@
  */
 
 import {
+	type CursorExecHandlers,
+	type CursorToolResultHandler,
 	getModel,
 	type ImageContent,
 	type Message,
@@ -11,6 +13,7 @@ import {
 	streamSimple,
 	type TextContent,
 	type ThinkingBudgets,
+	type ToolResultMessage,
 } from "@oh-my-pi/pi-ai";
 import { agentLoop, agentLoopContinue } from "./agent-loop";
 import type {
@@ -91,6 +94,16 @@ export interface AgentOptions {
 	 * Use for late-bound UI or session state access.
 	 */
 	getToolContext?: () => AgentToolContext | undefined;
+
+	/**
+	 * Cursor exec handlers for local tool execution.
+	 */
+	cursorExecHandlers?: CursorExecHandlers;
+
+	/**
+	 * Cursor tool result callback for exec tool responses.
+	 */
+	cursorOnToolResult?: CursorToolResultHandler;
 }
 
 export class Agent {
@@ -120,6 +133,8 @@ export class Agent {
 	private _thinkingBudgets?: ThinkingBudgets;
 	public getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 	private getToolContext?: () => AgentToolContext | undefined;
+	private cursorExecHandlers?: CursorExecHandlers;
+	private cursorOnToolResult?: CursorToolResultHandler;
 	private runningPrompt?: Promise<void>;
 	private resolveRunningPrompt?: () => void;
 
@@ -135,6 +150,8 @@ export class Agent {
 		this._thinkingBudgets = opts.thinkingBudgets;
 		this.getApiKey = opts.getApiKey;
 		this.getToolContext = opts.getToolContext;
+		this.cursorExecHandlers = opts.cursorExecHandlers;
+		this.cursorOnToolResult = opts.cursorOnToolResult;
 	}
 
 	/**
@@ -173,6 +190,33 @@ export class Agent {
 	subscribe(fn: (e: AgentEvent) => void): () => void {
 		this.listeners.add(fn);
 		return () => this.listeners.delete(fn);
+	}
+
+	emitExternalEvent(event: AgentEvent) {
+		switch (event.type) {
+			case "message_start":
+			case "message_update":
+				this._state.streamMessage = event.message;
+				break;
+			case "message_end":
+				this._state.streamMessage = null;
+				this.appendMessage(event.message);
+				break;
+			case "tool_execution_start": {
+				const pending = new Set(this._state.pendingToolCalls);
+				pending.add(event.toolCallId);
+				this._state.pendingToolCalls = pending;
+				break;
+			}
+			case "tool_execution_end": {
+				const pending = new Set(this._state.pendingToolCalls);
+				pending.delete(event.toolCallId);
+				this._state.pendingToolCalls = pending;
+				break;
+			}
+		}
+
+		this.emit(event);
 	}
 
 	// State mutators
@@ -382,6 +426,24 @@ export class Agent {
 			tools: this._state.tools,
 		};
 
+		const cursorOnToolResult =
+			this.cursorExecHandlers || this.cursorOnToolResult
+				? async (message: ToolResultMessage) => {
+						let finalMessage = message;
+						if (this.cursorOnToolResult) {
+							try {
+								const updated = await this.cursorOnToolResult(message);
+								if (updated) {
+									finalMessage = updated;
+								}
+							} catch {}
+						}
+						this.emitExternalEvent({ type: "message_start", message: finalMessage });
+						this.emitExternalEvent({ type: "message_end", message: finalMessage });
+						return finalMessage;
+					}
+				: undefined;
+
 		const config: AgentLoopConfig = {
 			model,
 			reasoning,
@@ -392,6 +454,8 @@ export class Agent {
 			transformContext: this.transformContext,
 			getApiKey: this.getApiKey,
 			getToolContext: this.getToolContext,
+			cursorExecHandlers: this.cursorExecHandlers,
+			cursorOnToolResult,
 			getSteeringMessages: async () => {
 				if (this.steeringMode === "one-at-a-time") {
 					if (this.steeringQueue.length > 0) {

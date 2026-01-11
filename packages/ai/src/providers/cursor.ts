@@ -1,0 +1,1577 @@
+import { createHash } from "node:crypto";
+import { appendFile } from "node:fs/promises";
+import http2 from "node:http2";
+import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
+import { calculateCost } from "../models";
+import type {
+	Api,
+	AssistantMessage,
+	Context,
+	CursorExecHandlerResult,
+	CursorExecHandlers,
+	CursorMcpCall,
+	CursorToolResultHandler,
+	ImageContent,
+	Model,
+	StreamFunction,
+	StreamOptions,
+	TextContent,
+	ThinkingContent,
+	Tool,
+	ToolCall,
+	ToolResultMessage,
+} from "../types";
+import { AssistantMessageEventStream } from "../utils/event-stream";
+import { parseStreamingJson } from "../utils/json-parse";
+import { formatErrorMessageWithRetryAfter } from "../utils/retry-after";
+import type { McpToolDefinition } from "./cursor/gen/agent_pb";
+import {
+	AgentClientMessageSchema,
+	AgentRunRequestSchema,
+	type AgentServerMessage,
+	AgentServerMessageSchema,
+	BackgroundShellSpawnResultSchema,
+	ClientHeartbeatSchema,
+	ConversationActionSchema,
+	ConversationStateStructureSchema,
+	DeleteErrorSchema,
+	DeleteRejectedSchema,
+	DeleteResultSchema,
+	DeleteSuccessSchema,
+	DiagnosticsErrorSchema,
+	DiagnosticsRejectedSchema,
+	DiagnosticsResultSchema,
+	DiagnosticsSuccessSchema,
+	type ExecClientMessage,
+	ExecClientMessageSchema,
+	type ExecServerMessage,
+	FetchErrorSchema,
+	FetchResultSchema,
+	GetBlobResultSchema,
+	GrepContentMatchSchema,
+	GrepContentResultSchema,
+	GrepCountResultSchema,
+	GrepErrorSchema,
+	type GrepFileCount,
+	GrepFileCountSchema,
+	GrepFileMatchSchema,
+	GrepFilesResultSchema,
+	GrepResultSchema,
+	GrepSuccessSchema,
+	type GrepUnionResult,
+	GrepUnionResultSchema,
+	KvClientMessageSchema,
+	type KvServerMessage,
+	type LsDirectoryTreeNode,
+	type LsDirectoryTreeNode_File,
+	LsDirectoryTreeNode_FileSchema,
+	LsDirectoryTreeNodeSchema,
+	LsErrorSchema,
+	LsRejectedSchema,
+	LsResultSchema,
+	LsSuccessSchema,
+	McpErrorSchema,
+	McpImageContentSchema,
+	McpResultSchema,
+	McpSuccessSchema,
+	McpTextContentSchema,
+	McpToolDefinitionSchema,
+	McpToolNotFoundSchema,
+	McpToolResultContentItemSchema,
+	ModelDetailsSchema,
+	ReadErrorSchema,
+	ReadRejectedSchema,
+	ReadResultSchema,
+	ReadSuccessSchema,
+	RequestContextResultSchema,
+	RequestContextSchema,
+	RequestContextSuccessSchema,
+	SetBlobResultSchema,
+	ShellFailureSchema,
+	ShellRejectedSchema,
+	ShellResultSchema,
+	ShellSuccessSchema,
+	UserMessageActionSchema,
+	UserMessageSchema,
+	WriteErrorSchema,
+	WriteRejectedSchema,
+	WriteResultSchema,
+	WriteShellStdinErrorSchema,
+	WriteShellStdinResultSchema,
+	WriteSuccessSchema,
+} from "./cursor/gen/agent_pb";
+
+export const CURSOR_API_URL = "https://api2.cursor.sh";
+export const CURSOR_CLIENT_VERSION = "cli-2026.01.09-231024f";
+
+export interface CursorOptions extends StreamOptions {
+	customSystemPrompt?: string;
+	conversationId?: string;
+	execHandlers?: CursorExecHandlers;
+	onToolResult?: CursorToolResultHandler;
+}
+
+const CONNECT_END_STREAM_FLAG = 0b00000010;
+
+async function appendCursorDebugLog(message: string): Promise<void> {
+	const logPath = process.env.DEBUG_CURSOR_LOG;
+	if (!logPath) return;
+	try {
+		await appendFile(logPath, `${message}\n`);
+	} catch {
+		// Ignore debug log failures
+	}
+}
+
+function logCursorDebug(message: string): void {
+	if (!process.env.DEBUG_CURSOR) return;
+	console.error(message);
+	void appendCursorDebugLog(message);
+}
+
+function frameConnectMessage(data: Uint8Array, flags = 0): Buffer {
+	const frame = Buffer.alloc(5 + data.length);
+	frame[0] = flags;
+	frame.writeUInt32BE(data.length, 1);
+	frame.set(data, 5);
+	return frame;
+}
+
+function parseConnectEndStream(data: Uint8Array): Error | null {
+	try {
+		const payload = JSON.parse(new TextDecoder().decode(data));
+		const error = payload?.error;
+		if (error) {
+			const code = typeof error.code === "string" ? error.code : "unknown";
+			const message = typeof error.message === "string" ? error.message : "Unknown error";
+			return new Error(`Connect error ${code}: ${message}`);
+		}
+		return null;
+	} catch {
+		return new Error("Failed to parse Connect end stream");
+	}
+}
+
+function debugBytes(bytes: Uint8Array, asHex: boolean): string {
+	if (asHex) {
+		return Buffer.from(bytes).toString("hex");
+	}
+	try {
+		const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+		if (/^[\x20-\x7E\s]*$/.test(text)) return text;
+	} catch {}
+	return Buffer.from(bytes).toString("hex");
+}
+
+function debugReplacer(key: string, value: unknown): unknown {
+	if (
+		value instanceof Uint8Array ||
+		(value && typeof value === "object" && "type" in value && value.type === "Buffer")
+	) {
+		const bytes = value instanceof Uint8Array ? value : new Uint8Array((value as any).data);
+		const asHex = key === "blobId" || key === "blob_id" || key.endsWith("Id") || key.endsWith("_id");
+		return debugBytes(bytes, asHex);
+	}
+	if (typeof value === "bigint") return value.toString();
+	return value;
+}
+
+export const streamCursor: StreamFunction<"cursor-agent"> = (
+	model: Model<"cursor-agent">,
+	context: Context,
+	options?: CursorOptions,
+): AssistantMessageEventStream => {
+	const stream = new AssistantMessageEventStream();
+
+	(async () => {
+		const output: AssistantMessage = {
+			role: "assistant",
+			content: [],
+			api: "cursor-agent" as Api,
+			provider: model.provider,
+			model: model.id,
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: Date.now(),
+		};
+
+		let h2Client: http2.ClientHttp2Session | null = null;
+		let h2Request: http2.ClientHttp2Stream | null = null;
+		let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+		try {
+			const apiKey = options?.apiKey;
+			if (!apiKey) {
+				throw new Error("Cursor API key (access token) is required");
+			}
+
+			const { requestBytes, blobStore } = buildGrpcRequest(model, context, options);
+			const requestContextTools = buildMcpToolDefinitions(context.tools);
+
+			const baseUrl = model.baseUrl || CURSOR_API_URL;
+			h2Client = http2.connect(baseUrl);
+
+			h2Request = h2Client.request({
+				":method": "POST",
+				":path": "/agent.v1.AgentService/Run",
+				"content-type": "application/connect+proto",
+				"connect-protocol-version": "1",
+				te: "trailers",
+				authorization: `Bearer ${apiKey}`,
+				"x-ghost-mode": "true",
+				"x-cursor-client-version": CURSOR_CLIENT_VERSION,
+				"x-cursor-client-type": "cli",
+				"x-request-id": crypto.randomUUID(),
+			});
+
+			stream.push({ type: "start", partial: output });
+
+			let pendingBuffer = Buffer.alloc(0);
+			let endStreamError: Error | null = null;
+			let currentTextBlock: (TextContent & { index: number }) | null = null;
+			let currentThinkingBlock: (ThinkingContent & { index: number }) | null = null;
+			let currentToolCall: (ToolCall & { index: number; partialJson: string }) | null = null;
+			const usageState: UsageState = { sawTokenDelta: false };
+
+			const state: BlockState = {
+				get currentTextBlock() {
+					return currentTextBlock;
+				},
+				get currentThinkingBlock() {
+					return currentThinkingBlock;
+				},
+				get currentToolCall() {
+					return currentToolCall;
+				},
+				setTextBlock: (b) => {
+					currentTextBlock = b;
+				},
+				setThinkingBlock: (b) => {
+					currentThinkingBlock = b;
+				},
+				setToolCall: (t) => {
+					currentToolCall = t;
+				},
+			};
+
+			h2Request.on("data", (chunk: Buffer) => {
+				pendingBuffer = Buffer.concat([pendingBuffer, chunk]);
+
+				while (pendingBuffer.length >= 5) {
+					const flags = pendingBuffer[0];
+					const msgLen = pendingBuffer.readUInt32BE(1);
+					if (pendingBuffer.length < 5 + msgLen) break;
+
+					const messageBytes = pendingBuffer.subarray(5, 5 + msgLen);
+					pendingBuffer = pendingBuffer.subarray(5 + msgLen);
+
+					if (flags & CONNECT_END_STREAM_FLAG) {
+						const endError = parseConnectEndStream(messageBytes);
+						if (endError) {
+							endStreamError = endError;
+							h2Request?.close();
+						}
+						continue;
+					}
+
+					try {
+						const serverMessage = fromBinary(AgentServerMessageSchema, messageBytes);
+						void handleServerMessage(
+							serverMessage,
+							output,
+							stream,
+							state,
+							blobStore,
+							h2Request!,
+							options?.execHandlers,
+							options?.onToolResult,
+							usageState,
+							requestContextTools,
+						).catch((error) => {
+							logCursorDebug(`[CURSOR] Failed to handle server message: ${String(error)}`);
+						});
+					} catch (e) {
+						logCursorDebug(`[CURSOR] Failed to parse server message: ${String(e)}`);
+					}
+				}
+			});
+
+			h2Request.write(frameConnectMessage(requestBytes));
+
+			const sendHeartbeat = () => {
+				if (!h2Request || h2Request.closed) {
+					return;
+				}
+				const heartbeatMessage = create(AgentClientMessageSchema, {
+					message: { case: "clientHeartbeat", value: create(ClientHeartbeatSchema, {}) },
+				});
+				const heartbeatBytes = toBinary(AgentClientMessageSchema, heartbeatMessage);
+				h2Request.write(frameConnectMessage(heartbeatBytes));
+			};
+
+			heartbeatTimer = setInterval(sendHeartbeat, 5000);
+
+			await new Promise<void>((resolve, reject) => {
+				h2Request!.on("trailers", (trailers) => {
+					const status = trailers["grpc-status"];
+					const msg = trailers["grpc-message"];
+					if (status && status !== "0") {
+						reject(new Error(`gRPC error ${status}: ${decodeURIComponent(String(msg || ""))}`));
+					}
+				});
+
+				h2Request!.on("end", () => {
+					if (endStreamError) {
+						reject(endStreamError);
+						return;
+					}
+					resolve();
+				});
+
+				h2Request!.on("error", reject);
+
+				if (options?.signal) {
+					options.signal.addEventListener("abort", () => {
+						h2Request?.close();
+						reject(new Error("Request was aborted"));
+					});
+				}
+			});
+
+			if (state.currentTextBlock) {
+				const idx = output.content.indexOf(state.currentTextBlock);
+				stream.push({
+					type: "text_end",
+					contentIndex: idx,
+					content: state.currentTextBlock.text,
+					partial: output,
+				});
+			}
+			if (state.currentThinkingBlock) {
+				const idx = output.content.indexOf(state.currentThinkingBlock);
+				stream.push({
+					type: "thinking_end",
+					contentIndex: idx,
+					content: state.currentThinkingBlock.thinking,
+					partial: output,
+				});
+			}
+			if (state.currentToolCall) {
+				const idx = output.content.indexOf(state.currentToolCall);
+				state.currentToolCall.arguments = parseStreamingJson(state.currentToolCall.partialJson);
+				delete (state.currentToolCall as any).partialJson;
+				delete (state.currentToolCall as any).index;
+				stream.push({
+					type: "toolcall_end",
+					contentIndex: idx,
+					toolCall: state.currentToolCall,
+					partial: output,
+				});
+			}
+
+			calculateCost(model, output.usage);
+
+			stream.push({
+				type: "done",
+				reason: output.stopReason as "stop" | "length" | "toolUse",
+				message: output,
+			});
+			stream.end();
+		} catch (error) {
+			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+			output.errorMessage = formatErrorMessageWithRetryAfter(error);
+			stream.push({ type: "error", reason: output.stopReason, error: output });
+			stream.end();
+		} finally {
+			if (heartbeatTimer) {
+				clearInterval(heartbeatTimer);
+				heartbeatTimer = null;
+			}
+			h2Request?.close();
+			h2Client?.close();
+		}
+	})();
+
+	return stream;
+};
+
+interface BlockState {
+	currentTextBlock: (TextContent & { index: number }) | null;
+	currentThinkingBlock: (ThinkingContent & { index: number }) | null;
+	currentToolCall: (ToolCall & { index: number; partialJson: string }) | null;
+	setTextBlock: (b: (TextContent & { index: number }) | null) => void;
+	setThinkingBlock: (b: (ThinkingContent & { index: number }) | null) => void;
+	setToolCall: (t: (ToolCall & { index: number; partialJson: string }) | null) => void;
+}
+
+interface UsageState {
+	sawTokenDelta: boolean;
+}
+
+async function handleServerMessage(
+	msg: AgentServerMessage,
+	output: AssistantMessage,
+	stream: AssistantMessageEventStream,
+	state: BlockState,
+	blobStore: Map<string, Uint8Array>,
+	h2Request: http2.ClientHttp2Stream,
+	execHandlers: CursorExecHandlers | undefined,
+	onToolResult: CursorToolResultHandler | undefined,
+	usageState: UsageState,
+	requestContextTools: McpToolDefinition[],
+): Promise<void> {
+	const msgCase = msg.message.case;
+
+	if (process.env.DEBUG_CURSOR) {
+		const detail =
+			process.env.DEBUG_CURSOR === "2"
+				? ` ${JSON.stringify(msg.message.value, debugReplacer, 2)?.slice(0, 2000)}`
+				: "";
+		logCursorDebug(`[CURSOR] Server message: ${msgCase}${detail}`);
+	}
+
+	if (msgCase === "interactionUpdate") {
+		processInteractionUpdate(msg.message.value, output, stream, state, usageState);
+	} else if (msgCase === "kvServerMessage") {
+		handleKvServerMessage(msg.message.value as KvServerMessage, blobStore, h2Request);
+	} else if (msgCase === "execServerMessage") {
+		await handleExecServerMessage(
+			msg.message.value as ExecServerMessage,
+			h2Request,
+			execHandlers,
+			onToolResult,
+			requestContextTools,
+		);
+	} else if (msgCase === "conversationCheckpointUpdate") {
+		handleConversationCheckpointUpdate(msg.message.value, output, usageState);
+	}
+}
+
+function handleKvServerMessage(
+	kvMsg: KvServerMessage,
+	blobStore: Map<string, Uint8Array>,
+	h2Request: http2.ClientHttp2Stream,
+): void {
+	const kvCase = kvMsg.message.case;
+
+	if (kvCase === "getBlobArgs") {
+		const blobId = kvMsg.message.value.blobId;
+		const blobIdKey = Buffer.from(blobId).toString("hex");
+
+		const blobData = blobStore.get(blobIdKey);
+
+		const response = create(KvClientMessageSchema, {
+			id: kvMsg.id,
+			message: {
+				case: "getBlobResult",
+				value: create(GetBlobResultSchema, blobData ? { blobData } : {}),
+			},
+		});
+
+		const kvClientMessage = create(AgentClientMessageSchema, {
+			message: { case: "kvClientMessage", value: response },
+		});
+
+		const responseBytes = toBinary(AgentClientMessageSchema, kvClientMessage);
+		h2Request.write(frameConnectMessage(responseBytes));
+
+		if (process.env.DEBUG_CURSOR) {
+			logCursorDebug(`[CURSOR] Sent KV blob response for id: ${blobIdKey.slice(0, 40)}`);
+		}
+	} else if (kvCase === "setBlobArgs") {
+		const { blobId, blobData } = kvMsg.message.value;
+		const blobIdKey = Buffer.from(blobId).toString("hex");
+		blobStore.set(blobIdKey, blobData);
+
+		const response = create(KvClientMessageSchema, {
+			id: kvMsg.id,
+			message: {
+				case: "setBlobResult",
+				value: create(SetBlobResultSchema, {}),
+			},
+		});
+
+		const kvClientMessage = create(AgentClientMessageSchema, {
+			message: { case: "kvClientMessage", value: response },
+		});
+
+		const responseBytes = toBinary(AgentClientMessageSchema, kvClientMessage);
+		h2Request.write(frameConnectMessage(responseBytes));
+
+		if (process.env.DEBUG_CURSOR) {
+			logCursorDebug(`[CURSOR] Stored KV blob: ${blobIdKey.slice(0, 40)}`);
+		}
+	}
+}
+
+async function handleExecServerMessage(
+	execMsg: ExecServerMessage,
+	h2Request: http2.ClientHttp2Stream,
+	execHandlers: CursorExecHandlers | undefined,
+	onToolResult: CursorToolResultHandler | undefined,
+	requestContextTools: McpToolDefinition[],
+): Promise<void> {
+	const execCase = execMsg.message.case;
+	if (execCase === "requestContextArgs") {
+		const requestContext = create(RequestContextSchema, {
+			rules: [],
+			repositoryInfo: [],
+			tools: requestContextTools,
+			gitRepos: [],
+			projectLayouts: [],
+			mcpInstructions: [],
+			fileContents: {},
+			customSubagents: [],
+		});
+
+		const requestContextResult = create(RequestContextResultSchema, {
+			result: {
+				case: "success",
+				value: create(RequestContextSuccessSchema, { requestContext }),
+			},
+		});
+
+		sendExecClientMessage(h2Request, execMsg, "requestContextResult", requestContextResult);
+
+		if (process.env.DEBUG_CURSOR) {
+			logCursorDebug("[CURSOR] Sent request context response");
+		}
+		return;
+	}
+
+	if (!execCase) {
+		return;
+	}
+
+	switch (execCase) {
+		case "readArgs": {
+			const args = execMsg.message.value;
+			const { execResult } = await resolveExecHandler(
+				args,
+				execHandlers?.read,
+				onToolResult,
+				(toolResult) => buildReadResultFromToolResult(args.path, toolResult),
+				(reason) => buildReadRejectedResult(args.path, reason),
+				(error) => buildReadErrorResult(args.path, error),
+			);
+			sendExecClientMessage(h2Request, execMsg, "readResult", execResult);
+			return;
+		}
+		case "lsArgs": {
+			const args = execMsg.message.value;
+			const { execResult } = await resolveExecHandler(
+				args,
+				execHandlers?.ls,
+				onToolResult,
+				(toolResult) => buildLsResultFromToolResult(args.path, toolResult),
+				(reason) => buildLsRejectedResult(args.path, reason),
+				(error) => buildLsErrorResult(args.path, error),
+			);
+			sendExecClientMessage(h2Request, execMsg, "lsResult", execResult);
+			return;
+		}
+		case "grepArgs": {
+			const args = execMsg.message.value;
+			const { execResult } = await resolveExecHandler(
+				args,
+				execHandlers?.grep,
+				onToolResult,
+				(toolResult) => buildGrepResultFromToolResult(args, toolResult),
+				(reason) => buildGrepErrorResult(reason),
+				(error) => buildGrepErrorResult(error),
+			);
+			sendExecClientMessage(h2Request, execMsg, "grepResult", execResult);
+			return;
+		}
+		case "writeArgs": {
+			const args = execMsg.message.value;
+			const { execResult } = await resolveExecHandler(
+				args,
+				execHandlers?.write,
+				onToolResult,
+				(toolResult) =>
+					buildWriteResultFromToolResult(
+						{
+							path: args.path,
+							fileText: args.fileText,
+							fileBytes: args.fileBytes,
+							returnFileContentAfterWrite: args.returnFileContentAfterWrite,
+						},
+						toolResult,
+					),
+				(reason) => buildWriteRejectedResult(args.path, reason),
+				(error) => buildWriteErrorResult(args.path, error),
+			);
+			sendExecClientMessage(h2Request, execMsg, "writeResult", execResult);
+			return;
+		}
+		case "deleteArgs": {
+			const args = execMsg.message.value;
+			const { execResult } = await resolveExecHandler(
+				args,
+				execHandlers?.delete,
+				onToolResult,
+				(toolResult) => buildDeleteResultFromToolResult(args.path, toolResult),
+				(reason) => buildDeleteRejectedResult(args.path, reason),
+				(error) => buildDeleteErrorResult(args.path, error),
+			);
+			sendExecClientMessage(h2Request, execMsg, "deleteResult", execResult);
+			return;
+		}
+		case "shellArgs": {
+			const args = execMsg.message.value;
+			const { execResult } = await resolveExecHandler(
+				args,
+				execHandlers?.shell,
+				onToolResult,
+				(toolResult) => buildShellResultFromToolResult(args, toolResult),
+				(reason) => buildShellRejectedResult(args.command, args.workingDirectory, reason),
+				(error) => buildShellFailureResult(args.command, args.workingDirectory, error),
+			);
+			sendExecClientMessage(h2Request, execMsg, "shellResult", execResult);
+			return;
+		}
+		case "shellStreamArgs": {
+			const args = execMsg.message.value;
+			const execResult = buildShellRejectedResult(args.command, args.workingDirectory, "Not implemented");
+			sendExecClientMessage(h2Request, execMsg, "shellResult", execResult);
+			return;
+		}
+		case "backgroundShellSpawnArgs": {
+			const args = execMsg.message.value;
+			const execResult = create(BackgroundShellSpawnResultSchema, {
+				result: {
+					case: "rejected",
+					value: create(ShellRejectedSchema, {
+						command: args.command,
+						workingDirectory: args.workingDirectory,
+						reason: "Not implemented",
+						isReadonly: false,
+					}),
+				},
+			});
+			sendExecClientMessage(h2Request, execMsg, "backgroundShellSpawnResult", execResult);
+			return;
+		}
+		case "writeShellStdinArgs": {
+			const execResult = create(WriteShellStdinResultSchema, {
+				result: {
+					case: "error",
+					value: create(WriteShellStdinErrorSchema, {
+						error: "Not implemented",
+					}),
+				},
+			});
+			sendExecClientMessage(h2Request, execMsg, "writeShellStdinResult", execResult);
+			return;
+		}
+		case "fetchArgs": {
+			const args = execMsg.message.value;
+			const execResult = create(FetchResultSchema, {
+				result: {
+					case: "error",
+					value: create(FetchErrorSchema, {
+						url: args.url,
+						error: "Not implemented",
+					}),
+				},
+			});
+			sendExecClientMessage(h2Request, execMsg, "fetchResult", execResult);
+			return;
+		}
+		case "diagnosticsArgs": {
+			const args = execMsg.message.value;
+			const { execResult } = await resolveExecHandler(
+				args,
+				execHandlers?.diagnostics,
+				onToolResult,
+				(toolResult) => buildDiagnosticsResultFromToolResult(args.path, toolResult),
+				(reason) => buildDiagnosticsRejectedResult(args.path, reason),
+				(error) => buildDiagnosticsErrorResult(args.path, error),
+			);
+			sendExecClientMessage(h2Request, execMsg, "diagnosticsResult", execResult);
+			return;
+		}
+		case "mcpArgs": {
+			const args = execMsg.message.value;
+			const mcpCall = decodeMcpCall(args);
+			const { execResult } = await resolveExecHandler(
+				mcpCall,
+				execHandlers?.mcp,
+				onToolResult,
+				(toolResult) => buildMcpResultFromToolResult(mcpCall, toolResult),
+				(_reason) => buildMcpToolNotFoundResult(mcpCall),
+				(error) => buildMcpErrorResult(error),
+			);
+			sendExecClientMessage(h2Request, execMsg, "mcpResult", execResult);
+			return;
+		}
+		default:
+			if (process.env.DEBUG_CURSOR) {
+				logCursorDebug(`[CURSOR] Unhandled exec message: ${execCase}`);
+			}
+	}
+}
+
+function sendExecClientMessage<T>(
+	h2Request: http2.ClientHttp2Stream,
+	execMsg: ExecServerMessage,
+	messageCase: ExecClientMessage["message"]["case"],
+	value: T,
+): void {
+	const execClientMessage = create(ExecClientMessageSchema, {
+		id: execMsg.id,
+		execId: execMsg.execId,
+		message: {
+			case: messageCase,
+			value: value as any,
+		},
+	});
+
+	const clientMessage = create(AgentClientMessageSchema, {
+		message: { case: "execClientMessage", value: execClientMessage },
+	});
+
+	const responseBytes = toBinary(AgentClientMessageSchema, clientMessage);
+	h2Request.write(frameConnectMessage(responseBytes));
+
+	if (process.env.DEBUG_CURSOR) {
+		const detail =
+			process.env.DEBUG_CURSOR === "2" ? ` ${JSON.stringify(value, debugReplacer, 2)?.slice(0, 2000)}` : "";
+		logCursorDebug(`[CURSOR] Sent exec client message: ${messageCase}${detail}`);
+	}
+}
+
+async function resolveExecHandler<TArgs, TResult>(
+	args: TArgs,
+	handler: ((args: TArgs) => Promise<CursorExecHandlerResult<TResult>>) | undefined,
+	onToolResult: CursorToolResultHandler | undefined,
+	buildFromToolResult: (toolResult: ToolResultMessage) => TResult,
+	buildRejected: (reason: string) => TResult,
+	buildError: (error: string) => TResult,
+): Promise<{ execResult: TResult; toolResult?: ToolResultMessage }> {
+	if (!handler) {
+		return { execResult: buildRejected("Tool not available") };
+	}
+
+	try {
+		const handlerResult = await handler(args);
+		const { execResult, toolResult } = splitExecHandlerResult(handlerResult);
+		const finalToolResult = await applyToolResultHandler(toolResult, onToolResult);
+
+		if (execResult) {
+			return { execResult, toolResult: finalToolResult };
+		}
+		if (finalToolResult) {
+			return { execResult: buildFromToolResult(finalToolResult), toolResult: finalToolResult };
+		}
+		return { execResult: buildRejected("Tool returned no result") };
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		return { execResult: buildError(message) };
+	}
+}
+
+function splitExecHandlerResult<TResult>(result: CursorExecHandlerResult<TResult>): {
+	execResult?: TResult;
+	toolResult?: ToolResultMessage;
+} {
+	if (isToolResultMessage(result)) {
+		return { toolResult: result };
+	}
+	if (result && typeof result === "object") {
+		const record = result as Record<string, unknown>;
+		if ("execResult" in record) {
+			const { execResult, toolResult } = record as {
+				execResult: TResult;
+				toolResult?: ToolResultMessage;
+			};
+			return { execResult, toolResult };
+		}
+		if ("toolResult" in record && !isToolResultMessage(record)) {
+			const { result: execResult, toolResult } = record as {
+				result?: TResult;
+				toolResult?: ToolResultMessage;
+			};
+			return { execResult, toolResult };
+		}
+		if ("result" in record && !("$typeName" in record)) {
+			const { result: execResult, toolResult } = record as {
+				result: TResult;
+				toolResult?: ToolResultMessage;
+			};
+			return { execResult, toolResult };
+		}
+	}
+	return { execResult: result as TResult };
+}
+
+function isToolResultMessage(value: unknown): value is ToolResultMessage {
+	return !!value && typeof value === "object" && (value as ToolResultMessage).role === "toolResult";
+}
+
+async function applyToolResultHandler(
+	toolResult: ToolResultMessage | undefined,
+	onToolResult: CursorToolResultHandler | undefined,
+): Promise<ToolResultMessage | undefined> {
+	if (!toolResult || !onToolResult) {
+		return toolResult;
+	}
+	const updated = await onToolResult(toolResult);
+	return updated ?? toolResult;
+}
+
+function toolResultToText(toolResult: ToolResultMessage): string {
+	return toolResult.content.map((item) => (item.type === "text" ? item.text : `[${item.mimeType} image]`)).join("\n");
+}
+
+function toolResultWasTruncated(toolResult: ToolResultMessage): boolean {
+	if (!toolResult.details || typeof toolResult.details !== "object") {
+		return false;
+	}
+	const truncation = (toolResult.details as { truncation?: { truncated?: boolean } }).truncation;
+	return !!truncation?.truncated;
+}
+
+function toolResultDetailBoolean(toolResult: ToolResultMessage, key: string): boolean {
+	if (!toolResult.details || typeof toolResult.details !== "object") {
+		return false;
+	}
+	const value = (toolResult.details as Record<string, unknown>)[key];
+	return typeof value === "boolean" ? value : false;
+}
+
+function buildReadResultFromToolResult(path: string, toolResult: ToolResultMessage) {
+	const text = toolResultToText(toolResult);
+	if (toolResult.isError) {
+		return buildReadErrorResult(path, text || "Read failed");
+	}
+	const totalLines = text ? text.split("\n").length : 0;
+	return create(ReadResultSchema, {
+		result: {
+			case: "success",
+			value: create(ReadSuccessSchema, {
+				path,
+				totalLines,
+				fileSize: BigInt(Buffer.byteLength(text, "utf-8")),
+				truncated: toolResultWasTruncated(toolResult),
+				output: { case: "content", value: text },
+			}),
+		},
+	});
+}
+
+function buildReadErrorResult(path: string, error: string) {
+	return create(ReadResultSchema, {
+		result: {
+			case: "error",
+			value: create(ReadErrorSchema, { path, error }),
+		},
+	});
+}
+
+function buildReadRejectedResult(path: string, reason: string) {
+	return create(ReadResultSchema, {
+		result: {
+			case: "rejected",
+			value: create(ReadRejectedSchema, { path, reason }),
+		},
+	});
+}
+
+function buildWriteResultFromToolResult(
+	args: { path: string; fileText?: string; fileBytes?: Uint8Array; returnFileContentAfterWrite?: boolean },
+	toolResult: ToolResultMessage,
+) {
+	const text = toolResultToText(toolResult);
+	if (toolResult.isError) {
+		return buildWriteErrorResult(args.path, text || "Write failed");
+	}
+	const fileText = args.fileText ?? "";
+	const fileSize = args.fileBytes?.length ?? Buffer.byteLength(fileText, "utf-8");
+	const linesCreated = fileText ? fileText.split("\n").length : 0;
+	return create(WriteResultSchema, {
+		result: {
+			case: "success",
+			value: create(WriteSuccessSchema, {
+				path: args.path,
+				linesCreated,
+				fileSize,
+				fileContentAfterWrite: args.returnFileContentAfterWrite ? fileText : undefined,
+			}),
+		},
+	});
+}
+
+function buildWriteErrorResult(path: string, error: string) {
+	return create(WriteResultSchema, {
+		result: {
+			case: "error",
+			value: create(WriteErrorSchema, { path, error }),
+		},
+	});
+}
+
+function buildWriteRejectedResult(path: string, reason: string) {
+	return create(WriteResultSchema, {
+		result: {
+			case: "rejected",
+			value: create(WriteRejectedSchema, { path, reason }),
+		},
+	});
+}
+
+function buildDeleteResultFromToolResult(path: string, toolResult: ToolResultMessage) {
+	const text = toolResultToText(toolResult);
+	if (toolResult.isError) {
+		return buildDeleteErrorResult(path, text || "Delete failed");
+	}
+	return create(DeleteResultSchema, {
+		result: {
+			case: "success",
+			value: create(DeleteSuccessSchema, {
+				path,
+				deletedFile: path,
+				fileSize: BigInt(0),
+				prevContent: "",
+			}),
+		},
+	});
+}
+
+function buildDeleteErrorResult(path: string, error: string) {
+	return create(DeleteResultSchema, {
+		result: {
+			case: "error",
+			value: create(DeleteErrorSchema, { path, error }),
+		},
+	});
+}
+
+function buildDeleteRejectedResult(path: string, reason: string) {
+	return create(DeleteResultSchema, {
+		result: {
+			case: "rejected",
+			value: create(DeleteRejectedSchema, { path, reason }),
+		},
+	});
+}
+
+function buildShellResultFromToolResult(
+	args: { command: string; workingDirectory: string },
+	toolResult: ToolResultMessage,
+) {
+	const output = toolResultToText(toolResult);
+	if (toolResult.isError) {
+		return buildShellFailureResult(args.command, args.workingDirectory, output || "Shell failed");
+	}
+	return create(ShellResultSchema, {
+		result: {
+			case: "success",
+			value: create(ShellSuccessSchema, {
+				command: args.command,
+				workingDirectory: args.workingDirectory,
+				exitCode: 0,
+				signal: "",
+				stdout: output,
+				stderr: "",
+				executionTime: 0,
+			}),
+		},
+	});
+}
+
+function buildShellFailureResult(command: string, workingDirectory: string, error: string) {
+	return create(ShellResultSchema, {
+		result: {
+			case: "failure",
+			value: create(ShellFailureSchema, {
+				command,
+				workingDirectory,
+				exitCode: 1,
+				signal: "",
+				stdout: "",
+				stderr: error,
+				executionTime: 0,
+				aborted: false,
+			}),
+		},
+	});
+}
+
+function buildShellRejectedResult(command: string, workingDirectory: string, reason: string) {
+	return create(ShellResultSchema, {
+		result: {
+			case: "rejected",
+			value: create(ShellRejectedSchema, {
+				command,
+				workingDirectory,
+				reason,
+				isReadonly: false,
+			}),
+		},
+	});
+}
+
+function buildLsResultFromToolResult(path: string, toolResult: ToolResultMessage) {
+	const text = toolResultToText(toolResult);
+	if (toolResult.isError) {
+		return buildLsErrorResult(path, text || "Ls failed");
+	}
+	const rootPath = path || ".";
+	const entries = text
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0 && !line.startsWith("["));
+	const childrenDirs: LsDirectoryTreeNode[] = [];
+	const childrenFiles: LsDirectoryTreeNode_File[] = [];
+
+	for (const entry of entries) {
+		const name = entry.split(" (")[0];
+		if (name.endsWith("/")) {
+			const dirName = name.slice(0, -1);
+			childrenDirs.push(
+				create(LsDirectoryTreeNodeSchema, {
+					absPath: `${rootPath.replace(/\/$/, "")}/${dirName}`,
+					childrenDirs: [],
+					childrenFiles: [],
+					childrenWereProcessed: false,
+					fullSubtreeExtensionCounts: {},
+					numFiles: 0,
+				}),
+			);
+		} else {
+			childrenFiles.push(create(LsDirectoryTreeNode_FileSchema, { name }));
+		}
+	}
+
+	const root = create(LsDirectoryTreeNodeSchema, {
+		absPath: rootPath,
+		childrenDirs,
+		childrenFiles,
+		childrenWereProcessed: true,
+		fullSubtreeExtensionCounts: {},
+		numFiles: childrenFiles.length,
+	});
+
+	return create(LsResultSchema, {
+		result: {
+			case: "success",
+			value: create(LsSuccessSchema, { directoryTreeRoot: root }),
+		},
+	});
+}
+
+function buildLsErrorResult(path: string, error: string) {
+	return create(LsResultSchema, {
+		result: {
+			case: "error",
+			value: create(LsErrorSchema, { path, error }),
+		},
+	});
+}
+
+function buildLsRejectedResult(path: string, reason: string) {
+	return create(LsResultSchema, {
+		result: {
+			case: "rejected",
+			value: create(LsRejectedSchema, { path, reason }),
+		},
+	});
+}
+
+function buildGrepResultFromToolResult(
+	args: { pattern: string; path?: string; outputMode?: string },
+	toolResult: ToolResultMessage,
+) {
+	const text = toolResultToText(toolResult);
+	if (toolResult.isError) {
+		return buildGrepErrorResult(text || "Grep failed");
+	}
+
+	const outputMode = args.outputMode || "content";
+	const clientTruncated = toolResultDetailBoolean(toolResult, "truncated");
+	const lines = text
+		.split("\n")
+		.map((line) => line.trimEnd())
+		.filter((line) => line.length > 0 && !line.startsWith("[") && !line.toLowerCase().startsWith("no matches"));
+
+	const workspaceKey = args.path || ".";
+	let unionResult: GrepUnionResult;
+
+	if (outputMode === "files_with_matches") {
+		const files = lines;
+		unionResult = create(GrepUnionResultSchema, {
+			result: {
+				case: "files",
+				value: create(GrepFilesResultSchema, {
+					files,
+					totalFiles: files.length,
+					clientTruncated,
+					ripgrepTruncated: false,
+				}),
+			},
+		});
+	} else if (outputMode === "count") {
+		const counts = lines
+			.map((line) => {
+				const separatorIndex = line.lastIndexOf(":");
+				if (separatorIndex === -1) {
+					return null;
+				}
+				const file = line.slice(0, separatorIndex);
+				const count = Number.parseInt(line.slice(separatorIndex + 1), 10);
+				if (!file || Number.isNaN(count)) {
+					return null;
+				}
+				return create(GrepFileCountSchema, { file, count });
+			})
+			.filter((entry): entry is GrepFileCount => entry !== null);
+		const totalMatches = counts.reduce((sum, entry) => sum + entry.count, 0);
+		unionResult = create(GrepUnionResultSchema, {
+			result: {
+				case: "count",
+				value: create(GrepCountResultSchema, {
+					counts,
+					totalFiles: counts.length,
+					totalMatches,
+					clientTruncated,
+					ripgrepTruncated: false,
+				}),
+			},
+		});
+	} else {
+		const matchMap = new Map<string, Array<{ line: number; content: string; isContextLine: boolean }>>();
+		let totalMatchedLines = 0;
+
+		for (const line of lines) {
+			const matchLine = line.match(/^(.+?):(\d+):\s?(.*)$/);
+			const contextLine = line.match(/^(.+?)-(\d+)-\s?(.*)$/);
+			const match = matchLine ?? contextLine;
+			if (!match) {
+				continue;
+			}
+			const [, file, lineNumber, content] = match;
+			const isContextLine = Boolean(contextLine);
+			const list = matchMap.get(file) ?? [];
+			list.push({ line: Number(lineNumber), content, isContextLine });
+			matchMap.set(file, list);
+			if (!isContextLine) {
+				totalMatchedLines += 1;
+			}
+		}
+
+		const matches = Array.from(matchMap.entries()).map(([file, matches]) =>
+			create(GrepFileMatchSchema, {
+				file,
+				matches: matches.map((entry) =>
+					create(GrepContentMatchSchema, {
+						lineNumber: entry.line,
+						content: entry.content,
+						contentTruncated: false,
+						isContextLine: entry.isContextLine,
+					}),
+				),
+			}),
+		);
+		const totalLines = matches.reduce((sum, entry) => sum + entry.matches.length, 0);
+		unionResult = create(GrepUnionResultSchema, {
+			result: {
+				case: "content",
+				value: create(GrepContentResultSchema, {
+					matches,
+					totalLines,
+					totalMatchedLines,
+					clientTruncated,
+					ripgrepTruncated: false,
+				}),
+			},
+		});
+	}
+
+	return create(GrepResultSchema, {
+		result: {
+			case: "success",
+			value: create(GrepSuccessSchema, {
+				pattern: args.pattern,
+				path: args.path || "",
+				outputMode,
+				workspaceResults: { [workspaceKey]: unionResult },
+			}),
+		},
+	});
+}
+
+function buildGrepErrorResult(error: string) {
+	return create(GrepResultSchema, {
+		result: {
+			case: "error",
+			value: create(GrepErrorSchema, { error }),
+		},
+	});
+}
+
+function buildDiagnosticsResultFromToolResult(path: string, toolResult: ToolResultMessage) {
+	const text = toolResultToText(toolResult);
+	if (toolResult.isError) {
+		return buildDiagnosticsErrorResult(path, text || "Diagnostics failed");
+	}
+	return create(DiagnosticsResultSchema, {
+		result: {
+			case: "success",
+			value: create(DiagnosticsSuccessSchema, {
+				path,
+				diagnostics: [],
+				totalDiagnostics: 0,
+			}),
+		},
+	});
+}
+
+function buildDiagnosticsErrorResult(_path: string, error: string) {
+	return create(DiagnosticsResultSchema, {
+		result: {
+			case: "error",
+			value: create(DiagnosticsErrorSchema, { error }),
+		},
+	});
+}
+
+function buildDiagnosticsRejectedResult(path: string, reason: string) {
+	return create(DiagnosticsResultSchema, {
+		result: {
+			case: "rejected",
+			value: create(DiagnosticsRejectedSchema, { path, reason }),
+		},
+	});
+}
+
+function decodeMcpCall(args: {
+	name: string;
+	args: Record<string, Uint8Array>;
+	toolCallId: string;
+	providerIdentifier: string;
+	toolName: string;
+}): CursorMcpCall {
+	const decodedArgs: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(args.args ?? {})) {
+		const text = new TextDecoder().decode(value);
+		try {
+			decodedArgs[key] = JSON.parse(text);
+		} catch {
+			decodedArgs[key] = text;
+		}
+	}
+	return {
+		name: args.name,
+		providerIdentifier: args.providerIdentifier,
+		toolName: args.toolName || args.name,
+		toolCallId: args.toolCallId,
+		args: decodedArgs,
+		rawArgs: args.args ?? {},
+	};
+}
+
+function buildMcpResultFromToolResult(_mcpCall: CursorMcpCall, toolResult: ToolResultMessage) {
+	if (toolResult.isError) {
+		return buildMcpErrorResult(toolResultToText(toolResult) || "MCP tool failed");
+	}
+	const content = toolResult.content.map((item) => {
+		if (item.type === "image") {
+			return create(McpToolResultContentItemSchema, {
+				content: {
+					case: "image",
+					value: create(McpImageContentSchema, {
+						data: Uint8Array.from(Buffer.from(item.data, "base64")),
+						mimeType: item.mimeType,
+					}),
+				},
+			});
+		}
+		return create(McpToolResultContentItemSchema, {
+			content: {
+				case: "text",
+				value: create(McpTextContentSchema, { text: item.text }),
+			},
+		});
+	});
+
+	return create(McpResultSchema, {
+		result: {
+			case: "success",
+			value: create(McpSuccessSchema, {
+				content,
+				isError: false,
+			}),
+		},
+	});
+}
+
+function buildMcpToolNotFoundResult(mcpCall: CursorMcpCall) {
+	return create(McpResultSchema, {
+		result: {
+			case: "toolNotFound",
+			value: create(McpToolNotFoundSchema, { name: mcpCall.toolName, availableTools: [] }),
+		},
+	});
+}
+
+function buildMcpErrorResult(error: string) {
+	return create(McpResultSchema, {
+		result: {
+			case: "error",
+			value: create(McpErrorSchema, { error }),
+		},
+	});
+}
+
+function processInteractionUpdate(
+	update: any,
+	output: AssistantMessage,
+	stream: AssistantMessageEventStream,
+	state: BlockState,
+	usageState: UsageState,
+): void {
+	const updateCase = update.message?.case;
+
+	if (process.env.DEBUG_CURSOR) {
+		const detail =
+			process.env.DEBUG_CURSOR === "2"
+				? ` ${JSON.stringify(update.message?.value, debugReplacer, 2)?.slice(0, 1000)}`
+				: "";
+		logCursorDebug(`[CURSOR] Interaction update: ${updateCase}${detail}`);
+	}
+
+	if (updateCase === "textDelta") {
+		const delta = update.message.value.text || "";
+		if (!state.currentTextBlock) {
+			const block: TextContent & { index: number } = {
+				type: "text",
+				text: "",
+				index: output.content.length,
+			};
+			output.content.push(block);
+			state.setTextBlock(block);
+			stream.push({ type: "text_start", contentIndex: output.content.length - 1, partial: output });
+		}
+		state.currentTextBlock!.text += delta;
+		const idx = output.content.indexOf(state.currentTextBlock!);
+		stream.push({ type: "text_delta", contentIndex: idx, delta, partial: output });
+	} else if (updateCase === "thinkingDelta") {
+		const delta = update.message.value.text || "";
+		if (!state.currentThinkingBlock) {
+			const block: ThinkingContent & { index: number } = {
+				type: "thinking",
+				thinking: "",
+				index: output.content.length,
+			};
+			output.content.push(block);
+			state.setThinkingBlock(block);
+			stream.push({ type: "thinking_start", contentIndex: output.content.length - 1, partial: output });
+		}
+		state.currentThinkingBlock!.thinking += delta;
+		const idx = output.content.indexOf(state.currentThinkingBlock!);
+		stream.push({ type: "thinking_delta", contentIndex: idx, delta, partial: output });
+	} else if (updateCase === "thinkingCompleted") {
+		if (state.currentThinkingBlock) {
+			const idx = output.content.indexOf(state.currentThinkingBlock);
+			delete (state.currentThinkingBlock as any).index;
+			stream.push({
+				type: "thinking_end",
+				contentIndex: idx,
+				content: state.currentThinkingBlock.thinking,
+				partial: output,
+			});
+			state.setThinkingBlock(null);
+		}
+	} else if (updateCase === "toolCallStarted") {
+		const toolCall = update.message.value.toolCall;
+		if (toolCall) {
+			const mcpCall = toolCall.mcpToolCall;
+			if (mcpCall) {
+				const args = mcpCall.args || {};
+				const block: ToolCall & { index: number; partialJson: string } = {
+					type: "toolCall",
+					id: args.toolCallId || crypto.randomUUID(),
+					name: args.name || args.toolName || "",
+					arguments: {},
+					index: output.content.length,
+					partialJson: "",
+				};
+				output.content.push(block);
+				state.setToolCall(block);
+				stream.push({ type: "toolcall_start", contentIndex: output.content.length - 1, partial: output });
+			}
+		}
+	} else if (updateCase === "toolCallDelta" || updateCase === "partialToolCall") {
+		if (state.currentToolCall) {
+			const delta = update.message.value.argsTextDelta || "";
+			state.currentToolCall.partialJson += delta;
+			state.currentToolCall.arguments = parseStreamingJson(state.currentToolCall.partialJson);
+			const idx = output.content.indexOf(state.currentToolCall);
+			stream.push({ type: "toolcall_delta", contentIndex: idx, delta, partial: output });
+		}
+	} else if (updateCase === "toolCallCompleted") {
+		if (state.currentToolCall) {
+			const toolCall = update.message.value.toolCall;
+			if (toolCall?.mcpToolCall?.args?.args) {
+				state.currentToolCall.arguments = toolCall.mcpToolCall.args.args;
+			}
+			const idx = output.content.indexOf(state.currentToolCall);
+			delete (state.currentToolCall as any).partialJson;
+			delete (state.currentToolCall as any).index;
+			stream.push({ type: "toolcall_end", contentIndex: idx, toolCall: state.currentToolCall, partial: output });
+			state.setToolCall(null);
+		}
+	} else if (updateCase === "turnEnded") {
+		output.stopReason = "stop";
+	} else if (updateCase === "tokenDelta") {
+		const tokenDelta = update.message.value;
+		usageState.sawTokenDelta = true;
+		output.usage.output += tokenDelta.tokens || 0;
+		output.usage.totalTokens = output.usage.input + output.usage.output;
+	}
+}
+
+function handleConversationCheckpointUpdate(
+	checkpoint: { tokenDetails?: { usedTokens?: number } },
+	output: AssistantMessage,
+	usageState: UsageState,
+): void {
+	if (usageState.sawTokenDelta) {
+		return;
+	}
+	const usedTokens = checkpoint.tokenDetails?.usedTokens ?? 0;
+	if (usedTokens <= 0) {
+		return;
+	}
+	if (output.usage.output !== usedTokens) {
+		output.usage.output = usedTokens;
+		output.usage.totalTokens = output.usage.input + output.usage.output;
+	}
+}
+
+function createBlobId(data: Uint8Array): Uint8Array {
+	return new Uint8Array(createHash("sha256").update(data).digest());
+}
+
+function buildMcpToolDefinitions(tools: Tool[] | undefined): McpToolDefinition[] {
+	if (!tools || tools.length === 0) {
+		return [];
+	}
+
+	const mcpTools = tools.filter((tool) => tool.name.startsWith("mcp_"));
+	if (mcpTools.length === 0) {
+		return [];
+	}
+
+	return mcpTools.map((tool) => {
+		const jsonSchema = tool.parameters as any;
+		return create(McpToolDefinitionSchema, {
+			name: tool.name,
+			description: tool.description,
+			providerIdentifier: "pi-agent",
+			toolName: tool.name,
+			inputSchema: new TextEncoder().encode(
+				JSON.stringify({
+					type: "object",
+					properties: jsonSchema.properties || {},
+					required: jsonSchema.required || [],
+				}),
+			),
+		});
+	});
+}
+
+function buildGrpcRequest(
+	model: Model<"cursor-agent">,
+	context: Context,
+	options?: CursorOptions,
+): { requestBytes: Uint8Array; blobStore: Map<string, Uint8Array> } {
+	const blobStore = new Map<string, Uint8Array>();
+
+	const systemPromptJson = JSON.stringify({
+		role: "system",
+		content: context.systemPrompt || "You are a helpful assistant.",
+	});
+	const systemPromptBytes = new TextEncoder().encode(systemPromptJson);
+	const systemPromptId = createBlobId(systemPromptBytes);
+	blobStore.set(Buffer.from(systemPromptId).toString("hex"), systemPromptBytes);
+
+	const lastMessage = context.messages[context.messages.length - 1];
+	const userText =
+		lastMessage?.role === "user"
+			? typeof lastMessage.content === "string"
+				? lastMessage.content
+				: extractText(lastMessage.content)
+			: "";
+
+	const userMessage = create(UserMessageSchema, {
+		text: userText,
+		messageId: crypto.randomUUID(),
+	});
+
+	const action = create(ConversationActionSchema, {
+		action: {
+			case: "userMessageAction",
+			value: create(UserMessageActionSchema, { userMessage }),
+		},
+	});
+
+	const conversationState = create(ConversationStateStructureSchema, {
+		rootPromptMessagesJson: [systemPromptId],
+		turns: [],
+	});
+
+	const modelDetails = create(ModelDetailsSchema, {
+		modelId: model.id,
+		displayModelId: model.id,
+		displayName: model.name,
+	});
+
+	const runRequest = create(AgentRunRequestSchema, {
+		conversationState,
+		action,
+		modelDetails,
+		conversationId: options?.conversationId || crypto.randomUUID(),
+	});
+
+	// Tools are sent later via requestContext (exec handshake)
+
+	if (options?.customSystemPrompt) {
+		runRequest.customSystemPrompt = options.customSystemPrompt;
+	}
+
+	const clientMessage = create(AgentClientMessageSchema, {
+		message: { case: "runRequest", value: runRequest },
+	});
+
+	const requestBytes = toBinary(AgentClientMessageSchema, clientMessage);
+
+	if (process.env.DEBUG_CURSOR) {
+		const toolNames = context.tools?.map((tool) => tool.name) ?? [];
+		const detail =
+			process.env.DEBUG_CURSOR === "2"
+				? ` ${JSON.stringify(clientMessage.message.value, debugReplacer, 2)?.slice(0, 2000)}`
+				: "";
+		logCursorDebug(
+			`[CURSOR] Built runRequest: bytes=${requestBytes.length} tools=${toolNames.length} names=${toolNames.slice(0, 20).join(",")}${detail}`,
+		);
+	}
+
+	return { requestBytes, blobStore };
+}
+
+function extractText(content: (TextContent | ImageContent)[]): string {
+	return content
+		.filter((c): c is TextContent => c.type === "text")
+		.map((c) => c.text)
+		.join("\n");
+}

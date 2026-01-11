@@ -1,6 +1,10 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added `cursorExecHandlers` and `cursorOnToolResult` options for local tool execution with cursor-based streaming
+- Added `emitExternalEvent` method to allow external event injection into the agent state
 
 ## [4.2.3] - 2026-01-11
 

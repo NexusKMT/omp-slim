@@ -13,7 +13,8 @@ export type OAuthProvider =
 	| "github-copilot"
 	| "google-gemini-cli"
 	| "google-antigravity"
-	| "openai-codex";
+	| "openai-codex"
+	| "cursor";
 
 export type OAuthPrompt = {
 	message: string;

@@ -11,6 +11,14 @@
 
 // Anthropic
 export { loginAnthropic, refreshAnthropicToken } from "./anthropic";
+// Cursor
+export {
+	generateCursorAuthParams,
+	isTokenExpiringSoon as isCursorTokenExpiringSoon,
+	loginCursor,
+	pollCursorAuth,
+	refreshCursorToken,
+} from "./cursor";
 // GitHub Copilot
 export {
 	getGitHubCopilotBaseUrl,
@@ -41,6 +49,7 @@ export * from "./types";
 // ============================================================================
 
 import { refreshAnthropicToken } from "./anthropic";
+import { refreshCursorToken } from "./cursor";
 import { refreshGitHubCopilotToken } from "./github-copilot";
 import { refreshAntigravityToken } from "./google-antigravity";
 import { refreshGoogleCloudToken } from "./google-gemini-cli";
@@ -82,6 +91,9 @@ export async function refreshOAuthToken(
 			break;
 		case "openai-codex":
 			newCredentials = await refreshOpenAICodexToken(credentials.refresh);
+			break;
+		case "cursor":
+			newCredentials = await refreshCursorToken(credentials.refresh);
 			break;
 		default:
 			throw new Error(`Unknown OAuth provider: ${provider}`);
@@ -151,6 +163,11 @@ export function getOAuthProviders(): OAuthProviderInfo[] {
 		{
 			id: "google-antigravity",
 			name: "Antigravity (Gemini 3, Claude, GPT-OSS)",
+			available: true,
+		},
+		{
+			id: "cursor",
+			name: "Cursor (Claude, GPT, etc.)",
 			available: true,
 		},
 	];

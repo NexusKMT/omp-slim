@@ -1,4 +1,22 @@
 import type { AnthropicOptions } from "./providers/anthropic";
+import type { CursorOptions } from "./providers/cursor";
+import type {
+	DeleteArgs,
+	DeleteResult,
+	DiagnosticsArgs,
+	DiagnosticsResult,
+	GrepArgs,
+	GrepResult,
+	LsArgs,
+	LsResult,
+	McpResult,
+	ReadArgs,
+	ReadResult,
+	ShellArgs,
+	ShellResult,
+	WriteArgs,
+	WriteResult,
+} from "./providers/cursor/gen/agent_pb";
 import type { GoogleOptions } from "./providers/google";
 import type { GoogleGeminiCliOptions } from "./providers/google-gemini-cli";
 import type { GoogleVertexOptions } from "./providers/google-vertex";
@@ -16,7 +34,8 @@ export type Api =
 	| "anthropic-messages"
 	| "google-generative-ai"
 	| "google-gemini-cli"
-	| "google-vertex";
+	| "google-vertex"
+	| "cursor-agent";
 
 export interface ApiOptionsMap {
 	"anthropic-messages": AnthropicOptions;
@@ -26,6 +45,7 @@ export interface ApiOptionsMap {
 	"google-generative-ai": GoogleOptions;
 	"google-gemini-cli": GoogleGeminiCliOptions;
 	"google-vertex": GoogleVertexOptions;
+	"cursor-agent": CursorOptions;
 }
 
 // Compile-time exhaustiveness check - this will fail if ApiOptionsMap doesn't have all KnownApi keys
@@ -49,6 +69,7 @@ export type KnownProvider =
 	| "openai"
 	| "openai-codex"
 	| "github-copilot"
+	| "cursor"
 	| "xai"
 	| "groq"
 	| "cerebras"
@@ -80,6 +101,8 @@ export interface StreamOptions {
 	 * session-aware features. Ignored by providers that don't support it.
 	 */
 	sessionId?: string;
+	/** Cursor exec/MCP tool handlers (cursor-agent only). */
+	execHandlers?: CursorExecHandlers;
 }
 
 // Unified options with reasoning passed to streamSimple() and completeSimple()
@@ -87,6 +110,10 @@ export interface SimpleStreamOptions extends StreamOptions {
 	reasoning?: ThinkingLevel;
 	/** Custom token budgets for thinking levels (token-based providers only) */
 	thinkingBudgets?: ThinkingBudgets;
+	/** Cursor exec handlers for local tool execution */
+	cursorExecHandlers?: CursorExecHandlers;
+	/** Hook to handle tool results from Cursor exec */
+	cursorOnToolResult?: CursorToolResultHandler;
 }
 
 // Generic StreamFunction with typed options
@@ -168,6 +195,33 @@ export interface ToolResultMessage<TDetails = any> {
 }
 
 export type Message = UserMessage | AssistantMessage | ToolResultMessage;
+
+export type CursorExecHandlerResult<T> = { result: T; toolResult?: ToolResultMessage } | T | ToolResultMessage;
+
+export type CursorToolResultHandler = (
+	result: ToolResultMessage,
+) => ToolResultMessage | undefined | Promise<ToolResultMessage | undefined>;
+
+export interface CursorMcpCall {
+	name: string;
+	providerIdentifier: string;
+	toolName: string;
+	toolCallId: string;
+	args: Record<string, unknown>;
+	rawArgs: Record<string, Uint8Array>;
+}
+
+export interface CursorExecHandlers {
+	read?: (args: ReadArgs) => Promise<CursorExecHandlerResult<ReadResult>>;
+	ls?: (args: LsArgs) => Promise<CursorExecHandlerResult<LsResult>>;
+	grep?: (args: GrepArgs) => Promise<CursorExecHandlerResult<GrepResult>>;
+	write?: (args: WriteArgs) => Promise<CursorExecHandlerResult<WriteResult>>;
+	delete?: (args: DeleteArgs) => Promise<CursorExecHandlerResult<DeleteResult>>;
+	shell?: (args: ShellArgs) => Promise<CursorExecHandlerResult<ShellResult>>;
+	diagnostics?: (args: DiagnosticsArgs) => Promise<CursorExecHandlerResult<DiagnosticsResult>>;
+	mcp?: (call: CursorMcpCall) => Promise<CursorExecHandlerResult<McpResult>>;
+	onToolResult?: CursorToolResultHandler;
+}
 
 import type { TSchema } from "@sinclair/typebox";
 
