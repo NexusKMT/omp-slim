@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [4.3.2] - 2026-01-11
 ### Changed
 
 - Increased default bash output preview from 5 to 10 lines when collapsed
