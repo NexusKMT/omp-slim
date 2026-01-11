@@ -1,6 +1,7 @@
 import { join, resolve } from "node:path";
 import Handlebars from "handlebars";
 import { CONFIG_DIR_NAME, getPromptsDir } from "../config";
+import { logger } from "./logger";
 
 /**
  * Represents a prompt template loaded from a markdown file
@@ -448,12 +449,12 @@ async function loadTemplatesFromDir(
 						source: sourceStr,
 					});
 				}
-			} catch (_error) {
-				// Silently skip files that can't be read
+			} catch (error) {
+				logger.warn("Failed to load prompt template", { path: fullPath, error: String(error) });
 			}
 		}
-	} catch (_error) {
-		// Silently skip directories that can't be read
+	} catch (error) {
+		logger.warn("Failed to scan prompt templates directory", { dir, error: String(error) });
 	}
 
 	return templates;

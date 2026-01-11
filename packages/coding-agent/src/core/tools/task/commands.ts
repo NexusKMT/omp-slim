@@ -7,6 +7,7 @@
 import * as path from "node:path";
 import { type SlashCommand, slashCommandCapability } from "../../../capability/slash-command";
 import { loadCapability } from "../../../discovery";
+import { parseFrontmatter } from "../../../discovery/helpers";
 
 // Embed command markdown files at build time
 import initMd from "../../../prompts/agents/init.md" with { type: "text" };
@@ -27,37 +28,10 @@ export interface WorkflowCommand {
 	filePath: string;
 }
 
-/**
- * Parse YAML frontmatter from markdown content.
- */
-function parseFrontmatter(content: string): { frontmatter: Record<string, string>; body: string } {
-	const frontmatter: Record<string, string> = {};
-	const normalized = content.replace(/\r\n/g, "\n");
-
-	if (!normalized.startsWith("---")) {
-		return { frontmatter, body: normalized };
-	}
-
-	const endIndex = normalized.indexOf("\n---", 3);
-	if (endIndex === -1) {
-		return { frontmatter, body: normalized };
-	}
-
-	const frontmatterBlock = normalized.slice(4, endIndex);
-	const body = normalized.slice(endIndex + 4).trim();
-
-	for (const line of frontmatterBlock.split("\n")) {
-		const match = line.match(/^([\w-]+):\s*(.*)$/);
-		if (match) {
-			let value = match[2].trim();
-			if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-				value = value.slice(1, -1);
-			}
-			frontmatter[match[1]] = value;
-		}
-	}
-
-	return { frontmatter, body };
+/** Extract string value from frontmatter field */
+function getString(frontmatter: Record<string, unknown>, key: string): string {
+	const value = frontmatter[key];
+	return typeof value === "string" ? value : "";
 }
 
 /** Cache for bundled commands */
@@ -79,7 +53,7 @@ export function loadBundledCommands(): WorkflowCommand[] {
 
 		commands.push({
 			name: cmdName,
-			description: frontmatter.description || "",
+			description: getString(frontmatter, "description"),
 			instructions: body,
 			source: "bundled",
 			filePath: `embedded:${name}`,
@@ -115,7 +89,7 @@ export async function discoverCommands(cwd: string): Promise<WorkflowCommand[]> 
 
 		commands.push({
 			name: cmd.name,
-			description: frontmatter.description || "",
+			description: getString(frontmatter, "description"),
 			instructions: body,
 			source,
 			filePath: cmd.path,

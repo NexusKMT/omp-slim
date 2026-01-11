@@ -95,7 +95,7 @@ export const handleReadTheDocs: SpecialHandler = async (
 				content = sourceResult.content;
 				notes.push(`Fetched raw source from ${sourceUrl}`);
 			}
-		} catch (_err) {
+		} catch {
 			// Ignore errors, fall back to HTML
 		}
 	}

@@ -156,6 +156,11 @@ export async function createTaskTool(
 			const shouldInheritSessionModel = model === undefined && isDefaultModelAlias(agent.model);
 			const sessionModel = shouldInheritSessionModel ? session.getActiveModelString?.() : undefined;
 			const modelOverride = model ?? sessionModel ?? session.getModelString?.();
+			const thinkingLevelOverride = agent.thinkingLevel;
+
+			// Output schema priority: agent frontmatter > params > inherited from parent session
+			const schemaOverridden = outputSchema !== undefined && agent.output !== undefined;
+			const effectiveOutputSchema = agent.output ?? outputSchema ?? session.outputSchema;
 
 			// Handle empty or missing tasks
 			if (!params.tasks || params.tasks.length === 0) {
@@ -345,7 +350,8 @@ export async function createTaskTool(
 							taskId: task.taskId,
 							context: undefined, // Already prepended above
 							modelOverride,
-							outputSchema,
+							thinkingLevel: thinkingLevelOverride,
+							outputSchema: effectiveOutputSchema,
 							sessionFile,
 							persistArtifacts: !!artifactsDir,
 							artifactsDir: effectiveArtifactsDir,
@@ -399,9 +405,12 @@ export async function createTaskTool(
 				const outputIds = results.map((r) => r.taskId);
 				const outputHint =
 					outputIds.length > 0 ? `\n\nUse output tool for full logs: output ids ${outputIds.join(", ")}` : "";
+				const schemaNote = schemaOverridden
+					? `\n\nNote: Agent '${agentName}' has a fixed output schema; your 'output' parameter was ignored.\nRequired schema: ${JSON.stringify(agent.output)}`
+					: "";
 				const summary = `${successCount}/${results.length} succeeded [${formatDuration(
 					totalDuration,
-				)}]\n\n${summaries.join("\n\n---\n\n")}${outputHint}`;
+				)}]\n\n${summaries.join("\n\n---\n\n")}${outputHint}${schemaNote}`;
 
 				// Cleanup temp directory if used
 				if (tempArtifactsDir) {

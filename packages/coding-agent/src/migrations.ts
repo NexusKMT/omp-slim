@@ -8,6 +8,7 @@ import chalk from "chalk";
 import { getAgentDbPath, getAgentDir, getBinDir } from "./config";
 import { AgentStorage } from "./core/agent-storage";
 import type { AuthCredential } from "./core/auth-storage";
+import { logger } from "./core/logger";
 
 /**
  * Migrate PI_* environment variables to OMP_* equivalents.
@@ -55,8 +56,8 @@ export function migrateAuthToAgentDb(): string[] {
 				providers.push(provider);
 			}
 			renameSync(oauthPath, `${oauthPath}.migrated`);
-		} catch {
-			// Skip on error
+		} catch (error) {
+			logger.warn("Failed to migrate oauth.json", { path: oauthPath, error: String(error) });
 		}
 	}
 
@@ -75,8 +76,8 @@ export function migrateAuthToAgentDb(): string[] {
 				delete settings.apiKeys;
 				writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 			}
-		} catch {
-			// Skip on error
+		} catch (error) {
+			logger.warn("Failed to migrate settings.json apiKeys", { path: settingsPath, error: String(error) });
 		}
 	}
 
@@ -105,7 +106,8 @@ export function migrateSessionsFromAgentRoot(): void {
 		files = readdirSync(agentDir)
 			.filter((f) => f.endsWith(".jsonl"))
 			.map((f) => join(agentDir, f));
-	} catch {
+	} catch (error) {
+		logger.warn("Failed to read agent directory for session migration", { path: agentDir, error: String(error) });
 		return;
 	}
 
@@ -137,8 +139,8 @@ export function migrateSessionsFromAgentRoot(): void {
 			if (existsSync(newPath)) continue; // Skip if target exists
 
 			renameSync(file, newPath);
-		} catch {
-			// Skip files that can't be migrated
+		} catch (error) {
+			logger.warn("Failed to migrate session file", { path: file, error: String(error) });
 		}
 	}
 }
@@ -168,8 +170,8 @@ function migrateToolsToBin(): void {
 				try {
 					renameSync(oldPath, newPath);
 					movedAny = true;
-				} catch {
-					// Ignore errors
+				} catch (error) {
+					logger.warn("Failed to migrate binary", { from: oldPath, to: newPath, error: String(error) });
 				}
 			} else {
 				// Target exists, just delete the old one

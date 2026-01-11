@@ -1,9 +1,9 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-
 // Embed package.json at build time for config
 import packageJson from "../package.json" with { type: "json" };
+import { logger } from "./core/logger";
 
 // =============================================================================
 // App Config (from embedded package.json)
@@ -244,8 +244,8 @@ export function readConfigFile<T = unknown>(
 					content: JSON.parse(content) as T,
 				};
 			}
-		} catch {
-			// Continue to next file on parse error
+		} catch (error) {
+			logger.warn("Failed to parse config file", { path: filePath, error: String(error) });
 		}
 	}
 
@@ -275,8 +275,8 @@ export function readAllConfigFiles<T = unknown>(
 					content: JSON.parse(content) as T,
 				});
 			}
-		} catch {
-			// Skip files that fail to parse
+		} catch (error) {
+			logger.warn("Failed to parse config file", { path: filePath, error: String(error) });
 		}
 	}
 

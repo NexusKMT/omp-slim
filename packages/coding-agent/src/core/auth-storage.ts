@@ -939,7 +939,12 @@ export class AuthStorage {
 
 			this.recordSessionCredential(provider, sessionId, "oauth", selection.index);
 			return result.apiKey;
-		} catch {
+		} catch (error) {
+			logger.warn("OAuth token refresh failed, removing credential", {
+				provider,
+				index: selection.index,
+				error: String(error),
+			});
 			this.removeCredentialAt(provider, selection.index);
 			if (this.getCredentialsForProvider(provider).some((credential) => credential.type === "oauth")) {
 				return this.getApiKey(provider, sessionId, options);

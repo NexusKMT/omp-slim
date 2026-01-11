@@ -2,11 +2,38 @@
  * Shared helpers for discovery providers.
  */
 
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { parse as parseYAML } from "yaml";
 import { readDirEntries, readFile } from "../capability/fs";
 import type { Skill, SkillFrontmatter } from "../capability/skill";
 import type { LoadContext, LoadResult, SourceMeta } from "../capability/types";
+import { logger } from "../core/logger";
+
+const VALID_THINKING_LEVELS: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
+
+/**
+ * Normalize unicode spaces to regular spaces.
+ */
+export function normalizeUnicodeSpaces(str: string): string {
+	return str.replace(UNICODE_SPACES, " ");
+}
+
+/**
+ * Expand ~ to home directory and normalize unicode spaces.
+ */
+export function expandPath(p: string): string {
+	const normalized = normalizeUnicodeSpaces(p);
+	if (normalized.startsWith("~/")) {
+		return join(homedir(), normalized.slice(2));
+	}
+	if (normalized.startsWith("~")) {
+		return join(homedir(), normalized.slice(1));
+	}
+	return normalized;
+}
 
 /**
  * Standard paths for each config source.
@@ -117,12 +144,106 @@ export function parseFrontmatter(content: string): {
 	const body = normalized.slice(endIndex + 4).trim();
 
 	try {
-		const frontmatter = parseYAML(raw) as Record<string, unknown> | null;
+		// Replace tabs with spaces for YAML compatibility, use failsafe mode for robustness
+		const frontmatter = parseYAML(raw.replaceAll("\t", "  "), { compat: "failsafe" }) as Record<
+			string,
+			unknown
+		> | null;
 		return { frontmatter: frontmatter ?? {}, body, raw };
-	} catch {
-		// Fallback to empty frontmatter on parse error
+	} catch (error) {
+		logger.warn("Failed to parse YAML frontmatter", { error: String(error) });
 		return { frontmatter: {}, body, raw };
 	}
+}
+
+/**
+ * Parse thinking level from frontmatter.
+ * Supports keys: thinkingLevel, thinking-level, thinking
+ */
+export function parseThinkingLevel(frontmatter: Record<string, unknown>): ThinkingLevel | undefined {
+	const raw = frontmatter.thinkingLevel ?? frontmatter["thinking-level"] ?? frontmatter.thinking;
+	if (typeof raw === "string" && VALID_THINKING_LEVELS.includes(raw)) {
+		return raw as ThinkingLevel;
+	}
+	return undefined;
+}
+
+/**
+ * Parse a comma-separated string into an array of trimmed, non-empty strings.
+ */
+export function parseCSV(value: string): string[] {
+	return value
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
+}
+
+/**
+ * Parse a value that may be an array of strings or a comma-separated string.
+ * Returns undefined if the result would be empty.
+ */
+export function parseArrayOrCSV(value: unknown): string[] | undefined {
+	if (Array.isArray(value)) {
+		const filtered = value.filter((item): item is string => typeof item === "string");
+		return filtered.length > 0 ? filtered : undefined;
+	}
+	if (typeof value === "string") {
+		const parsed = parseCSV(value);
+		return parsed.length > 0 ? parsed : undefined;
+	}
+	return undefined;
+}
+
+/** Parsed agent fields from frontmatter (excludes source/filePath/systemPrompt) */
+export interface ParsedAgentFields {
+	name: string;
+	description: string;
+	tools?: string[];
+	spawns?: string[] | "*";
+	model?: string;
+	output?: unknown;
+	thinkingLevel?: ThinkingLevel;
+}
+
+/**
+ * Parse agent fields from frontmatter.
+ * Returns null if required fields (name, description) are missing.
+ */
+export function parseAgentFields(frontmatter: Record<string, unknown>): ParsedAgentFields | null {
+	const name = typeof frontmatter.name === "string" ? frontmatter.name : undefined;
+	const description = typeof frontmatter.description === "string" ? frontmatter.description : undefined;
+
+	if (!name || !description) {
+		return null;
+	}
+
+	const tools = parseArrayOrCSV(frontmatter.tools);
+
+	// Parse spawns field (array, "*", or CSV)
+	let spawns: string[] | "*" | undefined;
+	if (frontmatter.spawns === "*") {
+		spawns = "*";
+	} else if (typeof frontmatter.spawns === "string") {
+		const trimmed = frontmatter.spawns.trim();
+		if (trimmed === "*") {
+			spawns = "*";
+		} else {
+			spawns = parseArrayOrCSV(trimmed);
+		}
+	} else {
+		spawns = parseArrayOrCSV(frontmatter.spawns);
+	}
+
+	// Backward compat: infer spawns: "*" when tools includes "task"
+	if (spawns === undefined && tools?.includes("task")) {
+		spawns = "*";
+	}
+
+	const output = frontmatter.output !== undefined ? frontmatter.output : undefined;
+	const model = typeof frontmatter.model === "string" ? frontmatter.model : undefined;
+	const thinkingLevel = parseThinkingLevel(frontmatter);
+
+	return { name, description, tools, spawns, model, output, thinkingLevel };
 }
 
 export async function loadSkillsFromDir(

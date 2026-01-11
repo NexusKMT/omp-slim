@@ -369,18 +369,28 @@ function renderAgentProgress(
 		}
 
 		for (const [toolName, dataArray] of Object.entries(progress.extractedToolData)) {
+			// Handle report_finding with tree formatting
+			if (toolName === "report_finding" && (dataArray as ReportFindingDetails[]).length > 0) {
+				const findings = dataArray as ReportFindingDetails[];
+				lines.push(`${continuePrefix}${formatFindingSummary(findings, theme)}`);
+				lines.push(...renderFindings(findings, continuePrefix, expanded, theme));
+				continue;
+			}
+
 			const handler = subprocessToolRegistry.getHandler(toolName);
 			if (handler?.renderInline) {
-				// Show last few items inline
-				const recentData = (dataArray as unknown[]).slice(-3);
+				const displayCount = expanded ? (dataArray as unknown[]).length : 3;
+				const recentData = (dataArray as unknown[]).slice(-displayCount);
 				for (const data of recentData) {
 					const component = handler.renderInline(data, theme);
 					if (component instanceof Text) {
 						lines.push(`${continuePrefix}${component.getText()}`);
 					}
 				}
-				if (dataArray.length > 3) {
-					lines.push(`${continuePrefix}${theme.fg("dim", formatMoreItems(dataArray.length - 3, "item", theme))}`);
+				if ((dataArray as unknown[]).length > displayCount) {
+					lines.push(
+						`${continuePrefix}${theme.fg("dim", formatMoreItems((dataArray as unknown[]).length - displayCount, "item", theme))}`,
+					);
 				}
 			}
 		}
@@ -436,7 +446,6 @@ function renderReviewResult(
 	lines.push(`${continuePrefix}${formatFindingSummary(findings, theme)}`);
 
 	if (findings.length > 0) {
-		lines.push(`${continuePrefix}`); // Spacing
 		lines.push(...renderFindings(findings, continuePrefix, expanded, theme));
 	}
 
@@ -453,11 +462,14 @@ function renderFindings(
 	theme: Theme,
 ): string[] {
 	const lines: string[] = [];
-	const displayCount = expanded ? findings.length : Math.min(3, findings.length);
+
+	// Sort by priority (lower = more severe) when collapsed to show most important first
+	const sortedFindings = expanded ? findings : [...findings].sort((a, b) => a.priority - b.priority);
+	const displayCount = expanded ? sortedFindings.length : Math.min(3, sortedFindings.length);
 
 	for (let i = 0; i < displayCount; i++) {
-		const finding = findings[i];
-		const isLastFinding = i === displayCount - 1 && (expanded || findings.length <= 3);
+		const finding = sortedFindings[i];
+		const isLastFinding = i === displayCount - 1 && (expanded || sortedFindings.length <= 3);
 		const findingPrefix = isLastFinding ? theme.tree.last : theme.tree.branch;
 		const findingContinue = isLastFinding ? "   " : `${theme.tree.vertical}  `;
 
@@ -538,14 +550,12 @@ function renderAgentResult(result: SingleResult, isLast: boolean, expanded: bool
 		return lines;
 	}
 	if (reportFindingData && reportFindingData.length > 0) {
-		lines.push(
-			`${continuePrefix}${theme.fg("warning", theme.status.warning)} ${theme.fg(
-				"dim",
-				"Review summary missing (complete not called)",
-			)}`,
-		);
+		const hasCompleteData = completeData && completeData.length > 0;
+		const message = hasCompleteData
+			? "Review verdict missing expected fields"
+			: "Review incomplete (complete not called)";
+		lines.push(`${continuePrefix}${theme.fg("warning", theme.status.warning)} ${theme.fg("dim", message)}`);
 		lines.push(`${continuePrefix}${formatFindingSummary(reportFindingData, theme)}`);
-		lines.push(`${continuePrefix}`); // Spacing
 		lines.push(...renderFindings(reportFindingData, continuePrefix, expanded, theme));
 		return lines;
 	}

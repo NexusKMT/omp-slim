@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@oh-my-pi/pi-agent-core";
+import type { AgentEvent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { SerializedAuthStorage } from "../../auth-storage";
 import type { SerializedModelRegistry } from "../../model-registry";
 
@@ -43,6 +43,7 @@ export interface SubagentWorkerStartPayload {
 	task: string;
 	systemPrompt: string;
 	model?: string;
+	thinkingLevel?: ThinkingLevel;
 	toolNames?: string[];
 	outputSchema?: unknown;
 	enableLsp?: boolean;

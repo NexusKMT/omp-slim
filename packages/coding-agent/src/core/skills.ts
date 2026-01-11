@@ -7,6 +7,7 @@ import type { SourceMeta } from "../capability/types";
 import type { Skill as CapabilitySkill, SkillFrontmatter as ImportedSkillFrontmatter } from "../discovery";
 import { loadCapability } from "../discovery";
 import { parseFrontmatter } from "../discovery/helpers";
+import { logger } from "./logger";
 import type { SkillsSettings } from "./settings-manager";
 
 // Re-export SkillFrontmatter for backward compatibility
@@ -67,8 +68,8 @@ export function loadSkillsFromDir(options: LoadSkillsFromDirOptions): LoadSkills
 					source: options.source,
 				});
 			}
-		} catch {
-			// Skip invalid skills
+		} catch (error) {
+			logger.warn("Failed to load skill", { path: skillFile, error: String(error) });
 		}
 	}
 
@@ -131,8 +132,8 @@ function scanDirectoryForSkills(dir: string): LoadSkillsResult {
 					source: "custom",
 				});
 			}
-		} catch {
-			// Skip invalid skills
+		} catch (error) {
+			logger.warn("Failed to load skill", { path: skillFile, error: String(error) });
 		}
 	}
 

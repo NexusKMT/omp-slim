@@ -11,6 +11,7 @@ import * as typebox from "@sinclair/typebox";
 import { getAgentDir, getConfigDirs } from "../../config";
 import * as piCodingAgent from "../../index";
 import { execCommand } from "../exec";
+import { logger } from "../logger";
 import { createReviewCommand } from "./bundled/review";
 import { createWorktreeCommand } from "./bundled/wt";
 import type {
@@ -110,7 +111,8 @@ export function discoverCustomCommands(options: DiscoverCustomCommandsOptions = 
 		let entries: Dirent[];
 		try {
 			entries = readdirSync(commandsDir, { withFileTypes: true });
-		} catch {
+		} catch (error) {
+			logger.warn("Failed to read custom commands directory", { path: commandsDir, error: String(error) });
 			continue;
 		}
 		for (const entry of entries) {

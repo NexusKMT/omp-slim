@@ -12,11 +12,13 @@ If you discussed requirements, plans, schemas, or decisions with the user, you M
 ## Available Agents
 
 {{#list agents prefix="- " join="\n"}}
-{{name}}: {{description}} (Tools: {{default (join tools ", ") "All tools"}})
+{{name}}: {{description}} (Tools: {{default (join tools ", ") "All tools"}}{{#if output}}, Output: structured{{/if}})
 {{/list}}
 {{#if moreAgents}}
   ...and {{moreAgents}} more agents
 {{/if}}
+
+Agents with "Output: structured" have a fixed schema enforced via frontmatter; your `output` parameter will be ignored for these agents.
 
 ## When NOT to Use
 

@@ -14,6 +14,7 @@ import { buildBetaHeader, claudeCodeHeaders, claudeCodeVersion } from "@oh-my-pi
 import { getAgentDbPath, getConfigDirPaths } from "../../../config";
 import { AgentStorage } from "../../agent-storage";
 import type { AuthCredential, AuthCredentialEntry, AuthStorageData } from "../../auth-storage";
+import { logger } from "../../logger";
 import { migrateJsonStorage } from "../../storage-migration";
 import type { AnthropicAuthConfig, AnthropicOAuthCredential, ModelsJson } from "./types";
 
@@ -48,8 +49,8 @@ async function parseEnvFile(filePath: string): Promise<Record<string, string>> {
 
 			result[key] = value;
 		}
-	} catch {
-		// Ignore read errors
+	} catch (error) {
+		logger.warn("Failed to read .env file", { path: filePath, error: String(error) });
 	}
 	return result;
 }
@@ -82,7 +83,8 @@ async function readJson<T>(filePath: string): Promise<T | null> {
 		if (!(await file.exists())) return null;
 		const content = await file.text();
 		return JSON.parse(content) as T;
-	} catch {
+	} catch (error) {
+		logger.warn("Failed to parse JSON file", { path: filePath, error: String(error) });
 		return null;
 	}
 }

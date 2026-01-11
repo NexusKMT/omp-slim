@@ -28,7 +28,7 @@
 
 import { join } from "node:path";
 import { Agent, type AgentEvent, type AgentMessage, type AgentTool, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Message, Model } from "@oh-my-pi/pi-ai";
+import { type Message, type Model, supportsXhigh } from "@oh-my-pi/pi-ai";
 import type { Component } from "@oh-my-pi/pi-tui";
 import chalk from "chalk";
 // Import discovery to register all providers on startup
@@ -631,6 +631,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	// Clamp to model capabilities
 	if (!model || !model.reasoning) {
 		thinkingLevel = "off";
+	} else if (thinkingLevel === "xhigh" && !supportsXhigh(model)) {
+		thinkingLevel = "high";
 	}
 
 	let skills: Skill[];
@@ -1021,8 +1023,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			});
 			lspServers = result.servers;
 			time("warmupLspServers");
-		} catch {
-			// Ignore warmup errors
+		} catch (error) {
+			logger.warn("LSP server warmup failed", { cwd, error: String(error) });
 		}
 	}
 

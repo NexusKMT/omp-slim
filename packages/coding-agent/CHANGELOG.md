@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Expanded system prompt with defensive reasoning guidance and assumption checks
+- Allowed agent frontmatter to override subagent thinking level, clamped to model capabilities
+
+### Fixed
+
+- Ensured reviewer agents use structured output schemas and include reported findings in task outputs
+
 ## [4.3.0] - 2026-01-11
 
 ### Added

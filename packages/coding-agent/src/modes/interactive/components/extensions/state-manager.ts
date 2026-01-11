@@ -13,6 +13,7 @@ import type { Skill } from "../../../../capability/skill";
 import type { SlashCommand } from "../../../../capability/slash-command";
 import type { CustomTool } from "../../../../capability/tool";
 import type { SourceMeta } from "../../../../capability/types";
+import { logger } from "../../../../core/logger";
 import {
 	disableProvider,
 	enableProvider,
@@ -105,8 +106,8 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[]): P
 			getDescription: (s) => s.frontmatter?.description,
 			getTrigger: (s) => s.frontmatter?.globs?.join(", "),
 		});
-	} catch {
-		// Capability may not be registered
+	} catch (error) {
+		logger.warn("Failed to load skills capability", { error: String(error) });
 	}
 
 	// Load rules
@@ -116,8 +117,8 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[]): P
 			getDescription: (r) => r.description,
 			getTrigger: (r) => r.globs?.join(", ") || (r.alwaysApply ? "always" : undefined),
 		});
-	} catch {
-		// Capability may not be registered
+	} catch (error) {
+		logger.warn("Failed to load rules capability", { error: String(error) });
 	}
 
 	// Load custom tools
@@ -126,8 +127,8 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[]): P
 		addItems(tools.all, "tool", {
 			getDescription: (t) => t.description,
 		});
-	} catch {
-		// Capability may not be registered
+	} catch (error) {
+		logger.warn("Failed to load tools capability", { error: String(error) });
 	}
 
 	// Load extension modules
@@ -135,8 +136,8 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[]): P
 		const modules = await loadCapability<ExtensionModule>("extension-modules", loadOpts);
 		const nativeModules = modules.all.filter((module) => module._source.provider === "native");
 		addItems(nativeModules, "extension-module");
-	} catch {
-		// Capability may not be registered
+	} catch (error) {
+		logger.warn("Failed to load extension-modules capability", { error: String(error) });
 	}
 
 	// Load MCP servers
@@ -178,8 +179,8 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[]): P
 				raw: server,
 			});
 		}
-	} catch {
-		// Capability may not be registered
+	} catch (error) {
+		logger.warn("Failed to load mcps capability", { error: String(error) });
 	}
 
 	// Load prompts
@@ -189,8 +190,8 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[]): P
 			getDescription: () => undefined,
 			getTrigger: (p) => `/prompts:${p.name}`,
 		});
-	} catch {
-		// Capability may not be registered
+	} catch (error) {
+		logger.warn("Failed to load prompts capability", { error: String(error) });
 	}
 
 	// Load slash commands
@@ -200,8 +201,8 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[]): P
 			getDescription: () => undefined,
 			getTrigger: (c) => `/${c.name}`,
 		});
-	} catch {
-		// Capability may not be registered
+	} catch (error) {
+		logger.warn("Failed to load slash-commands capability", { error: String(error) });
 	}
 
 	// Load hooks
@@ -243,8 +244,8 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[]): P
 				raw: hook,
 			});
 		}
-	} catch {
-		// Capability may not be registered
+	} catch (error) {
+		logger.warn("Failed to load hooks capability", { error: String(error) });
 	}
 
 	// Load context files
@@ -288,8 +289,8 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[]): P
 				raw: file,
 			});
 		}
-	} catch {
-		// Capability may not be registered
+	} catch (error) {
+		logger.warn("Failed to load context-files capability", { error: String(error) });
 	}
 
 	return extensions;

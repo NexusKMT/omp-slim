@@ -4,7 +4,7 @@
  * Runs each subagent in a Bun Worker and forwards AgentEvents for progress tracking.
  */
 
-import type { AgentEvent } from "@oh-my-pi/pi-agent-core";
+import type { AgentEvent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { AuthStorage } from "../../auth-storage";
 import type { EventBus } from "../../event-bus";
 import { callTool } from "../../mcp/client";
@@ -18,6 +18,7 @@ import {
 	type AgentProgress,
 	MAX_OUTPUT_BYTES,
 	MAX_OUTPUT_LINES,
+	type ReviewFinding,
 	type SingleResult,
 	TASK_SUBAGENT_EVENT_CHANNEL,
 	TASK_SUBAGENT_PROGRESS_CHANNEL,
@@ -39,6 +40,7 @@ export interface ExecutorOptions {
 	taskId: string;
 	context?: string;
 	modelOverride?: string;
+	thinkingLevel?: ThinkingLevel;
 	outputSchema?: unknown;
 	enableLsp?: boolean;
 	signal?: AbortSignal;
@@ -183,8 +185,20 @@ function extractMCPToolMetadata(mcpManager: MCPManager): MCPToolMetadata[] {
  * Run a single agent in a worker.
  */
 export async function runSubprocess(options: ExecutorOptions): Promise<SingleResult> {
-	const { cwd, agent, task, index, taskId, context, modelOverride, outputSchema, enableLsp, signal, onProgress } =
-		options;
+	const {
+		cwd,
+		agent,
+		task,
+		index,
+		taskId,
+		context,
+		modelOverride,
+		thinkingLevel,
+		outputSchema,
+		enableLsp,
+		signal,
+		onProgress,
+	} = options;
 	const startTime = Date.now();
 
 	// Initialize progress
@@ -578,6 +592,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			task: fullTask,
 			systemPrompt: agent.systemPrompt,
 			model: resolvedModel,
+			thinkingLevel,
 			toolNames,
 			outputSchema,
 			sessionFile,
@@ -749,6 +764,20 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					completeData = JSON.parse(completeData);
 				} catch {
 					// Not valid JSON, keep as string
+				}
+			}
+			// Special case: merge report_finding data into review output for parent visibility
+			const reportFindings = progress.extractedToolData?.report_finding as ReviewFinding[] | undefined;
+			if (
+				Array.isArray(reportFindings) &&
+				reportFindings.length > 0 &&
+				completeData &&
+				typeof completeData === "object" &&
+				!Array.isArray(completeData)
+			) {
+				const record = completeData as Record<string, unknown>;
+				if (!("findings" in record)) {
+					completeData = { ...record, findings: reportFindings };
 				}
 			}
 			try {

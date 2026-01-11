@@ -10,6 +10,7 @@ import {
 	setEditorKeybindings,
 } from "@oh-my-pi/pi-tui";
 import { getAgentDir } from "../config";
+import { logger } from "./logger";
 
 /**
  * Application-level actions (coding agent specific).
@@ -136,7 +137,8 @@ export class KeybindingsManager {
 		if (!existsSync(path)) return {};
 		try {
 			return JSON.parse(readFileSync(path, "utf-8"));
-		} catch {
+		} catch (error) {
+			logger.warn("Failed to parse keybindings config", { path, error: String(error) });
 			return {};
 		}
 	}

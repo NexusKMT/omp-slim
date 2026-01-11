@@ -68,7 +68,7 @@ export async function pollCursorAuth(
 			}
 
 			throw new Error(`Poll failed: ${response.status}`);
-		} catch (_error) {
+		} catch {
 			consecutiveErrors++;
 			if (consecutiveErrors >= 3) {
 				throw new Error("Too many consecutive errors during Cursor auth polling");

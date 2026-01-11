@@ -185,7 +185,9 @@ async function handleThinking<TApi extends Api>(model: Model<TApi>, options?: Op
 		messages: [
 			{
 				role: "user",
-				content: `Think long and hard about ${(Math.random() * 255) | 0} + 27. Think step by step. Then output the result.`,
+				content: `Think long and hard about ${
+					(Math.random() * 255) | 0
+				} + 27. Think step by step. Then output the result.`,
 				timestamp: Date.now(),
 			},
 		],
@@ -930,7 +932,7 @@ describe("Generate E2E Tests", () => {
 				console.log("Pulling gpt-oss:20b model for Ollama tests...");
 				try {
 					execSync("ollama pull gpt-oss:20b", { stdio: "inherit" });
-				} catch (_e) {
+				} catch {
 					console.warn("Failed to pull gpt-oss:20b model, tests will be skipped");
 					return;
 				}

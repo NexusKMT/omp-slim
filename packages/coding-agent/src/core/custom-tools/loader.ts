@@ -5,11 +5,11 @@
  * to avoid import resolution issues with custom tools loaded from user directories.
  */
 
-import * as os from "node:os";
 import * as path from "node:path";
 import * as typebox from "@sinclair/typebox";
 import { toolCapability } from "../../capability/tool";
 import { type CustomTool, loadCapability } from "../../discovery";
+import { expandPath } from "../../discovery/helpers";
 import * as piCodingAgent from "../../index";
 import { theme } from "../../modes/interactive/theme/theme";
 import type { ExecOptions } from "../exec";
@@ -18,23 +18,6 @@ import type { HookUIContext } from "../hooks/types";
 import { logger } from "../logger";
 import { getAllPluginToolPaths } from "../plugins/loader";
 import type { CustomToolAPI, CustomToolFactory, CustomToolsLoadResult, LoadedCustomTool } from "./types";
-
-const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
-
-function normalizeUnicodeSpaces(str: string): string {
-	return str.replace(UNICODE_SPACES, " ");
-}
-
-function expandPath(p: string): string {
-	const normalized = normalizeUnicodeSpaces(p);
-	if (normalized.startsWith("~/")) {
-		return path.join(os.homedir(), normalized.slice(2));
-	}
-	if (normalized.startsWith("~")) {
-		return path.join(os.homedir(), normalized.slice(1));
-	}
-	return normalized;
-}
 
 /**
  * Resolve tool path.

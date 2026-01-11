@@ -14,7 +14,7 @@ let imageBuffer: Uint8Array;
 try {
 	const file = Bun.file(testImagePath);
 	imageBuffer = await file.bytes();
-} catch (_e) {
+} catch {
 	console.error(`Failed to load image: ${testImagePath}`);
 	console.error("Usage: bun test/image-test.ts [path-to-image.png]");
 	process.exit(1);

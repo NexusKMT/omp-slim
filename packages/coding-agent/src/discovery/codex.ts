@@ -29,6 +29,7 @@ import { slashCommandCapability } from "../capability/slash-command";
 import type { CustomTool } from "../capability/tool";
 import { toolCapability } from "../capability/tool";
 import type { LoadContext, LoadResult } from "../capability/types";
+import { logger } from "../core/logger";
 import {
 	createSourceMeta,
 	discoverExtensionModulePaths,
@@ -117,7 +118,8 @@ async function loadTomlConfig(_ctx: LoadContext, path: string): Promise<Record<s
 
 	try {
 		return parseToml(content) as Record<string, unknown>;
-	} catch (_err) {
+	} catch (error) {
+		logger.warn("Failed to parse TOML config", { path, error: String(error) });
 		return null;
 	}
 }

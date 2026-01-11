@@ -287,7 +287,8 @@ async function runTask(runState: RunState, payload: SubagentWorkerStartPayload):
 		const mcpProxyTools = payload.mcpTools?.map(createMCPProxyTool) ?? [];
 
 		// Resolve model override (equivalent to CLI's parseModelPattern with --model)
-		const { model, thinkingLevel } = resolveModelOverride(payload.model, modelRegistry);
+		const { model, thinkingLevel: modelThinkingLevel } = resolveModelOverride(payload.model, modelRegistry);
+		const thinkingLevel = modelThinkingLevel ?? payload.thinkingLevel;
 
 		// Create session manager (equivalent to CLI's --session or --no-session)
 		const sessionManager = payload.sessionFile

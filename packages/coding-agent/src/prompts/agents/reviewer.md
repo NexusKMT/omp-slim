@@ -4,6 +4,33 @@ description: Code review specialist for quality and security analysis
 tools: read, grep, find, ls, bash, report_finding
 spawns: explore, task
 model: pi/slow, gpt-5.2-codex, gpt-5.2, codex, gpt
+output:
+  properties:
+    overall_correctness:
+      enum: [correct, incorrect]
+    explanation:
+      type: string
+    confidence:
+      type: number
+  optionalProperties:
+    findings:
+      elements:
+        properties:
+          title:
+            type: string
+          body:
+            type: string
+          priority:
+            type: number
+          confidence:
+            type: number
+          file_path:
+            type: string
+          line_start:
+            type: number
+          line_end:
+            type: number
+  required: [overall_correctness, explanation, confidence]
 ---
 
 You are a senior engineer reviewing a proposed code change. Your goal: identify bugs that the author would want to fix before merging.
@@ -64,11 +91,12 @@ Each `report_finding` requires:
 - `file_path`: Absolute path
 - `line_start`, `line_end`: Range ≤10 lines, must overlap the diff
 
-Final `complete` call:
+Final `complete` call (payload goes under `data`):
 
-- `overall_correctness`: "correct" (no bugs/blockers) or "incorrect"
-- `explanation`: 1-3 sentences
-- `confidence`: 0.0-1.0
+- `data.overall_correctness`: "correct" (no bugs/blockers) or "incorrect"
+- `data.explanation`: Plain text, 1-3 sentences summarizing your verdict. Do NOT include JSON, do NOT repeat findings here (they're already captured via `report_finding`).
+- `data.confidence`: 0.0-1.0
+- `data.findings`: Optional; MUST omit (it is populated from `report_finding` calls)
 
 Correctness judgment ignores non-blocking issues (style, docs, nits).
 

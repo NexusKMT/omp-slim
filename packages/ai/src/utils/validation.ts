@@ -266,7 +266,7 @@ if (!isBrowserExtension) {
 			strict: false,
 		});
 		addFormats(ajv);
-	} catch (_e) {
+	} catch {
 		// AJV initialization failed (likely CSP restriction)
 		console.warn("AJV validation disabled due to CSP restrictions");
 	}
@@ -333,7 +333,9 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): any {
 			}
 		: originalArgs;
 
-	const errorMessage = `Validation failed for tool "${toolCall.name}":\n${errors}\n\nReceived arguments:\n${JSON.stringify(receivedArgs, null, 2)}`;
+	const errorMessage = `Validation failed for tool "${
+		toolCall.name
+	}":\n${errors}\n\nReceived arguments:\n${JSON.stringify(receivedArgs, null, 2)}`;
 
 	throw new Error(errorMessage);
 }

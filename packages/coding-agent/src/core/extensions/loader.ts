@@ -3,13 +3,12 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import * as path from "node:path";
 import type { KeyId } from "@oh-my-pi/pi-tui";
 import * as TypeBox from "@sinclair/typebox";
 import { type ExtensionModule, extensionModuleCapability } from "../../capability/extension-module";
 import { loadCapability } from "../../discovery";
-import { getExtensionNameFromPath } from "../../discovery/helpers";
+import { expandPath, getExtensionNameFromPath } from "../../discovery/helpers";
 import * as piCodingAgent from "../../index";
 import { createEventBus, type EventBus } from "../event-bus";
 import type { ExecOptions } from "../exec";
@@ -26,23 +25,6 @@ import type {
 	RegisteredCommand,
 	ToolDefinition,
 } from "./types";
-
-const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
-
-function normalizeUnicodeSpaces(str: string): string {
-	return str.replace(UNICODE_SPACES, " ");
-}
-
-function expandPath(p: string): string {
-	const normalized = normalizeUnicodeSpaces(p);
-	if (normalized.startsWith("~/")) {
-		return path.join(homedir(), normalized.slice(2));
-	}
-	if (normalized.startsWith("~")) {
-		return path.join(homedir(), normalized.slice(1));
-	}
-	return normalized;
-}
 
 function resolvePath(extPath: string, cwd: string): string {
 	const expanded = expandPath(extPath);
@@ -291,7 +273,8 @@ function readExtensionManifest(packageJsonPath: string): ExtensionManifest | nul
 			return manifest;
 		}
 		return null;
-	} catch {
+	} catch (error) {
+		logger.warn("Failed to read extension manifest", { path: packageJsonPath, error: String(error) });
 		return null;
 	}
 }
@@ -370,7 +353,8 @@ function discoverExtensionsInDir(dir: string): string[] {
 				}
 			}
 		}
-	} catch {
+	} catch (error) {
+		logger.warn("Failed to discover extensions in directory", { path: dir, error: String(error) });
 		return [];
 	}
 

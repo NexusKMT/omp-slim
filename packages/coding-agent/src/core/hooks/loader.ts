@@ -2,12 +2,12 @@
  * Hook loader - loads TypeScript hook modules using native Bun import.
  */
 
-import * as os from "node:os";
 import * as path from "node:path";
 import * as typebox from "@sinclair/typebox";
 import { hookCapability } from "../../capability/hook";
 import type { Hook } from "../../discovery";
 import { loadCapability } from "../../discovery";
+import { expandPath } from "../../discovery/helpers";
 import * as piCodingAgent from "../../index";
 import { logger } from "../logger";
 import type { HookMessage } from "../messages";
@@ -82,23 +82,6 @@ export interface LoadHooksResult {
 	hooks: LoadedHook[];
 	/** Errors encountered during loading */
 	errors: Array<{ path: string; error: string }>;
-}
-
-const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
-
-function normalizeUnicodeSpaces(str: string): string {
-	return str.replace(UNICODE_SPACES, " ");
-}
-
-function expandPath(p: string): string {
-	const normalized = normalizeUnicodeSpaces(p);
-	if (normalized.startsWith("~/")) {
-		return path.join(os.homedir(), normalized.slice(2));
-	}
-	if (normalized.startsWith("~")) {
-		return path.join(os.homedir(), normalized.slice(1));
-	}
-	return normalized;
 }
 
 /**

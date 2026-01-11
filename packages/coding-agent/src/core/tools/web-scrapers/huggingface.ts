@@ -379,7 +379,7 @@ export const handleHuggingFace: SpecialHandler = async (url: string, timeout: nu
 			default:
 				return null;
 		}
-	} catch (_err) {
+	} catch {
 		return null;
 	}
 };

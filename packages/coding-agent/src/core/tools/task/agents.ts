@@ -4,6 +4,7 @@
  * Agents are embedded at build time via Bun's import with { type: "text" }.
  */
 
+import { parseAgentFields, parseFrontmatter } from "../../../discovery/helpers";
 import exploreMd from "../../../prompts/agents/explore.md" with { type: "text" };
 // Embed agent markdown files at build time
 import agentFrontmatterTemplate from "../../../prompts/agents/frontmatter.md" with { type: "text" };
@@ -18,6 +19,7 @@ interface AgentFrontmatter {
 	description: string;
 	spawns?: string;
 	model?: string;
+	thinkingLevel?: string;
 }
 
 interface EmbeddedAgentDef {
@@ -72,79 +74,18 @@ const EMBEDDED_AGENTS: { name: string; content: string }[] = EMBEDDED_AGENT_DEFS
 }));
 
 /**
- * Parse YAML frontmatter from markdown content.
- */
-function parseFrontmatter(content: string): { frontmatter: Record<string, string>; body: string } {
-	const frontmatter: Record<string, string> = {};
-	const normalized = content.replace(/\r\n/g, "\n");
-
-	if (!normalized.startsWith("---")) {
-		return { frontmatter, body: normalized };
-	}
-
-	const endIndex = normalized.indexOf("\n---", 3);
-	if (endIndex === -1) {
-		return { frontmatter, body: normalized };
-	}
-
-	const frontmatterBlock = normalized.slice(4, endIndex);
-	const body = normalized.slice(endIndex + 4).trim();
-
-	for (const line of frontmatterBlock.split("\n")) {
-		const match = line.match(/^([\w-]+):\s*(.*)$/);
-		if (match) {
-			let value = match[2].trim();
-			if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-				value = value.slice(1, -1);
-			}
-			frontmatter[match[1]] = value;
-		}
-	}
-
-	return { frontmatter, body };
-}
-
-/**
  * Parse an agent from embedded content.
  */
 function parseAgent(fileName: string, content: string, source: AgentSource): AgentDefinition | null {
 	const { frontmatter, body } = parseFrontmatter(content);
+	const fields = parseAgentFields(frontmatter);
 
-	if (!frontmatter.name || !frontmatter.description) {
+	if (!fields) {
 		return null;
 	}
 
-	const tools = frontmatter.tools
-		?.split(",")
-		.map((t) => t.trim())
-		.filter(Boolean);
-
-	// Parse spawns field
-	let spawns: string[] | "*" | undefined;
-	if (frontmatter.spawns !== undefined) {
-		const spawnsRaw = frontmatter.spawns.trim();
-		if (spawnsRaw === "*") {
-			spawns = "*";
-		} else if (spawnsRaw) {
-			spawns = spawnsRaw
-				.split(",")
-				.map((s) => s.trim())
-				.filter(Boolean);
-			if (spawns.length === 0) spawns = undefined;
-		}
-	}
-
-	// Backward compat: infer spawns: "*" when tools includes "task"
-	if (spawns === undefined && tools?.includes("task")) {
-		spawns = "*";
-	}
-
 	return {
-		name: frontmatter.name,
-		description: frontmatter.description,
-		tools: tools && tools.length > 0 ? tools : undefined,
-		spawns,
-		model: frontmatter.model,
+		...fields,
 		systemPrompt: body,
 		source,
 		filePath: `embedded:${fileName}`,

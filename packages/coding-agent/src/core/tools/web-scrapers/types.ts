@@ -170,7 +170,7 @@ export async function loadPage(url: string, options: LoadPageOptions = {}): Prom
 			}
 
 			return { content, contentType, finalUrl, ok: true, status: response.status };
-		} catch (_err) {
+		} catch {
 			if (signal?.aborted) {
 				return { content: "", contentType: "", finalUrl: url, ok: false };
 			}

@@ -292,8 +292,8 @@ export async function fetchMCPToolSchema(
 			mcpSchemaCache.set(cacheKey, tool);
 			return tool;
 		}
-	} catch {
-		// Fall through to return null
+	} catch (error) {
+		logger.warn("Failed to fetch MCP tool schema", { mcpToolName, isWebsetsTool, error: String(error) });
 	}
 	return null;
 }

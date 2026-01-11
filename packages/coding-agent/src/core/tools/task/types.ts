@@ -1,3 +1,4 @@
+import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Usage } from "@oh-my-pi/pi-ai";
 import { type Static, Type } from "@sinclair/typebox";
 
@@ -106,6 +107,8 @@ export interface AgentDefinition {
 	tools?: string[];
 	spawns?: string[] | "*";
 	model?: string;
+	thinkingLevel?: ThinkingLevel;
+	output?: unknown;
 	source: AgentSource;
 	filePath?: string;
 }

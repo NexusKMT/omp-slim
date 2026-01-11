@@ -10,11 +10,10 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
-import { CONFIG_DIR_NAME } from "../config";
 
 /** Get the logs directory (~/.omp/logs/) */
 function getLogsDir(): string {
-	return join(homedir(), CONFIG_DIR_NAME, "logs");
+	return join(homedir(), ".omp", "logs");
 }
 
 /** Ensure logs directory exists */
