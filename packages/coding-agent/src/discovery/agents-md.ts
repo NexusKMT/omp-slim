@@ -8,6 +8,7 @@
 
 import { dirname, join, sep } from "node:path";
 import { type ContextFile, contextFileCapability } from "../capability/context-file";
+import { readFile } from "../capability/fs";
 import { registerProvider } from "../capability/index";
 import type { LoadContext, LoadResult } from "../capability/types";
 import { calculateDepth, createSourceMeta } from "./helpers";
@@ -19,7 +20,7 @@ const MAX_DEPTH = 20; // Prevent walking up excessively far from cwd
 /**
  * Load standalone AGENTS.md files.
  */
-function loadAgentsMd(ctx: LoadContext): LoadResult<ContextFile> {
+async function loadAgentsMd(ctx: LoadContext): Promise<LoadResult<ContextFile>> {
 	const items: ContextFile[] = [];
 	const warnings: string[] = [];
 
@@ -29,30 +30,23 @@ function loadAgentsMd(ctx: LoadContext): LoadResult<ContextFile> {
 
 	while (depth < MAX_DEPTH) {
 		const candidate = join(current, "AGENTS.md");
+		const content = await readFile(candidate);
 
-		if (ctx.fs.isFile(candidate)) {
-			// Skip if it's inside a config directory (handled by other providers)
+		if (content !== null) {
 			const parent = dirname(candidate);
 			const baseName = parent.split(sep).pop() ?? "";
 
-			// Skip if inside .codex, .gemini, or other config dirs
 			if (!baseName.startsWith(".")) {
-				const content = ctx.fs.readFile(candidate);
+				const fileDir = dirname(candidate);
+				const calculatedDepth = calculateDepth(ctx.cwd, fileDir, sep);
 
-				if (content === null) {
-					warnings.push(`Failed to read: ${candidate}`);
-				} else {
-					const fileDir = dirname(candidate);
-					const calculatedDepth = calculateDepth(ctx.cwd, fileDir, sep);
-
-					items.push({
-						path: candidate,
-						content,
-						level: "project",
-						depth: calculatedDepth,
-						_source: createSourceMeta(PROVIDER_ID, candidate, "project"),
-					});
-				}
+				items.push({
+					path: candidate,
+					content,
+					level: "project",
+					depth: calculatedDepth,
+					_source: createSourceMeta(PROVIDER_ID, candidate, "project"),
+				});
 			}
 		}
 

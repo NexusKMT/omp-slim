@@ -99,7 +99,7 @@ export interface AgentSessionConfig {
 	/** Tool registry for LSP and settings */
 	toolRegistry?: Map<string, AgentTool>;
 	/** System prompt builder that can consider tool availability */
-	rebuildSystemPrompt?: (toolNames: string[], tools: Map<string, AgentTool>) => string;
+	rebuildSystemPrompt?: (toolNames: string[], tools: Map<string, AgentTool>) => Promise<string>;
 	/** TTSR manager for time-traveling stream rules */
 	ttsrManager?: TtsrManager;
 }
@@ -249,7 +249,7 @@ export class AgentSession {
 
 	// Tool registry and prompt builder for extensions
 	private _toolRegistry: Map<string, AgentTool>;
-	private _rebuildSystemPrompt: ((toolNames: string[], tools: Map<string, AgentTool>) => string) | undefined;
+	private _rebuildSystemPrompt: ((toolNames: string[], tools: Map<string, AgentTool>) => Promise<string>) | undefined;
 	private _baseSystemPrompt: string;
 
 	// TTSR manager for time-traveling stream rules
@@ -628,7 +628,7 @@ export class AgentSession {
 	 * Also rebuilds the system prompt to reflect the new tool set.
 	 * Changes take effect on the next agent turn.
 	 */
-	setActiveToolsByName(toolNames: string[]): void {
+	async setActiveToolsByName(toolNames: string[]): Promise<void> {
 		const tools: AgentTool[] = [];
 		const validToolNames: string[] = [];
 		for (const name of toolNames) {
@@ -642,7 +642,7 @@ export class AgentSession {
 
 		// Rebuild base system prompt with new tool set
 		if (this._rebuildSystemPrompt) {
-			this._baseSystemPrompt = this._rebuildSystemPrompt(validToolNames, this._toolRegistry);
+			this._baseSystemPrompt = await this._rebuildSystemPrompt(validToolNames, this._toolRegistry);
 			this.agent.setSystemPrompt(this._baseSystemPrompt);
 		}
 	}

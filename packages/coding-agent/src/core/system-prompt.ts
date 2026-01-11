@@ -8,7 +8,7 @@ import { join } from "node:path";
 import chalk from "chalk";
 import { contextFileCapability } from "../capability/context-file";
 import { systemPromptCapability } from "../capability/system-prompt";
-import { type ContextFile, loadSync, type SystemPrompt as SystemPromptFile } from "../discovery/index";
+import { type ContextFile, loadCapability, type SystemPrompt as SystemPromptFile } from "../discovery/index";
 import customSystemPromptTemplate from "../prompts/system/custom-system-prompt.md" with { type: "text" };
 import systemPromptTemplate from "../prompts/system/system-prompt.md" with { type: "text" };
 import { renderPromptTemplate } from "./prompt-templates";
@@ -558,12 +558,12 @@ export interface LoadContextFilesOptions {
  * Returns {path, content, depth} entries for all discovered context files.
  * Files are sorted by depth (descending) so files closer to cwd appear last/more prominent.
  */
-export function loadProjectContextFiles(
+export async function loadProjectContextFiles(
 	options: LoadContextFilesOptions = {},
-): Array<{ path: string; content: string; depth?: number }> {
+): Promise<Array<{ path: string; content: string; depth?: number }>> {
 	const resolvedCwd = options.cwd ?? process.cwd();
 
-	const result = loadSync(contextFileCapability.id, { cwd: resolvedCwd });
+	const result = await loadCapability(contextFileCapability.id, { cwd: resolvedCwd });
 
 	// Convert ContextFile items and preserve depth info
 	const files = result.items.map((item) => {
@@ -590,10 +590,10 @@ export function loadProjectContextFiles(
  * Load system prompt customization files (SYSTEM.md).
  * Returns combined content from all discovered SYSTEM.md files.
  */
-export function loadSystemPromptFiles(options: LoadContextFilesOptions = {}): string | null {
+export async function loadSystemPromptFiles(options: LoadContextFilesOptions = {}): Promise<string | null> {
 	const resolvedCwd = options.cwd ?? process.cwd();
 
-	const result = loadSync<SystemPromptFile>(systemPromptCapability.id, { cwd: resolvedCwd });
+	const result = await loadCapability<SystemPromptFile>(systemPromptCapability.id, { cwd: resolvedCwd });
 
 	if (result.items.length === 0) return null;
 
@@ -631,7 +631,7 @@ export interface BuildSystemPromptOptions {
 }
 
 /** Build the system prompt with tools, guidelines, and context */
-export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): string {
+export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}): Promise<string> {
 	const {
 		customPrompt,
 		tools,
@@ -648,7 +648,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	const resolvedAppendPrompt = resolvePromptInput(appendSystemPrompt, "append system prompt");
 
 	// Load SYSTEM.md customization (prepended to prompt)
-	const systemPromptCustomization = loadSystemPromptFiles({ cwd: resolvedCwd });
+	const systemPromptCustomization = await loadSystemPromptFiles({ cwd: resolvedCwd });
 
 	const now = new Date();
 	const dateTime = now.toLocaleString("en-US", {
@@ -663,7 +663,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	});
 
 	// Resolve context files: use provided or discover
-	const contextFiles = providedContextFiles ?? loadProjectContextFiles({ cwd: resolvedCwd });
+	const contextFiles = providedContextFiles ?? (await loadProjectContextFiles({ cwd: resolvedCwd }));
 	const agentsMdSearch = buildAgentsMdSearch(resolvedCwd);
 
 	// Build tool descriptions array
@@ -688,7 +688,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	// Resolve skills: use provided or discover
 	const skills =
 		providedSkills ??
-		(skillsSettings?.enabled !== false ? loadSkills({ ...skillsSettings, cwd: resolvedCwd }).skills : []);
+		(skillsSettings?.enabled !== false ? (await loadSkills({ ...skillsSettings, cwd: resolvedCwd })).skills : []);
 
 	// Get git context
 	const git = loadGitContext(resolvedCwd);

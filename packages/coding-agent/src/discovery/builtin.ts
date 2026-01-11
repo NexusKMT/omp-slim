@@ -9,6 +9,7 @@ import { dirname, isAbsolute, join, resolve } from "path";
 import { type ContextFile, contextFileCapability } from "../capability/context-file";
 import { type Extension, type ExtensionManifest, extensionCapability } from "../capability/extension";
 import { type ExtensionModule, extensionModuleCapability } from "../capability/extension-module";
+import { readDirEntries, readFile } from "../capability/fs";
 import { type Hook, hookCapability } from "../capability/hook";
 import { registerProvider } from "../capability/index";
 import { type Instruction, instructionCapability } from "../capability/instruction";
@@ -42,12 +43,13 @@ const PATHS = SOURCE_PATHS.native;
 const PROJECT_DIRS = [PATHS.projectDir, ...PATHS.aliases];
 const USER_DIRS = [PATHS.userBase, ...PATHS.aliases];
 
-function getConfigDirs(ctx: LoadContext): Array<{ dir: string; level: "user" | "project" }> {
+async function getConfigDirs(ctx: LoadContext): Promise<Array<{ dir: string; level: "user" | "project" }>> {
 	const result: Array<{ dir: string; level: "user" | "project" }> = [];
 
 	for (const name of PROJECT_DIRS) {
-		const projectDir = ctx.fs.walkUp(name, { dir: true });
-		if (projectDir) {
+		const projectDir = join(ctx.cwd, name);
+		const entries = await readDirEntries(projectDir);
+		if (entries.length > 0) {
 			result.push({ dir: projectDir, level: "project" });
 			break;
 		}
@@ -55,7 +57,8 @@ function getConfigDirs(ctx: LoadContext): Array<{ dir: string; level: "user" | "
 
 	for (const name of USER_DIRS) {
 		const userDir = join(ctx.home, name, PATHS.userAgent.replace(`${PATHS.userBase}/`, ""));
-		if (ctx.fs.isDir(userDir)) {
+		const entries = await readDirEntries(userDir);
+		if (entries.length > 0) {
 			result.push({ dir: userDir, level: "user" });
 			break;
 		}
@@ -65,53 +68,19 @@ function getConfigDirs(ctx: LoadContext): Array<{ dir: string; level: "user" | "
 }
 
 // MCP
-function loadMCPServers(ctx: LoadContext): LoadResult<MCPServer> {
+async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> {
 	const items: MCPServer[] = [];
 	const warnings: string[] = [];
 
-	for (const name of PROJECT_DIRS) {
-		const projectDir = ctx.fs.walkUp(name, { dir: true });
-		if (!projectDir) continue;
-
-		for (const filename of ["mcp.json", ".mcp.json"]) {
-			const path = join(projectDir, filename);
-			const content = ctx.fs.readFile(path);
-			if (!content) continue;
-
-			const data = parseJSON<{ mcpServers?: Record<string, unknown> }>(content);
-			if (!data?.mcpServers) continue;
-
-			const expanded = expandEnvVarsDeep(data.mcpServers);
-			for (const [serverName, config] of Object.entries(expanded)) {
-				const serverConfig = config as Record<string, unknown>;
-				items.push({
-					name: serverName,
-					command: serverConfig.command as string | undefined,
-					args: serverConfig.args as string[] | undefined,
-					env: serverConfig.env as Record<string, string> | undefined,
-					url: serverConfig.url as string | undefined,
-					headers: serverConfig.headers as Record<string, string> | undefined,
-					transport: serverConfig.type as "stdio" | "sse" | "http" | undefined,
-					_source: createSourceMeta(PROVIDER_ID, path, "project"),
-				});
-			}
-			break;
-		}
-		break;
-	}
-
-	for (const name of USER_DIRS) {
-		const userPath = join(ctx.home, name, "mcp.json");
-		const content = ctx.fs.readFile(userPath);
-		if (!content) continue;
-
+	const parseMcpServers = (content: string, path: string, level: "user" | "project"): MCPServer[] => {
+		const result: MCPServer[] = [];
 		const data = parseJSON<{ mcpServers?: Record<string, unknown> }>(content);
-		if (!data?.mcpServers) continue;
+		if (!data?.mcpServers) return result;
 
 		const expanded = expandEnvVarsDeep(data.mcpServers);
 		for (const [serverName, config] of Object.entries(expanded)) {
 			const serverConfig = config as Record<string, unknown>;
-			items.push({
+			result.push({
 				name: serverName,
 				command: serverConfig.command as string | undefined,
 				args: serverConfig.args as string[] | undefined,
@@ -119,10 +88,41 @@ function loadMCPServers(ctx: LoadContext): LoadResult<MCPServer> {
 				url: serverConfig.url as string | undefined,
 				headers: serverConfig.headers as Record<string, string> | undefined,
 				transport: serverConfig.type as "stdio" | "sse" | "http" | undefined,
-				_source: createSourceMeta(PROVIDER_ID, userPath, "user"),
+				_source: createSourceMeta(PROVIDER_ID, path, level),
 			});
 		}
-		break;
+		return result;
+	};
+
+	const projectDirs = await Promise.all(
+		PROJECT_DIRS.map(async (name) => {
+			const dir = join(ctx.cwd, name);
+			const entries = await readDirEntries(dir);
+			return entries.length > 0 ? dir : null;
+		}),
+	);
+	const userPaths = USER_DIRS.map((name) => join(ctx.home, name, "mcp.json"));
+
+	const projectDir = projectDirs.find((dir) => dir !== null);
+	if (projectDir) {
+		const projectCandidates = ["mcp.json", ".mcp.json"].map((filename) => join(projectDir, filename));
+		const projectContents = await Promise.all(projectCandidates.map((path) => readFile(path)));
+		for (let i = 0; i < projectCandidates.length; i++) {
+			const content = projectContents[i];
+			if (content) {
+				items.push(...parseMcpServers(content, projectCandidates[i], "project"));
+				break;
+			}
+		}
+	}
+
+	const userContents = await Promise.all(userPaths.map((path) => readFile(path)));
+	for (let i = 0; i < userPaths.length; i++) {
+		const content = userContents[i];
+		if (content) {
+			items.push(...parseMcpServers(content, userPaths[i], "user"));
+			break;
+		}
 	}
 
 	return { items, warnings };
@@ -137,46 +137,52 @@ registerProvider<MCPServer>(mcpCapability.id, {
 });
 
 // System Prompt (SYSTEM.md)
-function loadSystemPrompt(ctx: LoadContext): LoadResult<SystemPrompt> {
+async function loadSystemPrompt(ctx: LoadContext): Promise<LoadResult<SystemPrompt>> {
 	const items: SystemPrompt[] = [];
 
-	// User level: ~/.omp/agent/SYSTEM.md or ~/.pi/agent/SYSTEM.md
-	for (const name of USER_DIRS) {
-		const userPath = join(ctx.home, name, PATHS.userAgent.replace(`${PATHS.userBase}/`, ""), "SYSTEM.md");
-		const userContent = ctx.fs.readFile(userPath);
-		if (userContent) {
+	const userPaths = USER_DIRS.map((name) =>
+		join(ctx.home, name, PATHS.userAgent.replace(`${PATHS.userBase}/`, ""), "SYSTEM.md"),
+	);
+	const userContents = await Promise.all(userPaths.map((p) => readFile(p)));
+	for (let i = 0; i < userPaths.length; i++) {
+		const content = userContents[i];
+		if (content) {
 			items.push({
-				path: userPath,
-				content: userContent,
+				path: userPaths[i],
+				content,
 				level: "user",
-				_source: createSourceMeta(PROVIDER_ID, userPath, "user"),
+				_source: createSourceMeta(PROVIDER_ID, userPaths[i], "user"),
 			});
-			break; // First match wins
+			break;
 		}
 	}
 
-	// Project level: walk up looking for .omp/SYSTEM.md or .pi/SYSTEM.md
+	const ancestors: string[] = [];
 	let current = ctx.cwd;
 	while (true) {
-		for (const name of PROJECT_DIRS) {
-			const configDir = join(current, name);
-			if (ctx.fs.isDir(configDir)) {
-				const projectPath = join(configDir, "SYSTEM.md");
-				const content = ctx.fs.readFile(projectPath);
-				if (content) {
-					items.push({
-						path: projectPath,
-						content,
-						level: "project",
-						_source: createSourceMeta(PROVIDER_ID, projectPath, "project"),
-					});
-					break; // First config dir in this directory wins
-				}
-			}
-		}
+		ancestors.push(current);
 		const parent = dirname(current);
 		if (parent === current) break;
 		current = parent;
+	}
+
+	for (const dir of ancestors) {
+		const configDirs = PROJECT_DIRS.map((name) => join(dir, name));
+		const entriesResults = await Promise.all(configDirs.map((d) => readDirEntries(d)));
+		const validConfigDir = configDirs.find((_, i) => entriesResults[i].length > 0);
+		if (!validConfigDir) continue;
+
+		const projectPath = join(validConfigDir, "SYSTEM.md");
+		const content = await readFile(projectPath);
+		if (content) {
+			items.push({
+				path: projectPath,
+				content,
+				level: "project",
+				_source: createSourceMeta(PROVIDER_ID, projectPath, "project"),
+			});
+		}
+		break;
 	}
 
 	return { items, warnings: [] };
@@ -191,23 +197,23 @@ registerProvider<SystemPrompt>(systemPromptCapability.id, {
 });
 
 // Skills
-function loadSkills(ctx: LoadContext): LoadResult<Skill> {
-	const items: Skill[] = [];
-	const warnings: string[] = [];
+async function loadSkills(ctx: LoadContext): Promise<LoadResult<Skill>> {
+	const configDirs = await getConfigDirs(ctx);
+	const results = await Promise.all(
+		configDirs.map(({ dir, level }) =>
+			loadSkillsFromDir(ctx, {
+				dir: join(dir, "skills"),
+				providerId: PROVIDER_ID,
+				level,
+				requireDescription: true,
+			}),
+		),
+	);
 
-	for (const { dir, level } of getConfigDirs(ctx)) {
-		const skillsDir = join(dir, "skills");
-		const result = loadSkillsFromDir(ctx, {
-			dir: skillsDir,
-			providerId: PROVIDER_ID,
-			level,
-			requireDescription: true,
-		});
-		items.push(...result.items);
-		if (result.warnings) warnings.push(...result.warnings);
-	}
-
-	return { items, warnings };
+	return {
+		items: results.flatMap((r) => r.items),
+		warnings: results.flatMap((r) => r.warnings ?? []),
+	};
 }
 
 registerProvider<Skill>(skillCapability.id, {
@@ -219,13 +225,13 @@ registerProvider<Skill>(skillCapability.id, {
 });
 
 // Slash Commands
-function loadSlashCommands(ctx: LoadContext): LoadResult<SlashCommand> {
+async function loadSlashCommands(ctx: LoadContext): Promise<LoadResult<SlashCommand>> {
 	const items: SlashCommand[] = [];
 	const warnings: string[] = [];
 
-	for (const { dir, level } of getConfigDirs(ctx)) {
+	for (const { dir, level } of await getConfigDirs(ctx)) {
 		const commandsDir = join(dir, "commands");
-		const result = loadFilesFromDir<SlashCommand>(ctx, commandsDir, PROVIDER_ID, level, {
+		const result = await loadFilesFromDir<SlashCommand>(ctx, commandsDir, PROVIDER_ID, level, {
 			extensions: ["md"],
 			transform: (name, content, path, source) => ({
 				name: name.replace(/\.md$/, ""),
@@ -251,13 +257,13 @@ registerProvider<SlashCommand>(slashCommandCapability.id, {
 });
 
 // Rules
-function loadRules(ctx: LoadContext): LoadResult<Rule> {
+async function loadRules(ctx: LoadContext): Promise<LoadResult<Rule>> {
 	const items: Rule[] = [];
 	const warnings: string[] = [];
 
-	for (const { dir, level } of getConfigDirs(ctx)) {
+	for (const { dir, level } of await getConfigDirs(ctx)) {
 		const rulesDir = join(dir, "rules");
-		const result = loadFilesFromDir<Rule>(ctx, rulesDir, PROVIDER_ID, level, {
+		const result = await loadFilesFromDir<Rule>(ctx, rulesDir, PROVIDER_ID, level, {
 			extensions: ["md", "mdc"],
 			transform: (name, content, path, source) => {
 				const { frontmatter, body } = parseFrontmatter(content);
@@ -289,13 +295,13 @@ registerProvider<Rule>(ruleCapability.id, {
 });
 
 // Prompts
-function loadPrompts(ctx: LoadContext): LoadResult<Prompt> {
+async function loadPrompts(ctx: LoadContext): Promise<LoadResult<Prompt>> {
 	const items: Prompt[] = [];
 	const warnings: string[] = [];
 
-	for (const { dir, level } of getConfigDirs(ctx)) {
+	for (const { dir, level } of await getConfigDirs(ctx)) {
 		const promptsDir = join(dir, "prompts");
-		const result = loadFilesFromDir<Prompt>(ctx, promptsDir, PROVIDER_ID, level, {
+		const result = await loadFilesFromDir<Prompt>(ctx, promptsDir, PROVIDER_ID, level, {
 			extensions: ["md"],
 			transform: (name, content, path, source) => ({
 				name: name.replace(/\.md$/, ""),
@@ -320,7 +326,7 @@ registerProvider<Prompt>(promptCapability.id, {
 });
 
 // Extension Modules
-function loadExtensionModules(ctx: LoadContext): LoadResult<ExtensionModule> {
+async function loadExtensionModules(ctx: LoadContext): Promise<LoadResult<ExtensionModule>> {
 	const items: ExtensionModule[] = [];
 	const warnings: string[] = [];
 
@@ -337,45 +343,88 @@ function loadExtensionModules(ctx: LoadContext): LoadResult<ExtensionModule> {
 		return resolve(ctx.cwd, rawPath);
 	};
 
-	const addExtensionPath = (extPath: string, level: "user" | "project"): void => {
-		items.push({
-			name: getExtensionNameFromPath(extPath),
-			path: extPath,
-			level,
-			_source: createSourceMeta(PROVIDER_ID, extPath, level),
-		});
-	};
+	const createExtensionModule = (extPath: string, level: "user" | "project"): ExtensionModule => ({
+		name: getExtensionNameFromPath(extPath),
+		path: extPath,
+		level,
+		_source: createSourceMeta(PROVIDER_ID, extPath, level),
+	});
 
-	for (const { dir, level } of getConfigDirs(ctx)) {
-		const extensionsDir = join(dir, "extensions");
-		const discovered = discoverExtensionModulePaths(ctx, extensionsDir);
-		for (const extPath of discovered) {
-			addExtensionPath(extPath, level);
+	const configDirs = await getConfigDirs(ctx);
+
+	const [discoveredResults, settingsResults] = await Promise.all([
+		Promise.all(configDirs.map(({ dir }) => discoverExtensionModulePaths(ctx, join(dir, "extensions")))),
+		Promise.all(configDirs.map(({ dir }) => readFile(join(dir, "settings.json")))),
+	]);
+
+	for (let i = 0; i < configDirs.length; i++) {
+		const { level } = configDirs[i];
+		for (const extPath of discoveredResults[i]) {
+			items.push(createExtensionModule(extPath, level));
 		}
+	}
+
+	const settingsExtensions: Array<{
+		resolvedPath: string;
+		settingsPath: string;
+		level: "user" | "project";
+	}> = [];
+
+	for (let i = 0; i < configDirs.length; i++) {
+		const { dir, level } = configDirs[i];
+		const settingsContent = settingsResults[i];
+		if (!settingsContent) continue;
 
 		const settingsPath = join(dir, "settings.json");
-		const settingsContent = ctx.fs.readFile(settingsPath);
-		if (settingsContent) {
-			const settingsData = parseJSON<{ extensions?: unknown }>(settingsContent);
-			const extensions = settingsData?.extensions;
-			if (Array.isArray(extensions)) {
-				for (const entry of extensions) {
-					if (typeof entry !== "string") {
-						warnings.push(`Invalid extension path in ${settingsPath}: ${String(entry)}`);
-						continue;
-					}
-					const resolvedPath = resolveExtensionPath(entry);
-					if (ctx.fs.isDir(resolvedPath)) {
-						for (const extPath of discoverExtensionModulePaths(ctx, resolvedPath)) {
-							addExtensionPath(extPath, level);
-						}
-					} else if (ctx.fs.isFile(resolvedPath)) {
-						addExtensionPath(resolvedPath, level);
-					} else {
-						warnings.push(`Extension path not found: ${resolvedPath}`);
-					}
-				}
+		const settingsData = parseJSON<{ extensions?: unknown }>(settingsContent);
+		const extensions = settingsData?.extensions;
+		if (!Array.isArray(extensions)) continue;
+
+		for (const entry of extensions) {
+			if (typeof entry !== "string") {
+				warnings.push(`Invalid extension path in ${settingsPath}: ${String(entry)}`);
+				continue;
 			}
+			settingsExtensions.push({
+				resolvedPath: resolveExtensionPath(entry),
+				settingsPath,
+				level,
+			});
+		}
+	}
+
+	const [entriesResults, fileContents] = await Promise.all([
+		Promise.all(settingsExtensions.map(({ resolvedPath }) => readDirEntries(resolvedPath))),
+		Promise.all(settingsExtensions.map(({ resolvedPath }) => readFile(resolvedPath))),
+	]);
+
+	const dirDiscoveryPromises: Array<{
+		promise: Promise<string[]>;
+		level: "user" | "project";
+	}> = [];
+
+	for (let i = 0; i < settingsExtensions.length; i++) {
+		const { resolvedPath, level } = settingsExtensions[i];
+		const entries = entriesResults[i];
+		const content = fileContents[i];
+
+		if (entries.length > 0) {
+			dirDiscoveryPromises.push({
+				promise: discoverExtensionModulePaths(ctx, resolvedPath),
+				level,
+			});
+		} else if (content !== null) {
+			items.push(createExtensionModule(resolvedPath, level));
+		} else {
+			warnings.push(`Extension path not found: ${resolvedPath}`);
+		}
+	}
+
+	const dirDiscoveryResults = await Promise.all(dirDiscoveryPromises.map((d) => d.promise));
+	for (let i = 0; i < dirDiscoveryPromises.length; i++) {
+		const { level } = dirDiscoveryPromises[i];
+		for (const extPath of dirDiscoveryResults[i]) {
+			items.push(createExtensionModule(extPath, level));
 		}
 	}
 
@@ -391,38 +440,59 @@ registerProvider<ExtensionModule>(extensionModuleCapability.id, {
 });
 
 // Extensions
-function loadExtensions(ctx: LoadContext): LoadResult<Extension> {
+async function loadExtensions(ctx: LoadContext): Promise<LoadResult<Extension>> {
 	const items: Extension[] = [];
 	const warnings: string[] = [];
 
-	for (const { dir, level } of getConfigDirs(ctx)) {
+	const configDirs = await getConfigDirs(ctx);
+	const entriesResults = await Promise.all(configDirs.map(({ dir }) => readDirEntries(join(dir, "extensions"))));
+
+	const manifestCandidates: Array<{
+		extDir: string;
+		manifestPath: string;
+		entryName: string;
+		level: "user" | "project";
+	}> = [];
+
+	for (let i = 0; i < configDirs.length; i++) {
+		const { dir, level } = configDirs[i];
+		const entries = entriesResults[i];
 		const extensionsDir = join(dir, "extensions");
-		if (!ctx.fs.isDir(extensionsDir)) continue;
 
-		for (const name of ctx.fs.readDir(extensionsDir)) {
-			if (name.startsWith(".")) continue;
+		for (const entry of entries) {
+			if (entry.name.startsWith(".")) continue;
+			if (!entry.isDirectory()) continue;
 
-			const extDir = join(extensionsDir, name);
-			if (!ctx.fs.isDir(extDir)) continue;
-
-			const manifestPath = join(extDir, "gemini-extension.json");
-			const content = ctx.fs.readFile(manifestPath);
-			if (!content) continue;
-
-			const manifest = parseJSON<ExtensionManifest>(content);
-			if (!manifest) {
-				warnings.push(`Failed to parse ${manifestPath}`);
-				continue;
-			}
-
-			items.push({
-				name: manifest.name || name,
-				path: extDir,
-				manifest,
+			const extDir = join(extensionsDir, entry.name);
+			manifestCandidates.push({
+				extDir,
+				manifestPath: join(extDir, "gemini-extension.json"),
+				entryName: entry.name,
 				level,
-				_source: createSourceMeta(PROVIDER_ID, manifestPath, level),
 			});
 		}
+	}
+
+	const manifestContents = await Promise.all(manifestCandidates.map(({ manifestPath }) => readFile(manifestPath)));
+
+	for (let i = 0; i < manifestCandidates.length; i++) {
+		const content = manifestContents[i];
+		if (!content) continue;
+
+		const { extDir, manifestPath, entryName, level } = manifestCandidates[i];
+		const manifest = parseJSON<ExtensionManifest>(content);
+		if (!manifest) {
+			warnings.push(`Failed to parse ${manifestPath}`);
+			continue;
+		}
+
+		items.push({
+			name: manifest.name || entryName,
+			path: extDir,
+			manifest,
+			level,
+			_source: createSourceMeta(PROVIDER_ID, manifestPath, level),
+		});
 	}
 
 	return { items, warnings };
@@ -437,13 +507,13 @@ registerProvider<Extension>(extensionCapability.id, {
 });
 
 // Instructions
-function loadInstructions(ctx: LoadContext): LoadResult<Instruction> {
+async function loadInstructions(ctx: LoadContext): Promise<LoadResult<Instruction>> {
 	const items: Instruction[] = [];
 	const warnings: string[] = [];
 
-	for (const { dir, level } of getConfigDirs(ctx)) {
+	for (const { dir, level } of await getConfigDirs(ctx)) {
 		const instructionsDir = join(dir, "instructions");
-		const result = loadFilesFromDir<Instruction>(ctx, instructionsDir, PROVIDER_ID, level, {
+		const result = await loadFilesFromDir<Instruction>(ctx, instructionsDir, PROVIDER_ID, level, {
 			extensions: ["md"],
 			transform: (name, content, path, source) => {
 				const { frontmatter, body } = parseFrontmatter(content);
@@ -472,35 +542,50 @@ registerProvider<Instruction>(instructionCapability.id, {
 });
 
 // Hooks
-function loadHooks(ctx: LoadContext): LoadResult<Hook> {
+async function loadHooks(ctx: LoadContext): Promise<LoadResult<Hook>> {
 	const items: Hook[] = [];
 
-	for (const { dir, level } of getConfigDirs(ctx)) {
-		const hooksDir = join(dir, "hooks");
-		if (!ctx.fs.isDir(hooksDir)) continue;
+	const configDirs = await getConfigDirs(ctx);
+	const hookTypes = ["pre", "post"] as const;
 
-		for (const hookType of ["pre", "post"] as const) {
-			const typeDir = join(hooksDir, hookType);
-			if (!ctx.fs.isDir(typeDir)) continue;
+	const typeDirRequests: Array<{
+		typeDir: string;
+		hookType: (typeof hookTypes)[number];
+		level: "user" | "project";
+	}> = [];
 
-			for (const name of ctx.fs.readDir(typeDir)) {
-				if (name.startsWith(".")) continue;
+	for (const { dir, level } of configDirs) {
+		for (const hookType of hookTypes) {
+			typeDirRequests.push({
+				typeDir: join(dir, "hooks", hookType),
+				hookType,
+				level,
+			});
+		}
+	}
 
-				const path = join(typeDir, name);
-				if (!ctx.fs.isFile(path)) continue;
+	const typeEntriesResults = await Promise.all(typeDirRequests.map(({ typeDir }) => readDirEntries(typeDir)));
 
-				const baseName = name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : name;
-				const tool = baseName === "*" ? "*" : baseName;
+	for (let i = 0; i < typeDirRequests.length; i++) {
+		const { typeDir, hookType, level } = typeDirRequests[i];
+		const typeEntries = typeEntriesResults[i];
 
-				items.push({
-					name,
-					path,
-					type: hookType,
-					tool,
-					level,
-					_source: createSourceMeta(PROVIDER_ID, path, level),
-				});
-			}
+		for (const entry of typeEntries) {
+			if (entry.name.startsWith(".")) continue;
+			if (!entry.isFile()) continue;
+
+			const path = join(typeDir, entry.name);
+			const baseName = entry.name.includes(".") ? entry.name.slice(0, entry.name.lastIndexOf(".")) : entry.name;
+			const tool = baseName === "*" ? "*" : baseName;
+
+			items.push({
+				name: entry.name,
+				path,
+				type: hookType,
+				tool,
+				level,
+				_source: createSourceMeta(PROVIDER_ID, path, level),
+			});
 		}
 	}
 
@@ -516,58 +601,86 @@ registerProvider<Hook>(hookCapability.id, {
 });
 
 // Custom Tools
-function loadTools(ctx: LoadContext): LoadResult<CustomTool> {
+async function loadTools(ctx: LoadContext): Promise<LoadResult<CustomTool>> {
 	const items: CustomTool[] = [];
 	const warnings: string[] = [];
 
-	for (const { dir, level } of getConfigDirs(ctx)) {
-		const toolsDir = join(dir, "tools");
-		if (!ctx.fs.isDir(toolsDir)) continue;
+	const configDirs = await getConfigDirs(ctx);
+	const entriesResults = await Promise.all(configDirs.map(({ dir }) => readDirEntries(join(dir, "tools"))));
 
-		// Load tool files (JSON and Markdown declarative tools)
-		const result = loadFilesFromDir<CustomTool>(ctx, toolsDir, PROVIDER_ID, level, {
-			extensions: ["json", "md"],
-			transform: (name, content, path, source) => {
-				if (name.endsWith(".json")) {
-					const data = parseJSON<{ name?: string; description?: string }>(content);
+	const fileLoadPromises: Array<Promise<{ items: CustomTool[]; warnings?: string[] }>> = [];
+	const subDirCandidates: Array<{
+		indexPath: string;
+		entryName: string;
+		level: "user" | "project";
+	}> = [];
+
+	for (let i = 0; i < configDirs.length; i++) {
+		const { dir, level } = configDirs[i];
+		const toolEntries = entriesResults[i];
+		if (toolEntries.length === 0) continue;
+
+		const toolsDir = join(dir, "tools");
+
+		fileLoadPromises.push(
+			loadFilesFromDir<CustomTool>(ctx, toolsDir, PROVIDER_ID, level, {
+				extensions: ["json", "md"],
+				transform: (name, content, path, source) => {
+					if (name.endsWith(".json")) {
+						const data = parseJSON<{ name?: string; description?: string }>(content);
+						return {
+							name: data?.name || name.replace(/\.json$/, ""),
+							path,
+							description: data?.description,
+							level,
+							_source: source,
+						};
+					}
+					const { frontmatter } = parseFrontmatter(content);
 					return {
-						name: data?.name || name.replace(/\.json$/, ""),
+						name: (frontmatter.name as string) || name.replace(/\.md$/, ""),
 						path,
-						description: data?.description,
+						description: frontmatter.description as string | undefined,
 						level,
 						_source: source,
 					};
-				}
-				const { frontmatter } = parseFrontmatter(content);
-				return {
-					name: (frontmatter.name as string) || name.replace(/\.md$/, ""),
-					path,
-					description: frontmatter.description as string | undefined,
-					level,
-					_source: source,
-				};
-			},
-		});
+				},
+			}),
+		);
+
+		for (const entry of toolEntries) {
+			if (entry.name.startsWith(".")) continue;
+			if (!entry.isDirectory()) continue;
+
+			subDirCandidates.push({
+				indexPath: join(toolsDir, entry.name, "index.ts"),
+				entryName: entry.name,
+				level,
+			});
+		}
+	}
+
+	const [fileResults, indexContents] = await Promise.all([
+		Promise.all(fileLoadPromises),
+		Promise.all(subDirCandidates.map(({ indexPath }) => readFile(indexPath))),
+	]);
+
+	for (const result of fileResults) {
 		items.push(...result.items);
 		if (result.warnings) warnings.push(...result.warnings);
+	}
 
-		// Load TypeScript tools from subdirectories (tools/mytool/index.ts pattern)
-		for (const name of ctx.fs.readDir(toolsDir)) {
-			if (name.startsWith(".")) continue;
-
-			const subDir = join(toolsDir, name);
-			if (!ctx.fs.isDir(subDir)) continue;
-
-			const indexPath = join(subDir, "index.ts");
-			if (ctx.fs.isFile(indexPath)) {
-				items.push({
-					name,
-					path: indexPath,
-					description: undefined,
-					level,
-					_source: createSourceMeta(PROVIDER_ID, indexPath, level),
-				});
-			}
+	for (let i = 0; i < subDirCandidates.length; i++) {
+		const indexContent = indexContents[i];
+		if (indexContent !== null) {
+			const { indexPath, entryName, level } = subDirCandidates[i];
+			items.push({
+				name: entryName,
+				path: indexPath,
+				description: undefined,
+				level,
+				_source: createSourceMeta(PROVIDER_ID, indexPath, level),
+			});
 		}
 	}
 
@@ -583,13 +696,13 @@ registerProvider<CustomTool>(toolCapability.id, {
 });
 
 // Settings
-function loadSettings(ctx: LoadContext): LoadResult<Settings> {
+async function loadSettings(ctx: LoadContext): Promise<LoadResult<Settings>> {
 	const items: Settings[] = [];
 	const warnings: string[] = [];
 
-	for (const { dir, level } of getConfigDirs(ctx)) {
+	for (const { dir, level } of await getConfigDirs(ctx)) {
 		const settingsPath = join(dir, "settings.json");
-		const content = ctx.fs.readFile(settingsPath);
+		const content = await readFile(settingsPath);
 		if (!content) continue;
 
 		const data = parseJSON<Record<string, unknown>>(content);
@@ -618,50 +731,57 @@ registerProvider<Settings>(settingsCapability.id, {
 });
 
 // Context Files (AGENTS.md)
-function loadContextFiles(ctx: LoadContext): LoadResult<ContextFile> {
+async function loadContextFiles(ctx: LoadContext): Promise<LoadResult<ContextFile>> {
 	const items: ContextFile[] = [];
 	const warnings: string[] = [];
 
-	// User level: ~/.omp/agent/AGENTS.md or ~/.pi/agent/AGENTS.md
-	for (const name of USER_DIRS) {
-		const userPath = join(ctx.home, name, PATHS.userAgent.replace(`${PATHS.userBase}/`, ""), "AGENTS.md");
-		const content = ctx.fs.readFile(userPath);
+	const userPaths = USER_DIRS.map((name) =>
+		join(ctx.home, name, PATHS.userAgent.replace(`${PATHS.userBase}/`, ""), "AGENTS.md"),
+	);
+	const userContents = await Promise.all(userPaths.map((p) => readFile(p)));
+	for (let i = 0; i < userPaths.length; i++) {
+		const content = userContents[i];
 		if (content) {
 			items.push({
-				path: userPath,
+				path: userPaths[i],
 				content,
 				level: "user",
-				_source: createSourceMeta(PROVIDER_ID, userPath, "user"),
+				_source: createSourceMeta(PROVIDER_ID, userPaths[i], "user"),
 			});
-			break; // First match wins
+			break;
 		}
 	}
 
-	// Project level: walk up looking for .omp/AGENTS.md or .pi/AGENTS.md
+	const ancestors: Array<{ dir: string; depth: number }> = [];
 	let current = ctx.cwd;
 	let depth = 0;
 	while (true) {
-		for (const name of PROJECT_DIRS) {
-			const configDir = join(current, name);
-			if (ctx.fs.isDir(configDir)) {
-				const projectPath = join(configDir, "AGENTS.md");
-				const content = ctx.fs.readFile(projectPath);
-				if (content) {
-					items.push({
-						path: projectPath,
-						content,
-						level: "project",
-						depth,
-						_source: createSourceMeta(PROVIDER_ID, projectPath, "project"),
-					});
-					return { items, warnings }; // First config dir wins
-				}
-			}
-		}
+		ancestors.push({ dir: current, depth });
 		const parent = dirname(current);
 		if (parent === current) break;
 		current = parent;
 		depth++;
+	}
+
+	for (const { dir, depth: ancestorDepth } of ancestors) {
+		const configDirs = PROJECT_DIRS.map((name) => join(dir, name));
+		const entriesResults = await Promise.all(configDirs.map((d) => readDirEntries(d)));
+		const validConfigDir = configDirs.find((_, i) => entriesResults[i].length > 0);
+		if (!validConfigDir) continue;
+
+		const projectPath = join(validConfigDir, "AGENTS.md");
+		const content = await readFile(projectPath);
+		if (content) {
+			items.push({
+				path: projectPath,
+				content,
+				level: "project",
+				depth: ancestorDepth,
+				_source: createSourceMeta(PROVIDER_ID, projectPath, "project"),
+			});
+			return { items, warnings };
+		}
+		break;
 	}
 
 	return { items, warnings };

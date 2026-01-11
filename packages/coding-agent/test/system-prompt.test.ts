@@ -3,8 +3,8 @@ import { buildSystemPrompt } from "../src/core/system-prompt";
 
 describe("buildSystemPrompt", () => {
 	describe("empty tools", () => {
-		test("shows (none) for empty tools list", () => {
-			const prompt = buildSystemPrompt({
+		test("shows (none) for empty tools list", async () => {
+			const prompt = await buildSystemPrompt({
 				toolNames: [],
 				contextFiles: [],
 				skills: [],
@@ -14,8 +14,8 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain("<tools>\n(none)\n</tools>");
 		});
 
-		test("shows file paths guideline even with no tools", () => {
-			const prompt = buildSystemPrompt({
+		test("shows file paths guideline even with no tools", async () => {
+			const prompt = await buildSystemPrompt({
 				toolNames: [],
 				contextFiles: [],
 				skills: [],
@@ -26,8 +26,8 @@ describe("buildSystemPrompt", () => {
 	});
 
 	describe("default tools", () => {
-		test("includes all default tools", () => {
-			const prompt = buildSystemPrompt({
+		test("includes all default tools", async () => {
+			const prompt = await buildSystemPrompt({
 				contextFiles: [],
 				skills: [],
 			});

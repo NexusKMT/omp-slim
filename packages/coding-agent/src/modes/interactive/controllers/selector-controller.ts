@@ -111,9 +111,13 @@ export class SelectorController {
 	 * Show the Extension Control Center dashboard.
 	 * Replaces /status with a unified view of all providers and extensions.
 	 */
-	showExtensionsDashboard(): void {
+	async showExtensionsDashboard(): Promise<void> {
+		const dashboard = await ExtensionDashboard.create(
+			process.cwd(),
+			this.ctx.settingsManager,
+			this.ctx.ui.terminal.rows,
+		);
 		this.showSelector((done) => {
-			const dashboard = new ExtensionDashboard(process.cwd(), this.ctx.settingsManager, this.ctx.ui.terminal.rows);
 			dashboard.onClose = () => {
 				done();
 				this.ctx.ui.requestRender();

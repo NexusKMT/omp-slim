@@ -66,7 +66,7 @@ describe.skipIf(!API_KEY)("AgentSession compaction e2e", () => {
 		});
 
 		sessionManager = inMemory ? SessionManager.inMemory() : SessionManager.create(tempDir);
-		const settingsManager = SettingsManager.create(tempDir, tempDir);
+		const settingsManager = await SettingsManager.create(tempDir, tempDir);
 		// Use minimal keepRecentTokens so small test conversations have something to summarize
 		settingsManager.applyOverrides({ compaction: { keepRecentTokens: 1 } });
 		const authStorage = new AuthStorage(join(tempDir, "auth.json"));
@@ -88,7 +88,7 @@ describe.skipIf(!API_KEY)("AgentSession compaction e2e", () => {
 	}
 
 	it("should trigger manual compaction via compact()", async () => {
-		createSession();
+		await createSession();
 
 		// Send a few prompts to build up history
 		await session.prompt("What is 2+2? Reply with just the number.");
@@ -114,7 +114,7 @@ describe.skipIf(!API_KEY)("AgentSession compaction e2e", () => {
 	}, 120000);
 
 	it("should maintain valid session state after compaction", async () => {
-		createSession();
+		await createSession();
 
 		// Build up history
 		await session.prompt("What is the capital of France? One word answer.");
@@ -139,7 +139,7 @@ describe.skipIf(!API_KEY)("AgentSession compaction e2e", () => {
 	}, 180000);
 
 	it("should persist compaction to session file", async () => {
-		createSession();
+		await createSession();
 
 		await session.prompt("Say hello");
 		await session.agent.waitForIdle();
@@ -167,7 +167,7 @@ describe.skipIf(!API_KEY)("AgentSession compaction e2e", () => {
 	}, 120000);
 
 	it("should work with --no-session mode (in-memory only)", async () => {
-		createSession(true); // in-memory mode
+		await createSession(true); // in-memory mode
 
 		// Send prompts
 		await session.prompt("What is 2+2? Reply with just the number.");
@@ -189,7 +189,7 @@ describe.skipIf(!API_KEY)("AgentSession compaction e2e", () => {
 	}, 120000);
 
 	it("should emit correct events during auto-compaction", async () => {
-		createSession();
+		await createSession();
 
 		// Build some history
 		await session.prompt("Say hello");

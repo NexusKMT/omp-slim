@@ -2,8 +2,9 @@
  * Shared helpers for discovery providers.
  */
 
-import { join, resolve } from "path";
+import { join, resolve } from "node:path";
 import { parse as parseYAML } from "yaml";
+import { readDirEntries, readFile } from "../capability/fs";
 import type { Skill, SkillFrontmatter } from "../capability/skill";
 import type { LoadContext, LoadResult, SourceMeta } from "../capability/types";
 
@@ -71,16 +72,13 @@ export function getUserPath(ctx: LoadContext, source: SourceId, subpath: string)
 }
 
 /**
- * Get project-level path for a source (walks up from cwd).
+ * Get project-level path for a source (cwd only).
  */
 export function getProjectPath(ctx: LoadContext, source: SourceId, subpath: string): string | null {
 	const paths = SOURCE_PATHS[source];
 	if (!paths.projectDir) return null;
 
-	const found = ctx.fs.walkUp(paths.projectDir, { dir: true });
-	if (!found) return null;
-
-	return join(found, subpath);
+	return join(ctx.cwd, paths.projectDir, subpath);
 }
 
 /**
@@ -127,51 +125,54 @@ export function parseFrontmatter(content: string): {
 	}
 }
 
-export function loadSkillsFromDir(
-	ctx: LoadContext,
+export async function loadSkillsFromDir(
+	_ctx: LoadContext,
 	options: {
 		dir: string;
 		providerId: string;
 		level: "user" | "project";
 		requireDescription?: boolean;
 	},
-): LoadResult<Skill> {
+): Promise<LoadResult<Skill>> {
 	const items: Skill[] = [];
 	const warnings: string[] = [];
 	const { dir, level, providerId, requireDescription = false } = options;
 
-	if (!ctx.fs.isDir(dir)) {
-		return { items, warnings };
-	}
+	const entries = await readDirEntries(dir);
+	const skillDirs = entries.filter(
+		(entry) => entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules",
+	);
 
-	for (const name of ctx.fs.readDir(dir)) {
-		if (name.startsWith(".") || name === "node_modules") continue;
+	const results = await Promise.all(
+		skillDirs.map(async (entry) => {
+			const skillFile = join(dir, entry.name, "SKILL.md");
+			const content = await readFile(skillFile);
+			if (!content) {
+				return { item: null as Skill | null, warning: null as string | null };
+			}
 
-		const skillDir = join(dir, name);
-		if (!ctx.fs.isDir(skillDir)) continue;
+			const { frontmatter, body } = parseFrontmatter(content);
+			if (requireDescription && !frontmatter.description) {
+				return { item: null as Skill | null, warning: null as string | null };
+			}
 
-		const skillFile = join(skillDir, "SKILL.md");
-		if (!ctx.fs.isFile(skillFile)) continue;
+			return {
+				item: {
+					name: (frontmatter.name as string) || entry.name,
+					path: skillFile,
+					content: body,
+					frontmatter: frontmatter as SkillFrontmatter,
+					level,
+					_source: createSourceMeta(providerId, skillFile, level),
+				},
+				warning: null as string | null,
+			};
+		}),
+	);
 
-		const content = ctx.fs.readFile(skillFile);
-		if (!content) {
-			warnings.push(`Failed to read ${skillFile}`);
-			continue;
-		}
-
-		const { frontmatter, body } = parseFrontmatter(content);
-		if (requireDescription && !frontmatter.description) {
-			continue;
-		}
-
-		items.push({
-			name: (frontmatter.name as string) || name,
-			path: skillFile,
-			content: body,
-			frontmatter: frontmatter as SkillFrontmatter,
-			level,
-			_source: createSourceMeta(providerId, skillFile, level),
-		});
+	for (const result of results) {
+		if (result.warning) warnings.push(result.warning);
+		if (result.item) items.push(result.item);
 	}
 
 	return { items, warnings };
@@ -213,8 +214,8 @@ export function expandEnvVarsDeep<T>(obj: T, extraEnv?: Record<string, string>):
 /**
  * Load files from a directory matching a pattern.
  */
-export function loadFilesFromDir<T>(
-	ctx: LoadContext,
+export async function loadFilesFromDir<T>(
+	_ctx: LoadContext,
 	dir: string,
 	provider: string,
 	level: "user" | "project",
@@ -226,37 +227,40 @@ export function loadFilesFromDir<T>(
 		/** Whether to recurse into subdirectories */
 		recursive?: boolean;
 	},
-): LoadResult<T> {
+): Promise<LoadResult<T>> {
+	const entries = await readDirEntries(dir);
+
+	const visibleEntries = entries.filter((entry) => !entry.name.startsWith("."));
+
+	const directories = options.recursive ? visibleEntries.filter((entry) => entry.isDirectory()) : [];
+
+	const files = visibleEntries
+		.filter((entry) => entry.isFile())
+		.filter((entry) => {
+			if (!options.extensions) return true;
+			return options.extensions.some((ext) => entry.name.endsWith(`.${ext}`));
+		});
+
+	const [subResults, fileResults] = await Promise.all([
+		Promise.all(directories.map((entry) => loadFilesFromDir(_ctx, join(dir, entry.name), provider, level, options))),
+		Promise.all(
+			files.map(async (entry) => {
+				const path = join(dir, entry.name);
+				const content = await readFile(path);
+				return { entry, path, content };
+			}),
+		),
+	]);
+
 	const items: T[] = [];
 	const warnings: string[] = [];
 
-	if (!ctx.fs.isDir(dir)) {
-		return { items, warnings };
+	for (const subResult of subResults) {
+		items.push(...subResult.items);
+		if (subResult.warnings) warnings.push(...subResult.warnings);
 	}
 
-	const files = ctx.fs.readDir(dir);
-
-	for (const name of files) {
-		if (name.startsWith(".")) continue;
-
-		const path = join(dir, name);
-
-		if (options.recursive && ctx.fs.isDir(path)) {
-			const subResult = loadFilesFromDir(ctx, path, provider, level, options);
-			items.push(...subResult.items);
-			if (subResult.warnings) warnings.push(...subResult.warnings);
-			continue;
-		}
-
-		if (!ctx.fs.isFile(path)) continue;
-
-		// Check extension
-		if (options.extensions) {
-			const hasMatch = options.extensions.some((ext) => name.endsWith(`.${ext}`));
-			if (!hasMatch) continue;
-		}
-
-		const content = ctx.fs.readFile(path);
+	for (const { entry, path, content } of fileResults) {
 		if (content === null) {
 			warnings.push(`Failed to read file: ${path}`);
 			continue;
@@ -265,7 +269,7 @@ export function loadFilesFromDir<T>(
 		const source = createSourceMeta(provider, path, level);
 
 		try {
-			const item = options.transform(name, content, path, source);
+			const item = options.transform(entry.name, content, path, source);
 			if (item !== null) {
 				items.push(item);
 			}
@@ -303,8 +307,11 @@ interface ExtensionModuleManifest {
 	extensions?: string[];
 }
 
-function readExtensionModuleManifest(ctx: LoadContext, packageJsonPath: string): ExtensionModuleManifest | null {
-	const content = ctx.fs.readFile(packageJsonPath);
+async function readExtensionModuleManifest(
+	_ctx: LoadContext,
+	packageJsonPath: string,
+): Promise<ExtensionModuleManifest | null> {
+	const content = await readFile(packageJsonPath);
 	if (!content) return null;
 
 	const pkg = parseJSON<{ omp?: ExtensionModuleManifest; pi?: ExtensionModuleManifest }>(content);
@@ -329,34 +336,35 @@ function isExtensionModuleFile(name: string): boolean {
  *
  * No recursion beyond one level. Complex packages must use package.json manifest.
  */
-export function discoverExtensionModulePaths(ctx: LoadContext, dir: string): string[] {
-	if (!ctx.fs.isDir(dir)) {
-		return [];
-	}
-
+export async function discoverExtensionModulePaths(ctx: LoadContext, dir: string): Promise<string[]> {
 	const discovered: string[] = [];
+	const entries = await readDirEntries(dir);
 
-	for (const name of ctx.fs.readDir(dir)) {
-		if (name.startsWith(".") || name === "node_modules") continue;
+	for (const entry of entries) {
+		if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
 
-		const entryPath = join(dir, name);
+		const entryPath = join(dir, entry.name);
 
 		// 1. Direct files: *.ts or *.js
-		if (ctx.fs.isFile(entryPath) && isExtensionModuleFile(name)) {
+		if (entry.isFile() && isExtensionModuleFile(entry.name)) {
 			discovered.push(entryPath);
 			continue;
 		}
 
 		// 2 & 3. Subdirectories
-		if (ctx.fs.isDir(entryPath)) {
+		if (entry.isDirectory()) {
+			const subEntries = await readDirEntries(entryPath);
+			const subFileNames = new Set(subEntries.filter((e) => e.isFile()).map((e) => e.name));
+
 			// Check for package.json with "omp"/"pi" field first
-			const packageJsonPath = join(entryPath, "package.json");
-			if (ctx.fs.isFile(packageJsonPath)) {
-				const manifest = readExtensionModuleManifest(ctx, packageJsonPath);
+			if (subFileNames.has("package.json")) {
+				const packageJsonPath = join(entryPath, "package.json");
+				const manifest = await readExtensionModuleManifest(ctx, packageJsonPath);
 				if (manifest?.extensions && Array.isArray(manifest.extensions)) {
 					for (const extPath of manifest.extensions) {
 						const resolvedExtPath = resolve(entryPath, extPath);
-						if (ctx.fs.isFile(resolvedExtPath)) {
+						const content = await readFile(resolvedExtPath);
+						if (content !== null) {
 							discovered.push(resolvedExtPath);
 						}
 					}
@@ -365,12 +373,10 @@ export function discoverExtensionModulePaths(ctx: LoadContext, dir: string): str
 			}
 
 			// Check for index.ts or index.js
-			const indexTs = join(entryPath, "index.ts");
-			const indexJs = join(entryPath, "index.js");
-			if (ctx.fs.isFile(indexTs)) {
-				discovered.push(indexTs);
-			} else if (ctx.fs.isFile(indexJs)) {
-				discovered.push(indexJs);
+			if (subFileNames.has("index.ts")) {
+				discovered.push(join(entryPath, "index.ts"));
+			} else if (subFileNames.has("index.js")) {
+				discovered.push(join(entryPath, "index.js"));
 			}
 		}
 	}

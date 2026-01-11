@@ -11,6 +11,7 @@
  * - Legacy .windsurfrules file
  */
 
+import { readFile } from "../capability/fs";
 import { registerProvider } from "../capability/index";
 import { type MCPServer, mcpCapability } from "../capability/mcp";
 import { type Rule, ruleCapability } from "../capability/rule";
@@ -33,65 +34,58 @@ const PRIORITY = 50;
 // MCP Servers
 // =============================================================================
 
-function loadMCPServers(ctx: LoadContext): LoadResult<MCPServer> {
+function parseServerConfig(
+	name: string,
+	serverConfig: unknown,
+	path: string,
+	scope: "user" | "project",
+): { server?: MCPServer; warning?: string } {
+	if (typeof serverConfig !== "object" || serverConfig === null) {
+		return { warning: `Invalid server config for "${name}" in ${path}` };
+	}
+
+	const server = expandEnvVarsDeep(serverConfig as Record<string, unknown>);
+	return {
+		server: {
+			name,
+			command: server.command as string | undefined,
+			args: server.args as string[] | undefined,
+			env: server.env as Record<string, string> | undefined,
+			url: server.url as string | undefined,
+			headers: server.headers as Record<string, string> | undefined,
+			transport: server.type as "stdio" | "sse" | "http" | undefined,
+			_source: createSourceMeta(PROVIDER_ID, path, scope),
+		},
+	};
+}
+
+async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> {
 	const items: MCPServer[] = [];
 	const warnings: string[] = [];
 
-	// User-level: ~/.codeium/windsurf/mcp_config.json
 	const userPath = getUserPath(ctx, "windsurf", "mcp_config.json");
-	if (userPath && ctx.fs.isFile(userPath)) {
-		const content = ctx.fs.readFile(userPath);
-		if (content) {
-			const config = parseJSON<{ mcpServers?: Record<string, unknown> }>(content);
-			if (config?.mcpServers) {
-				for (const [name, serverConfig] of Object.entries(config.mcpServers)) {
-					if (typeof serverConfig !== "object" || serverConfig === null) {
-						warnings.push(`Invalid server config for "${name}" in ${userPath}`);
-						continue;
-					}
+	const [userContent, projectPath] = await Promise.all([
+		userPath ? readFile(userPath) : Promise.resolve(null),
+		getProjectPath(ctx, "windsurf", "mcp_config.json"),
+	]);
 
-					const server = expandEnvVarsDeep(serverConfig as Record<string, unknown>);
-					items.push({
-						name,
-						command: server.command as string | undefined,
-						args: server.args as string[] | undefined,
-						env: server.env as Record<string, string> | undefined,
-						url: server.url as string | undefined,
-						headers: server.headers as Record<string, string> | undefined,
-						transport: server.type as "stdio" | "sse" | "http" | undefined,
-						_source: createSourceMeta(PROVIDER_ID, userPath, "user"),
-					});
-				}
-			}
-		}
-	}
+	const projectContent = projectPath ? await readFile(projectPath) : null;
 
-	// Project-level: .windsurf/mcp_config.json
-	const projectPath = getProjectPath(ctx, "windsurf", "mcp_config.json");
-	if (projectPath && ctx.fs.isFile(projectPath)) {
-		const content = ctx.fs.readFile(projectPath);
-		if (content) {
-			const config = parseJSON<{ mcpServers?: Record<string, unknown> }>(content);
-			if (config?.mcpServers) {
-				for (const [name, serverConfig] of Object.entries(config.mcpServers)) {
-					if (typeof serverConfig !== "object" || serverConfig === null) {
-						warnings.push(`Invalid server config for "${name}" in ${projectPath}`);
-						continue;
-					}
+	const configs: Array<{ content: string | null; path: string | null; scope: "user" | "project" }> = [
+		{ content: userContent, path: userPath, scope: "user" },
+		{ content: projectContent, path: projectPath, scope: "project" },
+	];
 
-					const server = expandEnvVarsDeep(serverConfig as Record<string, unknown>);
-					items.push({
-						name,
-						command: server.command as string | undefined,
-						args: server.args as string[] | undefined,
-						env: server.env as Record<string, string> | undefined,
-						url: server.url as string | undefined,
-						headers: server.headers as Record<string, string> | undefined,
-						transport: server.type as "stdio" | "sse" | "http" | undefined,
-						_source: createSourceMeta(PROVIDER_ID, projectPath, "project"),
-					});
-				}
-			}
+	for (const { content, path, scope } of configs) {
+		if (!content || !path) continue;
+
+		const config = parseJSON<{ mcpServers?: Record<string, unknown> }>(content);
+		if (!config?.mcpServers) continue;
+
+		for (const [name, serverConfig] of Object.entries(config.mcpServers)) {
+			const result = parseServerConfig(name, serverConfig, path, scope);
+			if (result.warning) warnings.push(result.warning);
+			if (result.server) items.push(result.server);
 		}
 	}
 
@@ -102,14 +96,14 @@ function loadMCPServers(ctx: LoadContext): LoadResult<MCPServer> {
 // Rules
 // =============================================================================
 
-function loadRules(ctx: LoadContext): LoadResult<Rule> {
+async function loadRules(ctx: LoadContext): Promise<LoadResult<Rule>> {
 	const items: Rule[] = [];
 	const warnings: string[] = [];
 
 	// User-level: ~/.codeium/windsurf/memories/global_rules.md
 	const userPath = getUserPath(ctx, "windsurf", "memories/global_rules.md");
-	if (userPath && ctx.fs.isFile(userPath)) {
-		const content = ctx.fs.readFile(userPath);
+	if (userPath) {
+		const content = await readFile(userPath);
 		if (content) {
 			const { frontmatter, body } = parseFrontmatter(content);
 
@@ -137,7 +131,7 @@ function loadRules(ctx: LoadContext): LoadResult<Rule> {
 	// Project-level: .windsurf/rules/*.md
 	const projectRulesDir = getProjectPath(ctx, "windsurf", "rules");
 	if (projectRulesDir) {
-		const result = loadFilesFromDir<Rule>(ctx, projectRulesDir, PROVIDER_ID, "project", {
+		const result = await loadFilesFromDir<Rule>(ctx, projectRulesDir, PROVIDER_ID, "project", {
 			extensions: ["md"],
 			transform: (name, content, path, source) => {
 				const { frontmatter, body } = parseFrontmatter(content);
@@ -165,34 +159,6 @@ function loadRules(ctx: LoadContext): LoadResult<Rule> {
 		});
 		items.push(...result.items);
 		if (result.warnings) warnings.push(...result.warnings);
-	}
-
-	// Legacy: .windsurfrules in project root
-	const legacyPath = ctx.fs.walkUp(".windsurfrules", { file: true });
-	if (legacyPath) {
-		const content = ctx.fs.readFile(legacyPath);
-		if (content) {
-			const { frontmatter, body } = parseFrontmatter(content);
-
-			// Validate and normalize globs
-			let globs: string[] | undefined;
-			if (Array.isArray(frontmatter.globs)) {
-				globs = frontmatter.globs.filter((g): g is string => typeof g === "string");
-			} else if (typeof frontmatter.globs === "string") {
-				globs = [frontmatter.globs];
-			}
-
-			items.push({
-				name: "windsurfrules",
-				path: legacyPath,
-				content: body,
-				globs,
-				alwaysApply: frontmatter.alwaysApply as boolean | undefined,
-				description: frontmatter.description as string | undefined,
-				ttsrTrigger: typeof frontmatter.ttsr_trigger === "string" ? frontmatter.ttsr_trigger : undefined,
-				_source: createSourceMeta(PROVIDER_ID, legacyPath, "project"),
-			});
-		}
 	}
 
 	return { items, warnings };

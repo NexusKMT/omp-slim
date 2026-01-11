@@ -1,12 +1,22 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Added
 
 - Added `--no-lsp` to disable LSP tools, formatting, diagnostics, and warmup for a session
 
 ### Changed
 
+- Changed `SettingsManager.create()` to be async, requiring `await` when creating settings managers
+- Changed `loadSettings()` to be async, requiring `await` when loading settings
+- Changed `discoverSkills()` to be async, requiring `await` when discovering skills
+- Changed `loadSlashCommands()` to be async, requiring `await` when loading slash commands
+- Changed `buildSystemPrompt()` to be async, requiring `await` when building system prompts
+- Changed `loadSkills()` to be async, requiring `await` when loading skills
+- Changed `loadProjectContextFiles()` to be async, requiring `await` when loading context files
+- Changed `getShellConfig()` to be async, requiring `await` when getting shell configuration
+- Changed capability provider `load()` methods to be async-only, removing synchronous `loadSync` API
 - Updated `plan` agent with enhanced structured planning process, parallel exploration via `explore` agent spawning, and improved output format with examples
 - Removed `planner` agent command template, consolidating planning functionality into the `plan` agent
 

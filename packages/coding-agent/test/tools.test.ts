@@ -410,7 +410,7 @@ function b() {
 		});
 
 		it("should handle process spawn errors", async () => {
-			const getShellConfigSpy = vi.spyOn(shellModule, "getShellConfig").mockReturnValueOnce({
+			const getShellConfigSpy = vi.spyOn(shellModule, "getShellConfig").mockResolvedValueOnce({
 				shell: "/nonexistent-shell-path-xyz123",
 				args: ["-c"],
 				env: {},

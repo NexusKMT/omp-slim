@@ -6,7 +6,7 @@
  *
  * Sources:
  * - User: ~/.gemini
- * - Project: .gemini/ (walks up from cwd) or GEMINI.md in ancestors
+ * - Project: .gemini/ (cwd only)
  *
  * Capabilities:
  * - mcps: From settings.json with mcpServers key
@@ -16,10 +16,11 @@
  * - settings: From settings.json
  */
 
-import { dirname, join, sep } from "path";
+import { join, sep } from "node:path";
 import { type ContextFile, contextFileCapability } from "../capability/context-file";
 import { type Extension, type ExtensionManifest, extensionCapability } from "../capability/extension";
 import { type ExtensionModule, extensionModuleCapability } from "../capability/extension-module";
+import { readDirEntries, readFile } from "../capability/fs";
 import { registerProvider } from "../capability/index";
 import { type MCPServer, mcpCapability } from "../capability/mcp";
 import { type Settings, settingsCapability } from "../capability/settings";
@@ -44,22 +45,22 @@ const PRIORITY = 60;
 // MCP Servers
 // =============================================================================
 
-function loadMCPServers(ctx: LoadContext): LoadResult<MCPServer> {
+async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> {
 	const items: MCPServer[] = [];
 	const warnings: string[] = [];
 
 	// User-level: ~/.gemini/settings.json → mcpServers
 	const userPath = getUserPath(ctx, "gemini", "settings.json");
-	if (userPath && ctx.fs.isFile(userPath)) {
-		const result = loadMCPFromSettings(ctx, userPath, "user");
+	if (userPath) {
+		const result = await loadMCPFromSettings(ctx, userPath, "user");
 		items.push(...result.items);
 		if (result.warnings) warnings.push(...result.warnings);
 	}
 
 	// Project-level: .gemini/settings.json → mcpServers
 	const projectPath = getProjectPath(ctx, "gemini", "settings.json");
-	if (projectPath && ctx.fs.isFile(projectPath)) {
-		const result = loadMCPFromSettings(ctx, projectPath, "project");
+	if (projectPath) {
+		const result = await loadMCPFromSettings(ctx, projectPath, "project");
 		items.push(...result.items);
 		if (result.warnings) warnings.push(...result.warnings);
 	}
@@ -67,13 +68,16 @@ function loadMCPServers(ctx: LoadContext): LoadResult<MCPServer> {
 	return { items, warnings };
 }
 
-function loadMCPFromSettings(ctx: LoadContext, path: string, level: "user" | "project"): LoadResult<MCPServer> {
+async function loadMCPFromSettings(
+	_ctx: LoadContext,
+	path: string,
+	level: "user" | "project",
+): Promise<LoadResult<MCPServer>> {
 	const items: MCPServer[] = [];
 	const warnings: string[] = [];
 
-	const content = ctx.fs.readFile(path);
+	const content = await readFile(path);
 	if (!content) {
-		warnings.push(`Failed to read ${path}`);
 		return { items, warnings };
 	}
 
@@ -118,14 +122,14 @@ function loadMCPFromSettings(ctx: LoadContext, path: string, level: "user" | "pr
 // Context Files
 // =============================================================================
 
-function loadContextFiles(ctx: LoadContext): LoadResult<ContextFile> {
+async function loadContextFiles(ctx: LoadContext): Promise<LoadResult<ContextFile>> {
 	const items: ContextFile[] = [];
 	const warnings: string[] = [];
 
 	// User-level: ~/.gemini/GEMINI.md
 	const userGeminiMd = getUserPath(ctx, "gemini", "GEMINI.md");
-	if (userGeminiMd && ctx.fs.isFile(userGeminiMd)) {
-		const content = ctx.fs.readFile(userGeminiMd);
+	if (userGeminiMd) {
+		const content = await readFile(userGeminiMd);
 		if (content) {
 			items.push({
 				path: userGeminiMd,
@@ -138,8 +142,8 @@ function loadContextFiles(ctx: LoadContext): LoadResult<ContextFile> {
 
 	// Project-level: .gemini/GEMINI.md
 	const projectGeminiMd = getProjectPath(ctx, "gemini", "GEMINI.md");
-	if (projectGeminiMd && ctx.fs.isFile(projectGeminiMd)) {
-		const content = ctx.fs.readFile(projectGeminiMd);
+	if (projectGeminiMd) {
+		const content = await readFile(projectGeminiMd);
 		if (content) {
 			const projectBase = getProjectPath(ctx, "gemini", "");
 			const depth = projectBase ? calculateDepth(ctx.cwd, projectBase, sep) : 0;
@@ -154,28 +158,6 @@ function loadContextFiles(ctx: LoadContext): LoadResult<ContextFile> {
 		}
 	}
 
-	// Also check for GEMINI.md in project root (without .gemini directory)
-	const rootGeminiMd = ctx.fs.walkUp("GEMINI.md", { file: true });
-	if (rootGeminiMd) {
-		const content = ctx.fs.readFile(rootGeminiMd);
-		if (content) {
-			// Only add if not already added from .gemini/GEMINI.md
-			const alreadyAdded = items.some((item) => item.path === rootGeminiMd);
-			if (!alreadyAdded) {
-				const fileDir = dirname(rootGeminiMd);
-				const depth = calculateDepth(ctx.cwd, fileDir, sep);
-
-				items.push({
-					path: rootGeminiMd,
-					content,
-					level: "project",
-					depth,
-					_source: createSourceMeta(PROVIDER_ID, rootGeminiMd, "project"),
-				});
-			}
-		}
-	}
-
 	return { items, warnings };
 }
 
@@ -183,22 +165,22 @@ function loadContextFiles(ctx: LoadContext): LoadResult<ContextFile> {
 // Extensions
 // =============================================================================
 
-function loadExtensions(ctx: LoadContext): LoadResult<Extension> {
+async function loadExtensions(ctx: LoadContext): Promise<LoadResult<Extension>> {
 	const items: Extension[] = [];
 	const warnings: string[] = [];
 
 	// User-level: ~/.gemini/extensions/*/gemini-extension.json
 	const userExtPath = getUserPath(ctx, "gemini", "extensions");
-	if (userExtPath && ctx.fs.isDir(userExtPath)) {
-		const result = loadExtensionsFromDir(ctx, userExtPath, "user");
+	if (userExtPath) {
+		const result = await loadExtensionsFromDir(userExtPath, "user");
 		items.push(...result.items);
 		if (result.warnings) warnings.push(...result.warnings);
 	}
 
 	// Project-level: .gemini/extensions/*/gemini-extension.json
 	const projectExtPath = getProjectPath(ctx, "gemini", "extensions");
-	if (projectExtPath && ctx.fs.isDir(projectExtPath)) {
-		const result = loadExtensionsFromDir(ctx, projectExtPath, "project");
+	if (projectExtPath) {
+		const result = await loadExtensionsFromDir(projectExtPath, "project");
 		items.push(...result.items);
 		if (result.warnings) warnings.push(...result.warnings);
 	}
@@ -206,27 +188,24 @@ function loadExtensions(ctx: LoadContext): LoadResult<Extension> {
 	return { items, warnings };
 }
 
-function loadExtensionsFromDir(
-	ctx: LoadContext,
-	extensionsDir: string,
-	level: "user" | "project",
-): LoadResult<Extension> {
+async function loadExtensionsFromDir(extensionsDir: string, level: "user" | "project"): Promise<LoadResult<Extension>> {
+	const entries = await readDirEntries(extensionsDir);
+	const dirEntries = entries.filter((entry) => entry.isDirectory());
+
+	const results = await Promise.all(
+		dirEntries.map(async (entry) => {
+			const extPath = join(extensionsDir, entry.name);
+			const manifestPath = join(extPath, "gemini-extension.json");
+			const content = await readFile(manifestPath);
+			return { entry, extPath, manifestPath, content };
+		}),
+	);
+
 	const items: Extension[] = [];
 	const warnings: string[] = [];
 
-	const dirs = ctx.fs.readDir(extensionsDir);
-	for (const dirName of dirs) {
-		const extPath = join(extensionsDir, dirName);
-		if (!ctx.fs.isDir(extPath)) continue;
-
-		const manifestPath = join(extPath, "gemini-extension.json");
-		if (!ctx.fs.isFile(manifestPath)) continue;
-
-		const content = ctx.fs.readFile(manifestPath);
-		if (!content) {
-			warnings.push(`Failed to read ${manifestPath}`);
-			continue;
-		}
+	for (const { entry, extPath, manifestPath, content } of results) {
+		if (!content) continue;
 
 		const manifest = parseJSON<ExtensionManifest>(content);
 		if (!manifest) {
@@ -235,7 +214,7 @@ function loadExtensionsFromDir(
 		}
 
 		items.push({
-			name: manifest.name ?? dirName,
+			name: manifest.name ?? entry.name,
 			path: extPath,
 			manifest,
 			level,
@@ -250,49 +229,45 @@ function loadExtensionsFromDir(
 // Extension Modules
 // =============================================================================
 
-function loadExtensionModules(ctx: LoadContext): LoadResult<ExtensionModule> {
-	const items: ExtensionModule[] = [];
-	const warnings: string[] = [];
-
+async function loadExtensionModules(ctx: LoadContext): Promise<LoadResult<ExtensionModule>> {
 	const userExtensionsDir = getUserPath(ctx, "gemini", "extensions");
-	if (userExtensionsDir) {
-		for (const extPath of discoverExtensionModulePaths(ctx, userExtensionsDir)) {
-			items.push({
-				name: getExtensionNameFromPath(extPath),
-				path: extPath,
-				level: "user",
-				_source: createSourceMeta(PROVIDER_ID, extPath, "user"),
-			});
-		}
-	}
-
 	const projectExtensionsDir = getProjectPath(ctx, "gemini", "extensions");
-	if (projectExtensionsDir) {
-		for (const extPath of discoverExtensionModulePaths(ctx, projectExtensionsDir)) {
-			items.push({
-				name: getExtensionNameFromPath(extPath),
-				path: extPath,
-				level: "project",
-				_source: createSourceMeta(PROVIDER_ID, extPath, "project"),
-			});
-		}
-	}
 
-	return { items, warnings };
+	const [userPaths, projectPaths] = await Promise.all([
+		userExtensionsDir ? discoverExtensionModulePaths(ctx, userExtensionsDir) : Promise.resolve([]),
+		projectExtensionsDir ? discoverExtensionModulePaths(ctx, projectExtensionsDir) : Promise.resolve([]),
+	]);
+
+	const items: ExtensionModule[] = [
+		...userPaths.map((extPath) => ({
+			name: getExtensionNameFromPath(extPath),
+			path: extPath,
+			level: "user" as const,
+			_source: createSourceMeta(PROVIDER_ID, extPath, "user"),
+		})),
+		...projectPaths.map((extPath) => ({
+			name: getExtensionNameFromPath(extPath),
+			path: extPath,
+			level: "project" as const,
+			_source: createSourceMeta(PROVIDER_ID, extPath, "project"),
+		})),
+	];
+
+	return { items, warnings: [] };
 }
 
 // =============================================================================
 // Settings
 // =============================================================================
 
-function loadSettings(ctx: LoadContext): LoadResult<Settings> {
+async function loadSettings(ctx: LoadContext): Promise<LoadResult<Settings>> {
 	const items: Settings[] = [];
 	const warnings: string[] = [];
 
 	// User-level: ~/.gemini/settings.json
 	const userPath = getUserPath(ctx, "gemini", "settings.json");
-	if (userPath && ctx.fs.isFile(userPath)) {
-		const content = ctx.fs.readFile(userPath);
+	if (userPath) {
+		const content = await readFile(userPath);
 		if (content) {
 			const parsed = parseJSON<Record<string, unknown>>(content);
 			if (parsed) {
@@ -310,8 +285,8 @@ function loadSettings(ctx: LoadContext): LoadResult<Settings> {
 
 	// Project-level: .gemini/settings.json
 	const projectPath = getProjectPath(ctx, "gemini", "settings.json");
-	if (projectPath && ctx.fs.isFile(projectPath)) {
-		const content = ctx.fs.readFile(projectPath);
+	if (projectPath) {
+		const content = await readFile(projectPath);
 		if (content) {
 			const parsed = parseJSON<Record<string, unknown>>(content);
 			if (parsed) {
@@ -354,13 +329,13 @@ registerProvider(contextFileCapability.id, {
 // System Prompt
 // =============================================================================
 
-function loadSystemPrompt(ctx: LoadContext): LoadResult<SystemPrompt> {
+async function loadSystemPrompt(ctx: LoadContext): Promise<LoadResult<SystemPrompt>> {
 	const items: SystemPrompt[] = [];
 
 	// User-level: ~/.gemini/system.md
 	const userSystemMd = getUserPath(ctx, "gemini", "system.md");
-	if (userSystemMd && ctx.fs.isFile(userSystemMd)) {
-		const content = ctx.fs.readFile(userSystemMd);
+	if (userSystemMd) {
+		const content = await readFile(userSystemMd);
 		if (content) {
 			items.push({
 				path: userSystemMd,
@@ -373,8 +348,8 @@ function loadSystemPrompt(ctx: LoadContext): LoadResult<SystemPrompt> {
 
 	// Project-level: .gemini/system.md
 	const projectSystemMd = getProjectPath(ctx, "gemini", "system.md");
-	if (projectSystemMd && ctx.fs.isFile(projectSystemMd)) {
-		const content = ctx.fs.readFile(projectSystemMd);
+	if (projectSystemMd) {
+		const content = await readFile(projectSystemMd);
 		if (content) {
 			items.push({
 				path: projectSystemMd,

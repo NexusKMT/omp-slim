@@ -8,6 +8,7 @@
  */
 
 import { join } from "node:path";
+import { readFile } from "../capability/fs";
 import { registerProvider } from "../capability/index";
 import { type MCPServer, mcpCapability } from "../capability/mcp";
 import type { LoadContext, LoadResult, SourceMeta } from "../capability/types";
@@ -69,17 +70,16 @@ function transformMCPConfig(config: MCPConfigFile, source: SourceMeta): MCPServe
 /**
  * Load MCP servers from a JSON file.
  */
-function loadMCPJsonFile(ctx: LoadContext, path: string, level: "user" | "project"): LoadResult<MCPServer> {
+async function loadMCPJsonFile(
+	_ctx: LoadContext,
+	path: string,
+	level: "user" | "project",
+): Promise<LoadResult<MCPServer>> {
 	const warnings: string[] = [];
 	const items: MCPServer[] = [];
 
-	if (!ctx.fs.isFile(path)) {
-		return { items, warnings };
-	}
-
-	const content = ctx.fs.readFile(path);
+	const content = await readFile(path);
 	if (content === null) {
-		warnings.push(`Failed to read ${path}`);
 		return { items, warnings };
 	}
 
@@ -99,17 +99,14 @@ function loadMCPJsonFile(ctx: LoadContext, path: string, level: "user" | "projec
 /**
  * MCP JSON Provider loader.
  */
-function load(ctx: LoadContext): LoadResult<MCPServer> {
-	const allItems: MCPServer[] = [];
-	const allWarnings: string[] = [];
+async function load(ctx: LoadContext): Promise<LoadResult<MCPServer>> {
+	const filenames = ["mcp.json", ".mcp.json"];
+	const results = await Promise.all(
+		filenames.map((filename) => loadMCPJsonFile(ctx, join(ctx.cwd, filename), "project")),
+	);
 
-	// Check for mcp.json or .mcp.json in project root (cwd)
-	for (const filename of ["mcp.json", ".mcp.json"]) {
-		const path = join(ctx.cwd, filename);
-		const result = loadMCPJsonFile(ctx, path, "project");
-		allItems.push(...result.items);
-		if (result.warnings) allWarnings.push(...result.warnings);
-	}
+	const allItems = results.flatMap((r) => r.items);
+	const allWarnings = results.flatMap((r) => r.warnings ?? []);
 
 	return {
 		items: allItems,

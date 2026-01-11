@@ -756,7 +756,7 @@ export type GetActiveToolsHandler = () => string[];
 
 export type GetAllToolsHandler = () => string[];
 
-export type SetActiveToolsHandler = (toolNames: string[]) => void;
+export type SetActiveToolsHandler = (toolNames: string[]) => Promise<void>;
 
 export type SetModelHandler = (model: Model<any>) => Promise<boolean>;
 

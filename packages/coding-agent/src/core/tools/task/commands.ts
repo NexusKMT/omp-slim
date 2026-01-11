@@ -6,7 +6,7 @@
 
 import * as path from "node:path";
 import { type SlashCommand, slashCommandCapability } from "../../../capability/slash-command";
-import { loadSync } from "../../../discovery";
+import { loadCapability } from "../../../discovery";
 
 // Embed command markdown files at build time
 import initMd from "../../../prompts/agents/init.md" with { type: "text" };
@@ -95,11 +95,11 @@ export function loadBundledCommands(): WorkflowCommand[] {
  *
  * Precedence (highest wins): .omp > .pi > .claude (project before user), then bundled
  */
-export function discoverCommands(cwd: string): WorkflowCommand[] {
+export async function discoverCommands(cwd: string): Promise<WorkflowCommand[]> {
 	const resolvedCwd = path.resolve(cwd);
 
 	// Load slash commands from capability API
-	const result = loadSync<SlashCommand>(slashCommandCapability.id, { cwd: resolvedCwd });
+	const result = await loadCapability<SlashCommand>(slashCommandCapability.id, { cwd: resolvedCwd });
 
 	const commands: WorkflowCommand[] = [];
 	const seen = new Set<string>();

@@ -4,7 +4,7 @@ import { Text } from "@oh-my-pi/pi-tui";
 import { Type } from "@sinclair/typebox";
 import type { SSHHost } from "../../capability/ssh";
 import { sshCapability } from "../../capability/ssh";
-import { loadSync } from "../../discovery/index";
+import { loadCapability } from "../../discovery/index";
 import type { Theme } from "../../modes/interactive/theme/theme";
 import sshDescriptionBase from "../../prompts/tools/ssh.md" with { type: "text" };
 import type { RenderResultOptions } from "../custom-tools/types";
@@ -97,11 +97,11 @@ function buildRemoteCommand(command: string, cwd: string | undefined, info: SSHH
 	return `cd -- ${quoteRemotePath(cwd)} && ${command}`;
 }
 
-function loadHosts(session: ToolSession): {
+async function loadHosts(session: ToolSession): Promise<{
 	hostNames: string[];
 	hostsByName: Map<string, SSHHost>;
-} {
-	const result = loadSync<SSHHost>(sshCapability.id, { cwd: session.cwd });
+}> {
+	const result = await loadCapability<SSHHost>(sshCapability.id, { cwd: session.cwd });
 	const hostsByName = new Map<string, SSHHost>();
 	for (const host of result.items) {
 		if (!hostsByName.has(host.name)) {
@@ -112,8 +112,8 @@ function loadHosts(session: ToolSession): {
 	return { hostNames, hostsByName };
 }
 
-export function createSshTool(session: ToolSession): AgentTool<typeof sshSchema> | null {
-	const { hostNames, hostsByName } = loadHosts(session);
+export async function createSshTool(session: ToolSession): Promise<AgentTool<typeof sshSchema> | null> {
+	const { hostNames, hostsByName } = await loadHosts(session);
 	if (hostNames.length === 0) {
 		return null;
 	}

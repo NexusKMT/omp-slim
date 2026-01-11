@@ -8,7 +8,7 @@ import * as path from "node:path";
 import type { KeyId } from "@oh-my-pi/pi-tui";
 import * as TypeBox from "@sinclair/typebox";
 import { type ExtensionModule, extensionModuleCapability } from "../../capability/extension-module";
-import { loadSync } from "../../discovery";
+import { loadCapability } from "../../discovery";
 import { getExtensionNameFromPath } from "../../discovery/helpers";
 import * as piCodingAgent from "../../index";
 import { createEventBus, type EventBus } from "../event-bus";
@@ -408,7 +408,7 @@ export async function discoverAndLoadExtensions(
 	};
 
 	// 1. Discover extension modules via capability API (native .omp/.pi only)
-	const discovered = loadSync<ExtensionModule>(extensionModuleCapability.id, { cwd });
+	const discovered = await loadCapability<ExtensionModule>(extensionModuleCapability.id, { cwd });
 	for (const ext of discovered.items) {
 		if (ext._source.provider !== "native") continue;
 		if (isDisabledName(ext.name)) continue;

@@ -682,11 +682,11 @@ import { createAgentSession, SettingsManager, SessionManager } from "@oh-my-pi/p
 
 // Default: loads from files (global + project merged)
 const { session } = await createAgentSession({
-	settingsManager: SettingsManager.create(),
+	settingsManager: await SettingsManager.create(),
 });
 
 // With overrides
-const settingsManager = SettingsManager.create();
+const settingsManager = await SettingsManager.create();
 settingsManager.applyOverrides({
 	compaction: { enabled: false },
 	retry: { enabled: true, maxRetries: 5 },
@@ -701,13 +701,13 @@ const { session } = await createAgentSession({
 
 // Custom directories
 const { session } = await createAgentSession({
-	settingsManager: SettingsManager.create("/custom/cwd", "/custom/agent"),
+	settingsManager: await SettingsManager.create("/custom/cwd", "/custom/agent"),
 });
 ```
 
 **Static factories:**
 
-- `SettingsManager.create(cwd?, agentDir?)` - Load from files
+- `SettingsManager.create(cwd?, agentDir?)` - Load from files (async)
 - `SettingsManager.inMemory(settings?)` - No file I/O
 
 **Project-specific settings:**
@@ -765,7 +765,7 @@ const contextFiles = discoverContextFiles(cwd, agentDir);
 const commands = discoverSlashCommands(cwd, agentDir);
 
 // Settings (global + project merged)
-const settings = loadSettings(cwd, agentDir);
+const settings = await loadSettings(cwd, agentDir);
 
 // Build system prompt manually
 const prompt = buildSystemPrompt({

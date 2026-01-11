@@ -5,9 +5,10 @@
  * Priority: 80 (tool-specific, below builtin but above shared standards)
  */
 
-import { dirname, join, sep } from "path";
+import { join, sep } from "node:path";
 import { type ContextFile, contextFileCapability } from "../capability/context-file";
 import { type ExtensionModule, extensionModuleCapability } from "../capability/extension-module";
+import { readFile } from "../capability/fs";
 import { type Hook, hookCapability } from "../capability/hook";
 import { registerProvider } from "../capability/index";
 import { type MCPServer, mcpCapability } from "../capability/mcp";
@@ -41,45 +42,49 @@ function getUserClaude(ctx: LoadContext): string {
 }
 
 /**
- * Get project-level .claude path (walks up from cwd).
+ * Get project-level .claude path (cwd only).
  */
-function getProjectClaude(ctx: LoadContext): string | null {
-	return ctx.fs.walkUp(CONFIG_DIR, { dir: true });
+function getProjectClaude(ctx: LoadContext): string {
+	return join(ctx.cwd, CONFIG_DIR);
 }
 
 // =============================================================================
 // MCP Servers
 // =============================================================================
 
-function loadMCPServers(ctx: LoadContext): LoadResult<MCPServer> {
+async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> {
 	const items: MCPServer[] = [];
 	const warnings: string[] = [];
 
-	// User-level: ~/.claude.json or ~/.claude/mcp.json
 	const userBase = getUserClaude(ctx);
 	const userClaudeJson = join(ctx.home, ".claude.json");
 	const userMcpJson = join(userBase, "mcp.json");
 
-	for (const [path, level] of [
-		[userClaudeJson, "user"],
-		[userMcpJson, "user"],
-	] as const) {
-		if (!ctx.fs.isFile(path)) continue;
+	const projectBase = join(ctx.cwd, CONFIG_DIR);
+	const projectMcpJson = join(projectBase, ".mcp.json");
+	const projectMcpJsonAlt = join(projectBase, "mcp.json");
 
-		const content = ctx.fs.readFile(path);
-		if (!content) {
-			warnings.push(`Failed to read ${path}`);
-			continue;
-		}
+	const userPaths = [
+		{ path: userClaudeJson, level: "user" as const },
+		{ path: userMcpJson, level: "user" as const },
+	];
+	const projectPaths = [
+		{ path: projectMcpJson, level: "project" as const },
+		{ path: projectMcpJsonAlt, level: "project" as const },
+	];
 
+	const allPaths = [...userPaths, ...projectPaths];
+	const contents = await Promise.all(allPaths.map(({ path }) => readFile(path)));
+
+	const parseMcpServers = (content: string | null, path: string, level: "user" | "project"): MCPServer[] => {
+		if (!content) return [];
 		const json = parseJSON<{ mcpServers?: Record<string, unknown> }>(content);
-		if (!json?.mcpServers) continue;
+		if (!json?.mcpServers) return [];
 
 		const mcpServers = expandEnvVarsDeep(json.mcpServers);
-
-		for (const [name, config] of Object.entries(mcpServers)) {
+		return Object.entries(mcpServers).map(([name, config]) => {
 			const serverConfig = config as Record<string, unknown>;
-			items.push({
+			return {
 				name,
 				command: serverConfig.command as string | undefined,
 				args: serverConfig.args as string[] | undefined,
@@ -88,45 +93,24 @@ function loadMCPServers(ctx: LoadContext): LoadResult<MCPServer> {
 				headers: serverConfig.headers as Record<string, string> | undefined,
 				transport: serverConfig.type as "stdio" | "sse" | "http" | undefined,
 				_source: createSourceMeta(PROVIDER_ID, path, level),
-			});
+			};
+		});
+	};
+
+	for (let i = 0; i < userPaths.length; i++) {
+		const servers = parseMcpServers(contents[i], userPaths[i].path, userPaths[i].level);
+		if (servers.length > 0) {
+			items.push(...servers);
+			break;
 		}
-		break; // First existing file wins
 	}
 
-	// Project-level: <project>/.mcp.json or <project>/mcp.json
-	const projectBase = getProjectClaude(ctx);
-	if (projectBase) {
-		const projectMcpJson = join(projectBase, ".mcp.json");
-		const projectMcpJsonAlt = join(projectBase, "mcp.json");
-
-		for (const path of [projectMcpJson, projectMcpJsonAlt]) {
-			if (!ctx.fs.isFile(path)) continue;
-
-			const content = ctx.fs.readFile(path);
-			if (!content) {
-				warnings.push(`Failed to read ${path}`);
-				continue;
-			}
-
-			const json = parseJSON<{ mcpServers?: Record<string, unknown> }>(content);
-			if (!json?.mcpServers) continue;
-
-			const mcpServers = expandEnvVarsDeep(json.mcpServers);
-
-			for (const [name, config] of Object.entries(mcpServers)) {
-				const serverConfig = config as Record<string, unknown>;
-				items.push({
-					name,
-					command: serverConfig.command as string | undefined,
-					args: serverConfig.args as string[] | undefined,
-					env: serverConfig.env as Record<string, string> | undefined,
-					url: serverConfig.url as string | undefined,
-					headers: serverConfig.headers as Record<string, string> | undefined,
-					transport: serverConfig.type as "stdio" | "sse" | "http" | undefined,
-					_source: createSourceMeta(PROVIDER_ID, path, "project"),
-				});
-			}
-			break; // First existing file wins
+	const projectOffset = userPaths.length;
+	for (let i = 0; i < projectPaths.length; i++) {
+		const servers = parseMcpServers(contents[projectOffset + i], projectPaths[i].path, projectPaths[i].level);
+		if (servers.length > 0) {
+			items.push(...servers);
+			break;
 		}
 	}
 
@@ -137,74 +121,35 @@ function loadMCPServers(ctx: LoadContext): LoadResult<MCPServer> {
 // Context Files (CLAUDE.md)
 // =============================================================================
 
-function loadContextFiles(ctx: LoadContext): LoadResult<ContextFile> {
+async function loadContextFiles(ctx: LoadContext): Promise<LoadResult<ContextFile>> {
 	const items: ContextFile[] = [];
 	const warnings: string[] = [];
 
-	// User-level: ~/.claude/CLAUDE.md
 	const userBase = getUserClaude(ctx);
 	const userClaudeMd = join(userBase, "CLAUDE.md");
 
-	if (ctx.fs.isFile(userClaudeMd)) {
-		const content = ctx.fs.readFile(userClaudeMd);
-		if (content !== null) {
-			items.push({
-				path: userClaudeMd,
-				content,
-				level: "user",
-				_source: createSourceMeta(PROVIDER_ID, userClaudeMd, "user"),
-			});
-		} else {
-			warnings.push(`Failed to read ${userClaudeMd}`);
-		}
+	const userContent = await readFile(userClaudeMd);
+	if (userContent !== null) {
+		items.push({
+			path: userClaudeMd,
+			content: userContent,
+			level: "user",
+			_source: createSourceMeta(PROVIDER_ID, userClaudeMd, "user"),
+		});
 	}
 
-	// Project-level: walk up looking for .claude/CLAUDE.md
 	const projectBase = getProjectClaude(ctx);
-	if (projectBase) {
-		const projectClaudeMd = join(projectBase, "CLAUDE.md");
-
-		if (ctx.fs.isFile(projectClaudeMd)) {
-			const content = ctx.fs.readFile(projectClaudeMd);
-			if (content !== null) {
-				// Calculate depth (distance from cwd)
-				const depth = calculateDepth(ctx.cwd, projectBase, sep);
-
-				items.push({
-					path: projectClaudeMd,
-					content,
-					level: "project",
-					depth,
-					_source: createSourceMeta(PROVIDER_ID, projectClaudeMd, "project"),
-				});
-			} else {
-				warnings.push(`Failed to read ${projectClaudeMd}`);
-			}
-		}
-	}
-
-	// Also check for CLAUDE.md in project root (without .claude directory)
-	const rootClaudeMd = ctx.fs.walkUp("CLAUDE.md", { file: true });
-	if (rootClaudeMd) {
-		const content = ctx.fs.readFile(rootClaudeMd);
-		if (content !== null) {
-			// Only add if not already added from .claude/CLAUDE.md
-			const alreadyAdded = items.some((item) => item.path === rootClaudeMd);
-			if (!alreadyAdded) {
-				const fileDir = dirname(rootClaudeMd);
-				const depth = calculateDepth(ctx.cwd, fileDir, sep);
-
-				items.push({
-					path: rootClaudeMd,
-					content,
-					level: "project",
-					depth,
-					_source: createSourceMeta(PROVIDER_ID, rootClaudeMd, "project"),
-				});
-			}
-		} else {
-			warnings.push(`Failed to read ${rootClaudeMd}`);
-		}
+	const projectClaudeMd = join(projectBase, "CLAUDE.md");
+	const projectContent = await readFile(projectClaudeMd);
+	if (projectContent !== null) {
+		const depth = calculateDepth(ctx.cwd, projectBase, sep);
+		items.push({
+			path: projectClaudeMd,
+			content: projectContent,
+			level: "project",
+			depth,
+			_source: createSourceMeta(PROVIDER_ID, projectClaudeMd, "project"),
+		});
 	}
 
 	return { items, warnings };
@@ -214,62 +159,52 @@ function loadContextFiles(ctx: LoadContext): LoadResult<ContextFile> {
 // Skills
 // =============================================================================
 
-function loadSkills(ctx: LoadContext): LoadResult<Skill> {
-	const items: Skill[] = [];
-	const warnings: string[] = [];
-
+async function loadSkills(ctx: LoadContext): Promise<LoadResult<Skill>> {
 	const userSkillsDir = join(getUserClaude(ctx), "skills");
-	const userResult = loadSkillsFromDir(ctx, {
-		dir: userSkillsDir,
-		providerId: PROVIDER_ID,
-		level: "user",
-	});
-	items.push(...userResult.items);
-	if (userResult.warnings) warnings.push(...userResult.warnings);
+	const projectSkillsDir = join(getProjectClaude(ctx), "skills");
 
-	const projectBase = getProjectClaude(ctx);
-	if (projectBase) {
-		const projectSkillsDir = join(projectBase, "skills");
-		const projectResult = loadSkillsFromDir(ctx, {
-			dir: projectSkillsDir,
-			providerId: PROVIDER_ID,
-			level: "project",
-		});
-		items.push(...projectResult.items);
-		if (projectResult.warnings) warnings.push(...projectResult.warnings);
-	}
+	const results = await Promise.all([
+		loadSkillsFromDir(ctx, { dir: userSkillsDir, providerId: PROVIDER_ID, level: "user" }),
+		loadSkillsFromDir(ctx, { dir: projectSkillsDir, providerId: PROVIDER_ID, level: "project" }),
+	]);
 
-	return { items, warnings };
+	return {
+		items: results.flatMap((r) => r.items),
+		warnings: results.flatMap((r) => r.warnings ?? []),
+	};
 }
 
 // =============================================================================
 // Extension Modules
 // =============================================================================
 
-function loadExtensionModules(ctx: LoadContext): LoadResult<ExtensionModule> {
+async function loadExtensionModules(ctx: LoadContext): Promise<LoadResult<ExtensionModule>> {
 	const items: ExtensionModule[] = [];
 	const warnings: string[] = [];
 
 	const userBase = getUserClaude(ctx);
 	const userExtensionsDir = join(userBase, "extensions");
-	for (const extPath of discoverExtensionModulePaths(ctx, userExtensionsDir)) {
-		items.push({
-			name: getExtensionNameFromPath(extPath),
-			path: extPath,
-			level: "user",
-			_source: createSourceMeta(PROVIDER_ID, extPath, "user"),
-		});
-	}
+	const projectExtensionsDir = join(ctx.cwd, CONFIG_DIR, "extensions");
 
-	const projectBase = getProjectClaude(ctx);
-	if (projectBase) {
-		const projectExtensionsDir = join(projectBase, "extensions");
-		for (const extPath of discoverExtensionModulePaths(ctx, projectExtensionsDir)) {
+	const dirsToDiscover: { dir: string; level: "user" | "project" }[] = [
+		{ dir: userExtensionsDir, level: "user" },
+		{ dir: projectExtensionsDir, level: "project" },
+	];
+
+	const pathsByLevel = await Promise.all(
+		dirsToDiscover.map(async ({ dir, level }) => {
+			const paths = await discoverExtensionModulePaths(ctx, dir);
+			return paths.map((extPath) => ({ extPath, level }));
+		}),
+	);
+
+	for (const extensions of pathsByLevel) {
+		for (const { extPath, level } of extensions) {
 			items.push({
 				name: getExtensionNameFromPath(extPath),
 				path: extPath,
-				level: "project",
-				_source: createSourceMeta(PROVIDER_ID, extPath, "project"),
+				level,
+				_source: createSourceMeta(PROVIDER_ID, extPath, level),
 			});
 		}
 	}
@@ -281,15 +216,14 @@ function loadExtensionModules(ctx: LoadContext): LoadResult<ExtensionModule> {
 // Slash Commands
 // =============================================================================
 
-function loadSlashCommands(ctx: LoadContext): LoadResult<SlashCommand> {
+async function loadSlashCommands(ctx: LoadContext): Promise<LoadResult<SlashCommand>> {
 	const items: SlashCommand[] = [];
 	const warnings: string[] = [];
 
-	// User-level: ~/.claude/commands/*.md
 	const userBase = getUserClaude(ctx);
 	const userCommandsDir = join(userBase, "commands");
 
-	const userResult = loadFilesFromDir<SlashCommand>(ctx, userCommandsDir, PROVIDER_ID, "user", {
+	const userResult = await loadFilesFromDir<SlashCommand>(ctx, userCommandsDir, PROVIDER_ID, "user", {
 		extensions: ["md"],
 		transform: (name, content, path, source) => {
 			const cmdName = name.replace(/\.md$/, "");
@@ -306,28 +240,24 @@ function loadSlashCommands(ctx: LoadContext): LoadResult<SlashCommand> {
 	items.push(...userResult.items);
 	if (userResult.warnings) warnings.push(...userResult.warnings);
 
-	// Project-level: <project>/.claude/commands/*.md
-	const projectBase = getProjectClaude(ctx);
-	if (projectBase) {
-		const projectCommandsDir = join(projectBase, "commands");
+	const projectCommandsDir = join(ctx.cwd, CONFIG_DIR, "commands");
 
-		const projectResult = loadFilesFromDir<SlashCommand>(ctx, projectCommandsDir, PROVIDER_ID, "project", {
-			extensions: ["md"],
-			transform: (name, content, path, source) => {
-				const cmdName = name.replace(/\.md$/, "");
-				return {
-					name: cmdName,
-					path,
-					content,
-					level: "project",
-					_source: source,
-				};
-			},
-		});
+	const projectResult = await loadFilesFromDir<SlashCommand>(ctx, projectCommandsDir, PROVIDER_ID, "project", {
+		extensions: ["md"],
+		transform: (name, content, path, source) => {
+			const cmdName = name.replace(/\.md$/, "");
+			return {
+				name: cmdName,
+				path,
+				content,
+				level: "project",
+				_source: source,
+			};
+		},
+	});
 
-		items.push(...projectResult.items);
-		if (projectResult.warnings) warnings.push(...projectResult.warnings);
-	}
+	items.push(...projectResult.items);
+	if (projectResult.warnings) warnings.push(...projectResult.warnings);
 
 	return { items, warnings };
 }
@@ -336,63 +266,46 @@ function loadSlashCommands(ctx: LoadContext): LoadResult<SlashCommand> {
 // Hooks
 // =============================================================================
 
-function loadHooks(ctx: LoadContext): LoadResult<Hook> {
+async function loadHooks(ctx: LoadContext): Promise<LoadResult<Hook>> {
 	const items: Hook[] = [];
 	const warnings: string[] = [];
 
-	// User-level: ~/.claude/hooks/pre/* and ~/.claude/hooks/post/*
 	const userBase = getUserClaude(ctx);
 	const userHooksDir = join(userBase, "hooks");
+	const projectBase = getProjectClaude(ctx);
+	const projectHooksDir = join(projectBase, "hooks");
 
-	for (const hookType of ["pre", "post"] as const) {
-		const hooksTypeDir = join(userHooksDir, hookType);
+	const hookTypes = ["pre", "post"] as const;
 
-		const result = loadFilesFromDir<Hook>(ctx, hooksTypeDir, PROVIDER_ID, "user", {
-			transform: (name, _content, path, source) => {
-				// Extract tool name from filename (e.g., "bash.sh" -> "bash", "*.sh" -> "*")
-				const toolName = name.replace(/\.(sh|bash|zsh|fish)$/, "");
-
-				return {
-					name,
-					path,
-					type: hookType,
-					tool: toolName,
-					level: "user",
-					_source: source,
-				};
-			},
-		});
-
-		items.push(...result.items);
-		if (result.warnings) warnings.push(...result.warnings);
+	const loadTasks: { dir: string; hookType: "pre" | "post"; level: "user" | "project" }[] = [];
+	for (const hookType of hookTypes) {
+		loadTasks.push({ dir: join(userHooksDir, hookType), hookType, level: "user" });
+	}
+	for (const hookType of hookTypes) {
+		loadTasks.push({ dir: join(projectHooksDir, hookType), hookType, level: "project" });
 	}
 
-	// Project-level: <project>/.claude/hooks/pre/* and <project>/.claude/hooks/post/*
-	const projectBase = getProjectClaude(ctx);
-	if (projectBase) {
-		const projectHooksDir = join(projectBase, "hooks");
-
-		for (const hookType of ["pre", "post"] as const) {
-			const hooksTypeDir = join(projectHooksDir, hookType);
-
-			const result = loadFilesFromDir<Hook>(ctx, hooksTypeDir, PROVIDER_ID, "project", {
+	const results = await Promise.all(
+		loadTasks.map(({ dir, hookType, level }) =>
+			loadFilesFromDir<Hook>(ctx, dir, PROVIDER_ID, level, {
 				transform: (name, _content, path, source) => {
 					const toolName = name.replace(/\.(sh|bash|zsh|fish)$/, "");
-
 					return {
 						name,
 						path,
 						type: hookType,
 						tool: toolName,
-						level: "project",
+						level,
 						_source: source,
 					};
 				},
-			});
+			}),
+		),
+	);
 
-			items.push(...result.items);
-			if (result.warnings) warnings.push(...result.warnings);
-		}
+	for (const result of results) {
+		items.push(...result.items);
+		if (result.warnings) warnings.push(...result.warnings);
 	}
 
 	return { items, warnings };
@@ -402,15 +315,14 @@ function loadHooks(ctx: LoadContext): LoadResult<Hook> {
 // Custom Tools
 // =============================================================================
 
-function loadTools(ctx: LoadContext): LoadResult<CustomTool> {
+async function loadTools(ctx: LoadContext): Promise<LoadResult<CustomTool>> {
 	const items: CustomTool[] = [];
 	const warnings: string[] = [];
 
-	// User-level: ~/.claude/tools/*
 	const userBase = getUserClaude(ctx);
 	const userToolsDir = join(userBase, "tools");
 
-	const userResult = loadFilesFromDir<CustomTool>(ctx, userToolsDir, PROVIDER_ID, "user", {
+	const userResult = await loadFilesFromDir<CustomTool>(ctx, userToolsDir, PROVIDER_ID, "user", {
 		transform: (name, _content, path, source) => {
 			const toolName = name.replace(/\.(ts|js|sh|bash|py)$/, "");
 
@@ -426,27 +338,24 @@ function loadTools(ctx: LoadContext): LoadResult<CustomTool> {
 	items.push(...userResult.items);
 	if (userResult.warnings) warnings.push(...userResult.warnings);
 
-	// Project-level: <project>/.claude/tools/*
 	const projectBase = getProjectClaude(ctx);
-	if (projectBase) {
-		const projectToolsDir = join(projectBase, "tools");
+	const projectToolsDir = join(projectBase, "tools");
 
-		const projectResult = loadFilesFromDir<CustomTool>(ctx, projectToolsDir, PROVIDER_ID, "project", {
-			transform: (name, _content, path, source) => {
-				const toolName = name.replace(/\.(ts|js|sh|bash|py)$/, "");
+	const projectResult = await loadFilesFromDir<CustomTool>(ctx, projectToolsDir, PROVIDER_ID, "project", {
+		transform: (name, _content, path, source) => {
+			const toolName = name.replace(/\.(ts|js|sh|bash|py)$/, "");
 
-				return {
-					name: toolName,
-					path,
-					level: "project",
-					_source: source,
-				};
-			},
-		});
+			return {
+				name: toolName,
+				path,
+				level: "project",
+				_source: source,
+			};
+		},
+	});
 
-		items.push(...projectResult.items);
-		if (projectResult.warnings) warnings.push(...projectResult.warnings);
-	}
+	items.push(...projectResult.items);
+	if (projectResult.warnings) warnings.push(...projectResult.warnings);
 
 	return { items, warnings };
 }
@@ -455,26 +364,21 @@ function loadTools(ctx: LoadContext): LoadResult<CustomTool> {
 // System Prompts
 // =============================================================================
 
-function loadSystemPrompts(ctx: LoadContext): LoadResult<SystemPrompt> {
+async function loadSystemPrompts(ctx: LoadContext): Promise<LoadResult<SystemPrompt>> {
 	const items: SystemPrompt[] = [];
 	const warnings: string[] = [];
 
-	// User-level: ~/.claude/SYSTEM.md
 	const userBase = getUserClaude(ctx);
 	const userSystemMd = join(userBase, "SYSTEM.md");
 
-	if (ctx.fs.isFile(userSystemMd)) {
-		const content = ctx.fs.readFile(userSystemMd);
-		if (content !== null) {
-			items.push({
-				path: userSystemMd,
-				content,
-				level: "user",
-				_source: createSourceMeta(PROVIDER_ID, userSystemMd, "user"),
-			});
-		} else {
-			warnings.push(`Failed to read ${userSystemMd}`);
-		}
+	const content = await readFile(userSystemMd);
+	if (content !== null) {
+		items.push({
+			path: userSystemMd,
+			content,
+			level: "user",
+			_source: createSourceMeta(PROVIDER_ID, userSystemMd, "user"),
+		});
 	}
 
 	return { items, warnings };
@@ -484,55 +388,42 @@ function loadSystemPrompts(ctx: LoadContext): LoadResult<SystemPrompt> {
 // Settings
 // =============================================================================
 
-function loadSettings(ctx: LoadContext): LoadResult<Settings> {
+async function loadSettings(ctx: LoadContext): Promise<LoadResult<Settings>> {
 	const items: Settings[] = [];
 	const warnings: string[] = [];
 
-	// User-level: ~/.claude/settings.json
 	const userBase = getUserClaude(ctx);
 	const userSettingsJson = join(userBase, "settings.json");
 
-	if (ctx.fs.isFile(userSettingsJson)) {
-		const content = ctx.fs.readFile(userSettingsJson);
-		if (content) {
-			const data = parseJSON<Record<string, unknown>>(content);
-			if (data) {
-				items.push({
-					path: userSettingsJson,
-					data,
-					level: "user",
-					_source: createSourceMeta(PROVIDER_ID, userSettingsJson, "user"),
-				});
-			} else {
-				warnings.push(`Failed to parse JSON in ${userSettingsJson}`);
-			}
+	const userContent = await readFile(userSettingsJson);
+	if (userContent) {
+		const data = parseJSON<Record<string, unknown>>(userContent);
+		if (data) {
+			items.push({
+				path: userSettingsJson,
+				data,
+				level: "user",
+				_source: createSourceMeta(PROVIDER_ID, userSettingsJson, "user"),
+			});
 		} else {
-			warnings.push(`Failed to read ${userSettingsJson}`);
+			warnings.push(`Failed to parse JSON in ${userSettingsJson}`);
 		}
 	}
 
-	// Project-level: <project>/.claude/settings.json
 	const projectBase = getProjectClaude(ctx);
-	if (projectBase) {
-		const projectSettingsJson = join(projectBase, "settings.json");
-
-		if (ctx.fs.isFile(projectSettingsJson)) {
-			const content = ctx.fs.readFile(projectSettingsJson);
-			if (content) {
-				const data = parseJSON<Record<string, unknown>>(content);
-				if (data) {
-					items.push({
-						path: projectSettingsJson,
-						data,
-						level: "project",
-						_source: createSourceMeta(PROVIDER_ID, projectSettingsJson, "project"),
-					});
-				} else {
-					warnings.push(`Failed to parse JSON in ${projectSettingsJson}`);
-				}
-			} else {
-				warnings.push(`Failed to read ${projectSettingsJson}`);
-			}
+	const projectSettingsJson = join(projectBase, "settings.json");
+	const projectContent = await readFile(projectSettingsJson);
+	if (projectContent) {
+		const data = parseJSON<Record<string, unknown>>(projectContent);
+		if (data) {
+			items.push({
+				path: projectSettingsJson,
+				data,
+				level: "project",
+				_source: createSourceMeta(PROVIDER_ID, projectSettingsJson, "project"),
+			});
+		} else {
+			warnings.push(`Failed to parse JSON in ${projectSettingsJson}`);
 		}
 	}
 
@@ -554,7 +445,7 @@ registerProvider<MCPServer>(mcpCapability.id, {
 registerProvider<ContextFile>(contextFileCapability.id, {
 	id: PROVIDER_ID,
 	displayName: DISPLAY_NAME,
-	description: "Load CLAUDE.md files from .claude/ directories and project root",
+	description: "Load CLAUDE.md files from .claude/ directories",
 	priority: PRIORITY,
 	load: loadContextFiles,
 });

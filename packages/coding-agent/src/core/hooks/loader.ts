@@ -7,7 +7,7 @@ import * as path from "node:path";
 import * as typebox from "@sinclair/typebox";
 import { hookCapability } from "../../capability/hook";
 import type { Hook } from "../../discovery";
-import { loadSync } from "../../discovery";
+import { loadCapability } from "../../discovery";
 import * as piCodingAgent from "../../index";
 import { logger } from "../logger";
 import type { HookMessage } from "../messages";
@@ -278,7 +278,7 @@ export async function discoverAndLoadHooks(configuredPaths: string[], cwd: strin
 	};
 
 	// 1. Discover hooks via capability API
-	const discovered = loadSync<Hook>(hookCapability.id, { cwd });
+	const discovered = await loadCapability<Hook>(hookCapability.id, { cwd });
 	addPaths(discovered.items.map((hook) => hook.path));
 
 	// 2. Explicitly configured paths (can override/add)

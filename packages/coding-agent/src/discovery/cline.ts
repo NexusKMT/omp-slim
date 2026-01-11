@@ -5,6 +5,8 @@
  * Project-only (no user-level config).
  */
 
+import { dirname, resolve } from "node:path";
+import { readDirEntries, readFile } from "../capability/fs";
 import { registerProvider } from "../capability/index";
 import type { Rule } from "../capability/rule";
 import { ruleCapability } from "../capability/rule";
@@ -15,23 +17,41 @@ const PROVIDER_ID = "cline";
 const DISPLAY_NAME = "Cline";
 const PRIORITY = 40;
 
+async function findClinerules(startDir: string): Promise<{ path: string; isDir: boolean } | null> {
+	let current = resolve(startDir);
+
+	while (true) {
+		const entries = await readDirEntries(current);
+		const entry = entries.find((e) => e.name === ".clinerules");
+		if (entry) {
+			return {
+				path: resolve(current, ".clinerules"),
+				isDir: entry.isDirectory(),
+			};
+		}
+		const parent = dirname(current);
+		if (parent === current) return null;
+		current = parent;
+	}
+}
+
 /**
  * Load rules from .clinerules
  */
-function loadRules(ctx: LoadContext): LoadResult<Rule> {
+async function loadRules(ctx: LoadContext): Promise<LoadResult<Rule>> {
 	const items: Rule[] = [];
 	const warnings: string[] = [];
 
 	// Project-level only (Cline uses root-level .clinerules)
-	const projectPath = ctx.fs.walkUp(".clinerules");
-	if (!projectPath) {
+	const found = await findClinerules(ctx.cwd);
+	if (!found) {
 		return { items, warnings };
 	}
 
 	// Check if .clinerules is a directory or file
-	if (ctx.fs.isDir(projectPath)) {
+	if (found.isDir) {
 		// Directory format: load all *.md files
-		const result = loadFilesFromDir(ctx, projectPath, PROVIDER_ID, "project", {
+		const result = await loadFilesFromDir(ctx, found.path, PROVIDER_ID, "project", {
 			extensions: ["md"],
 			transform: (name, content, path, source) => {
 				const { frontmatter, body } = parseFrontmatter(content);
@@ -60,16 +80,16 @@ function loadRules(ctx: LoadContext): LoadResult<Rule> {
 
 		items.push(...result.items);
 		if (result.warnings) warnings.push(...result.warnings);
-	} else if (ctx.fs.isFile(projectPath)) {
+	} else {
 		// Single file format
-		const content = ctx.fs.readFile(projectPath);
+		const content = await readFile(found.path);
 		if (content === null) {
-			warnings.push(`Failed to read .clinerules at ${projectPath}`);
+			warnings.push(`Failed to read .clinerules at ${found.path}`);
 			return { items, warnings };
 		}
 
 		const { frontmatter, body } = parseFrontmatter(content);
-		const source = createSourceMeta(PROVIDER_ID, projectPath, "project");
+		const source = createSourceMeta(PROVIDER_ID, found.path, "project");
 
 		// Parse globs (can be array or single string)
 		let globs: string[] | undefined;
@@ -81,7 +101,7 @@ function loadRules(ctx: LoadContext): LoadResult<Rule> {
 
 		items.push({
 			name: "clinerules",
-			path: projectPath,
+			path: found.path,
 			content: body,
 			globs,
 			alwaysApply: typeof frontmatter.alwaysApply === "boolean" ? frontmatter.alwaysApply : undefined,

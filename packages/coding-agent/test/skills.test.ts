@@ -222,8 +222,8 @@ describe("skills", () => {
 	});
 
 	describe("loadSkills with options", () => {
-		it("should load from customDirectories only when built-ins disabled", () => {
-			const { skills } = loadSkills({
+		it("should load from customDirectories only when built-ins disabled", async () => {
+			const { skills } = await loadSkills({
 				enableCodexUser: false,
 				enableClaudeUser: false,
 				enableClaudeProject: false,
@@ -236,8 +236,8 @@ describe("skills", () => {
 			expect(skills.every((s) => s.source.startsWith("custom"))).toBe(true);
 		});
 
-		it("should filter out ignoredSkills", () => {
-			const { skills } = loadSkills({
+		it("should filter out ignoredSkills", async () => {
+			const { skills } = await loadSkills({
 				enableCodexUser: false,
 				enableClaudeUser: false,
 				enableClaudeProject: false,
@@ -249,8 +249,8 @@ describe("skills", () => {
 			expect(skills).toHaveLength(0);
 		});
 
-		it("should support glob patterns in ignoredSkills", () => {
-			const { skills } = loadSkills({
+		it("should support glob patterns in ignoredSkills", async () => {
+			const { skills } = await loadSkills({
 				enableCodexUser: false,
 				enableClaudeUser: false,
 				enableClaudeProject: false,
@@ -262,8 +262,8 @@ describe("skills", () => {
 			expect(skills.every((s) => !s.name.startsWith("valid-"))).toBe(true);
 		});
 
-		it("should have ignoredSkills take precedence over includeSkills", () => {
-			const { skills } = loadSkills({
+		it("should have ignoredSkills take precedence over includeSkills", async () => {
+			const { skills } = await loadSkills({
 				enableCodexUser: false,
 				enableClaudeUser: false,
 				enableClaudeProject: false,
@@ -277,9 +277,9 @@ describe("skills", () => {
 			expect(skills.every((s) => s.name !== "valid-skill")).toBe(true);
 		});
 
-		it("should expand ~ in customDirectories", () => {
+		it("should expand ~ in customDirectories", async () => {
 			const homeSkillsDir = join(homedir(), ".omp/agent/skills");
-			const { skills: withTilde } = loadSkills({
+			const { skills: withTilde } = await loadSkills({
 				enableCodexUser: false,
 				enableClaudeUser: false,
 				enableClaudeProject: false,
@@ -287,7 +287,7 @@ describe("skills", () => {
 				enablePiProject: false,
 				customDirectories: ["~/.omp/agent/skills"],
 			});
-			const { skills: withoutTilde } = loadSkills({
+			const { skills: withoutTilde } = await loadSkills({
 				enableCodexUser: false,
 				enableClaudeUser: false,
 				enableClaudeProject: false,
@@ -298,8 +298,8 @@ describe("skills", () => {
 			expect(withTilde.length).toBe(withoutTilde.length);
 		});
 
-		it("should return empty when all sources disabled and no custom dirs", () => {
-			const { skills } = loadSkills({
+		it("should return empty when all sources disabled and no custom dirs", async () => {
+			const { skills } = await loadSkills({
 				enableCodexUser: false,
 				enableClaudeUser: false,
 				enableClaudeProject: false,
@@ -309,9 +309,9 @@ describe("skills", () => {
 			expect(skills).toHaveLength(0);
 		});
 
-		it("should filter skills with includeSkills glob patterns", () => {
+		it("should filter skills with includeSkills glob patterns", async () => {
 			// Load all skills from fixtures
-			const { skills: allSkills } = loadSkills({
+			const { skills: allSkills } = await loadSkills({
 				enableCodexUser: false,
 				enableClaudeUser: false,
 				enableClaudeProject: false,
@@ -322,7 +322,7 @@ describe("skills", () => {
 			expect(allSkills.length).toBeGreaterThan(0);
 
 			// Filter to only include "valid-skill"
-			const { skills: filtered } = loadSkills({
+			const { skills: filtered } = await loadSkills({
 				enableCodexUser: false,
 				enableClaudeUser: false,
 				enableClaudeProject: false,
@@ -335,8 +335,8 @@ describe("skills", () => {
 			expect(filtered[0].name).toBe("valid-skill");
 		});
 
-		it("should support glob patterns in includeSkills", () => {
-			const { skills } = loadSkills({
+		it("should support glob patterns in includeSkills", async () => {
+			const { skills } = await loadSkills({
 				enableCodexUser: false,
 				enableClaudeUser: false,
 				enableClaudeProject: false,
@@ -349,8 +349,8 @@ describe("skills", () => {
 			expect(skills.every((s) => s.name.startsWith("valid-"))).toBe(true);
 		});
 
-		it("should return all skills when includeSkills is empty", () => {
-			const { skills: withEmpty } = loadSkills({
+		it("should return all skills when includeSkills is empty", async () => {
+			const { skills: withEmpty } = await loadSkills({
 				enableCodexUser: false,
 				enableClaudeUser: false,
 				enableClaudeProject: false,
@@ -359,7 +359,7 @@ describe("skills", () => {
 				customDirectories: [fixturesDir],
 				includeSkills: [],
 			});
-			const { skills: withoutOption } = loadSkills({
+			const { skills: withoutOption } = await loadSkills({
 				enableCodexUser: false,
 				enableClaudeUser: false,
 				enableClaudeProject: false,

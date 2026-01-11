@@ -33,22 +33,35 @@ import { applyFilter, createInitialState, filterByProvider, refreshState, toggle
 import type { DashboardState } from "./types";
 
 export class ExtensionDashboard extends Container {
-	private state: DashboardState;
-	private mainList: ExtensionList;
-	private inspector: InspectorPanel;
+	private state!: DashboardState;
+	private mainList!: ExtensionList;
+	private inspector!: InspectorPanel;
 	private settingsManager: SettingsManager | null;
 	private cwd: string;
 	private terminalHeight: number;
 
 	public onClose?: () => void;
 
-	constructor(cwd: string, settingsManager: SettingsManager | null = null, terminalHeight?: number) {
+	private constructor(cwd: string, settingsManager: SettingsManager | null, terminalHeight: number) {
 		super();
 		this.cwd = cwd;
 		this.settingsManager = settingsManager;
-		this.terminalHeight = terminalHeight ?? process.stdout.rows ?? 24;
-		const disabledIds = settingsManager?.getDisabledExtensions() ?? [];
-		this.state = createInitialState(cwd, disabledIds);
+		this.terminalHeight = terminalHeight;
+	}
+
+	static async create(
+		cwd: string,
+		settingsManager: SettingsManager | null = null,
+		terminalHeight?: number,
+	): Promise<ExtensionDashboard> {
+		const dashboard = new ExtensionDashboard(cwd, settingsManager, terminalHeight ?? process.stdout.rows ?? 24);
+		await dashboard.init();
+		return dashboard;
+	}
+
+	private async init(): Promise<void> {
+		const disabledIds = this.settingsManager?.getDisabledExtensions() ?? [];
+		this.state = await createInitialState(this.cwd, disabledIds);
 
 		// Calculate max visible items based on terminal height
 		// Reserve ~10 lines for header, tabs, help text, borders
@@ -150,7 +163,7 @@ export class ExtensionDashboard extends Container {
 
 	private handleProviderToggle(providerId: string): void {
 		toggleProvider(providerId);
-		this.refreshFromState();
+		void this.refreshFromState();
 	}
 
 	private handleExtensionToggle(extensionId: string, enabled: boolean): void {
@@ -162,15 +175,15 @@ export class ExtensionDashboard extends Container {
 			this.settingsManager.disableExtension(extensionId);
 		}
 
-		this.refreshFromState();
+		void this.refreshFromState();
 	}
 
-	private refreshFromState(): void {
+	private async refreshFromState(): Promise<void> {
 		// Remember current tab ID before refresh
 		const currentTabId = this.state.tabs[this.state.activeTabIndex]?.id;
 
 		const disabledIds = this.settingsManager?.getDisabledExtensions() ?? [];
-		this.state = refreshState(this.state, this.cwd, disabledIds);
+		this.state = await refreshState(this.state, this.cwd, disabledIds);
 
 		// Find the same tab in the new (re-sorted) list
 		if (currentTabId) {

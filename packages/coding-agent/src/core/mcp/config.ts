@@ -6,7 +6,7 @@
 
 import { mcpCapability } from "../../capability/mcp";
 import type { MCPServer } from "../../discovery";
-import { load } from "../../discovery";
+import { loadCapability } from "../../discovery";
 import type { MCPServerConfig } from "./types";
 
 /** Options for loading MCP configs */
@@ -81,7 +81,7 @@ export async function loadAllMCPConfigs(cwd: string, options?: LoadMCPConfigsOpt
 	const filterExa = options?.filterExa ?? true;
 
 	// Load MCP servers via capability system
-	const result = await load<MCPServer>(mcpCapability.id, { cwd });
+	const result = await loadCapability<MCPServer>(mcpCapability.id, { cwd });
 
 	// Filter out project-level configs if disabled
 	const servers = enableProjectConfig

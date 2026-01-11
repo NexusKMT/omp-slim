@@ -67,7 +67,7 @@ describe("AgentSession concurrent prompt guard", () => {
 		}
 	});
 
-	function createSession() {
+	async function createSession() {
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 		let abortSignal: AbortSignal | undefined;
 
@@ -98,7 +98,7 @@ describe("AgentSession concurrent prompt guard", () => {
 		});
 
 		const sessionManager = SessionManager.inMemory();
-		const settingsManager = SettingsManager.create(tempDir, tempDir);
+		const settingsManager = await SettingsManager.create(tempDir, tempDir);
 		const authStorage = new AuthStorage(join(tempDir, "auth.json"));
 		const modelRegistry = new ModelRegistry(authStorage, tempDir);
 		// Set a runtime API key so validation passes
@@ -115,7 +115,7 @@ describe("AgentSession concurrent prompt guard", () => {
 	}
 
 	it("should throw when prompt() called while streaming", async () => {
-		createSession();
+		await createSession();
 
 		// Start first prompt (don't await, it will block until abort)
 		const firstPrompt = session.prompt("First message");
@@ -137,7 +137,7 @@ describe("AgentSession concurrent prompt guard", () => {
 	});
 
 	it("should allow steer() while streaming", async () => {
-		createSession();
+		await createSession();
 
 		// Start first prompt
 		const firstPrompt = session.prompt("First message");
@@ -153,7 +153,7 @@ describe("AgentSession concurrent prompt guard", () => {
 	});
 
 	it("should allow followUp() while streaming", async () => {
-		createSession();
+		await createSession();
 
 		// Start first prompt
 		const firstPrompt = session.prompt("First message");
@@ -189,7 +189,7 @@ describe("AgentSession concurrent prompt guard", () => {
 		});
 
 		const sessionManager = SessionManager.inMemory();
-		const settingsManager = SettingsManager.create(tempDir, tempDir);
+		const settingsManager = await SettingsManager.create(tempDir, tempDir);
 		const authStorage = new AuthStorage(join(tempDir, "auth.json"));
 		const modelRegistry = new ModelRegistry(authStorage, tempDir);
 		authStorage.setRuntimeApiKey("anthropic", "test-key");

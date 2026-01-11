@@ -7,9 +7,9 @@
  * - Loading items for a capability across all providers
  */
 
-import { type Dirent, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { resolve } from "node:path";
+import { clearCache as clearFsCache, cacheStats as fsCacheStats, invalidate as invalidateFs } from "./fs";
 import type {
 	Capability,
 	CapabilityInfo,
@@ -39,87 +39,6 @@ const disabledProviders = new Set<string>();
 
 /** Settings manager for persistence (if set) */
 let settingsManager: { getDisabledProviders(): string[]; setDisabledProviders(ids: string[]): void } | null = null;
-
-// =============================================================================
-// Filesystem Cache
-// =============================================================================
-
-type StatResult = "file" | "dir" | null;
-
-const statCache = new Map<string, StatResult>();
-const contentCache = new Map<string, string | null>();
-const dirCache = new Map<string, Dirent[]>();
-
-function clearCache(): void {
-	statCache.clear();
-	contentCache.clear();
-	dirCache.clear();
-}
-
-function createFsHelpers(cwd: string): LoadContext["fs"] {
-	return {
-		exists(path: string): boolean {
-			const abs = resolve(cwd, path);
-			if (!statCache.has(abs)) {
-				try {
-					const stat = statSync(abs);
-					statCache.set(abs, stat.isDirectory() ? "dir" : stat.isFile() ? "file" : null);
-				} catch {
-					statCache.set(abs, null);
-				}
-			}
-			return statCache.get(abs) !== null;
-		},
-
-		isDir(path: string): boolean {
-			this.exists(path);
-			return statCache.get(resolve(cwd, path)) === "dir";
-		},
-
-		isFile(path: string): boolean {
-			this.exists(path);
-			return statCache.get(resolve(cwd, path)) === "file";
-		},
-
-		readFile(path: string): string | null {
-			const abs = resolve(cwd, path);
-			if (!contentCache.has(abs)) {
-				try {
-					contentCache.set(abs, readFileSync(abs, "utf-8"));
-				} catch {
-					contentCache.set(abs, null);
-				}
-			}
-			return contentCache.get(abs) ?? null;
-		},
-
-		readDir(path: string): string[] {
-			const abs = resolve(cwd, path);
-			if (!this.isDir(path)) return [];
-			if (!dirCache.has(abs)) {
-				try {
-					dirCache.set(abs, readdirSync(abs, { withFileTypes: true }));
-				} catch {
-					dirCache.set(abs, []);
-				}
-			}
-			return (dirCache.get(abs) ?? []).map((e) => e.name);
-		},
-
-		walkUp(name: string, opts: { file?: boolean; dir?: boolean } = {}): string | null {
-			const { file = true, dir = true } = opts;
-			let current = cwd;
-			while (true) {
-				const candidate = join(current, name);
-				if (file && this.isFile(candidate)) return candidate;
-				if (dir && this.isDir(candidate)) return candidate;
-				const parent = dirname(current);
-				if (parent === current) return null;
-				current = parent;
-			}
-		},
-	};
-}
 
 // =============================================================================
 // Registration API
@@ -175,97 +94,9 @@ export function registerProvider<T>(capabilityId: string, provider: Provider<T>)
 // =============================================================================
 
 /**
- * Core loading logic shared by both load() and loadSync().
+ * Async loading logic shared by loadCapability().
  */
-function loadImpl<T>(
-	capability: Capability<T>,
-	providers: Provider<T>[],
-	ctx: LoadContext,
-	options: LoadOptions,
-): CapabilityResult<T> {
-	const allItems: Array<T & { _source: SourceMeta; _shadowed?: boolean }> = [];
-	const allWarnings: string[] = [];
-	const contributingProviders: string[] = [];
-
-	for (const provider of providers) {
-		try {
-			const result = provider.load(ctx);
-
-			if (result instanceof Promise) {
-				throw new Error(
-					`Provider "${provider.id}" returned a Promise. Use load() instead of loadSync() for async providers.`,
-				);
-			}
-
-			if (result.warnings) {
-				allWarnings.push(...result.warnings.map((w) => `[${provider.displayName}] ${w}`));
-			}
-
-			if (result.items.length > 0) {
-				contributingProviders.push(provider.id);
-
-				for (const item of result.items) {
-					const itemWithSource = item as T & { _source: SourceMeta };
-					if (itemWithSource._source) {
-						itemWithSource._source.providerName = provider.displayName;
-						allItems.push(itemWithSource as T & { _source: SourceMeta; _shadowed?: boolean });
-					} else {
-						allWarnings.push(`[${provider.displayName}] Item missing _source metadata, skipping`);
-					}
-				}
-			}
-		} catch (err) {
-			if (err instanceof Error && err.message.includes("returned a Promise")) {
-				throw err;
-			}
-			allWarnings.push(`[${provider.displayName}] Failed to load: ${err}`);
-		}
-	}
-
-	// Deduplicate by key (first wins = highest priority)
-	const seen = new Map<string, number>();
-	const deduped: Array<T & { _source: SourceMeta }> = [];
-
-	for (let i = 0; i < allItems.length; i++) {
-		const item = allItems[i];
-		const key = capability.key(item);
-
-		if (key === undefined) {
-			deduped.push(item);
-		} else if (!seen.has(key)) {
-			seen.set(key, i);
-			deduped.push(item);
-		} else {
-			item._shadowed = true;
-		}
-	}
-
-	// Validate items (only non-shadowed items)
-	if (capability.validate && !options.includeInvalid) {
-		for (let i = deduped.length - 1; i >= 0; i--) {
-			const error = capability.validate(deduped[i]);
-			if (error) {
-				const source = deduped[i]._source;
-				allWarnings.push(
-					`[${source?.providerName ?? "unknown"}] Invalid item at ${source?.path ?? "unknown"}: ${error}`,
-				);
-				deduped.splice(i, 1);
-			}
-		}
-	}
-
-	return {
-		items: deduped,
-		all: allItems,
-		warnings: allWarnings,
-		providers: contributingProviders,
-	};
-}
-
-/**
- * Async loading logic shared by load().
- */
-async function loadImplAsync<T>(
+async function loadImpl<T>(
 	capability: Capability<T>,
 	providers: Provider<T>[],
 	ctx: LoadContext,
@@ -275,29 +106,43 @@ async function loadImplAsync<T>(
 	const allWarnings: string[] = [];
 	const contributingProviders: string[] = [];
 
-	for (const provider of providers) {
-		try {
-			const result = await provider.load(ctx);
-
-			if (result.warnings) {
-				allWarnings.push(...result.warnings.map((w) => `[${provider.displayName}] ${w}`));
+	const results = await Promise.all(
+		providers.map(async (provider) => {
+			try {
+				const result = await provider.load(ctx);
+				return { provider, result };
+			} catch (error) {
+				return { provider, error };
 			}
+		}),
+	);
 
-			if (result.items.length > 0) {
-				contributingProviders.push(provider.id);
+	for (const entry of results) {
+		const { provider } = entry;
+		if ("error" in entry) {
+			allWarnings.push(`[${provider.displayName}] Failed to load: ${entry.error}`);
+			continue;
+		}
 
-				for (const item of result.items) {
-					const itemWithSource = item as T & { _source: SourceMeta };
-					if (itemWithSource._source) {
-						itemWithSource._source.providerName = provider.displayName;
-						allItems.push(itemWithSource as T & { _source: SourceMeta; _shadowed?: boolean });
-					} else {
-						allWarnings.push(`[${provider.displayName}] Item missing _source metadata, skipping`);
-					}
+		const result = entry.result;
+		if (!result) continue;
+
+		if (result.warnings) {
+			allWarnings.push(...result.warnings.map((w) => `[${provider.displayName}] ${w}`));
+		}
+
+		if (result.items.length > 0) {
+			contributingProviders.push(provider.id);
+
+			for (const item of result.items) {
+				const itemWithSource = item as T & { _source: SourceMeta };
+				if (itemWithSource._source) {
+					itemWithSource._source.providerName = provider.displayName;
+					allItems.push(itemWithSource as T & { _source: SourceMeta; _shadowed?: boolean });
+				} else {
+					allWarnings.push(`[${provider.displayName}] Item missing _source metadata, skipping`);
 				}
 			}
-		} catch (err) {
-			allWarnings.push(`[${provider.displayName}] Failed to load: ${err}`);
 		}
 	}
 
@@ -362,7 +207,7 @@ function filterProviders<T>(capability: Capability<T>, options: LoadOptions): Pr
 /**
  * Load a capability by ID.
  */
-export async function load<T>(capabilityId: string, options: LoadOptions = {}): Promise<CapabilityResult<T>> {
+export async function loadCapability<T>(capabilityId: string, options: LoadOptions = {}): Promise<CapabilityResult<T>> {
 	const capability = capabilities.get(capabilityId) as Capability<T> | undefined;
 	if (!capability) {
 		throw new Error(`Unknown capability: "${capabilityId}"`);
@@ -370,28 +215,10 @@ export async function load<T>(capabilityId: string, options: LoadOptions = {}): 
 
 	const cwd = options.cwd ?? process.cwd();
 	const home = homedir();
-	const ctx: LoadContext = { cwd, home, fs: createFsHelpers(cwd) };
+	const ctx: LoadContext = { cwd, home };
 	const providers = filterProviders(capability, options);
 
-	return loadImplAsync(capability, providers, ctx, options);
-}
-
-/**
- * Synchronous load (for capabilities where all providers are sync).
- * Throws if any provider returns a Promise.
- */
-export function loadSync<T>(capabilityId: string, options: LoadOptions = {}): CapabilityResult<T> {
-	const capability = capabilities.get(capabilityId) as Capability<T> | undefined;
-	if (!capability) {
-		throw new Error(`Unknown capability: "${capabilityId}"`);
-	}
-
-	const cwd = options.cwd ?? process.cwd();
-	const home = homedir();
-	const ctx: LoadContext = { cwd, home, fs: createFsHelpers(cwd) };
-	const providers = filterProviders(capability, options);
-
-	return loadImpl(capability, providers, ctx, options);
+	return await loadImpl(capability, providers, ctx, options);
 }
 
 // =============================================================================
@@ -567,36 +394,23 @@ export function getAllProvidersInfo(): ProviderInfo[] {
  * Reset all caches. Call after chdir or filesystem changes.
  */
 export function reset(): void {
-	clearCache();
+	clearFsCache();
 }
 
 /**
  * Invalidate cache for a specific path.
  * @param path - Absolute or relative path to invalidate
- * @param cwd - Working directory for resolving relative paths (defaults to process.cwd())
  */
 export function invalidate(path: string, cwd?: string): void {
-	const abs = resolve(cwd ?? process.cwd(), path);
-	statCache.delete(abs);
-	contentCache.delete(abs);
-	dirCache.delete(abs);
-	// Also invalidate parent for directory listings
-	const parent = dirname(abs);
-	if (parent !== abs) {
-		statCache.delete(parent);
-		dirCache.delete(parent);
-	}
+	const resolved = cwd ? resolve(cwd, path) : path;
+	invalidateFs(resolved);
 }
 
 /**
  * Get cache stats for diagnostics.
  */
-export function cacheStats(): { stat: number; content: number; dir: number } {
-	return {
-		stat: statCache.size,
-		content: contentCache.size,
-		dir: dirCache.size,
-	};
+export function cacheStats(): { content: number; dir: number } {
+	return fsCacheStats();
 }
 
 // =============================================================================

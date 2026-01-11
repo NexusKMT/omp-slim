@@ -6,6 +6,7 @@
  */
 
 import { join } from "node:path";
+import { readFile } from "../capability/fs";
 import { registerProvider } from "../capability/index";
 import { type SSHHost, sshCapability } from "../capability/ssh";
 import type { LoadContext, LoadResult, SourceMeta } from "../capability/types";
@@ -90,17 +91,12 @@ function normalizeHost(
 	};
 }
 
-function loadSshJsonFile(ctx: LoadContext, path: string): LoadResult<SSHHost> {
+async function loadSshJsonFile(_ctx: LoadContext, path: string): Promise<LoadResult<SSHHost>> {
 	const items: SSHHost[] = [];
 	const warnings: string[] = [];
 
-	if (!ctx.fs.isFile(path)) {
-		return { items, warnings };
-	}
-
-	const content = ctx.fs.readFile(path);
+	const content = await readFile(path);
 	if (content === null) {
-		warnings.push(`Failed to read ${path}`);
 		return { items, warnings };
 	}
 
@@ -126,7 +122,7 @@ function loadSshJsonFile(ctx: LoadContext, path: string): LoadResult<SSHHost> {
 			warnings.push(`Invalid host entry in ${path}: ${name}`);
 			continue;
 		}
-		const host = normalizeHost(name, rawHost, source, ctx.home, warnings);
+		const host = normalizeHost(name, rawHost, source, _ctx.home, warnings);
 		if (host) items.push(host);
 	}
 
@@ -136,16 +132,12 @@ function loadSshJsonFile(ctx: LoadContext, path: string): LoadResult<SSHHost> {
 	};
 }
 
-function load(ctx: LoadContext): LoadResult<SSHHost> {
-	const allItems: SSHHost[] = [];
-	const allWarnings: string[] = [];
+async function load(ctx: LoadContext): Promise<LoadResult<SSHHost>> {
+	const filenames = ["ssh.json", ".ssh.json"];
+	const results = await Promise.all(filenames.map((filename) => loadSshJsonFile(ctx, join(ctx.cwd, filename))));
 
-	for (const filename of ["ssh.json", ".ssh.json"]) {
-		const path = join(ctx.cwd, filename);
-		const result = loadSshJsonFile(ctx, path);
-		allItems.push(...result.items);
-		if (result.warnings) allWarnings.push(...result.warnings);
-	}
+	const allItems = results.flatMap((r) => r.items);
+	const allWarnings = results.flatMap((r) => r.warnings ?? []);
 
 	return {
 		items: allItems,

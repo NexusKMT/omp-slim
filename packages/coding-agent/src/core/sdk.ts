@@ -33,7 +33,7 @@ import type { Component } from "@oh-my-pi/pi-tui";
 import chalk from "chalk";
 // Import discovery to register all providers on startup
 import "../discovery";
-import { loadSync as loadCapability } from "../capability/index";
+import { loadCapability } from "../capability/index";
 import { type Rule, ruleCapability } from "../capability/rule";
 import { getAgentDir, getConfigDirPaths } from "../config";
 import { initializeWithSettings } from "../discovery";
@@ -289,12 +289,12 @@ export async function discoverExtensions(cwd?: string): Promise<LoadExtensionsRe
 /**
  * Discover skills from cwd and agentDir.
  */
-export function discoverSkills(
+export async function discoverSkills(
 	cwd?: string,
 	_agentDir?: string,
 	settings?: SkillsSettings,
-): { skills: Skill[]; warnings: SkillWarning[] } {
-	return loadSkillsInternal({
+): Promise<{ skills: Skill[]; warnings: SkillWarning[] }> {
+	return await loadSkillsInternal({
 		...settings,
 		cwd: cwd ?? process.cwd(),
 	});
@@ -304,11 +304,11 @@ export function discoverSkills(
  * Discover context files (AGENTS.md) walking up from cwd.
  * Returns files sorted by depth (farther from cwd first, so closer files appear last/more prominent).
  */
-export function discoverContextFiles(
+export async function discoverContextFiles(
 	cwd?: string,
 	_agentDir?: string,
-): Array<{ path: string; content: string; depth?: number }> {
-	return loadContextFilesInternal({
+): Promise<Array<{ path: string; content: string; depth?: number }>> {
+	return await loadContextFilesInternal({
 		cwd: cwd ?? process.cwd(),
 	});
 }
@@ -326,7 +326,7 @@ export async function discoverPromptTemplates(cwd?: string, agentDir?: string): 
 /**
  * Discover file-based slash commands from commands/ directories.
  */
-export function discoverSlashCommands(cwd?: string): FileSlashCommand[] {
+export async function discoverSlashCommands(cwd?: string): Promise<FileSlashCommand[]> {
 	return loadSlashCommandsInternal({ cwd: cwd ?? process.cwd() });
 }
 
@@ -367,8 +367,8 @@ export interface BuildSystemPromptOptions {
 /**
  * Build the default system prompt.
  */
-export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): string {
-	return buildSystemPromptInternal({
+export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}): Promise<string> {
+	return await buildSystemPromptInternal({
 		cwd: options.cwd,
 		skills: options.skills,
 		contextFiles: options.contextFiles,
@@ -381,8 +381,8 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 /**
  * Load settings from agentDir/settings.json merged with cwd/.omp/settings.json.
  */
-export function loadSettings(cwd?: string, agentDir?: string): Settings {
-	const manager = SettingsManager.create(cwd ?? process.cwd(), agentDir ?? getDefaultAgentDir());
+export async function loadSettings(cwd?: string, agentDir?: string): Promise<Settings> {
+	const manager = await SettingsManager.create(cwd ?? process.cwd(), agentDir ?? getDefaultAgentDir());
 	return {
 		modelRoles: manager.getModelRoles(),
 		defaultThinkingLevel: manager.getDefaultThinkingLevel(),
@@ -546,7 +546,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const modelRegistry = options.modelRegistry ?? (await discoverModels(authStorage, agentDir));
 	time("discoverModels");
 
-	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
+	const settingsManager = options.settingsManager ?? (await SettingsManager.create(cwd, agentDir));
 	time("settingsManager");
 	initializeWithSettings(settingsManager);
 	time("initializeWithSettings");
@@ -599,12 +599,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	// Fall back to first available model with a valid API key
 	if (!model) {
-		for (const m of modelRegistry.getAll()) {
-			if (await modelRegistry.getApiKey(m, sessionId)) {
-				model = m;
-				break;
-			}
-		}
+		const allModels = modelRegistry.getAll();
+		const keyResults = await Promise.all(
+			allModels.map(async (m) => ({ model: m, hasKey: !!(await modelRegistry.getApiKey(m, sessionId)) })),
+		);
+		model = keyResults.find((r) => r.hasKey)?.model;
 		time("findAvailableModel");
 		if (model) {
 			if (modelFallbackMessage) {
@@ -639,7 +638,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		skills = options.skills;
 		skillWarnings = [];
 	} else {
-		const discovered = discoverSkills(cwd, agentDir, settingsManager.getSkillsSettings());
+		const discovered = await discoverSkills(cwd, agentDir, settingsManager.getSkillsSettings());
 		skills = discovered.skills;
 		skillWarnings = discovered.warnings;
 	}
@@ -647,7 +646,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	// Discover rules
 	const ttsrManager = createTtsrManager(settingsManager.getTtsrSettings());
-	const rulesResult = loadCapability<Rule>(ruleCapability.id, { cwd });
+	const rulesResult = await loadCapability<Rule>(ruleCapability.id, { cwd });
 	for (const rule of rulesResult.items) {
 		if (rule.ttsrTrigger) {
 			ttsrManager.addRule(rule);
@@ -656,7 +655,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	time("discoverTtsrRules");
 
 	// Filter rules for the rulebook (non-TTSR, non-alwaysApply, with descriptions)
-	const rulebookRules = rulesResult.items.filter((rule) => {
+	const rulebookRules = rulesResult.items.filter((rule: Rule) => {
 		if (rule.ttsrTrigger) return false;
 		if (rule.alwaysApply) return false;
 		if (!rule.description) return false;
@@ -664,7 +663,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	});
 	time("filterRulebookRules");
 
-	const contextFiles = options.contextFiles ?? discoverContextFiles(cwd, agentDir);
+	const contextFiles = options.contextFiles ?? (await discoverContextFiles(cwd, agentDir));
 	time("discoverContextFiles");
 
 	let agent: Agent;
@@ -855,9 +854,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	}
 	time("combineTools");
 
-	const rebuildSystemPrompt = (toolNames: string[], tools: Map<string, AgentTool>): string => {
+	const rebuildSystemPrompt = async (toolNames: string[], tools: Map<string, AgentTool>): Promise<string> => {
 		toolContextStore.setToolNames(toolNames);
-		const defaultPrompt = buildSystemPromptInternal({
+		const defaultPrompt = await buildSystemPromptInternal({
 			cwd,
 			skills,
 			contextFiles,
@@ -871,7 +870,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			return defaultPrompt;
 		}
 		if (typeof options.systemPrompt === "string") {
-			return buildSystemPromptInternal({
+			return await buildSystemPromptInternal({
 				cwd,
 				skills,
 				contextFiles,
@@ -885,13 +884,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		return options.systemPrompt(defaultPrompt);
 	};
 
-	const systemPrompt = rebuildSystemPrompt(Array.from(toolRegistry.keys()), toolRegistry);
+	const systemPrompt = await rebuildSystemPrompt(Array.from(toolRegistry.keys()), toolRegistry);
 	time("buildSystemPrompt");
 
 	const promptTemplates = options.promptTemplates ?? (await discoverPromptTemplates(cwd, agentDir));
 	time("discoverPromptTemplates");
 
-	const slashCommands = options.slashCommands ?? discoverSlashCommands(cwd);
+	const slashCommands = options.slashCommands ?? (await discoverSlashCommands(cwd));
 	time("discoverSlashCommands");
 
 	// Create convertToLlm wrapper that filters images if blockImages is enabled (defense-in-depth)

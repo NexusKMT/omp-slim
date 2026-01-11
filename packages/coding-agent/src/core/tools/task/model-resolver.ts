@@ -12,7 +12,7 @@
  */
 
 import { type Settings, settingsCapability } from "../../../capability/settings";
-import { loadSync } from "../../../discovery";
+import { loadCapability } from "../../../discovery";
 import { resolveOmpCommand } from "./omp-command";
 
 /** Cache for available models (provider/modelId format) */
@@ -79,8 +79,8 @@ export function clearModelCache(): void {
 /**
  * Load model roles from settings files using capability API.
  */
-function loadModelRoles(): Record<string, string> {
-	const result = loadSync<Settings>(settingsCapability.id, { cwd: process.cwd() });
+async function loadModelRoles(): Promise<Record<string, string>> {
+	const result = await loadCapability<Settings>(settingsCapability.id, { cwd: process.cwd() });
 
 	// Merge all settings, prioritizing first (highest priority)
 	let modelRoles: Record<string, string> = {};
@@ -99,8 +99,8 @@ function loadModelRoles(): Record<string, string> {
  * Looks up the role in settings.modelRoles and returns the configured model.
  * Returns undefined if the role isn't configured.
  */
-function resolveOmpAlias(role: string, availableModels: string[]): string | undefined {
-	const roles = loadModelRoles();
+async function resolveOmpAlias(role: string, availableModels: string[]): Promise<string | undefined> {
+	const roles = await loadModelRoles();
 
 	// Look up role in settings (case-insensitive)
 	const configured = roles[role] || roles[role.toLowerCase()];
@@ -127,7 +127,10 @@ function getModelId(fullModel: string): string {
  * @param pattern - Model pattern to resolve
  * @param availableModels - Optional pre-fetched list of available models (in provider/modelId format)
  */
-export function resolveModelPattern(pattern: string | undefined, availableModels?: string[]): string | undefined {
+export async function resolveModelPattern(
+	pattern: string | undefined,
+	availableModels?: string[],
+): Promise<string | undefined> {
 	if (!pattern || pattern === "default") {
 		return undefined;
 	}
@@ -149,7 +152,7 @@ export function resolveModelPattern(pattern: string | undefined, availableModels
 		const lower = p.toLowerCase();
 		if (lower.startsWith("omp/") || lower.startsWith("pi/")) {
 			const role = lower.startsWith("omp/") ? p.slice(4) : p.slice(3);
-			const resolved = resolveOmpAlias(role, models);
+			const resolved = await resolveOmpAlias(role, models);
 			if (resolved) return resolved;
 			continue; // Role not configured, try next pattern
 		}

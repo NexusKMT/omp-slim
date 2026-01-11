@@ -58,8 +58,7 @@ export {
 	isProviderEnabled,
 	listCapabilities,
 	// Loading API
-	load,
-	loadSync,
+	loadCapability,
 	// Cache management
 	reset,
 	setDisabledProviders,

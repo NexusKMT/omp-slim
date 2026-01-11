@@ -7,11 +7,11 @@
 import { createAgentSession, loadSettings, SessionManager, SettingsManager } from "@oh-my-pi/pi-coding-agent";
 
 // Load current settings (merged global + project)
-const settings = loadSettings();
+const settings = await loadSettings();
 console.log("Current settings:", JSON.stringify(settings, null, 2));
 
 // Override specific settings
-const settingsManager = SettingsManager.create();
+const settingsManager = await SettingsManager.create();
 settingsManager.applyOverrides({
 	compaction: { enabled: false },
 	retry: { enabled: true, maxRetries: 5, baseDelayMs: 1000 },

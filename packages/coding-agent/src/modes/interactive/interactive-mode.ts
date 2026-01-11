@@ -112,6 +112,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	public lastStatusText: Text | undefined = undefined;
 	public fileSlashCommands: Set<string> = new Set();
 
+	private pendingSlashCommands: SlashCommand[] = [];
 	private cleanupUnsubscribe?: () => void;
 	private readonly version: string;
 	private readonly changelogMarkdown: string | undefined;
@@ -210,14 +211,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			{ name: "exit", description: "Exit the application" },
 		];
 
-		// Load and convert file commands to SlashCommand format
-		const fileCommands = loadSlashCommands({ cwd: process.cwd() });
-		this.fileSlashCommands = new Set(fileCommands.map((cmd) => cmd.name));
-		const fileSlashCommands: SlashCommand[] = fileCommands.map((cmd) => ({
-			name: cmd.name,
-			description: cmd.description,
-		}));
-
 		// Convert hook commands to SlashCommand format
 		const hookCommands: SlashCommand[] = (this.session.extensionRunner?.getRegisteredCommands() ?? []).map((cmd) => ({
 			name: cmd.name,
@@ -230,12 +223,8 @@ export class InteractiveMode implements InteractiveModeContext {
 			description: `${loaded.command.description} (${loaded.source})`,
 		}));
 
-		// Setup autocomplete
-		const autocompleteProvider = new CombinedAutocompleteProvider(
-			[...slashCommands, ...fileSlashCommands, ...hookCommands, ...customCommands],
-			process.cwd(),
-		);
-		this.editor.setAutocompleteProvider(autocompleteProvider);
+		// Store pending commands for init() where file commands are loaded async
+		this.pendingSlashCommands = [...slashCommands, ...hookCommands, ...customCommands];
 
 		this.uiHelpers = new UiHelpers(this);
 		this.voiceManager = new VoiceManager(this);
@@ -251,6 +240,21 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		// Register session manager flush for signal handlers (SIGINT, SIGTERM, SIGHUP)
 		this.cleanupUnsubscribe = registerAsyncCleanup(() => this.sessionManager.flush());
+
+		// Load and convert file commands to SlashCommand format (async)
+		const fileCommands = await loadSlashCommands({ cwd: process.cwd() });
+		this.fileSlashCommands = new Set(fileCommands.map((cmd) => cmd.name));
+		const fileSlashCommands: SlashCommand[] = fileCommands.map((cmd) => ({
+			name: cmd.name,
+			description: cmd.description,
+		}));
+
+		// Setup autocomplete with all commands
+		const autocompleteProvider = new CombinedAutocompleteProvider(
+			[...this.pendingSlashCommands, ...fileSlashCommands],
+			process.cwd(),
+		);
+		this.editor.setAutocompleteProvider(autocompleteProvider);
 
 		// Get current model info for welcome screen
 		const modelName = this.session.model?.name ?? "Unknown";
@@ -560,7 +564,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	showExtensionsDashboard(): void {
-		this.selectorController.showExtensionsDashboard();
+		void this.selectorController.showExtensionsDashboard();
 	}
 
 	showModelSelector(options?: { temporaryOnly?: boolean }): void {

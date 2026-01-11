@@ -255,7 +255,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	}
 
 	// Resolve and add model
-	const resolvedModel = resolveModelPattern(modelOverride || agent.model);
+	const resolvedModel = await resolveModelPattern(modelOverride || agent.model);
 	const sessionFile = subtaskSessionFile ?? options.sessionFile ?? null;
 	const spawnsEnv = agent.spawns === undefined ? "" : agent.spawns === "*" ? "*" : agent.spawns.join(",");
 

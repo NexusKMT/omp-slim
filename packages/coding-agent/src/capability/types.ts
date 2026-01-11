@@ -14,16 +14,6 @@ export interface LoadContext {
 	cwd: string;
 	/** User home directory */
 	home: string;
-	/** Filesystem helpers (cached) */
-	fs: {
-		exists(path: string): boolean;
-		isDir(path: string): boolean;
-		isFile(path: string): boolean;
-		readFile(path: string): string | null;
-		readDir(path: string): string[];
-		/** Walk up from cwd looking for a file/dir, returns first match */
-		walkUp(name: string, opts?: { file?: boolean; dir?: boolean }): string | null;
-	};
 }
 
 /**
@@ -61,7 +51,7 @@ export interface Provider<T> {
 	 * Load items for this capability.
 	 * Returns items in provider's preferred order (usually project before user).
 	 */
-	load(ctx: LoadContext): LoadResult<T> | Promise<LoadResult<T>>;
+	load(ctx: LoadContext): Promise<LoadResult<T>>;
 }
 
 /**

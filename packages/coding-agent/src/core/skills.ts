@@ -1,10 +1,11 @@
-import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { minimatch } from "minimatch";
 import { skillCapability } from "../capability/skill";
 import type { SourceMeta } from "../capability/types";
 import type { Skill as CapabilitySkill, SkillFrontmatter as ImportedSkillFrontmatter } from "../discovery";
-import { loadSync } from "../discovery";
+import { loadCapability } from "../discovery";
 import { parseFrontmatter } from "../discovery/helpers";
 import type { SkillsSettings } from "./settings-manager";
 
@@ -215,7 +216,7 @@ export interface LoadSkillsOptions extends SkillsSettings {
  * Load skills from all configured locations.
  * Returns skills and any validation warnings.
  */
-export function loadSkills(options: LoadSkillsOptions = {}): LoadSkillsResult {
+export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadSkillsResult> {
 	const {
 		cwd = process.cwd(),
 		enabled = true,
@@ -247,7 +248,7 @@ export function loadSkills(options: LoadSkillsOptions = {}): LoadSkillsResult {
 	}
 
 	// Use capability API to load all skills
-	const result = loadSync<CapabilitySkill>(skillCapability.id, { cwd });
+	const result = await loadCapability<CapabilitySkill>(skillCapability.id, { cwd });
 
 	const skillMap = new Map<string, Skill>();
 	const realPathSet = new Set<string>();
@@ -265,28 +266,33 @@ export function loadSkills(options: LoadSkillsOptions = {}): LoadSkillsResult {
 		return ignoredSkills.some((pattern) => minimatch(name, pattern));
 	}
 
-	// Helper to add a skill to the map
-	function addSkill(capSkill: CapabilitySkill, sourceProvider: string) {
-		// Apply ignore filter (glob patterns) - takes precedence over include
-		if (matchesIgnorePatterns(capSkill.name)) {
-			return;
-		}
-		// Apply include filter (glob patterns)
-		if (!matchesIncludePatterns(capSkill.name)) {
-			return;
-		}
+	// Filter skills by source and patterns first
+	const filteredSkills = result.items.filter((capSkill) => {
+		if (!isSourceEnabled(capSkill._source)) return false;
+		if (matchesIgnorePatterns(capSkill.name)) return false;
+		if (!matchesIncludePatterns(capSkill.name)) return false;
+		return true;
+	});
 
-		// Resolve symlinks to detect duplicate files
-		let realPath: string;
-		try {
-			realPath = realpathSync(capSkill.path);
-		} catch {
-			realPath = capSkill.path;
-		}
+	// Batch resolve all real paths in parallel
+	const realPaths = await Promise.all(
+		filteredSkills.map(async (capSkill) => {
+			try {
+				return await realpath(capSkill.path);
+			} catch {
+				return capSkill.path;
+			}
+		}),
+	);
+
+	// Process skills with resolved paths
+	for (let i = 0; i < filteredSkills.length; i++) {
+		const capSkill = filteredSkills[i];
+		const resolvedPath = realPaths[i];
 
 		// Skip silently if we've already loaded this exact file (via symlink)
-		if (realPathSet.has(realPath)) {
-			return;
+		if (realPathSet.has(resolvedPath)) {
+			continue;
 		}
 
 		const existing = skillMap.get(capSkill.name);
@@ -302,46 +308,61 @@ export function loadSkills(options: LoadSkillsOptions = {}): LoadSkillsResult {
 				description: capSkill.frontmatter?.description || "",
 				filePath: capSkill.path,
 				baseDir: capSkill.path.replace(/\/SKILL\.md$/, ""),
-				source: `${sourceProvider}:${capSkill.level}`,
+				source: `${capSkill._source.provider}:${capSkill.level}`,
 				_source: capSkill._source,
 			};
 			skillMap.set(capSkill.name, skill);
-			realPathSet.add(realPath);
+			realPathSet.add(resolvedPath);
 		}
-	}
-
-	// Process skills from capability API
-	for (const capSkill of result.items) {
-		// Check if this source is enabled
-		if (!isSourceEnabled(capSkill._source)) {
-			continue;
-		}
-
-		addSkill(capSkill, capSkill._source.provider);
 	}
 
 	// Process custom directories - scan directly without using full provider system
+	const allCustomSkills: Array<{ skill: Skill; path: string }> = [];
 	for (const dir of customDirectories) {
 		const customSkills = scanDirectoryForSkills(dir);
 		for (const s of customSkills.skills) {
-			// Convert to capability format for addSkill processing
-			const capSkill: CapabilitySkill = {
-				name: s.name,
-				path: s.filePath,
-				content: "",
-				frontmatter: { description: s.description },
-				level: "user",
-				_source: {
-					provider: "custom",
-					providerName: "Custom",
-					path: s.filePath,
-					level: "user",
+			if (matchesIgnorePatterns(s.name)) continue;
+			if (!matchesIncludePatterns(s.name)) continue;
+			allCustomSkills.push({
+				skill: {
+					name: s.name,
+					description: s.description,
+					filePath: s.filePath,
+					baseDir: s.filePath.replace(/\/SKILL\.md$/, ""),
+					source: "custom:user",
+					_source: { provider: "custom", providerName: "Custom", path: s.filePath, level: "user" },
 				},
-			};
-			addSkill(capSkill, "custom");
+				path: s.filePath,
+			});
 		}
-		for (const warning of customSkills.warnings) {
-			collisionWarnings.push(warning);
+		collisionWarnings.push(...customSkills.warnings);
+	}
+
+	// Batch resolve custom skill paths
+	const customRealPaths = await Promise.all(
+		allCustomSkills.map(async ({ path }) => {
+			try {
+				return await realpath(path);
+			} catch {
+				return path;
+			}
+		}),
+	);
+
+	for (let i = 0; i < allCustomSkills.length; i++) {
+		const { skill } = allCustomSkills[i];
+		const resolvedPath = customRealPaths[i];
+		if (realPathSet.has(resolvedPath)) continue;
+
+		const existing = skillMap.get(skill.name);
+		if (existing) {
+			collisionWarnings.push({
+				skillPath: skill.filePath,
+				message: `name collision: "${skill.name}" already loaded from ${existing.filePath}, skipping this one`,
+			});
+		} else {
+			skillMap.set(skill.name, skill);
+			realPathSet.add(resolvedPath);
 		}
 	}
 

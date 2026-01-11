@@ -7,11 +7,12 @@
  * User directory: ~/.codex
  */
 
-import { join } from "path";
+import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import type { ContextFile } from "../capability/context-file";
 import { contextFileCapability } from "../capability/context-file";
 import { type ExtensionModule, extensionModuleCapability } from "../capability/extension-module";
+import { readFile } from "../capability/fs";
 import type { Hook } from "../capability/hook";
 import { hookCapability } from "../capability/hook";
 import { registerProvider } from "../capability/index";
@@ -42,27 +43,28 @@ const PROVIDER_ID = "codex";
 const DISPLAY_NAME = "OpenAI Codex";
 const PRIORITY = 70;
 
+function getProjectCodexDir(ctx: LoadContext): string {
+	return join(ctx.cwd, ".codex");
+}
+
 // =============================================================================
 // Context Files (AGENTS.md)
 // =============================================================================
 
-function loadContextFiles(ctx: LoadContext): LoadResult<ContextFile> {
+async function loadContextFiles(ctx: LoadContext): Promise<LoadResult<ContextFile>> {
 	const items: ContextFile[] = [];
 	const warnings: string[] = [];
 
 	// User level only: ~/.codex/AGENTS.md
-	const userBase = join(ctx.home, SOURCE_PATHS.codex.userBase);
-	if (ctx.fs.isDir(userBase)) {
-		const agentsMd = join(userBase, "AGENTS.md");
-		const agentsContent = ctx.fs.readFile(agentsMd);
-		if (agentsContent) {
-			items.push({
-				path: agentsMd,
-				content: agentsContent,
-				level: "user",
-				_source: createSourceMeta(PROVIDER_ID, agentsMd, "user"),
-			});
-		}
+	const agentsMd = join(ctx.home, SOURCE_PATHS.codex.userBase, "AGENTS.md");
+	const agentsContent = await readFile(agentsMd);
+	if (agentsContent) {
+		items.push({
+			path: agentsMd,
+			content: agentsContent,
+			level: "user",
+			_source: createSourceMeta(PROVIDER_ID, agentsMd, "user"),
+		});
 	}
 
 	return { items, warnings };
@@ -72,13 +74,19 @@ function loadContextFiles(ctx: LoadContext): LoadResult<ContextFile> {
 // MCP Servers (config.toml)
 // =============================================================================
 
-function loadMCPServers(ctx: LoadContext): LoadResult<MCPServer> {
-	const items: MCPServer[] = [];
+async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> {
 	const warnings: string[] = [];
 
-	// User level: ~/.codex/config.toml
 	const userConfigPath = join(ctx.home, SOURCE_PATHS.codex.userBase, "config.toml");
-	const userConfig = loadTomlConfig(ctx, userConfigPath);
+	const codexDir = getProjectCodexDir(ctx);
+	const projectConfigPath = join(codexDir, "config.toml");
+
+	const [userConfig, projectConfig] = await Promise.all([
+		loadTomlConfig(ctx, userConfigPath),
+		loadTomlConfig(ctx, projectConfigPath),
+	]);
+
+	const items: MCPServer[] = [];
 	if (userConfig) {
 		const servers = extractMCPServersFromToml(userConfig);
 		for (const [name, config] of Object.entries(servers)) {
@@ -89,29 +97,22 @@ function loadMCPServers(ctx: LoadContext): LoadResult<MCPServer> {
 			});
 		}
 	}
-
-	// Project level: .codex/config.toml
-	const codexDir = ctx.fs.walkUp(".codex", { dir: true });
-	if (codexDir) {
-		const projectConfigPath = join(codexDir, "config.toml");
-		const projectConfig = loadTomlConfig(ctx, projectConfigPath);
-		if (projectConfig) {
-			const servers = extractMCPServersFromToml(projectConfig);
-			for (const [name, config] of Object.entries(servers)) {
-				items.push({
-					name,
-					...config,
-					_source: createSourceMeta(PROVIDER_ID, projectConfigPath, "project"),
-				});
-			}
+	if (projectConfig) {
+		const servers = extractMCPServersFromToml(projectConfig);
+		for (const [name, config] of Object.entries(servers)) {
+			items.push({
+				name,
+				...config,
+				_source: createSourceMeta(PROVIDER_ID, projectConfigPath, "project"),
+			});
 		}
 	}
 
 	return { items, warnings };
 }
 
-function loadTomlConfig(ctx: LoadContext, path: string): Record<string, unknown> | null {
-	const content = ctx.fs.readFile(path);
+async function loadTomlConfig(_ctx: LoadContext, path: string): Promise<Record<string, unknown> | null> {
+	const content = await readFile(path);
 	if (!content) return null;
 
 	try {
@@ -206,30 +207,26 @@ function extractMCPServersFromToml(toml: Record<string, unknown>): Record<string
 // Skills (skills/)
 // =============================================================================
 
-function loadSkills(ctx: LoadContext): LoadResult<Skill> {
-	const items: Skill[] = [];
-	const warnings: string[] = [];
-
+async function loadSkills(ctx: LoadContext): Promise<LoadResult<Skill>> {
 	const userSkillsDir = join(ctx.home, SOURCE_PATHS.codex.userBase, "skills");
-	const userResult = loadSkillsFromDir(ctx, {
-		dir: userSkillsDir,
-		providerId: PROVIDER_ID,
-		level: "user",
-	});
-	items.push(...userResult.items);
-	if (userResult.warnings) warnings.push(...userResult.warnings);
+	const codexDir = getProjectCodexDir(ctx);
+	const projectSkillsDir = join(codexDir, "skills");
 
-	const codexDir = ctx.fs.walkUp(".codex", { dir: true });
-	if (codexDir) {
-		const projectSkillsDir = join(codexDir, "skills");
-		const projectResult = loadSkillsFromDir(ctx, {
+	const results = await Promise.all([
+		loadSkillsFromDir(ctx, {
+			dir: userSkillsDir,
+			providerId: PROVIDER_ID,
+			level: "user",
+		}),
+		loadSkillsFromDir(ctx, {
 			dir: projectSkillsDir,
 			providerId: PROVIDER_ID,
 			level: "project",
-		});
-		items.push(...projectResult.items);
-		if (projectResult.warnings) warnings.push(...projectResult.warnings);
-	}
+		}),
+	]);
+
+	const items = results.flatMap((r) => r.items);
+	const warnings = results.flatMap((r) => r.warnings || []);
 
 	return { items, warnings };
 }
@@ -238,34 +235,32 @@ function loadSkills(ctx: LoadContext): LoadResult<Skill> {
 // Extension Modules (extensions/)
 // =============================================================================
 
-function loadExtensionModules(ctx: LoadContext): LoadResult<ExtensionModule> {
-	const items: ExtensionModule[] = [];
+async function loadExtensionModules(ctx: LoadContext): Promise<LoadResult<ExtensionModule>> {
 	const warnings: string[] = [];
 
-	// User level: ~/.codex/extensions/
 	const userExtensionsDir = join(ctx.home, SOURCE_PATHS.codex.userBase, "extensions");
-	for (const extPath of discoverExtensionModulePaths(ctx, userExtensionsDir)) {
-		items.push({
+	const codexDir = getProjectCodexDir(ctx);
+	const projectExtensionsDir = join(codexDir, "extensions");
+
+	const [userPaths, projectPaths] = await Promise.all([
+		discoverExtensionModulePaths(ctx, userExtensionsDir),
+		discoverExtensionModulePaths(ctx, projectExtensionsDir),
+	]);
+
+	const items: ExtensionModule[] = [
+		...userPaths.map((extPath) => ({
 			name: getExtensionNameFromPath(extPath),
 			path: extPath,
-			level: "user",
+			level: "user" as const,
 			_source: createSourceMeta(PROVIDER_ID, extPath, "user"),
-		});
-	}
-
-	// Project level: .codex/extensions/
-	const codexDir = ctx.fs.walkUp(".codex", { dir: true });
-	if (codexDir) {
-		const projectExtensionsDir = join(codexDir, "extensions");
-		for (const extPath of discoverExtensionModulePaths(ctx, projectExtensionsDir)) {
-			items.push({
-				name: getExtensionNameFromPath(extPath),
-				path: extPath,
-				level: "project",
-				_source: createSourceMeta(PROVIDER_ID, extPath, "project"),
-			});
-		}
-	}
+		})),
+		...projectPaths.map((extPath) => ({
+			name: getExtensionNameFromPath(extPath),
+			path: extPath,
+			level: "project" as const,
+			_source: createSourceMeta(PROVIDER_ID, extPath, "project"),
+		})),
+	];
 
 	return { items, warnings };
 }
@@ -274,52 +269,38 @@ function loadExtensionModules(ctx: LoadContext): LoadResult<ExtensionModule> {
 // Slash Commands (commands/)
 // =============================================================================
 
-function loadSlashCommands(ctx: LoadContext): LoadResult<SlashCommand> {
-	const items: SlashCommand[] = [];
-	const warnings: string[] = [];
-
-	// User level: ~/.codex/commands/
+async function loadSlashCommands(ctx: LoadContext): Promise<LoadResult<SlashCommand>> {
 	const userCommandsDir = join(ctx.home, SOURCE_PATHS.codex.userBase, "commands");
-	const userResult = loadFilesFromDir(ctx, userCommandsDir, PROVIDER_ID, "user", {
-		extensions: ["md"],
-		transform: (name, content, path, source) => {
+	const codexDir = getProjectCodexDir(ctx);
+	const projectCommandsDir = join(codexDir, "commands");
+
+	const transformCommand =
+		(level: "user" | "project") =>
+		(name: string, content: string, path: string, source: ReturnType<typeof createSourceMeta>) => {
 			const { frontmatter, body } = parseFrontmatter(content);
 			const commandName = frontmatter.name || name.replace(/\.md$/, "");
-
 			return {
 				name: String(commandName),
 				path,
 				content: body,
-				level: "user" as const,
+				level,
 				_source: source,
 			};
-		},
-	});
-	items.push(...userResult.items);
-	warnings.push(...(userResult.warnings || []));
+		};
 
-	// Project level: .codex/commands/
-	const codexDir = ctx.fs.walkUp(".codex", { dir: true });
-	if (codexDir) {
-		const projectCommandsDir = join(codexDir, "commands");
-		const projectResult = loadFilesFromDir(ctx, projectCommandsDir, PROVIDER_ID, "project", {
+	const results = await Promise.all([
+		loadFilesFromDir(ctx, userCommandsDir, PROVIDER_ID, "user", {
 			extensions: ["md"],
-			transform: (name, content, path, source) => {
-				const { frontmatter, body } = parseFrontmatter(content);
-				const commandName = frontmatter.name || name.replace(/\.md$/, "");
+			transform: transformCommand("user"),
+		}),
+		loadFilesFromDir(ctx, projectCommandsDir, PROVIDER_ID, "project", {
+			extensions: ["md"],
+			transform: transformCommand("project"),
+		}),
+	]);
 
-				return {
-					name: String(commandName),
-					path,
-					content: body,
-					level: "project" as const,
-					_source: source,
-				};
-			},
-		});
-		items.push(...projectResult.items);
-		warnings.push(...(projectResult.warnings || []));
-	}
+	const items = results.flatMap((r) => r.items);
+	const warnings = results.flatMap((r) => r.warnings || []);
 
 	return { items, warnings };
 }
@@ -328,52 +309,41 @@ function loadSlashCommands(ctx: LoadContext): LoadResult<SlashCommand> {
 // Prompts (prompts/*.md)
 // =============================================================================
 
-function loadPrompts(ctx: LoadContext): LoadResult<Prompt> {
-	const items: Prompt[] = [];
-	const warnings: string[] = [];
-
-	// User level: ~/.codex/prompts/
+async function loadPrompts(ctx: LoadContext): Promise<LoadResult<Prompt>> {
 	const userPromptsDir = join(ctx.home, SOURCE_PATHS.codex.userBase, "prompts");
-	const userResult = loadFilesFromDir(ctx, userPromptsDir, PROVIDER_ID, "user", {
-		extensions: ["md"],
-		transform: (name, content, path, source) => {
-			const { frontmatter, body } = parseFrontmatter(content);
-			const promptName = frontmatter.name || name.replace(/\.md$/, "");
+	const codexDir = getProjectCodexDir(ctx);
+	const projectPromptsDir = join(codexDir, "prompts");
 
-			return {
-				name: String(promptName),
-				path,
-				content: body,
-				description: frontmatter.description ? String(frontmatter.description) : undefined,
-				_source: source,
-			};
-		},
-	});
-	items.push(...userResult.items);
-	warnings.push(...(userResult.warnings || []));
+	const transformPrompt = (
+		name: string,
+		content: string,
+		path: string,
+		source: ReturnType<typeof createSourceMeta>,
+	) => {
+		const { frontmatter, body } = parseFrontmatter(content);
+		const promptName = frontmatter.name || name.replace(/\.md$/, "");
+		return {
+			name: String(promptName),
+			path,
+			content: body,
+			description: frontmatter.description ? String(frontmatter.description) : undefined,
+			_source: source,
+		};
+	};
 
-	// Project level: .codex/prompts/
-	const codexDir = ctx.fs.walkUp(".codex", { dir: true });
-	if (codexDir) {
-		const projectPromptsDir = join(codexDir, "prompts");
-		const projectResult = loadFilesFromDir(ctx, projectPromptsDir, PROVIDER_ID, "project", {
+	const results = await Promise.all([
+		loadFilesFromDir(ctx, userPromptsDir, PROVIDER_ID, "user", {
 			extensions: ["md"],
-			transform: (name, content, path, source) => {
-				const { frontmatter, body } = parseFrontmatter(content);
-				const promptName = frontmatter.name || name.replace(/\.md$/, "");
+			transform: transformPrompt,
+		}),
+		loadFilesFromDir(ctx, projectPromptsDir, PROVIDER_ID, "project", {
+			extensions: ["md"],
+			transform: transformPrompt,
+		}),
+	]);
 
-				return {
-					name: String(promptName),
-					path,
-					content: body,
-					description: frontmatter.description ? String(frontmatter.description) : undefined,
-					_source: source,
-				};
-			},
-		});
-		items.push(...projectResult.items);
-		warnings.push(...(projectResult.warnings || []));
-	}
+	const items = results.flatMap((r) => r.items);
+	const warnings = results.flatMap((r) => r.warnings || []);
 
 	return { items, warnings };
 }
@@ -382,59 +352,41 @@ function loadPrompts(ctx: LoadContext): LoadResult<Prompt> {
 // Hooks (hooks/)
 // =============================================================================
 
-function loadHooks(ctx: LoadContext): LoadResult<Hook> {
-	const items: Hook[] = [];
-	const warnings: string[] = [];
-
-	// User level: ~/.codex/hooks/
+async function loadHooks(ctx: LoadContext): Promise<LoadResult<Hook>> {
 	const userHooksDir = join(ctx.home, SOURCE_PATHS.codex.userBase, "hooks");
-	const userResult = loadFilesFromDir(ctx, userHooksDir, PROVIDER_ID, "user", {
-		extensions: ["ts", "js"],
-		transform: (name, _content, path, source) => {
-			// Extract hook type and tool from filename (e.g., pre-bash.ts -> type: pre, tool: bash)
+	const codexDir = getProjectCodexDir(ctx);
+	const projectHooksDir = join(codexDir, "hooks");
+
+	const transformHook =
+		(level: "user" | "project") =>
+		(name: string, _content: string, path: string, source: ReturnType<typeof createSourceMeta>) => {
 			const baseName = name.replace(/\.(ts|js)$/, "");
 			const match = baseName.match(/^(pre|post)-(.+)$/);
 			const hookType = (match?.[1] as "pre" | "post") || "pre";
 			const toolName = match?.[2] || baseName;
-
 			return {
 				name,
 				path,
 				type: hookType,
 				tool: toolName,
-				level: "user" as const,
+				level,
 				_source: source,
 			};
-		},
-	});
-	items.push(...userResult.items);
-	warnings.push(...(userResult.warnings || []));
+		};
 
-	// Project level: .codex/hooks/
-	const codexDir = ctx.fs.walkUp(".codex", { dir: true });
-	if (codexDir) {
-		const projectHooksDir = join(codexDir, "hooks");
-		const projectResult = loadFilesFromDir(ctx, projectHooksDir, PROVIDER_ID, "project", {
+	const results = await Promise.all([
+		loadFilesFromDir(ctx, userHooksDir, PROVIDER_ID, "user", {
 			extensions: ["ts", "js"],
-			transform: (name, _content, path, source) => {
-				const baseName = name.replace(/\.(ts|js)$/, "");
-				const match = baseName.match(/^(pre|post)-(.+)$/);
-				const hookType = (match?.[1] as "pre" | "post") || "pre";
-				const toolName = match?.[2] || baseName;
+			transform: transformHook("user"),
+		}),
+		loadFilesFromDir(ctx, projectHooksDir, PROVIDER_ID, "project", {
+			extensions: ["ts", "js"],
+			transform: transformHook("project"),
+		}),
+	]);
 
-				return {
-					name,
-					path,
-					type: hookType,
-					tool: toolName,
-					level: "project" as const,
-					_source: source,
-				};
-			},
-		});
-		items.push(...projectResult.items);
-		warnings.push(...(projectResult.warnings || []));
-	}
+	const items = results.flatMap((r) => r.items);
+	const warnings = results.flatMap((r) => r.warnings || []);
 
 	return { items, warnings };
 }
@@ -443,46 +395,36 @@ function loadHooks(ctx: LoadContext): LoadResult<Hook> {
 // Tools (tools/)
 // =============================================================================
 
-function loadTools(ctx: LoadContext): LoadResult<CustomTool> {
-	const items: CustomTool[] = [];
-	const warnings: string[] = [];
-
-	// User level: ~/.codex/tools/
+async function loadTools(ctx: LoadContext): Promise<LoadResult<CustomTool>> {
 	const userToolsDir = join(ctx.home, SOURCE_PATHS.codex.userBase, "tools");
-	const userResult = loadFilesFromDir(ctx, userToolsDir, PROVIDER_ID, "user", {
-		extensions: ["ts", "js"],
-		transform: (name, _content, path, source) => {
+	const codexDir = getProjectCodexDir(ctx);
+	const projectToolsDir = join(codexDir, "tools");
+
+	const transformTool =
+		(level: "user" | "project") =>
+		(name: string, _content: string, path: string, source: ReturnType<typeof createSourceMeta>) => {
 			const toolName = name.replace(/\.(ts|js)$/, "");
 			return {
 				name: toolName,
 				path,
-				level: "user" as const,
+				level,
 				_source: source,
 			} as CustomTool;
-		},
-	});
-	items.push(...userResult.items);
-	warnings.push(...(userResult.warnings || []));
+		};
 
-	// Project level: .codex/tools/
-	const codexDir = ctx.fs.walkUp(".codex", { dir: true });
-	if (codexDir) {
-		const projectToolsDir = join(codexDir, "tools");
-		const projectResult = loadFilesFromDir(ctx, projectToolsDir, PROVIDER_ID, "project", {
+	const results = await Promise.all([
+		loadFilesFromDir(ctx, userToolsDir, PROVIDER_ID, "user", {
 			extensions: ["ts", "js"],
-			transform: (name, _content, path, source) => {
-				const toolName = name.replace(/\.(ts|js)$/, "");
-				return {
-					name: toolName,
-					path,
-					level: "project" as const,
-					_source: source,
-				} as CustomTool;
-			},
-		});
-		items.push(...projectResult.items);
-		warnings.push(...(projectResult.warnings || []));
-	}
+			transform: transformTool("user"),
+		}),
+		loadFilesFromDir(ctx, projectToolsDir, PROVIDER_ID, "project", {
+			extensions: ["ts", "js"],
+			transform: transformTool("project"),
+		}),
+	]);
+
+	const items = results.flatMap((r) => r.items);
+	const warnings = results.flatMap((r) => r.warnings || []);
 
 	return { items, warnings };
 }
@@ -491,31 +433,30 @@ function loadTools(ctx: LoadContext): LoadResult<CustomTool> {
 // Settings (config.toml)
 // =============================================================================
 
-function loadSettings(ctx: LoadContext): LoadResult<Settings> {
-	const items: Settings[] = [];
+async function loadSettings(ctx: LoadContext): Promise<LoadResult<Settings>> {
 	const warnings: string[] = [];
 
-	// User level: ~/.codex/config.toml
 	const userConfigPath = join(ctx.home, SOURCE_PATHS.codex.userBase, "config.toml");
-	const userConfig = loadTomlConfig(ctx, userConfigPath);
+	const codexDir = getProjectCodexDir(ctx);
+	const projectConfigPath = join(codexDir, "config.toml");
+
+	const [userConfig, projectConfig] = await Promise.all([
+		loadTomlConfig(ctx, userConfigPath),
+		loadTomlConfig(ctx, projectConfigPath),
+	]);
+
+	const items: Settings[] = [];
 	if (userConfig) {
 		items.push({
 			...userConfig,
 			_source: createSourceMeta(PROVIDER_ID, userConfigPath, "user"),
 		} as Settings);
 	}
-
-	// Project level: .codex/config.toml
-	const codexDir = ctx.fs.walkUp(".codex", { dir: true });
-	if (codexDir) {
-		const projectConfigPath = join(codexDir, "config.toml");
-		const projectConfig = loadTomlConfig(ctx, projectConfigPath);
-		if (projectConfig) {
-			items.push({
-				...projectConfig,
-				_source: createSourceMeta(PROVIDER_ID, projectConfigPath, "project"),
-			} as Settings);
-		}
+	if (projectConfig) {
+		items.push({
+			...projectConfig,
+			_source: createSourceMeta(PROVIDER_ID, projectConfigPath, "project"),
+		} as Settings);
 	}
 
 	return { items, warnings };

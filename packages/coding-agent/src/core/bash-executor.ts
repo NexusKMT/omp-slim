@@ -142,7 +142,7 @@ function createOutputSink(
  * @returns Promise resolving to execution result
  */
 export async function executeBash(command: string, options?: BashExecutorOptions): Promise<BashResult> {
-	const { shell, args, env, prefix } = getShellConfig();
+	const { shell, args, env, prefix } = await getShellConfig();
 
 	// Get or create shell snapshot (for aliases, functions, options)
 	const snapshotPath = await getOrCreateSnapshot(shell, env);

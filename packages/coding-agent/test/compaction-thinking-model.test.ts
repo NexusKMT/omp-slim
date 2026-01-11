@@ -73,9 +73,7 @@ describe.skipIf(!HAS_ANTIGRAVITY_AUTH)("Compaction with thinking models (Antigra
 		});
 
 		const sessionManager = SessionManager.inMemory();
-		const settingsManager = SettingsManager.create(tempDir, tempDir);
-		// Use minimal keepRecentTokens so small test conversations have something to summarize
-		// settingsManager.applyOverrides({ compaction: { keepRecentTokens: 1 } });
+		const settingsManager = await SettingsManager.create(tempDir, tempDir);
 
 		const authStorage = new AuthStorage(join(tempDir, "auth.json"));
 		const modelRegistry = new ModelRegistry(authStorage);
@@ -177,7 +175,7 @@ describe.skipIf(!HAS_ANTHROPIC_AUTH)("Compaction with thinking models (Anthropic
 		});
 
 		const sessionManager = SessionManager.inMemory();
-		const settingsManager = SettingsManager.create(tempDir, tempDir);
+		const settingsManager = await SettingsManager.create(tempDir, tempDir);
 
 		const authStorage = new AuthStorage(join(tempDir, "auth.json"));
 		const modelRegistry = new ModelRegistry(authStorage);

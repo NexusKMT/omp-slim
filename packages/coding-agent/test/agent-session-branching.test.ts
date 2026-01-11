@@ -62,7 +62,7 @@ describe.skipIf(!API_KEY)("AgentSession branching", () => {
 		});
 
 		sessionManager = noSession ? SessionManager.inMemory() : SessionManager.create(tempDir);
-		const settingsManager = SettingsManager.create(tempDir, tempDir);
+		const settingsManager = await SettingsManager.create(tempDir, tempDir);
 		const authStorage = new AuthStorage(join(tempDir, "auth.json"));
 		const modelRegistry = new ModelRegistry(authStorage, tempDir);
 
@@ -80,7 +80,7 @@ describe.skipIf(!API_KEY)("AgentSession branching", () => {
 	}
 
 	it("should allow branching from single message", async () => {
-		createSession();
+		await createSession();
 
 		// Send one message
 		await session.prompt("Say hello");
@@ -105,7 +105,7 @@ describe.skipIf(!API_KEY)("AgentSession branching", () => {
 	});
 
 	it("should support in-memory branching in --no-session mode", async () => {
-		createSession(true);
+		await createSession(true);
 
 		// Verify sessions are disabled
 		expect(session.sessionFile).toBeUndefined();
@@ -134,7 +134,7 @@ describe.skipIf(!API_KEY)("AgentSession branching", () => {
 	});
 
 	it("should branch from middle of conversation", async () => {
-		createSession();
+		await createSession();
 
 		// Send multiple messages
 		await session.prompt("Say one");

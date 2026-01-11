@@ -5,6 +5,7 @@
  * Supports MCP server discovery from `mcp.json` with nested `mcp.servers` structure.
  */
 
+import { readFile } from "../capability/fs";
 import { registerProvider } from "../capability/index";
 import { type MCPServer, mcpCapability } from "../capability/mcp";
 import type { LoadContext, LoadResult } from "../capability/types";
@@ -23,14 +24,14 @@ registerProvider<MCPServer>(mcpCapability.id, {
 	displayName: DISPLAY_NAME,
 	description: "Load MCP servers from .vscode/mcp.json",
 	priority: PRIORITY,
-	load(ctx: LoadContext): LoadResult<MCPServer> {
+	async load(ctx: LoadContext): Promise<LoadResult<MCPServer>> {
 		const items: MCPServer[] = [];
 		const warnings: string[] = [];
 
 		// Project-only (VS Code doesn't support user-level MCP config)
 		const projectPath = getProjectPath(ctx, "vscode", "mcp.json");
-		if (projectPath && ctx.fs.isFile(projectPath)) {
-			const result = loadMCPConfig(ctx, projectPath, "project");
+		if (projectPath) {
+			const result = await loadMCPConfig(ctx, projectPath, "project");
 			items.push(...result.items);
 			if (result.warnings) warnings.push(...result.warnings);
 		}
@@ -43,11 +44,15 @@ registerProvider<MCPServer>(mcpCapability.id, {
  * Load MCP servers from a mcp.json file.
  * VS Code uses nested structure: { "mcp": { "servers": { ... } } }
  */
-function loadMCPConfig(ctx: LoadContext, path: string, level: "user" | "project"): LoadResult<MCPServer> {
+async function loadMCPConfig(
+	_ctx: LoadContext,
+	path: string,
+	level: "user" | "project",
+): Promise<LoadResult<MCPServer>> {
 	const items: MCPServer[] = [];
 	const warnings: string[] = [];
 
-	const content = ctx.fs.readFile(path);
+	const content = await readFile(path);
 	if (!content) {
 		warnings.push(`Failed to read ${path}`);
 		return { items, warnings };

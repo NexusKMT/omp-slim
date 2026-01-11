@@ -92,12 +92,12 @@ function buildConfig(shell: string): ShellConfig {
  * 3. On Unix: $SHELL if bash/zsh, then fallback paths
  * 4. Fallback: sh
  */
-export function getShellConfig(): ShellConfig {
+export async function getShellConfig(): Promise<ShellConfig> {
 	if (cachedShellConfig) {
 		return cachedShellConfig;
 	}
 
-	const settings = SettingsManager.create();
+	const settings = await SettingsManager.create();
 	const customShellPath = settings.getShellPath();
 
 	// 1. Check user-specified shell path

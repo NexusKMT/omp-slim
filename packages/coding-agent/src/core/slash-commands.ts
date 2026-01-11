@@ -1,6 +1,6 @@
 import { slashCommandCapability } from "../capability/slash-command";
 import type { SlashCommand } from "../discovery";
-import { loadSync } from "../discovery";
+import { loadCapability } from "../discovery";
 import { parseFrontmatter } from "../discovery/helpers";
 import { renderPromptTemplate } from "./prompt-templates";
 import { EMBEDDED_COMMAND_TEMPLATES } from "./tools/task/commands";
@@ -108,8 +108,8 @@ export interface LoadSlashCommandsOptions {
  * Load all custom slash commands using the capability API.
  * Loads from all registered providers (builtin, user, project).
  */
-export function loadSlashCommands(options: LoadSlashCommandsOptions = {}): FileSlashCommand[] {
-	const result = loadSync<SlashCommand>(slashCommandCapability.id, { cwd: options.cwd });
+export async function loadSlashCommands(options: LoadSlashCommandsOptions = {}): Promise<FileSlashCommand[]> {
+	const result = await loadCapability<SlashCommand>(slashCommandCapability.id, { cwd: options.cwd });
 
 	const fileCommands: FileSlashCommand[] = result.items.map((cmd) => {
 		const { description, body } = parseCommandTemplate(cmd.content);

@@ -14,6 +14,7 @@
 
 import { basename, dirname, sep } from "node:path";
 import { type ContextFile, contextFileCapability } from "../capability/context-file";
+import { readFile } from "../capability/fs";
 import { registerProvider } from "../capability/index";
 import { type Instruction, instructionCapability } from "../capability/instruction";
 import type { LoadContext, LoadResult, SourceMeta } from "../capability/types";
@@ -27,14 +28,13 @@ const PRIORITY = 30;
 // Context Files
 // =============================================================================
 
-function loadContextFiles(ctx: LoadContext): LoadResult<ContextFile> {
+async function loadContextFiles(ctx: LoadContext): Promise<LoadResult<ContextFile>> {
 	const items: ContextFile[] = [];
 	const warnings: string[] = [];
 
-	// Project-level: .github/copilot-instructions.md
 	const copilotInstructionsPath = getProjectPath(ctx, "github", "copilot-instructions.md");
-	if (copilotInstructionsPath && ctx.fs.isFile(copilotInstructionsPath)) {
-		const content = ctx.fs.readFile(copilotInstructionsPath);
+	if (copilotInstructionsPath) {
+		const content = await readFile(copilotInstructionsPath);
 		if (content) {
 			const fileDir = dirname(copilotInstructionsPath);
 			const depth = calculateDepth(ctx.cwd, fileDir, sep);
@@ -46,8 +46,6 @@ function loadContextFiles(ctx: LoadContext): LoadResult<ContextFile> {
 				depth,
 				_source: createSourceMeta(PROVIDER_ID, copilotInstructionsPath, "project"),
 			});
-		} else {
-			warnings.push(`Failed to read ${copilotInstructionsPath}`);
 		}
 	}
 
@@ -58,14 +56,13 @@ function loadContextFiles(ctx: LoadContext): LoadResult<ContextFile> {
 // Instructions
 // =============================================================================
 
-function loadInstructions(ctx: LoadContext): LoadResult<Instruction> {
+async function loadInstructions(ctx: LoadContext): Promise<LoadResult<Instruction>> {
 	const items: Instruction[] = [];
 	const warnings: string[] = [];
 
-	// Project-level: .github/instructions/*.instructions.md
 	const instructionsDir = getProjectPath(ctx, "github", "instructions");
-	if (instructionsDir && ctx.fs.isDir(instructionsDir)) {
-		const result = loadFilesFromDir<Instruction>(ctx, instructionsDir, PROVIDER_ID, "project", {
+	if (instructionsDir) {
+		const result = await loadFilesFromDir<Instruction>(ctx, instructionsDir, PROVIDER_ID, "project", {
 			extensions: ["md"],
 			transform: transformInstruction,
 		});

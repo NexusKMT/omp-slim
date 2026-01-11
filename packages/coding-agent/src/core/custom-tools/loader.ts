@@ -9,7 +9,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as typebox from "@sinclair/typebox";
 import { toolCapability } from "../../capability/tool";
-import { type CustomTool, loadSync } from "../../discovery";
+import { type CustomTool, loadCapability } from "../../discovery";
 import * as piCodingAgent from "../../index";
 import { theme } from "../../modes/interactive/theme/theme";
 import type { ExecOptions } from "../exec";
@@ -225,7 +225,7 @@ export async function discoverAndLoadCustomTools(
 	};
 
 	// 1. Discover tools via capability system (user + project from all providers)
-	const discoveredTools = loadSync<CustomTool>(toolCapability.id, { cwd });
+	const discoveredTools = await loadCapability<CustomTool>(toolCapability.id, { cwd });
 	for (const tool of discoveredTools.items) {
 		addPath(tool.path, {
 			provider: tool._source.provider,

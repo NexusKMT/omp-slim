@@ -18,7 +18,7 @@ import {
 	enableProvider,
 	getAllProvidersInfo,
 	isProviderEnabled,
-	loadSync,
+	loadCapability,
 } from "../../../../discovery";
 import type {
 	DashboardState,
@@ -42,7 +42,7 @@ export interface ExtensionSettingsManager {
 /**
  * Load all extensions from all capabilities.
  */
-export function loadAllExtensions(cwd?: string, disabledIds?: string[]): Extension[] {
+export async function loadAllExtensions(cwd?: string, disabledIds?: string[]): Promise<Extension[]> {
 	const extensions: Extension[] = [];
 	const disabledExtensions = new Set<string>(disabledIds ?? []);
 
@@ -100,7 +100,7 @@ export function loadAllExtensions(cwd?: string, disabledIds?: string[]): Extensi
 
 	// Load skills
 	try {
-		const skills = loadSync<Skill>("skills", loadOpts);
+		const skills = await loadCapability<Skill>("skills", loadOpts);
 		addItems(skills.all, "skill", {
 			getDescription: (s) => s.frontmatter?.description,
 			getTrigger: (s) => s.frontmatter?.globs?.join(", "),
@@ -111,7 +111,7 @@ export function loadAllExtensions(cwd?: string, disabledIds?: string[]): Extensi
 
 	// Load rules
 	try {
-		const rules = loadSync<Rule>("rules", loadOpts);
+		const rules = await loadCapability<Rule>("rules", loadOpts);
 		addItems(rules.all, "rule", {
 			getDescription: (r) => r.description,
 			getTrigger: (r) => r.globs?.join(", ") || (r.alwaysApply ? "always" : undefined),
@@ -122,7 +122,7 @@ export function loadAllExtensions(cwd?: string, disabledIds?: string[]): Extensi
 
 	// Load custom tools
 	try {
-		const tools = loadSync<CustomTool>("tools", loadOpts);
+		const tools = await loadCapability<CustomTool>("tools", loadOpts);
 		addItems(tools.all, "tool", {
 			getDescription: (t) => t.description,
 		});
@@ -132,7 +132,7 @@ export function loadAllExtensions(cwd?: string, disabledIds?: string[]): Extensi
 
 	// Load extension modules
 	try {
-		const modules = loadSync<ExtensionModule>("extension-modules", loadOpts);
+		const modules = await loadCapability<ExtensionModule>("extension-modules", loadOpts);
 		const nativeModules = modules.all.filter((module) => module._source.provider === "native");
 		addItems(nativeModules, "extension-module");
 	} catch {
@@ -141,7 +141,7 @@ export function loadAllExtensions(cwd?: string, disabledIds?: string[]): Extensi
 
 	// Load MCP servers
 	try {
-		const mcps = loadSync<MCPServer>("mcps", loadOpts);
+		const mcps = await loadCapability<MCPServer>("mcps", loadOpts);
 		for (const server of mcps.all) {
 			const id = makeExtensionId("mcp", server.name);
 			const isDisabled = disabledExtensions.has(id);
@@ -184,7 +184,7 @@ export function loadAllExtensions(cwd?: string, disabledIds?: string[]): Extensi
 
 	// Load prompts
 	try {
-		const prompts = loadSync<Prompt>("prompts", loadOpts);
+		const prompts = await loadCapability<Prompt>("prompts", loadOpts);
 		addItems(prompts.all, "prompt", {
 			getDescription: () => undefined,
 			getTrigger: (p) => `/prompts:${p.name}`,
@@ -195,7 +195,7 @@ export function loadAllExtensions(cwd?: string, disabledIds?: string[]): Extensi
 
 	// Load slash commands
 	try {
-		const commands = loadSync<SlashCommand>("slash-commands", loadOpts);
+		const commands = await loadCapability<SlashCommand>("slash-commands", loadOpts);
 		addItems(commands.all, "slash-command", {
 			getDescription: () => undefined,
 			getTrigger: (c) => `/${c.name}`,
@@ -206,7 +206,7 @@ export function loadAllExtensions(cwd?: string, disabledIds?: string[]): Extensi
 
 	// Load hooks
 	try {
-		const hooks = loadSync<Hook>("hooks", loadOpts);
+		const hooks = await loadCapability<Hook>("hooks", loadOpts);
 		for (const hook of hooks.all) {
 			const id = makeExtensionId("hook", `${hook.type}:${hook.tool}:${hook.name}`);
 			const isDisabled = disabledExtensions.has(id);
@@ -249,7 +249,7 @@ export function loadAllExtensions(cwd?: string, disabledIds?: string[]): Extensi
 
 	// Load context files
 	try {
-		const contextFiles = loadSync<ContextFile>("context-files", loadOpts);
+		const contextFiles = await loadCapability<ContextFile>("context-files", loadOpts);
 		for (const file of contextFiles.all) {
 			// Extract filename from path for display
 			const name = file.path.split("/").pop() || file.path;
@@ -511,8 +511,8 @@ export function filterByProvider(extensions: Extension[], providerId: string): E
 /**
  * Create initial dashboard state.
  */
-export function createInitialState(cwd?: string, disabledIds?: string[]): DashboardState {
-	const extensions = loadAllExtensions(cwd, disabledIds);
+export async function createInitialState(cwd?: string, disabledIds?: string[]): Promise<DashboardState> {
+	const extensions = await loadAllExtensions(cwd, disabledIds);
 	const tabs = buildProviderTabs(extensions);
 	const tabFiltered = extensions; // "all" tab by default
 	const searchFiltered = tabFiltered;
@@ -546,8 +546,12 @@ export function toggleProvider(providerId: string): boolean {
 /**
  * Refresh state after toggle.
  */
-export function refreshState(state: DashboardState, cwd?: string, disabledIds?: string[]): DashboardState {
-	const extensions = loadAllExtensions(cwd, disabledIds);
+export async function refreshState(
+	state: DashboardState,
+	cwd?: string,
+	disabledIds?: string[],
+): Promise<DashboardState> {
+	const extensions = await loadAllExtensions(cwd, disabledIds);
 	const tabs = buildProviderTabs(extensions);
 
 	// Get current provider from tabs

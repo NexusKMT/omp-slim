@@ -6,15 +6,15 @@
  *
  * Sources:
  * - User: ~/.cursor
- * - Project: .cursor/ (walks up from cwd)
+ * - Project: .cursor/ (cwd only)
  *
  * Capabilities:
  * - mcps: From mcp.json with mcpServers key
  * - rules: From rules/*.mdc files with MDC frontmatter (description, globs, alwaysApply)
  * - settings: From settings.json if present
- * - Legacy: .cursorrules file in project root as a single rule
  */
 
+import { readFile } from "../capability/fs";
 import { registerProvider } from "../capability/index";
 import { type MCPServer, mcpCapability } from "../capability/mcp";
 import type { Rule } from "../capability/rule";
@@ -40,66 +40,62 @@ const PRIORITY = 50;
 // MCP Servers
 // =============================================================================
 
-function loadMCPServers(ctx: LoadContext): LoadResult<MCPServer> {
+function parseMCPServers(
+	content: string,
+	path: string,
+	level: "user" | "project",
+): { items: MCPServer[]; warning?: string } {
+	const items: MCPServer[] = [];
+
+	const parsed = parseJSON<{ mcpServers?: Record<string, unknown> }>(content);
+	if (!parsed?.mcpServers) {
+		return { items, warning: `${path}: missing or invalid 'mcpServers' key` };
+	}
+
+	const servers = expandEnvVarsDeep(parsed.mcpServers);
+	for (const [name, config] of Object.entries(servers)) {
+		const serverConfig = config as Record<string, unknown>;
+		items.push({
+			name,
+			command: serverConfig.command as string | undefined,
+			args: serverConfig.args as string[] | undefined,
+			env: serverConfig.env as Record<string, string> | undefined,
+			url: serverConfig.url as string | undefined,
+			headers: serverConfig.headers as Record<string, string> | undefined,
+			transport: ["stdio", "sse", "http"].includes(serverConfig.type as string)
+				? (serverConfig.type as "stdio" | "sse" | "http")
+				: undefined,
+			_source: createSourceMeta(PROVIDER_ID, path, level),
+		});
+	}
+
+	return { items };
+}
+
+async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> {
 	const items: MCPServer[] = [];
 	const warnings: string[] = [];
 
-	// User-level: ~/.cursor/mcp.json
 	const userPath = getUserPath(ctx, "cursor", "mcp.json");
-	if (userPath && ctx.fs.isFile(userPath)) {
-		const content = ctx.fs.readFile(userPath);
-		if (content) {
-			const parsed = parseJSON<{ mcpServers?: Record<string, unknown> }>(content);
-			if (parsed?.mcpServers) {
-				const servers = expandEnvVarsDeep(parsed.mcpServers);
-				for (const [name, config] of Object.entries(servers)) {
-					const serverConfig = config as Record<string, unknown>;
-					items.push({
-						name,
-						command: serverConfig.command as string | undefined,
-						args: serverConfig.args as string[] | undefined,
-						env: serverConfig.env as Record<string, string> | undefined,
-						url: serverConfig.url as string | undefined,
-						headers: serverConfig.headers as Record<string, string> | undefined,
-						transport: ["stdio", "sse", "http"].includes(serverConfig.type as string)
-							? (serverConfig.type as "stdio" | "sse" | "http")
-							: undefined,
-						_source: createSourceMeta(PROVIDER_ID, userPath, "user"),
-					});
-				}
-			} else {
-				warnings.push(`${userPath}: missing or invalid 'mcpServers' key`);
-			}
-		}
+
+	const [userContent, projectPath] = await Promise.all([
+		userPath ? readFile(userPath) : Promise.resolve(null),
+		getProjectPath(ctx, "cursor", "mcp.json"),
+	]);
+
+	const projectContentPromise = projectPath ? readFile(projectPath) : Promise.resolve(null);
+
+	if (userContent && userPath) {
+		const result = parseMCPServers(userContent, userPath, "user");
+		items.push(...result.items);
+		if (result.warning) warnings.push(result.warning);
 	}
 
-	// Project-level: .cursor/mcp.json
-	const projectPath = getProjectPath(ctx, "cursor", "mcp.json");
-	if (projectPath && ctx.fs.isFile(projectPath)) {
-		const content = ctx.fs.readFile(projectPath);
-		if (content) {
-			const parsed = parseJSON<{ mcpServers?: Record<string, unknown> }>(content);
-			if (parsed?.mcpServers) {
-				const servers = expandEnvVarsDeep(parsed.mcpServers);
-				for (const [name, config] of Object.entries(servers)) {
-					const serverConfig = config as Record<string, unknown>;
-					items.push({
-						name,
-						command: serverConfig.command as string | undefined,
-						args: serverConfig.args as string[] | undefined,
-						env: serverConfig.env as Record<string, string> | undefined,
-						url: serverConfig.url as string | undefined,
-						headers: serverConfig.headers as Record<string, string> | undefined,
-						transport: ["stdio", "sse", "http"].includes(serverConfig.type as string)
-							? (serverConfig.type as "stdio" | "sse" | "http")
-							: undefined,
-						_source: createSourceMeta(PROVIDER_ID, projectPath, "project"),
-					});
-				}
-			} else {
-				warnings.push(`${projectPath}: missing or invalid 'mcpServers' key`);
-			}
-		}
+	const projectContent = await projectContentPromise;
+	if (projectContent && projectPath) {
+		const result = parseMCPServers(projectContent, projectPath, "project");
+		items.push(...result.items);
+		if (result.warning) warnings.push(result.warning);
 	}
 
 	return { items, warnings };
@@ -109,45 +105,34 @@ function loadMCPServers(ctx: LoadContext): LoadResult<MCPServer> {
 // Rules
 // =============================================================================
 
-function loadRules(ctx: LoadContext): LoadResult<Rule> {
+async function loadRules(ctx: LoadContext): Promise<LoadResult<Rule>> {
 	const items: Rule[] = [];
 	const warnings: string[] = [];
 
-	// Legacy: .cursorrules file in project root
-	const legacyPath = ctx.fs.walkUp(".cursorrules", { file: true });
-	if (legacyPath) {
-		const content = ctx.fs.readFile(legacyPath);
-		if (content) {
-			items.push({
-				name: "cursorrules",
-				path: legacyPath,
-				content,
-				_source: createSourceMeta(PROVIDER_ID, legacyPath, "project"),
-			});
-		}
-	}
-
-	// User-level: ~/.cursor/rules/*.mdc
 	const userRulesPath = getUserPath(ctx, "cursor", "rules");
-	if (userRulesPath && ctx.fs.isDir(userRulesPath)) {
-		const result = loadFilesFromDir<Rule>(ctx, userRulesPath, PROVIDER_ID, "user", {
-			extensions: ["mdc", "md"],
-			transform: transformMDCRule,
-		});
-		items.push(...result.items);
-		if (result.warnings) warnings.push(...result.warnings);
-	}
 
-	// Project-level: .cursor/rules/*.mdc
 	const projectRulesPath = getProjectPath(ctx, "cursor", "rules");
-	if (projectRulesPath && ctx.fs.isDir(projectRulesPath)) {
-		const result = loadFilesFromDir<Rule>(ctx, projectRulesPath, PROVIDER_ID, "project", {
-			extensions: ["mdc", "md"],
-			transform: transformMDCRule,
-		});
-		items.push(...result.items);
-		if (result.warnings) warnings.push(...result.warnings);
-	}
+
+	const [userResult, projectResult] = await Promise.all([
+		userRulesPath
+			? loadFilesFromDir<Rule>(ctx, userRulesPath, PROVIDER_ID, "user", {
+					extensions: ["mdc", "md"],
+					transform: transformMDCRule,
+				})
+			: Promise.resolve({ items: [] as Rule[], warnings: undefined }),
+		projectRulesPath
+			? loadFilesFromDir<Rule>(ctx, projectRulesPath, PROVIDER_ID, "project", {
+					extensions: ["mdc", "md"],
+					transform: transformMDCRule,
+				})
+			: Promise.resolve({ items: [] as Rule[], warnings: undefined }),
+	]);
+
+	items.push(...userResult.items);
+	if (userResult.warnings) warnings.push(...userResult.warnings);
+
+	items.push(...projectResult.items);
+	if (projectResult.warnings) warnings.push(...projectResult.warnings);
 
 	return { items, warnings };
 }
@@ -192,45 +177,45 @@ function transformMDCRule(
 // Settings
 // =============================================================================
 
-function loadSettings(ctx: LoadContext): LoadResult<Settings> {
+async function loadSettings(ctx: LoadContext): Promise<LoadResult<Settings>> {
 	const items: Settings[] = [];
 	const warnings: string[] = [];
 
-	// User-level: ~/.cursor/settings.json
 	const userPath = getUserPath(ctx, "cursor", "settings.json");
-	if (userPath && ctx.fs.isFile(userPath)) {
-		const content = ctx.fs.readFile(userPath);
-		if (content) {
-			const parsed = parseJSON<Record<string, unknown>>(content);
-			if (parsed) {
-				items.push({
-					path: userPath,
-					data: parsed,
-					level: "user",
-					_source: createSourceMeta(PROVIDER_ID, userPath, "user"),
-				});
-			} else {
-				warnings.push(`${userPath}: invalid JSON`);
-			}
+
+	const [userContent, projectPath] = await Promise.all([
+		userPath ? readFile(userPath) : Promise.resolve(null),
+		getProjectPath(ctx, "cursor", "settings.json"),
+	]);
+
+	const projectContentPromise = projectPath ? readFile(projectPath) : Promise.resolve(null);
+
+	if (userContent && userPath) {
+		const parsed = parseJSON<Record<string, unknown>>(userContent);
+		if (parsed) {
+			items.push({
+				path: userPath,
+				data: parsed,
+				level: "user",
+				_source: createSourceMeta(PROVIDER_ID, userPath, "user"),
+			});
+		} else {
+			warnings.push(`${userPath}: invalid JSON`);
 		}
 	}
 
-	// Project-level: .cursor/settings.json
-	const projectPath = getProjectPath(ctx, "cursor", "settings.json");
-	if (projectPath && ctx.fs.isFile(projectPath)) {
-		const content = ctx.fs.readFile(projectPath);
-		if (content) {
-			const parsed = parseJSON<Record<string, unknown>>(content);
-			if (parsed) {
-				items.push({
-					path: projectPath,
-					data: parsed,
-					level: "project",
-					_source: createSourceMeta(PROVIDER_ID, projectPath, "project"),
-				});
-			} else {
-				warnings.push(`${projectPath}: invalid JSON`);
-			}
+	const projectContent = await projectContentPromise;
+	if (projectContent && projectPath) {
+		const parsed = parseJSON<Record<string, unknown>>(projectContent);
+		if (parsed) {
+			items.push({
+				path: projectPath,
+				data: parsed,
+				level: "project",
+				_source: createSourceMeta(PROVIDER_ID, projectPath, "project"),
+			});
+		} else {
+			warnings.push(`${projectPath}: invalid JSON`);
 		}
 	}
 

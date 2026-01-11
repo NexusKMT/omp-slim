@@ -19,8 +19,8 @@ import type { TSchema } from "@sinclair/typebox";
 import type { AgentSessionEvent } from "../../agent-session";
 import { AuthStorage } from "../../auth-storage";
 import type { CustomTool } from "../../custom-tools/types";
-import { parseModelPattern, parseModelString } from "../../model-resolver";
 import { ModelRegistry } from "../../model-registry";
+import { parseModelPattern, parseModelString } from "../../model-resolver";
 import { createAgentSession, discoverAuthStorage, discoverModels } from "../../sdk";
 import { SessionManager } from "../../session-manager";
 import { untilAborted } from "../../utils";
@@ -127,16 +127,28 @@ function createMCPProxyTool(metadata: MCPToolMetadata): CustomTool<TSchema> {
 		parameters: metadata.parameters as TSchema,
 		execute: async (_toolCallId, params, _onUpdate, _ctx, signal) => {
 			try {
-				const result = await callMCPToolViaParent(metadata.name, params as Record<string, unknown>, signal, metadata.timeoutMs);
+				const result = await callMCPToolViaParent(
+					metadata.name,
+					params as Record<string, unknown>,
+					signal,
+					metadata.timeoutMs,
+				);
 				return {
 					content: result.content.map((c) =>
-						c.type === "text" ? { type: "text" as const, text: c.text ?? "" } : { type: "text" as const, text: JSON.stringify(c) },
+						c.type === "text"
+							? { type: "text" as const, text: c.text ?? "" }
+							: { type: "text" as const, text: JSON.stringify(c) },
 					),
 					details: { serverName: metadata.serverName, mcpToolName: metadata.mcpToolName, isError: result.isError },
 				};
 			} catch (error) {
 				return {
-					content: [{ type: "text" as const, text: `MCP error: ${error instanceof Error ? error.message : String(error)}` }],
+					content: [
+						{
+							type: "text" as const,
+							text: `MCP error: ${error instanceof Error ? error.message : String(error)}`,
+						},
+					],
 					details: { serverName: metadata.serverName, mcpToolName: metadata.mcpToolName, isError: true },
 				};
 			}

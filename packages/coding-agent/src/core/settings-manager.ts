@@ -2,7 +2,7 @@ import { existsSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { type Settings as SettingsItem, settingsCapability } from "../capability/settings";
 import { getAgentDbPath, getAgentDir } from "../config";
-import { loadSync } from "../discovery";
+import { loadCapability } from "../discovery";
 import type { SymbolPreset } from "../modes/interactive/theme/theme";
 import { AgentStorage } from "./agent-storage";
 import { logger } from "./logger";
@@ -419,14 +419,21 @@ export class SettingsManager {
 	 * @param cwd - Current working directory for project settings discovery
 	 * @param initialSettings - Initial global settings to use
 	 * @param persist - Whether to persist settings changes to storage
+	 * @param projectSettings - Pre-loaded project settings (to avoid async in constructor)
 	 */
-	private constructor(storage: AgentStorage | null, cwd: string | null, initialSettings: Settings, persist: boolean) {
+	private constructor(
+		storage: AgentStorage | null,
+		cwd: string | null,
+		initialSettings: Settings,
+		persist: boolean,
+		projectSettings: Settings,
+	) {
 		this.storage = storage;
 		this.cwd = cwd;
 		this.persist = persist;
 		this.globalSettings = initialSettings;
 		this.overrides = {};
-		this.rebuildSettings();
+		this.rebuildSettings(projectSettings);
 
 		// Apply environment variables from settings
 		this.applyEnvironmentVariables();
@@ -458,12 +465,12 @@ export class SettingsManager {
 	 * @param agentDir - Agent directory containing agent.db
 	 * @returns Configured SettingsManager with merged global and user settings
 	 */
-	static create(cwd: string = process.cwd(), agentDir: string = getAgentDir()): SettingsManager {
+	static async create(cwd: string = process.cwd(), agentDir: string = getAgentDir()): Promise<SettingsManager> {
 		const storage = AgentStorage.open(getAgentDbPath(agentDir));
 		SettingsManager.migrateLegacySettingsFile(storage, agentDir);
 
 		// Use capability API to load user-level settings from all providers
-		const result = loadSync(settingsCapability.id, { cwd });
+		const result = await loadCapability(settingsCapability.id, { cwd });
 
 		// Merge all user-level settings
 		let globalSettings: Settings = {};
@@ -477,7 +484,10 @@ export class SettingsManager {
 		const storedSettings = SettingsManager.loadFromStorage(storage);
 		globalSettings = deepMergeSettings(globalSettings, storedSettings);
 
-		return new SettingsManager(storage, cwd, globalSettings, true);
+		// Load project settings before construction (constructor is sync)
+		const projectSettings = await SettingsManager.loadProjectSettingsStatic(cwd);
+
+		return new SettingsManager(storage, cwd, globalSettings, true, projectSettings);
 	}
 
 	/**
@@ -486,7 +496,7 @@ export class SettingsManager {
 	 * @returns SettingsManager that won't persist changes to disk
 	 */
 	static inMemory(settings: Partial<Settings> = {}): SettingsManager {
-		return new SettingsManager(null, null, settings, false);
+		return new SettingsManager(null, null, settings, false, {});
 	}
 
 	/**
@@ -538,11 +548,14 @@ export class SettingsManager {
 		return settings as Settings;
 	}
 
-	private loadProjectSettings(): Settings {
-		if (!this.cwd) return {};
+	/**
+	 * Static helper to load project settings (used by create() before construction).
+	 */
+	private static async loadProjectSettingsStatic(cwd: string | null): Promise<Settings> {
+		if (!cwd) return {};
 
 		// Use capability API to discover settings from all providers
-		const result = loadSync(settingsCapability.id, { cwd: this.cwd });
+		const result = await loadCapability(settingsCapability.id, { cwd });
 
 		// Merge only project-level settings (user-level settings are handled separately via globalSettings)
 		let merged: Settings = {};
@@ -555,24 +568,28 @@ export class SettingsManager {
 		return SettingsManager.migrateSettings(merged as Record<string, unknown>);
 	}
 
-	private rebuildSettings(projectSettings?: Settings): void {
-		const resolvedProjectSettings = projectSettings ?? this.loadProjectSettings();
+	private async loadProjectSettings(): Promise<Settings> {
+		return SettingsManager.loadProjectSettingsStatic(this.cwd);
+	}
+
+	private rebuildSettings(projectSettings: Settings): void {
 		this.settings = normalizeSettings(
-			deepMergeSettings(deepMergeSettings(this.globalSettings, resolvedProjectSettings), this.overrides),
+			deepMergeSettings(deepMergeSettings(this.globalSettings, projectSettings), this.overrides),
 		);
 	}
 
 	/** Apply additional overrides on top of current settings */
-	applyOverrides(overrides: Partial<Settings>): void {
+	async applyOverrides(overrides: Partial<Settings>): Promise<void> {
 		this.overrides = deepMergeSettings(this.overrides, overrides);
-		this.rebuildSettings();
+		const projectSettings = await this.loadProjectSettings();
+		this.rebuildSettings(projectSettings);
 	}
 
 	/**
 	 * Persist current global settings to SQLite storage and rebuild merged settings.
 	 * Merges with any concurrent changes in storage before saving.
 	 */
-	private save(): void {
+	private async save(): Promise<void> {
 		if (this.persist && this.storage) {
 			try {
 				const currentSettings = this.storage.getSettings() ?? {};
@@ -585,7 +602,7 @@ export class SettingsManager {
 		}
 
 		// Always re-merge to update active settings (needed for both file and inMemory modes)
-		const projectSettings = this.loadProjectSettings();
+		const projectSettings = await this.loadProjectSettings();
 		this.rebuildSettings(projectSettings);
 	}
 
@@ -593,9 +610,9 @@ export class SettingsManager {
 		return this.settings.lastChangelogVersion;
 	}
 
-	setLastChangelogVersion(version: string): void {
+	async setLastChangelogVersion(version: string): Promise<void> {
 		this.globalSettings.lastChangelogVersion = version;
-		this.save();
+		await this.save();
 	}
 
 	/**
@@ -608,7 +625,7 @@ export class SettingsManager {
 	/**
 	 * Set model for a role. Model should be "provider/modelId" format.
 	 */
-	setModelRole(role: string, model: string): void {
+	async setModelRole(role: string, model: string): Promise<void> {
 		if (!this.globalSettings.modelRoles) {
 			this.globalSettings.modelRoles = {};
 		}
@@ -618,7 +635,7 @@ export class SettingsManager {
 			this.overrides.modelRoles[role] = model;
 		}
 
-		this.save();
+		await this.save();
 	}
 
 	/**
@@ -632,66 +649,66 @@ export class SettingsManager {
 		return this.settings.steeringMode || "one-at-a-time";
 	}
 
-	setSteeringMode(mode: "all" | "one-at-a-time"): void {
+	async setSteeringMode(mode: "all" | "one-at-a-time"): Promise<void> {
 		this.globalSettings.steeringMode = mode;
-		this.save();
+		await this.save();
 	}
 
 	getFollowUpMode(): "all" | "one-at-a-time" {
 		return this.settings.followUpMode || "one-at-a-time";
 	}
 
-	setFollowUpMode(mode: "all" | "one-at-a-time"): void {
+	async setFollowUpMode(mode: "all" | "one-at-a-time"): Promise<void> {
 		this.globalSettings.followUpMode = mode;
-		this.save();
+		await this.save();
 	}
 
 	getInterruptMode(): "immediate" | "wait" {
 		return this.settings.interruptMode || "immediate";
 	}
 
-	setInterruptMode(mode: "immediate" | "wait"): void {
+	async setInterruptMode(mode: "immediate" | "wait"): Promise<void> {
 		this.globalSettings.interruptMode = mode;
-		this.save();
+		await this.save();
 	}
 
 	getTheme(): string | undefined {
 		return this.settings.theme;
 	}
 
-	setTheme(theme: string): void {
+	async setTheme(theme: string): Promise<void> {
 		this.globalSettings.theme = theme;
-		this.save();
+		await this.save();
 	}
 
 	getSymbolPreset(): SymbolPreset | undefined {
 		return this.settings.symbolPreset;
 	}
 
-	setSymbolPreset(preset: SymbolPreset): void {
+	async setSymbolPreset(preset: SymbolPreset): Promise<void> {
 		this.globalSettings.symbolPreset = preset;
-		this.save();
+		await this.save();
 	}
 
 	getDefaultThinkingLevel(): "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined {
 		return this.settings.defaultThinkingLevel;
 	}
 
-	setDefaultThinkingLevel(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh"): void {
+	async setDefaultThinkingLevel(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh"): Promise<void> {
 		this.globalSettings.defaultThinkingLevel = level;
-		this.save();
+		await this.save();
 	}
 
 	getCompactionEnabled(): boolean {
 		return this.settings.compaction?.enabled ?? true;
 	}
 
-	setCompactionEnabled(enabled: boolean): void {
+	async setCompactionEnabled(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.compaction) {
 			this.globalSettings.compaction = {};
 		}
 		this.globalSettings.compaction.enabled = enabled;
-		this.save();
+		await this.save();
 	}
 
 	getCompactionReserveTokens(): number {
@@ -714,12 +731,12 @@ export class SettingsManager {
 		return this.settings.branchSummary?.enabled ?? false;
 	}
 
-	setBranchSummaryEnabled(enabled: boolean): void {
+	async setBranchSummaryEnabled(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.branchSummary) {
 			this.globalSettings.branchSummary = {};
 		}
 		this.globalSettings.branchSummary.enabled = enabled;
-		this.save();
+		await this.save();
 	}
 
 	getBranchSummarySettings(): { enabled: boolean; reserveTokens: number } {
@@ -733,12 +750,12 @@ export class SettingsManager {
 		return this.settings.retry?.enabled ?? true;
 	}
 
-	setRetryEnabled(enabled: boolean): void {
+	async setRetryEnabled(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.retry) {
 			this.globalSettings.retry = {};
 		}
 		this.globalSettings.retry.enabled = enabled;
-		this.save();
+		await this.save();
 	}
 
 	getRetrySettings(): { enabled: boolean; maxRetries: number; baseDelayMs: number } {
@@ -757,48 +774,48 @@ export class SettingsManager {
 		return this.settings.hideThinkingBlock ?? false;
 	}
 
-	setHideThinkingBlock(hide: boolean): void {
+	async setHideThinkingBlock(hide: boolean): Promise<void> {
 		this.globalSettings.hideThinkingBlock = hide;
-		this.save();
+		await this.save();
 	}
 
 	getShellPath(): string | undefined {
 		return this.settings.shellPath;
 	}
 
-	setShellPath(path: string | undefined): void {
+	async setShellPath(path: string | undefined): Promise<void> {
 		this.globalSettings.shellPath = path;
-		this.save();
+		await this.save();
 	}
 
 	getCollapseChangelog(): boolean {
 		return this.settings.collapseChangelog ?? false;
 	}
 
-	setCollapseChangelog(collapse: boolean): void {
+	async setCollapseChangelog(collapse: boolean): Promise<void> {
 		this.globalSettings.collapseChangelog = collapse;
-		this.save();
+		await this.save();
 	}
 
 	getExtensionPaths(): string[] {
 		return [...(this.settings.extensions ?? [])];
 	}
 
-	setExtensionPaths(paths: string[]): void {
+	async setExtensionPaths(paths: string[]): Promise<void> {
 		this.globalSettings.extensions = paths;
-		this.save();
+		await this.save();
 	}
 
 	getSkillsEnabled(): boolean {
 		return this.settings.skills?.enabled ?? true;
 	}
 
-	setSkillsEnabled(enabled: boolean): void {
+	async setSkillsEnabled(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.skills) {
 			this.globalSettings.skills = {};
 		}
 		this.globalSettings.skills.enabled = enabled;
-		this.save();
+		await this.save();
 	}
 
 	getSkillsSettings(): Required<SkillsSettings> {
@@ -826,48 +843,48 @@ export class SettingsManager {
 		return this.settings.terminal?.showImages ?? true;
 	}
 
-	setShowImages(show: boolean): void {
+	async setShowImages(show: boolean): Promise<void> {
 		if (!this.globalSettings.terminal) {
 			this.globalSettings.terminal = {};
 		}
 		this.globalSettings.terminal.showImages = show;
-		this.save();
+		await this.save();
 	}
 
 	getNotificationOnComplete(): NotificationMethod {
 		return this.settings.notifications?.onComplete ?? "auto";
 	}
 
-	setNotificationOnComplete(method: NotificationMethod): void {
+	async setNotificationOnComplete(method: NotificationMethod): Promise<void> {
 		if (!this.globalSettings.notifications) {
 			this.globalSettings.notifications = {};
 		}
 		this.globalSettings.notifications.onComplete = method;
-		this.save();
+		await this.save();
 	}
 
 	getImageAutoResize(): boolean {
 		return this.settings.images?.autoResize ?? true;
 	}
 
-	setImageAutoResize(enabled: boolean): void {
+	async setImageAutoResize(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.images) {
 			this.globalSettings.images = {};
 		}
 		this.globalSettings.images.autoResize = enabled;
-		this.save();
+		await this.save();
 	}
 
 	getBlockImages(): boolean {
 		return this.settings.images?.blockImages ?? false;
 	}
 
-	setBlockImages(blocked: boolean): void {
+	async setBlockImages(blocked: boolean): Promise<void> {
 		if (!this.globalSettings.images) {
 			this.globalSettings.images = {};
 		}
 		this.globalSettings.images.blockImages = blocked;
-		this.save();
+		await this.save();
 	}
 
 	getEnabledModels(): string[] | undefined {
@@ -885,52 +902,52 @@ export class SettingsManager {
 		};
 	}
 
-	setExaEnabled(enabled: boolean): void {
+	async setExaEnabled(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.exa) {
 			this.globalSettings.exa = {};
 		}
 		this.globalSettings.exa.enabled = enabled;
-		this.save();
+		await this.save();
 	}
 
-	setExaSearchEnabled(enabled: boolean): void {
+	async setExaSearchEnabled(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.exa) {
 			this.globalSettings.exa = {};
 		}
 		this.globalSettings.exa.enableSearch = enabled;
-		this.save();
+		await this.save();
 	}
 
-	setExaLinkedinEnabled(enabled: boolean): void {
+	async setExaLinkedinEnabled(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.exa) {
 			this.globalSettings.exa = {};
 		}
 		this.globalSettings.exa.enableLinkedin = enabled;
-		this.save();
+		await this.save();
 	}
 
-	setExaCompanyEnabled(enabled: boolean): void {
+	async setExaCompanyEnabled(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.exa) {
 			this.globalSettings.exa = {};
 		}
 		this.globalSettings.exa.enableCompany = enabled;
-		this.save();
+		await this.save();
 	}
 
-	setExaResearcherEnabled(enabled: boolean): void {
+	async setExaResearcherEnabled(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.exa) {
 			this.globalSettings.exa = {};
 		}
 		this.globalSettings.exa.enableResearcher = enabled;
-		this.save();
+		await this.save();
 	}
 
-	setExaWebsetsEnabled(enabled: boolean): void {
+	async setExaWebsetsEnabled(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.exa) {
 			this.globalSettings.exa = {};
 		}
 		this.globalSettings.exa.enableWebsets = enabled;
-		this.save();
+		await this.save();
 	}
 
 	// Provider settings
@@ -938,24 +955,24 @@ export class SettingsManager {
 		return this.settings.providers?.webSearch ?? "auto";
 	}
 
-	setWebSearchProvider(provider: WebSearchProviderOption): void {
+	async setWebSearchProvider(provider: WebSearchProviderOption): Promise<void> {
 		if (!this.globalSettings.providers) {
 			this.globalSettings.providers = {};
 		}
 		this.globalSettings.providers.webSearch = provider;
-		this.save();
+		await this.save();
 	}
 
 	getImageProvider(): ImageProviderOption {
 		return this.settings.providers?.image ?? "auto";
 	}
 
-	setImageProvider(provider: ImageProviderOption): void {
+	async setImageProvider(provider: ImageProviderOption): Promise<void> {
 		if (!this.globalSettings.providers) {
 			this.globalSettings.providers = {};
 		}
 		this.globalSettings.providers.image = provider;
-		this.save();
+		await this.save();
 	}
 
 	getBashInterceptorEnabled(): boolean {
@@ -970,124 +987,124 @@ export class SettingsManager {
 		return [...(this.settings.bashInterceptor?.patterns ?? DEFAULT_BASH_INTERCEPTOR_RULES)];
 	}
 
-	setBashInterceptorEnabled(enabled: boolean): void {
+	async setBashInterceptorEnabled(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.bashInterceptor) {
 			this.globalSettings.bashInterceptor = {};
 		}
 		this.globalSettings.bashInterceptor.enabled = enabled;
-		this.save();
+		await this.save();
 	}
 
 	getGitToolEnabled(): boolean {
 		return this.settings.git?.enabled ?? false;
 	}
 
-	setGitToolEnabled(enabled: boolean): void {
+	async setGitToolEnabled(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.git) {
 			this.globalSettings.git = {};
 		}
 		this.globalSettings.git.enabled = enabled;
-		this.save();
+		await this.save();
 	}
 
 	getMCPProjectConfigEnabled(): boolean {
 		return this.settings.mcp?.enableProjectConfig ?? true;
 	}
 
-	setMCPProjectConfigEnabled(enabled: boolean): void {
+	async setMCPProjectConfigEnabled(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.mcp) {
 			this.globalSettings.mcp = {};
 		}
 		this.globalSettings.mcp.enableProjectConfig = enabled;
-		this.save();
+		await this.save();
 	}
 
 	getLspFormatOnWrite(): boolean {
 		return this.settings.lsp?.formatOnWrite ?? false;
 	}
 
-	setLspFormatOnWrite(enabled: boolean): void {
+	async setLspFormatOnWrite(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.lsp) {
 			this.globalSettings.lsp = {};
 		}
 		this.globalSettings.lsp.formatOnWrite = enabled;
-		this.save();
+		await this.save();
 	}
 
 	getLspDiagnosticsOnWrite(): boolean {
 		return this.settings.lsp?.diagnosticsOnWrite ?? true;
 	}
 
-	setLspDiagnosticsOnWrite(enabled: boolean): void {
+	async setLspDiagnosticsOnWrite(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.lsp) {
 			this.globalSettings.lsp = {};
 		}
 		this.globalSettings.lsp.diagnosticsOnWrite = enabled;
-		this.save();
+		await this.save();
 	}
 
 	getLspDiagnosticsOnEdit(): boolean {
 		return this.settings.lsp?.diagnosticsOnEdit ?? false;
 	}
 
-	setLspDiagnosticsOnEdit(enabled: boolean): void {
+	async setLspDiagnosticsOnEdit(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.lsp) {
 			this.globalSettings.lsp = {};
 		}
 		this.globalSettings.lsp.diagnosticsOnEdit = enabled;
-		this.save();
+		await this.save();
 	}
 
 	getEditFuzzyMatch(): boolean {
 		return this.settings.edit?.fuzzyMatch ?? true;
 	}
 
-	setEditFuzzyMatch(enabled: boolean): void {
+	async setEditFuzzyMatch(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.edit) {
 			this.globalSettings.edit = {};
 		}
 		this.globalSettings.edit.fuzzyMatch = enabled;
-		this.save();
+		await this.save();
 	}
 
 	getDisabledProviders(): string[] {
 		return [...(this.settings.disabledProviders ?? [])];
 	}
 
-	setDisabledProviders(providerIds: string[]): void {
+	async setDisabledProviders(providerIds: string[]): Promise<void> {
 		this.globalSettings.disabledProviders = providerIds;
-		this.save();
+		await this.save();
 	}
 
 	getDisabledExtensions(): string[] {
 		return [...(this.settings.disabledExtensions ?? [])];
 	}
 
-	setDisabledExtensions(extensionIds: string[]): void {
+	async setDisabledExtensions(extensionIds: string[]): Promise<void> {
 		this.globalSettings.disabledExtensions = extensionIds;
-		this.save();
+		await this.save();
 	}
 
 	isExtensionEnabled(extensionId: string): boolean {
 		return !(this.settings.disabledExtensions ?? []).includes(extensionId);
 	}
 
-	enableExtension(extensionId: string): void {
+	async enableExtension(extensionId: string): Promise<void> {
 		const disabled = this.globalSettings.disabledExtensions ?? [];
 		const index = disabled.indexOf(extensionId);
 		if (index !== -1) {
 			disabled.splice(index, 1);
 			this.globalSettings.disabledExtensions = disabled;
-			this.save();
+			await this.save();
 		}
 	}
 
-	disableExtension(extensionId: string): void {
+	async disableExtension(extensionId: string): Promise<void> {
 		const disabled = this.globalSettings.disabledExtensions ?? [];
 		if (!disabled.includes(extensionId)) {
 			disabled.push(extensionId);
 			this.globalSettings.disabledExtensions = disabled;
-			this.save();
+			await this.save();
 		}
 	}
 
@@ -1095,57 +1112,57 @@ export class SettingsManager {
 		return this.settings.ttsr ?? {};
 	}
 
-	setTtsrSettings(settings: TtsrSettings): void {
+	async setTtsrSettings(settings: TtsrSettings): Promise<void> {
 		this.globalSettings.ttsr = { ...this.globalSettings.ttsr, ...settings };
-		this.save();
+		await this.save();
 	}
 
 	getTtsrEnabled(): boolean {
 		return this.settings.ttsr?.enabled ?? true;
 	}
 
-	setTtsrEnabled(enabled: boolean): void {
+	async setTtsrEnabled(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.ttsr) {
 			this.globalSettings.ttsr = {};
 		}
 		this.globalSettings.ttsr.enabled = enabled;
-		this.save();
+		await this.save();
 	}
 
 	getTtsrContextMode(): "keep" | "discard" {
 		return this.settings.ttsr?.contextMode ?? "discard";
 	}
 
-	setTtsrContextMode(mode: "keep" | "discard"): void {
+	async setTtsrContextMode(mode: "keep" | "discard"): Promise<void> {
 		if (!this.globalSettings.ttsr) {
 			this.globalSettings.ttsr = {};
 		}
 		this.globalSettings.ttsr.contextMode = mode;
-		this.save();
+		await this.save();
 	}
 
 	getTtsrRepeatMode(): "once" | "after-gap" {
 		return this.settings.ttsr?.repeatMode ?? "once";
 	}
 
-	setTtsrRepeatMode(mode: "once" | "after-gap"): void {
+	async setTtsrRepeatMode(mode: "once" | "after-gap"): Promise<void> {
 		if (!this.globalSettings.ttsr) {
 			this.globalSettings.ttsr = {};
 		}
 		this.globalSettings.ttsr.repeatMode = mode;
-		this.save();
+		await this.save();
 	}
 
 	getTtsrRepeatGap(): number {
 		return this.settings.ttsr?.repeatGap ?? 10;
 	}
 
-	setTtsrRepeatGap(gap: number): void {
+	async setTtsrRepeatGap(gap: number): Promise<void> {
 		if (!this.globalSettings.ttsr) {
 			this.globalSettings.ttsr = {};
 		}
 		this.globalSettings.ttsr.repeatGap = gap;
-		this.save();
+		await this.save();
 	}
 
 	getVoiceSettings(): Required<VoiceSettings> {
@@ -1159,21 +1176,21 @@ export class SettingsManager {
 		};
 	}
 
-	setVoiceSettings(settings: VoiceSettings): void {
+	async setVoiceSettings(settings: VoiceSettings): Promise<void> {
 		this.globalSettings.voice = { ...this.globalSettings.voice, ...settings };
-		this.save();
+		await this.save();
 	}
 
 	getVoiceEnabled(): boolean {
 		return this.settings.voice?.enabled ?? false;
 	}
 
-	setVoiceEnabled(enabled: boolean): void {
+	async setVoiceEnabled(enabled: boolean): Promise<void> {
 		if (!this.globalSettings.voice) {
 			this.globalSettings.voice = {};
 		}
 		this.globalSettings.voice.enabled = enabled;
-		this.save();
+		await this.save();
 	}
 
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -1188,7 +1205,7 @@ export class SettingsManager {
 		return this.settings.statusLine?.preset ?? "default";
 	}
 
-	setStatusLinePreset(preset: StatusLinePreset): void {
+	async setStatusLinePreset(preset: StatusLinePreset): Promise<void> {
 		if (!this.globalSettings.statusLine) {
 			this.globalSettings.statusLine = {};
 		}
@@ -1198,26 +1215,26 @@ export class SettingsManager {
 			delete this.globalSettings.statusLine.segmentOptions;
 		}
 		this.globalSettings.statusLine.preset = preset;
-		this.save();
+		await this.save();
 	}
 
 	getStatusLineSeparator(): StatusLineSeparatorStyle {
 		return this.settings.statusLine?.separator ?? "powerline-thin";
 	}
 
-	setStatusLineSeparator(separator: StatusLineSeparatorStyle): void {
+	async setStatusLineSeparator(separator: StatusLineSeparatorStyle): Promise<void> {
 		if (!this.globalSettings.statusLine) {
 			this.globalSettings.statusLine = {};
 		}
 		this.globalSettings.statusLine.separator = separator;
-		this.save();
+		await this.save();
 	}
 
 	getStatusLineLeftSegments(): StatusLineSegmentId[] {
 		return [...(this.settings.statusLine?.leftSegments ?? [])];
 	}
 
-	setStatusLineLeftSegments(segments: StatusLineSegmentId[]): void {
+	async setStatusLineLeftSegments(segments: StatusLineSegmentId[]): Promise<void> {
 		if (!this.globalSettings.statusLine) {
 			this.globalSettings.statusLine = {};
 		}
@@ -1226,14 +1243,14 @@ export class SettingsManager {
 		if (this.globalSettings.statusLine.preset !== "custom") {
 			this.globalSettings.statusLine.preset = "custom";
 		}
-		this.save();
+		await this.save();
 	}
 
 	getStatusLineRightSegments(): StatusLineSegmentId[] {
 		return [...(this.settings.statusLine?.rightSegments ?? [])];
 	}
 
-	setStatusLineRightSegments(segments: StatusLineSegmentId[]): void {
+	async setStatusLineRightSegments(segments: StatusLineSegmentId[]): Promise<void> {
 		if (!this.globalSettings.statusLine) {
 			this.globalSettings.statusLine = {};
 		}
@@ -1242,18 +1259,18 @@ export class SettingsManager {
 		if (this.globalSettings.statusLine.preset !== "custom") {
 			this.globalSettings.statusLine.preset = "custom";
 		}
-		this.save();
+		await this.save();
 	}
 
 	getStatusLineSegmentOptions(): StatusLineSegmentOptions {
 		return { ...this.settings.statusLine?.segmentOptions };
 	}
 
-	setStatusLineSegmentOption<K extends keyof StatusLineSegmentOptions>(
+	async setStatusLineSegmentOption<K extends keyof StatusLineSegmentOptions>(
 		segment: K,
 		option: keyof NonNullable<StatusLineSegmentOptions[K]>,
 		value: boolean | number | string,
-	): void {
+	): Promise<void> {
 		if (!this.globalSettings.statusLine) {
 			this.globalSettings.statusLine = {};
 		}
@@ -1264,13 +1281,13 @@ export class SettingsManager {
 			this.globalSettings.statusLine.segmentOptions[segment] = {} as NonNullable<StatusLineSegmentOptions[K]>;
 		}
 		(this.globalSettings.statusLine.segmentOptions[segment] as Record<string, unknown>)[option as string] = value;
-		this.save();
+		await this.save();
 	}
 
-	clearStatusLineSegmentOption<K extends keyof StatusLineSegmentOptions>(
+	async clearStatusLineSegmentOption<K extends keyof StatusLineSegmentOptions>(
 		segment: K,
 		option: keyof NonNullable<StatusLineSegmentOptions[K]>,
-	): void {
+	): Promise<void> {
 		const segmentOptions = this.globalSettings.statusLine?.segmentOptions;
 		if (!segmentOptions || !segmentOptions[segment]) {
 			return;
@@ -1282,28 +1299,28 @@ export class SettingsManager {
 		if (Object.keys(segmentOptions).length === 0) {
 			delete this.globalSettings.statusLine?.segmentOptions;
 		}
-		this.save();
+		await this.save();
 	}
 
 	getStatusLineShowHookStatus(): boolean {
 		return this.settings.statusLine?.showHookStatus ?? true;
 	}
 
-	setStatusLineShowHookStatus(show: boolean): void {
+	async setStatusLineShowHookStatus(show: boolean): Promise<void> {
 		if (!this.globalSettings.statusLine) {
 			this.globalSettings.statusLine = {};
 		}
 		this.globalSettings.statusLine.showHookStatus = show;
-		this.save();
+		await this.save();
 	}
 
 	getDoubleEscapeAction(): "branch" | "tree" {
 		return this.settings.doubleEscapeAction ?? "tree";
 	}
 
-	setDoubleEscapeAction(action: "branch" | "tree"): void {
+	async setDoubleEscapeAction(action: "branch" | "tree"): Promise<void> {
 		this.globalSettings.doubleEscapeAction = action;
-		this.save();
+		await this.save();
 	}
 
 	/**
@@ -1317,37 +1334,37 @@ export class SettingsManager {
 	 * Set environment variables in settings (not process.env)
 	 * This will be applied on next startup or reload
 	 */
-	setEnvironmentVariables(envVars: Record<string, string>): void {
+	async setEnvironmentVariables(envVars: Record<string, string>): Promise<void> {
 		this.globalSettings.env = { ...envVars };
-		this.save();
+		await this.save();
 	}
 
 	/**
 	 * Clear all environment variables from settings
 	 */
-	clearEnvironmentVariables(): void {
+	async clearEnvironmentVariables(): Promise<void> {
 		delete this.globalSettings.env;
-		this.save();
+		await this.save();
 	}
 
 	/**
 	 * Set a single environment variable in settings
 	 */
-	setEnvironmentVariable(key: string, value: string): void {
+	async setEnvironmentVariable(key: string, value: string): Promise<void> {
 		if (!this.globalSettings.env) {
 			this.globalSettings.env = {};
 		}
 		this.globalSettings.env[key] = value;
-		this.save();
+		await this.save();
 	}
 
 	/**
 	 * Remove a single environment variable from settings
 	 */
-	removeEnvironmentVariable(key: string): void {
+	async removeEnvironmentVariable(key: string): Promise<void> {
 		if (this.globalSettings.env) {
 			delete this.globalSettings.env[key];
-			this.save();
+			await this.save();
 		}
 	}
 }

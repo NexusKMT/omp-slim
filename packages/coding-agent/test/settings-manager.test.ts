@@ -32,7 +32,7 @@ describe("SettingsManager", () => {
 	// Tests that SettingsManager merges with DB state on save rather than blindly overwriting.
 	// This ensures external edits (via AgentStorage directly) aren't lost when the app saves.
 	describe("preserves externally added settings", () => {
-		it("should preserve enabledModels when changing thinking level", () => {
+		it("should preserve enabledModels when changing thinking level", async () => {
 			// Seed initial settings in DB
 			const storage = AgentStorage.open(getAgentDbPath(agentDir));
 			storage.saveSettings({
@@ -41,7 +41,7 @@ describe("SettingsManager", () => {
 			});
 
 			// Manager loads the initial state
-			const manager = SettingsManager.create(projectDir, agentDir);
+			const manager = await SettingsManager.create(projectDir, agentDir);
 
 			// Simulate external edit (e.g., user modifying DB directly or another process)
 			storage.saveSettings({
@@ -60,13 +60,13 @@ describe("SettingsManager", () => {
 			expect(savedSettings.modelRoles?.default).toBe("claude-sonnet");
 		});
 
-		it("should preserve custom settings when changing theme", () => {
+		it("should preserve custom settings when changing theme", async () => {
 			const storage = AgentStorage.open(getAgentDbPath(agentDir));
 			storage.saveSettings({
 				modelRoles: { default: "claude-sonnet" },
 			});
 
-			const manager = SettingsManager.create(projectDir, agentDir);
+			const manager = await SettingsManager.create(projectDir, agentDir);
 
 			storage.saveSettings({
 				modelRoles: { default: "claude-sonnet" },
@@ -82,13 +82,13 @@ describe("SettingsManager", () => {
 			expect(savedSettings.theme).toBe("light");
 		});
 
-		it("should let in-memory changes override file changes for same key", () => {
+		it("should let in-memory changes override file changes for same key", async () => {
 			const storage = AgentStorage.open(getAgentDbPath(agentDir));
 			storage.saveSettings({
 				theme: "dark",
 			});
 
-			const manager = SettingsManager.create(projectDir, agentDir);
+			const manager = await SettingsManager.create(projectDir, agentDir);
 
 			storage.saveSettings({
 				theme: "dark",
