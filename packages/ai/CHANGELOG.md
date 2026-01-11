@@ -1,9 +1,10 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Changed
 
+- Updated `reasoningSummary` option to accept only `"auto"`, `"concise"`, `"detailed"`, or `null` (removed `"off"` and `"on"` values)
+- Changed default `reasoningSummary` from `"auto"` to `"detailed"`
 - OpenAI Codex: switched to bundled system prompt matching opencode, changed originator to "opencode", simplified prompt handling
 
 ### Fixed

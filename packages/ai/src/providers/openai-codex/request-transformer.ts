@@ -1,6 +1,6 @@
 export interface ReasoningConfig {
 	effort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
-	summary: "auto" | "concise" | "detailed" | "off" | "on";
+	summary: "auto" | "concise" | "detailed" | null;
 }
 
 export interface CodexRequestOptions {
@@ -61,7 +61,7 @@ function clampReasoningEffort(model: string, effort: ReasoningConfig["effort"]):
 function getReasoningConfig(model: string, options: CodexRequestOptions): ReasoningConfig {
 	return {
 		effort: clampReasoningEffort(model, options.reasoningEffort as ReasoningConfig["effort"]),
-		summary: options.reasoningSummary ?? "auto",
+		summary: options.reasoningSummary ?? "detailed",
 	};
 }
 

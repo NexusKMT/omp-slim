@@ -43,7 +43,7 @@ import { transformMessages } from "./transorm-messages";
 
 export interface OpenAICodexResponsesOptions extends StreamOptions {
 	reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
-	reasoningSummary?: "auto" | "concise" | "detailed" | "off" | "on" | null;
+	reasoningSummary?: "auto" | "concise" | "detailed" | null;
 	textVerbosity?: "low" | "medium" | "high";
 	include?: string[];
 	codexMode?: boolean;
