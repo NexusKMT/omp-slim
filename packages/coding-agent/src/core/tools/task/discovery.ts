@@ -62,7 +62,7 @@ function loadAgentsFromDir(dir: string, source: AgentSource): AgentDefinition[] 
 			continue;
 		}
 
-		const { frontmatter, body } = parseFrontmatter(content);
+		const { frontmatter, body } = parseFrontmatter(content, { source: filePath });
 		const fields = parseAgentFields(frontmatter);
 
 		if (!fields) {

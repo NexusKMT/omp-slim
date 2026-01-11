@@ -48,7 +48,10 @@ export function loadBundledCommands(): WorkflowCommand[] {
 	const commands: WorkflowCommand[] = [];
 
 	for (const { name, content } of EMBEDDED_COMMANDS) {
-		const { frontmatter, body } = parseFrontmatter(content);
+		const { frontmatter, body } = parseFrontmatter(content, {
+			source: `embedded:${name}`,
+			level: "fatal",
+		});
 		const cmdName = name.replace(/\.md$/, "");
 
 		commands.push({
@@ -82,7 +85,10 @@ export async function discoverCommands(cwd: string): Promise<WorkflowCommand[]> 
 	for (const cmd of result.items) {
 		if (seen.has(cmd.name)) continue;
 
-		const { frontmatter, body } = parseFrontmatter(cmd.content);
+		const { frontmatter, body } = parseFrontmatter(cmd.content, {
+			source: cmd.path ?? `workflow-command:${cmd.name}`,
+			level: cmd.level === "native" ? "fatal" : "warn",
+		});
 
 		// Map capability levels to WorkflowCommand source
 		const source: "bundled" | "user" | "project" = cmd.level === "native" ? "bundled" : cmd.level;

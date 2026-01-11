@@ -69,7 +69,7 @@ export const handleChooseALicense: SpecialHandler = async (
 		const result = await loadPage(rawUrl, { timeout, headers: { Accept: "text/plain" }, signal });
 		if (!result.ok) return null;
 
-		const { frontmatter, body } = parseFrontmatter(result.content);
+		const { frontmatter, body } = parseFrontmatter(result.content, { source: rawUrl });
 
 		const title = asString(frontmatter.title) ?? formatLabel(licenseSlug);
 		const spdxId = asString(frontmatter["spdx-id"]) ?? "Unknown";

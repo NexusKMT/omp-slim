@@ -143,7 +143,7 @@ function transformMDCRule(
 	path: string,
 	source: ReturnType<typeof createSourceMeta>,
 ): Rule {
-	const { frontmatter, body } = parseFrontmatter(content);
+	const { frontmatter, body } = parseFrontmatter(content, { source: path });
 
 	// Extract frontmatter fields
 	const description = typeof frontmatter.description === "string" ? frontmatter.description : undefined;

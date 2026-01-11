@@ -55,7 +55,7 @@ async function loadRules(ctx: LoadContext): Promise<LoadResult<Rule>> {
 		const result = await loadFilesFromDir(ctx, found.path, PROVIDER_ID, "project", {
 			extensions: ["md"],
 			transform: (name, content, path, source) => {
-				const { frontmatter, body } = parseFrontmatter(content);
+				const { frontmatter, body } = parseFrontmatter(content, { source: path });
 				const ruleName = name.replace(/\.md$/, "");
 
 				// Parse globs (can be array or single string)
@@ -89,7 +89,7 @@ async function loadRules(ctx: LoadContext): Promise<LoadResult<Rule>> {
 			return { items, warnings };
 		}
 
-		const { frontmatter, body } = parseFrontmatter(content);
+		const { frontmatter, body } = parseFrontmatter(content, { source: found.path });
 		const source = createSourceMeta(PROVIDER_ID, found.path, "project");
 
 		// Parse globs (can be array or single string)

@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { parseFrontmatter } from "../core/frontmatter";
 
 describe("parseFrontmatter", () => {
+	const parse = (content: string) => parseFrontmatter(content, { source: "tests:frontmatter", level: "off" });
+
 	test("parses simple key-value pairs", () => {
 		const content = `---
 name: test
@@ -9,7 +11,7 @@ enabled: true
 ---
 Body content`;
 
-		const result = parseFrontmatter(content);
+		const result = parse(content);
 		expect(result.frontmatter).toEqual({ name: "test", enabled: true });
 		expect(result.body).toBe("Body content");
 	});
@@ -23,7 +25,7 @@ tags:
 ---
 Body content`;
 
-		const result = parseFrontmatter(content);
+		const result = parse(content);
 		expect(result.frontmatter).toEqual({
 			tags: ["javascript", "typescript", "react"],
 		});
@@ -39,7 +41,7 @@ description: |
 ---
 Body content`;
 
-		const result = parseFrontmatter(content);
+		const result = parse(content);
 		expect(result.frontmatter).toEqual({
 			description: "This is a multi-line\ndescription block\nwith several lines\n",
 		});
@@ -57,7 +59,7 @@ config:
 ---
 Body content`;
 
-		const result = parseFrontmatter(content);
+		const result = parse(content);
 		expect(result.frontmatter).toEqual({
 			config: {
 				server: { port: 3000, host: "localhost" },
@@ -83,7 +85,7 @@ description: |
 ---
 Body content`;
 
-		const result = parseFrontmatter(content);
+		const result = parse(content);
 		expect(result.frontmatter).toEqual({
 			name: "complex-test",
 			version: "1.0.0",
@@ -99,7 +101,7 @@ Body content`;
 
 	test("handles missing frontmatter", () => {
 		const content = "Just body content";
-		const result = parseFrontmatter(content);
+		const result = parse(content);
 		expect(result.frontmatter).toEqual({});
 		expect(result.body).toBe("Just body content");
 	});
@@ -110,9 +112,9 @@ invalid: [unclosed array
 ---
 Body content`;
 
-		const result = parseFrontmatter(content);
+		const result = parse(content);
 		expect(result.frontmatter).toEqual({}); // Fallback to empty
-		expect(result.body).toBe("Body content");
+		expect(result.body).toBe(content);
 	});
 
 	test("handles empty frontmatter", () => {
@@ -120,7 +122,7 @@ Body content`;
 ---
 Body content`;
 
-		const result = parseFrontmatter(content);
+		const result = parse(content);
 		expect(result.frontmatter).toEqual({});
 		expect(result.body).toBe("Body content");
 	});

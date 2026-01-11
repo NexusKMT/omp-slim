@@ -80,7 +80,7 @@ function transformInstruction(name: string, content: string, path: string, sourc
 		return null;
 	}
 
-	const { frontmatter, body } = parseFrontmatter(content);
+	const { frontmatter, body } = parseFrontmatter(content, { source: path });
 
 	// Extract applyTo glob pattern from frontmatter
 	const applyTo = typeof frontmatter.applyTo === "string" ? frontmatter.applyTo : undefined;

@@ -78,7 +78,10 @@ const EMBEDDED_AGENTS: { name: string; content: string }[] = EMBEDDED_AGENT_DEFS
  * Parse an agent from embedded content.
  */
 function parseAgent(fileName: string, content: string, source: AgentSource): AgentDefinition | null {
-	const { frontmatter, body } = parseFrontmatter(content);
+	const { frontmatter, body } = parseFrontmatter(content, {
+		source: `embedded:${fileName}`,
+		level: "fatal",
+	});
 	const fields = parseAgentFields(frontmatter);
 
 	if (!fields) {

@@ -235,7 +235,7 @@ export async function loadSkillsFromDir(
 				return { item: null as Skill | null, warning: null as string | null };
 			}
 
-			const { frontmatter, body } = parseFrontmatter(content);
+			const { frontmatter, body } = parseFrontmatter(content, { source: skillFile });
 			if (requireDescription && !frontmatter.description) {
 				return { item: null as Skill | null, warning: null as string | null };
 			}

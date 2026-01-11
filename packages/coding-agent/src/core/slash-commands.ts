@@ -19,8 +19,11 @@ export interface FileSlashCommand {
 
 const EMBEDDED_SLASH_COMMANDS = EMBEDDED_COMMAND_TEMPLATES;
 
-function parseCommandTemplate(content: string): { description: string; body: string } {
-	const { frontmatter, body } = parseFrontmatter(content);
+function parseCommandTemplate(
+	content: string,
+	options: { source: string; level?: "off" | "warn" | "fatal" },
+): { description: string; body: string } {
+	const { frontmatter, body } = parseFrontmatter(content, options);
 	const frontmatterDesc = typeof frontmatter.description === "string" ? frontmatter.description.trim() : "";
 
 	// Get description from frontmatter or first non-empty line
@@ -112,7 +115,10 @@ export async function loadSlashCommands(options: LoadSlashCommandsOptions = {}):
 	const result = await loadCapability<SlashCommand>(slashCommandCapability.id, { cwd: options.cwd });
 
 	const fileCommands: FileSlashCommand[] = result.items.map((cmd) => {
-		const { description, body } = parseCommandTemplate(cmd.content);
+		const { description, body } = parseCommandTemplate(cmd.content, {
+			source: cmd.path ?? `slash-command:${cmd.name}`,
+			level: cmd.level === "native" ? "fatal" : "warn",
+		});
 
 		// Format source label: "via ProviderName Level"
 		const capitalizedLevel = cmd.level.charAt(0).toUpperCase() + cmd.level.slice(1);
@@ -132,7 +138,10 @@ export async function loadSlashCommands(options: LoadSlashCommandsOptions = {}):
 		const name = cmd.name.replace(/\.md$/, "");
 		if (seenNames.has(name)) continue;
 
-		const { description, body } = parseCommandTemplate(cmd.content);
+		const { description, body } = parseCommandTemplate(cmd.content, {
+			source: `embedded:${cmd.name}`,
+			level: "fatal",
+		});
 		fileCommands.push({
 			name,
 			description,

@@ -54,7 +54,7 @@ export function loadSkillsFromDir(options: LoadSkillsFromDirOptions): LoadSkills
 		if (seenPaths.has(skillFile)) return;
 		try {
 			const content = readFileSync(skillFile, "utf-8");
-			const { frontmatter } = parseFrontmatter(content);
+			const { frontmatter } = parseFrontmatter(content, { source: skillFile });
 			const name = (frontmatter.name as string) || dirName;
 			const description = frontmatter.description as string;
 
@@ -118,7 +118,7 @@ function scanDirectoryForSkills(dir: string): LoadSkillsResult {
 		if (seenPaths.has(skillFile)) return;
 		try {
 			const content = readFileSync(skillFile, "utf-8");
-			const { frontmatter } = parseFrontmatter(content);
+			const { frontmatter } = parseFrontmatter(content, { source: skillFile });
 			const name = (frontmatter.name as string) || dirName;
 			const description = frontmatter.description as string;
 

@@ -266,7 +266,7 @@ async function loadRules(ctx: LoadContext): Promise<LoadResult<Rule>> {
 		const result = await loadFilesFromDir<Rule>(ctx, rulesDir, PROVIDER_ID, level, {
 			extensions: ["md", "mdc"],
 			transform: (name, content, path, source) => {
-				const { frontmatter, body } = parseFrontmatter(content);
+				const { frontmatter, body } = parseFrontmatter(content, { source: path });
 				return {
 					name: name.replace(/\.(md|mdc)$/, ""),
 					path,
@@ -516,7 +516,7 @@ async function loadInstructions(ctx: LoadContext): Promise<LoadResult<Instructio
 		const result = await loadFilesFromDir<Instruction>(ctx, instructionsDir, PROVIDER_ID, level, {
 			extensions: ["md"],
 			transform: (name, content, path, source) => {
-				const { frontmatter, body } = parseFrontmatter(content);
+				const { frontmatter, body } = parseFrontmatter(content, { source: path });
 				return {
 					name: name.replace(/\.instructions\.md$/, "").replace(/\.md$/, ""),
 					path,
@@ -636,7 +636,7 @@ async function loadTools(ctx: LoadContext): Promise<LoadResult<CustomTool>> {
 							_source: source,
 						};
 					}
-					const { frontmatter } = parseFrontmatter(content);
+					const { frontmatter } = parseFrontmatter(content, { source: path });
 					return {
 						name: (frontmatter.name as string) || name.replace(/\.md$/, ""),
 						path,

@@ -279,7 +279,7 @@ async function loadSlashCommands(ctx: LoadContext): Promise<LoadResult<SlashComm
 	const transformCommand =
 		(level: "user" | "project") =>
 		(name: string, content: string, path: string, source: ReturnType<typeof createSourceMeta>) => {
-			const { frontmatter, body } = parseFrontmatter(content);
+			const { frontmatter, body } = parseFrontmatter(content, { source: path });
 			const commandName = frontmatter.name || name.replace(/\.md$/, "");
 			return {
 				name: String(commandName),
@@ -322,7 +322,7 @@ async function loadPrompts(ctx: LoadContext): Promise<LoadResult<Prompt>> {
 		path: string,
 		source: ReturnType<typeof createSourceMeta>,
 	) => {
-		const { frontmatter, body } = parseFrontmatter(content);
+		const { frontmatter, body } = parseFrontmatter(content, { source: path });
 		const promptName = frontmatter.name || name.replace(/\.md$/, "");
 		return {
 			name: String(promptName),

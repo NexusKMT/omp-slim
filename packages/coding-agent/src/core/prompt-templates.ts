@@ -384,7 +384,7 @@ async function loadTemplatesFromDir(
 
 				if (entry.endsWith(".md")) {
 					const rawContent = await file.text();
-					const { frontmatter, body } = parseFrontmatter(rawContent);
+					const { frontmatter, body } = parseFrontmatter(rawContent, { source: fullPath });
 
 					const name = entry.split("/").pop()!.slice(0, -3); // Remove .md extension
 

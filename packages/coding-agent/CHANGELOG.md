@@ -1,6 +1,14 @@
 # Changelog
 
 ## [Unreleased]
+### Changed
+
+- Updated system prompt to show file paths more clearly in output
+- Improved YAML frontmatter parsing with better error messages including source file information
+
+### Fixed
+
+- Fixed frontmatter parsing to properly report source location when YAML parsing fails
 
 ## [4.4.4] - 2026-01-11
 ### Added

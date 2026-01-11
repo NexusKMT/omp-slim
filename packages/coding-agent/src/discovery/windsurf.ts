@@ -105,7 +105,7 @@ async function loadRules(ctx: LoadContext): Promise<LoadResult<Rule>> {
 	if (userPath) {
 		const content = await readFile(userPath);
 		if (content) {
-			const { frontmatter, body } = parseFrontmatter(content);
+			const { frontmatter, body } = parseFrontmatter(content, { source: userPath });
 
 			// Validate and normalize globs
 			let globs: string[] | undefined;
@@ -134,7 +134,7 @@ async function loadRules(ctx: LoadContext): Promise<LoadResult<Rule>> {
 		const result = await loadFilesFromDir<Rule>(ctx, projectRulesDir, PROVIDER_ID, "project", {
 			extensions: ["md"],
 			transform: (name, content, path, source) => {
-				const { frontmatter, body } = parseFrontmatter(content);
+				const { frontmatter, body } = parseFrontmatter(content, { source: path });
 				const ruleName = name.replace(/\.md$/, "");
 
 				// Validate and normalize globs
