@@ -5,7 +5,11 @@
  */
 
 import type { AgentEvent } from "@oh-my-pi/pi-agent-core";
+import type { AuthStorage } from "../../auth-storage";
 import type { EventBus } from "../../event-bus";
+import { callTool } from "../../mcp/client";
+import type { MCPManager } from "../../mcp/manager";
+import type { ModelRegistry } from "../../model-registry";
 import { ensureArtifactsDir, getArtifactPaths } from "./artifacts";
 import { resolveModelPattern } from "./model-resolver";
 import { subprocessToolRegistry } from "./subprocess-tool-registry";
@@ -18,7 +22,12 @@ import {
 	TASK_SUBAGENT_EVENT_CHANNEL,
 	TASK_SUBAGENT_PROGRESS_CHANNEL,
 } from "./types";
-import type { SubagentWorkerRequest, SubagentWorkerResponse } from "./worker-protocol";
+import type {
+	MCPToolCallRequest,
+	MCPToolMetadata,
+	SubagentWorkerRequest,
+	SubagentWorkerResponse,
+} from "./worker-protocol";
 
 /** Options for worker execution */
 export interface ExecutorOptions {
@@ -38,6 +47,9 @@ export interface ExecutorOptions {
 	persistArtifacts?: boolean;
 	artifactsDir?: string;
 	eventBus?: EventBus;
+	mcpManager?: MCPManager;
+	authStorage?: AuthStorage;
+	modelRegistry?: ModelRegistry;
 }
 
 /**
@@ -132,6 +144,39 @@ function getUsageTokens(usage: unknown): number {
 	const cacheWrite = firstNumberField(record, ["cacheWrite", "cache_write", "cacheWriteTokens"]) ?? 0;
 
 	return input + output + cacheRead + cacheWrite;
+}
+
+/**
+ * Parse MCP tool name to extract server and tool names.
+ * Format: mcp_<serverName>_<toolName>
+ * Note: Uses lastIndexOf to handle server names with underscores.
+ */
+function parseMCPToolName(fullName: string): { serverName: string; toolName: string } | undefined {
+	if (!fullName.startsWith("mcp_")) return undefined;
+	const rest = fullName.slice(4);
+	const underscoreIndex = rest.lastIndexOf("_");
+	if (underscoreIndex === -1) return undefined;
+	return {
+		serverName: rest.slice(0, underscoreIndex),
+		toolName: rest.slice(underscoreIndex + 1),
+	};
+}
+
+/**
+ * Extract MCP tool metadata from MCPManager for passing to worker.
+ */
+function extractMCPToolMetadata(mcpManager: MCPManager): MCPToolMetadata[] {
+	return mcpManager.getTools().map((tool) => {
+		const parsed = parseMCPToolName(tool.name);
+		return {
+			name: tool.name,
+			label: tool.label ?? tool.name,
+			description: tool.description ?? "",
+			parameters: tool.parameters,
+			serverName: parsed?.serverName ?? "",
+			mcpToolName: parsed?.toolName ?? "",
+		};
+	});
 }
 
 /**
@@ -538,6 +583,9 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			sessionFile,
 			spawnsEnv,
 			enableLsp,
+			serializedAuth: options.authStorage?.serialize(),
+			serializedModels: options.modelRegistry?.serialize(),
+			mcpTools: options.mcpManager ? extractMCPToolMetadata(options.mcpManager) : undefined,
 		},
 	};
 
@@ -559,9 +607,43 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			cleanup();
 			resolve(message);
 		};
+		const handleMCPCall = async (request: MCPToolCallRequest) => {
+			const mcpManager = options.mcpManager;
+			if (!mcpManager) {
+				worker.postMessage({
+					type: "mcp_tool_result",
+					callId: request.callId,
+					error: "MCP not available",
+				});
+				return;
+			}
+			try {
+				const parsed = parseMCPToolName(request.toolName);
+				if (!parsed) throw new Error(`Invalid MCP tool name: ${request.toolName}`);
+				const connection = mcpManager.getConnection(parsed.serverName);
+				if (!connection) throw new Error(`MCP server not connected: ${parsed.serverName}`);
+				const result = await callTool(connection, parsed.toolName, request.params);
+				worker.postMessage({
+					type: "mcp_tool_result",
+					callId: request.callId,
+					result: { content: result.content ?? [], isError: result.isError },
+				});
+			} catch (error) {
+				worker.postMessage({
+					type: "mcp_tool_result",
+					callId: request.callId,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		};
+
 		const onMessage = (event: WorkerMessageEvent<SubagentWorkerResponse>) => {
 			const message = event.data;
 			if (!message || resolved) return;
+			if (message.type === "mcp_tool_call") {
+				handleMCPCall(message as MCPToolCallRequest);
+				return;
+			}
 			if (message.type === "event") {
 				try {
 					processEvent(message.event);

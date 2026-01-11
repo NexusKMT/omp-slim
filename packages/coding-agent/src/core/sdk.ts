@@ -687,6 +687,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			return activeModel ? formatModelString(activeModel) : undefined;
 		},
 		settings: settingsManager,
+		authStorage,
+		modelRegistry,
 	};
 
 	const builtinTools = await createTools(toolSession, options.toolNames);
@@ -712,6 +714,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		});
 		time("discoverAndLoadMCPTools");
 		mcpManager = mcpResult.manager;
+		toolSession.mcpManager = mcpManager;
 
 		// If we extracted Exa API keys from MCP configs and EXA_API_KEY isn't set, use the first one
 		if (mcpResult.exaApiKeys.length > 0 && !process.env.EXA_API_KEY) {

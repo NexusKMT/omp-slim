@@ -356,6 +356,9 @@ export async function createTaskTool(
 								progressMap.set(index, structuredClone(progress));
 								emitProgress();
 							},
+							authStorage: session.authStorage,
+							modelRegistry: session.modelRegistry,
+							mcpManager: session.mcpManager,
 						});
 					},
 					signal,

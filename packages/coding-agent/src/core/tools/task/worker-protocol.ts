@@ -1,4 +1,42 @@
 import type { AgentEvent } from "@oh-my-pi/pi-agent-core";
+import type { SerializedAuthStorage } from "../../auth-storage";
+import type { SerializedModelRegistry } from "../../model-registry";
+
+/**
+ * MCP tool metadata passed from parent to worker for proxy tool creation.
+ */
+export interface MCPToolMetadata {
+	name: string;
+	label: string;
+	description: string;
+	parameters: unknown;
+	serverName: string;
+	mcpToolName: string;
+	timeoutMs?: number;
+}
+
+/**
+ * Worker -> Parent: request to execute an MCP tool via parent's connection.
+ */
+export interface MCPToolCallRequest {
+	type: "mcp_tool_call";
+	callId: string;
+	toolName: string;
+	params: Record<string, unknown>;
+}
+
+/**
+ * Parent -> Worker: result of an MCP tool call.
+ */
+export interface MCPToolCallResponse {
+	type: "mcp_tool_result";
+	callId: string;
+	result?: {
+		content: Array<{ type: string; text?: string; [key: string]: unknown }>;
+		isError?: boolean;
+	};
+	error?: string;
+}
 
 export interface SubagentWorkerStartPayload {
 	cwd: string;
@@ -10,10 +48,17 @@ export interface SubagentWorkerStartPayload {
 	enableLsp?: boolean;
 	sessionFile?: string | null;
 	spawnsEnv?: string;
+	serializedAuth?: SerializedAuthStorage;
+	serializedModels?: SerializedModelRegistry;
+	mcpTools?: MCPToolMetadata[];
 }
 
-export type SubagentWorkerRequest = { type: "start"; payload: SubagentWorkerStartPayload } | { type: "abort" };
+export type SubagentWorkerRequest =
+	| { type: "start"; payload: SubagentWorkerStartPayload }
+	| { type: "abort" }
+	| MCPToolCallResponse;
 
 export type SubagentWorkerResponse =
 	| { type: "event"; event: AgentEvent }
-	| { type: "done"; exitCode: number; durationMs: number; error?: string; aborted?: boolean };
+	| { type: "done"; exitCode: number; durationMs: number; error?: string; aborted?: boolean }
+	| MCPToolCallRequest;

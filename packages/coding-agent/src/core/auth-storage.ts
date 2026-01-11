@@ -36,6 +36,22 @@ export type AuthCredentialEntry = AuthCredential | AuthCredential[];
 export type AuthStorageData = Record<string, AuthCredentialEntry>;
 
 /**
+ * Serialized representation of AuthStorage for passing to subagent workers.
+ * Contains only the essential credential data, not runtime state.
+ */
+export interface SerializedAuthStorage {
+	credentials: Record<
+		string,
+		Array<{
+			id: number;
+			type: "api_key" | "oauth";
+			data: Record<string, unknown>;
+		}>
+	>;
+	runtimeOverrides?: Record<string, string>;
+}
+
+/**
  * In-memory representation pairing DB row ID with credential.
  * The ID is required for update/delete operations against agent.db.
  */
@@ -114,6 +130,63 @@ export class AuthStorage {
 	) {
 		this.dbPath = AuthStorage.resolveDbPath(authPath);
 		this.storage = AgentStorage.open(this.dbPath);
+	}
+
+	/**
+	 * Create an in-memory AuthStorage instance from serialized data.
+	 * Used by subagent workers to bypass discovery and use parent's credentials.
+	 */
+	static fromSerialized(data: SerializedAuthStorage): AuthStorage {
+		const instance = Object.create(AuthStorage.prototype) as AuthStorage;
+		instance.data = new Map();
+		instance.runtimeOverrides = new Map();
+		instance.providerRoundRobinIndex = new Map();
+		instance.sessionLastCredential = new Map();
+		instance.credentialBackoff = new Map();
+		instance.codexUsageCache = new Map();
+
+		for (const [provider, creds] of Object.entries(data.credentials)) {
+			instance.data.set(
+				provider,
+				creds.map((c) => ({
+					id: c.id,
+					credential:
+						c.type === "api_key"
+							? ({ type: "api_key", key: c.data.key as string } satisfies ApiKeyCredential)
+							: ({ type: "oauth", ...c.data } as OAuthCredential),
+				})),
+			);
+		}
+		if (data.runtimeOverrides) {
+			for (const [k, v] of Object.entries(data.runtimeOverrides)) {
+				instance.runtimeOverrides.set(k, v);
+			}
+		}
+
+		return instance;
+	}
+
+	/**
+	 * Serialize AuthStorage for passing to subagent workers.
+	 * Excludes runtime state (round-robin, backoff, usage cache).
+	 */
+	serialize(): SerializedAuthStorage {
+		const credentials: SerializedAuthStorage["credentials"] = {};
+		for (const [provider, creds] of this.data.entries()) {
+			credentials[provider] = creds.map((c) => ({
+				id: c.id,
+				type: c.credential.type,
+				data: c.credential.type === "api_key" ? { key: c.credential.key } : { ...c.credential },
+			}));
+		}
+		const runtimeOverrides: Record<string, string> = {};
+		for (const [k, v] of this.runtimeOverrides.entries()) {
+			runtimeOverrides[k] = v;
+		}
+		return {
+			credentials,
+			runtimeOverrides: Object.keys(runtimeOverrides).length > 0 ? runtimeOverrides : undefined,
+		};
 	}
 
 	/**

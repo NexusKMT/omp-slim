@@ -15,12 +15,22 @@
 
 import type { AgentEvent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
+import type { TSchema } from "@sinclair/typebox";
 import type { AgentSessionEvent } from "../../agent-session";
+import { AuthStorage } from "../../auth-storage";
+import type { CustomTool } from "../../custom-tools/types";
 import { parseModelPattern, parseModelString } from "../../model-resolver";
+import { ModelRegistry } from "../../model-registry";
 import { createAgentSession, discoverAuthStorage, discoverModels } from "../../sdk";
 import { SessionManager } from "../../session-manager";
 import { untilAborted } from "../../utils";
-import type { SubagentWorkerRequest, SubagentWorkerResponse, SubagentWorkerStartPayload } from "./worker-protocol";
+import type {
+	MCPToolCallResponse,
+	MCPToolMetadata,
+	SubagentWorkerRequest,
+	SubagentWorkerResponse,
+	SubagentWorkerStartPayload,
+} from "./worker-protocol";
 
 type PostMessageFn = (message: SubagentWorkerResponse) => void;
 
@@ -31,6 +41,108 @@ const postMessageSafe: PostMessageFn = (message) => {
 		// Parent may have terminated worker, nothing we can do
 	}
 };
+
+interface PendingMCPCall {
+	resolve: (result: MCPToolCallResponse["result"]) => void;
+	reject: (error: Error) => void;
+	timeoutId: ReturnType<typeof setTimeout>;
+}
+
+const pendingMCPCalls = new Map<string, PendingMCPCall>();
+const MCP_CALL_TIMEOUT_MS = 60_000;
+let mcpCallIdCounter = 0;
+
+function generateMCPCallId(): string {
+	return `mcp_${Date.now()}_${++mcpCallIdCounter}`;
+}
+
+function callMCPToolViaParent(
+	toolName: string,
+	params: Record<string, unknown>,
+	signal?: AbortSignal,
+	timeoutMs = MCP_CALL_TIMEOUT_MS,
+): Promise<{ content: Array<{ type: string; text?: string; [key: string]: unknown }>; isError?: boolean }> {
+	return new Promise((resolve, reject) => {
+		const callId = generateMCPCallId();
+		if (signal?.aborted) {
+			reject(new Error("Aborted"));
+			return;
+		}
+
+		const timeoutId = setTimeout(() => {
+			pendingMCPCalls.delete(callId);
+			reject(new Error(`MCP call timed out after ${timeoutMs}ms`));
+		}, timeoutMs);
+
+		const cleanup = () => {
+			clearTimeout(timeoutId);
+			pendingMCPCalls.delete(callId);
+		};
+
+		signal?.addEventListener(
+			"abort",
+			() => {
+				cleanup();
+				reject(new Error("Aborted"));
+			},
+			{ once: true },
+		);
+
+		pendingMCPCalls.set(callId, {
+			resolve: (result) => {
+				cleanup();
+				resolve(result ?? { content: [] });
+			},
+			reject: (error) => {
+				cleanup();
+				reject(error);
+			},
+			timeoutId,
+		});
+
+		postMessageSafe({
+			type: "mcp_tool_call",
+			callId,
+			toolName,
+			params,
+		} as SubagentWorkerResponse);
+	});
+}
+
+function handleMCPToolResult(response: MCPToolCallResponse): void {
+	const pending = pendingMCPCalls.get(response.callId);
+	if (!pending) return;
+	if (response.error) {
+		pending.reject(new Error(response.error));
+	} else {
+		pending.resolve(response.result);
+	}
+}
+
+function createMCPProxyTool(metadata: MCPToolMetadata): CustomTool<TSchema> {
+	return {
+		name: metadata.name,
+		label: metadata.label,
+		description: metadata.description,
+		parameters: metadata.parameters as TSchema,
+		execute: async (_toolCallId, params, _onUpdate, _ctx, signal) => {
+			try {
+				const result = await callMCPToolViaParent(metadata.name, params as Record<string, unknown>, signal, metadata.timeoutMs);
+				return {
+					content: result.content.map((c) =>
+						c.type === "text" ? { type: "text" as const, text: c.text ?? "" } : { type: "text" as const, text: JSON.stringify(c) },
+					),
+					details: { serverName: metadata.serverName, mcpToolName: metadata.mcpToolName, isError: result.isError },
+				};
+			} catch (error) {
+				return {
+					content: [{ type: "text" as const, text: `MCP error: ${error instanceof Error ? error.message : String(error)}` }],
+					details: { serverName: metadata.serverName, mcpToolName: metadata.mcpToolName, isError: true },
+				};
+			}
+		},
+	};
+}
 
 interface WorkerMessageEvent<T> {
 	data: T;
@@ -145,11 +257,22 @@ async function runTask(runState: RunState, payload: SubagentWorkerStartPayload):
 		// Set working directory (CLI does this implicitly)
 		process.chdir(payload.cwd);
 
-		// Discover auth and models (equivalent to CLI's discoverAuthStorage/discoverModels)
-		const authStorage = await discoverAuthStorage();
-		checkAbort();
-		const modelRegistry = await discoverModels(authStorage);
-		checkAbort();
+		// Use serialized auth/models if provided, otherwise discover from disk
+		let authStorage: AuthStorage;
+		let modelRegistry: ModelRegistry;
+
+		if (payload.serializedAuth && payload.serializedModels) {
+			authStorage = AuthStorage.fromSerialized(payload.serializedAuth);
+			modelRegistry = ModelRegistry.fromSerialized(payload.serializedModels, authStorage);
+		} else {
+			authStorage = await discoverAuthStorage();
+			checkAbort();
+			modelRegistry = await discoverModels(authStorage);
+			checkAbort();
+		}
+
+		// Create MCP proxy tools if provided
+		const mcpProxyTools = payload.mcpTools?.map(createMCPProxyTool) ?? [];
 
 		// Resolve model override (equivalent to CLI's parseModelPattern with --model)
 		const { model, thinkingLevel } = resolveModelOverride(payload.model, modelRegistry);
@@ -181,6 +304,10 @@ async function runTask(runState: RunState, payload: SubagentWorkerStartPayload):
 			// Pass spawn restrictions to nested tasks
 			spawns: payload.spawnsEnv,
 			enableLsp: payload.enableLsp ?? true,
+			// Disable local MCP discovery if using proxy tools
+			enableMCP: !payload.mcpTools,
+			// Add MCP proxy tools
+			customTools: mcpProxyTools.length > 0 ? mcpProxyTools : undefined,
 		});
 
 		runState.session = session;
@@ -395,13 +522,18 @@ self.addEventListener("messageerror", () => {
 	reportFatal("Failed to deserialize parent message");
 });
 
-// Message handler - receives start/abort commands from parent
+// Message handler - receives start/abort/mcp_tool_result commands from parent
 globalThis.addEventListener("message", (event: WorkerMessageEvent<SubagentWorkerRequest>) => {
 	const message = event.data;
 	if (!message) return;
 
 	if (message.type === "abort") {
 		handleAbort();
+		return;
+	}
+
+	if (message.type === "mcp_tool_result") {
+		handleMCPToolResult(message);
 		return;
 	}
 

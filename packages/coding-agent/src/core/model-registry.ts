@@ -86,6 +86,15 @@ interface ProviderOverride {
 	apiKey?: string;
 }
 
+/**
+ * Serialized representation of ModelRegistry for passing to subagent workers.
+ */
+export interface SerializedModelRegistry {
+	models: Model<Api>[];
+	customProviderApiKeys?: Record<string, string>;
+	loadError?: string;
+}
+
 /** Result of loading custom models from models.json */
 interface CustomModelsResult {
 	models: Model<Api>[];
@@ -138,6 +147,43 @@ export class ModelRegistry {
 		});
 		// Load models synchronously in constructor
 		this.loadModels();
+	}
+
+	/**
+	 * Create an in-memory ModelRegistry instance from serialized data.
+	 * Used by subagent workers to bypass discovery and use parent's models.
+	 */
+	static fromSerialized(data: SerializedModelRegistry, authStorage: AuthStorage): ModelRegistry {
+		const instance = Object.create(ModelRegistry.prototype) as ModelRegistry;
+		(instance as any).authStorage = authStorage;
+		instance.models = data.models;
+		instance.customProviderApiKeys = new Map(Object.entries(data.customProviderApiKeys ?? {}));
+		instance.loadError = data.loadError;
+
+		authStorage.setFallbackResolver((provider) => {
+			const keyConfig = instance.customProviderApiKeys.get(provider);
+			if (keyConfig) {
+				return resolveApiKeyConfig(keyConfig);
+			}
+			return undefined;
+		});
+
+		return instance;
+	}
+
+	/**
+	 * Serialize ModelRegistry for passing to subagent workers.
+	 */
+	serialize(): SerializedModelRegistry {
+		const customProviderApiKeys: Record<string, string> = {};
+		for (const [k, v] of this.customProviderApiKeys.entries()) {
+			customProviderApiKeys[k] = v;
+		}
+		return {
+			models: this.models,
+			customProviderApiKeys: Object.keys(customProviderApiKeys).length > 0 ? customProviderApiKeys : undefined,
+			loadError: this.loadError,
+		};
 	}
 
 	/**

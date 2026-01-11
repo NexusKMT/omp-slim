@@ -108,6 +108,12 @@ export interface ToolSession {
 	getModelString?: () => string | undefined;
 	/** Get the current session model string, regardless of how it was chosen */
 	getActiveModelString?: () => string | undefined;
+	/** Auth storage for passing to subagents (avoids re-discovery) */
+	authStorage?: import("../auth-storage").AuthStorage;
+	/** Model registry for passing to subagents (avoids re-discovery) */
+	modelRegistry?: import("../model-registry").ModelRegistry;
+	/** MCP manager for proxying MCP calls through parent */
+	mcpManager?: import("../mcp/manager").MCPManager;
 	/** Settings manager (optional) */
 	settings?: {
 		getImageAutoResize(): boolean;
