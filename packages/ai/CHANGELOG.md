@@ -1,6 +1,11 @@
 # Changelog
 
 ## [Unreleased]
+
+### Changed
+
+- OpenAI Codex: switched to bundled system prompt matching opencode, changed originator to "opencode", simplified prompt handling
+
 ### Fixed
 
 - Fixed Cloud Code Assist tool schema conversion to avoid unsupported `const` fields

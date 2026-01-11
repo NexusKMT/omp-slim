@@ -8,6 +8,7 @@
 
 ### Changed
 
+- OpenAI Codex: updated to use bundled system prompt from upstream
 - Changed `complete` tool to make `data` parameter optional when aborting, while still requiring it for successful completions
 
 ### Removed
