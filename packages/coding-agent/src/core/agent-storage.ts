@@ -118,6 +118,9 @@ export class AgentStorage {
 	private listSettingsStmt: Statement;
 	private insertSettingStmt: Statement;
 	private deleteSettingsStmt: Statement;
+	private getCacheStmt: Statement;
+	private upsertCacheStmt: Statement;
+	private deleteExpiredCacheStmt: Statement;
 	private listAuthStmt: Statement;
 	private listAuthByProviderStmt: Statement;
 	private insertAuthStmt: Statement;
@@ -138,6 +141,12 @@ export class AgentStorage {
 			"INSERT INTO settings (key, value, updated_at) VALUES (?, ?, unixepoch())",
 		);
 		this.deleteSettingsStmt = this.db.prepare("DELETE FROM settings");
+
+		this.getCacheStmt = this.db.prepare("SELECT value FROM cache WHERE key = ? AND expires_at > unixepoch()");
+		this.upsertCacheStmt = this.db.prepare(
+			"INSERT INTO cache (key, value, expires_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at",
+		);
+		this.deleteExpiredCacheStmt = this.db.prepare("DELETE FROM cache WHERE expires_at <= unixepoch()");
 
 		this.listAuthStmt = this.db.prepare(
 			"SELECT id, provider, credential_type, data FROM auth_credentials ORDER BY id ASC",
@@ -174,6 +183,13 @@ CREATE TABLE IF NOT EXISTS auth_credentials (
 	updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 CREATE INDEX IF NOT EXISTS idx_auth_provider ON auth_credentials(provider);
+
+CREATE TABLE IF NOT EXISTS cache (
+	key TEXT PRIMARY KEY,
+	value TEXT NOT NULL,
+	expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cache_expires ON cache(expires_at);
 
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
 `);
@@ -299,6 +315,40 @@ CREATE TABLE settings (
 			replace(entries);
 		} catch (error) {
 			logger.error("AgentStorage failed to save settings", { error: String(error) });
+		}
+	}
+
+	/**
+	 * Gets a cached value by key. Returns null if not found or expired.
+	 */
+	getCache(key: string): string | null {
+		try {
+			const row = this.getCacheStmt.get(key) as { value?: string } | undefined;
+			return row?.value ?? null;
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * Sets a cached value with expiry time (unix seconds).
+	 */
+	setCache(key: string, value: string, expiresAtSec: number): void {
+		try {
+			this.upsertCacheStmt.run(key, value, expiresAtSec);
+		} catch (error) {
+			logger.warn("AgentStorage failed to set cache", { key, error: String(error) });
+		}
+	}
+
+	/**
+	 * Deletes expired cache entries. Call periodically for cleanup.
+	 */
+	cleanExpiredCache(): void {
+		try {
+			this.deleteExpiredCacheStmt.run();
+		} catch {
+			// Ignore cleanup errors
 		}
 	}
 

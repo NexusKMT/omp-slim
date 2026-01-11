@@ -1,9 +1,9 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Added
 
+- Added persistent cache storage for Codex usage data that survives application restarts
 - Added `--no-lsp` to disable LSP tools, formatting, diagnostics, and warmup for a session
 
 ### Changed

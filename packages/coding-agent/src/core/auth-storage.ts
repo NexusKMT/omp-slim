@@ -741,15 +741,41 @@ export class AuthStorage {
 		const normalizedBase = this.normalizeCodexBaseUrl(baseUrl);
 		const cacheKey = this.getCodexUsageCacheKey(accountId, normalizedBase);
 		const now = Date.now();
-		const cached = this.codexUsageCache.get(cacheKey);
-		if (cached && cached.expiresAt > now) {
-			return cached.usage;
+
+		// Check in-memory cache first (fastest)
+		const memCached = this.codexUsageCache.get(cacheKey);
+		if (memCached && memCached.expiresAt > now) {
+			return memCached.usage;
 		}
 
+		// Check DB cache (survives restarts)
+		const dbCached = this.storage.getCache(`codex_usage:${cacheKey}`);
+		if (dbCached) {
+			try {
+				const parsed = JSON.parse(dbCached) as CodexUsage;
+				// Store in memory for faster subsequent access
+				this.codexUsageCache.set(cacheKey, {
+					fetchedAt: now,
+					expiresAt: now + AuthStorage.codexUsageCacheTtlMs,
+					usage: parsed,
+				});
+				return parsed;
+			} catch {
+				// Invalid cache, continue to fetch
+			}
+		}
+
+		// Fetch from API
 		const usage = await this.fetchCodexUsage(credential, normalizedBase);
 		if (usage) {
 			const expiresAt = this.getCodexUsageExpiryMs(usage, now);
 			this.codexUsageCache.set(cacheKey, { fetchedAt: now, expiresAt, usage });
+			// Store in DB with 60s TTL
+			this.storage.setCache(
+				`codex_usage:${cacheKey}`,
+				JSON.stringify(usage),
+				Math.floor((now + AuthStorage.codexUsageCacheTtlMs) / 1000),
+			);
 			return usage;
 		}
 
