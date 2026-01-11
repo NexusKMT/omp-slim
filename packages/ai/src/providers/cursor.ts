@@ -35,6 +35,7 @@ import {
 	BackgroundShellSpawnResultSchema,
 	ClientHeartbeatSchema,
 	ConversationActionSchema,
+	type ConversationStateStructure,
 	ConversationStateStructureSchema,
 	DeleteErrorSchema,
 	DeleteRejectedSchema,
@@ -113,6 +114,9 @@ import {
 export const CURSOR_API_URL = "https://api2.cursor.sh";
 export const CURSOR_CLIENT_VERSION = "cli-2026.01.09-231024f";
 
+const conversationStateCache = new Map<string, ConversationStateStructure>();
+const conversationBlobStores = new Map<string, Map<string, Uint8Array>>();
+
 export interface CursorOptions extends StreamOptions {
 	customSystemPrompt?: string;
 	conversationId?: string;
@@ -122,20 +126,31 @@ export interface CursorOptions extends StreamOptions {
 
 const CONNECT_END_STREAM_FLAG = 0b00000010;
 
-async function appendCursorDebugLog(message: string): Promise<void> {
+interface CursorLogEntry {
+	ts: number;
+	type: string;
+	subtype?: string;
+	data?: unknown;
+}
+
+async function appendCursorDebugLog(entry: CursorLogEntry): Promise<void> {
 	const logPath = process.env.DEBUG_CURSOR_LOG;
 	if (!logPath) return;
 	try {
-		await appendFile(logPath, `${message}\n`);
+		await appendFile(logPath, `${JSON.stringify(entry, debugReplacer)}\n`);
 	} catch {
 		// Ignore debug log failures
 	}
 }
 
-function logCursorDebug(message: string): void {
+function log(type: string, subtype?: string, data?: unknown): void {
 	if (!process.env.DEBUG_CURSOR) return;
-	console.error(message);
-	void appendCursorDebugLog(message);
+	const normalizedData = data ? decodeLogData(data) : data;
+	const entry: CursorLogEntry = { ts: Date.now(), type, subtype, data: normalizedData };
+	const verbose = process.env.DEBUG_CURSOR === "2" || process.env.DEBUG_CURSOR === "verbose";
+	const dataStr = verbose && normalizedData ? ` ${JSON.stringify(normalizedData, debugReplacer)?.slice(0, 500)}` : "";
+	console.error(`[CURSOR] ${type}${subtype ? `: ${subtype}` : ""}${dataStr}`);
+	void appendCursorDebugLog(entry);
 }
 
 function frameConnectMessage(data: Uint8Array, flags = 0): Buffer {
@@ -185,6 +200,72 @@ function debugReplacer(key: string, value: unknown): unknown {
 	return value;
 }
 
+function extractLogBytes(value: unknown): Uint8Array | null {
+	if (value instanceof Uint8Array) {
+		return value;
+	}
+	if (value && typeof value === "object" && "type" in value && value.type === "Buffer") {
+		const data = (value as { data?: number[] }).data;
+		if (Array.isArray(data)) {
+			return new Uint8Array(data);
+		}
+	}
+	return null;
+}
+
+function decodeMcpArgsForLog(args?: Record<string, unknown>): Record<string, unknown> | undefined {
+	if (!args) {
+		return undefined;
+	}
+	let mutated = false;
+	const decoded: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(args)) {
+		const bytes = extractLogBytes(value);
+		if (bytes) {
+			decoded[key] = decodeMcpArgValue(bytes);
+			mutated = true;
+			continue;
+		}
+		const normalizedValue = decodeLogData(value);
+		decoded[key] = normalizedValue;
+		if (normalizedValue !== value) {
+			mutated = true;
+		}
+	}
+	return mutated ? decoded : args;
+}
+
+function decodeLogData(value: unknown): unknown {
+	if (!value || typeof value !== "object") {
+		return value;
+	}
+	if (Array.isArray(value)) {
+		return value.map((entry) => decodeLogData(entry));
+	}
+	const record = value as Record<string, unknown>;
+	if (record.$typeName === "agent.v1.McpArgs") {
+		const decodedArgs = decodeMcpArgsForLog(record.args as Record<string, unknown> | undefined);
+		return decodedArgs ? { ...record, args: decodedArgs } : record;
+	}
+	if (record.$typeName === "agent.v1.McpToolCall") {
+		const argsRecord = record.args as Record<string, unknown> | undefined;
+		const decodedArgs = decodeMcpArgsForLog(argsRecord?.args as Record<string, unknown> | undefined);
+		if (decodedArgs && argsRecord) {
+			return { ...record, args: { ...argsRecord, args: decodedArgs } };
+		}
+	}
+	let mutated = false;
+	const decoded: Record<string, unknown> = {};
+	for (const [key, entry] of Object.entries(record)) {
+		const normalizedEntry = decodeLogData(entry);
+		decoded[key] = normalizedEntry;
+		if (normalizedEntry !== entry) {
+			mutated = true;
+		}
+	}
+	return mutated ? decoded : record;
+}
+
 export const streamCursor: StreamFunction<"cursor-agent"> = (
 	model: Model<"cursor-agent">,
 	context: Context,
@@ -221,7 +302,16 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 				throw new Error("Cursor API key (access token) is required");
 			}
 
-			const { requestBytes, blobStore } = buildGrpcRequest(model, context, options);
+			const conversationId = options?.conversationId ?? options?.sessionId ?? crypto.randomUUID();
+			const blobStore = conversationBlobStores.get(conversationId) ?? new Map<string, Uint8Array>();
+			conversationBlobStores.set(conversationId, blobStore);
+			const cachedState = conversationStateCache.get(conversationId);
+			const { requestBytes, conversationState } = buildGrpcRequest(model, context, options, {
+				conversationId,
+				blobStore,
+				conversationState: cachedState,
+			});
+			conversationStateCache.set(conversationId, conversationState);
 			const requestContextTools = buildMcpToolDefinitions(context.tools);
 
 			const baseUrl = model.baseUrl || CURSOR_API_URL;
@@ -270,6 +360,10 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 				},
 			};
 
+			const onConversationCheckpoint = (checkpoint: ConversationStateStructure) => {
+				conversationStateCache.set(conversationId, checkpoint);
+			};
+
 			h2Request.on("data", (chunk: Buffer) => {
 				pendingBuffer = Buffer.concat([pendingBuffer, chunk]);
 
@@ -303,11 +397,12 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 							options?.onToolResult,
 							usageState,
 							requestContextTools,
+							onConversationCheckpoint,
 						).catch((error) => {
-							logCursorDebug(`[CURSOR] Failed to handle server message: ${String(error)}`);
+							log("error", "handleServerMessage", { error: String(error) });
 						});
 					} catch (e) {
-						logCursorDebug(`[CURSOR] Failed to parse server message: ${String(e)}`);
+						log("error", "parseServerMessage", { error: String(e) });
 					}
 				}
 			});
@@ -435,16 +530,11 @@ async function handleServerMessage(
 	onToolResult: CursorToolResultHandler | undefined,
 	usageState: UsageState,
 	requestContextTools: McpToolDefinition[],
+	onConversationCheckpoint?: (checkpoint: ConversationStateStructure) => void,
 ): Promise<void> {
 	const msgCase = msg.message.case;
 
-	if (process.env.DEBUG_CURSOR) {
-		const detail =
-			process.env.DEBUG_CURSOR === "2"
-				? ` ${JSON.stringify(msg.message.value, debugReplacer, 2)?.slice(0, 2000)}`
-				: "";
-		logCursorDebug(`[CURSOR] Server message: ${msgCase}${detail}`);
-	}
+	log("serverMessage", msgCase, msg.message.value);
 
 	if (msgCase === "interactionUpdate") {
 		processInteractionUpdate(msg.message.value, output, stream, state, usageState);
@@ -459,7 +549,7 @@ async function handleServerMessage(
 			requestContextTools,
 		);
 	} else if (msgCase === "conversationCheckpointUpdate") {
-		handleConversationCheckpointUpdate(msg.message.value, output, usageState);
+		handleConversationCheckpointUpdate(msg.message.value, output, usageState, onConversationCheckpoint);
 	}
 }
 
@@ -491,9 +581,7 @@ function handleKvServerMessage(
 		const responseBytes = toBinary(AgentClientMessageSchema, kvClientMessage);
 		h2Request.write(frameConnectMessage(responseBytes));
 
-		if (process.env.DEBUG_CURSOR) {
-			logCursorDebug(`[CURSOR] Sent KV blob response for id: ${blobIdKey.slice(0, 40)}`);
-		}
+		log("kvClient", "getBlobResult", { blobId: blobIdKey.slice(0, 40) });
 	} else if (kvCase === "setBlobArgs") {
 		const { blobId, blobData } = kvMsg.message.value;
 		const blobIdKey = Buffer.from(blobId).toString("hex");
@@ -514,9 +602,7 @@ function handleKvServerMessage(
 		const responseBytes = toBinary(AgentClientMessageSchema, kvClientMessage);
 		h2Request.write(frameConnectMessage(responseBytes));
 
-		if (process.env.DEBUG_CURSOR) {
-			logCursorDebug(`[CURSOR] Stored KV blob: ${blobIdKey.slice(0, 40)}`);
-		}
+		log("kvClient", "setBlobResult", { blobId: blobIdKey.slice(0, 40) });
 	}
 }
 
@@ -672,10 +758,7 @@ async function handleExecServerMessage(
 		});
 
 		sendExecClientMessage(h2Request, execMsg, "requestContextResult", requestContextResult);
-
-		if (process.env.DEBUG_CURSOR) {
-			logCursorDebug("[CURSOR] Sent request context response");
-		}
+		log("execClient", "requestContextResult");
 		return;
 	}
 
@@ -846,9 +929,7 @@ async function handleExecServerMessage(
 			return;
 		}
 		default:
-			if (process.env.DEBUG_CURSOR) {
-				logCursorDebug(`[CURSOR] Unhandled exec message: ${execCase}`);
-			}
+			log("warn", "unhandledExecMessage", { execCase });
 	}
 }
 
@@ -874,11 +955,7 @@ function sendExecClientMessage<T>(
 	const responseBytes = toBinary(AgentClientMessageSchema, clientMessage);
 	h2Request.write(frameConnectMessage(responseBytes));
 
-	if (process.env.DEBUG_CURSOR) {
-		const detail =
-			process.env.DEBUG_CURSOR === "2" ? ` ${JSON.stringify(value, debugReplacer, 2)?.slice(0, 2000)}` : "";
-		logCursorDebug(`[CURSOR] Sent exec client message: ${messageCase}${detail}`);
-	}
+	log("execClientMessage", messageCase, value);
 }
 
 async function resolveExecHandler<TArgs, TResult>(
@@ -1413,6 +1490,17 @@ function decodeMcpArgValue(value: Uint8Array): unknown {
 	return parseToolArgsJson(text);
 }
 
+function decodeMcpArgsMap(args?: Record<string, Uint8Array>): Record<string, unknown> | undefined {
+	if (!args) {
+		return undefined;
+	}
+	const decoded: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(args)) {
+		decoded[key] = decodeMcpArgValue(value);
+	}
+	return decoded;
+}
+
 function decodeMcpCall(args: {
 	name: string;
 	args: Record<string, Uint8Array>;
@@ -1496,13 +1584,7 @@ function processInteractionUpdate(
 ): void {
 	const updateCase = update.message?.case;
 
-	if (process.env.DEBUG_CURSOR) {
-		const detail =
-			process.env.DEBUG_CURSOR === "2"
-				? ` ${JSON.stringify(update.message?.value, debugReplacer, 2)?.slice(0, 1000)}`
-				: "";
-		logCursorDebug(`[CURSOR] Interaction update: ${updateCase}${detail}`);
-	}
+	log("interactionUpdate", updateCase, update.message?.value);
 
 	if (updateCase === "textDelta") {
 		const delta = update.message.value.text || "";
@@ -1576,8 +1658,9 @@ function processInteractionUpdate(
 	} else if (updateCase === "toolCallCompleted") {
 		if (state.currentToolCall) {
 			const toolCall = update.message.value.toolCall;
-			if (toolCall?.mcpToolCall?.args?.args) {
-				state.currentToolCall.arguments = toolCall.mcpToolCall.args.args;
+			const decodedArgs = decodeMcpArgsMap(toolCall?.mcpToolCall?.args?.args);
+			if (decodedArgs) {
+				state.currentToolCall.arguments = decodedArgs;
 			}
 			const idx = output.content.indexOf(state.currentToolCall);
 			delete (state.currentToolCall as any).partialJson;
@@ -1596,10 +1679,12 @@ function processInteractionUpdate(
 }
 
 function handleConversationCheckpointUpdate(
-	checkpoint: { tokenDetails?: { usedTokens?: number } },
+	checkpoint: ConversationStateStructure,
 	output: AssistantMessage,
 	usageState: UsageState,
+	onConversationCheckpoint?: (checkpoint: ConversationStateStructure) => void,
 ): void {
+	onConversationCheckpoint?.(checkpoint);
 	if (usageState.sawTokenDelta) {
 		return;
 	}
@@ -1649,9 +1734,18 @@ function buildMcpToolDefinitions(tools: Tool[] | undefined): McpToolDefinition[]
 function buildGrpcRequest(
 	model: Model<"cursor-agent">,
 	context: Context,
-	options?: CursorOptions,
-): { requestBytes: Uint8Array; blobStore: Map<string, Uint8Array> } {
-	const blobStore = new Map<string, Uint8Array>();
+	options: CursorOptions | undefined,
+	state: {
+		conversationId: string;
+		blobStore: Map<string, Uint8Array>;
+		conversationState?: ConversationStateStructure;
+	},
+): {
+	requestBytes: Uint8Array;
+	blobStore: Map<string, Uint8Array>;
+	conversationState: ConversationStateStructure;
+} {
+	const blobStore = state.blobStore;
 
 	const systemPromptJson = JSON.stringify({
 		role: "system",
@@ -1681,10 +1775,26 @@ function buildGrpcRequest(
 		},
 	});
 
-	const conversationState = create(ConversationStateStructureSchema, {
-		rootPromptMessagesJson: [systemPromptId],
-		turns: [],
-	});
+	const hasMatchingPrompt = state.conversationState?.rootPromptMessagesJson?.some((entry) =>
+		Buffer.from(entry).equals(systemPromptId),
+	);
+	const conversationState =
+		state.conversationState && hasMatchingPrompt
+			? state.conversationState
+			: create(ConversationStateStructureSchema, {
+					rootPromptMessagesJson: [systemPromptId],
+					turns: [],
+					todos: [],
+					pendingToolCalls: [],
+					previousWorkspaceUris: [],
+					fileStates: {},
+					fileStatesV2: {},
+					summaryArchives: [],
+					turnTimings: [],
+					subagentStates: {},
+					selfSummaryCount: 0,
+					readPaths: [],
+				});
 
 	const modelDetails = create(ModelDetailsSchema, {
 		modelId: model.id,
@@ -1696,7 +1806,7 @@ function buildGrpcRequest(
 		conversationState,
 		action,
 		modelDetails,
-		conversationId: options?.conversationId || crypto.randomUUID(),
+		conversationId: state.conversationId,
 	});
 
 	// Tools are sent later via requestContext (exec handshake)
@@ -1711,18 +1821,19 @@ function buildGrpcRequest(
 
 	const requestBytes = toBinary(AgentClientMessageSchema, clientMessage);
 
-	if (process.env.DEBUG_CURSOR) {
-		const toolNames = context.tools?.map((tool) => tool.name) ?? [];
-		const detail =
-			process.env.DEBUG_CURSOR === "2"
-				? ` ${JSON.stringify(clientMessage.message.value, debugReplacer, 2)?.slice(0, 2000)}`
-				: "";
-		logCursorDebug(
-			`[CURSOR] Built runRequest: bytes=${requestBytes.length} tools=${toolNames.length} names=${toolNames.slice(0, 20).join(",")}${detail}`,
-		);
-	}
+	const toolNames = context.tools?.map((tool) => tool.name) ?? [];
+	const detail =
+		process.env.DEBUG_CURSOR === "2"
+			? ` ${JSON.stringify(clientMessage.message.value, debugReplacer, 2)?.slice(0, 2000)}`
+			: "";
+	log("info", "builtRunRequest", {
+		bytes: requestBytes.length,
+		tools: toolNames.length,
+		toolNames: toolNames.slice(0, 20),
+		detail: detail || undefined,
+	});
 
-	return { requestBytes, blobStore };
+	return { requestBytes, blobStore, conversationState };
 }
 
 function extractText(content: (TextContent | ImageContent)[]): string {

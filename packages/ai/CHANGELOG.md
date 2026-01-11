@@ -1,8 +1,12 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Added
 
+- Added debug log filtering and display script for Cursor JSONL logs with follow mode and coalescing support
+- Added protobuf definition extractor script to reconstruct .proto files from bundled JavaScript
+- Added conversation state caching to persist context across multiple Cursor API requests in the same session
 - Added shell streaming support for real-time stdout/stderr output during command execution
 - Added JSON5 parsing for MCP tool arguments with Python-style boolean and None value normalization
 - Added Cursor provider with support for Claude, GPT, and Gemini models via Cursor's agent API
@@ -13,6 +17,7 @@
 
 ### Changed
 
+- Changed Cursor debug logging to use structured JSONL format with automatic MCP argument decoding
 - Changed MCP tool argument decoding to use protobuf Value schema for improved type handling
 - Changed tool advertisement to filter Cursor native tools (bash, read, write, delete, ls, grep, lsp) instead of only exposing mcp_ prefixed tools
 
