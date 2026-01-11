@@ -13,9 +13,9 @@ import {
 	formatCount,
 	formatExpandHint,
 	formatMoreItems,
+	formatStatusIcon,
 	getDomain,
 	getPreviewLines,
-	getStyledStatusIcon,
 	PREVIEW_LIMITS,
 	TRUNCATE_LENGTHS,
 	truncate,
@@ -38,8 +38,8 @@ function renderFallbackText(contentText: string, expanded: boolean, theme: Theme
 	const displayLines = lines.slice(0, maxLines).map((line) => truncate(line.trim(), 110, theme.format.ellipsis));
 	const remaining = lines.length - displayLines.length;
 
-	const headerIcon = getStyledStatusIcon("warning", theme);
-	const expandHint = formatExpandHint(expanded, remaining > 0, theme);
+	const headerIcon = formatStatusIcon("warning", theme);
+	const expandHint = formatExpandHint(theme, expanded, remaining > 0);
 	let text = `${headerIcon} ${theme.fg("dim", "Response")}${expandHint}`;
 
 	if (displayLines.length === 0) {
@@ -116,14 +116,14 @@ export function renderWebSearchResult(
 				: provider === "exa"
 					? "Exa"
 					: "Unknown";
-	const headerIcon = getStyledStatusIcon(sourceCount > 0 ? "success" : "warning", theme);
+	const headerIcon = formatStatusIcon(sourceCount > 0 ? "success" : "warning", theme);
 	const hasMore =
 		totalAnswerLines > answerPreview.length ||
 		sourceCount > 0 ||
 		citationCount > 0 ||
 		relatedCount > 0 ||
 		searchQueries.length > 0;
-	const expandHint = formatExpandHint(expanded, hasMore, theme);
+	const expandHint = formatExpandHint(theme, expanded, hasMore);
 	let text = `${headerIcon} ${theme.fg("dim", `(${providerLabel})`)}${theme.sep.dot}${theme.fg(
 		"dim",
 		formatCount("source", sourceCount),
@@ -257,7 +257,10 @@ export function renderWebSearchResult(
 	}
 	if (response.requestId) {
 		metaLines.push(
-			`${theme.fg("muted", "Request:")} ${theme.fg("text", truncate(response.requestId, MAX_REQUEST_ID_LEN, theme.format.ellipsis))}`,
+			`${theme.fg("muted", "Request:")} ${theme.fg(
+				"text",
+				truncate(response.requestId, MAX_REQUEST_ID_LEN, theme.format.ellipsis),
+			)}`,
 		);
 	}
 	if (searchQueries.length > 0) {
@@ -274,22 +277,22 @@ export function renderWebSearchResult(
 	const sections: Array<{ title: string; icon: string; lines: string[] }> = [
 		{
 			title: "Answer",
-			icon: getStyledStatusIcon("info", theme),
+			icon: formatStatusIcon("info", theme),
 			lines: answerSectionLines,
 		},
 		{
 			title: "Sources",
-			icon: getStyledStatusIcon(sourceCount > 0 ? "success" : "warning", theme),
+			icon: formatStatusIcon(sourceCount > 0 ? "success" : "warning", theme),
 			lines: sourceLines,
 		},
 		{
 			title: "Related",
-			icon: getStyledStatusIcon(relatedCount > 0 ? "info" : "warning", theme),
+			icon: formatStatusIcon(relatedCount > 0 ? "info" : "warning", theme),
 			lines: relatedLines,
 		},
 		{
 			title: "Meta",
-			icon: getStyledStatusIcon("info", theme),
+			icon: formatStatusIcon("info", theme),
 			lines: metaLines,
 		},
 	];

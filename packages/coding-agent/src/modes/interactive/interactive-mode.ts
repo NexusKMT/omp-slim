@@ -36,7 +36,7 @@ import type { HookEditorComponent } from "./components/hook-editor";
 import type { HookInputComponent } from "./components/hook-input";
 import type { HookSelectorComponent } from "./components/hook-selector";
 import { StatusLineComponent } from "./components/status-line";
-import type { ToolExecutionComponent } from "./components/tool-execution";
+import type { ToolExecutionHandle } from "./components/tool-execution";
 import { WelcomeComponent } from "./components/welcome";
 import { CommandController } from "./controllers/command-controller";
 import { EventController } from "./controllers/event-controller";
@@ -86,7 +86,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	public hideThinkingBlock = false;
 	public pendingImages: ImageContent[] = [];
 	public compactionQueuedMessages: CompactionQueuedMessage[] = [];
-	public pendingTools = new Map<string, ToolExecutionComponent>();
+	public pendingTools = new Map<string, ToolExecutionHandle>();
 	public pendingBashComponents: BashExecutionComponent[] = [];
 	public bashComponent: BashExecutionComponent | undefined = undefined;
 	public streamingComponent: AssistantMessageComponent | undefined = undefined;

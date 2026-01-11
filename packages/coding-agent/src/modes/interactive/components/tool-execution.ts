@@ -86,6 +86,21 @@ export interface ToolExecutionOptions {
 	showImages?: boolean; // default: true (only used if terminal supports images)
 }
 
+export interface ToolExecutionHandle {
+	updateArgs(args: any, toolCallId?: string): void;
+	updateResult(
+		result: {
+			content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+			details?: any;
+			isError?: boolean;
+		},
+		isPartial?: boolean,
+		toolCallId?: string,
+	): void;
+	setArgsComplete(toolCallId?: string): void;
+	setExpanded(expanded: boolean): void;
+}
+
 /**
  * Component that renders a tool call with its result (updateable)
  */
@@ -152,7 +167,7 @@ export class ToolExecutionComponent extends Container {
 		this.updateDisplay();
 	}
 
-	updateArgs(args: any): void {
+	updateArgs(args: any, _toolCallId?: string): void {
 		this.args = args;
 		this.updateDisplay();
 	}
@@ -161,7 +176,7 @@ export class ToolExecutionComponent extends Container {
 	 * Signal that args are complete (tool is about to execute).
 	 * This triggers diff computation for edit tool.
 	 */
-	setArgsComplete(): void {
+	setArgsComplete(_toolCallId?: string): void {
 		this.maybeComputeEditDiff();
 	}
 
@@ -206,6 +221,7 @@ export class ToolExecutionComponent extends Container {
 			isError?: boolean;
 		},
 		isPartial = false,
+		_toolCallId?: string,
 	): void {
 		this.result = result;
 		this.isPartial = isPartial;

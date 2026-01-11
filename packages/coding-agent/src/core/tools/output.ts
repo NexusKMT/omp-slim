@@ -470,7 +470,7 @@ export const outputToolRenderer = {
 		const maxOutputs = expanded ? outputs.length : Math.min(outputs.length, 5);
 		const hasMoreOutputs = outputs.length > maxOutputs;
 		const hasMorePreview = outputs.some((o) => (o.previewLines?.length ?? 0) > previewLimit);
-		const expandHint = formatExpandHint(expanded, hasMoreOutputs || hasMorePreview, uiTheme);
+		const expandHint = formatExpandHint(uiTheme, expanded, hasMoreOutputs || hasMorePreview);
 		let text = `${icon} ${uiTheme.fg("dim", summary)}${expandHint}`;
 
 		for (let i = 0; i < maxOutputs; i++) {

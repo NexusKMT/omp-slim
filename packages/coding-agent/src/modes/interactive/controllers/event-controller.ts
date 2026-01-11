@@ -2,13 +2,32 @@ import { Loader, Text } from "@oh-my-pi/pi-tui";
 import type { AgentSessionEvent } from "../../../core/agent-session";
 import { detectNotificationProtocol, isNotificationSuppressed, sendNotification } from "../../../core/terminal-notify";
 import { AssistantMessageComponent } from "../components/assistant-message";
+import { ReadToolGroupComponent } from "../components/read-tool-group";
 import { ToolExecutionComponent } from "../components/tool-execution";
 import { TtsrNotificationComponent } from "../components/ttsr-notification";
 import { getSymbolTheme, theme } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
 
 export class EventController {
+	private lastReadGroup: ReadToolGroupComponent | undefined = undefined;
+	private lastThinkingCount = 0;
+
 	constructor(private ctx: InteractiveModeContext) {}
+
+	private resetReadGroup(): void {
+		this.lastReadGroup = undefined;
+	}
+
+	private getReadGroup(): ReadToolGroupComponent {
+		if (!this.lastReadGroup) {
+			this.ctx.chatContainer.addChild(new Text("", 0, 0));
+			const group = new ReadToolGroupComponent();
+			group.setExpanded(this.ctx.toolOutputExpanded);
+			this.ctx.chatContainer.addChild(group);
+			this.lastReadGroup = group;
+		}
+		return this.lastReadGroup;
+	}
 
 	subscribeToAgent(): void {
 		this.ctx.unsubscribe = this.ctx.session.subscribe(async (event: AgentSessionEvent) => {
@@ -53,17 +72,21 @@ export class EventController {
 
 			case "message_start":
 				if (event.message.role === "hookMessage" || event.message.role === "custom") {
+					this.resetReadGroup();
 					this.ctx.addMessageToChat(event.message);
 					this.ctx.ui.requestRender();
 				} else if (event.message.role === "user") {
+					this.resetReadGroup();
 					this.ctx.addMessageToChat(event.message);
 					this.ctx.editor.setText("");
 					this.ctx.updatePendingMessagesDisplay();
 					this.ctx.ui.requestRender();
 				} else if (event.message.role === "fileMention") {
+					this.resetReadGroup();
 					this.ctx.addMessageToChat(event.message);
 					this.ctx.ui.requestRender();
 				} else if (event.message.role === "assistant") {
+					this.lastThinkingCount = 0;
 					this.ctx.streamingComponent = new AssistantMessageComponent(undefined, this.ctx.hideThinkingBlock);
 					this.ctx.streamingMessage = event.message;
 					this.ctx.chatContainer.addChild(this.ctx.streamingComponent);
@@ -77,29 +100,45 @@ export class EventController {
 					this.ctx.streamingMessage = event.message;
 					this.ctx.streamingComponent.updateContent(this.ctx.streamingMessage);
 
+					const thinkingCount = this.ctx.streamingMessage.content.filter(
+						(content) => content.type === "thinking" && content.thinking.trim(),
+					).length;
+					if (thinkingCount > this.lastThinkingCount) {
+						this.resetReadGroup();
+						this.lastThinkingCount = thinkingCount;
+					}
+
 					for (const content of this.ctx.streamingMessage.content) {
-						if (content.type === "toolCall") {
-							if (!this.ctx.pendingTools.has(content.id)) {
-								this.ctx.chatContainer.addChild(new Text("", 0, 0));
-								const tool = this.ctx.session.getToolByName(content.name);
-								const component = new ToolExecutionComponent(
-									content.name,
-									content.arguments,
-									{
-										showImages: this.ctx.settingsManager.getShowImages(),
-									},
-									tool,
-									this.ctx.ui,
-									this.ctx.sessionManager.getCwd(),
-								);
-								component.setExpanded(this.ctx.toolOutputExpanded);
-								this.ctx.chatContainer.addChild(component);
-								this.ctx.pendingTools.set(content.id, component);
-							} else {
-								const component = this.ctx.pendingTools.get(content.id);
-								if (component) {
-									component.updateArgs(content.arguments);
-								}
+						if (content.type !== "toolCall") continue;
+
+						if (!this.ctx.pendingTools.has(content.id)) {
+							if (content.name === "read") {
+								const group = this.getReadGroup();
+								group.updateArgs(content.arguments, content.id);
+								this.ctx.pendingTools.set(content.id, group);
+								continue;
+							}
+
+							this.resetReadGroup();
+							this.ctx.chatContainer.addChild(new Text("", 0, 0));
+							const tool = this.ctx.session.getToolByName(content.name);
+							const component = new ToolExecutionComponent(
+								content.name,
+								content.arguments,
+								{
+									showImages: this.ctx.settingsManager.getShowImages(),
+								},
+								tool,
+								this.ctx.ui,
+								this.ctx.sessionManager.getCwd(),
+							);
+							component.setExpanded(this.ctx.toolOutputExpanded);
+							this.ctx.chatContainer.addChild(component);
+							this.ctx.pendingTools.set(content.id, component);
+						} else {
+							const component = this.ctx.pendingTools.get(content.id);
+							if (component) {
+								component.updateArgs(content.arguments, content.id);
 							}
 						}
 					}
@@ -133,17 +172,21 @@ export class EventController {
 							} else {
 								errorMessage = this.ctx.streamingMessage.errorMessage || "Error";
 							}
-							for (const [, component] of this.ctx.pendingTools.entries()) {
-								component.updateResult({
-									content: [{ type: "text", text: errorMessage }],
-									isError: true,
-								});
+							for (const [toolCallId, component] of this.ctx.pendingTools.entries()) {
+								component.updateResult(
+									{
+										content: [{ type: "text", text: errorMessage }],
+										isError: true,
+									},
+									false,
+									toolCallId,
+								);
 							}
 						}
 						this.ctx.pendingTools.clear();
 					} else {
-						for (const [, component] of this.ctx.pendingTools.entries()) {
-							component.setArgsComplete();
+						for (const [toolCallId, component] of this.ctx.pendingTools.entries()) {
+							component.setArgsComplete(toolCallId);
 						}
 					}
 					this.ctx.streamingComponent = undefined;
@@ -156,6 +199,15 @@ export class EventController {
 
 			case "tool_execution_start": {
 				if (!this.ctx.pendingTools.has(event.toolCallId)) {
+					if (event.toolName === "read") {
+						const group = this.getReadGroup();
+						group.updateArgs(event.args, event.toolCallId);
+						this.ctx.pendingTools.set(event.toolCallId, group);
+						this.ctx.ui.requestRender();
+						break;
+					}
+
+					this.resetReadGroup();
 					const tool = this.ctx.session.getToolByName(event.toolName);
 					const component = new ToolExecutionComponent(
 						event.toolName,
@@ -178,7 +230,7 @@ export class EventController {
 			case "tool_execution_update": {
 				const component = this.ctx.pendingTools.get(event.toolCallId);
 				if (component) {
-					component.updateResult({ ...event.partialResult, isError: false }, true);
+					component.updateResult({ ...event.partialResult, isError: false }, true, event.toolCallId);
 					this.ctx.ui.requestRender();
 				}
 				break;
@@ -187,7 +239,7 @@ export class EventController {
 			case "tool_execution_end": {
 				const component = this.ctx.pendingTools.get(event.toolCallId);
 				if (component) {
-					component.updateResult({ ...event.result, isError: event.isError });
+					component.updateResult({ ...event.result, isError: event.isError }, false, event.toolCallId);
 					this.ctx.pendingTools.delete(event.toolCallId);
 					this.ctx.ui.requestRender();
 				}

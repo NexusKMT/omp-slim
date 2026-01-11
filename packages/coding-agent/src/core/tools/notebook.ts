@@ -278,7 +278,7 @@ export const notebookToolRenderer = {
 		if (totalCells !== undefined) summaryParts.push(`${totalCells} total`);
 		const summaryText = summaryParts.join(uiTheme.sep.dot);
 
-		const expandHint = formatExpandHint(expanded, canExpand, uiTheme);
+		const expandHint = expanded || !canExpand ? "" : formatExpandHint(uiTheme);
 		let text = `${icon} ${uiTheme.fg("dim", summaryText)}${expandHint}`;
 
 		if (cellSource) {

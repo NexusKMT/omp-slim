@@ -265,7 +265,7 @@ export const lsToolRenderer = {
 		);
 		const maxEntries = expanded ? entries.length : Math.min(entries.length, COLLAPSED_LIST_LIMIT);
 		const hasMoreEntries = entries.length > maxEntries;
-		const expandHint = formatExpandHint(expanded, hasMoreEntries, uiTheme);
+		const expandHint = formatExpandHint(uiTheme, expanded, hasMoreEntries);
 
 		let text = `${icon} ${uiTheme.fg("dim", summaryText)}${formatTruncationSuffix(truncated, uiTheme)}${expandHint}`;
 
@@ -302,7 +302,10 @@ export const lsToolRenderer = {
 		}
 
 		if (hasTruncation) {
-			text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg("warning", `truncated: ${truncationReasons.join(", ")}`)}`;
+			text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg(
+				"warning",
+				`truncated: ${truncationReasons.join(", ")}`,
+			)}`;
 		}
 
 		return new Text(text, 0, 0);

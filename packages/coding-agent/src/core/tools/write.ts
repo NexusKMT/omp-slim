@@ -10,7 +10,7 @@ import type { ToolSession } from "../sdk";
 import { untilAborted } from "../utils";
 import { createLspWritethrough, type FileDiagnosticsResult, writethroughNoop } from "./lsp/index";
 import { resolveToCwd } from "./path-utils";
-import { formatDiagnostics, replaceTabs, shortenPath } from "./render-utils";
+import { formatDiagnostics, formatExpandHint, replaceTabs, shortenPath } from "./render-utils";
 
 const writeSchema = Type.Object({
 	path: Type.String({ description: "Path to the file to write (relative or absolute)" }),
@@ -132,7 +132,7 @@ export const writeToolRenderer = {
 				outputLines.push(
 					uiTheme.fg(
 						"toolOutput",
-						`${uiTheme.format.ellipsis} (${remaining} more lines, ${totalLines} total) ${uiTheme.format.bracketLeft}Ctrl+O to expand${uiTheme.format.bracketRight}`,
+						`${uiTheme.format.ellipsis} (${remaining} more lines, ${totalLines} total) ${formatExpandHint(uiTheme)}`,
 					),
 				);
 			}

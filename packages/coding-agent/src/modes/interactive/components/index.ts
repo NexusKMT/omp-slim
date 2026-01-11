@@ -19,6 +19,7 @@ export { LoginDialogComponent } from "./login-dialog";
 export { ModelSelectorComponent } from "./model-selector";
 export { OAuthSelectorComponent } from "./oauth-selector";
 export { QueueModeSelectorComponent } from "./queue-mode-selector";
+export { ReadToolGroupComponent } from "./read-tool-group";
 export { SessionSelectorComponent } from "./session-selector";
 export {
 	type SettingChangeHandler,
@@ -30,7 +31,7 @@ export { ShowImagesSelectorComponent } from "./show-images-selector";
 export { StatusLineComponent } from "./status-line";
 export { ThemeSelectorComponent } from "./theme-selector";
 export { ThinkingSelectorComponent } from "./thinking-selector";
-export { ToolExecutionComponent, type ToolExecutionOptions } from "./tool-execution";
+export { ToolExecutionComponent, type ToolExecutionHandle, type ToolExecutionOptions } from "./tool-execution";
 export { TreeSelectorComponent } from "./tree-selector";
 export { TtsrNotificationComponent } from "./ttsr-notification";
 export { UserMessageComponent } from "./user-message";

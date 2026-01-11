@@ -13,9 +13,9 @@ import {
 	formatCount,
 	formatExpandHint,
 	formatMoreItems,
+	formatStatusIcon,
 	getDomain,
 	getPreviewLines,
-	getStyledStatusIcon,
 	PREVIEW_LIMITS,
 	TRUNCATE_LENGTHS,
 	truncate,
@@ -32,14 +32,14 @@ const MAX_HIGHLIGHT_LEN = TRUNCATE_LENGTHS.CONTENT;
 function renderErrorMessage(message: string, theme: Theme): Text {
 	const clean = message.replace(/^Error:\s*/, "").trim();
 	return new Text(
-		`${getStyledStatusIcon("error", theme)} ${theme.fg("error", `Error: ${clean || "Unknown error"}`)}`,
+		`${formatStatusIcon("error", theme)} ${theme.fg("error", `Error: ${clean || "Unknown error"}`)}`,
 		0,
 		0,
 	);
 }
 
 function renderEmptyMessage(message: string, theme: Theme): Text {
-	return new Text(`${getStyledStatusIcon("warning", theme)} ${theme.fg("muted", message)}`, 0, 0);
+	return new Text(`${formatStatusIcon("warning", theme)} ${theme.fg("muted", message)}`, 0, 0);
 }
 
 /** Render Exa result with tree-based layout */
@@ -64,9 +64,9 @@ export function renderExaResult(
 			const maxLines = expanded ? rawLines.length : Math.min(rawLines.length, COLLAPSED_PREVIEW_LINES);
 			const displayLines = rawLines.slice(0, maxLines);
 			const remaining = rawLines.length - maxLines;
-			const expandHint = formatExpandHint(expanded, remaining > 0, uiTheme);
+			const expandHint = formatExpandHint(uiTheme, expanded, remaining > 0);
 
-			let text = `${getStyledStatusIcon("info", uiTheme)} ${uiTheme.fg("dim", "Raw response")}${expandHint}`;
+			let text = `${formatStatusIcon("info", uiTheme)} ${uiTheme.fg("dim", "Raw response")}${expandHint}`;
 
 			for (let i = 0; i < displayLines.length; i++) {
 				const isLast = i === displayLines.length - 1 && remaining === 0;
@@ -78,7 +78,10 @@ export function renderExaResult(
 			}
 
 			if (remaining > 0) {
-				text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg("muted", formatMoreItems(remaining, "line", uiTheme))}`;
+				text += `\n ${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg(
+					"muted",
+					formatMoreItems(remaining, "line", uiTheme),
+				)}`;
 			}
 
 			return new Text(text, 0, 0);
@@ -91,7 +94,7 @@ export function renderExaResult(
 	const cost = response.costDollars?.total;
 	const time = response.searchTime;
 
-	const icon = getStyledStatusIcon(resultCount > 0 ? "success" : "warning", uiTheme);
+	const icon = formatStatusIcon(resultCount > 0 ? "success" : "warning", uiTheme);
 
 	const metaParts = [formatCount("result", resultCount)];
 	if (cost !== undefined) metaParts.push(`cost:$${cost.toFixed(4)}`);
@@ -104,7 +107,7 @@ export function renderExaResult(
 		const totalLines = previewText.split("\n").filter((l) => l.trim()).length;
 		hasMorePreview = totalLines > COLLAPSED_PREVIEW_LINES || resultCount > 1;
 	}
-	const expandHint = formatExpandHint(expanded, hasMorePreview, uiTheme);
+	const expandHint = formatExpandHint(uiTheme, expanded, hasMorePreview);
 
 	let text = `${icon} ${uiTheme.fg("dim", summaryText)}${expandHint}`;
 
@@ -165,11 +168,17 @@ export function renderExaResult(
 		text += `\n ${uiTheme.fg("dim", branch)} ${uiTheme.fg("accent", title)}${domainPart}`;
 
 		if (res.url) {
-			text += `\n ${uiTheme.fg("dim", cont)} ${uiTheme.fg("dim", uiTheme.tree.hook)} ${uiTheme.fg("mdLinkUrl", res.url)}`;
+			text += `\n ${uiTheme.fg("dim", cont)} ${uiTheme.fg("dim", uiTheme.tree.hook)} ${uiTheme.fg(
+				"mdLinkUrl",
+				res.url,
+			)}`;
 		}
 
 		if (res.author) {
-			text += `\n ${uiTheme.fg("dim", cont)} ${uiTheme.fg("dim", uiTheme.tree.hook)} ${uiTheme.fg("muted", `Author: ${res.author}`)}`;
+			text += `\n ${uiTheme.fg("dim", cont)} ${uiTheme.fg("dim", uiTheme.tree.hook)} ${uiTheme.fg(
+				"muted",
+				`Author: ${res.author}`,
+			)}`;
 		}
 
 		if (res.publishedDate) {
@@ -197,7 +206,10 @@ export function renderExaResult(
 		}
 
 		if (res.highlights?.length) {
-			text += `\n ${uiTheme.fg("dim", cont)} ${uiTheme.fg("dim", uiTheme.tree.hook)} ${uiTheme.fg("accent", "Highlights")}`;
+			text += `\n ${uiTheme.fg("dim", cont)} ${uiTheme.fg("dim", uiTheme.tree.hook)} ${uiTheme.fg(
+				"accent",
+				"Highlights",
+			)}`;
 			const maxHighlights = Math.min(res.highlights.length, 3);
 			for (let j = 0; j < maxHighlights; j++) {
 				const h = res.highlights[j];

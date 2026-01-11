@@ -6,7 +6,7 @@ import type { Component } from "@oh-my-pi/pi-tui";
 import { Text } from "@oh-my-pi/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { CONFIG_DIR_NAME } from "../../config";
-import { getLanguageFromPath, highlightCode, type Theme } from "../../modes/interactive/theme/theme";
+import type { Theme } from "../../modes/interactive/theme/theme";
 import readDescription from "../../prompts/tools/read.md" with { type: "text" };
 import { formatDimensionNote, resizeImage } from "../../utils/image-resize";
 import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime";
@@ -17,7 +17,7 @@ import type { ToolSession } from "../sdk";
 import { ScopeSignal, untilAborted } from "../utils";
 import { createLsTool } from "./ls";
 import { resolveReadPath, resolveToCwd } from "./path-utils";
-import { replaceTabs, shortenPath, wrapBrackets } from "./render-utils";
+import { shortenPath, wrapBrackets } from "./render-utils";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -657,17 +657,6 @@ interface ReadRenderArgs {
 	limit?: number;
 }
 
-const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "ico", "bmp", "tiff"]);
-const BINARY_EXTENSIONS = new Set(["pdf", "zip", "tar", "gz", "exe", "dll", "so", "dylib", "wasm"]);
-
-function getFileType(filePath: string): "image" | "binary" | "text" {
-	const ext = filePath.split(".").pop()?.toLowerCase();
-	if (!ext) return "text";
-	if (IMAGE_EXTENSIONS.has(ext)) return "image";
-	if (BINARY_EXTENSIONS.has(ext)) return "binary";
-	return "text";
-}
-
 export const readToolRenderer = {
 	renderCall(args: ReadRenderArgs, uiTheme: Theme): Component {
 		const rawPath = args.file_path || args.path || "";
@@ -688,49 +677,26 @@ export const readToolRenderer = {
 
 	renderResult(
 		result: { content: Array<{ type: string; text?: string }>; details?: ReadToolDetails },
-		{ expanded }: RenderResultOptions,
+		_options: RenderResultOptions,
 		uiTheme: Theme,
-		args?: ReadRenderArgs,
+		_args?: ReadRenderArgs,
 	): Component {
-		const rawPath = args?.file_path || args?.path || "";
-		const fileType = getFileType(rawPath);
 		const details = result.details;
 		const lines: string[] = [];
 
-		const output = result.content?.find((c) => c.type === "text")?.text ?? "";
+		lines.push(uiTheme.fg("dim", "Content hidden"));
 
-		if (fileType === "image") {
-			lines.push(uiTheme.fg("muted", "Image rendered below"));
-		} else if (fileType === "binary") {
-			// Binary files just show the header from renderCall
-		} else {
-			// Text file
-			const lang = getLanguageFromPath(rawPath);
-			const contentLines = lang ? highlightCode(replaceTabs(output), lang) : output.split("\n");
-
-			if (expanded) {
-				lines.push(
-					...contentLines.map((line: string) =>
-						lang ? replaceTabs(line) : uiTheme.fg("toolOutput", replaceTabs(line)),
-					),
-				);
+		const truncation = details?.truncation;
+		if (truncation?.truncated) {
+			let warning: string;
+			if (truncation.firstLineExceedsLimit) {
+				warning = `First line exceeds ${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit`;
+			} else if (truncation.truncatedBy === "lines") {
+				warning = `Truncated: ${truncation.outputLines} of ${truncation.totalLines} lines (${truncation.maxLines ?? DEFAULT_MAX_LINES} line limit)`;
 			} else {
-				lines.push(uiTheme.fg("dim", `${uiTheme.nav.expand} Ctrl+O to show content`));
+				warning = `Truncated: ${truncation.outputLines} lines (${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit)`;
 			}
-
-			// Truncation warning
-			const truncation = details?.truncation;
-			if (truncation?.truncated) {
-				let warning: string;
-				if (truncation.firstLineExceedsLimit) {
-					warning = `First line exceeds ${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit`;
-				} else if (truncation.truncatedBy === "lines") {
-					warning = `Truncated: ${truncation.outputLines} of ${truncation.totalLines} lines (${truncation.maxLines ?? DEFAULT_MAX_LINES} line limit)`;
-				} else {
-					warning = `Truncated: ${truncation.outputLines} lines (${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit)`;
-				}
-				lines.push(uiTheme.fg("warning", wrapBrackets(warning, uiTheme)));
-			}
+			lines.push(uiTheme.fg("warning", wrapBrackets(warning, uiTheme)));
 		}
 
 		return new Text(lines.join("\n"), 0, 0);

@@ -41,7 +41,7 @@ export const TRUNCATE_LENGTHS = {
 } as const;
 
 /** Standard expand hint text */
-export const EXPAND_HINT = "(Ctrl+O to expand)";
+export const EXPAND_HINT = "(Ctrl+O for more)";
 
 // =============================================================================
 // Text Truncation Utilities
@@ -148,7 +148,7 @@ export function formatAge(ageSeconds: number | null | undefined): string {
  * Get the appropriate status icon with color for a given state.
  * Standardizes status icon usage across all renderers.
  */
-export function getStyledStatusIcon(status: ToolUIStatus, theme: Theme, spinnerFrame?: number): string {
+export function formatStatusIcon(status: ToolUIStatus, theme: Theme, spinnerFrame?: number): string {
 	switch (status) {
 		case "success":
 			return theme.styledSymbol("status.success", "success");
@@ -175,8 +175,10 @@ export function getStyledStatusIcon(status: ToolUIStatus, theme: Theme, spinnerF
  * Format the expand hint with proper theming.
  * Returns empty string if already expanded or there is nothing more to show.
  */
-export function formatExpandHint(expanded: boolean, hasMore: boolean, theme: Theme): string {
-	return !expanded && hasMore ? theme.fg("dim", ` ${EXPAND_HINT}`) : "";
+export function formatExpandHint(theme: Theme, expanded?: boolean, hasMore?: boolean): string {
+	if (expanded) return "";
+	if (hasMore === false) return "";
+	return theme.fg("dim", wrapBrackets(EXPAND_HINT, theme));
 }
 
 /**
@@ -267,13 +269,13 @@ export function createToolUIKit(theme: Theme): ToolUIKit {
 		meta: (meta) => formatMeta(meta, theme),
 		count: (label, count) => formatCount(label, count),
 		moreItems: (remaining, itemType) => formatMoreItems(remaining, itemType, theme),
-		expandHint: (expanded, hasMore) => formatExpandHint(expanded, hasMore, theme),
+		expandHint: (expanded, hasMore) => formatExpandHint(theme, expanded, hasMore),
 		scope: (scopePath) => formatScope(scopePath, theme),
 		truncationSuffix: (truncated) => formatTruncationSuffix(truncated, theme),
 		errorMessage: (message) => formatErrorMessage(message, theme),
 		emptyMessage: (message) => formatEmptyMessage(message, theme),
 		badge: (label, color) => formatBadge(label, color, theme),
-		statusIcon: (status, spinnerFrame) => getStyledStatusIcon(status, theme, spinnerFrame),
+		statusIcon: (status, spinnerFrame) => formatStatusIcon(status, theme, spinnerFrame),
 		wrapBrackets: (text) => wrapBrackets(text, theme),
 		truncate: (text, maxLen) => truncate(text, maxLen, theme.format.ellipsis),
 		previewLines: (text, maxLines, maxLineLen) => getPreviewLines(text, maxLines, maxLineLen, theme.format.ellipsis),
@@ -342,26 +344,56 @@ export function formatDiagnostics(
 	let output = `\n\n${headerIcon} ${theme.fg("toolTitle", "Diagnostics")} ${theme.fg("dim", `(${diag.summary})`)}`;
 
 	const maxDiags = expanded ? diag.messages.length : 5;
-	let shown = 0;
+	let diagsShown = 0;
 
 	const files = Array.from(byFile.entries());
-	for (let fi = 0; fi < files.length && shown < maxDiags; fi++) {
+
+	// Count total diagnostics for "... X more" calculation
+	const totalParsedDiags = files.reduce((sum, [, diags]) => sum + diags.length, 0);
+	const totalDiags = totalParsedDiags + unparsed.length;
+
+	// Helper to check if this is the very last item in the tree
+	const isTreeEnd = (fileIdx: number, diagIdx: number | null, unparsedIdx: number | null): boolean => {
+		const willShowMore = totalDiags > diagsShown + 1;
+		if (willShowMore) return false;
+
+		if (unparsedIdx !== null) {
+			return unparsedIdx === unparsed.length - 1;
+		}
+		if (diagIdx !== null) {
+			const isLastDiagInFile = diagIdx === files[fileIdx][1].length - 1;
+			const isLastFile = fileIdx === files.length - 1;
+			return isLastDiagInFile && isLastFile && unparsed.length === 0;
+		}
+		// File node - never the tree end if it has diagnostics
+		return false;
+	};
+
+	for (let fi = 0; fi < files.length && diagsShown < maxDiags; fi++) {
 		const [filePath, diagnostics] = files[fi];
-		const isLastFile = fi === files.length - 1 && unparsed.length === 0;
-		const fileBranch = isLastFile ? theme.tree.last : theme.tree.branch;
+		// File is "last" only if no more files AND no unparsed AND we'll show all diags AND no "... X more"
+		const remainingDiagsInFile = diagnostics.length;
+		const remainingDiagsAfter = files.slice(fi + 1).reduce((sum, [, d]) => sum + d.length, 0) + unparsed.length;
+		const willShowAllRemaining = diagsShown + remainingDiagsInFile + remainingDiagsAfter <= maxDiags;
+		const isLastFileNode = fi === files.length - 1 && unparsed.length === 0 && willShowAllRemaining;
+		const fileBranch = isLastFileNode ? theme.tree.last : theme.tree.branch;
 
 		const fileIcon = theme.fg("muted", getLangIcon(filePath));
 		output += `\n ${theme.fg("dim", fileBranch)} ${fileIcon} ${theme.fg("accent", filePath)}`;
-		shown++;
 
-		for (let di = 0; di < diagnostics.length && shown < maxDiags; di++) {
+		for (let di = 0; di < diagnostics.length && diagsShown < maxDiags; di++) {
 			const d = diagnostics[di];
-			const isLastDiag = di === diagnostics.length - 1;
-			const diagBranch = isLastFile
-				? isLastDiag
+			const isLastDiagInFile = di === diagnostics.length - 1;
+			// This is the last visible diag in file if it's actually last OR we're about to hit the limit
+			const atDisplayLimit = diagsShown + 1 >= maxDiags;
+			const isLastVisibleInFile = isLastDiagInFile || atDisplayLimit;
+			// Check if this is the last visible item in the entire tree
+			const isVeryLast = isTreeEnd(fi, di, null);
+			const diagBranch = isLastFileNode
+				? isLastVisibleInFile || isVeryLast
 					? `  ${theme.tree.last}`
 					: `  ${theme.tree.branch}`
-				: isLastDiag
+				: isLastVisibleInFile || isVeryLast
 					? `${theme.tree.vertical} ${theme.tree.last}`
 					: `${theme.tree.vertical} ${theme.tree.branch}`;
 
@@ -376,20 +408,25 @@ export function formatDiagnostics(
 			const msgColor = d.severity === "error" ? "error" : d.severity === "warning" ? "warning" : "toolOutput";
 
 			output += `\n ${theme.fg("dim", diagBranch)} ${sevIcon}${location} ${theme.fg(msgColor, d.message)}${codeTag}`;
-			shown++;
+			diagsShown++;
 		}
 	}
 
-	for (const msg of unparsed) {
-		if (shown >= maxDiags) break;
+	for (let ui = 0; ui < unparsed.length && diagsShown < maxDiags; ui++) {
+		const msg = unparsed[ui];
+		const isVeryLast = isTreeEnd(-1, null, ui);
+		const branch = isVeryLast ? theme.tree.last : theme.tree.branch;
 		const color = msg.includes("[error]") ? "error" : msg.includes("[warning]") ? "warning" : "dim";
-		output += `\n ${theme.fg("dim", theme.tree.branch)} ${theme.fg(color, msg)}`;
-		shown++;
+		output += `\n ${theme.fg("dim", branch)} ${theme.fg(color, msg)}`;
+		diagsShown++;
 	}
 
-	if (diag.messages.length > shown) {
-		const remaining = diag.messages.length - shown;
-		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", `${theme.format.ellipsis} ${remaining} more`)} ${theme.fg("dim", "(Ctrl+O to expand)")}`;
+	if (totalDiags > diagsShown) {
+		const remaining = totalDiags - diagsShown;
+		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+			"muted",
+			`${theme.format.ellipsis} ${remaining} more`,
+		)} ${formatExpandHint(theme)}`;
 	}
 
 	return output;

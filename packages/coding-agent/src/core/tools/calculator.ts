@@ -478,7 +478,7 @@ export const calculatorToolRenderer = {
 		const hasMore = outputs.length > maxItems;
 		const icon = uiTheme.styledSymbol("status.success", "success");
 		const summary = uiTheme.fg("dim", formatCount("result", outputs.length));
-		const expandHint = formatExpandHint(expanded, hasMore, uiTheme);
+		const expandHint = formatExpandHint(uiTheme, expanded, hasMore);
 		let text = `${icon} ${summary}${expandHint}`;
 
 		// Render each result as a tree branch

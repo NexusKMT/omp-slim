@@ -21,7 +21,7 @@ import {
 import type { ToolSession } from "./index";
 import { createLspWritethrough, type FileDiagnosticsResult, writethroughNoop } from "./lsp/index";
 import { resolveToCwd } from "./path-utils";
-import { createToolUIKit, getDiffStats, shortenPath, truncateDiffByHunk } from "./render-utils";
+import { createToolUIKit, formatExpandHint, getDiffStats, shortenPath, truncateDiffByHunk } from "./render-utils";
 
 const editSchema = Type.Object({
 	path: Type.String({ description: "Path to the file to edit (relative or absolute)" }),
@@ -308,7 +308,7 @@ export const editToolRenderer = {
 					if (hiddenLines > 0) remainder.push(`${hiddenLines} more lines`);
 					text += uiTheme.fg(
 						"toolOutput",
-						`\n${uiTheme.format.ellipsis} (${remainder.join(", ")}) ${ui.wrapBrackets("Ctrl+O to expand")}`,
+						`\n${uiTheme.format.ellipsis} (${remainder.join(", ")}) ${formatExpandHint(uiTheme)}`,
 					);
 				}
 			}

@@ -12,6 +12,7 @@ import { ensureTool } from "../../utils/tools-manager";
 import type { RenderResultOptions } from "../custom-tools/types";
 import { renderPromptTemplate } from "../prompt-templates";
 import type { ToolSession } from "./index";
+import { formatExpandHint } from "./render-utils";
 import { specialHandlers } from "./web-scrapers/index";
 import type { RenderResult } from "./web-scrapers/types";
 import { finalizeOutput, loadPage } from "./web-scrapers/types";
@@ -947,8 +948,9 @@ export function renderWebFetchResult(
 	const statusIcon = details.truncated
 		? uiTheme.styledSymbol("status.warning", "warning")
 		: uiTheme.styledSymbol("status.success", "success");
-	const expandHint = expanded ? "" : uiTheme.fg("dim", " (Ctrl+O to expand)");
-	let text = `${statusIcon} ${uiTheme.fg("accent", `(${domain})`)}${uiTheme.sep.dot}${uiTheme.fg("dim", details.method)}${expandHint}`;
+	const expandHint = formatExpandHint(uiTheme, expanded);
+	const expandSuffix = expandHint ? ` ${expandHint}` : "";
+	let text = `${statusIcon} ${uiTheme.fg("accent", `(${domain})`)}${uiTheme.sep.dot}${uiTheme.fg("dim", details.method)}${expandSuffix}`;
 
 	// Get content text
 	const contentText = result.content[0]?.text ?? "";

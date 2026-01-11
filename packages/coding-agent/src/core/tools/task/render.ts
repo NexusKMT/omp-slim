@@ -14,8 +14,8 @@ import {
 	formatBadge,
 	formatDuration,
 	formatMoreItems,
+	formatStatusIcon,
 	formatTokens,
-	getStyledStatusIcon,
 	truncate,
 } from "../render-utils";
 import type { ReportFindingDetails, SubmitReviewDetails } from "../review";
@@ -38,15 +38,15 @@ const PRIORITY_LABELS: Record<number, string> = {
 function getStatusIcon(status: AgentProgress["status"], theme: Theme, spinnerFrame?: number): string {
 	switch (status) {
 		case "pending":
-			return getStyledStatusIcon("pending", theme);
+			return formatStatusIcon("pending", theme);
 		case "running":
-			return getStyledStatusIcon("running", theme, spinnerFrame);
+			return formatStatusIcon("running", theme, spinnerFrame);
 		case "completed":
-			return getStyledStatusIcon("success", theme);
+			return formatStatusIcon("success", theme);
 		case "failed":
-			return getStyledStatusIcon("error", theme);
+			return formatStatusIcon("error", theme);
 		case "aborted":
-			return getStyledStatusIcon("aborted", theme);
+			return formatStatusIcon("aborted", theme);
 	}
 }
 
@@ -389,7 +389,10 @@ function renderAgentProgress(
 				}
 				if ((dataArray as unknown[]).length > displayCount) {
 					lines.push(
-						`${continuePrefix}${theme.fg("dim", formatMoreItems((dataArray as unknown[]).length - displayCount, "item", theme))}`,
+						`${continuePrefix}${theme.fg(
+							"dim",
+							formatMoreItems((dataArray as unknown[]).length - displayCount, "item", theme),
+						)}`,
 					);
 				}
 			}

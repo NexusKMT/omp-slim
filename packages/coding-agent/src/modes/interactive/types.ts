@@ -15,7 +15,7 @@ import type { HookEditorComponent } from "./components/hook-editor";
 import type { HookInputComponent } from "./components/hook-input";
 import type { HookSelectorComponent } from "./components/hook-selector";
 import type { StatusLineComponent } from "./components/status-line";
-import type { ToolExecutionComponent } from "./components/tool-execution";
+import type { ToolExecutionHandle } from "./components/tool-execution";
 import type { Theme } from "./theme/theme";
 
 export type CompactionQueuedMessage = {
@@ -49,7 +49,7 @@ export interface InteractiveModeContext {
 	hideThinkingBlock: boolean;
 	pendingImages: ImageContent[];
 	compactionQueuedMessages: CompactionQueuedMessage[];
-	pendingTools: Map<string, ToolExecutionComponent>;
+	pendingTools: Map<string, ToolExecutionHandle>;
 	pendingBashComponents: BashExecutionComponent[];
 	bashComponent: BashExecutionComponent | undefined;
 	streamingComponent: AssistantMessageComponent | undefined;

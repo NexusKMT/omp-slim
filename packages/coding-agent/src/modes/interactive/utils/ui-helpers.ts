@@ -10,6 +10,7 @@ import { BranchSummaryMessageComponent } from "../components/branch-summary-mess
 import { CompactionSummaryMessageComponent } from "../components/compaction-summary-message";
 import { CustomMessageComponent } from "../components/custom-message";
 import { DynamicBorder } from "../components/dynamic-border";
+import { ReadToolGroupComponent } from "../components/read-tool-group";
 import { ToolExecutionComponent } from "../components/tool-execution";
 import { UserMessageComponent } from "../components/user-message";
 import { theme } from "../theme/theme";
@@ -159,47 +160,75 @@ export class UiHelpers {
 			this.ctx.updateEditorBorderColor();
 		}
 
+		let readGroup: ReadToolGroupComponent | null = null;
 		for (const message of sessionContext.messages) {
 			// Assistant messages need special handling for tool calls
 			if (message.role === "assistant") {
 				this.ctx.addMessageToChat(message);
+				readGroup = null;
+				const hasErrorStop = message.stopReason === "aborted" || message.stopReason === "error";
+				const errorMessage = hasErrorStop
+					? message.stopReason === "aborted"
+						? (() => {
+								const retryAttempt = this.ctx.session.retryAttempt;
+								return retryAttempt > 0
+									? `Aborted after ${retryAttempt} retry attempt${retryAttempt > 1 ? "s" : ""}`
+									: "Operation aborted";
+							})()
+						: message.errorMessage || "Error"
+					: null;
+
 				// Render tool call components
 				for (const content of message.content) {
-					if (content.type === "toolCall") {
-						const tool = this.ctx.session.getToolByName(content.name);
-						const component = new ToolExecutionComponent(
-							content.name,
-							content.arguments,
-							{ showImages: this.ctx.settingsManager.getShowImages() },
-							tool,
-							this.ctx.ui,
-							this.ctx.sessionManager.getCwd(),
-						);
-						component.setExpanded(this.ctx.toolOutputExpanded);
-						this.ctx.chatContainer.addChild(component);
+					if (content.type !== "toolCall") continue;
 
-						if (message.stopReason === "aborted" || message.stopReason === "error") {
-							let errorMessage: string;
-							if (message.stopReason === "aborted") {
-								const retryAttempt = this.ctx.session.retryAttempt;
-								errorMessage =
-									retryAttempt > 0
-										? `Aborted after ${retryAttempt} retry attempt${retryAttempt > 1 ? "s" : ""}`
-										: "Operation aborted";
-							} else {
-								errorMessage = message.errorMessage || "Error";
-							}
-							component.updateResult({ content: [{ type: "text", text: errorMessage }], isError: true });
-						} else {
-							this.ctx.pendingTools.set(content.id, component);
+					if (content.name === "read") {
+						if (!readGroup) {
+							readGroup = new ReadToolGroupComponent();
+							readGroup.setExpanded(this.ctx.toolOutputExpanded);
+							this.ctx.chatContainer.addChild(readGroup);
 						}
+						readGroup.updateArgs(content.arguments, content.id);
+						if (hasErrorStop && errorMessage) {
+							readGroup.updateResult(
+								{ content: [{ type: "text", text: errorMessage }], isError: true },
+								false,
+								content.id,
+							);
+						} else {
+							this.ctx.pendingTools.set(content.id, readGroup);
+						}
+						continue;
+					}
+
+					readGroup = null;
+					const tool = this.ctx.session.getToolByName(content.name);
+					const component = new ToolExecutionComponent(
+						content.name,
+						content.arguments,
+						{ showImages: this.ctx.settingsManager.getShowImages() },
+						tool,
+						this.ctx.ui,
+						this.ctx.sessionManager.getCwd(),
+					);
+					component.setExpanded(this.ctx.toolOutputExpanded);
+					this.ctx.chatContainer.addChild(component);
+
+					if (hasErrorStop && errorMessage) {
+						component.updateResult(
+							{ content: [{ type: "text", text: errorMessage }], isError: true },
+							false,
+							content.id,
+						);
+					} else {
+						this.ctx.pendingTools.set(content.id, component);
 					}
 				}
 			} else if (message.role === "toolResult") {
 				// Match tool results to pending tool components
 				const component = this.ctx.pendingTools.get(message.toolCallId);
 				if (component) {
-					component.updateResult(message);
+					component.updateResult(message, false, message.toolCallId);
 					this.ctx.pendingTools.delete(message.toolCallId);
 				}
 			} else {

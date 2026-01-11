@@ -128,7 +128,7 @@ function renderHover(
 	// Collapsed view
 	const firstCodeLine = codeLines[0] || "";
 	const hasMore = codeLines.length > 1 || Boolean(afterCode);
-	const expandHint = formatExpandHint(false, hasMore, theme);
+	const expandHint = formatExpandHint(theme, expanded, hasMore);
 
 	let output = `${icon}${langLabel}${expandHint}`;
 	const h = theme.boxSharp.horizontal;
@@ -237,7 +237,10 @@ function renderDiagnostics(
 			}
 			const severityColor = severityToColor(item.severity);
 			const location = formatDiagnosticLocation(item.file, item.line, item.col, theme);
-			output += `\n ${theme.fg("dim", branch)} ${theme.fg(severityColor, location)} ${theme.fg("dim", `[${item.severity}]`)}`;
+			output += `\n ${theme.fg("dim", branch)} ${theme.fg(severityColor, location)} ${theme.fg(
+				"dim",
+				`[${item.severity}]`,
+			)}`;
 			if (item.message) {
 				output += `\n ${theme.fg("dim", detailPrefix)}${theme.fg(
 					"muted",
@@ -253,7 +256,7 @@ function renderDiagnostics(
 		parsedDiagnostics.length > 0 ? parsedDiagnostics.slice(0, 3) : fallbackDiagnostics.slice(0, 3);
 	const remaining =
 		(parsedDiagnostics.length > 0 ? parsedDiagnostics.length : fallbackDiagnostics.length) - previewItems.length;
-	const expandHint = formatExpandHint(false, remaining > 0, theme);
+	const expandHint = formatExpandHint(theme, expanded, remaining > 0);
 	let output = `${icon} ${theme.fg("dim", meta.join(theme.sep.dot))}${expandHint}`;
 	for (let i = 0; i < previewItems.length; i++) {
 		const item = previewItems[i];
@@ -271,7 +274,10 @@ function renderDiagnostics(
 		output += `\n ${theme.fg("dim", branch)} ${theme.fg(severityColor, location)}${message}`;
 	}
 	if (remaining > 0) {
-		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", `${theme.format.ellipsis} ${remaining} more`)}`;
+		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+			"muted",
+			`${theme.format.ellipsis} ${remaining} more`,
+		)}`;
 	}
 
 	return new Text(output, 0, 0);
@@ -305,7 +311,7 @@ function renderReferences(refMatch: RegExpMatchArray, lines: string[], expanded:
 	const files = Array.from(byFile.keys());
 
 	const renderGrouped = (maxFiles: number, maxLocsPerFile: number, showHint: boolean): string => {
-		const expandHint = formatExpandHint(false, showHint, theme);
+		const expandHint = formatExpandHint(theme, undefined, showHint);
 		let output = `${icon} ${theme.fg("dim", `${refCount} found`)}${expandHint}`;
 
 		const filesToShow = files.slice(0, maxFiles);
@@ -326,7 +332,10 @@ function renderReferences(refMatch: RegExpMatchArray, lines: string[], expanded:
 					const isLastLoc = li === locsToShow.length - 1 && locs.length <= maxLocsPerFile;
 					const locBranch = isLastLoc ? theme.tree.last : theme.tree.branch;
 					const locCont = isLastLoc ? "   " : `${theme.tree.vertical}  `;
-					output += `\n ${theme.fg("dim", fileCont)}${theme.fg("dim", locBranch)} ${theme.fg("muted", `line ${line}, col ${col}`)}`;
+					output += `\n ${theme.fg("dim", fileCont)}${theme.fg("dim", locBranch)} ${theme.fg(
+						"muted",
+						`line ${line}, col ${col}`,
+					)}`;
 					if (expanded) {
 						const context = `at ${file}:${line}:${col}`;
 						output += `\n ${theme.fg("dim", fileCont)}${theme.fg("dim", locCont)}${theme.fg(
@@ -345,7 +354,10 @@ function renderReferences(refMatch: RegExpMatchArray, lines: string[], expanded:
 		}
 
 		if (files.length > maxFiles) {
-			output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", formatMoreItems(files.length - maxFiles, "file", theme))}`;
+			output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+				"muted",
+				formatMoreItems(files.length - maxFiles, "file", theme),
+			)}`;
 		}
 
 		return output;
@@ -439,7 +451,7 @@ function renderSymbols(symbolsMatch: RegExpMatchArray, lines: string[], expanded
 	// Collapsed: show first 3 top-level symbols
 	const topLevel = symbols.filter((s) => s.indent === 0).slice(0, 3);
 	const hasMoreSymbols = symbols.length > topLevel.length;
-	const expandHint = formatExpandHint(false, hasMoreSymbols, theme);
+	const expandHint = formatExpandHint(theme, expanded, hasMoreSymbols);
 	let output = `${icon} ${theme.fg("dim", `in ${fileName}`)}${expandHint}`;
 	for (let i = 0; i < topLevel.length; i++) {
 		const sym = topLevel[i];
@@ -451,7 +463,10 @@ function renderSymbols(symbolsMatch: RegExpMatchArray, lines: string[], expanded
 		)}`;
 	}
 	if (topLevelCount > 3) {
-		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", `${theme.format.ellipsis} ${topLevelCount - 3} more`)}`;
+		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+			"muted",
+			`${theme.format.ellipsis} ${topLevelCount - 3} more`,
+		)}`;
 	}
 
 	return new Text(output, 0, 0);
@@ -486,8 +501,11 @@ function renderGeneric(text: string, lines: string[], expanded: boolean, theme: 
 	}
 
 	const firstLine = lines[0] || "No output";
-	const expandHint = formatExpandHint(false, lines.length > 1, theme);
-	let output = `${icon} ${theme.fg("dim", truncate(firstLine, TRUNCATE_LENGTHS.TITLE, theme.format.ellipsis))}${expandHint}`;
+	const expandHint = formatExpandHint(theme, expanded, lines.length > 1);
+	let output = `${icon} ${theme.fg(
+		"dim",
+		truncate(firstLine, TRUNCATE_LENGTHS.TITLE, theme.format.ellipsis),
+	)}${expandHint}`;
 
 	if (lines.length > 1) {
 		const previewLines = lines.slice(1, 4);
@@ -500,7 +518,10 @@ function renderGeneric(text: string, lines: string[], expanded: boolean, theme: 
 			)}`;
 		}
 		if (lines.length > 4) {
-			output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", formatMoreItems(lines.length - 4, "line", theme))}`;
+			output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+				"muted",
+				formatMoreItems(lines.length - 4, "line", theme),
+			)}`;
 		}
 	}
 

@@ -1,6 +1,14 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added grouped display for consecutive Read tool calls, showing multiple file reads in a compact tree view
+
+### Changed
+
+- Changed expand hint text from "Ctrl+O to expand" to "Ctrl+O for more"
+- Changed Read tool result display to hide content by default, showing only file path and status
 
 ## [4.3.2] - 2026-01-11
 ### Changed
