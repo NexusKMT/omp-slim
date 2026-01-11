@@ -1,6 +1,11 @@
 # Changelog
 
 ## [Unreleased]
+
+### Changed
+
+- Changed default for `hidden` option in find tool from `false` to `true`, now including hidden files by default
+
 ### Fixed
 
 - Fixed serialized auth storage initialization so OAuth refreshes in subagents don't crash

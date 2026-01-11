@@ -20,7 +20,7 @@ const findSchema = Type.Object({
 	}),
 	path: Type.Optional(Type.String({ description: "Directory to search in (default: current directory)" })),
 	limit: Type.Optional(Type.Number({ description: "Maximum number of results (default: 1000)" })),
-	hidden: Type.Optional(Type.Boolean({ description: "Include hidden files (default: false)" })),
+	hidden: Type.Optional(Type.Boolean({ description: "Include hidden files (default: true)" })),
 	sortByMtime: Type.Optional(
 		Type.Boolean({ description: "Sort results by modification time, most recent first (default: false)" }),
 	),
@@ -143,7 +143,7 @@ export function createFindTool(session: ToolSession, options?: FindToolOptions):
 				})();
 				const effectiveLimit = limit ?? DEFAULT_LIMIT;
 				const effectiveType = type ?? "all";
-				const includeHidden = hidden ?? false;
+				const includeHidden = hidden ?? true;
 				const shouldSortByMtime = sortByMtime ?? false;
 
 				// If custom operations provided with glob, use that instead of fd
