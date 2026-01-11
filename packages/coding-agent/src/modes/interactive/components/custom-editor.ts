@@ -9,7 +9,6 @@ import {
 	isCtrlP,
 	isCtrlT,
 	isCtrlV,
-	isCtrlY,
 	isCtrlZ,
 	isEscape,
 	isShiftCtrlP,
@@ -36,7 +35,7 @@ export class CustomEditor extends Editor {
 	public onCtrlZ?: () => void;
 	public onQuestionMark?: () => void;
 	public onCapsLock?: () => void;
-	public onCtrlY?: () => void;
+	public onAltP?: () => void;
 	/** Called when Ctrl+V is pressed. Returns true if handled (image found), false to fall through to text paste. */
 	public onCtrlV?: () => Promise<boolean>;
 	/** Called when Alt+Up is pressed (dequeue keybinding). */
@@ -84,9 +83,9 @@ export class CustomEditor extends Editor {
 			return;
 		}
 
-		// Intercept Ctrl+Y for voice input
-		if (isCtrlY(data) && this.onCtrlY) {
-			this.onCtrlY();
+		// Intercept Alt+P for quick model switching
+		if (matchesKey(data, "alt+p") && this.onAltP) {
+			this.onAltP();
 			return;
 		}
 
@@ -99,12 +98,6 @@ export class CustomEditor extends Editor {
 		// Intercept Ctrl+T for thinking block visibility toggle
 		if (isCtrlT(data) && this.onCtrlT) {
 			this.onCtrlT();
-			return;
-		}
-
-		// Intercept Ctrl+Y for role-based model cycling
-		if (isCtrlY(data) && this.onCtrlY) {
-			this.onCtrlY();
 			return;
 		}
 

@@ -855,6 +855,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			toolRegistry.set(tool.name, wrapToolWithExtensions(tool, extensionRunner));
 		}
 	}
+	if (model?.provider === "cursor") {
+		toolRegistry.delete("edit");
+	}
 	time("combineTools");
 
 	let cursorEventEmitter: ((event: AgentEvent) => void) | undefined;

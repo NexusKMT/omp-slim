@@ -60,7 +60,7 @@ export class InputController {
 		this.ctx.editor.onShiftTab = () => this.cycleThinkingLevel();
 		this.ctx.editor.onCtrlP = () => this.cycleRoleModel();
 		this.ctx.editor.onShiftCtrlP = () => this.cycleRoleModel({ temporary: true });
-		this.ctx.editor.onCtrlY = () => this.ctx.showModelSelector({ temporaryOnly: true });
+		this.ctx.editor.onAltP = () => this.ctx.showModelSelector({ temporaryOnly: true });
 
 		// Global debug handler on TUI (works regardless of focus)
 		this.ctx.ui.onDebug = () => this.ctx.handleDebugCommand();
@@ -85,28 +85,34 @@ export class InputController {
 		};
 
 		this.ctx.editor.onAltEnter = async (text: string) => {
-			text = text.trim();
-			if (!text) return;
+			const trimmedText = text.trim();
 
 			// Queue follow-up messages while compaction is running
 			if (this.ctx.session.isCompacting) {
-				this.ctx.queueCompactionMessage(text, "followUp");
+				if (!trimmedText) {
+					this.ctx.editor.handleInput("\n");
+					return;
+				}
+				this.ctx.queueCompactionMessage(trimmedText, "followUp");
 				return;
 			}
 
-			// Alt+Enter queues a follow-up message (waits until agent finishes)
-			// This handles extension commands (execute immediately), prompt template expansion, and queueing
+			// Alt+Enter queues a follow-up message while streaming
 			if (this.ctx.session.isStreaming) {
-				this.ctx.editor.addToHistory(text);
+				if (!trimmedText) {
+					this.ctx.editor.handleInput("\n");
+					return;
+				}
+				this.ctx.editor.addToHistory(trimmedText);
 				this.ctx.editor.setText("");
-				await this.ctx.session.prompt(text, { streamingBehavior: "followUp" });
+				await this.ctx.session.prompt(trimmedText, { streamingBehavior: "followUp" });
 				this.ctx.updatePendingMessagesDisplay();
 				this.ctx.ui.requestRender();
+				return;
 			}
-			// If not streaming, Alt+Enter acts like regular Enter (trigger onSubmit)
-			else if (this.ctx.editor.onSubmit) {
-				this.ctx.editor.onSubmit(text);
-			}
+
+			// Default behavior: insert a new line
+			this.ctx.editor.handleInput("\n");
 		};
 	}
 

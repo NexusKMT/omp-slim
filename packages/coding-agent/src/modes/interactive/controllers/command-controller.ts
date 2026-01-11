@@ -334,7 +334,7 @@ export class CommandController {
 | \`Shift+Tab\` | Cycle thinking level |
 | \`Ctrl+P\` | Cycle role models (slow/default/smol) |
 | \`Shift+Ctrl+P\` | Cycle role models (temporary) |
-| \`Ctrl+Y\` | Select model (temporary) |
+| \`Alt+P\` | Select model (temporary) |
 | \`Ctrl+L\` | Select model (set roles) |
 | \`Ctrl+R\` | Search prompt history |
 | \`Ctrl+O\` | Toggle tool output expansion |

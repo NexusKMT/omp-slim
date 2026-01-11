@@ -1,14 +1,22 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Added
 
 - Added grouped display for consecutive Read tool calls, showing multiple file reads in a compact tree view
 
 ### Changed
 
+- Changed temporary model selector keybinding from Ctrl+Y to Alt+P
 - Changed expand hint text from "Ctrl+O to expand" to "Ctrl+O for more"
 - Changed Read tool result display to hide content by default, showing only file path and status
+
+### Fixed
+
+- Fixed Alt+Enter to insert a newline when not streaming, instead of submitting the message
+- Fixed Alt+Enter inserting a new line when not streaming instead of submitting a message
+- Fixed Cursor provider to avoid advertising the Edit tool, relying on full-file Write operations instead
 
 ## [4.3.2] - 2026-01-11
 ### Changed

@@ -708,6 +708,8 @@ export class Editor implements Component {
 		// New line shortcuts (but not plain LF/CR which should be submit)
 		else if (
 			(data.charCodeAt(0) === 10 && data.length > 1) || // Ctrl+Enter with modifiers
+			data === "\x1b[13;5u" || // Ctrl+Enter (Kitty protocol)
+			data === "\x1b[27;5;13~" || // Ctrl+Enter (legacy format)
 			data === "\x1b\r" || // Option+Enter in some terminals (legacy)
 			data === "\x1b[13;2~" || // Shift+Enter in some terminals (legacy format)
 			isShiftEnter(data) || // Shift+Enter (Kitty protocol, handles lock bits)
