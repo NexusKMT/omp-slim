@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [4.3.1] - 2026-01-11
+
 ### Changed
 
 - Expanded system prompt with defensive reasoning guidance and assumption checks
