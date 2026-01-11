@@ -21,6 +21,10 @@
 - Changed MCP tool argument decoding to use protobuf Value schema for improved type handling
 - Changed tool advertisement to filter Cursor native tools (bash, read, write, delete, ls, grep, lsp) instead of only exposing mcp_ prefixed tools
 
+### Fixed
+
+- Fixed Cursor conversation history serialization so subagents retain task context and can call complete
+
 ## [4.2.3] - 2026-01-11
 
 ## [4.2.2] - 2026-01-11

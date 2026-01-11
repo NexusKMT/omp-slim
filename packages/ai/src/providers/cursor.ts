@@ -14,6 +14,7 @@ import type {
 	CursorMcpCall,
 	CursorToolResultHandler,
 	ImageContent,
+	Message,
 	Model,
 	StreamFunction,
 	StreamOptions,
@@ -29,14 +30,18 @@ import { formatErrorMessageWithRetryAfter } from "../utils/retry-after";
 import type { McpToolDefinition } from "./cursor/gen/agent_pb";
 import {
 	AgentClientMessageSchema,
+	AgentConversationTurnStructureSchema,
 	AgentRunRequestSchema,
 	type AgentServerMessage,
 	AgentServerMessageSchema,
+	AssistantMessageSchema,
 	BackgroundShellSpawnResultSchema,
 	ClientHeartbeatSchema,
 	ConversationActionSchema,
 	type ConversationStateStructure,
 	ConversationStateStructureSchema,
+	ConversationStepSchema,
+	ConversationTurnStructureSchema,
 	DeleteErrorSchema,
 	DeleteRejectedSchema,
 	DeleteResultSchema,
@@ -243,20 +248,30 @@ function decodeLogData(value: unknown): unknown {
 		return value.map((entry) => decodeLogData(entry));
 	}
 	const record = value as Record<string, unknown>;
-	if (record.$typeName === "agent.v1.McpArgs") {
+	const typeName = record.$typeName;
+	const stripTypeName = typeof typeName === "string" && typeName.startsWith("agent.v1.");
+
+	if (typeName === "agent.v1.McpArgs") {
 		const decodedArgs = decodeMcpArgsForLog(record.args as Record<string, unknown> | undefined);
-		return decodedArgs ? { ...record, args: decodedArgs } : record;
+		const base = stripTypeName ? omitTypeName(record) : record;
+		return decodedArgs ? { ...base, args: decodedArgs } : base;
 	}
-	if (record.$typeName === "agent.v1.McpToolCall") {
+	if (typeName === "agent.v1.McpToolCall") {
 		const argsRecord = record.args as Record<string, unknown> | undefined;
 		const decodedArgs = decodeMcpArgsForLog(argsRecord?.args as Record<string, unknown> | undefined);
+		const base = stripTypeName ? omitTypeName(record) : record;
 		if (decodedArgs && argsRecord) {
-			return { ...record, args: { ...argsRecord, args: decodedArgs } };
+			return { ...base, args: { ...argsRecord, args: decodedArgs } };
 		}
+		return base;
 	}
-	let mutated = false;
+
+	let mutated = stripTypeName;
 	const decoded: Record<string, unknown> = {};
 	for (const [key, entry] of Object.entries(record)) {
+		if (stripTypeName && key === "$typeName") {
+			continue;
+		}
 		const normalizedEntry = decodeLogData(entry);
 		decoded[key] = normalizedEntry;
 		if (normalizedEntry !== entry) {
@@ -264,6 +279,11 @@ function decodeLogData(value: unknown): unknown {
 		}
 	}
 	return mutated ? decoded : record;
+}
+
+function omitTypeName(record: Record<string, unknown>): Record<string, unknown> {
+	const { $typeName: _, ...rest } = record;
+	return rest;
 }
 
 export const streamCursor: StreamFunction<"cursor-agent"> = (
@@ -1731,6 +1751,128 @@ function buildMcpToolDefinitions(tools: Tool[] | undefined): McpToolDefinition[]
 	});
 }
 
+/**
+ * Extract text content from a user message.
+ */
+function extractUserMessageText(msg: Message): string {
+	if (msg.role !== "user") return "";
+	const content = msg.content;
+	if (typeof content === "string") return content;
+	return content
+		.filter((c): c is TextContent => c.type === "text")
+		.map((c) => c.text)
+		.join("\n");
+}
+
+/**
+ * Extract text content from an assistant message.
+ */
+function extractAssistantMessageText(msg: Message): string {
+	if (msg.role !== "assistant") return "";
+	if (!Array.isArray(msg.content)) return "";
+	return msg.content
+		.filter((c): c is TextContent => c.type === "text")
+		.map((c) => c.text)
+		.join("\n");
+}
+
+/**
+ * Convert context.messages to Cursor's serialized ConversationTurn format.
+ * Groups messages into turns: each turn is a user message followed by the assistant's response.
+ * Excludes the last user message (which goes in the action).
+ * Returns serialized bytes for ConversationStateStructure.turns field.
+ */
+function buildConversationTurns(messages: Message[]): Uint8Array[] {
+	const turns: Uint8Array[] = [];
+
+	// Find turn boundaries - each turn starts with a user message
+	let i = 0;
+	while (i < messages.length) {
+		const msg = messages[i];
+
+		// Skip non-user messages at the start
+		if (msg.role !== "user") {
+			i++;
+			continue;
+		}
+
+		// Check if this is the last user message (which goes in the action, not turns)
+		let isLastUserMessage = true;
+		for (let j = i + 1; j < messages.length; j++) {
+			if (messages[j].role === "user") {
+				isLastUserMessage = false;
+				break;
+			}
+		}
+		if (isLastUserMessage) {
+			break;
+		}
+
+		// Create and serialize user message
+		const userText = extractUserMessageText(msg);
+		if (!userText) {
+			i++;
+			continue;
+		}
+
+		const userMessage = create(UserMessageSchema, {
+			text: userText,
+			messageId: crypto.randomUUID(),
+		});
+		const userMessageBytes = toBinary(UserMessageSchema, userMessage);
+
+		// Collect and serialize steps until next user message
+		const stepBytes: Uint8Array[] = [];
+		i++;
+
+		while (i < messages.length && messages[i].role !== "user") {
+			const stepMsg = messages[i];
+
+			if (stepMsg.role === "assistant") {
+				const text = extractAssistantMessageText(stepMsg);
+				if (text) {
+					const step = create(ConversationStepSchema, {
+						message: {
+							case: "assistantMessage",
+							value: create(AssistantMessageSchema, { text }),
+						},
+					});
+					stepBytes.push(toBinary(ConversationStepSchema, step));
+				}
+			} else if (stepMsg.role === "toolResult") {
+				// Include tool results as assistant text for context
+				const text = toolResultToText(stepMsg);
+				if (text) {
+					const step = create(ConversationStepSchema, {
+						message: {
+							case: "assistantMessage",
+							value: create(AssistantMessageSchema, { text: `[Tool Result]\n${text}` }),
+						},
+					});
+					stepBytes.push(toBinary(ConversationStepSchema, step));
+				}
+			}
+
+			i++;
+		}
+
+		// Create the serialized turn using Structure types (bytes)
+		const agentTurn = create(AgentConversationTurnStructureSchema, {
+			userMessage: userMessageBytes,
+			steps: stepBytes,
+		});
+		const turn = create(ConversationTurnStructureSchema, {
+			turn: {
+				case: "agentConversationTurn",
+				value: agentTurn,
+			},
+		});
+		turns.push(toBinary(ConversationTurnStructureSchema, turn));
+	}
+
+	return turns;
+}
+
 function buildGrpcRequest(
 	model: Model<"cursor-agent">,
 	context: Context,
@@ -1775,10 +1917,16 @@ function buildGrpcRequest(
 		},
 	});
 
+	// Build conversation turns from prior messages (excluding the last user message)
+	const turns = buildConversationTurns(context.messages);
+
 	const hasMatchingPrompt = state.conversationState?.rootPromptMessagesJson?.some((entry) =>
 		Buffer.from(entry).equals(systemPromptId),
 	);
-	const conversationState =
+
+	// Use cached state if available and system prompt matches, but always update turns
+	// from context.messages to ensure full conversation history is sent
+	const baseState =
 		state.conversationState && hasMatchingPrompt
 			? state.conversationState
 			: create(ConversationStateStructureSchema, {
@@ -1795,6 +1943,12 @@ function buildGrpcRequest(
 					selfSummaryCount: 0,
 					readPaths: [],
 				});
+
+	// Always populate turns from context.messages to ensure Cursor sees full conversation
+	const conversationState = create(ConversationStateStructureSchema, {
+		...baseState,
+		turns: turns.length > 0 ? turns : baseState.turns,
+	});
 
 	const modelDetails = create(ModelDetailsSchema, {
 		modelId: model.id,
