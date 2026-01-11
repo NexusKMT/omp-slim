@@ -1,18 +1,23 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Added
 
 - Added `planner` built-in agent for comprehensive implementation planning with slow model
+
+### Changed
+
+- Changed `complete` tool to make `data` parameter optional when aborting, while still requiring it for successful completions
+
+### Removed
+
+- Removed `architect-plan`, `implement`, and `implement-with-critic` built-in agent commands
 
 ### Fixed
 
 - Fixed editor border rendering glitch after canceling slash command autocomplete
 - Fixed login/logout credential path message to reference agent.db
-
-### Removed
-
-- Removed `architect-plan`, `implement`, and `implement-with-critic` built-in agent commands
 
 ## [4.2.0] - 2026-01-10
 

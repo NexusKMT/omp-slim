@@ -79,7 +79,7 @@ export function createCompleteTool(session: ToolSession) {
 		: Type.Any({ description: "Structured JSON output (no schema specified)" });
 
 	const completeParams = Type.Object({
-		data: dataSchema,
+		data: Type.Optional(dataSchema),
 		status: Type.Optional(
 			Type.Union([Type.Literal("success"), Type.Literal("aborted")], {
 				default: "success",
@@ -99,8 +99,11 @@ export function createCompleteTool(session: ToolSession) {
 		execute: async (_toolCallId, params) => {
 			const status = params.status ?? "success";
 
-			// Skip schema validation when aborting - the agent is giving up
+			// Skip validation when aborting - data is optional for aborts
 			if (status === "success") {
+				if (params.data === undefined) {
+					throw new Error("data is required when status is 'success'");
+				}
 				if (schemaError) {
 					throw new Error(`Invalid output schema: ${schemaError}`);
 				}
