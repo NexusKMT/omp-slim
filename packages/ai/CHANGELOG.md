@@ -1,14 +1,20 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Added
 
+- Added shell streaming support for real-time stdout/stderr output during command execution
+- Added JSON5 parsing for MCP tool arguments with Python-style boolean and None value normalization
 - Added Cursor provider with support for Claude, GPT, and Gemini models via Cursor's agent API
 - Added OAuth authentication flow for Cursor including login, token refresh, and expiry detection
 - Added `cursor-agent` API type with streaming support and tool execution handlers
 - Added Cursor model definitions including Claude 4.5, GPT-5.x, Gemini 3, and Grok variants
 - Added model generation script to automatically fetch and update AI model definitions from models.dev and OpenRouter APIs
+
+### Changed
+
+- Changed MCP tool argument decoding to use protobuf Value schema for improved type handling
+- Changed tool advertisement to filter Cursor native tools (bash, read, write, delete, ls, grep, lsp) instead of only exposing mcp_ prefixed tools
 
 ## [4.2.3] - 2026-01-11
 

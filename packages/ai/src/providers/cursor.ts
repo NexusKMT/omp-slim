@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { appendFile } from "node:fs/promises";
 import http2 from "node:http2";
-import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
+import { create, fromBinary, fromJson, type JsonValue, toBinary, toJson } from "@bufbuild/protobuf";
+import { ValueSchema } from "@bufbuild/protobuf/wkt";
+import JSON5 from "json5";
 import { calculateCost } from "../models";
 import type {
 	Api,
@@ -87,9 +89,16 @@ import {
 	RequestContextSchema,
 	RequestContextSuccessSchema,
 	SetBlobResultSchema,
+	type ShellArgs,
 	ShellFailureSchema,
 	ShellRejectedSchema,
 	ShellResultSchema,
+	type ShellStream,
+	ShellStreamExitSchema,
+	ShellStreamSchema,
+	ShellStreamStartSchema,
+	ShellStreamStderrSchema,
+	ShellStreamStdoutSchema,
 	ShellSuccessSchema,
 	UserMessageActionSchema,
 	UserMessageSchema,
@@ -511,6 +520,130 @@ function handleKvServerMessage(
 	}
 }
 
+function sendShellStreamEvent(
+	h2Request: http2.ClientHttp2Stream,
+	execMsg: ExecServerMessage,
+	event: ShellStream["event"],
+): void {
+	sendExecClientMessage(h2Request, execMsg, "shellStream", create(ShellStreamSchema, { event }));
+}
+
+async function handleShellStreamArgs(
+	args: ShellArgs,
+	execMsg: ExecServerMessage,
+	h2Request: http2.ClientHttp2Stream,
+	execHandlers: CursorExecHandlers | undefined,
+	onToolResult: CursorToolResultHandler | undefined,
+): Promise<void> {
+	const { execResult } = await resolveExecHandler(
+		args as any,
+		execHandlers?.shell,
+		onToolResult,
+		(toolResult) => buildShellResultFromToolResult(args as any, toolResult),
+		(reason) => buildShellRejectedResult((args as any).command, (args as any).workingDirectory, reason),
+		(error) => buildShellFailureResult((args as any).command, (args as any).workingDirectory, error),
+	);
+
+	sendShellStreamEvent(h2Request, execMsg, { case: "start", value: create(ShellStreamStartSchema, {}) });
+
+	const result = execResult.result;
+	switch (result.case) {
+		case "success": {
+			const value = result.value;
+			if (value.stdout) {
+				sendShellStreamEvent(h2Request, execMsg, {
+					case: "stdout",
+					value: create(ShellStreamStdoutSchema, { data: value.stdout }),
+				});
+			}
+			if (value.stderr) {
+				sendShellStreamEvent(h2Request, execMsg, {
+					case: "stderr",
+					value: create(ShellStreamStderrSchema, { data: value.stderr }),
+				});
+			}
+			sendShellStreamEvent(h2Request, execMsg, {
+				case: "exit",
+				value: create(ShellStreamExitSchema, {
+					code: value.exitCode,
+					cwd: value.workingDirectory,
+					aborted: false,
+				}),
+			});
+			return;
+		}
+		case "failure": {
+			const value = result.value;
+			if (value.stdout) {
+				sendShellStreamEvent(h2Request, execMsg, {
+					case: "stdout",
+					value: create(ShellStreamStdoutSchema, { data: value.stdout }),
+				});
+			}
+			if (value.stderr) {
+				sendShellStreamEvent(h2Request, execMsg, {
+					case: "stderr",
+					value: create(ShellStreamStderrSchema, { data: value.stderr }),
+				});
+			}
+			sendShellStreamEvent(h2Request, execMsg, {
+				case: "exit",
+				value: create(ShellStreamExitSchema, {
+					code: value.exitCode,
+					cwd: value.workingDirectory,
+					aborted: value.aborted,
+					abortReason: value.abortReason,
+				}),
+			});
+			return;
+		}
+		case "rejected": {
+			sendShellStreamEvent(h2Request, execMsg, { case: "rejected", value: result.value });
+			sendShellStreamEvent(h2Request, execMsg, {
+				case: "exit",
+				value: create(ShellStreamExitSchema, {
+					code: 1,
+					cwd: result.value.workingDirectory,
+					aborted: false,
+				}),
+			});
+			return;
+		}
+		case "timeout": {
+			const value = result.value;
+			sendShellStreamEvent(h2Request, execMsg, {
+				case: "stderr",
+				value: create(ShellStreamStderrSchema, {
+					data: `Command timed out after ${value.timeoutMs}ms`,
+				}),
+			});
+			sendShellStreamEvent(h2Request, execMsg, {
+				case: "exit",
+				value: create(ShellStreamExitSchema, {
+					code: 1,
+					cwd: value.workingDirectory,
+					aborted: true,
+				}),
+			});
+			return;
+		}
+		case "permissionDenied": {
+			sendShellStreamEvent(h2Request, execMsg, { case: "permissionDenied", value: result.value });
+			sendShellStreamEvent(h2Request, execMsg, {
+				case: "exit",
+				value: create(ShellStreamExitSchema, {
+					code: 1,
+					cwd: result.value.workingDirectory,
+					aborted: false,
+				}),
+			});
+			return;
+		}
+		default:
+			return;
+	}
+}
+
 async function handleExecServerMessage(
 	execMsg: ExecServerMessage,
 	h2Request: http2.ClientHttp2Stream,
@@ -640,8 +773,7 @@ async function handleExecServerMessage(
 		}
 		case "shellStreamArgs": {
 			const args = execMsg.message.value;
-			const execResult = buildShellRejectedResult(args.command, args.workingDirectory, "Not implemented");
-			sendExecClientMessage(h2Request, execMsg, "shellResult", execResult);
+			await handleShellStreamArgs(args, execMsg, h2Request, execHandlers, onToolResult);
 			return;
 		}
 		case "backgroundShellSpawnArgs": {
@@ -1253,6 +1385,34 @@ function buildDiagnosticsRejectedResult(path: string, reason: string) {
 	});
 }
 
+function parseToolArgsJson(text: string): unknown {
+	const trimmed = text.trim();
+	if (!trimmed) {
+		return text;
+	}
+	try {
+		const normalized = trimmed
+			.replace(/\bNone\b/g, "null")
+			.replace(/\bTrue\b/g, "true")
+			.replace(/\bFalse\b/g, "false");
+		return JSON5.parse(normalized);
+	} catch {}
+	return text;
+}
+
+function decodeMcpArgValue(value: Uint8Array): unknown {
+	try {
+		const parsedValue = fromBinary(ValueSchema, value);
+		const jsonValue = toJson(ValueSchema, parsedValue) as JsonValue;
+		if (typeof jsonValue === "string") {
+			return parseToolArgsJson(jsonValue);
+		}
+		return jsonValue;
+	} catch {}
+	const text = new TextDecoder().decode(value);
+	return parseToolArgsJson(text);
+}
+
 function decodeMcpCall(args: {
 	name: string;
 	args: Record<string, Uint8Array>;
@@ -1262,12 +1422,7 @@ function decodeMcpCall(args: {
 }): CursorMcpCall {
 	const decodedArgs: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(args.args ?? {})) {
-		const text = new TextDecoder().decode(value);
-		try {
-			decodedArgs[key] = JSON.parse(text);
-		} catch {
-			decodedArgs[key] = text;
-		}
+		decodedArgs[key] = decodeMcpArgValue(value);
 	}
 	return {
 		name: args.name,
@@ -1462,30 +1617,31 @@ function createBlobId(data: Uint8Array): Uint8Array {
 	return new Uint8Array(createHash("sha256").update(data).digest());
 }
 
+const CURSOR_NATIVE_TOOL_NAMES = new Set(["bash", "read", "write", "delete", "ls", "grep", "lsp"]);
+
 function buildMcpToolDefinitions(tools: Tool[] | undefined): McpToolDefinition[] {
 	if (!tools || tools.length === 0) {
 		return [];
 	}
 
-	const mcpTools = tools.filter((tool) => tool.name.startsWith("mcp_"));
-	if (mcpTools.length === 0) {
+	const advertisedTools = tools.filter((tool) => !CURSOR_NATIVE_TOOL_NAMES.has(tool.name));
+	if (advertisedTools.length === 0) {
 		return [];
 	}
 
-	return mcpTools.map((tool) => {
-		const jsonSchema = tool.parameters as any;
+	return advertisedTools.map((tool) => {
+		const jsonSchema = tool.parameters as Record<string, unknown> | undefined;
+		const schemaValue: JsonValue =
+			jsonSchema && typeof jsonSchema === "object"
+				? (jsonSchema as JsonValue)
+				: { type: "object", properties: {}, required: [] };
+		const inputSchema = toBinary(ValueSchema, fromJson(ValueSchema, schemaValue));
 		return create(McpToolDefinitionSchema, {
 			name: tool.name,
 			description: tool.description,
 			providerIdentifier: "pi-agent",
 			toolName: tool.name,
-			inputSchema: new TextEncoder().encode(
-				JSON.stringify({
-					type: "object",
-					properties: jsonSchema.properties || {},
-					required: jsonSchema.required || [],
-				}),
-			),
+			inputSchema,
 		});
 	});
 }
