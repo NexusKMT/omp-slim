@@ -1,4 +1,4 @@
-import { parseFrontmatter } from "../../../discovery/helpers";
+import { parseFrontmatter } from "../../../core/frontmatter";
 import type { RenderResult, SpecialHandler } from "./types";
 import { finalizeOutput, loadPage } from "./types";
 

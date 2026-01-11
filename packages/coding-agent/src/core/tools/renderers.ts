@@ -20,6 +20,7 @@ import { outputToolRenderer } from "./output";
 import { readToolRenderer } from "./read";
 import { sshToolRenderer } from "./ssh";
 import { taskToolRenderer } from "./task/render";
+import { todoWriteToolRenderer } from "./todo-write";
 import { webFetchToolRenderer } from "./web-fetch";
 import { webSearchToolRenderer } from "./web-search/render";
 import { writeToolRenderer } from "./write";
@@ -49,6 +50,7 @@ export const toolRenderers: Record<string, ToolRenderer> = {
 	read: readToolRenderer as ToolRenderer,
 	ssh: sshToolRenderer as ToolRenderer,
 	task: taskToolRenderer as ToolRenderer,
+	todo_write: todoWriteToolRenderer as ToolRenderer,
 	web_fetch: webFetchToolRenderer as ToolRenderer,
 	web_search: webSearchToolRenderer as ToolRenderer,
 	write: writeToolRenderer as ToolRenderer,

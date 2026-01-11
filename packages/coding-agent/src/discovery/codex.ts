@@ -29,6 +29,7 @@ import { slashCommandCapability } from "../capability/slash-command";
 import type { CustomTool } from "../capability/tool";
 import { toolCapability } from "../capability/tool";
 import type { LoadContext, LoadResult } from "../capability/types";
+import { parseFrontmatter } from "../core/frontmatter";
 import { logger } from "../core/logger";
 import {
 	createSourceMeta,
@@ -36,7 +37,6 @@ import {
 	getExtensionNameFromPath,
 	loadFilesFromDir,
 	loadSkillsFromDir,
-	parseFrontmatter,
 	SOURCE_PATHS,
 } from "./helpers";
 

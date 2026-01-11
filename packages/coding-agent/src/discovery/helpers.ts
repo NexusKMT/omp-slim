@@ -5,11 +5,10 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { parse as parseYAML } from "yaml";
 import { readDirEntries, readFile } from "../capability/fs";
 import type { Skill, SkillFrontmatter } from "../capability/skill";
 import type { LoadContext, LoadResult, SourceMeta } from "../capability/types";
-import { logger } from "../core/logger";
+import { parseFrontmatter } from "../core/frontmatter";
 
 const VALID_THINKING_LEVELS: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
@@ -118,42 +117,6 @@ export function createSourceMeta(provider: string, path: string, level: "user" |
 		path: resolve(path),
 		level,
 	};
-}
-
-/**
- * Strip YAML frontmatter from content.
- * Returns { frontmatter, body, raw }
- */
-export function parseFrontmatter(content: string): {
-	frontmatter: Record<string, unknown>;
-	body: string;
-	raw: string;
-} {
-	const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-
-	if (!normalized.startsWith("---")) {
-		return { frontmatter: {}, body: normalized, raw: "" };
-	}
-
-	const endIndex = normalized.indexOf("\n---", 3);
-	if (endIndex === -1) {
-		return { frontmatter: {}, body: normalized, raw: "" };
-	}
-
-	const raw = normalized.slice(4, endIndex);
-	const body = normalized.slice(endIndex + 4).trim();
-
-	try {
-		// Replace tabs with spaces for YAML compatibility, use failsafe mode for robustness
-		const frontmatter = parseYAML(raw.replaceAll("\t", "  "), { compat: "failsafe" }) as Record<
-			string,
-			unknown
-		> | null;
-		return { frontmatter: frontmatter ?? {}, body, raw };
-	} catch (error) {
-		logger.warn("Failed to parse YAML frontmatter", { error: String(error) });
-		return { frontmatter: {}, body, raw };
-	}
 }
 
 /**

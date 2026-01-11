@@ -28,6 +28,7 @@ export { createReadTool, type ReadToolDetails } from "./read";
 export { reportFindingTool, type SubmitReviewDetails } from "./review";
 export { createSshTool, type SSHToolDetails } from "./ssh";
 export { BUNDLED_AGENTS, createTaskTool, taskTool } from "./task/index";
+export { createTodoWriteTool, type TodoItem, type TodoWriteToolDetails } from "./todo-write";
 export {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -79,6 +80,7 @@ import { createReadTool } from "./read";
 import { reportFindingTool } from "./review";
 import { createSshTool } from "./ssh";
 import { createTaskTool } from "./task/index";
+import { createTodoWriteTool } from "./todo-write";
 import { createWebFetchTool } from "./web-fetch";
 import { createWebSearchTool } from "./web-search/index";
 import { createWriteTool } from "./write";
@@ -145,6 +147,7 @@ export const BUILTIN_TOOLS: Record<string, ToolFactory> = {
 	output: createOutputTool,
 	read: createReadTool,
 	task: createTaskTool,
+	todo_write: createTodoWriteTool,
 	web_fetch: createWebFetchTool,
 	web_search: createWebSearchTool,
 	write: createWriteTool,

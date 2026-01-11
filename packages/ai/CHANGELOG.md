@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Cursor todo updates to bridge update_todos tool calls to the local todo_write tool
+
 ## [4.3.2] - 2026-01-11
 
 ## [4.3.1] - 2026-01-11

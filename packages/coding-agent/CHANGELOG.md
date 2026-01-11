@@ -1,22 +1,34 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Added
 
+- Added `todo_write` tool for creating and managing structured task lists during coding sessions
+- Added persistent todo panel above the editor that displays task progress
+- Added `Ctrl+T` keybinding to toggle todo list expansion
 - Added grouped display for consecutive Read tool calls, showing multiple file reads in a compact tree view
+- Added `todo_write` tool and persistent todo panel above the editor
 
 ### Changed
 
+- Changed `Ctrl+Enter` to insert a newline when not streaming (previously `Alt+Enter`)
+- Changed `Ctrl+T` from toggling thinking block visibility to toggling todo list expansion
+- Changed system prompt to use more direct, field-oriented language with emphasis on verification and assumptions
 - Changed temporary model selector keybinding from Ctrl+Y to Alt+P
 - Changed expand hint text from "Ctrl+O to expand" to "Ctrl+O for more"
 - Changed Read tool result display to hide content by default, showing only file path and status
+- Changed `Ctrl+T` to toggle todo panel expansion
+
+### Removed
+
+- Removed `yaml` package dependency in favor of Bun's built-in YAML parser
 
 ### Fixed
 
 - Fixed Alt+Enter to insert a newline when not streaming, instead of submitting the message
 - Fixed Alt+Enter inserting a new line when not streaming instead of submitting a message
 - Fixed Cursor provider to avoid advertising the Edit tool, relying on full-file Write operations instead
+- Fixed prompt template loading to strip leading HTML comment metadata blocks
 
 ## [4.3.2] - 2026-01-11
 ### Changed

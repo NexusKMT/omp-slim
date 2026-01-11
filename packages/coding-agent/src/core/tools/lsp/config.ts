@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { basename, extname, join } from "node:path";
+import { YAML } from "bun";
 import { globSync } from "glob";
-import { parse as parseYaml } from "yaml";
 import { getConfigDirPaths } from "../../../config";
 import { logger } from "../../logger";
 import { createBiomeClient } from "./clients/biome-client";
@@ -32,7 +32,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function parseConfigContent(content: string, filePath: string): unknown {
 	const extension = extname(filePath).toLowerCase();
 	if (extension === ".yaml" || extension === ".yml") {
-		return parseYaml(content) as unknown;
+		return YAML.parse(content) as unknown;
 	}
 	return JSON.parse(content) as unknown;
 }

@@ -22,6 +22,7 @@ import { type SlashCommand, slashCommandCapability } from "../capability/slash-c
 import { type SystemPrompt, systemPromptCapability } from "../capability/system-prompt";
 import { type CustomTool, toolCapability } from "../capability/tool";
 import type { LoadContext, LoadResult } from "../capability/types";
+import { parseFrontmatter } from "../core/frontmatter";
 import {
 	createSourceMeta,
 	discoverExtensionModulePaths,
@@ -29,7 +30,6 @@ import {
 	getExtensionNameFromPath,
 	loadFilesFromDir,
 	loadSkillsFromDir,
-	parseFrontmatter,
 	parseJSON,
 	SOURCE_PATHS,
 } from "./helpers";

@@ -1,6 +1,7 @@
 import { join, resolve } from "node:path";
 import Handlebars from "handlebars";
 import { CONFIG_DIR_NAME, getPromptsDir } from "../config";
+import { parseFrontmatter } from "./frontmatter";
 import { logger } from "./logger";
 
 /**
@@ -281,36 +282,6 @@ function optimizePromptLayout(input: string): string {
 }
 
 /**
- * Parse YAML frontmatter from markdown content
- * Returns { frontmatter, content } where content has frontmatter stripped
- */
-function parseFrontmatter(content: string): { frontmatter: Record<string, string>; content: string } {
-	const frontmatter: Record<string, string> = {};
-
-	if (!content.startsWith("---")) {
-		return { frontmatter, content };
-	}
-
-	const endIndex = content.indexOf("\n---", 3);
-	if (endIndex === -1) {
-		return { frontmatter, content };
-	}
-
-	const frontmatterBlock = content.slice(4, endIndex);
-	const remainingContent = content.slice(endIndex + 4).trim();
-
-	// Simple YAML parsing - just key: value pairs
-	for (const line of frontmatterBlock.split("\n")) {
-		const match = line.match(/^(\w+):\s*(.*)$/);
-		if (match) {
-			frontmatter[match[1]] = match[2].trim();
-		}
-	}
-
-	return { frontmatter, content: remainingContent };
-}
-
-/**
  * Parse command arguments respecting quoted strings (bash-style)
  * Returns array of arguments
  */
@@ -413,7 +384,7 @@ async function loadTemplatesFromDir(
 
 				if (entry.endsWith(".md")) {
 					const rawContent = await file.text();
-					const { frontmatter, content } = parseFrontmatter(rawContent);
+					const { frontmatter, body } = parseFrontmatter(rawContent);
 
 					const name = entry.split("/").pop()!.slice(0, -3); // Remove .md extension
 
@@ -429,9 +400,9 @@ async function loadTemplatesFromDir(
 					}
 
 					// Get description from frontmatter or first non-empty line
-					let description = frontmatter.description || "";
+					let description = String(frontmatter.description || "");
 					if (!description) {
-						const firstLine = content.split("\n").find((line) => line.trim());
+						const firstLine = body.split("\n").find((line) => line.trim());
 						if (firstLine) {
 							// Truncate if too long
 							description = firstLine.slice(0, 60);
@@ -445,7 +416,7 @@ async function loadTemplatesFromDir(
 					templates.push({
 						name,
 						description,
-						content,
+						content: body,
 						source: sourceStr,
 					});
 				}

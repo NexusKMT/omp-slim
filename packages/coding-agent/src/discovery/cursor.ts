@@ -22,13 +22,13 @@ import { ruleCapability } from "../capability/rule";
 import type { Settings } from "../capability/settings";
 import { settingsCapability } from "../capability/settings";
 import type { LoadContext, LoadResult } from "../capability/types";
+import { parseFrontmatter } from "../core/frontmatter";
 import {
 	createSourceMeta,
 	expandEnvVarsDeep,
 	getProjectPath,
 	getUserPath,
 	loadFilesFromDir,
-	parseFrontmatter,
 	parseJSON,
 } from "./helpers";
 

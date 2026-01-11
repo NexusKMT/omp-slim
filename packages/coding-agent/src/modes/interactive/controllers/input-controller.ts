@@ -67,7 +67,7 @@ export class InputController {
 		this.ctx.editor.onCtrlL = () => this.ctx.showModelSelector();
 		this.ctx.editor.onCtrlR = () => this.ctx.showHistorySearch();
 		this.ctx.editor.onCtrlO = () => this.toggleToolOutputExpansion();
-		this.ctx.editor.onCtrlT = () => this.toggleThinkingBlockVisibility();
+		this.ctx.editor.onCtrlT = () => this.ctx.toggleTodoExpansion();
 		this.ctx.editor.onCtrlG = () => this.openExternalEditor();
 		this.ctx.editor.onQuestionMark = () => this.ctx.handleHotkeysCommand();
 		this.ctx.editor.onCtrlV = () => this.handleImagePaste();

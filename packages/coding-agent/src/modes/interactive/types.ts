@@ -23,12 +23,20 @@ export type CompactionQueuedMessage = {
 	mode: "steer" | "followUp";
 };
 
+export type TodoItem = {
+	id: string;
+	content: string;
+	activeForm: string;
+	status: "pending" | "in_progress" | "completed";
+};
+
 export interface InteractiveModeContext {
 	// UI access
 	ui: TUI;
 	chatContainer: Container;
 	pendingMessagesContainer: Container;
 	statusContainer: Container;
+	todoContainer: Container;
 	editor: CustomEditor;
 	editorContainer: Container;
 	statusLine: StatusLineComponent;
@@ -46,6 +54,7 @@ export interface InteractiveModeContext {
 	isBackgrounded: boolean;
 	isBashMode: boolean;
 	toolOutputExpanded: boolean;
+	todoExpanded: boolean;
 	hideThinkingBlock: boolean;
 	pendingImages: ImageContent[];
 	compactionQueuedMessages: CompactionQueuedMessage[];
@@ -74,6 +83,7 @@ export interface InteractiveModeContext {
 	lastStatusSpacer: Spacer | undefined;
 	lastStatusText: Text | undefined;
 	fileSlashCommands: Set<string>;
+	todoItems: TodoItem[];
 
 	// Lifecycle
 	init(): Promise<void>;
@@ -110,6 +120,8 @@ export interface InteractiveModeContext {
 	updateEditorTopBorder(): void;
 	updateEditorBorderColor(): void;
 	rebuildChatFromMessages(): void;
+	setTodos(todos: TodoItem[]): void;
+	toggleTodoExpansion(): void;
 
 	// Command handling
 	handleExportCommand(text: string): Promise<void>;

@@ -16,6 +16,7 @@ import {
 	Text,
 	TUI,
 } from "@oh-my-pi/pi-tui";
+import chalk from "chalk";
 import type { AgentSession, AgentSessionEvent } from "../../core/agent-session";
 import type { ExtensionUIContext } from "../../core/extensions/index";
 import { HistoryStorage } from "../../core/history-storage";
@@ -26,6 +27,7 @@ import { getRecentSessions } from "../../core/session-manager";
 import type { SettingsManager } from "../../core/settings-manager";
 import { loadSlashCommands } from "../../core/slash-commands";
 import { setTerminalTitle } from "../../core/title-generator";
+import { getArtifactsDir } from "../../core/tools/task/artifacts";
 import { VoiceSupervisor } from "../../core/voice-supervisor";
 import { registerAsyncCleanup } from "../cleanup";
 import type { AssistantMessageComponent } from "./components/assistant-message";
@@ -45,9 +47,11 @@ import { InputController } from "./controllers/input-controller";
 import { SelectorController } from "./controllers/selector-controller";
 import type { Theme } from "./theme/theme";
 import { getEditorTheme, getMarkdownTheme, onThemeChange, theme } from "./theme/theme";
-import type { CompactionQueuedMessage, InteractiveModeContext } from "./types";
+import type { CompactionQueuedMessage, InteractiveModeContext, TodoItem } from "./types";
 import { UiHelpers } from "./utils/ui-helpers";
 import { VoiceManager } from "./utils/voice-manager";
+
+const TODO_FILE_NAME = "todos.json";
 
 /** Options for creating an InteractiveMode instance (for future API use) */
 export interface InteractiveModeOptions {
@@ -75,6 +79,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	public chatContainer: Container;
 	public pendingMessagesContainer: Container;
 	public statusContainer: Container;
+	public todoContainer: Container;
 	public editor: CustomEditor;
 	public editorContainer: Container;
 	public statusLine: StatusLineComponent;
@@ -83,6 +88,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	public isBackgrounded = false;
 	public isBashMode = false;
 	public toolOutputExpanded = false;
+	public todoExpanded = false;
+	public todoItems: TodoItem[] = [];
 	public hideThinkingBlock = false;
 	public pendingImages: ImageContent[] = [];
 	public compactionQueuedMessages: CompactionQueuedMessage[] = [];
@@ -148,6 +155,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.chatContainer = new Container();
 		this.pendingMessagesContainer = new Container();
 		this.statusContainer = new Container();
+		this.todoContainer = new Container();
 		this.editor = new CustomEditor(getEditorTheme());
 		this.editor.setUseTerminalCursor(true);
 		this.editor.onAutocompleteCancel = () => {
@@ -308,6 +316,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.addChild(this.chatContainer);
 		this.ui.addChild(this.pendingMessagesContainer);
 		this.ui.addChild(this.statusContainer);
+		this.ui.addChild(this.todoContainer);
 		this.ui.addChild(new Spacer(1));
 		this.ui.addChild(this.editorContainer);
 		this.ui.addChild(this.statusLine); // Only renders hook statuses (main status in editor border)
@@ -315,6 +324,9 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		this.inputController.setupKeyHandlers();
 		this.inputController.setupEditorSubmitHandler();
+
+		// Load initial todos
+		await this.loadTodoList();
 
 		// Start the UI
 		this.ui.start();
@@ -377,6 +389,82 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.chatContainer.clear();
 		const context = this.sessionManager.buildSessionContext();
 		this.renderSessionContext(context);
+	}
+
+	private formatTodoLine(todo: TodoItem, prefix: string): string {
+		const checkbox = theme.checkbox;
+		const label = todo.status === "in_progress" ? todo.activeForm : todo.content;
+		switch (todo.status) {
+			case "completed":
+				return theme.fg("success", `${prefix}${checkbox.checked} ${chalk.strikethrough(todo.content)}`);
+			case "in_progress":
+				return theme.fg("accent", `${prefix}${checkbox.unchecked} ${label}`);
+			default:
+				return theme.fg("dim", `${prefix}${checkbox.unchecked} ${label}`);
+		}
+	}
+
+	private getCollapsedTodos(todos: TodoItem[]): TodoItem[] {
+		let startIndex = 0;
+		for (let i = todos.length - 1; i >= 0; i -= 1) {
+			if (todos[i].status === "completed") {
+				startIndex = i;
+				break;
+			}
+		}
+		return todos.slice(startIndex, startIndex + 5);
+	}
+
+	private renderTodoList(): void {
+		this.todoContainer.clear();
+		if (this.todoItems.length === 0) {
+			return;
+		}
+
+		const visibleTodos = this.todoExpanded ? this.todoItems : this.getCollapsedTodos(this.todoItems);
+		const indent = "  ";
+		const hook = theme.tree.hook;
+		const lines = [indent + theme.bold(theme.fg("accent", "Todos"))];
+
+		visibleTodos.forEach((todo, index) => {
+			const prefix = `${indent}${index === 0 ? hook : " "} `;
+			lines.push(this.formatTodoLine(todo, prefix));
+		});
+
+		if (!this.todoExpanded && visibleTodos.length < this.todoItems.length) {
+			const remaining = this.todoItems.length - visibleTodos.length;
+			lines.push(theme.fg("muted", `${indent}${hook} +${remaining} more (Ctrl+T to expand)`));
+		}
+
+		this.todoContainer.addChild(new Text(lines.join("\n"), 1, 0));
+	}
+
+	private async loadTodoList(): Promise<void> {
+		const sessionFile = this.sessionManager.getSessionFile() ?? null;
+		if (!sessionFile) {
+			this.renderTodoList();
+			return;
+		}
+		const artifactsDir = getArtifactsDir(sessionFile);
+		if (!artifactsDir) {
+			this.renderTodoList();
+			return;
+		}
+		const todoPath = path.join(artifactsDir, TODO_FILE_NAME);
+		const file = Bun.file(todoPath);
+		if (!(await file.exists())) {
+			this.renderTodoList();
+			return;
+		}
+		try {
+			const data = (await file.json()) as { todos?: TodoItem[] };
+			if (data?.todos && Array.isArray(data.todos)) {
+				this.todoItems = data.todos;
+			}
+		} catch (error) {
+			logger.warn("Failed to load todos", { path: todoPath, error: String(error) });
+		}
+		this.renderTodoList();
 	}
 
 	stop(): void {
@@ -634,6 +722,18 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	toggleThinkingBlockVisibility(): void {
 		this.inputController.toggleThinkingBlockVisibility();
+	}
+
+	toggleTodoExpansion(): void {
+		this.todoExpanded = !this.todoExpanded;
+		this.renderTodoList();
+		this.ui.requestRender();
+	}
+
+	setTodos(todos: TodoItem[]): void {
+		this.todoItems = todos;
+		this.renderTodoList();
+		this.ui.requestRender();
 	}
 
 	openExternalEditor(): void {

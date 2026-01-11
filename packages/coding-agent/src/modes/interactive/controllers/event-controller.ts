@@ -6,7 +6,7 @@ import { ReadToolGroupComponent } from "../components/read-tool-group";
 import { ToolExecutionComponent } from "../components/tool-execution";
 import { TtsrNotificationComponent } from "../components/ttsr-notification";
 import { getSymbolTheme, theme } from "../theme/theme";
-import type { InteractiveModeContext } from "../types";
+import type { InteractiveModeContext, TodoItem } from "../types";
 
 export class EventController {
 	private lastReadGroup: ReadToolGroupComponent | undefined = undefined;
@@ -242,6 +242,13 @@ export class EventController {
 					component.updateResult({ ...event.result, isError: event.isError }, false, event.toolCallId);
 					this.ctx.pendingTools.delete(event.toolCallId);
 					this.ctx.ui.requestRender();
+				}
+				// Update todo display when todo_write tool completes
+				if (event.toolName === "todo_write" && !event.isError) {
+					const details = event.result.details as { todos?: TodoItem[] } | undefined;
+					if (details?.todos) {
+						this.ctx.setTodos(details.todos);
+					}
 				}
 				break;
 			}

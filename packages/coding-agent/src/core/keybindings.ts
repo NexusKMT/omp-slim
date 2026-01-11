@@ -59,7 +59,7 @@ export const DEFAULT_APP_KEYBINDINGS: Record<AppAction, KeyId | KeyId[]> = {
 	expandTools: "ctrl+o",
 	toggleThinking: "ctrl+t",
 	externalEditor: "ctrl+g",
-	followUp: "alt+enter",
+	followUp: "ctrl+enter",
 	dequeue: "alt+up",
 };
 

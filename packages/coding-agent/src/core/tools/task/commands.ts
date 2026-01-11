@@ -6,8 +6,8 @@
 
 import * as path from "node:path";
 import { type SlashCommand, slashCommandCapability } from "../../../capability/slash-command";
+import { parseFrontmatter } from "../../../core/frontmatter";
 import { loadCapability } from "../../../discovery";
-import { parseFrontmatter } from "../../../discovery/helpers";
 
 // Embed command markdown files at build time
 import initMd from "../../../prompts/agents/init.md" with { type: "text" };

@@ -338,7 +338,7 @@ export class CommandController {
 | \`Ctrl+L\` | Select model (set roles) |
 | \`Ctrl+R\` | Search prompt history |
 | \`Ctrl+O\` | Toggle tool output expansion |
-| \`Ctrl+T\` | Toggle thinking block visibility |
+| \`Ctrl+T\` | Toggle todo list expansion |
 | \`Ctrl+G\` | Edit message in external editor |
 | \`/\` | Slash commands |
 | \`!\` | Run bash command |

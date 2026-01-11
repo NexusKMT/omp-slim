@@ -4,7 +4,8 @@
  * Agents are embedded at build time via Bun's import with { type: "text" }.
  */
 
-import { parseAgentFields, parseFrontmatter } from "../../../discovery/helpers";
+import { parseFrontmatter } from "../../../core/frontmatter";
+import { parseAgentFields } from "../../../discovery/helpers";
 import exploreMd from "../../../prompts/agents/explore.md" with { type: "text" };
 // Embed agent markdown files at build time
 import agentFrontmatterTemplate from "../../../prompts/agents/frontmatter.md" with { type: "text" };

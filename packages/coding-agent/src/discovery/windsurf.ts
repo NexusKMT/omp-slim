@@ -16,13 +16,13 @@ import { registerProvider } from "../capability/index";
 import { type MCPServer, mcpCapability } from "../capability/mcp";
 import { type Rule, ruleCapability } from "../capability/rule";
 import type { LoadContext, LoadResult } from "../capability/types";
+import { parseFrontmatter } from "../core/frontmatter";
 import {
 	createSourceMeta,
 	expandEnvVarsDeep,
 	getProjectPath,
 	getUserPath,
 	loadFilesFromDir,
-	parseFrontmatter,
 	parseJSON,
 } from "./helpers";
 

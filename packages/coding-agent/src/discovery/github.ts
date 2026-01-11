@@ -18,7 +18,8 @@ import { readFile } from "../capability/fs";
 import { registerProvider } from "../capability/index";
 import { type Instruction, instructionCapability } from "../capability/instruction";
 import type { LoadContext, LoadResult, SourceMeta } from "../capability/types";
-import { calculateDepth, createSourceMeta, getProjectPath, loadFilesFromDir, parseFrontmatter } from "./helpers";
+import { parseFrontmatter } from "../core/frontmatter";
+import { calculateDepth, createSourceMeta, getProjectPath, loadFilesFromDir } from "./helpers";
 
 const PROVIDER_ID = "github";
 const DISPLAY_NAME = "GitHub Copilot";

@@ -356,7 +356,7 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 			let endStreamError: Error | null = null;
 			let currentTextBlock: (TextContent & { index: number }) | null = null;
 			let currentThinkingBlock: (ThinkingContent & { index: number }) | null = null;
-			let currentToolCall: (ToolCall & { index: number; partialJson: string }) | null = null;
+			let currentToolCall: ToolCallState | null = null;
 			const usageState: UsageState = { sawTokenDelta: false };
 
 			const state: BlockState = {
@@ -526,13 +526,15 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 	return stream;
 };
 
+type ToolCallState = ToolCall & { index: number; partialJson?: string; kind: "mcp" | "todo_write" };
+
 interface BlockState {
 	currentTextBlock: (TextContent & { index: number }) | null;
 	currentThinkingBlock: (ThinkingContent & { index: number }) | null;
-	currentToolCall: (ToolCall & { index: number; partialJson: string }) | null;
+	currentToolCall: ToolCallState | null;
 	setTextBlock: (b: (TextContent & { index: number }) | null) => void;
 	setThinkingBlock: (b: (ThinkingContent & { index: number }) | null) => void;
-	setToolCall: (t: (ToolCall & { index: number; partialJson: string }) | null) => void;
+	setToolCall: (t: ToolCallState | null) => void;
 }
 
 interface UsageState {
@@ -1542,6 +1544,42 @@ function decodeMcpCall(args: {
 	};
 }
 
+function mapTodoStatusValue(status?: number): "pending" | "in_progress" | "completed" {
+	switch (status) {
+		case 2:
+			return "in_progress";
+		case 3:
+			return "completed";
+		default:
+			return "pending";
+	}
+}
+
+interface CursorTodoItem {
+	id?: string;
+	content?: string;
+	status?: number;
+}
+
+interface CursorUpdateTodosToolCall {
+	updateTodosToolCall?: { args?: { todos?: CursorTodoItem[] } };
+}
+
+function buildTodoWriteArgs(toolCall: CursorUpdateTodosToolCall): {
+	todos: Array<{ id?: string; content: string; activeForm: string; status: "pending" | "in_progress" | "completed" }>;
+} | null {
+	const todos = toolCall.updateTodosToolCall?.args?.todos;
+	if (!todos) return null;
+	return {
+		todos: todos.map((todo) => ({
+			id: typeof todo.id === "string" && todo.id.length > 0 ? todo.id : undefined,
+			content: typeof todo.content === "string" ? todo.content : "",
+			activeForm: typeof todo.content === "string" ? todo.content : "",
+			status: mapTodoStatusValue(typeof todo.status === "number" ? todo.status : undefined),
+		})),
+	};
+}
+
 function buildMcpResultFromToolResult(_mcpCall: CursorMcpCall, toolResult: ToolResultMessage) {
 	if (toolResult.isError) {
 		return buildMcpErrorResult(toolResultToText(toolResult) || "MCP tool failed");
@@ -1654,13 +1692,31 @@ function processInteractionUpdate(
 			const mcpCall = toolCall.mcpToolCall;
 			if (mcpCall) {
 				const args = mcpCall.args || {};
-				const block: ToolCall & { index: number; partialJson: string } = {
+				const block: ToolCallState = {
 					type: "toolCall",
 					id: args.toolCallId || crypto.randomUUID(),
 					name: args.name || args.toolName || "",
 					arguments: {},
 					index: output.content.length,
 					partialJson: "",
+					kind: "mcp",
+				};
+				output.content.push(block);
+				state.setToolCall(block);
+				stream.push({ type: "toolcall_start", contentIndex: output.content.length - 1, partial: output });
+				return;
+			}
+
+			const todoArgs = buildTodoWriteArgs(toolCall);
+			if (todoArgs) {
+				const callId = update.message.value.callId || crypto.randomUUID();
+				const block: ToolCallState = {
+					type: "toolCall",
+					id: callId,
+					name: "todo_write",
+					arguments: todoArgs,
+					index: output.content.length,
+					kind: "todo_write",
 				};
 				output.content.push(block);
 				state.setToolCall(block);
@@ -1668,23 +1724,31 @@ function processInteractionUpdate(
 			}
 		}
 	} else if (updateCase === "toolCallDelta" || updateCase === "partialToolCall") {
-		if (state.currentToolCall) {
+		if (state.currentToolCall?.kind === "mcp") {
 			const delta = update.message.value.argsTextDelta || "";
-			state.currentToolCall.partialJson += delta;
-			state.currentToolCall.arguments = parseStreamingJson(state.currentToolCall.partialJson);
+			state.currentToolCall.partialJson = `${state.currentToolCall.partialJson ?? ""}${delta}`;
+			state.currentToolCall.arguments = parseStreamingJson(state.currentToolCall.partialJson ?? "");
 			const idx = output.content.indexOf(state.currentToolCall);
 			stream.push({ type: "toolcall_delta", contentIndex: idx, delta, partial: output });
 		}
 	} else if (updateCase === "toolCallCompleted") {
 		if (state.currentToolCall) {
 			const toolCall = update.message.value.toolCall;
-			const decodedArgs = decodeMcpArgsMap(toolCall?.mcpToolCall?.args?.args);
-			if (decodedArgs) {
-				state.currentToolCall.arguments = decodedArgs;
+			if (state.currentToolCall.kind === "mcp") {
+				const decodedArgs = decodeMcpArgsMap(toolCall?.mcpToolCall?.args?.args);
+				if (decodedArgs) {
+					state.currentToolCall.arguments = decodedArgs;
+				}
+			} else if (state.currentToolCall.kind === "todo_write" && toolCall) {
+				const todoArgs = buildTodoWriteArgs(toolCall);
+				if (todoArgs) {
+					state.currentToolCall.arguments = todoArgs;
+				}
 			}
 			const idx = output.content.indexOf(state.currentToolCall);
 			delete (state.currentToolCall as any).partialJson;
 			delete (state.currentToolCall as any).index;
+			delete (state.currentToolCall as any).kind;
 			stream.push({ type: "toolcall_end", contentIndex: idx, toolCall: state.currentToolCall, partial: output });
 			state.setToolCall(null);
 		}
@@ -1722,7 +1786,7 @@ function createBlobId(data: Uint8Array): Uint8Array {
 	return new Uint8Array(createHash("sha256").update(data).digest());
 }
 
-const CURSOR_NATIVE_TOOL_NAMES = new Set(["bash", "read", "write", "delete", "ls", "grep", "lsp"]);
+const CURSOR_NATIVE_TOOL_NAMES = new Set(["bash", "read", "write", "delete", "ls", "grep", "lsp", "todo_write"]);
 
 function buildMcpToolDefinitions(tools: Tool[] | undefined): McpToolDefinition[] {
 	if (!tools || tools.length === 0) {

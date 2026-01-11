@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseFrontmatter } from "./helpers";
+import { parseFrontmatter } from "../core/frontmatter";
 
 describe("parseFrontmatter", () => {
 	test("parses simple key-value pairs", () => {

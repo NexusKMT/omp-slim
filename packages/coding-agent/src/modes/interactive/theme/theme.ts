@@ -1325,6 +1325,10 @@ export class Theme {
 		return chalk.underline(text);
 	}
 
+	strikethrough(text: string): string {
+		return chalk.strikethrough(text);
+	}
+
 	inverse(text: string): string {
 		return chalk.inverse(text);
 	}

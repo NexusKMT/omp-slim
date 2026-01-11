@@ -11,7 +11,8 @@ import { registerProvider } from "../capability/index";
 import type { Rule } from "../capability/rule";
 import { ruleCapability } from "../capability/rule";
 import type { LoadContext, LoadResult } from "../capability/types";
-import { createSourceMeta, loadFilesFromDir, parseFrontmatter } from "./helpers";
+import { parseFrontmatter } from "../core/frontmatter";
+import { createSourceMeta, loadFilesFromDir } from "./helpers";
 
 const PROVIDER_ID = "cline";
 const DISPLAY_NAME = "Cline";
