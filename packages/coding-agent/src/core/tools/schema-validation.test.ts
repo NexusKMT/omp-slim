@@ -178,7 +178,6 @@ describe("sanitizeSchemaForGoogle", () => {
 			type: "string",
 			enum: ["value"],
 			description: "A description",
-			minLength: 1,
 		});
 	});
 

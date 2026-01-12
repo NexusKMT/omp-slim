@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [4.4.9] - 2026-01-12
 ### Fixed
 
 - Fixed Google provider schema sanitization to strip additional unsupported JSON Schema fields (patternProperties, additionalProperties, min/max constraints, pattern, format)
