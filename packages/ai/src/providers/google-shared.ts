@@ -13,18 +13,19 @@ type GoogleApiType = "google-generative-ai" | "google-gemini-cli" | "google-vert
  * Determines whether a streamed Gemini `Part` should be treated as "thinking".
  *
  * Protocol note (Gemini / Vertex AI thought signatures):
- * - `thoughtSignature` may appear without `thought: true` (including in empty-text parts at the end of streaming).
+ * - `thought: true` is the definitive marker for thinking content (thought summaries).
+ * - `thoughtSignature` is an encrypted representation of the model's internal thought process
+ *   used to preserve reasoning context across multi-turn interactions.
+ * - `thoughtSignature` can appear on ANY part type (text, functionCall, etc.) - it does NOT
+ *   indicate the part itself is thinking content.
+ * - For non-functionCall responses, the signature appears on the last part for context replay.
  * - When persisting/replaying model outputs, signature-bearing parts must be preserved as-is;
  *   do not merge/move signatures across parts.
- * - Our streaming representation uses content blocks, so we classify any non-empty `thoughtSignature`
- *   as thinking to avoid leaking thought content into normal assistant text.
  *
- * Some Google backends send thought content with `thoughtSignature` but omit `thought: true`
- * on subsequent deltas. We treat any non-empty `thoughtSignature` as thinking to avoid
- * leaking thought text into the normal assistant text stream.
+ * See: https://ai.google.dev/gemini-api/docs/thought-signatures
  */
 export function isThinkingPart(part: Pick<Part, "thought" | "thoughtSignature">): boolean {
-	return part.thought === true || (typeof part.thoughtSignature === "string" && part.thoughtSignature.length > 0);
+	return part.thought === true;
 }
 
 /**

@@ -4,12 +4,12 @@ import { isThinkingPart, retainThoughtSignature } from "../src/providers/google-
 describe("Google thinking detection (thoughtSignature)", () => {
 	it("treats part.thought === true as thinking", () => {
 		expect(isThinkingPart({ thought: true, thoughtSignature: undefined })).toBe(true);
+		expect(isThinkingPart({ thought: true, thoughtSignature: "opaque-signature" })).toBe(true);
 	});
 
-	it("treats a non-empty thoughtSignature as thinking even if thought is missing", () => {
-		// This is the bug: some backends omit `thought: true` but still include `thoughtSignature`
-		expect(isThinkingPart({ thought: undefined, thoughtSignature: "opaque-signature" })).toBe(true);
-		expect(isThinkingPart({ thought: false, thoughtSignature: "opaque-signature" })).toBe(true);
+	it("does not treat thoughtSignature alone as thinking", () => {
+		expect(isThinkingPart({ thought: undefined, thoughtSignature: "opaque-signature" })).toBe(false);
+		expect(isThinkingPart({ thought: false, thoughtSignature: "opaque-signature" })).toBe(false);
 	});
 
 	it("does not treat empty/missing signatures as thinking if thought is not set", () => {
@@ -33,5 +33,4 @@ describe("Google thinking detection (thoughtSignature)", () => {
 		expect(updated).toBe("sig-2");
 	});
 
-	// Note: signature-only parts (empty text + thoughtSignature) are handled by isThinkingPart via thoughtSignature presence.
 });

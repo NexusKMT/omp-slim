@@ -30,7 +30,7 @@ import { sanitizeSurrogates } from "../utils/sanitize-unicode";
 import { transformMessages } from "./transorm-messages";
 
 // Stealth mode: Mimic Claude Code headers while avoiding tool name collisions.
-export const claudeCodeVersion = "1.0.83";
+export const claudeCodeVersion = "2.1.2";
 export const claudeToolPrefix = "proxy_";
 export const claudeCodeSystemInstruction = "You are Claude Code, Anthropic's official CLI for Claude.";
 export const claudeCodeHeaders = {
