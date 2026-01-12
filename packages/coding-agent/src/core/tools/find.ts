@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
+import { StringEnum } from "@oh-my-pi/pi-ai";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Text } from "@oh-my-pi/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -25,7 +26,7 @@ const findSchema = Type.Object({
 		Type.Boolean({ description: "Sort results by modification time, most recent first (default: false)" }),
 	),
 	type: Type.Optional(
-		Type.Union([Type.Literal("file"), Type.Literal("dir"), Type.Literal("all")], {
+		StringEnum(["file", "dir", "all"], {
 			description:
 				"Filter by type: 'file' for files only, 'dir' for directories only, 'all' for both (default: 'all')",
 		}),

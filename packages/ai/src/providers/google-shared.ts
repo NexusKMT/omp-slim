@@ -211,43 +211,73 @@ export function sanitizeSchemaForGoogle(value: unknown): unknown {
 		return value;
 	}
 
+	const obj = value as Record<string, unknown>;
 	const result: Record<string, unknown> = {};
-	let constValue: unknown | undefined;
 
-	for (const [key, entry] of Object.entries(value)) {
-		if (UNSUPPORTED_SCHEMA_FIELDS.has(key)) {
-			continue;
+	// Collapse anyOf/oneOf of const values into enum
+	for (const combiner of ["anyOf", "oneOf"] as const) {
+		if (Array.isArray(obj[combiner])) {
+			const variants = obj[combiner] as Record<string, unknown>[];
+
+			// Check if ALL variants have a const field
+			const allHaveConst = variants.every((v) => v && typeof v === "object" && "const" in v);
+
+			if (allHaveConst && variants.length > 0) {
+				// Extract all const values into enum
+				result.enum = variants.map((v) => v.const);
+
+				// Inherit type from first variant if present
+				const firstType = variants[0]?.type;
+				if (firstType) {
+					result.type = firstType;
+				}
+
+				// Copy description and other top-level fields (not the combiner)
+				for (const [key, entry] of Object.entries(obj)) {
+					if (key !== combiner && !(key in result)) {
+						result[key] = sanitizeSchemaForGoogle(entry);
+					}
+				}
+				return result;
+			}
 		}
+	}
+
+	// Regular field processing
+	let constValue: unknown;
+	for (const [key, entry] of Object.entries(obj)) {
+		if (UNSUPPORTED_SCHEMA_FIELDS.has(key)) continue;
 		if (key === "const") {
 			constValue = entry;
 			continue;
 		}
-		if (key === "additionalProperties" && entry === false) {
-			continue;
-		}
+		if (key === "additionalProperties" && entry === false) continue;
 		result[key] = sanitizeSchemaForGoogle(entry);
 	}
 
 	if (constValue !== undefined) {
-		const existingEnum = Array.isArray(result.enum) ? [...result.enum] : undefined;
-		const enumValues = existingEnum ?? [];
-		if (!enumValues.some((item) => Object.is(item, constValue))) {
-			enumValues.push(constValue);
+		// Convert const to enum, merging with existing enum if present
+		const existingEnum = Array.isArray(result.enum) ? result.enum : [];
+		if (!existingEnum.some((item) => Object.is(item, constValue))) {
+			existingEnum.push(constValue);
 		}
-		result.enum = enumValues;
+		result.enum = existingEnum;
+		if (!result.type) {
+			result.type =
+				typeof constValue === "string"
+					? "string"
+					: typeof constValue === "number"
+						? "number"
+						: typeof constValue === "boolean"
+							? "boolean"
+							: undefined;
+		}
 	}
 
 	return result;
 }
 
-function sanitizeToolNoop(tool: Tool): Tool {
-	return {
-		name: tool.name,
-		description: tool.description,
-		parameters: structuredClone(tool.parameters),
-	};
-}
-function sanitizeToolGoogle(tool: Tool): Tool {
+function sanitizeToolForGoogle(tool: Tool): Tool {
 	return {
 		name: tool.name,
 		description: tool.description,
@@ -260,11 +290,10 @@ function sanitizeToolGoogle(tool: Tool): Tool {
  */
 export function convertTools(
 	tools: Tool[],
-	model: Model<"google-generative-ai" | "google-gemini-cli" | "google-vertex">,
+	_model: Model<"google-generative-ai" | "google-gemini-cli" | "google-vertex">,
 ): { functionDeclarations: { name: string; description?: string; parameters: Schema }[] }[] | undefined {
 	if (tools.length === 0) return undefined;
-	const toolSanitizer = model?.id.startsWith("gemini-") ? sanitizeToolGoogle : sanitizeToolNoop;
-	return [{ functionDeclarations: tools.map(toolSanitizer) }];
+	return [{ functionDeclarations: tools.map(sanitizeToolForGoogle) }];
 }
 
 /**

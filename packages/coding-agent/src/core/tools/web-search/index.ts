@@ -13,6 +13,7 @@
  */
 
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
+import { StringEnum } from "@oh-my-pi/pi-ai";
 import { Type } from "@sinclair/typebox";
 import type { Theme } from "../../../modes/interactive/theme/theme";
 import webSearchDescription from "../../../prompts/tools/web-search.md" with { type: "text" };
@@ -36,7 +37,7 @@ export const webSearchSchema = Type.Object({
 	// Common
 	query: Type.String({ description: "Search query" }),
 	provider: Type.Optional(
-		Type.Union([Type.Literal("auto"), Type.Literal("exa"), Type.Literal("anthropic"), Type.Literal("perplexity")], {
+		StringEnum(["auto", "exa", "anthropic", "perplexity"], {
 			description: "Search provider (auto-detected if omitted or set to auto)",
 		}),
 	),
@@ -58,12 +59,12 @@ export const webSearchSchema = Type.Object({
 
 	// Perplexity-specific
 	model: Type.Optional(
-		Type.Union([Type.Literal("sonar"), Type.Literal("sonar-pro")], {
+		StringEnum(["sonar", "sonar-pro"], {
 			description: "Perplexity model - sonar (fast) or sonar-pro (comprehensive research)",
 		}),
 	),
 	search_recency_filter: Type.Optional(
-		Type.Union([Type.Literal("day"), Type.Literal("week"), Type.Literal("month"), Type.Literal("year")], {
+		StringEnum(["day", "week", "month", "year"], {
 			description: "Filter results by recency (Perplexity only)",
 		}),
 	),
@@ -73,7 +74,7 @@ export const webSearchSchema = Type.Object({
 		}),
 	),
 	search_context_size: Type.Optional(
-		Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")], {
+		StringEnum(["low", "medium", "high"], {
 			description: "Context size for cost control (Perplexity only)",
 		}),
 	),
@@ -379,7 +380,7 @@ export function createWebSearchTool(_session: ToolSession): AgentTool<typeof web
 const webSearchDeepSchema = Type.Object({
 	query: Type.String({ description: "Research query" }),
 	type: Type.Optional(
-		Type.Union([Type.Literal("keyword"), Type.Literal("neural"), Type.Literal("auto")], {
+		StringEnum(["keyword", "neural", "auto"], {
 			description: "Search type - neural (semantic), keyword (exact), or auto",
 		}),
 	),

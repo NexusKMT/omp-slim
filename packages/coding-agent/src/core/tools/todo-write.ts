@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
+import { StringEnum } from "@oh-my-pi/pi-ai";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Text } from "@oh-my-pi/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -20,7 +21,7 @@ const todoWriteSchema = Type.Object({
 			id: Type.Optional(Type.String({ description: "Stable todo id" })),
 			content: Type.String({ minLength: 1, description: "Imperative task description (e.g., 'Run tests')" }),
 			activeForm: Type.String({ minLength: 1, description: "Present continuous form (e.g., 'Running tests')" }),
-			status: Type.Union([Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("completed")]),
+			status: StringEnum(["pending", "in_progress", "completed"]),
 		}),
 		{ description: "The updated todo list" },
 	),

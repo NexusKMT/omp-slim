@@ -12,24 +12,33 @@ import { Container, Text } from "@oh-my-pi/pi-tui";
 import { Type } from "@sinclair/typebox";
 import type { Theme, ThemeColor } from "../../modes/interactive/theme/theme";
 
-const PRIORITY_LABELS: Record<number, string> = {
-	0: "P0",
-	1: "P1",
-	2: "P2",
-	3: "P3",
+export type FindingPriority = "P0" | "P1" | "P2" | "P3";
+
+export interface FindingPriorityInfo {
+	ord: 0 | 1 | 2 | 3;
+	symbol: "status.error" | "status.warning" | "status.info";
+	color: ThemeColor;
+}
+
+const PRIORITY_INFO: Record<FindingPriority, FindingPriorityInfo> = {
+	P0: { ord: 0, symbol: "status.error", color: "error" },
+	P1: { ord: 1, symbol: "status.warning", color: "warning" },
+	P2: { ord: 2, symbol: "status.warning", color: "muted" },
+	P3: { ord: 3, symbol: "status.info", color: "accent" },
 };
 
-const PRIORITY_META: Record<number, { symbol: "status.error" | "status.warning" | "status.info"; color: ThemeColor }> =
-	{
-		0: { symbol: "status.error", color: "error" },
-		1: { symbol: "status.warning", color: "warning" },
-		2: { symbol: "status.warning", color: "muted" },
-		3: { symbol: "status.info", color: "accent" },
-	};
+export const PRIORITY_LABELS: FindingPriority[] = ["P0", "P1", "P2", "P3"];
 
-function getPriorityDisplay(priority: number, theme: Theme): { label: string; icon: string; color: ThemeColor } {
-	const label = PRIORITY_LABELS[priority] ?? "P?";
-	const meta = PRIORITY_META[priority] ?? { symbol: "status.info", color: "muted" as const };
+export function getPriorityInfo(priority: FindingPriority): FindingPriorityInfo {
+	return PRIORITY_INFO[priority] ?? { ord: 3, symbol: "status.info", color: "muted" };
+}
+
+function getPriorityDisplay(
+	priority: FindingPriority,
+	theme: Theme,
+): { label: string; icon: string; color: ThemeColor } {
+	const label = priority;
+	const meta = PRIORITY_INFO[priority] ?? { symbol: "status.info", color: "muted" as const };
 	return {
 		label,
 		icon: theme.styledSymbol(meta.symbol, meta.color),
@@ -45,7 +54,7 @@ const ReportFindingParams = Type.Object({
 	body: Type.String({
 		description: "Markdown explaining why this is a problem. One paragraph max.",
 	}),
-	priority: Type.Union([Type.Literal(0), Type.Literal(1), Type.Literal(2), Type.Literal(3)], {
+	priority: StringEnum(["P0", "P1", "P2", "P3"], {
 		description: "0=P0 (critical), 1=P1 (urgent), 2=P2 (normal), 3=P3 (low)",
 	}),
 	confidence: Type.Number({
@@ -61,7 +70,7 @@ const ReportFindingParams = Type.Object({
 interface ReportFindingDetails {
 	title: string;
 	body: string;
-	priority: number;
+	priority: FindingPriority;
 	confidence: number;
 	file_path: string;
 	line_start: number;
@@ -81,7 +90,7 @@ export const reportFindingTool: AgentTool<typeof ReportFindingParams, ReportFind
 			content: [
 				{
 					type: "text",
-					text: `Finding recorded: ${PRIORITY_LABELS[priority]} ${title}\nLocation: ${location}\nConfidence: ${(
+					text: `Finding recorded: ${priority} ${title}\nLocation: ${location}\nConfidence: ${(
 						confidence * 100
 					).toFixed(0)}%`,
 				},
@@ -91,7 +100,7 @@ export const reportFindingTool: AgentTool<typeof ReportFindingParams, ReportFind
 	},
 
 	renderCall(args, theme): Component {
-		const { label, icon, color } = getPriorityDisplay(args.priority as number, theme);
+		const { label, icon, color } = getPriorityDisplay(args.priority, theme);
 		const titleText = String(args.title).replace(/^\[P\d\]\s*/, "");
 		return new Text(
 			`${theme.fg("toolTitle", theme.bold("report_finding "))}${icon} ${theme.fg(color, `[${label}]`)} ${theme.fg(
@@ -141,6 +150,7 @@ export type { ReportFindingDetails };
 // ─────────────────────────────────────────────────────────────────────────────
 
 import path from "node:path";
+import { StringEnum } from "@oh-my-pi/pi-ai";
 import { subprocessToolRegistry } from "./task/subprocess-tool-registry";
 
 // Register report_finding handler

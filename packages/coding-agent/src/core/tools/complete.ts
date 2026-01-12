@@ -5,6 +5,7 @@
  */
 
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
+import { StringEnum } from "@oh-my-pi/pi-ai";
 import { Type } from "@sinclair/typebox";
 import Ajv, { type ErrorObject, type ValidateFunction } from "ajv";
 import type { ToolSession } from "./index";
@@ -81,7 +82,7 @@ export function createCompleteTool(session: ToolSession) {
 	const completeParams = Type.Object({
 		data: Type.Optional(dataSchema),
 		status: Type.Optional(
-			Type.Union([Type.Literal("success"), Type.Literal("aborted")], {
+			StringEnum(["success", "aborted"], {
 				default: "success",
 				description: "Use 'aborted' if the task cannot be completed",
 			}),

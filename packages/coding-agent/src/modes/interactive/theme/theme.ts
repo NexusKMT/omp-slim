@@ -824,6 +824,7 @@ const ColorValueSchema = Type.Union([
 
 type ColorValue = Static<typeof ColorValueSchema>;
 
+// Use Type.Union here (not StringEnum) because TypeCompiler doesn't support Type.Unsafe
 const SymbolPresetSchema = Type.Union([Type.Literal("unicode"), Type.Literal("nerd"), Type.Literal("ascii")]);
 
 const SymbolsSchema = Type.Optional(

@@ -4,6 +4,7 @@
  * Basic neural/keyword search, deep research, code search, and URL crawling.
  */
 
+import { StringEnum } from "@oh-my-pi/pi-ai";
 import { Type } from "@sinclair/typebox";
 import type { CustomTool } from "../../custom-tools/types";
 import type { ExaRenderDetails } from "./types";
@@ -31,7 +32,7 @@ Parameters:
 	parameters: Type.Object({
 		query: Type.String({ description: "Search query" }),
 		type: Type.Optional(
-			Type.Union([Type.Literal("keyword"), Type.Literal("neural"), Type.Literal("auto")], {
+			StringEnum(["keyword", "neural", "auto"], {
 				description: "Search type - neural (semantic), keyword (exact), or auto",
 			}),
 		),
@@ -128,7 +129,7 @@ Similar parameters to exa_search, optimized for research depth.`,
 	parameters: Type.Object({
 		query: Type.String({ description: "Research query" }),
 		type: Type.Optional(
-			Type.Union([Type.Literal("keyword"), Type.Literal("neural"), Type.Literal("auto")], {
+			StringEnum(["keyword", "neural", "auto"], {
 				description: "Search type - neural (semantic), keyword (exact), or auto",
 			}),
 		),

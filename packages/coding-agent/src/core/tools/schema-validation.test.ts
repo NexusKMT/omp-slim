@@ -130,7 +130,7 @@ describe("sanitizeSchemaForGoogle", () => {
 		expect(sanitized).toEqual({ type: "string", enum: ["active", "inactive"] });
 	});
 
-	it("handles nested const in anyOf", () => {
+	it("collapses anyOf with const values into enum", () => {
 		const schema = {
 			anyOf: [
 				{ type: "string", const: "file" },
@@ -138,11 +138,10 @@ describe("sanitizeSchemaForGoogle", () => {
 			],
 		};
 		const sanitized = sanitizeSchemaForGoogle(schema);
+		// anyOf with all const values should collapse into a single enum
 		expect(sanitized).toEqual({
-			anyOf: [
-				{ type: "string", enum: ["file"] },
-				{ type: "string", enum: ["dir"] },
-			],
+			type: "string",
+			enum: ["file", "dir"],
 		});
 	});
 

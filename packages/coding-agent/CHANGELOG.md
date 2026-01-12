@@ -1,6 +1,10 @@
 # Changelog
 
 ## [Unreleased]
+### Changed
+
+- Changed review finding priority format from numeric (0-3) to string labels (P0-P3) for clearer severity indication
+- Replaced Type.Union with Type.Literal patterns with StringEnum helper across tool schemas for cleaner enum definitions
 
 ## [4.4.6] - 2026-01-11
 

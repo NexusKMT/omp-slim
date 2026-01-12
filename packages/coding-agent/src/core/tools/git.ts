@@ -1,4 +1,5 @@
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
+import { StringEnum } from "@oh-my-pi/pi-ai";
 import { type GitParams, gitTool as gitToolCore, type ToolResponse } from "@oh-my-pi/pi-git-tool";
 import { type Static, Type } from "@sinclair/typebox";
 import gitDescription from "../../prompts/tools/git.md" with { type: "text" };
@@ -6,50 +7,38 @@ import { renderPromptTemplate } from "../prompt-templates";
 import type { ToolSession } from "./index";
 
 const gitSchema = Type.Object({
-	operation: Type.Union([
-		Type.Literal("status"),
-		Type.Literal("diff"),
-		Type.Literal("log"),
-		Type.Literal("show"),
-		Type.Literal("blame"),
-		Type.Literal("branch"),
-		Type.Literal("add"),
-		Type.Literal("restore"),
-		Type.Literal("commit"),
-		Type.Literal("checkout"),
-		Type.Literal("merge"),
-		Type.Literal("rebase"),
-		Type.Literal("stash"),
-		Type.Literal("cherry-pick"),
-		Type.Literal("fetch"),
-		Type.Literal("pull"),
-		Type.Literal("push"),
-		Type.Literal("tag"),
-		Type.Literal("pr"),
-		Type.Literal("issue"),
-		Type.Literal("ci"),
-		Type.Literal("release"),
+	operation: StringEnum([
+		"status",
+		"diff",
+		"log",
+		"show",
+		"blame",
+		"branch",
+		"add",
+		"restore",
+		"commit",
+		"checkout",
+		"merge",
+		"rebase",
+		"stash",
+		"cherry-pick",
+		"fetch",
+		"pull",
+		"push",
+		"tag",
+		"pr",
+		"issue",
+		"ci",
+		"release",
 	]),
 
 	// Status
-	only: Type.Optional(
-		Type.Union([
-			Type.Literal("branch"),
-			Type.Literal("modified"),
-			Type.Literal("staged"),
-			Type.Literal("untracked"),
-			Type.Literal("conflicts"),
-			Type.Literal("sync"),
-		]),
-	),
+	only: Type.Optional(StringEnum(["branch", "modified", "staged", "untracked", "conflicts", "sync"])),
 	ignored: Type.Optional(Type.Boolean()),
 
 	// Diff
 	target: Type.Optional(
 		Type.Union([
-			Type.Literal("unstaged"),
-			Type.Literal("staged"),
-			Type.Literal("head"),
 			Type.Object({
 				from: Type.String(),
 				to: Type.Optional(Type.String()),
@@ -71,7 +60,7 @@ const gitSchema = Type.Object({
 	since: Type.Optional(Type.String()),
 	until: Type.Optional(Type.String()),
 	grep: Type.Optional(Type.String()),
-	format: Type.Optional(Type.Union([Type.Literal("oneline"), Type.Literal("short"), Type.Literal("full")])),
+	format: Type.Optional(StringEnum(["oneline", "short", "full"])),
 	stat: Type.Optional(Type.Boolean()),
 	merges: Type.Optional(Type.Boolean()),
 	first_parent: Type.Optional(Type.Boolean()),
@@ -90,15 +79,7 @@ const gitSchema = Type.Object({
 	root: Type.Optional(Type.Boolean()),
 
 	// Branch
-	action: Type.Optional(
-		Type.Union([
-			Type.Literal("list"),
-			Type.Literal("create"),
-			Type.Literal("delete"),
-			Type.Literal("rename"),
-			Type.Literal("current"),
-		]),
-	),
+	action: Type.Optional(StringEnum(["list", "create", "delete", "rename", "current"])),
 	name: Type.Optional(Type.String()),
 	newName: Type.Optional(Type.String()),
 	startPoint: Type.Optional(Type.String()),
@@ -165,13 +146,9 @@ const gitSchema = Type.Object({
 	base: Type.Optional(Type.String()),
 	head: Type.Optional(Type.String()),
 	draft: Type.Optional(Type.Boolean()),
-	state: Type.Optional(
-		Type.Union([Type.Literal("open"), Type.Literal("closed"), Type.Literal("merged"), Type.Literal("all")]),
-	),
-	merge_method: Type.Optional(Type.Union([Type.Literal("merge"), Type.Literal("squash"), Type.Literal("rebase")])),
-	review_action: Type.Optional(
-		Type.Union([Type.Literal("approve"), Type.Literal("request-changes"), Type.Literal("comment")]),
-	),
+	state: Type.Optional(StringEnum(["open", "closed", "merged", "all"])),
+	merge_method: Type.Optional(StringEnum(["merge", "squash", "rebase"])),
+	review_action: Type.Optional(StringEnum(["approve", "request-changes", "comment"])),
 	review_body: Type.Optional(Type.String()),
 
 	// Issue

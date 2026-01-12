@@ -1,5 +1,8 @@
 // Core session management
 
+// TypeBox helper for string enums (convenience for custom tools)
+// Re-export from pi-ai which uses the correct enum-based schema format
+export { StringEnum } from "@oh-my-pi/pi-ai";
 // Re-export TUI components for custom tool rendering
 export { Container, Markdown, Spacer, Text } from "@oh-my-pi/pi-tui";
 export {
@@ -264,15 +267,3 @@ export {
 	Theme,
 	type ThemeColor,
 } from "./modes/interactive/theme/theme";
-
-// TypeBox helper for string enums (convenience for custom tools)
-import { type TSchema, Type } from "@sinclair/typebox";
-export function StringEnum<T extends readonly string[]>(
-	values: T,
-	options?: { description?: string; default?: T[number] },
-): TSchema {
-	return Type.Union(
-		values.map((v) => Type.Literal(v)),
-		options,
-	);
-}

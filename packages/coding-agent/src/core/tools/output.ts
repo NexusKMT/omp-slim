@@ -7,7 +7,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
-import type { TextContent } from "@oh-my-pi/pi-ai";
+import { StringEnum, type TextContent } from "@oh-my-pi/pi-ai";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Text } from "@oh-my-pi/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -33,7 +33,7 @@ const outputSchema = Type.Object({
 		minItems: 1,
 	}),
 	format: Type.Optional(
-		Type.Union([Type.Literal("raw"), Type.Literal("json"), Type.Literal("stripped")], {
+		StringEnum(["raw", "json", "stripped"], {
 			description: "Output format: raw (default), json (structured), stripped (no ANSI)",
 		}),
 	),

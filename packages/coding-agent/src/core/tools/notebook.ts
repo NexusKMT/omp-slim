@@ -1,4 +1,5 @@
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
+import { StringEnum } from "@oh-my-pi/pi-ai";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Text } from "@oh-my-pi/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -17,14 +18,14 @@ import {
 } from "./render-utils";
 
 const notebookSchema = Type.Object({
-	action: Type.Union([Type.Literal("edit"), Type.Literal("insert"), Type.Literal("delete")], {
+	action: StringEnum(["edit", "insert", "delete"], {
 		description: "Action to perform on the notebook cell",
 	}),
 	notebook_path: Type.String({ description: "Path to the .ipynb file (relative or absolute)" }),
 	cell_index: Type.Number({ description: "0-based index of the cell to operate on" }),
 	content: Type.Optional(Type.String({ description: "New cell content (required for edit/insert)" })),
 	cell_type: Type.Optional(
-		Type.Union([Type.Literal("code"), Type.Literal("markdown")], {
+		StringEnum(["code", "markdown"], {
 			description: "Cell type for insert (default: code)",
 		}),
 	),

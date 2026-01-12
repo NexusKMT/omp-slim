@@ -1,5 +1,6 @@
 import nodePath from "node:path";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
+import { StringEnum } from "@oh-my-pi/pi-ai";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Text } from "@oh-my-pi/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -44,7 +45,7 @@ const grepSchema = Type.Object({
 	),
 	limit: Type.Optional(Type.Number({ description: "Maximum number of matches to return (default: 100)" })),
 	outputMode: Type.Optional(
-		Type.Union([Type.Literal("content"), Type.Literal("files_with_matches"), Type.Literal("count")], {
+		StringEnum(["content", "files_with_matches", "count"], {
 			description:
 				"Output mode: 'content' shows matching lines, 'files_with_matches' shows only file paths, 'count' shows match counts per file (default: 'content')",
 		}),

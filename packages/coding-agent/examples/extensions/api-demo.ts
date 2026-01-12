@@ -16,6 +16,9 @@ export default function (pi: ExtensionAPI) {
 	pi.logger.debug("API demo extension loaded");
 
 	// 3. Register a tool that uses all three API features
+	// Import StringEnum from typebox helpers
+	const { StringEnum } = pi.pi;
+
 	pi.registerTool({
 		name: "api_demo",
 		label: "API Demo",
@@ -23,7 +26,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({
 			message: Type.String({ description: "Test message" }),
 			logLevel: Type.Optional(
-				Type.Union([Type.Literal("error"), Type.Literal("warn"), Type.Literal("debug")], {
+				StringEnum(["error", "warn", "debug"], {
 					description: "Log level to use",
 					default: "debug",
 				}),

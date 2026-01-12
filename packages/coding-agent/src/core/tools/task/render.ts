@@ -18,17 +18,15 @@ import {
 	formatTokens,
 	truncate,
 } from "../render-utils";
-import type { ReportFindingDetails, SubmitReviewDetails } from "../review";
+import {
+	type FindingPriority,
+	getPriorityInfo,
+	PRIORITY_LABELS,
+	type ReportFindingDetails,
+	type SubmitReviewDetails,
+} from "../review";
 import { subprocessToolRegistry } from "./subprocess-tool-registry";
 import type { AgentProgress, SingleResult, TaskParams, TaskToolDetails } from "./types";
-
-/** Priority labels for review findings */
-const PRIORITY_LABELS: Record<number, string> = {
-	0: "P0",
-	1: "P1",
-	2: "P2",
-	3: "P3",
-};
 
 /**
  * Get status icon for agent state.
@@ -53,25 +51,17 @@ function getStatusIcon(status: AgentProgress["status"], theme: Theme, spinnerFra
 function formatFindingSummary(findings: ReportFindingDetails[], theme: Theme): string {
 	if (findings.length === 0) return theme.fg("dim", "Findings: none");
 
-	const counts = new Map<number, number>();
+	const counts: { [P in FindingPriority]?: number } = {};
 	for (const finding of findings) {
-		counts.set(finding.priority, (counts.get(finding.priority) ?? 0) + 1);
+		counts[finding.priority] = (counts[finding.priority] ?? 0) + 1;
 	}
 
-	const priorityMeta: Record<number, { icon: string; color: "error" | "warning" | "muted" | "accent" }> = {
-		0: { icon: theme.styledSymbol("status.error", "error"), color: "error" },
-		1: { icon: theme.styledSymbol("status.warning", "warning"), color: "warning" },
-		2: { icon: theme.styledSymbol("status.warning", "muted"), color: "muted" },
-		3: { icon: theme.styledSymbol("status.info", "accent"), color: "accent" },
-	};
-
 	const parts: string[] = [];
-	for (const priority of [0, 1, 2, 3]) {
-		const label = PRIORITY_LABELS[priority] ?? "P?";
-		const meta = priorityMeta[priority] ?? { icon: "", color: "muted" as const };
-		const count = counts.get(priority) ?? 0;
-		const text = theme.fg(meta.color, `${label}:${count}`);
-		parts.push(meta.icon ? `${meta.icon} ${text}` : text);
+	for (const label of PRIORITY_LABELS) {
+		const { symbol, color } = getPriorityInfo(label);
+		const count = counts[label] ?? 0;
+		const text = theme.fg(color, `${label}:${count}`);
+		parts.push(theme.styledSymbol(symbol, color) ? `${theme.styledSymbol(symbol, color)} ${text}` : text);
 	}
 
 	return `${theme.fg("dim", "Findings:")} ${parts.join(theme.sep.dot)}`;
@@ -467,7 +457,9 @@ function renderFindings(
 	const lines: string[] = [];
 
 	// Sort by priority (lower = more severe) when collapsed to show most important first
-	const sortedFindings = expanded ? findings : [...findings].sort((a, b) => a.priority - b.priority);
+	const sortedFindings = expanded
+		? findings
+		: [...findings].sort((a, b) => getPriorityInfo(a.priority).ord - getPriorityInfo(b.priority).ord);
 	const displayCount = expanded ? sortedFindings.length : Math.min(3, sortedFindings.length);
 
 	for (let i = 0; i < displayCount; i++) {
@@ -476,13 +468,12 @@ function renderFindings(
 		const findingPrefix = isLastFinding ? theme.tree.last : theme.tree.branch;
 		const findingContinue = isLastFinding ? "   " : `${theme.tree.vertical}  `;
 
-		const priority = PRIORITY_LABELS[finding.priority] ?? "P?";
-		const color = finding.priority === 0 ? "error" : finding.priority === 1 ? "warning" : "muted";
+		const { color } = getPriorityInfo(finding.priority);
 		const titleText = finding.title.replace(/^\[P\d\]\s*/, "");
 		const loc = `${path.basename(finding.file_path)}:${finding.line_start}`;
 
 		lines.push(
-			`${continuePrefix}${findingPrefix} ${theme.fg(color, `[${priority}]`)} ${titleText} ${theme.fg("dim", loc)}`,
+			`${continuePrefix}${findingPrefix} ${theme.fg(color, `[${finding.priority}]`)} ${titleText} ${theme.fg("dim", loc)}`,
 		);
 
 		// Show body when expanded

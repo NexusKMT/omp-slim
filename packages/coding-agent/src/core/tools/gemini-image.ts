@@ -1,5 +1,6 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { StringEnum } from "@oh-my-pi/pi-ai";
 import { type Static, Type } from "@sinclair/typebox";
 import { nanoid } from "nanoid";
 import geminiImageDescription from "../../prompts/tools/gemini-image.md" with { type: "text" };
@@ -21,12 +22,11 @@ interface ImageApiKey {
 	apiKey: string;
 }
 
-const responseModalitySchema = Type.Union([Type.Literal("Image"), Type.Literal("Text")]);
-const aspectRatioSchema = Type.Union(
-	[Type.Literal("1:1"), Type.Literal("3:4"), Type.Literal("4:3"), Type.Literal("9:16"), Type.Literal("16:9")],
-	{ description: "Aspect ratio (1:1, 3:4, 4:3, 9:16, 16:9)." },
-);
-const imageSizeSchema = Type.Union([Type.Literal("1024x1024"), Type.Literal("1536x1024"), Type.Literal("1024x1536")], {
+const responseModalitySchema = StringEnum(["Image", "Text"]);
+const aspectRatioSchema = StringEnum(["1:1", "3:4", "4:3", "9:16", "16:9"], {
+	description: "Aspect ratio (1:1, 3:4, 4:3, 9:16, 16:9).",
+});
+const imageSizeSchema = StringEnum(["1024x1024", "1536x1024", "1024x1536"], {
 	description: "Image size, mainly for gemini-3-pro-image-preview.",
 });
 

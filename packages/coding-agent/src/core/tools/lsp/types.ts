@@ -1,3 +1,4 @@
+import { StringEnum } from "@oh-my-pi/pi-ai";
 import { type Static, Type } from "@sinclair/typebox";
 import type { Subprocess } from "bun";
 
@@ -6,28 +7,28 @@ import type { Subprocess } from "bun";
 // =============================================================================
 
 export const lspSchema = Type.Object({
-	action: Type.Union(
+	action: StringEnum(
 		[
 			// Standard LSP operations
-			Type.Literal("diagnostics"),
-			Type.Literal("workspace_diagnostics"),
-			Type.Literal("references"),
-			Type.Literal("definition"),
-			Type.Literal("hover"),
-			Type.Literal("symbols"),
-			Type.Literal("workspace_symbols"),
-			Type.Literal("rename"),
-			Type.Literal("actions"),
-			Type.Literal("incoming_calls"),
-			Type.Literal("outgoing_calls"),
-			Type.Literal("status"),
+			"diagnostics",
+			"workspace_diagnostics",
+			"references",
+			"definition",
+			"hover",
+			"symbols",
+			"workspace_symbols",
+			"rename",
+			"actions",
+			"incoming_calls",
+			"outgoing_calls",
+			"status",
 			// Rust-analyzer specific operations
-			Type.Literal("flycheck"),
-			Type.Literal("expand_macro"),
-			Type.Literal("ssr"),
-			Type.Literal("runnables"),
-			Type.Literal("related_tests"),
-			Type.Literal("reload_workspace"),
+			"flycheck",
+			"expand_macro",
+			"ssr",
+			"runnables",
+			"related_tests",
+			"reload_workspace",
 		],
 		{ description: "LSP action to perform" },
 	),

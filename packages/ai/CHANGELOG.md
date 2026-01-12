@@ -1,6 +1,10 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+
+- Fixed Google provider schema sanitization to properly collapse `anyOf`/`oneOf` with const values into enum arrays
+- Fixed const-to-enum conversion to infer type from the const value when type is not specified
 
 ## [4.4.6] - 2026-01-11
 ### Fixed
