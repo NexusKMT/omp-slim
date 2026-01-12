@@ -16,7 +16,9 @@ export async function convertToPng(
 
 	// Try sharp first
 	try {
-		const sharp = (await import("sharp")).default;
+		// Use variable to prevent bun from statically analyzing the import
+		const sharpModule = "sharp";
+		const sharp = (await import(/* @vite-ignore */ sharpModule)).default;
 		const buffer = Buffer.from(base64Data, "base64");
 		const pngBuffer = await sharp(buffer).png().toBuffer();
 		return {

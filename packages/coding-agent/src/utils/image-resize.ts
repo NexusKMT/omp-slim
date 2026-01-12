@@ -99,9 +99,12 @@ export async function resizeImage(img: ImageContent, options?: ImageResizeOption
 	const opts = { ...DEFAULT_OPTIONS, ...options };
 	const buffer = Buffer.from(img.data, "base64");
 
-	let sharp: typeof import("sharp") | undefined;
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	let sharp: any;
 	try {
-		sharp = (await import("sharp")).default;
+		// Use variable to prevent bun from statically analyzing the import
+		const sharpModule = "sharp";
+		sharp = (await import(/* @vite-ignore */ sharpModule)).default;
 	} catch {
 		// Sharp not available - try ImageMagick fallback
 		return resizeImageWithImageMagick(img, opts);
@@ -147,13 +150,11 @@ export async function resizeImage(img: ImageContent, options?: ImageResizeOption
 		height: number,
 		jpegQuality: number,
 	): Promise<{ buffer: Buffer; mimeType: string }> {
-		const resized = await sharp!(buffer)
-			.resize(width, height, { fit: "inside", withoutEnlargement: true })
-			.toBuffer();
+		const resized = await sharp(buffer).resize(width, height, { fit: "inside", withoutEnlargement: true }).toBuffer();
 
 		const [pngBuffer, jpegBuffer] = await Promise.all([
-			sharp!(resized).png({ compressionLevel: 9 }).toBuffer(),
-			sharp!(resized).jpeg({ quality: jpegQuality }).toBuffer(),
+			sharp(resized).png({ compressionLevel: 9 }).toBuffer(),
+			sharp(resized).jpeg({ quality: jpegQuality }).toBuffer(),
 		]);
 
 		return pickSmaller({ buffer: pngBuffer, mimeType: "image/png" }, { buffer: jpegBuffer, mimeType: "image/jpeg" });
