@@ -6,68 +6,54 @@
  * plaintext envelope (`[4B uint32 BE peerId][sealed payload]`) plus TEXT JSON
  * control messages that carry no session data.
  */
+
 import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
+import type {
+	BusChannel,
+	GuestFrame,
+	ParsedCollabLink,
+	Participant,
+	SessionState,
+	AgentSnapshot as WireAgentSnapshot,
+} from "@oh-my-pi/pi-wire";
+import { DEFAULT_RELAY_URL, ENVELOPE_HEADER_LENGTH, ROOM_ID_BYTES } from "@oh-my-pi/pi-wire";
 import type { ContextUsage } from "../extensibility/extensions/types";
 import type { AgentSessionEvent } from "../session/agent-session";
 import type { SessionEntry, SessionHeader } from "../session/session-manager";
 
-export const COLLAB_PROTO = 1;
+export type {
+	CollabPromptDetails,
+	ParsedCollabLink,
+	RelayControlMessage,
+	RelayControlToGuest,
+	RelayControlToHost,
+} from "@oh-my-pi/pi-wire";
+export { COLLAB_PROMPT_MESSAGE_TYPE, COLLAB_PROTO } from "@oh-my-pi/pi-wire";
+export { DEFAULT_RELAY_URL, ENVELOPE_HEADER_LENGTH, ROOM_ID_BYTES };
 
-/** customType of guest prompts injected on the host (rendered with an author badge). */
-export const COLLAB_PROMPT_MESSAGE_TYPE = "collab-prompt";
-
-/** Display metadata attached to collab guest prompts. */
-export interface CollabPromptDetails {
-	from?: string;
-}
-
-export interface CollabParticipant {
-	name: string;
-	role: "host" | "guest";
-}
-
-/** Serializable mirror of an {@link AgentRef} (live session handle stripped). */
-export interface AgentSnapshot {
-	id: string;
-	displayName: string;
-	kind: "main" | "sub";
-	parentId?: string;
-	status: "running" | "idle" | "parked" | "aborted";
-	/** Whether the host has a transcript file for this agent (gates remote transcript fetch). */
-	hasSessionFile: boolean;
-	createdAt: number;
-	lastActivity: number;
-}
+export type CollabParticipant = Participant;
+export type AgentSnapshot = WireAgentSnapshot;
 
 /** Debounced footer snapshot broadcast by the host. */
-export interface CollabSessionState {
-	isStreaming: boolean;
-	queuedMessageCount: number;
-	sessionName?: string;
-	/** Host cwd — display/title/relativization only; guest never chdirs. */
-	cwd: string;
+export type CollabSessionState = SessionState & {
 	/**
 	 * Host model (full catalog object). Guests apply it to their replica
 	 * agent state so model display and context-window math are native.
 	 */
 	model?: Model;
-	/** Host effective thinking level (ThinkingLevel value). */
-	thinkingLevel?: string;
 	/** Host status-line context numbers (guest system prompt/tools differ, so local estimates drift). */
 	contextUsage?: ContextUsage;
-	participants: CollabParticipant[];
-}
+};
 
-/** Encrypted payload frames (inside AES-GCM, JSON). */
+/**
+ * Encrypted payload frames (inside AES-GCM, JSON). The wire package pins the
+ * JSON skeleton (`WireFrame`); host-side frames carry the rich session types
+ * that serialize into those shapes.
+ */
 export type CollabFrame =
-	// guest -> host
-	| { t: "hello"; proto: number; name: string }
+	// guest -> host (hello/abort/agent-cmd/fetch-transcript are taken verbatim from the wire grammar)
+	| Exclude<GuestFrame, { t: "prompt" }>
 	| { t: "prompt"; text: string; images?: ImageContent[] }
-	| { t: "abort" }
-	/** Agent Hub action routed to the host (chat requires `text`). */
-	| { t: "agent-cmd"; cmd: "chat" | "kill" | "revive"; agentId: string; text?: string }
-	/** Incremental subagent-transcript read (mirrors the hub's readFileIncremental contract). */
-	| { t: "fetch-transcript"; reqId: number; agentId: string; fromByte: number }
 	// host -> guest
 	| {
 			t: "welcome";
@@ -81,7 +67,7 @@ export type CollabFrame =
 	| { t: "event"; event: AgentSessionEvent }
 	| { t: "state"; state: CollabSessionState }
 	/** Mirrored EventBus traffic (task subagent lifecycle/progress channels only). */
-	| { t: "bus"; channel: string; data: unknown }
+	| { t: "bus"; channel: BusChannel; data: unknown }
 	/** Full agent-registry snapshot (debounced on registry change). */
 	| { t: "agents"; agents: AgentSnapshot[] }
 	/** Targeted reply to fetch-transcript; `text` is decoded JSONL from `fromByte`, `newSize` the next offset base. */
@@ -89,19 +75,11 @@ export type CollabFrame =
 	| { t: "bye"; reason: string }
 	| { t: "error"; message: string };
 
-/** Relay → host control message (TEXT JSON, unencrypted, no session data). */
-export type RelayControlToHost = { t: "peer-joined" | "peer-left"; peer: number };
-/** Relay → guest control message (TEXT JSON, unencrypted). */
-export type RelayControlToGuest = { t: "room-closed" };
-export type RelayControlMessage = RelayControlToHost | RelayControlToGuest;
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Wire envelope: [4B uint32 BE peerId][sealed payload]
 // Host→relay: peerId 0 broadcasts to all guests; peerId N targets guest N.
 // Guest→relay: always 0; the relay rewrites it to the sender's id.
 // ═══════════════════════════════════════════════════════════════════════════
-
-export const ENVELOPE_HEADER_LENGTH = 4;
 
 export function packEnvelope(peerId: number, sealed: Uint8Array): Uint8Array {
 	const out = new Uint8Array(ENVELOPE_HEADER_LENGTH + sealed.byteLength);
@@ -125,22 +103,10 @@ export function rewriteEnvelopePeer(data: Uint8Array, peerId: number): void {
 // Link format: wss://<host[:port]>/r/<roomId>#<base64url-32-byte-key>
 // ═══════════════════════════════════════════════════════════════════════════
 
-export const ROOM_ID_BYTES = 16;
-
-/** Default public relay; bare `<roomId>#<key>` links resolve against it. */
-export const DEFAULT_RELAY_URL = "wss://relay.omp.sh";
-
 const ROOM_PATH_RE = /^\/r\/([A-Za-z0-9_-]{10,64})$/;
 const BARE_LINK_RE = /^([A-Za-z0-9_-]{10,64})#([A-Za-z0-9_-]+)$/;
 const B64URL_RE = /^[A-Za-z0-9_-]+$/;
 const LOCAL_HOSTNAMES: Record<string, true> = { localhost: true, "127.0.0.1": true, "::1": true, "[::1]": true };
-
-export interface ParsedCollabLink {
-	/** wss://host[:port]/r/<roomId> — no query, no fragment. */
-	wsUrl: string;
-	roomId: string;
-	key: Uint8Array;
-}
 
 export function generateRoomId(): string {
 	const bytes = new Uint8Array(ROOM_ID_BYTES);
