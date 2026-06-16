@@ -1,8 +1,10 @@
 import * as path from "node:path";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
-import type { SecretEntry } from "./obfuscator";
+import { type SecretEntry, sanitizeSecretFriendlyName } from "./obfuscator";
 import { compileSecretRegex } from "./regex";
+
+type RawSecretEntry = Omit<SecretEntry, "friendlyName"> & { friendlyName?: unknown };
 
 export {
 	deobfuscateSessionContext,
@@ -65,12 +67,14 @@ async function loadSecretsFile(filePath: string): Promise<SecretEntry[]> {
 		for (let i = 0; i < raw.length; i++) {
 			const entry = raw[i];
 			if (!validateEntry(entry, filePath, i)) continue;
+			const friendlyName = loadFriendlyName(entry, filePath, i);
 			entries.push({
 				type: entry.type,
 				content: entry.content,
 				mode: entry.mode ?? "obfuscate",
 				replacement: entry.replacement,
 				flags: entry.flags,
+				friendlyName,
 			});
 		}
 		return entries;
@@ -81,7 +85,21 @@ async function loadSecretsFile(filePath: string): Promise<SecretEntry[]> {
 	}
 }
 
-function validateEntry(entry: unknown, filePath: string, index: number): entry is SecretEntry {
+function loadFriendlyName(entry: RawSecretEntry, filePath: string, index: number): string | undefined {
+	if (entry.friendlyName === undefined) return undefined;
+	if (typeof entry.friendlyName !== "string") {
+		logger.warn(`secrets.yml[${index}]: friendlyName must be a string`, { path: filePath });
+		return undefined;
+	}
+	const friendlyName = sanitizeSecretFriendlyName(entry.friendlyName);
+	if (!friendlyName) {
+		logger.warn(`secrets.yml[${index}]: friendlyName must contain at least one letter or digit`, { path: filePath });
+		return undefined;
+	}
+	return friendlyName;
+}
+
+function validateEntry(entry: unknown, filePath: string, index: number): entry is RawSecretEntry {
 	if (entry === null || typeof entry !== "object") {
 		logger.warn(`secrets.yml[${index}]: entry must be an object`, { path: filePath });
 		return false;

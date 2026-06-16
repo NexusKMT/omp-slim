@@ -13,6 +13,7 @@ export interface SecretEntry {
 	mode?: "obfuscate" | "replace";
 	replacement?: string;
 	flags?: string;
+	friendlyName?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -42,20 +43,73 @@ function generateDeterministicReplacement(secret: string): string {
 
 const HASH_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 const HASH_LEN = 4;
+const HASH_SEED = 0x5345_4352;
+const MAX_FRIENDLY_NAME_LEN = 32;
 
-/** Build an obfuscation placeholder for secret index N. Deterministic `#HASH#` token. */
-function buildPlaceholder(index: number): string {
-	let v = Bun.hash.xxHash32(String(index), 0x5345_4352);
-	let tag = "#";
+type PlaceholderCaseHint = "U" | "L" | "C" | "M";
+
+/** Normalize a friendly name into the model-visible placeholder prefix. */
+export function sanitizeSecretFriendlyName(name: string): string | undefined {
+	const sanitized = name
+		.replace(/[^A-Za-z0-9]/g, "")
+		.toUpperCase()
+		.slice(0, MAX_FRIENDLY_NAME_LEN);
+	return sanitized.length > 0 ? sanitized : undefined;
+}
+
+function normalizePlaceholderSecret(secret: string): string {
+	return secret.toLowerCase();
+}
+
+function buildHashBase(value: string): string {
+	let v = Bun.hash.xxHash32(value, HASH_SEED) >>> 0;
+	let tag = "";
 	for (let i = 0; i < HASH_LEN; i++) {
 		tag += HASH_CHARS[v % HASH_CHARS.length];
 		v = Math.floor(v / HASH_CHARS.length);
 	}
-	return `${tag}#`;
+	return tag;
 }
 
-/** Regex to match obfuscation placeholders: #HASH# */
-const PLACEHOLDER_RE = /#[A-Z0-9]{4}#/g;
+function inferCaseHint(secret: string): PlaceholderCaseHint | undefined {
+	let hasCased = false;
+	let hasUpper = false;
+	let hasLower = false;
+	let capitalized = true;
+	let seenFirstCased = false;
+
+	for (let i = 0; i < secret.length; i++) {
+		const code = secret.charCodeAt(i);
+		const isUpper = code >= 65 && code <= 90;
+		const isLower = code >= 97 && code <= 122;
+		if (!isUpper && !isLower) continue;
+
+		hasCased = true;
+		if (isUpper) {
+			hasUpper = true;
+			if (seenFirstCased) capitalized = false;
+		} else {
+			hasLower = true;
+			if (!seenFirstCased) capitalized = false;
+		}
+		seenFirstCased = true;
+	}
+
+	if (!hasCased) return undefined;
+	if (hasUpper && !hasLower) return "U";
+	if (hasLower && !hasUpper) return "L";
+	if (capitalized) return "C";
+	return "M";
+}
+
+function buildPlaceholder(secret: string, base: string, friendlyName?: string): string {
+	const hint = inferCaseHint(secret);
+	const prefix = friendlyName ? `${friendlyName}_` : "";
+	return hint ? `#${prefix}${base}:${hint}#` : `#${prefix}${base}#`;
+}
+
+/** Regex to match #HASH#, #HASH:U#, and #FRIENDLY_HASH(:hint)# placeholders. */
+const PLACEHOLDER_RE = /#(?:[A-Z0-9]+_)?[A-Z0-9]{4}(?::[ULCM])?#/g;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SecretObfuscator
@@ -66,7 +120,8 @@ export class SecretObfuscator {
 	#plainMappings = new Map<string, number>();
 
 	/** Regex entries (patterns compiled at construction) */
-	#regexEntries: Array<{ regex: RegExp; mode: "obfuscate" | "replace"; replacement?: string }> = [];
+	#regexEntries: Array<{ regex: RegExp; mode: "obfuscate" | "replace"; replacement?: string; friendlyName?: string }> =
+		[];
 
 	/** All obfuscate-mode mappings: index → { secret, placeholder } */
 	#obfuscateMappings = new Map<number, { secret: string; placeholder: string }>();
@@ -76,6 +131,12 @@ export class SecretObfuscator {
 
 	/** Reverse lookup for deobfuscation: placeholder → secret */
 	#deobfuscateMap = new Map<string, string>();
+
+	/** Case-folded secret → preferred placeholder base hash. */
+	#placeholderBaseByNormalized = new Map<string, string>();
+
+	/** Placeholder base hash → owner key, used to avoid ambiguous placeholders. */
+	#placeholderBaseOwners = new Map<string, string>();
 
 	/** Next available index for regex match discoveries */
 	#nextIndex: number;
@@ -90,10 +151,9 @@ export class SecretObfuscator {
 
 			if (entry.type === "plain") {
 				if (mode === "obfuscate") {
-					const placeholder = buildPlaceholder(index);
+					const placeholder = this.#createPlaceholder(entry.content, entry.friendlyName);
 					this.#plainMappings.set(entry.content, index);
 					this.#obfuscateMappings.set(index, { secret: entry.content, placeholder });
-					this.#deobfuscateMap.set(placeholder, entry.content);
 					index++;
 				} else {
 					// replace mode
@@ -104,7 +164,12 @@ export class SecretObfuscator {
 				// regex type — compiled here, matches discovered during obfuscate()
 				try {
 					const regex = compileSecretRegex(entry.content, entry.flags);
-					this.#regexEntries.push({ regex, mode, replacement: entry.replacement });
+					this.#regexEntries.push({
+						regex,
+						mode,
+						replacement: entry.replacement,
+						friendlyName: entry.friendlyName,
+					});
 				} catch {
 					// Invalid regex — skip silently (validation happens at load time)
 				}
@@ -158,9 +223,8 @@ export class SecretObfuscator {
 					let index = this.#findObfuscateIndex(matchValue);
 					if (index === undefined) {
 						index = this.#nextIndex++;
-						const placeholder = buildPlaceholder(index);
+						const placeholder = this.#createPlaceholder(matchValue, entry.friendlyName);
 						this.#obfuscateMappings.set(index, { secret: matchValue, placeholder });
-						this.#deobfuscateMap.set(placeholder, matchValue);
 					}
 					const mapping = this.#obfuscateMappings.get(index)!;
 					result = replaceAll(result, matchValue, mapping.placeholder);
@@ -202,6 +266,55 @@ export class SecretObfuscator {
 			if (mapping.secret === secret) return index;
 		}
 		return undefined;
+	}
+
+	#createPlaceholder(secret: string, friendlyName?: string): string {
+		const normalized = normalizePlaceholderSecret(secret);
+		const preferredBase = this.#resolvePreferredPlaceholderBase(normalized);
+		const sanitizedFriendlyName = friendlyName ? sanitizeSecretFriendlyName(friendlyName) : undefined;
+		const preferredPlaceholder = buildPlaceholder(secret, preferredBase, sanitizedFriendlyName);
+		if (!this.#placeholderCollides(preferredPlaceholder, secret)) {
+			this.#deobfuscateMap.set(preferredPlaceholder, secret);
+			return preferredPlaceholder;
+		}
+
+		for (let attempt = 1; ; attempt++) {
+			const fallbackBase = this.#reserveFallbackPlaceholderBase(normalized, attempt);
+			const placeholder = buildPlaceholder(secret, fallbackBase, sanitizedFriendlyName);
+			if (!this.#placeholderCollides(placeholder, secret)) {
+				this.#deobfuscateMap.set(placeholder, secret);
+				return placeholder;
+			}
+		}
+	}
+
+	#resolvePreferredPlaceholderBase(normalized: string): string {
+		const existing = this.#placeholderBaseByNormalized.get(normalized);
+		if (existing !== undefined) return existing;
+
+		for (let attempt = 0; ; attempt++) {
+			const base = attempt === 0 ? buildHashBase(normalized) : buildHashBase(`${normalized}\0${attempt}`);
+			const owner = this.#placeholderBaseOwners.get(base);
+			if (owner !== undefined && owner !== normalized) continue;
+			this.#placeholderBaseOwners.set(base, normalized);
+			this.#placeholderBaseByNormalized.set(normalized, base);
+			return base;
+		}
+	}
+
+	#reserveFallbackPlaceholderBase(normalized: string, startAttempt: number): string {
+		for (let attempt = startAttempt; ; attempt++) {
+			const owner = `${normalized}\0collision\0${attempt}`;
+			const base = buildHashBase(`${normalized}\0collision\0${attempt}`);
+			if (this.#placeholderBaseOwners.has(base)) continue;
+			this.#placeholderBaseOwners.set(base, owner);
+			return base;
+		}
+	}
+
+	#placeholderCollides(placeholder: string, secret: string): boolean {
+		const existing = this.#deobfuscateMap.get(placeholder);
+		return existing !== undefined && existing !== secret;
 	}
 }
 
