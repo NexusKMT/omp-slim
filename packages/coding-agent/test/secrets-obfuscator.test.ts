@@ -3,11 +3,16 @@
  */
 
 import { describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { Context, Message } from "@oh-my-pi/pi-ai";
+import { loadSecrets } from "@oh-my-pi/pi-coding-agent/secrets";
 import {
 	obfuscateMessages,
 	obfuscateProviderContext,
 	SecretObfuscator,
+	sanitizeSecretFriendlyName,
 } from "@oh-my-pi/pi-coding-agent/secrets/obfuscator";
 import { compileSecretRegex } from "@oh-my-pi/pi-coding-agent/secrets/regex";
 import { z } from "zod/v4";
@@ -151,5 +156,161 @@ describe("SecretObfuscator regex behavior", () => {
 
 		expect(JSON.stringify(obfuscated)).not.toContain(secret);
 		expect(obfuscator.deobfuscateObject(obfuscated)).toEqual(messages);
+	});
+});
+
+describe("SecretObfuscator friendlyName placeholders", () => {
+	it("prefixes plain secret placeholders with sanitized friendly names", () => {
+		const secret = "github_pat_abc123";
+		const obfuscator = new SecretObfuscator([{ type: "plain", content: secret, friendlyName: "GitHub Token!" }]);
+		const input = `use ${secret} now`;
+		const obfuscated = obfuscator.obfuscate(input);
+
+		expect(obfuscated).toMatch(/#GITHUBTOKEN_[A-Z0-9]{4}:L#/);
+		expect(obfuscated).not.toContain(secret);
+		expect(obfuscator.deobfuscate(obfuscated)).toBe(input);
+	});
+
+	it("uses regex entry friendly names for discovered matches", () => {
+		const secret = "tok_abc123";
+		const obfuscator = new SecretObfuscator([{ type: "regex", content: "tok_[a-z0-9]+", friendlyName: "API Key" }]);
+		const input = `use ${secret} please`;
+		const obfuscated = obfuscator.obfuscate(input);
+
+		expect(obfuscated).toMatch(/#APIKEY_[A-Z0-9]{4}:L#/);
+		expect(obfuscated).not.toContain(secret);
+		expect(obfuscator.deobfuscate(obfuscated)).toBe(input);
+	});
+
+	it("keeps no-name placeholders unprefixed but content-derived", () => {
+		const first = new SecretObfuscator([
+			{ type: "plain", content: "alpha-secret" },
+			{ type: "plain", content: "beta-secret" },
+		]);
+		const second = new SecretObfuscator([
+			{ type: "plain", content: "beta-secret" },
+			{ type: "plain", content: "alpha-secret" },
+		]);
+
+		const firstToken = first.obfuscate("alpha-secret").match(/#[A-Z0-9]{4}:L#/)?.[0];
+		const secondToken = second.obfuscate("alpha-secret").match(/#[A-Z0-9]{4}:L#/)?.[0];
+
+		expect(firstToken).toBeDefined();
+		expect(firstToken).toBe(secondToken);
+		expect(firstToken).not.toMatch(/_[A-Z0-9]{4}/);
+		expect(first.deobfuscate(firstToken ?? "")).toBe("alpha-secret");
+	});
+
+	it("shares a base hash across casing variants with distinct hints", () => {
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "secret", friendlyName: "token" },
+			{ type: "plain", content: "SECRET", friendlyName: "token" },
+			{ type: "plain", content: "Secret", friendlyName: "token" },
+		]);
+		const obfuscated = obfuscator.obfuscate("secret SECRET Secret");
+		const tokens = obfuscated.match(/#TOKEN_[A-Z0-9]{4}:[ULCM]#/g);
+		if (!tokens) throw new Error("Expected case-hinted placeholders");
+		const bases = tokens.map(token => /^#TOKEN_([A-Z0-9]{4})/.exec(token)?.[1]);
+
+		expect(tokens).toHaveLength(3);
+		expect(new Set(bases).size).toBe(1);
+		expect(tokens[0]?.endsWith(":L#")).toBe(true);
+		expect(tokens[1]?.endsWith(":U#")).toBe(true);
+		expect(tokens[2]?.endsWith(":C#")).toBe(true);
+		expect(obfuscator.deobfuscate(obfuscated)).toBe("secret SECRET Secret");
+	});
+
+	it("gives duplicate mixed-case variants distinct placeholders", () => {
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "SeCret", friendlyName: "token" },
+			{ type: "plain", content: "SecRet", friendlyName: "token" },
+		]);
+		const repeated = new SecretObfuscator([
+			{ type: "plain", content: "SeCret", friendlyName: "token" },
+			{ type: "plain", content: "SecRet", friendlyName: "token" },
+		]);
+		const input = "SeCret SecRet";
+		const obfuscated = obfuscator.obfuscate(input);
+		const tokens = obfuscated.match(/#TOKEN_[A-Z0-9]{4}:M#/g);
+		if (!tokens) throw new Error("Expected mixed-case placeholders");
+
+		expect(tokens).toHaveLength(2);
+		expect(new Set(tokens).size).toBe(2);
+		expect(repeated.obfuscate(input)).toBe(obfuscated);
+		expect(obfuscator.deobfuscate(obfuscated)).toBe(input);
+	});
+
+	it("allows duplicate friendly names because hash suffixes disambiguate them", () => {
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "first-token", friendlyName: "api" },
+			{ type: "plain", content: "second-token", friendlyName: "api" },
+		]);
+		const obfuscated = obfuscator.obfuscate("first-token second-token");
+		const tokens = obfuscated.match(/#API_[A-Z0-9]{4}:L#/g);
+		if (!tokens) throw new Error("Expected friendly-name placeholders");
+
+		expect(tokens).toHaveLength(2);
+		expect(new Set(tokens).size).toBe(2);
+		expect(obfuscator.deobfuscate(obfuscated)).toBe("first-token second-token");
+	});
+
+	it("sanitizes and caps friendly names", () => {
+		expect(sanitizeSecretFriendlyName("git hub-token!!!")).toBe("GITHUBTOKEN");
+		expect(sanitizeSecretFriendlyName("0123456789abcdefghijklmnopqrstuvwxyz")).toBe(
+			"0123456789ABCDEFGHIJKLMNOPQRSTUV",
+		);
+		expect(sanitizeSecretFriendlyName("***")).toBeUndefined();
+	});
+
+	it("omits invalid friendlyName metadata without dropping the secret", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-secret-friendly-"));
+		try {
+			const project = path.join(root, "project");
+			const agentDir = path.join(root, "agent");
+			await fs.mkdir(path.join(project, ".omp"), { recursive: true });
+			await fs.mkdir(agentDir, { recursive: true });
+			await fs.writeFile(
+				path.join(project, ".omp", "secrets.yml"),
+				"- type: plain\n  content: invalid-friendly-secret\n  friendlyName: '***'\n",
+			);
+
+			const entries = await loadSecrets(project, agentDir);
+			const obfuscator = new SecretObfuscator(entries);
+			const obfuscated = obfuscator.obfuscate("invalid-friendly-secret");
+
+			expect(entries).toHaveLength(1);
+			expect(entries[0]?.friendlyName).toBeUndefined();
+			expect(obfuscated).toMatch(/#[A-Z0-9]{4}:L#/);
+			expect(obfuscated).not.toMatch(/_[A-Z0-9]{4}/);
+			expect(obfuscator.deobfuscate(obfuscated)).toBe("invalid-friendly-secret");
+		} finally {
+			await fs.rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("omits non-string friendlyName metadata without dropping the secret", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-secret-friendly-"));
+		try {
+			const project = path.join(root, "project");
+			const agentDir = path.join(root, "agent");
+			await fs.mkdir(path.join(project, ".omp"), { recursive: true });
+			await fs.mkdir(agentDir, { recursive: true });
+			await fs.writeFile(
+				path.join(project, ".omp", "secrets.yml"),
+				"- type: plain\n  content: non-string-friendly-secret\n  friendlyName: 123\n",
+			);
+
+			const entries = await loadSecrets(project, agentDir);
+			const obfuscator = new SecretObfuscator(entries);
+			const obfuscated = obfuscator.obfuscate("non-string-friendly-secret");
+
+			expect(entries).toHaveLength(1);
+			expect(entries[0]?.friendlyName).toBeUndefined();
+			expect(obfuscated).toMatch(/#[A-Z0-9]{4}:L#/);
+			expect(obfuscated).not.toMatch(/_[A-Z0-9]{4}/);
+			expect(obfuscator.deobfuscate(obfuscated)).toBe("non-string-friendly-secret");
+		} finally {
+			await fs.rm(root, { recursive: true, force: true });
+		}
 	});
 });
