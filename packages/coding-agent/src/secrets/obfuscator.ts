@@ -71,6 +71,17 @@ function buildHashBase(value: string): string {
 	return tag;
 }
 
+/** Build the pre-friendly-name index-derived placeholder for session resume compatibility. */
+function buildLegacyPlaceholder(index: number): string {
+	let v = Bun.hash.xxHash32(String(index), HASH_SEED);
+	let tag = "#";
+	for (let i = 0; i < HASH_LEN; i++) {
+		tag += HASH_CHARS[v % HASH_CHARS.length];
+		v = Math.floor(v / HASH_CHARS.length);
+	}
+	return `${tag}#`;
+}
+
 function inferCaseHint(secret: string): PlaceholderCaseHint | undefined {
 	let hasCased = false;
 	let hasUpper = false;
@@ -110,6 +121,22 @@ function buildPlaceholder(secret: string, base: string, friendlyName?: string): 
 
 /** Regex to match #HASH#, #HASH:U#, and #FRIENDLY_HASH(:hint)# placeholders. */
 const PLACEHOLDER_RE = /#(?:[A-Z0-9]+_)?[A-Z0-9]{4}(?::[ULCM])?#/g;
+
+const PENDING_PLACEHOLDER_SUFFIX_RE = /#(?:[A-Z0-9]*|[A-Z0-9]{0,4}(?::[ULCM]?)?|[A-Z0-9]+_[A-Z0-9]{0,4}(?::[ULCM]?)?)$/;
+
+/** Withhold partial placeholders from streamed deltas until the full token is available. */
+export function stripPendingSecretPlaceholderSuffix(text: string): string {
+	const pendingPlaceholderStart = text.match(PENDING_PLACEHOLDER_SUFFIX_RE);
+	if (pendingPlaceholderStart?.index === undefined) return text;
+	if (
+		pendingPlaceholderStart[0] === "#" &&
+		pendingPlaceholderStart.index > 0 &&
+		/[A-Z0-9:]$/.test(text.slice(0, pendingPlaceholderStart.index))
+	) {
+		return text;
+	}
+	return text.slice(0, pendingPlaceholderStart.index);
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SecretObfuscator
@@ -152,6 +179,7 @@ export class SecretObfuscator {
 			if (entry.type === "plain") {
 				if (mode === "obfuscate") {
 					const placeholder = this.#createPlaceholder(entry.content, entry.friendlyName);
+					this.#registerDeobfuscationAlias(buildLegacyPlaceholder(index), entry.content);
 					this.#plainMappings.set(entry.content, index);
 					this.#obfuscateMappings.set(index, { secret: entry.content, placeholder });
 					index++;
@@ -274,7 +302,7 @@ export class SecretObfuscator {
 		const sanitizedFriendlyName = friendlyName ? sanitizeSecretFriendlyName(friendlyName) : undefined;
 		const preferredPlaceholder = buildPlaceholder(secret, preferredBase, sanitizedFriendlyName);
 		if (!this.#placeholderCollides(preferredPlaceholder, secret)) {
-			this.#deobfuscateMap.set(preferredPlaceholder, secret);
+			this.#registerDeobfuscationAlias(preferredPlaceholder, secret);
 			return preferredPlaceholder;
 		}
 
@@ -282,7 +310,7 @@ export class SecretObfuscator {
 			const fallbackBase = this.#reserveFallbackPlaceholderBase(normalized, attempt);
 			const placeholder = buildPlaceholder(secret, fallbackBase, sanitizedFriendlyName);
 			if (!this.#placeholderCollides(placeholder, secret)) {
-				this.#deobfuscateMap.set(placeholder, secret);
+				this.#registerDeobfuscationAlias(placeholder, secret);
 				return placeholder;
 			}
 		}
@@ -315,6 +343,13 @@ export class SecretObfuscator {
 	#placeholderCollides(placeholder: string, secret: string): boolean {
 		const existing = this.#deobfuscateMap.get(placeholder);
 		return existing !== undefined && existing !== secret;
+	}
+
+	#registerDeobfuscationAlias(placeholder: string, secret: string): void {
+		const existing = this.#deobfuscateMap.get(placeholder);
+		if (existing === undefined || existing === secret) {
+			this.#deobfuscateMap.set(placeholder, secret);
+		}
 	}
 }
 

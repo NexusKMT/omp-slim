@@ -13,6 +13,7 @@ import {
 	obfuscateProviderContext,
 	SecretObfuscator,
 	sanitizeSecretFriendlyName,
+	stripPendingSecretPlaceholderSuffix,
 } from "@oh-my-pi/pi-coding-agent/secrets/obfuscator";
 import { compileSecretRegex } from "@oh-my-pi/pi-coding-agent/secrets/regex";
 import { z } from "zod/v4";
@@ -199,6 +200,24 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(firstToken).toBe(secondToken);
 		expect(firstToken).not.toMatch(/_[A-Z0-9]{4}/);
 		expect(first.deobfuscate(firstToken ?? "")).toBe("alpha-secret");
+	});
+
+	it("deobfuscates legacy index-derived placeholders for plain secrets", () => {
+		const obfuscator = new SecretObfuscator([{ type: "plain", content: "legacy-secret" }]);
+
+		expect(obfuscator.obfuscate("legacy-secret")).not.toBe("#XRRS#");
+		expect(obfuscator.deobfuscate("#XRRS#")).toBe("legacy-secret");
+	});
+
+	it("withholds pending placeholders while streaming provider text", () => {
+		expect(stripPendingSecretPlaceholderSuffix("before #")).toBe("before ");
+		expect(stripPendingSecretPlaceholderSuffix("before #AB12:")).toBe("before ");
+		expect(stripPendingSecretPlaceholderSuffix("before #TOKEN")).toBe("before ");
+		expect(stripPendingSecretPlaceholderSuffix("before #TOKEN_")).toBe("before ");
+		expect(stripPendingSecretPlaceholderSuffix("before #TOKEN_AB12:")).toBe("before ");
+		expect(stripPendingSecretPlaceholderSuffix("before #TOKEN_AB12:U")).toBe("before ");
+		expect(stripPendingSecretPlaceholderSuffix("before #TOKEN_AB12:U#")).toBe("before #TOKEN_AB12:U#");
+		expect(stripPendingSecretPlaceholderSuffix("before #TOKEN ")).toBe("before #TOKEN ");
 	});
 
 	it("shares a base hash across casing variants with distinct hints", () => {

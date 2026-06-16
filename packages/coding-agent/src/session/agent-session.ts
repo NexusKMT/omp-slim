@@ -224,6 +224,7 @@ import {
 	obfuscateProviderContext,
 	obfuscateProviderTools,
 	type SecretObfuscator,
+	stripPendingSecretPlaceholderSuffix,
 } from "../secrets/obfuscator";
 import { invalidateHostMetadata } from "../ssh/connection-manager";
 import {
@@ -4632,9 +4633,7 @@ export class AgentSession {
 	#deobfuscatedProviderTextReadyForDelta(text: string): string {
 		const deobfuscated = this.#deobfuscateFromProvider(text);
 		if (!this.#obfuscator?.hasSecrets()) return deobfuscated;
-		const pendingPlaceholderStart = deobfuscated.match(/#[A-Z0-9]{0,4}$/);
-		if (pendingPlaceholderStart?.index === undefined) return deobfuscated;
-		return deobfuscated.slice(0, pendingPlaceholderStart.index);
+		return stripPendingSecretPlaceholderSuffix(deobfuscated);
 	}
 
 	#convertToLlmForSideRequest(messages: AgentMessage[]): Message[] {
