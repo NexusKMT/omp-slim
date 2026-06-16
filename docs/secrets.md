@@ -25,7 +25,7 @@ Two modes control what happens to each secret:
 
 | Mode                  | Behavior                                                                                      | Reversible                                   |
 | --------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `obfuscate` (default) | Replaced with deterministic placeholder `#[A-Z0-9]{4}(?::[ULCM])?#`, optionally name-prefixed | Yes (deobfuscated in display/resume context) |
+| `obfuscate` (default) | Replaced with deterministic placeholder `#[A-Z0-9]+(?::[ULCM])?#`, optionally name-prefixed | Yes (deobfuscated in display/resume context) |
 | `replace`             | Replaced with deterministic same-length string                                                | No (one-way)                                 |
 
 ## secrets.yml

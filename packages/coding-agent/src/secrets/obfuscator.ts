@@ -42,8 +42,17 @@ function generateDeterministicReplacement(secret: string): string {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const HASH_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-const HASH_LEN = 4;
-const HASH_SEED = 0x5345_4352;
+// Base length is sized for ~62 bits of entropy (a 64-bit hash rendered as 12
+// base36 chars) so unrelated secrets do not collide on a shared base. A base
+// collision would let a persisted placeholder deobfuscate to the wrong secret
+// when the configured secret set or its ordering changes across sessions.
+const HASH_LEN = 12;
+const HASH_SEED_HI = 0x5345_4352;
+const HASH_SEED_LO = 0x4f4d_5049;
+// Pre-friendly-name sessions persisted a 4-char, index-derived token; reproduce
+// that exact legacy format so old session text still deobfuscates.
+const LEGACY_HASH_LEN = 4;
+const LEGACY_HASH_SEED = 0x5345_4352;
 const MAX_FRIENDLY_NAME_LEN = 32;
 
 type PlaceholderCaseHint = "U" | "L" | "C" | "M";
@@ -62,20 +71,23 @@ function normalizePlaceholderSecret(secret: string): string {
 }
 
 function buildHashBase(value: string): string {
-	let v = Bun.hash.xxHash32(value, HASH_SEED) >>> 0;
+	const hi = BigInt(Bun.hash.xxHash32(value, HASH_SEED_HI) >>> 0);
+	const lo = BigInt(Bun.hash.xxHash32(value, HASH_SEED_LO) >>> 0);
+	let v = (hi << 32n) | lo;
+	const radix = BigInt(HASH_CHARS.length);
 	let tag = "";
 	for (let i = 0; i < HASH_LEN; i++) {
-		tag += HASH_CHARS[v % HASH_CHARS.length];
-		v = Math.floor(v / HASH_CHARS.length);
+		tag += HASH_CHARS[Number(v % radix)];
+		v /= radix;
 	}
 	return tag;
 }
 
 /** Build the pre-friendly-name index-derived placeholder for session resume compatibility. */
 function buildLegacyPlaceholder(index: number): string {
-	let v = Bun.hash.xxHash32(String(index), HASH_SEED);
+	let v = Bun.hash.xxHash32(String(index), LEGACY_HASH_SEED);
 	let tag = "#";
-	for (let i = 0; i < HASH_LEN; i++) {
+	for (let i = 0; i < LEGACY_HASH_LEN; i++) {
 		tag += HASH_CHARS[v % HASH_CHARS.length];
 		v = Math.floor(v / HASH_CHARS.length);
 	}
@@ -119,14 +131,14 @@ function buildPlaceholder(hint: PlaceholderCaseHint | undefined, base: string, f
 }
 
 /** Regex to match #HASH#, #HASH:U#, and #FRIENDLY_HASH(:hint)# placeholders. */
-const PLACEHOLDER_RE = /#(?:[A-Z0-9]+_)?[A-Z0-9]{4}(?::[ULCM])?#/g;
+const PLACEHOLDER_RE = /#(?:[A-Z0-9]+_)?[A-Z0-9]{4,}(?::[ULCM])?#/g;
 
 function placeholderWithoutFriendlyName(placeholder: string): string | undefined {
-	const match = /^#[A-Z0-9]+_([A-Z0-9]{4}(?::[ULCM])?)#$/.exec(placeholder);
+	const match = /^#[A-Z0-9]+_([A-Z0-9]{4,}(?::[ULCM])?)#$/.exec(placeholder);
 	return match ? `#${match[1]}#` : undefined;
 }
 
-const PENDING_PLACEHOLDER_SUFFIX_RE = /#(?:[A-Z0-9]*|[A-Z0-9]{0,4}(?::[ULCM]?)?|[A-Z0-9]+_[A-Z0-9]{0,4}(?::[ULCM]?)?)$/;
+const PENDING_PLACEHOLDER_SUFFIX_RE = /#(?:[A-Z0-9]+_)?[A-Z0-9]*(?::[ULCM]?)?$/;
 
 /** Withhold partial placeholders from streamed deltas until the full token is available. */
 export function stripPendingSecretPlaceholderSuffix(text: string): string {

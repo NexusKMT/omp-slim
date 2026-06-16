@@ -167,7 +167,7 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		const input = `use ${secret} now`;
 		const obfuscated = obfuscator.obfuscate(input);
 
-		expect(obfuscated).toMatch(/#GITHUBTOKEN_[A-Z0-9]{4}:L#/);
+		expect(obfuscated).toMatch(/#GITHUBTOKEN_[A-Z0-9]+:L#/);
 		expect(obfuscated).not.toContain(secret);
 		expect(obfuscator.deobfuscate(obfuscated)).toBe(input);
 	});
@@ -178,7 +178,7 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		const input = `use ${secret} please`;
 		const obfuscated = obfuscator.obfuscate(input);
 
-		expect(obfuscated).toMatch(/#APIKEY_[A-Z0-9]{4}:L#/);
+		expect(obfuscated).toMatch(/#APIKEY_[A-Z0-9]+:L#/);
 		expect(obfuscated).not.toContain(secret);
 		expect(obfuscator.deobfuscate(obfuscated)).toBe(input);
 	});
@@ -193,12 +193,12 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 			{ type: "plain", content: "alpha-secret" },
 		]);
 
-		const firstToken = first.obfuscate("alpha-secret").match(/#[A-Z0-9]{4}:L#/)?.[0];
-		const secondToken = second.obfuscate("alpha-secret").match(/#[A-Z0-9]{4}:L#/)?.[0];
+		const firstToken = first.obfuscate("alpha-secret").match(/#[A-Z0-9]+:L#/)?.[0];
+		const secondToken = second.obfuscate("alpha-secret").match(/#[A-Z0-9]+:L#/)?.[0];
 
 		expect(firstToken).toBeDefined();
 		expect(firstToken).toBe(secondToken);
-		expect(firstToken).not.toMatch(/_[A-Z0-9]{4}/);
+		expect(firstToken).not.toMatch(/_[A-Z0-9]+/);
 		expect(first.deobfuscate(firstToken ?? "")).toBe("alpha-secret");
 	});
 
@@ -215,7 +215,7 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		const oldName = current.replace("#NEWNAME_", "#OLDNAME_");
 		const removedName = new SecretObfuscator([{ type: "plain", content: "renamed-secret" }]);
 
-		expect(current).toMatch(/^#NEWNAME_[A-Z0-9]{4}:L#$/);
+		expect(current).toMatch(/^#NEWNAME_[A-Z0-9]+:L#$/);
 		expect(renamed.deobfuscate(oldName)).toBe("renamed-secret");
 		expect(removedName.deobfuscate(oldName)).toBe("renamed-secret");
 	});
@@ -229,8 +229,8 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		const [tokenA, tokenB] = obfuscated.split(" ");
 		if (!tokenA || !tokenB) throw new Error("expected two friendly placeholders");
 
-		expect(tokenA).toMatch(/^#ALPHA_[A-Z0-9]{4}:M#$/);
-		expect(tokenB).toMatch(/^#BRAVO_[A-Z0-9]{4}:M#$/);
+		expect(tokenA).toMatch(/^#ALPHA_[A-Z0-9]+:M#$/);
+		expect(tokenB).toMatch(/^#BRAVO_[A-Z0-9]+:M#$/);
 		expect(obfuscator.deobfuscate(obfuscated)).toBe("SeCret SecRet");
 
 		const stripPrefix = (token: string) => token.replace(/^#[A-Z0-9]+_/, "#");
@@ -261,7 +261,7 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		// Session 1: only SecRet is configured; persist its mixed-case token.
 		const before = new SecretObfuscator([{ type: "plain", content: "SecRet" }]);
 		const persisted = before.obfuscate("SecRet");
-		expect(persisted).toMatch(/^#[A-Z0-9]{4}:M#$/);
+		expect(persisted).toMatch(/^#[A-Z0-9]+:M#$/);
 
 		// Session 2: SeCret (same normalized value, also :M) is added EARLIER.
 		const after = new SecretObfuscator([
@@ -274,6 +274,28 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(after.obfuscate("SecRet")).toBe(persisted);
 		expect(after.deobfuscate(persisted)).toBe("SecRet");
 		expect(after.obfuscate("SeCret")).not.toBe(persisted);
+	});
+
+	it("derives each placeholder purely from its own secret, independent of load order", () => {
+		// A secret persisted alone must keep the same token when unrelated secrets
+		// are later added before it, so old session text never aliases to another
+		// secret because of config/env ordering.
+		const alone = new SecretObfuscator([{ type: "plain", content: "secret397" }]);
+		const persisted = alone.obfuscate("secret397");
+
+		const before = new SecretObfuscator([
+			{ type: "plain", content: "secret658" },
+			{ type: "plain", content: "secret397" },
+		]);
+		const after = new SecretObfuscator([
+			{ type: "plain", content: "secret397" },
+			{ type: "plain", content: "secret658" },
+		]);
+
+		expect(before.obfuscate("secret397")).toBe(persisted);
+		expect(after.obfuscate("secret397")).toBe(persisted);
+		expect(before.deobfuscate(persisted)).toBe("secret397");
+		expect(before.obfuscate("secret658")).not.toBe(persisted);
 	});
 
 	it("withholds pending placeholders while streaming provider text", () => {
@@ -294,9 +316,9 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 			{ type: "plain", content: "Secret", friendlyName: "token" },
 		]);
 		const obfuscated = obfuscator.obfuscate("secret SECRET Secret");
-		const tokens = obfuscated.match(/#TOKEN_[A-Z0-9]{4}:[ULCM]#/g);
+		const tokens = obfuscated.match(/#TOKEN_[A-Z0-9]+:[ULCM]#/g);
 		if (!tokens) throw new Error("Expected case-hinted placeholders");
-		const bases = tokens.map(token => /^#TOKEN_([A-Z0-9]{4})/.exec(token)?.[1]);
+		const bases = tokens.map(token => /^#TOKEN_([A-Z0-9]+):/.exec(token)?.[1]);
 
 		expect(tokens).toHaveLength(3);
 		expect(new Set(bases).size).toBe(1);
@@ -317,7 +339,7 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		]);
 		const input = "SeCret SecRet";
 		const obfuscated = obfuscator.obfuscate(input);
-		const tokens = obfuscated.match(/#TOKEN_[A-Z0-9]{4}:M#/g);
+		const tokens = obfuscated.match(/#TOKEN_[A-Z0-9]+:M#/g);
 		if (!tokens) throw new Error("Expected mixed-case placeholders");
 
 		expect(tokens).toHaveLength(2);
@@ -332,7 +354,7 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 			{ type: "plain", content: "second-token", friendlyName: "api" },
 		]);
 		const obfuscated = obfuscator.obfuscate("first-token second-token");
-		const tokens = obfuscated.match(/#API_[A-Z0-9]{4}:L#/g);
+		const tokens = obfuscated.match(/#API_[A-Z0-9]+:L#/g);
 		if (!tokens) throw new Error("Expected friendly-name placeholders");
 
 		expect(tokens).toHaveLength(2);
@@ -366,8 +388,8 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 
 			expect(entries).toHaveLength(1);
 			expect(entries[0]?.friendlyName).toBeUndefined();
-			expect(obfuscated).toMatch(/#[A-Z0-9]{4}:L#/);
-			expect(obfuscated).not.toMatch(/_[A-Z0-9]{4}/);
+			expect(obfuscated).toMatch(/#[A-Z0-9]+:L#/);
+			expect(obfuscated).not.toMatch(/_[A-Z0-9]+/);
 			expect(obfuscator.deobfuscate(obfuscated)).toBe("invalid-friendly-secret");
 		} finally {
 			await fs.rm(root, { recursive: true, force: true });
@@ -392,8 +414,8 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 
 			expect(entries).toHaveLength(1);
 			expect(entries[0]?.friendlyName).toBeUndefined();
-			expect(obfuscated).toMatch(/#[A-Z0-9]{4}:L#/);
-			expect(obfuscated).not.toMatch(/_[A-Z0-9]{4}/);
+			expect(obfuscated).toMatch(/#[A-Z0-9]+:L#/);
+			expect(obfuscated).not.toMatch(/_[A-Z0-9]+/);
 			expect(obfuscator.deobfuscate(obfuscated)).toBe("non-string-friendly-secret");
 		} finally {
 			await fs.rm(root, { recursive: true, force: true });
