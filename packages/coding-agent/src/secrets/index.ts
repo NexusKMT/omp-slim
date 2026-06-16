@@ -17,15 +17,13 @@ let cachedPlaceholderKey: string | undefined;
 export async function getSecretPlaceholderKey(): Promise<string> {
 	if (cachedPlaceholderKey !== undefined) return cachedPlaceholderKey;
 	const keyPath = path.join(getConfigRootDir(), "secret-placeholder.key");
-	try {
-		const existing = (await Bun.file(keyPath).text()).trim();
-		if (existing.length > 0) {
-			cachedPlaceholderKey = existing;
-			return existing;
-		}
-	} catch (err) {
-		if (!isEnoent(err)) throw err;
+
+	const existing = await readNonEmptyKeyFile(keyPath, false);
+	if (existing !== undefined) {
+		cachedPlaceholderKey = existing;
+		return existing;
 	}
+
 	const generated = crypto.randomBytes(32).toString("base64url");
 	await fs.mkdir(getConfigRootDir(), { recursive: true });
 	try {
@@ -33,14 +31,34 @@ export async function getSecretPlaceholderKey(): Promise<string> {
 		cachedPlaceholderKey = generated;
 		return generated;
 	} catch (err) {
-		// Another process created the key first; adopt the persisted value.
-		if ((err as NodeJS.ErrnoException).code === "EEXIST") {
-			const existing = (await Bun.file(keyPath).text()).trim();
-			cachedPlaceholderKey = existing;
-			return existing;
+		if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+		// Another process won the create race but may still be mid-write: `wx`
+		// creates the file empty before the bytes land. Wait for non-empty content
+		// instead of caching an empty key (which would be a known, dictionaryable
+		// key and would not match tokens other processes persist with the real key).
+		const winner = await readNonEmptyKeyFile(keyPath, true);
+		if (winner === undefined) {
+			throw new Error(`secret placeholder key at ${keyPath} exists but is empty or unreadable`);
 		}
-		throw err;
+		cachedPlaceholderKey = winner;
+		return winner;
 	}
+}
+
+/** Read the key file, optionally retrying briefly until it has non-empty content. */
+async function readNonEmptyKeyFile(keyPath: string, retry: boolean): Promise<string | undefined> {
+	const attempts = retry ? 50 : 1;
+	for (let attempt = 0; attempt < attempts; attempt++) {
+		if (attempt > 0) await Bun.sleep(10);
+		try {
+			const value = (await Bun.file(keyPath).text()).trim();
+			if (value.length > 0) return value;
+		} catch (err) {
+			if (isEnoent(err)) return undefined;
+			throw err;
+		}
+	}
+	return undefined;
 }
 
 type RawSecretEntry = Omit<SecretEntry, "friendlyName"> & { friendlyName?: unknown };
