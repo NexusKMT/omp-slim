@@ -149,7 +149,7 @@ describe("createAgentSession session storage isolation", () => {
 	});
 	it("shows redaction guidance only when secrets are actually loaded", async () => {
 		await withClearedSecretEnv(async () => {
-			const redactionGuidance = "redacted as `#XXXX#` tokens";
+			const redactionGuidance = "redacted as `#HASH#`, `#HASH:CASE#`, or `#NAME_HASH:CASE#` tokens";
 			const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-sdk-secrets-${Snowflake.next()}-`));
 			tempDirs.push(tempDir);
 			const cwd = path.join(tempDir, "project");
