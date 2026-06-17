@@ -282,11 +282,11 @@ export class SecretObfuscator {
 					result = replaceRange(result, match.start, match.end, replacement);
 				} else {
 					// obfuscate mode — get or create stable index
-					let index = this.#findObfuscateIndex(match.value);
+					let index = this.#findObfuscateIndex(match.canonicalValue);
 					if (index === undefined) {
 						index = this.#nextIndex++;
-						const placeholder = this.#createPlaceholder(match.value, entry.friendlyName, true);
-						this.#obfuscateMappings.set(index, { secret: match.value, placeholder });
+						const placeholder = this.#createPlaceholder(match.canonicalValue, entry.friendlyName, true);
+						this.#obfuscateMappings.set(index, { secret: match.canonicalValue, placeholder });
 					}
 					const mapping = this.#obfuscateMappings.get(index)!;
 					result = replaceRange(result, match.start, match.end, mapping.placeholder);
@@ -460,11 +460,11 @@ export class SecretObfuscator {
 		text: string,
 		regex: RegExp,
 		mode: "obfuscate" | "replace",
-	): Array<{ start: number; end: number; value: string }> {
+	): Array<{ start: number; end: number; value: string; canonicalValue: string }> {
 		const knownPlaceholderRanges = this.#knownPlaceholderRanges(text);
 		const scanText = maskKnownPlaceholders(text, placeholder => this.#isKnownPlaceholder(placeholder));
 		regex.lastIndex = 0;
-		const matches: Array<{ start: number; end: number; value: string }> = [];
+		const matches: Array<{ start: number; end: number; value: string; canonicalValue: string }> = [];
 		for (;;) {
 			const match = regex.exec(scanText);
 			if (match === null) break;
@@ -481,10 +481,12 @@ export class SecretObfuscator {
 			if (knownPlaceholderRanges.some(range => start >= range.start && end <= range.end)) {
 				continue;
 			}
+			const value = text.slice(start, end);
 			matches.push({
 				start,
 				end,
-				value: text.slice(start, end),
+				value,
+				canonicalValue: this.deobfuscate(value),
 			});
 		}
 		return matches.reverse();

@@ -296,6 +296,28 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obfuscator.deobfuscate(obfuscated)).toBe("api_key=abcXYZ");
 	});
 
+	it("keeps regex placeholders stable when inner friendly names change", () => {
+		const sharedKey = "E".repeat(43);
+		const before = new SecretObfuscator(
+			[
+				{ type: "plain", content: "abc", friendlyName: "old" },
+				{ type: "regex", content: "api_key=\\S+", friendlyName: "api-key" },
+			],
+			sharedKey,
+		);
+		const persisted = before.obfuscate("api_key=abcXYZ");
+		const after = new SecretObfuscator(
+			[
+				{ type: "plain", content: "abc", friendlyName: "new" },
+				{ type: "regex", content: "api_key=\\S+", friendlyName: "api-key" },
+			],
+			sharedKey,
+		);
+
+		expect(after.obfuscate("api_key=abcXYZ")).toBe(persisted);
+		expect(after.deobfuscate(persisted)).toBe("api_key=abcXYZ");
+	});
+
 	it("ignores replace-mode regex matches that overlap known placeholders", () => {
 		const obfuscator = new SecretObfuscator([
 			{ type: "plain", content: "secret" },
