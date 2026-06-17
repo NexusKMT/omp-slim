@@ -436,7 +436,21 @@ export class SecretObfuscator {
 		);
 	}
 
+	#knownPlaceholderRanges(text: string): Array<{ start: number; end: number }> {
+		PLACEHOLDER_RE.lastIndex = 0;
+		const ranges: Array<{ start: number; end: number }> = [];
+		for (;;) {
+			const match = PLACEHOLDER_RE.exec(text);
+			if (match === null) break;
+			if (this.#isKnownPlaceholder(match[0])) {
+				ranges.push({ start: match.index, end: match.index + match[0].length });
+			}
+		}
+		return ranges;
+	}
+
 	#collectRegexMatches(text: string, regex: RegExp): Array<{ start: number; end: number; value: string }> {
+		const knownPlaceholderRanges = this.#knownPlaceholderRanges(text);
 		const scanText = maskKnownPlaceholders(text, placeholder => this.#isKnownPlaceholder(placeholder));
 		regex.lastIndex = 0;
 		const matches: Array<{ start: number; end: number; value: string }> = [];
@@ -447,10 +461,15 @@ export class SecretObfuscator {
 				regex.lastIndex++;
 				continue;
 			}
+			const start = match.index;
+			const end = match.index + match[0].length;
+			if (knownPlaceholderRanges.some(range => start >= range.start && end <= range.end)) {
+				continue;
+			}
 			matches.push({
-				start: match.index,
-				end: match.index + match[0].length,
-				value: text.slice(match.index, match.index + match[0].length),
+				start,
+				end,
+				value: text.slice(start, end),
 			});
 		}
 		return matches.reverse();
