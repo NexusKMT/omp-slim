@@ -264,6 +264,20 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obfuscator.deobfuscate(obfuscated)).toBe(`value ${secret}`);
 	});
 
+	it("redacts regex matches that span known placeholders", () => {
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "abc" },
+			{ type: "regex", content: "api_key=\\S+", friendlyName: "api-key" },
+		]);
+
+		const obfuscated = obfuscator.obfuscate("api_key=abcXYZ");
+
+		expect(obfuscated).toMatch(/^#APIKEY_[A-Z0-9]+:M#$/);
+		expect(obfuscated).not.toContain("XYZ");
+		expect(obfuscated).not.toContain("abc");
+		expect(obfuscator.deobfuscate(obfuscated)).toBe("api_key=abcXYZ");
+	});
+
 	it("keeps no-name placeholders unprefixed but content-derived", () => {
 		const first = new SecretObfuscator([
 			{ type: "plain", content: "alpha-secret" },

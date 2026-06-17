@@ -274,22 +274,22 @@ export class SecretObfuscator {
 		// 3. Process regex entries — discover new matches
 		for (const entry of this.#regexEntries) {
 			entry.regex.lastIndex = 0;
-			const matches = this.#collectMatchesOutsideKnownPlaceholders(result, entry.regex);
+			const matches = this.#collectRegexMatches(result, entry.regex);
 
-			for (const matchValue of matches) {
+			for (const match of matches) {
 				if (entry.mode === "replace") {
-					const replacement = entry.replacement ?? generateDeterministicReplacement(matchValue);
-					result = this.#replaceAllOutsideKnownPlaceholders(result, matchValue, replacement);
+					const replacement = entry.replacement ?? generateDeterministicReplacement(match.value);
+					result = replaceRange(result, match.start, match.end, replacement);
 				} else {
 					// obfuscate mode — get or create stable index
-					let index = this.#findObfuscateIndex(matchValue);
+					let index = this.#findObfuscateIndex(match.value);
 					if (index === undefined) {
 						index = this.#nextIndex++;
-						const placeholder = this.#createPlaceholder(matchValue, entry.friendlyName);
-						this.#obfuscateMappings.set(index, { secret: matchValue, placeholder });
+						const placeholder = this.#createPlaceholder(match.value, entry.friendlyName);
+						this.#obfuscateMappings.set(index, { secret: match.value, placeholder });
 					}
 					const mapping = this.#obfuscateMappings.get(index)!;
-					result = this.#replaceAllOutsideKnownPlaceholders(result, matchValue, mapping.placeholder);
+					result = replaceRange(result, match.start, match.end, mapping.placeholder);
 				}
 			}
 		}
@@ -300,12 +300,21 @@ export class SecretObfuscator {
 	/** Deobfuscate obfuscate-mode placeholders back to original secrets. Replace-mode is NOT reversed. */
 	deobfuscate(text: string): string {
 		if (!this.#hasAny || !text.includes("#")) return text;
-		return text.replace(PLACEHOLDER_RE, match => {
-			const direct = this.#deobfuscateMap.get(match);
-			if (direct !== undefined) return direct;
-			const unprefixed = placeholderWithoutFriendlyName(match);
-			return unprefixed ? (this.#deobfuscateMap.get(unprefixed) ?? match) : match;
-		});
+		let result = text;
+		for (;;) {
+			const next = result.replace(PLACEHOLDER_RE, match => {
+				const direct = this.#deobfuscateMap.get(match);
+				if (direct !== undefined) return direct;
+				const unprefixed = placeholderWithoutFriendlyName(match);
+				if (unprefixed) {
+					const mapped = this.#deobfuscateMap.get(unprefixed);
+					if (mapped !== undefined) return mapped;
+				}
+				return match;
+			});
+			if (next === result || !next.includes("#")) return next;
+			result = next;
+		}
 	}
 
 	/** Deep-walk an object, deobfuscating all string values. */
@@ -427,26 +436,24 @@ export class SecretObfuscator {
 		);
 	}
 
-	#collectMatchesOutsideKnownPlaceholders(text: string, regex: RegExp): Set<string> {
-		const matches = new Set<string>();
-		transformOutsidePlaceholders(
-			text,
-			placeholder => this.#isKnownPlaceholder(placeholder),
-			chunk => {
-				regex.lastIndex = 0;
-				for (;;) {
-					const match = regex.exec(chunk);
-					if (match === null) break;
-					if (match[0].length === 0) {
-						regex.lastIndex++;
-						continue;
-					}
-					matches.add(match[0]);
-				}
-				return chunk;
-			},
-		);
-		return matches;
+	#collectRegexMatches(text: string, regex: RegExp): Array<{ start: number; end: number; value: string }> {
+		const scanText = maskKnownPlaceholders(text, placeholder => this.#isKnownPlaceholder(placeholder));
+		regex.lastIndex = 0;
+		const matches: Array<{ start: number; end: number; value: string }> = [];
+		for (;;) {
+			const match = regex.exec(scanText);
+			if (match === null) break;
+			if (match[0].length === 0) {
+				regex.lastIndex++;
+				continue;
+			}
+			matches.push({
+				start: match.index,
+				end: match.index + match[0].length,
+				value: text.slice(match.index, match.index + match[0].length),
+			});
+		}
+		return matches.reverse();
 	}
 }
 
@@ -513,6 +520,7 @@ function transformOutsidePlaceholders(
 	text: string,
 	shouldSkipPlaceholder: (placeholder: string) => boolean,
 	transform: (chunk: string) => string,
+	preservePlaceholder?: (placeholder: string) => string,
 ): string {
 	PLACEHOLDER_RE.lastIndex = 0;
 	let result = "";
@@ -522,11 +530,24 @@ function transformOutsidePlaceholders(
 		if (match === null) break;
 		if (!shouldSkipPlaceholder(match[0])) continue;
 		result += transform(text.slice(pendingIndex, match.index));
-		result += match[0];
+		result += preservePlaceholder ? preservePlaceholder(match[0]) : match[0];
 		pendingIndex = match.index + match[0].length;
 	}
 	result += transform(text.slice(pendingIndex));
 	return result;
+}
+
+function maskKnownPlaceholders(text: string, shouldMaskPlaceholder: (placeholder: string) => boolean): string {
+	return transformOutsidePlaceholders(
+		text,
+		shouldMaskPlaceholder,
+		chunk => chunk,
+		placeholder => "P".repeat(placeholder.length),
+	);
+}
+
+function replaceRange(text: string, start: number, end: number, replacement: string): string {
+	return text.slice(0, start) + replacement + text.slice(end);
 }
 
 /** Deep-walk an object, transforming all string values. */
