@@ -283,9 +283,12 @@ describe("createAgentSession session storage isolation", () => {
 			const keySpy = spyOn(secrets, "getSecretPlaceholderKey").mockImplementation(
 				async () => "test-placeholder-key",
 			);
+			const existingKeySpy = spyOn(secrets, "getExistingSecretPlaceholderKey").mockImplementation(
+				async () => "existing-placeholder-key",
+			);
 			try {
-				// Replace-mode secrets never build a reversible keyed placeholder, so the
-				// persisted key (and creating its config-root key file) must not be requested.
+				// Replace-mode secrets never build a reversible keyed placeholder, so
+				// startup must not create the key file; an existing key is still redacted.
 				fs.writeFileSync(
 					path.join(cwd, ".omp", "secrets.yml"),
 					"- type: plain\n  mode: replace\n  content: replace-only-secret-123456\n",
@@ -294,12 +297,17 @@ describe("createAgentSession session storage isolation", () => {
 				try {
 					expect(replaceOnly.session.obfuscator?.hasSecrets()).toBe(true);
 					expect(keySpy).not.toHaveBeenCalled();
+					expect(existingKeySpy).toHaveBeenCalled();
+					expect(replaceOnly.session.obfuscator?.obfuscate("existing-placeholder-key")).not.toContain(
+						"existing-placeholder-key",
+					);
 				} finally {
 					await replaceOnly.session.dispose();
 				}
 
 				// An obfuscate-mode secret needs the key for its reversible placeholder.
 				keySpy.mockClear();
+				existingKeySpy.mockClear();
 				fs.writeFileSync(
 					path.join(cwd, ".omp", "secrets.yml"),
 					"- type: plain\n  content: obfuscate-secret-123456\n",
@@ -307,11 +315,13 @@ describe("createAgentSession session storage isolation", () => {
 				const withObfuscate = await createAgentSession(commonOptions);
 				try {
 					expect(keySpy).toHaveBeenCalled();
+					expect(existingKeySpy).not.toHaveBeenCalled();
 				} finally {
 					await withObfuscate.session.dispose();
 				}
 			} finally {
 				keySpy.mockRestore();
+				existingKeySpy.mockRestore();
 			}
 		});
 	});

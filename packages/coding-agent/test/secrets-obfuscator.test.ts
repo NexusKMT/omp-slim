@@ -254,6 +254,16 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obfuscator.deobfuscate(obfuscated)).toBe(input);
 	});
 
+	it("redacts configured secrets that already look like placeholders", () => {
+		const secret = "#PASSWORD123#";
+		const obfuscator = new SecretObfuscator([{ type: "plain", content: secret }]);
+		const obfuscated = obfuscator.obfuscate(`value ${secret}`);
+
+		expect(obfuscated).not.toContain(secret);
+		expect(obfuscated).toMatch(/^value #[A-Z0-9]+:U#$/);
+		expect(obfuscator.deobfuscate(obfuscated)).toBe(`value ${secret}`);
+	});
+
 	it("keeps no-name placeholders unprefixed but content-derived", () => {
 		const first = new SecretObfuscator([
 			{ type: "plain", content: "alpha-secret" },

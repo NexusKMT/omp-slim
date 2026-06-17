@@ -109,6 +109,7 @@ import { AgentRegistry, MAIN_AGENT_ID } from "./registry/agent-registry";
 import {
 	collectEnvSecrets,
 	deobfuscateSessionContext,
+	getExistingSecretPlaceholderKey,
 	getSecretPlaceholderKey,
 	loadSecrets,
 	obfuscateMessages,
@@ -1228,10 +1229,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			// set must not require the key; otherwise a headless run with an unwritable
 			// config root fails startup for a feature it does not use.
 			const needsPlaceholderKey = allEntries.some(entry => (entry.mode ?? "obfuscate") === "obfuscate");
-			obfuscator = new SecretObfuscator(
-				allEntries,
-				needsPlaceholderKey ? await getSecretPlaceholderKey() : undefined,
-			);
+			const placeholderKey = needsPlaceholderKey
+				? await getSecretPlaceholderKey()
+				: await getExistingSecretPlaceholderKey();
+			obfuscator = new SecretObfuscator(allEntries, placeholderKey);
 		}
 	}
 	const secretsEnabled = obfuscator?.hasSecrets() === true;

@@ -47,6 +47,16 @@ export async function getSecretPlaceholderKey(): Promise<string> {
 	}
 }
 
+/** Return an existing placeholder key for redaction without creating a new key file. */
+export async function getExistingSecretPlaceholderKey(): Promise<string | undefined> {
+	const keyPath = path.join(getConfigRootDir(), "secret-placeholder.key");
+	const cached = cachedPlaceholderKeys.get(keyPath);
+	if (cached !== undefined) return cached;
+	const existing = await readPlaceholderKeyFile(keyPath, false);
+	if (existing !== undefined) cachedPlaceholderKeys.set(keyPath, existing);
+	return existing;
+}
+
 /** Read and validate the key file, optionally retrying briefly until a valid key lands. */
 async function readPlaceholderKeyFile(keyPath: string, retry: boolean): Promise<string | undefined> {
 	const attempts = retry ? 50 : 1;

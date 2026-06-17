@@ -262,24 +262,24 @@ export class SecretObfuscator {
 
 		// 1. Process replace-mode plain secrets
 		for (const [secret, replacement] of [...this.#replaceMappings].sort((a, b) => b[0].length - a[0].length)) {
-			result = replaceAllOutsidePlaceholders(result, secret, replacement);
+			result = this.#replaceAllOutsideKnownPlaceholders(result, secret, replacement);
 		}
 
 		// 2. Process obfuscate-mode plain secrets
 		for (const [secret, index] of [...this.#plainMappings].sort((a, b) => b[0].length - a[0].length)) {
 			const mapping = this.#obfuscateMappings.get(index)!;
-			result = replaceAllOutsidePlaceholders(result, secret, mapping.placeholder);
+			result = this.#replaceAllOutsideKnownPlaceholders(result, secret, mapping.placeholder);
 		}
 
 		// 3. Process regex entries — discover new matches
 		for (const entry of this.#regexEntries) {
 			entry.regex.lastIndex = 0;
-			const matches = collectMatchesOutsidePlaceholders(result, entry.regex);
+			const matches = this.#collectMatchesOutsideKnownPlaceholders(result, entry.regex);
 
 			for (const matchValue of matches) {
 				if (entry.mode === "replace") {
 					const replacement = entry.replacement ?? generateDeterministicReplacement(matchValue);
-					result = replaceAllOutsidePlaceholders(result, matchValue, replacement);
+					result = this.#replaceAllOutsideKnownPlaceholders(result, matchValue, replacement);
 				} else {
 					// obfuscate mode — get or create stable index
 					let index = this.#findObfuscateIndex(matchValue);
@@ -289,7 +289,7 @@ export class SecretObfuscator {
 						this.#obfuscateMappings.set(index, { secret: matchValue, placeholder });
 					}
 					const mapping = this.#obfuscateMappings.get(index)!;
-					result = replaceAllOutsidePlaceholders(result, matchValue, mapping.placeholder);
+					result = this.#replaceAllOutsideKnownPlaceholders(result, matchValue, mapping.placeholder);
 				}
 			}
 		}
@@ -412,6 +412,42 @@ export class SecretObfuscator {
 			}
 		}
 	}
+
+	#isKnownPlaceholder(placeholder: string): boolean {
+		if (this.#deobfuscateMap.has(placeholder)) return true;
+		const unprefixed = placeholderWithoutFriendlyName(placeholder);
+		return unprefixed !== undefined && this.#deobfuscateMap.has(unprefixed);
+	}
+
+	#replaceAllOutsideKnownPlaceholders(text: string, search: string, replacement: string): string {
+		return transformOutsidePlaceholders(
+			text,
+			placeholder => this.#isKnownPlaceholder(placeholder),
+			chunk => replaceAll(chunk, search, replacement),
+		);
+	}
+
+	#collectMatchesOutsideKnownPlaceholders(text: string, regex: RegExp): Set<string> {
+		const matches = new Set<string>();
+		transformOutsidePlaceholders(
+			text,
+			placeholder => this.#isKnownPlaceholder(placeholder),
+			chunk => {
+				regex.lastIndex = 0;
+				for (;;) {
+					const match = regex.exec(chunk);
+					if (match === null) break;
+					if (match[0].length === 0) {
+						regex.lastIndex++;
+						continue;
+					}
+					matches.add(match[0]);
+				}
+				return chunk;
+			},
+		);
+		return matches;
+	}
 }
 
 export function deobfuscateSessionContext(
@@ -473,41 +509,24 @@ function replaceAll(text: string, search: string, replacement: string): string {
 	return result;
 }
 
-function transformOutsidePlaceholders(text: string, transform: (chunk: string) => string): string {
+function transformOutsidePlaceholders(
+	text: string,
+	shouldSkipPlaceholder: (placeholder: string) => boolean,
+	transform: (chunk: string) => string,
+): string {
 	PLACEHOLDER_RE.lastIndex = 0;
 	let result = "";
-	let lastIndex = 0;
+	let pendingIndex = 0;
 	for (;;) {
 		const match = PLACEHOLDER_RE.exec(text);
 		if (match === null) break;
-		result += transform(text.slice(lastIndex, match.index));
+		if (!shouldSkipPlaceholder(match[0])) continue;
+		result += transform(text.slice(pendingIndex, match.index));
 		result += match[0];
-		lastIndex = match.index + match[0].length;
+		pendingIndex = match.index + match[0].length;
 	}
-	result += transform(text.slice(lastIndex));
+	result += transform(text.slice(pendingIndex));
 	return result;
-}
-
-function replaceAllOutsidePlaceholders(text: string, search: string, replacement: string): string {
-	return transformOutsidePlaceholders(text, chunk => replaceAll(chunk, search, replacement));
-}
-
-function collectMatchesOutsidePlaceholders(text: string, regex: RegExp): Set<string> {
-	const matches = new Set<string>();
-	transformOutsidePlaceholders(text, chunk => {
-		regex.lastIndex = 0;
-		for (;;) {
-			const match = regex.exec(chunk);
-			if (match === null) break;
-			if (match[0].length === 0) {
-				regex.lastIndex++;
-				continue;
-			}
-			matches.add(match[0]);
-		}
-		return chunk;
-	});
-	return matches;
 }
 
 /** Deep-walk an object, transforming all string values. */
