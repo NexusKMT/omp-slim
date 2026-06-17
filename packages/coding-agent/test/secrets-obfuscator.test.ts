@@ -318,6 +318,24 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(after.deobfuscate(persisted)).toBe("api_key=abcXYZ");
 	});
 
+	it("does not canonicalize literal placeholder aliases inside regex matches", () => {
+		const sharedKey = "F".repeat(43);
+		const plain = new SecretObfuscator([{ type: "plain", content: "legacy-secret" }], sharedKey);
+		expect(plain.deobfuscate("#XRRS#")).toBe("legacy-secret");
+
+		const obfuscator = new SecretObfuscator(
+			[
+				{ type: "plain", content: "legacy-secret" },
+				{ type: "regex", content: "api_key=\\S+", friendlyName: "api-key" },
+			],
+			sharedKey,
+		);
+
+		const obfuscated = obfuscator.obfuscate("api_key=#XRRS#");
+		expect(obfuscated).toMatch(/^#APIKEY_[A-Z0-9]+(?::[ULCM])?#$/);
+		expect(obfuscator.deobfuscate(obfuscated)).toBe("api_key=#XRRS#");
+	});
+
 	it("ignores replace-mode regex matches that overlap known placeholders", () => {
 		const obfuscator = new SecretObfuscator([
 			{ type: "plain", content: "secret" },
