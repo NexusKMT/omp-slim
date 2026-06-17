@@ -274,7 +274,7 @@ export class SecretObfuscator {
 		// 3. Process regex entries — discover new matches
 		for (const entry of this.#regexEntries) {
 			entry.regex.lastIndex = 0;
-			const matches = this.#collectRegexMatches(result, entry.regex);
+			const matches = this.#collectRegexMatches(result, entry.regex, entry.mode);
 
 			for (const match of matches) {
 				if (entry.mode === "replace") {
@@ -456,7 +456,11 @@ export class SecretObfuscator {
 		return ranges;
 	}
 
-	#collectRegexMatches(text: string, regex: RegExp): Array<{ start: number; end: number; value: string }> {
+	#collectRegexMatches(
+		text: string,
+		regex: RegExp,
+		mode: "obfuscate" | "replace",
+	): Array<{ start: number; end: number; value: string }> {
 		const knownPlaceholderRanges = this.#knownPlaceholderRanges(text);
 		const scanText = maskKnownPlaceholders(text, placeholder => this.#isKnownPlaceholder(placeholder));
 		regex.lastIndex = 0;
@@ -470,6 +474,10 @@ export class SecretObfuscator {
 			}
 			const start = match.index;
 			const end = match.index + match[0].length;
+			const overlapsPlaceholder = knownPlaceholderRanges.some(range => start < range.end && end > range.start);
+			if (mode === "replace" && overlapsPlaceholder) {
+				continue;
+			}
 			if (knownPlaceholderRanges.some(range => start >= range.start && end <= range.end)) {
 				continue;
 			}
