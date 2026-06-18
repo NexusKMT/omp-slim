@@ -6,6 +6,10 @@
 
 - Added `friendlyName` support for hidden secrets so model-visible placeholders can carry sanitized semantic labels, content-derived hashes, and case hints while preserving exact deobfuscation ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
 
+### Fixed
+
+- Fixed compiled `omp` binaries failing on startup with `Cannot find package 'mupdf'` after the in-house document converter moved PDF parsing onto the CLI startup import graph.
+
 ## [16.0.8] - 2026-06-18
 
 ### Changed

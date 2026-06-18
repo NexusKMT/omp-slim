@@ -61,8 +61,6 @@ async function main(): Promise<void> {
 					"--define",
 					`process.env.PI_TINY_TRANSFORMERS_VERSION=${JSON.stringify(transformersVersion)}`,
 					"--external",
-					"mupdf",
-					"--external",
 					"fastembed",
 					"--external",
 					"onnxruntime-node",
