@@ -15,8 +15,8 @@ const cachedPlaceholderKeys = new Map<string, string>();
  * reversed by dictionary-hashing candidate secrets. Stable across sessions so
  * persisted transcripts deobfuscate consistently.
  */
-export async function getSecretPlaceholderKey(): Promise<string> {
-	const keyPath = path.join(getConfigRootDir(), "secret-placeholder.key");
+export async function getSecretPlaceholderKey(keyDir: string = getConfigRootDir()): Promise<string> {
+	const keyPath = path.join(keyDir, "secret-placeholder.key");
 	const cached = cachedPlaceholderKeys.get(keyPath);
 	if (cached !== undefined) return cached;
 
@@ -27,7 +27,7 @@ export async function getSecretPlaceholderKey(): Promise<string> {
 	}
 
 	const generated = crypto.randomBytes(32).toString("base64url");
-	await fs.mkdir(getConfigRootDir(), { recursive: true });
+	await fs.mkdir(keyDir, { recursive: true });
 	try {
 		await fs.writeFile(keyPath, generated, { flag: "wx", mode: 0o600 });
 		cachedPlaceholderKeys.set(keyPath, generated);
@@ -48,8 +48,10 @@ export async function getSecretPlaceholderKey(): Promise<string> {
 }
 
 /** Return an existing placeholder key for redaction without creating a new key file. */
-export async function getExistingSecretPlaceholderKey(): Promise<string | undefined> {
-	const keyPath = path.join(getConfigRootDir(), "secret-placeholder.key");
+export async function getExistingSecretPlaceholderKey(
+	keyDir: string = getConfigRootDir(),
+): Promise<string | undefined> {
+	const keyPath = path.join(keyDir, "secret-placeholder.key");
 	const cached = cachedPlaceholderKeys.get(keyPath);
 	if (cached !== undefined) return cached;
 	const existing = await readPlaceholderKeyFile(keyPath, true);

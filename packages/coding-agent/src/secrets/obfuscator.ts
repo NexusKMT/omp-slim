@@ -714,15 +714,6 @@ function findScanSegment(segments: ReadonlyArray<RegexScanSegment>, scanIndex: n
 	throw new Error("regex match did not map to source text");
 }
 
-function maskKnownPlaceholders(text: string, shouldMaskPlaceholder: (placeholder: string) => boolean): string {
-	return transformOutsidePlaceholders(
-		text,
-		shouldMaskPlaceholder,
-		chunk => chunk,
-		placeholder => "P".repeat(placeholder.length),
-	);
-}
-
 function redactOutsideGeneratedPlaceholders(
 	text: string,
 	replacementForChunk: (chunk: string) => string,

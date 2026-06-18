@@ -12,7 +12,7 @@ import * as secrets from "@oh-my-pi/pi-coding-agent/secrets";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { getSessionsDir, Snowflake } from "@oh-my-pi/pi-utils";
-import { getActiveProfile, setProfile } from "@oh-my-pi/pi-utils/dirs";
+import { getActiveProfile, getConfigRootDir, setProfile } from "@oh-my-pi/pi-utils/dirs";
 
 function createTtsrRule(name: string): Rule {
 	return {
@@ -242,7 +242,7 @@ describe("createAgentSession session storage isolation", () => {
 
 				const obfuscator = new secrets.SecretObfuscator(
 					[{ type: "plain", content: "sdk-secret-token-123456" }],
-					await secrets.getSecretPlaceholderKey(),
+					await secrets.getSecretPlaceholderKey(agentDir),
 				);
 				const initialManager = SessionManager.create(cwd, path.join(agentDir, "sessions"));
 				initialManager.appendMessage({
@@ -375,6 +375,42 @@ describe("createAgentSession session storage isolation", () => {
 				keySpy.mockRestore();
 				existingKeySpy.mockRestore();
 			}
+		});
+	});
+
+	it("stores placeholder keys under the configured agentDir", async () => {
+		await withClearedSecretEnv(async () => {
+			await withTempConfigRoot(async () => {
+				const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-sdk-secrets-agent-key-${Snowflake.next()}-`));
+				tempDirs.push(tempDir);
+				const cwd = path.join(tempDir, "project");
+				const agentDir = path.join(tempDir, "agent");
+				fs.mkdirSync(path.join(cwd, ".omp"), { recursive: true });
+				fs.writeFileSync(
+					path.join(cwd, ".omp", "secrets.yml"),
+					"- type: plain\n  content: agent-dir-secret-123456\n",
+				);
+
+				const { session } = await createAgentSession({
+					cwd,
+					agentDir,
+					modelRegistry: sharedModelRegistry,
+					settings: Settings.isolated({ "secrets.enabled": true }),
+					disableExtensionDiscovery: true,
+					skills: [],
+					contextFiles: [],
+					promptTemplates: [],
+					slashCommands: [],
+					enableMCP: false,
+					enableLsp: false,
+				});
+				try {
+					expect(fs.existsSync(path.join(agentDir, "secret-placeholder.key"))).toBe(true);
+					expect(fs.existsSync(path.join(getConfigRootDir(), "secret-placeholder.key"))).toBe(false);
+				} finally {
+					await session.dispose();
+				}
+			});
 		});
 	});
 });
