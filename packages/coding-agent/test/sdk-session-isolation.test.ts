@@ -12,6 +12,7 @@ import * as secrets from "@oh-my-pi/pi-coding-agent/secrets";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { getSessionsDir, Snowflake } from "@oh-my-pi/pi-utils";
+import { getActiveProfile, setProfile } from "@oh-my-pi/pi-utils/dirs";
 
 function createTtsrRule(name: string): Rule {
 	return {
@@ -45,6 +46,33 @@ async function withClearedSecretEnv<T>(run: () => Promise<T>): Promise<T> {
 		for (const [name, value] of removed) {
 			process.env[name] = value;
 		}
+	}
+}
+
+async function withTempConfigRoot<T>(run: () => Promise<T>): Promise<T> {
+	const originalProfile = getActiveProfile();
+	const originalConfigDir = process.env.PI_CONFIG_DIR;
+	const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const configDirName = `.omp-sdk-session-${Snowflake.next()}`;
+	const configRoot = path.join(os.homedir(), configDirName);
+	try {
+		process.env.PI_CONFIG_DIR = configDirName;
+		setProfile(undefined);
+		return await run();
+	} finally {
+		setProfile(undefined);
+		if (originalConfigDir === undefined) {
+			delete process.env.PI_CONFIG_DIR;
+		} else {
+			process.env.PI_CONFIG_DIR = originalConfigDir;
+		}
+		if (originalAgentDir === undefined) {
+			delete process.env.PI_CODING_AGENT_DIR;
+		} else {
+			process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+		}
+		setProfile(originalProfile);
+		fs.rmSync(configRoot, { recursive: true, force: true });
 	}
 }
 
@@ -198,70 +226,75 @@ describe("createAgentSession session storage isolation", () => {
 
 	it("keeps restored assistant messages deobfuscated across reloads", async () => {
 		await withClearedSecretEnv(async () => {
-			const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-sdk-session-secrets-${Snowflake.next()}-`));
-			tempDirs.push(tempDir);
-			const cwd = path.join(tempDir, "project");
-			const agentDir = path.join(tempDir, "agent");
-			fs.mkdirSync(path.join(cwd, ".omp"), { recursive: true });
-			fs.writeFileSync(path.join(cwd, ".omp", "secrets.yml"), "- type: plain\n  content: sdk-secret-token-123456\n");
-
-			const model = getBundledModel("anthropic", "claude-sonnet-4-5");
-			if (!model) throw new Error("Expected anthropic model");
-
-			const obfuscator = new secrets.SecretObfuscator(
-				[{ type: "plain", content: "sdk-secret-token-123456" }],
-				await secrets.getSecretPlaceholderKey(),
-			);
-			const initialManager = SessionManager.create(cwd, path.join(agentDir, "sessions"));
-			initialManager.appendMessage({
-				role: "assistant",
-				content: [{ type: "text", text: obfuscator.obfuscate("token sdk-secret-token-123456") }],
-				api: model.api,
-				provider: model.provider,
-				model: model.id,
-				usage: {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					totalTokens: 0,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-				},
-				stopReason: "stop",
-				timestamp: Date.now(),
-			});
-			await initialManager.flush();
-			const sessionFile = initialManager.getSessionFile();
-			if (!sessionFile) throw new Error("Expected persisted session file");
-			await initialManager.close();
-
-			const resumedManager = await SessionManager.open(sessionFile, path.dirname(sessionFile));
-			const { session } = await createAgentSession({
-				cwd,
-				agentDir,
-				modelRegistry: sharedModelRegistry,
-				sessionManager: resumedManager,
-				model,
-				settings: Settings.isolated({ "secrets.enabled": true }),
-				disableExtensionDiscovery: true,
-				skills: [],
-				contextFiles: [],
-				promptTemplates: [],
-				slashCommands: [],
-				enableMCP: false,
-				enableLsp: false,
-			});
-			try {
-				expect(getAssistantText(session.messages.at(-1) as AssistantMessage | undefined)).toContain(
-					"sdk-secret-token-123456",
+			await withTempConfigRoot(async () => {
+				const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-sdk-session-secrets-${Snowflake.next()}-`));
+				tempDirs.push(tempDir);
+				const cwd = path.join(tempDir, "project");
+				const agentDir = path.join(tempDir, "agent");
+				fs.mkdirSync(path.join(cwd, ".omp"), { recursive: true });
+				fs.writeFileSync(
+					path.join(cwd, ".omp", "secrets.yml"),
+					"- type: plain\n  content: sdk-secret-token-123456\n",
 				);
-				await session.reload();
-				expect(getAssistantText(session.messages.at(-1) as AssistantMessage | undefined)).toContain(
-					"sdk-secret-token-123456",
+
+				const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+				if (!model) throw new Error("Expected anthropic model");
+
+				const obfuscator = new secrets.SecretObfuscator(
+					[{ type: "plain", content: "sdk-secret-token-123456" }],
+					await secrets.getSecretPlaceholderKey(),
 				);
-			} finally {
-				await session.dispose();
-			}
+				const initialManager = SessionManager.create(cwd, path.join(agentDir, "sessions"));
+				initialManager.appendMessage({
+					role: "assistant",
+					content: [{ type: "text", text: obfuscator.obfuscate("token sdk-secret-token-123456") }],
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					usage: {
+						input: 0,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 0,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+					stopReason: "stop",
+					timestamp: Date.now(),
+				});
+				await initialManager.flush();
+				const sessionFile = initialManager.getSessionFile();
+				if (!sessionFile) throw new Error("Expected persisted session file");
+				await initialManager.close();
+
+				const resumedManager = await SessionManager.open(sessionFile, path.dirname(sessionFile));
+				const { session } = await createAgentSession({
+					cwd,
+					agentDir,
+					modelRegistry: sharedModelRegistry,
+					sessionManager: resumedManager,
+					model,
+					settings: Settings.isolated({ "secrets.enabled": true }),
+					disableExtensionDiscovery: true,
+					skills: [],
+					contextFiles: [],
+					promptTemplates: [],
+					slashCommands: [],
+					enableMCP: false,
+					enableLsp: false,
+				});
+				try {
+					expect(getAssistantText(session.messages.at(-1) as AssistantMessage | undefined)).toContain(
+						"sdk-secret-token-123456",
+					);
+					await session.reload();
+					expect(getAssistantText(session.messages.at(-1) as AssistantMessage | undefined)).toContain(
+						"sdk-secret-token-123456",
+					);
+				} finally {
+					await session.dispose();
+				}
+			});
 		});
 	});
 

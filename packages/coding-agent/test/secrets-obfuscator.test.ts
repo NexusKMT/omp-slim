@@ -342,11 +342,24 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 			{ type: "regex", mode: "replace", content: "[A-Z0-9]{8,}", replacement: "REDACTED" },
 		]);
 
-		const obfuscated = obfuscator.obfuscate("secretX");
+		const obfuscated = obfuscator.obfuscate("secretX1");
 
 		expect(obfuscated).toMatch(/^#[A-Z0-9]+:L#REDACTED$/);
-		expect(obfuscated).not.toContain("secretX");
+		expect(obfuscated).not.toContain("secretX1");
 		expect(obfuscator.deobfuscate(obfuscated)).toBe("secretREDACTED");
+	});
+
+	it("redacts bounded replace-mode regex suffixes after generated placeholders", () => {
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "SECRET" },
+			{ type: "regex", mode: "replace", content: "[A-Z0-9]{8}", replacement: "REDACTED" },
+		]);
+
+		const obfuscated = obfuscator.obfuscate("SECRETX1");
+
+		expect(obfuscated).toMatch(/^#[A-Z0-9]+:U#REDACTED$/);
+		expect(obfuscated).not.toContain("X1");
+		expect(obfuscator.deobfuscate(obfuscated)).toBe("SECRETREDACTED");
 	});
 
 	it("redacts replace-mode regex prefixes and suffixes around generated placeholders", () => {

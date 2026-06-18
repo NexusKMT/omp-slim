@@ -171,6 +171,20 @@ export function stripPendingSecretPlaceholderSuffix(text: string): string {
 	return text.slice(0, pendingPlaceholderStart.index);
 }
 
+interface RegexScanSegment {
+	scanStart: number;
+	scanEnd: number;
+	textStart: number;
+	textEnd: number;
+	generatedPlaceholder: boolean;
+	recursive: boolean;
+}
+
+interface ReplaceRegexScan {
+	text: string;
+	segments: RegexScanSegment[];
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SecretObfuscator
 // ═══════════════════════════════════════════════════════════════════════════
@@ -489,7 +503,10 @@ export class SecretObfuscator {
 		preserveGeneratedPlaceholders: boolean;
 	}> {
 		const knownPlaceholderRanges = this.#knownPlaceholderRanges(text);
-		const scanText = maskKnownPlaceholders(text, placeholder => this.#isGeneratedPlaceholder(placeholder));
+		const replaceScan =
+			mode === "replace" ? buildReplaceRegexScan(text, knownPlaceholderRanges, this.#deobfuscateMap) : undefined;
+		const scanText =
+			replaceScan?.text ?? maskKnownPlaceholders(text, placeholder => this.#isGeneratedPlaceholder(placeholder));
 		regex.lastIndex = 0;
 		const matches: Array<{
 			start: number;
@@ -506,31 +523,46 @@ export class SecretObfuscator {
 				regex.lastIndex++;
 				continue;
 			}
-			const start = match.index;
-			const end = match.index + match[0].length;
-			const overlappingRanges = knownPlaceholderRanges.filter(range => start < range.end && end > range.start);
-			const containedByPlaceholder = overlappingRanges.some(range => start >= range.start && end <= range.end);
-			const cutsPlaceholderBoundary = overlappingRanges.some(
-				range => (start > range.start && start < range.end) || (end > range.start && end < range.end),
-			);
-			if (containedByPlaceholder || cutsPlaceholderBoundary) {
-				continue;
+			let start = match.index;
+			let end = match.index + match[0].length;
+			let canonicalValue = "";
+			let recursive = false;
+			let preserveGeneratedPlaceholders = false;
+
+			if (replaceScan) {
+				const mapped = mapReplaceRegexMatch(replaceScan.segments, start, end);
+				start = mapped.start;
+				end = mapped.end;
+				canonicalValue = match[0];
+				recursive = mapped.recursive;
+				preserveGeneratedPlaceholders = mapped.preserveGeneratedPlaceholders;
+			} else {
+				const overlappingRanges = knownPlaceholderRanges.filter(range => start < range.end && end > range.start);
+				const containedByPlaceholder = overlappingRanges.some(range => start >= range.start && end <= range.end);
+				const cutsPlaceholderBoundary = overlappingRanges.some(
+					range => (start > range.start && start < range.end) || (end > range.start && end < range.end),
+				);
+				if (containedByPlaceholder || cutsPlaceholderBoundary) {
+					continue;
+				}
+				const canonical = deobfuscateGeneratedPlaceholderRanges(
+					text,
+					start,
+					end,
+					knownPlaceholderRanges,
+					this.#deobfuscateMap,
+				);
+				canonicalValue = canonical.text;
+				recursive = canonical.recursive;
 			}
-			const value = text.slice(start, end);
-			const canonical = deobfuscateGeneratedPlaceholderRanges(
-				text,
-				start,
-				end,
-				knownPlaceholderRanges,
-				this.#deobfuscateMap,
-			);
+
 			matches.push({
 				start,
 				end,
-				value,
-				canonicalValue: canonical.text,
-				recursive: canonical.recursive,
-				preserveGeneratedPlaceholders: mode === "replace" && overlappingRanges.length > 0,
+				value: text.slice(start, end),
+				canonicalValue,
+				recursive,
+				preserveGeneratedPlaceholders,
 			});
 		}
 		return matches.reverse();
@@ -615,6 +647,82 @@ function transformOutsidePlaceholders(
 	}
 	result += transform(text.slice(pendingIndex));
 	return result;
+}
+
+function buildReplaceRegexScan(
+	text: string,
+	ranges: ReadonlyArray<{ start: number; end: number }>,
+	deobfuscateMap: ReadonlyMap<string, { secret: string; recursive: boolean }>,
+): ReplaceRegexScan {
+	let scanText = "";
+	let cursor = 0;
+	const segments: RegexScanSegment[] = [];
+	const appendSegment = (
+		value: string,
+		textStart: number,
+		textEnd: number,
+		generatedPlaceholder: boolean,
+		recursive: boolean,
+	) => {
+		if (value.length === 0) return;
+		const scanStart = scanText.length;
+		scanText += value;
+		segments.push({
+			scanStart,
+			scanEnd: scanStart + value.length,
+			textStart,
+			textEnd,
+			generatedPlaceholder,
+			recursive,
+		});
+	};
+
+	for (const range of ranges) {
+		appendSegment(text.slice(cursor, range.start), cursor, range.start, false, false);
+		const placeholder = text.slice(range.start, range.end);
+		const mapping = deobfuscateMap.get(placeholder);
+		appendSegment(
+			mapping ? "P".repeat(mapping.secret.length) : placeholder,
+			range.start,
+			range.end,
+			true,
+			mapping?.recursive ?? false,
+		);
+		cursor = range.end;
+	}
+	appendSegment(text.slice(cursor), cursor, text.length, false, false);
+
+	return { text: scanText, segments };
+}
+
+function mapReplaceRegexMatch(
+	segments: ReadonlyArray<RegexScanSegment>,
+	scanStart: number,
+	scanEnd: number,
+): { start: number; end: number; recursive: boolean; preserveGeneratedPlaceholders: boolean } {
+	const startSegment = findScanSegment(segments, scanStart);
+	const endSegment = findScanSegment(segments, scanEnd - 1);
+	const start = startSegment.generatedPlaceholder
+		? startSegment.textStart
+		: startSegment.textStart + (scanStart - startSegment.scanStart);
+	const end = endSegment.generatedPlaceholder
+		? endSegment.textEnd
+		: endSegment.textStart + (scanEnd - endSegment.scanStart);
+	let recursive = false;
+	let preserveGeneratedPlaceholders = false;
+	for (const segment of segments) {
+		if (segment.scanStart >= scanEnd || segment.scanEnd <= scanStart) continue;
+		recursive ||= segment.recursive;
+		preserveGeneratedPlaceholders ||= segment.generatedPlaceholder;
+	}
+	return { start, end, recursive, preserveGeneratedPlaceholders };
+}
+
+function findScanSegment(segments: ReadonlyArray<RegexScanSegment>, scanIndex: number): RegexScanSegment {
+	for (const segment of segments) {
+		if (scanIndex >= segment.scanStart && scanIndex < segment.scanEnd) return segment;
+	}
+	throw new Error("regex match did not map to source text");
 }
 
 function maskKnownPlaceholders(text: string, shouldMaskPlaceholder: (placeholder: string) => boolean): string {
