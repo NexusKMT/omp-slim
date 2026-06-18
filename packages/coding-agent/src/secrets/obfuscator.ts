@@ -509,7 +509,7 @@ export class SecretObfuscator {
 			const start = match.index;
 			const end = match.index + match[0].length;
 			const overlappingRanges = knownPlaceholderRanges.filter(range => start < range.end && end > range.start);
-			if (mode === "replace" && overlappingRanges.some(range => start >= range.start && end <= range.end)) {
+			if (overlappingRanges.some(range => start >= range.start && end <= range.end)) {
 				continue;
 			}
 			const value = text.slice(start, end);

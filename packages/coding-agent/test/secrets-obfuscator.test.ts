@@ -377,6 +377,19 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obfuscator.deobfuscate(obfuscated)).toBe("abc");
 	});
 
+	it("ignores obfuscate regex matches that fall entirely inside known placeholders", () => {
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "abc" },
+			{ type: "regex", content: "P{8}", friendlyName: "inner" },
+		]);
+
+		const obfuscated = obfuscator.obfuscate("abc");
+
+		expect(obfuscated).toMatch(/^#[A-Z0-9]+:L#$/);
+		expect(obfuscated).not.toMatch(/^#INNER_/);
+		expect(obfuscator.deobfuscate(obfuscated)).toBe("abc");
+	});
+
 	it("does not recursively rewrite plain secrets that look like placeholders", () => {
 		const sharedKey = "D".repeat(43);
 		const firstOnly = new SecretObfuscator(
