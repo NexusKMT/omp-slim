@@ -32,11 +32,11 @@ import {
 	AppendOnlyContextManager,
 	type AsideMessage,
 	type CompactionSummaryMessage,
+	countTokens,
 	resolveTelemetry,
 	STREAM_INTERRUPTED_AFTER_CONTENT_STOP_DETAIL,
 	ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
-
 import {
 	AGGRESSIVE_SHAKE_CONFIG,
 	AUTO_HANDOFF_THRESHOLD_FOCUS,
@@ -104,7 +104,7 @@ import {
 } from "@oh-my-pi/pi-ai";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { countTokens, MacOSPowerAssertion } from "@oh-my-pi/pi-natives";
+import { MacOSPowerAssertion } from "@oh-my-pi/pi-natives";
 import {
 	extractRetryHint,
 	formatDuration,
@@ -150,7 +150,7 @@ import {
 	resolveModelRoleValue,
 	resolveRoleSelection,
 } from "../config/model-resolver";
-import { MODEL_ROLE_IDS } from "../config/model-roles";
+import { MODEL_ROLE_IDS, MODEL_ROLES } from "../config/model-roles";
 import { expandPromptTemplate, type PromptTemplate } from "../config/prompt-templates";
 import type { Settings, SkillsSettings } from "../config/settings";
 import { onAppendOnlyModeChanged } from "../config/settings";
@@ -1756,6 +1756,24 @@ export class AgentSession {
 			systemPrompt.push(this.#advisorWatchdogPrompt);
 		}
 		const advisorSessionId = this.sessionId ? `${this.sessionId}-advisor` : undefined;
+
+		// Thread the primary's telemetry into the advisor loop so the advisor
+		// model's GenAI spans + usage/cost hooks fire like every other model call,
+		// stamped with the advisor's own identity. `conversationId` is cleared so
+		// the advisor loop falls back to its own `-advisor` session id for
+		// `gen_ai.conversation.id` instead of inheriting the primary's
+		// conversation; undefined telemetry stays undefined (zero-overhead no-op).
+		const advisorTelemetry = this.agent.telemetry
+			? {
+					...this.agent.telemetry,
+					agent: {
+						id: advisorSessionId,
+						name: MODEL_ROLES.advisor.name,
+						description: formatModelString(advisorSel.model),
+					},
+					conversationId: undefined,
+				}
+			: undefined;
 		const advisorAgent = new Agent({
 			initialState: {
 				systemPrompt,
@@ -1767,6 +1785,7 @@ export class AgentSession {
 			sessionId: advisorSessionId,
 			getApiKey: requestModel => this.#modelRegistry.resolver(requestModel, advisorSessionId),
 			intentTracing: false,
+			telemetry: advisorTelemetry,
 		});
 		advisorAgent.setDisableReasoning(shouldDisableReasoning(advisorThinkingLevel));
 
@@ -1942,24 +1961,26 @@ export class AgentSession {
 
 		let compactResult: CompactionResult | undefined;
 		let lastError: unknown;
+		const advisorSessionId = this.sessionId ? `${this.sessionId}-advisor` : undefined;
+		// Instrument the advisor's overflow-compaction one-shot like the primary
+		// compaction path so the advisor model's maintenance call also emits spans.
+		const telemetry = resolveTelemetry(advisor.telemetry, advisorSessionId);
 
 		for (const candidate of candidates) {
-			const apiKey = await this.#modelRegistry.getApiKey(
-				candidate,
-				this.sessionId ? `${this.sessionId}-advisor` : undefined,
-			);
+			const apiKey = await this.#modelRegistry.getApiKey(candidate, advisorSessionId);
 			if (!apiKey) continue;
 
 			try {
 				compactResult = await compact(
 					preparation,
 					candidate,
-					this.#modelRegistry.resolver(candidate, this.sessionId ? `${this.sessionId}-advisor` : undefined),
+					this.#modelRegistry.resolver(candidate, advisorSessionId),
 					undefined,
 					undefined,
 					{
 						thinkingLevel: advisorCompactionThinkingLevel,
 						convertToLlm: messages => this.#convertToLlmForSideRequest(messages),
+						telemetry,
 					},
 				);
 				break;
@@ -4423,7 +4444,7 @@ export class AgentSession {
 		}
 		return new Proxy(tool, {
 			get: (target, prop) => {
-				if (prop !== "execute") return Reflect.get(target, prop, target);
+				if (prop !== "execute") return target[prop as keyof T];
 				return async (
 					toolCallId: string,
 					args: unknown,
@@ -9224,7 +9245,9 @@ export class AgentSession {
 				let compactResult: CompactionResult | undefined;
 				let lastError: unknown;
 
-				for (const candidate of candidates) {
+				for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
+					const candidate = candidates[candidateIndex];
+					const hasMoreCandidates = candidateIndex < candidates.length - 1;
 					const apiKey = await this.#modelRegistry.getApiKey(candidate, this.sessionId);
 					if (!apiKey) continue;
 
@@ -9263,6 +9286,20 @@ export class AgentSession {
 								lastError = this.#buildCompactionAuthError();
 								break;
 							}
+							if (this.#isCompactionSummarizationTimeoutMessage(message)) {
+								logger.warn(
+									hasMoreCandidates
+										? "Auto-compaction summarization timed out, trying next model"
+										: "Auto-compaction summarization timed out, not retrying same model",
+									{
+										error: message,
+										model: `${candidate.provider}/${candidate.id}`,
+									},
+								);
+								lastError = error;
+								break;
+							}
+
 							const retryAfterMs = this.#parseRetryAfterMsFromError(message);
 							const shouldRetry =
 								retrySettings.enabled &&
@@ -9280,19 +9317,15 @@ export class AgentSession {
 
 							// If retry delay is too long (>30s), try next candidate instead of waiting
 							const maxAcceptableDelayMs = 30_000;
-							if (delayMs > maxAcceptableDelayMs) {
-								const hasMoreCandidates = candidates.indexOf(candidate) < candidates.length - 1;
-								if (hasMoreCandidates) {
-									logger.warn("Auto-compaction retry delay too long, trying next model", {
-										delayMs,
-										retryAfterMs,
-										error: message,
-										model: `${candidate.provider}/${candidate.id}`,
-									});
-									lastError = error;
-									break; // Exit retry loop, continue to next candidate
-								}
-								// No more candidates - we have to wait
+							if (delayMs > maxAcceptableDelayMs && hasMoreCandidates) {
+								logger.warn("Auto-compaction retry delay too long, trying next model", {
+									delayMs,
+									retryAfterMs,
+									error: message,
+									model: `${candidate.provider}/${candidate.id}`,
+								});
+								lastError = error;
+								break; // Exit retry loop, continue to next candidate
 							}
 
 							attempt++;
@@ -9653,6 +9686,7 @@ export class AgentSession {
 		if (isContextOverflow(message, contextWindow)) return false;
 
 		if (this.#isClassifierRefusal(message)) return true;
+		if (this.#isProviderErrorFinishReasonBeforeToolUse(message)) return true;
 		if (this.#streamInterruptedAfterObservableOutput(message)) return false;
 		if (this.#isStaleOpenAIResponsesReplayError(message)) return true;
 
@@ -9697,6 +9731,12 @@ export class AgentSession {
 		return stopType === "refusal" || stopType === "sensitive";
 	}
 
+	#isProviderErrorFinishReasonBeforeToolUse(message: AssistantMessage): boolean {
+		if (!message.errorMessage) return false;
+		if (message.content.some(block => block.type === "toolCall")) return false;
+		return /\bProvider (?:returned error finish_reason|finish_reason:\s*error)\b/i.test(message.errorMessage);
+	}
+
 	#isTransientErrorMessage(errorMessage: string): boolean {
 		return (
 			this.#isTransientEnvelopeErrorMessage(errorMessage) || this.#isTransientTransportErrorMessage(errorMessage)
@@ -9706,6 +9746,10 @@ export class AgentSession {
 	#isTransientEnvelopeErrorMessage(errorMessage: string): boolean {
 		// Match Anthropic stream-envelope failures that indicate a broken stream before any content starts.
 		return /anthropic stream envelope error:/i.test(errorMessage) && /before message_start/i.test(errorMessage);
+	}
+
+	#isCompactionSummarizationTimeoutMessage(errorMessage: string): boolean {
+		return /\b(?:operation\s+)?timed?\s*out\b|\btimeout\b|\bstream stall\b/i.test(errorMessage);
 	}
 
 	#isTransientTransportErrorMessage(errorMessage: string): boolean {

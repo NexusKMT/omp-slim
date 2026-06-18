@@ -1,6 +1,49 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added explicit ArkType schema descriptions to parameters across all agent tools to improve model tool-calling instructions and parameter guidance
+- Added support for inline evaluation macros (`@[[py.name]]` and `@[[js.name]]`) that dynamically splice values or function results from live kernel namespaces into assistant messages and tool arguments
+- Added documentation detailing inline macro syntax, argument parsing, and placement rules to the eval instruction prompts
+- Added evaluation macro syntactic parsing, evaluation, and expander integration tests (`macro-syntax`, `macro-evaluator`, and `macro-expand`)
+- Added support for OpenRouter fallback in Perplexity web search when direct Perplexity API keys fail or are unavailable
+- Added support for streaming the Perplexity Responses API (`/v1/responses`) via the `PI_PERPLEXITY_RESPONSES=1` environment variable
+- Added `omp ttsr` top-level CLI command to inspect and test Time-Traveling Stream Rules
+- Added `omp ttsr list` to enumerate all project/user-loaded TTSR rules with their conditions, scope, and source metadata
+- Added `omp ttsr test` to run snippets through the real TTSR matching pipeline with inline text, `--file <path>`, or stdin via `--file -`
+- Added `--json` output to `omp ttsr test` and `omp ttsr list` for machine-readable reporting
+- Added `--rule`, `--source`, `--tool`, `--path`, and `--verbose` options to `omp ttsr test` to control matching context and inspection details
+- Added `omp ttsr` subcommand for inspecting and testing Time-Traveling Stream Rules: `omp ttsr list` shows every TTSR-registered rule the current project/user config would load, and `omp ttsr test` feeds a snippet (inline, `--file`, or stdin) through the real TTSR matching pipeline (`TtsrManager.checkSnapshot`/`checkAstSnapshot`) and reports which rules would trigger. A positional that resolves to a file defaults to tool/edit context; `--source`, `--tool`, and `--path` override the inferred match context so glob/AST/scope-scoped rules evaluate the same way they do in a live session. `--rule` tests a single rule markdown file in isolation.
+- Added support for reading embedded PDF images via `read <pdf>:<image>.png` and listing available image members with `read <pdf>:`
+- Added a built-in `ts-no-inline-cast-access` TTSR rule that interrupts inline object-type assertions read immediately as a property (`(x as { y: T }).y`, including `?.` and bracket access), steering toward schema validation, `in`/`typeof` narrowing, or a validated named type
+
+### Changed
+
+- Enabled caching by default in the codebase search tool to improve search performance
+- Replaced internal schema validation and `@sinclair/typebox` polyfills across all agent tools and configurations from Zod to ArkType
+- Changed advisor model calls and overflow-compaction tasks to inherit and propagate primary telemetry spans, usage, and cost tracking
+- Changed PDF read output to replace `<!-- image: ... -->` placeholders with clickable `read <pdf>:<image>.png` handles, including line-range and multi-range reads
+- Changed the built-in `ts-no-any` rule to recommend a schema parse at trust boundaries and `in`-narrowing (instead of an inline `as`-cast) when reading fields off `unknown`
+
+### Fixed
+
+- Fixed edit seen-line guard mismatch assertion message formatting to report the actual state instead of generic failure notices
+- Fixed `omp ttsr scan` to discover files with gitignore-aware native globbing, skip binary/oversized files before text decoding, use a scan-specific matcher, keep default output summary-only, and avoid retaining per-file AST snapshots during scans
+- Fixed Perplexity web search to use shared OpenAI streaming transports while preserving streamed sources, citations, and related questions
+- Fixed `StatusLineComponent` fire-and-forget async callbacks (`#isDefaultBranch`, `#lookupPr`, `fs.watch`) firing `#onBranchChange` after `dispose()`, which reached the global `settings` proxy after tests called `resetSettingsForTest()` and threw "Settings not initialized" between test files; `dispose()` now sets a disposed flag, clears `#onBranchChange`, and every post-await continuation checks the flag before touching settings or the callback
+- Fixed `read <pdf>:<member>` errors for unknown PDF images to surface available extracted image names
+- Fixed puppeteer stealth scripts to use cached Reflect methods (`Reflect_get`, `Reflect_apply`) and `Reflect.apply` instead of live `Reflect`/`Function.prototype.apply` calls, preventing page tampering from leaking through proxy traps.
+- Fixed Perplexity API-key web search to use shared OpenAI streaming transports while preserving streamed sources and OpenRouter fallback.
+- Fixed subagents reporting success after a provider-error turn by preserving real run failures over earlier successful `yield` payloads, and retried bare OpenAI-compatible `finish_reason: "error"` provider failures after partial text instead of stopping immediately
+
+### Security
+
+- Secured PDF image reads by validating requested image members against the extracted member list before opening files and refusing traversal-style names
+
+### Fixed
+
+- Fixed provider setup sign-in URLs to attempt clipboard/OSC 52 copy and expose an Alt+C retry shortcut, so authentication is not blocked when TUI selection is unavailable ([#2908](https://github.com/can1357/oh-my-pi/issues/2908)).
 
 ### Added
 
@@ -46,6 +89,7 @@
 - Fixed the `tools.format` setting schema so `minimax` can be selected as an owned tool-calling dialect, and taught auto mode to route tool-less MiniMax-family models to the MiniMax owned dialect. ([#2759](https://github.com/can1357/oh-my-pi/issues/2759))
 - Fixed WSL2 TUI stutter by adding a `git.enabled` setting and skipping footer/status-line git probes when disabled or when no git-backed status segment is visible ([#2847](https://github.com/can1357/oh-my-pi/issues/2847)).
 - Fixed JSON-mode startup notices (export/resume/session-picker messages) writing to stdout before the JSON event stream; they now route to stderr so stdout remains newline-delimited JSON.
+- Fixed auto context-full maintenance to stop retrying the same summarization timeout before falling back to the next compaction model ([#2913](https://github.com/can1357/oh-my-pi/issues/2913)).
 
 ## [16.0.4] - 2026-06-17
 

@@ -5,9 +5,11 @@
 import {
 	type AssistantMessage,
 	type AssistantMessageEvent,
+	arkToWireSchema,
 	type Context,
 	EventStream,
 	isApiKeyResolver,
+	isArkSchema,
 	isZodSchema,
 	resolveApiKeyOnce,
 	seedApiKeyResolver,
@@ -565,6 +567,9 @@ export function normalizeTools(
 		if (injectIntent && intentMode !== "omit") {
 			if (isZodSchema(parameters)) {
 				const wired = zodToWireSchema(parameters);
+				parameters = injectIntentIntoSchema(wired, intentMode) as TSchema;
+			} else if (isArkSchema(parameters)) {
+				const wired = arkToWireSchema(parameters);
 				parameters = injectIntentIntoSchema(wired, intentMode) as TSchema;
 			} else {
 				parameters = injectIntentIntoSchema(parameters, intentMode) as TSchema;
@@ -1226,6 +1231,12 @@ async function streamAssistantResponse(
 							}
 						}
 						finalMessage = snapshotAssistantMessage(finalMessage);
+						// Expand inline macros (and any other registered rewrite) on the
+						// finalized message before it reaches the context, the UI, or tool
+						// dispatch — so a single mutation is the source of truth for all three.
+						if (config.transformAssistantMessage) {
+							await config.transformAssistantMessage(finalMessage, requestSignal);
+						}
 						if (addedPartial) {
 							context.messages[context.messages.length - 1] = finalMessage;
 						} else {
