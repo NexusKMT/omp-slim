@@ -503,10 +503,8 @@ export class SecretObfuscator {
 		preserveGeneratedPlaceholders: boolean;
 	}> {
 		const knownPlaceholderRanges = this.#knownPlaceholderRanges(text);
-		const replaceScan =
-			mode === "replace" ? buildReplaceRegexScan(text, knownPlaceholderRanges, this.#deobfuscateMap) : undefined;
-		const scanText =
-			replaceScan?.text ?? maskKnownPlaceholders(text, placeholder => this.#isGeneratedPlaceholder(placeholder));
+		const regexScan = buildReplaceRegexScan(text, knownPlaceholderRanges, this.#deobfuscateMap);
+		const scanText = regexScan.text;
 		regex.lastIndex = 0;
 		const matches: Array<{
 			start: number;
@@ -529,20 +527,17 @@ export class SecretObfuscator {
 			let recursive = false;
 			let preserveGeneratedPlaceholders = false;
 
-			if (replaceScan) {
-				const mapped = mapReplaceRegexMatch(replaceScan.segments, start, end);
-				start = mapped.start;
-				end = mapped.end;
+			const mapped = mapReplaceRegexMatch(regexScan.segments, start, end);
+			start = mapped.start;
+			end = mapped.end;
+			preserveGeneratedPlaceholders = mapped.preserveGeneratedPlaceholders;
+			if (mode === "replace") {
 				canonicalValue = match[0];
 				recursive = mapped.recursive;
-				preserveGeneratedPlaceholders = mapped.preserveGeneratedPlaceholders;
 			} else {
 				const overlappingRanges = knownPlaceholderRanges.filter(range => start < range.end && end > range.start);
 				const containedByPlaceholder = overlappingRanges.some(range => start >= range.start && end <= range.end);
-				const cutsPlaceholderBoundary = overlappingRanges.some(
-					range => (start > range.start && start < range.end) || (end > range.start && end < range.end),
-				);
-				if (containedByPlaceholder || cutsPlaceholderBoundary) {
+				if (containedByPlaceholder) {
 					continue;
 				}
 				const canonical = deobfuscateGeneratedPlaceholderRanges(
@@ -681,13 +676,7 @@ function buildReplaceRegexScan(
 		appendSegment(text.slice(cursor, range.start), cursor, range.start, false, false);
 		const placeholder = text.slice(range.start, range.end);
 		const mapping = deobfuscateMap.get(placeholder);
-		appendSegment(
-			mapping ? "P".repeat(mapping.secret.length) : placeholder,
-			range.start,
-			range.end,
-			true,
-			mapping?.recursive ?? false,
-		);
+		appendSegment(mapping?.secret ?? placeholder, range.start, range.end, true, mapping?.recursive ?? false);
 		cursor = range.end;
 	}
 	appendSegment(text.slice(cursor), cursor, text.length, false, false);
