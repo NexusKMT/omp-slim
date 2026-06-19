@@ -405,6 +405,49 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obfuscator.deobfuscate(obfuscated)).toBe("REDACTEDabc");
 	});
 
+	it("is idempotent when re-obfuscating already-obfuscated text", () => {
+		// The SDK obfuscates messages in both convertToLlm and transformProviderContext,
+		// and prior-turn messages re-enter every turn, so obfuscate() must be a fixed
+		// point. Re-running it on its own output must not re-redact around an existing
+		// placeholder (regression: `#…#REDACTED` -> `#…#REDACTEDDACTED`).
+		const replace = new SecretObfuscator(
+			[
+				{ type: "plain", content: "SECRET" },
+				{ type: "regex", mode: "replace", content: "[A-Z0-9]{8}", replacement: "REDACTED" },
+			],
+			"D".repeat(43),
+		);
+		const replaceOnce = replace.obfuscate("SECRETX1");
+		expect(replaceOnce).toMatch(/^#[A-Z0-9]+:U#REDACTED$/);
+		expect(replace.obfuscate(replaceOnce)).toBe(replaceOnce);
+		expect(replace.obfuscate(replace.obfuscate(replaceOnce))).toBe(replaceOnce);
+		expect(replace.deobfuscate(replaceOnce)).toBe("SECRETREDACTED");
+
+		// Custom replacement spanning a placeholder must also stay a fixed point.
+		const custom = new SecretObfuscator(
+			[
+				{ type: "plain", content: "abc" },
+				{ type: "regex", mode: "replace", content: "api_key=\\S+", replacement: "REDACTED" },
+			],
+			"E".repeat(43),
+		);
+		const customOnce = custom.obfuscate("api_key=abcXYZ");
+		expect(custom.obfuscate(customOnce)).toBe(customOnce);
+		expect(custom.deobfuscate(customOnce)).toBe("REDACTEDabc");
+
+		// Obfuscate-mode regex spanning a placeholder is a fixed point too.
+		const obf = new SecretObfuscator(
+			[
+				{ type: "plain", content: "abc" },
+				{ type: "regex", content: "api_key=[A-Za-z0-9]{6}", friendlyName: "api-key" },
+			],
+			"F".repeat(43),
+		);
+		const obfOnce = obf.obfuscate("api_key=abcXYZ");
+		expect(obf.obfuscate(obfOnce)).toBe(obfOnce);
+		expect(obf.deobfuscate(obfOnce)).toBe("api_key=abcXYZ");
+	});
+
 	it("ignores regex matches that fall entirely inside known placeholders", () => {
 		const obfuscator = new SecretObfuscator([
 			{ type: "plain", content: "abc" },
