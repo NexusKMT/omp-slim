@@ -613,26 +613,22 @@ export class SecretObfuscator {
 export function deobfuscateSessionContext(
 	sessionContext: SessionContext,
 	obfuscator: SecretObfuscator | undefined,
+	allowLegacyAliases = false,
 ): SessionContext {
 	if (!obfuscator?.hasSecrets()) return sessionContext;
-	// Assistant (provider-authored) records can carry model-synthesized legacy
-	// tokens: live deobfuscation already ignores them, but a guessed `#XRRS#`
-	// persisted in assistant output would, on replay, be restored to the raw
-	// secret here and then re-obfuscated into a usable keyed placeholder the
-	// model could weaponize in a tool argument. Restore legacy aliases only for
-	// non-assistant records (user input, tool results, app-synthesized messages)
-	// written by a pre-keyed obfuscator; assistant records get keyed-only
-	// restoration, exactly like the live paths.
-	let changed = false;
-	const messages = sessionContext.messages.map(message => {
-		const restored =
-			message.role === "assistant"
-				? obfuscator.deobfuscateObject(message)
-				: obfuscator.deobfuscateStoredObject(message);
-		if (restored !== message) changed = true;
-		return restored;
-	});
-	return changed ? { ...sessionContext, messages } : sessionContext;
+	// Legacy index-derived aliases (`#XXXX#`) are unkeyed and trivially guessable,
+	// so a prompt-injected model can plant one in ANY stored record it influences
+	// (its own assistant output, or tool results such as bash stdout). On a later
+	// resume/rebuild this would be restored to the raw secret and then re-obfuscated
+	// into a valid keyed placeholder the model can weaponize in a tool argument.
+	// Every agent-feeding path (resume, history rewrite, branch switch) therefore
+	// deobfuscates keyed placeholders ONLY, leaving any legacy token inert. Legacy
+	// aliases are restored solely for display-only transcripts that are never
+	// re-obfuscated or sent to a provider (`buildTranscriptSessionContext`).
+	const messages = allowLegacyAliases
+		? obfuscator.deobfuscateStoredObject(sessionContext.messages)
+		: obfuscator.deobfuscateObject(sessionContext.messages);
+	return messages === sessionContext.messages ? sessionContext : { ...sessionContext, messages };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

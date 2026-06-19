@@ -491,22 +491,24 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obfuscator.deobfuscateObject({ cmd: "cat #XRRS#" })).toEqual({ cmd: "cat #XRRS#" });
 	});
 
-	it("does not launder model-authored legacy aliases through session replay", () => {
-		// Reload/resume runs deobfuscateSessionContext over every saved message. A
-		// prompt-injected model can write a guessable legacy `#XRRS#` into its own
-		// assistant output: it is ignored live, but persisted verbatim. If replay
-		// restored it to the raw secret, the next provider request would re-obfuscate
-		// it into a usable keyed placeholder the model could echo in a tool argument
-		// to exfiltrate the secret. Assistant (provider-authored) records therefore
-		// get keyed-only restoration; trusted records (user input, tool results) still
-		// honor legacy aliases so pre-keyed sessions resume.
+	it("never restores legacy aliases on agent-feeding replay, only on display transcripts", () => {
+		// deobfuscateSessionContext has two kinds of consumers: agent-feeding paths
+		// (resume, history rewrite, branch switch) whose output is re-obfuscated and
+		// sent to the provider, and a display-only transcript (allowLegacyAliases).
+		// Legacy index-derived `#XRRS#` aliases are unkeyed and guessable, so a
+		// prompt-injected model can plant one in ANY record it influences — its own
+		// assistant output OR a tool result (bash stdout). If a feed path restored
+		// it, the next provider turn would re-obfuscate it into a usable keyed
+		// placeholder the model could weaponize in a tool argument. So feed paths
+		// restore keyed placeholders ONLY; legacy is restored solely for the
+		// never-re-sent transcript so pre-keyed sessions still render their secrets.
 		const obfuscator = new SecretObfuscator([{ type: "plain", content: "legacy-secret" }]);
 		const keyedToken = obfuscator.obfuscate("legacy-secret");
 		expect(keyedToken).not.toContain("#XRRS#");
 
 		const assistant: Message = {
 			role: "assistant",
-			content: [{ type: "text", text: `attacker wrote #XRRS# and echoed ${keyedToken}` }],
+			content: [{ type: "text", text: `attacker planted #XRRS# and echoed ${keyedToken}` }],
 			api: "anthropic-messages",
 			provider: "anthropic",
 			model: "test-model",
@@ -521,9 +523,16 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 			stopReason: "stop",
 			timestamp: 1,
 		};
-		const user: Message = { role: "user", content: "legitimate old #XRRS#", timestamp: 2 };
+		const toolResult: Message = {
+			role: "toolResult",
+			toolCallId: "call-1",
+			toolName: "bash",
+			content: [{ type: "text", text: "bash stdout #XRRS#" }],
+			isError: false,
+			timestamp: 2,
+		};
 		const ctx = {
-			messages: [assistant, user],
+			messages: [assistant, toolResult],
 			models: {},
 			injectedTtsrRules: [],
 			selectedMCPToolNames: [],
@@ -531,16 +540,24 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 			mode: "none",
 		};
 
-		const restored = deobfuscateSessionContext(ctx, obfuscator);
-		const restoredAssistant = restored.messages[0] as Extract<Message, { role: "assistant" }>;
-		const restoredUser = restored.messages[1] as Extract<Message, { role: "user" }>;
-		const assistantText = (restoredAssistant.content[0] as { text: string }).text;
+		// Agent-feeding default: the keyed token resolves, but no legacy `#XRRS#` is
+		// restored — neither in assistant output nor in tool results — so nothing can
+		// be laundered into a keyed placeholder on the next turn.
+		const fed = deobfuscateSessionContext(ctx, obfuscator);
+		const fedAssistant = (fed.messages[0] as Extract<Message, { role: "assistant" }>).content[0] as { text: string };
+		const fedTool = (fed.messages[1] as Extract<Message, { role: "toolResult" }>).content[0] as { text: string };
+		expect(fedAssistant.text).toBe("attacker planted #XRRS# and echoed legacy-secret");
+		expect(fedTool.text).toBe("bash stdout #XRRS#");
 
-		// Assistant: the keyed token resolves, but the guessable legacy alias stays
-		// literal — it is NOT laundered into the raw secret.
-		expect(assistantText).toBe("attacker wrote #XRRS# and echoed legacy-secret");
-		// Trusted user record: legacy alias still restored for old-session resume.
-		expect(restoredUser.content).toBe("legitimate old legacy-secret");
+		// Display-only transcript: legacy aliases ARE restored so a genuinely
+		// pre-keyed session renders its secrets. This output is never re-obfuscated.
+		const shown = deobfuscateSessionContext(ctx, obfuscator, true);
+		const shownAssistant = (shown.messages[0] as Extract<Message, { role: "assistant" }>).content[0] as {
+			text: string;
+		};
+		const shownTool = (shown.messages[1] as Extract<Message, { role: "toolResult" }>).content[0] as { text: string };
+		expect(shownAssistant.text).toBe("attacker planted legacy-secret and echoed legacy-secret");
+		expect(shownTool.text).toBe("bash stdout legacy-secret");
 	});
 
 	it("deobfuscates placeholders after friendlyName changes", () => {

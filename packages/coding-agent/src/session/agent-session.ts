@@ -5119,10 +5119,17 @@ export class AgentSession {
 	 * Full-history transcript for TUI display: every path entry in
 	 * chronological order with compactions rendered inline at the point they
 	 * fired (instead of replacing prior history). Display-only — NEVER feed
-	 * the result to `agent.replaceMessages` or a provider.
+	 * the result to `agent.replaceMessages` or a provider. Because it is never
+	 * re-obfuscated, it opts into legacy index-derived alias restoration so
+	 * pre-keyed sessions still render their secrets; the agent-feeding paths
+	 * (`buildDisplaySessionContext`) keep the keyed-only default.
 	 */
 	buildTranscriptSessionContext(): SessionContext {
-		return deobfuscateSessionContext(this.sessionManager.buildSessionContext({ transcript: true }), this.#obfuscator);
+		return deobfuscateSessionContext(
+			this.sessionManager.buildSessionContext({ transcript: true }),
+			this.#obfuscator,
+			true,
+		);
 	}
 
 	#obfuscateForProvider<T>(value: T): T {
