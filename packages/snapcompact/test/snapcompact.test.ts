@@ -609,6 +609,22 @@ describe("serializeConversation", () => {
 		expect(out).toBe("# Assistant ¶\nbefore\nafter");
 	});
 
+	it("drops blank text/thinking blocks instead of emitting an empty assistant heading", () => {
+		const out = snapcompact.serializeConversation(
+			[
+				createAssistantMessage([
+					{ type: "thinking", thinking: "   " },
+					{ type: "text", text: "" },
+					{ type: "toolCall", id: "c1", name: "read", arguments: { path: "a.ts" } },
+				]),
+				{ ...createToolResultMessage("body"), toolCallId: "c1" } as Message,
+			],
+			{ dimToolResults: false },
+		);
+		expect(out).toBe('# Tool call ¶\nread(path="a.ts")\n<out>\nbody\n</out>');
+		expect(out).not.toContain("# Assistant ¶");
+	});
+
 	it("wraps tool-result bodies in dim toggles by default and strips stray toggles from content", () => {
 		const out = snapcompact.serializeConversation([
 			createUserMessage(`hello ${snapcompact.DIM_ON}world`),
@@ -645,9 +661,8 @@ describe("compact", () => {
 		expect(result.firstKeptEntryId).toBe("kept-1");
 		expect(result.tokensBefore).toBe(99000);
 		// Reading instructions reflect the default (anthropic 11on16-bw) shape.
-		expect(result.summary).toContain("29 characters per row");
+		expect(result.summary).toContain("29 characters wide");
 		expect(result.summary).toContain("dim gray");
-		expect(result.summary).toContain("plain black ink");
 		expect(result.summary).toContain("snapcompact frame");
 		// File operations are upserted like every other compaction summary:
 		// one grouped <files> tree with per-file access markers.
@@ -687,7 +702,7 @@ describe("compact", () => {
 		// Conversation text outside the span stays in black bw ink (frame 1).
 		const first = decodePng(Buffer.from(archive?.frames[0].data ?? "", "base64"));
 		expect(new Set(first.pixels).has(7)).toBe(true);
-		expect(result.summary).toContain("dim gray ink");
+		expect(result.summary).toContain("archived tool output");
 	});
 
 	it("keeps frames free of dim ink when dimToolResults is false", async () => {
@@ -700,7 +715,7 @@ describe("compact", () => {
 		const archive = snapcompact.getPreservedArchive(result.preserveData);
 		const decoded = decodePng(Buffer.from(archive?.frames[0].data ?? "", "base64"));
 		expect(new Set(decoded.pixels).has(9)).toBe(false);
-		expect(result.summary).not.toContain("dim gray ink");
+		expect(result.summary).not.toContain("archived tool output");
 	});
 
 	it("keeps history past the frame budget as a text tail instead of dropping it", async () => {
