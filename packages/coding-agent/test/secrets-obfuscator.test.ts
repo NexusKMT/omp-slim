@@ -335,7 +335,7 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 	it("does not canonicalize literal placeholder aliases inside regex matches", () => {
 		const sharedKey = "F".repeat(43);
 		const plain = new SecretObfuscator([{ type: "plain", content: "legacy-secret" }], sharedKey);
-		expect(plain.deobfuscate("#XRRS#")).toBe("legacy-secret");
+		expect(plain.deobfuscateStored("#XRRS#")).toBe("legacy-secret");
 
 		const obfuscator = new SecretObfuscator(
 			[
@@ -473,11 +473,21 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(first.deobfuscate(firstToken ?? "")).toBe("alpha-secret");
 	});
 
-	it("deobfuscates legacy index-derived placeholders for plain secrets", () => {
+	it("honors legacy index-derived aliases only on the stored-replay path", () => {
 		const obfuscator = new SecretObfuscator([{ type: "plain", content: "legacy-secret" }]);
 
+		// The generated token is keyed, never the legacy index token.
 		expect(obfuscator.obfuscate("legacy-secret")).not.toBe("#XRRS#");
-		expect(obfuscator.deobfuscate("#XRRS#")).toBe("legacy-secret");
+
+		// Stored session replay/display restores pre-keyed legacy placeholders so
+		// older persisted sessions still resume correctly.
+		expect(obfuscator.deobfuscateStored("#XRRS#")).toBe("legacy-secret");
+
+		// Live provider output and tool-call arguments MUST NOT honor the legacy
+		// alias: it is unkeyed and trivially guessable, so a prompt-injected model
+		// could synthesize `#XRRS#` in a bash/read argument and exfiltrate the secret.
+		expect(obfuscator.deobfuscate("#XRRS#")).toBe("#XRRS#");
+		expect(obfuscator.deobfuscateObject({ cmd: "cat #XRRS#" })).toEqual({ cmd: "cat #XRRS#" });
 	});
 
 	it("deobfuscates placeholders after friendlyName changes", () => {
