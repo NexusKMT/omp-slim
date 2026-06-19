@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `friendlyName` support for hidden secrets so model-visible placeholders can carry sanitized semantic labels, content-derived hashes, and case hints while preserving exact deobfuscation ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
+
 ## [16.1.1] - 2026-06-19
 
 ### Changed
@@ -39,14 +43,6 @@
 - Unified TUI border corners on the rounded style: tool-result frames, overlays, code fences, debug frames, and the interactive bash box now draw rounded corners (`╭╮╰╯`) to match the editor and message cards, instead of mixing rounded boxes with sharp (`┌┐└┘`) ones. `boxRound` now carries the sharp tee/cross junction glyphs (no rounded variant exists), so dividers still honor `boxSharp.tee*`/`cross` theme overrides. Markdown tables intentionally keep the fully sharp `boxSharp` set; its corner tokens now affect tables only.
 
 ## [16.0.11] - 2026-06-19
-
-### Added
-
-- Added `friendlyName` support for hidden secrets so model-visible placeholders can carry sanitized semantic labels, content-derived hashes, and case hints while preserving exact deobfuscation ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
-
-### Fixed
-
-- Fixed compiled `omp` binaries failing on startup with `Cannot find package 'mupdf'` after the in-house document converter moved PDF parsing onto the CLI startup import graph.
 
 ### Added
 
@@ -204,7 +200,6 @@
 ### Security
 
 - Secured PDF image reads by validating requested image members against the extracted member list before opening files and refusing traversal-style names
-
 
 ## [16.0.5] - 2026-06-17
 
