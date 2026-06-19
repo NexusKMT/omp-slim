@@ -462,6 +462,27 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obf.deobfuscate(obfOnce)).toBe("api_key=abcXYZ");
 	});
 
+	it("cross-matches a fresh placeholder whose token already appears in the input", () => {
+		const obf = new SecretObfuscator(
+			[
+				{ type: "plain", content: "abc" },
+				{ type: "regex", mode: "replace", content: "api_key=\\S+", replacement: "REDACTED" },
+			],
+			"G".repeat(43),
+		);
+		const token = obf.obfuscate("abc");
+		expect(token).toMatch(/^#[A-Z0-9]+:L#$/);
+
+		// Input carries the prior token literally AND a fresh api_key=abcXYZ (raw `abc`).
+		// The fresh occurrence must still be redacted (XYZ gone) while the prior token is
+		// preserved; range-based origin tracking distinguishes the two same-token spans,
+		// where a token-value guard would skip both and leak XYZ.
+		const out = obf.obfuscate(`${token} api_key=abcXYZ`);
+		expect(out).toBe(`${token} REDACTED${token}`);
+		expect(obf.deobfuscate(out)).toBe("abc REDACTEDabc");
+		expect(obf.obfuscate(out)).toBe(out); // still a fixed point
+	});
+
 	it("ignores regex matches that fall entirely inside known placeholders", () => {
 		const obfuscator = new SecretObfuscator([
 			{ type: "plain", content: "abc" },
