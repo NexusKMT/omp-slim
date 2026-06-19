@@ -76,15 +76,6 @@ export function sanitizeSecretFriendlyName(name: string): string | undefined {
 	return sanitized.length > 0 ? sanitized : undefined;
 }
 
-function normalizePlaceholderSecret(secret: string): string {
-	// Fold ONLY ASCII A–Z casing — that is exactly what a case hint (U/L/C) can
-	// reconstruct. `String.toLowerCase()` also folds Unicode (e.g. `Ä`→`ä`), which
-	// no hint encodes, so two Unicode-case-distinct secrets that share an ASCII
-	// hint would collapse onto one base key and let a persisted placeholder
-	// deobfuscate to the wrong secret when the secret set or its order changes.
-	return secret.replace(/[A-Z]/g, ch => ch.toLowerCase());
-}
-
 // Derive the model-visible base from a KEYED digest of the secret. xxHash is
 // fast and unkeyed, so a fixed-seed content hash of a low-entropy secret could
 // be dictionaried from the transcript; HMAC-SHA256 under a private per-install
@@ -433,12 +424,15 @@ export class SecretObfuscator {
 
 	#createPlaceholder(secret: string, friendlyName?: string, recursive: boolean = false): string {
 		const hint = inferCaseHint(secret);
-		// `:M` does not encode the exact case pattern, so two distinct mixed-case
-		// values can share a case-folded base + hint. Key those on the exact value
-		// so each token stays stable per value regardless of config/env ordering.
-		// U/L/C/none reconstruct casing from the hint, so they safely share the
-		// case-folded base across casing variants.
-		const baseKey = hint === "M" ? secret : normalizePlaceholderSecret(secret);
+		// Key the base on the EXACT secret value, never a case-folded form. The
+		// case hint is only a model-visible label. If two distinct secrets that
+		// differ solely by ASCII case shared one case-folded base, a provider that
+		// saw one placeholder could swap the hint to synthesize the sibling
+		// secret's keyed token, and live deobfuscation (provider output / tool-call
+		// args) would restore a value that was never provider-visible. Exact-value
+		// keying gives every secret an independent base, so a sibling token cannot
+		// be derived without the per-install key.
+		const baseKey = secret;
 		const sanitizedFriendlyName = friendlyName ? sanitizeSecretFriendlyName(friendlyName) : undefined;
 		const preferredBase = this.#resolvePreferredPlaceholderBase(baseKey);
 		const preferredPlaceholder = buildPlaceholder(hint, preferredBase, sanitizedFriendlyName);

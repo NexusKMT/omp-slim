@@ -716,7 +716,7 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(stripPendingSecretPlaceholderSuffix("before #TOKEN ")).toBe("before #TOKEN ");
 	});
 
-	it("shares a base hash across casing variants with distinct hints", () => {
+	it("uses independent bases across casing variants with distinct hints", () => {
 		const obfuscator = new SecretObfuscator([
 			{ type: "plain", content: "secret", friendlyName: "token" },
 			{ type: "plain", content: "SECRET", friendlyName: "token" },
@@ -728,11 +728,47 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		const bases = tokens.map(token => /^#TOKEN_([A-Z0-9]+):/.exec(token)?.[1]);
 
 		expect(tokens).toHaveLength(3);
-		expect(new Set(bases).size).toBe(1);
+		// Distinct ASCII-case variants must NOT share a base: a shared case-folded
+		// base would let a provider synthesize a sibling token by swapping the hint.
+		expect(new Set(bases).size).toBe(3);
 		expect(tokens[0]?.endsWith(":L#")).toBe(true);
 		expect(tokens[1]?.endsWith(":U#")).toBe(true);
 		expect(tokens[2]?.endsWith(":C#")).toBe(true);
 		expect(obfuscator.deobfuscate(obfuscated)).toBe("secret SECRET Secret");
+	});
+
+	it("does not restore a case-variant sibling synthesized by swapping the hint", () => {
+		// P1: two obfuscate-mode secrets differing only by ASCII case. Only the
+		// lowercase one is ever provider-visible; a prompt-injected model must not
+		// recover the uppercase secret (never emitted) by taking the visible
+		// token's base and swapping the case hint in a tool-call argument.
+		const key = "case-variant-install-key-0000000000000000000";
+		const obfuscator = new SecretObfuscator(
+			[
+				{ type: "plain", content: "abc12345" },
+				{ type: "plain", content: "ABC12345" },
+			],
+			key,
+		);
+
+		// Provider sees only the lowercase placeholder.
+		const visible = obfuscator.obfuscate("abc12345");
+		expect(visible).toMatch(/^#[A-Z0-9]+:L#$/);
+		const base = /^#([A-Z0-9]+):L#$/.exec(visible)?.[1];
+		if (!base) throw new Error("expected a lowercase placeholder base");
+
+		// The uppercase secret's real token uses an independent base.
+		const upperReal = obfuscator.obfuscate("ABC12345");
+		expect(upperReal).toMatch(/^#[A-Z0-9]+:U#$/);
+		expect(upperReal).not.toBe(`#${base}:U#`);
+
+		// Live deobfuscation of the synthesized sibling token leaves it literal
+		// instead of restoring the never-provider-visible uppercase secret.
+		const synthesized = `#${base}:U#`;
+		expect(obfuscator.deobfuscate(synthesized)).toBe(synthesized);
+		expect(obfuscator.deobfuscateObject({ cmd: synthesized })).toEqual({ cmd: synthesized });
+		// The legitimate visible token still round-trips.
+		expect(obfuscator.deobfuscate(visible)).toBe("abc12345");
 	});
 
 	it("gives duplicate mixed-case variants distinct placeholders", () => {
