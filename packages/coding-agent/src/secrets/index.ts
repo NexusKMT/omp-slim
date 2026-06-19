@@ -54,7 +54,17 @@ export async function getExistingSecretPlaceholderKey(
 	const keyPath = path.join(keyDir, "secret-placeholder.key");
 	const cached = cachedPlaceholderKeys.get(keyPath);
 	if (cached !== undefined) return cached;
-	const existing = await readPlaceholderKeyFile(keyPath, true);
+	// Redaction-only: this key is loaded solely to redact an existing key file from
+	// provider-visible tool output, never to mint placeholders. A truncated/corrupt
+	// or unreadable key must NOT block startup for replace-only/no-secret sessions —
+	// an invalid key is not a usable HMAC anyway, and a tool reading the same file
+	// gets the same bytes, so there is nothing sensitive to redact.
+	let existing: string | undefined;
+	try {
+		existing = await readPlaceholderKeyFile(keyPath, true);
+	} catch {
+		return undefined;
+	}
 	if (existing !== undefined) cachedPlaceholderKeys.set(keyPath, existing);
 	return existing;
 }

@@ -233,6 +233,20 @@ describe("getSecretPlaceholderKey", () => {
 			await writer;
 		});
 	});
+
+	it("treats an invalid existing placeholder key as absent for redaction", async () => {
+		await withTempConfigRoot(async () => {
+			setProfile("invalid-existing");
+			await fs.mkdir(getConfigRootDir(), { recursive: true });
+			await fs.writeFile(path.join(getConfigRootDir(), "secret-placeholder.key"), "abc123");
+
+			// Replace-only/no-secret sessions load the key only to redact it from tool
+			// output; a corrupt key must not block startup, so the existing-key probe
+			// is best-effort. The obfuscate-mode loader still rejects an invalid key.
+			await expect(getExistingSecretPlaceholderKey()).resolves.toBeUndefined();
+			await expect(getSecretPlaceholderKey()).rejects.toThrow("secret placeholder key");
+		});
+	});
 });
 
 describe("SecretObfuscator friendlyName placeholders", () => {
