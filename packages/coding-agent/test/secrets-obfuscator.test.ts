@@ -558,6 +558,22 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obf.obfuscate(out)).toBe(out);
 	});
 
+	it("redacts trailing bytes after existing custom replacement markers", () => {
+		const obf = new SecretObfuscator(
+			[
+				{ type: "plain", content: "SECRET" },
+				{ type: "regex", mode: "replace", content: "[A-Z0-9]{15}", replacement: "REDACTED" },
+			],
+			"L".repeat(43),
+		);
+		const token = obf.obfuscate("SECRET");
+
+		const out = obf.obfuscate(`${token}REDACTEDX`);
+
+		expect(out).toBe(`${token}REDACTED`);
+		expect(obf.obfuscate(out)).toBe(out);
+	});
+
 	it("redacts default replace regex remainders around prior placeholders", () => {
 		const obf = new SecretObfuscator(
 			[
@@ -573,6 +589,20 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(out).toContain(token);
 		expect(out).not.toContain("XYZ");
 		expect(out).not.toContain("api_key=");
+		expect(obf.obfuscate(out)).toBe(out);
+	});
+
+	it("keeps default replace regex output idempotent around prior placeholders", () => {
+		const obf = new SecretObfuscator(
+			[
+				{ type: "plain", content: "SECRET" },
+				{ type: "regex", mode: "replace", content: "[A-Za-z0-9]{8}" },
+			],
+			"M".repeat(43),
+		);
+
+		const out = obf.obfuscate("SECRETX1");
+
 		expect(obf.obfuscate(out)).toBe(out);
 	});
 

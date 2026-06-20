@@ -318,6 +318,15 @@ export class SecretObfuscator {
 			for (const match of matches) {
 				if (entry.mode === "replace") {
 					if (match.preserveGeneratedPlaceholders) {
+						if (
+							match.preserveInputPlaceholders &&
+							!match.inputPlaceholderOutsideIndependentlyMatches &&
+							entry.replacement === undefined &&
+							match.inputPlaceholderOutsideChunkCount === 1 &&
+							/^[A-Za-z0-9]+$/.test(match.inputPlaceholderOutside)
+						) {
+							continue;
+						}
 						const span = result.slice(match.start, match.end);
 						// A custom replacement is a single redaction marker for the whole
 						// match, so emit it once around the preserved placeholder rather
@@ -654,6 +663,7 @@ export class SecretObfuscator {
 		inputPlaceholderOutside: string;
 		inputPlaceholderOutsideIndependentlyMatches: boolean;
 		inputPlaceholderOutsideStart: number;
+		inputPlaceholderOutsideChunkCount: number;
 	}> {
 		const knownPlaceholderRanges = this.#knownPlaceholderRanges(text);
 		const regexScan = buildReplaceRegexScan(text, knownPlaceholderRanges, this.#deobfuscateMap);
@@ -670,6 +680,7 @@ export class SecretObfuscator {
 			inputPlaceholderOutside: string;
 			inputPlaceholderOutsideIndependentlyMatches: boolean;
 			inputPlaceholderOutsideStart: number;
+			inputPlaceholderOutsideChunkCount: number;
 		}> = [];
 		for (;;) {
 			const match = regex.exec(scanText);
@@ -687,6 +698,7 @@ export class SecretObfuscator {
 			let inputPlaceholderOutside = "";
 			let inputPlaceholderOutsideIndependentlyMatches = false;
 			let inputPlaceholderOutsideStart = -1;
+			let inputPlaceholderOutsideChunkCount = 0;
 
 			const mapped = mapReplaceRegexMatch(regexScan.segments, start, end);
 			start = mapped.start;
@@ -703,22 +715,23 @@ export class SecretObfuscator {
 			);
 			preserveInputPlaceholders = overlapsInputPlaceholder;
 			if (overlapsInputPlaceholder) {
-				inputPlaceholderOutside = textOutsidePlaceholderRanges(text, start, end, knownPlaceholderRanges);
-				inputPlaceholderOutsideStart =
-					firstOutsidePlaceholderRange(start, end, knownPlaceholderRanges)?.start ?? -1;
+				const firstOutside = firstOutsidePlaceholderRange(start, end, knownPlaceholderRanges);
 				if (
 					mode === "replace" &&
 					replacement !== undefined &&
-					inputPlaceholderOutsideStart >= 0 &&
-					text.slice(inputPlaceholderOutsideStart, inputPlaceholderOutsideStart + replacement.length) ===
-						replacement
+					firstOutside !== undefined &&
+					text.slice(firstOutside.start, firstOutside.start + replacement.length) === replacement
 				) {
-					regex.lastIndex = Math.max(
-						regex.lastIndex,
-						match.index + match[0].length + replacement.length - inputPlaceholderOutside.length,
-					);
-					continue;
+					const expandedEnd = firstOutside.start + replacement.length;
+					if (expandedEnd > end) {
+						regex.lastIndex = Math.max(regex.lastIndex, match.index + match[0].length + expandedEnd - end);
+						end = expandedEnd;
+					}
 				}
+				inputPlaceholderOutside = textOutsidePlaceholderRanges(text, start, end, knownPlaceholderRanges);
+				inputPlaceholderOutsideStart =
+					firstOutsidePlaceholderRange(start, end, knownPlaceholderRanges)?.start ?? -1;
+				inputPlaceholderOutsideChunkCount = countOutsidePlaceholderRanges(start, end, knownPlaceholderRanges);
 				if (inputPlaceholderOutside.length === 0) continue;
 				const resumeIndex = regex.lastIndex;
 				regex.lastIndex = 0;
@@ -756,6 +769,7 @@ export class SecretObfuscator {
 				inputPlaceholderOutside,
 				inputPlaceholderOutsideIndependentlyMatches,
 				inputPlaceholderOutsideStart,
+				inputPlaceholderOutsideChunkCount,
 			});
 		}
 		return matches.reverse();
@@ -1012,6 +1026,24 @@ function firstOutsidePlaceholderRange(
 		cursor = overlapEnd;
 	}
 	return cursor < end ? { start: cursor, end } : undefined;
+}
+
+function countOutsidePlaceholderRanges(
+	start: number,
+	end: number,
+	ranges: ReadonlyArray<{ start: number; end: number }>,
+): number {
+	let count = 0;
+	let cursor = start;
+	for (const range of ranges) {
+		if (range.end <= start || range.start >= end) continue;
+		const overlapStart = Math.max(range.start, start);
+		const overlapEnd = Math.min(range.end, end);
+		if (cursor < overlapStart) count++;
+		cursor = overlapEnd;
+	}
+	if (cursor < end) count++;
+	return count;
 }
 
 function replaceRange(text: string, start: number, end: number, replacement: string): string {
