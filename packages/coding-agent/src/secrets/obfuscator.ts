@@ -321,7 +321,8 @@ export class SecretObfuscator {
 						if (
 							match.preserveInputPlaceholders &&
 							!match.inputPlaceholderOutsideIndependentlyMatches &&
-							(entry.replacement === undefined || entry.replacement.startsWith(match.inputPlaceholderOutside))
+							entry.replacement !== undefined &&
+							entry.replacement.startsWith(match.inputPlaceholderOutside)
 						) {
 							continue;
 						}
