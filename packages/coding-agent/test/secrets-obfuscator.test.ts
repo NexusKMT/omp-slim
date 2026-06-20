@@ -541,6 +541,23 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obf.obfuscate(out)).toBe(out);
 	});
 
+	it("redacts custom replacement prefixes that are raw regex remainders", () => {
+		const obf = new SecretObfuscator(
+			[
+				{ type: "plain", content: "SECRET" },
+				{ type: "regex", mode: "replace", content: "[A-Z0-9]{7}", replacement: "REDACTED" },
+			],
+			"K".repeat(43),
+		);
+		const token = obf.obfuscate("SECRET");
+
+		const out = obf.obfuscate(`${token}R`);
+
+		expect(out).toBe(`${token}REDACTED`);
+		expect(obf.deobfuscate(out)).toBe("SECRETREDACTED");
+		expect(obf.obfuscate(out)).toBe(out);
+	});
+
 	it("redacts default replace regex remainders around prior placeholders", () => {
 		const obf = new SecretObfuscator(
 			[

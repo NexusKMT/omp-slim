@@ -313,19 +313,11 @@ export class SecretObfuscator {
 		// 3. Process regex entries — discover new matches
 		for (const entry of this.#regexEntries) {
 			entry.regex.lastIndex = 0;
-			const matches = this.#collectRegexMatches(result, entry.regex, entry.mode, origin);
+			const matches = this.#collectRegexMatches(result, entry.regex, entry.mode, origin, entry.replacement);
 
 			for (const match of matches) {
 				if (entry.mode === "replace") {
 					if (match.preserveGeneratedPlaceholders) {
-						if (
-							match.preserveInputPlaceholders &&
-							!match.inputPlaceholderOutsideIndependentlyMatches &&
-							entry.replacement !== undefined &&
-							entry.replacement.startsWith(match.inputPlaceholderOutside)
-						) {
-							continue;
-						}
 						const span = result.slice(match.start, match.end);
 						// A custom replacement is a single redaction marker for the whole
 						// match, so emit it once around the preserved placeholder rather
@@ -650,6 +642,7 @@ export class SecretObfuscator {
 		regex: RegExp,
 		mode: "obfuscate" | "replace",
 		origin: string,
+		replacement: string | undefined,
 	): Array<{
 		start: number;
 		end: number;
@@ -660,6 +653,7 @@ export class SecretObfuscator {
 		preserveInputPlaceholders: boolean;
 		inputPlaceholderOutside: string;
 		inputPlaceholderOutsideIndependentlyMatches: boolean;
+		inputPlaceholderOutsideStart: number;
 	}> {
 		const knownPlaceholderRanges = this.#knownPlaceholderRanges(text);
 		const regexScan = buildReplaceRegexScan(text, knownPlaceholderRanges, this.#deobfuscateMap);
@@ -675,6 +669,7 @@ export class SecretObfuscator {
 			preserveInputPlaceholders: boolean;
 			inputPlaceholderOutside: string;
 			inputPlaceholderOutsideIndependentlyMatches: boolean;
+			inputPlaceholderOutsideStart: number;
 		}> = [];
 		for (;;) {
 			const match = regex.exec(scanText);
@@ -691,6 +686,7 @@ export class SecretObfuscator {
 			let preserveInputPlaceholders = false;
 			let inputPlaceholderOutside = "";
 			let inputPlaceholderOutsideIndependentlyMatches = false;
+			let inputPlaceholderOutsideStart = -1;
 
 			const mapped = mapReplaceRegexMatch(regexScan.segments, start, end);
 			start = mapped.start;
@@ -708,6 +704,21 @@ export class SecretObfuscator {
 			preserveInputPlaceholders = overlapsInputPlaceholder;
 			if (overlapsInputPlaceholder) {
 				inputPlaceholderOutside = textOutsidePlaceholderRanges(text, start, end, knownPlaceholderRanges);
+				inputPlaceholderOutsideStart =
+					firstOutsidePlaceholderRange(start, end, knownPlaceholderRanges)?.start ?? -1;
+				if (
+					mode === "replace" &&
+					replacement !== undefined &&
+					inputPlaceholderOutsideStart >= 0 &&
+					text.slice(inputPlaceholderOutsideStart, inputPlaceholderOutsideStart + replacement.length) ===
+						replacement
+				) {
+					regex.lastIndex = Math.max(
+						regex.lastIndex,
+						match.index + match[0].length + replacement.length - inputPlaceholderOutside.length,
+					);
+					continue;
+				}
 				if (inputPlaceholderOutside.length === 0) continue;
 				const resumeIndex = regex.lastIndex;
 				regex.lastIndex = 0;
@@ -744,6 +755,7 @@ export class SecretObfuscator {
 				preserveInputPlaceholders,
 				inputPlaceholderOutside,
 				inputPlaceholderOutsideIndependentlyMatches,
+				inputPlaceholderOutsideStart,
 			});
 		}
 		return matches.reverse();
@@ -984,6 +996,22 @@ function textOutsidePlaceholderRanges(
 	}
 	result += text.slice(cursor, end);
 	return result;
+}
+
+function firstOutsidePlaceholderRange(
+	start: number,
+	end: number,
+	ranges: ReadonlyArray<{ start: number; end: number }>,
+): { start: number; end: number } | undefined {
+	let cursor = start;
+	for (const range of ranges) {
+		if (range.end <= start || range.start >= end) continue;
+		const overlapStart = Math.max(range.start, start);
+		const overlapEnd = Math.min(range.end, end);
+		if (cursor < overlapStart) return { start: cursor, end: overlapStart };
+		cursor = overlapEnd;
+	}
+	return cursor < end ? { start: cursor, end } : undefined;
 }
 
 function replaceRange(text: string, start: number, end: number, replacement: string): string {
