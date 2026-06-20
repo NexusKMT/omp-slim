@@ -483,6 +483,30 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obf.obfuscate(out)).toBe(out); // still a fixed point
 	});
 
+	it("redacts new surrounding bytes around a prior-call placeholder without re-redacting markers", () => {
+		const obf = new SecretObfuscator(
+			[
+				{ type: "plain", content: "abc" },
+				{ type: "regex", mode: "replace", content: "api_key=\\S+", replacement: "REDACTED" },
+			],
+			"H".repeat(43),
+		);
+		// Simulate a session where `abc` was obfuscated in an earlier turn (the token
+		// is a prior-call/input placeholder) and the regex now re-enters text where
+		// `api_key=` + raw `XYZ` still surround that token. The prior placeholder is
+		// preserved, but the genuinely-new surrounding bytes (`api_key=`, `XYZ`) must
+		// be redacted — not dropped, which would leak `XYZ` to the provider.
+		const token = obf.obfuscate("abc");
+		const out = obf.obfuscate(`api_key=${token}XYZ`);
+		expect(out).toBe(`REDACTED${token}`);
+		expect(out).not.toContain("XYZ");
+		expect(out).not.toContain("api_key=");
+		expect(obf.deobfuscate(out)).toBe("REDACTEDabc");
+		// Re-obfuscating the redacted output is a fixed point: the marker `REDACTED`
+		// does not independently satisfy `api_key=\S+`, so nothing grows.
+		expect(obf.obfuscate(out)).toBe(out);
+	});
+
 	it("ignores regex matches that fall entirely inside known placeholders", () => {
 		const obfuscator = new SecretObfuscator([
 			{ type: "plain", content: "abc" },
