@@ -322,6 +322,21 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obfuscated).not.toContain("abc");
 		expect(obfuscator.deobfuscate(obfuscated)).toBe("api_key=abcXYZ");
 	});
+	it("obfuscates bounded regex remainders around prior placeholders", () => {
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "abc" },
+			{ type: "regex", content: "api_key=[A-Za-z0-9]{6}", friendlyName: "api-key" },
+		]);
+		const token = obfuscator.obfuscate("abc");
+
+		const obfuscated = obfuscator.obfuscate(`api_key=${token}XYZ`);
+
+		expect(obfuscated).not.toContain("api_key=");
+		expect(obfuscated).not.toContain("XYZ");
+		expect(obfuscated).toContain(token);
+		expect(obfuscator.deobfuscate(obfuscated)).toBe("api_key=abcXYZ");
+		expect(obfuscator.obfuscate(obfuscated)).toBe(obfuscated);
+	});
 
 	it("keeps regex placeholders stable when inner friendly names change", () => {
 		const sharedKey = "E".repeat(43);
