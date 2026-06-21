@@ -22,15 +22,23 @@ export interface SecretEntry {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const REPLACEMENT_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+const REPLACEMENT_SENTINEL = "ZZ";
+
+function isGeneratedDeterministicReplacement(value: string): boolean {
+	return value.length === 1 ? value === REPLACEMENT_SENTINEL[0] : value.startsWith(REPLACEMENT_SENTINEL);
+}
 
 /** Generate a deterministic same-length replacement string from a secret value. */
 function generateDeterministicReplacement(secret: string): string {
-	// Simple hash: use Bun.hash for speed, seed from the secret bytes
+	if (secret.length === 0) return "";
+	if (isGeneratedDeterministicReplacement(secret)) return secret;
+	// Prefix generated chunks with a fixed sentinel so a restarted process can
+	// recognize already-redacted default replacements next to reversible
+	// placeholders and keep outbound history idempotent.
 	const hash = BigInt(Bun.hash(secret));
-	const chars: string[] = [];
+	const chars = secret.length === 1 ? ["Z"] : ["Z", "Z"];
 	let h = hash;
-	for (let i = 0; i < secret.length; i++) {
-		// Mix the hash for each character position
+	for (let i = chars.length; i < secret.length; i++) {
 		h = h ^ (BigInt(i + 1) * 0x9e3779b97f4a7c15n);
 		const idx = Number((h < 0n ? -h : h) % BigInt(REPLACEMENT_CHARS.length));
 		chars.push(REPLACEMENT_CHARS[idx]);
@@ -325,7 +333,8 @@ export class SecretObfuscator {
 							match.preserveInputPlaceholders &&
 							entry.replacement === undefined &&
 							match.inputPlaceholderOutsideChunkCount === 1 &&
-							this.#generatedReplaceChunks.has(match.inputPlaceholderOutside)
+							(this.#generatedReplaceChunks.has(match.inputPlaceholderOutside) ||
+								isGeneratedDeterministicReplacement(match.inputPlaceholderOutside))
 						) {
 							continue;
 						}

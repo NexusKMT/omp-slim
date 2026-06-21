@@ -637,6 +637,27 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obf.obfuscate(out)).toBe(out);
 	});
 
+	it("keeps default replace regex output idempotent after restart", () => {
+		const key = "P".repeat(43);
+		const first = new SecretObfuscator(
+			[
+				{ type: "plain", content: "SECRET" },
+				{ type: "regex", mode: "replace", content: "[A-Za-z0-9]+" },
+			],
+			key,
+		);
+		const persisted = first.obfuscate("SECRETX1");
+		const restarted = new SecretObfuscator(
+			[
+				{ type: "plain", content: "SECRET" },
+				{ type: "regex", mode: "replace", content: "[A-Za-z0-9]+" },
+			],
+			key,
+		);
+
+		expect(restarted.obfuscate(persisted)).toBe(persisted);
+	});
+
 	it("ignores regex matches that fall entirely inside known placeholders", () => {
 		const obfuscator = new SecretObfuscator([
 			{ type: "plain", content: "abc" },
