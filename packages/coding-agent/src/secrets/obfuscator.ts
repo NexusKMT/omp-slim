@@ -344,7 +344,12 @@ export class SecretObfuscator {
 							entry.replacement === undefined &&
 							match.inputPlaceholderOutsideChunkCount === 1 &&
 							(this.#generatedReplaceChunks.has(match.inputPlaceholderOutside) ||
-								isGeneratedDeterministicReplacement(match.inputPlaceholderOutside))
+								// A sentinel-shaped outside chunk counts as an already-emitted redaction
+								// (and is preserved) ONLY when it independently matches the regex. A chunk
+								// that matches solely because the deobfuscated placeholder bridges it is raw
+								// content that was never redacted, so redact it rather than leak it verbatim.
+								(isGeneratedDeterministicReplacement(match.inputPlaceholderOutside) &&
+									match.inputPlaceholderOutsideIndependentlyMatches))
 						) {
 							continue;
 						}

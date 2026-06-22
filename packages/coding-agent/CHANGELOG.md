@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `friendlyName` support for hidden secrets so model-visible placeholders can carry sanitized semantic labels, content-derived hashes, and case hints while preserving exact deobfuscation ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
+
+### Fixed
+
+- Fixed reversible secret placeholders sharing a case-folded hash base across ASCII case variants, which let a prompt-injected model synthesize a never-provider-visible sibling secret's keyed token by swapping the case hint (`#…:L#` → `#…:U#`) in a tool-call argument. Placeholder bases are now keyed on the exact secret value, so each casing variant gets an independent base and a synthesized sibling token deobfuscates to nothing on live provider/tool-call paths ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
+
 ## [16.1.12] - 2026-06-21
 
 ### Changed
@@ -88,14 +96,6 @@
 - Removed Wafer Pass from CLI credential help; Wafer Serverless remains available.
 
 ## [16.1.8] - 2026-06-20
-
-### Added
-
-- Added `friendlyName` support for hidden secrets so model-visible placeholders can carry sanitized semantic labels, content-derived hashes, and case hints while preserving exact deobfuscation ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
-
-### Fixed
-
-- Fixed reversible secret placeholders sharing a case-folded hash base across ASCII case variants, which let a prompt-injected model synthesize a never-provider-visible sibling secret's keyed token by swapping the case hint (`#…:L#` → `#…:U#`) in a tool-call argument. Placeholder bases are now keyed on the exact secret value, so each casing variant gets an independent base and a synthesized sibling token deobfuscates to nothing on live provider/tool-call paths ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
 
 ### Added
 

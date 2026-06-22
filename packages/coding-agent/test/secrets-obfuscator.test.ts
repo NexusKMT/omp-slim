@@ -670,6 +670,28 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(out).toHaveLength("ZZTOPSECRET".length);
 	});
 
+	it("redacts a raw sentinel-shaped suffix bridged into a match by a prior placeholder", () => {
+		// A prior-call placeholder followed by RAW text that merely looks like a
+		// deterministic redaction sentinel (`ZZ…`). The default-replace regex matches
+		// only because the deobfuscated placeholder bridges the combined value; the
+		// raw suffix never independently matches `[A-Z0-9]{12}`, so it must be redacted
+		// rather than skipped as an already-emitted sentinel (which would leak `ZZZZ`).
+		const obf = new SecretObfuscator(
+			[
+				{ type: "plain", content: "SECRETUV" },
+				{ type: "regex", mode: "replace", content: "[A-Z0-9]{12}" },
+			],
+			"R".repeat(43),
+		);
+		const token = obf.obfuscate("SECRETUV");
+		expect(token).toMatch(/^#[A-Z0-9]+:U#$/);
+
+		const out = obf.obfuscate(`${token}ZZZZ`);
+
+		expect(out).toContain(token);
+		expect(out).not.toContain("ZZZZ");
+	});
+
 	it("keeps default replace regex output idempotent around prior placeholders", () => {
 		const obf = new SecretObfuscator(
 			[
