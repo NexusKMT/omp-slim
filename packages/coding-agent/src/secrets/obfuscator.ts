@@ -383,7 +383,7 @@ export class SecretObfuscator {
 						result = replaceRange(result, match.start, match.end, redacted);
 						origin = replaceRange(origin, match.start, match.end, "I".repeat(redacted.length));
 					} else {
-						const replacement = entry.replacement ?? this.#generateReplacement(match.value);
+						const replacement = entry.replacement ?? this.#generateRegexReplacement(match.value, entry.regex);
 						result = replaceRange(result, match.start, match.end, replacement);
 						origin = replaceRange(origin, match.start, match.end, "I".repeat(replacement.length));
 					}
@@ -508,6 +508,28 @@ export class SecretObfuscator {
 	 */
 	#generateSecretReplacement(secret: string): string {
 		const replacement = ensureDistinctReplacement(generateDeterministicReplacement(secret), secret);
+		this.#generatedReplaceChunks.add(replacement);
+		return replacement;
+	}
+
+	/**
+	 * Replacement for a default (no custom replacement) regex match. Like a plain
+	 * secret, a value equal to the `Z`/`ZZ` sentinel must not ship verbatim — but
+	 * unlike a plain secret a regex can re-match its own perturbed output, so only
+	 * perturb when the regex does NOT match the distinct value. Otherwise keep the
+	 * sentinel: for a self-matching short regex it is the only same-length output
+	 * that stays a fixed point under re-obfuscation (perturbing would oscillate and
+	 * re-leak on alternate passes), which obfuscate() requires. Such configs (a
+	 * regex matching a 1–2 char sentinel) are pathological.
+	 */
+	#generateRegexReplacement(value: string, regex: RegExp): string {
+		let replacement = generateDeterministicReplacement(value);
+		if (replacement === value) {
+			const distinct = ensureDistinctReplacement(replacement, value);
+			regex.lastIndex = 0;
+			if (!regex.test(distinct)) replacement = distinct;
+			regex.lastIndex = 0;
+		}
 		this.#generatedReplaceChunks.add(replacement);
 		return replacement;
 	}

@@ -683,6 +683,35 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		}
 	});
 
+	it("does not emit a default replace regex match equal to the Z/ZZ sentinel unchanged", () => {
+		// A literal regex whose match is exactly the sentinel: the perturbed value is
+		// not re-matched, so it is emitted distinct AND stays a fixed point.
+		for (const content of ["Z", "ZZ"]) {
+			const obf = new SecretObfuscator([{ type: "regex", mode: "replace", content }], "Q".repeat(43));
+
+			const out = obf.obfuscate(content);
+
+			expect(out).not.toBe(content);
+			expect(out).toHaveLength(content.length);
+			expect(obf.obfuscate(out)).toBe(out);
+		}
+	});
+
+	it("keeps a self-matching sentinel regex idempotent without oscillating", () => {
+		// A regex that also matches its own perturbed output cannot be both leak-free
+		// and a fixed point (any non-sentinel 2-char value is re-matched and collapses
+		// back). obfuscate() MUST stay a fixed point, so the sentinel is kept rather
+		// than oscillating between the raw value and a perturbed one across passes.
+		for (const content of ["Z+", "[A-Z]{2}"]) {
+			const obf = new SecretObfuscator([{ type: "regex", mode: "replace", content }], "Q".repeat(43));
+
+			const out = obf.obfuscate("ZZ");
+
+			expect(obf.obfuscate(out)).toBe(out);
+			expect(obf.obfuscate(obf.obfuscate(out))).toBe(out);
+		}
+	});
+
 	it("redacts a raw sentinel-shaped suffix bridged into a match by a prior placeholder", () => {
 		// A prior-call placeholder followed by RAW text that merely looks like a
 		// deterministic redaction sentinel (`ZZ…`). The default-replace regex matches
