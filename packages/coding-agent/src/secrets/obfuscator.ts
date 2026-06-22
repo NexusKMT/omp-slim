@@ -25,18 +25,14 @@ export type JsonRecord = { [key: string]: JsonValue | undefined };
 // ═══════════════════════════════════════════════════════════════════════════
 
 const REPLACEMENT_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-const REPLACEMENT_SENTINEL = "ZZ";
-
-function isGeneratedDeterministicReplacement(value: string): boolean {
-	return value.length === 1 ? value === REPLACEMENT_SENTINEL[0] : value.startsWith(REPLACEMENT_SENTINEL);
-}
 
 /** Generate a deterministic same-length replacement string from a secret value. */
 function generateDeterministicReplacement(secret: string): string {
 	if (secret.length === 0) return "";
-	// Prefix generated chunks with a fixed sentinel so a restarted process can
-	// recognize already-redacted default replacements next to reversible
-	// placeholders and keep outbound history idempotent.
+	// Prefix generated chunks with a fixed `ZZ` so re-redacting an already-emitted
+	// 1–2 char chunk is a fixed point (the deterministic replacement of a <=2-char
+	// value is itself `Z`/`ZZ`), keeping short default-replacement remainders next
+	// to a reversible placeholder stable across an obfuscator restart.
 	const hash = BigInt(Bun.hash(secret));
 	const chars = secret.length === 1 ? ["Z"] : ["Z", "Z"];
 	let h = hash;
@@ -343,13 +339,11 @@ export class SecretObfuscator {
 							match.preserveInputPlaceholders &&
 							entry.replacement === undefined &&
 							match.inputPlaceholderOutsideChunkCount === 1 &&
-							(this.#generatedReplaceChunks.has(match.inputPlaceholderOutside) ||
-								// A sentinel-shaped outside chunk counts as an already-emitted redaction
-								// (and is preserved) ONLY when it independently matches the regex. A chunk
-								// that matches solely because the deobfuscated placeholder bridges it is raw
-								// content that was never redacted, so redact it rather than leak it verbatim.
-								(isGeneratedDeterministicReplacement(match.inputPlaceholderOutside) &&
-									match.inputPlaceholderOutsideIndependentlyMatches))
+							// Preserve an outside chunk as an already-emitted redaction ONLY when this
+							// obfuscator emitted it this session; a sentinel-shaped (`ZZ…`) chunk is
+							// otherwise indistinguishable from raw content the user wrote, so matching it
+							// by shape alone would leak raw bytes the regex covers. Redact anything unknown.
+							this.#generatedReplaceChunks.has(match.inputPlaceholderOutside)
 						) {
 							continue;
 						}

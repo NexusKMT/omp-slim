@@ -673,23 +673,27 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 	it("redacts a raw sentinel-shaped suffix bridged into a match by a prior placeholder", () => {
 		// A prior-call placeholder followed by RAW text that merely looks like a
 		// deterministic redaction sentinel (`ZZ…`). The default-replace regex matches
-		// only because the deobfuscated placeholder bridges the combined value; the
-		// raw suffix never independently matches `[A-Z0-9]{12}`, so it must be redacted
-		// rather than skipped as an already-emitted sentinel (which would leak `ZZZZ`).
-		const obf = new SecretObfuscator(
-			[
-				{ type: "plain", content: "SECRETUV" },
-				{ type: "regex", mode: "replace", content: "[A-Z0-9]{12}" },
-			],
-			"R".repeat(43),
-		);
-		const token = obf.obfuscate("SECRETUV");
-		expect(token).toMatch(/^#[A-Z0-9]+:U#$/);
+		// only because the deobfuscated placeholder bridges the combined value. The raw
+		// suffix was never emitted by this obfuscator, so it must be redacted rather than
+		// skipped by shape — both for a fixed-width regex (where the suffix does NOT
+		// independently match) and a variable-width one (where it DOES). Either way,
+		// leaving it would leak `ZZZZ` to the provider.
+		for (const content of ["[A-Z0-9]{12}", "[A-Z0-9]{4,12}"]) {
+			const obf = new SecretObfuscator(
+				[
+					{ type: "plain", content: "SECRETUV" },
+					{ type: "regex", mode: "replace", content },
+				],
+				"R".repeat(43),
+			);
+			const token = obf.obfuscate("SECRETUV");
+			expect(token).toMatch(/^#[A-Z0-9]+:U#$/);
 
-		const out = obf.obfuscate(`${token}ZZZZ`);
+			const out = obf.obfuscate(`${token}ZZZZ`);
 
-		expect(out).toContain(token);
-		expect(out).not.toContain("ZZZZ");
+			expect(out).toContain(token);
+			expect(out).not.toContain("ZZZZ");
+		}
 	});
 
 	it("keeps default replace regex output idempotent around prior placeholders", () => {
