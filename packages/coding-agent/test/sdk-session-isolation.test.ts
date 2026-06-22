@@ -377,6 +377,55 @@ describe("createAgentSession session storage isolation", () => {
 		});
 	});
 
+	it("redacts a pre-existing placeholder key when only ignored short secrets remain", async () => {
+		await withClearedSecretEnv(async () => {
+			const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-sdk-secrets-stale-key-${Snowflake.next()}-`));
+			tempDirs.push(tempDir);
+			const cwd = path.join(tempDir, "project");
+			const agentDir = path.join(tempDir, "agent");
+			fs.mkdirSync(path.join(cwd, ".omp"), { recursive: true });
+			// Only an ignored short (<8 char) plain obfuscate secret: it never becomes an
+			// active secret, but a previously-created key file must still be redacted and
+			// no new key must be created.
+			fs.writeFileSync(path.join(cwd, ".omp", "secrets.yml"), "- type: plain\n  content: abc\n");
+
+			const keySpy = spyOn(secrets, "getSecretPlaceholderKey").mockImplementation(
+				async () => "test-placeholder-key",
+			);
+			const existingKeySpy = spyOn(secrets, "getExistingSecretPlaceholderKey").mockImplementation(
+				async () => "existing-placeholder-key",
+			);
+			try {
+				const session = await createAgentSession({
+					cwd,
+					agentDir,
+					modelRegistry: sharedModelRegistry,
+					settings: Settings.isolated({ "secrets.enabled": true }),
+					disableExtensionDiscovery: true,
+					skills: [],
+					contextFiles: [],
+					promptTemplates: [],
+					slashCommands: [],
+					enableMCP: false,
+					enableLsp: false,
+				});
+				try {
+					expect(keySpy).not.toHaveBeenCalled();
+					expect(existingKeySpy).toHaveBeenCalled();
+					expect(session.session.obfuscator?.hasSecrets()).toBe(true);
+					expect(session.session.obfuscator?.obfuscate("existing-placeholder-key")).not.toContain(
+						"existing-placeholder-key",
+					);
+				} finally {
+					await session.session.dispose();
+				}
+			} finally {
+				keySpy.mockRestore();
+				existingKeySpy.mockRestore();
+			}
+		});
+	});
+
 	it("stores placeholder keys under the configured agentDir", async () => {
 		await withClearedSecretEnv(async () => {
 			await withTempConfigRoot(async () => {

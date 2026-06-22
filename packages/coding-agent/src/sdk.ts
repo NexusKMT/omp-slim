@@ -1216,7 +1216,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			// replace-only secrets set must not require the key; otherwise a headless
 			// run with an unwritable default config root fails startup for a feature it does not use.
 			obfuscator = new SecretObfuscator(allEntries, placeholderKey);
-		} else if (placeholderKey !== undefined) {
+		}
+		if (obfuscator?.hasSecrets() !== true && placeholderKey !== undefined) {
+			// No configured entry produced an active secret (e.g. only ignored short
+			// plain entries, or no entries at all), but a persisted key exists. Build a
+			// redaction-only obfuscator so a tool read of the key file does not ship the
+			// reusable HMAC key to the provider.
 			obfuscator = new SecretObfuscator(
 				[{ type: "plain", mode: "replace", content: placeholderKey }],
 				placeholderKey,
