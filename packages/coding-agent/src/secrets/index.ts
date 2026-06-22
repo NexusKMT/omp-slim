@@ -99,6 +99,7 @@ export {
 	obfuscateProviderContext,
 	type SecretEntry,
 	SecretObfuscator,
+	secretEntryNeedsPlaceholderKey,
 } from "./obfuscator";
 
 /**

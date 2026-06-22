@@ -21,6 +21,7 @@ import {
 	obfuscateProviderContext,
 	SecretObfuscator,
 	sanitizeSecretFriendlyName,
+	secretEntryNeedsPlaceholderKey,
 	stripPendingSecretPlaceholderSuffix,
 } from "@oh-my-pi/pi-coding-agent/secrets/obfuscator";
 import { compileSecretRegex } from "@oh-my-pi/pi-coding-agent/secrets/regex";
@@ -710,6 +711,16 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 			expect(obf.obfuscate(out)).toBe(out);
 			expect(obf.obfuscate(obf.obfuscate(out))).toBe(out);
 		}
+	});
+
+	it("does not require a placeholder key for entries that never produce a placeholder", () => {
+		// Short plain obfuscate entries are toned down, so they must not force key
+		// creation; regex/long-plain obfuscate entries can placehold and do need it.
+		expect(secretEntryNeedsPlaceholderKey({ type: "plain", content: "abc" })).toBe(false);
+		expect(secretEntryNeedsPlaceholderKey({ type: "plain", content: "abcdefgh" })).toBe(true);
+		expect(secretEntryNeedsPlaceholderKey({ type: "regex", content: "[A-Z]{2}" })).toBe(true);
+		expect(secretEntryNeedsPlaceholderKey({ type: "plain", content: "abc", mode: "replace" })).toBe(false);
+		expect(secretEntryNeedsPlaceholderKey({ type: "regex", content: "x+", mode: "replace" })).toBe(false);
 	});
 
 	it("redacts a raw sentinel-shaped suffix bridged into a match by a prior placeholder", () => {

@@ -77,6 +77,9 @@ const HASH_LEN = 12;
 const LEGACY_HASH_LEN = 4;
 const LEGACY_HASH_SEED = 0x5345_4352;
 const MAX_FRIENDLY_NAME_LEN = 32;
+// Plain/regex obfuscate matches shorter than this are toned down (never placed
+// behind a reversible placeholder) to avoid redacting small words/fragments.
+export const MIN_OBFUSCATE_SECRET_LEN = 8;
 
 // Per-process fallback key used when a caller does not supply a persisted
 // per-install key. It is random (never shipped in source), so model-visible
@@ -97,6 +100,20 @@ export function sanitizeSecretFriendlyName(name: string): string | undefined {
 		.toUpperCase()
 		.slice(0, MAX_FRIENDLY_NAME_LEN);
 	return sanitized.length > 0 ? sanitized : undefined;
+}
+
+/**
+ * Whether an entry can produce a reversible (keyed) obfuscate-mode placeholder
+ * and therefore requires the persisted placeholder key. Short plain obfuscate
+ * entries are toned down (never placeheld), so they must NOT force key creation:
+ * otherwise a `secret-placeholder.key` file is written and persisted for a config
+ * that ends up with no active secrets, leaving the key readable via a tool and
+ * reusable for later placeholders.
+ */
+export function secretEntryNeedsPlaceholderKey(entry: SecretEntry): boolean {
+	if ((entry.mode ?? "obfuscate") !== "obfuscate") return false;
+	if (entry.type === "regex") return true;
+	return entry.content.length >= MIN_OBFUSCATE_SECRET_LEN;
 }
 
 // Derive the model-visible base from a KEYED digest of the secret. xxHash is
@@ -267,7 +284,7 @@ export class SecretObfuscator {
 
 			if (entry.type === "plain") {
 				if (mode === "obfuscate") {
-					if (entry.content.length < 8) {
+					if (entry.content.length < MIN_OBFUSCATE_SECRET_LEN) {
 						// Tone down short plain secret obfuscation to avoid false matches on small words like "esp"
 						continue;
 					}
@@ -396,7 +413,7 @@ export class SecretObfuscator {
 						origin = replaceRange(origin, match.start, match.end, obfuscated.origin);
 						continue;
 					}
-					if (match.value.length < 8) {
+					if (match.value.length < MIN_OBFUSCATE_SECRET_LEN) {
 						// Tone down short regex match obfuscation to avoid false matches on small words/fragments
 						continue;
 					}
