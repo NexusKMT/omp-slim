@@ -766,6 +766,29 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(secretEntriesNeedPlaceholderKey(reintroEntries)).toBe(true);
 		const reintroOut = new SecretObfuscator(reintroEntries, "test-placeholder-key").obfuscate(`value=${secret}`);
 		expect(reintroOut).toMatch(/#[A-Z0-9]/);
+		// Among duplicate same-content replace entries the LAST one wins (the
+		// obfuscator stores replace mappings in a content-keyed Map), so a safe earlier
+		// duplicate must not mask a later reintroducing one: key is still required.
+		const dupReintroLast: SecretEntry[] = [
+			{ type: "plain", content: secret, mode: "obfuscate" },
+			{ type: "plain", content: secret, mode: "replace" },
+			{ type: "plain", content: secret, mode: "replace", replacement: secret },
+		];
+		expect(secretEntriesNeedPlaceholderKey(dupReintroLast)).toBe(true);
+		expect(new SecretObfuscator(dupReintroLast, "test-placeholder-key").obfuscate(`value=${secret}`)).toMatch(
+			/#[A-Z0-9]/,
+		);
+		// Reverse order: a later safe replacement overrides an earlier reintroducing
+		// one, so the obfuscate entry is shadowed and no key is needed.
+		const dupSafeLast: SecretEntry[] = [
+			{ type: "plain", content: secret, mode: "obfuscate" },
+			{ type: "plain", content: secret, mode: "replace", replacement: `X_${secret}_X` },
+			{ type: "plain", content: secret, mode: "replace" },
+		];
+		expect(secretEntriesNeedPlaceholderKey(dupSafeLast)).toBe(false);
+		expect(new SecretObfuscator(dupSafeLast, "test-placeholder-key").obfuscate(`value=${secret}`)).not.toMatch(
+			/#[A-Z0-9]/,
+		);
 	});
 
 	it("redacts a raw sentinel-shaped suffix bridged into a match by a prior placeholder", () => {

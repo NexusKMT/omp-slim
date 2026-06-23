@@ -126,27 +126,36 @@ export function secretEntryNeedsPlaceholderKey(entry: SecretEntry): boolean {
  * creation, otherwise an effectively replace-only secret set still requires (and
  * writes) `secret-placeholder.key` and fails startup when the agent config dir is
  * unwritable.
- *
  * The shadow only holds when the replace entry's emitted replacement does NOT
  * reintroduce the secret value: a custom `replacement` that still contains the
  * content (e.g. `replacement: "SECRET123"`) is re-scanned by the later
  * plain-obfuscate pass, which then DOES emit a reversible placeholder needing the
  * key. Default (omitted) replacements are deterministic, length-preserving, and
  * guaranteed distinct from the secret, so they can never contain it.
+ *
+ * The decision uses the EFFECTIVE replacement per content. `SecretObfuscator`'s
+ * constructor stores plain replace mappings in a `Map` keyed by content, so among
+ * duplicate same-content replace entries only the LAST one is applied by
+ * `obfuscate()`. Mirror that here (later duplicate wins) instead of treating any
+ * earlier safe duplicate as proof of shadowing.
  */
 export function secretEntriesNeedPlaceholderKey(entries: SecretEntry[]): boolean {
-	const replaceShadowedContents = new Set<string>();
+	const effectiveReplacement = new Map<string, string | undefined>();
 	for (const entry of entries) {
 		if (entry.type !== "plain" || (entry.mode ?? "obfuscate") !== "replace") continue;
-		if (entry.replacement === undefined || !entry.replacement.includes(entry.content)) {
-			replaceShadowedContents.add(entry.content);
+		effectiveReplacement.set(entry.content, entry.replacement);
+	}
+	const replaceShadowedContents = new Set<string>();
+	for (const [content, replacement] of effectiveReplacement) {
+		if (replacement === undefined || !replacement.includes(content)) {
+			replaceShadowedContents.add(content);
 		}
 	}
 	return entries.some(entry => {
 		if (!secretEntryNeedsPlaceholderKey(entry)) return false;
 		// `secretEntryNeedsPlaceholderKey` already excludes replace-mode entries, so a
-		// surviving plain entry is obfuscate-mode; drop it only when a same-content
-		// replace entry shadows it without reintroducing the value.
+		// surviving plain entry is obfuscate-mode; drop it only when the effective
+		// same-content replace mapping shadows it without reintroducing the value.
 		return !(entry.type === "plain" && replaceShadowedContents.has(entry.content));
 	});
 }
