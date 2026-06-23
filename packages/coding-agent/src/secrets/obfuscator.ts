@@ -117,6 +117,31 @@ export function secretEntryNeedsPlaceholderKey(entry: SecretEntry): boolean {
 }
 
 /**
+ * Whether a plain replace-mode replacement string can contribute a fragment that
+ * helps the replace phase reconstruct an obfuscate `content`. During obfuscate()'s
+ * replace phase the output is a tiling of passthrough bytes (adversary-controlled
+ * provider text) and whole replacement outputs; any contiguous occurrence of
+ * `content` in that output is covered by interior replacement tiles (each a
+ * substring of `content`) bordered by passthrough at the ends, where the border
+ * tile may be a suffix of a replacement (forming `content`'s prefix) or a prefix
+ * of a replacement (forming `content`'s suffix). So a replacement can help iff it
+ * is a substring of `content`, contains `content`, or shares such a border overlap.
+ */
+function replacementCanFormContent(replacement: string, content: string): boolean {
+	if (replacement.length === 0) return false;
+	if (content.includes(replacement) || replacement.includes(content)) return true;
+	const maxOverlap = Math.min(replacement.length, content.length);
+	for (let k = 1; k <= maxOverlap; k++) {
+		// A suffix of the replacement forms the prefix of the content (left border),
+		// or a prefix of the replacement forms the suffix of the content (right border).
+		if (content.startsWith(replacement.slice(replacement.length - k)) || content.endsWith(replacement.slice(0, k))) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
  * Whether a SET of entries needs the persisted placeholder key. `obfuscate()`
  * applies plain replace-mode mappings before the plain-obfuscate pass, so a plain
  * obfuscate entry only emits a reversible (keyed) placeholder when its content can
@@ -128,14 +153,15 @@ export function secretEntryNeedsPlaceholderKey(entry: SecretEntry): boolean {
  * The decision models the replace phase as the obfuscator actually runs it:
  * replace mappings are content-keyed (later duplicate wins) and applied in
  * descending content-length order; for a fresh probe (no prior placeholders) that
- * phase is plain sequential substring replacement. Simulating it on the bare
- * content captures direct shadowing (`SECRET -> safe`), reintroduction (a custom
- * replacement that contains the value), and triggered chains
- * (`SECRET -> ALIAS`, `ALIAS -> SECRET`). As a sound guard against
- * context/superstring-triggered reintroduction that a bare-content probe cannot
- * surface, the key is also required whenever any effective replacement string
- * contains the content. Default (omitted) replacements are deterministic,
- * length-preserving, and distinct from the secret, so they never contain it.
+ * phase is plain sequential substring replacement. A plain obfuscate entry needs
+ * the key when its content survives that simulated phase (direct typing) OR when
+ * any effective replacement can form the content via tiling — a substring,
+ * wholesale superstring, or prefix/suffix border that joins with surrounding
+ * passthrough bytes (see `replacementCanFormContent`). This covers direct
+ * shadowing (`SECRET -> safe`), reintroduction, duplicate ordering, transitive
+ * chains, and context-joined fragments uniformly. Default (omitted) replacements
+ * are deterministic, length-preserving, and distinct, so a same-content shadow
+ * with no other interacting replacement stays key-free.
  */
 export function secretEntriesNeedPlaceholderKey(entries: SecretEntry[]): boolean {
 	const replaceMap = new Map<string, string>();
@@ -158,7 +184,9 @@ export function secretEntriesNeedPlaceholderKey(entries: SecretEntry[]): boolean
 		// Regex obfuscate entries match dynamically; conservatively require the key.
 		if (entry.type !== "plain") return true;
 		const content = entry.content;
-		return applyReplacePhase(content).includes(content) || replacements.some(r => r.includes(content));
+		return (
+			applyReplacePhase(content).includes(content) || replacements.some(r => replacementCanFormContent(r, content))
+		);
 	});
 }
 

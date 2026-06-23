@@ -802,6 +802,17 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(new SecretObfuscator(chainReintro, "test-placeholder-key").obfuscate(`value=${secret}`)).toMatch(
 			/#[A-Z0-9]/,
 		);
+		// A replacement fragment that joins with adjacent passthrough bytes to form an
+		// obfuscate content (`A -> SEC`, so `ARET12` becomes `SECRET12` during the
+		// replace phase) still emits a reversible placeholder, so the key is required
+		// even though no single replacement contains the whole content.
+		const fragmentJoin: SecretEntry[] = [
+			{ type: "plain", content: "SECRET12", mode: "obfuscate" },
+			{ type: "plain", content: "SECRET12", mode: "replace", replacement: "SAFE" },
+			{ type: "plain", content: "A", mode: "replace", replacement: "SEC" },
+		];
+		expect(secretEntriesNeedPlaceholderKey(fragmentJoin)).toBe(true);
+		expect(new SecretObfuscator(fragmentJoin, "test-placeholder-key").obfuscate("x ARET12 y")).toMatch(/#[A-Z0-9]/);
 	});
 
 	it("redacts a raw sentinel-shaped suffix bridged into a match by a prior placeholder", () => {
