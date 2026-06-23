@@ -116,6 +116,32 @@ export function secretEntryNeedsPlaceholderKey(entry: SecretEntry): boolean {
 	return entry.content.length >= MIN_OBFUSCATE_SECRET_LEN;
 }
 
+/**
+ * Whether a SET of entries needs the persisted placeholder key, accounting for
+ * replace-over-obfuscate shadowing. `obfuscate()` applies plain replace-mode
+ * mappings before plain obfuscate-mode mappings and only rewrites text outside
+ * existing spans, so a plain obfuscate entry whose content exactly equals a plain
+ * replace entry's content never emits a reversible (keyed) placeholder — it is
+ * one-way replaced first. Such a shadowed entry must not force key-file creation,
+ * otherwise an effectively replace-only secret set still requires (and writes)
+ * `secret-placeholder.key` and fails startup when the agent config dir is unwritable.
+ */
+export function secretEntriesNeedPlaceholderKey(entries: SecretEntry[]): boolean {
+	const replaceShadowedContents = new Set<string>();
+	for (const entry of entries) {
+		if (entry.type === "plain" && (entry.mode ?? "obfuscate") === "replace") {
+			replaceShadowedContents.add(entry.content);
+		}
+	}
+	return entries.some(entry => {
+		if (!secretEntryNeedsPlaceholderKey(entry)) return false;
+		// `secretEntryNeedsPlaceholderKey` already excludes replace-mode entries, so a
+		// surviving plain entry is obfuscate-mode; drop it when a same-content replace
+		// entry shadows it.
+		return !(entry.type === "plain" && replaceShadowedContents.has(entry.content));
+	});
+}
+
 // Derive the model-visible base from a KEYED digest of the secret. xxHash is
 // fast and unkeyed, so a fixed-seed content hash of a low-entropy secret could
 // be dictionaried from the transcript; HMAC-SHA256 under a private per-install

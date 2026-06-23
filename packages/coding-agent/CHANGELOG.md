@@ -9,6 +9,7 @@
 ### Fixed
 
 - Fixed reversible secret placeholders sharing a case-folded hash base across ASCII case variants, which let a prompt-injected model synthesize a never-provider-visible sibling secret's keyed token by swapping the case hint (`#…:L#` → `#…:U#`) in a tool-call argument. Placeholder bases are now keyed on the exact secret value, so each casing variant gets an independent base and a synthesized sibling token deobfuscates to nothing on live provider/tool-call paths ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
+- Fixed an auto-collected environment secret that is also declared as a plain `mode: "replace"` entry with the same content still forcing creation of the persisted `secret-placeholder.key`. Replace mappings run before obfuscate mappings, so the value is one-way replaced and the obfuscate entry never emits a reversible placeholder; the key-need check now ignores such replace-shadowed obfuscate entries, so an effectively replace-only secret set no longer requires (or writes) the key file and no longer fails startup when the agent config dir is unwritable ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
 
 ### Fixed
 

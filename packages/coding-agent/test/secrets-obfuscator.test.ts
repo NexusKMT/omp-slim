@@ -21,6 +21,7 @@ import {
 	obfuscateProviderContext,
 	SecretObfuscator,
 	sanitizeSecretFriendlyName,
+	secretEntriesNeedPlaceholderKey,
 	secretEntryNeedsPlaceholderKey,
 	stripPendingSecretPlaceholderSuffix,
 } from "@oh-my-pi/pi-coding-agent/secrets/obfuscator";
@@ -721,6 +722,39 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(secretEntryNeedsPlaceholderKey({ type: "regex", content: "[A-Z]{2}" })).toBe(true);
 		expect(secretEntryNeedsPlaceholderKey({ type: "plain", content: "abc", mode: "replace" })).toBe(false);
 		expect(secretEntryNeedsPlaceholderKey({ type: "regex", content: "x+", mode: "replace" })).toBe(false);
+	});
+
+	it("ignores obfuscate entries shadowed by a same-content replace entry when deciding key need", () => {
+		const secret = "ghp_exampletoken1234567890";
+		// A same-content plain replace entry runs before the plain obfuscate entry in
+		// obfuscate(), so the value is one-way replaced and the obfuscate entry never
+		// emits a reversible placeholder. The set must therefore not require the key.
+		expect(
+			secretEntriesNeedPlaceholderKey([
+				{ type: "plain", content: secret, mode: "obfuscate" },
+				{ type: "plain", content: secret, mode: "replace" },
+			]),
+		).toBe(false);
+		// Verify the shadowing actually holds: no reversible placeholder is emitted.
+		const obf = new SecretObfuscator(
+			[
+				{ type: "plain", content: secret, mode: "obfuscate" },
+				{ type: "plain", content: secret, mode: "replace" },
+			],
+			"test-placeholder-key",
+		);
+		const out = obf.obfuscate(`value=${secret}`);
+		expect(out).not.toContain(secret);
+		expect(out).not.toMatch(/#[A-Z0-9]/);
+		// An unshadowed obfuscate entry still requires the key.
+		expect(secretEntriesNeedPlaceholderKey([{ type: "plain", content: secret, mode: "obfuscate" }])).toBe(true);
+		// A replace entry with DIFFERENT content does not shadow the obfuscate entry.
+		expect(
+			secretEntriesNeedPlaceholderKey([
+				{ type: "plain", content: secret, mode: "obfuscate" },
+				{ type: "plain", content: "unrelated-other-secret", mode: "replace" },
+			]),
+		).toBe(true);
 	});
 
 	it("redacts a raw sentinel-shaped suffix bridged into a match by a prior placeholder", () => {

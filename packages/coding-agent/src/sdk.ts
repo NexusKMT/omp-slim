@@ -106,7 +106,7 @@ import {
 	obfuscateMessages,
 	obfuscateProviderContext,
 	SecretObfuscator,
-	secretEntryNeedsPlaceholderKey,
+	secretEntriesNeedPlaceholderKey,
 } from "./secrets";
 import { AgentSession } from "./session/agent-session";
 import { discoverAuthStorage as discoverAuthStorageFromConfig } from "./session/auth-broker-config";
@@ -1205,7 +1205,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		const fileEntries = await logger.time("loadSecrets", loadSecrets, cwd, agentDir);
 		const envEntries = collectEnvSecrets();
 		const allEntries = [...envEntries, ...fileEntries];
-		const needsPlaceholderKey = allEntries.some(secretEntryNeedsPlaceholderKey);
+		const needsPlaceholderKey = secretEntriesNeedPlaceholderKey(allEntries);
 		const placeholderKey = needsPlaceholderKey
 			? await getSecretPlaceholderKey(agentDir)
 			: await getExistingSecretPlaceholderKey(agentDir);
