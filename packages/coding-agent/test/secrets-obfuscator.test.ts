@@ -789,6 +789,19 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(new SecretObfuscator(dupSafeLast, "test-placeholder-key").obfuscate(`value=${secret}`)).not.toMatch(
 			/#[A-Z0-9]/,
 		);
+		// A transitive replace chain that rewrites a safe alias back into the secret
+		// (`SECRET -> ALIAS`, `ALIAS -> SECRET`) reintroduces the value before the
+		// plain-obfuscate pass, so the key is still required.
+		const alias = "ALIAS_TOKEN_XYZ";
+		const chainReintro: SecretEntry[] = [
+			{ type: "plain", content: secret, mode: "obfuscate" },
+			{ type: "plain", content: secret, mode: "replace", replacement: alias },
+			{ type: "plain", content: alias, mode: "replace", replacement: secret },
+		];
+		expect(secretEntriesNeedPlaceholderKey(chainReintro)).toBe(true);
+		expect(new SecretObfuscator(chainReintro, "test-placeholder-key").obfuscate(`value=${secret}`)).toMatch(
+			/#[A-Z0-9]/,
+		);
 	});
 
 	it("redacts a raw sentinel-shaped suffix bridged into a match by a prior placeholder", () => {

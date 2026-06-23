@@ -117,46 +117,48 @@ export function secretEntryNeedsPlaceholderKey(entry: SecretEntry): boolean {
 }
 
 /**
- * Whether a SET of entries needs the persisted placeholder key, accounting for
- * replace-over-obfuscate shadowing. `obfuscate()` applies plain replace-mode
- * mappings before plain obfuscate-mode mappings and only rewrites text outside
- * existing spans, so a plain obfuscate entry whose content exactly equals a plain
- * replace entry's content is normally one-way replaced first and never emits a
- * reversible (keyed) placeholder. Such a shadowed entry must not force key-file
- * creation, otherwise an effectively replace-only secret set still requires (and
- * writes) `secret-placeholder.key` and fails startup when the agent config dir is
- * unwritable.
- * The shadow only holds when the replace entry's emitted replacement does NOT
- * reintroduce the secret value: a custom `replacement` that still contains the
- * content (e.g. `replacement: "SECRET123"`) is re-scanned by the later
- * plain-obfuscate pass, which then DOES emit a reversible placeholder needing the
- * key. Default (omitted) replacements are deterministic, length-preserving, and
- * guaranteed distinct from the secret, so they can never contain it.
+ * Whether a SET of entries needs the persisted placeholder key. `obfuscate()`
+ * applies plain replace-mode mappings before the plain-obfuscate pass, so a plain
+ * obfuscate entry only emits a reversible (keyed) placeholder when its content can
+ * still appear AFTER the replace phase. When no obfuscate entry can ever produce a
+ * placeholder, the persisted key must NOT be required/created — otherwise an
+ * effectively replace-only secret set still writes `secret-placeholder.key` and
+ * fails startup when the agent config dir is unwritable.
  *
- * The decision uses the EFFECTIVE replacement per content. `SecretObfuscator`'s
- * constructor stores plain replace mappings in a `Map` keyed by content, so among
- * duplicate same-content replace entries only the LAST one is applied by
- * `obfuscate()`. Mirror that here (later duplicate wins) instead of treating any
- * earlier safe duplicate as proof of shadowing.
+ * The decision models the replace phase as the obfuscator actually runs it:
+ * replace mappings are content-keyed (later duplicate wins) and applied in
+ * descending content-length order; for a fresh probe (no prior placeholders) that
+ * phase is plain sequential substring replacement. Simulating it on the bare
+ * content captures direct shadowing (`SECRET -> safe`), reintroduction (a custom
+ * replacement that contains the value), and triggered chains
+ * (`SECRET -> ALIAS`, `ALIAS -> SECRET`). As a sound guard against
+ * context/superstring-triggered reintroduction that a bare-content probe cannot
+ * surface, the key is also required whenever any effective replacement string
+ * contains the content. Default (omitted) replacements are deterministic,
+ * length-preserving, and distinct from the secret, so they never contain it.
  */
 export function secretEntriesNeedPlaceholderKey(entries: SecretEntry[]): boolean {
-	const effectiveReplacement = new Map<string, string | undefined>();
+	const replaceMap = new Map<string, string>();
 	for (const entry of entries) {
 		if (entry.type !== "plain" || (entry.mode ?? "obfuscate") !== "replace") continue;
-		effectiveReplacement.set(entry.content, entry.replacement);
+		replaceMap.set(
+			entry.content,
+			entry.replacement ?? ensureDistinctReplacement(generateDeterministicReplacement(entry.content), entry.content),
+		);
 	}
-	const replaceShadowedContents = new Set<string>();
-	for (const [content, replacement] of effectiveReplacement) {
-		if (replacement === undefined || !replacement.includes(content)) {
-			replaceShadowedContents.add(content);
-		}
-	}
+	const replacePhase = [...replaceMap].sort((a, b) => b[0].length - a[0].length);
+	const replacements = [...replaceMap.values()];
+	const applyReplacePhase = (text: string): string => {
+		let result = text;
+		for (const [secret, replacement] of replacePhase) result = result.split(secret).join(replacement);
+		return result;
+	};
 	return entries.some(entry => {
 		if (!secretEntryNeedsPlaceholderKey(entry)) return false;
-		// `secretEntryNeedsPlaceholderKey` already excludes replace-mode entries, so a
-		// surviving plain entry is obfuscate-mode; drop it only when the effective
-		// same-content replace mapping shadows it without reintroducing the value.
-		return !(entry.type === "plain" && replaceShadowedContents.has(entry.content));
+		// Regex obfuscate entries match dynamically; conservatively require the key.
+		if (entry.type !== "plain") return true;
+		const content = entry.content;
+		return applyReplacePhase(content).includes(content) || replacements.some(r => r.includes(content));
 	});
 }
 
