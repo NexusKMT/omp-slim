@@ -2,13 +2,6 @@
 
 ## [Unreleased]
 
-## [16.1.16] - 2026-06-23
-
-### Breaking Changes
-
-- Renamed the eval `agent()` helper parameters `agent_type` → `agent` and `return_handle` → `handle` across every workflow runtime (Python, JavaScript, Ruby, Julia), so the names are identical in every language (no camelCase/snake_case split) and the agent-selection parameter matches the `task` tool's `agent`. The `__agent__` eval bridge wire protocol was renamed to match.
-- Changed the `eval` tool to take a single cell per call (`{ language, code, title?, timeout?, reset? }`) instead of a `cells` array. State still persists per language across separate eval calls, tool calls, and `task` subagents, so each call is one logical step that reuses everything earlier calls defined — the array only encouraged re-importing/re-declaring the same setup in every batch. The schema, field descriptions, examples, system `eval.md`/`workflowz` helper docs, and the `[i/n]` cell-counter (now hidden for single cells) were updated to match; the renderer, ACP start-text, copy-targets, and collab-web tool view still parse legacy multi-cell transcripts.
-
 ### Added
 
 - Added `friendlyName` support for hidden secrets so model-visible placeholders can carry sanitized semantic labels, content-derived hashes, and case hints while preserving exact deobfuscation ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
@@ -16,6 +9,13 @@
 ### Fixed
 
 - Fixed reversible secret placeholders sharing a case-folded hash base across ASCII case variants, which let a prompt-injected model synthesize a never-provider-visible sibling secret's keyed token by swapping the case hint (`#…:L#` → `#…:U#`) in a tool-call argument. Placeholder bases are now keyed on the exact secret value, so each casing variant gets an independent base and a synthesized sibling token deobfuscates to nothing on live provider/tool-call paths ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
+
+## [16.1.16] - 2026-06-23
+
+### Breaking Changes
+
+- Renamed the eval `agent()` helper parameters `agent_type` → `agent` and `return_handle` → `handle` across every workflow runtime (Python, JavaScript, Ruby, Julia), so the names are identical in every language (no camelCase/snake_case split) and the agent-selection parameter matches the `task` tool's `agent`. The `__agent__` eval bridge wire protocol was renamed to match.
+- Changed the `eval` tool to take a single cell per call (`{ language, code, title?, timeout?, reset? }`) instead of a `cells` array. State still persists per language across separate eval calls, tool calls, and `task` subagents, so each call is one logical step that reuses everything earlier calls defined — the array only encouraged re-importing/re-declaring the same setup in every batch. The schema, field descriptions, examples, system `eval.md`/`workflowz` helper docs, and the `[i/n]` cell-counter (now hidden for single cells) were updated to match; the renderer, ACP start-text, copy-targets, and collab-web tool view still parse legacy multi-cell transcripts.
 
 ### Added
 
