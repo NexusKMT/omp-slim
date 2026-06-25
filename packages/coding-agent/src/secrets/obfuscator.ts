@@ -61,6 +61,39 @@ function ensureDistinctReplacement(replacement: string, secret: string): string 
 	return alt + replacement.slice(1);
 }
 
+/**
+ * Search same-length replacements for one the regex does NOT match, so a default
+ * regex secret whose deterministic replacement collides with its own value (the
+ * `Z`/`ZZ` sentinel, or an astronomical hash collision) is still redacted to a
+ * STABLE nonmatching value instead of shipping the raw secret. A nonmatching
+ * candidate is a fixed point under re-obfuscation — the regex never re-matches it,
+ * so it cannot re-leak on a later pass. Candidates are enumerated deterministically
+ * over `REPLACEMENT_CHARS` (same value+regex always yields the same redaction); the
+ * sweep is bounded so a match-everything regex (`.`/`[\s\S]`) terminates, returning
+ * undefined to let the caller keep the sentinel as the only available fixed point.
+ */
+function findNonMatchingReplacement(value: string, regex: RegExp): string | undefined {
+	const len = value.length;
+	if (len === 0) return undefined;
+	const base = REPLACEMENT_CHARS.length;
+	// 62^2 = 3844 candidates cover every 1–2 char value (the only realistic
+	// trigger) exhaustively; the cap also bounds longer astronomical collisions.
+	const maxAttempts = 4096;
+	const chars = new Array<string>(len);
+	for (let n = 0; n < maxAttempts; n++) {
+		let q = n;
+		for (let i = len - 1; i >= 0; i--) {
+			chars[i] = REPLACEMENT_CHARS[q % base];
+			q = Math.floor(q / base);
+		}
+		const candidate = chars.join("");
+		if (candidate === value) continue;
+		regex.lastIndex = 0;
+		if (!regex.test(candidate)) return candidate;
+	}
+	return undefined;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Placeholder format
 // ═══════════════════════════════════════════════════════════════════════════
@@ -605,20 +638,22 @@ export class SecretObfuscator {
 
 	/**
 	 * Replacement for a default (no custom replacement) regex match. Like a plain
-	 * secret, a value equal to the `Z`/`ZZ` sentinel must not ship verbatim — but
-	 * unlike a plain secret a regex can re-match its own perturbed output, so only
-	 * perturb when the regex does NOT match the distinct value. Otherwise keep the
-	 * sentinel: for a self-matching short regex it is the only same-length output
-	 * that stays a fixed point under re-obfuscation (perturbing would oscillate and
-	 * re-leak on alternate passes), which obfuscate() requires. Such configs (a
-	 * regex matching a 1–2 char sentinel) are pathological.
+	 * secret, a value equal to the `Z`/`ZZ` sentinel (or an astronomical hash
+	 * collision) must not ship verbatim — but unlike a plain secret a regex can
+	 * re-match its own perturbed output. So when the deterministic replacement
+	 * collides with the value, search same-length candidates for one the regex does
+	 * NOT match: such a value is a STABLE fixed point under re-obfuscation (the regex
+	 * never re-matches it) and so cannot re-leak on a later pass. A single
+	 * perturbation is not enough — it may also match the regex (e.g. `B` is needed,
+	 * not `A`, for `Z|A`), so the search tries further candidates before giving up.
+	 * Only when no candidate avoids the regex (a pathological match-everything config
+	 * such as `.`/`[\s\S]`) keep the sentinel as the sole available fixed point.
 	 */
 	#generateRegexReplacement(value: string, regex: RegExp): string {
 		let replacement = generateDeterministicReplacement(value);
 		if (replacement === value) {
-			const distinct = ensureDistinctReplacement(replacement, value);
-			regex.lastIndex = 0;
-			if (!regex.test(distinct)) replacement = distinct;
+			const stable = findNonMatchingReplacement(value, regex);
+			if (stable !== undefined) replacement = stable;
 			regex.lastIndex = 0;
 		}
 		this.#generatedReplaceChunks.add(replacement);

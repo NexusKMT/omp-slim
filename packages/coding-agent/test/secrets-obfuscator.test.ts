@@ -700,18 +700,49 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		}
 	});
 
-	it("keeps a self-matching sentinel regex idempotent without oscillating", () => {
-		// A regex that also matches its own perturbed output cannot be both leak-free
-		// and a fixed point (any non-sentinel 2-char value is re-matched and collapses
-		// back). obfuscate() MUST stay a fixed point, so the sentinel is kept rather
-		// than oscillating between the raw value and a perturbed one across passes.
+	it("redacts a self-matching sentinel regex to a stable nonmatching value", () => {
+		// A regex that also matches the single A/B perturbation still has same-length
+		// values it does NOT match (a lowercase pair for [A-Z]{2}, an A/Z-free pair for
+		// Z+). The bounded search finds one, so the sentinel is redacted to a value the
+		// regex never re-matches: leak-free AND a fixed point under re-obfuscation.
 		for (const content of ["Z+", "[A-Z]{2}"]) {
 			const obf = new SecretObfuscator([{ type: "regex", mode: "replace", content }], "Q".repeat(43));
 
 			const out = obf.obfuscate("ZZ");
 
+			expect(out).not.toBe("ZZ");
+			expect(out).toHaveLength(2);
 			expect(obf.obfuscate(out)).toBe(out);
 			expect(obf.obfuscate(obf.obfuscate(out))).toBe(out);
+		}
+	});
+
+	it("searches past the first perturbation when it also matches the regex", () => {
+		// Regression for a regex that matches both the sentinel and its single A/B
+		// perturbation: `Z|A`/`[AZ]` match `Z` and `A`, so the old guard kept the raw
+		// `Z` and shipped it. A nonmatching same-length value (`B`) must be found.
+		for (const content of ["Z|A", "[AZ]"]) {
+			const obf = new SecretObfuscator([{ type: "regex", mode: "replace", content }], "Q".repeat(43));
+
+			const out = obf.obfuscate("Z");
+
+			expect(out).not.toBe("Z");
+			expect(out).toHaveLength(1);
+			expect(obf.obfuscate(out)).toBe(out);
+		}
+	});
+
+	it("keeps the sentinel only when no same-length value avoids the regex", () => {
+		// A match-everything regex has no nonmatching same-length redaction, so the
+		// search exhausts and the sentinel is kept as the sole fixed point. Such a
+		// config redacts every character and is pathological by construction.
+		for (const content of [".", "[\\s\\S]"]) {
+			const obf = new SecretObfuscator([{ type: "regex", mode: "replace", content }], "Q".repeat(43));
+
+			const out = obf.obfuscate("Z");
+
+			expect(out).toBe("Z");
+			expect(obf.obfuscate(out)).toBe(out);
 		}
 	});
 
