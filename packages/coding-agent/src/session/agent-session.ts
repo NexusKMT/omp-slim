@@ -160,6 +160,7 @@ import {
 } from "../config/model-resolver";
 import { MODEL_ROLE_IDS, MODEL_ROLES } from "../config/model-roles";
 import { expandPromptTemplate, type PromptTemplate } from "../config/prompt-templates";
+import { resolveServiceTierSetting } from "../config/service-tier";
 import type { Settings, SkillsSettings } from "../config/settings";
 import { getDefault, onAppendOnlyModeChanged } from "../config/settings";
 import { RawSseDebugBuffer } from "../debug/raw-sse-buffer";
@@ -1117,6 +1118,14 @@ function toRestoredQueuedMessage(message: AgentMessage): RestoredQueuedMessage {
 	return { text: queueChipText(message), images: queuedImageContent(message) };
 }
 
+function mergeLlmCompactionPreserveData(
+	hookPreserveData: Record<string, unknown> | undefined,
+	resultPreserveData: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+	const preserveData = { ...(hookPreserveData ?? {}), ...(resultPreserveData ?? {}) };
+	return snapcompact.stripPreservedArchive(Object.keys(preserveData).length > 0 ? preserveData : undefined);
+}
+
 export class AgentSession {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
@@ -1164,6 +1173,7 @@ export class AgentSession {
 	#advisorEnabled = false;
 	/** The advisor's own agent, retained so `/dump advisor` can serialize its transcript. Undefined when no advisor is active. */
 	#advisorAgent?: Agent;
+	#advisorAdviseTool?: AdviseTool;
 	#advisorReadOnlyTools?: AgentTool[];
 	#advisorWatchdogPrompt?: string;
 	#advisorYieldQueueUnsubscribe?: () => void;
@@ -1798,6 +1808,7 @@ export class AgentSession {
 		this.#advisorAgentUnsubscribe?.();
 		this.#advisorAgentUnsubscribe = undefined;
 		this.#advisorRuntime?.reset();
+		this.#advisorAdviseTool?.resetDeliveredNotes();
 		this.#attachAdvisorRecorderFeed();
 		this.#advisorPrimaryTurnsCompleted = 0;
 		this.#advisorInterruptImmuneTurnStart = undefined;
@@ -1878,6 +1889,7 @@ export class AgentSession {
 		};
 
 		const adviseTool = new AdviseTool(enqueueAdvice);
+		this.#advisorAdviseTool = adviseTool;
 		const advisorReadOnlyTools = this.#advisorReadOnlyTools ?? [];
 
 		const appendOnlyContext = new AppendOnlyContextManager();
@@ -1887,6 +1899,16 @@ export class AgentSession {
 			systemPrompt.push(this.#advisorWatchdogPrompt);
 		}
 		const advisorSessionId = this.sessionId ? `${this.sessionId}-advisor` : undefined;
+
+		// Advisor service tier (`serviceTierAdvisor`): "none" (default) runs the
+		// advisor on standard processing; "inherit" tracks the session's live tier
+		// per request (like the main agent, including /fast toggles) via a resolver;
+		// a concrete value pins the advisor to that tier regardless of the session.
+		const advisorTierSetting = this.settings.get("serviceTierAdvisor");
+		const advisorServiceTier =
+			advisorTierSetting === "inherit" ? undefined : resolveServiceTierSetting(advisorTierSetting, undefined);
+		const advisorServiceTierResolver =
+			advisorTierSetting === "inherit" ? (model: Model) => this.#effectiveServiceTier(model) : undefined;
 
 		// Thread the primary's telemetry into the advisor loop so the advisor
 		// model's GenAI spans + usage/cost hooks fire like every other model call,
@@ -1917,6 +1939,8 @@ export class AgentSession {
 			getApiKey: requestModel => this.#modelRegistry.resolver(requestModel, advisorSessionId),
 			intentTracing: false,
 			telemetry: advisorTelemetry,
+			serviceTier: advisorServiceTier,
+			serviceTierResolver: advisorServiceTierResolver,
 		});
 		advisorAgent.setDisableReasoning(shouldDisableReasoning(advisorThinkingLevel));
 
@@ -1992,6 +2016,7 @@ export class AgentSession {
 		if (this.#advisorAgent) {
 			this.#advisorAgent = undefined;
 		}
+		this.#advisorAdviseTool = undefined;
 		this.#advisorYieldQueueUnsubscribe?.();
 		this.#advisorYieldQueueUnsubscribe = undefined;
 	}
@@ -2798,6 +2823,9 @@ export class AgentSession {
 				return;
 			}
 
+			const successfulYieldMessage = this.#findSuccessfulYieldAssistantMessage(settledMessages);
+			const yieldOnThisMessage = this.#assistantEndedWithSuccessfulYield(msg);
+
 			const maintenanceRoute = (route: string, extra?: Record<string, unknown>) => {
 				logger.debug("agent_end maintenance routing", {
 					route,
@@ -2809,7 +2837,7 @@ export class AgentSession {
 					hasText: msg.content.some(content => content.type === "text"),
 					goalModeEnabled: this.#goalModeState?.enabled === true,
 					goalStatus: this.#goalModeState?.goal.status,
-					successfulYield: this.#assistantEndedWithSuccessfulYield(msg),
+					successfulYield: successfulYieldMessage !== undefined,
 					...extra,
 				});
 			};
@@ -2834,21 +2862,24 @@ export class AgentSession {
 			}
 
 			const activeGoal = this.#goalModeState?.enabled === true && this.#goalModeState.goal.status === "active";
-			const yieldOnThisMessage = this.#assistantEndedWithSuccessfulYield(msg);
 			// A successful `yield` in this run is terminal for execution purposes.
 			// Suppress empty-stop retry, unexpected-stop retry, queued-message drain,
 			// and compaction-driven continuations for the rest of this prompt cycle:
 			// the executor consumed the yield as the terminal result, so a trailing
 			// empty/aborted assistant stop must NOT revive the agent loop. The
 			// `#yieldTerminationPending` sticky flag clears on the next `prompt()`.
-			if (yieldOnThisMessage || this.#yieldTerminationPending) {
+			if (successfulYieldMessage || this.#yieldTerminationPending) {
 				this.#lastSuccessfulYieldToolCallId = undefined;
-				if (yieldOnThisMessage && activeGoal) {
-					maintenanceRoute("successful-yield-active-goal-checkCompaction");
-					const compactionTask = this.#checkCompaction(msg);
+				if (successfulYieldMessage && activeGoal) {
+					maintenanceRoute(
+						yieldOnThisMessage
+							? "successful-yield-active-goal-checkCompaction"
+							: "post-yield-trailing-stop-active-goal-checkCompaction",
+					);
+					const compactionTask = this.#checkCompaction(successfulYieldMessage);
 					this.#trackPostPromptTask(compactionTask);
 					await compactionTask;
-				} else if (yieldOnThisMessage) {
+				} else if (successfulYieldMessage) {
 					maintenanceRoute("successful-yield-no-active-goal");
 				} else {
 					maintenanceRoute("post-yield-trailing-stop-suppressed");
@@ -5334,11 +5365,48 @@ export class AgentSession {
 	}
 
 	#obfuscatePreparationForProvider(preparation: CompactionPreparation): CompactionPreparation {
-		if (!this.#obfuscator?.hasSecrets() || !preparation.previousSummary) return preparation;
-		// `previousPreserveData` is opaque provider-replay state (e.g. OpenAI remote-compaction
-		// `encrypted_content`); rewriting it would corrupt replay, so only the plaintext summary
-		// is redacted.
-		return { ...preparation, previousSummary: this.#obfuscator.obfuscate(preparation.previousSummary) };
+		if (!this.#obfuscator?.hasSecrets()) return preparation;
+		const previousSummary = this.#obfuscateTextForProvider(preparation.previousSummary);
+		// `compact()` folds the prior snapcompact archive's plaintext into the
+		// summarization prompt on the snapcompact→context-full transition, so the
+		// archive's text regions must be redacted alongside the summary. Only the
+		// `snapcompact` slot's text is rewritten; every other preserveData key —
+		// notably the OpenAI remote-compaction `encrypted_content` replay state — is
+		// opaque provider-replay data and stays byte-identical.
+		const previousPreserveData = this.#obfuscatePreservedArchiveText(preparation.previousPreserveData);
+		if (
+			previousSummary === preparation.previousSummary &&
+			previousPreserveData === preparation.previousPreserveData
+		) {
+			return preparation;
+		}
+		return { ...preparation, previousSummary, previousPreserveData };
+	}
+
+	/** Redact secrets in the persisted snapcompact archive's plaintext regions
+	 *  ({@link snapcompact.archiveSourceText}'s `text`/`textHead`/`textTail`) so the
+	 *  snapcompact→context-full migration in `compact()` cannot ship raw archived
+	 *  user/tool text to the provider. Frames and every non-`snapcompact` key pass
+	 *  through byte-identical; the same reference is returned when nothing changes. */
+	#obfuscatePreservedArchiveText(
+		preserveData: Record<string, unknown> | undefined,
+	): Record<string, unknown> | undefined {
+		const obfuscator = this.#obfuscator;
+		if (!obfuscator?.hasSecrets() || !preserveData || !snapcompact.getPreservedArchive(preserveData)) {
+			return preserveData;
+		}
+		const slot = preserveData[snapcompact.PRESERVE_KEY] as Record<string, unknown>;
+		const obfuscated: Record<string, unknown> = { ...slot };
+		let changed = false;
+		for (const key of ["text", "textHead", "textTail"] as const) {
+			const value = slot[key];
+			if (typeof value !== "string" || value.length === 0) continue;
+			const next = obfuscator.obfuscate(value);
+			if (next === value) continue;
+			obfuscated[key] = next;
+			changed = true;
+		}
+		return changed ? { ...preserveData, [snapcompact.PRESERVE_KEY]: obfuscated } : preserveData;
 	}
 
 	#deobfuscateFromProvider(text: string): string {
@@ -6816,7 +6884,12 @@ export class AgentSession {
 	 * the transcript can distinguish a deliberate user interrupt from an opaque
 	 * abort. Omit it for internal/lifecycle aborts.
 	 */
-	async abort(options?: { goalReason?: "interrupted" | "internal"; reason?: string }): Promise<void> {
+	async abort(options?: {
+		goalReason?: "interrupted" | "internal";
+		reason?: string;
+		/** Internal `/compact` startup keeps the manual-compaction marker alive while aborting the active turn. */
+		preserveCompaction?: boolean;
+	}): Promise<void> {
 		const userInterrupt = options?.reason === USER_INTERRUPT_LABEL;
 		if (userInterrupt) this.#advisorAutoResumeSuppressed = true;
 		// Pull advisor concerns out of the steer/follow-up queues before any await so
@@ -6831,7 +6904,17 @@ export class AgentSession {
 			this.abortRetry();
 			this.#promptGeneration++;
 			this.#scheduledHiddenNextTurnGeneration = undefined;
-			this.abortCompaction();
+			if (options?.preserveCompaction) {
+				// Manual `/compact` installed its own #compactionAbortController before
+				// this internal abort and must keep it alive (that marker is what makes
+				// isCompacting report true during startup). Any in-flight
+				// auto-compaction MUST still be cancelled, though: otherwise a
+				// background maintenance pass races the manual run and both
+				// appendCompaction/replaceMessages, double-rewriting session history.
+				this.#autoCompactionAbortController?.abort();
+			} else {
+				this.abortCompaction();
+			}
 			this.abortHandoff();
 			this.abortBash();
 			this.abortEval();
@@ -7804,12 +7887,12 @@ export class AgentSession {
 		if (compactMode?.rejectsFocus && customInstructions) {
 			throw new Error(`/compact ${compactMode.name} does not take focus instructions.`);
 		}
-		this.#disconnectFromAgent();
-		await this.abort({ goalReason: "internal" });
 		const compactionAbortController = new AbortController();
 		this.#compactionAbortController = compactionAbortController;
 
 		try {
+			this.#disconnectFromAgent();
+			await this.abort({ goalReason: "internal", preserveCompaction: true });
 			if (!this.model) {
 				throw new Error("No model selected");
 			}
@@ -7985,7 +8068,7 @@ export class AgentSession {
 					firstKeptEntryId = result.firstKeptEntryId;
 					tokensBefore = result.tokensBefore;
 					details = result.details;
-					preserveData = { ...(compactionPrep.preserveData ?? {}), ...(result.preserveData ?? {}) };
+					preserveData = mergeLlmCompactionPreserveData(compactionPrep.preserveData, result.preserveData);
 				} catch (err) {
 					if (err instanceof CompactionCancelledError) {
 						throw err;
@@ -8594,14 +8677,28 @@ export class AgentSession {
 		}
 		return COMPACTION_CHECK_NONE;
 	}
-	#assistantEndedWithSuccessfulYield(assistantMessage: AssistantMessage): boolean {
-		const toolCallId = this.#lastSuccessfulYieldToolCallId;
-		if (!toolCallId) return false;
+	#assistantMessageHasSuccessfulYieldToolCall(assistantMessage: AssistantMessage, toolCallId: string): boolean {
 		const lastToolCall = assistantMessage.content
 			.slice()
 			.reverse()
 			.find((content): content is ToolCall => content.type === "toolCall");
 		return lastToolCall?.name === "yield" && lastToolCall.id === toolCallId;
+	}
+
+	#assistantEndedWithSuccessfulYield(assistantMessage: AssistantMessage): boolean {
+		const toolCallId = this.#lastSuccessfulYieldToolCallId;
+		return toolCallId ? this.#assistantMessageHasSuccessfulYieldToolCall(assistantMessage, toolCallId) : false;
+	}
+
+	#findSuccessfulYieldAssistantMessage(messages: readonly AgentMessage[]): AssistantMessage | undefined {
+		const toolCallId = this.#lastSuccessfulYieldToolCallId;
+		if (!toolCallId) return undefined;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const message = messages[i];
+			if (message.role !== "assistant") continue;
+			if (this.#assistantMessageHasSuccessfulYieldToolCall(message, toolCallId)) return message;
+		}
+		return undefined;
 	}
 
 	async #handleEmptyAssistantStop(assistantMessage: AssistantMessage): Promise<boolean> {
@@ -10197,7 +10294,7 @@ export class AgentSession {
 				firstKeptEntryId = compactResult.firstKeptEntryId;
 				tokensBefore = compactResult.tokensBefore;
 				details = compactResult.details;
-				preserveData = { ...(compactionPrep.preserveData ?? {}), ...(compactResult.preserveData ?? {}) };
+				preserveData = mergeLlmCompactionPreserveData(compactionPrep.preserveData, compactResult.preserveData);
 			}
 
 			if (autoCompactionSignal.aborted) {
@@ -10622,7 +10719,16 @@ export class AgentSession {
 	#getRetryFallbackChains(): RetryFallbackChains {
 		const configuredChains = this.settings.get("retry.fallbackChains");
 		if (!configuredChains || typeof configuredChains !== "object") return {};
-		return configuredChains as RetryFallbackChains;
+		const chains: RetryFallbackChains = { ...(configuredChains as RetryFallbackChains) };
+		const defaultChain = chains.default;
+		if (Array.isArray(defaultChain)) {
+			for (const role of Object.keys(this.settings.getModelRoles())) {
+				if (role !== "default" && chains[role] === undefined) {
+					chains[role] = defaultChain;
+				}
+			}
+		}
+		return chains;
 	}
 
 	#validateRetryFallbackChains(): void {
