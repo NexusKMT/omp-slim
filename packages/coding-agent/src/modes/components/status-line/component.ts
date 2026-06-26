@@ -14,6 +14,7 @@ import { getSessionAccentAnsi, getSessionAccentHex } from "../../../utils/sessio
 import { sanitizeStatusText } from "../../shared";
 import { theme } from "../../theme/theme";
 import { canReuseCachedPr, createPrCacheContext, isSamePrCacheContext, type PrCacheContext } from "./git-utils";
+import * as jjInfo from "./jj-info";
 import { getPreset } from "./presets";
 import { renderSegment, type SegmentContext } from "./segments";
 import { getSeparator } from "./separators";
@@ -284,6 +285,14 @@ export class StatusLineComponent implements Component {
 	#cachedGitStatusCwd: string | undefined = undefined;
 	#gitStatusLastFetch = 0;
 	#gitStatusInFlightCwd: string | undefined = undefined;
+	#jjRoot: string | null | undefined = undefined;
+	#jjRootCwd: string | undefined = undefined;
+	#cachedJjBranch: string | null = null;
+	#jjBranchLastFetch = 0;
+	#jjBranchInFlight = false;
+	#cachedJjStatus: { staged: number; unstaged: number; untracked: number } | null = null;
+	#jjStatusLastFetch = 0;
+	#jjStatusInFlight = false;
 
 	// PR lookup caching (invalidated on branch/repo context changes)
 	#cachedPr: { number: number; url: string } | null | undefined = undefined;
@@ -653,15 +662,84 @@ export class StatusLineComponent implements Component {
 				nextStatus = null;
 			} finally {
 				if (this.#gitStatusInFlightCwd === gitCwd) {
+					const prev = this.#cachedGitStatusCwd === gitCwd ? this.#cachedGitStatus : null;
 					this.#cachedGitStatus = nextStatus;
 					this.#cachedGitStatusCwd = gitCwd;
 					this.#gitStatusLastFetch = Date.now();
 					this.#gitStatusInFlightCwd = undefined;
+					if (!this.#disposed && this.#onBranchChange && JSON.stringify(prev) !== JSON.stringify(nextStatus)) {
+						this.#onBranchChange();
+					}
 				}
 			}
 		})();
 
 		return this.#cachedGitStatusCwd === gitCwd ? this.#cachedGitStatus : null;
+	}
+
+	// Resolve (and cache per cwd) the jj workspace root, resetting both jj caches
+	// on a cwd change so a directory switch refetches label + status.
+	#jjRootFor(cwd: string): string | null {
+		if (this.#jjRoot === undefined || this.#jjRootCwd !== cwd) {
+			this.#jjRootCwd = cwd;
+			this.#jjRoot = jjInfo.findJjRoot(cwd);
+			this.#cachedJjBranch = null;
+			this.#jjBranchLastFetch = 0;
+			this.#cachedJjStatus = null;
+			this.#jjStatusLastFetch = 0;
+		}
+		return this.#jjRoot;
+	}
+
+	// jj working-copy bookmark label (nearest bookmark, change-id fallback), shown
+	// in the `git` segment where git HEAD is detached/absent under jj. Throttled,
+	// cached, and repaints on resolve.
+	#getJjBranch(): string | null {
+		const root = this.#jjRootFor(getProjectDir());
+		if (!root) return null;
+		if (this.#jjBranchInFlight || Date.now() - this.#jjBranchLastFetch < jjInfo.JJ_BRANCH_TTL_MS) {
+			return this.#cachedJjBranch;
+		}
+		this.#jjBranchInFlight = true;
+		(async () => {
+			try {
+				const next = await jjInfo.queryJjBranch(root);
+				const changed = next !== this.#cachedJjBranch;
+				this.#cachedJjBranch = next;
+				if (changed && !this.#disposed && this.#onBranchChange) {
+					this.#onBranchChange();
+				}
+			} finally {
+				this.#jjBranchLastFetch = Date.now();
+				this.#jjBranchInFlight = false;
+			}
+		})();
+		return this.#cachedJjBranch;
+	}
+
+	// jj working-copy status counts (`@` vs its parent), used in place of git
+	// status in a jj repo where `git status` has no `.git` to read. Throttled,
+	// cached, and repaints on resolve like #getJjBranch.
+	#getJjStatus(): { staged: number; unstaged: number; untracked: number } | null {
+		const root = this.#jjRootFor(getProjectDir());
+		if (!root) return null;
+		if (this.#jjStatusInFlight || Date.now() - this.#jjStatusLastFetch < jjInfo.JJ_BRANCH_TTL_MS) {
+			return this.#cachedJjStatus;
+		}
+		this.#jjStatusInFlight = true;
+		(async () => {
+			const prev = this.#cachedJjStatus;
+			try {
+				this.#cachedJjStatus = await jjInfo.queryJjStatus(root);
+			} finally {
+				this.#jjStatusLastFetch = Date.now();
+				this.#jjStatusInFlight = false;
+			}
+			if (!this.#disposed && this.#onBranchChange && JSON.stringify(prev) !== JSON.stringify(this.#cachedJjStatus)) {
+				this.#onBranchChange();
+			}
+		})();
+		return this.#cachedJjStatus;
 	}
 
 	#lookupPr(effectiveGitCwd?: string): { number: number; url: string } | null {
@@ -1030,8 +1108,13 @@ export class StatusLineComponent implements Component {
 		const activeRepoCache = shouldResolveActiveRepo
 			? this.#resolveActiveRepoCache()
 			: { projectDir, activeRepo: null, effectiveGitCwd: projectDir, worktree: null };
-		const gitBranch = includeGit || includePr ? this.#getCurrentBranch(activeRepoCache.effectiveGitCwd) : null;
-		const gitStatus = includeGit ? this.#getGitStatus(activeRepoCache.effectiveGitCwd) : null;
+		let gitBranch = includeGit || includePr ? this.#getCurrentBranch(activeRepoCache.effectiveGitCwd) : null;
+		if (includeGit && (gitBranch === "detached" || gitBranch === null)) {
+			gitBranch = this.#getJjBranch() ?? gitBranch;
+		}
+		const gitStatus = includeGit
+			? (this.#getJjStatus() ?? this.#getGitStatus(activeRepoCache.effectiveGitCwd))
+			: null;
 		const gitPr = includePr ? this.#lookupPr(activeRepoCache.effectiveGitCwd) : null;
 		return {
 			session: this.session,
