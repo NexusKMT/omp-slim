@@ -488,7 +488,20 @@ export class SecretObfuscator {
 						) {
 							continue;
 						}
-						const span = result.slice(match.start, match.end);
+						let replaceEnd = match.end;
+						let span = result.slice(match.start, replaceEnd);
+						if (entry.replacement !== undefined) {
+							const trailingChunk = trailingOutsidePreservedPlaceholderChunk(span, placeholder =>
+								this.#isGeneratedPlaceholder(placeholder),
+							);
+							if (trailingChunk.length > 0 && entry.replacement.startsWith(trailingChunk)) {
+								const trailingSuffix = entry.replacement.slice(trailingChunk.length);
+								if (trailingSuffix.length > 0 && result.slice(replaceEnd).startsWith(trailingSuffix)) {
+									replaceEnd += trailingSuffix.length;
+									span = result.slice(match.start, replaceEnd);
+								}
+							}
+						}
 						// A custom replacement is a single redaction marker for the whole
 						// match, so emit it once around the preserved placeholder rather
 						// than per surrounding chunk (which duplicates it, e.g.
@@ -504,8 +517,8 @@ export class SecretObfuscator {
 										chunk => this.#generateReplacement(chunk),
 										placeholder => this.#isGeneratedPlaceholder(placeholder),
 									);
-						result = replaceRange(result, match.start, match.end, redacted);
-						origin = replaceRange(origin, match.start, match.end, "I".repeat(redacted.length));
+						result = replaceRange(result, match.start, replaceEnd, redacted);
+						origin = replaceRange(origin, match.start, replaceEnd, "I".repeat(redacted.length));
 					} else {
 						const replacement = entry.replacement ?? this.#generateRegexReplacement(match.value, entry.regex);
 						result = replaceRange(result, match.start, match.end, replacement);
@@ -1225,6 +1238,23 @@ function transformOutsidePlaceholders(
 	return result;
 }
 
+function trailingOutsidePreservedPlaceholderChunk(
+	text: string,
+	shouldPreservePlaceholder: (placeholder: string) => boolean,
+): string {
+	PLACEHOLDER_RE.lastIndex = 0;
+	let pendingIndex = 0;
+	let sawPlaceholder = false;
+	for (;;) {
+		const match = PLACEHOLDER_RE.exec(text);
+		if (match === null) break;
+		if (!shouldPreservePlaceholder(match[0])) continue;
+		sawPlaceholder = true;
+		pendingIndex = match.index + match[0].length;
+	}
+	return sawPlaceholder ? text.slice(pendingIndex) : "";
+}
+
 function buildReplaceRegexScan(
 	text: string,
 	ranges: ReadonlyArray<{ start: number; end: number }>,
@@ -1308,12 +1338,16 @@ function redactOutsideGeneratedPlaceholders(
 	);
 }
 
-// Apply a fixed custom replacement ONCE across a matched span while preserving
-// any inner generated placeholders. The replacement is the user's single
-// redaction marker for the whole match, so reusing it per surrounding chunk
-// would duplicate it around the placeholder; emit it for the first non-empty
-// surrounding chunk only and drop the rest (they are redacted into the one
-// marker). The reversible placeholder stays intact in its relative position.
+// Apply a fixed custom replacement across a matched span while preserving any
+// inner generated placeholders. Usually the replacement is the user's single
+// redaction marker for the whole match, so emit it for the first non-empty
+// surrounding chunk and drop later chunks. But bounded regexes can cut through
+// an already-emitted marker on the trailing side (`X#…#RED` from
+// `XSECRETUVREDACTED`), where dropping the later prefix would leave raw bytes
+// (`ACTED`) to be consumed on the next pass. Promote later chunks that are a
+// prefix of the replacement to the FULL marker so the first pass is already a
+// fixed point. The reversible placeholder stays intact in its relative
+// position.
 function redactWithFixedReplacementOutsidePlaceholders(
 	text: string,
 	replacement: string,
@@ -1324,9 +1358,12 @@ function redactWithFixedReplacementOutsidePlaceholders(
 		text,
 		shouldPreservePlaceholder,
 		chunk => {
-			if (chunk.length === 0 || emitted) return "";
-			emitted = true;
-			return replacement;
+			if (chunk.length === 0) return "";
+			if (!emitted) {
+				emitted = true;
+				return replacement;
+			}
+			return replacement.startsWith(chunk) ? replacement : "";
 		},
 		placeholder => placeholder,
 	);

@@ -629,6 +629,21 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obf.obfuscate(out)).toBe(out);
 	});
 
+	it("keeps bounded custom replacement matches idempotent around preserved placeholders", () => {
+		const obf = new SecretObfuscator(
+			[
+				{ type: "plain", content: "SECRETUV" },
+				{ type: "regex", mode: "replace", content: "[A-Z0-9]{8,12}", replacement: "REDACTED" },
+			],
+			"M".repeat(43),
+		);
+		const out = obf.obfuscate("XSECRETUVREDACTED");
+
+		expect(out).toMatch(/^REDACTED#[A-Z0-9]+:U#REDACTED$/);
+		expect(obf.obfuscate(out)).toBe(out);
+		expect(obf.deobfuscate(out)).toBe("REDACTEDSECRETUVREDACTED");
+	});
+
 	it("redacts default replace regex remainders around prior placeholders", () => {
 		const obf = new SecretObfuscator(
 			[
