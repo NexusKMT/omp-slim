@@ -56,6 +56,7 @@ import {
 } from "./usage/openai-codex-reset";
 import { opencodeGoUsageProvider } from "./usage/opencode-go";
 import { zaiUsageProvider } from "./usage/zai";
+import { umansUsageProvider } from "./usage/umans";
 
 const USAGE_RANKING_METRIC_EPSILON = 1e-9;
 
@@ -515,6 +516,7 @@ const DEFAULT_USAGE_PROVIDERS: UsageProvider[] = [
 	ollamaCloudUsageProvider,
 	claudeUsageProvider,
 	zaiUsageProvider,
+	umansUsageProvider,
 	opencodeGoUsageProvider,
 	githubCopilotUsageProvider,
 ];
