@@ -662,6 +662,26 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obf.obfuscate(out)).toBe(out);
 	});
 
+	it("redacts bounded regex remainders around renamed friendly placeholders", () => {
+		const sharedKey = "J".repeat(43);
+		const before = new SecretObfuscator([{ type: "plain", content: "abcdefgh", friendlyName: "old" }], sharedKey);
+		const oldToken = before.obfuscate("abcdefgh");
+		const after = new SecretObfuscator(
+			[
+				{ type: "plain", content: "abcdefgh", friendlyName: "new" },
+				{ type: "regex", mode: "replace", content: "api_key=[A-Za-z0-9]{11}" },
+			],
+			sharedKey,
+		);
+
+		const out = after.obfuscate(`api_key=${oldToken}XYZ`);
+
+		expect(out).toContain(oldToken);
+		expect(out).not.toContain("api_key=");
+		expect(out).not.toContain("XYZ");
+		expect(after.obfuscate(out)).toBe(out);
+	});
+
 	it("redacts default replace raw suffixes after prior placeholders", () => {
 		const obf = new SecretObfuscator(
 			[
@@ -755,6 +775,17 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(out).not.toBe("ZZ");
 		expect(out).toHaveLength(2);
 		expect(/^[A-Za-z0-9]{2}$/.test(out)).toBe(false);
+		expect(obf.obfuscate(out)).toBe(out);
+	});
+
+	it("exhausts two-character fallback candidates before keeping the sentinel", () => {
+		const obf = new SecretObfuscator([{ type: "regex", mode: "replace", content: "[A-Za-z0-9]." }], "Q".repeat(43));
+
+		const out = obf.obfuscate("ZZ");
+
+		expect(out).not.toBe("ZZ");
+		expect(out).toHaveLength(2);
+		expect(/[A-Za-z0-9]./.test(out)).toBe(false);
 		expect(obf.obfuscate(out)).toBe(out);
 	});
 

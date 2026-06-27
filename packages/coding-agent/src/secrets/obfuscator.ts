@@ -80,9 +80,9 @@ function findNonMatchingReplacement(value: string, regex: RegExp): string | unde
 	const len = value.length;
 	if (len === 0) return undefined;
 	const base = NONMATCHING_REPLACEMENT_CHARS.length;
-	// 91^2 = 8281 candidates cover every 1–2 char value (the only realistic
-	// trigger) exhaustively; the cap also bounds longer astronomical collisions.
-	const maxAttempts = 4096;
+	// Exhaust every 1–2 char candidate (the only realistic trigger). Longer
+	// collisions stay bounded to avoid pathological sweeps.
+	const maxAttempts = Math.max(4096, len <= 2 ? base ** len : 0);
 	const chars = new Array<string>(len);
 	for (let n = 0; n < maxAttempts; n++) {
 		let q = n;
@@ -300,6 +300,16 @@ const PLACEHOLDER_RE = /#(?:[A-Z0-9]+_)?[A-Z0-9]{4,}(?::[ULCM])?#/g;
 function placeholderWithoutFriendlyName(placeholder: string): string | undefined {
 	const match = /^#[A-Z0-9]+_([A-Z0-9]{4,}(?::[ULCM])?)#$/.exec(placeholder);
 	return match ? `#${match[1]}#` : undefined;
+}
+
+function lookupFriendlyPlaceholderAlias(
+	deobfuscateMap: ReadonlyMap<string, { secret: string; recursive: boolean }>,
+	placeholder: string,
+): { secret: string; recursive: boolean } | undefined {
+	const direct = deobfuscateMap.get(placeholder);
+	if (direct !== undefined) return direct;
+	const unprefixed = placeholderWithoutFriendlyName(placeholder);
+	return unprefixed !== undefined ? deobfuscateMap.get(unprefixed) : undefined;
 }
 
 const PENDING_PLACEHOLDER_SUFFIX_RE = /#(?:[A-Z0-9]+_)?[A-Z0-9]*(?::[ULCM]?)?$/;
@@ -592,18 +602,10 @@ export class SecretObfuscator {
 		for (;;) {
 			let shouldContinue = false;
 			const next = result.replace(PLACEHOLDER_RE, match => {
-				const direct = this.#deobfuscateMap.get(match);
-				if (direct !== undefined) {
-					shouldContinue ||= direct.recursive;
-					return direct.secret;
-				}
-				const unprefixed = placeholderWithoutFriendlyName(match);
-				if (unprefixed) {
-					const mapped = this.#deobfuscateMap.get(unprefixed);
-					if (mapped !== undefined) {
-						shouldContinue ||= mapped.recursive;
-						return mapped.secret;
-					}
+				const mapped = lookupFriendlyPlaceholderAlias(this.#deobfuscateMap, match);
+				if (mapped !== undefined) {
+					shouldContinue ||= mapped.recursive;
+					return mapped.secret;
 				}
 				if (allowLegacy) {
 					const legacy = this.#legacyDeobfuscateMap.get(match);
@@ -777,7 +779,7 @@ export class SecretObfuscator {
 	}
 
 	#isGeneratedPlaceholder(placeholder: string): boolean {
-		return this.#generatedPlaceholders.has(placeholder);
+		return lookupFriendlyPlaceholderAlias(this.#deobfuscateMap, placeholder) !== undefined;
 	}
 
 	// Replace `search` with `replacement` outside known generated placeholders while
@@ -1293,7 +1295,7 @@ function buildReplaceRegexScan(
 	for (const range of ranges) {
 		appendSegment(text.slice(cursor, range.start), cursor, range.start, false, false);
 		const placeholder = text.slice(range.start, range.end);
-		const mapping = deobfuscateMap.get(placeholder);
+		const mapping = lookupFriendlyPlaceholderAlias(deobfuscateMap, placeholder);
 		appendSegment(mapping?.secret ?? placeholder, range.start, range.end, true, mapping?.recursive ?? false);
 		cursor = range.end;
 	}
@@ -1392,7 +1394,7 @@ function deobfuscateGeneratedPlaceholderRanges(
 		const overlapEnd = Math.min(range.end, end);
 		result += text.slice(cursor, overlapStart);
 		const placeholder = text.slice(overlapStart, overlapEnd);
-		const mapping = deobfuscateMap.get(placeholder);
+		const mapping = lookupFriendlyPlaceholderAlias(deobfuscateMap, placeholder);
 		result += mapping?.secret ?? placeholder;
 		recursive ||= mapping?.recursive ?? false;
 		cursor = overlapEnd;
