@@ -100,7 +100,7 @@ function findNonMatchingReplacement(value: string, regex: RegExp): string | unde
 	// Longer collisions stay bounded. First exhaust every single-position
 	// substitution against the deterministic baseline (`AAAA…`, then `!AAA…`,
 	// `A!AA…`, …) so regexes that only need one out-of-class byte — regardless of
-	// position — are handled deterministically before the bounded search gives up.
+	// position — are handled deterministically.
 	const baseline = NONMATCHING_REPLACEMENT_CHARS[0].repeat(len);
 	for (let position = 0; position < len; position++) {
 		for (const ch of NONMATCHING_REPLACEMENT_CHARS) {
@@ -109,6 +109,15 @@ function findNonMatchingReplacement(value: string, regex: RegExp): string | unde
 			regex.lastIndex = 0;
 			if (!regex.test(candidate)) return candidate;
 		}
+	}
+	// If the regex can still match around a lone punctuation byte (for example
+	// `[A-Za-z0-9].*` matching the `AAAA` tail of `!AAAA`), try full-width
+	// same-byte fallbacks like `!!!!!`, `_____`, etc. before giving up.
+	for (const ch of NONMATCHING_REPLACEMENT_CHARS) {
+		const candidate = ch.repeat(len);
+		if (candidate === value) continue;
+		regex.lastIndex = 0;
+		if (!regex.test(candidate)) return candidate;
 	}
 	return undefined;
 }
