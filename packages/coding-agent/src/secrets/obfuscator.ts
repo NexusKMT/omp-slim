@@ -25,6 +25,7 @@ export type JsonRecord = { [key: string]: JsonValue | undefined };
 // ═══════════════════════════════════════════════════════════════════════════
 
 const REPLACEMENT_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+const NONMATCHING_REPLACEMENT_CHARS = `${REPLACEMENT_CHARS}!#$%&()*+,-./:;<=>?@[]^_{|}~`;
 
 /** Generate a deterministic same-length replacement string from a secret value. */
 function generateDeterministicReplacement(secret: string): string {
@@ -68,22 +69,25 @@ function ensureDistinctReplacement(replacement: string, secret: string): string 
  * STABLE nonmatching value instead of shipping the raw secret. A nonmatching
  * candidate is a fixed point under re-obfuscation — the regex never re-matches it,
  * so it cannot re-leak on a later pass. Candidates are enumerated deterministically
- * over `REPLACEMENT_CHARS` (same value+regex always yields the same redaction); the
- * sweep is bounded so a match-everything regex (`.`/`[\s\S]`) terminates, returning
+ * over a stable ASCII alphabet: alphanumerics first (usually enough), then
+ * punctuation fallback bytes when the regex covers every alphanumeric candidate.
+ * This keeps the common case readable while still finding a nonmatching
+ * same-length redaction for patterns such as `[A-Za-z0-9]{2}`. The sweep is
+ * bounded so a match-everything regex (`.`/`[\s\S]`) terminates, returning
  * undefined to let the caller keep the sentinel as the only available fixed point.
  */
 function findNonMatchingReplacement(value: string, regex: RegExp): string | undefined {
 	const len = value.length;
 	if (len === 0) return undefined;
-	const base = REPLACEMENT_CHARS.length;
-	// 62^2 = 3844 candidates cover every 1–2 char value (the only realistic
+	const base = NONMATCHING_REPLACEMENT_CHARS.length;
+	// 91^2 = 8281 candidates cover every 1–2 char value (the only realistic
 	// trigger) exhaustively; the cap also bounds longer astronomical collisions.
 	const maxAttempts = 4096;
 	const chars = new Array<string>(len);
 	for (let n = 0; n < maxAttempts; n++) {
 		let q = n;
 		for (let i = len - 1; i >= 0; i--) {
-			chars[i] = REPLACEMENT_CHARS[q % base];
+			chars[i] = NONMATCHING_REPLACEMENT_CHARS[q % base];
 			q = Math.floor(q / base);
 		}
 		const candidate = chars.join("");
