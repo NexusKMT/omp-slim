@@ -300,9 +300,18 @@ export function secretEntriesNeedPlaceholderKey(entries: SecretEntry[]): boolean
 		const content = entry.content;
 		if (applyReplacePhaseFrom(content, 0).includes(content)) return true;
 		// Test each replacement output in the form it SURVIVES the rest of the phase,
-		// so a fragment a later replacement erases no longer forces the key.
-		return replacePhase.some(([, replacement], i) =>
-			replacementCanFormContent(applyReplacePhaseFrom(replacement, i + 1), content),
+		// so a fragment a later replacement erases no longer forces the key. The
+		// content it tiles into must also survive those later replacements: if a
+		// shorter-content replacement rewrites the surrounding passthrough bytes
+		// (e.g. `AA -> SEC` forms `SEC`+`RET12`, then `R -> X` turns the freshly
+		// formed `SECRET12` into `SECXET12`), the content can never reach the
+		// obfuscate pass, so the key is not needed. Requiring content stability only
+		// drops such false positives — a formation that genuinely survives is still
+		// caught at the replacement index that produces it.
+		return replacePhase.some(
+			([, replacement], i) =>
+				applyReplacePhaseFrom(content, i + 1) === content &&
+				replacementCanFormContent(applyReplacePhaseFrom(replacement, i + 1), content),
 		);
 	});
 }

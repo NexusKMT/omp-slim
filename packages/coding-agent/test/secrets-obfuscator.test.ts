@@ -1068,6 +1068,27 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(out).not.toMatch(/#[A-Z0-9]/);
 	});
 
+	it("does not require the key when a later replacement erases the surrounding context bytes", () => {
+		// `AA -> SEC` could seed `SECRET12` by tiling its `SEC` output against
+		// passthrough `RET12`, but the later `R -> X` rewrites that surrounding `R`,
+		// so a freshly formed `SECRET12` becomes `SECXET12` before the obfuscate pass
+		// — direct `SECRET12` is also shadowed to `SAFE`. The probe must model that
+		// later replacements destroy the required surrounding bytes, not just the
+		// fragment itself, and stay key-free for this effectively non-placeholding
+		// config (otherwise it writes secret-placeholder.key and fails startup in an
+		// unwritable agent config dir).
+		const entries: SecretEntry[] = [
+			{ type: "plain", content: "SECRET12", mode: "obfuscate" },
+			{ type: "plain", content: "SECRET12", mode: "replace", replacement: "SAFE" },
+			{ type: "plain", content: "AA", mode: "replace", replacement: "SEC" },
+			{ type: "plain", content: "R", mode: "replace", replacement: "X" },
+		];
+		expect(secretEntriesNeedPlaceholderKey(entries)).toBe(false);
+		const out = new SecretObfuscator(entries, "test-placeholder-key").obfuscate("AARET12 and SECRET12");
+		expect(out).not.toContain("SECRET12");
+		expect(out).not.toMatch(/#[A-Z0-9]/);
+	});
+
 	it("redacts a raw sentinel-shaped suffix bridged into a match by a prior placeholder", () => {
 		// A prior-call placeholder followed by RAW text that merely looks like a
 		// deterministic redaction sentinel (`ZZ…`). The default-replace regex matches
