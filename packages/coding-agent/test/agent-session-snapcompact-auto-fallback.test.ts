@@ -22,6 +22,11 @@ interface Harness {
 interface HarnessOptions {
 	activeModel: { provider: GeneratedProvider; id: string };
 	seedMessages?: Message[];
+	// Prompt-token count billed on the triggering assistant turn. Stays at or
+	// below the active model's context window for a threshold-driven compaction;
+	// exceeding it routes through the overflow-recovery path, which drops the
+	// failed turn (and, in a minimal transcript, leaves nothing to summarize).
+	triggerInputTokens?: number;
 }
 
 async function createHarness(tempDir: TempDir, authStorage: AuthStorage, options: HarnessOptions): Promise<Harness> {
@@ -66,6 +71,7 @@ async function createHarness(tempDir: TempDir, authStorage: AuthStorage, options
 	});
 
 	const triggerThreshold = () => {
+		const inputTokens = options.triggerInputTokens ?? 245000;
 		const assistantMsg = {
 			role: "assistant" as const,
 			content: [{ type: "text" as const, text: "Done." }],
@@ -74,11 +80,11 @@ async function createHarness(tempDir: TempDir, authStorage: AuthStorage, options
 			model: activeModel.id,
 			stopReason: "stop" as const,
 			usage: {
-				input: 245000,
+				input: inputTokens,
 				output: 1000,
 				cacheRead: 0,
 				cacheWrite: 0,
-				totalTokens: 246000,
+				totalTokens: inputTokens + 1000,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
 			timestamp: Date.now(),
@@ -134,6 +140,10 @@ describe("AgentSession auto-snapcompact local-blocker fallback", () => {
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
 		const harness = await createHarness(tempDir, authStorage, {
 			activeModel: { provider: "aimlapi", id: "claude-sonnet-4-5-20250929" },
+			// claude-sonnet-4-5 has a 200K window; bill just under it so the turn
+			// trips the threshold compaction (which keeps the turn) instead of the
+			// overflow-recovery path (which drops it and empties the summarize set).
+			triggerInputTokens: 195_000,
 			seedMessages: [
 				{
 					role: "user",
