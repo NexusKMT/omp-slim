@@ -578,15 +578,6 @@ export class SecretObfuscator {
 
 			for (const match of matches) {
 				if (entry.mode === "replace") {
-					if (match.partialPlaceholderCut) {
-						// Mirror the obfuscate-mode skip: a replace match whose boundary cuts
-						// into a generated placeholder's expanded value would redact only the
-						// bytes outside the snapped token, and that deterministic redaction is
-						// not a fixed point across re-obfuscation passes (the scrambled prefix
-						// drifts, e.g. `ZZgK#…#` → `ZZgZ#…#`). The cut secret is already
-						// obfuscated as that placeholder, so leave the match untouched.
-						continue;
-					}
 					if (match.preserveGeneratedPlaceholders) {
 						if (
 							match.preserveInputPlaceholders &&
@@ -638,32 +629,11 @@ export class SecretObfuscator {
 					}
 				} else {
 					if (match.scanMatchLength < MIN_OBFUSCATE_SECRET_LEN) {
-						// Tone down short regex match obfuscation to avoid false matches on
-						// small words/fragments. Measure the regex's own match length in the
+						// Tone down short regex matches to avoid obfuscating small
+						// words/fragments. Measure the regex's own match length in the
 						// canonical (placeholder-expanded) scan view, not the rewritten
-						// source span: a match that straddles an already-emitted `#…#` token
-						// has its range extended to cover the whole token, so both the source
-						// span and the expanded canonical overstate how much content the
-						// regex actually matched. This MUST run before the
-						// preserve-input-placeholders branch below: on a re-obfuscation pass
-						// a sub-threshold match that straddles a prior placeholder would
-						// otherwise rewrite its surrounding context into fresh placeholders,
-						// breaking the obfuscate() fixed point (and drifting provider-visible
-						// history / prompt-cache prefixes), or re-placeholder across the token
-						// and corrupt round-trip deobfuscation.
-						continue;
-					}
-					if (match.partialPlaceholderCut) {
-						// A regex match whose boundary falls inside a prior placeholder's
-						// expanded value gets snapped out to the whole `#…#` token, so two
-						// such matches around one placeholder map to overlapping text ranges
-						// that clobber on apply and drop bytes (e.g. a plain `ABCDEFGH`
-						// secret plus `[A-Z]{8}` turning `YYBBABCDEFGHSECRETUV` into a
-						// placeholder that restored as `YYBBABCDEFGHETUV`). This also runs
-						// before the preserve-input-placeholders branch so re-obfuscation
-						// stays a fixed point once the cut secret is itself an input
-						// placeholder. The cut secret is already obfuscated as that
-						// placeholder, so leave it — and the surrounding bytes — untouched.
+						// source span, so the threshold reflects how much content the regex
+						// actually matched.
 						continue;
 					}
 					if (match.preserveInputPlaceholders) {
@@ -1008,7 +978,6 @@ export class SecretObfuscator {
 		value: string;
 		canonicalValue: string;
 		scanMatchLength: number;
-		partialPlaceholderCut: boolean;
 		recursive: boolean;
 		preserveGeneratedPlaceholders: boolean;
 		preserveInputPlaceholders: boolean;
@@ -1027,7 +996,6 @@ export class SecretObfuscator {
 			value: string;
 			canonicalValue: string;
 			scanMatchLength: number;
-			partialPlaceholderCut: boolean;
 			recursive: boolean;
 			preserveGeneratedPlaceholders: boolean;
 			preserveInputPlaceholders: boolean;
@@ -1056,6 +1024,16 @@ export class SecretObfuscator {
 			let inputPlaceholderOutsideChunkCount = 0;
 
 			const mapped = mapReplaceRegexMatch(regexScan.segments, start, end);
+			if (mapped.partialPlaceholderCut) {
+				// The match straddles a generated placeholder (its boundary falls inside
+				// the secret's expanded value). Rewriting across the token drops bytes
+				// (obfuscate) or drifts the redaction across re-obfuscation passes
+				// (replace), so resume scanning just past the placeholder instead — the
+				// cut secret stays as its existing placeholder and any trailing
+				// wholly-outside content is matched fresh on the next iteration.
+				regex.lastIndex = mapped.cutResumeIndex;
+				continue;
+			}
 			start = mapped.start;
 			end = mapped.end;
 			preserveGeneratedPlaceholders = mapped.preserveGeneratedPlaceholders;
@@ -1121,7 +1099,6 @@ export class SecretObfuscator {
 				scanMatchLength,
 				recursive,
 				preserveGeneratedPlaceholders,
-				partialPlaceholderCut: mapped.partialPlaceholderCut,
 				preserveInputPlaceholders,
 				inputPlaceholderOutside,
 				inputPlaceholderOutsideIndependentlyMatches,
@@ -1441,6 +1418,7 @@ function mapReplaceRegexMatch(
 	recursive: boolean;
 	preserveGeneratedPlaceholders: boolean;
 	partialPlaceholderCut: boolean;
+	cutResumeIndex: number;
 } {
 	const startSegment = findScanSegment(segments, scanStart);
 	const endSegment = findScanSegment(segments, scanEnd - 1);
@@ -1459,12 +1437,20 @@ function mapReplaceRegexMatch(
 		(endSegment.generatedPlaceholder && scanEnd < endSegment.scanEnd);
 	let recursive = false;
 	let preserveGeneratedPlaceholders = false;
+	// When the match straddles a placeholder, resume scanning just past the last
+	// overlapping placeholder so trailing wholly-outside content (e.g. an 8-char
+	// run after the secret) still gets matched instead of being consumed by the
+	// straddling span.
+	let cutResumeIndex = scanStart;
 	for (const segment of segments) {
 		if (segment.scanStart >= scanEnd || segment.scanEnd <= scanStart) continue;
 		recursive ||= segment.recursive;
 		preserveGeneratedPlaceholders ||= segment.generatedPlaceholder;
+		if (segment.generatedPlaceholder && segment.scanEnd > cutResumeIndex) {
+			cutResumeIndex = segment.scanEnd;
+		}
 	}
-	return { start, end, recursive, preserveGeneratedPlaceholders, partialPlaceholderCut };
+	return { start, end, recursive, preserveGeneratedPlaceholders, partialPlaceholderCut, cutResumeIndex };
 }
 
 function findScanSegment(segments: ReadonlyArray<RegexScanSegment>, scanIndex: number): RegexScanSegment {

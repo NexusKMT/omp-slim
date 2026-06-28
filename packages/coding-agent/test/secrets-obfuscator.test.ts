@@ -421,12 +421,12 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 	it("leaves placeholders intact when a regex match cuts across their expanded value", () => {
 		// `[A-Z]{8}` meets MIN_OBFUSCATE_SECRET_LEN, but on "YYBBABCDEFGHSECRETUV"
 		// (plain secret `ABCDEFGH`) its greedy 8-char matches start/end inside the
-		// secret's placeholder expansion ("YYBBABCD", "EFGHSECR"). Each got snapped
-		// to the whole `#…#` token, so the two matches mapped to overlapping text
-		// ranges that clobbered on apply and dropped the `SECR` bytes (round-trip
-		// restored "YYBBABCDEFGHETUV"). Such partial-placeholder cuts must be left
-		// alone: the secret stays hidden as its placeholder, the surrounding literals
-		// survive, the round trip is exact, and re-obfuscation is a fixed point.
+		// secret's placeholder expansion ("YYBBABCD", "EFGHSECR"). Snapping each to
+		// the whole `#…#` token mapped them to overlapping ranges that clobbered on
+		// apply and dropped the `SECR` bytes (round-trip restored "YYBBABCDEFGHETUV").
+		// The scan now resumes past the cut placeholder instead, so the secret stays
+		// hidden, no bytes are lost, the trailing 8-char run is obfuscated on its own,
+		// and re-obfuscation is a fixed point.
 		const obfuscator = new SecretObfuscator([
 			{ type: "plain", content: "ABCDEFGH" },
 			{ type: "regex", content: "[A-Z]{8}" },
@@ -435,20 +435,19 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		const obfuscated = obfuscator.obfuscate("YYBBABCDEFGHSECRETUV");
 
 		expect(obfuscated).not.toContain("ABCDEFGH");
-		expect(obfuscated.startsWith("YYBB")).toBe(true);
-		expect(obfuscated.endsWith("SECRETUV")).toBe(true);
+		expect(obfuscated).not.toContain("SECRETUV");
 		expect(obfuscator.deobfuscate(obfuscated)).toBe("YYBBABCDEFGHSECRETUV");
 		expect(obfuscator.obfuscate(obfuscated)).toBe(obfuscated);
 	});
 
 	it("keeps replace regexes from rewriting placeholders their match cuts across", () => {
 		// Same partial-placeholder cut as above but in replace mode: `[A-Z]{8}`
-		// matches straddle the `ABCDEFGH` placeholder, and redacting only the bytes
-		// outside the snapped token was not a fixed point — the deterministic
-		// scramble of the prefix drifted across re-obfuscation passes ("ZZgK…" →
-		// "ZZgZ…"), breaking the provider-history / prompt-cache contract. The cut
-		// secret stays obfuscated as its placeholder and the surrounding bytes are
-		// left untouched, so re-obfuscation is stable and the secret never leaks.
+		// matches straddle the `ABCDEFGH` placeholder. Redacting only the bytes
+		// outside the snapped token was not a fixed point — the deterministic scramble
+		// of the prefix drifted across re-obfuscation passes ("ZZgK…" → "ZZgZ…"). The
+		// scan now resumes past the cut placeholder, so the cut secret stays hidden as
+		// its placeholder, the trailing 8-char run is redacted on its own, and
+		// re-obfuscation is stable.
 		const obfuscator = new SecretObfuscator([
 			{ type: "plain", content: "ABCDEFGH" },
 			{ type: "regex", content: "[A-Z]{8}", mode: "replace" },
@@ -457,6 +456,7 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		const obfuscated = obfuscator.obfuscate("YYBBABCDEFGHSECRETUV");
 
 		expect(obfuscated).not.toContain("ABCDEFGH");
+		expect(obfuscated).not.toContain("SECRETUV");
 		expect(obfuscator.obfuscate(obfuscated)).toBe(obfuscated);
 	});
 
