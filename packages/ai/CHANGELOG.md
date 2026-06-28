@@ -18,6 +18,9 @@
 ### Added
 
 - Added support for Baseten as an AI provider
+### Added
+
+- Umans usage provider: fetches `GET /v1/usage` and surfaces the rolling 5h request window + concurrency limits in `/usage`, `omp usage`, and the TUI status bar.
 
 ### Changed
 

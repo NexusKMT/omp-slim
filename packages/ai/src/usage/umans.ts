@@ -59,8 +59,7 @@ function buildAmount(args: {
 }): UsageAmount {
 	const used = args.used;
 	const limit = args.limit;
-	const usedFraction =
-		used !== undefined && limit !== undefined && limit > 0 ? Math.min(used / limit, 1) : undefined;
+	const usedFraction = used !== undefined && limit !== undefined && limit > 0 ? Math.min(used / limit, 1) : undefined;
 	const remainingFraction = usedFraction !== undefined ? Math.max(1 - usedFraction, 0) : undefined;
 	return {
 		used,

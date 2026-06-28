@@ -32,7 +32,11 @@ function fakeFetch(payload: unknown, status = 200): FetchImpl {
 	return fn as unknown as typeof fetch;
 }
 
-function fetchRecorder(calls: Array<{ url: string; headers: Record<string, string> }>, payload: unknown, status = 200): FetchImpl {
+function fetchRecorder(
+	calls: Array<{ url: string; headers: Record<string, string> }>,
+	payload: unknown,
+	status = 200,
+): FetchImpl {
 	const fn = async (input: string | URL | Request, init?: RequestInit) => {
 		calls.push({
 			url: String(input),
@@ -145,9 +149,15 @@ describe("umans usage provider", () => {
 	});
 
 	it("returns null when supports() is called for a different provider or credential type", () => {
-		expect(umansUsageProvider.supports?.({ provider: "zai", credential: { type: "api_key", apiKey: "x" } })).toBe(false);
-		expect(umansUsageProvider.supports?.({ provider: "umans", credential: { type: "oauth", accessToken: "x" } })).toBe(false);
-		expect(umansUsageProvider.supports?.({ provider: "umans", credential: { type: "api_key", apiKey: "x" } })).toBe(true);
+		expect(umansUsageProvider.supports?.({ provider: "zai", credential: { type: "api_key", apiKey: "x" } })).toBe(
+			false,
+		);
+		expect(
+			umansUsageProvider.supports?.({ provider: "umans", credential: { type: "oauth", accessToken: "x" } }),
+		).toBe(false);
+		expect(umansUsageProvider.supports?.({ provider: "umans", credential: { type: "api_key", apiKey: "x" } })).toBe(
+			true,
+		);
 	});
 
 	it("includes plan display name and account identity in metadata", async () => {
