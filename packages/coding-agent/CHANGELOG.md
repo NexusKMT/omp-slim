@@ -15,9 +15,26 @@
 - Fixed an obfuscate-mode secret regex whose sub-threshold match straddles a previously generated `#…#` placeholder re-obfuscating across the token — corrupting reversible deobfuscation (e.g. a plain `SECRETUV` secret plus `[A-Z]{6}` turning `XXSECRETUVYY` into a single placeholder that restored as `XXSECRETUV`) and, on a re-obfuscation pass, rewriting the surrounding context into fresh placeholders so the `obfuscate()` fixed point and provider-visible history/prompt-cache prefixes drifted. The short-match guard now measures the regex's own match length in the placeholder-expanded scan view (not the rewritten source span) and runs before the placeholder-preservation branch, so a match shorter than `MIN_OBFUSCATE_SECRET_LEN` is skipped, surrounding literals round-trip intact, and re-obfuscation stays a fixed point ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
 - Fixed a secret regex whose match boundary falls inside a previously generated `#…#` placeholder's expanded value mishandling the cut. In obfuscate mode the boundary was snapped out to the whole token, so two such matches around one placeholder mapped to overlapping source ranges that clobbered on apply and dropped bytes from reversible deobfuscation (e.g. a plain `ABCDEFGH` secret plus `[A-Z]{8}` turned `YYBBABCDEFGHSECRETUV` into a placeholder that restored as `YYBBABCDEFGHETUV`, dropping `SECR`); in replace mode the same cut redacted only the bytes outside the snapped token with a deterministic scramble that drifted across re-obfuscation passes (`ZZgK#…#` → `ZZgZ#…#`). The regex scan now resumes just past the cut placeholder rather than consuming the straddled span, so the cut secret stays hidden as its existing placeholder, no bytes are lost, any trailing wholly-outside content (e.g. an adjacent 8-char run) is still obfuscated or redacted on its own, and re-obfuscation is a fixed point ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
 
+## [16.2.6] - 2026-06-29
+
+### Changed
+
+- Optimized argument streaming performance by throttling JSON re-parsing for renderers that do not require raw input.
+
 ### Fixed
 
-- Fixed the bash interceptor blocking `echo` / `printf` redirects to `/dev/null`, `/dev/tty`, `/dev/stdout`, and `/dev/stderr` device sinks while still directing real file writes to the write tool. ([#3763](https://github.com/can1357/oh-my-pi/issues/3763))
+- Fixed memory leaks in the benchmark CLI by ensuring provider sessions are properly closed upon completion.
+- Fixed TUI rendering lag and shimmer frame starvation during streamed tool-call argument previews.
+- Fixed llama.cpp discovery mapping unlimited output limits (max_tokens = -1 / n_predict = -1) to the generic 32K cap instead of the actual discovered runtime context window.
+- Fixed memory exhaustion on Ctrl+C flush for large resumed sessions with repeated compaction summaries, and improved fork session previews starting with developer or assistant turns.
+- Fixed omp search applying web search provider filters before resolving its implicit provider chain.
+- Fixed Gemini web search to support standard GEMINI_API_KEY developer API credentials for native Google Search grounding, in addition to Cloud Code Assist OAuth.
+- Fixed the bash interceptor blocking echo and printf redirects to standard device sinks (such as /dev/null, /dev/tty, /dev/stdout, and /dev/stderr).
+- Fixed session file size inflation in the edit tool by pruning extremely large oldText and newText snapshots (over 32 KB) from tool-result details, while preserving visible diffs, paths, lines, and diagnostic metadata.
+- Fixed Windows MCP stdio launches for PATH-resolved npx.cmd shims by preserving the cmd.exe wrapper path to keep subprocess stdio attached.
+- Fixed the DuckDuckGo web_search provider returning empty results for non-encyclopedic queries by switching from the Instant Answer API to parsing the HTML frontend, and added clear error handling for bot-challenge throttling.
+- Fixed Windows --extension paths with spaces or \\?\ prefixes being truncated or incorrectly passed to Bun import/spawn APIs.
+- Fixed /mcp reauth compatibility with Cloudflare by aligning OAuth prompt behavior with the reference MCP SDK and updating the client label to oh-my-pi.
 
 ## [16.2.5] - 2026-06-28
 
