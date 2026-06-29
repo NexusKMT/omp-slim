@@ -378,6 +378,25 @@ function buildHashBase(key: string, value: string): string {
 	return tag;
 }
 
+// Build a deterministic, key-derived run of REPLACEMENT_CHARS of the given
+// length. Used to redact a per-chunk replace remainder to a marker that depends
+// only on the per-install key and the remainder length, so a fresh obfuscator
+// reproduces the identical marker (idempotent redaction across restarts) while
+// the run stays unpredictable without the key (raw sentinel-shaped bytes cannot
+// equal the marker, so they are still redacted rather than passed through).
+function buildKeyedReplacementRun(key: string, length: number): string {
+	if (length <= 0) return "";
+	const radix = REPLACEMENT_CHARS.length;
+	let out = "";
+	for (let block = 0; out.length < length; block++) {
+		const digest = new Bun.CryptoHasher("sha256", key).update(`replace-chunk\0${length}\0${block}`).digest();
+		for (let i = 0; i < digest.length && out.length < length; i++) {
+			out += REPLACEMENT_CHARS[digest[i] % radix];
+		}
+	}
+	return out;
+}
+
 /** Build the pre-friendly-name index-derived placeholder for session resume compatibility. */
 function buildLegacyPlaceholder(index: number): string {
 	let v = Bun.hash.xxHash32(String(index), LEGACY_HASH_SEED);
@@ -780,8 +799,20 @@ export class SecretObfuscator {
 		return deepWalkStrings(obj, s => this.obfuscate(s));
 	}
 
-	#generateReplacement(secret: string): string {
-		const replacement = generateDeterministicReplacement(secret);
+	#generateReplacement(chunk: string): string {
+		// Redact a per-chunk remainder to a marker that is a fixed point under
+		// re-redaction on ANY obfuscator sharing the key, so persisted obfuscated text
+		// — and the provider prompt-cache prefixes it anchors — never drifts across a
+		// restart. The marker keeps the `Z`/`ZZ` sentinel prefix (already a fixed point
+		// for <=2-char remainders) and, for longer remainders, a key-derived run that
+		// depends ONLY on the key and length. A fresh obfuscator reproduces the
+		// identical marker (so re-redacting it stays idempotent across restarts, where
+		// the content-derived chunk plus the session-local `#generatedReplaceChunks`
+		// were not), yet the run is unpredictable without the per-install key, so raw
+		// remainder bytes that merely look sentinel-shaped (e.g. `ZZZZ`) cannot equal
+		// the marker and are still redacted instead of passed through.
+		const replacement =
+			chunk.length <= 2 ? "Z".repeat(chunk.length) : `ZZ${buildKeyedReplacementRun(this.#key, chunk.length - 2)}`;
 		this.#generatedReplaceChunks.add(replacement);
 		return replacement;
 	}

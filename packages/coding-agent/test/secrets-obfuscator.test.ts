@@ -1210,6 +1210,33 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(restarted.obfuscate(persisted)).toBe(persisted);
 	});
 
+	it("keeps a multi-char default replace remainder stable across restart", () => {
+		// Regression: a per-chunk remainder longer than the 2-char `ZZ` sentinel was
+		// redacted to a content-derived `ZZ`+hash chunk that was only a fixed point
+		// within the generating session (tracked in #generatedReplaceChunks). A fresh
+		// obfuscator with the same key re-redacted it to a different value, so persisted
+		// obfuscated text — and the provider prompt-cache prefixes it anchors — drifted
+		// across restart (`ZZPL#…#` -> `ZZ7f#…#`). The remainder marker now depends only
+		// on the key and length, so a fresh instance reproduces it byte-identically.
+		const key = "Z".repeat(43);
+		const entries = [
+			{ type: "plain" as const, content: "ABCDEFGH" },
+			{ type: "regex" as const, mode: "replace" as const, content: "[A-Z0-9]{12}" },
+		];
+		const first = new SecretObfuscator(entries, key);
+		const token = first.obfuscate("ABCDEFGH");
+		const persisted = first.obfuscate("BBBBABCDEFGH");
+
+		// The 4-char remainder is redacted (raw bytes gone) but the placeholder survives.
+		expect(persisted).not.toContain("BBBB");
+		expect(persisted).toContain(token);
+		expect(first.obfuscate(persisted)).toBe(persisted);
+
+		// A fresh obfuscator (same key) reprocessing the persisted text must not drift.
+		const restarted = new SecretObfuscator(entries, key);
+		expect(restarted.obfuscate(persisted)).toBe(persisted);
+	});
+
 	it("ignores regex matches that fall entirely inside known placeholders", () => {
 		const obfuscator = new SecretObfuscator([
 			{ type: "plain", content: "abcdefgh" },
