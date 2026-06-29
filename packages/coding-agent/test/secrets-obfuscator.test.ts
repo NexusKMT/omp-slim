@@ -957,6 +957,33 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		}
 	});
 
+	it("redacts a context-sensitive replace regex to a value stable in place", () => {
+		// A replace-mode regex with lookbehind matches a value only in context, so a
+		// candidate tested in isolation can be accepted yet re-match once substituted
+		// back. Regression: `(?<=api=)[AZ]` redacting `api=Z` to `api=A` (A does not
+		// match a bare `A`) was then re-redacted to `api=Z` on the next pass, shipping
+		// the raw matched value on every other turn. The replacement must be a fixed
+		// point evaluated in its surrounding context. Both inputs exercise a distinct
+		// path: `Z` is the sentinel collision, `A`'s deterministic replacement (`Z`)
+		// differs from the value but still re-matches in context.
+		for (const input of ["api=Z", "api=A"]) {
+			const obf = new SecretObfuscator(
+				[{ type: "regex", mode: "replace", content: "(?<=api=)[AZ]" }],
+				"Q".repeat(43),
+			);
+
+			const out = obf.obfuscate(input);
+
+			expect(out).toHaveLength(input.length);
+			expect(out.startsWith("api=")).toBe(true);
+			// The matched character must not survive in a position the regex re-matches.
+			expect(/(?<=api=)[AZ]/.test(out)).toBe(false);
+			// Re-obfuscation is a fixed point, so it never oscillates back to the raw value.
+			expect(obf.obfuscate(out)).toBe(out);
+			expect(obf.obfuscate(obf.obfuscate(out))).toBe(out);
+		}
+	});
+
 	it("does not require a placeholder key for entries that never produce a placeholder", () => {
 		// Short plain obfuscate entries are toned down, so they must not force key
 		// creation; regex/long-plain obfuscate entries can placehold and do need it.

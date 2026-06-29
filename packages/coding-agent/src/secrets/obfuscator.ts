@@ -68,6 +68,52 @@ function ensureDistinctReplacement(replacement: string, secret: string): string 
 	return alt + replacement.slice(1);
 }
 
+// Width of surrounding context included when checking whether a fallback
+// replacement would be re-matched in place. A replace-mode regex can depend on
+// lookbehind/lookahead/word-boundary context, so a candidate must be tested as
+// it sits in the text, not in isolation. The window bounds the per-candidate
+// cost of the (already bounded) search; it comfortably exceeds any realistic
+// lookaround width, and truncation can only make the regex match LESS — the safe
+// direction, since a missed re-match keeps churning but never leaks more.
+const REGEX_CONTEXT_WINDOW = 512;
+
+interface RegexMatchContext {
+	/** Full text the match was found in (positions are offsets into it). */
+	text: string;
+	/** Start/end of the matched span being replaced. */
+	start: number;
+	end: number;
+}
+
+/**
+ * Whether `candidate`, substituted for the matched span in its surrounding text,
+ * is re-matched by `regex` at its own position. A replace-mode regex that depends
+ * on context (lookbehind/lookahead/`\b`) can match a candidate that does NOT match
+ * in isolation: e.g. `(?<=api=)[AZ]` never matches a bare `A`, but `api=A` does, so
+ * a candidate `A` chosen by an isolation test is re-redacted on the next obfuscate()
+ * pass and can oscillate back to the raw matched value. Testing in context makes the
+ * accepted replacement a genuine fixed point.
+ */
+function regexRematchesInContext(candidate: string, regex: RegExp, ctx: RegexMatchContext): boolean {
+	const windowStart = Math.max(0, ctx.start - REGEX_CONTEXT_WINDOW);
+	const left = ctx.text.slice(windowStart, ctx.start);
+	const right = ctx.text.slice(ctx.end, ctx.end + REGEX_CONTEXT_WINDOW);
+	const probe = left + candidate + right;
+	const spanStart = left.length;
+	const spanEnd = spanStart + candidate.length;
+	regex.lastIndex = 0;
+	for (let m = regex.exec(probe); m !== null; m = regex.exec(probe)) {
+		const matchStart = m.index;
+		const matchEnd = m.index + m[0].length;
+		// A match overlapping the candidate's own bytes means those bytes get
+		// re-redacted on a later pass — not a fixed point.
+		if (matchStart < spanEnd && matchEnd > spanStart) return true;
+		// Zero-width matches do not advance lastIndex; step past to avoid a loop.
+		if (m[0].length === 0) regex.lastIndex++;
+	}
+	return false;
+}
+
 /**
  * Search same-length replacements for one the regex does NOT match, so a default
  * regex secret whose deterministic replacement collides with its own value (the
@@ -85,7 +131,7 @@ function ensureDistinctReplacement(replacement: string, secret: string): string 
  * regex (`.`/`[\s\S]`, which also matches space and tab) terminates, returning
  * undefined to let the caller keep the sentinel as the only available fixed point.
  */
-function findNonMatchingReplacement(value: string, regex: RegExp): string | undefined {
+function findNonMatchingReplacement(value: string, regex: RegExp, context: RegexMatchContext): string | undefined {
 	const len = value.length;
 	if (len === 0) return undefined;
 	const base = NONMATCHING_REPLACEMENT_CHARS.length;
@@ -101,10 +147,9 @@ function findNonMatchingReplacement(value: string, regex: RegExp): string | unde
 			}
 			const candidate = chars.join("");
 			if (candidate === value) continue;
-			regex.lastIndex = 0;
-			if (!regex.test(candidate)) return candidate;
+			if (!regexRematchesInContext(candidate, regex, context)) return candidate;
 		}
-		return findWhitespaceFallbackReplacement(value, regex);
+		return findWhitespaceFallbackReplacement(value, regex, context);
 	}
 	// Longer collisions stay bounded. First exhaust every single-position
 	// substitution against the deterministic baseline (`AAAA…`, then `!AAA…`,
@@ -115,8 +160,7 @@ function findNonMatchingReplacement(value: string, regex: RegExp): string | unde
 		for (const ch of NONMATCHING_REPLACEMENT_CHARS) {
 			const candidate = `${baseline.slice(0, position)}${ch}${baseline.slice(position + 1)}`;
 			if (candidate === value) continue;
-			regex.lastIndex = 0;
-			if (!regex.test(candidate)) return candidate;
+			if (!regexRematchesInContext(candidate, regex, context)) return candidate;
 		}
 	}
 	// If the regex can still match around a lone punctuation byte (for example
@@ -125,10 +169,9 @@ function findNonMatchingReplacement(value: string, regex: RegExp): string | unde
 	for (const ch of NONMATCHING_REPLACEMENT_CHARS) {
 		const candidate = ch.repeat(len);
 		if (candidate === value) continue;
-		regex.lastIndex = 0;
-		if (!regex.test(candidate)) return candidate;
+		if (!regexRematchesInContext(candidate, regex, context)) return candidate;
 	}
-	return findWhitespaceFallbackReplacement(value, regex);
+	return findWhitespaceFallbackReplacement(value, regex, context);
 }
 
 /**
@@ -142,20 +185,22 @@ function findNonMatchingReplacement(value: string, regex: RegExp): string | unde
  * filler and the whitespace alike, so this still returns undefined there, keeping
  * the caller's sentinel as the sole fixed point.
  */
-function findWhitespaceFallbackReplacement(value: string, regex: RegExp): string | undefined {
+function findWhitespaceFallbackReplacement(
+	value: string,
+	regex: RegExp,
+	context: RegexMatchContext,
+): string | undefined {
 	const len = value.length;
 	const filler = NONMATCHING_REPLACEMENT_CHARS[0];
 	for (const ws of WHITESPACE_REPLACEMENT_CHARS) {
 		const full = ws.repeat(len);
 		if (full !== value) {
-			regex.lastIndex = 0;
-			if (!regex.test(full)) return full;
+			if (!regexRematchesInContext(full, regex, context)) return full;
 		}
 		for (let pos = 0; pos < len; pos++) {
 			const candidate = `${filler.repeat(pos)}${ws}${filler.repeat(len - pos - 1)}`;
 			if (candidate === value) continue;
-			regex.lastIndex = 0;
-			if (!regex.test(candidate)) return candidate;
+			if (!regexRematchesInContext(candidate, regex, context)) return candidate;
 		}
 	}
 	return undefined;
@@ -623,7 +668,13 @@ export class SecretObfuscator {
 						result = replaceRange(result, match.start, replaceEnd, redacted);
 						origin = replaceRange(origin, match.start, replaceEnd, "I".repeat(redacted.length));
 					} else {
-						const replacement = entry.replacement ?? this.#generateRegexReplacement(match.value, entry.regex);
+						const replacement =
+							entry.replacement ??
+							this.#generateRegexReplacement(match.value, entry.regex, {
+								text: result,
+								start: match.start,
+								end: match.end,
+							});
 						result = replaceRange(result, match.start, match.end, replacement);
 						origin = replaceRange(origin, match.start, match.end, "I".repeat(replacement.length));
 					}
@@ -749,22 +800,30 @@ export class SecretObfuscator {
 	}
 
 	/**
-	 * Replacement for a default (no custom replacement) regex match. Like a plain
-	 * secret, a value equal to the `Z`/`ZZ` sentinel (or an astronomical hash
-	 * collision) must not ship verbatim — but unlike a plain secret a regex can
-	 * re-match its own perturbed output. So when the deterministic replacement
-	 * collides with the value, search same-length candidates for one the regex does
-	 * NOT match: such a value is a STABLE fixed point under re-obfuscation (the regex
-	 * never re-matches it) and so cannot re-leak on a later pass. A single
-	 * perturbation is not enough — it may also match the regex (e.g. `B` is needed,
-	 * not `A`, for `Z|A`), so the search tries further candidates before giving up.
-	 * Only when no candidate avoids the regex (a pathological match-everything config
-	 * such as `.`/`[\s\S]`) keep the sentinel as the sole available fixed point.
+	 * Replacement for a default (no custom replacement) regex match. The output must
+	 * be a fixed point under re-obfuscation: a regex can re-match its own replacement,
+	 * and a later obfuscate() pass would then re-redact it — at best churning the
+	 * provider-visible text, at worst oscillating back to the raw matched value. The
+	 * deterministic replacement already differs from most values, but it is
+	 * all-alphanumeric and a regex may still match it, either directly (a `Z`/`ZZ`
+	 * sentinel collision, or a class like `[A-Za-z0-9]+`) or only in context
+	 * (lookbehind/lookahead/`\b`, e.g. `(?<=api=)[AZ]`). When it would re-match,
+	 * search same-length candidates IN CONTEXT for one the regex does not re-match:
+	 * that value is a stable fixed point and cannot re-leak. A single perturbation is
+	 * not enough — it may also match (e.g. `B`, not `A`, for `Z|A`) — so the search
+	 * tries further candidates before giving up. Only when no candidate avoids the
+	 * regex (a pathological match-everything config such as `.`/`[\s\S]`) keep the
+	 * deterministic value as the sole available fixed point.
 	 */
-	#generateRegexReplacement(value: string, regex: RegExp): string {
+	#generateRegexReplacement(value: string, regex: RegExp, context: RegexMatchContext): string {
 		let replacement = generateDeterministicReplacement(value);
-		if (replacement === value) {
-			const stable = findNonMatchingReplacement(value, regex);
+		// Verify in context, not just against the sentinel collision: the
+		// deterministic replacement is all-alphanumeric and a context-sensitive regex
+		// (lookbehind/lookahead/`\b`) can re-match it even when it differs from the
+		// value, so a later pass would re-redact and could oscillate back to the raw
+		// secret. Search for a candidate the regex does not re-match in place.
+		if (replacement === value || regexRematchesInContext(replacement, regex, context)) {
+			const stable = findNonMatchingReplacement(value, regex, context);
 			if (stable !== undefined) replacement = stable;
 			regex.lastIndex = 0;
 		}
