@@ -984,6 +984,33 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		}
 	});
 
+	it("redacts a wide-lookbehind replace regex to a value stable in place", () => {
+		// A lookbehind wider than the re-match back-scan window (512) must still
+		// evaluate against the full surrounding text. Regression: truncating the
+		// fixed-point probe to a fixed window dropped the 600-char lookbehind, so the
+		// check falsely accepted a candidate the regex DOES re-match once the whole
+		// prefix is present — the redaction then oscillated back to the raw matched
+		// value on alternating obfuscate() passes, leaking it to the provider.
+		const prefix = "A".repeat(600);
+		const re = new RegExp(`(?<=${prefix})[AZ]`);
+		for (const input of [`${prefix}Z`, `${prefix}A`]) {
+			const obf = new SecretObfuscator(
+				[{ type: "regex", mode: "replace", content: `(?<=${prefix})[AZ]` }],
+				"Q".repeat(43),
+			);
+
+			const out = obf.obfuscate(input);
+
+			expect(out).toHaveLength(input.length);
+			expect(out.startsWith(prefix)).toBe(true);
+			// The matched character must not survive where the full-context regex re-matches.
+			expect(re.test(out)).toBe(false);
+			// Re-obfuscation is a fixed point, so it never oscillates back to the raw value.
+			expect(obf.obfuscate(out)).toBe(out);
+			expect(obf.obfuscate(obf.obfuscate(out))).toBe(out);
+		}
+	});
+
 	it("does not require a placeholder key for entries that never produce a placeholder", () => {
 		// Short plain obfuscate entries are toned down, so they must not force key
 		// creation; regex/long-plain obfuscate entries can placehold and do need it.

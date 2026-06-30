@@ -68,14 +68,16 @@ function ensureDistinctReplacement(replacement: string, secret: string): string 
 	return alt + replacement.slice(1);
 }
 
-// Width of surrounding context included when checking whether a fallback
-// replacement would be re-matched in place. A replace-mode regex can depend on
-// lookbehind/lookahead/word-boundary context, so a candidate must be tested as
-// it sits in the text, not in isolation. The window bounds the per-candidate
-// cost of the (already bounded) search; it comfortably exceeds any realistic
-// lookaround width, and truncation can only make the regex match LESS — the safe
-// direction, since a missed re-match keeps churning but never leaks more.
-const REGEX_CONTEXT_WINDOW = 512;
+// How far left of the matched span the re-match scan begins looking for a match
+// that overlaps the candidate. This bounds ONLY the match-start search position,
+// never the lookbehind/lookahead context: the probe below substitutes the
+// candidate into the FULL text, so a regex's lookbehind/lookahead assertions
+// always evaluate against complete context regardless of width. The single
+// re-match this misses is one that begins more than this many bytes before the
+// span and extends into it (a single match longer than the window) — that only
+// churns the chosen redaction marker between candidates, never back to the raw
+// matched value, so it cannot leak a secret.
+const REGEX_REMATCH_BACKSCAN = 512;
 
 interface RegexMatchContext {
 	/** Full text the match was found in (positions are offsets into it). */
@@ -91,23 +93,28 @@ interface RegexMatchContext {
  * on context (lookbehind/lookahead/`\b`) can match a candidate that does NOT match
  * in isolation: e.g. `(?<=api=)[AZ]` never matches a bare `A`, but `api=A` does, so
  * a candidate `A` chosen by an isolation test is re-redacted on the next obfuscate()
- * pass and can oscillate back to the raw matched value. Testing in context makes the
- * accepted replacement a genuine fixed point.
+ * pass and can oscillate back to the raw matched value. The probe substitutes the
+ * candidate into the FULL text — not a truncated window — so a wide lookbehind or
+ * lookahead (e.g. `(?<=A{600})`) still evaluates against the context that makes it
+ * match. Truncating that context dropped the assertion's reach and falsely
+ * accepted an oscillating, leaky candidate. The scan starts a bounded distance
+ * left of the span and stops once a match begins at/after the span's end (matches
+ * arrive in order), keeping per-candidate cost independent of total text length.
  */
 function regexRematchesInContext(candidate: string, regex: RegExp, ctx: RegexMatchContext): boolean {
-	const windowStart = Math.max(0, ctx.start - REGEX_CONTEXT_WINDOW);
-	const left = ctx.text.slice(windowStart, ctx.start);
-	const right = ctx.text.slice(ctx.end, ctx.end + REGEX_CONTEXT_WINDOW);
-	const probe = left + candidate + right;
-	const spanStart = left.length;
+	const probe = ctx.text.slice(0, ctx.start) + candidate + ctx.text.slice(ctx.end);
+	const spanStart = ctx.start;
 	const spanEnd = spanStart + candidate.length;
-	regex.lastIndex = 0;
+	regex.lastIndex = Math.max(0, spanStart - REGEX_REMATCH_BACKSCAN);
 	for (let m = regex.exec(probe); m !== null; m = regex.exec(probe)) {
 		const matchStart = m.index;
 		const matchEnd = m.index + m[0].length;
+		// Matches arrive in increasing position; once one starts at or past the
+		// span's end it cannot cover the candidate, and neither can any later one.
+		if (matchStart >= spanEnd) break;
 		// A match overlapping the candidate's own bytes means those bytes get
 		// re-redacted on a later pass — not a fixed point.
-		if (matchStart < spanEnd && matchEnd > spanStart) return true;
+		if (matchEnd > spanStart) return true;
 		// Zero-width matches do not advance lastIndex; step past to avoid a loop.
 		if (m[0].length === 0) regex.lastIndex++;
 	}
