@@ -460,6 +460,32 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obfuscator.obfuscate(obfuscated)).toBe(obfuscated);
 	});
 
+	it("replace-mode re-obfuscation is a fixed point when a spillover match straddles a prior-call placeholder whose value satisfies the regex", () => {
+		// `[A-Z0-9]{8,12}` in replace mode greedily spans `SECRETUV` into the
+		// `ABCDEFGH` placeholder on re-obfuscation — `ABCDEFGH` alone satisfies the
+		// regex. Previously the short non-matching spillover bytes abutting the
+		// placeholder were fed into the deterministic scramble on every pass
+		// (e.g. `…#…#ZZJ5sotJ` → `…#…#ZZpvsotJ`), invalidating provider prompt-cache
+		// prefixes despite no new input. The fix: when a replace match straddles a
+		// placeholder whose own deobfuscated value satisfies the regex, the surrounding
+		// spillover bytes are left verbatim instead of being re-scrambled.
+		const obf = new SecretObfuscator(
+			[
+				{ type: "plain", content: "ABCDEFGH" },
+				{ type: "regex", content: "[A-Z0-9]{8,12}", mode: "replace" },
+			],
+			"Q".repeat(43),
+		);
+		const first = obf.obfuscate("YYBBABCDEFGHSECRETUV");
+
+		// Core regression: re-obfuscation must be a fixed point.
+		expect(obf.obfuscate(first)).toBe(first);
+		// Stable across multiple passes.
+		expect(obf.obfuscate(obf.obfuscate(first))).toBe(first);
+		// Plain secret must not leak into provider-visible output.
+		expect(first).not.toContain("ABCDEFGH");
+	});
+
 	it("redacts an independently matching prefix before a cut placeholder", () => {
 		// A regex match that starts in outside text and ends inside a generated
 		// placeholder's expanded value is not rewritten across the token (that drops

@@ -662,6 +662,23 @@ export class SecretObfuscator {
 						) {
 							continue;
 						}
+						// Same greedy-spillover fixed point as the obfuscate branch below: when
+						// the match only reached across a prior-call placeholder because the
+						// placeholder's own value satisfies the regex, and the surrounding raw
+						// bytes do not independently match, re-redacting those bytes drifts the
+						// deterministic scramble across passes (e.g. `…#…#ZZJ5sotJ` →
+						// `…#…#ZZpvsotJ`), invalidating prompt-cache prefixes despite no new
+						// input. Leave the placeholder and its spillover verbatim — a fixed
+						// point. Structurally-required bytes (placeholder value alone cannot
+						// match) and independently-matching outside chunks still fall through to
+						// the redaction below. Only prior-call (`origin "I"`) placeholders set
+						// these flags, so first-pass redaction of genuinely new bytes is intact.
+						if (
+							match.inputPlaceholderInnerIndependentlyMatches &&
+							!match.inputPlaceholderOutsideIndependentlyMatches
+						) {
+							continue;
+						}
 						let replaceEnd = match.end;
 						let span = result.slice(match.start, replaceEnd);
 						if (entry.replacement !== undefined) {
@@ -712,15 +729,19 @@ export class SecretObfuscator {
 					}
 					if (match.preserveInputPlaceholders) {
 						// The match straddled a prior-call placeholder. When the placeholder's
-						// own value already satisfies the regex on its own, the surrounding raw
-						// bytes are greedy spillover (e.g. the trailing `A` in `SECRETUV→#…#A`):
-						// obfuscating them mints fresh placeholders on re-obfuscation and drifts
-						// the provider-visible history and prompt-cache prefix. Leave the
-						// placeholder atomic and the spillover verbatim — a fixed point. Outside
-						// bytes are still obfuscated when the placeholder value alone cannot
-						// match (they are structurally part of the secret, e.g. an `api_key=`
-						// prefix the regex requires).
-						if (match.inputPlaceholderInnerIndependentlyMatches) {
+						// own value already satisfies the regex on its own AND the surrounding
+						// raw bytes do not independently match, those bytes are greedy spillover
+						// (e.g. the trailing `A` in `SECRETUV→#…#A`): obfuscating them mints
+						// fresh placeholders on re-obfuscation and drifts the provider-visible
+						// history and prompt-cache prefix. Leave the placeholder atomic and the
+						// spillover verbatim — a fixed point. Outside bytes are still obfuscated
+						// when the placeholder value alone cannot match (they are structurally
+						// part of the secret, e.g. an `api_key=` prefix the regex requires) or
+						// when they independently match the regex on their own.
+						if (
+							match.inputPlaceholderInnerIndependentlyMatches &&
+							!match.inputPlaceholderOutsideIndependentlyMatches
+						) {
 							continue;
 						}
 						const span = result.slice(match.start, match.end);
