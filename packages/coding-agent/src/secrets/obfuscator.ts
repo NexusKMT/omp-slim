@@ -694,13 +694,10 @@ export class SecretObfuscator {
 						result = replaceRange(result, match.start, replaceEnd, redacted);
 						origin = replaceRange(origin, match.start, replaceEnd, "I".repeat(redacted.length));
 					} else {
-						const replacement =
-							entry.replacement ??
-							this.#generateRegexReplacement(match.value, entry.regex, {
-								text: result,
-								start: match.start,
-								end: match.end,
-							});
+						const replacement = entry.replacement ?? match.defaultReplacement;
+						if (replacement === undefined) {
+							throw new Error("regex replace match missing a generated replacement");
+						}
 						result = replaceRange(result, match.start, match.end, replacement);
 						origin = replaceRange(origin, match.start, match.end, "I".repeat(replacement.length));
 					}
@@ -1082,6 +1079,7 @@ export class SecretObfuscator {
 		inputPlaceholderOutsideIndependentlyMatches: boolean;
 		inputPlaceholderOutsideStart: number;
 		inputPlaceholderOutsideChunkCount: number;
+		defaultReplacement: string | undefined;
 	}> {
 		const knownPlaceholderRanges = this.#knownPlaceholderRanges(text);
 		const regexScan = buildReplaceRegexScan(text, knownPlaceholderRanges, this.#deobfuscateMap);
@@ -1100,6 +1098,7 @@ export class SecretObfuscator {
 			inputPlaceholderOutsideIndependentlyMatches: boolean;
 			inputPlaceholderOutsideStart: number;
 			inputPlaceholderOutsideChunkCount: number;
+			defaultReplacement: string | undefined;
 		}> = [];
 		for (;;) {
 			const match = regex.exec(scanText);
@@ -1110,7 +1109,8 @@ export class SecretObfuscator {
 			}
 			let start = match.index;
 			let end = match.index + match[0].length;
-			const scanMatchLength = match[0].length;
+			let scanMatchLength = match[0].length;
+			let scanMatchValue = match[0];
 			let canonicalValue = "";
 			let recursive = false;
 			let preserveGeneratedPlaceholders = false;
@@ -1120,17 +1120,53 @@ export class SecretObfuscator {
 			let inputPlaceholderOutsideStart = -1;
 			let inputPlaceholderOutsideChunkCount = 0;
 
-			const mapped = mapReplaceRegexMatch(regexScan.segments, start, end);
+			let mapped = mapReplaceRegexMatch(regexScan.segments, start, end);
 			if (mapped.partialPlaceholderCut) {
 				// The match straddles a generated placeholder (its boundary falls inside
 				// the secret's expanded value). Rewriting across the token drops bytes
 				// (obfuscate) or drifts the redaction across re-obfuscation passes
-				// (replace), so resume scanning just past the placeholder instead — the
-				// cut secret stays as its existing placeholder and any trailing
-				// wholly-outside content is matched fresh on the next iteration.
-				regex.lastIndex = mapped.cutResumeIndex;
-				continue;
+				// (replace), so the cut secret must stay as its existing placeholder.
+				// But the wholly-outside prefix BEFORE the placeholder can itself be a
+				// complete match (e.g. `[A-Z0-9]{8,12}` greedily spanning `SECRETUV` into
+				// an `ABCDEFGH` placeholder): that prefix is provider-visible
+				// secret-shaped content, not a drift artifact. Re-run the regex bounded
+				// to just before the placeholder — full left context kept, so lookbehind
+				// still evaluates — and redact the independent prefix match on its own;
+				// otherwise skip past the placeholder and match trailing content fresh.
+				const cutResumeIndex = mapped.cutResumeIndex;
+				const prefixScanEnd = mapped.firstPlaceholderScanStart;
+				let handledPrefix = false;
+				if (prefixScanEnd > match.index) {
+					regex.lastIndex = match.index;
+					const prefixMatch = regex.exec(scanText.slice(0, prefixScanEnd));
+					if (prefixMatch !== null && prefixMatch[0].length > 0) {
+						const prefixStart = prefixMatch.index;
+						const prefixEnd = prefixMatch.index + prefixMatch[0].length;
+						const prefixMapped = mapReplaceRegexMatch(regexScan.segments, prefixStart, prefixEnd);
+						if (!prefixMapped.partialPlaceholderCut) {
+							start = prefixStart;
+							end = prefixEnd;
+							scanMatchValue = prefixMatch[0];
+							scanMatchLength = prefixMatch[0].length;
+							mapped = prefixMapped;
+							regex.lastIndex = prefixEnd;
+							handledPrefix = true;
+						}
+					}
+				}
+				if (!handledPrefix) {
+					regex.lastIndex = cutResumeIndex;
+					continue;
+				}
 			}
+			// Scan-space coordinates of the match (placeholders expanded). The default
+			// redaction's fixed-point check must run against this expanded view — the
+			// view re-obfuscation actually scans — not the literal `#…#` text, or a
+			// redaction adjacent to a placeholder (e.g. an outside prefix before a cut
+			// secret) could drift when the placeholder expands and connects to it.
+			const scanMatchStart = start;
+			const scanMatchEnd = end;
+			let defaultReplacement: string | undefined;
 			start = mapped.start;
 			end = mapped.end;
 			preserveGeneratedPlaceholders = mapped.preserveGeneratedPlaceholders;
@@ -1169,7 +1205,7 @@ export class SecretObfuscator {
 				regex.lastIndex = resumeIndex;
 			}
 			if (mode === "replace") {
-				canonicalValue = match[0];
+				canonicalValue = scanMatchValue;
 				recursive = mapped.recursive;
 			} else {
 				const overlappingRanges = knownPlaceholderRanges.filter(range => start < range.end && end > range.start);
@@ -1188,10 +1224,20 @@ export class SecretObfuscator {
 				recursive = canonical.recursive;
 			}
 
+			if (mode === "replace" && replacement === undefined && !preserveGeneratedPlaceholders) {
+				const savedLastIndex = regex.lastIndex;
+				defaultReplacement = this.#generateRegexReplacement(scanMatchValue, regex, {
+					text: scanText,
+					start: scanMatchStart,
+					end: scanMatchEnd,
+				});
+				regex.lastIndex = savedLastIndex;
+			}
 			matches.push({
 				start,
 				end,
 				value: text.slice(start, end),
+				defaultReplacement,
 				canonicalValue,
 				scanMatchLength,
 				recursive,
@@ -1516,6 +1562,7 @@ function mapReplaceRegexMatch(
 	preserveGeneratedPlaceholders: boolean;
 	partialPlaceholderCut: boolean;
 	cutResumeIndex: number;
+	firstPlaceholderScanStart: number;
 } {
 	const startSegment = findScanSegment(segments, scanStart);
 	const endSegment = findScanSegment(segments, scanEnd - 1);
@@ -1537,17 +1584,29 @@ function mapReplaceRegexMatch(
 	// When the match straddles a placeholder, resume scanning just past the last
 	// overlapping placeholder so trailing wholly-outside content (e.g. an 8-char
 	// run after the secret) still gets matched instead of being consumed by the
-	// straddling span.
+	// straddling span. `firstPlaceholderScanStart` marks where the leading
+	// wholly-outside prefix ends, so a prefix that independently matches can be
+	// redacted on its own rather than skipped along with the cut span.
 	let cutResumeIndex = scanStart;
+	let firstPlaceholderScanStart = -1;
 	for (const segment of segments) {
 		if (segment.scanStart >= scanEnd || segment.scanEnd <= scanStart) continue;
 		recursive ||= segment.recursive;
 		preserveGeneratedPlaceholders ||= segment.generatedPlaceholder;
-		if (segment.generatedPlaceholder && segment.scanEnd > cutResumeIndex) {
-			cutResumeIndex = segment.scanEnd;
+		if (segment.generatedPlaceholder) {
+			if (firstPlaceholderScanStart === -1) firstPlaceholderScanStart = segment.scanStart;
+			if (segment.scanEnd > cutResumeIndex) cutResumeIndex = segment.scanEnd;
 		}
 	}
-	return { start, end, recursive, preserveGeneratedPlaceholders, partialPlaceholderCut, cutResumeIndex };
+	return {
+		start,
+		end,
+		recursive,
+		preserveGeneratedPlaceholders,
+		partialPlaceholderCut,
+		cutResumeIndex,
+		firstPlaceholderScanStart,
+	};
 }
 
 function findScanSegment(segments: ReadonlyArray<RegexScanSegment>, scanIndex: number): RegexScanSegment {

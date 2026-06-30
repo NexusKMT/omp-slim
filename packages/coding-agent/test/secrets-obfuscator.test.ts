@@ -460,6 +460,46 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obfuscator.obfuscate(obfuscated)).toBe(obfuscated);
 	});
 
+	it("redacts an independently matching prefix before a cut placeholder", () => {
+		// A regex match that starts in outside text and ends inside a generated
+		// placeholder's expanded value is not rewritten across the token (that drops
+		// bytes / drifts the redaction). But when the wholly-outside prefix before the
+		// placeholder is itself a complete match it is provider-visible secret-shaped
+		// content, not a drift artifact. Regression: `[A-Z0-9]{8,12}` greedily
+		// spanning `SECRETUV` into an `ABCDEFGH` placeholder returned `SECRETUV#…#`,
+		// leaving `SECRETUV` visible even though it independently satisfies the regex.
+		// Obfuscate mode: the prefix gets its own reversible placeholder and the whole
+		// input still round-trips.
+		const obf = new SecretObfuscator(
+			[
+				{ type: "plain", content: "ABCDEFGH" },
+				{ type: "regex", content: "[A-Z0-9]{8,12}" },
+			],
+			"Q".repeat(43),
+		);
+		const out = obf.obfuscate("SECRETUVABCDEFGH");
+		expect(out).not.toContain("SECRETUV");
+		expect(out).not.toContain("ABCDEFGH");
+		expect(obf.deobfuscate(out)).toBe("SECRETUVABCDEFGH");
+		expect(obf.obfuscate(out)).toBe(out);
+
+		// Replace mode: the prefix is redacted one-way while the cut secret's
+		// placeholder is preserved and still restores.
+		const repl = new SecretObfuscator(
+			[
+				{ type: "plain", content: "ABCDEFGH" },
+				{ type: "regex", content: "[A-Z0-9]{8,12}", mode: "replace" },
+			],
+			"Q".repeat(43),
+		);
+		const rout = repl.obfuscate("SECRETUVABCDEFGH");
+		expect(rout).not.toContain("SECRETUV");
+		expect(rout).not.toContain("ABCDEFGH");
+		expect(repl.deobfuscate(rout)).toMatch(/ABCDEFGH$/);
+		expect(repl.deobfuscate(rout)).not.toContain("SECRETUV");
+		expect(repl.obfuscate(rout)).toBe(rout);
+	});
+
 	it("keeps regex placeholders stable when inner friendly names change", () => {
 		const sharedKey = "E".repeat(43);
 		const before = new SecretObfuscator(
