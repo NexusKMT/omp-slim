@@ -18,6 +18,14 @@
 - Fixed a multi-character `mode: "replace"` regex remainder (the bytes of a match outside a preserved `#…#` placeholder) drifting across an obfuscator restart, which invalidated provider prompt-cache prefixes even with a stable key. The remainder was redacted to a content-derived `ZZ`+hash marker that was only recognized as already-redacted within the generating session (via an in-memory set), so a fresh obfuscator reprocessing persisted text re-redacted it to a different value (`ZZPL#…#` → `ZZ7f#…#`). The remainder marker now derives from a keyed run of the per-install key and the remainder length, so any instance sharing the key reproduces it byte-identically (idempotent across restart) while staying unpredictable enough that raw sentinel-shaped bytes (`ZZZZ`) still differ from it and are redacted rather than passed through ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
 - Fixed a secret regex match that starts in outside text and ends inside a previously generated `#…#` placeholder's expanded value leaving an independently-matching outside prefix provider-visible. Resuming the scan past the cut placeholder skipped the whole straddling span, so a pattern like `[A-Z0-9]{8,12}` greedily spanning `SECRETUV` into an `ABCDEFGH` placeholder returned `SECRETUV#…#` even though `SECRETUV` satisfies the regex on its own. The cut handling now re-runs the regex bounded to just before the placeholder (full left context kept, so lookbehind still evaluates) and redacts the standalone prefix match — to its own reversible placeholder in obfuscate mode, or a one-way redaction in replace mode — while the cut secret stays as its existing placeholder. The replace-mode redaction's fixed point is verified against the placeholder-expanded view re-obfuscation actually scans, so it does not drift when the adjacent placeholder expands ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
 
+### Changed
+
+- Enabled contextual snapcompact shape resolution based on rendered text content
+
+### Fixed
+
+- Fixed snapcompact preflight to use the same font-aware renderability probe as compaction, including prior preserved archive text, so CJK history remains renderable through per-glyph Silver fallback across repeated compactions.
+
 ## [16.2.6] - 2026-06-29
 
 ### Changed
