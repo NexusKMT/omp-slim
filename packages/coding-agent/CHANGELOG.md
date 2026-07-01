@@ -19,6 +19,37 @@
 - Fixed a secret regex match that starts in outside text and ends inside a previously generated `#…#` placeholder's expanded value leaving an independently-matching outside prefix provider-visible. Resuming the scan past the cut placeholder skipped the whole straddling span, so a pattern like `[A-Z0-9]{8,12}` greedily spanning `SECRETUV` into an `ABCDEFGH` placeholder returned `SECRETUV#…#` even though `SECRETUV` satisfies the regex on its own. The cut handling now re-runs the regex bounded to just before the placeholder (full left context kept, so lookbehind still evaluates) and redacts the standalone prefix match — to its own reversible placeholder in obfuscate mode, or a one-way redaction in replace mode — while the cut secret stays as its existing placeholder. The replace-mode redaction's fixed point is verified against the placeholder-expanded view re-obfuscation actually scans, so it does not drift when the adjacent placeholder expands ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
 - Fixed a secret regex whose match straddles a previously generated `#…#` placeholder still rewriting short surrounding raw bytes the regex never needed, drifting the `obfuscate()` fixed point and provider-visible history/prompt-cache prefixes across re-obfuscation passes. When a greedy match (e.g. `[A-Z0-9]{8,12}`) reaches across a prior-call placeholder whose own value already satisfies the pattern, a trailing/leading raw chunk that does not independently match is now left verbatim instead of being rewritten on the next pass — in obfuscate mode the chunk was minted into a fresh placeholder (`…SECRETUV→#…#A`), and in default replace mode its deterministic scramble drifted (`…#…#ZZJ5sotJ` → `…#…#ZZpvsotJ`). Surrounding bytes are still redacted when the placeholder value alone cannot satisfy the regex (e.g. a required `api_key=` prefix) or when they independently match it ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
 
+## [16.2.12] - 2026-07-01
+
+### Breaking Changes
+
+- Removed the canonical-alias grouping and resolution layer. The `equivalence` key (`overrides`/`exclude`) in `models.yml`/`models.json` is now inert, and canonical-related methods have been removed from `ModelRegistry`.
+- Removed the "CANONICAL" tab from the interactive model selector and the `omp models canonical` subcommand.
+
+### Changed
+
+- Simplified model selection and matching by resolving bare model IDs in `--model`, `modelRoles`, and `enabledModels` via exact/flat-ID and provider-preference matching instead of cross-spelling canonical coalescing.
+- Improved cold start performance by removing the catalog-wide canonical index build from the startup path.
+
+### Fixed
+
+- Fixed the write tool not streaming execution progress to the TUI while files are being written.
+- Fixed live tool-call argument previews disappearing while arguments stream.
+- Fixed the LSP tool ignoring timeouts and abort signals during cold-starts and notification writes.
+- Fixed the browser tool leaking Chromium/Puppeteer processes when operations are aborted or when an agent session is disposed.
+- Added a configurable 30-second timeout (`extensionHandlerTimeoutMs`) to extension tool call handlers to prevent hung third-party extensions from blocking execution, and fixed a timer leak keeping the CLI alive.
+- Fixed the built-in `fd` tool ignoring shell cancellation (such as Ctrl-C or timeouts) during directory walks.
+- Fixed MCP stdio requests hanging indefinitely past their configured timeouts when the child subprocess stops draining stdin.
+- Fixed Python eval shell helpers buffering child-process output by streaming chunks and truncating oversized output.
+- Fixed cached model edit variants failing to update when changing project directories.
+- Fixed subagents with structured output schemas failing validation by correctly wrapping the schema in the system prompt.
+- Fixed MCP Streamable HTTP request and notification timeouts staying unarmed during stalled response body reads.
+- Fixed evaluation and task spawn defaults to respect restricted agent spawn lists.
+- Fixed timed-out `browser.run` calls leaving evaluated JavaScript continuations running.
+- Fixed performance degradation in session context and branch path reconstruction on deep linear histories.
+- Fixed agents repeating the same tool call across turns without corrective steering by wiring the cross-turn tool-call loop guard into sessions.
+- Fixed OpenAI-compatible model discovery (including LM Studio) reporting flat default context windows when proxies omit context length metadata, by resolving discovered IDs against the bundled model reference catalog to inherit accurate context windows, output limits, display names, modalities, and reasoning support.
+
 ## [16.2.11] - 2026-07-01
 
 ### Fixed
