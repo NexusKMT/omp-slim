@@ -120,9 +120,11 @@ function buildSectionValidators(
 	const validators = new Map<string, (value: unknown) => JsonSchemaValidationResult>();
 	const properties = jsonSchema.properties;
 	if (properties === null || typeof properties !== "object" || Array.isArray(properties)) return validators;
-	for (const label in properties) {
-		const raw = properties[label];
-		const propRecord = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? raw : undefined;
+	const propertyMap = properties as Record<string, unknown>;
+	for (const label in propertyMap) {
+		const raw = propertyMap[label];
+		const propRecord =
+			raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : undefined;
 		const sectionSchema =
 			propRecord?.type === "array" && propRecord.items !== undefined && propRecord.items !== null
 				? propRecord.items

@@ -111,10 +111,11 @@ export function arrayValuedLabels(outputSchema: unknown): ReadonlySet<string> {
 		dereferenced !== null && typeof dereferenced === "object" && !Array.isArray(dereferenced)
 			? dereferenced
 			: jsonSchema;
-	const properties = labelSchema.properties;
+	const properties = (labelSchema as Record<string, unknown>).properties;
 	if (properties === null || typeof properties !== "object" || Array.isArray(properties)) return labels;
-	for (const key in properties) {
-		if (isArrayTypedSchema(properties[key])) labels.add(key);
+	const propertyMap = properties as Record<string, unknown>;
+	for (const key in propertyMap) {
+		if (isArrayTypedSchema(propertyMap[key])) labels.add(key);
 	}
 	return labels;
 }
