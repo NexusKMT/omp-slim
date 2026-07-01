@@ -556,6 +556,60 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(first).not.toContain("ABCDEFGH");
 	});
 
+	it("redacts a two-sided independently matching chunk instead of leaking it as spillover", () => {
+		// `\b[A-Z]{8}\b|[A-Z]{17}` union regex, prior-call placeholder for `SECRETUV`
+		// flanked by prefix `ABCDEFGH` (independently matches `\b[A-Z]{8}\b`) and
+		// suffix `I` (matches nothing alone). The straddling match is the 17-char
+		// run `ABCDEFGH` + `SECRETUV` + `I`, which previously tested the concatenated
+		// outside chunks `"ABCDEFGH" + "I"` = `"ABCDEFGHI"` against the regex — that
+		// concatenation erases the placeholder-token boundary between the chunks, so
+		// neither alternative matches (9 chars, and `H` is no longer at a word
+		// boundary), and the whole match was left verbatim, leaking `ABCDEFGH`
+		// unredacted. The fix tests each outside chunk in its own real, flanked
+		// context: `ABCDEFGH` alone still independently matches `\b[A-Z]{8}\b`, so it
+		// is redacted instead of leaked.
+		const obf = new SecretObfuscator(
+			[
+				{ type: "plain", content: "SECRETUV" },
+				{ type: "regex", content: "\\b[A-Z]{8}\\b|[A-Z]{17}" },
+			],
+			"Q".repeat(43),
+		);
+		const placeholdered = obf.obfuscate("SECRETUV");
+		const second = obf.obfuscate(`ABCDEFGH${placeholdered}I`);
+
+		// Core regression: the independently matching prefix must not survive
+		// verbatim in provider-visible output.
+		expect(second).not.toContain("ABCDEFGH");
+		expect(second).not.toContain("SECRETUV");
+		// Every byte must still round-trip.
+		expect(obf.deobfuscate(second)).toBe("ABCDEFGHSECRETUVI");
+		// Redacting the prefix must itself be a fixed point.
+		expect(obf.obfuscate(second)).toBe(second);
+	});
+
+	it("leaves a genuine one-sided spillover chunk verbatim under the same union regex", () => {
+		// Contrast case for the fix above: the trailing chunk `IJKLMNOPQ` (9 chars)
+		// does NOT independently match `\b[A-Z]{8}\b|[A-Z]{17}` on its own, and only
+		// forms a match by bridging across the `SECRETUV` placeholder (`SECRETUV` +
+		// `IJKLMNOPQ` = 17 chars). This is genuine greedy spillover, not independent
+		// secret-shaped content, so per-chunk testing must still leave it verbatim
+		// and a fixed point — the fix must not turn spillover into a false positive.
+		const obf = new SecretObfuscator(
+			[
+				{ type: "plain", content: "SECRETUV" },
+				{ type: "regex", content: "\\b[A-Z]{8}\\b|[A-Z]{17}" },
+			],
+			"Q".repeat(43),
+		);
+		const placeholdered = obf.obfuscate("SECRETUV");
+		const second = obf.obfuscate(`${placeholdered}IJKLMNOPQ`);
+
+		expect(second.endsWith("IJKLMNOPQ")).toBe(true);
+		expect(obf.deobfuscate(second)).toBe("SECRETUVIJKLMNOPQ");
+		expect(obf.obfuscate(second)).toBe(second);
+	});
+
 	it("keeps regex placeholders stable when inner friendly names change", () => {
 		const sharedKey = "E".repeat(43);
 		const before = new SecretObfuscator(

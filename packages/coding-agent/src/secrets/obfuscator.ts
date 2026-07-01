@@ -1236,8 +1236,23 @@ export class SecretObfuscator {
 				inputPlaceholderOutsideChunkCount = countOutsidePlaceholderRanges(start, end, knownPlaceholderRanges);
 				if (inputPlaceholderOutside.length === 0) continue;
 				const resumeIndex = regex.lastIndex;
-				regex.lastIndex = 0;
-				inputPlaceholderOutsideIndependentlyMatches = regex.test(inputPlaceholderOutside);
+				// Test each outside chunk in isolation rather than the concatenation of
+				// all of them: concatenating chunks that sit on either side of the
+				// placeholder erases the `#…#` token boundary between them (e.g. a
+				// prefix "ABCDEFGH" that independently matches `\b[A-Z]{8}\b` next to a
+				// placeholder, followed by a raw "I" suffix, concatenates to "ABCDEFGHI"
+				// — which does NOT match, since the boundary the placeholder provided is
+				// gone). That false negative would leave a genuinely independent,
+				// secret-shaped chunk unredacted. Each chunk is tested as it actually sits
+				// in the source, flanked by non-word placeholder-token bytes on the side(s)
+				// facing the placeholder.
+				inputPlaceholderOutsideIndependentlyMatches = outsidePlaceholderRangesAnyIndependentlyMatch(
+					text,
+					start,
+					end,
+					knownPlaceholderRanges,
+					regex,
+				);
 				// Whether the placeholder's own (deobfuscated) value satisfies the regex
 				// with the surrounding raw bytes dropped. When it does, those raw bytes
 				// are greedy spillover the match never needed (e.g. the trailing `A` in
@@ -1778,6 +1793,36 @@ function textOutsidePlaceholderRanges(
 	}
 	result += text.slice(cursor, end);
 	return result;
+}
+
+// Like `textOutsidePlaceholderRanges`, but tests each outside chunk against
+// `regex` individually instead of concatenating them first. Concatenation
+// erases the placeholder-token boundary between chunks, which can hide a
+// chunk that independently matches in its actual (flanked) context — see the
+// call site in `#collectRegexMatches` for the false-negative this avoids.
+function outsidePlaceholderRangesAnyIndependentlyMatch(
+	text: string,
+	start: number,
+	end: number,
+	ranges: ReadonlyArray<{ start: number; end: number }>,
+	regex: RegExp,
+): boolean {
+	let cursor = start;
+	for (const range of ranges) {
+		if (range.end <= start || range.start >= end) continue;
+		const overlapStart = Math.max(range.start, start);
+		const overlapEnd = Math.min(range.end, end);
+		if (cursor < overlapStart) {
+			regex.lastIndex = 0;
+			if (regex.test(text.slice(cursor, overlapStart))) return true;
+		}
+		cursor = overlapEnd;
+	}
+	if (cursor < end) {
+		regex.lastIndex = 0;
+		if (regex.test(text.slice(cursor, end))) return true;
+	}
+	return false;
 }
 
 function firstOutsidePlaceholderRange(
