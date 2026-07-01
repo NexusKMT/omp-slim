@@ -1700,13 +1700,13 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 			mode: "none",
 		};
 
-		// Agent-feeding default: the keyed token resolves, but no legacy `#XRRS#` is
-		// restored — neither in assistant output nor in tool results — so nothing can
-		// be laundered into a keyed placeholder on the next turn.
+		// Agent-feeding default: assistant-authored content stays obfuscated, and no
+		// legacy `#XRRS#` is restored, so an echoed placeholder is not expanded into a
+		// raw secret before the next provider turn.
 		const fed = deobfuscateSessionContext(ctx, obfuscator);
 		const fedAssistant = (fed.messages[0] as Extract<Message, { role: "assistant" }>).content[0] as { text: string };
 		const fedTool = (fed.messages[1] as Extract<Message, { role: "toolResult" }>).content[0] as { text: string };
-		expect(fedAssistant.text).toBe("attacker planted #XRRS# and echoed legacy-secret");
+		expect(fedAssistant.text).toBe(`attacker planted #XRRS# and echoed ${keyedToken}`);
 		expect(fedTool.text).toBe("bash stdout #XRRS#");
 
 		// Display-only transcript: legacy aliases ARE restored so a genuinely
@@ -2120,7 +2120,11 @@ describe("deobfuscateAgentMessages (display restore)", () => {
 			timestamp: 4,
 		};
 
-		const restored = deobfuscateAgentMessages(obfuscator, [userMsg, assistantMsg, branchSummary, compactionSummary]);
+		const restored = deobfuscateAgentMessages(
+			obfuscator,
+			[userMsg, assistantMsg, branchSummary, compactionSummary],
+			true,
+		);
 
 		// Assistant text and tool-call args/intent are restored to the real secret.
 		const restoredAssistant = restored[1] as AssistantMessage;
@@ -2157,7 +2161,7 @@ describe("deobfuscateAgentMessages (display restore)", () => {
 			timestamp: 1,
 		};
 
-		const [restored] = deobfuscateAgentMessages(obfuscator, [message]) as [typeof message];
+		const [restored] = deobfuscateAgentMessages(obfuscator, [message], true) as [typeof message];
 		const blocks = restored.blocks ?? [];
 		const text = blocks[0];
 		const image = blocks[1];
