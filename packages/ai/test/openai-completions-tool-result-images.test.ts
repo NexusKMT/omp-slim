@@ -203,7 +203,7 @@ describe("openai-completions convertMessages", () => {
 		expect(assistantParam?.content).toBe("");
 	});
 
-	it("uses generated tool_call_id values when assistant/tool IDs are empty", () => {
+	it("uses generated tool_call_id values when assistant/tool IDs normalize to empty", () => {
 		const baseModel = getBundledModel("openai", "gpt-4o-mini") as Model<"openai-completions">;
 		const model: Model<"openai-completions"> = {
 			...baseModel,
@@ -214,7 +214,7 @@ describe("openai-completions convertMessages", () => {
 		const now = Date.now();
 		const assistantMessage: AssistantMessage = {
 			role: "assistant",
-			content: [{ type: "toolCall", id: "", name: "read", arguments: { path: "README.md" } }],
+			content: [{ type: "toolCall", id: "|", name: "read", arguments: { path: "README.md" } }],
 			api: model.api,
 			provider: model.provider,
 			model: model.id,
@@ -229,7 +229,7 @@ describe("openai-completions convertMessages", () => {
 				assistantMessage,
 				{
 					role: "toolResult",
-					toolCallId: "",
+					toolCallId: "|",
 					toolName: "read",
 					content: [{ type: "text", text: "done" }],
 					isError: false,
