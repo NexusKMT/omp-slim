@@ -610,6 +610,40 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obf.obfuscate(second)).toBe(second);
 	});
 
+	it("redacts a lookbehind-anchored prefix tested in its real source context instead of leaking it", () => {
+		// `(?<=api=)[0-9]{8}[A-Z]{8}|(?<=api=)[0-9]{8}|[A-Z]{8}` combined with a
+		// prior-call placeholder for `ABCDEFGH` (independently matches the bare
+		// `[A-Z]{8}` alternative). Re-obfuscating `api=12345678` + placeholder makes
+		// the full match (placeholder expanded) `12345678ABCDEFGH`, preceded by the
+		// literal `api=`. The outside chunk is `12345678`. Testing that chunk as an
+		// ISOLATED slice (starting a fresh string at index 0) loses the real `api=`
+		// bytes immediately before it in the source, so `(?<=api=)[0-9]{8}` never
+		// fires, none of the three alternatives match a bare "12345678", and the
+		// digits were wrongly left verbatim — a lookbehind-blind leak. The fix tests
+		// the chunk against the regex at its REAL position in the full text, where
+		// the lookbehind correctly sees the preceding `api=` and the chunk is
+		// identified as an independent match, so it is redacted like any other
+		// secret-shaped content.
+		const obf = new SecretObfuscator(
+			[
+				{ type: "plain", content: "ABCDEFGH" },
+				{ type: "regex", content: "(?<=api=)[0-9]{8}[A-Z]{8}|(?<=api=)[0-9]{8}|[A-Z]{8}" },
+			],
+			"Q".repeat(43),
+		);
+		const placeholdered = obf.obfuscate("ABCDEFGH");
+		const second = obf.obfuscate(`api=12345678${placeholdered}`);
+
+		// Core regression: the lookbehind-qualified digits must not survive
+		// verbatim in provider-visible output.
+		expect(second).not.toContain("12345678");
+		expect(second).not.toContain("ABCDEFGH");
+		// Every byte must still round-trip.
+		expect(obf.deobfuscate(second)).toBe("api=12345678ABCDEFGH");
+		// Redacting the prefix must itself be a fixed point.
+		expect(obf.obfuscate(second)).toBe(second);
+	});
+
 	it("keeps regex placeholders stable when inner friendly names change", () => {
 		const sharedKey = "E".repeat(43);
 		const before = new SecretObfuscator(

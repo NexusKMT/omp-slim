@@ -1796,10 +1796,14 @@ function textOutsidePlaceholderRanges(
 }
 
 // Like `textOutsidePlaceholderRanges`, but tests each outside chunk against
-// `regex` individually instead of concatenating them first. Concatenation
-// erases the placeholder-token boundary between chunks, which can hide a
-// chunk that independently matches in its actual (flanked) context — see the
-// call site in `#collectRegexMatches` for the false-negative this avoids.
+// `regex` in its REAL source-text context instead of on an isolated slice.
+// Slicing a chunk out and testing it alone breaks context-sensitive patterns
+// (lookbehind/lookahead, `\b`) that depend on the bytes actually preceding or
+// following the chunk in `text` — e.g. `(?<=api=)[0-9]{8}` over `api=12345678`
+// only matches when evaluated against the real `api=` prefix, not against the
+// isolated chunk `12345678`. A match only counts when it lies ENTIRELY within
+// one outside chunk; a match that reaches into the placeholder itself is not
+// evidence the outside chunk independently requires redaction.
 function outsidePlaceholderRangesAnyIndependentlyMatch(
 	text: string,
 	start: number,
@@ -1812,17 +1816,24 @@ function outsidePlaceholderRangesAnyIndependentlyMatch(
 		if (range.end <= start || range.start >= end) continue;
 		const overlapStart = Math.max(range.start, start);
 		const overlapEnd = Math.min(range.end, end);
-		if (cursor < overlapStart) {
-			regex.lastIndex = 0;
-			if (regex.test(text.slice(cursor, overlapStart))) return true;
-		}
+		if (cursor < overlapStart && chunkMatchesInSourceContext(text, cursor, overlapStart, regex)) return true;
 		cursor = overlapEnd;
 	}
-	if (cursor < end) {
-		regex.lastIndex = 0;
-		if (regex.test(text.slice(cursor, end))) return true;
+	return cursor < end && chunkMatchesInSourceContext(text, cursor, end, regex);
+}
+
+// Whether `regex` (global) has a match fully contained in [chunkStart, chunkEnd)
+// when run against the full `text` — so lookbehind/lookahead see the actual
+// surrounding bytes rather than an isolated slice's edges.
+function chunkMatchesInSourceContext(text: string, chunkStart: number, chunkEnd: number, regex: RegExp): boolean {
+	regex.lastIndex = chunkStart;
+	for (;;) {
+		const found = regex.exec(text);
+		if (found === null || found.index >= chunkEnd) return false;
+		const matchEnd = found.index + found[0].length;
+		if (matchEnd <= chunkEnd) return true;
+		regex.lastIndex = found[0].length === 0 ? found.index + 1 : matchEnd;
 	}
-	return false;
 }
 
 function firstOutsidePlaceholderRange(
