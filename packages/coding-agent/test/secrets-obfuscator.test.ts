@@ -663,6 +663,26 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obf.obfuscate(second)).toBe(second);
 	});
 
+	it("redacts a cut suffix using placeholder left context instead of leaking it", () => {
+		const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1n";
+		const entries = [
+			{ type: "plain" as const, content: "ABCDEFGH" },
+			{ type: "regex" as const, mode: "replace" as const, content: "(?<=ABCD)[A-Z]{8}" },
+		];
+		const obf = new SecretObfuscator(entries, key);
+		const placeholdered = obf.obfuscate("ABCDEFGH");
+		const second = obf.obfuscate("ABCDEFGHIJKL");
+
+		// The suffix match depends on lookbehind supplied by the expanded placeholder.
+		// It must still be redacted while the placeholder's own bytes stay atomic.
+		expect(second).not.toContain("IJKL");
+		expect(second).toContain(placeholdered);
+		expect(obf.obfuscate(second)).toBe(second);
+
+		const restarted = new SecretObfuscator(entries, key);
+		expect(restarted.obfuscate(second)).toBe(second);
+	});
+
 	it("keeps default replace markers stable when a lookbehind match spills into a prior placeholder", () => {
 		const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1n";
 		const entries = [

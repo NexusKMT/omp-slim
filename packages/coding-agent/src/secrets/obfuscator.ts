@@ -1197,15 +1197,15 @@ export class SecretObfuscator {
 				// the secret's expanded value). Rewriting across the token drops bytes
 				// (obfuscate) or drifts the redaction across re-obfuscation passes
 				// (replace), so the cut secret must stay as its existing placeholder.
-				// But the wholly-outside prefix BEFORE the placeholder is still
-				// provider-visible content covered by the regex. Probe against the full
-				// expanded scan text so right-hand context supplied by the placeholder
-				// still satisfies lookahead/alternatives, then clamp the accepted match
-				// to the prefix boundary so bytes owned by the placeholder stay atomic.
-				// Otherwise skip past the placeholder and match trailing content fresh.
+				// But wholly-outside bytes on either side of the placeholder are still
+				// provider-visible content covered by the regex. Probe the prefix against
+				// the full expanded scan text so right-hand context supplied by the
+				// placeholder still satisfies lookahead/alternatives, then clamp the
+				// accepted match to the prefix boundary. If no prefix is available, redact
+				// the outside suffix that was covered by the full-context match.
 				const cutResumeIndex = mapped.cutResumeIndex;
 				const prefixScanEnd = mapped.firstPlaceholderScanStart;
-				let handledPrefix = false;
+				let handledOutside = false;
 				if (prefixScanEnd > match.index) {
 					regex.lastIndex = match.index;
 					const prefixMatch = regex.exec(scanText);
@@ -1220,11 +1220,25 @@ export class SecretObfuscator {
 							scanMatchLength = scanMatchValue.length;
 							mapped = prefixMapped;
 							regex.lastIndex = prefixEnd;
-							handledPrefix = true;
+							handledOutside = true;
 						}
 					}
 				}
-				if (!handledPrefix) {
+				if (!handledOutside && cutResumeIndex < end) {
+					const suffixStart = cutResumeIndex;
+					const suffixEnd = end;
+					const suffixMapped = mapReplaceRegexMatch(regexScan.segments, suffixStart, suffixEnd);
+					if (!suffixMapped.partialPlaceholderCut) {
+						start = suffixStart;
+						end = suffixEnd;
+						scanMatchValue = scanText.slice(suffixStart, suffixEnd);
+						scanMatchLength = scanMatchValue.length;
+						mapped = suffixMapped;
+						regex.lastIndex = suffixEnd;
+						handledOutside = true;
+					}
+				}
+				if (!handledOutside) {
 					regex.lastIndex = cutResumeIndex;
 					continue;
 				}
