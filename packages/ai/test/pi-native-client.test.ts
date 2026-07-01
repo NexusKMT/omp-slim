@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, type Mock, mock, spyOn, vi } from "bun:test";
+import { afterEach, describe, expect, it, type Mock, mock, spyOn } from "bun:test";
 import { streamPiNative } from "@oh-my-pi/pi-ai/providers/pi-native-client";
 import type {
 	AssistantMessage,
@@ -136,7 +136,6 @@ async function collectEvents(stream: AsyncIterable<AssistantMessageEvent>): Prom
 
 afterEach(() => {
 	mock.restore();
-	vi.useRealTimers();
 });
 
 describe("streamPiNative request shape", () => {
@@ -352,13 +351,15 @@ describe("streamPiNative event flow", () => {
 	});
 
 	it("does not time out a healthy pi-native stream that keeps making semantic progress", async () => {
-		vi.useFakeTimers({ now: 0 });
 		const final = baseAssistant({ content: [{ type: "text", text: "hello world" }] });
+		// This deliberately exercises the real ReadableStream + Date.now watchdog:
+		// Bun fake timers do not consistently drive response-body timers across the
+		// supported runner versions, and this contract is the platform timer behavior.
 		const chunks = [
 			{ atMs: 0, bytes: sseEventBytes({ type: "start", partial: baseAssistant() }) },
-			{ atMs: 50, bytes: sseEventBytes({ type: "text_delta", contentIndex: 0, delta: "hello", partial: final }) },
-			{ atMs: 180, bytes: sseEventBytes({ type: "text_delta", contentIndex: 0, delta: " world", partial: final }) },
-			{ atMs: 310, bytes: sseEventBytes({ type: "done", reason: "stop", message: final }) },
+			{ atMs: 75, bytes: sseEventBytes({ type: "text_delta", contentIndex: 0, delta: "hello", partial: final }) },
+			{ atMs: 225, bytes: sseEventBytes({ type: "text_delta", contentIndex: 0, delta: " world", partial: final }) },
+			{ atMs: 375, bytes: sseEventBytes({ type: "done", reason: "stop", message: final }) },
 		];
 		const fetchImpl: FetchImpl = (async () =>
 			new Response(delayedBody(chunks), {
@@ -369,17 +370,11 @@ describe("streamPiNative event flow", () => {
 		const stream = streamPiNative(fakeModel(), baseContext, {
 			apiKey: "k",
 			fetch: fetchImpl,
-			streamFirstEventTimeoutMs: 150,
-			streamIdleTimeoutMs: 200,
+			streamFirstEventTimeoutMs: 500,
+			streamIdleTimeoutMs: 300,
 		});
 
-		const resultPromise = stream.result();
-		await Promise.resolve();
-		for (const elapsedMs of [0, 50, 130, 130]) {
-			vi.advanceTimersByTime(elapsedMs);
-			await Promise.resolve();
-		}
-		const result = await resultPromise;
+		const result = await stream.result();
 		expect(result.stopReason).toBe("stop");
 		expect(result.content).toEqual([{ type: "text", text: "hello world" }]);
 	});
