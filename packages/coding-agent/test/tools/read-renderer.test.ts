@@ -25,6 +25,7 @@ beforeAll(async () => {
 
 afterEach(() => {
 	settings.clearOverride("tui.hyperlinks");
+	settings.clearOverride("read.renderMarkdown");
 });
 
 afterAll(() => {
@@ -109,6 +110,87 @@ describe("readToolRenderer hyperlinks", () => {
 		const rendered = component.render(200).join("\n");
 		expect(rendered).toContain("example.com /final");
 		expect(extractLinkUris(rendered)).toContain("http://example.com/final");
+	});
+});
+
+describe("readToolRenderer markdown content", () => {
+	it("keeps text/markdown details raw unless markdown rendering is enabled", async () => {
+		const theme = await getThemeByName("dark");
+		expect(theme).toBeDefined();
+
+		const component = readToolRenderer.renderResult(
+			{
+				content: [{ type: "text", text: "[notes.md#ABCD]\n1:# Heading\n2:\n3:This is **bold** text." }],
+				details: {
+					displayContent: { text: "# Heading\n\nThis is **bold** text.", startLine: 1 },
+					contentType: "text/markdown",
+				},
+			},
+			{ expanded: true, isPartial: false },
+			theme!,
+			{ path: "notes.md" },
+		);
+
+		const stripped = component
+			.render(100)
+			.map(line => Bun.stripANSI(line))
+			.join("\n");
+		expect(stripped).toContain("# Heading");
+		expect(stripped).toContain("**bold**");
+	});
+
+	it("renders text/markdown details through the markdown renderer", async () => {
+		settings.override("read.renderMarkdown", true);
+		const theme = await getThemeByName("dark");
+		expect(theme).toBeDefined();
+
+		const component = readToolRenderer.renderResult(
+			{
+				content: [{ type: "text", text: "[notes.md#ABCD]\n1:# Heading\n2:\n3:This is **bold** text." }],
+				details: {
+					displayContent: { text: "# Heading\n\nThis is **bold** text.", startLine: 1 },
+					contentType: "text/markdown",
+				},
+			},
+			{ expanded: true, isPartial: false },
+			theme!,
+			{ path: "notes.md" },
+		);
+
+		const stripped = component
+			.render(100)
+			.map(line => Bun.stripANSI(line))
+			.join("\n");
+		expect(stripped).toContain("Heading");
+		expect(stripped).toContain("This is bold text.");
+		expect(stripped).not.toContain("# Heading");
+		expect(stripped).not.toContain("**bold**");
+	});
+
+	it("keeps raw markdown selector reads in the code renderer", async () => {
+		settings.override("read.renderMarkdown", true);
+		const theme = await getThemeByName("dark");
+		expect(theme).toBeDefined();
+
+		const component = readToolRenderer.renderResult(
+			{
+				content: [{ type: "text", text: "# Heading\n\nThis is **bold** text." }],
+				details: {
+					displayContent: { text: "# Heading\n\nThis is **bold** text.", startLine: 1 },
+					contentType: "text/markdown",
+				},
+			},
+			{ expanded: true, isPartial: false },
+			theme!,
+			{ path: "notes.md:raw" },
+		);
+
+		const stripped = component
+			.render(100)
+			.map(line => Bun.stripANSI(line))
+			.join("\n");
+		expect(stripped).toContain("# Heading");
+		expect(stripped).toContain("**bold**");
 	});
 });
 

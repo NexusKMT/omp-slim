@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the opt-in `read.renderMarkdown` setting for formatted Markdown read previews, disabled by default.
+
+### Fixed
+
+- Fixed Markdown file read metadata so the opt-in Markdown preview renderer can recognize local and URI-backed Markdown files consistently.
+
 ## [16.2.9] - 2026-06-30
 
 ### Breaking Changes

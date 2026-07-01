@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { getAgentDir, isEnoent } from "@oh-my-pi/pi-utils";
 import { getMemoryRoot } from "../memories";
 import { AgentRegistry } from "../registry/agent-registry";
+import { isMarkdownPath } from "../utils/lang-from-path";
 import { buildDirectoryResource } from "./filesystem-resource";
 import { validateRelativePath } from "./skill-protocol";
 import type { InternalResource, InternalUrl, ProtocolHandler, UrlCompletion } from "./types";
@@ -111,8 +112,7 @@ async function tryResolveInRoot(url: InternalUrl, memoryRoot: string): Promise<I
 	}
 
 	const content = await Bun.file(realTargetPath).text();
-	const ext = path.extname(realTargetPath).toLowerCase();
-	const contentType: InternalResource["contentType"] = ext === ".md" ? "text/markdown" : "text/plain";
+	const contentType: InternalResource["contentType"] = isMarkdownPath(realTargetPath) ? "text/markdown" : "text/plain";
 
 	return {
 		url: url.href,

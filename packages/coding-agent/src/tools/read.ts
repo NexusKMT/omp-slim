@@ -25,6 +25,7 @@ import {
 } from "@oh-my-pi/pi-utils";
 import { type } from "arktype";
 import { LRUCache } from "lru-cache/raw";
+import { isSettingsInitialized, settings } from "../config/settings";
 import {
 	canonicalSnapshotKey,
 	getFileSnapshotStore,
@@ -39,7 +40,7 @@ import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { InternalUrlRouter, resolveLocalUrlToFile } from "../internal-urls";
 import { parseInternalUrl } from "../internal-urls/parse";
 import type { InternalUrl } from "../internal-urls/types";
-import { getLanguageFromPath, type Theme } from "../modes/theme/theme";
+import { getLanguageFromPath, isMarkdownPath, type Theme } from "../modes/theme/theme";
 import readDescription from "../prompts/tools/read.md" with { type: "text" };
 import type { ToolSession } from "../sdk";
 import {
@@ -157,7 +158,16 @@ const MAX_SUMMARY_LINES = 20_000;
  * on disk is unchanged. Shared with the streaming sink path so one setting
  * covers `bash`/`ssh`/`python`/`js eval` and `read` uniformly.
  */
-const PROSE_SUMMARY_EXTENSIONS = new Set([".md", ".txt"]);
+const PROSE_SUMMARY_EXTENSIONS = new Set([".txt"]);
+
+function isMarkdownContentPath(filePath: string): boolean {
+	return isMarkdownPath(filePath);
+}
+
+function isProseSummaryPath(filePath: string): boolean {
+	return isMarkdownContentPath(filePath) || PROSE_SUMMARY_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
 // Remote mount path prefix (sshfs mounts) - skip fuzzy matching to avoid hangs
 const REMOTE_MOUNT_PREFIX = getRemoteDir() + path.sep;
 
@@ -750,6 +760,13 @@ export interface ReadToolDetails {
 	conflictCount?: number;
 	/** Paths recovered from a delimited read argument; used only by the TUI to render one call as multiple read rows. */
 	displayReadTargets?: string[];
+}
+
+function markMarkdownContentType(details: ReadToolDetails, filePath: string): ReadToolDetails {
+	if (!details.contentType && isMarkdownContentPath(filePath)) {
+		details.contentType = "text/markdown";
+	}
+	return details;
 }
 
 type ReadParams = ReadToolInput;
@@ -1526,7 +1543,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			try {
 				const bridgeText = await bridgePromise;
 				const bridgeResult = this.#buildInMemoryMultiRangeResult(bridgeText, ranges, {
-					details: { resolvedPath: absolutePath, suffixResolution },
+					details: markMarkdownContentType({ resolvedPath: absolutePath, suffixResolution }, absolutePath),
 					sourcePath: absolutePath,
 					entityLabel: "file",
 					raw: rawSelector,
@@ -1702,10 +1719,13 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		const archive = await openArchive(resolvedArchivePath.absolutePath);
 		throwIfAborted(signal);
 
-		const details: ReadToolDetails = {
-			resolvedPath: resolvedArchivePath.absolutePath,
-			suffixResolution: resolvedArchivePath.suffixResolution,
-		};
+		const details: ReadToolDetails = markMarkdownContentType(
+			{
+				resolvedPath: resolvedArchivePath.absolutePath,
+				suffixResolution: resolvedArchivePath.suffixResolution,
+			},
+			resolvedArchivePath.archiveSubPath,
+		);
 
 		let archiveSubPath = resolvedArchivePath.archiveSubPath;
 		let sel = parsedSel;
@@ -2304,14 +2324,14 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				// because only `truncateHead` was being applied.
 				if (isMultiRange(parsed) && parsed.kind === "lines") {
 					return this.#buildInMemoryMultiRangeResult(renderedContent, parsed.ranges, {
-						details: { resolvedPath: absolutePath },
+						details: { resolvedPath: absolutePath, contentType: "text/markdown" },
 						sourcePath: absolutePath,
 						entityLabel: "document",
 					});
 				}
 				const { offset, limit } = selToOffsetLimit(parsed);
 				return this.#buildInMemoryTextResult(renderedContent, offset, limit, {
-					details: { resolvedPath: absolutePath },
+					details: { resolvedPath: absolutePath, contentType: "text/markdown" },
 					sourcePath: absolutePath,
 					entityLabel: "document",
 					raw: isRawSelector(parsed),
@@ -2344,7 +2364,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			if (
 				parsed.kind === "none" &&
 				this.session.settings.get("read.summarize.enabled") &&
-				(this.session.settings.get("read.summarize.prose") || !PROSE_SUMMARY_EXTENSIONS.has(ext))
+				(this.session.settings.get("read.summarize.prose") || !isProseSummaryPath(absolutePath))
 			) {
 				const summary = await this.#trySummarize(absolutePath, fileSize, signal);
 				if (summary?.parsed && summary.elided) {
@@ -2404,7 +2424,10 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 						try {
 							const bridgeText = await bridgePromise;
 							const bridgeResult = this.#buildInMemoryTextResult(bridgeText, offset, limit, {
-								details: { resolvedPath: absolutePath, suffixResolution },
+								details: markMarkdownContentType(
+									{ resolvedPath: absolutePath, suffixResolution },
+									absolutePath,
+								),
 								sourcePath: absolutePath,
 								entityLabel: "file",
 								raw: isRawSelector(parsed),
@@ -2691,6 +2714,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			}
 		}
 
+		markMarkdownContentType(details, absolutePath);
 		if (suffixResolution) {
 			details.suffixResolution = suffixResolution;
 			// Inline resolution notice into first text block so the model sees the actual path
@@ -3216,7 +3240,8 @@ export const readToolRenderer = {
 			title += ` ${uiTheme.fg("warning", `(⚠ ${n} conflict${n === 1 ? "" : "s"})`)}`;
 		}
 		const rawRequested = args?.raw === true || isRawSelector(parseSel(renderPath.sel));
-		const isMarkdown = details?.contentType === "text/markdown" && !rawRequested;
+		const markdownPreviewEnabled = isSettingsInitialized() && settings.get("read.renderMarkdown");
+		const isMarkdown = markdownPreviewEnabled && details?.contentType === "text/markdown" && !rawRequested;
 		let cachedWidth: number | undefined;
 		let cachedExpanded: boolean | undefined;
 		let cachedLines: string[] | undefined;
