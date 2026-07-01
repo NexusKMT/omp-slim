@@ -223,7 +223,7 @@ describe("createAgentSession session storage isolation", () => {
 		});
 	});
 
-	it("keeps restored assistant messages deobfuscated across reloads", async () => {
+	it("keeps restored assistant placeholders obfuscated across reloads", async () => {
 		await withClearedSecretEnv(async () => {
 			await withTempConfigRoot(async () => {
 				const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-sdk-session-secrets-${Snowflake.next()}-`));
@@ -243,10 +243,11 @@ describe("createAgentSession session storage isolation", () => {
 					[{ type: "plain", content: "sdk-secret-token-123456" }],
 					await secrets.getSecretPlaceholderKey(agentDir),
 				);
+				const placeholder = obfuscator.obfuscate("token sdk-secret-token-123456");
 				const initialManager = SessionManager.create(cwd, path.join(agentDir, "sessions"));
 				initialManager.appendMessage({
 					role: "assistant",
-					content: [{ type: "text", text: obfuscator.obfuscate("token sdk-secret-token-123456") }],
+					content: [{ type: "text", text: placeholder }],
 					api: model.api,
 					provider: model.provider,
 					model: model.id,
@@ -283,13 +284,9 @@ describe("createAgentSession session storage isolation", () => {
 					enableLsp: false,
 				});
 				try {
-					expect(getAssistantText(session.messages.at(-1) as AssistantMessage | undefined)).toContain(
-						"sdk-secret-token-123456",
-					);
+					expect(getAssistantText(session.messages.at(-1) as AssistantMessage | undefined)).toBe(placeholder);
 					await session.reload();
-					expect(getAssistantText(session.messages.at(-1) as AssistantMessage | undefined)).toContain(
-						"sdk-secret-token-123456",
-					);
+					expect(getAssistantText(session.messages.at(-1) as AssistantMessage | undefined)).toBe(placeholder);
 				} finally {
 					await session.dispose();
 				}
