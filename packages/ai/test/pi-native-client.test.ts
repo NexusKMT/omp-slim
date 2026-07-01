@@ -335,9 +335,9 @@ describe("streamPiNative event flow", () => {
 		const final = baseAssistant({ content: [{ type: "text", text: "hello world" }] });
 		const chunks = [
 			{ atMs: 0, bytes: sseEventBytes({ type: "start", partial: baseAssistant() }) },
-			{ atMs: 15, bytes: sseEventBytes({ type: "text_delta", contentIndex: 0, delta: "hello", partial: final }) },
-			{ atMs: 35, bytes: sseEventBytes({ type: "text_delta", contentIndex: 0, delta: " world", partial: final }) },
-			{ atMs: 55, bytes: sseEventBytes({ type: "done", reason: "stop", message: final }) },
+			{ atMs: 80, bytes: sseEventBytes({ type: "text_delta", contentIndex: 0, delta: "hello", partial: final }) },
+			{ atMs: 160, bytes: sseEventBytes({ type: "text_delta", contentIndex: 0, delta: " world", partial: final }) },
+			{ atMs: 320, bytes: sseEventBytes({ type: "done", reason: "stop", message: final }) },
 		];
 		const fetchImpl: FetchImpl = (async () =>
 			new Response(delayedBody(chunks), {
@@ -348,8 +348,8 @@ describe("streamPiNative event flow", () => {
 		const stream = streamPiNative(fakeModel(), baseContext, {
 			apiKey: "k",
 			fetch: fetchImpl,
-			streamFirstEventTimeoutMs: 40,
-			streamIdleTimeoutMs: 30,
+			streamFirstEventTimeoutMs: 500,
+			streamIdleTimeoutMs: 180,
 		});
 
 		const result = await stream.result();
@@ -399,8 +399,10 @@ describe("streamPiNative event flow", () => {
 
 	it("forwards caller aborts to the underlying fetch signal", async () => {
 		const captured: { signal?: AbortSignal } = {};
+		const fetchStarted = Promise.withResolvers<void>();
 		const fetchImpl: FetchImpl = (async (_input, init) => {
 			captured.signal = init?.signal ?? undefined;
+			fetchStarted.resolve();
 			return new Response(stalledBody(), { status: 200, headers: { "Content-Type": "text/event-stream" } });
 		}) as FetchImpl;
 		const controller = new AbortController();
@@ -410,7 +412,7 @@ describe("streamPiNative event flow", () => {
 			signal: controller.signal,
 		});
 
-		await Bun.sleep(0);
+		await fetchStarted.promise;
 		expect(captured.signal?.aborted).toBe(false);
 		controller.abort(new Error("caller aborted"));
 
