@@ -19,6 +19,35 @@
 - Fixed a secret regex match that starts in outside text and ends inside a previously generated `#…#` placeholder's expanded value leaving an independently-matching outside prefix provider-visible. Resuming the scan past the cut placeholder skipped the whole straddling span, so a pattern like `[A-Z0-9]{8,12}` greedily spanning `SECRETUV` into an `ABCDEFGH` placeholder returned `SECRETUV#…#` even though `SECRETUV` satisfies the regex on its own. The cut handling now re-runs the regex bounded to just before the placeholder (full left context kept, so lookbehind still evaluates) and redacts the standalone prefix match — to its own reversible placeholder in obfuscate mode, or a one-way redaction in replace mode — while the cut secret stays as its existing placeholder. The replace-mode redaction's fixed point is verified against the placeholder-expanded view re-obfuscation actually scans, so it does not drift when the adjacent placeholder expands ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
 - Fixed a secret regex whose match straddles a previously generated `#…#` placeholder still rewriting short surrounding raw bytes the regex never needed, drifting the `obfuscate()` fixed point and provider-visible history/prompt-cache prefixes across re-obfuscation passes. When a greedy match (e.g. `[A-Z0-9]{8,12}`) reaches across a prior-call placeholder whose own value already satisfies the pattern, a trailing/leading raw chunk that does not independently match is now left verbatim instead of being rewritten on the next pass — in obfuscate mode the chunk was minted into a fresh placeholder (`…SECRETUV→#…#A`), and in default replace mode its deterministic scramble drifted (`…#…#ZZJ5sotJ` → `…#…#ZZpvsotJ`). Surrounding bytes are still redacted when the placeholder value alone cannot satisfy the regex (e.g. a required `api_key=` prefix) or when they independently match it ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
 
+## [16.2.11] - 2026-07-01
+
+### Fixed
+
+- Fixed model-discovery requests (Ollama, Llama.cpp, LM Studio, OpenAI, LiteLLM, vLLM) failing to clear timeouts after completion, preventing potential memory and timer leaks.
+- Fixed grep and ripgrep built-in tools ignoring shell abort and timeout signals during recursive directory walks, allowing them to be interrupted immediately.
+- Fixed omp setup speech returning prematurely before Whisper STT downloads complete, and improved error reporting for worker download failures.
+- Fixed high memory usage in multi-target ast_grep searches by only retaining the final page window while preserving exact match and file counts.
+- Fixed async job manager disposal and task cancellation handling to properly release session semaphores when aborted.
+- Updated and expanded omp:// documentation coverage for managed memory, skill tools, image/speech generation, and package CLIs.
+
+## [16.2.10] - 2026-06-30
+
+### Changed
+
+- Updated grep warnings to clarify that large files are partially searched rather than entirely skipped
+- Renamed the filesystem walker worker count environment variable from PI_GREP_WORKERS to PI_WALK_WORKERS
+- Centralized filesystem traversal policy in `pi-walker`.
+- Changed the in-session `/resume` session picker to open as a fullscreen window on the terminal's alternate screen, matching the startup `--resume` picker and `/settings`. It borrows the alt buffer for its lifetime (the transcript is untouched underneath) and enables mouse tracking — the wheel scrolls the list and a left click resumes the row under the pointer — with the keybinding hint and bottom border pinned to the screen bottom. Previously it mounted inline in the editor slot and rendered compactly without mouse support.
+
+### Fixed
+
+- Fixed Git subcommands ignoring repository paths by stripping ambient Git environment variables
+- Fixed concurrent bash commands cross-killing each other on cancel/timeout. Cancellation cleanup previously walked the whole host process tree and signalled every descendant spawned since a per-run baseline, so cancelling or timing out one command could SIGTERM an unrelated command's child still running in parallel (it looked "new" relative to the canceller's baseline). Each run now tracks only the processes it actually spawned (via a brush-core spawn-observer hook) and scopes its TERM/KILL waves to that set, leaving concurrent runs untouched.
+- Fixed `/skill:<name>` invocation losing the user's prompt context when the slash token was reached mid-prompt via the autocomplete. The slash-command parser now recognizes a `/skill:<name>` token surrounded by whitespace in non-slash, non-local-execution drafts (in addition to the leading form) and threads the surrounding prose through to the skill as `args`, so the typed prompt survives both in the editor (see the TUI changelog) and in the dispatched skill message. Drafts that already begin with another slash command (`/compact /skill:foo`), a bash sigil (`!echo /skill:foo`, `!!echo /skill:foo`), or a python sigil (`$ run.py /skill:foo`, `$$ run.py /skill:foo`) keep their existing dispatcher precedence and are not hijacked by the mid-prompt skill parser. Applies to the interactive TUI, ACP, and RPC dispatch paths via the shared `parseSkillInvocation` helper in `extensibility/skills` ([#3913](https://github.com/can1357/oh-my-pi/issues/3913)).
+- Fixed the incomplete-todo reminder drifting to the bottom of the screen and piling up as dozens of duplicate copies in native scrollback. The reminder rendered in a dedicated anchored live-region container (`todoReminderContainer`) pinned above the editor, so it re-rendered in place every frame and — being taller than the viewport on short terminals while the subagent/job HUD churned below it — had its top rows committed to scrollback again on each reflow. It is now committed once into the transcript as a regular block (the same path TTSR notifications use), so it stays anchored in history where it fired.
+- Fixed subagent frontmatter `thinkingLevel` being overridden by `modelRoles.task` model suffixes. ([#3915](https://github.com/can1357/oh-my-pi/issues/3915))
+- Fixed Ruff LSP auto-detection for Windows Python virtualenvs by checking `.venv/Scripts`, `venv/Scripts`, and `.env/Scripts` before falling back to PATH. ([#3916](https://github.com/can1357/oh-my-pi/issues/3916))
+
 ## [16.2.9] - 2026-06-30
 
 ### Breaking Changes
