@@ -20,6 +20,13 @@
 - Fixed a secret regex whose match straddles a previously generated `#…#` placeholder still rewriting short surrounding raw bytes the regex never needed, drifting the `obfuscate()` fixed point and provider-visible history/prompt-cache prefixes across re-obfuscation passes. When a greedy match (e.g. `[A-Z0-9]{8,12}`) reaches across a prior-call placeholder whose own value already satisfies the pattern, a trailing/leading raw chunk that does not independently match is now left verbatim instead of being rewritten on the next pass — in obfuscate mode the chunk was minted into a fresh placeholder (`…SECRETUV→#…#A`), and in default replace mode its deterministic scramble drifted (`…#…#ZZJ5sotJ` → `…#…#ZZpvsotJ`). Surrounding bytes are still redacted when the placeholder value alone cannot satisfy the regex (e.g. a required `api_key=` prefix) or when they independently match it ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
 - Fixed a secret regex match straddling a prior-call placeholder with independently-matching raw bytes on one or both sides leaking those bytes unredacted, in two ways. First, the spillover check concatenated the outside-placeholder chunks before testing whether they independently satisfy the regex, which erased the placeholder-token boundary between them — e.g. with `\b[A-Z]{8}\b|[A-Z]{17}` and a placeholder for `SECRETUV` flanked by prefix `ABCDEFGH` (matches on its own) and suffix `I` (does not), the concatenated `ABCDEFGHI` matched neither alternative, so `ABCDEFGH` was treated as spillover and left verbatim. Second, testing each chunk in isolation (an out-of-context substring) broke context-sensitive patterns — lookbehind, lookahead, and `\b` — that depend on bytes actually adjacent to the chunk in the source text but outside its own range: `(?<=api=)[0-9]{8}` over `api=12345678` plus a trailing placeholder failed when `12345678` was tested standalone, since the isolated slice has no `api=` immediately before it. Each outside chunk is now tested at its real position in the source text, so lookbehind/lookahead see the actual surrounding bytes while a match spanning into the placeholder itself still doesn't count as independent.
 
+## [16.2.13] - 2026-07-01
+
+### Fixed
+
+- Fixed `models.yml` remote compaction schema support for V2 streaming endpoint fields. ([#4146](https://github.com/can1357/oh-my-pi/issues/4146))
+- Fixed the SSH tool to reject `cwd` values of `~` and `~/...` before sending guaranteed-bad quoted tilde paths to remote POSIX shells. ([#4002](https://github.com/can1357/oh-my-pi/issues/4002))
+
 ## [16.2.12] - 2026-07-01
 
 ### Breaking Changes
