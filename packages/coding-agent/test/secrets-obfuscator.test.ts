@@ -728,6 +728,32 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(after.deobfuscate(persisted)).toBe("api_key=abcdefghXYZ");
 	});
 
+	it("keeps default replace markers stable when friendly placeholder aliases advance scan context", () => {
+		const sharedKey = "E".repeat(43);
+		const regex = "api_key=[a-z]{8}[A-Za-z0-9]{3}|(?<=abcdefgh)[A-Za-z0-9]{3}";
+		const before = new SecretObfuscator(
+			[
+				{ type: "plain", content: "abcdefgh", friendlyName: "old" },
+				{ type: "regex", mode: "replace", content: regex },
+			],
+			sharedKey,
+		);
+		const oldPlaceholder = before.obfuscate("abcdefgh");
+		const after = new SecretObfuscator(
+			[
+				{ type: "plain", content: "abcdefgh", friendlyName: "new" },
+				{ type: "regex", mode: "replace", content: regex },
+			],
+			sharedKey,
+		);
+
+		const persisted = after.obfuscate(`api_key=${oldPlaceholder}XYZ`);
+
+		expect(persisted).toContain(oldPlaceholder);
+		expect(persisted).not.toContain("XYZ");
+		expect(after.obfuscate(persisted)).toBe(persisted);
+	});
+
 	it("does not canonicalize literal placeholder aliases inside regex matches", () => {
 		const sharedKey = "F".repeat(43);
 		const plain = new SecretObfuscator([{ type: "plain", content: "legacy-secret" }], sharedKey);

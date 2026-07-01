@@ -926,7 +926,8 @@ export class SecretObfuscator {
 				});
 			},
 			placeholder => {
-				scanCursor += this.#deobfuscateMap.get(placeholder)?.secret.length ?? placeholder.length;
+				scanCursor +=
+					lookupFriendlyPlaceholderAlias(this.#deobfuscateMap, placeholder)?.secret.length ?? placeholder.length;
 				return placeholder;
 			},
 		);
