@@ -644,6 +644,29 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obf.obfuscate(second)).toBe(second);
 	});
 
+	it("keeps default replace markers stable when a lookbehind match spills into a prior placeholder", () => {
+		const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1n";
+		const entries = [
+			{ type: "plain" as const, content: "ABCDEFGH" },
+			{
+				type: "regex" as const,
+				mode: "replace" as const,
+				content: "(?<=api=)[0-9]{8}[A-Z]{8}|(?<=api=)[0-9]{8}|[A-Z]{8}",
+			},
+		];
+		const obf = new SecretObfuscator(entries, key);
+		const placeholdered = obf.obfuscate("ABCDEFGH");
+		const persisted = obf.obfuscate(`api=12345678${placeholdered}`);
+
+		expect(persisted).not.toContain("12345678");
+		expect(persisted).not.toContain("ABCDEFGH");
+		expect(persisted).toContain(placeholdered);
+		expect(obf.obfuscate(persisted)).toBe(persisted);
+
+		const restarted = new SecretObfuscator(entries, key);
+		expect(restarted.obfuscate(persisted)).toBe(persisted);
+	});
+
 	it("keeps regex placeholders stable when inner friendly names change", () => {
 		const sharedKey = "E".repeat(43);
 		const before = new SecretObfuscator(

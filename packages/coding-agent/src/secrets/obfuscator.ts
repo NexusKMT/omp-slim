@@ -697,17 +697,15 @@ export class SecretObfuscator {
 						// match, so emit it once around the preserved placeholder rather
 						// than per surrounding chunk (which duplicates it, e.g.
 						// `api_key=***#…#api_key=***`). Without one, each surrounding chunk
-						// gets its own length-matched deterministic scramble.
+						// gets its own length-matched fixed-point marker, checked in the
+						// expanded scan context so marker bytes cannot re-match beside the
+						// preserved placeholder on the next pass.
 						const redacted =
 							entry.replacement !== undefined
 								? redactWithFixedReplacementOutsidePlaceholders(span, entry.replacement, placeholder =>
 										this.#isGeneratedPlaceholder(placeholder),
 									)
-								: redactOutsideGeneratedPlaceholders(
-										span,
-										chunk => this.#generateReplacement(chunk),
-										placeholder => this.#isGeneratedPlaceholder(placeholder),
-									);
+								: this.#redactRegexMatchOutsidePlaceholders(span, entry.regex, match.scanContext);
 						result = replaceRange(result, match.start, replaceEnd, redacted);
 						origin = replaceRange(origin, match.start, replaceEnd, "I".repeat(redacted.length));
 					} else {
@@ -897,6 +895,41 @@ export class SecretObfuscator {
 		}
 		this.#generatedReplaceChunks.add(replacement);
 		return replacement;
+	}
+
+	#generateRegexChunkReplacement(chunk: string, regex: RegExp, context: RegexMatchContext): string {
+		let replacement = this.#generateReplacement(chunk);
+		if (regexRematchesInContext(replacement, regex, context)) {
+			const stable = findNonMatchingReplacement(chunk, regex, context);
+			if (stable !== undefined) {
+				replacement = stable;
+				this.#generatedReplaceChunks.add(replacement);
+			}
+			regex.lastIndex = 0;
+		}
+		return replacement;
+	}
+
+	#redactRegexMatchOutsidePlaceholders(text: string, regex: RegExp, context: RegexMatchContext): string {
+		let scanCursor = context.start;
+		return transformOutsidePlaceholders(
+			text,
+			placeholder => this.#isGeneratedPlaceholder(placeholder),
+			chunk => {
+				const start = scanCursor;
+				scanCursor += chunk.length;
+				if (chunk.length === 0) return "";
+				return this.#generateRegexChunkReplacement(chunk, regex, {
+					text: context.text,
+					start,
+					end: scanCursor,
+				});
+			},
+			placeholder => {
+				scanCursor += this.#deobfuscateMap.get(placeholder)?.secret.length ?? placeholder.length;
+				return placeholder;
+			},
+		);
 	}
 
 	/** Find the obfuscate index for a known secret value. */
@@ -1114,6 +1147,7 @@ export class SecretObfuscator {
 		inputPlaceholderOutsideChunkCount: number;
 		inputPlaceholderInnerIndependentlyMatches: boolean;
 		defaultReplacement: string | undefined;
+		scanContext: RegexMatchContext;
 	}> {
 		const knownPlaceholderRanges = this.#knownPlaceholderRanges(text);
 		const regexScan = buildReplaceRegexScan(text, knownPlaceholderRanges, this.#deobfuscateMap);
@@ -1134,6 +1168,7 @@ export class SecretObfuscator {
 			inputPlaceholderOutsideChunkCount: number;
 			inputPlaceholderInnerIndependentlyMatches: boolean;
 			defaultReplacement: string | undefined;
+			scanContext: RegexMatchContext;
 		}> = [];
 		for (;;) {
 			const match = regex.exec(scanText);
@@ -1285,13 +1320,14 @@ export class SecretObfuscator {
 				recursive = canonical.recursive;
 			}
 
+			const scanContext = {
+				text: scanText,
+				start: scanMatchStart,
+				end: scanMatchEnd,
+			};
 			if (mode === "replace" && replacement === undefined && !preserveGeneratedPlaceholders) {
 				const savedLastIndex = regex.lastIndex;
-				defaultReplacement = this.#generateRegexReplacement(scanMatchValue, regex, {
-					text: scanText,
-					start: scanMatchStart,
-					end: scanMatchEnd,
-				});
+				defaultReplacement = this.#generateRegexReplacement(scanMatchValue, regex, scanContext);
 				regex.lastIndex = savedLastIndex;
 			}
 			matches.push({
@@ -1309,6 +1345,7 @@ export class SecretObfuscator {
 				inputPlaceholderOutsideStart,
 				inputPlaceholderOutsideChunkCount,
 				inputPlaceholderInnerIndependentlyMatches,
+				scanContext,
 			});
 		}
 		return matches.reverse();
@@ -1676,19 +1713,6 @@ function findScanSegment(segments: ReadonlyArray<RegexScanSegment>, scanIndex: n
 		if (scanIndex >= segment.scanStart && scanIndex < segment.scanEnd) return segment;
 	}
 	throw new Error("regex match did not map to source text");
-}
-
-function redactOutsideGeneratedPlaceholders(
-	text: string,
-	replacementForChunk: (chunk: string) => string,
-	shouldPreservePlaceholder: (placeholder: string) => boolean,
-): string {
-	return transformOutsidePlaceholders(
-		text,
-		shouldPreservePlaceholder,
-		chunk => (chunk.length === 0 ? "" : replacementForChunk(chunk)),
-		placeholder => placeholder,
-	);
 }
 
 // Apply a fixed custom replacement across a matched span while preserving any
