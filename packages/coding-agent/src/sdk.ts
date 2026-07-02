@@ -1240,9 +1240,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		if (allEntries.length > 0) {
 			// The persisted placeholder key — and creating its key file under the
 			// configured agentDir — is only needed for reversible obfuscate-mode
-			// placeholders. Replace-mode entries never build a keyed base, so a
-			// replace-only secrets set must not require the key; otherwise a headless
-			// run with an unwritable default config root fails startup for a feature it does not use.
+			// placeholders, or for a default (no custom `replacement`) replace-mode
+			// regex whose key-derived idempotent fallback marker needs a stable key
+			// across restarts (see `secretEntryNeedsPlaceholderKey`). A replace-only
+			// secrets set with no such regex must not require the key; otherwise a
+			// headless run with an unwritable default config root fails startup for a
+			// feature it does not use.
 			obfuscator = new SecretObfuscator(allEntries, placeholderKey);
 		}
 		if (obfuscator?.hasSecrets() !== true && placeholderKey !== undefined) {

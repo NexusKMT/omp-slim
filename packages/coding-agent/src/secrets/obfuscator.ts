@@ -248,17 +248,30 @@ export function sanitizeSecretFriendlyName(name: string): string | undefined {
 }
 
 /**
- * Whether an entry can produce a reversible (keyed) obfuscate-mode placeholder
- * and therefore requires the persisted placeholder key. Short plain obfuscate
- * entries are toned down (never placeheld), so they must NOT force key creation:
- * otherwise a `secret-placeholder.key` file is written and persisted for a config
- * that ends up with no active secrets, leaving the key readable via a tool and
- * reusable for later placeholders.
+ * Whether an entry needs the persisted placeholder key: either because it can
+ * produce a reversible (keyed) obfuscate-mode placeholder, or because a default
+ * (no custom `replacement`) replace-mode regex can reach
+ * `#generateRegexReplacement`'s key-derived idempotent fallback marker (see
+ * `#generateReplacement`) when every same-length candidate re-matches a
+ * pathological match-everything config (e.g. `[\s\S]{8}`). That fallback depends
+ * on the persisted per-install key — not just length — to stay a fixed point
+ * across a process restart; without a persisted key, a fresh install falls back
+ * to a process-random key (`defaultPlaceholderKey()`), so the fallback marker
+ * would churn across restarts even though the algorithm itself is stable. A
+ * regex WITH a custom `replacement` never reaches that fallback (it always emits
+ * the literal configured string), and a plain replace secret's replacement is
+ * pure content-hash (`#generateSecretReplacement`), so neither needs the key.
+ * Short plain obfuscate entries are toned down (never placeheld), so they must
+ * NOT force key creation: otherwise a `secret-placeholder.key` file is written
+ * and persisted for a config that ends up with no active secrets, leaving the
+ * key readable via a tool and reusable for later placeholders.
  */
 export function secretEntryNeedsPlaceholderKey(entry: SecretEntry): boolean {
-	if ((entry.mode ?? "obfuscate") !== "obfuscate") return false;
-	if (entry.type === "regex") return true;
-	return entry.content.length >= MIN_OBFUSCATE_SECRET_LEN;
+	if ((entry.mode ?? "obfuscate") === "obfuscate") {
+		if (entry.type === "regex") return true;
+		return entry.content.length >= MIN_OBFUSCATE_SECRET_LEN;
+	}
+	return entry.type === "regex" && entry.replacement === undefined;
 }
 
 /**

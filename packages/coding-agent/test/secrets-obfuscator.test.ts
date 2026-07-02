@@ -1478,14 +1478,52 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		}
 	});
 
-	it("does not require a placeholder key for entries that never produce a placeholder", () => {
+	it("does not require a placeholder key for entries that never produce a reversible placeholder", () => {
 		// Short plain obfuscate entries are toned down, so they must not force key
 		// creation; regex/long-plain obfuscate entries can placehold and do need it.
+		// A plain replace entry's replacement is pure content-hash, so it never needs
+		// the key either — see the tests below for regex replace entries, which can
+		// still need the key for a different reason (the fixed-point fallback marker).
 		expect(secretEntryNeedsPlaceholderKey({ type: "plain", content: "abc" })).toBe(false);
 		expect(secretEntryNeedsPlaceholderKey({ type: "plain", content: "abcdefgh" })).toBe(true);
 		expect(secretEntryNeedsPlaceholderKey({ type: "regex", content: "[A-Z]{2}" })).toBe(true);
 		expect(secretEntryNeedsPlaceholderKey({ type: "plain", content: "abc", mode: "replace" })).toBe(false);
-		expect(secretEntryNeedsPlaceholderKey({ type: "regex", content: "x+", mode: "replace" })).toBe(false);
+	});
+
+	it("requires a placeholder key for a default replace regex but not one with a custom replacement", () => {
+		// A replace-mode regex with NO custom `replacement` can reach
+		// `#generateRegexReplacement`'s no-stable-candidate fallback (e.g. for a
+		// pathological match-everything regex like `[\s\S]{8}`), which derives its
+		// marker from the persisted key so it stays a fixed point across restarts —
+		// so this shape DOES need the key. Regression: this previously returned
+		// `false` for every replace-mode entry, so a fresh install with only this
+		// entry never persisted a key and `SecretObfuscator` fell back to
+		// `defaultPlaceholderKey()` (process-random, regenerated every restart),
+		// churning the fallback marker across restarts anyway — the exact symptom
+		// the fixed-point fix was meant to eliminate.
+		expect(secretEntryNeedsPlaceholderKey({ type: "regex", content: "[\\s\\S]{8}", mode: "replace" })).toBe(true);
+		// A regex WITH a custom `replacement` never reaches that fallback — it always
+		// emits the literal configured string — so it still does not need the key.
+		expect(
+			secretEntryNeedsPlaceholderKey({
+				type: "regex",
+				content: "[\\s\\S]{8}",
+				mode: "replace",
+				replacement: "REDACTED",
+			}),
+		).toBe(false);
+	});
+
+	it("requires a persisted placeholder key for a config with only a whole-match default replace regex", () => {
+		// End-to-end counterpart to the previous test, exercised through
+		// `secretEntriesNeedPlaceholderKey` — what `sdk.ts` actually calls to decide
+		// whether to create/read the persisted key file. Entries mirror "keeps a
+		// whole-match default replace regex stable across restart" above. Regression:
+		// this previously returned `false` for this exact config, so `sdk.ts` never
+		// persisted a key and `SecretObfuscator` fell back to a process-random key,
+		// churning the fixed-point fallback marker across restarts anyway.
+		const entries = [{ type: "regex" as const, mode: "replace" as const, content: "[\\s\\S]{8}" }];
+		expect(secretEntriesNeedPlaceholderKey(entries)).toBe(true);
 	});
 
 	it("ignores obfuscate entries shadowed by a same-content replace entry when deciding key need", () => {
