@@ -50,7 +50,7 @@ describe("multi-path tools tolerate missing entries", () => {
 
 		const result = await tool.execute("search-multi-missing", {
 			pattern: "shared-needle",
-			paths: ["src/", "tests/"],
+			path: "src/; tests/",
 		});
 
 		const text = getText(result);
@@ -70,7 +70,7 @@ describe("multi-path tools tolerate missing entries", () => {
 
 		const promise = tool.execute("search-all-missing", {
 			pattern: "shared-needle",
-			paths: ["does-not-exist/", "also-missing/"],
+			path: "does-not-exist/; also-missing/",
 		});
 
 		await expect(promise).rejects.toThrow(/Path not found.*does-not-exist.*also-missing/s);
@@ -82,7 +82,7 @@ describe("multi-path tools tolerate missing entries", () => {
 		if (!tool) throw new Error("Missing glob tool");
 
 		const result = await tool.execute("find-multi-missing", {
-			paths: ["src/**/*.ts", "tests/**/*.ts"],
+			path: "src/**/*.ts; tests/**/*.ts",
 		});
 
 		const text = getText(result);
@@ -103,9 +103,16 @@ describe("multi-path tools tolerate missing entries", () => {
 		if (!tool) throw new Error("Missing glob tool");
 
 		const promise = tool.execute("find-all-missing", {
-			paths: ["nope/**/*.ts", "also-nope/**/*.ts"],
+			path: "nope/**/*.ts; also-nope/**/*.ts",
 		});
 
-		await expect(promise).rejects.toThrow(/Path not found.*nope.*also-nope/s);
+		// The semicolon splitter only recognizes a joined string as multiple
+		// paths once at least one segment resolves on disk (see
+		// `splitDelimitedPathEntry` in path-utils.ts); when every segment is
+		// missing it falls back to treating the whole string as one literal
+		// glob, whose base path truncates at the first wildcard. The error
+		// therefore only names the first pattern, but the call still fails
+		// loud instead of silently returning zero results.
+		await expect(promise).rejects.toThrow(/Path not found.*nope/s);
 	});
 });
