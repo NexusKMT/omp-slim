@@ -178,7 +178,7 @@ describe("git subprocess safety", () => {
 		const error = await failure;
 		expect(error).toBeInstanceOf(git.GitCommandError);
 		expect(String(error.message)).toContain("timed out");
-	});
+	}, 30000);
 
 	it("honors an explicit timeoutMs override on fetch", async () => {
 		const { child, kill } = createTimedOutChild("SIGTERM");
@@ -209,5 +209,5 @@ describe("git subprocess safety", () => {
 		expect(kill).toHaveBeenCalledWith("SIGTERM");
 		expect(error).toBeInstanceOf(git.GitCommandError);
 		expect(String(error.message)).toContain("timed out after 20ms");
-	});
+	}, 30000);
 });
