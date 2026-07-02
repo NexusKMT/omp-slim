@@ -154,7 +154,12 @@ describe("git subprocess safety", () => {
 		);
 		const target = path.join(os.tmpdir(), `omp-git-clone-timeout-${crypto.randomUUID()}`);
 
-		const failure = git.clone("https://example.invalid/repo.git", target).then(
+		// A loopback address on an unused port fails instantly (ECONNREFUSED, no
+		// DNS lookup) even if the Bun.spawn mock below somehow failed to
+		// intercept and a real `git clone` ran — unlike a DNS-resolvable host,
+		// which can hang for minutes on a restrictive resolver and turn a mock
+		// miss into an unrecoverable CI job hang instead of a fast local failure.
+		const failure = git.clone("git://127.0.0.1:1/repo.git", target).then(
 			() => undefined,
 			error => error,
 		);
@@ -173,7 +178,7 @@ describe("git subprocess safety", () => {
 		const error = await failure;
 		expect(error).toBeInstanceOf(git.GitCommandError);
 		expect(String(error.message)).toContain("timed out");
-	}, 20000);
+	});
 
 	it("honors an explicit timeoutMs override on fetch", async () => {
 		const { child, kill } = createTimedOutChild("SIGTERM");
@@ -196,7 +201,7 @@ describe("git subprocess safety", () => {
 		vi.spyOn(Bun, "spawn").mockImplementation(createSpawnMock(() => child));
 		const target = path.join(os.tmpdir(), `omp-git-clone-timeout-${crypto.randomUUID()}`);
 
-		const error = await git.clone("https://example.invalid/repo.git", target, { timeoutMs: 20 }).then(
+		const error = await git.clone("git://127.0.0.1:1/repo.git", target, { timeoutMs: 20 }).then(
 			() => undefined,
 			err => err,
 		);
@@ -204,5 +209,5 @@ describe("git subprocess safety", () => {
 		expect(kill).toHaveBeenCalledWith("SIGTERM");
 		expect(error).toBeInstanceOf(git.GitCommandError);
 		expect(String(error.message)).toContain("timed out after 20ms");
-	}, 20000);
+	});
 });
