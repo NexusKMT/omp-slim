@@ -285,7 +285,7 @@ describe("azure openai responses streaming", () => {
 		expect(result.stopReason).toBe("error");
 		expect(result.errorMessage).toContain("server_error: backend exploded late");
 	});
-	it("preserves assistant message phase when rebuilding fallback replay history", async () => {
+	it("preserves assistant message id and phase when rebuilding fallback replay history", async () => {
 		const payload = await captureAzurePayload({
 			messages: [
 				{ role: "user", content: "first user", timestamp: Date.now() },
@@ -304,13 +304,14 @@ describe("azure openai responses streaming", () => {
 				role: "assistant",
 				content: [{ type: "output_text", text: "Commentary answer", annotations: [] }],
 				status: "completed",
+				id: "msg_commentary",
 				phase: "final_answer",
 			},
 			{ role: "user", content: [{ type: "input_text", text: "follow-up" }] },
 		]);
 	});
 
-	it("omits legacy plain-string text signature IDs when rebuilding fallback replay history without reasoning", async () => {
+	it("preserves legacy plain-string text signature IDs when rebuilding fallback replay history", async () => {
 		const payload = await captureAzurePayload({
 			messages: [
 				{ role: "user", content: "first user", timestamp: Date.now() },
@@ -326,6 +327,7 @@ describe("azure openai responses streaming", () => {
 				role: "assistant",
 				content: [{ type: "output_text", text: "Legacy answer", annotations: [] }],
 				status: "completed",
+				id: "msg_legacy",
 			},
 			{ role: "user", content: [{ type: "input_text", text: "follow-up" }] },
 		]);

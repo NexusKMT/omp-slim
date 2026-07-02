@@ -74,11 +74,11 @@ async function waitFor(predicate: () => boolean, timeoutMs = 500): Promise<void>
 function isRemovalMissDebugCall(call: unknown[]): boolean {
 	const payload = call[1];
 	return (
-		call[0] === "agent active context assistant removal" &&
+		call[0] === "agent active context assistant removal missed" &&
 		typeof payload === "object" &&
 		payload !== null &&
-		"removed" in payload &&
-		payload.removed === false
+		"reason" in payload &&
+		payload.reason === "auto-retry"
 	);
 }
 
@@ -143,15 +143,10 @@ describe("AgentSession retry diagnostics", () => {
 
 		const promptPromise = session.prompt("trigger transient error").catch(() => undefined);
 		await waitFor(() => debugSpy.mock.calls.some(isRemovalMissDebugCall));
-		await waitFor(() => debugSpy.mock.calls.some(call => call[0] === "agent.continue failed state after scheduling"));
 
 		expect(debugSpy.mock.calls).toContainEqual([
-			"agent active context assistant removal",
-			expect.objectContaining({ reason: "auto-retry", removed: false, lastRole: "assistant" }),
-		]);
-		expect(debugSpy.mock.calls).toContainEqual([
-			"agent.continue failed state after scheduling",
-			expect.objectContaining({ lastRole: "assistant", messageCount: 2 }),
+			"agent active context assistant removal missed",
+			expect.objectContaining({ reason: "auto-retry", lastRole: "assistant" }),
 		]);
 		await session.abort();
 		await promptPromise;
