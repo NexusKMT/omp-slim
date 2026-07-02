@@ -644,6 +644,43 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obf.obfuscate(second)).toBe(second);
 	});
 
+	it("redacts a suffix whose lookbehind only resolves against the expanded scan context, not the literal placeholder token", () => {
+		// `ABCDEFGHSECRET|(?<=ABCDEFGH)SECRET|ABCDEFGH` combined with a prior-call
+		// placeholder for `ABCDEFGH` (independently matches the bare `ABCDEFGH`
+		// alternative). Re-obfuscating placeholder + `SECRET` makes the full match
+		// (placeholder expanded) `ABCDEFGHSECRET`; the outside chunk is `SECRET`.
+		// The ONLY way `SECRET` independently matches on its own is via the second
+		// alternative's lookbehind `(?<=ABCDEFGH)SECRET` — but the bytes immediately
+		// preceding it in the actual text are the LITERAL placeholder token (`#…#`),
+		// not `ABCDEFGH`, so testing the chunk in its literal-token context alone
+		// never satisfies the lookbehind and wrongly reports no independent match
+		// (unlike the two-sided-chunk test above, which literal context alone does
+		// catch). Testing the same chunk against the EXPANDED scan context — where
+		// the placeholder is resolved back to `ABCDEFGH` — lets the lookbehind see
+		// its real preceding bytes and correctly reports an independent match.
+		// Without that expanded-context check unioned with the literal-context one,
+		// `SECRET` was wrongly treated as spillover and leaked verbatim beside the
+		// placeholder.
+		const obf = new SecretObfuscator(
+			[
+				{ type: "plain", content: "ABCDEFGH" },
+				{ type: "regex", content: "ABCDEFGHSECRET|(?<=ABCDEFGH)SECRET|ABCDEFGH" },
+			],
+			"Q".repeat(43),
+		);
+		const placeholdered = obf.obfuscate("ABCDEFGH");
+		const second = obf.obfuscate(`${placeholdered}SECRET`);
+
+		// Core regression: the lookbehind-qualified suffix must not survive
+		// verbatim in provider-visible output.
+		expect(second).not.toContain("SECRET");
+		expect(second).not.toContain("ABCDEFGH");
+		// Every byte must still round-trip.
+		expect(obf.deobfuscate(second)).toBe("ABCDEFGHSECRET");
+		// Redacting the suffix must itself be a fixed point.
+		expect(obf.obfuscate(second)).toBe(second);
+	});
+
 	it("redacts a cut prefix using placeholder right context instead of leaking it", () => {
 		const obf = new SecretObfuscator(
 			[

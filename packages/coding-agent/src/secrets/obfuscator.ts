@@ -1292,11 +1292,17 @@ export class SecretObfuscator {
 				// placeholder, followed by a raw "I" suffix, concatenates to "ABCDEFGHI"
 				// — which does NOT match, since the boundary the placeholder provided is
 				// gone). That false negative would leave a genuinely independent,
-				// secret-shaped chunk unredacted. Each chunk is tested as it actually sits
-				// in the source, flanked by non-word placeholder-token bytes on the side(s)
-				// facing the placeholder.
+				// secret-shaped chunk unredacted. Each chunk is tested in BOTH its real
+				// literal-token context (where the token's own non-word boundary can
+				// complete a boundary-sensitive pattern) and the EXPANDED scan context —
+				// the same view re-obfuscation's own regex scan runs against — so a
+				// lookbehind/lookahead that only resolves once the neighboring
+				// placeholder is expanded (e.g. `(?<=ABCDEFGH)SECRET` beside a
+				// placeholder for `ABCDEFGH`) also counts as an independent match.
 				inputPlaceholderOutsideIndependentlyMatches = outsidePlaceholderRangesAnyIndependentlyMatch(
 					text,
+					scanText,
+					regexScan.segments,
 					start,
 					end,
 					knownPlaceholderRanges,
@@ -1837,30 +1843,59 @@ function textOutsidePlaceholderRanges(
 }
 
 // Like `textOutsidePlaceholderRanges`, but tests each outside chunk against
-// `regex` in its REAL source-text context instead of on an isolated slice.
-// Slicing a chunk out and testing it alone breaks context-sensitive patterns
-// (lookbehind/lookahead, `\b`) that depend on the bytes actually preceding or
-// following the chunk in `text` — e.g. `(?<=api=)[0-9]{8}` over `api=12345678`
-// only matches when evaluated against the real `api=` prefix, not against the
-// isolated chunk `12345678`. A match only counts when it lies ENTIRELY within
-// one outside chunk; a match that reaches into the placeholder itself is not
-// evidence the outside chunk independently requires redaction.
+// `regex` in its REAL context instead of on an isolated slice — tried in BOTH
+// the literal `#…#` placeholder-token text AND the EXPANDED scan context
+// (placeholder resolved to its secret value), since either can be the reason a
+// chunk independently requires redaction:
+//  - Literal-token context matters when the placeholder TOKEN's own non-word
+//    boundary is what completes a boundary-sensitive pattern, e.g. a prefix
+//    "ABCDEFGH" next to a placeholder token matches `\b[A-Z]{8}\b` because the
+//    token's leading `#` is a non-word byte — but that boundary disappears
+//    once the placeholder expands into more `[A-Z]` bytes with no separator.
+//  - Expanded scan context matters when a lookbehind/lookahead only resolves
+//    once the neighboring placeholder is expanded, e.g. a prior plain
+//    placeholder for `ABCDEFGH` next to raw `SECRET`, matched by
+//    `(?<=ABCDEFGH)SECRET`: the literal placeholder token before `SECRET`
+//    never satisfies the lookbehind, so literal-context alone wrongly reports
+//    no independent match.
+// A match only counts when it lies ENTIRELY within one outside chunk (in
+// whichever context it was tested); a match that reaches into the
+// placeholder itself is not evidence the outside chunk independently
+// requires redaction.
 function outsidePlaceholderRangesAnyIndependentlyMatch(
 	text: string,
+	scanText: string,
+	segments: ReadonlyArray<RegexScanSegment>,
 	start: number,
 	end: number,
 	ranges: ReadonlyArray<{ start: number; end: number }>,
 	regex: RegExp,
 ): boolean {
+	// A text-space outside chunk lies entirely within one non-placeholder scan
+	// segment (placeholder ranges are exactly the gaps between such segments),
+	// so its scan-space span is a fixed offset from its text-space span.
+	const toScanSpace = (chunkStart: number, chunkEnd: number): [number, number] | undefined => {
+		for (const segment of segments) {
+			if (segment.generatedPlaceholder || segment.textStart > chunkStart || segment.textEnd < chunkEnd) continue;
+			const offset = segment.scanStart - segment.textStart;
+			return [chunkStart + offset, chunkEnd + offset];
+		}
+		return undefined;
+	};
+	const chunkIndependentlyMatches = (chunkStart: number, chunkEnd: number): boolean => {
+		if (chunkMatchesInSourceContext(text, chunkStart, chunkEnd, regex)) return true;
+		const scanSpan = toScanSpace(chunkStart, chunkEnd);
+		return scanSpan !== undefined && chunkMatchesInSourceContext(scanText, scanSpan[0], scanSpan[1], regex);
+	};
 	let cursor = start;
 	for (const range of ranges) {
 		if (range.end <= start || range.start >= end) continue;
 		const overlapStart = Math.max(range.start, start);
 		const overlapEnd = Math.min(range.end, end);
-		if (cursor < overlapStart && chunkMatchesInSourceContext(text, cursor, overlapStart, regex)) return true;
+		if (cursor < overlapStart && chunkIndependentlyMatches(cursor, overlapStart)) return true;
 		cursor = overlapEnd;
 	}
-	return cursor < end && chunkMatchesInSourceContext(text, cursor, end, regex);
+	return cursor < end && chunkIndependentlyMatches(cursor, end);
 }
 
 // Whether `regex` (global) has a match fully contained in [chunkStart, chunkEnd)
