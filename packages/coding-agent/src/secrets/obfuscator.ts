@@ -699,15 +699,23 @@ export class SecretObfuscator {
 						// `api_key=***#…#api_key=***`). Without one, each surrounding chunk
 						// gets its own length-matched fixed-point marker, checked in the
 						// expanded scan context so marker bytes cannot re-match beside the
-						// preserved placeholder on the next pass.
+						// preserved placeholder on the next pass. The origin of any placeholder
+						// PRESERVED inside `span` must survive verbatim — blanket-tagging the
+						// whole redacted span "I" would relabel a same-call-fresh ("F")
+						// placeholder as prior-call, wrongly triggering the spillover-skip
+						// above for a LATER regex entry over content this call just redacted.
+						const spanOrigin = origin.slice(match.start, replaceEnd);
 						const redacted =
 							entry.replacement !== undefined
-								? redactWithFixedReplacementOutsidePlaceholders(span, entry.replacement, placeholder =>
-										this.#isGeneratedPlaceholder(placeholder),
+								? redactWithFixedReplacementOutsidePlaceholders(
+										span,
+										spanOrigin,
+										entry.replacement,
+										placeholder => this.#isGeneratedPlaceholder(placeholder),
 									)
-								: this.#redactRegexMatchOutsidePlaceholders(span, entry.regex, match.scanContext);
-						result = replaceRange(result, match.start, replaceEnd, redacted);
-						origin = replaceRange(origin, match.start, replaceEnd, "I".repeat(redacted.length));
+								: this.#redactRegexMatchOutsidePlaceholders(span, spanOrigin, entry.regex, match.scanContext);
+						result = replaceRange(result, match.start, replaceEnd, redacted.text);
+						origin = replaceRange(origin, match.start, replaceEnd, redacted.origin);
 					} else {
 						const replacement = entry.replacement ?? match.defaultReplacement;
 						if (replacement === undefined) {
@@ -910,10 +918,16 @@ export class SecretObfuscator {
 		return replacement;
 	}
 
-	#redactRegexMatchOutsidePlaceholders(text: string, regex: RegExp, context: RegexMatchContext): string {
+	#redactRegexMatchOutsidePlaceholders(
+		text: string,
+		origin: string,
+		regex: RegExp,
+		context: RegexMatchContext,
+	): { text: string; origin: string } {
 		let scanCursor = context.start;
-		return transformOutsidePlaceholders(
+		return transformOutsidePlaceholdersTracked(
 			text,
+			origin,
 			placeholder => this.#isGeneratedPlaceholder(placeholder),
 			chunk => {
 				const start = scanCursor;
@@ -1595,25 +1609,39 @@ export function obfuscateProviderContext(obfuscator: SecretObfuscator | undefine
 // Helpers
 // ═══════════════════════════════════════════════════════════════════════════
 
-function transformOutsidePlaceholders(
+// Like the untracked walk, but threads a parallel `origin` tag string through:
+// preserved placeholder spans keep their existing origin tag (so a
+// same-call-fresh "F" placeholder is never relabeled prior-call "I", and vice
+// versa), while `transform`'s output — always freshly generated or redacted
+// content in both callers below — is tagged "I" (it must not be re-matched as
+// though it arrived in the input, mirroring plain-secret replacement tagging).
+function transformOutsidePlaceholdersTracked(
 	text: string,
+	origin: string,
 	shouldSkipPlaceholder: (placeholder: string) => boolean,
 	transform: (chunk: string) => string,
 	preservePlaceholder?: (placeholder: string) => string,
-): string {
+): { text: string; origin: string } {
 	PLACEHOLDER_RE.lastIndex = 0;
 	let result = "";
+	let resultOrigin = "";
 	let pendingIndex = 0;
 	for (;;) {
 		const match = PLACEHOLDER_RE.exec(text);
 		if (match === null) break;
 		if (!shouldSkipPlaceholder(match[0])) continue;
-		result += transform(text.slice(pendingIndex, match.index));
-		result += preservePlaceholder ? preservePlaceholder(match[0]) : match[0];
+		const transformed = transform(text.slice(pendingIndex, match.index));
+		result += transformed;
+		resultOrigin += "I".repeat(transformed.length);
+		const preserved = preservePlaceholder ? preservePlaceholder(match[0]) : match[0];
+		result += preserved;
+		resultOrigin += origin.slice(match.index, match.index + match[0].length);
 		pendingIndex = match.index + match[0].length;
 	}
-	result += transform(text.slice(pendingIndex));
-	return result;
+	const trailing = transform(text.slice(pendingIndex));
+	result += trailing;
+	resultOrigin += "I".repeat(trailing.length);
+	return { text: result, origin: resultOrigin };
 }
 
 function trailingOutsidePreservedPlaceholderChunk(
@@ -1750,12 +1778,14 @@ function findScanSegment(segments: ReadonlyArray<RegexScanSegment>, scanIndex: n
 // position.
 function redactWithFixedReplacementOutsidePlaceholders(
 	text: string,
+	origin: string,
 	replacement: string,
 	shouldPreservePlaceholder: (placeholder: string) => boolean,
-): string {
+): { text: string; origin: string } {
 	let emitted = false;
-	return transformOutsidePlaceholders(
+	return transformOutsidePlaceholdersTracked(
 		text,
+		origin,
 		shouldPreservePlaceholder,
 		chunk => {
 			if (chunk.length === 0) return "";

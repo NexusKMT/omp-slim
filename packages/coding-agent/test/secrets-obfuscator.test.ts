@@ -759,6 +759,39 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(restarted.obfuscate(persisted)).toBe(persisted);
 	});
 
+	it("preserves a same-call fresh placeholder's origin across sequential replace-mode regex entries", () => {
+		// Codex review on PR #2735 ("Preserve fresh placeholder origin after regex
+		// redactions"): `ABCDEFGH` (obfuscate mode) + `[A-Z]{8}` (replace) +
+		// `[A-Z]{8,14}` (replace), all discovered in a SINGLE obfuscate() call on
+		// `ABCDEFGHSECRET`. Step 2 turns `ABCDEFGH` into a placeholder tagged "F"
+		// (fresh this call). The first regex entry's redaction pass matches that
+		// placeholder token exactly and preserves it untouched — but blanket-tagging
+		// the whole redacted span "I" mislabeled the preserved placeholder as
+		// prior-call. That false "I" tag then made the SECOND regex entry treat the
+		// placeholder as eligible for the greedy-spillover fixed-point skip: its
+		// deobfuscated inner value (`ABCDEFGH`, 8 chars) independently matches
+		// `[A-Z]{8,14}` while the outside chunk (`SECRET`, 6 chars) does not, so
+		// redaction was skipped entirely, leaking `SECRET` verbatim in the output.
+		// The fix threads the origin tag through the redaction helpers so a
+		// preserved placeholder keeps its own "F" tag, and the second entry
+		// correctly redacts `SECRET` instead of treating it as spillover.
+		const obf = new SecretObfuscator(
+			[
+				{ type: "plain", content: "ABCDEFGH" },
+				{ type: "regex", content: "[A-Z]{8}", mode: "replace" },
+				{ type: "regex", content: "[A-Z]{8,14}", mode: "replace" },
+			],
+			"Q".repeat(43),
+		);
+		const result = obf.obfuscate("ABCDEFGHSECRET");
+
+		// Core regression: the trailing secret must not survive verbatim in
+		// provider-visible output.
+		expect(result).not.toContain("SECRET");
+		// Re-obfuscating the already-redacted output must be a fixed point.
+		expect(obf.obfuscate(result)).toBe(result);
+	});
+
 	it("keeps regex placeholders stable when inner friendly names change", () => {
 		const sharedKey = "E".repeat(43);
 		const before = new SecretObfuscator(
