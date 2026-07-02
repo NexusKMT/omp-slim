@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Cache full-session retention transcript incrementally instead of re-formatting the entire message history on every retain cycle ([#4246](https://github.com/can1357/oh-my-pi/issues/4246))
+
+
 ## [16.3.0] - 2026-07-02
 
 ### Added
