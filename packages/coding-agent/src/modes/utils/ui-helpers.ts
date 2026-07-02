@@ -454,6 +454,7 @@ export class UiHelpers {
 							false,
 							content.id,
 						);
+					} else {
 						this.ctx.pendingTools.set(content.id, component);
 					}
 				}
