@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [16.3.0] - 2026-07-02
+
 ### Added
 
 - Added `friendlyName` support for hidden secrets so model-visible placeholders can carry sanitized semantic labels, content-derived hashes, and case hints while preserving exact deobfuscation ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
