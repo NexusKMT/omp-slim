@@ -792,6 +792,48 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obf.obfuscate(result)).toBe(result);
 	});
 
+	it("never mints a placeholder equal to another configured secret's literal value", () => {
+		// Codex review on PR #2735 ("Reject placeholders that equal configured
+		// secret values"): `#placeholderConflicts` only checked the internal
+		// deobfuscation map, not the full set of configured plain-secret literals.
+		// Discover the exact keyed placeholder `ABCDEFGH` mints under a fixed key,
+		// then configure THAT placeholder string as a second, unrelated plain
+		// secret ("B"). Its own plain-secret redaction pass (sorted by length, run
+		// once per obfuscate() call) already completed before `ABCDEFGH`'s
+		// placeholder existed in the text, so a naive conflict check never catches
+		// the collision — the newly-minted placeholder becomes a verbatim,
+		// provider-visible copy of B's raw secret. Covers both entry orderings
+		// since the bug depended on which secret's redaction pass ran first.
+		const key = "Q".repeat(43);
+		const discoveryObf = new SecretObfuscator([{ type: "plain", content: "ABCDEFGH" }], key);
+		const collidingPlaceholder = discoveryObf.obfuscate("ABCDEFGH");
+		expect(collidingPlaceholder).toMatch(/^#[A-Z0-9]+(?::[ULCM])?#$/);
+
+		for (const entries of [
+			[
+				{ type: "plain" as const, content: "ABCDEFGH" },
+				{ type: "plain" as const, content: collidingPlaceholder },
+			],
+			[
+				{ type: "plain" as const, content: collidingPlaceholder },
+				{ type: "plain" as const, content: "ABCDEFGH" },
+			],
+		]) {
+			const obf = new SecretObfuscator(entries, key);
+			const input = "value=ABCDEFGH other=stuff";
+
+			const out = obf.obfuscate(input);
+
+			// Core regression: B's raw literal must never survive verbatim,
+			// disguised as A's placeholder, in provider-visible output.
+			expect(out).not.toContain(collidingPlaceholder);
+			// Deobfuscation still restores the original input.
+			expect(obf.deobfuscate(out)).toBe(input);
+			// Re-obfuscating the already-redacted output must be a fixed point.
+			expect(obf.obfuscate(out)).toBe(out);
+		}
+	});
+
 	it("keeps regex placeholders stable when inner friendly names change", () => {
 		const sharedKey = "E".repeat(43);
 		const before = new SecretObfuscator(

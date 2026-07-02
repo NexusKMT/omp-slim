@@ -535,6 +535,15 @@ export class SecretObfuscator {
 	/** Deterministic replace chunks emitted by this obfuscator, used to keep re-obfuscation idempotent. */
 	#generatedReplaceChunks = new Set<string>();
 
+	/** Every configured plain-secret literal value (both obfuscate and replace
+	 *  mode), collected before any placeholder is minted. A generated placeholder
+	 *  must never equal one of these — otherwise a later-processed secret whose
+	 *  raw value happens to equal an earlier secret's placeholder would be
+	 *  indistinguishable from that placeholder on the NEXT obfuscate() pass (its
+	 *  own plain-secret redaction already ran, sorted by length, before the
+	 *  placeholder existed) and would survive verbatim in provider-visible text. */
+	#configuredSecretValues = new Set<string>();
+
 	/** Placeholder base-key (exact value for :M, case-folded otherwise) → base hash. */
 	#placeholderBaseByKey = new Map<string, string>();
 
@@ -558,6 +567,13 @@ export class SecretObfuscator {
 		// provider verbatim and undo that protection, so redact the key itself from
 		// obfuscated (provider-visible) output as a one-way secret.
 		this.#replaceMappings.set(key, this.#generateSecretReplacement(key));
+		this.#configuredSecretValues.add(key);
+		// Collect every configured plain-secret literal BEFORE minting any
+		// placeholder below, so a placeholder for an EARLIER entry can never equal
+		// a LATER entry's raw value regardless of entries[] order.
+		for (const entry of entries) {
+			if (entry.type === "plain") this.#configuredSecretValues.add(entry.content);
+		}
 		let index = 0;
 		let hasRealSec = false;
 		for (const entry of entries) {
@@ -1020,13 +1036,20 @@ export class SecretObfuscator {
 	}
 
 	// A friendly placeholder is only safe if BOTH its full token and its
-	// friendly-name-independent alias are free (or already ours). Otherwise a
-	// later prefix-stripping deobfuscation of a renamed/removed friendly name
-	// would resolve the shared alias to the wrong same-base/same-hint secret.
+	// friendly-name-independent alias are free (or already ours), AND the token
+	// itself is not another configured secret's literal value. Without the
+	// latter check, a placeholder minted for secret A that happens to equal
+	// secret B's raw content passes silently: B's own plain-secret redaction
+	// pass (sorted by length, run once per obfuscate() call) already completed
+	// before A's placeholder existed in the text, so B is never redacted out of
+	// it — A's placeholder becomes a verbatim, provider-visible copy of B.
 	#placeholderConflicts(placeholder: string, secret: string): boolean {
 		if (this.#placeholderCollides(placeholder, secret)) return true;
+		if (this.#configuredSecretValues.has(placeholder) && placeholder !== secret) return true;
 		const unprefixed = placeholderWithoutFriendlyName(placeholder);
-		return unprefixed !== undefined && this.#placeholderCollides(unprefixed, secret);
+		if (unprefixed === undefined) return false;
+		if (this.#placeholderCollides(unprefixed, secret)) return true;
+		return this.#configuredSecretValues.has(unprefixed) && unprefixed !== secret;
 	}
 
 	#registerDeobfuscationAlias(placeholder: string, secret: string, recursive: boolean): void {
