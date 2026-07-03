@@ -35,8 +35,13 @@ interface UmansUsagePayload {
 function normalizeBaseUrl(baseUrl?: string): string {
 	if (!baseUrl?.trim()) return DEFAULT_ENDPOINT;
 	const trimmed = baseUrl.trim();
-	// Strip a trailing slash so `${origin}/v1/usage` is stable.
-	return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
+	// Normalize to origin so provider base URLs that include a path (e.g.
+	// `https://api.code.umans.ai/v1`) don't double the `/v1` in the usage path.
+	try {
+		return new URL(trimmed).origin;
+	} catch {
+		return DEFAULT_ENDPOINT;
+	}
 }
 
 function toFiniteNumber(value: unknown): number | undefined {

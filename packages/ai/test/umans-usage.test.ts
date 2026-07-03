@@ -116,6 +116,19 @@ describe("umans usage provider", () => {
 		expect(calls[0]?.url).toBe("https://custom.umans.example/v1/usage");
 	});
 
+	it("strips a /v1 path from a custom baseUrl", async () => {
+		const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+		await umansUsageProvider.fetchUsage(
+			{
+				provider: "umans",
+				credential: { type: "api_key", apiKey: "sk-test" },
+				baseUrl: "https://api.code.umans.ai/v1",
+			},
+			{ fetch: fetchRecorder(calls, umansPayload()) },
+		);
+		expect(calls[0]?.url).toBe("https://api.code.umans.ai/v1/usage");
+	});
+
 	it("surfaces priority.low as a provider note", async () => {
 		const payload = umansPayload({
 			usage: {
