@@ -1090,9 +1090,13 @@ export class SecretObfuscator {
 	// text, though: an attacker who has observed ANY live placeholder's hash
 	// suffix elsewhere in the transcript could wrap it around a DIFFERENT
 	// real secret's plaintext to make the whole token look pre-redacted and
-	// smuggle that secret through untouched. Refuse the alias fallback when
-	// the dropped prefix contains a configured secret's literal value, so the
-	// plain-secret pass still catches it instead of skipping the whole span.
+	// smuggle that secret through untouched. Refuse the alias fallback when the
+	// dropped prefix contains a configured plain secret's literal value OR any
+	// regex-discovered secret's value this instance has ever minted a
+	// placeholder for (`#obfuscateMappings` — regex secrets are found
+	// dynamically, so they are never in `#configuredSecretValues`), so the
+	// plain-secret/regex pass still catches it instead of skipping the whole
+	// span.
 	#isGeneratedPlaceholder(placeholder: string): boolean {
 		if (this.#deobfuscateMap.has(placeholder)) return true;
 		const match = /^#([A-Z0-9]+)_([A-Z0-9]{4,}(?::[ULCM])?)#$/.exec(placeholder);
@@ -1100,6 +1104,9 @@ export class SecretObfuscator {
 		const prefix = match[1]!;
 		for (const secretValue of this.#configuredSecretValues) {
 			if (secretValue.length > 0 && prefix.includes(secretValue)) return false;
+		}
+		for (const { secret } of this.#obfuscateMappings.values()) {
+			if (secret.length > 0 && prefix.includes(secret)) return false;
 		}
 		return this.#deobfuscateMap.has(`#${match[2]}#`);
 	}
@@ -1296,7 +1303,12 @@ export class SecretObfuscator {
 							start = prefixStart;
 							end = prefixEnd;
 							scanMatchValue = scanText.slice(prefixStart, prefixEnd);
-							scanMatchLength = scanMatchValue.length;
+							// Keep the full match length in the expanded scan view (not the
+							// clamped prefix length) — the short-match guard below measures the
+							// regex's own match length, so a full-size match with a short
+							// outside-prefix remainder must not be undercounted as too short,
+							// matching the suffix-clamp branch below.
+							scanMatchLength = match[0].length;
 							mapped = prefixMapped;
 							regex.lastIndex = extendPastAdjacentPlaceholders(regexScan.segments, prefixEnd);
 							handledOutside = true;

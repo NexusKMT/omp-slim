@@ -440,6 +440,35 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obfuscator.obfuscate(obfuscated)).toBe(obfuscated);
 	});
 
+	it("keeps the full cut-match length when a regex match's outside prefix is clamped below the short-match floor", () => {
+		// Regression: when an obfuscate-mode regex match starts before an
+		// already-generated placeholder and gets clamped down to just the
+		// wholly-outside prefix portion before that placeholder, the short-match
+		// guard (MIN_OBFUSCATE_SECRET_LEN) must measure the FULL original match
+		// length in the expanded scan view, not the shorter clamped-prefix length.
+		// Reusing the sibling "[A-Z]{8}" straddle above but split across two
+		// obfuscate() calls (same instance/key, so the first call's placeholder is
+		// recognized as already-generated on the second): call 1 mints ABCDEFGH's
+		// placeholder alone; call 2 re-scans "YYBB" immediately followed by that
+		// placeholder, and the SAME "[A-Z]{8}" regex re-matches across "YYBB" plus
+		// the placeholder's expanded value, clamping to just the 4-byte "YYBB"
+		// prefix. Before the fix, that clamped 4-byte length (not the true 8-byte
+		// full match) was checked against the floor, so "YYBB" was wrongly skipped
+		// as too short and left raw/unredacted in the output.
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "ABCDEFGH" },
+			{ type: "regex", content: "[A-Z]{8}" },
+		]);
+
+		const placeholder = obfuscator.obfuscate("ABCDEFGH");
+		expect(placeholder).not.toContain("ABCDEFGH");
+
+		const second = obfuscator.obfuscate(`YYBB${placeholder}`);
+
+		expect(second).not.toContain("YYBB");
+		expect(obfuscator.deobfuscate(second)).toBe("YYBBABCDEFGH");
+	});
+
 	it("keeps replace regexes from rewriting placeholders their match cuts across", () => {
 		// Same partial-placeholder cut as above but in replace mode: `[A-Z]{8}`
 		// matches straddle the `ABCDEFGH` placeholder. Redacting only the bytes
@@ -2072,6 +2101,51 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		const mixed = `${bravoPlaceholder} then ${forgedExact}`;
 		const mixedObfuscated = obfuscator.obfuscate(mixed);
 		expect(mixedObfuscated).not.toContain(secretA);
+		expect(mixedObfuscated).toContain(bravoPlaceholder);
+		expect(obfuscator.deobfuscate(bravoPlaceholder)).toBe(secretB);
+	});
+
+	it("rejects a forged placeholder wrapper that smuggles a regex-discovered secret prefix past obfuscate()", () => {
+		// Regression: the forged-prefix check above only ever scanned
+		// `#configuredSecretValues` (secrets known up front). A regex-discovered
+		// secret is never in that set — regex secrets are found dynamically as
+		// obfuscate() encounters them — so a REGEX secret's literal value could
+		// still be wrapped as the forged "friendly name" prefix around another
+		// secret's real bare-alias suffix and sail through #isGeneratedPlaceholder
+		// untouched. The fix also scans every value this instance has ever minted
+		// an obfuscate-mode placeholder for (`#obfuscateMappings`, which regex
+		// discoveries populate too), not just the always-known configured set.
+		const regexSecret = "LEAKTOKEN42";
+		const secretB = "bravo-secret-value";
+		const obfuscator = new SecretObfuscator([
+			{ type: "regex", content: "LEAKTOKEN[0-9]+", friendlyName: "leak" },
+			{ type: "plain", content: secretB, friendlyName: "BRAVO" },
+		]);
+
+		// Force the regex secret to be discovered/minted first, matching the real
+		// attack model of "attacker has observed this secret's placeholder in an
+		// earlier turn" — only after this does #obfuscateMappings know its value.
+		const regexPlaceholder = obfuscator.obfuscate(regexSecret);
+		expect(regexPlaceholder).not.toContain(regexSecret);
+
+		// Learn secretB's real placeholder, then derive the friendly-name-
+		// independent bare-alias suffix (`_<hash>:<hint>#`).
+		const bravoPlaceholder = obfuscator.obfuscate(secretB);
+		expect(bravoPlaceholder).toMatch(/^#BRAVO_[A-Z0-9]{4,}(?::[ULCM])?#$/);
+		const aliasSuffix = bravoPlaceholder.replace(/^#BRAVO/, "");
+
+		// Forge a token wrapping the REGEX secret's raw literal around secretB's
+		// real bare-alias suffix.
+		const forgedExact = `#${regexSecret}${aliasSuffix}`;
+		expect(forgedExact).toMatch(/^#[A-Z0-9]+_[A-Z0-9]{4,}(?::[ULCM])?#$/);
+		expect(obfuscator.obfuscate(forgedExact)).not.toContain(regexSecret);
+
+		// Mixed real + forged in one call: the real secretB placeholder must still
+		// round-trip normally via deobfuscate(), and the forged wrapper must still
+		// not leak the regex secret.
+		const mixed = `${bravoPlaceholder} then ${forgedExact}`;
+		const mixedObfuscated = obfuscator.obfuscate(mixed);
+		expect(mixedObfuscated).not.toContain(regexSecret);
 		expect(mixedObfuscated).toContain(bravoPlaceholder);
 		expect(obfuscator.deobfuscate(bravoPlaceholder)).toBe(secretB);
 	});
