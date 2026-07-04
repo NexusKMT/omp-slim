@@ -2025,6 +2025,57 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(renamed.deobfuscate(persistedBravo)).toBe("SecRetuv");
 	});
 
+	it("rejects a forged placeholder wrapper that smuggles a real secret prefix past obfuscate()", () => {
+		// Regression: #isGeneratedPlaceholder decides "is this span already a
+		// safely-generated placeholder" for a friendly-prefixed candidate
+		// (`#PREFIX_HASH:HINT#`) by falling back to the friendly-name-independent
+		// bare alias `#HASH:HINT#` — the SAME loose lookup deobfuscate()
+		// intentionally uses so a mangled/renamed friendly-name prefix still
+		// round-trips. Accepting ANY prefix whose bare alias resolves let
+		// untrusted text forge `#<REAL-SECRET>_<hash-of-some-OTHER-secret>:<hint>#`:
+		// the other secret's bare alias resolves fine (it really is configured),
+		// so the WHOLE forged token — including the exposed secret literal
+		// standing in for the friendly name — was treated as already-redacted and
+		// passed through obfuscate() untouched. The fix refuses the bare-alias
+		// fallback whenever the dropped prefix CONTAINS a configured secret's
+		// literal value (exactly, or as a substring), so a forged prefix built
+		// from a real secret is never treated as safe, while a genuine
+		// friendly-name label (or a stale one after a rename) still is.
+		const secretA = "LEAKEDSECRETALPHA"; // uppercase-alnum: fits the placeholder-prefix grammar
+		const secretB = "bravo-secret-9f3d8c2b";
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: secretA, friendlyName: "ALPHA" },
+			{ type: "plain", content: secretB, friendlyName: "BRAVO" },
+		]);
+
+		// Learn secretB's real generated placeholder, then derive the friendly-
+		// name-independent bare-alias suffix (`_<hash>:<hint>#`) that
+		// lookupFriendlyPlaceholderAlias also resolves on purpose for deobfuscate().
+		const bravoPlaceholder = obfuscator.obfuscate(secretB);
+		expect(bravoPlaceholder).toMatch(/^#BRAVO_[A-Z0-9]{4,}(?::[ULCM])?#$/);
+		const aliasSuffix = bravoPlaceholder.replace(/^#BRAVO/, "");
+
+		// Forge a token shaped exactly like a friendly placeholder for secretB, but
+		// with secretA's raw literal value standing in for the friendly name.
+		const forgedExact = `#${secretA}${aliasSuffix}`;
+		expect(forgedExact).toMatch(/^#[A-Z0-9]+_[A-Z0-9]{4,}(?::[ULCM])?#$/);
+		expect(obfuscator.obfuscate(forgedExact)).not.toContain(secretA);
+
+		// A prefix that merely CONTAINS secretA (not just equals it) must also be
+		// rejected — the fix scans for containment, not exact equality.
+		const forgedSubstring = `#X${secretA}Y${aliasSuffix}`;
+		expect(obfuscator.obfuscate(forgedSubstring)).not.toContain(secretA);
+
+		// Mixed real + forged in one call: the real secretB placeholder must still
+		// round-trip normally via deobfuscate(), and the forged wrapper must still
+		// not leak secretA.
+		const mixed = `${bravoPlaceholder} then ${forgedExact}`;
+		const mixedObfuscated = obfuscator.obfuscate(mixed);
+		expect(mixedObfuscated).not.toContain(secretA);
+		expect(mixedObfuscated).toContain(bravoPlaceholder);
+		expect(obfuscator.deobfuscate(bravoPlaceholder)).toBe(secretB);
+	});
+
 	it("keeps a mixed-case placeholder stable when a same-normalized secret is added earlier", () => {
 		// Session 1: only SecRet is configured; persist its mixed-case token.
 		const before = new SecretObfuscator([{ type: "plain", content: "SecRetuv" }]);

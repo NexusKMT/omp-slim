@@ -1080,8 +1080,28 @@ export class SecretObfuscator {
 		}
 	}
 
+	// Exact match always qualifies. Otherwise fall back to the friendly-name-
+	// independent bare alias: needed so a placeholder minted under a NOW-
+	// renamed friendly name (same secret, same key, different `secrets.yml`
+	// label) still round-trips when older provider-visible text is re-scanned
+	// by a renamed-config instance — the hash suffix is a keyed digest of the
+	// secret VALUE alone, so a same-key instance recomputes it identically
+	// regardless of the label. The dropped prefix is otherwise unconstrained
+	// text, though: an attacker who has observed ANY live placeholder's hash
+	// suffix elsewhere in the transcript could wrap it around a DIFFERENT
+	// real secret's plaintext to make the whole token look pre-redacted and
+	// smuggle that secret through untouched. Refuse the alias fallback when
+	// the dropped prefix contains a configured secret's literal value, so the
+	// plain-secret pass still catches it instead of skipping the whole span.
 	#isGeneratedPlaceholder(placeholder: string): boolean {
-		return lookupFriendlyPlaceholderAlias(this.#deobfuscateMap, placeholder) !== undefined;
+		if (this.#deobfuscateMap.has(placeholder)) return true;
+		const match = /^#([A-Z0-9]+)_([A-Z0-9]{4,}(?::[ULCM])?)#$/.exec(placeholder);
+		if (match === null) return false;
+		const prefix = match[1]!;
+		for (const secretValue of this.#configuredSecretValues) {
+			if (secretValue.length > 0 && prefix.includes(secretValue)) return false;
+		}
+		return this.#deobfuscateMap.has(`#${match[2]}#`);
 	}
 
 	// Replace `search` with `replacement` outside known generated placeholders while
