@@ -120,19 +120,50 @@ describe("Firecrawl web search provider", () => {
 		}
 	});
 
-	it("throws a clear error when Firecrawl credentials are missing", async () => {
-		const fetchMock: FetchImpl = async () => {
-			throw new Error("fetch should not be called without credentials");
+	it("uses keyless mode when no API key is configured (no Authorization header)", async () => {
+		const captured: { url?: string; init?: RequestInit; body?: unknown } = {};
+
+		const fetchMock: FetchImpl = async (input, init) => {
+			captured.url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+			captured.init = init;
+			captured.body = JSON.parse(String(init?.body ?? "null")) as unknown;
+			return new Response(
+				JSON.stringify({
+					id: "keyless-request-456",
+					data: {
+						web: [
+							{
+								title: "Keyless result",
+								url: "https://example.com/keyless",
+								description: "Result from keyless Firecrawl",
+							},
+						],
+					},
+				}),
+				{ status: 200, headers: { "Content-Type": "application/json" } },
+			);
 		};
 
-		try {
-			await searchFirecrawl({ ...makeParams("missing creds", makeAuthStorage(undefined)), fetch: fetchMock });
-			expect.unreachable("expected searchFirecrawl to throw");
-		} catch (error) {
-			expect(error).toBeInstanceOf(Error);
-			expect((error as Error).message).toBe(
-				'Firecrawl credentials not found. Set FIRECRAWL_API_KEY or configure an API key for provider "firecrawl".',
-			);
-		}
+		const response = await searchFirecrawl({
+			...makeParams("keyless query", makeAuthStorage(undefined)),
+			fetch: fetchMock,
+		});
+
+		expect(captured.url).toBe("https://api.firecrawl.dev/v2/search");
+		expect(captured.init?.method).toBe("POST");
+		expect(getHeader(captured.init?.headers, "Authorization")).toBeNull();
+		expect(getHeader(captured.init?.headers, "Content-Type")).toBe("application/json");
+		expect(response).toEqual({
+			provider: "firecrawl",
+			sources: [
+				{
+					title: "Keyless result",
+					url: "https://example.com/keyless",
+					snippet: "Result from keyless Firecrawl",
+				},
+			],
+			requestId: "keyless-request-456",
+			authMode: "keyless",
+		});
 	});
 });

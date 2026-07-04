@@ -66,13 +66,16 @@ function buildRequestBody(params: FirecrawlSearchParams): Record<string, unknown
 	return body;
 }
 
-async function callFirecrawlSearch(apiKey: string, params: FirecrawlSearchParams): Promise<FirecrawlSearchResponse> {
+async function callFirecrawlSearch(apiKey: string | undefined, params: FirecrawlSearchParams): Promise<FirecrawlSearchResponse> {
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+	};
+	if (apiKey) {
+		headers.Authorization = `Bearer ${apiKey}`;
+	}
 	const response = await (params.fetch ?? fetch)(FIRECRAWL_SEARCH_URL, {
 		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-			Authorization: `Bearer ${apiKey}`,
-		},
+		headers,
 		body: JSON.stringify(buildRequestBody(params)),
 		signal: withHardTimeout(params.signal),
 	});
@@ -105,11 +108,26 @@ export async function searchFirecrawl(params: SearchParams): Promise<SearchRespo
 	});
 	const numResults = clampNumResults(firecrawlParams.num_results, DEFAULT_NUM_RESULTS, MAX_NUM_RESULTS);
 
-	const data = await withAuth(keyOrResolver, key => callFirecrawlSearch(key, firecrawlParams), {
-		signal: params.signal,
-		missingKeyMessage:
-			'Firecrawl credentials not found. Set FIRECRAWL_API_KEY or configure an API key for provider "firecrawl".',
-	});
+	/** Resolve the API key; may be undefined (keyless mode). */
+	async function resolveApiKey(): Promise<string | undefined> {
+		if (typeof keyOrResolver === "function") {
+			return keyOrResolver({ lastChance: false, error: undefined, signal: params.signal });
+		}
+		return keyOrResolver;
+	}
+
+	const resolvedKey = await resolveApiKey();
+	let data: FirecrawlSearchResponse;
+	if (resolvedKey) {
+		// Authenticated mode
+		data = await withAuth(keyOrResolver, key => callFirecrawlSearch(key, firecrawlParams), {
+			signal: params.signal,
+		});
+	} else {
+		// Keyless mode — omit Authorization header
+		data = await callFirecrawlSearch(undefined, firecrawlParams);
+	}
+
 	const sources: SearchSource[] = [];
 
 	for (const result of data.data?.web ?? []) {
@@ -125,17 +143,27 @@ export async function searchFirecrawl(params: SearchParams): Promise<SearchRespo
 		provider: "firecrawl",
 		sources: sources.slice(0, numResults),
 		requestId: data.id ?? undefined,
-		authMode: "api_key",
+		authMode: resolvedKey ? "api_key" : "keyless",
 	};
 }
-
-/** Search provider for Firecrawl web search. */
 export class FirecrawlProvider extends SearchProvider {
 	readonly id = "firecrawl";
 	readonly label = "Firecrawl";
 
+	/**
+	 * Auto-chain admission: requires a credential so an unconfigured Firecrawl
+	 * doesn't displace other providers that the user has set up with API keys.
+	 */
 	isAvailable(authStorage: AuthStorage): boolean {
 		return authStorage.hasAuth("firecrawl") || !!getEnvApiKey("firecrawl");
+	}
+
+	/**
+	 * Firecrawl supports keyless mode, so an explicit user selection
+	 * (`webSearch: firecrawl`) works without any credential configured.
+	 */
+	isExplicitlyAvailable(_authStorage: AuthStorage): boolean {
+		return true;
 	}
 
 	search(params: SearchParams): Promise<SearchResponse> {
