@@ -574,53 +574,53 @@ export class SecretObfuscator {
 		// obfuscated (provider-visible) output as a one-way secret.
 		this.#replaceMappings.set(key, this.#generateSecretReplacement(key));
 		this.#configuredSecretValues.add(key);
-		// Collect every configured plain-secret literal BEFORE minting any
-		// placeholder below, so a placeholder for an EARLIER entry can never equal
-		// a LATER entry's raw value regardless of entries[] order.
+		// Collect every configured plain-secret literal AND compile every regex
+		// entry BEFORE minting any placeholder below, so a placeholder's friendly
+		// name (checked against both in `#createPlaceholder`) can never embed a
+		// LATER entry's raw value or regex coverage, regardless of entries[]
+		// order — same reasoning as the base-collision guard below, extended to
+		// the friendly-name collision guard.
 		for (const entry of entries) {
-			if (entry.type === "plain") this.#configuredSecretValues.add(entry.content);
+			if (entry.type === "plain") {
+				this.#configuredSecretValues.add(entry.content);
+				continue;
+			}
+			try {
+				this.#regexEntries.push({
+					regex: compileSecretRegex(entry.content, entry.flags),
+					mode: entry.mode ?? "obfuscate",
+					replacement: entry.replacement,
+					friendlyName: entry.friendlyName,
+				});
+			} catch {
+				// Invalid regex — skip silently (validation happens at load time)
+			}
 		}
 		let index = 0;
-		let hasRealSec = false;
+		let hasRealSec = this.#regexEntries.length > 0;
 		for (const entry of entries) {
+			if (entry.type !== "plain") continue;
 			const mode = entry.mode ?? "obfuscate";
-
-			if (entry.type === "plain") {
-				if (mode === "obfuscate") {
-					if (entry.content.length < MIN_OBFUSCATE_SECRET_LEN) {
-						// Tone down short plain secret obfuscation to avoid false matches on small words like "esp"
-						continue;
-					}
-					const placeholder = this.#createPlaceholder(entry.content, entry.friendlyName);
-					this.#legacyDeobfuscateMap.set(buildLegacyPlaceholder(index), {
-						secret: entry.content,
-						recursive: false,
-					});
-					this.#plainMappings.set(entry.content, index);
-					this.#obfuscateMappings.set(index, { secret: entry.content, placeholder });
-					this.#generatedPlaceholders.add(placeholder);
-					index++;
-					hasRealSec = true;
-				} else {
-					// replace mode
-					const replacement = entry.replacement ?? this.#generateSecretReplacement(entry.content);
-					this.#replaceMappings.set(entry.content, replacement);
-					hasRealSec = true;
+			if (mode === "obfuscate") {
+				if (entry.content.length < MIN_OBFUSCATE_SECRET_LEN) {
+					// Tone down short plain secret obfuscation to avoid false matches on small words like "esp"
+					continue;
 				}
+				const placeholder = this.#createPlaceholder(entry.content, entry.friendlyName);
+				this.#legacyDeobfuscateMap.set(buildLegacyPlaceholder(index), {
+					secret: entry.content,
+					recursive: false,
+				});
+				this.#plainMappings.set(entry.content, index);
+				this.#obfuscateMappings.set(index, { secret: entry.content, placeholder });
+				this.#generatedPlaceholders.add(placeholder);
+				index++;
+				hasRealSec = true;
 			} else {
-				// regex type — compiled here, matches discovered during obfuscate()
-				try {
-					const regex = compileSecretRegex(entry.content, entry.flags);
-					this.#regexEntries.push({
-						regex,
-						mode,
-						replacement: entry.replacement,
-						friendlyName: entry.friendlyName,
-					});
-					hasRealSec = true;
-				} catch {
-					// Invalid regex — skip silently (validation happens at load time)
-				}
+				// replace mode
+				const replacement = entry.replacement ?? this.#generateSecretReplacement(entry.content);
+				this.#replaceMappings.set(entry.content, replacement);
+				hasRealSec = true;
 			}
 		}
 
@@ -1001,7 +1001,18 @@ export class SecretObfuscator {
 		// keying gives every secret an independent base, so a sibling token cannot
 		// be derived without the per-install key.
 		const baseKey = secret;
-		const sanitizedFriendlyName = friendlyName ? sanitizeSecretFriendlyName(friendlyName) : undefined;
+		// A friendly name that embeds a configured secret's literal (or matches a
+		// configured regex pattern) would bake that secret straight into a
+		// LEGITIMATE, exact-registered placeholder — later scans recognize the
+		// whole token as already-generated on an EXACT match, before the
+		// alias-fallback prefix check above ever runs, so the embedded secret
+		// would never be scanned. Drop the label for this mint rather than risk
+		// it; the secret still gets a bare (unprefixed) placeholder.
+		const requestedFriendlyName = friendlyName ? sanitizeSecretFriendlyName(friendlyName) : undefined;
+		const sanitizedFriendlyName =
+			requestedFriendlyName !== undefined && !this.#friendlyNameCollidesWithSecret(requestedFriendlyName)
+				? requestedFriendlyName
+				: undefined;
 		const preferredBase = this.#resolvePreferredPlaceholderBase(baseKey);
 		const preferredPlaceholder = buildPlaceholder(hint, preferredBase, sanitizedFriendlyName);
 		if (!this.#placeholderConflicts(preferredPlaceholder, secret)) {
@@ -1064,6 +1075,27 @@ export class SecretObfuscator {
 		if (unprefixed === undefined) return false;
 		if (this.#placeholderCollides(unprefixed, secret)) return true;
 		return this.#configuredSecretValues.has(unprefixed) && unprefixed !== secret;
+	}
+
+	// A sanitized friendly name must not double as a live secret: it becomes a
+	// verbatim, model-visible prefix on every placeholder minted for THIS
+	// secret, baked in via an exact `#deobfuscateMap` entry rather than the
+	// alias fallback — so it needs its own check independent of the scan-skip
+	// alias guard in `#isGeneratedPlaceholder`. Reject when the label contains
+	// a configured plain secret's literal value, or when any configured regex
+	// pattern matches the label — either means that text is meant to be
+	// redacted, not stamped unredacted onto every use of this secret.
+	#friendlyNameCollidesWithSecret(name: string): boolean {
+		for (const secretValue of this.#configuredSecretValues) {
+			if (secretValue.length > 0 && name.includes(secretValue)) return true;
+		}
+		for (const entry of this.#regexEntries) {
+			entry.regex.lastIndex = 0;
+			const matches = entry.regex.test(name);
+			entry.regex.lastIndex = 0;
+			if (matches) return true;
+		}
+		return false;
 	}
 
 	#registerDeobfuscationAlias(placeholder: string, secret: string, recursive: boolean): void {

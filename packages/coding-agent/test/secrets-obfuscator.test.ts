@@ -2150,6 +2150,56 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obfuscator.deobfuscate(bravoPlaceholder)).toBe(secretB);
 	});
 
+	it("drops a friendly name that contains another configured secret's literal value", () => {
+		// Regression: a friendlyName is baked verbatim into every placeholder
+		// minted for its secret (`#NAME_hash:hint#`) via an EXACT
+		// `#deobfuscateMap` entry — not through the loose alias-fallback lookup
+		// the forged-wrapper tests above defend against. If that friendly name
+		// happens to CONTAIN another LIVE secret's literal value, the baked-in
+		// prefix leaks that other secret on every use of THIS secret — and,
+		// because the whole token is now a recognized "already generated"
+		// placeholder, the leaked literal is protected from ever being redacted
+		// by that other secret's own plain-secret pass. The fix refuses the
+		// friendly-name prefix for this specific mint (falling back to a bare,
+		// unprefixed placeholder) whenever the sanitized name contains a
+		// configured plain secret's literal value.
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "ABCDEFGH", friendlyName: "LEAKTOKEN" },
+			{ type: "plain", content: "LEAKTOKEN" },
+			{ type: "plain", content: "OTHERSECRETXY", friendlyName: "SAFE" },
+		]);
+
+		const obfuscated = obfuscator.obfuscate("ABCDEFGH");
+		expect(obfuscated).not.toContain("LEAKTOKEN");
+		// Friendly name dropped for this mint: bare, unprefixed placeholder shape.
+		expect(obfuscated).toMatch(/^#[A-Z0-9]{4,}(?::[ULCM])?#$/);
+
+		// A friendly name that does NOT collide with any live secret is unaffected.
+		const safeObfuscated = obfuscator.obfuscate("OTHERSECRETXY");
+		expect(safeObfuscated).toMatch(/^#SAFE_[A-Z0-9]{4,}(?::[ULCM])?#$/);
+	});
+
+	it("drops a friendly name matched by a later-declared regex secret, regardless of entries[] order", () => {
+		// Regression: the collision guard above must also cover configured REGEX
+		// patterns, not just plain-secret literals — and must do so regardless of
+		// where the regex entry sits in `entries[]`. The constructor compiles
+		// every regex entry into `#regexEntries` in a dedicated pass BEFORE any
+		// placeholder is minted, so a plain entry's friendly name is checked
+		// against a fully-populated regex set even when its colliding regex entry
+		// is declared LATER in the array. A naive fix that only pre-collected
+		// plain-secret literals (leaving regex compilation in the same forward
+		// pass that mints placeholders) would miss exactly this ordering: at mint
+		// time for the entry below, `#regexEntries` would still be empty.
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "ABCDEFGH", friendlyName: "LEAKTOKEN" },
+			{ type: "regex", content: "LEAKTOKEN" },
+		]);
+
+		const obfuscated = obfuscator.obfuscate("ABCDEFGH");
+		expect(obfuscated).not.toContain("LEAKTOKEN");
+		expect(obfuscated).toMatch(/^#[A-Z0-9]{4,}(?::[ULCM])?#$/);
+	});
+
 	it("keeps a mixed-case placeholder stable when a same-normalized secret is added earlier", () => {
 		// Session 1: only SecRet is configured; persist its mixed-case token.
 		const before = new SecretObfuscator([{ type: "plain", content: "SecRetuv" }]);
