@@ -150,13 +150,37 @@ describe("umans usage provider", () => {
 		expect(report?.notes).toContain("Requests deprioritized after a rate-limit burst.");
 	});
 
-	it("returns null on a non-ok HTTP response", async () => {
+	it("throws on a 401 auth failure so checkCredentials flags the bad key", async () => {
+		await expect(
+			umansUsageProvider.fetchUsage(
+				{
+					provider: "umans",
+					credential: { type: "api_key", apiKey: "sk-test" },
+				},
+				{ fetch: fakeFetch({ message: "unauthorized" }, 401) },
+			),
+		).rejects.toThrow(/401/);
+	});
+
+	it("throws on a 403 auth failure so checkCredentials flags the bad key", async () => {
+		await expect(
+			umansUsageProvider.fetchUsage(
+				{
+					provider: "umans",
+					credential: { type: "api_key", apiKey: "sk-test" },
+				},
+				{ fetch: fakeFetch({ message: "forbidden" }, 403) },
+			),
+		).rejects.toThrow(/403/);
+	});
+
+	it("returns null on a transient non-auth HTTP failure (500)", async () => {
 		const report = await umansUsageProvider.fetchUsage(
 			{
 				provider: "umans",
 				credential: { type: "api_key", apiKey: "sk-test" },
 			},
-			{ fetch: fakeFetch({ message: "unauthorized" }, 401) },
+			{ fetch: fakeFetch({ message: "internal server error" }, 500) },
 		);
 		expect(report).toBeNull();
 	});

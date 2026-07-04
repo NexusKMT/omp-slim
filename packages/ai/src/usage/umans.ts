@@ -1,3 +1,4 @@
+import { ProviderHttpError } from "../error";
 import type {
 	UsageAmount,
 	UsageFetchContext,
@@ -133,6 +134,15 @@ async function fetchUmansUsage(params: UsageFetchParams, ctx: UsageFetchContext)
 	try {
 		const response = await ctx.fetch(url, { headers, signal: params.signal });
 		if (!response.ok) {
+			// Auth failures (401/403) must throw so checkCredentials flags the bad
+			// key as ok:false rather than ok:null (unknown). Other non-ok statuses
+			// are transient — return null so the probe reports "no data".
+			if (response.status === 401 || response.status === 403) {
+				throw new ProviderHttpError(
+					`Umans usage endpoint returned ${response.status} ${response.statusText}`.trim(),
+					response.status,
+				);
+			}
 			ctx.logger?.warn("Umans usage fetch failed", { status: response.status, statusText: response.statusText });
 			return null;
 		}
@@ -143,6 +153,8 @@ async function fetchUmansUsage(params: UsageFetchParams, ctx: UsageFetchContext)
 		}
 		payload = json as unknown as UmansUsagePayload;
 	} catch (error) {
+		// Re-throw auth errors so the credential-health probe can surface them.
+		if (error instanceof ProviderHttpError) throw error;
 		ctx.logger?.warn("Umans usage fetch error", { error: String(error) });
 		return null;
 	}
