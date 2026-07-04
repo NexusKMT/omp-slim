@@ -36,13 +36,11 @@ interface UmansUsagePayload {
 function normalizeBaseUrl(baseUrl?: string): string {
 	if (!baseUrl?.trim()) return DEFAULT_ENDPOINT;
 	const trimmed = baseUrl.trim();
-	// Normalize to origin so provider base URLs that include a path (e.g.
-	// `https://api.code.umans.ai/v1`) don't double the `/v1` in the usage path.
-	try {
-		return new URL(trimmed).origin;
-	} catch {
-		return DEFAULT_ENDPOINT;
-	}
+	// Strip a trailing `/v1` (with optional surrounding slashes) so the usage
+	// path doesn't double it, but preserve any preceding path prefix (e.g. a
+	// path-mounted gateway like `https://gateway.example/team/umans/v1`).
+	const withoutTrailingSlash = trimmed.replace(/\/+$/, "");
+	return withoutTrailingSlash.replace(/\/v1$/i, "") || DEFAULT_ENDPOINT;
 }
 
 function toFiniteNumber(value: unknown): number | undefined {

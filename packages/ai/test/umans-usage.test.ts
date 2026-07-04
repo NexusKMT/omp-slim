@@ -116,7 +116,7 @@ describe("umans usage provider", () => {
 		expect(calls[0]?.url).toBe("https://custom.umans.example/v1/usage");
 	});
 
-	it("strips a /v1 path from a custom baseUrl", async () => {
+	it("strips a trailing /v1 from a custom baseUrl", async () => {
 		const calls: Array<{ url: string; headers: Record<string, string> }> = [];
 		await umansUsageProvider.fetchUsage(
 			{
@@ -127,6 +127,19 @@ describe("umans usage provider", () => {
 			{ fetch: fetchRecorder(calls, umansPayload()) },
 		);
 		expect(calls[0]?.url).toBe("https://api.code.umans.ai/v1/usage");
+	});
+
+	it("preserves a path-mounted gateway prefix while stripping /v1", async () => {
+		const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+		await umansUsageProvider.fetchUsage(
+			{
+				provider: "umans",
+				credential: { type: "api_key", apiKey: "sk-test" },
+				baseUrl: "https://gateway.example/team/umans/v1",
+			},
+			{ fetch: fetchRecorder(calls, umansPayload()) },
+		);
+		expect(calls[0]?.url).toBe("https://gateway.example/team/umans/v1/usage");
 	});
 
 	it("surfaces priority.low as a provider note", async () => {
