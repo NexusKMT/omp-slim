@@ -215,7 +215,12 @@ function renderIrcPeerRoster(selfId: string): string {
 	return lines.join("\n");
 }
 
-function withAbortTimeout<T>(promise: Promise<T>, timeoutMs: number, signal?: AbortSignal): Promise<T> {
+function withAbortTimeout<T>(
+	promise: Promise<T>,
+	timeoutMs: number,
+	signal?: AbortSignal,
+	timeoutController?: AbortController,
+): Promise<T> {
 	if (signal?.aborted) {
 		return Promise.reject(new ToolAbortError());
 	}
@@ -225,6 +230,7 @@ function withAbortTimeout<T>(promise: Promise<T>, timeoutMs: number, signal?: Ab
 	const timeoutId = setTimeout(() => {
 		if (settled) return;
 		settled = true;
+		timeoutController?.abort(new DOMException(`MCP tool call timed out after ${timeoutMs}ms`, "TimeoutError"));
 		reject(new Error(`MCP tool call timed out after ${timeoutMs}ms`));
 	}, timeoutMs);
 
@@ -232,6 +238,7 @@ function withAbortTimeout<T>(promise: Promise<T>, timeoutMs: number, signal?: Ab
 		if (settled) return;
 		settled = true;
 		clearTimeout(timeoutId);
+		timeoutController?.abort();
 		reject(new ToolAbortError());
 	};
 
@@ -708,13 +715,21 @@ export function createMCPProxyTools(mcpManager: MCPManager): CustomTool[] {
 				const serverName = mcpTool.mcpServerName ?? "";
 				const mcpToolName = mcpTool.mcpToolName ?? "";
 				try {
+					const timeoutController = new AbortController();
+					const timeoutSignal = timeoutController.signal;
+					const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 					const result = await withAbortTimeout(
 						(async () => {
-							const connection = await mcpManager.waitForConnection(serverName);
-							return callTool(connection, mcpToolName, params as Record<string, unknown>, { signal });
+							const connection = await untilAborted(combinedSignal, () =>
+								mcpManager.waitForConnection(serverName),
+							);
+							return callTool(connection, mcpToolName, params as Record<string, unknown>, {
+								signal: combinedSignal,
+							});
 						})(),
 						MCP_CALL_TIMEOUT_MS,
 						signal,
+						timeoutController,
 					);
 					return {
 						content: (result.content ?? []).map(item =>
@@ -882,6 +897,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 	const finalOutputChunks: string[] = [];
 	const RECENT_OUTPUT_TAIL_BYTES = 8 * 1024;
 	let recentOutputTail = "";
+	let tailLastLineRepresentable = false;
 	let resolved = false;
 	let abortSent = false;
 	let abortReason: AbortReason | undefined;
@@ -1060,17 +1076,35 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 	};
 
 	const updateRecentOutputLines = () => {
-		const lines = recentOutputTail.split("\n").filter(line => line.trim());
-		progress.recentOutput = lines.slice(-8).reverse();
+		const lines = recentOutputTail.split("\n");
+		const filtered = lines.filter(line => line.trim());
+		progress.recentOutput = filtered.slice(-8).reverse();
+		// The tail's last raw segment (after its final newline) is "represented"
+		// in recentOutput only when it trims non-empty — an empty/whitespace-only
+		// trailing segment is filtered out, so recentOutput[0] is then the line
+		// before it, not the tail's true last line.
+		tailLastLineRepresentable = lines[lines.length - 1].trim().length > 0;
 	};
 
 	const appendRecentOutputTail = (text: string) => {
 		if (!text) return;
 		recentOutputTail += text;
-		if (recentOutputTail.length > RECENT_OUTPUT_TAIL_BYTES) {
+		const truncated = recentOutputTail.length > RECENT_OUTPUT_TAIL_BYTES;
+		if (truncated) {
 			recentOutputTail = recentOutputTail.slice(-RECENT_OUTPUT_TAIL_BYTES);
 		}
-		updateRecentOutputLines();
+		// Fast path: a token without a newline only extends the current last line.
+		// This runs on every text_delta token (hundreds/thousands per second while
+		// streaming), so skip re-splitting the whole (up to 8KB) tail unless the line
+		// structure actually changed. Requires no truncation AND the tail's last line
+		// already represented (trims non-empty) — otherwise boundaries shift and a
+		// full recompute is required. Appending to a non-empty line keeps it non-empty,
+		// so the flag stays valid across consecutive fast-path tokens.
+		if (truncated || text.includes("\n") || !tailLastLineRepresentable || progress.recentOutput.length === 0) {
+			updateRecentOutputLines();
+		} else {
+			progress.recentOutput = [progress.recentOutput[0] + text, ...progress.recentOutput.slice(1)];
+		}
 	};
 
 	const replaceRecentOutputFromContent = (content: unknown[]) => {
@@ -1090,6 +1124,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 
 	const resetRecentOutput = () => {
 		recentOutputTail = "";
+		tailLastLineRepresentable = false;
 		progress.recentOutput = [];
 	};
 
@@ -2141,6 +2176,11 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				modelRegistry,
 				settings: subagentSettings,
 				model,
+				modelPattern: model || modelOverride === undefined ? undefined : modelPatterns,
+				modelPatternAuthFallback:
+					model || modelOverride === undefined ? undefined : options.parentActiveModelPattern,
+				modelPatternFallbackRole:
+					model || modelOverride === undefined ? undefined : `${SUBAGENT_RETRY_FALLBACK_ROLE_PREFIX}${id}`,
 				thinkingLevel: effectiveThinkingLevel,
 				toolNames,
 				outputSchema,

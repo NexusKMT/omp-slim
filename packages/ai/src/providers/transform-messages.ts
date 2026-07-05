@@ -1,5 +1,6 @@
 import { renderDemotedThinking } from "../dialect/demotion";
 import type { Api, AssistantMessage, Message, Model, ToolCall, ToolResultMessage, UserMessage } from "../types";
+import { isDemotedThinking, kDemotedThinking } from "../utils/block-symbols";
 
 const enum ToolCallStatus {
 	/** A tool result has already been emitted for this tool call; later duplicates must be skipped. */
@@ -341,13 +342,18 @@ export function transformMessages<TApi extends Api>(
 			const isLatestSurvivingAssistant = index === latestSurvivingAssistantIndex;
 			// Signature policy is a second axis. Anthropic cryptographically
 			// binds reasoning signatures to its key+session+model, so cross-model
-			// signatures must be stripped whenever official Anthropic is on
-			// either end of the replay:
-			//   * official → 3p: the 3p target can't reverify the signature;
-			//     keeping it leaks private continuation metadata for no benefit.
-			//   * 3p → official: official rejects a foreign signature outright.
-			//   * official → official cross-model: the new model rejects the
-			//     previous model's signature.
+			// signatures must be stripped whenever a signing Anthropic endpoint
+			// is on either end of the replay:
+			//   * official Anthropic (source): the 3p target can't reverify a
+			//     foreign signature and keeping it leaks continuation metadata
+			//     for no benefit.
+			//   * signing Anthropic (target): official Anthropic, GitHub Copilot,
+			//     ZenMux, Cloudflare AI Gateway `/anthropic`, and Google Vertex
+			//     `publishers/anthropic/…` all forward to signature-enforcing
+			//     Anthropic. Any stale/cross-model signature on the wire triggers
+			//     `400 Invalid signature in thinking block` — same failure class
+			//     whether `officialEndpoint` is true or the endpoint is one of
+			//     the known signing proxies (#4297).
 			// 3p ↔ 3p replays preserve signatures because compatible providers
 			// (Z.AI, DeepSeek, custom `models.yaml` providers) treat them as
 			// opaque continuation hints rather than verified material; stripping
@@ -358,8 +364,8 @@ export function transformMessages<TApi extends Api>(
 			// a custom proxy via `models.yaml` will see signatures stripped, the
 			// conservative direction (degraded reasoning, not broken requests).
 			const isOfficialAnthropicSource = isAnthropicReplay && assistantMsg.provider === "anthropic";
-			const isOfficialAnthropicTarget = isAnthropicTarget && model.compat.officialEndpoint;
-			const officialAnthropicInvolved = isOfficialAnthropicSource || isOfficialAnthropicTarget;
+			const isSigningAnthropicTarget = isAnthropicTarget && model.compat.signingEndpoint;
+			const signingAnthropicInvolved = isOfficialAnthropicSource || isSigningAnthropicTarget;
 			// Compatible Anthropic-messages reasoning targets that accept
 			// unsigned thinking natively (Z.AI, DeepSeek, the generic
 			// `reasoning && !official` case in the compat builder). Used to keep
@@ -397,6 +403,31 @@ export function transformMessages<TApi extends Api>(
 				assistantMsg.content.some(b => b.type === "toolCall");
 			const lastBlockIndex = assistantMsg.content.length - 1;
 
+			const anthropicVisibleThinkingSurvivesReplay = (
+				candidate: AssistantMessage["content"][number],
+				candidateIndex: number,
+			): boolean => {
+				if (candidate.type !== "thinking") return false;
+				if (!isAnthropicReplay) return false;
+				if (isLatestSurvivingAssistant && abandonedToolUse) return true;
+				const candidateSignatureUntrustworthy =
+					abandonedToolUse || (invalidStopReason && candidateIndex === lastBlockIndex);
+				const replaySignature =
+					candidateSignatureUntrustworthy && candidate.thinkingSignature ? undefined : candidate.thinkingSignature;
+				if (!replaySignature && (!candidate.thinking || candidate.thinking.trim() === "")) return false;
+				if (isSameModel && isSigningAnthropicTarget && (!replaySignature || replaySignature.trim() === "")) {
+					return false;
+				}
+				return true;
+			};
+			const hasVisibleAnthropicThinking = assistantMsg.content.some(candidate => candidate.type === "thinking");
+			const dropsAllSameModelVisibleThinking =
+				isAnthropicReplay &&
+				isSameModel &&
+				isSigningAnthropicTarget &&
+				hasVisibleAnthropicThinking &&
+				!assistantMsg.content.some(anthropicVisibleThinkingSurvivesReplay);
+
 			const transformedContent = assistantMsg.content.flatMap((block, blockIndex) => {
 				if (block.type === "thinking") {
 					// Only an aborted/errored turn's final (mid-stream) block can hold a
@@ -421,7 +452,7 @@ export function transformMessages<TApi extends Api>(
 						if (
 							!isLatestSurvivingAssistant &&
 							!isSameModel &&
-							officialAnthropicInvolved &&
+							signingAnthropicInvolved &&
 							sanitized.thinkingSignature
 						) {
 							sanitized = { ...sanitized, thinkingSignature: undefined };
@@ -432,13 +463,15 @@ export function transformMessages<TApi extends Api>(
 							return [];
 						}
 						// Same-model Anthropic replay to a signature-enforcing endpoint
-						// cannot natively replay thinking blocks whose source explicitly
-						// recorded an empty signature, but this is not a dialect
-						// transition. Do not demote that sentinel into the target model's
-						// textual thinking dialect; keep demotion for signatures stripped
-						// by the untrustworthy-turn recovery above and for literal thinking
-						// envelopes that never carried a signature field.
-						if (isSameModel && isOfficialAnthropicTarget && sanitized.thinkingSignature?.trim() === "") {
+						// requires valid signatures to natively replay thinking blocks.
+						// Both undefined and empty string signatures are invalid and must
+						// be dropped entirely — not demoted to text. Demotion would cause
+						// the reasoning_extraction safety classifier to refuse the response.
+						if (
+							isSameModel &&
+							isSigningAnthropicTarget &&
+							(!sanitized.thinkingSignature || sanitized.thinkingSignature.trim() === "")
+						) {
 							return [];
 						}
 						return sanitized;
@@ -471,9 +504,21 @@ export function transformMessages<TApi extends Api>(
 					// TARGET model's own canonical thinking-block dialect (e.g. a ```thinking
 					// fence for Gemini) so it reads as reasoning rather than bare prose the
 					// model might mimic.
+					// Mark the demoted block (symbol-keyed, never serialized) instead of
+					// baking a separator into its text: the openai-completions flatten —
+					// the one consumer that joins adjacent text blocks into a single
+					// string — inserts a paragraph break after marked blocks, so the
+					// bare Anthropic-dialect output (or any dialect's wrapped output
+					// whose closing tag isn't a natural word boundary) can't glue onto
+					// the following visible-text block, while ordinary adjacent text
+					// blocks stitched from streaming / bridges / imported transcripts
+					// stay byte-identical. A separator baked into the block text would
+					// leak to non-flattening targets: Anthropic/Bedrock reject a
+					// terminal assistant message whose text ends with whitespace.
 					return {
 						type: "text" as const,
 						text: renderDemotedThinking(model.id, sanitized.thinking),
+						[kDemotedThinking]: true,
 					};
 				}
 
@@ -481,9 +526,11 @@ export function transformMessages<TApi extends Api>(
 					// Redacted thinking is native-only. Keep it for same-model
 					// signed replay, the latest byte-for-byte Anthropic turn, or
 					// compatible targets that will also emit sibling unsigned
-					// thinking natively. Drop it when the visible thinking was
-					// cross-model stripped and will be demoted to text.
+					// thinking natively. Drop it when the matching visible thinking
+					// was discarded, or when visible thinking was cross-model
+					// stripped and will be demoted to text.
 					if (isAnthropicReplay) {
+						if (dropsAllSameModelVisibleThinking) return [];
 						if (isSameModel || isLatestSurvivingAssistant || replaysUnsignedAnthropicThinking) return block;
 						return [];
 					}
@@ -547,6 +594,18 @@ export function transformMessages<TApi extends Api>(
 
 				return block;
 			});
+
+			// A demoted-thinking block that survived as the message's final block can
+			// still end with the thinking text's own trailing whitespace (bare
+			// Anthropic-dialect demotion copies it verbatim), and Anthropic rejects a
+			// terminal assistant message whose text ends with trailing whitespace
+			// ("final assistant content cannot end with trailing whitespace").
+			// trimEnd() is safe: demoted text is synthesized context, never
+			// byte-exact replay material.
+			const finalBlock = transformedContent[transformedContent.length - 1];
+			if (finalBlock?.type === "text" && isDemotedThinking(finalBlock)) {
+				transformedContent[transformedContent.length - 1] = { ...finalBlock, text: finalBlock.text.trimEnd() };
+			}
 
 			return {
 				...assistantMsg,

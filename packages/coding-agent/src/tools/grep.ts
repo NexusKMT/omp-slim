@@ -162,7 +162,7 @@ function parsePathSpecs(rawEntries: readonly string[]): GrepPathSpec[] {
 			// `:conflicts:1-1`) instead of silently widening the search or dropping a chunk.
 			if (!isReadSelectorGrammar(internalSplit.sel)) {
 				throw new ToolError(
-					`paths entry "${entry}" has an invalid selector ":${internalSplit.sel}" — use ":N-M" line ranges, ":raw"/":conflicts", a range plus ":raw", or percent-encode a literal ":" as %3A`,
+					`path entry "${entry}" has an invalid selector ":${internalSplit.sel}" — use ":N-M" line ranges, ":raw"/":conflicts", a range plus ":raw", or percent-encode a literal ":" as %3A`,
 				);
 			}
 			specs.push({ original: entry, clean: internalSplit.path, ranges: selectorLineRanges(internalSplit.sel) });
@@ -175,7 +175,7 @@ function parsePathSpecs(rawEntries: readonly string[]): GrepPathSpec[] {
 			const parsed = parseLineRanges(split.sel);
 			if (!parsed) {
 				throw new ToolError(
-					`paths entry "${entry}" — only line-range selectors like ":50-100" are supported (no ":raw"/":conflicts")`,
+					`path entry "${entry}" — only line-range selectors like ":50-100" are supported (no ":raw"/":conflicts")`,
 				);
 			}
 			if (hasGlobPathChars(split.path)) {
@@ -750,6 +750,11 @@ async function resolveInternalSearchInputs(opts: {
 		localProtocolOptions: opts.localProtocolOptions,
 		skills: opts.skills,
 		skipDirectoryListing: true,
+		// Try path-only first so large artifacts (and any other handler that
+		// separates path from content) resolve without materializing bytes.
+		// Handlers that ignore the flag still return content, and virtual
+		// resources without a sourcePath fall through to a second resolve.
+		pathOnly: true,
 	};
 
 	for (let idx = 0; idx < paths.length; idx++) {
@@ -764,7 +769,7 @@ async function resolveInternalSearchInputs(opts: {
 		if (hasGlobPathChars(globTarget)) {
 			throw new ToolError(`Glob patterns are not supported for internal URLs: ${rawPath}`);
 		}
-		const resource = await internalRouter.resolve(rawPath, context);
+		let resource = await internalRouter.resolve(rawPath, context);
 		// A directory listing with no backing local path (e.g. a remote ssh:// dir)
 		// has no real contents to grep — searching its listing text would be
 		// misleading. Local/skill/vault dir resources set `sourcePath` and skip this.
@@ -781,8 +786,20 @@ async function resolveInternalSearchInputs(opts: {
 			continue;
 		}
 
+		// No sourcePath: this handler needs its content materialized so the
+		// virtual expansion can search it. Re-resolve without pathOnly.
+		if (context.pathOnly) {
+			resource = await internalRouter.resolve(rawPath, { ...context, pathOnly: false });
+		}
+
 		const ranges = opts.pathSpecs[idx]?.ranges;
-		const expanded = await expandVirtualInternalResource(rawPath, resource, internalRouter, context, ranges);
+		const expanded = await expandVirtualInternalResource(
+			rawPath,
+			resource,
+			internalRouter,
+			{ ...context, pathOnly: false },
+			ranges,
+		);
 		virtualInputIndexes.add(idx);
 		for (const virtual of expanded) {
 			virtualResources.push(virtual);
@@ -952,7 +969,7 @@ export class GrepTool implements AgentTool<typeof searchSchema, GrepToolDetails>
 						trackImmutableSources: true,
 						surfaceExactFilePaths: true,
 						fanOutFileTargets: true,
-						multipathStatHint: " (`paths` entries must each exist relative to cwd)",
+						multipathStatHint: " (`path` list entries must each exist relative to cwd)",
 						settings: this.session.settings,
 						signal,
 						localProtocolOptions: this.session.localProtocolOptions,
@@ -1027,7 +1044,7 @@ export class GrepTool implements AgentTool<typeof searchSchema, GrepToolDetails>
 							? ` (archive members were not searchable: ${archiveUnreadable.join(", ")})`
 							: "";
 					throw new ToolError(
-						`Path not found: ${missingPaths.join(", ")}; pass each path as its own array element${archiveHint}`,
+						`Path not found: ${missingPaths.join(", ")}; list each target in the semicolon-delimited \`path\`${archiveHint}`,
 					);
 				}
 				const baseDisplayMode = resolveFileDisplayMode(this.session);
@@ -1371,6 +1388,17 @@ export class GrepTool implements AgentTool<typeof searchSchema, GrepToolDetails>
 					}, 0);
 					let lastEmittedLine: number | undefined;
 					const gutterPad = " ".repeat(lineNumberWidth + 1);
+					// Track match/context lines whose displayed text was
+					// column-truncated by the native (see `crates/pi-natives/src/grep.rs`
+					// `truncate_line`, marker `...` at max_columns). Excluded from
+					// seenLines so a follow-up edit anchored at that line still
+					// requires a full-width re-read — the model saw only the
+					// prefix. The native currently propagates `truncated` only on
+					// the match line; context lines fall back to a length check
+					// against `DEFAULT_MAX_COLUMN` as a conservative heuristic.
+					const clippedLines = new Set<number>();
+					const isNativeTruncated = (line: string): boolean =>
+						line.length >= DEFAULT_MAX_COLUMN && line.endsWith("...");
 					for (const match of fileMatches) {
 						const pushLine = (lineNumber: number, line: string, isMatch: boolean) => {
 							if (lastEmittedLine !== undefined && lineNumber > lastEmittedLine + 1) {
@@ -1384,22 +1412,31 @@ export class GrepTool implements AgentTool<typeof searchSchema, GrepToolDetails>
 						if (match.contextBefore) {
 							for (const ctx of match.contextBefore) {
 								pushLine(ctx.lineNumber, ctx.line, false);
+								if (isNativeTruncated(ctx.line)) clippedLines.add(ctx.lineNumber);
 							}
 						}
 						pushLine(match.lineNumber, match.line, true);
 						if (match.truncated) {
 							linesTruncated = true;
+							clippedLines.add(match.lineNumber);
 						}
 						if (match.contextAfter) {
 							for (const ctx of match.contextAfter) {
 								pushLine(ctx.lineNumber, ctx.line, false);
+								if (isNativeTruncated(ctx.line)) clippedLines.add(ctx.lineNumber);
 							}
 						}
 						fileMatchCounts.set(relativePath, (fileMatchCounts.get(relativePath) ?? 0) + 1);
 					}
 					if (hashContext?.tag) {
 						const absoluteFilePath = path.resolve(this.session.cwd, relativePath);
-						recordSeenLinesFromBody(this.session, absoluteFilePath, hashContext.tag, modelOut.join("\n"));
+						recordSeenLinesFromBody(
+							this.session,
+							absoluteFilePath,
+							hashContext.tag,
+							modelOut.join("\n"),
+							clippedLines,
+						);
 					}
 					return { model: modelOut, display: displayOut };
 				};

@@ -16,7 +16,13 @@ import * as AIError from "./error";
 import { isUsageLimitOutcome } from "./error/rate-limit";
 import { getProviderDefinition, PASTE_CODE_LOGIN_PROVIDERS } from "./registry";
 import { getOAuthApiKey, getOAuthProvider, refreshOAuthToken } from "./registry/oauth";
-import type { OAuthController, OAuthCredentials, OAuthProvider, OAuthProviderId } from "./registry/oauth/types";
+import type {
+	OAuthAuthInfo,
+	OAuthController,
+	OAuthCredentials,
+	OAuthProvider,
+	OAuthProviderId,
+} from "./registry/oauth/types";
 import { getEnvApiKey, getEnvApiKeyName } from "./stream";
 import type { Provider } from "./types";
 import type {
@@ -115,6 +121,18 @@ export interface StoredAuthCredential {
 	provider: string;
 	credential: AuthCredential;
 	disabledCause: string | null;
+}
+
+/** One persisted rate-limit block: credential row id + provider-type key + optional scope. */
+export interface StoredCredentialBlock {
+	/** SQLite row id of the credential (auth_credentials.id). */
+	credentialId: number;
+	/** `${provider}:${credentialType}` — same value as AuthStorage's in-memory providerKey. */
+	providerKey: string;
+	/** Block scope (e.g. "tier:fable"); empty string = unscoped. Never NUL-delimited. */
+	blockScope: string;
+	/** Epoch milliseconds. */
+	blockedUntilMs: number;
 }
 
 /**
@@ -299,6 +317,16 @@ export interface AuthCredentialStore {
 	getCache(key: string, options?: { includeExpired?: boolean }): string | null;
 	setCache(key: string, value: string, expiresAtSec: number): void;
 	cleanExpiredCache(): void;
+	/** Non-expired block for one (credential, providerKey, scope) key, or undefined. */
+	getCredentialBlock?(credentialId: number, providerKey: string, blockScope: string): number | undefined;
+	/** Upsert with MAX semantics: keep the later blockedUntilMs on conflict. */
+	upsertCredentialBlock?(block: StoredCredentialBlock): void;
+	/** Drop every block row for a credential (all providerKeys/scopes). */
+	deleteCredentialBlocks?(credentialId: number): void;
+	/** Prune rows with blocked_until_ms <= nowMs. */
+	cleanExpiredCredentialBlocks?(nowMs: number): void;
+	/** List non-expired blocks for broker snapshots. */
+	listCredentialBlocks?(credentialIds: readonly number[]): StoredCredentialBlock[];
 	/**
 	 * Append usage-limit snapshots for trend history. Optional: stores without
 	 * durable storage (e.g. the broker remote store) omit it and recording is
@@ -362,6 +390,13 @@ export interface AuthCredentialStore {
 	 * `signal` propagates the agent's cancel down to the broker fetch.
 	 */
 	getUsageReport?(provider: Provider, credential: OAuthCredential, signal?: AbortSignal): Promise<UsageReport | null>;
+	/**
+	 * Optional store hook to ingest a parsed provider usage report for one OAuth
+	 * credential. Remote broker stores use this to overlay header-derived limits
+	 * onto their cached aggregate `/v1/usage` response without mutating broker
+	 * state.
+	 */
+	ingestUsageReport?(provider: Provider, credential: OAuthCredential, report: UsageReport): boolean;
 	/**
 	 * Optional store hook to invalidate a specific credential after the upstream
 	 * provider returned 401 on a supposedly-fresh key. Remote stores force the
@@ -974,6 +1009,11 @@ export class AuthStorage {
 		} catch {
 			// Best-effort.
 		}
+		try {
+			this.#store.cleanExpiredCredentialBlocks?.(Date.now());
+		} catch {
+			// Best-effort.
+		}
 		this.#usageFetch = options.usageFetch ?? fetch;
 		this.#usageRequestTimeoutMs = options.usageRequestTimeoutMs ?? DEFAULT_USAGE_REQUEST_TIMEOUT_MS;
 		this.#refreshOAuthCredentialOverride = options.refreshOAuthCredential;
@@ -1292,13 +1332,13 @@ export class AuthStorage {
 		return blockScope ? `${providerKey}\0${blockScope}` : providerKey;
 	}
 
-	/** Returns block expiry timestamp for a credential/key pair, cleaning up expired entries. */
-	#getCredentialBlockedUntilForKey(backoffKey: string, credentialIndex: number): number | undefined {
+	/** Returns in-memory block expiry timestamp for a credential/key pair, cleaning up expired entries. */
+	#getCredentialBlockedUntilForKey(backoffKey: string, credentialIndex: number, nowMs: number): number | undefined {
 		const backoffMap = this.#credentialBackoff.get(backoffKey);
 		if (!backoffMap) return undefined;
 		const blockedUntil = backoffMap.get(credentialIndex);
 		if (!blockedUntil) return undefined;
-		if (blockedUntil <= Date.now()) {
+		if (blockedUntil <= nowMs) {
 			backoffMap.delete(credentialIndex);
 			if (backoffMap.size === 0) {
 				this.#credentialBackoff.delete(backoffKey);
@@ -1308,28 +1348,80 @@ export class AuthStorage {
 		return blockedUntil;
 	}
 
-	/** Returns block expiry timestamp for a credential, checking global then scoped blocks. */
+	#readPersistedCredentialBlock(
+		credentialId: number,
+		providerKey: string,
+		blockScope: string | undefined,
+	): number | undefined {
+		const getCredentialBlock = this.#store.getCredentialBlock?.bind(this.#store);
+		if (!getCredentialBlock) return undefined;
+		try {
+			return getCredentialBlock(credentialId, providerKey, blockScope ?? "");
+		} catch (err) {
+			logger.debug("Failed to read credential block from persistent store", {
+				err,
+				credentialId,
+				providerKey,
+				blockScope,
+			});
+			return undefined;
+		}
+	}
+
+	/** Returns block expiry timestamp for a credential, checking unscoped and scoped blocks. */
 	#getCredentialBlockedUntil(
+		provider: string,
 		providerKey: string,
 		credentialIndex: number,
 		blockScope: string | undefined = undefined,
 	): number | undefined {
-		const globalBlockedUntil = this.#getCredentialBlockedUntilForKey(providerKey, credentialIndex);
-		if (globalBlockedUntil !== undefined || !blockScope) return globalBlockedUntil;
-		return this.#getCredentialBlockedUntilForKey(this.#toScopedBackoffKey(providerKey, blockScope), credentialIndex);
+		const nowMs = Date.now();
+		let blockedUntil = this.#getCredentialBlockedUntilForKey(providerKey, credentialIndex, nowMs);
+		if (blockScope) {
+			const scopedBlockedUntil = this.#getCredentialBlockedUntilForKey(
+				this.#toScopedBackoffKey(providerKey, blockScope),
+				credentialIndex,
+				nowMs,
+			);
+			if (scopedBlockedUntil !== undefined && (blockedUntil === undefined || scopedBlockedUntil > blockedUntil)) {
+				blockedUntil = scopedBlockedUntil;
+			}
+		}
+
+		const credentialId = this.#getStoredCredentials(provider)[credentialIndex]?.id;
+		if (credentialId === undefined) return blockedUntil;
+		const persistedGlobalBlockedUntil = this.#readPersistedCredentialBlock(credentialId, providerKey, "");
+		if (
+			persistedGlobalBlockedUntil !== undefined &&
+			(blockedUntil === undefined || persistedGlobalBlockedUntil > blockedUntil)
+		) {
+			blockedUntil = persistedGlobalBlockedUntil;
+		}
+		if (blockScope) {
+			const persistedScopedBlockedUntil = this.#readPersistedCredentialBlock(credentialId, providerKey, blockScope);
+			if (
+				persistedScopedBlockedUntil !== undefined &&
+				(blockedUntil === undefined || persistedScopedBlockedUntil > blockedUntil)
+			) {
+				blockedUntil = persistedScopedBlockedUntil;
+			}
+		}
+		return blockedUntil;
 	}
 
 	/** Checks if a credential is temporarily blocked due to usage limits. */
 	#isCredentialBlocked(
+		provider: string,
 		providerKey: string,
 		credentialIndex: number,
 		blockScope: string | undefined = undefined,
 	): boolean {
-		return this.#getCredentialBlockedUntil(providerKey, credentialIndex, blockScope) !== undefined;
+		return this.#getCredentialBlockedUntil(provider, providerKey, credentialIndex, blockScope) !== undefined;
 	}
 
 	/** Marks a credential as blocked until the specified time. */
 	#markCredentialBlocked(
+		provider: string,
 		providerKey: string,
 		credentialIndex: number,
 		blockedUntilMs: number,
@@ -1338,8 +1430,31 @@ export class AuthStorage {
 		const backoffKey = this.#toScopedBackoffKey(providerKey, blockScope);
 		const backoffMap = this.#credentialBackoff.get(backoffKey) ?? new Map<number, number>();
 		const existing = backoffMap.get(credentialIndex) ?? 0;
-		backoffMap.set(credentialIndex, Math.max(existing, blockedUntilMs));
+		const nextBlockedUntil = Math.max(existing, blockedUntilMs);
+		backoffMap.set(credentialIndex, nextBlockedUntil);
 		this.#credentialBackoff.set(backoffKey, backoffMap);
+
+		const upsertCredentialBlock = this.#store.upsertCredentialBlock?.bind(this.#store);
+		if (!upsertCredentialBlock) return;
+		const credentialId = this.#getStoredCredentials(provider)[credentialIndex]?.id;
+		if (credentialId === undefined) return;
+		try {
+			upsertCredentialBlock({
+				credentialId,
+				providerKey,
+				blockScope: blockScope ?? "",
+				blockedUntilMs: nextBlockedUntil,
+			});
+		} catch (err) {
+			logger.debug("Failed to persist credential block", {
+				err,
+				credentialId,
+				provider,
+				providerKey,
+				blockScope,
+				blockedUntilMs: nextBlockedUntil,
+			});
+		}
 	}
 
 	/** Records which credential was used for a session (for rate-limit switching). */
@@ -1456,7 +1571,7 @@ export class AuthStorage {
 
 		for (const idx of order) {
 			const candidate = credentials[idx];
-			if (!this.#isCredentialBlocked(providerKey, candidate.index)) {
+			if (!this.#isCredentialBlocked(provider, providerKey, candidate.index)) {
 				return candidate;
 			}
 		}
@@ -1856,7 +1971,7 @@ export class AuthStorage {
 		provider: OAuthProviderId,
 		ctrl: OAuthController & {
 			/** onAuth is required by auth-storage but optional in OAuthController */
-			onAuth: (info: { url: string; instructions?: string }) => void;
+			onAuth: (info: OAuthAuthInfo) => void;
 			/** onPrompt is required for some providers (github-copilot, openai-codex) */
 			onPrompt: (prompt: { message: string; placeholder?: string }) => Promise<string>;
 		},
@@ -2234,16 +2349,15 @@ export class AuthStorage {
 				this.#recordUsageHistory(request, report);
 				return report;
 			}
-			// Failure: cache the LAST GOOD value (if any) with a short jittered TTL
-			// so the credential cools down briefly without dropping out of the
-			// report. If we never had a good value, return null this cycle and
-			// don't write — let the next poll retry.
+			// Failure: apply a short jittered cool-down so the credential doesn't
+			// re-hit the endpoint on every poll. Serve the last good value when we
+			// have one (keeps the credential in the report); otherwise cache null
+			// so a cold or throttled credential stops re-bursting until the window
+			// expires and the next poll retries.
 			const lastGood = this.#usageCache.getStale<UsageReport | null>(cacheKey)?.value ?? null;
-			if (lastGood !== null) {
-				const backoffJitter = USAGE_FAILURE_BACKOFF_MS * (Math.random() * 0.5 - 0.25);
-				const coolDown = Date.now() + USAGE_FAILURE_BACKOFF_MS + backoffJitter;
-				this.#usageCache.set(cacheKey, { value: lastGood, expiresAt: coolDown });
-			}
+			const backoffJitter = USAGE_FAILURE_BACKOFF_MS * (Math.random() * 0.5 - 0.25);
+			const coolDown = Date.now() + USAGE_FAILURE_BACKOFF_MS + backoffJitter;
+			this.#usageCache.set(cacheKey, { value: lastGood, expiresAt: coolDown });
 			return lastGood;
 		})().finally(() => {
 			this.#usageRequestInFlight.delete(cacheKey);
@@ -2360,7 +2474,7 @@ export class AuthStorage {
 		headers: Record<string, string>,
 		options?: { sessionId?: string; baseUrl?: string },
 	): boolean {
-		if (this.#fetchUsageReportsOverride || this.#store.fetchUsageReports) return false;
+		if (this.#fetchUsageReportsOverride) return false;
 
 		const credential = this.#resolveActiveOAuthCredential(provider, options?.sessionId);
 		if (!credential) return false;
@@ -2380,6 +2494,14 @@ export class AuthStorage {
 		if (credential.projectId && metadata.projectId === undefined) metadata.projectId = credential.projectId;
 		const report: UsageReport = { ...parsedReport, metadata };
 
+		const storeIngest = this.#store.ingestUsageReport?.bind(this.#store);
+		if (storeIngest) {
+			const ingested = storeIngest(provider, credential, report);
+			if (ingested) this.#usageHeaderIngestAt.set(cacheKey, now);
+			return ingested;
+		}
+
+		if (this.#fetchUsageReportsOverride || this.#store.fetchUsageReports) return false;
 		const prior = this.#usageCache.getStale<UsageReport | null>(cacheKey)?.value;
 		let merged = report;
 		if (prior && Array.isArray(prior.limits)) {
@@ -2963,7 +3085,7 @@ export class AuthStorage {
 			}
 		}
 
-		this.#markCredentialBlocked(providerKey, sessionCredential.index, blockedUntil, blockScope);
+		this.#markCredentialBlocked(provider, providerKey, sessionCredential.index, blockedUntil, blockScope);
 
 		const remainingCredentials = this.#getCredentialsForProvider(provider)
 			.map((credential, index) => ({ credential, index }))
@@ -2974,7 +3096,12 @@ export class AuthStorage {
 
 		let retryAtMs: number | undefined;
 		for (const candidate of remainingCredentials) {
-			const candidateBlockedUntil = this.#getCredentialBlockedUntil(providerKey, candidate.index, blockScope);
+			const candidateBlockedUntil = this.#getCredentialBlockedUntil(
+				provider,
+				providerKey,
+				candidate.index,
+				blockScope,
+			);
 			if (candidateBlockedUntil === undefined) return { switched: true };
 			if (retryAtMs === undefined || candidateBlockedUntil < retryAtMs) retryAtMs = candidateBlockedUntil;
 		}
@@ -3154,7 +3281,12 @@ export class AuthStorage {
 			args.order.map(async idx => {
 				const selection = args.credentials[idx];
 				if (!selection) return null;
-				const blockedUntil = this.#getCredentialBlockedUntil(args.providerKey, selection.index, args.blockScope);
+				const blockedUntil = this.#getCredentialBlockedUntil(
+					args.provider,
+					args.providerKey,
+					selection.index,
+					args.blockScope,
+				);
 				if (blockedUntil !== undefined) return { selection, usage: null, usageChecked: false, blockedUntil };
 				const usage = await this.#getUsageReport(args.provider, selection.credential, {
 					...args.options,
@@ -3191,7 +3323,13 @@ export class AuthStorage {
 			if (!blocked && scopedLimits && this.#isUsageLimitReached(scopedLimits)) {
 				const resetAtMs = this.#getUsageResetAtMs(scopedLimits, nowMs);
 				blockedUntil = resetAtMs ?? Date.now() + AuthStorage.#defaultBackoffMs;
-				this.#markCredentialBlocked(args.providerKey, selection.index, blockedUntil, args.blockScope);
+				this.#markCredentialBlocked(
+					args.provider,
+					args.providerKey,
+					selection.index,
+					blockedUntil,
+					args.blockScope,
+				);
 				blocked = true;
 			}
 			const windows = usage ? strategy.findWindowLimits(usage, args.rankingContext) : undefined;
@@ -3255,7 +3393,7 @@ export class AuthStorage {
 		// with the most headroom proactively and fall back intelligently when rate-limited.
 		const sessionPreferredIsAvailable =
 			sessionPreferredIndex !== undefined &&
-			!this.#isCredentialBlocked(providerKey, sessionPreferredIndex, blockScope);
+			!this.#isCredentialBlocked(provider, providerKey, sessionPreferredIndex, blockScope);
 		const shouldRank = checkUsage && (!sessionPreferredIsAvailable || requiresProModel);
 		const rankingOrder = shouldRank && sessionId ? credentials.map((_credential, index) => index) : order;
 		const candidates = shouldRank
@@ -3278,7 +3416,7 @@ export class AuthStorage {
 		if (sessionPreferredIndex !== undefined && !requiresProModel) {
 			const sessionPreferredCandidate = candidates.findIndex(
 				candidate =>
-					!this.#isCredentialBlocked(providerKey, candidate.selection.index, blockScope) &&
+					!this.#isCredentialBlocked(provider, providerKey, candidate.selection.index, blockScope) &&
 					candidate.selection.index === sessionPreferredIndex,
 			);
 			if (sessionPreferredCandidate > 0) {
@@ -3383,7 +3521,7 @@ export class AuthStorage {
 			if (resolved) return resolved;
 		}
 
-		if (fallback && this.#isCredentialBlocked(providerKey, fallback.selection.index, blockScope)) {
+		if (fallback && this.#isCredentialBlocked(provider, providerKey, fallback.selection.index, blockScope)) {
 			return this.#tryOAuthCredential(provider, fallback.selection, providerKey, sessionId, options, {
 				checkUsage,
 				allowBlocked: true,
@@ -3546,7 +3684,7 @@ export class AuthStorage {
 			blockScope,
 			allowFallback = true,
 		} = usageOptions;
-		if (!allowBlocked && this.#isCredentialBlocked(providerKey, selection.index, blockScope)) {
+		if (!allowBlocked && this.#isCredentialBlocked(provider, providerKey, selection.index, blockScope)) {
 			return undefined;
 		}
 
@@ -3583,6 +3721,7 @@ export class AuthStorage {
 				if (this.#isUsageLimitReached(scopedLimits)) {
 					const resetAtMs = this.#getUsageResetAtMs(scopedLimits, Date.now());
 					this.#markCredentialBlocked(
+						provider,
 						providerKey,
 						selection.index,
 						resetAtMs ?? Date.now() + AuthStorage.#defaultBackoffMs,
@@ -3659,6 +3798,7 @@ export class AuthStorage {
 					if (this.#isUsageLimitReached(scopedLimits)) {
 						const resetAtMs = this.#getUsageResetAtMs(scopedLimits, Date.now());
 						this.#markCredentialBlocked(
+							provider,
 							providerKey,
 							selection.index,
 							resetAtMs ?? Date.now() + AuthStorage.#defaultBackoffMs,
@@ -3735,7 +3875,7 @@ export class AuthStorage {
 				}
 			} else {
 				// Block temporarily for transient failures (5 minutes)
-				this.#markCredentialBlocked(providerKey, selection.index, Date.now() + 5 * 60 * 1000);
+				this.#markCredentialBlocked(provider, providerKey, selection.index, Date.now() + 5 * 60 * 1000);
 			}
 		}
 
@@ -4134,6 +4274,15 @@ export class AuthStorage {
 	 * that `markUsageLimitReached` set for the now-obsolete reset time.
 	 */
 	#clearCredentialBlocks(provider: string, credentialId: number): void {
+		const deleteCredentialBlocks = this.#store.deleteCredentialBlocks?.bind(this.#store);
+		if (deleteCredentialBlocks) {
+			try {
+				deleteCredentialBlocks(credentialId);
+			} catch (err) {
+				logger.debug("Failed to clear persisted credential blocks", { err, provider, credentialId });
+			}
+		}
+
 		const index = this.#getStoredCredentials(provider).findIndex(entry => entry.id === credentialId);
 		if (index < 0) return;
 		const providerKey = this.#getProviderTypeKey(provider, "oauth");
@@ -4193,6 +4342,7 @@ export class AuthStorage {
 
 		this.#clearSessionCredential(provider, sessionId);
 		this.#markCredentialBlocked(
+			provider,
 			this.#getProviderTypeKey(provider, matched.type),
 			matched.index,
 			Date.now() + AuthStorage.#defaultBackoffMs,
@@ -4255,11 +4405,16 @@ export class AuthStorage {
 			(credential, index) =>
 				credential.type === sessionCredential.type &&
 				index !== sessionCredential.index &&
-				!this.#isCredentialBlocked(providerKey, index),
+				!this.#isCredentialBlocked(provider, providerKey, index),
 		);
 		const target = this.#getStoredCredentials(provider)[sessionCredential.index];
 		this.#clearSessionCredential(provider, sessionId);
-		this.#markCredentialBlocked(providerKey, sessionCredential.index, Date.now() + AuthStorage.#defaultBackoffMs);
+		this.#markCredentialBlocked(
+			provider,
+			providerKey,
+			sessionCredential.index,
+			Date.now() + AuthStorage.#defaultBackoffMs,
+		);
 
 		if (target) {
 			const markSuspect = this.#store.markCredentialSuspect?.bind(this.#store);
@@ -4486,6 +4641,33 @@ export class AuthStorage {
 	}
 
 	/**
+	 * Broker-server seam: list non-expired persisted blocks for snapshot entries.
+	 */
+	listCredentialBlocks(credentialIds: readonly number[]): StoredCredentialBlock[] {
+		return this.#store.listCredentialBlocks?.(credentialIds) ?? [];
+	}
+
+	/**
+	 * Broker-server seam: persist one credential block and notify snapshot waiters.
+	 */
+	upsertCredentialBlock(block: StoredCredentialBlock): void {
+		const upsertCredentialBlock = this.#store.upsertCredentialBlock?.bind(this.#store);
+		if (!upsertCredentialBlock) return;
+		upsertCredentialBlock(block);
+		this.#bumpGeneration("credential-block");
+	}
+
+	/**
+	 * Broker-server seam: clear all persisted blocks for one credential and notify snapshot waiters.
+	 */
+	deleteCredentialBlocks(credentialId: number): void {
+		const deleteCredentialBlocks = this.#store.deleteCredentialBlocks?.bind(this.#store);
+		if (!deleteCredentialBlocks) return;
+		deleteCredentialBlocks(credentialId);
+		this.#bumpGeneration("credential-block");
+	}
+
+	/**
 	 * Describe where the active credential for a provider came from.
 	 *
 	 * Mirrors {@link AuthStorage.getApiKey} precedence, highest first:
@@ -4550,13 +4732,20 @@ type AuthRow = {
 	identity_key: string | null;
 };
 
+type CredentialBlockRow = {
+	credential_id: number;
+	provider_key: string;
+	block_scope: string;
+	blocked_until_ms: number;
+};
+
 type SerializedCredentialRecord = {
 	credentialType: AuthCredential["type"];
 	data: string;
 	identityKey: string | null;
 };
 
-const AUTH_SCHEMA_VERSION = 4;
+const AUTH_SCHEMA_VERSION = 5;
 const SQLITE_NOW_EPOCH = "CAST(strftime('%s','now') AS INTEGER)";
 
 /**
@@ -4756,6 +4945,11 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 	#getCacheIncludingExpiredStmt: Statement;
 	#upsertCacheStmt: Statement;
 	#deleteExpiredCacheStmt: Statement;
+	#getCredentialBlockStmt: Statement;
+	#listCredentialBlocksByCredentialStmt: Statement;
+	#upsertCredentialBlockStmt: Statement;
+	#deleteCredentialBlocksStmt: Statement;
+	#deleteExpiredCredentialBlocksStmt: Statement;
 	#insertUsageHistoryStmt: Statement;
 	#insertUsageCostStmt: Statement;
 	#listUsageCostsStmt: Statement;
@@ -4801,6 +4995,23 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 			"INSERT INTO cache (key, value, expires_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at",
 		);
 		this.#deleteExpiredCacheStmt = this.#db.prepare(`DELETE FROM cache WHERE expires_at <= ${SQLITE_NOW_EPOCH}`);
+		this.#getCredentialBlockStmt = this.#db.prepare(
+			"SELECT blocked_until_ms FROM auth_credential_blocks WHERE credential_id = ? AND provider_key = ? AND block_scope = ? AND blocked_until_ms > ?",
+		);
+		this.#listCredentialBlocksByCredentialStmt = this.#db.prepare(
+			"SELECT credential_id, provider_key, block_scope, blocked_until_ms FROM auth_credential_blocks WHERE credential_id = ? AND blocked_until_ms > ? ORDER BY provider_key ASC, block_scope ASC",
+		);
+		this.#upsertCredentialBlockStmt = this.#db.prepare(
+			`INSERT INTO auth_credential_blocks (credential_id, provider_key, block_scope, blocked_until_ms, updated_at)
+			VALUES (?, ?, ?, ?, ${SQLITE_NOW_EPOCH})
+			ON CONFLICT(credential_id, provider_key, block_scope) DO UPDATE SET
+				blocked_until_ms = MAX(blocked_until_ms, excluded.blocked_until_ms),
+				updated_at = excluded.updated_at`,
+		);
+		this.#deleteCredentialBlocksStmt = this.#db.prepare("DELETE FROM auth_credential_blocks WHERE credential_id = ?");
+		this.#deleteExpiredCredentialBlocksStmt = this.#db.prepare(
+			"DELETE FROM auth_credential_blocks WHERE blocked_until_ms <= ?",
+		);
 		this.#insertUsageHistoryStmt = this.#db.prepare(
 			"INSERT INTO usage_history (recorded_at, provider, account_key, email, account_id, limit_id, label, window_label, used_fraction, status, resets_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		);
@@ -4912,6 +5123,7 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 
 		if (!this.#authCredentialsTableExists()) {
 			this.#createAuthCredentialsTable();
+			this.#createAuthCredentialBlocksTable();
 			this.#writeAuthSchemaVersion(AUTH_SCHEMA_VERSION);
 			return;
 		}
@@ -4928,6 +5140,7 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		}
 
 		this.#createAuthCredentialIndexes();
+		this.#createAuthCredentialBlocksTable();
 		this.#backfillCredentialIdentityKeys();
 		// Rewriting an already-current version row is a no-op write transaction
 		// on every boot; only persist when the recorded version actually changes.
@@ -5011,6 +5224,20 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		`);
 	}
 
+	#createAuthCredentialBlocksTable(): void {
+		this.#db.run(`
+			CREATE TABLE IF NOT EXISTS auth_credential_blocks (
+				credential_id INTEGER NOT NULL,
+				provider_key TEXT NOT NULL,
+				block_scope TEXT NOT NULL DEFAULT '',
+				blocked_until_ms INTEGER NOT NULL,
+				updated_at INTEGER NOT NULL,
+				PRIMARY KEY (credential_id, provider_key, block_scope)
+			);
+			CREATE INDEX IF NOT EXISTS idx_auth_credential_blocks_expires ON auth_credential_blocks(blocked_until_ms);
+		`);
+	}
+
 	#migrateAuthSchema(fromVersion: number): void {
 		if (fromVersion < 1) {
 			this.#migrateAuthSchemaV0ToV1();
@@ -5020,6 +5247,9 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		}
 		if (fromVersion < 4) {
 			this.#migrateAuthSchemaV3ToV4();
+		}
+		if (fromVersion < 5) {
+			this.#migrateAuthSchemaV4ToV5();
 		}
 	}
 
@@ -5103,6 +5333,13 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 				FROM auth_credentials_v3
 			`);
 			this.#db.run("DROP TABLE auth_credentials_v3");
+		});
+		migrate();
+	}
+
+	#migrateAuthSchemaV4ToV5(): void {
+		const migrate = this.#db.transaction(() => {
+			this.#createAuthCredentialBlocksTable();
 		});
 		migrate();
 	}
@@ -5372,6 +5609,54 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		}
 	}
 
+	getCredentialBlock(credentialId: number, providerKey: string, blockScope: string): number | undefined {
+		const nowMs = Date.now();
+		this.#deleteExpiredCredentialBlocksStmt.run(nowMs);
+		const row = this.#getCredentialBlockStmt.get(credentialId, providerKey, blockScope, nowMs) as
+			| { blocked_until_ms?: number }
+			| undefined;
+		return typeof row?.blocked_until_ms === "number" ? row.blocked_until_ms : undefined;
+	}
+
+	upsertCredentialBlock(block: StoredCredentialBlock): void {
+		this.#upsertCredentialBlockStmt.run(
+			block.credentialId,
+			block.providerKey,
+			block.blockScope,
+			block.blockedUntilMs,
+		);
+	}
+
+	deleteCredentialBlocks(credentialId: number): void {
+		this.#deleteCredentialBlocksStmt.run(credentialId);
+	}
+
+	cleanExpiredCredentialBlocks(nowMs: number): void {
+		this.#deleteExpiredCredentialBlocksStmt.run(nowMs);
+	}
+
+	listCredentialBlocks(credentialIds: readonly number[]): StoredCredentialBlock[] {
+		if (credentialIds.length === 0) return [];
+		const nowMs = Date.now();
+		this.cleanExpiredCredentialBlocks(nowMs);
+		const seenCredentialIds = new Set<number>();
+		const blocks: StoredCredentialBlock[] = [];
+		for (const credentialId of credentialIds) {
+			if (seenCredentialIds.has(credentialId)) continue;
+			seenCredentialIds.add(credentialId);
+			const rows = this.#listCredentialBlocksByCredentialStmt.all(credentialId, nowMs) as CredentialBlockRow[];
+			for (const row of rows) {
+				blocks.push({
+					credentialId: row.credential_id,
+					providerKey: row.provider_key,
+					blockScope: row.block_scope,
+					blockedUntilMs: row.blocked_until_ms,
+				});
+			}
+		}
+		return blocks;
+	}
+
 	recordUsageSnapshots(entries: UsageHistoryEntry[]): void {
 		try {
 			for (const entry of entries) {
@@ -5565,6 +5850,11 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		this.#getCacheIncludingExpiredStmt.finalize();
 		this.#upsertCacheStmt.finalize();
 		this.#deleteExpiredCacheStmt.finalize();
+		this.#getCredentialBlockStmt.finalize();
+		this.#listCredentialBlocksByCredentialStmt.finalize();
+		this.#upsertCredentialBlockStmt.finalize();
+		this.#deleteCredentialBlocksStmt.finalize();
+		this.#deleteExpiredCredentialBlocksStmt.finalize();
 		this.#insertUsageHistoryStmt.finalize();
 		this.#lastUsageHistoryStmt.finalize();
 		this.#listUsageHistoryStmt.finalize();

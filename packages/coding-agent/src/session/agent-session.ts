@@ -81,6 +81,8 @@ import type { ProtectedToolMatcher } from "@oh-my-pi/pi-agent-core/compaction/to
 import type {
 	AssistantMessage,
 	AssistantMessageEvent,
+	AssistantRetryRecovery,
+	AssistantRetryRecoveryKind,
 	Context,
 	ImageContent,
 	Message,
@@ -121,6 +123,7 @@ import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { MacOSPowerAssertion } from "@oh-my-pi/pi-natives";
 import {
+	escapeXmlText,
 	extractRetryHint,
 	formatDuration,
 	getAgentDbPath,
@@ -218,6 +221,7 @@ import { createExtensionModelQuery } from "../extensibility/extensions/model-api
 import type { CompactOptions, ContextUsage } from "../extensibility/extensions/types";
 import { ExtensionToolWrapper } from "../extensibility/extensions/wrapper";
 import type { HookCommandContext } from "../extensibility/hooks/types";
+import type { RecoveredRetryError } from "../extensibility/shared-events";
 import type { Skill, SkillWarning } from "../extensibility/skills";
 import { expandSlashCommand, type FileSlashCommand } from "../extensibility/slash-commands";
 import { GoalRuntime } from "../goals/runtime";
@@ -237,6 +241,7 @@ import { containsWorkflow, WORKFLOW_NOTICE } from "../modes/workflow";
 import { createPlanReadMatcher } from "../plan-mode/plan-protection";
 import type { PlanModeState } from "../plan-mode/state";
 import advisorSystemPrompt from "../prompts/advisor/system.md" with { type: "text" };
+import goalModeContextPrompt from "../prompts/goals/goal-mode-context.md" with { type: "text" };
 import goalTodoContextPrompt from "../prompts/goals/goal-todo-context.md" with { type: "text" };
 import parentIrcSteerTemplate from "../prompts/steering/parent-irc.md" with { type: "text" };
 import autoContinuePrompt from "../prompts/system/auto-continue.md" with { type: "text" };
@@ -332,11 +337,16 @@ import {
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
+	type CustomMessagePayload,
 	convertToLlm,
 	demoteInterruptedThinking,
+	type FileMentionMessage,
+	type HookMessage,
 	INTERRUPTED_THINKING_MESSAGE_TYPE,
 	type InterruptedThinkingDetails,
+	isEmptyErrorTurn,
 	isUserInterruptAbort,
+	normalizeCustomMessagePayload,
 	type PythonExecutionMessage,
 	readQueueChipText,
 	SILENT_ABORT_MARKER,
@@ -358,6 +368,8 @@ import { classifyUnexpectedStop, isUnexpectedStopCandidate } from "./unexpected-
 import { YieldQueue } from "./yield-queue";
 
 const SESSION_STOP_CONTINUATION_CAP = 8;
+const PLAN_MODE_REMINDER_MAX = 3;
+const PLAN_DECISION_TOOLS = new Set(["ask", "resolve"]);
 
 /**
  * Mutating tool results (`bash`/`eval`/`edit`/`write`/`ast_edit`) without the
@@ -493,7 +505,13 @@ export type AgentSessionEvent =
 			errorMessage: string;
 			errorId?: number;
 	  }
-	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
+	| {
+			type: "auto_retry_end";
+			success: boolean;
+			attempt: number;
+			finalError?: string;
+			recoveredErrors?: RecoveredRetryError[];
+	  }
 	| { type: "retry_fallback_applied"; from: string; to: string; role: string }
 	| { type: "retry_fallback_succeeded"; model: string; role: string }
 	| { type: "ttsr_triggered"; rules: Rule[] }
@@ -833,6 +851,16 @@ export interface PromptOptions {
 	skipCompactionCheck?: boolean;
 }
 
+/** Options for AgentSession.followUp() */
+export interface FollowUpOptions {
+	/** Enqueue as a hidden developer message (agent-attributed by default) instead of a user follow-up. */
+	synthetic?: boolean;
+	/** Whether to expand file-based prompt templates (default: true). */
+	expandPromptTemplates?: boolean;
+	/** Explicit billing/initiator attribution. Defaults to `agent` for synthetic follow-ups. */
+	attribution?: MessageAttribution;
+}
+
 /** Result from a handoff operation. */
 export interface HandoffResult {
 	document: string;
@@ -965,6 +993,18 @@ interface ActiveAdvisor {
 	agentUnsubscribe?: () => void;
 	model: Model;
 	thinkingLevel: ThinkingLevel;
+	/** Stable key for the resolved runtime inputs that require a rebuild to change. */
+	signature: string;
+}
+
+/** Resolved advisor config ready to instantiate as an {@link ActiveAdvisor}. */
+interface AdvisorRuntimeDescriptor {
+	config: AdvisorConfig;
+	name: string;
+	slug: string;
+	model: Model;
+	thinkingLevel: ThinkingLevel;
+	signature: string;
 }
 
 export interface FreshSessionResult {
@@ -1409,6 +1449,13 @@ type MessageEndPersistenceSlot = {
 	persist: (persistMessage: () => void) => Promise<void>;
 	release: () => void;
 };
+type PendingRecoveredRetryError = {
+	entryId: string;
+	persistenceKey: string;
+	recovery: AssistantRetryRecoveryKind;
+	attempt: number;
+	note: string;
+};
 
 type PostPromptSkipReason = "aborted" | "stale-generation";
 
@@ -1565,6 +1612,7 @@ export class AgentSession {
 	#retryPromise: Promise<void> | undefined = undefined;
 	#retryResolve: (() => void) | undefined = undefined;
 	#activeRetryFallback: ActiveRetryFallbackState | undefined = undefined;
+	#pendingRecoveredRetryErrors: PendingRecoveredRetryError[] = [];
 	// Todo completion reminder state
 	#todoReminderCount = 0;
 	/**
@@ -1587,6 +1635,8 @@ export class AgentSession {
 	/** Mid-run nudges fired this prompt cycle; capped by
 	 *  {@link MID_RUN_TODO_NUDGE_MAX_PER_CYCLE}, reset with the counter above. */
 	#midRunNudgeCount = 0;
+	#planModeReminderCount = 0;
+	#planModeReminderAwaitingProgress = false;
 	#todoPhases: TodoPhase[] = [];
 	#replanTitleRefreshInFlight: Promise<void> | undefined = undefined;
 	/** Resolved TITLE_SYSTEM.md override applied to every automatic session-title
@@ -1636,6 +1686,7 @@ export class AgentSession {
 	#turnIndex = 0;
 	#messageEndPersistenceTail: Promise<void> = Promise.resolve();
 	#pendingMessageEndPersistence = new Map<string, Promise<void>>();
+	#persistedMessageKeys: { anchor: string; keys: Set<string> } | undefined;
 
 	#skills: Skill[];
 	#skillWarnings: SkillWarning[];
@@ -1861,6 +1912,21 @@ export class AgentSession {
 		const records = [...this.#pendingIrcInterrupts, ...this.#pendingIrcAsides];
 		this.#pendingIrcInterrupts = [];
 		this.#pendingIrcAsides = [];
+		if (this.#planModeState?.enabled) {
+			// Plan mode: fold stranded IRC asides into context without waking an
+			// autonomous turn. Convergence to ask/resolve stays user-driven.
+			for (const record of records) {
+				this.agent.appendMessage(record);
+				this.sessionManager.appendCustomMessageEntry(
+					record.customType,
+					record.content,
+					record.display,
+					record.details,
+					record.attribution ?? "agent",
+				);
+			}
+			return;
+		}
 		this.#wakeForIrc(records);
 	}
 
@@ -2247,32 +2313,10 @@ export class AgentSession {
 		}
 	}
 
-	#buildAdvisorRuntime(seedToCurrent = false): boolean {
-		if (this.#isDisposed) return false;
-		if (this.#advisors.length > 0) return true;
-		if (!this.#advisorEnabled) return false;
-		if (this.#agentKind !== "main" && !this.settings.get("advisor.subagents")) return false;
-
-		// The lone implicit "default" advisor (slug "") reproduces the legacy
-		// single-advisor path: the `advisor` role model + `__advisor.jsonl`.
+	#resolveAdvisorRuntimeDescriptors(emitWarnings: boolean): AdvisorRuntimeDescriptor[] {
 		const legacy = !this.#advisorConfigs?.length;
 		const roster: AdvisorConfig[] = legacy ? [{ name: "default" }] : this.#advisorConfigs!;
-
-		// Advisor service tier (`tier.advisor`): "none" (default) runs the advisor
-		// on standard processing; "inherit" tracks the session's live per-family
-		// tiers per request (like the main agent, including /fast toggles); a
-		// concrete value is broadcast across families and applied to the advisor
-		// model's family. One value for all advisors.
-		const advisorTierSetting = this.settings.get("tier.advisor");
-		const advisorTierMap =
-			advisorTierSetting === "inherit"
-				? undefined
-				: serviceTierForAllFamilies(serviceTierSettingToTier(advisorTierSetting));
-		const advisorServiceTierResolver = (model: Model): ServiceTier | undefined =>
-			advisorTierSetting === "inherit"
-				? this.#effectiveServiceTier(model)
-				: resolveModelServiceTier(advisorTierMap, model);
-
+		const descriptors: AdvisorRuntimeDescriptor[] = [];
 		const usedSlugs = new Set<string>();
 		for (const config of roster) {
 			let slug = legacy ? "" : slugifyAdvisorName(config.name);
@@ -2293,23 +2337,96 @@ export class AgentSession {
 				model = resolved.model;
 				thinkingLevel = concreteThinkingLevel(resolved.thinkingLevel);
 				if (!model) {
-					this.emitNotice("warning", `Advisor "${config.name}": no model matched "${config.model}"`, "advisor");
+					if (emitWarnings) {
+						this.emitNotice("warning", `Advisor "${config.name}": no model matched "${config.model}"`, "advisor");
+					}
 					continue;
 				}
 			} else {
 				const sel = resolveAdvisorRoleSelection(this.settings, this.#modelRegistry.getAvailable());
 				if (!sel) {
-					logger.debug("advisor enabled but no model assigned to the 'advisor' role; advisor inactive", {
-						advisor: config.name,
-					});
+					if (emitWarnings) {
+						logger.debug("advisor enabled but no model assigned to the 'advisor' role; advisor inactive", {
+							advisor: config.name,
+						});
+					}
 					continue;
 				}
 				model = sel.model;
 				thinkingLevel = concreteThinkingLevel(sel.thinkingLevel);
 			}
-			const advisorModel = model;
-			const advisorName = config.name;
-			const advisorThinkingLevel = thinkingLevel ?? ThinkingLevel.Medium;
+			// Clamp the effort against the resolved model. Historically we defaulted
+			// to `ThinkingLevel.Medium` unconditionally, which threw at first stream
+			// on reasoning models that expose no controllable effort surface
+			// (e.g. `devin-agent`: Cascade routes by sibling model id, not a wire
+			// param; `getSupportedEfforts` returns `[]`). `resolveThinkingLevelForModel`
+			// preserves an explicit `off`, clamps a concrete effort into the model's
+			// supported range, and returns `undefined` for reasoning models without
+			// controllable efforts — for that case we forward `Inherit` so no effort
+			// is sent and reasoning stays enabled (matching the `auto`-path fix for
+			// Devin models via `clampAutoThinkingEffort`). See #4579.
+			const requestedLevel = thinkingLevel ?? ThinkingLevel.Medium;
+			const resolvedLevel = resolveThinkingLevelForModel(model, requestedLevel);
+			const advisorThinkingLevel: ThinkingLevel = resolvedLevel ?? ThinkingLevel.Inherit;
+			descriptors.push({
+				config,
+				name: config.name,
+				slug,
+				model,
+				thinkingLevel: advisorThinkingLevel,
+				signature: this.#advisorRuntimeSignature(config, slug, model, advisorThinkingLevel),
+			});
+		}
+		return descriptors;
+	}
+
+	#advisorRuntimeSignature(config: AdvisorConfig, slug: string, model: Model, thinkingLevel: ThinkingLevel): string {
+		const tools = config.tools?.length ? config.tools.join("\u001e") : "";
+		const instructions = config.instructions?.trim() ?? "";
+		return [config.name, slug, model.provider, model.id, thinkingLevel, tools, instructions].join("\u001f");
+	}
+
+	#advisorRuntimeMatchesCurrentConfig(): boolean {
+		const descriptors = this.#resolveAdvisorRuntimeDescriptors(false);
+		if (descriptors.length !== this.#advisors.length) return false;
+		for (let i = 0; i < descriptors.length; i++) {
+			if (descriptors[i].signature !== this.#advisors[i].signature) return false;
+		}
+		return true;
+	}
+
+	#buildAdvisorRuntime(seedToCurrent = false): boolean {
+		if (this.#isDisposed) return false;
+		if (this.#advisors.length > 0) return true;
+		if (!this.#advisorEnabled) return false;
+		if (this.#agentKind !== "main" && !this.settings.get("advisor.subagents")) return false;
+
+		const descriptors = this.#resolveAdvisorRuntimeDescriptors(true);
+
+		// Advisor service tier (`tier.advisor`): "none" (default) runs the advisor
+		// on standard processing; "inherit" tracks the session's live per-family
+		// tiers per request (like the main agent, including /fast toggles); a
+		// concrete value is broadcast across families and applied to the advisor
+		// model's family. One value for all advisors.
+		const advisorTierSetting = this.settings.get("tier.advisor");
+		const advisorTierMap =
+			advisorTierSetting === "inherit"
+				? undefined
+				: serviceTierForAllFamilies(serviceTierSettingToTier(advisorTierSetting));
+		const advisorServiceTierResolver = (model: Model): ServiceTier | undefined =>
+			advisorTierSetting === "inherit"
+				? this.#effectiveServiceTier(model)
+				: resolveModelServiceTier(advisorTierMap, model);
+
+		for (const descriptor of descriptors) {
+			const {
+				config,
+				slug,
+				model: advisorModel,
+				name: advisorName,
+				thinkingLevel: advisorThinkingLevel,
+				signature,
+			} = descriptor;
 
 			const emissionGuard = new AdvisorEmissionGuard();
 			const adviseTool = new AdviseTool((note, severity) => this.#routeAdvice(advisorRef, note, severity));
@@ -2435,6 +2552,7 @@ export class AgentSession {
 				recorderClosed: Promise.resolve(),
 				model: advisorModel,
 				thinkingLevel: advisorThinkingLevel,
+				signature,
 			};
 			this.#attachAdvisorRecorderFeed(advisorRef);
 			if (seedToCurrent) runtime.seedTo(this.agent.state.messages.length);
@@ -2521,6 +2639,20 @@ export class AgentSession {
 			return;
 		}
 		this.#recordAdvisorInterruptDelivered();
+		if (this.#planModeState?.enabled) {
+			// Plan mode: record advice visibly in context but never wake an
+			// autonomous turn — only user-driven turns converge on ask/resolve.
+			this.#preserveAdvisorCard({
+				role: "custom",
+				customType: "advisor",
+				content,
+				display: true,
+				attribution: "agent",
+				details,
+				timestamp: Date.now(),
+			});
+			return;
+		}
 		void this.sendCustomMessage(
 			{ customType: "advisor", content, display: true, attribution: "agent", details },
 			{ deliverAs: "steer", triggerTurn: true },
@@ -2945,6 +3077,26 @@ export class AgentSession {
 		manager?.cancelAll({ ownerId: this.#agentId });
 	}
 
+	/**
+	 * True when a background async job owned by this agent is still running with
+	 * an unsuppressed delivery, or a finished job's delivery is still queued or
+	 * in flight. Either way the async-result follow-up will re-wake the loop, so
+	 * a settle observed now is a scheduling pause rather than a terminal stop:
+	 * stop-time passes (todo reminder, session_stop hooks) defer to the settle
+	 * reached once the session is fully idle. Suppressed deliveries
+	 * (acknowledged, or watched by an in-flight `job` poll) never wake the loop,
+	 * so they don't count.
+	 */
+	#hasPendingAsyncWake(): boolean {
+		const manager = this.#asyncJobManager;
+		if (!manager) return false;
+		const ownerFilter = this.#agentId ? { ownerId: this.#agentId } : undefined;
+		return (
+			manager.getRunningJobs(ownerFilter).some(job => !manager.isDeliverySuppressed(job.id)) ||
+			manager.hasPendingDeliveries(ownerFilter)
+		);
+	}
+
 	// =========================================================================
 	// Event Subscription
 	// =========================================================================
@@ -3149,12 +3301,19 @@ export class AgentSession {
 	/**
 	 * Index every message entry on the current branch by persistence key, so
 	 * the mid-run-compaction planner can ask "is this turn message already on
-	 * the branch?" in O(1) instead of re-walking the branch per check.
+	 * the branch?" in O(1). The set is memoized through the current leaf path
+	 * and validated at use time against a (session file, leaf id) anchor.
 	 *
 	 * The mid-run ordering check uses key identity alone: same-key content
 	 * variants are one logical message at this boundary, because otherwise a
 	 * display-side rewrite can make the assistant look missing after its tool
 	 * results have already persisted.
+	 *
+	 * Coherency is anchor-based, not invalidation-based: every branch mutation
+	 * (rewind, branch switch, new session, custom-entry append) changes the
+	 * session manager's leaf id or session file, so `#ensurePersistedMessageKeys`
+	 * detects staleness itself and rebuilds. No mutation call site has to
+	 * remember to invalidate anything.
 	 *
 	 * Pre-#3629 the equivalent was `sessionManager.getBranch()` called twice
 	 * per turn message, each call rebuilding the path via O(n²) `unshift` and
@@ -3163,6 +3322,24 @@ export class AgentSession {
 	 * `ui.loop-blocked` warnings in the bug report.
 	 */
 	#indexPersistedMessageKeys(): Set<string> {
+		return this.#ensurePersistedMessageKeys();
+	}
+
+	#persistedMessageKeysAnchor(): string {
+		return `${this.sessionManager.getSessionFile() ?? ""}\u0000${this.sessionManager.getLeafId() ?? ""}`;
+	}
+
+	#ensurePersistedMessageKeys(): Set<string> {
+		const anchor = this.#persistedMessageKeysAnchor();
+		let cache = this.#persistedMessageKeys;
+		if (cache === undefined || cache.anchor !== anchor) {
+			cache = { anchor, keys: this.#buildPersistedMessageKeySet() };
+			this.#persistedMessageKeys = cache;
+		}
+		return cache.keys;
+	}
+
+	#buildPersistedMessageKeySet(): Set<string> {
 		const keys = new Set<string>();
 		for (const entry of this.sessionManager.getBranch()) {
 			if (entry.type !== "message") continue;
@@ -3174,20 +3351,16 @@ export class AgentSession {
 
 	/**
 	 * True when {@link message} is structurally identical to a message already
-	 * appended to the current branch. Pairs a fast persistence-key lookup with
-	 * a content-equality fallback so two logically distinct messages that
-	 * happen to collide on the cheap key (e.g. two assistant turns at the same
-	 * millisecond with `undefined` responseId) still count as DISTINCT.
+	 * appended to the current branch. Uses the current branch's memoized
+	 * persistence-key cache for the common missing-key case, and only walks the
+	 * branch to verify content when a key hit could be a rare collision.
 	 */
 	#sessionMessageAlreadyPersisted(message: AgentMessage): boolean {
 		const key = sessionMessagePersistenceKey(message);
 		if (key === undefined) return false;
+		const keys = this.#ensurePersistedMessageKeys();
+		if (!keys.has(key)) return false;
 		const branch = this.sessionManager.getBranch();
-		// Reverse walk: recently-appended entries are at the tail, so the common
-		// "is the message I just emitted already in the branch?" lookup short-
-		// circuits in O(1) hot, O(branch) cold. Cheap-key compare for every
-		// entry; content compare only when the cheap check matches, so the
-		// expensive `JSON.stringify(content)` path stays off the hot loop.
 		for (let index = branch.length - 1; index >= 0; index--) {
 			const entry = branch[index];
 			if (entry.type !== "message") continue;
@@ -3195,6 +3368,26 @@ export class AgentSession {
 			if (sameMessageContent(entry.message, message)) return true;
 		}
 		return false;
+	}
+
+	#appendSessionMessage(
+		message:
+			| Message
+			| CustomMessage
+			| HookMessage
+			| BashExecutionMessage
+			| PythonExecutionMessage
+			| FileMentionMessage,
+	): string {
+		const cache = this.#persistedMessageKeys;
+		const wasFresh = cache !== undefined && cache.anchor === this.#persistedMessageKeysAnchor();
+		const entryId = this.sessionManager.appendMessage(message);
+		const key = sessionMessagePersistenceKey(message);
+		if (wasFresh && cache && key) {
+			cache.keys.add(key);
+			cache.anchor = this.#persistedMessageKeysAnchor();
+		}
+		return entryId;
 	}
 
 	#persistSessionMessageIfMissing(message: AgentMessage): void {
@@ -3211,6 +3404,7 @@ export class AgentSession {
 		if (message.role === "assistant") {
 			const assistantMsg = message as AssistantMessage;
 			if (this.#isClassifierRefusal(assistantMsg)) return;
+			if (isEmptyErrorTurn(assistantMsg)) return;
 			if (assistantMsg.stopReason !== "aborted" && assistantMsg.stopReason !== "error" && assistantMsg.usage) {
 				assistantMsg.contextSnapshot = {
 					promptTokens: calculatePromptTokens(assistantMsg.usage),
@@ -3223,7 +3417,7 @@ export class AgentSession {
 			message.toolName === "rewind" &&
 			this.#rewoundToolResultIds.delete(message.toolCallId);
 		if (!skipPersistedRewindResult) {
-			this.sessionManager.appendMessage(message);
+			this.#appendSessionMessage(message);
 		}
 	}
 
@@ -3421,6 +3615,11 @@ export class AgentSession {
 			} else {
 				await this.#goalRuntime.onToolCompleted(event.toolName);
 			}
+			this.#planModeReminderAwaitingProgress = false;
+			if (this.#isPlanDecisionTool(event.toolName)) {
+				this.#planModeReminderCount = 0;
+				this.#planModeReminderAwaitingProgress = false;
+			}
 		}
 		if (event.type === "tool_execution_end" && event.toolName === "yield" && !event.isError) {
 			this.#lastSuccessfulYieldToolCallId = event.toolCallId;
@@ -3551,11 +3750,14 @@ export class AgentSession {
 							role: this.#activeRetryFallback.role,
 						});
 					}
+					const recoveredErrors = await this.#markPendingRecoveredRetryErrors(assistantMsg);
 					await this.#emitSessionEvent({
 						type: "auto_retry_end",
 						success: true,
 						attempt: this.#retryAttempt,
+						recoveredErrors,
 					});
+					this.#clearPendingRecoveredRetryErrors();
 					this.#retryAttempt = 0;
 				}
 				if (assistantMsg.provider === "opencode-go") {
@@ -3843,11 +4045,25 @@ export class AgentSession {
 					await emitAgentEndNotification();
 					return;
 				}
+				const planModeContinuationScheduled = await this.#enforcePlanModeDecisionAtSettle();
+				if (planModeContinuationScheduled) {
+					await emitAgentEndNotification();
+					return;
+				}
 				const todoContinuationScheduled = await this.#checkTodoCompletion();
 				if (todoContinuationScheduled) {
 					await emitAgentEndNotification();
 					return;
 				}
+			}
+			// A pending async wake means this settle is a scheduling pause, not
+			// the terminal stop: the async-result delivery continues the loop and
+			// the real stop settles later. Defer the session_stop hook pass until
+			// the session is fully idle (the todo reminder above defers the same
+			// way inside #checkTodoCompletion).
+			if (this.#hasPendingAsyncWake()) {
+				await emitAgentEndNotification();
+				return;
 			}
 			await this.#emitSessionStopEvent(settledMessages, msg);
 			await emitAgentEndNotification();
@@ -5211,6 +5427,7 @@ export class AgentSession {
 				success: event.success,
 				attempt: event.attempt,
 				finalError: event.finalError,
+				recoveredErrors: event.recoveredErrors,
 			});
 		} else if (event.type === "ttsr_triggered") {
 			await this.#extensionRunner.emit({ type: "ttsr_triggered", rules: event.rules });
@@ -6684,6 +6901,12 @@ export class AgentSession {
 		if (state?.enabled) {
 			this.#planReferenceSent = false;
 			this.#planReferencePath = state.planFilePath;
+		} else {
+			this.#planModeReminderCount = 0;
+			this.#planModeReminderAwaitingProgress = false;
+			// Drop any unconsumed forced decision so a post-plan execution turn
+			// does not inherit a stale `required` tool choice.
+			this.#toolChoiceQueue.removeByLabel("plan-mode-decision");
 		}
 	}
 
@@ -6948,15 +7171,30 @@ export class AgentSession {
 		return {
 			role: "custom",
 			customType: "goal-mode-context",
-			content: todoContext ? `${content}\n\n${todoContext}` : content,
+			content: prompt.render(goalModeContextPrompt, { goalContext: content, todoContext }),
 			display: false,
 			attribution: "agent",
 			timestamp: Date.now(),
 		};
 	}
 
+	#sanitizeGoalTodoText(text: string): string {
+		return escapeXmlText(text)
+			.replace(/\r\n/g, "\\n")
+			.replace(/\r/g, "\\r")
+			.replace(/\n/g, "\\n")
+			.replace(/\t/g, "\\t")
+			.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u2028\u2029]/g, " ");
+	}
+
 	#buildGoalTodoContext(): string | undefined {
 		if (!this.settings.get("todo.enabled")) return undefined;
+		const activeToolNames = this.getActiveToolNames();
+		const canCallTodoTool = activeToolNames.includes("todo");
+		const canDiscoverTodoTool =
+			!canCallTodoTool && this.getDiscoverableTools({ source: "builtin" }).some(tool => tool.name === "todo");
+		const canActivateTodoTool = canDiscoverTodoTool && activeToolNames.includes("search_tool_bm25");
+		if (!canCallTodoTool && !canDiscoverTodoTool) return undefined;
 		const phases = this.getTodoPhases().filter(phase => phase.tasks.length > 0);
 		if (phases.length === 0) return undefined;
 
@@ -6964,7 +7202,7 @@ export class AgentSession {
 		let closed = 0;
 		let open = 0;
 		const promptPhases = phases.map(phase => ({
-			name: phase.name,
+			name: this.#sanitizeGoalTodoText(phase.name),
 			tasks: phase.tasks.map(task => {
 				total++;
 				if (task.status === "completed" || task.status === "abandoned") {
@@ -6972,11 +7210,13 @@ export class AgentSession {
 				} else {
 					open++;
 				}
-				return { content: task.content, status: task.status };
+				return { content: this.#sanitizeGoalTodoText(task.content), status: task.status };
 			}),
 		}));
 
 		return prompt.render(goalTodoContextPrompt, {
+			canCallTodoTool,
+			canActivateTodoTool,
 			closed: String(closed),
 			open: String(open),
 			phases: promptPhases,
@@ -7162,6 +7402,11 @@ export class AgentSession {
 		// Agent-initiated synthetic prompts (auto-continue, plan, reminders) do not.
 		if (options?.userInitiated ?? !options?.synthetic) {
 			this.#advisorAutoResumeSuppressed = false;
+			this.#planModeReminderCount = 0;
+			this.#planModeReminderAwaitingProgress = false;
+			// A user turn owns the next decision; drop a queued forced choice from
+			// a reminder continuation this prompt just preempted.
+			this.#toolChoiceQueue.removeByLabel("plan-mode-decision");
 		}
 
 		// If streaming, queue via steer() or followUp() based on option
@@ -7231,9 +7476,6 @@ export class AgentSession {
 			// Clean up residual eager-todo directive if the prompt never consumed it
 			// (e.g., compaction aborted, validation failed).
 			this.#toolChoiceQueue.removeByLabel("eager-todo");
-		}
-		if (!options?.synthetic) {
-			await this.#enforcePlanModeToolDecision();
 		}
 		return true;
 	}
@@ -7418,15 +7660,22 @@ export class AgentSession {
 					const promptAttribution: "user" | "agent" | undefined =
 						"attribution" in message ? message.attribution : undefined;
 					for (const msg of result.messages) {
+						const normalized = normalizeCustomMessagePayload(msg);
+						const hasExplicitAttribution =
+							msg !== null &&
+							typeof msg === "object" &&
+							!Array.isArray(msg) &&
+							(msg.attribution === "user" || msg.attribution === "agent");
 						messages.push(
 							await this.#normalizeAgentMessageImages({
 								role: "custom",
-								customType: msg.customType,
-								content: msg.content,
-								display: msg.display,
-								details: msg.details,
-								attribution:
-									msg.attribution ?? promptAttribution ?? (message.role === "user" ? "user" : "agent"),
+								customType: normalized.customType,
+								content: normalized.content,
+								display: normalized.display,
+								details: normalized.details,
+								attribution: hasExplicitAttribution
+									? normalized.attribution
+									: (promptAttribution ?? (message.role === "user" ? "user" : "agent")),
 								timestamp: Date.now(),
 							}),
 						);
@@ -7641,14 +7890,42 @@ export class AgentSession {
 
 	/**
 	 * Queue a follow-up message to process after the agent would otherwise stop.
+	 * Set `options.synthetic` to enqueue a hidden developer message (agent-attributed
+	 * by default) instead of a user-attributed follow-up; the plan-approval flow
+	 * uses this to land its execution directive behind a queued user turn without
+	 * flipping advisor auto-resume.
 	 */
-	async followUp(text: string, images?: ImageContent[]): Promise<void> {
+	async followUp(text: string, images?: ImageContent[], options?: FollowUpOptions): Promise<void> {
 		if (text.startsWith("/")) {
 			this.#throwIfExtensionCommand(text);
 		}
 
-		const expandedText = expandPromptTemplate(text, [...this.#promptTemplates]);
-		await this.#queueUserMessage(expandedText, images, "followUp");
+		const expandedText =
+			options?.expandPromptTemplates === false ? text : expandPromptTemplate(text, [...this.#promptTemplates]);
+		if (!options?.synthetic) {
+			await this.#queueUserMessage(expandedText, images, "followUp");
+			return;
+		}
+		// Synthetic branch: agent-initiated hidden developer message. Bypass
+		// #queueUserMessage (which clears advisor auto-resume suppression and
+		// enqueues as a user-attributed message) and place the developer message
+		// directly on the follow-up queue.
+		const normalizedImages = await this.#normalizeImagesForModel(images);
+		const content: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
+		if (normalizedImages?.length) {
+			content.push(...normalizedImages);
+		}
+		const imageDescriptionNotice = normalizedImages?.length
+			? await this.#buildImageDescriptionNotice(normalizedImages)
+			: undefined;
+		if (imageDescriptionNotice) this.agent.followUp(imageDescriptionNotice);
+		this.agent.followUp({
+			role: "developer",
+			content,
+			attribution: options.attribution ?? "agent",
+			timestamp: Date.now(),
+		});
+		this.#scheduleIdleQueueDrain();
 	}
 
 	async #queueUserMessage(
@@ -7889,26 +8166,26 @@ export class AgentSession {
 	 * use this to avoid acting on a turn that never ran.
 	 */
 	async sendCustomMessage<T = unknown>(
-		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
+		message: CustomMessagePayload<T>,
 		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn"; queueChipText?: string },
 	): Promise<boolean> {
+		const normalizedPayload = normalizeCustomMessagePayload<T>(message);
 		const details =
 			options?.queueChipText && options.deliverAs !== "nextTurn"
 				? ({
-						...((message.details && typeof message.details === "object" ? message.details : {}) as Record<
-							string,
-							unknown
-						>),
+						...((normalizedPayload.details && typeof normalizedPayload.details === "object"
+							? normalizedPayload.details
+							: {}) as Record<string, unknown>),
 						__queueChipText: options.queueChipText,
 					} as T)
-				: message.details;
+				: normalizedPayload.details;
 		const appMessage: CustomMessage<T> = {
 			role: "custom",
-			customType: message.customType,
-			content: message.content,
-			display: message.display,
+			customType: normalizedPayload.customType,
+			content: normalizedPayload.content,
+			display: normalizedPayload.display,
 			details,
-			attribution: message.attribution ?? "agent",
+			attribution: normalizedPayload.attribution,
 			timestamp: Date.now(),
 		};
 		const normalizedAppMessage = await this.#normalizeAgentMessageImages(appMessage);
@@ -7940,9 +8217,9 @@ export class AgentSession {
 			this.sessionManager.appendCustomMessageEntry(
 				normalizedAppMessage.customType,
 				normalizedAppMessage.content,
-				message.display,
-				message.details,
-				message.attribution ?? "agent",
+				normalizedAppMessage.display,
+				normalizedAppMessage.details,
+				normalizedAppMessage.attribution,
 			);
 			return false;
 		}
@@ -7960,9 +8237,9 @@ export class AgentSession {
 		this.sessionManager.appendCustomMessageEntry(
 			normalizedAppMessage.customType,
 			normalizedAppMessage.content,
-			message.display,
-			message.details,
-			message.attribution ?? "agent",
+			normalizedAppMessage.display,
+			normalizedAppMessage.details,
+			normalizedAppMessage.attribution,
 		);
 		return false;
 	}
@@ -8356,6 +8633,7 @@ export class AgentSession {
 			await this.sessionManager.flush();
 		}
 		await this.sessionManager.newSession(options);
+
 		this.#clearCheckpointRuntimeState();
 		this.setTodoPhases([]);
 		this.#freshProviderSessionId = undefined;
@@ -8483,12 +8761,10 @@ export class AgentSession {
 	/**
 	 * Set model directly.
 	 * Validates that a credential source is configured (synchronously, without
-	 * refreshing OAuth or running command-backed key programs). The active
-	 * session switches by default; when `currentContextTokens` is provided and
-	 * exceeds the refreshed candidate's context window, the live switch is
-	 * skipped while role persistence still runs. Returns whether the active
-	 * model actually switched, computed against the refreshed metadata so
-	 * dynamic providers (e.g. llama.cpp) honor their post-load contextWindow.
+	 * refreshing OAuth or running command-backed key programs). Active switches
+	 * always take effect; if the current transcript is too large for the target
+	 * model, the next prompt's compaction/error path owns that recovery instead
+	 * of leaving the session pinned to the old model.
 	 * @throws Error if no API key available for the model
 	 */
 	async setModel(
@@ -8508,27 +8784,14 @@ export class AgentSession {
 
 		const targetModel = await this.#modelRegistry.refreshSelectedModelMetadata(model);
 
-		const currentContextTokens = options?.currentContextTokens ?? 0;
-		const targetContextWindow = targetModel.contextWindow ?? 0;
-		const switched = !(
-			currentContextTokens > 0 &&
-			targetContextWindow > 0 &&
-			currentContextTokens > targetContextWindow
-		);
-
-		if (switched) {
-			this.#clearActiveRetryFallback();
-			this.#setModelWithProviderSessionReset(targetModel);
-			this.sessionManager.appendModelChange(`${targetModel.provider}/${targetModel.id}`, role);
-		}
+		this.#clearActiveRetryFallback();
+		this.#setModelWithProviderSessionReset(targetModel);
+		this.sessionManager.appendModelChange(`${targetModel.provider}/${targetModel.id}`, role);
 		if (options?.persist) {
 			this.settings.setModelRole(
 				role,
 				this.#formatRoleModelValue(role, targetModel, options.selector, options.thinkingLevel),
 			);
-		}
-		if (!switched) {
-			return { switched: false };
 		}
 		this.settings.getStorage()?.recordModelUsage(`${targetModel.provider}/${targetModel.id}`);
 
@@ -8986,24 +9249,26 @@ export class AgentSession {
 
 	/**
 	 * `/fast on|off` targets the family of the currently selected model: it sets
-	 * (or clears) that family's `priority` tier. Models without a service-tier
-	 * family (Fireworks, or providers with no tier knob) have nothing to toggle.
+	 * (or clears) that family's `priority` tier. Returns `false` when the model
+	 * has no service-tier family, so callers can report that fast mode is
+	 * unavailable instead of claiming success.
 	 */
-	setFastMode(enabled: boolean): void {
+	setFastMode(enabled: boolean): boolean {
 		const family = this.model ? serviceTierFamily(this.model) : undefined;
 		if (!family) {
 			this.emitNotice("info", "The current model has no service-tier control for /fast to toggle.", "priority");
-			return;
+			return false;
 		}
 		if (!enabled) {
 			if (this.#serviceTierByFamily[family] === "priority") this.setServiceTierFamily(family, undefined);
-			return;
+			return true;
 		}
 		this.setServiceTierFamily(family, "priority");
+		return true;
 	}
 
 	toggleFastMode(): boolean {
-		this.setFastMode(!this.isFastModeEnabled());
+		if (!this.setFastMode(!this.isFastModeEnabled())) return false;
 		return this.isFastModeEnabled();
 	}
 
@@ -9281,7 +9546,11 @@ export class AgentSession {
 		// Modes that produce no LLM summary (snapcompact) have nothing to focus.
 		// Reject focus text loudly so programmatic callers don't silently lose
 		// instructions (the slash path pre-validates via parseCompactArgs).
-		if (compactMode?.rejectsFocus && customInstructions) {
+		// `internalGuidance` counts the same way — plan-mode approval never
+		// combines with a rejects-focus mode, but reject early if a caller ever
+		// wires it up so we don't silently drop the directive on the snapcompact
+		// fallback (issue #4359).
+		if (compactMode?.rejectsFocus && (customInstructions || options?.internalGuidance)) {
 			throw new Error(`/compact ${compactMode.name} does not take focus instructions.`);
 		}
 		const compactionAbortController = new AbortController();
@@ -9362,12 +9631,16 @@ export class AgentSession {
 
 			const compactionPrep = await this.#prepareCompactionFromHooks(preparation, hookCompaction);
 
-			// Strategy honored on manual /compact too. Custom instructions imply a
-			// directed LLM summary; a text-only model cannot read snapcompact frames.
-			// When snapcompact itself was requested, fail locally instead of silently
+			// Strategy honored on manual /compact too. Custom instructions (public
+			// user focus OR internal plan-mode guidance) imply a directed LLM
+			// summary; a text-only model cannot read snapcompact frames. When
+			// snapcompact itself was requested, fail locally instead of silently
 			// converting the "no LLM call" path into a provider-backed summary.
 			const wantsSnapcompact =
-				compactionPrep.kind !== "fromHook" && effectiveSettings.strategy === "snapcompact" && !customInstructions;
+				compactionPrep.kind !== "fromHook" &&
+				effectiveSettings.strategy === "snapcompact" &&
+				!customInstructions &&
+				!options?.internalGuidance;
 			const snapcompactReady = wantsSnapcompact;
 			const snapcompactShapeSetting = this.settings.get("snapcompact.shape");
 			let snapcompactShape: snapcompact.Shape | undefined;
@@ -9393,11 +9666,11 @@ export class AgentSession {
 					const percent = (renderScan.unrenderableRatio * 100).toFixed(1);
 					this.emitNotice(
 						"warning",
-						`snapcompact disabled: high non-ASCII rate detected (${percent}%). No LLM fallback was attempted.`,
+						`snapcompact disabled: unsupported characters for selected snapcompact font (${percent}%). No LLM fallback was attempted.`,
 						"compaction",
 					);
 					throw new Error(
-						`snapcompact cannot render this conversation locally: high non-ASCII rate detected (${percent}%).`,
+						`snapcompact cannot render this conversation locally: unsupported characters for selected snapcompact font (${percent}%).`,
 					);
 				}
 			}
@@ -9500,7 +9773,7 @@ export class AgentSession {
 				try {
 					const result = await this.#compactWithFallbackModel(
 						preparation,
-						customInstructions,
+						options?.internalGuidance ?? customInstructions,
 						compactionAbortController.signal,
 						{
 							promptOverride: this.#obfuscateTextForProvider(compactionPrep.hookPrompt),
@@ -9768,6 +10041,7 @@ export class AgentSession {
 			await this.sessionManager.flush();
 			this.#cancelOwnAsyncJobs();
 			await this.sessionManager.newSession(previousSessionFile ? { parentSession: previousSessionFile } : undefined);
+
 			this.#clearCheckpointRuntimeState();
 			// agent.reset() clears the core steering/follow-up queues. Preserve any queued
 			// steers/follow-ups (RPC/SDK steer()/followUp() issued during the handoff, or a
@@ -10062,6 +10336,48 @@ export class AgentSession {
 			}
 			return COMPACTION_CHECK_NONE;
 		}
+		// A context promotion can land while the failing call is already in
+		// flight (or on a run whose loop predates the switch): the overflow
+		// error then arrives stamped with the pre-promotion model while
+		// `this.model` is already the promoted target. The sameModel guard
+		// above deliberately ignores stale foreign-model errors, but this
+		// state is not stale — recover exactly like the promotion path:
+		// drop the dead turn and retry on the already-promoted model. Gated
+		// narrowly on "current model IS the failed model's promotion target
+		// with a strictly larger window" so genuinely stale errors from
+		// old user-switched models keep surfacing untouched.
+		if (
+			!sameModel &&
+			autoContinue &&
+			!errorIsFromBeforeCompaction &&
+			assistantMessage.stopReason === "error" &&
+			this.model &&
+			contextWindow > 0 &&
+			this.settings.getGroup("contextPromotion").enabled
+		) {
+			const failedModel = this.#modelRegistry.find(assistantMessage.provider, assistantMessage.model);
+			const failedWindow = failedModel?.contextWindow ?? 0;
+			const promotionTarget = failedModel
+				? this.#resolveContextPromotionConfiguredTarget(failedModel, this.#modelRegistry.getAvailable())
+				: undefined;
+			if (
+				failedModel &&
+				failedWindow > 0 &&
+				contextWindow > failedWindow &&
+				promotionTarget &&
+				modelsAreEqual(promotionTarget, this.model) &&
+				AIError.isContextOverflow(assistantMessage, failedWindow)
+			) {
+				this.#removeAssistantMessageFromActiveContext(assistantMessage);
+				await this.#dropPersistedAssistantTurn(assistantMessage);
+				logger.debug("Overflow on pre-promotion model; retrying on promoted model", {
+					failed: `${assistantMessage.provider}/${assistantMessage.model}`,
+					current: `${this.model.provider}/${this.model.id}`,
+				});
+				this.#scheduleAgentContinue({ delayMs: 100, generation });
+				return COMPACTION_CHECK_CONTINUATION;
+			}
+		}
 
 		// Case 3: Output-side incomplete — `response.incomplete` from OpenAI Responses
 		// (and Codex) maps to stopReason === "length". The model burned its
@@ -10208,6 +10524,133 @@ export class AgentSession {
 		return undefined;
 	}
 
+	#clearPendingRecoveredRetryErrors(): void {
+		this.#pendingRecoveredRetryErrors = [];
+	}
+
+	async #persistRetryLifecycleErrorMessage(message: AssistantMessage): Promise<void> {
+		await this.#waitForSessionMessagePersistence(message);
+		if (!isEmptyErrorTurn(message)) return;
+		if (this.#sessionMessageAlreadyPersisted(message)) return;
+		this.#appendSessionMessage(message);
+	}
+
+	#retryRecoveryKind(
+		id: number,
+		switchedCredential: boolean,
+		switchedModel: boolean,
+		delayMs: number,
+	): AssistantRetryRecoveryKind {
+		if (switchedCredential) return "credential";
+		if (switchedModel) return "model";
+		if (AIError.is(id, AIError.Flag.UsageLimit) && delayMs > 0) return "wait";
+		return "plain";
+	}
+
+	#retryRecoveryNote(recovery: AssistantRetryRecoveryKind, rateLimited: boolean): string {
+		const parts: string[] = [];
+		if (rateLimited) {
+			parts.push("rate-limited");
+		} else if (recovery === "plain") {
+			parts.push("error");
+		}
+		if (recovery === "credential") {
+			parts.push("switched account");
+		} else if (recovery === "model") {
+			parts.push("switched model");
+		} else if (recovery === "wait") {
+			parts.push("waited");
+		}
+		parts.push("retried");
+		return parts.join("; ");
+	}
+
+	async #recordPendingRecoveredRetryError(
+		message: AssistantMessage,
+		id: number,
+		options: { switchedCredential: boolean; switchedModel: boolean; delayMs: number },
+	): Promise<void> {
+		await this.#persistRetryLifecycleErrorMessage(message);
+		const persistenceKey = sessionMessagePersistenceKey(message);
+		if (!persistenceKey) return;
+		let branchEntry: SessionEntry | undefined;
+		for (const entry of this.sessionManager.getBranch().slice().reverse()) {
+			if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+			if (sessionMessagePersistenceKey(entry.message) !== persistenceKey) continue;
+			if (!sameMessageContent(entry.message, message) && !this.#isSameAssistantMessage(entry.message, message)) {
+				continue;
+			}
+			branchEntry = entry;
+			break;
+		}
+		if (!branchEntry) return;
+		if (this.#pendingRecoveredRetryErrors.some(error => error.entryId === branchEntry.id)) return;
+		const rateLimited = AIError.is(id, AIError.Flag.UsageLimit);
+		const recovery = this.#retryRecoveryKind(id, options.switchedCredential, options.switchedModel, options.delayMs);
+		const note = this.#retryRecoveryNote(recovery, rateLimited);
+		this.#pendingRecoveredRetryErrors.push({
+			entryId: branchEntry.id,
+			persistenceKey,
+			recovery,
+			attempt: this.#retryAttempt,
+			note,
+		});
+	}
+
+	async #markPendingRecoveredRetryErrors(supersedingMessage: AssistantMessage): Promise<RecoveredRetryError[]> {
+		if (this.#pendingRecoveredRetryErrors.length === 0) return [];
+		const branch = this.sessionManager.getBranch();
+		const branchById = new Map<string, SessionEntry>();
+		for (const entry of branch) {
+			branchById.set(entry.id, entry);
+		}
+		const recoveredAt = new Date().toISOString();
+		const supersededBy: AssistantRetryRecovery["supersededBy"] = {
+			timestamp: supersedingMessage.timestamp,
+			provider: supersedingMessage.provider,
+			model: supersedingMessage.model,
+		};
+		if (supersedingMessage.responseId) {
+			supersededBy.responseId = supersedingMessage.responseId;
+		}
+		const recoveredErrors: RecoveredRetryError[] = [];
+		for (const pending of this.#pendingRecoveredRetryErrors) {
+			let entry = branchById.get(pending.entryId);
+			if (entry?.type !== "message" || entry.message.role !== "assistant") {
+				entry = branch
+					.slice()
+					.reverse()
+					.find(
+						candidate =>
+							candidate.type === "message" &&
+							candidate.message.role === "assistant" &&
+							sessionMessagePersistenceKey(candidate.message) === pending.persistenceKey,
+					);
+			}
+			if (entry?.type !== "message" || entry.message.role !== "assistant") continue;
+			const retryRecovery: AssistantRetryRecovery = {
+				kind: "auto-retry",
+				status: "recovered",
+				attempt: pending.attempt,
+				recoveredAt,
+				recovery: pending.recovery,
+				note: pending.note,
+				supersededBy,
+			};
+			entry.message.retryRecovery = retryRecovery;
+			recoveredErrors.push({
+				entryId: entry.id,
+				persistenceKey: pending.persistenceKey,
+				note: retryRecovery.note,
+				retryRecovery,
+			});
+		}
+		if (recoveredErrors.length > 0) {
+			await this.sessionManager.rewriteEntries();
+		}
+		return recoveredErrors;
+	}
+
 	async #handleEmptyAssistantStop(assistantMessage: AssistantMessage): Promise<boolean> {
 		if (!this.#isEmptyAssistantStop(assistantMessage)) {
 			this.#emptyStopRetryCount = 0;
@@ -10228,6 +10671,7 @@ export class AgentSession {
 					attempt: this.#retryAttempt,
 					finalError: "Assistant returned empty stop after retry cap",
 				});
+				this.#clearPendingRecoveredRetryErrors();
 				this.#retryAttempt = 0;
 			}
 			this.#resolveRetry();
@@ -10415,7 +10859,7 @@ export class AgentSession {
 	}
 
 	#restoreFailedAssistantTurn(assistantMessage: AssistantMessage): void {
-		this.sessionManager.appendMessage(assistantMessage);
+		if (!isEmptyErrorTurn(assistantMessage)) this.sessionManager.appendMessage(assistantMessage);
 		const lastMessage = this.agent.state.messages.at(-1);
 		if (
 			lastMessage?.role === "assistant" &&
@@ -10518,6 +10962,7 @@ export class AgentSession {
 			});
 			this.sessionManager.branchWithSummary(null, report, { startedAt: checkpointState.startedAt });
 		}
+
 		const rewoundAt = new Date().toISOString();
 		const details = { report, startedAt: checkpointState.startedAt, rewoundAt };
 		this.sessionManager.appendCustomMessageEntry(
@@ -10548,41 +10993,72 @@ export class AgentSession {
 		this.#checkpointState = undefined;
 		this.#pendingRewindReport = undefined;
 	}
-	async #enforcePlanModeToolDecision(): Promise<void> {
+	#isPlanDecisionTool(name: string): boolean {
+		return PLAN_DECISION_TOOLS.has(name);
+	}
+
+	async #enforcePlanModeDecisionAtSettle(): Promise<boolean> {
 		if (!this.#planModeState?.enabled) {
-			return;
+			return false;
 		}
 		const assistantMessage = this.#findLastAssistantMessage();
 		if (!assistantMessage) {
-			return;
+			return false;
 		}
 		if (assistantMessage.stopReason === "error" || assistantMessage.stopReason === "aborted") {
-			return;
+			return false;
 		}
 
-		const calledRequiredTool = assistantMessage.content.some(
-			content => content.type === "toolCall" && (content.name === "ask" || content.name === "resolve"),
+		const calledDecisionTool = assistantMessage.content.some(
+			content => content.type === "toolCall" && this.#isPlanDecisionTool(content.name),
 		);
-		if (calledRequiredTool) {
-			return;
+		if (calledDecisionTool) {
+			this.#planModeReminderCount = 0;
+			this.#planModeReminderAwaitingProgress = false;
+			return false;
+		}
+
+		const hasToolCall = assistantMessage.content.some(content => content.type === "toolCall");
+		if (hasToolCall) {
+			return false;
+		}
+		if (this.#planModeReminderAwaitingProgress) {
+			return false;
+		}
+		if (this.#planModeReminderCount >= PLAN_MODE_REMINDER_MAX) {
+			logger.debug("Plan mode convergence: reminder cap reached; yielding to user");
+			return false;
 		}
 		const hasRequiredTools = this.#toolRegistry.has("ask") && this.#toolRegistry.has("resolve");
 		if (!hasRequiredTools) {
 			logger.warn("Plan mode enforcement skipped because ask/resolve tools are unavailable", {
 				activeToolNames: this.agent.state.tools.map(tool => tool.name),
 			});
-			return;
+			return false;
 		}
 
+		this.#planModeReminderCount++;
+		this.#planModeReminderAwaitingProgress = true;
+		this.#toolChoiceQueue.pushOnce("required", { label: "plan-mode-decision" });
 		const reminder = prompt.render(planModeToolDecisionReminderPrompt, {
 			askToolName: "ask",
 		});
+		const reminderMessage: Message = {
+			role: "developer",
+			content: [{ type: "text", text: reminder }],
+			attribution: "agent",
+			timestamp: Date.now(),
+		};
 
-		await this.prompt(reminder, {
-			synthetic: true,
-			expandPromptTemplates: false,
-			toolChoice: "required",
+		this.agent.appendMessage(reminderMessage);
+		this.sessionManager.appendMessage(reminderMessage);
+		this.#scheduleAgentContinue({
+			generation: this.#promptGeneration,
+			// If the continuation never runs (new prompt, dispose, compaction,
+			// handoff), the forced choice must not leak onto an unrelated turn.
+			onSkip: () => this.#toolChoiceQueue.removeByLabel("plan-mode-decision"),
 		});
+		return true;
 	}
 
 	/**
@@ -10731,6 +11207,13 @@ export class AgentSession {
 			return false;
 		}
 
+		// Plan mode owns convergence via #enforcePlanModeDecisionAtSettle (remind →
+		// cap → yield). Todo reminders must not re-wake a turn the cap intends to
+		// yield to the user. The label is already consumed above, so no leak.
+		if (this.#planModeState?.enabled) {
+			return false;
+		}
+
 		// Suppress within a self-continuation chain: if the agent's last turn was driven by a
 		// prior reminder (and the agent took no tool-level action since), do not re-ping.
 		// The agent has already acknowledged; further escalation just wastes context and
@@ -10778,6 +11261,18 @@ export class AgentSession {
 		if (incomplete.length === 0) {
 			this.#todoReminderCount = 0;
 			this.#todoReminderAwaitingProgress = false;
+			return false;
+		}
+
+		// Background async jobs (bash/task) owned by this agent re-wake the loop
+		// when they complete: the result delivery enqueues an async-result
+		// follow-up that continues the run, and todos are re-evaluated at that
+		// settle. A stop with such a job in flight is a scheduling pause, not
+		// abandonment — stay silent instead of nagging.
+		if (this.#hasPendingAsyncWake()) {
+			logger.debug("Todo completion: async jobs in flight will re-wake the loop; skipping reminder", {
+				incomplete: incomplete.length,
+			});
 			return false;
 		}
 
@@ -11960,7 +12455,7 @@ export class AgentSession {
 			// + a summary message carrying the imaged archive at FRAME_TOKEN_ESTIMATE
 			// per frame; #computeSnapcompactMaxFrames sizes the frame cap from the
 			// live window so we don't run snapcompact just to overflow every threshold
-			// tick. Any local blocker (non-ASCII transcript, kept-history too large,
+			// tick. Any local blocker (unsupported snapcompact glyphs, kept-history too large,
 			// post-render overflow) downgrades auto maintenance to a context-full LLM
 			// summary instead of wedging the session (#3659) — auto runs the default
 			// strategy on the user's behalf, so a fallback that lets the session keep
@@ -11982,11 +12477,11 @@ export class AgentSession {
 				const renderScan = snapcompact.scanRenderability(probeText, { shape });
 				if (!renderScan.isSafe) {
 					const percent = (renderScan.unrenderableRatio * 100).toFixed(1);
-					logger.warn("Snapcompact disabled: high non-ASCII rate detected", {
+					logger.warn("Snapcompact disabled: unsupported characters for selected snapcompact font", {
 						model: this.model?.id,
 						unrenderableRatio: renderScan.unrenderableRatio,
 					});
-					snapcompactBlocker = `snapcompact disabled: high non-ASCII rate detected (${percent}%); using context-full auto-compaction instead.`;
+					snapcompactBlocker = `snapcompact disabled: unsupported characters for selected snapcompact font (${percent}%); using context-full auto-compaction instead.`;
 				} else {
 					const maxFrames = this.#computeSnapcompactMaxFrames(preparation, compactionSettings);
 					if (maxFrames < 1) {
@@ -13030,6 +13525,7 @@ export class AgentSession {
 		}
 
 		if (this.#retryAttempt > retrySettings.maxRetries) {
+			await this.#persistRetryLifecycleErrorMessage(message);
 			// Max retries exceeded, emit final failure and reset
 			await this.#emitSessionEvent({
 				type: "auto_retry_end",
@@ -13037,6 +13533,7 @@ export class AgentSession {
 				attempt: this.#retryAttempt - 1,
 				finalError: message.errorMessage,
 			});
+			this.#clearPendingRecoveredRetryErrors();
 			this.#retryAttempt = 0;
 			this.#resolveRetry(); // Resolve so waitForRetry() completes
 			return false;
@@ -13148,6 +13645,7 @@ export class AgentSession {
 		// can act on it.
 		const maxDelayMs = retrySettings.maxDelayMs;
 		if (maxDelayMs > 0 && delayMs > maxDelayMs && !switchedCredential && !switchedModel) {
+			await this.#persistRetryLifecycleErrorMessage(message);
 			const attempt = this.#retryAttempt;
 			this.#retryAttempt = 0;
 			await this.#emitSessionEvent({
@@ -13156,9 +13654,12 @@ export class AgentSession {
 				attempt,
 				finalError: `Provider requested ${delayMs}ms wait, exceeds retry.maxDelayMs (${maxDelayMs}ms). Original error: ${errorMessage}`,
 			});
+			this.#clearPendingRecoveredRetryErrors();
 			this.#resolveRetry();
 			return false;
 		}
+
+		await this.#recordPendingRecoveredRetryError(message, id, { switchedCredential, switchedModel, delayMs });
 
 		await this.#emitSessionEvent({
 			type: "auto_retry_start",
@@ -13197,6 +13698,7 @@ export class AgentSession {
 				attempt,
 				finalError: "Retry cancelled",
 			});
+			this.#clearPendingRecoveredRetryErrors();
 			this.#resolveRetry();
 			return false;
 		}
@@ -13676,24 +14178,32 @@ export class AgentSession {
 	 *
 	 * - mid-turn → queued on the aside channel and folded in at the next step
 	 *   boundary (non-interrupting, like async-result deliveries) → "injected";
+	 * - idle in plan mode → appended into context without waking an autonomous
+	 *   turn (convergence stays user-driven) → "injected";
 	 * - idle → starts a real turn with the message so the recipient wakes
 	 *   → "woken".
 	 *
 	 * Never blocks on the recipient's turn: the wake turn is fire-and-forget.
 	 *
-	 * When the sender expects a reply (`send await:true`) and this session is
-	 * mid-turn with async execution disabled, the next step boundary may be
-	 * gated on the sender's own batch finishing (blocking task spawns), so a
-	 * real reply turn can never happen in time. In that case an ephemeral
-	 * side-channel auto-reply is generated from the current context (the old
-	 * `respondAsBackground` path) and sent back over the bus on this agent's
-	 * behalf.
+	 * When the sender expects a reply (`send await:true`) and this session
+	 * cannot produce a real reply turn in time — mid-turn with async execution
+	 * disabled (the next step boundary may be gated on the sender's own batch
+	 * finishing), or idle in plan mode (wake turns are suppressed) — an
+	 * ephemeral side-channel auto-reply is generated from the current context
+	 * (the old `respondAsBackground` path) and sent back over the bus on this
+	 * agent's behalf.
 	 */
 	async deliverIrcMessage(msg: IrcMessage, opts?: { expectsReply?: boolean }): Promise<"injected" | "woken"> {
 		if (this.#isDisposed) {
 			throw new Error("Recipient session is disposed.");
 		}
-		const autoReply = (opts?.expectsReply ?? false) && this.isStreaming && !this.settings.get("async.enabled");
+		// Auto-reply eligibility: the sender is blocked on an answer and this
+		// session cannot produce a real reply turn in time — either mid-turn with
+		// async execution disabled (no step boundary until the sender's own batch
+		// ends), or idle in plan mode (autonomous wake turns are suppressed).
+		const planModeIdle = !this.isStreaming && this.#planModeState?.enabled === true;
+		const autoReply =
+			(opts?.expectsReply ?? false) && ((this.isStreaming && !this.settings.get("async.enabled")) || planModeIdle);
 		const record: CustomMessage = {
 			role: "custom",
 			customType: "irc:incoming",
@@ -13723,6 +14233,19 @@ export class AgentSession {
 			} else {
 				this.#pendingIrcInterrupts.push(record);
 			}
+			if (autoReply) void this.#runIrcAutoReply(msg);
+			return "injected";
+		}
+		// Plan mode: record into context but do not wake an autonomous turn.
+		if (this.#planModeState?.enabled) {
+			this.agent.appendMessage(record);
+			this.sessionManager.appendCustomMessageEntry(
+				record.customType,
+				record.content,
+				record.display,
+				record.details,
+				record.attribution ?? "agent",
+			);
 			if (autoReply) void this.#runIrcAutoReply(msg);
 			return "injected";
 		}
@@ -13848,9 +14371,17 @@ export class AgentSession {
 				continue;
 			}
 			if (event.type === "done") {
+				// A well-formed provider "done" event carries `content: AssistantContentBlock[]`,
+				// but a proxy/wrapper (custom extension providers, gateway-wrapped OAuth streams,
+				// see #4323) can hand back a message whose `content` was dropped or replaced with
+				// `undefined`. Downstream `.content.filter` at the sanitize step below would then
+				// crash the recap turn with `TypeError: undefined is not an object (evaluating
+				// 'H.content.filter')`. Normalize to `[]` so the recap surfaces an empty reply
+				// instead of turning a malformed side-channel response into a session-mute crash.
+				const rawContent = Array.isArray(event.message.content) ? event.message.content : [];
 				assistantMessage = this.#obfuscator?.hasSecrets()
-					? { ...event.message, content: deobfuscateAssistantContent(this.#obfuscator, event.message.content) }
-					: event.message;
+					? { ...event.message, content: deobfuscateAssistantContent(this.#obfuscator, rawContent) }
+					: { ...event.message, content: rawContent };
 				break;
 			}
 			if (event.type === "error") {
@@ -13884,7 +14415,7 @@ export class AgentSession {
 	#buildEphemeralSnapshot(promptText: string): AgentMessage[] {
 		const messages = [...this.messages];
 		const streaming = this.agent.state.streamMessage;
-		if (streaming && streaming.role === "assistant") {
+		if (streaming && streaming.role === "assistant" && Array.isArray(streaming.content)) {
 			const preservedBlocks: AssistantMessage["content"] = [];
 			// Preserve thinking blocks: DeepSeek-class encoders replay them as
 			// `reasoning_content` and reject the request (HTTP 400) when the field
@@ -14353,6 +14884,7 @@ export class AgentSession {
 		this.#cancelOwnAsyncJobs();
 
 		this.sessionManager.createBranchedSession(leafId);
+
 		this.#rehydrateCheckpointRewindState();
 		this.sessionManager.appendMessage({
 			role: "user",
@@ -14536,6 +15068,7 @@ export class AgentSession {
 		if (summaryText) {
 			// Create summary at target position (can be null for root)
 			const summaryId = this.sessionManager.branchWithSummary(newLeafId, summaryText, summaryDetails, fromExtension);
+
 			summaryEntry = this.sessionManager.getEntry(summaryId) as BranchSummaryEntry;
 		} else if (newLeafId === null) {
 			// No summary, navigating to root - reset leaf
@@ -14620,6 +15153,7 @@ export class AgentSession {
 		let totalCacheRead = 0;
 		let totalReasoning = 0;
 		let totalCacheWrite = 0;
+		let totalTokens = 0;
 		let totalCost = 0;
 		let totalPremiumRequests = 0;
 
@@ -14640,6 +15174,7 @@ export class AgentSession {
 				totalReasoning += assistantMsg.usage.reasoningTokens ?? 0;
 				totalCacheRead += assistantMsg.usage.cacheRead;
 				totalCacheWrite += assistantMsg.usage.cacheWrite;
+				totalTokens += assistantMsg.usage.totalTokens;
 				totalPremiumRequests += assistantMsg.usage.premiumRequests ?? 0;
 				totalCost += assistantMsg.usage.cost.total;
 			}
@@ -14652,6 +15187,7 @@ export class AgentSession {
 					totalReasoning += usage.reasoningTokens ?? 0;
 					totalCacheRead += usage.cacheRead;
 					totalCacheWrite += usage.cacheWrite;
+					totalTokens += usage.totalTokens;
 					totalPremiumRequests += usage.premiumRequests ?? 0;
 					totalCost += usage.cost.total;
 				}
@@ -14672,7 +15208,7 @@ export class AgentSession {
 				reasoning: totalReasoning,
 				cacheRead: totalCacheRead,
 				cacheWrite: totalCacheWrite,
-				total: totalInput + totalOutput + totalCacheRead + totalCacheWrite,
+				total: totalTokens,
 			},
 			cost: totalCost,
 			premiumRequests: totalPremiumRequests,
@@ -15187,6 +15723,7 @@ export class AgentSession {
 	setAdvisorEnabled(enabled: boolean): boolean {
 		this.#advisorEnabled = enabled;
 		if (enabled) {
+			if (this.#advisors.length > 0 && !this.#advisorRuntimeMatchesCurrentConfig()) this.#stopAdvisorRuntime();
 			return this.#buildAdvisorRuntime(true);
 		}
 		this.#stopAdvisorRuntime();
@@ -15317,6 +15854,7 @@ export class AgentSession {
 		let reasoning = 0;
 		let cacheRead = 0;
 		let cacheWrite = 0;
+		let totalTokens = 0;
 		let cost = 0;
 		let user = 0;
 		let assistant = 0;
@@ -15330,6 +15868,7 @@ export class AgentSession {
 				reasoning += assistantMsg.usage.reasoningTokens ?? 0;
 				cacheRead += assistantMsg.usage.cacheRead;
 				cacheWrite += assistantMsg.usage.cacheWrite;
+				totalTokens += assistantMsg.usage.totalTokens;
 				cost += assistantMsg.usage.cost.total;
 			}
 		}
@@ -15338,7 +15877,7 @@ export class AgentSession {
 			model,
 			contextWindow: model.contextWindow ?? 0,
 			contextTokens,
-			tokens: { input, output, reasoning, cacheRead, cacheWrite, total: input + output + cacheRead + cacheWrite },
+			tokens: { input, output, reasoning, cacheRead, cacheWrite, total: totalTokens },
 			cost,
 			messages: { user, assistant, total: messages.length },
 		};

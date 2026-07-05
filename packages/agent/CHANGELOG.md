@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [16.3.7] - 2026-07-05
+
+### Fixed
+
+- Fixed an issue where provider orchestration tokens were incorrectly included in context token calculations, which could trigger premature context auto-compaction and promotion.
+
+## [16.3.3] - 2026-07-02
+
+### Changed
+
+- Enabled dynamic model resolution to support seamless mid-run model switching.
+
+### Fixed
+
+- Fixed an issue in the Cursor agent where assistant messages containing native tool calls could duplicate text blocks on replay.
+- Fixed a bug where Cursor agent exec-channel tools (such as bash, write, and delete) were executed a second time after server-side execution.
+- Improved error handling for tool calls interrupted by upstream provider stream errors, distinguishing transport/provider failures from local tool execution failures in the CLI, events, and messages.
+
 ## [16.3.0] - 2026-07-02
 
 ### Added

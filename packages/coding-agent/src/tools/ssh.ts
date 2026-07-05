@@ -261,23 +261,33 @@ function formatSshCommandLines(command: string, uiTheme: Theme): string[] {
 }
 
 export const sshToolRenderer = {
-	renderCall(args: SshRenderArgs, _options: RenderResultOptions, uiTheme: Theme): Component {
+	animatedPendingPreview: true,
+	renderCall(args: SshRenderArgs, options: RenderResultOptions, uiTheme: Theme): Component {
 		const host = args.host || "…";
 		const command = args.command ?? "";
-		const header = renderStatusLine({ icon: "pending", title: "SSH", description: `[${host}]` }, uiTheme);
 		const cmdLines = formatSshCommandLines(command, uiTheme);
 		const outputBlock = new CachedOutputBlock();
 		return markFramedBlockComponent({
-			render: (width: number): readonly string[] =>
-				outputBlock.render(
+			render: (width: number): readonly string[] => {
+				const header = renderStatusLine(
+					{
+						icon: options.spinnerFrame !== undefined ? "running" : "pending",
+						spinnerFrame: options.spinnerFrame,
+						title: "SSH",
+						description: `[${host}]`,
+					},
+					uiTheme,
+				);
+				return outputBlock.render(
 					{
 						header,
-						state: "pending",
-						sections: [{ lines: capPreviewLines(cmdLines, uiTheme, { expanded: _options.expanded }) }],
+						state: options.spinnerFrame !== undefined ? "running" : "pending",
+						sections: [{ lines: capPreviewLines(cmdLines, uiTheme, { expanded: options.expanded }) }],
 						width,
 					},
 					uiTheme,
-				),
+				);
+			},
 			invalidate: () => {
 				outputBlock.invalidate();
 			},
@@ -376,20 +386,12 @@ export const sshToolRenderer = {
 		});
 	},
 	mergeCallAndResult: true,
-	// Pending call preview can re-anchor wholesale when the final result inserts
-	// the `Output` section, so no pending SSH rows may commit to native
-	// scrollback — even when expanded. The expanded pending shape was previously
-	// allowed to commit, which left two visible shapes in native scrollback once
-	// the result settled: a stale `⏳ SSH: [host]` header above the final frame,
-	// and the pending `╰──╯` footer reused in-place as the new `├── Output ──┤`
-	// separator with a fresh footer pushed below it.
-	provisionalPendingPreview: true,
-	// Partial-result chrome (pending icon and frame state) differs from the
-	// final SSH glyph/state, so the block stays commit-unstable while
-	// `options.isPartial` holds. Without this, a long-running SSH command's
-	// stable pending header would be promoted by the stable-prefix ratchet and
-	// committed to native scrollback, then the final render's SSH glyph would
-	// land below and strand a duplicate pending header above the final frame
-	// ([#3177](https://github.com/can1357/oh-my-pi/issues/3177)).
-	provisionalPartialResult: true,
+	// Streamed args can initially render the SSH placeholder (`⏳ SSH: […]` /
+	// `$ …`), then the first partial result inserts the `Output` section and
+	// re-anchors the frame. Force a full repaint at that seam so placeholder rows
+	// do not survive in viewport/native scrollback.
+	forceFirstResultViewportRepaint: true,
+	// The provisional pending-result frame settles into the final `⇄ SSH: [host]`
+	// frame, so clear/replay the viewport at that topology flip too.
+	forceResultViewportRepaintOnSettle: true,
 };

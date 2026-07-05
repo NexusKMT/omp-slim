@@ -1726,6 +1726,26 @@ export const cherryPick = Object.assign(
 		async abort(cwd: string, signal?: AbortSignal): Promise<void> {
 			await runEffect(cwd, ["cherry-pick", "--abort"], { signal });
 		},
+		/**
+		 * Skip the current commit of an in-progress cherry-pick sequence and
+		 * continue with the rest of the range. Use after {@link isEmptyError}
+		 * reports the current attempt collapsed to a no-op — the alternative,
+		 * `--abort`, throws away every remaining commit in the range.
+		 */
+		async skip(cwd: string, signal?: AbortSignal): Promise<void> {
+			await runEffect(cwd, ["cherry-pick", "--skip"], { signal });
+		},
+		/**
+		 * True when a cherry-pick failure was caused by the current commit
+		 * being empty against HEAD — either redundant with an already-applied
+		 * change, or auto-resolved to HEAD by a 3-way merge. Callers should
+		 * `--skip` in this case to advance the sequencer rather than aborting
+		 * the whole range: an empty commit is not a merge conflict, and any
+		 * later commits in the range still deserve to land.
+		 */
+		isEmptyError(err: unknown): boolean {
+			return err instanceof GitCommandError && /the previous cherry-pick is now empty/i.test(err.result.stderr);
+		},
 	},
 );
 
@@ -1917,6 +1937,14 @@ export const ls = {
 	/** List untracked files (excludes ignored). */
 	async untracked(cwd: string, signal?: AbortSignal): Promise<string[]> {
 		return ls.files(cwd, { others: true, excludeStandard: true, signal });
+	},
+
+	/** List paths present in a ref, optionally filtered to specific paths. */
+	async tree(cwd: string, ref: string, files: readonly string[] = [], signal?: AbortSignal): Promise<string[]> {
+		const args = ["ls-tree", "--name-only", "-r", "-z", ref];
+		if (files.length > 0) args.push("--", ...files);
+		const raw = await runText(cwd, args, { readOnly: true, signal });
+		return raw.split("\0").filter(entry => entry.length > 0);
 	},
 
 	/** List submodule paths (recursive). */

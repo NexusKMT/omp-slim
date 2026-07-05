@@ -321,6 +321,50 @@ describe("pickDefaultAvailableModel", () => {
 		expect(result?.provider).toBe("anthropic");
 		expect(result?.id).toBe(DEFAULT_MODEL_PER_PROVIDER.anthropic);
 	});
+
+	test("uses the Zhipu Coding Plan login-validated model before newer z.ai defaults", () => {
+		const zhipuGlm51 = buildModel({
+			id: "glm-5.1",
+			name: "GLM-5.1",
+			api: "openai-completions",
+			provider: "zhipu-coding-plan",
+			baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 200000,
+			maxTokens: 131072,
+		});
+		const zhipuGlm52 = buildModel({
+			id: "glm-5.2",
+			name: "GLM-5.2",
+			api: "openai-completions",
+			provider: "zhipu-coding-plan",
+			baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1000000,
+			maxTokens: 131072,
+		});
+		const zaiGlm52 = buildModel({
+			id: "glm-5.2",
+			name: "GLM-5.2",
+			api: "anthropic-messages",
+			provider: "zai",
+			baseUrl: "https://api.z.ai/api/anthropic",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1000000,
+			maxTokens: 131072,
+		});
+
+		const result = pickDefaultAvailableModel([zhipuGlm51, zhipuGlm52, zaiGlm52]);
+
+		expect(result?.provider).toBe("zhipu-coding-plan");
+		expect(result?.id).toBe("glm-5.1");
+	});
 });
 
 describe("parseModelPattern", () => {
@@ -684,6 +728,21 @@ describe("resolveAgentModelPatterns", () => {
 		});
 
 		expect(result).toEqual(["anthropic/claude-sonnet-4-5:high"]);
+	});
+
+	test("accepts YAML list values for configured task role patterns", () => {
+		const settings = Settings.isolated({
+			modelRoles: {
+				task: ["anthropic/claude-sonnet-4-6", "zai/glm-5.2:high"],
+			},
+		});
+
+		const result = resolveAgentModelPatterns({
+			agentModel: "pi/task",
+			settings,
+		});
+
+		expect(result).toEqual(["anthropic/claude-sonnet-4-6", "zai/glm-5.2:high"]);
 	});
 
 	test("uses default for unconfigured smol, slow, and designer agent roles before priority defaults", () => {
