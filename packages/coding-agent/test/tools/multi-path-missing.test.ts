@@ -106,13 +106,6 @@ describe("multi-path tools tolerate missing entries", () => {
 			path: "nope/**/*.ts; also-nope/**/*.ts",
 		});
 
-		// The semicolon splitter only recognizes a joined string as multiple
-		// paths once at least one segment resolves on disk (see
-		// `splitDelimitedPathEntry` in path-utils.ts); when every segment is
-		// missing it falls back to treating the whole string as one literal
-		// glob, whose base path truncates at the first wildcard. The error
-		// therefore only names the first pattern, but the call still fails
-		// loud instead of silently returning zero results.
-		await expect(promise).rejects.toThrow(/Path not found.*nope/s);
+		await expect(promise).rejects.toThrow(/Path not found.*nope.*also-nope/s);
 	});
 });
