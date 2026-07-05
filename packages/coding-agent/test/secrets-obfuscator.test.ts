@@ -2,7 +2,7 @@
  * Tests for secrets regex parsing, compilation, and obfuscation.
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -27,7 +27,7 @@ import {
 	stripPendingSecretPlaceholderSuffix,
 } from "@oh-my-pi/pi-coding-agent/secrets/obfuscator";
 import { compileSecretRegex } from "@oh-my-pi/pi-coding-agent/secrets/regex";
-import { getActiveProfile, getConfigRootDir, setProfile } from "@oh-my-pi/pi-utils/dirs";
+import { getActiveProfile, getAgentDir, setProfile } from "@oh-my-pi/pi-utils/dirs";
 import { type } from "arktype";
 
 describe("compileSecretRegex", () => {
@@ -222,66 +222,67 @@ describe("SecretObfuscator regex behavior", () => {
 });
 
 describe("getSecretPlaceholderKey", () => {
-	async function withTempConfigRoot(run: () => Promise<void>): Promise<void> {
+	// Isolate under a fresh $HOME (never the real homedir) so mkdir/writeFile
+	// below cannot hit EACCES in a sandboxed CI/review environment where the
+	// real home is read-only, and so the default-arg path under test resolves
+	// through the SAME `getAgentDir()` the runtime uses (see getSecretPlaceholderKey's
+	// docstring) rather than the unrelated `getConfigRootDir()`.
+	async function withTempAgentHome(run: () => Promise<void>): Promise<void> {
 		const originalProfile = getActiveProfile();
-		const originalConfigDir = process.env.PI_CONFIG_DIR;
-		const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
-		const configDirName = `.omp-secret-key-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-		const configRoot = path.join(os.homedir(), configDirName);
+		const originalHome = process.env.HOME;
+		const tempHomeDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-secret-key-"));
+		process.env.HOME = tempHomeDir;
+		const homedirSpy = spyOn(os, "homedir").mockReturnValue(tempHomeDir);
 		try {
-			process.env.PI_CONFIG_DIR = configDirName;
 			setProfile(undefined);
 			await run();
 		} finally {
-			setProfile(undefined);
-			if (originalConfigDir === undefined) {
-				delete process.env.PI_CONFIG_DIR;
-			} else {
-				process.env.PI_CONFIG_DIR = originalConfigDir;
-			}
-			if (originalAgentDir === undefined) {
-				delete process.env.PI_CODING_AGENT_DIR;
-			} else {
-				process.env.PI_CODING_AGENT_DIR = originalAgentDir;
-			}
 			setProfile(originalProfile);
-			await fs.rm(configRoot, { recursive: true, force: true });
+			homedirSpy.mockRestore();
+			if (originalHome === undefined) {
+				delete process.env.HOME;
+			} else {
+				process.env.HOME = originalHome;
+			}
+			await fs.rm(tempHomeDir, { recursive: true, force: true });
 		}
 	}
 
-	it("caches placeholder keys per profile config root", async () => {
-		await withTempConfigRoot(async () => {
+	it("caches placeholder keys per profile agent dir", async () => {
+		await withTempAgentHome(async () => {
 			const alphaKey = "A".repeat(43);
 			const betaKey = "B".repeat(43);
 			setProfile("alpha");
-			await fs.mkdir(getConfigRootDir(), { recursive: true });
-			await fs.writeFile(path.join(getConfigRootDir(), "secret-placeholder.key"), alphaKey);
+			await fs.mkdir(getAgentDir(), { recursive: true });
+			await fs.writeFile(path.join(getAgentDir(), "secret-placeholder.key"), alphaKey);
 			expect(await getSecretPlaceholderKey()).toBe(alphaKey);
 
 			setProfile("beta");
-			await fs.mkdir(getConfigRootDir(), { recursive: true });
-			await fs.writeFile(path.join(getConfigRootDir(), "secret-placeholder.key"), betaKey);
+			await fs.mkdir(getAgentDir(), { recursive: true });
+			await fs.writeFile(path.join(getAgentDir(), "secret-placeholder.key"), betaKey);
 			expect(await getSecretPlaceholderKey()).toBe(betaKey);
 		});
 	});
 
 	it("rejects truncated placeholder key files", async () => {
-		await withTempConfigRoot(async () => {
+		await withTempAgentHome(async () => {
 			setProfile("truncated");
-			await fs.mkdir(getConfigRootDir(), { recursive: true });
-			await fs.writeFile(path.join(getConfigRootDir(), "secret-placeholder.key"), "abc123");
+			await fs.mkdir(getAgentDir(), { recursive: true });
+			await fs.writeFile(path.join(getAgentDir(), "secret-placeholder.key"), "abc123");
 
 			await expect(getSecretPlaceholderKey()).rejects.toThrow("secret placeholder key");
 		});
 	});
 
 	it("retries empty existing placeholder key files without creating a new one", async () => {
-		await withTempConfigRoot(async () => {
+		await withTempAgentHome(async () => {
 			setProfile("race");
-			await fs.mkdir(getConfigRootDir(), { recursive: true });
-			const keyPath = path.join(getConfigRootDir(), "secret-placeholder.key");
+			await fs.mkdir(getAgentDir(), { recursive: true });
+			const keyPath = path.join(getAgentDir(), "secret-placeholder.key");
 			await fs.writeFile(keyPath, "");
 			const eventualKey = "C".repeat(43);
+			// Real delay is intentional: this exercises readPlaceholderKeyFile's retry
+			// loop against an actual concurrent filesystem write, not a mockable timer.
 			const writer = Bun.sleep(25).then(() => fs.writeFile(keyPath, eventualKey));
 
 			await expect(getExistingSecretPlaceholderKey()).resolves.toBe(eventualKey);
@@ -290,10 +291,10 @@ describe("getSecretPlaceholderKey", () => {
 	});
 
 	it("treats an invalid existing placeholder key as absent for redaction", async () => {
-		await withTempConfigRoot(async () => {
+		await withTempAgentHome(async () => {
 			setProfile("invalid-existing");
-			await fs.mkdir(getConfigRootDir(), { recursive: true });
-			await fs.writeFile(path.join(getConfigRootDir(), "secret-placeholder.key"), "abc123");
+			await fs.mkdir(getAgentDir(), { recursive: true });
+			await fs.writeFile(path.join(getAgentDir(), "secret-placeholder.key"), "abc123");
 
 			// Replace-only/no-secret sessions load the key only to redact it from tool
 			// output; a corrupt key must not block startup, so the existing-key probe
@@ -1412,18 +1413,34 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obf.obfuscate(out)).toBe(out);
 	});
 
-	it("keeps the sentinel only when no same-length value avoids the regex", () => {
+	it("never emits a <=2 char match unchanged when no same-length value avoids the regex", () => {
 		// A match-everything regex has no nonmatching same-length redaction, so the
-		// search exhausts and the sentinel is kept as the sole fixed point. Such a
-		// config redacts every character and is pathological by construction.
+		// search exhausts. The fallback must still differ from a <=2 char value that
+		// happens to equal `#generateReplacement`'s own `Z`/`ZZ` sentinel (else the
+		// raw secret would ship unchanged) while staying a fixed point under
+		// re-obfuscation. Such a config redacts every character and is pathological
+		// by construction.
 		for (const content of [".", "[\\s\\S]"]) {
 			const obf = new SecretObfuscator([{ type: "regex", mode: "replace", content }], "Q".repeat(43));
 
 			const out = obf.obfuscate("Z");
 
-			expect(out).toBe("Z");
+			expect(out).not.toBe("Z");
+			expect(out).toHaveLength(1);
 			expect(obf.obfuscate(out)).toBe(out);
 		}
+	});
+
+	it("never emits a 2-char match unchanged when no same-length value avoids the regex", () => {
+		// Same pathology as above, sized to hit the `ZZ` half of `#generateReplacement`'s
+		// sentinel rather than the `Z` half.
+		const obf = new SecretObfuscator([{ type: "regex", mode: "replace", content: "[\\s\\S]{2}" }], "Q".repeat(43));
+
+		const out = obf.obfuscate("ZZ");
+
+		expect(out).not.toBe("ZZ");
+		expect(out).toHaveLength(2);
+		expect(obf.obfuscate(out)).toBe(out);
 	});
 
 	it("resolves a three-character match-everything regex without the removed exhaustive sweep", () => {

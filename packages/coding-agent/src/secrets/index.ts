@@ -1,7 +1,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getConfigRootDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { getAgentDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { type SecretEntry, sanitizeSecretFriendlyName } from "./obfuscator";
 import { compileSecretRegex } from "./regex";
@@ -10,12 +10,16 @@ const PLACEHOLDER_KEY_RE = /^[A-Za-z0-9_-]{43}$/;
 const cachedPlaceholderKeys = new Map<string, string>();
 
 /**
- * Per-install secret key for the placeholder digest. Persisted under the config
- * root and never sent to a provider, so model-visible placeholders cannot be
- * reversed by dictionary-hashing candidate secrets. Stable across sessions so
- * persisted transcripts deobfuscate consistently.
+ * Per-install secret key for the placeholder digest. Persisted under the agent
+ * config directory and never sent to a provider, so model-visible placeholders
+ * cannot be reversed by dictionary-hashing candidate secrets. Stable across
+ * sessions so persisted transcripts deobfuscate consistently. Defaults to
+ * `getAgentDir()` — the same directory `createAgentSession()` passes as
+ * `agentDir` — so a caller relying on the default reads/writes the identical
+ * key file live sessions use, per `~/.omp/agent/secret-placeholder.key` in
+ * docs/secrets.md.
  */
-export async function getSecretPlaceholderKey(keyDir: string = getConfigRootDir()): Promise<string> {
+export async function getSecretPlaceholderKey(keyDir: string = getAgentDir()): Promise<string> {
 	const keyPath = path.join(keyDir, "secret-placeholder.key");
 	const cached = cachedPlaceholderKeys.get(keyPath);
 	if (cached !== undefined) return cached;
@@ -48,9 +52,7 @@ export async function getSecretPlaceholderKey(keyDir: string = getConfigRootDir(
 }
 
 /** Return an existing placeholder key for redaction without creating a new key file. */
-export async function getExistingSecretPlaceholderKey(
-	keyDir: string = getConfigRootDir(),
-): Promise<string | undefined> {
+export async function getExistingSecretPlaceholderKey(keyDir: string = getAgentDir()): Promise<string | undefined> {
 	const keyPath = path.join(keyDir, "secret-placeholder.key");
 	const cached = cachedPlaceholderKeys.get(keyPath);
 	if (cached !== undefined) return cached;

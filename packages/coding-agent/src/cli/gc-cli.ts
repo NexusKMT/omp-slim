@@ -351,7 +351,7 @@ async function listActiveSessions(sessionsRoot: string): Promise<SessionInfo[]> 
 		if (!entry.isDirectory()) continue;
 		sessions.push(...(await listSessionsReadOnly(path.join(sessionsRoot, entry.name), storage)));
 	}
-	sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime() || b.path.localeCompare(a.path));
+	sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
 	return sessions;
 }
 
@@ -361,7 +361,7 @@ async function listNestedSessionsReadOnly(artifactsRoot: string): Promise<Sessio
 	const storage = new FileSessionStorage();
 	const sessions: SessionInfo[] = [];
 	for (const dir of dirs) sessions.push(...(await listSessionsReadOnly(dir, storage)));
-	sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime() || b.path.localeCompare(a.path));
+	sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
 	return sessions;
 }
 

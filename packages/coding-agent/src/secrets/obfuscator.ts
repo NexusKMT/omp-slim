@@ -913,11 +913,31 @@ export class SecretObfuscator {
 	 * the next pass, and because it is derived from the bytes being replaced, rehashing
 	 * those bytes (the marker itself, not the original secret) produces a DIFFERENT
 	 * value — churning the redaction, and the provider prompt-cache prefix it anchors,
-	 * across every re-obfuscation. Fall back instead to the same key+length-only marker
-	 * `#generateReplacement` uses for chunk redactions: it depends on nothing but
-	 * `this.#key` and the value's length, so re-matching and re-redacting it reproduces
-	 * the IDENTICAL marker every time, which the pathological case requires since no
-	 * value can escape the regex at all.
+	 * across every re-obfuscation. Fall back instead to a marker that depends only
+	 * on `this.#key` and the value's length, not its content, so re-matching and
+	 * re-redacting it reproduces the IDENTICAL marker every time, which the
+	 * pathological case requires since no value can escape the regex at all. This
+	 * cannot reuse `#generateReplacement`'s own <=2-char branch directly: that
+	 * branch is the fixed `Z`/`ZZ` sentinel, which is itself a value this fallback
+	 * could be asked to replace (an input of exactly `Z` or `ZZ`), and returning it
+	 * unchanged would ship the raw secret to the provider — the exact failure plain
+	 * replace-mode secrets avoid via `ensureDistinctReplacement`. Neither
+	 * `ensureDistinctReplacement`'s single-char flip NOR a length-changing marker is
+	 * usable here: a pathological regex re-matches ANY same-length value, including
+	 * a flipped one, so a value-dependent flip oscillates between the two forever;
+	 * and a regex with no quantifier (matching one input character per match, e.g.
+	 * `.`) re-scans a LONGER marker as several independent same-regex matches on the
+	 * next pass, re-expanding each one — unbounded growth, not a fixed point. Use a
+	 * SAME-LENGTH keyed run instead of the sentinel for <=2 chars: content-independent
+	 * (so it is trivially its own fixed point once emitted) and no longer a public,
+	 * install-independent constant, closing the specific guessable collision
+	 * (`Z`/`ZZ`) the sentinel had. A same-length, content-independent marker cannot
+	 * mathematically rule out equaling some pathological input by construction (the
+	 * marker is itself a same-length string a match-everything regex also matches),
+	 * but that residual case now requires guessing this install's private key rather
+	 * than a universal constant — the same class of accepted risk
+	 * `generateDeterministicReplacement`'s hash collision already carries for longer
+	 * values.
 	 */
 	#generateRegexReplacement(value: string, regex: RegExp, context: RegexMatchContext): string {
 		let replacement = generateDeterministicReplacement(value);
@@ -928,7 +948,12 @@ export class SecretObfuscator {
 		// secret. Search for a candidate the regex does not re-match in place.
 		if (replacement === value || regexRematchesInContext(replacement, regex, context)) {
 			const stable = findNonMatchingReplacement(value, regex, context);
-			replacement = stable ?? this.#generateReplacement(value);
+			// See docstring above: same-length keyed run for <=2 chars (never the
+			// `Z`/`ZZ` sentinel, which a <=2 char value could itself be), otherwise
+			// the ordinary keyed-run fallback #generateReplacement already uses.
+			replacement =
+				stable ??
+				(value.length <= 2 ? buildKeyedReplacementRun(this.#key, value.length) : this.#generateReplacement(value));
 			regex.lastIndex = 0;
 		}
 		this.#generatedReplaceChunks.add(replacement);
