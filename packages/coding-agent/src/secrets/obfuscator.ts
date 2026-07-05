@@ -1087,7 +1087,9 @@ export class SecretObfuscator {
 		// it; the secret still gets a bare (unprefixed) placeholder.
 		const requestedFriendlyName = friendlyName ? sanitizeSecretFriendlyName(friendlyName) : undefined;
 		const sanitizedFriendlyName =
-			requestedFriendlyName !== undefined && !this.#friendlyNameCollidesWithSecret(requestedFriendlyName)
+			requestedFriendlyName !== undefined &&
+			friendlyName !== undefined &&
+			!this.#friendlyNameCollidesWithSecret(requestedFriendlyName, friendlyName)
 				? requestedFriendlyName
 				: undefined;
 		const preferredBase = this.#resolvePreferredPlaceholderBase(baseKey);
@@ -1158,21 +1160,27 @@ export class SecretObfuscator {
 	// verbatim, model-visible prefix on every placeholder minted for THIS
 	// secret, baked in via an exact `#deobfuscateMap` entry rather than the
 	// alias fallback — so it needs its own check independent of the scan-skip
-	// alias guard in `#isGeneratedPlaceholder`. Reject when the label contains a
-	// sanitized (alnum-only, uppercased) form of a configured plain secret's
-	// value — the same normalization already applied to the label itself, so a
+	// alias guard in `#isGeneratedPlaceholder`. Reject when the SANITIZED label
+	// contains a sanitized (alnum-only, uppercased) form of a configured plain
+	// secret's value — comparing both sides through the same normalization so a
 	// lowercase or punctuated secret cannot smuggle itself through case or
-	// separator noise — or when any configured regex pattern matches the label
-	// — either means that text is meant to be redacted, not stamped unredacted
-	// onto every use of this secret.
-	#friendlyNameCollidesWithSecret(name: string): boolean {
+	// separator noise — or when any configured regex pattern matches the RAW
+	// (pre-sanitization) label. The regex check uses the raw label, not the
+	// sanitized one: a regex describes what a real secret occurrence looks like
+	// verbatim in text, so the question is whether this label's own literal
+	// characters are a value the regex would have redacted, not whether some
+	// unrelated case/punctuation-stripped rendering of it happens to match a
+	// pattern that never described that rendering. Either check means the text
+	// is meant to be redacted, not stamped unredacted onto every use of this
+	// secret.
+	#friendlyNameCollidesWithSecret(sanitizedName: string, rawName: string): boolean {
 		for (const secretValue of this.#configuredSecretValues) {
 			const sanitizedSecret = secretValue.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-			if (sanitizedSecret.length > 0 && name.includes(sanitizedSecret)) return true;
+			if (sanitizedSecret.length > 0 && sanitizedName.includes(sanitizedSecret)) return true;
 		}
 		for (const entry of this.#regexEntries) {
 			entry.regex.lastIndex = 0;
-			const matches = entry.regex.test(name);
+			const matches = entry.regex.test(rawName);
 			entry.regex.lastIndex = 0;
 			if (matches) return true;
 		}
