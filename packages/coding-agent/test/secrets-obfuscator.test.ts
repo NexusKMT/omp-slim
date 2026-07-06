@@ -407,6 +407,27 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obfuscator.deobfuscate(obfuscated)).toBe(input);
 	});
 
+	it("rejects a regex entry friendlyName that is the normalized form of a value the regex discovers", () => {
+		// `#friendlyNameCollidesWithSecret` also used to test the RAW friendlyName
+		// directly against the regex entry's own pattern. That misses labels which
+		// are already normalized (uppercased, separators stripped): "TOKABC123"
+		// has no lowercase letters or underscore, so it can never match the
+		// case-sensitive, punctuated pattern `tok_[a-z0-9]+` directly - even though
+		// "TOKABC123" is exactly the normalized rendering of "tok_abc123", a value
+		// that pattern actually discovers. Nothing compared the label against the
+		// literal match either, so this friendlyName slipped through and got
+		// stamped into the placeholder. The check now also compares the sanitized
+		// label against the sanitized value of the current secret being minted,
+		// catching this on the secret's very first mint.
+		const obfuscator = new SecretObfuscator([{ type: "regex", content: "tok_[a-z0-9]+", friendlyName: "TOKABC123" }]);
+		const input = "use tok_abc123 now";
+		const obfuscated = obfuscator.obfuscate(input);
+
+		expect(obfuscated).not.toMatch(/TOKABC123_/);
+		expect(obfuscated).toMatch(/^use #[A-Z0-9]+:L# now$/);
+		expect(obfuscator.deobfuscate(obfuscated)).toBe(input);
+	});
+
 	it("does not replace plain secrets inside generated friendly placeholders", () => {
 		const longSecret = "long-secret-token";
 		const prefixSecret = "TOKENABC";

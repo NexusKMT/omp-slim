@@ -1127,7 +1127,7 @@ export class SecretObfuscator {
 		const sanitizedFriendlyName =
 			requestedFriendlyName !== undefined &&
 			friendlyName !== undefined &&
-			!this.#friendlyNameCollidesWithSecret(sanitizeForCollisionCheck(friendlyName), friendlyName)
+			!this.#friendlyNameCollidesWithSecret(sanitizeForCollisionCheck(friendlyName), friendlyName, secret)
 				? requestedFriendlyName
 				: undefined;
 		const preferredBase = this.#resolvePreferredPlaceholderBase(baseKey);
@@ -1198,24 +1198,26 @@ export class SecretObfuscator {
 	// verbatim, model-visible prefix on every placeholder minted for THIS
 	// secret, baked in via an exact `#deobfuscateMap` entry rather than the
 	// alias fallback — so it needs its own check independent of the scan-skip
-	// alias guard in `#isGeneratedPlaceholder`. Reject when the SANITIZED label
-	// contains a sanitized (alnum-only, uppercased) form of a configured plain
-	// secret's value — comparing both sides through the same normalization so a
-	// lowercase or punctuated secret cannot smuggle itself through case or
-	// separator noise — or when any configured regex pattern matches the RAW
-	// (pre-sanitization) label. The regex check uses the raw label, not the
-	// sanitized one: a regex describes what a real secret occurrence looks like
-	// verbatim in text, so the question is whether this label's own literal
-	// characters are a value the regex would have redacted, not whether some
-	// unrelated case/punctuation-stripped rendering of it happens to match a
-	// pattern that never described that rendering. Either check means the text
-	// is meant to be redacted, not stamped unredacted onto every use of this
-	// secret.
-	#friendlyNameCollidesWithSecret(sanitizedName: string, rawName: string): boolean {
-		for (const secretValue of this.#configuredSecretValues) {
-			const sanitizedSecret = sanitizeForCollisionCheck(secretValue);
-			if (sanitizedSecret.length > 0 && sanitizedName.includes(sanitizedSecret)) return true;
-		}
+	// alias guard in `#isGeneratedPlaceholder`. Reuses `#prefixIsSecretShaped`
+	// for the sanitized-vs-sanitized comparisons (configured plain secrets,
+	// every regex-discovered secret this instance has ever minted a
+	// placeholder for) and the sanitized-label-vs-regex-pattern check, then
+	// adds two label-specific checks `#prefixIsSecretShaped` cannot make: the
+	// CURRENT secret being minted right now — which, on its first-ever mint,
+	// is not yet in `#prefixIsSecretShaped`'s previously-discovered set, since
+	// that set is only populated AFTER this call returns — normalized the
+	// same way (catches, e.g., `friendlyName: "TOKABC123"` for a regex secret
+	// whose literal match is `tok_abc123`, which the sanitized-name-vs-pattern
+	// check misses when the pattern is case-sensitive/punctuated); and the RAW
+	// (pre-sanitization) label against every configured regex pattern (catches
+	// `friendlyName: "tok_abc123"` literally, which the SANITIZED label
+	// `"TOKABC123"` could never match against that same case-sensitive
+	// pattern). Any of these means the text is meant to be redacted, not
+	// stamped unredacted onto every use of this secret.
+	#friendlyNameCollidesWithSecret(sanitizedName: string, rawName: string, secret: string): boolean {
+		if (this.#prefixIsSecretShaped(sanitizedName)) return true;
+		const sanitizedSecretValue = sanitizeForCollisionCheck(secret);
+		if (sanitizedSecretValue.length > 0 && sanitizedName.includes(sanitizedSecretValue)) return true;
 		for (const entry of this.#regexEntries) {
 			entry.regex.lastIndex = 0;
 			const matches = entry.regex.test(rawName);
