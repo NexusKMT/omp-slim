@@ -347,6 +347,31 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(distinctObfuscator.deobfuscate(distinctObfuscated)).toBe(distinctSecret);
 	});
 
+	it("rejects a friendlyName equal to its own secret even when the secret's sanitized form exceeds the 32-char display cap", () => {
+		// `#friendlyNameCollidesWithSecret` used to compare the friendly name
+		// against each secret's sanitized value using the ALREADY-CAPPED,
+		// display-length friendly name (sliced to `MAX_FRIENDLY_NAME_LEN` = 32
+		// chars by `sanitizeSecretFriendlyName`) rather than the full,
+		// un-truncated sanitized form. For a secret whose sanitized (alnum-only,
+		// uppercased) form is longer than 32 characters, the 32-char-capped
+		// label being checked could never `.includes()` the longer sanitized
+		// secret, so a friendlyName set to the secret's own value slipped past
+		// the collision guard entirely — and the secret's first 32 sanitized
+		// characters were accepted and baked into the placeholder as a
+		// visible prefix (e.g. "#GITHUBPATABCDEFGHIJKLMNOPQRSTUV_<hash>:L#"),
+		// leaking part of the secret. The check now runs against the full,
+		// un-truncated sanitized label before the 32-char cap is applied for
+		// display, so secrets longer than the cap are still fully compared
+		// and caught.
+		const longSecret = "github_pat_abcdefghijklmnopqrstuvwxyz0123456789";
+		const obfuscator = new SecretObfuscator([{ type: "plain", content: longSecret, friendlyName: longSecret }]);
+		const obfuscated = obfuscator.obfuscate(longSecret);
+
+		expect(obfuscated).not.toMatch(/GITHUBPAT/);
+		expect(obfuscated).toMatch(/^#[A-Z0-9]+:L#$/);
+		expect(obfuscator.deobfuscate(obfuscated)).toBe(longSecret);
+	});
+
 	it("uses regex entry friendly names for discovered matches", () => {
 		const secret = "tok_abc123";
 		const obfuscator = new SecretObfuscator([{ type: "regex", content: "tok_[a-z0-9]+", friendlyName: "API Key" }]);

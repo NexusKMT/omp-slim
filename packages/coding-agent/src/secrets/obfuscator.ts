@@ -1116,12 +1116,18 @@ export class SecretObfuscator {
 		// whole token as already-generated on an EXACT match, before the
 		// alias-fallback prefix check above ever runs, so the embedded secret
 		// would never be scanned. Drop the label for this mint rather than risk
-		// it; the secret still gets a bare (unprefixed) placeholder.
+		// it; the secret still gets a bare (unprefixed) placeholder. The collision
+		// check runs against the FULL normalized label — `sanitizeForCollisionCheck`,
+		// not yet capped at `MAX_FRIENDLY_NAME_LEN` — so a secret longer than the
+		// 32-char display cap (or one whose sanitized form exceeds it) still gets
+		// caught: a truncated `requestedFriendlyName` can never contain a longer
+		// secret's full sanitized form, so checking the truncated label would let
+		// the secret's first 32 (post-cap) characters leak as an accepted prefix.
 		const requestedFriendlyName = friendlyName ? sanitizeSecretFriendlyName(friendlyName) : undefined;
 		const sanitizedFriendlyName =
 			requestedFriendlyName !== undefined &&
 			friendlyName !== undefined &&
-			!this.#friendlyNameCollidesWithSecret(requestedFriendlyName, friendlyName)
+			!this.#friendlyNameCollidesWithSecret(sanitizeForCollisionCheck(friendlyName), friendlyName)
 				? requestedFriendlyName
 				: undefined;
 		const preferredBase = this.#resolvePreferredPlaceholderBase(baseKey);
