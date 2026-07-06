@@ -36,6 +36,24 @@
 - Fixed the friendly-name self-collision check comparing an already 32-char-capped, sanitized label against a configured secret's full sanitized value: a secret longer than the cap (or a label set to a long secret's value) could never have its full sanitized form contained in the truncated label, so the collision went undetected and the secret's first 32 sanitized characters were accepted and stamped into the placeholder. The check now runs against the full, uncapped sanitized label; the 32-char cap is applied only afterward, for display.
 - Fixed a regex entry's `friendlyName` collision check testing the sanitized label only against the RAW spelling of what the regex would match, so a label set to the NORMALIZED (already uppercased, separator-stripped) rendering of a value the regex redacts — e.g. `friendlyName: "TOKABC123"` for `content: "tok_[a-z0-9]+"`, which discovers `tok_abc123` — slipped past a case-sensitive/punctuated pattern that can never match its own normalized form. The check now also compares the sanitized label directly against the sanitized value of the secret actually being minted (reusing `#prefixIsSecretShaped`), catching this on the secret's very first mint, before it's recorded as a previously-discovered value.
 
+## [16.3.9] - 2026-07-06
+
+### Added
+
+- Added a `--file` flag to the `say` command to read input text directly from files.
+- Enabled streaming text synthesis in the `say` command for gapless, long-form audio generation.
+- Added voice selection validation to the `say` command.
+
+### Changed
+
+- Improved the `say` command to display the segment count and total duration upon completion.
+
+### Fixed
+
+- Fixed an issue where local llama.cpp vision models remained text-only after a model refresh, ensuring they are correctly recognized as image-capable when configured as the default or vision role.
+- Fixed `omp commit` split plans aborting when lock files (such as `bun.lockb`) were staged alongside their manifests by correctly pairing lock files with their corresponding commit groups and properly handling binary files during split execution.
+- Fixed skill loading to ensure that disabling a higher-priority provider does not drop same-named skills from enabled lower-priority providers.
+
 ## [16.3.8] - 2026-07-05
 
 ### Fixed
