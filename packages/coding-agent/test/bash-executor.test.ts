@@ -3,7 +3,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { resetSettingsForTest, Settings, type ShellMinimizerSettings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { buildMinimizerOptions, executeBash } from "@oh-my-pi/pi-coding-agent/exec/bash-executor";
+import {
+	buildMinimizerOptions,
+	executeBash,
+	isPersistentShellCdCommand,
+} from "@oh-my-pi/pi-coding-agent/exec/bash-executor";
 import { DEFAULT_MAX_BYTES } from "@oh-my-pi/pi-coding-agent/session/streaming-output";
 import * as shellSnapshot from "@oh-my-pi/pi-coding-agent/utils/shell-snapshot";
 import type { Shell, ShellRunResult } from "@oh-my-pi/pi-natives";
@@ -126,6 +130,34 @@ describe("executeBash", () => {
 			legacyFilters: true,
 		});
 	});
+
+	it.each([
+		["cd", true],
+		[" cd child ", true],
+		["cd\tchild", true],
+		["cd -", true],
+		["cd --", true],
+		["cd -- -P", true],
+		['cd "#note"', true],
+		['cd "two words"', true],
+		["cd '~/literal'", true],
+		["cd +1", false],
+		['cd "+1"', false],
+		["cd -- -1", false],
+		["cd -- '+2'", false],
+		["cd\npwd", false],
+		["cd\rpwd", false],
+		["cd -P", false],
+		["cd -L /tmp", false],
+		["cd #note", false],
+		["cd child && pwd", false],
+		["cd two words", false],
+		['cd ""', false],
+		["cd ~other", false],
+		["echo cd child", false],
+	] as const)("classifies persistent-shell cd routing for %j", (command, expected) => {
+		expect(isPersistentShellCdCommand(command)).toBe(expected);
+	});
 	it("returns non-zero exit codes without cancellation", async () => {
 		const result = await executeBash("exit 7", { cwd: tempDir, timeout: 5000 });
 		expect(result.exitCode).toBe(7);
@@ -222,6 +254,88 @@ exit 64
 			expect(result.exitCode).toBe(0);
 			expect(result.output.trim()).toBe("shell-ok");
 			expect(fs.readFileSync(marker, "utf8")).toContain("-l -c");
+		} finally {
+			removeSyncWithRetries(shellDir);
+		}
+	});
+
+	it("persists cd, bare cd, and cd - when shortcut commands use a non-bash user shell", async () => {
+		if (process.platform === "win32") return;
+
+		const shellDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-cd-shellpath-"));
+		const marker = path.join(shellDir, "fake-shell-ran");
+		const fakeShell = path.join(shellDir, "fake-shell");
+		const childDir = path.join(tempDir, "child");
+		fs.mkdirSync(childDir);
+		fs.writeFileSync(
+			fakeShell,
+			`#!/bin/sh
+printf '%s\\n' "$*" > ${shellQuote(marker)}
+while [ "$#" -gt 0 ]; do
+	if [ "$1" = "-c" ]; then
+		shift
+		exec /bin/sh -c "$1"
+	fi
+	shift
+done
+exit 64
+`,
+		);
+		fs.chmodSync(fakeShell, 0o755);
+		Settings.instance.set("shellPath", fakeShell);
+		vi.spyOn(Settings.prototype, "getShellConfig").mockReturnValue({
+			shell: fakeShell,
+			args: ["-l", "-c"],
+			env: {
+				PATH: Bun.env.PATH ?? "",
+				HOME: tempDir,
+			},
+			prefix: undefined,
+		});
+
+		try {
+			const sessionKey = `persistent-cd-${Date.now()}`;
+			const moved = await executeBash("cd child", {
+				cwd: tempDir,
+				timeout: 5000,
+				sessionKey,
+				useUserShell: true,
+			});
+
+			expect(moved.exitCode).toBe(0);
+			expect(moved.workingDir).toBe(childDir);
+			expect(fs.existsSync(marker)).toBe(false);
+
+			const home = await executeBash("cd", {
+				cwd: childDir,
+				timeout: 5000,
+				sessionKey,
+				useUserShell: true,
+			});
+
+			expect(home.exitCode).toBe(0);
+			expect(home.workingDir).toBe(tempDir);
+			expect(fs.existsSync(marker)).toBe(false);
+
+			const returned = await executeBash("cd -", {
+				cwd: tempDir,
+				timeout: 5000,
+				sessionKey,
+				useUserShell: true,
+			});
+
+			expect(returned.exitCode).toBe(0);
+			expect(returned.workingDir).toBe(childDir);
+			expect(fs.existsSync(marker)).toBe(false);
+
+			const pwd = await executeBash("pwd", {
+				cwd: childDir,
+				timeout: 5000,
+				sessionKey,
+				useUserShell: true,
+			});
+			expect(pwd.output.trim()).toBe(childDir);
+			expect(fs.existsSync(marker)).toBe(true);
 		} finally {
 			removeSyncWithRetries(shellDir);
 		}

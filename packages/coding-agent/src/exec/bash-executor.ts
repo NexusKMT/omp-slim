@@ -150,6 +150,53 @@ function isBashShell(shell: string): boolean {
 	return basename.includes("bash");
 }
 
+const UNSUPPORTED_UNQUOTED_CD_CHARS = "\\$`;&|<>(){}*?[]!#\"'";
+
+function hasUnsupportedUnquotedCdSyntax(value: string): boolean {
+	for (const char of value) {
+		if (/\s/.test(char) || UNSUPPORTED_UNQUOTED_CD_CHARS.includes(char)) return true;
+	}
+	return false;
+}
+
+export function isPersistentShellCdCommand(command: string): boolean {
+	if (/[\r\n]/.test(command)) return false;
+
+	const trimmed = command.trim();
+	if (trimmed === "cd") return true;
+	if (!trimmed.startsWith("cd") || !/[ \t]/.test(trimmed[2] ?? "")) return false;
+
+	let rest = trimmed.slice(2).trim();
+	if (rest === "" || rest === "--") return true;
+
+	let hasOptionTerminator = false;
+	if (/^--[ \t]/.test(rest)) {
+		hasOptionTerminator = true;
+		rest = rest.slice(2).trimStart();
+	}
+	if (rest === "") return true;
+
+	const quote = rest[0];
+	let target: string;
+	let quoted = false;
+	if (quote === `"` || quote === "'") {
+		if (rest.length < 2 || rest[rest.length - 1] !== quote) return false;
+		target = rest.slice(1, -1);
+		if (target.includes(quote)) return false;
+		if (quote === `"` && /[\\$`\r\n]/.test(target)) return false;
+		quoted = true;
+	} else {
+		if (hasUnsupportedUnquotedCdSyntax(rest)) return false;
+		target = rest;
+	}
+
+	if (target === "") return false;
+	if (/^[+-]\d+$/.test(target)) return false;
+	if (!hasOptionTerminator && target.startsWith("-") && target !== "-") return false;
+	if (!quoted && target.startsWith("~") && target !== "~" && !target.startsWith("~/")) return false;
+	return true;
+}
+
 function needsInteractiveShellArg(shell: string): boolean {
 	const basename = shellBasename(shell);
 	return basename.includes("zsh");
@@ -224,8 +271,9 @@ export async function executeBash(command: string, options?: BashExecutorOptions
 
 	// Apply command prefix if configured
 	const prefixedCommand = prefix ? `${prefix} ${command}` : command;
+	const runCdInPersistentShell = options?.useUserShell === true && !prefix && isPersistentShellCdCommand(command);
 	const finalCommand =
-		options?.useUserShell === true && !bashShell
+		options?.useUserShell === true && !bashShell && !runCdInPersistentShell
 			? buildUserShellCommand(shell, args, prefixedCommand)
 			: prefixedCommand;
 
