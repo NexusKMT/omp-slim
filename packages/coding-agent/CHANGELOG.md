@@ -36,6 +36,10 @@
 - Fixed the friendly-name self-collision check comparing an already 32-char-capped, sanitized label against a configured secret's full sanitized value: a secret longer than the cap (or a label set to a long secret's value) could never have its full sanitized form contained in the truncated label, so the collision went undetected and the secret's first 32 sanitized characters were accepted and stamped into the placeholder. The check now runs against the full, uncapped sanitized label; the 32-char cap is applied only afterward, for display.
 - Fixed a regex entry's `friendlyName` collision check testing the sanitized label only against the RAW spelling of what the regex would match, so a label set to the NORMALIZED (already uppercased, separator-stripped) rendering of a value the regex redacts — e.g. `friendlyName: "TOKABC123"` for `content: "tok_[a-z0-9]+"`, which discovers `tok_abc123` — slipped past a case-sensitive/punctuated pattern that can never match its own normalized form. The check now also compares the sanitized label directly against the sanitized value of the secret actually being minted (reusing `#prefixIsSecretShaped`), catching this on the secret's very first mint, before it's recorded as a previously-discovered value.
 
+### Changed
+
+- Memoized non-message token totals (system prompt, tool schemas, skills) so the per-turn compaction and context-threshold paths recompute them at most once per input change instead of on every call. `getContextBreakdown` and `#estimateStoredContextTokens` previously re-tokenized the system prompt and every tool's wire schema (per-tool `JSON.stringify`) several times per turn over inputs that change at most once per turn.
+
 ## [16.3.11] - 2026-07-06
 
 ### Changed
