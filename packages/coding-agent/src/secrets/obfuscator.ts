@@ -708,6 +708,9 @@ export class SecretObfuscator {
 		for (const [secret, replacement] of [...this.#replaceMappings].sort((a, b) => b[0].length - a[0].length)) {
 			({ text: result, origin } = this.#replaceOutsidePlaceholdersTracked(result, origin, secret, replacement, "I"));
 		}
+		for (const secretValue of this.#collectRegexSecretValues(result)) {
+			this.#currentRegexSecretValues.add(secretValue);
+		}
 
 		// 2. Process obfuscate-mode plain secrets
 		for (const [secret, index] of [...this.#plainMappings].sort((a, b) => b[0].length - a[0].length)) {
