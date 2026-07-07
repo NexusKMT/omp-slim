@@ -479,6 +479,36 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obfuscator.deobfuscate(obfuscated)).toBe("use tok_abc123 and zeta_secret1 now");
 	});
 
+	it("omits an unrelated regex entry's friendly label that normalizes to a regex-protected value produced by a regex replace mapping", () => {
+		// Regression: same upfront-collision-set gap as the plain-replace case
+		// above, but the value-producing entry is itself a REGEX replace mapping
+		// (`X` -> `tok_abc123` via `{ type: "regex", mode: "replace" }`) rather
+		// than a plain replace secret. The regex-entries loop processes entries
+		// in order and must merge newly discovered regex-protected values into
+		// the friendly-label collision set after EACH replace-mode regex entry
+		// runs, so the unrelated `zeta_[a-z0-9]+` entry's friendlyName
+		// "TOKABC123" must still be rejected even though `tok_abc123` never
+		// appeared in the raw input — it only exists because the regex replace
+		// entry ahead of it produced it.
+		const obfuscator = new SecretObfuscator([
+			{ type: "regex", mode: "replace", content: "X", replacement: "tok_abc123" },
+			{ type: "regex", content: "zeta_[a-z0-9]+", friendlyName: "TOKABC123" },
+			{ type: "regex", content: "tok_[a-z0-9]+" },
+		]);
+		const input = "use X and zeta_secret1 now";
+		const obfuscated = obfuscator.obfuscate(input);
+
+		expect(obfuscated).not.toContain("TOKABC123_");
+		expect(obfuscated).not.toContain("zeta_secret1");
+		expect(obfuscated).not.toContain("tok_abc123");
+		expect(obfuscated).toMatch(/^use #[A-Z0-9]{4,}(?::[ULCM])?# and #[A-Z0-9]{4,}(?::[ULCM])?# now$/);
+		// Deobfuscation restores the two obfuscate-mode (regex-discovered)
+		// placeholders to the values that were actually matched — the
+		// regex-replace-produced `tok_abc123` and the raw `zeta_secret1` — but
+		// the one-way regex replace mapping never restores the original `X`.
+		expect(obfuscator.deobfuscate(obfuscated)).toBe("use tok_abc123 and zeta_secret1 now");
+	});
+
 	it("does not replace plain secrets inside generated friendly placeholders", () => {
 		const longSecret = "long-secret-token";
 		const prefixSecret = "TOKENABC";

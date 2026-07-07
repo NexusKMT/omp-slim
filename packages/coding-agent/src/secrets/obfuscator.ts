@@ -857,6 +857,11 @@ export class SecretObfuscator {
 					origin = replaceRange(origin, match.start, match.end, "F".repeat(placeholder.length));
 				}
 			}
+			if (entry.mode === "replace") {
+				for (const secretValue of this.#collectRegexSecretValues(result)) {
+					this.#currentRegexSecretValues.add(secretValue);
+				}
+			}
 		}
 
 		this.#currentRegexSecretValues = new Set();
