@@ -428,6 +428,28 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obfuscator.deobfuscate(obfuscated)).toBe(input);
 	});
 
+	it("omits an unrelated regex entry's friendly label that normalizes to a value a later regex entry discovers in the same input", () => {
+		// Earlier coverage only caught a regex entry's friendlyName colliding with
+		// its own pattern/value. Regex placeholders are minted lazily in entries[]
+		// order, so an unrelated entry listed first could stamp a normalized form
+		// of a later regex match into its placeholder before that later entry
+		// discovered the raw value in the same input. The upfront input scan keeps
+		// labels from exposing any regex-protected value present in this pass,
+		// regardless of entry order.
+		const obfuscator = new SecretObfuscator([
+			{ type: "regex", content: "zeta_[a-z0-9]+", friendlyName: "TOKABC123" },
+			{ type: "regex", content: "tok_[a-z0-9]+" },
+		]);
+		const input = "use zeta_secret1 and tok_abc123 now";
+		const obfuscated = obfuscator.obfuscate(input);
+
+		expect(obfuscated).not.toContain("TOKABC123_");
+		expect(obfuscated).not.toContain("zeta_secret1");
+		expect(obfuscated).not.toContain("tok_abc123");
+		expect(obfuscated).toMatch(/^use #[A-Z0-9]{4,}(?::[ULCM])?# and #[A-Z0-9]{4,}(?::[ULCM])?# now$/);
+		expect(obfuscator.deobfuscate(obfuscated)).toBe(input);
+	});
+
 	it("does not replace plain secrets inside generated friendly placeholders", () => {
 		const longSecret = "long-secret-token";
 		const prefixSecret = "TOKENABC";

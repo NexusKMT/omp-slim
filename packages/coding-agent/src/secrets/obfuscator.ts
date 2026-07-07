@@ -589,6 +589,9 @@ export class SecretObfuscator {
 	 *  placeholder existed) and would survive verbatim in provider-visible text. */
 	#configuredSecretValues = new Set<string>();
 
+	/** Regex values seen in the current obfuscate input, used to keep friendly labels from exposing normalized matches that are discovered later in the same pass. */
+	#currentRegexSecretValues = new Set<string>();
+
 	/** Placeholder base-key (exact value for :M, case-folded otherwise) → base hash. */
 	#placeholderBaseByKey = new Map<string, string>();
 
@@ -689,6 +692,7 @@ export class SecretObfuscator {
 	/** Obfuscate all secrets in text. Bidirectional placeholders for obfuscate mode, one-way for replace. */
 	obfuscate(text: string): string {
 		if (!this.#hasAny) return text;
+		this.#currentRegexSecretValues = this.#collectRegexSecretValues(text);
 		let result = text;
 		// `origin` runs parallel to `result` (one tag char per result char): "I" for
 		// bytes carried from the INPUT (placeholders from a PRIOR obfuscate() call)
@@ -700,7 +704,6 @@ export class SecretObfuscator {
 		// Tracking by RANGE (not token value) keeps a fresh placeholder that happens
 		// to equal a prior one (same secret seen raw again) eligible for cross-match.
 		let origin = "I".repeat(text.length);
-
 		// 1. Process replace-mode plain secrets
 		for (const [secret, replacement] of [...this.#replaceMappings].sort((a, b) => b[0].length - a[0].length)) {
 			({ text: result, origin } = this.#replaceOutsidePlaceholdersTracked(result, origin, secret, replacement, "I"));
@@ -713,7 +716,7 @@ export class SecretObfuscator {
 				result,
 				origin,
 				secret,
-				mapping.placeholder,
+				this.#placeholderForCurrentInput(mapping.placeholder),
 				"F",
 			));
 		}
@@ -846,12 +849,14 @@ export class SecretObfuscator {
 						this.#generatedPlaceholders.add(placeholder);
 					}
 					const mapping = this.#obfuscateMappings.get(index)!;
-					result = replaceRange(result, match.start, match.end, mapping.placeholder);
-					origin = replaceRange(origin, match.start, match.end, "F".repeat(mapping.placeholder.length));
+					const placeholder = this.#placeholderForCurrentInput(mapping.placeholder);
+					result = replaceRange(result, match.start, match.end, placeholder);
+					origin = replaceRange(origin, match.start, match.end, "F".repeat(placeholder.length));
 				}
 			}
 		}
 
+		this.#currentRegexSecretValues = new Set();
 		return result;
 	}
 
@@ -1214,6 +1219,24 @@ export class SecretObfuscator {
 	// `"TOKABC123"` could never match against that same case-sensitive
 	// pattern). Any of these means the text is meant to be redacted, not
 	// stamped unredacted onto every use of this secret.
+	#collectRegexSecretValues(text: string): Set<string> {
+		const values = new Set<string>();
+		for (const entry of this.#regexEntries) {
+			entry.regex.lastIndex = 0;
+			for (;;) {
+				const match = entry.regex.exec(text);
+				if (match === null) break;
+				if (match[0].length === 0) {
+					entry.regex.lastIndex++;
+					continue;
+				}
+				values.add(match[0]);
+			}
+			entry.regex.lastIndex = 0;
+		}
+		return values;
+	}
+
 	#friendlyNameCollidesWithSecret(sanitizedName: string, rawName: string, secret: string): boolean {
 		if (this.#prefixIsSecretShaped(sanitizedName)) return true;
 		const sanitizedSecretValue = sanitizeForCollisionCheck(secret);
@@ -1225,6 +1248,14 @@ export class SecretObfuscator {
 			if (matches) return true;
 		}
 		return false;
+	}
+
+	#placeholderForCurrentInput(placeholder: string): string {
+		const unprefixed = placeholderWithoutFriendlyName(placeholder);
+		if (unprefixed === undefined) return placeholder;
+		const match = /^#([A-Z0-9]+)_/.exec(placeholder);
+		if (match === null || !this.#prefixIsSecretShaped(match[1]!)) return placeholder;
+		return unprefixed;
 	}
 
 	#registerDeobfuscationAlias(placeholder: string, secret: string, recursive: boolean): void {
@@ -1253,6 +1284,10 @@ export class SecretObfuscator {
 	// against a forged/attacker-chosen prefix.
 	#prefixIsSecretShaped(prefix: string): boolean {
 		for (const secretValue of this.#configuredSecretValues) {
+			const sanitizedSecret = sanitizeForCollisionCheck(secretValue);
+			if (sanitizedSecret.length > 0 && prefix.includes(sanitizedSecret)) return true;
+		}
+		for (const secretValue of this.#currentRegexSecretValues) {
 			const sanitizedSecret = sanitizeForCollisionCheck(secretValue);
 			if (sanitizedSecret.length > 0 && prefix.includes(sanitizedSecret)) return true;
 		}
@@ -1340,7 +1375,7 @@ export class SecretObfuscator {
 			this.#obfuscateMappings.set(index, { secret, placeholder });
 			this.#generatedPlaceholders.add(placeholder);
 		}
-		return this.#obfuscateMappings.get(index)!.placeholder;
+		return this.#placeholderForCurrentInput(this.#obfuscateMappings.get(index)!.placeholder);
 	}
 
 	#obfuscateOutsidePlaceholdersTracked(
