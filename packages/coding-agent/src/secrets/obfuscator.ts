@@ -699,9 +699,12 @@ export class SecretObfuscator {
 	}
 
 	/** Obfuscate all secrets in text. Bidirectional placeholders for obfuscate mode, one-way for replace. */
-	obfuscate(text: string): string {
+	obfuscate(text: string, sharedRegexSecretValues?: ReadonlySet<string>): string {
 		if (!this.#hasAny) return text;
-		this.#currentRegexSecretValues = this.#collectRegexSecretValues(text);
+		this.#currentRegexSecretValues = this.collectRegexSecretValuesForObfuscation(text);
+		for (const secretValue of sharedRegexSecretValues ?? []) {
+			this.#currentRegexSecretValues.add(secretValue);
+		}
 		let result = text;
 		// `origin` runs parallel to `result` (one tag char per result char): "I" for
 		// bytes carried from the INPUT (placeholders from a PRIOR obfuscate() call)
@@ -721,6 +724,9 @@ export class SecretObfuscator {
 			this.#currentRegexSecretValues.add(secretValue);
 		}
 		for (const secretValue of this.#collectRegexSecretValuesAfterRegexReplacements(result, origin)) {
+			this.#currentRegexSecretValues.add(secretValue);
+		}
+		for (const secretValue of sharedRegexSecretValues ?? []) {
 			this.#currentRegexSecretValues.add(secretValue);
 		}
 		({ text: result, origin } = this.#stripUnsafeFriendlyPrefixes(result, origin));
@@ -1292,6 +1298,22 @@ export class SecretObfuscator {
 				values.add(match[0]);
 			}
 			entry.regex.lastIndex = 0;
+		}
+		return values;
+	}
+
+	collectRegexSecretValuesForObfuscation(text: string): Set<string> {
+		const values = this.#collectRegexSecretValues(text);
+		let result = text;
+		let origin = "I".repeat(text.length);
+		for (const [secret, replacement] of [...this.#replaceMappings].sort((a, b) => b[0].length - a[0].length)) {
+			({ text: result, origin } = this.#replaceOutsidePlaceholdersTracked(result, origin, secret, replacement, "I"));
+		}
+		for (const secretValue of this.#collectRegexSecretValues(result)) {
+			values.add(secretValue);
+		}
+		for (const secretValue of this.#collectRegexSecretValuesAfterRegexReplacements(result, origin)) {
+			values.add(secretValue);
 		}
 		return values;
 	}
@@ -1936,11 +1958,12 @@ type UserFacingMessage = Extract<Message, { role: "user" | "developer" | "toolRe
 function obfuscateTextBlocks(
 	obfuscator: SecretObfuscator,
 	content: (TextContent | ImageContent)[],
+	sharedRegexSecretValues?: ReadonlySet<string>,
 ): (TextContent | ImageContent)[] {
 	let changed = false;
 	const result = content.map((block): TextContent | ImageContent => {
 		if (block.type !== "text") return block;
-		const text = obfuscator.obfuscate(block.text);
+		const text = obfuscator.obfuscate(block.text, sharedRegexSecretValues);
 		if (text === block.text) return block;
 		changed = true;
 		return { ...block, text };
@@ -1967,6 +1990,33 @@ function deobfuscateTextBlocks(
 	return changed ? result : content;
 }
 
+function collectMessageRegexSecretValues(obfuscator: SecretObfuscator, messages: Message[]): Set<string> {
+	const values = new Set<string>();
+	const addText = (text: string): void => {
+		for (const value of obfuscator.collectRegexSecretValuesForObfuscation(text)) {
+			values.add(value);
+		}
+	};
+	for (const message of messages) {
+		if (
+			message.role !== "user" &&
+			message.role !== "toolResult" &&
+			!(message.role === "developer" && message.attribution === "user")
+		) {
+			continue;
+		}
+		const target = message as UserFacingMessage;
+		if (typeof target.content === "string") {
+			addText(target.content);
+			continue;
+		}
+		for (const block of target.content) {
+			if (block.type === "text") addText(block.text);
+		}
+	}
+	return values;
+}
+
 /**
  * Redact secrets from outbound messages. Opt-in by origin: only user messages,
  * tool results, and user-authored developer messages (e.g. `@file` mentions)
@@ -1977,6 +2027,7 @@ function deobfuscateTextBlocks(
  */
 export function obfuscateMessages(obfuscator: SecretObfuscator, messages: Message[]): Message[] {
 	if (!obfuscator.hasSecrets()) return messages;
+	const sharedRegexSecretValues = collectMessageRegexSecretValues(obfuscator, messages);
 	let changed = false;
 	const result = messages.map((message): Message => {
 		if (
@@ -1988,12 +2039,12 @@ export function obfuscateMessages(obfuscator: SecretObfuscator, messages: Messag
 		}
 		const target = message as UserFacingMessage;
 		if (typeof target.content === "string") {
-			const content = obfuscator.obfuscate(target.content);
+			const content = obfuscator.obfuscate(target.content, sharedRegexSecretValues);
 			if (content === target.content) return message;
 			changed = true;
 			return { ...target, content } as Message;
 		}
-		const content = obfuscateTextBlocks(obfuscator, target.content);
+		const content = obfuscateTextBlocks(obfuscator, target.content, sharedRegexSecretValues);
 		if (content === target.content) return message;
 		changed = true;
 		return { ...target, content } as Message;

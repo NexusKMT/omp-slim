@@ -2996,6 +2996,45 @@ describe("SecretObfuscator cross-turn cache stability", () => {
 		const earlyTurnNPlus1 = JSON.stringify(obfuscateMessages(obfuscator, early));
 		expect(earlyTurnNPlus1).toEqual(earlyTurnN);
 	});
+
+	it("shares regex-protected values across the whole outbound batch so an earlier message's friendly prefix cannot leak a later message's secret", () => {
+		// Regression: obfuscateMessages precomputes `sharedRegexSecretValues` across
+		// ALL targeted message texts before obfuscating any single one. Without that
+		// precomputation, processing messages one by one would let an EARLIER message
+		// mint a friendly-prefixed placeholder for `OTHERSECRET` before the regex
+		// value it collides with (`tok_abc123`, sanitized to `TOKABC123`, matching the
+		// `friendlyName`) is even discovered in a LATER message — baking a normalized
+		// rendering of that later secret into provider-visible text as an "innocent"
+		// friendly label instead of stripping it to a bare placeholder.
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
+			{ type: "regex", content: "tok_[a-z0-9]+" },
+		]);
+		const messages: Message[] = [
+			{ role: "user", content: "first message carries OTHERSECRET", timestamp: 1 },
+			{ role: "user", content: "later message reveals tok_abc123", timestamp: 2 },
+		];
+
+		const obfuscated = obfuscateMessages(obfuscator, messages);
+		const serialized = JSON.stringify(obfuscated);
+
+		expect(serialized).not.toContain("OTHERSECRET");
+		expect(serialized).not.toContain("tok_abc123");
+		// The friendly prefix is itself a normalized rendering of the later-discovered
+		// regex value; sharing regex values across the batch up front must strip it
+		// down to a bare placeholder rather than bake it into message 1's output.
+		expect(serialized).not.toContain("TOKABC123_");
+
+		// Both originals still round-trip through deobfuscation of the serialized batch.
+		const restored = obfuscator.deobfuscate(serialized);
+		expect(restored).toContain("OTHERSECRET");
+		expect(restored).toContain("tok_abc123");
+
+		// Re-obfuscating the already-obfuscated batch is a fixed point: identical bytes,
+		// so re-running obfuscateMessages over a growing conversation never busts the
+		// provider prompt cache for messages already sent.
+		expect(JSON.stringify(obfuscateMessages(obfuscator, obfuscated))).toEqual(serialized);
+	});
 });
 
 describe("deobfuscateAgentMessages (display restore)", () => {
