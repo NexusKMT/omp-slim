@@ -755,10 +755,13 @@ export class SecretObfuscator {
 							match.preserveInputPlaceholders &&
 							entry.replacement === undefined &&
 							match.inputPlaceholderOutsideChunkCount === 1 &&
-							// Preserve an outside chunk as an already-emitted redaction ONLY when this
-							// obfuscator emitted it this session; a sentinel-shaped (`ZZ…`) chunk is
-							// otherwise indistinguishable from raw content the user wrote, so matching it
-							// by shape alone would leak raw bytes the regex covers. Redact anything unknown.
+							match.inputPlaceholderOutsideStart >= 0 &&
+							origin
+								.slice(
+									match.inputPlaceholderOutsideStart,
+									match.inputPlaceholderOutsideStart + match.inputPlaceholderOutside.length,
+								)
+								.includes("F") &&
 							this.#generatedReplaceChunks.has(match.inputPlaceholderOutside)
 						) {
 							continue;
@@ -1133,6 +1136,13 @@ export class SecretObfuscator {
 					match.preserveInputPlaceholders &&
 					entry.replacement === undefined &&
 					match.inputPlaceholderOutsideChunkCount === 1 &&
+					match.inputPlaceholderOutsideStart >= 0 &&
+					currentOrigin
+						.slice(
+							match.inputPlaceholderOutsideStart,
+							match.inputPlaceholderOutsideStart + match.inputPlaceholderOutside.length,
+						)
+						.includes("F") &&
 					this.#generatedReplaceChunks.has(match.inputPlaceholderOutside)
 				) {
 					continue;
