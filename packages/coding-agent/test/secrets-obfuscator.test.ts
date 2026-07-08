@@ -7,7 +7,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, Context, Message } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Context, Message, TextContent } from "@oh-my-pi/pi-ai";
 import {
 	getExistingSecretPlaceholderKey,
 	getSecretPlaceholderKey,
@@ -3034,6 +3034,106 @@ describe("SecretObfuscator cross-turn cache stability", () => {
 		// so re-running obfuscateMessages over a growing conversation never busts the
 		// provider prompt cache for messages already sent.
 		expect(JSON.stringify(obfuscateMessages(obfuscator, obfuscated))).toEqual(serialized);
+	});
+
+	it("strips a stale friendly prefix from persisted assistant history once a later message reveals the colliding regex secret", () => {
+		// Regression: `stripUnsafeFriendlyPrefixesFromAssistantContent` only scans
+		// the assistant content passed to THIS call. If an earlier turn already
+		// minted `#TOKABC123_<hash>#` for `OTHERSECRET` and that exact placeholder
+		// was persisted verbatim into assistant history before `tok_abc123` was
+		// ever seen, replaying that history alongside a NEW message that finally
+		// reveals `tok_abc123` must still scrub the now-unsafe prefix out of the
+		// OLD assistant text — not merely avoid minting a fresh prefixed one.
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
+			{ type: "regex", content: "tok_[a-z0-9]+" },
+		]);
+
+		function assistantText(message: Message): string {
+			if (message.role !== "assistant") throw new Error("expected an assistant message");
+			const block = message.content.find((c): c is TextContent => c.type === "text");
+			if (block === undefined) throw new Error("expected an assistant text block");
+			return block.text;
+		}
+		function toolResultText(message: Message): string {
+			if (message.role !== "toolResult") throw new Error("expected a toolResult message");
+			const block = message.content.find((c): c is TextContent => c.type === "text");
+			if (block === undefined) throw new Error("expected a toolResult text block");
+			return block.text;
+		}
+		function userText(message: Message): string {
+			if (message.role !== "user") throw new Error("expected a user message");
+			if (typeof message.content !== "string") throw new Error("expected string user content");
+			return message.content;
+		}
+
+		// Turn 1: mint the friendly-prefixed placeholder for OTHERSECRET while
+		// tok_abc123 is still unknown to this obfuscator instance — nothing in
+		// this batch matches the regex pattern, so the collision guard has
+		// nothing to compare the friendly name against yet.
+		const minted = obfuscateMessages(obfuscator, [
+			{ role: "user", content: "remember OTHERSECRET for later", timestamp: 1 },
+		]);
+		const mintedMatch = /#TOKABC123_[A-Z0-9]+(?::[ULCM])?#/.exec(userText(minted[0]));
+		if (mintedMatch === null) throw new Error("expected turn 1 to mint a friendly-prefixed placeholder");
+		const mintedPlaceholder = mintedMatch[0];
+		const bareAlias = mintedPlaceholder.replace(/^#TOKABC123_/, "#");
+
+		// Turn 2: assistant history persisted that exact prefixed placeholder
+		// verbatim, wrapped in ordinary prose that carries no secret material
+		// and must survive untouched. A tool result in the same batch finally
+		// reveals the raw regex-protected secret it collides with.
+		const untouchedPrefix = "Sure, I stored it — ";
+		const untouchedSuffix = " — anything else?";
+		const assistantMessage: Message = {
+			role: "assistant",
+			content: [{ type: "text", text: `${untouchedPrefix}${mintedPlaceholder}${untouchedSuffix}` }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "test-model",
+			usage: {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 2,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: 2,
+		};
+		const toolResultMessage: Message = {
+			role: "toolResult",
+			toolCallId: "call-1",
+			toolName: "bash",
+			content: [{ type: "text", text: "the real token is tok_abc123" }],
+			isError: false,
+			timestamp: 3,
+		};
+
+		const result = obfuscateMessages(obfuscator, [assistantMessage, toolResultMessage]);
+		const strippedAssistantText = assistantText(result[0]);
+		const redactedToolResultText = toolResultText(result[1]);
+
+		// The stale friendly prefix is gone, replaced by the friendly-name-
+		// independent bare alias minted back in turn 1...
+		expect(strippedAssistantText).not.toContain("TOKABC123_");
+		expect(strippedAssistantText).toContain(bareAlias);
+		// ...while the surrounding raw assistant prose is untouched byte-for-byte.
+		expect(strippedAssistantText).toContain(untouchedPrefix);
+		expect(strippedAssistantText).toContain(untouchedSuffix);
+
+		// The newly revealed raw secret is redacted in the tool result.
+		expect(redactedToolResultText).not.toContain("tok_abc123");
+
+		// Both secrets still round-trip through deobfuscation of the serialized batch.
+		const serialized = JSON.stringify(result);
+		const restored = obfuscator.deobfuscate(serialized);
+		expect(restored).toContain("OTHERSECRET");
+		expect(restored).toContain("tok_abc123");
+
+		// Fixed point: re-obfuscating the already-stripped batch changes nothing further.
+		expect(JSON.stringify(obfuscateMessages(obfuscator, result))).toEqual(serialized);
 	});
 });
 

@@ -1396,6 +1396,16 @@ export class SecretObfuscator {
 		return { text: result, origin: resultOrigin };
 	}
 
+	stripUnsafeFriendlyPlaceholderPrefixes(text: string, sharedRegexSecretValues: ReadonlySet<string>): string {
+		const previousRegexSecretValues = this.#currentRegexSecretValues;
+		this.#currentRegexSecretValues = new Set(sharedRegexSecretValues);
+		try {
+			return this.#stripUnsafeFriendlyPrefixes(text, "I".repeat(text.length)).text;
+		} finally {
+			this.#currentRegexSecretValues = previousRegexSecretValues;
+		}
+	}
+
 	#registerDeobfuscationAlias(placeholder: string, secret: string, recursive: boolean): void {
 		const existing = this.#deobfuscateMap.get(placeholder);
 		if (existing === undefined || existing.secret === secret) {
@@ -1990,6 +2000,22 @@ function deobfuscateTextBlocks(
 	return changed ? result : content;
 }
 
+function stripUnsafeFriendlyPrefixesFromAssistantContent(
+	obfuscator: SecretObfuscator,
+	content: AssistantMessage["content"],
+	sharedRegexSecretValues: ReadonlySet<string>,
+): AssistantMessage["content"] {
+	let changed = false;
+	const result = content.map((block): AssistantMessage["content"][number] => {
+		if (block.type !== "text") return block;
+		const text = obfuscator.stripUnsafeFriendlyPlaceholderPrefixes(block.text, sharedRegexSecretValues);
+		if (text === block.text) return block;
+		changed = true;
+		return { ...block, text };
+	});
+	return changed ? result : content;
+}
+
 function collectMessageRegexSecretValues(obfuscator: SecretObfuscator, messages: Message[]): Set<string> {
 	const values = new Set<string>();
 	const addText = (text: string): void => {
@@ -2018,11 +2044,11 @@ function collectMessageRegexSecretValues(obfuscator: SecretObfuscator, messages:
 }
 
 /**
- * Redact secrets from outbound messages. Opt-in by origin: only user messages,
- * tool results, and user-authored developer messages (e.g. `@file` mentions)
- * can carry operator secrets. System prompts, tool schemas, and assistant
- * output are author-controlled or model-generated and pass through untouched.
- * Within a targeted message only `text` blocks are rewritten — inline image
+ * Redact secrets from outbound messages. User messages, tool results, and
+ * user-authored developer messages (e.g. `@file` mentions) can carry operator
+ * secrets and are fully obfuscated. Assistant messages are only scanned for
+ * already-generated placeholders whose friendly prefix is no longer safe for
+ * the current batch; their raw text is never otherwise rewritten. Inline image
  * bytes are never walked.
  */
 export function obfuscateMessages(obfuscator: SecretObfuscator, messages: Message[]): Message[] {
@@ -2035,7 +2061,15 @@ export function obfuscateMessages(obfuscator: SecretObfuscator, messages: Messag
 			message.role !== "toolResult" &&
 			!(message.role === "developer" && message.attribution === "user")
 		) {
-			return message;
+			if (message.role !== "assistant") return message;
+			const content = stripUnsafeFriendlyPrefixesFromAssistantContent(
+				obfuscator,
+				message.content,
+				sharedRegexSecretValues,
+			);
+			if (content === message.content) return message;
+			changed = true;
+			return { ...message, content };
 		}
 		const target = message as UserFacingMessage;
 		if (typeof target.content === "string") {
