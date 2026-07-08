@@ -1956,10 +1956,8 @@ export function obfuscateToolArguments(
 	sharedRegexSecretValues?: ReadonlySet<string>,
 ): Record<string, unknown> {
 	if (!obfuscator.hasSecrets()) return args;
-	return mapJsonStrings(args as JsonValue, s => obfuscator.obfuscate(s, sharedRegexSecretValues)) as Record<
-		string,
-		unknown
-	>;
+	const regexSecretValues = sharedRegexSecretValues ?? collectJsonRegexSecretValues(obfuscator, args as JsonValue);
+	return mapJsonStrings(args as JsonValue, s => obfuscator.obfuscate(s, regexSecretValues)) as Record<string, unknown>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2548,6 +2546,29 @@ function deepWalkStrings<T>(obj: T, transform: (s: string) => string): T {
 function isPlainRecord(obj: object): obj is Record<string, unknown> {
 	const prototype = Object.getPrototypeOf(obj);
 	return prototype === Object.prototype || prototype === null;
+}
+
+function collectJsonRegexSecretValues(obfuscator: SecretObfuscator, value: JsonValue): Set<string> {
+	const values = new Set<string>();
+	const collect = (item: JsonValue): void => {
+		if (typeof item === "string") {
+			for (const secretValue of obfuscator.collectRegexSecretValuesForObfuscation(item)) {
+				values.add(secretValue);
+			}
+			return;
+		}
+		if (Array.isArray(item)) {
+			for (const child of item) collect(child);
+			return;
+		}
+		if (item !== null && typeof item === "object") {
+			for (const child of Object.values(item)) {
+				if (child !== undefined) collect(child);
+			}
+		}
+	};
+	collect(value);
+	return values;
 }
 
 /**

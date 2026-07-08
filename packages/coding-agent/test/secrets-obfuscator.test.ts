@@ -19,6 +19,7 @@ import {
 	deobfuscateToolArguments,
 	obfuscateMessages,
 	obfuscateProviderContext,
+	obfuscateToolArguments,
 	type SecretEntry,
 	SecretObfuscator,
 	sanitizeSecretFriendlyName,
@@ -3034,6 +3035,43 @@ describe("SecretObfuscator cross-turn cache stability", () => {
 		// so re-running obfuscateMessages over a growing conversation never busts the
 		// provider prompt cache for messages already sent.
 		expect(JSON.stringify(obfuscateMessages(obfuscator, obfuscated))).toEqual(serialized);
+	});
+
+	it("collects regex-protected values across the whole tool-call argument payload before obfuscating any single string", () => {
+		// Regression: `obfuscateToolArguments` must precompute regex-protected
+		// values by walking the ENTIRE JSON argument object up front — the same
+		// whole-batch precomputation `obfuscateMessages` performs above — before
+		// redacting any single string within it, when the caller passes no
+		// `sharedRegexSecretValues` of its own. Mapping each JSON string
+		// independently (obfuscating `first` before `nested.later` is ever
+		// visited) would let `first`'s OTHERSECRET mint a friendly-prefixed
+		// placeholder before `tok_abc123` is discovered deeper in the same
+		// payload, baking a normalized rendering of that later secret into
+		// provider-visible text as an "innocent" friendly label.
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
+			{ type: "regex", content: "tok_[a-z0-9]+" },
+		]);
+		const args = { first: "OTHERSECRET", nested: { later: "tok_abc123" } };
+
+		const obfuscated = obfuscateToolArguments(obfuscator, args);
+		const serialized = JSON.stringify(obfuscated);
+
+		expect(serialized).not.toContain("OTHERSECRET");
+		expect(serialized).not.toContain("tok_abc123");
+		// The friendly prefix is itself a normalized rendering of the
+		// later-discovered regex value; collecting regex values across the whole
+		// payload up front must strip it down to a bare placeholder rather than
+		// bake it into `first`'s output before `nested.later` is ever visited.
+		expect(serialized).not.toContain("TOKABC123_");
+
+		// Both originals round-trip through deobfuscation of the serialized args.
+		expect(deobfuscateToolArguments(obfuscator, obfuscated)).toEqual(args);
+
+		// Re-obfuscating the already-obfuscated args is a fixed point: identical
+		// bytes, matching the cache-stability guarantee `obfuscateMessages` gives
+		// full conversation batches.
+		expect(JSON.stringify(obfuscateToolArguments(obfuscator, obfuscated))).toEqual(serialized);
 	});
 
 	it("strips a stale friendly prefix from persisted assistant history once a later message reveals the colliding regex secret", () => {
