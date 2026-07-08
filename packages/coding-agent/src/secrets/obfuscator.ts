@@ -2005,13 +2005,25 @@ function stripUnsafeFriendlyPrefixesFromAssistantContent(
 	content: AssistantMessage["content"],
 	sharedRegexSecretValues: ReadonlySet<string>,
 ): AssistantMessage["content"] {
+	const strip = (text: string): string =>
+		obfuscator.stripUnsafeFriendlyPlaceholderPrefixes(text, sharedRegexSecretValues);
 	let changed = false;
 	const result = content.map((block): AssistantMessage["content"][number] => {
-		if (block.type !== "text") return block;
-		const text = obfuscator.stripUnsafeFriendlyPlaceholderPrefixes(block.text, sharedRegexSecretValues);
-		if (text === block.text) return block;
-		changed = true;
-		return { ...block, text };
+		if (block.type === "text") {
+			const text = strip(block.text);
+			if (text === block.text) return block;
+			changed = true;
+			return { ...block, text };
+		}
+		if (block.type === "toolCall") {
+			const args = mapJsonStrings(block.arguments as JsonValue, strip) as Record<string, unknown>;
+			const intent = block.intent === undefined ? undefined : strip(block.intent);
+			const rawBlock = block.rawBlock === undefined ? undefined : strip(block.rawBlock);
+			if (args === block.arguments && intent === block.intent && rawBlock === block.rawBlock) return block;
+			changed = true;
+			return { ...block, arguments: args, intent, rawBlock };
+		}
+		return block;
 	});
 	return changed ? result : content;
 }

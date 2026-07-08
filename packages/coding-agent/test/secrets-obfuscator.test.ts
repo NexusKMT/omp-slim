@@ -3135,6 +3135,131 @@ describe("SecretObfuscator cross-turn cache stability", () => {
 		// Fixed point: re-obfuscating the already-stripped batch changes nothing further.
 		expect(JSON.stringify(obfuscateMessages(obfuscator, result))).toEqual(serialized);
 	});
+
+	it("strips a stale friendly prefix from an assistant toolCall block's arguments, intent, and rawBlock once a later message reveals the colliding regex secret", () => {
+		// Regression: `stripUnsafeFriendlyPrefixesFromAssistantContent` walks `text`
+		// blocks and `toolCall` blocks differently — a toolCall's `arguments`,
+		// `intent`, and `rawBlock` are where the model's own tool invocations
+		// persist a friendly-prefixed placeholder minted in an earlier turn. If a
+		// later message reveals the regex-protected value that placeholder's
+		// friendly name normalizes to, the toolCall fields must be re-scanned and
+		// scrubbed exactly like assistant text — leaving "TOKABC123_" baked into a
+		// replayed tool call would expose the very value `tok_[a-z0-9]+` is
+		// configured to hide, just via a different content-block type.
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
+			{ type: "regex", content: "tok_[a-z0-9]+" },
+		]);
+
+		type AssistantToolCallBlock = Extract<AssistantMessage["content"][number], { type: "toolCall" }>;
+		function assistantToolCall(message: Message): AssistantToolCallBlock {
+			if (message.role !== "assistant") throw new Error("expected an assistant message");
+			const block = message.content.find((c): c is AssistantToolCallBlock => c.type === "toolCall");
+			if (block === undefined) throw new Error("expected an assistant toolCall block");
+			return block;
+		}
+		function toolResultText(message: Message): string {
+			if (message.role !== "toolResult") throw new Error("expected a toolResult message");
+			const block = message.content.find((c): c is TextContent => c.type === "text");
+			if (block === undefined) throw new Error("expected a toolResult text block");
+			return block.text;
+		}
+		function userText(message: Message): string {
+			if (message.role !== "user") throw new Error("expected a user message");
+			if (typeof message.content !== "string") throw new Error("expected string user content");
+			return message.content;
+		}
+
+		// Turn 1: mint the friendly-prefixed placeholder for OTHERSECRET while
+		// tok_abc123 is still unknown to this obfuscator instance.
+		const minted = obfuscateMessages(obfuscator, [
+			{ role: "user", content: "remember OTHERSECRET for later", timestamp: 1 },
+		]);
+		const mintedMatch = /#TOKABC123_[A-Z0-9]+(?::[ULCM])?#/.exec(userText(minted[0]));
+		if (mintedMatch === null) throw new Error("expected turn 1 to mint a friendly-prefixed placeholder");
+		const mintedPlaceholder = mintedMatch[0];
+		const bareAlias = mintedPlaceholder.replace(/^#TOKABC123_/, "#");
+
+		// Turn 2: assistant history persisted that exact prefixed placeholder
+		// verbatim inside a toolCall block's arguments, intent, and rawBlock —
+		// each also carrying ordinary raw prose that carries no secret material
+		// and must survive untouched. A tool result in the same batch finally
+		// reveals the raw regex-protected secret it collides with.
+		const untouchedPrefix = "run with token ";
+		const untouchedSuffix = " please";
+		const staleField = `${untouchedPrefix}${mintedPlaceholder}${untouchedSuffix}`;
+		const assistantMessage: Message = {
+			role: "assistant",
+			content: [
+				{
+					type: "toolCall",
+					id: "call-1",
+					name: "bash",
+					arguments: { command: staleField, note: "no secret material here" },
+					intent: staleField,
+					rawBlock: staleField,
+				},
+			],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "test-model",
+			usage: {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 2,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: 2,
+		};
+		const toolResultMessage: Message = {
+			role: "toolResult",
+			toolCallId: "call-1",
+			toolName: "bash",
+			content: [{ type: "text", text: "the real token is tok_abc123" }],
+			isError: false,
+			timestamp: 3,
+		};
+
+		const result = obfuscateMessages(obfuscator, [assistantMessage, toolResultMessage]);
+		const strippedToolCall = assistantToolCall(result[0]);
+		const redactedToolResultText = toolResultText(result[1]);
+
+		// The stale friendly prefix is gone from every toolCall field, replaced by
+		// the friendly-name-independent bare alias minted back in turn 1, while the
+		// surrounding raw prose in each field is untouched byte-for-byte.
+		const strippedArgsJson = JSON.stringify(strippedToolCall.arguments);
+		expect(strippedArgsJson).not.toContain("TOKABC123_");
+		expect(strippedArgsJson).toContain(bareAlias);
+		expect(strippedArgsJson).toContain(untouchedPrefix);
+		expect(strippedArgsJson).toContain(untouchedSuffix);
+
+		if (strippedToolCall.intent === undefined) throw new Error("expected intent to survive stripping");
+		expect(strippedToolCall.intent).not.toContain("TOKABC123_");
+		expect(strippedToolCall.intent).toContain(bareAlias);
+		expect(strippedToolCall.intent).toContain(untouchedPrefix);
+		expect(strippedToolCall.intent).toContain(untouchedSuffix);
+
+		if (strippedToolCall.rawBlock === undefined) throw new Error("expected rawBlock to survive stripping");
+		expect(strippedToolCall.rawBlock).not.toContain("TOKABC123_");
+		expect(strippedToolCall.rawBlock).toContain(bareAlias);
+		expect(strippedToolCall.rawBlock).toContain(untouchedPrefix);
+		expect(strippedToolCall.rawBlock).toContain(untouchedSuffix);
+
+		// The newly revealed raw secret is redacted in the tool result.
+		expect(redactedToolResultText).not.toContain("tok_abc123");
+
+		// Both secrets still round-trip through deobfuscation of the serialized batch.
+		const serialized = JSON.stringify(result);
+		const restored = obfuscator.deobfuscate(serialized);
+		expect(restored).toContain("OTHERSECRET");
+		expect(restored).toContain("tok_abc123");
+
+		// Fixed point: re-obfuscating the already-stripped batch changes nothing further.
+		expect(JSON.stringify(obfuscateMessages(obfuscator, result))).toEqual(serialized);
+	});
 });
 
 describe("deobfuscateAgentMessages (display restore)", () => {
