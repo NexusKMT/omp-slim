@@ -895,6 +895,50 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obf.deobfuscate(first)).toBe("ZZZZZZZZABCDEFGHSECRETUVA");
 	});
 
+	it("keeps a default replace regex a fixed point on the first pass when raw text flanks a generated placeholder on both sides", () => {
+		// `[A-Z]{9}` (exact quantifier) over raw `X` + plain secret `SECRETUV`
+		// (minted fresh this call, 8 chars) + raw `Y`: the greedy left-to-right
+		// match on the FIRST pass is exactly "XSECRETUV" (the 1-char raw prefix
+		// plus the whole placeholder's expanded value), so the scan resumes right
+		// past it and the trailing `Y` — only 1 char, short of the exact {9}
+		// quantifier — was left raw and unredacted (`a#…#Y`). Once the prefix
+		// redacts to a non-uppercase marker, a SECOND pass re-aligns the same
+		// regex to match "SECRETUVY" instead (placeholder + the now-exposed raw
+		// suffix) and redacts `Y` for the first time — drifting provider-visible
+		// history and the prompt-cache prefix across the call-1-to-2 transition
+		// (`a#…#Y` -> `a#…#a`). The fix must already redact both flanking chunks
+		// on the very first pass so obfuscate() is a fixed point from the start.
+		const obf = new SecretObfuscator(
+			[
+				{ type: "plain", content: "SECRETUV" },
+				{ type: "regex", mode: "replace", content: "[A-Z]{9}" },
+			],
+			"Q".repeat(43),
+		);
+
+		const first = obf.obfuscate("XSECRETUVY");
+
+		// The plain secret must never survive in provider-visible output.
+		expect(first).not.toContain("SECRETUV");
+		// Core regression: the trailing raw suffix must already be redacted on
+		// the FIRST pass instead of surviving verbatim until a second call
+		// re-aligns the match around it.
+		expect(first.endsWith("Y")).toBe(false);
+		// Core regression: re-obfuscation must already be a fixed point from the
+		// very first call — this used to be false (`a#…#Y` -> `a#…#a`).
+		expect(obf.obfuscate(first)).toBe(first);
+		// Stable across multiple passes.
+		expect(obf.obfuscate(obf.obfuscate(first))).toBe(first);
+
+		// Deobfuscating restores the plain secret (reversible), but the regex's
+		// one-way replace-mode redaction never restores the raw flanking bytes
+		// it consumed — that is the correct, appropriate behavior for replace
+		// mode.
+		const restored = obf.deobfuscate(first);
+		expect(restored).toContain("SECRETUV");
+		expect(restored).not.toBe("XSECRETUVY");
+	});
+
 	it("redacts a two-sided independently matching chunk instead of leaking it as spillover", () => {
 		// `\b[A-Z]{8}\b|[A-Z]{17}` union regex, prior-call placeholder for `SECRETUV`
 		// flanked by prefix `ABCDEFGH` (independently matches `\b[A-Z]{8}\b`) and

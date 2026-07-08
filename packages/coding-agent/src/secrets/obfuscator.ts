@@ -875,6 +875,7 @@ export class SecretObfuscator {
 				}
 			}
 		}
+		({ text: result, origin } = this.#stabilizeReplaceRegexPlaceholderSpillover(result, origin));
 
 		this.#currentRegexSecretValues = new Set();
 		return result;
@@ -1109,6 +1110,43 @@ export class SecretObfuscator {
 				return placeholder;
 			},
 		);
+	}
+
+	#stabilizeReplaceRegexPlaceholderSpillover(text: string, origin: string): { text: string; origin: string } {
+		let result = text;
+		let currentOrigin = origin;
+		for (const entry of this.#regexEntries) {
+			if (entry.mode !== "replace" || entry.replacement !== undefined) continue;
+			entry.regex.lastIndex = 0;
+			const matches = this.#collectRegexMatches(result, entry.regex, entry.mode, currentOrigin, entry.replacement);
+			entry.regex.lastIndex = 0;
+			for (const match of matches) {
+				if (!match.preserveGeneratedPlaceholders) continue;
+				if (
+					match.preserveInputPlaceholders &&
+					entry.replacement === undefined &&
+					match.inputPlaceholderOutsideChunkCount === 1 &&
+					this.#generatedReplaceChunks.has(match.inputPlaceholderOutside)
+				) {
+					continue;
+				}
+				if (match.inputPlaceholderInnerIndependentlyMatches && !match.inputPlaceholderOutsideIndependentlyMatches) {
+					continue;
+				}
+				const span = result.slice(match.start, match.end);
+				const spanOrigin = currentOrigin.slice(match.start, match.end);
+				const redacted =
+					entry.replacement !== undefined
+						? redactWithFixedReplacementOutsidePlaceholders(span, spanOrigin, entry.replacement, placeholder =>
+								this.#isGeneratedPlaceholder(placeholder),
+							)
+						: this.#redactRegexMatchOutsidePlaceholders(span, spanOrigin, entry.regex, match.scanContext);
+				if (redacted.text === span) continue;
+				result = replaceRange(result, match.start, match.end, redacted.text);
+				currentOrigin = replaceRange(currentOrigin, match.start, match.end, redacted.origin);
+			}
+		}
+		return { text: result, origin: currentOrigin };
 	}
 
 	/** Find the obfuscate index for a known secret value. */
