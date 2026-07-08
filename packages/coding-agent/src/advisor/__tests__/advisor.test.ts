@@ -832,6 +832,69 @@ describe("advisor", () => {
 			expect(promptInputs[0]).not.toContain(secret);
 		});
 
+		it("shares regex-protected values across the whole advisor delta so an earlier field's friendly prefix cannot leak a sibling field's secret", async () => {
+			// Regression: obfuscateAdvisorDelta must precompute regex-protected values
+			// (collectAdvisorRegexSecretValues) across every field of the WHOLE advisor
+			// delta before redacting any single message — mirroring the whole-batch
+			// precomputation obfuscateMessages performs for the primary provider path
+			// (see secrets-obfuscator.test.ts). Redacting message fields independently
+			// would let the EARLIER user message's plain secret (OTHERSECRET) mint a
+			// friendly-prefixed placeholder ("#TOKABC123_<hash>#") before the SIBLING
+			// toolResult's `details.diff` field, later in the same delta, reveals the
+			// regex-protected value that friendly name normalizes to
+			// (tok_abc123 -> TOKABC123) — baking a normalized rendering of that
+			// still-undiscovered secret into the advisor-bound prompt as an "innocent"
+			// friendly label instead of a bare placeholder.
+			const obfuscator = new SecretObfuscator([
+				{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
+				{ type: "regex", content: "tok_[a-z0-9]+" },
+			]);
+			const promptInputs: string[] = [];
+			const agent = makeAgent(promptInputs);
+			const diff = `--- a/config.ts\n+++ b/config.ts\n@@ -1 +1 @@\n-const token = "old";\n+const token = "tok_abc123";`;
+			const messages: AgentMessage[] = [
+				{ role: "user", content: "remember OTHERSECRET for later", timestamp: 1 } as AgentMessage,
+				{
+					role: "assistant",
+					content: [{ type: "toolCall", id: "c1", name: "edit", arguments: { path: "config.ts" } }],
+					timestamp: 2,
+				} as unknown as AgentMessage,
+				{
+					role: "toolResult",
+					toolCallId: "c1",
+					toolName: "edit",
+					content: "ok",
+					details: { diff },
+					timestamp: 3,
+				} as unknown as AgentMessage,
+			];
+			const host: AdvisorRuntimeHost = {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+				obfuscator,
+			};
+			const runtime = new AdvisorRuntime(agent, host);
+
+			runtime.onTurnEnd();
+			await Promise.resolve();
+
+			expect(promptInputs).toHaveLength(1);
+			const prompt = promptInputs[0]!;
+			expect(prompt).not.toContain("OTHERSECRET");
+			expect(prompt).not.toContain("tok_abc123");
+			// The friendly prefix is itself a normalized rendering of the
+			// later-discovered regex value; sharing regex values across the whole
+			// delta up front must strip it to a bare placeholder rather than bake
+			// it into the earlier user message's rendering.
+			expect(prompt).not.toContain("TOKABC123_");
+
+			// Both originals still round-trip through deobfuscation of the
+			// advisor-bound prompt text.
+			const restored = obfuscator.deobfuscate(prompt);
+			expect(restored).toContain("OTHERSECRET");
+			expect(restored).toContain("tok_abc123");
+		});
+
 		it("expands plan-mode context once, then collapses an unchanged re-injection", async () => {
 			const promptInputs: string[] = [];
 			const agent = makeAgent(promptInputs);

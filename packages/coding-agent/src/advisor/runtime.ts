@@ -407,12 +407,16 @@ export class AdvisorRuntime {
 
 type TextualContent = string | readonly (TextContent | ImageContent)[];
 
-function obfuscateTextualContent(obfuscator: SecretObfuscator, content: TextualContent): TextualContent {
-	if (typeof content === "string") return obfuscator.obfuscate(content);
+function obfuscateTextualContent(
+	obfuscator: SecretObfuscator,
+	content: TextualContent,
+	sharedRegexSecretValues: ReadonlySet<string>,
+): TextualContent {
+	if (typeof content === "string") return obfuscator.obfuscate(content, sharedRegexSecretValues);
 	let changed = false;
 	const result = content.map((block): TextContent | ImageContent => {
 		if (block.type !== "text") return block;
-		const text = obfuscator.obfuscate(block.text);
+		const text = obfuscator.obfuscate(block.text, sharedRegexSecretValues);
 		if (text === block.text) return block;
 		changed = true;
 		return { ...block, text };
@@ -420,17 +424,21 @@ function obfuscateTextualContent(obfuscator: SecretObfuscator, content: TextualC
 	return changed ? result : content;
 }
 
-function obfuscateAssistantMessage(obfuscator: SecretObfuscator, message: AssistantMessage): AssistantMessage {
+function obfuscateAssistantMessage(
+	obfuscator: SecretObfuscator,
+	message: AssistantMessage,
+	sharedRegexSecretValues: ReadonlySet<string>,
+): AssistantMessage {
 	let changed = false;
 	const content = message.content.map((block): AssistantMessage["content"][number] => {
 		if (block.type === "text") {
-			const text = obfuscator.obfuscate(block.text);
+			const text = obfuscator.obfuscate(block.text, sharedRegexSecretValues);
 			if (text === block.text) return block;
 			changed = true;
 			return { ...block, text };
 		}
 		if (block.type === "toolCall") {
-			const args = obfuscateToolArguments(obfuscator, block.arguments);
+			const args = obfuscateToolArguments(obfuscator, block.arguments, sharedRegexSecretValues);
 			if (args === block.arguments) return block;
 			changed = true;
 			return { ...block, arguments: args };
@@ -443,19 +451,28 @@ function obfuscateAssistantMessage(obfuscator: SecretObfuscator, message: Assist
 function obfuscateDetails(
 	obfuscator: SecretObfuscator,
 	details: Record<string, unknown> | undefined,
+	sharedRegexSecretValues: ReadonlySet<string>,
 ): Record<string, unknown> | undefined {
 	if (!details) return details;
 	// Walk strings at every depth: `customOneLiner` renders nested fields
 	// (e.g. `async-result` reads `details.jobs[].label`/`jobId`), so a shallow
 	// pass leaks any secret a background job's label happens to contain.
-	return obfuscateToolArguments(obfuscator, details);
+	return obfuscateToolArguments(obfuscator, details, sharedRegexSecretValues);
 }
 
-function obfuscateAdvisorMessage(obfuscator: SecretObfuscator, message: AgentMessage): AgentMessage {
+function obfuscateAdvisorMessage(
+	obfuscator: SecretObfuscator,
+	message: AgentMessage,
+	sharedRegexSecretValues: ReadonlySet<string>,
+): AgentMessage {
 	switch (message.role) {
 		case "user":
 		case "developer": {
-			const content = obfuscateTextualContent(obfuscator, message.content as TextualContent);
+			const content = obfuscateTextualContent(
+				obfuscator,
+				message.content as TextualContent,
+				sharedRegexSecretValues,
+			);
 			return content === message.content ? message : ({ ...(message as object), content } as AgentMessage);
 		}
 		case "toolResult": {
@@ -463,48 +480,52 @@ function obfuscateAdvisorMessage(obfuscator: SecretObfuscator, message: AgentMes
 				content: TextualContent;
 				details?: Record<string, unknown>;
 			};
-			const content = obfuscateTextualContent(obfuscator, msg.content);
-			const details = obfuscateDetails(obfuscator, msg.details);
+			const content = obfuscateTextualContent(obfuscator, msg.content, sharedRegexSecretValues);
+			const details = obfuscateDetails(obfuscator, msg.details, sharedRegexSecretValues);
 			if (content === msg.content && details === msg.details) return message;
 			return { ...(message as object), content, details } as AgentMessage;
 		}
 		case "assistant":
-			return obfuscateAssistantMessage(obfuscator, message as AssistantMessage) as AgentMessage;
+			return obfuscateAssistantMessage(
+				obfuscator,
+				message as AssistantMessage,
+				sharedRegexSecretValues,
+			) as AgentMessage;
 		case "custom":
 		case "hookMessage": {
 			const msg = message as AgentMessage & {
 				content: TextualContent;
 				details?: Record<string, unknown>;
 			};
-			const content = obfuscateTextualContent(obfuscator, msg.content);
-			const details = obfuscateDetails(obfuscator, msg.details);
+			const content = obfuscateTextualContent(obfuscator, msg.content, sharedRegexSecretValues);
+			const details = obfuscateDetails(obfuscator, msg.details, sharedRegexSecretValues);
 			if (content === msg.content && details === msg.details) return message;
 			return { ...(message as object), content, details } as AgentMessage;
 		}
 		case "bashExecution": {
 			const msg = message as AgentMessage & { command: string; output: string };
-			const command = obfuscator.obfuscate(msg.command);
-			const output = obfuscator.obfuscate(msg.output);
+			const command = obfuscator.obfuscate(msg.command, sharedRegexSecretValues);
+			const output = obfuscator.obfuscate(msg.output, sharedRegexSecretValues);
 			return command === msg.command && output === msg.output
 				? message
 				: ({ ...(message as object), command, output } as AgentMessage);
 		}
 		case "pythonExecution": {
 			const msg = message as AgentMessage & { code: string; output: string };
-			const code = obfuscator.obfuscate(msg.code);
-			const output = obfuscator.obfuscate(msg.output);
+			const code = obfuscator.obfuscate(msg.code, sharedRegexSecretValues);
+			const output = obfuscator.obfuscate(msg.output, sharedRegexSecretValues);
 			return code === msg.code && output === msg.output
 				? message
 				: ({ ...(message as object), code, output } as AgentMessage);
 		}
 		case "branchSummary": {
 			const msg = message as AgentMessage & { summary: string };
-			const summary = obfuscator.obfuscate(msg.summary);
+			const summary = obfuscator.obfuscate(msg.summary, sharedRegexSecretValues);
 			return summary === msg.summary ? message : ({ ...(message as object), summary } as AgentMessage);
 		}
 		case "compactionSummary": {
 			const msg = message as AgentMessage & { summary: string };
-			const summary = obfuscator.obfuscate(msg.summary);
+			const summary = obfuscator.obfuscate(msg.summary, sharedRegexSecretValues);
 			return summary === msg.summary ? message : ({ ...(message as object), summary } as AgentMessage);
 		}
 		case "fileMention": {
@@ -513,8 +534,8 @@ function obfuscateAdvisorMessage(obfuscator: SecretObfuscator, message: AgentMes
 			};
 			let changed = false;
 			const files = msg.files.map(file => {
-				const path = obfuscator.obfuscate(file.path);
-				const content = obfuscator.obfuscate(file.content);
+				const path = obfuscator.obfuscate(file.path, sharedRegexSecretValues);
+				const content = obfuscator.obfuscate(file.content, sharedRegexSecretValues);
 				if (path === file.path && content === file.content) return file;
 				changed = true;
 				return { ...file, path, content };
@@ -526,10 +547,34 @@ function obfuscateAdvisorMessage(obfuscator: SecretObfuscator, message: AgentMes
 	}
 }
 
+function collectAdvisorRegexSecretValues(obfuscator: SecretObfuscator, messages: AgentMessage[]): Set<string> {
+	const values = new Set<string>();
+	const visit = (value: unknown): void => {
+		if (typeof value === "string") {
+			if (!value.startsWith("data:image/")) {
+				for (const secretValue of obfuscator.collectRegexSecretValuesForObfuscation(value)) {
+					values.add(secretValue);
+				}
+			}
+			return;
+		}
+		if (Array.isArray(value)) {
+			for (const item of value) visit(item);
+			return;
+		}
+		if (value !== null && typeof value === "object") {
+			for (const item of Object.values(value)) visit(item);
+		}
+	};
+	visit(messages);
+	return values;
+}
+
 function obfuscateAdvisorDelta(obfuscator: SecretObfuscator, messages: AgentMessage[]): AgentMessage[] {
+	const sharedRegexSecretValues = collectAdvisorRegexSecretValues(obfuscator, messages);
 	let changed = false;
 	const result = messages.map(message => {
-		const next = obfuscateAdvisorMessage(obfuscator, message);
+		const next = obfuscateAdvisorMessage(obfuscator, message, sharedRegexSecretValues);
 		if (next !== message) changed = true;
 		return next;
 	});
