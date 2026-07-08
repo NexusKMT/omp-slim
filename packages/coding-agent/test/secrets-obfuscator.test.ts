@@ -529,6 +529,39 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obfuscator.deobfuscate(obfuscated)).toBe("use tok_abc123 and zeta_secret1 now");
 	});
 
+	it("omits a plain secret's own friendly label that normalizes to a regex-protected value produced by a later regex replace mapping", () => {
+		// Regression: the two collision-set gaps above cover an UNRELATED regex
+		// entry's friendlyName colliding with a later-produced regex-protected
+		// value. This covers a PLAIN obfuscate-mode secret's OWN friendlyName.
+		// Plain obfuscate secrets mint their placeholder in the CONSTRUCTOR —
+		// before `obfuscate()` ever runs and forecasts post-replace regex
+		// values into `#currentRegexSecretValues` — so a friendlyName that
+		// merely normalizes to a value a LATER regex replace mapping produces
+		// (here `X` -> `tok_abc123`, protected by `tok_[a-z0-9]+`) can get
+		// baked into the placeholder at mint time even though `tok_abc123`
+		// never appears in the raw input. The obfuscator must re-check the
+		// baked-in friendly prefix against the freshly forecasted collision
+		// set on every `obfuscate()` call and fall back to a bare placeholder
+		// when it collides, so the friendly prefix never exposes the
+		// normalized future regex secret.
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
+			{ type: "regex", mode: "replace", content: "X", replacement: "tok_abc123" },
+			{ type: "regex", content: "tok_[a-z0-9]+" },
+		]);
+		const input = "use OTHERSECRET and X now";
+		const obfuscated = obfuscator.obfuscate(input);
+
+		expect(obfuscated).not.toContain("TOKABC123_");
+		expect(obfuscated).not.toContain("OTHERSECRET");
+		expect(obfuscated).not.toContain("tok_abc123");
+		expect(obfuscated).toMatch(/^use #[A-Z0-9]{4,}:U# and #[A-Z0-9]{4,}:L# now$/);
+		// Deobfuscation restores the plain secret's placeholder to `OTHERSECRET`
+		// and the regex-discovered placeholder to the value actually matched
+		// (`tok_abc123`); the one-way regex replace mapping never restores `X`.
+		expect(obfuscator.deobfuscate(obfuscated)).toBe("use OTHERSECRET and tok_abc123 now");
+	});
+
 	it("does not replace plain secrets inside generated friendly placeholders", () => {
 		const longSecret = "long-secret-token";
 		const prefixSecret = "TOKENABC";

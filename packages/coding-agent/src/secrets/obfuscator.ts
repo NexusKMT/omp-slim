@@ -720,6 +720,9 @@ export class SecretObfuscator {
 		for (const secretValue of this.#collectRegexSecretValues(result)) {
 			this.#currentRegexSecretValues.add(secretValue);
 		}
+		for (const secretValue of this.#collectRegexSecretValuesAfterRegexReplacements(result, origin)) {
+			this.#currentRegexSecretValues.add(secretValue);
+		}
 
 		// 2. Process obfuscate-mode plain secrets
 		for (const [secret, index] of [...this.#plainMappings].sort((a, b) => b[0].length - a[0].length)) {
@@ -1250,6 +1253,41 @@ export class SecretObfuscator {
 				values.add(match[0]);
 			}
 			entry.regex.lastIndex = 0;
+		}
+		return values;
+	}
+
+	#collectRegexSecretValuesAfterRegexReplacements(text: string, origin: string): Set<string> {
+		const values = new Set<string>();
+		let simulated = text;
+		let simulatedOrigin = origin;
+		for (const entry of this.#regexEntries) {
+			if (entry.mode !== "replace" || entry.replacement === undefined) continue;
+			entry.regex.lastIndex = 0;
+			const matches = this.#collectRegexMatches(
+				simulated,
+				entry.regex,
+				entry.mode,
+				simulatedOrigin,
+				entry.replacement,
+			);
+			entry.regex.lastIndex = 0;
+			if (matches.length === 0) continue;
+			for (const secretValue of this.#collectRegexSecretValues(entry.replacement)) {
+				values.add(secretValue);
+			}
+			for (const match of [...matches].sort((a, b) => b.start - a.start)) {
+				simulated = replaceRange(simulated, match.start, match.end, entry.replacement);
+				simulatedOrigin = replaceRange(
+					simulatedOrigin,
+					match.start,
+					match.end,
+					"I".repeat(entry.replacement.length),
+				);
+			}
+			for (const secretValue of this.#collectRegexSecretValues(simulated)) {
+				values.add(secretValue);
+			}
 		}
 		return values;
 	}
