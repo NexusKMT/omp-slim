@@ -19,16 +19,18 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 import { type } from "arktype";
 import { createAssistantMessage } from "./helpers/agent-session-setup";
 
+type ObservedSkillTurn = {
+	texts: string[];
+};
+
+// 4644 gates the workflowz notice on an active `task` tool; keep one active so
+// keyword steering exercises the notice path.
 const mockTaskTool: AgentTool = {
 	name: "task",
 	label: "Task",
 	description: "Mock task tool",
 	parameters: type({}),
-	execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
-};
-
-type ObservedSkillTurn = {
-	texts: string[];
+	execute: async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
 };
 
 describe("AgentSession skill prompt keyword steering", () => {
@@ -53,6 +55,7 @@ describe("AgentSession skill prompt keyword steering", () => {
 				model,
 				systemPrompt: ["Test"],
 				tools: [mockTaskTool],
+				messages: [],
 			},
 			convertToLlm,
 			streamFn: (_model, context) => {
