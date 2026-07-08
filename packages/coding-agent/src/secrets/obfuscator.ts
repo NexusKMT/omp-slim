@@ -1953,9 +1953,13 @@ export function deobfuscateToolArguments(
 export function obfuscateToolArguments(
 	obfuscator: SecretObfuscator,
 	args: Record<string, unknown>,
+	sharedRegexSecretValues?: ReadonlySet<string>,
 ): Record<string, unknown> {
 	if (!obfuscator.hasSecrets()) return args;
-	return mapJsonStrings(args as JsonValue, s => obfuscator.obfuscate(s)) as Record<string, unknown>;
+	return mapJsonStrings(args as JsonValue, s => obfuscator.obfuscate(s, sharedRegexSecretValues)) as Record<
+		string,
+		unknown
+	>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

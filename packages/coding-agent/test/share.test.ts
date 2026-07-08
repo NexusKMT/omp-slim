@@ -249,6 +249,68 @@ describe("buildShareSnapshot", () => {
 		// Source entries keep the real values; redaction is share-only.
 		expect(JSON.stringify(entries)).toContain(secret);
 	});
+
+	test("collects regex-protected values across the whole snapshot so an earlier field's friendly-name placeholder cannot leak a later field's secret", () => {
+		// `buildShareSnapshot` must precompute regex-matched secret values across the ENTIRE
+		// snapshot (header + entries) before redacting any single field. Otherwise the header
+		// (redacted first) would obfuscate `plainSecret` under its friendly name unaware that
+		// `regexSecret` — only present in a LATER bash-output field — sanitizes to the exact
+		// same label, and the friendly prefix would leak the regex secret's shape into the share.
+		const plainSecret = "OTHERSECRET";
+		const friendlyName = "TOKABC123";
+		const regexSecret = "tok_abc123";
+		const ts = "2026-06-12T00:00:00.000Z";
+		const header = {
+			type: "session",
+			version: 3,
+			id: "t",
+			timestamp: ts,
+			cwd: "/tmp",
+			title: `investigating ${plainSecret}`,
+		};
+		const entries: SessionEntry[] = [
+			{
+				type: "message",
+				id: "b1",
+				parentId: null,
+				timestamp: ts,
+				message: {
+					role: "bashExecution",
+					command: "cat token.txt",
+					output: `token is ${regexSecret}`,
+					exitCode: 0,
+					cancelled: false,
+					truncated: false,
+					timestamp: 1,
+				},
+			} as unknown as SessionEntry,
+		];
+		const sm = {
+			getHeader: () => header,
+			getEntries: () => entries,
+			getLeafId: () => "b1",
+		} as unknown as SessionManager;
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: plainSecret, friendlyName },
+			{ type: "regex", content: "tok_[a-z0-9]+" },
+		]);
+
+		const flat = JSON.stringify(buildShareSnapshot(sm, { obfuscator }));
+
+		// Neither raw secret leaves the share...
+		expect(flat).not.toContain(plainSecret);
+		expect(flat).not.toContain(regexSecret);
+		// ...and the header's placeholder for `plainSecret` was NOT minted with the friendly
+		// prefix that spells out the later field's regex-protected value's sanitized shape.
+		expect(flat).not.toContain(`${friendlyName}_`);
+
+		// Deobfuscating the redacted share recovers both originals (the stripped placeholder
+		// still carries its friendly-name-independent alias), and is a fixed point.
+		const recovered = obfuscator.deobfuscate(flat);
+		expect(recovered).toContain(plainSecret);
+		expect(recovered).toContain(regexSecret);
+		expect(obfuscator.deobfuscate(recovered)).toBe(recovered);
+	});
 });
 
 describe("normalizeShareServerUrl", () => {
