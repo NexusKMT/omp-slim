@@ -553,14 +553,16 @@ function obfuscateAdvisorMessage(
 	}
 }
 
+function isImageBlock(value: object): value is ImageContent {
+	return "type" in value && value.type === "image";
+}
+
 function collectAdvisorRegexSecretValues(obfuscator: SecretObfuscator, messages: AgentMessage[]): Set<string> {
 	const values = new Set<string>();
 	const visit = (value: unknown): void => {
 		if (typeof value === "string") {
-			if (!value.startsWith("data:image/")) {
-				for (const secretValue of obfuscator.collectRegexSecretValuesForObfuscation(value)) {
-					values.add(secretValue);
-				}
+			for (const secretValue of obfuscator.collectRegexSecretValuesForObfuscation(value)) {
+				values.add(secretValue);
 			}
 			return;
 		}
@@ -569,6 +571,9 @@ function collectAdvisorRegexSecretValues(obfuscator: SecretObfuscator, messages:
 			return;
 		}
 		if (value !== null && typeof value === "object") {
+			// Raw image bytes (`ImageContent.data`) are base64, not a `data:` URL
+			// (that form only exists in the rendered viewer) — never regex-scan them.
+			if (isImageBlock(value)) return;
 			for (const item of Object.values(value)) visit(item);
 		}
 	};

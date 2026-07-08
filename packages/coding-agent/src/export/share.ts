@@ -107,10 +107,8 @@ function collectShareRegexSecretValues(o: SecretObfuscator, data: SessionData): 
 	const values = new Set<string>();
 	const visit = (value: unknown): void => {
 		if (typeof value === "string") {
-			if (!value.startsWith("data:image/")) {
-				for (const secretValue of o.collectRegexSecretValuesForObfuscation(value)) {
-					values.add(secretValue);
-				}
+			for (const secretValue of o.collectRegexSecretValuesForObfuscation(value)) {
+				values.add(secretValue);
 			}
 			return;
 		}
@@ -119,6 +117,9 @@ function collectShareRegexSecretValues(o: SecretObfuscator, data: SessionData): 
 			return;
 		}
 		if (isRecord(value)) {
+			// Raw image bytes (`ImageContent.data`) are base64, not a `data:` URL
+			// (that form only exists in the rendered viewer) — never regex-scan them.
+			if (value.type === "image") return;
 			for (const item of Object.values(value)) visit(item);
 		}
 	};

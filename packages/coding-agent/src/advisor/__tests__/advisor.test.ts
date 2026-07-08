@@ -953,6 +953,49 @@ describe("advisor", () => {
 			expect(restored).toContain("tok_abc123");
 		});
 
+		it("skips raw image payload bytes when collecting regex-protected values, so image data cannot spuriously trigger friendly-prefix collision avoidance", async () => {
+			// Regression: collectAdvisorRegexSecretValues's generic tree walk only
+			// skipped strings already shaped like a `data:image/...` URL, but
+			// `ImageContent.data` at rest is raw base64 (that URL form only exists
+			// in the rendered viewer). Left unguarded, every image payload in the
+			// raw message array gets regex-scanned on every advisor turn —
+			// wasteful for large screenshots the advisor never even sees (images
+			// render as the literal "[image]" marker) — and an accidental regex
+			// match inside the base64 bytes would poison the whole-delta collision
+			// set used to decide whether OTHER fields' friendly-name placeholders
+			// are safe to render.
+			const obfuscator = new SecretObfuscator([
+				{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
+				{ type: "regex", content: "tok_[a-z0-9]+" },
+			]);
+			const promptInputs: string[] = [];
+			const agent = makeAgent(promptInputs);
+			const messages: AgentMessage[] = [
+				{ role: "user", content: "remember OTHERSECRET for later", timestamp: 1 } as AgentMessage,
+				{
+					role: "user",
+					content: [{ type: "image", data: "binary noise tok_abc123 more noise", mimeType: "image/png" }],
+					timestamp: 2,
+				} as unknown as AgentMessage,
+			];
+			const host: AdvisorRuntimeHost = {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+				obfuscator,
+			};
+			const runtime = new AdvisorRuntime(agent, host);
+
+			runtime.onTurnEnd();
+			await Promise.resolve();
+
+			expect(promptInputs).toHaveLength(1);
+			const prompt = promptInputs[0]!;
+			expect(prompt).not.toContain("OTHERSECRET");
+			// Because the image bytes were skipped by the collision pre-scan, the
+			// plain secret's friendly-name placeholder needed no collision avoidance.
+			expect(prompt).toContain("TOKABC123_");
+		});
+
 		it("expands plan-mode context once, then collapses an unchanged re-injection", async () => {
 			const promptInputs: string[] = [];
 			const agent = makeAgent(promptInputs);

@@ -311,6 +311,61 @@ describe("buildShareSnapshot", () => {
 		expect(recovered).toContain(regexSecret);
 		expect(obfuscator.deobfuscate(recovered)).toBe(recovered);
 	});
+
+	test("skips raw image payload bytes when collecting regex-protected values, so image data cannot spuriously trigger friendly-prefix collision avoidance", () => {
+		// Regression: the whole-snapshot collision pre-scan only skipped strings
+		// already shaped like a `data:image/...` URL, but `ImageContent.data` at
+		// rest is raw base64 (that URL form only exists in the rendered viewer).
+		// Left unguarded, every image payload gets regex-scanned like any other
+		// string on each share — wasteful for large images, and an accidental
+		// regex match inside the base64 bytes would poison the whole-snapshot
+		// collision set used to decide whether OTHER fields' friendly-name
+		// placeholders are safe to render.
+		const plainSecret = "OTHERSECRET";
+		const friendlyName = "TOKABC123";
+		const regexSecret = "tok_abc123";
+		const ts = "2026-06-12T00:00:00.000Z";
+		// A regex secret ("tok_[a-z0-9]+") happens to match literally inside this
+		// "image" payload, cleanly bounded so the match is exactly `regexSecret`;
+		// a correct scan must never see it.
+		const imageData = `binary noise ${regexSecret} more noise`;
+		const entries: SessionEntry[] = [
+			{
+				type: "message",
+				id: "a1",
+				parentId: null,
+				timestamp: ts,
+				message: {
+					role: "user",
+					content: [
+						{ type: "text", text: `remember ${plainSecret} for later` },
+						{ type: "image", data: imageData, mimeType: "image/png" },
+					],
+					timestamp: 1,
+				},
+			} as unknown as SessionEntry,
+		];
+		const sm = {
+			getHeader: () => sessionData([], "x").header,
+			getEntries: () => entries,
+			getLeafId: () => "a1",
+		} as unknown as SessionManager;
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: plainSecret, friendlyName },
+			{ type: "regex", content: "tok_[a-z0-9]+" },
+		]);
+
+		const flat = JSON.stringify(buildShareSnapshot(sm, { obfuscator }));
+
+		expect(flat).not.toContain(plainSecret);
+		// The image payload is left byte-for-byte intact — redaction never
+		// touches inline image bytes (size trimming is a separate later pass).
+		expect(flat).toContain(imageData);
+		// Because the image bytes were skipped by the collision pre-scan, the
+		// sibling plain secret's friendly-name placeholder needed no collision
+		// avoidance and keeps its normal friendly prefix.
+		expect(flat).toContain(`${friendlyName}_`);
+	});
 });
 
 describe("normalizeShareServerUrl", () => {
