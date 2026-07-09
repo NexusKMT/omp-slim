@@ -308,7 +308,21 @@ export function setTerminalTitle(title: string): void {
 }
 
 export function setSessionTerminalTitle(sessionName: string | undefined, cwd?: string): void {
+	// An authoritative session title (rename, new session, focus swap) supersedes
+	// any extension override so the base title tracks the real session again.
+	terminalTitleRuntime.extensionOverride = undefined;
 	terminalTitleRuntime.base = formatSessionTerminalTitle(sessionName, cwd);
+	emitTerminalTitle();
+}
+
+/**
+ * Set a terminal title from an extension's `setTitle()`. Unlike the session base
+ * title, this owns the terminal verbatim: the run-state spinner will not prefix a
+ * glyph or overwrite it on its next tick. Cleared when the app next sets an
+ * authoritative session title via {@link setSessionTerminalTitle}.
+ */
+export function setExtensionTerminalTitle(title: string): void {
+	terminalTitleRuntime.extensionOverride = title;
 	emitTerminalTitle();
 }
 
@@ -327,8 +341,13 @@ const terminalTitleRuntime: {
 	state: TerminalTitleState;
 	frame: number;
 	enabled: boolean;
-	timer: ReturnType<typeof setInterval> | undefined;
+	timer: NodeJS.Timeout | undefined;
 	lastEmitted: string | undefined;
+	/** A title an extension set via `setTitle()`. While set, it owns the terminal
+	 *  title verbatim: the run-state spinner never prefixes or overwrites it. Cleared
+	 *  when the app next establishes an authoritative session title (rename, new
+	 *  session, focus swap) via `setSessionTerminalTitle`. */
+	extensionOverride: string | undefined;
 } = {
 	base: DEFAULT_TERMINAL_TITLE,
 	state: "idle",
@@ -336,6 +355,7 @@ const terminalTitleRuntime: {
 	enabled: true,
 	timer: undefined,
 	lastEmitted: undefined,
+	extensionOverride: undefined,
 };
 
 /**
@@ -362,12 +382,16 @@ export function buildTerminalTitleWithState(
 }
 
 function emitTerminalTitle(): void {
-	const next = buildTerminalTitleWithState(
-		terminalTitleRuntime.base,
-		terminalTitleRuntime.state,
-		terminalTitleRuntime.frame,
-		terminalTitleRuntime.enabled,
-	);
+	// An extension override owns the terminal verbatim; the run-state prefix and
+	// spinner ticks must not clobber it (still deduped via lastEmitted).
+	const next =
+		terminalTitleRuntime.extensionOverride ??
+		buildTerminalTitleWithState(
+			terminalTitleRuntime.base,
+			terminalTitleRuntime.state,
+			terminalTitleRuntime.frame,
+			terminalTitleRuntime.enabled,
+		);
 	if (next === terminalTitleRuntime.lastEmitted) return;
 	terminalTitleRuntime.lastEmitted = next;
 	setTerminalTitle(next);
