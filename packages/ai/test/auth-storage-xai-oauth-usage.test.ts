@@ -100,6 +100,34 @@ describe("xAI OAuth environment usage", () => {
 		});
 	});
 
+	it("uses XAI_OAUTH_TOKEN when stored xAI credentials contain only an API key", async () => {
+		const calls: UsageFetchParams[] = [];
+		await withEnv({ XAI_OAUTH_TOKEN: "env-oauth-bearer" }, async () => {
+			const storage = new AuthStorage(
+				makeStore([
+					{
+						id: 1,
+						provider: "xai-oauth",
+						credential: {
+							type: "api_key",
+							key: "stored-api-key",
+						},
+						disabledCause: null,
+					},
+				]),
+				{
+					usageProviderResolver: provider => (provider === "xai-oauth" ? captureUsageProvider(calls) : undefined),
+				},
+			);
+			await storage.reload();
+
+			await storage.fetchUsageReports();
+		});
+
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.credential).toEqual({ type: "oauth", accessToken: "env-oauth-bearer" });
+	});
+
 	it("does not send shared XAI_API_KEY to the SuperGrok usage endpoint", async () => {
 		const calls: UsageFetchParams[] = [];
 		await withEnv({ XAI_OAUTH_TOKEN: undefined, XAI_API_KEY: "paid-api-key" }, async () => {

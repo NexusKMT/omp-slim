@@ -162,6 +162,55 @@ describe("xAI OAuth helpers", () => {
 		);
 		expect(requests[0]?.init?.redirect).toBe("error");
 	});
+
+	it("combines caller cancellation with the 15-second userinfo timeout", async () => {
+		const timeoutControllers: AbortController[] = [];
+		const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation(timeoutMs => {
+			expect(timeoutMs).toBe(15_000);
+			const controller = new AbortController();
+			timeoutControllers.push(controller);
+			return controller.signal;
+		});
+		const requests: RecordedRequest[] = [];
+		const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+			requests.push({
+				url: typeof input === "string" ? input : input instanceof Request ? input.url : input.toString(),
+				init,
+			});
+			const { promise, reject } = Promise.withResolvers<Response>();
+			const requestSignal = init?.signal;
+			if (!requestSignal) {
+				reject(new Error("expected userinfo request signal"));
+			} else if (requestSignal.aborted) {
+				reject(requestSignal.reason);
+			} else {
+				requestSignal.addEventListener("abort", () => reject(requestSignal.reason), { once: true });
+			}
+			return promise;
+		});
+
+		const callerController = new AbortController();
+		const callerCancelled = fetchXAIOAuthIdentity(
+			"access-token",
+			fetchMock as unknown as typeof fetch,
+			callerController.signal,
+		);
+		callerController.abort();
+		await expect(callerCancelled).resolves.toBeNull();
+		expect(requests[0]?.init?.signal).not.toBe(callerController.signal);
+
+		expect(timeoutSpy).toHaveBeenCalledWith(15_000);
+		const timeoutCancelled = fetchXAIOAuthIdentity(
+			"access-token",
+			fetchMock as unknown as typeof fetch,
+			new AbortController().signal,
+		);
+		const timeoutController = timeoutControllers[1];
+		expect(timeoutController).toBeDefined();
+		timeoutController?.abort();
+		await expect(timeoutCancelled).resolves.toBeNull();
+		expect(requests[1]?.init?.signal).not.toBe(timeoutController?.signal);
+	});
 });
 
 describe("validateXAIEndpoint", () => {
@@ -374,7 +423,7 @@ describe("loginXAIOAuth", () => {
 			accountId: "jwt-sub",
 		});
 		expect(requests.at(-1)?.url).toBe(USERINFO_URL);
-		expect(requests.at(-1)?.init?.signal).toBe(controller.signal);
+		expect(requests.at(-1)?.init?.signal).not.toBe(controller.signal);
 	});
 
 	it("keeps the JWT subject when userinfo returns only an email", async () => {

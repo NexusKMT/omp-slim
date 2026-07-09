@@ -3230,14 +3230,16 @@ export class AuthStorage {
 			}
 
 			if (providerId === "xai-oauth") {
+				let hasUsableStoredOAuthCredential = false;
 				for (const entry of entries) {
 					if (entry.credential.type !== "oauth") continue;
 					const request = this.#buildUsageRequestForOauth(provider, entry.credential, baseUrl);
 					if (providerImpl.supports && !providerImpl.supports(request)) continue;
 					requests.push(request);
+					hasUsableStoredOAuthCredential = true;
 				}
 				const oauthToken = $env.XAI_OAUTH_TOKEN?.trim();
-				if (entries.length === 0 && oauthToken) {
+				if (!hasUsableStoredOAuthCredential && oauthToken) {
 					const request = this.#buildUsageRequest(provider, { type: "oauth", accessToken: oauthToken }, baseUrl);
 					if (!providerImpl.supports || providerImpl.supports(request)) requests.push(request);
 				}

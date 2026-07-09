@@ -190,7 +190,9 @@ export async function fetchXAIOAuthIdentity(
 				Accept: "application/json",
 			},
 			redirect: "error",
-			signal: signal ?? AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
+			signal: signal
+				? AbortSignal.any([signal, AbortSignal.timeout(DISCOVERY_TIMEOUT_MS)])
+				: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
 		});
 		if (!response.ok) return null;
 		const payload = (await response.json()) as unknown;
