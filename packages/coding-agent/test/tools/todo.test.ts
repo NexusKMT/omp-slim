@@ -225,6 +225,52 @@ describe("TodoTool operations", () => {
 		expect(result.details?.phases[0]?.tasks[0]?.status).toBe("blocked");
 	});
 
+	it("blocking a phase leaves completed/abandoned tasks closed", async () => {
+		const tool = new TodoTool(createSession());
+		await tool.execute("call-1", { op: "init", list: [{ phase: "Work", items: ["a", "b", "c"] }] });
+		await tool.execute("call-2", { op: "done", task: "a" });
+		await tool.execute("call-3", { op: "drop", task: "c" });
+
+		const result = await tool.execute("call-4", { op: "block", phase: "Work", reason: "waiting on infra" });
+		const tasks = result.details?.phases[0]?.tasks ?? [];
+		const byContent = (content: string) => tasks.find(task => task.content === content);
+		// Completed/abandoned work is untouched; only the open task becomes blocked.
+		expect(byContent("a")?.status).toBe("completed");
+		expect(byContent("c")?.status).toBe("abandoned");
+		expect(byContent("b")?.status).toBe("blocked");
+		expect(byContent("b")?.blocker).toBe("waiting on infra");
+		// A completed task must never carry a blocker note.
+		expect(byContent("a")?.blocker).toBeUndefined();
+	});
+
+	it("rejects a block with neither task nor phase target", async () => {
+		const tool = new TodoTool(createSession());
+		await tool.execute("call-1", { op: "init", list: [{ phase: "Work", items: ["a", "b"] }] });
+
+		const result = await tool.execute("call-2", { op: "block", reason: "oops" });
+		expect(result.isError).toBe(true);
+		const summary = result.content.find(part => part.type === "text");
+		if (summary?.type !== "text") throw new Error("Expected text summary from todo");
+		expect(summary.text).toContain("block requires a task or phase target");
+		// Nothing was blocked — state is unchanged.
+		const tasks = result.details?.phases[0]?.tasks ?? [];
+		expect(tasks.every(task => task.status !== "blocked")).toBe(true);
+	});
+
+	it("rejects an unblock with neither task nor phase target", async () => {
+		const tool = new TodoTool(createSession());
+		await tool.execute("call-1", { op: "init", list: [{ phase: "Work", items: ["a"] }] });
+		await tool.execute("call-2", { op: "block", task: "a", reason: "x" });
+
+		const result = await tool.execute("call-3", { op: "unblock" });
+		expect(result.isError).toBe(true);
+		const summary = result.content.find(part => part.type === "text");
+		if (summary?.type !== "text") throw new Error("Expected text summary from todo");
+		expect(summary.text).toContain("unblock requires a task or phase target");
+		// The blocked task stays blocked — the targetless unblock was rejected.
+		expect(result.details?.phases[0]?.tasks[0]?.status).toBe("blocked");
+	});
+
 	it("preserves blocked status across the markdown round-trip", () => {
 		const phases: TodoPhase[] = [
 			{

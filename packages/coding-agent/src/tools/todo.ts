@@ -390,14 +390,25 @@ function applyEntry(phases: TodoPhase[], entry: TodoOpEntryValue, errors: string
 			return phases;
 		}
 		case "block": {
+			if (!entry.task && !entry.phase) {
+				errors.push("block requires a task or phase target");
+				return phases;
+			}
 			const reason = entry.reason?.trim() || undefined;
 			for (const task of getTaskTargets(phases, entry, errors)) {
+				// Only actionable open work can be blocked: blocking a phase must
+				// not reopen completed/abandoned tasks or erase finished progress.
+				if (task.status !== "pending" && task.status !== "in_progress") continue;
 				task.status = "blocked";
 				task.blocker = reason;
 			}
 			return phases;
 		}
 		case "unblock": {
+			if (!entry.task && !entry.phase) {
+				errors.push("unblock requires a task or phase target");
+				return phases;
+			}
 			for (const task of getTaskTargets(phases, entry, errors)) {
 				if (task.status === "blocked") {
 					task.status = "pending";
@@ -808,6 +819,10 @@ function formatTodoLine(
 			return uiTheme.fg("accent", `${prefix}${checkbox.unchecked} ${item.content}`);
 		case "abandoned":
 			return uiTheme.fg("error", `${prefix}${checkbox.unchecked} ${strikethroughText(item.content)}`);
+		case "blocked": {
+			const note = item.blocker ? `blocked: ${item.blocker}` : "blocked";
+			return uiTheme.fg("warning", `${prefix}${checkbox.unchecked} ${item.content} (${note})`);
+		}
 		default:
 			return uiTheme.fg("dim", `${prefix}${checkbox.unchecked} ${item.content}`);
 	}

@@ -1760,7 +1760,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		// stage's `done/total` makes the hidden count obvious, so there is no
 		// "… more" row; expanded lists every task.
 		const renderTasks = (phase: TodoPhase): string[] => {
-			const open = phase.tasks.filter(t => t.status === "pending" || t.status === "in_progress");
+			const open = phase.tasks.filter(
+				t => t.status === "pending" || t.status === "in_progress" || t.status === "blocked",
+			);
 			const base = expanded ? phase.tasks : open.length > 0 ? open : phase.tasks;
 			const items = expanded ? base : base.slice(0, activeTaskCap);
 			return renderTreeList(
