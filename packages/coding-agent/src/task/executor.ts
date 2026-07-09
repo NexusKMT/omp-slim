@@ -798,6 +798,8 @@ export function createSubagentSettings(
 
 type AbortReason = "signal" | "terminate" | "timeout" | "budget";
 
+const MAX_YIELD_TOOL_ERRORS = 6;
+
 /** Inputs for the run monitor driving one subagent assignment. */
 interface RunMonitorArgs {
 	index: number;
@@ -834,11 +836,13 @@ interface SubagentRunMonitor {
 	hasUsage(): boolean;
 	yieldCalled(): boolean;
 	runtimeLimitExceeded(): boolean;
+	terminalError(): string | undefined;
 	/** True when the abort carries a precise external reason (signal / wall-clock / budget). */
 	hasExplicitAbortReason(): boolean;
 	/** Whether the (attempted) abort counts as a cancelled run rather than an internal failure. */
 	isAbortedRun(): boolean;
 	requestAbort(reason: AbortReason): void;
+	failWithError(message: string): void;
 	abortActiveSession(): Promise<void>;
 	waitForActiveSessionAbort(): Promise<void>;
 	resolveSignalAbortReason(): string;
@@ -922,6 +926,8 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 	let hasUsage = false;
 	let budgetSteerSent = false;
 	let budgetLimitExceeded = false;
+	let terminalError: string | undefined;
+	let consecutiveYieldToolErrors = 0;
 	let lastAssistantSalvageText: string | undefined;
 	let activeSessionAbortPromise: Promise<void> | undefined;
 
@@ -958,6 +964,11 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 		abortReason = reason;
 		abortController.abort();
 		void abortActiveSession();
+	};
+
+	const failWithError = (message: string) => {
+		terminalError ??= message;
+		requestAbort("terminate");
 	};
 
 	// Handle abort signal
@@ -1187,6 +1198,38 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 				// renderer doesn't double-count it against the final entry.
 				if (event.toolName === "task") {
 					progress.inflightTaskDetails = undefined;
+				}
+
+				if (event.toolName === "yield") {
+					if (event.isError) {
+						consecutiveYieldToolErrors++;
+						let yieldErrorText = "";
+						const resultContent = event.result?.content;
+						if (Array.isArray(resultContent)) {
+							const textParts: string[] = [];
+							for (const block of resultContent) {
+								if (
+									block &&
+									typeof block === "object" &&
+									"type" in block &&
+									block.type === "text" &&
+									"text" in block &&
+									typeof block.text === "string"
+								) {
+									textParts.push(block.text);
+								}
+							}
+							yieldErrorText = textParts.join("\n").trim();
+						}
+						if (consecutiveYieldToolErrors >= MAX_YIELD_TOOL_ERRORS) {
+							const suffix = yieldErrorText ? ` Last yield error: ${yieldErrorText}` : "";
+							failWithError(
+								`Subagent submitted invalid yield results ${consecutiveYieldToolErrors} times; stopping to avoid an infinite submit loop.${suffix}`,
+							);
+						}
+					} else {
+						consecutiveYieldToolErrors = 0;
+					}
 				}
 
 				// Check for registered subagent tool handler
@@ -1454,10 +1497,12 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 		hasUsage: () => hasUsage,
 		yieldCalled: () => yieldCalled,
 		runtimeLimitExceeded: () => runtimeLimitExceeded,
+		terminalError: () => terminalError,
 		hasExplicitAbortReason: () => abortReason === "signal" || runtimeLimitExceeded || budgetLimitExceeded,
 		isAbortedRun: () =>
 			abortReason === "signal" || runtimeLimitExceeded || budgetLimitExceeded || abortReason === undefined,
 		requestAbort,
+		failWithError,
 		abortActiveSession,
 		waitForActiveSessionAbort,
 		resolveSignalAbortReason,
@@ -1615,6 +1660,7 @@ async function driveSessionToYield(
 			error = err instanceof Error ? err.stack || err.message : String(err);
 		}
 	} finally {
+		error ??= monitor.terminalError();
 		if (abortSignal.aborted) {
 			aborted = monitor.isAbortedRun();
 			if (aborted) {
