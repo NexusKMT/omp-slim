@@ -1,19 +1,34 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import { isXAIAccessTokenExpiring, loginXAIOAuth, refreshXAIOAuthToken, validateXAIEndpoint } from "../xai-oauth";
+import {
+	buildXAICliBillingUrl,
+	extractXAIAccessTokenSubject,
+	fetchXAIOAuthIdentity,
+	getXAICliBillingHeaders,
+	isXAIAccessTokenExpiring,
+	loginXAIOAuth,
+	parseXAIAccessTokenPayload,
+	refreshXAIOAuthToken,
+	validateXAIEndpoint,
+} from "../xai-oauth";
 
 afterEach(() => {
 	vi.restoreAllMocks();
 });
 
 function jwtWithExp(exp: number): string {
+	return jwtWithPayload({ exp });
+}
+
+function jwtWithPayload(payload: Record<string, unknown>): string {
 	const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
-	const payload = Buffer.from(JSON.stringify({ exp })).toString("base64url");
-	return `${header}.${payload}.sig`;
+	const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
+	return `${header}.${encodedPayload}.sig`;
 }
 
 const DISCOVERY_URL = "https://auth.x.ai/.well-known/openid-configuration";
 const DEVICE_CODE_URL = "https://auth.x.ai/oauth2/device/code";
 const TOKEN_ENDPOINT = "https://auth.x.ai/oauth2/token";
+const USERINFO_URL = "https://auth.x.ai/oauth2/userinfo";
 const CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828";
 const SCOPE = "openid profile email offline_access grok-cli:access api:access";
 
@@ -43,7 +58,10 @@ function jsonResponse(body: unknown, status: number = 200): Response {
 	});
 }
 
-function createDeviceFlowFetch(tokenResponses: readonly TokenResponse[]) {
+function createDeviceFlowFetch(
+	tokenResponses: readonly TokenResponse[],
+	userinfoResponse: TokenResponse = { body: {} },
+) {
 	const requests: RecordedRequest[] = [];
 	let tokenResponseIndex = 0;
 	const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -63,6 +81,9 @@ function createDeviceFlowFetch(tokenResponses: readonly TokenResponse[]) {
 				throw new Error(`Unexpected xAI token poll ${tokenResponseIndex}`);
 			}
 			return jsonResponse(tokenResponse.body, tokenResponse.status);
+		}
+		if (url === USERINFO_URL) {
+			return jsonResponse(userinfoResponse.body, userinfoResponse.status);
 		}
 		throw new Error(`Unexpected xAI OAuth request: ${url}`);
 	});
@@ -101,6 +122,48 @@ describe("isXAIAccessTokenExpiring", () => {
 	});
 });
 
+describe("xAI OAuth helpers", () => {
+	it("parses JWT payloads and extracts subjects", () => {
+		const token = jwtWithPayload({ sub: " subject-123 ", exp: 1_900_000_000 });
+
+		expect(parseXAIAccessTokenPayload(token)).toEqual({ sub: " subject-123 ", exp: 1_900_000_000 });
+		expect(extractXAIAccessTokenSubject(token)).toBe("subject-123");
+		expect(parseXAIAccessTokenPayload("not-a-jwt")).toBeNull();
+		expect(extractXAIAccessTokenSubject("not-a-jwt")).toBeUndefined();
+	});
+
+	it("builds the billing URL and bearer-only headers", () => {
+		expect(buildXAICliBillingUrl()).toBe("https://cli-chat-proxy.grok.com/v1/billing?format=credits");
+		expect(buildXAICliBillingUrl("tokens")).toBe("https://cli-chat-proxy.grok.com/v1/billing?format=tokens");
+		expect(getXAICliBillingHeaders({ accessToken: "access-token" })).toEqual({
+			Authorization: "Bearer access-token",
+			Accept: "application/json",
+		});
+	});
+
+	it("normalizes OIDC userinfo identity", async () => {
+		const requests: RecordedRequest[] = [];
+		const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+			requests.push({
+				url: typeof input === "string" ? input : input instanceof Request ? input.url : input.toString(),
+				init,
+			});
+			return jsonResponse({ sub: "profile-sub", email: "User@Example.com", name: "User" });
+		});
+
+		await expect(fetchXAIOAuthIdentity("access-token", fetchMock as unknown as typeof fetch)).resolves.toEqual({
+			accountId: "profile-sub",
+			email: "user@example.com",
+			name: "User",
+		});
+		expect(requests[0]?.url).toBe(USERINFO_URL);
+		expect(new Headers(requests[0]?.init?.headers)).toEqual(
+			new Headers({ Authorization: "Bearer access-token", Accept: "application/json" }),
+		);
+		expect(requests[0]?.init?.redirect).toBe("error");
+	});
+});
+
 describe("validateXAIEndpoint", () => {
 	it("rejects non-HTTPS URLs", () => {
 		expect(() => validateXAIEndpoint("http://x.ai/token", "token_endpoint")).toThrow(/Invalid xAI token_endpoint/);
@@ -130,6 +193,35 @@ describe("refreshXAIOAuthToken", () => {
 			/missing refresh_token/,
 		);
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("persists refreshed OAuth identity from OIDC userinfo", async () => {
+		const accessToken = jwtWithPayload({ sub: "jwt-sub" });
+		const requests: RecordedRequest[] = [];
+		const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+			const url = typeof input === "string" ? input : input instanceof Request ? input.url : input.toString();
+			requests.push({ url, init });
+			if (url === DISCOVERY_URL) return jsonResponse({ token_endpoint: TOKEN_ENDPOINT });
+			if (url === TOKEN_ENDPOINT) {
+				return jsonResponse({
+					access_token: accessToken,
+					expires_in: 3600,
+				});
+			}
+			if (url === USERINFO_URL) return jsonResponse({ sub: "profile-sub", email: "User@Example.com" });
+			throw new Error(`Unexpected xAI OAuth request: ${url}`);
+		});
+
+		await expect(
+			refreshXAIOAuthToken("old-refresh-token", fetchMock as unknown as typeof fetch),
+		).resolves.toMatchObject({
+			access: accessToken,
+			refresh: "old-refresh-token",
+			accountId: "profile-sub",
+			email: "user@example.com",
+		});
+		expect(requests.map(request => request.url)).toEqual([DISCOVERY_URL, TOKEN_ENDPOINT, USERINFO_URL]);
+		expect(requests.find(request => request.url === TOKEN_ENDPOINT)?.init?.redirect).toBe("error");
 	});
 });
 
@@ -165,7 +257,12 @@ describe("loginXAIOAuth", () => {
 			onManualCodeInput,
 		});
 
-		expect(requests.map(request => request.url)).toEqual([DISCOVERY_URL, DEVICE_CODE_URL, TOKEN_ENDPOINT]);
+		expect(requests.map(request => request.url)).toEqual([
+			DISCOVERY_URL,
+			DEVICE_CODE_URL,
+			TOKEN_ENDPOINT,
+			USERINFO_URL,
+		]);
 
 		const discoveryRequest = requests[0];
 		expect(discoveryRequest?.init?.method).toBe("GET");
@@ -230,6 +327,7 @@ describe("loginXAIOAuth", () => {
 
 		const tokenRequests = requests.filter(request => request.url === TOKEN_ENDPOINT);
 		expect(tokenRequests).toHaveLength(3);
+		expect(tokenRequests.every(request => request.init?.redirect === "error")).toBe(true);
 		expect(tokenRequests.map(request => Object.fromEntries(requestForm(request)))).toEqual([
 			{
 				grant_type: "urn:ietf:params:oauth:grant-type:device_code",
@@ -250,6 +348,54 @@ describe("loginXAIOAuth", () => {
 		expect(sleepSpy.mock.calls).toEqual([[1000], [6000]]);
 		expect(credentials.access).toBe("eventual-access-token");
 		expect(credentials.refresh).toBe("eventual-refresh-token");
+	});
+
+	it("retains the JWT subject and succeeds when OIDC userinfo fails", async () => {
+		const accessToken = jwtWithPayload({ sub: "jwt-sub" });
+		const controller = new AbortController();
+		const { fetchMock, requests } = createDeviceFlowFetch(
+			[
+				{
+					body: {
+						access_token: accessToken,
+						refresh_token: "refresh-token",
+						expires_in: 3600,
+					},
+				},
+			],
+			{ body: { error: "userinfo unavailable" }, status: 503 },
+		);
+
+		const credentials = await loginXAIOAuth({ fetch: fetchMock, signal: controller.signal });
+
+		expect(credentials).toMatchObject({
+			access: accessToken,
+			refresh: "refresh-token",
+			accountId: "jwt-sub",
+		});
+		expect(requests.at(-1)?.url).toBe(USERINFO_URL);
+		expect(requests.at(-1)?.init?.signal).toBe(controller.signal);
+	});
+
+	it("keeps the JWT subject when userinfo returns only an email", async () => {
+		const accessToken = jwtWithPayload({ sub: "jwt-sub" });
+		const { fetchMock } = createDeviceFlowFetch(
+			[
+				{
+					body: {
+						access_token: accessToken,
+						refresh_token: "refresh-token",
+						expires_in: 3600,
+					},
+				},
+			],
+			{ body: { email: "User@Example.com" } },
+		);
+
+		await expect(loginXAIOAuth({ fetch: fetchMock })).resolves.toMatchObject({
+			accountId: "jwt-sub",
+			email: "user@example.com",
+		});
 	});
 
 	it("rejects a token response that omits access_token", async () => {
