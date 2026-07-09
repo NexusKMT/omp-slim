@@ -112,8 +112,11 @@ describe("legacy-pi bundled virtual module synthesizer (issue #3423)", () => {
 			].join("\n"),
 		);
 
-		const resolveResult = resolveBundledVirtualSpecifier("omp-legacy-pi-bundled:@oh-my-pi/pi-utils");
-		expect(resolveResult).toEqual({
+		expect(resolveBundledVirtualSpecifier("@oh-my-pi/pi-utils")).toEqual({
+			namespace: "omp-legacy-pi-bundled",
+			path: "@oh-my-pi/pi-utils",
+		});
+		expect(resolveBundledVirtualSpecifier("omp-legacy-pi-bundled:@oh-my-pi/pi-utils")).toEqual({
 			namespace: "omp-legacy-pi-bundled",
 			path: "@oh-my-pi/pi-utils",
 		});
@@ -123,6 +126,9 @@ describe("legacy-pi bundled virtual module synthesizer (issue #3423)", () => {
 			name: "omp-legacy-pi-bundled-virtual-regression",
 			setup(build) {
 				build.onResolve({ filter: /^omp-legacy-pi-bundled:.+$/, namespace: "file" }, args =>
+					resolveBundledVirtualSpecifier(args.path),
+				);
+				build.onResolve({ filter: /.*/, namespace: "omp-legacy-pi-bundled" }, args =>
 					resolveBundledVirtualSpecifier(args.path),
 				);
 				build.onLoad({ filter: /.*/, namespace: "omp-legacy-pi-bundled" }, args => {
