@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { executeBash } from "@oh-my-pi/pi-coding-agent/exec/bash-executor";
+import { applyDirenvPreflight, executeBash } from "@oh-my-pi/pi-coding-agent/exec/bash-executor";
 import { findEnvrc, loadDirenvEnv, parseDirenvExport } from "@oh-my-pi/pi-coding-agent/exec/direnv";
 import { $which, TempDir } from "@oh-my-pi/pi-utils";
 
@@ -112,13 +112,31 @@ describe.skipIf(!hasDirenv)("loadDirenvEnv (real direnv, auto-allow)", () => {
 		expect(await loadDirenvEnv(tmp())).toBeNull();
 	});
 
-	it("re-loads when the .envrc content changes (cache keyed by content)", async () => {
+	it("re-exports when the .envrc content changes (no stale cache)", async () => {
 		const root = tmp();
 		await Bun.write(path.join(root, ".envrc"), "export DIRENV_CACHE_TEST=one\n");
 		expect((await loadDirenvEnv(root))?.set.DIRENV_CACHE_TEST).toBe("one");
 
 		await Bun.write(path.join(root, ".envrc"), "export DIRENV_CACHE_TEST=two\n");
 		expect((await loadDirenvEnv(root))?.set.DIRENV_CACHE_TEST).toBe("two");
+	});
+
+	it("always re-invokes direnv so a changed watched file re-exports even when .envrc text is unchanged", async () => {
+		// direnv's own `watch_file` invalidation — not a content hash of the
+		// `.envrc` — is the freshness authority. The `.envrc` bytes never change
+		// here; only the watched file's contents do. A content-hash early-return
+		// (the old behavior) would serve the stale first value; always running
+		// `direnv export json` picks up the new one.
+		const root = tmp();
+		await Bun.write(path.join(root, "watched.env"), "one\n");
+		await Bun.write(
+			path.join(root, ".envrc"),
+			'watch_file watched.env\nexport DIRENV_WATCH_TEST="$(cat watched.env)"\n',
+		);
+		expect((await loadDirenvEnv(root))?.set.DIRENV_WATCH_TEST).toBe("one");
+
+		await Bun.write(path.join(root, "watched.env"), "two\n");
+		expect((await loadDirenvEnv(root))?.set.DIRENV_WATCH_TEST).toBe("two");
 	});
 });
 
@@ -169,5 +187,103 @@ describe.skipIf(!hasDirenv)("bash executor direnv wiring (end-to-end)", () => {
 		} finally {
 			delete Bun.env.PI_DIRENV_UNSET_E2E;
 		}
+	});
+});
+
+describe.skipIf(!hasDirenv)("applyDirenvPreflight (shared all-backends preflight)", () => {
+	// This helper is what the ACP client-terminal and PTY backends call so they
+	// expose the same devenv env as `executeBash`. Assert its core contract:
+	// set-merge with caller-wins, the regex-gated `unset -v` prefix, and the
+	// off/absent passthrough. HOME/XDG isolation mirrors the loader cases so
+	// `direnv allow` never touches the dev/CI user's global store.
+	const savedEnv: Record<string, string | undefined> = {};
+	beforeEach(() => {
+		const home = tmp();
+		for (const key of ["HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"]) {
+			savedEnv[key] = Bun.env[key];
+			Bun.env[key] = path.join(home, key.toLowerCase());
+		}
+	});
+	afterEach(() => {
+		for (const [key, value] of Object.entries(savedEnv)) {
+			if (value === undefined) delete Bun.env[key];
+			else Bun.env[key] = value;
+		}
+	});
+
+	it("merges direnv set vars into env while the caller's env wins", async () => {
+		const root = tmp();
+		await Bun.write(path.join(root, ".envrc"), "export DIRENV_PF_SET=fromdirenv\nexport OVERRIDE_ME=fromdirenv\n");
+
+		const { command, env } = await applyDirenvPreflight("echo hi", root, {
+			callerEnv: { OVERRIDE_ME: "fromcaller" },
+			direnvSetting: "auto",
+		});
+
+		expect(env?.DIRENV_PF_SET).toBe("fromdirenv");
+		expect(env?.OVERRIDE_ME).toBe("fromcaller");
+		// No unset in this .envrc, so the command is returned unprefixed.
+		expect(command).toBe("echo hi");
+	});
+
+	it("prepends a regex-gated `unset -v` for vars the .envrc removes, skipping caller-resupplied names", async () => {
+		const root = tmp();
+		await Bun.write(path.join(root, ".envrc"), "unset PI_PF_UNSET_A\nunset PI_PF_UNSET_B\n");
+		Bun.env.PI_PF_UNSET_A = "present";
+		Bun.env.PI_PF_UNSET_B = "present";
+		try {
+			const { command } = await applyDirenvPreflight("run-it", root, {
+				// Caller re-supplies B, so its unset must be skipped (caller wins).
+				callerEnv: { PI_PF_UNSET_B: "kept" },
+				direnvSetting: "auto",
+			});
+			expect(command).toContain("unset -v PI_PF_UNSET_A");
+			expect(command).not.toContain("PI_PF_UNSET_B");
+			expect(command.endsWith("run-it")).toBe(true);
+		} finally {
+			delete Bun.env.PI_PF_UNSET_A;
+			delete Bun.env.PI_PF_UNSET_B;
+		}
+	});
+
+	it("applies the shell commandPrefix after the unset prefix", async () => {
+		const root = tmp();
+		await Bun.write(path.join(root, ".envrc"), "unset PI_PF_ORDER\n");
+		Bun.env.PI_PF_ORDER = "present";
+		try {
+			const { command } = await applyDirenvPreflight("payload", root, {
+				direnvSetting: "auto",
+				commandPrefix: "strace -f",
+			});
+			// Ordering must be: `unset -v NAME; <prefix> <command>`.
+			expect(command).toBe("unset -v PI_PF_ORDER; strace -f payload");
+		} finally {
+			delete Bun.env.PI_PF_ORDER;
+		}
+	});
+
+	it("returns the command + caller env unchanged when direnv is off", async () => {
+		const root = tmp();
+		await Bun.write(path.join(root, ".envrc"), "export DIRENV_PF_OFF=loaded\n");
+
+		const callerEnv = { FOO: "bar" };
+		const { command, env } = await applyDirenvPreflight("noop", root, {
+			callerEnv,
+			direnvSetting: "off",
+		});
+
+		expect(command).toBe("noop");
+		expect(env).toBe(callerEnv);
+	});
+
+	it("returns the command + caller env unchanged when no .envrc exists", async () => {
+		const callerEnv = { FOO: "bar" };
+		const { command, env } = await applyDirenvPreflight("noop", tmp(), {
+			callerEnv,
+			direnvSetting: "auto",
+		});
+
+		expect(command).toBe("noop");
+		expect(env).toBe(callerEnv);
 	});
 });

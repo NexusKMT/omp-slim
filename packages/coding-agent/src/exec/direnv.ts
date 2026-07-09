@@ -97,15 +97,16 @@ async function runDirenv(
 	return { exitCode, stdout };
 }
 
-/** Cache the parsed env per resolved `.envrc` + content hash, so the (possibly
- *  slow) first export is paid once and a changed `.envrc` re-loads. */
-const exportCache = new Map<string, DirenvExportDiff>();
-
 /**
  * Resolve the nearest `.envrc` from `cwd`, auto-allow it, and return its
  * `direnv export` diff (variables to set, and variables direnv removes).
  * Returns `null` when there is no `.envrc`, `direnv` is not installed, or the
  * export fails/times out.
+ *
+ * Always re-invokes `direnv export json` rather than serving a cached diff:
+ * direnv is fast once warm, and its own watch/mtime invalidation is the
+ * authoritative freshness signal (a content-hash cache here would go stale when
+ * a `watch_file` target changes without the `.envrc` text changing).
  *
  * Auto-allow is deliberate: OMP already runs the repository's own code, so its
  * `.envrc` is trusted under the same model rather than forcing a manual
@@ -120,16 +121,6 @@ export async function loadDirenvEnv(
 	const bin = direnvBinary();
 	if (!bin) return null;
 
-	let cacheKey: string;
-	try {
-		const content = await fs.readFile(envrcPath);
-		cacheKey = `${envrcPath}\u0000${Bun.hash(content).toString(36)}`;
-	} catch {
-		return null;
-	}
-	const cached = exportCache.get(cacheKey);
-	if (cached) return cached;
-
 	const dir = path.dirname(envrcPath);
 	const timeoutMs = opts?.timeoutMs ?? DEFAULT_DIRENV_TIMEOUT_MS;
 	const env = cleanSpawnEnv();
@@ -140,9 +131,7 @@ export async function loadDirenvEnv(
 			logger.warn("direnv export failed", { dir, exitCode });
 			return null;
 		}
-		const diff = parseDirenvExport(stdout);
-		exportCache.set(cacheKey, diff);
-		return diff;
+		return parseDirenvExport(stdout);
 	} catch (err) {
 		logger.warn("direnv load failed", { dir, error: err instanceof Error ? err.message : String(err) });
 		return null;

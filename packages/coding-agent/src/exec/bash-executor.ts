@@ -60,6 +60,58 @@ export interface BashResult {
  *  `unset`. `.envrc` never produces non-identifier names in practice. */
 const SAFE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+export interface DirenvPreflightOptions {
+	/** Caller-supplied env overlay; these values win over direnv-provided ones. */
+	callerEnv?: Record<string, string>;
+	signal?: AbortSignal;
+	/** Cap on the direnv load; the caller's own timeout further clamps it. */
+	timeoutMs?: number;
+	/** `bash.direnv` setting — `"off"` skips the load entirely. */
+	direnvSetting: "auto" | "off";
+	/** Shell wrapper prefix (profiler/strace) to place *after* the unset prefix,
+	 *  matching `executeBash`'s ordering. Backends that apply their own shell
+	 *  wrapping (ACP `wrapShellLineForClientTerminal`) omit this. */
+	commandPrefix?: string | undefined;
+}
+
+/**
+ * Load the repo's direnv/devenv env and fold it into a `(command, env)` pair so
+ * every bash backend (one-shot `executeBash`, ACP client terminal, PTY) exposes
+ * the same devenv tools. Encapsulates: load the diff, merge `set` under the
+ * caller's overlay (caller wins), and prepend a regex-gated `unset -v` for
+ * variables the `.envrc` removes (skipping any the caller re-supplied).
+ *
+ * Returns the possibly-prefixed command plus the merged env, or the inputs
+ * unchanged (`env` = `callerEnv`) when direnv is off, absent, or has no `.envrc`.
+ * Pure transform: does NOT layer non-interactive env defaults — that stays the
+ * caller's job (so interactive PTY/ACP paths keep their own env shape).
+ */
+export async function applyDirenvPreflight(
+	command: string,
+	cwd: string,
+	opts: DirenvPreflightOptions,
+): Promise<{ command: string; env: Record<string, string> | undefined }> {
+	const withPrefix = (line: string): string => (opts.commandPrefix ? `${opts.commandPrefix} ${line}` : line);
+	const direnvDiff =
+		opts.direnvSetting === "off"
+			? null
+			: await loadDirenvEnv(cwd, { timeoutMs: opts.timeoutMs, signal: opts.signal });
+	if (!direnvDiff) {
+		return { command: withPrefix(command), env: opts.callerEnv };
+	}
+	// The caller's explicit env still wins over direnv-provided values.
+	const mergedEnv = { ...direnvDiff.set, ...opts.callerEnv };
+	// direnv can also *remove* inherited variables (a `.envrc` doing
+	// `unset AWS_PROFILE`). An env overlay can only add/override, so prepend a
+	// real `unset` for those — unless the caller re-supplied the same var
+	// explicitly, in which case the caller wins.
+	const direnvUnsets = direnvDiff.unset.filter(
+		name => !(opts.callerEnv && name in opts.callerEnv) && SAFE_ENV_NAME.test(name),
+	);
+	const unsetPrefix = direnvUnsets.length > 0 ? `unset -v ${direnvUnsets.join(" ")}; ` : "";
+	return { command: `${unsetPrefix}${withPrefix(command)}`, env: mergedEnv };
+}
+
 const shellSessions = new Map<string, Shell>();
 const brokenShellSessions = new Set<string>();
 const shellSessionQuarantines = new Map<string, Promise<unknown>>();
@@ -221,36 +273,32 @@ export async function executeBash(command: string, options?: BashExecutorOptions
 	const minimizer = buildMinimizerOptions(settings.getGroup("shellMinimizer"));
 
 	const commandCwd = resolveShellCwd(options?.cwd);
-	// Load the repo's direnv/devenv env (cached per .envrc) so devenv tools land
-	// on PATH; the caller's explicit `env` still wins over direnv-provided values.
-	// Thread the caller's signal + timeout so an aborted / short-timeout call
-	// can't hang on a cold `.envrc` load before the abort listener is installed.
-	const direnvDiff =
-		settings.get("bash.direnv") === "off"
-			? null
-			: await loadDirenvEnv(commandCwd ?? process.cwd(), {
-					timeoutMs: Math.min(
-						settings.get("bash.direnvLoadTimeoutMs"),
-						options?.timeout ?? Number.POSITIVE_INFINITY,
-					),
-					signal: options?.signal,
-				});
-	const commandEnv = buildNonInteractiveEnv(direnvDiff ? { ...direnvDiff.set, ...options?.env } : options?.env);
-	// direnv can also *remove* inherited variables (a `.envrc` doing
-	// `unset AWS_PROFILE`). The per-command env overlay can only add/override, so
-	// prepend a real `unset` for those — unless the caller re-supplied the same
-	// var explicitly, in which case the caller wins.
-	const direnvUnsets = direnvDiff
-		? direnvDiff.unset.filter(name => !(options?.env && name in options.env) && SAFE_ENV_NAME.test(name))
-		: [];
-	const unsetPrefix = direnvUnsets.length > 0 ? `unset -v ${direnvUnsets.join(" ")}; ` : "";
-
-	// Apply command prefix if configured
-	const prefixedCommand = `${unsetPrefix}${prefix ? `${prefix} ${command}` : command}`;
+	// Fold the repo's direnv/devenv env into the command + env so devenv tools
+	// land on PATH; the caller's explicit `env` still wins. Thread the caller's
+	// signal + timeout so an aborted / short-timeout call can't hang on a cold
+	// `.envrc` load before the abort listener is installed. The helper applies
+	// the configured shell `prefix` after any `unset -v` it prepends.
+	const preflight = await applyDirenvPreflight(command, commandCwd ?? process.cwd(), {
+		callerEnv: options?.env,
+		signal: options?.signal,
+		timeoutMs: (() => {
+			const direnvBudget = settings.get("bash.direnvLoadTimeoutMs");
+			// A disabled command deadline (`timeout: 0`) means "no caller clamp",
+			// not a 0 ms direnv load — the load still gets its full budget. Only a
+			// positive caller timeout clamps the direnv window below that budget.
+			const callerDeadline = options?.timeout;
+			return callerDeadline !== undefined && callerDeadline > 0
+				? Math.min(direnvBudget, callerDeadline)
+				: direnvBudget;
+		})(),
+		direnvSetting: settings.get("bash.direnv"),
+		commandPrefix: prefix,
+	});
+	const commandEnv = buildNonInteractiveEnv(preflight.env);
 	const finalCommand =
 		options?.useUserShell === true && !bashShell
-			? buildUserShellCommand(shell, args, prefixedCommand)
-			: prefixedCommand;
+			? buildUserShellCommand(shell, args, preflight.command)
+			: preflight.command;
 
 	// Create output sink for truncation and artifact handling
 	const sink = new OutputSink({
