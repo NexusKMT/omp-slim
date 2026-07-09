@@ -64,8 +64,17 @@ export interface DirenvPreflightOptions {
 	/** Caller-supplied env overlay; these values win over direnv-provided ones. */
 	callerEnv?: Record<string, string>;
 	signal?: AbortSignal;
-	/** Cap on the direnv load; the caller's own timeout further clamps it. */
+	/** Full direnv-load budget (`bash.direnvLoadTimeoutMs`). A positive
+	 *  `callerTimeoutMs` clamps the effective load below this; `0`/undefined
+	 *  leaves the full budget. */
 	timeoutMs?: number;
+	/** The caller's command deadline (ms). A positive value clamps the direnv
+	 *  load so a cold `.envrc` can't outlast a short-timeout command; `0` or
+	 *  undefined means "no caller clamp" — the load keeps its full `timeoutMs`
+	 *  budget (a disabled command deadline is NOT a 0 ms load). Centralizing the
+	 *  clamp here keeps every backend (executeBash, ACP terminal, PTY) on one
+	 *  contract instead of each re-deriving it. */
+	callerTimeoutMs?: number;
 	/** `bash.direnv` setting — `"off"` skips the load entirely. */
 	direnvSetting: "auto" | "off";
 	/** Shell wrapper prefix (profiler/strace) to place *after* the unset prefix,
@@ -92,10 +101,16 @@ export async function applyDirenvPreflight(
 	opts: DirenvPreflightOptions,
 ): Promise<{ command: string; env: Record<string, string> | undefined }> {
 	const withPrefix = (line: string): string => (opts.commandPrefix ? `${opts.commandPrefix} ${line}` : line);
+	// A positive caller deadline clamps the direnv load below its full budget so
+	// a cold `.envrc` can't outlast a short-timeout command; `0`/undefined means
+	// "no caller clamp" (a disabled command deadline is not a 0 ms load). Every
+	// backend routes through here, so the clamp lives in one place.
+	const loadTimeoutMs =
+		opts.callerTimeoutMs !== undefined && opts.callerTimeoutMs > 0
+			? Math.min(opts.timeoutMs ?? opts.callerTimeoutMs, opts.callerTimeoutMs)
+			: opts.timeoutMs;
 	const direnvDiff =
-		opts.direnvSetting === "off"
-			? null
-			: await loadDirenvEnv(cwd, { timeoutMs: opts.timeoutMs, signal: opts.signal });
+		opts.direnvSetting === "off" ? null : await loadDirenvEnv(cwd, { timeoutMs: loadTimeoutMs, signal: opts.signal });
 	if (!direnvDiff) {
 		return { command: withPrefix(command), env: opts.callerEnv };
 	}
@@ -281,16 +296,8 @@ export async function executeBash(command: string, options?: BashExecutorOptions
 	const preflight = await applyDirenvPreflight(command, commandCwd ?? process.cwd(), {
 		callerEnv: options?.env,
 		signal: options?.signal,
-		timeoutMs: (() => {
-			const direnvBudget = settings.get("bash.direnvLoadTimeoutMs");
-			// A disabled command deadline (`timeout: 0`) means "no caller clamp",
-			// not a 0 ms direnv load — the load still gets its full budget. Only a
-			// positive caller timeout clamps the direnv window below that budget.
-			const callerDeadline = options?.timeout;
-			return callerDeadline !== undefined && callerDeadline > 0
-				? Math.min(direnvBudget, callerDeadline)
-				: direnvBudget;
-		})(),
+		timeoutMs: settings.get("bash.direnvLoadTimeoutMs"),
+		callerTimeoutMs: options?.timeout,
 		direnvSetting: settings.get("bash.direnv"),
 		commandPrefix: prefix,
 	});

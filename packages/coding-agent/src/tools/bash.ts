@@ -889,6 +889,9 @@ export class BashTool implements AgentTool<typeof bashSchemaBase | typeof bashSc
 		// would double-apply the unset prefix and re-merge the env. No
 		// `commandPrefix` here: ACP applies the shell prefix via
 		// `wrapShellLineForClientTerminal`, and the PTY path never wrapped one.
+		// `callerTimeoutMs` clamps the direnv load to a positive command timeout
+		// (the backend's own timeout is installed only after this await), matching
+		// the executeBash branch so a cold `.envrc` can't outlast a short call.
 		const backendPreflight =
 			(clientBridge?.capabilities.terminal && clientBridge.createTerminal && !pty) ||
 			canUseInteractiveBashPty(pty, ctx)
@@ -896,6 +899,7 @@ export class BashTool implements AgentTool<typeof bashSchemaBase | typeof bashSc
 						callerEnv: resolvedEnv,
 						signal,
 						timeoutMs: this.session.settings.get("bash.direnvLoadTimeoutMs"),
+						callerTimeoutMs: timeoutMs,
 						direnvSetting: this.session.settings.get("bash.direnv"),
 					})
 				: undefined;
