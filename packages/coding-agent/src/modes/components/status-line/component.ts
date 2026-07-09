@@ -595,6 +595,15 @@ export class StatusLineComponent implements Component {
 		this.#cachedBranchRepoId = undefined;
 		this.#cachedBranchCwd = undefined;
 		this.#cachedPrContext = undefined;
+		// jj label/status share the git segment's lifecycle: a HEAD move (e.g. a
+		// colocated `jj new`/bookmark move) must drop the throttled jj caches too,
+		// mirroring #jjRootFor's per-cwd reset so the next render refetches.
+		this.#jjRoot = undefined;
+		this.#jjRootCwd = undefined;
+		this.#cachedJjBranch = null;
+		this.#jjBranchLastFetch = 0;
+		this.#cachedJjStatus = null;
+		this.#jjStatusLastFetch = 0;
 	}
 	#getCurrentBranch(effectiveGitCwd?: string): string | null {
 		if (!this.#gitEnabled()) return null;
@@ -694,25 +703,30 @@ export class StatusLineComponent implements Component {
 	// jj working-copy bookmark label (nearest bookmark, change-id fallback), shown
 	// in the `git` segment where git HEAD is detached/absent under jj. Throttled,
 	// cached, and repaints on resolve.
-	#getJjBranch(): string | null {
-		const root = this.#jjRootFor(getProjectDir());
+	#getJjBranch(effectiveGitCwd?: string): string | null {
+		const cwd = effectiveGitCwd ?? this.#resolveActiveRepoCache().effectiveGitCwd;
+		const root = this.#jjRootFor(cwd);
 		if (!root) return null;
 		if (this.#jjBranchInFlight || Date.now() - this.#jjBranchLastFetch < jjInfo.JJ_BRANCH_TTL_MS) {
 			return this.#cachedJjBranch;
 		}
 		this.#jjBranchInFlight = true;
 		(async () => {
+			let next: string | null = null;
 			try {
-				const next = await jjInfo.queryJjBranch(root);
-				const changed = next !== this.#cachedJjBranch;
-				this.#cachedJjBranch = next;
-				if (changed && !this.#disposed && this.#onBranchChange) {
-					this.#onBranchChange();
-				}
+				next = await jjInfo.queryJjBranch(root);
 			} finally {
-				this.#jjBranchLastFetch = Date.now();
 				this.#jjBranchInFlight = false;
+				// Only advance this root's throttle; a mid-flight cwd/root switch
+				// leaves the new root's reset TTL intact so it refetches.
+				if (this.#jjRoot === root) this.#jjBranchLastFetch = Date.now();
 			}
+			// Drop a result whose root is no longer current (repo switched or
+			// caches invalidated mid-flight) so A's label never lands in B's cache.
+			if (this.#jjRoot !== root || this.#disposed) return;
+			const changed = next !== this.#cachedJjBranch;
+			this.#cachedJjBranch = next;
+			if (changed && this.#onBranchChange) this.#onBranchChange();
 		})();
 		return this.#cachedJjBranch;
 	}
@@ -720,24 +734,26 @@ export class StatusLineComponent implements Component {
 	// jj working-copy status counts (`@` vs its parent), used in place of git
 	// status in a jj repo where `git status` has no `.git` to read. Throttled,
 	// cached, and repaints on resolve like #getJjBranch.
-	#getJjStatus(): { staged: number; unstaged: number; untracked: number } | null {
-		const root = this.#jjRootFor(getProjectDir());
+	#getJjStatus(effectiveGitCwd?: string): { staged: number; unstaged: number; untracked: number } | null {
+		const cwd = effectiveGitCwd ?? this.#resolveActiveRepoCache().effectiveGitCwd;
+		const root = this.#jjRootFor(cwd);
 		if (!root) return null;
 		if (this.#jjStatusInFlight || Date.now() - this.#jjStatusLastFetch < jjInfo.JJ_BRANCH_TTL_MS) {
 			return this.#cachedJjStatus;
 		}
 		this.#jjStatusInFlight = true;
 		(async () => {
-			const prev = this.#cachedJjStatus;
+			let next: { staged: number; unstaged: number; untracked: number } | null = null;
 			try {
-				this.#cachedJjStatus = await jjInfo.queryJjStatus(root);
+				next = await jjInfo.queryJjStatus(root);
 			} finally {
-				this.#jjStatusLastFetch = Date.now();
 				this.#jjStatusInFlight = false;
+				if (this.#jjRoot === root) this.#jjStatusLastFetch = Date.now();
 			}
-			if (!this.#disposed && this.#onBranchChange && JSON.stringify(prev) !== JSON.stringify(this.#cachedJjStatus)) {
-				this.#onBranchChange();
-			}
+			if (this.#jjRoot !== root || this.#disposed) return;
+			const prev = this.#cachedJjStatus;
+			this.#cachedJjStatus = next;
+			if (this.#onBranchChange && JSON.stringify(prev) !== JSON.stringify(next)) this.#onBranchChange();
 		})();
 		return this.#cachedJjStatus;
 	}
@@ -1109,11 +1125,18 @@ export class StatusLineComponent implements Component {
 			? this.#resolveActiveRepoCache()
 			: { projectDir, activeRepo: null, effectiveGitCwd: projectDir, worktree: null };
 		let gitBranch = includeGit || includePr ? this.#getCurrentBranch(activeRepoCache.effectiveGitCwd) : null;
-		if (includeGit && (gitBranch === "detached" || gitBranch === null)) {
-			gitBranch = this.#getJjBranch() ?? gitBranch;
+		// A jj repo has no git branch to read: git HEAD is detached (colocated) or
+		// absent. Gate BOTH the jj branch label and the jj status counts on that
+		// same condition, captured before the label overlay rewrites gitBranch, so
+		// a nested ordinary git checkout under a parent jj workspace keeps its own
+		// git branch AND its own git status instead of the ancestor jj status.
+		const gitHeadIsJjLike = gitBranch === "detached" || gitBranch === null;
+		if (includeGit && gitHeadIsJjLike) {
+			gitBranch = this.#getJjBranch(activeRepoCache.effectiveGitCwd) ?? gitBranch;
 		}
 		const gitStatus = includeGit
-			? (this.#getJjStatus() ?? this.#getGitStatus(activeRepoCache.effectiveGitCwd))
+			? ((gitHeadIsJjLike ? this.#getJjStatus(activeRepoCache.effectiveGitCwd) : null) ??
+				this.#getGitStatus(activeRepoCache.effectiveGitCwd))
 			: null;
 		const gitPr = includePr ? this.#lookupPr(activeRepoCache.effectiveGitCwd) : null;
 		return {
