@@ -125,6 +125,7 @@ import { getEditorCommand, openInEditor } from "../utils/external-editor";
 import { getSessionAccentAnsi, getSessionAccentHex } from "../utils/session-color";
 import { messageHasDisplayableThinking } from "../utils/thinking-display";
 import {
+	disposeTerminalTitleState,
 	popTerminalTitle,
 	pushTerminalTitle,
 	setSessionTerminalTitle,
@@ -3504,6 +3505,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		// Drain any in-flight Kitty key release events before stopping.
 		// This prevents escape sequences from leaking to the parent shell over slow SSH.
 		await this.ui.terminal.drainInput(1000);
+		// Stop the run-state spinner interval BEFORE restoring the shell title, so a
+		// pending tick cannot re-emit an OSC title after `popTerminalTitle` hands the
+		// terminal back (which would leave the parent shell with a `⠋ π: …` tab).
+		disposeTerminalTitleState();
 		popTerminalTitle();
 		this.stop();
 
