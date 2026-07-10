@@ -1,9 +1,9 @@
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { getProjectDir, setProjectDir } from "@oh-my-pi/pi-utils";
-import { settings, Settings } from "../../../config/settings";
+import { Settings, settings } from "../../../config/settings";
 import type { AgentSession } from "../../../session/agent-session";
 import * as git from "../../../utils/git";
 import { getThemeByName, setThemeInstance } from "../../theme/theme";
@@ -36,7 +36,6 @@ async function flushMicrotasks(): Promise<void> {
 
 // Strip SGR/OSC escapes so assertions match on the visible branch label text.
 function visible(s: string): string {
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: matching terminal escapes
 	return s.replace(/\x1b\][^\x07]*\x07/g, "").replace(/\x1b\[[0-9;]*m/g, "");
 }
 
