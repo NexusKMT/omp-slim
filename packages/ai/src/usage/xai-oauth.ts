@@ -98,7 +98,7 @@ function buildPeriodWindow(period: XaiBillingPeriod): UsageWindow {
 	};
 }
 
-function parseBillingConfig(payload: unknown, now: number): XaiBillingConfig | null {
+function parseBillingConfig(payload: unknown): XaiBillingConfig | null {
 	if (!isRecord(payload) || !isRecord(payload.config)) return null;
 	const raw = payload.config;
 	if (!isRecord(raw.currentPeriod)) return null;
@@ -106,7 +106,10 @@ function parseBillingConfig(payload: unknown, now: number): XaiBillingConfig | n
 	const start = typeof raw.currentPeriod.start === "string" ? parseIsoMs(raw.currentPeriod.start) : undefined;
 	const end = typeof raw.currentPeriod.end === "string" ? parseIsoMs(raw.currentPeriod.end) : undefined;
 	const type = typeof raw.currentPeriod.type === "string" ? raw.currentPeriod.type : "";
-	if (start === undefined || end === undefined || end <= start || end <= now || !type.toUpperCase().includes("WEEK")) {
+	// Keep recently-ended weekly windows so /usage still renders across period
+	// rollover while the billing API is mid-refresh. Reject only inverted ranges
+	// and non-weekly period types.
+	if (start === undefined || end === undefined || end <= start || !type.toUpperCase().includes("WEEK")) {
 		return null;
 	}
 
@@ -235,7 +238,7 @@ export const xaiOauthUsageProvider: UsageProvider = {
 			return null;
 		}
 
-		const config = parseBillingConfig(payload, Date.now());
+		const config = parseBillingConfig(payload);
 		if (!config) return null;
 		return {
 			provider: PROVIDER_ID,

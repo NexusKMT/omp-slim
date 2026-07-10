@@ -137,6 +137,28 @@ describe("xai-oauth usage provider", () => {
 		expect(onDemand?.amount.usedFraction).toBeCloseTo(0.2, 5);
 	});
 
+	it("still reports usage when the weekly period has just ended", async () => {
+		const periodEnd = new Date(Date.now() - 60_000).toISOString();
+		const periodStart = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+		const report = await xaiOauthUsageProvider.fetchUsage(
+			{ provider: "xai-oauth", credential: makeCredential() },
+			{
+				fetch: capturingFetch(
+					makeBillingPayload({
+						currentPeriod: {
+							end: periodEnd,
+							start: periodStart,
+							type: "USAGE_PERIOD_TYPE_WEEKLY",
+						},
+					}),
+				).fetch,
+			},
+		);
+
+		expect(report?.limits[0]?.id).toBe("xai-oauth:credits:1w");
+		expect(report?.limits[0]?.window?.resetsAt).toBe(Date.parse(periodEnd));
+	});
+
 	it("skips expired OAuth tokens and returns null for rejected billing", async () => {
 		const expired = await xaiOauthUsageProvider.fetchUsage(
 			{ provider: "xai-oauth", credential: makeCredential({ expiresAt: Date.now() - 1 }) },

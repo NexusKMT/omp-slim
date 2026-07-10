@@ -8,6 +8,7 @@ import {
 	loginXAIOAuth,
 	parseXAIAccessTokenPayload,
 	refreshXAIOAuthToken,
+	validateXAIBillingEndpoint,
 	validateXAIEndpoint,
 } from "../xai-oauth";
 
@@ -139,6 +140,17 @@ describe("xAI OAuth helpers", () => {
 			Authorization: "Bearer access-token",
 			Accept: "application/json",
 		});
+	});
+
+	it("pins SuperGrok billing URLs to https grok.com hosts", () => {
+		expect(validateXAIBillingEndpoint("https://cli-chat-proxy.grok.com/v1/billing")).toBe(
+			"https://cli-chat-proxy.grok.com/v1/billing",
+		);
+		expect(() => validateXAIBillingEndpoint("https://auth.x.ai/v1/billing")).toThrow(/Invalid xAI billing_url/);
+		expect(() => validateXAIBillingEndpoint("http://cli-chat-proxy.grok.com/v1/billing")).toThrow(
+			/Invalid xAI billing_url/,
+		);
+		expect(() => validateXAIBillingEndpoint("https://evil.com/v1/billing")).toThrow(/Invalid xAI billing_url/);
 	});
 
 	it("normalizes OIDC userinfo identity", async () => {

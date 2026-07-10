@@ -3229,6 +3229,12 @@ export class AuthStorage {
 				entries = dedupedEntries;
 			}
 
+			// SuperGrok billing only accepts OAuth bearers. Catalog envVars for
+			// xai-oauth are [XAI_OAUTH_TOKEN, XAI_API_KEY], so the generic path
+			// would (a) build api_key usage requests from stored keys / the paid
+			// API env var and (b) never fall through to XAI_OAUTH_TOKEN when a
+			// non-OAuth row is the only stored credential. Skip api_key material
+			// and only env-fallback to the dedicated OAuth bearer.
 			if (providerId === "xai-oauth") {
 				let hasUsableStoredOAuthCredential = false;
 				for (const entry of entries) {

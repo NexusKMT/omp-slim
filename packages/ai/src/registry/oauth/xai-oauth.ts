@@ -55,6 +55,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * @throws Error with message `Invalid xAI <field>: <url>` when the URL fails
  *         either scheme or host validation.
  */
+function isXaiAuthHostname(host: string): boolean {
+	return host === "x.ai" || host.endsWith(".x.ai");
+}
+
+/** SuperGrok CLI billing proxy host (`cli-chat-proxy.grok.com`), not the OIDC issuer. */
+function isXaiBillingHostname(host: string): boolean {
+	return host === "grok.com" || host.endsWith(".grok.com");
+}
+
 export function validateXAIEndpoint(url: string, field: string): string {
 	let parsed: URL;
 	try {
@@ -66,7 +75,28 @@ export function validateXAIEndpoint(url: string, field: string): string {
 		throw new AIError.OAuthError(`Invalid xAI ${field}: ${url}`, { kind: "validation", provider: "xai" });
 	}
 	const host = parsed.hostname.toLowerCase();
-	if (!host || (host !== "x.ai" && !host.endsWith(".x.ai"))) {
+	if (!host || !isXaiAuthHostname(host)) {
+		throw new AIError.OAuthError(`Invalid xAI ${field}: ${url}`, { kind: "validation", provider: "xai" });
+	}
+	return url;
+}
+
+/**
+ * Pin SuperGrok billing URLs to HTTPS `grok.com` / `*.grok.com`.
+ * The CLI billing proxy is intentionally not on `*.x.ai`.
+ */
+export function validateXAIBillingEndpoint(url: string, field: string = "billing_url"): string {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		throw new AIError.OAuthError(`Invalid xAI ${field}: ${url}`, { kind: "validation", provider: "xai" });
+	}
+	if (parsed.protocol !== "https:") {
+		throw new AIError.OAuthError(`Invalid xAI ${field}: ${url}`, { kind: "validation", provider: "xai" });
+	}
+	const host = parsed.hostname.toLowerCase();
+	if (!host || !isXaiBillingHostname(host)) {
 		throw new AIError.OAuthError(`Invalid xAI ${field}: ${url}`, { kind: "validation", provider: "xai" });
 	}
 	return url;
@@ -230,7 +260,7 @@ async function withXAIOAuthIdentity(
 export function buildXAICliBillingUrl(format: string = XAI_CLI_BILLING_FORMAT): string {
 	const url = new URL(XAI_CLI_BILLING_PATH, XAI_CLI_BILLING_BASE_URL);
 	url.searchParams.set("format", format);
-	return url.toString();
+	return validateXAIBillingEndpoint(url.toString());
 }
 
 /** Return the Bearer-only headers required by the SuperGrok CLI billing proxy. */
