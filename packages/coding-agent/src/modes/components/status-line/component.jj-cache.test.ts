@@ -183,4 +183,47 @@ describe("StatusLineComponent jj cache coherence", () => {
 		await flushMicrotasks();
 		expect(visible(statusLine.getTopBorder(WIDTH).content)).toContain("branch-B");
 	});
+
+	it("a jj lookup that resolves after a same-root invalidation never lands as stale", async () => {
+		// The finding-6 race: a HEAD/bookmark move invalidates the caches while a
+		// branch query for the SAME root is still in flight. #invalidateGitCaches
+		// resets #jjRoot, but the next render re-resolves it to the identical root
+		// string — so a guard keyed only on root equality would accept the
+		// pre-invalidation result. The generation token must reject it.
+		const deferred = Promise.withResolvers<string | null>();
+		let call = 0;
+		const branchSpy = spyOn(jjInfo, "queryJjBranch").mockImplementation(async () => {
+			call++;
+			// First query (pre-invalidation) hangs; later queries return the fresh label.
+			return call === 1 ? deferred.promise : "bookmark-fresh";
+		});
+		spies.push(branchSpy);
+
+		const statusLine = new StatusLineComponent(makeSession());
+
+		// Render in ROOT_A: starts the (hanging) first lookup. Nothing cached yet.
+		statusLine.getTopBorder(WIDTH);
+		await flushMicrotasks();
+		expect(branchSpy).toHaveBeenCalledTimes(1);
+
+		// A HEAD/bookmark move fires the watcher → invalidate(). The cwd is
+		// unchanged, so the next #jjRootFor re-resolves #jjRoot to the SAME ROOT_A.
+		statusLine.invalidate();
+		statusLine.getTopBorder(WIDTH);
+		await flushMicrotasks();
+
+		// The stale first query now resolves. The generation captured at its launch
+		// no longer matches (invalidate bumped it), so its label must be dropped —
+		// never cached, and the throttle must NOT be advanced on it.
+		deferred.resolve("bookmark-stale");
+		await flushMicrotasks();
+		const paintedImmediate = visible(statusLine.getTopBorder(WIDTH).content);
+		expect(paintedImmediate).not.toContain("bookmark-stale");
+
+		// Because the stale result did not advance the throttle, the post-invalidate
+		// cache is free to refetch and paint the fresh label.
+		await flushMicrotasks();
+		expect(visible(statusLine.getTopBorder(WIDTH).content)).toContain("bookmark-fresh");
+		expect(branchSpy).toHaveBeenCalledTimes(2);
+	});
 });

@@ -293,6 +293,13 @@ export class StatusLineComponent implements Component {
 	#cachedJjStatus: { staged: number; unstaged: number; untracked: number } | null = null;
 	#jjStatusLastFetch = 0;
 	#jjStatusInFlight = false;
+	// Bumped on every jj-cache reset — a cwd switch (#jjRootFor) or a HEAD /
+	// bookmark move (#invalidateGitCaches). An in-flight jj query captures this
+	// at launch; a mismatch on resolve means the caches were reset underneath it
+	// (including a reset that re-resolves to the SAME root, which a root-equality
+	// check cannot detect), so the result is stale and must be dropped rather
+	// than poison the fresh cache or advance its throttle.
+	#jjCacheGeneration = 0;
 
 	// PR lookup caching (invalidated on branch/repo context changes)
 	#cachedPr: { number: number; url: string } | null | undefined = undefined;
@@ -604,6 +611,7 @@ export class StatusLineComponent implements Component {
 		this.#jjBranchLastFetch = 0;
 		this.#cachedJjStatus = null;
 		this.#jjStatusLastFetch = 0;
+		this.#jjCacheGeneration++;
 	}
 	#getCurrentBranch(effectiveGitCwd?: string): string | null {
 		if (!this.#gitEnabled()) return null;
@@ -696,6 +704,7 @@ export class StatusLineComponent implements Component {
 			this.#jjBranchLastFetch = 0;
 			this.#cachedJjStatus = null;
 			this.#jjStatusLastFetch = 0;
+			this.#jjCacheGeneration++;
 		}
 		return this.#jjRoot;
 	}
@@ -711,19 +720,22 @@ export class StatusLineComponent implements Component {
 			return this.#cachedJjBranch;
 		}
 		this.#jjBranchInFlight = true;
+		const generation = this.#jjCacheGeneration;
 		(async () => {
 			let next: string | null = null;
 			try {
 				next = await jjInfo.queryJjBranch(root);
 			} finally {
 				this.#jjBranchInFlight = false;
-				// Only advance this root's throttle; a mid-flight cwd/root switch
-				// leaves the new root's reset TTL intact so it refetches.
-				if (this.#jjRoot === root) this.#jjBranchLastFetch = Date.now();
+				// Advance the throttle only if no reset raced this query; a reset
+				// leaves LastFetch at 0 so the current root refetches instead of
+				// being throttled on a superseded result.
+				if (this.#jjCacheGeneration === generation) this.#jjBranchLastFetch = Date.now();
 			}
-			// Drop a result whose root is no longer current (repo switched or
-			// caches invalidated mid-flight) so A's label never lands in B's cache.
-			if (this.#jjRoot !== root || this.#disposed) return;
+			// Drop a result whose caches were reset mid-flight — a repo switch OR a
+			// same-root HEAD/bookmark move — so a superseded label never lands in
+			// the live cache.
+			if (this.#jjCacheGeneration !== generation || this.#disposed) return;
 			const changed = next !== this.#cachedJjBranch;
 			this.#cachedJjBranch = next;
 			if (changed && this.#onBranchChange) this.#onBranchChange();
@@ -742,15 +754,16 @@ export class StatusLineComponent implements Component {
 			return this.#cachedJjStatus;
 		}
 		this.#jjStatusInFlight = true;
+		const generation = this.#jjCacheGeneration;
 		(async () => {
 			let next: { staged: number; unstaged: number; untracked: number } | null = null;
 			try {
 				next = await jjInfo.queryJjStatus(root);
 			} finally {
 				this.#jjStatusInFlight = false;
-				if (this.#jjRoot === root) this.#jjStatusLastFetch = Date.now();
+				if (this.#jjCacheGeneration === generation) this.#jjStatusLastFetch = Date.now();
 			}
-			if (this.#jjRoot !== root || this.#disposed) return;
+			if (this.#jjCacheGeneration !== generation || this.#disposed) return;
 			const prev = this.#cachedJjStatus;
 			this.#cachedJjStatus = next;
 			if (this.#onBranchChange && JSON.stringify(prev) !== JSON.stringify(next)) this.#onBranchChange();
