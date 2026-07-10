@@ -263,11 +263,16 @@ export function buildXAICliBillingUrl(format: string = XAI_CLI_BILLING_FORMAT): 
 	return validateXAIBillingEndpoint(url.toString());
 }
 
-/** Return the Bearer-only headers required by the SuperGrok CLI billing proxy. */
+/**
+ * Headers for SuperGrok CLI billing (`cli-chat-proxy.grok.com`).
+ * Official Grok CLI also sends `X-XAI-Token-Auth: xai-grok-cli` on this host;
+ * include it so billing stays on the same product gate as chat inference.
+ */
 export function getXAICliBillingHeaders(options: { accessToken: string }): Record<string, string> {
 	return {
 		Authorization: `Bearer ${options.accessToken}`,
 		Accept: "application/json",
+		"X-XAI-Token-Auth": "xai-grok-cli",
 	};
 }
 

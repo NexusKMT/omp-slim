@@ -82,7 +82,7 @@ describe("xai-oauth usage provider", () => {
 		).toBe(false);
 	});
 
-	it("maps weekly credit and product usage with Bearer-only billing headers", async () => {
+	it("maps weekly credit and product usage with CLI-aligned billing headers", async () => {
 		const { fetch, calls } = capturingFetch(makeBillingPayload());
 		const report = await xaiOauthUsageProvider.fetchUsage(
 			{ provider: "xai-oauth", credential: makeCredential() },
@@ -103,6 +103,7 @@ describe("xai-oauth usage provider", () => {
 		expect(billingCall?.headers).toEqual({
 			authorization: `Bearer ${accessTokenFixture}`,
 			accept: "application/json",
+			"x-xai-token-auth": "xai-grok-cli",
 		});
 		expect(billingCall?.redirect).toBe("error");
 	});

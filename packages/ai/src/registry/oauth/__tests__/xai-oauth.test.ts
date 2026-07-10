@@ -133,12 +133,13 @@ describe("xAI OAuth helpers", () => {
 		expect(extractXAIAccessTokenSubject("not-a-jwt")).toBeUndefined();
 	});
 
-	it("builds the billing URL and bearer-only headers", () => {
+	it("builds the billing URL and CLI-aligned headers", () => {
 		expect(buildXAICliBillingUrl()).toBe("https://cli-chat-proxy.grok.com/v1/billing?format=credits");
 		expect(buildXAICliBillingUrl("tokens")).toBe("https://cli-chat-proxy.grok.com/v1/billing?format=tokens");
 		expect(getXAICliBillingHeaders({ accessToken: "access-token" })).toEqual({
 			Authorization: "Bearer access-token",
 			Accept: "application/json",
+			"X-XAI-Token-Auth": "xai-grok-cli",
 		});
 	});
 

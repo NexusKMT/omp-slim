@@ -174,15 +174,15 @@
 - Fixed compatibility with xAI by automatically downgrading OpenAI-specific tool calls and image detail settings during message history replays.
 - Fixed a race condition in shared SQLite OAuth token refreshes by implementing durable credential ownership and compare-and-set persistence to prevent stale refresh failures.
 - Fixed OpenAI Codex requests to include the required version header for newly gated models.
+### Added
+
+- Added SuperGrok (`xai-oauth`) usage tracking for weekly credits, product limits, and positive on-demand caps.
 
 ## [16.4.1] - 2026-07-10
 
 ### Changed
 
 - Enforced `all_turns` reasoning context for all Responses Lite requests
-### Added
-
-- Added SuperGrok (`xai-oauth`) usage tracking for weekly credits, product limits, and positive on-demand caps.
 
 ## [16.4.0] - 2026-07-10
 
