@@ -105,25 +105,129 @@ export function buildShareSnapshot(sm: SessionManager, options?: ShareSessionOpt
  */
 function collectShareRegexSecretValues(o: SecretObfuscator, data: SessionData): Set<string> {
 	const values = new Set<string>();
-	const visit = (value: unknown): void => {
+	const add = (value: string | undefined): void => {
+		if (value === undefined) return;
+		for (const secretValue of o.collectRegexSecretValuesForObfuscation(value)) {
+			values.add(secretValue);
+		}
+	};
+	const addJsonStrings = (value: unknown): void => {
 		if (typeof value === "string") {
-			for (const secretValue of o.collectRegexSecretValuesForObfuscation(value)) {
-				values.add(secretValue);
-			}
+			add(value);
 			return;
 		}
 		if (Array.isArray(value)) {
-			for (const item of value) visit(item);
+			for (const item of value) addJsonStrings(item);
 			return;
 		}
-		if (isRecord(value)) {
-			// Raw image bytes (`ImageContent.data`) are base64, not a `data:` URL
-			// (that form only exists in the rendered viewer) — never regex-scan them.
-			if (value.type === "image") return;
-			for (const item of Object.values(value)) visit(item);
+		if (!isRecord(value) || value.type === "image") return;
+		for (const item of Object.values(value)) addJsonStrings(item);
+	};
+	const addContent = (content: string | (TextContent | ImageContent)[]): void => {
+		if (typeof content === "string") {
+			add(content);
+			return;
+		}
+		for (const block of content) {
+			if (block.type === "text") add(block.text);
 		}
 	};
-	visit(data);
+	const addOutputMeta = (meta: OutputMeta | undefined): void => {
+		if (!meta) return;
+		add(meta.source?.value);
+		if (!meta.diagnostics) return;
+		add(meta.diagnostics.summary);
+		for (const message of meta.diagnostics.messages) add(message);
+	};
+	const addMessage = (message: AgentMessage): void => {
+		switch (message.role) {
+			case "user":
+			case "developer":
+			case "custom":
+			case "hookMessage":
+			case "toolResult":
+				addContent(message.content as string | (TextContent | ImageContent)[]);
+				return;
+			case "assistant":
+				add(message.errorMessage);
+				for (const block of message.content) {
+					if (block.type === "text") add(block.text);
+					else if (block.type === "thinking") add(block.thinking);
+					else if (block.type === "toolCall") {
+						addJsonStrings(block.arguments);
+						add(block.intent);
+						add(block.rawBlock);
+					}
+				}
+				return;
+			case "bashExecution":
+				add(message.command);
+				add(message.output);
+				addOutputMeta(message.meta);
+				return;
+			case "pythonExecution":
+				add(message.code);
+				add(message.output);
+				addOutputMeta(message.meta);
+				return;
+			case "branchSummary":
+				add(message.summary);
+				return;
+			case "compactionSummary":
+				add(message.summary);
+				add(message.shortSummary);
+				if (message.blocks) addContent(message.blocks);
+				return;
+			case "fileMention":
+				for (const file of message.files) {
+					add(file.path);
+					add(file.content);
+				}
+				return;
+			default:
+				return;
+		}
+	};
+	const addEntry = (entry: SessionEntry): void => {
+		switch (entry.type) {
+			case "message":
+				addMessage(entry.message);
+				return;
+			case "compaction":
+				add(entry.summary);
+				add(entry.shortSummary);
+				return;
+			case "branch_summary":
+				add(entry.summary);
+				return;
+			case "custom_message":
+				addContent(entry.content);
+				return;
+			case "session_init":
+				add(entry.systemPrompt);
+				add(entry.task);
+				return;
+			case "label":
+				add(entry.label);
+				return;
+			default:
+				return;
+		}
+	};
+	const addHeader = (header: SessionHeader | null): void => {
+		if (!header) return;
+		add(header.title);
+		add(header.cwd);
+	};
+
+	addHeader(data.header);
+	add(data.systemPrompt);
+	for (const tool of data.tools ?? []) add(tool.description);
+	for (const entry of data.entries) addEntry(entry);
+	for (const sub of Object.values(data.subSessions ?? {})) {
+		addHeader(sub.header);
+		for (const entry of sub.entries) addEntry(entry);
+	}
 	return values;
 }
 

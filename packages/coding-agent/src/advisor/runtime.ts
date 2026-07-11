@@ -559,25 +559,74 @@ function isImageBlock(value: object): value is ImageContent {
 
 function collectAdvisorRegexSecretValues(obfuscator: SecretObfuscator, messages: AgentMessage[]): Set<string> {
 	const values = new Set<string>();
-	const visit = (value: unknown): void => {
+	const add = (value: string | undefined): void => {
+		if (value === undefined) return;
+		for (const secretValue of obfuscator.collectRegexSecretValuesForObfuscation(value)) {
+			values.add(secretValue);
+		}
+	};
+	const addJsonStrings = (value: unknown): void => {
 		if (typeof value === "string") {
-			for (const secretValue of obfuscator.collectRegexSecretValuesForObfuscation(value)) {
-				values.add(secretValue);
-			}
+			add(value);
 			return;
 		}
 		if (Array.isArray(value)) {
-			for (const item of value) visit(item);
+			for (const item of value) addJsonStrings(item);
 			return;
 		}
-		if (value !== null && typeof value === "object") {
-			// Raw image bytes (`ImageContent.data`) are base64, not a `data:` URL
-			// (that form only exists in the rendered viewer) — never regex-scan them.
-			if (isImageBlock(value)) return;
-			for (const item of Object.values(value)) visit(item);
+		if (value === null || typeof value !== "object" || isImageBlock(value)) return;
+		for (const item of Object.values(value)) addJsonStrings(item);
+	};
+	const addContent = (content: TextualContent): void => {
+		if (typeof content === "string") {
+			add(content);
+			return;
+		}
+		for (const block of content) {
+			if (block.type === "text") add(block.text);
 		}
 	};
-	visit(messages);
+	for (const message of messages) {
+		switch (message.role) {
+			case "user":
+			case "developer":
+				addContent(message.content as TextualContent);
+				break;
+			case "toolResult":
+			case "custom":
+			case "hookMessage":
+				addContent(message.content as TextualContent);
+				addJsonStrings(message.details);
+				break;
+			case "assistant":
+				for (const block of message.content) {
+					if (block.type === "text") add(block.text);
+					else if (block.type === "thinking") add(block.thinking);
+					else if (block.type === "toolCall") addJsonStrings(block.arguments);
+				}
+				break;
+			case "bashExecution":
+				add(message.command);
+				add(message.output);
+				break;
+			case "pythonExecution":
+				add(message.code);
+				add(message.output);
+				break;
+			case "branchSummary":
+			case "compactionSummary":
+				add(message.summary);
+				break;
+			case "fileMention":
+				for (const file of message.files) {
+					add(file.path);
+					add(file.content);
+				}
+				break;
+			default:
+				break;
+		}
+	}
 	return values;
 }
 

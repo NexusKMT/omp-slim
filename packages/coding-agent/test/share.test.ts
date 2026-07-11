@@ -366,6 +366,42 @@ describe("buildShareSnapshot", () => {
 		// avoidance and keeps its normal friendly prefix.
 		expect(flat).toContain(`${friendlyName}_`);
 	});
+
+	test("ignores dropped provider replay payloads when collecting regex collision values", () => {
+		const plainSecret = "OTHERSECRET";
+		const friendlyName = "TOKABC123";
+		const regexSecret = "tok_abc123";
+		const ts = "2026-06-12T00:00:00.000Z";
+		const entries: SessionEntry[] = [
+			{
+				type: "message",
+				id: "a1",
+				parentId: null,
+				timestamp: ts,
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: `remember ${plainSecret} for later` }],
+					providerPayload: { items: [{ note: regexSecret }] },
+					timestamp: 1,
+				},
+			} as unknown as SessionEntry,
+		];
+		const sm = {
+			getHeader: () => sessionData([], "x").header,
+			getEntries: () => entries,
+			getLeafId: () => "a1",
+		} as unknown as SessionManager;
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: plainSecret, friendlyName },
+			{ type: "regex", content: "tok_[a-z0-9]+" },
+		]);
+
+		const flat = JSON.stringify(buildShareSnapshot(sm, { obfuscator }));
+
+		expect(flat).not.toContain(plainSecret);
+		expect(flat).not.toContain(regexSecret);
+		expect(flat).toContain(`${friendlyName}_`);
+	});
 });
 
 describe("normalizeShareServerUrl", () => {
