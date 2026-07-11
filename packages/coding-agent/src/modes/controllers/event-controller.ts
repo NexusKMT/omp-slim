@@ -87,6 +87,16 @@ export class EventController {
 	#pinnedErrorComponent: AssistantMessageComponent | undefined = undefined;
 	#retrySupersededAssistantComponents = new Map<string, AssistantMessageComponent>();
 	#retrySupersededAssistantQueue: AssistantMessageComponent[] = [];
+	// Set when `auto_retry_start` fires; the `agent_end` that follows carries the
+	// failed assistant message (stopReason === "error") but the turn is not
+	// actually settled — the session may still recover. `sendErrorNotification`
+	// consumes this (checks it, then resets it) so exactly one settle-looking
+	// `agent_end` per retry attempt is suppressed. Consuming on read — rather
+	// than only clearing it from `#handleAutoRetryEnd` — keeps this self-healing:
+	// a classifier-refusal attempt can short-circuit `#handleRetryableError`
+	// without ever emitting a fresh `auto_retry_end`, and `#handleAutoRetryEnd`
+	// also clears it directly so a successful recovery never leaves it stuck.
+	#retryPending = false;
 	#idleCompactionTimer?: NodeJS.Timeout;
 	#idleRecapTimer?: NodeJS.Timeout;
 	// In-flight ephemeral recap turn; aborted by #cancelIdleRecap when any
@@ -1273,6 +1283,7 @@ export class EventController {
 	}
 
 	async #handleAutoRetryStart(event: Extract<AgentSessionEvent, { type: "auto_retry_start" }>): Promise<void> {
+		this.#retryPending = true;
 		this.#trackRetrySupersededAssistantComponent(this.#lastAssistantComponent);
 		this.#stopWorkingLoader();
 		this.ctx.statusContainer.disposeChildren();
@@ -1296,6 +1307,7 @@ export class EventController {
 	}
 
 	async #handleAutoRetryEnd(event: Extract<AgentSessionEvent, { type: "auto_retry_end" }>): Promise<void> {
+		this.#retryPending = false;
 		if (this.ctx.retryLoader) {
 			this.ctx.retryLoader.stop();
 			this.ctx.retryLoader = undefined;
@@ -1484,6 +1496,20 @@ export class EventController {
 	}
 
 	sendErrorNotification(event: Extract<AgentSessionEvent, { type: "agent_end" }>): void {
+		// A retryable error's `agent_end` fires with the failed assistant message
+		// (stopReason === "error") the instant `#handleRetryableError` schedules a
+		// retry (`auto_retry_start`, above) — the turn is not actually settled, so
+		// this specific `agent_end` must not raise a toast the user has to dismiss
+		// for a turn that may go on to succeed. Consume the flag (check-then-clear)
+		// rather than only relying on `#handleAutoRetryEnd` to clear it: a
+		// classifier-refusal attempt can short-circuit `#handleRetryableError`
+		// without ever emitting a fresh `auto_retry_end`, and this `agent_end` is
+		// then the true final settle that must notify normally.
+		if (this.#retryPending) {
+			this.#retryPending = false;
+			return;
+		}
+
 		const notify = settings.get("error.notify");
 		if (notify === "off") return;
 

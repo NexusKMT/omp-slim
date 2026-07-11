@@ -25,6 +25,7 @@
 - Fixed `/btw` side-channel turns on Codex models such as `gpt-5.6-luna` by preserving the session websocket preference instead of forcing SSE, and made Esc dismiss the active `/btw` panel before interrupting loop/maintenance work. ([#5213](https://github.com/can1357/oh-my-pi/issues/5213))
 - Fixed the Model Hub role-assignment strip hiding the selected chip once the row overflowed; the strip now scrolls horizontally, truncating passed chips behind a leading ellipsis so the selection (plus one chip of lookahead) stays visible.
 - Fixed mouse hover and clicks in the /models Roles view landing one row above the pointer (the row mapping subtracted the status row twice).
+- Fixed `error.notify` raising a "Stopped with error" toast for a retryable provider error while an auto-retry was still pending; the toast now only fires once the retry saga actually settles (recovers silently, or exhausts retries).
 
 ## [16.4.5] - 2026-07-11
 
