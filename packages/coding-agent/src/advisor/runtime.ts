@@ -553,10 +553,6 @@ function obfuscateAdvisorMessage(
 	}
 }
 
-function isImageBlock(value: object): value is ImageContent {
-	return "type" in value && value.type === "image";
-}
-
 function collectAdvisorRegexSecretValues(obfuscator: SecretObfuscator, messages: AgentMessage[]): Set<string> {
 	const values = new Set<string>();
 	const add = (value: string | undefined): void => {
@@ -574,7 +570,7 @@ function collectAdvisorRegexSecretValues(obfuscator: SecretObfuscator, messages:
 			for (const item of value) addJsonStrings(item);
 			return;
 		}
-		if (value === null || typeof value !== "object" || isImageBlock(value)) return;
+		if (value === null || typeof value !== "object") return;
 		for (const item of Object.values(value)) addJsonStrings(item);
 	};
 	const addContent = (content: TextualContent): void => {

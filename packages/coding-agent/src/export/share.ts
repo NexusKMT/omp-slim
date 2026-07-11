@@ -120,7 +120,7 @@ function collectShareRegexSecretValues(o: SecretObfuscator, data: SessionData): 
 			for (const item of value) addJsonStrings(item);
 			return;
 		}
-		if (!isRecord(value) || value.type === "image") return;
+		if (!isRecord(value)) return;
 		for (const item of Object.values(value)) addJsonStrings(item);
 	};
 	const addContent = (content: string | (TextContent | ImageContent)[]): void => {

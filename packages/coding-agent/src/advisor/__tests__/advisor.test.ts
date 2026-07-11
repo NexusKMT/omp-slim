@@ -1028,6 +1028,40 @@ describe("advisor", () => {
 			expect(prompt).toContain("TOKABC123_");
 		});
 
+		it("collects regex values from tool arguments that resemble image blocks", async () => {
+			const obfuscator = new SecretObfuscator([
+				{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
+				{ type: "regex", content: "tok_[a-z0-9]+" },
+			]);
+			const promptInputs: string[] = [];
+			const agent = makeAgent(promptInputs);
+			const messages: AgentMessage[] = [
+				{ role: "user", content: "remember OTHERSECRET for later", timestamp: 1 } as AgentMessage,
+				{
+					role: "assistant",
+					content: [
+						{ type: "toolCall", id: "call-1", name: "read", arguments: { type: "image", value: "tok_abc123" } },
+					],
+					timestamp: 2,
+				} as unknown as AgentMessage,
+			];
+			const host: AdvisorRuntimeHost = {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+				obfuscator,
+			};
+			const runtime = new AdvisorRuntime(agent, host);
+
+			runtime.onTurnEnd();
+			await Promise.resolve();
+
+			expect(promptInputs).toHaveLength(1);
+			const prompt = promptInputs[0]!;
+			expect(prompt).not.toContain("OTHERSECRET");
+			expect(prompt).not.toContain("tok_abc123");
+			expect(prompt).not.toContain("TOKABC123_");
+		});
+
 		it("expands plan-mode context once, then collapses an unchanged re-injection", async () => {
 			const promptInputs: string[] = [];
 			const agent = makeAgent(promptInputs);
