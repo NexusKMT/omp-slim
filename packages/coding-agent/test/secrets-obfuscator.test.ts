@@ -2355,7 +2355,7 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obfuscator.deobfuscateObject({ cmd: "cat #XRRS#" })).toEqual({ cmd: "cat #XRRS#" });
 	});
 
-	it("never restores legacy aliases on agent-feeding replay, only on display transcripts", () => {
+	it("restores keyed placeholders but never legacy aliases on agent-feeding replay", () => {
 		// deobfuscateSessionContext has two kinds of consumers: agent-feeding paths
 		// (resume, history rewrite, branch switch) whose output is re-obfuscated and
 		// sent to the provider, and a display-only transcript (allowLegacyAliases).
@@ -2395,8 +2395,26 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 			isError: false,
 			timestamp: 2,
 		};
+		const branchSummary: AgentMessage = {
+			role: "branchSummary",
+			summary: `branch #XRRS# and echoed ${keyedToken}`,
+			fromId: "branch-1",
+			timestamp: 3,
+		};
+		const compactionSummary: AgentMessage = {
+			role: "compactionSummary",
+			summary: `compaction #XRRS# and echoed ${keyedToken}`,
+			tokensBefore: 0,
+			timestamp: 4,
+		};
+		const contextMessages: AgentMessage[] = [
+			assistant as AgentMessage,
+			toolResult as AgentMessage,
+			branchSummary,
+			compactionSummary,
+		];
 		const ctx = {
-			messages: [assistant, toolResult],
+			messages: contextMessages,
 			models: {},
 			injectedTtsrRules: [],
 			selectedMCPToolNames: [],
@@ -2404,14 +2422,18 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 			mode: "none",
 		};
 
-		// Agent-feeding default: assistant-authored content stays obfuscated, and no
-		// legacy `#XRRS#` is restored, so an echoed placeholder is not expanded into a
-		// raw secret before the next provider turn.
+		// Agent-feeding default restores keyed placeholders authored by this
+		// obfuscator but leaves a prompt-injected legacy alias inert before the
+		// next provider turn.
 		const fed = deobfuscateSessionContext(ctx, obfuscator);
 		const fedAssistant = (fed.messages[0] as Extract<Message, { role: "assistant" }>).content[0] as { text: string };
 		const fedTool = (fed.messages[1] as Extract<Message, { role: "toolResult" }>).content[0] as { text: string };
-		expect(fedAssistant.text).toBe(`attacker planted #XRRS# and echoed ${keyedToken}`);
+		expect(fedAssistant.text).toBe("attacker planted #XRRS# and echoed legacy-secret");
 		expect(fedTool.text).toBe("bash stdout #XRRS#");
+		const fedBranch = fed.messages[2] as Extract<AgentMessage, { role: "branchSummary" }>;
+		const fedCompaction = fed.messages[3] as Extract<AgentMessage, { role: "compactionSummary" }>;
+		expect(fedBranch.summary).toBe("branch #XRRS# and echoed legacy-secret");
+		expect(fedCompaction.summary).toBe("compaction #XRRS# and echoed legacy-secret");
 
 		// Display-only transcript: legacy aliases ARE restored so a genuinely
 		// pre-keyed session renders its secrets. This output is never re-obfuscated.
@@ -2422,6 +2444,10 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		const shownTool = (shown.messages[1] as Extract<Message, { role: "toolResult" }>).content[0] as { text: string };
 		expect(shownAssistant.text).toBe("attacker planted legacy-secret and echoed legacy-secret");
 		expect(shownTool.text).toBe("bash stdout #XRRS#");
+		const shownBranch = shown.messages[2] as Extract<AgentMessage, { role: "branchSummary" }>;
+		const shownCompaction = shown.messages[3] as Extract<AgentMessage, { role: "compactionSummary" }>;
+		expect(shownBranch.summary).toBe("branch legacy-secret and echoed legacy-secret");
+		expect(shownCompaction.summary).toBe("compaction legacy-secret and echoed legacy-secret");
 	});
 
 	it("deobfuscates placeholders after friendlyName changes", () => {
@@ -3502,11 +3528,7 @@ describe("deobfuscateAgentMessages (display restore)", () => {
 			timestamp: 4,
 		};
 
-		const restored = deobfuscateAgentMessages(
-			obfuscator,
-			[userMsg, assistantMsg, branchSummary, compactionSummary],
-			true,
-		);
+		const restored = deobfuscateAgentMessages(obfuscator, [userMsg, assistantMsg, branchSummary, compactionSummary]);
 
 		// Assistant text and tool-call args/intent are restored to the real secret.
 		const restoredAssistant = restored[1] as AssistantMessage;

@@ -1874,21 +1874,18 @@ export function deobfuscateAgentMessages(
 	const result = messages.map((message): AgentMessage => {
 		switch (message.role) {
 			case "assistant": {
-				if (!allowLegacyAliases) return message;
 				const content = deobfuscateAssistantContent(obfuscator, message.content, allowLegacyAliases);
 				if (content === message.content) return message;
 				changed = true;
 				return { ...message, content };
 			}
 			case "branchSummary": {
-				if (!allowLegacyAliases) return message;
 				const summary = deob(message.summary);
 				if (summary === message.summary) return message;
 				changed = true;
 				return { ...message, summary };
 			}
 			case "compactionSummary": {
-				if (!allowLegacyAliases) return message;
 				const summary = deob(message.summary);
 				const shortSummary = message.shortSummary === undefined ? undefined : deob(message.shortSummary);
 				const blocks =
