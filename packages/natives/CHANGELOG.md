@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Updated native HTML-to-Markdown rendering to html-to-markdown-rs 3.9.2 defaults; Markdown formatting can differ from 2.30.0, including fenced code blocks and cycling nested-list bullets.
+
+### Fixed
+
+- Fixed pathological HTML inputs crashing the process; conversions that reach the native-stack DOM depth limit now reject instead of returning silently truncated Markdown.
+
 ## [17.2.1] - 2026-07-30
 
 ### Fixed
