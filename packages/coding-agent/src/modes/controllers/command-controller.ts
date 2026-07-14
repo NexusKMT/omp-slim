@@ -15,6 +15,7 @@ import { formatDuration, Snowflake, sanitizeText } from "@oh-my-pi/pi-utils";
 import { shouldEnableAppendOnlyContext } from "../../config/append-only-context-mode";
 import { type BashResult, isPersistentShellCdCommand } from "../../exec/bash-executor";
 import { type LoadedCustomShare, loadCustomShare } from "../../export/custom-share";
+import { parseExportArgs } from "../../export/html";
 import { shareSession } from "../../export/share";
 import type { CompactOptions } from "../../extensibility/extensions/types";
 import {
@@ -76,16 +77,14 @@ export class CommandController {
 	}
 
 	async handleExportCommand(text: string): Promise<void> {
-		const parts = text.split(/\s+/);
-		const arg = parts.length > 1 ? parts[1] : undefined;
-
-		if (arg === "--copy" || arg === "clipboard" || arg === "copy") {
-			this.ctx.showWarning("Use /dump to copy the session to clipboard.");
-			return;
-		}
-
 		try {
-			const filePath = await this.ctx.session.exportToHtml(arg);
+			const { outputPath, useUserThemes } = parseExportArgs(text.slice("/export".length));
+			if (outputPath === "--copy" || outputPath === "clipboard" || outputPath === "copy") {
+				this.ctx.showWarning("Use /dump to copy the session to clipboard.");
+				return;
+			}
+
+			const filePath = await this.ctx.session.exportToHtml(outputPath, useUserThemes);
 			this.ctx.showStatus(`Session exported to: ${filePath}`);
 			this.openInBrowser(filePath);
 		} catch (error: unknown) {

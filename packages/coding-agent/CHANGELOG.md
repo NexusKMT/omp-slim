@@ -572,6 +572,9 @@
 - Fixed `--reasoning-slide-plan` silently ending the run with no code written when the model answered with a text-only reply.
 - Fixed launch tool rendering issues, including stacked pending headers and confusing start/wait results when readiness timed out.
 - Fixed the in-process `stat` and other GNU-flavored shell builtins (such as `date`, `sed`, `mktemp`, `tail`, `find`, `base64`, and `ln`) mangling or failing on macOS/BSD-style invocations.
+### Added
+
+- Added system-aware light and dark themes to HTML session exports, with a `/export --themes` option to bundle the user's selected TUI themes.
 
 ## [16.5.1] - 2026-07-14
 
