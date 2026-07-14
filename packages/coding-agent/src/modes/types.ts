@@ -368,7 +368,7 @@ export interface InteractiveModeContext {
 	showProviderSetup(): Promise<void>;
 	showHookConfirm(title: string, message: string): Promise<boolean>;
 	showDebugSelector(): Promise<void>;
-	showAgentHub(options?: { requireContent?: boolean }): void;
+	showAgentHub(options?: { requireContent?: boolean; armCloseTap?: boolean }): void;
 	resetObserverRegistry(): void;
 
 	// Input handling
@@ -377,6 +377,8 @@ export interface InteractiveModeContext {
 	handleCtrlZ(): void;
 	handleDequeue(): void;
 	handleImagePaste(): Promise<boolean>;
+	/** Queue a message for delivery only after the active agent turn would stop. */
+	handleQueueCommand(message: string): Promise<void>;
 	handleBtwCommand(question: string): Promise<void>;
 	handleTanCommand(work: string): Promise<void>;
 	hasActiveBtw(): boolean;
