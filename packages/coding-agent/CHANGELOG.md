@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `error.notify` so failed model turns can emit distinct terminal/desktop notifications without changing completion notifications ([#2691](https://github.com/can1357/oh-my-pi/issues/2691)).
+
+### Fixed
+
+- Fixed `error.notify` raising a "Stopped with error" toast for a retryable provider error while an auto-retry was still pending; the toast now only fires once the retry saga actually settles (recovers silently, or exhausts retries).
+
 ## [16.5.0] - 2026-07-13
 
 ### Breaking Changes
@@ -17,7 +25,6 @@
 - Redesigned Agent Hub entries as two-line cards: identity (status glyph, name, agent type, parent when nested) on the left, active model + reasoning level and age right-aligned, with the task description on its own line; dropped the redundant `sub · of Main` noise
 - Added a project-scoped `launch` tool for shared long-running services and debuggers, with readiness probes, bounded logs, PTY input, restart policies, and automatic teardown after the last omp instance exits. Gated behind the `launch.enabled` setting (default on); when disabled the tool is withdrawn and the bash prompt drops its "use launch" guidance.
 - Added `detached` `launch` starts for standalone services that survive every omp instance and broker shutdown, then reconnect to the next broker for logs and explicit stop.
-- Added `error.notify` so failed model turns can emit distinct terminal/desktop notifications without changing completion notifications ([#2691](https://github.com/can1357/oh-my-pi/issues/2691)).
 - Added a new `--prewalk` execution flow (with `--prewalk-into <model>` and `--no-prewalk` overrides) that starts tasks on a strong model for planning and todo initialization before handing off to a faster, cheaper model for implementation.
  - Added a status line annotation for the active prewalk phase (armed or active).
  - Added the `tui.scrollbackRebuild` setting to gate the erase-and-replay native scrollback rebuild mechanism (defaults to off).
@@ -49,7 +56,6 @@
 - Fixed confusing launch start/wait results when readiness timed out with the log pattern already matched (readiness needs log AND port): the result printed a contradictory `Ready: <match>` next to `Readiness timed out` without naming the failing condition. Daemon snapshots now carry the unmet conditions (`readyPending`), and start/wait results state exactly what never happened (e.g. `port 3100 on 127.0.0.1 never accepted connections`); the TUI shows a `waiting on port` badge on starting daemons
 - Fixed the in-process `stat` builtin mangling BSD-style invocations like `stat -f "%Sm %N" file` (macOS muscle memory): GNU `-f` means `--file-system`, so the format string was treated as a file operand — printing filesystem info for the real operands and erroring with `cannot read file system information for '%Sm %N'`. A `-f` whose format value contains `%` is now detected as BSD syntax and translated to the GNU equivalent (`%Sm`→`%y`, `%N`→`%n`, `%z`→`%s`, epoch/`S`-form times, owner/group/permission and `H`/`L` sub-field directives, `-L`/`-n`/`-q`/`-F` flag clusters, with `%n`/`%t` as literal newline/tab); directives with no GNU counterpart fail with a clear `unsupported BSD format directive` error
 - Fixed the remaining GNU-flavored shell builtins that broke under macOS/BSD muscle memory, using the same unambiguous-detection approach as the `stat` fix (only invocations that are invalid or nonsensical under GNU semantics are reinterpreted; unsupported BSD forms fail loudly instead of producing wrong output): `date -r <epoch>` formats the epoch when no such file exists (GNU `-r FILE` mtime preserved), signed `date -v±N<unit>` adjustments translate to `-d` relative dates and `-j` is accepted (`-j -f` strptime parse mode and field-set `-v` error clearly); `sed -i '' 's/…/…/' file` drops the BSD empty backup-suffix token instead of treating it as the script; `mktemp -t prefix` without X's creates `$TMPDIR/prefix.XXXXXXXXXX` (the GNU `too few X's` error path); `tail -r` reverses input by delegating to `tac` (with `-n`/`-c`/`-f` combinations erroring clearly); `find -E` maps to `-regextype posix-extended` ahead of the expression; `base64 -D` decodes as an alias of `-d`; and `ln -sfh` works via a `-h` alias of `--no-dereference` (clap's `-h` help short is dropped to match real GNU/BSD ln; `--help` unchanged)
-- Fixed `error.notify` raising a "Stopped with error" toast for a retryable provider error while an auto-retry was still pending; the toast now only fires once the retry saga actually settles (recovers silently, or exhausts retries).
 - Fixed terminal scrollback duplication issues with expanded streaming edit previews (Ctrl+O) by using a viewport-sized tail window.
 - Fixed custom model role resolution and alias parsing, ensuring canonical role selectors (`@role`) and thinking suffixes resolve correctly across all configuration surfaces.
 - Fixed quadratic growth in JSON logs by eliding redundant message snapshots and payloads.
