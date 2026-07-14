@@ -1428,6 +1428,44 @@ describe("advisor", () => {
 			expect(restored).toContain("tok_abc123");
 		});
 
+		it("scrubs prior advisor prompts when a later replace regex collides with their friendly prefix", async () => {
+			const obfuscator = new SecretObfuscator([
+				{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
+				{ type: "regex", content: "tok_[a-z0-9]+", mode: "replace" },
+			]);
+			const promptInputs: string[] = [];
+			const agent = makeAgent(promptInputs);
+			const firstStoredPrompt = (): string => {
+				const message = agent.state.messages[0];
+				if (!message || message.role !== "user" || !("content" in message) || typeof message.content !== "string") {
+					throw new Error("Expected the first advisor history item to be a user prompt");
+				}
+				return message.content;
+			};
+			const messages: AgentMessage[] = [
+				{ role: "user", content: "remember OTHERSECRET", timestamp: 1 } as AgentMessage,
+			];
+			const host: AdvisorRuntimeHost = {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+				obfuscator,
+			};
+			const runtime = new AdvisorRuntime(agent, host);
+
+			runtime.onTurnEnd();
+			await runtime.waitForCatchup(1000, 1);
+			agent.state.messages.push({ role: "user", content: promptInputs[0]!, timestamp: 1 } as AgentMessage);
+			expect(firstStoredPrompt()).toContain("TOKABC123_");
+
+			messages.push({ role: "user", content: "later tok_abc123", timestamp: 2 } as AgentMessage);
+			runtime.onTurnEnd();
+			await runtime.waitForCatchup(1000, 1);
+
+			expect(promptInputs).toHaveLength(2);
+			expect(firstStoredPrompt()).not.toContain("TOKABC123_");
+			expect(promptInputs[1]).not.toContain("TOKABC123_");
+		});
+
 		it("redacts secrets inside assistant thinking blocks, honoring the whole-delta friendly-prefix collision set", async () => {
 			// Regression: obfuscateAssistantMessage (the advisor-local redaction path)
 			// must rewrite `thinking` blocks the same way it rewrites `text` blocks.

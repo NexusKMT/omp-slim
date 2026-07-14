@@ -354,7 +354,12 @@ export class AdvisorRuntime {
 		this.#lastCount = all.length;
 		if (delta.length === 0) return null;
 		const obfuscator = this.host.obfuscator;
-		const formattedDelta = obfuscator?.hasSecrets() ? obfuscateAdvisorDelta(obfuscator, delta) : delta;
+		let formattedDelta = delta;
+		if (obfuscator?.hasSecrets()) {
+			const sharedRegexSecretValues = collectAdvisorRegexSecretValues(obfuscator, delta);
+			scrubAdvisorHistory(obfuscator, this.agent.state.messages, sharedRegexSecretValues);
+			formattedDelta = obfuscateAdvisorMessages(obfuscator, delta, sharedRegexSecretValues);
+		}
 		const md = formatSessionHistoryMarkdown(formattedDelta, {
 			includeThinking: true,
 			includeToolIntent: true,
@@ -829,8 +834,11 @@ function collectAdvisorRegexSecretValues(obfuscator: SecretObfuscator, messages:
 	return values;
 }
 
-function obfuscateAdvisorDelta(obfuscator: SecretObfuscator, messages: AgentMessage[]): AgentMessage[] {
-	const sharedRegexSecretValues = collectAdvisorRegexSecretValues(obfuscator, messages);
+function obfuscateAdvisorMessages(
+	obfuscator: SecretObfuscator,
+	messages: AgentMessage[],
+	sharedRegexSecretValues: ReadonlySet<string>,
+): AgentMessage[] {
 	let changed = false;
 	const result = messages.map(message => {
 		const next = obfuscateAdvisorMessage(obfuscator, message, sharedRegexSecretValues);
@@ -838,4 +846,16 @@ function obfuscateAdvisorDelta(obfuscator: SecretObfuscator, messages: AgentMess
 		return next;
 	});
 	return changed ? result : messages;
+}
+
+function scrubAdvisorHistory(
+	obfuscator: SecretObfuscator,
+	messages: AgentMessage[],
+	sharedRegexSecretValues: ReadonlySet<string>,
+): void {
+	for (let index = 0; index < messages.length; index++) {
+		const message = messages[index]!;
+		const next = obfuscateAdvisorMessage(obfuscator, message, sharedRegexSecretValues);
+		if (next !== message) messages[index] = next;
+	}
 }
