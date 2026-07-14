@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed persisted vibe workers disappearing or being replaced across graceful restarts, session switches, failed mode exits, and late cancelled initialization: resumable conversations now restore safely, mode exit atomically commits worker tombstones with the mode change and rolls back cleanly on storage failure, explicit kills tear workers down monotonically while repairing uncertain append tails, killed transcripts remain readable but non-revivable, and stale initializers cannot overwrite newer same-ID workers ([#5303](https://github.com/can1357/oh-my-pi/issues/5303) by [@mastertyko](https://github.com/mastertyko)).
+
 ## [16.4.8] - 2026-07-12
 
 ### Fixed
