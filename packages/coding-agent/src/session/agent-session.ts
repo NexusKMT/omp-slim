@@ -4403,8 +4403,9 @@ export class AgentSession {
 		// Check auto-retry and auto-compaction after agent completes
 		if (event.type === "agent_end") {
 			const settledMessages = event.messages;
+			const activeMessages = this.agent.state.messages;
 			const emitAgentEndNotification = async (isTerminal = true) => {
-				await this.#emitAgentEndNotification(settledMessages);
+				await this.#emitAgentEndNotification(activeMessages);
 				await this.#emitSessionEvent({ ...event, isTerminal });
 			};
 			const usage = this.getSessionStats().tokens;
@@ -4654,7 +4655,7 @@ export class AgentSession {
 				await emitAgentEndNotification(false);
 				return;
 			}
-			await this.#emitSessionStopEvent(settledMessages, msg);
+			await this.#emitSessionStopEvent(activeMessages, msg);
 			await emitAgentEndNotification();
 		}
 	};

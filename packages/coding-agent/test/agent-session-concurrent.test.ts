@@ -344,6 +344,7 @@ describe("AgentSession concurrent prompt guard", () => {
 			convertToLlm,
 		});
 		const stopEvents: Array<{
+			messages: AgentMessage[];
 			stop_hook_active: boolean;
 			session_id: string;
 			turn_id: number;
@@ -399,6 +400,14 @@ describe("AgentSession concurrent prompt guard", () => {
 		expect(stopEvents.map(event => event.turn_id)).toEqual([0, 0]);
 		expect(stopEvents[0]?.session_id).toBe(session.sessionId);
 		expect(stopEvents[0]?.last_assistant_message?.role).toBe("assistant");
+		expect(
+			stopEvents[1]?.messages.some(
+				message =>
+					message.role === "user" &&
+					Array.isArray(message.content) &&
+					message.content.some(block => block.type === "text" && block.text === "First message"),
+			),
+		).toBe(true);
 	});
 
 	it("uses non-empty session_stop reason when additional context is empty", async () => {
