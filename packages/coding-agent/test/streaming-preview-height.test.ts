@@ -382,7 +382,7 @@ describe("streaming edit preview height (stable, full tail window)", () => {
 describe("streaming tool call preview height (bounded across renderers)", () => {
 	beforeAll(async () => {
 		// `evalToolRenderer.renderCall` walks the theme during highlighting; the
-		// bash/ssh/eval pending previews exercised below DO NOT read
+		// bash/eval pending previews exercised below DO NOT read
 		// `settings.*`, so the global Settings singleton is intentionally left
 		// untouched here. Resetting/initialising it in `beforeEach` raced with
 		// parallel test files that do the same dance (issue #2582), flipping the
@@ -422,6 +422,9 @@ describe("streaming tool call preview height (bounded across renderers)", () => 
 	});
 
 	test("bash pending previews stay short even with very long multiline args", () => {
+		// bash windows the collapsed command to a viewport-sized TAIL: the end
+		// (the live edge while args stream) stays visible behind an "… N earlier
+		// lines" marker on top; the head is elided.
 		const window = previewWindowRows();
 		const total = window + 5;
 		const longLines = Array.from({ length: total }, (_, i) => `line-${i}`);
@@ -447,10 +450,10 @@ describe("streaming tool call preview height (bounded across renderers)", () => 
 	}, 30_000);
 
 	test("eval pending preview windows the code to the viewport tail", () => {
-		// Eval code is capped to the same viewport-sized tail window as bash:
-		// the live edge stays visible behind an "… N earlier lines" marker;
-		// ctrl+o uncaps. Unlike bash, the marker row sits above the window, so
-		// previewWindowRows() code lines stay visible.
+		// Eval cell code is capped to the same viewport-sized TAIL window as
+		// bash: the live edge stays visible behind an "… N earlier lines"
+		// marker on top; ctrl+o uncaps. Unlike bash, the marker row sits above
+		// the window, so previewWindowRows() code lines stay visible.
 		const window = previewWindowRows();
 		const total = window + 5;
 		const hidden = total - window;
