@@ -4592,7 +4592,15 @@ export class AgentSession {
 			if (this.#isClassifierRefusal(msg)) {
 				this.#removeAssistantMessageFromActiveContext(msg);
 			}
-			if (msg.stopReason === "error" && this.#retryAttempt > 0) {
+			this.#resolveRetry();
+
+			if (!checkedCompaction) {
+				maintenanceRoute("bottom-checkCompaction");
+				const compactionTask = this.#checkCompaction(msg);
+				this.#trackPostPromptTask(compactionTask);
+				compactionResult = await compactionTask;
+			}
+			if (msg.stopReason === "error" && this.#retryAttempt > 0 && !compactionResult.continuationScheduled) {
 				const attempt = this.#retryAttempt;
 				this.#retryAttempt = 0;
 				await this.#emitSessionEvent({
@@ -4602,14 +4610,6 @@ export class AgentSession {
 					finalError: msg.errorMessage,
 				});
 				this.#clearPendingRecoveredRetryErrors();
-			}
-			this.#resolveRetry();
-
-			if (!checkedCompaction) {
-				maintenanceRoute("bottom-checkCompaction");
-				const compactionTask = this.#checkCompaction(msg);
-				this.#trackPostPromptTask(compactionTask);
-				compactionResult = await compactionTask;
 			}
 			// Stop-time todo reconciliation only fires at a text-only final stop. A run
 			// that ends still mid-tool-use (deadline hit, context full, etc.) skips the
