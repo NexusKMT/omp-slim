@@ -2,6 +2,7 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { estimateTokens } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, ImageContent, TextContent } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
+import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { obfuscateToolArguments, type SecretObfuscator } from "../secrets/obfuscator";
 import {
 	formatExecutionSourcePreview,
@@ -672,14 +673,15 @@ function obfuscateAdvisorToolResultErrorContent(
 	content: TextualContent,
 	sharedRegexSecretValues: ReadonlySet<string>,
 ): TextualContent {
-	const preview = firstAdvisorToolResultErrorLine(content);
-	if (preview === undefined) return content;
+	const firstLine = firstAdvisorToolResultErrorLine(content);
+	if (firstLine === undefined) return content;
+	const preview = formatToolResultErrorPreview(content);
 	const obfuscatedPreview = obfuscator.obfuscate(preview, sharedRegexSecretValues);
-	if (obfuscatedPreview === preview) return content;
-	if (typeof content === "string") return obfuscatedPreview + content.slice(preview.length);
+	if (obfuscatedPreview === firstLine) return content;
+	if (typeof content === "string") return obfuscatedPreview + content.slice(firstLine.length);
 	const first = content[0]!;
 	if (first.type !== "text") return content;
-	return [{ ...first, text: obfuscatedPreview + first.text.slice(preview.length) }, ...content.slice(1)];
+	return [{ ...first, text: obfuscatedPreview + first.text.slice(firstLine.length) }, ...content.slice(1)];
 }
 
 function obfuscateAssistantMessage(
@@ -702,8 +704,12 @@ function obfuscateAssistantMessage(
 			return { ...block, thinking, thinkingSignature: undefined };
 		}
 		if (block.type === "toolCall") {
-			const args = obfuscateToolArguments(obfuscator, block.arguments, sharedRegexSecretValues);
-			if (args === block.arguments) return block;
+			const primaryArg = formatToolCallPrimaryArg(block.name, block.arguments);
+			const intent = formatToolCallIntentPreview(block.arguments);
+			const args = {
+				path: obfuscator.obfuscate(primaryArg, sharedRegexSecretValues),
+				...(intent ? { [INTENT_FIELD]: obfuscator.obfuscate(intent, sharedRegexSecretValues) } : {}),
+			};
 			changed = true;
 			return { ...block, arguments: args };
 		}

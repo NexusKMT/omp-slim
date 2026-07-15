@@ -1974,7 +1974,7 @@ describe("advisor", () => {
 			expect(prompt).toContain("TOKABC123_");
 		});
 
-		it("collects regex values from tool arguments that resemble image blocks", async () => {
+		it("does not scan tool arguments omitted by the primary-argument preview", async () => {
 			const obfuscator = new SecretObfuscator([
 				{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
 				{ type: "regex", content: "tok_[a-z0-9]+" },
@@ -2005,7 +2005,7 @@ describe("advisor", () => {
 			const prompt = promptInputs[0]!;
 			expect(prompt).not.toContain("OTHERSECRET");
 			expect(prompt).not.toContain("tok_abc123");
-			expect(prompt).not.toContain("TOKABC123_");
+			expect(prompt).toContain("TOKABC123_");
 		});
 
 		it("expands plan-mode context once, then collapses an unchanged re-injection", async () => {
