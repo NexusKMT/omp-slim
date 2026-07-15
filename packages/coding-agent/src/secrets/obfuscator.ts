@@ -669,20 +669,28 @@ export class SecretObfuscator {
 			}
 		}
 		let index = 0;
+		let legacyIndex = 0;
 		let hasRealSec = this.#regexEntries.length > 0;
 		for (const entry of entries) {
 			if (entry.type !== "plain") continue;
 			const mode = entry.mode ?? "obfuscate";
 			if (mode === "obfuscate") {
 				if (entry.content.length < MIN_OBFUSCATE_SECRET_LEN) {
-					// Tone down short plain secret obfuscation to avoid false matches on small words like "esp"
+					// Tone down short plain secret obfuscation to avoid false matches on small words like "esp".
+					// Legacy aliases remain display-only, so preserve their historical positions.
+					this.#legacyDeobfuscateMap.set(buildLegacyPlaceholder(legacyIndex), {
+						secret: entry.content,
+						recursive: false,
+					});
+					legacyIndex++;
 					continue;
 				}
 				const placeholder = this.#createPlaceholder(entry.content, entry.friendlyName);
-				this.#legacyDeobfuscateMap.set(buildLegacyPlaceholder(index), {
+				this.#legacyDeobfuscateMap.set(buildLegacyPlaceholder(legacyIndex), {
 					secret: entry.content,
 					recursive: false,
 				});
+				legacyIndex++;
 				this.#plainMappings.set(entry.content, index);
 				this.#obfuscateMappings.set(index, { secret: entry.content, placeholder });
 				this.#generatedPlaceholders.add(placeholder);
@@ -1397,10 +1405,7 @@ export class SecretObfuscator {
 			if (match === null) break;
 			const placeholder = match[0];
 			const unprefixed = placeholderWithoutFriendlyName(placeholder);
-			const replacement =
-				unprefixed !== undefined && this.#deobfuscateMap.has(unprefixed)
-					? this.#placeholderForCurrentInput(placeholder)
-					: placeholder;
+			const replacement = unprefixed !== undefined ? this.#placeholderForCurrentInput(placeholder) : placeholder;
 			result += text.slice(cursor, match.index);
 			resultOrigin += origin.slice(cursor, match.index);
 			result += replacement;

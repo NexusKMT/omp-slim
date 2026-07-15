@@ -598,6 +598,18 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(obfuscator.deobfuscate(obfuscated)).toBe("use OTHERSECRET and tok_abc123 now");
 	});
 
+	it("strips an unsafe prefix from an unknown historical friendly placeholder", () => {
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
+			{ type: "regex", content: "tok_[a-z0-9]+" },
+		]);
+		const stalePlaceholder = "#TOKABC123_OLDHASH:L#";
+
+		expect(obfuscator.stripUnsafeFriendlyPlaceholderPrefixes(stalePlaceholder, new Set(["tok_abc123"]))).toBe(
+			"#OLDHASH:L#",
+		);
+	});
+
 	it("strips an already-obfuscated placeholder's unsafe friendly prefix carried in from earlier history when a later input reveals the regex-protected value it normalizes to", () => {
 		// Regression: the two same-call forecasts above only re-check a friendly
 		// prefix at the moment its placeholder is FIRST substituted into THIS
@@ -2348,6 +2360,16 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(firstToken).toBe(secondToken);
 		expect(firstToken).not.toMatch(/_[A-Z0-9]+/);
 		expect(first.deobfuscate(firstToken ?? "")).toBe("alpha-secret");
+	});
+
+	it("preserves legacy alias positions for skipped short plain secrets", () => {
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "abc" },
+			{ type: "plain", content: "MYSECRET123" },
+		]);
+
+		expect(obfuscator.deobfuscateStored("#XRRS#")).toBe("abc");
+		expect(obfuscator.deobfuscateStored("#NTJ5#")).toBe("MYSECRET123");
 	});
 
 	it("honors legacy index-derived aliases only on the stored-replay path", () => {
