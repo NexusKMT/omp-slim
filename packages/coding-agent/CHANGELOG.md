@@ -1,6 +1,14 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added `error.notify` so failed model turns can emit distinct terminal/desktop notifications without changing completion notifications ([#2691](https://github.com/can1357/oh-my-pi/issues/2691)).
+
+### Fixed
+
+- Fixed `error.notify` raising a "Stopped with error" toast for provider failures while an auto-retry or async-delivery continuation was pending; the toast now waits for the true terminal settle.
+
 
 ## [17.0.0] - 2026-07-15
 
@@ -20,7 +28,6 @@
 - Added the `edit.enforceSeenLines` setting (default off) to gate the hashline seen-line guard. When enabled, edits anchored on lines that a prior `read` or `grep` never displayed are rejected.
 - Added per-agent prewalk for subagents, featuring a `prewalk` frontmatter field, a `task.agentPrewalk` settings override toggled from the `/agents` dashboard, and a `task.prewalk` boolean (default off) to arm the bundled generic `task` agent.
 
-- Added `error.notify` so failed model turns can emit distinct terminal/desktop notifications without changing completion notifications ([#2691](https://github.com/can1357/oh-my-pi/issues/2691)).
 
 ### Changed
 
@@ -51,7 +58,6 @@
 - Fixed non-yolo approval modes double-prompting for `xd://` device dispatches.
 - Fixed TTSR rules with leading inline regex flags failing to compile and being silently dropped in Bun/JS environments, and recovered scope tokens and sibling values from malformed frontmatter.
 
-- Fixed `error.notify` raising a "Stopped with error" toast for a retryable provider error while an auto-retry was still pending; the toast now only fires once the retry saga actually settles (recovers silently, or exhausts retries).
 
 ## [16.5.2] - 2026-07-14
 

@@ -198,6 +198,19 @@ describe("EventController.sendErrorNotification", () => {
 		controller.sendErrorNotification(makeAgentEndEvent([makeAssistantMessage("stop")]));
 		expect(spy).toHaveBeenCalledTimes(0);
 	});
+	it("skips an error turn marked as a non-terminal scheduling pause", () => {
+		const spy = vi.spyOn(TERMINAL, "sendNotification").mockImplementation(() => {});
+		settings.override("error.notify", "on");
+		const controller = new EventController(makeContext());
+		const event = {
+			...makeAgentEndEvent([makeAssistantMessage("error")]),
+			isTerminal: false,
+		} as Extract<AgentSessionEvent, { type: "agent_end" }> & { isTerminal: false };
+
+		controller.sendErrorNotification(event);
+
+		expect(spy).not.toHaveBeenCalled();
+	});
 });
 
 describe("EventController — notifications through the real turn-end path (#handleAgentEnd)", () => {

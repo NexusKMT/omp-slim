@@ -582,7 +582,11 @@ function sanitizeAssistantForReparentedHistory(message: AssistantMessage): Assis
 
 /** Session-specific events that extend the core AgentEvent */
 export type AgentSessionEvent =
-	| AgentEvent
+	| Exclude<AgentEvent, { type: "agent_end" }>
+	| (Extract<AgentEvent, { type: "agent_end" }> & {
+			/** False when an async delivery will resume the session before its true final settle. */
+			isTerminal?: boolean;
+	  })
 	| {
 			type: "auto_compaction_start";
 			reason: "threshold" | "overflow" | "idle" | "incomplete";
@@ -4129,11 +4133,13 @@ export class AgentSession {
 			this.#recordToolExecutionStart(event);
 		}
 
-		try {
-			await this.#emitSessionEvent(displayEvent);
-		} catch (error) {
-			messageEndPersistence?.release();
-			throw error;
+		if (event.type !== "agent_end") {
+			try {
+				await this.#emitSessionEvent(displayEvent);
+			} catch (error) {
+				messageEndPersistence?.release();
+				throw error;
+			}
 		}
 
 		if (event.type === "turn_start") {
@@ -4397,8 +4403,9 @@ export class AgentSession {
 		// Check auto-retry and auto-compaction after agent completes
 		if (event.type === "agent_end") {
 			const settledMessages = this.agent.state.messages;
-			const emitAgentEndNotification = async () => {
+			const emitAgentEndNotification = async (isTerminal = true) => {
 				await this.#emitAgentEndNotification(settledMessages);
+				await this.#emitSessionEvent({ ...event, isTerminal });
 			};
 			const usage = this.getSessionStats().tokens;
 			await this.#goalRuntime.onAgentEnd({
@@ -4648,7 +4655,7 @@ export class AgentSession {
 			// the session is fully idle (the todo reminder above defers the same
 			// way inside #checkTodoCompletion).
 			if (this.#hasPendingAsyncWake()) {
-				await emitAgentEndNotification();
+				await emitAgentEndNotification(false);
 				return;
 			}
 			await this.#emitSessionStopEvent(settledMessages, msg);

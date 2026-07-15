@@ -1573,6 +1573,12 @@ export class EventController {
 	}
 
 	sendErrorNotification(event: Extract<AgentSessionEvent, { type: "agent_end" }>): void {
+		// A running async job or queued delivery will wake the session again, so
+		// its current agent_end is a scheduling pause rather than a user-visible
+		// terminal failure. AgentSession marks that stable outcome before
+		// dispatching the deferred event; do not infer it from mutable job state.
+		if (event.isTerminal === false) return;
+
 		// `AgentSession` defers and coalesces the wire-level `agent_end` while a
 		// prompt is still in flight (see `#emitSessionEvent` in agent-session.ts):
 		// every mid-retry attempt's own settle is superseded, so this method often

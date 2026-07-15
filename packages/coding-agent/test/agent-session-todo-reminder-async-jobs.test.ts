@@ -58,6 +58,7 @@ describe("AgentSession todo reminder async-job deferral", () => {
 	let gates: Array<PromiseWithResolvers<string>>;
 	let reminderAttempts: number[];
 	let firstReminderPromise: Promise<void>;
+	let agentEndTerminalStates: Array<boolean | undefined>;
 	let resolveFirstReminder: () => void;
 
 	function textOnlyAssistantMessage(): AssistantMessage {
@@ -150,11 +151,17 @@ describe("AgentSession todo reminder async-job deferral", () => {
 		});
 
 		reminderAttempts = [];
+		agentEndTerminalStates = [];
 		({ promise: firstReminderPromise, resolve: resolveFirstReminder } = Promise.withResolvers<void>());
 		session.subscribe((event: AgentSessionEvent) => {
 			if (event.type === "todo_reminder") {
 				reminderAttempts.push(event.attempt);
 				if (reminderAttempts.length === 1) resolveFirstReminder();
+			}
+			if (event.type === "agent_end") {
+				agentEndTerminalStates.push(
+					(event as Extract<AgentSessionEvent, { type: "agent_end" }> & { isTerminal?: boolean }).isTerminal,
+				);
 			}
 		});
 	});
@@ -182,6 +189,7 @@ describe("AgentSession todo reminder async-job deferral", () => {
 
 		expect(reminderAttempts).toEqual([]);
 		expect(continueSpy).not.toHaveBeenCalled();
+		expect(agentEndTerminalStates).toEqual([false]);
 	});
 
 	it("does not defer for a running job owned by a different agent", async () => {
