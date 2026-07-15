@@ -2,7 +2,6 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { estimateTokens } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, ImageContent, TextContent } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
-import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { obfuscateToolArguments, type SecretObfuscator } from "../secrets/obfuscator";
 import {
 	formatExecutionSourcePreview,
@@ -729,12 +728,8 @@ function obfuscateAssistantMessage(
 			return { ...block, thinking, thinkingSignature: undefined };
 		}
 		if (block.type === "toolCall") {
-			const primaryArg = formatToolCallPrimaryArg(block.name, block.arguments);
-			const intent = formatToolCallIntentPreview(block.arguments);
-			const args = {
-				path: obfuscator.obfuscate(primaryArg, sharedRegexSecretValues),
-				...(intent ? { [INTENT_FIELD]: obfuscator.obfuscate(intent, sharedRegexSecretValues) } : {}),
-			};
+			const args = obfuscateToolArguments(obfuscator, block.arguments, sharedRegexSecretValues);
+			if (args === block.arguments) return block;
 			changed = true;
 			return { ...block, arguments: args };
 		}
