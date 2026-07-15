@@ -721,20 +721,14 @@ function obfuscateAdvisorMessage(
 			return { ...(message as object), content, details } as AgentMessage;
 		}
 		case "bashExecution": {
-			const msg = message as AgentMessage & { command: string; output: string };
+			const msg = message as AgentMessage & { command: string };
 			const command = obfuscator.obfuscate(msg.command, sharedRegexSecretValues);
-			const output = obfuscator.obfuscate(msg.output, sharedRegexSecretValues);
-			return command === msg.command && output === msg.output
-				? message
-				: ({ ...(message as object), command, output } as AgentMessage);
+			return command === msg.command ? message : ({ ...(message as object), command } as AgentMessage);
 		}
 		case "pythonExecution": {
-			const msg = message as AgentMessage & { code: string; output: string };
+			const msg = message as AgentMessage & { code: string };
 			const code = obfuscator.obfuscate(msg.code, sharedRegexSecretValues);
-			const output = obfuscator.obfuscate(msg.output, sharedRegexSecretValues);
-			return code === msg.code && output === msg.output
-				? message
-				: ({ ...(message as object), code, output } as AgentMessage);
+			return code === msg.code ? message : ({ ...(message as object), code } as AgentMessage);
 		}
 		case "branchSummary": {
 			const msg = message as AgentMessage & { summary: string };
