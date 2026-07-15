@@ -712,6 +712,11 @@ export class SecretObfuscator {
 		return this.#hasAny;
 	}
 
+	/** Whether stored-session restoration can resolve keyed or legacy placeholders. */
+	hasStoredSecrets(): boolean {
+		return this.#hasAny || this.#legacyDeobfuscateMap.size > 0;
+	}
+
 	/** Obfuscate all secrets in text. Bidirectional placeholders for obfuscate mode, one-way for replace. */
 	obfuscate(text: string, sharedRegexSecretValues?: ReadonlySet<string>): string {
 		if (!this.#hasAny) return text;
@@ -946,7 +951,8 @@ export class SecretObfuscator {
 	}
 
 	#deobfuscate(text: string, allowLegacy: boolean): string {
-		if (!this.#hasAny || !text.includes("#")) return text;
+		if ((!this.#hasAny && (!allowLegacy || this.#legacyDeobfuscateMap.size === 0)) || !text.includes("#"))
+			return text;
 		let result = text;
 		for (;;) {
 			let shouldContinue = false;
@@ -978,7 +984,7 @@ export class SecretObfuscator {
 
 	/** Deep-walk stored session content, deobfuscating string values incl. legacy aliases. */
 	deobfuscateStoredObject<T>(obj: T): T {
-		if (!this.#hasAny) return obj;
+		if (!this.hasStoredSecrets()) return obj;
 		return deepWalkStrings(obj, s => this.deobfuscateStored(s));
 	}
 
@@ -1877,7 +1883,8 @@ export function deobfuscateSessionContext(
 	obfuscator: SecretObfuscator | undefined,
 	allowLegacyAliases = false,
 ): SessionContext {
-	if (!obfuscator?.hasSecrets()) return sessionContext;
+	if (!obfuscator || !(allowLegacyAliases ? obfuscator.hasStoredSecrets() : obfuscator.hasSecrets()))
+		return sessionContext;
 	const messages = deobfuscateAgentMessages(obfuscator, sessionContext.messages, allowLegacyAliases);
 	return messages === sessionContext.messages ? sessionContext : { ...sessionContext, messages };
 }
@@ -1934,7 +1941,7 @@ export function deobfuscateAssistantContent(
 	content: AssistantMessage["content"],
 	allowLegacyAliases = false,
 ): AssistantMessage["content"] {
-	if (!obfuscator.hasSecrets()) return content;
+	if (!(allowLegacyAliases ? obfuscator.hasStoredSecrets() : obfuscator.hasSecrets())) return content;
 	const deob = (text: string): string =>
 		allowLegacyAliases ? obfuscator.deobfuscateStored(text) : obfuscator.deobfuscate(text);
 	let changed = false;
@@ -1969,7 +1976,7 @@ export function deobfuscateToolArguments(
 	args: Record<string, unknown>,
 	allowLegacyAliases = false,
 ): Record<string, unknown> {
-	if (!obfuscator.hasSecrets()) return args;
+	if (!(allowLegacyAliases ? obfuscator.hasStoredSecrets() : obfuscator.hasSecrets())) return args;
 	const deob = (text: string): string =>
 		allowLegacyAliases ? obfuscator.deobfuscateStored(text) : obfuscator.deobfuscate(text);
 	return mapJsonStrings(args as JsonValue, deob) as Record<string, unknown>;
