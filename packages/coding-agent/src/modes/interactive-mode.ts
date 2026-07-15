@@ -56,6 +56,7 @@ import { reset as resetCapabilities } from "../capability";
 import type { CollabGuestLink } from "../collab/guest";
 import type { CollabHost } from "../collab/host";
 import { KeybindingsManager } from "../config/keybindings";
+import { formatModelString } from "../config/model-resolver";
 import { applyProviderGlobalsFromSettings } from "../config/provider-globals";
 import { isSettingsInitialized, onStatusLineSessionAccentChanged, Settings, settings } from "../config/settings";
 import { clearClaudePluginRootsCache } from "../discovery/helpers";
@@ -1966,6 +1967,11 @@ export class InteractiveMode implements InteractiveModeContext {
 			sessionManager: this.sessionManager,
 			asyncJobManager: this.session.asyncJobManager,
 			settings: this.session.settings,
+			// Resolve restored/switched-to workers against this session's active model
+			// (same as the spawn-path ToolSession), not the settings default. This is
+			// the primary fallback in resolveAgentModelPatterns, so the `good` worker's
+			// pi/task inheritance tracks the reopened session's model.
+			getActiveModelString: () => (this.session.model ? formatModelString(this.session.model) : undefined),
 		};
 	}
 
