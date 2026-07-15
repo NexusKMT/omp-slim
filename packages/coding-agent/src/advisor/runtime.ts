@@ -695,7 +695,11 @@ function obfuscateAdvisorMessage(
 				details?: Record<string, unknown>;
 			};
 			const content = obfuscateTextualContent(obfuscator, msg.content, sharedRegexSecretValues);
-			const details = obfuscateDetails(obfuscator, msg.details, sharedRegexSecretValues);
+			let details = msg.details;
+			if (typeof details?.diff === "string") {
+				const diff = obfuscator.obfuscate(details.diff, sharedRegexSecretValues);
+				if (diff !== details.diff) details = { ...details, diff };
+			}
 			if (content === msg.content && details === msg.details) return message;
 			return { ...(message as object), content, details } as AgentMessage;
 		}
@@ -796,7 +800,12 @@ function collectAdvisorRegexSecretValues(obfuscator: SecretObfuscator, messages:
 			case "developer":
 				addContent(message.content as TextualContent);
 				break;
-			case "toolResult":
+			case "toolResult": {
+				addContent(message.content as TextualContent);
+				const diff = (message.details as { diff?: unknown } | undefined)?.diff;
+				if (typeof diff === "string") add(diff);
+				break;
+			}
 			case "custom":
 			case "hookMessage":
 				addContent(message.content as TextualContent);
