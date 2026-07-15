@@ -20,6 +20,8 @@ describe("ToolExecutionComponent live preview spinners", () => {
 
 	it("animates the eval pending cell while the call is live", () => {
 		vi.useFakeTimers();
+		let now = 0;
+		vi.spyOn(performance, "now").mockImplementation(() => now);
 		const requestRender = vi.fn();
 		const requestComponentRender = vi.fn();
 		const component = new ToolExecutionComponent(
@@ -33,6 +35,7 @@ describe("ToolExecutionComponent live preview spinners", () => {
 
 		try {
 			const firstFrame = stripVTControlCharacters(component.render(80).join("\n"));
+			now = 120;
 			vi.advanceTimersByTime(120);
 			const secondFrame = stripVTControlCharacters(component.render(80).join("\n"));
 
@@ -48,6 +51,8 @@ describe("ToolExecutionComponent live preview spinners", () => {
 
 	it("animates a shell pending header while the call is live", () => {
 		vi.useFakeTimers();
+		let now = 0;
+		vi.spyOn(performance, "now").mockImplementation(() => now);
 		const requestRender = vi.fn();
 		const requestComponentRender = vi.fn();
 		const component = new ToolExecutionComponent(
@@ -61,6 +66,7 @@ describe("ToolExecutionComponent live preview spinners", () => {
 
 		try {
 			const firstFrame = stripVTControlCharacters(component.render(80).join("\n"));
+			now = 120;
 			vi.advanceTimersByTime(120);
 			const secondFrame = stripVTControlCharacters(component.render(80).join("\n"));
 

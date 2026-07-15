@@ -33,6 +33,9 @@
 - Removed the `xdev` `--tools` token; the `xd://` device system now mounts only via the `tools.xdev` setting (the `--tools ...,xdev` opt-in and `HIDDEN_TOOLS.xdev` are gone).
 
 ### Fixed
+- Fixed prewalk never switching after a successful todo call; the todo gate now opens at the completed turn boundary without allowing the todo call itself to trigger the handoff.
+- Fixed live pending tool headers retaining a stale spinner frame by rebuilding their cached display on each spinner tick.
+- Fixed task and eval tool descriptions omitting the configured default or allowed subagent names under restricted spawn policies.
 
 - Fixed Bash internal URLs remaining unresolved when used as unquoted arguments inside command substitutions ([#5535](https://github.com/can1357/oh-my-pi/issues/5535)).
 - Fixed `--tools` silently dropping hidden tool names (`xdev`, `yield`, ...); hidden built-ins are now addressable per the `hidden` tool contract.

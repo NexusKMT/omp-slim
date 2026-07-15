@@ -1738,6 +1738,8 @@ export class AgentSession {
 	#prewalk: Prewalk | undefined;
 	/** True once the plan nudge has been queued; scrubbed from context at the switch. */
 	#prewalkPlanInjected = false;
+	/** A text-only turn receives one continuation; tool progress re-arms it. */
+	#prewalkContinuationInjected = false;
 	/** True once any successful `todo` call landed — opens the prewalk
 	 *  trigger gate: the switch fires at the first edit/write AFTER the todo
 	 *  list exists (sessions without an ACTIVE todo tool skip the gate). */
@@ -2239,7 +2241,10 @@ export class AgentSession {
 		// silently killing production SWE-bench runs before any code was ever
 		// written. Force one more turn only in that specific, self-created
 		// hazard window.
-		if (this.#prewalkPlanInjected && context.toolResults.length === 0) {
+		if (context.toolResults.length > 0) {
+			this.#prewalkContinuationInjected = false;
+		} else if (this.#prewalkPlanInjected && !this.#prewalkContinuationInjected) {
+			this.#prewalkContinuationInjected = true;
 			this.agent.steer({
 				role: "custom",
 				customType: PREWALK_CONTINUE_MESSAGE_TYPE,
@@ -2262,6 +2267,9 @@ export class AgentSession {
 		const action = todoGateOpen
 			? context.toolResults.find(result => PREWALK_ACTION_TOOLS[result.toolName])
 			: undefined;
+		if (context.toolResults.some(result => result.toolName === "todo" && !result.isError)) {
+			this.#prewalkTodoSeen = true;
+		}
 		if (!action) {
 			if (!this.#prewalkPlanInjected) {
 				this.#prewalkPlanInjected = true;
