@@ -76,6 +76,10 @@ function oneLine(text: string, max = PRIMARY_ARG_MAX): string {
 	return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
+export function formatExecutionSourcePreview(source: string): string {
+	return oneLine(source);
+}
+
 /** Join the text blocks of a string-or-blocks content field. Images become `[image]`. */
 function contentToText(content: string | readonly (TextContent | ImageContent)[]): string {
 	if (typeof content === "string") return content;
@@ -211,7 +215,8 @@ function executionLine(
 			? `error · exit ${msg.exitCode}`
 			: "ok";
 	const lines = lineCount(msg.output);
-	return `→ ${kind}! ${oneLine(source)} ⇒ ${status} · ${lines} ${lines === 1 ? "line" : "lines"}`;
+	const sourcePreview = formatExecutionSourcePreview(source);
+	return `→ ${kind}! ${sourcePreview} ⇒ ${status} · ${lines} ${lines === 1 ? "line" : "lines"}`;
 }
 
 /**

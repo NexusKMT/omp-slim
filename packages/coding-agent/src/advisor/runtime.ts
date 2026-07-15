@@ -3,7 +3,11 @@ import { estimateTokens } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, ImageContent, TextContent } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
 import { obfuscateToolArguments, type SecretObfuscator } from "../secrets/obfuscator";
-import { formatSessionHistoryMarkdown, PRIMARY_CONTEXT_CUSTOM_TYPES } from "../session/session-history-format";
+import {
+	formatExecutionSourcePreview,
+	formatSessionHistoryMarkdown,
+	PRIMARY_CONTEXT_CUSTOM_TYPES,
+} from "../session/session-history-format";
 
 /**
  * Minimal slice of `Agent` the runtime drives — satisfied by pi-agent-core
@@ -769,12 +773,12 @@ function obfuscateAdvisorMessage(
 		}
 		case "bashExecution": {
 			const msg = message as AgentMessage & { command: string };
-			const command = obfuscator.obfuscate(msg.command, sharedRegexSecretValues);
+			const command = obfuscator.obfuscate(formatExecutionSourcePreview(msg.command), sharedRegexSecretValues);
 			return command === msg.command ? message : ({ ...(message as object), command } as AgentMessage);
 		}
 		case "pythonExecution": {
 			const msg = message as AgentMessage & { code: string };
-			const code = obfuscator.obfuscate(msg.code, sharedRegexSecretValues);
+			const code = obfuscator.obfuscate(formatExecutionSourcePreview(msg.code), sharedRegexSecretValues);
 			return code === msg.code ? message : ({ ...(message as object), code } as AgentMessage);
 		}
 		case "branchSummary": {
@@ -847,10 +851,10 @@ function collectAdvisorRegexSecretValues(obfuscator: SecretObfuscator, messages:
 				}
 				break;
 			case "bashExecution":
-				add(message.command);
+				add(formatExecutionSourcePreview(message.command));
 				break;
 			case "pythonExecution":
-				add(message.code);
+				add(formatExecutionSourcePreview(message.code));
 				break;
 			case "branchSummary":
 			case "compactionSummary":

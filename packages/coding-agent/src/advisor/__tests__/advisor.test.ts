@@ -1523,6 +1523,43 @@ describe("advisor", () => {
 			expect(promptInputs[0]).toContain("#TOKABC123_");
 			expect(promptInputs[0]).not.toContain("tok_abc123");
 		});
+		it("does not scan execution source after the advisor preview cap", async () => {
+			const obfuscator = new SecretObfuscator([
+				{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
+				{ type: "regex", content: "tok_[a-z0-9]+" },
+			]);
+			const promptInputs: string[] = [];
+			const agent = makeAgent(promptInputs);
+			const hiddenSuffix = `${"x".repeat(120)} tok_abc123`;
+			const messages: AgentMessage[] = [
+				{ role: "user", content: "remember OTHERSECRET for later", timestamp: 1 } as AgentMessage,
+				{
+					role: "bashExecution",
+					command: `echo ${hiddenSuffix}`,
+					exitCode: 0,
+					timestamp: 2,
+				} as unknown as AgentMessage,
+				{
+					role: "pythonExecution",
+					code: `print("${hiddenSuffix}")`,
+					exitCode: 0,
+					timestamp: 3,
+				} as unknown as AgentMessage,
+			];
+			const host: AdvisorRuntimeHost = {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+				obfuscator,
+			};
+			const runtime = new AdvisorRuntime(agent, host);
+
+			runtime.onTurnEnd();
+			await Promise.resolve();
+
+			expect(promptInputs).toHaveLength(1);
+			expect(promptInputs[0]).toContain("#TOKABC123_");
+			expect(promptInputs[0]).not.toContain("tok_abc123");
+		});
 
 		it("does not scan advisor-hidden file mention content", async () => {
 			const obfuscator = new SecretObfuscator([
