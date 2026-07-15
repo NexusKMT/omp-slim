@@ -820,11 +820,9 @@ function collectAdvisorRegexSecretValues(obfuscator: SecretObfuscator, messages:
 				break;
 			case "bashExecution":
 				add(message.command);
-				add(message.output);
 				break;
 			case "pythonExecution":
 				add(message.code);
-				add(message.output);
 				break;
 			case "branchSummary":
 			case "compactionSummary":
