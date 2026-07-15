@@ -241,7 +241,11 @@ describe("AgentSession prewalk", () => {
 		const failingTodoTool: AgentTool<typeof todoToolSchema, undefined> = {
 			...todoTool,
 			async execute() {
-				throw new Error("todo update failed");
+				return {
+					content: [{ type: "text", text: "todo update failed" }],
+					details: undefined,
+					isError: true,
+				};
 			},
 		};
 		const mock = createMockModel({

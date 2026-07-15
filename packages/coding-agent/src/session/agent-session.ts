@@ -2232,8 +2232,8 @@ export class AgentSession {
 		const prewalk = this.#prewalk;
 		if (!prewalk || context?.message.role !== "assistant") return;
 
-		const todoCalledThisTurn = context.toolResults.some(result => result.toolName === "todo");
-		if (todoCalledThisTurn) {
+		const todoSucceededThisTurn = context.toolResults.some(result => result.toolName === "todo" && !result.isError);
+		if (todoSucceededThisTurn) {
 			this.#prewalkTodoSeen = true;
 		}
 
@@ -2268,9 +2268,6 @@ export class AgentSession {
 		// not establish the list. The gate keys on the ACTIVE tool set, not the
 		// registry: a registered-but-deactivated todo (e.g. a restricted
 		// active-tool slate) is uncallable and would deadlock the switch.
-		if (context.toolResults.some(result => result.toolName === "todo" && !result.isError)) {
-			this.#prewalkTodoSeen = true;
-		}
 		const todoGateOpen = this.#prewalkTodoSeen || !this.getActiveToolNames().includes("todo");
 		const action = todoGateOpen
 			? context.toolResults.find(result => PREWALK_ACTION_TOOLS[result.toolName])
@@ -4583,6 +4580,17 @@ export class AgentSession {
 			// `stopReason === "error"`.
 			if (this.#isClassifierRefusal(msg)) {
 				this.#removeAssistantMessageFromActiveContext(msg);
+			}
+			if (msg.stopReason === "error" && this.#retryAttempt > 0) {
+				const attempt = this.#retryAttempt;
+				this.#retryAttempt = 0;
+				await this.#emitSessionEvent({
+					type: "auto_retry_end",
+					success: false,
+					attempt,
+					finalError: msg.errorMessage,
+				});
+				this.#clearPendingRecoveredRetryErrors();
 			}
 			this.#resolveRetry();
 

@@ -1683,6 +1683,54 @@ describe("AgentSession retry fallback", () => {
 		expect(lastAssistant.errorMessage).toBe(envelopeError);
 	});
 
+	it("closes the retry lifecycle when a retried turn ends with a non-retryable error", async () => {
+		const model = getBundledModel("openai", "gpt-4o-mini");
+		if (!model) throw new Error("Expected bundled OpenAI test model to exist");
+
+		const retryableError = "rate limit exceeded retry-after-ms=5";
+		const terminalError = "invalid request: schema violation";
+		const requestedModels: string[] = [];
+		const mock = createMockModel();
+		const agent = new Agent({
+			getApiKey: requestedModel => `${requestedModel.provider}-test-key`,
+			initialState: {
+				model,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [],
+			},
+			streamFn: (requestedModel, context, options) => {
+				requestedModels.push(`${requestedModel.provider}/${requestedModel.id}`);
+				mock.push({ throw: requestedModels.length === 1 ? retryableError : terminalError });
+				return mock.stream(requestedModel, context, options);
+			},
+		});
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 5,
+			"retry.maxRetries": 1,
+		});
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+		const { retryStartEvents, retryEndEvents } = trackRetryEvents(session);
+		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
+
+		await session.prompt("Retry once, then surface a terminal validation failure");
+		await session.waitForIdle();
+
+		expect(requestedModels).toEqual([`${model.provider}/${model.id}`, `${model.provider}/${model.id}`]);
+		expect(retryStartEvents).toHaveLength(1);
+		expect(retryEndEvents).toEqual([
+			expect.objectContaining({ success: false, attempt: 1, finalError: terminalError }),
+		]);
+		expect(session.retryAttempt).toBe(0);
+		expect(getLastAssistantMessage(session).stopReason).toBe("error");
+	});
+
 	it("auto-retries a bare Request was aborted error-stop turn (issue #5375)", async () => {
 		const model = getBundledModel("openai", "gpt-4o-mini");
 		if (!model) {
