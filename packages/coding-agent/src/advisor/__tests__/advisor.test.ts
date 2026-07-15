@@ -1449,6 +1449,7 @@ describe("advisor", () => {
 			]);
 			const promptInputs: string[] = [];
 			const agent = makeAgent(promptInputs);
+			const obfuscate = vi.spyOn(obfuscator, "obfuscate");
 			const messages: AgentMessage[] = [
 				{ role: "user", content: "remember OTHERSECRET for later", timestamp: 1 } as AgentMessage,
 				{
@@ -1470,6 +1471,7 @@ describe("advisor", () => {
 			expect(promptInputs).toHaveLength(1);
 			expect(promptInputs[0]).toContain("#TOKABC123_");
 			expect(promptInputs[0]).not.toContain("tok_abc123");
+			expect(obfuscate).not.toHaveBeenCalledWith("tok_abc123", expect.anything());
 		});
 
 		it("shares regex-protected values across the whole advisor delta so an earlier field's friendly prefix cannot leak a sibling field's secret", async () => {

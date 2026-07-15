@@ -747,10 +747,9 @@ function obfuscateAdvisorMessage(
 			let changed = false;
 			const files = msg.files.map(file => {
 				const path = obfuscator.obfuscate(file.path, sharedRegexSecretValues);
-				const content = obfuscator.obfuscate(file.content, sharedRegexSecretValues);
-				if (path === file.path && content === file.content) return file;
+				if (path === file.path) return file;
 				changed = true;
-				return { ...file, path, content };
+				return { ...file, path };
 			});
 			return changed ? ({ ...(message as object), files } as AgentMessage) : message;
 		}
