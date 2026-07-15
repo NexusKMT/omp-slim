@@ -609,6 +609,17 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 			"#OLDHASH:L#",
 		);
 	});
+	it("strips unsafe prefixes from overlapping historical placeholders", () => {
+		const obfuscator = new SecretObfuscator([
+			{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
+			{ type: "regex", content: "tok_[a-z0-9]+" },
+		]);
+		const stalePlaceholders = "#FOOO#TOKABC123_OLDHASH:L#";
+
+		expect(obfuscator.stripUnsafeFriendlyPlaceholderPrefixes(stalePlaceholders, new Set(["tok_abc123"]))).toBe(
+			"#FOOO#OLDHASH:L#",
+		);
+	});
 
 	it("strips an already-obfuscated placeholder's unsafe friendly prefix carried in from earlier history when a later input reveals the regex-protected value it normalizes to", () => {
 		// Regression: the two same-call forecasts above only re-check a friendly

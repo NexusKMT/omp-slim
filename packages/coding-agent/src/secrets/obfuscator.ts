@@ -1406,6 +1406,10 @@ export class SecretObfuscator {
 			const placeholder = match[0];
 			const unprefixed = placeholderWithoutFriendlyName(placeholder);
 			const replacement = unprefixed !== undefined ? this.#placeholderForCurrentInput(placeholder) : placeholder;
+			if (replacement === placeholder) {
+				resumePlaceholderScanAfterRejectedCandidate(match);
+				continue;
+			}
 			result += text.slice(cursor, match.index);
 			resultOrigin += origin.slice(cursor, match.index);
 			result += replacement;
