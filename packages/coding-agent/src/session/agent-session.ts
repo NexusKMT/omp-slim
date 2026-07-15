@@ -3802,6 +3802,13 @@ export class AgentSession {
 	 * the recovery wait always sees the in-flight handler and blocks until it — and
 	 * everything it schedules — settles. */
 	#handleAgentEvent = async (event: AgentEvent): Promise<void> => {
+		if (event.type === "tool_execution_end" && this.#isTerminalYieldToolResult(event)) {
+			const alreadyTerminated = this.#synchronouslyTerminatedYieldToolCallIds.delete(event.toolCallId);
+			if (!alreadyTerminated) {
+				this.#markTerminalYieldToolCall(event.toolCallId);
+				this.agent.abort(TERMINAL_TOOL_RESULT_ABORT_REASON);
+			}
+		}
 		if (event.type !== "agent_end") {
 			return this.#processAgentEvent(event);
 		}
@@ -4178,13 +4185,6 @@ export class AgentSession {
 				this.#planModeReminderAwaitingProgress = false;
 			}
 		}
-		if (event.type === "tool_execution_end" && this.#isTerminalYieldToolResult(event)) {
-			const alreadyTerminated = this.#synchronouslyTerminatedYieldToolCallIds.delete(event.toolCallId);
-			if (!alreadyTerminated) {
-				this.#markTerminalYieldToolCall(event.toolCallId);
-				this.agent.abort(TERMINAL_TOOL_RESULT_ABORT_REASON);
-			}
-		}
 
 		// TTSR: Check for pattern matches on assistant text/thinking and tool argument deltas
 		if (event.type === "message_update" && this.#ttsrManager?.hasRules()) {
@@ -4402,7 +4402,7 @@ export class AgentSession {
 
 		// Check auto-retry and auto-compaction after agent completes
 		if (event.type === "agent_end") {
-			const settledMessages = this.agent.state.messages;
+			const settledMessages = event.messages;
 			const emitAgentEndNotification = async (isTerminal = true) => {
 				await this.#emitAgentEndNotification(settledMessages);
 				await this.#emitSessionEvent({ ...event, isTerminal });
@@ -4432,8 +4432,10 @@ export class AgentSession {
 				return;
 			}
 
-			const successfulYieldMessage = this.#findSuccessfulYieldAssistantMessage(settledMessages);
 			const yieldOnThisMessage = this.#assistantEndedWithSuccessfulYield(msg);
+			const successfulYieldMessage = yieldOnThisMessage
+				? msg
+				: this.#findSuccessfulYieldAssistantMessage(settledMessages);
 
 			const maintenanceRoute = (route: string, extra?: Record<string, unknown>) => {
 				logger.debug("agent_end maintenance routing", {
@@ -4519,18 +4521,15 @@ export class AgentSession {
 				this.#trackPostPromptTask(compactionTask);
 				compactionResult = await compactionTask;
 				checkedCompaction = true;
-				if (
-					compactionResult.deferredHandoff ||
-					compactionResult.continuationScheduled ||
-					compactionResult.automaticContinuationBlocked
-				) {
+				const compactionContinues = compactionResult.deferredHandoff || compactionResult.continuationScheduled;
+				if (compactionContinues || compactionResult.automaticContinuationBlocked) {
 					maintenanceRoute("active-goal-pre-empt-compaction-handled", {
 						deferredHandoff: compactionResult.deferredHandoff,
 						continuationScheduled: compactionResult.continuationScheduled,
 						automaticContinuationBlocked: compactionResult.automaticContinuationBlocked === true,
 					});
 					this.#resolveRetry();
-					await emitAgentEndNotification();
+					await emitAgentEndNotification(!compactionContinues);
 					return;
 				}
 			}
@@ -4625,12 +4624,9 @@ export class AgentSession {
 			// rewind/todo/session_stop passes: any reminder or hook continuation we append
 			// here would race the handoff, retry, auto-continue prompt, queued-message
 			// drain, or the explicit pause that is preventing a compaction loop.
-			if (
-				compactionResult.deferredHandoff ||
-				compactionResult.continuationScheduled ||
-				compactionResult.automaticContinuationBlocked
-			) {
-				await emitAgentEndNotification();
+			const compactionContinues = compactionResult.deferredHandoff || compactionResult.continuationScheduled;
+			if (compactionContinues || compactionResult.automaticContinuationBlocked) {
+				await emitAgentEndNotification(!compactionContinues);
 				return;
 			}
 			if (msg.stopReason !== "error") {

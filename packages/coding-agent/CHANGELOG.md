@@ -8,6 +8,7 @@
 ### Fixed
 
 - Fixed `error.notify` raising a "Stopped with error" toast for provider failures while an auto-retry or async-delivery continuation was pending; the toast now waits for the true terminal settle.
+- Fixed terminal `yield` results racing post-turn maintenance, which could trigger an unnecessary automatic handoff or compaction.
 
 
 ## [17.0.0] - 2026-07-15
