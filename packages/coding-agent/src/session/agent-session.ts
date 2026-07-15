@@ -1741,6 +1741,8 @@ export class AgentSession {
 	 *  trigger gate: the switch fires at the first edit/write AFTER the todo
 	 *  list exists (sessions without an ACTIVE todo tool skip the gate). */
 	#prewalkTodoSeen = false;
+	/** True once a text-only turn has consumed its continuation until tool progress re-arms it. */
+	#prewalkContinuationIssued = false;
 	#planYolo: PlanYolo | undefined;
 	#planYoloPreviousTools: string[] | undefined;
 	#planYoloArmed = false;
@@ -2238,7 +2240,8 @@ export class AgentSession {
 		// silently killing production SWE-bench runs before any code was ever
 		// written. Force one more turn only in that specific, self-created
 		// hazard window.
-		if (this.#prewalkPlanInjected && context.toolResults.length === 0) {
+		if (context.toolResults.length > 0) this.#prewalkContinuationIssued = false;
+		if (this.#prewalkPlanInjected && context.toolResults.length === 0 && !this.#prewalkContinuationIssued) {
 			this.agent.steer({
 				role: "custom",
 				customType: PREWALK_CONTINUE_MESSAGE_TYPE,
@@ -2247,6 +2250,7 @@ export class AgentSession {
 				display: false,
 				timestamp: Date.now(),
 			});
+			this.#prewalkContinuationIssued = true;
 		}
 
 		// Todo gate: the plan nudge instructs "finish the plan, then init the
@@ -2257,6 +2261,9 @@ export class AgentSession {
 		// ACTIVE tool set, not the registry: a registered-but-deactivated todo
 		// (e.g. a restricted active-tool slate) is uncallable and would
 		// deadlock the switch.
+		if (context.toolResults.some(result => result.toolName === "todo")) {
+			this.#prewalkTodoSeen = true;
+		}
 		const todoGateOpen = this.#prewalkTodoSeen || !this.getActiveToolNames().includes("todo");
 		const action = todoGateOpen
 			? context.toolResults.find(result => PREWALK_ACTION_TOOLS[result.toolName])
