@@ -290,6 +290,24 @@ describe("EventController — error toast gated while auto-retry is pending", ()
 		expect(spy).not.toHaveBeenCalled();
 	});
 
+	it("clears a retry latch when the view retargets to a session that is not retrying", async () => {
+		const spy = vi.spyOn(TERMINAL, "sendNotification").mockImplementation(() => {});
+		settings.override("error.notify", "on");
+		const controller = new EventController(makeTurnEndContext());
+
+		await controller.handleEvent({
+			type: "auto_retry_start",
+			attempt: 1,
+			maxAttempts: 3,
+			delayMs: 100,
+			errorMessage: "overloaded",
+		} as Extract<AgentSessionEvent, { type: "auto_retry_start" }>);
+		controller.resetTranscriptAnchors();
+		await controller.handleEvent(makeAgentEndEvent([makeAssistantMessage("error")]));
+
+		expect(spy).toHaveBeenCalledTimes(1);
+	});
+
 	it("fires no error toast at all when the retry recovers", async () => {
 		const spy = vi.spyOn(TERMINAL, "sendNotification").mockImplementation(() => {});
 		settings.override("error.notify", "on");
