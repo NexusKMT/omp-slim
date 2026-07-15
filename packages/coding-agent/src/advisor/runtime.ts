@@ -825,7 +825,6 @@ function collectAdvisorRegexSecretValues(obfuscator: SecretObfuscator, messages:
 			case "fileMention":
 				for (const file of message.files) {
 					add(file.path);
-					add(file.content);
 				}
 				break;
 			default:
