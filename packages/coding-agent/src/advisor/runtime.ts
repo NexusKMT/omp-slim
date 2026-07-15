@@ -368,10 +368,17 @@ export class AdvisorRuntime {
 		this.#lastCount = all.length;
 		if (delta.length === 0) return null;
 		const obfuscator = this.host.obfuscator;
-		let formattedDelta = delta;
+		let md = formatSessionHistoryMarkdown(delta, {
+			includeThinking: true,
+			includeToolIntent: true,
+			watchedRoles: true,
+			expandPrimaryContext: true,
+			expandEditDiffs: true,
+		});
+		if (!md.trim()) return null;
 		if (obfuscator?.hasSecrets()) {
 			let discoveredNewRegexSecretValue = false;
-			for (const secretValue of collectAdvisorRegexSecretValues(obfuscator, delta)) {
+			for (const secretValue of obfuscator.collectRegexSecretValuesForObfuscation(md)) {
 				if (this.#advisorRegexSecretValues.has(secretValue)) continue;
 				this.#advisorRegexSecretValues.add(secretValue);
 				discoveredNewRegexSecretValue = true;
@@ -383,16 +390,22 @@ export class AdvisorRuntime {
 					text: obfuscator.stripUnsafeFriendlyPlaceholderPrefixes(delta.text, this.#advisorRegexSecretValues),
 				}));
 			}
-			formattedDelta = obfuscateAdvisorMessages(obfuscator, delta, this.#advisorRegexSecretValues);
+			md = formatSessionHistoryMarkdown(
+				delta.map(message =>
+					message.role === "custom" && PRIMARY_CONTEXT_CUSTOM_TYPES.has(message.customType)
+						? obfuscateAdvisorMessage(obfuscator, message, this.#advisorRegexSecretValues)
+						: message,
+				),
+				{
+					includeThinking: true,
+					includeToolIntent: true,
+					watchedRoles: true,
+					expandPrimaryContext: true,
+					expandEditDiffs: true,
+				},
+			);
+			md = obfuscator.obfuscate(md, this.#advisorRegexSecretValues);
 		}
-		const md = formatSessionHistoryMarkdown(formattedDelta, {
-			includeThinking: true,
-			includeToolIntent: true,
-			watchedRoles: true,
-			expandPrimaryContext: true,
-			expandEditDiffs: true,
-		});
-		if (!md.trim()) return null;
 		const heading = wip ? "### Session update [in progress — more steps follow]" : "### Session update";
 		return `${heading}\n\n${md}`;
 	}
