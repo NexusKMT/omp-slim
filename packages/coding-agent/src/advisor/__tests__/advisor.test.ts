@@ -1452,6 +1452,38 @@ describe("advisor", () => {
 			expect(promptInputs[0]).toContain("#TOKABC123_");
 			expect(promptInputs[0]).not.toContain("tok_abc123");
 		});
+		it("does not scan advisor-hidden successful tool-result bodies", async () => {
+			const obfuscator = new SecretObfuscator([
+				{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
+				{ type: "regex", content: "tok_[a-z0-9]+" },
+			]);
+			const promptInputs: string[] = [];
+			const agent = makeAgent(promptInputs);
+			const messages: AgentMessage[] = [
+				{ role: "user", content: "remember OTHERSECRET for later", timestamp: 1 } as AgentMessage,
+				{
+					role: "toolResult",
+					toolCallId: "c1",
+					toolName: "read",
+					content: "tok_abc123",
+					isError: false,
+					timestamp: 2,
+				} as unknown as AgentMessage,
+			];
+			const host: AdvisorRuntimeHost = {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+				obfuscator,
+			};
+			const runtime = new AdvisorRuntime(agent, host);
+
+			runtime.onTurnEnd();
+			await Promise.resolve();
+
+			expect(promptInputs).toHaveLength(1);
+			expect(promptInputs[0]).toContain("#TOKABC123_");
+			expect(promptInputs[0]).not.toContain("tok_abc123");
+		});
 
 		it("does not scan advisor-hidden execution output", async () => {
 			const obfuscator = new SecretObfuscator([

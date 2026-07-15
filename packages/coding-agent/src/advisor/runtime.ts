@@ -653,6 +653,28 @@ function obfuscateTextualContent(
 	return changed ? result : content;
 }
 
+function firstAdvisorToolResultErrorLine(content: TextualContent): string | undefined {
+	if (typeof content === "string") return content.split("\n", 1)[0];
+	const first = content[0];
+	if (first?.type !== "text") return undefined;
+	return first.text.split("\n", 1)[0];
+}
+
+function obfuscateAdvisorToolResultErrorContent(
+	obfuscator: SecretObfuscator,
+	content: TextualContent,
+	sharedRegexSecretValues: ReadonlySet<string>,
+): TextualContent {
+	const preview = firstAdvisorToolResultErrorLine(content);
+	if (preview === undefined) return content;
+	const obfuscatedPreview = obfuscator.obfuscate(preview, sharedRegexSecretValues);
+	if (obfuscatedPreview === preview) return content;
+	if (typeof content === "string") return obfuscatedPreview + content.slice(preview.length);
+	const first = content[0]!;
+	if (first.type !== "text") return content;
+	return [{ ...first, text: obfuscatedPreview + first.text.slice(preview.length) }, ...content.slice(1)];
+}
+
 function obfuscateAssistantMessage(
 	obfuscator: SecretObfuscator,
 	message: AssistantMessage,
@@ -714,8 +736,11 @@ function obfuscateAdvisorMessage(
 			const msg = message as AgentMessage & {
 				content: TextualContent;
 				details?: Record<string, unknown>;
+				isError?: boolean;
 			};
-			const content = obfuscateTextualContent(obfuscator, msg.content, sharedRegexSecretValues);
+			const content = msg.isError
+				? obfuscateAdvisorToolResultErrorContent(obfuscator, msg.content, sharedRegexSecretValues)
+				: msg.content;
 			let details = msg.details;
 			if (typeof details?.diff === "string") {
 				const diff = obfuscator.obfuscate(details.diff, sharedRegexSecretValues);
@@ -802,7 +827,7 @@ function collectAdvisorRegexSecretValues(obfuscator: SecretObfuscator, messages:
 				addContent(message.content as TextualContent);
 				break;
 			case "toolResult": {
-				addContent(message.content as TextualContent);
+				if (message.isError) add(firstAdvisorToolResultErrorLine(message.content as TextualContent));
 				const diff = (message.details as { diff?: unknown } | undefined)?.diff;
 				if (typeof diff === "string") add(diff);
 				break;
