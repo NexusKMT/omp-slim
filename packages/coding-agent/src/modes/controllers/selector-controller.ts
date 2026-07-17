@@ -1,4 +1,4 @@
-import { type AgentToolContext, type AgentToolResult, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import { type AgentToolResult, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { PASTE_CODE_LOGIN_PROVIDERS } from "@oh-my-pi/pi-ai";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { OAuthProvider } from "@oh-my-pi/pi-ai/oauth/types";
@@ -1201,6 +1201,7 @@ export class SelectorController {
 						let result = await this.ctx.session.navigateTree(entryId, {
 							summarize: wantsSummary,
 							customInstructions,
+							allowAskReopen: true,
 						});
 
 						// Selecting an `ask` toolResult doesn't land the leaf directly —
@@ -1215,6 +1216,7 @@ export class SelectorController {
 							result = await this.ctx.session.navigateTree(entryId, {
 								summarize: wantsSummary,
 								customInstructions,
+								allowAskReopen: true,
 								reanswerAskResult: reanswer,
 							});
 						}
@@ -1284,17 +1286,27 @@ export class SelectorController {
 			getPlanModeState: () => this.ctx.session.getPlanModeState(),
 		};
 		const askTool = new AskTool(toolSession);
-		// AgentToolContext carries many runtime-only fields (cwd, sessionManager,
-		// compact, ...) a standalone re-answer never touches — AskTool only reads
-		// `hasUI`/`ui`/`abort()`. Matches the narrow-context convention already
-		// used by ask.test.ts's `createContext` helper.
-		const context = { hasUI: true, ui: uiContext, abort: () => {} } as unknown as AgentToolContext;
+		const context = this.ctx.session.buildAskReanswerContext(uiContext);
+		let result: AgentToolResult<AskToolDetails>;
 		try {
-			return await askTool.execute("tree-reanswer", { questions }, undefined, undefined, context);
+			result = await askTool.execute("tree-reanswer", { questions }, undefined, undefined, context);
 		} catch (error) {
 			if (error instanceof ToolAbortError) return undefined;
 			throw error;
 		}
+		// The rich ask dialog can race a collab guest choosing "Chat about this"
+		// (`AskTool`'s `chatRedirect` result); that's meaningful inside a live
+		// agent turn, where the model sees the redirect and starts a
+		// conversation, but this standalone re-answer has no turn to hand it
+		// to — completing the navigation with it would silently drop the
+		// user's intent to chat (roboomp review on #5895).
+		if (result.details?.chatRedirect) {
+			this.ctx.showError(
+				"Chat about this isn't available when re-answering from the tree — pick an option or type a custom answer instead.",
+			);
+			return undefined;
+		}
+		return result;
 	}
 
 	async showSessionSelector(): Promise<void> {

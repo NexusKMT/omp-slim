@@ -6,9 +6,16 @@
  * questions (`reopenAsk`) so the caller can re-open the picker, then a
  * follow-up call with `reanswerAskResult` branches a *new* sibling toolResult
  * off the same `ask` toolCall — leaving the original answer's branch intact.
+ *
+ * The two-phase protocol is opt-in via `allowAskReopen`: only the
+ * interactive `/tree` selector understands `reopenAsk`, so every other
+ * `navigateTree()` caller (extensions, hooks, ACP, session-extension
+ * actions) must keep getting the pre-#5642 plain leaf move instead of
+ * silently reporting a successful no-op navigation (review on #5895).
  */
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
+import type { ExtensionRunner, ExtensionUIContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import type { AskToolDetails } from "@oh-my-pi/pi-coding-agent/tools/ask";
 import { assistantMsg, createTestSession, userMsg } from "./utilities";
 
@@ -25,6 +32,15 @@ function toolCallMsg(toolCallId: string, toolName: string, args: Record<string, 
 	return {
 		...assistantMsg(""),
 		content: [{ type: "toolCall" as const, id: toolCallId, name: toolName, arguments: args }],
+		stopReason: "toolUse" as const,
+	};
+}
+
+/** Assistant message emitting multiple `toolCall` blocks in one turn. */
+function multiToolCallMsg(calls: Array<{ id: string; name: string; args: Record<string, unknown> }>) {
+	return {
+		...assistantMsg(""),
+		content: calls.map(c => ({ type: "toolCall" as const, id: c.id, name: c.name, arguments: c.args })),
 		stopReason: "toolUse" as const,
 	};
 }
@@ -81,7 +97,7 @@ describe("AgentSession tree navigation onto an ask toolResult", () => {
 			sessionManager.appendMessage(assistantMsg("deploying to staging"));
 			const leafBeforeProbe = sessionManager.getLeafId();
 
-			const result = await session.navigateTree(tr1Id);
+			const result = await session.navigateTree(tr1Id, { allowAskReopen: true });
 
 			expect(result.cancelled).toBe(false);
 			expect(result.reopenAsk).toBeDefined();
@@ -109,10 +125,13 @@ describe("AgentSession tree navigation onto an ask toolResult", () => {
 			);
 			const a2Id = sessionManager.appendMessage(assistantMsg("deploying to staging"));
 
-			const probe = await session.navigateTree(tr1Id);
+			const probe = await session.navigateTree(tr1Id, { allowAskReopen: true });
 			expect(probe.reopenAsk).toBeDefined();
 
-			const result = await session.navigateTree(tr1Id, { reanswerAskResult: newAnswerResult() });
+			const result = await session.navigateTree(tr1Id, {
+				allowAskReopen: true,
+				reanswerAskResult: newAnswerResult(),
+			});
 
 			expect(result.cancelled).toBe(false);
 			const newLeafId = sessionManager.getLeafId();
@@ -159,7 +178,7 @@ describe("AgentSession tree navigation onto an ask toolResult", () => {
 			const tr1Id = sessionManager.appendMessage(toolResultMsg("read-call-1", "read", "file body"));
 			sessionManager.appendMessage(assistantMsg("done reading"));
 
-			const result = await session.navigateTree(tr1Id);
+			const result = await session.navigateTree(tr1Id, { allowAskReopen: true });
 
 			expect(result.cancelled).toBe(false);
 			expect(result.reopenAsk).toBeUndefined();
@@ -182,11 +201,150 @@ describe("AgentSession tree navigation onto an ask toolResult", () => {
 			const trBadId = sessionManager.appendMessage(toolResultMsg("ask-call-bad", "ask", "User selected: staging"));
 			sessionManager.appendMessage(assistantMsg("deploying to staging"));
 
-			const result = await session.navigateTree(trBadId);
+			const result = await session.navigateTree(trBadId, { allowAskReopen: true });
 
 			expect(result.cancelled).toBe(false);
 			expect(result.reopenAsk).toBeUndefined();
 			expect(sessionManager.getLeafId()).toBe(trBadId);
+		} finally {
+			await ctx.cleanup();
+		}
+	});
+
+	it("(f) without allowAskReopen, a caller that doesn't understand reopenAsk gets a direct leaf move", async () => {
+		const ctx = await createTestSession({ inMemory: true });
+		try {
+			const { session, sessionManager } = ctx;
+
+			// Recoverable ask args — proves this is gated on the caller's opt-in,
+			// not on corrupted/legacy data like test (e).
+			sessionManager.appendMessage(userMsg("please deploy"));
+			const askCallId = "ask-call-1";
+			sessionManager.appendMessage(toolCallMsg(askCallId, "ask", { questions: ORIGINAL_QUESTIONS }));
+			const tr1Id = sessionManager.appendMessage(
+				toolResultMsg(askCallId, "ask", "User selected: staging", staleAnswerResult().details),
+			);
+			sessionManager.appendMessage(assistantMsg("deploying to staging"));
+
+			// Mirrors extension-ui-controller.ts / runtime-init.ts / acp-agent.ts /
+			// the session-extension navigateTree action, none of which pass
+			// `allowAskReopen` or handle `reopenAsk`.
+			const result = await session.navigateTree(tr1Id);
+
+			expect(result.cancelled).toBe(false);
+			expect(result.reopenAsk).toBeUndefined();
+			expect(sessionManager.getLeafId()).toBe(tr1Id);
+		} finally {
+			await ctx.cleanup();
+		}
+	});
+
+	it("(g) recovers reopenAsk questions when the ask toolCall isn't the toolResult's direct parent", async () => {
+		const ctx = await createTestSession({ inMemory: true });
+		try {
+			const { session, sessionManager } = ctx;
+
+			// `ask` runs `exclusive` (serialized *execution*), but a single
+			// assistant turn can still emit another tool call first — that tool
+			// call's persisted toolResult becomes the `ask` toolResult's parent,
+			// not the assistant message that issued both toolCalls.
+			sessionManager.appendMessage(userMsg("please deploy and check the config"));
+			const readCallId = "read-call-1";
+			const askCallId = "ask-call-1";
+			sessionManager.appendMessage(
+				multiToolCallMsg([
+					{ id: readCallId, name: "read", args: { path: "config.txt" } },
+					{ id: askCallId, name: "ask", args: { questions: ORIGINAL_QUESTIONS } },
+				]),
+			);
+			sessionManager.appendMessage(toolResultMsg(readCallId, "read", "file body"));
+			const trAskId = sessionManager.appendMessage(
+				toolResultMsg(askCallId, "ask", "User selected: staging", staleAnswerResult().details),
+			);
+			sessionManager.appendMessage(assistantMsg("deploying to staging"));
+
+			const result = await session.navigateTree(trAskId, { allowAskReopen: true });
+
+			expect(result.cancelled).toBe(false);
+			expect(result.reopenAsk).toBeDefined();
+			expect(result.reopenAsk?.toolCallId).toBe(askCallId);
+			expect(result.reopenAsk?.questions).toEqual(ORIGINAL_QUESTIONS);
+		} finally {
+			await ctx.cleanup();
+		}
+	});
+
+	it("(h) a reanswer completion summarizes the abandoned branch including the replaced answer", async () => {
+		const capturedEntryIds: string[][] = [];
+		const extensionRunner = {
+			hasHandlers: vi.fn((eventType: string) => eventType === "session_before_tree"),
+			emit: vi.fn(async (event: { type: string; preparation?: { entriesToSummarize: Array<{ id: string }> } }) => {
+				if (event.type === "session_before_tree" && event.preparation) {
+					capturedEntryIds.push(event.preparation.entriesToSummarize.map(e => e.id));
+					// Stub summary — skips the default model-backed summarizer so this
+					// test needs no API key.
+					return { summary: { summary: "stub summary" } };
+				}
+				return undefined;
+			}),
+		} as unknown as ExtensionRunner;
+
+		const ctx = await createTestSession({ inMemory: true, extensionRunner });
+		try {
+			const { session, sessionManager } = ctx;
+
+			sessionManager.appendMessage(userMsg("please deploy"));
+			const askCallId = "ask-call-1";
+			const askCallEntryId = sessionManager.appendMessage(
+				toolCallMsg(askCallId, "ask", { questions: ORIGINAL_QUESTIONS }),
+			);
+			const tr1Id = sessionManager.appendMessage(
+				toolResultMsg(askCallId, "ask", "User selected: staging", staleAnswerResult().details),
+			);
+			sessionManager.appendMessage(assistantMsg("deploying to staging"));
+
+			const probe = await session.navigateTree(tr1Id, { allowAskReopen: true });
+			expect(probe.reopenAsk).toBeDefined();
+
+			const result = await session.navigateTree(tr1Id, {
+				allowAskReopen: true,
+				summarize: true,
+				reanswerAskResult: newAnswerResult(),
+			});
+
+			expect(result.cancelled).toBe(false);
+			expect(result.summaryEntry).toBeDefined();
+			expect(capturedEntryIds).toHaveLength(1);
+			// The old (staging) answer must be part of the summarized/abandoned
+			// range — it's neither reachable from the new (production) leaf nor
+			// the branch point, so omitting it from the summary would silently
+			// drop the fact that staging was ever chosen.
+			expect(capturedEntryIds[0]).toContain(tr1Id);
+			expect(capturedEntryIds[0]).not.toContain(askCallEntryId);
+		} finally {
+			await ctx.cleanup();
+		}
+	});
+});
+
+describe("AgentSession.buildAskReanswerContext", () => {
+	it("builds an AgentToolContext backed by real session state, not a fabricated stub", async () => {
+		const ctx = await createTestSession({ inMemory: true });
+		try {
+			const { session } = ctx;
+			const uiContext = { select: async () => undefined } as unknown as ExtensionUIContext;
+
+			const toolContext = session.buildAskReanswerContext(uiContext);
+
+			expect(toolContext.sessionManager).toBe(session.sessionManager);
+			expect(toolContext.modelRegistry).toBe(session.modelRegistry);
+			expect(toolContext.model).toBe(session.model);
+			expect(toolContext.settings).toBe(session.settings);
+			expect(toolContext.hasUI).toBe(true);
+			expect(toolContext.ui).toBe(uiContext);
+			expect(toolContext.isIdle?.()).toBe(true);
+			expect(toolContext.hasQueuedMessages?.()).toBe(false);
+			expect(() => toolContext.abort?.()).not.toThrow();
 		} finally {
 			await ctx.cleanup();
 		}
