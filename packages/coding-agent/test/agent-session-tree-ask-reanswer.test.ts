@@ -16,6 +16,7 @@
 import { describe, expect, it, vi } from "bun:test";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { ExtensionRunner, ExtensionUIContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
+import { SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets/obfuscator";
 import type { AskToolDetails } from "@oh-my-pi/pi-coding-agent/tools/ask";
 import { assistantMsg, createTestSession, userMsg } from "./utilities";
 
@@ -351,6 +352,54 @@ describe("AgentSession tree navigation onto an ask toolResult", () => {
 			// drop the fact that staging was ever chosen.
 			expect(capturedEntryIds[0]).toContain(tr1Id);
 			expect(capturedEntryIds[0]).not.toContain(askCallEntryId);
+		} finally {
+			await ctx.cleanup();
+		}
+	});
+
+	it("(i) deobfuscates recovered ask arguments when secret obfuscation is active", async () => {
+		// The recovery path must mirror the live tool path's
+		// `transformToolCallArguments`: persisted `ask` toolCall arguments may
+		// hold `#HASH#` placeholders in place of real secrets, and must be
+		// deobfuscated before validation — otherwise the reopened picker shows
+		// the raw placeholder instead of the original question text
+		// (chatgpt-codex review on #5895).
+		const SECRET = "SUPER_SECRET_TOKEN_12345";
+		const obfuscator = new SecretObfuscator([{ type: "plain", content: SECRET }]);
+		const plainQuestion = `Deploy using token ${SECRET}?`;
+		const obfuscatedQuestion = obfuscator.obfuscate(plainQuestion);
+		// Sanity: the persisted argument actually holds a placeholder, not the secret.
+		expect(obfuscatedQuestion).not.toContain(SECRET);
+
+		const ctx = await createTestSession({ inMemory: true, obfuscator });
+		try {
+			const { session, sessionManager } = ctx;
+
+			sessionManager.appendMessage(userMsg("please deploy"));
+			const askCallId = "ask-call-1";
+			sessionManager.appendMessage(
+				toolCallMsg(askCallId, "ask", {
+					questions: [
+						{
+							id: "deploy_target",
+							question: obfuscatedQuestion,
+							options: [{ label: "staging" }, { label: "production" }],
+						},
+					],
+				}),
+			);
+			const tr1Id = sessionManager.appendMessage(
+				toolResultMsg(askCallId, "ask", "User selected: staging", staleAnswerResult().details),
+			);
+			sessionManager.appendMessage(assistantMsg("deploying to staging"));
+
+			const result = await session.navigateTree(tr1Id, { allowAskReopen: true });
+
+			expect(result.cancelled).toBe(false);
+			expect(result.reopenAsk).toBeDefined();
+			// The recovered question must be the deobfuscated plaintext, not the
+			// raw persisted placeholder.
+			expect(result.reopenAsk?.questions[0]?.question).toBe(plainQuestion);
 		} finally {
 			await ctx.cleanup();
 		}

@@ -302,6 +302,7 @@ import { AgentRegistry } from "../registry/agent-registry";
 import {
 	deobfuscateAssistantContent,
 	deobfuscateSessionContext,
+	deobfuscateToolArguments,
 	obfuscateMessages,
 	obfuscateProviderContext,
 	type SecretObfuscator,
@@ -17036,7 +17037,10 @@ export class AgentSession {
 					);
 					if (!toolCall) return undefined;
 					if (toolCall.name !== "ask") return undefined;
-					return recoverAskQuestions(toolCall.arguments);
+					const args = this.#obfuscator?.hasSecrets()
+						? deobfuscateToolArguments(this.#obfuscator, toolCall.arguments)
+						: toolCall.arguments;
+					return recoverAskQuestions(args);
 				}
 				if (entry.message.role === "user") return undefined;
 			}
