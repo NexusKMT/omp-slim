@@ -16993,30 +16993,34 @@ export class AgentSession {
 	/**
 	 * Look up the `ask` toolCall's persisted `arguments` and validate them
 	 * back into `questions`, for `/tree` `ask` re-answer (issue #5642). Walks
-	 * up from the toolResult's parent past any interleaved sibling toolResults
-	 * — `ask` runs `exclusive` (serialized execution) but a multi-tool-call
-	 * assistant turn can still emit other tool calls first, so the persisted
-	 * *parent* of the `ask` toolResult may be one of those toolResults rather
-	 * than the assistant message itself (roboomp review on #5895) — until it
-	 * finds the assistant entry that actually emitted `toolCallId`. Returns
-	 * `undefined` when no ancestor entry holds a matching `ask` toolCall, or
-	 * the arguments can't be resolved — the caller falls back to a plain leaf
-	 * move rather than opening a picker with bad data.
+	 * up from the toolResult's parent past any interleaved ancestor entries
+	 * — sibling toolResults from other tool calls in the same turn (`ask`
+	 * runs `exclusive`, which only serializes *execution*, not persistence
+	 * order — roboomp review on #5895), and bookkeeping entries such as the
+	 * `tool_execution_start` custom entry `#recordToolExecutionStart()`
+	 * appends before every toolResult in real persisted sessions (chatgpt-codex
+	 * review on #5895) — until it finds the assistant entry that actually
+	 * emitted `toolCallId`. Stops at a `user` message (turn boundary) or a
+	 * dead end. Returns `undefined` when no ancestor entry holds a matching
+	 * `ask` toolCall, or the arguments can't be resolved — the caller falls
+	 * back to a plain leaf move rather than opening a picker with bad data.
 	 */
 	#recoverAskReanswerQuestions(parentId: string | null, toolCallId: string): AskToolInput["questions"] | undefined {
 		let current = parentId;
 		while (current !== null) {
 			const entry = this.sessionManager.getEntry(current);
-			if (entry?.type !== "message") return undefined;
-			if (entry.message.role === "assistant") {
-				const toolCall = entry.message.content.find(
-					(block): block is AgentToolCall => block.type === "toolCall" && block.id === toolCallId,
-				);
-				if (!toolCall) return undefined;
-				if (toolCall.name !== "ask") return undefined;
-				return recoverAskQuestions(toolCall.arguments);
+			if (!entry) return undefined;
+			if (entry.type === "message") {
+				if (entry.message.role === "assistant") {
+					const toolCall = entry.message.content.find(
+						(block): block is AgentToolCall => block.type === "toolCall" && block.id === toolCallId,
+					);
+					if (!toolCall) return undefined;
+					if (toolCall.name !== "ask") return undefined;
+					return recoverAskQuestions(toolCall.arguments);
+				}
+				if (entry.message.role === "user") return undefined;
 			}
-			if (entry.message.role !== "toolResult") return undefined;
 			current = entry.parentId;
 		}
 		return undefined;

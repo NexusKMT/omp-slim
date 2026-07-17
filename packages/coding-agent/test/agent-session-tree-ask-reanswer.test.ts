@@ -274,6 +274,36 @@ describe("AgentSession tree navigation onto an ask toolResult", () => {
 		}
 	});
 
+	it("(g2) recovers reopenAsk questions past a tool_execution_start bookkeeping entry", async () => {
+		const ctx = await createTestSession({ inMemory: true });
+		try {
+			const { session, sessionManager } = ctx;
+
+			// Real persisted sessions insert a `custom` (not `custom_message`)
+			// `tool_execution_start` entry between the assistant message and every
+			// toolResult — `#recordToolExecutionStart()` appends it before the
+			// tool actually runs. The ancestor walk must skip this bookkeeping
+			// entry too, not just other `message`-typed toolResults.
+			sessionManager.appendMessage(userMsg("please deploy"));
+			const askCallId = "ask-call-1";
+			sessionManager.appendMessage(toolCallMsg(askCallId, "ask", { questions: ORIGINAL_QUESTIONS }));
+			sessionManager.appendCustomEntry("tool_execution_start", { toolCallId: askCallId, toolName: "ask" });
+			const trAskId = sessionManager.appendMessage(
+				toolResultMsg(askCallId, "ask", "User selected: staging", staleAnswerResult().details),
+			);
+			sessionManager.appendMessage(assistantMsg("deploying to staging"));
+
+			const result = await session.navigateTree(trAskId, { allowAskReopen: true });
+
+			expect(result.cancelled).toBe(false);
+			expect(result.reopenAsk).toBeDefined();
+			expect(result.reopenAsk?.toolCallId).toBe(askCallId);
+			expect(result.reopenAsk?.questions).toEqual(ORIGINAL_QUESTIONS);
+		} finally {
+			await ctx.cleanup();
+		}
+	});
+
 	it("(h) a reanswer completion summarizes the abandoned branch including the replaced answer", async () => {
 		const capturedEntryIds: string[][] = [];
 		const extensionRunner = {
