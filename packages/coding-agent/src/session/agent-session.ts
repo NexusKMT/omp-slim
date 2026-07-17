@@ -16776,19 +16776,29 @@ export class AgentSession {
 		await this.#flushPendingBashMessages();
 		const oldLeafId = this.sessionManager.getLeafId();
 
-		// No-op if already at target
-		if (targetId === oldLeafId) {
+		const targetEntry = this.sessionManager.getEntry(targetId);
+		if (!targetEntry) {
+			throw new Error(`Entry ${targetId} not found`);
+		}
+		const targetIsAskResult =
+			targetEntry.type === "message" &&
+			targetEntry.message.role === "toolResult" &&
+			targetEntry.message.toolName === "ask";
+
+		// No-op if already at target — except mid-flight through the `ask`
+		// re-answer protocol (issue #5642): a probe or completion call can
+		// legitimately target the *current* leaf (e.g. the user interrupted
+		// right after answering `ask`, before a follow-up assistant message
+		// landed, or another caller navigated straight onto the ask result),
+		// and must still return `reopenAsk` / branch the new answer instead of
+		// silently reporting a no-op (chatgpt-codex review on #5895).
+		if (targetId === oldLeafId && !(options.allowAskReopen && targetIsAskResult)) {
 			return { cancelled: false };
 		}
 
 		// Model required for summarization
 		if (options.summarize && !this.model) {
 			throw new Error("No model available for summarization");
-		}
-
-		const targetEntry = this.sessionManager.getEntry(targetId);
-		if (!targetEntry) {
-			throw new Error(`Entry ${targetId} not found`);
 		}
 
 		// `ask` toolResult, first pass: hand control back to the caller to

@@ -404,6 +404,60 @@ describe("AgentSession tree navigation onto an ask toolResult", () => {
 			await ctx.cleanup();
 		}
 	});
+
+	it("(j) allows probing and completing an ask re-answer when the ask toolResult is already the current leaf", async () => {
+		// If the user interrupts right after answering `ask` (before a
+		// follow-up assistant message is appended), or another caller navigates
+		// straight onto the ask result, the ask toolResult itself is the
+		// current leaf. The `targetId === oldLeafId` no-op short-circuit must
+		// not swallow the re-answer protocol in that case — a probe still
+		// needs to return `reopenAsk`, and a completion still needs to branch
+		// a new sibling (chatgpt-codex review on #5895).
+		const ctx = await createTestSession({ inMemory: true });
+		try {
+			const { session, sessionManager } = ctx;
+
+			sessionManager.appendMessage(userMsg("please deploy"));
+			const askCallId = "ask-call-1";
+			const askCallEntryId = sessionManager.appendMessage(
+				toolCallMsg(askCallId, "ask", { questions: ORIGINAL_QUESTIONS }),
+			);
+			const tr1Id = sessionManager.appendMessage(
+				toolResultMsg(askCallId, "ask", "User selected: staging", staleAnswerResult().details),
+			);
+			// No follow-up assistant message: tr1 is the current leaf.
+			expect(sessionManager.getLeafId()).toBe(tr1Id);
+
+			const probe = await session.navigateTree(tr1Id, { allowAskReopen: true });
+			expect(probe.cancelled).toBe(false);
+			expect(probe.reopenAsk).toBeDefined();
+			expect(probe.reopenAsk?.toolCallId).toBe(askCallId);
+			expect(probe.reopenAsk?.questions).toEqual(ORIGINAL_QUESTIONS);
+			// The probe must not mutate anything.
+			expect(sessionManager.getLeafId()).toBe(tr1Id);
+
+			const result = await session.navigateTree(tr1Id, {
+				allowAskReopen: true,
+				reanswerAskResult: newAnswerResult(),
+			});
+
+			expect(result.cancelled).toBe(false);
+			const newLeafId = sessionManager.getLeafId();
+			expect(newLeafId).not.toBe(tr1Id);
+			const newEntry = sessionManager.getEntry(newLeafId!);
+			expect(newEntry?.parentId).toBe(askCallEntryId);
+			if (newEntry?.type === "message" && newEntry.message.role === "toolResult") {
+				expect(newEntry.message.details).toEqual(newAnswerResult().details);
+			} else {
+				throw new Error("expected the new leaf to be a toolResult entry");
+			}
+			// The original (stale) answer's branch is still reachable.
+			const originalEntry = sessionManager.getEntry(tr1Id);
+			expect(originalEntry?.parentId).toBe(askCallEntryId);
+		} finally {
+			await ctx.cleanup();
+		}
+	});
 });
 
 describe("AgentSession.buildAskReanswerContext", () => {
