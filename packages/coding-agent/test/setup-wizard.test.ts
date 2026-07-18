@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
+import type { Model } from "@oh-my-pi/pi-ai";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { runOnboardingSetup } from "@oh-my-pi/pi-coding-agent/commands/setup";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { SETTINGS_SCHEMA } from "@oh-my-pi/pi-coding-agent/config/settings-schema";
@@ -107,6 +109,66 @@ describe("setup wizard scene selection", () => {
 			{ isTTY: true },
 		);
 		expect(selected.map(scene => scene.id)).toEqual(["allowed"]);
+	});
+});
+
+describe("setup wizard model selection", () => {
+	it("saves a configured custom model as the default", async () => {
+		await initTheme(false, "unicode", false, "titanium", "dark");
+		const settings = Settings.isolated();
+		const model: Model = buildModel({
+			id: "minimax-m3",
+			name: "MiniMax M3",
+			api: "openai-completions",
+			provider: "spark",
+			baseUrl: "http://127.0.0.1:8000/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 100_000,
+			maxTokens: 32_000,
+		});
+		const finished = Promise.withResolvers<string>();
+		const setModel = mock(
+			async (
+				selected: Model,
+				role: string,
+				options?: { selector?: string; persist?: boolean },
+			): Promise<{ switched: boolean }> => {
+				if (options?.persist) {
+					settings.setModelRole(role, options.selector ?? `${selected.provider}/${selected.id}`);
+				}
+				return { switched: true };
+			},
+		);
+		const host = {
+			ctx: {
+				settings,
+				session: {
+					model: undefined,
+					modelRegistry: {
+						getAvailable: () => [model],
+						getAll: () => [model],
+						refresh: async () => {},
+					},
+					setModel,
+				},
+				ui: { terminal: { rows: 30 } },
+			},
+			requestRender: () => {},
+			finish: (next: string) => finished.resolve(next),
+			setFocus: () => {},
+			restoreFocus: () => {},
+		} as unknown as SetupSceneHost;
+		const scene = ALL_SCENES.find(candidate => candidate.id === "model");
+		expect(scene).toBeDefined();
+
+		const controller = scene!.mount(host);
+		controller.handleInput?.("\r");
+		const result = await finished.promise;
+
+		expect(settings.getModelRole("default")).toBe("spark/minimax-m3");
+		expect(result).toBe("done");
 	});
 });
 

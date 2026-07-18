@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed onboarding omitting model selection by adding a persisted default-model step, and documented custom `models.yml` provider configuration and default-role selection ([#5979](https://github.com/can1357/oh-my-pi/issues/5979)).
+
 ## [17.0.4] - 2026-07-18
 
 ### Fixed
