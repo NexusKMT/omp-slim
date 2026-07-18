@@ -206,6 +206,7 @@ function normalizeToolResult<TDetails>(result: RpcClientToolResult<TDetails>): A
 
 export class RpcClient {
 	#process: ptree.ChildProcess | null = null;
+	#reaping: Promise<void> | null = null;
 	#eventListeners: RpcEventListener[] = [];
 	#sessionEventListeners: RpcSessionEventListener[] = [];
 	#subagentLifecycleListeners = new Set<RpcSubagentLifecycleListener>();
@@ -233,6 +234,7 @@ export class RpcClient {
 	 * retry without leaking processes.
 	 */
 	async start(): Promise<void> {
+		await this.#reaping;
 		if (this.#process) {
 			throw new Error("Client already started");
 		}
@@ -283,7 +285,7 @@ export class RpcClient {
 			} catch {
 				// The process may already have exited.
 			}
-			await child.exited.catch(() => {});
+			await this.#waitForExit(child);
 			for (const request of pendingRequests) request.reject(error);
 		};
 
@@ -304,7 +306,14 @@ export class RpcClient {
 			// rejecting here would snapshot a partial stderr tail and lose
 			// the actual startup error.
 			if (readySettled) {
-				await reapAfterOutputFailure(new Error("Agent output stream ended"));
+				let error: Error;
+				try {
+					const exitCode = await child.exited;
+					error = new Error(`Agent process exited with code ${exitCode}. Stderr: ${child.peekStderr()}`);
+				} catch (cause) {
+					error = new Error(`Agent output stream ended. Stderr: ${child.peekStderr()}`, { cause });
+				}
+				await reapAfterOutputFailure(error);
 				return;
 			}
 			await child.exited.catch(() => {});
@@ -364,11 +373,12 @@ export class RpcClient {
 	/**
 	 * Stop the RPC agent process.
 	 */
-	stop() {
-		if (!this.#process) return;
+	stop(): Promise<void> {
+		if (!this.#process) return this.#reaping ?? Promise.resolve();
 
 		const error = new Error("Client stopped");
-		this.#process.kill();
+		const child = this.#process;
+		child.kill();
 		this.#abortController.abort(error);
 		this.#process = null;
 		for (const request of this.#pendingRequests.values()) request.reject(error);
@@ -377,17 +387,26 @@ export class RpcClient {
 			pendingCall.controller.abort(error);
 		}
 		this.#pendingHostToolCalls.clear();
+		return this.#waitForExit(child);
 	}
 
 	/**
 	 * Stop the RPC agent process and clean up resources.
 	 */
 	[Symbol.dispose](): void {
-		try {
-			this.stop();
-		} catch {
-			// Ignore cleanup errors
-		}
+		void this.stop();
+	}
+
+	#waitForExit(child: ptree.ChildProcess): Promise<void> {
+		const reaping = child.exited.then(
+			() => {},
+			() => {},
+		);
+		this.#reaping = reaping;
+		void reaping.then(() => {
+			if (this.#reaping === reaping) this.#reaping = null;
+		});
+		return reaping;
 	}
 
 	/**

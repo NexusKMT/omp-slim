@@ -22,6 +22,10 @@ for await (const raw of console) {
 	try {
 		const frame = JSON.parse(raw) as Record<string, unknown>;
 		if (frame && typeof frame === "object" && typeof frame.type === "string") {
+			if (Bun.env.MOCK_RPC_EXIT_ON_COMMAND) {
+				process.stderr.write(Bun.env.MOCK_RPC_EXIT_STDERR ?? "");
+				process.exit(Number(Bun.env.MOCK_RPC_EXIT_ON_COMMAND));
+			}
 			if (Bun.env.MOCK_RPC_INVALID_OUTPUT === "1") {
 				process.stdout.write("{invalid-json\n");
 				continue;

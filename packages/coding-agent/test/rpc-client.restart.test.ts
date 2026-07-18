@@ -22,15 +22,39 @@ describe("RpcClient lifecycle (issue #4079 B)", () => {
 
 		// First lifecycle: start + stop.
 		await client.start();
-		client.stop();
+		await client.stop();
 
 		// Second start on the same instance must NOT reuse the aborted
 		// controller from the previous stop(). Before the fix, this rejected
 		// with "Agent process exited before ready" because the JSONL reader
 		// short-circuited on the pre-aborted signal.
 		await client.start();
-		client.stop();
+		await client.stop();
 	}, 20000);
+
+	test("start() waits for a signal-ignoring worker to be reaped after stop()", async () => {
+		using tempDir = TempDir.createSync("@omp-rpc-stop-restart-");
+		const pidFile = tempDir.join("pid");
+		using client = new RpcClient({
+			cliPath: MOCK_AGENT,
+			env: {
+				MOCK_RPC_PID_FILE: pidFile,
+				MOCK_RPC_IGNORE_SIGTERM: process.platform === "win32" ? "0" : "1",
+			},
+		});
+
+		await client.start();
+		const firstPid = Number(await Bun.file(pidFile).text());
+
+		const stopped = client.stop();
+		const restarted = client.start();
+		await Promise.all([stopped, restarted]);
+
+		const secondPid = Number(await Bun.file(pidFile).text());
+		expect(secondPid).not.toBe(firstPid);
+		expect(isProcessAlive(firstPid)).toBe(false);
+		await client.stop();
+	}, 20_000);
 
 	test("start() may be retried after a failed start (child is cleaned up on failure)", async () => {
 		using client = new RpcClient({
@@ -89,4 +113,19 @@ describe("RpcClient lifecycle (issue #4079 B)", () => {
 			if (pid > 0 && isProcessAlive(pid)) process.kill(pid, "SIGKILL");
 		}
 	}, 10_000);
+
+	test("reports exit code and stderr when a ready worker exits", async () => {
+		using client = new RpcClient({
+			cliPath: MOCK_AGENT,
+			env: {
+				MOCK_RPC_EXIT_ON_COMMAND: "23",
+				MOCK_RPC_EXIT_STDERR: "fixture worker failed",
+			},
+		});
+		await client.start();
+
+		await expect(client.getState()).rejects.toThrow(
+			"Agent process exited with code 23. Stderr: fixture worker failed",
+		);
+	});
 });
