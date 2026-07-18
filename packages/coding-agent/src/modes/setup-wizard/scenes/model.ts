@@ -109,7 +109,11 @@ class ModelSceneController implements SetupSceneController {
 		this.#status = theme.fg("muted", `Saving ${selector} as the default model…`);
 		this.host.requestRender();
 		try {
-			await this.host.ctx.session.setModel(model, "default", { selector, persist: true });
+			const projectScope = this.host.ctx.settings.get("modelRoleStorage") === "project";
+			await this.host.ctx.session.setModel(model, "default", { selector, persist: !projectScope });
+			if (projectScope) {
+				this.host.ctx.settings.setProjectModelRole("default", selector);
+			}
 			await this.host.ctx.settings.flush();
 			if (!this.#disposed) this.host.finish("done");
 		} catch (error) {

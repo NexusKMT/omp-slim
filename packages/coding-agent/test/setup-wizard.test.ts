@@ -113,21 +113,21 @@ describe("setup wizard scene selection", () => {
 });
 
 describe("setup wizard model selection", () => {
-	it("discovers and saves an uncached custom model as the default", async () => {
+	const CUSTOM_MODEL: Model = buildModel({
+		id: "minimax-m3",
+		name: "MiniMax M3",
+		api: "openai-completions",
+		provider: "spark",
+		baseUrl: "http://127.0.0.1:8000/v1",
+		reasoning: true,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 100_000,
+		maxTokens: 32_000,
+	});
+
+	async function pickModelDuringSetup(settings: Settings): Promise<string> {
 		await initTheme(false, "unicode", false, "titanium", "dark");
-		const settings = Settings.isolated();
-		const model: Model = buildModel({
-			id: "minimax-m3",
-			name: "MiniMax M3",
-			api: "openai-completions",
-			provider: "spark",
-			baseUrl: "http://127.0.0.1:8000/v1",
-			reasoning: true,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 100_000,
-			maxTokens: 32_000,
-		});
 		let available: Model[] = [];
 		const finished = Promise.withResolvers<string>();
 		const setModel = mock(
@@ -151,7 +151,7 @@ describe("setup wizard model selection", () => {
 						getAvailable: () => available,
 						getAll: () => available,
 						refresh: async (strategy: string) => {
-							if (strategy === "online-if-uncached") available = [model];
+							if (strategy === "online-if-uncached") available = [CUSTOM_MODEL];
 						},
 					},
 					setModel,
@@ -171,10 +171,27 @@ describe("setup wizard model selection", () => {
 		await controller.onMount?.();
 		expect(controller.render?.(120).join("\n")).toContain("minimax-m3");
 		controller.handleInput?.("\r");
-		const result = await finished.promise;
+		return finished.promise;
+	}
 
-		expect(settings.getModelRole("default")).toBe("spark/minimax-m3");
+	it("discovers and saves an uncached custom model as the global default", async () => {
+		const settings = Settings.isolated();
+
+		const result = await pickModelDuringSetup(settings);
+
 		expect(result).toBe("done");
+		expect(settings.getGlobalModelRole("default")).toBe("spark/minimax-m3");
+		expect(settings.getProjectModelRole("default")).toBeUndefined();
+	});
+
+	it("saves to the project layer under project role storage", async () => {
+		const settings = Settings.isolated({ modelRoleStorage: "project" });
+
+		const result = await pickModelDuringSetup(settings);
+
+		expect(result).toBe("done");
+		expect(settings.getProjectModelRole("default")).toBe("spark/minimax-m3");
+		expect(settings.getGlobalModelRole("default")).toBeUndefined();
 	});
 });
 
