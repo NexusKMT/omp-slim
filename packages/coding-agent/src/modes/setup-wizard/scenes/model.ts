@@ -30,8 +30,10 @@ class ModelSceneController implements SetupSceneController {
 		this.#syncModels();
 	}
 
-	onMount(): void {
-		void this.#refreshModels();
+	async onMount(): Promise<void> {
+		this.#status = theme.fg("muted", "Discovering available models…");
+		this.host.requestRender();
+		await this.#refreshModels();
 	}
 
 	dispose(): void {
@@ -89,9 +91,10 @@ class ModelSceneController implements SetupSceneController {
 
 	async #refreshModels(): Promise<void> {
 		try {
-			await this.host.ctx.session.modelRegistry.refresh("offline");
+			await this.host.ctx.session.modelRegistry.refresh("online-if-uncached");
 			if (this.#disposed) return;
 			this.#syncModels();
+			this.#status = undefined;
 			this.host.requestRender();
 		} catch (error) {
 			if (this.#disposed) return;

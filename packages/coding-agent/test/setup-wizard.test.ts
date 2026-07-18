@@ -113,7 +113,7 @@ describe("setup wizard scene selection", () => {
 });
 
 describe("setup wizard model selection", () => {
-	it("saves a configured custom model as the default", async () => {
+	it("discovers and saves an uncached custom model as the default", async () => {
 		await initTheme(false, "unicode", false, "titanium", "dark");
 		const settings = Settings.isolated();
 		const model: Model = buildModel({
@@ -128,6 +128,7 @@ describe("setup wizard model selection", () => {
 			contextWindow: 100_000,
 			maxTokens: 32_000,
 		});
+		let available: Model[] = [];
 		const finished = Promise.withResolvers<string>();
 		const setModel = mock(
 			async (
@@ -147,9 +148,11 @@ describe("setup wizard model selection", () => {
 				session: {
 					model: undefined,
 					modelRegistry: {
-						getAvailable: () => [model],
-						getAll: () => [model],
-						refresh: async () => {},
+						getAvailable: () => available,
+						getAll: () => available,
+						refresh: async (strategy: string) => {
+							if (strategy === "online-if-uncached") available = [model];
+						},
 					},
 					setModel,
 				},
@@ -164,6 +167,9 @@ describe("setup wizard model selection", () => {
 		expect(scene).toBeDefined();
 
 		const controller = scene!.mount(host);
+		expect(controller.render?.(120).join("\n")).not.toContain("minimax-m3");
+		await controller.onMount?.();
+		expect(controller.render?.(120).join("\n")).toContain("minimax-m3");
 		controller.handleInput?.("\r");
 		const result = await finished.promise;
 
