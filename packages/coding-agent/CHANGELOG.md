@@ -127,7 +127,7 @@
 - Fixed authoritative providers (e.g. `openai-codex`) keeping unsupported bundled models selectable when a fresh model cache and an expired OAuth token coincided: built-in discovery now forces the OAuth refresh so the provider's model manager is constructed and prunes stale bundled entries (e.g. `gpt-5.4-nano`) instead of waiting out the cache TTL. ([#5364](https://github.com/can1357/oh-my-pi/issues/5364))
 ### Fixed
 
-- Bounded RPC JSONL frames to 1 MiB, compacted `agent_end` to retain only messages not already streamed, and guaranteed worker reaping plus pending-request rejection after output-reader failures or explicit stops ([#5405](https://github.com/can1357/oh-my-pi/issues/5405)).
+- Bounded RPC JSONL frames to 1 MiB, compacted oversized `agent_end` frames to retain only messages not already streamed, and guaranteed worker reaping plus pending-request rejection after output-reader failures or explicit stops ([#5405](https://github.com/can1357/oh-my-pi/issues/5405)).
 
 ## [17.0.4] - 2026-07-18
 

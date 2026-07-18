@@ -121,12 +121,15 @@ function overflowFrame(frame: object): object {
 
 /** Serialize a complete JSONL frame while enforcing the transport byte ceiling. */
 export function encodeRpcFrame(frame: object, streamedMessageCount = 0, streamedMessages?: readonly unknown[]): string {
-	const compacted = compactTerminalFrame(frame, streamedMessageCount, streamedMessages);
-	let json = JSON.stringify(compacted);
+	let json = JSON.stringify(frame);
 	if (serializedFrameBytes(json) <= MAX_RPC_FRAME_BYTES) return `${json}\n`;
-	if (isRecord(compacted) && compacted.type === "response") {
-		return `${JSON.stringify(overflowFrame(compacted))}\n`;
+	if (isRecord(frame) && frame.type === "response") {
+		return `${JSON.stringify(overflowFrame(frame))}\n`;
 	}
+
+	const compacted = compactTerminalFrame(frame, streamedMessageCount, streamedMessages);
+	json = JSON.stringify(compacted);
+	if (serializedFrameBytes(json) <= MAX_RPC_FRAME_BYTES) return `${json}\n`;
 
 	for (const pass of SHRINK_PASSES) {
 		json = JSON.stringify(shrinkValue(compacted, pass));
