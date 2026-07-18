@@ -2459,6 +2459,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		const planModeState = this.session.getPlanModeState();
 		const planModeTools = this.session.getEnabledToolNames();
+		const planModeMountedTools = this.session.getMountedXdevToolNames();
 		const planModeModelState = this.session.model
 			? { model: this.session.model, thinkingLevel: this.session.configuredThinkingLevel() }
 			: undefined;
@@ -2492,12 +2493,15 @@ export class InteractiveMode implements InteractiveModeContext {
 				}
 			}
 			const enabledTools = this.session.getEnabledToolNames();
+			const mountedTools = this.session.getMountedXdevToolNames();
 			if (
 				enabledTools.length !== planModeTools.length ||
-				enabledTools.some((name, index) => name !== planModeTools[index])
+				enabledTools.some((name, index) => name !== planModeTools[index]) ||
+				mountedTools.length !== planModeMountedTools.length ||
+				mountedTools.some((name, index) => name !== planModeMountedTools[index])
 			) {
 				try {
-					await this.session.setActiveToolsByName(planModeTools);
+					await this.session.setActiveToolPresentation(planModeTools, planModeMountedTools);
 				} catch (rollbackError) {
 					logger.warn("Failed to restore plan tools after plan exit failure", { error: String(rollbackError) });
 				}

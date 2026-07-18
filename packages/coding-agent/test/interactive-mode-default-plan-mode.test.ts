@@ -10,6 +10,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { type } from "arktype";
 import { ModelRegistry } from "../src/config/model-registry";
+import type { CustomTool } from "../src/extensibility/custom-tools/types";
 import { InteractiveMode } from "../src/modes/interactive-mode";
 import { XdevRegistry } from "../src/tools/xdev";
 
@@ -199,24 +200,42 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 		expect(session?.getActiveToolNames()).toEqual(["read"]);
 	});
 
-	it("restores mounted xd devices when prior-model restoration fails", async () => {
+	it("restores plan tool presentation when prior-model restoration fails", async () => {
 		const settings = Settings.isolated({ "plan.defaultOnStartup": true, "compaction.enabled": false });
 		settings.setModelRole("plan", "anthropic/claude-haiku-4-5:high");
 		const writeTool = makeTool("write");
-		const mountedTool = { ...makeTool("ambient_search"), loadMode: "discoverable" as const };
+		const planSelectedTool = makeTool("plan_selected");
+		const mountedTool: CustomTool = {
+			name: "mcp__ambient_search",
+			label: "ambient/search",
+			description: "Search ambient data",
+			parameters: type({}),
+			loadMode: "discoverable",
+			mcpServerName: "ambient",
+			mcpToolName: "search",
+			async execute() {
+				return { content: [{ type: "text", text: "ok" }] };
+			},
+		};
+		const xdevRegistry = new XdevRegistry([]);
 		const created = createHarness(settings, {
-			extraRegistryTools: [writeTool],
+			extraRegistryTools: [writeTool, planSelectedTool],
 			builtInToolNames: ["read", "write"],
-			xdevRegistry: new XdevRegistry([]),
+			xdevRegistry,
 		});
 		const previousModel = session?.model;
-		await session!.refreshRpcHostTools([mountedTool]);
 		await created.init({ suppressWelcomeIntro: true });
 		const planModel = session?.model;
-		const planTools = session?.getEnabledToolNames();
+		await session!.refreshMCPTools([mountedTool]);
+		await session!.setActiveToolsByName([...session!.getEnabledToolNames(), planSelectedTool.name]);
+		const planTools = session!.getEnabledToolNames();
+		const planActiveTools = session!.getActiveToolNames();
+		const planMountedTools = session!.getMountedXdevToolNames();
 		expect(planModel?.id).toBe("claude-haiku-4-5");
 		expect(session?.configuredThinkingLevel()).toBe(Effort.High);
-		expect(session?.getMountedXdevToolNames()).toEqual([mountedTool.name]);
+		expect(planActiveTools).toEqual(["read", "write", planSelectedTool.name]);
+		expect(planMountedTools).toEqual([mountedTool.name]);
+		expect(xdevRegistry.get(mountedTool.name)?.name).toBe(mountedTool.name);
 
 		const setModelTemporary = session!.setModelTemporary.bind(session);
 		const restoreModel = vi.spyOn(session!, "setModelTemporary").mockImplementationOnce(async (...args) => {
@@ -232,15 +251,18 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 		expect(session?.model?.id).toBe(planModel?.id);
 		expect(session?.configuredThinkingLevel()).toBe(Effort.High);
 		expect(session?.getEnabledToolNames()).toEqual(planTools);
-		expect(session?.getMountedXdevToolNames()).toEqual([mountedTool.name]);
+		expect(session?.getActiveToolNames()).toEqual(planActiveTools);
+		expect(session?.getMountedXdevToolNames()).toEqual(planMountedTools);
+		expect(xdevRegistry.get(mountedTool.name)?.name).toBe(mountedTool.name);
 
 		restoreModel.mockRestore();
 		await created.handlePlanModeCommand();
 		expect(created.planModeEnabled).toBe(false);
 		expect(session?.getPlanModeState()).toBeUndefined();
 		expect(session?.model?.id).toBe(previousModel?.id);
-		expect(session?.getEnabledToolNames()).toEqual(["read", "write", mountedTool.name]);
-		expect(session?.getMountedXdevToolNames()).toEqual([mountedTool.name]);
+		expect(session?.getActiveToolNames()).toEqual(["read"]);
+		expect(session?.getMountedXdevToolNames()).toEqual([]);
+		expect(xdevRegistry.get(mountedTool.name)).toBeUndefined();
 	});
 
 	it("clears old plan UI state when target-session reconciliation restore fails", async () => {

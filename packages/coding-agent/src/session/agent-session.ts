@@ -7556,6 +7556,41 @@ export class AgentSession {
 		}
 	}
 
+	/**
+	 * Restore an enabled tool set with its exact top-level versus `xd://` partition.
+	 *
+	 * Both inputs are required because {@link setActiveToolsByName} only receives the
+	 * enabled name list and classifies mounts from the *current* `#mountedXdevToolNames`.
+	 * Rollback/restore callers must pass the snapshotted mounted subset so names that
+	 * were top-level stay pinned (`#runtimeSelectedToolNames`) and names that were under
+	 * `xd://` remain mount-eligible, even when the live mount set has drifted.
+	 *
+	 * Names outside `mountedToolNames` are pinned top-level for this application;
+	 * names in the mounted subset remain eligible for xdev mounting. Delegates the
+	 * actual apply through `#applyActiveToolsByName` and restores the prior runtime
+	 * selection if that apply throws.
+	 */
+	async setActiveToolPresentation(toolNames: string[], mountedToolNames: string[]): Promise<void> {
+		const normalized = normalizeToolNames(toolNames);
+		const mounted = new Set(normalizeToolNames(mountedToolNames));
+		const transportWriteActive =
+			this.#builtInToolNames.has("write") &&
+			normalized.includes("write") &&
+			this.#presentationPinnedToolNames?.has("write") !== true &&
+			this.#runtimeSelectedToolNames?.has("write") !== true &&
+			(mounted.size > 0 || this.#planModeState?.enabled === true);
+		const previousRuntimeSelectedToolNames = this.#runtimeSelectedToolNames;
+		this.#runtimeSelectedToolNames = new Set(
+			normalized.filter(name => !mounted.has(name) && !(name === "write" && transportWriteActive)),
+		);
+		try {
+			await this.#applyActiveToolsByName(normalized);
+		} catch (error) {
+			this.#runtimeSelectedToolNames = previousRuntimeSelectedToolNames;
+			throw error;
+		}
+	}
+
 	/** Rebuild the base system prompt using the current active tool set. */
 	async refreshBaseSystemPrompt(): Promise<void> {
 		if (!this.#rebuildSystemPrompt) return;
