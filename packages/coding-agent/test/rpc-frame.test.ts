@@ -103,6 +103,31 @@ describe("RPC frame encoding", () => {
 		});
 	});
 
+	it("keeps the active run snapshot when a continuing agent_end arrives late", () => {
+		const active = { role: "assistant", content: [{ type: "text", text: "active" }] };
+		const stale = { role: "assistant", content: [{ type: "text", text: "stale" }] };
+		const encoder = new RpcFrameEncoder();
+		encoder.encode({ type: "agent_start" });
+		encoder.encode({ type: "message_end", message: active });
+
+		expect(decode(encoder.encode({ type: "agent_end", messages: [stale], willContinue: true }))).toEqual({
+			type: "agent_end",
+			messages: [stale],
+			messageCount: 1,
+			willContinue: true,
+		});
+		expect(decode(encoder.encode({ type: "agent_end", messages: [active] }))).toEqual({
+			type: "agent_end",
+			messages: [],
+			messageCount: 1,
+		});
+		expect(decode(encoder.encode({ type: "agent_end", messages: [active] }))).toEqual({
+			type: "agent_end",
+			messages: [active],
+			messageCount: 1,
+		});
+	});
+
 	it("bounds a single multi-byte message without losing its event discriminator", () => {
 		const encoded = encodeRpcFrame({
 			type: "message_end",
