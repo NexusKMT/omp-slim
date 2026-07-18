@@ -300,27 +300,30 @@ export class RpcClient {
 				}
 				this.#handleLine(line);
 			}
-			// Stream ended without the ready signal — the child exited or is
-			// exiting. Defer to the exit handler below: ptree resolves
-			// `exited` only after stderr is fully drained (nonzero exits), so
-			// rejecting here would snapshot a partial stderr tail and lose
-			// the actual startup error.
-			if (readySettled) {
-				let error: Error;
-				try {
-					const exitCode = await child.exited;
-					error = new Error(`Agent process exited with code ${exitCode}. Stderr: ${child.peekStderr()}`);
-				} catch (cause) {
-					error = new Error(`Agent output stream ended. Stderr: ${child.peekStderr()}`, { cause });
-				}
-				await reapAfterOutputFailure(error);
-				return;
-			}
-			await child.exited.catch(() => {});
+			// A closed stdout is terminal even if the child remains alive. Startup
+			// failures are reaped by the readyPromise catch below; established
+			// workers are reaped here so pending requests cannot hang indefinitely.
 			if (!readySettled) {
 				readySettled = true;
-				readyReject(new Error(`Agent process exited before ready. Stderr: ${child.peekStderr()}`));
+				readyReject(new Error(`Agent output stream ended before ready. Stderr: ${child.peekStderr()}`));
+				return;
 			}
+			const exitResult = await Promise.race([
+				child.exited.then(
+					exitCode => ({ exitCode }),
+					cause => ({ cause }),
+				),
+				Bun.sleep(100).then(() => null),
+			]);
+			const error =
+				exitResult === null
+					? new Error(`Agent output stream ended unexpectedly. Stderr: ${child.peekStderr()}`)
+					: "exitCode" in exitResult
+						? new Error(`Agent process exited with code ${exitResult.exitCode}. Stderr: ${child.peekStderr()}`)
+						: new Error(`Agent output stream ended. Stderr: ${child.peekStderr()}`, {
+								cause: exitResult.cause,
+							});
+			await reapAfterOutputFailure(error);
 		})().catch(async (cause: unknown) => {
 			const error = cause instanceof Error ? cause : new Error(String(cause));
 			if (!readySettled) {
