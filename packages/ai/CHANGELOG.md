@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Devin total-token usage omitting cache reads and cache writes.
+
 ## [17.0.5] - 2026-07-18
 
 ### Changed
