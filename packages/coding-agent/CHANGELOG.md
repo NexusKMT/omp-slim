@@ -25,6 +25,7 @@
 - Rendered `read xd://` calls in the compact grouped read view instead of a full tool-execution card; other internal URLs (`skill://`, `agent://`, …) still render full so their resolved content stays visible.
 
 ### Fixed
+- Fixed `plan.defaultOnStartup` being ignored by headless `omp -p` sessions, so the initial prompt now runs in plan mode and the persisted session remains in plan mode for later review ([#6017](https://github.com/can1357/oh-my-pi/issues/6017)).
 
 - Fixed `--model <role>` resolving a bare configured `modelRoles` key.
 - Browser tool selectors now accept bare snapshot refs (`tab.click("e501")`, `@e501`) everywhere `aria-ref=e501` works — previously the tab-worker backend fell through to a CSS tag selector that could never match, burning the 2s zero-match watchdog with a misleading "matches no elements" hint. `tab.select`, `tab.uploadFile`, `tab.press({ selector })`, `tab.screenshot({ selector })`, and `tab.drag` now resolve refs too. Unknown/stale refs fail immediately with the "refresh refs" error.

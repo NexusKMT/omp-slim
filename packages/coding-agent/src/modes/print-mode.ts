@@ -8,6 +8,7 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { logger, sanitizeText } from "@oh-my-pi/pi-utils";
+import { resolvePlanModelTransition } from "../plan-mode/model-transition";
 import { type AgentSession, type AgentSessionEvent, SHUTDOWN_CONSOLIDATE_BUDGET_MS } from "../session/agent-session";
 import { isSilentAbort } from "../session/messages";
 import { flushTelemetryExport } from "../telemetry-export";
@@ -107,6 +108,42 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 			process.stderr.write(`Extension error (${err.extensionPath}): ${err.error}\n`);
 		},
 	});
+
+	// InteractiveMode applies the same startup default during TUI initialization.
+	// Print mode has no TUI bootstrap, so arm the shared session directly before
+	// the first prompt; persisting the mode_change also lets a later interactive
+	// attachment restore and review the generated plan.
+	const hasConversationContext = session.sessionManager.buildSessionContext().messages.length > 0;
+	const hasExplicitMode = session.sessionManager.getEntries().some(entry => entry.type === "mode_change");
+	if (
+		!hasConversationContext &&
+		!hasExplicitMode &&
+		session.settings.get("plan.defaultOnStartup") &&
+		session.settings.get("plan.enabled")
+	) {
+		const planFilePath = session.getPlanReferencePath() || "local://PLAN.md";
+		const previousTools = session.getEnabledToolNames();
+		const planTools = session.hasBuiltInTool("write") ? [...new Set([...previousTools, "write"])] : previousTools;
+		await session.setActiveToolsByName(planTools);
+		session.setPlanModeState({
+			enabled: true,
+			planFilePath,
+			workflow: "parallel",
+		});
+		session.sessionManager.appendModeChange("plan", { planFilePath });
+
+		const resolved = session.resolveRoleModelWithThinking("plan");
+		const transition = resolvePlanModelTransition(session.model, resolved, false);
+		if (transition.kind === "thinking") {
+			session.setThinkingLevel(transition.thinkingLevel);
+		} else if (transition.kind === "apply") {
+			try {
+				await session.setModelTemporary(transition.model, transition.thinkingLevel);
+			} catch (error) {
+				logger.warn("Failed to switch to plan model for print mode", { error: String(error) });
+			}
+		}
+	}
 
 	// Always subscribe to enable session persistence via _handleAgentEvent
 	session.subscribe(event => {
