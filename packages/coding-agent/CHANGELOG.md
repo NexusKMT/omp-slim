@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the status-line `tok/s` badge ignoring vibe worker sessions: in `/vibe` mode the director is often idle while workers stream, so the badge showed a stale/zero rate while parallel work was actively generating tokens. The rate now aggregates the main session's live tok/s with every live vibe worker's tok/s, and falls back to the main session's own cached rate when no workers are streaming.
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
