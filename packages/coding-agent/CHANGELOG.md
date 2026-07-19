@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- Fixed failed plan-mode exits leaving the session on the restored execution model while plan mode remained active and silently changing ambient `xd://` tool presentation; rollback now restores the plan model, thinking level, and exact top-level-versus-mounted tool partition so exit can be retried safely ([#6013](https://github.com/can1357/oh-my-pi/pull/6013)).
 
 ## [17.0.5] - 2026-07-18
 
@@ -44,8 +45,6 @@
 - Fixed bash command timeouts rendering with an incorrect error border, and resolved Windows bash crashes when piped commands time out.
 - Migrated legacy nested/quoted-dotted config keys (e.g., `dev.autoqa.consent` -> `dev.autoqaConsent`) on settings load.
 - Added managed `ctx.setInterval` / `ctx.setTimeout` / `ctx.clearTimer` helpers on extension contexts to prevent uncaught exceptions from crashing sessions.
-- Fixed failed plan-mode exits leaving the session on the restored execution model while plan mode remained active and silently unmounting ambient `xd://` tools; rollback now restores the plan model, thinking level, and full enabled tool set so exit can be retried safely ([#6013](https://github.com/can1357/oh-my-pi/pull/6013)).
-- Fixed failed plan-mode exits leaving the session on the restored execution model while plan mode remained active and silently changing ambient `xd://` tool presentation; rollback now restores the plan model, thinking level, and exact top-level-versus-mounted tool partition so exit can be retried safely ([#6013](https://github.com/can1357/oh-my-pi/pull/6013)).
 
 - Fixed `--model <role>` resolving a bare configured `modelRoles` key.
 - Browser tool selectors now accept bare snapshot refs (`tab.click("e501")`, `@e501`) everywhere `aria-ref=e501` works — previously the tab-worker backend fell through to a CSS tag selector that could never match, burning the 2s zero-match watchdog with a misleading "matches no elements" hint. `tab.select`, `tab.uploadFile`, `tab.press({ selector })`, `tab.screenshot({ selector })`, and `tab.drag` now resolve refs too. Unknown/stale refs fail immediately with the "refresh refs" error.
