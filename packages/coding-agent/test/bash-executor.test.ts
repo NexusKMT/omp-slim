@@ -337,8 +337,8 @@ exit 64
 			return;
 		}
 
-		const fishPath = ["/usr/bin/fish", "/bin/fish", "/usr/local/bin/fish", "/opt/homebrew/bin/fish"].find(
-			candidate => fs.existsSync(candidate),
+		const fishPath = ["/usr/bin/fish", "/bin/fish", "/usr/local/bin/fish", "/opt/homebrew/bin/fish"].find(candidate =>
+			fs.existsSync(candidate),
 		);
 		if (!fishPath) {
 			return;
