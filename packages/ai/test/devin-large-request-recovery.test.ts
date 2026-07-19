@@ -184,4 +184,44 @@ describe("streamDevin large request recovery", () => {
 		expect(result.errorMessage).toContain("trace ID: prior-history-overflow");
 		expect(AIError.is(result.errorId, AIError.Flag.ContextOverflow)).toBe(true);
 	});
+
+	it("classifies as context overflow if the request follows a large tool execution", async () => {
+		const result = await runTrailerError(
+			{
+				messages: [
+					{
+						role: "user" as const,
+						content: "small user prompt",
+						timestamp: 1,
+					},
+					{
+						role: "assistant" as const,
+						content: "running a tool",
+						toolCalls: [
+							{
+								id: "call-1",
+								name: "large_tool",
+								arguments: {},
+							},
+						],
+						timestamp: 2,
+					},
+					{
+						role: "toolResult" as const,
+						toolCallId: "call-1",
+						toolName: "large_tool",
+						content: [{ type: "text" as const, text: "t".repeat(520 * 1024) }],
+						isError: false,
+						timestamp: 3,
+					},
+				],
+			},
+			"invalid_argument",
+			"an internal error occurred (trace ID: tool-execution-overflow)",
+		);
+
+		expect(result.stopReason).toBe("error");
+		expect(result.errorMessage).toContain("trace ID: tool-execution-overflow");
+		expect(AIError.is(result.errorId, AIError.Flag.ContextOverflow)).toBe(true);
+	});
 });
