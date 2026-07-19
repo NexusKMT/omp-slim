@@ -4444,6 +4444,16 @@ export const SETTINGS_SCHEMA = {
 			options: SEARCH_PROVIDER_OPTIONS,
 		},
 	},
+	"providers.webSearchOrder": {
+		type: "array",
+		default: [] as SearchProviderId[],
+		ui: {
+			tab: "providers",
+			group: "Services",
+			label: "Web Search Provider Order",
+			description: "Prioritized providers; unlisted providers retain their default order afterward",
+		},
+	},
 	"providers.webSearchExclude": {
 		type: "array",
 		default: [] as SearchProviderId[],
