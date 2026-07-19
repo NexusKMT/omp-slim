@@ -45,6 +45,7 @@ import type {
 } from "../types";
 import { deterministicUuid } from "../utils/deterministic-id";
 import { AssistantMessageEventStream } from "../utils/event-stream";
+import { isDemotedThinking } from "../utils/block-symbols";
 import { toolWireSchema } from "../utils/schema/wire";
 import { transformMessages } from "./transform-messages";
 
@@ -527,7 +528,7 @@ function buildChatMessagePrompts(
 			const toolCalls: ChatToolCall[] = [];
 			for (const part of msg.content) {
 				if (part.type === "text") {
-					promptText += part.text;
+					promptText += `${part.text}${isDemotedThinking(part) ? "\n" : ""}`;
 				} else if (part.type === "thinking") {
 					thinkingText += part.thinking;
 					if (isNativeDevinMessage && !signature && part.thinkingSignature) signature = part.thinkingSignature;
