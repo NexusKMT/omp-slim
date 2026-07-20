@@ -149,6 +149,10 @@
 - Migrated legacy nested/quoted-dotted config keys (e.g., `dev.autoqa.consent` -> `dev.autoqaConsent`) on settings load.
 - Added managed `ctx.setInterval` / `ctx.setTimeout` / `ctx.clearTimer` helpers on extension contexts to prevent uncaught exceptions from crashing sessions.
 
+### Fixed
+
+- Fixed `web_search` being unreachable under default config: with `tools.xdev: true`, the discoverable `web_search` tool was mounted under `xd://` and dropped from the top-level toolset, so models calling it directly got "Tool web_search not found". It is now pinned top-level via `XDEV_KEEP_TOP_LEVEL` while other discoverable tools keep mounting under `xd://` ([#5973](https://github.com/can1357/oh-my-pi/issues/5973)).
+
 ## [17.0.4] - 2026-07-18
 
 ### Fixed
