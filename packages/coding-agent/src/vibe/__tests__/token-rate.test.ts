@@ -64,6 +64,19 @@ describe("aggregateVibeWorkerTokensPerSecond", () => {
 		expect(aggregateVibeWorkerTokensPerSecond(OWNER)).toBeNull();
 	});
 
+	it("ignores idle workers whose last turn finished — a finalized duration must not contribute a stale rate", () => {
+		// Finalized message (duration set) but the worker is no longer
+		// streaming: its completed tok/s must not stick to the badge forever.
+		registerWorker("w1", fakeSession([assistantMessage(100, 1000)], false));
+		expect(aggregateVibeWorkerTokensPerSecond(OWNER)).toBeNull();
+	});
+
+	it("streaming workers still count while an idle sibling is skipped", () => {
+		registerWorker("w1", fakeSession([assistantMessage(100, 1000)], true));
+		registerWorker("w2", fakeSession([assistantMessage(50, 500)], false));
+		expect(aggregateVibeWorkerTokensPerSecond(OWNER)).toBe(100);
+	});
+
 	it("ignores workers whose AgentRegistry session is detached", () => {
 		registerWorker("w1", fakeSession([assistantMessage(100, 1000)], true));
 		// w2 is in the vibe roster but has no live AgentRegistry session.

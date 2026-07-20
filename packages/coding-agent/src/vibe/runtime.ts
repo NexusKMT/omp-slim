@@ -749,8 +749,8 @@ export function aggregateVibeWorkerTokensPerSecond(ownerId: string): number | nu
 	const registry = AgentRegistry.global();
 	for (const id of ids) {
 		const workerSession = registry.get(id)?.session;
-		if (!workerSession) continue;
-		const rate = calculateTokensPerSecond(workerSession.state.messages, workerSession.isStreaming);
+		if (!workerSession?.isStreaming) continue;
+		const rate = calculateTokensPerSecond(workerSession.state.messages, true);
 		if (rate !== null) {
 			total += rate;
 			any = true;
