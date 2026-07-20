@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added static fallback seed for Devin's `swe-1-7` model so it is bundled even when catalog generation runs without a Devin session token.
+
+### Fixed
+
+- Collapsed Devin's six GLM-5.2 variants into two logical entries (`glm-5-2` for 200K free, `glm-5-2-1m` for 1M paid). The 200K entry routes every thinking effort to the free `glm-5-2` wire UID — never to the quota-gated `glm-5-2-max` or `glm-5-2-none` — so GLM-5.2 works even when the weekly usage quota is exhausted.
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
@@ -174,13 +182,6 @@
 
 - Updated cost and token configurations for various models across providers
 - Renamed several models for consistency (e.g., MiniMax M3, Gemma 4 31B, Qwen variants)
-### Added
-
-- Added static fallback seed for Devin's `swe-1-7` model so it is bundled even when catalog generation runs without a Devin session token.
-
-### Fixed
-
-- Collapsed Devin's six GLM-5.2 variants into two logical entries (`glm-5-2` for 200K free, `glm-5-2-1m` for 1M paid). The 200K entry routes every thinking effort to the free `glm-5-2` wire UID — never to the quota-gated `glm-5-2-max` or `glm-5-2-none` — so GLM-5.2 works even when the weekly usage quota is exhausted.
 
 ## [16.3.12] - 2026-07-08
 
