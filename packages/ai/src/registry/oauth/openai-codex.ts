@@ -51,30 +51,27 @@ export function decodeJwt<T = Record<string, unknown>>(token: string): T | null 
 	}
 }
 
-function nonEmpty(value: unknown): string | undefined {
-	return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
-
 /**
- * Identity slice decoded from the token response. `accountId` is the ChatGPT
- * workspace (`chatgpt_account_id`) the token is scoped to — a personal plan
- * and a Team/Enterprise seat under one email are different workspaces with
- * independent limit pools, while every member of one workspace shares this
- * id. `planType` (`chatgpt_plan_type`) labels the workspace's subscription;
- * the access token may omit it, so the id_token claims serve as fallback.
+ * Identity slice decoded from the token claims. The ChatGPT workspace
+ * (`chatgpt_account_id`) is the subscription pool the token draws limits
+ * from — one account email can hold several (e.g. a personal Pro plan plus a
+ * Team seat). `chatgpt_plan_type` may only be present on the `id_token`.
  */
 function getTokenProfile(
 	accessToken: string,
 	idToken?: string,
 ): { accountId?: string; email?: string; planType?: string } {
 	const payload = decodeJwt<JwtPayload>(accessToken);
+	const idPayload = idToken ? decodeJwt<JwtPayload>(idToken) : null;
 	const auth = payload?.[JWT_CLAIM_PATH];
+	const idAuth = idPayload?.[JWT_CLAIM_PATH];
+	const accountId = auth?.chatgpt_account_id;
 	const email = payload?.[JWT_PROFILE_CLAIM]?.email?.trim().toLowerCase();
-	const idAuth = idToken ? decodeJwt<JwtPayload>(idToken)?.[JWT_CLAIM_PATH] : undefined;
+	const planType = (auth?.chatgpt_plan_type ?? idAuth?.chatgpt_plan_type)?.trim().toLowerCase();
 	return {
-		accountId: nonEmpty(auth?.chatgpt_account_id),
-		email: nonEmpty(email),
-		planType: nonEmpty(auth?.chatgpt_plan_type)?.toLowerCase() ?? nonEmpty(idAuth?.chatgpt_plan_type)?.toLowerCase(),
+		accountId: typeof accountId === "string" && accountId.length > 0 ? accountId : undefined,
+		email: typeof email === "string" && email.length > 0 ? email : undefined,
+		planType: typeof planType === "string" && planType.length > 0 ? planType : undefined,
 	};
 }
 
@@ -172,8 +169,7 @@ class OpenAICodexOAuthFlow extends OAuthCallbackFlow {
 	}
 }
 
-/** Exchanges an authorization code for OAuth credentials; exported for auth regression tests. */
-export async function exchangeCodeForToken(
+async function exchangeCodeForToken(
 	code: string,
 	verifier: string,
 	redirectUri: string,
@@ -222,10 +218,6 @@ export async function exchangeCodeForToken(
 		expires: Date.now() + tokenData.expires_in * 1000,
 		accountId,
 		email,
-		// The ChatGPT workspace is the subscription pool the token draws limits
-		// from — the org-scoped credential identity qualifier (same email can
-		// hold a personal plan plus Team/Enterprise seats). The plan type
-		// labels it for display; identity never depends on it.
 		orgId: accountId,
 		orgName: planType,
 	};
@@ -345,17 +337,10 @@ export async function loginOpenAICodexDevice(ctrl: OAuthController): Promise<OAu
 }
 
 /**
- * Refresh OpenAI Codex OAuth token.
- *
- * Deliberately no org fields on the result: the ChatGPT workspace a
- * credential is scoped to is fixed at login. Callers merge refresh results
- * over the stored credential, so omitting org here preserves it verbatim.
+ * Refresh OpenAI Codex OAuth token
  */
-export async function refreshOpenAICodexToken(
-	refreshToken: string,
-	fetchImpl: FetchImpl = fetch,
-): Promise<OAuthCredentials> {
-	const response = await fetchImpl(TOKEN_URL, {
+export async function refreshOpenAICodexToken(refreshToken: string): Promise<OAuthCredentials> {
+	const response = await fetch(TOKEN_URL, {
 		method: "POST",
 		headers: { "Content-Type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams({
@@ -386,6 +371,9 @@ export async function refreshOpenAICodexToken(
 
 	const { accountId, email } = getTokenProfile(tokenData.access_token);
 
+	// Deliberately no org fields on the result: the workspace a credential is
+	// scoped to is fixed at login. Callers merge refresh results over the
+	// stored credential, so omitting org here preserves it verbatim.
 	return {
 		access: tokenData.access_token,
 		refresh: tokenData.refresh_token || refreshToken,

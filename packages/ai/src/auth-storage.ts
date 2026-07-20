@@ -186,7 +186,7 @@ export interface CredentialHealthResult {
 	email?: string;
 	/** OAuth account id if known. */
 	accountId?: string;
-	/** Organization/workspace the credential is scoped to (Anthropic org / ChatGPT workspace). */
+	/** Organization/workspace the credential is scoped to (Anthropic/ChatGPT multi-subscription). */
 	orgId?: string;
 	orgName?: string;
 	/** `true` when the refresh token lives on a remote broker (sentinel was present). */
@@ -735,7 +735,7 @@ export interface OAuthAccess {
 	projectId?: string;
 	enterpriseUrl?: string;
 	apiEndpoint?: string;
-	/** Organization/workspace the credential is scoped to (Anthropic org / ChatGPT workspace). */
+	/** Organization/workspace the credential is scoped to (Anthropic/ChatGPT multi-subscription). */
 	orgId?: string;
 	orgName?: string;
 }
@@ -760,7 +760,7 @@ export interface OAuthAccessFailure {
 	projectId?: string;
 	enterpriseUrl?: string;
 	apiEndpoint?: string;
-	/** Organization/workspace the credential is scoped to (Anthropic org / ChatGPT workspace). */
+	/** Organization/workspace the credential is scoped to (Anthropic/ChatGPT multi-subscription). */
 	orgId?: string;
 	orgName?: string;
 	error: string;
@@ -776,7 +776,7 @@ export interface OAuthAccountIdentity {
 	accountId?: string;
 	email?: string;
 	projectId?: string;
-	/** Organization/workspace the credential is scoped to (Anthropic org / ChatGPT workspace). */
+	/** Organization/workspace the credential is scoped to (Anthropic/ChatGPT multi-subscription). */
 	orgId?: string;
 	orgName?: string;
 }
@@ -795,7 +795,7 @@ export interface OAuthAccountSummary {
 	email?: string;
 	projectId?: string;
 	enterpriseUrl?: string;
-	/** Organization/workspace the credential is scoped to (Anthropic org / ChatGPT workspace). */
+	/** Organization/workspace the credential is scoped to (Anthropic/ChatGPT multi-subscription). */
 	orgId?: string;
 	orgName?: string;
 }
@@ -3284,18 +3284,13 @@ export class AuthStorage {
 		const email = this.#getUsageReportMetadataValue(report, "email");
 		if (email) identifiers.push(`email:${email.toLowerCase()}`);
 		if (report.provider === "anthropic" || report.provider === "openai-codex") {
-			// One account email can hold several org-scoped limit pools:
-			// Anthropic organizations (Team seat + personal Max) and ChatGPT
-			// workspaces (personal Plus/Pro + Team/Enterprise seats;
-			// metadata.orgId carries the token's chatgpt_account_id). Reports
-			// from different orgs must not merge — scope every identifier by
-			// org when the report carries one. When the email could not be
-			// recovered, fall back to the account (identical across one
-			// login's Anthropic orgs and across one workspace's members,
-			// hence the org qualifier is what keeps two pools apart) so
-			// no-email reports still merge per org. Org-less reports
-			// (pre-upgrade caches) keep their bare identifiers and only merge
-			// among themselves.
+			// One account email can hold several org-scoped subscriptions
+			// (Anthropic organizations, ChatGPT workspaces). Reports from
+			// different orgs must not merge — scope every identifier by org
+			// when the report carries one; fall back to the account when the
+			// email could not be recovered so no-email reports still merge
+			// per org. Org-less reports (pre-upgrade caches) keep their bare
+			// identifiers and only merge among themselves.
 			if (identifiers.length === 0) {
 				const accountId =
 					this.#getUsageReportMetadataValue(report, "accountId") ?? this.#getUsageReportScopeAccountId(report);
@@ -5297,11 +5292,9 @@ export class AuthStorage {
 			if (credential.type !== "oauth") continue;
 			const credentialEmail = credential.email?.trim().toLowerCase();
 			const credentialAccountId = credential.accountId?.trim().toLowerCase();
-			// Every dimension present on BOTH sides must agree. The accountId is
-			// the ChatGPT workspace — shared by every member of a Team seat but
-			// distinct across one email's workspaces — so an email-only match
-			// would leak a personal report onto the enterprise row, and an
-			// account-only match would leak one member's report onto another.
+			// Every identity dimension present on BOTH sides must agree — the
+			// account id is shared workspace-wide and one email can span
+			// workspaces, so a single-dimension match can cross-link siblings.
 			const emailComparable = Boolean(email && credentialEmail);
 			const accountComparable = Boolean(accountId && credentialAccountId);
 			if (!emailComparable && !accountComparable) continue;
@@ -5918,19 +5911,14 @@ function toStoredAuthCredential(row: AuthRow, credential: AuthCredential): Store
 function resolveProviderCredentialIdentityKey(provider: string, identifiers: string[]): string | null {
 	const emailIdentifier = identifiers.find(identifier => identifier.startsWith("email:"));
 	if (provider === "anthropic" || provider === "openai-codex") {
-		// One subscription email can hold several org-scoped token pools:
-		// Anthropic organizations (e.g. a Team seat plus a personal Max plan)
-		// and ChatGPT workspaces (a personal Plus/Pro plan plus Team or
-		// Enterprise seats; the workspace id — chatgpt_account_id — is
-		// captured as orgId at login). Scope identity by org so the
-		// subscriptions can be stored side by side. The qualifier rides on
-		// whichever base identity is available — the Anthropic account UUID
-		// is IDENTICAL across the orgs of one login account, and the ChatGPT
-		// account id is IDENTICAL across every member of one workspace, so an
-		// unqualified account fallback would still collapse rows that must
-		// stay apart whenever the email could not be recovered. Org-less
-		// credentials (rows written before org capture existed) keep their
-		// bare key.
+		// One account email can hold several organizations/workspaces (e.g. a
+		// Team seat plus a personal plan), each with its own org-scoped token
+		// and limit pools. Scope identity by org so both subscriptions can be
+		// stored side by side. The qualifier rides on whichever base identity
+		// is available, so an unqualified account/project fallback would
+		// still collapse two subscriptions whenever the email could not be
+		// recovered. Org-less credentials (rows written before org capture
+		// existed) keep their bare key.
 		const base =
 			emailIdentifier ??
 			identifiers.find(identifier => identifier.startsWith("account:")) ??
@@ -5978,8 +5966,7 @@ function matchesReplacementCredential(
 	// One-way upgrade, applied only when the INCOMING identity key carries the
 	// org qualifier (only anthropic and openai-codex keys do, so other
 	// providers never reach the checks below). An org-scoped login `org:<o>`
-	// claims (and re-keys) any existing row that denotes the same
-	// subscription:
+	// claims (and re-keys) any existing row that denotes the same subscription:
 	//   - `org:<o>` — org-only row stored when identity recovery failed, claimed
 	//     once a later same-org login recovers a base identity;
 	//   - `<b>` for any base identity `<b>` (email/account/project) the incoming
@@ -6003,16 +5990,16 @@ function matchesReplacementCredential(
 		existing.type === "oauth" && existingIdentityKey.endsWith(`|${orgIdentifier}`)
 			? extractOAuthCredentialIdentifiers(existing)
 			: null;
-	// A base that merely repeats the org qualifier's id carries no per-user
-	// identity: openai-codex stores the ChatGPT workspace id as BOTH accountId
-	// and orgId, and every member of the workspace shares it, so letting it
-	// act as a claimable base would re-key another member's same-org row.
-	// (Anthropic account UUIDs never equal the org UUID, so this never skips.)
-	const orgQualifiedAccount = `account:${orgIdentifier.slice("org:".length)}`;
+	// A base identifier that merely repeats the org qualifier's id carries no
+	// per-user identity (openai-codex stores the ChatGPT workspace id as both
+	// accountId and orgId, shared by every member) — letting it act as a
+	// claimable base would re-key another member's same-org row.
+	const orgQualifierId = orgIdentifier.slice("org:".length);
 	for (const identifier of incomingIdentifiers) {
 		const isBase =
 			identifier.startsWith("email:") || identifier.startsWith("account:") || identifier.startsWith("project:");
-		if (!isBase || identifier === orgQualifiedAccount) continue;
+		if (!isBase) continue;
+		if (identifier.slice(identifier.indexOf(":") + 1) === orgQualifierId) continue;
 		if (existingIdentityKey === identifier) return true;
 		if (existingIdentityKey === `${identifier}|${orgIdentifier}`) return true;
 		if (existingIdentifiers?.includes(identifier)) return true;
