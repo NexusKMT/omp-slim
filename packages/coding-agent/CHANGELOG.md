@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added an optional `apply` control to the `task` tool: with `isolated: true, apply: false`, a subagent runs in its dedicated worktree and its patch/branch artifacts are captured without applying changes to the parent checkout. `apply` defaults to `true`. Available both as a flat top-level control and per `tasks[]` item (per-item value wins).
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
