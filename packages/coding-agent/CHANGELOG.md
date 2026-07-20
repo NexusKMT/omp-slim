@@ -3,6 +3,10 @@
 ## [Unreleased]
 - Fixed failed plan-mode exits leaving the session on the restored execution model while plan mode remained active and silently changing ambient `xd://` tool presentation; rollback now restores the plan model, thinking level, and exact top-level-versus-mounted tool partition so exit can be retried safely ([#6013](https://github.com/can1357/oh-my-pi/pull/6013)).
 
+### Fixed
+
+- Fixed the interactive `!`/`!!` shell shortcut spawning fish as a login shell (`fish -l -c …`), which fired `status is-login` blocks in user config (agent/keychain setup, PATH mutation) on every command. fish is now started with `-i` instead — interactive shells source the same `config.fish`/`conf.d` files (so aliases and functions from #1816 keep working) without login-shell side effects. zsh behavior (`-l -i`) is unchanged.
+
 ## [17.0.5] - 2026-07-18
 
 ### Added

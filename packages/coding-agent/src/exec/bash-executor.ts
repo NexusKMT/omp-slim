@@ -152,7 +152,7 @@ function isBashShell(shell: string): boolean {
 
 function needsInteractiveShellArg(shell: string): boolean {
 	const basename = shellBasename(shell);
-	return basename.includes("zsh");
+	return basename.includes("zsh") || basename.includes("fish");
 }
 
 function supportsAutoUserShell(shell: string): boolean {
@@ -165,19 +165,31 @@ function hasInteractiveShellArg(args: string[]): boolean {
 }
 
 function ensureInteractiveShellArgs(shell: string, args: string[]): string[] {
-	if (!needsInteractiveShellArg(shell) || hasInteractiveShellArg(args)) return args;
+	if (!needsInteractiveShellArg(shell)) return args;
 
-	const commandIndex = args.findIndex(arg => arg === "-c" || arg === "--command");
+	// fish sources the same config files (config.fish + conf.d) for interactive
+	// shells as for login shells, so the inherited `-l` adds nothing — it only
+	// marks the shell as login, firing `status is-login` blocks in user config
+	// (agent/keychain setup, path mutation) on every `!` command. zsh keeps `-l`
+	// because .zprofile is login-only. Args originate from procmgr's
+	// getShellArgs(), so login only ever appears as a standalone `-l`/`--login`.
+	const effectiveArgs = shellBasename(shell).includes("fish")
+		? args.filter(arg => arg !== "-l" && arg !== "--login")
+		: args;
+
+	if (hasInteractiveShellArg(effectiveArgs)) return effectiveArgs;
+
+	const commandIndex = effectiveArgs.findIndex(arg => arg === "-c" || arg === "--command");
 	if (commandIndex !== -1) {
-		return [...args.slice(0, commandIndex), "-i", ...args.slice(commandIndex)];
+		return [...effectiveArgs.slice(0, commandIndex), "-i", ...effectiveArgs.slice(commandIndex)];
 	}
 
-	const compactCommandIndex = args.findIndex(arg => /^-[^-]*c[^-]*$/.test(arg));
+	const compactCommandIndex = effectiveArgs.findIndex(arg => /^-[^-]*c[^-]*$/.test(arg));
 	if (compactCommandIndex !== -1) {
-		return args.map((arg, index) => (index === compactCommandIndex ? arg.replace("c", "ic") : arg));
+		return effectiveArgs.map((arg, index) => (index === compactCommandIndex ? arg.replace("c", "ic") : arg));
 	}
 
-	return [...args, "-i"];
+	return [...effectiveArgs, "-i"];
 }
 
 function quoteShellArg(value: string): string {

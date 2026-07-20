@@ -276,8 +276,10 @@ exit 64
 			expect(result.cancelled).toBe(false);
 			expect(result.exitCode).toBe(0);
 			expect(result.output.trim()).toBe("env-shell-ok");
-			expect(fs.readFileSync(marker, "utf8")).toContain("-l -c");
-			expect(fs.readFileSync(marker, "utf8")).not.toContain("-i");
+			// fish gets `-i` (interactive loads config.fish too) instead of `-l`,
+			// so `status is-login` blocks in user config don't fire on `!` commands.
+			expect(fs.readFileSync(marker, "utf8")).toContain("-i -c");
+			expect(fs.readFileSync(marker, "utf8")).not.toContain("-l");
 		} finally {
 			if (originalShell === undefined) {
 				delete Bun.env.SHELL;
@@ -325,6 +327,58 @@ exit 64
 			expect(result.cancelled).toBe(false);
 			expect(result.exitCode).toBe(0);
 			expect(result.output.trim()).toBe("zsh-alias-ok");
+		} finally {
+			removeSyncWithRetries(shellDir);
+		}
+	});
+
+	it("runs fish user-shell commands without login-shell side effects", async () => {
+		if (process.platform === "win32") {
+			return;
+		}
+
+		const fishPath = ["/usr/bin/fish", "/bin/fish", "/usr/local/bin/fish", "/opt/homebrew/bin/fish"].find(candidate =>
+			fs.existsSync(candidate),
+		);
+		if (!fishPath) {
+			return;
+		}
+
+		const shellDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-fish-shellpath-"));
+		const configDir = path.join(shellDir, ".config", "fish");
+		fs.mkdirSync(path.join(configDir, "conf.d"), { recursive: true });
+		fs.writeFileSync(path.join(configDir, "config.fish"), "function pi_fish_fn; echo fish-fn-ok; end\n");
+		// Login-gated snippet: fires only when the spawned fish is a login shell.
+		fs.writeFileSync(
+			path.join(configDir, "conf.d", "pi-login.fish"),
+			"if status is-login; echo fish-login-side-effect; end\n",
+		);
+		Settings.instance.set("shellPath", fishPath);
+
+		vi.spyOn(Settings.prototype, "getShellConfig").mockReturnValue({
+			shell: fishPath,
+			args: ["-l", "-c"],
+			env: {
+				PATH: Bun.env.PATH ?? "",
+				HOME: shellDir,
+			},
+			prefix: undefined,
+		});
+
+		try {
+			const result = await executeBash("pi_fish_fn", {
+				cwd: tempDir,
+				timeout: 5000,
+				sessionKey: "fish-shell-path",
+				useUserShell: true,
+			});
+
+			expect(result.cancelled).toBe(false);
+			expect(result.exitCode).toBe(0);
+			// config.fish must still load (#1816 contract)…
+			expect(result.output).toContain("fish-fn-ok");
+			// …but the shell must not be a login shell.
+			expect(result.output).not.toContain("fish-login-side-effect");
 		} finally {
 			removeSyncWithRetries(shellDir);
 		}
