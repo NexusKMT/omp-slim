@@ -1335,7 +1335,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 					}
 				}
 				if (event.toolName === "yield") {
-					if (event.isError && !yieldCalled && !abortSent) {
+					if (event.isError && !abortSent) {
 						consecutiveYieldToolErrors++;
 						let yieldErrorText = "";
 						const resultContent = event.result?.content;

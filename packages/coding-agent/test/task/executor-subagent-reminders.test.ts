@@ -429,6 +429,51 @@ describe("runSubprocess yield reminders", () => {
 		expect(abortCalls).toBe(1);
 	});
 
+	it("fails when malformed yields repeat after an incremental yield section", async () => {
+		const promptReleased = Promise.withResolvers<void>();
+		let abortCalls = 0;
+		const session = createMockSession(async ({ emit, state }) => {
+			emit({
+				type: "tool_execution_end",
+				toolCallId: "tool-incremental",
+				toolName: "yield",
+				result: {
+					content: [{ type: "text", text: "Section recorded." }],
+					details: { status: "success", data: { note: "partial" }, type: ["section"] },
+				},
+				isError: false,
+			});
+			for (let attempt = 1; attempt <= 6; attempt++) {
+				const assistant = createAssistantStopMessage(`malformed terminal yield attempt ${attempt}`);
+				state.messages.push(assistant);
+				emit({ type: "message_end", message: assistant });
+				emit({
+					type: "tool_execution_end",
+					toolCallId: `tool-malformed-after-incremental-${attempt}`,
+					toolName: "yield",
+					result: {
+						content: [{ type: "text", text: "result must be an object containing either data or error" }],
+						details: { status: "error", error: "result must be an object containing either data or error" },
+					},
+					isError: true,
+				});
+			}
+			await promptReleased.promise;
+		});
+		const abortableSession = session as unknown as { abort: () => Promise<void> };
+		abortableSession.abort = async () => {
+			abortCalls += 1;
+			promptReleased.resolve();
+		};
+
+		mockCreateAgentSession(session);
+
+		const result = await runSubprocess({ ...baseOptions, id: "subagent-incremental-then-malformed-yield" });
+		expect(result.exitCode).toBe(1);
+		expect(result.aborted).toBe(false);
+		expect(result.stderr).toContain("Subagent submitted invalid yield results 6 times");
+		expect(abortCalls).toBe(1);
+	});
 	it("waits for yield-triggered abort cleanup before resolving the subagent", async () => {
 		const promptCleanup = Promise.withResolvers<void>();
 		const abortCleanup = Promise.withResolvers<void>();
