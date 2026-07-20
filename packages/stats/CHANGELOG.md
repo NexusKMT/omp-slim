@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Clarified overview token accounting by separating uncached input from cache reads and showing the conversation-token total used by the agent breakdown.
+
 ## [17.0.5] - 2026-07-18
 
 ### Fixed
