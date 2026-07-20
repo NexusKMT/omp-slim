@@ -129,6 +129,6 @@ class ModelSceneController implements SetupSceneController {
 export const modelSetupScene: SetupScene = {
 	id: "model",
 	title: "Choose your default model",
-	minVersion: 2,
+	minVersion: 1,
 	mount: host => new ModelSceneController(host),
 };
