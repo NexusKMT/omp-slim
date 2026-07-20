@@ -237,6 +237,30 @@ describe("streamDevin large request recovery", () => {
 		expect(result.errorMessage).toContain("trace ID: tool-execution-overflow");
 		expect(AIError.is(result.errorId, AIError.Flag.ContextOverflow)).toBe(true);
 	});
+	it("keeps prior user-role execution history eligible before the active prompt", async () => {
+		const result = await runTrailerError(
+			{
+				messages: [
+					{
+						role: "user" as const,
+						content: "execution output: ".concat("x".repeat(520 * 1024)),
+						timestamp: 1,
+					},
+					{
+						role: "user" as const,
+						content: "small active prompt",
+						timestamp: 2,
+					},
+				],
+			},
+			"invalid_argument",
+			"an internal error occurred (trace ID: user-role-history)",
+		);
+
+		expect(result.stopReason).toBe("error");
+		expect(AIError.is(result.errorId, AIError.Flag.ContextOverflow)).toBe(true);
+	});
+
 	it("keeps the trailer transient for a large current prompt split across multiple trailing user/developer messages", async () => {
 		const result = await runTrailerError(
 			{

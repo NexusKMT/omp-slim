@@ -245,12 +245,18 @@ export const streamDevin: StreamFunction<"devin-agent"> = (
 								// schemas, which history maintenance cannot shrink. Re-encode
 								// only the repeated history field before choosing recovery.
 								let activeTailCount = 0;
-								for (let i = context.messages.length - 1; i >= 0; i--) {
-									const role = context.messages[i].role;
-									if (role === "user" || role === "developer") {
-										activeTailCount++;
-									} else {
-										break;
+								const lastRole = context.messages.at(-1)?.role;
+								if (lastRole === "user" || lastRole === "developer") {
+									activeTailCount = 1;
+									// A trailing developer message can accompany the current user
+									// prompt. Earlier user-role records may instead be flushed
+									// execution history and must remain eligible for compaction.
+									if (lastRole === "developer") {
+										for (let i = context.messages.length - 2; i >= 0; i--) {
+											const role = context.messages[i].role;
+											if (role !== "user" && role !== "developer") break;
+											activeTailCount++;
+										}
 									}
 								}
 								const shrinkablePrompts =
