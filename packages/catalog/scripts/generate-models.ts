@@ -17,7 +17,6 @@ import { getGitLabDuoModels } from "@oh-my-pi/pi-ai/providers/gitlab-duo";
 import { $env } from "@oh-my-pi/pi-utils";
 import { ANTIGRAVITY_PRIMARY_ENDPOINT, fetchAntigravityDiscoveryModels } from "../src/discovery/antigravity";
 import { fetchCodexModels } from "../src/discovery/codex";
-import { DEVIN_STATIC_FALLBACK_MODELS } from "../src/discovery/devin";
 import { buildGitLabDuoWorkflowFallbackModel } from "../src/discovery/gitlab-duo-workflow";
 import { createModelManager } from "../src/model-manager";
 import prevModelsJson from "../src/models.json" with { type: "json" };
@@ -541,13 +540,6 @@ async function generateModels() {
 	// guard therefore always passes for this id, kept only to mirror the Sakana seed shape.
 	if (!authoritativeCatalogProviders.has("gitlab-duo-agent")) {
 		allModels.push(buildGitLabDuoWorkflowFallbackModel());
-	}
-	// Seed Devin fallback models so newly released free models (e.g. `swe-1-7`)
-	// are bundled even when catalog generation runs without a Devin session
-	// token. Devin is `dynamicModelsAuthoritative: true`, so live discovery
-	// replaces these at runtime when a key is present.
-	if (!authoritativeCatalogProviders.has("devin")) {
-		allModels.push(...DEVIN_STATIC_FALLBACK_MODELS);
 	}
 	// Seed Fireworks "Fast" serving-path variants (`<id>-fast`). Fast routers are
 	// not enumerated by the serverless control-plane list, so discovery never

@@ -149,27 +149,3 @@ function normalizeDevinModels(
 	}
 	return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
-
-/**
- * Static fallback Devin models for catalog generation without a live API key.
- *
- * Devin discovery requires an authenticated session token; when catalog
- * generation runs without one, these seeds ensure new free models (like
- * `swe-1-7`) are still bundled. Live discovery is authoritative — when it
- * succeeds, it replaces these seeds entirely (stale entries are pruned).
- */
-export const DEVIN_STATIC_FALLBACK_MODELS: readonly ModelSpec<"devin-agent">[] = [
-	{
-		id: "swe-1-7",
-		name: "SWE-1.7",
-		api: "devin-agent",
-		provider: "devin",
-		baseUrl: DEVIN_DEFAULT_BASE_URL,
-		reasoning: true,
-		input: ["text"],
-		supportsTools: true,
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 262_000,
-		maxTokens: DEFAULT_MAX_TOKENS,
-	},
-];
