@@ -714,6 +714,31 @@ export interface CredentialDisabledEvent {
 }
 
 // ============================================================================
+// MCP Events
+// ============================================================================
+
+/**
+ * Fired for every JSON-RPC notification received from a connected MCP server,
+ * AFTER the runtime's own handling of known list/update methods. Unknown or
+ * server-custom methods are delivered too — extensions can bridge them into
+ * session behavior by inspecting `method`/`params` and injecting a follow-up
+ * via `pi.sendMessage(..., { deliverAs })` or `pi.sendUserMessage(...)`.
+ */
+export interface McpNotificationEvent {
+	type: "mcp_notification";
+	/**
+	 * Server name as declared in the MCP config (raw, unsanitized). Note this
+	 * differs from the sanitized prefix used in `mcp__<sanitized_server>_<tool>`
+	 * tool names — filter by this raw name, not by tool-name prefix matching.
+	 */
+	server: string;
+	/** JSON-RPC method (e.g. `notifications/tools/list_changed`, or server-custom). */
+	method: string;
+	/** JSON-RPC params, opaque to the runtime. */
+	params: unknown;
+}
+
+// ============================================================================
 // User Bash Events
 // ============================================================================
 
@@ -941,6 +966,7 @@ export type ExtensionEvent =
 	| TodoReminderEvent
 	| GoalUpdatedEvent
 	| CredentialDisabledEvent
+	| McpNotificationEvent
 	| UserBashEvent
 	| UserPythonEvent
 	| InputEvent
@@ -1134,6 +1160,7 @@ export interface ExtensionAPI {
 	on(event: "tool_result", handler: ExtensionHandler<ToolResultEvent, ToolResultEventResult>): void;
 	on(event: "user_bash", handler: ExtensionHandler<UserBashEvent, UserBashEventResult>): void;
 	on(event: "user_python", handler: ExtensionHandler<UserPythonEvent, UserPythonEventResult>): void;
+	on(event: "mcp_notification", handler: ExtensionHandler<McpNotificationEvent>): void;
 
 	// =========================================================================
 	// Tool Registration

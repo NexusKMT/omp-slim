@@ -39,6 +39,7 @@ import type {
 	ExtensionUIContext,
 	InputEvent,
 	InputEventResult,
+	McpNotificationEvent,
 	MessageRenderer,
 	RegisteredCommand,
 	RegisteredTool,
@@ -131,6 +132,14 @@ async function raceHandlerWithTimeout<T>(
 }
 
 const MAX_PENDING_CREDENTIAL_DISABLED = 32;
+
+/**
+ * Buffer cap for `mcp_notification` events received before {@link ExtensionRunner.initialize}
+ * has run. Sized to match the manager-side buffer in `MCPManager.NOTIFICATION_BUFFER_CAP` so
+ * the two layers can't drop different amounts of the same burst — the pipe drains, or it
+ * spills, but it does so consistently at both ends. Drop-oldest under pressure.
+ */
+const MAX_PENDING_MCP_NOTIFICATIONS = 100;
 
 /**
  * Events handled by the generic emit() method.
@@ -260,6 +269,19 @@ export class ExtensionRunner {
 	#pendingCredentialDisabled: CredentialDisabledEvent[] = [];
 
 	/**
+	 * Buffer for `mcp_notification` events received via {@link emitMcpNotification} before
+	 * {@link initialize} has run. Two-layer race: `MCPManager` also buffers frames until
+	 * its first `addNotificationListener` subscriber attaches, but the sdk.ts bridge is
+	 * registered inside `createAgentSession` — BEFORE the mode controller calls
+	 * `ExtensionRunner.initialize()`. Without this second buffer, the manager's drain
+	 * arrives at the bridge → the bridge calls `emitMcpNotification` → the runner drops
+	 * the frame because `#initialized === false`, and the frame evaporates a second time.
+	 * Bounded at {@link MAX_PENDING_MCP_NOTIFICATIONS}; oldest entries are dropped under
+	 * pressure. Drained in {@link initialize} once the runtime/UI context is wired.
+	 */
+	#pendingMcpNotifications: Array<Omit<McpNotificationEvent, "type">> = [];
+
+	/**
 	 * Timers scheduled by extensions through the sanctioned `ctx.setInterval` /
 	 * `ctx.setTimeout` helpers. Callbacks run with the same isolation as handler
 	 * dispatch — a throw is logged and routed through {@link onError} instead of
@@ -345,6 +367,23 @@ export class ExtensionRunner {
 				});
 			}
 		});
+
+		// Drain events buffered by emitMcpNotification() before initialize ran, using the
+		// same deferred-microtask ordering as the credential-disabled drain above so any
+		// onError listener registered synchronously after initialize() still catches
+		// handler errors during flush.
+		const pendingMcp = this.#pendingMcpNotifications.splice(0);
+		queueMicrotask(() => {
+			for (const event of pendingMcp) {
+				this.emit({ type: "mcp_notification", ...event }).catch((error: unknown) => {
+					logger.warn("mcp_notification handler threw during initialize flush", {
+						server: event.server,
+						method: event.method,
+						error: error instanceof Error ? error.message : String(error),
+					});
+				});
+			}
+		});
 	}
 
 	/**
@@ -370,6 +409,32 @@ export class ExtensionRunner {
 			return;
 		}
 		await this.emit({ type: "credential_disabled", ...event });
+	}
+
+	/**
+	 * Forward an MCP server notification to extension handlers.
+	 *
+	 * If {@link initialize} has not yet run, the notification is buffered and replayed
+	 * once initialize wires the runtime/UI context. Matches the credential-disabled
+	 * deferral above: the sdk.ts bridge registers `MCPManager.addNotificationListener`
+	 * inside `createAgentSession` — BEFORE the mode controller calls `initialize()` on
+	 * this runner — so notification frames drained by the manager (either fresh
+	 * arrivals or replay from its own startup buffer) can reach us pre-init. Without
+	 * this buffer they would evaporate for a second time here.
+	 *
+	 * Bounded at {@link MAX_PENDING_MCP_NOTIFICATIONS}; oldest entries drop under
+	 * pressure. Never throws; per-handler errors are routed through {@link onError}
+	 * via {@link emit}'s normal isolation.
+	 */
+	async emitMcpNotification(event: Omit<McpNotificationEvent, "type">): Promise<void> {
+		if (!this.#initialized) {
+			if (this.#pendingMcpNotifications.length >= MAX_PENDING_MCP_NOTIFICATIONS) {
+				this.#pendingMcpNotifications.shift();
+			}
+			this.#pendingMcpNotifications.push(event);
+			return;
+		}
+		await this.emit({ type: "mcp_notification", ...event });
 	}
 
 	async emitSessionStop(event: Omit<SessionStopEvent, "type">): Promise<SessionStopEventResult | undefined> {
