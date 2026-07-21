@@ -1598,6 +1598,13 @@ export function filterAvailableModelsByEnabledPatterns(
 
 	return includeSyntheticAllowedModels(available, allowedModels);
 }
+function findExactCliModel(selector: string, models: Model<Api>[]): Model<Api> | undefined {
+	const referenced = findExactModelReferenceMatch(selector, models);
+	if (referenced) return referenced;
+
+	const lower = selector.toLowerCase();
+	return models.find(model => model.id.toLowerCase() === lower || formatModelString(model).toLowerCase() === lower);
+}
 
 export interface ResolveCliModelResult {
 	model: Model<Api> | undefined;
@@ -1620,17 +1627,19 @@ export function resolveCliModel(options: {
 	cliProvider?: string;
 	cliModel?: string;
 	modelRegistry: CliModelRegistry;
+	/** Authenticated models to prefer for unqualified selectors; omit to preserve catalog-order behavior. */
+	availableModels?: Model<Api>[];
 	settings?: Settings;
 	preferences?: ModelMatchPreferences;
 }): ResolveCliModelResult {
-	const { cliProvider, cliModel, modelRegistry, settings, preferences } = options;
+	const { cliProvider, cliModel, modelRegistry, settings, preferences, availableModels: preferredModels } = options;
 
 	if (!cliModel) {
 		return { model: undefined, selector: undefined, warning: undefined, error: undefined };
 	}
 
-	const availableModels = modelRegistry.getAll();
-	if (availableModels.length === 0) {
+	const allModels = modelRegistry.getAll();
+	if (allModels.length === 0) {
 		return {
 			model: undefined,
 			selector: undefined,
@@ -1639,8 +1648,9 @@ export function resolveCliModel(options: {
 		};
 	}
 
+	const availableModels = preferredModels ?? allModels;
 	const providerMap = new Map<string, string>();
-	for (const model of availableModels) {
+	for (const model of allModels) {
 		providerMap.set(model.provider.toLowerCase(), model.provider);
 	}
 
@@ -1656,18 +1666,14 @@ export function resolveCliModel(options: {
 
 	const trimmedModel = cliModel.trim();
 	if (!provider) {
-		const lower = trimmedModel.toLowerCase();
-		// When input has provider/id format (e.g. "zai/glm-5"), prefer decomposed
-		// provider+id match over flat id match. Without this, a model with id
-		// "zai/glm-5" on provider "vercel-ai-gateway" wins over provider "zai"
-		// with id "glm-5", because Array.find returns the first catalog hit.
-		let exact = findExactModelReferenceMatch(trimmedModel, availableModels);
-		if (!exact) {
-			// Flat exact id (or full selector) by catalog order: CLI resolution
-			// stays deterministic across runs regardless of usage-based ranking.
-			exact = availableModels.find(
-				model => model.id.toLowerCase() === lower || `${model.provider}/${model.id}`.toLowerCase() === lower,
-			);
+		const slashIndex = trimmedModel.indexOf("/");
+		const hasExplicitProvider =
+			slashIndex !== -1 && providerMap.has(trimmedModel.substring(0, slashIndex).toLowerCase());
+		let exact = hasExplicitProvider
+			? findExactCliModel(trimmedModel, allModels)
+			: findExactCliModel(trimmedModel, availableModels);
+		if (!exact && !hasExplicitProvider) {
+			exact = findExactCliModel(trimmedModel, allModels);
 		}
 		if (exact) {
 			return {
@@ -1684,14 +1690,11 @@ export function resolveCliModel(options: {
 			MAX_THINKING_SUFFIX_OPTIONS,
 		);
 		if (exactThinkingLevel) {
-			let exactSuffixed = findExactModelReferenceMatch(exactBase, availableModels);
-			if (!exactSuffixed) {
-				const lowerExactBase = exactBase.toLowerCase();
-				exactSuffixed = availableModels.find(
-					model =>
-						model.id.toLowerCase() === lowerExactBase ||
-						`${model.provider}/${model.id}`.toLowerCase() === lowerExactBase,
-				);
+			let exactSuffixed = hasExplicitProvider
+				? findExactCliModel(exactBase, allModels)
+				: findExactCliModel(exactBase, availableModels);
+			if (!exactSuffixed && !hasExplicitProvider) {
+				exactSuffixed = findExactCliModel(exactBase, allModels);
 			}
 			if (exactSuffixed) {
 				return {
@@ -1719,10 +1722,16 @@ export function resolveCliModel(options: {
 					: undefined;
 		if (roleSelector) {
 			configuredPatterns = resolveConfiguredModelPatterns([roleSelector], settings);
-			const resolved = resolveModelRoleValue(roleSelector, availableModels, {
+			const availableResolved = resolveModelRoleValue(roleSelector, availableModels, {
 				settings,
 				matchPreferences: preferences,
 			});
+			const resolved = availableResolved.model
+				? availableResolved
+				: resolveModelRoleValue(roleSelector, allModels, {
+						settings,
+						matchPreferences: preferences,
+					});
 			if (resolved.model) {
 				return {
 					model: resolved.model,
@@ -1767,7 +1776,7 @@ export function resolveCliModel(options: {
 	}
 
 	if (provider) {
-		const exactProviderMatch = resolveProviderModelReference(provider, pattern, availableModels);
+		const exactProviderMatch = resolveProviderModelReference(provider, pattern, allModels);
 		if (exactProviderMatch) {
 			return {
 				model: exactProviderMatch,
@@ -1779,10 +1788,16 @@ export function resolveCliModel(options: {
 		}
 	}
 
-	const candidates = provider ? availableModels.filter(model => model.provider === provider) : availableModels;
-	const { model, thinkingLevel, warning, upstream } = parseModelPattern(pattern, candidates, preferences, {
+	const candidates = provider ? allModels.filter(model => model.provider === provider) : availableModels;
+	let parsed = parseModelPattern(pattern, candidates, preferences, {
 		allowInvalidThinkingSelectorFallback: false,
 	});
+	if (!parsed.model && !provider) {
+		parsed = parseModelPattern(pattern, allModels, preferences, {
+			allowInvalidThinkingSelectorFallback: false,
+		});
+	}
+	const { model, thinkingLevel, warning, upstream } = parsed;
 
 	if (!model) {
 		const display = provider ? `${provider}/${pattern}` : cliModel;
