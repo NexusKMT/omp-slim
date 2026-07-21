@@ -41,6 +41,8 @@ export type TOptional<_E extends ArkSchema> = ArkSchema;
 export type TUnion<_T extends readonly ArkSchema[] = readonly ArkSchema[]> = ArkSchema;
 export type TEnum<_T extends readonly (string | number)[] = readonly (string | number)[]> = ArkSchema;
 export type TRecord<_K extends ArkSchema, _V extends ArkSchema> = ArkSchema;
+/** TypeBox-compatible wrapper for raw JSON Schema documents. */
+export type TUnsafe<_T = unknown> = ArkSchema;
 
 // ---------------------------------------------------------------------------
 // ArkSchema wrapper — JSON Schema object with hidden validator metadata
@@ -560,18 +562,14 @@ function tNull(opts?: Meta): ArkSchema {
 	return applyMeta(createArkSchema(validator, { type: "null" }), opts);
 }
 
+const identityValidator = (data: unknown): unknown => data;
+
 function tAny(opts?: Meta): ArkSchema {
-	return applyMeta(
-		createArkSchema((data: unknown) => data, {}),
-		opts,
-	);
+	return applyMeta(createArkSchema(identityValidator, {}), opts);
 }
 
 function tUnknown(opts?: Meta): ArkSchema {
-	return applyMeta(
-		createArkSchema((data: unknown) => data, {}),
-		opts,
-	);
+	return applyMeta(createArkSchema(identityValidator, {}), opts);
 }
 
 function tNever(opts?: Meta): ArkSchema {
@@ -920,6 +918,9 @@ export const Type = {
 	Null: tNull,
 	Any: tAny,
 	Unknown: tUnknown,
+	Unsafe<T = unknown>(jsonSchema: Record<string, unknown> = {}): TUnsafe<T> {
+		return createArkSchema(identityValidator, jsonSchema);
+	},
 	Never: tNever,
 	Literal: tLiteral,
 	Union: tUnion,
