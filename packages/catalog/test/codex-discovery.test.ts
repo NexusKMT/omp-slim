@@ -141,7 +141,7 @@ describe("Codex model discovery", () => {
 		expect(legacy?.contextWindow).toBe(272_000);
 	});
 
-	it("uses the discovered account catalog as authoritative", async () => {
+	it("keeps account-listed API-unsupported models while pruning hidden and absent models", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-codex-authoritative-"));
 		const staticOnlyModel: ModelSpec<"openai-codex-responses"> = {
 			id: "unsupported-static",
@@ -155,23 +155,58 @@ describe("Codex model discovery", () => {
 			contextWindow: 272_000,
 			maxTokens: 128_000,
 		};
-		const discoveredModel: ModelSpec<"openai-codex-responses"> = {
+		const sparkModel: ModelSpec<"openai-codex-responses"> = {
 			...staticOnlyModel,
-			id: "account-supported",
-			name: "Account-supported model",
+			id: "gpt-5.3-codex-spark",
+			name: "GPT-5.3 Codex Spark",
+			contextWindow: 128_000,
 		};
+		const fetchFn: typeof fetch = Object.assign(
+			async () =>
+				new Response(
+					JSON.stringify({
+						models: [
+							{
+								slug: "gpt-5.3-codex-spark",
+								display_name: "GPT-5.3-Codex-Spark",
+								visibility: "list",
+								supported_in_api: false,
+								context_window: 128_000,
+								default_reasoning_level: "high",
+								input_modalities: ["text"],
+							},
+							{
+								slug: "hidden-model",
+								display_name: "Hidden model",
+								visibility: "hidden",
+								supported_in_api: true,
+							},
+							{
+								slug: "hide-model",
+								display_name: "Hide model",
+								visibility: "hide",
+								supported_in_api: true,
+							},
+						],
+					}),
+				),
+			{ preconnect() {} },
+		);
 		try {
 			const result = await resolveProviderModels(
 				{
-					...openaiCodexModelManagerOptions(),
-					staticModels: [staticOnlyModel],
+					...openaiCodexModelManagerOptions({ accessToken: "test-token", fetch: fetchFn }),
+					staticModels: [staticOnlyModel, sparkModel],
 					cacheDbPath: path.join(tempDir, "models.db"),
-					fetchDynamicModels: async () => [discoveredModel],
 				},
 				"online",
 			);
 
-			expect(result.models.map(model => model.id)).toEqual(["account-supported"]);
+			expect(result.models.map(model => model.id)).toEqual(["gpt-5.3-codex-spark"]);
+			expect(result.models[0]).toMatchObject({
+				contextWindow: 128_000,
+				maxTokens: 128_000,
+			});
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}

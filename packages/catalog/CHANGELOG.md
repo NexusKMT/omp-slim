@@ -11,6 +11,9 @@
 ### Fixed
 
 - Collapsed Devin's six GLM-5.2 variants into two logical entries (`glm-5-2` for 200K free, `glm-5-2-1m` for 1M paid). The 200K entry routes every thinking effort to the free `glm-5-2` wire UID — never to the quota-gated `glm-5-2-max` or `glm-5-2-none` — so GLM-5.2 works even when the weekly usage quota is exhausted.
+### Fixed
+
+- Fixed authenticated OpenAI Codex discovery dropping account-listed ChatGPT-only models such as GPT-5.3 Codex Spark when they are unavailable through the public API ([#6108](https://github.com/can1357/oh-my-pi/issues/6108)).
 
 ## [17.0.5] - 2026-07-18
 
