@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed dynamic model discovery refreshes dropping provider-level compatibility overrides from `models.yml` ([#6041](https://github.com/can1357/oh-my-pi/issues/6041)).
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
