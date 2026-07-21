@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Prevented canonical slash commands and their matching aliases from appearing as duplicate autocomplete rows ([#6131](https://github.com/can1357/oh-my-pi/issues/6131)).
+
 ## [17.0.5] - 2026-07-18
 
 ### Changed
