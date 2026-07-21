@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Esc aborting an ongoing agent turn instead of overlapping TTS playback, leaving speech uninterruptible ([#6118](https://github.com/can1357/oh-my-pi/issues/6118)).
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
