@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed Gemini Flash Cloud Code Assist responses containing only intercepted planning-leak JSON being counted as meaningful output, so fully discarded leaks now use the existing empty-response retry path while visible suffixes and native structured tool calls remain successful.
+- Fixed Antigravity auto endpoint routing stopping after the daily endpoint exhausted its empty-stream retries, allowing retryable pre-content provider failures to fail over to the sandbox endpoint without replaying partial output or retrying content blocks.
 
 ## [17.0.6] - 2026-07-20
 

@@ -571,8 +571,8 @@ describe("Google Gemini CLI alignment", () => {
 					fetchCalls === 1
 						? sseChunks
 						: [
-							'data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"Recovered."}]},"finishReason":"STOP"}]}}\n\n',
-						];
+								'data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"Recovered."}]},"finishReason":"STOP"}]}}\n\n',
+							];
 				const stream = new ReadableStream({
 					async start(controller) {
 						const encoder = new TextEncoder();

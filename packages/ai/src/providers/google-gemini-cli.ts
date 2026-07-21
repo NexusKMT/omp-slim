@@ -893,6 +893,7 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 
 				if (isBuffering && textBuffer !== "") {
 					const buffered = consumePlanningBuffer(textBuffer, toolNames, true);
+
 					if (buffered.kind !== "incomplete") {
 						feedVisibleText(buffered.visibleText, bufferedTextSignature);
 					}
@@ -1048,10 +1049,15 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 					break;
 				} catch (error) {
 					const status = extractHttpStatusFromError(error);
-					if (AIError.isTransientStatus(status)) {
-						if (!isLastEndpoint && !started) {
-							continue;
-						}
+					if (
+						!isLastEndpoint &&
+						!started &&
+						(AIError.isTransientStatus(status) ||
+							(status === undefined &&
+								!(error instanceof AIError.ProviderResponseError && error.kind === "output") &&
+								AIError.retriable(AIError.classify(error))))
+					) {
+						continue;
 					}
 					throw error;
 				}
