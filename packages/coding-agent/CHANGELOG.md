@@ -1,6 +1,10 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+
+- Fixed `Ctrl+V` clipboard paste being dropped while API-key and other modal prompts own focus ([#6057](https://github.com/can1357/oh-my-pi/issues/6057)).
+
 
 ## [17.0.5] - 2026-07-18
 
