@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed in-progress aborts awaiting `session_stop` extension handlers whose results would be discarded ([#6134](https://github.com/can1357/oh-my-pi/issues/6134)).
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
