@@ -915,6 +915,9 @@ export class EventController {
 					createUsageRowBlock(event.message.usage, event.message.duration, event.message.ttft),
 				);
 			}
+			if (displayMessage === event.message) {
+				this.ctx.transcriptMessageComponents.set(event.message, this.ctx.streamingComponent);
+			}
 			this.ctx.streamingComponent = undefined;
 			this.ctx.streamingMessage = undefined;
 			// Pin a turn-ending provider error (e.g. Anthropic content-filter block)
@@ -1311,7 +1314,7 @@ export class EventController {
 			}
 		} else if (event.result) {
 			this.ctx.lastAssistantUsage = undefined;
-			this.ctx.rebuildChatFromMessages();
+			this.ctx.rebuildChatFromMessages({ reuseSettledComponents: true });
 			this.ctx.statusLine.invalidate();
 			// When history collapses behind the summary divider, the frame
 			// shrinks far below the committed row count; without clearing, the
