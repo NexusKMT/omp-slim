@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Alibaba Coding Plan Custom login rejecting valid API keys when the endpoint does not serve the built-in validation model by validating against its model catalog instead. ([#6078](https://github.com/can1357/oh-my-pi/issues/6078))
+
 ## [17.0.5] - 2026-07-18
 
 ### Changed
