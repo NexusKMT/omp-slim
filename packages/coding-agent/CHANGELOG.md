@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Mnemopi consolidation re-storing cumulative session transcripts after incremental auto-retain, including after resuming a session ([#6058](https://github.com/can1357/oh-my-pi/issues/6058)).
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
