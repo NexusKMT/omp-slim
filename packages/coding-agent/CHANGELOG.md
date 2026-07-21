@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed near-miss `xd://` write targets silently creating filesystem paths instead of surfacing a corrective URI error ([#6123](https://github.com/can1357/oh-my-pi/issues/6123)).
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
