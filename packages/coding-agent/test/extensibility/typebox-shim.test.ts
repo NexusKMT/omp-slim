@@ -39,6 +39,10 @@ describe("pi.typebox compatibility shim", () => {
 		const validArgs = { path: "README.md" };
 
 		expect(schema.__validator(validArgs)).toBe(validArgs);
+		expect(schema.safeParse({}).success).toBe(false);
+		const composed = Type.Object({ input: schema });
+		expect(composed.safeParse({ input: validArgs }).success).toBe(true);
+		expect(composed.safeParse({ input: {} }).success).toBe(false);
 		expect(toolWireSchema(tool)).toEqual(rawSchema);
 		expect(
 			validateToolArguments(tool, {

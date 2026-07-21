@@ -17,7 +17,7 @@
  * like a small validator at runtime.
  */
 
-import { areJsonValuesEqual } from "@oh-my-pi/pi-ai/utils/schema";
+import { areJsonValuesEqual, validateJsonSchemaValue } from "@oh-my-pi/pi-ai/utils/schema";
 
 // ---------------------------------------------------------------------------
 // Type aliases — exported so `import type { Static, TSchema } from "..."`
@@ -919,7 +919,15 @@ export const Type = {
 	Any: tAny,
 	Unknown: tUnknown,
 	Unsafe<T = unknown>(jsonSchema: Record<string, unknown> = {}): TUnsafe<T> {
-		return createArkSchema(identityValidator, jsonSchema);
+		const validator = (data: unknown): unknown => {
+			const result = validateJsonSchemaValue(jsonSchema, data);
+			if (result.success) return data;
+			const messages = result.issues.map(issue =>
+				issue.path.length > 0 ? `${issue.path.join(".")}: ${issue.message}` : issue.message,
+			);
+			return validationFailure(messages.join("; ") || "Invalid value");
+		};
+		return createArkSchema(validator, jsonSchema);
 	},
 	Never: tNever,
 	Literal: tLiteral,
