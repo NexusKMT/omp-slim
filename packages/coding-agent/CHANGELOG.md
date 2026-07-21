@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `/retry` reporting "Nothing to retry" after a stream stalled or aborted mid-tool-call, where a synthetic tool result appended for the un-run tool call shadowed the failed assistant turn ([#6056](https://github.com/can1357/oh-my-pi/issues/6056)).
+
 ## [17.0.5] - 2026-07-18
 
 ### Added

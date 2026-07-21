@@ -2285,6 +2285,23 @@ export interface SyntheticToolResultDetails {
 	upstreamError?: string;
 }
 
+/**
+ * Narrow an {@link AgentMessage} to a synthetic {@link ToolResultMessage} —
+ * a tool_result emitted for a tool call the assistant never invoked (see
+ * {@link SyntheticToolResultDetails}). Consumers use this to look past the
+ * placeholder pairing back to the assistant turn that produced it, e.g.
+ * `AgentSession.retry()` walking back over the synthetic results a
+ * stalled/aborted mid-tool-call turn leaves behind.
+ */
+export function isSyntheticToolResultMessage(
+	message: AgentMessage | undefined,
+): message is ToolResultMessage<SyntheticToolResultDetails> {
+	return (
+		message?.role === "toolResult" &&
+		(message.details as SyntheticToolResultDetails | undefined)?.__synthetic === true
+	);
+}
+
 function syntheticDetailsFor(
 	reason: "aborted" | "error" | "skipped" | "length",
 	errorMessage: string | undefined,

@@ -37,6 +37,7 @@ import {
 	type CompactionSummaryMessage,
 	countTokens,
 	createToolScopedAbortReason,
+	isSyntheticToolResultMessage,
 	resolveTelemetry,
 	type StreamFn,
 	TERMINAL_TOOL_RESULT_ABORT_REASON,
@@ -15630,20 +15631,40 @@ export class AgentSession {
 	/**
 	 * Manually retry the last failed assistant turn.
 	 * Removes the error message from agent state and re-attempts with a fresh retry budget.
+	 *
+	 * A stream that stalls or aborts mid-tool-call ends the turn with
+	 * `stopReason: "error" | "aborted"` and then appends one synthetic
+	 * {@link isSyntheticToolResultMessage tool_result} per emitted tool call to
+	 * preserve the provider's tool_use/tool_result pairing (see
+	 * `createAbortedToolResult` in `agent-loop.ts`). Those placeholders trail the
+	 * failed assistant turn, so the retry lookback walks back over them before
+	 * checking the assistant message; it strips both the placeholders and the
+	 * failed turn before re-attempting.
+	 *
 	 * @returns true if retry was initiated, false if no failed turn to retry or agent is busy
 	 */
 	async retry(): Promise<boolean> {
 		if (this.isStreaming || this.isCompacting || this.isRetrying) return false;
 
 		const messages = this.agent.state.messages;
-		const lastMsg = messages[messages.length - 1];
+
+		// Walk back past trailing synthetic tool_result placeholders emitted for
+		// tool calls that never ran because the turn stalled/aborted mid-tool-call.
+		// They shadow the failed assistant turn from the single-message lookback.
+		let turnEnd = messages.length;
+		while (turnEnd > 0 && isSyntheticToolResultMessage(messages[turnEnd - 1])) {
+			turnEnd--;
+		}
+
+		const lastMsg = messages[turnEnd - 1];
 		if (lastMsg?.role !== "assistant") return false;
 
 		const assistantMsg = lastMsg as AssistantMessage;
 		if (assistantMsg.stopReason !== "error" && assistantMsg.stopReason !== "aborted") return false;
 
-		// Remove the failed/aborted assistant message (same as auto-retry does before re-attempting)
-		this.agent.replaceMessages(messages.slice(0, -1));
+		// Remove the failed/aborted assistant message plus its synthetic tool
+		// results (same as auto-retry does before re-attempting).
+		this.agent.replaceMessages(messages.slice(0, turnEnd - 1));
 
 		// Reset retry budget for a fresh attempt
 		this.#retryAttempt = 0;
