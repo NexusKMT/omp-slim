@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed prewalked subagents continuing to display their starting model after switching to the target model. ([#6083](https://github.com/can1357/oh-my-pi/issues/6083))
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
