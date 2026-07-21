@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the fullscreen Plan Review overlay staying interactive with no feedback after a choice was picked: while the approval ran slow async work (e.g. context compaction) the overlay remained mounted, arrow keys still moved the cursor, and repeat Enter/Esc were silently swallowed, so users on Ghostty and macOS Terminal thought `/plan` was frozen. The overlay now locks input and shows a "submitting…" indicator the moment a choice commits ([#5926](https://github.com/can1357/oh-my-pi/issues/5926)).
+
 ## [17.0.3] - 2026-07-17
 
 ### Changed
