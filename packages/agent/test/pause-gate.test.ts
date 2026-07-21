@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { agentLoop, agentPauseGate } from "@oh-my-pi/pi-agent-core";
 import type { AgentContext, AgentLoopConfig, AgentMessage, AgentTool } from "@oh-my-pi/pi-agent-core/types";
 import type { Message } from "@oh-my-pi/pi-ai";
@@ -29,6 +29,7 @@ describe("agentPauseGate", () => {
 	afterEach(() => {
 		// The gate is process-global: never leak an engaged pause into other files.
 		agentPauseGate.resume();
+		vi.restoreAllMocks();
 	});
 
 	it("holds the next model call while paused and releases it on resume", async () => {
@@ -65,8 +66,14 @@ describe("agentPauseGate", () => {
 		const context: AgentContext = { systemPrompt: ["Test"], messages: [], tools: [makeEchoTool(executed)] };
 		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
 
+		const toolBoundary = Promise.withResolvers<void>();
+		const waitUntilResumed = agentPauseGate.waitUntilResumed.bind(agentPauseGate);
+		vi.spyOn(agentPauseGate, "waitUntilResumed").mockImplementation(signal => {
+			toolBoundary.resolve();
+			return waitUntilResumed(signal);
+		});
 		const result = agentLoop([createUserMessage("run echo")], context, config, undefined, mock.stream).result();
-		await Bun.sleep(20);
+		await toolBoundary.promise;
 		expect(executed).toEqual([]); // tool parked, not started
 		expect(mock.calls.length).toBe(1); // and no follow-up model call either
 
