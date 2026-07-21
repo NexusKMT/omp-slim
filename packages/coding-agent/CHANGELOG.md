@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a cache-cold startup race where `modelRoles.default` pointing at a `models.yml` discovery provider (e.g. a custom OpenAI-compatible endpoint with `discovery.type: openai-models-list`) was silently replaced by an unrelated authenticated provider's default. `createAgentSession` resolves the default role before background discovery populates the catalog, so on a cold `models.db` the configured provider had no models yet and the fallback went straight to `pickDefaultAvailableModel`. Startup now awaits one cache-aware discovery pass and re-resolves the configured default whenever it is still unresolved (not only when nothing resolved at all) before accepting a bundled-provider fallback ([#6162](https://github.com/can1357/oh-my-pi/issues/6162)).
+
 ## [17.0.6] - 2026-07-20
 
 - Fixed failed plan-mode exits leaving the session on the restored execution model while plan mode remained active and silently changing ambient `xd://` tool presentation; rollback now restores the plan model, thinking level, and exact top-level-versus-mounted tool partition so exit can be retried safely ([#6013](https://github.com/can1357/oh-my-pi/pull/6013)).
