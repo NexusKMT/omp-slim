@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a startup crash that locked users out of the app when `prewalk.enabled` was set but the prewalk hand-off target (default `@smol`) had no configured API key; prewalk now stays unarmed with a warning instead of aborting startup ([#6064](https://github.com/can1357/oh-my-pi/issues/6064)).
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
