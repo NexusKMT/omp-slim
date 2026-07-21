@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed HTML session exports overflowing the browser call stack when rendering valid deeply nested conversation trees.
+
 ## [17.0.7] - 2026-07-21
 
 ### Fixed
