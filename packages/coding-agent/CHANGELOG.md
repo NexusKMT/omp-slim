@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the advisor docs (`docs/advisor-watchdog.md`) describing `/advisor`, `/advisor on`, and `/advisor off` as toggling the persisted `advisor.enabled` setting; the slash toggle is session-scoped and writes nothing to config ([#6128](https://github.com/can1357/oh-my-pi/issues/6128)).
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
