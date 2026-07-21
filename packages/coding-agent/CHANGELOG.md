@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed project system prompts shortening working directories beneath the user's home to `~`, which could cause models to invent an incorrect absolute path for tool calls ([#6100](https://github.com/can1357/oh-my-pi/issues/6100)).
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
