@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `auth-gateway` model listings exposing duplicate, ambiguous bare IDs by advertising one provider-qualified routing ID per upstream model ([#6170](https://github.com/can1357/oh-my-pi/issues/6170)).
+
 ## [17.0.6] - 2026-07-20
 
 ### Fixed
