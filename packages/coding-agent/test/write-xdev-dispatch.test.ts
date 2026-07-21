@@ -107,6 +107,12 @@ describe("read and write route xd:// device URLs", () => {
 			});
 			expect(escaped.isError).toBeUndefined();
 			expect(await Bun.file(path.join(tempDir, "xd/web_search")).text()).toBe("intentional file");
+
+			// conflict:// has no router handler but is a documented write scheme —
+			// the guard must let it reach the conflict resolver, not reject it.
+			await expect(write!.execute("write-conflict", { path: "conflict://1", content: "x" })).rejects.toThrow(
+				"Conflict #1 not found",
+			);
 		} finally {
 			await removeWithRetries(tempDir);
 		}

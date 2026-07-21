@@ -104,6 +104,9 @@ function assertWriteTargetAddressable(target: string, router: InternalUrlRouter)
 	if (!uriLike) return;
 
 	const scheme = uriLike[1]!.toLowerCase();
+	// conflict:// has no router handler but is spliced downstream by
+	// parseConflictUri (which emits its own precise id/scope errors); let it pass.
+	if (scheme === "conflict") return;
 	const canonicalScheme = router.getHandler(scheme) ? scheme : XD_SCHEME_NEAR_MISSES[scheme] ? "xd" : undefined;
 	const suggestion = canonicalScheme
 		? ` Did you mean '${canonicalScheme}://${uriLike[2]}'?`
