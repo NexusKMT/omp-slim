@@ -159,6 +159,8 @@ class LeakedThinkingProjector {
 	#toolBlocks = new Map<number, { index: number; block: StreamingToolCall }>();
 	/** Projected native thinking blocks, keyed by the inner stream's `contentIndex`. */
 	#thinkingBlocks = new Map<number, number>();
+	/** Native thinking blocks whose projected `thinking_end` awaits the source end event. */
+	#pendingThinkingEnds = new Set<number>();
 
 	constructor(out: AssistantMessageEventStream, seed: AssistantMessage) {
 		this.#out = out;
@@ -177,8 +179,10 @@ class LeakedThinkingProjector {
 	thinking(srcIndex: number, delta: string, signature: string | undefined): void {
 		let index = this.#thinkingBlocks.get(srcIndex);
 		if (index === undefined) {
+			if (this.#thinking && this.#pendingThinkingEnds.has(this.#thinking.index)) this.#closeThinking();
 			index = this.#openThinking();
 			this.#thinkingBlocks.set(srcIndex, index);
+			this.#pendingThinkingEnds.add(index);
 		}
 		const block = this.#partial.content[index] as ThinkingContent;
 		block.thinking += delta;
@@ -187,13 +191,19 @@ class LeakedThinkingProjector {
 	}
 
 	/**
-	 * Capture a native thinking block's completed signature. Source identity is
-	 * required because providers may finalize it after a later block has started.
+	 * Finalize a native thinking block by source identity. Its projected end is
+	 * deferred until this event so stream consumers observe the completed
+	 * signature before the block closes, even when later blocks started first.
 	 */
 	thinkingEnd(srcIndex: number, signature: string | undefined): void {
 		const index = this.#thinkingBlocks.get(srcIndex);
-		if (signature === undefined || index === undefined) return;
-		(this.#partial.content[index] as ThinkingContent).thinkingSignature = signature;
+		if (index === undefined) return;
+		if (signature !== undefined) {
+			(this.#partial.content[index] as ThinkingContent).thinkingSignature = signature;
+		}
+		if (!this.#pendingThinkingEnds.delete(index)) return;
+		if (this.#thinking?.index === index) this.#thinking = undefined;
+		this.#emitThinkingEnd(index);
 	}
 
 	/** Forward a completed native image after releasing held text. */
@@ -263,6 +273,10 @@ class LeakedThinkingProjector {
 	 * flush held-back fragments, close open blocks, and return the healed content.
 	 */
 	finish(message: AssistantMessage): AssistantMessage["content"] {
+		for (const [srcIndex] of this.#thinkingBlocks) {
+			const block = message.content[srcIndex];
+			this.thinkingEnd(srcIndex, block?.type === "thinking" ? block.thinkingSignature : undefined);
+		}
 		let fullText = "";
 		let tailSignature: string | undefined;
 		for (const block of message.content) {
@@ -333,13 +347,19 @@ class LeakedThinkingProjector {
 
 	#closeThinking(): void {
 		if (!this.#thinking) return;
-		const block = this.#partial.content[this.#thinking.index] as ThinkingContent;
+		const index = this.#thinking.index;
+		this.#thinking = undefined;
+		if (this.#pendingThinkingEnds.has(index)) return;
+		this.#emitThinkingEnd(index);
+	}
+
+	#emitThinkingEnd(index: number): void {
+		const block = this.#partial.content[index] as ThinkingContent;
 		this.#out.push({
 			type: "thinking_end",
-			contentIndex: this.#thinking.index,
+			contentIndex: index,
 			content: block.thinking,
 			partial: this.#partial,
 		});
-		this.#thinking = undefined;
 	}
 }
