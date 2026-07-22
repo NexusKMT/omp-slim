@@ -5,7 +5,6 @@
  *
  * Run from the repo root: `bun packages/mnemopi/bench/native-vectors.bench.ts`
  */
-import { execSync } from "node:child_process";
 import {
 	cosineSimilarityBatch,
 	cosineSimilarityPairs,
@@ -200,7 +199,7 @@ for (const count of COUNTS.filter(n => n <= 1000)) {
 	pushRow("mmrRerankIndices (via mmrRerank)", count, ts, native);
 }
 
-const sha = execSync("git rev-parse HEAD").toString().trim();
+const sha = Bun.spawnSync(["git", "rev-parse", "HEAD"]).stdout.toString().trim();
 const report = {
 	sha,
 	date: new Date().toISOString(),
