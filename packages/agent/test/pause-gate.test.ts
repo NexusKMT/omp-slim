@@ -51,12 +51,14 @@ describe("agentPauseGate", () => {
 
 	it("holds tool execution at the tool boundary when paused mid-turn", async () => {
 		const executed: string[] = [];
+		const toolResponse = Promise.withResolvers<void>();
 		const mock = createMockModel({
 			responses: [
 				() => {
 					// Engage the gate while the model response is being produced: the
 					// turn's tool batch must park before the tool starts.
 					agentPauseGate.pause();
+					toolResponse.resolve();
 					return { content: [{ type: "toolCall" as const, name: "echo", arguments: { msg: "frozen" } }] };
 				},
 				{ content: ["done"] },
@@ -65,11 +67,8 @@ describe("agentPauseGate", () => {
 		const context: AgentContext = { systemPrompt: ["Test"], messages: [], tools: [makeEchoTool(executed)] };
 		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
 
-		// Let queued microtasks consume the scripted tool response. This verifies the
-		// observable contract without a process-global spy that sibling test files can
-		// restore while this turn is suspended.
 		const result = agentLoop([createUserMessage("run echo")], context, config, undefined, mock.stream).result();
-		for (let tick = 0; tick < 10; tick++) await Promise.resolve();
+		await toolResponse.promise;
 		expect(executed).toEqual([]); // tool parked, not started
 		expect(mock.calls.length).toBe(1); // and no follow-up model call either
 
