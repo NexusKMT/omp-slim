@@ -363,7 +363,7 @@ describe("createAgentSession deferred model pattern resolution", () => {
 		authStorage.setRuntimeApiKey("runtime-provider", "test-key");
 		authStoragesToClose.push(authStorage);
 		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir, "missing-role-models.yml"));
-		const parsed = parseArgs(["--model", "slow:high"]);
+		const parsed = parseArgs(["--model", "slow:low"]);
 		const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string | null) => {
 			throw new Error(`buildSessionOptions unexpectedly exited with ${code}`);
 		});
@@ -375,7 +375,7 @@ describe("createAgentSession deferred model pattern resolution", () => {
 				modelRegistry,
 				settings,
 			);
-			expect(cliOptions.modelPattern).toBe("slow:high");
+			expect(cliOptions.modelPattern).toBe("slow:low");
 
 			const { session, modelFallbackMessage } = await createAgentSession({
 				...cliOptions,
@@ -398,7 +398,9 @@ describe("createAgentSession deferred model pattern resolution", () => {
 			try {
 				expect(session.model?.provider).toBe("runtime-provider");
 				expect(session.model?.id).toBe("runtime-reasoning-model");
-				expect(session.thinkingLevel).toBe(Effort.High);
+				// `low` differs from the fallback model's default (`high`), so this
+				// proves the suffix is inherited rather than the model default applied.
+				expect(session.thinkingLevel).toBe(Effort.Low);
 				expect(modelFallbackMessage).toBeUndefined();
 			} finally {
 				await session.dispose();

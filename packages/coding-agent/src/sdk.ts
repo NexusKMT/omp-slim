@@ -2143,6 +2143,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				let selectedModel = primary.model;
 				let selectedThinkingLevel = primary.thinkingLevel;
 				let selectedExplicitThinkingLevel = primary.explicitThinkingLevel;
+				// A chain entry without its own `:level` suffix inherits the
+				// unavailable primary's configured thinking level, matching
+				// runtime fallback-chain semantics.
+				if (retryFallback && !selectedExplicitThinkingLevel && retryFallback.originalThinkingLevel !== undefined) {
+					selectedThinkingLevel = retryFallback.originalThinkingLevel;
+					selectedExplicitThinkingLevel = true;
+				}
 				let authFallbackUsed = false;
 				if (options.modelPatternAuthFallback) {
 					const primaryKey = await modelRegistry.getApiKey(primary.model);
