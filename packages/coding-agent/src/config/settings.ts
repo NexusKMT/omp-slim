@@ -1630,7 +1630,8 @@ export class Settings {
 		clearTimeout(this.#saveTimer);
 		this.#saveTimer = setTimeout(() => {
 			this.#saveTimer = undefined;
-			const savePromise = this.#saveNow();
+			const previousSave = this.#savePromise;
+			const savePromise = previousSave ? previousSave.then(() => this.#saveNow()) : this.#saveNow();
 			this.#savePromise = savePromise;
 			savePromise
 				.catch(err => {
@@ -1705,6 +1706,15 @@ export class Settings {
 				// Update our global with any external changes we preserved
 				this.#global = current;
 				await Bun.write(configPath, YAML.stringify(this.#global, null, 2));
+				// These pending roles were included in this write. Remove each
+				// only if no newer local change arrived while Bun.write was in
+				// flight; a newer value still needs the queued follow-up save.
+				const globalRolesAfterWrite = this.#modelRolesFromLayer(this.#global);
+				for (const role of rolesToPreserve) {
+					if (latestGlobalRoles[role] === globalRolesAfterWrite[role]) {
+						this.#modifiedGlobalModelRoles.delete(role);
+					}
+				}
 			});
 		} catch (error) {
 			logger.warn("Settings: save failed", { error: String(error) });

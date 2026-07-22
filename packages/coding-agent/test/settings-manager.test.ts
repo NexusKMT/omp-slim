@@ -459,31 +459,48 @@ describe("Settings", () => {
 			});
 		});
 
-		it("preserves a global role changed while an earlier save is pending", async () => {
+		it("does not replay a preserved role after the save writes it", async () => {
 			await writeSettings({
 				modelRoles: { default: "anthropic/claude-sonnet-4-5" },
 			});
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 			const firstSaveEntered = Promise.withResolvers<void>();
 			const releaseFirstSave = Promise.withResolvers<void>();
+			const firstSaveFinished = Promise.withResolvers<void>();
 			const withFileLock = fileLock.withFileLock;
 			vi.spyOn(fileLock, "withFileLock").mockImplementation(async (filePath, fn, options) => {
 				firstSaveEntered.resolve();
 				await releaseFirstSave.promise;
-				return withFileLock(filePath, fn, options);
+				const result = await withFileLock(filePath, fn, options);
+				firstSaveFinished.resolve();
+				return result;
 			});
 
 			settings.setModelRole("smol", "anthropic/claude-haiku-4-5");
 			await firstSaveEntered.promise;
 			settings.setModelRole("advisor", "moonshot/kimi-k3:max");
 			releaseFirstSave.resolve();
-			await settings.flush();
+			await firstSaveFinished.promise;
 
-			expect(settings.getGlobalModelRole("advisor")).toBe("moonshot/kimi-k3:max");
 			expect((await readSettings()).modelRoles).toEqual({
 				default: "anthropic/claude-sonnet-4-5",
 				smol: "anthropic/claude-haiku-4-5",
 				advisor: "moonshot/kimi-k3:max",
+			});
+
+			await writeSettings({
+				modelRoles: {
+					default: "anthropic/claude-sonnet-4-5",
+					smol: "anthropic/claude-haiku-4-5",
+					advisor: "external/new-advisor",
+				},
+			});
+			await settings.flush();
+
+			expect((await readSettings()).modelRoles).toEqual({
+				default: "anthropic/claude-sonnet-4-5",
+				smol: "anthropic/claude-haiku-4-5",
+				advisor: "external/new-advisor",
 			});
 		});
 
