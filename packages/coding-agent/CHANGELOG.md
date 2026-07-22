@@ -176,6 +176,10 @@
 
 - Fixed project system prompts shortening working directories beneath the user's home to `~`, which could cause models to invent an incorrect absolute path for tool calls ([#6100](https://github.com/can1357/oh-my-pi/issues/6100)).
 
+### Fixed
+
+- Fixed the TUI `/usage` matrix mis-aligning multi-account columns across quota windows: each window row was sorted independently by used fraction, so the positional `account N` labels denoted different credentials per row and an exhausted limit (e.g. a Kimi Code account's 5h window) could render under a sibling that still had quota. Account columns are now ordered once per provider (worst-first) and held stable across every window row ([#6067](https://github.com/can1357/oh-my-pi/issues/6067)).
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
