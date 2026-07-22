@@ -636,20 +636,29 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		);
 		return dedupeExactContextFiles([...primary, ...extra.flat()]);
 	})();
-	const workspaceTreePromise =
-		providedWorkspaceTree !== undefined
-			? Promise.resolve(providedWorkspaceTree)
+	const additionalRootsForTree = additionalWorkspaceRoots.filter(d => path.resolve(d) !== path.resolve(resolvedCwd));
+	const workspaceTreePromise = (async () => {
+		const primary = providedWorkspaceTree !== undefined
+			? providedWorkspaceTree
 			: includeWorkspaceTree
-				? logger.time("buildWorkspaceTree", () =>
+				? await logger.time("buildWorkspaceTree", () =>
 						buildWorkspaceTree(resolvedCwd, { timeoutMs: SYSTEM_PROMPT_PREP_TIMEOUT_MS }),
 					)
-				: Promise.resolve({
-						rootPath: resolvedCwd,
-						rendered: "",
-						truncated: false,
-						totalLines: 0,
-						agentsMdFiles: [],
-					});
+				: { rootPath: resolvedCwd, rendered: "", truncated: false, totalLines: 0, agentsMdFiles: [] };
+		if (additionalRootsForTree.length === 0 || !includeWorkspaceTree) return primary;
+		const extraTrees = await Promise.all(
+			additionalRootsForTree.map(root =>
+				buildWorkspaceTree(root, { timeoutMs: SYSTEM_PROMPT_PREP_TIMEOUT_MS }).catch(() => ({
+					rootPath: root,
+					rendered: "",
+					truncated: false,
+					totalLines: 0,
+					agentsMdFiles: [],
+				})),
+			),
+		);
+		return { ...primary, agentsMdFiles: [...primary.agentsMdFiles, ...extraTrees.flatMap(t => t.agentsMdFiles)] };
+	})();
 	const skillsPromise: Promise<readonly Skill[]> =
 		providedSkills !== undefined
 			? Promise.resolve(providedSkills)

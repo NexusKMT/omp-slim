@@ -1203,6 +1203,13 @@ export class SessionManager {
 		this.#cwd = resolvedCwd;
 		this.#sessionDir = nextSessionDir;
 		this.#header.cwd = resolvedCwd;
+		// Re-filter additional roots: the new cwd may have been an additional root,
+		// or it may now contain/subsume one. Re-normalize to keep the invariant
+		// that cwd is never also listed as an additional directory.
+		if (this.#additionalDirectories.length > 0) {
+			this.#additionalDirectories = this.#additionalDirectories.filter(d => d !== resolvedCwd);
+			this.#header.additionalDirectories = this.#additionalDirectories.length > 0 ? this.#additionalDirectories : undefined;
+		}
 
 		// Rewrite at the new location when the file already existed (update cwd) or
 		// there is in-memory output worth materializing; otherwise stay lazy.
