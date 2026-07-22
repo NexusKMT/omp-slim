@@ -352,6 +352,61 @@ describe("createAgentSession deferred model pattern resolution", () => {
 		}
 	});
 
+	test("uses a configured role fallback when its primary model is unavailable", async () => {
+		const settings = Settings.isolated({
+			"retry.fallbackChains": {
+				slow: ["missing-provider/missing-fallback", "runtime-provider/runtime-model"],
+			},
+		});
+		settings.setModelRole("slow", "missing-provider/missing-model");
+		const authStorage = await AuthStorage.create(path.join(tempDir, "missing-role-auth.db"));
+		authStorage.setRuntimeApiKey("runtime-provider", "test-key");
+		authStoragesToClose.push(authStorage);
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir, "missing-role-models.yml"));
+		const parsed = parseArgs(["--model", "slow"]);
+		const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string | null) => {
+			throw new Error(`buildSessionOptions unexpectedly exited with ${code}`);
+		});
+		try {
+			const cliOptions = await buildCliSessionOptions(
+				parsed,
+				[],
+				SessionManager.inMemory(),
+				modelRegistry,
+				settings,
+			);
+			expect(cliOptions.modelPattern).toBe("slow");
+
+			const { session, modelFallbackMessage } = await createAgentSession({
+				...cliOptions,
+				cwd: tempDir,
+				agentDir: tempDir,
+				authStorage,
+				modelRegistry,
+				settings,
+				disableExtensionDiscovery: true,
+				extensions: [providerExtension],
+				skills: [],
+				contextFiles: [],
+				promptTemplates: [],
+				slashCommands: [],
+				enableMCP: false,
+				enableLsp: false,
+				skipPythonPreflight: true,
+			});
+
+			try {
+				expect(session.model?.provider).toBe("runtime-provider");
+				expect(session.model?.id).toBe("runtime-model");
+				expect(modelFallbackMessage).toBeUndefined();
+			} finally {
+				await session.dispose();
+			}
+		} finally {
+			exitSpy.mockRestore();
+		}
+	});
+
 	test("preserves deferred bare role fallback chains", async () => {
 		const settings = Settings.isolated();
 		settings.setModelRole("task", "runtime-provider/runtime-model,runtime-provider/runtime-reasoning-model");

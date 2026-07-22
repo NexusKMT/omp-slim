@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `--model <role>` skipping the role's ordered `retry.fallbackChains` when its configured primary is unavailable, so startup now selects the first available authenticated fallback instead of leaving the role unresolved ([#6283](https://github.com/can1357/oh-my-pi/issues/6283)).
+
 ## [17.0.7] - 2026-07-21
 
 ### Fixed

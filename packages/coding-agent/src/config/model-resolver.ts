@@ -1601,8 +1601,10 @@ export function filterAvailableModelsByEnabledPatterns(
 
 export interface ResolveCliModelResult {
 	model: Model<Api> | undefined;
-	/** configuredPatterns is the full configured fallback chain when the selector resolves through a role. */
+	/** configuredPatterns contains the role's ordered primary candidates. */
 	configuredPatterns?: string[];
+	/** configuredRole identifies the role expanded into configuredPatterns. */
+	configuredRole?: string;
 	/** configuredPatternIndex identifies the configured role pattern that matched an available model. */
 	configuredPatternIndex?: number;
 	selector?: string;
@@ -1718,6 +1720,7 @@ export function resolveCliModel(options: {
 					? `${formatModelRoleAlias(bareRoleName)}${bareRoleThinkingLevel ? `:${bareRoleThinkingLevel}` : ""}`
 					: undefined;
 		if (roleSelector) {
+			const configuredRole = getModelRoleAlias(roleSelector, settings);
 			configuredPatterns = resolveConfiguredModelPatterns([roleSelector], settings);
 			const resolved = resolveModelRoleValue(roleSelector, availableModels, {
 				settings,
@@ -1727,6 +1730,7 @@ export function resolveCliModel(options: {
 				return {
 					model: resolved.model,
 					selector: formatModelString(resolved.model),
+					configuredRole,
 					configuredPatterns,
 					configuredPatternIndex: resolved.matchedPatternIndex,
 					thinkingLevel: resolved.thinkingLevel,
@@ -1738,6 +1742,7 @@ export function resolveCliModel(options: {
 				return {
 					model: undefined,
 					configuredPatterns,
+					configuredRole,
 					selector: undefined,
 					thinkingLevel: undefined,
 					warning: resolved.warning,

@@ -2085,23 +2085,46 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 						preferences: matchPreferences,
 					});
 					if (resolved.configuredPatterns && resolved.configuredPatterns.length > 0) {
-						return resolved.configuredPatterns;
+						const primaryPatterns = resolved.configuredPatterns.map(pattern => ({
+							pattern,
+							retryFallback: false,
+						}));
+						if (!resolved.configuredRole || !settings.get("retry.modelFallback")) {
+							return primaryPatterns;
+						}
+						const fallbackChains = settings.get("retry.fallbackChains");
+						const roleFallbacks =
+							fallbackChains[resolved.configuredRole] ??
+							(resolved.configuredRole === "default" ? undefined : fallbackChains.default);
+						if (!Array.isArray(roleFallbacks)) return primaryPatterns;
+						return [
+							...primaryPatterns,
+							...roleFallbacks
+								.filter((pattern): pattern is string => typeof pattern === "string")
+								.map(pattern => ({ pattern, retryFallback: true })),
+						];
 					}
 					if (resolved.model) {
 						return [
-							formatModelSelectorValue(
-								resolved.selector ?? formatModelStringWithRouting(resolved.model),
-								resolved.thinkingLevel,
-							),
+							{
+								pattern: formatModelSelectorValue(
+									resolved.selector ?? formatModelStringWithRouting(resolved.model),
+									resolved.thinkingLevel,
+								),
+								retryFallback: false,
+							},
 						];
 					}
-					return resolveConfiguredModelPatterns([trimmedSelector], settings);
+					return resolveConfiguredModelPatterns([trimmedSelector], settings).map(pattern => ({
+						pattern,
+						retryFallback: false,
+					}));
 				}),
 			);
 			for (let patternIndex = 0; patternIndex < expandedModelPatterns.length; patternIndex += 1) {
-				const pattern = expandedModelPatterns[patternIndex];
+				const { pattern, retryFallback } = expandedModelPatterns[patternIndex];
 				const primary = parseModelPattern(pattern, availableModels, matchPreferences);
-				if (!primary.model) continue;
+				if (!primary.model || (retryFallback && !hasModelAuth(primary.model))) continue;
 				let selectedModel = primary.model;
 				let selectedThinkingLevel = primary.thinkingLevel;
 				let selectedExplicitThinkingLevel = primary.explicitThinkingLevel;
@@ -2132,8 +2155,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					);
 					const seenSelectors = new Set<string>([primarySelector]);
 					const fallbackSelectors: string[] = [];
-					for (const fallbackPattern of expandedModelPatterns.slice(patternIndex + 1)) {
-						const fallback = parseModelPattern(fallbackPattern, availableModels, matchPreferences);
+					for (const fallbackEntry of expandedModelPatterns.slice(patternIndex + 1)) {
+						const fallback = parseModelPattern(fallbackEntry.pattern, availableModels, matchPreferences);
 						if (!fallback.model) continue;
 						const fallbackSelector = formatModelSelectorValue(
 							formatModelStringWithRouting(fallback.model),
