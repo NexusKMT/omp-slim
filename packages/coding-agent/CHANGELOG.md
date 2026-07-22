@@ -10,6 +10,7 @@
 ### Changed
 
 - Added `omp-linux-musl-x64` and `omp-linux-musl-arm64` release binaries for Alpine and other musl-based Linux distributions, with automatic musl selection in the binary installer. ([#3367](https://github.com/can1357/oh-my-pi/issues/3367))
+- Edit-tool previews, diff components, and intra-line word highlighting now compute line and word diffs natively, cutting synchronous diff time 2-10x on large inputs (a 50k-line file at 20% edit density drops from ~26s to ~2.4s; see `packages/natives/bench/diff-results.md`) ([#6279](https://github.com/can1357/oh-my-pi/pull/6279) by [@wolfiesch](https://github.com/wolfiesch)).
 
 ### Fixed
 
@@ -241,20 +242,6 @@
 - Fixed the transcript keeping finalized assistant blocks in the live compose walk after their rows entered native terminal scrollback, making each stream tick's `TranscriptContainer.render` depth-linear in session length. Fully committed finalized blocks are now compacted out of the local frame regardless of post-finalize version tracking; a later mutation no longer recommits on ordinary frames (no duplication) and rehydrates on the next destructive full replay (no loss). Compose cost for a live tail tick is now flat as depth grows (`bench/transcript-compose.bench.ts`: ratio(N5000/N500) 2.30 → 0.90) ([#5930](https://github.com/can1357/oh-my-pi/issues/5930)).
 - Fixed `/quit` and `/exit` hanging during interactive shutdown by making the mnemopi dispose path retain the current session and flush in-flight extractions without sleeping the bank; the `/memory enqueue` path and end-of-session backend enqueue still perform full cross-session consolidation. ([#3641](https://github.com/can1357/oh-my-pi/issues/3641))
 - Fixed interactive bash shortcut `cd` commands leaving the OMP session and status-line working directory unchanged.
-
-## [17.0.3] - 2026-07-17
-
-### Added
-
-- Added an optional `apply` control to the `task` tool: with `isolated: true, apply: false`, a subagent runs in its dedicated worktree and its patch/branch artifacts are captured without applying changes to the parent checkout. `apply` defaults to `true`. Available both as a flat top-level control and per `tasks[]` item (per-item value wins).
-
-### Fixed
-
-- Fixed `task` rejecting `apply` controls unless `isolated: true`, preventing capture-only intent from silently running in the parent checkout, and kept isolation/capture-only badges visible throughout progress and result rendering.
-
-### Changed
-
-- Edit-tool previews, diff components, and intra-line word highlighting now compute line and word diffs natively, cutting synchronous diff time 2-10x on large inputs (a 50k-line file at 20% edit density drops from ~26s to ~2.4s; see `packages/natives/bench/diff-results.md`) ([#6279](https://github.com/can1357/oh-my-pi/pull/6279) by [@wolfiesch](https://github.com/wolfiesch)).
 
 ## [17.0.3] - 2026-07-17
 
