@@ -4,7 +4,6 @@
  * Usage: bun bench/diff.ts
  * Records git sha, scenario, and iteration counts; prints a markdown table.
  */
-import { execSync } from "node:child_process";
 import { diffLines as nativeDiffLines, structuredPatchHunks } from "../native/index.js";
 import * as Diff from "diff";
 
@@ -48,12 +47,13 @@ function bench(fn: () => unknown): { meanMs: number; iterations: number } {
 	return { meanMs: (performance.now() - start) / ITERATIONS, iterations: ITERATIONS };
 }
 
-const sha = execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+const sha = Bun.spawnSync(["git", "rev-parse", "HEAD"]).stdout.toString().trim();
 console.log(`# diff bench — sha ${sha}, warmup ${WARMUP}, iterations ${ITERATIONS}/scenario\n`);
 console.log("| scenario | jsdiff diffLines | native diffLines | speedup | jsdiff structuredPatch | native hunks | speedup |");
 console.log("|---|---|---|---|---|---|---|");
 
-for (const lines of [100, 5_000, 50_000]) {
+const MAX_LINES = Number(Bun.env.BENCH_MAX_LINES ?? Number.POSITIVE_INFINITY);
+for (const lines of [100, 5_000, 50_000].filter(n => n <= MAX_LINES)) {
 	for (const density of [0.01, 0.2]) {
 		const rng = makeRng(lines * 31 + density * 1000);
 		const oldText = buildDoc(rng, lines);
