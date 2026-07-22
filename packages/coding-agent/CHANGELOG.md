@@ -19,6 +19,10 @@
 - Fixed `/agents` showing prewalk as off for the bundled `task` agent when `task.prewalk` enables its runtime default ([#6306](https://github.com/can1357/oh-my-pi/issues/6306)).
 - Fixed `hub start`/`for:"ready"` waits blocking for the full readiness timeout when the launched process became ready and exited within one poll interval (or exited before ever becoming ready). The wait now wakes on the sticky `readyAt` marker or any terminal state instead of sampling the transient live state, and `start` reports `Process exited before readiness was observed.` for a pre-ready exit ([#6303](https://github.com/can1357/oh-my-pi/issues/6303)).
 
+### Fixed
+
+- Fixed `tools.maxTimeout` only clamping explicitly-passed tool timeouts: the per-tool default (e.g. `bash` 300s), used whenever the agent omits `timeout`, bypassed the ceiling entirely. `clampTimeout` now caps the resolved effective timeout — including the default-fallback path — against `tools.maxTimeout` at every call site (`bash`, `eval`, `browser`, `debug`, `lsp`, `fetch`, and the session-level bash executor) ([#6294](https://github.com/can1357/oh-my-pi/issues/6294)).
+
 ## [17.0.7] - 2026-07-21
 
 ### Fixed
