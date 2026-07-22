@@ -31,6 +31,10 @@
 
 - Fixed the remapped TypeBox compatibility shim omitting `Type.Unsafe`, which crashed extensions such as `pi-mcp-adapter` when they registered tools from raw MCP input schemas ([#6221](https://github.com/can1357/oh-my-pi/issues/6221)).
 
+### Fixed
+
+- Fixed `omp models` hanging after output when loaded extensions kept background resources alive; the one-shot command now emits `session_shutdown` and clears managed extension timers before returning ([#6297](https://github.com/can1357/oh-my-pi/issues/6297)).
+
 ## [17.0.7] - 2026-07-21
 
 ### Fixed
