@@ -51,12 +51,14 @@ describe("agentPauseGate", () => {
 
 	it("holds tool execution at the tool boundary when paused mid-turn", async () => {
 		const executed: string[] = [];
+		const toolResponse = Promise.withResolvers<void>();
 		const mock = createMockModel({
 			responses: [
 				() => {
 					// Engage the gate while the model response is being produced: the
 					// turn's tool batch must park before the tool starts.
 					agentPauseGate.pause();
+					toolResponse.resolve();
 					return { content: [{ type: "toolCall" as const, name: "echo", arguments: { msg: "frozen" } }] };
 				},
 				{ content: ["done"] },
@@ -66,7 +68,7 @@ describe("agentPauseGate", () => {
 		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
 
 		const result = agentLoop([createUserMessage("run echo")], context, config, undefined, mock.stream).result();
-		await Bun.sleep(20);
+		await toolResponse.promise;
 		expect(executed).toEqual([]); // tool parked, not started
 		expect(mock.calls.length).toBe(1); // and no follow-up model call either
 
