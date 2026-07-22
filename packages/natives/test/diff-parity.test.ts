@@ -103,6 +103,23 @@ describe("native diff parity with jsdiff", () => {
 		}
 	});
 
+	test("ill-formed UTF-16 is rejected, never silently normalized", () => {
+		// N-API UTF-8 conversion would replace unpaired surrogates with U+FFFD
+		// and collapse distinct inputs into "no change"; the native exports
+		// throw instead so callers fall back to a UTF-16-aware JS diff.
+		const a = "a\ud800b";
+		const b = "a\ud801b";
+		expect(() => diffLines(a, b)).toThrow(/ill-formed UTF-16/);
+		expect(() => diffLineRuns(a, b)).toThrow(/ill-formed UTF-16/);
+		expect(() => diffWords(a, b)).toThrow(/ill-formed UTF-16/);
+		expect(() => structuredPatchHunks(a, b, 3)).toThrow(/ill-formed UTF-16/);
+		expect(() => diffLines("well formed", b)).toThrow(/ill-formed UTF-16/);
+		// A legitimate embedded NUL is content, not a terminator.
+		expect(natChanges(diffLines("a\u0000\nb\n", "a\u0000\nc\n"))).toEqual(
+			jsChanges(Diff.diffLines("a\u0000\nb\n", "a\u0000\nc\n")),
+		);
+	});
+
 	test("seeded random word diffs", () => {
 		// Token pool stresses jsdiff's word/whitespace boundary rules: repeated
 		// and mixed whitespace, tabs, newlines, punctuation runs, Latin
