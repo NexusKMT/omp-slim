@@ -76,7 +76,7 @@ has_bun() {
 # where `uname -m` reports the translated x86_64.
 host_arch() {
     if [ "$(uname -s)" = "Darwin" ]; then
-        if [ "$(sysctl -in hw.optional.arm64 2>/dev/null)" = "1" ]; then
+        if [ "$(sysctl -in hw.optional.arm64 2>/dev/null || /usr/sbin/sysctl -in hw.optional.arm64 2>/dev/null)" = "1" ]; then
             echo "arm64"
         else
             echo "x64"
