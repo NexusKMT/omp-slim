@@ -16,6 +16,7 @@
 - Fixed model switches to Devin rejecting foreign provider response IDs, reasoning signatures, and empty interrupted turns as invalid Cascade history.
 - Classified zero-output Devin `invalid_argument` trailers as context overflow when the serialized message history is already large, routing cumulative tool-output payload failures through context maintenance—including artifact-backed shake rescue—instead of retrying the same rejected history.
 - Fixed custom Anthropic base URLs losing native thinking signatures in the leaked-thinking recovery wrapper: the signature Anthropic delivers at `thinking_end` (after all `thinking_delta` events) was ignored, so continuations replayed the block with an empty signature and signing endpoints rejected it ([#6046](https://github.com/can1357/oh-my-pi/issues/6046)).
+- Fixed Alibaba Coding Plan Custom login rejecting valid API keys when the endpoint does not serve the built-in validation model by validating against its model catalog instead. ([#6078](https://github.com/can1357/oh-my-pi/issues/6078))
 
 ## [17.0.5] - 2026-07-18
 
