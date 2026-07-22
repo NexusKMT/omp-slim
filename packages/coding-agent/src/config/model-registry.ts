@@ -136,6 +136,9 @@ interface ProviderOverride {
 	compat?: ModelSpec<Api>["compat"];
 	remoteCompaction?: RemoteCompactionConfig<Api>;
 	transport?: Model<Api>["transport"];
+	guardrailIdentifier?: Model<Api>["guardrailIdentifier"];
+	guardrailVersion?: Model<Api>["guardrailVersion"];
+	guardrailTrace?: Model<Api>["guardrailTrace"];
 }
 
 /**
@@ -226,6 +229,19 @@ function providersWithAuthoritativeProjectCatalog(models: readonly Model<Api>[])
 
 function dropProviderModels(models: readonly Model<Api>[], providers: ReadonlySet<string>): Model<Api>[] {
 	return models.filter(model => !providers.has(model.provider));
+}
+
+/**
+ * Bedrock guardrail fields to spread onto a model spec, dropping keys that a
+ * provider override left unset so an override never clobbers an existing value
+ * with `undefined`.
+ */
+function guardrailOverrideFields(override: ProviderOverride): Partial<ModelSpec<Api>> {
+	const fields: Partial<ModelSpec<Api>> = {};
+	if (override.guardrailIdentifier !== undefined) fields.guardrailIdentifier = override.guardrailIdentifier;
+	if (override.guardrailVersion !== undefined) fields.guardrailVersion = override.guardrailVersion;
+	if (override.guardrailTrace !== undefined) fields.guardrailTrace = override.guardrailTrace;
+	return fields;
 }
 
 /**
@@ -1254,6 +1270,7 @@ export class ModelRegistry {
 				return buildModel({
 					...withTransportOverride,
 					compat: mergeCompat(m.compatConfig, providerOverride.compat),
+					...guardrailOverrideFields(providerOverride),
 				} as ModelSpec<Api>);
 			});
 		});
@@ -1578,7 +1595,7 @@ export class ModelRegistry {
 		const configuredProviders = new Set(Object.keys(value.providers ?? {}));
 		for (const [providerName, providerConfig] of providerEntries) {
 			const resolvedProviderHeaders = resolveConfigHeaders(providerConfig.headers);
-			// Always set overrides when baseUrl/headers/apiKey/authHeader/compat/disableStrictTools/transport are present
+			// Always set overrides when baseUrl/headers/apiKey/authHeader/compat/disableStrictTools/guardrail*/transport are present
 			if (
 				providerConfig.baseUrl ||
 				resolvedProviderHeaders ||
@@ -1586,6 +1603,7 @@ export class ModelRegistry {
 				providerConfig.authHeader !== undefined ||
 				providerConfig.compat ||
 				providerConfig.disableStrictTools ||
+				providerConfig.guardrailIdentifier ||
 				providerConfig.remoteCompaction ||
 				providerConfig.transport
 			) {
@@ -1601,6 +1619,9 @@ export class ModelRegistry {
 					compat: mergeCompat(providerConfig.compat, disableStrictCompat),
 					remoteCompaction: providerConfig.remoteCompaction,
 					transport: providerConfig.transport,
+					guardrailIdentifier: providerConfig.guardrailIdentifier,
+					guardrailVersion: providerConfig.guardrailVersion,
+					guardrailTrace: providerConfig.guardrailTrace,
 				});
 			}
 

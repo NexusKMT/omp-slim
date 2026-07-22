@@ -1605,6 +1605,9 @@ function mapOptionsForApi<TApi extends Api>(
 				thinkingBudgets: options?.thinkingBudgets,
 				toolChoice: mapAnthropicToolChoice(options?.toolChoice),
 				thinkingDisplay: options?.hideThinkingSummary ? "omitted" : undefined,
+				guardrailIdentifier: model.guardrailIdentifier,
+				guardrailVersion: model.guardrailVersion,
+				guardrailTrace: model.guardrailTrace,
 			};
 			// Adaptive mode sends effort directly, no budget_tokens — skip budget inflation.
 			if (model.thinking?.mode === "anthropic-adaptive") {

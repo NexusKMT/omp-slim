@@ -49,11 +49,24 @@ import { transformMessages } from "./transform-messages";
 
 export type BedrockThinkingDisplay = "summarized" | "omitted";
 
+/** Bedrock guardrail trace verbosity, mirrors the Converse `guardrailConfig.trace` values. */
+export type BedrockGuardrailTrace = "enabled" | "disabled" | "enabled_full";
+
 export interface BedrockOptions extends StreamOptions {
 	region?: string;
 	profile?: string;
 	/** Amazon Bedrock API key sent as `Authorization: Bearer`, ahead of SigV4 credential resolution. */
 	bearerToken?: string;
+	/**
+	 * Amazon Bedrock Guardrail id or ARN. When set, the Converse request carries a
+	 * `guardrailConfig` so accounts that gate `bedrock:InvokeModel*` on the
+	 * `bedrock:GuardrailIdentifier` condition key stop returning an explicit deny.
+	 */
+	guardrailIdentifier?: string;
+	/** Guardrail version to apply. Defaults to `"DRAFT"` when a guardrail is set. */
+	guardrailVersion?: string;
+	/** Guardrail trace verbosity. Left unset (Bedrock default) unless provided. */
+	guardrailTrace?: BedrockGuardrailTrace;
 	toolChoice?: "auto" | "any" | "none" | { type: "tool"; name: string };
 	/* See https://docs.aws.amazon.com/bedrock/latest/userguide/inference-reasoning.html for supported models. */
 	reasoning?: Effort;
@@ -240,11 +253,18 @@ interface BedrockToolPlan {
 	sentinelInjected: boolean;
 }
 
+interface WireGuardrailConfig {
+	guardrailIdentifier: string;
+	guardrailVersion: string;
+	trace?: BedrockGuardrailTrace;
+}
+
 interface ConverseStreamRequest {
 	messages: WireMessage[];
 	system?: SystemContent[];
 	inferenceConfig?: { maxTokens?: number; temperature?: number; topP?: number };
 	toolConfig?: WireToolConfig;
+	guardrailConfig?: WireGuardrailConfig;
 	additionalModelRequestFields?: Record<string, unknown>;
 }
 
@@ -338,6 +358,7 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 					topP: options.topP,
 				},
 				toolConfig,
+				guardrailConfig: buildGuardrailConfig(options),
 				additionalModelRequestFields,
 			};
 			options?.onPayload?.(commandInput, model);
@@ -488,7 +509,12 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 						output.stopReason =
 							sentinelInjected && ev.stopReason === "tool_use" ? "stop" : mapStopReason(ev.stopReason);
 						if (output.stopReason === "error") {
-							output.errorMessage = `Generation failed with stop reason: ${ev.stopReason ?? "unknown"}`;
+							// A guardrail block ends the turn with `guardrail_intervened` and often no
+							// content — surface it explicitly so it never reads as an empty completion.
+							output.errorMessage =
+								ev.stopReason === "guardrail_intervened" || ev.stopReason === "content_filtered"
+									? `Response blocked by Amazon Bedrock guardrail (stop reason: ${ev.stopReason}).`
+									: `Generation failed with stop reason: ${ev.stopReason ?? "unknown"}`;
 						}
 						break;
 					}
@@ -984,6 +1010,21 @@ function mapStopReason(reason: string | undefined): StopReason {
 		default:
 			return "error";
 	}
+}
+
+/**
+ * Build the Converse `guardrailConfig` block when a guardrail identifier is set.
+ * The version defaults to `"DRAFT"` (Bedrock's editable working draft) and the
+ * trace is passed through untouched — leaving it undefined keeps Bedrock's own
+ * default rather than forcing a value.
+ */
+function buildGuardrailConfig(options: BedrockOptions): WireGuardrailConfig | undefined {
+	if (!options.guardrailIdentifier) return undefined;
+	return {
+		guardrailIdentifier: options.guardrailIdentifier,
+		guardrailVersion: options.guardrailVersion ?? "DRAFT",
+		...(options.guardrailTrace === undefined ? {} : { trace: options.guardrailTrace }),
+	};
 }
 
 function buildAdditionalModelRequestFields(
