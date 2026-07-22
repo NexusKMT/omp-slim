@@ -707,6 +707,43 @@ describe("model cache spec round trip", () => {
 		}
 	});
 
+	it("refetches a current request-model alias whose headers differ from its static base", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-custom-alias-"));
+		const dbPath = path.join(tempDir, "models.db");
+		const baseHeaders = { "X-Route": "static" };
+		const customHeaders = { "X-Route": "tenant-specific" };
+		const base = completionsSpec({ id: "base", provider: "alias-cache-test", headers: baseHeaders });
+		const aliasSpec = completionsSpec({
+			id: "custom-alias",
+			provider: "alias-cache-test",
+			requestModelId: "base",
+			headers: customHeaders,
+		});
+		const alias = buildModel(aliasSpec);
+		let fetches = 0;
+		const options = {
+			providerId: "alias-cache-test",
+			staticModels: [base],
+			cacheDbPath: dbPath,
+			fetchDynamicModels: async () => {
+				fetches++;
+				return [aliasSpec];
+			},
+		};
+		try {
+			writeModelCache("alias-cache-test", Date.now(), [alias], true, "", dbPath, [buildModel(base)]);
+
+			const refreshed = await resolveProviderModels<"openai-completions">(options, "online-if-uncached");
+			expect(fetches).toBe(1);
+			expect(refreshed.models.find(candidate => candidate.id === alias.id)?.headers).toEqual(customHeaders);
+
+			const offline = await resolveProviderModels<"openai-completions">(options, "offline");
+			expect(offline.models.find(candidate => candidate.id === alias.id)).toBeUndefined();
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	it("recovers a legacy stale-marked request-model variant via requestModelId", async () => {
 		// Legacy cache rows (written by the old id-only writer) flag `-1m`
 		// variants unrestorable because it never matched their base's headers.
@@ -728,6 +765,9 @@ describe("model cache spec round trip", () => {
 			// Emulate a legacy write: no static header source, so the variant is
 			// flagged unrestorable even though its base carries the headers.
 			writeModelCache("variant-cache-test", Date.now(), [variant], true, "", dbPath);
+			const db = new Database(dbPath);
+			db.run("UPDATE model_cache SET header_restore_version = 0 WHERE provider_id = ?", ["variant-cache-test"]);
+			db.close();
 
 			const offline = await resolveProviderModels<"openai-completions">(
 				{ providerId: "variant-cache-test", staticModels: [base], cacheDbPath: dbPath },

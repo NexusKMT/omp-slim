@@ -21,6 +21,7 @@ import type { Api, Model, ModelSpec } from "./types";
 // effort-tier variant collapsing (raw `-low`/`-high`/`-thinking` member ids);
 // v4 dropped the pre-efforts ThinkingConfig shape.
 const CACHE_SCHEMA_VERSION = 10;
+const HEADER_RESTORE_VERSION = 1;
 
 interface CacheRow {
 	provider_id: string;
@@ -31,6 +32,7 @@ interface CacheRow {
 	models: string;
 	header_omitted_model_ids: string;
 	unrestorable_header_model_ids: string;
+	header_restore_version: number;
 }
 
 interface TableInfoRow {
@@ -46,6 +48,8 @@ interface CacheEntry<TApi extends Api = Api> {
 	headerOmittedModelIds: readonly string[];
 	/** Header-bearing model ids that cannot be rebuilt from the static source. */
 	unrestorableHeaderModelIds: readonly string[];
+	/** Whether unrestorable markers predate request-model header matching. */
+	legacyHeaderRestoreMarkers: boolean;
 	/**
 	 * Hash of the static catalog slice that was merged into `models` when this
 	 * row was written. `resolveProviderModels` compares against the current
@@ -77,6 +81,7 @@ function openDb(resolvedPath: string): Database {
 			static_fingerprint TEXT NOT NULL DEFAULT '',
 			header_omitted_model_ids TEXT NOT NULL DEFAULT '[]',
 			unrestorable_header_model_ids TEXT NOT NULL DEFAULT '[]',
+			header_restore_version INTEGER NOT NULL DEFAULT 0,
 			models TEXT NOT NULL
 		)
 	`);
@@ -121,6 +126,12 @@ function migrateCacheSchema(db: Database): void {
 		if (!columns.some(column => column.name === "unrestorable_header_model_ids")) {
 			db.run("ALTER TABLE model_cache ADD COLUMN unrestorable_header_model_ids TEXT NOT NULL DEFAULT '[]'");
 		}
+		if (!columns.some(column => column.name === "header_restore_version")) {
+			// Existing v10 rows get 0, distinguishing markers produced by the
+			// old id-only header matcher from rows written after request-model
+			// header matching was introduced.
+			db.run("ALTER TABLE model_cache ADD COLUMN header_restore_version INTEGER NOT NULL DEFAULT 0");
+		}
 	} finally {
 		stmt.finalize();
 	}
@@ -164,6 +175,7 @@ export function readModelCache<TApi extends Api>(
 					updatedAt: row.updated_at,
 					headerOmittedModelIds,
 					unrestorableHeaderModelIds,
+					legacyHeaderRestoreMarkers: row.header_restore_version < HEADER_RESTORE_VERSION,
 					staticFingerprint: row.static_fingerprint ?? "",
 				};
 			} finally {
@@ -241,8 +253,9 @@ export function writeModelCache<TApi extends Api>(
 			db.run(
 				`INSERT OR REPLACE INTO model_cache (
 					provider_id, version, updated_at, authoritative, static_fingerprint,
-					header_omitted_model_ids, unrestorable_header_model_ids, models
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+					header_omitted_model_ids, unrestorable_header_model_ids,
+					header_restore_version, models
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				[
 					providerId,
 					CACHE_SCHEMA_VERSION,
@@ -251,6 +264,7 @@ export function writeModelCache<TApi extends Api>(
 					staticFingerprint,
 					JSON.stringify(headerOmittedModelIds),
 					JSON.stringify(unrestorableHeaderModelIds),
+					HEADER_RESTORE_VERSION,
 					JSON.stringify(cachedModels),
 				],
 			);

@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -2156,11 +2157,34 @@ describe("ModelRegistry runtime discovery", () => {
 		// Emulate a legacy write: the variant has no same-id static header source,
 		// so it is flagged unrestorable even though its base carries the headers.
 		writeModelCache("github-copilot", Date.now(), [cachedVariant], true, "", cacheDbPath);
+		const db = new Database(cacheDbPath);
+		db.run("UPDATE model_cache SET header_restore_version = 0 WHERE provider_id = ?", ["github-copilot"]);
+		db.close();
 
 		const registry = new ModelRegistry(authStorage, modelsJsonPath);
 
 		const restored = registry.find("github-copilot", "gpt-5.6-sol-1m");
 		expect(restored).toBeDefined();
 		expect(restored?.headers).toEqual(bundledBase.headers);
+	});
+
+	test("startup drops a current Copilot alias whose headers differ from its bundled base", () => {
+		const bundledBase = getBundledModel("github-copilot", "gpt-5.6-sol");
+		if (!bundledBase?.headers) {
+			throw new Error("Expected bundled Copilot base to carry transport headers");
+		}
+		const cachedAlias = buildModel({
+			...(bundledBase as ModelSpec<"openai-responses">),
+			id: "gpt-5.6-sol-custom",
+			name: "GPT-5.6 Sol Custom Route",
+			requestModelId: "gpt-5.6-sol",
+			headers: { "X-Tenant-Route": "tenant-a" },
+		});
+		writeModelCache("github-copilot", Date.now(), [cachedAlias], true, "", cacheDbPath, [bundledBase]);
+
+		const registry = new ModelRegistry(authStorage, modelsJsonPath);
+
+		expect(registry.find("github-copilot", cachedAlias.id)).toBeUndefined();
+		expect(registry.find("github-copilot", bundledBase.id)?.headers).toEqual(bundledBase.headers);
 	});
 });
