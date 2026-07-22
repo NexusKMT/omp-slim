@@ -73,6 +73,7 @@ import {
 	type SessionStorageWriter,
 } from "./session-storage";
 import { type SessionTitleUpdate, serializeTitleSlot } from "./session-title-slot";
+import { additionalWorkspaceDirectories, normalizeSessionWorkspace, type SessionWorkspace } from "./session-workspace";
 
 const JSONL_SUFFIX_LENGTH = ".jsonl".length;
 const DRAFT_ONLY_SESSION_MARKER = ".draft-only-session";
@@ -380,6 +381,8 @@ interface DiskQueueOptions {
  */
 export class SessionManager {
 	#cwd: string;
+	/** Additional workspace directories beyond cwd (multi-root). Normalized absolute, deduped, excludes cwd. */
+	#additionalDirectories: string[] = [];
 	#sessionDir: string;
 	readonly #persist: boolean;
 	readonly #storage: SessionStorage;
@@ -1040,6 +1043,7 @@ export class SessionManager {
 		}
 
 		this.#applyEntries(header, fileEntries.slice(1) as SessionEntry[]);
+		this.#additionalDirectories = header.additionalDirectories ?? [];
 		this.#titleUpdatedAt = titleSlot?.updatedAt ?? header.timestamp;
 		this.#hasTitleSlot = titleSlot !== undefined;
 		this.#fileIsCurrent = true;
@@ -1090,6 +1094,7 @@ export class SessionManager {
 			titleSource: this.#header.titleSource ?? this.#titleSource,
 			timestamp,
 			cwd: this.#cwd,
+			additionalDirectories: this.#additionalDirectories.length > 0 ? [...this.#additionalDirectories] : undefined,
 			parentSession: parentSessionId,
 			providerPromptCacheKey: this.#header.providerPromptCacheKey ?? parentSessionId,
 		};
@@ -1301,6 +1306,70 @@ export class SessionManager {
 
 	getCwd(): string {
 		return this.#cwd;
+	}
+
+	/** Additional workspace directories beyond cwd (multi-root), absolute and normalized. */
+	getAdditionalDirectories(): string[] {
+		return [...this.#additionalDirectories];
+	}
+
+	/** Full workspace as a {@link SessionWorkspace}: cwd first, then additional dirs. */
+	getWorkspace(): SessionWorkspace {
+		return { cwd: this.#cwd, directories: [this.#cwd, ...this.#additionalDirectories] };
+	}
+
+	/**
+	 * Add a workspace directory. Normalizes (relative to cwd), dedupes, rejects
+	 * the cwd itself, persists to the session header, and triggers an atomic
+	 * rewrite so the change survives a crash. Returns the resolved absolute
+	 * path or `null` when the directory was already present (no-op).
+	 */
+	async addWorkspaceDirectory(directory: string): Promise<string | null> {
+		const resolved = path.resolve(this.#cwd, directory);
+		if (resolved === path.resolve(this.#cwd)) {
+			throw new Error("The current working directory is already the primary workspace root.");
+		}
+		if (this.#additionalDirectories.includes(resolved)) return null;
+		this.#additionalDirectories = [...this.#additionalDirectories, resolved];
+		this.#header.additionalDirectories = this.#additionalDirectories;
+		if (this.#persist && this.#sessionFile) {
+			this.#rewriteRequired = true;
+			await this.#rewriteAtomically();
+		}
+		return resolved;
+	}
+
+	/**
+	 * Remove a workspace directory by absolute or cwd-relative path. Persists
+	 * the trimmed header. Returns the resolved path that was removed, or
+	 * `null` when the directory was not an additional root (no-op).
+	 */
+	async removeWorkspaceDirectory(directory: string): Promise<string | null> {
+		const resolved = path.isAbsolute(directory) ? directory : path.resolve(this.#cwd, directory);
+		const idx = this.#additionalDirectories.findIndex(p => path.resolve(p) === resolved);
+		if (idx === -1) return null;
+		this.#additionalDirectories = this.#additionalDirectories.filter((_, i) => i !== idx);
+		if (this.#additionalDirectories.length === 0) {
+			this.#header.additionalDirectories = undefined;
+		} else {
+			this.#header.additionalDirectories = this.#additionalDirectories;
+		}
+		if (this.#persist && this.#sessionFile) {
+			this.#rewriteRequired = true;
+			await this.#rewriteAtomically();
+		}
+		return resolved;
+	}
+
+	/** Seed additional directories from settings or a passed list (called at session creation). */
+	setAdditionalDirectories(directories: string[]): void {
+		const workspace = normalizeSessionWorkspace({ cwd: this.#cwd, directories });
+		this.#additionalDirectories = additionalWorkspaceDirectories(workspace);
+		if (this.#additionalDirectories.length > 0) {
+			this.#header.additionalDirectories = this.#additionalDirectories;
+		} else {
+			this.#header.additionalDirectories = undefined;
+		}
 	}
 
 	getUsageStatistics(): UsageStatistics {
