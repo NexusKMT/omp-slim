@@ -73,7 +73,11 @@ import {
 	type SessionStorageWriter,
 } from "./session-storage";
 import { type SessionTitleUpdate, serializeTitleSlot } from "./session-title-slot";
-import { additionalWorkspaceDirectories, normalizeSessionWorkspace, normalizeWorkspaceDirectory } from "./session-workspace";
+import {
+	additionalWorkspaceDirectories,
+	normalizeSessionWorkspace,
+	normalizeWorkspaceDirectory,
+} from "./session-workspace";
 
 const JSONL_SUFFIX_LENGTH = ".jsonl".length;
 const DRAFT_ONLY_SESSION_MARKER = ".draft-only-session";
@@ -808,7 +812,10 @@ export class SessionManager {
 			parentSession: options?.parentSession,
 			providerPromptCacheKey: options?.providerPromptCacheKey,
 		};
-		const workspace = normalizeSessionWorkspace({ cwd: this.#cwd, directories: options?.additionalDirectories ?? [] });
+		const workspace = normalizeSessionWorkspace({
+			cwd: this.#cwd,
+			directories: options?.additionalDirectories ?? [],
+		});
 		this.#additionalDirectories = additionalWorkspaceDirectories(workspace);
 		if (this.#additionalDirectories.length > 0) {
 			this.#header.additionalDirectories = [...this.#additionalDirectories];
@@ -1213,7 +1220,8 @@ export class SessionManager {
 		// that cwd is never also listed as an additional directory.
 		if (this.#additionalDirectories.length > 0) {
 			this.#additionalDirectories = this.#additionalDirectories.filter(d => d !== resolvedCwd);
-			this.#header.additionalDirectories = this.#additionalDirectories.length > 0 ? this.#additionalDirectories : undefined;
+			this.#header.additionalDirectories =
+				this.#additionalDirectories.length > 0 ? this.#additionalDirectories : undefined;
 		}
 
 		// Rewrite at the new location when the file already existed (update cwd) or
@@ -1325,7 +1333,6 @@ export class SessionManager {
 	getAdditionalDirectories(): string[] {
 		return [...this.#additionalDirectories];
 	}
-
 
 	/**
 	 * Add a workspace directory. Normalizes (relative to cwd), dedupes, rejects
@@ -2040,7 +2047,8 @@ export class SessionManager {
 		manager.#header.title = sourceHeader?.title;
 		manager.#header.titleSource = sourceHeader?.titleSource;
 		manager.#additionalDirectories = (sourceHeader?.additionalDirectories ?? []).filter(d => d !== path.resolve(cwd));
-		manager.#header.additionalDirectories = manager.#additionalDirectories.length > 0 ? manager.#additionalDirectories : undefined;
+		manager.#header.additionalDirectories =
+			manager.#additionalDirectories.length > 0 ? manager.#additionalDirectories : undefined;
 		manager.#sessionName = manager.#header.title;
 		manager.#titleSource = manager.#header.titleSource;
 		manager.#titleUpdatedAt = nowIso();

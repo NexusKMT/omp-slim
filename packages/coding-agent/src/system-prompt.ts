@@ -638,13 +638,14 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 	})();
 	const additionalRootsForTree = additionalWorkspaceRoots.filter(d => path.resolve(d) !== path.resolve(resolvedCwd));
 	const workspaceTreePromise = (async () => {
-		const primary = providedWorkspaceTree !== undefined
-			? await Promise.resolve(providedWorkspaceTree)
-			: includeWorkspaceTree
-				? await logger.time("buildWorkspaceTree", () =>
-						buildWorkspaceTree(resolvedCwd, { timeoutMs: SYSTEM_PROMPT_PREP_TIMEOUT_MS }),
-					)
-				: { rootPath: resolvedCwd, rendered: "", truncated: false, totalLines: 0, agentsMdFiles: [] };
+		const primary =
+			providedWorkspaceTree !== undefined
+				? await Promise.resolve(providedWorkspaceTree)
+				: includeWorkspaceTree
+					? await logger.time("buildWorkspaceTree", () =>
+							buildWorkspaceTree(resolvedCwd, { timeoutMs: SYSTEM_PROMPT_PREP_TIMEOUT_MS }),
+						)
+					: { rootPath: resolvedCwd, rendered: "", truncated: false, totalLines: 0, agentsMdFiles: [] };
 		if (additionalRootsForTree.length === 0 || !includeWorkspaceTree) return primary;
 		const extraTrees = await Promise.all(
 			additionalRootsForTree.map(root =>
