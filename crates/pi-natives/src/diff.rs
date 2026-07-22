@@ -18,7 +18,26 @@
 
 use std::{collections::HashMap, rc::Rc};
 
+use napi::{JsString, bindgen_prelude::*};
 use napi_derive::napi;
+
+/// Decode a JS string strictly: unpaired surrogates are rejected instead of
+/// being replaced with U+FFFD, so callers can fall back to a UTF-16-aware
+/// JS diff and both sides keep byte-identical jsdiff semantics.
+fn strict_utf16_to_string(text: JsString) -> Result<String> {
+	let utf16 = text.into_utf16()?;
+	// `as_slice` includes the trailing NUL terminator; drop it like napi's
+	// own `as_str` does (a legitimate U+0000 in the content sits before it).
+	let Some((_, units)) = utf16.as_slice().split_last() else {
+		return Ok(String::new());
+	};
+	String::from_utf16(units).map_err(|_| {
+		Error::new(
+			Status::InvalidArg,
+			"ill-formed UTF-16 input (unpaired surrogate); caller must fall back to a JS diff",
+		)
+	})
+}
 
 /// One jsdiff change object: a run of added, removed, or common tokens.
 #[napi(object)]
@@ -308,9 +327,13 @@ fn diff_line_tokens<'a>(old_tokens: &[&'a str], new_tokens: &[&'a str]) -> Vec<R
 /// options). Change values keep line terminators, and common runs are joined
 /// from the new text.
 #[napi]
-pub fn diff_lines(old_text: String, new_text: String) -> Vec<DiffChange> {
-	let old_tokens = line_tokens(&old_text);
-	let new_tokens = line_tokens(&new_text);
+pub fn diff_lines(old_text: JsString, new_text: JsString) -> Result<Vec<DiffChange>> {
+	Ok(diff_lines_impl(&strict_utf16_to_string(old_text)?, &strict_utf16_to_string(new_text)?))
+}
+
+fn diff_lines_impl(old_text: &str, new_text: &str) -> Vec<DiffChange> {
+	let old_tokens = line_tokens(old_text);
+	let new_tokens = line_tokens(new_text);
 	let runs = diff_line_tokens(&old_tokens, &new_tokens);
 	build_changes(&runs, &old_tokens, &new_tokens, |tokens| tokens.concat())
 }
@@ -322,7 +345,11 @@ pub fn diff_lines(old_text: String, new_text: String) -> Vec<DiffChange> {
 /// Callers that map line numbers — like hashline recovery — need the counts,
 /// not another copy of the text.
 #[napi]
-pub fn diff_line_runs(old_text: String, new_text: String) -> Vec<DiffRun> {
+pub fn diff_line_runs(old_text: JsString, new_text: JsString) -> Result<Vec<DiffRun>> {
+	Ok(diff_line_runs_impl(&strict_utf16_to_string(old_text)?, &strict_utf16_to_string(new_text)?))
+}
+
+fn diff_line_runs_impl(old_text: &str, new_text: &str) -> Vec<DiffRun> {
 	let old_tokens: Vec<&str> = old_text.split('\n').collect();
 	let new_tokens: Vec<&str> = new_text.split('\n').collect();
 	let (old_ids, new_ids) = intern_exact(&old_tokens, &new_tokens);
@@ -341,13 +368,25 @@ pub fn diff_line_runs(old_text: String, new_text: String) -> Vec<DiffRun> {
 /// semantics. `context` defaults to 4 like jsdiff.
 #[napi]
 pub fn structured_patch_hunks(
-	old_text: String,
-	new_text: String,
+	old_text: JsString,
+	new_text: JsString,
+	context: Option<u32>,
+) -> Result<Vec<PatchHunk>> {
+	Ok(structured_patch_hunks_impl(
+		&strict_utf16_to_string(old_text)?,
+		&strict_utf16_to_string(new_text)?,
+		context,
+	))
+}
+
+fn structured_patch_hunks_impl(
+	old_text: &str,
+	new_text: &str,
 	context: Option<u32>,
 ) -> Vec<PatchHunk> {
 	let context = context.map_or(4usize, |value| value as usize);
-	let old_tokens = line_tokens(&old_text);
-	let new_tokens = line_tokens(&new_text);
+	let old_tokens = line_tokens(old_text);
+	let new_tokens = line_tokens(new_text);
 	let runs = diff_line_tokens(&old_tokens, &new_tokens);
 
 	// Change list with per-change line slices; the trailing sentinel mirrors
@@ -778,9 +817,13 @@ fn word_post_process(changes: &mut [DiffChange]) {
 /// Tokens carry surrounding whitespace, equality ignores it, and the
 /// post-pass dedupes whitespace across change boundaries.
 #[napi]
-pub fn diff_words(old_text: String, new_text: String) -> Vec<DiffChange> {
-	let old_tokens = word_tokens(&old_text);
-	let new_tokens = word_tokens(&new_text);
+pub fn diff_words(old_text: JsString, new_text: JsString) -> Result<Vec<DiffChange>> {
+	Ok(diff_words_impl(&strict_utf16_to_string(old_text)?, &strict_utf16_to_string(new_text)?))
+}
+
+fn diff_words_impl(old_text: &str, new_text: &str) -> Vec<DiffChange> {
+	let old_tokens = word_tokens(old_text);
+	let new_tokens = word_tokens(new_text);
 	let old_refs: Vec<&str> = old_tokens.iter().map(String::as_str).collect();
 	let new_refs: Vec<&str> = new_tokens.iter().map(String::as_str).collect();
 	// Equality is whitespace-insensitive: intern by trimmed text.
@@ -798,7 +841,7 @@ mod tests {
 	use super::*;
 
 	fn lines(old: &str, new: &str) -> Vec<(String, bool, bool)> {
-		diff_lines(old.to_string(), new.to_string())
+		diff_lines_impl(old, new)
 			.into_iter()
 			.map(|c| (c.value, c.added, c.removed))
 			.collect()
@@ -825,7 +868,7 @@ mod tests {
 
 	#[test]
 	fn structured_patch_marks_missing_eof_newline() {
-		let hunks = structured_patch_hunks("a\nb".into(), "a\nc".into(), Some(3));
+		let hunks = structured_patch_hunks_impl("a\nb", "a\nc", Some(3));
 		assert_eq!(hunks.len(), 1);
 		assert_eq!(hunks[0].lines, vec![
 			" a",
@@ -839,7 +882,7 @@ mod tests {
 	#[test]
 	fn word_diff_dedupes_boundary_whitespace() {
 		// jsdiff's documented example 2: K:'foo ' D:'bar' I:'qux' K:' baz'.
-		let changes = diff_words("foo bar baz".into(), "foo qux baz".into());
+		let changes = diff_words_impl("foo bar baz", "foo qux baz");
 		let shaped: Vec<(String, bool, bool)> = changes
 			.into_iter()
 			.map(|c| (c.value, c.added, c.removed))
@@ -854,7 +897,7 @@ mod tests {
 
 	#[test]
 	fn line_runs_preserve_empty_lines() {
-		let runs = diff_line_runs("a\n\nb".into(), "a\n\nc".into());
+		let runs = diff_line_runs_impl("a\n\nb", "a\n\nc");
 		let shaped: Vec<(u32, bool, bool)> = runs
 			.into_iter()
 			.map(|r| (r.count, r.added, r.removed))
