@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Recall hot loops (exact vector-index search, binary vector search, SHMR similarity clustering, and default-similarity MMR rerank) now run on native batch kernels with one N-API crossing per operation. Crossing-inclusive speedups at dim=384: 1.4-3.4x cosine scoring, ~2x top-K search, 2.7-11x Hamming search, and 30-38x MMR rerank. Custom `similarityFn` MMR reranks and incremental per-row scoring stay on the TypeScript implementations.
+- Recall hot loops (exact vector-index search, binary vector search, SHMR similarity clustering, and default-similarity MMR rerank) now run on native batch kernels with one N-API crossing per operation. Crossing-inclusive speedups at dim=384 (see `bench/native-vectors.bench.json`): 1.6-3.2x cosine scoring, 1.8-2x top-K search, 1.6x pairwise clustering scans, 3-10x Hamming search, and 21-39x MMR rerank. Custom `similarityFn` MMR reranks and incremental per-row scoring stay on the TypeScript implementations.
 
 ## [17.0.4] - 2026-07-18
 
