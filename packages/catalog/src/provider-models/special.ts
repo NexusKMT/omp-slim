@@ -25,8 +25,13 @@ export interface OpenAICodexModelManagerConfig {
 	 * independently and the results unioned by id. Without this, discovery would
 	 * surface only the account it happened to resolve and, being authoritative,
 	 * prune every model the other accounts expose (#6265).
+	 *
+	 * Returns `null` to abort discovery entirely (e.g. an account's credential
+	 * failed to refresh): a partial account set would be cached as the complete
+	 * authoritative catalog and hide the missing account's models, so the caller
+	 * keeps the previous/bundled catalog instead.
 	 */
-	resolveAccounts?: () => Promise<readonly OpenAICodexAccount[]>;
+	resolveAccounts?: () => Promise<readonly OpenAICodexAccount[] | null>;
 	clientVersion?: string;
 	fetch?: FetchImpl;
 }
@@ -42,7 +47,7 @@ export function openaiCodexModelManagerOptions(
 			? {
 					fetchDynamicModels: async () => {
 						const accounts = await resolveAccounts();
-						if (accounts.length === 0) return null;
+						if (!accounts || accounts.length === 0) return null;
 						const results = await Promise.all(
 							accounts.map(account =>
 								fetchCodexModels({

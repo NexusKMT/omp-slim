@@ -433,15 +433,21 @@ function getOAuthCredentialsForProvider(authStorage: AuthStorage, provider: stri
  * each credential exactly once. Codex `/models` is account-scoped, so discovery
  * must fetch per account and union the results; resolving a single access token
  * (as before) hid models available only through a sibling account (#6265).
+ *
+ * Returns `null` when any stored account fails to resolve (e.g. a transient
+ * refresh failure): the Codex manager is authoritative, so unioning only the
+ * accounts that resolved would cache a partial catalog and hide the failed
+ * account's models for the cache TTL. Aborting keeps the previous/bundled
+ * catalog instead.
  */
 async function resolveCodexDiscoveryAccounts(
 	authStorage: AuthStorage,
 	resolvedAccessToken: string,
-): Promise<OpenAICodexAccount[]> {
+): Promise<OpenAICodexAccount[] | null> {
 	const accesses = await authStorage.getOAuthAccesses("openai-codex");
 	const accounts: OpenAICodexAccount[] = [];
 	for (const access of accesses) {
-		if (!access.ok) continue;
+		if (!access.ok) return null;
 		accounts.push({ accessToken: access.accessToken, accountId: access.accountId });
 	}
 	if (!accounts.some(account => account.accessToken === resolvedAccessToken)) {
