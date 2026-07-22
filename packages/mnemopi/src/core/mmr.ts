@@ -1,3 +1,5 @@
+import { mmrRerankIndices } from "@oh-my-pi/pi-natives";
+
 export interface MmrResult {
 	readonly content?: string;
 	readonly score?: number;
@@ -32,6 +34,20 @@ export function mmrRerank<T extends MmrResult>(
 	const sortedResults = results.slice().sort((left, right) => (right.score ?? 0) - (left.score ?? 0));
 	const first = sortedResults[0];
 	if (first === undefined) return [];
+
+	// Native batch kernel: one N-API crossing selects all indices. Only valid
+	// for the default Jaccard similarity; custom similarity functions stay in TS.
+	if (similarityFn === jaccardSimilarity) {
+		const contents = sortedResults.map(result => result.content ?? "");
+		const scores = Float64Array.from(sortedResults, result => result.score ?? 0);
+		const picked = mmrRerankIndices(contents, scores, lambdaParam, limit);
+		const out: T[] = [];
+		for (const index of picked) {
+			const item = sortedResults[index];
+			if (item !== undefined) out.push(item);
+		}
+		return out;
+	}
 
 	const selected: T[] = [first];
 	const remaining = sortedResults.slice(1);

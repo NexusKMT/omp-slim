@@ -483,14 +483,13 @@ export declare function cosineSimilarityBatch(query: Float64Array, candidates: F
 /**
  * All pairs `(i, j)` with `i < j` whose cosine similarity meets `threshold`.
  *
- * `vectors` is `count` vectors flattened row-major at `dim` `f32` elements
- * per row (zero-padded). Element values are widened to `f64` before any
- * arithmetic, exactly like JS reads from a `Float32Array`, so the similarity
- * is bit-identical to the TS pairwise loop in `clusterBySimilarity`.
- * Returns pairs flattened as `[i0, j0, i1, j1, ...]` in the same `(i, j)`
- * visit order as the TS nested loop.
+ * `vectors` is `count` vectors flattened row-major at `dim` `f64` elements
+ * per row (zero-padded, which matches the TS `?? 0` missing-element
+ * semantics), so the similarity is bit-identical to the TS pairwise loop in
+ * `clusterBySimilarity`. Returns pairs flattened as `[i0, j0, i1, j1, ...]`
+ * in the same `(i, j)` visit order as the TS nested loop.
  */
-export declare function cosineSimilarityPairs(vectors: Float32Array, count: number, dim: number, threshold: number): Uint32Array
+export declare function cosineSimilarityPairs(vectors: Float64Array, count: number, dim: number, threshold: number): Uint32Array
 
 /**
  * Count tokens in `input`.

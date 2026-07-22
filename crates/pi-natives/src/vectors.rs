@@ -92,26 +92,25 @@ pub fn cosine_similarity_batch(
 
 /// All pairs `(i, j)` with `i < j` whose cosine similarity meets `threshold`.
 ///
-/// `vectors` is `count` vectors flattened row-major at `dim` `f32` elements
-/// per row (zero-padded). Element values are widened to `f64` before any
-/// arithmetic, exactly like JS reads from a `Float32Array`, so the similarity
-/// is bit-identical to the TS pairwise loop in `clusterBySimilarity`.
-/// Returns pairs flattened as `[i0, j0, i1, j1, ...]` in the same `(i, j)`
-/// visit order as the TS nested loop.
+/// `vectors` is `count` vectors flattened row-major at `dim` `f64` elements
+/// per row (zero-padded, which matches the TS `?? 0` missing-element
+/// semantics), so the similarity is bit-identical to the TS pairwise loop in
+/// `clusterBySimilarity`. Returns pairs flattened as `[i0, j0, i1, j1, ...]`
+/// in the same `(i, j)` visit order as the TS nested loop.
 #[napi]
 pub fn cosine_similarity_pairs(
-	vectors: Float32Array,
+	vectors: Float64Array,
 	count: u32,
 	dim: u32,
 	threshold: f64,
 ) -> Result<Uint32Array> {
 	let count = count as usize;
 	let dim = dim as usize;
-	let data: &[f32] = &vectors;
+	let data: &[f64] = &vectors;
 	if data.len() != count * dim {
 		return invalid("vectors length must equal count * dim");
 	}
-	let widened: Vec<f64> = data.iter().map(|&v| f64::from(v)).collect();
+	let widened: &[f64] = data;
 	let mut pairs: Vec<u32> = Vec::new();
 	for i in 0..count {
 		let left = &widened[i * dim..(i + 1) * dim];
