@@ -150,6 +150,13 @@
 - Fixed in-progress aborts awaiting `session_stop` extension handlers whose results would be discarded ([#6134](https://github.com/can1357/oh-my-pi/issues/6134)).
 - Fixed `/retry` reporting "Nothing to retry" after a stream stalled or aborted mid-tool-call, where a synthetic tool result appended for the un-run tool call shadowed the failed assistant turn ([#6056](https://github.com/can1357/oh-my-pi/issues/6056)).
 - Fixed locally consumed extension commands triggering automatic title generation and exposing their command text to the title model ([#6061](https://github.com/can1357/oh-my-pi/issues/6061)).
+### Added
+
+- Added configurable Hindsight client request deadlines via `hindsight.requestTimeoutMs` / `reflectTimeoutMs` / `recallTimeoutMs` / `retainTimeoutMs` settings (and matching `HINDSIGHT_*_TIMEOUT_MS` env vars).
+
+### Fixed
+
+- Fixed the single 30s Hindsight client timeout aborting healthy `reflect` calls, which are agentic retrieve+synthesize ops that routinely exceed 30s; each op now has its own deadline (reflect defaults to 120s) and the timeout error reports the effective seconds ([#6125](https://github.com/can1357/oh-my-pi/issues/6125)).
 
 ## [17.0.5] - 2026-07-18
 
