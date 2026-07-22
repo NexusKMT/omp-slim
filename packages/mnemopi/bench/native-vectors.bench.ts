@@ -6,12 +6,8 @@
  * Run from the repo root: `bun packages/mnemopi/bench/native-vectors.bench.ts`
  */
 import {
-	cosineSimilarityBatch,
 	cosineSimilarityPairs,
-	hammingDistanceBatch,
-	hammingDistanceForDimBatch,
 } from "@oh-my-pi/pi-natives";
-import { hammingDistance, hammingDistanceForDimension } from "../src/core/binary-vectors";
 import { jaccardSimilarity, mmrRerank } from "../src/core/mmr";
 import { searchExactVectorIndex } from "../src/core/vector-index";
 import { cosineSimilarity } from "../src/core/vector-math";
@@ -64,22 +60,6 @@ function pushRow(kernel: string, count: number, ts: { ns: number; iterations: nu
 const rows: Row[] = [];
 const rng = makeRng(0xbe4c4);
 
-for (const count of COUNTS) {
-	const query = Float64Array.from({ length: DIM }, () => rng() * 2 - 1);
-	const flat = new Float64Array(count * DIM);
-	for (let i = 0; i < flat.length; i += 1) flat[i] = rng() * 2 - 1;
-
-	const ts = timeNs(() => {
-		for (let row = 0; row < count; row += 1) {
-			sink += cosineSimilarity(query, flat.subarray(row * DIM, (row + 1) * DIM));
-		}
-	});
-	const native = timeNs(() => {
-		sink += cosineSimilarityBatch(query, flat, DIM)[0] ?? 0;
-	});
-	pushRow("cosineSimilarityBatch", count, ts, native);
-}
-
 // vectorIndexTopK is measured through the public wrapper searchExactVectorIndex,
 // so the native side pays the production per-call query conversion, guards, and
 // hit-array construction. The TS side replicates the pre-native wrapper body.
@@ -111,33 +91,6 @@ for (const count of COUNTS) {
 		sink += searchExactVectorIndex(index, queryArr, limit)[0]?.score ?? 0;
 	});
 	pushRow("searchExactVectorIndex (topK wrapper)", count, ts, native);
-}
-
-// hammingDistanceBatch: the native side pays FastBinarySearch.search's per-call
-// packing (stride scan, packed/lengths allocation, full copy) before crossing.
-for (const count of COUNTS) {
-	const query = Uint8Array.from({ length: STRIDE }, () => Math.floor(rng() * 256));
-	const backing = new Uint8Array(count * STRIDE);
-	for (let i = 0; i < backing.length; i += 1) backing[i] = Math.floor(rng() * 256);
-	const vectors: Uint8Array[] = [];
-	for (let i = 0; i < count; i += 1) vectors.push(backing.subarray(i * STRIDE, (i + 1) * STRIDE));
-
-	const ts = timeNs(() => {
-		for (let i = 0; i < count; i += 1) sink += hammingDistance(query, vectors[i] ?? new Uint8Array());
-	});
-	const native = timeNs(() => {
-		let stride = 0;
-		for (const vector of vectors) if (vector.length > stride) stride = vector.length;
-		const packed = new Uint8Array(vectors.length * stride);
-		const lengths = new Uint32Array(vectors.length);
-		for (let i = 0; i < vectors.length; i += 1) {
-			const vector = vectors[i] ?? new Uint8Array();
-			lengths[i] = vector.length;
-			packed.set(vector, i * stride);
-		}
-		sink += hammingDistanceBatch(query, packed, stride, lengths)[0] ?? 0;
-	});
-	pushRow("hammingDistanceBatch (incl. packing)", count, ts, native);
 }
 
 // cosineSimilarityPairs: O(n²) pair scan. The TS baseline is the pre-native
@@ -192,34 +145,6 @@ for (const count of COUNTS.filter(n => n <= 1000)) {
 	pushRow("cosineSimilarityPairs (incl. flatten+adjacency)", count, ts, native);
 }
 
-// hammingDistanceForDimBatch: ragged/dim-masked variant used by
-// BinaryVectorStore.search; the native side pays the production per-call
-// packed/dims allocation and copy before crossing.
-for (const count of COUNTS) {
-	const query = Uint8Array.from({ length: STRIDE }, () => Math.floor(rng() * 256));
-	const packed = new Uint8Array(count * STRIDE);
-	for (let i = 0; i < packed.length; i += 1) packed[i] = Math.floor(rng() * 256);
-	const dims = Uint32Array.from({ length: count }, () => (rng() < 0.5 ? DIM : DIM / 2));
-	const vectors: Uint8Array[] = [];
-	for (let i = 0; i < count; i += 1) vectors.push(packed.subarray(i * STRIDE, (i + 1) * STRIDE));
-
-	const ts = timeNs(() => {
-		for (let i = 0; i < count; i += 1) {
-			sink += hammingDistanceForDimension(query, vectors[i] ?? new Uint8Array(), dims[i] ?? DIM);
-		}
-	});
-	const native = timeNs(() => {
-		const packed2 = new Uint8Array(vectors.length * STRIDE);
-		const dims2 = new Uint32Array(vectors.length);
-		for (let i = 0; i < vectors.length; i += 1) {
-			const vector = vectors[i] ?? new Uint8Array();
-			dims2[i] = dims[i] ?? DIM;
-			packed2.set(vector, i * STRIDE);
-		}
-		sink += hammingDistanceForDimBatch(query, packed2, STRIDE, dims2)[0] ?? 0;
-	});
-	pushRow("hammingDistanceForDimBatch (incl. packing)", count, ts, native);
-}
 
 // mmrRerank production paths: the TS side wraps jaccardSimilarity in a lambda,
 // defeating the identity check so the exact pre-native selection loop runs; the

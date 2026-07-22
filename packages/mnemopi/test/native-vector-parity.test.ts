@@ -1,13 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-	cosineSimilarityBatch,
-	cosineSimilarityPairs,
-	hammingDistanceBatch,
-	hammingDistanceForDimBatch,
-	mmrRerankIndices,
-	vectorIndexTopK,
-} from "@oh-my-pi/pi-natives";
-import { hammingDistance, hammingDistanceForDimension } from "../src/core/binary-vectors";
+import { cosineSimilarityPairs, mmrRerankIndices, vectorIndexTopK } from "@oh-my-pi/pi-natives";
 import { jaccardSimilarity, mmrRerank } from "../src/core/mmr";
 import { buildExactVectorIndex, searchExactVectorIndex } from "../src/core/vector-index";
 import { cosineSimilarity } from "../src/core/vector-math";
@@ -32,24 +24,6 @@ function expectClose(actual: number, expected: number): void {
 }
 
 describe("native vector kernel parity", () => {
-	test("cosineSimilarityBatch matches TS cosineSimilarity per row", () => {
-		const rng = makeRng(0xc051e);
-		const dim = 384;
-		const count = 200;
-		const query = Float64Array.from({ length: dim }, () => rng() * 2 - 1);
-		const candidates = new Float64Array(count * dim);
-		for (let i = 0; i < candidates.length; i += 1) candidates[i] = rng() * 2 - 1;
-		// Sprinkle non-finite values to exercise the finite_or_zero path.
-		candidates[3] = Number.NaN;
-		candidates[dim + 7] = Number.POSITIVE_INFINITY;
-		const scores = cosineSimilarityBatch(query, candidates, dim);
-		expect(scores.length).toBe(count);
-		for (let row = 0; row < count; row += 1) {
-			const expected = cosineSimilarity(query, candidates.subarray(row * dim, (row + 1) * dim));
-			expectClose(scores[row] ?? Number.NaN, expected);
-		}
-	});
-
 	test("cosineSimilarityPairs matches the TS pairwise threshold loop", () => {
 		const rng = makeRng(0x9a175);
 		const dim = 64;
@@ -95,45 +69,6 @@ describe("native vector kernel parity", () => {
 		expect(Array.from(result.indices)).toEqual(hits.slice(0, limit).map(h => h.row));
 		for (let i = 0; i < limit; i += 1) {
 			expectClose(result.scores[i] ?? Number.NaN, hits[i]?.score ?? Number.NaN);
-		}
-	});
-
-	test("hammingDistanceBatch is exactly equal to TS hammingDistance", () => {
-		const rng = makeRng(0xba7c4);
-		const stride = 48; // 384-dim binarized
-		const count = 128;
-		const query = Uint8Array.from({ length: stride }, () => Math.floor(rng() * 256));
-		const packed = new Uint8Array(count * stride);
-		const lengths = new Uint32Array(count);
-		const vectors: Uint8Array[] = [];
-		for (let i = 0; i < count; i += 1) {
-			const len = i % 7 === 0 ? Math.floor(rng() * stride) : stride; // ragged rows
-			const vector = Uint8Array.from({ length: len }, () => Math.floor(rng() * 256));
-			vectors.push(vector);
-			lengths[i] = len;
-			packed.set(vector, i * stride);
-		}
-		const distances = hammingDistanceBatch(query, packed, stride, lengths);
-		for (let i = 0; i < count; i += 1) {
-			expect(distances[i]).toBe(hammingDistance(query, vectors[i] ?? new Uint8Array()));
-		}
-	});
-
-	test("hammingDistanceForDimBatch is exactly equal to TS hammingDistanceForDimension", () => {
-		const rng = makeRng(0xd1235);
-		const stride = 48;
-		const count = 96;
-		const query = Uint8Array.from({ length: stride }, () => Math.floor(rng() * 256));
-		const packed = new Uint8Array(count * stride);
-		const dims = new Uint32Array(count);
-		for (let i = 0; i < count; i += 1) {
-			dims[i] = Math.floor(rng() * (stride * 8 + 1)); // includes partial-byte tails and 0
-			for (let b = 0; b < stride; b += 1) packed[i * stride + b] = Math.floor(rng() * 256);
-		}
-		const distances = hammingDistanceForDimBatch(query, packed, stride, dims);
-		for (let i = 0; i < count; i += 1) {
-			const row = packed.subarray(i * stride, (i + 1) * stride);
-			expect(distances[i]).toBe(hammingDistanceForDimension(query, row, dims[i] ?? 0));
 		}
 	});
 

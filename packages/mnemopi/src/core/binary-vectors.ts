@@ -1,5 +1,4 @@
 import type { Database } from "bun:sqlite";
-import { hammingDistanceBatch, hammingDistanceForDimBatch } from "@oh-my-pi/pi-natives";
 
 import { embeddingDim, type VecType } from "../config";
 import { closeQuietly, type DatabasePath, openDatabase } from "../db";
@@ -148,7 +147,7 @@ export function hammingDistance(binaryA: Uint8Array | ArrayBuffer, binaryB: Uint
 	return distance;
 }
 
-export function hammingDistanceForDimension(
+function hammingDistanceForDimension(
 	binaryA: Uint8Array | ArrayBuffer,
 	binaryB: Uint8Array | ArrayBuffer,
 	dim: number,
@@ -227,31 +226,15 @@ export class BinaryVectorStore {
 		const rows = this.conn
 			.query(`SELECT memory_id, binary_vector, original_dim, magnitude FROM ${this.tableName}`)
 			.all() as VectorRow[];
-		// Native batch kernel: pack all rows at a fixed stride (zero-padded,
-		// matching the TS `?? 0` out-of-range reads) and compute every
-		// dimension-masked distance in one N-API crossing.
-		const stride = BYTES_PER_VECTOR;
-		const packed = new Uint8Array(rows.length * stride);
-		const dims = new Uint32Array(rows.length);
-		const comparedDims: number[] = new Array(rows.length);
-		for (let i = 0; i < rows.length; i += 1) {
-			const row = rows[i];
-			if (row === undefined) continue;
+		const results: BinaryVectorSearchResult[] = [];
+		for (const row of rows) {
 			const storedDim = Math.max(0, Math.min(EMBEDDING_DIM, Math.trunc(toFiniteNumber(row.original_dim))));
 			const comparedDim = Math.min(queryDim, storedDim);
-			comparedDims[i] = comparedDim;
-			dims[i] = comparedDim;
-			const bytes = bytesFromBlob(row.binary_vector);
-			packed.set(bytes.length > stride ? bytes.subarray(0, stride) : bytes, i * stride);
-		}
-		const distances = hammingDistanceForDimBatch(queryBinary, packed, stride, dims);
-		const results: BinaryVectorSearchResult[] = [];
-		for (let i = 0; i < rows.length; i += 1) {
-			const distance = distances[i] ?? 0;
+			const distance = hammingDistanceForDimension(queryBinary, bytesFromBlob(row.binary_vector), comparedDim);
 			results.push({
-				memory_id: rows[i]?.memory_id ?? "",
+				memory_id: row.memory_id,
 				distance,
-				score: informationTheoreticScore(distance, comparedDims[i] ?? 0),
+				score: informationTheoreticScore(distance, comparedDim),
 			});
 		}
 		results.sort((a, b) => b.score - a.score || a.memory_id.localeCompare(b.memory_id));
@@ -319,22 +302,9 @@ export class FastBinarySearch {
 
 	search(queryBinary: Uint8Array | ArrayBuffer, topK = 10): BinaryVectorSearchResult[] {
 		const query = queryBinary instanceof Uint8Array ? queryBinary : new Uint8Array(queryBinary);
-		// Native batch kernel: pack all vectors at the max byte length and
-		// compute every Hamming distance in one N-API crossing. Per-row
-		// lengths preserve the TS unmatched-tail popcount semantics.
-		let stride = 0;
-		for (const vector of this.vectors) if (vector.length > stride) stride = vector.length;
-		const packed = new Uint8Array(this.vectors.length * stride);
-		const lengths = new Uint32Array(this.vectors.length);
-		for (let i = 0; i < this.vectors.length; i += 1) {
-			const vector = this.vectors[i] ?? new Uint8Array();
-			lengths[i] = vector.length;
-			packed.set(vector, i * stride);
-		}
-		const distances = hammingDistanceBatch(query, packed, stride, lengths);
 		const results: BinaryVectorSearchResult[] = [];
 		for (let i = 0; i < this.vectors.length; i += 1) {
-			const distance = distances[i] ?? 0;
+			const distance = hammingDistance(query, this.vectors[i] ?? new Uint8Array());
 			results.push({
 				memory_id: this.memoryIds[i] ?? "",
 				distance,

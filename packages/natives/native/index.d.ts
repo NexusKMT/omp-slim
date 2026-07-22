@@ -471,16 +471,6 @@ export interface ContextLine {
 export declare function copyToClipboard(text: string): void
 
 /**
- * Cosine similarity of `query` against a batch of candidate vectors.
- *
- * `candidates` is `n` vectors flattened row-major at `dim` elements per row
- * (callers zero-pad shorter vectors, which matches the TS `?? 0` missing
- * element semantics). Returns one score per candidate, bit-identical to
- * calling the TS `cosineSimilarity(query, candidate)` per row.
- */
-export declare function cosineSimilarityBatch(query: Float64Array, candidates: Float64Array, dim: number): Float64Array
-
-/**
  * All pairs `(i, j)` with `i < j` whose cosine similarity meets `threshold`.
  *
  * `vectors` is `count` vectors flattened row-major at `dim` `f64` elements
@@ -829,28 +819,6 @@ export interface GrepResult {
   /** Number of files skipped because they exceed the size limit. */
   skippedOversized?: number
 }
-
-/**
- * Hamming distance of `query` against a batch of packed binary vectors.
- *
- * `candidates` is flattened row-major at `stride` bytes per row.
- * `lengths[i]` gives the meaningful byte length of row `i` (clamped to
- * `stride`); omit it when every row is exactly `stride` bytes. Semantics
- * match the TS `hammingDistance` exactly, including popcounting the
- * unmatched tail of whichever side is longer.
- */
-export declare function hammingDistanceBatch(query: Uint8Array, candidates: Uint8Array, stride: number, lengths?: Uint32Array | undefined | null): Uint32Array
-
-/**
- * Dimension-masked Hamming distance of `query` against a batch of packed
- * binary vectors.
- *
- * `candidates` is flattened row-major at `stride` bytes per row and
- * `dims[i]` is the bit dimension compared for row `i`. Bytes beyond either
- * side's data read as `0`, and a trailing partial byte is masked to the top
- * `dims[i] % 8` bits — exactly the TS `hammingDistanceForDimension`.
- */
-export declare function hammingDistanceForDimBatch(query: Uint8Array, candidates: Uint8Array, stride: number, dims: Uint32Array): Uint32Array
 
 /**
  * Quick check if content matches a pattern.

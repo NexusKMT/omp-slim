@@ -9,7 +9,7 @@
 
 use napi::{
 	Error, Result, Status,
-	bindgen_prelude::{Float32Array, Float64Array, Uint8Array, Uint32Array},
+	bindgen_prelude::{Float32Array, Float64Array, Uint32Array},
 };
 use napi_derive::napi;
 
@@ -61,37 +61,6 @@ fn cosine_one(a: &[f64], b: &[f64]) -> f64 {
 		return 0.0;
 	}
 	dot / (norm_a.sqrt() * norm_b.sqrt())
-}
-
-/// Cosine similarity of `query` against a batch of candidate vectors.
-///
-/// `candidates` is `n` vectors flattened row-major at `dim` elements per row
-/// (callers zero-pad shorter vectors, which matches the TS `?? 0` missing
-/// element semantics). Returns one score per candidate, bit-identical to
-/// calling the TS `cosineSimilarity(query, candidate)` per row.
-#[napi]
-pub fn cosine_similarity_batch(
-	query: Float64Array,
-	candidates: Float64Array,
-	dim: u32,
-) -> Result<Float64Array> {
-	let dim = dim as usize;
-	let cands: &[f64] = &candidates;
-	if dim == 0 {
-		if !cands.is_empty() {
-			return invalid("candidates must be empty when dim is 0");
-		}
-		return Ok(Float64Array::new(Vec::new()));
-	}
-	if !cands.len().is_multiple_of(dim) {
-		return invalid("candidates length must be a multiple of dim");
-	}
-	let q: &[f64] = &query;
-	let scores: Vec<f64> = cands
-		.chunks_exact(dim)
-		.map(|row| cosine_one(q, row))
-		.collect();
-	Ok(Float64Array::new(scores))
 }
 
 /// All pairs `(i, j)` with `i < j` whose cosine similarity meets `threshold`.
@@ -203,123 +172,6 @@ pub fn vector_index_top_k(
 	let indices: Vec<u32> = order.iter().map(|&(_, row)| row).collect();
 	let scores: Vec<f64> = order.iter().map(|&(score, _)| score).collect();
 	Ok(VectorTopK { indices: Uint32Array::new(indices), scores: Float64Array::new(scores) })
-}
-
-#[inline]
-fn hamming_one(query: &[u8], row: &[u8]) -> u32 {
-	let shared = query.len().min(row.len());
-	let mut distance = 0u32;
-	for i in 0..shared {
-		distance += (query[i] ^ row[i]).count_ones();
-	}
-	for &byte in &query[shared..] {
-		distance += byte.count_ones();
-	}
-	for &byte in &row[shared..] {
-		distance += byte.count_ones();
-	}
-	distance
-}
-
-/// Hamming distance of `query` against a batch of packed binary vectors.
-///
-/// `candidates` is flattened row-major at `stride` bytes per row.
-/// `lengths[i]` gives the meaningful byte length of row `i` (clamped to
-/// `stride`); omit it when every row is exactly `stride` bytes. Semantics
-/// match the TS `hammingDistance` exactly, including popcounting the
-/// unmatched tail of whichever side is longer.
-#[napi]
-pub fn hamming_distance_batch(
-	query: Uint8Array,
-	candidates: Uint8Array,
-	stride: u32,
-	lengths: Option<Uint32Array>,
-) -> Result<Uint32Array> {
-	let stride = stride as usize;
-	let cands: &[u8] = &candidates;
-	let q: &[u8] = &query;
-	let count = match &lengths {
-		Some(lens) => lens.len(),
-		None if stride == 0 => {
-			if cands.is_empty() {
-				return Ok(Uint32Array::new(Vec::new()));
-			}
-			return invalid("stride must be positive when lengths is omitted");
-		},
-		None => {
-			if !cands.len().is_multiple_of(stride) {
-				return invalid("candidates length must be a multiple of stride");
-			}
-			cands.len() / stride
-		},
-	};
-	if count * stride > cands.len() {
-		return invalid("candidates shorter than count * stride");
-	}
-	let mut distances: Vec<u32> = Vec::with_capacity(count);
-	for i in 0..count {
-		let len = match &lengths {
-			Some(lens) => (lens[i] as usize).min(stride),
-			None => stride,
-		};
-		let row = &cands[i * stride..i * stride + len];
-		distances.push(hamming_one(q, row));
-	}
-	Ok(Uint32Array::new(distances))
-}
-
-/// Dimension-masked Hamming distance of `query` against a batch of packed
-/// binary vectors.
-///
-/// `candidates` is flattened row-major at `stride` bytes per row and
-/// `dims[i]` is the bit dimension compared for row `i`. Bytes beyond either
-/// side's data read as `0`, and a trailing partial byte is masked to the top
-/// `dims[i] % 8` bits — exactly the TS `hammingDistanceForDimension`.
-#[napi]
-pub fn hamming_distance_for_dim_batch(
-	query: Uint8Array,
-	candidates: Uint8Array,
-	stride: u32,
-	dims: Uint32Array,
-) -> Result<Uint32Array> {
-	let stride = stride as usize;
-	let cands: &[u8] = &candidates;
-	let q: &[u8] = &query;
-	let count = dims.len();
-	if count * stride > cands.len() {
-		return invalid("candidates shorter than dims.length * stride");
-	}
-	let mut distances: Vec<u32> = Vec::with_capacity(count);
-	for i in 0..count {
-		let row = &cands[i * stride..(i + 1) * stride];
-		let dim = dims[i] as usize;
-		let whole_bytes = dim >> 3;
-		// Bytes beyond either side's data read as 0, so the XOR reduces to a
-		// plain popcount over whichever side still has data. Sliced loops keep
-		// the hot path branch-free and autovectorizable (see `hamming_one`).
-		let q_end = q.len().min(whole_bytes);
-		let row_end = row.len().min(whole_bytes);
-		let shared = q_end.min(row_end);
-		let mut distance = 0u32;
-		for byte in 0..shared {
-			distance += (q[byte] ^ row[byte]).count_ones();
-		}
-		for &byte in &q[shared..q_end] {
-			distance += byte.count_ones();
-		}
-		for &byte in &row[shared..row_end] {
-			distance += byte.count_ones();
-		}
-		let remaining_bits = dim & 7;
-		if remaining_bits > 0 {
-			let mask = (0xffu16 << (8 - remaining_bits)) as u8;
-			let a = q.get(whole_bytes).copied().unwrap_or(0);
-			let b = row.get(whole_bytes).copied().unwrap_or(0);
-			distance += ((a ^ b) & mask).count_ones();
-		}
-		distances.push(distance);
-	}
-	Ok(Uint32Array::new(distances))
 }
 
 /// ECMA-262 `\s` (`WhiteSpace` ∪ `LineTerminator`), which differs from Rust's
@@ -456,7 +308,7 @@ pub fn mmr_rerank_indices(
 
 #[cfg(test)]
 mod tests {
-	use super::{cosine_one, hamming_one, is_js_whitespace, jaccard_sorted, word_set};
+	use super::{cosine_one, is_js_whitespace, jaccard_sorted, word_set};
 
 	#[test]
 	fn cosine_matches_reference_semantics() {
@@ -468,13 +320,6 @@ mod tests {
 		let sim = cosine_one(&[f64::NAN, 1.0], &[0.5, 1.0, 2.0]);
 		let expect = 1.0 / (1.0f64.sqrt() * (0.25f64 + 1.0 + 4.0).sqrt());
 		assert!((sim - expect).abs() < 1e-12);
-	}
-
-	#[test]
-	fn hamming_counts_unmatched_tails() {
-		assert_eq!(hamming_one(&[0xff, 0x0f], &[0x0f]), 4 + 4);
-		assert_eq!(hamming_one(&[], &[0xff]), 8);
-		assert_eq!(hamming_one(&[0b1010], &[0b0101]), 4);
 	}
 
 	#[test]
