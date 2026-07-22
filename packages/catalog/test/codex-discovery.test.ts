@@ -238,7 +238,10 @@ describe("Codex model discovery", () => {
 		try {
 			const result = await resolveProviderModels(
 				{
-					...openaiCodexModelManagerOptions({ accessToken: "test-token", fetch: fetchFn }),
+					...openaiCodexModelManagerOptions({
+						resolveAccounts: async () => [{ accessToken: "test-token" }],
+						fetch: fetchFn,
+					}),
 					staticModels: [staticOnlyModel, sparkModel],
 					cacheDbPath: path.join(tempDir, "models.db"),
 				},

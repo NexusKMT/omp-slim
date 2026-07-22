@@ -1148,10 +1148,17 @@ mod tests {
 
 		// Unique disposable working directory with a sentinel file inside it.
 		static COUNTER: AtomicU32 = AtomicU32::new(0);
-		let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+		let nanos = SystemTime::now()
+			.duration_since(UNIX_EPOCH)
+			.unwrap()
+			.as_nanos();
 		let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
-		let cwd = std::env::temp_dir()
-			.join(format!("omp-rm-empty-{}-{}-{}", std::process::id(), nanos, seq));
+		let cwd = std::env::temp_dir().join(format!(
+			"omp-rm-empty-{}-{}-{}",
+			std::process::id(),
+			nanos,
+			seq
+		));
 		std::fs::create_dir_all(&cwd).unwrap();
 		let sentinel = cwd.join("sentinel");
 		std::fs::write(&sentinel, b"keep me").unwrap();
@@ -1167,8 +1174,7 @@ mod tests {
 			cancel:                Arc::new(AtomicBool::new(false)),
 		};
 
-		let args =
-			vec![OsString::from("rm"), OsString::from("-rf"), OsString::new()];
+		let args = vec![OsString::from("rm"), OsString::from("-rf"), OsString::new()];
 		let code = scope(io, || crate::run(args));
 
 		// `rm -f` swallows the empty-operand error, matching GNU rm's exit 0.
