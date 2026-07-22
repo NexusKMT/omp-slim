@@ -142,6 +142,7 @@
 - Fixed custom `anthropic-messages` OAuth providers being unable to opt into configured Claude Code fingerprint header overrides. ([#5888](https://github.com/can1357/oh-my-pi/issues/5888))
 - Fixed authoritative providers (e.g. `openai-codex`) keeping unsupported bundled models selectable when a fresh model cache and an expired OAuth token coincided: built-in discovery now forces the OAuth refresh so the provider's model manager is constructed and prunes stale bundled entries (e.g. `gpt-5.4-nano`) instead of waiting out the cache TTL. ([#5364](https://github.com/can1357/oh-my-pi/issues/5364))
 - Fixed dynamic model discovery refreshes dropping provider-level compatibility overrides from `models.yml` ([#6041](https://github.com/can1357/oh-my-pi/issues/6041)).
+- Fixed a startup crash that locked users out of the app when `prewalk.enabled` was set but the prewalk hand-off target (default `@smol`) had no configured API key; prewalk now stays unarmed with a warning instead of aborting startup ([#6064](https://github.com/can1357/oh-my-pi/issues/6064)).
 
 ## [17.0.5] - 2026-07-18
 
