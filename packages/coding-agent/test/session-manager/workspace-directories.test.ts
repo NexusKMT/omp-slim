@@ -152,4 +152,15 @@ describe("SessionManager workspace directories", () => {
 		const header = JSON.parse(fs.readFileSync(file, "utf8").split("\n").filter(l => l.trim())[1]!);
 		expect(header.additionalDirectories).toEqual([path.join(tempDir.path(), "added")]);
 	});
+
+	it("forkFrom preserves additionalDirectories from the source session", async () => {
+		using tempDir = TempDir.createSync("@pi-session-workspace-fork-");
+		const source = SessionManager.create(tempDir.path(), tempDir.path());
+		await source.addWorkspaceDirectory(path.join(tempDir.path(), "extra"));
+		source.appendMessage({ role: "user", content: "hello", timestamp: 1 });
+		await source.flush();
+
+		const forked = await SessionManager.forkFrom(source.getSessionFile()!, tempDir.path());
+		expect(forked.getAdditionalDirectories()).toEqual([path.join(tempDir.path(), "extra")]);
+	});
 });

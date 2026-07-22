@@ -1312,7 +1312,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			SessionManager.create(cwd, SessionManager.getDefaultSessionDir(cwd, agentDir)),
 		);
 	const configuredDirs = options.additionalDirectories ?? settings.get("workspace.additionalDirectories");
-	if (configuredDirs.length > 0) await sessionManager.setAdditionalDirectories(configuredDirs);
+	if (configuredDirs.length > 0) {
+		// Merge with any roots restored from the session header (resume/fork), not replace.
+		const existing = sessionManager.getAdditionalDirectories();
+		const merged = [...new Set([...existing, ...configuredDirs])];
+		await sessionManager.setAdditionalDirectories(merged);
+	}
 	const providerSessionId = options.providerSessionId ?? sessionManager.getSessionId();
 	const forkCacheShapeChanged =
 		options.model !== undefined ||

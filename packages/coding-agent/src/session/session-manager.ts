@@ -2025,6 +2025,8 @@ export class SessionManager {
 		);
 		manager.#header.title = sourceHeader?.title;
 		manager.#header.titleSource = sourceHeader?.titleSource;
+		manager.#additionalDirectories = sourceHeader?.additionalDirectories ?? [];
+		manager.#header.additionalDirectories = manager.#additionalDirectories.length > 0 ? manager.#additionalDirectories : undefined;
 		manager.#sessionName = manager.#header.title;
 		manager.#titleSource = manager.#header.titleSource;
 		manager.#titleUpdatedAt = nowIso();
