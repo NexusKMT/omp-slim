@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added jsdiff-compatible native diff exports: `diffLines`, `diffWords`, and `structuredPatchHunks`.
+- Added jsdiff-compatible native diff exports: `diffLines`, `diffWords`, `diffLineRuns`, and `structuredPatchHunks`.
 
 ## [17.0.5] - 2026-07-18
 
