@@ -300,7 +300,7 @@ describe("AgentSession retry fallback", () => {
 
 	it("applies a model-keyed fallback chain to advisor quota failures", async () => {
 		const mainModel = getBundledModel("openai", "gpt-4o-mini");
-		const advisorPrimary = getBundledModel("devin", "gpt-5-6-sol");
+		const advisorPrimary = getBundledModel("devin", "swe-1-6-slow");
 		const advisorFallback = getBundledModel("openai-codex", "gpt-5.6-sol");
 		if (!mainModel || !advisorPrimary || !advisorFallback) {
 			throw new Error("Expected bundled advisor fallback models to exist");
@@ -390,7 +390,9 @@ describe("AgentSession retry fallback", () => {
 		expect(fallbackAppliedEvents).toEqual([
 			{
 				type: "retry_fallback_applied",
-				from: `${advisorPrimarySelector}:medium`,
+				// devin-agent models expose no controllable effort (#4579), so the
+				// advisor selector renders without a `:level` suffix.
+				from: advisorPrimarySelector,
 				to: advisorFallbackSelector,
 				role: advisorPrimarySelector,
 			},
@@ -398,7 +400,9 @@ describe("AgentSession retry fallback", () => {
 		expect(fallbackSucceededEvents).toEqual([
 			{
 				type: "retry_fallback_succeeded",
-				model: `${advisorFallbackSelector}:medium`,
+				// The fallback inherits the primary's (effort-less) thinking level,
+				// so its selector renders without a suffix too.
+				model: advisorFallbackSelector,
 				role: advisorPrimarySelector,
 			},
 		]);
