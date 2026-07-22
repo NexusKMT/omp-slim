@@ -505,10 +505,13 @@ export function stringify(id: number | undefined): string {
 
 const STREAM_PARSE_TRUNCATION_PATTERN =
 	/unterminated string|unexpected end of json input|unexpected end of data|unexpected eof|end of file|eof while parsing|truncated/i;
+const STREAM_PARSE_DIAGNOSTIC_PATTERN =
+	/(?:json parse error:\s*(?:unterminated string|unexpected end of json input|unexpected end of data|unexpected eof|end of file|eof while parsing|truncated)|json\.parse:\s*(?:unterminated string|unexpected end of data)|unexpected end of json input|unexpected eof|eof while parsing)/i;
 const STREAM_EVENT_ORDER_PATTERN = /stream event order|before message_start/i;
 
 /** Transient stream corruption where the response was truncated mid-JSON. */
 export function isTransientStreamParseError(error: unknown): boolean {
+	if (typeof error === "string") return STREAM_PARSE_DIAGNOSTIC_PATTERN.test(error);
 	return error instanceof Error && STREAM_PARSE_TRUNCATION_PATTERN.test(error.message);
 }
 
