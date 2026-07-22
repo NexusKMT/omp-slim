@@ -12,6 +12,7 @@
 
 - Fixed idle Loader animations on WSL repeatedly entering render scheduling after an expired ConPTY post-paint settle window instead of resuming direct component writes ([#6024](https://github.com/can1357/oh-my-pi/issues/6024)).
 - Prevented canonical slash commands and their matching aliases from appearing as duplicate autocomplete rows ([#6131](https://github.com/can1357/oh-my-pi/issues/6131)).
+- Fixed Ctrl+L appearance refreshes inside tmux reading tmux's stale OSC 11 background cache instead of querying the outer terminal when passthrough is enabled ([#6066](https://github.com/can1357/oh-my-pi/issues/6066)).
 
 ## [17.0.5] - 2026-07-18
 
