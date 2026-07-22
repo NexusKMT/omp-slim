@@ -14,6 +14,7 @@
 ### Fixed
 
 - Fixed summarized changelog entries being reintroduced by stale pull-request merges and repeated in later patch release notes ([#6157](https://github.com/can1357/oh-my-pi/issues/6157)).
+- Fixed AgentSession ending task agents on the provider terminal message `Unable to connect. Is the computer able to access the url?` instead of entering its bounded auto-retry path ([#6139](https://github.com/can1357/oh-my-pi/pull/6139)).
 
 ## [17.0.6] - 2026-07-20
 
