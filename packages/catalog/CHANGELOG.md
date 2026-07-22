@@ -46,6 +46,9 @@
 ### Fixed
 
 - Fixed Codex (`openai-codex`) catalog discovery hiding models available only through a second configured OAuth account: discovery fetched one account's `/models` catalog and, being authoritative, pruned every model the other accounts exposed. `openaiCodexModelManagerOptions` now takes a `resolveAccounts` callback, fetches each configured account's catalog independently, and unions them by id before the authoritative merge (bundled models are retained when every account fetch fails) ([#6265](https://github.com/can1357/oh-my-pi/issues/6265)).
+### Fixed
+
+- Fixed cached models that reuse a bundled request model — including GitHub Copilot `-1m` long-context variants — being flagged unrestorable and dropped after a restart. Header restoration now matches the `requestModelId` base and bypasses a stale `unrestorable` marker written by the old id-only cache writer. ([#6037](https://github.com/can1357/oh-my-pi/issues/6037), [#6284](https://github.com/can1357/oh-my-pi/issues/6284))
 
 ## [17.0.6] - 2026-07-20
 

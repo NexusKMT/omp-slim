@@ -1159,8 +1159,18 @@ export class ModelRegistry {
 					models.push(spec);
 					continue;
 				}
-				if (unrestorableHeaderIds.has(spec.id)) continue;
-				const bundledHeaders = bundledById?.get(spec.id)?.headers;
+				// Current unrestorable markers prove that neither same-id nor
+				// request-model bundled headers matched the live model. Only markers
+				// from the old id-only writer may recover through `requestModelId`.
+				const unrestorable = unrestorableHeaderIds.has(spec.id);
+				const bundledHeaders = (
+					unrestorable
+						? cache.legacyHeaderRestoreMarkers && spec.requestModelId
+							? bundledById?.get(spec.requestModelId)
+							: undefined
+						: (bundledById?.get(spec.id) ??
+							(spec.requestModelId ? bundledById?.get(spec.requestModelId) : undefined))
+				)?.headers;
 				if (!bundledHeaders) continue;
 				models.push({ ...spec, headers: bundledHeaders });
 			}
