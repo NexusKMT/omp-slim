@@ -626,7 +626,16 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		: logger.time("loadSystemPromptFiles", loadSystemPromptFiles, { cwd: resolvedCwd });
 	const contextFilesPromise = providedContextFiles
 		? Promise.resolve(providedContextFiles)
-		: logger.time("loadProjectContextFiles", loadProjectContextFiles, { cwd: resolvedCwd });
+		: (async () => {
+				const primary = await logger.time("loadProjectContextFiles", loadProjectContextFiles, { cwd: resolvedCwd });
+				// Also discover context files (AGENTS.md, rules, etc.) for each additional workspace root.
+				const additionalRoots = additionalWorkspaceRoots.filter(d => path.resolve(d) !== path.resolve(resolvedCwd));
+				if (additionalRoots.length === 0) return primary;
+				const extra = await Promise.all(
+					additionalRoots.map(root => loadProjectContextFiles({ cwd: root }).catch(() => [])),
+				);
+				return dedupeExactContextFiles([...primary, ...extra.flat()]);
+			})();
 	const workspaceTreePromise =
 		providedWorkspaceTree !== undefined
 			? Promise.resolve(providedWorkspaceTree)
