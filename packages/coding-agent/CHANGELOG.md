@@ -19,6 +19,7 @@
 - Fixed summarized changelog entries being reintroduced by stale pull-request merges and repeated in later patch release notes ([#6157](https://github.com/can1357/oh-my-pi/issues/6157)).
 - Fixed AgentSession ending task agents on the provider terminal message `Unable to connect. Is the computer able to access the url?` instead of entering its bounded auto-retry path ([#6139](https://github.com/can1357/oh-my-pi/pull/6139)).
 - Fixed a cache-cold startup race where `modelRoles.default` pointing at a `models.yml` discovery provider (e.g. a custom OpenAI-compatible endpoint with `discovery.type: openai-models-list`) was silently replaced by an unrelated authenticated provider's default. `createAgentSession` resolves the default role before background discovery populates the catalog, so on a cold `models.db` the configured provider had no models yet and the fallback went straight to `pickDefaultAvailableModel`. Startup now awaits one cache-aware discovery pass and re-resolves the configured default whenever it is still unresolved (not only when nothing resolved at all) before accepting a bundled-provider fallback ([#6162](https://github.com/can1357/oh-my-pi/issues/6162)).
+- Fixed unqualified `--model` startup selection preferring an unauthenticated provider's catalog entry over the same model from a configured provider. ([#6150](https://github.com/can1357/oh-my-pi/issues/6150))
 
 ## [17.0.6] - 2026-07-20
 
