@@ -73,7 +73,7 @@ import {
 	type SessionStorageWriter,
 } from "./session-storage";
 import { type SessionTitleUpdate, serializeTitleSlot } from "./session-title-slot";
-import { additionalWorkspaceDirectories, normalizeSessionWorkspace, type SessionWorkspace } from "./session-workspace";
+import { additionalWorkspaceDirectories, normalizeSessionWorkspace, normalizeWorkspaceDirectory } from "./session-workspace";
 
 const JSONL_SUFFIX_LENGTH = ".jsonl".length;
 const DRAFT_ONLY_SESSION_MARKER = ".draft-only-session";
@@ -1313,10 +1313,6 @@ export class SessionManager {
 		return [...this.#additionalDirectories];
 	}
 
-	/** Full workspace as a {@link SessionWorkspace}: cwd first, then additional dirs. */
-	getWorkspace(): SessionWorkspace {
-		return { cwd: this.#cwd, directories: [this.#cwd, ...this.#additionalDirectories] };
-	}
 
 	/**
 	 * Add a workspace directory. Normalizes (relative to cwd), dedupes, rejects
@@ -1325,7 +1321,7 @@ export class SessionManager {
 	 * path or `null` when the directory was already present (no-op).
 	 */
 	async addWorkspaceDirectory(directory: string): Promise<string | null> {
-		const resolved = path.resolve(this.#cwd, directory);
+		const resolved = normalizeWorkspaceDirectory(directory, this.#cwd);
 		if (resolved === path.resolve(this.#cwd)) {
 			throw new Error("The current working directory is already the primary workspace root.");
 		}
@@ -1345,7 +1341,7 @@ export class SessionManager {
 	 * `null` when the directory was not an additional root (no-op).
 	 */
 	async removeWorkspaceDirectory(directory: string): Promise<string | null> {
-		const resolved = path.isAbsolute(directory) ? directory : path.resolve(this.#cwd, directory);
+		const resolved = normalizeWorkspaceDirectory(directory, this.#cwd);
 		const idx = this.#additionalDirectories.findIndex(p => path.resolve(p) === resolved);
 		if (idx === -1) return null;
 		this.#additionalDirectories = this.#additionalDirectories.filter((_, i) => i !== idx);
@@ -1361,14 +1357,18 @@ export class SessionManager {
 		return resolved;
 	}
 
-	/** Seed additional directories from settings or a passed list (called at session creation). */
-	setAdditionalDirectories(directories: string[]): void {
+	/** Seed additional directories from settings or a passed list. Also called on resumed sessions with --add-dir; persists the updated header when a session file already exists. */
+	async setAdditionalDirectories(directories: string[]): Promise<void> {
 		const workspace = normalizeSessionWorkspace({ cwd: this.#cwd, directories });
 		this.#additionalDirectories = additionalWorkspaceDirectories(workspace);
 		if (this.#additionalDirectories.length > 0) {
 			this.#header.additionalDirectories = this.#additionalDirectories;
 		} else {
 			this.#header.additionalDirectories = undefined;
+		}
+		if (this.#persist && this.#sessionFile) {
+			this.#rewriteRequired = true;
+			await this.#rewriteAtomically();
 		}
 	}
 

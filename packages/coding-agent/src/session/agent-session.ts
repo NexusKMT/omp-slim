@@ -194,7 +194,7 @@ import {
 import { getKnownRoleIds, MODEL_ROLE_IDS, MODEL_ROLES } from "../config/model-roles";
 import { expandPromptTemplate, type PromptTemplate } from "../config/prompt-templates";
 import { buildServiceTierByFamily, serviceTierForAllFamilies, serviceTierSettingToTier } from "../config/service-tier";
-import type { SettingPath, Settings, SkillsSettings } from "../config/settings";
+import type { Settings, SkillsSettings } from "../config/settings";
 import {
 	getDefault,
 	onAppendOnlyModeChanged,
@@ -9984,9 +9984,8 @@ export class AgentSession {
 				await this.sessionManager.flush();
 			}
 			await this.sessionManager.newSession(options);
-			const configuredDirs =
-				(this.settings.get("workspace.additionalDirectories" as SettingPath) as string[] | undefined) ?? [];
-			if (configuredDirs.length > 0) this.sessionManager.setAdditionalDirectories(configuredDirs);
+			const configuredDirs = this.settings.get("workspace.additionalDirectories");
+			await this.sessionManager.setAdditionalDirectories(configuredDirs);
 			this.#markBashSessionTransition(bashTransition);
 			sessionTransitioned = true;
 		} finally {

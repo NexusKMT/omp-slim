@@ -5,7 +5,6 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import {
 	additionalWorkspaceDirectories,
 	normalizeSessionWorkspace,
-	workspaceRootForPath,
 } from "@oh-my-pi/pi-coding-agent/session/session-workspace";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
@@ -40,31 +39,19 @@ describe("additionalWorkspaceDirectories", () => {
 	});
 });
 
-describe("workspaceRootForPath", () => {
-	it("picks the longest-prefix match", () => {
-		const dirs = ["/repo", "/repo/packages/sub"];
-		expect(workspaceRootForPath("/repo/packages/sub/file.ts", dirs, "/fallback")).toBe("/repo/packages/sub");
-		expect(workspaceRootForPath("/repo/other/file.ts", dirs, "/fallback")).toBe("/repo");
-	});
-
-	it("falls back when no root contains the path", () => {
-		expect(workspaceRootForPath("/elsewhere/file.ts", ["/repo"], "/fallback")).toBe("/fallback");
-	});
-});
-
 describe("SessionManager workspace directories", () => {
 	it("starts with no additional directories", () => {
 		const session = SessionManager.inMemory();
 		expect(session.getAdditionalDirectories()).toEqual([]);
-		expect(session.getWorkspace().directories).toEqual([session.getCwd()]);
+		expect([session.getCwd(), ...session.getAdditionalDirectories()]).toEqual([session.getCwd()]);
 	});
 
-	it("seeds from setAdditionalDirectories and excludes cwd", () => {
+	it("seeds from setAdditionalDirectories and excludes cwd", async () => {
 		const session = SessionManager.inMemory();
-		session.setAdditionalDirectories(["/some/other", session.getCwd()]);
+		await session.setAdditionalDirectories(["/some/other", session.getCwd()]);
 		// cwd is filtered out of the additional set.
 		expect(session.getAdditionalDirectories()).toEqual(["/some/other"]);
-		expect(session.getWorkspace().directories).toEqual([session.getCwd(), "/some/other"]);
+		expect([session.getCwd(), ...session.getAdditionalDirectories()]).toEqual([session.getCwd(), "/some/other"]);
 	});
 
 	it("addWorkspaceDirectory rejects the cwd itself", async () => {
@@ -84,6 +71,14 @@ describe("SessionManager workspace directories", () => {
 		expect(session.getAdditionalDirectories()).toEqual([path.resolve("/another/repo")]);
 	});
 
+	it("addWorkspaceDirectory expands ~ to home", async () => {
+		const session = SessionManager.inMemory();
+		const home = require("node:os").homedir();
+		const added = await session.addWorkspaceDirectory("~/projects");
+		expect(added).toBe(path.join(home, "projects"));
+		expect(session.getAdditionalDirectories()).toEqual([path.join(home, "projects")]);
+	});
+
 	it("removeWorkspaceDirectory removes a known root and returns null when absent", async () => {
 		const session = SessionManager.inMemory();
 		await session.addWorkspaceDirectory("/x");
@@ -93,6 +88,16 @@ describe("SessionManager workspace directories", () => {
 
 		const again = await session.removeWorkspaceDirectory("/x");
 		expect(again).toBeNull();
+	});
+
+	it("removeWorkspaceDirectory matches ~-expanded paths", async () => {
+		const session = SessionManager.inMemory();
+		const home = require("node:os").homedir();
+		await session.addWorkspaceDirectory("~/projects");
+		// Removing with the ~ form should match the expanded stored path.
+		const removed = await session.removeWorkspaceDirectory("~/projects");
+		expect(removed).toBe(path.join(home, "projects"));
+		expect(session.getAdditionalDirectories()).toEqual([]);
 	});
 
 	it("persists additionalDirectories in the session header across reopen", async () => {
@@ -107,7 +112,10 @@ describe("SessionManager workspace directories", () => {
 		expect(file).toBeDefined();
 		const reopened = await SessionManager.open(file!);
 		expect(reopened.getAdditionalDirectories()).toEqual([path.join(tempDir.path(), "sibling")]);
-		expect(reopened.getWorkspace().directories).toEqual([tempDir.path(), path.join(tempDir.path(), "sibling")]);
+		expect([reopened.getCwd(), ...reopened.getAdditionalDirectories()]).toEqual([
+			tempDir.path(),
+			path.join(tempDir.path(), "sibling"),
+		]);
 	});
 
 	it("clears the header field when the last additional directory is removed", async () => {
@@ -119,8 +127,29 @@ describe("SessionManager workspace directories", () => {
 
 		await session.removeWorkspaceDirectory(path.join(tempDir.path(), "extra"));
 		const file = session.getSessionFile()!;
-		const raw = fs.readFileSync(file, "utf8").split("\n")[0]!;
-		const header = JSON.parse(raw);
+		const header = JSON.parse(fs.readFileSync(file, "utf8").split("\n").filter(l => l.trim())[1]!);
 		expect(header.additionalDirectories).toBeUndefined();
+	});
+
+	it("setAdditionalDirectories clears stale roots when called with an empty list", async () => {
+		const session = SessionManager.inMemory();
+		await session.addWorkspaceDirectory("/stale");
+		expect(session.getAdditionalDirectories()).toEqual([path.resolve("/stale")]);
+
+		await session.setAdditionalDirectories([]);
+		expect(session.getAdditionalDirectories()).toEqual([]);
+	});
+
+	it("setAdditionalDirectories persists the updated header on a resumed session", async () => {
+		using tempDir = TempDir.createSync("@pi-session-workspace-resume-");
+		const session = SessionManager.create(tempDir.path(), tempDir.path());
+		// Simulate a resumed session: append a message so the file exists, then setAdditionalDirectories.
+		session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
+		await session.flush();
+
+		await session.setAdditionalDirectories([path.join(tempDir.path(), "added")]);
+		const file = session.getSessionFile()!;
+		const header = JSON.parse(fs.readFileSync(file, "utf8").split("\n").filter(l => l.trim())[1]!);
+		expect(header.additionalDirectories).toEqual([path.join(tempDir.path(), "added")]);
 	});
 });

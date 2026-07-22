@@ -1311,9 +1311,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		logger.time("sessionManager", () =>
 			SessionManager.create(cwd, SessionManager.getDefaultSessionDir(cwd, agentDir)),
 		);
-	if (options.additionalDirectories && options.additionalDirectories.length > 0) {
-		sessionManager.setAdditionalDirectories(options.additionalDirectories);
-	}
+	const configuredDirs = options.additionalDirectories ?? settings.get("workspace.additionalDirectories");
+	if (configuredDirs.length > 0) await sessionManager.setAdditionalDirectories(configuredDirs);
 	const providerSessionId = options.providerSessionId ?? sessionManager.getSessionId();
 	const forkCacheShapeChanged =
 		options.model !== undefined ||

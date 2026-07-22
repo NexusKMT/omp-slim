@@ -51,20 +51,3 @@ export function normalizeSessionWorkspace(args: { cwd: string; directories?: str
 export function additionalWorkspaceDirectories(workspace: SessionWorkspace): string[] {
 	return workspace.directories.filter(directory => directory !== workspace.cwd);
 }
-
-/**
- * Pick the workspace directory containing `filePath` (longest prefix wins, so
- * nested roots resolve to the deepest match), falling back to `fallback` when
- * no workspace directory contains it. Keeps per-file consumers (e.g. LSP root
- * selection) from collapsing unrelated repos into one parent tree.
- */
-export function workspaceRootForPath(filePath: string, directories: string[] | undefined, fallback: string): string {
-	let best = "";
-	for (const directory of directories ?? []) {
-		const prefixed = directory.endsWith(path.sep) ? directory : `${directory}${path.sep}`;
-		if ((filePath === directory || filePath.startsWith(prefixed)) && directory.length > best.length) {
-			best = directory;
-		}
-	}
-	return best || fallback;
-}
