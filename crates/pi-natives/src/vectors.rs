@@ -18,7 +18,7 @@ fn invalid<T>(message: &str) -> Result<T> {
 }
 
 #[inline]
-fn finite_or_zero(value: f64) -> f64 {
+const fn finite_or_zero(value: f64) -> f64 {
 	if value.is_finite() { value } else { 0.0 }
 }
 
@@ -30,6 +30,10 @@ fn finite_or_zero(value: f64) -> f64 {
 /// terms of the shorter side only ever add `±0.0` to `dot` and `+0.0` to its
 /// own norm, in the same index order as the TS loop.
 #[inline]
+#[allow(
+	clippy::suboptimal_flops,
+	reason = "mul_add rounds differently; bit-exact with the TS loops is the contract"
+)]
 fn cosine_one(a: &[f64], b: &[f64]) -> f64 {
 	if a.is_empty() && b.is_empty() {
 		return 0.0;
@@ -79,7 +83,7 @@ pub fn cosine_similarity_batch(
 		}
 		return Ok(Float64Array::new(Vec::new()));
 	}
-	if cands.len() % dim != 0 {
+	if !cands.len().is_multiple_of(dim) {
 		return invalid("candidates length must be a multiple of dim");
 	}
 	let q: &[f64] = &query;
@@ -146,6 +150,10 @@ pub struct VectorTopK {
 /// (`-0.0` and `+0.0` compare equal). Callers are expected to enforce the TS
 /// guards first (finite query with a positive norm, non-empty matrix).
 #[napi]
+#[allow(
+	clippy::suboptimal_flops,
+	reason = "mul_add rounds differently; bit-exact with the TS loops is the contract"
+)]
 pub fn vector_index_top_k(
 	matrix: Float32Array,
 	dimensions: u32,
@@ -154,7 +162,7 @@ pub fn vector_index_top_k(
 ) -> Result<VectorTopK> {
 	let dims = dimensions as usize;
 	let data: &[f32] = &matrix;
-	if dims == 0 || data.len() % dims != 0 {
+	if dims == 0 || !data.len().is_multiple_of(dims) {
 		return invalid("matrix length must be a positive multiple of dimensions");
 	}
 	let count = data.len() / dims;
@@ -239,7 +247,7 @@ pub fn hamming_distance_batch(
 			return invalid("stride must be positive when lengths is omitted");
 		},
 		None => {
-			if cands.len() % stride != 0 {
+			if !cands.len().is_multiple_of(stride) {
 				return invalid("candidates length must be a multiple of stride");
 			}
 			cands.len() / stride
@@ -314,7 +322,7 @@ pub fn hamming_distance_for_dim_batch(
 	Ok(Uint32Array::new(distances))
 }
 
-/// ECMA-262 `\s` (WhiteSpace ∪ LineTerminator), which differs from Rust's
+/// ECMA-262 `\s` (`WhiteSpace` ∪ `LineTerminator`), which differs from Rust's
 /// `char::is_whitespace` (JS additionally includes U+FEFF).
 #[inline]
 const fn is_js_whitespace(c: char) -> bool {
@@ -396,6 +404,10 @@ fn jaccard_sorted(a: &[Box<str>], b: &[Box<str>]) -> f64 {
 /// tokenize to a single non-whitespace word so Jaccard counts still agree
 /// unless a text mixes U+FFFD words with lone-surrogate words.
 #[napi]
+#[allow(
+	clippy::suboptimal_flops,
+	reason = "mul_add rounds differently; bit-exact with the TS loops is the contract"
+)]
 pub fn mmr_rerank_indices(
 	contents: Vec<String>,
 	scores: Float64Array,
