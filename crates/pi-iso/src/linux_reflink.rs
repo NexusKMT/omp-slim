@@ -80,7 +80,8 @@ mod imp {
 
 	use crate::{IsoError, IsoResult};
 
-	// `libc::Ioctl` is `c_int` on musl and `c_ulong` on glibc; the constant fits both.
+	// `libc::Ioctl` is `c_int` on musl and `c_ulong` on glibc; the constant fits
+	// both.
 	const FICLONE: libc::Ioctl = 0x4004_9409;
 
 	pub fn start(lower: &Path, merged: &Path) -> IsoResult<()> {
