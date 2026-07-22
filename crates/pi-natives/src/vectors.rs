@@ -286,11 +286,21 @@ pub fn hamming_distance_for_dim_batch(
 		let row = &cands[i * stride..(i + 1) * stride];
 		let dim = dims[i] as usize;
 		let whole_bytes = dim >> 3;
+		// Bytes beyond either side's data read as 0, so the XOR reduces to a
+		// plain popcount over whichever side still has data. Sliced loops keep
+		// the hot path branch-free and autovectorizable (see `hamming_one`).
+		let q_end = q.len().min(whole_bytes);
+		let row_end = row.len().min(whole_bytes);
+		let shared = q_end.min(row_end);
 		let mut distance = 0u32;
-		for byte in 0..whole_bytes {
-			let a = q.get(byte).copied().unwrap_or(0);
-			let b = row.get(byte).copied().unwrap_or(0);
-			distance += (a ^ b).count_ones();
+		for byte in 0..shared {
+			distance += (q[byte] ^ row[byte]).count_ones();
+		}
+		for &byte in &q[shared..q_end] {
+			distance += byte.count_ones();
+		}
+		for &byte in &row[shared..row_end] {
+			distance += byte.count_ones();
 		}
 		let remaining_bits = dim & 7;
 		if remaining_bits > 0 {
