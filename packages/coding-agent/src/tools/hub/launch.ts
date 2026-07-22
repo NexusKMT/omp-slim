@@ -442,6 +442,8 @@ export function launchRenderResult(
 								: "Readiness timed out; the process is still running.",
 						),
 					);
+				} else if (params.ready && daemon && daemon.readyAt === undefined && TERMINAL_STATES[daemon.state]) {
+					body.push(theme.fg("warning", "Process exited before readiness was observed."));
 				}
 				break;
 			}
