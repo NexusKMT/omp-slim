@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed `scripts/install.sh` installing an x86_64 build on Apple Silicon when an x86_64 `bun` runs under Rosetta. The default path only checked whether `bun` existed; it now compares `bun`'s `process.arch` to the host (detected via `sysctl -in hw.optional.arm64` so Rosetta can't spoof it) and falls back to the prebuilt native binary on a mismatch, while `--source` errors with an actionable message. `install_binary` also derives the arch from the real host instead of the Rosetta-translated `uname -m` ([#6268](https://github.com/can1357/oh-my-pi/issues/6268)).
+- Fixed the model picker hiding Codex models available only through a second configured ChatGPT/Codex OAuth account. Catalog discovery now resolves every stored `openai-codex` OAuth account and unions their `/models` catalogs instead of surfacing only the discovery preflight account's list ([#6265](https://github.com/can1357/oh-my-pi/issues/6265)).
 
 ## [17.0.7] - 2026-07-21
 

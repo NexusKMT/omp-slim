@@ -327,6 +327,71 @@ describe("ModelRegistry runtime discovery", () => {
 		expect(registry.find("openai-codex", "gpt-5.4-nano")).toBeUndefined();
 	});
 
+	test("Codex discovery falls back to a resolved non-OAuth token when no OAuth accounts exist", async () => {
+		authStorage.setRuntimeApiKey("openai-codex", "runtime-openai-codex");
+		let modelListCalls = 0;
+		const fetchMock: FetchImpl = async (input, init) => {
+			const url = String(input);
+			if (url.startsWith("https://chatgpt.com/backend-api") && url.includes("/models")) {
+				modelListCalls++;
+				expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer runtime-openai-codex");
+				return Response.json({
+					models: [
+						{
+							slug: "runtime-codex-model",
+							display_name: "Runtime Codex Model",
+							context_window: 128_000,
+							supported_in_api: true,
+							input_modalities: ["text"],
+						},
+					],
+				});
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		};
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+
+		await registry.refreshProvider("openai-codex", "online");
+
+		expect(modelListCalls).toBe(1);
+		expect(registry.find("openai-codex", "runtime-codex-model")).toBeDefined();
+	});
+
+	test("Codex discovery aborts (keeps bundled models) when any account credential fails to refresh", async () => {
+		// Two configured Codex accounts: the fresh one resolves, the expired one's
+		// refresh throws so getOAuthAccesses reports ok:false. A partial union would
+		// be cached as the authoritative catalog and hide the failed account's
+		// models, so discovery must abort and keep bundled models.
+		authStorage.close();
+		authStorage = await AuthStorage.create(":memory:", {
+			refreshOAuthCredential: async (_provider, _credentialId, credential): Promise<OAuthCredentials> => {
+				if (credential.access.includes("expired")) {
+					throw new Error("simulated transient refresh failure");
+				}
+				return { ...credential, expires: Date.now() + 3_600_000 };
+			},
+		});
+		await authStorage.set("openai-codex", [
+			{ type: "oauth", access: "fresh-codex", refresh: "refresh-fresh", expires: Date.now() + 3_600_000 },
+			{ type: "oauth", access: "expired-codex", refresh: "refresh-expired", expires: Date.now() - 60_000 },
+		]);
+		let modelListCalls = 0;
+		const fetchMock: FetchImpl = async input => {
+			const url = String(input);
+			if (url.startsWith("https://chatgpt.com/backend-api") && url.includes("/models")) {
+				modelListCalls++;
+				return Response.json({ models: [] });
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		};
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+
+		await registry.refreshProvider("openai-codex", "online");
+
+		expect(modelListCalls).toBe(0);
+		expect(getModelsForProvider(registry, "openai-codex").length).toBeGreaterThan(0);
+	});
+
 	test("configured discovery suppresses built-in special OAuth discovery", async () => {
 		await authStorage.set("google-gemini-cli", {
 			type: "oauth",

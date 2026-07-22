@@ -255,6 +255,105 @@ describe("Codex model discovery", () => {
 		}
 	});
 
+	it("unions models across every configured Codex OAuth account (#6265)", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-codex-union-"));
+		// Codex `/models` is account-scoped: account 1 lacks gpt-5.6-sol, account 2
+		// exposes it. Keyed off the chatgpt-account-id header the discovery flow
+		// sends per account.
+		const catalogs: Record<string, readonly string[]> = {
+			"account-1": ["gpt-5.6-terra", "gpt-5.6-luna"],
+			"account-2": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+		};
+		const fetchFn: typeof fetch = Object.assign(
+			async (_input: string | URL | Request, init?: RequestInit) => {
+				const accountId = new Headers(init?.headers).get("chatgpt-account-id") ?? "";
+				const slugs = catalogs[accountId] ?? [];
+				return new Response(
+					JSON.stringify({
+						models: slugs.map(slug => ({
+							slug,
+							display_name: slug,
+							default_reasoning_level: "medium",
+							supported_reasoning_levels: ["low", "medium", "high"],
+							input_modalities: ["text", "image"],
+							supported_in_api: true,
+						})),
+					}),
+				);
+			},
+			{ preconnect() {} },
+		);
+		try {
+			const options = openaiCodexModelManagerOptions({
+				resolveAccounts: async () => [
+					{ accessToken: "token-1", accountId: "account-1" },
+					{ accessToken: "token-2", accountId: "account-2" },
+				],
+				fetch: fetchFn,
+			});
+			const result = await resolveProviderModels(
+				{ ...options, cacheDbPath: path.join(tempDir, "models.db") },
+				"online",
+			);
+
+			expect(result.models.map(model => model.id).sort()).toEqual(["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps bundled Codex models when any account catalog fetch fails (#6265)", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-codex-union-fail-"));
+		const bundled: ModelSpec<"openai-codex-responses"> = {
+			id: "gpt-5.6-terra",
+			name: "GPT-5.6 Terra",
+			api: "openai-codex-responses",
+			provider: "openai-codex",
+			baseUrl: "https://chatgpt.com/backend-api",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 372_000,
+			maxTokens: 128_000,
+		};
+		const fetchFn: typeof fetch = Object.assign(
+			async (_input: string | URL | Request, init?: RequestInit) => {
+				const accountId = new Headers(init?.headers).get("chatgpt-account-id");
+				if (accountId === "account-1") {
+					return Response.json({
+						models: [
+							{
+								slug: "partial-account-model",
+								display_name: "Partial Account Model",
+								supported_in_api: true,
+								input_modalities: ["text"],
+							},
+						],
+					});
+				}
+				return new Response("nope", { status: 500 });
+			},
+			{ preconnect() {} },
+		);
+		try {
+			const options = openaiCodexModelManagerOptions({
+				resolveAccounts: async () => [
+					{ accessToken: "token-1", accountId: "account-1" },
+					{ accessToken: "token-2", accountId: "account-2" },
+				],
+				fetch: fetchFn,
+			});
+			const result = await resolveProviderModels(
+				{ ...options, staticModels: [bundled], cacheDbPath: path.join(tempDir, "models.db") },
+				"online",
+			);
+
+			expect(result.models.map(model => model.id)).toEqual(["gpt-5.6-terra"]);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	it("ignores pre-V2 Codex discovery cache rows", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-codex-v7-cache-"));
 		const dbPath = path.join(tempDir, "models.db");

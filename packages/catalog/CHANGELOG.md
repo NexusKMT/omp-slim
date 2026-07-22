@@ -43,6 +43,9 @@
 ### Fixed
 
 - Fixed authenticated OpenAI Codex discovery dropping account-listed ChatGPT-only models such as GPT-5.3 Codex Spark when they are unavailable through the public API ([#6108](https://github.com/can1357/oh-my-pi/issues/6108)).
+### Fixed
+
+- Fixed Codex (`openai-codex`) catalog discovery hiding models available only through a second configured OAuth account: discovery fetched one account's `/models` catalog and, being authoritative, pruned every model the other accounts exposed. `openaiCodexModelManagerOptions` now takes a `resolveAccounts` callback, fetches each configured account's catalog independently, and unions them by id before the authoritative merge (bundled models are retained when every account fetch fails) ([#6265](https://github.com/can1357/oh-my-pi/issues/6265)).
 
 ## [17.0.6] - 2026-07-20
 
