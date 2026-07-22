@@ -1,93 +1,207 @@
 {
-  "sha": "22a5fb3d9ff9dfbe63049b6bfa36ce16755d66a8",
-  "date": "2026-07-22T08:24:55.683Z",
-  "scenario": "dim=384, stride=48B, warmup=20, iterations=200, crossing-inclusive",
+  "sha": "46e296637f54cbef3ea9c1156a074e92f24f7a49",
+  "date": "2026-07-22T09:30:25.203Z",
+  "scenario": "dim=384, stride=48B, warmup=20, iterations=200 (adaptive for O(n²) rows, see per-row fields), crossing-inclusive",
   "runtime": "bun 1.3.14",
   "rows": [
     {
       "kernel": "cosineSimilarityBatch",
       "count": 10,
-      "ts_us": 10.12,
-      "native_us": 3.44,
-      "speedup": 2.94
+      "ts_us": 11.43,
+      "native_us": 3.54,
+      "speedup": 3.23,
+      "ts_iterations": 200,
+      "native_iterations": 200
     },
     {
       "kernel": "cosineSimilarityBatch",
       "count": 100,
-      "ts_us": 42.43,
-      "native_us": 28.18,
-      "speedup": 1.51
+      "ts_us": 47.43,
+      "native_us": 28.11,
+      "speedup": 1.69,
+      "ts_iterations": 200,
+      "native_iterations": 200
     },
     {
       "kernel": "cosineSimilarityBatch",
       "count": 1000,
-      "ts_us": 402.47,
-      "native_us": 279.5,
-      "speedup": 1.44
+      "ts_us": 453.25,
+      "native_us": 278.19,
+      "speedup": 1.63,
+      "ts_iterations": 200,
+      "native_iterations": 200
     },
     {
       "kernel": "cosineSimilarityBatch",
       "count": 10000,
-      "ts_us": 3977.01,
-      "native_us": 2821.78,
-      "speedup": 1.41
+      "ts_us": 4880.56,
+      "native_us": 2809.26,
+      "speedup": 1.74,
+      "ts_iterations": 200,
+      "native_iterations": 200
     },
     {
       "kernel": "vectorIndexTopK",
       "count": 10,
-      "ts_us": 5.52,
-      "native_us": 3.49,
-      "speedup": 1.58
+      "ts_us": 5.95,
+      "native_us": 3.38,
+      "speedup": 1.76,
+      "ts_iterations": 200,
+      "native_iterations": 200
     },
     {
       "kernel": "vectorIndexTopK",
       "count": 100,
-      "ts_us": 31.87,
-      "native_us": 17.73,
-      "speedup": 1.8
+      "ts_us": 36.07,
+      "native_us": 19.65,
+      "speedup": 1.84,
+      "ts_iterations": 200,
+      "native_iterations": 200
     },
     {
       "kernel": "vectorIndexTopK",
       "count": 1000,
-      "ts_us": 331.28,
-      "native_us": 165.43,
-      "speedup": 2
+      "ts_us": 382.6,
+      "native_us": 186.72,
+      "speedup": 2.05,
+      "ts_iterations": 200,
+      "native_iterations": 200
     },
     {
       "kernel": "vectorIndexTopK",
       "count": 10000,
-      "ts_us": 3842.08,
-      "native_us": 1890.8,
-      "speedup": 2.03
+      "ts_us": 4318,
+      "native_us": 2014.29,
+      "speedup": 2.14,
+      "ts_iterations": 200,
+      "native_iterations": 200
     },
     {
       "kernel": "hammingDistanceBatch",
       "count": 10,
-      "ts_us": 3.03,
-      "native_us": 0.67,
-      "speedup": 4.51
+      "ts_us": 3.17,
+      "native_us": 0.65,
+      "speedup": 4.88,
+      "ts_iterations": 200,
+      "native_iterations": 200
     },
     {
       "kernel": "hammingDistanceBatch",
       "count": 100,
-      "ts_us": 7.05,
-      "native_us": 0.71,
-      "speedup": 9.99
+      "ts_us": 7.63,
+      "native_us": 0.8,
+      "speedup": 9.6,
+      "ts_iterations": 200,
+      "native_iterations": 200
     },
     {
       "kernel": "hammingDistanceBatch",
       "count": 1000,
-      "ts_us": 28.76,
-      "native_us": 4.02,
-      "speedup": 7.15
+      "ts_us": 28.5,
+      "native_us": 4.18,
+      "speedup": 6.81,
+      "ts_iterations": 200,
+      "native_iterations": 200
     },
     {
       "kernel": "hammingDistanceBatch",
       "count": 10000,
-      "ts_us": 230.52,
-      "native_us": 39.25,
-      "speedup": 5.87
+      "ts_us": 260.8,
+      "native_us": 36.34,
+      "speedup": 7.18,
+      "ts_iterations": 200,
+      "native_iterations": 200
+    },
+    {
+      "kernel": "cosineSimilarityPairs",
+      "count": 10,
+      "ts_us": 19.57,
+      "native_us": 12,
+      "speedup": 1.63,
+      "ts_iterations": 200,
+      "native_iterations": 200
+    },
+    {
+      "kernel": "cosineSimilarityPairs",
+      "count": 100,
+      "ts_us": 2158.12,
+      "native_us": 1293.04,
+      "speedup": 1.67,
+      "ts_iterations": 200,
+      "native_iterations": 200
+    },
+    {
+      "kernel": "cosineSimilarityPairs",
+      "count": 1000,
+      "ts_us": 217904.4,
+      "native_us": 136833.13,
+      "speedup": 1.59,
+      "ts_iterations": 10,
+      "native_iterations": 10
+    },
+    {
+      "kernel": "hammingDistanceForDimBatch",
+      "count": 10,
+      "ts_us": 2.69,
+      "native_us": 0.85,
+      "speedup": 3.16,
+      "ts_iterations": 200,
+      "native_iterations": 200
+    },
+    {
+      "kernel": "hammingDistanceForDimBatch",
+      "count": 100,
+      "ts_us": 6.03,
+      "native_us": 0.91,
+      "speedup": 6.63,
+      "ts_iterations": 200,
+      "native_iterations": 200
+    },
+    {
+      "kernel": "hammingDistanceForDimBatch",
+      "count": 1000,
+      "ts_us": 26.41,
+      "native_us": 5.32,
+      "speedup": 4.96,
+      "ts_iterations": 200,
+      "native_iterations": 200
+    },
+    {
+      "kernel": "hammingDistanceForDimBatch",
+      "count": 10000,
+      "ts_us": 227.07,
+      "native_us": 74.1,
+      "speedup": 3.06,
+      "ts_iterations": 200,
+      "native_iterations": 200
+    },
+    {
+      "kernel": "mmrRerankIndices (via mmrRerank)",
+      "count": 10,
+      "ts_us": 352.01,
+      "native_us": 14.7,
+      "speedup": 23.94,
+      "ts_iterations": 200,
+      "native_iterations": 200
+    },
+    {
+      "kernel": "mmrRerankIndices (via mmrRerank)",
+      "count": 100,
+      "ts_us": 8222.8,
+      "native_us": 219.59,
+      "speedup": 37.45,
+      "ts_iterations": 200,
+      "native_iterations": 200
+    },
+    {
+      "kernel": "mmrRerankIndices (via mmrRerank)",
+      "count": 1000,
+      "ts_us": 82410.2,
+      "native_us": 2504.3,
+      "speedup": 32.91,
+      "ts_iterations": 200,
+      "native_iterations": 200
     }
   ],
-  "sink": 469653256.8853176
+  "sink": 823409556.8853176
 }
