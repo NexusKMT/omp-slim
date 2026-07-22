@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -23,7 +23,7 @@ describe("normalizeSessionWorkspace", () => {
 
 	it("expands ~ to home", () => {
 		const workspace = normalizeSessionWorkspace({ cwd: "/tmp", directories: ["~/docs"] });
-		expect(workspace.directories[1]).toBe(path.join(process.env.HOME ?? require("node:os").homedir(), "docs"));
+		expect(workspace.directories[1]).toBe(path.join(process.env.HOME ?? os.homedir(), "docs"));
 	});
 });
 
@@ -73,7 +73,7 @@ describe("SessionManager workspace directories", () => {
 
 	it("addWorkspaceDirectory expands ~ to home", async () => {
 		const session = SessionManager.inMemory();
-		const home = require("node:os").homedir();
+		const home = os.homedir();
 		const added = await session.addWorkspaceDirectory("~/projects");
 		expect(added).toBe(path.join(home, "projects"));
 		expect(session.getAdditionalDirectories()).toEqual([path.join(home, "projects")]);
@@ -92,7 +92,7 @@ describe("SessionManager workspace directories", () => {
 
 	it("removeWorkspaceDirectory matches ~-expanded paths", async () => {
 		const session = SessionManager.inMemory();
-		const home = require("node:os").homedir();
+		const home = os.homedir();
 		await session.addWorkspaceDirectory("~/projects");
 		// Removing with the ~ form should match the expanded stored path.
 		const removed = await session.removeWorkspaceDirectory("~/projects");
