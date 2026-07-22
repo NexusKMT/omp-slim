@@ -204,6 +204,10 @@
 
 - Fixed the `task` tool rejecting a valid batch `{ context, tasks[] }` call with the misleading `task must be a string (was missing)` when `task.batch` was disabled. The flat single-spawn wire schema strips `tasks`/`context` (arktype `"+": "delete"`) and then fails on the now-missing `task` in the agent loop, preempting the tool's own actionable shape check. The tool now uses lenient argument validation so those raw args reach `execute()`, which explains the real cause (`task.batch is disabled…`) ([#6039](https://github.com/can1357/oh-my-pi/issues/6039)).
 
+### Fixed
+
+- Fixed JS/TS `debug` launches timing out on WSL2 with `networkingMode=mirrored` by waiting for the adapter's listening banner before connecting (avoiding the ghost-accept window on a just-released reservation port) and rejecting pending DAP requests and event waiters the moment the transport closes, so any transport failure surfaces as an immediate `DAP connection closed` error instead of a silent 30s timeout ([#6055](https://github.com/can1357/oh-my-pi/issues/6055)).
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
