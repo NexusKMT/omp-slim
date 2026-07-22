@@ -147,6 +147,7 @@
 - Fixed dynamic model discovery refreshes dropping provider-level compatibility overrides from `models.yml` ([#6041](https://github.com/can1357/oh-my-pi/issues/6041)).
 - Fixed a startup crash that locked users out of the app when `prewalk.enabled` was set but the prewalk hand-off target (default `@smol`) had no configured API key; prewalk now stays unarmed with a warning instead of aborting startup ([#6064](https://github.com/can1357/oh-my-pi/issues/6064)).
 - Fixed in-progress aborts awaiting `session_stop` extension handlers whose results would be discarded ([#6134](https://github.com/can1357/oh-my-pi/issues/6134)).
+- Fixed `/retry` reporting "Nothing to retry" after a stream stalled or aborted mid-tool-call, where a synthetic tool result appended for the un-run tool call shadowed the failed assistant turn ([#6056](https://github.com/can1357/oh-my-pi/issues/6056)).
 
 ## [17.0.5] - 2026-07-18
 
