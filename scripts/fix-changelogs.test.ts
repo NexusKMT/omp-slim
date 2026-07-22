@@ -7,6 +7,7 @@ import {
 	collectPromotableAddedItemLines,
 	fixChangelogContent,
 	parseChangelog,
+	parseItems,
 	recordSummarizedItemFingerprints,
 	renderChangelog,
 	runChangelogFixer,
@@ -171,10 +172,11 @@ describe("fixChangelogContent", () => {
 		const unreleased = document.sections.find(section => section.title === "Unreleased");
 		if (!unreleased) throw new Error("fixture is missing Unreleased");
 
-		recordSummarizedItemFingerprints(document, unreleased);
+		const sourceItems = unreleased.subsections.flatMap(sub => parseItems(sub.lines));
 		const summarizedItem =
 			"- Fixed isolated `task` subagents mutating the parent checkout by detaching the git directory.";
 		unreleased.subsections = [{ title: "Fixed", lines: [{ text: summarizedItem, lineNumber: 0 }] }];
+		recordSummarizedItemFingerprints(document, sourceItems, unreleased);
 		const staleMerge = renderChangelog(document).replace(summarizedItem, `${summarizedItem}\n${sourceItem}`);
 
 		const result = fixChangelogContent(staleMerge, new Set());
@@ -182,6 +184,27 @@ describe("fixChangelogContent", () => {
 		expect(result.droppedReleasedDuplicates).toBe(1);
 		expect(result.content).toContain(summarizedItem);
 		expect(result.content).not.toContain(sourceItem);
+	});
+
+	it("keeps bullets the rewrite preserved verbatim instead of dropping them as consumed", () => {
+		const keptItem = "- Fixed crash when opening the empty settings panel ([#1234](https://github.com/can1357/oh-my-pi/issues/1234)).";
+		const document = parseChangelog(
+			["# Changelog", "", "## [Unreleased]", "", "### Fixed", "", keptItem, ""].join("\n"),
+		);
+		const unreleased = document.sections.find(section => section.title === "Unreleased");
+		if (!unreleased) throw new Error("fixture is missing Unreleased");
+
+		const sourceItems = unreleased.subsections.flatMap(sub => parseItems(sub.lines));
+		// The model returned this bullet unchanged; applyRewrite writes it back.
+		unreleased.subsections = [{ title: "Fixed", lines: [{ text: keptItem, lineNumber: 0 }] }];
+		recordSummarizedItemFingerprints(document, sourceItems, unreleased);
+		const afterRewrite = renderChangelog(document);
+		expect(afterRewrite).not.toContain("changelog-source-item");
+
+		const result = fixChangelogContent(afterRewrite, new Set());
+
+		expect(result.droppedReleasedDuplicates).toBe(0);
+		expect(result.content).toContain(keptItem);
 	});
 
 	it("can recover Unreleased by dropping bullets known to be historically released", () => {

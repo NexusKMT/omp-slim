@@ -299,21 +299,34 @@ function addItemKeys(keys: Set<string>, itemLines: readonly string[]): void {
 }
 
 /**
- * Records source-item fingerprints before an Unreleased section is summarized.
+ * Records fingerprints for source items consumed by summarization. Called
+ * after the rewrite is applied: items whose exact text survives in the
+ * rewritten section are skipped — recording those would make the next fixer
+ * run treat the still-valid Unreleased bullet as already consumed and drop it.
  */
-export function recordSummarizedItemFingerprints(document: ChangelogDocument, section: ReleaseSection): void {
+export function recordSummarizedItemFingerprints(
+	document: ChangelogDocument,
+	sourceItems: readonly ParsedItem[],
+	rewrittenSection: ReleaseSection,
+): void {
+	const surviving = new Set<string>();
+	for (const subsection of rewrittenSection.subsections) {
+		for (const item of parseItems(subsection.lines)) {
+			const text = itemTextKey(item.lines);
+			if (text) surviving.add(text);
+		}
+	}
 	const recorded = new Set<string>();
 	collectRecordedItemFingerprints(document.prefixLines, recorded);
-	for (const subsection of section.subsections) {
-		for (const item of parseItems(subsection.lines)) {
-			const fingerprint = itemFingerprint(item.lines);
-			if (!fingerprint || recorded.has(fingerprint)) continue;
-			document.prefixLines.push({
-				text: `<!-- changelog-source-item sha256:${fingerprint} -->`,
-				lineNumber: 0,
-			});
-			recorded.add(fingerprint);
-		}
+	for (const item of sourceItems) {
+		if (surviving.has(itemTextKey(item.lines))) continue;
+		const fingerprint = itemFingerprint(item.lines);
+		if (!fingerprint || recorded.has(fingerprint)) continue;
+		document.prefixLines.push({
+			text: `<!-- changelog-source-item sha256:${fingerprint} -->`,
+			lineNumber: 0,
+		});
+		recorded.add(fingerprint);
 	}
 }
 
