@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added jsdiff-compatible native diff exports: `diffLines`, `diffWords`, `diffLineRuns`, and `structuredPatchHunks`.
+- Added jsdiff-compatible native diff exports: `diffLines`, `diffWords`, `diffLineRuns`, and `structuredPatchHunks` ([#6279](https://github.com/can1357/oh-my-pi/pull/6279) by [@wolfiesch](https://github.com/wolfiesch)).
 
 ## [17.0.5] - 2026-07-18
 
