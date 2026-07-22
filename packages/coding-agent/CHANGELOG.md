@@ -8,6 +8,7 @@
 - Fixed the model picker hiding Codex models available only through a second configured ChatGPT/Codex OAuth account. Catalog discovery now resolves every stored `openai-codex` OAuth account and unions their `/models` catalogs instead of surfacing only the discovery preflight account's list ([#6265](https://github.com/can1357/oh-my-pi/issues/6265)).
 - Fixed GitHub Copilot 1M-context models (e.g. `github-copilot/gpt-5.6-sol-1m`) disappearing from the model picker on restart, with a `Could not restore model` warning, until discovery was manually refreshed. The startup cache loader now restores their transport headers from the bundled base via `requestModelId`. ([#6037](https://github.com/can1357/oh-my-pi/issues/6037), [#6284](https://github.com/can1357/oh-my-pi/issues/6284))
 - Fixed `--model <role>` skipping the role's ordered `retry.fallbackChains` when its configured primary is unavailable, so startup now selects the first available authenticated fallback instead of leaving the role unresolved ([#6283](https://github.com/can1357/oh-my-pi/issues/6283)).
+- Fixed global `setModelRole` persisting the entire stale in-memory `modelRoles` record, which clobbered concurrent/external per-role edits to `config.yml` (roles reverted, added keys vanished) when a process with a stale global snapshot made one global model switch. Global saves now merge only the changed role into the re-read file, mirroring the project save path ([#6260](https://github.com/can1357/oh-my-pi/issues/6260)).
 
 ## [17.0.7] - 2026-07-21
 
