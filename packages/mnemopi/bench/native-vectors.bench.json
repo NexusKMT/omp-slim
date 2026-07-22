@@ -1,0 +1,93 @@
+{
+  "sha": "22a5fb3d9ff9dfbe63049b6bfa36ce16755d66a8",
+  "date": "2026-07-22T08:24:55.683Z",
+  "scenario": "dim=384, stride=48B, warmup=20, iterations=200, crossing-inclusive",
+  "runtime": "bun 1.3.14",
+  "rows": [
+    {
+      "kernel": "cosineSimilarityBatch",
+      "count": 10,
+      "ts_us": 10.12,
+      "native_us": 3.44,
+      "speedup": 2.94
+    },
+    {
+      "kernel": "cosineSimilarityBatch",
+      "count": 100,
+      "ts_us": 42.43,
+      "native_us": 28.18,
+      "speedup": 1.51
+    },
+    {
+      "kernel": "cosineSimilarityBatch",
+      "count": 1000,
+      "ts_us": 402.47,
+      "native_us": 279.5,
+      "speedup": 1.44
+    },
+    {
+      "kernel": "cosineSimilarityBatch",
+      "count": 10000,
+      "ts_us": 3977.01,
+      "native_us": 2821.78,
+      "speedup": 1.41
+    },
+    {
+      "kernel": "vectorIndexTopK",
+      "count": 10,
+      "ts_us": 5.52,
+      "native_us": 3.49,
+      "speedup": 1.58
+    },
+    {
+      "kernel": "vectorIndexTopK",
+      "count": 100,
+      "ts_us": 31.87,
+      "native_us": 17.73,
+      "speedup": 1.8
+    },
+    {
+      "kernel": "vectorIndexTopK",
+      "count": 1000,
+      "ts_us": 331.28,
+      "native_us": 165.43,
+      "speedup": 2
+    },
+    {
+      "kernel": "vectorIndexTopK",
+      "count": 10000,
+      "ts_us": 3842.08,
+      "native_us": 1890.8,
+      "speedup": 2.03
+    },
+    {
+      "kernel": "hammingDistanceBatch",
+      "count": 10,
+      "ts_us": 3.03,
+      "native_us": 0.67,
+      "speedup": 4.51
+    },
+    {
+      "kernel": "hammingDistanceBatch",
+      "count": 100,
+      "ts_us": 7.05,
+      "native_us": 0.71,
+      "speedup": 9.99
+    },
+    {
+      "kernel": "hammingDistanceBatch",
+      "count": 1000,
+      "ts_us": 28.76,
+      "native_us": 4.02,
+      "speedup": 7.15
+    },
+    {
+      "kernel": "hammingDistanceBatch",
+      "count": 10000,
+      "ts_us": 230.52,
+      "native_us": 39.25,
+      "speedup": 5.87
+    }
+  ],
+  "sink": 469653256.8853176
+}
