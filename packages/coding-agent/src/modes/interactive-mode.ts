@@ -481,6 +481,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	proseOnlyThinking = true;
 	compactionQueuedMessages: CompactionQueuedMessage[] = [];
 	pendingTools = new Map<string, ToolExecutionHandle>();
+	transcriptMessageComponents = new WeakMap<AgentMessage, Component>();
 	pendingBashComponents: BashExecutionComponent[] = [];
 	bashComponent: BashExecutionComponent | undefined = undefined;
 	pendingPythonComponents: EvalExecutionComponent[] = [];
@@ -1657,7 +1658,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (options.requestRender !== false) this.ui.requestRender();
 	}
 
-	rebuildChatFromMessages(): void {
+	rebuildChatFromMessages(options: { reuseSettledComponents?: boolean } = {}): void {
 		// Mid-stream rebuilds (e.g. `/shake`, theme/setting changes that touch the
 		// transcript) replay only committed `state.messages`. The agent's in-flight
 		// `streamMessage` and its still-pending tool calls live OUTSIDE
@@ -1690,7 +1691,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		const context = this.viewSession.buildTranscriptSessionContext({
 			collapseCompactedHistory: settings.get("display.collapseCompacted"),
 		});
-		this.renderSessionContext(context);
+		this.renderSessionContext(context, { reuseSettledComponents: options.reuseSettledComponents });
 		for (const child of liveComponents) {
 			this.chatContainer.addChild(child);
 		}
@@ -3912,6 +3913,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	resetTranscript(): void {
+		this.transcriptMessageComponents = new WeakMap<AgentMessage, Component>();
 		this.chatContainer.dispose();
 		this.chatContainer.clear();
 	}
@@ -4137,14 +4139,18 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	addMessageToChat(
 		message: AgentMessage,
-		options?: { populateHistory?: boolean; imageLinks?: readonly (string | undefined)[] },
+		options?: {
+			populateHistory?: boolean;
+			imageLinks?: readonly (string | undefined)[];
+			reuseSettledComponent?: boolean;
+		},
 	): Component[] {
 		return this.#uiHelpers.addMessageToChat(message, options);
 	}
 
 	renderSessionContext(
 		sessionContext: SessionContext,
-		options?: { updateFooter?: boolean; populateHistory?: boolean },
+		options?: { updateFooter?: boolean; populateHistory?: boolean; reuseSettledComponents?: boolean },
 	): void {
 		for (const message of sessionContext.messages) {
 			this.noteDisplayableThinkingContent(message);

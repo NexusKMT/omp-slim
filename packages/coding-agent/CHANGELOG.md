@@ -185,6 +185,8 @@
 
 ### Fixed
 
+- Fixed post-compaction transcript rebuilds blocking the main thread by reusing settled message components and their rendered layout caches ([#6033](https://github.com/can1357/oh-my-pi/issues/6033)).
+
 - Fixed isolated `task` subagents mutating the parent git checkout and stacking parallel task branches by detaching the git directory.
 - Fixed Windows compatibility issues, including `launch start` daemons opening visible console windows, startup crashes when running from a drive root, and command errors in the `hub` tool with non-POSIX shells.
 - Fixed Windows stdio MCP servers launched through `.cmd`/`.bat` shims failing with `Transport closed` by escaping arguments properly.

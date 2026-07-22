@@ -1311,7 +1311,7 @@ export class CommandController {
 
 			compactingLoader.stop();
 			this.ctx.statusContainer.disposeChildren();
-			this.ctx.rebuildChatFromMessages();
+			this.ctx.rebuildChatFromMessages({ reuseSettledComponents: true });
 
 			this.ctx.statusLine.invalidate();
 			// Same as the auto-compaction rebuild: a collapsed transcript is an
