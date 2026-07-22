@@ -172,6 +172,7 @@ export class InputController {
 
 	#enhancedPaste?: EnhancedPasteController;
 	#focusedLeftTapListenerInstalled = false;
+	#focusedPasteListenerInstalled = false;
 	#btwBranchListenerInstalled = false;
 	#btwCopyListenerInstalled = false;
 	// Tap counter for the double-← gesture; reset whenever a quiet gap
@@ -262,6 +263,16 @@ export class InputController {
 				if (this.ctx.ui.getFocused() !== this.ctx.editor) return undefined;
 				if (this.ctx.editor.getText().trim()) return undefined;
 				void this.ctx.handleBtwCopyKey();
+				return { consume: true };
+			});
+		}
+		if (!this.#focusedPasteListenerInstalled) {
+			this.#focusedPasteListenerInstalled = true;
+			this.ctx.ui.addInputListener(data => {
+				const focused = this.ctx.ui.getFocused();
+				if (!focused || focused === this.ctx.editor || !hasPasteText(focused)) return undefined;
+				if (!this.ctx.keybindings.matches(data, "app.clipboard.pasteImage")) return undefined;
+				void this.handleImagePaste();
 				return { consume: true };
 			});
 		}
