@@ -508,8 +508,10 @@ export interface DiffChange {
 ")` against `newText.split("
 ")` with jsdiff
  * `diffArrays` semantics (exact string equality, empty lines preserved),
- * returning only run lengths. Callers that map line numbers — like hashline
- * recovery — need the counts, not another copy of the text.
+ * returning only run lengths.
+ *
+ * Callers that map line numbers — like hashline recovery — need the counts,
+ * not another copy of the text.
  */
 export declare function diffLineRuns(oldText: string, newText: string): Array<DiffRun>
 
@@ -532,8 +534,10 @@ export interface DiffRun {
 
 /**
  * Word diff with jsdiff `diffWords(oldText, newText)` semantics (default
- * options): tokens carry surrounding whitespace, equality ignores it, and
- * the post-pass dedupes whitespace across change boundaries.
+ * options).
+ *
+ * Tokens carry surrounding whitespace, equality ignores it, and the
+ * post-pass dedupes whitespace across change boundaries.
  */
 export declare function diffWords(oldText: string, newText: string): Array<DiffChange>
 
