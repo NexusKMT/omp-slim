@@ -95,21 +95,24 @@ function formatResolvedModelBadge(resolved: string, preserveProvider = false): s
  * (e.g. a parked historical agent restored from disk).
  */
 function modelBadge(ref: AgentRef, observed: ObservableSession | undefined): string | undefined {
-	const fallback = ref.session?.retryFallbackModel;
-	if (fallback) {
-		return `${theme.fg("warning", "fallback →")} ${formatResolvedModelBadge(fallback, true)}`;
+	const progress = observed?.progress;
+	// Prefer the live session's own resolved fallback selector; else honor the
+	// executor-reported fallback flag. The latter covers observer-only rows (no
+	// live session) AND live rows whose fallback armed no session retry state —
+	// e.g. the Fireworks Fast → base degrade, which emits `retry_fallback_applied`
+	// without populating `#activeRetryFallback`, so `retryFallbackModel` is undefined.
+	const fallbackSelector =
+		ref.session?.retryFallbackModel ?? (progress?.resolvedModelIsFallback ? progress.resolvedModel : undefined);
+	if (fallbackSelector) {
+		return `${theme.fg("warning", "fallback →")} ${formatResolvedModelBadge(fallbackSelector, true)}`;
 	}
 	const model = ref.session?.model;
 	if (model) {
 		const level = model.thinking ? ref.session?.thinkingLevel : undefined;
 		return formatModelBadge(model.id, level);
 	}
-	const resolved = observed?.progress?.resolvedModel;
-	if (!resolved) return undefined;
-	if (observed?.progress?.resolvedModelIsFallback) {
-		return `${theme.fg("warning", "fallback →")} ${formatResolvedModelBadge(resolved, true)}`;
-	}
-	return formatResolvedModelBadge(resolved);
+	const resolved = progress?.resolvedModel;
+	return resolved ? formatResolvedModelBadge(resolved) : undefined;
 }
 
 /** Result of one host-backed transcript read for the Agent Hub viewer. */

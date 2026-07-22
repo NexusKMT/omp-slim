@@ -204,4 +204,46 @@ describe("Agent hub row ordering", () => {
 			hub.dispose();
 		}
 	});
+
+	it("flags a fallback badge for a live row whose fallback armed no session retry state", () => {
+		geometry = stubStdoutGeometry(120);
+		const agents = new AgentRegistry();
+		// Live session with a resolved model but no `retryFallbackModel` — the
+		// Fireworks Fast → base degrade emits `retry_fallback_applied` without
+		// arming `#activeRetryFallback`, so the badge must fall back to the
+		// executor-reported progress flag.
+		const session = { model: { id: "kimi-k2" }, retryFallbackModel: undefined } as unknown as AgentSession;
+		agents.register({ id: "FastAgent", displayName: "Fast Agent", kind: "sub", session });
+
+		const observers = new SessionObserverRegistry();
+		vi.spyOn(observers, "getSessions").mockReturnValue([
+			{
+				id: "FastAgent",
+				kind: "subagent",
+				label: "Subagent",
+				status: "active",
+				lastUpdate: Date.now(),
+				progress: {
+					resolvedModel: "fireworks/kimi-k2",
+					resolvedModelIsFallback: true,
+				} as never,
+			},
+		]);
+
+		const hub = new AgentHubOverlayComponent({
+			observers,
+			hubKeys: [],
+			onDone: () => {},
+			requestRender: () => {},
+			registry: agents,
+			irc: new IrcBus(agents),
+			focusAgent: async () => {},
+		});
+
+		try {
+			expect(Bun.stripANSI(hub.render(120).join("\n"))).toContain("fallback → fireworks/kimi-k2");
+		} finally {
+			hub.dispose();
+		}
+	});
 });
