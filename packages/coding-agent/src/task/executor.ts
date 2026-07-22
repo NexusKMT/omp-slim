@@ -2220,7 +2220,11 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	const settings = options.settings ?? Settings.isolated();
 	const subagentSettings = createSubagentSettings(
 		settings,
-		agent.readSummarize === false ? { "read.summarize.enabled": false } : undefined,
+		{
+			...(agent.readSummarize === false ? { "read.summarize.enabled": false } : undefined),
+			// Isolated runs must not expose roots outside the worktree.
+			...(worktree !== undefined ? { "workspace.additionalDirectories": [] } : undefined),
+		},
 		options.parentServiceTier,
 	);
 	const maxRecursionDepth = settings.get("task.maxRecursionDepth") ?? 2;
