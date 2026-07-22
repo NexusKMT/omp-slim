@@ -4867,9 +4867,10 @@ export class AgentSession {
 				if (toolName === "edit" && editedPath) {
 					this.#invalidateFileCacheForPath(editedPath);
 				}
+				// TodoTool commits its state during execute. Replaying the result after
+				// awaited event fan-out can overwrite a newer call from the same batch.
 				const phases = details?.phases;
 				if (toolName === "todo" && !isError && details && Array.isArray(phases) && phases.every(isTodoPhase)) {
-					this.setTodoPhases(phases);
 					if (this.#isTodoInitResult(details, toolCallId)) {
 						this.#scheduleReplanTitleRefresh();
 					}
