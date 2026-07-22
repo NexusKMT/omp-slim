@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `hub start`/`for:"ready"` waits blocking for the full readiness timeout when the launched process became ready and exited within one poll interval (or exited before ever becoming ready). The wait now wakes on the sticky `readyAt` marker or any terminal state instead of sampling the transient live state, and `start` reports `Process exited before readiness was observed.` for a pre-ready exit ([#6303](https://github.com/can1357/oh-my-pi/issues/6303)).
+
 ## [17.0.7] - 2026-07-21
 
 ### Fixed

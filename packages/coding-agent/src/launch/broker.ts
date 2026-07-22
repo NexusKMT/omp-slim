@@ -491,8 +491,17 @@ class DaemonBroker {
 		await this.#launch(record);
 		let readyTimedOut = false;
 		if (spec.ready && !terminalState(record.snapshot.state)) {
-			const ready = await this.#waitUntil(record, () => record.snapshot.state === "ready", spec.ready.timeoutMs);
-			readyTimedOut = !ready && !terminalState(record.snapshot.state);
+			// Wake on the sticky readyAt marker or any terminal state, not the live
+			// state: a fast process flips starting→ready→exited within one poll
+			// interval, so sampling `state === "ready"` never observes readiness even
+			// though #markReady durably recorded readyAt. A pre-ready exit must also
+			// wake the wait rather than block for the full timeout.
+			const ready = await this.#waitUntil(
+				record,
+				() => record.snapshot.readyAt !== undefined || terminalState(record.snapshot.state),
+				spec.ready.timeoutMs,
+			);
+			readyTimedOut = !ready;
 		}
 		await record.persistQueue;
 		return { op: "start", daemon: record.snapshot, readyTimedOut };
@@ -820,6 +829,10 @@ class DaemonBroker {
 				return true;
 			}
 			if (operation.for === "exit") return terminalState(record.snapshot.state);
+			// A settled daemon that flipped ready→exited within a poll interval still
+			// satisfies for:"ready" via the sticky readyAt marker; a terminal state
+			// wakes the wait so it never blocks for the full timeout.
+			if (record.snapshot.readyAt !== undefined || terminalState(record.snapshot.state)) return true;
 			return record.snapshot.state === "ready" || (record.snapshot.state === "running" && !record.spec.ready);
 		};
 		const reached = condition() || (await this.#waitUntil(record, condition, operation.timeoutMs));
