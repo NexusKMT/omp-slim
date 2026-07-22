@@ -41,9 +41,13 @@ describe("prewalk startup degradation", () => {
 	test("leaves prewalk unarmed instead of crashing when the target has no configured auth", async () => {
 		const settings = Settings.isolated();
 		settings.set("prewalk.enabled", true);
-		// smol role points at a provider that has NO configured API key.
 		settings.setModelRole("smol", "cerebras/zai-glm-4.7");
 		const { modelRegistry } = await newRegistry("no-auth");
+		// Force the no-auth condition: hasAuth() also consults $HOME/.env via
+		// getEnvApiKey (packages/utils/src/env.ts), so a CEREBRAS_API_KEY in the
+		// runner's home .env would otherwise legitimately arm prewalk and make
+		// this test environment-dependent.
+		vi.spyOn(modelRegistry, "hasConfiguredAuth").mockReturnValue(false);
 
 		const options = await buildSessionOptions(parseArgs([]), [], SessionManager.inMemory(), modelRegistry, settings);
 
