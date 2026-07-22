@@ -166,6 +166,7 @@
 - Fixed Mnemopi consolidation re-storing cumulative session transcripts after incremental auto-retain, including after resuming a session ([#6058](https://github.com/can1357/oh-my-pi/issues/6058)).
 - Fixed turn-ending Codex rate-limit errors remaining hidden behind the fullscreen Plan Review overlay and leaving its approval promise pending ([#6086](https://github.com/can1357/oh-my-pi/issues/6086)).
 - Fixed prewalked subagents continuing to display their starting model after switching to the target model. ([#6083](https://github.com/can1357/oh-my-pi/issues/6083))
+- Fixed Esc aborting an ongoing agent turn instead of overlapping TTS playback, leaving speech uninterruptible ([#6118](https://github.com/can1357/oh-my-pi/issues/6118)).
 
 ## [17.0.5] - 2026-07-18
 
