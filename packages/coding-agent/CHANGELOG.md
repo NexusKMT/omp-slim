@@ -747,6 +747,7 @@
 - Redesigned OAuth logins to run inside a cancellable dialog (aborted via Esc) rather than an inescapable pairing prompt.
 - Reworked the subagent soft request budget to gracefully steer child agents to wrap up and yield partial findings instead of silently terminating them, and raised the default budget to 200 requests.
 - Updated task rendering to retain the agent type badge on live progress and finished result rows.
+- Added `omp-linux-musl-x64` and `omp-linux-musl-arm64` release binaries for Alpine and other musl-based Linux distributions, with automatic musl selection in the binary installer. ([#3367](https://github.com/can1357/oh-my-pi/issues/3367))
 
 ### Fixed
 
