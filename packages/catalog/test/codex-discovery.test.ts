@@ -224,7 +224,7 @@ describe("Codex model discovery", () => {
 		}
 	});
 
-	it("keeps bundled Codex models when every account fetch fails (#6265)", async () => {
+	it("keeps bundled Codex models when any account catalog fetch fails (#6265)", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-codex-union-fail-"));
 		const bundled: ModelSpec<"openai-codex-responses"> = {
 			id: "gpt-5.6-terra",
@@ -238,12 +238,31 @@ describe("Codex model discovery", () => {
 			contextWindow: 372_000,
 			maxTokens: 128_000,
 		};
-		const fetchFn: typeof fetch = Object.assign(async () => new Response("nope", { status: 500 }), {
-			preconnect() {},
-		});
+		const fetchFn: typeof fetch = Object.assign(
+			async (_input: string | URL | Request, init?: RequestInit) => {
+				const accountId = new Headers(init?.headers).get("chatgpt-account-id");
+				if (accountId === "account-1") {
+					return Response.json({
+						models: [
+							{
+								slug: "partial-account-model",
+								display_name: "Partial Account Model",
+								supported_in_api: true,
+								input_modalities: ["text"],
+							},
+						],
+					});
+				}
+				return new Response("nope", { status: 500 });
+			},
+			{ preconnect() {} },
+		);
 		try {
 			const options = openaiCodexModelManagerOptions({
-				resolveAccounts: async () => [{ accessToken: "token-1", accountId: "account-1" }],
+				resolveAccounts: async () => [
+					{ accessToken: "token-1", accountId: "account-1" },
+					{ accessToken: "token-2", accountId: "account-2" },
+				],
 				fetch: fetchFn,
 			});
 			const result = await resolveProviderModels(

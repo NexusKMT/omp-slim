@@ -61,24 +61,22 @@ export function openaiCodexModelManagerOptions(
 }
 
 /**
- * Merge per-account Codex catalogs into one authoritative list, deduped by
- * model id (first account to expose an id wins). Returns `null` when every
- * account's fetch failed, so the caller keeps bundled models instead of pruning
- * to an empty authoritative catalog.
+ * Merge complete per-account Codex catalogs into one authoritative list,
+ * deduped by model id (first account to expose an id wins). Returns `null` when
+ * any account's fetch failed, so a partial list cannot replace the previous or
+ * bundled authoritative catalog.
  */
 function unionCodexModels(
 	results: readonly (CodexModelDiscoveryResult | null)[],
 ): ModelSpec<"openai-codex-responses">[] | null {
 	const byId = new Map<string, ModelSpec<"openai-codex-responses">>();
-	let anySucceeded = false;
 	for (const result of results) {
-		if (!result) continue;
-		anySucceeded = true;
+		if (!result) return null;
 		for (const model of result.models) {
 			if (!byId.has(model.id)) byId.set(model.id, model);
 		}
 	}
-	return anySucceeded ? [...byId.values()] : null;
+	return [...byId.values()];
 }
 
 // ---------------------------------------------------------------------------
