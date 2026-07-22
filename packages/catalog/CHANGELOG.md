@@ -59,6 +59,9 @@
 ### Fixed
 
 - Collapsed Devin's six GLM-5.2 variants into two logical entries (`glm-5-2` for 200K free, `glm-5-2-1m` for 1M paid). The 200K entry routes every thinking effort to the free `glm-5-2` wire UID — never to the quota-gated `glm-5-2-max` or `glm-5-2-none` — so GLM-5.2 works even when the weekly usage quota is exhausted.
+### Fixed
+
+- Fixed LM Studio discovery reporting a model's architectural maximum (`max_context_length`) instead of the window the running instance actually serves. `getLmStudioNativeContextWindow` now prefers `loaded_context_length` when a model reports `state: "loaded"`, so context accounting and compaction schedule against the real window ([#6082](https://github.com/can1357/oh-my-pi/issues/6082)).
 
 ## [17.0.5] - 2026-07-18
 
