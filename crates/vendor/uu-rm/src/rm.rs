@@ -545,6 +545,12 @@ fn create_progress_bar(files: &[&OsStr], recursive: bool) -> Option<ProgressBar>
 fn count_files(paths: &[&OsStr], recursive: bool) -> u64 {
 	let mut total = 0;
 	for p in paths {
+		// Empty operands are rejected by `remove()` before deletion; skip them
+		// here too so the progress pre-count doesn't resolve "" to the cwd and
+		// walk the entire working directory into the total.
+		if p.is_empty() {
+			continue;
+		}
 		let path = Path::new(p);
 		if let Ok(md) = fs::symlink_metadata(pi_uutils_ctx::resolve(path)) {
 			if md.is_dir() && !is_symlink_dir(&md) {
