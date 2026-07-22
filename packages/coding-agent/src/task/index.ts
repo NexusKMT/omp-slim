@@ -290,7 +290,7 @@ function copyTaskIsolationControls(
 /**
  * Normalize a validated call into its spawn list: the `tasks[]` batch when
  * provided, otherwise the single top-level spawn. The flat form's isolation controls
- * are is only materialized when the caller sent one — `#runSpawn`
+ * are only materialized when the caller sent them — `#runSpawn`
  * distinguishes an absent key from an explicit value.
  */
 function resolveSpawnItems(params: TaskParams): TaskItem[] {
