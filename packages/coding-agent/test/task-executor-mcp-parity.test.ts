@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from "bun:test";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import type { CustomToolContext } from "../src/extensibility/custom-tools/types";
+import type { ExtensionRunner } from "../src/extensibility/extensions/runner";
+import type { RegisteredTool } from "../src/extensibility/extensions/types";
+import { wrapRegisteredTool } from "../src/extensibility/extensions/wrapper";
 import { MCPManager } from "../src/mcp/manager";
 import { DeferredMCPTool, MCPTool } from "../src/mcp/tool-bridge";
 import type { MCPServerConnection, MCPToolDefinition } from "../src/mcp/types";
+import { customToolToDefinition } from "../src/sdk";
 import { createMCPProxyTools } from "../src/task/executor";
 import { createMockConnection, createMockTransport } from "./mcp-test-utils";
 
@@ -51,6 +55,23 @@ describe("MCP tool strict declaration", () => {
 		vi.spyOn(manager, "getTools").mockReturnValue([new MCPTool(createCapturedConnection([]), STRICT_TOOL)]);
 		const [proxy] = createMCPProxyTools(manager);
 		expect(proxy?.strict).toBe(false);
+	});
+
+	it("survives the custom-tool → definition bridge into the registered session tool", () => {
+		const manager = new MCPManager(process.cwd());
+		vi.spyOn(manager, "getTools").mockReturnValue([new MCPTool(createCapturedConnection([]), STRICT_TOOL)]);
+		const [proxy] = createMCPProxyTools(manager);
+		if (!proxy) {
+			expect.unreachable("no proxy tool created");
+			return;
+		}
+		const definition = customToolToDefinition(proxy);
+		expect(definition.strict).toBe(false);
+		const adapter = wrapRegisteredTool(
+			{ definition, extensionPath: "<sdk>" } as RegisteredTool,
+			{ createContext: () => ({}) } as unknown as ExtensionRunner,
+		);
+		expect(adapter.strict).toBe(false);
 	});
 });
 
