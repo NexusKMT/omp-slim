@@ -439,6 +439,29 @@ describe("InputController keybinding setup", () => {
 		expect(focusedPasteText).toHaveBeenCalledWith("sk-test-key");
 	});
 
+	it("rejects image smart-paste while a login input is focused instead of mutating the hidden editor", async () => {
+		const focusedPasteText = vi.fn();
+		const { InputController, ctx, editor, setFocused, spies } = await createContext();
+		setFocused({ pasteText: focusedPasteText });
+		const { promise: rejected, resolve: resolveRejected } = Promise.withResolvers<string>();
+		(ctx.showStatus as unknown as Mock<(message: string) => void>).mockImplementation(message => {
+			resolveRejected(message);
+		});
+		const controller = new InputController(ctx, {
+			readImage: async () => ({ data: new Uint8Array([0x89, 0x50]), mimeType: "image/png" }),
+			readText: async () => "sk-test-key",
+		});
+
+		controller.setupKeyHandlers();
+		const result = dispatchInput(registeredInputListeners(spies.addInputListener), "\x16");
+
+		expect(result).toEqual({ consume: true });
+		expect(await rejected).toBe("Image paste is not supported in this prompt");
+		expect(focusedPasteText).not.toHaveBeenCalled();
+		expect(editor.pendingImages).toHaveLength(0);
+		expect(editor.getText()).toBe("");
+	});
+
 	it("routes c to copy a copyable /btw panel when the editor is empty", async () => {
 		const { InputController, ctx, spies } = await createContext();
 		(ctx.canCopyBtw as unknown as { mockReturnValue(value: boolean): void }).mockReturnValue(true);

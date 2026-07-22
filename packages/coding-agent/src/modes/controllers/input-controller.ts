@@ -1583,8 +1583,19 @@ export class InputController {
 
 	async handleImagePaste(): Promise<boolean> {
 		try {
+			// When a modal paste-capable prompt (login/API-key Input) owns focus,
+			// only clipboard text may land there. Image payloads must not mutate
+			// the hidden main editor — mirror the enhanced-paste `pasteImage`
+			// behavior and surface the unsupported-status instead (#6057).
+			const focusedNow = this.ctx.ui.getFocused();
+			const promptTarget =
+				focusedNow && focusedNow !== this.ctx.editor && hasPasteText(focusedNow) ? focusedNow : null;
 			const image = await this.clipboard.readImage();
 			if (image) {
+				if (promptTarget) {
+					this.ctx.showStatus("Image paste is not supported in this prompt");
+					return false;
+				}
 				return await this.#normalizeAndInsertPastedImage(
 					{
 						type: "image",
@@ -1606,7 +1617,7 @@ export class InputController {
 			// selections must not silently drop after the first attach.
 			// `readMacFileUrls` returns an empty list off Darwin, so the
 			// check is free on every other platform.
-			const fileUrls = (await this.clipboard.readMacFileUrls?.()) ?? [];
+			const fileUrls = promptTarget ? [] : ((await this.clipboard.readMacFileUrls?.()) ?? []);
 			let attachedFromFileUrls = false;
 			for (const url of fileUrls) {
 				const candidate = extractImagePathFromText(url);
@@ -1631,15 +1642,14 @@ export class InputController {
 			// text. Covers terminals that paste the Finder file path as
 			// plain text rather than as a `public.file-url` (most macOS
 			// terminals do this for image clipboards).
-			const imagePath = extractImagePathFromText(text);
+			const imagePath = promptTarget ? null : extractImagePathFromText(text);
 			if (imagePath) {
 				await this.handleImagePathPaste(imagePath);
 				return true;
 			}
 			// Route to the focused component when it accepts pastes (modal
 			// Input prompts), matching the enhanced-paste text path (#2127).
-			const focused = this.ctx.ui.getFocused();
-			const target = focused && focused !== this.ctx.editor && hasPasteText(focused) ? focused : this.ctx.editor;
+			const target = promptTarget ?? this.ctx.editor;
 			target.pasteText(text);
 			this.ctx.ui.requestRender();
 			return true;
