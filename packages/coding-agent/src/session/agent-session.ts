@@ -5133,12 +5133,14 @@ export class AgentSession {
 			if (this.#isClassifierRefusal(msg)) {
 				this.#prunedTerminalRefusal = msg;
 				this.#removeAssistantMessageFromActiveContext(msg);
-			} else {
+			} else if (!AIError.isContextOverflow(msg, this.model?.contextWindow ?? 0)) {
 				// No retry, fallback, or compaction continuation fired: this errored
 				// turn ends the run. #persistSessionMessageIfMissing dropped it as an
 				// empty error turn, so record it here — otherwise the JSONL stops at
 				// the last tool result and the provider's errorMessage is lost (#6249).
-				// Idempotent and a no-op for non-empty turns.
+				// Idempotent and a no-op for non-empty turns. Content-less overflow
+				// rejections stay live-UI only per the auto-compaction progress guard:
+				// persisting one would replay an empty assistant turn on reload.
 				await this.#persistTerminalEmptyErrorTurn(msg);
 			}
 			this.#resolveRetry();
