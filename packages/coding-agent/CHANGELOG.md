@@ -51,6 +51,10 @@
 ### Fixed
 
 - Fixed `task` rejecting `apply` controls unless `isolated: true`, preventing capture-only intent from silently running in the parent checkout, and kept isolation/capture-only badges visible throughout progress and result rendering.
+### Changed
+
+- Edit-tool previews, diff components, and intra-line word highlighting now compute line and word diffs natively, cutting synchronous diff time 2-10x on large inputs (a 50k-line file at 20% edit density drops from ~26s to ~2.4s; see `packages/natives/bench/diff-results.md`) ([#6279](https://github.com/can1357/oh-my-pi/pull/6279) by [@wolfiesch](https://github.com/wolfiesch)).
+
 ## [17.0.7] - 2026-07-21
 
 ### Fixed
