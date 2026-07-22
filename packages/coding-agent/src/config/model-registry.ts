@@ -23,6 +23,7 @@ import { getBundledModels, getBundledProviders } from "@oh-my-pi/pi-catalog/mode
 import {
 	googleAntigravityModelManagerOptions,
 	googleGeminiCliModelManagerOptions,
+	type OpenAICodexAccount,
 	openaiCodexModelManagerOptions,
 	PROVIDER_DESCRIPTORS,
 } from "@oh-my-pi/pi-catalog/provider-models";
@@ -427,20 +428,20 @@ function getOAuthCredentialsForProvider(authStorage: AuthStorage, provider: stri
 	return entries.filter((entry): entry is OAuthCredential => entry.type === "oauth");
 }
 
-function resolveOAuthAccountIdForAccessToken(
-	authStorage: AuthStorage,
-	provider: string,
-	accessToken: string,
-): string | undefined {
-	const oauthCredentials = getOAuthCredentialsForProvider(authStorage, provider);
-	const matchingCredential = oauthCredentials.find(credential => credential.access === accessToken);
-	if (matchingCredential) {
-		return matchingCredential.accountId;
+/**
+ * Resolve every configured Codex OAuth account for catalog discovery, refreshing
+ * each credential exactly once. Codex `/models` is account-scoped, so discovery
+ * must fetch per account and union the results; resolving a single access token
+ * (as before) hid models available only through a sibling account (#6265).
+ */
+async function resolveCodexDiscoveryAccounts(authStorage: AuthStorage): Promise<OpenAICodexAccount[]> {
+	const accesses = await authStorage.getOAuthAccesses("openai-codex");
+	const accounts: OpenAICodexAccount[] = [];
+	for (const access of accesses) {
+		if (!access.ok) continue;
+		accounts.push({ accessToken: access.accessToken, accountId: access.accountId });
 	}
-	if (oauthCredentials.length === 1) {
-		return oauthCredentials[0].accountId;
-	}
-	return undefined;
+	return accounts;
 }
 
 function mergeCompat<TBase extends object, TOverride extends object>(
@@ -1723,14 +1724,11 @@ export class ModelRegistry {
 				providerId: "openai-codex",
 				authoritative: true,
 				resolveKey: value => value,
-				createOptions: accessToken => {
-					const accountId = resolveOAuthAccountIdForAccessToken(this.authStorage, "openai-codex", accessToken);
-					return openaiCodexModelManagerOptions({
-						accessToken,
-						accountId,
+				createOptions: () =>
+					openaiCodexModelManagerOptions({
+						resolveAccounts: () => resolveCodexDiscoveryAccounts(this.authStorage),
 						fetch: this.#fetch,
-					});
-				},
+					}),
 			},
 		];
 		const disabledProviders = getDisabledProviderIdsFromSettings();

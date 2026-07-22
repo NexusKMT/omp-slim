@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the model picker hiding Codex models available only through a second configured ChatGPT/Codex OAuth account. Catalog discovery now resolves every stored `openai-codex` OAuth account and unions their `/models` catalogs instead of surfacing only the discovery preflight account's list ([#6265](https://github.com/can1357/oh-my-pi/issues/6265)).
+
 ## [17.0.7] - 2026-07-21
 
 ### Fixed
