@@ -1519,9 +1519,16 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 		scheduleProgress(flushProgress);
 	};
 
-	const attach = (session: AgentSession): (() => void) =>
-		session.subscribe(event => {
+	const attach = (session: AgentSession): (() => void) => {
+		let activeModel = session.model ? formatModelStringWithRouting(session.model) : undefined;
+		return session.subscribe(event => {
 			emitSubagentEvent(event);
+			const nextModel = session.model ? formatModelStringWithRouting(session.model) : undefined;
+			if (nextModel && nextModel !== activeModel) {
+				activeModel = nextModel;
+				progress.resolvedModel = nextModel;
+				scheduleProgress(true);
+			}
 			if (event.type === "auto_retry_start") {
 				progress.retryState = {
 					attempt: event.attempt,
@@ -1572,6 +1579,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 				return;
 			}
 		});
+	};
 
 	const captureSalvage = (session: AgentSession): void => {
 		// Best-effort salvage: capture the last assistant text so
