@@ -33,6 +33,15 @@ describe("git helpers with git binary absent (#6169)", () => {
 		await expect(git.diff.has("/")).rejects.toThrow("git is not installed.");
 	});
 
+	it("does not blame the git binary when the cwd is what is missing", async () => {
+		vi.spyOn(Bun, "spawn").mockImplementation(throwSpawnEnoent);
+		// A deleted cwd also makes spawn throw ENOENT; the error must name the
+		// directory, not falsely claim git is uninstalled.
+		await expect(git.diff.has("/nonexistent-omp-eval-dir")).rejects.toThrow(
+			"working directory does not exist: /nonexistent-omp-eval-dir",
+		);
+	});
+
 	it("repo.root degrades to null instead of throwing ENOENT", async () => {
 		vi.spyOn(Bun, "spawn").mockImplementation(throwSpawnEnoent);
 		expect(await git.repo.root("/")).toBeNull();

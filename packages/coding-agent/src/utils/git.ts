@@ -442,7 +442,14 @@ async function git(cwd: string, args: readonly string[], options: CommandOptions
 			windowsHide: true,
 		});
 	} catch (err) {
-		if (isEnoent(err)) return { exitCode: GIT_SPAWN_ENOENT_EXIT_CODE, stdout: "", stderr: "git is not installed." };
+		if (isEnoent(err)) {
+			// A deleted/nonexistent cwd also surfaces as a spawn ENOENT; only blame
+			// the binary when the working directory actually exists.
+			const stderr = fs.existsSync(cwd)
+				? "git is not installed."
+				: `working directory does not exist: ${cwd}`;
+			return { exitCode: GIT_SPAWN_ENOENT_EXIT_CODE, stdout: "", stderr };
+		}
 		throw err;
 	}
 
