@@ -14822,8 +14822,6 @@ export class AgentSession {
 			message.content.some(block => block.type === "thinking" && block.thinking.trim().length > 0)
 		);
 	}
-	
-	
 
 	#isClassifierRefusal(message: AssistantMessage): boolean {
 		if (message.stopReason !== "error") return false;
@@ -15423,7 +15421,9 @@ export class AgentSession {
 		// (every rotation sets switchedCredential and skips it), so without
 		// this last resort a provider-wide usage cap never fails over to the
 		// configured chain.
-		const maxRetries = this.#isOpenRouterThinkingStreamClose(message) ? Math.min(retrySettings.maxRetries, 1) : retrySettings.maxRetries;
+		const maxRetries = this.#isOpenRouterThinkingStreamClose(message)
+			? Math.min(retrySettings.maxRetries, 1)
+			: retrySettings.maxRetries;
 		const retryBudgetExhausted = this.#retryAttempt > maxRetries;
 
 		const errorMessage = message.errorMessage || "Unknown error";
