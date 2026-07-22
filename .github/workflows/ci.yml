@@ -262,7 +262,7 @@ jobs:
               libc: ${{ matrix.libc }}
               variant: ${{ matrix.variant }}
               target: ${{ matrix.target }}
-              glibc: ${{ matrix.platform == 'linux' && env.GLIBC_FLOOR || '' }}
+              glibc: ${{ matrix.platform == 'linux' && matrix.libc != 'musl' && env.GLIBC_FLOOR || '' }}
               save_cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
    native_cross_platform_macos:
