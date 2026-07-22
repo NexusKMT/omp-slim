@@ -184,6 +184,10 @@
 
 - Fixed the TUI `/usage` matrix mis-aligning multi-account columns across quota windows: each window row was sorted independently by used fraction, so the positional `account N` labels denoted different credentials per row and an exhausted limit (e.g. a Kimi Code account's 5h window) could render under a sibling that still had quota. Account columns are now ordered once per provider (worst-first) and held stable across every window row ([#6067](https://github.com/can1357/oh-my-pi/issues/6067)).
 
+### Fixed
+
+- Fixed near-miss `xd://` write targets silently creating filesystem paths instead of surfacing a corrective URI error ([#6123](https://github.com/can1357/oh-my-pi/issues/6123)).
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
