@@ -5,6 +5,7 @@
  *
  * Run from the repo root: `bun packages/mnemopi/bench/native-vectors.bench.ts`
  */
+import * as os from "node:os";
 import {
 	cosineSimilarityPairs,
 } from "@oh-my-pi/pi-natives";
@@ -172,12 +173,13 @@ for (const count of COUNTS.filter(n => n <= 1000)) {
 	pushRow("mmrRerankIndices (via mmrRerank)", count, ts, native);
 }
 
-const sha = Bun.spawnSync(["git", "rev-parse", "HEAD"]).stdout.toString().trim();
+const sha = Bun.env.BENCH_SHA ?? Bun.spawnSync(["git", "rev-parse", "HEAD"]).stdout.toString().trim();
 const report = {
 	sha,
 	date: new Date().toISOString(),
 	scenario: `dim=${DIM}, stride=${STRIDE}B, warmup=${WARMUP}, iterations=${ITERATIONS} (adaptive for O(n²) rows, see per-row fields), crossing-inclusive`,
 	runtime: `bun ${Bun.version}`,
+	host: `${os.cpus()[0]?.model ?? "unknown"}, ${os.platform()}-${os.arch()}`,
 	rows: rows.map(r => ({
 		kernel: r.kernel,
 		count: r.count,
