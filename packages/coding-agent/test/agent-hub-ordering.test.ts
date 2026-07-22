@@ -165,4 +165,43 @@ describe("Agent hub row ordering", () => {
 
 		hub.dispose();
 	});
+
+	it("flags a fallback badge for observer-only rows with no live session", () => {
+		geometry = stubStdoutGeometry(120);
+		const agents = new AgentRegistry();
+		// A collab guest / observer-only row carries no live AgentSession, so the
+		// badge must come from the executor-reported progress instead.
+		agents.register({ id: "GuestAgent", displayName: "Guest Agent", kind: "sub", session: null });
+
+		const observers = new SessionObserverRegistry();
+		vi.spyOn(observers, "getSessions").mockReturnValue([
+			{
+				id: "GuestAgent",
+				kind: "subagent",
+				label: "Subagent",
+				status: "active",
+				lastUpdate: Date.now(),
+				progress: {
+					resolvedModel: "openai/gpt-4o",
+					resolvedModelIsFallback: true,
+				} as never,
+			},
+		]);
+
+		const hub = new AgentHubOverlayComponent({
+			observers,
+			hubKeys: [],
+			onDone: () => {},
+			requestRender: () => {},
+			registry: agents,
+			irc: new IrcBus(agents),
+			focusAgent: async () => {},
+		});
+
+		try {
+			expect(Bun.stripANSI(hub.render(120).join("\n"))).toContain("fallback → openai/gpt-4o");
+		} finally {
+			hub.dispose();
+		}
+	});
 });

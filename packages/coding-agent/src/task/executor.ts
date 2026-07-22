@@ -1563,11 +1563,13 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 			}
 			if (event.type === "retry_fallback_applied") {
 				progress.resolvedModel = event.to;
+				progress.resolvedModelIsFallback = true;
 				scheduleProgress(true);
 				return;
 			}
 			if (event.type === "retry_fallback_succeeded") {
 				progress.resolvedModel = event.model;
+				progress.resolvedModelIsFallback = true;
 				scheduleProgress(true);
 				return;
 			}
@@ -1973,6 +1975,7 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 		contextWindow: progress.contextWindow,
 		modelOverride,
 		resolvedModel: progress.resolvedModel,
+		resolvedModelIsFallback: progress.resolvedModelIsFallback,
 		error: exitCode !== 0 && stderr ? stderr : undefined,
 		aborted: wasAborted,
 		abortReason: finalAbortReason,

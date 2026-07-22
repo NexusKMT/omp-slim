@@ -105,7 +105,11 @@ function modelBadge(ref: AgentRef, observed: ObservableSession | undefined): str
 		return formatModelBadge(model.id, level);
 	}
 	const resolved = observed?.progress?.resolvedModel;
-	return resolved ? formatResolvedModelBadge(resolved) : undefined;
+	if (!resolved) return undefined;
+	if (observed?.progress?.resolvedModelIsFallback) {
+		return `${theme.fg("warning", "fallback →")} ${formatResolvedModelBadge(resolved, true)}`;
+	}
+	return formatResolvedModelBadge(resolved);
 }
 
 /** Result of one host-backed transcript read for the Agent Hub viewer. */
