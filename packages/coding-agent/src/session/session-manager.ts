@@ -808,6 +808,10 @@ export class SessionManager {
 			parentSession: options?.parentSession,
 			providerPromptCacheKey: options?.providerPromptCacheKey,
 		};
+		this.#additionalDirectories = options?.additionalDirectories ?? [];
+		if (this.#additionalDirectories.length > 0) {
+			this.#header.additionalDirectories = [...this.#additionalDirectories];
+		}
 		this.#titleUpdatedAt = timestamp;
 
 		this.#entries = [];

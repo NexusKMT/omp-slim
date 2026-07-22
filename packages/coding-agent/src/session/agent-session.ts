@@ -9983,9 +9983,10 @@ export class AgentSession {
 			} else {
 				await this.sessionManager.flush();
 			}
-			await this.sessionManager.newSession(options);
-			const configuredDirs = this.settings.get("workspace.additionalDirectories");
-			await this.sessionManager.setAdditionalDirectories(configuredDirs);
+			await this.sessionManager.newSession({
+				...options,
+				additionalDirectories: this.settings.get("workspace.additionalDirectories"),
+			});
 			this.#markBashSessionTransition(bashTransition);
 			sessionTransitioned = true;
 		} finally {
