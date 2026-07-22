@@ -17,7 +17,7 @@
  * like a small validator at runtime.
  */
 
-import { areJsonValuesEqual, validateJsonSchemaValue } from "@oh-my-pi/pi-ai/utils/schema";
+import { areJsonValuesEqual, upgradeJsonSchemaTo202012, validateJsonSchemaValue } from "@oh-my-pi/pi-ai/utils/schema";
 
 // ---------------------------------------------------------------------------
 // Type aliases — exported so `import type { Static, TSchema } from "..."`
@@ -919,8 +919,12 @@ export const Type = {
 	Any: tAny,
 	Unknown: tUnknown,
 	Unsafe<T = unknown>(jsonSchema: Record<string, unknown> = {}): TUnsafe<T> {
+		// Validate against the same draft-2020-12 upgrade the wire/tool-call
+		// path applies, so legacy draft-07 documents (tuple `items`, etc.)
+		// behave identically in `safeParse` and `validateToolArguments`.
+		const upgradedSchema = upgradeJsonSchemaTo202012(jsonSchema);
 		const validator = (data: unknown): unknown => {
-			const result = validateJsonSchemaValue(jsonSchema, data);
+			const result = validateJsonSchemaValue(upgradedSchema, data);
 			if (result.success) return data;
 			const messages = result.issues.map(issue =>
 				issue.path.length > 0 ? `${issue.path.join(".")}: ${issue.message}` : issue.message,

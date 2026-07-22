@@ -62,6 +62,18 @@ describe("pi.typebox compatibility shim", () => {
 		).toThrow('Validation failed for tool "unsafe-schema"');
 	});
 
+	it("validates Type.Unsafe draft-07 documents like the wire path", () => {
+		const schema = Type.Unsafe({
+			type: "object",
+			properties: { xs: { type: "array", items: [{ type: "string" }] } },
+			required: ["xs"],
+		});
+
+		expect(schema.safeParse({ xs: ["a"] }).success).toBe(true);
+		expect(schema.safeParse({ xs: [1] }).success).toBe(false);
+		expect(schema.safeParse({}).success).toBe(false);
+	});
+
 	it("preserves numeric enum values from TypeScript enum objects", () => {
 		const schema = Type.Enum({ 0: "Fast", 1: "Slow", Fast: 0, Slow: 1 });
 
