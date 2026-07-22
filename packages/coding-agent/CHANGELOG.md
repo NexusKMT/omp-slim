@@ -44,6 +44,13 @@
 - Added `/tree` re-answer for a past `ask` toolResult: selecting it now re-opens the picker with the original questions and branches the new answer as a sibling toolResult, leaving the original answer's branch reachable ([#5895](https://github.com/can1357/oh-my-pi/pull/5895) by [@Mathews-Tom](https://github.com/Mathews-Tom)).
 
 ## [17.0.3] - 2026-07-17
+### Added
+
+- Added an optional `apply` control to the `task` tool: with `isolated: true, apply: false`, a subagent runs in its dedicated worktree and its patch/branch artifacts are captured without applying changes to the parent checkout. `apply` defaults to `true`. Available both as a flat top-level control and per `tasks[]` item (per-item value wins).
+
+### Fixed
+
+- Fixed `task` rejecting `apply` controls unless `isolated: true`, preventing capture-only intent from silently running in the parent checkout, and kept isolation/capture-only badges visible throughout progress and result rendering.
 ## [17.0.7] - 2026-07-21
 
 ### Fixed
