@@ -172,6 +172,10 @@
 - Fixed prewalked subagents continuing to display their starting model after switching to the target model. ([#6083](https://github.com/can1357/oh-my-pi/issues/6083))
 - Fixed Esc aborting an ongoing agent turn instead of overlapping TTS playback, leaving speech uninterruptible ([#6118](https://github.com/can1357/oh-my-pi/issues/6118)).
 
+### Fixed
+
+- Fixed project system prompts shortening working directories beneath the user's home to `~`, which could cause models to invent an incorrect absolute path for tool calls ([#6100](https://github.com/can1357/oh-my-pi/issues/6100)).
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
