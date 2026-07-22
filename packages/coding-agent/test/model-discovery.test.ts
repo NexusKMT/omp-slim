@@ -327,6 +327,36 @@ describe("ModelRegistry runtime discovery", () => {
 		expect(registry.find("openai-codex", "gpt-5.4-nano")).toBeUndefined();
 	});
 
+	test("Codex discovery falls back to a resolved non-OAuth token when no OAuth accounts exist", async () => {
+		authStorage.setRuntimeApiKey("openai-codex", "runtime-openai-codex");
+		let modelListCalls = 0;
+		const fetchMock: FetchImpl = async (input, init) => {
+			const url = String(input);
+			if (url.startsWith("https://chatgpt.com/backend-api") && url.includes("/models")) {
+				modelListCalls++;
+				expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer runtime-openai-codex");
+				return Response.json({
+					models: [
+						{
+							slug: "runtime-codex-model",
+							display_name: "Runtime Codex Model",
+							context_window: 128_000,
+							supported_in_api: true,
+							input_modalities: ["text"],
+						},
+					],
+				});
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		};
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+
+		await registry.refreshProvider("openai-codex", "online");
+
+		expect(modelListCalls).toBe(1);
+		expect(registry.find("openai-codex", "runtime-codex-model")).toBeDefined();
+	});
+
 	test("configured discovery suppresses built-in special OAuth discovery", async () => {
 		await authStorage.set("google-gemini-cli", {
 			type: "oauth",

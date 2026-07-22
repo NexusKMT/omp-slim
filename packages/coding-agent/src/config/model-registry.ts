@@ -434,12 +434,21 @@ function getOAuthCredentialsForProvider(authStorage: AuthStorage, provider: stri
  * must fetch per account and union the results; resolving a single access token
  * (as before) hid models available only through a sibling account (#6265).
  */
-async function resolveCodexDiscoveryAccounts(authStorage: AuthStorage): Promise<OpenAICodexAccount[]> {
+async function resolveCodexDiscoveryAccounts(
+	authStorage: AuthStorage,
+	resolvedAccessToken: string,
+): Promise<OpenAICodexAccount[]> {
 	const accesses = await authStorage.getOAuthAccesses("openai-codex");
 	const accounts: OpenAICodexAccount[] = [];
 	for (const access of accesses) {
 		if (!access.ok) continue;
 		accounts.push({ accessToken: access.accessToken, accountId: access.accountId });
+	}
+	if (!accounts.some(account => account.accessToken === resolvedAccessToken)) {
+		const matchingCredential = getOAuthCredentialsForProvider(authStorage, "openai-codex").find(
+			credential => credential.access === resolvedAccessToken,
+		);
+		accounts.push({ accessToken: resolvedAccessToken, accountId: matchingCredential?.accountId });
 	}
 	return accounts;
 }
@@ -1724,9 +1733,9 @@ export class ModelRegistry {
 				providerId: "openai-codex",
 				authoritative: true,
 				resolveKey: value => value,
-				createOptions: () =>
+				createOptions: accessToken =>
 					openaiCodexModelManagerOptions({
-						resolveAccounts: () => resolveCodexDiscoveryAccounts(this.authStorage),
+						resolveAccounts: () => resolveCodexDiscoveryAccounts(this.authStorage, accessToken),
 						fetch: this.#fetch,
 					}),
 			},
