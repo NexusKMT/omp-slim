@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Snapshot recovery line remapping now uses the native line diff.
+
 ## [17.0.4] - 2026-07-18
 
 ### Fixed

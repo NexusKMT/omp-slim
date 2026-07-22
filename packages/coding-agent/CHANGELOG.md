@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Edit-tool previews, diff components, and intra-line word highlighting now compute line and word diffs natively, cutting synchronous diff time 2-10x on large inputs (a 50k-line file at 20% edit density drops from ~21s to ~2.4s).
+
 ## [17.0.7] - 2026-07-21
 
 ### Fixed

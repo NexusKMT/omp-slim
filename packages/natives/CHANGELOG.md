@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added jsdiff-compatible native diff exports: `diffLines`, `diffWords`, and `structuredPatchHunks`.
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
