@@ -1598,12 +1598,25 @@ export function filterAvailableModelsByEnabledPatterns(
 
 	return includeSyntheticAllowedModels(available, allowedModels);
 }
-function findExactCliModel(selector: string, models: Model<Api>[]): Model<Api> | undefined {
-	const referenced = findExactModelReferenceMatch(selector, models);
+function findExactCliModel(
+	selector: string,
+	allModels: Model<Api>[],
+	availableModels: Model<Api>[],
+): Model<Api> | undefined {
+	// Explicit provider/id references stay authoritative against the full catalog.
+	const referenced = findExactModelReferenceMatch(selector, allModels);
 	if (referenced) return referenced;
 
+	// Flat-id (or full-selector-string) matches prefer authenticated providers,
+	// then fall back to catalog order. This covers aggregator-style flat ids
+	// that merely look provider-qualified (e.g. "openai/gpt-oss-120b" hosted on
+	// OpenRouter), where the provider/id decomposition above found nothing.
 	const lower = selector.toLowerCase();
-	return models.find(model => model.id.toLowerCase() === lower || formatModelString(model).toLowerCase() === lower);
+	const isFlatMatch = (model: Model<Api>) =>
+		model.id.toLowerCase() === lower || formatModelString(model).toLowerCase() === lower;
+	const preferred = availableModels.find(isFlatMatch);
+	if (preferred) return preferred;
+	return availableModels === allModels ? undefined : allModels.find(isFlatMatch);
 }
 
 export interface ResolveCliModelResult {
@@ -1668,15 +1681,7 @@ export function resolveCliModel(options: {
 
 	const trimmedModel = cliModel.trim();
 	if (!provider) {
-		const slashIndex = trimmedModel.indexOf("/");
-		const hasExplicitProvider =
-			slashIndex !== -1 && providerMap.has(trimmedModel.substring(0, slashIndex).toLowerCase());
-		let exact = hasExplicitProvider
-			? findExactCliModel(trimmedModel, allModels)
-			: findExactCliModel(trimmedModel, availableModels);
-		if (!exact && !hasExplicitProvider) {
-			exact = findExactCliModel(trimmedModel, allModels);
-		}
+		const exact = findExactCliModel(trimmedModel, allModels, availableModels);
 		if (exact) {
 			return {
 				model: exact,
@@ -1692,12 +1697,7 @@ export function resolveCliModel(options: {
 			MAX_THINKING_SUFFIX_OPTIONS,
 		);
 		if (exactThinkingLevel) {
-			let exactSuffixed = hasExplicitProvider
-				? findExactCliModel(exactBase, allModels)
-				: findExactCliModel(exactBase, availableModels);
-			if (!exactSuffixed && !hasExplicitProvider) {
-				exactSuffixed = findExactCliModel(exactBase, allModels);
-			}
+			const exactSuffixed = findExactCliModel(exactBase, allModels, availableModels);
 			if (exactSuffixed) {
 				return {
 					model: exactSuffixed,

@@ -1021,6 +1021,37 @@ describe("resolveCliModel", () => {
 		expect(result.model?.id).toBe("gpt-5.5");
 	});
 
+	test("prefers an authenticated provider for flat slashful ids whose prefix is a provider slug", () => {
+		const mirror = (provider: string, baseUrl: string): Model<"anthropic-messages"> =>
+			buildModel({
+				id: "openai/gpt-oss-120b",
+				name: "GPT-OSS 120B",
+				api: "anthropic-messages",
+				provider,
+				baseUrl,
+				reasoning: false,
+				input: ["text"],
+				cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1 },
+				contextWindow: 128000,
+				maxTokens: 4096,
+			});
+		const catalogFirst = mirror("fireworks", "https://api.fireworks.ai");
+		const authenticated = mirror("openrouter", "https://openrouter.ai");
+		// "openai" is a real provider slug in the catalog, but it does not carry
+		// this model — the selector is a flat aggregator id, not provider/id.
+		const catalog = [...allModels, catalogFirst, authenticated];
+
+		const result = resolveCliModel({
+			cliModel: "openai/gpt-oss-120b",
+			modelRegistry: { getAll: () => catalog },
+			availableModels: [authenticated],
+		});
+
+		expect(result.error).toBeUndefined();
+		expect(result.model?.provider).toBe("openrouter");
+		expect(result.model?.id).toBe("openai/gpt-oss-120b");
+	});
+
 	test("resolves bare configured role names from --model", () => {
 		const registry = { getAll: () => allModels };
 		const settings = Settings.isolated({
