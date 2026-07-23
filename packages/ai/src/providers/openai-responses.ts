@@ -204,6 +204,7 @@ interface OpenAIResponsesChainState {
 	 * `previous_response_id`.
 	 */
 	lastParams?: OpenAIResponsesSamplingParams;
+	lastPromptCacheBreakpointPolicy?: "latest-stable-message" | "none";
 	lastResponseId?: string;
 	/** Output items of the last response, in replay-sanitized form (matches next-turn input). */
 	lastResponseItems?: ResponseInput;
@@ -277,6 +278,7 @@ function resetOpenAIResponsesChainState(state: OpenAIResponsesChainState): void 
 	state.lastParams = undefined;
 	state.lastResponseId = undefined;
 	state.lastResponseItems = undefined;
+	state.lastPromptCacheBreakpointPolicy = undefined;
 }
 
 interface OpenAIResponsesChainedParams {
@@ -437,8 +439,15 @@ const streamOpenAIResponsesOnce = (
 			const premiumRequestsTotal = copilotPremiumRequests;
 			const providerSessionState = getOpenAIResponsesProviderSessionState(model, options?.providerSessionState);
 			const strictToolsScope = getOpenAIStrictToolsScope(model, baseUrl);
+			const promptCacheBreakpointPolicy =
+				resolveCacheRetention(options?.cacheRetention) !== "none" && options?.promptCache?.mode === "explicit"
+					? (options.promptCache.breakpoint ?? "latest-stable-message")
+					: undefined;
 			if (isOpenAIResponsesStatefulEnabled(options, baseUrl) && routingSessionId && providerSessionState) {
 				chainState = getOpenAIResponsesChainState(providerSessionState, model, baseUrl, routingSessionId);
+				if (chainState.canAppend && chainState.lastPromptCacheBreakpointPolicy !== promptCacheBreakpointPolicy) {
+					resetOpenAIResponsesChainState(chainState);
+				}
 			}
 			const builtParams = buildParams(
 				model,
@@ -812,6 +821,7 @@ const streamOpenAIResponsesOnce = (
 				if (providerSessionState) providerSessionState.nativeHistoryReplayWarmed = true;
 				if (chainState) {
 					chainState.lastParams = structuredCloneJSON(activeParams);
+					chainState.lastPromptCacheBreakpointPolicy = promptCacheBreakpointPolicy;
 					if (output.responseId) {
 						chainState.lastResponseId = output.responseId;
 						chainState.lastResponseItems = replayableResponseItems;
@@ -830,6 +840,7 @@ const streamOpenAIResponsesOnce = (
 				// without re-enabling `previous_response_id` chaining.
 				chainState.canAppend = false;
 				chainState.lastParams = structuredCloneJSON(activeParams);
+				chainState.lastPromptCacheBreakpointPolicy = promptCacheBreakpointPolicy;
 				chainState.lastResponseId = undefined;
 				chainState.lastResponseItems = undefined;
 			}

@@ -180,6 +180,46 @@ describe("openai-responses stateful chaining", () => {
 		]);
 	});
 
+	it("re-enables an explicit cache breakpoint after a markerless chained turn", async () => {
+		const sentRequests: Array<Record<string, unknown>> = [];
+		const fetchMock = createCapturingFetch(sentRequests);
+		const providerSessionState = new Map<string, ProviderSessionState>();
+		const baseOptions = {
+			apiKey: "test-key",
+			sessionId: "stateful-reenabled-cache-breakpoint-session",
+			providerSessionState,
+			statefulResponses: true,
+			fetch: fetchMock,
+		};
+		const firstUser = { role: "user" as const, content: "First question", timestamp: 1000 };
+		const firstResponse = await streamOpenAIResponses(
+			explicitPromptCacheModel,
+			{ messages: [firstUser] },
+			{ ...baseOptions, promptCache: { mode: "explicit", breakpoint: "none" } },
+		).result();
+		const secondUser = { role: "user" as const, content: "Second question", timestamp: 1001 };
+		const secondResponse = await streamOpenAIResponses(
+			explicitPromptCacheModel,
+			{ messages: [firstUser, firstResponse, secondUser] },
+			{ ...baseOptions, promptCache: { mode: "explicit" } },
+		).result();
+		const thirdUser = { role: "user" as const, content: "Third question", timestamp: 1002 };
+		await streamOpenAIResponses(
+			explicitPromptCacheModel,
+			{ messages: [firstUser, firstResponse, secondUser, secondResponse, thirdUser] },
+			{ ...baseOptions, promptCache: { mode: "explicit" } },
+		).result();
+
+		expect(sentRequests).toHaveLength(3);
+		expect(JSON.stringify(sentRequests[0]?.input)).not.toContain("prompt_cache_breakpoint");
+		expect(sentRequests[1]?.previous_response_id).toBeUndefined();
+		expect(JSON.stringify(sentRequests[1]?.input)).toContain("prompt_cache_breakpoint");
+		expect(sentRequests[2]?.previous_response_id).toBe("resp_2");
+		expect(sentRequests[2]?.input).toEqual([
+			{ role: "user", content: [{ type: "input_text", text: "Third question" }] },
+		]);
+	});
+
 	it("preserves an established no-system cache breakpoint across chained turns", async () => {
 		const sentRequests: Array<Record<string, unknown>> = [];
 		const fetchMock = createCapturingFetch(sentRequests);
