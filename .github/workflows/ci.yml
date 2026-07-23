@@ -698,7 +698,10 @@ jobs:
            if: matrix.libc == 'musl'
            run: |
               binary="$(realpath "${{ matrix.binary_path }}")"
-              docker run --rm -v "$binary:/usr/local/bin/omp:ro" alpine:3.22 sh -c '
+              # Bun's musl-target binaries link libstdc++/libgcc dynamically;
+              # Alpine users install them alongside the binary (same as bun itself).
+              docker run --rm -v "$binary:/usr/local/bin/omp:ro" alpine:3.22 sh -ec '
+                apk add --no-cache libstdc++ libgcc >/dev/null
                 runtime_dir="$(mktemp -d)"
                 HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" omp --version
                 HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" omp --smoke-test
