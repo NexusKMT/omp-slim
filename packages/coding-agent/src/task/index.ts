@@ -229,6 +229,19 @@ function validateShapeParams(batchEnabled: boolean, params: TaskParams): string 
  * policy later, in `spawnParamsFor`. Returns a problem description, or
  * undefined when valid.
  */
+function hasInvalidModelSelector(model: unknown): boolean {
+	if (model === undefined) return false;
+	const selectors = typeof model === "string" ? [model] : Array.isArray(model) ? model : undefined;
+	const materializedSelectors = selectors ? Array.from(selectors) : [];
+	return (
+		!selectors ||
+		materializedSelectors.length === 0 ||
+		materializedSelectors.some(
+			selector => typeof selector !== "string" || !selector.split(",").some(pattern => pattern.trim()),
+		)
+	);
+}
+
 function validateSpawnParams(params: TaskParams, batchEnabled: boolean): string | undefined {
 	const hasTask = typeof params.task === "string" && params.task.trim() !== "";
 	const tasks = params.tasks;
@@ -243,6 +256,9 @@ function validateSpawnParams(params: TaskParams, batchEnabled: boolean): string 
 			const item = tasks[i];
 			if (!item || typeof item.task !== "string" || item.task.trim() === "") {
 				return `Task ${i + 1}${item?.name ? ` (\`${item.name}\`)` : ""} is missing \`task\`. Every task needs complete, self-contained instructions.`;
+			}
+			if (hasInvalidModelSelector(item.model)) {
+				return `Task ${i + 1}${item.name ? ` (\`${item.name}\`)` : ""} has an invalid \`model\`. Provide a non-empty selector or a non-empty array of non-empty selectors.`;
 			}
 		}
 		const seen = new Map<string, string>();
@@ -266,6 +282,9 @@ function validateSpawnParams(params: TaskParams, batchEnabled: boolean): string 
 			? "Missing `tasks`. Provide a `tasks` array (one subagent per item) with a shared `context`."
 			: "Missing `task`. Provide complete, self-contained instructions for the agent.";
 	}
+	if (hasInvalidModelSelector(params.model)) {
+		return "Invalid `model`. Provide a non-empty selector or a non-empty array of non-empty selectors.";
+	}
 	return undefined;
 }
 
@@ -279,7 +298,7 @@ function resolveSpawnItems(params: TaskParams): TaskItem[] {
 	if (Array.isArray(params.tasks) && params.tasks.length > 0) {
 		return params.tasks;
 	}
-	const item: TaskItem = { name: params.name, agent: params.agent, task: params.task };
+	const item: TaskItem = { name: params.name, agent: params.agent, task: params.task, model: params.model };
 	if ("outputSchema" in params) item.outputSchema = params.outputSchema;
 	if ("schemaMode" in params) item.schemaMode = params.schemaMode;
 	if ("isolated" in params) item.isolated = params.isolated;
@@ -299,6 +318,7 @@ function spawnParamsFor(params: TaskParams, item: TaskItem, defaultAgent: string
 	const spawn: TaskParams = { agent: item.agent?.trim() || defaultAgent };
 	if (item.name !== undefined) spawn.name = item.name;
 	if (item.task !== undefined) spawn.task = item.task;
+	if (item.model !== undefined) spawn.model = item.model;
 	if (params.context !== undefined) spawn.context = params.context;
 	if ("outputSchema" in item) spawn.outputSchema = item.outputSchema;
 	if ("schemaMode" in item) spawn.schemaMode = item.schemaMode;
@@ -469,6 +489,14 @@ function discoverAgentsForCreate(cwd: string): Promise<DiscoveryResult> {
 	return pending;
 }
 
+function formatModelForApproval(model: unknown): string | undefined {
+	const selectors = typeof model === "string" ? [model] : Array.isArray(model) ? model : [];
+	const normalized = selectors.filter(
+		(selector): selector is string => typeof selector === "string" && !!selector.trim(),
+	);
+	return normalized.length > 0 ? truncateForPrompt(normalized.join(" → ")) : undefined;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Tool Class
 // ═══════════════════════════════════════════════════════════════════════════
@@ -492,6 +520,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		if (typeof params.name === "string" && params.name.trim()) {
 			lines.push(`Name: ${truncateForPrompt(params.name)}`);
 		}
+		const model = formatModelForApproval(params.model);
+		if (model) lines.push(`Model: ${model}`);
 		if (typeof params.task === "string") {
 			lines.push(`Task:\n${truncateForPrompt(params.task)}`);
 		}
@@ -507,6 +537,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			if (typeof firstTask.agent === "string" && firstTask.agent.trim()) {
 				lines.push(`Agent: ${truncateForPrompt(firstTask.agent)}`);
 			}
+			const itemModel = formatModelForApproval(firstTask.model);
+			if (itemModel) lines.push(`Model: ${itemModel}`);
 			if (typeof firstTask.task === "string") {
 				lines.push(`Task:\n${truncateForPrompt(firstTask.task)}`);
 			}
@@ -612,6 +644,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			assignment: (params.task ?? "").trim(),
 			context: this.#isBatchEnabled() ? params.context?.trim() || undefined : undefined,
 			agent: params.agent,
+			model: params.model,
 			...(Object.hasOwn(params, "outputSchema") ? { outputSchema: params.outputSchema } : {}),
 			...(Object.hasOwn(params, "schemaMode") ? { schemaMode: params.schemaMode } : {}),
 			...("isolated" in params ? { isolation: { requested: params.isolated } } : {}),
@@ -1383,6 +1416,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				assignment,
 				context,
 				agent: params.agent,
+				model: params.model,
 				...(Object.hasOwn(params, "outputSchema") ? { outputSchema: params.outputSchema } : {}),
 				...(Object.hasOwn(params, "schemaMode") ? { schemaMode: params.schemaMode } : {}),
 				identity: { id: preAllocatedId, label: params.name },

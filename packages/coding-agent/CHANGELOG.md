@@ -5,6 +5,9 @@
 ### Changed
 
 - Adjusted retry fallback handling to recognize discovery-only and runtime extension providers, preventing spurious unknown-provider warnings.
+### Added
+
+- Added per-call `model` selection to the `task` tool, including per-item batch selectors, fallback chains, and explicit reasoning suffixes.
 
 ### Fixed
 
