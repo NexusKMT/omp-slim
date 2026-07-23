@@ -13868,7 +13868,17 @@ export class AgentSession {
 		const SUMMARY_TEMPLATE_TOKENS = 2000;
 		const frameBudget = recoveryBandTokens - baseTokens - textEdgeTokens - SUMMARY_TEMPLATE_TOKENS;
 		if (frameBudget < snapcompact.FRAME_TOKEN_ESTIMATE) return 1;
-		return Math.max(1, Math.floor(frameBudget / snapcompact.FRAME_TOKEN_ESTIMATE));
+		// Same hard caps as #computeSnapcompactMaxFrames: a threshold-derived
+		// count above the per-request payload budget would "shrink" a huge
+		// archive to a frame count the rebuilt prompt can never attach anyway.
+		return Math.max(
+			1,
+			Math.min(
+				Math.floor(frameBudget / snapcompact.FRAME_TOKEN_ESTIMATE),
+				snapcompact.MAX_FRAMES_DEFAULT,
+				snapcompact.maxFramesForDataBudget(),
+			),
+		);
 	}
 
 	/**
@@ -14178,15 +14188,18 @@ export class AgentSession {
 				// strategy pass (it tried and found nothing); skip entirely on the
 				// idle timer (it re-checks usage on its own cadence).
 				let rescueRewroteHistory = false;
-				// A trailing snapcompact CompactionEntry is invisible to both rescue
-				// tiers below (they only inspect message entries) and to
-				// prepareCompaction itself (last-entry-is-compaction guard), so a
-				// frame archive billed past the threshold dead-ends here on every
-				// resume. Rebuild it at a threshold-derived frame budget first; when
-				// that lands, the branch is already fully compacted — there is
-				// nothing left to summarize, so skip the elide/image tiers (provably
-				// no-ops on this shape) and the no-progress warning entirely.
+				// A snapcompact CompactionEntry is invisible to both rescue tiers
+				// below (they only inspect message entries) and to prepareCompaction
+				// itself (last-entry-is-compaction guard), so a frame archive billed
+				// past the threshold dead-ends here on every resume. Rebuild it at a
+				// threshold-derived frame budget first — but treat that as complete
+				// only when it actually created headroom: the latest archive may not
+				// be the oversized tail (e.g. a huge kept tool result after it), and
+				// declaring victory on a mere frame-count shrink would skip the
+				// elide/image tiers that can still reach that tail and suppress a
+				// warning the user should see.
 				let frameOverflowRescued = false;
+				let frameRescueCreatedHeadroom = false;
 				if (reason !== "idle") {
 					frameOverflowRescued = await this.#rescueSnapcompactFrameOverflow(
 						pathEntriesForCompaction,
@@ -14196,7 +14209,9 @@ export class AgentSession {
 					if (frameOverflowRescued) {
 						rescueRewroteHistory = true;
 						pathEntriesForCompaction = this.sessionManager.getBranch();
-					} else {
+						frameRescueCreatedHeadroom = this.#compactionCreatedHeadroom();
+					}
+					if (!frameRescueCreatedHeadroom) {
 						await this.#rescueCompactionDeadEnd(autoCompactionSignal, {
 							skipElide: fallbackFromShake,
 							hasProgress: () => {
@@ -14223,12 +14238,12 @@ export class AgentSession {
 						willRetry: false,
 						skipped: true,
 					});
-					const noProgressDeadEnd = reason !== "idle" && !frameOverflowRescued;
+					const noProgressDeadEnd = reason !== "idle" && !frameRescueCreatedHeadroom;
 					let continuationScheduled = false;
-					if (frameOverflowRescued) {
+					if (frameRescueCreatedHeadroom) {
 						continuationScheduled = this.#scheduleCompactionContinuation({
 							generation,
-							autoContinue: shouldAutoContinue && this.#compactionCreatedHeadroom(),
+							autoContinue: shouldAutoContinue,
 							terminalTextAnswer,
 							suppressContinuation,
 						});

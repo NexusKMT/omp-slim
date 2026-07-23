@@ -228,17 +228,27 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 		await createSession({ frameCount: SEEDED_FRAME_COUNT });
 		vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined as never);
 		vi.spyOn(session.agent, "continue").mockResolvedValue();
-		vi.spyOn(session, "getContextUsage").mockReturnValue({ tokens: 190000, contextWindow: 200000, percent: 95 });
+		// Over the band until the rescue rebuilds the archive, then well under —
+		// the rescue only counts as complete when it creates real headroom.
+		let rebuiltArchiveApplied = false;
+		vi.spyOn(session, "getContextUsage").mockImplementation(() =>
+			rebuiltArchiveApplied
+				? { tokens: 30000, contextWindow: 200000, percent: 15 }
+				: { tokens: 190000, contextWindow: 200000, percent: 95 },
+		);
 		const shakeSpy = vi
 			.spyOn(session, "shake")
 			.mockResolvedValue({ mode: "elide", toolResultsDropped: 0, blocksDropped: 0, tokensFreed: 0 });
-		const compactSpy = vi.spyOn(snapcompact, "compact").mockResolvedValue({
-			summary: "Rebuilt archive at a smaller frame budget.",
-			shortSummary: "rebuilt snapcompact archive",
-			firstKeptEntryId: (sessionManager.getBranch()[0] as { id: string }).id,
-			tokensBefore: 150_000,
-			details: { readFiles: ["src/a.ts"], modifiedFiles: ["src/b.ts"] },
-			preserveData: makeArchivePreserveData(4),
+		const compactSpy = vi.spyOn(snapcompact, "compact").mockImplementation(async () => {
+			rebuiltArchiveApplied = true;
+			return {
+				summary: "Rebuilt archive at a smaller frame budget.",
+				shortSummary: "rebuilt snapcompact archive",
+				firstKeptEntryId: (sessionManager.getBranch()[0] as { id: string }).id,
+				tokensBefore: 150_000,
+				details: { readFiles: ["src/a.ts"], modifiedFiles: ["src/b.ts"] },
+				preserveData: makeArchivePreserveData(4),
+			};
 		});
 
 		const notices = collectNotices();
@@ -313,6 +323,37 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 		expect(noProgress.length).toBe(0);
 		const recovery = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("dead-end recovery"));
 		expect(recovery.length).toBe(1);
+	});
+
+	it("still runs the elide tiers and warns when the frame rebuild frees too little", async () => {
+		// Codex review on #6362: the latest archive may not be the oversized
+		// tail (e.g. a huge kept tool result sits after it). A frame-count
+		// shrink alone must NOT count as success — the elide/image tiers still
+		// get their shot at the real tail, and the no-progress warning stays.
+		await createSession({ frameCount: SEEDED_FRAME_COUNT });
+		vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined as never);
+		vi.spyOn(session.agent, "continue").mockResolvedValue();
+		// Usage stays over the band even after the rebuild.
+		vi.spyOn(session, "getContextUsage").mockReturnValue({ tokens: 190000, contextWindow: 200000, percent: 95 });
+		const shakeSpy = vi
+			.spyOn(session, "shake")
+			.mockResolvedValue({ mode: "elide", toolResultsDropped: 0, blocksDropped: 0, tokensFreed: 0 });
+		vi.spyOn(snapcompact, "compact").mockResolvedValue({
+			summary: "Rebuilt archive at a smaller frame budget.",
+			shortSummary: "rebuilt snapcompact archive",
+			firstKeptEntryId: (sessionManager.getBranch()[0] as { id: string }).id,
+			tokensBefore: 150_000,
+			details: { readFiles: [], modifiedFiles: [] },
+			preserveData: makeArchivePreserveData(4),
+		});
+
+		const notices = collectNotices();
+		await triggerMaintenance();
+
+		expect(shakeSpy).toHaveBeenCalledWith("elide", expect.anything());
+		const noProgress = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes(NO_PROGRESS_FRAGMENT));
+		expect(noProgress.length).toBe(1);
+		expect(noProgress[0].level).toBe("warning");
 	});
 
 	it("still warns once when the trailing archive is already at the minimum frame count", async () => {
