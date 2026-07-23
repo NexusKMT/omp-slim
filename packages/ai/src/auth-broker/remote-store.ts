@@ -945,13 +945,12 @@ export class RemoteAuthCredentialStore implements AuthCredentialStore {
 		if (!accountPool) return reports;
 		return reports.filter(report => {
 			if (!accountPool.has(report.provider)) return true;
-			// Aggregate reports do not identify their source credential type. A
-			// visible API key therefore makes the provider's whole report set visible.
-			return this.#snapshot.credentials.some(entry => {
-				if (entry.provider !== report.provider) return false;
-				if (entry.credential.type !== "oauth") return true;
-				return usageReportMatchesCredential(report, entry.credential);
-			});
+			return this.#snapshot.credentials.some(
+				entry =>
+					entry.provider === report.provider &&
+					entry.credential.type === "oauth" &&
+					usageReportMatchesCredential(report, entry.credential),
+			);
 		});
 	}
 

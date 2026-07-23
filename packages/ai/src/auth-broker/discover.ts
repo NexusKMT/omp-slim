@@ -114,7 +114,7 @@ async function readConfigYaml(agentDir: string): Promise<ConfigSnapshot> {
 	return {};
 }
 
-async function readAuthBrokerAccountPool(): Promise<AuthBrokerAccountPool | undefined> {
+export async function loadAuthBrokerAccountPool(): Promise<AuthBrokerAccountPool | undefined> {
 	const filePath = process.env.OMP_AUTH_BROKER_ACCOUNT_POOL_FILE?.trim();
 	if (!filePath) return undefined;
 
@@ -132,8 +132,14 @@ async function readAuthBrokerAccountPool(): Promise<AuthBrokerAccountPool | unde
 
 	const accountPool = new Map<string, ReadonlySet<string>>();
 	for (const [provider, value] of Object.entries(parsed)) {
-		if (provider.trim().length === 0) {
+		const normalizedProvider = provider.trim();
+		if (normalizedProvider.length === 0) {
 			throw new AIError.ConfigurationError("OMP_AUTH_BROKER_ACCOUNT_POOL_FILE contains an empty provider id");
+		}
+		if (provider !== normalizedProvider) {
+			throw new AIError.ConfigurationError(
+				"OMP_AUTH_BROKER_ACCOUNT_POOL_FILE contains a provider id with surrounding whitespace",
+			);
 		}
 		if (!Array.isArray(value)) {
 			throw new AIError.ConfigurationError(
@@ -225,7 +231,7 @@ export async function discoverAuthStorage(options: DiscoverAuthStorageOptions = 
 	});
 
 	if (brokerConfig) {
-		const accountPool = options.accountPool ?? (await readAuthBrokerAccountPool());
+		const accountPool = options.accountPool ?? (await loadAuthBrokerAccountPool());
 		const client = new AuthBrokerClient({ url: brokerConfig.url, token: brokerConfig.token });
 		const cachePath = options.cachePath ?? getAuthBrokerSnapshotCachePath();
 		const ttlMs = resolveSnapshotTtlMs();

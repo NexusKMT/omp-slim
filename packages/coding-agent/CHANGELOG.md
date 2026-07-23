@@ -29,6 +29,7 @@
 
 ### Fixed
 
+- Fixed `omp auth-gateway serve` and `omp auth-gateway check` bypassing the process-scoped OAuth account pool configured by `OMP_AUTH_BROKER_ACCOUNT_POOL_FILE`.
 - Fixed `error.notify` raising a "Stopped with error" toast for provider failures while an auto-retry or async-delivery continuation was pending; the toast now waits for the true terminal settle.
 - Fixed terminal `yield` results racing post-turn maintenance, which could trigger an unnecessary automatic handoff or compaction.
 - Fixed credential-shaped tokens (GitHub/GitLab/OpenAI/Anthropic key patterns) being redacted from outbound provider requests even with `secrets.enabled` off; the pattern redaction now follows the `secrets.enabled` ("Hide Secrets") setting like the secret obfuscator.

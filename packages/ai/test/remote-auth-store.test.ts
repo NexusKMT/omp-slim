@@ -1159,7 +1159,7 @@ describe("RemoteAuthCredentialStore + AuthStorage integration", () => {
 		}
 	});
 
-	test("account pool preserves usage for a provider with a visible API key", async () => {
+	test("account pool hides unattributable usage even with a visible API key", async () => {
 		const brokerClient = new AuthBrokerClient({ url: "http://127.0.0.1:9", token: "unused" });
 		const now = Date.now();
 		const oauthCredential = {
@@ -1214,7 +1214,7 @@ describe("RemoteAuthCredentialStore + AuthStorage integration", () => {
 			},
 		});
 		try {
-			expect(await remoteStore.fetchUsageReports()).toEqual(reports);
+			expect(await remoteStore.fetchUsageReports()).toEqual([reports[0]]);
 		} finally {
 			remoteStore.close();
 		}
