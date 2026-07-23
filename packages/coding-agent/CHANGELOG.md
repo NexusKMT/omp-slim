@@ -898,6 +898,7 @@
 - Fixed subagent yield tool calls being discarded when a soft request budget aborts the assistant turn before the yield event completes.
 - Fixed --tools filtering in interactive sessions incorrectly disabling deferred MCP tools from configured servers.
 - Fixed kept-alive task subagents entering infinite provider-call loops after an IRC wake and terminal yield.
+- Terminal title now reflects the agent run state in the separator between the `π` brand and the session name: animated spinner frames while the agent is working, `>` when the turn is over and it's your move, `!` while the agent is blocked on you (ask/approval prompt). Gated by the new `tui.titleState` setting (default on). ([#3587](https://github.com/can1357/oh-my-pi/issues/3587), [#4451](https://github.com/can1357/oh-my-pi/pull/4451) by [@mattwilkinsonn](https://github.com/mattwilkinsonn))
 
 ## [16.3.15] - 2026-07-09
 
