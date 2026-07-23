@@ -20,6 +20,20 @@ afterEach(async () => {
 	for (const dir of tmpDirs.splice(0)) await dir.remove();
 });
 
+/** Explicitly `direnv allow` an `.envrc` (against the test-isolated HOME/XDG
+ *  dirs). Loading now honors the allow list, so tests that expect an export
+ *  must opt the file in the same way a user would. Re-run after every content
+ *  change — direnv's allow entry is content-hashed. */
+async function allowEnvrc(dir: string): Promise<void> {
+	const env: Record<string, string> = {};
+	for (const key in Bun.env) {
+		const value = Bun.env[key];
+		if (value !== undefined && !key.startsWith("DIRENV_")) env[key] = value;
+	}
+	const proc = Bun.spawn(["direnv", "allow"], { cwd: dir, env, stdout: "ignore", stderr: "ignore" });
+	if ((await proc.exited) !== 0) throw new Error(`direnv allow failed in ${dir}`);
+}
+
 describe("findEnvrc", () => {
 	it("walks up to the nearest .envrc above the start dir", async () => {
 		const root = tmp();
@@ -62,7 +76,7 @@ describe("parseDirenvExport", () => {
 	});
 });
 
-describe.skipIf(!hasDirenv)("loadDirenvEnv (real direnv, auto-allow)", () => {
+describe.skipIf(!hasDirenv)("loadDirenvEnv (real direnv, allow-list honored)", () => {
 	// `direnv allow` writes a trust entry into its data dir. Redirect HOME + the
 	// XDG dirs to a throwaway tmp so real-direnv cases never leak allow state
 	// into the dev/CI user's global direnv store.
@@ -81,10 +95,21 @@ describe.skipIf(!hasDirenv)("loadDirenvEnv (real direnv, auto-allow)", () => {
 		}
 	});
 
-	it("auto-allows an untrusted .envrc and returns its exported vars + PATH additions", async () => {
+	it("returns null for an .envrc the user has not allowed (never auto-allows)", async () => {
+		// The security contract: an untrusted `.envrc` is NEVER executed. A
+		// poisoned repo gets nothing until the user runs `direnv allow` — exactly
+		// the trust boundary direnv itself enforces in the user's shell.
+		const root = tmp();
+		await Bun.write(path.join(root, ".envrc"), "export DIRENV_BLOCKED_TEST=leaked\n");
+
+		expect(await loadDirenvEnv(root)).toBeNull();
+	});
+
+	it("returns exported vars + PATH additions for an allowed .envrc", async () => {
 		const root = tmp();
 		await fs.mkdir(path.join(root, "bin"), { recursive: true });
 		await Bun.write(path.join(root, ".envrc"), "export DIRENV_FEATURE_TEST=loaded\nPATH_add bin\n");
+		await allowEnvrc(root);
 
 		const diff = await loadDirenvEnv(root);
 
@@ -95,6 +120,7 @@ describe.skipIf(!hasDirenv)("loadDirenvEnv (real direnv, auto-allow)", () => {
 	it("reports variables a .envrc unsets", async () => {
 		const root = tmp();
 		await Bun.write(path.join(root, ".envrc"), "unset PI_DIRENV_UNSET_TEST\n");
+		await allowEnvrc(root);
 		// direnv emits a JSON null for a var only when it was present in the
 		// spawn env and the `.envrc` removes it, so seed it in the parent env.
 		// (Avoid a `DIRENV_`-prefixed name — the loader strips those before spawn.)
@@ -113,11 +139,15 @@ describe.skipIf(!hasDirenv)("loadDirenvEnv (real direnv, auto-allow)", () => {
 	});
 
 	it("re-exports when the .envrc content changes (no stale cache)", async () => {
+		// direnv's allow entry is content-hashed, so each rewrite is re-allowed —
+		// mirroring what a user does after editing their own .envrc.
 		const root = tmp();
 		await Bun.write(path.join(root, ".envrc"), "export DIRENV_CACHE_TEST=one\n");
+		await allowEnvrc(root);
 		expect((await loadDirenvEnv(root))?.set.DIRENV_CACHE_TEST).toBe("one");
 
 		await Bun.write(path.join(root, ".envrc"), "export DIRENV_CACHE_TEST=two\n");
+		await allowEnvrc(root);
 		expect((await loadDirenvEnv(root))?.set.DIRENV_CACHE_TEST).toBe("two");
 	});
 
@@ -133,6 +163,7 @@ describe.skipIf(!hasDirenv)("loadDirenvEnv (real direnv, auto-allow)", () => {
 			path.join(root, ".envrc"),
 			'watch_file watched.env\nexport DIRENV_WATCH_TEST="$(cat watched.env)"\n',
 		);
+		await allowEnvrc(root);
 		expect((await loadDirenvEnv(root))?.set.DIRENV_WATCH_TEST).toBe("one");
 
 		await Bun.write(path.join(root, "watched.env"), "two\n");
@@ -159,6 +190,7 @@ describe.skipIf(!hasDirenv)("bash executor direnv wiring (end-to-end)", () => {
 	it("exposes direnv-loaded vars to the command while per-call env still wins", async () => {
 		const root = tmp();
 		await Bun.write(path.join(root, ".envrc"), "export DIRENV_WIRE_TEST=fromdirenv\nexport OVERRIDE_ME=fromdirenv\n");
+		await allowEnvrc(root);
 
 		const result = await executeBash('printf "%s|%s" "$DIRENV_WIRE_TEST" "$OVERRIDE_ME"', {
 			cwd: root,
@@ -171,6 +203,7 @@ describe.skipIf(!hasDirenv)("bash executor direnv wiring (end-to-end)", () => {
 	it("removes variables the .envrc unsets from the command environment", async () => {
 		const root = tmp();
 		await Bun.write(path.join(root, ".envrc"), "unset PI_DIRENV_UNSET_E2E\n");
+		await allowEnvrc(root);
 		// Inherited from the process env (as an OMP-provided var would be); the
 		// caller does NOT re-supply it, so direnv's unset must strip it. `printenv`
 		// exits non-zero and prints nothing when the name is genuinely absent. A
@@ -214,6 +247,7 @@ describe.skipIf(!hasDirenv)("applyDirenvPreflight (shared all-backends preflight
 	it("merges direnv set vars into env while the caller's env wins", async () => {
 		const root = tmp();
 		await Bun.write(path.join(root, ".envrc"), "export DIRENV_PF_SET=fromdirenv\nexport OVERRIDE_ME=fromdirenv\n");
+		await allowEnvrc(root);
 
 		const { command, env } = await applyDirenvPreflight("echo hi", root, {
 			callerEnv: { OVERRIDE_ME: "fromcaller" },
@@ -229,6 +263,7 @@ describe.skipIf(!hasDirenv)("applyDirenvPreflight (shared all-backends preflight
 	it("prepends a regex-gated `unset -v` for vars the .envrc removes, skipping caller-resupplied names", async () => {
 		const root = tmp();
 		await Bun.write(path.join(root, ".envrc"), "unset PI_PF_UNSET_A\nunset PI_PF_UNSET_B\n");
+		await allowEnvrc(root);
 		Bun.env.PI_PF_UNSET_A = "present";
 		Bun.env.PI_PF_UNSET_B = "present";
 		try {
@@ -249,6 +284,7 @@ describe.skipIf(!hasDirenv)("applyDirenvPreflight (shared all-backends preflight
 	it("applies the shell commandPrefix after the unset prefix", async () => {
 		const root = tmp();
 		await Bun.write(path.join(root, ".envrc"), "unset PI_PF_ORDER\n");
+		await allowEnvrc(root);
 		Bun.env.PI_PF_ORDER = "present";
 		try {
 			const { command } = await applyDirenvPreflight("payload", root, {

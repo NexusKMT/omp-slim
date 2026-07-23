@@ -3356,7 +3356,7 @@ export const SETTINGS_SCHEMA = {
 			group: "Bash",
 			label: "direnv Auto-Load",
 			description:
-				"Auto-load (and auto-allow) a repo's direnv/devenv `.envrc` into the bash session so devenv tools and env vars are present without manual `direnv exec`",
+				"Auto-load a repo's direnv/devenv `.envrc` into the bash session so devenv tools and env vars are present without manual `direnv exec`. Honors direnv's allow list: an `.envrc` you haven't `direnv allow`ed is never executed",
 		},
 	},
 	"bash.direnvLoadTimeoutMs": {

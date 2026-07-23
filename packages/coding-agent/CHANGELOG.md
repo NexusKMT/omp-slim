@@ -1138,6 +1138,7 @@
 ### Fixed
 
 - Extended the bash tool's direnv/devenv auto-loading to every backend: the ACP client terminal and the interactive PTY now receive the repo's direnv environment (variables set, and `unset -v` for variables the `.envrc` removes) — previously only the one-shot `executeBash` path did — via a shared preflight so all backends behave identically, with the caller's explicit env still winning. direnv loading also always re-runs `direnv export json` instead of serving a content-hashed cache, so a change to a `watch_file` target re-exports even when the `.envrc` text is unchanged (direnv's own watch invalidation is authoritative). ([#4455](https://github.com/can1357/oh-my-pi/issues/4455))
+- The bash tool's direnv auto-load now honors direnv's own allow list: an `.envrc` the user has not `direnv allow`ed is skipped silently and never executed or auto-allowed, keeping OMP's trust boundary identical to the user's shell. ([#4455](https://github.com/can1357/oh-my-pi/issues/4455))
 
 ## [16.3.4] - 2026-07-03
 
