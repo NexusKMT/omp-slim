@@ -7,6 +7,7 @@
 - Fixed credential-shaped tokens (GitHub/GitLab/OpenAI/Anthropic key patterns) being redacted from outbound provider requests even with `secrets.enabled` off; the pattern redaction now follows the `secrets.enabled` ("Hide Secrets") setting like the secret obfuscator.
 - Fixed Ctrl-clicking a wrapped OAuth authorization URL opening only the clicked row's truncated fragment by preserving the complete hyperlink target on every rendered row.
 - Fixed used-only absolute usage amounts across output surfaces: CLI now renders `$123.45 used`; the TUI shows a neutral, width-bounded amount instead of a pending/dotted/account-count placeholder; and ACP preserves `123.45 usd used` while suppressing duplicate window suffixes such as `— extra`. ([#5575](https://github.com/can1357/oh-my-pi/issues/5575))
+- Fixed the `browser` tool's `open` action ignoring the requested `timeout` during browser acquisition (CDP discovery/connect ran to its own fixed wait), and orphaning a freshly-created browser on abort/timeout before tab publication. The requested timeout now bounds the whole open lifecycle, and one explicit registry lease is held across tab acquisition so rollback disposes exactly the failed open — a concurrent open of a different tab name on the same browser can no longer dispose the browser out from under it. ([#6365](https://github.com/can1357/oh-my-pi/issues/6365))
 
 ## [17.0.9] - 2026-07-23
 
