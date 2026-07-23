@@ -2084,23 +2084,23 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			// hadn't populated yet. Await the in-flight runtime discovery
 			// already kicked off above (stash + reuse avoids a second concurrent
 			// `#refreshRuntimeDiscoveries` pass for the same runtime model
-			// managers). `refreshRuntimeProviders()` only covers runtime model
+			// managers; it resolves instantly when no runtime managers are
+			// registered). `refreshRuntimeProviders()` only covers runtime model
 			// managers, not config-discovery providers (e.g. user-configured
 			// ollama); fall back to a full cache-aware refresh only when the
-			// runtime pass didn't surface a match. By then runtime managers
-			// short-circuit on the fresh cache written by the awaited pass,
-			// closing the double-fetch window.
-			if (modelRegistry.getDiscoverableProviders().length > 0) {
-				await logger.time("resolveModelDiscoveryDeferredRetry", () => runtimeDiscoveryPromise);
-				const availableModelsAfterRuntime = modelRegistry.getAll();
-				const runtimeResolved = deferredModelPatterns.some(pattern =>
-					availableModelsAfterRuntime.some(m => `${m.provider}/${m.id}` === pattern),
+			// runtime pass didn't surface a match AND config-discovery providers
+			// exist to fetch from. By then runtime managers short-circuit on the
+			// fresh cache written by the awaited pass, closing the double-fetch
+			// window.
+			await logger.time("resolveModelDiscoveryDeferredRetry", () => runtimeDiscoveryPromise);
+			const availableModelsAfterRuntime = modelRegistry.getAll();
+			const runtimeResolved = deferredModelPatterns.some(pattern =>
+				availableModelsAfterRuntime.some(m => `${m.provider}/${m.id}` === pattern),
+			);
+			if (!runtimeResolved && modelRegistry.getDiscoverableProviders().length > 0) {
+				await logger.time("resolveModelDiscoveryFallbackNonRuntime", () =>
+					modelRegistry.refresh("online-if-uncached"),
 				);
-				if (!runtimeResolved) {
-					await logger.time("resolveModelDiscoveryFallbackNonRuntime", () =>
-						modelRegistry.refresh("online-if-uncached"),
-					);
-				}
 			}
 			const availableModels = modelRegistry.getAll();
 			const matchPreferences = getModelMatchPreferences(settings);
