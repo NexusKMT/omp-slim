@@ -105,6 +105,35 @@ describe("Firecrawl web search provider", () => {
 		});
 	});
 
+	it("uses the initially resolved credential for the first authenticated request", async () => {
+		let resolutionCount = 0;
+		const authStorage = {
+			resolver(provider: string, options?: { sessionId?: string }) {
+				expect(provider).toBe("firecrawl");
+				expect(options?.sessionId).toBe("session-firecrawl-test");
+				return async () => {
+					resolutionCount += 1;
+					return resolutionCount === 1 ? "initial-firecrawl-key" : undefined;
+				};
+			},
+		} as unknown as AuthStorage;
+		const fetchMock: FetchImpl = async (_input, init) => {
+			expect(getHeader(init?.headers, "Authorization")).toBe("Bearer initial-firecrawl-key");
+			return new Response(JSON.stringify({ data: { web: [] } }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+		};
+
+		const response = await searchFirecrawl({
+			...makeParams("credential reuse", authStorage),
+			fetch: fetchMock,
+		});
+
+		expect(response.authMode).toBe("api_key");
+		expect(resolutionCount).toBe(1);
+	});
+
 	it.each([
 		[401, "firecrawl: 401 unauthorized"],
 		[402, "firecrawl: 402 credits exhausted"],

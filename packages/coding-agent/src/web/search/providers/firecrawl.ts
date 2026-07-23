@@ -4,7 +4,14 @@
  * Calls Firecrawl's search API and maps web results into the unified
  * SearchResponse shape used by the web search tool.
  */
-import { type ApiKey, type AuthStorage, type FetchImpl, getEnvApiKey, withAuth } from "@oh-my-pi/pi-ai";
+import {
+	type AuthStorage,
+	type FetchImpl,
+	getEnvApiKey,
+	resolveApiKeyOnce,
+	seedApiKeyResolver,
+	withAuth,
+} from "@oh-my-pi/pi-ai";
 import type { SearchResponse, SearchSource } from "../../../web/search/types";
 import { SearchProviderError } from "../../../web/search/types";
 import { clampNumResults } from "../utils";
@@ -66,7 +73,10 @@ function buildRequestBody(params: FirecrawlSearchParams): Record<string, unknown
 	return body;
 }
 
-async function callFirecrawlSearch(apiKey: string | undefined, params: FirecrawlSearchParams): Promise<FirecrawlSearchResponse> {
+async function callFirecrawlSearch(
+	apiKey: string | undefined,
+	params: FirecrawlSearchParams,
+): Promise<FirecrawlSearchResponse> {
 	const headers: Record<string, string> = {
 		"Content-Type": "application/json",
 	};
@@ -103,24 +113,17 @@ export async function searchFirecrawl(params: SearchParams): Promise<SearchRespo
 		signal: params.signal,
 		fetch: params.fetch,
 	};
-	const keyOrResolver: ApiKey = params.authStorage.resolver("firecrawl", {
+	const keyResolver = params.authStorage.resolver("firecrawl", {
 		sessionId: params.sessionId,
 	});
 	const numResults = clampNumResults(firecrawlParams.num_results, DEFAULT_NUM_RESULTS, MAX_NUM_RESULTS);
 
-	/** Resolve the API key; may be undefined (keyless mode). */
-	async function resolveApiKey(): Promise<string | undefined> {
-		if (typeof keyOrResolver === "function") {
-			return keyOrResolver({ lastChance: false, error: undefined, signal: params.signal });
-		}
-		return keyOrResolver;
-	}
-
-	const resolvedKey = await resolveApiKey();
+	const resolvedKey = await resolveApiKeyOnce(keyResolver, params.signal);
 	let data: FirecrawlSearchResponse;
 	if (resolvedKey) {
-		// Authenticated mode
-		data = await withAuth(keyOrResolver, key => callFirecrawlSearch(key, firecrawlParams), {
+		// Reuse the preflight credential for the initial authenticated attempt.
+		const seededResolver = seedApiKeyResolver(resolvedKey, keyResolver);
+		data = await withAuth(seededResolver, key => callFirecrawlSearch(key, firecrawlParams), {
 			signal: params.signal,
 		});
 	} else {
