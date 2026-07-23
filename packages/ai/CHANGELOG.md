@@ -10,6 +10,8 @@
 ### Fixed
 
 - Fixed GitHub Copilot OpenAI-compatible requests being rejected when the session's native OpenAI service tier was set to `priority` ([#5160](https://github.com/can1357/oh-my-pi/pull/5160) by [@audreyt](https://github.com/audreyt)).
+- Fixed OpenAI Responses token-cap truncations suppressing fully streamed function and custom tool calls whose inputs are complete.
+- Added SuperGrok (`xai-oauth`) usage tracking for weekly credits, product limits, and positive on-demand caps.
 
 ## [17.0.8] - 2026-07-22
 
@@ -22,10 +24,6 @@
 - Improved connection error handling by classifying generic connection failures as transient, allowing them to be retried, while keeping explicit authentication rejections non-retryable.
 - Fixed custom Anthropic base URLs losing native thinking signatures during continuation requests.
 - Fixed Alibaba Coding Plan Custom login rejecting valid API keys on endpoints that do not serve the default validation model by validating against the model catalog instead.
-### Fixed
-
-- Fixed OpenAI Responses token-cap truncations suppressing fully streamed function and custom tool calls whose inputs are complete.
-- Added SuperGrok (`xai-oauth`) usage tracking for weekly credits, product limits, and positive on-demand caps.
 
 ## [17.0.6] - 2026-07-20
 
