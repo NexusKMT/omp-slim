@@ -2101,6 +2101,24 @@ export class ModelRegistry {
 			.map(provider => provider.provider);
 	}
 
+	/**
+	 * Whether `providerId` is known to the registry: it has at least one live
+	 * model, or it is configured for dynamic discovery (models.yml `discovery:`
+	 * or a runtime extension provider) and is not disabled. Discovery-only
+	 * providers can hold zero models at startup — cached rows never persist
+	 * live auth headers (#5780), so a provider whose discovered models all
+	 * carry config headers (`authHeader: true`) only materializes models after
+	 * the online refresh completes.
+	 */
+	hasProvider(providerId: string): boolean {
+		if (this.#models.some(model => model.provider === providerId)) return true;
+		if (getDisabledProviderIdsFromSettings().has(providerId)) return false;
+		return (
+			this.#discoverableProviders.some(provider => provider.provider === providerId) ||
+			this.#runtimeModelManagers.has(providerId)
+		);
+	}
+
 	getProviderDiscoveryState(provider: string): ProviderDiscoveryState | undefined {
 		return this.#providerDiscoveryStates.get(provider);
 	}

@@ -14901,9 +14901,15 @@ export class AgentSession {
 		return stopType === "refusal" || stopType === "sensitive";
 	}
 
-	/** True when any registered model belongs to `provider`. */
-	#hasProviderModels(provider: string): boolean {
-		return this.#modelRegistry.getAll().some(model => model.provider === provider);
+	/**
+	 * True when `provider` has registered models or is configured for dynamic
+	 * discovery. Discovery-only providers (e.g. a models.yml provider with
+	 * `discovery:` and no static models) can hold zero models until the online
+	 * refresh completes, so a models-only check would misreport them as
+	 * unknown during session construction.
+	 */
+	#isKnownProvider(provider: string): boolean {
+		return this.#modelRegistry.hasProvider(provider);
 	}
 
 	#getRetryFallbackChains(): RetryFallbackChains {
@@ -14936,8 +14942,8 @@ export class AgentSession {
 			const keyKind = isRetryFallbackModelKey(key) ? "model" : "role";
 			if (keyKind === "model") {
 				if (isRetryFallbackWildcardKey(key)) {
-					const { provider } = parseRetryFallbackWildcard(key, p => this.#hasProviderModels(p));
-					if (!this.#hasProviderModels(provider)) {
+					const { provider } = parseRetryFallbackWildcard(key, p => this.#isKnownProvider(p));
+					if (!this.#isKnownProvider(provider)) {
 						const msg = `retry.fallbackChains wildcard key references unknown provider: ${key}`;
 						logger.warn(msg);
 						this.configWarnings.push(msg);
@@ -14969,8 +14975,8 @@ export class AgentSession {
 					continue;
 				}
 				if (isRetryFallbackWildcardKey(selectorStr)) {
-					const { provider } = parseRetryFallbackWildcard(selectorStr, p => this.#hasProviderModels(p));
-					if (!this.#hasProviderModels(provider)) {
+					const { provider } = parseRetryFallbackWildcard(selectorStr, p => this.#isKnownProvider(p));
+					if (!this.#isKnownProvider(provider)) {
 						const msg = `Fallback chain for ${keyKind} '${key}' references unknown provider: ${selectorStr}`;
 						logger.warn(msg);
 						this.configWarnings.push(msg);
@@ -15070,7 +15076,7 @@ export class AgentSession {
 		let wildcardPrefixLength = -1;
 		for (const key in chains) {
 			if (!isRetryFallbackWildcardKey(key) || !Array.isArray(chains[key])) continue;
-			const { provider, idPrefix } = parseRetryFallbackWildcard(key, p => this.#hasProviderModels(p));
+			const { provider, idPrefix } = parseRetryFallbackWildcard(key, p => this.#isKnownProvider(p));
 			if (provider !== parsedCurrent.provider) continue;
 			if (idPrefix !== undefined && !parsedCurrent.id.startsWith(`${idPrefix}/`)) continue;
 			const prefixLength = idPrefix === undefined ? 0 : idPrefix.length;
@@ -15110,7 +15116,7 @@ export class AgentSession {
 	): RetryFallbackSelector | undefined {
 		if (isRetryFallbackWildcardKey(entry)) {
 			if (!current) return undefined;
-			const { provider, idPrefix } = parseRetryFallbackWildcard(entry, p => this.#hasProviderModels(p));
+			const { provider, idPrefix } = parseRetryFallbackWildcard(entry, p => this.#isKnownProvider(p));
 			const bareId = current.id.slice(current.id.lastIndexOf("/") + 1);
 			let id: string;
 			if (idPrefix !== undefined) {

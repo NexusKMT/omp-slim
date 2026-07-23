@@ -1,6 +1,11 @@
 # Changelog
 
 ## [Unreleased]
+
+### Changed
+
+- Adjusted retry fallback handling to recognize discovery-only and runtime extension providers, preventing spurious unknown-provider warnings.
+
 ### Fixed
 
 - Fixed the setup wizard hiding the selected row on short terminals (e.g. 24x80): the provider sign-in, theme, and web-search lists now fit their windows to the visible height, and decorative chrome (sign-in hint, theme mock preview) yields to the list when space is tight.
