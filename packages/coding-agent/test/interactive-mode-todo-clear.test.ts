@@ -165,6 +165,7 @@ describe("InteractiveMode todo HUD persistence", () => {
 		mode.setTodos(session.getTodoPhases());
 
 		await mode.init();
+		vi.useFakeTimers();
 		eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, {
 			id: "ReviewFixer",
 			index: 0,
@@ -173,6 +174,7 @@ describe("InteractiveMode todo HUD persistence", () => {
 			status: "completed",
 			detached: true,
 		});
+		vi.advanceTimersByTime(100);
 
 		const task = session.getTodoPhases()[0]?.tasks[0];
 		expect(task?.status).toBe("completed");
