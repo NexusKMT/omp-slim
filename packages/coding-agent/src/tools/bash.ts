@@ -179,7 +179,7 @@ function findBashApprovalPatternRule(
 	rules: readonly BashApprovalPatternRule[],
 ): BashApprovalPatternRule | undefined {
 	return rules.find(rule => {
-		if (rule.approval === "allow" && BASH_APPROVAL_SHELL_CONTROL_RE.test(normalizeBashApprovalPattern(command))) {
+		if (rule.approval === "allow" && BASH_APPROVAL_SHELL_CONTROL_RE.test(command)) {
 			return false;
 		}
 		return commandMatchesBashApprovalPattern(command, rule.match);

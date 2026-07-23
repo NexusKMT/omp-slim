@@ -130,6 +130,15 @@ export function resolveApproval(
 	}
 
 	if (mode === "yolo") {
+		if (decision.policy) {
+			return {
+				policy: decision.policy,
+				tier: decision.tier,
+				override: false,
+				source: "tool",
+				...(decision.reason ? { reason: decision.reason } : {}),
+			};
+		}
 		return {
 			policy: userPolicy ?? "allow",
 			tier: decision.tier,

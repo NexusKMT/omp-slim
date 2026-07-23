@@ -273,6 +273,60 @@ describe("tool-owned dynamic approval declarations", () => {
 			reason: "Blocked by bash pattern: rm -rf *",
 		});
 	});
+	it("never auto-approves a command that only prefixes an allow pattern", () => {
+		const settingsOverrides = {
+			"bash.patterns": [{ match: "git *", approval: "allow" }],
+		};
+
+		// Shell control syntax after (or around) the allowed prefix must not ride the allow rule.
+		for (const command of [
+			"git status; rm file.txt",
+			"git status && rm file.txt",
+			"git status | sh",
+			"git status\nrm file.txt",
+			"git status\r\nrm file.txt",
+			"git $(rm file.txt)",
+			"git `rm file.txt` status",
+			"git status > /etc/passwd",
+			"git status < seed",
+			// Different binary resolution than the pattern names.
+			"FOO=1 git status",
+			"/usr/bin/git status",
+			'"git" status',
+			"gitx status",
+			"git",
+			"",
+		]) {
+			const decision = bashApproval(command, settingsOverrides);
+			expect(typeof decision === "object" ? decision.policy : undefined).not.toBe("allow");
+		}
+
+		for (const command of ["git status", "git status --short", "git  status", "git\tstatus"]) {
+			expect(bashApproval(command, settingsOverrides)).toEqual({ tier: "write", policy: "allow" });
+		}
+	});
+
+	it("honors bash pattern rules in yolo mode", () => {
+		const tool = createBashTool({
+			"bash.patterns": [
+				{ match: "echo *", approval: "prompt" },
+				{ match: "git *", approval: "allow" },
+			],
+		});
+
+		expect(resolveApproval(tool, { command: "echo hello" }, "yolo", {})).toMatchObject({
+			policy: "prompt",
+			source: "tool",
+		});
+		expect(resolveApproval(tool, { command: "git status" }, "yolo", {})).toMatchObject({
+			policy: "allow",
+			source: "tool",
+		});
+		expect(resolveApproval(tool, { command: "true" }, "yolo", {})).toMatchObject({
+			policy: "allow",
+			source: "mode",
+		});
+	});
 
 	it("exports LSP and debug read-only action sets from their owning tools", () => {
 		expect(LSP_READONLY_ACTIONS.has("diagnostics")).toBe(true);
