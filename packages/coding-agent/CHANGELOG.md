@@ -99,6 +99,9 @@
 ### Fixed
 
 - Fixed Portkey/gateway custom models whose ids start with `@` (e.g. `@modal/GLM-5-2-FP8`) being rewritten to unrelated bundled wire ids (e.g. `glm-5-2`), which caused `400` responses requiring `x-portkey-config` or `x-portkey-provider`.
+### Changed
+
+- Reduced format-on-write latency by avoiding cold language-server startup when diagnostics are disabled.
 
 ## [17.0.6] - 2026-07-20
 
