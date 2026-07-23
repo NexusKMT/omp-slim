@@ -199,20 +199,26 @@ describe("openai-responses stateful chaining", () => {
 			{ messages: [oldestUser, firstUser] },
 			options,
 		).result();
+		const secondUser = { role: "user" as const, content: "Second question", timestamp: 1002 };
 		const secondResponse = await streamOpenAIResponses(
 			explicitPromptCacheModel,
 			{
-				messages: [
-					oldestUser,
-					firstUser,
-					firstResponse,
-					{ role: "user", content: "Second question", timestamp: 1002 },
-				],
+				messages: [oldestUser, firstUser, firstResponse, secondUser],
+			},
+			options,
+		).result();
+		const thirdUser = { role: "user" as const, content: "Third question", timestamp: 1003 };
+		const thirdResponse = await streamOpenAIResponses(
+			explicitPromptCacheModel,
+			{
+				messages: [oldestUser, firstUser, firstResponse, secondUser, secondResponse, thirdUser],
 			},
 			options,
 		).result();
 
 		expect(secondResponse.stopReason).toBe("stop");
+		expect(thirdResponse.stopReason).toBe("stop");
+		expect(sentRequests).toHaveLength(3);
 		expect(sentRequests[0]?.input).toEqual([
 			{
 				role: "user",
@@ -229,6 +235,10 @@ describe("openai-responses stateful chaining", () => {
 		expect(sentRequests[1]?.previous_response_id).toBe("resp_1");
 		expect(sentRequests[1]?.input).toEqual([
 			{ role: "user", content: [{ type: "input_text", text: "Second question" }] },
+		]);
+		expect(sentRequests[2]?.previous_response_id).toBe("resp_2");
+		expect(sentRequests[2]?.input).toEqual([
+			{ role: "user", content: [{ type: "input_text", text: "Third question" }] },
 		]);
 	});
 

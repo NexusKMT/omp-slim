@@ -442,6 +442,14 @@ describe("OpenAI explicit prompt-cache breakpoint compat", () => {
 		).toBe(false);
 		expect(
 			buildOpenAIResponsesCompat({
+				id: "gpt-5.6",
+				provider: "openrouter",
+				name: "GPT 5.6 through OpenRouter",
+				baseUrl: "https://openrouter.ai/api/v1",
+			}).supportsPromptCacheBreakpoints,
+		).toBe(false);
+		expect(
+			buildOpenAIResponsesCompat({
 				id: "gpt-4.1",
 				provider: "openai",
 				name: "GPT 4.1",
