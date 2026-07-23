@@ -26,6 +26,9 @@
 - Bound interactive bash live display write queue to prevent unbounded PTY chunk backlog ([#4240](https://github.com/can1357/oh-my-pi/issues/4240))
 - All Markdown flavors (`.markdown`, `.mdx`, `.mdc`, `.mkd`, `.mdown`) now follow the `read.summarize.prose` setting like `.md`, so they read verbatim instead of being code-block summarized when prose summaries are off.
 - xAI web search now uses `grok-4.5` (at low reasoning effort) instead of `grok-4.3`.
+### Added
+
+- Added `models.yml` Bedrock Converse prompt-cache capability overrides for bundled and opaque inference profiles.
 
 ### Fixed
 - Fixed a first-use race in `ArtifactManager` where two concurrent `allocatePath`/`save` callers on a fresh instance both re-seeded `#nextId` across the directory-scan yield and allocated the same artifact id, silently overwriting the first artifact (same tool type) or making `artifact://` resolution ambiguous (different tool types). The initial scan is now memoized as a single in-flight promise so all concurrent callers share one initialization and receive distinct ids ([#4091](https://github.com/can1357/oh-my-pi/issues/4091)).
