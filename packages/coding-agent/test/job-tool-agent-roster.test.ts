@@ -255,4 +255,45 @@ describe("hub cancel of a non-job-backed agent registration (#6315)", () => {
 		expect((result.details as CoordinationDetails)?.cancelled).toEqual([{ id: "Ghost", status: "not_found" }]);
 		expect(resultText(result)).toContain("Background job not found: Ghost");
 	});
+	test("cancel kills the registration even while the settled job row is still retained", async () => {
+		const registry = new AgentRegistry();
+		const lifecycle = new AgentLifecycleManager(registry);
+		const fake = fakeSession();
+		const manager = createManager();
+		// Job id == agent id for task spawns; the settled row survives ~5 min
+		// after the budget abort while the keep-alive registration lives on.
+		manager.register("task", "Zombie", async () => "done", { id: "Zombie", agentId: "Zombie", ownerId: "Main" });
+		await manager.waitForAll();
+		registry.register({
+			id: "Zombie",
+			displayName: "Zombie",
+			kind: "sub",
+			parentId: "Main",
+			session: fake.session as never,
+			status: "idle",
+		});
+		lifecycle.adopt("Zombie", { idleTtlMs: 0 });
+		const tool = new HubTool(createToolSession({ manager, registry, agentId: "Main", lifecycle }));
+
+		const result = await tool.execute("call", { op: "cancel", ids: ["Zombie"] });
+
+		expect((result.details as CoordinationDetails)?.cancelled).toEqual([{ id: "Zombie", status: "cancelled" }]);
+		expect(registry.get("Zombie")).toBeUndefined();
+		expect(lifecycle.has("Zombie")).toBe(false);
+		expect(fake.disposeCalls()).toBe(1);
+	});
+
+	test("cancel of a settled job with no lingering registration stays already_completed", async () => {
+		const registry = new AgentRegistry();
+		const lifecycle = new AgentLifecycleManager(registry);
+		const manager = createManager();
+		manager.register("task", "DoneJob", async () => "done", { id: "DoneJob", agentId: "DoneJob", ownerId: "Main" });
+		await manager.waitForAll();
+		const tool = new HubTool(createToolSession({ manager, registry, agentId: "Main", lifecycle }));
+
+		const result = await tool.execute("call", { op: "cancel", ids: ["DoneJob"] });
+
+		expect((result.details as CoordinationDetails)?.cancelled).toEqual([{ id: "DoneJob", status: "already_completed" }]);
+		expect(resultText(result)).toContain("already completed");
+	});
 });

@@ -323,11 +323,20 @@ export async function executeCancel(
 			continue;
 		}
 		if (existing.status !== "running") {
-			cancelOutcomes.push({
-				id,
-				status: "already_completed",
-				message: `Background job ${id} is already ${existing.status}.`,
-			});
+			// The job row settled but may still be inside the retention window.
+			// The agent registration behind it (job id == agent id for task
+			// spawns) can outlive the row as an idle/parked zombie — try the
+			// registration kill before reporting the row as already done.
+			const regOutcome = await cancelAgentRegistration(session, ownerId, id);
+			cancelOutcomes.push(
+				regOutcome.status === "cancelled"
+					? regOutcome
+					: {
+							id,
+							status: "already_completed",
+							message: `Background job ${id} is already ${existing.status}.`,
+						},
+			);
 			continue;
 		}
 		const cancelled = manager.cancel(id, ownerFilter);
