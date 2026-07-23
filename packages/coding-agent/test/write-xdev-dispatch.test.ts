@@ -258,6 +258,14 @@ describe("read and write route xd:// device URLs", () => {
 
 			const catalogWithAllowlistDocs = registry.docsAll("catalog", ["mcp__context_mode_*"]);
 			expect(catalogWithAllowlistDocs).not.toContain("## mcp__context_mode_ctx_execute");
+
+			// Malformed user config (scalar or non-string entries reach the
+			// registry unvalidated) degrades to the catalog listing instead of
+			// throwing while the system prompt is built.
+			const scalarAllowlistDocs = registry.docsAll("builtins", "mcp__context_mode_*" as never);
+			expect(scalarAllowlistDocs).toContain("- xd://mcp__context_mode_ctx_execute —");
+			const nonStringAllowlistDocs = registry.docsAll("builtins", [123] as never);
+			expect(nonStringAllowlistDocs).toContain("- xd://mcp__context_mode_ctx_execute —");
 		} finally {
 			await removeWithRetries(tempDir);
 		}

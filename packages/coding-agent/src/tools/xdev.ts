@@ -183,6 +183,18 @@ function promptCatalogSummary(inst: Tool, maxLength?: number): string {
 	return `${summary.slice(0, maxLength).trimEnd()}…`;
 }
 
+/** Compile the `tools.xdevInlineDevices` allowlist once per render, dropping
+ *  non-string entries so malformed user config cannot break prompt builds. */
+function compileInlineGlobs(patterns: readonly string[]): Bun.Glob[] {
+	if (!Array.isArray(patterns)) return [];
+	const globs: Bun.Glob[] = [];
+	for (const pattern of patterns) {
+		if (typeof pattern !== "string" || pattern.length === 0) continue;
+		globs.push(new Bun.Glob(pattern));
+	}
+	return globs;
+}
+
 /** Decode the (possibly partially streamed) inner args JSON string into display args. */
 function decodeInnerArgs(raw: unknown): Record<string, unknown> {
 	if (typeof raw !== "string" || raw.length === 0) return {};
@@ -295,9 +307,10 @@ export class XdevRegistry {
 	docsAll(mode: XdevDocsMode = "inline", inlinePatterns: readonly string[] = []): string {
 		const sections: string[] = [];
 		const overflow: Tool[] = [];
+		const inlineGlobs = compileInlineGlobs(inlinePatterns);
 		let used = 0;
 		for (const tool of this.list()) {
-			if (!this.#shouldInline(tool, mode, inlinePatterns)) {
+			if (!this.#shouldInline(tool, mode, inlineGlobs)) {
 				overflow.push(tool);
 				continue;
 			}
@@ -329,10 +342,11 @@ export class XdevRegistry {
 	/** Docs for selected mounted devices under the configured prompt-doc policy. */
 	docsFor(names: Iterable<string>, mode: XdevDocsMode, inlinePatterns: readonly string[] = []): string {
 		const sections: string[] = [];
+		const inlineGlobs = compileInlineGlobs(inlinePatterns);
 		let used = 0;
 		for (const name of names) {
 			const tool = this.get(name);
-			if (!tool || !this.#shouldInline(tool, mode, inlinePatterns)) continue;
+			if (!tool || !this.#shouldInline(tool, mode, inlineGlobs)) continue;
 			const descriptionCap = this.#dynamic.has(tool.name) ? XdevRegistry.EXTERNAL_DESCRIPTION_CAP : undefined;
 			const docs = renderDocs(tool, "##", descriptionCap);
 			if (docs.length > XdevRegistry.DOCS_PER_DEVICE_CAP || used + docs.length > XdevRegistry.DOCS_TOTAL_BUDGET)
@@ -343,12 +357,10 @@ export class XdevRegistry {
 		return sections.join("\n\n");
 	}
 
-	#shouldInline(tool: Tool, mode: XdevDocsMode, inlinePatterns: readonly string[]): boolean {
+	#shouldInline(tool: Tool, mode: XdevDocsMode, inlineGlobs: readonly Bun.Glob[]): boolean {
 		return (
 			mode !== "catalog" &&
-			(mode === "inline" ||
-				this.#builtins.has(tool.name) ||
-				inlinePatterns.some(pattern => new Bun.Glob(pattern).match(tool.name)))
+			(mode === "inline" || this.#builtins.has(tool.name) || inlineGlobs.some(glob => glob.match(tool.name)))
 		);
 	}
 
