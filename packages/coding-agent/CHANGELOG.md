@@ -29,6 +29,7 @@
 
 ### Fixed
 
+- Fixed the approved plan reference being permanently suppressed when the first post-approval prompt bailed during setup: `#planReferenceSent` was set at message-construction time (before delivery), so a generation-bail, an `@`-mention read error, or a `before_agent_start` hook throw between build and `agent.prompt` left the flag set with nothing delivered and the retry skipped re-injection. The flag is now committed only when the plan-reference message is handed to `agent.prompt` ([#4094](https://github.com/can1357/oh-my-pi/issues/4094)).
 - Fixed `error.notify` raising a "Stopped with error" toast for provider failures while an auto-retry or async-delivery continuation was pending; the toast now waits for the true terminal settle.
 - Fixed terminal `yield` results racing post-turn maintenance, which could trigger an unnecessary automatic handoff or compaction.
 - Fixed credential-shaped tokens (GitHub/GitLab/OpenAI/Anthropic key patterns) being redacted from outbound provider requests even with `secrets.enabled` off; the pattern redaction now follows the `secrets.enabled` ("Hide Secrets") setting like the secret obfuscator.
