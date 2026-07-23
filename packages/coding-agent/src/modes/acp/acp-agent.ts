@@ -164,6 +164,10 @@ function isPromptTurnInFlight(turn: PromptTurnState | undefined): turn is Prompt
 type ManagedSessionRecord = {
 	session: AgentSession;
 	mcpManager: MCPManager | undefined;
+	// Ordered queue of MCP tool refreshes for this record. Rebuilt per
+	// `#configureMcpServers` call; drained on reconfigure so a stale in-flight
+	// refresh can never land after a newer configuration's tools.
+	mcpRefreshChain: Promise<void> | undefined;
 	promptTurn: PromptTurnState | undefined;
 	promptQueue: PromptQueueState;
 	liveMessageId: string | undefined;
@@ -1132,6 +1136,7 @@ export class AcpAgent implements Agent {
 		return {
 			session,
 			mcpManager: undefined,
+			mcpRefreshChain: undefined,
 			promptTurn: undefined,
 			promptQueue: { promise: Promise.resolve(), release: undefined },
 			liveMessageId: undefined,
@@ -2373,6 +2378,11 @@ export class AcpAgent implements Agent {
 		if (record.mcpManager) {
 			await record.mcpManager.disconnectAll();
 		}
+		// Drain any in-flight refresh queued by a previous configuration: a refresh
+		// that already passed its manager guard could otherwise finish applying a
+		// stale tool set after this reconfiguration installs the new one.
+		await record.mcpRefreshChain;
+		record.mcpRefreshChain = undefined;
 		if (servers.length === 0) {
 			record.mcpManager = undefined;
 			await record.session.refreshMCPTools([]);
@@ -2381,26 +2391,28 @@ export class AcpAgent implements Agent {
 
 		const manager = new MCPManager(record.session.sessionManager.getCwd());
 		// MCP servers connect and reconnect independently, so `onToolsChanged` can fire
-		// several times back to back. Each firing is chained onto `refreshChain` so
-		// refreshes apply in order, and each one re-reads `manager.getTools()` at the
+		// several times back to back. Each firing is chained onto `record.mcpRefreshChain`
+		// so refreshes apply in order, and each one re-reads `manager.getTools()` at the
 		// time it actually runs rather than the snapshot from when it was queued — so a
 		// refresh can never apply a stale, smaller tool set after a newer one already landed.
-		let refreshChain: Promise<void> = Promise.resolve();
+		// The returned promise propagates failures (the initial awaited refresh below must
+		// fail session setup, as the pre-queue code did); the stored chain swallows them
+		// after logging so background firings only warn and the chain never rejects.
 		const enqueueMcpToolsRefresh = (): Promise<void> => {
-			refreshChain = refreshChain.then(async () => {
+			const run = (record.mcpRefreshChain ?? Promise.resolve()).then(async () => {
 				if (record.mcpManager !== manager) return;
-				try {
-					await record.session.refreshMCPTools(manager.getTools());
-				} catch (error) {
-					logger.warn("ACP MCP tool refresh failed", {
-						error: error instanceof Error ? error.message : String(error),
-					});
-				}
+				await record.session.refreshMCPTools(manager.getTools());
 			});
-			return refreshChain;
+			record.mcpRefreshChain = run.catch(error => {
+				logger.warn("ACP MCP tool refresh failed", {
+					error: error instanceof Error ? error.message : String(error),
+				});
+			});
+			return run;
 		};
 		manager.setOnToolsChanged(() => {
-			void enqueueMcpToolsRefresh();
+			// Failures are logged once via the stored chain's catch above.
+			enqueueMcpToolsRefresh().catch(() => {});
 		});
 		const configs: MCPConfigMap = {};
 		const sources: MCPSourceMap = {};
