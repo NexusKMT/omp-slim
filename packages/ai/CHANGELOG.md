@@ -25,6 +25,7 @@
 ### Fixed
 
 - Fixed OpenAI Responses token-cap truncations suppressing fully streamed function and custom tool calls whose inputs are complete.
+- Added SuperGrok (`xai-oauth`) usage tracking for weekly credits, product limits, and positive on-demand caps.
 
 ## [17.0.6] - 2026-07-20
 
