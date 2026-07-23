@@ -4,6 +4,7 @@ import { streamGoogle } from "@oh-my-pi/pi-ai/providers/google";
 import type { GoogleGeminiCliOptions } from "@oh-my-pi/pi-ai/providers/google-gemini-cli";
 import { buildGoogleGenerateContentParams } from "@oh-my-pi/pi-ai/providers/google-shared";
 import { streamGoogleVertex } from "@oh-my-pi/pi-ai/providers/google-vertex";
+import { streamSimple } from "@oh-my-pi/pi-ai/stream";
 import type { ApiOptionsMap, AssistantMessageEvent, Context, FetchImpl, Model, Tool } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
@@ -50,6 +51,19 @@ const vertexModel: Model<"google-vertex"> = buildModel({
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 	contextWindow: 200_000,
 	maxTokens: 32_000,
+});
+
+const openAiModel: Model<"openai-completions"> = buildModel({
+	id: "gpt-4.1-mini",
+	name: "OpenAI test model",
+	api: "openai-completions",
+	provider: "openai",
+	baseUrl: "https://api.openai.com/v1",
+	reasoning: false,
+	input: ["text"],
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	contextWindow: 128_000,
+	maxTokens: 16_384,
 });
 
 function sseStop(usage?: Record<string, number>): Response {
@@ -148,6 +162,43 @@ describe("Google caller-owned cachedContent", () => {
 		expect(body.systemInstruction).toBeUndefined();
 		expect(body.tools).toBeUndefined();
 		expect(body.toolConfig).toBeUndefined();
+	});
+
+	it("forwards cachedContent through public dispatch only to direct Google APIs", async () => {
+		const gemini = capturingFetch();
+		await drain(
+			streamSimple(geminiModel, cacheOnlyContext, {
+				apiKey: "k",
+				cachedContent: CACHE_NAME,
+				fetch: gemini.fetch,
+			}),
+		);
+		expect(gemini.calls()).toHaveLength(1);
+		expect(gemini.calls()[0]?.body.cachedContent).toBe(CACHE_NAME);
+
+		const vertex = capturingFetch();
+		await drain(
+			streamSimple(vertexModel, cacheOnlyContext, {
+				apiKey: "k",
+				cachedContent: VERTEX_CACHE_NAME,
+				fetch: vertex.fetch,
+			}),
+		);
+		expect(vertex.calls()).toHaveLength(1);
+		expect(vertex.calls()[0]?.body.cachedContent).toBe(VERTEX_CACHE_NAME);
+
+		const nonGoogle = capturingFetch(
+			new Response('{"error":{"message":"expected test rejection"}}', { status: 400 }),
+		);
+		await drain(
+			streamSimple(openAiModel, cacheOnlyContext, {
+				apiKey: "k",
+				cachedContent: CACHE_NAME,
+				fetch: nonGoogle.fetch,
+			}),
+		);
+		expect(nonGoogle.calls()).toHaveLength(1);
+		expect(nonGoogle.calls()[0]?.body.cachedContent).toBeUndefined();
 	});
 
 	it("rejects blank cachedContent in the shared builder before transport", () => {

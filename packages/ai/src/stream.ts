@@ -1643,6 +1643,7 @@ function mapOptionsForApi<TApi extends Api>(
 					serviceTier: options?.serviceTier,
 					thinking: { enabled: false },
 					toolChoice: mapGoogleToolChoice(options?.toolChoice),
+					cachedContent: options?.cachedContent,
 				});
 			}
 
@@ -1661,10 +1662,11 @@ function mapOptionsForApi<TApi extends Api>(
 					},
 					hideThinkingSummary: options?.hideThinkingSummary,
 					toolChoice: mapGoogleToolChoice(options?.toolChoice),
+					cachedContent: options?.cachedContent,
 				});
 			}
 
-			return castApi<"google-gemini-cli">({
+			return castApi<"google-generative-ai">({
 				...base,
 				thinking: {
 					enabled: true,
@@ -1672,6 +1674,7 @@ function mapOptionsForApi<TApi extends Api>(
 				},
 				hideThinkingSummary: options?.hideThinkingSummary,
 				toolChoice: mapGoogleToolChoice(options?.toolChoice),
+				cachedContent: options?.cachedContent,
 			});
 		}
 
@@ -1745,6 +1748,7 @@ function mapOptionsForApi<TApi extends Api>(
 					serviceTier: options?.serviceTier,
 					thinking: { enabled: false },
 					toolChoice: mapGoogleToolChoice(options?.toolChoice),
+					cachedContent: options?.cachedContent,
 				});
 			}
 
@@ -1762,6 +1766,7 @@ function mapOptionsForApi<TApi extends Api>(
 					},
 					hideThinkingSummary: options?.hideThinkingSummary,
 					toolChoice: mapGoogleToolChoice(options?.toolChoice),
+					cachedContent: options?.cachedContent,
 				});
 			}
 
@@ -1774,6 +1779,7 @@ function mapOptionsForApi<TApi extends Api>(
 				},
 				hideThinkingSummary: options?.hideThinkingSummary,
 				toolChoice: mapGoogleToolChoice(options?.toolChoice),
+				cachedContent: options?.cachedContent,
 			});
 		}
 
