@@ -1,0 +1,338 @@
+import { describe, expect, it } from "bun:test";
+import type {
+	Api,
+	ApiKeyResolver,
+	AssistantMessage,
+	AssistantMessageEvent,
+	AssistantMessageEventStream,
+	Context,
+	Model,
+	SimpleStreamOptions,
+} from "@oh-my-pi/pi-ai";
+import { type BenchModelRegistry, runBenchCommand } from "@oh-my-pi/pi-coding-agent/cli/bench-cli";
+
+const model = {
+	provider: "openai",
+	id: "gpt-cache-test",
+	name: "gpt-cache-test",
+	api: "openai-responses",
+	maxTokens: 4096,
+	contextWindow: 128_000,
+} as unknown as Model<Api>;
+
+const codexModel = {
+	...model,
+	provider: "openai-codex",
+	id: "gpt-cache-codex-test",
+	name: "gpt-cache-codex-test",
+	api: "openai-codex-responses",
+} as unknown as Model<Api>;
+
+const registry: BenchModelRegistry = {
+	getAll: () => [model],
+	getApiKey: async () => "sk-test",
+	resolver: () => (() => Promise.resolve("sk-test")) as unknown as ApiKeyResolver,
+};
+
+function streamWithMessage(message: AssistantMessage, beforeDone?: () => void): AssistantMessageEventStream {
+	const events = [
+		{ type: "text_delta", delta: "ok" },
+		{ type: "done", message },
+	] as unknown as AssistantMessageEvent[];
+	const iterator = (async function* () {
+		for (const event of events) {
+			if (event.type === "done") beforeDone?.();
+			yield event;
+		}
+	})();
+	return Object.assign(iterator, { result: async () => message }) as unknown as AssistantMessageEventStream;
+}
+
+function successfulMessage(cacheRead: number, cacheWrite: number): AssistantMessage {
+	return {
+		role: "assistant",
+		content: [{ type: "text", text: "ok" }],
+		stopReason: "stop",
+		usage: {
+			input: 20,
+			output: 2,
+			cacheRead,
+			cacheWrite,
+			totalTokens: 22 + cacheRead + cacheWrite,
+			cost: { input: 1, output: 1, cacheRead: 1, cacheWrite: 1, total: 4 },
+		},
+		duration: 20,
+		ttft: 5,
+	} as unknown as AssistantMessage;
+}
+
+describe("bench cache mode", () => {
+	it("splits the cache breakpoint prefix from each variable suffix with native OMP messages", async () => {
+		const calls: Array<{ context: Context; options: SimpleStreamOptions }> = [];
+		let coldCompleted = false;
+		let stdout = "";
+		let id = 0;
+		const summary = await runBenchCommand(
+			{ models: ["openai/gpt-cache-test"], flags: { cache: true, json: true } },
+			{
+				createRuntime: async () => ({ modelRegistry: registry, close: () => {} }),
+				randomSessionId: () => `session-${++id}`,
+				writeStdout: text => {
+					stdout += text;
+				},
+				writeStderr: () => {},
+				setExitCode: () => {},
+				streamSimple: (_model, context, options) => {
+					const phase = calls.length === 0 ? "cold" : "warm";
+					if (phase === "warm") expect(coldCompleted).toBe(true);
+					calls.push({ context, options: options! });
+					void options?.onPayload?.({ input: context.messages, model: "gpt-cache-test" });
+					void options?.onResponse?.({
+						status: 200,
+						requestId: phase === "cold" ? "request-cold" : "request-warm",
+						headers: phase === "warm" ? { "cf-aig-cache-status": "HIT" } : {},
+					});
+					const message = successfulMessage(phase === "warm" ? 100 : 0, phase === "cold" ? 100 : 0);
+					return streamWithMessage(
+						message,
+						phase === "cold"
+							? () => {
+									coldCompleted = true;
+								}
+							: undefined,
+					);
+				},
+				stdoutIsTTY: false,
+			},
+		);
+
+		expect(summary.runs).toBe(2);
+		expect(summary.maxTokens).toBe(64);
+		expect(summary.cache).toEqual({ pairs: 1, concurrency: 1 });
+		expect(calls).toHaveLength(2);
+		expect(calls[0]?.options.promptCacheKey).toBe(calls[1]?.options.promptCacheKey);
+		expect(calls[0]?.options.apiKey).toBe(calls[1]?.options.apiKey);
+		expect(calls[0]?.options.sessionId).not.toBe(calls[1]?.options.sessionId);
+		expect(calls[0]?.options.providerSessionState).not.toBe(calls[1]?.options.providerSessionState);
+		expect(calls[0]?.options.providerSessionState?.size).toBe(0);
+		expect(calls[1]?.options.providerSessionState?.size).toBe(0);
+		expect(calls[0]?.options.statefulResponses).toBe(false);
+		expect(calls[1]?.options.statefulResponses).toBe(false);
+		expect(calls[0]?.options.headers).toBeUndefined();
+		const coldMessages = calls[0]?.context.messages;
+		const warmMessages = calls[1]?.context.messages;
+		expect(coldMessages).toHaveLength(2);
+		expect(warmMessages).toHaveLength(2);
+		expect(coldMessages?.[0]?.content).toBe(warmMessages?.[0]?.content);
+		expect(coldMessages?.[1]?.content).toBe("Cache benchmark suffix A.");
+		expect(warmMessages?.[1]?.content).toBe("Cache benchmark suffix B.");
+		const pair = summary.models[0]?.cachePairs?.[0];
+		expect(pair?.cold.observations).toEqual(["prompt_cache_write_observed"]);
+		expect(pair?.warm.observations).toEqual(["prompt_cache_read_observed", "response_cache_hit_observed"]);
+		expect(pair?.payloadStructureStable).toBe(true);
+		expect(pair?.coldAlreadyWarm).toBe(false);
+		expect(stdout).not.toContain("Prompt-cache benchmark stable prefix");
+		expect(stdout).not.toContain("bench-cache:");
+		expect(stdout).not.toContain("Cache benchmark suffix");
+	});
+
+	it("rejects Codex Responses cache mode before credentials or requests can imply independent pairs", async () => {
+		let credentialLookups = 0;
+		await expect(
+			runBenchCommand(
+				{ models: ["openai-codex/gpt-cache-codex-test"], flags: { cache: true } },
+				{
+					createRuntime: async () => ({
+						modelRegistry: {
+							...registry,
+							getAll: () => [codexModel],
+							getApiKey: async () => {
+								credentialLookups++;
+								return "sk-test";
+							},
+						},
+						close: () => {},
+					}),
+					streamSimple: () => {
+						throw new Error("Codex cache mode must reject before issuing a request");
+					},
+				},
+			),
+		).rejects.toThrow(
+			"--cache is not supported for openai-codex-responses because Codex WebSocket chaining cannot produce independent prompt-cache pairs",
+		);
+		expect(credentialLookups).toBe(0);
+	});
+
+	it("gives every pair a private stable namespace and flags a prewarmed cold request", async () => {
+		const calls: Array<{ context: Context; options: SimpleStreamOptions }> = [];
+		let stdout = "";
+		const summary = await runBenchCommand(
+			{ models: ["openai/gpt-cache-test"], flags: { cache: true, cachePairs: 2 } },
+			{
+				createRuntime: async () => ({ modelRegistry: registry, close: () => {} }),
+				randomSessionId: (() => {
+					let id = 0;
+					return () => `session-${++id}`;
+				})(),
+				writeStdout: text => {
+					stdout += text;
+				},
+				writeStderr: () => {},
+				setExitCode: () => {},
+				streamSimple: (_model, context, options) => {
+					const callIndex = calls.length;
+					calls.push({ context, options: options! });
+					void options?.onPayload?.({ input: context.messages });
+					const cold = callIndex % 2 === 0;
+					return streamWithMessage(successfulMessage(callIndex === 2 ? 100 : 0, cold ? 100 : 0));
+				},
+				stdoutIsTTY: false,
+			},
+		);
+
+		expect(calls).toHaveLength(4);
+		const stablePrefixes = calls.map(call => call.context.messages[0]?.content);
+		expect(stablePrefixes[0]).toBe(stablePrefixes[1]);
+		expect(stablePrefixes[2]).toBe(stablePrefixes[3]);
+		expect(stablePrefixes[0]).not.toBe(stablePrefixes[2]);
+		expect(calls[0]?.options.promptCacheKey).toBe(calls[1]?.options.promptCacheKey);
+		expect(calls[2]?.options.promptCacheKey).toBe(calls[3]?.options.promptCacheKey);
+		expect(calls[0]?.options.promptCacheKey).not.toBe(calls[2]?.options.promptCacheKey);
+		expect(summary.models[0]?.cachePairs?.[0]?.coldAlreadyWarm).toBe(false);
+		expect(summary.models[0]?.cachePairs?.[1]?.coldAlreadyWarm).toBe(true);
+		expect(stdout).toContain("cold (already warm)");
+	});
+
+	it("prints cache pair TTFT, duration, tokens, and throughput for human output", async () => {
+		let stdout = "";
+		await runBenchCommand(
+			{ models: ["openai/gpt-cache-test"], flags: { cache: true } },
+			{
+				createRuntime: async () => ({ modelRegistry: registry, close: () => {} }),
+				randomSessionId: (() => {
+					let id = 0;
+					return () => `session-${++id}`;
+				})(),
+				writeStdout: text => {
+					stdout += text;
+				},
+				writeStderr: () => {},
+				setExitCode: () => {},
+				streamSimple: (_model, context, options) => {
+					void options?.onPayload?.({ input: context.messages });
+					return streamWithMessage(successfulMessage(0, 0));
+				},
+				stdoutIsTTY: false,
+			},
+		);
+
+		expect(stdout).toContain("TTFT");
+		expect(stdout).toContain("duration");
+		expect(stdout).toContain("tokens");
+		expect(stdout).toContain("throughput");
+	});
+
+	it("keeps normal defaults and requires explicit cache concurrency", async () => {
+		let active = 0;
+		let maxActive = 0;
+		let started = 0;
+		const release = Promise.withResolvers<void>();
+		let id = 0;
+		const summary = await runBenchCommand(
+			{ models: ["openai/gpt-cache-test"], flags: { json: true } },
+			{
+				createRuntime: async () => ({ modelRegistry: registry, close: () => {} }),
+				randomSessionId: () => `session-${++id}`,
+				writeStdout: () => {},
+				writeStderr: () => {},
+				setExitCode: () => {},
+				streamSimple: () => {
+					const message = successfulMessage(0, 0);
+					const iterator = (async function* () {
+						active++;
+						maxActive = Math.max(maxActive, active);
+						started++;
+						if (started === 4) release.resolve();
+						await release.promise;
+						active--;
+						yield { type: "text_delta", delta: "ok" } as unknown as AssistantMessageEvent;
+						yield { type: "done", message } as unknown as AssistantMessageEvent;
+					})();
+					return Object.assign(iterator, {
+						result: async () => message,
+					}) as unknown as AssistantMessageEventStream;
+				},
+				stdoutIsTTY: false,
+			},
+		);
+		expect(summary.runs).toBe(10);
+		expect(summary.maxTokens).toBe(512);
+		expect(maxActive).toBe(4);
+		await expect(
+			runBenchCommand(
+				{ models: ["openai/gpt-cache-test"], flags: { cache: true, par: 2 } },
+				{ createRuntime: async () => ({ modelRegistry: registry, close: () => {} }) },
+			),
+		).rejects.toThrow("--cache-concurrency");
+	});
+	it("reads only the configured prefix bytes without exposing the file", async () => {
+		const stablePrefixes: string[] = [];
+		await runBenchCommand(
+			{
+				models: ["openai/gpt-cache-test"],
+				flags: { cache: true, cachePrefixFile: "private-prefix.txt", cachePrefixBytes: 5, json: true },
+			},
+			{
+				createRuntime: async () => ({ modelRegistry: registry, close: () => {} }),
+				randomSessionId: (() => {
+					let id = 0;
+					return () => `session-${++id}`;
+				})(),
+				readTextFile: async (path, maxBytes) => {
+					expect(path).toBe("private-prefix.txt");
+					expect(maxBytes).toBe(5);
+					return "ab😀cd";
+				},
+				writeStdout: text => {
+					expect(text).not.toContain("ab😀cd");
+				},
+				writeStderr: () => {},
+				setExitCode: () => {},
+				streamSimple: (_model, context, options) => {
+					stablePrefixes.push(context.messages[0]?.content as string);
+					void options?.onPayload?.({ input: context.messages });
+					return streamWithMessage(successfulMessage(0, 0));
+				},
+				stdoutIsTTY: false,
+			},
+		);
+		expect(stablePrefixes).toHaveLength(2);
+		expect(stablePrefixes[0]).toBe(stablePrefixes[1]);
+		expect(stablePrefixes[0]).toStartWith("ab\n\nPrompt-cache benchmark namespace:");
+	});
+
+	it("does not turn zero cache counters into a miss", async () => {
+		const summary = await runBenchCommand(
+			{ models: ["openai/gpt-cache-test"], flags: { cache: true, json: true } },
+			{
+				createRuntime: async () => ({ modelRegistry: registry, close: () => {} }),
+				randomSessionId: (() => {
+					let id = 0;
+					return () => `session-${++id}`;
+				})(),
+				writeStdout: () => {},
+				writeStderr: () => {},
+				setExitCode: () => {},
+				streamSimple: (_model, context, options) => {
+					void options?.onPayload?.({ input: context.messages });
+					return streamWithMessage(successfulMessage(0, 0));
+				},
+				stdoutIsTTY: false,
+			},
+		);
+		const pair = summary.models[0]?.cachePairs?.[0];
+		expect(pair?.cold.observations).toEqual(["no_provider_proof"]);
+		expect(pair?.warm.observations).toEqual(["no_provider_proof"]);
+	});
+});
