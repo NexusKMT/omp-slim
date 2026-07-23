@@ -178,9 +178,7 @@ export class AgentLifecycleManager {
 	isParking(id: string, expected?: AgentRefExpectation): boolean {
 		const park = this.#parks.get(id);
 		return Boolean(
-			park &&
-				!park.cancelled &&
-				(expected === undefined || park.ref === expected || park.ref.session === expected),
+			park && !park.cancelled && (expected === undefined || park.ref === expected || park.ref.session === expected),
 		);
 	}
 
