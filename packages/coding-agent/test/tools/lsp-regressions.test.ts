@@ -2821,7 +2821,7 @@ describe("lsp regressions", () => {
 			const tempDir = TempDir.createSync("@omp-lsp-reload-cancel-fallback-");
 			const controller = new AbortController();
 			try {
-				const server = installFakeLsp((message, srv) => {
+				installFakeLsp((message, srv) => {
 					if (message.method === "initialize") {
 						srv.send({ jsonrpc: "2.0", id: message.id, result: { capabilities: {} } });
 					} else if (message.method === "rust-analyzer/reloadWorkspace") {
