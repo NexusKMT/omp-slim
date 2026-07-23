@@ -13966,6 +13966,13 @@ export class AgentSession {
 		const sessionContext = this.buildDisplaySessionContext();
 		this.agent.replaceMessages(sessionContext.messages);
 		this.#rebasePendingContextSnapshotAfterCompaction();
+		// Same post-rewrite bookkeeping as the regular compaction append: the
+		// rebuilt context no longer carries the transient plan reference (#1246),
+		// and advisor cursors / todo phases were derived from the replaced
+		// history.
+		this.#planReferenceSent = false;
+		this.#resetAllAdvisorRuntimes();
+		this.#syncTodoPhasesFromBranch();
 		this.#closeCodexProviderSessionsForHistoryRewrite();
 		this.emitNotice(
 			"info",
