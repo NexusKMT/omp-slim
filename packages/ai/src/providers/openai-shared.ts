@@ -669,6 +669,7 @@ export function applyVercelResponsesCacheControls(
 
 	params.caching = "auto";
 	if (routing.cacheAnchorItems !== undefined) params.cache_anchor_items = routing.cacheAnchorItems;
+	// A configured 1h TTL is capped by resolved retention; default and short intentionally omit it.
 	if (routing.cacheTtl !== undefined && (routing.cacheTtl !== "1h" || cacheRetention === "long")) {
 		params.cache_ttl = routing.cacheTtl;
 	}
