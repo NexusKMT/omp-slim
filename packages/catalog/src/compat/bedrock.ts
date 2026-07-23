@@ -45,13 +45,19 @@ const EXPLICIT_CHECKPOINTS_4096_1H: ResolvedBedrockCompat = {
 /**
  * Explicit Nova cache points complement Bedrock's automatic prefix caching:
  * AWS recommends them for consistent cache hits and input-cost savings. Keep
- * this exact bundled set conservative rather than treating arbitrary Nova-like
- * application profiles as checkpoint-capable.
+ * these exact documented model and inference-profile IDs conservative rather
+ * than treating arbitrary Nova-like application profiles as checkpoint-capable.
  */
 function detectedBedrockCompat(modelId: string): ResolvedBedrockCompat {
 	const id = modelId.toLowerCase();
 
-	if (id === "us.amazon.nova-lite-v1:0" || id === "us.amazon.nova-micro-v1:0" || id === "us.amazon.nova-pro-v1:0") {
+	if (
+		id === "us.amazon.nova-lite-v1:0" ||
+		id === "us.amazon.nova-micro-v1:0" ||
+		id === "us.amazon.nova-pro-v1:0" ||
+		id === "amazon.nova-premier-v1:0" ||
+		id === "us.amazon.nova-premier-v1:0"
+	) {
 		return EXPLICIT_CHECKPOINTS_1024_5M;
 	}
 

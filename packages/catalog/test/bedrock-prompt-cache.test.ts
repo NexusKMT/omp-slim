@@ -94,24 +94,37 @@ describe("Bedrock prompt-cache compat", () => {
 		}
 	});
 
-	test("models every bundled cache-capable Nova variant for explicit 5m checkpoints", () => {
-		for (const id of ["us.amazon.nova-lite-v1:0", "us.amazon.nova-micro-v1:0", "us.amazon.nova-pro-v1:0"] as const) {
-			const model = getBundledModel<"bedrock-converse-stream">("amazon-bedrock", id);
-			expect(model?.compat).toEqual({
-				promptCacheMode: "explicit",
-				supportsLongPromptCacheRetention: false,
-				promptCacheMinimumTokens: 1024,
-				promptCacheMaximumCheckpoints: 4,
-			});
+	test("models exact cache-capable Nova IDs for explicit 5m checkpoints", () => {
+		const expected = {
+			promptCacheMode: "explicit",
+			supportsLongPromptCacheRetention: false,
+			promptCacheMinimumTokens: 1024,
+			promptCacheMaximumCheckpoints: 4,
+		} as const;
+
+		for (const id of [
+			"us.amazon.nova-lite-v1:0",
+			"us.amazon.nova-micro-v1:0",
+			"us.amazon.nova-pro-v1:0",
+			"us.amazon.nova-premier-v1:0",
+		] as const) {
+			expect(getBundledModel<"bedrock-converse-stream">("amazon-bedrock", id)?.compat).toEqual(expected);
+		}
+
+		// AWS documents these as Nova Premier's in-region model and US geo inference IDs.
+		for (const id of ["amazon.nova-premier-v1:0", "us.amazon.nova-premier-v1:0"] as const) {
+			expect(buildModel(bedrockSpec({ id })).compat).toEqual(expected);
 		}
 	});
 
 	test("keeps unknown routes conservative and honors sparse profile overrides", () => {
-		const unknown = buildModel(
-			bedrockSpec({ id: "arn:aws:bedrock:us-east-1:123:application-inference-profile/opaque" }),
-		);
+		const opaqueProfileId = "arn:aws:bedrock:us-east-1:123:application-inference-profile/opaque";
+		const unknown = buildModel(bedrockSpec({ id: opaqueProfileId }));
 		expect(unknown.compat.promptCacheMode).toBe("none");
 
+		for (const id of ["amazon.nova-premier-v1:1", "us.amazon.nova-unknown-v1:0"]) {
+			expect(buildModel(bedrockSpec({ id })).compat.promptCacheMode).toBe("none");
+		}
 		const sparse = {
 			promptCacheMode: "explicit" as const,
 			promptCacheMinimumTokens: 1024,

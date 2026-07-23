@@ -95,7 +95,12 @@ describe("Bedrock prompt cache checkpoints", () => {
 	});
 
 	test("emits default-5m checkpoints for every bundled Nova cache-capable payload", async () => {
-		for (const id of ["us.amazon.nova-lite-v1:0", "us.amazon.nova-micro-v1:0", "us.amazon.nova-pro-v1:0"] as const) {
+		for (const id of [
+			"us.amazon.nova-lite-v1:0",
+			"us.amazon.nova-micro-v1:0",
+			"us.amazon.nova-pro-v1:0",
+			"us.amazon.nova-premier-v1:0",
+		] as const) {
 			const nova = getBundledModel<"bedrock-converse-stream">("amazon-bedrock", id);
 			expect(nova).toBeDefined();
 			const payload = await capturePayload(nova!, "long");
@@ -112,6 +117,14 @@ describe("Bedrock prompt cache checkpoints", () => {
 				additionalModelRequestFields: undefined,
 			});
 		}
+	});
+
+	test("emits default-5m system and message checkpoints for Nova Premier's in-region ID", async () => {
+		const payload = await capturePayload(model("amazon.nova-premier-v1:0"), "long");
+		expect(payload.system).toEqual([{ text: "Use concise answers." }, { cachePoint: { type: "default" } }]);
+		expect(payload.messages).toEqual([
+			{ role: "user", content: [{ text: "What is the answer?" }, { cachePoint: { type: "default" } }] },
+		]);
 	});
 
 	test("forces opaque profiles to default checkpoints without granting 1h retention", async () => {
