@@ -94,7 +94,7 @@ describe("Bedrock prompt-cache compat", () => {
 		}
 	});
 
-	test("models every AWS-documented Nova 2 Lite ID for explicit 5m checkpoints", () => {
+	test("models exact cache-capable Nova IDs for explicit 5m checkpoints", () => {
 		const expected = {
 			promptCacheMode: "explicit",
 			supportsLongPromptCacheRetention: false,
@@ -102,10 +102,17 @@ describe("Bedrock prompt-cache compat", () => {
 			promptCacheMaximumCheckpoints: 4,
 		} as const;
 
-		const bundled = getBundledModel<"bedrock-converse-stream">("amazon-bedrock", "global.amazon.nova-2-lite-v1:0");
-		expect(bundled?.compat).toEqual(expected);
+		for (const id of [
+			"us.amazon.nova-lite-v1:0",
+			"us.amazon.nova-micro-v1:0",
+			"us.amazon.nova-pro-v1:0",
+			"us.amazon.nova-premier-v1:0",
+			"global.amazon.nova-2-lite-v1:0",
+		] as const) {
+			expect(getBundledModel<"bedrock-converse-stream">("amazon-bedrock", id)?.compat).toEqual(expected);
+		}
 
-		// AWS documents both the in-region model IDs and the US geo inference IDs.
+		// AWS documents in-region model IDs plus geo/global inference-profile IDs.
 		for (const id of [
 			"amazon.nova-lite-v1:0",
 			"amazon.nova-micro-v1:0",
