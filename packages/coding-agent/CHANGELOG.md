@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Ctrl-clicking a wrapped OAuth authorization URL opening only the clicked row's truncated fragment by preserving the complete hyperlink target on every rendered row.
+
 ## [17.0.9] - 2026-07-23
 
 ### Added
@@ -17,7 +21,6 @@
 
 ### Fixed
 
-- Fixed Ctrl-clicking a wrapped OAuth authorization URL opening only the clicked row's truncated fragment by preserving the complete hyperlink target on every rendered row.
 - Fixed Auto QA grievance recording silently dropping every report since the xd:// device consolidation: `openAutoQaDb` treated the database file path (`~/.omp/autoqa.db`) as a directory and tried to open `autoqa.db/autoqa.db` inside it, which fails on legacy installs (the flat file blocks the directory) and fresh ones alike (SQLite does not create parent directories). Also restored the `busy_timeout` pragma dropped in the same refactor (#2421). Renamed `getAutoQaDbDir` to `getAutoQaDbPath` to match what it returns.
 - Fixed the setup wizard hiding the selected row on short terminals (e.g. 24x80): the provider sign-in, theme, and web-search lists now fit their windows to the visible height, and decorative chrome (sign-in hint, theme mock preview) yields to the list when space is tight.
 - Fixed restored sessions replaying terminal aborted or errored assistant turns, which could repeatedly fail continuation from an assistant role; `/retry` now consults the persisted transcript so the failed turn remains retryable without re-entering provider context.
