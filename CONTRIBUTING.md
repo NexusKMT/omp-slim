@@ -3,6 +3,12 @@
 Pull requests are welcome. Keep them focused, understand the work you submit,
 and be prepared to explain and maintain it.
 
+> [!NOTE]
+> Pull requests are **temporarily open to everyone** as a trial. We previously
+> required a vouch before accepting PRs; that requirement is lifted for now
+> while we evaluate how open contributions go. Depending on the results, the
+> vouch system may return.
+
 ## Before you start
 
 ### Small changes
