@@ -2,7 +2,7 @@
  * Contracts: task.batch gating (batch spawning + shared context).
  *
  * 1. The wire schema is shape-swapped by `task.batch`: `{ context, tasks[] }`
- *    when on (per-spawn fields — including `isolated`, `outputSchema`, and
+ *    when on (per-spawn fields — including `model`, `isolated`, `outputSchema`, and
  *    `schemaMode` — live in the items), the flat form exposes those fields
  *    directly. The stale `schema` field is never accepted.
  * 2. Shape validation rejects stale `schema`, `tasks`/`context` while batch
@@ -101,6 +101,7 @@ describe("task.batch schema gating", () => {
 		expect(offProperties.context).toBeUndefined();
 		expect(offProperties.task).toBeDefined();
 		expect(offProperties.name).toBeDefined();
+		expect(offProperties.model).toBeDefined();
 		expect(offProperties.outputSchema).toBeDefined();
 		expect(typeof offProperties.outputSchema).toBe("object");
 		expect(offProperties.schemaMode).toBeDefined();
@@ -114,12 +115,14 @@ describe("task.batch schema gating", () => {
 		expect(onProperties.task).toBeUndefined();
 		expect(onProperties.name).toBeUndefined();
 		expect(onProperties.agent).toBeUndefined();
+		expect(onProperties.model).toBeUndefined();
 		expect(onProperties.outputSchema).toBeUndefined();
 		expect(onProperties.schemaMode).toBeUndefined();
 		const items = (onProperties.tasks as { items?: { properties?: Record<string, unknown> } }).items;
 		expect(items?.properties?.task).toBeDefined();
 		expect(items?.properties?.name).toBeDefined();
 		expect(items?.properties?.agent).toBeDefined();
+		expect(items?.properties?.model).toBeDefined();
 		expect(items?.properties?.outputSchema).toBeDefined();
 		expect(typeof items?.properties?.outputSchema).toBe("object");
 		expect(items?.properties?.schemaMode).toBeDefined();
@@ -212,6 +215,18 @@ describe("task.batch validation", () => {
 		expect(text).toContain("Missing `context`");
 	});
 
+	it("rejects an empty per-item model selector", async () => {
+		const text = await executeText(
+			{
+				context: "Background.",
+				tasks: [{ name: "Alpha", task: "Work.", model: [","] }],
+			},
+			{ "task.batch": true },
+		);
+		expect(text).toContain("Task 1 (`Alpha`) has an invalid `model`");
+		expect(text).toContain("non-empty array");
+	});
+
 	it("rejects duplicate provided names case-insensitively", async () => {
 		const text = await executeText(
 			{
@@ -269,7 +284,7 @@ describe("task.batch spawning", () => {
 		AgentRegistry.resetGlobalForTests();
 	});
 
-	it("spawns one background job per task item and forwards independent schemas with shared context", async () => {
+	it("spawns one background job per task item and forwards independent models and schemas with shared context", async () => {
 		mockDiscovery({
 			...taskAgent,
 			output: { type: "object", properties: { staleAgentOutput: { type: "boolean" } } },
@@ -279,6 +294,7 @@ describe("task.batch spawning", () => {
 			context?: string;
 			assignment?: string;
 			parentAgentId?: string;
+			modelOverride?: string | string[];
 			outputSchema?: unknown;
 			outputSchemaMode?: "permissive" | "strict";
 			outputSchemaSource?: "caller" | "agent" | "session" | "none";
@@ -290,6 +306,7 @@ describe("task.batch spawning", () => {
 				context: options.context,
 				assignment: options.assignment,
 				parentAgentId: options.parentAgentId,
+				modelOverride: options.modelOverride,
 				outputSchema: options.outputSchema,
 				outputSchemaMode: options.outputSchemaMode,
 				outputSchemaSource: options.outputSchemaSource,
@@ -307,8 +324,20 @@ describe("task.batch spawning", () => {
 		const result = await tool.execute("tc-batch", {
 			context: "# Goal\nShared background.",
 			tasks: [
-				{ name: "Alpha", task: "Do A.", outputSchema: alphaSchema, schemaMode: "strict" },
-				{ name: "Beta", task: "Do B.", outputSchema: betaSchema, schemaMode: "permissive" },
+				{
+					name: "Alpha",
+					task: "Do A.",
+					model: "openai-codex/gpt-5.6-sol:high",
+					outputSchema: alphaSchema,
+					schemaMode: "strict",
+				},
+				{
+					name: "Beta",
+					task: "Do B.",
+					model: ["anthropic/claude-sonnet-4-6:medium", "openai-codex/gpt-5.6-sol:low"],
+					outputSchema: betaSchema,
+					schemaMode: "permissive",
+				},
 			],
 		} as TaskParams);
 
@@ -333,10 +362,15 @@ describe("task.batch spawning", () => {
 			expect(spawn.outputSchemaOverridesAgent).toBe(true);
 		}
 		const byId = new Map(seen.map(spawn => [spawn.id, spawn]));
+		expect(byId.get("Alpha")?.modelOverride).toEqual(["openai-codex/gpt-5.6-sol:high"]);
 		expect(byId.get("Alpha")?.outputSchema).toEqual(alphaSchema);
 		expect(byId.get("Alpha")?.outputSchemaMode).toBe("strict");
 		expect(byId.get("Beta")?.outputSchema).toEqual(betaSchema);
 		expect(byId.get("Beta")?.outputSchemaMode).toBe("permissive");
+		expect(byId.get("Beta")?.modelOverride).toEqual([
+			"anthropic/claude-sonnet-4-6:medium",
+			"openai-codex/gpt-5.6-sol:low",
+		]);
 		expect(seen.map(spawn => spawn.assignment).sort()).toEqual(["Do A.", "Do B."]);
 		for (const spawn of seen) expect(spawn.parentAgentId).toBe("ParentA");
 	});

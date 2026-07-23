@@ -26,9 +26,9 @@
 
 ## Inputs
 
-The wire schema is shape-swapped by `task.batch` (default on). One unit of work is the task item `{ name?, agent?, task, isolated? }` (`isolated` only when `task.isolation.mode` is not `none`):
+The wire schema is shape-swapped by `task.batch` (default on). One unit of work is the task item `{ name?, agent?, task, model?, isolated? }` (`isolated` only when `task.isolation.mode` is not `none`):
 
-- **Batch shape** (`task.batch` on): `{ context, tasks: item[] }` — one subagent per item, all run under the same fan-out rules; there is no top-level agent field. `context` is **required** shared background rendered into every spawned subagent's system prompt (`CONTEXT` section); `agent` and `isolated` are per item, so one call may mix agent types.
+- **Batch shape** (`task.batch` on): `{ context, tasks: item[] }` — one subagent per item, all run under the same fan-out rules; there is no top-level agent field. `context` is **required** shared background rendered into every spawned subagent's system prompt (`CONTEXT` section); `agent`, `model`, and `isolated` are per item, so one call may mix agent types and models.
 - **Flat shape** (`task.batch` off): `{ ...item }` — exactly one spawn per call. Shared background goes into a `local://` file (e.g. `local://ctx.md`) that each spawn's `task` references; subagents share the parent's `local://` root.
 
 | Field | Type | Required | Description |
@@ -38,6 +38,7 @@ The wire schema is shape-swapped by `task.batch` (default on). One unit of work 
 | `name` | `string` | No | Stable agent name — becomes the registry/IRC id. Defaults to a generated AdjectiveNoun name. Uniquified per session by `AgentOutputManager`. Item field in batch shape, top-level in flat shape. |
 | `agent` | `string` | No | Agent type to run this item (e.g. `scout`). Defaults to the spawn policy's default agent (usually `task`); items in one batch call may use different agent types. Item field in batch shape, top-level in flat shape. |
 | `task` | `string` | Yes | The work — complete, self-contained instructions. Empty-after-trim is rejected. Item field in batch shape, top-level in flat shape. |
+| `model` | `string \| string[]` | No | Explicit non-empty model selector or non-empty fallback chain for this spawn. Optional `:reasoning` suffixes are preserved. Takes precedence over `task.agentModelOverrides` and agent frontmatter. Item field in batch shape, top-level in flat shape. |
 | `isolated` | `boolean` | No | Run in an isolated workspace and return patches. Exists only when `task.isolation.mode` is not `none`; per item in batch shape, top-level in flat shape. Isolated agents are torn down at completion — not revivable. |
 
 There is no wire label field: the one-line UI label shown in the TUI/registry is generated automatically from the `task` text by the tiny/title model (fire-and-forget), so callers never provide it.
@@ -84,7 +85,7 @@ Artifacts and side channels:
    - a mixed call registers the async jobs first, then runs its blocking items inline and returns once they settle — the text combines the inline summaries with the spawned-job listing, and the block keeps rendering the still-running background rows beside the inline results.
 5. `#executeSync(...)` runs the spawn path (`#runSpawn`), which rediscovers agents from disk, so runtime resolution can differ from the create-time description.
 6. It resolves each spawn's requested `agent` type, rejects unknown or settings-disabled agents, and enforces parent spawn policy plus `PI_BLOCKED_AGENT` self-recursion prevention.
-7. Output schema priority: agent frontmatter `output` → inherited parent session schema (the call itself never carries one).
+7. Model priority: per-call `model` → `task.agentModelOverrides` → agent frontmatter → configured task role/session fallback. Output schema priority: per-call `outputSchema` → agent frontmatter `output` → inherited parent session schema.
 8. Plan mode swaps in an `effectiveAgent` with a read-only tool subset and plan-mode prompt; `runSubprocess(...)` receives the effective agent.
 9. If `isolated`, it requires a git repo (`getRepoRoot(...)` / `captureBaseline(...)`), maps `task.isolation.mode` to a backend-kind hint (`parseIsolationMode`), and materializes the workspace via the natives PAL (`ensureIsolation` → `isoResolve`/`isoStart`), walking the candidate list when a backend is unavailable.
 10. Artifacts dir comes from the parent session file when available, otherwise a temp dir. When the session is executing an approved plan, the plan reference is handed to the subagent.
