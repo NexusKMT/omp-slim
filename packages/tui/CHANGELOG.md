@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added `SelectList.setMaxVisible()` so hosts can refit the visible row budget to available height after construction.
 
 ## [17.0.8] - 2026-07-22
 
