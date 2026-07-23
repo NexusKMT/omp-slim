@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Fixed concurrent dead-kernel replacement in persistent Python sessions starting multiple generations and orphaning the losing process; callers now share one generation-scoped replacement, while resets and disposal invalidate and drain stale replacements ([#6367](https://github.com/can1357/oh-my-pi/issues/6367)).
 - Fixed credential-shaped tokens (GitHub/GitLab/OpenAI/Anthropic key patterns) being redacted from outbound provider requests even with `secrets.enabled` off; the pattern redaction now follows the `secrets.enabled` ("Hide Secrets") setting like the secret obfuscator.
 - Fixed Ctrl-clicking a wrapped OAuth authorization URL opening only the clicked row's truncated fragment by preserving the complete hyperlink target on every rendered row.
 - Fixed used-only absolute usage amounts across output surfaces: CLI now renders `$123.45 used`; the TUI shows a neutral, width-bounded amount instead of a pending/dotted/account-count placeholder; and ACP preserves `123.45 usd used` while suppressing duplicate window suffixes such as `— extra`. ([#5575](https://github.com/can1357/oh-my-pi/issues/5575))
