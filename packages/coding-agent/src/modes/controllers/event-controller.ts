@@ -1092,7 +1092,12 @@ import { aggregateVibeWorkerTokensPerSecond, VibeSessionRegistry } from "../vibe
 		// which only fire `tool_execution_end`, never `_update` — do not leave
 		// the UI looking idle while the session keeps streaming (#3857).
 		this.#ensureWorkingLoaderWhileStreaming();
-		if (event.toolName === "ask" || this.#approvalAttentionToolCallIds.delete(event.toolCallId)) {
+		// Return to `working` only when the LAST outstanding user-blocking prompt
+		// resolves: with queued approval prompts (always-ask/write), the first tool
+		// to finish must not clear the attention signal while another prompt still
+		// waits. `ask` ids are in the set too (added at tool_execution_start), so
+		// the delete also covers them without leaking ids until turn end.
+		if (this.#approvalAttentionToolCallIds.delete(event.toolCallId) && this.#approvalAttentionToolCallIds.size === 0) {
 			setTerminalTitleState("working");
 		}
 		if (event.toolName === "read") {
