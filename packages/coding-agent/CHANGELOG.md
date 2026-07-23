@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed snapcompact archiving reproduced assistant reasoning (`¶think:` sections) into frames replayed to the model on every subsequent request, wedging Fable 5 sessions on `reasoning_extraction` refusals; snapcompact serialization now excludes reasoning when the session model uses the Anthropic dialect ([#6093](https://github.com/can1357/oh-my-pi/issues/6093)).
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
