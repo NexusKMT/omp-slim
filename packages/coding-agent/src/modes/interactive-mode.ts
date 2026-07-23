@@ -130,7 +130,21 @@ import type { EventBus } from "../utils/event-bus";
 import { getEditorCommand, openInEditor } from "../utils/external-editor";
 import { getSessionAccentAnsi, getSessionAccentHex } from "../utils/session-color";
 import { messageHasDisplayableThinking } from "../utils/thinking-display";
-import { popTerminalTitle, pushTerminalTitle, setSessionTerminalTitle } from "../utils/title-generator";
+1: 	#backgroundTaskCallIds = new Set<string>();
+	/** Tool calls whose approval prompt drove the title into `attention`; cleared
+	 *  at their tool_execution_end so the title returns to `working`. */
+	#approvalAttentionToolCallIds = new Set<string>();
+2: 		this.#toolTimelineComponents.clear();
+		this.#postToolAssistantComponents.clear();
+		this.#backgroundTaskCallIds.clear();
+		this.#approvalAttentionToolCallIds.clear();
+3: import {
+	disposeTerminalTitleState,
+	popTerminalTitle,
+	pushTerminalTitle,
+	setSessionTerminalTitle,
+	setTerminalTitleStateEnabled,
+} from "../utils/title-generator";
 import { aggregateVibeWorkerTokensPerSecond, VibeSessionRegistry } from "../vibe/runtime";
 import type { AssistantMessageComponent } from "./components/assistant-message";
 import type { BashExecutionComponent } from "./components/bash-execution";
@@ -976,6 +990,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		// the initial welcome frame does not append over the previous run's scrollback.
 		this.ui.start({ clearScrollback: options.clearInitialTerminalHistory === true });
 		pushTerminalTitle();
+		setTerminalTitleStateEnabled(this.settings.get("tui.titleState"));
 		setSessionTerminalTitle(this.sessionManager.getSessionName(), this.sessionManager.getCwd());
 		this.updateEditorBorderColor();
 		// Single side-effect point for title changes: every setSessionName caller
@@ -3825,6 +3840,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		// Drain any in-flight Kitty key release events before stopping.
 		// This prevents escape sequences from leaking to the parent shell over slow SSH.
 		await this.ui.terminal.drainInput(1000);
+		// Stop the run-state spinner interval BEFORE restoring the shell title, so a
+		// pending tick cannot re-emit an OSC title after `popTerminalTitle` hands the
+		// terminal back (which would leave the parent shell with a `⠋ π: …` tab).
+		disposeTerminalTitleState();
 		popTerminalTitle();
 		this.stop();
 

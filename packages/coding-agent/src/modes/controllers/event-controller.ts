@@ -23,12 +23,14 @@ import type { InteractiveModeContext, TodoPhase } from "../../modes/types";
 import idleRecapPrompt from "../../prompts/system/recap-user.md" with { type: "text" };
 import type { AgentSessionEvent } from "../../session/agent-session";
 import { isSilentAbort, readQueueChipText, resolveAbortLabel } from "../../session/messages";
+import { type ApprovalMode, resolveApproval } from "../../tools/approval";
 import { previewLine, TRUNCATE_LENGTHS } from "../../tools/render-utils";
 import { PROPOSE_DEVICE_NAME, writeDeviceDispatch } from "../../tools/resolve";
 import { nextActionableTask } from "../../tools/todo";
 import { SpeechEnhancer } from "../../tts/speech-enhancer";
 import { vocalizer } from "../../tts/vocalizer";
 import { canonicalizeMessage } from "../../utils/thinking-display";
+import { setTerminalTitleState } from "../../utils/title-generator";
 import { interruptHint } from "../shared";
 import { createAssistantMessageComponent } from "../utils/interactive-context-helpers";
 import {
@@ -80,7 +82,22 @@ export class EventController {
 	#lastVisibleBlockCount = 0;
 	#renderedCustomMessages = new Set<string>();
 	#lastIntent: string | undefined = undefined;
-	#backgroundTaskCallIds = new Set<string>();
+1: 	#backgroundTaskCallIds = new Set<string>();
+	/** Tool calls whose approval prompt drove the title into `attention`; cleared
+	 *  at their tool_execution_end so the title returns to `working`. */
+	#approvalAttentionToolCallIds = new Set<string>();
+2: 		this.#toolTimelineComponents.clear();
+		this.#postToolAssistantComponents.clear();
+		this.#backgroundTaskCallIds.clear();
+		this.#approvalAttentionToolCallIds.clear();
+3: import {
+	disposeTerminalTitleState,
+	popTerminalTitle,
+	pushTerminalTitle,
+	setSessionTerminalTitle,
+	setTerminalTitleStateEnabled,
+} from "../utils/title-generator";
+import { aggregateVibeWorkerTokensPerSecond, VibeSessionRegistry } from "../vibe/runtime";
 	#readToolCallArgs = new Map<string, Record<string, unknown>>();
 	#readToolCallAssistantComponents = new Map<string, AssistantMessageComponent>();
 	#toolTimelineComponents = new Map<string, Component>();
@@ -319,9 +336,22 @@ export class EventController {
 		this.#lastVisibleBlockCount = 0;
 		this.#renderedCustomMessages.clear();
 		this.#lastIntent = undefined;
-		this.#toolTimelineComponents.clear();
+1: 	#backgroundTaskCallIds = new Set<string>();
+	/** Tool calls whose approval prompt drove the title into `attention`; cleared
+	 *  at their tool_execution_end so the title returns to `working`. */
+	#approvalAttentionToolCallIds = new Set<string>();
+2: 		this.#toolTimelineComponents.clear();
 		this.#postToolAssistantComponents.clear();
 		this.#backgroundTaskCallIds.clear();
+		this.#approvalAttentionToolCallIds.clear();
+3: import {
+	disposeTerminalTitleState,
+	popTerminalTitle,
+	pushTerminalTitle,
+	setSessionTerminalTitle,
+	setTerminalTitleStateEnabled,
+} from "../utils/title-generator";
+import { aggregateVibeWorkerTokensPerSecond, VibeSessionRegistry } from "../vibe/runtime";
 		this.#readToolCallArgs.clear();
 		this.#readToolCallAssistantComponents.clear();
 		this.#lastAssistantComponent = undefined;
@@ -428,6 +458,7 @@ export class EventController {
 		this.ctx.statusLine.markActivityStart();
 		this.#setTerminalProgress(true);
 		this.ctx.ensureLoadingAnimation();
+		setTerminalTitleState("working");
 		this.ctx.ui.requestRender();
 	}
 
@@ -943,6 +974,10 @@ export class EventController {
 	async #handleToolExecutionStart(event: Extract<AgentSessionEvent, { type: "tool_execution_start" }>): Promise<void> {
 		this.#ensureWorkingLoaderWhileStreaming();
 		this.#updateWorkingMessageFromIntent(event.intent);
+		if (event.toolName === "ask" || this.#toolWillPromptForApproval(event.toolName, event.args)) {
+			this.#approvalAttentionToolCallIds.add(event.toolCallId);
+			setTerminalTitleState("attention");
+		}
 		this.#resolveDisplaceablePoll(event.toolName);
 		if (!this.ctx.pendingTools.has(event.toolCallId)) {
 			if (event.toolName === "read" && readArgsCollapseIntoGroup(event.args)) {
@@ -1005,6 +1040,23 @@ export class EventController {
 		}
 	}
 
+	/**
+	 * Whether this tool call will block on an approval prompt before executing.
+	 * The extension wrapper waits on `uiContext.select(...)` after emitting
+	 * `tool_execution_start`, so an approval-mode / per-tool `prompt` policy is
+	 * user-blocking — the title should read `attention`, not `working`. Mirrors
+	 * the wrapper's `resolveApproval` inputs (approvalMode + tools.approval); uses
+	 * `resolveApproval` rather than `requiresApproval` so a `deny` policy does not
+	 * throw in the render path.
+	 */
+	#toolWillPromptForApproval(toolName: string, args: unknown): boolean {
+		const tool = this.ctx.viewSession.getToolByName(toolName);
+		if (!tool) return false;
+		const mode = (settings.get("tools.approvalMode") ?? "yolo") as ApprovalMode;
+		const userPolicies = (settings.get("tools.approval") ?? {}) as Record<string, unknown>;
+		return resolveApproval(tool, args, mode, userPolicies).policy === "prompt";
+	}
+
 	async #handleToolExecutionUpdate(
 		event: Extract<AgentSessionEvent, { type: "tool_execution_update" }>,
 	): Promise<void> {
@@ -1040,6 +1092,9 @@ export class EventController {
 		// which only fire `tool_execution_end`, never `_update` — do not leave
 		// the UI looking idle while the session keeps streaming (#3857).
 		this.#ensureWorkingLoaderWhileStreaming();
+		if (event.toolName === "ask" || this.#approvalAttentionToolCallIds.delete(event.toolCallId)) {
+			setTerminalTitleState("working");
+		}
 		if (event.toolName === "read") {
 			if (this.#inlineReadToolImages(event.toolCallId, event.result)) {
 				const component = this.ctx.pendingTools.get(event.toolCallId);
@@ -1148,6 +1203,7 @@ export class EventController {
 		// the loader and finalizes it at its own agent_end (isStreaming === false by
 		// then). Mirrors the collab guest's !isStreaming loader reconciler.
 		if (this.ctx.session.isStreaming) return;
+		setTerminalTitleState("idle");
 
 		await this.#finishAgentEnd();
 	}
@@ -1186,6 +1242,7 @@ export class EventController {
 		this.#backgroundTaskCallIds = new Set(
 			Array.from(this.#backgroundTaskCallIds).filter(toolCallId => this.ctx.pendingTools.has(toolCallId)),
 		);
+		this.#approvalAttentionToolCallIds.clear();
 		this.#readToolCallArgs.clear();
 		this.#readToolCallAssistantComponents.clear();
 		this.#toolTimelineComponents.clear();
