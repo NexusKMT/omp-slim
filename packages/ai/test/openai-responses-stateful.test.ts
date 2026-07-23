@@ -2,9 +2,22 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import { streamOpenAIResponses } from "@oh-my-pi/pi-ai/providers/openai-responses";
 import type { Context, FetchImpl, Model, ModelSpec, ProviderSessionState } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { buildOpenAIResponsesCompat } from "@oh-my-pi/pi-catalog/compat/openai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 
 const model = getBundledModel("openai", "gpt-5-mini") as Model<"openai-responses">;
+
+const explicitPromptCacheModel: Model<"openai-responses"> = {
+	...model,
+	id: "gpt-5.6",
+	name: "GPT-5.6",
+	compat: buildOpenAIResponsesCompat({
+		id: "gpt-5.6",
+		name: "GPT-5.6",
+		provider: "openai",
+		baseUrl: "https://api.openai.com/v1",
+	}),
+};
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -95,6 +108,41 @@ describe("openai-responses stateful chaining", () => {
 		expect(deltaInput[0]?.role).toBe("user");
 		expect(JSON.stringify(deltaInput)).toContain("Second question");
 		expect(JSON.stringify(deltaInput)).not.toContain("Answer 1");
+	});
+
+	it("keeps the automatic explicit cache breakpoint stable across chained turns", async () => {
+		const sentRequests: Array<Record<string, unknown>> = [];
+		const fetchMock = createCapturingFetch(sentRequests);
+		const providerSessionState = new Map<string, ProviderSessionState>();
+		const options = {
+			apiKey: "test-key",
+			sessionId: "stateful-cache-session",
+			providerSessionState,
+			statefulResponses: true,
+			promptCache: { mode: "explicit" as const },
+			fetch: fetchMock,
+		};
+		const firstUser = { role: "user" as const, content: "First question", timestamp: 1000 };
+		const firstResponse = await streamOpenAIResponses(
+			explicitPromptCacheModel,
+			{ systemPrompt, messages: [firstUser] },
+			options,
+		).result();
+		const secondResponse = await streamOpenAIResponses(
+			explicitPromptCacheModel,
+			{
+				systemPrompt,
+				messages: [firstUser, firstResponse, { role: "user", content: "Second question", timestamp: 1001 }],
+			},
+			options,
+		).result();
+
+		expect(secondResponse.stopReason).toBe("stop");
+		expect(sentRequests).toHaveLength(2);
+		expect(sentRequests[1]?.previous_response_id).toBe("resp_1");
+		expect(sentRequests[1]?.input).toEqual([
+			{ role: "user", content: [{ type: "input_text", text: "Second question" }] },
+		]);
 	});
 
 	it("chains turns without appending an extra no-reasoning developer item", async () => {

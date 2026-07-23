@@ -1425,6 +1425,7 @@ function assertExplicitOpenAIResponsesPromptCacheSupport<TApi extends Api>(
 	options?: SimpleStreamOptions,
 ): void {
 	if (
+		model.transport === "pi-native" ||
 		options?.cacheRetention === "none" ||
 		options?.promptCache?.mode !== "explicit" ||
 		!isOpenAIResponsesPromptCacheSurface(model) ||

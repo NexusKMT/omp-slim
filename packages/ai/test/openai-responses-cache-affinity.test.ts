@@ -427,6 +427,57 @@ describe("OpenAI Responses explicit prompt cache policy", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
+	it("defers explicit policy validation to the gateway-resolved model for pi-native transport", async () => {
+		const sidecarModel: Model<"openai-responses"> = {
+			...openAI56ResponsesModel,
+			id: "gateway-model",
+			baseUrl: "http://gateway.internal",
+			transport: "pi-native",
+			compat: buildOpenAIResponsesCompat({
+				id: "gpt-5.5",
+				name: "Gateway model",
+				provider: "openai",
+				baseUrl: "https://api.openai.com/v1",
+			}),
+		};
+		const fetchMock: FetchImpl = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+			const body = JSON.parse(String(init?.body)) as { options?: SimpleStreamOptions };
+			expect(body.options?.promptCache).toEqual({ mode: "explicit" });
+			return new Response(
+				`data: ${JSON.stringify({
+					type: "done",
+					reason: "stop",
+					message: {
+						role: "assistant",
+						content: [],
+						api: "openai-responses",
+						provider: "openai",
+						model: "gpt-5.6",
+						usage: {
+							input: 0,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							totalTokens: 0,
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+						},
+						stopReason: "stop",
+						timestamp: 0,
+					},
+				})}\n\ndata: [DONE]\n\n`,
+				{ headers: { "content-type": "text/event-stream" } },
+			);
+		}) as FetchImpl;
+		const result = await streamSimple(
+			sidecarModel,
+			{ messages: [{ role: "user", content: "prompt", timestamp: 0 }] },
+			{ apiKey: "gateway-token", promptCache: { mode: "explicit" }, fetch: fetchMock },
+		).result();
+
+		expect(result.stopReason).toBe("stop");
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
 	it("treats cacheRetention none as a disabled no-op before public policy validation", async () => {
 		const unsupportedModel: Model<"openai-responses"> = {
 			...openAI56ResponsesModel,

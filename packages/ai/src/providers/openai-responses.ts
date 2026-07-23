@@ -906,7 +906,7 @@ function isStableStringResponsesInstruction(item: unknown): item is ResponsesStr
 	);
 }
 
-function markLatestStableResponsesCacheBreakpoint(input: ResponseInput | undefined): boolean {
+function markEarliestStableResponsesCacheBreakpoint(input: ResponseInput | undefined): boolean {
 	if (!input) return false;
 	let latestInputMessage = -1;
 	for (let i = input.length - 1; i >= 0; i--) {
@@ -919,7 +919,10 @@ function markLatestStableResponsesCacheBreakpoint(input: ResponseInput | undefin
 	}
 	if (latestInputMessage <= 0) return false;
 
-	for (let i = latestInputMessage - 1; i >= 0; i--) {
+	// Anchor at the first eligible history block. A stateful turn rebuilds its
+	// full transcript before deriving a delta, so moving this marker toward the
+	// growing tail would make the append baseline appear mutated.
+	for (let i = 0; i < latestInputMessage; i++) {
 		const message = input[i];
 		if (isResponsesPromptCacheableMessage(message)) {
 			const block = message.content[message.content.length - 1];
@@ -963,7 +966,7 @@ function applyOpenAIResponsesPromptCachePolicy(
 		mode: promptCache.mode,
 		ttl: promptCache.ttl ?? model.compat.promptCacheBreakpointTtl,
 	};
-	if (promptCache.breakpoint !== "none") markLatestStableResponsesCacheBreakpoint(params.input);
+	if (promptCache.breakpoint !== "none") markEarliestStableResponsesCacheBreakpoint(params.input);
 }
 
 export function buildParams(
