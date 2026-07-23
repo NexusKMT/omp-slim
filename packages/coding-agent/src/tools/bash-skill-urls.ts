@@ -154,6 +154,19 @@ function isInsideShellQuote(command: string, index: number): boolean {
 	const substitutions: CommandSubstitution[] = [];
 	for (let i = 0; i < index; i++) {
 		const char = command[i];
+		// Inside a backtick substitution nested in double quotes, bash treats `\"`
+		// as a quote delimiter for the inner command, not as an escaped literal.
+		if (
+			char === "\\" &&
+			command[i + 1] === '"' &&
+			quote !== "'" &&
+			substitutions.at(-1)?.kind === "backtick" &&
+			substitutions.at(-1)?.outerQuote === '"'
+		) {
+			quote = quote === '"' ? undefined : '"';
+			i++;
+			continue;
+		}
 		if (char === "\\" && quote !== "'") {
 			i++;
 			continue;

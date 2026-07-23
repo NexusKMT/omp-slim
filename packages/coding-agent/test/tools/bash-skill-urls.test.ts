@@ -268,6 +268,13 @@ describe("expandInternalUrls", () => {
 		await expect(expandInternalUrls(command, { skills })).resolves.toBe(command);
 	});
 
+	it("leaves a URL inside escaped quotes within a double-quoted backtick substitution", async () => {
+		const skills = [createSkill("valid-skill", "/tmp/skills/valid-skill")];
+		const command = 'echo "`printf %s \\"literal skill://valid-skill/SKILL.md\\"`"';
+
+		await expect(expandInternalUrls(command, { skills })).resolves.toBe(command);
+	});
+
 	it("leaves literal internal URLs embedded in quoted text unchanged", async () => {
 		const router = createInternalRouter({
 			"memory://root/summary.md": { sourcePath: "/tmp/memories/summary.md" },
