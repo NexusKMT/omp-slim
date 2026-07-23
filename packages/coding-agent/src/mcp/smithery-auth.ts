@@ -14,7 +14,7 @@ type SmitheryCliAuthSession = {
 	authUrl: string;
 };
 
-type SmitheryCliPollResponse = {
+export type SmitheryCliPollResponse = {
 	status: "pending" | "success" | "error";
 	apiKey?: string;
 	message?: string;
