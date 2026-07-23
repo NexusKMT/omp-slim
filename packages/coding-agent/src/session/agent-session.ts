@@ -7069,6 +7069,12 @@ export class AgentSession {
 		return this.agent.state.model;
 	}
 
+	/** Resolved selector while retry routing is using a fallback model. */
+	get retryFallbackModel(): string | undefined {
+		const model = this.model;
+		return this.#activeRetryFallback && model ? formatRetryFallbackSelector(model, this.thinkingLevel) : undefined;
+	}
+
 	/** Effective thinking level applied to the agent (the resolved level when `auto`). */
 	get thinkingLevel(): ThinkingLevel | undefined {
 		return this.#thinkingLevel;

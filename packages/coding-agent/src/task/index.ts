@@ -1142,6 +1142,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 							// and running counters without reverting the "running"
 							// status back to the subagent's initial "pending" snapshot.
 							progress.resolvedModel = nextProgress.resolvedModel;
+							progress.resolvedModelIsFallback = nextProgress.resolvedModelIsFallback;
 							progress.tokens = nextProgress.tokens;
 							progress.requests = nextProgress.requests;
 							progress.contextTokens = nextProgress.contextTokens;
@@ -1186,8 +1187,10 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					progress.retryState = undefined;
 					if (singleResult?.resolvedModel) {
 						progress.resolvedModel = singleResult.resolvedModel;
+						progress.resolvedModelIsFallback = singleResult.resolvedModelIsFallback;
 					} else {
 						delete progress.resolvedModel;
+						delete progress.resolvedModelIsFallback;
 					}
 					onSettled?.(resultFailed);
 					const statusText = resultFailed

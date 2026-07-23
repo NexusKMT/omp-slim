@@ -90,6 +90,9 @@
 ### Fixed
 
 - Fixed a budget-aborted keep-alive subagent becoming an unkillable registration with no `hub`-level stop. A subagent force-stopped for exceeding its soft request budget is kept resumable (status `idle`, adopted by the lifecycle) so its context can be salvaged, but its async job row settles and is reaped after ~5 min — after which `hub cancel <id>` could only report `Background job not found` because it consulted the job manager alone. `hub cancel` now falls through to the agent registration: for an id the caller spawned that has no live job, it aborts any in-flight turn, disposes the session, and drops the registration (the interactive Agent Hub `x` and collab `kill` already did this; the model-facing `hub` did not). Cross-agent kills stay impossible and Main/advisor refs are never targeted ([#6315](https://github.com/can1357/oh-my-pi/issues/6315)).
+### Fixed
+
+- Fixed Agent Hub fallback rows hiding routing provenance and the resolved provider/model ([#6316](https://github.com/can1357/oh-my-pi/issues/6316)).
 
 ## [17.0.7] - 2026-07-21
 
