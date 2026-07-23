@@ -149,6 +149,8 @@ export async function searchFirecrawl(params: SearchParams): Promise<SearchRespo
 		authMode: resolvedKey ? "api_key" : "keyless",
 	};
 }
+
+/** Search provider for Firecrawl web search. */
 export class FirecrawlProvider extends SearchProvider {
 	readonly id = "firecrawl";
 	readonly label = "Firecrawl";
