@@ -252,9 +252,20 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 		});
 
 		const notices = collectNotices();
+		const compactionEnds: { result?: unknown; skipped?: boolean }[] = [];
+		session.subscribe(event => {
+			if (event.type === "auto_compaction_end") {
+				compactionEnds.push({ result: event.result, skipped: event.skipped });
+			}
+		});
 		await triggerMaintenance();
 
 		expect(compactSpy).toHaveBeenCalledTimes(1);
+		// The rescue rewrote history: the pass must surface a real result (TUI
+		// rebuilds on it), not a skipped no-op.
+		expect(compactionEnds.length).toBe(1);
+		expect(compactionEnds[0].result).toBeTruthy();
+		expect(compactionEnds[0].skipped).toBeFalsy();
 		const [, compactOptions] = compactSpy.mock.calls[0] as [unknown, { maxFrames?: number }];
 		expect(compactOptions.maxFrames).toBeDefined();
 		expect(compactOptions.maxFrames as number).toBeLessThan(SEEDED_FRAME_COUNT);
@@ -309,6 +320,7 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 		});
 
 		const notices = collectNotices();
+		const emitSpy = vi.spyOn(ExtensionRunner.prototype, "emit");
 		await triggerMaintenance();
 
 		expect(compactSpy).toHaveBeenCalledTimes(1);
@@ -318,6 +330,12 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 		expect(hookWritten.summary).toContain("Superseded compaction summary elided");
 		expect(hookWritten.preserveData).toBeUndefined();
 		expect(snapcompact.getPreservedArchive(rebuilt.preserveData)?.frames.length).toBe(4);
+		// Extensions must be notified about the entry that is now active, not
+		// only the hook-written one the rescue superseded.
+		const compactEvents = emitSpy.mock.calls
+			.map(c => c[0] as { type?: string; compactionEntry?: CompactionEntry })
+			.filter(e => e.type === "session_compact");
+		expect(compactEvents.some(e => e.compactionEntry?.id === rebuilt.id)).toBe(true);
 		expect(shakeSpy).not.toHaveBeenCalled();
 		const noProgress = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes(NO_PROGRESS_FRAGMENT));
 		expect(noProgress.length).toBe(0);

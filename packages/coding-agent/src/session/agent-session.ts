@@ -13785,12 +13785,12 @@ export class AgentSession {
 		// into MORE frames, so the archive grows past the recovery band and the
 		// elide/image tiers below can never shrink it): rebuild the archive at
 		// a threshold-derived frame budget.
-		const frameRescued = await this.#rescueSnapcompactFrameOverflow(
+		const frameRescue = await this.#rescueSnapcompactFrameOverflow(
 			this.sessionManager.getBranch(),
 			this.settings.getGroup("compaction"),
 			signal,
 		);
-		if (frameRescued && options.hasProgress()) return true;
+		if (frameRescue !== undefined && options.hasProgress()) return true;
 		let elided = 0;
 		let elidedTokens = 0;
 		let elideSink = "placeholders";
@@ -13905,19 +13905,19 @@ export class AgentSession {
 		branchEntries: SessionEntry[],
 		settings: CompactionSettings,
 		signal: AbortSignal,
-	): Promise<boolean> {
-		if (signal.aborted) return false;
+	): Promise<snapcompact.CompactionResult | undefined> {
+		if (signal.aborted) return undefined;
 		// Re-rendering frames needs a vision-capable model, same gate as the
 		// snapcompact strategy path.
-		if (!this.model?.input.includes("image")) return false;
+		if (!this.model?.input.includes("image")) return undefined;
 		const staleEntry = getLatestCompactionEntry(branchEntries);
-		if (!staleEntry) return false;
+		if (!staleEntry) return undefined;
 		const archive = snapcompact.getPreservedArchive(staleEntry.preserveData);
-		if (!archive || archive.frames.length <= 1) return false;
+		if (!archive || archive.frames.length <= 1) return undefined;
 		const archiveText = snapcompact.archiveSourceText(archive);
-		if (!archiveText) return false;
+		if (!archiveText) return undefined;
 		const maxFrames = this.#computeSnapcompactRescueMaxFrames(settings);
-		if (maxFrames >= archive.frames.length) return false;
+		if (maxFrames >= archive.frames.length) return undefined;
 
 		const staleDetails = staleEntry.details as snapcompact.CompactionDetails | undefined;
 		const fileOps = snapcompact.createFileOps();
@@ -13948,13 +13948,13 @@ export class AgentSession {
 			logger.warn("Dead-end snapcompact frame rescue failed", {
 				error: error instanceof Error ? error.message : String(error),
 			});
-			return false;
+			return undefined;
 		}
-		if (signal.aborted) return false;
+		if (signal.aborted) return undefined;
 		const rebuilt = snapcompact.getPreservedArchive(result.preserveData);
-		if (!rebuilt || rebuilt.frames.length >= archive.frames.length) return false;
+		if (!rebuilt || rebuilt.frames.length >= archive.frames.length) return undefined;
 
-		this.sessionManager.appendCompaction(
+		const rebuiltEntryId = this.sessionManager.appendCompaction(
 			result.summary,
 			result.shortSummary,
 			result.firstKeptEntryId,
@@ -13974,12 +13974,24 @@ export class AgentSession {
 		this.#resetAllAdvisorRuntimes();
 		this.#syncTodoPhasesFromBranch();
 		this.#closeCodexProviderSessionsForHistoryRewrite();
+		// Extensions must see the entry that is now active, not (only) the one
+		// this rebuild just superseded — mirror the regular append path's hook.
+		const rebuiltEntry = this.sessionManager.getEntries().find(e => e.id === rebuiltEntryId) as
+			| CompactionEntry
+			| undefined;
+		if (this.#extensionRunner && rebuiltEntry) {
+			await this.#extensionRunner.emit({
+				type: "session_compact",
+				compactionEntry: rebuiltEntry,
+				fromExtension: false,
+			});
+		}
 		this.emitNotice(
 			"info",
 			`Compaction dead-end recovery: rebuilt the trailing snapcompact archive at a smaller frame budget (${archive.frames.length} → ${rebuilt.frames.length} frames) so maintenance could make progress.`,
 			"compaction",
 		);
-		return true;
+		return result;
 	}
 
 	/**
@@ -14205,15 +14217,15 @@ export class AgentSession {
 				// declaring victory on a mere frame-count shrink would skip the
 				// elide/image tiers that can still reach that tail and suppress a
 				// warning the user should see.
-				let frameOverflowRescued = false;
+				let frameRescueResult: snapcompact.CompactionResult | undefined;
 				let frameRescueCreatedHeadroom = false;
 				if (reason !== "idle") {
-					frameOverflowRescued = await this.#rescueSnapcompactFrameOverflow(
+					frameRescueResult = await this.#rescueSnapcompactFrameOverflow(
 						pathEntriesForCompaction,
 						compactionSettings,
 						autoCompactionSignal,
 					);
-					if (frameOverflowRescued) {
+					if (frameRescueResult) {
 						rescueRewroteHistory = true;
 						pathEntriesForCompaction = this.sessionManager.getBranch();
 						frameRescueCreatedHeadroom = this.#compactionCreatedHeadroom();
@@ -14237,13 +14249,17 @@ export class AgentSession {
 					}
 				}
 				if (!preparation) {
+					// A successful frame rescue rewrote history and activated a new
+					// compaction entry — surface it as a real (non-skipped) result so
+					// the TUI rebuilds the transcript instead of treating the pass as
+					// a benign no-op.
 					await this.#emitSessionEvent({
 						type: "auto_compaction_end",
 						action,
-						result: undefined,
+						result: frameRescueResult,
 						aborted: false,
 						willRetry: false,
-						skipped: true,
+						skipped: frameRescueResult === undefined,
 					});
 					const noProgressDeadEnd = reason !== "idle" && !frameRescueCreatedHeadroom;
 					let continuationScheduled = false;
