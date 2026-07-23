@@ -529,6 +529,8 @@ describe("ExtensionRunner", () => {
 					setModel: async () => false,
 					getThinkingLevel: () => undefined,
 					setThinkingLevel: () => {},
+					getServiceTiers: () => ({}),
+					setServiceTier: () => {},
 					getSessionName: () => undefined,
 					setSessionName: async () => {},
 				},
@@ -1206,6 +1208,8 @@ describe("ExtensionRunner", () => {
 					setModel: async () => false,
 					getThinkingLevel: () => undefined,
 					setThinkingLevel: () => {},
+					getServiceTiers: () => ({}),
+					setServiceTier: () => {},
 					getSessionName: () => undefined,
 					setSessionName: async () => {},
 				},
@@ -1229,6 +1233,84 @@ describe("ExtensionRunner", () => {
 				searchable: true,
 			});
 			delete globalState.__ompMemoryStatus;
+		});
+	});
+
+	describe("service tier API", () => {
+		it("returns a detached snapshot, forwards valid changes, and rejects invalid family tiers", async () => {
+			const extCode = `
+				export default function(pi) {
+					pi.on("session_start", () => {
+						const tiers = pi.getServiceTiers();
+						tiers.openai = "scale";
+						pi.appendEntry("service-tier-snapshot", tiers);
+						pi.setServiceTier("google", "flex");
+						pi.setServiceTier("openai", undefined);
+						pi.setServiceTier("anthropic", "scale");
+					});
+				}
+			`;
+			const explicitExtensionPath = path.join(tempDir.path(), "service-tiers.ts");
+			fs.writeFileSync(explicitExtensionPath, extCode);
+			const result = await loadTestExtensions([explicitExtensionPath]);
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const serviceTiers = { openai: "priority" as const };
+			const snapshots: unknown[] = [];
+			const setCalls: Array<[string, unknown]> = [];
+			const errors: string[] = [];
+			runner.onError(error => {
+				errors.push(error.error);
+			});
+			runner.initialize(
+				{
+					sendMessage: () => {},
+					sendUserMessage: () => {},
+					appendEntry: (_customType, data) => {
+						snapshots.push(data);
+					},
+					setLabel: () => {},
+					getActiveTools: () => [],
+					getAllTools: () => [],
+					setActiveTools: async () => {},
+					getCommands: () => [],
+					setModel: async () => false,
+					getThinkingLevel: () => undefined,
+					setThinkingLevel: () => {},
+					getServiceTiers: () => serviceTiers,
+					setServiceTier: (family, tier) => {
+						setCalls.push([family, tier]);
+					},
+					getSessionName: () => undefined,
+					setSessionName: async () => {},
+				},
+				{
+					getModel: () => undefined,
+					isIdle: () => true,
+					abort: () => {},
+					hasPendingMessages: () => false,
+					shutdown: () => {},
+					getContextUsage: () => undefined,
+					compact: async () => {},
+					getSystemPrompt: () => [],
+				},
+			);
+
+			await runner.emit({ type: "session_start" });
+
+			expect(serviceTiers).toEqual({ openai: "priority" });
+			expect(snapshots).toEqual([{ openai: "scale" }]);
+			expect(setCalls).toEqual([
+				["google", "flex"],
+				["openai", undefined],
+			]);
+			expect(errors).toHaveLength(1);
+			expect(errors[0]).toContain('Invalid service tier "scale" for family "anthropic"');
 		});
 	});
 
@@ -1268,6 +1350,8 @@ describe("ExtensionRunner", () => {
 					setModel: async () => false,
 					getThinkingLevel: () => undefined,
 					setThinkingLevel: () => {},
+					getServiceTiers: () => ({}),
+					setServiceTier: () => {},
 					getSessionName: () => sessionManager.getSessionName(),
 					setSessionName: async name => {
 						await sessionManager.setSessionName(name);
@@ -1326,6 +1410,8 @@ describe("ExtensionRunner", () => {
 					setModel: async () => false,
 					getThinkingLevel: () => undefined,
 					setThinkingLevel: () => {},
+					getServiceTiers: () => ({}),
+					setServiceTier: () => {},
 					getSessionName: () => undefined,
 					setSessionName: async () => {},
 				},
@@ -1993,6 +2079,8 @@ describe("ExtensionRunner", () => {
 					setModel: async () => false,
 					getThinkingLevel: () => undefined,
 					setThinkingLevel: () => {},
+					getServiceTiers: () => ({}),
+					setServiceTier: () => {},
 					getSessionName: () => sessionManager.getSessionName(),
 					setSessionName: async () => {},
 				},
