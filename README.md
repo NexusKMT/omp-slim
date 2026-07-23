@@ -1,3 +1,9 @@
+> [!NOTE]
+> Pull requests are **temporarily open to everyone** as a trial. We previously
+> required a vouch before accepting PRs; that requirement is lifted for now
+> while we evaluate how open contributions go. Depending on the results, the
+> vouch system may return.
+
 <p align="center">
   <img src="https://github.com/can1357/oh-my-pi/blob/main/assets/hero.png?raw=true" alt="omp">
 </p>
