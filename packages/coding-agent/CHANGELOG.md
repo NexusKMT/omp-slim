@@ -20,6 +20,7 @@
 - Added a toggle-list editor in `/settings` for array-of-enum settings: `providers.webSearchOrder` and `providers.imageOrder` (ordered — Enter/Space toggles, ←/→ nudges, 1-9 splices the hovered provider into that position) and `providers.webSearchExclude` now appear under Providers → Services instead of being config-file only.
 - Added `models.yml` Bedrock Converse prompt-cache capability overrides for bundled and opaque inference profiles.
 - Documented Vibe mode (`/vibe`) in `docs/vibe-mode.md` and the `/fresh` provider-stream reset in the session-operations doc, and linked both from the README's new "Session controls" section ([#6440](https://github.com/can1357/oh-my-pi/issues/6440)).
+- Added `tools.xdevDocs` prompt-doc modes (`inline`, `builtins`, `catalog`) and the `tools.xdevInlineDevices` glob allowlist controlling which mounted `xd://` device docs are inlined into the system prompt; dynamic-device catalog summaries and mid-session mount notices are capped to one line, and changing the mode in `/settings` refreshes the active prompt ([#6063](https://github.com/can1357/oh-my-pi/issues/6063)).
 
 ### Changed
 
