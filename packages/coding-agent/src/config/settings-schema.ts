@@ -3945,6 +3945,17 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"mcp.renderMarkdownResults": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tools",
+			group: "Discovery & MCP",
+			label: "MCP Markdown Results",
+			description: "Render non-JSON MCP text results as Markdown in the transcript",
+		},
+	},
+
 	"mcp.notifications": {
 		type: "boolean",
 		default: false,
