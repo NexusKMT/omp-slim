@@ -232,10 +232,13 @@ function validateShapeParams(batchEnabled: boolean, params: TaskParams): string 
 function hasInvalidModelSelector(model: unknown): boolean {
 	if (model === undefined) return false;
 	const selectors = typeof model === "string" ? [model] : Array.isArray(model) ? model : undefined;
+	const materializedSelectors = selectors ? Array.from(selectors) : [];
 	return (
 		!selectors ||
-		selectors.length === 0 ||
-		selectors.some(selector => typeof selector !== "string" || !selector.split(",").some(pattern => pattern.trim()))
+		materializedSelectors.length === 0 ||
+		materializedSelectors.some(
+			selector => typeof selector !== "string" || !selector.split(",").some(pattern => pattern.trim()),
+		)
 	);
 }
 

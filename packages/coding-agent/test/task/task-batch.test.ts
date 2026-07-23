@@ -215,17 +215,20 @@ describe("task.batch validation", () => {
 		expect(text).toContain("Missing `context`");
 	});
 
-	it("rejects an empty per-item model selector", async () => {
-		const text = await executeText(
-			{
-				context: "Background.",
-				tasks: [{ name: "Alpha", task: "Work.", model: [","] }],
-			},
-			{ "task.batch": true },
-		);
-		expect(text).toContain("Task 1 (`Alpha`) has an invalid `model`");
-		expect(text).toContain("non-empty array");
-	});
+	it.each([{ model: [","] }, { model: Array<string>(1) }])(
+		"rejects an empty per-item model selector",
+		async ({ model }) => {
+			const text = await executeText(
+				{
+					context: "Background.",
+					tasks: [{ name: "Alpha", task: "Work.", model }],
+				},
+				{ "task.batch": true },
+			);
+			expect(text).toContain("Task 1 (`Alpha`) has an invalid `model`");
+			expect(text).toContain("non-empty array");
+		},
+	);
 
 	it("rejects duplicate provided names case-insensitively", async () => {
 		const text = await executeText(

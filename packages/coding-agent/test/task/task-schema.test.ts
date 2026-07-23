@@ -94,6 +94,7 @@ describe("task spawn validation", () => {
 		{ model: "," },
 		{ model: " , " },
 		{ model: [] },
+		{ model: Array<string>(1) },
 		{ model: ["openai-codex/gpt-5.6-sol:high", " "] },
 		{ model: ["openai-codex/gpt-5.6-sol:high", ","] },
 	])("rejects an empty model selector", async ({ model }) => {
