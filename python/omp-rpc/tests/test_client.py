@@ -519,6 +519,34 @@ V2_MESSAGES_SERVER = textwrap.dedent(
                         "command": command_type,
                         "success": False,
                         "error": "Cannot page messages while the session is changing",
+                        "code": "session_busy",
+                    }
+                )
+                continue
+            if os.environ.get("V2_MESSAGES_STALE") == "1":
+                if command.get("cursor") is not None:
+                    emit(
+                        {
+                            "id": request_id,
+                            "type": "response",
+                            "command": command_type,
+                            "success": False,
+                            "error": "RPC message cursor is stale",
+                            "code": "stale_cursor",
+                        }
+                    )
+                    continue
+                emit(
+                    {
+                        "id": request_id,
+                        "type": "response",
+                        "command": command_type,
+                        "success": True,
+                        "data": {
+                            "messages": [message],
+                            "totalMessages": 2,
+                            "nextCursor": "page-two",
+                        },
                     }
                 )
                 continue
@@ -1031,6 +1059,17 @@ class RpcClientTests(unittest.TestCase):
                 RpcCommandError, "Cannot page messages while the session is changing"
             ):
                 client.get_messages_page()
+            messages = client.get_messages()
+
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["content"][0]["text"], "streaming snapshot")
+
+    def test_protocol_v2_get_messages_discards_stale_page_walk(self) -> None:
+        with self.make_client(
+            server=V2_MESSAGES_SERVER, env={"V2_MESSAGES_STALE": "1"}
+        ) as client:
+            with self.assertRaisesRegex(RpcCommandError, "RPC message cursor is stale"):
+                client.get_messages_page(cursor="page-two")
             messages = client.get_messages()
 
         self.assertEqual(len(messages), 1)

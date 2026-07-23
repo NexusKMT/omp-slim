@@ -87,6 +87,18 @@ for await (const raw of console) {
 						command: frame.type,
 						success: false,
 						error: "Cannot page messages while the session is changing",
+						code: "session_busy",
+					});
+					continue;
+				}
+				if (Bun.env.MOCK_RPC_PAGE_STALE === "1" && frame.cursor !== undefined) {
+					writeFrame({
+						id,
+						type: "response",
+						command: frame.type,
+						success: false,
+						error: "RPC message cursor is stale",
+						code: "stale_cursor",
 					});
 					continue;
 				}
@@ -109,7 +121,10 @@ for await (const raw of console) {
 				});
 				continue;
 			}
-			if (frame.type === "get_messages" && Bun.env.MOCK_RPC_PAGE_BUSY === "1") {
+			if (
+				frame.type === "get_messages" &&
+				(Bun.env.MOCK_RPC_PAGE_BUSY === "1" || Bun.env.MOCK_RPC_PAGE_STALE === "1")
+			) {
 				writeFrame({
 					id,
 					type: "response",

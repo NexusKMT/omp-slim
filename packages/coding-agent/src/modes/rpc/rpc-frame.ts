@@ -84,19 +84,27 @@ function encodedMessageSnapshot(encoded: string): { message: unknown } | undefin
 		: undefined;
 }
 
-function encodeChunkedRpcFrame(frame: object, chunkId: string): string {
-	const json = JSON.stringify(frame);
+/**
+ * Emit protocol v2 chunk frames for one pre-serialized logical frame, one physical
+ * JSONL line at a time so callers can write with backpressure instead of holding the
+ * whole ~4/3-sized base64 transport in memory. The reassembly ceiling is enforced on
+ * `Buffer.byteLength` BEFORE any full-payload allocation.
+ */
+function* encodeChunkedRpcFrames(frame: object, json: string, chunkId: string): Generator<string> {
+	const byteLength = Buffer.byteLength(json, "utf8");
+	if (byteLength > MAX_RPC_REASSEMBLED_BYTES) {
+		yield `${JSON.stringify(overflowFrame(frame))}\n`;
+		return;
+	}
 	const bytes = Buffer.from(json, "utf8");
-	if (bytes.byteLength > MAX_RPC_REASSEMBLED_BYTES) return `${JSON.stringify(overflowFrame(frame))}\n`;
-	const count = Math.ceil(bytes.byteLength / RPC_CHUNK_PAYLOAD_BYTES);
-	let encoded = "";
+	const count = Math.ceil(byteLength / RPC_CHUNK_PAYLOAD_BYTES);
 	for (let index = 0; index < count; index++) {
 		const chunk: RpcChunkFrame = {
 			type: "rpc_chunk",
 			chunkId,
 			index,
 			count,
-			byteLength: bytes.byteLength,
+			byteLength,
 			data: bytes
 				.subarray(index * RPC_CHUNK_PAYLOAD_BYTES, (index + 1) * RPC_CHUNK_PAYLOAD_BYTES)
 				.toString("base64"),
@@ -104,9 +112,8 @@ function encodeChunkedRpcFrame(frame: object, chunkId: string): string {
 		const line = `${JSON.stringify(chunk)}\n`;
 		if (serializedFrameBytes(line.slice(0, -1)) > MAX_RPC_FRAME_BYTES)
 			throw new Error("RPC chunk exceeded the transport limit");
-		encoded += line;
+		yield line;
 	}
-	return encoded;
 }
 
 function isRpcChunkFrame(value: unknown): value is RpcChunkFrame {
@@ -263,28 +270,47 @@ export class RpcFrameEncoder {
 		this.#protocolVersion = version;
 	}
 
-	encode(frame: object): string {
+	/**
+	 * Encode one logical frame into physical JSONL lines. Encoder bookkeeping runs
+	 * eagerly; only chunk emission is lazy, so a chunked result can be streamed to
+	 * stdout with backpressure without holding the whole transport in memory. The
+	 * returned iterable MUST be fully consumed exactly once.
+	 */
+	encodeFrames(frame: object): Iterable<string> {
 		if (isRecord(frame) && frame.type === "agent_start") this.#streamedMessages = [];
-		let json = JSON.stringify(frame);
-		let encoded: string;
+		const json = JSON.stringify(frame);
+		let frames: Iterable<string>;
+		let singleFrame: string | undefined;
 		if (this.#protocolVersion === 2 && serializedFrameBytes(json) > MAX_RPC_FRAME_BYTES) {
 			const compacted = compactTerminalFrame(frame, this.#streamedMessages.length, this.#streamedMessages);
-			json = JSON.stringify(compacted);
-			encoded =
-				serializedFrameBytes(json) > MAX_RPC_FRAME_BYTES
-					? encodeChunkedRpcFrame(compacted, `rpc-${++this.#chunkCounter}`)
-					: `${json}\n`;
+			// Reuse the original serialization when compaction was a no-op.
+			const compactedJson = compacted === frame ? json : JSON.stringify(compacted);
+			if (serializedFrameBytes(compactedJson) > MAX_RPC_FRAME_BYTES) {
+				frames = encodeChunkedRpcFrames(compacted, compactedJson, `rpc-${++this.#chunkCounter}`);
+			} else {
+				singleFrame = `${compactedJson}\n`;
+				frames = [singleFrame];
+			}
 		} else {
-			encoded = encodeRpcFrame(frame, this.#streamedMessages.length, this.#streamedMessages);
+			singleFrame = encodeRpcFrame(frame, this.#streamedMessages.length, this.#streamedMessages);
+			frames = [singleFrame];
 		}
-		if (!isRecord(frame)) return encoded;
+		if (!isRecord(frame)) return frames;
 		if (frame.type === "message_end") {
 			const snapshot =
 				this.#protocolVersion === 2 && Object.hasOwn(frame, "message")
 					? { message: jsonSnapshot(frame.message) }
-					: encodedMessageSnapshot(encoded);
+					: singleFrame !== undefined
+						? encodedMessageSnapshot(singleFrame)
+						: undefined;
 			if (snapshot) this.#streamedMessages.push(snapshot.message);
 		} else if (frame.type === "agent_end" && frame.willContinue !== true) this.#streamedMessages = [];
+		return frames;
+	}
+
+	encode(frame: object): string {
+		let encoded = "";
+		for (const line of this.encodeFrames(frame)) encoded += line;
 		return encoded;
 	}
 }

@@ -10,6 +10,7 @@
  * - Events: AgentSessionEvent objects streamed as they occur
  * - Extension UI: Extension UI requests are emitted, client responds with extension_ui_response
  */
+import { once } from "node:events";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import { isZodSchema, zodToWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { $env, isRecord, readLines, Snowflake } from "@oh-my-pi/pi-utils";
@@ -36,7 +37,7 @@ import { isRpcHostToolResult, isRpcHostToolUpdate, RpcHostToolBridge } from "./h
 import { isRpcHostUriResult, RpcHostUriBridge } from "./host-uris";
 import { MAX_RPC_FRAME_BYTES, MAX_RPC_REASSEMBLED_BYTES, RpcFrameEncoder } from "./rpc-frame";
 import { claimRpcInput } from "./rpc-input";
-import { pageRpcMessages, RPC_MESSAGES_PAGE_BUSY_ERROR } from "./rpc-messages";
+import { pageRpcMessages, RPC_MESSAGES_PAGE_BUSY_ERROR, RpcMessagesPageError } from "./rpc-messages";
 import { RpcSubagentRegistry, readRpcSubagentTranscript } from "./rpc-subagents";
 import type {
 	RpcCommand,
@@ -620,8 +621,22 @@ export async function runRpcMode(
 	process.env.PI_NOTIFICATIONS = "off";
 
 	const frameEncoder = new RpcFrameEncoder();
-	process.stdout.write(
-		frameEncoder.encode({
+	// Ordered stdout writer honoring backpressure: chunked v2 frames are produced
+	// lazily by the encoder and written one physical line at a time, so a near-limit
+	// logical frame never materializes its full base64 transport in memory.
+	let stdoutQueue: Promise<void> = Promise.resolve();
+	const writeFrames = (frames: Iterable<string>) => {
+		stdoutQueue = stdoutQueue
+			.then(async () => {
+				for (const line of frames) {
+					if (!process.stdout.write(line)) await once(process.stdout, "drain");
+				}
+			})
+			// stdout gone (host exited) — nothing left to deliver; keep the queue alive.
+			.catch(() => {});
+	};
+	writeFrames(
+		frameEncoder.encodeFrames({
 			type: "ready",
 			protocolVersion: 1,
 			supportedProtocolVersions: [1, 2],
@@ -630,7 +645,7 @@ export async function runRpcMode(
 		}),
 	);
 	const output = (obj: RpcResponse | RpcExtensionUIRequest | object) => {
-		process.stdout.write(frameEncoder.encode(obj));
+		writeFrames(frameEncoder.encodeFrames(obj));
 		if (isRecord(obj) && obj.type === "response" && obj.command === "negotiate_protocol" && obj.success === true)
 			frameEncoder.setProtocolVersion(2);
 	};
@@ -647,8 +662,8 @@ export async function runRpcMode(
 		return { id, type: "response", command, success: true, data } as RpcResponse;
 	};
 
-	const error = (id: string | undefined, command: string, message: string): RpcResponse => {
-		return { id, type: "response", command, success: false, error: message };
+	const error = (id: string | undefined, command: string, message: string, code?: string): RpcResponse => {
+		return { id, type: "response", command, success: false, error: message, ...(code ? { code } : {}) };
 	};
 
 	const extensionUserMessageTracker = new RpcExtensionUserMessageTracker();
@@ -1308,7 +1323,7 @@ export async function runRpcMode(
 
 			case "get_messages_page": {
 				if (session.isStreaming || session.isCompacting)
-					return error(id, "get_messages_page", RPC_MESSAGES_PAGE_BUSY_ERROR);
+					return error(id, "get_messages_page", RPC_MESSAGES_PAGE_BUSY_ERROR, "session_busy");
 				const messages = session.messages;
 				try {
 					return success(
@@ -1329,6 +1344,7 @@ export async function runRpcMode(
 						id,
 						"get_messages_page",
 						pageError instanceof Error ? pageError.message : String(pageError),
+						pageError instanceof RpcMessagesPageError ? pageError.code : undefined,
 					);
 				}
 			}

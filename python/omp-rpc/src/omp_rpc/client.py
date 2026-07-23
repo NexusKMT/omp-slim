@@ -118,6 +118,8 @@ _MAX_RPC_FRAME_BYTES = 1024 * 1024
 _MAX_RPC_REASSEMBLED_BYTES = 64 * 1024 * 1024
 _RPC_CHUNK_PAYLOAD_BYTES = 256 * 1024
 _RPC_MESSAGES_PAGE_BUSY_ERROR = "Cannot page messages while the session is changing"
+_RPC_MESSAGES_PAGE_STALE_ERROR = "RPC message cursor is stale"
+_RPC_MESSAGES_PAGE_FALLBACK_CODES = frozenset({"session_busy", "stale_cursor"})
 
 
 @dataclass(slots=True)
@@ -313,12 +315,16 @@ class RpcConcurrencyError(RpcError):
 
 
 class RpcCommandError(RpcError):
-    """Raised when the RPC server returns `success: false`."""
+    """Raised when the RPC server returns `success: false`.
 
-    def __init__(self, command: str, error: str):
+    `code` carries the server's machine-readable error code when present.
+    """
+
+    def __init__(self, command: str, error: str, code: str | None = None):
         super().__init__(f"{command}: {error}")
         self.command = command
         self.error = error
+        self.code = code
 
 
 class RpcProtocolError(RpcError):
@@ -1036,9 +1042,13 @@ class RpcClient:
                     )
                 return tuple(messages)
             except RpcCommandError as error:
-                if (
-                    error.command != "get_messages_page"
-                    or error.error != _RPC_MESSAGES_PAGE_BUSY_ERROR
+                if error.command != "get_messages_page" or not (
+                    error.code in _RPC_MESSAGES_PAGE_FALLBACK_CODES
+                    or error.error
+                    in (
+                        _RPC_MESSAGES_PAGE_BUSY_ERROR,
+                        _RPC_MESSAGES_PAGE_STALE_ERROR,
+                    )
                 ):
                     raise
         payload = self._request("get_messages")
@@ -1385,9 +1395,11 @@ class RpcClient:
             raise response
 
         if not bool(response.get("success", False)):
+            raw_code = response.get("code")
             raise RpcCommandError(
                 command=str(response.get("command", command_type)),
                 error=str(response.get("error", "")),
+                code=raw_code if isinstance(raw_code, str) else None,
             )
 
         data = response.get("data")

@@ -13,7 +13,12 @@ import type { FileSink } from "bun";
 import type { BashResult } from "../../exec/bash-executor";
 import type { AgentSessionEvent, SessionStats } from "../../session/agent-session";
 import { MAX_RPC_FRAME_BYTES, MAX_RPC_REASSEMBLED_BYTES, RpcFrameDecoder, type RpcProtocolVersion } from "./rpc-frame";
-import { RPC_MESSAGES_PAGE_BUSY_ERROR, type RpcMessagesPage, type RpcMessagesPageOptions } from "./rpc-messages";
+import {
+	RPC_MESSAGES_PAGE_BUSY_ERROR,
+	RPC_MESSAGES_PAGE_STALE_ERROR,
+	type RpcMessagesPage,
+	type RpcMessagesPageOptions,
+} from "./rpc-messages";
 import type {
 	RpcAvailableCommandsUpdateFrame,
 	RpcAvailableSlashCommand,
@@ -210,6 +215,26 @@ function normalizeToolResult<TDetails>(result: RpcClientToolResult<TDetails>): A
 		};
 	}
 	return result;
+}
+
+/** Failed RPC command; `code` mirrors the server's machine-readable error code when present. */
+export class RpcCommandError extends Error {
+	constructor(
+		message: string,
+		readonly command: string,
+		readonly code?: string,
+	) {
+		super(message);
+		this.name = "RpcCommandError";
+	}
+}
+
+/** True when a high-level `getMessages()` drain should discard partial pages and fall back to `get_messages`. */
+function isPageFallbackError(error: unknown): boolean {
+	if (!(error instanceof Error)) return false;
+	if (error instanceof RpcCommandError && (error.code === "session_busy" || error.code === "stale_cursor"))
+		return true;
+	return error.message === RPC_MESSAGES_PAGE_BUSY_ERROR || error.message === RPC_MESSAGES_PAGE_STALE_ERROR;
 }
 
 // ============================================================================
@@ -810,7 +835,7 @@ export class RpcClient {
 					throw new Error("RPC message pagination ended before the advertised total");
 				return messages;
 			} catch (error) {
-				if (!(error instanceof Error) || error.message !== RPC_MESSAGES_PAGE_BUSY_ERROR) throw error;
+				if (!isPageFallbackError(error)) throw error;
 			}
 		}
 		const response = await this.#send({ type: "get_messages" });
@@ -1160,7 +1185,7 @@ export class RpcClient {
 	#getData<T>(response: RpcResponse): T {
 		if (!response.success) {
 			const errorResponse = response as Extract<RpcResponse, { success: false }>;
-			throw new Error(errorResponse.error);
+			throw new RpcCommandError(errorResponse.error, errorResponse.command, errorResponse.code);
 		}
 		// Type assertion: we trust response.data matches T based on the command sent.
 		// This is safe because each public method specifies the correct T for its command.
