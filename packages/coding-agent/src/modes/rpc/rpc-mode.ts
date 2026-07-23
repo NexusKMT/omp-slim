@@ -34,8 +34,9 @@ import type { EventBus } from "../../utils/event-bus";
 import { initializeExtensions } from "../runtime-init";
 import { isRpcHostToolResult, isRpcHostToolUpdate, RpcHostToolBridge } from "./host-tools";
 import { isRpcHostUriResult, RpcHostUriBridge } from "./host-uris";
-import { RpcFrameEncoder } from "./rpc-frame";
+import { MAX_RPC_FRAME_BYTES, MAX_RPC_REASSEMBLED_BYTES, RpcFrameEncoder } from "./rpc-frame";
 import { claimRpcInput } from "./rpc-input";
+import { pageRpcMessages, RPC_MESSAGES_PAGE_BUSY_ERROR } from "./rpc-messages";
 import { RpcSubagentRegistry, readRpcSubagentTranscript } from "./rpc-subagents";
 import type {
 	RpcCommand,
@@ -619,9 +620,19 @@ export async function runRpcMode(
 	process.env.PI_NOTIFICATIONS = "off";
 
 	const frameEncoder = new RpcFrameEncoder();
-	process.stdout.write(frameEncoder.encode({ type: "ready" }));
+	process.stdout.write(
+		frameEncoder.encode({
+			type: "ready",
+			protocolVersion: 1,
+			supportedProtocolVersions: [1, 2],
+			maxFrameBytes: MAX_RPC_FRAME_BYTES,
+			maxReassembledFrameBytes: MAX_RPC_REASSEMBLED_BYTES,
+		}),
+	);
 	const output = (obj: RpcResponse | RpcExtensionUIRequest | object) => {
 		process.stdout.write(frameEncoder.encode(obj));
+		if (isRecord(obj) && obj.type === "response" && obj.command === "negotiate_protocol" && obj.success === true)
+			frameEncoder.setProtocolVersion(2);
 	};
 	const emitRpcTitles = shouldEmitRpcTitles();
 
@@ -936,6 +947,12 @@ export async function runRpcMode(
 		const id = command.id;
 
 		switch (command.type) {
+			case "negotiate_protocol": {
+				if (command.protocolVersion !== 2)
+					return error(id, "negotiate_protocol", `Unsupported RPC protocol version: ${command.protocolVersion}`);
+				return success(id, "negotiate_protocol", { protocolVersion: 2 });
+			}
+
 			// =================================================================
 			// Prompting
 			// =================================================================
@@ -1287,6 +1304,33 @@ export async function runRpcMode(
 
 			case "get_messages": {
 				return success(id, "get_messages", { messages: session.messages });
+			}
+
+			case "get_messages_page": {
+				if (session.isStreaming || session.isCompacting)
+					return error(id, "get_messages_page", RPC_MESSAGES_PAGE_BUSY_ERROR);
+				const messages = session.messages;
+				try {
+					return success(
+						id,
+						"get_messages_page",
+						pageRpcMessages(
+							messages,
+							{
+								sessionId: session.sessionId,
+								leafId: session.sessionManager.getLeafId(),
+								messageCount: messages.length,
+							},
+							{ cursor: command.cursor, limit: command.limit },
+						),
+					);
+				} catch (pageError) {
+					return error(
+						id,
+						"get_messages_page",
+						pageError instanceof Error ? pageError.message : String(pageError),
+					);
+				}
 			}
 
 			// =================================================================

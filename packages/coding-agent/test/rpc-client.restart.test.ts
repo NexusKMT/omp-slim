@@ -15,6 +15,34 @@ function isProcessAlive(pid: number): boolean {
 }
 
 describe("RpcClient lifecycle (issue #4079 B)", () => {
+	test("auto-negotiates protocol v2 and reassembles an oversized response", async () => {
+		using client = new RpcClient({
+			cliPath: MOCK_AGENT,
+			env: { MOCK_RPC_V2: "1" },
+		});
+
+		await client.start();
+		const state = (await client.getState()) as unknown as { payload: string };
+		expect(state.payload).toBe("😀".repeat(400_000));
+		expect((await client.getMessages()) as unknown).toEqual([
+			{ role: "user", content: "first", timestamp: 1 },
+			{ role: "assistant", content: [{ type: "text", text: "second" }], timestamp: 2 },
+		]);
+	}, 20_000);
+
+	test("preserves getMessages snapshot behavior while a v2 page walk is unavailable", async () => {
+		using client = new RpcClient({
+			cliPath: MOCK_AGENT,
+			env: { MOCK_RPC_V2: "1", MOCK_RPC_PAGE_BUSY: "1" },
+		});
+
+		await client.start();
+		await expect(client.getMessagesPage()).rejects.toThrow("Cannot page messages while the session is changing");
+		expect((await client.getMessages()) as unknown).toEqual([
+			{ role: "assistant", content: [{ type: "text", text: "streaming snapshot" }], timestamp: 3 },
+		]);
+	}, 20_000);
+
 	test("start() succeeds a second time after stop() on the same instance", async () => {
 		using client = new RpcClient({
 			cliPath: MOCK_AGENT,
