@@ -460,6 +460,38 @@ describe("AuthStorage usage cache: header ingestion", () => {
 		expect(storage.ingestUsageHeaders("anthropic", usageHeaders("0.05", "0.6"), { sessionId: "s" })).toBe(false);
 	});
 
+	it("preserves a failed fetch cooldown across exhausted header ingestion, then retries after expiry", async () => {
+		const start = Date.now();
+		const now = vi.spyOn(Date, "now").mockReturnValue(start);
+		let calls = 0;
+		vi.spyOn(claudeUsage.claudeUsageProvider, "fetchUsage").mockImplementation(async () => {
+			calls += 1;
+			return null;
+		});
+
+		expect(await storage.getApiKey("anthropic", "cooldown-session")).toBe("oat-1");
+		expect(
+			storage.ingestUsageHeaders("anthropic", usageHeaders("0.02", "0.3"), {
+				sessionId: "cooldown-session",
+			}),
+		).toBe(true);
+		expect(await storage.fetchUsageReports()).toHaveLength(1);
+		expect(calls).toBe(1);
+
+		now.mockReturnValue(start + 1_000);
+		expect(
+			storage.ingestUsageHeaders("anthropic", usageHeaders("1", "0.3"), {
+				sessionId: "cooldown-session",
+			}),
+		).toBe(true);
+		expect(await storage.fetchUsageReports()).toHaveLength(1);
+		expect(calls).toBe(1);
+
+		now.mockReturnValue(start + 12_501);
+		expect(await storage.fetchUsageReports()).toHaveLength(1);
+		expect(calls).toBe(2);
+	});
+
 	it("merges header umbrella windows onto the last real report and preserves tier limits", async () => {
 		const realReport = makeTieredReport("a@example.com");
 		let calls = 0;

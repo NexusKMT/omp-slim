@@ -3172,7 +3172,8 @@ export class AuthStorage {
 		}
 
 		if (this.#fetchUsageReportsOverride || this.#store.fetchUsageReports) return false;
-		const prior = this.#usageCache.getStale<UsageReport | null>(cacheKey)?.value;
+		const priorEntry = this.#usageCache.getStale<UsageReport | null>(cacheKey);
+		const prior = priorEntry?.value;
 		let merged = report;
 		if (prior && Array.isArray(prior.limits)) {
 			const headerLimitsById = new Map(report.limits.map(limit => [limit.id, limit]));
@@ -3203,9 +3204,12 @@ export class AuthStorage {
 		}
 
 		// Header-only reports are last-good hints, not completed usage fetches.
-		// Keep them durable but stale so the next poll probes the provider; a
-		// failed probe still applies the normal short backoff in #fetchUsageCached.
-		const expiresAt = merged.metadata?.source === "ratelimit-headers" ? now - 1 : now + USAGE_REPORT_TTL_MS;
+		// Keep them durable but stale so the next poll probes the provider, while
+		// preserving any active failure backoff installed by #fetchUsageCached.
+		const expiresAt =
+			merged.metadata?.source === "ratelimit-headers"
+				? Math.max(priorEntry?.expiresAt ?? now - 1, now - 1)
+				: now + USAGE_REPORT_TTL_MS;
 		this.#usageCache.set(cacheKey, { value: merged, expiresAt });
 		this.#usageHeaderIngestAt.set(cacheKey, now);
 		return true;
