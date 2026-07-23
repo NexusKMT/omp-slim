@@ -401,6 +401,50 @@ describe("openai-completions wire-quirk compat detection", () => {
 	});
 });
 
+describe("OpenAI explicit prompt-cache breakpoint compat", () => {
+	it("enables the 30-minute breakpoint contract only for GPT-5.6 on the official API", () => {
+		const completions = buildOpenAICompat(
+			completionsSpec({ id: "gpt-5.6", provider: "openai", baseUrl: "https://api.openai.com/v1" }),
+		);
+		const responses = buildOpenAIResponsesCompat({
+			id: "gpt-5.6-mini",
+			provider: "openai",
+			name: "GPT 5.6 Mini",
+			baseUrl: "https://api.openai.com/v1",
+		});
+
+		expect(completions.supportsPromptCacheBreakpoints).toBe(true);
+		expect(completions.promptCacheBreakpointTtl).toBe("30m");
+		expect(responses.supportsPromptCacheBreakpoints).toBe(true);
+		expect(responses.promptCacheBreakpointTtl).toBe("30m");
+
+		expect(
+			buildOpenAICompat(completionsSpec({ id: "gpt-5.5", provider: "openai", baseUrl: "https://api.openai.com/v1" }))
+				.supportsPromptCacheBreakpoints,
+		).toBe(false);
+		expect(
+			buildOpenAIResponsesCompat({
+				id: "gpt-5.6",
+				provider: "openai",
+				name: "GPT 5.6",
+				baseUrl: "https://api.openai.com.evil/v1",
+			}).supportsPromptCacheBreakpoints,
+		).toBe(false);
+	});
+
+	it("keeps custom endpoint support opt-in", () => {
+		const compat = buildOpenAICompat(
+			completionsSpec({
+				id: "gpt-5.6",
+				compat: { supportsPromptCacheBreakpoints: true, promptCacheBreakpointTtl: "30m" },
+			}),
+		);
+
+		expect(compat.supportsPromptCacheBreakpoints).toBe(true);
+		expect(compat.promptCacheBreakpointTtl).toBe("30m");
+	});
+});
+
 describe("OpenRouter model discovery", () => {
 	it("keeps refreshed OpenRouter models on the OpenRouter pseudo API", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-openrouter-refresh-"));
