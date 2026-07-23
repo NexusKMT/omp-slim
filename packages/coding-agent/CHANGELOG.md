@@ -1240,6 +1240,9 @@
 
 - Cache full-session retention transcript incrementally instead of re-formatting the entire message history on every retain cycle ([#4246](https://github.com/can1357/oh-my-pi/issues/4246))
 - Bound interactive bash live display write queue to prevent unbounded PTY chunk backlog ([#4240](https://github.com/can1357/oh-my-pi/issues/4240))
+### Fixed
+
+- Fix ACP terminal hang/leak by bounding createTerminal and RPC awaits with abort/timeout and cleaning up late-resolving terminals ([#4241](https://github.com/can1357/oh-my-pi/issues/4241))
 
 
 ## [16.3.0] - 2026-07-02
