@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Renamed `getAutoQaDbDir` to `getAutoQaDbPath` for accuracy; update any usage accordingly
+
 ## [17.0.5] - 2026-07-18
 
 ### Changed
