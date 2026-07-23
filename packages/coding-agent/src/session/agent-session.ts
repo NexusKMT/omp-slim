@@ -219,6 +219,7 @@ import {
 import { disposeRubyKernelSessionsByOwner } from "../eval/rb/executor";
 import { defaultEvalSessionId } from "../eval/session-id";
 import { type BashResult, executeBash as executeBashCommand } from "../exec/bash-executor";
+import { exportSessionToHtml } from "../export/html";
 import type { TtsrManager, TtsrMatchContext } from "../export/ttsr";
 import type { LoadedCustomCommand } from "../extensibility/custom-commands";
 import type { CustomTool, CustomToolContext } from "../extensibility/custom-tools/types";
@@ -18253,16 +18254,20 @@ export class AgentSession {
 
 	/**
 	 * Export session to HTML.
-	 * @param outputPath Optional output path (defaults to session directory)
-	 * @returns Path to exported file
+	 * @param outputPath Optional output path
+	 * @param useUserThemes Bundle the dark and light TUI themes selected in settings
 	 */
-	async exportToHtml(outputPath?: string): Promise<string> {
-		// Public HTML export ships in the omp brand palette (collab-web
-		// pink/purple), matching my.omp.sh — not the host's terminal theme.
-		// Callers who want a themed export can pass `palette: "theme"` with
-		// `themeName` directly to `exportSessionToHtml`.
-		const { exportSessionToHtml } = await import("../export/html");
-		return exportSessionToHtml(this.sessionManager, this.state, { outputPath, palette: "web" });
+	async exportToHtml(outputPath?: string, useUserThemes = false): Promise<string> {
+		return exportSessionToHtml(this.sessionManager, this.state, {
+			outputPath,
+			palette: useUserThemes ? "theme" : "web",
+			themeNames: useUserThemes
+				? {
+						dark: this.settings.get("theme.dark") ?? "titanium",
+						light: this.settings.get("theme.light") ?? "light",
+					}
+				: undefined,
+		});
 	}
 
 	// =========================================================================
