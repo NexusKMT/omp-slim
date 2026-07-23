@@ -98,6 +98,15 @@ export class EventController {
 	#pinnedErrorComponent: AssistantMessageComponent | undefined = undefined;
 	#retrySupersededAssistantComponents = new Map<string, AssistantMessageComponent>();
 	#retrySupersededAssistantQueue: AssistantMessageComponent[] = [];
+	// Set when `auto_retry_start` fires and cleared by `auto_retry_end` (both
+	// outcomes) — true for exactly the window a retry is outstanding. Gates
+	// `sendErrorNotification`: the wire-level `agent_end` for a retryable
+	// failure is coalesced with every other attempt in the same saga while the
+	// prompt is in flight (see `AgentSession#emitSessionEvent`), so the single
+	// `agent_end` that survives to reach this controller can be either a
+	// mid-retry blip or the final settle — only the retry lifecycle events
+	// (never deferred) can tell them apart.
+	#retryPending = false;
 	#idleCompactionTimer?: NodeJS.Timeout;
 	#idleRecapTimer?: NodeJS.Timeout;
 	// In-flight ephemeral recap turn; aborted by #cancelIdleRecap when any
@@ -332,6 +341,7 @@ export class EventController {
 		this.#readToolCallAssistantComponents.clear();
 		this.#lastAssistantComponent = undefined;
 		this.#pinnedErrorComponent = undefined;
+		this.#retryPending = this.ctx.viewSession.isRetrying;
 		this.#cancelIdleCompaction();
 		this.#cancelIdleRecap();
 		for (const timer of this.#ircExpiryTimers.values()) {
@@ -1176,7 +1186,7 @@ export class EventController {
 			}
 		}
 	}
-	async #handleAgentEnd(_event: Extract<AgentSessionEvent, { type: "agent_end" }>): Promise<void> {
+	async #handleAgentEnd(event: Extract<AgentSessionEvent, { type: "agent_end" }>): Promise<void> {
 		// A superseded agent_end: the agent is already streaming a fresh turn, so
 		// this event belongs to a turn that has already been replaced. The session
 		// dispatches to listeners fire-and-forget across an async extension-emit hop
@@ -1189,10 +1199,10 @@ export class EventController {
 		if (this.ctx.session.isStreaming) return;
 		setTerminalTitleState("idle");
 
-		await this.#finishAgentEnd();
+		await this.#finishAgentEnd(event);
 	}
 
-	async #finishAgentEnd(): Promise<void> {
+	async #finishAgentEnd(event: Extract<AgentSessionEvent, { type: "agent_end" }>): Promise<void> {
 		this.#setTerminalProgress(false);
 		this.ctx.statusLine.markActivityEnd();
 		this.#streamingReveal.stop();
@@ -1241,7 +1251,8 @@ export class EventController {
 		this.ctx.ui.requestRender();
 		this.#scheduleIdleCompaction();
 		this.#scheduleIdleRecap();
-		this.sendCompletionNotification();
+		this.sendErrorNotification(event);
+		this.sendCompletionNotification(event);
 	}
 
 	/**
@@ -1399,6 +1410,7 @@ export class EventController {
 	}
 
 	async #handleAutoRetryStart(event: Extract<AgentSessionEvent, { type: "auto_retry_start" }>): Promise<void> {
+		this.#retryPending = true;
 		this.#trackRetrySupersededAssistantComponent(this.#lastAssistantComponent);
 		this.#stopWorkingLoader();
 		this.ctx.statusContainer.disposeChildren();
@@ -1422,6 +1434,7 @@ export class EventController {
 	}
 
 	async #handleAutoRetryEnd(event: Extract<AgentSessionEvent, { type: "auto_retry_end" }>): Promise<void> {
+		this.#retryPending = false;
 		if (this.ctx.retryLoader) {
 			this.ctx.retryLoader.stop();
 			this.ctx.retryLoader = undefined;
@@ -1609,7 +1622,51 @@ export class EventController {
 		return this.ctx.viewSession.getContextUsage()?.tokens ?? 0;
 	}
 
-	sendCompletionNotification(): void {
+	sendErrorNotification(event: Extract<AgentSessionEvent, { type: "agent_end" }>): void {
+		// A running async job or queued delivery will wake the session again, so
+		// its current agent_end is a scheduling pause rather than a user-visible
+		// terminal failure. AgentSession marks that stable outcome before
+		// dispatching the deferred event; do not infer it from mutable job state.
+		if (event.isTerminal === false) return;
+
+		// `AgentSession` defers and coalesces the wire-level `agent_end` while a
+		// prompt is still in flight (see `#emitSessionEvent` in agent-session.ts):
+		// every mid-retry attempt's own settle is superseded, so this method often
+		// sees only ONE `agent_end` for an entire multi-attempt retry saga — which
+		// can be the final failure, not an intermediate one. Gate purely on the
+		// retry lifecycle (`auto_retry_start`/`auto_retry_end`, which are never
+		// deferred) rather than consuming this flag against whichever `agent_end`
+		// happens to arrive first: `#retryPending` is true only for the actual
+		// window a retry is outstanding, so the settled failure that survives
+		// coalescing is never mistaken for a mid-retry blip.
+		if (this.#retryPending) return;
+
+		// Warp structured OSC 777 already drives native completion UX when the
+		// protocol is negotiated — avoid a second legacy desktop/OSC-9 toast.
+		if (isWarpCliAgentProtocolActive()) return;
+
+		const notify = settings.get("error.notify");
+		if (notify === "off") return;
+
+		// Read the turn's own outcome from `agent_end.messages`, not the mutable
+		// active context: a classifier-refusal failure is final (stopReason ===
+		// "error") but gets pruned from `viewSession`'s active context before this
+		// handler runs (see `#removeAssistantMessageFromActiveContext` in
+		// agent-session.ts), so `getLastAssistantMessage()` would see a stale or
+		// absent assistant and silently drop the notification.
+		const last = event.messages.findLast((message): message is AssistantMessage => message.role === "assistant");
+		if (last?.stopReason !== "error") return;
+
+		const sessionName = this.ctx.sessionManager.getSessionName();
+		TERMINAL.sendNotification({
+			title: sessionName || "Oh My Pi",
+			body: "Stopped with error",
+			type: "error",
+			actions: "focus",
+		});
+	}
+
+	sendCompletionNotification(event: Extract<AgentSessionEvent, { type: "agent_end" }>): void {
 		const notify = settings.get("completion.notify");
 		if (notify === "off") return;
 
@@ -1617,11 +1674,12 @@ export class EventController {
 		// protocol is negotiated — avoid a second legacy desktop/OSC-9 toast.
 		if (isWarpCliAgentProtocolActive()) return;
 
-		// Skip when the turn was aborted (e.g. ask cancelled with Ctrl+C) or
-		// errored — those are not "Task complete" events. Mirrors the gate
-		// already used by #currentContextTokens, #handleMessageEnd, and the
-		// retry / TTSR / compaction skip paths across agent-session.ts.
-		const last = this.ctx.viewSession.getLastAssistantMessage?.();
+		// Read the turn's own outcome from `agent_end.messages`, not the mutable
+		// active context (see `sendErrorNotification` above for why `viewSession`'s
+		// snapshot can be stale): an aborted or errored turn is not "Task
+		// complete", and using the same event `sendErrorNotification` just read
+		// keeps the two notifications mutually exclusive for one settled turn.
+		const last = event.messages.findLast((message): message is AssistantMessage => message.role === "assistant");
 		if (last?.stopReason === "aborted" || last?.stopReason === "error") return;
 
 		const sessionName = this.ctx.sessionManager.getSessionName();

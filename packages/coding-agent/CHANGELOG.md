@@ -1,6 +1,15 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added `error.notify` so failed model turns can emit distinct terminal/desktop notifications without changing completion notifications ([#2691](https://github.com/can1357/oh-my-pi/issues/2691)).
+
+### Fixed
+
+- Fixed `error.notify` raising a "Stopped with error" toast for provider failures while an auto-retry or async-delivery continuation was pending; the toast now waits for the true terminal settle.
+- Fixed terminal `yield` results racing post-turn maintenance, which could trigger an unnecessary automatic handoff or compaction.
+
 
 ### Added
 
@@ -520,6 +529,7 @@
 - Added the `edit.enforceSeenLines` setting (default off) to gate the hashline seen-line guard. When enabled, edits anchored on lines that a prior `read` or `grep` never displayed are rejected.
 - Added per-agent prewalk for subagents, featuring a `prewalk` frontmatter field, a `task.agentPrewalk` settings override toggled from the `/agents` dashboard, and a `task.prewalk` boolean (default off) to arm the bundled generic `task` agent.
 
+
 ### Changed
 
 - Renamed `"dev.autoqa.consent"` to `"dev.autoqaConsent"` and `"todo.reminders.max"` to `"todo.remindersMax"` to eliminate nested configuration prefix collisions in standard JSON/YAML.
@@ -548,6 +558,7 @@
 - Fixed ACP clients rendering `xd://` device dispatches as file edits; they now map to an `execute`-kind tool call titled with the device URL.
 - Fixed non-yolo approval modes double-prompting for `xd://` device dispatches.
 - Fixed TTSR rules with leading inline regex flags failing to compile and being silently dropped in Bun/JS environments, and recovered scope tokens and sibling values from malformed frontmatter.
+
 
 ## [16.5.2] - 2026-07-14
 

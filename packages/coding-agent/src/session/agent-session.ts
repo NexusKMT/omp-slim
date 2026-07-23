@@ -662,7 +662,11 @@ function sanitizeAssistantForReparentedHistory(message: AssistantMessage): Assis
 
 /** Session-specific events that extend the core AgentEvent */
 export type AgentSessionEvent =
-	| AgentEvent
+	| Exclude<AgentEvent, { type: "agent_end" }>
+	| (Extract<AgentEvent, { type: "agent_end" }> & {
+			/** False when an async delivery will resume the session before its true final settle. */
+			isTerminal?: boolean;
+	  })
 	| {
 			type: "auto_compaction_start";
 			reason: "threshold" | "overflow" | "idle" | "incomplete";
@@ -2452,8 +2456,8 @@ export class AgentSession {
 		const prewalk = this.#prewalk;
 		if (!prewalk || context?.message.role !== "assistant") return;
 
-		const todoCalledThisTurn = context.toolResults.some(result => result.toolName === "todo");
-		if (todoCalledThisTurn) {
+		const todoSucceededThisTurn = context.toolResults.some(result => result.toolName === "todo" && !result.isError);
+		if (todoSucceededThisTurn) {
 			this.#prewalkTodoSeen = true;
 		}
 
@@ -2484,10 +2488,10 @@ export class AgentSession {
 		// todo list from it and start" — so the switch waits until a todo list
 		// exists AND the model has actually started implementing (first
 		// edit/write). The todo call itself never triggers: firing there handed
-		// the fast model the whole implementation cold. The gate keys on the
-		// ACTIVE tool set, not the registry: a registered-but-deactivated todo
-		// (e.g. a restricted active-tool slate) is uncallable and would
-		// deadlock the switch.
+		// the fast model the whole implementation cold. A failed todo call does
+		// not establish the list. The gate keys on the ACTIVE tool set, not the
+		// registry: a registered-but-deactivated todo (e.g. a restricted
+		// active-tool slate) is uncallable and would deadlock the switch.
 		const todoGateOpen = this.#prewalkTodoSeen || !this.getActiveToolNames().includes("todo");
 		const action = todoGateOpen
 			? context.toolResults.find(result => PREWALK_ACTION_TOOLS[result.toolName])
@@ -4324,6 +4328,13 @@ export class AgentSession {
 	 * the recovery wait always sees the in-flight handler and blocks until it — and
 	 * everything it schedules — settles. */
 	#handleAgentEvent = async (event: AgentEvent): Promise<void> => {
+		if (event.type === "tool_execution_end" && this.#isTerminalYieldToolResult(event)) {
+			const alreadyTerminated = this.#synchronouslyTerminatedYieldToolCallIds.delete(event.toolCallId);
+			if (!alreadyTerminated) {
+				this.#markTerminalYieldToolCall(event.toolCallId);
+				this.agent.abort(TERMINAL_TOOL_RESULT_ABORT_REASON);
+			}
+		}
 		if (event.type !== "agent_end") {
 			const processing = this.#processAgentEvent(event);
 			if ((event.type === "message_start" || event.type === "message_end") && isAdvisorCard(event.message)) {
@@ -4678,11 +4689,13 @@ export class AgentSession {
 			this.#recordToolExecutionStart(event);
 		}
 
-		try {
-			await this.#emitSessionEvent(displayEvent);
-		} catch (error) {
-			messageEndPersistence?.release();
-			throw error;
+		if (event.type !== "agent_end") {
+			try {
+				await this.#emitSessionEvent(displayEvent);
+			} catch (error) {
+				messageEndPersistence?.release();
+				throw error;
+			}
 		}
 
 		if (event.type === "turn_start") {
@@ -4719,13 +4732,6 @@ export class AgentSession {
 			) {
 				this.#planModeReminderCount = 0;
 				this.#planModeReminderAwaitingProgress = false;
-			}
-		}
-		if (event.type === "tool_execution_end" && this.#isTerminalYieldToolResult(event)) {
-			const alreadyTerminated = this.#synchronouslyTerminatedYieldToolCallIds.delete(event.toolCallId);
-			if (!alreadyTerminated) {
-				this.#markTerminalYieldToolCall(event.toolCallId);
-				this.agent.abort(TERMINAL_TOOL_RESULT_ABORT_REASON);
 			}
 		}
 
@@ -4940,12 +4946,19 @@ export class AgentSession {
 
 		// Check auto-retry and auto-compaction after agent completes
 		if (event.type === "agent_end") {
-			const settledMessages = this.agent.state.messages;
+			const settledMessages = event.messages;
+			const activeMessages = this.agent.state.messages;
 			// TTSR retry work runs concurrently and clears the live flag before
 			// maintenance can emit agent_end, so preserve the state at settle entry.
 			const ttsrAbortPendingAtAgentEnd = this.#ttsrAbortPending;
 			const emitAgentEndNotification = async (options?: { willContinue?: boolean }) => {
-				await this.#emitAgentEndNotification(settledMessages, options);
+				// Public agent_end is held out of the eager display pass and emitted
+				// here after maintenance routing, tagged isTerminal so subscribers can
+				// tell final settles from scheduled continuations.
+				await this.#emitSessionEvent({ ...event, isTerminal: !options?.willContinue });
+				void this.#emitAgentEndNotification(activeMessages, options).catch(err => {
+					logger.error("Agent end extension notification failed", { err });
+				});
 			};
 			const usage = this.getSessionStats().tokens;
 			await this.#goalRuntime.onAgentEnd({
@@ -4972,8 +4985,10 @@ export class AgentSession {
 				return;
 			}
 
-			const successfulYieldMessage = this.#findSuccessfulYieldAssistantMessage(settledMessages);
 			const yieldOnThisMessage = this.#assistantEndedWithSuccessfulYield(msg);
+			const successfulYieldMessage = yieldOnThisMessage
+				? msg
+				: this.#findSuccessfulYieldAssistantMessage(settledMessages);
 
 			const maintenanceRoute = (route: string, extra?: Record<string, unknown>) => {
 				logger.debug("agent_end maintenance routing", {
@@ -5065,11 +5080,8 @@ export class AgentSession {
 				this.#trackPostPromptTask(compactionTask);
 				compactionResult = await compactionTask;
 				checkedCompaction = true;
-				if (
-					compactionResult.deferredHandoff ||
-					compactionResult.continuationScheduled ||
-					compactionResult.automaticContinuationBlocked
-				) {
+				const compactionContinues = compactionResult.deferredHandoff || compactionResult.continuationScheduled;
+				if (compactionContinues || compactionResult.automaticContinuationBlocked) {
 					maintenanceRoute("active-goal-pre-empt-compaction-handled", {
 						deferredHandoff: compactionResult.deferredHandoff,
 						continuationScheduled: compactionResult.continuationScheduled,
@@ -5167,6 +5179,17 @@ export class AgentSession {
 				this.#trackPostPromptTask(compactionTask);
 				compactionResult = await compactionTask;
 			}
+			if (msg.stopReason === "error" && this.#retryAttempt > 0 && !compactionResult.continuationScheduled) {
+				const attempt = this.#retryAttempt;
+				this.#retryAttempt = 0;
+				await this.#emitSessionEvent({
+					type: "auto_retry_end",
+					success: false,
+					attempt,
+					finalError: msg.errorMessage,
+				});
+				this.#clearPendingRecoveredRetryErrors();
+			}
 			// Stop-time todo reconciliation only fires at a text-only final stop. A run
 			// that ends still mid-tool-use (deadline hit, context full, etc.) skips the
 			// reminder so we don't pile a follow-up onto an already in-flight turn.
@@ -5214,7 +5237,7 @@ export class AgentSession {
 				await emitAgentEndNotification({ willContinue: true });
 				return;
 			}
-			const sessionStopWillContinue = await this.#emitSessionStopEvent(settledMessages, msg);
+			const sessionStopWillContinue = await this.#emitSessionStopEvent(activeMessages, msg);
 			await emitAgentEndNotification(sessionStopWillContinue ? { willContinue: true } : undefined);
 		}
 	};
@@ -15889,6 +15912,23 @@ export class AgentSession {
 			this.#retryAttempt = 1;
 		}
 		if (classifierRefusal && !switchedModel) {
+			// A prior attempt in this saga already announced `auto_retry_start`
+			// (retryAttempt was incremented for each call to this method, so > 1
+			// means at least one earlier attempt started the loop) but this
+			// attempt is not going to retry — the saga must close with its own
+			// `auto_retry_end` so subscribers tracking retry-outstanding state
+			// (e.g. suppressing a duplicate error toast) don't stay latched on
+			// an announcement that never resolves.
+			if (this.#retryAttempt > 1) {
+				await this.#persistRetryLifecycleErrorMessage(message);
+				await this.#emitSessionEvent({
+					type: "auto_retry_end",
+					success: false,
+					attempt: this.#retryAttempt - 1,
+					finalError: errorMessage,
+				});
+				this.#clearPendingRecoveredRetryErrors();
+			}
 			this.#retryAttempt = 0;
 			this.#resolveRetry();
 			return false;
@@ -15903,6 +15943,17 @@ export class AgentSession {
 			!switchedModel &&
 			!this.#isRetryableError(message)
 		) {
+			// Same auto_retry_end backstop as the classifier-refusal branch above.
+			if (this.#retryAttempt > 1) {
+				await this.#persistRetryLifecycleErrorMessage(message);
+				await this.#emitSessionEvent({
+					type: "auto_retry_end",
+					success: false,
+					attempt: this.#retryAttempt - 1,
+					finalError: errorMessage,
+				});
+				this.#clearPendingRecoveredRetryErrors();
+			}
 			this.#retryAttempt = 0;
 			this.#resolveRetry();
 			return false;
