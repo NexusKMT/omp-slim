@@ -446,7 +446,7 @@ describe("InteractiveMode plan review rendering", () => {
 		expect(session.isPlanInternalAbortPending).toBe(false);
 	});
 
-	it("approves with in-overlay edits and mirrors them to the durable plan file", async () => {
+	it("approves with in-overlay edits and mirrors them to the plan file", async () => {
 		const planFilePath = "local://PLAN.md";
 		const resolvedPlanPath = resolveLocalUrlToPath(planFilePath, {
 			getArtifactsDir: () => session.sessionManager.getArtifactsDir(),
@@ -477,11 +477,10 @@ describe("InteractiveMode plan review rendering", () => {
 			title: "PLAN",
 		});
 
-		// The synthetic plan-approved prompt points execution at the durable
-		// local:// file instead of inlining stale plan content.
+		// The plan-approved prompt stays reference-only; approval must instead
+		// await the durable file mirror before dispatch so read sees the edit.
 		const call = promptSpy.mock.calls.find(isPlanApprovedCall);
 		expect(call).toBeDefined();
-		expect(call?.[0] as string).toContain("local://PLAN.md");
 		expect(call?.[0] as string).not.toContain("edited body");
 		expect(call?.[0] as string).not.toContain("original body");
 		// onPlanEdited mirrored the edit to the plan file.

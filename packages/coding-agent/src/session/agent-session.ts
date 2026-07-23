@@ -2506,9 +2506,6 @@ export class AgentSession {
 		const action = todoGateOpen
 			? context.toolResults.find(result => PREWALK_ACTION_TOOLS[result.toolName])
 			: undefined;
-		if (context.toolResults.some(result => result.toolName === "todo" && !result.isError)) {
-			this.#prewalkTodoSeen = true;
-		}
 		if (!action) {
 			if (!this.#prewalkPlanInjected) {
 				this.#prewalkPlanInjected = true;

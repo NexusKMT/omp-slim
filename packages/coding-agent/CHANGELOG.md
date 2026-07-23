@@ -558,9 +558,6 @@
 - Mid-session `xd://` mount changes (e.g. MCP connect/disconnect) no longer rewrite the system prompt: the delta is announced to the model as a steered system notice ("these tools became available" / "no longer mounted"), so the provider prompt cache stays intact; device docs join the prompt on the next unrelated rebuild.
 
 ### Fixed
-- Fixed prewalk never switching after a successful todo call; the todo gate now opens at the completed turn boundary without allowing the todo call itself to trigger the handoff.
-- Fixed live pending tool headers retaining a stale spinner frame by rebuilding their cached display on each spinner tick.
-- Fixed task and eval tool descriptions omitting the configured default or allowed subagent names under restricted spawn policies.
 
 - Fixed a bug where a nested configuration value (like `dev.autoqa.consent` / `dev.autoqaConsent`) would incorrectly satisfy a parent key lookup (like `dev.autoqa`), causing Auto QA to be enabled and prompt for consent by default when it should have been disabled.
 - Fixed compiled appserver startup deadlocking before socket creation when user extensions were present.
