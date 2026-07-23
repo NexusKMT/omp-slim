@@ -2,6 +2,7 @@ import * as imageGen from "../tools/image-gen";
 import * as webSearch from "../web/search";
 
 interface ProviderGlobalSettings {
+	get(path: "providers.webSearchOrder"): unknown;
 	get(path: "providers.webSearchExclude"): unknown;
 	get(path: "providers.webSearch"): unknown;
 	get(path: "providers.image"): unknown;
@@ -11,6 +12,11 @@ export function applyProviderGlobalsFromSettings(settings: ProviderGlobalSetting
 	const excludedWebSearchProviders = settings.get("providers.webSearchExclude");
 	if (Array.isArray(excludedWebSearchProviders)) {
 		webSearch.setExcludedSearchProviders(excludedWebSearchProviders.filter(webSearch.isSearchProviderId));
+	}
+
+	const orderedWebSearchProviders = settings.get("providers.webSearchOrder");
+	if (Array.isArray(orderedWebSearchProviders)) {
+		webSearch.setSearchProviderOrder(orderedWebSearchProviders.filter(webSearch.isSearchProviderId));
 	}
 
 	const webSearchProvider = settings.get("providers.webSearch");

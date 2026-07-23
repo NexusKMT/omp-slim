@@ -197,6 +197,21 @@ export function setPreferredSearchProvider(provider: SearchProviderId | "auto"):
 	preferredProvId = provider;
 }
 
+/** Provider fallback order set via settings (default: built-in order). */
+let orderedProvIds: readonly SearchProviderId[] = SEARCH_PROVIDER_ORDER;
+
+/**
+ * Prioritize configured providers while retaining every unlisted provider in
+ * its built-in relative order. Invalid IDs are ignored defensively.
+ */
+export function setSearchProviderOrder(providers: readonly SearchProviderId[]): void {
+	const prioritized = new Set(providers.filter(id => SEARCH_PROVIDER_ORDER.includes(id)));
+	orderedProvIds =
+		prioritized.size === 0
+			? SEARCH_PROVIDER_ORDER
+			: [...prioritized, ...SEARCH_PROVIDER_ORDER.filter(id => !prioritized.has(id))];
+}
+
 /** Providers excluded from web search resolution via settings. */
 let excludedProvIds = new Set<SearchProviderId>();
 
@@ -225,7 +240,7 @@ export function resolveProviderCandidates(
 		candidates.push({ id: preferredProvider, explicit: true });
 	}
 
-	for (const id of SEARCH_PROVIDER_ORDER) {
+	for (const id of orderedProvIds) {
 		if (id === preferredProvider || isSearchProviderExcluded(id)) continue;
 		candidates.push({ id, explicit: false });
 	}

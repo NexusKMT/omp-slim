@@ -6,6 +6,7 @@ import {
 	resolveProviderChain,
 	setExcludedSearchProviders,
 	setPreferredSearchProvider,
+	setSearchProviderOrder,
 } from "@oh-my-pi/pi-coding-agent/web/search/provider";
 import { SEARCH_PROVIDER_ORDER } from "@oh-my-pi/pi-coding-agent/web/search/types";
 
@@ -35,17 +36,22 @@ function restoreEnv(): void {
 afterEach(() => {
 	setPreferredSearchProvider("auto");
 	setExcludedSearchProviders([]);
+	setSearchProviderOrder([]);
 	restoreEnv();
 });
 
 describe("resolveProviderCandidates", () => {
-	it("orders the preferred provider before unloaded fallbacks", () => {
-		const candidates = resolveProviderCandidates("exa");
+	it("orders the preferred provider before configured and built-in fallbacks", () => {
+		setSearchProviderOrder(["gemini", "exa"]);
 
-		expect(candidates[0]).toEqual({ id: "exa", explicit: true });
-		expect(candidates.slice(1).map(candidate => candidate.id)).toEqual(
-			SEARCH_PROVIDER_ORDER.filter(id => id !== "exa"),
-		);
+		const candidates = resolveProviderCandidates("perplexity");
+
+		expect(candidates[0]).toEqual({ id: "perplexity", explicit: true });
+		expect(candidates.slice(1).map(candidate => candidate.id)).toEqual([
+			"gemini",
+			"exa",
+			...SEARCH_PROVIDER_ORDER.filter(id => id !== "perplexity" && id !== "gemini" && id !== "exa"),
+		]);
 	});
 
 	it("omits excluded providers without resolving them", () => {
@@ -55,6 +61,16 @@ describe("resolveProviderCandidates", () => {
 
 		expect(candidates.map(candidate => candidate.id)).not.toContain("duckduckgo");
 		expect(candidates.map(candidate => candidate.id)).not.toContain("google");
+	});
+
+	it("applies live settings edits, filtering invalid and duplicate provider IDs", () => {
+		const controller = new SelectorController({} as unknown as ConstructorParameters<typeof SelectorController>[0]);
+
+		controller.handleSettingChange("providers.webSearchOrder", ["exa", "not-a-provider", "exa", "gemini"]);
+
+		const candidates = resolveProviderCandidates("auto");
+		expect(candidates.slice(0, 2).map(candidate => candidate.id)).toEqual(["exa", "gemini"]);
+		expect(candidates).toHaveLength(SEARCH_PROVIDER_ORDER.length);
 	});
 });
 

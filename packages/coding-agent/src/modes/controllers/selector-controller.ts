@@ -63,6 +63,7 @@ import {
 	setExcludedSearchProviders,
 	setPreferredImageProvider,
 	setPreferredSearchProvider,
+	setSearchProviderOrder,
 	type ToolSession,
 } from "../../tools";
 import { AskTool, type AskToolDetails, type AskToolInput } from "../../tools/ask";
@@ -612,6 +613,11 @@ export class SelectorController {
 			case "providers.webSearch":
 				if (typeof value === "string" && isSearchProviderPreference(value)) {
 					setPreferredSearchProvider(value);
+				}
+				break;
+			case "providers.webSearchOrder":
+				if (Array.isArray(value)) {
+					setSearchProviderOrder(value.filter(isSearchProviderId));
 				}
 				break;
 			case "providers.webSearchExclude":

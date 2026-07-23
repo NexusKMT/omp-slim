@@ -216,7 +216,6 @@ async function executeSearch(
 			// summary error), masking the cancellation.
 			throwIfAborted(signal);
 			failures.push({ provider: provider ?? providerMeta, error });
-			if (candidate.explicit) break;
 		}
 	}
 
@@ -351,6 +350,11 @@ export function getSearchTools(): CustomTool<any, any>[] {
 	return [webSearchCustomTool];
 }
 
-export { getSearchProvider, setExcludedSearchProviders, setPreferredSearchProvider } from "./provider";
+export {
+	getSearchProvider,
+	setExcludedSearchProviders,
+	setPreferredSearchProvider,
+	setSearchProviderOrder,
+} from "./provider";
 export type { SearchProviderId as SearchProvider, SearchResponse } from "./types";
 export { isSearchProviderId, isSearchProviderPreference } from "./types";

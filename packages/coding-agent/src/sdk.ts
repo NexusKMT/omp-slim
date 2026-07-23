@@ -184,6 +184,7 @@ import {
 	setExcludedSearchProviders,
 	setPreferredImageProvider,
 	setPreferredSearchProvider,
+	setSearchProviderOrder,
 	type Tool,
 	type ToolSession,
 	WebSearchTool,
@@ -1258,6 +1259,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const excludedWebSearchProviders = settings.get("providers.webSearchExclude");
 	if (Array.isArray(excludedWebSearchProviders)) {
 		setExcludedSearchProviders(excludedWebSearchProviders.filter(isSearchProviderId));
+	}
+
+	const orderedWebSearchProviders = settings.get("providers.webSearchOrder");
+	if (Array.isArray(orderedWebSearchProviders)) {
+		setSearchProviderOrder(orderedWebSearchProviders.filter(isSearchProviderId));
 	}
 
 	const webSearchProvider = settings.get("providers.webSearch");
