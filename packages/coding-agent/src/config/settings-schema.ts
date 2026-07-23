@@ -3108,6 +3108,17 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"read.renderMarkdown": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "files",
+			group: "Reading",
+			label: "Markdown Previews",
+			description: "Render Markdown read results as formatted terminal Markdown previews instead of raw source",
+		},
+	},
+
 	"read.summarize.enabled": {
 		type: "boolean",
 		default: true,

@@ -100,6 +100,26 @@ describe("read summary", () => {
 		expect(proseResult.details?.summary?.elidedSpans).toBe(1);
 	});
 
+	it("marks local Markdown-like extensions as markdown while preserving model-facing source text", async () => {
+		const markdown = "# Heading\n\nSome **bold** text.\n";
+		const extensions = ["md", "markdown", "mdx", "mdc", "mkd", "mdown"] as const;
+		const tool = new ReadTool(createSession(tmpDir));
+
+		for (const extension of extensions) {
+			const fixture = path.join(tmpDir, `fixture.${extension}`);
+			await fs.writeFile(fixture, markdown);
+
+			const result = await tool.execute(`read-summary-markdown-${extension}`, { path: fixture });
+			const text = textOutput(result);
+
+			expect(result.details?.contentType).toBe("text/markdown");
+			expect(result.details?.displayContent?.text).toBe(markdown);
+			expect(text.split("\n")[0]).toMatch(new RegExp(`^\\[fixture\\.${extension}#[0-9A-F]{4}\\]$`));
+			expect(text).toContain("1:# Heading");
+			expect(text).toContain("3:Some **bold** text.");
+		}
+	});
+
 	it("does not truncate summarized output", async () => {
 		const fixture = path.join(tmpDir, "many.ts");
 		const source = Array.from(
