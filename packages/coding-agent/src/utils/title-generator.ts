@@ -390,14 +390,14 @@ export function setSessionTerminalTitle(sessionName: string | undefined, cwd?: s
 	// An authoritative session title (rename, new session, focus swap) supersedes
 	// any extension override so the base title tracks the real session again.
 	terminalTitleRuntime.extensionOverride = undefined;
-	terminalTitleRuntime.base = formatSessionTerminalTitle(sessionName, cwd);
+	terminalTitleRuntime.label = sanitizeTerminalTitlePart(sessionName) ?? getFallbackTerminalTitle(cwd);
 	emitTerminalTitle();
 }
 
 /**
  * Set a terminal title from an extension's `setTitle()`. Unlike the session base
- * title, this owns the terminal verbatim: the run-state spinner will not prefix a
- * glyph or overwrite it on its next tick. Cleared when the app next sets an
+ * title, this owns the terminal verbatim: the run-state separator will not rewrite
+ * it on the next spinner tick or state change. Cleared when the app next sets an
  * authoritative session title via {@link setSessionTerminalTitle}.
  */
 export function setExtensionTerminalTitle(title: string): void {
@@ -407,28 +407,32 @@ export function setExtensionTerminalTitle(title: string): void {
 
 export type TerminalTitleState = "idle" | "working" | "attention";
 
-/** Braille spinner frames for the `working` state. Self-contained (not the theme's
- *  symbol set) to avoid a utils→modes import cycle; OSC titles render in tab/window
- *  bars that handle Unicode. */
+/** Separator glyphs carrying the run state between the `π` brand and the session
+ *  label — the brand itself stays bare (no prefix glyph). Spinner frames animate
+ *  the separator while working; they are self-contained (not the theme's symbol
+ *  set) to avoid a utils→modes import cycle; OSC titles render in tab/window bars
+ *  that handle Unicode. */
 const TITLE_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 const TITLE_SPINNER_INTERVAL_MS = 80;
-const TITLE_IDLE_GLYPH = "●";
-const TITLE_ATTENTION_GLYPH = "[!]";
+/** The user's turn: the title reads like a shell prompt awaiting input. */
+const TITLE_IDLE_SEPARATOR = ">";
+/** Agent blocked on the user (ask / approval prompt). */
+const TITLE_ATTENTION_SEPARATOR = "!";
 
 const terminalTitleRuntime: {
-	base: string;
+	label: string | undefined;
 	state: TerminalTitleState;
 	frame: number;
 	enabled: boolean;
 	timer: NodeJS.Timeout | undefined;
 	lastEmitted: string | undefined;
 	/** A title an extension set via `setTitle()`. While set, it owns the terminal
-	 *  title verbatim: the run-state spinner never prefixes or overwrites it. Cleared
-	 *  when the app next establishes an authoritative session title (rename, new
-	 *  session, focus swap) via `setSessionTerminalTitle`. */
+	 *  title verbatim: the run-state separator never rewrites it. Cleared when the
+	 *  app next establishes an authoritative session title (rename, new session,
+	 *  focus swap) via `setSessionTerminalTitle`. */
 	extensionOverride: string | undefined;
 } = {
-	base: DEFAULT_TERMINAL_TITLE,
+	label: undefined,
 	state: "idle",
 	frame: 0,
 	enabled: true,
@@ -438,35 +442,39 @@ const terminalTitleRuntime: {
 };
 
 /**
- * Compose the run-state prefix with the base title. Pure (no I/O) so the
- * state→glyph contract is unit-testable: `working` shows an animated spinner
- * frame, `idle` a steady dot, `attention` a bracketed bang; when disabled it
- * renders the bare title (the pre-state behavior).
+ * Compose the terminal title from the `π` brand, a state-carrying SEPARATOR, and
+ * the session label. The brand never gains a prefix glyph — the separator slot
+ * expresses the run state instead. Pure (no I/O) so the state→separator contract
+ * is unit-testable:
+ *   - `idle` (user's turn):  `π > label`  — reads like a prompt awaiting input;
+ *   - `working`:             `π ⠋ label`  — spinner frames animate the separator;
+ *   - `attention`:           `π ! label`  — agent blocked on the user;
+ *   - disabled:              `π: label`   — the pre-state layout.
+ * Without a label the separator trails the brand (`π >`) so the state stays visible.
  */
 export function buildTerminalTitleWithState(
-	base: string,
+	label: string | undefined,
 	state: TerminalTitleState,
 	frame: number,
 	enabled: boolean,
 ): string {
-	if (!enabled) return base;
-	switch (state) {
-		case "working":
-			return `${TITLE_SPINNER_FRAMES[frame % TITLE_SPINNER_FRAMES.length]} ${base}`;
-		case "attention":
-			return `${TITLE_ATTENTION_GLYPH} ${base}`;
-		case "idle":
-			return `${TITLE_IDLE_GLYPH} ${base}`;
-	}
+	if (!enabled) return label ? `${DEFAULT_TERMINAL_TITLE}: ${label}` : DEFAULT_TERMINAL_TITLE;
+	const separator =
+		state === "working"
+			? TITLE_SPINNER_FRAMES[frame % TITLE_SPINNER_FRAMES.length]
+			: state === "attention"
+				? TITLE_ATTENTION_SEPARATOR
+				: TITLE_IDLE_SEPARATOR;
+	return label ? `${DEFAULT_TERMINAL_TITLE} ${separator} ${label}` : `${DEFAULT_TERMINAL_TITLE} ${separator}`;
 }
 
 function emitTerminalTitle(): void {
-	// An extension override owns the terminal verbatim; the run-state prefix and
+	// An extension override owns the terminal verbatim; the run-state separator and
 	// spinner ticks must not clobber it (still deduped via lastEmitted).
 	const next =
 		terminalTitleRuntime.extensionOverride ??
 		buildTerminalTitleWithState(
-			terminalTitleRuntime.base,
+			terminalTitleRuntime.label,
 			terminalTitleRuntime.state,
 			terminalTitleRuntime.frame,
 			terminalTitleRuntime.enabled,
@@ -494,9 +502,9 @@ function startTerminalTitleSpinner(): void {
 }
 
 /**
- * Reflect the agent run state in the terminal title: `working` animates a
- * spinner, `idle` shows a steady dot, `attention` flags that the agent is
- * blocked on the user. Gated off by `tui.titleState`.
+ * Reflect the agent run state in the terminal title's separator: `working`
+ * animates spinner frames in the separator slot, `idle` shows `>` (your turn),
+ * `attention` shows `!` (agent blocked on you). Gated off by `tui.titleState`.
  */
 export function setTerminalTitleState(state: TerminalTitleState): void {
 	terminalTitleRuntime.state = state;
@@ -505,7 +513,7 @@ export function setTerminalTitleState(state: TerminalTitleState): void {
 	emitTerminalTitle();
 }
 
-/** Enable/disable the run-state prefix (driven by the `tui.titleState` setting). */
+/** Enable/disable the run-state separator (driven by the `tui.titleState` setting). */
 export function setTerminalTitleStateEnabled(enabled: boolean): void {
 	terminalTitleRuntime.enabled = enabled;
 	if (enabled && terminalTitleRuntime.state === "working") startTerminalTitleSpinner();

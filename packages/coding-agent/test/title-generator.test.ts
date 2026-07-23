@@ -579,7 +579,8 @@ describe("title generator", () => {
 
 // The terminal title runtime is a module-global. `emitTerminalTitle()` composes
 // the emitted OSC title from three inputs — an extension override, a run-state
-// prefix (spinner/dot/bang), and the session base — and writes it to
+// separator (spinner frame / `>` / `!` between the `π` brand and the session
+// label), and the session label — and writes it to
 // `process.stdout` as `ESC]0;<title>BEL`. These tests pin the observable
 // contract at that sink: what STRING actually reaches the terminal after a
 // given sequence of the exported state transitions.

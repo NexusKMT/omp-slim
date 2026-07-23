@@ -3842,7 +3842,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		await this.ui.terminal.drainInput(1000);
 		// Stop the run-state spinner interval BEFORE restoring the shell title, so a
 		// pending tick cannot re-emit an OSC title after `popTerminalTitle` hands the
-		// terminal back (which would leave the parent shell with a `⠋ π: …` tab).
+		// terminal back (which would leave the parent shell with a `π ⠋ …` tab).
 		disposeTerminalTitleState();
 		popTerminalTitle();
 		this.stop();

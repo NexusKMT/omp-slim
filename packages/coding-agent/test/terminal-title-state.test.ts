@@ -7,35 +7,44 @@ import {
 } from "@oh-my-pi/pi-coding-agent/utils/title-generator";
 import { setTerminalHeadless } from "@oh-my-pi/pi-utils";
 
-const BASE = "π: my-project";
+const LABEL = "my-project";
 
 describe("buildTerminalTitleWithState", () => {
-	it("shows a steady dot when idle/done", () => {
-		expect(buildTerminalTitleWithState(BASE, "idle", 0, true)).toBe(`● ${BASE}`);
+	it("separates brand and label with '>' when idle/done (your turn)", () => {
+		expect(buildTerminalTitleWithState(LABEL, "idle", 0, true)).toBe(`π > ${LABEL}`);
 	});
 
-	it("shows a bracketed bang when the agent needs attention", () => {
-		expect(buildTerminalTitleWithState(BASE, "attention", 0, true)).toBe(`[!] ${BASE}`);
+	it("separates brand and label with '!' when the agent needs attention", () => {
+		expect(buildTerminalTitleWithState(LABEL, "attention", 0, true)).toBe(`π ! ${LABEL}`);
 	});
 
-	it("animates a spinner glyph while working", () => {
-		const frame0 = buildTerminalTitleWithState(BASE, "working", 0, true);
-		const frame1 = buildTerminalTitleWithState(BASE, "working", 1, true);
-		// A single glyph + space precedes the base, and the glyph advances per frame.
-		expect(frame0.endsWith(` ${BASE}`)).toBe(true);
-		expect(frame0.length).toBeGreaterThan(BASE.length + 1);
+	it("animates spinner frames in the separator slot while working", () => {
+		const frame0 = buildTerminalTitleWithState(LABEL, "working", 0, true);
+		const frame1 = buildTerminalTitleWithState(LABEL, "working", 1, true);
+		// The brand stays a bare `π`; only the separator between brand and label
+		// carries the spinner glyph, and it advances per frame.
+		expect(frame0).toBe(`π ⠋ ${LABEL}`);
+		expect(frame1).toBe(`π ⠙ ${LABEL}`);
 		expect(frame1).not.toBe(frame0);
 		// The frame index is taken modulo the frame count, so it never throws or
-		// produces an "undefined" glyph for a large counter.
-		const wrapped = buildTerminalTitleWithState(BASE, "working", 9999, true);
-		expect(wrapped.endsWith(` ${BASE}`)).toBe(true);
+		// produces an "undefined" separator for a large counter.
+		const wrapped = buildTerminalTitleWithState(LABEL, "working", 9999, true);
+		expect(wrapped.startsWith("π ")).toBe(true);
+		expect(wrapped.endsWith(` ${LABEL}`)).toBe(true);
 		expect(wrapped).not.toContain("undefined");
 	});
 
-	it("renders the bare title (pre-state behavior) when disabled, regardless of state", () => {
-		expect(buildTerminalTitleWithState(BASE, "working", 3, false)).toBe(BASE);
-		expect(buildTerminalTitleWithState(BASE, "idle", 0, false)).toBe(BASE);
-		expect(buildTerminalTitleWithState(BASE, "attention", 0, false)).toBe(BASE);
+	it("keeps the state visible as a trailing separator when there is no label", () => {
+		expect(buildTerminalTitleWithState(undefined, "idle", 0, true)).toBe("π >");
+		expect(buildTerminalTitleWithState(undefined, "attention", 0, true)).toBe("π !");
+		expect(buildTerminalTitleWithState(undefined, "working", 0, true)).toBe("π ⠋");
+	});
+
+	it("renders the pre-state `π: label` layout when disabled, regardless of state", () => {
+		expect(buildTerminalTitleWithState(LABEL, "working", 3, false)).toBe(`π: ${LABEL}`);
+		expect(buildTerminalTitleWithState(LABEL, "idle", 0, false)).toBe(`π: ${LABEL}`);
+		expect(buildTerminalTitleWithState(LABEL, "attention", 0, false)).toBe(`π: ${LABEL}`);
+		expect(buildTerminalTitleWithState(undefined, "idle", 0, false)).toBe("π");
 	});
 });
 
@@ -43,7 +52,7 @@ describe("buildTerminalTitleWithState", () => {
 // `working` spinner arms a periodic `setInterval` that, on every tick, re-emits
 // the terminal title as an OSC-0 write (`ESC]0;<title>BEL`). If that interval is
 // not cleared on teardown, a pending tick can fire AFTER the shell title was
-// restored, leaving the parent shell tab reading `⠋ π: …` post-exit.
+// restored, leaving the parent shell tab reading `π ⠋ …` post-exit.
 // `disposeTerminalTitleState()` (now wired into `InteractiveMode.shutdown()`)
 // must stop the timer so no further OSC-title write reaches stdout.
 //

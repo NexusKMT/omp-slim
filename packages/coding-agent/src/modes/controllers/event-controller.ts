@@ -1097,7 +1097,10 @@ import { aggregateVibeWorkerTokensPerSecond, VibeSessionRegistry } from "../vibe
 		// to finish must not clear the attention signal while another prompt still
 		// waits. `ask` ids are in the set too (added at tool_execution_start), so
 		// the delete also covers them without leaking ids until turn end.
-		if (this.#approvalAttentionToolCallIds.delete(event.toolCallId) && this.#approvalAttentionToolCallIds.size === 0) {
+		if (
+			this.#approvalAttentionToolCallIds.delete(event.toolCallId) &&
+			this.#approvalAttentionToolCallIds.size === 0
+		) {
 			setTerminalTitleState("working");
 		}
 		if (event.toolName === "read") {
