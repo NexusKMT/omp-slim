@@ -492,6 +492,74 @@ describe("AuthStorage usage cache: header ingestion", () => {
 		expect(calls).toBe(2);
 	});
 
+	it("does not let header ingestion slide the full-report refresh deadline", async () => {
+		const start = Date.now();
+		const now = vi.spyOn(Date, "now").mockReturnValue(start);
+		vi.spyOn(Math, "random").mockReturnValue(0.5);
+		const makeFullReport = (extraUsed: number): UsageReport => {
+			const baseReport = makeTieredReport("a@example.com");
+			return {
+				...baseReport,
+				limits: [
+					...baseReport.limits,
+					{
+						id: "anthropic:extra",
+						label: "Claude Extra Usage",
+						scope: { provider: "anthropic", windowId: "extra" },
+						amount: {
+							used: extraUsed,
+							limit: 100,
+							usedFraction: extraUsed / 100,
+							unit: "usd",
+						},
+						status: "ok",
+					},
+				],
+				raw: { extra_usage: { used: extraUsed * 100, limit: 10_000 } },
+			};
+		};
+		const firstFullReport = makeFullReport(12.34);
+		const secondFullReport = makeFullReport(56.78);
+		const fetchSpy = vi
+			.spyOn(claudeUsage.claudeUsageProvider, "fetchUsage")
+			.mockResolvedValueOnce(firstFullReport)
+			.mockResolvedValue(secondFullReport);
+
+		const initialReport = requireAnthropicReport(await storage.fetchUsageReports());
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
+		expect(requireLimit(initialReport, "anthropic:extra").amount.used).toBe(12.34);
+		expect(await storage.getApiKey("anthropic", "sliding-session")).toBe("oat-1");
+
+		now.mockReturnValue(start + 60_000);
+		expect(
+			storage.ingestUsageHeaders("anthropic", usageHeaders("0.05", "0.6"), {
+				sessionId: "sliding-session",
+			}),
+		).toBe(true);
+		now.mockReturnValue(start + 120_000);
+		expect(
+			storage.ingestUsageHeaders("anthropic", usageHeaders("0.06", "0.61"), {
+				sessionId: "sliding-session",
+			}),
+		).toBe(true);
+		now.mockReturnValue(start + 240_000);
+		expect(
+			storage.ingestUsageHeaders("anthropic", usageHeaders("0.07", "0.62"), {
+				sessionId: "sliding-session",
+			}),
+		).toBe(true);
+
+		now.mockReturnValue(start + 299_999);
+		const beforeDeadline = requireAnthropicReport(await storage.fetchUsageReports());
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
+		expect(requireLimit(beforeDeadline, "anthropic:extra").amount.used).toBe(12.34);
+
+		now.mockReturnValue(start + 376_000);
+		const refreshed = requireAnthropicReport(await storage.fetchUsageReports());
+		expect(fetchSpy).toHaveBeenCalledTimes(2);
+		expect(requireLimit(refreshed, "anthropic:extra").amount.used).toBe(56.78);
+	});
+
 	it("merges header umbrella windows onto the last real report and preserves tier limits", async () => {
 		const realReport = makeTieredReport("a@example.com");
 		let calls = 0;

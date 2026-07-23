@@ -3203,13 +3203,12 @@ export class AuthStorage {
 			};
 		}
 
-		// Header-only reports are last-good hints, not completed usage fetches.
-		// Keep them durable but stale so the next poll probes the provider, while
-		// preserving any active failure backoff installed by #fetchUsageCached.
-		const expiresAt =
-			merged.metadata?.source === "ratelimit-headers"
-				? Math.max(priorEntry?.expiresAt ?? now - 1, now - 1)
-				: now + USAGE_REPORT_TTL_MS;
+		// Header ingestion merges values but never extends a cache entry's lifetime.
+		// Preserve the existing expiry (including active failure cooldowns) so full
+		// reports refetch on their original 5-minute schedule and full-payload-only
+		// rows such as extra usage stay current; headers only refresh window rows
+		// between fetches. A newly minted header-only report is durable but stale.
+		const expiresAt = Math.max(priorEntry?.expiresAt ?? now - 1, now - 1);
 		this.#usageCache.set(cacheKey, { value: merged, expiresAt });
 		this.#usageHeaderIngestAt.set(cacheKey, now);
 		return true;
