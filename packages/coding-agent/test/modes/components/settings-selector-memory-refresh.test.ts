@@ -92,17 +92,30 @@ describe("SettingsSelectorComponent memory tab", () => {
 
 	it("saves a pasted Hindsight API token from its settings row", () => {
 		settings.set("memory.backend", "hindsight");
+		settings.set("hindsight.apiToken", "saved-secret-token");
 		const comp = createSelector();
 
 		for (const ch of "hindsight api token") comp.handleInput(ch);
-		expect(comp.render(120).join("\n")).toContain("Hindsight API Token");
+		const row = comp.render(120).join("\n");
+		expect(row).toContain("Hindsight API Token");
+		expect(row).toContain("••••••••");
+		expect(row).not.toContain("saved-secret-token");
 
 		comp.handleInput("\n");
+		expect(comp.render(120).join("\n")).not.toContain("saved-secret-token");
+		comp.handleInput("\n");
+		expect(settings.get("hindsight.apiToken")).toBe("saved-secret-token");
+		expect(comp.render(120).join("\n")).not.toContain("saved-secret-token");
+
+		comp.handleInput("\n");
+		comp.handleInput("\x15");
 		comp.handleInput("\x1b[200~test-token-123\x1b[201~");
+		expect(comp.render(120).join("\n")).not.toContain("test-token-123");
 		comp.handleInput("\n");
 
 		expect(settings.get("hindsight.apiToken")).toBe("test-token-123");
 		expect(loadHindsightConfig(settings, {}).hindsightApiToken).toBe("test-token-123");
+		expect(comp.render(120).join("\n")).not.toContain("test-token-123");
 	});
 
 	it("hides Hindsight rows again when the backend is switched back to off without leaving the tab", () => {
