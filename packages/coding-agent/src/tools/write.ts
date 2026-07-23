@@ -140,16 +140,24 @@ function assertWriteTargetAddressable(target: string, router: InternalUrlRouter)
  * literal path or an ambiguous stat (`"unknown"`: EACCES, transient I/O) also
  * passes through so a real file is never shadowed by the guard.
  */
-async function assertNotReadSelectorMisfire(target: string, content: string, cwd: string): Promise<void> {
-	if (content.length > 0) return;
-	const { sel } = splitPathAndSel(target);
-	if (sel === undefined) return;
-	if ((await probeLiteralPathExists(target, cwd)) !== "missing") return;
+function readSelectorForEmptyWrite(target: string, content: string): string | undefined {
+	if (content.length > 0) return undefined;
+	return splitPathAndSel(target).sel;
+}
+
+function throwReadSelectorMisfire(target: string, sel: string): never {
 	throw new ToolError(
 		`write target '${target}' ends with a read-tool selector ':${sel}' and no such file exists — refusing to create a literal file by that name. ` +
 			`If you meant to read it, use read({ path: "${target}" }). ` +
 			`If you truly intend to create this file, pass its contents in \`content\` (a non-empty write is never blocked).`,
 	);
+}
+
+async function assertNotReadSelectorMisfire(target: string, content: string, cwd: string): Promise<void> {
+	const sel = readSelectorForEmptyWrite(target, content);
+	if (sel === undefined) return;
+	if ((await probeLiteralPathExists(target, cwd)) !== "missing") return;
+	throwReadSelectorMisfire(target, sel);
 }
 
 const BULK_DIRECTIVE_RE = /^#?(\d+)\s*[:=]\s*(@ours|@theirs|@base|@both)$/;
@@ -611,6 +619,11 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 			} catch (error) {
 				throw new ToolError(error instanceof Error ? error.message : String(error));
 			}
+		}
+		const writeTarget = `${resolvedArchivePath.archivePath}:${resolvedArchivePath.archiveSubPath}`;
+		const sel = readSelectorForEmptyWrite(writeTarget, content);
+		if (sel !== undefined && !entries.has(resolvedArchivePath.archiveSubPath)) {
+			throwReadSelectorMisfire(writeTarget, sel);
 		}
 		entries.set(resolvedArchivePath.archiveSubPath, content);
 

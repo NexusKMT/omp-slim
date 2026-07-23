@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { WriteTool } from "@oh-my-pi/pi-coding-agent/tools/write";
+import { readArchiveEntries, writeArchive } from "@oh-my-pi/pi-coding-agent/utils/zip";
 
 // A read-only step that mis-dispatches `read` as `write` passes the full read
 // expression (`src/foo.tsx:1-260:raw`) as the target. Because a literal colon
@@ -74,6 +75,38 @@ describe("write refuses read-selector misfires", () => {
 		const res = await write.execute("c", { path: "src/empty.txt", content: "" });
 		expect(res.isError).toBeUndefined();
 		expect(await Bun.file(path.join(dir, "src/empty.txt")).exists()).toBe(true);
+		await fs.rm(dir, { recursive: true, force: true });
+	});
+
+	it("rejects a missing selector-suffixed archive member without mutating the archive", async () => {
+		const dir = await makeWorkspace();
+		const archivePath = path.join(dir, "bundle.zip");
+		const archiveEntries: Array<readonly [string, string]> = [["src/foo.ts", "export const x = 1;\n"]];
+		await writeArchive(archivePath, "zip", archiveEntries);
+		const before = await Bun.file(archivePath).bytes();
+		const write = new WriteTool(session(dir));
+		const target = "bundle.zip:src/foo.ts:1-20:raw";
+		await expect(write.execute("c", { path: target, content: "" })).rejects.toThrow(
+			/read-tool selector ':1-20:raw'.*read\(\{ path: "bundle\.zip:src\/foo\.ts:1-20:raw" \}\)/s,
+		);
+		expect(await Bun.file(archivePath).bytes()).toEqual(before);
+		const entries = await readArchiveEntries({ bytes: before, format: "zip" });
+		expect(entries.has("src/foo.ts")).toBe(true);
+		expect(entries.has("src/foo.ts:1-20:raw")).toBe(false);
+		await fs.rm(dir, { recursive: true, force: true });
+	});
+
+	it("keeps an existing literal selector-shaped archive member writable", async () => {
+		const dir = await makeWorkspace();
+		const archivePath = path.join(dir, "bundle.zip");
+		const member = "src/foo.ts:1-20:raw";
+		const archiveEntries: Array<readonly [string, string]> = [[member, "old"]];
+		await writeArchive(archivePath, "zip", archiveEntries);
+		const write = new WriteTool(session(dir));
+		const result = await write.execute("c", { path: `bundle.zip:${member}`, content: "" });
+		expect(result.isError).toBeUndefined();
+		const entries = await readArchiveEntries({ bytes: await Bun.file(archivePath).bytes(), format: "zip" });
+		expect(entries.get(member)).toEqual(new Uint8Array());
 		await fs.rm(dir, { recursive: true, force: true });
 	});
 });
