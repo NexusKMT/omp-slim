@@ -158,6 +158,11 @@ export class SessionTools {
 		return this.#skillsSettings;
 	}
 
+	/** Drops cached per-session ACP `allow_always`/`reject_always` decisions. */
+	clearAcpPermissionDecisions(): void {
+		this.#acpPermissionDecisions.clear();
+	}
+
 	/** Re-wraps active and mounted tools after the ACP client changes. */
 	refreshAcpPermissionGates(): void {
 		this.#acpPermissionDecisions.clear();

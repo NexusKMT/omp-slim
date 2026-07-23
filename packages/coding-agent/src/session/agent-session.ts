@@ -4023,6 +4023,12 @@ export class AgentSession {
 		this.#rewoundToolResultIds.clear();
 	}
 
+	/** Drop mutable tool decisions and directives owned by the previous logical session. */
+	#clearSessionScopedToolState(): void {
+		this.#toolChoiceQueue.clear();
+		this.#tools.clearAcpPermissionDecisions();
+	}
+
 	/**
 	 * Rebuild checkpoint/rewind runtime state from the current branch. Handles two
 	 * cases surfaced by session resume, `switchSession()` reloading the same file,
@@ -5690,6 +5696,7 @@ export class AgentSession {
 			this.#bash.finishSessionTransition(bashTransition, sessionTransitioned);
 		}
 
+		this.#clearSessionScopedToolState();
 		this.#clearCheckpointRuntimeState();
 		this.setTodoPhases([]);
 		this.#freshProviderSessionId = undefined;
@@ -6809,6 +6816,9 @@ export class AgentSession {
 
 			if (switchingToDifferentSession) {
 				await this.#memory.resetContextForNewTranscript();
+			}
+			if (switchingToDifferentSession) {
+				this.#clearSessionScopedToolState();
 			}
 			this.#reconnectToAgent();
 			try {
