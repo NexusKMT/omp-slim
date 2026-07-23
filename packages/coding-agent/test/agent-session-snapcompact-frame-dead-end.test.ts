@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
+import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -372,6 +373,47 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 		const noProgress = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes(NO_PROGRESS_FRAGMENT));
 		expect(noProgress.length).toBe(1);
 		expect(noProgress[0].level).toBe("warning");
+	});
+
+	it("leaves an oversized non-archive tail to the elide tiers instead of rescuing the archive", async () => {
+		// Codex review on #6362 (round 4): with […, archive, HUGE kept tool
+		// result], rebuilding the archive would append the replacement at the
+		// leaf — making the branch tail a compaction entry that
+		// prepareCompaction's last-entry guard can never summarize past, even
+		// after elide shrinks the real culprit. The rescue must bail when the
+		// post-archive tail alone exceeds the recovery band.
+		await createSession({ frameCount: SEEDED_FRAME_COUNT });
+		// Seed a kept tool-result tail far above the 0.8 × 60k band.
+		sessionManager.appendMessage({
+			role: "toolResult",
+			toolCallId: "call-huge",
+			toolName: "bash",
+			content: [{ type: "text", text: "x".repeat(400_000) }],
+			isError: false,
+			timestamp: Date.now(),
+		});
+		// Force the no-preparation dead-end (as in the #4786 guard tests): the
+		// oversized turn leaves nothing summarizable, which is the shape where
+		// a premature archive rebuild would wedge prepareCompaction.
+		vi.spyOn(compactionModule, "prepareCompaction").mockReturnValue(undefined);
+		vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined as never);
+		vi.spyOn(session.agent, "continue").mockResolvedValue();
+		vi.spyOn(session, "getContextUsage").mockReturnValue({ tokens: 190000, contextWindow: 200000, percent: 95 });
+		const shakeSpy = vi
+			.spyOn(session, "shake")
+			.mockResolvedValue({ mode: "elide", toolResultsDropped: 0, blocksDropped: 0, tokensFreed: 0 });
+		const compactSpy = vi.spyOn(snapcompact, "compact");
+
+		const notices = collectNotices();
+		await triggerMaintenance();
+
+		// The archive was NOT rebuilt; the elide tier got its shot at the tail.
+		expect(compactSpy).not.toHaveBeenCalled();
+		expect(shakeSpy).toHaveBeenCalledWith("elide", expect.anything());
+		const lastEntry = sessionManager.getBranch().at(-1);
+		expect(lastEntry?.type).not.toBe("compaction");
+		const noProgress = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes(NO_PROGRESS_FRAGMENT));
+		expect(noProgress.length).toBe(1);
 	});
 
 	it("still warns once when the trailing archive is already at the minimum frame count", async () => {

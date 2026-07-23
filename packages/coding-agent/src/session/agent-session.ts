@@ -13912,6 +13912,25 @@ export class AgentSession {
 		if (!this.model?.input.includes("image")) return undefined;
 		const staleEntry = getLatestCompactionEntry(branchEntries);
 		if (!staleEntry) return undefined;
+		// Only rescue when the archive is the actual source of the overflow.
+		// If the kept tail AFTER it is itself over the recovery band (e.g. a
+		// huge kept tool result), rebuilding the archive would append the
+		// replacement compaction at the leaf — turning the branch tail into a
+		// compaction entry, which prepareCompaction's last-entry guard can
+		// never summarize past even after an elide shrinks the real culprit.
+		// Bail and let the elide/image tiers handle that tail instead.
+		const ctxWindow = this.model.contextWindow ?? 0;
+		if (ctxWindow > 0) {
+			const tailBar = Math.floor(resolveThresholdTokens(ctxWindow, settings) * COMPACTION_RECOVERY_BAND);
+			let tailTokens = 0;
+			for (let i = branchEntries.length - 1; i >= 0; i--) {
+				const entry = branchEntries[i];
+				if (entry.id === staleEntry.id) break;
+				const message = (entry as { message?: AgentMessage }).message;
+				if (message) tailTokens += estimateTokens(message);
+			}
+			if (tailTokens > tailBar) return undefined;
+		}
 		const archive = snapcompact.getPreservedArchive(staleEntry.preserveData);
 		if (!archive || archive.frames.length <= 1) return undefined;
 		const archiveText = snapcompact.archiveSourceText(archive);
