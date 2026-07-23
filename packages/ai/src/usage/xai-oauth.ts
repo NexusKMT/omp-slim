@@ -126,7 +126,7 @@ function buildMonthlyWindow(periodStart: string, periodEnd: string): UsageWindow
 	const startMs = parseIsoMs(periodStart);
 	const endMs = parseIsoMs(periodEnd);
 	if (startMs === undefined || endMs === undefined || endMs <= startMs) return undefined;
-	// ponytail: real calendar months vary; use observed period length from the API
+	// Real calendar months vary; use the observed period length from the API.
 	const durationMs = endMs - startMs;
 	const approxDays = Math.max(1, Math.round(durationMs / DAY_MS));
 	return {
@@ -296,7 +296,7 @@ function buildLimits(config: XaiBillingConfig, accountId: string | undefined): U
 				remaining: Math.max(0, config.limit - config.used),
 				usedFraction,
 				remainingFraction: 1 - usedFraction,
-				// ponytail: xAI does not label the unit; amounts match dashboard dollars-ish quota points
+				// xAI does not label the unit; amounts match the dashboard quota points.
 				unit: "unknown",
 			},
 			status: buildUsageStatus(usedFraction),
