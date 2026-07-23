@@ -22,6 +22,8 @@
 
 ### Changed
 
+- Split the `AgentSession` implementation into focused session-domain controllers while preserving its public API and runtime behavior.
+
 - Subagents now inherit `async.enabled` and `bash.autoBackground.enabled` from the parent instead of having both force-disabled. Subagent runs complete only after their own background jobs settle and the agent submits a `yield` that postdates every delivered result: a terminal yield with jobs still pending parks the run (recoverable turn stop) instead of completing it, async results are folded in as follow-up turns (with a one-time notice offering `hub` wait/cancel), a result delivered after a yield supersedes that yield and re-runs the yield reminder ladder, and a run that never refreshes a superseded yield fails with the stale payload preserved as salvage. Teardown cancels and awaits surviving jobs before isolation worktree capture and cleanup.
 - Added ordered `bash.patterns` command approval rules so selected bash commands can be allowed, prompted, or denied by command pattern.
 - Cache full-session retention transcript incrementally instead of re-formatting the entire message history on every retain cycle ([#4246](https://github.com/can1357/oh-my-pi/issues/4246))
