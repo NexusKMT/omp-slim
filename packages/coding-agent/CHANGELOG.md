@@ -29,6 +29,7 @@
 
 ### Fixed
 
+- Fixed blob reference resolution passing unvalidated `blob:sha256:` suffixes into `path.join`, allowing a crafted ref (e.g. `blob:sha256:../../../etc/passwd`) in a persisted/shared session to escape the blob directory and read arbitrary files into resolved image history; `parseBlobRef` now rejects any suffix that is not a canonical 64-char lowercase hex hash, gating every resolution path ([#4088](https://github.com/can1357/oh-my-pi/issues/4088)).
 - Fixed discarded `Settings` instances keeping debounced save timers and chained background saves armed; discarding an instance now cancels its pending writes so they cannot race a successor's file locks.
 - Fixed `error.notify` raising a "Stopped with error" toast for provider failures while an auto-retry or async-delivery continuation was pending; the toast now waits for the true terminal settle.
 - Fixed terminal `yield` results racing post-turn maintenance, which could trigger an unnecessary automatic handoff or compaction.
