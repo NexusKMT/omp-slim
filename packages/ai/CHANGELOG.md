@@ -22,6 +22,9 @@
 - Improved connection error handling by classifying generic connection failures as transient, allowing them to be retried, while keeping explicit authentication rejections non-retryable.
 - Fixed custom Anthropic base URLs losing native thinking signatures during continuation requests.
 - Fixed Alibaba Coding Plan Custom login rejecting valid API keys on endpoints that do not serve the default validation model by validating against the model catalog instead.
+### Fixed
+
+- Fixed OpenAI Responses token-cap truncations suppressing fully streamed function and custom tool calls whose inputs are complete.
 
 ## [17.0.6] - 2026-07-20
 
