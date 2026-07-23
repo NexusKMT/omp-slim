@@ -208,6 +208,21 @@ describe("RPC frame encoding", () => {
 		expect(decoded).toEqual(frame);
 	});
 
+	it("preserves terminal message counts above the protocol v2 ceiling", () => {
+		const encoder = new RpcFrameEncoder();
+		encoder.setProtocolVersion(2);
+		const encoded = encoder.encode({
+			type: "agent_end",
+			messages: [{ role: "assistant", content: "x".repeat(MAX_RPC_REASSEMBLED_BYTES) }],
+		});
+
+		expect(decode(encoded)).toEqual({
+			type: "agent_end",
+			messages: [],
+			messageCount: 1,
+		});
+	});
+
 	it("rejects protocol v2 logical frames above the advertised reassembly ceiling", () => {
 		const encoder = new RpcFrameEncoder();
 		encoder.setProtocolVersion(2);

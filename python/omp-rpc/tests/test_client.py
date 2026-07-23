@@ -447,6 +447,7 @@ V2_MESSAGES_SERVER = textwrap.dedent(
     """
     import base64
     import json
+    import os
     import sys
 
     message = {
@@ -507,6 +508,17 @@ V2_MESSAGES_SERVER = textwrap.dedent(
                 }
             )
         elif command_type == "get_messages_page":
+            if os.environ.get("V2_MESSAGES_BUSY") == "1":
+                emit(
+                    {
+                        "id": request_id,
+                        "type": "response",
+                        "command": command_type,
+                        "success": False,
+                        "error": "Cannot page messages while the session is changing",
+                    }
+                )
+                continue
             emit(
                 {
                     "id": request_id,
@@ -517,6 +529,26 @@ V2_MESSAGES_SERVER = textwrap.dedent(
                         "messages": [message],
                         "totalMessages": 1,
                         "nextCursor": None,
+                    },
+                }
+            )
+        elif command_type == "get_messages":
+            emit(
+                {
+                    "id": request_id,
+                    "type": "response",
+                    "command": command_type,
+                    "success": True,
+                    "data": {
+                        "messages": [
+                            {
+                                "role": "assistant",
+                                "content": [
+                                    {"type": "text", "text": "streaming snapshot"}
+                                ],
+                                "timestamp": 3,
+                            }
+                        ]
                     },
                 }
             )
@@ -955,6 +987,19 @@ class RpcClientTests(unittest.TestCase):
 
         self.assertEqual(len(messages), 1)
         self.assertEqual(len(messages[0]["content"][0]["text"]), 1024 * 1024)
+
+    def test_protocol_v2_get_messages_falls_back_to_streaming_snapshot(self) -> None:
+        with self.make_client(
+            server=V2_MESSAGES_SERVER, env={"V2_MESSAGES_BUSY": "1"}
+        ) as client:
+            with self.assertRaisesRegex(
+                RpcCommandError, "Cannot page messages while the session is changing"
+            ):
+                client.get_messages_page()
+            messages = client.get_messages()
+
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["content"][0]["text"], "streaming snapshot")
 
     def test_collect_events_returns_turn_events(self) -> None:
         with self.make_client() as client:

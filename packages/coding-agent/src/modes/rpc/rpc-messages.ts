@@ -6,6 +6,8 @@ const MAX_RPC_MESSAGE_PAGE_LIMIT = 256;
 const MAX_RPC_MESSAGE_PAGE_BYTES = 768 * 1024;
 const MAX_RPC_MESSAGE_CURSOR_CHARS = 2048;
 
+export const RPC_MESSAGES_PAGE_BUSY_ERROR = "Cannot page messages while the session is changing";
+
 export interface RpcMessageSnapshot {
 	sessionId: string;
 	leafId: string | null;

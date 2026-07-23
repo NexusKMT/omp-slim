@@ -13,7 +13,7 @@ import type { FileSink } from "bun";
 import type { BashResult } from "../../exec/bash-executor";
 import type { AgentSessionEvent, SessionStats } from "../../session/agent-session";
 import { MAX_RPC_FRAME_BYTES, MAX_RPC_REASSEMBLED_BYTES, RpcFrameDecoder, type RpcProtocolVersion } from "./rpc-frame";
-import type { RpcMessagesPage, RpcMessagesPageOptions } from "./rpc-messages";
+import { RPC_MESSAGES_PAGE_BUSY_ERROR, type RpcMessagesPage, type RpcMessagesPageOptions } from "./rpc-messages";
 import type {
 	RpcAvailableCommandsUpdateFrame,
 	RpcAvailableSlashCommand,
@@ -787,27 +787,31 @@ export class RpcClient {
 	/** Get all messages, draining stable pages when protocol v2 is available. */
 	async getMessages(): Promise<AgentMessage[]> {
 		if (this.#protocolVersion === 2) {
-			const messages: AgentMessage[] = [];
-			const seenCursors = new Set<string>();
-			let totalMessages: number | undefined;
-			let cursor: string | undefined;
-			do {
-				const page = await this.getMessagesPage({ cursor, limit: 256 });
-				if (
-					!Number.isSafeInteger(page.totalMessages) ||
-					page.totalMessages < 0 ||
-					(totalMessages !== undefined && page.totalMessages !== totalMessages)
-				)
-					throw new Error("RPC message pagination returned an inconsistent total");
-				totalMessages = page.totalMessages;
-				messages.push(...page.messages);
-				cursor = page.nextCursor;
-				if (cursor && seenCursors.has(cursor)) throw new Error("RPC message pagination repeated a cursor");
-				if (cursor) seenCursors.add(cursor);
-			} while (cursor);
-			if (messages.length !== totalMessages)
-				throw new Error("RPC message pagination ended before the advertised total");
-			return messages;
+			try {
+				const messages: AgentMessage[] = [];
+				const seenCursors = new Set<string>();
+				let totalMessages: number | undefined;
+				let cursor: string | undefined;
+				do {
+					const page = await this.getMessagesPage({ cursor, limit: 256 });
+					if (
+						!Number.isSafeInteger(page.totalMessages) ||
+						page.totalMessages < 0 ||
+						(totalMessages !== undefined && page.totalMessages !== totalMessages)
+					)
+						throw new Error("RPC message pagination returned an inconsistent total");
+					totalMessages = page.totalMessages;
+					messages.push(...page.messages);
+					cursor = page.nextCursor;
+					if (cursor && seenCursors.has(cursor)) throw new Error("RPC message pagination repeated a cursor");
+					if (cursor) seenCursors.add(cursor);
+				} while (cursor);
+				if (messages.length !== totalMessages)
+					throw new Error("RPC message pagination ended before the advertised total");
+				return messages;
+			} catch (error) {
+				if (!(error instanceof Error) || error.message !== RPC_MESSAGES_PAGE_BUSY_ERROR) throw error;
+			}
 		}
 		const response = await this.#send({ type: "get_messages" });
 		return this.#getData<{ messages: AgentMessage[] }>(response).messages;

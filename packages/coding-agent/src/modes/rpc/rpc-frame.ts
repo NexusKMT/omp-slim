@@ -265,11 +265,18 @@ export class RpcFrameEncoder {
 
 	encode(frame: object): string {
 		if (isRecord(frame) && frame.type === "agent_start") this.#streamedMessages = [];
-		const json = JSON.stringify(frame);
-		const encoded =
-			this.#protocolVersion === 2 && serializedFrameBytes(json) > MAX_RPC_FRAME_BYTES
-				? encodeChunkedRpcFrame(frame, `rpc-${++this.#chunkCounter}`)
-				: encodeRpcFrame(frame, this.#streamedMessages.length, this.#streamedMessages);
+		let json = JSON.stringify(frame);
+		let encoded: string;
+		if (this.#protocolVersion === 2 && serializedFrameBytes(json) > MAX_RPC_FRAME_BYTES) {
+			const compacted = compactTerminalFrame(frame, this.#streamedMessages.length, this.#streamedMessages);
+			json = JSON.stringify(compacted);
+			encoded =
+				serializedFrameBytes(json) > MAX_RPC_FRAME_BYTES
+					? encodeChunkedRpcFrame(compacted, `rpc-${++this.#chunkCounter}`)
+					: `${json}\n`;
+		} else {
+			encoded = encodeRpcFrame(frame, this.#streamedMessages.length, this.#streamedMessages);
+		}
 		if (!isRecord(frame)) return encoded;
 		if (frame.type === "message_end") {
 			const snapshot =

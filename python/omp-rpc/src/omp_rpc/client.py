@@ -117,6 +117,7 @@ _TODO_STATUS_VALUES = frozenset({"pending", "in_progress", "completed", "abandon
 _MAX_RPC_FRAME_BYTES = 1024 * 1024
 _MAX_RPC_REASSEMBLED_BYTES = 64 * 1024 * 1024
 _RPC_CHUNK_PAYLOAD_BYTES = 256 * 1024
+_RPC_MESSAGES_PAGE_BUSY_ERROR = "Cannot page messages while the session is changing"
 
 
 @dataclass(slots=True)
@@ -1007,29 +1008,39 @@ class RpcClient:
 
     def get_messages(self) -> tuple[AgentMessage, ...]:
         if self._protocol_version == 2:
-            messages: list[AgentMessage] = []
-            seen_cursors: set[str] = set()
-            total_messages: int | None = None
-            cursor: str | None = None
-            while True:
-                page = self.get_messages_page(cursor=cursor, limit=256)
-                if total_messages is not None and page.total_messages != total_messages:
+            try:
+                messages: list[AgentMessage] = []
+                seen_cursors: set[str] = set()
+                total_messages: int | None = None
+                cursor: str | None = None
+                while True:
+                    page = self.get_messages_page(cursor=cursor, limit=256)
+                    if (
+                        total_messages is not None
+                        and page.total_messages != total_messages
+                    ):
+                        raise RpcError(
+                            "RPC message pagination returned an inconsistent total"
+                        )
+                    total_messages = page.total_messages
+                    messages.extend(page.messages)
+                    cursor = page.next_cursor
+                    if cursor is None:
+                        break
+                    if cursor in seen_cursors:
+                        raise RpcError("RPC message pagination repeated a cursor")
+                    seen_cursors.add(cursor)
+                if len(messages) != total_messages:
                     raise RpcError(
-                        "RPC message pagination returned an inconsistent total"
+                        "RPC message pagination ended before the advertised total"
                     )
-                total_messages = page.total_messages
-                messages.extend(page.messages)
-                cursor = page.next_cursor
-                if cursor is None:
-                    break
-                if cursor in seen_cursors:
-                    raise RpcError("RPC message pagination repeated a cursor")
-                seen_cursors.add(cursor)
-            if len(messages) != total_messages:
-                raise RpcError(
-                    "RPC message pagination ended before the advertised total"
-                )
-            return tuple(messages)
+                return tuple(messages)
+            except RpcCommandError as error:
+                if (
+                    error.command != "get_messages_page"
+                    or error.error != _RPC_MESSAGES_PAGE_BUSY_ERROR
+                ):
+                    raise
         payload = self._request("get_messages")
         return parse_agent_messages(cast(JsonValue | None, payload.get("messages")))
 

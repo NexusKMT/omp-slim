@@ -36,7 +36,7 @@ import { isRpcHostToolResult, isRpcHostToolUpdate, RpcHostToolBridge } from "./h
 import { isRpcHostUriResult, RpcHostUriBridge } from "./host-uris";
 import { MAX_RPC_FRAME_BYTES, MAX_RPC_REASSEMBLED_BYTES, RpcFrameEncoder } from "./rpc-frame";
 import { claimRpcInput } from "./rpc-input";
-import { pageRpcMessages } from "./rpc-messages";
+import { pageRpcMessages, RPC_MESSAGES_PAGE_BUSY_ERROR } from "./rpc-messages";
 import { RpcSubagentRegistry, readRpcSubagentTranscript } from "./rpc-subagents";
 import type {
 	RpcCommand,
@@ -1296,7 +1296,7 @@ export async function runRpcMode(
 
 			case "get_messages_page": {
 				if (session.isStreaming || session.isCompacting)
-					return error(id, "get_messages_page", "Cannot page messages while the session is changing");
+					return error(id, "get_messages_page", RPC_MESSAGES_PAGE_BUSY_ERROR);
 				const messages = session.messages;
 				try {
 					return success(

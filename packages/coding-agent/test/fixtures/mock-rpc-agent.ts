@@ -80,6 +80,16 @@ for await (const raw of console) {
 				continue;
 			}
 			if (frame.type === "get_messages_page") {
+				if (Bun.env.MOCK_RPC_PAGE_BUSY === "1") {
+					writeFrame({
+						id,
+						type: "response",
+						command: frame.type,
+						success: false,
+						error: "Cannot page messages while the session is changing",
+					});
+					continue;
+				}
 				const first = frame.cursor === undefined;
 				writeFrame({
 					id,
@@ -96,6 +106,20 @@ for await (const raw of console) {
 								messages: [{ role: "assistant", content: [{ type: "text", text: "second" }], timestamp: 2 }],
 								totalMessages: 2,
 							},
+				});
+				continue;
+			}
+			if (frame.type === "get_messages" && Bun.env.MOCK_RPC_PAGE_BUSY === "1") {
+				writeFrame({
+					id,
+					type: "response",
+					command: frame.type,
+					success: true,
+					data: {
+						messages: [
+							{ role: "assistant", content: [{ type: "text", text: "streaming snapshot" }], timestamp: 3 },
+						],
+					},
 				});
 				continue;
 			}
