@@ -1504,7 +1504,15 @@ function evaluateGraphCommonJs(modulePath: string): unknown {
 	}
 }
 
-Reflect.set(globalThis, COMMONJS_REQUIRE_GLOBAL, evaluateGraphCommonJs);
+// First-wins registration. On source-link installs the pi-coding-agent root
+// shim is served from src/, so an extension import can evaluate a second
+// instance of this module with empty graph state. An unconditional set would
+// let that empty instance clobber the host bundle's populated bridge and break
+// transitive CommonJS resolution (#6449); guarding preserves the first
+// (host-owned) registration.
+if (!Reflect.get(globalThis, COMMONJS_REQUIRE_GLOBAL)) {
+	Reflect.set(globalThis, COMMONJS_REQUIRE_GLOBAL, evaluateGraphCommonJs);
+}
 
 let legacyPiLoadTag = 0;
 
