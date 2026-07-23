@@ -30,6 +30,7 @@
 ### Fixed
 
 - Fixed discarded `Settings` instances keeping debounced save timers and chained background saves armed; discarding an instance now cancels its pending writes so they cannot race a successor's file locks.
+- Fixed startup status messages (warnings, errors, extension/tool errors, status lines) keeping the dark-mode color after auto-theme detection later switched the active theme to light — e.g. `dark-catppuccin`/`light-catppuccin` warnings rendered in Mocha yellow on the Latte background. Transient status presenters now resolve their color lazily at render time so a theme swap re-shapes them ([#6337](https://github.com/can1357/oh-my-pi/issues/6337)).
 - Fixed `error.notify` raising a "Stopped with error" toast for provider failures while an auto-retry or async-delivery continuation was pending; the toast now waits for the true terminal settle.
 - Fixed terminal `yield` results racing post-turn maintenance, which could trigger an unnecessary automatic handoff or compaction.
 - Fixed credential-shaped tokens (GitHub/GitLab/OpenAI/Anthropic key patterns) being redacted from outbound provider requests even with `secrets.enabled` off; the pattern redaction now follows the `secrets.enabled` ("Hide Secrets") setting like the secret obfuscator.
