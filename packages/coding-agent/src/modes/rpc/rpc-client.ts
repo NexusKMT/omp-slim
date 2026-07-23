@@ -12,7 +12,8 @@ import { isRecord, ptree, readJsonl } from "@oh-my-pi/pi-utils";
 import type { FileSink } from "bun";
 import type { BashResult } from "../../exec/bash-executor";
 import type { AgentSessionEvent, SessionStats } from "../../session/agent-session";
-import { MAX_RPC_FRAME_BYTES, MAX_RPC_REASSEMBLED_BYTES, RpcFrameDecoder } from "./rpc-frame";
+import { MAX_RPC_FRAME_BYTES, MAX_RPC_REASSEMBLED_BYTES, RpcFrameDecoder, type RpcProtocolVersion } from "./rpc-frame";
+import type { RpcMessagesPage, RpcMessagesPageOptions } from "./rpc-messages";
 import type {
 	RpcAvailableCommandsUpdateFrame,
 	RpcAvailableSlashCommand,
@@ -229,6 +230,7 @@ export class RpcClient {
 	#customTools: RpcClientCustomTool[] = [];
 	#pendingHostToolCalls = new Map<string, { controller: AbortController }>();
 	#requestId = 0;
+	#protocolVersion: RpcProtocolVersion = 1;
 	#extensionUiListeners: Set<(req: RpcExtensionUIRequest) => void> = new Set();
 	#abortController = new AbortController();
 
@@ -253,6 +255,7 @@ export class RpcClient {
 		// Mint a fresh controller so a previous stop()'s abort does not
 		// short-circuit the new stdout reader (issue #4079).
 		this.#abortController = new AbortController();
+		this.#protocolVersion = 1;
 
 		const cliPath = this.options.cliPath ?? "dist/cli.js";
 		const args = ["--mode", "rpc"];
@@ -387,6 +390,7 @@ export class RpcClient {
 					response.data.protocolVersion !== 2
 				)
 					throw new Error("RPC protocol v2 negotiation failed");
+				this.#protocolVersion = 2;
 			}
 			if (this.#customTools.length > 0) {
 				await this.setCustomTools(this.#customTools);
@@ -773,9 +777,38 @@ export class RpcClient {
 	}
 
 	/**
-	 * Get all messages in the session.
+	 * Get one stable, byte-bounded message page.
 	 */
+	async getMessagesPage(options: RpcMessagesPageOptions = {}): Promise<RpcMessagesPage> {
+		const response = await this.#send({ type: "get_messages_page", ...options });
+		return this.#getData<RpcMessagesPage>(response);
+	}
+
+	/** Get all messages, draining stable pages when protocol v2 is available. */
 	async getMessages(): Promise<AgentMessage[]> {
+		if (this.#protocolVersion === 2) {
+			const messages: AgentMessage[] = [];
+			const seenCursors = new Set<string>();
+			let totalMessages: number | undefined;
+			let cursor: string | undefined;
+			do {
+				const page = await this.getMessagesPage({ cursor, limit: 256 });
+				if (
+					!Number.isSafeInteger(page.totalMessages) ||
+					page.totalMessages < 0 ||
+					(totalMessages !== undefined && page.totalMessages !== totalMessages)
+				)
+					throw new Error("RPC message pagination returned an inconsistent total");
+				totalMessages = page.totalMessages;
+				messages.push(...page.messages);
+				cursor = page.nextCursor;
+				if (cursor && seenCursors.has(cursor)) throw new Error("RPC message pagination repeated a cursor");
+				if (cursor) seenCursors.add(cursor);
+			} while (cursor);
+			if (messages.length !== totalMessages)
+				throw new Error("RPC message pagination ended before the advertised total");
+			return messages;
+		}
 		const response = await this.#send({ type: "get_messages" });
 		return this.#getData<{ messages: AgentMessage[] }>(response).messages;
 	}

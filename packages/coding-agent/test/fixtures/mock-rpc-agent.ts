@@ -79,6 +79,26 @@ for await (const raw of console) {
 				protocolV2Enabled = true;
 				continue;
 			}
+			if (frame.type === "get_messages_page") {
+				const first = frame.cursor === undefined;
+				writeFrame({
+					id,
+					type: "response",
+					command: frame.type,
+					success: true,
+					data: first
+						? {
+								messages: [{ role: "user", content: "first", timestamp: 1 }],
+								nextCursor: "second-page",
+								totalMessages: 2,
+							}
+						: {
+								messages: [{ role: "assistant", content: [{ type: "text", text: "second" }], timestamp: 2 }],
+								totalMessages: 2,
+							},
+				});
+				continue;
+			}
 			writeFrame({
 				id,
 				type: "response",

@@ -442,6 +442,97 @@ FAKE_SERVER = textwrap.dedent(
     """
 )
 
+
+V2_MESSAGES_SERVER = textwrap.dedent(
+    """
+    import base64
+    import json
+    import sys
+
+    message = {
+        "role": "user",
+        "content": [{"type": "text", "text": "x" * (1024 * 1024)}],
+        "timestamp": 1,
+    }
+
+    def emit(payload):
+        encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        if len(encoded) <= 1024 * 1024:
+            print(encoded.decode("utf-8"), flush=True)
+            return
+        chunk_size = 256 * 1024
+        count = (len(encoded) + chunk_size - 1) // chunk_size
+        for index in range(count):
+            chunk = encoded[index * chunk_size : (index + 1) * chunk_size]
+            print(
+                json.dumps(
+                    {
+                        "type": "rpc_chunk",
+                        "chunkId": "test-page",
+                        "index": index,
+                        "count": count,
+                        "byteLength": len(encoded),
+                        "data": base64.b64encode(chunk).decode("ascii"),
+                    },
+                    separators=(",", ":"),
+                ),
+                flush=True,
+            )
+
+    print(
+        json.dumps(
+            {
+                "type": "ready",
+                "protocolVersion": 1,
+                "supportedProtocolVersions": [1, 2],
+                "maxFrameBytes": 1024 * 1024,
+                "maxReassembledFrameBytes": 64 * 1024 * 1024,
+            }
+        ),
+        flush=True,
+    )
+
+    for raw_line in sys.stdin:
+        command = json.loads(raw_line)
+        request_id = command["id"]
+        command_type = command["type"]
+        if command_type == "negotiate_protocol":
+            emit(
+                {
+                    "id": request_id,
+                    "type": "response",
+                    "command": command_type,
+                    "success": True,
+                    "data": {"protocolVersion": 2},
+                }
+            )
+        elif command_type == "get_messages_page":
+            emit(
+                {
+                    "id": request_id,
+                    "type": "response",
+                    "command": command_type,
+                    "success": True,
+                    "data": {
+                        "messages": [message],
+                        "totalMessages": 1,
+                        "nextCursor": None,
+                    },
+                }
+            )
+        else:
+            emit(
+                {
+                    "id": request_id,
+                    "type": "response",
+                    "command": command_type,
+                    "success": False,
+                    "error": f"unexpected command: {command_type}",
+                }
+            )
+    """
+)
+
 IDLESS_ERROR_SERVER = textwrap.dedent(
     """
     import json
@@ -857,6 +948,13 @@ class RpcClientTests(unittest.TestCase):
             client.abort_and_prompt("say hello")
             client.wait_for_idle(timeout=2.0)
             self.assertEqual(client.get_last_assistant_text(), "pong")
+
+    def test_protocol_v2_reassembles_chunked_message_pages(self) -> None:
+        with self.make_client(server=V2_MESSAGES_SERVER) as client:
+            messages = client.get_messages()
+
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(len(messages[0]["content"][0]["text"]), 1024 * 1024)
 
     def test_collect_events_returns_turn_events(self) -> None:
         with self.make_client() as client:

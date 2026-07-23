@@ -19,6 +19,7 @@ import type {
 	SubagentProgressPayload,
 } from "../../task";
 import type { TodoPhase } from "../../tools/todo";
+import type { RpcMessagesPage } from "./rpc-messages";
 
 // ============================================================================
 // RPC Commands (stdin)
@@ -84,6 +85,7 @@ export type RpcCommand =
 
 	// Messages
 	| { id?: string; type: "get_messages" }
+	| { id?: string; type: "get_messages_page"; cursor?: string; limit?: number }
 
 	// Login
 	| { id?: string; type: "get_login_providers" }
@@ -313,6 +315,7 @@ export type RpcResponse =
 
 	// Messages
 	| { id?: string; type: "response"; command: "get_messages"; success: true; data: { messages: AgentMessage[] } }
+	| { id?: string; type: "response"; command: "get_messages_page"; success: true; data: RpcMessagesPage }
 
 	// Login
 	| {
