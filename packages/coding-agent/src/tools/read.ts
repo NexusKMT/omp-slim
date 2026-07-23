@@ -17,6 +17,8 @@ import { Text } from "@oh-my-pi/pi-tui";
 import {
 	getRemoteDir,
 	type ImageMetadata,
+	isEexist,
+	isEnotempty,
 	isProbablyBinary,
 	logger,
 	prompt,
@@ -721,6 +723,22 @@ function prependSuffixResolutionNotice(text: string, suffixResolution?: { from: 
 const PDF_IMAGE_PLACEHOLDER_RE = /<!--\s*image:\s*([^\s<>]+)(.*?)-->/g;
 const PDF_IMAGE_MEMBER_RE = /^(.*\.pdf):(.*)$/i;
 const PDF_IMAGE_MEMBER_EXTENSION_RE = /\.png$/i;
+const PDF_IMAGE_CACHE_BASENAME_MAX_LENGTH = 96;
+
+interface PdfImageSnapshot {
+	directory: string;
+	filePath: string;
+	digest: string;
+}
+
+interface PdfImageExtraction {
+	controller: AbortController;
+	promise: Promise<string>;
+	settled: boolean;
+	waiters: number;
+}
+
+const pdfImageExtractions = new Map<string, PdfImageExtraction>();
 
 function pdfImageMemberPath(pdfPath: string, imageId: string): string {
 	const member = PDF_IMAGE_MEMBER_EXTENSION_RE.test(imageId) ? imageId : `${imageId}.png`;
@@ -1106,7 +1124,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		return null;
 	}
 
-	#pdfImageCacheDir(absolutePdfPath: string): string {
+	#pdfImageCacheDir(absolutePdfPath: string, contentDigest: string): string {
 		const artifactsDir = this.session.getArtifactsDir?.();
 		let root = artifactsDir ?? undefined;
 		if (root === undefined) {
@@ -1115,8 +1133,28 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				? sessionFile.slice(0, -6)
 				: path.join(os.tmpdir(), "omp-read-pdf-images");
 		}
-		const basename = path.basename(absolutePdfPath).replace(/[^A-Za-z0-9._-]/g, "_");
-		return path.join(root, "read-pdf-images", `${basename}-${Bun.hash(absolutePdfPath).toString(36)}`);
+		const basename = path
+			.basename(absolutePdfPath)
+			.replace(/[^A-Za-z0-9._-]/g, "_")
+			.slice(0, PDF_IMAGE_CACHE_BASENAME_MAX_LENGTH);
+		const pathDigest = Bun.hash(absolutePdfPath).toString(36);
+		return path.join(root, "read-pdf-images", `${basename}-${pathDigest}-${contentDigest}`);
+	}
+
+	async #snapshotPdfSource(absolutePdfPath: string, signal?: AbortSignal): Promise<PdfImageSnapshot> {
+		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "omp-read-pdf-"));
+		try {
+			const bytes = await untilAborted(signal, () => Bun.file(absolutePdfPath).bytes());
+			signal?.throwIfAborted();
+			const digest = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+			const filePath = path.join(directory, "source.pdf");
+			await Bun.write(filePath, bytes);
+			signal?.throwIfAborted();
+			return { directory, filePath, digest };
+		} catch (error) {
+			await fs.rm(directory, { recursive: true, force: true });
+			throw error;
+		}
 	}
 
 	async #listPdfImageMembers(imageDir: string): Promise<string[]> {
@@ -1133,8 +1171,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		}
 	}
 
-	async #ensurePdfImageCache(absolutePdfPath: string, signal?: AbortSignal): Promise<string> {
-		const imageDir = this.#pdfImageCacheDir(absolutePdfPath);
+	async #extractPdfImages(snapshot: PdfImageSnapshot, imageDir: string, signal: AbortSignal): Promise<string> {
 		const markerPath = path.join(imageDir, ".extracted");
 		try {
 			await fs.stat(markerPath);
@@ -1143,15 +1180,74 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			if (!isNotFoundError(error)) throw error;
 		}
 
-		await fs.rm(imageDir, { recursive: true, force: true });
-		await fs.mkdir(imageDir, { recursive: true });
-		const result = await convertFileWithMarkit(absolutePdfPath, signal, { imageDir });
-		if (!result.ok) {
-			await fs.rm(imageDir, { recursive: true, force: true });
-			throw new ToolError(`Cannot extract images from PDF: ${result.error ?? "conversion failed"}`);
+		await fs.mkdir(path.dirname(imageDir), { recursive: true });
+		const stagingDir = await fs.mkdtemp(`${imageDir}.tmp-`);
+		let published = false;
+		try {
+			const result = await convertFileWithMarkit(snapshot.filePath, signal, { imageDir: stagingDir });
+			if (!result.ok) {
+				throw new ToolError(`Cannot extract images from PDF: ${result.error ?? "conversion failed"}`);
+			}
+			await Bun.write(path.join(stagingDir, ".extracted"), "ok");
+			try {
+				await fs.rename(stagingDir, imageDir);
+				published = true;
+			} catch (error) {
+				if (!isEexist(error) && !isEnotempty(error)) throw error;
+				try {
+					await fs.stat(markerPath);
+				} catch (markerError) {
+					if (isNotFoundError(markerError)) throw error;
+					throw markerError;
+				}
+			}
+			return imageDir;
+		} finally {
+			if (!published) await fs.rm(stagingDir, { recursive: true, force: true });
 		}
-		await Bun.write(markerPath, "ok");
-		return imageDir;
+	}
+
+	#createPdfImageExtraction(snapshot: PdfImageSnapshot, imageDir: string): PdfImageExtraction {
+		const controller = new AbortController();
+		const promise = this.#extractPdfImages(snapshot, imageDir, controller.signal).finally(() =>
+			fs.rm(snapshot.directory, { recursive: true, force: true }),
+		);
+		const extraction: PdfImageExtraction = { controller, promise, settled: false, waiters: 0 };
+		const settle = () => {
+			extraction.settled = true;
+			if (pdfImageExtractions.get(imageDir) === extraction) pdfImageExtractions.delete(imageDir);
+		};
+		void promise.then(settle, settle);
+		return extraction;
+	}
+
+	async #waitForPdfImageExtraction(extraction: PdfImageExtraction, signal: AbortSignal | undefined): Promise<string> {
+		extraction.waiters++;
+		try {
+			return await untilAborted(signal, extraction.promise);
+		} finally {
+			extraction.waiters--;
+			if (extraction.waiters === 0 && !extraction.settled) {
+				extraction.controller.abort();
+				try {
+					await extraction.promise;
+				} catch {}
+			}
+		}
+	}
+
+	async #ensurePdfImageCache(absolutePdfPath: string, signal?: AbortSignal): Promise<string> {
+		const snapshot = await this.#snapshotPdfSource(absolutePdfPath, signal);
+		const imageDir = this.#pdfImageCacheDir(absolutePdfPath, snapshot.digest);
+		const existing = pdfImageExtractions.get(imageDir);
+		if (existing && !existing.settled && !existing.controller.signal.aborted) {
+			await fs.rm(snapshot.directory, { recursive: true, force: true });
+			return this.#waitForPdfImageExtraction(existing, signal);
+		}
+
+		const extraction = this.#createPdfImageExtraction(snapshot, imageDir);
+		pdfImageExtractions.set(imageDir, extraction);
+		return this.#waitForPdfImageExtraction(extraction, signal);
 	}
 
 	async #readPdfImageMember(
