@@ -93,4 +93,48 @@ describe("AgentSession owner-routed async delivery", () => {
 		);
 		expect(sawResult).toBe(true);
 	});
+
+	it("still reports pending async work while a delivered result awaits injection", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [] },
+			convertToLlm,
+			streamFn: mock.stream,
+		});
+		const authStorage = await AuthStorage.create(path.join(tempDir, "auth.db"));
+		authStorages.push(authStorage);
+		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		const manager = new AsyncJobManager({});
+		AsyncJobManager.setInstance(manager);
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated(),
+			modelRegistry: new ModelRegistry(authStorage),
+			agentId: "SubAgent",
+			asyncJobManager: manager,
+		});
+
+		const gate = Promise.withResolvers<string>();
+		manager.register("bash", "gated job", () => gate.promise, { id: "sub-job", ownerId: "SubAgent" });
+		gate.resolve("job finished: QUEUED RESULT");
+		await manager.waitForOwnerJobs("SubAgent");
+		await manager.drainDeliveries({ filter: { ownerId: "SubAgent" } });
+
+		// The manager has fully handed off — no running jobs, no queued or
+		// in-flight deliveries — but the async-result follow-up still sits on
+		// the session's yield queue awaiting the (delayed) idle flush / next
+		// step boundary. A terminal yield observed in this window MUST still
+		// count as pending async work, or the run driver terminates and the
+		// delivered result is silently dropped from the final report.
+		expect(session.hasPendingAsyncWork()).toBe(true);
+
+		// Settling drains the queued follow-up into a real turn and only then
+		// reaches quiescence.
+		await session.settleAsyncWork();
+		expect(session.hasPendingAsyncWork()).toBe(false);
+	});
 });

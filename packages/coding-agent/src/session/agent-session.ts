@@ -358,6 +358,7 @@ import type { VibeModeState } from "../vibe/state";
 import {
 	ASYNC_INLINE_RESULT_MAX_CHARS,
 	ASYNC_PREVIEW_MAX_CHARS,
+	ASYNC_RESULT_MESSAGE_TYPE,
 	type AsyncResultEntry,
 	buildAsyncResultBatchMessage,
 } from "./async-job-delivery";
@@ -4152,9 +4153,10 @@ export class AgentSession {
 
 	/**
 	 * True when a background async job owned by this agent is still running with
-	 * an unsuppressed delivery, or a finished job's delivery is still queued or
-	 * in flight. Either way the async-result follow-up will re-wake the loop, so
-	 * a settle observed now is a scheduling pause rather than a terminal stop:
+	 * an unsuppressed delivery, a finished job's delivery is still queued or in
+	 * flight, or a delivered result is still sitting on the yield queue awaiting
+	 * injection. In every case the async-result follow-up will re-wake the loop,
+	 * so a settle observed now is a scheduling pause rather than a terminal stop:
 	 * stop-time passes (todo reminder, session_stop hooks) defer to the settle
 	 * reached once the session is fully idle. Suppressed deliveries
 	 * (acknowledged, or watched by an in-flight `hub` wait) never wake the loop,
@@ -4166,7 +4168,13 @@ export class AgentSession {
 		const ownerFilter = this.#agentId ? { ownerId: this.#agentId } : undefined;
 		return (
 			manager.getRunningJobs(ownerFilter).some(job => !manager.isDeliverySuppressed(job.id)) ||
-			manager.hasPendingDeliveries(ownerFilter)
+			manager.hasPendingDeliveries(ownerFilter) ||
+			// Delivered but not yet injected: the sink has enqueued the
+			// async-result follow-up on the yield queue, and the manager no
+			// longer reports it. Without this leg a terminal yield in the
+			// (idle-flush delay / step-boundary) handoff window would read as
+			// quiescent and the run driver would drop the queued result.
+			this.yieldQueue.has(ASYNC_RESULT_MESSAGE_TYPE)
 		);
 	}
 
