@@ -111,8 +111,14 @@ describe("Bedrock prompt-cache compat", () => {
 			expect(getBundledModel<"bedrock-converse-stream">("amazon-bedrock", id)?.compat).toEqual(expected);
 		}
 
-		// AWS documents these as Nova Premier's in-region model and US geo inference IDs.
-		for (const id of ["amazon.nova-premier-v1:0", "us.amazon.nova-premier-v1:0"] as const) {
+		// AWS documents both the in-region model IDs and the US geo inference IDs.
+		for (const id of [
+			"amazon.nova-lite-v1:0",
+			"amazon.nova-micro-v1:0",
+			"amazon.nova-pro-v1:0",
+			"amazon.nova-premier-v1:0",
+			"us.amazon.nova-premier-v1:0",
+		] as const) {
 			expect(buildModel(bedrockSpec({ id })).compat).toEqual(expected);
 		}
 	});

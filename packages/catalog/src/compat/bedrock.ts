@@ -52,8 +52,11 @@ function detectedBedrockCompat(modelId: string): ResolvedBedrockCompat {
 	const id = modelId.toLowerCase();
 
 	if (
+		id === "amazon.nova-lite-v1:0" ||
 		id === "us.amazon.nova-lite-v1:0" ||
+		id === "amazon.nova-micro-v1:0" ||
 		id === "us.amazon.nova-micro-v1:0" ||
+		id === "amazon.nova-pro-v1:0" ||
 		id === "us.amazon.nova-pro-v1:0" ||
 		id === "amazon.nova-premier-v1:0" ||
 		id === "us.amazon.nova-premier-v1:0"
