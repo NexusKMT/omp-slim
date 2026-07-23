@@ -148,12 +148,17 @@ export async function loadAuthBrokerAccountPool(): Promise<AuthBrokerAccountPool
 		}
 		const identities = new Set<string>();
 		for (const identity of value) {
-			if (typeof identity !== "string" || identity.trim().length === 0) {
+			if (typeof identity !== "string" || identity.length === 0) {
 				throw new AIError.ConfigurationError(
 					`OMP_AUTH_BROKER_ACCOUNT_POOL_FILE entry for ${provider} contains an invalid identity key`,
 				);
 			}
-			identities.add(identity.trim());
+			if (identity !== identity.trim()) {
+				throw new AIError.ConfigurationError(
+					`OMP_AUTH_BROKER_ACCOUNT_POOL_FILE entry for ${provider} contains an identity key with surrounding whitespace`,
+				);
+			}
+			identities.add(identity);
 		}
 		accountPool.set(provider, identities);
 	}

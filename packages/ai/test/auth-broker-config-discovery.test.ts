@@ -77,6 +77,7 @@ describe("resolveAuthBrokerConfig config discovery", () => {
 				['{"anthropic":"email:a@example.com"}', "must be an array of identity keys"],
 				['{"anthropic":[42]}', "contains an invalid identity key"],
 				['{" anthropic":["email:a@example.com"]}', "provider id with surrounding whitespace"],
+				['{"anthropic":[" email:a@example.com"]}', "identity key with surrounding whitespace"],
 			] as const;
 			for (const [content, expectedError] of invalidFiles) {
 				await Bun.write(poolPath, content);
