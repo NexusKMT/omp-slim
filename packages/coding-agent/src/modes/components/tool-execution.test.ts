@@ -29,7 +29,7 @@ describe("ToolExecutionComponent custom renderer failures", () => {
 	});
 
 	afterEach(() => {
-		settings.set("mcp.renderMarkdownResults", false);
+		settings.set("mcp.renderMarkdownResults", true);
 	});
 
 	it("falls back to the custom tool label when a renderCall child component throws during render", () => {
@@ -120,21 +120,10 @@ describe("MCP result Markdown rendering", () => {
 	});
 
 	afterEach(() => {
-		settings.set("mcp.renderMarkdownResults", false);
-	});
-
-	it("keeps Markdown syntax literal by default", () => {
-		const component = renderMCPResult(
-			{ content: [{ type: "text", text: "**bold result**" }], details },
-			{ expanded: true, isPartial: false },
-			theme,
-		);
-
-		expect(visibleText(component.render(80))).toContain("**bold result**");
-	});
-
-	it("renders inline Markdown when the opt-in setting is enabled", () => {
 		settings.set("mcp.renderMarkdownResults", true);
+	});
+
+	it("renders inline Markdown by default", () => {
 		const component = renderMCPResult(
 			{ content: [{ type: "text", text: "**bold result** and `code`" }], details },
 			{ expanded: true, isPartial: false },
@@ -145,6 +134,17 @@ describe("MCP result Markdown rendering", () => {
 		expect(rendered).toContain("bold result and code");
 		expect(rendered).not.toContain("**bold result**");
 		expect(rendered).not.toContain("`code`");
+	});
+
+	it("keeps Markdown syntax literal when the setting is disabled", () => {
+		settings.set("mcp.renderMarkdownResults", false);
+		const component = renderMCPResult(
+			{ content: [{ type: "text", text: "**bold result**" }], details },
+			{ expanded: true, isPartial: false },
+			theme,
+		);
+
+		expect(visibleText(component.render(80))).toContain("**bold result**");
 	});
 
 	it("preserves structured JSON rendering when Markdown is enabled", () => {

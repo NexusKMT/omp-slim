@@ -3961,7 +3961,7 @@ export const SETTINGS_SCHEMA = {
 
 	"mcp.renderMarkdownResults": {
 		type: "boolean",
-		default: false,
+		default: true,
 		ui: {
 			tab: "tools",
 			group: "Discovery & MCP",
