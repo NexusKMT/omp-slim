@@ -13940,18 +13940,27 @@ export class AgentSession {
 		const staleEntry = getLatestCompactionEntry(branchEntries);
 		if (!staleEntry) return undefined;
 		// Only rescue when the archive is the actual source of the overflow.
-		// The frame budget below charges the kept tail AFTER the archive plus
-		// the fixed context, mirroring what #compactionCreatedHeadroom will
-		// measure. When not even one frame fits (e.g. a huge kept tool result
-		// dominates), rebuilding would append the replacement compaction at
-		// the leaf — turning the branch tail into a compaction entry, which
-		// prepareCompaction's last-entry guard can never summarize past even
-		// after an elide shrinks the real culprit. Bail and let the
-		// elide/image tiers handle that tail instead.
+		// The frame budget below charges every kept entry the rebuilt context
+		// will still carry — the kept-recent region from `firstKeptEntryId`
+		// (re-emitted before the archive by buildSessionContext) plus the
+		// entries after the archive — on top of the fixed context, mirroring
+		// what #compactionCreatedHeadroom will measure. When not even one
+		// frame fits (e.g. a huge kept tool result dominates), rebuilding
+		// would append the replacement compaction at the leaf — turning the
+		// branch tail into a compaction entry, which prepareCompaction's
+		// last-entry guard can never summarize past even after an elide
+		// shrinks the real culprit. Bail and let the elide/image tiers handle
+		// that tail instead.
 		let keptTailTokens = 0;
-		for (let i = branchEntries.length - 1; i >= 0; i--) {
-			const entry = branchEntries[i];
-			if (entry.id === staleEntry.id) break;
+		let inKeptRegion = false;
+		for (const entry of branchEntries) {
+			if (entry.id === staleEntry.firstKeptEntryId) inKeptRegion = true;
+			if (entry.id === staleEntry.id) {
+				// Everything after the archive is always kept.
+				inKeptRegion = true;
+				continue;
+			}
+			if (!inKeptRegion) continue;
 			const message = (entry as { message?: AgentMessage }).message;
 			if (message) keptTailTokens += estimateTokens(message);
 		}
@@ -14292,6 +14301,25 @@ export class AgentSession {
 					}
 				}
 				if (!preparation) {
+					const noProgressDeadEnd = reason !== "idle" && !frameRescueCreatedHeadroom;
+					const deadEndWarning = noProgressDeadEnd
+						? compactionDeadEndWarning("shrink it (e.g. clear large tool output)")
+						: undefined;
+					// A rescue that appended a rebuilt archive without creating
+					// headroom must carry the dead-end badge on the entry the
+					// transcript actually shows (the rebuilt one), or the pause
+					// loses its explanation once the notice scrolls away. Stamp it
+					// BEFORE the auto_compaction_end event: a result-carrying event
+					// makes the TUI rebuild the chat from the current entries
+					// immediately, so a later stamp would not appear until some
+					// unrelated rebuild.
+					if (deadEndWarning && frameRescueResult) {
+						const stampEntry = getLatestCompactionEntry(this.sessionManager.getBranch());
+						if (stampEntry) {
+							stampEntry.warning = deadEndWarning;
+							await this.sessionManager.rewriteEntries();
+						}
+					}
 					// A successful frame rescue rewrote history and activated a new
 					// compaction entry — surface it as a real (non-skipped) result so
 					// the TUI rebuilds the transcript instead of treating the pass as
@@ -14304,7 +14332,6 @@ export class AgentSession {
 						willRetry: false,
 						skipped: frameRescueResult === undefined,
 					});
-					const noProgressDeadEnd = reason !== "idle" && !frameRescueCreatedHeadroom;
 					let continuationScheduled = false;
 					if (frameRescueCreatedHeadroom) {
 						continuationScheduled = this.#scheduleCompactionContinuation({
@@ -14321,20 +14348,8 @@ export class AgentSession {
 						});
 						continuationScheduled = true;
 					}
-					if (noProgressDeadEnd) {
-						const deadEndWarning = compactionDeadEndWarning("shrink it (e.g. clear large tool output)");
+					if (deadEndWarning) {
 						this.emitNotice("warning", deadEndWarning, "compaction");
-						// A rescue that appended a rebuilt archive without creating
-						// headroom must carry the dead-end badge on the entry the
-						// transcript actually shows (the rebuilt one), or the pause
-						// loses its explanation once the notice scrolls away.
-						if (frameRescueResult) {
-							const stampEntry = getLatestCompactionEntry(this.sessionManager.getBranch());
-							if (stampEntry) {
-								stampEntry.warning = deadEndWarning;
-								await this.sessionManager.rewriteEntries();
-							}
-						}
 					}
 					// A rescue that offloaded content but still could not produce a
 					// preparation rewrote the branch; flag it so the overflow-recovery

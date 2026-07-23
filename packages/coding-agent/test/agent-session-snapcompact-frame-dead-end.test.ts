@@ -70,6 +70,9 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 		 *  many frames — exercising the POST-PASS dead-end (a completed pass
 		 *  whose just-written archive is itself the over-budget cost). */
 		hookArchiveFrames?: number;
+		/** Seed a kept-recent entry between firstKeptEntryId and the archive —
+		 *  re-emitted by buildSessionContext, so the rescue budget must charge it. */
+		preArchiveKeptText?: string;
 	}): Promise<void> {
 		tempDir = TempDir.createSync("@pi-snapcompact-frame-dead-end-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
@@ -135,6 +138,19 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 			content: "hello",
 			timestamp: Date.now(),
 		});
+		if (options.preArchiveKeptText !== undefined && options.hookArchiveFrames === undefined) {
+			// A kept-recent entry BETWEEN firstKeptEntryId and the archive:
+			// buildSessionContext re-emits it before the compaction entry, so
+			// the rescue budget must charge it too.
+			sessionManager.appendMessage({
+				role: "toolResult",
+				toolCallId: "call-kept",
+				toolName: "bash",
+				content: [{ type: "text", text: options.preArchiveKeptText }],
+				isError: false,
+				timestamp: Date.now(),
+			});
+		}
 		if (options.hookArchiveFrames === undefined) {
 			sessionManager.appendCompaction(
 				"Archived history onto stale snapcompact frames.",
@@ -411,6 +427,29 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 		expect(compactSpy).not.toHaveBeenCalled();
 		expect(shakeSpy).toHaveBeenCalledWith("elide", expect.anything());
 		expect(sessionManager.getBranch().at(-1)?.type).not.toBe("compaction");
+	});
+
+	it("bails when the kept region BEFORE the archive leaves no frame budget", async () => {
+		// Codex review on #6362 (round 6): the rebuilt compaction preserves
+		// firstKeptEntryId, and buildSessionContext re-emits the kept messages
+		// that sit BEFORE the compaction entry — so a large pre-archive kept
+		// region costs the rebuilt prompt exactly like a post-archive tail.
+		// The budget must charge it, or the rescue appends a still-over-band
+		// archive and the dead-end persists.
+		await createSession({ frameCount: SEEDED_FRAME_COUNT, preArchiveKeptText: "y".repeat(160_000) });
+		vi.spyOn(compactionModule, "prepareCompaction").mockReturnValue(undefined);
+		vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined as never);
+		vi.spyOn(session.agent, "continue").mockResolvedValue();
+		vi.spyOn(session, "getContextUsage").mockReturnValue({ tokens: 190000, contextWindow: 200000, percent: 95 });
+		const shakeSpy = vi
+			.spyOn(session, "shake")
+			.mockResolvedValue({ mode: "elide", toolResultsDropped: 0, blocksDropped: 0, tokensFreed: 0 });
+		const compactSpy = vi.spyOn(snapcompact, "compact");
+
+		await triggerMaintenance();
+
+		expect(compactSpy).not.toHaveBeenCalled();
+		expect(shakeSpy).toHaveBeenCalledWith("elide", expect.anything());
 	});
 
 	it("leaves an oversized non-archive tail to the elide tiers instead of rescuing the archive", async () => {
