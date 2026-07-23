@@ -5227,11 +5227,11 @@ export class AgentSession {
 					return;
 				}
 			}
-			const resumeCursorStreamStall = this.#canResumeCursorStreamStall(msg);
-			if (resumeCursorStreamStall || this.#isRetryableError(msg)) {
+			const resumeResolvedStreamStall = this.#canResumeResolvedStreamStall(msg);
+			if (resumeResolvedStreamStall || this.#isRetryableError(msg)) {
 				const didRetry = await this.#handleRetryableError(
 					msg,
-					resumeCursorStreamStall ? { preserveFailedTurn: true } : undefined,
+					resumeResolvedStreamStall ? { preserveFailedTurn: true } : undefined,
 				);
 				if (didRetry) {
 					await emitAgentEndNotification({ willContinue: true });
@@ -15266,17 +15266,13 @@ export class AgentSession {
 	}
 
 	/**
-	 * Resume a stalled Cursor turn after every server-executed tool has produced
-	 * a result. The failed assistant/tool-result pair must stay in context: it
-	 * records completed side effects and lets the next request continue from
-	 * them instead of replaying the original turn.
+	 * Resume a stalled turn after every emitted tool call has produced a result.
+	 * Cursor calls must also carry the server-execution marker. The failed
+	 * assistant/tool-result pair stays in context so completed side effects are
+	 * continued from rather than replayed.
 	 */
-	#canResumeCursorStreamStall(message: AssistantMessage): boolean {
-		if (
-			message.provider !== "cursor" ||
-			message.stopReason !== "error" ||
-			!message.errorMessage?.toLowerCase().includes("stream stall")
-		) {
+	#canResumeResolvedStreamStall(message: AssistantMessage): boolean {
+		if (message.stopReason !== "error" || !message.errorMessage?.toLowerCase().includes("stream stall")) {
 			return false;
 		}
 		const id = this.#classifyRetryMessage(message);
@@ -15285,7 +15281,12 @@ export class AgentSession {
 		const resolvedToolCallIds: string[] = [];
 		for (const block of message.content) {
 			if (block.type !== "toolCall") continue;
-			if (!(kCursorExecResolved in block) || block[kCursorExecResolved] !== true) return false;
+			if (
+				message.provider === "cursor" &&
+				(!(kCursorExecResolved in block) || block[kCursorExecResolved] !== true)
+			) {
+				return false;
+			}
 			resolvedToolCallIds.push(block.id);
 		}
 		if (resolvedToolCallIds.length === 0) return false;
@@ -16131,8 +16132,8 @@ export class AgentSession {
 			errorId: message.errorId,
 		});
 
-		// Cursor exec-channel tools have already run and emitted results. Keep that
-		// failed turn intact so continuation cannot repeat their side effects.
+		// Resolved stream-stall tools have already emitted results. Keep that failed
+		// turn intact so continuation cannot repeat their side effects.
 		if (!options?.preserveFailedTurn) {
 			this.#removeAssistantMessageFromActiveContext(message, "auto-retry");
 		}
