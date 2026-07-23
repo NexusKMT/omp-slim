@@ -29,6 +29,7 @@
 
 ### Fixed
 
+- Fixed mid-session `memory.backend` changes leaving runtime state, tools, listeners, and prompt context on different backends; Mnemopi clear/enqueue now rehydrate listeners, and legacy `memories.enabled` no longer activates the local pipeline after migration ([#5638](https://github.com/can1357/oh-my-pi/issues/5638)).
 - Fixed `error.notify` raising a "Stopped with error" toast for provider failures while an auto-retry or async-delivery continuation was pending; the toast now waits for the true terminal settle.
 - Fixed terminal `yield` results racing post-turn maintenance, which could trigger an unnecessary automatic handoff or compaction.
 - Fixed credential-shaped tokens (GitHub/GitLab/OpenAI/Anthropic key patterns) being redacted from outbound provider requests even with `secrets.enabled` off; the pattern redaction now follows the `secrets.enabled` ("Hide Secrets") setting like the secret obfuscator.
