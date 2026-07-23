@@ -7,7 +7,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/export/html";
 
 describe("HTML export themes", () => {
-	it("bundles dark, light, and system-following web themes", async () => {
+	it("bundles dark, light, and auto-following web themes", async () => {
 		const styles = await generateThemeStyles("web");
 
 		expect(styles).toContain(':root, :root[data-theme="dark"] { color-scheme: dark;');
@@ -28,10 +28,10 @@ describe("HTML export themes", () => {
 		expect(styles).toContain(`:root[data-theme="light"] { color-scheme: light; ${light} }`);
 	});
 
-	it("renders a system, light, and dark theme selector", () => {
+	it("renders an auto, light, and dark theme selector", () => {
 		const html = getTemplate();
 		expect(html).toContain('id="theme-select"');
-		expect(html).toContain('<option value="system">System</option>');
+		expect(html).toContain('<option value="auto">Auto</option>');
 		expect(html).toContain('<option value="light">Light</option>');
 		expect(html).toContain('<option value="dark">Dark</option>');
 	});

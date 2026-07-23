@@ -145,7 +145,7 @@ export async function generateThemeVars(
 	return lines.join(" ");
 }
 
-/** Generate dark, light, and system-following CSS rules for a standalone viewer. */
+/** Generate dark, light, and auto-following CSS rules for a standalone viewer. */
 export async function generateThemeStyles(
 	palette: "web" | "theme",
 	themeNames?: ExportThemeNames,

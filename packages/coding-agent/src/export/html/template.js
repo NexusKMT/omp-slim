@@ -3,10 +3,10 @@
 
       const THEME_STORAGE_KEY = 'omp-export-theme';
       const themeSelect = document.getElementById('theme-select');
-      let themePreference = 'system';
+      let themePreference = 'auto';
       try {
         const stored = localStorage.getItem(THEME_STORAGE_KEY);
-        if (stored === 'light' || stored === 'dark' || stored === 'system') themePreference = stored;
+        if (stored === 'light' || stored === 'dark' || stored === 'auto') themePreference = stored;
       } catch {}
 
       function applyThemePreference(next) {
