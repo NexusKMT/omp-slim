@@ -272,4 +272,57 @@ describe("BashTool ACP terminal routing", () => {
 		expect(releaseSpy).toHaveBeenCalledTimes(1);
 		expect(currentOutputAfterKill).toBeGreaterThan(0);
 	});
+
+	it("still times out when a poll-tick output read hangs", async () => {
+		// Real 1s timeout — deliberately exercises the wall-clock deadline against
+		// an RPC that never settles; fake timers cannot model a hung peer.
+		const pendingExit = Promise.withResolvers<{ exitCode: number | null; signal: string | null }>();
+		const neverOutput = new Promise<{ output: string; truncated: boolean }>(() => {});
+
+		const handle: ClientBridgeTerminalHandle = {
+			terminalId: "term-hung-poll",
+			waitForExit: async () => pendingExit.promise,
+			currentOutput: () => neverOutput,
+			kill: async () => {},
+			release: async () => {},
+		};
+		const bridge: ClientBridge = {
+			capabilities: { terminal: true },
+			createTerminal: async () => handle,
+		};
+		const killSpy = spyOn(handle, "kill");
+		const releaseSpy = spyOn(handle, "release");
+
+		const tool = new BashTool(makeSession(bridge));
+		const executePromise = tool.execute("call-hung-poll", { command: "sleep 60", timeout: 1 });
+
+		await expect(executePromise).rejects.toThrow(/Command timed out after 1 seconds/);
+		expect(killSpy).toHaveBeenCalledTimes(1);
+		expect(releaseSpy).toHaveBeenCalledTimes(1);
+	}, 8000);
+
+	it("returns even when terminal release hangs", async () => {
+		// Real-time grace bound: release() never settles; the tool must still
+		// resolve once the kill-grace window elapses.
+		const stubText = "done\n";
+		const neverRelease = new Promise<void>(() => {});
+
+		const handle: ClientBridgeTerminalHandle = {
+			terminalId: "term-hung-release",
+			waitForExit: async () => ({ exitCode: 0, signal: null }),
+			currentOutput: async () => ({ output: stubText, truncated: false }),
+			kill: async () => {},
+			release: () => neverRelease,
+		};
+		const bridge: ClientBridge = {
+			capabilities: { terminal: true },
+			createTerminal: async () => handle,
+		};
+
+		const tool = new BashTool(makeSession(bridge));
+		const result = await tool.execute("call-hung-release", { command: "echo done" });
+
+		const text = result.content.find(c => c.type === "text");
+		expect(text?.text).toContain("done");
+	}, 8000);
 });

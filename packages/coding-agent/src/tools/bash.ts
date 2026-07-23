@@ -1155,6 +1155,7 @@ export class BashTool implements AgentTool<typeof bashSchemaBase | typeof bashSc
 				const exitRacer = exitPromise.then(status => ({ kind: "exit" as const, status }));
 				const abortRacer = abortedP.then(() => ({ kind: "aborted" as const }));
 				const abortPollRacer = abortedP.then(() => undefined as ClientBridgeTerminalOutput | undefined);
+				const timeoutPollRacer = timeoutPromise.then(() => undefined as ClientBridgeTerminalOutput | undefined);
 				let lastPolledOutput: ClientBridgeTerminalOutput = { output: "", truncated: false };
 
 				// Poll until the process exits, times out, or the caller aborts.
@@ -1213,12 +1214,12 @@ export class BashTool implements AgentTool<typeof bashSchemaBase | typeof bashSc
 					}
 
 					// Poll tick: push current output so agent-loop transcript stays consistent.
-					// Race the read against abort so a stuck `terminal/output` RPC does not
-					// delay cancellation.
-					const pollOutput = await Promise.race([handle.currentOutput(), abortPollRacer]);
+					// Race the read against abort/timeout so a stuck `terminal/output` RPC does
+					// not delay cancellation or let the command outlive its deadline.
+					const pollOutput = await Promise.race([handle.currentOutput(), abortPollRacer, timeoutPollRacer]);
 					if (pollOutput === undefined) {
-						// Abort fired during the poll-tick read; let the next loop iteration
-						// observe `signal?.aborted` and exit via the abort branch.
+						// Abort or timeout fired during the poll-tick read; let the next loop
+						// iteration exit via the matching abort/timeout branch.
 						continue;
 					}
 					lastPolledOutput = pollOutput;
@@ -1276,11 +1277,15 @@ export class BashTool implements AgentTool<typeof bashSchemaBase | typeof bashSc
 				clearTimeout(timeoutTimer);
 				signal?.removeEventListener("abort", onAbortSignal);
 				if (handle) {
-					try {
-						await handle.release();
-					} catch (error) {
-						logger.warn("ACP terminal release failed", { terminalId: handle.terminalId, error });
-					}
+					const releaseHandle = handle;
+					// Bound release like kill/output: a hung `terminal/release` RPC must not
+					// keep the tool pending after the result is already decided.
+					await Promise.race([
+						releaseHandle.release().catch((error: unknown) => {
+							logger.warn("ACP terminal release failed", { terminalId: releaseHandle.terminalId, error });
+						}),
+						Bun.sleep(killGraceMs),
+					]);
 				}
 			}
 		}
