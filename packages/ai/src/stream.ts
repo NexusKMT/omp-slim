@@ -73,6 +73,7 @@ import type {
 	ThinkingBudgets,
 	ToolChoice,
 } from "./types";
+import { resolveCacheRetention } from "./utils";
 import { AssistantMessageEventStream } from "./utils/event-stream";
 import { isFoundryEnabled } from "./utils/foundry";
 import { wrapLeakedThinkingStream } from "./utils/leaked-thinking-stream";
@@ -1426,7 +1427,7 @@ function assertExplicitOpenAIResponsesPromptCacheSupport<TApi extends Api>(
 ): void {
 	if (
 		model.transport === "pi-native" ||
-		options?.cacheRetention === "none" ||
+		resolveCacheRetention(options?.cacheRetention) === "none" ||
 		options?.promptCache?.mode !== "explicit" ||
 		!isOpenAIResponsesPromptCacheSurface(model) ||
 		supportsExplicitOpenAIResponsesPromptCache(model.compat)

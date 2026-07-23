@@ -10,6 +10,7 @@ import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { buildOpenAIResponsesCompat } from "@oh-my-pi/pi-catalog/compat/openai";
 
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { withEnv } from "./helpers";
 
 const model = getBundledModel("openai", "gpt-5-mini") as Model<"openai-responses">;
 const openRouterResponsesModel: Model<"openai-responses"> = {
@@ -538,6 +539,38 @@ describe("OpenAI Responses explicit prompt cache policy", () => {
 		expect(contentBlocks.length).toBeGreaterThan(0);
 		for (const block of contentBlocks) {
 			expect(block).not.toHaveProperty("prompt_cache_breakpoint");
+		}
+	});
+
+	it("honors cache retention environment overrides before public explicit policy validation", async () => {
+		const unsupportedModel: Model<"openai-responses"> = {
+			...openAI56ResponsesModel,
+			id: "gpt-5.5",
+			compat: buildOpenAIResponsesCompat({
+				id: "gpt-5.5",
+				name: "GPT-5.5",
+				provider: "openai",
+				baseUrl: "https://api.openai.com/v1",
+			}),
+		};
+
+		await withEnv({ PI_CACHE_RETENTION: "none" }, async () => {
+			const body = await captureSimpleOpenAIResponseBody({ promptCache: { mode: "explicit" } }, unsupportedModel);
+
+			if (body === null) throw new Error("Expected disabled prompt-cache request to reach the provider");
+			expect(body).not.toHaveProperty("prompt_cache_options");
+		});
+
+		for (const retention of ["short", "long"] as const) {
+			await withEnv({ PI_CACHE_RETENTION: retention }, () => {
+				expect(() =>
+					streamSimple(
+						unsupportedModel,
+						{ messages: [{ role: "user", content: [{ type: "text", text: "prompt" }], timestamp: 0 }] },
+						{ apiKey: "test-key", promptCache: { mode: "explicit" } },
+					),
+				).toThrow("OpenAI explicit prompt caching is unsupported");
+			});
 		}
 	});
 });
