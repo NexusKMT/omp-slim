@@ -352,7 +352,9 @@ function renderCacheBenchmarkPrefix(prefix: string, namespace: string): string {
 	}
 	// Render the static wrapper first, then inject caller bytes so prompt
 	// normalization cannot trim spaces or collapse blank lines in prefix files.
-	return rendered.replace(CACHE_PREFIX_PLACEHOLDER, prefix);
+	// Function replacer: a prefix containing `$&`/`$'`/`` $` `` must not be
+	// expanded as a string-replacement pattern.
+	return rendered.replace(CACHE_PREFIX_PLACEHOLDER, () => prefix);
 }
 
 async function resolveCachePrefix(

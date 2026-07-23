@@ -494,10 +494,10 @@ describe("bench cache mode", () => {
 		expect(stablePrefixes[0]).not.toContain("\uFFFD");
 	});
 
-	it("preserves significant whitespace from the default prefix-file reader", async () => {
+	it("preserves significant whitespace and replacement patterns from the default prefix-file reader", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-bench-cache-prefix-whitespace-"));
 		const prefixPath = path.join(tempDir, "prefix.txt");
-		const exactPrefix = "line one  \n\n\nline two\t\n";
+		const exactPrefix = "line one  \n\n\n$& $' $` $$ line two\t\n";
 		const stablePrefixes: string[] = [];
 		await Bun.write(prefixPath, exactPrefix);
 		try {
