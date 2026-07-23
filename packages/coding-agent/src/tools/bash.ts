@@ -10,7 +10,7 @@ import type { Component } from "@oh-my-pi/pi-tui";
 import { ImageProtocol, TERMINAL } from "@oh-my-pi/pi-tui";
 import { getProjectDir, isEnoent, logger, prompt } from "@oh-my-pi/pi-utils";
 import { type } from "arktype";
-import { type BashResult, executeBash } from "../exec/bash-executor";
+import { applyDirenvPreflight, type BashResult, executeBash } from "../exec/bash-executor";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { InternalUrlRouter } from "../internal-urls";
 import { truncateToVisualLines } from "../modes/components/visual-truncate";
@@ -1009,17 +1009,43 @@ export class BashTool implements AgentTool<typeof bashSchemaBase | typeof bashSc
 			});
 		}
 
+		// Fold direnv/devenv env into (command, env) ONCE for the two backends
+		// that bypass `executeBash` — the ACP client terminal and the PTY. The
+		// `executeBash` branch below is intentionally excluded: it runs its own
+		// preflight internally, so routing the pre-applied command there too
+		// would double-apply the unset prefix and re-merge the env. No
+		// `commandPrefix` here: ACP applies the shell prefix via
+		// `wrapShellLineForClientTerminal`, and the PTY path never wrapped one.
+		// `callerTimeoutMs` clamps the direnv load to a positive command timeout
+		// (the backend's own timeout is installed only after this await), matching
+		// the executeBash branch so a cold `.envrc` can't outlast a short call.
+		const backendPreflight =
+			(clientBridge?.capabilities.terminal && clientBridge.createTerminal && !pty) ||
+			canUseInteractiveBashPty(pty, ctx)
+				? await applyDirenvPreflight(command, commandCwd, {
+						callerEnv: resolvedEnv,
+						signal,
+						timeoutMs: this.session.settings.get("bash.direnvLoadTimeoutMs"),
+						callerTimeoutMs: timeoutMs,
+						direnvSetting: this.session.settings.get("bash.direnv"),
+					})
+				: undefined;
+
 		// Route through the client terminal when the client advertises the terminal capability.
 		// Skip when pty=true (PTY needs the local terminal UI).
 		if (clientBridge?.capabilities.terminal && clientBridge.createTerminal && !pty) {
 			const bridgeWallTimeStart = performance.now();
-			const shellSpawn = wrapShellLineForClientTerminal(command, this.session.settings.getShellConfig());
+			// direnv-transformed command (carries any `unset -v` prefix) + merged
+			// env; falls back to the raw command/env when direnv is off/absent.
+			const bridgeCommand = backendPreflight?.command ?? command;
+			const bridgeEnv = backendPreflight?.env ?? resolvedEnv;
+			const shellSpawn = wrapShellLineForClientTerminal(bridgeCommand, this.session.settings.getShellConfig());
 			const handle = await clientBridge.createTerminal({
 				command: shellSpawn.command,
 				args: shellSpawn.args,
 				cwd: commandCwd,
-				env: resolvedEnv
-					? Object.entries(resolvedEnv).map(([name, value]) => ({ name, value: value as string }))
+				env: bridgeEnv
+					? Object.entries(bridgeEnv).map(([name, value]) => ({ name, value: value as string }))
 					: undefined,
 				outputByteLimit: DEFAULT_MAX_BYTES,
 			});
@@ -1193,15 +1219,21 @@ export class BashTool implements AgentTool<typeof bashSchemaBase | typeof bashSc
 		const wallTimeStart = performance.now();
 		const result: BashResult | BashInteractiveResult = interactiveUi
 			? await runInteractiveBashPty(interactiveUi, {
-					command,
+					// PTY bypasses executeBash, so feed it the direnv-transformed
+					// command + merged env (backendPreflight is defined whenever this
+					// branch runs, since both gate on canUseInteractiveBashPty).
+					command: backendPreflight?.command ?? command,
 					cwd: commandCwd,
 					timeoutMs,
 					signal,
-					env: resolvedEnv,
+					env: backendPreflight?.env ?? resolvedEnv,
 					artifactPath,
 					artifactId,
 				})
-			: await executeBash(command, {
+			: // executeBash runs its OWN direnv preflight internally — pass the RAW
+				// command + resolvedEnv here so the unset prefix / env merge is not
+				// applied twice.
+				await executeBash(command, {
 					cwd: commandCwd,
 					sessionKey: this.session.getSessionId?.() ?? undefined,
 					timeout: timeoutMs ?? 0,
