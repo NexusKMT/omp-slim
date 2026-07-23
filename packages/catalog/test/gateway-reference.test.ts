@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { buildModel } from "../src/build";
 import { getBundledModelReferenceIndex } from "../src/identity/bundled";
 import { inheritReferenceThinking, resolveModelReference } from "../src/identity/reference";
-import { buildModel } from "../src/build";
 import type { ModelSpec } from "../src/types";
 
 describe("Portkey gateway model references", () => {
@@ -48,4 +48,38 @@ describe("Vercel AI Gateway cache compat", () => {
 			caching: "auto",
 		});
 	});
+});
+
+test("resolves Responses cache controls only for the Vercel endpoint", () => {
+	const routing = { caching: "auto" as const, cacheAnchorItems: 1, cacheTtl: "1h" as const };
+	const vercel = buildModel({
+		id: "anthropic/claude-sonnet-4.6",
+		name: "Claude Sonnet 4.6",
+		api: "openai-responses",
+		provider: "vercel-ai-gateway",
+		baseUrl: "https://ai-gateway.vercel.sh/v1",
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 200_000,
+		maxTokens: 16_384,
+		compat: { vercelGatewayRouting: routing },
+	} satisfies ModelSpec<"openai-responses">);
+	const direct = buildModel({
+		id: "anthropic/claude-sonnet-4.6",
+		name: "Claude Sonnet 4.6",
+		api: "openai-responses",
+		provider: "custom",
+		baseUrl: "https://api.example.com/v1",
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 200_000,
+		maxTokens: 16_384,
+		compat: { vercelGatewayRouting: routing },
+	} satisfies ModelSpec<"openai-responses">);
+
+	expect(vercel.compat.isVercelGatewayHost).toBe(true);
+	expect(vercel.compat.vercelGatewayRouting).toEqual(routing);
+	expect(direct.compat.isVercelGatewayHost).toBe(false);
 });

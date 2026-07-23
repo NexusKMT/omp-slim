@@ -616,20 +616,49 @@ export interface OpenAIGatewayRoutingCompat {
 export function applyOpenAIGatewayRouting(
 	params: OpenAIGatewayRoutingParams,
 	compat: OpenAIGatewayRoutingCompat,
+	cacheEnabled = true,
 ): void {
 	if (compat.isOpenRouterHost && compat.openRouterRouting) {
 		params.provider = compat.openRouterRouting;
 	}
 	if (compat.isVercelGatewayHost && compat.vercelGatewayRouting) {
 		const routing = compat.vercelGatewayRouting;
-		if (routing.only || routing.order || routing.caching) {
+		if (routing.only || routing.order || (cacheEnabled && routing.caching)) {
 			const gatewayOptions: Pick<VercelGatewayRouting, "only" | "order" | "caching"> = {};
 			if (routing.only) gatewayOptions.only = routing.only;
 			if (routing.order) gatewayOptions.order = routing.order;
-			if (routing.caching) gatewayOptions.caching = routing.caching;
+			if (cacheEnabled && routing.caching) gatewayOptions.caching = routing.caching;
 			params.providerOptions = { gateway: gatewayOptions };
 		}
 	}
+}
+
+export interface VercelResponsesCacheParams {
+	caching?: "auto";
+	cache_anchor_items?: number;
+	cache_ttl?: "5m" | "1h";
+}
+
+export interface VercelResponsesCacheCompat {
+	isVercelGatewayHost: boolean;
+	vercelGatewayRouting?: VercelGatewayRouting;
+}
+
+/**
+ * Apply Vercel AI Gateway's Responses-only automatic cache controls. Chat
+ * Completions uses the distinct `providerOptions.gateway` shape above.
+ */
+export function applyVercelResponsesCacheControls(
+	params: VercelResponsesCacheParams,
+	compat: VercelResponsesCacheCompat,
+	cacheEnabled = true,
+): void {
+	const routing = compat.vercelGatewayRouting;
+	if (!cacheEnabled || !compat.isVercelGatewayHost || routing?.caching !== "auto") return;
+
+	params.caching = "auto";
+	if (routing.cacheAnchorItems !== undefined) params.cache_anchor_items = routing.cacheAnchorItems;
+	if (routing.cacheTtl !== undefined) params.cache_ttl = routing.cacheTtl;
 }
 
 export interface OpenAIExtraBodyOptions {

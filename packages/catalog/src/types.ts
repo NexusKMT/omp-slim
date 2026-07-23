@@ -483,6 +483,10 @@ export interface VercelGatewayRouting {
 	order?: string[];
 	/** Enables Vercel AI Gateway's provider-aware automatic prompt caching. */
 	caching?: "auto";
+	/** Stable Responses input-item prefix to anchor for automatic caching. */
+	cacheAnchorItems?: number;
+	/** Requested automatic-cache lifetime for the Responses API. */
+	cacheTtl?: "5m" | "1h";
 }
 
 type ResolvedToolStrictMode = NonNullable<OpenAICompat["toolStrictMode"]> | "mixed";
@@ -622,6 +626,9 @@ export interface ResolvedOpenAIResponsesCompat extends ResolvedOpenAISharedCompa
 	supportsImageDetailOriginal: boolean;
 	supportsObfuscationOptOut: boolean;
 	streamIdleTimeoutMs?: number;
+	vercelGatewayRouting?: OpenAICompat["vercelGatewayRouting"];
+	/** The model sits behind Vercel AI Gateway's Responses endpoint. */
+	isVercelGatewayHost: boolean;
 }
 
 /**
