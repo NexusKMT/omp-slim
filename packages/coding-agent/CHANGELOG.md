@@ -28,6 +28,7 @@
 - xAI web search now uses `grok-4.5` (at low reasoning effort) instead of `grok-4.3`.
 
 ### Fixed
+- Fixed a first-use race in `ArtifactManager` where two concurrent `allocatePath`/`save` callers on a fresh instance both re-seeded `#nextId` across the directory-scan yield and allocated the same artifact id, silently overwriting the first artifact (same tool type) or making `artifact://` resolution ambiguous (different tool types). The initial scan is now memoized as a single in-flight promise so all concurrent callers share one initialization and receive distinct ids ([#4091](https://github.com/can1357/oh-my-pi/issues/4091)).
 
 - Fixed discarded `Settings` instances keeping debounced save timers and chained background saves armed; discarding an instance now cancels its pending writes so they cannot race a successor's file locks.
 - Fixed `error.notify` raising a "Stopped with error" toast for provider failures while an auto-retry or async-delivery continuation was pending; the toast now waits for the true terminal settle.
