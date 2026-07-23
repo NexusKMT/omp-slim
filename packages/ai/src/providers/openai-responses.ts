@@ -64,6 +64,7 @@ import type {
 	Tool as OpenAITool,
 	ResponseCreateParamsStreaming,
 	ResponseInput,
+	ResponseInputContent,
 	ResponseStreamEvent,
 } from "./openai-responses-wire";
 import {
@@ -86,6 +87,7 @@ import {
 	isOpenAIResponsesProgressEvent,
 	isOpenRouterAnthropicModel,
 	isStrictToolsDisabledForScope,
+	type OpenAIPromptCacheOptions,
 	type OpenAIStrictToolsScope,
 	type OpenAIStrictToolsState,
 	processResponsesStream,
@@ -150,6 +152,8 @@ export interface OpenAIResponsesOptions extends StreamOptions {
 	 * prompt_cache_key for prompt-cache routing).
 	 */
 	extraBody?: Record<string, unknown>;
+	/** Opt-in GPT-5.6+ prompt-cache policy. Unsupported explicit mode fails locally. */
+	promptCache?: OpenAIPromptCacheOptions;
 }
 
 const OPENAI_RESPONSES_PROVIDER_SESSION_STATE_PREFIX = "openai-responses:";
@@ -871,6 +875,97 @@ function isOfficialOpenAIResponsesEndpoint(model: Model<"openai-responses">): bo
 	}
 }
 
+function isResponsesPromptCacheableContentBlock(block: unknown): block is ResponseInputContent {
+	if (typeof block !== "object" || block === null || !("type" in block)) return false;
+	return block.type === "input_text" || block.type === "input_image" || block.type === "input_file";
+}
+
+type ResponsesPromptCacheableMessage = {
+	role: "assistant" | "developer" | "system" | "user";
+	content: ResponseInputContent[];
+};
+
+function isResponsesPromptCacheableMessage(item: unknown): item is ResponsesPromptCacheableMessage {
+	if (typeof item !== "object" || item === null || !("role" in item) || !("content" in item)) return false;
+	if (item.role !== "assistant" && item.role !== "developer" && item.role !== "system" && item.role !== "user")
+		return false;
+	return Array.isArray(item.content) && item.content.every(isResponsesPromptCacheableContentBlock);
+}
+
+type ResponsesStringInstruction = {
+	role: "developer" | "system";
+	content: string | ResponseInputContent[];
+};
+
+function isStableStringResponsesInstruction(item: unknown): item is ResponsesStringInstruction {
+	if (typeof item !== "object" || item === null || !("role" in item) || !("content" in item)) return false;
+	return (
+		(item.role === "developer" || item.role === "system") &&
+		typeof item.content === "string" &&
+		item.content.length > 0
+	);
+}
+
+function markLatestStableResponsesCacheBreakpoint(input: ResponseInput | undefined): boolean {
+	if (!input) return false;
+	let latestInputMessage = -1;
+	for (let i = input.length - 1; i >= 0; i--) {
+		const message = input[i];
+		if (!("role" in message)) continue;
+		if (message.role === "user" || message.role === "developer") {
+			latestInputMessage = i;
+			break;
+		}
+	}
+	if (latestInputMessage <= 0) return false;
+
+	for (let i = latestInputMessage - 1; i >= 0; i--) {
+		const message = input[i];
+		if (isResponsesPromptCacheableMessage(message)) {
+			const block = message.content[message.content.length - 1];
+			if (block) {
+				Object.assign(block, { prompt_cache_breakpoint: { mode: "explicit" } });
+				return true;
+			}
+		}
+		if (isStableStringResponsesInstruction(message) && typeof message.content === "string") {
+			const text = message.content;
+			message.content = [
+				{
+					type: "input_text",
+					text,
+					prompt_cache_breakpoint: { mode: "explicit" },
+				},
+			];
+			return true;
+		}
+	}
+	return false;
+}
+
+function applyOpenAIResponsesPromptCachePolicy(
+	params: OpenAIResponsesSamplingParams,
+	model: Model<"openai-responses">,
+	options: OpenAIResponsesOptions | undefined,
+): void {
+	const promptCache = options?.promptCache;
+	if (!promptCache || resolveCacheRetention(options?.cacheRetention) === "none") return;
+	if (!model.compat.supportsPromptCacheBreakpoints) {
+		if (promptCache.mode === "explicit") {
+			throw new AIError.ConfigurationError(
+				`OpenAI explicit prompt caching is unsupported for ${model.provider}/${model.id}; enable compat.supportsPromptCacheBreakpoints only for a compatible endpoint.`,
+			);
+		}
+		return;
+	}
+
+	params.prompt_cache_options = {
+		mode: promptCache.mode,
+		ttl: promptCache.ttl ?? model.compat.promptCacheBreakpointTtl,
+	};
+	if (promptCache.breakpoint !== "none") markLatestStableResponsesCacheBreakpoint(params.input);
+}
+
 export function buildParams(
 	model: Model<"openai-responses">,
 	context: Context,
@@ -1027,6 +1122,7 @@ export function buildParams(
 	applyOpenAIGatewayRouting(params, model.compat);
 
 	applyOpenAIExtraBody(params, options?.extraBody);
+	applyOpenAIResponsesPromptCachePolicy(params, model, options);
 
 	return { params, strictToolsApplied };
 }
