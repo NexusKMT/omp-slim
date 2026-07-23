@@ -3811,11 +3811,7 @@ export class AgentSession {
 			this.sessionId,
 			advisor.slug,
 		);
-		const preparation = prepareCompaction(
-			pathEntries,
-			compactionSettings,
-			await this.#runnableCompactionCandidates(candidates, advisorProviderSessionId),
-		);
+		const preparation = prepareCompaction(pathEntries, compactionSettings, advisorModel);
 		if (!preparation) {
 			// Cannot prepare compaction, fallback to re-prime
 			return true;
@@ -11031,11 +11027,7 @@ export class AgentSession {
 				compactionCandidates = this.#getCompactionModelCandidates(availableModels);
 			}
 			const pathEntries = this.sessionManager.getBranch();
-			const preparation = prepareCompaction(
-				pathEntries,
-				effectiveSettings,
-				await this.#runnableCompactionCandidates(compactionCandidates, this.sessionId),
-			);
+			const preparation = prepareCompaction(pathEntries, effectiveSettings, this.model);
 			if (!preparation) {
 				// Check why we can't compact
 				const lastEntry = pathEntries[pathEntries.length - 1];
@@ -13386,17 +13378,6 @@ export class AgentSession {
 		return this.#resolveCompactionModelCandidates(this.model, availableModels, filter);
 	}
 
-	/**
-	 * Compaction candidates that can actually run — those with a resolvable API
-	 * key, matching the per-candidate getApiKey gate the execution loop applies.
-	 * Re-expansion reusability (prepareCompaction) must judge remote-preserve
-	 * reuse against these, not against candidates the loop would skip at runtime.
-	 */
-	async #runnableCompactionCandidates(candidates: readonly Model[], sessionId: string | undefined): Promise<Model[]> {
-		const keys = await Promise.all(candidates.map(model => this.#modelRegistry.getApiKey(model, sessionId)));
-		return candidates.filter((_, index) => keys[index] !== undefined);
-	}
-
 	#resolveCompactionModelCandidates(
 		preferredModel: Model | null | undefined,
 		availableModels: Model[],
@@ -14025,12 +14006,8 @@ export class AgentSession {
 
 			const pathEntries = this.sessionManager.getBranch();
 
-			const autoCompactionCandidates = await this.#runnableCompactionCandidates(
-				this.#getCompactionModelCandidates(availableModels),
-				this.sessionId,
-			);
 			let pathEntriesForCompaction = pathEntries;
-			let preparation = prepareCompaction(pathEntriesForCompaction, compactionSettings, autoCompactionCandidates);
+			let preparation = prepareCompaction(pathEntriesForCompaction, compactionSettings, this.model);
 			if (!preparation) {
 				// prepareCompaction found nothing to summarize because the kept region
 				// is a single oversized recent turn — findCutPoint never cuts inside a
@@ -14057,11 +14034,7 @@ export class AgentSession {
 							// branch has been rewritten either way.
 							rescueRewroteHistory = true;
 							pathEntriesForCompaction = this.sessionManager.getBranch();
-							preparation = prepareCompaction(
-								pathEntriesForCompaction,
-								compactionSettings,
-								autoCompactionCandidates,
-							);
+							preparation = prepareCompaction(pathEntriesForCompaction, compactionSettings, this.model);
 							return preparation !== undefined;
 						},
 					});

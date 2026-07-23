@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed provider-switched sessions being stranded without their remotely-compacted history: compaction now judges whether a prior OpenAI remote-compaction replay payload can be reused against the active model rather than the whole candidate set, so switching to a model that cannot replay the payload re-expands the originals into a portable local summary instead of leaving the model with only a placeholder ([#6343](https://github.com/can1357/oh-my-pi/issues/6343)).
+
 ## [17.0.8] - 2026-07-22
 
 ### Fixed
