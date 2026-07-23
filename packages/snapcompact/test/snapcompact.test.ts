@@ -1065,6 +1065,57 @@ describe("compact", () => {
 		expect(second.preserveData?.openaiRemoteCompaction).toBeUndefined();
 		expect(second.preserveData?.appKey).toBe("kept");
 	});
+
+	it("scrubs legacy ¶think: sections from the prior archive when thinking is excluded", async () => {
+		const first = await snapcompact.compact(
+			makePreparation({
+				messagesToSummarize: [
+					createUserMessage("Investigate the flaky auth test."),
+					createAssistantMessage([
+						{ type: "thinking", thinking: "legacy private chain of thought" },
+						{ type: "text", text: "The token clock is skewed." },
+					]),
+				],
+			}),
+			{ frameSize: TEST_FRAME_SIZE },
+		);
+		expect(snapcompact.getPreservedArchive(first.preserveData)?.text ?? "").toContain("¶think:");
+
+		const second = await snapcompact.compact(
+			makePreparation({
+				messagesToSummarize: [createUserMessage("Continue after switching to Claude.")],
+				previousPreserveData: first.preserveData,
+			}),
+			{ frameSize: TEST_FRAME_SIZE, includeThinking: false },
+		);
+		const archiveText = snapcompact.getPreservedArchive(second.preserveData)?.text ?? "";
+		expect(archiveText).not.toContain("¶think:");
+		expect(archiveText).not.toContain("legacy private chain of thought");
+		expect(archiveText).toContain("Investigate the flaky auth test.");
+		expect(archiveText).toContain("The token clock is skewed.");
+	});
+
+	it("keeps legacy ¶think: sections when thinking stays included", async () => {
+		const first = await snapcompact.compact(
+			makePreparation({
+				messagesToSummarize: [
+					createAssistantMessage([
+						{ type: "thinking", thinking: "legacy private chain of thought" },
+						{ type: "text", text: "Visible reply." },
+					]),
+				],
+			}),
+			{ frameSize: TEST_FRAME_SIZE },
+		);
+		const second = await snapcompact.compact(
+			makePreparation({
+				messagesToSummarize: [createUserMessage("Another turn.")],
+				previousPreserveData: first.preserveData,
+			}),
+			{ frameSize: TEST_FRAME_SIZE },
+		);
+		expect(snapcompact.getPreservedArchive(second.preserveData)?.text ?? "").toContain("¶think:");
+	});
 });
 
 describe("archive helpers", () => {
