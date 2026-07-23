@@ -1919,11 +1919,9 @@ const SETTING_HOOKS: Partial<Record<SettingPath, SettingHook<any>>> = {
 	"providers.maxInFlightRequests": value => {
 		configureProviderMaxInFlightRequests(validateProviderMaxInFlightRequests(value));
 	},
-	"hindsight.apiUrl": () => hindsightRuntimeSignal.fire(),
-	"hindsight.apiToken": () => hindsightRuntimeSignal.fire(),
-	"hindsight.bankId": () => hindsightRuntimeSignal.fire(),
-	"hindsight.bankIdPrefix": () => hindsightRuntimeSignal.fire(),
-	"hindsight.scoping": () => hindsightRuntimeSignal.fire(),
+	"hindsight.bankId": () => hindsightScopeSignal.fire(),
+	"hindsight.bankIdPrefix": () => hindsightScopeSignal.fire(),
+	"hindsight.scoping": () => hindsightScopeSignal.fire(),
 	"worktree.base": value => {
 		const dir = typeof value === "string" && value.trim() ? value : undefined;
 		// Always call so an unset/empty value clears a previously-applied override.
@@ -1961,19 +1959,20 @@ const statusLineSessionAccentSignal = new SettingSignal("statusLine.sessionAccen
  */
 export const onStatusLineSessionAccentChanged = (cb: () => void) => statusLineSessionAccentSignal.on(cb);
 
-/** Fires when Hindsight connection or bank-routing settings change. */
-const hindsightRuntimeSignal = new SettingSignal("hindsight runtime");
+/** Fires when any `hindsight.bankId` / `bankIdPrefix` / `scoping` value changes. */
+const hindsightScopeSignal = new SettingSignal("hindsight scope");
 
 /**
- * Subscribe to changes in the Hindsight connection and bank-routing settings. Lets the
+ * Subscribe to changes in the Hindsight bank-scoping settings. Lets the
  * Hindsight backend rebuild the active `HindsightSessionState` when the
- * operator changes the API URL/token, bank id/prefix, or scoping mid-session
- * so subsequent retain/recall calls use the new connection and bank routing.
+ * operator switches `hindsight.bankId`, `hindsight.bankIdPrefix`, or
+ * `hindsight.scoping` mid-session so subsequent retain/recall calls land in
+ * the new bank instead of the one selected at session start.
  *
  * Returns an unsubscribe function. The callback receives no arguments — the
  * caller is expected to re-read the relevant settings via `Settings.get`.
  */
-export const onHindsightRuntimeChanged = (cb: () => void) => hindsightRuntimeSignal.on(cb);
+export const onHindsightScopeChanged = (cb: () => void) => hindsightScopeSignal.on(cb);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Global Singleton

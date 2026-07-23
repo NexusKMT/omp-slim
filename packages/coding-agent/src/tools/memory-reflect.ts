@@ -61,12 +61,10 @@ export class MemoryReflectTool implements AgentTool<typeof memoryReflectSchema> 
 				}
 			}
 
-			const sessionState = this.session.getHindsightSessionState?.();
-			if (!sessionState) {
+			const state = this.session.getHindsightSessionState?.();
+			if (!state) {
 				throw new Error("Hindsight backend is not initialised for this session.");
 			}
-			const state = sessionState.resolvePersistenceState();
-			if (!state) throw new Error("Hindsight backend is not initialised for this session.");
 
 			try {
 				await ensureBankExists(state.client, state.bankId, state.config, state.banksSet);

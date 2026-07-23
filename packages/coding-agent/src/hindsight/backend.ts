@@ -9,7 +9,7 @@
 
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { logger } from "@oh-my-pi/pi-utils";
-import { onHindsightRuntimeChanged, type Settings } from "../config/settings";
+import { onHindsightScopeChanged, type Settings } from "../config/settings";
 import type { MemoryBackend, MemoryBackendStartOptions } from "../memory-backend/types";
 import type { AgentSession } from "../session/agent-session";
 import { type BankScope, computeBankScope } from "./bank";
@@ -88,7 +88,7 @@ export const hindsightBackend: MemoryBackend = {
 		if (!isHindsightConfigured(config)) return undefined;
 
 		const state = session?.getHindsightSessionState();
-		const primary = state?.resolvePersistenceState();
+		const primary = state?.aliasOf ?? state;
 		const recallSnippet = primary?.lastRecallSnippet;
 		const mentalModelsSnippet = primary?.mentalModelsSnippet;
 
@@ -150,15 +150,10 @@ interface PrimaryRebuildTask {
 	pending: boolean;
 }
 
-interface ConversationTracking {
-	lastRetainedTurn: number;
-	hasRecalledForFirstTurn: boolean;
-}
-
 const primaryRebuildTasks = new WeakMap<AgentSession, PrimaryRebuildTask>();
 
 /**
- * Coalesce and serialize live runtime rebuilds for one session. Cwd reloads fire
+ * Coalesce and serialize live scope rebuilds for one session. Cwd reloads fire
  * all settings hooks synchronously; running every callback immediately would
  * let multiple rebuilds capture the same old state and leak the fresh states
  * installed by earlier continuations.
@@ -177,9 +172,9 @@ function schedulePrimaryStateRebuild(session: AgentSession): void {
 			while (nextTask.pending) {
 				nextTask.pending = false;
 				try {
-					await rebuildPrimaryStateOnRuntimeChange(session);
+					await rebuildPrimaryStateOnScopeChange(session);
 				} catch (err) {
-					logger.warn("Hindsight: runtime rebuild failed", { error: String(err) });
+					logger.warn("Hindsight: scope rebuild failed", { error: String(err) });
 				}
 			}
 		})
@@ -196,15 +191,14 @@ function schedulePrimaryStateRebuild(session: AgentSession): void {
  * after flushing its retain queue so in-flight tool-initiated retains land in
  * the bank that was selected when they were enqueued, not in the new bank.
  *
- * The created state takes ownership of the `onHindsightRuntimeChanged`
- * subscription so subsequent connection or bank-routing edits trigger another
- * rebuild from the same wiring.
+ * The created state takes ownership of the `onHindsightScopeChanged`
+ * subscription so subsequent `hindsight.bankId` / `bankIdPrefix` / `scoping`
+ * edits trigger another rebuild from the same wiring.
  */
 async function installPrimaryState(
 	session: AgentSession,
 	settings: Settings,
 	banksSet: Set<string>,
-	conversationTracking?: ConversationTracking,
 ): Promise<HindsightSessionState | undefined> {
 	const sessionId = session.sessionId;
 	if (!sessionId) return undefined;
@@ -242,13 +236,13 @@ async function installPrimaryState(
 		config,
 		session,
 		banksSet,
-		lastRetainedTurn: conversationTracking?.lastRetainedTurn ?? 0,
-		hasRecalledForFirstTurn: conversationTracking?.hasRecalledForFirstTurn ?? false,
+		lastRetainedTurn: 0,
+		hasRecalledForFirstTurn: false,
 	});
 
 	// Subscribe BEFORE installing: if the operator manages to flip another
 	// setting between install and subscribe, we'd miss the edge.
-	state.unsubscribeRuntime = onHindsightRuntimeChanged(() => {
+	state.unsubscribeScope = onHindsightScopeChanged(() => {
 		schedulePrimaryStateRebuild(session);
 	});
 
@@ -257,7 +251,6 @@ async function installPrimaryState(
 		await displaced.flushRetainQueue();
 		displaced.dispose();
 	}
-	if (previous && previous !== state) previous.replacedBy = state;
 	previous?.dispose();
 	state.attachSessionListeners();
 
@@ -275,46 +268,31 @@ async function installPrimaryState(
 }
 
 /**
- * `onHindsightRuntimeChanged` handler: re-evaluate the connection and bank
- * scope from current settings and rebuild the primary state when either has
- * actually drifted. No-op
+ * `onHindsightScopeChanged` handler: re-evaluate the bank scope from current
+ * settings and rebuild the primary state when it has actually drifted. No-op
  * when the scope is unchanged or the session is no longer hosting a primary
  * state (e.g. it was wiped to `undefined`, or this is a subagent alias).
  */
-async function rebuildPrimaryStateOnRuntimeChange(session: AgentSession): Promise<void> {
+async function rebuildPrimaryStateOnScopeChange(session: AgentSession): Promise<void> {
 	const current = session.getHindsightSessionState();
 	if (!current || current.aliasOf) return;
 
 	const settings = session.settings;
 	const config = loadHindsightConfig(settings);
 	if (!isHindsightConfigured(config)) {
-		if (current.persistenceDisabled) return;
-		// Hindsight effectively unwired mid-session. Flush before disabling so
+		// Hindsight effectively unwired mid-session. Flush before clearing so
 		// queued retains don't get dropped by `HindsightRetainQueue.#doFlush`.
-		// Keep the runtime subscription alive so a later API URL can re-enable
-		// the backend without restarting the session.
 		await current.flushRetainQueue();
-		current.disablePersistence();
+		const previous = session.setHindsightSessionState(undefined);
+		previous?.dispose();
 		return;
 	}
 
 	const next = computeBankScope(config, session.sessionManager.getCwd());
-	const scopeUnchanged = bankScopesEqual(next, current);
-	const connectionUnchanged =
-		config.hindsightApiUrl === current.config.hindsightApiUrl &&
-		config.hindsightApiToken === current.config.hindsightApiToken;
-	if (!current.persistenceDisabled && connectionUnchanged && scopeUnchanged) return;
+	if (bankScopesEqual(next, current)) return;
 
-	// Bank existence is scoped by both endpoint and credential tenant. Preserve
-	// the cache only when the connection identity is unchanged.
-	const banksSet = connectionUnchanged ? current.banksSet : new Set<string>();
-	const conversationTracking = scopeUnchanged
-		? {
-				lastRetainedTurn: current.lastRetainedTurn,
-				hasRecalledForFirstTurn: current.hasRecalledForFirstTurn,
-			}
-		: undefined;
-	await installPrimaryState(session, settings, banksSet, conversationTracking);
+	// Preserve the banksSet so we don't re-PUT banks we've already confirmed.
+	await installPrimaryState(session, settings, current.banksSet);
 }
 
 /** Tag-array equality: order matters because we never reorder on the way in. */

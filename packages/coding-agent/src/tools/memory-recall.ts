@@ -62,12 +62,10 @@ export class MemoryRecallTool implements AgentTool<typeof memoryRecallSchema> {
 				}
 			}
 
-			const sessionState = this.session.getHindsightSessionState?.();
-			if (!sessionState) {
+			const state = this.session.getHindsightSessionState?.();
+			if (!state) {
 				throw new Error("Hindsight backend is not initialised for this session.");
 			}
-			const state = sessionState.resolvePersistenceState();
-			if (!state) throw new Error("Hindsight backend is not initialised for this session.");
 
 			try {
 				const response = await state.client.recall(state.bankId, params.query, {

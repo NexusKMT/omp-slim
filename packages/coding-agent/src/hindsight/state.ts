@@ -27,7 +27,6 @@ interface PendingRetainItem {
 	content: string;
 	context?: string;
 	timestamp: Date;
-	persistenceState: HindsightSessionState;
 }
 
 interface RecallOutcome {
@@ -82,11 +81,11 @@ export class HindsightRetainQueue {
 		return this.#items.length;
 	}
 
-	enqueue(content: string, context: string | undefined, persistenceState: HindsightSessionState): void {
+	enqueue(content: string, context?: string): void {
 		if (this.#closed) {
 			throw new Error("Hindsight retain queue is closed.");
 		}
-		this.#items.push({ content, context, timestamp: new Date(), persistenceState });
+		this.#items.push({ content, context, timestamp: new Date() });
 
 		if (this.#items.length >= RETAIN_FLUSH_BATCH_SIZE) {
 			void this.flush();
@@ -138,17 +137,7 @@ export class HindsightRetainQueue {
 
 	async #doFlush(items: PendingRetainItem[]): Promise<void> {
 		const state = this.#state;
-		const persistence = state.resolvePersistenceState();
 		const sessionId = state.sessionId;
-		if (!persistence) {
-			logger.warn("Hindsight retain queue: backend disabled, dropping batch", {
-				sessionId,
-				items: items.length,
-			});
-			return;
-		}
-		const currentItems = items.filter(item => item.persistenceState === persistence);
-		if (currentItems.length === 0) return;
 		if (state.session.getHindsightSessionState() !== state) {
 			// Session went away before we could flush. We can't notify anyone, so
 			// log and drop — these are best-effort facts, not transactional writes.
@@ -160,32 +149,31 @@ export class HindsightRetainQueue {
 		}
 
 		try {
-			await ensureBankExists(persistence.client, persistence.bankId, persistence.config, persistence.banksSet);
-			if (state.resolvePersistenceState() !== persistence) return;
-			const batch: MemoryItemInput[] = currentItems.map(item => ({
+			await ensureBankExists(state.client, state.bankId, state.config, state.banksSet);
+			const batch: MemoryItemInput[] = items.map(item => ({
 				content: item.content,
-				context: item.context ?? persistence.config.retainContext,
+				context: item.context ?? state.config.retainContext,
 				metadata: { session_id: sessionId },
-				tags: persistence.retainTags,
+				tags: state.retainTags,
 				timestamp: item.timestamp,
 			}));
-			await persistence.client.retainBatch(persistence.bankId, batch, { async: true });
-			if (persistence.config.debug) {
+			await state.client.retainBatch(state.bankId, batch, { async: true });
+			if (state.config.debug) {
 				logger.debug("Hindsight retain queue: batch flushed", {
 					sessionId,
-					bankId: persistence.bankId,
-					items: currentItems.length,
+					bankId: state.bankId,
+					items: items.length,
 				});
 			}
 		} catch (err) {
 			const errorText = err instanceof Error ? err.message : String(err);
 			logger.warn("Hindsight retain queue: batch flush failed", {
 				sessionId,
-				bankId: persistence.bankId,
-				items: currentItems.length,
+				bankId: state.bankId,
+				items: items.length,
 				error: errorText,
 			});
-			this.#notifyRetainFailure(currentItems.length, errorText);
+			this.#notifyRetainFailure(items.length, errorText);
 		}
 	}
 
@@ -228,17 +216,13 @@ export class HindsightSessionState {
 	mentalModelsLoadPromise?: Promise<void>;
 	unsubscribe?: () => void;
 	/**
-	 * Releases the Hindsight settings subscription that drives live rebuilds
-	 * when connection or bank-routing settings change.
+	 * Releases the `onHindsightScopeChanged` subscription that drives live
+	 * rebuilds when `hindsight.bankId` / `bankIdPrefix` / `scoping` change.
 	 * Only set on primary states; aliases inherit the parent's subscription.
 	 */
-	unsubscribeRuntime?: () => void;
+	unsubscribeScope?: () => void;
 	/** Alias states delegate persistence config to a primary parent state. */
 	aliasOf?: HindsightSessionState;
-	/** Successor installed after a live runtime-settings rebuild. */
-	replacedBy?: HindsightSessionState;
-	/** Marks a terminal primary state after Hindsight is disabled. */
-	persistenceDisabled = false;
 	readonly retainQueue: HindsightRetainQueue;
 
 	constructor(options: HindsightSessionStateOptions) {
@@ -267,18 +251,8 @@ export class HindsightSessionState {
 		this.lastRecallSnippet = undefined;
 	}
 
-	/** Resolve the current primary persistence state, following live rebuilds. */
-	resolvePersistenceState(): HindsightSessionState | undefined {
-		let state = this.aliasOf ?? this;
-		while (state.replacedBy) state = state.replacedBy;
-		if (this.aliasOf && this.aliasOf !== state) this.aliasOf = state;
-		return state.persistenceDisabled ? undefined : state;
-	}
-
 	enqueueRetain(content: string, context?: string): void {
-		const persistence = this.resolvePersistenceState();
-		if (!persistence) throw new Error("Hindsight backend is not initialised for this session.");
-		this.retainQueue.enqueue(content, context, persistence);
+		this.retainQueue.enqueue(content, context);
 	}
 
 	async flushRetainQueue(): Promise<void> {
@@ -286,35 +260,31 @@ export class HindsightSessionState {
 	}
 
 	async recallForContext(query: string, signal?: AbortSignal): Promise<RecallOutcome> {
-		const state = this.resolvePersistenceState();
-		if (!state) return { context: null, ok: false };
 		try {
-			const response = await state.client.recall(state.bankId, query, {
-				budget: state.config.recallBudget,
-				maxTokens: state.config.recallMaxTokens,
-				types: state.config.recallTypes.length > 0 ? state.config.recallTypes : undefined,
-				tags: state.recallTags,
-				tagsMatch: state.recallTagsMatch,
+			const response = await this.client.recall(this.bankId, query, {
+				budget: this.config.recallBudget,
+				maxTokens: this.config.recallMaxTokens,
+				types: this.config.recallTypes.length > 0 ? this.config.recallTypes : undefined,
+				tags: this.recallTags,
+				tagsMatch: this.recallTagsMatch,
 			});
 			if (signal?.aborted) return { context: null, ok: false };
 			const results = response.results ?? [];
 			if (results.length === 0) return { context: null, ok: true };
 			const formatted = formatMemories(results);
-			const block = `<memories>\n${state.config.recallPromptPreamble}\nCurrent time: ${formatCurrentTime()} UTC\n\n${formatted}\n</memories>`;
+			const block = `<memories>\n${this.config.recallPromptPreamble}\nCurrent time: ${formatCurrentTime()} UTC\n\n${formatted}\n</memories>`;
 			return { context: block, ok: true };
 		} catch (err) {
-			if (state.config.debug) {
-				logger.debug("Hindsight: recall failed", { bankId: state.bankId, error: String(err) });
+			if (this.config.debug) {
+				logger.debug("Hindsight: recall failed", { bankId: this.bankId, error: String(err) });
 			}
 			return { context: null, ok: false };
 		}
 	}
 
 	async retainSession(messages: HindsightMessage[]): Promise<void> {
-		const state = this.resolvePersistenceState();
-		if (!state) return;
 		const retainedAt = new Date();
-		const retainFullWindow = state.config.retainMode === "full-session";
+		const retainFullWindow = this.config.retainMode === "full-session";
 		let target: HindsightMessage[];
 		let documentId: string;
 
@@ -322,7 +292,7 @@ export class HindsightSessionState {
 			target = messages;
 			documentId = this.sessionId;
 		} else {
-			const windowTurns = state.config.retainEveryNTurns + state.config.retainOverlapTurns;
+			const windowTurns = this.config.retainEveryNTurns + this.config.retainOverlapTurns;
 			target = sliceLastTurnsByUserBoundary(messages, windowTurns);
 			documentId = `${this.sessionId}-${retainedAt.getTime()}`;
 		}
@@ -330,12 +300,12 @@ export class HindsightSessionState {
 		const { transcript } = prepareRetentionTranscript(target, true);
 		if (!transcript) return;
 
-		await ensureBankExists(state.client, state.bankId, state.config, state.banksSet);
-		await state.client.retain(state.bankId, transcript, {
+		await ensureBankExists(this.client, this.bankId, this.config, this.banksSet);
+		await this.client.retain(this.bankId, transcript, {
 			documentId,
-			context: state.config.retainContext,
+			context: this.config.retainContext,
 			metadata: { session_id: this.sessionId },
-			tags: state.retainTags,
+			tags: this.retainTags,
 			timestamp: retainedAt,
 			async: true,
 		});
@@ -443,7 +413,6 @@ export class HindsightSessionState {
 		// that surfaces as a FK / 404 on Hindsight's side. `ensureBankExists`
 		// is idempotent (PUT) and skips after the first call via `banksSet`.
 		await ensureBankExists(this.client, this.bankId, this.config, this.banksSet);
-		if (this.resolvePersistenceState() !== this) return;
 
 		// Seeding is opt-in (`hindsight.mentalModelAutoSeed`). Default behaviour is
 		// read-only: we surface whatever models the operator has curated on the
@@ -455,7 +424,6 @@ export class HindsightSessionState {
 				await ensureMentalModels(this.client, this.bankId, seeds, this.config.debug);
 			}
 		}
-		if (this.resolvePersistenceState() !== this) return;
 
 		await this.refreshMentalModelsSnippet();
 		await this.#refreshBaseSystemPromptAfter("MM load");
@@ -474,10 +442,9 @@ export class HindsightSessionState {
 
 	async reloadMentalModels(): Promise<boolean> {
 		if (this.aliasOf) return false;
-		const state = this.resolvePersistenceState();
-		if (!state?.config.mentalModelsEnabled) return false;
-		await state.refreshMentalModelsSnippet();
-		await state.#refreshBaseSystemPromptAfter("MM reload");
+		if (!this.config.mentalModelsEnabled) return false;
+		await this.refreshMentalModelsSnippet();
+		await this.#refreshBaseSystemPromptAfter("MM reload");
 		return true;
 	}
 
@@ -507,19 +474,11 @@ export class HindsightSessionState {
 		});
 	}
 
-	/** Stop persistence work while retaining the runtime-settings subscription. */
-	disablePersistence(): void {
-		this.persistenceDisabled = true;
-		this.unsubscribe?.();
-		this.unsubscribe = undefined;
-		this.retainQueue.dispose();
-	}
-
 	dispose(): void {
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
-		this.unsubscribeRuntime?.();
-		this.unsubscribeRuntime = undefined;
+		this.unsubscribeScope?.();
+		this.unsubscribeScope = undefined;
 		this.retainQueue.dispose();
 	}
 
