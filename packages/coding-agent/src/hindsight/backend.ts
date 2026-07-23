@@ -288,12 +288,13 @@ async function rebuildPrimaryStateOnRuntimeChange(session: AgentSession): Promis
 	const settings = session.settings;
 	const config = loadHindsightConfig(settings);
 	if (!isHindsightConfigured(config)) {
-		// Hindsight effectively unwired mid-session. Flush before clearing so
+		if (current.persistenceDisabled) return;
+		// Hindsight effectively unwired mid-session. Flush before disabling so
 		// queued retains don't get dropped by `HindsightRetainQueue.#doFlush`.
+		// Keep the runtime subscription alive so a later API URL can re-enable
+		// the backend without restarting the session.
 		await current.flushRetainQueue();
-		const previous = session.setHindsightSessionState(undefined);
-		if (previous) previous.persistenceDisabled = true;
-		previous?.dispose();
+		current.disablePersistence();
 		return;
 	}
 
@@ -302,7 +303,7 @@ async function rebuildPrimaryStateOnRuntimeChange(session: AgentSession): Promis
 	const connectionUnchanged =
 		config.hindsightApiUrl === current.config.hindsightApiUrl &&
 		config.hindsightApiToken === current.config.hindsightApiToken;
-	if (connectionUnchanged && scopeUnchanged) return;
+	if (!current.persistenceDisabled && connectionUnchanged && scopeUnchanged) return;
 
 	// Bank existence is scoped by both endpoint and credential tenant. Preserve
 	// the cache only when the connection identity is unchanged.

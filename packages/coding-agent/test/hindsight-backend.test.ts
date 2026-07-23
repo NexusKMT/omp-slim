@@ -701,8 +701,23 @@ describe("hindsightBackend live bank routing", () => {
 		}
 	});
 
-	it("invalidates an active subagent alias when hindsight.apiUrl is cleared", async () => {
-		const settings = Settings.isolated({ "memory.backend": "hindsight" });
+	it("invalidates active aliases and rebuilds when hindsight.apiUrl is restored", async () => {
+		const retainBatchSpy = vi.spyOn(HindsightApi.prototype, "retainBatch").mockResolvedValue({} as never);
+		let releaseCreateBank: (() => void) | undefined;
+		const createBankGate = new Promise<void>(resolve => {
+			releaseCreateBank = resolve;
+		});
+		const createBankSpy = vi.spyOn(HindsightApi.prototype, "createBank").mockImplementation(async () => {
+			await createBankGate;
+			return {} as never;
+		});
+		const listMentalModelsSpy = vi.spyOn(HindsightApi.prototype, "listMentalModels").mockResolvedValue({
+			items: [],
+		} as never);
+		const settings = Settings.isolated({
+			"memory.backend": "hindsight",
+			"hindsight.mentalModelsEnabled": false,
+		});
 		settings.set("hindsight.apiUrl", "http://localhost:8888");
 		const parentSession = makeFakeSession({ sessionId: "parent-disabled", settings });
 		const subSession = makeFakeSession({ sessionId: "sub-disabled", settings });
@@ -723,12 +738,36 @@ describe("hindsightBackend live bank routing", () => {
 				parentHindsightSessionState: parentSession.getHindsightSessionState(),
 			});
 			const alias = subSession.getHindsightSessionState()!;
+			alias.enqueueRetain("queued before disable");
+			const aliasFlush = alias.flushRetainQueue();
+			await Bun.sleep(0);
+			expect(createBankSpy).toHaveBeenCalledTimes(1);
 
 			settings.set("hindsight.apiUrl", "");
 			await Bun.sleep(0);
-			expect(parentSession.getHindsightSessionState()).toBeUndefined();
+			const disabled = parentSession.getHindsightSessionState();
+			expect(disabled).toBeDefined();
+			expect(disabled?.resolvePersistenceState()).toBeUndefined();
 			expect(alias.resolvePersistenceState()).toBeUndefined();
+			expect(() => alias.enqueueRetain("queued while disabled")).toThrow(
+				"Hindsight backend is not initialised for this session.",
+			);
+			listMentalModelsSpy.mockClear();
+			expect(await reloadMentalModelsForSession(parentSession as never)).toBe(false);
+			expect(listMentalModelsSpy).not.toHaveBeenCalled();
+
+			settings.set("hindsight.apiUrl", "http://localhost:8888");
+			await Bun.sleep(0);
+			const restored = parentSession.getHindsightSessionState();
+			expect(restored).toBeDefined();
+			expect(restored).not.toBe(disabled);
+			expect(restored?.config.hindsightApiUrl).toBe("http://localhost:8888");
+			expect(alias.resolvePersistenceState()).toBe(restored);
+			releaseCreateBank?.();
+			await aliasFlush;
+			expect(retainBatchSpy).not.toHaveBeenCalled();
 		} finally {
+			releaseCreateBank?.();
 			await hindsightBackend.clear("/tmp", "/tmp", subSession as never);
 			await hindsightBackend.clear("/tmp", "/tmp", parentSession as never);
 		}

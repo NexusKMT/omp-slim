@@ -27,6 +27,7 @@ interface PendingRetainItem {
 	content: string;
 	context?: string;
 	timestamp: Date;
+	persistenceState: HindsightSessionState;
 }
 
 interface RecallOutcome {
@@ -81,11 +82,11 @@ export class HindsightRetainQueue {
 		return this.#items.length;
 	}
 
-	enqueue(content: string, context?: string): void {
+	enqueue(content: string, context: string | undefined, persistenceState: HindsightSessionState): void {
 		if (this.#closed) {
 			throw new Error("Hindsight retain queue is closed.");
 		}
-		this.#items.push({ content, context, timestamp: new Date() });
+		this.#items.push({ content, context, timestamp: new Date(), persistenceState });
 
 		if (this.#items.length >= RETAIN_FLUSH_BATCH_SIZE) {
 			void this.flush();
@@ -146,6 +147,8 @@ export class HindsightRetainQueue {
 			});
 			return;
 		}
+		const currentItems = items.filter(item => item.persistenceState === persistence);
+		if (currentItems.length === 0) return;
 		if (state.session.getHindsightSessionState() !== state) {
 			// Session went away before we could flush. We can't notify anyone, so
 			// log and drop — these are best-effort facts, not transactional writes.
@@ -158,7 +161,8 @@ export class HindsightRetainQueue {
 
 		try {
 			await ensureBankExists(persistence.client, persistence.bankId, persistence.config, persistence.banksSet);
-			const batch: MemoryItemInput[] = items.map(item => ({
+			if (state.resolvePersistenceState() !== persistence) return;
+			const batch: MemoryItemInput[] = currentItems.map(item => ({
 				content: item.content,
 				context: item.context ?? persistence.config.retainContext,
 				metadata: { session_id: sessionId },
@@ -170,7 +174,7 @@ export class HindsightRetainQueue {
 				logger.debug("Hindsight retain queue: batch flushed", {
 					sessionId,
 					bankId: persistence.bankId,
-					items: items.length,
+					items: currentItems.length,
 				});
 			}
 		} catch (err) {
@@ -178,10 +182,10 @@ export class HindsightRetainQueue {
 			logger.warn("Hindsight retain queue: batch flush failed", {
 				sessionId,
 				bankId: persistence.bankId,
-				items: items.length,
+				items: currentItems.length,
 				error: errorText,
 			});
-			this.#notifyRetainFailure(items.length, errorText);
+			this.#notifyRetainFailure(currentItems.length, errorText);
 		}
 	}
 
@@ -272,7 +276,9 @@ export class HindsightSessionState {
 	}
 
 	enqueueRetain(content: string, context?: string): void {
-		this.retainQueue.enqueue(content, context);
+		const persistence = this.resolvePersistenceState();
+		if (!persistence) throw new Error("Hindsight backend is not initialised for this session.");
+		this.retainQueue.enqueue(content, context, persistence);
 	}
 
 	async flushRetainQueue(): Promise<void> {
@@ -437,6 +443,7 @@ export class HindsightSessionState {
 		// that surfaces as a FK / 404 on Hindsight's side. `ensureBankExists`
 		// is idempotent (PUT) and skips after the first call via `banksSet`.
 		await ensureBankExists(this.client, this.bankId, this.config, this.banksSet);
+		if (this.resolvePersistenceState() !== this) return;
 
 		// Seeding is opt-in (`hindsight.mentalModelAutoSeed`). Default behaviour is
 		// read-only: we surface whatever models the operator has curated on the
@@ -448,6 +455,7 @@ export class HindsightSessionState {
 				await ensureMentalModels(this.client, this.bankId, seeds, this.config.debug);
 			}
 		}
+		if (this.resolvePersistenceState() !== this) return;
 
 		await this.refreshMentalModelsSnippet();
 		await this.#refreshBaseSystemPromptAfter("MM load");
@@ -466,9 +474,10 @@ export class HindsightSessionState {
 
 	async reloadMentalModels(): Promise<boolean> {
 		if (this.aliasOf) return false;
-		if (!this.config.mentalModelsEnabled) return false;
-		await this.refreshMentalModelsSnippet();
-		await this.#refreshBaseSystemPromptAfter("MM reload");
+		const state = this.resolvePersistenceState();
+		if (!state?.config.mentalModelsEnabled) return false;
+		await state.refreshMentalModelsSnippet();
+		await state.#refreshBaseSystemPromptAfter("MM reload");
 		return true;
 	}
 
@@ -496,6 +505,14 @@ export class HindsightSessionState {
 				}
 			}
 		});
+	}
+
+	/** Stop persistence work while retaining the runtime-settings subscription. */
+	disablePersistence(): void {
+		this.persistenceDisabled = true;
+		this.unsubscribe?.();
+		this.unsubscribe = undefined;
+		this.retainQueue.dispose();
 	}
 
 	dispose(): void {
