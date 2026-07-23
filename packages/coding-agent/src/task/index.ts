@@ -160,6 +160,7 @@ export function formatResultOutputFallback(result: Pick<SingleResult, "output" |
 function renderDescription(
 	agents: AgentDefinition[],
 	isolationEnabled: boolean,
+	applyIsolatedChanges: boolean,
 	disabledAgents: string[],
 	batchEnabled: boolean,
 	asyncEnabled: boolean,
@@ -187,6 +188,7 @@ function renderDescription(
 		defaultAgent: spawnPolicy.defaultAgent,
 		allowedAgentsText: spawnPolicy.allowedPromptText,
 		isolationEnabled,
+		applyIsolatedChanges,
 		batchEnabled,
 		asyncEnabled,
 		hasBlockingAgents: renderedAgents.some(agent => agent.blocking),
@@ -566,6 +568,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		return renderDescription(
 			this.#discoveredAgents,
 			!planMode && isolationMode !== "none",
+			this.session.settings.get("task.isolation.apply"),
 			disabledAgents,
 			this.#isBatchEnabled(),
 			this.session.settings.get("async.enabled"),
