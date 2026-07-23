@@ -319,6 +319,8 @@ export async function loadSessionMessagesReadOnly(filePath: string): Promise<Age
 	migrateToCurrentVersion(entries);
 	await resolveBlobRefsInEntries(entries, new BlobStore(getBlobsDir()));
 	const sessionEntries = entries.filter((e): e is SessionEntry => e.type !== "session");
-	return buildSessionContext(sessionEntries, undefined, undefined, { transcript: true, collapseCompactedHistory: true })
-		.messages;
+	return buildSessionContext(sessionEntries, undefined, undefined, {
+		transcript: true,
+		collapseCompactedHistory: true,
+	}).messages;
 }

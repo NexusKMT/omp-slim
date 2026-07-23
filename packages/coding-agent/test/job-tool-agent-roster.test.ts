@@ -293,7 +293,9 @@ describe("hub cancel of a non-job-backed agent registration (#6315)", () => {
 
 		const result = await tool.execute("call", { op: "cancel", ids: ["DoneJob"] });
 
-		expect((result.details as CoordinationDetails)?.cancelled).toEqual([{ id: "DoneJob", status: "already_completed" }]);
+		expect((result.details as CoordinationDetails)?.cancelled).toEqual([
+			{ id: "DoneJob", status: "already_completed" },
+		]);
 		expect(resultText(result)).toContain("already completed");
 	});
 });

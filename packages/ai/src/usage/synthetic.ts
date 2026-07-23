@@ -1,3 +1,4 @@
+import { isRecord } from "@oh-my-pi/pi-utils/type-guards";
 import type {
 	UsageAmount,
 	UsageFetchContext,
@@ -8,7 +9,6 @@ import type {
 	UsageStatus,
 	UsageWindow,
 } from "../usage";
-import { isRecord } from "@oh-my-pi/pi-utils/type-guards";
 
 const QUOTAS_URL = "https://api.synthetic.new/v2/quotas";
 const FIVE_HOUR_MS = 5 * 60 * 60 * 1000;
