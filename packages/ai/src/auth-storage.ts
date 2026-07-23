@@ -11,7 +11,7 @@ import { Database, type Statement } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getAgentDbPath, logger } from "@oh-my-pi/pi-utils";
+import { $env, getAgentDbPath, logger } from "@oh-my-pi/pi-utils";
 import type { ApiKeyResolver } from "./auth-retry";
 import * as AIError from "./error";
 import { isUsageLimitOutcome } from "./error/rate-limit";
@@ -57,6 +57,8 @@ import {
 	listCodexResetCredits,
 } from "./usage/openai-codex-reset";
 import { opencodeGoUsageProvider } from "./usage/opencode-go";
+import { syntheticUsageProvider } from "./usage/synthetic";
+import { xaiOauthUsageProvider } from "./usage/xai-oauth";
 import { zaiRankingStrategy, zaiUsageProvider } from "./usage/zai";
 
 const USAGE_RANKING_METRIC_EPSILON = 1e-9;
@@ -73,6 +75,15 @@ function fingerprintOAuthBearer(bearer: string): string {
 	return createHash("sha256").update(bearer).digest("base64url");
 }
 const SESSION_STICKY_CACHE_PREFIX = "session:sticky:";
+/**
+ * Anthropic-only idle window after which a session's pinned credential no
+ * longer suppresses usage-based re-ranking. Anthropic caps OAuth prompt-cache
+ * retention at `ttl: "1h"` (ephemeral ~5min otherwise), so after this long
+ * without an Anthropic resolve the conversation-prefix cache is no longer
+ * guaranteed warm. Other providers retain indefinite stickiness until their
+ * own cache lifetimes are verified.
+ */
+const ANTHROPIC_SESSION_STICKY_CACHE_WARM_MS = 60 * 60_000;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Credential Types
@@ -177,7 +188,7 @@ export interface CredentialHealthResult {
 	email?: string;
 	/** OAuth account id if known. */
 	accountId?: string;
-	/** Organization/workspace the credential is scoped to (Anthropic multi-subscription). */
+	/** Organization/workspace the credential is scoped to (Anthropic/ChatGPT multi-subscription). */
 	orgId?: string;
 	orgName?: string;
 	/** `true` when the refresh token lives on a remote broker (sentinel was present). */
@@ -587,6 +598,8 @@ const DEFAULT_USAGE_PROVIDERS: UsageProvider[] = [
 	opencodeGoUsageProvider,
 	githubCopilotUsageProvider,
 	cursorUsageProvider,
+	syntheticUsageProvider,
+	xaiOauthUsageProvider,
 ];
 
 const DEFAULT_USAGE_PROVIDER_MAP = new Map<Provider, UsageProvider>(
@@ -726,7 +739,7 @@ export interface OAuthAccess {
 	projectId?: string;
 	enterpriseUrl?: string;
 	apiEndpoint?: string;
-	/** Organization/workspace the credential is scoped to (Anthropic multi-subscription). */
+	/** Organization/workspace the credential is scoped to (Anthropic/ChatGPT multi-subscription). */
 	orgId?: string;
 	orgName?: string;
 }
@@ -751,7 +764,7 @@ export interface OAuthAccessFailure {
 	projectId?: string;
 	enterpriseUrl?: string;
 	apiEndpoint?: string;
-	/** Organization/workspace the credential is scoped to (Anthropic multi-subscription). */
+	/** Organization/workspace the credential is scoped to (Anthropic/ChatGPT multi-subscription). */
 	orgId?: string;
 	orgName?: string;
 	error: string;
@@ -767,7 +780,7 @@ export interface OAuthAccountIdentity {
 	accountId?: string;
 	email?: string;
 	projectId?: string;
-	/** Organization/workspace the credential is scoped to (Anthropic multi-subscription). */
+	/** Organization/workspace the credential is scoped to (Anthropic/ChatGPT multi-subscription). */
 	orgId?: string;
 	orgName?: string;
 }
@@ -786,7 +799,7 @@ export interface OAuthAccountSummary {
 	email?: string;
 	projectId?: string;
 	enterpriseUrl?: string;
-	/** Organization/workspace the credential is scoped to (Anthropic multi-subscription). */
+	/** Organization/workspace the credential is scoped to (Anthropic/ChatGPT multi-subscription). */
 	orgId?: string;
 	orgName?: string;
 }
@@ -797,6 +810,8 @@ export interface InvalidateCredentialMatchingOptions {
 
 /** Options for refreshing one stored OAuth row through durable ownership. */
 export interface StoredOAuthRefreshOptions<T extends OAuthCredential = OAuthCredential> {
+	/** Stable row id when a provider has multiple OAuth credentials. */
+	credentialId?: number;
 	observedCredential?: T;
 	credentialFromRow: (credential: OAuthCredential) => T | undefined;
 	forceRefresh?: boolean;
@@ -1135,7 +1150,10 @@ export class AuthStorage {
 	/** Tracks next credential index per provider:type key for round-robin distribution (non-session use). */
 	#providerRoundRobinIndex: Map<string, number> = new Map();
 	/** Tracks the last used credential per provider for a session (used for rate-limit switching). */
-	#sessionLastCredential: Map<string, Map<string, { type: AuthCredential["type"]; index: number }>> = new Map();
+	#sessionLastCredential: Map<
+		string,
+		Map<string, { type: AuthCredential["type"]; index: number; lastUsedAtMs?: number }>
+	> = new Map();
 	/** Recent bearer fingerprints resolved for each durable OAuth row; used only for delayed usage-limit attribution. */
 	#oauthBearerFingerprints: Map<string, Map<number, string[]>> = new Map();
 	/** Maps provider:type -> credentialIndex -> blockedUntilMs for temporary backoff. */
@@ -1683,17 +1701,18 @@ export class AuthStorage {
 		index: number,
 	): void {
 		if (!sessionId) return;
+		const nowMs = Date.now();
 		const sessionMap = this.#sessionLastCredential.get(provider) ?? new Map();
-		sessionMap.set(sessionId, { type, index });
+		sessionMap.set(sessionId, { type, index, lastUsedAtMs: nowMs });
 		this.#sessionLastCredential.set(provider, sessionMap);
 
 		try {
 			const credentialId = this.#getStoredCredentials(provider)[index]?.id;
 			if (credentialId !== undefined) {
 				const cacheKey = `${SESSION_STICKY_CACHE_PREFIX}${provider}:${sessionId}`;
-				const cacheValue = JSON.stringify({ type, index, credentialId });
+				const cacheValue = JSON.stringify({ type, index, credentialId, lastUsedAtMs: nowMs });
 				// Expires in 30 days
-				const expiresAtSec = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
+				const expiresAtSec = Math.floor(nowMs / 1000) + 30 * 24 * 60 * 60;
 				this.#store.setCache(cacheKey, cacheValue, expiresAtSec);
 			}
 		} catch (err) {
@@ -1705,7 +1724,7 @@ export class AuthStorage {
 	#getSessionCredential(
 		provider: string,
 		sessionId: string | undefined,
-	): { type: AuthCredential["type"]; index: number } | undefined {
+	): { type: AuthCredential["type"]; index: number; lastUsedAtMs?: number } | undefined {
 		if (!sessionId) return undefined;
 		let sessionMap = this.#sessionLastCredential.get(provider);
 		if (sessionMap?.has(sessionId)) {
@@ -1715,7 +1734,12 @@ export class AuthStorage {
 			const cacheKey = `${SESSION_STICKY_CACHE_PREFIX}${provider}:${sessionId}`;
 			const raw = this.#store.getCache(cacheKey);
 			if (raw) {
-				const val = JSON.parse(raw) as { type: AuthCredential["type"]; index: number; credentialId?: number };
+				const val = JSON.parse(raw) as {
+					type: AuthCredential["type"];
+					index: number;
+					credentialId?: number;
+					lastUsedAtMs?: number;
+				};
 
 				if (val.credentialId !== undefined) {
 					const stored = this.#getStoredCredentials(provider);
@@ -1735,7 +1759,7 @@ export class AuthStorage {
 					sessionMap = new Map();
 					this.#sessionLastCredential.set(provider, sessionMap);
 				}
-				const sessionVal = { type: val.type, index: val.index };
+				const sessionVal = { type: val.type, index: val.index, lastUsedAtMs: val.lastUsedAtMs };
 				sessionMap.set(sessionId, sessionVal);
 				return sessionVal;
 			}
@@ -2007,17 +2031,32 @@ export class AuthStorage {
 	}
 
 	/**
-	 * Persist a refreshed credential addressed by id, not a positional index.
-	 * A concurrent disable can reorder/shrink the provider's row array while an
-	 * async refresh is in flight, so a pre-await index is unsafe; resolving the
-	 * row by id at write time lands the rotated token on the correct row. Returns
-	 * the row's current index, or -1 when it was disabled/removed mid-refresh.
+	 * Persist a refreshed credential by id only while the row still matches this
+	 * process's snapshot. A peer rotation wins the CAS and is reloaded instead of
+	 * being overwritten after this process releases its refresh lease.
+	 *
+	 * Returns the row's current index, or -1 when it was disabled or removed.
 	 */
 	#replaceCredentialById(provider: string, id: number, credential: AuthCredential): number {
 		const entries = this.#getStoredCredentials(provider);
 		const index = entries.findIndex(entry => entry.id === id);
 		if (index === -1) return -1;
-		this.#store.updateAuthCredential(id, credential);
+		const expected = serializeCredential(provider, entries[index]!.credential);
+		if (
+			expected &&
+			this.#store.tryUpdateAuthCredentialIfMatches &&
+			!this.#store.tryUpdateAuthCredentialIfMatches(id, expected.data, credential)
+		) {
+			const latest = this.#store.listAuthCredentials(provider);
+			this.#setStoredCredentials(
+				provider,
+				latest.map(row => ({ id: row.id, credential: row.credential })),
+			);
+			return latest.findIndex(row => row.id === id);
+		}
+		if (!expected || !this.#store.tryUpdateAuthCredentialIfMatches) {
+			this.#store.updateAuthCredential(id, credential);
+		}
 		const updated = [...entries];
 		updated[index] = { id, credential };
 		this.#setStoredCredentials(provider, updated);
@@ -2150,7 +2189,11 @@ export class AuthStorage {
 				provider,
 				rows.map(row => ({ id: row.id, credential: row.credential })),
 			);
-			const row = rows.find(entry => entry.credential.type === "oauth");
+			const row = rows.find(
+				entry =>
+					entry.credential.type === "oauth" &&
+					(options.credentialId === undefined || entry.id === options.credentialId),
+			);
 			if (row?.credential.type !== "oauth") {
 				return { credential: undefined, refreshed: false, removed: false };
 			}
@@ -2189,7 +2232,11 @@ export class AuthStorage {
 				provider,
 				rows.map(row => ({ id: row.id, credential: row.credential })),
 			);
-			const row = rows.find(entry => entry.credential.type === "oauth");
+			const row = rows.find(
+				entry =>
+					entry.credential.type === "oauth" &&
+					(options.credentialId === undefined || entry.id === options.credentialId),
+			);
 			if (row?.credential.type !== "oauth") {
 				return { credential: undefined, refreshed: false, removed: false };
 			}
@@ -2266,7 +2313,7 @@ export class AuthStorage {
 							return { credential: undefined, refreshed: false, removed: true };
 						}
 						await this.reload();
-						const latest = this.get(provider);
+						const latest = this.#getStoredCredentials(provider).find(entry => entry.id === row.id)?.credential;
 						return {
 							credential: latest?.type === "oauth" ? options.credentialFromRow(latest) : undefined,
 							refreshed: false,
@@ -2316,7 +2363,7 @@ export class AuthStorage {
 					)
 				) {
 					await this.reload();
-					const latest = this.get(provider);
+					const latest = this.#getStoredCredentials(provider).find(entry => entry.id === row.id)?.credential;
 					return {
 						credential: latest?.type === "oauth" ? options.credentialFromRow(latest) : undefined,
 						refreshed: false,
@@ -2808,37 +2855,27 @@ export class AuthStorage {
 		return match?.id;
 	}
 
-	#persistRefreshedUsageCredential(provider: Provider, previous: UsageCredential, next: UsageCredential): void {
-		const entries = this.#getStoredCredentials(provider);
-		// Same sentinel rule as #findStoredCredentialIdForUsageCredential above.
-		const previousRefresh =
-			previous.refreshToken && previous.refreshToken !== REMOTE_REFRESH_SENTINEL ? previous.refreshToken : undefined;
-		const index = entries.findIndex(entry => {
-			if (entry.credential.type !== "oauth") return false;
-			if (previousRefresh && entry.credential.refresh === previousRefresh) return true;
-			if (previous.accessToken && entry.credential.access === previous.accessToken) return true;
-			return (
-				entry.credential.accountId === previous.accountId &&
-				entry.credential.email === previous.email &&
-				entry.credential.projectId === previous.projectId &&
-				entry.credential.orgId === previous.orgId
-			);
-		});
-		if (index === -1) return;
-		const existing = entries[index]!.credential;
-		if (existing.type !== "oauth") return;
-		this.#replaceCredentialAt(provider, index, {
+	#persistRefreshedUsageCredential(
+		provider: Provider,
+		previous: UsageCredential,
+		next: UsageCredential,
+		credentialId = this.#findStoredCredentialIdForUsageCredential(provider, previous),
+	): void {
+		if (credentialId === undefined) return;
+		const entry = this.#getStoredCredentials(provider).find(candidate => candidate.id === credentialId);
+		if (entry?.credential.type !== "oauth") return;
+		this.#replaceCredentialById(provider, credentialId, {
 			type: "oauth",
-			access: next.accessToken ?? existing.access,
-			refresh: next.refreshToken ?? existing.refresh,
-			expires: next.expiresAt ?? existing.expires,
+			access: next.accessToken ?? entry.credential.access,
+			refresh: next.refreshToken ?? entry.credential.refresh,
+			expires: next.expiresAt ?? entry.credential.expires,
 			accountId: next.accountId,
 			projectId: next.projectId,
 			email: next.email,
 			enterpriseUrl: next.enterpriseUrl,
 			apiEndpoint: next.apiEndpoint,
-			orgId: next.orgId ?? existing.orgId,
-			orgName: next.orgName ?? existing.orgName,
+			orgId: next.orgId ?? entry.credential.orgId,
+			orgName: next.orgName ?? entry.credential.orgName,
 		});
 	}
 
@@ -2878,7 +2915,12 @@ export class AuthStorage {
 						timeoutSignal,
 					);
 					const refreshedCredential = this.#mergeRefreshedUsageCredential(request.credential, refreshed);
-					this.#persistRefreshedUsageCredential(request.provider, request.credential, refreshedCredential);
+					this.#persistRefreshedUsageCredential(
+						request.provider,
+						request.credential,
+						refreshedCredential,
+						refreshableCredentialId,
+					);
 					params = {
 						...request,
 						credential: refreshedCredential,
@@ -2887,46 +2929,16 @@ export class AuthStorage {
 					};
 				} catch (error) {
 					const errorMsg = String(error);
-					// Definitive failure (invalid_grant / 401 not from a network blip) means
-					// the refresh token itself is dead — probing with the original credential
-					// will 401, the catch below will return null, and #fetchUsageCached's
-					// last-good fallback will surface yesterday's report indefinitely
-					// (including its already-elapsed `resetsAt`). CAS-disable the row and
-					// clear the cache so the credential drops out of the report instead of
-					// freezing in place until the user notices and re-logs in.
-					if (AIError.isDefinitiveOAuthFailure(errorMsg)) {
-						const credentialId = this.#findStoredCredentialIdForUsageCredential(
-							request.provider,
-							request.credential,
-						);
-						if (credentialId !== undefined) {
-							const entries = this.#getStoredCredentials(request.provider);
-							const index = entries.findIndex(entry => entry.id === credentialId);
-							if (index !== -1) {
-								const disabled = this.#tryDisableCredentialAtIfMatches(
-									request.provider,
-									index,
-									refreshableCredential,
-									`oauth refresh failed during usage probe: ${errorMsg}`,
-								);
-								if (disabled) {
-									this.#usageLogger?.warn(
-										"Usage credential refresh failed definitively; credential disabled",
-										{ provider: request.provider, credentialId, error: errorMsg },
-									);
-									// Neutralize last-good for this cache key: write a null
-									// entry with an immediately-elapsed expiry so a future
-									// getStale lookup (e.g. on re-login under the same
-									// account identity) can't replay the stale report.
-									this.#usageCache.set(this.#buildUsageReportCacheKey(request), {
-										value: null,
-										expiresAt: 0,
-									});
-									return null;
-								}
-							}
-						}
+					if (request.credential.expiresAt <= Date.now() && AIError.isDefinitiveOAuthFailure(errorMsg)) {
+						// The current access token is unusable, so don't replay an
+						// old usage report after its rotating refresh token is revoked.
+						// This changes cache state only; usage polling remains
+						// non-authoritative about the credential lifecycle.
+						this.#usageCache.set(this.#buildUsageReportCacheKey(request), { value: null, expiresAt: 0 });
 					}
+					// Usage polling is advisory. A refresh can fail while the current
+					// access token remains valid inside the refresh skew, so probe with
+					// that token and never mutate credential state from this path.
 					this.#usageLogger?.debug("Usage credential refresh failed, using original credential", {
 						provider: request.provider,
 						error: errorMsg,
@@ -3219,6 +3231,29 @@ export class AuthStorage {
 				entries = dedupedEntries;
 			}
 
+			// SuperGrok billing only accepts OAuth bearers. Catalog envVars for
+			// xai-oauth are [XAI_OAUTH_TOKEN, XAI_API_KEY], so the generic path
+			// would (a) build api_key usage requests from stored keys / the paid
+			// API env var and (b) never fall through to XAI_OAUTH_TOKEN when a
+			// non-OAuth row is the only stored credential. Skip api_key material
+			// and only env-fallback to the dedicated OAuth bearer.
+			if (providerId === "xai-oauth") {
+				let hasUsableStoredOAuthCredential = false;
+				for (const entry of entries) {
+					if (entry.credential.type !== "oauth") continue;
+					const request = this.#buildUsageRequestForOauth(provider, entry.credential, baseUrl);
+					if (providerImpl.supports && !providerImpl.supports(request)) continue;
+					requests.push(request);
+					hasUsableStoredOAuthCredential = true;
+				}
+				const oauthToken = $env.XAI_OAUTH_TOKEN?.trim();
+				if (!hasUsableStoredOAuthCredential && oauthToken) {
+					const request = this.#buildUsageRequest(provider, { type: "oauth", accessToken: oauthToken }, baseUrl);
+					if (!providerImpl.supports || providerImpl.supports(request)) requests.push(request);
+				}
+				continue;
+			}
+
 			if (entries.length === 0) {
 				const runtimeKey = this.#runtimeOverrides.get(providerId);
 				const envKey = getEnvApiKey(providerId);
@@ -3275,15 +3310,14 @@ export class AuthStorage {
 		const identifiers: string[] = [];
 		const email = this.#getUsageReportMetadataValue(report, "email");
 		if (email) identifiers.push(`email:${email.toLowerCase()}`);
-		if (report.provider === "anthropic") {
-			// Anthropic: one account email can hold several organizations
-			// (Team seat + personal Max). Reports from different orgs must not
-			// merge — scope every identifier by org when the report carries one.
-			// When the email could not be recovered, fall back to the account
-			// (identical across orgs, hence the org qualifier is what keeps two
-			// subscriptions apart) so no-email reports still merge per org.
-			// Org-less reports (pre-upgrade caches) keep their bare identifiers
-			// and only merge among themselves.
+		if (report.provider === "anthropic" || report.provider === "openai-codex") {
+			// One account email can hold several org-scoped subscriptions
+			// (Anthropic organizations, ChatGPT workspaces). Reports from
+			// different orgs must not merge — scope every identifier by org
+			// when the report carries one; fall back to the account when the
+			// email could not be recovered so no-email reports still merge
+			// per org. Org-less reports (pre-upgrade caches) keep their bare
+			// identifiers and only merge among themselves.
 			if (identifiers.length === 0) {
 				const accountId =
 					this.#getUsageReportMetadataValue(report, "accountId") ?? this.#getUsageReportScopeAccountId(report);
@@ -3291,12 +3325,11 @@ export class AuthStorage {
 			}
 			const orgId = this.#getUsageReportMetadataValue(report, "orgId");
 			if (orgId) {
-				if (identifiers.length === 0) return [`anthropic:org:${orgId.toLowerCase()}`];
-				return identifiers.map(identifier => `anthropic:org:${orgId.toLowerCase()}|${identifier.toLowerCase()}`);
+				if (identifiers.length === 0) return [`${report.provider}:org:${orgId.toLowerCase()}`];
+				return identifiers.map(
+					identifier => `${report.provider}:org:${orgId.toLowerCase()}|${identifier.toLowerCase()}`,
+				);
 			}
-			return identifiers.map(identifier => `anthropic:${identifier.toLowerCase()}`);
-		}
-		if (report.provider === "openai-codex") {
 			return identifiers.map(identifier => `${report.provider}:${identifier.toLowerCase()}`);
 		}
 		const projectId =
@@ -3667,6 +3700,7 @@ export class AuthStorage {
 							row.provider as Provider,
 							initialRequest.credential,
 							refreshedCredential,
+							row.id,
 						);
 						params = {
 							...params,
@@ -3895,16 +3929,15 @@ export class AuthStorage {
 	 * how fast the window's remaining quota must be consumed to fully use it
 	 * before it resets and expires. Higher = more headroom at risk of expiring
 	 * unused = ranked first, so selection chases quota that is about to be
-	 * wasted ("use it or lose it"). Without a reset clock the headroom
-	 * fraction alone is returned, degrading to most-headroom-first.
+	 * wasted ("use it or lose it"). Without a reset clock, the full window
+	 * duration is assumed to remain so clocked and clockless scores stay comparable.
 	 */
 	#computeWindowRequiredDrain(limit: UsageLimit | undefined, nowMs: number, fallbackDurationMs: number): number {
 		const headroom = 1 - this.#normalizeUsageFraction(limit);
 		if (headroom <= 0) return 0;
 		const resetAt = this.#resolveWindowResetAt(limit?.window);
-		if (resetAt === undefined) return headroom;
 		const durationMs = limit?.window?.durationMs ?? fallbackDurationMs;
-		let remainingMs = resetAt - nowMs;
+		let remainingMs = resetAt === undefined ? durationMs : resetAt - nowMs;
 		if (Number.isFinite(durationMs) && durationMs > 0) {
 			remainingMs = Math.min(remainingMs, durationMs);
 		}
@@ -4144,16 +4177,39 @@ export class AuthStorage {
 			sessionPreferredCredential !== undefined &&
 			(sessionPreferredCredential.refresh.trim().length > 0 ||
 				Date.now() + OAUTH_REFRESH_SKEW_MS < sessionPreferredCredential.expires);
-		// Skip ranking only when the session already has a working preferred credential — re-ranking
-		// mid-session causes account switches that cold-start the server-side prompt cache. New sessions
-		// (no preference) and sessions whose preferred is blocked still rank, so we pick the account
-		// with the most headroom proactively and fall back intelligently when rate-limited.
+		// Skip ranking when the session already has a working preferred credential and its prompt
+		// cache may still be warm. Only Anthropic has a verified idle boundary here; unverified
+		// providers retain indefinite stickiness rather than risk switching while their prompt cache
+		// remains warm. New Anthropic sessions (no preference), sessions whose preferred is blocked,
+		// and sessions idle past {@link ANTHROPIC_SESSION_STICKY_CACHE_WARM_MS} still rank. Legacy
+		// pins predating `lastUsedAtMs` count as warm until the next resolve rewrites the row.
+		const sessionPreferredLastUsedAtMs =
+			sessionCredential?.type === "oauth" ? sessionCredential.lastUsedAtMs : undefined;
+		const sessionPreferredIsWarm =
+			provider !== "anthropic" ||
+			sessionPreferredLastUsedAtMs === undefined ||
+			Date.now() - sessionPreferredLastUsedAtMs < ANTHROPIC_SESSION_STICKY_CACHE_WARM_MS;
 		const sessionPreferredIsAvailable =
 			sessionPreferredIndex !== undefined &&
 			sessionPreferredCanRefreshOrUse &&
 			!this.#isCredentialBlocked(provider, providerKey, sessionPreferredIndex, blockScope);
-		const shouldRank = checkUsage && (!sessionPreferredIsAvailable || hasPlanRequirement);
-		const rankingOrder = shouldRank && sessionId ? credentials.map((_credential, index) => index) : order;
+		const shouldRank = checkUsage && (!sessionPreferredIsAvailable || !sessionPreferredIsWarm || hasPlanRequirement);
+		// When ranking, seed the pinned credential first in the evaluation order so it wins genuine
+		// ties (the ranked comparator falls back to `orderPos`) without overriding a strictly-better
+		// sibling — this respects the residual value of a same-account shared static prefix that other
+		// workspace traffic may have kept warm, while still rotating away from a clearly-worse account.
+		const baseRankingOrder = credentials.map((_credential, index) => index);
+		let rankingOrder = shouldRank && sessionId ? baseRankingOrder : order;
+		const sessionPreferredRankingPos =
+			shouldRank && sessionId && sessionPreferredIndex !== undefined && !hasPlanRequirement
+				? credentials.findIndex(entry => entry.index === sessionPreferredIndex)
+				: -1;
+		if (sessionPreferredRankingPos > 0) {
+			rankingOrder = [
+				sessionPreferredRankingPos,
+				...baseRankingOrder.filter(index => index !== sessionPreferredRankingPos),
+			];
+		}
 		const candidates = shouldRank
 			? await this.#rankOAuthSelections({
 					providerKey,
@@ -4171,7 +4227,10 @@ export class AuthStorage {
 					.filter((selection): selection is { credential: OAuthCredential; index: number } => Boolean(selection))
 					.map(selection => ({ selection, usage: null, usageChecked: false }));
 
-		if (sessionPreferredIndex !== undefined && !hasPlanRequirement) {
+		// On the warm skip path the candidate list follows the round-robin `order`, not the pin, so
+		// hoist the pinned credential to the front to actually reuse it. When ranking ran, the pin is
+		// already a mere tie-break via `rankingOrder`; do not override the ranked result here.
+		if (!shouldRank && sessionPreferredIndex !== undefined && !hasPlanRequirement) {
 			const sessionPreferredCandidate = candidates.findIndex(
 				candidate =>
 					!this.#isCredentialBlocked(provider, providerKey, candidate.selection.index, blockScope) &&
@@ -4258,6 +4317,29 @@ export class AuthStorage {
 			hasPlanRequirement &&
 			candidates.some(candidate => getOpenAICodexPlanEligibility(candidate.usage, planRequirement) === true);
 
+		// Plan-gated Codex models rank on every resolve to re-verify account tiers,
+		// so the drain-urgency order can flip between two eligible accounts as their
+		// usage headroom shifts. Promote the session-preferred credential back to the
+		// front while it is unblocked and still plan-eligible (or the requirement is
+		// unenforced and the pin is not known-ineligible) so an active session never
+		// silently migrates accounts mid-conversation; blocked, exhausted, or
+		// known-ineligible pins still fall through to the ranked sibling.
+		if (hasPlanRequirement && sessionPreferredIndex !== undefined) {
+			const sessionPreferredCandidate = candidates.findIndex(
+				candidate =>
+					!this.#isCredentialBlocked(provider, providerKey, candidate.selection.index, blockScope) &&
+					candidate.selection.index === sessionPreferredIndex,
+			);
+			if (sessionPreferredCandidate > 0) {
+				const preferred = candidates[sessionPreferredCandidate]!;
+				const planEligibility = getOpenAICodexPlanEligibility(preferred.usage, planRequirement);
+				if (planEligibility === true || (!enforcePlanRequirement && planEligibility !== false)) {
+					candidates.splice(sessionPreferredCandidate, 1);
+					candidates.unshift(preferred);
+				}
+			}
+		}
+
 		const passes: Array<{ allowBlocked: boolean; enforcePlanRequirement: boolean }> = [
 			{ allowBlocked: false, enforcePlanRequirement },
 			{ allowBlocked: true, enforcePlanRequirement },
@@ -4318,6 +4400,42 @@ export class AuthStorage {
 		credentialId: number | undefined,
 		signal?: AbortSignal,
 	): Promise<OAuthCredentials> {
+		const hasDurableLease =
+			!!this.#store.tryAcquireCredentialRefreshLease &&
+			!!this.#store.getCredentialRefreshLeaseExpiresAt &&
+			!!this.#store.releaseCredentialRefreshLease &&
+			!!this.#store.renewCredentialRefreshLease;
+		if (credentialId !== undefined && hasDurableLease) {
+			const forceRefresh = credential.expires === 0;
+			const result = await this.refreshStoredOAuthCredential(provider, {
+				credentialId,
+				observedCredential: forceRefresh ? undefined : credential,
+				credentialFromRow: row => row,
+				forceRefresh,
+				signal,
+				refresh: (current, refreshSignal) =>
+					this.#requestOAuthCredentialRefresh(
+						provider,
+						current,
+						credentialId,
+						signal && refreshSignal ? AbortSignal.any([signal, refreshSignal]) : (signal ?? refreshSignal),
+					),
+			});
+			if (result.credential) return result.credential;
+			throw new AIError.OAuthError(`OAuth credential no longer exists for provider: ${provider}`, {
+				kind: "token-refresh",
+				provider,
+			});
+		}
+		return this.#requestOAuthCredentialRefresh(provider, credential, credentialId, signal);
+	}
+
+	async #requestOAuthCredentialRefresh(
+		provider: Provider,
+		credential: OAuthCredential,
+		credentialId: number | undefined,
+		signal?: AbortSignal,
+	): Promise<OAuthCredentials> {
 		let refreshPromise: Promise<OAuthCredentials>;
 		// Caller override > store-level hook > local per-provider refresh.
 		// `RemoteAuthCredentialStore` exposes the hook so a broker-backed gateway
@@ -4343,10 +4461,9 @@ export class AuthStorage {
 		// Bound the refresh so a slow/hanging token endpoint cannot stall credential selection.
 		// Caller-driven abort jumps the gun on the timeout — the agent's ESC must
 		// take priority over the floor timeout.
-		let timeout: NodeJS.Timeout | undefined;
-		let onAbort: (() => void) | undefined;
 		const cancellation = Promise.withResolvers<never>();
-		timeout = setTimeout(
+		let onAbort: (() => void) | undefined;
+		const timeout = setTimeout(
 			() =>
 				cancellation.reject(
 					new AIError.OAuthError(`OAuth token refresh timed out for provider: ${provider}`, {
@@ -4367,7 +4484,7 @@ export class AuthStorage {
 		try {
 			return await Promise.race([refreshPromise, cancellation.promise]);
 		} finally {
-			if (timeout) clearTimeout(timeout);
+			clearTimeout(timeout);
 			if (signal && onAbort) signal.removeEventListener("abort", onAbort);
 		}
 	}
@@ -5202,9 +5319,15 @@ export class AuthStorage {
 			if (credential.type !== "oauth") continue;
 			const credentialEmail = credential.email?.trim().toLowerCase();
 			const credentialAccountId = credential.accountId?.trim().toLowerCase();
-			if ((email && credentialEmail === email) || (accountId && credentialAccountId === accountId)) {
-				matches.push(entry.id);
-			}
+			// Every identity dimension present on BOTH sides must agree — the
+			// account id is shared workspace-wide and one email can span
+			// workspaces, so a single-dimension match can cross-link siblings.
+			const emailComparable = Boolean(email && credentialEmail);
+			const accountComparable = Boolean(accountId && credentialAccountId);
+			if (!emailComparable && !accountComparable) continue;
+			if (emailComparable && credentialEmail !== email) continue;
+			if (accountComparable && credentialAccountId !== accountId) continue;
+			matches.push(entry.id);
 		}
 		return matches;
 	}
@@ -5358,6 +5481,21 @@ export class AuthStorage {
 			sessionCredential.index,
 			Date.now() + AuthStorage.#defaultBackoffMs,
 		);
+
+		if (target && AIError.isInvalidatedOAuthTokenError(error)) {
+			const disabledCause = message ?? "upstream reported invalidated OAuth token";
+			const deleted = this.#store.deleteAuthCredentialRemote
+				? await this.#store.deleteAuthCredentialRemote(target.id, disabledCause)
+				: this.disableCredentialById(target.id, disabledCause);
+			if (deleted) {
+				const latestRows = this.#store.listAuthCredentials(provider);
+				this.#setStoredCredentials(
+					provider,
+					latestRows.map(row => ({ id: row.id, credential: row.credential })),
+				);
+			}
+			return deleted && hasSibling;
+		}
 
 		if (target) {
 			const markSuspect = this.#store.markCredentialSuspect?.bind(this.#store);
@@ -5799,16 +5937,15 @@ function toStoredAuthCredential(row: AuthRow, credential: AuthCredential): Store
 
 function resolveProviderCredentialIdentityKey(provider: string, identifiers: string[]): string | null {
 	const emailIdentifier = identifiers.find(identifier => identifier.startsWith("email:"));
-	if (provider === "anthropic") {
-		// One Anthropic account email can hold several organizations (e.g. a
-		// Team seat plus a personal Max plan), each with its own org-scoped
-		// token and limit pools. Scope identity by org so both subscriptions
-		// can be stored side by side. The qualifier rides on whichever base
-		// identity is available — the account UUID is IDENTICAL across the
-		// orgs of one login account, so an unqualified account/project
-		// fallback would still collapse two subscriptions whenever the email
-		// could not be recovered. Org-less credentials (rows written before
-		// org capture existed) keep their bare key.
+	if (provider === "anthropic" || provider === "openai-codex") {
+		// One account email can hold several organizations/workspaces (e.g. a
+		// Team seat plus a personal plan), each with its own org-scoped token
+		// and limit pools. Scope identity by org so both subscriptions can be
+		// stored side by side. The qualifier rides on whichever base identity
+		// is available, so an unqualified account/project fallback would
+		// still collapse two subscriptions whenever the email could not be
+		// recovered. Org-less credentials (rows written before org capture
+		// existed) keep their bare key.
 		const base =
 			emailIdentifier ??
 			identifiers.find(identifier => identifier.startsWith("account:")) ??
@@ -5818,7 +5955,6 @@ function resolveProviderCredentialIdentityKey(provider: string, identifiers: str
 		// No base identity at all: the org alone still distinguishes the row.
 		return orgIdentifier ?? null;
 	}
-	if (provider === "openai-codex" && emailIdentifier) return emailIdentifier;
 	const accountIdentifier = identifiers.find(identifier => identifier.startsWith("account:"));
 	if (accountIdentifier) return accountIdentifier;
 	if (emailIdentifier) return emailIdentifier;
@@ -5855,9 +5991,9 @@ function matchesReplacementCredential(
 	if (incomingIdentityKey === existingIdentityKey) return true;
 	if (existingIdentityKey === null) return false;
 	// One-way upgrade, applied only when the INCOMING identity key carries the
-	// org qualifier (only anthropic keys do, so other providers never reach the
-	// checks below). An org-scoped login `org:<o>` claims (and re-keys) any
-	// existing row that denotes the same subscription:
+	// org qualifier (only anthropic and openai-codex keys do, so other
+	// providers never reach the checks below). An org-scoped login `org:<o>`
+	// claims (and re-keys) any existing row that denotes the same subscription:
 	//   - `org:<o>` — org-only row stored when identity recovery failed, claimed
 	//     once a later same-org login recovers a base identity;
 	//   - `<b>` for any base identity `<b>` (email/account/project) the incoming
@@ -5881,10 +6017,16 @@ function matchesReplacementCredential(
 		existing.type === "oauth" && existingIdentityKey.endsWith(`|${orgIdentifier}`)
 			? extractOAuthCredentialIdentifiers(existing)
 			: null;
+	// A base identifier that merely repeats the org qualifier's id carries no
+	// per-user identity (openai-codex stores the ChatGPT workspace id as both
+	// accountId and orgId, shared by every member) — letting it act as a
+	// claimable base would re-key another member's same-org row.
+	const orgQualifierId = orgIdentifier.slice("org:".length);
 	for (const identifier of incomingIdentifiers) {
 		const isBase =
 			identifier.startsWith("email:") || identifier.startsWith("account:") || identifier.startsWith("project:");
 		if (!isBase) continue;
+		if (identifier.slice(identifier.indexOf(":") + 1) === orgQualifierId) continue;
 		if (existingIdentityKey === identifier) return true;
 		if (existingIdentityKey === `${identifier}|${orgIdentifier}`) return true;
 		if (existingIdentifiers?.includes(identifier)) return true;

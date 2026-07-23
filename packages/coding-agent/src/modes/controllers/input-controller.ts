@@ -35,7 +35,6 @@ import { EnhancedPasteController } from "../../utils/enhanced-paste";
 import { getEditorCommand, openInEditor } from "../../utils/external-editor";
 import { ensureSupportedImageInput, ImageInputTooLargeError, loadImageInput } from "../../utils/image-loading";
 import { resizeImage } from "../../utils/image-resize";
-import { generateSessionTitle } from "../../utils/title-generator";
 
 /**
  * Slash commands that may carry secrets in their arguments should never be
@@ -173,6 +172,7 @@ export class InputController {
 
 	#enhancedPaste?: EnhancedPasteController;
 	#focusedLeftTapListenerInstalled = false;
+	#focusedPasteListenerInstalled = false;
 	#btwBranchListenerInstalled = false;
 	#btwCopyListenerInstalled = false;
 	// Tap counter for the double-← gesture; reset whenever a quiet gap
@@ -266,6 +266,16 @@ export class InputController {
 				return { consume: true };
 			});
 		}
+		if (!this.#focusedPasteListenerInstalled) {
+			this.#focusedPasteListenerInstalled = true;
+			this.ctx.ui.addInputListener(data => {
+				const focused = this.ctx.ui.getFocused();
+				if (!focused || focused === this.ctx.editor || !hasPasteText(focused)) return undefined;
+				if (!this.ctx.keybindings.matches(data, "app.clipboard.pasteImage")) return undefined;
+				void this.handleImagePaste();
+				return { consume: true };
+			});
+		}
 		this.ctx.editor.onEscape = () => {
 			// Side-channel panels are the topmost view. Esc dismisses them before
 			// touching loop mode, maintenance, or the underlying main turn.
@@ -307,6 +317,14 @@ export class InputController {
 					aborted = true;
 				}
 				if (aborted) return;
+			}
+
+			if (vocalizer.isSpeaking()) {
+				// Playback from the completed response can overlap the next agent
+				// turn. Silence it before interrupting any ongoing main-turn work.
+				vocalizer.clear();
+				this.ctx.lastEscapeTime = 0;
+				return;
 			}
 
 			if (this.ctx.loopModeEnabled) {
@@ -361,13 +379,6 @@ export class InputController {
 			} else if (this.ctx.editor.getText().trim()) {
 				// Esc must not destroy an in-progress draft.
 				this.ctx.lastEscapeTime = 0;
-			} else if (vocalizer.isSpeaking()) {
-				// TTS buffers seconds of PCM past the streaming abort, so an Esc
-				// arriving after the model stopped would otherwise fall through to
-				// the double-Esc gesture while Kokoro reads on. Silence first;
-				// tree/branch stays reachable via a second Esc.
-				vocalizer.clear();
-				this.ctx.lastEscapeTime = 0;
 			} else {
 				// Double-interrupt with empty editor triggers /tree, /branch, or nothing based on setting
 				const action = settings.get("doubleEscapeAction");
@@ -392,7 +403,16 @@ export class InputController {
 		this.ctx.editor.onClear = () => this.handleCtrlC();
 		this.ctx.editor.setActionKeys("app.exit", this.ctx.keybindings.getKeys("app.exit"));
 		this.ctx.editor.setActionKeys("app.display.reset", this.ctx.keybindings.getKeys("app.display.reset"));
-		this.ctx.editor.onDisplayReset = () => this.ctx.ui.resetDisplay();
+		this.ctx.editor.onDisplayReset = () => {
+			// Explicit user gesture (Ctrl+L): re-query the terminal background once
+			// so a mid-session light/dark switch is picked up even on terminals
+			// without an end-to-end Mode 2031 notification path (#5352). The
+			// appearance callback re-evaluates the auto theme; the repaint below
+			// then renders the resolved palette. Bounded to one OSC 11 probe per
+			// gesture — no timers, no periodic polling.
+			this.ctx.ui.terminal.refreshAppearance?.();
+			this.ctx.ui.resetDisplay();
+		};
 		this.ctx.editor.onExit = () => this.handleCtrlD();
 		this.ctx.editor.setActionKeys("app.suspend", this.ctx.keybindings.getKeys("app.suspend"));
 		this.ctx.editor.onSuspend = () => this.handleCtrlZ();
@@ -763,7 +783,7 @@ export class InputController {
 			// While loop mode is on, every user-typed prompt becomes the new loop
 			// prompt that auto-resubmits after each yield.
 			if (this.ctx.loopModeEnabled) {
-				this.ctx.loopPrompt = text;
+				this.ctx.setLoopPrompt(text);
 			}
 
 			// Queue input during compaction
@@ -814,23 +834,28 @@ export class InputController {
 			// First, move any pending bash components to chat
 			this.ctx.flushPendingBashComponents();
 
+			// AgentSession.prompt() consumes registered extension commands locally.
+			// Classify them here because title generation starts before prompt dispatch.
+			const extensionCommandSpace = text.indexOf(" ");
+			const isLocalExtensionCommand =
+				text.startsWith("/") &&
+				runner?.getCommand(extensionCommandSpace === -1 ? text.slice(1) : text.slice(1, extensionCommandSpace)) !==
+					undefined;
+
 			// Auto-generate a session title while the session is still unnamed.
 			// Greetings / acknowledgements / empty input carry no task, so they are
 			// skipped deterministically (no model invoked, no download-progress UI)
 			// and the session stays unnamed — the next user message gets a fresh
 			// chance, so titling defers past "hi" instead of latching onto it.
-			if (!this.ctx.sessionManager.getSessionName() && !$env.PI_NO_TITLE && !isLowSignalTitleInput(text)) {
+			if (
+				!isLocalExtensionCommand &&
+				!this.ctx.sessionManager.getSessionName() &&
+				!$env.PI_NO_TITLE &&
+				!isLowSignalTitleInput(text)
+			) {
 				this.#showTinyTitleDownloadProgress(this.ctx.settings.get("providers.tinyModel"));
-				const registry = this.ctx.session.modelRegistry;
-				generateSessionTitle(
-					text,
-					registry,
-					this.ctx.settings,
-					this.ctx.session.sessionId,
-					this.ctx.session.model,
-					provider => this.ctx.session.agent.metadataForProvider(provider),
-					this.ctx.session.titleSystemPrompt,
-				)
+				this.ctx.session
+					.generateTitle(text)
 					.then(async title => {
 						// Re-check: a concurrent attempt for an earlier message may have
 						// already named the session. Don't clobber it. Terminal title and
@@ -1558,8 +1583,19 @@ export class InputController {
 
 	async handleImagePaste(): Promise<boolean> {
 		try {
+			// When a modal paste-capable prompt (login/API-key Input) owns focus,
+			// only clipboard text may land there. Image payloads must not mutate
+			// the hidden main editor — mirror the enhanced-paste `pasteImage`
+			// behavior and surface the unsupported-status instead (#6057).
+			const focusedNow = this.ctx.ui.getFocused();
+			const promptTarget =
+				focusedNow && focusedNow !== this.ctx.editor && hasPasteText(focusedNow) ? focusedNow : null;
 			const image = await this.clipboard.readImage();
 			if (image) {
+				if (promptTarget) {
+					this.ctx.showStatus("Image paste is not supported in this prompt");
+					return false;
+				}
 				return await this.#normalizeAndInsertPastedImage(
 					{
 						type: "image",
@@ -1581,7 +1617,7 @@ export class InputController {
 			// selections must not silently drop after the first attach.
 			// `readMacFileUrls` returns an empty list off Darwin, so the
 			// check is free on every other platform.
-			const fileUrls = (await this.clipboard.readMacFileUrls?.()) ?? [];
+			const fileUrls = promptTarget ? [] : ((await this.clipboard.readMacFileUrls?.()) ?? []);
 			let attachedFromFileUrls = false;
 			for (const url of fileUrls) {
 				const candidate = extractImagePathFromText(url);
@@ -1606,15 +1642,14 @@ export class InputController {
 			// text. Covers terminals that paste the Finder file path as
 			// plain text rather than as a `public.file-url` (most macOS
 			// terminals do this for image clipboards).
-			const imagePath = extractImagePathFromText(text);
+			const imagePath = promptTarget ? null : extractImagePathFromText(text);
 			if (imagePath) {
 				await this.handleImagePathPaste(imagePath);
 				return true;
 			}
 			// Route to the focused component when it accepts pastes (modal
 			// Input prompts), matching the enhanced-paste text path (#2127).
-			const focused = this.ctx.ui.getFocused();
-			const target = focused && focused !== this.ctx.editor && hasPasteText(focused) ? focused : this.ctx.editor;
+			const target = promptTarget ?? this.ctx.editor;
 			target.pasteText(text);
 			this.ctx.ui.requestRender();
 			return true;

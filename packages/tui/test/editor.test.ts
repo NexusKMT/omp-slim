@@ -293,9 +293,12 @@ describe("Editor component", () => {
 	});
 
 	describe("autocomplete triggers", () => {
-		it("triggers slash-command autocomplete when typing slash", async () => {
+		it("triggers slash-command autocomplete without losing the hardware cursor anchor", async () => {
 			const editor = new Editor(defaultEditorTheme);
+			editor.focused = true;
+			editor.setUseTerminalCursor(true);
 			const { promise, resolve } = Promise.withResolvers<string>();
+			const { promise: autocompleteUpdated, resolve: resolveAutocompleteUpdated } = Promise.withResolvers<void>();
 
 			editor.setAutocompleteProvider({
 				async getSuggestions(lines, cursorLine, cursorCol) {
@@ -307,23 +310,23 @@ describe("Editor component", () => {
 					return { lines, cursorLine, cursorCol };
 				},
 			});
+			editor.onAutocompleteUpdate = resolveAutocompleteUpdated;
 
 			editor.handleInput("/");
 
 			await expect(promise).resolves.toBe("/");
+			await autocompleteUpdated;
+			expect(editor.isShowingAutocomplete()).toBe(true);
+			expect(editor.render(80).some(line => line.includes(CURSOR_MARKER))).toBe(true);
 		});
 
-		it("renders slash-command suggestions as compact item rows", async () => {
+		it("wraps long slash-command descriptions instead of dropping the tail", async () => {
 			const editor = new Editor(defaultEditorTheme);
-			editor.setAutocompleteMaxVisible(10);
 			const longDescription =
-				"Plan and execute non-trivial architectural improvements to the codebase without turning each slash command into a multi-line block.";
+				"Plan and execute non-trivial architectural improvements to the codebase. Use this skill when you need to refactor existing systems.";
 			editor.setAutocompleteProvider(
 				new CombinedAutocompleteProvider(
-					Array.from({ length: 12 }, (_, i) => ({
-						name: `cmd${i}`,
-						description: longDescription,
-					})),
+					[{ name: "improve-codebase-architecture", description: longDescription }],
 					"/tmp",
 				),
 			);
@@ -335,10 +338,8 @@ describe("Editor component", () => {
 			await autocompleteUpdated;
 
 			const rendered = editor.render(80).map(line => stripVTControlCharacters(line));
-			for (let i = 0; i < 10; i += 1) {
-				expect(rendered.some(line => line.includes(`cmd${i}`))).toBe(true);
-			}
-			expect(rendered.some(line => line.includes("cmd10"))).toBe(false);
+			expect(rendered.some(line => line.includes("improve-codebase-architecture"))).toBe(true);
+			expect(rendered.join("\n")).toContain("refactor existing systems.");
 		});
 
 		it("triggers file-reference autocomplete when typing at-sign", async () => {

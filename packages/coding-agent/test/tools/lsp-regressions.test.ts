@@ -3,6 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentToolResult, RenderResultOptions } from "@oh-my-pi/pi-agent-core";
+import { arkToWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { preloadPluginRoots } from "@oh-my-pi/pi-coding-agent/discovery/helpers";
 import { LspTool } from "@oh-my-pi/pi-coding-agent/lsp";
 import * as lspClient from "@oh-my-pi/pi-coding-agent/lsp/client";
@@ -14,18 +16,19 @@ import {
 	sortAndValidateTextEdits,
 } from "@oh-my-pi/pi-coding-agent/lsp/edits";
 import { renderCall, renderResult } from "@oh-my-pi/pi-coding-agent/lsp/render";
-import type {
-	CodeAction,
-	CreateFile,
-	DeleteFile,
-	Diagnostic,
-	LspClient,
-	LspToolDetails,
-	RenameFile,
-	ServerConfig,
-	SymbolInformation,
-	TextDocumentEdit,
-	WorkspaceEdit,
+import {
+	type CodeAction,
+	type CreateFile,
+	type DeleteFile,
+	type Diagnostic,
+	type LspClient,
+	type LspToolDetails,
+	lspSchema,
+	type RenameFile,
+	type ServerConfig,
+	type SymbolInformation,
+	type TextDocumentEdit,
+	type WorkspaceEdit,
 } from "@oh-my-pi/pi-coding-agent/lsp/types";
 import {
 	applyCodeAction,
@@ -47,6 +50,11 @@ import { sanitizeText, TempDir } from "@oh-my-pi/pi-utils";
 import type { Subprocess } from "bun";
 import DEFAULTS from "../../src/lsp/defaults.json" with { type: "json" };
 import { getLanguageFromPath } from "../../src/utils/lang-from-path";
+
+/** Minimal LSP tool session: production always supplies `settings`; these tests only need cwd + a default settings stub. */
+function makeLspSession(cwd: string): ToolSession {
+	return { cwd, settings: Settings.isolated() } as ToolSession;
+}
 
 interface RpcMessage {
 	jsonrpc?: string;
@@ -253,10 +261,20 @@ describe("lsp regressions", () => {
 		expect(hasGlobPattern("src/main.ts")).toBe(false);
 	});
 
-	it("clamps LSP timeout to configured bounds", () => {
+	it("supports long LSP timeouts up to the advertised ceiling", () => {
 		expect(clampTimeout("lsp")).toBe(20);
 		expect(clampTimeout("lsp", 1)).toBe(5);
-		expect(clampTimeout("lsp", 1000)).toBe(60);
+		expect(clampTimeout("lsp", 120)).toBe(120);
+		expect(clampTimeout("lsp", 1000)).toBe(300);
+		expect(arkToWireSchema(lspSchema)).toMatchObject({
+			properties: {
+				timeout: {
+					description: "Timeout in seconds (default 20; range 5–300).",
+					maximum: 300,
+					minimum: 5,
+				},
+			},
+		});
 	});
 
 	it("sends the LSP exit notification after shutdown completes", async () => {
@@ -292,6 +310,83 @@ describe("lsp regressions", () => {
 			expect(exitIndex).toBeGreaterThan(shutdownIndex);
 			expect(server.killed).toBe(false);
 		} finally {
+			await lspClient.shutdownAll();
+			tempDir.removeSync();
+		}
+	});
+
+	it("returns an already-starting client without creating a second client", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-pending-client-");
+		const initialize = Promise.withResolvers<void>();
+		try {
+			const server = installFakeLsp(async (message, srv) => {
+				if (message.method === "initialize") {
+					await initialize.promise;
+					srv.send({ jsonrpc: "2.0", id: message.id, result: { capabilities: {} } });
+				} else if (message.method === "shutdown") {
+					srv.send({ jsonrpc: "2.0", id: message.id, result: null });
+				} else if (message.method === "exit") {
+					srv.exit(0);
+				}
+			});
+			const config: ServerConfig = {
+				command: "fake-pending-lsp",
+				fileTypes: ["ts"],
+				rootMarkers: [],
+			};
+
+			const startingClient = lspClient.getOrCreateClient(config, tempDir.path(), 1_000);
+			await server.waitFor(message => message.method === "initialize");
+			const existingClient = lspClient.getActiveOrPendingClient(config, tempDir.path());
+			let settled = false;
+			void existingClient.then(() => {
+				settled = true;
+			});
+			await Bun.sleep(0);
+			expect(settled).toBe(false);
+
+			initialize.resolve();
+			expect(await existingClient).toBe(await startingClient);
+			expect(server.received.filter(message => message.method === "initialize")).toHaveLength(1);
+		} finally {
+			initialize.resolve();
+			await lspClient.shutdownAll();
+			tempDir.removeSync();
+		}
+	});
+
+	it("stops waiting for a pending client on caller abort without cancelling its initialization", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-pending-abort-");
+		const initialize = Promise.withResolvers<void>();
+		try {
+			const server = installFakeLsp(async (message, srv) => {
+				if (message.method === "initialize") {
+					await initialize.promise;
+					srv.send({ jsonrpc: "2.0", id: message.id, result: { capabilities: {} } });
+				} else if (message.method === "shutdown") {
+					srv.send({ jsonrpc: "2.0", id: message.id, result: null });
+				} else if (message.method === "exit") {
+					srv.exit(0);
+				}
+			});
+			const config: ServerConfig = {
+				command: "fake-abort-pending-lsp",
+				fileTypes: ["ts"],
+				rootMarkers: [],
+			};
+
+			const startingClient = lspClient.getOrCreateClient(config, tempDir.path(), 1_000);
+			await server.waitFor(message => message.method === "initialize");
+			const controller = new AbortController();
+			const waitingClient = lspClient.getActiveOrPendingClient(config, tempDir.path(), controller.signal);
+			controller.abort();
+			await expect(waitingClient).rejects.toThrow();
+
+			initialize.resolve();
+			expect(await startingClient).toBeDefined();
+			expect(server.received.filter(message => message.method === "initialize")).toHaveLength(1);
+		} finally {
+			initialize.resolve();
 			await lspClient.shutdownAll();
 			tempDir.removeSync();
 		}
@@ -423,6 +518,103 @@ describe("lsp regressions", () => {
 				"textDocument/hover",
 			]);
 			expect(server.received[2].params).toEqual({ settings: config.settings });
+		} finally {
+			await lspClient.shutdownAll();
+			tempDir.removeSync();
+		}
+	});
+
+	it("answers missing workspace configuration sections with null in request order", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-configuration-null-");
+		try {
+			const server = installFakeLsp((message, srv) => {
+				if (message.method === "initialize") {
+					srv.send({ jsonrpc: "2.0", id: message.id, result: { capabilities: {} } });
+				} else if (message.method === "initialized") {
+					srv.send({
+						jsonrpc: "2.0",
+						id: 5745,
+						method: "workspace/configuration",
+						params: {
+							items: [
+								{ section: "razor.format.attribute_indent_style" },
+								{ section: "html.auto_closing_tags" },
+								{},
+							],
+						},
+					});
+				} else if (message.method === "shutdown") {
+					srv.send({ jsonrpc: "2.0", id: message.id, result: null });
+				} else if (message.method === "exit") {
+					srv.exit(0);
+				}
+			});
+			const config: ServerConfig = {
+				command: "fake-lsp",
+				fileTypes: ["cs"],
+				rootMarkers: [],
+				settings: { "html.auto_closing_tags": true },
+			};
+
+			await lspClient.getOrCreateClient(config, tempDir.path(), 1_000);
+			const response = await server.waitFor(message => message.id === 5745 && message.method === undefined);
+
+			expect(response.result).toEqual([null, true, null]);
+		} finally {
+			await lspClient.shutdownAll();
+			tempDir.removeSync();
+		}
+	});
+
+	it("keeps the session alive when configuration is pulled after didChangeConfiguration", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-configuration-session-");
+		let configurationAccepted = false;
+		try {
+			const server = installFakeLsp((message, srv) => {
+				if (message.method === "initialize") {
+					srv.send({ jsonrpc: "2.0", id: message.id, result: { capabilities: { hoverProvider: true } } });
+				} else if (message.method === "workspace/didChangeConfiguration") {
+					srv.send({
+						jsonrpc: "2.0",
+						id: "roslyn-config",
+						method: "workspace/configuration",
+						params: { items: [{ section: "razor.format.attribute_indent_style" }] },
+					});
+				} else if (message.id === "roslyn-config" && message.method === undefined) {
+					if (Array.isArray(message.result) && message.result[0] === null) {
+						configurationAccepted = true;
+					} else {
+						srv.exit(-6);
+					}
+				} else if (message.method === "textDocument/hover" && configurationAccepted) {
+					srv.send({ jsonrpc: "2.0", id: message.id, result: { contents: "string C.Target" } });
+				} else if (message.method === "shutdown") {
+					srv.send({ jsonrpc: "2.0", id: message.id, result: null });
+				} else if (message.method === "exit") {
+					srv.exit(0);
+				}
+			});
+			const config: ServerConfig = {
+				command: "fake-lsp",
+				fileTypes: ["cs"],
+				rootMarkers: [],
+			};
+
+			const client = await lspClient.getOrCreateClient(config, tempDir.path(), 1_000);
+			await server.waitFor(message => message.id === "roslyn-config" && message.method === undefined);
+			const result = await lspClient.sendRequest(
+				client,
+				"textDocument/hover",
+				{
+					textDocument: { uri: fileToUri(path.join(tempDir.path(), "Target.cs")) },
+					position: { line: 0, character: 6 },
+				},
+				undefined,
+				50,
+			);
+
+			expect(result).toEqual({ contents: "string C.Target" });
+			expect(configurationAccepted).toBe(true);
 		} finally {
 			await lspClient.shutdownAll();
 			tempDir.removeSync();
@@ -741,7 +933,7 @@ describe("lsp regressions", () => {
 			});
 			vi.spyOn(lspConfig, "getServersForFile").mockReturnValue([["rust-analyzer", server]]);
 
-			const tool = new LspTool({ cwd: tempDir.path() } as ToolSession);
+			const tool = new LspTool(makeLspSession(tempDir.path()));
 			const result = await tool.execute("rust-wait-test", {
 				action: "definition",
 				file: sourcePath,
@@ -810,7 +1002,7 @@ describe("lsp regressions", () => {
 			});
 			vi.spyOn(lspConfig, "getServersForFile").mockReturnValue([["rust-analyzer", server]]);
 
-			const tool = new LspTool({ cwd: tempDir.path() } as ToolSession);
+			const tool = new LspTool(makeLspSession(tempDir.path()));
 			const result = await tool.execute("rust-standalone-test", {
 				action: "definition",
 				file: sourcePath,
@@ -1087,6 +1279,103 @@ describe("lsp regressions", () => {
 		expect(resultText.replace(/\s+/g, " ")).toContain("too many arguments in call");
 	});
 
+	for (const dynamicRegistration of [false, true]) {
+		it(`reports pull diagnostics advertised through ${dynamicRegistration ? "dynamic registration" : "server capabilities"}`, async () => {
+			const tempDir = TempDir.createSync("@omp-lsp-pull-diags-");
+			try {
+				const targetFile = path.join(tempDir.path(), "target.ts");
+				await Bun.write(targetFile, "const broken: string = 42;\n");
+				const diagnostic: Diagnostic = {
+					message: "Type 'number' is not assignable to type 'string'.",
+					severity: 1,
+					code: 2322,
+					source: "ts",
+					range: {
+						start: { line: 0, character: 6 },
+						end: { line: 0, character: 12 },
+					},
+				};
+
+				const fakeServer = installFakeLsp((message, server) => {
+					if (message.method === "initialize") {
+						server.send({
+							jsonrpc: "2.0",
+							id: message.id,
+							result: { capabilities: dynamicRegistration ? {} : { diagnosticProvider: true } },
+						});
+						server.send({
+							jsonrpc: "2.0",
+							method: "$/progress",
+							params: { token: "workspace", value: { kind: "begin" } },
+						});
+						server.send({
+							jsonrpc: "2.0",
+							method: "$/progress",
+							params: { token: "workspace", value: { kind: "end" } },
+						});
+					} else if (dynamicRegistration && message.method === "initialized") {
+						server.send({
+							jsonrpc: "2.0",
+							id: "register-diagnostics",
+							method: "client/registerCapability",
+							params: {
+								registrations: [
+									{
+										id: "pull-diagnostics",
+										method: "textDocument/diagnostic",
+										registerOptions: {},
+									},
+								],
+							},
+						});
+					} else if (message.method === "textDocument/diagnostic") {
+						server.send({
+							jsonrpc: "2.0",
+							id: message.id,
+							result: { kind: "full", items: [diagnostic] },
+						});
+					} else if (message.method === "shutdown") {
+						server.send({ jsonrpc: "2.0", id: message.id, result: null });
+					} else if (message.method === "exit") {
+						server.exit(0);
+					}
+				});
+
+				const serverConfig: ServerConfig = {
+					command: "fake-lsp",
+					fileTypes: ["ts"],
+					rootMarkers: [],
+				};
+				vi.spyOn(lspConfig, "loadConfig").mockReturnValue({
+					servers: { "fake-lsp": serverConfig },
+					idleTimeoutMs: undefined,
+				});
+				vi.spyOn(lspConfig, "getServersForFile").mockReturnValue([["fake-lsp", serverConfig]]);
+
+				const tool = new LspTool(makeLspSession(tempDir.path()));
+				const result = await tool.execute(`pull-diagnostics-${dynamicRegistration}`, {
+					action: "diagnostics",
+					file: targetFile,
+					timeout: 20,
+				});
+				const initialize = fakeServer.received.find(message => message.method === "initialize");
+
+				expect(initialize).toMatchObject({
+					params: {
+						capabilities: {
+							textDocument: { diagnostic: { dynamicRegistration: true } },
+						},
+					},
+				});
+				expect(fakeServer.received.map(message => message.method)).toContain("textDocument/diagnostic");
+				expect(textResult(result)).toContain("Type 'number' is not assignable to type 'string'.");
+			} finally {
+				await lspClient.shutdownAll();
+				tempDir.removeSync();
+			}
+		}, 15_000);
+	}
+
 	it("does not reuse stale file diagnostics after another URI publishes", async () => {
 		const tempDir = TempDir.createSync("@omp-lsp-stale-diags-");
 		try {
@@ -1155,7 +1444,7 @@ describe("lsp regressions", () => {
 				client.diagnosticsVersion += 1;
 			}, 80);
 
-			const tool = new LspTool({ cwd: tempDir.path() } as ToolSession);
+			const tool = new LspTool(makeLspSession(tempDir.path()));
 			const result = await tool.execute("diag-stale", {
 				action: "diagnostics",
 				file: targetFile,
@@ -1189,7 +1478,7 @@ describe("lsp regressions", () => {
 			await Bun.write(path.join(tempDir.path(), "go.work"), ["go 1.22", "", "use ./service", ""].join("\n"));
 			await Bun.write(path.join(serviceDir, "go.mod"), "module example.com/service\n\ngo 1.22\n");
 
-			const tool = new LspTool({ cwd: tempDir.path() } as ToolSession);
+			const tool = new LspTool(makeLspSession(tempDir.path()));
 			const result = await tool.execute("go-work-only-diagnostics", {
 				action: "diagnostics",
 				file: "*",
@@ -1236,7 +1525,7 @@ describe("lsp regressions", () => {
 				["go 1.22", "", "use (", "\t.", "\t./service", "\t./tools/helper", ")", ""].join("\n"),
 			);
 
-			const tool = new LspTool({ cwd: tempDir.path() } as ToolSession);
+			const tool = new LspTool(makeLspSession(tempDir.path()));
 			const result = await tool.execute("go-work-module-patterns", {
 				action: "diagnostics",
 				file: "*",
@@ -1548,7 +1837,7 @@ describe("lsp regressions", () => {
 				notifications.push({ method, params });
 			});
 
-			const tool = new LspTool({ cwd: tempDir.path() } as ToolSession);
+			const tool = new LspTool(makeLspSession(tempDir.path()));
 			const result = await tool.execute("rename-file-test", {
 				action: "rename_file",
 				file: sourceFile,
@@ -1628,7 +1917,7 @@ describe("lsp regressions", () => {
 			});
 			const notifySpy = vi.spyOn(lspClient, "sendNotification").mockResolvedValue();
 
-			const tool = new LspTool({ cwd: tempDir.path() } as ToolSession);
+			const tool = new LspTool(makeLspSession(tempDir.path()));
 			await tool.execute("rename-file-preview", {
 				action: "rename_file",
 				file: sourceFile,
@@ -1692,7 +1981,7 @@ describe("lsp regressions", () => {
 			});
 			vi.spyOn(lspClient, "sendNotification").mockResolvedValue();
 
-			const tool = new LspTool({ cwd: tempDir.path() } as ToolSession);
+			const tool = new LspTool(makeLspSession(tempDir.path()));
 			await tool.execute("rename-dir-test", {
 				action: "rename_file",
 				file: srcDir,
@@ -1764,7 +2053,7 @@ describe("lsp regressions", () => {
 				return { expansion: "macro_rules!" };
 			});
 
-			const tool = new LspTool({ cwd: tempDir.path() } as ToolSession);
+			const tool = new LspTool(makeLspSession(tempDir.path()));
 			const result = await tool.execute("request-test", {
 				action: "request",
 				file: filePath,
@@ -1831,7 +2120,7 @@ describe("lsp regressions", () => {
 				return null;
 			});
 
-			const tool = new LspTool({ cwd: tempDir.path() } as ToolSession);
+			const tool = new LspTool(makeLspSession(tempDir.path()));
 			await tool.execute("request-payload", {
 				action: "request",
 				query: "workspace/executeCommand",
@@ -1889,7 +2178,7 @@ describe("lsp regressions", () => {
 			});
 			vi.spyOn(lspClient, "getOrCreateClient").mockResolvedValue(client);
 
-			const tool = new LspTool({ cwd: tempDir.path() } as ToolSession);
+			const tool = new LspTool(makeLspSession(tempDir.path()));
 			const result = await tool.execute("caps-test", {
 				action: "capabilities",
 				timeout: 5,
@@ -2308,7 +2597,7 @@ describe("lsp regressions", () => {
 			const notifySpy = vi.spyOn(lspClient, "sendNotification");
 			const getClientSpy = vi.spyOn(lspClient, "getOrCreateClient");
 
-			const tool = new LspTool({ cwd: tempDir.path() } as ToolSession);
+			const tool = new LspTool(makeLspSession(tempDir.path()));
 			const result = await tool.execute("rename-md", {
 				action: "rename_file",
 				file: sourceFile,
@@ -2352,7 +2641,7 @@ describe("lsp regressions", () => {
 			vi.spyOn(lspClient, "getOrCreateClient").mockResolvedValue(client);
 			vi.spyOn(lspClient, "sendRequest").mockResolvedValue(null);
 
-			const tool = new LspTool({ cwd: tempDir.path() } as ToolSession);
+			const tool = new LspTool(makeLspSession(tempDir.path()));
 			const initial = await tool.execute("reload-redetect-status", { action: "status" });
 			const initialOutput = initial.content
 				.filter(block => block.type === "text")
@@ -2402,7 +2691,7 @@ describe("lsp regressions", () => {
 			{ name: "typescript-language-server", status: "ready", fileTypes: [".ts"] },
 		]);
 
-		const tool = new LspTool({ cwd: process.cwd() } as ToolSession);
+		const tool = new LspTool(makeLspSession(process.cwd()));
 		const result = await tool.execute("status-test", { action: "status" });
 		const output = result.content
 			.filter(block => block.type === "text")
@@ -2443,7 +2732,7 @@ describe("lsp regressions", () => {
 			vi.spyOn(lspClient, "getOrCreateClient").mockRejectedValue(new Error("spawn suppressed in test"));
 			vi.spyOn(lspClient, "getActiveClients").mockReturnValue([]);
 
-			const tool = new LspTool({ cwd } as ToolSession);
+			const tool = new LspTool(makeLspSession(cwd));
 
 			const status1 = await tool.execute("cache-1", { action: "status" });
 			const text1 = status1.content

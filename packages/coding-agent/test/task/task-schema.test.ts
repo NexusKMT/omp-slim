@@ -6,14 +6,14 @@ import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { type } from "arktype";
 
 // Contract: the single-spawn schema (`task.batch: false`; the exported
-// `taskSchema` instance) carries no batch fields. The batch shape (`tasks[]` +
-// shared `context`) is gated by the `task.batch` setting (default on, covered
-// by test/task/task-batch.test.ts), and a per-call `schema` input no longer
-// exists at all; follow-ups go through `irc` messaging.
+// `taskSchema` instance) carries no batch fields while accepting a caller
+// `model`, `outputSchema`, and its validation mode. The batch shape (`tasks[]` + shared
+// `context`) is gated by the `task.batch` setting (default on, covered by
+// test/task/task-batch.test.ts).
 
 describe("task schema (single-spawn)", () => {
 	it("accepts {agent, task}", () => {
-		const parsed = taskSchema({ agent: "explore", task: "Map the auth module." });
+		const parsed = taskSchema({ agent: "scout", task: "Map the auth module." });
 		expect(parsed instanceof type.errors).toBe(false);
 	});
 
@@ -26,22 +26,27 @@ describe("task schema (single-spawn)", () => {
 	});
 
 	it("requires task", () => {
-		const parsed = taskSchema({ agent: "explore" });
+		const parsed = taskSchema({ agent: "scout" });
 		expect(parsed instanceof type.errors).toBe(true);
 	});
 
-	it("strips tasks/context/schema from the single-spawn schema", () => {
+	it("retains caller model, outputSchema, and schemaMode while stripping stale keys", () => {
+		const outputSchema = { type: "object", properties: { answer: { type: "string" } } };
 		const parsed = taskSchema({
-			agent: "explore",
+			agent: "scout",
 			task: "Map the auth module.",
+			model: "openai-codex/gpt-5.6-sol:high",
+			outputSchema,
+			schemaMode: "strict",
 			context: "shared background",
 			tasks: [{ name: "A", task: "..." }],
 			schema: '{"properties":{}}',
 		});
 		expect(parsed instanceof type.errors).toBe(false);
 		if (!(parsed instanceof type.errors)) {
-			// Unknown keys are stripped: batch/context exist only on the batch
-			// schema and the per-call schema input was removed outright.
+			expect(parsed.model).toBe("openai-codex/gpt-5.6-sol:high");
+			expect(parsed.outputSchema).toEqual(outputSchema);
+			expect(parsed.schemaMode).toBe("strict");
 			expect("tasks" in parsed).toBe(false);
 			expect("context" in parsed).toBe(false);
 			expect("schema" in parsed).toBe(false);
@@ -79,7 +84,22 @@ describe("task spawn validation", () => {
 	});
 
 	it("rejects a missing task", async () => {
-		const text = await executeText({ agent: "explore" });
+		const text = await executeText({ agent: "scout" });
 		expect(text).toContain("Missing `task`");
+	});
+
+	it.each([
+		{ model: "" },
+		{ model: " " },
+		{ model: "," },
+		{ model: " , " },
+		{ model: [] },
+		{ model: Array<string>(1) },
+		{ model: ["openai-codex/gpt-5.6-sol:high", " "] },
+		{ model: ["openai-codex/gpt-5.6-sol:high", ","] },
+	])("rejects an empty model selector", async ({ model }) => {
+		const text = await executeText({ agent: "scout", task: "Map the auth module.", model });
+		expect(text).toContain("Invalid `model`");
+		expect(text).toContain("non-empty selector");
 	});
 });

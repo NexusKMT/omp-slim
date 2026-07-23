@@ -183,6 +183,7 @@ type AssistantToolCallBlock = Extract<AssistantContentBlock, { type: "toolCall" 
 function snapshotAssistantContentBlock(block: AssistantContentBlock): AssistantContentBlock {
 	switch (block.type) {
 		case "text":
+		case "image":
 			return { ...block };
 		case "thinking":
 			return { ...block };
@@ -224,6 +225,7 @@ function snapshotAssistantMessageEvent(
 		case "text_start":
 		case "text_delta":
 		case "text_end":
+		case "image_end":
 		case "thinking_start":
 		case "thinking_delta":
 		case "thinking_end":
@@ -1525,6 +1527,7 @@ async function streamAssistantResponse(
 						case "text_start":
 						case "text_delta":
 						case "text_end":
+						case "image_end":
 						case "thinking_start":
 						case "thinking_delta":
 						case "thinking_end":
@@ -1626,13 +1629,26 @@ function recoverTransientErrorToolTurn(
 	if (message.stopReason !== "error") return message;
 	const toolCalls = message.content.filter(block => block.type === "toolCall");
 	if (toolCalls.length === 0) return message;
+	const stopDetailType = message.stopDetails?.type;
+	const stopDetailCategory = message.stopDetails?.category;
+	if (
+		stopDetailType === "refusal" ||
+		stopDetailType === "sensitive" ||
+		stopDetailCategory === "refusal" ||
+		stopDetailCategory === "sensitive"
+	)
+		return message;
 	const availableToolNames = new Set<string>();
 	for (const tool of availableTools) {
 		availableToolNames.add(tool.name);
 		if (tool.customWireName !== undefined) availableToolNames.add(tool.customWireName);
 	}
 	if (!toolCalls.every(toolCall => availableToolNames.has(toolCall.name))) return message;
-	if (!AIError.isStreamReadErrorText(`${message.errorMessage ?? ""}\n${message.stopDetails?.explanation ?? ""}`))
+	if (
+		!AIError.isStreamReadErrorText(`${message.errorMessage ?? ""}\n${message.stopDetails?.explanation ?? ""}`) &&
+		!AIError.isTransientStreamParseError(message.errorMessage) &&
+		!AIError.isTransientStreamParseError(message.stopDetails?.explanation)
+	)
 		return message;
 	return {
 		...message,
@@ -1821,11 +1837,25 @@ async function executeToolCalls(
 		const tool =
 			tools?.find(t => t.name === toolCall.name) ??
 			tools?.find(t => t.customWireName !== undefined && t.customWireName === toolCall.name);
+		const args = toolCall.arguments as Record<string, unknown>;
+		const interruptibleMode = tool?.interruptible;
+		let interruptible = false;
+		if (typeof interruptibleMode === "function") {
+			try {
+				interruptible = interruptibleMode(args);
+			} catch {
+				// Resolver failures default to preserving the tool's outcome.
+				interruptible = false;
+			}
+		} else {
+			interruptible = interruptibleMode === true;
+		}
 		return {
 			toolCall,
 			tool,
-			args: toolCall.arguments as Record<string, unknown>,
-			signal: tool?.interruptible ? interruptibleSignal : nonInterruptibleSignal,
+			args,
+			interruptible,
+			signal: interruptible ? interruptibleSignal : nonInterruptibleSignal,
 			started: false,
 			result: undefined as AgentToolResult<any> | undefined,
 			isError: false,
@@ -2207,16 +2237,16 @@ async function executeToolCalls(
 		}
 	}
 
-	// While an interruptible tool is in flight (e.g. a `job`/`irc` wait
-	// blocking on external work), queued steering or interrupting IRC would
-	// otherwise wait out the tool's own window. Poll only non-consuming queues
-	// and abort the shared tool signal so the boundary dequeue below injects
-	// the message promptly. Gated on immediate-interrupt mode + an
-	// interruptible tool; checkSteering is idempotent (no-op once triggered).
+	// While an interruptible tool call is in flight (e.g. a `hub` wait blocking
+	// on external work), queued steering or interrupting IRC would otherwise
+	// wait out the tool's own window. Poll only non-consuming queues and abort
+	// the shared tool signal so the boundary dequeue below injects the message
+	// promptly. Gated on immediate-interrupt mode + an interruptible call;
+	// checkSteering is idempotent (no-op once triggered).
 	const watchSteeringWhileRunning =
 		shouldInterruptImmediately &&
 		(hasSteeringMessages !== undefined || hasIrcInterrupts !== undefined) &&
-		records.some(r => r.tool?.interruptible === true);
+		records.some(record => record.interruptible);
 	const steeringWatchTimer = watchSteeringWhileRunning
 		? setInterval(() => void checkSteering(), STEERING_INTERRUPT_POLL_MS)
 		: undefined;
@@ -2268,6 +2298,23 @@ export interface SyntheticToolResultDetails {
 	upstreamError?: string;
 }
 
+/**
+ * Narrow an {@link AgentMessage} to a synthetic {@link ToolResultMessage} —
+ * a tool_result emitted for a tool call the assistant never invoked (see
+ * {@link SyntheticToolResultDetails}). Consumers use this to look past the
+ * placeholder pairing back to the assistant turn that produced it, e.g.
+ * `AgentSession.retry()` walking back over the synthetic results a
+ * stalled/aborted mid-tool-call turn leaves behind.
+ */
+export function isSyntheticToolResultMessage(
+	message: AgentMessage | undefined,
+): message is ToolResultMessage<SyntheticToolResultDetails> {
+	return (
+		message?.role === "toolResult" &&
+		(message.details as SyntheticToolResultDetails | undefined)?.__synthetic === true
+	);
+}
+
 function syntheticDetailsFor(
 	reason: "aborted" | "error" | "skipped" | "length",
 	errorMessage: string | undefined,
@@ -2289,18 +2336,14 @@ function syntheticDetailsFor(
 }
 
 /**
- * Create a tool result for a tool call that was emitted by the assistant but
- * never invoked locally. Maintains the tool_use / tool_result pairing the
- * provider API requires, and tags {@link SyntheticToolResultDetails} so
- * consumers can distinguish this from a real local tool failure without
- * string-matching the content (#4321).
+ * Create the persisted synthetic result for a tool call that was emitted by
+ * the assistant but never invoked locally.
  */
-function createAbortedToolResult(
+export function createSyntheticToolResultMessage(
 	toolCall: Extract<AssistantMessage["content"][number], { type: "toolCall" }>,
-	stream: EventStream<AgentEvent, AgentMessage[]>,
 	reason: "aborted" | "error" | "skipped" | "length",
 	errorMessage?: string,
-): ToolResultMessage {
+): ToolResultMessage<SyntheticToolResultDetails> {
 	const message =
 		reason === "aborted"
 			? "Tool execution was aborted"
@@ -2310,9 +2353,31 @@ function createAbortedToolResult(
 					? "Tool call was not executed because the assistant ended its turn"
 					: "Tool call was not executed because the provider stream ended with an error before the tool could run";
 	const details = syntheticDetailsFor(reason, errorMessage);
-	const result: AgentToolResult<SyntheticToolResultDetails> = {
+	return {
+		role: "toolResult",
+		toolCallId: toolCall.id,
+		toolName: toolCall.name,
 		content: [{ type: "text", text: errorMessage ? `${message}: ${errorMessage}` : `${message}.` }],
 		details,
+		isError: true,
+		timestamp: Date.now(),
+	};
+}
+
+/**
+ * Create and emit a tool result for a tool call that was emitted by the
+ * assistant but never invoked locally.
+ */
+function createAbortedToolResult(
+	toolCall: Extract<AssistantMessage["content"][number], { type: "toolCall" }>,
+	stream: EventStream<AgentEvent, AgentMessage[]>,
+	reason: "aborted" | "error" | "skipped" | "length",
+	errorMessage?: string,
+): ToolResultMessage {
+	const toolResultMessage = createSyntheticToolResultMessage(toolCall, reason, errorMessage);
+	const result: AgentToolResult<SyntheticToolResultDetails> = {
+		content: toolResultMessage.content,
+		details: toolResultMessage.details,
 	};
 
 	stream.push({
@@ -2329,17 +2394,6 @@ function createAbortedToolResult(
 		result,
 		isError: true,
 	});
-
-	const toolResultMessage: ToolResultMessage<SyntheticToolResultDetails> = {
-		role: "toolResult",
-		toolCallId: toolCall.id,
-		toolName: toolCall.name,
-		content: result.content,
-		details,
-		isError: true,
-		timestamp: Date.now(),
-	};
-
 	stream.push({ type: "message_start", message: toolResultMessage });
 	stream.push({ type: "message_end", message: toolResultMessage });
 

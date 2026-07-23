@@ -141,13 +141,17 @@ function isOpenAIServiceTierApi(api: Api | undefined): boolean {
 	return api === "openai-completions" || api === "openai-responses" || api === "openai-codex-responses";
 }
 
-function hasDedicatedServiceTierControl(provider: Provider | undefined): boolean {
-	return provider === "fireworks";
+function excludesInferredOpenAIServiceTier(provider: Provider | undefined): boolean {
+	// Fireworks has its own priority-only control. GitHub Copilot proxies OpenAI
+	// models but rejects OpenAI's `service_tier` request field.
+	return provider === "fireworks" || provider === "github-copilot";
 }
 
 function isOpenAIServiceTierModel(model: ServiceTierModel): boolean {
 	return (
-		!hasDedicatedServiceTierControl(model.provider) && isOpenAIServiceTierApi(model.api) && isOpenAIModelId(model.id)
+		!excludesInferredOpenAIServiceTier(model.provider) &&
+		isOpenAIServiceTierApi(model.api) &&
+		isOpenAIModelId(model.id)
 	);
 }
 
@@ -159,7 +163,8 @@ function isOpenAIServiceTierModel(model: ServiceTierModel): boolean {
  * `openai/`); Claude on Bedrock/Vertex (api `anthropic-messages`) is the
  * anthropic family even though its provider is `amazon-bedrock`/`google-vertex`.
  * Custom OpenAI-compatible relays that serve OpenAI model ids are OpenAI family
- * too unless that provider owns a separate tier control such as Fireworks.
+ * too unless the provider owns a separate tier control (Fireworks) or rejects
+ * OpenAI's service-tier field (GitHub Copilot).
  */
 export function serviceTierFamily(model: ServiceTierModel): ServiceTierFamily | undefined {
 	const provider = model.provider;
@@ -539,7 +544,7 @@ export interface SimpleStreamOptions extends Omit<StreamOptions, "apiKey"> {
 	toolChoice?: ToolChoice;
 	/** OpenAI service tier for processing priority/cost control. Ignored by non-OpenAI providers. */
 	serviceTier?: ServiceTier;
-	/** API format for Kimi Code provider: "openai" or "anthropic" (default: "anthropic") */
+	/** Explicit Kimi Code API format override; omitted uses live per-model protocol metadata. */
 	kimiApiFormat?: "openai" | "anthropic";
 	/** API format for Synthetic provider: "openai" or "anthropic" (default: "openai") */
 	syntheticApiFormat?: "openai" | "anthropic";
@@ -706,7 +711,14 @@ export interface ContextSnapshot {
 
 export interface AssistantMessage {
 	role: "assistant";
-	content: (TextContent | ThinkingContent | RedactedThinkingContent | AnthropicFallbackContent | ToolCall)[];
+	content: (
+		| TextContent
+		| ThinkingContent
+		| RedactedThinkingContent
+		| AnthropicFallbackContent
+		| ImageContent
+		| ToolCall
+	)[];
 	api: Api;
 	provider: Provider;
 	model: string;
@@ -893,6 +905,7 @@ export type AssistantMessageEvent =
 	| { type: "thinking_start"; contentIndex: number; partial: AssistantMessage }
 	| { type: "thinking_delta"; contentIndex: number; delta: string; partial: AssistantMessage }
 	| { type: "thinking_end"; contentIndex: number; content: string; partial: AssistantMessage }
+	| { type: "image_end"; contentIndex: number; content: ImageContent; partial: AssistantMessage }
 	| { type: "toolcall_start"; contentIndex: number; partial: AssistantMessage }
 	| { type: "toolcall_delta"; contentIndex: number; delta: string; partial: AssistantMessage }
 	| { type: "toolcall_end"; contentIndex: number; toolCall: ToolCall; partial: AssistantMessage }

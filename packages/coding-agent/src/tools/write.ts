@@ -36,7 +36,7 @@ import {
 	writeArchive,
 } from "../utils/zip";
 import { routeWriteThroughBridge } from "./acp-bridge";
-import { truncateForPrompt } from "./approval";
+import { resolveToolTier, truncateForPrompt } from "./approval";
 import { assertEditableFile } from "./auto-generated-guard";
 import {
 	type ConflictEntry,
@@ -85,6 +85,36 @@ import { renderXdevCall, renderXdevResult, type XdevDispatch } from "./xdev";
 
 const LOOSE_HASHLINE_HEADER_RE = /^\s*\[[^#\r\n]+#[^ \t\r\n]*\]\s*$/;
 const EXECUTABLE_NOTICE = "[Notice: Made executable via chmod +x]";
+const URI_LIKE_WRITE_PATH_RE = /^([a-z][a-z0-9+.-]*):\/{1,2}(.*)$/i;
+const XD_MISSING_DELIMITER_RE = /^xd\/+(.*)$/i;
+const XD_SCHEME_NEAR_MISSES: Record<string, true> = { dx: true, xdd: true, xdt: true };
+
+function assertWriteTargetAddressable(target: string, router: InternalUrlRouter): void {
+	const trimmed = target.trim();
+	if (path.win32.isAbsolute(trimmed) || router.canHandle(trimmed)) return;
+
+	const missingDelimiter = trimmed.match(XD_MISSING_DELIMITER_RE);
+	if (missingDelimiter) {
+		throw new ToolError(
+			`Unknown URI-like write target '${trimmed}'. Did you mean 'xd://${missingDelimiter[1]}'? Prefix the path with './' to write it as a filesystem path.`,
+		);
+	}
+
+	const uriLike = trimmed.match(URI_LIKE_WRITE_PATH_RE);
+	if (!uriLike) return;
+
+	const scheme = uriLike[1]!.toLowerCase();
+	// conflict:// has no router handler but is spliced downstream by
+	// parseConflictUri (which emits its own precise id/scope errors); let it pass.
+	if (scheme === "conflict") return;
+	const canonicalScheme = router.getHandler(scheme) ? scheme : XD_SCHEME_NEAR_MISSES[scheme] ? "xd" : undefined;
+	const suggestion = canonicalScheme
+		? ` Did you mean '${canonicalScheme}://${uriLike[2]}'?`
+		: " Tool devices use 'xd://<tool>'.";
+	throw new ToolError(
+		`Unknown URI-like write target '${trimmed}'.${suggestion} Prefix the path with './' to write it as a filesystem path.`,
+	);
+}
 
 const BULK_DIRECTIVE_RE = /^#?(\d+)\s*[:=]\s*(@ours|@theirs|@base|@both)$/;
 /**
@@ -398,9 +428,27 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 			if (xdevTarget.name === REPORT_ISSUE_DEVICE_NAME) return "write";
 			if (xdevTarget.name && isResolutionDeviceName(xdevTarget.name)) return "read";
 			const inst = xdevTarget.name ? this.session.xdevRegistry?.get(xdevTarget.name) : undefined;
-			const decision = typeof inst?.approval === "function" ? undefined : inst?.approval;
-			const tier = typeof decision === "object" ? decision?.tier : decision;
-			return tier ?? "exec";
+			if (!inst) return "exec";
+			// Decode the device JSON payload and evaluate the mounted tool's own
+			// approval (which may be argument-dependent, e.g. ast_edit is read-tier
+			// for internal-URL paths, debug is read-tier for inspection actions).
+			// Malformed JSON, non-object payloads, missing content, and approval
+			// functions that reject schema-invalid objects stay exec so the gate
+			// fails closed — the dispatch itself rejects invalid arguments too.
+			const rawContent = (args as Partial<WriteParams>).content;
+			if (typeof rawContent !== "string") return "exec";
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(rawContent);
+			} catch {
+				return "exec";
+			}
+			if (!isRecord(parsed)) return "exec";
+			try {
+				return resolveToolTier(inst, parsed);
+			} catch {
+				return "exec";
+			}
 		}
 		// Remote SSH writes open an outbound connection and run a remote shell —
 		// gate them like the exec-tier `ssh` tool, ahead of the handler-write
@@ -969,6 +1017,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 			// Strip hashline display prefixes ([PATH#HASH] + LINE:) if the model copied them from read output
 			const { text: cleanContent, stripped } = stripWriteContent(this.session, content);
 			const internalRouter = InternalUrlRouter.instance();
+			assertWriteTargetAddressable(path, internalRouter);
 			if (internalRouter.canHandle(path)) {
 				const parsed = parseInternalUrl(path);
 				const scheme = parsed.protocol.replace(/:$/, "").toLowerCase();
