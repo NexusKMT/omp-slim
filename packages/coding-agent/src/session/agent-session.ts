@@ -131,6 +131,7 @@ import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { GeminiHeaderRunDetector, isGeminiThinkingModel } from "@oh-my-pi/pi-ai/utils/thinking-loop";
 import { type RepeatedToolCallDetection, ToolCallLoopGuard } from "@oh-my-pi/pi-ai/utils/tool-call-loop-guard";
 import { isFireworksFastModelId, toFireworksBaseModelId } from "@oh-my-pi/pi-catalog/fireworks-model-id";
+import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { MacOSPowerAssertion } from "@oh-my-pi/pi-natives";
@@ -256,7 +257,8 @@ import type { Goal, GoalModeState } from "../goals/state";
 import type { HindsightSessionState } from "../hindsight/state";
 import { type LocalProtocolOptions, resolveLocalUrlToPath } from "../internal-urls";
 import { IrcBus, type IrcMessage } from "../irc/bus";
-import { resolveMemoryBackend } from "../memory-backend";
+import { resolveMemoryBackend } from "../memory-backend/resolve";
+import { MEMORY_BACKEND_TOOL_NAMES } from "../memory-backend/tool-names";
 import { shutdownMnemopiEmbedClient } from "../mnemopi/embed-client";
 import { getMnemopiSessionState, type MnemopiSessionState, setMnemopiSessionState } from "../mnemopi/state";
 import { containsOrchestrate, ORCHESTRATE_NOTICE } from "../modes/orchestrate";
@@ -936,6 +938,12 @@ export interface AgentSessionConfig {
 	/** Custom commands (TypeScript slash commands) */
 	customCommands?: LoadedCustomCommand[];
 	skillsSettings?: SkillsSettings;
+	/** Agent directory used when applying memory backend changes during a live session. */
+	memoryAgentDir?: string;
+	/** Recursion depth used to suppress live backend replacement in subagents. */
+	memoryTaskDepth?: number;
+	/** Creates the built-in memory tools allowed by the current backend selection. */
+	createMemoryTools?: () => Promise<AgentTool[]>;
 	/** Model registry for API key resolution and model discovery */
 	modelRegistry: ModelRegistry;
 	/** Tool registry for LSP and settings */
@@ -2258,6 +2266,11 @@ export class AgentSession {
 	#synchronouslyTerminatedYieldToolCallIds = new Set<string>();
 	#providerSessionState = new Map<string, ProviderSessionState>();
 	#hindsightSessionState: HindsightSessionState | undefined = undefined;
+	#memoryAgentDir: string | undefined;
+	#memoryTaskDepth = 0;
+	#createMemoryTools: (() => Promise<AgentTool[]>) | undefined;
+	#memoryBackendTransition: Promise<void> = Promise.resolve();
+	#localMemoryStartupAbort: AbortController | undefined;
 	readonly rawSseDebugBuffer: RawSseDebugBuffer;
 
 	#resetPromptMaintenanceState(): void {
@@ -2790,6 +2803,9 @@ export class AgentSession {
 		this.#skillsReloadable = config.skillsReloadable ?? true;
 		this.#skillsSettings = config.skillsSettings;
 		this.#modelRegistry = config.modelRegistry;
+		this.#memoryAgentDir = config.memoryAgentDir;
+		this.#memoryTaskDepth = config.memoryTaskDepth ?? 0;
+		this.#createMemoryTools = config.createMemoryTools;
 		// Resolve the wire service-tier per request so the Fireworks Priority
 		// toggle scopes priority to Fireworks alone, without mutating the shared
 		// session `serviceTier` that drives `/fast` and OpenAI/Anthropic priority.
@@ -3856,11 +3872,7 @@ export class AgentSession {
 			this.sessionId,
 			advisor.slug,
 		);
-		const preparation = prepareCompaction(
-			pathEntries,
-			compactionSettings,
-			await this.#runnableCompactionCandidates(candidates, advisorProviderSessionId),
-		);
+		const preparation = prepareCompaction(pathEntries, compactionSettings, advisorModel);
 		if (!preparation) {
 			// Cannot prepare compaction, fallback to re-prime
 			return true;
@@ -5227,11 +5239,11 @@ export class AgentSession {
 					return;
 				}
 			}
-			const resumeCursorStreamStall = this.#canResumeCursorStreamStall(msg);
-			if (resumeCursorStreamStall || this.#isRetryableError(msg)) {
+			const resumeResolvedStreamStall = this.#canResumeResolvedStreamStall(msg);
+			if (resumeResolvedStreamStall || this.#isRetryableError(msg)) {
 				const didRetry = await this.#handleRetryableError(
 					msg,
-					resumeCursorStreamStall ? { preserveFailedTurn: true } : undefined,
+					resumeResolvedStreamStall ? { preserveFailedTurn: true } : undefined,
 				);
 				if (didRetry) {
 					await emitAgentEndNotification({ willContinue: true });
@@ -6976,6 +6988,7 @@ export class AgentSession {
 	 */
 	beginDispose(): void {
 		this.#isDisposed = true;
+		this.cancelLocalMemoryStartup();
 		this.#titleGenerationAbortController.abort();
 		this.#abortAutolearnCapture();
 		this.#flushPendingIrcAsides();
@@ -7106,6 +7119,7 @@ export class AgentSession {
 			logger.warn("Post-prompt tasks still draining at dispose deadline", { error: String(error) });
 		}
 		await this.#drainAutolearnCapture();
+		await this.#memoryBackendTransition;
 
 		const hindsightState = this.getHindsightSessionState();
 		const mnemopiState = setMnemopiSessionState(this, undefined);
@@ -7845,13 +7859,126 @@ export class AgentSession {
 		}
 	}
 
+	/** Cancel the local rollout-memory startup owned by this session. */
+	cancelLocalMemoryStartup(): void {
+		this.#localMemoryStartupAbort?.abort();
+		this.#localMemoryStartupAbort = undefined;
+	}
+
+	/** Start a new local rollout-memory generation and cancel its predecessor. */
+	beginLocalMemoryStartup(): AbortSignal {
+		this.cancelLocalMemoryStartup();
+		const controller = new AbortController();
+		this.#localMemoryStartupAbort = controller;
+		return controller.signal;
+	}
+
+	/** Release the local startup slot if `signal` still owns it. */
+	endLocalMemoryStartup(signal: AbortSignal): void {
+		if (this.#localMemoryStartupAbort?.signal === signal) this.#localMemoryStartupAbort = undefined;
+	}
+
+	async #disposeMemoryBackendState(consolidateMnemopi = true): Promise<void> {
+		this.cancelLocalMemoryStartup();
+		const hindsight = this.getHindsightSessionState();
+		if (hindsight) {
+			try {
+				await hindsight.flushRetainQueue();
+			} catch (error) {
+				logger.warn("Memory lifecycle: Hindsight flush failed", { error: String(error) });
+			}
+			this.setHindsightSessionState(undefined);
+			hindsight.dispose();
+		}
+
+		const mnemopi = setMnemopiSessionState(this, undefined);
+		if (mnemopi) {
+			try {
+				await mnemopi.dispose({ consolidate: consolidateMnemopi });
+			} catch (error) {
+				logger.warn("Memory lifecycle: Mnemopi dispose failed", { error: String(error) });
+			}
+		}
+	}
+
+	/**
+	 * Apply the selected memory backend to runtime state, tools, and prompt.
+	 * Concurrent settings changes run in order and settle before the next turn.
+	 */
+	async applyMemoryBackend(): Promise<void> {
+		if (this.#isDisposed) return;
+		const transition = this.#memoryBackendTransition.then(() => this.#applyMemoryBackend());
+		this.#memoryBackendTransition = transition.then(
+			() => undefined,
+			() => undefined,
+		);
+		await transition;
+	}
+
+	async #applyMemoryBackend(): Promise<void> {
+		if (this.#isDisposed) return;
+		try {
+			await this.#disposeMemoryBackendState();
+			if (this.#memoryAgentDir && this.#memoryTaskDepth === 0 && !this.#isDisposed) {
+				const backend = await resolveMemoryBackend(this.settings);
+				await backend.start({
+					session: this,
+					settings: this.settings,
+					modelRegistry: this.#modelRegistry,
+					agentDir: this.#memoryAgentDir,
+					taskDepth: this.#memoryTaskDepth,
+				});
+			}
+			if (this.#isDisposed) return;
+			await this.#refreshMemoryTools();
+			if (this.#isDisposed) return;
+			await this.refreshBaseSystemPrompt();
+		} catch (error) {
+			await this.#disposeMemoryBackendState(false);
+			if (!this.#isDisposed) {
+				await this.#replaceMemoryTools([]).catch(refreshError => {
+					logger.warn("Failed to remove memory tools after backend apply error", {
+						error: String(refreshError),
+					});
+				});
+			}
+			throw error;
+		}
+	}
+
+	async #refreshMemoryTools(): Promise<void> {
+		const tools = (await this.#createMemoryTools?.()) ?? [];
+		await this.#replaceMemoryTools(tools);
+	}
+
+	async #replaceMemoryTools(tools: AgentTool[]): Promise<void> {
+		const removed = new Set<string>(MEMORY_BACKEND_TOOL_NAMES.filter(name => this.#builtInToolNames.has(name)));
+		const nextActive = this.getEnabledToolNames().filter(name => !removed.has(name));
+		for (const name of removed) {
+			this.#toolRegistry.delete(name);
+			this.#builtInToolNames.delete(name);
+		}
+
+		for (const tool of tools) {
+			if (!MEMORY_BACKEND_TOOL_NAMES.some(name => name === tool.name) || this.#toolRegistry.has(tool.name)) {
+				continue;
+			}
+			const wrapped = this.#wrapRuntimeTool(tool);
+			this.#toolRegistry.set(wrapped.name, wrapped);
+			this.#builtInToolNames.add(wrapped.name);
+			nextActive.push(wrapped.name);
+		}
+		await this.#applyActiveToolsByName([...new Set(nextActive)]);
+	}
+
 	/** Rebuild the base system prompt using the current active tool set. */
 	async refreshBaseSystemPrompt(): Promise<void> {
-		if (!this.#rebuildSystemPrompt) return;
+		if (this.#isDisposed || !this.#rebuildSystemPrompt) return;
 		const activeToolNames = this.getActiveToolNames();
 		this.#setActiveToolNames?.(activeToolNames);
 		const previousBaseSystemPrompt = this.#baseSystemPrompt;
 		const built = await this.#rebuildSystemPrompt(activeToolNames, this.#toolRegistry);
+		if (this.#isDisposed) return;
 		this.#baseSystemPrompt = built.systemPrompt;
 		this.#baseSystemPromptBeforeMemoryPromotion = undefined;
 		if (
@@ -9194,6 +9321,14 @@ export class AgentSession {
 				}
 			}
 
+			// A prompt issued while the session is already disposing must still run:
+			// the dispose-driven abort settles its turn (see "does not auto-retry
+			// empty reasonless aborts once the session is disposing"). Only drop the
+			// prompt when disposal began during the backend-transition await, where
+			// resuming would start a turn on a torn-down session.
+			const disposingBeforeTransition = this.#isDisposed;
+			await this.#memoryBackendTransition;
+			if ((this.#isDisposed && !disposingBeforeTransition) || this.#promptGeneration !== generation) return;
 			const beforeAgentStartSystemPrompt = await this.#buildSystemPromptForAgentStart(expandedText);
 
 			// Emit before_agent_start extension event
@@ -11227,11 +11362,7 @@ export class AgentSession {
 				compactionCandidates = this.#getCompactionModelCandidates(availableModels);
 			}
 			const pathEntries = this.sessionManager.getBranch();
-			const preparation = prepareCompaction(
-				pathEntries,
-				effectiveSettings,
-				await this.#runnableCompactionCandidates(compactionCandidates, this.sessionId),
-			);
+			const preparation = prepareCompaction(pathEntries, effectiveSettings, this.model);
 			if (!preparation) {
 				// Check why we can't compact
 				const lastEntry = pathEntries[pathEntries.length - 1];
@@ -11284,6 +11415,11 @@ export class AgentSession {
 			let snapcompactReady = wantsSnapcompact;
 			const snapcompactShapeSetting = this.settings.get("snapcompact.shape");
 			let snapcompactShape: snapcompact.Shape | undefined;
+			// Claude refuses inputs that reproduce its own reasoning as text
+			// ("reasoning_extraction"), and the snapcompact archive is replayed as
+			// text into every later request; drop `¶think:` sections for
+			// Anthropic-dialect targets (issue #6093).
+			const snapcompactIncludeThinking = preferredDialect(this.model.id) !== "anthropic";
 			if (wantsSnapcompact && !this.model.input.includes("image")) {
 				if (explicitSnapcompact) {
 					this.emitNotice(
@@ -11302,6 +11438,7 @@ export class AgentSession {
 			} else if (snapcompactReady) {
 				const text = snapcompact.serializeConversation(
 					convertToLlm(preparation.messagesToSummarize.concat(preparation.turnPrefixMessages)),
+					{ includeThinking: snapcompactIncludeThinking },
 				);
 				const probeText = snapcompact.renderabilityProbeText(
 					text,
@@ -11357,6 +11494,7 @@ export class AgentSession {
 						model: this.model,
 						...(snapcompactShapeSetting === "auto" ? {} : { shape }),
 						maxFrames,
+						includeThinking: snapcompactIncludeThinking,
 					});
 					const framePayloadBytes = this.#snapcompactFramePayloadBytes(snapcompactResult);
 					if (framePayloadBytes > snapcompact.FRAME_DATA_BYTES_BUDGET) {
@@ -13583,17 +13721,6 @@ export class AgentSession {
 		return this.#resolveCompactionModelCandidates(this.model, availableModels, filter);
 	}
 
-	/**
-	 * Compaction candidates that can actually run — those with a resolvable API
-	 * key, matching the per-candidate getApiKey gate the execution loop applies.
-	 * Re-expansion reusability (prepareCompaction) must judge remote-preserve
-	 * reuse against these, not against candidates the loop would skip at runtime.
-	 */
-	async #runnableCompactionCandidates(candidates: readonly Model[], sessionId: string | undefined): Promise<Model[]> {
-		const keys = await Promise.all(candidates.map(model => this.#modelRegistry.getApiKey(model, sessionId)));
-		return candidates.filter((_, index) => keys[index] !== undefined);
-	}
-
 	#resolveCompactionModelCandidates(
 		preferredModel: Model | null | undefined,
 		availableModels: Model[],
@@ -14406,12 +14533,8 @@ export class AgentSession {
 
 			const pathEntries = this.sessionManager.getBranch();
 
-			const autoCompactionCandidates = await this.#runnableCompactionCandidates(
-				this.#getCompactionModelCandidates(availableModels),
-				this.sessionId,
-			);
 			let pathEntriesForCompaction = pathEntries;
-			let preparation = prepareCompaction(pathEntriesForCompaction, compactionSettings, autoCompactionCandidates);
+			let preparation = prepareCompaction(pathEntriesForCompaction, compactionSettings, this.model);
 			if (!preparation) {
 				// prepareCompaction found nothing to summarize because the kept region
 				// is a single oversized recent turn — findCutPoint never cuts inside a
@@ -14461,11 +14584,7 @@ export class AgentSession {
 								// branch has been rewritten either way.
 								rescueRewroteHistory = true;
 								pathEntriesForCompaction = this.sessionManager.getBranch();
-								preparation = prepareCompaction(
-									pathEntriesForCompaction,
-									compactionSettings,
-									autoCompactionCandidates,
-								);
+								preparation = prepareCompaction(pathEntriesForCompaction, compactionSettings, this.model);
 								return preparation !== undefined;
 							},
 						});
@@ -14587,8 +14706,13 @@ export class AgentSession {
 			let snapcompactResult: snapcompact.CompactionResult | undefined;
 			let snapcompactBlocker: string | undefined;
 			if (action === "snapcompact" && compactionPrep.kind !== "fromHook") {
+				// Drop `¶think:` sections for Anthropic-dialect targets: the archive
+				// is replayed as text and Claude refuses reproduced reasoning
+				// ("reasoning_extraction", issue #6093).
+				const snapcompactIncludeThinking = preferredDialect(this.model.id) !== "anthropic";
 				const text = snapcompact.serializeConversation(
 					convertToLlm(preparation.messagesToSummarize.concat(preparation.turnPrefixMessages)),
+					{ includeThinking: snapcompactIncludeThinking },
 				);
 				const probeText = snapcompact.renderabilityProbeText(
 					text,
@@ -14619,6 +14743,7 @@ export class AgentSession {
 							model: this.model,
 							...(shapeSetting === "auto" ? {} : { shape }),
 							maxFrames,
+							includeThinking: snapcompactIncludeThinking,
 						});
 						const framePayloadBytes = this.#snapcompactFramePayloadBytes(snapcompactResult);
 						if (framePayloadBytes > snapcompact.FRAME_DATA_BYTES_BUDGET) {
@@ -15266,17 +15391,13 @@ export class AgentSession {
 	}
 
 	/**
-	 * Resume a stalled Cursor turn after every server-executed tool has produced
-	 * a result. The failed assistant/tool-result pair must stay in context: it
-	 * records completed side effects and lets the next request continue from
-	 * them instead of replaying the original turn.
+	 * Resume a stalled turn after every emitted tool call has produced a result.
+	 * Cursor calls must also carry the server-execution marker. The failed
+	 * assistant/tool-result pair stays in context so completed side effects are
+	 * continued from rather than replayed.
 	 */
-	#canResumeCursorStreamStall(message: AssistantMessage): boolean {
-		if (
-			message.provider !== "cursor" ||
-			message.stopReason !== "error" ||
-			!message.errorMessage?.toLowerCase().includes("stream stall")
-		) {
+	#canResumeResolvedStreamStall(message: AssistantMessage): boolean {
+		if (message.stopReason !== "error" || !message.errorMessage?.toLowerCase().includes("stream stall")) {
 			return false;
 		}
 		const id = this.#classifyRetryMessage(message);
@@ -15285,7 +15406,12 @@ export class AgentSession {
 		const resolvedToolCallIds: string[] = [];
 		for (const block of message.content) {
 			if (block.type !== "toolCall") continue;
-			if (!(kCursorExecResolved in block) || block[kCursorExecResolved] !== true) return false;
+			if (
+				message.provider === "cursor" &&
+				(!(kCursorExecResolved in block) || block[kCursorExecResolved] !== true)
+			) {
+				return false;
+			}
 			resolvedToolCallIds.push(block.id);
 		}
 		if (resolvedToolCallIds.length === 0) return false;
@@ -16131,8 +16257,8 @@ export class AgentSession {
 			errorId: message.errorId,
 		});
 
-		// Cursor exec-channel tools have already run and emitted results. Keep that
-		// failed turn intact so continuation cannot repeat their side effects.
+		// Resolved stream-stall tools have already emitted results. Keep that failed
+		// turn intact so continuation cannot repeat their side effects.
 		if (!options?.preserveFailedTurn) {
 			this.#removeAssistantMessageFromActiveContext(message, "auto-retry");
 		}

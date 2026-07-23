@@ -472,7 +472,6 @@ describe("Settings", () => {
 			const withFileLock = fileLock.withFileLock;
 			vi.spyOn(fileLock, "withFileLock").mockImplementation(async (filePath, fn, options) => {
 				firstSaveEntered.resolve();
-				await releaseFirstSave.promise;
 				const result = await withFileLock(filePath, fn, options);
 				firstSaveFinished.resolve();
 				return result;

@@ -364,6 +364,7 @@ export class Settings {
 		if (options.configFiles) configFiles.push(...options.configFiles);
 		this.#configFiles = configFiles.map(file => path.resolve(this.#cwd, expandTilde(file)));
 		this.#persist = !options.inMemory && options.readOnly !== true;
+		liveSettingsInstances.add(new WeakRef(this));
 
 		if (options.overrides) {
 			for (const [key, value] of Object.entries(options.overrides)) {
@@ -535,6 +536,23 @@ export class Settings {
 		if (path === "modelRoles") {
 			modelRolesSignal.fire();
 		}
+	}
+
+	/** Set once this instance is discarded; background saves become no-ops. */
+	#savesCancelled = false;
+
+	/**
+	 * Drop pending debounced saves and refuse any further background writes.
+	 * Used when an instance is being discarded (test teardown): an armed timer
+	 * or a chained in-flight save on a dropped instance would otherwise fire
+	 * later and race the successor's file locks.
+	 */
+	cancelPendingSaves(): void {
+		this.#savesCancelled = true;
+		clearTimeout(this.#saveTimer);
+		this.#saveTimer = undefined;
+		clearTimeout(this.#projectSaveTimer);
+		this.#projectSaveTimer = undefined;
 	}
 
 	/**
@@ -1688,7 +1706,7 @@ export class Settings {
 	}
 
 	async #saveNow(): Promise<void> {
-		if (!this.#persist || !this.#configPath) return;
+		if (this.#savesCancelled || !this.#persist || !this.#configPath) return;
 		if (this.#modified.size === 0 && this.#modifiedGlobalModelRoles.size === 0) return;
 
 		const configPath = this.#configPath;
@@ -1792,7 +1810,7 @@ export class Settings {
 	}
 
 	async #saveProjectNow(): Promise<void> {
-		if (!this.#persist || this.#modifiedProjectModelRoles.size === 0) return;
+		if (this.#savesCancelled || !this.#persist || this.#modifiedProjectModelRoles.size === 0) return;
 
 		const projectConfigPath = path.join(this.#cwd, ".omp", "config.yml");
 		const modifiedModelRoles = [...this.#modifiedProjectModelRoles];
@@ -2023,6 +2041,13 @@ export const onHindsightScopeChanged = (cb: () => void) => hindsightScopeSignal.
 // Global Singleton
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Weak registry of every constructed instance so `resetSettingsForTest` can
+ * disarm stray background saves on isolated instances too. WeakRefs never
+ * retain instances; the set is cleared on every test reset.
+ */
+const liveSettingsInstances = new Set<WeakRef<Settings>>();
+
 let globalInstance: Settings | null = null;
 let globalInstancePromise: Promise<Settings> | null = null;
 let boundSettingsInstance: Settings | null = null;
@@ -2042,6 +2067,14 @@ export function isSettingsInitialized(): boolean {
  * @internal
  */
 export function resetSettingsForTest(): void {
+	// Disarm every constructed instance's debounced saves — including isolated
+	// (non-singleton) instances: an armed timer or chained in-flight save on a
+	// dropped instance fires mid-way through the NEXT test and races its file
+	// locks/spies (cross-file pollution).
+	for (const ref of liveSettingsInstances) {
+		ref.deref()?.cancelPendingSaves();
+	}
+	liveSettingsInstances.clear();
 	globalInstance = null;
 	globalInstancePromise = null;
 	clearBoundSettingsMethods();
