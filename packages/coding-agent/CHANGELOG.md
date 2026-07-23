@@ -10,6 +10,9 @@
 ### Changed
 
 - Adjusted retry fallback handling to recognize discovery-only and runtime extension providers, preventing spurious unknown-provider warnings.
+### Added
+
+- Added an opt-in `mcp.renderMarkdownResults` setting that renders non-JSON MCP text results as Markdown in the terminal transcript.
 
 ### Fixed
 
