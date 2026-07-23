@@ -1881,6 +1881,22 @@ function titleConversationTurnFromMessage(message: AgentMessage): TitleConversat
 	return { role: message.role, ...(text ? { text } : {}), ...(thinking ? { thinking } : {}) };
 }
 
+function syntheticToolResultTailStart(messages: readonly AgentMessage[]): number {
+	let index = messages.length;
+	while (index > 0 && isSyntheticToolResultMessage(messages[index - 1])) {
+		index--;
+	}
+	return index;
+}
+
+function retryableAssistantTurnEnd(messages: readonly AgentMessage[]): number | undefined {
+	const turnEnd = syntheticToolResultTailStart(messages);
+	const message = messages[turnEnd - 1];
+	if (message?.role !== "assistant") return undefined;
+	if (message.stopReason !== "error" && message.stopReason !== "aborted") return undefined;
+	return turnEnd;
+}
+
 export class AgentSession {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
@@ -8951,12 +8967,16 @@ export class AgentSession {
 				);
 			}
 
-			// Check if we need to compact before sending (catches aborted responses). Run
-			// inline (allowDefer=false) so the handoff/maintenance fully settles before this
-			// prompt's agent loop starts — otherwise a deferred handoff would fire on the
-			// next microtask alongside the new turn.
+			// Recover a previously failed/incomplete assistant turn before sending.
+			// Successful historical turns take the cheaper pre-prompt threshold path
+			// below; re-running the full post-turn check on resume can synchronously
+			// rewrite/re-render old context before the new prompt starts.
 			const lastAssistant = this.#findLastAssistantMessage();
-			if (lastAssistant && !options?.skipCompactionCheck) {
+			if (
+				lastAssistant &&
+				!options?.skipCompactionCheck &&
+				(lastAssistant.stopReason === "error" || lastAssistant.stopReason === "length")
+			) {
 				await this.#checkCompaction(lastAssistant, false, false, false);
 			}
 
@@ -15786,7 +15806,8 @@ export class AgentSession {
 	}
 	/**
 	 * Manually retry the last failed assistant turn.
-	 * Removes the error message from agent state and re-attempts with a fresh retry budget.
+	 * Removes the error message from active agent state when present and
+	 * re-attempts with a fresh retry budget.
 	 *
 	 * A stream that stalls or aborts mid-tool-call ends the turn with
 	 * `stopReason: "error" | "aborted"` and then appends one synthetic
@@ -15797,30 +15818,28 @@ export class AgentSession {
 	 * checking the assistant message; it strips both the placeholders and the
 	 * failed turn before re-attempting.
 	 *
+	 * A restored session deliberately omits failed assistant turns from provider
+	 * context. In that case, the persisted display transcript remains the source
+	 * of truth for whether the current branch has a retryable failed tail.
+	 *
 	 * @returns true if retry was initiated, false if no failed turn to retry or agent is busy
 	 */
 	async retry(): Promise<boolean> {
 		if (this.isStreaming || this.isCompacting || this.isRetrying) return false;
 
 		const messages = this.agent.state.messages;
-
-		// Walk back past trailing synthetic tool_result placeholders emitted for
-		// tool calls that never ran because the turn stalled/aborted mid-tool-call.
-		// They shadow the failed assistant turn from the single-message lookback.
-		let turnEnd = messages.length;
-		while (turnEnd > 0 && isSyntheticToolResultMessage(messages[turnEnd - 1])) {
-			turnEnd--;
+		const activeTurnEnd = retryableAssistantTurnEnd(messages);
+		if (activeTurnEnd !== undefined) {
+			// Remove the failed/aborted assistant message plus its synthetic tool
+			// results (same as auto-retry does before re-attempting).
+			this.agent.replaceMessages(messages.slice(0, activeTurnEnd - 1));
+		} else {
+			// A restored session already dropped the failed assistant turn (and its
+			// paired synthetic tool results) from provider context, so the persisted
+			// display transcript is the source of truth for a retryable failed tail.
+			const transcriptMessages = this.sessionManager.buildSessionContext({ transcript: true }).messages;
+			if (retryableAssistantTurnEnd(transcriptMessages) === undefined) return false;
 		}
-
-		const lastMsg = messages[turnEnd - 1];
-		if (lastMsg?.role !== "assistant") return false;
-
-		const assistantMsg = lastMsg as AssistantMessage;
-		if (assistantMsg.stopReason !== "error" && assistantMsg.stopReason !== "aborted") return false;
-
-		// Remove the failed/aborted assistant message plus its synthetic tool
-		// results (same as auto-retry does before re-attempting).
-		this.agent.replaceMessages(messages.slice(0, turnEnd - 1));
 
 		// Reset retry budget for a fresh attempt
 		this.#retryAttempt = 0;
