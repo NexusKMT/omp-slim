@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- Fixed sessions wedging onto their fallback model with `400 Invalid \`signature\` in \`thinking\` block` after switching to an Anthropic signing endpoint while the latest assistant turn came from a different Anthropic-compatible provider (e.g. Kimi k3). The cross-model thinking-signature strip skipped the latest surviving assistant turn entirely, replaying the foreign signature verbatim on every attempt; the latest turn now strips signatures whose issuing provider differs from the target (same-provider switches keep their byte-for-byte latest turn), and foreign `redacted_thinking` siblings are dropped alongside instead of riding the wire unverifiable.
 - Fixed GitHub Copilot OpenAI-compatible requests being rejected when the session's native OpenAI service tier was set to `priority` ([#5160](https://github.com/can1357/oh-my-pi/pull/5160) by [@audreyt](https://github.com/audreyt)).
 - Fixed OpenAI Responses token-cap truncations suppressing fully streamed function and custom tool calls whose inputs are complete.
 - Added SuperGrok (`xai-oauth`) usage tracking for weekly credits, product limits, and positive on-demand caps.
