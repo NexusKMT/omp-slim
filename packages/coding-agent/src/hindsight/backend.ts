@@ -150,6 +150,11 @@ interface PrimaryRebuildTask {
 	pending: boolean;
 }
 
+interface ConversationTracking {
+	lastRetainedTurn: number;
+	hasRecalledForFirstTurn: boolean;
+}
+
 const primaryRebuildTasks = new WeakMap<AgentSession, PrimaryRebuildTask>();
 
 /**
@@ -199,6 +204,7 @@ async function installPrimaryState(
 	session: AgentSession,
 	settings: Settings,
 	banksSet: Set<string>,
+	conversationTracking?: ConversationTracking,
 ): Promise<HindsightSessionState | undefined> {
 	const sessionId = session.sessionId;
 	if (!sessionId) return undefined;
@@ -236,8 +242,8 @@ async function installPrimaryState(
 		config,
 		session,
 		banksSet,
-		lastRetainedTurn: 0,
-		hasRecalledForFirstTurn: false,
+		lastRetainedTurn: conversationTracking?.lastRetainedTurn ?? 0,
+		hasRecalledForFirstTurn: conversationTracking?.hasRecalledForFirstTurn ?? false,
 	});
 
 	// Subscribe BEFORE installing: if the operator manages to flip another
@@ -292,15 +298,22 @@ async function rebuildPrimaryStateOnRuntimeChange(session: AgentSession): Promis
 	}
 
 	const next = computeBankScope(config, session.sessionManager.getCwd());
+	const scopeUnchanged = bankScopesEqual(next, current);
 	const connectionUnchanged =
 		config.hindsightApiUrl === current.config.hindsightApiUrl &&
 		config.hindsightApiToken === current.config.hindsightApiToken;
-	if (connectionUnchanged && bankScopesEqual(next, current)) return;
+	if (connectionUnchanged && scopeUnchanged) return;
 
-	// A bank cache is endpoint-specific. Preserve it for token/scope changes,
-	// but force bank creation checks again after switching servers.
-	const banksSet = config.hindsightApiUrl === current.config.hindsightApiUrl ? current.banksSet : new Set<string>();
-	await installPrimaryState(session, settings, banksSet);
+	// Bank existence is scoped by both endpoint and credential tenant. Preserve
+	// the cache only when the connection identity is unchanged.
+	const banksSet = connectionUnchanged ? current.banksSet : new Set<string>();
+	const conversationTracking = scopeUnchanged
+		? {
+				lastRetainedTurn: current.lastRetainedTurn,
+				hasRecalledForFirstTurn: current.hasRecalledForFirstTurn,
+			}
+		: undefined;
+	await installPrimaryState(session, settings, banksSet, conversationTracking);
 }
 
 /** Tag-array equality: order matters because we never reorder on the way in. */

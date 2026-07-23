@@ -621,15 +621,13 @@ describe("hindsightBackend live bank routing", () => {
 	it("rebuilds the primary state with a new bearer token when hindsight.apiToken changes", async () => {
 		const originalApiToken = process.env.HINDSIGHT_API_TOKEN;
 		delete process.env.HINDSIGHT_API_TOKEN;
-		let session: ReturnType<typeof makeFakeSession> | undefined;
+		const settings = Settings.isolated({
+			"memory.backend": "hindsight",
+			"hindsight.apiUrl": "http://localhost:8888",
+		});
+		settings.set("hindsight.apiToken", "old-token");
+		const session = makeFakeSession({ sessionId: "s-token", settings });
 		try {
-			const settings = Settings.isolated({
-				"memory.backend": "hindsight",
-				"hindsight.apiUrl": "http://localhost:8888",
-			});
-			settings.set("hindsight.apiToken", "old-token");
-			session = makeFakeSession({ sessionId: "s-token", settings });
-
 			await hindsightBackend.start({
 				session: session as never,
 				settings,
@@ -639,6 +637,9 @@ describe("hindsightBackend live bank routing", () => {
 			});
 
 			const initial = session.getHindsightSessionState();
+			initial!.banksSet.add(initial!.bankId);
+			initial!.lastRetainedTurn = 4;
+			initial!.hasRecalledForFirstTurn = true;
 			settings.set("hindsight.apiToken", "new-token");
 			await Bun.sleep(0);
 
@@ -646,6 +647,10 @@ describe("hindsightBackend live bank routing", () => {
 			expect(next).toBeDefined();
 			expect(next).not.toBe(initial);
 			expect(next?.config.hindsightApiToken).toBe("new-token");
+			expect(next?.banksSet).not.toBe(initial?.banksSet);
+			expect(next?.banksSet.has(next!.bankId)).toBe(false);
+			expect(next?.lastRetainedTurn).toBe(4);
+			expect(next?.hasRecalledForFirstTurn).toBe(true);
 
 			const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
 				new Response(JSON.stringify({ results: [] }), {
@@ -657,7 +662,7 @@ describe("hindsightBackend live bank routing", () => {
 			const headers = fetchSpy.mock.calls[0]?.[1]?.headers as Record<string, string>;
 			expect(headers.Authorization).toBe("Bearer new-token");
 		} finally {
-			if (session) await hindsightBackend.clear("/tmp", "/tmp", session as never);
+			await hindsightBackend.clear("/tmp", "/tmp", session as never);
 			if (originalApiToken === undefined) delete process.env.HINDSIGHT_API_TOKEN;
 			else process.env.HINDSIGHT_API_TOKEN = originalApiToken;
 		}
@@ -732,15 +737,14 @@ describe("hindsightBackend live bank routing", () => {
 	it("routes an active subagent alias through the rebuilt primary client", async () => {
 		const originalApiToken = process.env.HINDSIGHT_API_TOKEN;
 		delete process.env.HINDSIGHT_API_TOKEN;
-		let parentSession: ReturnType<typeof makeFakeSession> | undefined;
-		let subSession: ReturnType<typeof makeFakeSession> | undefined;
+		const settings = Settings.isolated({
+			"memory.backend": "hindsight",
+			"hindsight.apiUrl": "http://localhost:8888",
+		});
+		settings.set("hindsight.apiToken", "old-token");
+		const parentSession = makeFakeSession({ sessionId: "parent-runtime", settings });
+		const subSession = makeFakeSession({ sessionId: "sub-runtime", settings });
 		try {
-			const settings = Settings.isolated({
-				"memory.backend": "hindsight",
-				"hindsight.apiUrl": "http://localhost:8888",
-			});
-			settings.set("hindsight.apiToken", "old-token");
-			parentSession = makeFakeSession({ sessionId: "parent-runtime", settings });
 			await hindsightBackend.start({
 				session: parentSession as never,
 				settings,
@@ -749,7 +753,6 @@ describe("hindsightBackend live bank routing", () => {
 				taskDepth: 0,
 			});
 
-			subSession = makeFakeSession({ sessionId: "sub-runtime", settings });
 			await hindsightBackend.start({
 				session: subSession as never,
 				settings,
@@ -775,8 +778,8 @@ describe("hindsightBackend live bank routing", () => {
 			const headers = fetchSpy.mock.calls[0]?.[1]?.headers as Record<string, string>;
 			expect(headers.Authorization).toBe("Bearer new-token");
 		} finally {
-			if (subSession) await hindsightBackend.clear("/tmp", "/tmp", subSession as never);
-			if (parentSession) await hindsightBackend.clear("/tmp", "/tmp", parentSession as never);
+			await hindsightBackend.clear("/tmp", "/tmp", subSession as never);
+			await hindsightBackend.clear("/tmp", "/tmp", parentSession as never);
 			if (originalApiToken === undefined) delete process.env.HINDSIGHT_API_TOKEN;
 			else process.env.HINDSIGHT_API_TOKEN = originalApiToken;
 		}
