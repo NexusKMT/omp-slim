@@ -251,6 +251,28 @@ describe("legacy pi package root remaps (issue #1474)", () => {
 		expect(loaded.printable).toBe("a");
 	});
 
+	it("loads pi-sprite's legacy terminal helpers", async () => {
+		const entry = await writeFixtureExtension(
+			[
+				'import { deleteAllKittyImages, deleteKittyImage, getCapabilities } from "@earendil-works/pi-tui";',
+				"export const deleteOne = deleteKittyImage(42);",
+				"export const deleteAll = deleteAllKittyImages();",
+				"export const capabilities = getCapabilities();",
+			].join("\n"),
+		);
+
+		const loaded = (await loadLegacyPiModule(entry)) as {
+			deleteOne: string;
+			deleteAll: string;
+			capabilities: { images: "kitty" | "iterm2" | null; trueColor: boolean; hyperlinks: boolean };
+		};
+		expect(loaded.deleteOne).toContain("a=d,d=I,i=42,q=2");
+		expect(loaded.deleteAll).toContain("a=d,d=A,q=2");
+		expect(["kitty", "iterm2", null]).toContain(loaded.capabilities.images);
+		expect(typeof loaded.capabilities.trueColor).toBe("boolean");
+		expect(typeof loaded.capabilities.hyperlinks).toBe("boolean");
+	});
+
 	it("preserves legacy defineTool root imports and usable coding tools", async () => {
 		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-legacy-coding-tools-"));
 		tempRoots.push(dir);
