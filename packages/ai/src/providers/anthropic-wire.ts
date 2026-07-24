@@ -89,8 +89,17 @@ export type WebSearchToolResultBlockParam = {
 export function isAnthropicWebSearchHistoryBlock(block: {
 	type: string;
 	name?: unknown;
+	id?: unknown;
+	tool_use_id?: unknown;
+	content?: unknown;
 }): block is WebSearchServerToolUseBlockParam | WebSearchToolResultBlockParam {
-	return block.type === "web_search_tool_result" || (block.type === "server_tool_use" && block.name === "web_search");
+	if (block.type === "server_tool_use") {
+		return block.name === "web_search" && typeof block.id === "string" && block.id.length > 0;
+	}
+	if (block.type === "web_search_tool_result") {
+		return typeof block.tool_use_id === "string" && block.tool_use_id.length > 0 && Object.hasOwn(block, "content");
+	}
+	return false;
 }
 
 export type ThinkingBlockParam = {

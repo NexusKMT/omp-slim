@@ -344,6 +344,28 @@ describe("anthropic-messages parseRequest", () => {
 		]);
 	});
 
+	it("flattens malformed web-search history blocks instead of preserving invalid replay state", () => {
+		const parsed = parseRequest({
+			model: "claude-opus-4-7",
+			max_tokens: 8,
+			messages: [
+				{ role: "user", content: "weather?" },
+				{
+					role: "assistant",
+					content: [
+						{ type: "server_tool_use", name: "web_search" },
+						{ type: "web_search_tool_result", tool_use_id: "srvtoolu_1" },
+						{ type: "web_search_tool_result", content: [] },
+					],
+				},
+			],
+		});
+		const assistant = parsed.context.messages.find(message => message.role === "assistant");
+		expect(assistant?.content).toHaveLength(3);
+		expect(assistant?.content.every(block => block.type === "text")).toBe(true);
+		expect(assistant?.content.some(block => block.type === "anthropicServerTool")).toBe(false);
+	});
+
 	it("does not retain a partial code-execution server-tool history", () => {
 		const parsed = parseRequest({
 			model: "claude-opus-4-7",
