@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added OAuth account session pinning and active status tracking in storage
 - Added OpenAI Responses native computer-use transport, including batched actions and exact `computer_call`/`computer_call_output` replay with pending/acknowledged safety checks and `image_url`/`file_id` output references. Models without native support receive the same action surface as a regular function tool; provider-specific tool-choice forcing is used where supported.
 - Added `PI_CODEX_RESPONSES_LITE` to override the catalog-selected Codex Responses transport for diagnostics (`1`/`true` forces Lite; `0`/`false` forces the standard body).
 

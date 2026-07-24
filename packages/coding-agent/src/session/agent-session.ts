@@ -218,6 +218,7 @@ import type {
 	RoleModelCycle,
 	RoleModelCycleResult,
 	SessionHandoffOptions,
+	SessionOAuthAccountList,
 	SessionStats,
 	UsageFallbackConfirmation,
 } from "./agent-session-types";
@@ -7773,6 +7774,28 @@ export class AgentSession {
 			for (const modelId of modelIds) selectors.add(`${provider}/${modelId}`);
 		}
 		return [...selectors].sort((left, right) => left.localeCompare(right));
+	}
+
+	/** List stored OAuth accounts for the current model provider and mark this session's active account. */
+	async listCurrentProviderOAuthAccounts(): Promise<SessionOAuthAccountList | undefined> {
+		const provider = this.model?.provider;
+		if (!provider) return undefined;
+		const authStorage = this.#modelRegistry.authStorage;
+		await authStorage.reload();
+		return {
+			provider,
+			accounts: authStorage.listOAuthAccounts(provider, this.sessionId),
+		};
+	}
+
+	/**
+	 * Pin a stored OAuth account to the current model provider for this session.
+	 * Returns false while streaming or when the credential is no longer available.
+	 */
+	pinCurrentProviderOAuthAccount(credentialId: number): boolean {
+		const provider = this.model?.provider;
+		if (!provider || this.isStreaming) return false;
+		return this.#modelRegistry.authStorage.pinSessionOAuthAccount(provider, this.sessionId, credentialId);
 	}
 
 	/**

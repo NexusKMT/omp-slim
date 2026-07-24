@@ -5,6 +5,7 @@ import type {
 	Message,
 	MessageAttribution,
 	Model,
+	OAuthAccountSummary,
 	ServiceTierByFamily,
 	SimpleStreamOptions,
 	ToolChoice,
@@ -323,6 +324,12 @@ export interface SessionStats {
 	premiumRequests: number;
 	cost: number;
 	contextUsage?: ContextUsage;
+}
+
+/** Stored OAuth accounts available to the current model provider. */
+export interface SessionOAuthAccountList {
+	provider: string;
+	accounts: OAuthAccountSummary[];
 }
 
 /** IDs for a newly created session and the session it replaced. */
