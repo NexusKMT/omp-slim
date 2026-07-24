@@ -33,7 +33,7 @@ import type { Theme } from "../modes/theme/theme";
 import type { Tool } from "./index";
 import { replaceTabs } from "./render-utils";
 import type { ToolRenderer } from "./renderers";
-import { ToolError } from "./tool-errors";
+import { renderError, ToolAbortError, ToolError } from "./tool-errors";
 
 /**
  * Discoverable built-ins that must stay top-level even when xdev mounting is
@@ -389,28 +389,45 @@ export class XdevRegistry {
 		onUpdate?: AgentToolUpdateCallback,
 		context?: AgentToolContext,
 	): Promise<{ result: AgentToolResult<unknown>; xdev: XdevDispatch }> {
-		const inst = this.#resolve(name);
+		let xdev: XdevDispatch = { tool: name, mode: "execute" };
+		try {
+			const inst = this.#resolve(name);
 
-		if (HELP_CONTENT_RE.test(content)) {
+			if (HELP_CONTENT_RE.test(content)) {
+				return {
+					result: { content: [{ type: "text", text: renderDocs(inst) }] },
+					xdev: { tool: name, mode: "help" },
+				};
+			}
+
+			const validated = parseDeviceArgs(inst as AiTool, content, toolCallId, () => renderDocs(inst));
+			xdev = { ...xdev, args: validated };
+			const innerOnUpdate: AgentToolUpdateCallback | undefined = onUpdate
+				? partial =>
+						onUpdate({
+							content: partial.content,
+							details: { xdev: { ...xdev, inner: partial.details } },
+							isError: partial.isError,
+						})
+				: undefined;
+			const result = await inst.execute(toolCallId, validated as never, signal, innerOnUpdate, context);
+			return { result, xdev: { ...xdev, inner: result.details } };
+		} catch (error) {
+			if (
+				error instanceof ToolAbortError ||
+				signal?.aborted ||
+				(error instanceof Error && error.name === "AbortError")
+			) {
+				throw error;
+			}
 			return {
-				result: { content: [{ type: "text", text: renderDocs(inst) }] },
-				xdev: { tool: name, mode: "help" },
+				result: {
+					content: [{ type: "text", text: renderError(error) }],
+					isError: true,
+				},
+				xdev,
 			};
 		}
-
-		const validated = parseDeviceArgs(inst as AiTool, content, toolCallId, () => renderDocs(inst));
-
-		const xdevBase: XdevDispatch = { tool: name, mode: "execute", args: validated };
-		const innerOnUpdate: AgentToolUpdateCallback | undefined = onUpdate
-			? partial =>
-					onUpdate({
-						content: partial.content,
-						details: { xdev: { ...xdevBase, inner: partial.details } },
-						isError: partial.isError,
-					})
-			: undefined;
-		const result = await inst.execute(toolCallId, validated as never, signal, innerOnUpdate, context);
-		return { result, xdev: { ...xdevBase, inner: result.details } };
 	}
 }
 
