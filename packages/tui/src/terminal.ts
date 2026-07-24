@@ -12,7 +12,6 @@ import {
 import { setKittyProtocolActive } from "./keys";
 import { StdinBuffer } from "./stdin-buffer";
 import {
-	detectTerminalId,
 	isInsideTerminalMultiplexer,
 	NotifyProtocol,
 	setCellDimensions,
@@ -20,31 +19,12 @@ import {
 	TERMINAL,
 } from "./terminal-capabilities";
 import { isInsideTmux, wrapTmuxPassthrough } from "./tmux";
-import { type HangulCompatibilityJamoWidth, setHangulCompatibilityJamoWidth } from "./utils";
+import { setHangulCompatibilityJamoWidth } from "./utils";
 
 const TERMINAL_PROGRESS_KEEPALIVE_MS = 1000;
 const TERMINAL_PROGRESS_ACTIVE_SEQUENCE = "\x1b]9;4;3\x07";
 const TERMINAL_PROGRESS_CLEAR_SEQUENCE = "\x1b]9;4;0;\x07";
 const WINDOWS_TERMINAL_OSC11_POLL_MS = 30_000;
-/**
- * Resolves terminal-specific Compatibility Jamo widths while preserving the platform default for unknown terminals.
- *
- * Ghostty follows UAX#11 (2 cells), while Warp paints each code point at 1 cell.
- * Terminal.app and iTerm2 also render narrow, matching the macOS platform default.
- */
-export function resolveHangulCompatibilityJamoWidthFromTerminalIdentity(
-	env: NodeJS.ProcessEnv = Bun.env,
-): HangulCompatibilityJamoWidth {
-	switch (detectTerminalId(env)) {
-		case "ghostty":
-			return 2;
-		case "warp":
-			return 1;
-		default:
-			return "platform";
-	}
-}
-
 function shouldEnableModifyOtherKeysFallback(env: NodeJS.ProcessEnv = Bun.env): boolean {
 	if (!env.SSH_CONNECTION && !env.SSH_TTY && !env.SSH_CLIENT) return true;
 	return TERMINAL.id !== "base" && TERMINAL.id !== "trueColor";
@@ -660,7 +640,7 @@ export class ProcessTerminal implements Terminal {
 		// The query handler intercepts input temporarily, then installs the user's handler
 		// See: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
 		this.#queryAndEnableKittyProtocol();
-		setHangulCompatibilityJamoWidth(resolveHangulCompatibilityJamoWidthFromTerminalIdentity());
+		setHangulCompatibilityJamoWidth(TERMINAL.hangulJamoWidth);
 
 		// Query terminal background color via OSC 11 for dark/light detection.
 		// Uses DA1 (Primary Device Attributes) as a sentinel: terminals process
