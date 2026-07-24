@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Ctrl+O (expand tools) truncating the session on ConPTY hosts (native Windows and WSL): the full-view replay routed through the ConPTY frame-truncation intended only for the initial session resume (issue #2115), dropping every row above the retained tail behind an "older lines hidden" marker. The bound now applies to the first resume paint only; user-driven redraws (Ctrl+O expand, resize) replay the whole transcript ([#4863](https://github.com/can1357/oh-my-pi/issues/4863)).
+
 ## [16.3.12] - 2026-07-08
 
 ### Fixed
