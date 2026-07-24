@@ -1189,6 +1189,71 @@ describe("resolveCliModel", () => {
 		expect(suffixed.thinkingLevel).toBe(Effort.High);
 	});
 
+	test("configured role beats an unauthenticated catalog id collision (#6508)", () => {
+		// A bundled `cursor/default` model has the bare id `default`, which collides
+		// with the reserved `default` role selector. When the user has no Cursor
+		// credentials the catalog entry is not authenticated, so it must not shadow
+		// a configured, runnable `modelRoles.default`.
+		const cursorDefault = buildModel({
+			id: "default",
+			name: "Cursor Default",
+			api: "anthropic-messages",
+			provider: "cursor",
+			baseUrl: "https://cursor.sh",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1 },
+			contextWindow: 128000,
+			maxTokens: 4096,
+		});
+		const registry = { getAll: () => [...allModels, cursorDefault] };
+		const settings = Settings.isolated({
+			modelRoles: { default: "openai/gpt-4o" },
+		});
+
+		const result = resolveCliModel({
+			cliModel: "default",
+			modelRegistry: registry,
+			settings,
+			// Authenticated set omits the catalog-only Cursor model.
+			availableModels: allModels,
+		});
+
+		expect(result.error).toBeUndefined();
+		expect(result.model?.provider).toBe("openai");
+		expect(result.model?.id).toBe("gpt-4o");
+	});
+
+	test("unauthenticated catalog id still resolves when no role matches", () => {
+		// Without a configured role the same bare id must still reach the catalog
+		// model (so `--model default` surfaces the usual "no API key" error rather
+		// than a spurious not-found), confirming the fallback is only deferred.
+		const cursorDefault = buildModel({
+			id: "default",
+			name: "Cursor Default",
+			api: "anthropic-messages",
+			provider: "cursor",
+			baseUrl: "https://cursor.sh",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1 },
+			contextWindow: 128000,
+			maxTokens: 4096,
+		});
+		const registry = { getAll: () => [...allModels, cursorDefault] };
+		const settings = Settings.isolated({ modelRoles: {} });
+
+		const result = resolveCliModel({
+			cliModel: "default",
+			modelRegistry: registry,
+			settings,
+			availableModels: allModels,
+		});
+
+		expect(result.model?.provider).toBe("cursor");
+		expect(result.model?.id).toBe("default");
+	});
+
 	test("resolves configured custom, legacy, and default role aliases from --model", () => {
 		const registry = { getAll: () => allModels };
 		const settings = Settings.isolated({

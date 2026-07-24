@@ -1601,6 +1601,7 @@ function findExactCliModel(
 	selector: string,
 	allModels: Model<Api>[],
 	availableModels: Model<Api>[],
+	options?: { catalogFallback?: boolean },
 ): Model<Api> | undefined {
 	// Explicit provider/id references stay authoritative against the full catalog.
 	const referenced = findExactModelReferenceMatch(selector, allModels);
@@ -1615,6 +1616,13 @@ function findExactCliModel(
 		model.id.toLowerCase() === lower || formatModelString(model).toLowerCase() === lower;
 	const preferred = availableModels.find(isFlatMatch);
 	if (preferred) return preferred;
+	// The unauthenticated catalog fallback is a weak match: a bare id like
+	// `default` collides with the bundled `cursor/default` model, which must not
+	// shadow a configured `modelRoles.default` role the user can actually run.
+	// Callers resolving a possible role name pass `catalogFallback: false` so the
+	// role gets a chance first; the deferred fuzzy fallback below still recovers
+	// the catalog id when no role matches.
+	if (options?.catalogFallback === false) return undefined;
 	return availableModels === allModels ? undefined : allModels.find(isFlatMatch);
 }
 
@@ -1635,7 +1643,10 @@ export interface ResolveCliModelResult {
 /**
  * Resolve a single model from CLI flags.
  *
- * Exact model names take precedence over configured role names.
+ * Explicit `provider/id` references and authenticated bare ids take precedence
+ * over configured role names, which in turn take precedence over an
+ * unauthenticated catalog-only id (so a bundled `cursor/default` never shadows a
+ * configured `modelRoles.default`).
  */
 export function resolveCliModel(options: {
 	cliProvider?: string;
@@ -1680,7 +1691,7 @@ export function resolveCliModel(options: {
 
 	const trimmedModel = cliModel.trim();
 	if (!provider) {
-		const exact = findExactCliModel(trimmedModel, allModels, availableModels);
+		const exact = findExactCliModel(trimmedModel, allModels, availableModels, { catalogFallback: false });
 		if (exact) {
 			return {
 				model: exact,
@@ -1696,7 +1707,7 @@ export function resolveCliModel(options: {
 			MAX_THINKING_SUFFIX_OPTIONS,
 		);
 		if (exactThinkingLevel) {
-			const exactSuffixed = findExactCliModel(exactBase, allModels, availableModels);
+			const exactSuffixed = findExactCliModel(exactBase, allModels, availableModels, { catalogFallback: false });
 			if (exactSuffixed) {
 				return {
 					model: exactSuffixed,
