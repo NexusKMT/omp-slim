@@ -5,6 +5,9 @@
 ### Fixed
 
 - Fixed stateful OpenAI Responses explicit cache breakpoints being restored onto edited historical messages, ensuring full replays recompute the latest stable cache boundary.
+### Added
+
+- Added OpenAI Responses native computer-use transport, including batched actions and exact `computer_call`/`computer_call_output` replay with pending/acknowledged safety checks and `image_url`/`file_id` output references. Models without native support receive the same action surface as a regular function tool; provider-specific tool-choice forcing is used where supported.
 
 ## [17.1.0] - 2026-07-24
 
@@ -28,7 +31,6 @@
 - Forwarded `statefulResponses` through `streamSimple`, so diagnostic callers can explicitly disable OpenAI Responses `previous_response_id` chaining.
 - Added native QwenCloud Token Plan API-key login, model discovery, and an optional interactive console-Cookie prompt for 5-hour and 7-day quota reporting ([#6151](https://github.com/can1357/oh-my-pi/issues/6151)).
 - Added model-scoped usage health and same-provider reselection for native coding-plan credential pools, preserving OAuth/login-pool precedence, scoped broker blocks, sibling rotation state, and conservative unknown-account handling while excluding ordinary configured API keys ([#5018](https://github.com/can1357/oh-my-pi/issues/5018)).
-- Added OpenAI Responses native computer-use transport, including batched actions and exact `computer_call`/`computer_call_output` replay with pending/acknowledged safety checks and `image_url`/`file_id` output references. Models without native support receive the same action surface as a regular function tool; provider-specific tool-choice forcing is used where supported.
 
 ### Fixed
 
