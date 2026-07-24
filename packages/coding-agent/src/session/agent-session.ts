@@ -7508,6 +7508,10 @@ export class AgentSession {
 		// Determine the new leaf position based on target type
 		let newLeafId: string | null;
 		let editorText: string | undefined;
+		// Set when the second-pass `ask` re-answer branch below actually commits a
+		// new sibling answer — the trigger for resuming the agent afterwards so the
+		// model consumes it, mirroring a live `ask` completion (issue #6483).
+		let isAskReanswerCompletion = false;
 
 		if (targetEntry.type === "message" && targetEntry.message.role === "user") {
 			// User message: leaf = parent (null if root), text goes to editor
@@ -7544,6 +7548,7 @@ export class AgentSession {
 				timestamp: Date.now(),
 			};
 			newLeafId = this.sessionManager.appendMessageToBranch(toolResultMessage, targetEntry.parentId);
+			isAskReanswerCompletion = true;
 		} else {
 			// Non-user message (or a user-invoked skill-prompt injection): land the
 			// leaf on the selected node so it stays on the active branch. Skill
@@ -7588,6 +7593,19 @@ export class AgentSession {
 		this.#closeCodexProviderSessionsForHistoryRewrite();
 
 		this.#branchSummaryAbortController = undefined;
+
+		// Resume the agent after a committed `ask` re-answer. A live `ask`
+		// completes inside the streaming run loop, whose continuation after a
+		// tool result is intrinsic; a `/tree` re-answer instead mutates the tree
+		// outside any running turn, so nothing would pick up the new answer
+		// without an explicit continue. Scheduled as a post-prompt task (honoring
+		// the disposed/compacting guards) rather than awaited, so the interactive
+		// caller still rebuilds its UI synchronously first (issue #6483). Plain
+		// leaf moves and the read-only `reopenAsk` probe never reach here with the
+		// flag set, so they stay idle as before.
+		if (isAskReanswerCompletion) {
+			this.#scheduleAgentContinue();
+		}
 
 		// Emit session_tree event; only handlers can mutate session entries, so skip
 		// the emit and the context rebuild when no handlers are registered (mirrors

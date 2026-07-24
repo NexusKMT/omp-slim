@@ -458,6 +458,70 @@ describe("AgentSession tree navigation onto an ask toolResult", () => {
 			await ctx.cleanup();
 		}
 	});
+
+	it("(k) schedules an agent continue after a successful ask re-answer so the model consumes the new answer", async () => {
+		const ctx = await createTestSession({ inMemory: true });
+		try {
+			const { session, sessionManager } = ctx;
+
+			// u1 -> a1(ask toolCall) -> tr1(stale answer) -> a2(next reply, leaf)
+			sessionManager.appendMessage(userMsg("please deploy"));
+			const askCallId = "ask-call-1";
+			sessionManager.appendMessage(toolCallMsg(askCallId, "ask", { questions: ORIGINAL_QUESTIONS }));
+			const tr1Id = sessionManager.appendMessage(
+				toolResultMsg(askCallId, "ask", "User selected: staging", staleAnswerResult().details),
+			);
+			sessionManager.appendMessage(assistantMsg("deploying to staging"));
+
+			const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue(undefined);
+
+			const probe = await session.navigateTree(tr1Id, { allowAskReopen: true });
+			expect(probe.reopenAsk).toBeDefined();
+			// The read-only probe must NOT resume the agent — nothing was committed yet.
+			await session.waitForIdle();
+			expect(continueSpy).not.toHaveBeenCalled();
+
+			const result = await session.navigateTree(tr1Id, {
+				allowAskReopen: true,
+				reanswerAskResult: newAnswerResult(),
+			});
+			expect(result.cancelled).toBe(false);
+
+			// The freshly-branched ask toolResult must drive a follow-up turn, matching
+			// how a live ask completion resumes the agent (issue #6483).
+			await session.waitForIdle();
+			expect(continueSpy).toHaveBeenCalledTimes(1);
+			// The tail the continue resumes from is the new answer toolResult.
+			const messages = session.messages;
+			const last = messages[messages.length - 1];
+			expect(last?.role).toBe("toolResult");
+		} finally {
+			await ctx.cleanup();
+		}
+	});
+
+	it("(l) does not schedule a continue for a plain non-ask leaf move", async () => {
+		const ctx = await createTestSession({ inMemory: true });
+		try {
+			const { session, sessionManager } = ctx;
+
+			sessionManager.appendMessage(userMsg("read the config"));
+			sessionManager.appendMessage(toolCallMsg("read-call-1", "read", { path: "config.txt" }));
+			const tr1Id = sessionManager.appendMessage(toolResultMsg("read-call-1", "read", "file body"));
+			sessionManager.appendMessage(assistantMsg("done reading"));
+
+			const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue(undefined);
+
+			const result = await session.navigateTree(tr1Id, { allowAskReopen: true });
+			expect(result.cancelled).toBe(false);
+			expect(result.reopenAsk).toBeUndefined();
+
+			await session.waitForIdle();
+			expect(continueSpy).not.toHaveBeenCalled();
+		} finally {
+			await ctx.cleanup();
+		}
+	});
 });
 
 describe("AgentSession.buildAskReanswerContext", () => {
