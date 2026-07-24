@@ -209,6 +209,13 @@ interface UpdateMethodResolutionOptions {
 	miseBinDirs?: readonly string[];
 	miseDataDir?: string;
 	npmBinDir?: string;
+	/**
+	 * Whether the resolved omp path is a plain file (the standalone binary)
+	 * rather than a package-manager symlink. Stops a binary install from being
+	 * misrouted to npm/bun when the global bin dir overlaps the installer's
+	 * target directory.
+	 */
+	ompIsRegularFile?: boolean;
 }
 
 type UpdateTarget =
@@ -223,15 +230,22 @@ function resolveUpdateMethod(
 	bunBinDir: string | undefined,
 	options: UpdateMethodResolutionOptions = {},
 ): UpdateMethod {
-	const { homebrewPrefix, miseBinDirs = [], miseDataDir, npmBinDir } = options;
+	const { homebrewPrefix, miseBinDirs = [], miseDataDir, npmBinDir, ompIsRegularFile = false } = options;
 	const launcherExtension = path.extname(ompPath).toLowerCase();
 	const isWindowsScriptLauncher =
 		launcherExtension === ".cmd" || launcherExtension === ".ps1" || launcherExtension === ".bat";
 	if (homebrewPrefix && isPathInDirectory(ompPath, path.join(homebrewPrefix, "bin"))) return "brew";
 	if (miseBinDirs.some(dir => isPathInDirectory(ompPath, dir))) return "mise";
 	if (miseDataDir && isPathInDirectory(ompPath, path.join(miseDataDir, "shims"))) return "mise";
-	if (bunBinDir && isPathInDirectory(ompPath, bunBinDir)) return "bun";
-	if ((npmBinDir && isPathInDirectory(ompPath, npmBinDir)) || isWindowsScriptLauncher) return "npm";
+	// A plain executable file in a package-manager bin dir is the standalone
+	// binary the installer placed there, not an npm/bun-managed install (those
+	// symlink into node_modules). When the global bin dir overlaps the
+	// installer's default (~/.local/bin), classifying by directory alone routes
+	// a binary install through npm/bun, whose reinstall then collides with the
+	// existing file (npm EEXIST). Fall through to binary replacement instead.
+	if (bunBinDir && isPathInDirectory(ompPath, bunBinDir) && !ompIsRegularFile) return "bun";
+	if ((npmBinDir && isPathInDirectory(ompPath, npmBinDir) && !ompIsRegularFile) || isWindowsScriptLauncher)
+		return "npm";
 	return "binary";
 }
 
@@ -252,7 +266,22 @@ async function resolveUpdateTarget(): Promise<UpdateTarget> {
 	const ompPath = resolveOmpPath();
 
 	if (ompPath) {
-		const method = resolveUpdateMethod(ompPath, bunBinDir, { homebrewPrefix, miseBinDirs, miseDataDir, npmBinDir });
+		// Package-manager installs symlink the bin entry into node_modules; the
+		// standalone installer writes a plain executable. When the global bin dir
+		// overlaps the installer's default (~/.local/bin), that file type — not
+		// directory containment — distinguishes a binary install from npm/bun.
+		let ompIsRegularFile = false;
+		try {
+			const stat = fs.lstatSync(ompPath);
+			ompIsRegularFile = stat.isFile() && !stat.isSymbolicLink();
+		} catch {}
+		const method = resolveUpdateMethod(ompPath, bunBinDir, {
+			homebrewPrefix,
+			miseBinDirs,
+			miseDataDir,
+			npmBinDir,
+			ompIsRegularFile,
+		});
 		if (method === "binary") return { method, path: ompPath };
 		return { method };
 	}
