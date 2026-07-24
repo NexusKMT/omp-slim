@@ -73,8 +73,8 @@ export function getStreamFirstEventTimeoutMs(
  * global default during prompt processing. A zero per-provider fallback
  * disables the first-event watchdog unless an environment override is set.
  *
- * Returns `undefined` when an explicit env knob or per-provider fallback
- * disables the watchdog.
+ * Returns `0` when an explicit env knob or per-provider fallback disables the
+ * watchdog, preserving the sentinel through iterator timeout resolution.
  */
 export function getOpenAIStreamFirstEventTimeoutMs(
 	idleTimeoutMs?: number,
@@ -82,10 +82,10 @@ export function getOpenAIStreamFirstEventTimeoutMs(
 ): number | undefined {
 	const openAIFirstEventRaw = $env.PI_OPENAI_STREAM_FIRST_EVENT_TIMEOUT_MS;
 	if (openAIFirstEventRaw !== undefined) {
-		return normalizeIdleTimeoutMs(openAIFirstEventRaw, fallbackMs);
+		return normalizeIdleTimeoutMs(openAIFirstEventRaw, fallbackMs) ?? 0;
 	}
 	const base = normalizeIdleTimeoutMs($env.PI_STREAM_FIRST_EVENT_TIMEOUT_MS, fallbackMs);
-	if (base === undefined || base <= 0) return undefined;
+	if (base === undefined || base <= 0) return 0;
 	if (idleTimeoutMs === undefined || idleTimeoutMs <= 0) return base;
 	return Math.max(base, idleTimeoutMs);
 }
