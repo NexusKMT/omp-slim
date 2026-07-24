@@ -1,4 +1,12 @@
-import { type Component, matchesKey, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
+import {
+	type Component,
+	matchesKey,
+	replaceTabs,
+	sliceWithWidth,
+	truncateToWidth,
+	visibleWidth,
+} from "@oh-my-pi/pi-tui";
+import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { type ThemeColor, theme } from "../modes/theme/theme";
 
 /** Distinct states of a realtime call connection. */
@@ -7,6 +15,18 @@ export type LivePhase = "connecting" | "listening" | "working" | "speaking" | "m
 export interface LiveVisualizerOptions {
 	onStop(): void;
 	onToggleMute(): void;
+}
+
+function normalizeTranscript(text: string): string {
+	return replaceTabs(sanitizeText(text)).replace(/\s+/g, " ").trim();
+}
+
+function truncateFromStart(text: string, width: number): string {
+	if (width <= 0) return "";
+	const textWidth = visibleWidth(text);
+	if (textWidth <= width) return text;
+	if (width === 1) return "…";
+	return `…${sliceWithWidth(text, textWidth - width + 1, width - 1, true).text}`;
 }
 
 /** A compact, fixed-height terminal component for displaying a realtime call. */
@@ -19,6 +39,7 @@ export class LiveVisualizer implements Component {
 	#inputLevel = 0;
 	#displayLevel = 0;
 	#frame = 0;
+	#userTranscript = "";
 
 	#cache:
 		| {
@@ -26,6 +47,7 @@ export class LiveVisualizer implements Component {
 				phase: LivePhase;
 				displayLevel: number;
 				frame: number;
+				userTranscript: string;
 				lines: readonly string[];
 		  }
 		| undefined;
@@ -61,6 +83,21 @@ export class LiveVisualizer implements Component {
 		}
 	}
 
+	/** Updates the user's streaming voice transcript. */
+	setTranscript(text: string): void {
+		const normalized = normalizeTranscript(text);
+		if (this.#userTranscript === normalized) return;
+		this.#userTranscript = normalized;
+		this.invalidate();
+	}
+
+	/** Clears the user's voice transcript row. */
+	clearTranscript(): void {
+		if (!this.#userTranscript) return;
+		this.#userTranscript = "";
+		this.invalidate();
+	}
+
 	/** Processes user keypresses. */
 	handleInput(data: string): void {
 		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
@@ -82,7 +119,8 @@ export class LiveVisualizer implements Component {
 			this.#cache.width === width &&
 			this.#cache.phase === this.#phase &&
 			this.#cache.displayLevel === this.#displayLevel &&
-			this.#cache.frame === this.#frame
+			this.#cache.frame === this.#frame &&
+			this.#cache.userTranscript === this.#userTranscript
 		) {
 			return this.#cache.lines;
 		}
@@ -93,6 +131,7 @@ export class LiveVisualizer implements Component {
 			phase: this.#phase,
 			displayLevel: this.#displayLevel,
 			frame: this.#frame,
+			userTranscript: this.#userTranscript,
 			lines,
 		};
 		return lines;
@@ -107,7 +146,14 @@ export class LiveVisualizer implements Component {
 		const spectrumColor: ThemeColor = this.#phase === "muted" ? "dim" : this.#phase === "error" ? "error" : "success";
 		const spectrum = this.#generateSpectrum(innerWidth, 2);
 		const spectrumRows = spectrum.map(row => border(theme.fg(spectrumColor, row)));
-		return [top, ...spectrumRows, this.#renderFooter(width, innerWidth)];
+		const transcript = this.#renderTranscript(this.#userTranscript, innerWidth, border);
+		return [top, ...spectrumRows, transcript, this.#renderFooter(width, innerWidth)];
+	}
+
+	#renderTranscript(transcript: string, innerWidth: number, border: (content: string) => string): string {
+		const content = truncateFromStart(transcript, innerWidth);
+		const padding = " ".repeat(Math.max(0, innerWidth - visibleWidth(content)));
+		return border(theme.fg("accent", content) + padding);
 	}
 
 	#renderFooter(width: number, innerWidth: number): string {

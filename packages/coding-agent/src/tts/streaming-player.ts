@@ -22,17 +22,28 @@ export class StreamingAudioPlayer {
 	#ending: Promise<void> | null = null;
 	#inputClosed = false;
 	#stopped = false;
+	#failNative(native: AudioPlayback, cause: unknown): void {
+		this.#error = errorFrom(cause);
+		if (this.#native === native) this.#native = null;
+		try {
+			native.stop();
+		} catch {
+			// Preserve the original playback failure.
+		}
+	}
 
 	/** Opens the default speaker at the stream's logical sample rate. */
 	start(sampleRate = DEFAULT_SAMPLE_RATE): void {
 		if (this.#native || this.#error || this.#inputClosed || this.#stopped) return;
 		this.#sampleRate = sampleRate > 0 ? sampleRate : DEFAULT_SAMPLE_RATE;
+		let native: AudioPlayback | undefined;
 		try {
-			this.#native = new AudioPlayback(this.#sampleRate);
-			this.#native.setGain(this.#gain);
+			native = new AudioPlayback(this.#sampleRate);
+			native.setGain(this.#gain);
+			this.#native = native;
 		} catch (cause) {
-			this.#error = errorFrom(cause);
-			this.#native = null;
+			if (native) this.#failNative(native, cause);
+			else this.#error = errorFrom(cause);
 		}
 	}
 
@@ -45,13 +56,7 @@ export class StreamingAudioPlayer {
 		try {
 			native.write(pcm);
 		} catch (cause) {
-			this.#error = errorFrom(cause);
-			this.#native = null;
-			try {
-				native.stop();
-			} catch {
-				// Preserve the write failure surfaced by end().
-			}
+			this.#failNative(native, cause);
 		}
 	}
 
@@ -64,7 +69,7 @@ export class StreamingAudioPlayer {
 		try {
 			native.setGain(gain);
 		} catch (cause) {
-			this.#error = errorFrom(cause);
+			this.#failNative(native, cause);
 		}
 	}
 

@@ -276,7 +276,6 @@ impl AudioCapture {
 		on_audio: CaptureCallback,
 	) -> Result<Self> {
 		let sample_rate = audio_sample_rate(sample_rate).map_err(napi::Error::from_reason)?;
-		let sample_rate_hz = u32::from(sample_rate);
 		let mut builder = DeviceBuilder::capture().f32();
 		builder
 			.sample_rate(sample_rate)
@@ -284,28 +283,9 @@ impl AudioCapture {
 			.period_size_millis(AUDIO_PERIOD_MS)
 			.performance_profile(PerformanceProfile::LowLatency)
 			.backends(AUDIO_BACKENDS);
-		let mut inspected_samples = 0usize;
-		let mut received_signal = false;
-		let mut silence_reported = false;
 		let mut device = builder
 			.with_callback(move |_device, samples| {
 				if samples.is_empty() {
-					return;
-				}
-				if !received_signal {
-					received_signal = samples.iter().any(|sample| *sample != 0.0);
-					inspected_samples = inspected_samples.saturating_add(samples.len());
-				}
-				if !received_signal && !silence_reported && inspected_samples >= sample_rate_hz as usize
-				{
-					silence_reported = true;
-					on_audio.call(
-						Err(napi::Error::from_reason(
-							"Default microphone produced only silence; check microphone permission and \
-							 the default input device",
-						)),
-						ThreadsafeFunctionCallMode::NonBlocking,
-					);
 					return;
 				}
 				on_audio.call(

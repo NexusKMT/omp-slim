@@ -1,4 +1,5 @@
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import chalk from "chalk";
 import { logger } from "@oh-my-pi/pi-utils";
 import { LiveSessionController, type LiveTranscript } from "../../live/controller";
 import { LIVE_MODEL } from "../../live/protocol";
@@ -6,6 +7,7 @@ import { LiveVisualizer } from "../../live/visualizer";
 import { vocalizer } from "../../tts/vocalizer";
 import type { AssistantMessageComponent } from "../components/assistant-message";
 import type { CustomEditor } from "../components/custom-editor";
+import { theme } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
 import { createAssistantMessageComponent } from "../utils/interactive-context-helpers";
 
@@ -19,7 +21,6 @@ const LIVE_MESSAGE_USAGE: AssistantMessage["usage"] = {
 	totalTokens: 0,
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
-
 function errorFrom(cause: unknown): Error {
 	return cause instanceof Error ? cause : new Error(String(cause));
 }
@@ -37,6 +38,7 @@ export class LiveCommandController {
 	#previousUseTerminalCursor: boolean | undefined;
 	#resumeVocalizer: (() => void) | undefined;
 	#assistantTranscriptComponent: AssistantMessageComponent | undefined;
+	#assistantTranscriptTurn = 0;
 	#assistantTranscriptStartedAt = 0;
 
 	constructor(ctx: InteractiveModeContext) {
@@ -88,6 +90,8 @@ export class LiveCommandController {
 	}
 
 	async #start(): Promise<void> {
+		this.#assistantTranscriptTurn = 0;
+		this.#assistantTranscriptStartedAt = 0;
 		const visualizer = new LiveVisualizer({
 			onStop: () => {
 				void this.stop().catch(cause => this.#ctx.showError(errorFrom(cause).message));
@@ -113,7 +117,15 @@ export class LiveCommandController {
 				},
 				onTranscript: transcript => {
 					if (this.#visualizer !== visualizer) return;
-					this.#presentTranscript(transcript);
+					if (!transcript) {
+						visualizer.clearTranscript();
+						this.#ctx.ui.requestComponentRender(visualizer);
+					} else if (transcript.role === "user") {
+						visualizer.setTranscript(transcript.text);
+						this.#ctx.ui.requestComponentRender(visualizer);
+					} else {
+						this.#presentAssistantTranscript(transcript);
+					}
 				},
 				onTerminal: error => this.#finish(session, error),
 			},
@@ -130,24 +142,22 @@ export class LiveCommandController {
 		}
 	}
 
-	#presentTranscript(transcript: LiveTranscript | undefined): void {
-		if (!transcript) return;
-		if (transcript.role === "user") {
-			if (!transcript.final) return;
-			this.#finalizeAssistantTranscript();
-			this.#ctx.addMessageToChat({
-				role: "user",
-				content: [{ type: "text", text: transcript.text }],
-				attribution: "user",
-				timestamp: Date.now(),
-			});
-			this.#ctx.ui.requestRender();
+	#presentAssistantTranscript(transcript: LiveTranscript): void {
+		if (
+			transcript.turn < this.#assistantTranscriptTurn ||
+			(transcript.turn === this.#assistantTranscriptTurn && !this.#assistantTranscriptComponent)
+		) {
 			return;
+		}
+		if (transcript.turn > this.#assistantTranscriptTurn) {
+			this.#finalizeAssistantTranscript();
+			this.#assistantTranscriptTurn = transcript.turn;
 		}
 
 		let component = this.#assistantTranscriptComponent;
 		if (!component) {
 			component = createAssistantMessageComponent(this.#ctx);
+			component.setTextColorTransform(text => theme.fg("borderAccent", text));
 			this.#assistantTranscriptComponent = component;
 			this.#assistantTranscriptStartedAt = Date.now();
 		}
@@ -162,7 +172,6 @@ export class LiveCommandController {
 			timestamp: this.#assistantTranscriptStartedAt,
 		};
 		component.updateContent(message, { transient: !transcript.final });
-		if (component !== this.#assistantTranscriptComponent) return;
 		if (transcript.final) {
 			component.markTranscriptBlockFinalized();
 			this.#assistantTranscriptComponent = undefined;
