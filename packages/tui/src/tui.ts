@@ -1376,6 +1376,7 @@ export class TUI extends Container {
 			this.terminal.write(encodeKittyDeleteImage(id));
 		}
 	}
+
 	/**
 	 * Get whether scrollback divergence rebuild is enabled.
 	 */

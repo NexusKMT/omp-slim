@@ -708,6 +708,7 @@ describe("TUI inline-image budget", () => {
 	});
 
 	it("lets a full-width non-fullscreen overlay replace Unicode image placeholder rows", async () => {
+		const originalGraphics = { ...getKittyGraphics() };
 		const term = new VirtualTerminal(40, 12);
 		const writes: string[] = [];
 		const realWrite = term.write.bind(term);
@@ -716,6 +717,7 @@ describe("TUI inline-image budget", () => {
 			realWrite(data);
 		});
 
+		setKittyGraphics({ unicodePlaceholders: true });
 		const tui = new TUI(term);
 		tui.addChild(makeImage(tui.imageBudget, "behind-modal"));
 		try {
@@ -743,6 +745,7 @@ describe("TUI inline-image budget", () => {
 			expect(term.getViewport().join("\n")).toContain(KITTY_PLACEHOLDER);
 		} finally {
 			tui.stop();
+			setKittyGraphics(originalGraphics);
 		}
 	});
 
