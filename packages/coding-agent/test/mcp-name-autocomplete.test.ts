@@ -87,6 +87,36 @@ describe("MCP server-name autocomplete", () => {
 		expect(names).toEqual(["project-server", "runtime-discovered", "user-disabled", "user-enabled"]);
 	});
 
+	test("collectMcpServerNames includes a discovered server disabled via disabledServers, even once dropped from mcpManager", async () => {
+		// A third-party-discovered server that was `/mcp disable`d: recorded in the user
+		// config's top-level `disabledServers` list, absent from `mcpServers`, and no
+		// longer reported by the manager (loadAllMCPConfigs filters disabled sources out).
+		await Bun.write(
+			getMCPConfigPath("user", projectDir),
+			`${JSON.stringify({ mcpServers: {}, disabledServers: ["discovered-disabled"] }, null, 2)}\n`,
+		);
+		await writeConfig("project", projectDir, {});
+		const { ctx } = createFakeCtx([]);
+
+		const names = await collectMcpServerNames(ctx);
+
+		expect(names).toEqual(["discovered-disabled"]);
+	});
+
+	test("collectMcpServerNames accepts preloaded configs and skips re-reading them from disk", async () => {
+		await writeConfig("user", projectDir, { "user-server": { type: "stdio", command: "one" } });
+		await writeConfig("project", projectDir, { "project-server": { type: "stdio", command: "two" } });
+		const { ctx } = createFakeCtx(["runtime-discovered"]);
+
+		const names = await collectMcpServerNames(ctx, {
+			userConfig: { mcpServers: { "override-server": { type: "stdio", command: "override" } } },
+			projectConfig: { mcpServers: {} },
+		});
+
+		// Reflects the preloaded configs, not what's actually on disk for "user"/"project".
+		expect(names).toEqual(["override-server", "runtime-discovered"]);
+	});
+
 	test("/mcp getArgumentCompletions resolves known server names after a server-name subcommand, filtered by prefix", async () => {
 		await writeConfig("user", projectDir, {
 			"my-server": { type: "stdio", command: "one" },
@@ -124,5 +154,17 @@ describe("MCP server-name autocomplete", () => {
 
 		const matches = await mcp.getArgumentCompletions("en");
 		expect(matches?.map(item => item.label)).toEqual(["enable"]);
+	});
+
+	test("/mcp getArgumentCompletions returns null instead of throwing when a config file is malformed", async () => {
+		// Malformed JSON makes readMCPConfigFile's JSON.parse throw (ENOENT is the only
+		// error it swallows), which must not escape the autocomplete provider.
+		await Bun.write(getMCPConfigPath("user", projectDir), "{ not valid json");
+		const { ctx } = createFakeCtx([]);
+		const runtime: TuiSlashCommandRuntime = { ctx };
+		const mcp = buildTuiBuiltinSlashCommands(runtime).find(c => c.name === "mcp");
+		if (!mcp?.getArgumentCompletions) throw new Error("expected /mcp command with getArgumentCompletions");
+
+		await expect(mcp.getArgumentCompletions("enable ")).resolves.toBeNull();
 	});
 });

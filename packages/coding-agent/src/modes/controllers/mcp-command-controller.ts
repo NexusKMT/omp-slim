@@ -48,7 +48,13 @@ import {
 	searchSmitheryRegistry,
 	toConfigName,
 } from "../../mcp/smithery-registry";
-import type { MCPAuthChallenge, MCPAuthConfig, MCPServerConfig, MCPServerConnection } from "../../mcp/types";
+import type {
+	MCPAuthChallenge,
+	MCPAuthConfig,
+	MCPConfigFile,
+	MCPServerConfig,
+	MCPServerConnection,
+} from "../../mcp/types";
 import { shortenPath } from "../../tools/render-utils";
 import { urlHyperlinkAlways } from "../../tui";
 import { copyToClipboard } from "../../utils/clipboard";
@@ -248,28 +254,45 @@ type MCPSearchParsed = {
 
 /**
  * Collect the de-duplicated union of every MCP server name we know about:
- * user config, project config, and any runtime-discovered servers not
- * already present in either config (`ctx.mcpManager.getAllServerNames()`
- * covers connections, pending connections, and discovered-but-not-yet-
- * connected sources). Disabled servers stay in this list — disabling a
- * server only flips its config `enabled` flag, it doesn't remove the config
- * entry, so a disabled server is still a valid `/mcp enable <name>` target.
+ * user config, project config, disabled-server entries, and any
+ * runtime-discovered servers not already present in either config
+ * (`ctx.mcpManager.getAllServerNames()` covers connections, pending
+ * connections, and discovered-but-not-yet-connected sources). Disabled
+ * servers stay in this list — disabling a server only flips its config
+ * `enabled` flag, it doesn't remove the config entry, so a disabled server
+ * is still a valid `/mcp enable <name>` target. This also covers a
+ * discovered (non-config) server that was disabled: `loadAllMCPConfigs`
+ * filters it out of `getAllServerNames()`, but its name survives in
+ * `userConfig.disabledServers`.
  *
  * This is the single source of truth for "every known server name": both
  * `MCPCommandController#handleList()` and the `/mcp` slash-command argument
  * completer (server-name autocomplete for `enable`/`disable`/`test`/etc.)
  * call this instead of re-deriving the union themselves.
+ *
+ * `preloaded` lets a caller that already read both config files (e.g.
+ * `#handleList()`) pass them in and skip the redundant re-read.
  */
-export async function collectMcpServerNames(ctx: InteractiveModeContext): Promise<string[]> {
-	const cwd = getProjectDir();
-	const [userConfig, projectConfig] = await Promise.all([
-		readMCPConfigFile(getMCPConfigPath("user", cwd)),
-		readMCPConfigFile(getMCPConfigPath("project", cwd)),
-	]);
+export async function collectMcpServerNames(
+	ctx: InteractiveModeContext,
+	preloaded?: { userConfig: MCPConfigFile; projectConfig: MCPConfigFile },
+): Promise<string[]> {
+	let userConfig: MCPConfigFile;
+	let projectConfig: MCPConfigFile;
+	if (preloaded) {
+		({ userConfig, projectConfig } = preloaded);
+	} else {
+		const cwd = getProjectDir();
+		[userConfig, projectConfig] = await Promise.all([
+			readMCPConfigFile(getMCPConfigPath("user", cwd)),
+			readMCPConfigFile(getMCPConfigPath("project", cwd)),
+		]);
+	}
 
 	const names = new Set<string>([
 		...Object.keys(userConfig.mcpServers ?? {}),
 		...Object.keys(projectConfig.mcpServers ?? {}),
+		...(userConfig.disabledServers ?? []),
 	]);
 	if (ctx.mcpManager) {
 		for (const name of ctx.mcpManager.getAllServerNames()) {
@@ -1304,10 +1327,10 @@ export class MCPCommandController {
 
 			// Collect runtime-discovered servers not in config files
 			const configServerNames = new Set([...userServers, ...projectServers]);
-			const disabledServerNames = new Set(await readDisabledServers(userPath));
+			const disabledServerNames = new Set(userConfig.disabledServers ?? []);
 			const discoveredServers: { name: string; source: SourceMeta }[] = [];
 			if (this.ctx.mcpManager) {
-				const allServerNames = await collectMcpServerNames(this.ctx);
+				const allServerNames = await collectMcpServerNames(this.ctx, { userConfig, projectConfig });
 				for (const name of allServerNames) {
 					if (configServerNames.has(name)) continue;
 					if (disabledServerNames.has(name)) continue;

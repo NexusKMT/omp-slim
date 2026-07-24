@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import { type AutocompleteItem, Spacer } from "@oh-my-pi/pi-tui";
-import { APP_NAME, getProjectDir, setProjectDir } from "@oh-my-pi/pi-utils";
+import { APP_NAME, getProjectDir, logger, setProjectDir } from "@oh-my-pi/pi-utils";
 import { reset as resetCapabilities } from "../capability";
 import { COLLAB_GUEST_ALLOWED_COMMANDS, CollabGuestLink } from "../collab/guest";
 import { CollabHost } from "../collab/host";
@@ -2478,7 +2478,13 @@ function buildMcpArgumentCompletions(
 		if (!MCP_SERVER_NAME_SUBCOMMANDS.has(rawSubcommand.toLowerCase())) return null;
 
 		const namePrefix = argumentPrefix.slice(spaceIndex + 1).toLowerCase();
-		const serverNames = await collectMcpServerNames(runtime.ctx);
+		let serverNames: string[];
+		try {
+			serverNames = await collectMcpServerNames(runtime.ctx);
+		} catch (error) {
+			logger.warn("MCP server-name autocomplete failed to read config", { error });
+			return null;
+		}
 		const matches: AutocompleteItem[] = serverNames
 			.filter(name => name.toLowerCase().startsWith(namePrefix))
 			.map(name => ({ value: `${rawSubcommand} ${name} `, label: name }));
