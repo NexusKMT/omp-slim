@@ -233,7 +233,7 @@ if (isMainThread) {
 			}
 			if (brokenPipeSource === "stdio-write" && stdioDisconnectRegistrations > 0) {
 				logger.warn("Stdio peer disconnected; shutting down gracefully", { err });
-				await quit(0);
+				await runQuit(0, "native");
 				return;
 			}
 			if (isExpectedCleanupError(reason)) {
@@ -325,13 +325,7 @@ export function cleanup(): Promise<void> {
 	return runCleanup(Reason.MANUAL);
 }
 
-/**
- * Runs all cleanup callbacks and exits.
- *
- * In main thread: waits for stdout drain, then calls process.exit().
- * In workers: runs cleanup only (process.exit would kill entire process).
- */
-export async function quit(code: number = 0): Promise<void> {
+async function runQuit(code: number, exitMode: "guarded" | "native"): Promise<void> {
 	await runCleanup(Reason.MANUAL);
 
 	if (!isMainThread) {
@@ -343,5 +337,21 @@ export async function quit(code: number = 0): Promise<void> {
 		process.stdout.once("drain", resolve);
 		await Promise.race([promise, Bun.sleep(5000)]);
 	}
-	exitProcess(code);
+
+	switch (exitMode) {
+		case "guarded":
+			return process.exit(code);
+		case "native":
+			return exitProcess(code);
+	}
+}
+
+/**
+ * Runs all cleanup callbacks and exits through the current `process.exit`.
+ *
+ * In main thread: waits for stdout drain, then calls `process.exit()`.
+ * In workers: runs cleanup only (process.exit would kill entire process).
+ */
+export function quit(code: number = 0): Promise<void> {
+	return runQuit(code, "guarded");
 }
