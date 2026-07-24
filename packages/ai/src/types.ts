@@ -560,6 +560,12 @@ export interface SimpleStreamOptions extends Omit<StreamOptions, "apiKey"> {
 	 * or the catalog entry already names the variant).
 	 */
 	openrouterVariant?: string;
+	/**
+	 * Caller-owned Google context-cache resource name. Forwarded only to the
+	 * direct Gemini GenerateContent and Vertex GenerateContent APIs; all other
+	 * providers ignore it. Callers own the cache lifecycle and compatibility.
+	 */
+	cachedContent?: string;
 	/** Antigravity endpoint routing mode: "auto" (default with failover), "production", "sandbox". */
 	antigravityEndpointMode?: "auto" | "production" | "sandbox";
 	/**
