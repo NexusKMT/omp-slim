@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Prevented inline Kitty graphics from covering full-width overlays such as `/switch`.
+
 ## [17.1.0] - 2026-07-24
 
 ### Added
