@@ -167,4 +167,24 @@ describe("MCP server-name autocomplete", () => {
 
 		await expect(mcp.getArgumentCompletions("enable ")).resolves.toBeNull();
 	});
+
+	test("/mcp getArgumentCompletions for remove only offers config-file names, tagging user-only ones with --scope user", async () => {
+		await writeConfig("user", projectDir, { "user-only": { type: "stdio", command: "one" } });
+		await writeConfig("project", projectDir, { "project-only": { type: "stdio", command: "two" } });
+		// A purely runtime-discovered server (no config entry in either scope) has
+		// nothing for /mcp remove to delete and must not be offered.
+		const { ctx } = createFakeCtx(["discovered-only"]);
+		const runtime: TuiSlashCommandRuntime = { ctx };
+		const mcp = buildTuiBuiltinSlashCommands(runtime).find(c => c.name === "mcp");
+		if (!mcp?.getArgumentCompletions) throw new Error("expected /mcp command with getArgumentCompletions");
+
+		const matches = await mcp.getArgumentCompletions("remove ");
+		expect(matches?.map(item => item.label)).toEqual(["project-only", "user-only (user)"]);
+
+		const projectMatch = matches?.find(item => item.label === "project-only");
+		expect(projectMatch?.value).toBe("remove project-only ");
+
+		const userMatch = matches?.find(item => item.label === "user-only (user)");
+		expect(userMatch?.value).toBe("remove user-only --scope user ");
+	});
 });
