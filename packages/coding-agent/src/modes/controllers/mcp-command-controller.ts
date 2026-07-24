@@ -246,6 +246,39 @@ type MCPSearchParsed = {
 	error?: string;
 };
 
+/**
+ * Collect the de-duplicated union of every MCP server name we know about:
+ * user config, project config, and any runtime-discovered servers not
+ * already present in either config (`ctx.mcpManager.getAllServerNames()`
+ * covers connections, pending connections, and discovered-but-not-yet-
+ * connected sources). Disabled servers stay in this list — disabling a
+ * server only flips its config `enabled` flag, it doesn't remove the config
+ * entry, so a disabled server is still a valid `/mcp enable <name>` target.
+ *
+ * This is the single source of truth for "every known server name": both
+ * `MCPCommandController#handleList()` and the `/mcp` slash-command argument
+ * completer (server-name autocomplete for `enable`/`disable`/`test`/etc.)
+ * call this instead of re-deriving the union themselves.
+ */
+export async function collectMcpServerNames(ctx: InteractiveModeContext): Promise<string[]> {
+	const cwd = getProjectDir();
+	const [userConfig, projectConfig] = await Promise.all([
+		readMCPConfigFile(getMCPConfigPath("user", cwd)),
+		readMCPConfigFile(getMCPConfigPath("project", cwd)),
+	]);
+
+	const names = new Set<string>([
+		...Object.keys(userConfig.mcpServers ?? {}),
+		...Object.keys(projectConfig.mcpServers ?? {}),
+	]);
+	if (ctx.mcpManager) {
+		for (const name of ctx.mcpManager.getAllServerNames()) {
+			names.add(name);
+		}
+	}
+	return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+
 export class MCPCommandController {
 	constructor(private ctx: InteractiveModeContext) {}
 
@@ -1274,7 +1307,8 @@ export class MCPCommandController {
 			const disabledServerNames = new Set(await readDisabledServers(userPath));
 			const discoveredServers: { name: string; source: SourceMeta }[] = [];
 			if (this.ctx.mcpManager) {
-				for (const name of this.ctx.mcpManager.getAllServerNames()) {
+				const allServerNames = await collectMcpServerNames(this.ctx);
+				for (const name of allServerNames) {
 					if (configServerNames.has(name)) continue;
 					if (disabledServerNames.has(name)) continue;
 					const source = this.ctx.mcpManager.getSource(name);

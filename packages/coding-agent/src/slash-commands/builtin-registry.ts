@@ -28,6 +28,7 @@ import {
 } from "../extensibility/plugins/marketplace";
 import { resolveMemoryBackend } from "../memory-backend";
 import { runPauseScreen } from "../modes/components/pause-screen";
+import { collectMcpServerNames } from "../modes/controllers/mcp-command-controller";
 import { describeLoopLimitRuntime } from "../modes/loop-limit";
 import { theme } from "../modes/theme/theme";
 import type { InteractiveModeContext } from "../modes/types";
@@ -2436,6 +2437,47 @@ function buildArgumentCompletions(subcommands: SubcommandDef[]): (prefix: string
 	};
 }
 
+/** /mcp subcommands whose argument is a server name (per their `usage: "<name>..."`). */
+const MCP_SERVER_NAME_SUBCOMMANDS: ReadonlySet<string> = new Set([
+	"enable",
+	"disable",
+	"test",
+	"remove",
+	"reconnect",
+	"reauth",
+	"unauth",
+]);
+
+/**
+ * Build getArgumentCompletions for /mcp. Delegates to the generic
+ * declarative subcommand completer while the subcommand name itself is
+ * still being typed, then switches to MCP server-name completion (sourced
+ * from {@link collectMcpServerNames}) once a recognized server-name
+ * subcommand (enable/disable/test/remove/reconnect/reauth/unauth) is
+ * followed by a space. Subcommands with a different argument shape
+ * (add, smithery-search, ...) get no argument completion.
+ */
+function buildMcpArgumentCompletions(
+	subcommands: SubcommandDef[],
+	runtime: TuiSlashCommandRuntime,
+): (argumentPrefix: string) => Promise<AutocompleteItem[] | null> {
+	const genericCompletions = buildArgumentCompletions(subcommands);
+	return async (argumentPrefix: string) => {
+		const spaceIndex = argumentPrefix.indexOf(" ");
+		if (spaceIndex === -1) return genericCompletions(argumentPrefix);
+
+		const rawSubcommand = argumentPrefix.slice(0, spaceIndex);
+		if (!MCP_SERVER_NAME_SUBCOMMANDS.has(rawSubcommand.toLowerCase())) return null;
+
+		const namePrefix = argumentPrefix.slice(spaceIndex + 1).toLowerCase();
+		const serverNames = await collectMcpServerNames(runtime.ctx);
+		const matches: AutocompleteItem[] = serverNames
+			.filter(name => name.toLowerCase().startsWith(namePrefix))
+			.map(name => ({ value: `${rawSubcommand} ${name} `, label: name }));
+		return matches.length > 0 ? matches : null;
+	};
+}
+
 /**
  * Build getInlineHint from declarative subcommand definitions.
  * Shows remaining completion + usage as dim ghost text after cursor.
@@ -2599,7 +2641,10 @@ function materializeTuiBuiltinSlashCommand(
 ): TuiBuiltinSlashCommand {
 	const materialized: TuiBuiltinSlashCommand = { ...cmd };
 	if (cmd.subcommands) {
-		materialized.getArgumentCompletions = buildArgumentCompletions(cmd.subcommands);
+		materialized.getArgumentCompletions =
+			cmd.name === "mcp" && runtime
+				? buildMcpArgumentCompletions(cmd.subcommands, runtime)
+				: buildArgumentCompletions(cmd.subcommands);
 		materialized.getInlineHint = buildSubcommandInlineHint(cmd.subcommands);
 	} else if (cmd.name === "move") {
 		materialized.getArgumentCompletions = buildDirectoryArgumentCompletions();
