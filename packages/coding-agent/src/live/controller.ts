@@ -17,7 +17,7 @@ import {
 import { CodexLiveTransport } from "./transport";
 import type { LivePhase, LiveTranscript } from "./visualizer";
 
-const DEFAULT_VOICE = "marin";
+const DEFAULT_VOICE = "sol";
 const OUTPUT_ACTIVE_LEVEL = 0.015;
 const MIN_BARGE_IN_LEVEL = 0.04;
 const OUTPUT_ECHO_RATIO = 0.65;
@@ -42,7 +42,7 @@ export interface LiveSessionControllerOptions {
 	callbacks: LiveSessionCallbacks;
 	/** Extracts visible assistant text using the caller's normal UI rules. */
 	extractAssistantText(message: AssistantMessage): string;
-	/** Realtime output voice, defaulting to marin. */
+	/** Realtime output voice, defaulting to sol. */
 	voice?: string;
 }
 

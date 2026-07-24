@@ -34,22 +34,6 @@
 		Promise.resolve(window.__ompLiveFailure(message)).catch(() => {});
 	}
 
-	function waitForIceGathering() {
-		if (peer.iceGatheringState === "complete") return Promise.resolve();
-		return new Promise((resolve, reject) => {
-			const timeout = setTimeout(() => {
-				peer.removeEventListener("icegatheringstatechange", onChange);
-				reject(new Error("Timed out gathering WebRTC ICE candidates"));
-			}, 10_000);
-			function onChange() {
-				if (peer.iceGatheringState !== "complete") return;
-				clearTimeout(timeout);
-				peer.removeEventListener("icegatheringstatechange", onChange);
-				resolve();
-			}
-			peer.addEventListener("icegatheringstatechange", onChange);
-		});
-	}
 
 	function decodePcm(base64) {
 		const encoded = atob(base64);
@@ -154,10 +138,9 @@
 		};
 
 		const offer = await peer.createOffer();
+		if (!offer.sdp) throw new Error("Browser produced an empty WebRTC offer");
 		await peer.setLocalDescription(offer);
-		await waitForIceGathering();
-		if (!peer.localDescription || !peer.localDescription.sdp) throw new Error("Browser produced an empty WebRTC offer");
-		return peer.localDescription.sdp;
+		return offer.sdp;
 	}
 
 	async function acceptAnswer(sdp) {

@@ -23,6 +23,7 @@
 #![feature(alloc_error_hook)]
 
 pub mod appearance;
+pub mod audio;
 pub mod ast;
 pub mod block;
 pub mod clipboard;
@@ -34,6 +35,7 @@ pub mod desktop;
 /// pure conversion helpers stay unit-testable without a live X server.
 #[cfg(any(target_os = "linux", test))]
 pub mod desktop_x11;
+pub mod devicecheck;
 pub mod diff;
 pub mod fd;
 pub mod glob;
@@ -43,6 +45,7 @@ pub mod highlight;
 pub mod html;
 pub mod iofs;
 pub mod keys;
+pub mod live;
 pub mod sixel;
 pub mod snapcompact;
 pub use pi_ast::language;

@@ -16,7 +16,10 @@ import { loadNative } from "./loader-state.js";
 const nativeBindings = loadNative();
 // --- generated native exports (do not edit) ---
 // classes
+export const AudioCapture = nativeBindings.AudioCapture;
+export const AudioPlayback = nativeBindings.AudioPlayback;
 export const DesktopSession = nativeBindings.DesktopSession;
+export const LiveWebRtcPeer = nativeBindings.LiveWebRtcPeer;
 export const MacAppearanceObserver = nativeBindings.MacAppearanceObserver;
 export const MacOSPowerAssertion = nativeBindings.MacOSPowerAssertion;
 export const Process = nativeBindings.Process;
@@ -34,6 +37,7 @@ export const copyToClipboard = nativeBindings.copyToClipboard;
 export const cosineSimilarityPairs = nativeBindings.cosineSimilarityPairs;
 export const countTokens = nativeBindings.countTokens;
 export const detectMacOSAppearance = nativeBindings.detectMacOSAppearance;
+export const deviceCheckGenerateToken = nativeBindings.deviceCheckGenerateToken;
 export const diffLineRuns = nativeBindings.diffLineRuns;
 export const diffLines = nativeBindings.diffLines;
 export const diffWords = nativeBindings.diffWords;
