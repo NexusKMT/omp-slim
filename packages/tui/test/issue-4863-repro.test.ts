@@ -101,4 +101,39 @@ describe("issue #4863: Ctrl+O full-view expand truncates the session on ConPTY",
 			tui.stop();
 		}
 	});
+
+	it("still bounds a post-startup session-replace paint on ConPTY (issue #2115)", async () => {
+		// /resume, handoff, and other session switches replace the transcript via
+		// requestRender(true, { clearScrollback: true }) after the TUI is already
+		// running — firstPaint is false, but these must stay bounded so a
+		// multi-megabyte replay does not stall conhost.
+		Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+		const term = new VirtualTerminal(80, 24, 20_000);
+		const writes: string[] = [];
+		const realWrite = term.write.bind(term);
+		vi.spyOn(term, "write").mockImplementation((data: string) => {
+			writes.push(data);
+			realWrite(data);
+		});
+		const tui = new TUI(term);
+		tui.addChild(new LargeContent(8000));
+
+		try {
+			tui.start();
+			await term.waitForRender();
+
+			// Simulate a session replace: bulk transcript swap requesting a
+			// scrollback-clearing full paint, the path handleResumeSession() takes.
+			writes.length = 0;
+			tui.requestRender(true, { clearScrollback: true });
+			await term.waitForRender();
+
+			const replacePaint = writes.find(write => write.includes("\x1b[2J"));
+			expect(replacePaint).toBeDefined();
+			expect(replacePaint).toContain("older lines hidden");
+			expect(Buffer.byteLength(replacePaint ?? "", "utf8")).toBeLessThan(128 * 1024);
+		} finally {
+			tui.stop();
+		}
+	});
 });
