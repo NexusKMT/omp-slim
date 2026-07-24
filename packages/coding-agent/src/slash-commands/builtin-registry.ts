@@ -2458,6 +2458,18 @@ const MCP_SERVER_NAME_SUBCOMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * `/mcp` subcommands where a discovered server disabled via `/mcp disable`
+ * (name only in `userConfig.disabledServers`, dropped from
+ * `mcpManager.getAllServerNames()` by `loadAllMCPConfigs`) is still a valid
+ * completion target: `enable` is the primary re-enable path, and offering
+ * it for `disable` is a harmless no-op (`#handleSetEnabled` reports
+ * "already disabled"). The rest (`test`/`reconnect`/`reauth`/`unauth`) need
+ * a live connection or config entry that a disabled-only name never has —
+ * `#resolveServerForAuth`/`reconnectServer` would report it as not found.
+ */
+const MCP_DISABLED_ONLY_ELIGIBLE_SUBCOMMANDS: ReadonlySet<string> = new Set(["enable", "disable"]);
+
+/**
  * Build getArgumentCompletions for /mcp. Delegates to the generic
  * declarative subcommand completer while the subcommand name itself is
  * still being typed, then switches to MCP server-name completion (sourced
@@ -2489,7 +2501,11 @@ function buildMcpArgumentCompletions(
 
 		let serverNames: string[];
 		try {
-			serverNames = await collectMcpServerNames(runtime.ctx);
+			serverNames = await collectMcpServerNames(
+				runtime.ctx,
+				undefined,
+				MCP_DISABLED_ONLY_ELIGIBLE_SUBCOMMANDS.has(lowerSubcommand),
+			);
 		} catch (error) {
 			logger.warn("MCP server-name autocomplete failed to read config", { error });
 			return null;

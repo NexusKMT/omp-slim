@@ -254,16 +254,21 @@ type MCPSearchParsed = {
 
 /**
  * Collect the de-duplicated union of every MCP server name we know about:
- * user config, project config, disabled-server entries, and any
- * runtime-discovered servers not already present in either config
- * (`ctx.mcpManager.getAllServerNames()` covers connections, pending
- * connections, and discovered-but-not-yet-connected sources). Disabled
- * servers stay in this list — disabling a server only flips its config
- * `enabled` flag, it doesn't remove the config entry, so a disabled server
- * is still a valid `/mcp enable <name>` target. This also covers a
- * discovered (non-config) server that was disabled: `loadAllMCPConfigs`
- * filters it out of `getAllServerNames()`, but its name survives in
- * `userConfig.disabledServers`.
+ * user config, project config, and any runtime-discovered servers not
+ * already present in either config (`ctx.mcpManager.getAllServerNames()`
+ * covers connections, pending connections, and discovered-but-not-yet-
+ * connected sources).
+ *
+ * When `includeDisabled` is true (the default), disabled-server entries
+ * are unioned in too — disabling a server only flips its config `enabled`
+ * flag, it doesn't remove the config entry, so a disabled server is still
+ * a valid `/mcp enable <name>` target. This also covers a discovered
+ * (non-config) server that was disabled: `loadAllMCPConfigs` filters it
+ * out of `getAllServerNames()`, but its name survives in
+ * `userConfig.disabledServers`. Callers whose target operation needs a
+ * live connection or config entry (`/mcp test`/`reconnect`/`reauth`/
+ * `unauth`) — which a disabled-only name can never satisfy — must pass
+ * `includeDisabled: false`.
  *
  * This is the single source of truth for "every known server name": both
  * `MCPCommandController#handleList()` and the `/mcp` slash-command argument
@@ -276,6 +281,7 @@ type MCPSearchParsed = {
 export async function collectMcpServerNames(
 	ctx: InteractiveModeContext,
 	preloaded?: { userConfig: MCPConfigFile; projectConfig: MCPConfigFile },
+	includeDisabled = true,
 ): Promise<string[]> {
 	let userConfig: MCPConfigFile;
 	let projectConfig: MCPConfigFile;
@@ -292,7 +298,7 @@ export async function collectMcpServerNames(
 	const names = new Set<string>([
 		...Object.keys(userConfig.mcpServers ?? {}),
 		...Object.keys(projectConfig.mcpServers ?? {}),
-		...(userConfig.disabledServers ?? []),
+		...(includeDisabled ? (userConfig.disabledServers ?? []) : []),
 	]);
 	if (ctx.mcpManager) {
 		for (const name of ctx.mcpManager.getAllServerNames()) {

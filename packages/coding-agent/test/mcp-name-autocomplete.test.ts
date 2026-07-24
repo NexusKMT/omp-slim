@@ -136,6 +136,30 @@ describe("MCP server-name autocomplete", () => {
 		expect(filtered?.[0]?.value).toBe("enable my-server ");
 	});
 
+	test("/mcp getArgumentCompletions offers a disabled-only discovered name for enable/disable but not test/reconnect/reauth/unauth", async () => {
+		// "discovered-disabled" is a third-party server that was /mcp disable'd:
+		// present only in userConfig.disabledServers, absent from mcpServers, and
+		// no longer reported by the manager (loadAllMCPConfigs drops disabled
+		// sources). #resolveServerForAuth/reconnectServer can't resolve it, so
+		// test/reconnect/reauth/unauth must not suggest it.
+		await Bun.write(
+			getMCPConfigPath("user", projectDir),
+			`${JSON.stringify({ mcpServers: {}, disabledServers: ["discovered-disabled"] }, null, 2)}\n`,
+		);
+		await writeConfig("project", projectDir, {});
+		const { ctx } = createFakeCtx([]);
+		const runtime: TuiSlashCommandRuntime = { ctx };
+		const mcp = buildTuiBuiltinSlashCommands(runtime).find(c => c.name === "mcp");
+		if (!mcp?.getArgumentCompletions) throw new Error("expected /mcp command with getArgumentCompletions");
+
+		expect((await mcp.getArgumentCompletions("enable "))?.map(item => item.label)).toEqual(["discovered-disabled"]);
+		expect((await mcp.getArgumentCompletions("disable "))?.map(item => item.label)).toEqual(["discovered-disabled"]);
+		expect(await mcp.getArgumentCompletions("test ")).toBeNull();
+		expect(await mcp.getArgumentCompletions("reconnect ")).toBeNull();
+		expect(await mcp.getArgumentCompletions("reauth ")).toBeNull();
+		expect(await mcp.getArgumentCompletions("unauth ")).toBeNull();
+	});
+
 	test("/mcp getArgumentCompletions returns null for subcommands that don't take a server name", async () => {
 		await writeConfig("user", projectDir, { "my-server": { type: "stdio", command: "one" } });
 		const { ctx } = createFakeCtx([]);
