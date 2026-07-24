@@ -459,7 +459,7 @@ describe("AgentSession tree navigation onto an ask toolResult", () => {
 		}
 	});
 
-	it("(k) schedules an agent continue after a successful ask re-answer so the model consumes the new answer", async () => {
+	it("(k) reports a committed re-answer and resumes the agent only via resumeAfterAskReanswer", async () => {
 		const ctx = await createTestSession({ inMemory: true });
 		try {
 			const { session, sessionManager } = ctx;
@@ -477,30 +477,34 @@ describe("AgentSession tree navigation onto an ask toolResult", () => {
 
 			const probe = await session.navigateTree(tr1Id, { allowAskReopen: true });
 			expect(probe.reopenAsk).toBeDefined();
-			// The read-only probe must NOT resume the agent — nothing was committed yet.
-			await session.waitForIdle();
-			expect(continueSpy).not.toHaveBeenCalled();
+			// The read-only probe commits nothing, so it must not report a re-answer.
+			expect(probe.askReanswerCommitted).toBeFalsy();
 
 			const result = await session.navigateTree(tr1Id, {
 				allowAskReopen: true,
 				reanswerAskResult: newAnswerResult(),
 			});
 			expect(result.cancelled).toBe(false);
+			// navigateTree reports the commit but does NOT resume on its own — the
+			// interactive caller owns the timing so the resumed turn renders against
+			// the rebuilt transcript (issue #6483).
+			expect(result.askReanswerCommitted).toBe(true);
+			await session.waitForIdle();
+			expect(continueSpy).not.toHaveBeenCalled();
+			// The tail the resume will continue from is the new answer toolResult.
+			const messages = session.messages;
+			expect(messages[messages.length - 1]?.role).toBe("toolResult");
 
-			// The freshly-branched ask toolResult must drive a follow-up turn, matching
-			// how a live ask completion resumes the agent (issue #6483).
+			// The caller resumes explicitly after rebuilding its UI.
+			session.resumeAfterAskReanswer();
 			await session.waitForIdle();
 			expect(continueSpy).toHaveBeenCalledTimes(1);
-			// The tail the continue resumes from is the new answer toolResult.
-			const messages = session.messages;
-			const last = messages[messages.length - 1];
-			expect(last?.role).toBe("toolResult");
 		} finally {
 			await ctx.cleanup();
 		}
 	});
 
-	it("(l) does not schedule a continue for a plain non-ask leaf move", async () => {
+	it("(l) does not report a committed re-answer for a plain non-ask leaf move", async () => {
 		const ctx = await createTestSession({ inMemory: true });
 		try {
 			const { session, sessionManager } = ctx;
@@ -515,6 +519,7 @@ describe("AgentSession tree navigation onto an ask toolResult", () => {
 			const result = await session.navigateTree(tr1Id, { allowAskReopen: true });
 			expect(result.cancelled).toBe(false);
 			expect(result.reopenAsk).toBeUndefined();
+			expect(result.askReanswerCommitted).toBeFalsy();
 
 			await session.waitForIdle();
 			expect(continueSpy).not.toHaveBeenCalled();
