@@ -5,6 +5,8 @@
 //! never race each other and every coordinate action is interpreted against the
 //! last composite frame returned to JavaScript.
 
+#[cfg(target_os = "macos")]
+use std::process::{Command, Stdio};
 use std::{
 	collections::HashSet,
 	fmt,
@@ -577,8 +579,88 @@ struct LayoutDisplay {
 
 #[derive(Debug)]
 struct MonitorSnapshot {
+	#[cfg(not(target_os = "macos"))]
 	monitor: Monitor,
 	display: LayoutDisplay,
+}
+
+#[cfg(target_os = "macos")]
+fn capture_quartz_screenshot(display: &LayoutDisplay) -> CoreResult<RgbaImage> {
+	let file = tempfile::Builder::new()
+		.prefix("omp-computer-")
+		.suffix(".png")
+		.tempfile()
+		.map_err(|error| {
+			DesktopError::new(
+				ErrorCode::CaptureFailed,
+				format!("failed to create temporary screenshot file: {error}"),
+			)
+		})?;
+	let rect = format!("-R{},{},{},{}", display.x, display.y, display.width, display.height);
+	let mut child = Command::new("/usr/sbin/screencapture")
+		.arg("-x")
+		.arg(rect)
+		.arg(file.path())
+		.stdin(Stdio::null())
+		.stdout(Stdio::null())
+		.stderr(Stdio::null())
+		.spawn()
+		.map_err(|error| {
+			DesktopError::new(
+				ErrorCode::CaptureFailed,
+				format!("failed to start macOS screen capture: {error}"),
+			)
+		})?;
+	let deadline = Instant::now() + Duration::from_secs(5);
+	let status = loop {
+		match child.try_wait() {
+			Ok(Some(status)) => break status,
+			Ok(None) => {},
+			Err(error) => {
+				let _ = child.kill();
+				let _ = child.wait();
+				return Err(DesktopError::new(
+					ErrorCode::CaptureFailed,
+					format!("failed while waiting for macOS screen capture: {error}"),
+				));
+			},
+		}
+		if Instant::now() >= deadline {
+			let _ = child.kill();
+			let _ = child.wait();
+			return Err(DesktopError::new(
+				ErrorCode::CaptureFailed,
+				"macOS screen capture exceeded its five-second deadline",
+			));
+		}
+		thread::sleep(Duration::from_millis(10));
+	};
+	if !status.success() {
+		return Err(DesktopError::permission_or(
+			ErrorCode::CaptureFailed,
+			format!("macOS screen capture exited with {status}"),
+		));
+	}
+	image::open(file.path())
+		.map_err(|error| {
+			DesktopError::new(
+				ErrorCode::CaptureFailed,
+				format!("failed to decode macOS screenshot: {error}"),
+			)
+		})
+		.map(DynamicImage::into_rgba8)
+}
+
+fn capture_monitor_image(snapshot: &MonitorSnapshot) -> CoreResult<RgbaImage> {
+	#[cfg(target_os = "macos")]
+	return capture_quartz_screenshot(&snapshot.display);
+	#[cfg(not(target_os = "macos"))]
+	snapshot.monitor.capture_image().map_err(|source| {
+		DesktopError::permission_or(
+			ErrorCode::CaptureFailed,
+			format!("capture of display `{}` failed: {source}", snapshot.display.id),
+		)
+	})
 }
 
 const fn same_display_rect(left: &LayoutDisplay, right: &LayoutDisplay) -> bool {
@@ -984,6 +1066,7 @@ impl DesktopWorker {
 			let scale = f64::from(monitor.scale_factor().map_err(capture_metadata_error)?);
 			let is_primary = monitor.is_primary().map_err(capture_metadata_error)?;
 			snapshots.push(MonitorSnapshot {
+				#[cfg(not(target_os = "macos"))]
 				monitor,
 				display: LayoutDisplay { id, name, x, y, width, height, scale, is_primary },
 			});
@@ -1051,13 +1134,9 @@ impl DesktopWorker {
 		let mut images = Vec::with_capacity(snapshots.len());
 		let mut native_scale = 1.0f64;
 		for snapshot in &snapshots {
-			let image = match snapshot.monitor.capture_image() {
+			let image = match capture_monitor_image(snapshot) {
 				Ok(image) => image,
-				Err(source) => {
-					let error = DesktopError::permission_or(
-						ErrorCode::CaptureFailed,
-						format!("capture of display `{}` failed: {source}", snapshot.display.id),
-					);
+				Err(error) => {
 					self.record_capture_failure(&error);
 					return Err(error);
 				},

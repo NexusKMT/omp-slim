@@ -4227,6 +4227,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "syntect",
+ "tempfile",
  "tiktoken-rs",
  "tokio",
  "tokio-util",

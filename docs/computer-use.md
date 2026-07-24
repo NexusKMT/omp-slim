@@ -189,7 +189,7 @@ See [Tool approval mode](./approval-mode.md) for general policy resolution.
 
 | Platform | Backend | Setup and current status |
 |---|---|---|
-| macOS x64/arm64 | Quartz/CoreGraphics capture; Quartz/CGEvent and native input | Supported. Grant Screen Recording and Accessibility. Real remote desktop execution was verified on Apple hardware; see [Verification boundary](#verification-boundary). |
+| macOS x64/arm64 | Bounded macOS `screencapture` service capture; Quartz/CGEvent and native input | Supported. Grant Screen Recording and Accessibility. Real remote desktop execution was verified on Apple hardware; see [Verification boundary](#verification-boundary). |
 | Linux x64/arm64, glibc/musl, X11 | Pure-Rust X11 capture and XTest input (`x11rb`), bundled in the core addon | Supported when a graphical session and `DISPLAY` are available. No GUI system libraries are required; the backend speaks the X protocol directly over the display socket. Requires the RandR and XTEST server extensions. |
 | Linux x64/arm64, glibc/musl, Wayland | XWayland capture; XTest input bridged by the compositor | Supported with an active XWayland `DISPLAY`. Pure Wayland capture (portal/PipeWire) is not implemented. Input delivery to native Wayland windows depends on the compositor's XWayland input bridge. |
 | Windows x64 | xcap capture; Win32 virtual-desktop pointer movement and native input | Implemented, including negative origins and secondary monitors. Not remotely exercised in this feature's verification. |
