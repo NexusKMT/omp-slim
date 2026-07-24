@@ -23,22 +23,22 @@
 - Added `getServiceTiers()` and `setServiceTier()` extension APIs for reading and changing the live per-family service tier used by subsequent session requests ([#5860](https://github.com/can1357/oh-my-pi/issues/5860)).
 - Added opt-in `omp bench --cache` independent cold/warm prompt-cache pairs with stable-prefix controls, sequential-by-default execution, mechanism-specific provider proof, and privacy-safe JSON output; it rejects `openai-codex-responses`, whose WebSocket transport chains turns.
 - Added `tools.xdevDocs` prompt-doc modes (`inline`, `builtins`, `catalog`) and the `tools.xdevInlineDevices` glob allowlist controlling which mounted `xd://` device docs are inlined into the system prompt; dynamic-device catalog summaries and mid-session mount notices are capped to one line, and changing the mode in `/settings` refreshes the active prompt ([#6063](https://github.com/can1357/oh-my-pi/issues/6063)).
+- Added opt-in usage-aware model fallback for rationed coding plans: `/usage` lists every available model mapped to live quantitative usage data, same-provider account pools are reselected before model changes, interactive reserve crossings require confirmation, and noninteractive role/subagent selection walks existing fallback chains ([#5018](https://github.com/can1357/oh-my-pi/issues/5018)).
 
 ### Changed
 
 - Split the `AgentSession` implementation into focused session-domain controllers while preserving its public API and runtime behavior.
-
 - Subagents now inherit `async.enabled` and `bash.autoBackground.enabled` from the parent instead of having both force-disabled. Subagent runs complete only after their own background jobs settle and the agent submits a `yield` that postdates every delivered result: a terminal yield with jobs still pending parks the run (recoverable turn stop) instead of completing it, async results are folded in as follow-up turns (with a one-time notice offering `hub` wait/cancel), a result delivered after a yield supersedes that yield and re-runs the yield reminder ladder, and a run that never refreshes a superseded yield fails with the stale payload preserved as salvage. Teardown cancels and awaits surviving jobs before isolation worktree capture and cleanup.
 - Added ordered `bash.patterns` command approval rules so selected bash commands can be allowed, prompted, or denied by command pattern.
 - Cache full-session retention transcript incrementally instead of re-formatting the entire message history on every retain cycle ([#4246](https://github.com/can1357/oh-my-pi/issues/4246))
 - Bound interactive bash live display write queue to prevent unbounded PTY chunk backlog ([#4240](https://github.com/can1357/oh-my-pi/issues/4240))
 - All Markdown flavors (`.markdown`, `.mdx`, `.mdc`, `.mkd`, `.mdown`) now follow the `read.summarize.prose` setting like `.md`, so they read verbatim instead of being code-block summarized when prose summaries are off.
 - xAI web search now uses `grok-4.5` (at low reasoning effort) instead of `grok-4.3`.
+- Unified startup and runtime retry-fallback selector resolution, so deferred model roles honor the same exact-model, longest-wildcard, role, and default-chain precedence before session creation ([#5018](https://github.com/can1357/oh-my-pi/issues/5018)).
 
 ### Fixed
 
 - Fixed `models.yml` compatibility validation accepting invalid OpenAI-specific values through the Bedrock schema branch.
-
 - Pinned displaceable transcript snapshots (`hub` waiting polls and live `todo` lists) to the viewport like the `vibe_wait` wall: when the transcript outgrows the terminal, their still-mutating rows are no longer committed to native scrollback on every spinner tick, which previously spammed hundreds of duplicated "waiting on N jobs" rows and force-sealed the poll so follow-up polls stacked instead of replacing it.
 - Fixed legacy pi extensions failing to load on npm/source-link installs when their module graph contained a transitive CommonJS dependency (`Missing graph-owned CommonJS definition`). The `@(scope)/pi-coding-agent` root shim is served from `src/` on source-link installs, so an extension's import evaluated a second instance of `legacy-pi-compat.ts` whose top-level global registration clobbered the host bundle's populated CommonJS graph bridge with empty state; the registration is now first-wins so the host bridge survives ([#6449](https://github.com/can1357/oh-my-pi/issues/6449)).
 - Fixed `omp auth-gateway serve` and `omp auth-gateway check` bypassing the process-scoped OAuth account pool configured by `OMP_AUTH_BROKER_ACCOUNT_POOL_FILE`.
@@ -114,13 +114,6 @@
 - Added dynamic multi-root workspace context (issue [#2569](https://github.com/can1357/oh-my-pi/issues/2569)): a session now carries an ordered list of workspace directories beyond `cwd`, managed live from the terminal. New `/add-dir <path>`, `/remove-dir <path>`, and `/dirs` slash commands let you add and remove folders mid-session; the repeatable `--add-dir <path>` CLI flag seeds them at launch, and the `workspace.additionalDirectories` setting persists defaults per project. Additional roots are persisted in the session header, survive reopen/fork/move, and are surfaced to the agent in the system prompt so it knows they exist and can `read`/`grep`/`glob` them by absolute path. Design aligns with the endorsed community implementation on `feature/session-workspace`.
 - Fixed the `browser` tool's `open` action ignoring the requested `timeout` during browser acquisition (CDP discovery/connect ran to its own fixed wait), and orphaning a freshly-created browser on abort/timeout before tab publication. The requested timeout now bounds the whole open lifecycle, and one explicit registry lease is held across tab acquisition so rollback disposes exactly the failed open — a concurrent open of a different tab name on the same browser can no longer dispose the browser out from under it. ([#6365](https://github.com/can1357/oh-my-pi/issues/6365))
 - Fixed `write` silently creating a stray zero-byte file or archive member when a read was mis-dispatched as a write: a local target that ends in a read-tool selector (e.g. `src/foo.tsx:1-260:raw`), does not exist, and carries empty content is now rejected with a message pointing at the equivalent `read(...)`. Non-empty content still deliberately creates selector-shaped names, and existing literal colon filenames or archive members stay writable. ([#6387](https://github.com/can1357/oh-my-pi/issues/6387))
-### Added
-
-- Added opt-in usage-aware model fallback for rationed coding plans: `/usage` lists every available model mapped to live quantitative usage data, same-provider account pools are reselected before model changes, interactive reserve crossings require confirmation, and noninteractive role/subagent selection walks existing fallback chains ([#5018](https://github.com/can1357/oh-my-pi/issues/5018)).
-
-### Changed
-
-- Unified startup and runtime retry-fallback selector resolution, so deferred model roles honor the same exact-model, longest-wildcard, role, and default-chain precedence before session creation ([#5018](https://github.com/can1357/oh-my-pi/issues/5018)).
 
 ## [17.0.9] - 2026-07-23
 
@@ -245,6 +238,7 @@
 - Changed every bundled TTSR rule to warn without interrupting generation.
 - Renamed the system prompt's project-context section wrapper from `<context>` to `<repo-rules>` to stop it colliding with the `task` tool's `context` parameter under in-band XML tool dialects: models were closing `<parameter name="context">` with a stray `</context>` (primed by the ambient section tag) and emitting sibling params as bare `<tasks>` elements, so `tasks` arrived missing.
 - Rendered `read xd://` calls in the compact grouped read view instead of a full tool-execution card; other internal URLs (`skill://`, `agent://`, …) still render full so their resolved content stays visible.
+- Changed `providers.webSearch` preferred provider failure handling to fall back and cascade through other configured/default search providers rather than stopping immediately.
 
 ### Fixed
 
@@ -333,6 +327,7 @@
 - Fixed `autoResume` crossing an explicit `/new` boundary: after `/new` a new session's JSONL is created lazily (only once assistant output exists), so exiting before any assistant message left the per-terminal breadcrumb pointing at a not-yet-materialized file. `readTerminalBreadcrumbEntry` rejected the missing target and `continueRecent()` fell back to the most-recent session — the pre-`/new` transcript — processing the next prompt with stale context. `/new` now records a durable `fresh` breadcrumb boundary that `continueRecent()` honors (starting fresh) even when the target is absent, while a genuinely stale/deleted breadcrumb still falls back to the most-recent session ([#5730](https://github.com/can1357/oh-my-pi/issues/5730)).
 - Fixed subagents that repeatedly submit malformed `yield` results from leaving the parent waiting forever; malformed submissions now repeat the required response format, and repeated invalid submissions fail the child with a clear error. ([#4957](https://github.com/can1357/oh-my-pi/issues/4957))
 - Fixed configured or `-e` extensions in compiled binaries failing to resolve bundled `@oh-my-pi/*` value imports through the `omp-legacy-pi-bundled:` registry, and surfaced extension load failures during interactive and `-p` session startup. ([#4954](https://github.com/can1357/oh-my-pi/issues/4954))
+- Fixed snapcompact archiving reproduced assistant reasoning (`¶think:` sections) into frames replayed to the model on every subsequent request, wedging Fable 5 sessions on `reasoning_extraction` refusals; snapcompact serialization now excludes reasoning when the session model uses the Anthropic dialect ([#6093](https://github.com/can1357/oh-my-pi/issues/6093)).
 
 ### Removed
 
@@ -340,13 +335,6 @@
 - Fixed custom `anthropic-messages` OAuth providers being unable to opt into configured Claude Code fingerprint header overrides. ([#5888](https://github.com/can1357/oh-my-pi/issues/5888))
 - Fixed authoritative providers (e.g. `openai-codex`) keeping unsupported bundled models selectable when a fresh model cache and an expired OAuth token coincided: built-in discovery now forces the OAuth refresh so the provider's model manager is constructed and prunes stale bundled entries (e.g. `gpt-5.4-nano`) instead of waiting out the cache TTL. ([#5364](https://github.com/can1357/oh-my-pi/issues/5364))
 - Added `providers.webSearchOrder` to prioritize web-search fallbacks while preserving the built-in order for unlisted providers; a failing preferred provider now continues through that fallback chain.
-
-### Changed
-
-- Changed `providers.webSearch` preferred provider failure handling to fall back and cascade through other configured/default search providers rather than stopping immediately.
-### Fixed
-
-- Fixed snapcompact archiving reproduced assistant reasoning (`¶think:` sections) into frames replayed to the model on every subsequent request, wedging Fable 5 sessions on `reasoning_extraction` refusals; snapcompact serialization now excludes reasoning when the session model uses the Anthropic dialect ([#6093](https://github.com/can1357/oh-my-pi/issues/6093)).
 
 ## [17.0.5] - 2026-07-18
 
