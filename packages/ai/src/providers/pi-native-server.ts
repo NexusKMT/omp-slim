@@ -64,6 +64,7 @@ const ALLOWED_OPTION_KEYS: ReadonlySet<keyof SimpleStreamOptions> = new Set([
 	"sessionId",
 	"promptCacheKey",
 	"promptCache",
+	"statefulResponses",
 	"streamFirstEventTimeoutMs",
 	"streamIdleTimeoutMs",
 	"reasoning",

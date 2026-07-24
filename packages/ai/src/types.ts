@@ -439,6 +439,12 @@ export interface StreamOptions {
 	 */
 	promptCache?: OpenAIPromptCacheOptions;
 	/**
+	 * Disable OpenAI Responses server-side turn chaining for this request.
+	 * Diagnostic callers that compare independent requests can set this to
+	 * `false` so `previous_response_id` cannot explain a result.
+	 */
+	statefulResponses?: boolean;
+	/**
 	 * Provider-scoped mutable state store for this agent session.
 	 * Providers can use this to persist transport/session state between turns.
 	 */

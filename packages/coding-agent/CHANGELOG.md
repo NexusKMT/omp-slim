@@ -32,6 +32,9 @@
 - Bound interactive bash live display write queue to prevent unbounded PTY chunk backlog ([#4240](https://github.com/can1357/oh-my-pi/issues/4240))
 - All Markdown flavors (`.markdown`, `.mdx`, `.mdc`, `.mkd`, `.mdown`) now follow the `read.summarize.prose` setting like `.md`, so they read verbatim instead of being code-block summarized when prose summaries are off.
 - xAI web search now uses `grok-4.5` (at low reasoning effort) instead of `grok-4.3`.
+### Added
+
+- Added opt-in `omp bench --cache` independent cold/warm prompt-cache pairs with stable-prefix controls, sequential-by-default execution, mechanism-specific provider proof, and privacy-safe JSON output; it rejects `openai-codex-responses`, whose WebSocket transport chains turns.
 
 ### Fixed
 

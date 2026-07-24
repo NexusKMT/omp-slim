@@ -1614,6 +1614,7 @@ function mapOptionsForApi<TApi extends Api>(
 					disableReasoning: options?.disableReasoning,
 					textVerbosity: options?.textVerbosity,
 					promptCache: options?.promptCache,
+					statefulResponses: options?.statefulResponses,
 				});
 			}
 			return castApi<"openai-completions">({
@@ -1652,6 +1653,7 @@ function mapOptionsForApi<TApi extends Api>(
 				disableReasoning: options?.disableReasoning,
 				textVerbosity: options?.textVerbosity,
 				promptCache: options?.promptCache,
+				statefulResponses: options?.statefulResponses,
 			});
 
 		case "azure-openai-responses":
@@ -1662,6 +1664,7 @@ function mapOptionsForApi<TApi extends Api>(
 				serviceTier: options?.serviceTier,
 				reasoningSummary: options?.hideThinkingSummary ? null : undefined,
 				promptCache: options?.promptCache,
+				statefulResponses: options?.statefulResponses,
 			});
 
 		case "openai-codex-responses":

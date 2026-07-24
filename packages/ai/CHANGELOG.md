@@ -11,12 +11,14 @@
 - Added opt-in Vercel AI Gateway automatic prompt caching for OpenAI Chat Completions while preserving `only` and `order` routing preferences.
 - Added Vercel AI Gateway Responses cache anchors and cache lifetimes, emitted only with automatic caching.
 - Added opt-in OpenAI GPT-5.6 explicit prompt-cache controls for Responses and Chat Completions. Existing requests remain implicit; the policy marks at most one existing stable-history block and is rejected locally on unsupported explicit routes.
+- Forwarded `statefulResponses` through `streamSimple`, so diagnostic callers can explicitly disable OpenAI Responses `previous_response_id` chaining.
 
 ### Fixed
 
 - Fixed Bedrock cache checkpoints to use resolved model compatibility: unsupported 1-hour retention now falls back to the provider-default 5-minute cache, bundled Nova Lite, Micro, Pro, and Premier requests—and Nova Premier's documented in-region model ID—emit AWS-recommended explicit checkpoints for cache savings, and forced opaque profiles remain conservative.
 - Fixed OpenAI GPT-5.6+ explicit prompt-cache controls to select the latest stable boundary, preserve established stateful Responses markers (including no-system histories), and support later official GPT-5.x and GPT-6.x models.
 - Fixed Bedrock cache checkpoints to use resolved model compatibility: unsupported 1-hour retention now falls back to the provider-default 5-minute cache, bundled Nova Lite, Micro, Pro, Premier, and Nova 2 Lite requests—including their documented in-region, regional, and global IDs—emit AWS-recommended explicit checkpoints for cache savings, configured checkpoint maxima are honored exactly (zero disables emission, one keeps the final-user boundary), and forced opaque profiles remain conservative.
+- Fixed Pi-native and compatibility-wrapper requests dropping cache controls required by `omp bench --cache`, so benchmark pairs can disable OpenAI Responses chaining and preserve explicit prompt-cache affinity.
 
 - Fixed outbound credential-pattern redaction (`[github_token_redacted]` & co.) running unconditionally: it is now opt-in via `configureCredentialRedaction` and disabled by default, so credential-shaped strings the user deliberately pastes reach the provider unmodified unless the host enables redaction.
 - Added interactive Meta Model API key login and `MODEL_API_KEY` / `META_API_KEY` environment authentication ([#4941](https://github.com/can1357/oh-my-pi/issues/4941)).
