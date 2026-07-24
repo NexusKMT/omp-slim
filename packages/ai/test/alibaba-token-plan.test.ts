@@ -23,7 +23,8 @@ describe("QwenCloud Token Plan login", () => {
 		expect(authRequests).toEqual([
 			{
 				url: "https://home.qwencloud.com/billing/subscription/token-plan-individual",
-				instructions: "Subscribe to Token Plan Individual and copy its dedicated API key",
+				instructions:
+					"Subscribe to Token Plan Individual and copy its dedicated API key. Keep this page open; the next prompt explains how to enable optional quota reporting.",
 			},
 		]);
 		expect(requestedUrl).toBe("https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1/models");
@@ -31,12 +32,19 @@ describe("QwenCloud Token Plan login", () => {
 	});
 
 	test("stores an optional console Cookie while sending only the API key to inference", async () => {
-		const prompts = ["sk-sp-test", "session_id=test; login_aliyunid_csrf=csrf-token"];
+		let cookiePrompt = "";
 		const credential = await loginAlibabaTokenPlan({
 			onAuth: () => {},
-			onPrompt: async () => prompts.shift() ?? "",
+			onPrompt: async prompt => {
+				if (!prompt.allowEmpty) return "sk-sp-test";
+				cookiePrompt = prompt.message;
+				return "Cookie: session_id=test; login_aliyunid_csrf=csrf-token";
+			},
 			fetch: () => Promise.resolve(Response.json({ data: [{ id: "qwen3.7-plus" }] })),
 		});
+		expect(cookiePrompt).toContain("DevTools → Network");
+		expect(cookiePrompt).toContain("cs-data.qwencloud.com/data/api.json");
+		expect(cookiePrompt).toContain("Request Headers → Cookie");
 		expect(JSON.parse(credential)).toEqual({
 			token: "sk-sp-test",
 			cookie: "session_id=test; login_aliyunid_csrf=csrf-token",
@@ -50,6 +58,17 @@ describe("QwenCloud Token Plan login", () => {
 		});
 		expect(setup.headers.Authorization).toBe("Bearer sk-sp-test");
 		expect(JSON.stringify(setup)).not.toContain("session_id=test");
+	});
+
+	test("rejects a single cookie value with actionable guidance", async () => {
+		const prompts = ["sk-sp-test", "5123456789012345"];
+		await expect(
+			loginAlibabaTokenPlan({
+				onAuth: () => {},
+				onPrompt: async () => prompts.shift() ?? "",
+				fetch: () => Promise.resolve(Response.json({ data: [{ id: "qwen3.7-plus" }] })),
+			}),
+		).rejects.toThrow("cs-data.qwencloud.com usage request");
 	});
 
 	test("rejects malformed compound credentials before inference setup", () => {

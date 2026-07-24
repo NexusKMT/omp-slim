@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed QwenCloud Token Plan quota reporting to call the current console usage RPC and document how to capture its optional Cookie during login.
+
 ## [17.1.1] - 2026-07-24
 
 ### Added
