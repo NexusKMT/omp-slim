@@ -13,6 +13,8 @@ import { VirtualTerminal } from "./virtual-terminal";
 // dropped everything above the retained tail. The reporter hit this under WSL.
 
 const PLATFORM_DESCRIPTOR = Object.getOwnPropertyDescriptor(process, "platform");
+const WSL_DISTRO_NAME = process.env.WSL_DISTRO_NAME;
+const TMUX = process.env.TMUX;
 
 class LargeContent implements Component {
 	#lines: string[];
@@ -36,7 +38,10 @@ class LargeContent implements Component {
 describe("issue #4863: Ctrl+O full-view expand truncates the session on ConPTY", () => {
 	afterEach(() => {
 		if (PLATFORM_DESCRIPTOR) Object.defineProperty(process, "platform", PLATFORM_DESCRIPTOR);
-		delete process.env.WSL_DISTRO_NAME;
+		if (WSL_DISTRO_NAME === undefined) delete process.env.WSL_DISTRO_NAME;
+		else process.env.WSL_DISTRO_NAME = WSL_DISTRO_NAME;
+		if (TMUX === undefined) delete process.env.TMUX;
+		else process.env.TMUX = TMUX;
 		vi.restoreAllMocks();
 	});
 
@@ -102,12 +107,13 @@ describe("issue #4863: Ctrl+O full-view expand truncates the session on ConPTY",
 		}
 	});
 
-	it("still bounds a post-startup session-replace paint on ConPTY (issue #2115)", async () => {
-		// /resume, handoff, and other session switches replace the transcript via
-		// requestRender(true, { clearScrollback: true }) after the TUI is already
-		// running — firstPaint is false, but these must stay bounded so a
-		// multi-megabyte replay does not stall conhost.
-		Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+	it("bounds a session replace after a resetDisplay update under WSL+tmux", async () => {
+		// Under a multiplexer, resetDisplay() is an in-place update rather than
+		// a full paint. Its one-shot unbounded intent must be consumed by that
+		// update, not leak into the next /resume or handoff replacement.
+		Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+		process.env.WSL_DISTRO_NAME = "Ubuntu";
+		process.env.TMUX = "/tmp/tmux-1000/default,1,0";
 		const term = new VirtualTerminal(80, 24, 20_000);
 		const writes: string[] = [];
 		const realWrite = term.write.bind(term);
@@ -122,8 +128,13 @@ describe("issue #4863: Ctrl+O full-view expand truncates the session on ConPTY",
 			tui.start();
 			await term.waitForRender();
 
-			// Simulate a session replace: bulk transcript swap requesting a
-			// scrollback-clearing full paint, the path handleResumeSession() takes.
+			// Ctrl+O/toggle reset: resizeRepaintsInPlace() makes this an update.
+			writes.length = 0;
+			tui.resetDisplay();
+			await term.waitForRender();
+			expect(writes.some(write => write.includes("\x1b[2J"))).toBe(false);
+
+			// Then simulate /resume: the later bulk replace must still be bounded.
 			writes.length = 0;
 			tui.requestRender(true, { clearScrollback: true });
 			await term.waitForRender();

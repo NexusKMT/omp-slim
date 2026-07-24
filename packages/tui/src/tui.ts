@@ -1000,12 +1000,12 @@ export class TUI extends Container {
 	#ghosttyInitialImageDelayTimer: RenderTimer | undefined;
 	#ghosttyImageReadyAtMs = 0;
 	#clearScrollbackOnNextRender = false;
-	// Set by `resetDisplay()`: the next full paint is a user-driven redraw of the
+	// Set by `resetDisplay()` and consumed by the next authoritative normal-screen
+	// render. If that render is a full paint, it is a user-driven replay of the
 	// current transcript (Ctrl+O expand, thinking/setting toggles, display reset)
-	// that must show every row, so it opts out of the ConPTY resume-paint bound
-	// (#truncateLargeConptyFrame). Bulk transcript-replacement paints — first
-	// paint, /resume and handoff (requestRender(true, { clearScrollback })), and
-	// resize geometry rebuilds — leave it false and stay bounded (#2115, #4863).
+	// that must show every row, so it opts out of #truncateLargeConptyFrame.
+	// Multiplexer resets render as in-place updates; consuming the flag there
+	// prevents a later /resume or handoff bulk replacement from inheriting it.
 	#unboundedConptyPaintRequested = false;
 	#forceViewportRepaintOnNextRender = false;
 	#hasEverRendered = false;
@@ -2778,6 +2778,12 @@ export class TUI extends Container {
 		}
 		const cursorTrackingLineCount = hasVisibleOverlay ? Math.max(frame.length, windowTop + height) : frame.length;
 
+		// `resetDisplay()` requests an unbounded replay of the current
+		// transcript. Consume that one-shot intent on this authoritative
+		// normal-screen render even when a multiplexer makes it an in-place
+		// update; otherwise a later /resume or handoff full paint inherits it.
+		const unboundedConptyPaint = this.#unboundedConptyPaintRequested;
+		this.#unboundedConptyPaintRequested = false;
 		const intent: RenderIntent = fullPaint
 			? { kind: "fullPaint", clearScrollback: replaceRequested || geometryRebuild ? !isMultiplexerSession() : false }
 			: { kind: "update", chunkTo, windowTop };
@@ -2808,12 +2814,11 @@ export class TUI extends Container {
 				chunkTo,
 				windowTop,
 				cursorTrackingLineCount,
-				boundConptyPaint: !this.#unboundedConptyPaintRequested,
+				boundConptyPaint: !unboundedConptyPaint,
 			});
 			this.#committedPrefix = rawFrame.slice(0, chunkTo);
 			this.#committedPrefixAuditRows = Math.min(chunkTo, finalBoundary);
 			this.#clearScrollbackOnNextRender = false;
-			this.#unboundedConptyPaintRequested = false;
 			this.#hasEverRendered = true;
 			if (!firstPaint && frameLength > height) this.#armPostFullPaintSettle();
 			return;
