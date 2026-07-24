@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -14,6 +14,7 @@ async function createTempDir(): Promise<string> {
 }
 
 afterEach(async () => {
+	vi.restoreAllMocks();
 	for (const dir of createdTempDirs.splice(0)) {
 		await removeWithRetries(dir);
 	}
@@ -82,5 +83,52 @@ describe("OutputSink fd lifecycle", () => {
 
 		const content = await Bun.file(artifactPath).text();
 		expect(content).not.toContain("y".repeat(64));
+	});
+
+	test("dispose() closes the descriptor even when the capped tail replay write throws", async () => {
+		const dir = await createTempDir();
+		const artifactPath = path.join(dir, "capped.txt");
+
+		let ended = false;
+		// Mock FileSink: head bytes ("h") write fine; the tail replay (the
+		// `[ARTIFACT TRUNCATED …]` notice + "t" ring) throws, mirroring a disk
+		// write error while closing a capped artifact. Cast to the sink type — a
+		// full FileSink has methods OutputSink never calls.
+		const fakeSink = {
+			write(chunk: string): number {
+				if (chunk.includes("[ARTIFACT TRUNCATED") || chunk.includes("t")) {
+					throw new Error("simulated disk write failure");
+				}
+				return Buffer.byteLength(chunk, "utf-8");
+			},
+			end(): Promise<number> {
+				ended = true;
+				return Promise.resolve(0);
+			},
+		} as unknown as Bun.FileSink;
+		const fakeFile = { writer: () => fakeSink } as unknown as Bun.BunFile;
+
+		const realFile = Bun.file.bind(Bun);
+		vi.spyOn(Bun, "file").mockImplementation((source, options) => {
+			if (source === artifactPath) return fakeFile;
+			return realFile(source as string, options);
+		});
+
+		// Small on-disk cap so head fills, the rest overflows into the tail ring,
+		// and #flushArtifactTailIfCapped replays a truncation notice on close.
+		const sink = new OutputSink({
+			artifactPath,
+			artifactId: "capped",
+			spillThreshold: 16,
+			artifactMaxBytes: 40,
+			artifactHeadBytes: 20,
+		});
+		sink.push("h".repeat(30));
+		sink.push("t".repeat(60));
+
+		// The tail replay throws, but dispose() must still close the sink and must
+		// not surface the replay error (it would mask the original tool error).
+		await expect(sink.dispose()).resolves.toBeUndefined();
+		expect(ended).toBe(true);
 	});
 });

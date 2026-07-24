@@ -1338,12 +1338,22 @@ export class OutputSink {
 		if (this.#fileCreation) {
 			await this.#fileCreation.catch(() => undefined);
 		}
-		if (!this.#file) return;
-		this.#flushArtifactTailIfCapped();
+		const file = this.#file;
+		if (!file) return;
+		// The tail/notice replay writes to the sink and can throw (e.g. a disk
+		// write error). Closing the descriptor MUST still happen — otherwise the
+		// fd leaks and the replay error masks the original tool error that put us
+		// on this path. Both failures are swallowed so dispose() never throws.
 		try {
-			await this.#file.sink.end();
+			this.#flushArtifactTailIfCapped();
 		} catch {
 			/* ignore */
+		} finally {
+			try {
+				await file.sink.end();
+			} catch {
+				/* ignore */
+			}
 		}
 	}
 
