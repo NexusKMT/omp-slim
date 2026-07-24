@@ -6,6 +6,7 @@ import {
 	buildCursorSystemPromptJsons,
 	emptyGrepPatternRejection,
 	handleServerMessage,
+	processInteractionUpdate,
 	resolveExecHandler,
 	streamCursor,
 	type ToolCallState,
@@ -516,7 +517,7 @@ describe("Cursor exec local-work tracking (issue #4593)", () => {
 		expect(written.length).toBe(1);
 	});
 
-	it("marks an MCP call as resolved before its streamed block arrives", async () => {
+	it("synthesizes an MCP call when the exec frame precedes its streamed block", async () => {
 		const output = cursorAssistantMessage();
 		const stream = new AssistantMessageEventStream();
 		const state = newBlockState();
@@ -534,6 +535,7 @@ describe("Cursor exec local-work tracking (issue #4593)", () => {
 							toolName: "mcp__fixture_report",
 							toolCallId: "call-mcp-1",
 							providerIdentifier: "pi-agent",
+							args: { query: new TextEncoder().encode(JSON.stringify("latest chess news")) },
 						}),
 					},
 				}),
@@ -567,6 +569,22 @@ describe("Cursor exec local-work tracking (issue #4593)", () => {
 			[],
 		);
 
+		processInteractionUpdate(
+			{ message: { case: "textDelta", value: { text: "Final synthesized answer" } } },
+			output,
+			stream,
+			state,
+			{ sawTokenDelta: false },
+		);
+
+		expect(output.content).toHaveLength(2);
+		expect(output.content[0]).toMatchObject({
+			type: "toolCall",
+			id: "call-mcp-1",
+			name: "mcp__fixture_report",
+			arguments: { query: "latest chess news" },
+		});
+		expect(output.content[1]).toMatchObject({ type: "text", text: "Final synthesized answer" });
 		expect(state.resolvedMcpToolCallIds.has("call-mcp-1")).toBe(true);
 	});
 
