@@ -1399,6 +1399,7 @@ export class AgentSession {
 			finishBashSessionTransition: (transition, success) => this.#bash.finishSessionTransition(transition, success),
 			cancelOwnAsyncJobs: () => this.#cancelOwnAsyncJobs(),
 			clearCheckpointRuntimeState: () => this.#clearCheckpointRuntimeState(),
+			clearSessionScopedToolState: () => this.#clearSessionScopedToolState(),
 			clearFreshProviderSessionId: () => {
 				this.#freshProviderSessionId = undefined;
 			},
@@ -4023,6 +4024,12 @@ export class AgentSession {
 		this.#rewoundToolResultIds.clear();
 	}
 
+	/** Drop mutable tool decisions and directives owned by the previous logical session. */
+	#clearSessionScopedToolState(): void {
+		this.#toolChoiceQueue.clear();
+		this.#tools.clearAcpPermissionDecisions();
+	}
+
 	/**
 	 * Rebuild checkpoint/rewind runtime state from the current branch. Handles two
 	 * cases surfaced by session resume, `switchSession()` reloading the same file,
@@ -5699,6 +5706,7 @@ export class AgentSession {
 			this.#bash.finishSessionTransition(bashTransition, sessionTransitioned);
 		}
 
+		this.#clearSessionScopedToolState();
 		this.#clearCheckpointRuntimeState();
 		this.setTodoPhases([]);
 		this.#freshProviderSessionId = undefined;
@@ -6819,6 +6827,9 @@ export class AgentSession {
 			if (switchingToDifferentSession) {
 				await this.#memory.resetContextForNewTranscript();
 			}
+			if (switchingToDifferentSession) {
+				this.#clearSessionScopedToolState();
+			}
 			this.#reconnectToAgent();
 			try {
 				await this.#sessionSwitchReconciler?.();
@@ -6941,6 +6952,7 @@ export class AgentSession {
 		} finally {
 			this.#bash.finishSessionTransition(bashTransition, sessionTransitioned);
 		}
+		this.#clearSessionScopedToolState();
 		this.#rehydrateCheckpointRewindState();
 		this.#todo.syncFromBranch();
 		this.#freshProviderSessionId = undefined;
@@ -7037,6 +7049,8 @@ export class AgentSession {
 		} finally {
 			this.#bash.finishSessionTransition(bashTransition, sessionTransitioned);
 		}
+
+		this.#clearSessionScopedToolState();
 
 		this.#rehydrateCheckpointRewindState();
 		this.sessionManager.appendMessage({
