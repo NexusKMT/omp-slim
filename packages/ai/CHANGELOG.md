@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.1.0] - 2026-07-24
+
 ### Added
 
 - Added support for caller-owned `cachedContent` on Google Generative AI and Google Vertex AI `GenerateContent` options, allowing passing of opaque cache resource names.

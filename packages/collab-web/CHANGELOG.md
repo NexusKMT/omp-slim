@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.1.0] - 2026-07-24
+
 ### Fixed
 
 - Fixed action metadata loss on xd://resolve, xd://reject, and xd://propose cards to ensure correct action badges are rendered.

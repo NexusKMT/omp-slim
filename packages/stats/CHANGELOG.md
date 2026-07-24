@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.1.0] - 2026-07-24
+
 ### Fixed
 
 - Fixed an issue where malformed persisted content blocks could abort stats ingestion for subsequent projects, and ensured pending full-session migrations are properly settled after successful backfills.

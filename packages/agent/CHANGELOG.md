@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.1.0] - 2026-07-24
+
 ### Added
 
 - Added support for tracking Cloudflare AI Gateway cache status (hit, miss, bypass, unknown) on chat spans.
