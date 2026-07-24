@@ -203,11 +203,12 @@ function sanitizeOpenAIResponsesHistoryItemForReplay(
 	if (item.type === "image_generation_call") return sanitizeOpenAIResponsesImageGenerationCallForReplay(item);
 	if (item.type === "reasoning") return sanitizeOpenAIResponsesReasoningItemForReplay(item);
 
-	// Only computer calls require exact status replay here; image generation
-	// calls are handled above. Other output lifecycle statuses are rejected when
-	// replayed through the Responses input array.
+	// Strip status only from item types whose replay input rejects output
+	// lifecycle metadata. Hosted built-in tool items require status for replay.
 	const { id: _id, ...sanitizedItem } = item;
-	if (item.type !== "computer_call") delete sanitizedItem.status;
+	if (item.type === "message" || item.type === "function_call" || item.type === "custom_tool_call") {
+		delete sanitizedItem.status;
+	}
 	if (item.type === "computer_call" && typeof item.id === "string") sanitizedItem.id = item.id;
 	if (typeof item.call_id === "string") {
 		sanitizedItem.call_id = normalizeReplayedResponsesHistoryCallId(item.call_id, normalizedCallIds);

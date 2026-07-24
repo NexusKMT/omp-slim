@@ -933,8 +933,7 @@ describe("OpenAI responses history payload", () => {
 				: undefined;
 		const webSearchItem = findResponsesInputItem(input, "web_search_call");
 
-		expect(webSearchItem).toMatchObject({ type: "web_search_call" });
-		expect(webSearchItem).not.toHaveProperty("status");
+		expect(webSearchItem).toMatchObject({ type: "web_search_call", status: "completed" });
 		expect(webSearchItem?.id).toBeUndefined();
 		expect(containsAssistantOutputText(input, "ignored")).toBe(false);
 		expect(containsUserInputText(input, followUp)).toBe(true);
