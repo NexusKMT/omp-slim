@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed direct binary updates trusting an executable that only reported the expected version. The updater now selects one exact asset from the tagged GitHub release, requires its published SHA-256 digest and size, and verifies both while streaming the download before installation.
+
 ## [17.1.3] - 2026-07-24
 
 ### Fixed
