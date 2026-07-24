@@ -5245,7 +5245,7 @@ export class AuthStorage {
 		const stored = this.#getStoredCredentials(provider);
 		const index = stored.findIndex(entry => entry.id === credentialId);
 		const target = stored[index];
-		if (!target || target.credential.type !== "oauth") return false;
+		if (target?.credential.type !== "oauth") return false;
 		this.#recordSessionCredential(provider, sessionId, "oauth", index);
 		return true;
 	}
