@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import * as themeModule from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { ToolChoiceQueue } from "@oh-my-pi/pi-coding-agent/session/tool-choice-queue";
@@ -226,6 +227,50 @@ describe("read and write route xd:// device URLs", () => {
 		expect(rendered).toContain("GitHub Repo");
 		expect(rendered).toContain("gh: Not Found (HTTP 404)");
 		expect(rendered).not.toContain("Write");
+	});
+
+	it("keeps the generic custom-tool card when a mounted device has no renderer", async () => {
+		await themeModule.initTheme();
+		const uiTheme = (await themeModule.getThemeByName("dark")) ?? (await themeModule.getThemeByName("light"));
+		if (!uiTheme) throw new Error("expected an initialized theme");
+
+		const weatherDevice: AgentTool = {
+			name: "weather",
+			label: "Weather",
+			description: "Gets the weather",
+			parameters: type({ query: "string" }),
+			async execute() {
+				return { content: [{ type: "text", text: "Tokyo: 22°C" }] };
+			},
+		};
+		const registry = new XdevRegistry([weatherDevice]);
+		const write = new WriteTool(xdevSession(process.cwd(), { xdevRegistry: registry }));
+		const content = JSON.stringify({ query: "Tokyo" });
+		const result = await write.execute("write-xdev-default-renderer", {
+			path: "xd://weather",
+			content,
+		});
+
+		const component = writeToolRenderer.renderResult(
+			result,
+			{
+				expanded: false,
+				isPartial: false,
+				renderContext: { resolveXdevMounted: name => registry.get(name) },
+			},
+			uiTheme,
+			{ path: "xd://weather", content },
+		);
+		const lines = component.render(80);
+		const rendered = Bun.stripANSI(lines.join("\n"));
+		const backgroundProbe = uiTheme.bg("toolSuccessBg", "|");
+		const backgroundPrefix = backgroundProbe.slice(0, backgroundProbe.indexOf("|"));
+
+		expect(rendered).toContain("Weather");
+		expect(rendered).toContain('query="Tokyo"');
+		expect(rendered).toContain("Tokyo: 22°C");
+		expect(backgroundPrefix).not.toBe("");
+		expect(lines.some(line => line.includes(backgroundPrefix))).toBe(true);
 	});
 
 	it("docsAll inlines small device docs and falls back to a listing past the caps", async () => {

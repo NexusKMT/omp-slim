@@ -30,6 +30,7 @@ import { parseStreamingJson } from "@oh-my-pi/pi-utils";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { XD_URL_PREFIX } from "../internal-urls/xd-protocol";
 import type { Theme } from "../modes/theme/theme";
+import { renderDefaultToolExecution } from "./default-renderer";
 import type { Tool } from "./index";
 import { replaceTabs } from "./render-utils";
 import type { ToolRenderer } from "./renderers";
@@ -440,9 +441,8 @@ export class XdevRegistry {
  *  map keyed by name. */
 function resolveDeviceRenderer(
 	name: string,
-	resolveMounted: ((name: string) => Tool | undefined) | undefined,
+	mounted: Tool | undefined,
 ): Pick<ToolRenderer, "renderCall" | "renderResult" | "mergeCallAndResult"> | undefined {
-	const mounted = resolveMounted?.(name);
 	if (mounted && (mounted.renderCall || mounted.renderResult)) {
 		// A mounted AgentTool exposes the same renderCall/renderResult/mergeCallAndResult
 		// surface as a static ToolRenderer; only the parameter generics differ, so unify
@@ -464,11 +464,13 @@ export function renderXdevCall(
 	theme: Theme,
 	resolveMounted?: (name: string) => Tool | undefined,
 ): Component | undefined {
-	const renderer = resolveDeviceRenderer(name, resolveMounted);
+	const mounted = resolveMounted?.(name);
+	const renderer = resolveDeviceRenderer(name, mounted);
+	const args = decodeInnerArgs(content);
 	if (renderer?.renderCall) {
-		return renderer.renderCall(decodeInnerArgs(content), options, theme);
+		return renderer.renderCall(args, options, theme);
 	}
-	return new Text(theme.fg("toolTitle", theme.bold(`${XD_URL_PREFIX}${name}`)), 0, 0);
+	return renderDefaultToolExecution({ label: mounted?.label ?? name, args, options }, theme);
 }
 
 /** Forward an `xd://` dispatch result to the mounted tool's renderer. */
@@ -486,7 +488,8 @@ export function renderXdevResult(
 	if (dispatch.mode === "help") {
 		return text ? new Text(theme.fg("toolOutput", replaceTabs(text)), 0, 0) : undefined;
 	}
-	const renderer = resolveDeviceRenderer(dispatch.tool, resolveMounted);
+	const mounted = resolveMounted?.(dispatch.tool);
+	const renderer = resolveDeviceRenderer(dispatch.tool, mounted);
 	const innerResult = { content: result.content, details: dispatch.inner, isError: result.isError };
 	if (renderer?.renderResult) {
 		const parts: Component[] = [];
@@ -505,5 +508,13 @@ export function renderXdevResult(
 			return box;
 		}
 	}
-	return text ? new Text(theme.fg("toolOutput", replaceTabs(text)), 0, 0) : undefined;
+	return renderDefaultToolExecution(
+		{
+			label: mounted?.label ?? dispatch.tool,
+			args: dispatch.args ?? {},
+			result: { output: text, isError: result.isError },
+			options,
+		},
+		theme,
+	);
 }
