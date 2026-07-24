@@ -861,4 +861,29 @@ describe("OpenAI-family first-event timeouts", () => {
 		expect(result.stopReason).toBe("error");
 		expect(result.errorMessage).toBe("OpenAI responses stream stalled while waiting for the next event");
 	});
+
+	it("honors streamFirstEventTimeoutMs from model.compat for OpenAI responses streams", async () => {
+		const customResponsesModel: Model<"openai-responses"> = buildModel({
+			id: "slow-first-event",
+			name: "Slow First Event",
+			api: "openai-responses",
+			provider: "custom",
+			baseUrl: "https://example.com/v1",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128000,
+			maxTokens: 16384,
+			compat: { streamFirstEventTimeoutMs: 20, streamIdleTimeoutMs: 5 },
+		});
+		const fetchMock = createDelayedFetch(30, createOpenAIResponsesSuccessResponse);
+
+		const result = await streamOpenAIResponses(customResponsesModel, baseContext(), {
+			apiKey: "test-key",
+			fetch: fetchMock,
+		}).result();
+
+		expect(result.stopReason).toBe("error");
+		expect(result.errorMessage).toBe("OpenAI responses stream timed out while waiting for the first event");
+	});
 });

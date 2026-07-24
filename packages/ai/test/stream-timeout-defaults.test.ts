@@ -123,6 +123,10 @@ describe("getOpenAIStreamFirstEventTimeoutMs(idleTimeoutMs, fallbackMs)", () => 
 		expect(getOpenAIStreamFirstEventTimeoutMs(1500, 100_000)).toBeUndefined();
 	});
 
+	it("treats a zero per-provider fallback as a watchdog disable", () => {
+		expect(getOpenAIStreamFirstEventTimeoutMs(300_000, 0)).toBeUndefined();
+	});
+
 	it("falls back to the generic first-event env when OpenAI env vars are unset", () => {
 		Bun.env.PI_STREAM_FIRST_EVENT_TIMEOUT_MS = "42";
 		expect(getOpenAIStreamFirstEventTimeoutMs(undefined, 300_000)).toBe(42);
