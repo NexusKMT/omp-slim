@@ -38,7 +38,7 @@ const RESTART_MAX_DELAY_MS = 30_000;
  * are always shown in full; older history is truncated so the response stays
  * bounded over a long-lived project (issue #6517).
  */
-export const MAX_TERMINAL_DAEMONS_LISTED = 10;
+const MAX_TERMINAL_DAEMONS_LISTED = 10;
 const TOKEN_FILE = "broker.token";
 const PID_FILE = "broker.pid";
 const META_FILE = "meta.json";
@@ -109,7 +109,7 @@ function terminalState(state: DaemonSnapshot["state"]): boolean {
  * growing without bound. Truncated terminal records stay addressable by name
  * via `describe`/`logs`/`restart`.
  */
-export function orderDaemonsForListing(snapshots: DaemonSnapshot[]): DaemonSnapshot[] {
+function orderDaemonsForListing(snapshots: DaemonSnapshot[]): DaemonSnapshot[] {
 	const active: DaemonSnapshot[] = [];
 	const terminal: DaemonSnapshot[] = [];
 	for (const snapshot of snapshots) {
@@ -127,7 +127,7 @@ export function orderDaemonsForListing(snapshots: DaemonSnapshot[]): DaemonSnaps
  * exited are marked `exited` at `now`, since their process died with that broker
  * (issue #6517). Returns whether the record was reaped.
  */
-export function reapRecoveredSnapshot(snapshot: DaemonSnapshot, now: number): boolean {
+function reapRecoveredSnapshot(snapshot: DaemonSnapshot, now: number): boolean {
 	if (terminalState(snapshot.state)) return false;
 	snapshot.pid = undefined;
 	snapshot.state = "exited";

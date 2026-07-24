@@ -1,15 +1,36 @@
 import { describe, expect, it } from "bun:test";
-import { MAX_TERMINAL_DAEMONS_LISTED, orderDaemonsForListing, reapRecoveredSnapshot } from "./broker";
-import type { DaemonSnapshot, DaemonState } from "./protocol";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { TempDir } from "@oh-my-pi/pi-utils";
+import { createDaemonBrokerClient, type DaemonBrokerClient } from "./client";
+import type { DaemonSnapshot, DaemonSpec } from "./protocol";
 
-function snapshot(name: string, state: DaemonState, createdAt: number, exitedAt?: number): DaemonSnapshot {
+const TERMINAL_HISTORY_LIMIT = 10;
+
+function spec(name: string, cwd: string): DaemonSpec {
+	return {
+		name,
+		application: process.execPath,
+		args: [],
+		env: {},
+		cwd,
+		pty: false,
+		restart: "no",
+		persist: false,
+		detached: false,
+	};
+}
+
+function terminalSnapshot(index: number): DaemonSnapshot {
+	const name = `exited-${index}`;
 	return {
 		name,
 		id: name,
-		state,
-		createdAt,
-		startedAt: createdAt,
-		exitedAt,
+		state: index % 2 === 0 ? "exited" : "failed",
+		createdAt: index * 10,
+		startedAt: index * 10,
+		exitedAt: index * 10 + 1,
+		exitReason: `historical exit ${index}`,
 		restartCount: 0,
 		outputBytes: 0,
 		persist: false,
@@ -17,88 +38,52 @@ function snapshot(name: string, state: DaemonState, createdAt: number, exitedAt?
 	};
 }
 
-describe("orderDaemonsForListing", () => {
-	it("surfaces active daemons ahead of exited history regardless of creation order", () => {
-		const daemons = [
-			snapshot("old-0", "exited", 1_000, 2_000),
-			snapshot("old-1", "exited", 3_000, 4_000),
-			snapshot("active", "running", 5_000),
-		];
-		const ordered = orderDaemonsForListing(daemons).map(d => d.name);
-		expect(ordered[0]).toBe("active");
-		expect(ordered).toEqual(["active", "old-1", "old-0"]);
-	});
+async function seedTerminalRecord(runtimeDir: string, cwd: string, snapshot: DaemonSnapshot): Promise<void> {
+	const metaPath = path.join(runtimeDir, "daemons", snapshot.name, "meta.json");
+	await Bun.write(metaPath, JSON.stringify({ daemon: snapshot, spec: spec(snapshot.name, cwd) }));
+}
 
-	it("orders active daemons oldest-to-newest and terminal daemons newest-exit-first", () => {
-		const daemons = [
-			snapshot("active-new", "ready", 6_000),
-			snapshot("active-old", "running", 5_000),
-			snapshot("exit-early", "exited", 1_000, 1_500),
-			snapshot("exit-late", "failed", 2_000, 9_000),
-		];
-		expect(orderDaemonsForListing(daemons).map(d => d.name)).toEqual([
-			"active-old",
-			"active-new",
-			"exit-late",
-			"exit-early",
-		]);
-	});
+async function shutdown(client: DaemonBrokerClient, activeName: string): Promise<void> {
+	await client.request({ op: "stop", name: activeName, timeoutMs: 2_000 }).catch(() => undefined);
+	await client.request({ op: "shutdown" }).catch(() => undefined);
+	client.close();
+}
 
-	it("caps terminal history but never drops active daemons", () => {
-		const daemons: DaemonSnapshot[] = [];
-		for (let i = 0; i < MAX_TERMINAL_DAEMONS_LISTED + 20; i++) {
-			daemons.push(snapshot(`exited-${i}`, "exited", i, i + 1));
+describe("broker list", () => {
+	it("returns active daemons first and caps recovered terminal history by real exit time", async () => {
+		using tempDir = TempDir.createSync("@omp-launch-list-");
+		const projectDir = path.join(tempDir.path(), "project");
+		const runtimeDir = path.join(tempDir.path(), "runtime");
+		await fs.mkdir(projectDir);
+
+		for (let index = 0; index < TERMINAL_HISTORY_LIMIT + 5; index++) {
+			await seedTerminalRecord(runtimeDir, projectDir, terminalSnapshot(index));
 		}
-		daemons.push(snapshot("active", "running", 999_999));
-		const ordered = orderDaemonsForListing(daemons);
-		expect(ordered.length).toBe(MAX_TERMINAL_DAEMONS_LISTED + 1);
-		expect(ordered[0].name).toBe("active");
-		// Only the most-recently-exited history survives the cap.
-		const kept = ordered.slice(1).map(d => d.name);
-		expect(kept).toContain(`exited-${MAX_TERMINAL_DAEMONS_LISTED + 19}`);
-		expect(kept).not.toContain("exited-0");
-	});
-});
 
-describe("reapRecoveredSnapshot", () => {
-	it("preserves the real exit time of already-terminal records", () => {
-		const exited = snapshot("done", "exited", 1_000, 2_000);
-		exited.exitReason = "process completed";
-		const failed = snapshot("boom", "failed", 3_000, 4_000);
+		const client = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
+		const activeName = "active-server";
+		try {
+			const started = await client.request({
+				op: "start",
+				spec: {
+					...spec(activeName, projectDir),
+					args: ["-e", "process.stdin.resume()"],
+				},
+			});
+			expect(started.op).toBe("start");
 
-		expect(reapRecoveredSnapshot(exited, 9_000)).toBe(false);
-		expect(reapRecoveredSnapshot(failed, 9_000)).toBe(false);
-		expect(exited.exitedAt).toBe(2_000);
-		expect(exited.exitReason).toBe("process completed");
-		expect(failed.exitedAt).toBe(4_000);
-		expect(failed.state).toBe("failed");
-	});
+			const listed = await client.request({ op: "list" });
+			expect(listed.op).toBe("list");
+			if (listed.op !== "list") throw new Error(`Unexpected broker result: ${listed.op}`);
 
-	it("reaps records that were still alive at recovery time", () => {
-		const running = snapshot("web", "running", 5_000);
-		running.pid = 4242;
-
-		expect(reapRecoveredSnapshot(running, 9_000)).toBe(true);
-		expect(running.state).toBe("exited");
-		expect(running.exitedAt).toBe(9_000);
-		expect(running.exitReason).toBe("previous broker exited");
-		expect(running.pid).toBeUndefined();
-	});
-
-	it("keeps the genuinely most-recent exit visible after recovery restamps live records", () => {
-		// A long-lived project: many old exited daemons plus one that was still
-		// running when the broker restarted (reaped to recovery time).
-		const recovered: DaemonSnapshot[] = [];
-		for (let i = 0; i < MAX_TERMINAL_DAEMONS_LISTED + 5; i++) {
-			const s = snapshot(`old-${i}`, "exited", i * 10, i * 10 + 1);
-			reapRecoveredSnapshot(s, 100_000); // no-op: already terminal
-			recovered.push(s);
+			expect(listed.daemons.map(daemon => daemon.name)).toEqual([
+				activeName,
+				...Array.from({ length: TERMINAL_HISTORY_LIMIT }, (_, offset) => `exited-${14 - offset}`),
+			]);
+			expect(listed.daemons[0]?.state).toBe("running");
+			expect(listed.daemons.at(-1)?.exitedAt).toBe(51);
+		} finally {
+			await shutdown(client, activeName);
 		}
-		const lastFailed = snapshot("last-failed", "failed", 500, 5_000);
-		reapRecoveredSnapshot(lastFailed, 100_000); // no-op: already terminal
-		recovered.push(lastFailed);
-
-		const kept = orderDaemonsForListing(recovered).map(d => d.name);
-		expect(kept).toContain("last-failed");
-	});
+	}, 20_000);
 });
