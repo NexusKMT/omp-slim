@@ -2,7 +2,7 @@ import type { Component } from "@oh-my-pi/pi-tui";
 import { Box, Container } from "@oh-my-pi/pi-tui";
 import type { MessageRenderer } from "../../extensibility/extensions/types";
 import { theme } from "../../modes/theme/theme";
-import { LIVE_DELEGATION_MESSAGE_TYPE, type CustomMessage } from "../../session/messages";
+import { type CustomMessage, LIVE_DELEGATION_MESSAGE_TYPE } from "../../session/messages";
 import { renderFramedMessage } from "./message-frame";
 
 /**

@@ -1,5 +1,4 @@
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import chalk from "chalk";
 import { logger } from "@oh-my-pi/pi-utils";
 import { LiveSessionController, type LiveTranscript } from "../../live/controller";
 import { LIVE_MODEL } from "../../live/protocol";

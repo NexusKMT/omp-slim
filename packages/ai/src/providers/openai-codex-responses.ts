@@ -241,6 +241,42 @@ const CODEX_RETRYABLE_EVENT_CODES = new Set(["model_error", "server_error", "int
 const CODEX_RETRYABLE_EVENT_MESSAGE =
 	/processing your request|retry your request|temporar(?:y|ily)|overloaded|service.?unavailable|internal error|server error/i;
 const CODEX_PROVIDER_SESSION_STATE_KEY = "openai-codex-responses";
+
+/**
+ * Host integration boundary for just-in-time `x-oai-attestation` header
+ * values (codex-rs `AttestationProvider`). Resolves to the full header value
+ * — an `{"v":1,"s":0,"t":"v1.…"}` envelope — or `undefined` when no
+ * attestation should be sent.
+ */
+export type CodexAttestationProvider = () => Promise<string | undefined>;
+
+let codexAttestationProvider: CodexAttestationProvider | undefined;
+
+/**
+ * Install the process-wide attestation hook consulted for upstream Codex
+ * requests (codex-rs stores its provider on `ModelClient` construction). The
+ * hook is only consulted for ChatGPT-OAuth credentials and runs just-in-time
+ * per request; WebSocket handshakes resolve once per connection because the
+ * header is connection-scoped there.
+ */
+export function setCodexAttestationProvider(provider: CodexAttestationProvider | undefined): void {
+	codexAttestationProvider = provider;
+}
+
+/**
+ * Resolve the `x-oai-attestation` header value for one upstream request.
+ * Gated on ChatGPT-OAuth credentials (a Codex JWT carries `chatgpt_account_id`;
+ * codex-rs gates on `auth.is_chatgpt_auth()`). A throwing hook degrades to no
+ * header rather than failing the request.
+ */
+export async function getCodexAttestationHeader(accountId: string | undefined): Promise<string | undefined> {
+	if (!accountId || !codexAttestationProvider) return undefined;
+	try {
+		return await codexAttestationProvider();
+	} catch {
+		return undefined;
+	}
+}
 const X_CODEX_TURN_STATE_HEADER = "x-codex-turn-state";
 const X_MODELS_ETAG_HEADER = "x-models-etag";
 /** WebSocket frames cannot carry per-request HTTP headers; codex-rs mirrors the lite marker into `client_metadata` under this key. */
@@ -1535,6 +1571,7 @@ async function openCodexWebSocketTransport(
 		websocketState,
 		requestContext.responsesLite,
 		requestContext.requestMetadata,
+		await getCodexAttestationHeader(requestContext.accountId),
 	);
 	const requestBodyForState = structuredCloneJSON(requestContext.transformedBody);
 	// `onPayload` may rewrite the outgoing frame (e.g. drop `stream_options`);
@@ -2730,6 +2767,7 @@ export async function prewarmOpenAICodexResponses(
 	);
 	const codexClientVersion = CODEX_CLIENT_VERSION;
 	const requestIdentity = createCodexCompatibilityIdentity(metadataSession);
+	const attestation = await getCodexAttestationHeader(accountId);
 	const headers = logger.time(
 		"prewarmCodex:createHeaders",
 		createCodexHeaders,
@@ -2742,6 +2780,7 @@ export async function prewarmOpenAICodexResponses(
 		state,
 		responsesLite,
 		requestIdentity,
+		attestation,
 	);
 	await logger.time(
 		"prewarmCodex:establishWs",
@@ -3888,6 +3927,7 @@ async function openCodexSseEventStream(
 		state,
 		responsesLite,
 		requestMetadata,
+		await getCodexAttestationHeader(accountId),
 	);
 	CODEX_DEBUG &&
 		logger.debug("[codex] codex request", {
@@ -3961,11 +4001,17 @@ function createCodexHeaders(
 	state?: CodexWebSocketSessionState,
 	responsesLite = false,
 	requestMetadata?: CodexCompatibilityIdentity,
+	attestation?: string,
 ): Headers {
 	const headers = new Headers(initHeaders ?? {});
 	headers.delete("x-api-key");
 	headers.set("Authorization", `Bearer ${accessToken}`);
 	if (accountId) headers.set(OPENAI_HEADERS.ACCOUNT_ID, accountId);
+	if (attestation) {
+		headers.set(OPENAI_HEADERS.ATTESTATION, attestation);
+	} else {
+		headers.delete(OPENAI_HEADERS.ATTESTATION);
+	}
 	const betaHeader =
 		transport === "websocket"
 			? OPENAI_HEADER_VALUES.BETA_RESPONSES_WEBSOCKETS_V2

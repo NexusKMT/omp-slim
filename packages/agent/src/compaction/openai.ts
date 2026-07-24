@@ -20,6 +20,7 @@ import { applyCodexResponsesLiteShape } from "@oh-my-pi/pi-ai/providers/openai-c
 import {
 	createOpenAICodexCompactionRequestContext,
 	createOpenAICodexCompatibilityMetadata,
+	getCodexAttestationHeader,
 } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
 import { parseAzureDeploymentNameMap, parseTextSignature } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import { transformMessages } from "@oh-my-pi/pi-ai/providers/transform-messages";
@@ -649,6 +650,10 @@ export async function requestOpenAiRemoteCompaction(
 		const accountId = getCodexAccountId(apiKey);
 		if (accountId) {
 			headers[OPENAI_HEADERS.ACCOUNT_ID] = accountId;
+		}
+		const attestation = await getCodexAttestationHeader(accountId);
+		if (attestation) {
+			headers[OPENAI_HEADERS.ATTESTATION] = attestation;
 		}
 		headers[OPENAI_HEADERS.BETA] = OPENAI_HEADER_VALUES.BETA_RESPONSES;
 		headers[OPENAI_HEADERS.ORIGINATOR] = OPENAI_HEADER_VALUES.ORIGINATOR_CODEX;
