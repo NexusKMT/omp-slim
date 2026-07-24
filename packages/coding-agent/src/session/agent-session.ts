@@ -3516,7 +3516,7 @@ export class AgentSession {
 			this.#disposeOwnedAsyncJobs(),
 			this.#eval.disposeKernels(),
 			this.#releaseOwnedBrowserTabs(this.sessionManager.getSessionId()),
-			this.#releaseOwnedComputerSessions(this.#evalKernelOwnerId),
+			this.#releaseOwnedComputerSessions(this.#eval.getKernelOwnerId()),
 			shutdownTinyTitleClient(),
 			this.#disconnectOwnedMcp(),
 			advisorRecorderClosed,
@@ -4134,6 +4134,9 @@ export class AgentSession {
 	}
 	getEvalSessionId(): string | null {
 		return this.#eval.getSessionId();
+	}
+	getEvalKernelOwnerId(): string {
+		return this.#eval.getKernelOwnerId();
 	}
 
 	/** Current session display name, if set */
