@@ -1,10 +1,10 @@
 import * as os from "node:os";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import { AudioCapture } from "@oh-my-pi/pi-natives";
 import { prompt } from "@oh-my-pi/pi-utils";
 import type { AgentSession } from "../session/agent-session";
 import type { AgentSessionEvent } from "../session/agent-session-events";
-import { type StreamingRecordingHandle, startStreamingRecording } from "../stt/recorder";
 import agentFinalMessageTemplate from "./prompts/agent-final-message.md" with { type: "text" };
 import liveInstructionsTemplate from "./prompts/live-instructions.md" with { type: "text" };
 import {
@@ -15,12 +15,19 @@ import {
 	type LiveServerEvent,
 } from "./protocol";
 import { CodexLiveTransport } from "./transport";
-import type { LivePhase, LiveTranscript } from "./visualizer";
+import type { LivePhase } from "./visualizer";
 
 const DEFAULT_VOICE = "sol";
 const OUTPUT_ACTIVE_LEVEL = 0.015;
 const MIN_BARGE_IN_LEVEL = 0.04;
 const OUTPUT_ECHO_RATIO = 0.65;
+
+/** Incremental or final transcript for one realtime conversational turn. */
+export interface LiveTranscript {
+	role: "user" | "assistant";
+	text: string;
+	final: boolean;
+}
 
 /** UI notifications emitted during a live session. */
 export interface LiveSessionCallbacks {
@@ -85,7 +92,7 @@ export class LiveSessionController {
 	readonly #voice: string;
 
 	#transport: CodexLiveTransport | undefined;
-	#recorder: StreamingRecordingHandle | undefined;
+	#recorder: AudioCapture | undefined;
 	#unsubscribeSession: (() => void) | undefined;
 	#sendChain: Promise<void> = Promise.resolve();
 	#stopPromise: Promise<void> | undefined;
@@ -161,19 +168,20 @@ export class LiveSessionController {
 			if (this.#stopped) {
 				throw this.#failure ?? new Error("The live session stopped before recording began.");
 			}
-			const recorder = await startStreamingRecording(samples => this.#handleMicrophoneAudio(samples));
+			const recorder = new AudioCapture(16_000, (error, samples) => {
+				if (error) {
+					this.#reportFailure(error);
+					return;
+				}
+				this.#handleMicrophoneAudio(samples);
+			});
 			if (this.#stopped) {
-				if (recorder) {
-					try {
-						await recorder.stop();
-					} catch {
-						// Preserve the failure that stopped startup.
-					}
+				try {
+					recorder.stop();
+				} catch {
+					// Preserve the failure that stopped startup.
 				}
 				throw this.#failure ?? new Error("The live session stopped while recording began.");
-			}
-			if (!recorder) {
-				throw new Error("Live mode needs a streaming audio recorder; run `omp setup speech` and try again.");
 			}
 			this.#recorder = recorder;
 			this.#refreshAudioPhase();
@@ -216,7 +224,7 @@ export class LiveSessionController {
 		this.#recorder = undefined;
 		if (recorder) {
 			try {
-				await recorder.stop();
+				recorder.stop();
 			} catch (cause) {
 				cleanupError = errorFrom(cause);
 			}
@@ -372,17 +380,24 @@ export class LiveSessionController {
 		const next = current.startsWith(text) && current.length > text.length ? current : text;
 		this.#storeTranscript(role, next, true);
 	}
-
 	#storeTranscript(role: LiveTranscript["role"], text: string, final: boolean): void {
+		const normalized = text.trim();
+		if (!normalized) return;
 		if (role === "user") {
-			this.#userTranscript = text;
+			this.#userTranscript = normalized;
 			this.#userTranscriptFinal = final;
 		} else {
-			this.#assistantTranscript = text;
+			this.#assistantTranscript = normalized;
 			this.#assistantTranscriptFinal = final;
 		}
-		if (this.#lastTranscript?.role === role && this.#lastTranscript.text === text) return;
-		this.#emitTranscript({ role, text });
+		if (
+			this.#lastTranscript?.role === role &&
+			this.#lastTranscript.text === normalized &&
+			this.#lastTranscript.final === final
+		) {
+			return;
+		}
+		this.#emitTranscript({ role, text: normalized, final });
 	}
 
 	#queueSend(message: LiveClientMessage): void {

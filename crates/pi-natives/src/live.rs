@@ -20,7 +20,6 @@ use napi_derive::napi;
 use opus::{Application, Channels, Decoder, Encoder};
 use parking_lot::Mutex;
 use tokio::{sync::watch, task::JoinHandle};
-use crate::audio::{PlaybackStream, PlaybackWriter};
 use webrtc::{
 	api::{
 		APIBuilder,
@@ -31,8 +30,7 @@ use webrtc::{
 	interceptor::registry::Registry,
 	media::Sample,
 	peer_connection::{
-		RTCPeerConnection,
-		configuration::RTCConfiguration,
+		RTCPeerConnection, configuration::RTCConfiguration,
 		peer_connection_state::RTCPeerConnectionState,
 		sdp::session_description::RTCSessionDescription,
 	},
@@ -45,6 +43,8 @@ use webrtc::{
 		track_remote::TrackRemote,
 	},
 };
+
+use crate::audio::{PlaybackStream, PlaybackWriter};
 
 const DATA_CHANNEL_LABEL: &str = "oai-events";
 const INPUT_SAMPLE_RATE: u32 = 16_000;
@@ -61,9 +61,9 @@ const DISCONNECT_GRACE: Duration = Duration::from_secs(2);
 const CLOSE_TASK_TIMEOUT: Duration = Duration::from_secs(1);
 
 const OPUS_CAPABILITY: RTCRtpCodecCapability = RTCRtpCodecCapability {
-	mime_type: String::new(),
-	clock_rate: OUTPUT_SAMPLE_RATE,
-	channels: 2,
+	mime_type:     String::new(),
+	clock_rate:    OUTPUT_SAMPLE_RATE,
+	channels:      2,
 	sdp_fmtp_line: String::new(),
 	rtcp_feedback: Vec::new(),
 };
@@ -93,12 +93,12 @@ struct LiveCallbacks {
 }
 
 struct LiveResources {
-	peer:        Arc<RTCPeerConnection>,
+	peer:         Arc<RTCPeerConnection>,
 	data_channel: Arc<RTCDataChannel>,
-	input_tx:    flume::Sender<InputCommand>,
-	input_task:  JoinHandle<()>,
-	rtcp_task:   JoinHandle<()>,
-	playback:    PlaybackStream,
+	input_tx:     flume::Sender<InputCommand>,
+	input_task:   JoinHandle<()>,
+	rtcp_task:    JoinHandle<()>,
+	playback:     PlaybackStream,
 }
 
 struct LivePeerCore {
@@ -198,27 +198,19 @@ impl LivePeerCore {
 			let _ = peer.close().await;
 			return Err(format!("Failed to install the live SDP offer: {error}"));
 		}
+		let mut resources_slot = self.resources.lock();
 		if self.closing.load(Ordering::Acquire) {
+			drop(resources_slot);
 			let _ = peer.close().await;
 			return Err("Native live WebRTC peer was closed while starting".to_owned());
 		}
 
 		let (input_tx, input_rx) = flume::unbounded();
-		let input_task = tokio::spawn(run_input_audio(
-			track,
-			input_rx,
-			Arc::downgrade(self),
-		));
+		let input_task = tokio::spawn(run_input_audio(track, input_rx, Arc::downgrade(self)));
 		let rtcp_task = tokio::spawn(drain_rtcp(sender));
-		let resources = LiveResources {
-			peer,
-			data_channel,
-			input_tx,
-			input_task,
-			rtcp_task,
-			playback,
-		};
-		*self.resources.lock() = Some(resources);
+		let resources =
+			LiveResources { peer, data_channel, input_tx, input_task, rtcp_task, playback };
+		*resources_slot = Some(resources);
 		Ok(offer.sdp)
 	}
 
@@ -231,7 +223,8 @@ impl LivePeerCore {
 			.ok_or_else(|| "Native live WebRTC peer has not started".to_owned())?;
 		let answer = RTCSessionDescription::answer(sdp)
 			.map_err(|error| format!("Codex returned an invalid live SDP answer: {error}"))?;
-		peer.set_remote_description(answer)
+		peer
+			.set_remote_description(answer)
 			.await
 			.map_err(|error| format!("Failed to install the live SDP answer: {error}"))
 	}
@@ -240,10 +233,13 @@ impl LivePeerCore {
 		let mut signal_rx = self.signal_tx.subscribe();
 		let wait = async {
 			loop {
-				match signal_rx.borrow().clone() {
+				let signal = signal_rx.borrow().clone();
+				match signal {
 					PeerSignal::Open => return Ok(()),
 					PeerSignal::Failed(message) => return Err(message),
-					PeerSignal::Closed => return Err("Native live WebRTC peer closed before opening".to_owned()),
+					PeerSignal::Closed => {
+						return Err("Native live WebRTC peer closed before opening".to_owned());
+					},
 					PeerSignal::Connecting => {},
 				}
 				signal_rx
@@ -269,13 +265,22 @@ impl LivePeerCore {
 			.ok_or_else(|| "Native live WebRTC peer has not started".to_owned())?;
 		let sample_count = samples.len().min(MAX_QUEUED_INPUT_SAMPLES);
 		let retained = &samples[samples.len() - sample_count..];
-		let queued = self.queued_samples.fetch_add(sample_count, Ordering::AcqRel);
+		let queued = self
+			.queued_samples
+			.fetch_add(sample_count, Ordering::AcqRel);
 		if queued.saturating_add(sample_count) > MAX_QUEUED_INPUT_SAMPLES {
-			self.queued_samples.fetch_sub(sample_count, Ordering::AcqRel);
+			self
+				.queued_samples
+				.fetch_sub(sample_count, Ordering::AcqRel);
 			return Ok(());
 		}
-		if input_tx.send(InputCommand::Audio(retained.to_vec())).is_err() {
-			self.queued_samples.fetch_sub(sample_count, Ordering::AcqRel);
+		if input_tx
+			.send(InputCommand::Audio(retained.to_vec()))
+			.is_err()
+		{
+			self
+				.queued_samples
+				.fetch_sub(sample_count, Ordering::AcqRel);
 			return Err("Native live audio input is closed".to_owned());
 		}
 		Ok(())
@@ -297,13 +302,15 @@ impl LivePeerCore {
 	}
 
 	fn report_event(&self, payload: String) {
-		self.callbacks
+		self
+			.callbacks
 			.event
 			.call(Ok(payload), ThreadsafeFunctionCallMode::NonBlocking);
 	}
 
 	fn report_level(&self, level: f64) {
-		self.callbacks
+		self
+			.callbacks
 			.level
 			.call(Ok(level.clamp(0.0, 1.0)), ThreadsafeFunctionCallMode::NonBlocking);
 	}
@@ -315,11 +322,15 @@ impl LivePeerCore {
 	}
 
 	fn report_failure(&self, message: String) {
-		if self.closing.load(Ordering::Acquire) || self.failure_reported.swap(true, Ordering::AcqRel) {
+		if self.closing.load(Ordering::Acquire) || self.failure_reported.swap(true, Ordering::AcqRel)
+		{
 			return;
 		}
-		self.signal_tx.send_replace(PeerSignal::Failed(message.clone()));
-		self.callbacks
+		self
+			.signal_tx
+			.send_replace(PeerSignal::Failed(message.clone()));
+		self
+			.callbacks
 			.failure
 			.call(Ok(message), ThreadsafeFunctionCallMode::NonBlocking);
 	}
@@ -358,20 +369,20 @@ pub struct LiveWebRtcPeer {
 
 #[napi]
 impl LiveWebRtcPeer {
-	/// Create an idle peer and register its event, output-level, and failure callbacks.
+	/// Create an idle peer and register its event, output-level, and failure
+	/// callbacks.
 	#[napi(constructor)]
 	pub fn new(
 		#[napi(ts_arg_type = "(error: Error | null, payload: string) => void")]
 		on_event: StringCallback,
-		#[napi(ts_arg_type = "(error: Error | null, level: number) => void")]
-		on_level: LevelCallback,
+		#[napi(ts_arg_type = "(error: Error | null, level: number) => void")] on_level: LevelCallback,
 		#[napi(ts_arg_type = "(error: Error | null, message: string) => void")]
 		on_failure: StringCallback,
 	) -> Self {
 		Self {
 			inner: Arc::new(LivePeerCore::new(LiveCallbacks {
-				event: on_event,
-				level: on_level,
+				event:   on_event,
+				level:   on_level,
 				failure: on_failure,
 			})),
 		}
@@ -380,19 +391,28 @@ impl LiveWebRtcPeer {
 	/// Start the native media peer and return its SDP offer.
 	#[napi]
 	pub async fn create_offer(&self) -> Result<String> {
-		self.inner.create_offer().await.map_err(napi::Error::from_reason)
+		self
+			.inner
+			.create_offer()
+			.await
+			.map_err(napi::Error::from_reason)
 	}
 
 	/// Apply the remote SDP answer returned by Codex signaling.
 	#[napi]
 	pub async fn accept_answer(&self, sdp: String) -> Result<()> {
-		self.inner.accept_answer(sdp).await.map_err(napi::Error::from_reason)
+		self
+			.inner
+			.accept_answer(sdp)
+			.await
+			.map_err(napi::Error::from_reason)
 	}
 
 	/// Wait until the `oai-events` data channel is open.
 	#[napi]
 	pub async fn wait_for_open(&self, timeout_ms: Option<u32>) -> Result<()> {
-		self.inner
+		self
+			.inner
 			.wait_for_open(timeout_ms.unwrap_or(DEFAULT_OPEN_TIMEOUT_MS))
 			.await
 			.map_err(napi::Error::from_reason)
@@ -401,13 +421,20 @@ impl LiveWebRtcPeer {
 	/// Queue 16 kHz mono floating-point PCM for Opus transmission.
 	#[napi]
 	pub fn push_audio(&self, samples: Float32Array) -> Result<()> {
-		self.inner.push_audio(&samples).map_err(napi::Error::from_reason)
+		self
+			.inner
+			.push_audio(&samples)
+			.map_err(napi::Error::from_reason)
 	}
 
-	/// Enable or disable microphone transmission, discarding partial muted frames.
+	/// Enable or disable microphone transmission, discarding partial muted
+	/// frames.
 	#[napi]
 	pub fn set_muted(&self, muted: bool) -> Result<()> {
-		self.inner.set_muted(muted).map_err(napi::Error::from_reason)
+		self
+			.inner
+			.set_muted(muted)
+			.map_err(napi::Error::from_reason)
 	}
 
 	/// Close media, the data channel, the peer connection, and speaker playback.
@@ -433,14 +460,13 @@ impl Drop for LiveWebRtcPeer {
 
 fn opus_capability() -> RTCRtpCodecCapability {
 	RTCRtpCodecCapability {
-		mime_type: MIME_TYPE_OPUS.to_owned(),
-		clock_rate: OPUS_CAPABILITY.clock_rate,
-		channels: OPUS_CAPABILITY.channels,
+		mime_type:     MIME_TYPE_OPUS.to_owned(),
+		clock_rate:    OPUS_CAPABILITY.clock_rate,
+		channels:      OPUS_CAPABILITY.channels,
 		sdp_fmtp_line: "minptime=10;useinbandfec=1".to_owned(),
 		rtcp_feedback: Vec::new(),
 	}
 }
-
 
 fn install_peer_callbacks(
 	peer: &Arc<RTCPeerConnection>,
@@ -459,7 +485,9 @@ fn install_peer_callbacks(
 			}
 			let Some(output_sender) = output_sender else {
 				if let Some(core) = core.upgrade() {
-					core.report_failure("Codex live returned more than one remote audio track".to_owned());
+					core.report_failure(
+						"Codex live returned more than one remote audio track".to_owned(),
+					);
 				}
 				return;
 			};
@@ -479,17 +507,14 @@ fn install_peer_callbacks(
 				RTCPeerConnectionState::Failed => {
 					core.report_failure("Live WebRTC peer connection failed".to_owned());
 				},
-				RTCPeerConnectionState::Closed => {
-					if !core.closing.load(Ordering::Acquire) {
-						core.report_failure("Live WebRTC peer connection closed unexpectedly".to_owned());
-					}
+				RTCPeerConnectionState::Closed if !core.closing.load(Ordering::Acquire) => {
+					core.report_failure("Live WebRTC peer connection closed unexpectedly".to_owned());
 				},
 				RTCPeerConnectionState::Disconnected => {
 					tokio::time::sleep(DISCONNECT_GRACE).await;
-					if peer
-						.upgrade()
-						.is_some_and(|peer| peer.connection_state() == RTCPeerConnectionState::Disconnected)
-					{
+					if peer.upgrade().is_some_and(|peer| {
+						peer.connection_state() == RTCPeerConnectionState::Disconnected
+					}) {
 						core.report_failure("Live WebRTC peer connection disconnected".to_owned());
 					}
 				},
@@ -502,9 +527,8 @@ fn install_peer_callbacks(
 fn install_data_channel_callbacks(data_channel: &Arc<RTCDataChannel>, core: Weak<LivePeerCore>) {
 	let core_for_open = core.clone();
 	data_channel.on_open(Box::new(move || {
-		let core = core_for_open.clone();
 		Box::pin(async move {
-			if let Some(core) = core.upgrade() {
+			if let Some(core) = core_for_open.upgrade() {
 				core.mark_open();
 			}
 		})
@@ -517,7 +541,9 @@ fn install_data_channel_callbacks(data_channel: &Arc<RTCDataChannel>, core: Weak
 			if !message.is_string {
 				return;
 			}
-			if let (Some(core), Ok(payload)) = (core.upgrade(), String::from_utf8(message.data.to_vec())) {
+			if let (Some(core), Ok(payload)) =
+				(core.upgrade(), String::from_utf8(message.data.to_vec()))
+			{
 				core.report_event(payload);
 			}
 		})
@@ -650,7 +676,12 @@ async fn receive_output_audio(
 	playback_tx: PlaybackWriter,
 	core: Weak<LivePeerCore>,
 ) {
-	if !track.codec().capability.mime_type.eq_ignore_ascii_case(MIME_TYPE_OPUS) {
+	if !track
+		.codec()
+		.capability
+		.mime_type
+		.eq_ignore_ascii_case(MIME_TYPE_OPUS)
+	{
 		if let Some(core) = core.upgrade() {
 			core.report_failure(format!(
 				"Codex live negotiated unsupported audio codec {}",
@@ -668,7 +699,7 @@ async fn receive_output_audio(
 			return;
 		},
 	};
-	let mut decoded = [0.0f32; MAX_DECODED_OPUS_SAMPLES];
+	let mut decoded = vec![0.0f32; MAX_DECODED_OPUS_SAMPLES].into_boxed_slice();
 	let mut expected_sequence: Option<u16> = None;
 	let mut level = OutputLevel::default();
 
@@ -753,7 +784,8 @@ impl OutputLevel {
 		while offset < decoded.len() {
 			let take = (OUTPUT_LEVEL_SAMPLES - self.samples).min(decoded.len() - offset);
 			for &sample in &decoded[offset..offset + take] {
-				self.sum_squares += f64::from(sample) * f64::from(sample);
+				let sample = f64::from(sample);
+				self.sum_squares = sample.mul_add(sample, self.sum_squares);
 			}
 			self.samples += take;
 			offset += take;

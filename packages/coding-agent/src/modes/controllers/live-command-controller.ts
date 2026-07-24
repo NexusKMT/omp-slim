@@ -1,11 +1,24 @@
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
-import { LiveSessionController } from "../../live/controller";
+import { LiveSessionController, type LiveTranscript } from "../../live/controller";
+import { LIVE_MODEL } from "../../live/protocol";
 import { LiveVisualizer } from "../../live/visualizer";
 import { vocalizer } from "../../tts/vocalizer";
+import type { AssistantMessageComponent } from "../components/assistant-message";
 import type { CustomEditor } from "../components/custom-editor";
 import type { InteractiveModeContext } from "../types";
+import { createAssistantMessageComponent } from "../utils/interactive-context-helpers";
 
 const ANIMATION_INTERVAL_MS = 80;
+
+const LIVE_MESSAGE_USAGE: AssistantMessage["usage"] = {
+	input: 0,
+	output: 0,
+	cacheRead: 0,
+	cacheWrite: 0,
+	totalTokens: 0,
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+};
 
 function errorFrom(cause: unknown): Error {
 	return cause instanceof Error ? cause : new Error(String(cause));
@@ -23,6 +36,8 @@ export class LiveCommandController {
 	#previousShowHardwareCursor: boolean | undefined;
 	#previousUseTerminalCursor: boolean | undefined;
 	#resumeVocalizer: (() => void) | undefined;
+	#assistantTranscriptComponent: AssistantMessageComponent | undefined;
+	#assistantTranscriptStartedAt = 0;
 
 	constructor(ctx: InteractiveModeContext) {
 		this.#ctx = ctx;
@@ -91,15 +106,14 @@ export class LiveCommandController {
 					visualizer.setPhase(phase);
 					this.#ctx.ui.requestComponentRender(visualizer);
 				},
-				onLevels: (input, output) => {
+				onLevels: input => {
 					if (this.#visualizer !== visualizer) return;
-					visualizer.setLevels(input, output);
+					visualizer.setInputLevel(input);
 					this.#ctx.ui.requestComponentRender(visualizer);
 				},
 				onTranscript: transcript => {
 					if (this.#visualizer !== visualizer) return;
-					visualizer.setTranscript(transcript);
-					this.#ctx.ui.requestComponentRender(visualizer);
+					this.#presentTranscript(transcript);
 				},
 				onTerminal: error => this.#finish(session, error),
 			},
@@ -114,6 +128,60 @@ export class LiveCommandController {
 				this.#finish(session, errorFrom(cause));
 			}
 		}
+	}
+
+	#presentTranscript(transcript: LiveTranscript | undefined): void {
+		if (!transcript) return;
+		if (transcript.role === "user") {
+			if (!transcript.final) return;
+			this.#finalizeAssistantTranscript();
+			this.#ctx.addMessageToChat({
+				role: "user",
+				content: [{ type: "text", text: transcript.text }],
+				attribution: "user",
+				timestamp: Date.now(),
+			});
+			this.#ctx.ui.requestRender();
+			return;
+		}
+
+		let component = this.#assistantTranscriptComponent;
+		if (!component) {
+			component = createAssistantMessageComponent(this.#ctx);
+			this.#assistantTranscriptComponent = component;
+			this.#assistantTranscriptStartedAt = Date.now();
+		}
+		const message: AssistantMessage = {
+			role: "assistant",
+			content: [{ type: "text", text: transcript.text }],
+			api: "openai-codex-responses",
+			provider: "openai-codex",
+			model: LIVE_MODEL,
+			usage: { ...LIVE_MESSAGE_USAGE },
+			stopReason: "stop",
+			timestamp: this.#assistantTranscriptStartedAt,
+		};
+		component.updateContent(message, { transient: !transcript.final });
+		if (component !== this.#assistantTranscriptComponent) return;
+		if (transcript.final) {
+			component.markTranscriptBlockFinalized();
+			this.#assistantTranscriptComponent = undefined;
+			this.#assistantTranscriptStartedAt = 0;
+		}
+		if (!this.#ctx.chatContainer.children.includes(component)) {
+			this.#ctx.present(component);
+		} else {
+			this.#ctx.ui.requestComponentRender(component);
+		}
+	}
+
+	#finalizeAssistantTranscript(): void {
+		const component = this.#assistantTranscriptComponent;
+		if (!component) return;
+		component.markTranscriptBlockFinalized();
+		this.#assistantTranscriptComponent = undefined;
+		this.#assistantTranscriptStartedAt = 0;
+		this.#ctx.ui.requestComponentRender(component);
 	}
 
 	#mountVisualizer(visualizer: LiveVisualizer): void {
@@ -152,6 +220,7 @@ export class LiveCommandController {
 	}
 
 	#restoreEditor(): void {
+		this.#finalizeAssistantTranscript();
 		if (this.#animationInterval) {
 			clearInterval(this.#animationInterval);
 			this.#animationInterval = undefined;

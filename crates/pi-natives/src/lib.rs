@@ -23,8 +23,8 @@
 #![feature(alloc_error_hook)]
 
 pub mod appearance;
-pub mod audio;
 pub mod ast;
+pub mod audio;
 pub mod block;
 pub mod clipboard;
 pub mod crash_handler;

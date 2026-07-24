@@ -10,7 +10,14 @@ use std::sync::{
 };
 
 use flume::TryRecvError;
-use miniaudio::{Device, DeviceConfig, DeviceType, Format, PerformanceProfile};
+use maudio::{
+	audio::{performance::PerformanceProfile, sample_rate::SampleRate},
+	backend::Backend,
+	device::{
+		Device,
+		device_builder::{DeviceBuilder, DeviceBuilderOps},
+	},
+};
 use napi::{
 	bindgen_prelude::{Float32Array, Result},
 	threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode, UnknownReturnValue},
@@ -22,6 +29,15 @@ use tokio::sync::Notify;
 const AUDIO_CHANNELS: u32 = 1;
 const AUDIO_PERIOD_MS: u32 = 20;
 const PLAYBACK_DRAIN_CALLBACKS: usize = 2;
+
+#[cfg(target_os = "macos")]
+const AUDIO_BACKENDS: &[Backend] = &[Backend::CoreAudio];
+#[cfg(target_os = "windows")]
+const AUDIO_BACKENDS: &[Backend] = &[Backend::Wasapi];
+#[cfg(target_os = "linux")]
+const AUDIO_BACKENDS: &[Backend] = &[Backend::PulseAudio, Backend::Alsa, Backend::Jack];
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+const AUDIO_BACKENDS: &[Backend] = &[Backend::Sndio, Backend::Audio4, Backend::Oss];
 
 type CaptureCallback = ThreadsafeFunction<Float32Array, UnknownReturnValue>;
 type NativeResult<T> = std::result::Result<T, String>;
@@ -37,9 +53,9 @@ impl PlaybackState {
 	fn new() -> Self {
 		Self {
 			gain_bits: AtomicU32::new(1.0f32.to_bits()),
-			drained: AtomicBool::new(false),
-			stopped: AtomicBool::new(false),
-			notify: Notify::new(),
+			drained:   AtomicBool::new(false),
+			stopped:   AtomicBool::new(false),
+			notify:    Notify::new(),
 		}
 	}
 
@@ -89,7 +105,8 @@ impl PlaybackWriter {
 		if self.state.stopped.load(Ordering::Acquire) || self.state.drained.load(Ordering::Acquire) {
 			return Err("Native audio playback is closed".to_owned());
 		}
-		self.tx
+		self
+			.tx
 			.send(samples.to_vec())
 			.map_err(|_| "Native audio playback is closed".to_owned())
 	}
@@ -97,7 +114,7 @@ impl PlaybackWriter {
 
 /// Running mono playback stream shared by N-API playback and native WebRTC.
 pub(crate) struct PlaybackStream {
-	device: Option<Device>,
+	device: Option<Device<f32>>,
 	writer: Option<PlaybackWriter>,
 	state:  Arc<PlaybackState>,
 }
@@ -105,33 +122,34 @@ pub(crate) struct PlaybackStream {
 impl PlaybackStream {
 	/// Open and start the default speaker at the requested logical sample rate.
 	pub(crate) fn start(sample_rate: u32) -> NativeResult<Self> {
-		validate_sample_rate(sample_rate)?;
+		let sample_rate = audio_sample_rate(sample_rate)?;
 		let state = Arc::new(PlaybackState::new());
 		let (tx, rx) = flume::unbounded::<Vec<f32>>();
-		let mut config = audio_config(DeviceType::Playback, sample_rate);
-		config.playback_mut().set_format(Format::F32);
-		config.playback_mut().set_channels(AUDIO_CHANNELS);
-		let mut device = Device::new(None, &config)
-			.map_err(|error| format!("Failed to open the default speaker: {error}"))?;
-
 		let callback_state = Arc::clone(&state);
 		let mut current = Vec::new();
 		let mut cursor = 0;
 		let mut empty_callbacks = 0;
-		device.set_data_callback(move |_device, output, _input| {
-			fill_playback(
-				&rx,
-				&mut current,
-				&mut cursor,
-				output.as_samples_mut::<f32>(),
-				&callback_state,
-				&mut empty_callbacks,
-			);
-		});
-		let stop_state = Arc::clone(&state);
-		device.set_stop_callback(move |_device| stop_state.mark_stopped());
+		let mut builder = DeviceBuilder::playback().f32();
+		builder
+			.sample_rate(sample_rate)
+			.playback_channels(AUDIO_CHANNELS)
+			.period_size_millis(AUDIO_PERIOD_MS)
+			.performance_profile(PerformanceProfile::LowLatency)
+			.backends(AUDIO_BACKENDS);
+		let mut device = builder
+			.with_callback(move |_device, output| {
+				fill_playback(
+					&rx,
+					&mut current,
+					&mut cursor,
+					output,
+					&callback_state,
+					&mut empty_callbacks,
+				);
+			})
+			.map_err(|error| format!("Failed to open the default speaker: {error}"))?;
 		device
-			.start()
+			.device_start()
 			.map_err(|error| format!("Failed to start speaker playback: {error}"))?;
 
 		Ok(Self {
@@ -143,7 +161,8 @@ impl PlaybackStream {
 
 	/// Clone the producer endpoint used by the remote-audio decoder.
 	pub(crate) fn writer(&self) -> NativeResult<PlaybackWriter> {
-		self.writer
+		self
+			.writer
 			.clone()
 			.ok_or_else(|| "Native audio playback is closed".to_owned())
 	}
@@ -168,11 +187,11 @@ impl PlaybackStream {
 	pub(crate) fn stop(&mut self) -> NativeResult<()> {
 		self.writer.take();
 		self.state.mark_stopped();
-		let Some(device) = self.device.take() else {
+		let Some(mut device) = self.device.take() else {
 			return Ok(());
 		};
 		device
-			.stop()
+			.device_stop()
 			.map_err(|error| format!("Failed to stop speaker playback: {error}"))
 	}
 }
@@ -183,19 +202,9 @@ impl Drop for PlaybackStream {
 	}
 }
 
-fn audio_config(device_type: DeviceType, sample_rate: u32) -> DeviceConfig {
-	let mut config = DeviceConfig::new(device_type);
-	config.set_sample_rate(sample_rate);
-	config.set_period_size_in_milliseconds(AUDIO_PERIOD_MS);
-	config.set_performance_profile(PerformanceProfile::LowLatency);
-	config
-}
-
-fn validate_sample_rate(sample_rate: u32) -> NativeResult<()> {
-	if sample_rate == 0 {
-		return Err("Audio sample rate must be greater than zero".to_owned());
-	}
-	Ok(())
+fn audio_sample_rate(sample_rate: u32) -> NativeResult<SampleRate> {
+	SampleRate::try_from(sample_rate)
+		.map_err(|error| format!("Unsupported audio sample rate {sample_rate}: {error}"))
 }
 
 fn fill_playback(
@@ -250,10 +259,11 @@ fn fill_playback(
 	}
 }
 
-/// Default-microphone capture converted to mono `f32` at the requested sample rate.
+/// Default-microphone capture converted to mono `f32` at the requested sample
+/// rate.
 #[napi]
 pub struct AudioCapture {
-	device: Mutex<Option<Device>>,
+	device: Mutex<Option<Device<f32>>>,
 }
 
 #[napi]
@@ -265,22 +275,48 @@ impl AudioCapture {
 		#[napi(ts_arg_type = "(error: Error | null, samples: Float32Array) => void")]
 		on_audio: CaptureCallback,
 	) -> Result<Self> {
-		validate_sample_rate(sample_rate).map_err(napi::Error::from_reason)?;
-		let mut config = audio_config(DeviceType::Capture, sample_rate);
-		config.capture_mut().set_format(Format::F32);
-		config.capture_mut().set_channels(AUDIO_CHANNELS);
-		let mut device = Device::new(None, &config)
-			.map_err(|error| napi::Error::from_reason(format!("Failed to open the default microphone: {error}")))?;
-		device.set_data_callback(move |_device, _output, input| {
-			if input.sample_count() == 0 {
-				return;
-			}
-			on_audio.call(
-				Ok(Float32Array::new(input.as_samples::<f32>().to_vec())),
-				ThreadsafeFunctionCallMode::NonBlocking,
-			);
-		});
-		device.start().map_err(|error| {
+		let sample_rate = audio_sample_rate(sample_rate).map_err(napi::Error::from_reason)?;
+		let sample_rate_hz = u32::from(sample_rate);
+		let mut builder = DeviceBuilder::capture().f32();
+		builder
+			.sample_rate(sample_rate)
+			.capture_channels(AUDIO_CHANNELS)
+			.period_size_millis(AUDIO_PERIOD_MS)
+			.performance_profile(PerformanceProfile::LowLatency)
+			.backends(AUDIO_BACKENDS);
+		let mut inspected_samples = 0usize;
+		let mut received_signal = false;
+		let mut silence_reported = false;
+		let mut device = builder
+			.with_callback(move |_device, samples| {
+				if samples.is_empty() {
+					return;
+				}
+				if !received_signal {
+					received_signal = samples.iter().any(|sample| *sample != 0.0);
+					inspected_samples = inspected_samples.saturating_add(samples.len());
+				}
+				if !received_signal && !silence_reported && inspected_samples >= sample_rate_hz as usize
+				{
+					silence_reported = true;
+					on_audio.call(
+						Err(napi::Error::from_reason(
+							"Default microphone produced only silence; check microphone permission and \
+							 the default input device",
+						)),
+						ThreadsafeFunctionCallMode::NonBlocking,
+					);
+					return;
+				}
+				on_audio.call(
+					Ok(Float32Array::new(samples.to_vec())),
+					ThreadsafeFunctionCallMode::NonBlocking,
+				);
+			})
+			.map_err(|error| {
+				napi::Error::from_reason(format!("Failed to open the default microphone: {error}"))
+			})?;
+		device.device_start().map_err(|error| {
 			napi::Error::from_reason(format!("Failed to start microphone capture: {error}"))
 		})?;
 		Ok(Self { device: Mutex::new(Some(device)) })
@@ -290,19 +326,19 @@ impl AudioCapture {
 	#[napi]
 	pub fn stop(&self) -> Result<()> {
 		let device = self.device.lock().take();
-		let Some(device) = device else {
+		let Some(mut device) = device else {
 			return Ok(());
 		};
-		device
-			.stop()
-			.map_err(|error| napi::Error::from_reason(format!("Failed to stop microphone capture: {error}")))
+		device.device_stop().map_err(|error| {
+			napi::Error::from_reason(format!("Failed to stop microphone capture: {error}"))
+		})
 	}
 }
 
 impl Drop for AudioCapture {
 	fn drop(&mut self) {
-		if let Some(device) = self.device.get_mut().take() {
-			let _ = device.stop();
+		if let Some(mut device) = self.device.get_mut().take() {
+			let _ = device.device_stop();
 		}
 	}
 }
@@ -344,10 +380,13 @@ impl AudioPlayback {
 		let stream = stream
 			.as_ref()
 			.ok_or_else(|| napi::Error::from_reason("Native audio playback is closed"))?;
-		stream.set_gain(gain as f32).map_err(napi::Error::from_reason)
+		stream
+			.set_gain(gain as f32)
+			.map_err(napi::Error::from_reason)
 	}
 
-	/// Close input, wait until queued samples reach the speaker, then release it.
+	/// Close input, wait until queued samples reach the speaker, then release
+	/// it.
 	#[napi]
 	pub async fn end(&self) -> Result<()> {
 		{
@@ -401,26 +440,12 @@ mod tests {
 		let mut empty_callbacks = 0;
 		let mut output = [9.0; 5];
 
-		fill_playback(
-			&rx,
-			&mut current,
-			&mut cursor,
-			&mut output,
-			&state,
-			&mut empty_callbacks,
-		);
+		fill_playback(&rx, &mut current, &mut cursor, &mut output, &state, &mut empty_callbacks);
 
 		assert_eq!(output, [0.5, -0.5, 0.25, -0.25, 0.0]);
 		assert!(!state.drained.load(Ordering::Acquire));
 		let mut silence = [1.0; 2];
-		fill_playback(
-			&rx,
-			&mut current,
-			&mut cursor,
-			&mut silence,
-			&state,
-			&mut empty_callbacks,
-		);
+		fill_playback(&rx, &mut current, &mut cursor, &mut silence, &state, &mut empty_callbacks);
 		assert_eq!(silence, [0.0, 0.0]);
 		assert!(state.drained.load(Ordering::Acquire));
 	}

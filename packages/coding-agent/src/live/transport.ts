@@ -25,7 +25,6 @@ const LIVE_CALL_ID_PATTERN = /^rtc_[\w-]+$/;
 
 type Lifecycle = "idle" | "connecting" | "connected" | "closing" | "closed";
 
-
 interface LiveSignalingResult {
 	answer: string;
 	callId: string;
@@ -115,7 +114,6 @@ function abortReason(signal: AbortSignal | undefined): Error {
 	return new DOMException("Live connection aborted", "AbortError");
 }
 
-
 /** Native WebRTC transport for a Codex Frameless Bidi live session. */
 export class CodexLiveTransport {
 	readonly #options: LiveTransportOptions;
@@ -138,7 +136,7 @@ export class CodexLiveTransport {
 		if (!options.signal?.aborted) options.signal?.addEventListener("abort", this.#abortListener, { once: true });
 	}
 
-	/** Establish the browser peer, perform Codex signaling, and wait for the data channel. */
+	/** Establish the native peer, perform Codex signaling, and wait for the data channel. */
 	connect(): Promise<void> {
 		if (this.#state === "connected") return Promise.resolve();
 		if (this.#connectPromise) return this.#connectPromise;
@@ -226,7 +224,8 @@ export class CodexLiveTransport {
 			throw new LiveSignalingError(response.status, `Codex live signaling failed (${response.status}): ${detail}`);
 		}
 		const answer = responseBody;
-		if (!answer.trim()) throw new LiveSignalingError(response.status, "Codex live signaling returned an empty SDP answer");
+		if (!answer.trim())
+			throw new LiveSignalingError(response.status, "Codex live signaling returned an empty SDP answer");
 		const callId = parseLiveCallId(response.headers.get("location"));
 		if (!callId) {
 			throw new LiveSignalingError(response.status, "Codex live signaling returned no valid call ID");
@@ -234,11 +233,7 @@ export class CodexLiveTransport {
 		return { answer, callId, access, attestation };
 	}
 
-	async #connectSideband(
-		callId: string,
-		access: OAuthAccess,
-		attestation: string | undefined,
-	): Promise<void> {
+	async #connectSideband(callId: string, access: OAuthAccess, attestation: string | undefined): Promise<void> {
 		let failure = new Error("Codex live sideband connection failed");
 		for (let attempt = 0; attempt < SIDEBAND_CONNECT_ATTEMPTS; attempt++) {
 			try {
@@ -253,11 +248,7 @@ export class CodexLiveTransport {
 		throw failure;
 	}
 
-	async #openSideband(
-		callId: string,
-		access: OAuthAccess,
-		attestation: string | undefined,
-	): Promise<void> {
+	async #openSideband(callId: string, access: OAuthAccess, attestation: string | undefined): Promise<void> {
 		const url = buildLiveSidebandUrl(callId);
 		const options = {
 			headers: liveSessionHeaders(access, this.#options.sessionId, this.#realtimeSessionId, attestation),
