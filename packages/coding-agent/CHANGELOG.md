@@ -20,6 +20,7 @@
 - Added a toggle-list editor in `/settings` for array-of-enum settings: `providers.webSearchOrder` and `providers.imageOrder` (ordered — Enter/Space toggles, ←/→ nudges, 1-9 splices the hovered provider into that position) and `providers.webSearchExclude` now appear under Providers → Services instead of being config-file only.
 - Added `models.yml` Bedrock Converse prompt-cache capability overrides for bundled and opaque inference profiles.
 - Documented Vibe mode (`/vibe`) in `docs/vibe-mode.md` and the `/fresh` provider-stream reset in the session-operations doc, and linked both from the README's new "Session controls" section ([#6440](https://github.com/can1357/oh-my-pi/issues/6440)).
+- Added `getServiceTiers()` and `setServiceTier()` extension APIs for reading and changing the live per-family service tier used by subsequent session requests ([#5860](https://github.com/can1357/oh-my-pi/issues/5860)).
 
 ### Changed
 
