@@ -40,8 +40,8 @@ import {
 	theme,
 } from "../../modes/theme/theme";
 import type { InteractiveModeContext } from "../../modes/types";
-import type { ResetCreditAccountStatus, ResetCreditRedeemOutcome } from "../../session/auth-storage";
 import type { SessionOAuthAccountList } from "../../session/agent-session-types";
+import type { ResetCreditAccountStatus, ResetCreditRedeemOutcome } from "../../session/auth-storage";
 import type { SessionInfo } from "../../session/session-listing";
 import { SessionManager } from "../../session/session-manager";
 import { FileSessionStorage } from "../../session/session-storage";
