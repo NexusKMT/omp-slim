@@ -3029,7 +3029,8 @@ mod tests {
 		session
 			.shell
 			.run_string(
-				"export PI_EXEC_ENV=zed; find . -name keep.log -exec sh -c 'echo \"$PI_EXEC_ENV $1\"' sh {} ';' > cap.txt",
+				"export PI_EXEC_ENV=zed; find . -name keep.log -exec sh -c 'echo \"$PI_EXEC_ENV $1\"' \
+				 sh {} ';' > cap.txt",
 				&si,
 				&params,
 			)
