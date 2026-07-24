@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed OpenAI Responses native history replay sending output-only `status` fields back as input, preventing `input[N].status` failures in long-running sessions. ([#6513](https://github.com/can1357/oh-my-pi/pull/6513) by [@Ant39140](https://github.com/Ant39140))
+
 ## [17.1.1] - 2026-07-24
 
 ### Added
