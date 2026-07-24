@@ -21,8 +21,45 @@ import { type ComputerController, ComputerSupervisor, registerComputerController
 import type { ToolSession } from "./index";
 import { ToolError, throwIfAborted } from "./tool-errors";
 
+// Desktop actions cross the N-API boundary as i32; out-of-range JS numbers
+// must fail closed here instead of truncating in the napi conversion.
+const INT32_MIN = -2_147_483_648;
+const INT32_MAX = 2_147_483_647;
+
+const coordinateSchema = type("0 <= number.integer <= 2147483647");
+const scrollDeltaSchema = type("-2147483648 <= number.integer <= 2147483647");
+
+const pointSchema = type({
+	x: coordinateSchema.describe("x pixel coordinate"),
+	y: coordinateSchema.describe("y pixel coordinate"),
+});
+
+const computerActionSchema = type({
+	type: type(
+		"'click' | 'double_click' | 'drag' | 'keypress' | 'move' | 'screenshot' | 'scroll' | 'type' | 'wait'",
+	).describe("action kind"),
+	"x?": coordinateSchema.describe(
+		"x pixel coordinate in the most recent screenshot (click, double_click, move, scroll)",
+	),
+	"y?": coordinateSchema.describe(
+		"y pixel coordinate in the most recent screenshot (click, double_click, move, scroll)",
+	),
+	"button?": type("'left' | 'right' | 'wheel' | 'back' | 'forward'").describe("mouse button; required for click"),
+	"path?": pointSchema.array().atLeastLength(1).describe("waypoints from press to release; required for drag"),
+	"keys?": type("string[]").describe(
+		"key names (e.g. CTRL, SHIFT, ENTER, A); required chord for keypress, optional held modifiers for pointer actions",
+	),
+	"scroll_x?": scrollDeltaSchema.describe("horizontal scroll delta in pixels; required for scroll"),
+	"scroll_y?": scrollDeltaSchema.describe(
+		"vertical scroll delta in pixels, positive scrolls content down; required for scroll",
+	),
+	"text?": type("string").describe("literal text to type; required for type"),
+});
+
 const computerSchema = type({
-	"actions?": type("unknown[]").describe("ordered computer actions; provider-native calls supply these automatically"),
+	"actions?": computerActionSchema
+		.array()
+		.describe("ordered actions executed as one batch; omit or pass [] to just capture a screenshot"),
 });
 
 export type ComputerParams = typeof computerSchema.infer;
@@ -41,16 +78,20 @@ export interface ComputerToolDetails {
 
 export type ComputerControllerFactory = (options: DesktopSessionOptions) => ComputerController;
 
-function isNumber(value: unknown): value is number {
-	return typeof value === "number" && Number.isFinite(value);
+function isInt32(value: unknown): value is number {
+	return typeof value === "number" && Number.isInteger(value) && value >= INT32_MIN && value <= INT32_MAX;
+}
+
+function isCoordinate(value: unknown): value is number {
+	return isInt32(value) && value >= 0;
 }
 
 function isPoint(value: unknown): value is { x: number; y: number } {
 	return (
 		!!value &&
 		typeof value === "object" &&
-		isNumber((value as { x?: unknown }).x) &&
-		isNumber((value as { y?: unknown }).y)
+		isCoordinate((value as { x?: unknown }).x) &&
+		isCoordinate((value as { y?: unknown }).y)
 	);
 }
 
@@ -64,23 +105,26 @@ function isComputerAction(value: unknown): value is ComputerAction {
 	switch (action.type) {
 		case "click":
 			return (
-				isNumber(action.x) &&
-				isNumber(action.y) &&
+				isCoordinate(action.x) &&
+				isCoordinate(action.y) &&
 				["left", "right", "wheel", "back", "forward"].includes(String(action.button))
 			);
 		case "double_click":
-			return isNumber(action.x) && isNumber(action.y) && (action.keys === null || isStringArray(action.keys));
+			// Function-calling models omit `keys`; the GA wire shape sends null.
+			return isCoordinate(action.x) && isCoordinate(action.y) && (action.keys == null || isStringArray(action.keys));
 		case "drag":
 			return Array.isArray(action.path) && action.path.length > 0 && action.path.every(isPoint);
 		case "keypress":
 			return isStringArray(action.keys) && action.keys.length > 0;
 		case "move":
-			return isNumber(action.x) && isNumber(action.y);
+			return isCoordinate(action.x) && isCoordinate(action.y);
 		case "screenshot":
 		case "wait":
 			return true;
 		case "scroll":
-			return isNumber(action.x) && isNumber(action.y) && isNumber(action.scroll_x) && isNumber(action.scroll_y);
+			return (
+				isCoordinate(action.x) && isCoordinate(action.y) && isInt32(action.scroll_x) && isInt32(action.scroll_y)
+			);
 		case "type":
 			return typeof action.text === "string";
 		default:
@@ -89,7 +133,11 @@ function isComputerAction(value: unknown): value is ComputerAction {
 }
 
 function parseActions(value: unknown): ComputerAction[] {
-	if (!Array.isArray(value) || value.length === 0) throw new ToolError("Computer call requires at least one action");
+	// Missing or empty action batches degrade to a plain screenshot so a
+	// function-calling model can observe the screen before acting.
+	if (value === undefined || value === null) return [{ type: "screenshot" }];
+	if (!Array.isArray(value)) throw new ToolError("Computer call requires an array of actions");
+	if (value.length === 0) return [{ type: "screenshot" }];
 	if (!value.every(isComputerAction)) throw new ToolError("Computer call contains an invalid action");
 	return value;
 }

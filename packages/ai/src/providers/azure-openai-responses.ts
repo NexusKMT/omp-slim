@@ -368,10 +368,13 @@ function buildParams(
 		const serializedTools: NonNullable<AzureOpenAIResponsesSamplingParams["tools"]> = [];
 		for (const tool of context.tools) {
 			if (tool.native?.type === "computer") {
-				if (model.supportsComputerUse === true) serializedTools.push({ type: "computer" });
-				continue;
-			}
-			if (tool.native !== undefined) continue;
+				if (model.supportsComputerUse === true) {
+					serializedTools.push({ type: "computer" });
+					continue;
+				}
+				// Fall through: unsupported models get the computer tool as a
+				// plain function tool so function-calling models can drive it.
+			} else if (tool.native !== undefined) continue;
 			serializedTools.push({
 				type: "function",
 				name: tool.name,

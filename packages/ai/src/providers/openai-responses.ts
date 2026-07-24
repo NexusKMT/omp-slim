@@ -1308,10 +1308,13 @@ export function convertTools(
 	const allowFreeform = supportsFreeformApplyPatch(model);
 	const out: OpenAITool[] = [];
 	for (const tool of tools) {
-		if (tool.native?.type === "computer") {
-			if (model.supportsComputerUse === true) out.push({ type: "computer" });
+		if (tool.native?.type === "computer" && model.supportsComputerUse === true) {
+			out.push({ type: "computer" });
 			continue;
 		}
+		// Models without native computer support fall through and receive the
+		// tool as a plain function tool (name/description/schema below), so
+		// function-calling models can still drive the desktop.
 		if (allowFreeform && tool.customFormat) {
 			out.push({
 				type: "custom",

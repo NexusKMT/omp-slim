@@ -208,7 +208,7 @@ describe("azure openai responses streaming", () => {
 		expect(Array.isArray(tools[0].parameters.properties.item.anyOf)).toBe(true);
 	});
 
-	it("drops native computer tools and forced computer choice instead of misapplying it to function tools", async () => {
+	it("serializes computer as a function tool on unsupported models and gates the native forced choice", async () => {
 		const computer: Tool = {
 			name: "computer",
 			description: "Control the desktop",
@@ -228,7 +228,11 @@ describe("azure openai responses streaming", () => {
 			azureModel,
 			{ toolChoice: { type: "computer" } },
 		);
-		expect(payload.tools).toEqual([expect.objectContaining({ type: "function", name: "read_file" })]);
+		expect(payload.tools).toEqual([
+			expect.objectContaining({ type: "function", name: "computer" }),
+			expect.objectContaining({ type: "function", name: "read_file" }),
+		]);
+		expect(JSON.stringify(payload.tools)).not.toContain('{"type":"computer"}');
 		expect(payload.tool_choice).toBeUndefined();
 	});
 

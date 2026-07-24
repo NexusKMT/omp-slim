@@ -34,8 +34,6 @@ export interface GetAddonFilenamesInput {
 
 export function getAddonFilenames(input: GetAddonFilenamesInput): string[];
 
-export function getDesktopAddonFilenames(input: GetAddonFilenamesInput): string[];
-
 export interface ShouldStageNodeModulesAddonInput {
 	platform: NodeJS.Platform | string;
 	isCompiledBinary: boolean;
@@ -101,8 +99,3 @@ export function validateLoadedBindings(
 ): void;
 
 export function loadNative(): Record<string, unknown>;
-export function loadDesktopNative(): Record<string, unknown> | null;
-
-export function createDesktopSession(coreConstructor: new (options?: unknown) => unknown): new (
-	options?: unknown,
-) => unknown;

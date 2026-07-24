@@ -4175,10 +4175,12 @@ export function convertOpenAICodexResponsesTools(
 	const allowFreeform = model.applyPatchToolType === "freeform";
 	const payloads: CodexToolPayload[] = [];
 	for (const tool of tools) {
-		if (tool.native?.type === "computer") {
-			if (model.supportsComputerUse === true) payloads.push({ type: "computer" });
+		if (tool.native?.type === "computer" && model.supportsComputerUse === true) {
+			payloads.push({ type: "computer" });
 			continue;
 		}
+		// Models without native computer support fall through and receive the
+		// tool as a plain function tool so function-calling models can drive it.
 		if (allowFreeform && tool.customFormat) {
 			payloads.push({
 				type: "custom",

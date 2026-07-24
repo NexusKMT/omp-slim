@@ -144,41 +144,47 @@ const computerSafetyCheckSchema = type({
 	"message?": "string | null",
 });
 
+// Desktop coordinates cross the native boundary as i32 and must be
+// nonnegative; scroll deltas are signed i32. Out-of-range numbers fail
+// closed here instead of truncating downstream.
+const computerCoordinate = type("0 <= number.integer <= 2147483647");
+const computerScrollDelta = type("-2147483648 <= number.integer <= 2147483647");
+
 const computerClickActionSchema = type({
 	type: "'click'",
 	button: "'left' | 'right' | 'wheel' | 'back' | 'forward'",
-	x: "number",
-	y: "number",
+	x: computerCoordinate,
+	y: computerCoordinate,
 	"keys?": "string[] | null",
 });
 
 const computerDoubleClickActionSchema = type({
 	type: "'double_click'",
-	x: "number",
-	y: "number",
+	x: computerCoordinate,
+	y: computerCoordinate,
 	keys: "string[] | null",
 });
 
 const computerDragActionSchema = type({
 	type: "'drag'",
-	path: type({ x: "number", y: "number" }).array(),
+	path: type({ x: computerCoordinate, y: computerCoordinate }).array(),
 	"keys?": "string[] | null",
 });
 
 const computerKeypressActionSchema = type({ type: "'keypress'", keys: "string[]" });
 const computerMoveActionSchema = type({
 	type: "'move'",
-	x: "number",
-	y: "number",
+	x: computerCoordinate,
+	y: computerCoordinate,
 	"keys?": "string[] | null",
 });
 const computerScreenshotActionSchema = type({ type: "'screenshot'" });
 const computerScrollActionSchema = type({
 	type: "'scroll'",
-	x: "number",
-	y: "number",
-	scroll_x: "number",
-	scroll_y: "number",
+	x: computerCoordinate,
+	y: computerCoordinate,
+	scroll_x: computerScrollDelta,
+	scroll_y: computerScrollDelta,
 	"keys?": "string[] | null",
 });
 const computerTypeActionSchema = type({ type: "'type'", text: "string" });

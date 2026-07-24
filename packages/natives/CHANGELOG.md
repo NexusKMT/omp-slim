@@ -4,11 +4,7 @@
 
 ### Added
 
-- Added a genuine native desktop backend for computer use, including macOS Quartz/CGEvent support and a lazily loaded Linux x64 glibc addon with direct X11/XTest input or Wayland libei portal input. Unsupported Linux arm64/musl and currently unsupported pure-Wayland/multi-output cases fail closed.
-
-### Fixed
-
-- Fixed Linux desktop addon builds against PipeWire 0.3.48 development headers by detecting the pre-0.3.65 SPA video layout at build time.
+- Added a genuine native desktop backend for computer use, bundled in the core addon on every published platform: macOS Quartz/CGEvent, Windows Win32/`SendInput`, and a pure-Rust Linux X11 backend (`x11rb` capture over the display socket, XTest input with keysym mapping) that links no GUI system libraries — so Linux x64/arm64, glibc and musl are all supported and headless hosts are unaffected. Wayland sessions work through XWayland. Execute batches enforce a 60-second native deadline (`DESKTOP_DEADLINE_EXCEEDED`) and never emit input after it expires; unsupported pure-Wayland capture and out-of-XTest-range or negative-origin coordinate layouts fail closed.
 
 ## [17.0.8] - 2026-07-22
 

@@ -73,7 +73,7 @@ describe("OpenAI GA computer contract", () => {
 		expect(supported.supportsComputerUse).toBe(true);
 		expect(unsupported.supportsComputerUse).toBe(false);
 		expect(convertTools([computerTool], true, supported)).toEqual([{ type: "computer" }]);
-		expect(convertTools([computerTool], true, unsupported)).toEqual([]);
+		expect(convertTools([computerTool], true, unsupported)).toMatchObject([{ type: "function", name: "computer" }]);
 		expect(mapOpenAIResponsesToolChoiceForTools({ type: "computer" }, [computerTool], supported)).toEqual({
 			type: "computer",
 		});
@@ -92,6 +92,34 @@ describe("OpenAI GA computer contract", () => {
 		});
 		expect(JSON.stringify(params)).not.toContain("display_width");
 		expect(JSON.stringify(params)).not.toContain("display_height");
+	});
+
+	test("serializes the computer tool as a named function tool for unsupported models", () => {
+		const unsupported = model("openai-responses", "gpt-5.3");
+		const tools = convertTools([computerTool], true, unsupported);
+		expect(tools).toHaveLength(1);
+		const serialized = JSON.parse(JSON.stringify(tools[0])) as Record<string, unknown>;
+		expect(serialized.type).toBe("function");
+		expect(serialized.name).toBe("computer");
+		expect(serialized.description).toBe("Control the host desktop");
+		expect(serialized.parameters).toMatchObject({ type: "object" });
+		expect(JSON.stringify(tools)).not.toContain('{"type":"computer"}');
+		// Forcing the fallback uses a plain named function choice.
+		expect(
+			mapOpenAIResponsesToolChoiceForTools({ type: "function", name: "computer" }, [computerTool], unsupported),
+		).toEqual({ type: "function", name: "computer" });
+		// The native choice stays gated off for unsupported models.
+		expect(mapOpenAIResponsesToolChoiceForTools({ type: "computer" }, [computerTool], unsupported)).toBeUndefined();
+
+		const codexUnsupported = model("openai-codex-responses", "gpt-5.3");
+		expect(codexUnsupported.supportsComputerUse).not.toBe(true);
+		const codexTools = convertOpenAICodexResponsesTools([computerTool], codexUnsupported);
+		expect(codexTools).toHaveLength(1);
+		expect(codexTools[0]).toMatchObject({ type: "function", name: "computer" });
+		expect(
+			normalizeCodexToolChoice({ type: "function", name: "computer" }, [computerTool], codexUnsupported),
+		).toEqual({ type: "function", name: "computer" });
+		expect(normalizeCodexToolChoice({ type: "computer" }, [computerTool], codexUnsupported)).toBeUndefined();
 	});
 
 	test("parses batched streamed actions, stable item id, and safety checks", async () => {

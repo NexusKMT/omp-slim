@@ -6,7 +6,13 @@ import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/ex
 import { ExtensionToolWrapper } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import { getThemeByName } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { buildSystemPrompt } from "@oh-my-pi/pi-coding-agent/system-prompt";
-import { ComputerTool, computerApproval, createTools, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import {
+	type ComputerParams,
+	ComputerTool,
+	computerApproval,
+	createTools,
+	type ToolSession,
+} from "@oh-my-pi/pi-coding-agent/tools";
 import type {
 	ComputerWorkerInbound,
 	ComputerWorkerOutbound,
@@ -23,6 +29,7 @@ import { ComputerWorkerCore, type NativeDesktopSession } from "@oh-my-pi/pi-codi
 import { computerToolRenderer } from "@oh-my-pi/pi-coding-agent/tools/computer-renderer";
 import { buildNamedToolChoice, isToolChoiceActive } from "@oh-my-pi/pi-coding-agent/utils/tool-choice";
 import type { DesktopAction, DesktopCapabilities, DesktopCapture, DesktopSessionOptions } from "@oh-my-pi/pi-natives";
+import { type as arkType } from "arktype";
 
 const capabilities: DesktopCapabilities = {
 	capture: true,
@@ -358,12 +365,12 @@ describe("computer supervisor", () => {
 });
 
 describe("computer tool choice", () => {
-	it("uses native forced choice only for models declaring computer-use support", () => {
+	it("uses native forced choice for GA models and named function choice for the fallback", () => {
 		const supported = { api: "openai-responses", supportsComputerUse: true } as unknown as Model<Api>;
 		expect(buildNamedToolChoice("computer", supported)).toEqual({ type: "computer" });
 		for (const api of ["openai-responses", "openai-codex-responses", "azure-openai-responses"] as const) {
 			const unsupported = { api, supportsComputerUse: false } as unknown as Model<Api>;
-			expect(buildNamedToolChoice("computer", unsupported)).toBeUndefined();
+			expect(buildNamedToolChoice("computer", unsupported)).toEqual({ type: "function", name: "computer" });
 		}
 		expect(isToolChoiceActive({ type: "computer" }, [{ name: "computer" }])).toBe(true);
 		expect(isToolChoiceActive({ type: "computer" }, [{ name: "read" }])).toBe(false);
@@ -376,6 +383,78 @@ describe("computer tool", () => {
 		expect(disabled).toHaveLength(0);
 		const enabled = await createTools(toolSession(Settings.isolated({ "computer.enabled": true })), ["computer"]);
 		expect(enabled.map(tool => [tool.name, tool.loadMode])).toEqual([["computer", "essential"]]);
+	});
+
+	it("accepts each GA action shape through the params schema and rejects malformed coordinates", () => {
+		const tool = new ComputerTool(
+			toolSession(Settings.isolated({ "computer.enabled": true })),
+			() => new FakeController(),
+		);
+		const ok = tool.parameters({
+			actions: [
+				{ type: "click", x: 1, y: 2, button: "left" },
+				{ type: "double_click", x: 3, y: 4 },
+				{
+					type: "drag",
+					path: [
+						{ x: 0, y: 0 },
+						{ x: 9, y: 9 },
+					],
+				},
+				{ type: "keypress", keys: ["CTRL", "A"] },
+				{ type: "move", x: 5, y: 6 },
+				{ type: "screenshot" },
+				{ type: "scroll", x: 7, y: 8, scroll_x: -10, scroll_y: 20 },
+				{ type: "type", text: "hello" },
+				{ type: "wait" },
+			],
+		});
+		expect(ok instanceof arkType.errors).toBe(false);
+		for (const actions of [
+			[{ type: "click", x: -1, y: 2, button: "left" }],
+			[{ type: "move", x: 0.5, y: 0 }],
+			[{ type: "scroll", x: 0, y: 0, scroll_x: 2 ** 31, scroll_y: 0 }],
+		]) {
+			expect(tool.parameters({ actions }) instanceof arkType.errors).toBe(true);
+		}
+	});
+
+	it("executes function-call params.actions and defaults empty batches to a screenshot", async () => {
+		const controller = new FakeController();
+		const tool = new ComputerTool(toolSession(Settings.isolated({ "computer.enabled": true })), () => controller);
+		const result = await tool.execute("call", { actions: [{ type: "click", x: 5, y: 6, button: "left" }] });
+		expect(result.content).toEqual([{ type: "image", data: "AQ==", mimeType: "image/png", detail: "original" }]);
+		await tool.execute("call", {});
+		await tool.execute("call", { actions: [] });
+		expect(controller.batches).toEqual([
+			[{ type: "click", x: 5, y: 6, button: "left" }],
+			[{ type: "screenshot" }],
+			[{ type: "screenshot" }],
+		]);
+		await tool.close();
+	});
+
+	it("fails closed on non-integer, negative, or out-of-int32-range coordinates", async () => {
+		const controller = new FakeController();
+		const tool = new ComputerTool(toolSession(Settings.isolated({ "computer.enabled": true })), () => controller);
+		const invalidBatches = [
+			[{ type: "click", x: 1.5, y: 2, button: "left" }],
+			[{ type: "move", x: -1, y: 2 }],
+			[{ type: "move", x: 2 ** 31, y: 0 }],
+			[{ type: "scroll", x: 0, y: 0, scroll_x: 0, scroll_y: -(2 ** 31) - 1 }],
+			[{ type: "drag", path: [{ x: 0, y: -3 }] }],
+		] as unknown as ComputerParams["actions"][];
+		for (const actions of invalidBatches) {
+			await expect(tool.execute("call", { actions })).rejects.toThrow("Computer call contains an invalid action");
+		}
+		expect(controller.batches).toHaveLength(0);
+		await tool.execute("call", {
+			actions: [{ type: "scroll", x: 0, y: 0, scroll_x: -2_147_483_648, scroll_y: 2_147_483_647 }],
+		});
+		expect(controller.batches).toEqual([
+			[{ type: "scroll", x: 0, y: 0, scroll_x: -2_147_483_648, scroll_y: 2_147_483_647 }],
+		]);
+		await tool.close();
 	});
 
 	it("uses registered native options, adapts every GA field, and returns exactly one fresh PNG with metadata", async () => {

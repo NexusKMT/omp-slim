@@ -3127,6 +3127,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 						);
 						return tools.filter((tool): tool is AgentTool => tool !== null);
 					},
+			createComputerTool: restrictToolNames
+				? undefined
+				: async () => (await BUILTIN_TOOLS.computer(toolSession)) ?? null,
 			createVibeTools:
 				(options.taskDepth ?? 0) === 0 && !options.parentTaskPrefix
 					? () => createVibeTools(toolSession)

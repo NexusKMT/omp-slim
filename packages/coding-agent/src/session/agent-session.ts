@@ -1130,6 +1130,7 @@ export class AgentSession {
 			autoApprove: config.autoApprove,
 			toolRegistry: config.toolRegistry,
 			createVibeTools: config.createVibeTools,
+			createComputerTool: config.createComputerTool,
 			builtInToolNames: config.builtInToolNames,
 			presentationPinnedToolNames: config.presentationPinnedToolNames,
 			ensureWriteRegistered: config.ensureWriteRegistered,
@@ -3950,6 +3951,20 @@ export class AgentSession {
 	/** Restores an exact top-level versus `xd://` tool partition. */
 	setActiveToolPresentation(toolNames: string[], mountedToolNames: string[]): Promise<void> {
 		return this.#tools.setActiveToolPresentation(toolNames, mountedToolNames);
+	}
+
+	/**
+	 * Session-scoped enable/disable for the settings-gated `computer` tool.
+	 *
+	 * Enabling builds the tool through {@link AgentSessionConfig.createComputerTool}
+	 * on first use and activates it; disabling drops it from the active set while
+	 * keeping the registry entry so repeated toggles reuse one desktop controller.
+	 *
+	 * @returns false when enabling was requested but this session cannot build the
+	 * tool (e.g. restricted child sessions have no factory).
+	 */
+	setComputerToolEnabled(enabled: boolean): Promise<boolean> {
+		return this.#tools.setComputerToolEnabled(enabled);
 	}
 
 	/** Cancels the local rollout-memory startup owned by this session. */

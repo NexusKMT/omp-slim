@@ -5,15 +5,13 @@
 //! never race each other and every coordinate action is interpreted against the
 //! last composite frame returned to JavaScript.
 
-#[cfg(target_os = "linux")]
-use std::collections::{HashMap, VecDeque};
 use std::{
 	collections::HashSet,
 	fmt,
 	io::Cursor,
 	sync::Arc,
 	thread::{self, JoinHandle},
-	time::Duration,
+	time::{Duration, Instant},
 };
 
 #[cfg(target_os = "macos")]
@@ -22,25 +20,17 @@ use core_graphics::{
 	event_source::{CGEventSource, CGEventSourceStateID},
 	geometry::CGPoint,
 };
+#[cfg(not(target_os = "linux"))]
 use enigo::{Axis, Button, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
 use image::{DynamicImage, ImageFormat, Rgba, RgbaImage, imageops::FilterType};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use parking_lot::Mutex;
-#[cfg(target_os = "linux")]
-use x11rb::{
-	CURRENT_TIME, NONE,
-	connection::Connection as _,
-	protocol::{
-		xinput::{self, DeviceUse},
-		xproto::{self, ConnectionExt as _},
-		xtest::ConnectionExt as _,
-	},
-	rust_connection::RustConnection,
-	wrapper::ConnectionExt as _,
-};
+#[cfg(not(target_os = "linux"))]
 use xcap::Monitor;
 
+#[cfg(target_os = "linux")]
+use crate::desktop_x11::{Axis, Button, Coordinate, Direction, Input as Enigo, Key, Monitor};
 use crate::task;
 
 const OPERATION_TIMEOUT: Duration = Duration::from_mins(1);
@@ -160,6 +150,7 @@ enum ErrorCode {
 	PermissionDenied,
 	CaptureFailed,
 	InputFailed,
+	DeadlineExceeded,
 	LayoutChanged,
 	CoordinateOutOfBounds,
 	SessionClosed,
@@ -175,6 +166,7 @@ impl ErrorCode {
 			Self::PermissionDenied => "DESKTOP_PERMISSION_DENIED",
 			Self::CaptureFailed => "DESKTOP_CAPTURE_FAILED",
 			Self::InputFailed => "DESKTOP_INPUT_FAILED",
+			Self::DeadlineExceeded => "DESKTOP_DEADLINE_EXCEEDED",
 			Self::LayoutChanged => "DESKTOP_LAYOUT_CHANGED",
 			Self::CoordinateOutOfBounds => "DESKTOP_COORDINATE_OUT_OF_BOUNDS",
 			Self::SessionClosed => "DESKTOP_SESSION_CLOSED",
@@ -585,11 +577,11 @@ struct LayoutDisplay {
 
 #[derive(Debug)]
 struct MonitorSnapshot {
-	monitor: xcap::Monitor,
+	monitor: Monitor,
 	display: LayoutDisplay,
 }
 
-fn same_display_rect(left: &LayoutDisplay, right: &LayoutDisplay) -> bool {
+const fn same_display_rect(left: &LayoutDisplay, right: &LayoutDisplay) -> bool {
 	left.x == right.x
 		&& left.y == right.y
 		&& left.width == right.width
@@ -764,448 +756,26 @@ fn same_layout(frame: &FrameGeometry, current: &[LayoutDisplay]) -> bool {
 		})
 	})
 }
-
-#[cfg(target_os = "linux")]
-struct X11Input {
-	connection:       RustConnection,
-	root:             u32,
-	min_keycode:      u8,
-	keysyms_per_code: u8,
-	keysyms:          Vec<u32>,
-	unused_keycodes:  VecDeque<u8>,
-	mapped_keycodes:  HashMap<u32, u8>,
-	held_keycodes:    Vec<u8>,
-	keyboard_device:  u8,
-	pointer_device:   u8,
-}
-
-#[cfg(target_os = "linux")]
-impl X11Input {
-	fn new() -> CoreResult<Self> {
-		let (connection, screen_index) = x11rb::connect(None).map_err(|error| {
-			DesktopError::new(
-				ErrorCode::BackendUnavailable,
-				format!("X11/XTest connection failed: {error}"),
-			)
-		})?;
-		connection
-			.xtest_get_version(2, 2)
-			.map_err(|error| x11_protocol_error("query XTest", error))?
-			.reply()
-			.map_err(|error| x11_protocol_error("query XTest", error))?;
-		let setup = connection.setup();
-		let root = setup.roots[screen_index].root;
-		let min_keycode = setup.min_keycode;
-		let max_keycode = setup.max_keycode;
-		let mapping = connection
-			.get_keyboard_mapping(min_keycode, max_keycode - min_keycode + 1)
-			.map_err(|error| x11_protocol_error("read keyboard mapping", error))?
-			.reply()
-			.map_err(|error| x11_protocol_error("read keyboard mapping", error))?;
-		let unused_keycodes = mapping
-			.keysyms
-			.chunks(usize::from(mapping.keysyms_per_keycode))
-			.zip(min_keycode..=max_keycode)
-			.filter_map(|(keysyms, keycode)| {
-				(keycode != 8 && keysyms.iter().all(|keysym| *keysym == 0)).then_some(keycode)
-			})
-			.collect();
-		let keyboard_device = x11_device_id(&connection, DeviceUse::IS_X_KEYBOARD)?;
-		let pointer_device = x11_device_id(&connection, DeviceUse::IS_X_POINTER)?;
-		Ok(Self {
-			connection,
-			root,
-			min_keycode,
-			keysyms_per_code: mapping.keysyms_per_keycode,
-			keysyms: mapping.keysyms,
-			unused_keycodes,
-			mapped_keycodes: HashMap::new(),
-			held_keycodes: Vec::new(),
-			keyboard_device,
-			pointer_device,
-		})
-	}
-
-	fn key(&mut self, key: Key, direction: Direction) -> CoreResult<()> {
-		let keysym: xkeysym::Keysym = key.into();
-		let keycode = self.keycode_for(keysym.raw())?;
-		if matches!(direction, Direction::Press | Direction::Click) {
-			self.fake_input(
-				xproto::KEY_PRESS_EVENT,
-				keycode,
-				self.root,
-				0,
-				0,
-				self.keyboard_device,
-				"press key",
-			)?;
-			self.held_keycodes.push(keycode);
-		}
-		if matches!(direction, Direction::Release | Direction::Click) {
-			self.fake_input(
-				xproto::KEY_RELEASE_EVENT,
-				keycode,
-				self.root,
-				0,
-				0,
-				self.keyboard_device,
-				"release key",
-			)?;
-			if let Some(index) = self.held_keycodes.iter().rposition(|held| *held == keycode) {
-				self.held_keycodes.remove(index);
-			}
-		}
-		self
-			.connection
-			.sync()
-			.map_err(|error| x11_protocol_error("synchronize key input", error))
-	}
-
-	fn text(&mut self, text: &str) -> CoreResult<()> {
-		for character in text.chars() {
-			self.key(Key::Unicode(character), Direction::Click)?;
-		}
-		Ok(())
-	}
-
-	fn button(&mut self, button: Button, direction: Direction) -> CoreResult<()> {
-		let detail = match button {
-			Button::Left => 1,
-			Button::Middle => 2,
-			Button::Right => 3,
-			Button::ScrollUp => 4,
-			Button::ScrollDown => 5,
-			Button::ScrollLeft => 6,
-			Button::ScrollRight => 7,
-			Button::Back => 8,
-			Button::Forward => 9,
-		};
-		if matches!(direction, Direction::Press | Direction::Click) {
-			self.x11_button(detail, xproto::BUTTON_PRESS_EVENT)?;
-		}
-		if matches!(direction, Direction::Release | Direction::Click) {
-			self.x11_button(detail, xproto::BUTTON_RELEASE_EVENT)?;
-		}
-		self
-			.connection
-			.sync()
-			.map_err(|error| x11_protocol_error("synchronize button input", error))
-	}
-
-	fn move_mouse(&mut self, x: i32, y: i32, coordinate: Coordinate) -> CoreResult<()> {
-		if coordinate == Coordinate::Abs && (x < 0 || y < 0) {
-			return Err(DesktopError::new(
-				ErrorCode::BackendUnavailable,
-				"X11/x11rb XTest absolute input cannot represent negative global desktop coordinates",
-			));
-		}
-		let x = i16::try_from(x).map_err(|_| {
-			DesktopError::new(
-				ErrorCode::CoordinateOutOfBounds,
-				"X11/XTest pointer x coordinate must fit in -32768..=32767",
-			)
-		})?;
-		let y = i16::try_from(y).map_err(|_| {
-			DesktopError::new(
-				ErrorCode::CoordinateOutOfBounds,
-				"X11/XTest pointer y coordinate must fit in -32768..=32767",
-			)
-		})?;
-		self.fake_input(
-			xproto::MOTION_NOTIFY_EVENT,
-			if coordinate == Coordinate::Rel { 1 } else { 0 },
-			NONE,
-			x,
-			y,
-			self.pointer_device,
-			"move pointer",
-		)?;
-		self
-			.connection
-			.sync()
-			.map_err(|error| x11_protocol_error("synchronize pointer input", error))
-	}
-
-	fn scroll(&mut self, length: i32, axis: Axis) -> CoreResult<()> {
-		let button = match (length.is_positive(), axis) {
-			(true, Axis::Vertical) => Button::ScrollDown,
-			(false, Axis::Vertical) => Button::ScrollUp,
-			(true, Axis::Horizontal) => Button::ScrollRight,
-			(false, Axis::Horizontal) => Button::ScrollLeft,
-		};
-		for _ in 0..length.unsigned_abs() {
-			self.button(button, Direction::Click)?;
-		}
-		Ok(())
-	}
-
-	fn keycode_for(&mut self, keysym: u32) -> CoreResult<u8> {
-		if let Some(keycode) = self.mapped_keycodes.get(&keysym) {
-			return Ok(*keycode);
-		}
-		if let Some((index, _)) = self
-			.keysyms
-			.chunks(usize::from(self.keysyms_per_code))
-			.enumerate()
-			.find(|(_, keysyms)| keysyms.first() == Some(&keysym))
-		{
-			return u8::try_from(index + usize::from(self.min_keycode)).map_err(|_| {
-				DesktopError::new(ErrorCode::InputFailed, "X11 keycode mapping overflow")
-			});
-		}
-		if self.unused_keycodes.is_empty() {
-			let reusable: Vec<_> = self
-				.mapped_keycodes
-				.iter()
-				.filter_map(|(keysym, keycode)| {
-					(!self.held_keycodes.contains(keycode)).then_some((*keysym, *keycode))
-				})
-				.collect();
-			let mut first_error = None;
-			for (mapped_keysym, keycode) in reusable {
-				match self.bind_key(keycode, 0) {
-					Ok(()) => {
-						self.mapped_keycodes.remove(&mapped_keysym);
-						self.unused_keycodes.push_back(keycode);
-					},
-					Err(error) if first_error.is_none() => first_error = Some(error),
-					Err(_) => {},
-				}
-			}
-			if let Some(error) = first_error {
-				return Err(error);
-			}
-		}
-		let keycode = self.unused_keycodes.pop_front().ok_or_else(|| {
-			DesktopError::new(
-				ErrorCode::InputFailed,
-				"X11 keyboard map has no reusable keycode for the requested key",
-			)
-		})?;
-		self.bind_key(keycode, keysym)?;
-		self.mapped_keycodes.insert(keysym, keycode);
-		Ok(keycode)
-	}
-
-	fn bind_key(&self, keycode: u8, keysym: u32) -> CoreResult<()> {
-		let row = vec![keysym; usize::from(self.keysyms_per_code)];
-		self.change_keyboard_row(keycode, &row, "update keyboard mapping")?;
-		self
-			.connection
-			.sync()
-			.map_err(|error| x11_protocol_error("synchronize keyboard mapping", error))
-	}
-
-	fn x11_button(&self, detail: u8, event_type: u8) -> CoreResult<()> {
-		self.fake_input(event_type, detail, self.root, 0, 0, self.pointer_device, "emit button input")
-	}
-
-	fn fake_input(
-		&self,
-		event_type: u8,
-		detail: u8,
-		root: u32,
-		root_x: i16,
-		root_y: i16,
-		device: u8,
-		context: &str,
-	) -> CoreResult<()> {
-		self
-			.connection
-			.xtest_fake_input(event_type, detail, CURRENT_TIME, root, root_x, root_y, device)
-			.map_err(|error| x11_protocol_error(context, error))?
-			.check()
-			.map_err(|error| x11_protocol_error(context, error))
-	}
-
-	fn change_keyboard_row(&self, keycode: u8, row: &[u32], context: &str) -> CoreResult<()> {
-		let width = u8::try_from(row.len()).map_err(|_| {
-			DesktopError::new(ErrorCode::InputFailed, "X11 keyboard mapping row is too wide")
-		})?;
-		self
-			.connection
-			.change_keyboard_mapping(1, keycode, width, row)
-			.map_err(|error| x11_protocol_error(context, error))?
-			.check()
-			.map_err(|error| x11_protocol_error(context, error))
-	}
-}
-
-#[cfg(target_os = "linux")]
-impl Drop for X11Input {
-	fn drop(&mut self) {
-		let held = self.held_keycodes.clone();
-		let mut mapped: Vec<_> = self.mapped_keycodes.values().copied().collect();
-		mapped.sort_unstable();
-		let _ = cleanup_x11_keyboard_state(&held, &mapped, self.keysyms_per_code, |operation| {
-			match operation {
-				X11CleanupOperation::Release(keycode) => self.fake_input(
-					xproto::KEY_RELEASE_EVENT,
-					keycode,
-					self.root,
-					0,
-					0,
-					self.keyboard_device,
-					"release held key during cleanup",
-				),
-				X11CleanupOperation::Restore(keycode, row) => {
-					self.change_keyboard_row(keycode, row, "restore keyboard mapping during cleanup")
-				},
-			}
-		});
-		let _ = self.connection.sync();
-	}
-}
-
-#[cfg(target_os = "linux")]
-enum X11CleanupOperation<'a> {
-	Release(u8),
-	Restore(u8, &'a [u32]),
-}
-
-#[cfg(target_os = "linux")]
-fn cleanup_x11_keyboard_state<E>(
-	held_keycodes: &[u8],
-	mapped_keycodes: &[u8],
-	keysyms_per_code: u8,
-	mut perform: impl FnMut(X11CleanupOperation<'_>) -> std::result::Result<(), E>,
-) -> std::result::Result<(), E> {
-	let mut first_error = None;
-	for &keycode in held_keycodes.iter().rev() {
-		if let Err(error) = perform(X11CleanupOperation::Release(keycode))
-			&& first_error.is_none()
-		{
-			first_error = Some(error);
-		}
-	}
-	let empty_row = vec![0; usize::from(keysyms_per_code)];
-	for &keycode in mapped_keycodes {
-		if let Err(error) = perform(X11CleanupOperation::Restore(keycode, &empty_row))
-			&& first_error.is_none()
-		{
-			first_error = Some(error);
-		}
-	}
-	match first_error {
-		Some(error) => Err(error),
-		None => Ok(()),
-	}
-}
-
-#[cfg(target_os = "linux")]
-fn x11_device_id(connection: &RustConnection, usage: DeviceUse) -> CoreResult<u8> {
-	xinput::list_input_devices(connection)
-		.map_err(|error| x11_protocol_error("list X11 input devices", error))?
-		.reply()
-		.map_err(|error| x11_protocol_error("list X11 input devices", error))?
-		.devices
-		.into_iter()
-		.find(|device| device.device_use == usage)
-		.map(|device| device.device_id)
-		.ok_or_else(|| {
-			DesktopError::new(
-				ErrorCode::BackendUnavailable,
-				format!("X11/XTest did not report a {usage:?} device"),
-			)
-		})
-}
-
-#[cfg(target_os = "linux")]
-fn x11_protocol_error(context: &str, error: impl fmt::Display) -> DesktopError {
-	DesktopError::new(ErrorCode::InputFailed, format!("X11/XTest {context} failed: {error}"))
-}
-
-enum NativeInput {
-	Enigo(Enigo),
-	#[cfg(target_os = "linux")]
-	X11(X11Input),
-}
-
-impl NativeInput {
-	fn key(&mut self, key: Key, direction: Direction) -> CoreResult<()> {
-		match self {
-			Self::Enigo(input) => input.key(key, direction).map_err(input_error),
-			#[cfg(target_os = "linux")]
-			Self::X11(input) => input.key(key, direction),
-		}
-	}
-
-	fn text(&mut self, text: &str) -> CoreResult<()> {
-		match self {
-			Self::Enigo(input) => input.text(text).map_err(input_error),
-			#[cfg(target_os = "linux")]
-			Self::X11(input) => input.text(text),
-		}
-	}
-
-	fn button(&mut self, button: Button, direction: Direction) -> CoreResult<()> {
-		match self {
-			Self::Enigo(input) => input.button(button, direction).map_err(input_error),
-			#[cfg(target_os = "linux")]
-			Self::X11(input) => input.button(button, direction),
-		}
-	}
-
-	fn move_mouse(&mut self, x: i32, y: i32, coordinate: Coordinate) -> CoreResult<()> {
-		match self {
-			Self::Enigo(input) => input.move_mouse(x, y, coordinate).map_err(input_error),
-			#[cfg(target_os = "linux")]
-			Self::X11(input) => input.move_mouse(x, y, coordinate),
-		}
-	}
-
-	fn scroll(&mut self, length: i32, axis: Axis) -> CoreResult<()> {
-		match self {
-			Self::Enigo(input) => input.scroll(length, axis).map_err(input_error),
-			#[cfg(target_os = "linux")]
-			Self::X11(input) => input.scroll(length, axis),
-		}
-	}
-}
-
-struct DesktopWorker {
-	config:       SessionConfig,
-	capabilities: Arc<Mutex<DesktopCapabilities>>,
-	input:        Option<NativeInput>,
-	input_error:  Option<DesktopError>,
-	last_frame:   Option<FrameGeometry>,
-}
-
-#[cfg(target_os = "linux")]
-fn validate_coordinate_backend(
-	backend: Option<ConcreteBackend>,
-	frame: &FrameGeometry,
-) -> CoreResult<()> {
-	if backend == Some(ConcreteBackend::Wayland) && frame.displays.len() > 1 {
-		return Err(DesktopError::new(
-			ErrorCode::BackendUnavailable,
-			"Wayland/libei absolute input cannot safely correlate a multi-display XWayland \
-			 composite; select one display or use an X11 session",
-		));
-	}
-	let has_negative_origin = frame
+/// XTest `FakeInput` root coordinates are i16. Reject frame layouts the wire
+/// protocol cannot address before any input is synthesized, so coordinates
+/// fail closed instead of truncating.
+#[cfg(any(target_os = "linux", test))]
+fn validate_xtest_frame(frame: &FrameGeometry) -> CoreResult<()> {
+	if frame
 		.displays
 		.iter()
-		.any(|display| display.display.x < 0 || display.display.y < 0);
-	if has_negative_origin {
-		let backend = match backend {
-			Some(ConcreteBackend::X11) => "X11/x11rb XTest",
-			Some(ConcreteBackend::Wayland) => "Wayland/libei",
-			None => return Ok(()),
-		};
+		.any(|display| display.display.x < 0 || display.display.y < 0)
+	{
 		return Err(DesktopError::new(
 			ErrorCode::BackendUnavailable,
-			format!(
-				"{backend} absolute input cannot represent negative global desktop coordinates; \
-				 select a display whose origin is non-negative"
-			),
+			"X11/x11rb XTest absolute input cannot represent negative global desktop coordinates; \
+			 select a display whose origin is non-negative",
 		));
 	}
-	if backend == Some(ConcreteBackend::X11)
-		&& frame.displays.iter().any(|display| {
-			i64::from(display.display.x) + i64::from(display.display.width) > 32_768
-				|| i64::from(display.display.y) + i64::from(display.display.height) > 32_768
-		}) {
+	if frame.displays.iter().any(|display| {
+		i64::from(display.display.x) + i64::from(display.display.width) > 32_768
+			|| i64::from(display.display.y) + i64::from(display.display.height) > 32_768
+	}) {
 		return Err(DesktopError::new(
 			ErrorCode::BackendUnavailable,
 			"X11/x11rb XTest absolute input is limited to global coordinates in 0..=32767; select a \
@@ -1215,27 +785,36 @@ fn validate_coordinate_backend(
 	Ok(())
 }
 
+/// Every Linux input path (plain X11 and XWayland alike) synthesizes through
+/// XTest, so the XTest coordinate limits apply regardless of the detected
+/// backend.
+#[cfg(target_os = "linux")]
+fn validate_coordinate_backend(frame: &FrameGeometry) -> CoreResult<()> {
+	validate_xtest_frame(frame)
+}
+
 #[cfg(not(target_os = "linux"))]
-fn validate_coordinate_backend(
-	_backend: Option<ConcreteBackend>,
-	_frame: &FrameGeometry,
-) -> CoreResult<()> {
+#[allow(
+	clippy::unnecessary_wraps,
+	clippy::missing_const_for_fn,
+	reason = "signature parity with the Linux XTest validator"
+)]
+fn validate_coordinate_backend(_frame: &FrameGeometry) -> CoreResult<()> {
 	Ok(())
 }
 
+/// The composite frame every coordinate action in one batch maps against:
+/// frozen to the frame most recently returned to JavaScript before the batch
+/// started, so an in-batch capture can never silently rebase later actions.
 #[derive(Clone, Debug)]
 struct BatchCoordinateFrame(Option<FrameGeometry>);
 
 impl BatchCoordinateFrame {
-	fn from_returned_frame(frame: &Option<FrameGeometry>) -> Self {
-		Self(frame.clone())
+	fn from_returned_frame(frame: Option<&FrameGeometry>) -> Self {
+		Self(frame.cloned())
 	}
 
-	fn validate(
-		&self,
-		backend: Option<ConcreteBackend>,
-		current: &[LayoutDisplay],
-	) -> CoreResult<FrameGeometry> {
+	fn validate(&self, current: &[LayoutDisplay]) -> CoreResult<FrameGeometry> {
 		let frame = self.0.clone().ok_or_else(|| {
 			DesktopError::new(
 				ErrorCode::InvalidAction,
@@ -1249,17 +828,29 @@ impl BatchCoordinateFrame {
 				 input",
 			));
 		}
-		validate_coordinate_backend(backend, &frame)?;
+		validate_coordinate_backend(&frame)?;
 		Ok(frame)
 	}
 }
 
+/// Intermediate `screenshot` actions are deferred to the single capture taken
+/// after the batch; every other action keeps its relative order.
 fn executable_batch_actions(
 	actions: Vec<ValidatedAction>,
 ) -> impl Iterator<Item = ValidatedAction> {
 	actions
 		.into_iter()
 		.filter(|action| !matches!(action, ValidatedAction::Screenshot))
+}
+
+struct DesktopWorker {
+	config:         SessionConfig,
+	capabilities:   Arc<Mutex<DesktopCapabilities>>,
+	input:          Option<Enigo>,
+	input_error:    Option<DesktopError>,
+	/// Geometry of the last frame actually handed back to JavaScript; the only
+	/// frame coordinate input may be interpreted against.
+	returned_frame: Option<FrameGeometry>,
 }
 
 impl DesktopWorker {
@@ -1272,10 +863,10 @@ impl DesktopWorker {
 		} else {
 			None
 		};
-		let worker = Self { config, capabilities, input: None, input_error, last_frame: None };
+		let worker = Self { config, capabilities, input: None, input_error, returned_frame: None };
 		// Capture probing is intentionally independent from input initialization.
-		// In particular, Linux read-only sessions must not open the RemoteDesktop
-		// portal or request libei input consent until the first mutating action.
+		// In particular, Linux read-only sessions must not connect the XTest
+		// input backend until the first mutating action.
 		worker.probe_capabilities();
 		worker
 	}
@@ -1302,7 +893,7 @@ impl DesktopWorker {
 		caps.display_count = 0;
 	}
 
-	fn ensure_input(&mut self) -> CoreResult<&mut NativeInput> {
+	fn ensure_input(&mut self) -> CoreResult<&mut Enigo> {
 		if self.input.is_none() {
 			let backend = self.config.backend.ok_or_else(|| {
 				DesktopError::new(
@@ -1350,8 +941,8 @@ impl DesktopWorker {
 		if backend == ConcreteBackend::Wayland && std::env::var_os("DISPLAY").is_none() {
 			let error = DesktopError::new(
 				ErrorCode::BackendUnavailable,
-				"Wayland capture through xcap 0.9.6 requires an active XWayland DISPLAY; pure Wayland \
-				 capture is unavailable",
+				"Wayland sessions require an active XWayland DISPLAY for native capture and input; \
+				 pure Wayland capture is unavailable",
 			);
 			self.record_capture_failure(&error);
 			return Err(error);
@@ -1540,7 +1131,7 @@ impl DesktopWorker {
 			height:   target_height,
 			displays: frame_displays,
 		};
-		self.last_frame = Some(geometry.clone());
+		self.returned_frame = Some(geometry.clone());
 		let mut caps = self.capabilities.lock();
 		caps.capture = true;
 		caps.capture_permission = PERMISSION_GRANTED.to_string();
@@ -1554,18 +1145,23 @@ impl DesktopWorker {
 		batch_frame: &BatchCoordinateFrame,
 	) -> CoreResult<FrameGeometry> {
 		let current = self.current_layout()?;
-		let frame = batch_frame.validate(self.config.backend, &current);
+		let frame = batch_frame.validate(&current);
 		if matches!(&frame, Err(error) if error.code == ErrorCode::LayoutChanged) {
-			self.last_frame = None;
+			self.returned_frame = None;
 		}
 		frame
 	}
 
-	fn execute(&mut self, actions: Vec<ValidatedAction>) -> CoreResult<CoreCapture> {
+	fn execute(
+		&mut self,
+		actions: Vec<ValidatedAction>,
+		deadline: Instant,
+	) -> CoreResult<CoreCapture> {
 		// Freeze coordinate mapping to the last frame returned before this batch.
 		// In-batch screenshot markers are deferred to the single final capture.
-		let batch_frame = BatchCoordinateFrame::from_returned_frame(&self.last_frame);
+		let batch_frame = BatchCoordinateFrame::from_returned_frame(self.returned_frame.as_ref());
 		for action in executable_batch_actions(actions) {
+			check_deadline(deadline)?;
 			match action {
 				ValidatedAction::Click { x, y, button, count, modifiers } => {
 					let frame = self.ensure_coordinate_frame(&batch_frame)?;
@@ -1593,6 +1189,7 @@ impl DesktopWorker {
 					let (x, y) = frame.map_point(x, y)?;
 					with_modifiers(self.ensure_input()?, &modifiers, |input| move_mouse(input, x, y))?;
 				},
+				ValidatedAction::Screenshot => unreachable!("screenshot actions are deferred"),
 				ValidatedAction::Scroll { x, y, scroll_x, scroll_y, modifiers } => {
 					let frame = self.ensure_coordinate_frame(&batch_frame)?;
 					let (x, y) = frame.map_point(x, y)?;
@@ -1602,22 +1199,32 @@ impl DesktopWorker {
 						let horizontal = scroll_steps(scroll_x);
 						let vertical = scroll_steps(scroll_y);
 						if horizontal != 0 {
-							input.scroll(horizontal, Axis::Horizontal)?;
+							input
+								.scroll(horizontal, Axis::Horizontal)
+								.map_err(input_error)?;
 						}
 						if vertical != 0 {
-							input.scroll(vertical, Axis::Vertical)?;
+							input
+								.scroll(vertical, Axis::Vertical)
+								.map_err(input_error)?;
 						}
 						Ok(())
 					})?;
 				},
 				ValidatedAction::Type { text } => {
-					self.ensure_input()?.text(&text)?;
+					self.ensure_input()?.text(&text).map_err(input_error)?;
 				},
-				ValidatedAction::Wait => thread::sleep(WAIT_ACTION_DURATION),
-				ValidatedAction::Screenshot => unreachable!("screenshot actions are deferred"),
+				ValidatedAction::Wait => {
+					let remaining = deadline.saturating_duration_since(Instant::now());
+					if remaining.is_zero() {
+						return Err(deadline_exceeded());
+					}
+					thread::sleep(WAIT_ACTION_DURATION.min(remaining));
+				},
 			}
 		}
 		// The result is always a new frame taken after the complete ordered batch.
+		check_deadline(deadline)?;
 		self.capture()
 	}
 }
@@ -1628,7 +1235,7 @@ fn scaled_edge(value: u32, scale: f64) -> u32 {
 		.clamp(0.0, f64::from(u32::MAX)) as u32
 }
 
-fn capture_metadata_error(error: xcap::XCapError) -> DesktopError {
+fn capture_metadata_error(error: impl fmt::Display) -> DesktopError {
 	DesktopError::permission_or(
 		ErrorCode::BackendUnavailable,
 		format!("failed to read native display metadata: {error}"),
@@ -1653,71 +1260,69 @@ fn monitor_name(monitor: &Monitor) -> String {
 }
 
 #[cfg(target_os = "linux")]
-fn desktop_portal_available() -> CoreResult<()> {
-	let connection = zbus::blocking::Connection::session().map_err(|error| {
-		DesktopError::new(
+fn create_input(backend: ConcreteBackend) -> CoreResult<Enigo> {
+	Enigo::new().map_err(|error| {
+		DesktopError::permission_or(
 			ErrorCode::BackendUnavailable,
-			format!("desktop portal session bus is unavailable: {error}"),
+			format!("{} native input initialization failed: {error}", backend.name()),
 		)
-	})?;
-	let proxy = zbus::blocking::Proxy::new(
-		&connection,
-		"org.freedesktop.DBus",
-		"/org/freedesktop/DBus",
-		"org.freedesktop.DBus",
-	)
-	.map_err(|error| {
-		DesktopError::new(
-			ErrorCode::BackendUnavailable,
-			format!("desktop portal probe failed: {error}"),
-		)
-	})?;
-	let available: bool = proxy
-		.call("NameHasOwner", &("org.freedesktop.portal.Desktop",))
-		.map_err(|error| {
-			DesktopError::new(
-				ErrorCode::BackendUnavailable,
-				format!("desktop portal probe failed: {error}"),
-			)
-		})?;
-	if !available {
-		return Err(DesktopError::new(
-			ErrorCode::BackendUnavailable,
-			"org.freedesktop.portal.Desktop is not available for native libei input",
-		));
-	}
-	Ok(())
+	})
 }
 
-fn create_input(backend: ConcreteBackend) -> CoreResult<NativeInput> {
-	#[cfg(target_os = "linux")]
-	if backend == ConcreteBackend::X11 {
-		return X11Input::new().map(NativeInput::X11);
-	}
+#[cfg(not(target_os = "linux"))]
+fn create_input(backend: ConcreteBackend) -> CoreResult<Enigo> {
 	#[cfg(target_os = "windows")]
 	let _ = enigo::set_dpi_awareness();
-	#[cfg(target_os = "linux")]
-	desktop_portal_available()?;
 	let settings = Settings { open_prompt_to_get_permissions: false, ..Settings::default() };
 	match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Enigo::new(&settings))) {
-		Ok(Ok(input)) => Ok(NativeInput::Enigo(input)),
+		Ok(Ok(input)) => Ok(input),
 		Ok(Err(error)) => Err(DesktopError::permission_or(
 			ErrorCode::BackendUnavailable,
 			format!("{} native input initialization failed: {error}", backend.name()),
 		)),
 		Err(_) => Err(DesktopError::new(
 			ErrorCode::BackendUnavailable,
-			format!(
-				"{} native input initialization failed while contacting the desktop portal",
-				backend.name()
-			),
+			format!("{} native input initialization failed unexpectedly", backend.name()),
 		)),
 	}
 }
 
-fn input_error(error: enigo::InputError) -> DesktopError {
+fn input_error(error: impl fmt::Display) -> DesktopError {
 	DesktopError::permission_or(ErrorCode::InputFailed, format!("native input failed: {error}"))
 }
+
+fn deadline_exceeded() -> DesktopError {
+	DesktopError::new(
+		ErrorCode::DeadlineExceeded,
+		"native action deadline exceeded; remaining batch actions were not executed",
+	)
+}
+
+fn check_deadline(deadline: Instant) -> CoreResult<()> {
+	if Instant::now() >= deadline {
+		Err(deadline_exceeded())
+	} else {
+		Ok(())
+	}
+}
+
+/// Reject batches whose mandatory `wait` time alone cannot finish inside the
+/// worker deadline, keeping 5s of slack for real input and the final capture.
+fn validate_batch_wait_budget(actions: &[ValidatedAction]) -> CoreResult<()> {
+	let waits = actions
+		.iter()
+		.filter(|action| matches!(action, ValidatedAction::Wait))
+		.count();
+	let wait_total = WAIT_ACTION_DURATION.saturating_mul(u32::try_from(waits).unwrap_or(u32::MAX));
+	if wait_total > OPERATION_TIMEOUT.saturating_sub(Duration::from_secs(5)) {
+		return Err(DesktopError::new(
+			ErrorCode::InvalidAction,
+			"batch cannot complete within the 60s native deadline",
+		));
+	}
+	Ok(())
+}
+
 #[cfg(any(target_os = "macos", test))]
 const MODIFIER_CONTROL: u8 = 1 << 0;
 #[cfg(any(target_os = "macos", test))]
@@ -1762,7 +1367,7 @@ fn quartz_modifier_flags(modifiers: &[Key]) -> CGEventFlags {
 
 #[cfg(not(target_os = "macos"))]
 fn click_at(
-	input: &mut NativeInput,
+	input: &mut Enigo,
 	x: i32,
 	y: i32,
 	button: MouseButton,
@@ -1771,21 +1376,23 @@ fn click_at(
 ) -> CoreResult<()> {
 	move_mouse(input, x, y)?;
 	for _ in 0..count {
-		input.button(button.into(), Direction::Click)?;
+		input
+			.button(button.into(), Direction::Click)
+			.map_err(input_error)?;
 	}
 	Ok(())
 }
 
 #[cfg(target_os = "macos")]
 fn click_at(
-	_input: &mut NativeInput,
+	_input: &mut Enigo,
 	x: i32,
 	y: i32,
 	button: MouseButton,
 	count: u8,
 	modifiers: &[Key],
 ) -> CoreResult<()> {
-	let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
+	let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|()| {
 		DesktopError::new(ErrorCode::InputFailed, "failed to create a Quartz pointer event source")
 	})?;
 	let (down, up, quartz_button, number) = match button {
@@ -1810,7 +1417,7 @@ fn click_at(
 	for click_state in 1..=i64::from(count) {
 		for event_type in [down, up] {
 			let event = CGEvent::new_mouse_event(source.clone(), event_type, point, quartz_button)
-				.map_err(|_| {
+				.map_err(|()| {
 					DesktopError::new(ErrorCode::InputFailed, "failed to create a Quartz pointer event")
 				})?;
 			event.set_integer_value_field(EventField::MOUSE_EVENT_BUTTON_NUMBER, number);
@@ -1823,20 +1430,24 @@ fn click_at(
 }
 
 #[cfg(not(target_os = "macos"))]
-fn drag_path(input: &mut NativeInput, path: &[(i32, i32)], _modifiers: &[Key]) -> CoreResult<()> {
+fn drag_path(input: &mut Enigo, path: &[(i32, i32)], _modifiers: &[Key]) -> CoreResult<()> {
 	let (start_x, start_y) = path[0];
 	move_mouse(input, start_x, start_y)?;
-	input.button(Button::Left, Direction::Press)?;
+	input
+		.button(Button::Left, Direction::Press)
+		.map_err(input_error)?;
 	let drag_result = path[1..]
 		.iter()
 		.try_for_each(|&(x, y)| move_mouse(input, x, y));
-	let release_result = input.button(Button::Left, Direction::Release);
+	let release_result = input
+		.button(Button::Left, Direction::Release)
+		.map_err(input_error);
 	drag_result.and(release_result)
 }
 
 #[cfg(target_os = "macos")]
-fn drag_path(_input: &mut NativeInput, path: &[(i32, i32)], modifiers: &[Key]) -> CoreResult<()> {
-	let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
+fn drag_path(_input: &mut Enigo, path: &[(i32, i32)], modifiers: &[Key]) -> CoreResult<()> {
+	let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|()| {
 		DesktopError::new(ErrorCode::InputFailed, "failed to create a Quartz pointer event source")
 	})?;
 	let flags = quartz_modifier_flags(modifiers);
@@ -1847,7 +1458,7 @@ fn drag_path(_input: &mut NativeInput, path: &[(i32, i32)], modifiers: &[Key]) -
 			CGPoint::new(f64::from(x), f64::from(y)),
 			CGMouseButton::Left,
 		)
-		.map_err(|_| {
+		.map_err(|()| {
 			DesktopError::new(ErrorCode::InputFailed, "failed to create a Quartz drag event")
 		})?;
 		event.set_flags(flags);
@@ -1864,12 +1475,12 @@ fn drag_path(_input: &mut NativeInput, path: &[(i32, i32)], modifiers: &[Key]) -
 }
 
 #[cfg(not(target_os = "windows"))]
-fn move_mouse(input: &mut NativeInput, x: i32, y: i32) -> CoreResult<()> {
-	input.move_mouse(x, y, Coordinate::Abs)
+fn move_mouse(input: &mut Enigo, x: i32, y: i32) -> CoreResult<()> {
+	input.move_mouse(x, y, Coordinate::Abs).map_err(input_error)
 }
 
 #[cfg(target_os = "windows")]
-fn move_mouse(_input: &mut NativeInput, x: i32, y: i32) -> CoreResult<()> {
+fn move_mouse(_input: &mut Enigo, x: i32, y: i32) -> CoreResult<()> {
 	use std::mem::size_of;
 
 	use windows_sys::Win32::UI::{
@@ -2059,6 +1670,9 @@ fn parse_key(value: &str) -> CoreResult<Key> {
 	Ok(key)
 }
 
+/// Press every chord key in order, then release in reverse. A failed press
+/// best-effort-releases what is already held; a failed release still attempts
+/// every remaining held key and surfaces the first release error.
 fn execute_keypress_with<E>(
 	keys: &[Key],
 	mut emit: impl FnMut(Key, Direction) -> std::result::Result<(), E>,
@@ -2090,14 +1704,14 @@ fn execute_keypress_with<E>(
 	}
 }
 
-fn execute_keypress(input: &mut NativeInput, keys: &[Key]) -> CoreResult<()> {
-	execute_keypress_with(keys, |key, direction| input.key(key, direction))
+fn execute_keypress(input: &mut Enigo, keys: &[Key]) -> CoreResult<()> {
+	execute_keypress_with(keys, |key, direction| input.key(key, direction)).map_err(input_error)
 }
 
 fn with_modifiers(
-	input: &mut NativeInput,
+	input: &mut Enigo,
 	modifiers: &[Key],
-	operation: impl FnOnce(&mut NativeInput) -> CoreResult<()>,
+	operation: impl FnOnce(&mut Enigo) -> CoreResult<()>,
 ) -> CoreResult<()> {
 	let mut pressed = Vec::with_capacity(modifiers.len());
 	for &key in modifiers {
@@ -2105,7 +1719,7 @@ fn with_modifiers(
 			for &held in pressed.iter().rev() {
 				let _ = input.key(held, Direction::Release);
 			}
-			return Err(error);
+			return Err(input_error(error));
 		}
 		pressed.push(key);
 	}
@@ -2115,7 +1729,7 @@ fn with_modifiers(
 		if let Err(error) = input.key(key, Direction::Release)
 			&& release_result.is_ok()
 		{
-			release_result = Err(error);
+			release_result = Err(input_error(error));
 		}
 	}
 	operation_result.and(release_result)
@@ -2123,7 +1737,11 @@ fn with_modifiers(
 
 enum WorkerRequest {
 	Capture(flume::Sender<CoreResult<CoreCapture>>),
-	Execute(Vec<ValidatedAction>, flume::Sender<CoreResult<CoreCapture>>),
+	Execute {
+		actions:  Vec<ValidatedAction>,
+		deadline: Instant,
+		reply:    flume::Sender<CoreResult<CoreCapture>>,
+	},
 	Close(flume::Sender<()>),
 }
 
@@ -2155,8 +1773,8 @@ impl SessionCore {
 						WorkerRequest::Capture(reply) => {
 							let _ = reply.send(worker.capture());
 						},
-						WorkerRequest::Execute(actions, reply) => {
-							let _ = reply.send(worker.execute(actions));
+						WorkerRequest::Execute { actions, deadline, reply } => {
+							let _ = reply.send(worker.execute(actions, deadline));
 						},
 						WorkerRequest::Close(reply) => {
 							let _ = reply.send(());
@@ -2196,10 +1814,14 @@ impl SessionCore {
 	}
 
 	fn execute(&self, actions: Vec<ValidatedAction>) -> CoreResult<CoreCapture> {
+		validate_batch_wait_budget(&actions)?;
+		let deadline = Instant::now() + OPERATION_TIMEOUT;
 		let (reply_tx, reply_rx) = flume::bounded(1);
-		self.send(WorkerRequest::Execute(actions, reply_tx))?;
+		self.send(WorkerRequest::Execute { actions, deadline, reply: reply_tx })?;
+		// The worker enforces `deadline` itself; the extra slack guarantees its
+		// DeadlineExceeded error reports before this channel timeout can fire.
 		reply_rx
-			.recv_timeout(OPERATION_TIMEOUT)
+			.recv_timeout(OPERATION_TIMEOUT + Duration::from_secs(5))
 			.map_err(worker_receive_error)?
 	}
 
@@ -2441,57 +2063,27 @@ mod tests {
 	}
 
 	#[test]
-	fn portal_cancellation_is_permission_denied() {
-		let error = DesktopError::permission_or(ErrorCode::BackendUnavailable, "Z-Bus canceled");
-		assert_eq!(error.code, ErrorCode::PermissionDenied);
-	}
-
-	#[cfg(target_os = "linux")]
-	#[test]
-	fn wayland_rejects_ambiguous_multi_display_input_coordinates() {
-		let geometry = frame(
-			vec![
-				(display("primary", 0, 0, 100, 100, 1.0), 0, 0, 100, 100),
-				(display("right", 100, 0, 100, 100, 1.0), 100, 0, 100, 100),
-			],
-			200,
-			100,
-		);
-		assert_eq!(
-			validate_coordinate_backend(Some(ConcreteBackend::Wayland), &geometry)
-				.unwrap_err()
-				.code,
-			ErrorCode::BackendUnavailable
-		);
-		assert!(validate_coordinate_backend(Some(ConcreteBackend::X11), &geometry).is_ok());
-	}
-
-	#[cfg(target_os = "linux")]
-	#[test]
 	fn linux_backends_reject_negative_origin_before_input() {
 		let geometry =
 			frame(vec![(display("left", -100, 0, 100, 100, 1.0), 0, 0, 100, 100)], 100, 100);
-		for backend in [ConcreteBackend::X11, ConcreteBackend::Wayland] {
-			let error = validate_coordinate_backend(Some(backend), &geometry).unwrap_err();
-			assert_eq!(error.code, ErrorCode::BackendUnavailable);
-			assert!(
-				error
-					.message
-					.contains("cannot represent negative global desktop coordinates")
-			);
-		}
+		let error = validate_xtest_frame(&geometry).unwrap_err();
+		assert_eq!(error.code, ErrorCode::BackendUnavailable);
+		assert!(
+			error
+				.message
+				.contains("cannot represent negative global desktop coordinates")
+		);
 	}
 
-	#[cfg(target_os = "linux")]
 	#[test]
 	fn x11_rejects_layouts_beyond_xtest_absolute_range() {
 		let maximum =
 			frame(vec![(display("wide", 0, 0, 32_768, 100, 1.0), 0, 0, 32_768, 100)], 32_768, 100);
-		assert!(validate_coordinate_backend(Some(ConcreteBackend::X11), &maximum).is_ok());
+		assert!(validate_xtest_frame(&maximum).is_ok());
 
 		let oversized =
 			frame(vec![(display("wide", 0, 0, 32_769, 100, 1.0), 0, 0, 32_769, 100)], 32_769, 100);
-		let error = validate_coordinate_backend(Some(ConcreteBackend::X11), &oversized).unwrap_err();
+		let error = validate_xtest_frame(&oversized).unwrap_err();
 		assert_eq!(error.code, ErrorCode::BackendUnavailable);
 		assert!(error.message.contains("0..=32767"));
 	}
@@ -2500,13 +2092,13 @@ mod tests {
 	fn batch_coordinates_remain_bound_to_prior_returned_frame() {
 		let returned_display = display("primary", 0, 0, 100, 100, 1.0);
 		let returned = frame(vec![(returned_display.clone(), 0, 0, 100, 100)], 100, 100);
-		let batch = BatchCoordinateFrame::from_returned_frame(&Some(returned));
+		let batch = BatchCoordinateFrame::from_returned_frame(Some(&returned));
 
 		let unseen =
 			frame(vec![(display("primary", 100, 0, 100, 100, 1.0), 0, 0, 100, 100)], 100, 100);
 		let mut published = Some(unseen);
 		let mapped = batch
-			.validate(None, std::slice::from_ref(&returned_display))
+			.validate(std::slice::from_ref(&returned_display))
 			.unwrap()
 			.map_point(10, 10)
 			.unwrap();
@@ -2528,8 +2120,8 @@ mod tests {
 
 	#[test]
 	fn coordinate_input_requires_a_previously_returned_frame() {
-		let error = BatchCoordinateFrame::from_returned_frame(&None)
-			.validate(None, &[])
+		let error = BatchCoordinateFrame::from_returned_frame(None)
+			.validate(&[])
 			.unwrap_err();
 		assert_eq!(error.code, ErrorCode::InvalidAction);
 		assert_eq!(
@@ -2560,44 +2152,10 @@ mod tests {
 			(Key::Control, Direction::Release),
 		]);
 	}
-
-	#[cfg(target_os = "linux")]
 	#[test]
-	fn x11_cleanup_continues_after_errors_and_restores_exact_row_width() {
-		#[derive(Debug, PartialEq, Eq)]
-		enum Observed {
-			Release(u8),
-			Restore(u8, Vec<u32>),
-		}
-
-		let mut observed = Vec::new();
-		let error = cleanup_x11_keyboard_state(&[1, 2, 3], &[8, 9], 4, |operation| {
-			match operation {
-				X11CleanupOperation::Release(keycode) => {
-					observed.push(Observed::Release(keycode));
-					if keycode == 3 {
-						return Err("first cleanup failure");
-					}
-				},
-				X11CleanupOperation::Restore(keycode, row) => {
-					observed.push(Observed::Restore(keycode, row.to_vec()));
-					if keycode == 8 {
-						return Err("later cleanup failure");
-					}
-				},
-			}
-			Ok(())
-		})
-		.unwrap_err();
-
-		assert_eq!(error, "first cleanup failure");
-		assert_eq!(observed, vec![
-			Observed::Release(3),
-			Observed::Release(2),
-			Observed::Release(1),
-			Observed::Restore(8, vec![0, 0, 0, 0]),
-			Observed::Restore(9, vec![0, 0, 0, 0]),
-		]);
+	fn cancellation_is_permission_denied() {
+		let error = DesktopError::permission_or(ErrorCode::BackendUnavailable, "request canceled");
+		assert_eq!(error.code, ErrorCode::PermissionDenied);
 	}
 
 	#[test]
@@ -2632,7 +2190,7 @@ mod tests {
 
 	#[cfg(target_os = "linux")]
 	#[test]
-	fn read_only_worker_startup_does_not_initialize_libei() {
+	fn read_only_worker_startup_does_not_initialize_input() {
 		let capabilities = Arc::new(Mutex::new(DesktopCapabilities {
 			backend:            "x11".to_string(),
 			display_server:     Some(":test".to_string()),
@@ -2656,19 +2214,6 @@ mod tests {
 		let capabilities = capabilities.lock();
 		assert!(!capabilities.input);
 		assert_eq!(capabilities.input_permission, PERMISSION_UNKNOWN);
-	}
-
-	#[cfg(target_os = "linux")]
-	#[test]
-	fn opt_in_x11_input_uses_portal_free_xtest_backend() {
-		if std::env::var_os("OMP_NATIVE_DESKTOP_X11_INPUT_TEST").is_none() {
-			return;
-		}
-		let mut input = create_input(ConcreteBackend::X11)
-			.expect("X11 input should initialize without a session bus or desktop portal");
-		assert!(matches!(input, NativeInput::X11(_)));
-		input.move_mouse(20, 20, Coordinate::Abs).unwrap();
-		execute_keypress(&mut input, &[Key::Unicode('x')]).unwrap();
 	}
 
 	#[test]
@@ -2770,6 +2315,74 @@ mod tests {
 		core.close().unwrap();
 		core.close().unwrap();
 		assert_eq!(core.capture().unwrap_err().code, ErrorCode::SessionClosed);
+	}
+
+	fn unavailable_capabilities() -> Arc<Mutex<DesktopCapabilities>> {
+		Arc::new(Mutex::new(DesktopCapabilities {
+			backend:            "unavailable".to_string(),
+			display_server:     None,
+			capture:            false,
+			input:              false,
+			capture_permission: PERMISSION_UNAVAILABLE.to_string(),
+			input_permission:   PERMISSION_UNAVAILABLE.to_string(),
+			display_count:      0,
+		}))
+	}
+
+	fn unavailable_config() -> SessionConfig {
+		SessionConfig {
+			backend:    None,
+			selection:  DisplaySelection::All,
+			max_width:  None,
+			max_height: None,
+		}
+	}
+
+	#[test]
+	fn deadline_error_code_uses_the_desktop_prefix() {
+		assert_eq!(ErrorCode::DeadlineExceeded.as_str(), "DESKTOP_DEADLINE_EXCEEDED");
+	}
+
+	#[test]
+	fn wait_heavy_batches_are_rejected_before_reaching_the_worker() {
+		assert!(validate_batch_wait_budget(&vec![ValidatedAction::Wait; 27]).is_ok());
+		assert_eq!(
+			validate_batch_wait_budget(&vec![ValidatedAction::Wait; 28])
+				.unwrap_err()
+				.code,
+			ErrorCode::InvalidAction
+		);
+		// Enforcement point: SessionCore::execute rejects before the request can
+		// reach the worker, so nothing sleeps.
+		let core = SessionCore::start(unavailable_config(), unavailable_capabilities()).unwrap();
+		assert_eq!(
+			core
+				.execute(vec![ValidatedAction::Wait; 28])
+				.unwrap_err()
+				.code,
+			ErrorCode::InvalidAction
+		);
+		core.close().unwrap();
+	}
+
+	#[test]
+	fn expired_deadline_short_circuits_before_any_action() {
+		let mut worker = DesktopWorker::new(unavailable_config(), unavailable_capabilities());
+		let error = worker
+			.execute(vec![ValidatedAction::Wait], Instant::now())
+			.unwrap_err();
+		assert_eq!(error.code, ErrorCode::DeadlineExceeded);
+	}
+
+	#[test]
+	fn wait_clamps_to_the_remaining_deadline_budget() {
+		let mut worker = DesktopWorker::new(unavailable_config(), unavailable_capabilities());
+		let start = Instant::now();
+		let error = worker
+			.execute(vec![ValidatedAction::Wait], start + Duration::from_millis(50))
+			.unwrap_err();
+		assert_eq!(error.code, ErrorCode::DeadlineExceeded);
+		assert!(start.elapsed() < WAIT_ACTION_DURATION);
 	}
 
 	#[test]

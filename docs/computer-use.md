@@ -46,7 +46,7 @@ omp config set computer.enabled true
 omp config get computer.enabled
 ```
 
-Start a new session after changing computer settings. The desktop controller snapshots its backend, display, and image-size settings when the session tool is created.
+Inside a running session, the `/computer` slash command (`/computer`, `/computer on|off|status`) toggles the tool for that session only; it never writes settings files. Backend, display, and image-size settings still snapshot when the session's desktop controller is created, so change those in config and start a new session.
 
 ### Settings
 
@@ -69,23 +69,21 @@ A disconnected or changed ID fails with `DESKTOP_INVALID_OPTIONS`; switch to `al
 
 ## Model and provider capability
 
-Enablement alone is not enough. The active model/provider transport must support the OpenAI Responses GA native tool declaration `{ "type": "computer" }`.
+Models with native OpenAI GA computer-use support receive the wire declaration `{ "type": "computer" }`. Every other function-calling model receives `computer` as a regular function tool whose JSON schema describes the same GA action set. Both paths execute through the same native desktop backend, approval policy, and safety rules.
 
-OMP marks a model capable when either:
+OMP marks a model natively capable when either:
 
 - its catalog metadata explicitly sets `supportsComputerUse: true`, or
 - it uses `openai-responses`, `openai-codex-responses`, or `azure-openai-responses` and resolves to an OpenAI/OpenAI Codex or Azure model ID matching `gpt-5.4` or later in the `gpt-5.x` family.
 
-An explicit `supportsComputerUse: false` disables automatic derivation.
+An explicit `supportsComputerUse: false` disables automatic derivation and routes the model through the function-tool form.
 
-The provider adapter sends the native computer declaration and a forced computer tool choice only when `supportsComputerUse` is true. Unsupported models do not receive the declaration. If a session containing native computer history switches to an unsupported model, OMP converts prior `computer_call` and `computer_call_output` items into stable text notes rather than sending invalid native items.
+Natively capable models may receive a forced `{ "type": "computer" }` tool choice; other models are forced through an ordinary named function choice. If a session containing native computer history switches to a model without native support, OMP converts prior `computer_call` and `computer_call_output` items into stable text notes rather than sending invalid native items; new calls continue through the function tool.
 
-This feature does not turn another provider's ordinary function-calling model into a native computer-use model. If the tool never appears or the model never calls it:
+If the tool never appears:
 
-1. Confirm `computer.enabled` is true in the effective config.
-2. Confirm the active model reports native computer-use support.
-3. Use a supported OpenAI Responses, OpenAI Codex Responses, or Azure OpenAI Responses model/deployment.
-4. Start a new session after changing model or tool settings.
+1. Confirm `computer.enabled` is true in the effective config, or toggle it with `/computer`.
+2. Start a new session after changing settings files; `/computer` toggles apply immediately.
 
 ## Actions
 
@@ -140,11 +138,10 @@ The worker rejects a coordinate action until a screenshot has been returned to t
 Use one display when:
 
 - the desktop is very wide and labels become hard for the model to read after downscaling;
-- a layout gap makes targets ambiguous;
-- you want to isolate sensitive content on another monitor; or
-- you are using Wayland input.
+- a layout gap makes targets ambiguous; or
+- you want to isolate sensitive content on another monitor.
 
-On Linux Wayland, capture currently comes through XWayland. Coordinate input over a multi-display composite fails with `DESKTOP_BACKEND_UNAVAILABLE` because libei absolute coordinates cannot be safely correlated to the XWayland composite. Select one display or log into an X11 session. Keyboard-only actions do not require screenshot-coordinate mapping, but capture still requires XWayland.
+On Linux, Wayland sessions are captured and driven through XWayland: `DISPLAY` must point at the XWayland server, capture reads the X11 composite, and input is emitted as XTest events in the same X11 global coordinate space, so multi-display coordinate mapping is exact. Whether that input reaches native Wayland windows depends on the compositor's XWayland input bridging (modern GNOME and KDE support it).
 
 ## Approval and safety precedence
 
@@ -193,10 +190,8 @@ See [Tool approval mode](./approval-mode.md) for general policy resolution.
 | Platform | Backend | Setup and current status |
 |---|---|---|
 | macOS x64/arm64 | Quartz/CoreGraphics capture; Quartz/CGEvent and native input | Supported. Grant Screen Recording and Accessibility. Real remote desktop execution was verified on Apple hardware; see [Verification boundary](#verification-boundary). |
-| Linux x64 glibc, X11 | xcap capture; direct x11rb/XTest input | Supported when a graphical session and `DISPLAY` are available. X11 input does not contact the desktop portal. The GUI-linked addon is packaged separately and loaded only when the tool starts. |
-| Linux x64 glibc, Wayland | XWayland capture; libei through the desktop portal | Supported with limitations: active XWayland `DISPLAY` required; portal/session bus required for input; select one display for coordinate input. Pure Wayland capture is not implemented. |
-| Linux arm64 | Portable core addon only | Packaged native desktop capture/input is unsupported. |
-| Linux musl | Portable core addon only | Explicitly unsupported because the capture dependency requires dynamically linked graphical-session libraries. |
+| Linux x64/arm64, glibc/musl, X11 | Pure-Rust X11 capture and XTest input (`x11rb`), bundled in the core addon | Supported when a graphical session and `DISPLAY` are available. No GUI system libraries are required; the backend speaks the X protocol directly over the display socket. Requires the RandR and XTEST server extensions. |
+| Linux x64/arm64, glibc/musl, Wayland | XWayland capture; XTest input bridged by the compositor | Supported with an active XWayland `DISPLAY`. Pure Wayland capture (portal/PipeWire) is not implemented. Input delivery to native Wayland windows depends on the compositor's XWayland input bridge. |
 | Windows x64 | xcap capture; Win32 virtual-desktop pointer movement and native input | Implemented, including negative origins and secondary monitors. Not remotely exercised in this feature's verification. |
 | Other OS/architectures | none | Unsupported by the published native package matrix. |
 
@@ -212,19 +207,14 @@ OMP performs a non-prompting Screen Recording preflight. It does not open the pe
 
 ### Linux setup
 
-For X11, run OMP inside the target graphical session and ensure `DISPLAY` identifies it. Input uses XTest directly and does not require D-Bus, a desktop portal, or libei.
+For X11, run OMP inside the target graphical session and ensure `DISPLAY` identifies it. Capture and input need no GUI system libraries: the backend speaks the X protocol directly and emits input through the XTEST extension.
 
 For Wayland:
 
-- run an x64 glibc build;
-- keep XWayland enabled and ensure `DISPLAY` is set for capture;
-- ensure the D-Bus session bus and `org.freedesktop.portal.Desktop` are running;
-- use a desktop portal/compositor with libei input support; and
-- select one display before coordinate input.
+- keep XWayland enabled and ensure `DISPLAY` is set; capture and input both go through it; and
+- use a compositor that bridges XWayland XTest input to native windows (modern GNOME and KDE do).
 
-OMP probes portal availability but does not treat the probe as user consent or automatically approve an OS permission dialog.
-
-The normal Linux core addon stays GUI-library-free. The Linux x64 desktop addon is loaded lazily when `DesktopSession` is first constructed. A missing published desktop addon falls back to the portable stub and reports `DESKTOP_BACKEND_UNAVAILABLE`; an addon that exists but cannot be loaded reports `Failed to load packaged Linux desktop addon` with candidate errors.
+The desktop backend is always bundled in the core `pi-natives` addon on every published Linux target (x64/arm64, glibc/musl). It opens no display connection until the tool runs, so headless hosts are unaffected; without a reachable X server the tool reports `DESKTOP_BACKEND_UNAVAILABLE`.
 
 ## Session and worker lifecycle
 
@@ -263,22 +253,22 @@ Computer backend errors begin with a stable code:
 |---|---|
 | `DESKTOP_INVALID_OPTIONS` | Invalid backend, zero image limit, malformed display value, or inactive display ID. Correct config and start a new session. |
 | `DESKTOP_INVALID_ACTION` | Unknown action/button/key, missing or unexpected fields, negative point, short drag path, or invalid/duplicate modifier. Capture again only after fixing the action. |
-| `DESKTOP_BACKEND_UNAVAILABLE` | No graphical session/backend, unsupported build, missing portal/XWayland, unsafe Wayland mapping, negative-origin Linux layout, out-of-range XTest layout, or native input initialization failure. Follow the platform section. |
+| `DESKTOP_BACKEND_UNAVAILABLE` | No graphical session/backend, missing XWayland `DISPLAY`, missing RandR/XTEST server extension, a negative-origin or out-of-XTest-range Linux layout, or native input initialization failure. Follow the platform section. |
 | `DESKTOP_PERMISSION_DENIED` | Screen capture or input permission denied. Grant OS permissions and restart the host/session. |
 | `DESKTOP_CAPTURE_FAILED` | Display capture, scaling, allocation, or PNG encoding failed. Reduce `maxWidth`/`maxHeight`, verify the display is active, then capture again. |
-| `DESKTOP_INPUT_FAILED` | Native input initialization/event failed. Check Accessibility/portal/compositor permissions and session access. |
+| `DESKTOP_INPUT_FAILED` | Native input initialization/event failed. Check macOS Accessibility permission or X server access for the session. |
 | `DESKTOP_LAYOUT_CHANGED` | Display topology changed after the reference screenshot. Capture a new frame before input. |
 | `DESKTOP_COORDINATE_OUT_OF_BOUNDS` | Point lies outside the PNG, in a composite gap, or outside every display. Choose a point inside a listed `pixel*` rectangle. |
+| `DESKTOP_DEADLINE_EXCEEDED` | The 60-second native batch deadline expired; remaining actions were not executed. Split the batch into smaller calls and capture a fresh screenshot. |
 | `DESKTOP_SESSION_CLOSED` | Native session was closed. Start a new OMP session. |
 | `DESKTOP_WORKER_FAILED` | Native worker startup, communication, timeout, or shutdown failed. Start a new session; if persistent, verify the native addon installation. |
 
 Common exact failures:
 
-- `Wayland capture through xcap 0.9.6 requires an active XWayland DISPLAY; pure Wayland capture is unavailable` → enable XWayland or use X11.
-- `Wayland/libei absolute input cannot safely correlate a multi-display XWayland composite` → set a single display or use X11.
-- `org.freedesktop.portal.Desktop is not available for native libei input` → start/install the desktop portal in the same user session.
+- `Wayland sessions require an active XWayland DISPLAY for native capture and input; pure Wayland capture is unavailable` → enable XWayland or use X11.
 - `X11/x11rb XTest absolute input cannot represent negative global desktop coordinates` → select a display whose origin is non-negative.
 - `X11/x11rb XTest absolute input is limited to global coordinates in 0..=32767` → select one display or a smaller layout.
+- `native action deadline exceeded; remaining batch actions were not executed` → split the batch into smaller calls and take a fresh screenshot.
 - `macOS Screen Recording permission is not granted for this process` → grant the launching host Screen Recording and restart it.
 - `Provider safety checks require interactive approval before computer input` → use an interactive session and approve the provider prompt.
 - `Timed out starting native computer worker` → verify the installed native addon matches the OMP release, then restart/reinstall.
@@ -295,11 +285,10 @@ The native composite safety ceiling is 268,435,456 pixels. Normal defaults are f
 - Coordinate targets are valid only for the preceding frame and current display layout.
 - Screenshot composites may downscale small text to fit configured limits.
 - Gaps are visible but not valid input targets; overlapping non-mirrored layouts fail closed.
-- Pure Wayland capture currently requires XWayland; it is not a native portal capture path.
-- Multi-output Wayland coordinate input fails closed; select one display or X11.
+- Pure Wayland capture currently requires XWayland; the portal/PipeWire capture path is not implemented.
+- On Wayland, XTest input reaching native windows depends on the compositor's XWayland input bridge.
 - Linux coordinate input fails closed for negative global display origins; select a display whose origin is non-negative.
 - X11/XTest coordinate input is limited to global positions through 32767 on each axis.
-- Published Linux desktop support is x64 glibc only; Linux arm64 and musl are unsupported.
 - Windows support is implemented for x64 but was not remotely exercised for this change.
 - Native captures use inline `image_url`; OMP does not upload them to provider Files.
 - OS secure desktops and policy-protected surfaces may reject ordinary user-session capture/input; OMP has no bypass.

@@ -14,7 +14,6 @@ User setup, safety guidance, platform permissions, and verified limitations: [Na
 - Renderer: `packages/coding-agent/src/tools/computer-renderer.ts`
 - Supervisor/protocol: `packages/coding-agent/src/tools/computer/{supervisor,protocol,worker,worker-entry}.ts`
 - Native implementation: `crates/pi-natives/src/desktop.rs`
-- Portable Linux stub: `crates/pi-natives/src/desktop_unsupported.rs`
 - Native loader: `packages/natives/native/loader-state.js`
 - Provider types: `packages/ai/src/types.ts`
 - OpenAI GA schemas: `packages/ai/src/providers/openai-responses-server-schema.ts`
@@ -22,13 +21,13 @@ User setup, safety guidance, platform permissions, and verified limitations: [Na
 
 ## Availability and declaration
 
-- `computer.enabled` gates registration and defaults to `false`.
+- `computer.enabled` gates registration and defaults to `false`. The `/computer` slash command toggles it for the current session without persisting settings.
 - Enabled tool load mode: `essential`.
 - Concurrency: `exclusive`.
 - Native descriptor: `{ type: "computer" }`.
-- Providers serialize the descriptor only when `model.supportsComputerUse === true`.
+- Providers serialize the native descriptor only when `model.supportsComputerUse === true`; every other function-calling model receives `computer` as a regular function tool with the typed action schema below.
 - Automatic capability derivation covers GA `gpt-5.4+` IDs on OpenAI Responses, OpenAI Codex Responses, and Azure OpenAI Responses; explicit model metadata overrides derivation.
-- Unsupported-model history conversion replaces native call/output items with stable assistant text notes.
+- Unsupported-model history conversion replaces native call/output items with stable assistant text notes; new calls on such models flow as ordinary function calls.
 
 Unlike `browser`, `computer` operates the entire visible host session. It can act in IDEs, terminals, native applications, browser windows, and system dialogs, but has no structured application/DOM inspection.
 
@@ -46,22 +45,30 @@ Constructor snapshots these settings into one `DesktopSessionOptions`. No settin
 
 ## Inputs
 
-Public schema:
+Public schema (arktype; also serialized as the function-tool JSON schema):
 
 ```ts
 {
-  actions?: unknown[]
+  actions?: Array<{
+    type: "click" | "double_click" | "drag" | "keypress" | "move" | "screenshot" | "scroll" | "type" | "wait",
+    x?: int32 >= 0, y?: int32 >= 0,          // most-recent-screenshot pixels
+    button?: "left" | "right" | "wheel" | "back" | "forward",
+    path?: Array<{ x, y }>,                   // drag waypoints
+    keys?: string[],                          // keypress chord / held pointer modifiers
+    scroll_x?: int32, scroll_y?: int32,
+    text?: string
+  }>
 }
 ```
 
-The schema stays generic because provider-native `computer_call` metadata is authoritative. `execute()` chooses `context.toolCall.providerMetadata.actions` when metadata type is `computer`; otherwise it uses `params.actions`. Missing, empty, or invalid action arrays fail before worker dispatch.
+Provider-native `computer_call` metadata stays authoritative: `execute()` chooses `context.toolCall.providerMetadata.actions` when metadata type is `computer`; otherwise it uses `params.actions`. Both paths run the same per-type validator. An omitted or empty `actions` array degrades to a screenshot-only batch; a non-array or invalid entry fails before worker dispatch.
 
 ### GA action shapes
 
 | Type | Shape |
 |---|---|
 | `click` | `{ type, button: "left" \| "right" \| "wheel" \| "back" \| "forward", x, y, keys? }` |
-| `double_click` | `{ type, x, y, keys: string[] \| null }` |
+| `double_click` | `{ type, x, y, keys?: string[] \| null }` |
 | `drag` | `{ type, path: Array<{x,y}>, keys? }`; native minimum two points |
 | `keypress` | `{ type, keys: string[] }`; non-empty array and entries |
 | `move` | `{ type, x, y, keys? }` |
@@ -70,7 +77,7 @@ The schema stays generic because provider-native `computer_call` metadata is aut
 | `type` | `{ type, text: string }` |
 | `wait` | `{ type }`; fixed two-second sleep |
 
-Native validation rejects missing and unexpected fields before emitting input. Coordinate values must map to non-negative `i32` screenshot pixels. Mouse `keys` accept unique modifier keys only. Keypress strings are case-insensitive, accept aliases and `+`-separated chords, and fall back to one Unicode character. `wheel` is the GA middle-button spelling; `middle` is invalid.
+Validation rejects missing and unexpected fields before emitting input, at both the JS ingress and the native layer. Coordinates, drag points, and scroll deltas must be integers in signed 32-bit range (coordinates additionally non-negative); out-of-range JS numbers fail closed instead of truncating in the N-API `i32` conversion. Mouse `keys` accept unique modifier keys only. Keypress strings are case-insensitive, accept aliases and `+`-separated chords, and fall back to one Unicode character. `wheel` is the GA middle-button spelling; `middle` is invalid.
 
 Scroll conversion: nonzero provider delta `d` becomes `sign(d) × max(1, floor((abs(d)+50)/100))` native steps.
 
@@ -155,14 +162,12 @@ Before each coordinate action, native code re-enumerates displays and compares I
 
 | Target | Native surface |
 |---|---|
-| `darwin-x64`, `darwin-arm64` | Real `DesktopSession` in core addon: xcap/CoreGraphics capture, Quartz `CGEvent` pointer events, native input. Screen Recording preflight; Accessibility required operationally. |
-| `linux-x64` glibc | Core addon remains GUI-free. Separate `pi_natives.desktop.linux-x64[-variant].node` is loaded on first `DesktopSession` construction. X11 uses direct x11rb/XTest input; XWayland capture uses portal/libei input. |
-| `linux-arm64` | Published core has typed unsupported stub; no packaged desktop leaf. |
-| Linux musl | Explicit typed unsupported stub. |
-| `win32-x64` | Real `DesktopSession` in core addon: xcap, native input, `SendInput` absolute movement over the virtual desktop. |
+| `darwin-x64`, `darwin-arm64` | xcap/CoreGraphics capture, Quartz `CGEvent` pointer events, native input. Screen Recording preflight; Accessibility required operationally. |
+| `linux-x64`, `linux-arm64` (glibc and musl) | Pure-Rust X11 backend bundled in the core addon: `x11rb` RustConnection capture (RandR monitors, `GetImage`) and XTest input with keysym mapping. No GUI system libraries linked; the X protocol is spoken over the display socket. |
+| `win32-x64` | xcap capture, native input, `SendInput` absolute movement over the virtual desktop. |
 | Other targets | Native package loader rejects unsupported platform tag. |
 
-Wayland detection wins when `XDG_SESSION_TYPE=wayland` or `WAYLAND_DISPLAY` is set. Capture still requires `DISPLAY` because xcap 0.9.6 uses XWayland. Wayland input verifies the session bus and `org.freedesktop.portal.Desktop`, then initializes Enigo/libei without asking OMP to open a permission prompt. X11 input uses x11rb/XTest directly and never enters that portal path. Coordinate input rejects Wayland frames containing more than one selected display and rejects negative global origins on either Linux backend; XTest additionally requires global coordinates in `0..=32767`.
+Wayland detection wins when `XDG_SESSION_TYPE=wayland` or `WAYLAND_DISPLAY` is set. Capture and input still require `DISPLAY` (XWayland): capture reads the X11 composite and input is emitted as XTest events in the same X11 global space, bridged to native windows by compositors with XWayland input support. No D-Bus, portal, or libei connection is made, and no permission prompt is opened. Coordinate input rejects negative global display origins, and XTest limits global coordinates to `0..=32767` on each axis.
 
 macOS capture calls `CGPreflightScreenCaptureAccess()` without prompting. Input creation also disables automatic permission prompts. Windows sets DPI awareness and maps pointer coordinates with `MOUSEEVENTF_VIRTUALDESK`, supporting negative origins and secondary displays.
 
@@ -178,7 +183,7 @@ macOS capture calls `CGPreflightScreenCaptureAccess()` without prompting. Input 
 
 `ComputerWorkerCore` also serializes inbound messages. It initializes once, tracks whether a screenshot was returned, closes native session once, then unsubscribes and closes transport.
 
-Native `DesktopSession` starts a named `omp-desktop-session` thread. Capture/execute/close requests use a FIFO channel. Operation waits are bounded to one minute; explicit close waits up to two seconds and is idempotent. Destructor sends best-effort close but does not block indefinitely on a stuck worker.
+Native `DesktopSession` starts a named `omp-desktop-session` thread. Capture/execute/close requests use a FIFO channel. Every execute batch carries a 60-second deadline enforced inside the native worker: the deadline is checked before each action and the final capture, expiry returns `DESKTOP_DEADLINE_EXCEEDED` without emitting further input, and wait-heavy batches that cannot finish in time are rejected upfront. Explicit close waits up to two seconds and is idempotent. Destructor sends best-effort close but does not block indefinitely on a stuck worker.
 
 ## Side effects
 
@@ -186,7 +191,6 @@ Native `DesktopSession` starts a named `omp-desktop-session` thread. Capture/exe
 - Emits real user-session keyboard and pointer events.
 - Keeps a native worker and desktop session alive across calls.
 - May expose visible secrets, notifications, other applications, and system dialogs in screenshots.
-- Linux x64 may lazily `dlopen` the separately packaged GUI-linked addon.
 - Does not launch a browser, upload to provider Files, persist screenshots as local files, or create arbitrary child processes beyond its dedicated Bun/native workers.
 
 ## Errors
@@ -201,12 +205,13 @@ Stable native codes:
 - `DESKTOP_INPUT_FAILED`
 - `DESKTOP_LAYOUT_CHANGED`
 - `DESKTOP_COORDINATE_OUT_OF_BOUNDS`
+- `DESKTOP_DEADLINE_EXCEEDED`
 - `DESKTOP_SESSION_CLOSED`
 - `DESKTOP_WORKER_FAILED`
 
 Tool/wrapper errors also include:
 
-- `Computer call requires at least one action`
+- `Computer call requires an array of actions`
 - `Computer call contains an invalid action`
 - `Computer session is closed`
 - `Provider safety checks require interactive approval before computer input`
@@ -218,10 +223,8 @@ Key platform failures and remedies are listed in [Native computer use: Troublesh
 ## Limits and proof boundary
 
 - No non-native backend or browser fallback.
-- No pure Wayland capture; XWayland required.
-- No safe multi-display coordinate input on Wayland.
+- No pure Wayland capture; XWayland required. On Wayland, XTest input delivery to native windows depends on the compositor's XWayland input bridge.
 - Linux coordinate input rejects negative global display origins; X11/XTest also rejects global positions above 32767.
-- Published Linux native desktop addon: x64 glibc only.
 - Windows backend implemented but not remotely exercised for this feature.
 - Real remote macOS proof used `ComputerSupervisor` → worker → native session on a real macOS host, controlling TextEdit with global hotkey, double-click, click, type, and 1920×1080 Quartz capture after permissions were granted.
-- That proof did not include a live OpenAI native provider round trip. GA transport and replay are contract-tested locally.
+- That proof did not include a live OpenAI native provider round trip. GA transport and replay are contract-tested locally. The pure-Rust Linux backend is exercised by unit tests (pixel conversion, keysym mapping, deadline enforcement), not by a live X session in CI.

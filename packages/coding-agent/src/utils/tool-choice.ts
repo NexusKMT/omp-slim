@@ -12,8 +12,7 @@ export function buildNamedToolChoice(toolName: string, model?: Model<Api>): Tool
 		return { type: "tool", name: toolName };
 	}
 
-	if (toolName === "computer") {
-		if (model.supportsComputerUse !== true) return undefined;
+	if (toolName === "computer" && model.supportsComputerUse === true) {
 		if (
 			model.api === "openai-codex-responses" ||
 			model.api === "openai-responses" ||
@@ -23,6 +22,8 @@ export function buildNamedToolChoice(toolName: string, model?: Model<Api>): Tool
 		}
 		return undefined;
 	}
+	// Models without native computer support receive the tool as a regular
+	// function tool, so the generic named-function forcing below applies.
 
 	if (
 		model.api === "openai-codex-responses" ||

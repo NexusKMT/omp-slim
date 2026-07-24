@@ -493,7 +493,7 @@ computer:
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `computer.enabled` | boolean | `false` | Enable the native computer tool. The active model/provider must also support the OpenAI Responses GA native computer tool. |
+| `computer.enabled` | boolean | `false` | Enable the native computer tool. Natively capable OpenAI GA models use the `{ "type": "computer" }` wire form; every other function-calling model gets `computer` as a regular function tool. The `/computer` slash command toggles this for the current session only. |
 | `computer.backend` | enum | `auto` | `auto` or `native`; both require native capture/input and never fall back to browser automation. |
 | `computer.display` | string | `all` | Composite all active displays, or use a numeric display ID reported by a successful computer result. |
 | `computer.maxWidth` | number | `1920` | Maximum composite screenshot width in pixels; must be greater than zero. |
