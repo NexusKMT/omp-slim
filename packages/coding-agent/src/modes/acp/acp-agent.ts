@@ -2380,6 +2380,28 @@ export class AcpAgent implements Agent {
 		}
 
 		const manager = new MCPManager(record.session.sessionManager.getCwd());
+		// MCP servers connect and reconnect independently, so `onToolsChanged` can fire
+		// several times back to back. Each firing is chained onto `refreshChain` so
+		// refreshes apply in order, and each one re-reads `manager.getTools()` at the
+		// time it actually runs rather than the snapshot from when it was queued — so a
+		// refresh can never apply a stale, smaller tool set after a newer one already landed.
+		let refreshChain: Promise<void> = Promise.resolve();
+		const enqueueMcpToolsRefresh = (): Promise<void> => {
+			refreshChain = refreshChain.then(async () => {
+				if (record.mcpManager !== manager) return;
+				try {
+					await record.session.refreshMCPTools(manager.getTools());
+				} catch (error) {
+					logger.warn("ACP MCP tool refresh failed", {
+						error: error instanceof Error ? error.message : String(error),
+					});
+				}
+			});
+			return refreshChain;
+		};
+		manager.setOnToolsChanged(() => {
+			void enqueueMcpToolsRefresh();
+		});
 		const configs: MCPConfigMap = {};
 		const sources: MCPSourceMap = {};
 		for (const server of servers) {
@@ -2402,7 +2424,7 @@ export class AcpAgent implements Agent {
 		}
 
 		record.mcpManager = manager;
-		await record.session.refreshMCPTools(result.tools);
+		await enqueueMcpToolsRefresh();
 	}
 
 	#toMcpConfig(server: McpServer): MCPServerConfig {
