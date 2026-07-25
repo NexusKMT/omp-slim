@@ -54,4 +54,26 @@ describe("provider error expand", () => {
 		const recollapsed = Bun.stripANSI(component.render(120).join("\n"));
 		expect(recollapsed).not.toContain("provider error detail line 29");
 	});
+
+	it("reveals the full body inline when expanded while the error is pinned", () => {
+		const component = new AssistantMessageComponent(makeErr(longError(30)));
+
+		// The banner above the editor mirrors the error, so the inline block is
+		// suppressed while pinned (EventController does this at message_end).
+		component.setErrorPinned(true);
+		const pinned = Bun.stripANSI(component.render(120).join("\n"));
+		expect(pinned).not.toContain("provider error detail line 0");
+
+		// Ctrl+O while pinned must still reach the full body inline.
+		component.setExpanded(true);
+		const expanded = Bun.stripANSI(component.render(120).join("\n"));
+		const shown = expanded.match(/provider error detail line \d+/g) ?? [];
+		expect(shown.length).toBe(30);
+		expect(expanded).toContain("provider error detail line 29");
+
+		// Collapsing again re-suppresses the pinned inline error.
+		component.setExpanded(false);
+		const recollapsed = Bun.stripANSI(component.render(120).join("\n"));
+		expect(recollapsed).not.toContain("provider error detail line 0");
+	});
 });
