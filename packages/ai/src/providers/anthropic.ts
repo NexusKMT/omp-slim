@@ -72,6 +72,7 @@ import {
 	calculateAnthropicRetryDelayMs,
 	retryDelayFromHeaders,
 } from "./anthropic-client";
+import { claudeAgentSdkVersion, claudeClientVersion, claudeCodeVersion } from "./anthropic-versions";
 import {
 	type ToolInputSchema as AnthropicToolInputSchema,
 	type Tool as AnthropicWireTool,
@@ -91,6 +92,8 @@ import {
 } from "./github-copilot-headers";
 import { transformMessages } from "./transform-messages";
 import { NON_VISION_IMAGE_PLACEHOLDER } from "./vision-guard";
+
+export * from "./anthropic-versions";
 
 export type AnthropicHeaderOptions = {
 	apiKey: string;
@@ -464,9 +467,6 @@ function getCacheControl(
 }
 
 // Stealth mode: mimic Claude Code's request fingerprint.
-export const claudeCodeVersion = "2.1.165";
-export const claudeAgentSdkVersion = "0.3.165";
-export const claudeClientVersion = "1.11187.4";
 export const claudeToolPrefix: string = "_";
 export const claudeCodeSystemInstruction = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
 // Claude Code caps requested output at 64k tokens even when the model ceiling is
