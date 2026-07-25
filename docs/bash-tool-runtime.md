@@ -109,13 +109,13 @@ Concurrent calls never share one `Shell`: the native session runs one command at
 
 The non-PTY shell registers a bundled `jq` command backed by vendored [jaq](https://github.com/01mf02/jaq), not the system `jq`. jaq errors when chained access indexes through a null or missing intermediate: `.a.b` over `{}` exits 5, whereas jq returns `null`.
 
-Use `.a.b? // null` when the parent may be null or absent. Parenthesize the entire value inside an object constructor for compatibility with both implementations:
+Guard the access with `[.a.b?][0]` when the parent may be null or absent. The `?` suppresses jaq's traversal error (jq never raises it), and `[…][0]` maps the suppressed empty output to `null` while preserving a legitimate `false` or `null` value:
 
 ```jq
-{"c": (.a.b? // null)}
+{"c": [.a.b?][0]}
 ```
 
-The unparenthesized `{"c": .a.b? // null}` is accepted by jaq but is a syntax error in jq.
+Avoid the naive `.a.b? // null`: `//` treats a legitimate `false` (and `null`) as absent, so it silently rewrites boolean data to the fallback. It also diverges on parse — `{"c": .a.b? // null}` is accepted by jaq but is a syntax error in jq (the value needs parentheses: `{"c": (.a.b? // null)}`).
 
 ## Shell config and snapshot behavior
 
