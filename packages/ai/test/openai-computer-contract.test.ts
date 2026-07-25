@@ -204,16 +204,19 @@ describe("OpenAI GA computer contract", () => {
 		};
 		expect(convertOpenAICodexResponsesTools([computerTool], optedIn)).toEqual([{ type: "computer" }]);
 		expect(normalizeCodexToolChoice({ type: "computer" }, [computerTool], optedIn)).toEqual({ type: "computer" });
+		expect(normalizeCodexToolChoice({ type: "function", name: "computer" }, [computerTool], optedIn)).toEqual({
+			type: "computer",
+		});
 
 		const regular = await buildTransformedCodexRequestBody(optedIn, context, {
-			toolChoice: { type: "computer" },
+			toolChoice: { type: "function", name: "computer" },
 			responsesLite: false,
 		});
 		expect(regular.tools).toEqual([{ type: "computer" }]);
 		expect(regular.tool_choice).toEqual({ type: "computer" });
 
 		const lite = await buildTransformedCodexRequestBody(optedIn, context, {
-			toolChoice: { type: "computer" },
+			toolChoice: { type: "function", name: "computer" },
 			responsesLite: true,
 		});
 		expect(lite.tools).toBeUndefined();

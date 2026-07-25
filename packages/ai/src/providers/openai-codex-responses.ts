@@ -1140,6 +1140,9 @@ export function normalizeCodexToolChoice(
 			: undefined;
 		const offeredTool = customTool ?? directTool;
 		if (!offeredTool) return undefined;
+		if (offeredTool.native?.type === "computer" && model?.supportsComputerUse === true) {
+			return { type: "computer" };
+		}
 		return customTool
 			? { type: "custom", name: customTool.customWireName ?? customTool.name }
 			: { type: "function", name: offeredTool.name };
