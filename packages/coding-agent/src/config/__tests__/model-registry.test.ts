@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { ModelRegistry } from "../model-registry";
 
 /**
@@ -20,7 +21,20 @@ function createStubAuthStorage(): AuthStorage {
 	return stub as unknown as AuthStorage;
 }
 
-describe("ModelRegistry.awaitBackgroundRefresh", () => {
+const testModel = buildModel({
+	id: "test-model",
+	name: "Test Model",
+	api: "openai-completions",
+	provider: "test",
+	baseUrl: "https://example.test",
+	reasoning: false,
+	input: ["text"],
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	contextWindow: 1000,
+	maxTokens: 100,
+});
+
+describe("ModelRegistry", () => {
 	let tmpDir: string;
 	let registry: ModelRegistry;
 
@@ -143,5 +157,23 @@ describe("ModelRegistry.awaitBackgroundRefresh", () => {
 
 		secondResolve();
 		await registry.awaitBackgroundRefresh();
+	});
+	test("resolves API keys and provider headers for legacy extensions", async () => {
+		const model = testModel;
+		vi.spyOn(registry, "getApiKey").mockResolvedValue("test-key");
+		vi.spyOn(registry, "getProviderHeaders").mockReturnValue({ "x-test": "value" });
+
+		expect(await registry.getApiKeyAndHeaders(model)).toEqual({
+			ok: true,
+			apiKey: "test-key",
+			headers: { "x-test": "value" },
+		});
+	});
+
+	test("maps legacy extension auth failures into the result contract", async () => {
+		const model = testModel;
+		vi.spyOn(registry, "getApiKey").mockRejectedValue(new Error("auth failed"));
+
+		expect(await registry.getApiKeyAndHeaders(model)).toEqual({ ok: false, error: "auth failed" });
 	});
 });

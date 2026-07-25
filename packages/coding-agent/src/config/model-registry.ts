@@ -763,6 +763,16 @@ function getDisabledProviderIdsFromSettings(): Set<string> {
 	}
 }
 
+/** Authentication material returned to legacy extensions for one model request. */
+export type ResolvedRequestAuth =
+	| {
+			ok: true;
+			apiKey?: string;
+			headers?: Record<string, string>;
+			env?: Record<string, string>;
+	  }
+	| { ok: false; error: string };
+
 /**
  * Model registry - loads and manages models, resolves API keys via AuthStorage.
  */
@@ -2192,6 +2202,17 @@ export class ModelRegistry {
 			modelId: model.id,
 			signal: options?.signal,
 		});
+	}
+
+	/** Resolve request authentication through the historical Pi extension facade. */
+	async getApiKeyAndHeaders(model: Model<Api>): Promise<ResolvedRequestAuth> {
+		try {
+			const apiKey = await this.getApiKey(model);
+			const headers = this.getProviderHeaders(model.provider);
+			return { ok: true, apiKey, headers };
+		} catch (error) {
+			return { ok: false, error: error instanceof Error ? error.message : String(error) };
+		}
 	}
 
 	/**
