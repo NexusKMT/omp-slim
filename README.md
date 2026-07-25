@@ -373,7 +373,7 @@ Twenty-five backends. Pin one, or let `auto` walk the chain in order.
 | `codex`      | oauth                  |
 | `xai`        | `XAI_API_KEY`          |
 | `zai`        | `ZAI_API_KEY`          |
-| `exa`        | `/login` / env / mcp   |
+| `exa`        | `EXA_API_KEY` (or mcp) |
 | `tinyfish`   | `TINYFISH_API_KEY`     |
 | `jina`       | `JINA_API_KEY`         |
 | `kagi`       | `KAGI_API_KEY`         |
@@ -392,6 +392,8 @@ Twenty-five backends. Pin one, or let `auto` walk the chain in order.
 | `ecosia`     | no key (browser)       |
 | `mojeek`     | no key (browser)       |
 | `public`     | no key (all of the above, consolidated) |
+
+Exa also accepts a stored API key through `/login exa`; explicit keyless selection uses the public MCP fallback.
 
 ### Specialised handlers
 

@@ -32,11 +32,7 @@ export const SEARCH_PROVIDER_OPTIONS = [
 	},
 	{ value: "xai", label: "xAI", description: "Grok web search via xAI Responses API (requires XAI_API_KEY)" },
 	{ value: "zai", label: "Z.AI", description: "Calls Z.AI webSearchPrime MCP" },
-	{
-		value: "exa",
-		label: "Exa",
-		description: "Uses Exa API with /login exa or EXA_API_KEY; explicit selection can fall back to public Exa MCP",
-	},
+	{ value: "exa", label: "Exa", description: "API via /login exa or EXA_API_KEY; explicit keyless fallback via MCP" },
 	{ value: "tinyfish", label: "TinyFish", description: "Requires TINYFISH_API_KEY" },
 	{ value: "jina", label: "Jina", description: "Requires JINA_API_KEY" },
 	{ value: "kagi", label: "Kagi", description: "Requires KAGI_API_KEY and Kagi Search API beta access" },
