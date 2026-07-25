@@ -2,7 +2,7 @@ import type { AssistantMessage, ImageContent } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { getStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { type Component, Loader, TERMINAL } from "@oh-my-pi/pi-tui";
-import { logger, prompt } from "@oh-my-pi/pi-utils";
+import { logger, prompt, sanitizeText } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { extractTextContent } from "../../commit/utils";
 import { settings } from "../../config/settings";
@@ -1154,8 +1154,22 @@ export class EventController {
 			const textContent = event.result.content.find(
 				(content: { type: string; text?: string }) => content.type === "text",
 			)?.text;
+			// This text can be a provider error copied verbatim off the wire (the
+			// Cursor todo bridge forwards the server's string), so it may carry
+			// ANSI escapes, other C0/C1 controls, tabs, newlines, or a line far
+			// wider than the terminal. `showWarning` renders through a plain
+			// `Text`, which strips none of that — an escape reaches the terminal
+			// and can repaint outside the row. `sanitizeText` drops the control
+			// sequences (and returns the same reference when there are none),
+			// then `previewLine` collapses the remaining whitespace and bounds
+			// the width. Sanitizing first matters: truncating before stripping
+			// can cut an escape mid-sequence and leave a dangling introducer.
+			//
+			// This is the render boundary, not the persisted result: the stored
+			// error stays full-fidelity for the transcript and for replays.
+			const detail = textContent ? previewLine(sanitizeText(textContent), TRUNCATE_LENGTHS.LINE) : "";
 			this.ctx.showWarning(
-				`Todo update failed${textContent ? `: ${textContent}` : ". Progress may be stale until todo succeeds."}`,
+				`Todo update failed${detail ? `: ${detail}` : ". Progress may be stale until todo succeeds."}`,
 			);
 		}
 		// Plan approval rides a `write` to xd://propose: the dispatch metadata on

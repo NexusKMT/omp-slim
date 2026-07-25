@@ -574,7 +574,14 @@ export interface SimpleStreamOptions extends Omit<StreamOptions, "apiKey"> {
 	thinkingBudgets?: ThinkingBudgets;
 	/** Cursor exec handlers for local tool execution */
 	cursorExecHandlers?: CursorExecHandlers;
-	/** Hook to handle tool results from Cursor exec */
+	/**
+	 * Optional rewrite of Cursor exec-channel tool results. May return a Promise.
+	 *
+	 * Limitation: an async rewrite that resolves after turn close may not be
+	 * persisted. The Agent drains buffered Cursor results on `message_end`, so a
+	 * late mutation only patches a detached entry while the already-persisted
+	 * message keeps the pre-transform payload.
+	 */
 	cursorOnToolResult?: CursorToolResultHandler;
 	/** Optional tool choice override for compatible providers */
 	toolChoice?: ToolChoice;
@@ -895,6 +902,15 @@ export type Message = UserMessage | DeveloperMessage | AssistantMessage | ToolRe
 
 export type CursorExecHandlerResult<T> = { result: T; toolResult?: ToolResultMessage } | T | ToolResultMessage;
 
+/**
+ * Optional rewrite of a Cursor exec-channel tool result.
+ * May return a Promise. Returning `undefined` keeps the original result.
+ *
+ * Limitation: an async rewrite that resolves after turn close may not be
+ * persisted. The Agent drains buffered Cursor results on `message_end`, so a
+ * late mutation only patches a detached entry while the already-persisted
+ * message keeps the pre-transform payload.
+ */
 export type CursorToolResultHandler = (
 	result: ToolResultMessage,
 ) => ToolResultMessage | undefined | Promise<ToolResultMessage | undefined>;

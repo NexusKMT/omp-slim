@@ -342,6 +342,10 @@ describe("Agent", () => {
 		// A transformer still pending when the turn closes must not cost the
 		// result: an unbuffered toolResult leaves its toolCall block unpaired, and
 		// the transcript rebuild strips it as dangling.
+		//
+		// This asserts only that the call survives — not that a late rewrite of
+		// the payload is persisted. After the drain, patching the detached entry
+		// leaves the already-emitted result unchanged.
 		const mock = createMockModel({ responses: [] });
 		const toolCall = {
 			type: "toolCall" as const,

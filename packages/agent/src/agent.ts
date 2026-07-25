@@ -276,7 +276,16 @@ export interface AgentOptions {
 	getCursorTools?: () => AgentTool[];
 
 	/**
-	 * Cursor tool result callback for exec tool responses.
+	 * Optional rewrite of Cursor exec-channel tool results. May return a Promise.
+	 *
+	 * The Agent reserves the original result in its Cursor result buffer first,
+	 * then awaits this hook and patches the reserved entry in place. That keeps
+	 * the call paired even if `message_end` arrives while the Promise is still
+	 * pending. Limitation: `#emitCursorSplitAssistantMessage` drains the buffer
+	 * on `message_end`, so a mutation that resolves after the drain only patches
+	 * the detached entry — the already-persisted result keeps the pre-transform
+	 * payload. Hosts that only pass `cursorExecHandlers` (the coding-agent path)
+	 * never hit this hook.
 	 */
 	cursorOnToolResult?: CursorToolResultHandler;
 
@@ -1140,10 +1149,15 @@ export class Agent {
 						// messages with `void handleServerMessage(...)`, so a `message_end`
 						// decoded from the same chunk can drain the buffer while a
 						// transformer is still pending — pushing afterwards would drop the
-						// result and strip its toolCall block as dangling on replay. The
-						// entry is patched in place once the transformer resolves, which
-						// keeps buffer order and still applies the customization whenever
-						// it lands before the drain.
+						// result and strip its toolCall block as dangling on replay.
+						//
+						// Limitation: the in-place patch only reaches the persisted
+						// message when the transformer resolves BEFORE the drain. After
+						// `#emitCursorSplitAssistantMessage` swaps the buffer out, a late
+						// `entry.toolResult = updated` mutates a detached object and the
+						// already-emitted/persisted result keeps the original payload.
+						// The reservation guarantees the call is not lost; it does not
+						// await customization. Coding-agent never supplies this hook.
 						const entry: CursorToolResultEntry = { toolResult: message };
 						this.#cursorToolResultBuffer.push(entry);
 						if (this.#cursorOnToolResult) {
@@ -1468,6 +1482,10 @@ export class Agent {
 	 * multi-text turns, producing duplicated text on replay.
 	 */
 	#emitCursorSplitAssistantMessage(assistantMessage: AssistantMessage): void {
+		// Snapshot and detach immediately so a still-pending `cursorOnToolResult`
+		// cannot push into a drained buffer. Entries already reserved stay paired
+		// with their toolCall; any transform that finishes after this point no
+		// longer reaches the messages appended below (see reservation comment).
 		const buffer = this.#cursorToolResultBuffer;
 		this.#cursorToolResultBuffer = [];
 

@@ -2052,6 +2052,8 @@ interface CursorTodoItem {
 	id?: string;
 	content?: string;
 	status?: number;
+	/** IDs of other todos this one waits on (agent.proto `TodoItem.dependencies`). */
+	dependencies?: string[];
 }
 
 interface CursorTodoResult {
@@ -2162,6 +2164,37 @@ function extractTodoSnapshot(toolCall: CursorTodoToolCall): CursorTodoSnapshot |
 	for (const todo of mapped) {
 		if (seen.has(todo.content)) return null;
 		seen.add(todo.content);
+	}
+	// `TodoItem.dependencies` carries the IDs a row waits on. The local model can
+	// express *that* a task is blocked (`TodoStatus` has `blocked`, `TodoItem`
+	// has `blocker`), but not the graph: it has no ids, so an edge cannot be
+	// stored, replayed, or re-evaluated when the blocker later completes.
+	//
+	// Dropping the edge silently is the harmful part. `nextActionableTask`
+	// (`todo.ts:164`) returns the first `pending` row with no notion of
+	// blockage, so the panel, the idle recap, and the completion reminders
+	// would all steer toward work the server says is not ready yet — and a
+	// reload loses the constraint for good.
+	//
+	// Only *unresolved* edges are refused: a dependency on an already
+	// finished row imposes nothing, which keeps late-session snapshots
+	// syncing normally.
+	//
+	// Projecting unresolved edges onto `blocked` + a `blocker` note is the
+	// lossy alternative — it preserves the warning but not the graph, and
+	// nothing would ever unblock the row, since the local engine has no id to
+	// match when the dependency completes. Refusing keeps this consistent with
+	// the collision case above: decline what cannot be represented rather than
+	// import an approximation.
+	const finished = new Set<string>();
+	for (const todo of todos) {
+		const status = mapTodoStatusValue(typeof todo.status === "number" ? todo.status : undefined);
+		if (todo.id && (status === "completed" || status === "abandoned")) finished.add(todo.id);
+	}
+	for (const todo of todos) {
+		for (const dependency of todo.dependencies ?? []) {
+			if (!finished.has(dependency)) return null;
+		}
 	}
 	return {
 		todos: mapped,

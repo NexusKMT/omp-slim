@@ -402,6 +402,13 @@ describe("cursor native todo bridge (wire-encoded protobuf)", () => {
 		return rows.map(([id, content, status]) => create(TodoItemSchema, { id, content, status }));
 	}
 
+	/** Rows carrying `TodoItem.dependencies` — the ids each row waits on. */
+	function depItems(rows: [string, string, number, string[]][]) {
+		return rows.map(([id, content, status, dependencies]) =>
+			create(TodoItemSchema, { id, content, status, dependencies }),
+		);
+	}
+
 	function successResult(todos: TodoItem[], totalCount: number, wasMerge = false) {
 		return create(UpdateTodosResultSchema, {
 			result: {
@@ -598,6 +605,63 @@ describe("cursor native todo bridge (wire-encoded protobuf)", () => {
 			isError: false,
 			content: [{ type: "text", text: "Todo snapshot not mirrored" }],
 		});
+	});
+
+	it("refuses a snapshot whose rows carry unresolved dependencies", () => {
+		// `TodoItem.dependencies` is a graph the local model cannot store: rows are
+		// keyed by content and have no id, so an edge cannot be replayed or
+		// re-evaluated when the blocker finishes. Importing the row anyway files it
+		// as plain `pending`, and `nextActionableTask` then offers work the server
+		// says is not ready.
+		//
+		// Positive control: the same two rows without the edge do sync, so the
+		// refusal is attributable to the dependency and not to a decode failure.
+		const rows: [string, string, number][] = [
+			["1", "blocker task", 1],
+			["2", "dependent task", 1],
+		];
+		expect(drive(updateCall(items(rows), 2)).snapshots).toHaveLength(1);
+
+		const h = drive(
+			updateCall(
+				depItems([
+					["1", "blocker task", 1, []],
+					["2", "dependent task", 1, ["1"]],
+				]),
+				2,
+			),
+		);
+		const callId = todoBlocks(h)[0].id;
+
+		expect(todoBlocks(h)).toHaveLength(1);
+		expect(h.snapshots).toEqual([]);
+		// Settles as a benign no-op under the streamed id, like every other refusal.
+		expect(h.syncCalls).toEqual([{ snapshot: null, toolCallId: callId, error: null }]);
+		expect(h.toolResults[0]).toMatchObject({ toolCallId: callId, isError: false });
+	});
+
+	it("still mirrors when every dependency is already finished", () => {
+		// A dependency on a completed row constrains nothing, so refusing it would
+		// strand late-session snapshots — by then most edges point at done work.
+		const h = drive(
+			updateCall(
+				depItems([
+					["1", "blocker task", 3, []],
+					["2", "dependent task", 1, ["1"]],
+				]),
+				2,
+			),
+		);
+
+		expect(h.snapshots).toEqual([
+			{
+				todos: [
+					{ content: "blocker task", status: "completed" },
+					{ content: "dependent task", status: "pending" },
+				],
+				merged: false,
+			},
+		]);
 	});
 
 	it("refuses a wire-decoded read_todos narrowed by status_filter", () => {
