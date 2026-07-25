@@ -502,21 +502,23 @@ function inferCaseHint(secret: string): PlaceholderCaseHint | undefined {
 
 function buildPlaceholder(hint: PlaceholderCaseHint | undefined, base: string, friendlyName?: string): string {
 	const prefix = friendlyName ? `${friendlyName}_` : "";
-	return hint ? `#${prefix}${base}:${hint}#` : `#${prefix}${base}#`;
+	return hint ? `$$${prefix}${base}:${hint}$$` : `$$${prefix}${base}$$`;
 }
 
-/** Regex to match #HASH#, #HASH:U#, and #FRIENDLY_HASH(:hint)# placeholders. */
-const PLACEHOLDER_RE = /#(?:[A-Z0-9]+_)?[A-Z0-9]{4,}(?::[ULCM])?#/g;
+/** Regex matching current `$$HASH$$` and persisted legacy `#HASH#` placeholders. */
+const PLACEHOLDER_RE = /(?:\$\$(?:[A-Z0-9]+_)?[A-Z0-9]{4,}(?::[ULCM])?\$\$|#(?:[A-Z0-9]+_)?[A-Z0-9]{4,}(?::[ULCM])?#)/g;
 
 function resumePlaceholderScanAfterRejectedCandidate(match: RegExpExecArray): void {
 	// RegExp#exec does not find overlapping matches. Restart at the rejected
-	// candidate's closing `#`, which can open an immediately adjacent placeholder.
-	PLACEHOLDER_RE.lastIndex = match.index + match[0].length - 1;
+	// candidate's closing delimiter, which can open an immediately adjacent placeholder.
+	PLACEHOLDER_RE.lastIndex = match.index + match[0].length - (match[0].startsWith("$$") ? 2 : 1);
 }
 
 function placeholderWithoutFriendlyName(placeholder: string): string | undefined {
-	const match = /^#[A-Z0-9]+_([A-Z0-9]{4,}(?::[ULCM])?)#$/.exec(placeholder);
-	return match ? `#${match[1]}#` : undefined;
+	const current = /^\$\$[A-Z0-9]+_([A-Z0-9]{4,}(?::[ULCM])?)\$\$$/.exec(placeholder);
+	if (current !== null) return `$$${current[1]}$$`;
+	const legacy = /^#[A-Z0-9]+_([A-Z0-9]{4,}(?::[ULCM])?)#$/.exec(placeholder);
+	return legacy ? `#${legacy[1]}#` : undefined;
 }
 
 function lookupFriendlyPlaceholderAlias(
@@ -529,14 +531,13 @@ function lookupFriendlyPlaceholderAlias(
 	return unprefixed !== undefined ? deobfuscateMap.get(unprefixed) : undefined;
 }
 
-const PENDING_PLACEHOLDER_SUFFIX_RE = /#(?:[A-Z0-9]+_)?[A-Z0-9]*(?::[ULCM]?)?$/;
+const PENDING_PLACEHOLDER_SUFFIX_RE =
+	/(?:\${1,2}(?:[A-Z0-9]+_)?[A-Z0-9]*(?::[ULCM]?)?|#(?:[A-Z0-9]+_)?[A-Z0-9]*(?::[ULCM]?)?)$/;
 
 // Withhold a trailing run that could be the start of a placeholder from streamed
 // deltas, so a partial token is never emitted before deobfuscation can replace
-// it. A lone trailing `#` is always buffered, even right after an alnum/`:`
-// (e.g. `ID#`), because that `#` can open a placeholder; emitting it would
-// corrupt the length-sliced live draft once the token completes. The final
-// non-streamed flush re-emits any buffered tail, so nothing is lost.
+// it. A lone trailing delimiter character is always buffered because it can open
+// a placeholder; the final non-streamed flush re-emits it when no token follows.
 export function stripPendingSecretPlaceholderSuffix(text: string): string {
 	const pendingPlaceholderStart = text.match(PENDING_PLACEHOLDER_SUFFIX_RE);
 	if (pendingPlaceholderStart?.index === undefined) return text;
@@ -929,7 +930,7 @@ export class SecretObfuscator {
 	// placeholder minted under a renamed friendly name still deobfuscates
 	// (see `#prefixIsSecretShaped`'s docstring for why), but unconditionally
 	// stripping and ignoring an attacker-authored prefix would let a forged
-	// token like `#GITHUBPATABC123_<suffix-copied-from-any-real-placeholder>#`
+	// token like `$$GITHUBPATABC123_<suffix-copied-from-any-real-placeholder>$$`
 	// restore to that OTHER secret's raw value with no check at all — worse
 	// than the obfuscate-direction leak, since deobfuscation is what feeds
 	// tool-call arguments and provider-output restoration. Refuse the
@@ -939,13 +940,18 @@ export class SecretObfuscator {
 	#lookupLiveAlias(placeholder: string): { secret: string; recursive: boolean } | undefined {
 		const direct = this.#deobfuscateMap.get(placeholder);
 		if (direct !== undefined) return direct;
-		const match = /^#([A-Z0-9]+)_([A-Z0-9]{4,}(?::[ULCM])?)#$/.exec(placeholder);
+		const body = placeholder.startsWith("$$") ? placeholder.slice(2, -2) : placeholder.slice(1, -1);
+		const match = /^([A-Z0-9]+)_([A-Z0-9]{4,}(?::[ULCM])?)$/.exec(body);
 		if (match === null || this.#prefixIsSecretShaped(match[1]!)) return undefined;
-		return this.#deobfuscateMap.get(`#${match[2]}#`);
+		const unprefixed = placeholder.startsWith("$$") ? `$$${match[2]}$$` : `#${match[2]}#`;
+		return this.#deobfuscateMap.get(unprefixed);
 	}
 
 	#deobfuscate(text: string, allowLegacy: boolean): string {
-		if ((!this.#hasAny && (!allowLegacy || this.#legacyDeobfuscateMap.size === 0)) || !text.includes("#"))
+		if (
+			(!this.#hasAny && (!allowLegacy || this.#legacyDeobfuscateMap.size === 0)) ||
+			(!text.includes("$$") && !text.includes("#"))
+		)
 			return text;
 		let result = text;
 		for (;;) {
@@ -965,7 +971,7 @@ export class SecretObfuscator {
 				}
 				return match;
 			});
-			if (next === result || !shouldContinue || !next.includes("#")) return next;
+			if (next === result || !shouldContinue || (!next.includes("$$") && !next.includes("#"))) return next;
 			result = next;
 		}
 	}
@@ -1390,7 +1396,8 @@ export class SecretObfuscator {
 	#placeholderForCurrentInput(placeholder: string): string {
 		const unprefixed = placeholderWithoutFriendlyName(placeholder);
 		if (unprefixed === undefined) return placeholder;
-		const match = /^#([A-Z0-9]+)_/.exec(placeholder);
+		const body = placeholder.startsWith("$$") ? placeholder.slice(2, -2) : placeholder.slice(1, -1);
+		const match = /^([A-Z0-9]+)_/.exec(body);
 		if (match === null || !this.#prefixIsSecretShaped(match[1]!)) return placeholder;
 		return unprefixed;
 	}
@@ -1443,6 +1450,20 @@ export class SecretObfuscator {
 				this.#deobfuscateMap.set(unprefixed, { secret, recursive });
 			}
 		}
+		if (placeholder.startsWith("$$")) {
+			const legacy = `#${placeholder.slice(2, -2)}#`;
+			const existingLegacy = this.#legacyDeobfuscateMap.get(legacy);
+			if (existingLegacy === undefined || existingLegacy.secret === secret) {
+				this.#legacyDeobfuscateMap.set(legacy, { secret, recursive });
+			}
+			if (unprefixed !== undefined) {
+				const legacyUnprefixed = `#${unprefixed.slice(2, -2)}#`;
+				const existingLegacyUnprefixed = this.#legacyDeobfuscateMap.get(legacyUnprefixed);
+				if (existingLegacyUnprefixed === undefined || existingLegacyUnprefixed.secret === secret) {
+					this.#legacyDeobfuscateMap.set(legacyUnprefixed, { secret, recursive });
+				}
+			}
+		}
 	}
 
 	// Whether an alnum-only, uppercase friendly-name-shaped prefix dropped from
@@ -1492,10 +1513,12 @@ export class SecretObfuscator {
 	// deobfuscate-direction check in `#deobfuscate`.
 	#isGeneratedPlaceholder(placeholder: string): boolean {
 		if (this.#deobfuscateMap.has(placeholder)) return true;
-		const match = /^#([A-Z0-9]+)_([A-Z0-9]{4,}(?::[ULCM])?)#$/.exec(placeholder);
+		const body = placeholder.startsWith("$$") ? placeholder.slice(2, -2) : placeholder.slice(1, -1);
+		const match = /^([A-Z0-9]+)_([A-Z0-9]{4,}(?::[ULCM])?)$/.exec(body);
 		if (match === null) return false;
 		if (this.#prefixIsSecretShaped(match[1]!)) return false;
-		return this.#deobfuscateMap.has(`#${match[2]}#`);
+		const unprefixed = placeholder.startsWith("$$") ? `$$${match[2]}$$` : `#${match[2]}#`;
+		return this.#deobfuscateMap.has(unprefixed);
 	}
 
 	// Replace `search` with `replacement` outside known generated placeholders while
