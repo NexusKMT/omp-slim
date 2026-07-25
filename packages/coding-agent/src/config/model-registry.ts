@@ -793,7 +793,7 @@ export class ModelRegistry {
 	// Runtime model managers registered by extensions via fetchDynamicModels.
 	// Keyed by provider name; use the same SQLite cache path as builtins.
 	#runtimeModelManagers: Map<string, { options: ModelManagerOptions<Api>; sourceId: string }> = new Map();
-	#ignorePiNativeProviderConfig: boolean;
+	#ignoreLocalModelConfig: boolean;
 	#fetch: FetchImpl;
 
 	#resolveCommandBackedApiKey(provider: string): CommandApiKeyResolution {
@@ -831,12 +831,17 @@ export class ModelRegistry {
 		readonly authStorage: AuthStorage,
 		modelsPath?: string,
 		options?: {
-			/** Skip models config providers routed through a pi-native gateway, preventing a gateway server from routing back into itself. */
-			ignorePiNativeProviderConfig?: boolean;
+			/**
+			 * Gateway mode: ignore local `models.yml` entirely (provider overrides,
+			 * config API keys, custom models, custom discovery). A broker-backed
+			 * gateway serves only bundled + broker-discovered catalog metadata and
+			 * must never apply client-side credential or routing overrides.
+			 */
+			ignoreLocalModelConfig?: boolean;
 			fetch?: FetchImpl;
 		},
 	) {
-		this.#ignorePiNativeProviderConfig = options?.ignorePiNativeProviderConfig ?? false;
+		this.#ignoreLocalModelConfig = options?.ignoreLocalModelConfig ?? false;
 		this.#fetch =
 			options?.fetch ??
 			(isBunTestRuntime()
@@ -1373,6 +1378,24 @@ export class ModelRegistry {
 	}
 
 	#loadCustomModels(): CustomModelsResult {
+		// Gateway mode: serve bundled + broker-discovered catalog metadata only.
+		// Local models.yml provider overrides (baseUrl/apiKey/headers/transport),
+		// custom models, custom discovery, and config API keys are all client-side
+		// routing that MUST NOT reach a broker-backed gateway — applying them would
+		// send broker bearers to a configured endpoint, install config keys that
+		// shadow broker credentials (bypassing account pooling/refresh/accounting),
+		// or route a pi-native gateway back into itself.
+		if (this.#ignoreLocalModelConfig) {
+			return {
+				models: [],
+				overrides: new Map(),
+				modelOverrides: new Map(),
+				keylessProviders: new Set(),
+				discoverableProviders: [],
+				configuredProviders: new Set(),
+				found: false,
+			};
+		}
 		const { value, error, status } = this.#modelsConfigFile.tryLoad();
 
 		if (status === "error") {
@@ -1402,13 +1425,8 @@ export class ModelRegistry {
 		const allModelOverrides = new Map<string, Map<string, ModelOverride>>();
 		const keylessProviders = new Set<string>();
 		const discoverableProviders: DiscoveryProviderConfig[] = [];
-		const providerEntries = Object.entries(value.providers ?? {}).filter(
-			([, providerConfig]) => !this.#ignorePiNativeProviderConfig || providerConfig.transport !== "pi-native",
-		);
-		const configuredProviders = new Set(providerEntries.map(([providerName]) => providerName));
-		const effectiveConfig = this.#ignorePiNativeProviderConfig
-			? { ...value, providers: Object.fromEntries(providerEntries) }
-			: value;
+		const providerEntries = Object.entries(value.providers ?? {});
+		const configuredProviders = new Set(Object.keys(value.providers ?? {}));
 		for (const [providerName, providerConfig] of providerEntries) {
 			const resolvedProviderHeaders = resolveConfigHeaders(providerConfig.headers);
 			// Always set overrides when baseUrl/headers/apiKey/authHeader/compat/disableStrictTools/transport are present
@@ -1481,7 +1499,7 @@ export class ModelRegistry {
 		}
 
 		return {
-			models: this.#parseModels(effectiveConfig),
+			models: this.#parseModels(value),
 			overrides,
 			modelOverrides: allModelOverrides,
 			keylessProviders,

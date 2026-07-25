@@ -200,15 +200,18 @@ async function runServe(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
 	// Build the model resolver + catalog from the ModelRegistry — the same
 	// component the TUI/CLI use — scoped to providers we hold credentials for.
 	// `getAll()` is a superset of the bundled catalog (bundled first, then
-	// cached + discovered), so the discovery-only models omp itself reaches
-	// become routable through the gateway instead of freezing on the compiled
-	// snapshot. Format handlers ask `resolveModel` to translate a
-	// client-requested `model` field into a pi-ai `Model<Api>` before dispatch;
+	// cached + broker-discovered), so the discovery-only models omp itself
+	// reaches become routable through the gateway instead of freezing on the
+	// compiled snapshot. `ignoreLocalModelConfig` keeps the host's `models.yml`
+	// out of the picture: client-side provider overrides (baseUrl/apiKey/headers/
+	// transport) and custom models must never route a broker-backed gateway or
+	// shadow broker credentials. Format handlers ask `resolveModel` to translate
+	// a client-requested `model` field into a pi-ai `Model<Api>` before dispatch;
 	// `listModels` powers `/v1/models`.
 	const snapshot = storage.exportSnapshot();
 	const providersWithCreds = new Set<string>();
 	for (const entry of snapshot.credentials) providersWithCreds.add(entry.provider);
-	const registry = new ModelRegistry(storage, undefined, { ignorePiNativeProviderConfig: true });
+	const registry = new ModelRegistry(storage, undefined, { ignoreLocalModelConfig: true });
 	await registry.refresh();
 	let modelById = indexModelsByRequestId(registry.getAll(), providersWithCreds);
 

@@ -5,11 +5,11 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 import { ModelRegistry } from "../../config/model-registry";
 import { indexModelsByRequestId } from "../auth-gateway-cli";
 
-function stubAuthStorage(): AuthStorage {
+function stubAuthStorage(configKeys?: string[]): AuthStorage {
 	const stub = {
 		setFallbackResolver: () => {},
 		clearConfigApiKeys: () => {},
-		setConfigApiKey: () => {},
+		setConfigApiKey: (provider: string) => configKeys?.push(provider),
 		removeConfigApiKey: () => {},
 		hasAuth: () => true,
 		getAll: () => ({ anthropic: {} }),
@@ -49,9 +49,11 @@ describe("indexModelsByRequestId (auth-gateway catalog)", () => {
 		expect(index.get("claude-opus-5-repro")?.id).toBe("claude-opus-5-repro");
 	});
 
-	test("ignores client-side pi-native routing in the gateway registry", async () => {
+	test("gateway registry ignores local models.yml credential and routing overrides", async () => {
 		using tempDir = TempDir.createSync("@omp-auth-gateway-catalog-");
 		const modelsPath = tempDir.join("models.yml");
+		// anthropic: a plain credential/baseUrl override (no transport) — the
+		// reviewer's leak. openai: a pi-native gateway route — the self-routing loop.
 		await Bun.write(
 			modelsPath,
 			[
@@ -59,25 +61,36 @@ describe("indexModelsByRequestId (auth-gateway catalog)", () => {
 				"  anthropic:",
 				"    baseUrl: http://127.0.0.1:18899",
 				"    apiKey: gateway-token",
+				"  openai:",
+				"    baseUrl: http://127.0.0.1:18899",
+				"    apiKey: gateway-token",
 				"    transport: pi-native",
 				"",
 			].join("\n"),
 		);
 
-		const clientRegistry = new ModelRegistry(stubAuthStorage(), modelsPath);
-		const routedModel = clientRegistry.find("anthropic", "claude-sonnet-4-5");
-		expect(routedModel?.transport).toBe("pi-native");
-		expect(routedModel?.baseUrl).toBe("http://127.0.0.1:18899");
+		// A normal client registry applies the local overrides and installs the
+		// config API keys into AuthStorage.
+		const clientKeys: string[] = [];
+		const clientRegistry = new ModelRegistry(stubAuthStorage(clientKeys), modelsPath);
+		expect(clientRegistry.find("anthropic", "claude-sonnet-4-5")?.baseUrl).toBe("http://127.0.0.1:18899");
+		expect(clientRegistry.getAll().find(model => model.provider === "openai")?.transport).toBe("pi-native");
+		expect(clientKeys).toContain("anthropic");
 
-		const gatewayRegistry = new ModelRegistry(stubAuthStorage(), modelsPath, {
-			ignorePiNativeProviderConfig: true,
+		// The gateway registry ignores models.yml entirely: bundled routing wins,
+		// no config key reaches AuthStorage, and no pi-native self-route survives.
+		const gatewayKeys: string[] = [];
+		const gatewayRegistry = new ModelRegistry(stubAuthStorage(gatewayKeys), modelsPath, {
+			ignoreLocalModelConfig: true,
 		});
 		const gatewayModel = gatewayRegistry.find("anthropic", "claude-sonnet-4-5");
 		const bundledModel = getBundledModels("anthropic").find(model => model.id === "claude-sonnet-4-5");
 		if (!gatewayModel || !bundledModel) throw new Error("expected bundled Anthropic model");
 
-		expect(gatewayModel.transport).toBeUndefined();
 		expect(gatewayModel.baseUrl).toBe(bundledModel.baseUrl);
+		expect(gatewayModel.transport).toBeUndefined();
+		expect(gatewayKeys).toHaveLength(0);
+		expect(gatewayRegistry.getAll().find(model => model.provider === "openai")?.transport).toBeUndefined();
 		expect(indexModelsByRequestId(gatewayRegistry.getAll(), new Set(["anthropic"])).get(gatewayModel.id)).toBe(
 			gatewayModel,
 		);
