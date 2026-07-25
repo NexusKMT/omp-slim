@@ -1282,7 +1282,15 @@ export class SessionAdvisors {
 		for (const candidate of candidates) {
 			const apiKey = await this.#host.modelRegistry.getApiKey(candidate, advisorProviderSessionId);
 			if (!apiKey) continue;
-
+			// The advisor overflow-compaction one-shot bypasses the advisor `Agent`,
+			// so its installed metadata resolver never runs. Emit the same
+			// `metadata.user_id` identity here (resolved per candidate provider,
+			// after the session-sticky credential is selected) so summarization
+			// requests carry the advisor session id like every other advisor call
+			// (issue #6625).
+			const advisorMetadata = advisorProviderSessionId
+				? buildSessionMetadata(advisorProviderSessionId, candidate.provider, this.#host.modelRegistry.authStorage)
+				: undefined;
 			try {
 				compactResult = await compact(
 					preparation,
@@ -1297,6 +1305,7 @@ export class SessionAdvisors {
 						tools: agent.state.tools,
 						sessionId: advisorProviderSessionId,
 						promptCacheKey: advisorProviderSessionId,
+						metadata: advisorMetadata,
 						providerSessionState: this.#host.providerSessionState,
 						codexCompaction,
 					},
