@@ -1,16 +1,11 @@
 import { describe, expect, it } from "bun:test";
+import { fileURLToPath } from "node:url";
 
-const CONCURRENT_IMPORT_SCRIPT = `
-await Promise.all([
-	import("@oh-my-pi/pi-ai/registry/oauth"),
-	import("@oh-my-pi/pi-ai/providers/anthropic"),
-	import("@oh-my-pi/pi-ai/auth-storage"),
-]);
-`;
+const STATIC_IMPORT_FIXTURE = fileURLToPath(new URL("./fixtures/oauth-barrel-import.ts", import.meta.url));
 
 describe("OAuth barrel imports", () => {
-	it("loads concurrently with the Anthropic provider and auth storage", async () => {
-		const child = Bun.spawn([process.execPath, "-e", CONCURRENT_IMPORT_SCRIPT], {
+	it("loads with the Anthropic provider and auth storage while preserving public exports", async () => {
+		const child = Bun.spawn([process.execPath, STATIC_IMPORT_FIXTURE], {
 			cwd: import.meta.dir,
 			stdout: "pipe",
 			stderr: "pipe",
