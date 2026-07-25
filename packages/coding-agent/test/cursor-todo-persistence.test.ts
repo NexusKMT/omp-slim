@@ -1,10 +1,13 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { AgentEvent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { CursorExecHandlers } from "@oh-my-pi/pi-coding-agent/cursor";
+import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import {
 	getLatestTodoPhasesFromEntries,
 	type TodoPhase,
+	todoToolRenderer,
 	USER_TODO_EDIT_CUSTOM_TYPE,
 } from "@oh-my-pi/pi-coding-agent/tools/todo";
 import { buildSessionContext } from "../src/session/session-context";
@@ -64,6 +67,17 @@ function newHarness(initial: TodoPhase[] = []): Harness {
 }
 
 describe("cursor todo persistence", () => {
+	// The replay test drives the real todo renderer, which reads theme + settings.
+	beforeAll(async () => {
+		resetSettingsForTest();
+		await Settings.init({ inMemory: true });
+		await initTheme();
+	});
+
+	afterAll(() => {
+		resetSettingsForTest();
+	});
+
 	it("survives a reload, which replays session entries rather than memory", () => {
 		// Cursor resolves `update_todos` server-side and emits no local `todo`
 		// toolResult, so nothing would otherwise land in the branch and every
@@ -275,11 +289,21 @@ describe("cursor todo persistence", () => {
 		const rebuilt = context.messages.find(message => message.role === "assistant");
 		expect(rebuilt?.content.some(block => block.type === "toolCall" && block.id === "cursor-call-1")).toBe(true);
 
-		// And the paired result still carries the phases the renderer needs.
+		// And the rebuilt result actually renders the list: `renderResult` derives
+		// every row from `details.phases`, so a summary-only result would print
+		// the `0 tasks` fallback instead of the task.
 		const replayed = context.messages.find(
 			(message): message is typeof result => message.role === "toolResult" && message.toolCallId === "cursor-call-1",
 		);
-		const phases = (replayed?.details as { phases?: TodoPhase[] } | undefined)?.phases ?? [];
-		expect(phases.flatMap(phase => phase.tasks)).toEqual([{ content: "oauth", status: "completed" }]);
+		if (!replayed) throw new Error("expected the paired result to survive the rebuild");
+		const component = todoToolRenderer.renderResult(
+			{ content: replayed.content, details: replayed.details as never, isError: replayed.isError },
+			{ expanded: true } as Parameters<typeof todoToolRenderer.renderResult>[1],
+			theme,
+		);
+		const rendered = (component.render(120) as readonly string[]).join("\n");
+
+		expect(rendered).toContain("oauth");
+		expect(rendered).not.toContain("0 tasks");
 	});
 });
