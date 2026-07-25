@@ -9,9 +9,9 @@ import type { Api, Model, ModelSpec } from "./types";
 // Rows persist ModelSpec JSON (sparse `compat`, never the resolved record);
 // the model manager rebuilds via `buildModel` on load. Request headers are
 // intentionally omitted: arbitrary provider-defined header names can carry
-// credentials. v10 deletes rows that may contain persisted headers and records
-// which model ids lost headers and which cannot be rebuilt from static inputs,
-// so the manager can restore the safe subset or refetch dynamic-only headers;
+// credentials. v11 invalidates rows that may persist derived computer-use
+// support without provenance; v10 deletes rows that may contain persisted
+// headers and records which model ids lost headers or cannot be rebuilt.
 // v9 invalidated Kimi Code rows predating live effort and protocol metadata;
 // v8 invalidated Codex discovery rows predating provider-native V2 compaction
 // metadata; v7 invalidated rows predating the Antigravity Gemini budget-mode
@@ -20,7 +20,7 @@ import type { Api, Model, ModelSpec } from "./types";
 // retired unknown-limit sentinels (222222/8888); v5 invalidated rows predating
 // effort-tier variant collapsing (raw `-low`/`-high`/`-thinking` member ids);
 // v4 dropped the pre-efforts ThinkingConfig shape.
-const CACHE_SCHEMA_VERSION = 10;
+const CACHE_SCHEMA_VERSION = 11;
 const HEADER_RESTORE_VERSION = 1;
 
 interface CacheRow {

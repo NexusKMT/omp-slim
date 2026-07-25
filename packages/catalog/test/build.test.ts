@@ -6,7 +6,7 @@ import * as path from "node:path";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { isOfficialAnthropicApiUrl } from "@oh-my-pi/pi-catalog/compat/anthropic";
 import { buildOpenAICompat, buildOpenAIResponsesCompat } from "@oh-my-pi/pi-catalog/compat/openai";
-import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
+import { readModelCache, writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { openrouterModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
@@ -682,6 +682,37 @@ describe("model cache spec round trip", () => {
 			expect(model?.compat.supportsDeveloperRole).toBe(true);
 			expect(model?.compat.isOpenRouterHost).toBe(false);
 			expect(model?.compatConfig).toEqual(sparse);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	it("invalidates schema-v10 rows that predate computer-use capability provenance", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-legacy-computer-cache-"));
+		const dbPath = path.join(tempDir, "models.db");
+		const model = buildModel({
+			id: "legacy-inferred-computer",
+			name: "Legacy inferred computer",
+			api: "openai-responses",
+			provider: "openai",
+			baseUrl: "https://api.openai.com/v1",
+			reasoning: true,
+			input: ["text", "image"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 400_000,
+			maxTokens: 128_000,
+		} satisfies ModelSpec<"openai-responses">);
+		try {
+			writeModelCache("legacy-computer-cache-test", Date.now(), [model], true, "", dbPath);
+			const db = new Database(dbPath);
+			db.run("UPDATE model_cache SET version = 10 WHERE provider_id = ?", ["legacy-computer-cache-test"]);
+			db.close();
+
+			expect(readModelCache("legacy-computer-cache-test", Infinity, Date.now, dbPath)).toBeNull();
+			const verified = new Database(dbPath, { readonly: true });
+			const row = verified.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM model_cache").get();
+			verified.close();
+			expect(row?.count).toBe(0);
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
