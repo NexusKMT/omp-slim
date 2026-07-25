@@ -53,7 +53,8 @@ export interface ModelManagerOptions<TApi extends Api = Api, TModelsDevPayload =
  * Resolution result.
  *
  * `stale` is false when the resolved catalog is authoritative for the selected provider:
- * - a non-empty dynamic endpoint catalog was fetched in this call,
+ * - a dynamic endpoint fetch succeeded in this call (an empty catalog is still
+ *   authoritative for the cycle, so downstream pruning of removed models runs),
  * - a still-fresh authoritative cache was reused in `online-if-uncached` mode, or
  * - the provider has no dynamic fetcher configured.
  */
@@ -226,13 +227,18 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 				options.dropCachedModelIdsOnStaticMismatch,
 			);
 	const dynamicModels = fetchedDynamicModels ?? [];
-	const dynamicResultAuthoritative = dynamicFetchSucceeded && dynamicModels.length > 0;
+	// A successful empty result stays authoritative for THIS cycle (so an
+	// intentional catalog emptying still prunes removed models downstream), but
+	// is NOT pinned into the cache as authoritative — that would suppress the
+	// short retry that recovers a transient empty response (#6620). The two
+	// concerns are deliberately separate: result authority vs. cache retry.
+	const dynamicCacheAuthoritative = dynamicFetchSucceeded && dynamicModels.length > 0;
 	const mergedWithCache = mergeDynamicModels(mergeModelSources(staticModels, modelsDevModels), cacheModels);
 	const mergedModels = mergeDynamicModels(mergedWithCache, dynamicModels);
 	const models = collapseBuiltModelVariants(
 		dynamicModelsAuthoritative && dynamicFetchSucceeded ? retainModelIds(mergedModels, dynamicModels) : mergedModels,
 	);
-	const dynamicAuthoritative = !hasDynamicFetcher || dynamicResultAuthoritative || shouldUseFreshCacheAsAuthoritative;
+	const dynamicAuthoritative = !hasDynamicFetcher || dynamicFetchSucceeded || shouldUseFreshCacheAsAuthoritative;
 	if (shouldFetchFromNetwork) {
 		if (dynamicFetchSucceeded) {
 			const mergedSnapshot = mergeDynamicModels(mergeModelSources(staticModels, modelsDevModels), dynamicModels);
@@ -243,7 +249,7 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 				cacheProviderId,
 				now(),
 				collapseBuiltModelVariants(snapshotModels),
-				dynamicResultAuthoritative,
+				dynamicCacheAuthoritative,
 				staticFingerprint,
 				dbPath,
 				staticModels,

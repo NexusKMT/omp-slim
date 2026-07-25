@@ -692,7 +692,9 @@ describe("model cache spec round trip", () => {
 		try {
 			const empty = await resolveProviderModels(options, "online");
 			expect(empty.models).toEqual([]);
-			expect(empty.stale).toBe(true);
+			// Authoritative for the cycle (drives downstream pruning) yet not pinned
+			// into the cache as authoritative (keeps the short retry interval).
+			expect(empty.stale).toBe(false);
 			expect(fetches).toBe(1);
 
 			const db = new Database(dbPath, { readonly: true });
@@ -719,6 +721,40 @@ describe("model cache spec round trip", () => {
 			expect(cached.models.map(model => model.id)).toEqual([recoveredModel.id]);
 			expect(cached.stale).toBe(false);
 			expect(fetches).toBe(2);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+	it("reports an authoritative catalog emptying as non-stale so removed models prune", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-empty-transition-"));
+		const dbPath = path.join(tempDir, "models.db");
+		const model = completionsSpec({ id: "going-away", provider: "empty-transition-test" });
+		let discoveredModels: readonly ModelSpec<"openai-completions">[] = [model];
+		const options = {
+			providerId: "empty-transition-test",
+			staticModels: [],
+			dynamicModelsAuthoritative: true,
+			cacheDbPath: dbPath,
+			fetchDynamicModels: async () => discoveredModels,
+		};
+		try {
+			const populated = await resolveProviderModels(options, "online");
+			expect(populated.models.map(candidate => candidate.id)).toEqual([model.id]);
+			expect(populated.stale).toBe(false);
+
+			discoveredModels = [];
+			const emptied = await resolveProviderModels(options, "online");
+			expect(emptied.models).toEqual([]);
+			// The successful empty fetch must stay authoritative so ModelRegistry
+			// prunes the removed model instead of leaving it selectable forever.
+			expect(emptied.stale).toBe(false);
+
+			const db = new Database(dbPath, { readonly: true });
+			const row = db
+				.query<{ authoritative: number }, [string]>("SELECT authoritative FROM model_cache WHERE provider_id = ?")
+				.get(options.providerId);
+			db.close();
+			expect(row?.authoritative).toBe(0);
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
