@@ -475,6 +475,7 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 			let currentToolCall: ToolCallState | null = null;
 			const resolvedMcpToolCallIds = new Set<string>();
 			const usageState: UsageState = { sawTokenDelta: false };
+			const inFlightDispatches = new Set<Promise<void>>();
 
 			const state: BlockState = {
 				get currentTextBlock() {
@@ -547,7 +548,13 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 						const isTurnEnded =
 							serverMessage.message.case === "interactionUpdate" &&
 							serverMessage.message.value.message?.case === "turnEnded";
-						void handleServerMessage(
+						// Dispatch is fire-and-forget so the socket keeps draining while a
+						// handler runs, but the promise is tracked: `done` must not be
+						// pushed while an exec handler is still resolving, or the Agent
+						// drains its Cursor result buffer before the handler reserved its
+						// entry and the call is left unpaired. Awaited after
+						// `h2Completion` below.
+						const dispatch = handleServerMessage(
 							serverMessage,
 							output,
 							stream,
@@ -562,6 +569,8 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 						).catch(error => {
 							log("error", "handleServerMessage", { error: String(error) });
 						});
+						inFlightDispatches.add(dispatch);
+						void dispatch.finally(() => inFlightDispatches.delete(dispatch));
 
 						// Application completion is not protocol success; wait for a clean HTTP/2 end.
 						if (isTurnEnded) {
@@ -623,6 +632,15 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 			h2Request.write(frameConnectMessage(requestBytes));
 			heartbeatTimer = setInterval(sendHeartbeat, 5000);
 			await h2Completion.promise;
+			// The transport is done, but a handler decoded from the last chunk may
+			// still be running: exec handlers and `onToolResult` transformers are
+			// async. Pushing `done` now would let the Agent drain its Cursor result
+			// buffer before such a handler reserves its entry, leaving the call
+			// unpaired and stripped from every rebuilt transcript. Each dispatch
+			// already swallows its own rejection, so this only waits.
+			while (inFlightDispatches.size > 0) {
+				await Promise.all([...inFlightDispatches]);
+			}
 
 			endCurrentTextBlock(output, stream, state);
 			endCurrentThinkingBlock(output, stream, state);

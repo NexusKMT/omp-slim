@@ -6,7 +6,9 @@ import type { Context, Model } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import {
 	AgentServerMessageSchema,
+	ExecServerMessageSchema,
 	InteractionUpdateSchema,
+	ReadArgsSchema,
 	TextDeltaUpdateSchema,
 	TurnEndedUpdateSchema,
 } from "@oh-my-pi/pi-catalog/discovery/cursor-gen/agent_pb";
@@ -18,7 +20,8 @@ type Scenario =
 	| { kind: "connect-error-after-turn" }
 	| { kind: "grpc-trailer-after-turn" }
 	| { kind: "end-before-turn" }
-	| { kind: "hang-after-turn" };
+	| { kind: "hang-after-turn" }
+	| { kind: "exec-in-final-chunk"; responseFinished: PromiseWithResolvers<void> };
 
 let server: http2.Http2Server | undefined;
 const sessions = new Set<http2.Http2Session>();
@@ -67,6 +70,31 @@ function connectEndErrorFrame(code: string, message: string): Buffer {
 	return frameConnectMessage(payload, CONNECT_END_STREAM_FLAG);
 }
 
+/**
+ * A `read` exec request, `turnEnded` and the stream close, all in ONE chunk.
+ *
+ * The provider parses every frame in a chunk synchronously and dispatches each
+ * `handleServerMessage` fire-and-forget, so the exec handler is still running
+ * when the transport completes. Without a barrier before `done`, the Agent
+ * drains its Cursor result buffer first and the call is never paired.
+ */
+function execAndTurnEndedFrame(): Buffer {
+	const message = create(AgentServerMessageSchema, {
+		message: {
+			case: "execServerMessage",
+			value: create(ExecServerMessageSchema, {
+				id: 1,
+				execId: "exec-final",
+				message: {
+					case: "readArgs",
+					value: create(ReadArgsSchema, { path: "/tmp/final", toolCallId: "call-final" }),
+				},
+			}),
+		},
+	});
+	return Buffer.concat([frameConnectMessage(toBinary(AgentServerMessageSchema, message)), turnEndedFrame()]);
+}
+
 async function startServer(): Promise<string> {
 	server = http2.createServer();
 	server.on("session", session => {
@@ -109,6 +137,16 @@ async function startServer(): Promise<string> {
 
 		if (scenario.kind === "end-before-turn") {
 			stream.write(textDeltaFrame("partial"));
+			stream.end();
+			return;
+		}
+
+		if (scenario.kind === "exec-in-final-chunk") {
+			const { responseFinished } = scenario;
+			// Resolves once the server has flushed the whole response, so the test
+			// never guesses at timing.
+			stream.on("finish", () => responseFinished.resolve());
+			stream.write(execAndTurnEndedFrame());
 			stream.end();
 			return;
 		}
@@ -253,5 +291,69 @@ describe("Cursor terminal lifecycle after turnEnded", () => {
 		expect(eventTypes.at(-1)).toBe("error");
 		expect(eventTypes).not.toContain("done");
 		expect(result.stopReason).toBe("aborted");
+	});
+
+	it("waits for an exec handler decoded from the final chunk before done", async () => {
+		// The provider dispatches every decoded message fire-and-forget so the
+		// socket keeps draining. When the exec request, `turnEnded` and the close
+		// arrive in ONE chunk, the transport completes while the handler is still
+		// running. `done` must not be pushed first: the Agent drains its Cursor
+		// result buffer on the terminal event, so a result reserved afterwards
+		// misses the drain and the synthesized (already resolved) toolCall block
+		// is stripped from every rebuilt transcript as dangling.
+		//
+		// No wall-clock delay. The handler is released only after the server has
+		// flushed its whole response AND the handler is known to be running, so
+		// the transport has genuinely completed while the handler is in flight.
+		const responseFinished = Promise.withResolvers<void>();
+		scenario = { kind: "exec-in-final-chunk", responseFinished };
+		const baseUrl = await startServer();
+		const paired: string[] = [];
+		const handlerStarted = Promise.withResolvers<void>();
+		const handlerDone = Promise.withResolvers<void>();
+		const stream = streamCursor(makeModel(baseUrl), context, {
+			apiKey: "test-token",
+			execHandlers: {
+				async read() {
+					handlerStarted.resolve();
+					await handlerDone.promise;
+					return {
+						role: "toolResult",
+						toolCallId: "call-final",
+						toolName: "read",
+						content: [{ type: "text", text: "file body" }],
+						isError: false,
+						timestamp: 1,
+					};
+				},
+			},
+			onToolResult: result => {
+				paired.push(result.toolCallId);
+				return result;
+			},
+		});
+
+		const gate = (async () => {
+			await Promise.all([handlerStarted.promise, responseFinished.promise]);
+			// `finish` means the server flushed its bytes, not that the client has
+			// processed the end. Yield so the client's `end` handler and every
+			// queued continuation run first: a provider that does not await the
+			// handler settles the stream in exactly that window.
+			await Bun.sleep(0);
+			expect(stream.resultSettled).toBe(false);
+			expect(paired).toEqual([]);
+			handlerDone.resolve();
+		})();
+
+		const eventTypes: string[] = [];
+		for await (const event of stream) {
+			// The result must already be paired by the time `done` is observed.
+			if (event.type === "done") expect(paired).toEqual(["call-final"]);
+			eventTypes.push(event.type);
+		}
+		await gate;
+
+		expect(eventTypes).toContain("done");
+		expect(paired).toEqual(["call-final"]);
 	});
 });
