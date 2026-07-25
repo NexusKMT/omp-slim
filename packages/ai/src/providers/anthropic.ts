@@ -130,6 +130,22 @@ export function buildBetaHeader(baseBetas: readonly string[], extraBetas: readon
 	return result.join(",");
 }
 
+/**
+ * Merge an extra Anthropic beta into a caller-provided `anthropic-beta` header,
+ * preserving the caller's key casing and deduping the tokens. Returns a
+ * single-entry header record for a per-request `headers` override — used to
+ * attach a required beta to injected SDK clients that bypass the client-level
+ * beta construction.
+ */
+function mergeAnthropicBetaHeader(callerHeaders: Record<string, string>, beta: string): Record<string, string> {
+	for (const key in callerHeaders) {
+		if (key.toLowerCase() === "anthropic-beta") {
+			return { [key]: buildBetaHeader(normalizeExtraBetas(callerHeaders[key]), [beta]) };
+		}
+	}
+	return { "anthropic-beta": beta };
+}
+
 const midConversationSystemBeta = "mid-conversation-system-2026-04-07";
 const contextManagementBeta = "context-management-2025-06-27";
 const structuredOutputsBeta = "structured-outputs-2025-12-15";
@@ -2064,10 +2080,27 @@ const streamAnthropicOnce = (
 				// to zero even when no watchdog timeout is configured (the helper only
 				// pins it alongside a timeout; a client retry budget of 5 would otherwise
 				// multiply with PROVIDER_MAX_RETRIES into up to 66 wire attempts).
+				// Injected SDK clients (`options.client`) bypass the client-level
+				// `anthropic-beta` construction below, so any `output_config.effort` the
+				// body carries — the adaptive-only thinking-off / forced-tool pins and
+				// enabled-effort turns alike — would reach Anthropic without the required
+				// `effort-2025-11-24` beta and 400. `create()` accepts per-request headers
+				// (already used for the gateway web-search header), so merge the beta with
+				// any caller-provided `anthropic-beta` (deduped) and attach it there. Vertex
+				// never carries the effort field (dropped in buildParams), so it is unaffected.
+				const injectedClientEffortHeaders =
+					options?.client !== undefined &&
+					(params.output_config as AnthropicOutputConfig | undefined)?.effort !== undefined
+						? mergeAnthropicBetaHeader(mergedCallerHeaders, effortBeta)
+						: undefined;
+				const perRequestHeaders =
+					umansGatewayWebSearchHeader || injectedClientEffortHeaders
+						? { ...umansGatewayWebSearchHeader, ...injectedClientEffortHeaders }
+						: undefined;
 				const requestOptions = {
 					...createSdkStreamRequestOptions(requestSignal, requestTimeoutMs),
 					maxRetries: 0,
-					...(umansGatewayWebSearchHeader ? { headers: umansGatewayWebSearchHeader } : {}),
+					...(perRequestHeaders ? { headers: perRequestHeaders } : {}),
 				};
 				const anthropicRequest: unknown =
 					isOAuthToken && client.beta
@@ -2963,7 +2996,6 @@ function createClient(
 function disableThinkingIfToolChoiceForced(
 	params: MessageCreateParamsStreaming,
 	model: Model<"anthropic-messages">,
-	canDeliverEffortBeta: boolean,
 ): void {
 	const toolChoice = params.tool_choice;
 	if (!toolChoice) return;
@@ -2975,12 +3007,12 @@ function disableThinkingIfToolChoiceForced(
 	// Adaptive-only models can't be switched off by omitting `thinking` — a bare
 	// omission defaults to adaptive thinking ON, so a forced-tool turn would still
 	// reason instead of calling the tool (#6589). Pin the lowest adaptive effort
-	// instead of dropping it, mirroring the disable branch in buildParams. The pin
-	// only lands when the effort beta can ride along: Vertex rawPredict needs it in
-	// the body (dropped here too, see buildParams) and injected SDK clients own
-	// their own headers, so both fall back to the delete behavior rather than
-	// shipping `output_config.effort` the API would 400 without the beta.
-	if (isAdaptiveOnlyThinking(model) && model.provider !== "google-vertex" && canDeliverEffortBeta) {
+	// instead of dropping it, mirroring the disable branch in buildParams. Vertex
+	// rawPredict is the sole exception: it can only carry the effort beta in the
+	// body (dropped there too, see buildParams), so it keeps the delete behavior.
+	// The effort beta itself is attached at the request site — including per-request
+	// for injected SDK clients that bypass client-level beta construction.
+	if (isAdaptiveOnlyThinking(model) && model.provider !== "google-vertex") {
 		const outputConfig = (params.output_config as AnthropicOutputConfig | undefined) ?? {};
 		outputConfig.effort = "low";
 		params.output_config = outputConfig;
@@ -3394,10 +3426,9 @@ function buildParams(
 				// Omit the thinking field (the API defaults to adaptive) and pin the
 				// lowest effort so "thinking off" calls stay cheap instead of failing
 				// the request with a 400 (a hidden-thinking toggle must never break it).
-				// Injected SDK clients own their headers and can't receive the effort
-				// beta this code would otherwise attach, so omit the pin for them —
-				// the request stays valid (adaptive defaults on) instead of 400ing.
-				if (!options?.client) outputConfigEffort = "low";
+				// The effort field requires the `effort-2025-11-24` beta; it is attached
+				// at the request site, including per-request for injected SDK clients.
+				outputConfigEffort = "low";
 			} else {
 				thinking = { type: "disabled" };
 			}
@@ -3518,7 +3549,7 @@ function buildParams(
 		}
 	}
 
-	disableThinkingIfToolChoiceForced(params, model, !options?.client);
+	disableThinkingIfToolChoiceForced(params, model);
 	ensureMaxTokensForThinking(params, maxOutputTokens);
 	applyPromptCaching(params, cacheControl);
 	enforceCacheControlLimit(params, 4);

@@ -21,6 +21,7 @@ import {
 	streamAnthropic,
 	stripClaudeToolPrefix,
 } from "@oh-my-pi/pi-ai/providers/anthropic";
+import type { MessageCreateParamsStreaming } from "@oh-my-pi/pi-ai/providers/anthropic-wire";
 import { getEnvApiKey, streamSimple } from "@oh-my-pi/pi-ai/stream";
 import type {
 	AssistantMessage,
@@ -472,11 +473,11 @@ describe("Anthropic request fingerprint alignment", () => {
 		expect(capturedBeta).toContain("effort-2025-11-24");
 	});
 
-	it("omits the adaptive effort pin for injected clients on forced tool choice (can't carry the effort beta)", async () => {
-		// Injected SDK clients own their headers, so this code can't attach the
-		// effort beta. Shipping output_config.effort without it would 400 an
-		// otherwise ordinary forced-tool request (#6590 review) — omit the pin
-		// instead, keeping the request valid.
+	it("attaches the effort beta per-request for injected clients on forced tool choice", async () => {
+		// Injected SDK clients bypass client-level `anthropic-beta` construction, so
+		// the forced-tool effort pin's required beta must ride the per-request headers
+		// instead of being dropped (#6590 review) — otherwise Anthropic 400s the
+		// otherwise valid forced-tool request.
 		const adaptiveModel: Model<"anthropic-messages"> = buildModel({
 			...ANTHROPIC_MODEL_SPEC,
 			id: "claude-opus-4-8-20260528",
@@ -486,11 +487,9 @@ describe("Anthropic request fingerprint alignment", () => {
 				efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
 			},
 		});
-		const injectedClient = {
-			messages: { create: () => (async function* () {})() },
-		};
-		const { promise, resolve } = Promise.withResolvers<unknown>();
-		streamAnthropic(
+		let capturedParams: MessageCreateParamsStreaming | undefined;
+		let capturedOptions: { headers?: Record<string, string> } | undefined;
+		await streamAnthropic(
 			adaptiveModel,
 			{
 				systemPrompt: ["Stay concise."],
@@ -505,21 +504,25 @@ describe("Anthropic request fingerprint alignment", () => {
 			},
 			{
 				apiKey: "sk-ant-api-test",
-				signal: createAbortedSignal(),
 				toolChoice: "any",
-				client: injectedClient,
-				onPayload: payload => resolve(payload),
+				client: {
+					messages: {
+						create: (params, requestOptions) => {
+							capturedParams = params;
+							capturedOptions = requestOptions as { headers?: Record<string, string> } | undefined;
+							throw new Error("stop-after-capture");
+						},
+					},
+				},
 			},
-		);
-		const payload = (await promise) as {
-			thinking?: unknown;
-			output_config?: unknown;
-			tool_choice?: { type?: string };
-		};
+		)
+			.result()
+			.catch(() => undefined);
 
-		expect(payload.tool_choice).toEqual({ type: "any" });
-		expect(payload.thinking).toBeUndefined();
-		expect(payload.output_config).toBeUndefined();
+		expect(capturedParams?.tool_choice).toEqual({ type: "any" });
+		expect(capturedParams?.thinking).toBeUndefined();
+		expect(capturedParams?.output_config).toEqual({ effort: "low" });
+		expect(capturedOptions?.headers?.["anthropic-beta"] ?? "").toContain("effort-2025-11-24");
 	});
 
 	it("adds the extended-cache-ttl beta to API-key requests that default to 1h caching", async () => {
