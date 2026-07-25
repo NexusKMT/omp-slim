@@ -425,10 +425,11 @@ export class CursorExecHandlers implements ICursorExecHandlers {
 	 *   erasing the interaction from every rebuilt transcript.
 	 *
 	 * A `null` snapshot means nothing may be mirrored — a server `error`, or a
-	 * benign refusal such as a filtered or truncated read. Local state is left
-	 * untouched, and the result carries no `details`: `event-controller` feeds
-	 * `details.phases` straight into `setTodos`, so echoing the current list
-	 * back would let a call that changed nothing overwrite live UI state.
+	 * benign refusal: a filtered or truncated read, or a snapshot the local model
+	 * cannot represent. Local state is left untouched, and the result carries no
+	 * `details`: `event-controller` feeds `details.phases` straight into
+	 * `setTodos`, so echoing the current list back would let a call that changed
+	 * nothing overwrite live UI state.
 	 */
 	todoSync(snapshot: CursorTodoSnapshot | null, toolCallId: string, error: string | null = null): ToolResultMessage {
 		const setPhases = this.options.setTodoPhases;

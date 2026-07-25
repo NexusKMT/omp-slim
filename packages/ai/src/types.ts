@@ -931,8 +931,9 @@ export interface CursorTodoSnapshot {
  * refused or failed call that stayed silent would animate forever.
  *
  * `snapshot` is the server-confirmed list, or `null` when there is nothing to
- * mirror — a server error (`error` set) or a benign refusal such as a filtered
- * or truncated read (`error` null). Local state MUST be left untouched unless a
+ * mirror — a server error (`error` set), or a benign refusal with `error` null:
+ * a filtered or truncated read, or a snapshot the local model cannot represent
+ * (two rows sharing content). Local state MUST be left untouched unless a
  * snapshot is supplied.
  *
  * `toolCallId` is the id of the streamed native call, which is also the key the

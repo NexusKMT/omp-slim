@@ -2169,10 +2169,11 @@ function extractTodoSnapshot(toolCall: CursorTodoToolCall): CursorTodoSnapshot |
 /**
  * Error text when the server itself rejected the call.
  *
- * Distinct from {@link extractTodoSnapshot} returning `null`: a filtered or
- * truncated read is a benign refusal (the call succeeded, we just decline to
- * treat a subset as the list), whereas an `UpdateTodosError` / `ReadTodosError`
- * is a real failure that must not replay as a successful no-op.
+ * Distinct from {@link extractTodoSnapshot} returning `null`: a filtered read, a
+ * truncated one, or a snapshot the local model cannot represent are all benign
+ * refusals (the call succeeded, we just decline to mirror it), whereas an
+ * `UpdateTodosError` / `ReadTodosError` is a real failure that must not replay
+ * as a successful no-op.
  */
 function extractTodoError(toolCall: CursorTodoToolCall): string | null {
 	const { update, read } = selectTodoCalls(toolCall);
@@ -2200,9 +2201,10 @@ function buildTodoDisplayArgs(toolCall: CursorTodoToolCall): { todos: CursorTodo
  * transcript.
  *
  * Three outcomes, kept distinct: a server error replays as a failure, a benign
- * refusal (filtered/truncated read) replays as a successful no-op, and a
- * settled snapshot replays as its summary. Collapsing the first into the second
- * would hide the failure and let downstream lifecycle logic treat it as success.
+ * refusal (a filtered or truncated read, or a snapshot the local model cannot
+ * represent) replays as a successful no-op, and a settled snapshot replays as
+ * its summary. Collapsing the first into the second would hide the failure and
+ * let downstream lifecycle logic treat it as success.
  */
 function buildTodoToolResult(
 	toolCallId: string,
