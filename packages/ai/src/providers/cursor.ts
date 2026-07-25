@@ -117,6 +117,7 @@ import type {
 	Context,
 	CursorExecHandlerResult,
 	CursorExecHandlers,
+	CursorExecPairing,
 	CursorMcpCall,
 	CursorShellStreamCallbacks,
 	CursorTodoSnapshot,
@@ -963,6 +964,7 @@ async function handleShellStreamArgs(
 			buildShellRejectedResult((normalizedArgs as any).command, (normalizedArgs as any).workingDirectory, reason),
 		error =>
 			buildShellFailureResult((normalizedArgs as any).command, (normalizedArgs as any).workingDirectory, error),
+		{ toolCallId: args.toolCallId, toolName: "bash" },
 	);
 
 	// When using the batch handler (no shellStream), send buffered stdout/stderr
@@ -1145,6 +1147,7 @@ async function handleExecServerMessage(
 				toolResult => buildReadResultFromToolResult(args.path, toolResult),
 				reason => buildReadRejectedResult(args.path, reason),
 				error => buildReadErrorResult(args.path, error),
+				{ toolCallId: args.toolCallId, toolName: "read" },
 			);
 			sendExecClientMessage(h2Request, execMsg, "readResult", execResult);
 			return;
@@ -1163,6 +1166,7 @@ async function handleExecServerMessage(
 				toolResult => buildLsResultFromToolResult(args.path, toolResult),
 				reason => buildLsRejectedResult(args.path, reason),
 				error => buildLsErrorResult(args.path, error),
+				{ toolCallId: args.toolCallId, toolName: "read" },
 			);
 			sendExecClientMessage(h2Request, execMsg, "lsResult", execResult);
 			return;
@@ -1197,6 +1201,7 @@ async function handleExecServerMessage(
 				toolResult => buildGrepResultFromToolResult(args, toolResult),
 				reason => buildGrepErrorResult(reason),
 				error => buildGrepErrorResult(error),
+				{ toolCallId: args.toolCallId, toolName: "grep" },
 			);
 			sendExecClientMessage(h2Request, execMsg, "grepResult", execResult);
 			return;
@@ -1226,6 +1231,7 @@ async function handleExecServerMessage(
 					),
 				reason => buildWriteRejectedResult(args.path, reason),
 				error => buildWriteErrorResult(args.path, error),
+				{ toolCallId: args.toolCallId, toolName: "write" },
 			);
 			sendExecClientMessage(h2Request, execMsg, "writeResult", execResult);
 			return;
@@ -1241,6 +1247,7 @@ async function handleExecServerMessage(
 				toolResult => buildDeleteResultFromToolResult(args.path, toolResult),
 				reason => buildDeleteRejectedResult(args.path, reason),
 				error => buildDeleteErrorResult(args.path, error),
+				{ toolCallId: args.toolCallId, toolName: "delete" },
 			);
 			sendExecClientMessage(h2Request, execMsg, "deleteResult", execResult);
 			return;
@@ -1264,6 +1271,7 @@ async function handleExecServerMessage(
 				toolResult => buildShellResultFromToolResult(normalizedArgs, toolResult),
 				reason => buildShellRejectedResult(normalizedArgs.command, normalizedArgs.workingDirectory, reason),
 				error => buildShellFailureResult(normalizedArgs.command, normalizedArgs.workingDirectory, error),
+				{ toolCallId: args.toolCallId, toolName: "bash" },
 			);
 			const sanitizedExecResult = sanitizeShellExecResult(execResult);
 			sendExecClientMessage(h2Request, execMsg, "shellResult", sanitizedExecResult);
@@ -1339,6 +1347,7 @@ async function handleExecServerMessage(
 				toolResult => buildDiagnosticsResultFromToolResult(args.path, toolResult),
 				reason => buildDiagnosticsRejectedResult(args.path, reason),
 				error => buildDiagnosticsErrorResult(args.path, error),
+				{ toolCallId: args.toolCallId, toolName: "lsp" },
 			);
 			sendExecClientMessage(h2Request, execMsg, "diagnosticsResult", execResult);
 			return;
@@ -1360,6 +1369,7 @@ async function handleExecServerMessage(
 				toolResult => buildMcpResultFromToolResult(mcpCall, toolResult),
 				_reason => buildMcpToolNotFoundResult(mcpCall),
 				error => buildMcpErrorResult(error),
+				{ toolCallId: mcpCall.toolCallId, toolName: mcpCall.toolName },
 			);
 			sendExecClientMessage(h2Request, execMsg, "mcpResult", execResult);
 			return;
@@ -1442,7 +1452,17 @@ function sendExecClientStreamClose(h2Request: http2.ClientHttp2Stream, execMsg: 
 	log("execClientControl", "streamClose", { id: execMsg.id, execId: execMsg.execId });
 }
 
-/** Exported for tests: verifies handler is invoked with correct `this` when passed as bound. */
+/**
+ * Exported for tests: verifies handler is invoked with correct `this` when passed as bound.
+ *
+ * Every exit pairs a `toolResult`. The synthesized block was already marked
+ * `kCursorExecResolved` before this runs (`synthesizeCursorExecToolCall`), so
+ * `agent-loop.ts` emits no placeholder for it: a path that returns without a
+ * result leaves the call unpaired and `buildSessionContext` strips the whole
+ * interaction on replay. The three result-less paths — no handler installed, a
+ * handler that produced nothing, and a thrown handler — therefore synthesize
+ * one from the same text the server sees in `execResult`.
+ */
 export async function resolveExecHandler<TArgs, TResult>(
 	args: TArgs,
 	handler: ((args: TArgs) => Promise<CursorExecHandlerResult<TResult>>) | undefined,
@@ -1450,9 +1470,23 @@ export async function resolveExecHandler<TArgs, TResult>(
 	buildFromToolResult: (toolResult: ToolResultMessage) => TResult,
 	buildRejected: (reason: string) => TResult,
 	buildError: (error: string) => TResult,
+	pairing: CursorExecPairing,
 ): Promise<{ execResult: TResult; toolResult?: ToolResultMessage }> {
+	const pair = async (text: string, isError: boolean): Promise<ToolResultMessage | undefined> => {
+		const synthesized: ToolResultMessage = {
+			role: "toolResult",
+			toolCallId: pairing.toolCallId,
+			toolName: pairing.toolName,
+			content: [{ type: "text", text }],
+			isError,
+			timestamp: Date.now(),
+		};
+		return await applyToolResultHandler(synthesized, onToolResult);
+	};
+
 	if (!handler) {
-		return { execResult: buildRejected("Tool not available") };
+		const reason = "Tool not available";
+		return { execResult: buildRejected(reason), toolResult: await pair(reason, true) };
 	}
 
 	try {
@@ -1461,15 +1495,19 @@ export async function resolveExecHandler<TArgs, TResult>(
 		const finalToolResult = await applyToolResultHandler(toolResult, onToolResult);
 
 		if (execResult) {
-			return { execResult, toolResult: finalToolResult };
+			return {
+				execResult,
+				toolResult: finalToolResult ?? (await pair("Tool produced no transcript result", false)),
+			};
 		}
 		if (finalToolResult) {
 			return { execResult: buildFromToolResult(finalToolResult), toolResult: finalToolResult };
 		}
-		return { execResult: buildRejected("Tool returned no result") };
+		const reason = "Tool returned no result";
+		return { execResult: buildRejected(reason), toolResult: await pair(reason, true) };
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		return { execResult: buildError(message) };
+		return { execResult: buildError(message), toolResult: await pair(message, true) };
 	}
 }
 
@@ -2144,17 +2182,18 @@ function extractTodoSnapshot(toolCall: CursorTodoToolCall): CursorTodoSnapshot |
 	if (!todos) return null;
 	// A response that disagrees with the server's own count is partial; treating
 	// it as the list would drop whatever it left out. This applies to BOTH call
-	// kinds: a size-limited or partial `update_todos` merge response is just as
-	// incomplete as a filtered read, and mirroring it would delete every omitted
-	// local task.
+	// kinds and to the empty case: a size-limited or partial `update_todos`
+	// merge response is just as incomplete as a filtered read, and an empty one
+	// whose `total_count` is nonzero is the most destructive shape of all —
+	// mirroring it would delete every local task at once.
 	//
-	// The empty case splits, because `total_count` is a proto3 scalar and an
-	// unset field arrives as `0`, indistinguishable from a genuine zero. An
-	// empty READ is refused — it cannot be told apart from a filtered response
-	// that matched nothing, and accepting it would wipe local state. An empty
-	// UPDATE is the authoritative clear path and still syncs.
+	// `total_count` is a proto3 scalar, so an unset field arrives as `0`. That
+	// makes `todos=[]` + `total_count=0` ambiguous: a genuine clear, or a
+	// filtered read that matched nothing with the count omitted. An empty READ
+	// is therefore refused outright, while an empty UPDATE with a matching zero
+	// count remains the authoritative clear path.
 	const totalCount = result.value?.totalCount;
-	if (typeof totalCount === "number" && todos.length > 0 && totalCount !== todos.length) {
+	if (typeof totalCount === "number" && totalCount !== todos.length) {
 		return null;
 	}
 	if (read && todos.length === 0) {
@@ -2575,13 +2614,19 @@ export function processInteractionUpdate(
 					state.currentToolCall.arguments as Record<string, unknown> | undefined,
 					decodedArgs,
 				);
-			} else if (state.currentToolCall[kStreamingBlockKind] === "todo" && toolCall) {
+			} else if (state.currentToolCall[kStreamingBlockKind] === "todo") {
 				// Only the server's success snapshot is authoritative: the request args
 				// may differ from what was actually stored after a merge, and on
 				// `UpdateTodosError` nothing was stored at all. No snapshot => leave
 				// both the rendered args and local session state untouched.
-				const snapshot = extractTodoSnapshot(toolCall);
-				const error = extractTodoError(toolCall);
+				//
+				// A completion frame whose optional `toolCall` is absent carries
+				// neither, but must still settle: the block is already marked
+				// `kCursorExecResolved`, so `agent-loop.ts` emits no placeholder for
+				// it and an unpaired call is stripped from every rebuilt transcript.
+				// It reads as "nothing to mirror", the same as a refused snapshot.
+				const snapshot = toolCall ? extractTodoSnapshot(toolCall) : null;
+				const error = toolCall ? extractTodoError(toolCall) : null;
 				if (snapshot) {
 					state.currentToolCall.arguments = { todos: snapshot.todos, merged: snapshot.merged };
 				}

@@ -383,7 +383,9 @@ describe("cursor native todo bridge", () => {
  * production ever sees.
  */
 describe("cursor native todo bridge (wire-encoded protobuf)", () => {
-	function wireUpdate(kind: "toolCallStarted" | "toolCallCompleted", toolCall: ToolCall): unknown {
+	function wireUpdate(kind: "toolCallStarted" | "toolCallCompleted", toolCall?: ToolCall): unknown {
+		// `toolCall` is optional on the wire: omitting it exercises a completion
+		// frame that carries no result at all.
 		const value =
 			kind === "toolCallStarted"
 				? create(ToolCallStartedUpdateSchema, { callId: "call-1", toolCall })
@@ -552,6 +554,44 @@ describe("cursor native todo bridge (wire-encoded protobuf)", () => {
 		const h = drive(updateCall([], 0));
 
 		expect(h.snapshots).toEqual([{ todos: [], merged: false }]);
+	});
+
+	it("refuses an empty update_todos whose total_count is nonzero", () => {
+		// The most destructive shape: an empty partial/size-limited merge response
+		// that still reports rows. Accepting it as an authoritative clear would
+		// delete every local task at once. Only a matching zero count is a clear.
+		const h = drive(updateCall([], 3));
+
+		expect(todoBlocks(h)).toHaveLength(1);
+		expect(h.snapshots).toEqual([]);
+		expect(h.syncCalls).toEqual([{ snapshot: null, toolCallId: todoBlocks(h)[0].id, error: null }]);
+	});
+
+	it("settles a completion frame that carries no toolCall at all", () => {
+		// `ToolCallCompletedUpdate.tool_call` is optional. The started frame has
+		// already marked the block `kCursorExecResolved`, so `agent-loop.ts` emits
+		// no placeholder result for it — staying silent here would leave the call
+		// unpaired and `buildSessionContext` would strip the whole interaction
+		// from every rebuilt transcript.
+		const h = newHarness();
+		const toolCall = updateCall(items([["1", "step one", 2]]), 1);
+		processInteractionUpdate(
+			wireUpdate("toolCallStarted", toolCall) as never,
+			h.output,
+			h.stream,
+			h.state,
+			h.usageState,
+		);
+		processInteractionUpdate(wireUpdate("toolCallCompleted") as never, h.output, h.stream, h.state, h.usageState);
+
+		const callId = todoBlocks(h)[0].id;
+		expect(todoBlocks(h)).toHaveLength(1);
+		// Nothing to mirror: no snapshot and no server error.
+		expect(h.snapshots).toEqual([]);
+		expect(h.syncCalls).toEqual([{ snapshot: null, toolCallId: callId, error: null }]);
+		// But it IS paired, so the block survives a rebuild.
+		expect(h.toolResults.map(r => r.toolCallId)).toEqual([callId]);
+		expect(h.toolResults[0]).toMatchObject({ role: "toolResult", toolName: "todo", isError: false });
 	});
 
 	it("refuses a snapshot carrying a row with empty content", () => {

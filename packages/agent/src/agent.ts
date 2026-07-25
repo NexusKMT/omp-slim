@@ -1143,43 +1143,51 @@ export class Agent {
 			tools: this.#state.tools,
 		};
 
-		const cursorOnToolResult =
-			this.#cursorExecHandlers || this.#cursorOnToolResult
-				? async (message: ToolResultMessage) => {
-						// Cursor executes tools server-side during streaming. We buffer
-						// each toolResult and emit them right after the assistant message
-						// closes (see `#emitCursorSplitAssistantMessage`), so replay
-						// receives (assistant with interleaved toolCall blocks) → results.
-						//
-						// The entry is reserved SYNCHRONOUSLY, before awaiting the
-						// optional transformer. The provider's data loop dispatches
-						// messages with `void handleServerMessage(...)`, so a `message_end`
-						// decoded from the same chunk can drain the buffer while a
-						// transformer is still pending — pushing afterwards would drop the
-						// result and strip its toolCall block as dangling on replay.
-						//
-						// The transformer's in-flight promise is recorded on the entry so
-						// the drain can await it (`#emitCursorSplitAssistantMessage`).
-						// Without that, a transformer resolving after the swap would patch
-						// a detached object while the persisted result kept the original
-						// payload — the rewrite silently lost.
-						const entry: CursorToolResultEntry = { toolResult: message };
-						this.#cursorToolResultBuffer.push(entry);
-						const transform = this.#cursorOnToolResult;
-						if (transform) {
-							const pending = (async () => {
-								try {
-									const updated = await transform(message);
-									if (updated) entry.toolResult = updated;
-								} catch {}
-							})();
-							entry.pending = pending;
-							await pending;
-							entry.pending = undefined;
-						}
-						return entry.toolResult;
-					}
-				: undefined;
+		// Installed unconditionally. Both `cursorExecHandlers` and
+		// `cursorOnToolResult` are optional, but the Cursor provider resolves
+		// native todo calls server-side and synthesizes exec blocks regardless,
+		// marking both `kCursorExecResolved` — `agent-loop.ts` then emits no
+		// placeholder result for them. The provider always offers a paired result
+		// for those blocks (its todo fallback, and every `resolveExecHandler`
+		// exit including the no-handler one), but only through this sink: without
+		// it the result is dropped on the floor, the assistant block is left
+		// unpaired, and `buildSessionContext` strips the whole interaction on
+		// replay. A non-Cursor provider never calls this, so the closure costs
+		// nothing.
+		const cursorOnToolResult = async (message: ToolResultMessage) => {
+			// Cursor executes tools server-side during streaming. We buffer each
+			// toolResult and emit them right after the assistant message closes
+			// (see `#emitCursorSplitAssistantMessage`), so replay receives
+			// (assistant with interleaved toolCall blocks) → results.
+			//
+			// The entry is reserved SYNCHRONOUSLY, before awaiting the optional
+			// transformer. The provider's data loop dispatches messages with
+			// `void handleServerMessage(...)`, so a `message_end` decoded from the
+			// same chunk can drain the buffer while a transformer is still pending
+			// — pushing afterwards would drop the result and strip its toolCall
+			// block as dangling on replay.
+			//
+			// The transformer's in-flight promise is recorded on the entry so the
+			// drain can await it (`#emitCursorSplitAssistantMessage`). Without
+			// that, a transformer resolving after the swap would patch a detached
+			// object while the persisted result kept the original payload — the
+			// rewrite silently lost.
+			const entry: CursorToolResultEntry = { toolResult: message };
+			this.#cursorToolResultBuffer.push(entry);
+			const transform = this.#cursorOnToolResult;
+			if (transform) {
+				const pending = (async () => {
+					try {
+						const updated = await transform(message);
+						if (updated) entry.toolResult = updated;
+					} catch {}
+				})();
+				entry.pending = pending;
+				await pending;
+				entry.pending = undefined;
+			}
+			return entry.toolResult;
+		};
 
 		const getToolChoice = (): ToolChoiceDirective | undefined => {
 			const queued = this.#getToolChoice?.();

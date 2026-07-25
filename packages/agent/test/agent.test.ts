@@ -336,6 +336,51 @@ describe("Agent", () => {
 		});
 	});
 
+	it("buffers a Cursor result even with neither exec handlers nor a transformer", async () => {
+		// Both options are optional, but the Cursor provider resolves its native
+		// tools server-side regardless and marks those blocks
+		// `kCursorExecResolved`, so `agent-loop.ts` emits no placeholder for them.
+		// Without a result sink the provider's own fallback result is dropped and
+		// the assistant block is left unpaired — `buildSessionContext` then strips
+		// the whole interaction on replay.
+		const mock = createMockModel({ responses: [] });
+		const toolCall = {
+			type: "toolCall" as const,
+			id: "cursor-tool-bare",
+			name: "todo",
+			arguments: { todos: [] },
+			[kCursorExecResolved]: true,
+		};
+		const started = createAssistantMessage([toolCall]);
+		const realToolResult: ToolResultMessage = {
+			role: "toolResult",
+			toolCallId: toolCall.id,
+			toolName: toolCall.name,
+			content: [{ type: "text", text: "Todo snapshot not mirrored" }],
+			isError: false,
+			timestamp: Date.now(),
+		};
+		// No `cursorExecHandlers`, no `cursorOnToolResult` — a bare SDK host.
+		const agent = new Agent({
+			initialState: { model: mock.model, systemPrompt: ["Test"], tools: [], messages: [] },
+			streamFn: (_model, _context, options) => {
+				const stream = new AssistantMessageEventStream();
+				queueMicrotask(() => {
+					void options?.cursorOnToolResult?.(realToolResult);
+					stream.push({ type: "start", partial: started });
+					stream.push({ type: "done", reason: "stop", message: started });
+				});
+				return stream;
+			},
+		});
+
+		await agent.prompt("trigger");
+
+		const toolResults = agent.state.messages.filter(message => message.role === "toolResult");
+		expect(toolResults).toHaveLength(1);
+		expect(toolResults[0]).toMatchObject({ toolCallId: toolCall.id, toolName: toolCall.name });
+	});
+
 	it("keeps the reserved result when the transformer rejects", async () => {
 		// `cursorOnToolResult` is a supported option returning a Promise, and the
 		// provider dispatches decoded messages with `void handleServerMessage(...)`.

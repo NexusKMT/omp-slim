@@ -915,6 +915,15 @@ export type CursorToolResultHandler = (
 	result: ToolResultMessage,
 ) => ToolResultMessage | undefined | Promise<ToolResultMessage | undefined>;
 
+/**
+ * Identifies the synthesized assistant block a Cursor exec call was filed
+ * under, so paths that produce no handler `toolResult` can still pair one.
+ */
+export interface CursorExecPairing {
+	toolCallId: string;
+	toolName: string;
+}
+
 export interface CursorMcpCall {
 	name: string;
 	providerIdentifier: string;
