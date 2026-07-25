@@ -42,6 +42,7 @@ import type { SessionOAuthAccountList } from "../session/agent-session-types";
 import { COMPACT_MODES, parseCompactArgs } from "../session/compact-modes";
 import { resolveResumableSession } from "../session/session-listing";
 import { formatShakeSummary, type ShakeMode } from "../session/shake-types";
+import type { ComputerTool } from "../tools/computer";
 import { computerExposureMode } from "../tools/computer/exposure";
 import { expandTilde, resolveToCwd } from "../tools/path-utils";
 import { urlHyperlinkAlways } from "../tui";
@@ -104,12 +105,30 @@ function formatComputerUseStatus(session: AgentSession): string {
 	const modelName = model ? formatModelString(model) : "none";
 	const exposure = !enabled || !active ? "not exposed" : computerExposureMode(model);
 	const toolState = active ? "active" : enabled ? "unavailable" : "inactive";
+	const configured = {
+		backend: session.settings.get("computer.backend"),
+		display: session.settings.get("computer.display"),
+		maxWidth: session.settings.get("computer.maxWidth"),
+		maxHeight: session.settings.get("computer.maxHeight"),
+	};
+	const computerTool = session.getToolByName("computer") as Pick<ComputerTool, "effectiveConfiguration"> | undefined;
+	const effective = computerTool?.effectiveConfiguration ?? configured;
+	const configurationChanged =
+		effective.backend !== configured.backend ||
+		effective.display !== configured.display ||
+		effective.maxWidth !== configured.maxWidth ||
+		effective.maxHeight !== configured.maxHeight;
 	return [
 		`Computer use: ${enabled ? "enabled" : "disabled"}`,
 		`tool: ${toolState}`,
-		`backend: ${session.settings.get("computer.backend")}`,
-		`display: ${session.settings.get("computer.display")}`,
-		`capture: ${session.settings.get("computer.maxWidth")}×${session.settings.get("computer.maxHeight")}`,
+		`backend: ${effective.backend}`,
+		`display: ${effective.display}`,
+		`capture: ${effective.maxWidth}×${effective.maxHeight}`,
+		...(configurationChanged
+			? [
+					`next-session settings: backend=${configured.backend}, display=${configured.display}, capture=${configured.maxWidth}×${configured.maxHeight}`,
+				]
+			: []),
 		`model: ${modelName}`,
 		`exposure: ${exposure}`,
 	].join(" · ");

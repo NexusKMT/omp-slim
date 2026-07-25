@@ -22,7 +22,11 @@ import { sanitizeOpenAIResponsesHistoryItemsForReplay } from "@oh-my-pi/pi-ai/ut
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { type } from "arktype";
 
-function model<TApi extends "openai-responses" | "openai-codex-responses">(api: TApi, id = "gpt-5.4"): Model<TApi> {
+function model<TApi extends "openai-responses" | "openai-codex-responses">(
+	api: TApi,
+	id = "gpt-5.4",
+	supportsComputerUse?: boolean,
+): Model<TApi> {
 	return buildModel({
 		id,
 		name: id,
@@ -34,6 +38,7 @@ function model<TApi extends "openai-responses" | "openai-codex-responses">(api: 
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 400_000,
 		maxTokens: 128_000,
+		...(supportsComputerUse !== undefined ? { supportsComputerUse } : {}),
 	} as ModelSpec<TApi>);
 }
 
@@ -161,10 +166,7 @@ describe("OpenAI GA computer contract", () => {
 	});
 
 	test("preserves an explicit future Codex native opt-in through regular and Lite requests", async () => {
-		const optedIn = buildModel({
-			...model("openai-codex-responses", "gpt-5.6-terra"),
-			supportsComputerUse: true,
-		} as ModelSpec<"openai-codex-responses">);
+		const optedIn = model("openai-codex-responses", "gpt-5.6-terra", true);
 		const context: Context = {
 			messages: [{ role: "user", content: "capture", timestamp: 1 }],
 			tools: [computerTool],
@@ -188,10 +190,7 @@ describe("OpenAI GA computer contract", () => {
 		expect(lite.tool_choice).toBe("required");
 	});
 	test("pairs in-memory computer results for an explicit Codex native opt-in", () => {
-		const optedIn = buildModel({
-			...model("openai-codex-responses", "gpt-5.6-terra"),
-			supportsComputerUse: true,
-		} as ModelSpec<"openai-codex-responses">);
+		const optedIn = model("openai-codex-responses", "gpt-5.6-terra", true);
 		const call = assistant([
 			{
 				type: "toolCall",

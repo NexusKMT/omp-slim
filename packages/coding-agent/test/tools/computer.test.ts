@@ -549,6 +549,16 @@ describe("computer tool", () => {
 			receivedOptions = options;
 			return controller;
 		});
+		expect(tool.effectiveConfiguration).toEqual({
+			backend: "native",
+			display: "display-1",
+			maxWidth: 1600,
+			maxHeight: 900,
+		});
+		expect(Object.isFrozen(tool.effectiveConfiguration)).toBe(true);
+		settings.override("computer.display", "all");
+		settings.override("computer.maxWidth", 1920);
+		expect(tool.effectiveConfiguration).toMatchObject({ display: "display-1", maxWidth: 1600 });
 		const actions: ComputerAction[] = [
 			{ type: "click", x: 11, y: 22, button: "right", keys: ["SHIFT"] },
 			{ type: "double_click", x: 30, y: 40, keys: null },

@@ -357,6 +357,8 @@ export class ComputerTool implements AgentTool<typeof computerSchema, ComputerTo
 		const actions = args && typeof args === "object" ? (args as { actions?: unknown }).actions : undefined;
 		return approvalActionSummary(actions);
 	};
+	/** Immutable settings snapshot used to create this tool's reusable controller. */
+	readonly effectiveConfiguration: Readonly<DesktopSessionOptions>;
 	readonly #controller: ComputerController;
 	readonly #unregisterOwner: () => void;
 	#closed = false;
@@ -366,12 +368,13 @@ export class ComputerTool implements AgentTool<typeof computerSchema, ComputerTo
 		readonly session: ToolSession,
 		createController: ComputerControllerFactory = options => new ComputerSupervisor(options),
 	) {
-		this.#controller = createController({
+		this.effectiveConfiguration = Object.freeze({
 			backend: session.settings.get("computer.backend"),
 			display: session.settings.get("computer.display"),
 			maxWidth: session.settings.get("computer.maxWidth"),
 			maxHeight: session.settings.get("computer.maxHeight"),
 		});
+		this.#controller = createController(this.effectiveConfiguration);
 		this.#unregisterOwner = registerComputerController(
 			session.getEvalKernelOwnerId?.() ?? undefined,
 			this.#controller,

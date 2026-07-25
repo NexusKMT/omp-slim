@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "bun:test";
 import { executeAcpBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/acp-builtins";
 import type { SlashCommandRuntime } from "@oh-my-pi/pi-coding-agent/slash-commands/types";
+import type { DesktopSessionOptions } from "@oh-my-pi/pi-natives";
 
 function acpRuntime(options?: {
 	enabled?: boolean;
@@ -20,8 +21,29 @@ function acpRuntime(options?: {
 		if (path === "computer.enabled") store[path] = value;
 	});
 	const set = vi.fn();
-	const setComputerToolEnabled = vi.fn(async () => options?.applyResult ?? true);
+	let controllerConfiguration: Readonly<DesktopSessionOptions> | undefined = options?.enabled
+		? {
+				backend: store["computer.backend"],
+				display: store["computer.display"],
+				maxWidth: store["computer.maxWidth"],
+				maxHeight: store["computer.maxHeight"],
+			}
+		: undefined;
+	const setComputerToolEnabled = vi.fn(async (enabled: boolean) => {
+		if (enabled && !controllerConfiguration) {
+			controllerConfiguration = {
+				backend: store["computer.backend"],
+				display: store["computer.display"],
+				maxWidth: store["computer.maxWidth"],
+				maxHeight: store["computer.maxHeight"],
+			};
+		}
+		return options?.applyResult ?? true;
+	});
 	const getEnabledToolNames = vi.fn(() => (store["computer.enabled"] ? ["computer"] : []));
+	const getToolByName = vi.fn(() =>
+		controllerConfiguration ? { name: "computer", effectiveConfiguration: controllerConfiguration } : undefined,
+	);
 	const output = vi.fn();
 	const model = options?.codex
 		? {
@@ -42,10 +64,11 @@ function acpRuntime(options?: {
 			setComputerToolEnabled,
 			getEnabledToolNames,
 			model,
+			getToolByName,
 		},
 		output,
 	} as unknown as SlashCommandRuntime;
-	return { get, override, set, setComputerToolEnabled, getEnabledToolNames, output, runtime };
+	return { get, override, set, setComputerToolEnabled, getEnabledToolNames, getToolByName, output, runtime, store };
 }
 
 describe("/computer slash command", () => {
@@ -94,6 +117,19 @@ describe("/computer slash command", () => {
 		expect(h.override).not.toHaveBeenCalled();
 		expect(h.output).toHaveBeenCalledWith(
 			"Computer use: enabled · tool: active · backend: auto · display: all · capture: 1920×1200 · model: google/gemini-2.5-flash · exposure: function",
+		);
+	});
+
+	it("reports the existing controller snapshot and labels changed settings for the next session", async () => {
+		const h = acpRuntime({ enabled: true });
+		h.store["computer.display"] = "display-2";
+		h.store["computer.maxWidth"] = 1600;
+		h.store["computer.maxHeight"] = 900;
+
+		await executeAcpBuiltinSlashCommand("/computer status", h.runtime);
+
+		expect(h.output).toHaveBeenCalledWith(
+			"Computer use: enabled · tool: active · backend: auto · display: all · capture: 1920×1200 · next-session settings: backend=auto, display=display-2, capture=1600×900 · model: google/gemini-2.5-flash · exposure: function",
 		);
 	});
 

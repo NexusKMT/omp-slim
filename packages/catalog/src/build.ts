@@ -46,19 +46,27 @@ function isDirectOpenAIResponsesEndpoint(spec: ModelSpec<Api>): boolean {
 	}
 }
 
-function supportsOpenAIGAComputerUse(spec: ModelSpec<Api>): boolean {
-	if (spec.supportsComputerUse !== undefined) return spec.supportsComputerUse;
+function explicitComputerUseConfig(spec: ModelSpec<Api>): boolean | undefined {
+	return "supportsComputerUseConfig" in spec
+		? (spec as Model<Api>).supportsComputerUseConfig
+		: spec.supportsComputerUse;
+}
+
+function supportsOpenAIGAComputerUse(spec: ModelSpec<Api>, explicitSupport: boolean | undefined): boolean {
+	if (explicitSupport !== undefined) return explicitSupport;
 	if (!isDirectOpenAIResponsesEndpoint(spec)) return false;
 	return OPENAI_GA_COMPUTER_MODEL_RE.test(spec.requestModelId ?? spec.id);
 }
 
 export function buildModel<TApi extends Api>(spec: ModelSpec<TApi>): Model<TApi> {
 	const compat = buildCompat(spec) as CompatOf<TApi>;
+	const supportsComputerUseConfig = explicitComputerUseConfig(spec);
 	return {
 		...spec,
 		name: cleanModelName(spec.name),
 		thinking: resolveModelThinking(spec, compat),
-		supportsComputerUse: supportsOpenAIGAComputerUse(spec),
+		supportsComputerUse: supportsOpenAIGAComputerUse(spec, supportsComputerUseConfig),
+		supportsComputerUseConfig,
 		compat,
 		compatConfig: spec.compat,
 	} as Model<TApi>;

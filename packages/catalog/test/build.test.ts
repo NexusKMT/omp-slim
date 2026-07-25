@@ -10,7 +10,7 @@ import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { openrouterModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
-import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import type { Model, ModelSpec } from "@oh-my-pi/pi-catalog/types";
 
 function completionsSpec(overrides: Partial<ModelSpec<"openai-completions">> = {}): ModelSpec<"openai-completions"> {
 	return {
@@ -185,6 +185,39 @@ describe("buildModel", () => {
 		expect(buildModel(azure).supportsComputerUse).toBe(true);
 		expect(buildModel({ ...azure, provider: "custom-azure-proxy" }).supportsComputerUse).toBe(false);
 		expect(buildModel({ ...azure, baseUrl: "https://gateway.example/openai/v1" }).supportsComputerUse).toBe(false);
+	});
+	it("recomputes inferred computer capability when a built model is rerouted while preserving explicit metadata", () => {
+		const direct = {
+			id: "gpt-5.4",
+			name: "GPT-5.4",
+			api: "openai-responses" as const,
+			provider: "openai",
+			baseUrl: "https://api.openai.com/v1",
+			reasoning: true,
+			input: ["text", "image"] as Array<"text" | "image">,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 400_000,
+			maxTokens: 128_000,
+		} satisfies ModelSpec<"openai-responses">;
+		const reroute = (model: Model<"openai-responses">, baseUrl: string) =>
+			buildModel({ ...model, baseUrl, compat: model.compatConfig } as ModelSpec<"openai-responses">);
+
+		expect(reroute(buildModel(direct), "https://gateway.example/v1").supportsComputerUse).toBe(false);
+		const inferred = buildModel(direct);
+		expect(
+			buildModel({
+				...inferred,
+				provider: "gpt-proxy",
+				compat: inferred.compatConfig,
+			} as ModelSpec<"openai-responses">).supportsComputerUse,
+		).toBe(false);
+		expect(
+			reroute(buildModel({ ...direct, supportsComputerUse: true }), "https://gateway.example/v1")
+				.supportsComputerUse,
+		).toBe(true);
+		expect(reroute(buildModel({ ...direct, supportsComputerUse: false }), direct.baseUrl).supportsComputerUse).toBe(
+			false,
+		);
 	});
 });
 

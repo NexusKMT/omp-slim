@@ -4,25 +4,20 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 test("normal CLI startup keeps computer worker modules lazy", async () => {
 	using tempDir = TempDir.createSync("@omp-cli-computer-lazy-");
 	const cliUrl = new URL("../src/cli.ts", import.meta.url).href;
-	const workerUrl = new URL("../src/tools/computer/worker-entry.ts", import.meta.url).href;
-	const supervisorUrl = new URL("../src/tools/computer/supervisor.ts", import.meta.url).href;
 	const probePath = tempDir.join("probe.ts");
+	// Import by file URL inside the child so only that fresh process evaluates the CLI graph.
 	await Bun.write(
 		probePath,
 		[
-			'import { mock } from "bun:test";',
-			"let workerEvaluated = false;",
-			"let supervisorEvaluated = false;",
-			`mock.module(${JSON.stringify(workerUrl)}, () => { workerEvaluated = true; return { startComputerWorker() {} }; });`,
-			`mock.module(${JSON.stringify(supervisorUrl)}, () => { supervisorEvaluated = true; return { async smokeTestComputerWorker() {} }; });`,
 			`const { runCli } = await import(${JSON.stringify(cliUrl)});`,
 			"process.stdout.write = () => true;",
 			'await runCli(["--version"]);',
-			'if (workerEvaluated || supervisorEvaluated) throw new Error("computer worker graph evaluated during normal startup");',
 		].join("\n"),
 	);
 
-	const child = Bun.spawn([process.execPath, probePath], { stdout: "pipe", stderr: "pipe" });
+	// `--no-addons` is a process-local sentinel: evaluating the computer worker graph
+	// attempts to load the desktop addon and fails, while normal CLI startup must not.
+	const child = Bun.spawn([process.execPath, "--no-addons", probePath], { stdout: "pipe", stderr: "pipe" });
 	const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
 	expect(exitCode, stderr).toBe(0);
 });
