@@ -472,6 +472,56 @@ describe("Anthropic request fingerprint alignment", () => {
 		expect(capturedBeta).toContain("effort-2025-11-24");
 	});
 
+	it("omits the adaptive effort pin for injected clients on forced tool choice (can't carry the effort beta)", async () => {
+		// Injected SDK clients own their headers, so this code can't attach the
+		// effort beta. Shipping output_config.effort without it would 400 an
+		// otherwise ordinary forced-tool request (#6590 review) — omit the pin
+		// instead, keeping the request valid.
+		const adaptiveModel: Model<"anthropic-messages"> = buildModel({
+			...ANTHROPIC_MODEL_SPEC,
+			id: "claude-opus-4-8-20260528",
+			name: "Claude Opus 4.8",
+			thinking: {
+				mode: "anthropic-adaptive",
+				efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
+			},
+		});
+		const injectedClient = {
+			messages: { create: () => (async function* () {})() },
+		};
+		const { promise, resolve } = Promise.withResolvers<unknown>();
+		streamAnthropic(
+			adaptiveModel,
+			{
+				systemPrompt: ["Stay concise."],
+				messages: [{ role: "user", content: "Use the tool", timestamp: Date.now() }],
+				tools: [
+					{
+						name: "lookup",
+						description: "Lookup a value",
+						parameters: { type: "object", properties: {}, additionalProperties: false },
+					},
+				],
+			},
+			{
+				apiKey: "sk-ant-api-test",
+				signal: createAbortedSignal(),
+				toolChoice: "any",
+				client: injectedClient,
+				onPayload: payload => resolve(payload),
+			},
+		);
+		const payload = (await promise) as {
+			thinking?: unknown;
+			output_config?: unknown;
+			tool_choice?: { type?: string };
+		};
+
+		expect(payload.tool_choice).toEqual({ type: "any" });
+		expect(payload.thinking).toBeUndefined();
+		expect(payload.output_config).toBeUndefined();
+	});
+
 	it("adds the extended-cache-ttl beta to API-key requests that default to 1h caching", async () => {
 		const captureBeta = () => {
 			let captured: string | undefined;

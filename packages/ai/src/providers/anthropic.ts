@@ -2963,6 +2963,7 @@ function createClient(
 function disableThinkingIfToolChoiceForced(
 	params: MessageCreateParamsStreaming,
 	model: Model<"anthropic-messages">,
+	canDeliverEffortBeta: boolean,
 ): void {
 	const toolChoice = params.tool_choice;
 	if (!toolChoice) return;
@@ -2974,10 +2975,12 @@ function disableThinkingIfToolChoiceForced(
 	// Adaptive-only models can't be switched off by omitting `thinking` — a bare
 	// omission defaults to adaptive thinking ON, so a forced-tool turn would still
 	// reason instead of calling the tool (#6589). Pin the lowest adaptive effort
-	// instead of dropping it, mirroring the disable branch in buildParams. Vertex
-	// rawPredict can't carry the effort beta as an HTTP header, so it keeps the
-	// delete behavior (the field is stripped there anyway; see buildParams).
-	if (isAdaptiveOnlyThinking(model) && model.provider !== "google-vertex") {
+	// instead of dropping it, mirroring the disable branch in buildParams. The pin
+	// only lands when the effort beta can ride along: Vertex rawPredict needs it in
+	// the body (dropped here too, see buildParams) and injected SDK clients own
+	// their own headers, so both fall back to the delete behavior rather than
+	// shipping `output_config.effort` the API would 400 without the beta.
+	if (isAdaptiveOnlyThinking(model) && model.provider !== "google-vertex" && canDeliverEffortBeta) {
 		const outputConfig = (params.output_config as AnthropicOutputConfig | undefined) ?? {};
 		outputConfig.effort = "low";
 		params.output_config = outputConfig;
@@ -3391,7 +3394,10 @@ function buildParams(
 				// Omit the thinking field (the API defaults to adaptive) and pin the
 				// lowest effort so "thinking off" calls stay cheap instead of failing
 				// the request with a 400 (a hidden-thinking toggle must never break it).
-				outputConfigEffort = "low";
+				// Injected SDK clients own their headers and can't receive the effort
+				// beta this code would otherwise attach, so omit the pin for them —
+				// the request stays valid (adaptive defaults on) instead of 400ing.
+				if (!options?.client) outputConfigEffort = "low";
 			} else {
 				thinking = { type: "disabled" };
 			}
@@ -3512,7 +3518,7 @@ function buildParams(
 		}
 	}
 
-	disableThinkingIfToolChoiceForced(params, model);
+	disableThinkingIfToolChoiceForced(params, model, !options?.client);
 	ensureMaxTokensForThinking(params, maxOutputTokens);
 	applyPromptCaching(params, cacheControl);
 	enforceCacheControlLimit(params, 4);
