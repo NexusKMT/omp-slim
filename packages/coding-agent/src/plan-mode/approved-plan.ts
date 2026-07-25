@@ -149,8 +149,9 @@ export interface ResolvedApprovedPlan {
 
 /** Locate the plan file the agent wrote and finalize its title — without
  *  renaming anything. Tries, in order: the slug derived from `extra.title`
- *  (`local://<slug>-plan.md`), recent plan files from newest to oldest, then
- *  the plan path from plan-mode state. Throws a `ToolError` guiding the agent when none exist. */
+ *  (`local://<slug>-plan.md`), a state plan that the artifact scan can't see,
+ *  scanned plan files newest-to-oldest, then the state plan path as a final
+ *  fallback. Throws a `ToolError` guiding the agent when none exist. */
 export async function resolveApprovedPlan(input: ResolveApprovedPlanInput): Promise<ResolvedApprovedPlan> {
 	const ordered: string[] = [];
 	const consider = (url: string | undefined): void => {
@@ -160,9 +161,16 @@ export async function resolveApprovedPlan(input: ResolveApprovedPlanInput): Prom
 	const slug = planSlugFromSupplied(input.suppliedTitle);
 	consider(slug ? planFileUrlForSlug(slug) : undefined);
 
-	if (input.listPlanFiles) {
-		for (const url of await input.listPlanFiles()) consider(url);
+	const listed = input.listPlanFiles ? await input.listPlanFiles() : [];
+	// A state plan the scan cannot surface (cwd-relative, or a local file whose
+	// name does not end in `plan.md`) has no mtime in `listed` to compete on, so
+	// it keeps precedence over scanned artifacts — otherwise a stale older draft
+	// could shadow the deliberately-set current plan. A state plan already inside
+	// the scan competes purely on the newest-first ordering below (issue #6569).
+	if (input.statePlanFilePath && !listed.includes(input.statePlanFilePath)) {
+		consider(input.statePlanFilePath);
 	}
+	for (const url of listed) consider(url);
 	consider(input.statePlanFilePath);
 
 	for (const url of ordered) {

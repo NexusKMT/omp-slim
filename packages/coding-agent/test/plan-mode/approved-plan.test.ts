@@ -62,6 +62,21 @@ describe("resolveApprovedPlan", () => {
 		expect(result.planContent).toContain("New plan");
 	});
 
+	it("keeps a state plan the scan can't see ahead of older scanned artifacts", async () => {
+		const result = await resolveApprovedPlan({
+			suppliedTitle: undefined,
+			// A cwd-relative / non-`plan.md` state path never appears in listPlanFiles().
+			statePlanFilePath: "docs/CURRENT.md",
+			readPlan: reader({
+				"docs/CURRENT.md": "# Current\n\nCurrent plan",
+				"local://old-artifact-plan.md": "# Old\n\nOld plan",
+			}),
+			listPlanFiles: async () => ["local://old-artifact-plan.md"],
+		});
+		expect(result.planFilePath).toBe("docs/CURRENT.md");
+		expect(result.planContent).toContain("Current plan");
+	});
+
 	it("scans listed plan files when the title was dropped and state path is empty", async () => {
 		const result = await resolveApprovedPlan({
 			suppliedTitle: undefined,
