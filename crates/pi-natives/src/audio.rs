@@ -27,13 +27,18 @@ use parking_lot::Mutex;
 use tokio::sync::Notify;
 
 const AUDIO_CHANNELS: u32 = 1;
+// PulseAudio TCP playback stutters with a 20 ms target buffer; 50 ms absorbs
+// transport jitter while preserving interactive latency.
+#[cfg(target_os = "linux")]
+const PLAYBACK_PERIOD_MS: u32 = 50;
+#[cfg(not(target_os = "linux"))]
 const PLAYBACK_PERIOD_MS: u32 = 20;
 // miniaudio's PulseAudio backend reserves three periods. Android's OpenSL ES
 // source emits 125 ms fragments, so Linux capture needs at least 150 ms queued.
 #[cfg(target_os = "linux")]
 const CAPTURE_PERIOD_MS: u32 = 50;
 #[cfg(not(target_os = "linux"))]
-const CAPTURE_PERIOD_MS: u32 = PLAYBACK_PERIOD_MS;
+const CAPTURE_PERIOD_MS: u32 = 20;
 const PLAYBACK_DRAIN_CALLBACKS: usize = 2;
 
 #[cfg(target_os = "macos")]
