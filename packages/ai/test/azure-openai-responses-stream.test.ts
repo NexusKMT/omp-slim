@@ -289,6 +289,28 @@ describe("azure openai responses streaming", () => {
 		expect(payload.include).toEqual(["computer_call_output.output.image_url", "reasoning.encrypted_content"]);
 		expect(JSON.stringify(payload)).not.toContain("display_width");
 		expect(JSON.stringify(payload)).not.toContain("display_height");
+
+		const gatewayPayload = await captureAzurePayload(
+			{
+				messages: [{ role: "user", content: "Inspect", timestamp: Date.now() }],
+				tools: [computer],
+			},
+			supportedModel,
+			{
+				azureBaseUrl: "https://gateway.example/openai/v1",
+				toolChoice: { type: "function", name: "computer" },
+			},
+		);
+		expect(gatewayPayload.tools).toMatchObject([
+			{
+				type: "function",
+				name: "computer",
+				description: "Control the desktop",
+				parameters: { type: "object", properties: {} },
+				strict: false,
+			},
+		]);
+		expect(gatewayPayload.tool_choice).toEqual({ type: "function", name: "computer" });
 	});
 
 	it("surfaces nested response.failed provider errors", async () => {
