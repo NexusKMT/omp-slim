@@ -27,6 +27,7 @@ import {
 import { declareWorkerHostEntry, installWorkerInbox } from "@oh-my-pi/pi-utils/worker-host";
 import { installProfileAlias, resolveProfileAliasCommandFromProcess } from "./cli/profile-alias";
 import { extractProfileFlags } from "./cli/profile-bootstrap";
+import type { WorkerInbound as JsWorkerInbound, WorkerOutbound as JsWorkerOutbound } from "./eval/js/worker-protocol";
 import { DAEMON_BROKER_WORKER_ARG } from "./launch/protocol";
 
 if (Bun.semver.order(Bun.version, MIN_BUN_VERSION) < 0) {
@@ -167,11 +168,17 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 		return true;
 	}
 	if (arg === JS_EVAL_PROCESS_ARG) {
+		// Profile bootstrap is complete: loading the host's global fatal-rejection
+		// guard here keeps dotenv out of the process-entry module's import graph.
+		const { postmortem } = await import("@oh-my-pi/pi-utils");
 		const { startJsEvalProcess } = await import("./eval/js/process-entry");
 		// The JS evaluator forwards user-controlled payloads (tool-call args,
 		// display outputs); a non-serializable one must fail that cell, not
 		// SIGKILL the kernel and erase the eval session's state.
-		await runIpcSubprocessWorker(startJsEvalProcess, { rethrowConnectedSendErrors: true });
+		await runIpcSubprocessWorker<JsWorkerInbound, JsWorkerOutbound>(
+			transport => startJsEvalProcess(transport, postmortem.interceptUnhandledRejections),
+			{ rethrowConnectedSendErrors: true },
+		);
 		return true;
 	}
 	if (arg === STT_WORKER_ARG) {

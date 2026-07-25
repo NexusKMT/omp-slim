@@ -25,7 +25,7 @@ interface ActiveRun {
 
 type RunResult = Extract<WorkerOutbound, { type: "result" }>;
 
-type RejectionInterceptor = (handler: (reason: unknown) => boolean) => () => void;
+export type RejectionInterceptor = (handler: (reason: unknown) => boolean) => () => void;
 
 export type WorkerCoreOptions =
 	| {
