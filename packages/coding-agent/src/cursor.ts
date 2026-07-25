@@ -10,11 +10,16 @@ import type {
 import type {
 	CursorMcpCall,
 	CursorShellStreamCallbacks,
+	CursorTodoSnapshot,
 	CursorExecHandlers as ICursorExecHandlers,
 	ToolResultMessage,
 } from "@oh-my-pi/pi-ai";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { resolveToCwd } from "./tools/path-utils";
+import type { TodoPhase, TodoStatus } from "./tools/todo";
+
+/** Phase used for Cursor-owned tasks with no local phase grouping. */
+const CURSOR_TODO_PHASE = "Tasks";
 
 interface CursorExecBridgeOptions {
 	cwd: string;
@@ -32,6 +37,18 @@ interface CursorExecBridgeOptions {
 	 * callers with a restricted tool set (advisors) opt out.
 	 */
 	allowNativeDelete?: boolean;
+	/**
+	 * Mirror Cursor's server-owned todo list into local session state. Cursor
+	 * resolves `update_todos` / `read_todos` remotely, so without this bridge
+	 * the provider's list and the local `todo` state diverge silently.
+	 */
+	setTodoPhases?: (phases: TodoPhase[]) => void;
+	getTodoPhases?: () => TodoPhase[];
+	/**
+	 * Persist the mirrored list to the session branch so it survives reloads.
+	 * Cursor emits no local `todo` toolResult, so nothing else records it.
+	 */
+	persistTodoPhases?: (phases: TodoPhase[]) => void;
 }
 
 function createToolResultMessage(
@@ -175,6 +192,18 @@ function decodeMcpArgs(rawArgs: Record<string, Uint8Array>): Record<string, unkn
 function formatMcpToolErrorMessage(toolName: string, availableTools: string[]): string {
 	const list = availableTools.length > 0 ? availableTools.join(", ") : "none";
 	return `MCP tool "${toolName}" not found. Available tools: ${list}`;
+}
+
+/**
+ * One-line summary for the synthesized todo result. Cursor's server-resolved
+ * call produces no local tool output, but the transcript entry still needs
+ * text content alongside the phases the UI renders.
+ */
+function formatTodoSyncSummary(phases: TodoPhase[]): string {
+	const tasks = phases.flatMap(phase => phase.tasks);
+	if (tasks.length === 0) return "No todos";
+	const done = tasks.filter(task => task.status === "completed").length;
+	return `${done}/${tasks.length} tasks completed`;
 }
 
 export class CursorExecHandlers implements ICursorExecHandlers {
@@ -339,6 +368,72 @@ export class CursorExecHandlers implements ICursorExecHandlers {
 			file: args.path,
 		});
 		return toolResultMessage;
+	}
+
+	/**
+	 * Mirror Cursor's server-confirmed todo list into local session state.
+	 *
+	 * Cursor's snapshot is a flat list, so tasks already known locally keep
+	 * their phase and only their status is updated; unknown tasks land in a
+	 * single fallback phase. Statuses come straight from the server snapshot —
+	 * no local normalization, or an all-pending remote list would gain a
+	 * phantom in-progress task the remote list does not have.
+	 *
+	 * The snapshot is also persisted to the session branch. Every other
+	 * provider's todo state survives a reload because `todo` runs locally and
+	 * its `toolResult` (carrying `details.phases`) lands in the branch, which
+	 * `#syncTodoPhasesFromBranch` replays. Cursor resolves the tool remotely and
+	 * emits no such result, so without an explicit entry the list is in-memory
+	 * only and every reload, rewind, compaction, or session switch drops it.
+	 *
+	 * A `tool_execution_end` event is emitted for the same reason: the
+	 * interactive todo panel refreshes off that event
+	 * (`event-controller.ts` reads `details.phases`), and Cursor's
+	 * server-resolved call never produces one, so the visible list would stay
+	 * stale until the next reload.
+	 */
+	todoSync(snapshot: CursorTodoSnapshot, toolCallId = randomUUID()): void {
+		const setPhases = this.options.setTodoPhases;
+		if (!setPhases) return;
+
+		const existing = this.options.getTodoPhases?.() ?? [];
+		const phaseByContent = new Map<string, string>();
+		for (const phase of existing) {
+			for (const task of phase.tasks) phaseByContent.set(task.content, phase.name);
+		}
+
+		const grouped = new Map<string, TodoPhase["tasks"]>();
+		for (const todo of snapshot.todos) {
+			const name = phaseByContent.get(todo.content) ?? CURSOR_TODO_PHASE;
+			let tasks = grouped.get(name);
+			if (!tasks) {
+				tasks = [];
+				grouped.set(name, tasks);
+			}
+			tasks.push({ content: todo.content, status: todo.status as TodoStatus });
+		}
+
+		// Preserve the local phase order; phases new to this snapshot append.
+		const next: TodoPhase[] = [];
+		for (const phase of existing) {
+			const tasks = grouped.get(phase.name);
+			if (!tasks) continue;
+			next.push({ name: phase.name, tasks });
+			grouped.delete(phase.name);
+		}
+		for (const [name, tasks] of grouped) next.push({ name, tasks });
+		setPhases(next);
+		this.options.persistTodoPhases?.(next);
+		this.options.emitEvent?.({
+			type: "tool_execution_end",
+			toolCallId,
+			toolName: "todo",
+			result: {
+				content: [{ type: "text", text: formatTodoSyncSummary(next) }],
+				details: { phases: next, storage: "session" },
+			},
+			isError: false,
+		});
 	}
 
 	async mcp(call: CursorMcpCall) {

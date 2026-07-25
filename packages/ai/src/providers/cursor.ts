@@ -119,6 +119,9 @@ import type {
 	CursorExecHandlers,
 	CursorMcpCall,
 	CursorShellStreamCallbacks,
+	CursorTodoSnapshot,
+	CursorTodoSnapshotItem,
+	CursorTodoSyncHandler,
 	CursorToolResultHandler,
 	ImageContent,
 	Message,
@@ -498,6 +501,7 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 				setFirstTokenTime: () => {
 					if (!firstTokenTime) firstTokenTime = performance.now();
 				},
+				onTodoSnapshot: options?.execHandlers?.todoSync?.bind(options.execHandlers),
 			};
 
 			const onConversationCheckpoint = (checkpoint: ConversationStateStructure) => {
@@ -686,6 +690,8 @@ export interface BlockState {
 	setThinkingBlock: (b: (ThinkingContent & { [kStreamingBlockIndex]: number }) | null) => void;
 	setToolCall: (t: ToolCallState | null) => void;
 	setFirstTokenTime: () => void;
+	/** Mirror a server-confirmed todo snapshot into local session state. */
+	onTodoSnapshot?: CursorTodoSyncHandler;
 }
 
 export interface UsageState {
@@ -2016,12 +2022,20 @@ function decodeMcpCall(args: {
 	};
 }
 
-function mapTodoStatusValue(status?: number): "pending" | "in_progress" | "completed" {
+/**
+ * Map Cursor's `TodoStatus` enum (agent.proto) onto the local todo statuses.
+ *
+ * `TODO_STATUS_CANCELLED` (4) maps to `abandoned` rather than collapsing to
+ * `pending`, which would resurrect a task the model explicitly cancelled.
+ */
+function mapTodoStatusValue(status?: number): CursorTodoSnapshotItem["status"] {
 	switch (status) {
 		case 2:
 			return "in_progress";
 		case 3:
 			return "completed";
+		case 4:
+			return "abandoned";
 		default:
 			return "pending";
 	}
@@ -2033,22 +2047,108 @@ interface CursorTodoItem {
 	status?: number;
 }
 
-interface CursorUpdateTodosToolCall {
-	updateTodosToolCall?: { args?: { todos?: CursorTodoItem[] } };
+interface CursorTodoResult {
+	result?: {
+		case?: "success" | "error";
+		value?: { todos?: CursorTodoItem[]; totalCount?: number; wasMerge?: boolean; error?: string };
+	};
 }
 
-function buildTodoArgs(toolCall: CursorUpdateTodosToolCall): {
-	todos: Array<{ id?: string; content: string; activeForm: string; status: "pending" | "in_progress" | "completed" }>;
-} | null {
-	const todos = toolCall.updateTodosToolCall?.args?.todos;
+interface CursorReadTodosArgs {
+	statusFilter?: number[];
+	idFilter?: string[];
+}
+
+interface CursorUpdateTodosCall {
+	args?: { todos?: CursorTodoItem[]; merge?: boolean };
+	result?: CursorTodoResult;
+}
+
+interface CursorReadTodosCall {
+	args?: CursorReadTodosArgs;
+	result?: CursorTodoResult;
+}
+
+/**
+ * `ToolCall` is a protobuf oneof, so a decoded message exposes the selected
+ * variant as `tool: { case, value }` — NOT as a named property. Hand-built
+ * fixtures and some call sites still use the flattened form, so both are
+ * accepted here.
+ */
+interface CursorTodoToolCall {
+	tool?: { case?: string; value?: unknown };
+	updateTodosToolCall?: CursorUpdateTodosCall;
+	readTodosToolCall?: CursorReadTodosCall;
+}
+
+function selectTodoCalls(toolCall: CursorTodoToolCall): {
+	update?: CursorUpdateTodosCall;
+	read?: CursorReadTodosCall;
+} {
+	const oneof = toolCall.tool;
+	if (oneof?.case === "updateTodosToolCall") return { update: oneof.value as CursorUpdateTodosCall };
+	if (oneof?.case === "readTodosToolCall") return { read: oneof.value as CursorReadTodosCall };
+	return { update: toolCall.updateTodosToolCall, read: toolCall.readTodosToolCall };
+}
+
+function mapTodoSnapshot(todos: CursorTodoItem[]): CursorTodoSnapshotItem[] {
+	return todos.map(todo => ({
+		content: typeof todo.content === "string" ? todo.content : "",
+		status: mapTodoStatusValue(typeof todo.status === "number" ? todo.status : undefined),
+	}));
+}
+
+/**
+ * Extract the authoritative full todo list from a completed native todo call.
+ *
+ * Cursor owns this list server-side: `update_todos` / `read_todos` are resolved
+ * remotely and the settled state rides on the tool call's `result`, never on
+ * the exec channel (`ExecServerMessage` has no todo case). Only
+ * `result.success.todos` is authoritative — the request `args` may differ from
+ * what the server actually stored after a merge or normalization, and on
+ * `UpdateTodosError` nothing was stored at all.
+ *
+ * A `read_todos` call carrying `status_filter` / `id_filter` (agent.proto
+ * `ReadTodosArgs`) returns a SUBSET, not the list, and its `total_count`
+ * reports the full size. Mirroring a partial response would delete every task
+ * it omitted, so filtered and short reads are both refused here.
+ *
+ * Returns `null` when no full snapshot is available, which the caller MUST
+ * treat as "leave local state untouched".
+ */
+function extractTodoSnapshot(toolCall: CursorTodoToolCall): CursorTodoSnapshot | null {
+	const { update, read } = selectTodoCalls(toolCall);
+	if (read && ((read.args?.statusFilter?.length ?? 0) > 0 || (read.args?.idFilter?.length ?? 0) > 0)) {
+		return null;
+	}
+	const call = update ?? read;
+	if (!call) return null;
+	const result = call.result?.result;
+	if (result?.case !== "success") return null;
+	const todos = result.value?.todos;
 	if (!todos) return null;
+	// A read that disagrees with the server's own count is partial; treating it
+	// as the list would drop whatever it left out. `total_count` is a proto3
+	// scalar, so an unset field arrives as `0` and is indistinguishable from a
+	// genuinely empty count — an ambiguous read is refused rather than risk
+	// deleting tasks, since `update_todos` is the primary sync path anyway.
+	const totalCount = result.value?.totalCount;
+	if (read && typeof totalCount === "number" && totalCount !== todos.length) {
+		return null;
+	}
 	return {
-		todos: todos.map(todo => ({
-			id: typeof todo.id === "string" && todo.id.length > 0 ? todo.id : undefined,
-			content: typeof todo.content === "string" ? todo.content : "",
-			activeForm: typeof todo.content === "string" ? todo.content : "",
-			status: mapTodoStatusValue(typeof todo.status === "number" ? todo.status : undefined),
-		})),
+		todos: mapTodoSnapshot(todos),
+		// Presentation-only: the snapshot is already the settled full list.
+		merged: result.value?.wasMerge === true,
+	};
+}
+
+/** Args echoed onto the synthesized display block, for rendering only. */
+function buildTodoDisplayArgs(toolCall: CursorTodoToolCall): { todos: CursorTodoSnapshotItem[]; merge?: boolean } {
+	const args = selectTodoCalls(toolCall).update?.args;
+	return {
+		todos: args?.todos ? mapTodoSnapshot(args.todos) : [],
+		merge: args?.merge === true ? true : undefined,
 	};
 }
 
@@ -2284,16 +2384,23 @@ export function processInteractionUpdate(
 				return;
 			}
 
-			const todoArgs = buildTodoArgs(toolCall);
-			if (todoArgs) {
+			// Cursor resolves `update_todos` / `read_todos` server-side and settles
+			// them on the tool call's `result`. Both blocks are stamped resolved so
+			// `agent-loop.ts` never runs them locally: there is no local tool behind
+			// them, and executing one would emit a spurious toolResult and drive an
+			// extra continuation turn. Local state is mirrored on completion, from
+			// the server's success snapshot only.
+			const todoCalls = selectTodoCalls(toolCall);
+			if (todoCalls.update || todoCalls.read) {
 				const callId = update.message.value.callId || crypto.randomUUID();
 				const block: ToolCallState = {
 					type: "toolCall",
 					id: callId,
 					name: "todo",
-					arguments: todoArgs,
+					arguments: buildTodoDisplayArgs(toolCall),
 					[kStreamingBlockIndex]: output.content.length,
 					[kStreamingBlockKind]: "todo",
+					[kCursorExecResolved]: true,
 				};
 				output.content.push(block);
 				state.setToolCall(block);
@@ -2341,9 +2448,14 @@ export function processInteractionUpdate(
 					decodedArgs,
 				);
 			} else if (state.currentToolCall[kStreamingBlockKind] === "todo" && toolCall) {
-				const todoArgs = buildTodoArgs(toolCall);
-				if (todoArgs) {
-					state.currentToolCall.arguments = todoArgs;
+				// Only the server's success snapshot is authoritative: the request args
+				// may differ from what was actually stored after a merge, and on
+				// `UpdateTodosError` nothing was stored at all. No snapshot => leave
+				// both the rendered args and local session state untouched.
+				const snapshot = extractTodoSnapshot(toolCall);
+				if (snapshot) {
+					state.currentToolCall.arguments = { todos: snapshot.todos, merged: snapshot.merged };
+					state.onTodoSnapshot?.(snapshot);
 				}
 			}
 			const idx = output.content.indexOf(state.currentToolCall);

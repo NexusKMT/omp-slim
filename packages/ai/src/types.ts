@@ -908,6 +908,27 @@ export interface CursorMcpCall {
 	rawArgs: Record<string, Uint8Array>;
 }
 
+export interface CursorTodoSnapshotItem {
+	content: string;
+	status: "pending" | "in_progress" | "completed" | "abandoned";
+}
+
+/**
+ * Authoritative todo list state settled by Cursor's server-side
+ * `update_todos` / `read_todos` tools.
+ */
+export interface CursorTodoSnapshot {
+	todos: CursorTodoSnapshotItem[];
+	/** True when the server reported the update as a merge. Presentation only. */
+	merged: boolean;
+}
+
+/**
+ * Receives the settled todo list so the host can mirror it into local session
+ * state. Only ever called with a server-confirmed success snapshot.
+ */
+export type CursorTodoSyncHandler = (snapshot: CursorTodoSnapshot) => void;
+
 export interface CursorShellStreamCallbacks {
 	onStdout(data: string): void;
 	onStderr(data: string): void;
@@ -926,6 +947,8 @@ export interface CursorExecHandlers {
 	) => Promise<CursorExecHandlerResult<ShellResult>>;
 	diagnostics?: (args: DiagnosticsArgs) => Promise<CursorExecHandlerResult<DiagnosticsResult>>;
 	mcp?: (call: CursorMcpCall) => Promise<CursorExecHandlerResult<McpResult>>;
+	/** Mirror Cursor's server-owned todo list into local session state. */
+	todoSync?: CursorTodoSyncHandler;
 	onToolResult?: CursorToolResultHandler;
 }
 
