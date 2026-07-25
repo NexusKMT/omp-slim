@@ -2768,6 +2768,11 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(stripPendingSecretPlaceholderSuffix("prefix ID$")).toBe("prefix ID");
 		expect(stripPendingSecretPlaceholderSuffix("count 42$")).toBe("count 42");
 		expect(stripPendingSecretPlaceholderSuffix("before $$TOKEN ")).toBe("before $$TOKEN ");
+		// A single `$` followed by non-`$` can never open a `$$…$$` placeholder, so it
+		// must stream through instead of being withheld until the next boundary.
+		expect(stripPendingSecretPlaceholderSuffix("run $HOME")).toBe("run $HOME");
+		expect(stripPendingSecretPlaceholderSuffix("pay $100")).toBe("pay $100");
+		expect(stripPendingSecretPlaceholderSuffix("cost $$100")).toBe("cost ");
 	});
 
 	it("uses independent bases across casing variants with distinct hints", () => {

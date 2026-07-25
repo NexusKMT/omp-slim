@@ -513,7 +513,7 @@ function lookupFriendlyPlaceholderAlias(
 	return unprefixed !== undefined ? deobfuscateMap.get(unprefixed) : undefined;
 }
 
-const PENDING_PLACEHOLDER_SUFFIX_RE = /\${1,2}(?:[A-Z0-9]+_)?[A-Z0-9]*(?::[ULCM]?)?$/;
+const PENDING_PLACEHOLDER_SUFFIX_RE = /(?:\$\$(?:[A-Z0-9]+_)?[A-Z0-9]*(?::[ULCM]?)?|\$)$/;
 
 // Withhold a trailing run that could be the start of a placeholder from streamed
 // deltas, so a partial token is never emitted before deobfuscation can replace
