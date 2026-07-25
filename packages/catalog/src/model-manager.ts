@@ -53,7 +53,7 @@ export interface ModelManagerOptions<TApi extends Api = Api, TModelsDevPayload =
  * Resolution result.
  *
  * `stale` is false when the resolved catalog is authoritative for the selected provider:
- * - dynamic endpoint data was fetched in this call,
+ * - a non-empty dynamic endpoint catalog was fetched in this call,
  * - a still-fresh authoritative cache was reused in `online-if-uncached` mode, or
  * - the provider has no dynamic fetcher configured.
  */
@@ -226,12 +226,13 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 				options.dropCachedModelIdsOnStaticMismatch,
 			);
 	const dynamicModels = fetchedDynamicModels ?? [];
+	const dynamicResultAuthoritative = dynamicFetchSucceeded && dynamicModels.length > 0;
 	const mergedWithCache = mergeDynamicModels(mergeModelSources(staticModels, modelsDevModels), cacheModels);
 	const mergedModels = mergeDynamicModels(mergedWithCache, dynamicModels);
 	const models = collapseBuiltModelVariants(
 		dynamicModelsAuthoritative && dynamicFetchSucceeded ? retainModelIds(mergedModels, dynamicModels) : mergedModels,
 	);
-	const dynamicAuthoritative = !hasDynamicFetcher || dynamicFetchSucceeded || shouldUseFreshCacheAsAuthoritative;
+	const dynamicAuthoritative = !hasDynamicFetcher || dynamicResultAuthoritative || shouldUseFreshCacheAsAuthoritative;
 	if (shouldFetchFromNetwork) {
 		if (dynamicFetchSucceeded) {
 			const mergedSnapshot = mergeDynamicModels(mergeModelSources(staticModels, modelsDevModels), dynamicModels);
@@ -242,7 +243,7 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 				cacheProviderId,
 				now(),
 				collapseBuiltModelVariants(snapshotModels),
-				true,
+				dynamicResultAuthoritative,
 				staticFingerprint,
 				dbPath,
 				staticModels,

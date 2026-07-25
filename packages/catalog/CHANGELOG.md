@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Retried empty successful provider discovery responses after the short non-authoritative interval instead of caching them for the full catalog TTL ([#6620](https://github.com/can1357/oh-my-pi/issues/6620)).
+
 ## [17.1.3] - 2026-07-24
 
 ### Fixed
