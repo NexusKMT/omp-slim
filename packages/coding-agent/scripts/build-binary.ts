@@ -96,7 +96,6 @@ async function main(): Promise<void> {
 			await compileCodingAgent({
 				repoRoot,
 				entrypoint: path.join(packageDir, "src", "cli.ts"),
-				workerEntrypoints: [path.join(packageDir, "src", "computer-worker-process-entry.ts")],
 				outfile: outputPath,
 				transformersVersion,
 				target: crossBuild?.target,

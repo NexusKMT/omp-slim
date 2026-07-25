@@ -32,6 +32,7 @@ import { startJsEvalProcess } from "./eval/js/process-entry";
 import type { WorkerInbound as JsWorkerInbound, WorkerOutbound as JsWorkerOutbound } from "./eval/js/worker-protocol";
 import { DAEMON_BROKER_WORKER_ARG } from "./launch/protocol";
 import { smokeTestComputerWorker } from "./tools/computer/supervisor";
+import { startComputerWorker } from "./tools/computer/worker-entry";
 
 if (Bun.semver.order(Bun.version, MIN_BUN_VERSION) < 0) {
 	process.stderr.write(
@@ -112,6 +113,7 @@ async function runSmokeTest(): Promise<void> {
 const TINY_WORKER_ARG = "__omp_worker_tiny_inference";
 const STATS_SYNC_WORKER_ARG = "__omp_worker_stats_sync";
 const TAB_WORKER_ARG = "__omp_worker_tab";
+const COMPUTER_WORKER_ARG = "__omp_worker_computer";
 const JS_EVAL_WORKER_ARG = "__omp_worker_js_eval";
 const JS_EVAL_PROCESS_ARG = "__omp_worker_js_eval_process";
 const STT_WORKER_ARG = "__omp_worker_stt";
@@ -153,6 +155,11 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 	if (arg === TAB_WORKER_ARG) {
 		if (parentPort) installWorkerInbox(parentPort);
 		await import("./tools/browser/tab-worker-entry");
+		return true;
+	}
+	if (arg === COMPUTER_WORKER_ARG) {
+		if (parentPort) installWorkerInbox(parentPort);
+		startComputerWorker();
 		return true;
 	}
 	if (arg === JS_EVAL_WORKER_ARG) {
