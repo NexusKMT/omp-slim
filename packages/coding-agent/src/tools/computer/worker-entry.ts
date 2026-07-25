@@ -1,6 +1,6 @@
 import { parentPort } from "node:worker_threads";
-import { consumeWorkerInbox } from "@oh-my-pi/pi-utils/worker-host";
-import { COMPUTER_WORKER_ARG, type ComputerWorkerInbound, type ComputerWorkerTransport } from "./protocol";
+import { consumeWorkerInbox, isWorkerHostSelector } from "@oh-my-pi/pi-utils/worker-host";
+import type { ComputerWorkerInbound, ComputerWorkerTransport } from "./protocol";
 import { ComputerWorkerCore } from "./worker";
 
 export function startComputerWorker(): void {
@@ -29,6 +29,6 @@ export function startComputerWorker(): void {
 // Bun workers report `import.meta.main === false`. The source fallback still
 // enters this file directly, while packaged CLI workers carry the selector and
 // start the named entry only after installing its inbox.
-if (!Bun.isMainThread && !process.argv.includes(COMPUTER_WORKER_ARG) && import.meta.path === Bun.main) {
+if (!Bun.isMainThread && !process.argv.some(isWorkerHostSelector) && import.meta.path === Bun.main) {
 	startComputerWorker();
 }
