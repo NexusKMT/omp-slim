@@ -502,6 +502,7 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 					if (!firstTokenTime) firstTokenTime = performance.now();
 				},
 				onTodoSnapshot: options?.execHandlers?.todoSync?.bind(options.execHandlers),
+				onToolResult: options?.onToolResult,
 			};
 
 			const onConversationCheckpoint = (checkpoint: ConversationStateStructure) => {
@@ -692,6 +693,12 @@ export interface BlockState {
 	setFirstTokenTime: () => void;
 	/** Mirror a server-confirmed todo snapshot into local session state. */
 	onTodoSnapshot?: CursorTodoSyncHandler;
+	/**
+	 * Persist a paired `toolResult` for a server-resolved call. Native todo calls
+	 * never travel the exec channel, so without this the resolved block has no
+	 * matching result and every transcript rebuild strips it as dangling.
+	 */
+	onToolResult?: CursorToolResultHandler;
 }
 
 export interface UsageState {
@@ -2152,6 +2159,33 @@ function buildTodoDisplayArgs(toolCall: CursorTodoToolCall): { todos: CursorTodo
 	};
 }
 
+/**
+ * Paired result for a server-resolved native todo call.
+ *
+ * The bridge never runs a local `todo` tool for these, so nothing else would
+ * produce a `toolResult` for the block — and `buildSessionContext` strips any
+ * `toolCall` left unpaired, taking the interaction out of every rebuilt
+ * transcript. A refused snapshot still gets a result: the call did happen, it
+ * just changed no local state.
+ */
+function buildTodoToolResult(toolCallId: string, snapshot: CursorTodoSnapshot | null): ToolResultMessage {
+	const text = snapshot ? formatTodoSnapshotSummary(snapshot.todos) : "No todo changes";
+	return {
+		role: "toolResult",
+		toolCallId,
+		toolName: "todo",
+		content: [{ type: "text", text }],
+		isError: false,
+		timestamp: Date.now(),
+	};
+}
+
+function formatTodoSnapshotSummary(todos: CursorTodoSnapshotItem[]): string {
+	if (todos.length === 0) return "No todos";
+	const done = todos.filter(todo => todo.status === "completed").length;
+	return `${done}/${todos.length} tasks completed`;
+}
+
 function buildMcpResultFromToolResult(_mcpCall: CursorMcpCall, toolResult: ToolResultMessage) {
 	if (toolResult.isError) {
 		return buildMcpErrorResult(toolResultToText(toolResult) || "MCP tool failed");
@@ -2455,8 +2489,16 @@ export function processInteractionUpdate(
 				const snapshot = extractTodoSnapshot(toolCall);
 				if (snapshot) {
 					state.currentToolCall.arguments = { todos: snapshot.todos, merged: snapshot.merged };
-					state.onTodoSnapshot?.(snapshot);
+					// Reuse the streamed call id: the interactive transcript filed the
+					// visible block under it, and only a matching `tool_execution_end`
+					// resolves that block.
+					state.onTodoSnapshot?.(snapshot, state.currentToolCall.id);
 				}
+				// Pair the resolved block with a persisted result regardless of the
+				// snapshot outcome. `buildSessionContext` strips any `toolCall` with no
+				// matching `toolResult`, so an unpaired block silently vanishes from
+				// every rebuilt transcript (reload, branch switch, Ctrl+L).
+				state.onToolResult?.(buildTodoToolResult(state.currentToolCall.id, snapshot));
 			}
 			const idx = output.content.indexOf(state.currentToolCall);
 			clearStreamingPartialJson(state.currentToolCall);

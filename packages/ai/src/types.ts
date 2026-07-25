@@ -926,8 +926,12 @@ export interface CursorTodoSnapshot {
 /**
  * Receives the settled todo list so the host can mirror it into local session
  * state. Only ever called with a server-confirmed success snapshot.
+ *
+ * `toolCallId` is the id of the streamed native call, which is also the key the
+ * interactive transcript filed the visible block under. The host MUST reuse it
+ * when emitting the synthetic completion, or that block never resolves.
  */
-export type CursorTodoSyncHandler = (snapshot: CursorTodoSnapshot) => void;
+export type CursorTodoSyncHandler = (snapshot: CursorTodoSnapshot, toolCallId: string) => void;
 
 export interface CursorShellStreamCallbacks {
 	onStdout(data: string): void;

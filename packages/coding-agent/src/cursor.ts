@@ -392,7 +392,7 @@ export class CursorExecHandlers implements ICursorExecHandlers {
 	 * server-resolved call never produces one, so the visible list would stay
 	 * stale until the next reload.
 	 */
-	todoSync(snapshot: CursorTodoSnapshot, toolCallId = randomUUID()): void {
+	todoSync(snapshot: CursorTodoSnapshot, toolCallId: string): void {
 		const setPhases = this.options.setTodoPhases;
 		if (!setPhases) return;
 

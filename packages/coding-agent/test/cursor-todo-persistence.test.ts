@@ -65,13 +65,16 @@ describe("cursor todo persistence", () => {
 		// toolResult, so nothing would otherwise land in the branch and every
 		// reload/rewind/compaction would silently drop the list.
 		const h = newHarness();
-		h.handlers.todoSync({
-			merged: false,
-			todos: [
-				{ content: "step one", status: "completed" },
-				{ content: "step two", status: "in_progress" },
-			],
-		});
+		h.handlers.todoSync(
+			{
+				merged: false,
+				todos: [
+					{ content: "step one", status: "completed" },
+					{ content: "step two", status: "in_progress" },
+				],
+			},
+			"call-1",
+		);
 
 		expect(h.reload()).toEqual(h.current());
 		expect(h.reload()).toEqual([
@@ -87,14 +90,17 @@ describe("cursor todo persistence", () => {
 
 	it("replays the newest snapshot after repeated updates", () => {
 		const h = newHarness();
-		h.handlers.todoSync({ merged: false, todos: [{ content: "step one", status: "in_progress" }] });
-		h.handlers.todoSync({
-			merged: false,
-			todos: [
-				{ content: "step one", status: "completed" },
-				{ content: "step two", status: "in_progress" },
-			],
-		});
+		h.handlers.todoSync({ merged: false, todos: [{ content: "step one", status: "in_progress" }] }, "call-1");
+		h.handlers.todoSync(
+			{
+				merged: false,
+				todos: [
+					{ content: "step one", status: "completed" },
+					{ content: "step two", status: "in_progress" },
+				],
+			},
+			"call-1",
+		);
 
 		expect(h.reload()).toEqual([
 			{
@@ -112,14 +118,17 @@ describe("cursor todo persistence", () => {
 			{ name: "Foundation", tasks: [{ content: "scaffold", status: "pending" }] },
 			{ name: "Auth", tasks: [{ content: "oauth", status: "pending" }] },
 		]);
-		h.handlers.todoSync({
-			merged: false,
-			todos: [
-				{ content: "scaffold", status: "completed" },
-				{ content: "oauth", status: "in_progress" },
-				{ content: "unknown", status: "pending" },
-			],
-		});
+		h.handlers.todoSync(
+			{
+				merged: false,
+				todos: [
+					{ content: "scaffold", status: "completed" },
+					{ content: "oauth", status: "in_progress" },
+					{ content: "unknown", status: "pending" },
+				],
+			},
+			"call-1",
+		);
 
 		expect(h.reload()).toEqual([
 			{ name: "Foundation", tasks: [{ content: "scaffold", status: "completed" }] },
@@ -130,13 +139,16 @@ describe("cursor todo persistence", () => {
 
 	it("never invents an active task for an all-pending remote snapshot", () => {
 		const h = newHarness();
-		h.handlers.todoSync({
-			merged: false,
-			todos: [
-				{ content: "a", status: "pending" },
-				{ content: "b", status: "pending" },
-			],
-		});
+		h.handlers.todoSync(
+			{
+				merged: false,
+				todos: [
+					{ content: "a", status: "pending" },
+					{ content: "b", status: "pending" },
+				],
+			},
+			"call-1",
+		);
 
 		expect(h.reload()[0].tasks.every(task => task.status === "pending")).toBe(true);
 	});
@@ -155,7 +167,7 @@ describe("cursor todo persistence", () => {
 			},
 		});
 
-		handlers.todoSync({ merged: false, todos: [{ content: "a", status: "pending" }] });
+		handlers.todoSync({ merged: false, todos: [{ content: "a", status: "pending" }] }, "call-1");
 
 		expect(entries).toEqual([]);
 	});
@@ -164,13 +176,16 @@ describe("cursor todo persistence", () => {
 		// Cursor's todo call is resolved server-side and runs no local tool, so
 		// without a synthesized event the visible panel stays stale until reload.
 		const h = newHarness();
-		h.handlers.todoSync({
-			merged: false,
-			todos: [
-				{ content: "step one", status: "completed" },
-				{ content: "step two", status: "in_progress" },
-			],
-		});
+		h.handlers.todoSync(
+			{
+				merged: false,
+				todos: [
+					{ content: "step one", status: "completed" },
+					{ content: "step two", status: "in_progress" },
+				],
+			},
+			"call-1",
+		);
 
 		expect(h.uiTodos()).toEqual(h.current());
 		expect(h.uiTodos()).toEqual([
@@ -186,7 +201,7 @@ describe("cursor todo persistence", () => {
 
 	it("keeps the panel, session state, and branch replay in agreement", () => {
 		const h = newHarness([{ name: "Auth", tasks: [{ content: "oauth", status: "pending" }] }]);
-		h.handlers.todoSync({ merged: false, todos: [{ content: "oauth", status: "completed" }] });
+		h.handlers.todoSync({ merged: false, todos: [{ content: "oauth", status: "completed" }] }, "call-1");
 
 		expect(h.uiTodos()).toEqual(h.current());
 		expect(h.reload()).toEqual(h.current());
@@ -202,7 +217,7 @@ describe("cursor todo persistence", () => {
 			},
 		});
 
-		handlers.todoSync({ merged: false, todos: [{ content: "a", status: "pending" }] });
+		handlers.todoSync({ merged: false, todos: [{ content: "a", status: "pending" }] }, "call-1");
 
 		expect(events).toEqual([]);
 	});

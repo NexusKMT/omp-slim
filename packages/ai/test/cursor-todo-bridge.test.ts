@@ -6,7 +6,7 @@ import {
 	type ToolCallState,
 	type UsageState,
 } from "@oh-my-pi/pi-ai/providers/cursor";
-import type { AssistantMessage, CursorTodoSnapshot } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, CursorTodoSnapshot, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
 import { kCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import {
@@ -35,6 +35,10 @@ interface Harness {
 	state: BlockState;
 	usageState: UsageState;
 	snapshots: CursorTodoSnapshot[];
+	/** Call ids handed to `todoSync`, in order. */
+	syncCallIds: string[];
+	/** Results persisted for server-resolved blocks. */
+	toolResults: ToolResultMessage[];
 }
 
 function newHarness(): Harness {
@@ -57,6 +61,8 @@ function newHarness(): Harness {
 	};
 	const stream = new AssistantMessageEventStream();
 	const snapshots: CursorTodoSnapshot[] = [];
+	const syncCallIds: string[] = [];
+	const toolResults: ToolResultMessage[] = [];
 	let textBlock: BlockState["currentTextBlock"] = null;
 	let thinkingBlock: BlockState["currentThinkingBlock"] = null;
 	let toolCall: ToolCallState | null = null;
@@ -82,11 +88,16 @@ function newHarness(): Harness {
 			toolCall = t;
 		},
 		setFirstTokenTime: () => {},
-		onTodoSnapshot: snapshot => {
+		onTodoSnapshot: (snapshot, toolCallId) => {
 			snapshots.push(snapshot);
+			syncCallIds.push(toolCallId);
+		},
+		onToolResult: result => {
+			toolResults.push(result);
+			return result;
 		},
 	};
-	return { output, stream, state, usageState: { sawTokenDelta: false }, snapshots };
+	return { output, stream, state, usageState: { sawTokenDelta: false }, snapshots, syncCallIds, toolResults };
 }
 
 function start(h: Harness, toolCall: unknown, callId = "call-1"): void {
@@ -458,5 +469,32 @@ describe("cursor native todo bridge (wire-encoded protobuf)", () => {
 
 		expect(todoBlocks(h)).toHaveLength(1);
 		expect(h.snapshots).toEqual([]);
+	});
+
+	it("syncs under the streamed call id so the visible block can resolve", () => {
+		// The interactive transcript files the block under the streamed `callId`
+		// and only clears it when `tool_execution_end.toolCallId` matches. A
+		// freshly generated id leaves that card pending and animating forever.
+		const h = drive(updateCall(items([["1", "task", 2]]), 1));
+
+		expect(h.syncCallIds).toEqual([todoBlocks(h)[0].id]);
+	});
+
+	it("persists a paired result so the block survives a transcript rebuild", () => {
+		// `buildSessionContext` strips any `toolCall` with no matching
+		// `toolResult`, so an unpaired resolved block vanishes on reload.
+		const h = drive(updateCall(items([["1", "task", 3]]), 1));
+
+		expect(h.toolResults.map(r => r.toolCallId)).toEqual([todoBlocks(h)[0].id]);
+		expect(h.toolResults[0]).toMatchObject({ role: "toolResult", toolName: "todo", isError: false });
+	});
+
+	it("still pairs a result when the snapshot is refused", () => {
+		// The call happened and the block is rendered; only local state was left
+		// alone. Without a result the block would be stripped on rebuild.
+		const h = drive(readCall(items([["1", "task", 2]]), 5));
+
+		expect(h.snapshots).toEqual([]);
+		expect(h.toolResults.map(r => r.toolCallId)).toEqual([todoBlocks(h)[0].id]);
 	});
 });
