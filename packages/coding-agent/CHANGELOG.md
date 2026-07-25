@@ -12,6 +12,9 @@
 - Fixed the Docker `natives-builder` stage failing to build releases ≥ 17.1.1: the native audio stack added bindgen (miniaudio needs libclang) and a bundled-opus CMake build (needs cmake + make), none of which were installed in the slim builder image.
 - Fixed `omp usage` duplicating org-less legacy accounts as "no usage data" rows whenever any sibling report carried an organization (mixed pools of pre-org-capture rows and fresh org-scoped logins): an org-less account is now covered by its own org-less report, while org-attributed sibling reports still never count as its coverage.
 - `omp usage` revalidates the broker credential snapshot before rendering: live usage reports were previously paired with a disk-cached account list up to an hour old, so a just-completed re-login (org-less row upserted to org-scoped) rendered as a phantom duplicate until the cache expired.
+### Fixed
+
+- Fixed `omp config list` printing credential settings in plain text. `auth.broker.token`, `searxng.token`, `searxng.basicPassword` and `dev.autoqaPush.token` were disclosed in both the human and `--json` output of a command that dumps every value without anyone asking for a specific credential. Credentials are now marked in the schema with a top-level `credential` flag, which also covers settings that have no settings-panel entry and so cannot use `ui.secret`. Human output shows dots; JSON omits `value` and marks the entry `redacted` rather than substituting a placeholder a consumer could write back. `omp config get <path>` is unchanged, since that is an explicit request for one value. The settings panel now derives masking from the same flag, so a credential cannot render as plain text on one surface and dots on the other.
 
 ## [17.1.3] - 2026-07-24
 

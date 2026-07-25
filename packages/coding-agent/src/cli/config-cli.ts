@@ -12,6 +12,7 @@ import {
 	getEnumValues,
 	getType,
 	getUi,
+	isCredential,
 	type SettingPath,
 	Settings,
 	type SettingValue,
@@ -48,6 +49,9 @@ type CliSettingDef = {
 };
 
 const ALL_SETTING_PATHS = Object.keys(SETTINGS_SCHEMA) as SettingPath[];
+
+/** Printed instead of a credential value in human output only. */
+const REDACTED = "********";
 
 /** Find setting definition by path */
 function findSettingDef(path: string): CliSettingDef | undefined {
@@ -277,13 +281,14 @@ async function handleList(flags: { json?: boolean }): Promise<void> {
 	const defs = ALL_SETTING_PATHS.map(path => findSettingDef(path)).filter((def): def is CliSettingDef => !!def);
 
 	if (flags.json) {
-		const result: Record<string, { value: unknown; type: string; description: string }> = {};
+		// A redacted entry omits `value` and says so, rather than substituting a
+		// placeholder string: a consumer cannot tell a stand-in from a real value
+		// and could write it back as the credential.
+		const result: Record<string, { value?: unknown; redacted?: true; type: string; description: string }> = {};
 		for (const def of defs) {
-			result[def.path] = {
-				value: settings.get(def.path),
-				type: def.type,
-				description: def.description,
-			};
+			result[def.path] = isCredential(def.path)
+				? { redacted: true, type: def.type, description: def.description }
+				: { value: settings.get(def.path), type: def.type, description: def.description };
 		}
 		await writeStdout(`${JSON.stringify(result, null, 2)}\n`);
 		return;
@@ -308,8 +313,10 @@ async function handleList(flags: { json?: boolean }): Promise<void> {
 	for (const group of sortedGroups) {
 		console.log(chalk.bold.blue(`[${group}]`));
 		for (const def of groups[group]) {
-			const value = settings.get(def.path);
-			const valueStr = formatValue(value);
+			// `list` dumps every value without anyone asking for a specific
+			// credential, so redact here. `get <path>` stays an explicit
+			// single-value request and is left alone.
+			const valueStr = isCredential(def.path) ? REDACTED : formatValue(settings.get(def.path));
 			const typeStr = getTypeDisplay(def);
 			console.log(`  ${chalk.white(def.path)} = ${valueStr} ${chalk.dim(typeStr)}`);
 		}
