@@ -183,6 +183,7 @@ describe("buildModel", () => {
 			baseUrl: "",
 		} satisfies ModelSpec<"azure-openai-responses">;
 		expect(buildModel(azure).supportsComputerUse).toBe(true);
+		expect(buildModel({ ...azure, provider: "azure-openai" }).supportsComputerUse).toBe(true);
 		expect(buildModel({ ...azure, provider: "custom-azure-proxy" }).supportsComputerUse).toBe(false);
 		expect(buildModel({ ...azure, baseUrl: "https://gateway.example/openai/v1" }).supportsComputerUse).toBe(false);
 	});

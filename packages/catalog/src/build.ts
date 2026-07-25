@@ -34,7 +34,7 @@ function isDirectOpenAIResponsesEndpoint(spec: ModelSpec<Api>): boolean {
 	if (spec.api !== "azure-openai-responses" || (spec.provider !== "azure" && spec.provider !== "azure-openai")) {
 		return false;
 	}
-	if (!spec.baseUrl) return spec.provider === "azure";
+	if (!spec.baseUrl) return true;
 	try {
 		const url = new URL(spec.baseUrl);
 		return (
