@@ -2,7 +2,7 @@ import { expect, it } from "bun:test";
 import * as path from "node:path";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
-it("imports the JS process entry without loading dotenv before profile bootstrap", async () => {
+it("imports the CLI entry graph without loading dotenv before profile bootstrap", async () => {
 	using tempDir = TempDir.createSync("@omp-js-process-import-");
 	await Bun.write(path.join(tempDir.path(), ".env"), "OMP_PROCESS_ENTRY_ENV_PROBE=loaded-too-early\n");
 	const env = Object.fromEntries(
@@ -24,4 +24,17 @@ it("imports the JS process entry without loading dotenv before profile bootstrap
 	expect(exitCode).toBe(0);
 	expect(stdout).toBe("");
 	expect(stderr).toBe("");
+});
+
+it("statically links the JS process selector through the bootstrap-safe rejection seam", async () => {
+	const cliPath = path.resolve(import.meta.dir, "../../cli.ts");
+	const source = await Bun.file(cliPath).text();
+	const imports = new Bun.Transpiler({ loader: "tsx" }).scanImports(source.replace(/^#![^\n]*\n/, ""));
+
+	expect(imports).toContainEqual({
+		kind: "import-statement",
+		path: "@oh-my-pi/pi-utils/postmortem",
+	});
+	expect(imports).toContainEqual({ kind: "import-statement", path: "./eval/js/process-entry" });
+	expect(imports).not.toContainEqual({ kind: "dynamic-import", path: "@oh-my-pi/pi-utils" });
 });
