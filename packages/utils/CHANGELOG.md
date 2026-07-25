@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Contained timed-out child lifecycle rejections so `ptree` callers cannot leak an unhandled `TimeoutError` after settling ([#6635](https://github.com/can1357/oh-my-pi/issues/6635)).
+
 ## [17.0.9] - 2026-07-23
 
 ### Breaking Changes
