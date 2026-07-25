@@ -3288,6 +3288,12 @@ export class AgentSession {
 		this.agent.setMetadataResolver((provider: string) =>
 			buildSessionMetadata(sid, provider, this.#modelRegistry.authStorage),
 		);
+		// Keep every live advisor's provider identity in lockstep with the primary's
+		// across every session-boundary transition — including branch paths that
+		// skip conversation restore — so advisors never emit the previous
+		// conversation's session id/metadata (issue #6625). Guarded because this
+		// runs once during construction before the advisor controller exists.
+		if (this.#advisors) this.#advisors.refreshProviderIdentity();
 	}
 
 	/** Run one abortable auto-learn capture outside the primary agent loop. */

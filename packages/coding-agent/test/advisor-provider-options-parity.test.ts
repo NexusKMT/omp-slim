@@ -301,4 +301,48 @@ describe("AgentSession advisor provider-options parity", () => {
 		expect(metadataSessionId(capturedStreamOptions[0])).toBe(advisor.sessionId);
 		expect(metadataSessionId(capturedStreamOptions[0])).not.toBe(previousAdvisorSessionId);
 	});
+
+	it("refreshes the advisor provider session identity on a fork that skips advisor re-prime", async () => {
+		// Regression for #6625 review: `fork()` (like a branch whose hook returns
+		// `skipConversationRestore`) updates the primary provider identity via
+		// `#syncAgentSessionId()` WITHOUT running `resetSessionState()`. The advisor
+		// must still rebind to the new provider session id instead of emitting the
+		// pre-fork one.
+		const capturedStreamOptions: Array<SimpleStreamOptions | undefined> = [];
+		const captureStreamFn: StreamFn = (_m, _ctx, opts) => {
+			capturedStreamOptions.push(opts);
+			throw new Error("capture-stop");
+		};
+		const mainAgent = new Agent({
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+		});
+		session = new AgentSession({
+			agent: mainAgent,
+			sessionManager,
+			settings: settings(),
+			modelRegistry,
+			advisorTools: [],
+			advisorStreamFn: captureStreamFn,
+		});
+		session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
+		expect(session.setAdvisorEnabled(true)).toBe(true);
+
+		const advisor = session.getAdvisorAgent();
+		if (!advisor?.sessionId) throw new Error("Expected advisor agent with a provider session id");
+		const previousAdvisorSessionId = advisor.sessionId;
+
+		expect(await session.fork()).toBe(true);
+		expect(session.getAdvisorAgent()).toBe(advisor);
+		expect(advisor.sessionId).toMatch(UUID_V7_PATTERN);
+		expect(advisor.sessionId).not.toBe(previousAdvisorSessionId);
+		expect(advisor.sessionId).not.toBe(mainAgent.sessionId);
+		// Fork inherits the parent's provider prompt-cache key (shared shard), so it
+		// stays pinned to the main agent's key rather than the advisor's own id.
+		expect(advisor.promptCacheKey).toBe(mainAgent.promptCacheKey);
+
+		await advisor.prompt("ping").catch(() => {});
+
+		expect(metadataSessionId(capturedStreamOptions[0])).toBe(advisor.sessionId);
+		expect(metadataSessionId(capturedStreamOptions[0])).not.toBe(previousAdvisorSessionId);
+	});
 });

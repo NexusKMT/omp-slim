@@ -329,6 +329,17 @@ export class SessionAdvisors {
 		this.#resetAdvisorSessionState();
 	}
 
+	/**
+	 * Rebind every live advisor to the active primary conversation's provider
+	 * identity (session id, prompt-cache key, credential + metadata resolvers,
+	 * telemetry). Invoked on every provider-session change — including branch
+	 * paths that skip conversation restore — so advisors never keep emitting the
+	 * previous conversation's session id/metadata (issue #6625).
+	 */
+	refreshProviderIdentity(): void {
+		for (const advisor of this.#advisors) this.#refreshAdvisorProviderIdentity(advisor);
+	}
+
 	/** Re-primes advisor transcript views after an in-conversation history rewrite. */
 	resetAllRuntimes(): void {
 		this.#resetAllAdvisorRuntimes();
@@ -447,7 +458,6 @@ export class SessionAdvisors {
 			a.agentUnsubscribe?.();
 			a.agentUnsubscribe = undefined;
 			a.runtime.reset();
-			this.#refreshAdvisorProviderIdentity(a);
 			a.adviseTool.resetDeliveredNotes();
 			a.emissionGuard.reset();
 			this.#attachAdvisorRecorderFeed(a);
