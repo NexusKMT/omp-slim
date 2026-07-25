@@ -3042,6 +3042,11 @@ export class Editor implements Component, Focusable {
 		return true;
 	}
 
+	/** Type literal text through the character-editing pipeline without keybinding dispatch. */
+	typeCharacter(text: string): void {
+		this.#insertCharacter(text);
+	}
+
 	#insertCharacter(char: string): void {
 		this.#exitHistoryForEditing();
 		// Undo coalescing: consecutive word typing collapses into one undo unit

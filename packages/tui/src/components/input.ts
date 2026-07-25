@@ -1,6 +1,6 @@
 import { BracketedPasteHandler, decodeReencodedPasteControls } from "../bracketed-paste";
-import { getKeybindings } from "../keybindings";
-import { extractPrintableText, matchesKey } from "../keys";
+import { canonicalKeyId, getKeybindings } from "../keybindings";
+import { extractPrintableText, parseKey } from "../keys";
 import { KillRing } from "../kill-ring";
 import type { TspInputProps } from "@oh-my-pi/pi-wire";
 import { node } from "../native/describe";
@@ -29,6 +29,16 @@ import {
 } from "../utils";
 
 const segmenter = getSegmenter();
+
+function getSpaceHoldText(data: string, canonical: string | undefined): string | undefined {
+	if (canonical === undefined) return undefined;
+	const shifted = canonical.startsWith("shift+");
+	const base = shifted ? canonical.slice("shift+".length) : canonical;
+	if (base !== "space" && base.length !== 1) return undefined;
+	if (base === "space" && canonical !== "space" && !shifted) return undefined;
+	const text = extractPrintableText(data);
+	return text && (base !== "space" || text === " ") ? text : undefined;
+}
 
 /**
  * Clean text entering the single-line value from outside the keyboard (pastes, dictation) —
@@ -134,6 +144,12 @@ export class Input implements Component, Focusable {
 		return this.#useTerminalCursor;
 	}
 
+	capturesInput(data: string): boolean {
+		const parsedKey = parseKey(data);
+		const canonical = parsedKey !== undefined ? canonicalKeyId(parsedKey) : undefined;
+		return this.spaceHold.shouldRoute(canonical);
+	}
+
 	/**
 	 * Apply one key: the editor's text bindings (motion, deletion, kill ring,
 	 * undo), pastes and printable text. Returns whether the key was the
@@ -154,10 +170,14 @@ export class Input implements Component, Focusable {
 			return true;
 		}
 
-		// Space-hold push-to-talk: a sustained space bar starts/stops STT instead of typing spaces.
-		switch (this.spaceHold.process(matchesKey(data, "space"))) {
+		// Reserve configured keys before text bindings or submit/delete handlers can consume them.
+		const parsedKey = parseKey(data);
+		const canonical = parsedKey !== undefined ? canonicalKeyId(parsedKey) : undefined;
+		const spaceHoldText = getSpaceHoldText(data, canonical);
+		switch (this.spaceHold.process(canonical, spaceHoldText?.length ?? 0)) {
 			case "type":
-				this.#insertCharacter(" ");
+				this.#insertCharacter(spaceHoldText!);
+				this.spaceHold.recordTyped(spaceHoldText!.length);
 				return true;
 			case "swallow":
 				return true;

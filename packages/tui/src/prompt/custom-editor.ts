@@ -9,7 +9,7 @@ import {
 	type NativeEditorLayout,
 } from "../components/editor";
 import { addKeyAliases, canonicalKeyId, getKeybindings } from "../keybindings";
-import { type KeyId, parseKey, parseKittySequence } from "../keys";
+import { type KeyId, extractPrintableText, parseKey, parseKittySequence } from "../keys";
 import { SpaceHoldGesture } from "../space-hold";
 import { type Component, TUI } from "../tui";
 import type { AppKeybinding } from "../app-keybindings";
@@ -46,6 +46,16 @@ import { isNativeRendering } from "../native/state";
 import { isQueuedMessageList, parseQueueShorthand, QUEUE_LIST_MARKER_RE } from "./queue-input";
 import { type WordCompletionMethod, WordCompletionProvider } from "./word-completion";
 import { fgOrPlain, theme } from "../theme/theme";
+
+function getSpaceHoldText(data: string, canonical: string | undefined): string | undefined {
+	if (canonical === undefined) return undefined;
+	const shifted = canonical.startsWith("shift+");
+	const base = shifted ? canonical.slice("shift+".length) : canonical;
+	if (base !== "space" && base.length !== 1) return undefined;
+	if (base === "space" && canonical !== "space" && !shifted) return undefined;
+	const text = extractPrintableText(data);
+	return text && (base !== "space" || text === " ") ? text : undefined;
+}
 
 /** A shell-mode draft's sigil (`!`, `!!`, `$`, `$$`) with its surrounding blanks; the mode chip stands in for it natively. */
 const SHELL_SIGIL_RE = /^\s*(?:!!?|\$\$?)[ \t]?/;
@@ -1325,8 +1335,13 @@ export class CustomEditor extends Editor {
 	/** Space-bar push-to-talk; set its `handler` to enable it. It is a text-composition gesture, so it
 	 *  stays out of Vim's Normal/Visual modes (where the space bar is the `l` motion) and away from an
 	 *  open autocomplete menu. */
+	#spaceHoldSnapshot: { revision: number; line: number; col: number } | undefined;
+
 	readonly spaceHold = new SpaceHoldGesture(
-		count => this.deleteBeforeCursor(count),
+		count => {
+			this.#spaceHoldSnapshot = undefined;
+			if (count > 0) this.deleteBeforeCursor(count);
+		},
 		() => this.vimMode === "insert" && !this.isShowingAutocomplete(),
 	);
 
@@ -1437,6 +1452,11 @@ export class CustomEditor extends Editor {
 		this.#pasteInFlight++;
 		void promise.then(this.#onPasteSettled, this.#onPasteSettled);
 	}
+	capturesInput(data: string): boolean {
+		const parsedKey = parseKey(data);
+		const canonical = parsedKey !== undefined ? canonicalKeyId(parsedKey) : undefined;
+		return this.spaceHold.shouldRoute(canonical);
+	}
 
 	override handleInput(data: string): void {
 		// Serialize behind any in-flight async paste so a trailing Enter / follow-up key can't
@@ -1504,21 +1524,74 @@ export class CustomEditor extends Editor {
 		const parsedKey = parseKey(data);
 		const canonical = parsedKey !== undefined ? canonicalKeyId(parsedKey) : undefined;
 
+		// Space-hold push-to-talk runs before editor shortcuts so a reserved binding can never
+		// delete, move, submit, or invoke an app action while the gesture is enabled.
+		const spaceHoldText = getSpaceHoldText(data, canonical);
+		const priorSnapshot = this.#spaceHoldSnapshot;
+		if (priorSnapshot) {
+			const cursor = this.getCursor();
+			if (
+				this.textRevision !== priorSnapshot.revision ||
+				cursor.line !== priorSnapshot.line ||
+				cursor.col !== priorSnapshot.col
+			) {
+				this.spaceHold.process(undefined);
+				this.#spaceHoldSnapshot = undefined;
+			}
+		}
+
+		switch (this.spaceHold.process(canonical, spaceHoldText?.length ?? 0)) {
+			case "type": {
+				const text = spaceHoldText!;
+				const beforeCursor = this.getCursor();
+				const beforeLine = this.getLines()[beforeCursor.line] ?? "";
+				const beforeRevision = this.textRevision;
+				this.typeCharacter(text);
+				this.#collapseSkillTokens();
+				this.#collapseModelMentions();
+				this.#normalizeQueuePrefix(hadBareQueuePrefix);
+
+				const afterCursor = this.getCursor();
+				const afterLine = this.getLines()[afterCursor.line] ?? "";
+				const noInsertion =
+					this.textRevision === beforeRevision &&
+					afterCursor.line === beforeCursor.line &&
+					afterCursor.col === beforeCursor.col &&
+					afterLine === beforeLine;
+				const literalInsertion =
+					afterCursor.line === beforeCursor.line &&
+					afterCursor.col === beforeCursor.col + text.length &&
+					afterLine === beforeLine.slice(0, beforeCursor.col) + text + beforeLine.slice(beforeCursor.col);
+				if (noInsertion) {
+					this.spaceHold.recordTyped(0);
+				} else if (literalInsertion) {
+					this.spaceHold.recordTyped(text.length);
+				} else {
+					// Typing hooks rewrote the candidate (e.g. autocorrect/inline replacement).
+					// Commit that edit and start a fresh cadence rather than deleting its suffix later.
+					this.spaceHold.process(undefined);
+					this.#spaceHoldSnapshot = undefined;
+					return;
+				}
+				const cursor = this.getCursor();
+				this.#spaceHoldSnapshot = {
+					revision: this.textRevision,
+					line: cursor.line,
+					col: cursor.col,
+				};
+				return;
+			}
+			case "swallow":
+				return;
+		}
+		this.#spaceHoldSnapshot = undefined;
+
 		// Left-arrow on an empty editor: surface for the agent-hub double-tap
 		// gesture. Plain "left" only — modified arrows and any in-text cursor
 		// movement fall through to normal handling.
 		if (canonical === "left" && this.onLeftAtStart && this.getText().trim() === "") {
 			this.onLeftAtStart();
 			return;
-		}
-
-		// Space-hold push-to-talk: a sustained space bar starts/stops STT instead of typing spaces.
-		switch (this.spaceHold.process(canonical === "space")) {
-			case "type":
-				this.#forwardInput(data);
-				return;
-			case "swallow":
-				return;
 		}
 
 		// One union probe decides whether any per-action interception below can

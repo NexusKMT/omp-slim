@@ -294,10 +294,15 @@ export interface Component {
 	handleNativeEvent?(event: NativeUiEvent): void;
 
 	/**
+	 * Pure preflight for focused input that must precede TUI-wide input listeners
+	 * and debug shortcuts. A true result routes the event to this component first.
+	 */
+	capturesInput?(data: string): boolean;
+
+	/**
 	 * Optional handler for keyboard input when component has focus
 	 */
 	handleInput?(data: string): void;
-
 	/**
 	 * If true, component receives key release events (Kitty protocol).
 	 * Default is false - release events are filtered out.
@@ -2725,12 +2730,46 @@ export class TUI extends Container {
 			data = data.slice(0, searchFrom + match.index) + data.slice(searchFrom + match.index + match[0].length);
 		}
 		if (data.length === 0) return;
+
+		// Consume terminal cell size responses before any component claims keyboard input.
+		if (this.#consumeCellSizeResponse(data)) {
+			return;
+		}
+
+		// If focused component is an overlay, verify it's still visible before input preflight
+		// or global listeners can claim its keys.
+		const focusedOverlay = this.overlayStack.find(o => o.component === this.#focusedComponent);
+		if (focusedOverlay && !this.#isOverlayVisible(focusedOverlay)) {
+			// Focused overlay is no longer visible, redirect to topmost visible overlay
+			const topVisible = this.#getTopmostVisibleOverlay();
+			if (topVisible) {
+				this.setFocus(topVisible.component);
+			} else {
+				// No visible overlays, restore to preFocus
+				this.setFocus(focusedOverlay.preFocus);
+			}
+		}
+
 		// Ctrl+C/Esc use app-level double-press windows. Give those gestures one
 		// frame to drain queued input before an ordinary repaint; delaying every
 		// key would make idle navigation pay a full frame of latency.
 		if (matchesKey(data, "ctrl+c") || matchesKey(data, "escape")) {
 			this.#inputRenderGraceUntilMs = this.#renderScheduler.now() + TUI.#INPUT_RENDER_GRACE_MS;
 		}
+
+		// A focused input owner can reserve its gesture before TUI-wide listeners
+		// and debug shortcuts see the key, then handle the raw event exactly once.
+		const focusedForCapture = this.#focusedComponent;
+		if (
+			focusedForCapture?.handleInput &&
+			(!isKeyRelease(data) || focusedForCapture.wantsKeyRelease) &&
+			focusedForCapture.capturesInput?.(data)
+		) {
+			focusedForCapture.handleInput(data);
+			this.requestRender();
+			return;
+		}
+
 		if (this.#inputListeners.size > 0) {
 			let current = data;
 			for (const listener of this.#inputListeners) {
@@ -2748,29 +2787,10 @@ export class TUI extends Container {
 			data = current;
 		}
 
-		// Consume terminal cell size responses without blocking unrelated input.
-		if (this.#consumeCellSizeResponse(data)) {
-			return;
-		}
-
 		// Global debug key handler (Shift+Ctrl+D)
 		if (matchesKey(data, "shift+ctrl+d") && this.onDebug) {
 			this.onDebug();
 			return;
-		}
-
-		// If focused component is an overlay, verify it's still visible
-		// (visibility can change due to terminal resize or visible() callback)
-		const focusedOverlay = this.overlayStack.find(o => o.component === this.#focusedComponent);
-		if (focusedOverlay && !this.#isOverlayVisible(focusedOverlay)) {
-			// Focused overlay is no longer visible, redirect to topmost visible overlay
-			const topVisible = this.#getTopmostVisibleOverlay();
-			if (topVisible) {
-				this.setFocus(topVisible.component);
-			} else {
-				// No visible overlays, restore to preFocus
-				this.setFocus(focusedOverlay.preFocus);
-			}
 		}
 
 		// Pass input to focused component (including Ctrl+C).
