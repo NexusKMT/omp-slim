@@ -38,6 +38,8 @@ use crate::task;
 const OPERATION_TIMEOUT: Duration = Duration::from_mins(1);
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 const WAIT_ACTION_DURATION: Duration = Duration::from_secs(2);
+#[cfg(target_os = "macos")]
+const MACOS_POST_INPUT_SETTLE_DURATION: Duration = Duration::from_millis(100);
 const MAX_COMPOSITE_PIXELS: u64 = 268_435_456;
 
 const PERMISSION_GRANTED: &str = "granted";
@@ -925,6 +927,26 @@ fn executable_batch_actions(
 		.filter(|action| !matches!(action, ValidatedAction::Screenshot))
 }
 
+#[cfg(any(target_os = "macos", test))]
+/// Whether the final segment after the last explicit wait contains input.
+/// Screenshot markers are deferred and do not affect settling.
+fn needs_post_input_settle(actions: &[ValidatedAction]) -> bool {
+	let mut needs_settle = false;
+	for action in actions {
+		match action {
+			ValidatedAction::Wait => needs_settle = false,
+			ValidatedAction::Screenshot => {},
+			ValidatedAction::Click { .. }
+			| ValidatedAction::Drag { .. }
+			| ValidatedAction::Keypress { .. }
+			| ValidatedAction::Move { .. }
+			| ValidatedAction::Scroll { .. }
+			| ValidatedAction::Type { .. } => needs_settle = true,
+		}
+	}
+	needs_settle
+}
+
 struct DesktopWorker {
 	config:         SessionConfig,
 	capabilities:   Arc<Mutex<DesktopCapabilities>>,
@@ -1239,6 +1261,8 @@ impl DesktopWorker {
 		// Freeze coordinate mapping to the last frame returned before this batch.
 		// In-batch screenshot markers are deferred to the single final capture.
 		let batch_frame = BatchCoordinateFrame::from_returned_frame(self.returned_frame.as_ref());
+		#[cfg(target_os = "macos")]
+		let needs_post_input_settle = needs_post_input_settle(&actions);
 		for action in executable_batch_actions(actions) {
 			check_deadline(deadline)?;
 			match action {
@@ -1301,6 +1325,11 @@ impl DesktopWorker {
 					thread::sleep(WAIT_ACTION_DURATION.min(remaining));
 				},
 			}
+		}
+		#[cfg(target_os = "macos")]
+		if needs_post_input_settle {
+			let remaining = deadline.saturating_duration_since(Instant::now());
+			thread::sleep(MACOS_POST_INPUT_SETTLE_DURATION.min(remaining));
 		}
 		// The result is always a new frame taken after the complete ordered batch.
 		check_deadline(deadline)?;
@@ -2206,6 +2235,52 @@ mod tests {
 			ValidatedAction::Wait,
 			ValidatedAction::Keypress { keys: vec!["A".to_string()] },
 		]);
+	}
+
+	#[test]
+	fn post_input_settle_depends_on_input_after_the_last_wait() {
+		let input_actions = [
+			ValidatedAction::Click {
+				x:         0,
+				y:         0,
+				button:    MouseButton::Left,
+				count:     1,
+				modifiers: Vec::new(),
+			},
+			ValidatedAction::Drag {
+				path:      vec![DesktopPoint { x: 0, y: 0 }, DesktopPoint { x: 1, y: 1 }],
+				modifiers: Vec::new(),
+			},
+			ValidatedAction::Keypress { keys: vec!["A".to_string()] },
+			ValidatedAction::Move { x: 0, y: 0, modifiers: Vec::new() },
+			ValidatedAction::Scroll {
+				x:         0,
+				y:         0,
+				scroll_x:  0,
+				scroll_y:  1,
+				modifiers: Vec::new(),
+			},
+			ValidatedAction::Type { text: "x".to_string() },
+		];
+		for input in input_actions {
+			assert!(needs_post_input_settle(&[input]));
+		}
+
+		assert!(!needs_post_input_settle(&[ValidatedAction::Screenshot]));
+		assert!(!needs_post_input_settle(&[ValidatedAction::Wait]));
+		assert!(!needs_post_input_settle(&[
+			ValidatedAction::Type { text: "x".to_string() },
+			ValidatedAction::Wait,
+		]));
+		assert!(needs_post_input_settle(&[
+			ValidatedAction::Type { text: "x".to_string() },
+			ValidatedAction::Wait,
+			ValidatedAction::Keypress { keys: vec!["A".to_string()] },
+		]));
+		assert!(needs_post_input_settle(&[
+			ValidatedAction::Move { x: 0, y: 0, modifiers: Vec::new() },
+			ValidatedAction::Screenshot,
+		]));
 	}
 
 	#[test]
