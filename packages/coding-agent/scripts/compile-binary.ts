@@ -10,6 +10,8 @@ export interface CodingAgentCompileOptions {
 	readonly repoRoot: string;
 	/** Absolute CLI entrypoint. */
 	readonly entrypoint: string;
+	/** Additional worker modules embedded as independently evaluated process entries. */
+	readonly workerEntrypoints?: readonly string[];
 	/** Absolute standalone executable output path. */
 	readonly outfile: string;
 	/** Concrete Transformers.js version baked into the tiny-model worker. */
@@ -33,7 +35,7 @@ export async function compileCodingAgent(options: CodingAgentCompileOptions): Pr
 	}
 	try {
 		const output = await Bun.build({
-			entrypoints: [options.entrypoint],
+			entrypoints: [options.entrypoint, ...(options.workerEntrypoints ?? [])],
 			root: options.repoRoot,
 			external: [...COMPILED_EXTERNAL_DEPENDENCIES],
 			define: {

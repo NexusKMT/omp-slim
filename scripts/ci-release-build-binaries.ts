@@ -16,6 +16,7 @@ interface BinaryTarget {
 const repoRoot = path.join(import.meta.dir, "..");
 const binariesDir = path.join(repoRoot, "packages", "coding-agent", "binaries");
 const entrypoint = path.join(repoRoot, "packages", "coding-agent", "src", "cli.ts");
+const workerEntrypoint = path.join(repoRoot, "packages", "coding-agent", "src", "computer-worker-process-entry.ts");
 const transformersManifest: unknown = createRequire(import.meta.url)("@huggingface/transformers/package.json");
 if (
 	typeof transformersManifest !== "object" ||
@@ -26,9 +27,8 @@ if (
 	throw new Error("@huggingface/transformers package manifest has no string version");
 }
 const transformersVersion = transformersManifest.version;
-// Worker threads re-enter the binary's CLI entry module. Legacy Pi host
-// modules are supplied by the in-memory compile plugin, so neither subsystem
-// needs extra `--compile` entrypoints.
+// The computer worker is an independent compiled entry so its native graph is
+// evaluated only when the supervisor selects it. Other workers re-enter the CLI.
 const isDryRun = process.argv.includes("--dry-run");
 const targets: BinaryTarget[] = [
 	{
@@ -144,6 +144,7 @@ async function buildBinary(target: BinaryTarget): Promise<void> {
 	await compileCodingAgent({
 		repoRoot,
 		entrypoint,
+		workerEntrypoints: [workerEntrypoint],
 		outfile: path.join(repoRoot, target.outfile),
 		transformersVersion,
 		target: target.target,

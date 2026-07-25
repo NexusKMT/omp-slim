@@ -1,7 +1,5 @@
 import type { DesktopAction, DesktopCapabilities, DesktopCapture, DesktopSessionOptions } from "@oh-my-pi/pi-natives";
 
-export const COMPUTER_WORKER_ARG = "__omp_worker_computer";
-
 export type ComputerWorkerInbound =
 	| { type: "ping"; id: string }
 	| { type: "init"; options: DesktopSessionOptions }

@@ -75,7 +75,13 @@ async function cleanBundleOutputs(): Promise<void> {
 	}
 	await Promise.all(
 		entries
-			.filter(entry => entry === "cli.js" || entry.endsWith(".node") || entry.endsWith(".js.map"))
+			.filter(
+				entry =>
+					entry === "cli.js" ||
+					entry === "computer-worker-process-entry.js" ||
+					entry.endsWith(".node") ||
+					entry.endsWith(".js.map"),
+			)
 			.map(entry => fs.rm(path.join(outDir, entry), { force: true })),
 	);
 }
@@ -92,7 +98,10 @@ async function main(): Promise<void> {
 		// 128KiB per-argv-string cap, so it can never be passed as a CLI
 		// `--define` (posix_spawn fails with E2BIG).
 		const output = await Bun.build({
-			entrypoints: [path.join(packageDir, "src/cli.ts")],
+			entrypoints: [
+				path.join(packageDir, "src/cli.ts"),
+				path.join(packageDir, "src/computer-worker-process-entry.ts"),
+			],
 			outdir: outDir,
 			target: "bun",
 			external: [...ALWAYS_EXTERNAL, ...RUNTIME_EXTERNAL],

@@ -386,8 +386,14 @@ function buildParams(
 		if (serializedTools.length > 0) {
 			params.tools = serializedTools;
 			if (options?.toolChoice) {
-				const toolChoice = mapToOpenAIResponsesToolChoice(options.toolChoice);
+				let toolChoice = mapToOpenAIResponsesToolChoice(options.toolChoice);
 				const hasComputerTool = serializedTools.some(tool => tool.type === "computer");
+				if (toolChoice && typeof toolChoice !== "string" && toolChoice.type === "computer" && !hasComputerTool) {
+					const computer = context.tools.find(tool => tool.native?.type === "computer");
+					if (computer && serializedTools.some(tool => tool.type === "function" && tool.name === computer.name)) {
+						toolChoice = { type: "function", name: computer.name };
+					}
+				}
 				if (
 					toolChoice &&
 					(typeof toolChoice === "string" ||

@@ -208,7 +208,7 @@ describe("azure openai responses streaming", () => {
 		expect(Array.isArray(tools[0].parameters.properties.item.anyOf)).toBe(true);
 	});
 
-	it("serializes computer as a function tool on unsupported models and gates the native forced choice", async () => {
+	it("serializes computer and its forced choice as a function on unsupported models", async () => {
 		const computer: Tool = {
 			name: "computer",
 			description: "Control the desktop",
@@ -233,7 +233,7 @@ describe("azure openai responses streaming", () => {
 			expect.objectContaining({ type: "function", name: "read_file" }),
 		]);
 		expect(JSON.stringify(payload.tools)).not.toContain('{"type":"computer"}');
-		expect(payload.tool_choice).toBeUndefined();
+		expect(payload.tool_choice).toEqual({ type: "function", name: "computer" });
 	});
 
 	it("serializes native GA computer and forced choice for a supported GPT-5.4 Azure model", async () => {

@@ -106,6 +106,7 @@
   "files": [
     "src",
     "dist/cli.js",
+    "dist/computer-worker-process-entry.js",
     "dist/*.node",
     "scripts",
     "examples",

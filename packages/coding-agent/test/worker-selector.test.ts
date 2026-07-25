@@ -41,20 +41,4 @@ describe("computer worker entry", () => {
 	it("is side-effect-free to import and exposes a named start function", () => {
 		expect(computerWorkerEntry.startComputerWorker).toBeFunction();
 	});
-
-	it("dispatches an immediately posted message through the CLI worker selector", async () => {
-		const worker = new Worker(new URL("../src/cli.ts", import.meta.url).href, {
-			type: "module",
-			argv: ["__omp_worker_computer"],
-		});
-		const response = Promise.withResolvers<unknown>();
-		worker.addEventListener("message", event => response.resolve(event.data));
-
-		try {
-			worker.postMessage({ type: "ping", id: "computer-worker-selector" });
-			expect(await response.promise).toEqual({ type: "pong", id: "computer-worker-selector" });
-		} finally {
-			worker.terminate();
-		}
-	});
 });

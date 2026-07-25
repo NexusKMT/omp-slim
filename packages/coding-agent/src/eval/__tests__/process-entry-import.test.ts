@@ -26,15 +26,32 @@ it("imports the CLI entry graph without loading dotenv before profile bootstrap"
 	expect(stderr).toBe("");
 });
 
-it("statically links the JS process selector through the bootstrap-safe rejection seam", async () => {
+it("starts ordinary CLI paths without evaluating the computer worker entry", async () => {
 	const cliPath = path.resolve(import.meta.dir, "../../cli.ts");
-	const source = await Bun.file(cliPath).text();
-	const imports = new Bun.Transpiler({ loader: "tsx" }).scanImports(source.replace(/^#![^\n]*\n/, ""));
+	for (const args of [
+		["--no-addons", cliPath, "--version"],
+		[cliPath, "--help"],
+	]) {
+		const proc = Bun.spawn([process.execPath, ...args], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+		expect(exitCode, `${args.at(-1)}: ${stderr}`).toBe(0);
+	}
+});
 
-	expect(imports).toContainEqual({
-		kind: "import-statement",
-		path: "@oh-my-pi/pi-utils/postmortem",
+it("dispatches the computer worker through its dedicated process entry", async () => {
+	const fixture = path.resolve(import.meta.dir, "../../../test/fixtures/computer-worker-process-entry.ts");
+	const proc = Bun.spawn([process.execPath, fixture], {
+		stdout: "pipe",
+		stderr: "pipe",
 	});
-	expect(imports).toContainEqual({ kind: "import-statement", path: "./eval/js/process-entry" });
-	expect(imports).not.toContainEqual({ kind: "dynamic-import", path: "@oh-my-pi/pi-utils" });
+	const [exitCode, stdout, stderr] = await Promise.all([
+		proc.exited,
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+	]);
+	expect(exitCode, stderr).toBe(0);
+	expect(stdout).toBe('{"type":"pong","id":"computer-process-entry"}\n');
 });

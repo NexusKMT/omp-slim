@@ -1,12 +1,8 @@
 import type { DesktopAction, DesktopCapabilities, DesktopCapture, DesktopSessionOptions } from "@oh-my-pi/pi-natives";
-import { logger, withTimeout, workerHostEntry } from "@oh-my-pi/pi-utils";
+import { withTimeout } from "@oh-my-pi/pi-utils/async";
+import * as logger from "@oh-my-pi/pi-utils/logger";
 import { ToolAbortError, ToolError } from "../tool-errors";
-import {
-	COMPUTER_WORKER_ARG,
-	type ComputerWorkerError,
-	type ComputerWorkerInbound,
-	type ComputerWorkerOutbound,
-} from "./protocol";
+import type { ComputerWorkerError, ComputerWorkerInbound, ComputerWorkerOutbound } from "./protocol";
 
 const START_TIMEOUT_MS = 10_000;
 const CLOSE_TIMEOUT_MS = 1_500;
@@ -66,11 +62,11 @@ function wrapWorker(worker: Worker): ComputerWorkerHandle {
 }
 
 export function spawnComputerWorker(): ComputerWorkerHandle {
-	const hostEntry = workerHostEntry();
-	const worker = hostEntry
-		? new Worker(hostEntry, { type: "module", argv: [COMPUTER_WORKER_ARG] })
-		: new Worker(new URL("./worker-entry.ts", import.meta.url).href, { type: "module" });
-	return wrapWorker(worker);
+	const processEntry =
+		process.env.PI_BUNDLED === "true" || process.env.PI_COMPILED === "true"
+			? new URL("./computer-worker-process-entry.js", import.meta.url).href
+			: new URL("../../computer-worker-process-entry.ts", import.meta.url).href;
+	return wrapWorker(new Worker(processEntry, { type: "module" }));
 }
 
 interface PendingRequest {
