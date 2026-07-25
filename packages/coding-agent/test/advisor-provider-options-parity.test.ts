@@ -208,4 +208,52 @@ describe("AgentSession advisor provider-options parity", () => {
 		expect(advisor.sessionId).toMatch(UUID_V7_PATTERN);
 		expect(advisor.sessionId).not.toBe(advisor.promptCacheKey);
 	});
+
+	it("propagates the advisor's own provider session id via metadata.user_id, distinct from the main agent", async () => {
+		// Regression for #6625: the separately constructed advisor Agent had no
+		// metadata resolver, so its outbound Anthropic request omitted the
+		// `metadata.user_id` session identity that AgentSession installs for the
+		// main/subagent agents — custom proxies saw advisor traffic with no
+		// stable session id to route or attribute on.
+		const capturedStreamOptions: Array<SimpleStreamOptions | undefined> = [];
+		const captureStreamFn: StreamFn = (_m, _ctx, opts) => {
+			capturedStreamOptions.push(opts);
+			throw new Error("capture-stop");
+		};
+		const mainAgent = new Agent({
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+		});
+		session = new AgentSession({
+			agent: mainAgent,
+			sessionManager,
+			settings: settings(),
+			modelRegistry,
+			advisorTools: [],
+			advisorStreamFn: captureStreamFn,
+		});
+		session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
+		expect(session.setAdvisorEnabled(true)).toBe(true);
+
+		const advisor = session.getAdvisorAgent();
+		if (!advisor) throw new Error("Expected advisor agent to be live");
+
+		await advisor.prompt("ping").catch(() => {});
+
+		const opts = capturedStreamOptions[0];
+		if (!opts) throw new Error("Expected captured advisor stream options");
+
+		// The advisor request must carry a non-empty session id keyed to the
+		// advisor's own provider-facing UUIDv7, not the parent session id.
+		const advisorMeta = opts.metadata as { user_id?: string } | undefined;
+		if (!advisorMeta?.user_id) throw new Error("Expected advisor metadata.user_id");
+		const advisorUserId = JSON.parse(advisorMeta.user_id) as { session_id?: string };
+		expect(advisorUserId.session_id).toBe(advisor.sessionId);
+
+		// Distinct from the main agent's session identity (both non-empty).
+		const mainMeta = mainAgent.metadataForProvider("anthropic") as { user_id?: string } | undefined;
+		if (!mainMeta?.user_id) throw new Error("Expected main agent metadata.user_id");
+		const mainUserId = JSON.parse(mainMeta.user_id) as { session_id?: string };
+		expect(mainUserId.session_id).toBeTruthy();
+		expect(advisorUserId.session_id).not.toBe(mainUserId.session_id);
+	});
 });

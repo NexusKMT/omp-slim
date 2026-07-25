@@ -93,6 +93,7 @@ import { formatSessionDumpText } from "./session-dump-format";
 import type { CompactionEntry, SessionEntry } from "./session-entries";
 import { formatSessionHistoryMarkdown } from "./session-history-format";
 import type { SessionManager } from "./session-manager";
+import { buildSessionMetadata } from "./session-metadata";
 import type { YieldQueue } from "./yield-queue";
 
 /** Advisor statistics for the advisor status command. */
@@ -677,6 +678,19 @@ export class SessionAdvisors {
 				serviceTierResolver: advisorServiceTierResolver,
 			});
 			advisorAgent.setDisableReasoning(shouldDisableReasoning(advisorThinkingLevel));
+			// Emit the advisor's own provider-facing session id as request metadata
+			// (`metadata.user_id`), exactly like `AgentSession.#syncAgentSessionId`
+			// installs for the main/subagent agents. Without it the separately
+			// constructed advisor `Agent` had no metadata resolver, so custom
+			// Anthropic proxies saw advisor traffic with no session identity while
+			// Main/subagent requests carried one (issue #6625). Resolved live so a
+			// token refresh surfaces the current `account_uuid`.
+			if (advisorProviderSessionId) {
+				const advisorSessionId = advisorProviderSessionId;
+				advisorAgent.setMetadataResolver((provider: string) =>
+					buildSessionMetadata(advisorSessionId, provider, this.#host.modelRegistry.authStorage),
+				);
+			}
 
 			const advisorAgentFacade: AdvisorAgent = {
 				prompt: async input => {
