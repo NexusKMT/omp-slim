@@ -4127,6 +4127,7 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 	// `function_call_output` (OpenAI rejects mismatched pairs).
 	const customCallIds = new Set<string>();
 	const knownCallIds = new Set<string>();
+	const computerCallIds = new Set<string>();
 
 	for (const msg of transformedMessages) {
 		if (msg.role === "user" || msg.role === "developer") {
@@ -4144,6 +4145,7 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 					if (item.type === "custom_tool_call") {
 						customCallIds.add(item.call_id);
 					}
+					if (item.type === "computer_call") computerCallIds.add(item.call_id);
 					if ((item.type === "function_call" || item.type === "custom_tool_call") && item.call_id) {
 						knownCallIds.add(item.call_id);
 					}
@@ -4182,6 +4184,7 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 						if (item.type === "custom_tool_call") {
 							customCallIds.add(item.call_id);
 						}
+						if (item.type === "computer_call") computerCallIds.add(item.call_id);
 						if ((item.type === "function_call" || item.type === "custom_tool_call") && item.call_id) {
 							knownCallIds.add(item.call_id);
 						}
@@ -4207,6 +4210,8 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 				customCallIds,
 				false,
 				true,
+				undefined,
+				computerCallIds,
 			);
 			const outputItems = suppressHiddenEmptyFallback
 				? sanitizeOpenAIResponsesAssistantFallbackItemsForReplay(convertedOutputItems)
@@ -4228,6 +4233,7 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 				knownCallIds,
 				customCallIds,
 				true,
+				computerCallIds,
 			);
 		}
 

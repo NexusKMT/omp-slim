@@ -187,6 +187,46 @@ describe("OpenAI GA computer contract", () => {
 		expect(lite.input?.[0]).toEqual({ type: "additional_tools", role: "developer", tools: [{ type: "computer" }] });
 		expect(lite.tool_choice).toBe("required");
 	});
+	test("pairs in-memory computer results for an explicit Codex native opt-in", () => {
+		const optedIn = buildModel({
+			...model("openai-codex-responses", "gpt-5.6-terra"),
+			supportsComputerUse: true,
+		} as ModelSpec<"openai-codex-responses">);
+		const call = assistant([
+			{
+				type: "toolCall",
+				id: "call_native_codex|item_native_codex",
+				name: "computer",
+				arguments: {},
+				providerMetadata: {
+					type: "computer",
+					providerItemId: "item_native_codex",
+					actions: [{ type: "screenshot" }],
+					pendingSafetyChecks: [],
+				},
+			},
+		]);
+		const result: ToolResultMessage = {
+			role: "toolResult",
+			toolCallId: "call_native_codex|item_native_codex",
+			toolName: "computer",
+			content: [{ type: "image", data: "cG5n", mimeType: "image/png", detail: "original" }],
+			isError: false,
+			timestamp: 2,
+			providerMetadata: {
+				type: "computer",
+				screenshot: { type: "computer_screenshot", image_url: "data:image/png;base64,cG5n" },
+				acknowledgedSafetyChecks: [],
+			},
+		};
+
+		const replay = convertCodexResponsesMessages(optedIn, { messages: [call, result] });
+		expect(replay).toContainEqual(expect.objectContaining({ type: "computer_call", call_id: "call_native_codex" }));
+		expect(replay).toContainEqual(
+			expect.objectContaining({ type: "computer_call_output", call_id: "call_native_codex" }),
+		);
+		expect(replay.some(item => item.type === "function_call_output")).toBe(false);
+	});
 	test("parses batched streamed actions, stable item id, and safety checks", async () => {
 		const output = assistant([]);
 		const emitted: unknown[] = [];
