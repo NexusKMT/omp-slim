@@ -793,6 +793,7 @@ export class ModelRegistry {
 	// Runtime model managers registered by extensions via fetchDynamicModels.
 	// Keyed by provider name; use the same SQLite cache path as builtins.
 	#runtimeModelManagers: Map<string, { options: ModelManagerOptions<Api>; sourceId: string }> = new Map();
+	#ignorePiNativeProviderConfig: boolean;
 	#fetch: FetchImpl;
 
 	#resolveCommandBackedApiKey(provider: string): CommandApiKeyResolution {
@@ -829,8 +830,13 @@ export class ModelRegistry {
 	constructor(
 		readonly authStorage: AuthStorage,
 		modelsPath?: string,
-		options?: { fetch?: FetchImpl },
+		options?: {
+			/** Skip models config providers routed through a pi-native gateway, preventing a gateway server from routing back into itself. */
+			ignorePiNativeProviderConfig?: boolean;
+			fetch?: FetchImpl;
+		},
 	) {
+		this.#ignorePiNativeProviderConfig = options?.ignorePiNativeProviderConfig ?? false;
 		this.#fetch =
 			options?.fetch ??
 			(isBunTestRuntime()
@@ -1396,8 +1402,13 @@ export class ModelRegistry {
 		const allModelOverrides = new Map<string, Map<string, ModelOverride>>();
 		const keylessProviders = new Set<string>();
 		const discoverableProviders: DiscoveryProviderConfig[] = [];
-		const providerEntries = Object.entries(value.providers ?? {});
-		const configuredProviders = new Set(Object.keys(value.providers ?? {}));
+		const providerEntries = Object.entries(value.providers ?? {}).filter(
+			([, providerConfig]) => !this.#ignorePiNativeProviderConfig || providerConfig.transport !== "pi-native",
+		);
+		const configuredProviders = new Set(providerEntries.map(([providerName]) => providerName));
+		const effectiveConfig = this.#ignorePiNativeProviderConfig
+			? { ...value, providers: Object.fromEntries(providerEntries) }
+			: value;
 		for (const [providerName, providerConfig] of providerEntries) {
 			const resolvedProviderHeaders = resolveConfigHeaders(providerConfig.headers);
 			// Always set overrides when baseUrl/headers/apiKey/authHeader/compat/disableStrictTools/transport are present
@@ -1470,7 +1481,7 @@ export class ModelRegistry {
 		}
 
 		return {
-			models: this.#parseModels(value),
+			models: this.#parseModels(effectiveConfig),
 			overrides,
 			modelOverrides: allModelOverrides,
 			keylessProviders,

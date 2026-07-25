@@ -208,7 +208,7 @@ async function runServe(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
 	const snapshot = storage.exportSnapshot();
 	const providersWithCreds = new Set<string>();
 	for (const entry of snapshot.credentials) providersWithCreds.add(entry.provider);
-	const registry = new ModelRegistry(storage);
+	const registry = new ModelRegistry(storage, undefined, { ignorePiNativeProviderConfig: true });
 	await registry.refresh();
 	let modelById = indexModelsByRequestId(registry.getAll(), providersWithCreds);
 

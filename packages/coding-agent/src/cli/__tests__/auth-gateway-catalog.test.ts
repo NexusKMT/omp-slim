@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
+import { TempDir } from "@oh-my-pi/pi-utils";
 import { ModelRegistry } from "../../config/model-registry";
 import { indexModelsByRequestId } from "../auth-gateway-cli";
 
@@ -46,6 +47,40 @@ describe("indexModelsByRequestId (auth-gateway catalog)", () => {
 		// "Unknown model" when the index was built from getBundledModels only.
 		expect(index.get("anthropic/claude-opus-5-repro")?.id).toBe("claude-opus-5-repro");
 		expect(index.get("claude-opus-5-repro")?.id).toBe("claude-opus-5-repro");
+	});
+
+	test("ignores client-side pi-native routing in the gateway registry", async () => {
+		using tempDir = TempDir.createSync("@omp-auth-gateway-catalog-");
+		const modelsPath = tempDir.join("models.yml");
+		await Bun.write(
+			modelsPath,
+			[
+				"providers:",
+				"  anthropic:",
+				"    baseUrl: http://127.0.0.1:18899",
+				"    apiKey: gateway-token",
+				"    transport: pi-native",
+				"",
+			].join("\n"),
+		);
+
+		const clientRegistry = new ModelRegistry(stubAuthStorage(), modelsPath);
+		const routedModel = clientRegistry.find("anthropic", "claude-sonnet-4-5");
+		expect(routedModel?.transport).toBe("pi-native");
+		expect(routedModel?.baseUrl).toBe("http://127.0.0.1:18899");
+
+		const gatewayRegistry = new ModelRegistry(stubAuthStorage(), modelsPath, {
+			ignorePiNativeProviderConfig: true,
+		});
+		const gatewayModel = gatewayRegistry.find("anthropic", "claude-sonnet-4-5");
+		const bundledModel = getBundledModels("anthropic").find(model => model.id === "claude-sonnet-4-5");
+		if (!gatewayModel || !bundledModel) throw new Error("expected bundled Anthropic model");
+
+		expect(gatewayModel.transport).toBeUndefined();
+		expect(gatewayModel.baseUrl).toBe(bundledModel.baseUrl);
+		expect(indexModelsByRequestId(gatewayRegistry.getAll(), new Set(["anthropic"])).get(gatewayModel.id)).toBe(
+			gatewayModel,
+		);
 	});
 
 	test("scopes the catalog to providers with credentials", () => {
