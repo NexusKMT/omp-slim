@@ -278,7 +278,7 @@ describe("azure openai responses streaming", () => {
 			},
 			supportedModel,
 			{
-				toolChoice: { type: "computer" },
+				toolChoice: { type: "function", name: "computer" },
 				include: ["computer_call_output.output.image_url", "reasoning.encrypted_content"],
 			},
 		);

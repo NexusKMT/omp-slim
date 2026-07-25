@@ -394,6 +394,12 @@ function buildParams(
 						toolChoice = { type: "function", name: computer.name };
 					}
 				}
+				if (toolChoice && typeof toolChoice !== "string" && toolChoice.type === "function" && hasComputerTool) {
+					const computer = context.tools.find(tool => tool.native?.type === "computer");
+					if (computer?.name === toolChoice.name) {
+						toolChoice = { type: "computer" };
+					}
+				}
 				if (
 					toolChoice &&
 					(typeof toolChoice === "string" ||
