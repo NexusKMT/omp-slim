@@ -173,8 +173,17 @@ export function trimRemoteCompactionInputToContextWindow(
 		estimatedTokensAfter = estimateRemoteCompactionInputTokens(rewrittenInput, instructions, tools);
 	}
 
+	if (!rewrittenInput || estimatedTokensAfter > contextWindow) {
+		return {
+			input,
+			rewrittenOutputs: 0,
+			estimatedTokensBefore,
+			estimatedTokensAfter: estimatedTokensBefore,
+		};
+	}
+
 	return {
-		input: rewrittenInput ?? input,
+		input: rewrittenInput,
 		rewrittenOutputs,
 		estimatedTokensBefore,
 		estimatedTokensAfter,

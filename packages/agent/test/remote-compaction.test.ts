@@ -518,6 +518,22 @@ describe("remote compaction input forwarding", () => {
 		expect(input[2].output).toHaveLength(8_000);
 	});
 
+	test("keeps the original input when trailing rewrites cannot make the request fit", () => {
+		const input = [
+			{ type: "function_call", call_id: "call_1", name: "read", arguments: "{}" },
+			{ type: "function_call_output", call_id: "call_1", output: "a".repeat(20_000) },
+			{ type: "function_call", call_id: "call_2", name: "read", arguments: "{}" },
+			{ type: "function_call_output", call_id: "call_2", output: "useful latest result" },
+		];
+
+		const result = trimRemoteCompactionInputToContextWindow(input, 1_000, "compact");
+
+		expect(result.rewrittenOutputs).toBe(0);
+		expect(result.input).toBe(input);
+		expect(result.input[3].output).toBe("useful latest result");
+		expect(result.estimatedTokensAfter).toBe(result.estimatedTokensBefore);
+	});
+
 	test("charges inline images by vision tokens instead of serialized base64 size", () => {
 		const input = [
 			{

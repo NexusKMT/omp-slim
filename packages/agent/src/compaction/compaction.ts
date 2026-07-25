@@ -28,7 +28,7 @@ import { convertTools } from "@oh-my-pi/pi-ai/providers/openai-responses";
 import { buildResponsesInput, resolveOpenAICompatPolicy } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { clampThinkingLevelForModel } from "@oh-my-pi/pi-catalog/model-thinking";
-import { logger, prompt, stringifyJson } from "@oh-my-pi/pi-utils";
+import { isRecord, logger, prompt, stringifyJson } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { type AgentTelemetry, instrumentedCompleteSimple } from "../telemetry";
 import { ThinkingLevel } from "../thinking";
@@ -1301,9 +1301,14 @@ function buildOpenAiResponsesCompactionInput(
 		includeThinkingSignatures: true,
 		repairOrphanOutputs: true,
 	});
-	return (previousReplacementHistory ? [...previousReplacementHistory, ...input] : input) as Array<
-		Record<string, unknown>
-	>;
+	const nativeInput: Array<Record<string, unknown>> = [];
+	for (const item of input) {
+		if (!isRecord(item)) {
+			throw new Error("OpenAI Responses compaction input contains a non-object item");
+		}
+		nativeInput.push(item);
+	}
+	return previousReplacementHistory ? [...previousReplacementHistory, ...nativeInput] : nativeInput;
 }
 
 /**
