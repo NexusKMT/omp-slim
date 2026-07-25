@@ -1,3 +1,4 @@
+import { postmortem } from "@oh-my-pi/pi-utils";
 import { WorkerCore } from "./worker-core";
 import type { WorkerInbound, WorkerOutbound } from "./worker-protocol";
 
@@ -22,6 +23,7 @@ export function startJsEvalProcess(transport: {
 			// the project instead of the install dir. Worker threads cannot pass
 			// this — `process.chdir` is unavailable there.
 			chdir: cwd => process.chdir(cwd),
+			interceptUnhandledRejections: postmortem.interceptUnhandledRejections,
 		},
 	);
 }
