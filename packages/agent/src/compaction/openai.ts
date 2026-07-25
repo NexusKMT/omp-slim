@@ -45,6 +45,7 @@ import {
 	OPENAI_HEADERS,
 } from "@oh-my-pi/pi-catalog/wire/codex";
 import { $env, logger, stringifyJson, structuredCloneJSON } from "@oh-my-pi/pi-utils";
+import { countTokens } from "../tokenizer";
 
 export * from "./compaction-v2-streaming";
 
@@ -65,6 +66,120 @@ export const OPENAI_REMOTE_COMPACTION_PRESERVE_KEY = "openaiRemoteCompaction";
 export const REMOTE_COMPACTION_TIMEOUT_MS = 180_000;
 
 const DEFAULT_AZURE_API_VERSION = "v1";
+
+export const CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE = "Output exceeded the available model context and was truncated";
+
+const REMOTE_COMPACTION_REQUEST_OVERHEAD_TOKENS = 256;
+const REMOTE_COMPACTION_IMAGE_TOKEN_ESTIMATE = 765;
+const REMOTE_COMPACTION_ORIGINAL_IMAGE_TOKEN_ESTIMATE = 10_000;
+
+interface NormalizedEstimateValue {
+	value: unknown;
+	imageTokens: number;
+}
+
+function normalizeRemoteCompactionEstimateValue(value: unknown): NormalizedEstimateValue {
+	if (Array.isArray(value)) {
+		const normalized: unknown[] = [];
+		let imageTokens = 0;
+		for (const item of value) {
+			const result = normalizeRemoteCompactionEstimateValue(item);
+			normalized.push(result.value);
+			imageTokens += result.imageTokens;
+		}
+		return { value: normalized, imageTokens };
+	}
+	if (!value || typeof value !== "object") return { value, imageTokens: 0 };
+
+	const record = value as Record<string, unknown>;
+	if (record.type === "input_image") {
+		return {
+			value: { ...record, image_url: "<image>" },
+			imageTokens:
+				record.detail === "original"
+					? REMOTE_COMPACTION_ORIGINAL_IMAGE_TOKEN_ESTIMATE
+					: REMOTE_COMPACTION_IMAGE_TOKEN_ESTIMATE,
+		};
+	}
+
+	const normalized: Record<string, unknown> = {};
+	let imageTokens = 0;
+	for (const [key, item] of Object.entries(record)) {
+		const result = normalizeRemoteCompactionEstimateValue(item);
+		normalized[key] = result.value;
+		imageTokens += result.imageTokens;
+	}
+	return { value: normalized, imageTokens };
+}
+
+export interface TrimRemoteCompactionInputResult {
+	input: Array<Record<string, unknown>>;
+	rewrittenOutputs: number;
+	estimatedTokensBefore: number;
+	estimatedTokensAfter: number;
+}
+
+function estimateRemoteCompactionInputTokens(
+	input: Array<Record<string, unknown>>,
+	instructions: string,
+	tools?: unknown[],
+): number {
+	const normalized = normalizeRemoteCompactionEstimateValue({ instructions, input, ...(tools ? { tools } : {}) });
+	const serialized = stringifyJson(normalized.value) ?? "";
+	return countTokens(serialized) + normalized.imageTokens + REMOTE_COMPACTION_REQUEST_OVERHEAD_TOKENS;
+}
+
+function rewriteToolOutputForContextWindow(item: Record<string, unknown>): Record<string, unknown> | undefined {
+	if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
+		return { ...item, output: CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE };
+	}
+	if (item.type === "tool_search_output") {
+		return { ...item, tools: [] };
+	}
+	return undefined;
+}
+
+/**
+ * Preserve the full native transcript unless trailing tool outputs alone push a
+ * remote compaction request beyond the model window. Replacing only those
+ * outputs keeps call/result pairing and all earlier assistant/reasoning history,
+ * matching Codex's recovery path for oversized tool turns.
+ */
+export function trimRemoteCompactionInputToContextWindow(
+	input: Array<Record<string, unknown>>,
+	contextWindow: number | null | undefined,
+	instructions: string,
+	tools?: unknown[],
+): TrimRemoteCompactionInputResult {
+	const estimatedTokensBefore = estimateRemoteCompactionInputTokens(input, instructions, tools);
+	if (!contextWindow || contextWindow <= 0 || estimatedTokensBefore <= contextWindow) {
+		return {
+			input,
+			rewrittenOutputs: 0,
+			estimatedTokensBefore,
+			estimatedTokensAfter: estimatedTokensBefore,
+		};
+	}
+
+	let rewrittenInput: Array<Record<string, unknown>> | undefined;
+	let estimatedTokensAfter = estimatedTokensBefore;
+	let rewrittenOutputs = 0;
+	for (let index = input.length - 1; index >= 0 && estimatedTokensAfter > contextWindow; index--) {
+		const rewritten = rewriteToolOutputForContextWindow(input[index]);
+		if (!rewritten) break;
+		rewrittenInput ??= input.slice();
+		rewrittenInput[index] = rewritten;
+		rewrittenOutputs++;
+		estimatedTokensAfter = estimateRemoteCompactionInputTokens(rewrittenInput, instructions, tools);
+	}
+
+	return {
+		input: rewrittenInput ?? input,
+		rewrittenOutputs,
+		estimatedTokensBefore,
+		estimatedTokensAfter,
+	};
+}
 
 /** Race the caller's signal against the request timeout; `timeoutMs <= 0` disables the watchdog. */
 function withRequestTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal | undefined {
@@ -622,12 +737,23 @@ export async function requestOpenAiRemoteCompaction(
 ): Promise<OpenAiRemoteCompactionResponse> {
 	const endpoint = resolveOpenAiCompactEndpoint(model);
 	const requestModel = resolveOpenAiCompactModel(model);
+	const trimmed = trimRemoteCompactionInputToContextWindow(compactInput, model.contextWindow, instructions);
+	if (trimmed.rewrittenOutputs > 0) {
+		logger.info("Rewrote trailing tool outputs before OpenAI remote compaction", {
+			model: model.id,
+			provider: model.provider,
+			rewrittenOutputs: trimmed.rewrittenOutputs,
+			estimatedTokensBefore: trimmed.estimatedTokensBefore,
+			estimatedTokensAfter: trimmed.estimatedTokensAfter,
+			contextWindow: model.contextWindow,
+		});
+	}
 	const request: OpenAiRemoteCompactionRequest = {
 		model: requestModel,
-		// Send full history to the endpoint - don't trim locally.
-		// The provider handles compression via the compaction endpoint.
-		// Trimming before sending loses assistant messages and thinking blocks.
-		input: compactInput,
+		// Preserve the native transcript. Only oversized trailing tool outputs are
+		// rewritten above, reducing the request without losing assistant turns,
+		// reasoning, or call/result pairing.
+		input: trimmed.input,
 		instructions,
 	};
 	const isAzureOpenAiResponses = (model.remoteCompaction?.api ?? model.api) === "azure-openai-responses";
