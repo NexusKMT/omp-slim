@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added interactive xAI API-key login with key validation through the xAI models endpoint.
+
 ## [17.1.8] - 2026-07-28
 
 ### Fixed
