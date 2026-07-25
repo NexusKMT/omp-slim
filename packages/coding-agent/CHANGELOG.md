@@ -14,7 +14,7 @@
 - `omp usage` revalidates the broker credential snapshot before rendering: live usage reports were previously paired with a disk-cached account list up to an hour old, so a just-completed re-login (org-less row upserted to org-scoped) rendered as a phantom duplicate until the cache expired.
 ### Fixed
 
-- Fixed screenshot-relative pointer actions missing their visible targets when a function-tool provider silently downscaled a large computer screenshot; computer captures now stay within provider-safe dimensions before establishing the native coordinate frame ([#6596](https://github.com/can1357/oh-my-pi/pull/6596)).
+- Fixed screenshot-relative pointer actions missing their visible targets when Claude-family image transports silently downscaled a large computer screenshot; those sessions now establish the native coordinate frame below the verified image-resize threshold without changing the public capture defaults for other models ([#6596](https://github.com/can1357/oh-my-pi/pull/6596) by [@wolfiesch](https://github.com/wolfiesch)).
 
 ## [17.1.3] - 2026-07-24
 

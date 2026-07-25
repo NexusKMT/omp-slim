@@ -3871,23 +3871,23 @@ export const SETTINGS_SCHEMA = {
 
 	"computer.maxWidth": {
 		type: "number",
-		default: 1280,
+		default: 1920,
 		ui: {
 			tab: "tools",
 			group: "Computer",
 			label: "Computer Screenshot Width",
-			description: "Maximum composite screenshot width in pixels (provider-safe cap: 1280)",
+			description: "Maximum composite screenshot width in pixels",
 		},
 	},
 
 	"computer.maxHeight": {
 		type: "number",
-		default: 900,
+		default: 1200,
 		ui: {
 			tab: "tools",
 			group: "Computer",
 			label: "Computer Screenshot Height",
-			description: "Maximum composite screenshot height in pixels (provider-safe cap: 900)",
+			description: "Maximum composite screenshot height in pixels",
 		},
 	},
 

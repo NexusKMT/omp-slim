@@ -5,7 +5,8 @@ import type {
 	AgentToolUpdateCallback,
 	ToolApprovalDecision,
 } from "@oh-my-pi/pi-agent-core";
-import type { ComputerAction, ComputerSafetyCheck, ComputerToolCallMetadata } from "@oh-my-pi/pi-ai";
+import type { ComputerAction, ComputerSafetyCheck, ComputerToolCallMetadata, Model } from "@oh-my-pi/pi-ai";
+import { isClaudeModelId } from "@oh-my-pi/pi-catalog/identity";
 import type {
 	DesktopAction,
 	DesktopCapabilities,
@@ -21,10 +22,32 @@ import { type ComputerController, ComputerSupervisor, registerComputerController
 import type { ToolSession } from "./index";
 import { ToolError, throwIfAborted } from "./tool-errors";
 
-// Function-tool providers may downscale larger screenshots without exposing the
-// transformed dimensions. Keep the native coordinate frame below that threshold.
-const PROVIDER_SAFE_MAX_WIDTH = 1280;
-const PROVIDER_SAFE_MAX_HEIGHT = 900;
+// Claude-family image transports resize screenshots above their image budget
+// without returning transformed dimensions. Keep only those native coordinate
+// frames below the empirically verified threshold; other providers retain their
+// configured limits instead of inheriting a universal, unproven ceiling.
+const CLAUDE_MAX_CAPTURE_WIDTH = 1280;
+const CLAUDE_MAX_CAPTURE_HEIGHT = 896;
+
+function usesClaudeImageSizing(model: Model | undefined): boolean {
+	if (!model) return false;
+	return (
+		isClaudeModelId(model.id) ||
+		(model.requestModelId !== undefined && isClaudeModelId(model.requestModelId)) ||
+		(typeof model.name === "string" && /^claude(?:\s|$)/i.test(model.name))
+	);
+}
+
+function captureOptions(session: ToolSession, claudeImageSizing: boolean): DesktopSessionOptions {
+	const maxWidth = session.settings.get("computer.maxWidth");
+	const maxHeight = session.settings.get("computer.maxHeight");
+	return {
+		backend: session.settings.get("computer.backend"),
+		display: session.settings.get("computer.display"),
+		maxWidth: claudeImageSizing ? Math.min(maxWidth, CLAUDE_MAX_CAPTURE_WIDTH) : maxWidth,
+		maxHeight: claudeImageSizing ? Math.min(maxHeight, CLAUDE_MAX_CAPTURE_HEIGHT) : maxHeight,
+	};
+}
 
 // Desktop actions cross the N-API boundary as i32; out-of-range JS numbers
 // must fail closed here instead of truncating in the napi conversion.
@@ -361,8 +384,10 @@ export class ComputerTool implements AgentTool<typeof computerSchema, ComputerTo
 		const actions = args && typeof args === "object" ? (args as { actions?: unknown }).actions : undefined;
 		return approvalActionSummary(actions);
 	};
-	readonly #controller: ComputerController;
-	readonly #unregisterOwner: () => void;
+	readonly #createController: ComputerControllerFactory;
+	#controller: ComputerController;
+	#unregisterOwner: () => void;
+	#usesClaudeImageSizing: boolean;
 	#closed = false;
 	#description?: string;
 
@@ -370,12 +395,9 @@ export class ComputerTool implements AgentTool<typeof computerSchema, ComputerTo
 		readonly session: ToolSession,
 		createController: ComputerControllerFactory = options => new ComputerSupervisor(options),
 	) {
-		this.#controller = createController({
-			backend: session.settings.get("computer.backend"),
-			display: session.settings.get("computer.display"),
-			maxWidth: Math.min(session.settings.get("computer.maxWidth"), PROVIDER_SAFE_MAX_WIDTH),
-			maxHeight: Math.min(session.settings.get("computer.maxHeight"), PROVIDER_SAFE_MAX_HEIGHT),
-		});
+		this.#createController = createController;
+		this.#usesClaudeImageSizing = usesClaudeImageSizing(session.getActiveModel?.());
+		this.#controller = createController(captureOptions(session, this.#usesClaudeImageSizing));
 		this.#unregisterOwner = registerComputerController(
 			session.getEvalKernelOwnerId?.() ?? undefined,
 			this.#controller,
@@ -384,6 +406,19 @@ export class ComputerTool implements AgentTool<typeof computerSchema, ComputerTo
 	get description(): string {
 		this.#description ??= prompt.render(computerDescription);
 		return this.#description;
+	}
+
+	async #refreshControllerForModel(): Promise<void> {
+		const nextUsesClaudeImageSizing = usesClaudeImageSizing(this.session.getActiveModel?.());
+		if (nextUsesClaudeImageSizing === this.#usesClaudeImageSizing) return;
+
+		const previous = this.#controller;
+		const next = this.#createController(captureOptions(this.session, nextUsesClaudeImageSizing));
+		this.#unregisterOwner();
+		this.#controller = next;
+		this.#unregisterOwner = registerComputerController(this.session.getEvalKernelOwnerId?.() ?? undefined, next);
+		this.#usesClaudeImageSizing = nextUsesClaudeImageSizing;
+		await previous.close();
 	}
 
 	async execute(
@@ -401,6 +436,8 @@ export class ComputerTool implements AgentTool<typeof computerSchema, ComputerTo
 		if (pendingSafetyChecks.length > 0 && context?.providerSafetyApproved !== true) {
 			throw new ToolError("Provider safety checks require interactive approval before computer input");
 		}
+		await this.#refreshControllerForModel();
+		throwIfAborted(signal);
 		const capture = await this.#controller.execute(actions.map(toDesktopAction), signal);
 		throwIfAborted(signal);
 		const data = Buffer.from(capture.data).toBase64();
