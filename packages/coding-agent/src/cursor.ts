@@ -209,18 +209,28 @@ function formatTodoSyncSummary(phases: TodoPhase[]): string {
 /**
  * Persisted result for a server-resolved todo call.
  *
- * `details.phases` is load-bearing, not decoration: `todoToolRenderer`
- * rebuilds the rendered list exclusively from it, so a result carrying only
- * summary text replays as `Todo 0 tasks` after a reload.
+ * `details` is only attached for an authoritative snapshot, and then
+ * `details.phases` is load-bearing rather than decoration: `todoToolRenderer`
+ * rebuilds the rendered list exclusively from it, so a mirrored update that
+ * omitted it would replay as `Todo 0 tasks` after a reload.
+ *
+ * A refusal or a server error carries no `details`. Echoing the current phases
+ * there would replay a call that changed nothing as if it had re-asserted the
+ * whole list — and `event-controller` feeds `details.phases` straight into
+ * `setTodos`, so a refused `read_todos` would overwrite live UI state.
  */
-function buildTodoSyncResult(toolCallId: string, phases: TodoPhase[]): ToolResultMessage {
+function buildTodoSyncResult(
+	toolCallId: string,
+	phases: TodoPhase[] | undefined,
+	error: string | null,
+): ToolResultMessage {
 	return {
 		role: "toolResult",
 		toolCallId,
 		toolName: "todo",
-		content: [{ type: "text", text: formatTodoSyncSummary(phases) }],
-		details: { phases, storage: "session" },
-		isError: false,
+		content: [{ type: "text", text: error ?? (phases ? formatTodoSyncSummary(phases) : "No todo changes") }],
+		details: phases ? { phases, storage: "session" } : undefined,
+		isError: error !== null,
 		timestamp: Date.now(),
 	};
 }
@@ -390,7 +400,8 @@ export class CursorExecHandlers implements ICursorExecHandlers {
 	}
 
 	/**
-	 * Mirror Cursor's server-confirmed todo list into local session state.
+	 * Settle a completed native Cursor todo call, mirroring its list when the
+	 * server supplied an authoritative one.
 	 *
 	 * Cursor's snapshot is a flat list, so tasks already known locally keep
 	 * their phase and only their status is updated; unknown tasks land in a
@@ -405,58 +416,67 @@ export class CursorExecHandlers implements ICursorExecHandlers {
 	 * emits no such result, so without an explicit entry the list is in-memory
 	 * only and every reload, rewind, compaction, or session switch drops it.
 	 *
-	 * A `tool_execution_end` event is emitted for the same reason: the
-	 * interactive todo panel refreshes off that event
-	 * (`event-controller.ts` reads `details.phases`), and Cursor's
-	 * server-resolved call never produces one, so the visible list would stay
-	 * stale until the next reload.
+	 * This ALWAYS settles the call and returns the result to persist, even when
+	 * nothing is mirrored. Two reasons it cannot bail out early:
 	 *
-	 * Returns the grouped result so the caller can persist it verbatim. Only
-	 * this method knows the phase grouping — the provider sees a flat list —
-	 * and `todoToolRenderer.renderResult` rebuilds the rendered list purely
-	 * from `details.phases`, so a result without them replays as `0 tasks`.
-	 * Returns nothing when the session exposes no todo state, leaving the
-	 * provider's summary-only fallback in place.
+	 * - the interactive card leaves `pendingTools` only on a matching
+	 *   `tool_execution_end`, so staying silent leaves it animating forever;
+	 * - an unpaired `toolCall` is stripped as dangling by `buildSessionContext`,
+	 *   erasing the interaction from every rebuilt transcript.
+	 *
+	 * A `null` snapshot means nothing may be mirrored — a server `error`, or a
+	 * benign refusal such as a filtered or truncated read. Local state is left
+	 * untouched, and the result carries no `details`: `event-controller` feeds
+	 * `details.phases` straight into `setTodos`, so echoing the current list
+	 * back would let a call that changed nothing overwrite live UI state.
 	 */
-	todoSync(snapshot: CursorTodoSnapshot, toolCallId: string): ToolResultMessage | undefined {
+	todoSync(snapshot: CursorTodoSnapshot | null, toolCallId: string, error: string | null = null): ToolResultMessage {
 		const setPhases = this.options.setTodoPhases;
-		if (!setPhases) return undefined;
-
 		const existing = this.options.getTodoPhases?.() ?? [];
-		const phaseByContent = new Map<string, string>();
-		for (const phase of existing) {
-			for (const task of phase.tasks) phaseByContent.set(task.content, phase.name);
-		}
 
-		const grouped = new Map<string, TodoPhase["tasks"]>();
-		for (const todo of snapshot.todos) {
-			const name = phaseByContent.get(todo.content) ?? CURSOR_TODO_PHASE;
-			let tasks = grouped.get(name);
-			if (!tasks) {
-				tasks = [];
-				grouped.set(name, tasks);
+		// Mirroring is gated on having both a snapshot and somewhere to put it.
+		// Settling the call is NOT: the interactive card leaves `pendingTools`
+		// only on a matching `tool_execution_end`, so a refusal, a server error,
+		// or a host with no local todo state must still resolve it.
+		let phases: TodoPhase[] | undefined;
+		if (snapshot && setPhases) {
+			const phaseByContent = new Map<string, string>();
+			for (const phase of existing) {
+				for (const task of phase.tasks) phaseByContent.set(task.content, phase.name);
 			}
-			tasks.push({ content: todo.content, status: todo.status as TodoStatus });
+
+			const grouped = new Map<string, TodoPhase["tasks"]>();
+			for (const todo of snapshot.todos) {
+				const name = phaseByContent.get(todo.content) ?? CURSOR_TODO_PHASE;
+				let tasks = grouped.get(name);
+				if (!tasks) {
+					tasks = [];
+					grouped.set(name, tasks);
+				}
+				tasks.push({ content: todo.content, status: todo.status as TodoStatus });
+			}
+
+			// Preserve the local phase order; phases new to this snapshot append.
+			const next: TodoPhase[] = [];
+			for (const phase of existing) {
+				const tasks = grouped.get(phase.name);
+				if (!tasks) continue;
+				next.push({ name: phase.name, tasks });
+				grouped.delete(phase.name);
+			}
+			for (const [name, tasks] of grouped) next.push({ name, tasks });
+			setPhases(next);
+			this.options.persistTodoPhases?.(next);
+			phases = next;
 		}
 
-		// Preserve the local phase order; phases new to this snapshot append.
-		const next: TodoPhase[] = [];
-		for (const phase of existing) {
-			const tasks = grouped.get(phase.name);
-			if (!tasks) continue;
-			next.push({ name: phase.name, tasks });
-			grouped.delete(phase.name);
-		}
-		for (const [name, tasks] of grouped) next.push({ name, tasks });
-		setPhases(next);
-		this.options.persistTodoPhases?.(next);
-		const result = buildTodoSyncResult(toolCallId, next);
+		const result = buildTodoSyncResult(toolCallId, phases, error);
 		this.options.emitEvent?.({
 			type: "tool_execution_end",
 			toolCallId,
 			toolName: "todo",
 			result: { content: result.content, details: result.details },
-			isError: false,
+			isError: error !== null,
 		});
 		return result;
 	}

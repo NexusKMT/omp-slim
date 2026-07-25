@@ -924,19 +924,32 @@ export interface CursorTodoSnapshot {
 }
 
 /**
- * Receives the settled todo list so the host can mirror it into local session
- * state. Only ever called with a server-confirmed success snapshot.
+ * Settles a native todo call in the host.
+ *
+ * Called for every completed native todo call, not just successful ones: the
+ * interactive todo card only resolves on a matching `tool_execution_end`, so a
+ * refused or failed call that stayed silent would animate forever.
+ *
+ * `snapshot` is the server-confirmed list, or `null` when there is nothing to
+ * mirror — a server error (`error` set) or a benign refusal such as a filtered
+ * or truncated read (`error` null). Local state MUST be left untouched unless a
+ * snapshot is supplied.
  *
  * `toolCallId` is the id of the streamed native call, which is also the key the
  * interactive transcript filed the visible block under. The host MUST reuse it
  * when emitting the synthetic completion, or that block never resolves.
  *
- * Returns the result to persist for that block, when the host has one. Only the
- * host knows the phase grouping the todo renderer replays from, so the provider
- * persists that value verbatim instead of synthesizing its own; a host that
- * returns nothing falls back to the provider's summary-only result.
+ * Returns the result to persist for that block — always, since every settle
+ * needs a paired result or `buildSessionContext` strips the block as dangling.
+ * Only the host knows the phase grouping the todo renderer replays from, so the
+ * provider persists this value verbatim. When no handler is registered at all,
+ * the provider falls back to its own summary-only result.
  */
-export type CursorTodoSyncHandler = (snapshot: CursorTodoSnapshot, toolCallId: string) => ToolResultMessage | undefined;
+export type CursorTodoSyncHandler = (
+	snapshot: CursorTodoSnapshot | null,
+	toolCallId: string,
+	error: string | null,
+) => ToolResultMessage;
 
 export interface CursorShellStreamCallbacks {
 	onStdout(data: string): void;

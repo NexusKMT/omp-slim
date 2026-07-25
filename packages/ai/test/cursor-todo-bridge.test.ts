@@ -29,11 +29,21 @@ import {
 	UpdateTodosToolCallSchema,
 } from "@oh-my-pi/pi-catalog/discovery/cursor-gen/agent_pb";
 
+/** One `todoSync` invocation, recorded verbatim. */
+interface SyncCall {
+	snapshot: CursorTodoSnapshot | null;
+	toolCallId: string;
+	error: string | null;
+}
+
 interface Harness {
 	output: AssistantMessage;
 	stream: AssistantMessageEventStream;
 	state: BlockState;
 	usageState: UsageState;
+	/** Every settle, including refusals and server errors. */
+	syncCalls: SyncCall[];
+	/** Mirrored snapshots only — the subset that carries a list. */
 	snapshots: CursorTodoSnapshot[];
 	/** Call ids handed to `todoSync`, in order. */
 	syncCallIds: string[];
@@ -60,6 +70,7 @@ function newHarness(): Harness {
 		timestamp: 0,
 	};
 	const stream = new AssistantMessageEventStream();
+	const syncCalls: SyncCall[] = [];
 	const snapshots: CursorTodoSnapshot[] = [];
 	const syncCallIds: string[] = [];
 	const toolResults: ToolResultMessage[] = [];
@@ -88,16 +99,36 @@ function newHarness(): Harness {
 			toolCall = t;
 		},
 		setFirstTokenTime: () => {},
-		onTodoSnapshot: (snapshot, toolCallId) => {
-			snapshots.push(snapshot);
+		onTodoSnapshot: (snapshot, toolCallId, error) => {
+			syncCalls.push({ snapshot, toolCallId, error });
+			if (snapshot) snapshots.push(snapshot);
 			syncCallIds.push(toolCallId);
+			// Stands in for the host's phase-grouped result: the provider must
+			// persist it verbatim rather than synthesizing its own.
+			return {
+				role: "toolResult",
+				toolCallId,
+				toolName: "todo",
+				content: [{ type: "text", text: error ?? "host result" }],
+				isError: error !== null,
+				timestamp: 0,
+			};
 		},
 		onToolResult: result => {
 			toolResults.push(result);
 			return result;
 		},
 	};
-	return { output, stream, state, usageState: { sawTokenDelta: false }, snapshots, syncCallIds, toolResults };
+	return {
+		output,
+		stream,
+		state,
+		usageState: { sawTokenDelta: false },
+		syncCalls,
+		snapshots,
+		syncCallIds,
+		toolResults,
+	};
 }
 
 function start(h: Harness, toolCall: unknown, callId = "call-1"): void {
@@ -377,6 +408,21 @@ describe("cursor native todo bridge (wire-encoded protobuf)", () => {
 		});
 	}
 
+	/** A completed `update_todos` the server rejected outright. */
+	function errorCall(error: string): ToolCall {
+		return create(ToolCallSchema, {
+			tool: {
+				case: "updateTodosToolCall",
+				value: create(UpdateTodosToolCallSchema, {
+					args: create(UpdateTodosArgsSchema, { todos: [], merge: false }),
+					result: create(UpdateTodosResultSchema, {
+						result: { case: "error", value: create(UpdateTodosErrorSchema, { error }) },
+					}),
+				}),
+			},
+		});
+	}
+
 	function drive(toolCall: ToolCall): Harness {
 		const h = newHarness();
 		processInteractionUpdate(
@@ -453,19 +499,7 @@ describe("cursor native todo bridge (wire-encoded protobuf)", () => {
 	});
 
 	it("leaves local state untouched when the wire result carries an error", () => {
-		const toolCall = create(ToolCallSchema, {
-			tool: {
-				case: "updateTodosToolCall",
-				value: create(UpdateTodosToolCallSchema, {
-					args: create(UpdateTodosArgsSchema, { todos: [], merge: false }),
-					result: create(UpdateTodosResultSchema, {
-						result: { case: "error", value: create(UpdateTodosErrorSchema, { error: "boom" }) },
-					}),
-				}),
-			},
-		});
-
-		const h = drive(toolCall);
+		const h = drive(errorCall("boom"));
 
 		expect(todoBlocks(h)).toHaveLength(1);
 		expect(h.snapshots).toEqual([]);
@@ -496,5 +530,70 @@ describe("cursor native todo bridge (wire-encoded protobuf)", () => {
 
 		expect(h.snapshots).toEqual([]);
 		expect(h.toolResults.map(r => r.toolCallId)).toEqual([todoBlocks(h)[0].id]);
+	});
+
+	it("settles a refused read as a successful no-op under the streamed call id", () => {
+		// The card leaves `pendingTools` only on a matching completion, so a
+		// refusal that stayed silent would animate forever. Nothing changed
+		// locally, so it settles as a success.
+		const h = drive(readCall(items([["1", "task", 2]]), 5));
+		const callId = todoBlocks(h)[0].id;
+
+		expect(h.syncCalls).toEqual([{ snapshot: null, toolCallId: callId, error: null }]);
+		expect(h.toolResults[0]).toMatchObject({ toolCallId: callId, isError: false });
+	});
+
+	it("settles a server error as a failure carrying the server's text", () => {
+		// Collapsing an `UpdateTodosError` into the benign no-op would replay the
+		// failure as a success and hide it from the rebuilt transcript.
+		const h = drive(errorCall("boom"));
+		const callId = todoBlocks(h)[0].id;
+
+		expect(h.syncCalls).toEqual([{ snapshot: null, toolCallId: callId, error: "boom" }]);
+		expect(h.toolResults[0]).toMatchObject({
+			toolCallId: callId,
+			isError: true,
+			content: [{ type: "text", text: "boom" }],
+		});
+	});
+
+	it("persists the host's result verbatim instead of its own summary", () => {
+		// Only the host knows the phase grouping the todo renderer replays from,
+		// so a provider-synthesized summary would replay the list as `0 tasks`.
+		const h = drive(updateCall(items([["1", "task", 3]]), 1));
+
+		expect(h.toolResults[0]).toMatchObject({ content: [{ type: "text", text: "host result" }] });
+	});
+
+	it("falls back to a summary-only result when no host handler is registered", () => {
+		// A host with no todo state registers no handler at all; the block still
+		// needs a paired result or the rebuild strips it.
+		const h = newHarness();
+		h.state.onTodoSnapshot = undefined;
+		const toolCall = updateCall(items([["1", "task", 3]]), 1);
+		for (const kind of ["toolCallStarted", "toolCallCompleted"] as const) {
+			processInteractionUpdate(wireUpdate(kind, toolCall) as never, h.output, h.stream, h.state, h.usageState);
+		}
+
+		expect(h.syncCalls).toEqual([]);
+		expect(h.toolResults[0]).toMatchObject({
+			toolCallId: todoBlocks(h)[0].id,
+			isError: false,
+			content: [{ type: "text", text: "1/1 tasks completed" }],
+		});
+	});
+
+	it("falls back to the server's error text when no host handler is registered", () => {
+		const h = newHarness();
+		h.state.onTodoSnapshot = undefined;
+		const toolCall = errorCall("boom");
+		for (const kind of ["toolCallStarted", "toolCallCompleted"] as const) {
+			processInteractionUpdate(wireUpdate(kind, toolCall) as never, h.output, h.stream, h.state, h.usageState);
+		}
+
+		expect(h.toolResults[0]).toMatchObject({
+			isError: true,
+			content: [{ type: "text", text: "boom" }],
+		});
 	});
 });

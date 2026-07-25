@@ -2150,6 +2150,22 @@ function extractTodoSnapshot(toolCall: CursorTodoToolCall): CursorTodoSnapshot |
 	};
 }
 
+/**
+ * Error text when the server itself rejected the call.
+ *
+ * Distinct from {@link extractTodoSnapshot} returning `null`: a filtered or
+ * truncated read is a benign refusal (the call succeeded, we just decline to
+ * treat a subset as the list), whereas an `UpdateTodosError` / `ReadTodosError`
+ * is a real failure that must not replay as a successful no-op.
+ */
+function extractTodoError(toolCall: CursorTodoToolCall): string | null {
+	const { update, read } = selectTodoCalls(toolCall);
+	const result = (update ?? read)?.result?.result;
+	if (result?.case !== "error") return null;
+	const error = result.value?.error;
+	return typeof error === "string" && error.length > 0 ? error : "Todo operation failed";
+}
+
 /** Args echoed onto the synthesized display block, for rendering only. */
 function buildTodoDisplayArgs(toolCall: CursorTodoToolCall): { todos: CursorTodoSnapshotItem[]; merge?: boolean } {
 	const args = selectTodoCalls(toolCall).update?.args;
@@ -2165,17 +2181,25 @@ function buildTodoDisplayArgs(toolCall: CursorTodoToolCall): { todos: CursorTodo
  * The bridge never runs a local `todo` tool for these, so nothing else would
  * produce a `toolResult` for the block — and `buildSessionContext` strips any
  * `toolCall` left unpaired, taking the interaction out of every rebuilt
- * transcript. A refused snapshot still gets a result: the call did happen, it
- * just changed no local state.
+ * transcript.
+ *
+ * Three outcomes, kept distinct: a server error replays as a failure, a benign
+ * refusal (filtered/truncated read) replays as a successful no-op, and a
+ * settled snapshot replays as its summary. Collapsing the first into the second
+ * would hide the failure and let downstream lifecycle logic treat it as success.
  */
-function buildTodoToolResult(toolCallId: string, snapshot: CursorTodoSnapshot | null): ToolResultMessage {
-	const text = snapshot ? formatTodoSnapshotSummary(snapshot.todos) : "No todo changes";
+function buildTodoToolResult(
+	toolCallId: string,
+	snapshot: CursorTodoSnapshot | null,
+	error: string | null,
+): ToolResultMessage {
+	const text = error ?? (snapshot ? formatTodoSnapshotSummary(snapshot.todos) : "No todo changes");
 	return {
 		role: "toolResult",
 		toolCallId,
 		toolName: "todo",
 		content: [{ type: "text", text }],
-		isError: false,
+		isError: error !== null,
 		timestamp: Date.now(),
 	};
 }
@@ -2487,22 +2511,23 @@ export function processInteractionUpdate(
 				// `UpdateTodosError` nothing was stored at all. No snapshot => leave
 				// both the rendered args and local session state untouched.
 				const snapshot = extractTodoSnapshot(toolCall);
-				// Pair the resolved block with exactly one persisted result. Without
-				// one, `buildSessionContext` strips the block as dangling and the
-				// interaction vanishes from every rebuilt transcript (reload, branch
-				// switch, Ctrl+L). The host's result is preferred because only it
-				// carries `details.phases`, which the todo renderer replays the list
-				// from; a refused snapshot never reaches the host, so the
-				// summary-only fallback stands in.
-				let persisted: ToolResultMessage | undefined;
+				const error = extractTodoError(toolCall);
 				if (snapshot) {
 					state.currentToolCall.arguments = { todos: snapshot.todos, merged: snapshot.merged };
-					// Reuse the streamed call id: the interactive transcript filed the
-					// visible block under it, and only a matching `tool_execution_end`
-					// resolves that block.
-					persisted = state.onTodoSnapshot?.(snapshot, state.currentToolCall.id) ?? undefined;
 				}
-				state.onToolResult?.(persisted ?? buildTodoToolResult(state.currentToolCall.id, snapshot));
+				// The host settles EVERY completed native todo call, successful or
+				// not: the interactive card only resolves on a matching
+				// `tool_execution_end`, so staying silent on a refusal or a server
+				// error would leave it animating for the rest of the session. The
+				// streamed call id is reused because the transcript filed the block
+				// under it.
+				//
+				// Exactly one result is persisted. The host's is preferred — only it
+				// carries the `details.phases` the todo renderer replays the list
+				// from — with the provider's summary standing in when the host has
+				// nothing to add.
+				const persisted = state.onTodoSnapshot?.(snapshot, state.currentToolCall.id, error) ?? undefined;
+				state.onToolResult?.(persisted ?? buildTodoToolResult(state.currentToolCall.id, snapshot, error));
 			}
 			const idx = output.content.indexOf(state.currentToolCall);
 			clearStreamingPartialJson(state.currentToolCall);

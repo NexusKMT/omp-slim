@@ -225,7 +225,10 @@ describe("cursor todo persistence", () => {
 		expect(h.reload()).toEqual(h.current());
 	});
 
-	it("emits no todo event when the session exposes no todo state", () => {
+	it("settles the call without phases when the session exposes no todo state", () => {
+		// The visible block exists either way — it is rendered from the stream,
+		// not from local state — so it still needs a completion to stop
+		// animating. There is just nothing to mirror into `details.phases`.
 		const events: AgentEvent[] = [];
 		const handlers = new CursorExecHandlers({
 			cwd: "/tmp",
@@ -237,7 +240,45 @@ describe("cursor todo persistence", () => {
 
 		handlers.todoSync({ merged: false, todos: [{ content: "a", status: "pending" }] }, "call-1");
 
-		expect(events).toEqual([]);
+		expect(events).toHaveLength(1);
+		const settled = events[0];
+		if (settled?.type !== "tool_execution_end") throw new Error("expected a completion event");
+		expect(settled).toMatchObject({ toolCallId: "call-1", toolName: "todo", isError: false });
+		expect(settled.result.details).toBeUndefined();
+	});
+
+	it("settles a refusal without overwriting the live todo list", () => {
+		// `event-controller` feeds `details.phases` straight into `setTodos`, so
+		// a refused `read_todos` echoing the current list back would let a call
+		// that changed nothing overwrite live UI state.
+		const h = newHarness([{ name: "Auth", tasks: [{ content: "oauth", status: "pending" }] }]);
+		const before = h.current();
+
+		const result = h.handlers.todoSync(null, "call-1");
+
+		expect(h.current()).toBe(before);
+		expect(h.entries).toEqual([]);
+		expect(h.uiTodos()).toBeNull();
+		expect(result).toMatchObject({ toolCallId: "call-1", isError: false, details: undefined });
+		expect(h.events).toHaveLength(1);
+		expect(h.events[0]).toMatchObject({ type: "tool_execution_end", toolCallId: "call-1", isError: false });
+	});
+
+	it("settles a server error as a failure without touching local state", () => {
+		const h = newHarness([{ name: "Auth", tasks: [{ content: "oauth", status: "pending" }] }]);
+		const before = h.current();
+
+		const result = h.handlers.todoSync(null, "call-1", "boom");
+
+		expect(h.current()).toBe(before);
+		expect(h.entries).toEqual([]);
+		expect(result).toMatchObject({
+			toolCallId: "call-1",
+			isError: true,
+			content: [{ type: "text", text: "boom" }],
+			details: undefined,
+		});
+		expect(h.events[0]).toMatchObject({ type: "tool_execution_end", toolCallId: "call-1", isError: true });
 	});
 
 	it("returns a result that survives buildSessionContext and rebuilds the list", () => {
