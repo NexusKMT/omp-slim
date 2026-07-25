@@ -101,6 +101,34 @@ describe("OpenAI GA computer contract", () => {
 		expect(JSON.stringify(params)).not.toContain("display_height");
 	});
 
+	test("reconciles a queued computer choice after direct and proxy model switches", () => {
+		const direct = model("openai-responses");
+		const proxy = buildModel({
+			...direct,
+			baseUrl: "https://proxy.example.com/v1",
+			compat: direct.compatConfig,
+		} as ModelSpec<"openai-responses">);
+		const context: Context = {
+			messages: [{ role: "user", content: "inspect", timestamp: 1 }],
+			tools: [computerTool],
+		};
+
+		expect(direct.supportsComputerUse).toBe(true);
+		expect(proxy.supportsComputerUse).toBe(false);
+		const directRequest = buildParams(
+			direct,
+			context,
+			{ toolChoice: { type: "function", name: "computer" } },
+			undefined,
+		);
+		expect(directRequest.params.tools).toEqual([{ type: "computer" }]);
+		expect(directRequest.params.tool_choice).toEqual({ type: "computer" });
+
+		const proxyRequest = buildParams(proxy, context, { toolChoice: { type: "computer" } }, undefined);
+		expect(proxyRequest.params.tools).toMatchObject([{ type: "function", name: "computer" }]);
+		expect(proxyRequest.params.tool_choice).toEqual({ type: "function", name: "computer" });
+	});
+
 	test("serializes the computer tool as a named function tool for unsupported models", () => {
 		const unsupported = model("openai-responses", "gpt-5.3");
 		const tools = convertTools([computerTool], true, unsupported);
@@ -115,8 +143,11 @@ describe("OpenAI GA computer contract", () => {
 		expect(
 			mapOpenAIResponsesToolChoiceForTools({ type: "function", name: "computer" }, [computerTool], unsupported),
 		).toEqual({ type: "function", name: "computer" });
-		// The native choice stays gated off for unsupported models.
-		expect(mapOpenAIResponsesToolChoiceForTools({ type: "computer" }, [computerTool], unsupported)).toBeUndefined();
+		// A queued native choice is reconciled to the emitted function fallback.
+		expect(mapOpenAIResponsesToolChoiceForTools({ type: "computer" }, [computerTool], unsupported)).toEqual({
+			type: "function",
+			name: "computer",
+		});
 
 		const codexUnsupported = model("openai-codex-responses", "gpt-5.3");
 		expect(codexUnsupported.supportsComputerUse).not.toBe(true);

@@ -1275,15 +1275,13 @@ export function mapOpenAIResponsesToolChoiceForTools(
 	model: Model<"openai-responses">,
 ): OpenAIResponsesToolChoice {
 	if (!model.compat.supportsToolChoice) return undefined;
-	if (
-		typeof choice !== "string" &&
-		choice?.type === "computer" &&
-		(model.supportsComputerUse !== true || !tools.some(tool => tool.native?.type === "computer"))
-	) {
-		return undefined;
-	}
 	if (isForcedToolChoice(choice) && !model.compat.supportsForcedToolChoice) {
 		return "auto";
+	}
+	if (typeof choice !== "string" && choice?.type === "computer") {
+		const computer = tools.find(tool => tool.native?.type === "computer");
+		if (!computer) return undefined;
+		return model.supportsComputerUse === true ? { type: "computer" } : { type: "function", name: computer.name };
 	}
 	const mapped = mapToOpenAIResponsesToolChoice(choice);
 	if (!mapped || typeof mapped === "string" || mapped.type !== "function") {
@@ -1295,6 +1293,9 @@ export function mapOpenAIResponsesToolChoiceForTools(
 		? tools.find(tool => tool.customFormat && (tool.name === mapped.name || tool.customWireName === mapped.name))
 		: undefined;
 	const offeredTool = customTool ?? directTool;
+	if (offeredTool?.native?.type === "computer") {
+		return model.supportsComputerUse === true ? { type: "computer" } : { type: "function", name: offeredTool.name };
+	}
 	if (!offeredTool) {
 		return undefined;
 	}
