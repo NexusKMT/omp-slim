@@ -2120,8 +2120,12 @@ function mapTodoSnapshot(todos: CursorTodoItem[]): CursorTodoSnapshotItem[] {
  * reports the full size. Mirroring a partial response would delete every task
  * it omitted, so filtered and short reads are both refused here.
  *
- * Returns `null` when no full snapshot is available, which the caller MUST
- * treat as "leave local state untouched".
+ * A snapshot whose rows are not unique by content is refused for a different
+ * reason: Cursor keys todos by `id`, the local list is keyed by content, and
+ * the collision is unrepresentable rather than merely partial.
+ *
+ * Returns `null` when no usable full snapshot is available, which the caller
+ * MUST treat as "leave local state untouched".
  */
 function extractTodoSnapshot(toolCall: CursorTodoToolCall): CursorTodoSnapshot | null {
 	const { update, read } = selectTodoCalls(toolCall);
@@ -2143,8 +2147,20 @@ function extractTodoSnapshot(toolCall: CursorTodoToolCall): CursorTodoSnapshot |
 	if (read && typeof totalCount === "number" && totalCount !== todos.length) {
 		return null;
 	}
+	const mapped = mapTodoSnapshot(todos);
+	// The wire model identifies rows by `id` and can represent two rows sharing
+	// `content`; the local list is keyed by content alone (`findTaskByContent`)
+	// and `todo` rejects a duplicate outright. Importing such a snapshot would
+	// leave every later `done`/`drop`/`rm` resolving to the first row and the
+	// second permanently unaddressable, so it is refused like any other snapshot
+	// that cannot be represented locally.
+	const seen = new Set<string>();
+	for (const todo of mapped) {
+		if (seen.has(todo.content)) return null;
+		seen.add(todo.content);
+	}
 	return {
-		todos: mapTodoSnapshot(todos),
+		todos: mapped,
 		// Presentation-only: the snapshot is already the settled full list.
 		merged: result.value?.wasMerge === true,
 	};

@@ -485,6 +485,72 @@ describe("cursor native todo bridge (wire-encoded protobuf)", () => {
 		expect(h.snapshots).toEqual([]);
 	});
 
+	it("refuses a snapshot whose rows collide on content", () => {
+		// The wire model identifies rows by `id` and can represent two rows with
+		// the same `content`, so the bridge must survive one. The local list is
+		// keyed by content alone, so importing the pair would make every later
+		// `done`/`drop` resolve to the first row and strand the second.
+		//
+		// Positive control: the same two rows with distinct content do sync, so
+		// the refusal below is attributable to the collision.
+		const distinct = drive(
+			updateCall(
+				items([
+					["1", "task a", 1],
+					["2", "task b", 1],
+				]),
+				2,
+			),
+		);
+		expect(distinct.snapshots).toHaveLength(1);
+
+		const h = drive(
+			updateCall(
+				items([
+					["1", "same task", 1],
+					["2", "same task", 3],
+				]),
+				2,
+			),
+		);
+		const callId = todoBlocks(h)[0].id;
+
+		expect(todoBlocks(h)).toHaveLength(1);
+		// Nothing mutable reaches the host: no snapshot at all, so it cannot
+		// mirror a list the local model is unable to key.
+		expect(h.snapshots).toEqual([]);
+		expect(h.syncCalls).toEqual([{ snapshot: null, toolCallId: callId, error: null }]);
+		// Still settles: the call happened, only the mirror was declined. Without
+		// a completion the card animates forever, and without a paired result the
+		// block is stripped on rebuild. It reads as a benign no-op, not a failure.
+		expect(h.toolResults.map(r => r.toolCallId)).toEqual([callId]);
+		expect(h.toolResults[0]).toMatchObject({ role: "toolResult", toolName: "todo", isError: false });
+	});
+
+	it("settles a collided snapshot as a no-op when no host handler is registered", () => {
+		// Without a host the provider builds the result itself: a declined mirror
+		// must read as "nothing changed", never as an empty list, or a rebuilt
+		// transcript would claim the server wiped every task.
+		const h = newHarness();
+		h.state.onTodoSnapshot = undefined;
+		const toolCall = updateCall(
+			items([
+				["1", "same task", 1],
+				["2", "same task", 3],
+			]),
+			2,
+		);
+		for (const kind of ["toolCallStarted", "toolCallCompleted"] as const) {
+			processInteractionUpdate(wireUpdate(kind, toolCall) as never, h.output, h.stream, h.state, h.usageState);
+		}
+
+		expect(h.toolResults[0]).toMatchObject({
+			toolCallId: todoBlocks(h)[0].id,
+			isError: false,
+			content: [{ type: "text", text: "No todo changes" }],
+		});
+	});
+
 	it("refuses a wire-decoded read_todos narrowed by status_filter", () => {
 		const rows: [string, string, number][] = [["1", "only task", 3]];
 		// Positive control: the identical response without the filter does sync,
