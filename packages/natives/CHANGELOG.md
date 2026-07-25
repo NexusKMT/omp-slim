@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed macOS computer screenshots occasionally returning the pre-action frame instead of reflecting completed keyboard and pointer input.
+- Fixed macOS computer screenshots occasionally returning the pre-action frame instead of reflecting completed keyboard and pointer input ([#6595](https://github.com/can1357/oh-my-pi/pull/6595)).
 
 ## [17.1.3] - 2026-07-24
 
