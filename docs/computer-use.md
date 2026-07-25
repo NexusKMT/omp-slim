@@ -16,8 +16,8 @@ computer:
   enabled: true
   backend: auto
   display: all
-  maxWidth: 1920
-  maxHeight: 1200
+  maxWidth: 1280
+  maxHeight: 900
 
 tools:
   approvalMode: write
@@ -55,8 +55,8 @@ Inside a running session, the `/computer` slash command (`/computer`, `/computer
 | `computer.enabled` | `false` | Register the essential `computer` tool. |
 | `computer.backend` | `auto` | `auto` or `native`. Both require a native backend; neither falls back to browser or software automation. |
 | `computer.display` | `all` | Composite every active display, or select one numeric native display ID. |
-| `computer.maxWidth` | `1920` | Maximum composite screenshot width in pixels. Must be greater than zero. |
-| `computer.maxHeight` | `1200` | Maximum composite screenshot height in pixels. Must be greater than zero. |
+| `computer.maxWidth` | `1280` | Maximum composite screenshot width in pixels. Larger values are capped at `1280` to preserve screenshot-relative coordinates across providers. |
+| `computer.maxHeight` | `900` | Maximum composite screenshot height in pixels. Larger values are capped at `900` to preserve screenshot-relative coordinates across providers. |
 
 The first successful result lists each display ID, name, logical rectangle, screenshot-pixel rectangle, scale, and primary status. Use one of those IDs as a string when you want a single display:
 
@@ -114,7 +114,7 @@ For each capture, OMP:
 1. Enumerates the selected native displays and their global logical rectangles.
 2. Captures every selected display at native pixel density.
 3. Builds one logical bounding rectangle, including negative monitor origins.
-4. Chooses one render scale that preserves the desktop layout and stays within `maxWidth` and `maxHeight`.
+4. Chooses one render scale that preserves the desktop layout and stays within the configured and provider-safe `maxWidth` and `maxHeight` limits.
 5. Places each resized display image into the composite and returns a PNG.
 
 Each result's `displays` metadata maps both spaces:

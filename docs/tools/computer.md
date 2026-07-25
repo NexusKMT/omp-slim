@@ -38,8 +38,8 @@ Unlike `browser`, `computer` operates the entire visible host session. It can ac
 | `computer.enabled` | boolean | `false` | Register tool. |
 | `computer.backend` | `auto \| native` | `auto` | Both prohibit non-native fallback. |
 | `computer.display` | string | `all` | `all` or numeric native monitor ID. |
-| `computer.maxWidth` | number | `1920` | Maximum composite PNG width; must be positive. |
-| `computer.maxHeight` | number | `1200` | Maximum composite PNG height; must be positive. |
+| `computer.maxWidth` | number | `1280` | Maximum composite PNG width; larger values are capped at `1280` for provider-safe coordinate fidelity. |
+| `computer.maxHeight` | number | `900` | Maximum composite PNG height; larger values are capped at `900` for provider-safe coordinate fidelity. |
 
 Constructor snapshots these settings into one `DesktopSessionOptions`. No setting is reread per call.
 

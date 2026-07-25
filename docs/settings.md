@@ -487,8 +487,8 @@ computer:
   enabled: true
   backend: auto
   display: all
-  maxWidth: 1920
-  maxHeight: 1200
+  maxWidth: 1280
+  maxHeight: 900
 ```
 
 | Key | Type | Default | Notes |
@@ -496,8 +496,8 @@ computer:
 | `computer.enabled` | boolean | `false` | Enable the native computer tool. Natively capable OpenAI GA models use the `{ "type": "computer" }` wire form; every other function-calling model gets `computer` as a regular function tool. The `/computer` slash command toggles this for the current session only. |
 | `computer.backend` | enum | `auto` | `auto` or `native`; both require native capture/input and never fall back to browser automation. |
 | `computer.display` | string | `all` | Composite all active displays, or use a numeric display ID reported by a successful computer result. |
-| `computer.maxWidth` | number | `1920` | Maximum composite screenshot width in pixels; must be greater than zero. |
-| `computer.maxHeight` | number | `1200` | Maximum composite screenshot height in pixels; must be greater than zero. |
+| `computer.maxWidth` | number | `1280` | Maximum composite screenshot width in pixels; larger values are capped at `1280` to preserve screenshot-relative coordinates across providers. |
+| `computer.maxHeight` | number | `900` | Maximum composite screenshot height in pixels; larger values are capped at `900` to preserve screenshot-relative coordinates across providers. |
 
 Computer settings are captured when the session tool is constructed; start a new session after changing them. Before enabling input, configure `tools.approvalMode` or `tools.approval.computer` and grant platform permissions. See [Native computer use](./computer-use.md) for supported providers, actions, coordinate mapping, displays, platform setup, safety, Files behavior, troubleshooting, and verified limitations.
 

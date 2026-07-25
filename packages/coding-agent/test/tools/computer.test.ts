@@ -488,13 +488,29 @@ describe("computer tool", () => {
 		await tool.close();
 	});
 
+	it("preserves configured capture limits below the provider-safe ceiling", async () => {
+		const settings = Settings.isolated({
+			"computer.enabled": true,
+			"computer.maxWidth": 960,
+			"computer.maxHeight": 640,
+		});
+		let receivedOptions: DesktopSessionOptions | undefined;
+		const tool = new ComputerTool(toolSession(settings), options => {
+			receivedOptions = options;
+			return new FakeController();
+		});
+
+		expect(receivedOptions).toMatchObject({ maxWidth: 960, maxHeight: 640 });
+		await tool.close();
+	});
+
 	it("uses registered native options, adapts every GA field, and returns exactly one fresh PNG with metadata", async () => {
 		const settings = Settings.isolated({
 			"computer.enabled": true,
 			"computer.backend": "native",
 			"computer.display": "display-1",
 			"computer.maxWidth": 1600,
-			"computer.maxHeight": 900,
+			"computer.maxHeight": 1000,
 		});
 		const controller = new FakeController();
 		let receivedOptions: DesktopSessionOptions | undefined;
@@ -526,7 +542,7 @@ describe("computer tool", () => {
 		expect(receivedOptions).toEqual({
 			backend: "native",
 			display: "display-1",
-			maxWidth: 1600,
+			maxWidth: 1280,
 			maxHeight: 900,
 		});
 		expect(controller.batches).toEqual([

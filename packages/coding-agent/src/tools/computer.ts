@@ -21,6 +21,11 @@ import { type ComputerController, ComputerSupervisor, registerComputerController
 import type { ToolSession } from "./index";
 import { ToolError, throwIfAborted } from "./tool-errors";
 
+// Function-tool providers may downscale larger screenshots without exposing the
+// transformed dimensions. Keep the native coordinate frame below that threshold.
+const PROVIDER_SAFE_MAX_WIDTH = 1280;
+const PROVIDER_SAFE_MAX_HEIGHT = 900;
+
 // Desktop actions cross the N-API boundary as i32; out-of-range JS numbers
 // must fail closed here instead of truncating in the napi conversion.
 const INT32_MIN = -2_147_483_648;
@@ -368,8 +373,8 @@ export class ComputerTool implements AgentTool<typeof computerSchema, ComputerTo
 		this.#controller = createController({
 			backend: session.settings.get("computer.backend"),
 			display: session.settings.get("computer.display"),
-			maxWidth: session.settings.get("computer.maxWidth"),
-			maxHeight: session.settings.get("computer.maxHeight"),
+			maxWidth: Math.min(session.settings.get("computer.maxWidth"), PROVIDER_SAFE_MAX_WIDTH),
+			maxHeight: Math.min(session.settings.get("computer.maxHeight"), PROVIDER_SAFE_MAX_HEIGHT),
 		});
 		this.#unregisterOwner = registerComputerController(
 			session.getEvalKernelOwnerId?.() ?? undefined,

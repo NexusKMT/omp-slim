@@ -12,6 +12,9 @@
 - Fixed the Docker `natives-builder` stage failing to build releases ≥ 17.1.1: the native audio stack added bindgen (miniaudio needs libclang) and a bundled-opus CMake build (needs cmake + make), none of which were installed in the slim builder image.
 - Fixed `omp usage` duplicating org-less legacy accounts as "no usage data" rows whenever any sibling report carried an organization (mixed pools of pre-org-capture rows and fresh org-scoped logins): an org-less account is now covered by its own org-less report, while org-attributed sibling reports still never count as its coverage.
 - `omp usage` revalidates the broker credential snapshot before rendering: live usage reports were previously paired with a disk-cached account list up to an hour old, so a just-completed re-login (org-less row upserted to org-scoped) rendered as a phantom duplicate until the cache expired.
+### Fixed
+
+- Fixed screenshot-relative pointer actions missing their visible targets when a function-tool provider silently downscaled a large computer screenshot; computer captures now stay within provider-safe dimensions before establishing the native coordinate frame.
 
 ## [17.1.3] - 2026-07-24
 
