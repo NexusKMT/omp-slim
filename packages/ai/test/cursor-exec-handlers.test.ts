@@ -6,6 +6,7 @@ import {
 	buildCursorSystemPromptJsons,
 	emptyGrepPatternRejection,
 	handleServerMessage,
+	processInteractionUpdate,
 	resolveExecHandler,
 	streamCursor,
 	type ToolCallState,
@@ -679,6 +680,88 @@ describe("Cursor exec local-work tracking (issue #4593)", () => {
 		);
 
 		expect(state.resolvedMcpToolCallIds.has("call-mcp-1")).toBe(true);
+	});
+
+	it("leaves an MCP call unpaired when no mcp handler is installed", async () => {
+		// The exception to the pairing rule. Every other exec case synthesizes a
+		// block and marks it resolved unconditionally, but `mcpArgs` only marks it
+		// when an `mcp` handler exists. Without one the streamed block stays
+		// unresolved, so `agent-loop.ts` runs it locally and pairs its own result
+		// — synthesizing one here would double up.
+		const output = cursorAssistantMessage();
+		const stream = new AssistantMessageEventStream();
+		const state = newBlockState();
+		const h2Request = { write: () => true } as unknown as Parameters<typeof handleServerMessage>[5];
+		const serverMsg = create(AgentServerMessageSchema, {
+			message: {
+				case: "execServerMessage",
+				value: create(ExecServerMessageSchema, {
+					id: 1,
+					execId: "exec-mcp-2",
+					message: {
+						case: "mcpArgs",
+						value: create(McpArgsSchema, {
+							name: "mcp__fixture_report",
+							toolName: "mcp__fixture_report",
+							toolCallId: "call-mcp-unhandled",
+							providerIdentifier: "pi-agent",
+						}),
+					},
+				}),
+			},
+		});
+		const collected: ToolResultMessage[] = [];
+
+		await handleServerMessage(
+			serverMsg,
+			output,
+			stream,
+			state,
+			new Map(),
+			h2Request,
+			undefined,
+			result => {
+				collected.push(result);
+				return result;
+			},
+			{ sawTokenDelta: false },
+			[],
+		);
+
+		expect(state.resolvedMcpToolCallIds.has("call-mcp-unhandled")).toBe(false);
+		expect(collected).toEqual([]);
+
+		// The block itself only exists once the streamed call arrives. It must
+		// come out unresolved, so `agent-loop.ts` executes it and pairs a result.
+		processInteractionUpdate(
+			{
+				message: {
+					case: "toolCallStarted",
+					value: {
+						callId: "call-mcp-unhandled",
+						toolCall: {
+							mcpToolCall: {
+								args: {
+									name: "mcp__fixture_report",
+									toolName: "mcp__fixture_report",
+									toolCallId: "call-mcp-unhandled",
+								},
+							},
+						},
+					},
+				},
+			},
+			output,
+			stream,
+			state,
+			{ sawTokenDelta: false },
+		);
+
+		const mcpBlock = output.content.find(
+			(block): block is ToolCallState => block.type === "toolCall" && block.id === "call-mcp-unhandled",
+		);
+		expect(mcpBlock).toBeDefined();
+		expect(mcpBlock?.[kCursorExecResolved]).toBeUndefined();
 	});
 
 	it("pairs a result for a synthesized exec block when no handler is installed", async () => {

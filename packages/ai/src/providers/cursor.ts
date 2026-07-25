@@ -1369,7 +1369,7 @@ async function handleExecServerMessage(
 				toolResult => buildMcpResultFromToolResult(mcpCall, toolResult),
 				_reason => buildMcpToolNotFoundResult(mcpCall),
 				error => buildMcpErrorResult(error),
-				{ toolCallId: mcpCall.toolCallId, toolName: mcpCall.toolName },
+				execHandlers?.mcp ? { toolCallId: mcpCall.toolCallId, toolName: mcpCall.toolName } : null,
 			);
 			sendExecClientMessage(h2Request, execMsg, "mcpResult", execResult);
 			return;
@@ -1462,6 +1462,10 @@ function sendExecClientStreamClose(h2Request: http2.ClientHttp2Stream, execMsg: 
  * interaction on replay. The three result-less paths — no handler installed, a
  * handler that produced nothing, and a thrown handler — therefore synthesize
  * one from the same text the server sees in `execResult`.
+ *
+ * `pairing` is required so a new callsite cannot silently recreate the orphan,
+ * and nullable for the one caller whose block is NOT pre-resolved: MCP without
+ * an `mcp` handler, which `agent-loop.ts` runs locally and pairs itself.
  */
 export async function resolveExecHandler<TArgs, TResult>(
 	args: TArgs,
@@ -1470,9 +1474,13 @@ export async function resolveExecHandler<TArgs, TResult>(
 	buildFromToolResult: (toolResult: ToolResultMessage) => TResult,
 	buildRejected: (reason: string) => TResult,
 	buildError: (error: string) => TResult,
-	pairing: CursorExecPairing,
+	pairing: CursorExecPairing | null,
 ): Promise<{ execResult: TResult; toolResult?: ToolResultMessage }> {
 	const pair = async (text: string, isError: boolean): Promise<ToolResultMessage | undefined> => {
+		// `null` only for MCP without a handler: that block is never marked
+		// resolved, so `agent-loop.ts` runs it locally and pairs its own result.
+		// Synthesizing one here would double up.
+		if (!pairing) return undefined;
 		const synthesized: ToolResultMessage = {
 			role: "toolResult",
 			toolCallId: pairing.toolCallId,
@@ -2145,6 +2153,33 @@ function mapTodoSnapshot(todos: CursorTodoItem[]): CursorTodoSnapshotItem[] {
 	}));
 }
 
+interface CursorMcpToolCall {
+	args?: {
+		name?: string;
+		toolName?: string;
+		toolCallId?: string;
+		args?: Record<string, Uint8Array>;
+	};
+}
+
+interface CursorMcpToolCallCarrier {
+	tool?: { case?: string; value?: unknown };
+	mcpToolCall?: CursorMcpToolCall;
+}
+
+/**
+ * `ToolCall.tool` is a protobuf oneof: a wire-decoded message exposes the
+ * variant as `{ case, value }` and NEVER as a flattened `mcpToolCall`
+ * property. Reading the flat property alone is what made native todo calls
+ * invisible on the wire while hand-shaped test fixtures kept passing, so MCP
+ * goes through the same selector. The flat fallback is kept for those fixtures.
+ */
+function selectMcpCall(toolCall: CursorMcpToolCallCarrier | undefined): CursorMcpToolCall | undefined {
+	const oneof = toolCall?.tool;
+	if (oneof?.case === "mcpToolCall") return oneof.value as CursorMcpToolCall;
+	return toolCall?.mcpToolCall;
+}
+
 /**
  * Extract the authoritative full todo list from a completed native todo call.
  *
@@ -2529,14 +2564,17 @@ export function processInteractionUpdate(
 		endCurrentThinkingBlock(output, stream, state);
 		const toolCall = update.message.value.toolCall;
 		if (toolCall) {
-			const mcpCall = toolCall.mcpToolCall;
+			const mcpCall = selectMcpCall(toolCall);
 			if (mcpCall) {
 				const args = mcpCall.args || {};
 				const id = args.toolCallId || crypto.randomUUID();
 				const block: ToolCallState = {
 					type: "toolCall",
 					id,
-					name: args.name || args.toolName || "",
+					// Same precedence as `decodeMcpCall` (`toolName || name`), which is
+					// what the exec channel pairs its result under. Diverging here would
+					// name the block one thing and its result another.
+					name: args.toolName || args.name || "",
 					arguments: {},
 					[kStreamingBlockIndex]: output.content.length,
 					[kStreamingPartialJson]: "",
@@ -2609,7 +2647,7 @@ export function processInteractionUpdate(
 				if (partial !== undefined) {
 					state.currentToolCall.arguments = parseStreamingJson(partial);
 				}
-				const decodedArgs = decodeMcpArgsMap(toolCall?.mcpToolCall?.args?.args);
+				const decodedArgs = decodeMcpArgsMap(selectMcpCall(toolCall)?.args?.args);
 				state.currentToolCall.arguments = mergeCursorMcpToolCallArgs(
 					state.currentToolCall.arguments as Record<string, unknown> | undefined,
 					decodedArgs,

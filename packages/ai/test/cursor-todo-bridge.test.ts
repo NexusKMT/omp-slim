@@ -12,6 +12,8 @@ import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream"
 import {
 	AgentServerMessageSchema,
 	InteractionUpdateSchema,
+	McpArgsSchema,
+	McpToolCallSchema,
 	ReadTodosArgsSchema,
 	ReadTodosResultSchema,
 	ReadTodosSuccessSchema,
@@ -872,5 +874,54 @@ describe("cursor native todo bridge (wire-encoded protobuf)", () => {
 			isError: true,
 			content: [{ type: "text", text: "boom" }],
 		});
+	});
+
+	it("recognizes an MCP call through the wire-encoded oneof, start and completion", () => {
+		// Same wire-shape trap the native todo calls fell into: `ToolCall.tool` is
+		// a protobuf oneof, so a decoded message exposes the variant as
+		// `{ case, value }` and never as a flat `mcpToolCall` property. Reading
+		// the flat one produced `undefined` on every real message while
+		// hand-shaped fixtures kept passing. Encode/decode for real here, and
+		// cover BOTH reads: the started frame that creates the block and the
+		// completed frame that merges the decoded argument map into it.
+		const h = newHarness();
+		const mcpCall = (args: Record<string, Uint8Array>) =>
+			create(ToolCallSchema, {
+				tool: {
+					case: "mcpToolCall",
+					value: create(McpToolCallSchema, {
+						args: create(McpArgsSchema, {
+							// `name` and `toolName` differ on purpose: the block must be
+							// named the same way `decodeMcpCall` names the paired result,
+							// which prefers `toolName`.
+							name: "fixture_report",
+							toolName: "mcp__fixture_report",
+							toolCallId: "call-mcp-wire",
+							providerIdentifier: "pi-agent",
+							args,
+						}),
+					}),
+				},
+			});
+		processInteractionUpdate(
+			wireUpdate("toolCallStarted", mcpCall({})) as never,
+			h.output,
+			h.stream,
+			h.state,
+			h.usageState,
+		);
+		processInteractionUpdate(
+			wireUpdate("toolCallCompleted", mcpCall({ query: new TextEncoder().encode('"weather"') })) as never,
+			h.output,
+			h.stream,
+			h.state,
+			h.usageState,
+		);
+
+		const blocks = h.output.content.filter((block): block is ToolCallState => block.type === "toolCall");
+		expect(blocks).toHaveLength(1);
+		expect(blocks[0]).toMatchObject({ id: "call-mcp-wire", name: "mcp__fixture_report" });
+		// The completion read is what merges the decoded args onto the block.
+		expect(blocks[0].arguments).toMatchObject({ query: "weather" });
 	});
 });
