@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Documented that the non-PTY shell's bundled `jq` command is backed by jaq, including its null-indexing divergence and portable filter syntax ([#6614](https://github.com/can1357/oh-my-pi/issues/6614)).
+
 ## [17.1.3] - 2026-07-24
 
 ### Fixed
