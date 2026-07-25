@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+
+- Fixed dragging an image whose path contains unescaped spaces (e.g. macOS screenshot names like `Screenshot 2026-07-24 at 1.55.12 PM.png`) into the terminal — the bracketed-paste image extraction route now has the same whole-text-as-path fallback as the clipboard keybind route, so both routes share identical detection and attach the image instead of inserting the raw path as literal text ([#6578](https://github.com/can1357/oh-my-pi/issues/6578)).
 
 ## [17.1.3] - 2026-07-24
 

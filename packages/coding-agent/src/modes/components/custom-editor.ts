@@ -80,10 +80,10 @@ const FILE_URI_REGEX = /^file:\/\//i;
 const WINDOWS_DRIVE_PATH_REGEX = /^[a-z]:[\\/]/i;
 /**
  * Whole-string anchor for paths that are unambiguously absolute. Restricts the
- * "treat the entire clipboard text as one path" branch of
- * {@link extractImagePathFromText} to inputs that start with a clearly-anchored
- * filesystem prefix, so prose containing a path-shaped fragment (e.g.
- * "see /tmp/x.png") never hijacks the smart fallback.
+ * "treat the entire text as one path" pass of {@link extractWholeTextImagePath}
+ * to inputs that start with a clearly-anchored filesystem prefix, so prose
+ * containing a path-shaped fragment (e.g. "see /tmp/x.png") never hijacks the
+ * smart fallback.
  */
 const ABSOLUTE_PATH_PREFIX_REGEX = /^(?:\/|~\/|file:\/\/|\\\\|[A-Za-z]:[\\/])/;
 
@@ -228,16 +228,18 @@ export function extractPastePathsFromText(text: string): string[] | undefined {
 	return extractExplicitPathSegments(text);
 }
 
-export function extractBracketedPastePaths(data: string): string[] | undefined {
-	if (!data.startsWith(BRACKETED_PASTE_START)) return undefined;
-	const endIndex = data.indexOf(BRACKETED_PASTE_END, BRACKETED_PASTE_START.length);
-	if (endIndex === -1 || endIndex + BRACKETED_PASTE_END.length !== data.length) return undefined;
-	return extractExplicitPathSegments(data.slice(BRACKETED_PASTE_START.length, endIndex));
-}
-
-export function extractBracketedImagePastePaths(data: string): string[] | undefined {
-	const paths = extractBracketedPastePaths(data);
-	return paths?.every(isImagePath) ? paths : undefined;
+/**
+ * Whole-text-as-path pass shared by {@link extractImagePastePathsFromText}
+ * and {@link extractImagePathFromText}: treat the entire text as one path
+ * when it is anchored by {@link ABSOLUTE_PATH_PREFIX_REGEX}, contains no
+ * newlines, and points at a supported image extension. Recovers single paths
+ * whose unescaped spaces defeat the segment splitter (macOS screenshot names).
+ */
+function extractWholeTextImagePath(text: string): string | undefined {
+	const trimmed = text.trim();
+	if (!trimmed || /[\r\n]/.test(trimmed) || !ABSOLUTE_PATH_PREFIX_REGEX.test(trimmed)) return undefined;
+	const wholePath = normalizePastedPath(trimmed);
+	return wholePath && isExplicitPastedPath(wholePath) && isImagePath(wholePath) ? wholePath : undefined;
 }
 
 /**
@@ -245,10 +247,35 @@ export function extractBracketedImagePastePaths(data: string): string[] | undefi
  * payload that has already been stripped of the `\x1b[200~` / `\x1b[201~`
  * markers — used by the assembled-paste router in {@link CustomEditor.handleInput}
  * so split bracketed pastes get the same image-path detection as single-chunk ones.
+ *
+ * When the segment splitter fails (an unescaped space in a real path breaks
+ * its every-segment-is-a-path invariant), falls back to
+ * {@link extractWholeTextImagePath}, so a dropped macOS screenshot
+ * (`Screenshot 2026-06-25 at 1.23.45 PM.png`) attaches as an image instead of
+ * degrading to literal text (#6578).
  */
 export function extractImagePastePathsFromText(text: string): string[] | undefined {
 	const paths = extractPastePathsFromText(text);
-	return paths?.every(isImagePath) ? paths : undefined;
+	if (paths !== undefined) return paths.every(isImagePath) ? paths : undefined;
+	const wholePath = extractWholeTextImagePath(text);
+	return wholePath ? [wholePath] : undefined;
+}
+
+function bracketedPastePayload(data: string): string | undefined {
+	if (!data.startsWith(BRACKETED_PASTE_START)) return undefined;
+	const endIndex = data.indexOf(BRACKETED_PASTE_END, BRACKETED_PASTE_START.length);
+	if (endIndex === -1 || endIndex + BRACKETED_PASTE_END.length !== data.length) return undefined;
+	return data.slice(BRACKETED_PASTE_START.length, endIndex);
+}
+
+export function extractBracketedPastePaths(data: string): string[] | undefined {
+	const payload = bracketedPastePayload(data);
+	return payload === undefined ? undefined : extractExplicitPathSegments(payload);
+}
+
+export function extractBracketedImagePastePaths(data: string): string[] | undefined {
+	const payload = bracketedPastePayload(data);
+	return payload === undefined ? undefined : extractImagePastePathsFromText(payload);
 }
 
 export function extractBracketedImagePastePath(data: string): string | undefined {
@@ -272,25 +299,17 @@ export function extractBracketedImagePastePath(data: string): string | undefined
  *    ambiguous multi-path clipboard text like `/tmp/a.png /tmp/b.png`
  *    still falls through to the text fallback instead of being mis-loaded
  *    as one giant path).
- * 2. Whole-text-as-path pass — only reached when the splitter failed
- *    (every segment must look like an explicit path; an unescaped space in
- *    a real path breaks that). Restricted to inputs anchored by
- *    {@link ABSOLUTE_PATH_PREFIX_REGEX} so prose containing a path-shaped
- *    fragment ("see /tmp/x.png") never hijacks the smart fallback. This
- *    is what recovers macOS screenshot filenames like
+ * 2. {@link extractWholeTextImagePath} — only reached when the splitter
+ *    failed (every segment must look like an explicit path; an unescaped
+ *    space in a real path breaks that). This is what recovers macOS
+ *    screenshot filenames like
  *    `/Users/me/Desktop/Screenshot 2026-06-25 at 1.23.45 PM.png`.
  */
 export function extractImagePathFromText(text: string): string | undefined {
 	const paths = extractPastePathsFromText(text);
 	if (paths?.length === 1 && isImagePath(paths[0])) return paths[0];
 	if (paths !== undefined) return undefined;
-	const trimmed = text.trim();
-	if (!trimmed || /[\r\n]/.test(trimmed) || !ABSOLUTE_PATH_PREFIX_REGEX.test(trimmed)) return undefined;
-	const wholePath = normalizePastedPath(trimmed);
-	if (wholePath && isExplicitPastedPath(wholePath) && isImagePath(wholePath)) {
-		return wholePath;
-	}
-	return undefined;
+	return extractWholeTextImagePath(text);
 }
 
 /**

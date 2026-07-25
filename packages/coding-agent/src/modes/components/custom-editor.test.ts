@@ -8,6 +8,7 @@ import {
 	CustomEditor,
 	extractBracketedImagePastePaths,
 	extractBracketedPastePaths,
+	extractImagePastePathsFromText,
 	extractImagePathFromText,
 	extractPastePathsFromText,
 	SPACE_HOLD_MECHANICAL_RUN,
@@ -182,6 +183,23 @@ describe("CustomEditor bracketed path paste", () => {
 		expect(editor.getText()).toBe("/tmp/report.csv");
 		expect(imagePathCalls).toBe(0);
 	});
+
+	it("attaches a spaced screenshot path as an image instead of inserting it as literal text", () => {
+		// #6578: the raw macOS "copy screenshot path" payload has unescaped
+		// spaces, which defeats the segment splitter. Before the whole-text
+		// fallback the paste degraded to literal text in the prompt.
+		const { editor } = makeEditor();
+		const screenshot = "/Users/me/Desktop/Screenshot 2026-07-24 at 1.55.12 PM.png";
+		const pasted: string[] = [];
+		editor.onPasteImagePath = path => {
+			pasted.push(path);
+		};
+
+		editor.handleInput(bracketedPaste(screenshot));
+
+		expect(pasted).toEqual([screenshot]);
+		expect(editor.getText()).toBe("");
+	});
 });
 describe("CustomEditor configured paste image keys", () => {
 	it("routes Ghostty Cmd+V kitty key events through the macOS image-paste default", () => {
@@ -262,6 +280,60 @@ describe("extractPastePathsFromText", () => {
 		expect(extractPastePathsFromText("/tmp/a.png /tmp/b.png")).toEqual(["/tmp/a.png", "/tmp/b.png"]);
 		expect(extractPastePathsFromText("just text")).toBeUndefined();
 	});
+});
+
+describe("extractImagePastePathsFromText (issue #6578)", () => {
+	const MAC_SCREENSHOT =
+		"/var/folders/xx/T/TemporaryItems/NSIRD_screencaptureui_ab/Screenshot 2026-07-24 at 1.55.12 PM.png";
+	const WINDOWS_SPACED = "C:\\Users\\me\\My Pictures\\shot 1.png";
+
+	// Every case must resolve identically on the stripped-marker route
+	// (assembled pastes) and the bracketed route, since the latter now
+	// delegates to the former.
+	const cases: { name: string; text: string; expected: string[] | undefined }[] = [
+		{ name: "a macOS screenshot path with unescaped spaces", text: MAC_SCREENSHOT, expected: [MAC_SCREENSHOT] },
+		{ name: "a Windows drive path with unescaped spaces", text: WINDOWS_SPACED, expected: [WINDOWS_SPACED] },
+		{
+			name: "a home-anchored path with unescaped spaces",
+			text: "~/Pictures/Cleanshot 2026-07-24 at 12.00.png",
+			expected: ["~/Pictures/Cleanshot 2026-07-24 at 12.00.png"],
+		},
+		{
+			name: "a shell-escaped spaced path",
+			text: "/tmp/My\\ Photos/shot\\ 1.png",
+			expected: ["/tmp/My Photos/shot 1.png"],
+		},
+		{
+			name: "a double-quoted spaced path",
+			text: '"/tmp/My Photos/shot 1.png"',
+			expected: ["/tmp/My Photos/shot 1.png"],
+		},
+		{ name: "a spaced path with a non-image extension", text: "/tmp/my report 2026.csv", expected: undefined },
+		{
+			// Ends in a real image extension, so only the absolute-prefix
+			// anchor keeps the whole-text fallback from swallowing the prose.
+			name: "prose ending in a path-shaped fragment",
+			text: "see /Users/me/Desktop/Screen Shot 1.png",
+			expected: undefined,
+		},
+		{
+			name: "two spaced image paths on separate lines",
+			text: "/tmp/a shot.png\n/tmp/b shot.png",
+			expected: undefined,
+		},
+		{
+			name: "a bare spaced filename with no leading separator",
+			text: "Screenshot 2026-07-24 at 1.55.12 PM.png",
+			expected: undefined,
+		},
+	];
+
+	for (const { name, text, expected } of cases) {
+		it(`${expected ? "recovers" : "rejects"} ${name} on both paste routes`, () => {
+			expect(extractImagePastePathsFromText(text)).toEqual(expected);
+			expect(extractBracketedImagePastePaths(bracketedPaste(text))).toEqual(expected);
+		});
+	}
 });
 
 describe("CustomEditor space-hold push-to-talk", () => {
