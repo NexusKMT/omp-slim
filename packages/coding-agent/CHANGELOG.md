@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed plan approval presenting a completed plan instead of the newest draft when the submitted title did not match the draft filename ([#6569](https://github.com/can1357/oh-my-pi/issues/6569)).
+
 ## [17.1.3] - 2026-07-24
 
 ### Fixed

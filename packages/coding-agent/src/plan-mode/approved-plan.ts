@@ -149,8 +149,8 @@ export interface ResolvedApprovedPlan {
 
 /** Locate the plan file the agent wrote and finalize its title — without
  *  renaming anything. Tries, in order: the slug derived from `extra.title`
- *  (`local://<slug>-plan.md`), the plan path from plan-mode state, then a scan
- *  of recent plan files. Throws a `ToolError` guiding the agent when none exist. */
+ *  (`local://<slug>-plan.md`), recent plan files from newest to oldest, then
+ *  the plan path from plan-mode state. Throws a `ToolError` guiding the agent when none exist. */
 export async function resolveApprovedPlan(input: ResolveApprovedPlanInput): Promise<ResolvedApprovedPlan> {
 	const ordered: string[] = [];
 	const consider = (url: string | undefined): void => {
@@ -159,19 +159,15 @@ export async function resolveApprovedPlan(input: ResolveApprovedPlanInput): Prom
 
 	const slug = planSlugFromSupplied(input.suppliedTitle);
 	consider(slug ? planFileUrlForSlug(slug) : undefined);
+
+	if (input.listPlanFiles) {
+		for (const url of await input.listPlanFiles()) consider(url);
+	}
 	consider(input.statePlanFilePath);
 
 	for (const url of ordered) {
 		const content = await input.readPlan(url);
 		if (content !== null) return finalizeApprovedPlan(url, content, input.suppliedTitle);
-	}
-
-	if (input.listPlanFiles) {
-		for (const url of await input.listPlanFiles()) {
-			if (ordered.includes(url)) continue;
-			const content = await input.readPlan(url);
-			if (content !== null) return finalizeApprovedPlan(url, content, input.suppliedTitle);
-		}
 	}
 
 	const target = ordered[0] ?? input.statePlanFilePath;

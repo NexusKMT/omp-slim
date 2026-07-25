@@ -48,6 +48,20 @@ describe("resolveApprovedPlan", () => {
 		expect(result.planFilePath).toBe("local://existing-plan.md");
 	});
 
+	it("prefers the newest listed plan over a completed state plan", async () => {
+		const result = await resolveApprovedPlan({
+			suppliedTitle: "Different title",
+			statePlanFilePath: "local://completed-plan.md",
+			readPlan: reader({
+				"local://completed-plan.md": "# Completed\n\nOld plan",
+				"local://new-draft-plan.md": "# New\n\nNew plan",
+			}),
+			listPlanFiles: async () => ["local://new-draft-plan.md", "local://completed-plan.md"],
+		});
+		expect(result.planFilePath).toBe("local://new-draft-plan.md");
+		expect(result.planContent).toContain("New plan");
+	});
+
 	it("scans listed plan files when the title was dropped and state path is empty", async () => {
 		const result = await resolveApprovedPlan({
 			suppliedTitle: undefined,
