@@ -15,7 +15,6 @@ import {
 } from "@oh-my-pi/pi-coding-agent/secrets";
 import {
 	deobfuscateAgentMessages,
-	deobfuscateSessionContext,
 	deobfuscateToolArguments,
 	obfuscateMessages,
 	obfuscateProviderContext,
@@ -1398,17 +1397,10 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(after.obfuscate(persisted)).toBe(persisted);
 	});
 
-	it("does not canonicalize literal placeholder aliases inside regex matches", () => {
-		const sharedKey = "F".repeat(43);
-		const plain = new SecretObfuscator([{ type: "plain", content: "legacy-secret" }], sharedKey);
-		expect(plain.deobfuscateStored("#XRRS#")).toBe("legacy-secret");
-
+	it("redacts literal hash-delimited text inside regex matches", () => {
 		const obfuscator = new SecretObfuscator(
-			[
-				{ type: "plain", content: "legacy-secret" },
-				{ type: "regex", content: "api_key=\\S+", friendlyName: "api-key" },
-			],
-			sharedKey,
+			[{ type: "regex", content: "api_key=\\S+", friendlyName: "api-key" }],
+			"F".repeat(43),
 		);
 
 		const obfuscated = obfuscator.obfuscate("api_key=#XRRS#");
@@ -2375,69 +2367,12 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(first.deobfuscate(firstToken ?? "")).toBe("alpha-secret");
 	});
 
-	it("keeps legacy aliases aligned with formerly obfuscated secrets", () => {
-		const obfuscator = new SecretObfuscator([
-			{ type: "plain", content: "abc" },
-			{ type: "plain", content: "MYSECRET123" },
-		]);
-
-		expect(obfuscator.deobfuscateStored("#XRRS#")).toBe("MYSECRET123");
-		expect(obfuscator.deobfuscateStored("#NTJ5#")).toBe("#NTJ5#");
-	});
-
-	it("restores hash-delimited keyed placeholders only from stored sessions", () => {
-		const obfuscator = new SecretObfuscator([{ type: "plain", content: "legacy-secret" }], "shared-key");
+	it("leaves hash-delimited tokens inert while restoring current placeholders", () => {
+		const obfuscator = new SecretObfuscator([{ type: "plain", content: "legacy-secret" }]);
 		const current = obfuscator.obfuscate("legacy-secret");
-		const legacy = current.replace(/^\$\$/, "#").replace(/\$\$$/, "#");
-
-		expect(obfuscator.deobfuscateStored(legacy)).toBe("legacy-secret");
-		expect(obfuscator.deobfuscate(legacy)).toBe(legacy);
-	});
-
-	it("honors legacy index-derived aliases only on the stored-replay path", () => {
-		const obfuscator = new SecretObfuscator([{ type: "plain", content: "legacy-secret" }]);
-
-		// The generated token is keyed, never the legacy index token.
-		expect(obfuscator.obfuscate("legacy-secret")).not.toBe("#XRRS#");
-
-		// Stored session replay/display restores pre-keyed legacy placeholders so
-		// older persisted sessions still resume correctly.
-		expect(obfuscator.deobfuscateStored("#XRRS#")).toBe("legacy-secret");
-
-		// Live provider output and tool-call arguments MUST NOT honor the legacy
-		// alias: it is unkeyed and trivially guessable, so a prompt-injected model
-		// could synthesize `#XRRS#` in a bash/read argument and exfiltrate the secret.
-		expect(obfuscator.deobfuscate("#XRRS#")).toBe("#XRRS#");
-		expect(obfuscator.deobfuscateObject({ cmd: "cat #XRRS#" })).toEqual({ cmd: "cat #XRRS#" });
-	});
-
-	it("restores keyed placeholders but never legacy aliases on agent-feeding replay", () => {
-		// deobfuscateSessionContext has two kinds of consumers: agent-feeding paths
-		// (resume, history rewrite, branch switch) whose output is re-obfuscated and
-		// sent to the provider, and a display-only transcript (allowLegacyAliases).
-		// Legacy index-derived `#XRRS#` aliases are unkeyed and guessable, so a
-		// prompt-injected model can plant one in ANY record it influences — its own
-		// assistant output OR a tool result (bash stdout). If a feed path restored
-		// it, the next provider turn would re-obfuscate it into a usable keyed
-		// placeholder the model could weaponize in a tool argument. So feed paths
-		// restore keyed placeholders ONLY; legacy is restored solely for the
-		// never-re-sent transcript so pre-keyed sessions still render their secrets.
-		const obfuscator = new SecretObfuscator([{ type: "plain", content: "legacy-secret" }]);
-		const keyedToken = obfuscator.obfuscate("legacy-secret");
-		expect(keyedToken).not.toContain("#XRRS#");
-
-		const assistant: Message = {
+		const message: AgentMessage = {
 			role: "assistant",
-			content: [
-				{ type: "text", text: `attacker planted #XRRS# and echoed ${keyedToken}` },
-				{
-					type: "toolCall",
-					id: "call-1",
-					name: "read",
-					arguments: { note: keyedToken },
-					intent: `intent ${keyedToken}`,
-				},
-			],
+			content: [{ type: "text", text: `legacy #XRRS# current ${current}` }],
 			api: "anthropic-messages",
 			provider: "anthropic",
 			model: "test-model",
@@ -2452,80 +2387,11 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 			stopReason: "stop",
 			timestamp: 1,
 		};
-		const toolResult: Message = {
-			role: "toolResult",
-			toolCallId: "call-1",
-			toolName: "bash",
-			content: [{ type: "text", text: "bash stdout #XRRS#" }],
-			isError: false,
-			timestamp: 2,
-		};
-		const branchSummary: AgentMessage = {
-			role: "branchSummary",
-			summary: `branch #XRRS# and echoed ${keyedToken}`,
-			fromId: "branch-1",
-			timestamp: 3,
-		};
-		const compactionSummary: AgentMessage = {
-			role: "compactionSummary",
-			summary: `compaction #XRRS# and echoed ${keyedToken}`,
-			tokensBefore: 0,
-			timestamp: 4,
-		};
-		const contextMessages: AgentMessage[] = [
-			assistant as AgentMessage,
-			toolResult as AgentMessage,
-			branchSummary,
-			compactionSummary,
-		];
-		const ctx = {
-			messages: contextMessages,
-			models: {},
-			injectedTtsrRules: [],
-			selectedMCPToolNames: [],
-			hasPersistedMCPToolSelection: false,
-			mode: "none",
-		};
 
-		// Agent-feeding default restores keyed placeholders authored by this
-		// obfuscator but leaves a prompt-injected legacy alias inert before the
-		// next provider turn.
-		const fed = deobfuscateSessionContext(ctx, obfuscator);
-		const fedAssistant = (fed.messages[0] as Extract<Message, { role: "assistant" }>).content[0] as { text: string };
-		const fedTool = (fed.messages[1] as Extract<Message, { role: "toolResult" }>).content[0] as { text: string };
-		expect(fedAssistant.text).toBe("attacker planted #XRRS# and echoed legacy-secret");
-		const fedCall = (fed.messages[0] as AssistantMessage).content[1] as {
-			arguments: Record<string, unknown>;
-			intent?: string;
-		};
-		expect(fedCall.arguments).toEqual({ note: "legacy-secret" });
-		expect(fedCall.intent).toBe("intent legacy-secret");
-		expect(fedTool.text).toBe("bash stdout #XRRS#");
-		const fedBranch = fed.messages[2] as Extract<AgentMessage, { role: "branchSummary" }>;
-		const fedCompaction = fed.messages[3] as Extract<AgentMessage, { role: "compactionSummary" }>;
-		expect(fedBranch.summary).toBe("branch #XRRS# and echoed legacy-secret");
-		expect(fedCompaction.summary).toBe("compaction #XRRS# and echoed legacy-secret");
-		const replayed = obfuscateMessages(obfuscator, [fed.messages[0] as Message]);
-		const replayedAssistant = replayed[0] as Extract<Message, { role: "assistant" }>;
-		const replayedText = replayedAssistant.content[0] as { text: string };
-		expect(replayedText.text).toBe(`attacker planted #XRRS# and echoed ${keyedToken}`);
-		const replayedCall = replayedAssistant.content[1] as { arguments: Record<string, unknown>; intent?: string };
-		expect(replayedCall.arguments).toEqual({ note: keyedToken });
-		expect(replayedCall.intent).toBe(`intent ${keyedToken}`);
-
-		// Display-only transcript: legacy aliases ARE restored so a genuinely
-		// pre-keyed session renders its secrets. This output is never re-obfuscated.
-		const shown = deobfuscateSessionContext(ctx, obfuscator, true);
-		const shownAssistant = (shown.messages[0] as Extract<Message, { role: "assistant" }>).content[0] as {
-			text: string;
-		};
-		const shownTool = (shown.messages[1] as Extract<Message, { role: "toolResult" }>).content[0] as { text: string };
-		expect(shownAssistant.text).toBe("attacker planted legacy-secret and echoed legacy-secret");
-		expect(shownTool.text).toBe("bash stdout #XRRS#");
-		const shownBranch = shown.messages[2] as Extract<AgentMessage, { role: "branchSummary" }>;
-		const shownCompaction = shown.messages[3] as Extract<AgentMessage, { role: "compactionSummary" }>;
-		expect(shownBranch.summary).toBe("branch legacy-secret and echoed legacy-secret");
-		expect(shownCompaction.summary).toBe("compaction legacy-secret and echoed legacy-secret");
+		const restored = deobfuscateAgentMessages(obfuscator, [message])[0];
+		if (restored?.role !== "assistant") throw new Error("expected restored assistant message");
+		const text = restored.content[0];
+		expect(text?.type === "text" && text.text).toBe("legacy #XRRS# current legacy-secret");
 	});
 
 	it("deobfuscates placeholders after friendlyName changes", () => {
@@ -3683,7 +3549,8 @@ describe("deobfuscateAgentMessages (display restore)", () => {
 			timestamp: 1,
 		};
 
-		const [restored] = deobfuscateAgentMessages(obfuscator, [message], true) as [typeof message];
+		const restored = deobfuscateAgentMessages(obfuscator, [message])[0];
+		if (restored?.role !== "compactionSummary") throw new Error("expected restored compaction summary");
 		const blocks = restored.blocks ?? [];
 		const text = blocks[0];
 		const image = blocks[1];

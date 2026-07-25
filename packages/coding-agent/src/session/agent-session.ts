@@ -4097,10 +4097,7 @@ export class AgentSession {
 	 * Transcript for TUI display. Full history is kept for export/resume-style
 	 * callers; live chat can collapse compacted history to keep the hot render
 	 * surface bounded. Display-only — NEVER feed the result to
-	 * `agent.replaceMessages` or a provider. Because it is never re-obfuscated,
-	 * it opts into legacy index-derived alias restoration so pre-keyed sessions
-	 * still render their secrets; the agent-feeding paths
-	 * (`buildDisplaySessionContext`) keep the keyed-only default.
+	 * `agent.replaceMessages` or a provider.
 	 */
 	buildTranscriptSessionContext(
 		options?: Pick<BuildSessionContextOptions, "collapseCompactedHistory" | "keepDanglingToolCalls">,
