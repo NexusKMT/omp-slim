@@ -28,6 +28,18 @@ import { TempDir } from "@oh-my-pi/pi-utils";
  *  labels stay local-only (telemetry, transcripts). */
 const UUID_V7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+function metadataSessionId(options: SimpleStreamOptions | undefined): string {
+	const metadata = options?.metadata;
+	if (!metadata || typeof metadata.user_id !== "string") {
+		throw new Error("Expected metadata.user_id");
+	}
+	const userId: unknown = JSON.parse(metadata.user_id);
+	if (!userId || typeof userId !== "object" || !("session_id" in userId) || typeof userId.session_id !== "string") {
+		throw new Error("Expected metadata.user_id.session_id");
+	}
+	return userId.session_id;
+}
+
 describe("AgentSession advisor provider-options parity", () => {
 	let sharedDir: TempDir;
 	let authStorage: AuthStorage;
@@ -235,7 +247,7 @@ describe("AgentSession advisor provider-options parity", () => {
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 
 		const advisor = session.getAdvisorAgent();
-		if (!advisor) throw new Error("Expected advisor agent to be live");
+		if (!advisor?.sessionId) throw new Error("Expected advisor agent with a provider session id");
 
 		await advisor.prompt("ping").catch(() => {});
 
@@ -244,16 +256,49 @@ describe("AgentSession advisor provider-options parity", () => {
 
 		// The advisor request must carry a non-empty session id keyed to the
 		// advisor's own provider-facing UUIDv7, not the parent session id.
-		const advisorMeta = opts.metadata as { user_id?: string } | undefined;
-		if (!advisorMeta?.user_id) throw new Error("Expected advisor metadata.user_id");
-		const advisorUserId = JSON.parse(advisorMeta.user_id) as { session_id?: string };
-		expect(advisorUserId.session_id).toBe(advisor.sessionId);
+		expect(metadataSessionId(opts)).toBe(advisor.sessionId);
 
 		// Distinct from the main agent's session identity (both non-empty).
-		const mainMeta = mainAgent.metadataForProvider("anthropic") as { user_id?: string } | undefined;
-		if (!mainMeta?.user_id) throw new Error("Expected main agent metadata.user_id");
-		const mainUserId = JSON.parse(mainMeta.user_id) as { session_id?: string };
-		expect(mainUserId.session_id).toBeTruthy();
-		expect(advisorUserId.session_id).not.toBe(mainUserId.session_id);
+		expect(metadataSessionId({ metadata: mainAgent.metadataForProvider("anthropic") })).toBeTruthy();
+		expect(metadataSessionId(opts)).not.toBe(
+			metadataSessionId({ metadata: mainAgent.metadataForProvider("anthropic") }),
+		);
+	});
+
+	it("refreshes the advisor provider session identity after starting a new session", async () => {
+		const capturedStreamOptions: Array<SimpleStreamOptions | undefined> = [];
+		const captureStreamFn: StreamFn = (_m, _ctx, opts) => {
+			capturedStreamOptions.push(opts);
+			throw new Error("capture-stop");
+		};
+		const mainAgent = new Agent({
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+		});
+		session = new AgentSession({
+			agent: mainAgent,
+			sessionManager,
+			settings: settings(),
+			modelRegistry,
+			advisorTools: [],
+			advisorStreamFn: captureStreamFn,
+		});
+		session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
+		expect(session.setAdvisorEnabled(true)).toBe(true);
+
+		const advisor = session.getAdvisorAgent();
+		if (!advisor?.sessionId) throw new Error("Expected advisor agent with a provider session id");
+		const previousAdvisorSessionId = advisor.sessionId;
+
+		expect(await session.newSession()).toBe(true);
+		expect(session.getAdvisorAgent()).toBe(advisor);
+		expect(advisor.sessionId).toMatch(UUID_V7_PATTERN);
+		expect(advisor.sessionId).not.toBe(previousAdvisorSessionId);
+		expect(advisor.sessionId).not.toBe(mainAgent.sessionId);
+		expect(advisor.promptCacheKey).toBe(advisor.sessionId);
+
+		await advisor.prompt("ping").catch(() => {});
+
+		expect(metadataSessionId(capturedStreamOptions[0])).toBe(advisor.sessionId);
+		expect(metadataSessionId(capturedStreamOptions[0])).not.toBe(previousAdvisorSessionId);
 	});
 });

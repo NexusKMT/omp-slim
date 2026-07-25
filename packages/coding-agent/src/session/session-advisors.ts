@@ -392,6 +392,38 @@ export class SessionAdvisors {
 		this.#advisorInterruptImmuneTurnStart = this.#advisorPrimaryTurnsCompleted + 1;
 	}
 
+	/** Rebind one advisor to the active primary conversation's provider identity. */
+	#refreshAdvisorProviderIdentity(advisor: ActiveAdvisor): void {
+		const primaryProviderSessionId = this.#host.sessionId();
+		const providerSessionId = getOrCreateAdvisorProviderSessionId(
+			this.#advisorProviderSessionIds,
+			primaryProviderSessionId,
+			advisor.slug,
+		);
+		advisor.providerSessionId = providerSessionId;
+		advisor.agent.sessionId = providerSessionId;
+		advisor.agent.promptCacheKey = this.#host.agent.promptCacheKey ?? providerSessionId;
+		advisor.agent.getApiKey = requestModel => this.#host.modelRegistry.resolver(requestModel, providerSessionId);
+		advisor.agent.setMetadataResolver(
+			providerSessionId
+				? provider => buildSessionMetadata(providerSessionId, provider, this.#host.modelRegistry.authStorage)
+				: undefined,
+		);
+
+		const telemetry = advisor.agent.telemetry;
+		if (telemetry?.agent) {
+			advisor.agent.setTelemetry({
+				...telemetry,
+				agent: {
+					...telemetry.agent,
+					id: advisor.slug
+						? `${primaryProviderSessionId}-advisor-${advisor.slug}`
+						: `${primaryProviderSessionId}-advisor`,
+				},
+			});
+		}
+	}
+
 	/**
 	 * Re-prime the advisor across a conversation boundary: `/new`, `/branch`,
 	 * `/btw`, `/tree`, and session switch/resume. Beyond {@link AdvisorRuntime.reset}
@@ -415,6 +447,7 @@ export class SessionAdvisors {
 			a.agentUnsubscribe?.();
 			a.agentUnsubscribe = undefined;
 			a.runtime.reset();
+			this.#refreshAdvisorProviderIdentity(a);
 			a.adviseTool.resetDeliveredNotes();
 			a.emissionGuard.reset();
 			this.#attachAdvisorRecorderFeed(a);
@@ -678,19 +711,6 @@ export class SessionAdvisors {
 				serviceTierResolver: advisorServiceTierResolver,
 			});
 			advisorAgent.setDisableReasoning(shouldDisableReasoning(advisorThinkingLevel));
-			// Emit the advisor's own provider-facing session id as request metadata
-			// (`metadata.user_id`), exactly like `AgentSession.#syncAgentSessionId`
-			// installs for the main/subagent agents. Without it the separately
-			// constructed advisor `Agent` had no metadata resolver, so custom
-			// Anthropic proxies saw advisor traffic with no session identity while
-			// Main/subagent requests carried one (issue #6625). Resolved live so a
-			// token refresh surfaces the current `account_uuid`.
-			if (advisorProviderSessionId) {
-				const advisorSessionId = advisorProviderSessionId;
-				advisorAgent.setMetadataResolver((provider: string) =>
-					buildSessionMetadata(advisorSessionId, provider, this.#host.modelRegistry.authStorage),
-				);
-			}
 
 			const advisorAgentFacade: AdvisorAgent = {
 				prompt: async input => {
@@ -786,6 +806,7 @@ export class SessionAdvisors {
 				retryFallbackPendingSuccess: false,
 				signature,
 			};
+			this.#refreshAdvisorProviderIdentity(advisorRef);
 			this.#attachAdvisorRecorderFeed(advisorRef);
 			if (seedToCurrent) runtime.seedTo(this.#host.agent.state.messages.length);
 			this.#advisorStatuses.set(slug, { name: advisorName, status: "running" });
