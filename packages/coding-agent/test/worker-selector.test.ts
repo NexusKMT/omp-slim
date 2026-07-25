@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { runCli } from "../src/cli";
+import * as computerWorkerEntry from "../src/tools/computer/worker-entry";
 
 // The worker-host re-entry seam dispatches any `__omp_worker_*` selector to
 // `runWorkerEntrypoint`. An unrecognized selector must fail loudly rather than
@@ -37,10 +38,8 @@ describe("worker selector dispatch", () => {
 });
 
 describe("computer worker entry", () => {
-	it("is side-effect-free to import and exposes a named start function", async () => {
-		// Dynamic import intentionally exercises module evaluation without a worker parent port.
-		const entry = await import("../src/tools/computer/worker-entry");
-		expect(entry.startComputerWorker).toBeFunction();
+	it("is side-effect-free to import and exposes a named start function", () => {
+		expect(computerWorkerEntry.startComputerWorker).toBeFunction();
 	});
 
 	it("dispatches an immediately posted message through the CLI worker selector", async () => {
