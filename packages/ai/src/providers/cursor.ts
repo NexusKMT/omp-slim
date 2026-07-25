@@ -2118,7 +2118,9 @@ function mapTodoSnapshot(todos: CursorTodoItem[]): CursorTodoSnapshotItem[] {
  * A `read_todos` call carrying `status_filter` / `id_filter` (agent.proto
  * `ReadTodosArgs`) returns a SUBSET, not the list, and its `total_count`
  * reports the full size. Mirroring a partial response would delete every task
- * it omitted, so filtered and short reads are both refused here.
+ * it omitted, so filtered and short reads are refused here. An empty read is
+ * refused too: proto3 defaults unset `total_count` to 0, so `todos=[]` cannot
+ * be told from a missing count.
  *
  * A snapshot whose rows are not unique by content is refused for a different
  * reason: Cursor keys todos by `id`, the local list is keyed by content, and
@@ -2141,10 +2143,12 @@ function extractTodoSnapshot(toolCall: CursorTodoToolCall): CursorTodoSnapshot |
 	// A read that disagrees with the server's own count is partial; treating it
 	// as the list would drop whatever it left out. `total_count` is a proto3
 	// scalar, so an unset field arrives as `0` and is indistinguishable from a
-	// genuinely empty count — an ambiguous read is refused rather than risk
-	// deleting tasks, since `update_todos` is the primary sync path anyway.
+	// genuinely empty count — an empty read is therefore refused rather than
+	// risk wiping local state. `update_todos` remains the authoritative clear
+	// path (an empty update still syncs). A non-empty read whose count disagrees
+	// with the row list is refused the same way.
 	const totalCount = result.value?.totalCount;
-	if (read && typeof totalCount === "number" && totalCount !== todos.length) {
+	if (read && (todos.length === 0 || (typeof totalCount === "number" && totalCount !== todos.length))) {
 		return null;
 	}
 	const mapped = mapTodoSnapshot(todos);
@@ -2170,10 +2174,10 @@ function extractTodoSnapshot(toolCall: CursorTodoToolCall): CursorTodoSnapshot |
  * Error text when the server itself rejected the call.
  *
  * Distinct from {@link extractTodoSnapshot} returning `null`: a filtered read, a
- * truncated one, or a snapshot the local model cannot represent are all benign
- * refusals (the call succeeded, we just decline to mirror it), whereas an
- * `UpdateTodosError` / `ReadTodosError` is a real failure that must not replay
- * as a successful no-op.
+ * truncated or empty one (proto3 cannot tell unset `total_count` from zero), or
+ * a snapshot the local model cannot represent are all benign refusals (the call
+ * succeeded, we just decline to mirror it), whereas an `UpdateTodosError` /
+ * `ReadTodosError` is a real failure that must not replay as a successful no-op.
  */
 function extractTodoError(toolCall: CursorTodoToolCall): string | null {
 	const { update, read } = selectTodoCalls(toolCall);
@@ -2201,17 +2205,19 @@ function buildTodoDisplayArgs(toolCall: CursorTodoToolCall): { todos: CursorTodo
  * transcript.
  *
  * Three outcomes, kept distinct: a server error replays as a failure, a benign
- * refusal (a filtered or truncated read, or a snapshot the local model cannot
- * represent) replays as a successful no-op, and a settled snapshot replays as
- * its summary. Collapsing the first into the second would hide the failure and
- * let downstream lifecycle logic treat it as success.
+ * refusal (a filtered, truncated, or empty read, or a snapshot the local model
+ * cannot represent) replays as `"Todo snapshot not mirrored"`, and a settled
+ * snapshot replays as its summary. Collapsing the first into the second would
+ * hide the failure and let downstream lifecycle logic treat it as success. The
+ * refusal text must not say `"No todo changes"`: an `update_todos` the server
+ * accepted may still be declined locally, and that is not "no changes".
  */
 function buildTodoToolResult(
 	toolCallId: string,
 	snapshot: CursorTodoSnapshot | null,
 	error: string | null,
 ): ToolResultMessage {
-	const text = error ?? (snapshot ? formatTodoSnapshotSummary(snapshot.todos) : "No todo changes");
+	const text = error ?? (snapshot ? formatTodoSnapshotSummary(snapshot.todos) : "Todo snapshot not mirrored");
 	return {
 		role: "toolResult",
 		toolCallId,

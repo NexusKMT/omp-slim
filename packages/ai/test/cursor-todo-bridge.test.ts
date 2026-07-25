@@ -252,7 +252,9 @@ describe("cursor native todo bridge", () => {
 		complete(h, {
 			readTodosToolCall: {
 				args: {},
-				result: { result: { case: "success", value: { todos: [{ content: "remote", status: 2 }] } } },
+				result: {
+					result: { case: "success", value: { todos: [{ content: "remote", status: 2 }], totalCount: 1 } },
+				},
 			},
 		});
 
@@ -305,6 +307,43 @@ describe("cursor native todo bridge", () => {
 		});
 
 		expect(h.snapshots).toEqual([]);
+	});
+
+	it("refuses an empty read_todos whose total_count is zero or unset", () => {
+		// proto3 defaults an unset `total_count` to 0, so todos=[] + totalCount=0
+		// is indistinguishable from a genuinely empty list. Mirroring it would
+		// wipe every local task; update_todos remains the clear path.
+		const h = newHarness();
+		start(h, { readTodosToolCall: { args: {} } });
+		complete(h, {
+			readTodosToolCall: {
+				args: {},
+				result: {
+					result: {
+						case: "success",
+						value: { todos: [], totalCount: 0 },
+					},
+				},
+			},
+		});
+		expect(h.snapshots).toEqual([]);
+
+		// Positive control: the same empty snapshot via update_todos DOES sync —
+		// clearing the list is an authoritative write, not an ambiguous read.
+		const cleared = newHarness();
+		start(cleared, { updateTodosToolCall: { args: { todos: [] } } });
+		complete(cleared, {
+			updateTodosToolCall: {
+				args: { todos: [] },
+				result: {
+					result: {
+						case: "success",
+						value: { todos: [], totalCount: 0 },
+					},
+				},
+			},
+		});
+		expect(cleared.snapshots).toEqual([{ todos: [], merged: false }]);
 	});
 
 	it("accepts a read_todos result whose row count matches total_count", () => {
@@ -485,6 +524,14 @@ describe("cursor native todo bridge (wire-encoded protobuf)", () => {
 		expect(h.snapshots).toEqual([]);
 	});
 
+	it("refuses a wire-decoded empty read_todos with total_count 0", () => {
+		const h = drive(readCall([], 0));
+		expect(todoBlocks(h)).toHaveLength(1);
+		expect(h.snapshots).toEqual([]);
+		// Still settles as a benign non-mirror, not a wipe and not a failure.
+		expect(h.syncCalls).toEqual([{ snapshot: null, toolCallId: todoBlocks(h)[0].id, error: null }]);
+	});
+
 	it("refuses a snapshot whose rows collide on content", () => {
 		// The wire model identifies rows by `id` and can represent two rows with
 		// the same `content`, so the bridge must survive one. The local list is
@@ -530,8 +577,9 @@ describe("cursor native todo bridge (wire-encoded protobuf)", () => {
 
 	it("settles a collided snapshot as a no-op when no host handler is registered", () => {
 		// Without a host the provider builds the result itself: a declined mirror
-		// must read as "nothing changed", never as an empty list, or a rebuilt
-		// transcript would claim the server wiped every task.
+		// must read as "not mirrored", never as an empty list, or a rebuilt
+		// transcript would claim the server wiped every task. The server may have
+		// accepted the update — claiming "No todo changes" would be false about that.
 		const h = newHarness();
 		h.state.onTodoSnapshot = undefined;
 		const toolCall = updateCall(
@@ -548,7 +596,7 @@ describe("cursor native todo bridge (wire-encoded protobuf)", () => {
 		expect(h.toolResults[0]).toMatchObject({
 			toolCallId: todoBlocks(h)[0].id,
 			isError: false,
-			content: [{ type: "text", text: "No todo changes" }],
+			content: [{ type: "text", text: "Todo snapshot not mirrored" }],
 		});
 	});
 

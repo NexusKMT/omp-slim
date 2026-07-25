@@ -932,9 +932,9 @@ export interface CursorTodoSnapshot {
  *
  * `snapshot` is the server-confirmed list, or `null` when there is nothing to
  * mirror — a server error (`error` set), or a benign refusal with `error` null:
- * a filtered or truncated read, or a snapshot the local model cannot represent
- * (two rows sharing content). Local state MUST be left untouched unless a
- * snapshot is supplied.
+ * a filtered, truncated, or empty read, or a snapshot the local model cannot
+ * represent (two rows sharing content). Local state MUST be left untouched
+ * unless a snapshot is supplied.
  *
  * `toolCallId` is the id of the streamed native call, which is also the key the
  * interactive transcript filed the visible block under. The host MUST reuse it

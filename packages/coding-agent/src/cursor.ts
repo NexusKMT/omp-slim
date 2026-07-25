@@ -228,7 +228,9 @@ function buildTodoSyncResult(
 		role: "toolResult",
 		toolCallId,
 		toolName: "todo",
-		content: [{ type: "text", text: error ?? (phases ? formatTodoSyncSummary(phases) : "No todo changes") }],
+		content: [
+			{ type: "text", text: error ?? (phases ? formatTodoSyncSummary(phases) : "Todo snapshot not mirrored") },
+		],
 		details: phases ? { phases, storage: "session" } : undefined,
 		isError: error !== null,
 		timestamp: Date.now(),
@@ -425,11 +427,11 @@ export class CursorExecHandlers implements ICursorExecHandlers {
 	 *   erasing the interaction from every rebuilt transcript.
 	 *
 	 * A `null` snapshot means nothing may be mirrored — a server `error`, or a
-	 * benign refusal: a filtered or truncated read, or a snapshot the local model
-	 * cannot represent. Local state is left untouched, and the result carries no
-	 * `details`: `event-controller` feeds `details.phases` straight into
-	 * `setTodos`, so echoing the current list back would let a call that changed
-	 * nothing overwrite live UI state.
+	 * benign refusal: a filtered, truncated, or empty read, or a snapshot the
+	 * local model cannot represent. Local state is left untouched, and the result
+	 * carries no `details` (text `"Todo snapshot not mirrored"`): `event-controller`
+	 * feeds `details.phases` straight into `setTodos`, so echoing the current list
+	 * back would let a call that changed nothing overwrite live UI state.
 	 */
 	todoSync(snapshot: CursorTodoSnapshot | null, toolCallId: string, error: string | null = null): ToolResultMessage {
 		const setPhases = this.options.setTodoPhases;
