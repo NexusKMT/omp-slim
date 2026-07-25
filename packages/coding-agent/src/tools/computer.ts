@@ -22,30 +22,33 @@ import { type ComputerController, ComputerSupervisor, registerComputerController
 import type { ToolSession } from "./index";
 import { ToolError, throwIfAborted } from "./tool-errors";
 
-// Claude-family image transports resize screenshots above their image budget
-// without returning transformed dimensions. Keep only those native coordinate
-// frames below the empirically verified threshold; other providers retain their
-// configured limits instead of inheriting a universal, unproven ceiling.
-const CLAUDE_MAX_CAPTURE_WIDTH = 1280;
-const CLAUDE_MAX_CAPTURE_HEIGHT = 896;
+// Image transports that cannot preserve native screenshot detail resize frames
+// without returning transformed dimensions. Keep their native coordinate frames
+// below the empirically verified threshold so pointer actions match what the
+// model sees. Claude paths predate the resolved transport capability and retain
+// their established model-family fallback.
+const COORDINATE_SAFE_MAX_CAPTURE_WIDTH = 1280;
+const COORDINATE_SAFE_MAX_CAPTURE_HEIGHT = 896;
 
-function usesClaudeImageSizing(model: Model | undefined): boolean {
+function usesCoordinateSafeImageSizing(model: Model | undefined): boolean {
 	if (!model) return false;
+	const compat = model.compat;
 	return (
+		(!!compat && "supportsImageDetailOriginal" in compat && compat.supportsImageDetailOriginal === false) ||
 		isClaudeModelId(model.id) ||
 		(model.requestModelId !== undefined && isClaudeModelId(model.requestModelId)) ||
 		(typeof model.name === "string" && /^claude(?:\s|$)/i.test(model.name))
 	);
 }
 
-function captureOptions(session: ToolSession, claudeImageSizing: boolean): DesktopSessionOptions {
+function captureOptions(session: ToolSession, coordinateSafeImageSizing: boolean): DesktopSessionOptions {
 	const maxWidth = session.settings.get("computer.maxWidth");
 	const maxHeight = session.settings.get("computer.maxHeight");
 	return {
 		backend: session.settings.get("computer.backend"),
 		display: session.settings.get("computer.display"),
-		maxWidth: claudeImageSizing ? Math.min(maxWidth, CLAUDE_MAX_CAPTURE_WIDTH) : maxWidth,
-		maxHeight: claudeImageSizing ? Math.min(maxHeight, CLAUDE_MAX_CAPTURE_HEIGHT) : maxHeight,
+		maxWidth: coordinateSafeImageSizing ? Math.min(maxWidth, COORDINATE_SAFE_MAX_CAPTURE_WIDTH) : maxWidth,
+		maxHeight: coordinateSafeImageSizing ? Math.min(maxHeight, COORDINATE_SAFE_MAX_CAPTURE_HEIGHT) : maxHeight,
 	};
 }
 
@@ -387,7 +390,7 @@ export class ComputerTool implements AgentTool<typeof computerSchema, ComputerTo
 	readonly #createController: ComputerControllerFactory;
 	#controller: ComputerController;
 	#unregisterOwner: () => void;
-	#usesClaudeImageSizing: boolean;
+	#usesCoordinateSafeImageSizing: boolean;
 	#closed = false;
 	#description?: string;
 
@@ -396,8 +399,8 @@ export class ComputerTool implements AgentTool<typeof computerSchema, ComputerTo
 		createController: ComputerControllerFactory = options => new ComputerSupervisor(options),
 	) {
 		this.#createController = createController;
-		this.#usesClaudeImageSizing = usesClaudeImageSizing(session.getActiveModel?.());
-		this.#controller = createController(captureOptions(session, this.#usesClaudeImageSizing));
+		this.#usesCoordinateSafeImageSizing = usesCoordinateSafeImageSizing(session.getActiveModel?.());
+		this.#controller = createController(captureOptions(session, this.#usesCoordinateSafeImageSizing));
 		this.#unregisterOwner = registerComputerController(
 			session.getEvalKernelOwnerId?.() ?? undefined,
 			this.#controller,
@@ -409,15 +412,15 @@ export class ComputerTool implements AgentTool<typeof computerSchema, ComputerTo
 	}
 
 	async #refreshControllerForModel(): Promise<void> {
-		const nextUsesClaudeImageSizing = usesClaudeImageSizing(this.session.getActiveModel?.());
-		if (nextUsesClaudeImageSizing === this.#usesClaudeImageSizing) return;
+		const nextUsesCoordinateSafeImageSizing = usesCoordinateSafeImageSizing(this.session.getActiveModel?.());
+		if (nextUsesCoordinateSafeImageSizing === this.#usesCoordinateSafeImageSizing) return;
 
 		const previous = this.#controller;
-		const next = this.#createController(captureOptions(this.session, nextUsesClaudeImageSizing));
+		const next = this.#createController(captureOptions(this.session, nextUsesCoordinateSafeImageSizing));
 		this.#unregisterOwner();
 		this.#controller = next;
 		this.#unregisterOwner = registerComputerController(this.session.getEvalKernelOwnerId?.() ?? undefined, next);
-		this.#usesClaudeImageSizing = nextUsesClaudeImageSizing;
+		this.#usesCoordinateSafeImageSizing = nextUsesCoordinateSafeImageSizing;
 		await previous.close();
 	}
 

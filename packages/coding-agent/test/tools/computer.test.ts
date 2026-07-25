@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentTool, AgentToolContext } from "@oh-my-pi/pi-agent-core";
 import type { Api, ComputerAction, ComputerToolCallMetadata, Model } from "@oh-my-pi/pi-ai";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import { ExtensionToolWrapper } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
@@ -509,6 +510,32 @@ describe("computer tool", () => {
 	it("caps Claude-family captures without changing the public defaults", async () => {
 		const settings = Settings.isolated({ "computer.enabled": true });
 		const model = { id: "claude-opus-4-8", api: "openai-completions" } as unknown as Model<Api>;
+		let receivedOptions: DesktopSessionOptions | undefined;
+		const tool = new ComputerTool(toolSession(settings, model), options => {
+			receivedOptions = options;
+			return new FakeController();
+		});
+
+		expect(settings.get("computer.maxWidth")).toBe(1920);
+		expect(settings.get("computer.maxHeight")).toBe(1200);
+		expect(receivedOptions).toMatchObject({ maxWidth: 1280, maxHeight: 896 });
+		await tool.close();
+	});
+
+	it("caps Copilot GPT-5 Responses captures when original image detail is unavailable", async () => {
+		const settings = Settings.isolated({ "computer.enabled": true });
+		const model = buildModel({
+			id: "gpt-5.5",
+			name: "GPT-5.5",
+			api: "openai-responses",
+			provider: "github-copilot",
+			baseUrl: "https://api.githubcopilot.com",
+			reasoning: true,
+			input: ["text", "image"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128_000,
+			maxTokens: 32_000,
+		});
 		let receivedOptions: DesktopSessionOptions | undefined;
 		const tool = new ComputerTool(toolSession(settings, model), options => {
 			receivedOptions = options;
