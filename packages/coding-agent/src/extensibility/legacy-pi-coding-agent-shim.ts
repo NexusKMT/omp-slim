@@ -1366,6 +1366,13 @@ export function getPackageDir(): string {
 	return getOmpPackageDir() ?? (isCompiledBinary() ? path.dirname(process.execPath) : process.cwd());
 }
 
+// Legacy pi's `@earendil-works/pi-coding-agent` re-exported `estimateTokens`
+// from its package root (via `./core/compaction/index.ts`). In omp it lives in
+// `@oh-my-pi/pi-agent-core/compaction`, and the coding-agent barrel below does
+// not forward it, so legacy extensions importing it fail Bun's static export
+// check during validation (issue #6583).
+export { estimateTokens } from "@oh-my-pi/pi-agent-core/compaction";
+
 export * from "../index";
 export { formatBytes as formatSize } from "../tools/render-utils";
 export { copyToClipboard } from "../utils/clipboard";
