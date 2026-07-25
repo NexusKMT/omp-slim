@@ -2871,7 +2871,6 @@ export const SETTINGS_SCHEMA = {
 			label: "Hindsight API URL",
 			description: "Hindsight server URL (Cloud or self-hosted)",
 			condition: "hindsightActive",
-			secret: true,
 		},
 	},
 
