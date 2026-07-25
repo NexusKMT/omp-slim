@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Linux `AudioCapture` stalling on PulseAudio sources that emit fragments larger than miniaudio's previous 60 ms capture buffer, including Android OpenSL ES microphones reached through a forwarded PulseAudio server.
+
 ## [17.1.3] - 2026-07-24
 
 ### Changed

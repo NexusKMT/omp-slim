@@ -27,7 +27,13 @@ use parking_lot::Mutex;
 use tokio::sync::Notify;
 
 const AUDIO_CHANNELS: u32 = 1;
-const AUDIO_PERIOD_MS: u32 = 20;
+const PLAYBACK_PERIOD_MS: u32 = 20;
+// miniaudio's PulseAudio backend reserves three periods. Android's OpenSL ES
+// source emits 125 ms fragments, so Linux capture needs at least 150 ms queued.
+#[cfg(target_os = "linux")]
+const CAPTURE_PERIOD_MS: u32 = 50;
+#[cfg(not(target_os = "linux"))]
+const CAPTURE_PERIOD_MS: u32 = PLAYBACK_PERIOD_MS;
 const PLAYBACK_DRAIN_CALLBACKS: usize = 2;
 
 #[cfg(target_os = "macos")]
@@ -133,7 +139,7 @@ impl PlaybackStream {
 		builder
 			.sample_rate(sample_rate)
 			.playback_channels(AUDIO_CHANNELS)
-			.period_size_millis(AUDIO_PERIOD_MS)
+			.period_size_millis(PLAYBACK_PERIOD_MS)
 			.performance_profile(PerformanceProfile::LowLatency)
 			.backends(AUDIO_BACKENDS);
 		let mut device = builder
@@ -280,7 +286,7 @@ impl AudioCapture {
 		builder
 			.sample_rate(sample_rate)
 			.capture_channels(AUDIO_CHANNELS)
-			.period_size_millis(AUDIO_PERIOD_MS)
+			.period_size_millis(CAPTURE_PERIOD_MS)
 			.performance_profile(PerformanceProfile::LowLatency)
 			.backends(AUDIO_BACKENDS);
 		let mut device = builder
@@ -428,5 +434,42 @@ mod tests {
 		fill_playback(&rx, &mut current, &mut cursor, &mut silence, &state, &mut empty_callbacks);
 		assert_eq!(silence, [0.0, 0.0]);
 		assert!(state.drained.load(Ordering::Acquire));
+	}
+
+	#[test]
+	fn opt_in_default_capture_receives_frames() {
+		if std::env::var_os("OMP_NATIVE_AUDIO_CAPTURE_TEST").is_none() {
+			return;
+		}
+
+		let callbacks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+		let callback_count = Arc::clone(&callbacks);
+		let mut builder = DeviceBuilder::capture().f32();
+		builder
+			.sample_rate(audio_sample_rate(16_000).expect("sample rate is supported"))
+			.capture_channels(AUDIO_CHANNELS)
+			.period_size_millis(CAPTURE_PERIOD_MS)
+			.performance_profile(PerformanceProfile::LowLatency)
+			.backends(AUDIO_BACKENDS);
+		let mut device = builder
+			.with_callback(move |_device, samples| {
+				if !samples.is_empty() {
+					callback_count.fetch_add(1, Ordering::Relaxed);
+				}
+			})
+			.expect("default capture device opens");
+		device
+			.device_start()
+			.expect("default capture device starts");
+
+		let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+		while callbacks.load(Ordering::Relaxed) == 0 && std::time::Instant::now() < deadline {
+			std::thread::sleep(std::time::Duration::from_millis(20));
+		}
+		if callbacks.load(Ordering::Relaxed) == 0 {
+			std::mem::forget(device);
+			panic!("capture device started but delivered no frames within five seconds");
+		}
+		device.device_stop().expect("capture device stops");
 	}
 }
