@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Corrected Windows shell resolution errors to identify the active global, project, overlay, or runtime source for `shellPath`, including profile and custom configuration directories, instead of directing every user to the retired `settings.json` file ([#6579](https://github.com/can1357/oh-my-pi/issues/6579)).
+
 ## [17.1.3] - 2026-07-24
 
 ### Fixed

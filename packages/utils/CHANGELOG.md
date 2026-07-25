@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Corrected Windows shell resolution errors to direct `shellPath` configuration to `~/.omp/agent/config.yml` instead of the retired `settings.json` file ([#6579](https://github.com/can1357/oh-my-pi/issues/6579)).
+- Corrected Windows shell resolution errors to identify the active global, project, overlay, or runtime source for `shellPath` instead of directing every user to the retired `settings.json` file ([#6579](https://github.com/can1357/oh-my-pi/issues/6579)).
 
 ## [17.0.9] - 2026-07-23
 
