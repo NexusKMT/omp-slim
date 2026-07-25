@@ -138,6 +138,23 @@ describe("ModelRegistry runtime provider registration", () => {
 		expect(afterAnthropicCount).toBe(beforeAnthropicCount);
 	});
 
+	test("registerProvider rebuilds inferred computer capability after OpenAI runtime reroutes", async () => {
+		const modelId = "gpt-5.4";
+		const directModel = registry.find("openai", modelId);
+		expect(directModel?.supportsComputerUse).toBe(true);
+
+		registry.registerProvider("openai", { baseUrl: "https://runtime-proxy.example.com/v1" }, "ext://runtime");
+		expect(registry.find("openai", modelId)?.supportsComputerUse).toBe(false);
+
+		await registry.refresh("offline");
+		expect(registry.find("openai", modelId)?.supportsComputerUse).toBe(false);
+		await registry.refreshProvider("openai", "offline");
+		expect(registry.find("openai", modelId)?.supportsComputerUse).toBe(false);
+
+		registry.clearSourceRegistrations("ext://runtime");
+		expect(registry.find("openai", modelId)?.supportsComputerUse).toBe(true);
+	});
+
 	test("registerProvider applies headers-only overrides to existing provider models across refresh", async () => {
 		const providerName = "anthropic";
 		const runtimeHeader = "X-Runtime-Provider-Header";

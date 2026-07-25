@@ -1958,12 +1958,22 @@ export class ModelRegistry {
 			remoteCompaction: mergeProviderRemoteCompactionConfig(entry.remoteCompaction, override.remoteCompaction),
 		};
 	}
+	#applyProviderTransportOverrideToModel(
+		model: Model<Api>,
+		override: Pick<
+			ProviderOverride,
+			"baseUrl" | "headers" | "authHeader" | "apiKey" | "remoteCompaction" | "transport"
+		>,
+	): Model<Api> {
+		return buildModel(this.#applyProviderTransportOverride(toModelSpec(model), override));
+	}
+
 	#applyRuntimeProviderOverrides(models: Model<Api>[]): Model<Api>[] {
 		if (this.#runtimeProviderOverrides.size === 0) return models;
 		return models.map(model => {
 			const override = this.#runtimeProviderOverrides.get(model.provider);
 			if (!override) return model;
-			return this.#applyProviderTransportOverride(model, override);
+			return this.#applyProviderTransportOverrideToModel(model, override);
 		});
 	}
 	#resolveLiveModelOverride(model: Model<Api>): ModelOverride | undefined {
@@ -2488,7 +2498,7 @@ export class ModelRegistry {
 			this.#models = this.#applyLlamaCppQwenThinkingToModels(
 				this.#models.map(m => {
 					if (m.provider !== providerName) return m;
-					return this.#applyProviderTransportOverride(m, transportOverride);
+					return this.#applyProviderTransportOverrideToModel(m, transportOverride);
 				}),
 			);
 		}
