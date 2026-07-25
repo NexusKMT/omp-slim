@@ -416,6 +416,13 @@ impl Drop for AudioPlayback {
 
 #[cfg(test)]
 mod tests {
+	use std::{
+		mem::forget,
+		sync::atomic::AtomicUsize,
+		thread::sleep,
+		time::{Duration, Instant},
+	};
+
 	use super::*;
 
 	#[test]
@@ -447,7 +454,7 @@ mod tests {
 			return;
 		}
 
-		let callbacks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+		let callbacks = Arc::new(AtomicUsize::new(0));
 		let callback_count = Arc::clone(&callbacks);
 		let mut builder = DeviceBuilder::capture().f32();
 		builder
@@ -467,12 +474,12 @@ mod tests {
 			.device_start()
 			.expect("default capture device starts");
 
-		let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-		while callbacks.load(Ordering::Relaxed) == 0 && std::time::Instant::now() < deadline {
-			std::thread::sleep(std::time::Duration::from_millis(20));
+		let deadline = Instant::now() + Duration::from_secs(5);
+		while callbacks.load(Ordering::Relaxed) == 0 && Instant::now() < deadline {
+			sleep(Duration::from_millis(20));
 		}
 		if callbacks.load(Ordering::Relaxed) == 0 {
-			std::mem::forget(device);
+			forget(device);
 			panic!("capture device started but delivered no frames within five seconds");
 		}
 		device.device_stop().expect("capture device stops");
