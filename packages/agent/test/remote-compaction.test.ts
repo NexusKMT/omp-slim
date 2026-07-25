@@ -553,6 +553,40 @@ describe("remote compaction input forwarding", () => {
 		expect(result.estimatedTokensAfter).toBeLessThanOrEqual(2_000);
 	});
 
+	test("uses conservative token accounting for token-dense trailing output", () => {
+		const output = Array.from({ length: 1_000 }, (_, index) => index.toString(16).padStart(8, "0")).join("");
+		const input = [{ type: "function_call_output", call_id: "call_1", output }];
+
+		const result = trimRemoteCompactionInputToContextWindow(input, 3_000, "compact");
+
+		expect(result.estimatedTokensBefore).toBeGreaterThan(3_000);
+		expect(result.rewrittenOutputs).toBe(1);
+		expect(result.input[0].output).toBe(CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE);
+		expect(result.estimatedTokensAfter).toBeLessThanOrEqual(3_000);
+	});
+
+	test("scans past a synthetic tool-image attachment to rewrite its output", () => {
+		const attachment = {
+			type: "message",
+			role: "user",
+			content: [
+				{ type: "input_text", text: "Attached image(s) from tool result:" },
+				{ type: "input_image", detail: "auto", image_url: "data:image/png;base64,AAAA" },
+			],
+		};
+		const input = [
+			{ type: "function_call_output", call_id: "call_1", output: "large tool output".repeat(1_000) },
+			attachment,
+		];
+
+		const result = trimRemoteCompactionInputToContextWindow(input, 2_000, "compact");
+
+		expect(result.rewrittenOutputs).toBe(1);
+		expect(result.input[0].output).toBe(CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE);
+		expect(result.input[1]).toBe(attachment);
+		expect(result.estimatedTokensAfter).toBeLessThanOrEqual(2_000);
+	});
+
 	test("reserves the high-resolution patch budget for original-detail images", () => {
 		const input = [
 			{
@@ -1467,7 +1501,7 @@ describe("compact() remote compaction failure handling", () => {
 		];
 		preparation.recentMessages = [];
 		const model = makeOpenAiModel({
-			contextWindow: 500,
+			contextWindow: 20_000,
 			remoteCompaction: {
 				enabled: true,
 				v2StreamingEnabled: true,

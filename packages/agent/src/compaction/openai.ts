@@ -44,8 +44,8 @@ import {
 	OPENAI_HEADER_VALUES,
 	OPENAI_HEADERS,
 } from "@oh-my-pi/pi-catalog/wire/codex";
-import { $env, logger, stringifyJson, structuredCloneJSON } from "@oh-my-pi/pi-utils";
-import { countTokens } from "../tokenizer";
+import { $env, isRecord, logger, stringifyJson, structuredCloneJSON } from "@oh-my-pi/pi-utils";
+import { countTokensConservatively } from "../tokenizer";
 
 export * from "./compaction-v2-streaming";
 
@@ -72,6 +72,7 @@ export const CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE = "Output exceeded the avai
 const REMOTE_COMPACTION_REQUEST_OVERHEAD_TOKENS = 256;
 const REMOTE_COMPACTION_IMAGE_TOKEN_ESTIMATE = 765;
 const REMOTE_COMPACTION_ORIGINAL_IMAGE_TOKEN_ESTIMATE = 10_000;
+const TOOL_RESULT_IMAGE_ATTACHMENT_TEXT = "Attached image(s) from tool result:";
 
 interface NormalizedEstimateValue {
 	value: unknown;
@@ -126,7 +127,7 @@ function estimateRemoteCompactionInputTokens(
 ): number {
 	const normalized = normalizeRemoteCompactionEstimateValue({ instructions, input, ...(tools ? { tools } : {}) });
 	const serialized = stringifyJson(normalized.value) ?? "";
-	return countTokens(serialized) + normalized.imageTokens + REMOTE_COMPACTION_REQUEST_OVERHEAD_TOKENS;
+	return countTokensConservatively(serialized) + normalized.imageTokens + REMOTE_COMPACTION_REQUEST_OVERHEAD_TOKENS;
 }
 
 function rewriteToolOutputForContextWindow(item: Record<string, unknown>): Record<string, unknown> | undefined {
@@ -137,6 +138,19 @@ function rewriteToolOutputForContextWindow(item: Record<string, unknown>): Recor
 		return { ...item, tools: [] };
 	}
 	return undefined;
+}
+
+function isToolResultImageAttachment(item: Record<string, unknown>): boolean {
+	if (item.type !== "message" || item.role !== "user" || !Array.isArray(item.content)) return false;
+
+	let hasLabel = false;
+	let hasImage = false;
+	for (const block of item.content) {
+		if (!isRecord(block)) continue;
+		if (block.type === "input_text" && block.text === TOOL_RESULT_IMAGE_ATTACHMENT_TEXT) hasLabel = true;
+		if (block.type === "input_image") hasImage = true;
+	}
+	return hasLabel && hasImage;
 }
 
 /**
@@ -165,7 +179,9 @@ export function trimRemoteCompactionInputToContextWindow(
 	let estimatedTokensAfter = estimatedTokensBefore;
 	let rewrittenOutputs = 0;
 	for (let index = input.length - 1; index >= 0 && estimatedTokensAfter > contextWindow; index--) {
-		const rewritten = rewriteToolOutputForContextWindow(input[index]);
+		const item = input[index];
+		if (isToolResultImageAttachment(item)) continue;
+		const rewritten = rewriteToolOutputForContextWindow(item);
 		if (!rewritten) break;
 		rewrittenInput ??= input.slice();
 		rewrittenInput[index] = rewritten;
@@ -707,7 +723,7 @@ export function buildOpenAiNativeHistory(
 
 			if (hasImages && model.input.includes("image")) {
 				const contentBlocks: Array<Record<string, unknown>> = [
-					{ type: "input_text", text: "Attached image(s) from tool result:" },
+					{ type: "input_text", text: TOOL_RESULT_IMAGE_ATTACHMENT_TEXT },
 				];
 				for (const block of message.content) {
 					if (block.type !== "image") continue;
