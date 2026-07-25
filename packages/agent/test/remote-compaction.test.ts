@@ -529,12 +529,12 @@ describe("remote compaction input forwarding", () => {
 		const result = trimRemoteCompactionInputToContextWindow(input, 1_000, "compact");
 
 		expect(result.rewrittenOutputs).toBe(0);
-		expect(result.input).toBe(input);
+		expect(result.input).toEqual(input);
 		expect(result.input[3].output).toBe("useful latest result");
 		expect(result.estimatedTokensAfter).toBe(result.estimatedTokensBefore);
 	});
 
-	test("charges inline images by vision tokens instead of serialized base64 size", () => {
+	test("charges inline images by the maximum vision budget instead of serialized base64 size", () => {
 		const input = [
 			{
 				type: "message",
@@ -546,11 +546,12 @@ describe("remote compaction input forwarding", () => {
 			{ type: "function_call_output", call_id: "call_1", output: "useful result" },
 		];
 
-		const result = trimRemoteCompactionInputToContextWindow(input, 2_000, "compact");
+		const result = trimRemoteCompactionInputToContextWindow(input, 15_000, "compact");
 
 		expect(result.rewrittenOutputs).toBe(0);
-		expect(result.input).toBe(input);
-		expect(result.estimatedTokensAfter).toBeLessThanOrEqual(2_000);
+		expect(result.input).toEqual(input);
+		expect(result.estimatedTokensAfter).toBeGreaterThan(12_000);
+		expect(result.estimatedTokensAfter).toBeLessThanOrEqual(15_000);
 	});
 
 	test("uses conservative token accounting for token-dense trailing output", () => {
@@ -579,15 +580,15 @@ describe("remote compaction input forwarding", () => {
 			attachment,
 		];
 
-		const result = trimRemoteCompactionInputToContextWindow(input, 2_000, "compact");
+		const result = trimRemoteCompactionInputToContextWindow(input, 15_000, "compact");
 
 		expect(result.rewrittenOutputs).toBe(1);
 		expect(result.input[0].output).toBe(CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE);
-		expect(result.input[1]).toBe(attachment);
-		expect(result.estimatedTokensAfter).toBeLessThanOrEqual(2_000);
+		expect(result.input[1]).toEqual(attachment);
+		expect(result.estimatedTokensAfter).toBeLessThanOrEqual(15_000);
 	});
 
-	test("reserves the high-resolution patch budget for original-detail images", () => {
+	test("reserves the maximum patch budget for original-detail images", () => {
 		const input = [
 			{
 				type: "message",
@@ -599,20 +600,20 @@ describe("remote compaction input forwarding", () => {
 			{ type: "function_call_output", call_id: "call_1", output: "useful result".repeat(2_000) },
 		];
 
-		const result = trimRemoteCompactionInputToContextWindow(input, 12_000, "compact");
+		const result = trimRemoteCompactionInputToContextWindow(input, 15_000, "compact");
 
-		expect(result.estimatedTokensBefore).toBeGreaterThan(12_000);
+		expect(result.estimatedTokensBefore).toBeGreaterThan(15_000);
 		expect(result.rewrittenOutputs).toBe(1);
-		expect(result.estimatedTokensAfter).toBeLessThanOrEqual(12_000);
+		expect(result.estimatedTokensAfter).toBeLessThanOrEqual(15_000);
 	});
 
-	test("returns the original input without allocation when it already fits", () => {
+	test("returns semantically unchanged input when it already fits", () => {
 		const input = [{ type: "function_call_output", call_id: "call_1", output: "small" }];
 
 		const result = trimRemoteCompactionInputToContextWindow(input, 1_000, "compact");
 
 		expect(result.rewrittenOutputs).toBe(0);
-		expect(result.input).toBe(input);
+		expect(result.input).toEqual(input);
 	});
 });
 

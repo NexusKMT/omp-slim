@@ -70,8 +70,7 @@ const DEFAULT_AZURE_API_VERSION = "v1";
 export const CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE = "Output exceeded the available model context and was truncated";
 
 const REMOTE_COMPACTION_REQUEST_OVERHEAD_TOKENS = 256;
-const REMOTE_COMPACTION_IMAGE_TOKEN_ESTIMATE = 765;
-const REMOTE_COMPACTION_ORIGINAL_IMAGE_TOKEN_ESTIMATE = 10_000;
+const REMOTE_COMPACTION_IMAGE_TOKEN_ESTIMATE = 12_000;
 const TOOL_RESULT_IMAGE_ATTACHMENT_TEXT = "Attached image(s) from tool result:";
 
 interface NormalizedEstimateValue {
@@ -96,10 +95,7 @@ function normalizeRemoteCompactionEstimateValue(value: unknown): NormalizedEstim
 	if (record.type === "input_image") {
 		return {
 			value: { ...record, image_url: "<image>" },
-			imageTokens:
-				record.detail === "original"
-					? REMOTE_COMPACTION_ORIGINAL_IMAGE_TOKEN_ESTIMATE
-					: REMOTE_COMPACTION_IMAGE_TOKEN_ESTIMATE,
+			imageTokens: REMOTE_COMPACTION_IMAGE_TOKEN_ESTIMATE,
 		};
 	}
 
