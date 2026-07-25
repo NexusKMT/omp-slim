@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { fileURLToPath } from "node:url";
 
-const STATIC_IMPORT_FIXTURE = fileURLToPath(new URL("./fixtures/oauth-barrel-import.ts", import.meta.url));
+const STATIC_IMPORT_FIXTURE = `${import.meta.dir}/fixtures/oauth-barrel-import.ts`;
 
 describe("OAuth barrel imports", () => {
 	it("loads with the Anthropic provider and auth storage while preserving public exports", async () => {
