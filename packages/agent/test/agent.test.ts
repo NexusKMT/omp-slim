@@ -336,6 +336,56 @@ describe("Agent", () => {
 		});
 	});
 
+	it("buffers a Cursor result even when the transformer resolves after the turn closes", async () => {
+		// `cursorOnToolResult` is a supported option returning a Promise, and the
+		// provider dispatches decoded messages with `void handleServerMessage(...)`.
+		// A transformer still pending when the turn closes must not cost the
+		// result: an unbuffered toolResult leaves its toolCall block unpaired, and
+		// the transcript rebuild strips it as dangling.
+		const mock = createMockModel({ responses: [] });
+		const toolCall = {
+			type: "toolCall" as const,
+			id: "cursor-tool-slow",
+			name: "shell",
+			arguments: { command: "pwd" },
+			[kCursorExecResolved]: true,
+		};
+		const started = createAssistantMessage([toolCall]);
+		const realToolResult: ToolResultMessage = {
+			role: "toolResult",
+			toolCallId: toolCall.id,
+			toolName: toolCall.name,
+			content: [{ type: "text", text: "/workspace" }],
+			isError: false,
+			timestamp: Date.now(),
+		};
+		const release = Promise.withResolvers<void>();
+		const agent = new Agent({
+			initialState: { model: mock.model, systemPrompt: ["Test"], tools: [], messages: [] },
+			cursorOnToolResult: async message => {
+				await release.promise;
+				return message;
+			},
+			streamFn: (_model, _context, options) => {
+				const stream = new AssistantMessageEventStream();
+				queueMicrotask(() => {
+					// Fire-and-forget, exactly like the provider's data loop.
+					void options?.cursorOnToolResult?.(realToolResult);
+					stream.push({ type: "start", partial: started });
+					stream.push({ type: "done", reason: "stop", message: started });
+				});
+				return stream;
+			},
+		});
+
+		await agent.prompt("trigger");
+		release.resolve();
+
+		const toolResults = agent.state.messages.filter(message => message.role === "toolResult");
+		expect(toolResults).toHaveLength(1);
+		expect(toolResults[0]).toMatchObject({ toolCallId: toolCall.id, toolName: toolCall.name });
+	});
+
 	it("prompt() finalizes an existing assistant stream for Anthropic output-blocked stream errors", async () => {
 		const mock = createMockModel({ responses: [] });
 		const errorText = "Output blocked by content filtering policy";

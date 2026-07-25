@@ -1130,21 +1130,29 @@ export class Agent {
 		const cursorOnToolResult =
 			this.#cursorExecHandlers || this.#cursorOnToolResult
 				? async (message: ToolResultMessage) => {
-						let finalMessage = message;
-						if (this.#cursorOnToolResult) {
-							try {
-								const updated = await this.#cursorOnToolResult(message);
-								if (updated) {
-									finalMessage = updated;
-								}
-							} catch {}
-						}
 						// Cursor executes tools server-side during streaming. We buffer
 						// each toolResult and emit them right after the assistant message
 						// closes (see `#emitCursorSplitAssistantMessage`), so replay
 						// receives (assistant with interleaved toolCall blocks) → results.
-						this.#cursorToolResultBuffer.push({ toolResult: finalMessage });
-						return finalMessage;
+						//
+						// The entry is reserved SYNCHRONOUSLY, before awaiting the
+						// optional transformer. The provider's data loop dispatches
+						// messages with `void handleServerMessage(...)`, so a `message_end`
+						// decoded from the same chunk can drain the buffer while a
+						// transformer is still pending — pushing afterwards would drop the
+						// result and strip its toolCall block as dangling on replay. The
+						// entry is patched in place once the transformer resolves, which
+						// keeps buffer order and still applies the customization whenever
+						// it lands before the drain.
+						const entry: CursorToolResultEntry = { toolResult: message };
+						this.#cursorToolResultBuffer.push(entry);
+						if (this.#cursorOnToolResult) {
+							try {
+								const updated = await this.#cursorOnToolResult(message);
+								if (updated) entry.toolResult = updated;
+							} catch {}
+						}
+						return entry.toolResult;
 					}
 				: undefined;
 

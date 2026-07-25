@@ -930,8 +930,13 @@ export interface CursorTodoSnapshot {
  * `toolCallId` is the id of the streamed native call, which is also the key the
  * interactive transcript filed the visible block under. The host MUST reuse it
  * when emitting the synthetic completion, or that block never resolves.
+ *
+ * Returns the result to persist for that block, when the host has one. Only the
+ * host knows the phase grouping the todo renderer replays from, so the provider
+ * persists that value verbatim instead of synthesizing its own; a host that
+ * returns nothing falls back to the provider's summary-only result.
  */
-export type CursorTodoSyncHandler = (snapshot: CursorTodoSnapshot, toolCallId: string) => void;
+export type CursorTodoSyncHandler = (snapshot: CursorTodoSnapshot, toolCallId: string) => ToolResultMessage | undefined;
 
 export interface CursorShellStreamCallbacks {
 	onStdout(data: string): void;

@@ -206,6 +206,25 @@ function formatTodoSyncSummary(phases: TodoPhase[]): string {
 	return `${done}/${tasks.length} tasks completed`;
 }
 
+/**
+ * Persisted result for a server-resolved todo call.
+ *
+ * `details.phases` is load-bearing, not decoration: `todoToolRenderer`
+ * rebuilds the rendered list exclusively from it, so a result carrying only
+ * summary text replays as `Todo 0 tasks` after a reload.
+ */
+function buildTodoSyncResult(toolCallId: string, phases: TodoPhase[]): ToolResultMessage {
+	return {
+		role: "toolResult",
+		toolCallId,
+		toolName: "todo",
+		content: [{ type: "text", text: formatTodoSyncSummary(phases) }],
+		details: { phases, storage: "session" },
+		isError: false,
+		timestamp: Date.now(),
+	};
+}
+
 export class CursorExecHandlers implements ICursorExecHandlers {
 	constructor(private options: CursorExecBridgeOptions) {}
 
@@ -391,10 +410,17 @@ export class CursorExecHandlers implements ICursorExecHandlers {
 	 * (`event-controller.ts` reads `details.phases`), and Cursor's
 	 * server-resolved call never produces one, so the visible list would stay
 	 * stale until the next reload.
+	 *
+	 * Returns the grouped result so the caller can persist it verbatim. Only
+	 * this method knows the phase grouping — the provider sees a flat list —
+	 * and `todoToolRenderer.renderResult` rebuilds the rendered list purely
+	 * from `details.phases`, so a result without them replays as `0 tasks`.
+	 * Returns nothing when the session exposes no todo state, leaving the
+	 * provider's summary-only fallback in place.
 	 */
-	todoSync(snapshot: CursorTodoSnapshot, toolCallId: string): void {
+	todoSync(snapshot: CursorTodoSnapshot, toolCallId: string): ToolResultMessage | undefined {
 		const setPhases = this.options.setTodoPhases;
-		if (!setPhases) return;
+		if (!setPhases) return undefined;
 
 		const existing = this.options.getTodoPhases?.() ?? [];
 		const phaseByContent = new Map<string, string>();
@@ -424,16 +450,15 @@ export class CursorExecHandlers implements ICursorExecHandlers {
 		for (const [name, tasks] of grouped) next.push({ name, tasks });
 		setPhases(next);
 		this.options.persistTodoPhases?.(next);
+		const result = buildTodoSyncResult(toolCallId, next);
 		this.options.emitEvent?.({
 			type: "tool_execution_end",
 			toolCallId,
 			toolName: "todo",
-			result: {
-				content: [{ type: "text", text: formatTodoSyncSummary(next) }],
-				details: { phases: next, storage: "session" },
-			},
+			result: { content: result.content, details: result.details },
 			isError: false,
 		});
+		return result;
 	}
 
 	async mcp(call: CursorMcpCall) {

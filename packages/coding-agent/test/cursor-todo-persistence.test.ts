@@ -1,12 +1,16 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentEvent } from "@oh-my-pi/pi-agent-core";
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { CursorExecHandlers } from "@oh-my-pi/pi-coding-agent/cursor";
 import {
 	getLatestTodoPhasesFromEntries,
 	type TodoPhase,
 	USER_TODO_EDIT_CUSTOM_TYPE,
 } from "@oh-my-pi/pi-coding-agent/tools/todo";
+import { buildSessionContext } from "../src/session/session-context";
 import type { SessionEntry } from "../src/session/session-entries";
+
+const TIMESTAMP = "2026-07-25T00:00:00.000Z";
 
 interface Harness {
 	handlers: CursorExecHandlers;
@@ -220,5 +224,62 @@ describe("cursor todo persistence", () => {
 		handlers.todoSync({ merged: false, todos: [{ content: "a", status: "pending" }] }, "call-1");
 
 		expect(events).toEqual([]);
+	});
+
+	it("returns a result that survives buildSessionContext and rebuilds the list", () => {
+		// The persisted result is what a rebuilt transcript renders from. Two
+		// independent failure modes: no result at all strips the block as
+		// dangling, and a summary-only result (no `details.phases`) survives the
+		// strip but replays as `Todo 0 tasks` — `todoToolRenderer.renderResult`
+		// reconstructs the list exclusively from `details.phases`.
+		const h = newHarness([{ name: "Auth", tasks: [{ content: "oauth", status: "pending" }] }]);
+		const result = h.handlers.todoSync(
+			{ merged: false, todos: [{ content: "oauth", status: "completed" }] },
+			"cursor-call-1",
+		);
+
+		if (!result) throw new Error("expected a persisted result");
+
+		const assistant: AssistantMessage = {
+			role: "assistant",
+			content: [{ type: "toolCall", id: "cursor-call-1", name: "todo", arguments: {} }],
+			api: "cursor-agent",
+			provider: "cursor",
+			model: "cursor-composer-2.5",
+			usage: {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 2,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "toolUse",
+			timestamp: 2,
+		};
+		const replayEntries = [
+			{
+				type: "message",
+				id: "m1",
+				parentId: null,
+				timestamp: TIMESTAMP,
+				message: { role: "user", content: [{ type: "text", text: "track it" }], timestamp: 1 },
+			},
+			{ type: "message", id: "m2", parentId: "m1", timestamp: TIMESTAMP, message: assistant },
+			{ type: "message", id: "m3", parentId: "m2", timestamp: TIMESTAMP, message: result },
+		] as SessionEntry[];
+
+		const context = buildSessionContext(replayEntries, undefined, undefined, { transcript: true });
+
+		// The block is paired, so the rebuild keeps it.
+		const rebuilt = context.messages.find(message => message.role === "assistant");
+		expect(rebuilt?.content.some(block => block.type === "toolCall" && block.id === "cursor-call-1")).toBe(true);
+
+		// And the paired result still carries the phases the renderer needs.
+		const replayed = context.messages.find(
+			(message): message is typeof result => message.role === "toolResult" && message.toolCallId === "cursor-call-1",
+		);
+		const phases = (replayed?.details as { phases?: TodoPhase[] } | undefined)?.phases ?? [];
+		expect(phases.flatMap(phase => phase.tasks)).toEqual([{ content: "oauth", status: "completed" }]);
 	});
 });

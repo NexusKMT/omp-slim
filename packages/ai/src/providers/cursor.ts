@@ -2487,18 +2487,22 @@ export function processInteractionUpdate(
 				// `UpdateTodosError` nothing was stored at all. No snapshot => leave
 				// both the rendered args and local session state untouched.
 				const snapshot = extractTodoSnapshot(toolCall);
+				// Pair the resolved block with exactly one persisted result. Without
+				// one, `buildSessionContext` strips the block as dangling and the
+				// interaction vanishes from every rebuilt transcript (reload, branch
+				// switch, Ctrl+L). The host's result is preferred because only it
+				// carries `details.phases`, which the todo renderer replays the list
+				// from; a refused snapshot never reaches the host, so the
+				// summary-only fallback stands in.
+				let persisted: ToolResultMessage | undefined;
 				if (snapshot) {
 					state.currentToolCall.arguments = { todos: snapshot.todos, merged: snapshot.merged };
 					// Reuse the streamed call id: the interactive transcript filed the
 					// visible block under it, and only a matching `tool_execution_end`
 					// resolves that block.
-					state.onTodoSnapshot?.(snapshot, state.currentToolCall.id);
+					persisted = state.onTodoSnapshot?.(snapshot, state.currentToolCall.id) ?? undefined;
 				}
-				// Pair the resolved block with a persisted result regardless of the
-				// snapshot outcome. `buildSessionContext` strips any `toolCall` with no
-				// matching `toolResult`, so an unpaired block silently vanishes from
-				// every rebuilt transcript (reload, branch switch, Ctrl+L).
-				state.onToolResult?.(buildTodoToolResult(state.currentToolCall.id, snapshot));
+				state.onToolResult?.(persisted ?? buildTodoToolResult(state.currentToolCall.id, snapshot));
 			}
 			const idx = output.content.indexOf(state.currentToolCall);
 			clearStreamingPartialJson(state.currentToolCall);
