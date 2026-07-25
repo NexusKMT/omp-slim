@@ -427,6 +427,51 @@ describe("Anthropic request fingerprint alignment", () => {
 		expect(capturedBeta).toContain("mid-conversation-system-2026-04-07");
 	});
 
+	it("adds the effort beta when a direct forced tool choice creates an adaptive effort pin", async () => {
+		let capturedBeta: string | undefined;
+		let capturedBody: { output_config?: { effort?: string }; tool_choice?: { type?: string } } | undefined;
+		const fetchMock = (async (_input: string | URL | Request, init?: RequestInit) => {
+			capturedBeta = (init?.headers as Record<string, string> | undefined)?.["anthropic-beta"];
+			capturedBody = JSON.parse(String(init?.body ?? "{}")) as {
+				output_config?: { effort?: string };
+				tool_choice?: { type?: string };
+			};
+			return new Response(
+				JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "captured" } }),
+				{ status: 400, headers: { "Content-Type": "application/json" } },
+			);
+		}) as typeof fetch;
+		const adaptiveModel: Model<"anthropic-messages"> = buildModel({
+			...ANTHROPIC_MODEL_SPEC,
+			id: "claude-opus-4-8-20260528",
+			name: "Claude Opus 4.8",
+			thinking: {
+				mode: "anthropic-adaptive",
+				efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
+			},
+		});
+
+		await streamAnthropic(
+			adaptiveModel,
+			{
+				systemPrompt: ["Stay concise."],
+				messages: [{ role: "user", content: "Use the tool", timestamp: Date.now() }],
+				tools: [
+					{
+						name: "lookup",
+						description: "Lookup a value",
+						parameters: { type: "object", properties: {}, additionalProperties: false },
+					},
+				],
+			},
+			{ apiKey: "sk-ant-api-test", toolChoice: "any", fetch: fetchMock },
+		).result();
+
+		expect(capturedBody?.tool_choice).toEqual({ type: "any" });
+		expect(capturedBody?.output_config).toEqual({ effort: "low" });
+		expect(capturedBeta).toContain("effort-2025-11-24");
+	});
+
 	it("adds the extended-cache-ttl beta to API-key requests that default to 1h caching", async () => {
 		const captureBeta = () => {
 			let captured: string | undefined;

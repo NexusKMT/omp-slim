@@ -63,6 +63,7 @@ import { COMBINATOR_KEYS, NO_STRICT, toolWireSchema } from "../utils/schema";
 import { spillToDescription } from "../utils/schema/spill";
 import { createSdkStreamRequestOptions } from "../utils/sdk-stream-timeout";
 import { notifyRawSseEvent } from "../utils/sse-debug";
+import { isForcedToolChoice } from "../utils/tool-choice";
 import {
 	AnthropicApiError,
 	AnthropicConnectionTimeoutError,
@@ -1840,20 +1841,19 @@ const streamAnthropicOnce = (
 				if (options?.taskBudget && !extraBetas.includes(taskBudgetBeta)) {
 					extraBetas.push(taskBudgetBeta);
 				}
-				// `output_config.effort` ships on thinking-on requests AND on the
-				// thinking-off adaptive pin (adaptive-only models get effort:"low" so
-				// the toggle cannot 400); the beta must accompany the field in both.
-				// MiniMax uses `thinking.type:"adaptive"` itself as the control surface,
-				// so the sentinel "adaptive" value intentionally sends no output_config.
-				// Skip Vertex rawPredict: that adapter needs betas in the body
-				// (`anthropic_beta`), not as an `anthropic-beta` HTTP header, so the
-				// effort field is dropped from the body there too (see buildParams) and
-				// advertising the beta would only earn a 400 (#5614).
+				// `output_config.effort` ships on thinking-on requests, explicit
+				// thinking-off adaptive pins, and forced-tool adaptive pins. The beta
+				// must accompany the field even when direct streamAnthropic callers omit
+				// thinkingEnabled (#6589). MiniMax uses `thinking.type:"adaptive"` itself
+				// as the control surface, so the sentinel "adaptive" value intentionally
+				// sends no output_config. Skip Vertex rawPredict: that adapter needs betas
+				// in the body (`anthropic_beta`), not as an `anthropic-beta` HTTP header,
+				// so the effort field is dropped from the body there too (see buildParams)
+				// and advertising the beta would only earn a 400 (#5614).
 				const sendsAdaptiveEffortPin =
-					options?.thinkingEnabled === false &&
-					model.thinking?.mode === "anthropic-adaptive" &&
-					!model.compat.disableAdaptiveThinking &&
-					!usesAdaptiveThinkingTagOnly(model);
+					isAdaptiveOnlyThinking(model) &&
+					(options?.thinkingEnabled === false ||
+						(model.compat.supportsForcedToolChoice && isForcedToolChoice(options?.toolChoice)));
 				if (
 					model.reasoning &&
 					model.provider !== "google-vertex" &&
