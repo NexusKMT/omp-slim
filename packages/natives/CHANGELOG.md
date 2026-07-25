@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed older running OMP versions deleting newer native addon cache directories during cleanup, which could race a new version's first-run extraction and crash with `ENOENT`.
+
 ## [17.1.3] - 2026-07-24
 
 ### Changed
