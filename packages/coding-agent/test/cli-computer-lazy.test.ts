@@ -9,7 +9,7 @@ test("normal CLI startup keeps computer worker modules lazy", async () => {
 	await Bun.write(
 		probePath,
 		[
-			`const { runCli } = await import(${JSON.stringify(cliUrl)});`,
+			`import { runCli } from ${JSON.stringify(cliUrl)};`,
 			"process.stdout.write = () => true;",
 			'await runCli(["--version"]);',
 		].join("\n"),

@@ -687,6 +687,80 @@ describe("model cache spec round trip", () => {
 		}
 	});
 
+	it("preserves computer-use provenance across cache restarts and endpoint reroutes", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-computer-use-cache-"));
+		const dbPath = path.join(tempDir, "models.db");
+		const common = {
+			name: "GPT-5.4",
+			requestModelId: "gpt-5.4",
+			api: "openai-responses" as const,
+			reasoning: true,
+			input: ["text", "image"] as Array<"text" | "image">,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 400_000,
+			maxTokens: 128_000,
+		};
+		const direct = {
+			...common,
+			id: "inferred-direct",
+			provider: "openai",
+			baseUrl: "https://api.openai.com/v1",
+		} satisfies ModelSpec<"openai-responses">;
+		const proxy = {
+			...common,
+			id: "inferred-proxy",
+			provider: "gpt-proxy",
+			baseUrl: "https://gateway.example/v1",
+		} satisfies ModelSpec<"openai-responses">;
+		const explicitTrue = { ...direct, id: "explicit-true", supportsComputerUse: true };
+		const explicitFalse = { ...proxy, id: "explicit-false", supportsComputerUse: false };
+		const reroute = (model: Model<"openai-responses">, provider: string, baseUrl: string) =>
+			buildModel({ ...model, provider, baseUrl, compat: model.compatConfig } as ModelSpec<"openai-responses">);
+
+		try {
+			await resolveProviderModels<"openai-responses">(
+				{
+					providerId: "computer-use-cache-test",
+					staticModels: [],
+					cacheDbPath: dbPath,
+					fetchDynamicModels: async () => [direct, proxy, explicitTrue, explicitFalse],
+				},
+				"online",
+			);
+
+			const db = new Database(dbPath, { readonly: true });
+			const row = db
+				.query<{ models: string }, [string]>("SELECT models FROM model_cache WHERE provider_id = ?")
+				.get("computer-use-cache-test");
+			db.close();
+			const persisted = JSON.parse(row?.models ?? "[]") as Array<Record<string, unknown>>;
+			expect(persisted.find(model => model.id === direct.id)).not.toHaveProperty("supportsComputerUse");
+			expect(persisted.find(model => model.id === proxy.id)).not.toHaveProperty("supportsComputerUse");
+			expect(persisted.find(model => model.id === explicitTrue.id)?.supportsComputerUse).toBe(true);
+			expect(persisted.find(model => model.id === explicitFalse.id)?.supportsComputerUse).toBe(false);
+
+			const offline = await resolveProviderModels<"openai-responses">(
+				{ providerId: "computer-use-cache-test", staticModels: [], cacheDbPath: dbPath },
+				"offline",
+			);
+			const byId = new Map(offline.models.map(model => [model.id, model]));
+			const cachedDirect = byId.get(direct.id);
+			const cachedProxy = byId.get(proxy.id);
+			const cachedExplicitTrue = byId.get(explicitTrue.id);
+			const cachedExplicitFalse = byId.get(explicitFalse.id);
+			expect(cachedDirect?.supportsComputerUseConfig).toBeUndefined();
+			expect(cachedProxy?.supportsComputerUseConfig).toBeUndefined();
+			expect(reroute(cachedDirect!, "gpt-proxy", proxy.baseUrl).supportsComputerUse).toBe(false);
+			expect(reroute(cachedProxy!, "openai", direct.baseUrl).supportsComputerUse).toBe(true);
+			expect(cachedExplicitTrue?.supportsComputerUseConfig).toBe(true);
+			expect(cachedExplicitFalse?.supportsComputerUseConfig).toBe(false);
+			expect(reroute(cachedExplicitTrue!, "gpt-proxy", proxy.baseUrl).supportsComputerUse).toBe(true);
+			expect(reroute(cachedExplicitFalse!, "openai", direct.baseUrl).supportsComputerUse).toBe(false);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	it("uses current static limits for same-id cache rows when the static fingerprint changed", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-static-fingerprint-"));
 		const dbPath = path.join(tempDir, "models.db");

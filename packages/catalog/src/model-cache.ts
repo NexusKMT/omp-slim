@@ -204,8 +204,8 @@ function hasModelHeaders(model: Model<Api>): boolean {
  * headers and reject/refetch dynamic-only cached models that need live headers.
  */
 function toCachedModelSpec<TApi extends Api>(model: Model<TApi>): ModelSpec<TApi> {
-	const { headers: _headers, compatConfig, ...rest } = model;
-	return { ...rest, compat: compatConfig };
+	const { headers: _headers, compatConfig, supportsComputerUseConfig, ...rest } = model;
+	return { ...rest, supportsComputerUse: supportsComputerUseConfig, compat: compatConfig };
 }
 
 /** Whether two in-memory header records are byte-for-byte equivalent. */
