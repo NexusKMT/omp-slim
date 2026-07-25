@@ -6,17 +6,13 @@ import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { ModelRegistry } from "../model-registry";
 
-/**
- * Stub AuthStorage that satisfies the surface used by ModelRegistry's
- * constructor (#loadModels → clearConfigApiKeys, constructor →
- * setFallbackResolver). The awaiter under test never reaches auth-gated code
- * paths, so no real credential store is required.
- */
+/** Stub auth storage for registry lifecycle and missing-credential coverage. */
 function createStubAuthStorage(): AuthStorage {
 	const stub = {
 		setFallbackResolver: () => {},
 		clearConfigApiKeys: () => {},
 		hasAuth: () => false,
+		getApiKey: async () => undefined,
 	};
 	return stub as unknown as AuthStorage;
 }
@@ -167,6 +163,13 @@ describe("ModelRegistry", () => {
 			ok: true,
 			apiKey: "test-key",
 			headers: { "x-test": "value" },
+		});
+	});
+
+	test("returns an error when authentication resolves without a credential", async () => {
+		expect(await registry.getApiKeyAndHeaders(testModel)).toEqual({
+			ok: false,
+			error: 'No API key found for "test"',
 		});
 	});
 

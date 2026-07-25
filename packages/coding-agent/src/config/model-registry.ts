@@ -2208,6 +2208,9 @@ export class ModelRegistry {
 	async getApiKeyAndHeaders(model: Model<Api>): Promise<ResolvedRequestAuth> {
 		try {
 			const apiKey = await this.getApiKey(model);
+			if (apiKey === undefined) {
+				return { ok: false, error: `No API key found for "${model.provider}"` };
+			}
 			const headers = this.getProviderHeaders(model.provider);
 			return { ok: true, apiKey, headers };
 		} catch (error) {
