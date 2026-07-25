@@ -577,10 +577,10 @@ export interface SimpleStreamOptions extends Omit<StreamOptions, "apiKey"> {
 	/**
 	 * Optional rewrite of Cursor exec-channel tool results. May return a Promise.
 	 *
-	 * Limitation: an async rewrite that resolves after turn close may not be
-	 * persisted. The Agent drains buffered Cursor results on `message_end`, so a
-	 * late mutation only patches a detached entry while the already-persisted
-	 * message keeps the pre-transform payload.
+	 * The Agent reserves the original result in its buffer before awaiting this
+	 * hook, and the `message_end` drain waits for a still-pending rewrite, so an
+	 * async transformer is honored even when the turn closes in the same chunk.
+	 * A rejecting transformer is swallowed and the reserved payload stands in.
 	 */
 	cursorOnToolResult?: CursorToolResultHandler;
 	/** Optional tool choice override for compatible providers */
@@ -906,10 +906,10 @@ export type CursorExecHandlerResult<T> = { result: T; toolResult?: ToolResultMes
  * Optional rewrite of a Cursor exec-channel tool result.
  * May return a Promise. Returning `undefined` keeps the original result.
  *
- * Limitation: an async rewrite that resolves after turn close may not be
- * persisted. The Agent drains buffered Cursor results on `message_end`, so a
- * late mutation only patches a detached entry while the already-persisted
- * message keeps the pre-transform payload.
+ * The Agent reserves the original result in its buffer before awaiting this
+ * hook, and the `message_end` drain waits for a still-pending rewrite, so an
+ * async transformer is honored even when the turn closes in the same chunk.
+ * A rejecting transformer is swallowed and the reserved payload stands in.
  */
 export type CursorToolResultHandler = (
 	result: ToolResultMessage,

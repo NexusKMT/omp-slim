@@ -336,16 +336,13 @@ describe("Agent", () => {
 		});
 	});
 
-	it("buffers a Cursor result even when the transformer resolves after the turn closes", async () => {
+	it("keeps the reserved result when the transformer rejects", async () => {
 		// `cursorOnToolResult` is a supported option returning a Promise, and the
 		// provider dispatches decoded messages with `void handleServerMessage(...)`.
-		// A transformer still pending when the turn closes must not cost the
-		// result: an unbuffered toolResult leaves its toolCall block unpaired, and
-		// the transcript rebuild strips it as dangling.
-		//
-		// This asserts only that the call survives — not that a late rewrite of
-		// the payload is persisted. After the drain, patching the detached entry
-		// leaves the already-emitted result unchanged.
+		// The drain awaits a pending transformer, so a REJECTING one must not
+		// take the turn down with it or cost the result: an unbuffered toolResult
+		// leaves its toolCall block unpaired and the transcript rebuild strips it
+		// as dangling. The reserved (pre-transform) payload stands in.
 		const mock = createMockModel({ responses: [] });
 		const toolCall = {
 			type: "toolCall" as const,
@@ -363,12 +360,10 @@ describe("Agent", () => {
 			isError: false,
 			timestamp: Date.now(),
 		};
-		const release = Promise.withResolvers<void>();
 		const agent = new Agent({
 			initialState: { model: mock.model, systemPrompt: ["Test"], tools: [], messages: [] },
-			cursorOnToolResult: async message => {
-				await release.promise;
-				return message;
+			cursorOnToolResult: async () => {
+				throw new Error("transformer blew up");
 			},
 			streamFn: (_model, _context, options) => {
 				const stream = new AssistantMessageEventStream();
@@ -383,11 +378,82 @@ describe("Agent", () => {
 		});
 
 		await agent.prompt("trigger");
-		release.resolve();
 
 		const toolResults = agent.state.messages.filter(message => message.role === "toolResult");
 		expect(toolResults).toHaveLength(1);
-		expect(toolResults[0]).toMatchObject({ toolCallId: toolCall.id, toolName: toolCall.name });
+		expect(toolResults[0]).toMatchObject({
+			toolCallId: toolCall.id,
+			toolName: toolCall.name,
+			content: [{ type: "text", text: "/workspace" }],
+		});
+	});
+
+	it("persists the transformed payload when the transformer resolves after message_end", async () => {
+		// The transformer is awaited by the provider's fire-and-forget dispatch,
+		// so `message_end` decoded from the same chunk can reach the drain while
+		// it is still pending. Buffering the call is not enough: a transformer
+		// that actually rewrites the result must have that rewrite persisted,
+		// exactly like the awaited exec-channel paths. Otherwise the customized
+		// payload is silently replaced by the original in this timing window.
+		const mock = createMockModel({ responses: [] });
+		const toolCall = {
+			type: "toolCall" as const,
+			id: "cursor-tool-late",
+			name: "shell",
+			arguments: { command: "pwd" },
+			[kCursorExecResolved]: true,
+		};
+		const started = createAssistantMessage([toolCall]);
+		const realToolResult: ToolResultMessage = {
+			role: "toolResult",
+			toolCallId: toolCall.id,
+			toolName: toolCall.name,
+			content: [{ type: "text", text: "original" }],
+			isError: false,
+			timestamp: Date.now(),
+		};
+		// Deterministic race, no wall-clock delay. The transformer blocks on a
+		// gate this test holds open across the whole stream, so it is guaranteed
+		// to still be unresolved when `message_end` reaches the drain. The gate
+		// is released only after `prompt()` has been started and has had a chance
+		// to run to the drain — a drain that does not await the transformer will
+		// already have persisted the original payload by then.
+		//
+		// Gating on the `message_end` event instead would deadlock: that event is
+		// emitted from inside the drain that now waits on this promise.
+		const gate = Promise.withResolvers<void>();
+		const agent = new Agent({
+			initialState: { model: mock.model, systemPrompt: ["Test"], tools: [], messages: [] },
+			cursorOnToolResult: async message => {
+				await gate.promise;
+				return { ...message, content: [{ type: "text" as const, text: "transformed" }] };
+			},
+			streamFn: (_model, _context, options) => {
+				const stream = new AssistantMessageEventStream();
+				queueMicrotask(() => {
+					// Fire-and-forget, exactly like the provider's data loop: the
+					// transformer is still pending when the stream closes below.
+					void options?.cursorOnToolResult?.(realToolResult);
+					stream.push({ type: "start", partial: started });
+					stream.push({ type: "done", reason: "stop", message: started });
+				});
+				return stream;
+			},
+		});
+
+		const turn = agent.prompt("trigger");
+		// Let the stream drain as far as it can while the transformer is blocked.
+		// An unawaited drain finishes the turn here, with the original payload.
+		for (let i = 0; i < 50; i++) await Promise.resolve();
+		gate.resolve();
+		await turn;
+
+		const toolResults = agent.state.messages.filter(message => message.role === "toolResult");
+		expect(toolResults).toHaveLength(1);
+		expect(toolResults[0]).toMatchObject({
+			toolCallId: toolCall.id,
+			content: [{ type: "text", text: "transformed" }],
+		});
 	});
 
 	it("prompt() finalizes an existing assistant stream for Anthropic output-blocked stream errors", async () => {

@@ -281,11 +281,11 @@ export interface AgentOptions {
 	 * The Agent reserves the original result in its Cursor result buffer first,
 	 * then awaits this hook and patches the reserved entry in place. That keeps
 	 * the call paired even if `message_end` arrives while the Promise is still
-	 * pending. Limitation: `#emitCursorSplitAssistantMessage` drains the buffer
-	 * on `message_end`, so a mutation that resolves after the drain only patches
-	 * the detached entry — the already-persisted result keeps the pre-transform
-	 * payload. Hosts that only pass `cursorExecHandlers` (the coding-agent path)
-	 * never hit this hook.
+	 * pending, and `#emitCursorSplitAssistantMessage` waits for any transformer
+	 * still in flight before persisting, so a late rewrite is not lost. A
+	 * rejecting transformer is swallowed and the reserved payload stands in.
+	 * Hosts that only pass `cursorExecHandlers` (the coding-agent path) never
+	 * hit this hook.
 	 */
 	cursorOnToolResult?: CursorToolResultHandler;
 
@@ -339,6 +339,13 @@ export interface AgentPromptOptions {
 /** Buffered Cursor exec-channel tool result waiting to be emitted after the assistant message. */
 interface CursorToolResultEntry {
 	toolResult: ToolResultMessage;
+	/**
+	 * Set while an async `cursorOnToolResult` transformer is still running for
+	 * this entry, and cleared once it settles. The drain awaits it so a
+	 * transformer that rewrites the payload is not silently discarded when
+	 * `message_end` lands in the same chunk as the tool result.
+	 */
+	pending?: Promise<void>;
 }
 
 export class Agent {
@@ -1151,20 +1158,24 @@ export class Agent {
 						// transformer is still pending — pushing afterwards would drop the
 						// result and strip its toolCall block as dangling on replay.
 						//
-						// Limitation: the in-place patch only reaches the persisted
-						// message when the transformer resolves BEFORE the drain. After
-						// `#emitCursorSplitAssistantMessage` swaps the buffer out, a late
-						// `entry.toolResult = updated` mutates a detached object and the
-						// already-emitted/persisted result keeps the original payload.
-						// The reservation guarantees the call is not lost; it does not
-						// await customization. Coding-agent never supplies this hook.
+						// The transformer's in-flight promise is recorded on the entry so
+						// the drain can await it (`#emitCursorSplitAssistantMessage`).
+						// Without that, a transformer resolving after the swap would patch
+						// a detached object while the persisted result kept the original
+						// payload — the rewrite silently lost.
 						const entry: CursorToolResultEntry = { toolResult: message };
 						this.#cursorToolResultBuffer.push(entry);
-						if (this.#cursorOnToolResult) {
-							try {
-								const updated = await this.#cursorOnToolResult(message);
-								if (updated) entry.toolResult = updated;
-							} catch {}
+						const transform = this.#cursorOnToolResult;
+						if (transform) {
+							const pending = (async () => {
+								try {
+									const updated = await transform(message);
+									if (updated) entry.toolResult = updated;
+								} catch {}
+							})();
+							entry.pending = pending;
+							await pending;
+							entry.pending = undefined;
 						}
 						return entry.toolResult;
 					}
@@ -1299,7 +1310,7 @@ export class Agent {
 						// Check if this is an assistant message with buffered Cursor tool results.
 						// If so, split the message to emit tool results at the correct position.
 						if (event.message.role === "assistant" && this.#cursorToolResultBuffer.length > 0) {
-							this.#emitCursorSplitAssistantMessage(event.message as AssistantMessage);
+							await this.#emitCursorSplitAssistantMessage(event.message as AssistantMessage);
 							continue; // Skip default emit - split method handles everything
 						}
 						this.#state.streamMessage = null;
@@ -1481,13 +1492,21 @@ export class Agent {
 	 * toolCall blocks; it also copied `preambleText` into every text block on
 	 * multi-text turns, producing duplicated text on replay.
 	 */
-	#emitCursorSplitAssistantMessage(assistantMessage: AssistantMessage): void {
+	async #emitCursorSplitAssistantMessage(assistantMessage: AssistantMessage): Promise<void> {
 		// Snapshot and detach immediately so a still-pending `cursorOnToolResult`
 		// cannot push into a drained buffer. Entries already reserved stay paired
-		// with their toolCall; any transform that finishes after this point no
-		// longer reaches the messages appended below (see reservation comment).
+		// with their toolCall.
 		const buffer = this.#cursorToolResultBuffer;
 		this.#cursorToolResultBuffer = [];
+
+		// Await any transformer still running for a reserved entry before reading
+		// its payload. The provider dispatches with `void handleServerMessage(…)`,
+		// so a `message_end` from the same chunk can reach this point while a
+		// transformer is mid-flight; without the await its rewrite would land on
+		// the detached entry after the original was already appended and emitted.
+		// Each `pending` swallows its own rejection, so this cannot throw.
+		const pending = buffer.filter(entry => entry.pending !== undefined).map(entry => entry.pending);
+		if (pending.length > 0) await Promise.all(pending);
 
 		this.#state.streamMessage = null;
 		this.appendMessage(assistantMessage);
