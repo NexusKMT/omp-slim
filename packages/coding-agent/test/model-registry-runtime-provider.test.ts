@@ -155,6 +155,29 @@ describe("ModelRegistry runtime provider registration", () => {
 		expect(registry.find("openai", modelId)?.supportsComputerUse).toBe(true);
 	});
 
+	test("config.models re-registration rebuilds inferred capability after a saved transport override", () => {
+		const providerName = "openai";
+		const modelId = "gpt-5.4";
+		const proxyBaseUrl = "https://runtime-proxy.example.com/v1";
+
+		registry.registerProvider(providerName, { baseUrl: proxyBaseUrl }, "ext://runtime");
+		registry.registerProvider(
+			providerName,
+			{
+				baseUrl: "https://api.openai.com/v1",
+				api: "openai-responses",
+				apiKey: "RUNTIME_KEY",
+				models: [{ ...baseModel, id: modelId }],
+			},
+			"ext://runtime",
+		);
+
+		const model = registry.find(providerName, modelId);
+		expect(model?.baseUrl).toBe(proxyBaseUrl);
+		expect(model?.supportsComputerUse).toBe(false);
+		expect(model?.supportsComputerUseConfig).toBeUndefined();
+	});
+
 	test("registerProvider applies headers-only overrides to existing provider models across refresh", async () => {
 		const providerName = "anthropic";
 		const runtimeHeader = "X-Runtime-Provider-Header";
