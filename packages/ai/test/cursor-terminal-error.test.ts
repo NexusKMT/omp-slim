@@ -340,9 +340,15 @@ describe("Cursor terminal lifecycle after turnEnded", () => {
 			// queued continuation run first: a provider that does not await the
 			// handler settles the stream in exactly that window.
 			await Bun.sleep(0);
-			expect(stream.resultSettled).toBe(false);
-			expect(paired).toEqual([]);
-			handlerDone.resolve();
+			try {
+				expect(stream.resultSettled).toBe(false);
+				expect(paired).toEqual([]);
+			} finally {
+				// Always release: a failing assertion here must surface as that
+				// failure, not as a hung `for await` that waits for a handler
+				// nobody will ever unblock.
+				handlerDone.resolve();
+			}
 		})();
 
 		const eventTypes: string[] = [];
