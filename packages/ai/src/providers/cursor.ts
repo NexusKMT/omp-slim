@@ -2142,18 +2142,31 @@ function extractTodoSnapshot(toolCall: CursorTodoToolCall): CursorTodoSnapshot |
 	if (result?.case !== "success") return null;
 	const todos = result.value?.todos;
 	if (!todos) return null;
-	// A read that disagrees with the server's own count is partial; treating it
-	// as the list would drop whatever it left out. `total_count` is a proto3
-	// scalar, so an unset field arrives as `0` and is indistinguishable from a
-	// genuinely empty count — an empty read is therefore refused rather than
-	// risk wiping local state. `update_todos` remains the authoritative clear
-	// path (an empty update still syncs). A non-empty read whose count disagrees
-	// with the row list is refused the same way.
+	// A response that disagrees with the server's own count is partial; treating
+	// it as the list would drop whatever it left out. This applies to BOTH call
+	// kinds: a size-limited or partial `update_todos` merge response is just as
+	// incomplete as a filtered read, and mirroring it would delete every omitted
+	// local task.
+	//
+	// The empty case splits, because `total_count` is a proto3 scalar and an
+	// unset field arrives as `0`, indistinguishable from a genuine zero. An
+	// empty READ is refused — it cannot be told apart from a filtered response
+	// that matched nothing, and accepting it would wipe local state. An empty
+	// UPDATE is the authoritative clear path and still syncs.
 	const totalCount = result.value?.totalCount;
-	if (read && (todos.length === 0 || (typeof totalCount === "number" && totalCount !== todos.length))) {
+	if (typeof totalCount === "number" && todos.length > 0 && totalCount !== todos.length) {
+		return null;
+	}
+	if (read && todos.length === 0) {
 		return null;
 	}
 	const mapped = mapTodoSnapshot(todos);
+	// A row whose `content` is missing or proto-default lands as `""`. The local
+	// list is keyed by content and `resolveTaskOrError` rejects a falsy one
+	// before lookup, so the task would be permanently unreachable to every
+	// task-targeted `done`/`drop`/`rm` — the same unrepresentable shape as a
+	// content collision, refused for the same reason.
+	if (mapped.some(todo => todo.content.length === 0)) return null;
 	// The wire model identifies rows by `id` and can represent two rows sharing
 	// `content`; the local list is keyed by content alone (`findTaskByContent`)
 	// and `todo` rejects a duplicate outright. Importing such a snapshot would

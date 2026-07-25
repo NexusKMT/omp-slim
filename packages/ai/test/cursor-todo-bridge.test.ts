@@ -531,6 +531,64 @@ describe("cursor native todo bridge (wire-encoded protobuf)", () => {
 		expect(h.snapshots).toEqual([]);
 	});
 
+	it("refuses an update_todos snapshot truncated below total_count", () => {
+		// A partial or size-limited merge response is as incomplete as a filtered
+		// read: mirroring it would delete every task the server omitted. The
+		// refusal is not read-only.
+		//
+		// Positive control: the same row with an honest count does sync.
+		expect(drive(updateCall(items([["1", "only task", 2]]), 1)).snapshots).toHaveLength(1);
+
+		const h = drive(updateCall(items([["1", "only task", 2]]), 5));
+
+		expect(todoBlocks(h)).toHaveLength(1);
+		expect(h.snapshots).toEqual([]);
+	});
+
+	it("still mirrors an empty update_todos, the authoritative clear path", () => {
+		// Unlike an empty read (ambiguous: proto3 defaults `total_count` to 0),
+		// an empty update is an explicit "the list is now nothing" and must still
+		// clear local state — the count guard above must not swallow it.
+		const h = drive(updateCall([], 0));
+
+		expect(h.snapshots).toEqual([{ todos: [], merged: false }]);
+	});
+
+	it("refuses a snapshot carrying a row with empty content", () => {
+		// `content` is a proto3 string: missing or default arrives as `""`. The
+		// local list is keyed by content and `resolveTaskOrError` rejects a falsy
+		// one before lookup, so the row would be unreachable to every
+		// task-targeted `done`/`drop`/`rm`.
+		//
+		// Positive control: the same pair with real content syncs.
+		expect(
+			drive(
+				updateCall(
+					items([
+						["1", "real task", 1],
+						["2", "other task", 1],
+					]),
+					2,
+				),
+			).snapshots,
+		).toHaveLength(1);
+
+		const h = drive(
+			updateCall(
+				items([
+					["1", "real task", 1],
+					["2", "", 1],
+				]),
+				2,
+			),
+		);
+
+		expect(todoBlocks(h)).toHaveLength(1);
+		expect(h.snapshots).toEqual([]);
+		// Still settles as a benign no-op, like every other refusal.
+		expect(h.syncCalls).toEqual([{ snapshot: null, toolCallId: todoBlocks(h)[0].id, error: null }]);
+	});
+
 	it("refuses a wire-decoded empty read_todos with total_count 0", () => {
 		const h = drive(readCall([], 0));
 		expect(todoBlocks(h)).toHaveLength(1);
