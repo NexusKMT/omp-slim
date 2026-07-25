@@ -200,6 +200,26 @@ describe("CustomEditor bracketed path paste", () => {
 		expect(pasted).toEqual([screenshot]);
 		expect(editor.getText()).toBe("");
 	});
+
+	it("keeps a two-file drag with unescaped spaces as text instead of attaching one fused path", () => {
+		// PR #6582 review: selecting two screenshots and dropping them together
+		// emits a single space-separated payload the splitter also refuses
+		// (`PM.png` carries no directory). Fusing it into one path attaches
+		// nothing — `handleImagePathPaste` hits ENOENT and only shows a status,
+		// never restoring the text — so the drop must degrade to a text paste.
+		const { editor } = makeEditor();
+		const dropped =
+			"/Users/me/Desktop/Screenshot 2026-07-24 at 1.55.12 PM.png /Users/me/Desktop/Screenshot 2026-07-24 at 1.56.00 PM.png";
+		const pasted: string[] = [];
+		editor.onPasteImagePath = path => {
+			pasted.push(path);
+		};
+
+		editor.handleInput(bracketedPaste(dropped));
+
+		expect(pasted).toEqual([]);
+		expect(editor.getText()).toBe(dropped);
+	});
 });
 describe("CustomEditor configured paste image keys", () => {
 	it("routes Ghostty Cmd+V kitty key events through the macOS image-paste default", () => {
@@ -268,6 +288,12 @@ describe("extractImagePathFromText (issue #3506)", () => {
 		);
 	});
 
+	it("returns undefined for two spaced paths the splitter could not separate", () => {
+		// Only the whole-text pass survives the splitter here, and it must not
+		// fuse the pair into one path the loader can never resolve.
+		expect(extractImagePathFromText("/tmp/a.png /tmp/b shot.png")).toBeUndefined();
+	});
+
 	it("does not hijack prose that happens to contain a path-shaped fragment", () => {
 		// The whole-text branch is gated on ABSOLUTE_PATH_PREFIX_REGEX, so a
 		// non-anchored prefix ("see ...") never triggers it.
@@ -325,6 +351,55 @@ describe("extractImagePastePathsFromText (issue #6578)", () => {
 			name: "a bare spaced filename with no leading separator",
 			text: "Screenshot 2026-07-24 at 1.55.12 PM.png",
 			expected: undefined,
+		},
+		{
+			name: "two POSIX paths dragged together when one has unescaped spaces",
+			text: "/tmp/a.png /tmp/b shot.png",
+			expected: undefined,
+		},
+		{
+			name: "two macOS screenshots dragged together",
+			text: `${MAC_SCREENSHOT} /var/folders/xx/T/TemporaryItems/NSIRD_screencaptureui_ab/Screenshot 2026-07-24 at 1.56.00 PM.png`,
+			expected: undefined,
+		},
+		{
+			name: "two home-anchored paths with unescaped spaces",
+			text: "~/a.png ~/Pictures/b shot.png",
+			expected: undefined,
+		},
+		{
+			name: "two Windows drive paths with unescaped spaces",
+			text: `C:\\Users\\me\\a.png ${WINDOWS_SPACED}`,
+			expected: undefined,
+		},
+		{
+			name: "two `file://` URLs with unescaped spaces",
+			text: "file:///tmp/a.png file:///tmp/b shot.png",
+			expected: undefined,
+		},
+		{
+			name: "two UNC paths with unescaped spaces",
+			text: "\\\\srv\\share\\a.png \\\\srv\\share\\b shot.png",
+			expected: undefined,
+		},
+		{
+			name: "a tab-separated pair of dragged paths",
+			text: "/tmp/a.png\t/tmp/b shot.png",
+			expected: undefined,
+		},
+		{
+			// The escape asserts the space belongs to the path, so the `/sub`
+			// that follows is a component rather than a second drag payload.
+			name: "a path whose escaped space precedes a slash-led component",
+			text: "/tmp/odd dir\\ /sub/a b.png",
+			expected: ["/tmp/odd dir /sub/a b.png"],
+		},
+		{
+			// Splitter-success path: both segments are explicit, so the
+			// whole-text pass never runs and the pair still attaches as two.
+			name: "two explicit image paths the splitter can separate",
+			text: "/tmp/a.png /tmp/b.png",
+			expected: ["/tmp/a.png", "/tmp/b.png"],
 		},
 	];
 

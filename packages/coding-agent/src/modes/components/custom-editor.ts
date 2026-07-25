@@ -79,13 +79,28 @@ const URI_SCHEME_REGEX = /^[a-z][a-z0-9+.-]*:/i;
 const FILE_URI_REGEX = /^file:\/\//i;
 const WINDOWS_DRIVE_PATH_REGEX = /^[a-z]:[\\/]/i;
 /**
+ * Alternation of the filesystem prefixes that make a path unambiguously
+ * absolute (POSIX root, home, `file://`, UNC, Windows drive). Shared by
+ * {@link ABSOLUTE_PATH_PREFIX_REGEX} and {@link INTERIOR_PATH_ANCHOR_REGEX} so
+ * the leading-anchor test and the second-anchor test can never disagree about
+ * what counts as the start of a path.
+ */
+const ABSOLUTE_PATH_PREFIX_SOURCE = String.raw`(?:\/|~\/|file:\/\/|\\\\|[A-Za-z]:[\\/])`;
+/**
  * Whole-string anchor for paths that are unambiguously absolute. Restricts the
  * "treat the entire text as one path" pass of {@link extractWholeTextImagePath}
  * to inputs that start with a clearly-anchored filesystem prefix, so prose
  * containing a path-shaped fragment (e.g. "see /tmp/x.png") never hijacks the
  * smart fallback.
  */
-const ABSOLUTE_PATH_PREFIX_REGEX = /^(?:\/|~\/|file:\/\/|\\\\|[A-Za-z]:[\\/])/;
+const ABSOLUTE_PATH_PREFIX_REGEX = new RegExp(`^${ABSOLUTE_PATH_PREFIX_SOURCE}`);
+/**
+ * A second absolute-path anchor after *unescaped* whitespace — the signature of
+ * a multi-path payload (`/tmp/a.png /tmp/b shot.png`) rather than of one path
+ * whose name merely contains spaces. Escaped whitespace (`/tmp/My\ Photos/x.png`)
+ * is exempt: the escape is the terminal asserting the space belongs to the path.
+ */
+const INTERIOR_PATH_ANCHOR_REGEX = new RegExp(String.raw`(?<!\\)\s${ABSOLUTE_PATH_PREFIX_SOURCE}`);
 
 /** Max gap (ms) between two spaces for the later one to count as OS key auto-repeat rather than a
  *  deliberate press. OS auto-repeat is fast; a deliberate tap (even a fast one) is slower. */
@@ -234,10 +249,20 @@ export function extractPastePathsFromText(text: string): string[] | undefined {
  * when it is anchored by {@link ABSOLUTE_PATH_PREFIX_REGEX}, contains no
  * newlines, and points at a supported image extension. Recovers single paths
  * whose unescaped spaces defeat the segment splitter (macOS screenshot names).
+ *
+ * Refuses payloads carrying a second {@link INTERIOR_PATH_ANCHOR_REGEX} anchor.
+ * Dragging two files at once emits `/tmp/a.png /tmp/b shot.png`, which the
+ * splitter also refuses (`shot.png` is not explicit); swallowing it as one path
+ * attaches nothing, and `handleImagePathPaste`'s ENOENT branch only surfaces a
+ * status — unlike its other failure branches it never re-pastes the text — so
+ * both paths would vanish. Genuinely ambiguous input lands here too (a
+ * directory whose name ends in a space, as in `/tmp/odd dir /sub/x.png`); a
+ * plain text paste is the losing-nothing outcome, so ambiguity resolves that way.
  */
 function extractWholeTextImagePath(text: string): string | undefined {
 	const trimmed = text.trim();
 	if (!trimmed || /[\r\n]/.test(trimmed) || !ABSOLUTE_PATH_PREFIX_REGEX.test(trimmed)) return undefined;
+	if (INTERIOR_PATH_ANCHOR_REGEX.test(trimmed)) return undefined;
 	const wholePath = normalizePastedPath(trimmed);
 	return wholePath && isExplicitPastedPath(wholePath) && isImagePath(wholePath) ? wholePath : undefined;
 }
