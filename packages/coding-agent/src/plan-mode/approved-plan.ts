@@ -1,3 +1,4 @@
+import { normalizeLocalScheme } from "../tools/path-utils";
 import { ToolError } from "../tools/tool-errors";
 
 /** Shape forwarded from the plan-proposal handler to InteractiveMode's
@@ -167,7 +168,10 @@ export async function resolveApprovedPlan(input: ResolveApprovedPlanInput): Prom
 	// it keeps precedence over scanned artifacts — otherwise a stale older draft
 	// could shadow the deliberately-set current plan. A state plan already inside
 	// the scan competes purely on the newest-first ordering below (issue #6569).
-	if (input.statePlanFilePath && !listed.includes(input.statePlanFilePath)) {
+	// Compare canonical `local://` spellings so a resumed `local:/…` state path
+	// still matches the scanner's `local://…` entry (normalizeLocalScheme).
+	const canonicalListed = new Set(listed.map(normalizeLocalScheme));
+	if (input.statePlanFilePath && !canonicalListed.has(normalizeLocalScheme(input.statePlanFilePath))) {
 		consider(input.statePlanFilePath);
 	}
 	for (const url of listed) consider(url);

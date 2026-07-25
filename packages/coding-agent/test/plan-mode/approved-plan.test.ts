@@ -6,6 +6,7 @@ import {
 	resolveApprovedPlan,
 	resolvePlanTitle,
 } from "@oh-my-pi/pi-coding-agent/plan-mode/approved-plan";
+import { normalizeLocalScheme } from "@oh-my-pi/pi-coding-agent/tools/path-utils";
 
 describe("planFileUrlForSlug", () => {
 	it("maps a slug to its local plan URL", () => {
@@ -53,6 +54,28 @@ describe("resolveApprovedPlan", () => {
 			suppliedTitle: "Different title",
 			statePlanFilePath: "local://completed-plan.md",
 			readPlan: reader({
+				"local://completed-plan.md": "# Completed\n\nOld plan",
+				"local://new-draft-plan.md": "# New\n\nNew plan",
+			}),
+			listPlanFiles: async () => ["local://new-draft-plan.md", "local://completed-plan.md"],
+		});
+		expect(result.planFilePath).toBe("local://new-draft-plan.md");
+		expect(result.planContent).toContain("New plan");
+	});
+
+	it("treats a single-slash state URL as in-scan and prefers the newer draft", async () => {
+		// Mirror the real reader: canonicalize the local scheme before lookup, so a
+		// `local:/…` state path resolves the same file as the scanner's `local://…`.
+		const canonical = (files: Record<string, string>) => {
+			const map: Record<string, string> = {};
+			for (const url in files) map[normalizeLocalScheme(url)] = files[url];
+			return async (url: string) => map[normalizeLocalScheme(url)] ?? null;
+		};
+		const result = await resolveApprovedPlan({
+			suppliedTitle: undefined,
+			// Resumed sessions can persist the accepted single-slash spelling.
+			statePlanFilePath: "local:/completed-plan.md",
+			readPlan: canonical({
 				"local://completed-plan.md": "# Completed\n\nOld plan",
 				"local://new-draft-plan.md": "# New\n\nNew plan",
 			}),
