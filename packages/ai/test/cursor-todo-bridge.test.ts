@@ -489,7 +489,8 @@ describe("cursor native todo bridge (wire-encoded protobuf)", () => {
 		// The wire model identifies rows by `id` and can represent two rows with
 		// the same `content`, so the bridge must survive one. The local list is
 		// keyed by content alone, so importing the pair would make every later
-		// `done`/`drop` resolve to the first row and strand the second.
+		// task-targeted `done`/`drop` resolve to the first row and strand the
+		// second.
 		//
 		// Positive control: the same two rows with distinct content do sync, so
 		// the refusal below is attributable to the collision.

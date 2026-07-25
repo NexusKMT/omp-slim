@@ -2151,9 +2151,9 @@ function extractTodoSnapshot(toolCall: CursorTodoToolCall): CursorTodoSnapshot |
 	// The wire model identifies rows by `id` and can represent two rows sharing
 	// `content`; the local list is keyed by content alone (`findTaskByContent`)
 	// and `todo` rejects a duplicate outright. Importing such a snapshot would
-	// leave every later `done`/`drop`/`rm` resolving to the first row and the
-	// second permanently unaddressable, so it is refused like any other snapshot
-	// that cannot be represented locally.
+	// leave every task-targeted `done`/`drop`/`rm` resolving to the first row and
+	// the second unreachable (phase-wide and untargeted ops still hit both), so
+	// it is refused like any other snapshot that cannot be represented locally.
 	const seen = new Set<string>();
 	for (const todo of mapped) {
 		if (seen.has(todo.content)) return null;
