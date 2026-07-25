@@ -454,9 +454,11 @@ describe("update-cli release binary integrity", () => {
 		await Bun.write(targetPath, installed);
 		await fs.chmod(targetPath, 0o755);
 
-		const fetchImpl = async (input: string | URL | Request): Promise<Response> => {
+		const metadataAuthorizations: Array<string | null> = [];
+		const fetchImpl = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
 			const requestUrl = String(input);
 			if (requestUrl.startsWith("https://api.github.com/")) {
+				metadataAuthorizations.push(new Headers(init?.headers).get("Authorization"));
 				return new Response(
 					JSON.stringify(
 						releaseAsset({
@@ -470,12 +472,38 @@ describe("update-cli release binary integrity", () => {
 			throw new Error(`Unexpected request: ${requestUrl}`);
 		};
 
-		await expect(updateViaBinaryAt(targetPath, "17.1.2", { binaryName, fetchImpl })).rejects.toThrow(
-			"digest mismatch",
-		);
-		expect(await Bun.file(targetPath).text()).toBe(installed);
-		expect((await fs.stat(targetPath)).mode & 0o777).toBe(0o755);
-		expect(await Bun.file(`${targetPath}.new`).exists()).toBe(false);
+		const previousGitHubToken = Bun.env.GITHUB_TOKEN;
+		Bun.env.GITHUB_TOKEN = "test-token";
+		try {
+			await expect(
+				updateViaBinaryAt(targetPath, "17.1.2", {
+					binaryName,
+					fetchImpl,
+				}),
+			).rejects.toThrow("digest mismatch");
+			expect(metadataAuthorizations).toEqual(["Bearer test-token"]);
+			expect(await Bun.file(targetPath).text()).toBe(installed);
+			expect((await fs.stat(targetPath)).mode & 0o777).toBe(0o755);
+			expect(await Bun.file(`${targetPath}.new`).exists()).toBe(false);
+		} finally {
+			if (previousGitHubToken === undefined) delete Bun.env.GITHUB_TOKEN;
+			else Bun.env.GITHUB_TOKEN = previousGitHubToken;
+		}
+	});
+
+	it("explains how to authenticate after an anonymous GitHub API rate limit", async () => {
+		const dir = await makeTempDir();
+		const targetPath = path.join(dir, binaryName);
+		const fetchImpl = async () => new Response(null, { status: 403, statusText: "rate limit exceeded" });
+
+		await expect(
+			updateViaBinaryAt(targetPath, "17.1.2", {
+				binaryName,
+				fetchImpl,
+				githubToken: "",
+			}),
+		).rejects.toThrow("retry later or set GITHUB_TOKEN or GH_TOKEN");
+		expect(await Bun.file(targetPath).exists()).toBe(false);
 	});
 });
 

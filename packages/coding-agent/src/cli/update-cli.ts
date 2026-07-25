@@ -10,7 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { $which, APP_NAME, isEnoent, VERSION } from "@oh-my-pi/pi-utils";
+import { $env, $which, APP_NAME, isEnoent, VERSION } from "@oh-my-pi/pi-utils";
 import { $ } from "bun";
 import chalk from "chalk";
 import { theme } from "../modes/theme/theme";
@@ -137,15 +137,19 @@ async function getReleaseBinaryAsset(
 	expectedVersion: string,
 	binaryName: string,
 	fetchImpl: Fetch = fetch,
+	githubToken: string | undefined = $env.GITHUB_TOKEN || $env.GH_TOKEN,
 ): Promise<ReleaseBinaryAsset> {
 	const tag = `v${expectedVersion}`;
+	const headers: Record<string, string> = {
+		Accept: "application/vnd.github+json",
+		"X-GitHub-Api-Version": "2022-11-28",
+	};
+	if (githubToken) headers.Authorization = `Bearer ${githubToken}`;
+
 	let response: Response;
 	try {
 		response = await fetchImpl(`${GITHUB_API}/repos/${REPO}/releases/tags/${encodeURIComponent(tag)}`, {
-			headers: {
-				Accept: "application/vnd.github+json",
-				"X-GitHub-Api-Version": "2022-11-28",
-			},
+			headers,
 			signal: withTimeoutSignal(RELEASE_METADATA_TIMEOUT_MS),
 		});
 	} catch (err) {
@@ -153,6 +157,11 @@ async function getReleaseBinaryAsset(
 			throw new Error("Timed out fetching GitHub release metadata after 30s", { cause: err });
 		}
 		throw err;
+	}
+	if ((response.status === 403 && !githubToken) || response.status === 429) {
+		throw new Error(
+			"GitHub API rate limit exceeded while fetching release metadata; retry later or set GITHUB_TOKEN or GH_TOKEN",
+		);
 	}
 	if (!response.ok) {
 		throw new Error(`Failed to fetch GitHub release metadata: ${response.statusText}`);
@@ -1062,6 +1071,7 @@ export async function updateViaBinaryAt(
 	options: {
 		binaryName?: string;
 		fetchImpl?: Fetch;
+		githubToken?: string;
 		verifyInstalledVersion?: typeof verifyInstalledVersion;
 	} = {},
 ): Promise<void> {
@@ -1072,7 +1082,7 @@ export async function updateViaBinaryAt(
 	// would force the move-aside rename to overwrite it. pid + timestamp keeps
 	// two forced updates in the same millisecond from colliding.
 	const backupPath = `${targetPath}.${Date.now()}.${process.pid}.bak`;
-	const asset = await getReleaseBinaryAsset(expectedVersion, binaryName, options.fetchImpl);
+	const asset = await getReleaseBinaryAsset(expectedVersion, binaryName, options.fetchImpl, options.githubToken);
 	console.log(chalk.dim(`Downloading ${binaryName}…`));
 	await downloadVerifiedBinary({
 		url: asset.url,

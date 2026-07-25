@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed direct binary updates trusting an executable that only reported the expected version. The updater now selects one exact asset from the tagged GitHub release, requires its published SHA-256 digest and size, and verifies both while streaming the download before installation.
+- Fixed direct binary updates trusting an executable that only reported the expected version. The updater now selects one exact asset from the tagged GitHub release, requires its published SHA-256 digest and size, and verifies both while streaming the download before installation. GitHub release metadata requests use `GITHUB_TOKEN` or `GH_TOKEN` when available, allowing users behind an exhausted anonymous rate limit to authenticate.
 
 ## [17.1.3] - 2026-07-24
 
