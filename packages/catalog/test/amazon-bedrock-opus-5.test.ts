@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { buildBedrockCompat } from "@oh-my-pi/pi-catalog/compat/bedrock";
-import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
+import { MODELS_DEV_PROVIDER_DESCRIPTORS, mapModelsDevToModels } from "@oh-my-pi/pi-catalog/provider-models";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import { dropUnsupportedBedrockGeoIds } from "../scripts/generated-policies";
 
@@ -18,16 +18,59 @@ const AWS_DOCUMENTED_OPUS_5_IDS = [
 	"global.anthropic.claude-opus-5",
 ];
 
-describe("Amazon Bedrock Claude Opus 5", () => {
-	test("bundles exactly the AWS-documented inference-profile IDs", () => {
-		const bedrockOpus5Ids = getBundledModels("amazon-bedrock")
-			.map(model => model.id)
-			.filter(id => id.endsWith("anthropic.claude-opus-5"));
+// A representative `models.dev` "amazon-bedrock" payload for Claude Opus 5.
+// models.dev lists each inference-profile prefix as its own row (the `eu.`
+// row even carries distinct EU pricing), including the `jp.` profile that AWS
+// does not actually expose for this model. We reproduce that shape so the test
+// exercises the real source → catalog path — `mapModelsDevToModels` plus the
+// `dropUnsupportedBedrockGeoIds` generation policy — rather than the committed
+// `models.json` snapshot. A non-tool model is included to confirm the
+// descriptor's `tool_call` filter still drops it.
+const OPUS_5_MODELS_DEV_FIXTURE = {
+	"amazon-bedrock": {
+		models: Object.fromEntries(
+			[
+				"anthropic.claude-opus-5",
+				"us.anthropic.claude-opus-5",
+				"eu.anthropic.claude-opus-5",
+				"au.anthropic.claude-opus-5",
+				"global.anthropic.claude-opus-5",
+				"jp.anthropic.claude-opus-5",
+			].map(id => [
+				id,
+				{
+					name: "Claude Opus 5",
+					tool_call: true,
+					reasoning: true,
+					limit: { context: 1_000_000, output: 128_000 },
+					cost: { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
+					modalities: { input: ["text", "image"] },
+				},
+			]),
+		),
+	},
+};
 
-		expect(new Set(bedrockOpus5Ids)).toEqual(new Set(AWS_DOCUMENTED_OPUS_5_IDS));
-		// `models.dev` currently also lists `jp.anthropic.claude-opus-5`; Bedrock
-		// has no such inference profile for this model and would reject it.
-		expect(bedrockOpus5Ids).not.toContain("jp.anthropic.claude-opus-5");
+describe("Amazon Bedrock Claude Opus 5", () => {
+	test("source mapping plus generation policy yields exactly the AWS-documented inference-profile IDs", () => {
+		// Guard the source (models.dev descriptor + exclusion policy), not the
+		// bundled snapshot: the assertion must break if the mapping or policy
+		// stops reproducing the documented IDs, and must not falsely fail when
+		// upstream metadata legitimately shifts.
+		const mapped = mapModelsDevToModels(OPUS_5_MODELS_DEV_FIXTURE, MODELS_DEV_PROVIDER_DESCRIPTORS).filter(
+			model => model.provider === "amazon-bedrock" && model.id.endsWith("anthropic.claude-opus-5"),
+		);
+		const opus5Ids = dropUnsupportedBedrockGeoIds(mapped).map(model => model.id);
+
+		// Set semantics: the descriptor also derives an `eu.` variant from the
+		// bare `anthropic.` row, so `eu.` legitimately arrives from both that
+		// derivation and the standalone models.dev row (deduped downstream by
+		// the generator). We assert the documented ID coverage, not row count.
+		expect(new Set(opus5Ids)).toEqual(new Set(AWS_DOCUMENTED_OPUS_5_IDS));
+		// `models.dev` lists `jp.anthropic.claude-opus-5`, but Bedrock has no such
+		// inference profile for this model and would reject it, so the generation
+		// policy must drop it before it reaches the catalog.
+		expect(opus5Ids).not.toContain("jp.anthropic.claude-opus-5");
 	});
 
 	test("dropUnsupportedBedrockGeoIds filters the undocumented jp. profile without touching other providers/ids", () => {
