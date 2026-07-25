@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed numeric GitHub issue/PR autocomplete being suppressed inside prompt-bearing skill slash-command arguments while preserving literal prompt-action tokens such as `#copy` ([#6604](https://github.com/can1357/oh-my-pi/issues/6604)).
+
 ## [17.1.3] - 2026-07-24
 
 ### Fixed
