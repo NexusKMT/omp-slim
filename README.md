@@ -373,7 +373,7 @@ Twenty-five backends. Pin one, or let `auto` walk the chain in order.
 | `codex`      | oauth                  |
 | `xai`        | `XAI_API_KEY`          |
 | `zai`        | `ZAI_API_KEY`          |
-| `exa`        | `EXA_API_KEY` (or mcp) |
+| `exa`        | `/login` / env / mcp   |
 | `tinyfish`   | `TINYFISH_API_KEY`     |
 | `jina`       | `JINA_API_KEY`         |
 | `kagi`       | `KAGI_API_KEY`         |

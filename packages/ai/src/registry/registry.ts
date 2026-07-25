@@ -12,6 +12,7 @@ import { coreWeaveProvider } from "./coreweave";
 import { cursorProvider } from "./cursor";
 import { deepseekProvider } from "./deepseek";
 import { devinProvider } from "./devin";
+import { exaProvider } from "./exa";
 import { firepassProvider } from "./firepass";
 import { fireworksProvider } from "./fireworks";
 import { githubCopilotProvider } from "./github-copilot";
@@ -134,6 +135,7 @@ const ALL = [
 	opencodeGoProvider,
 	tavilyProvider,
 	kagiProvider,
+	exaProvider,
 	parallelProvider,
 	ollamaProvider,
 	ollamaCloudProvider,
