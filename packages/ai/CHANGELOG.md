@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed native Anthropic adaptive-only models (Opus 4.6+, Sonnet 4.6+, Fable/Mythos 5) keeping thinking ON when reasoning was meant to be off. `mapOptionsForApi` never consulted `disableReasoning` on the Anthropic branch, so a caller-side disable left adaptive thinking at full effort; and `disableThinkingIfToolChoiceForced` deleted `output_config.effort` alongside `thinking`, which for adaptive-only models silently re-enabled adaptive thinking (a bare omission defaults to adaptive-ON). Both paths now omit `thinking` and pin the lowest adaptive effort, so `disableReasoning` and forced `tool_choice` turns (e.g. the delivery reviewer's `report_delivery`) actually suppress reasoning instead of returning a thinking block with `end_turn` ([#6589](https://github.com/can1357/oh-my-pi/issues/6589)).
+
 ## [17.1.3] - 2026-07-24
 
 ### Fixed
