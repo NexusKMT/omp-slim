@@ -20,30 +20,69 @@ interface Fixture {
 	ctx: InteractiveModeContext;
 	controller: EventController;
 	showWarning: Mock<InteractiveModeContext["showWarning"]>;
+	/** Components the controller committed to the transcript, in order. */
+	blocks: unknown[];
 }
 
 function createFixture(): Fixture {
 	const showWarning = vi.fn();
+	const blocks: unknown[] = [];
 	const ctx = {
 		isInitialized: true,
 		init: vi.fn(async () => {}),
-		ui: { requestRender: vi.fn() },
+		ui: { requestRender: vi.fn(), requestComponentRender: vi.fn() },
 		transcriptMessageComponents: new WeakMap(),
 		pendingTools: new Map(),
 		statusLine: { invalidate: vi.fn(), markActivityStart: vi.fn() },
 		session: { isAborting: false },
+		settings: { get: () => false },
 		updateEditorTopBorder: vi.fn(),
 		clearPinnedError: vi.fn(),
 		ensureLoadingAnimation: vi.fn(),
+		noteDisplayableThinkingContent: () => false,
+		effectiveHideThinkingBlock: false,
+		// A live streaming component: the streamed toolCall block path
+		// (`#handleMessageUpdate`) only runs while one exists.
+		streamingComponent: { setHideThinkingBlock: vi.fn(), markTranscriptBlockFinalized: vi.fn() },
+		streamingMessage: undefined,
 		viewSession: { isStreaming: false, getToolByName: () => undefined },
 		sessionManager: { getCwd: () => "/tmp" },
-		chatContainer: { addChild: vi.fn(), removeChild: vi.fn(), isBlockUncommitted: () => false },
+		chatContainer: {
+			addChild: (block: unknown) => blocks.push(block),
+			removeChild: vi.fn(),
+			isBlockUncommitted: () => false,
+		},
 		toolOutputExpanded: false,
 		setTodos: vi.fn(),
 		present: vi.fn(),
 		showWarning,
 	} as unknown as InteractiveModeContext;
-	return { ctx, controller: new EventController(ctx), showWarning };
+	return { ctx, controller: new EventController(ctx), showWarning, blocks };
+}
+
+/** A cumulative `message_update` whose content carries the streamed todo toolCall block. */
+function streamedTodoBlock(toolCallId: string): Extract<AgentSessionEvent, { type: "message_update" }> {
+	return {
+		type: "message_update",
+		assistantMessageEvent: { type: "toolcall_start" },
+		message: {
+			role: "assistant",
+			content: [{ type: "toolCall", id: toolCallId, name: "todo", arguments: { todos: [] } }],
+		},
+	} as unknown as Extract<AgentSessionEvent, { type: "message_update" }>;
+}
+
+function todoEnd(
+	toolCallId: string,
+	phases: { name: string; tasks: { content: string; status: string }[] }[],
+): Extract<AgentSessionEvent, { type: "tool_execution_end" }> {
+	return {
+		type: "tool_execution_end",
+		toolCallId,
+		toolName: "todo",
+		isError: false,
+		result: { content: [{ type: "text", text: "" }], details: { phases } },
+	} as Extract<AgentSessionEvent, { type: "tool_execution_end" }>;
 }
 
 function todoFailure(text: string): Extract<AgentSessionEvent, { type: "tool_execution_end" }> {
@@ -88,5 +127,91 @@ describe("EventController + Cursor todo bridge", () => {
 		await f.controller.handleEvent(todoFailure(""));
 
 		expect(f.showWarning).toHaveBeenCalledWith("Todo update failed. Progress may be stale until todo succeeds.");
+	});
+
+	it("settles a card whose completion arrived before the streamed block created it", async () => {
+		// The Cursor bridge's `tool_execution_end` is a synchronous callback fired
+		// mid-parse, while the `toolcall_start` for the same call is queued on
+		// `AssistantMessageEventStream` and delivered a microtask later. When the
+		// server packs start and completion into one HTTP/2 chunk, the controller
+		// sees the completion FIRST — with nothing in `pendingTools` to settle.
+		// Dropping it stranded the card the streamed block creates moments later,
+		// animating for the rest of the session.
+		const f = createFixture();
+		const phases = [{ name: "Tasks", tasks: [{ content: "step one", status: "completed" }] }];
+
+		await f.controller.handleEvent(todoEnd("cursor-call-1", phases));
+		// Completion held: nothing rendered yet, nothing pending.
+		expect(f.blocks).toHaveLength(0);
+		expect(f.ctx.pendingTools.size).toBe(0);
+
+		await f.controller.handleEvent(streamedTodoBlock("cursor-call-1"));
+
+		// Exactly one card, created by the stream and immediately settled by the
+		// held completion — not left pending.
+		expect(f.blocks).toHaveLength(1);
+		expect(f.ctx.pendingTools.size).toBe(0);
+		// The mirror still ran: settling must not cost the panel refresh.
+		expect(f.ctx.setTodos).toHaveBeenCalledWith(phases);
+	});
+
+	it("fires the failure warning exactly once when a failed completion is replayed", async () => {
+		// The held completion is replayed through the full end handler to settle
+		// the late-created card. Its user-facing side effects (failure warning,
+		// panel refresh) already ran on first arrival — the replay must only
+		// settle the component, not repeat them.
+		const f = createFixture();
+
+		await f.controller.handleEvent(todoFailure("boom"));
+		expect(f.showWarning).toHaveBeenCalledTimes(1);
+
+		await f.controller.handleEvent(streamedTodoBlock("todo-1"));
+
+		expect(f.blocks).toHaveLength(1);
+		expect(f.ctx.pendingTools.size).toBe(0);
+		expect(f.showWarning).toHaveBeenCalledTimes(1);
+	});
+
+	it("refreshes the panel exactly once when a successful completion is replayed", async () => {
+		const f = createFixture();
+		const phases = [{ name: "Tasks", tasks: [{ content: "step one", status: "completed" }] }];
+
+		await f.controller.handleEvent(todoEnd("cursor-call-1", phases));
+		await f.controller.handleEvent(streamedTodoBlock("cursor-call-1"));
+
+		expect(f.ctx.setTodos).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not recreate the card on later cumulative stream updates", async () => {
+		// `message_update` is cumulative: every subsequent update re-lists the
+		// same toolCall block. After the orphaned completion settles the card
+		// (removing it from `pendingTools`), a replayed block must not pass the
+		// creation guard and spawn a second, forever-pending card.
+		const f = createFixture();
+		const phases = [{ name: "Tasks", tasks: [{ content: "step one", status: "completed" }] }];
+
+		await f.controller.handleEvent(todoEnd("cursor-call-1", phases));
+		await f.controller.handleEvent(streamedTodoBlock("cursor-call-1"));
+		await f.controller.handleEvent(streamedTodoBlock("cursor-call-1"));
+		await f.controller.handleEvent(streamedTodoBlock("cursor-call-1"));
+
+		expect(f.blocks).toHaveLength(1);
+		expect(f.ctx.pendingTools.size).toBe(0);
+	});
+
+	it("still settles normally when the start precedes the completion", async () => {
+		// The common ordering (start delivered first) must keep working: the
+		// orphan path only exists for the packed-chunk race.
+		const f = createFixture();
+		const phases = [{ name: "Tasks", tasks: [{ content: "step one", status: "completed" }] }];
+
+		await f.controller.handleEvent(streamedTodoBlock("cursor-call-1"));
+		expect(f.ctx.pendingTools.size).toBe(1);
+
+		await f.controller.handleEvent(todoEnd("cursor-call-1", phases));
+
+		expect(f.blocks).toHaveLength(1);
+		expect(f.ctx.pendingTools.size).toBe(0);
+		expect(f.ctx.setTodos).toHaveBeenCalledWith(phases);
 	});
 });

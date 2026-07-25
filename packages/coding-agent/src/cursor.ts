@@ -474,26 +474,16 @@ export class CursorExecHandlers implements ICursorExecHandlers {
 		}
 
 		const result = buildTodoSyncResult(toolCallId, phases, error);
-		// KNOWN DEFECT (unfixed): when Cursor packs `toolCallStarted` and
-		// `toolCallCompleted` into one HTTP/2 chunk, this completion races ahead
-		// of the streamed `toolcall_start`. That start is queued on
-		// `AssistantMessageEventStream` and delivered a microtask later, while
-		// `emitEvent` is a synchronous callback invoked mid-parse from
-		// `processInteractionUpdate`. The controller therefore handles the
-		// completion with no `pendingTools` entry, drops it
-		// (`event-controller.ts:1114`), and the card the streamed block creates
-		// afterwards (`:780`) animates for the rest of the session.
-		//
-		// Emitting a matching `tool_execution_start` here does NOT fix it: the
-		// completion deletes the entry it creates, so the late streamed block
-		// still finds an empty map and adds a SECOND card — one settled, one
-		// stuck. Measured, not assumed.
-		//
-		// The exec channel avoids this by construction: its handlers are async,
-		// so the stream has drained before they emit. The fix belongs at a point
-		// that runs after delivery — `agent-loop.ts:1189` already recognizes
-		// `kCursorExecResolved` blocks at `message_end` and currently filters
-		// them out without emitting any lifecycle for them.
+		// This completion is emitted synchronously mid-parse, while the streamed
+		// `toolcall_start` that creates the visible card rides
+		// `AssistantMessageEventStream` and lands a microtask later. When Cursor
+		// packs start and completion into one HTTP/2 chunk the completion arrives
+		// first; the interactive controller holds it as an orphan and replays it
+		// once the streamed block creates the card (`event-controller.ts`,
+		// `#orphanedToolCompletions`). Emitting a synthetic `tool_execution_start`
+		// here instead was measured and rejected: settling deletes the pending
+		// entry, and the next cumulative `message_update` re-creates the card —
+		// one settled card plus one stuck forever.
 		this.options.emitEvent?.({
 			type: "tool_execution_end",
 			toolCallId,
