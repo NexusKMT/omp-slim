@@ -164,17 +164,20 @@ describe("MiniMax Token Plan usage", () => {
 	});
 
 	test("honors a configured base URL for the quota request", async () => {
-		let requestedUrl = "";
-		const fetchMock: FetchImpl = input => {
-			requestedUrl = String(input);
-			return Promise.resolve(Response.json(remainsPayload()));
-		};
-		const request: UsageFetchParams = { ...params("minimax-code"), baseUrl: "https://proxy.example/v1/" };
+		// One case per trim the provider applies: trailing slash, trailing `/v1`, and both together.
+		for (const configured of ["https://proxy.example", "https://proxy.example/", "https://proxy.example/v1/"]) {
+			let requestedUrl = "";
+			const fetchMock: FetchImpl = input => {
+				requestedUrl = String(input);
+				return Promise.resolve(Response.json(remainsPayload()));
+			};
+			const request: UsageFetchParams = { ...params("minimax-code"), baseUrl: configured };
 
-		const report = await minimaxCodeUsageProvider.fetchUsage(request, { fetch: fetchMock });
+			const report = await minimaxCodeUsageProvider.fetchUsage(request, { fetch: fetchMock });
 
-		expect(requestedUrl).toBe("https://proxy.example/v1/token_plan/remains");
-		expect(report?.provider).toBe("minimax-code");
+			expect(requestedUrl).toBe("https://proxy.example/v1/token_plan/remains");
+			expect(report?.provider).toBe("minimax-code");
+		}
 	});
 
 	test("fails closed when MiniMax rejects the key inside a 200 response", async () => {
@@ -248,6 +251,32 @@ describe("MiniMax Token Plan usage", () => {
 			Promise.resolve(Response.json(payloadOf(notInPlanBucket("general"), notInPlanBucket("video"))));
 
 		expect(await minimaxCodeCnUsageProvider.fetchUsage(params("minimax-code-cn"), { fetch: fetchMock })).toBeNull();
+	});
+
+	test("keeps a bucket whose windows disagree about being in the plan", async () => {
+		const meteredWeekly: RemainsBucket = {
+			...notInPlanBucket("video"),
+			current_weekly_status: 1,
+			current_weekly_total_count: 21,
+			current_weekly_usage_count: 1,
+			current_weekly_remaining_percent: 40,
+		};
+		const meteredInterval: RemainsBucket = {
+			...notInPlanBucket("video"),
+			current_interval_status: 1,
+			current_interval_total_count: 3,
+			current_interval_usage_count: 1,
+			current_interval_remaining_percent: 40,
+		};
+
+		for (const bucket of [meteredWeekly, meteredInterval]) {
+			const fetchMock: FetchImpl = () => Promise.resolve(Response.json(payloadOf(bucket)));
+
+			const report = await minimaxCodeCnUsageProvider.fetchUsage(params("minimax-code-cn"), { fetch: fetchMock });
+
+			expect(report?.limits.map(limit => limit.id)).toEqual(["video:4h", "video:7d"]);
+			expect(report?.metadata).not.toHaveProperty("unavailableModels");
+		}
 	});
 
 	test("rejects a payload with no base_resp envelope", async () => {
