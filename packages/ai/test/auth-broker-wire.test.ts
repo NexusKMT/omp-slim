@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { AuthStorage, REMOTE_REFRESH_SENTINEL, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
 import {
 	AuthBrokerClient,
+	AuthBrokerError,
 	type AuthBrokerServerHandle,
 	AuthBrokerStreamUnsupportedError,
 	type SnapshotStreamEvent,
@@ -108,7 +109,13 @@ describe("auth-broker wire surface", () => {
 			}) as typeof fetch,
 		});
 
-		await expect(client.fetchSnapshot({ signal: AbortSignal.timeout(10) })).rejects.toMatchObject({ status: 401 });
+		try {
+			await client.fetchSnapshot({ signal: AbortSignal.timeout(10) });
+			throw new Error("expected auth rejection");
+		} catch (error) {
+			expect(error).toBeInstanceOf(AuthBrokerError);
+			expect(error).toMatchObject({ status: 401 });
+		}
 	});
 
 	test("GET /v1/snapshot returns generation headers and 304 for unchanged long-poll", async () => {
