@@ -1634,7 +1634,7 @@ describe("advisor", () => {
 			await Promise.resolve();
 
 			expect(promptInputs).toHaveLength(1);
-			expect(promptInputs[0]).toContain("#TOKABC123_");
+			expect(promptInputs[0]).toContain("$$TOKABC123_");
 			expect(promptInputs[0]).not.toContain("tok_abc123");
 		});
 		it("does not scan advisor-hidden successful tool-result bodies", async () => {
@@ -1666,7 +1666,7 @@ describe("advisor", () => {
 			await Promise.resolve();
 
 			expect(promptInputs).toHaveLength(1);
-			expect(promptInputs[0]).toContain("#TOKABC123_");
+			expect(promptInputs[0]).toContain("$$TOKABC123_");
 			expect(promptInputs[0]).not.toContain("tok_abc123");
 		});
 		it("does not scan tool-call arguments hidden by the primary-argument preview", async () => {
@@ -1693,7 +1693,7 @@ describe("advisor", () => {
 			});
 			runtime.onTurnEnd();
 			await runtime.waitForCatchup(1000, 1);
-			expect(promptInputs[0]).toContain("#TOKABC123_");
+			expect(promptInputs[0]).toContain("$$TOKABC123_");
 			expect(promptInputs[0]).not.toContain("tok_abc123");
 		});
 
@@ -1722,7 +1722,7 @@ describe("advisor", () => {
 			});
 			runtime.onTurnEnd();
 			await runtime.waitForCatchup(1000, 1);
-			expect(promptInputs[0]).toContain("#TOKABC123_");
+			expect(promptInputs[0]).toContain("$$TOKABC123_");
 			expect(promptInputs[0]).not.toContain("tok_abc123");
 		});
 
@@ -1761,7 +1761,7 @@ describe("advisor", () => {
 			await Promise.resolve();
 
 			expect(promptInputs).toHaveLength(1);
-			expect(promptInputs[0]).toContain("#TOKABC123_");
+			expect(promptInputs[0]).toContain("$$TOKABC123_");
 			expect(promptInputs[0]).not.toContain("tok_abc123");
 		});
 		it("does not scan execution source after the advisor preview cap", async () => {
@@ -1798,7 +1798,7 @@ describe("advisor", () => {
 			await Promise.resolve();
 
 			expect(promptInputs).toHaveLength(1);
-			expect(promptInputs[0]).toContain("#TOKABC123_");
+			expect(promptInputs[0]).toContain("$$TOKABC123_");
 			expect(promptInputs[0]).not.toContain("tok_abc123");
 		});
 
@@ -1829,7 +1829,7 @@ describe("advisor", () => {
 			await Promise.resolve();
 
 			expect(promptInputs).toHaveLength(1);
-			expect(promptInputs[0]).toContain("#TOKABC123_");
+			expect(promptInputs[0]).toContain("$$TOKABC123_");
 			expect(promptInputs[0]).not.toContain("tok_abc123");
 			expect(obfuscate).not.toHaveBeenCalledWith("tok_abc123", expect.anything());
 		});
@@ -1864,7 +1864,7 @@ describe("advisor", () => {
 			await Promise.resolve();
 
 			expect(promptInputs).toHaveLength(1);
-			expect(promptInputs[0]).toContain("#TOKABC123_");
+			expect(promptInputs[0]).toContain("$$TOKABC123_");
 			expect(promptInputs[0]).not.toContain("tok_abc123");
 			expect(obfuscate).not.toHaveBeenCalledWith("tok_abc123", expect.anything());
 		});
@@ -1876,7 +1876,7 @@ describe("advisor", () => {
 			// precomputation obfuscateMessages performs for the primary provider path
 			// (see secrets-obfuscator.test.ts). Redacting message fields independently
 			// would let the EARLIER user message's plain secret (OTHERSECRET) mint a
-			// friendly-prefixed placeholder ("#TOKABC123_<hash>#") before the SIBLING
+			// friendly-prefixed placeholder ("$$TOKABC123_<hash>$$") before the SIBLING
 			// toolResult's `details.diff` field, later in the same delta, reveals the
 			// regex-protected value that friendly name normalizes to
 			// (tok_abc123 -> TOKABC123) — baking a normalized rendering of that
@@ -2004,7 +2004,7 @@ describe("advisor", () => {
 			// placeholder from a PRIOR thinking block: if thinking fell through
 			// unredacted, the advisor prompt would receive both the raw secret AND,
 			// had it been redacted without sharing the regex collision set, a
-			// normalized "#TOKABC123_<hash>#" rendering of the regex-protected value
+			// normalized "$$TOKABC123_<hash>$$" rendering of the regex-protected value
 			// (tok_abc123) only discovered later in the same delta.
 			const obfuscator = new SecretObfuscator([
 				{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
