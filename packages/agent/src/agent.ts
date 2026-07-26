@@ -415,7 +415,6 @@ export class Agent {
 	#onAssistantMessageEvent?: (message: AssistantMessage, event: AssistantMessageEvent) => void;
 	#onHarmonyLeak?: (event: HarmonyAuditEvent) => void | Promise<void>;
 	#onBeforeYield?: () => Promise<void> | void;
-	#beforeSteeringPoll?: () => Promise<void> | void;
 	#onTurnEnd?: (messages: AgentMessage[], signal?: AbortSignal, context?: AgentTurnEndContext) => Promise<void> | void;
 	#asideMessageProvider?: () => AsideMessage[] | Promise<AsideMessage[]>;
 	#telemetry?: AgentLoopConfig["telemetry"];
@@ -795,10 +794,6 @@ export class Agent {
 
 	setOnBeforeYield(fn: (() => Promise<void> | void) | undefined): void {
 		this.#onBeforeYield = fn;
-	}
-
-	setBeforeSteeringPoll(fn: (() => Promise<void> | void) | undefined): void {
-		this.#beforeSteeringPoll = fn;
 	}
 	setOnTurnEnd(
 		fn:
@@ -1302,11 +1297,9 @@ export class Agent {
 					skipInitialSteeringPoll = false;
 					return [];
 				}
-				await this.#beforeSteeringPoll?.();
 				return this.#dequeueSteeringMessages();
 			},
-			hasSteeringMessages: async () => {
-				await this.#beforeSteeringPoll?.();
+			hasSteeringMessages: () => {
 				if (this.#steeringQueue.length === 0) {
 					return { queued: false };
 				}
