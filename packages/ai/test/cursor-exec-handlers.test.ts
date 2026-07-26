@@ -269,7 +269,7 @@ describe("Cursor history encoding", () => {
 		expect(history.rootPromptMessagesJson).toEqual([
 			{
 				role: "user",
-				content: [{ type: "image", image: imageData, mediaType: "image/png" }],
+				content: [{ type: "image", image: `data:image/png;base64,${imageData}`, mediaType: "image/png" }],
 			},
 			{
 				role: "assistant",

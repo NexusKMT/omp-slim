@@ -2474,7 +2474,7 @@ function buildCursorRootPromptContent(content: string | (TextContent | ImageCont
 				parts.push({ type: "text", text });
 			}
 		} else {
-			parts.push({ type: "image", image: item.data, mediaType: item.mimeType });
+			parts.push({ type: "image", image: `data:${item.mimeType};base64,${item.data}`, mediaType: item.mimeType });
 		}
 	}
 	return parts;
