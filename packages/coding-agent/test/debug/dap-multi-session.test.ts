@@ -6,6 +6,7 @@ import type {
 	DapClientState,
 	DapEventMessage,
 	DapResolvedAdapter,
+	DapThread,
 } from "@oh-my-pi/pi-coding-agent/dap/types";
 
 const TEST_ADAPTER: DapResolvedAdapter = {
@@ -25,6 +26,13 @@ const TEST_ADAPTER: DapResolvedAdapter = {
 type EventHandler = (body: unknown, event: DapEventMessage) => void | Promise<void>;
 type ReverseHandler = (args: unknown) => unknown | Promise<unknown>;
 
+interface FakeOptions {
+	/** Threads returned by this session's `threads` request. */
+	threads?: DapThread[];
+	/** Thread id reported by the synthetic `stopped` event (defaults to 7). */
+	stopThreadId?: number;
+}
+
 class FakeDapClient {
 	readonly proc: DapClientState["proc"];
 	readonly port = 8123;
@@ -39,6 +47,7 @@ class FakeDapClient {
 		readonly childConfiguration?: Record<string, unknown>,
 		readonly childRequest: "launch" | "attach" = "launch",
 		readonly stopOnStart = true,
+		readonly options: FakeOptions = {},
 	) {
 		this.proc = {
 			exited: this.#exited.promise,
@@ -71,10 +80,10 @@ class FakeDapClient {
 					});
 				});
 			} else if (this.stopOnStart) {
-				queueMicrotask(() => this.#emit("stopped", { reason: "entry", threadId: 7 }));
+				queueMicrotask(() => this.#emit("stopped", { reason: "entry", threadId: this.options.stopThreadId ?? 7 }));
 			}
 		}
-		if (command === "threads") return { threads: [{ id: 7, name: "target.js" }] };
+		if (command === "threads") return { threads: this.options.threads ?? [{ id: 7, name: "target.js" }] };
 		if (command === "stackTrace") {
 			return {
 				stackFrames: [{ id: 70, name: "main", line: 2, column: 1, source: { path: "/tmp/target.js" } }],
@@ -125,6 +134,11 @@ class FakeDapClient {
 
 	emit(event: string, body: unknown): void {
 		this.#emit(event, body);
+	}
+
+	/** Drive an adapter-initiated reverse request (e.g. a late `startDebugging`). */
+	async triggerReverse(command: string, args: unknown): Promise<void> {
+		await this.#emitReverse(command, args);
 	}
 
 	async #emitReverse(command: string, args: unknown): Promise<void> {
@@ -245,5 +259,64 @@ describe("DAP multi-session debugging", () => {
 		expect(root.requests.filter(request => request.command === "threads")).toHaveLength(1);
 
 		await manager.terminate(undefined, 100);
+	});
+
+	it("keeps focus on the stopped script child when a worker attaches later", async () => {
+		const root = new FakeDapClient({
+			name: "script.mts",
+			type: "pwa-node",
+			__pendingTargetId: "main",
+			program: "/tmp/script.mts",
+		});
+		// The script child stops on entry (thread 1), then a worker session
+		// attaches afterwards via a late reverse `startDebugging`.
+		const main = new FakeDapClient(undefined, "launch", true, {
+			threads: [{ id: 1, name: "script.mts" }],
+			stopThreadId: 1,
+		});
+		const worker = new FakeDapClient(undefined, "launch", false, {
+			threads: [{ id: 1, name: "[worker 1]" }],
+		});
+		const children = [main, worker];
+		spyOn(DapClient, "spawn").mockResolvedValue(root as unknown as DapClient);
+		spyOn(DapClient, "connect").mockImplementation(async () => {
+			const next = children.shift();
+			if (!next) throw new Error("Unexpected child DAP connection");
+			return next as unknown as DapClient;
+		});
+		const manager = new DapSessionManager();
+
+		const launched = await manager.launch(
+			{ adapter: TEST_ADAPTER, program: "/tmp/script.mts", cwd: "/tmp" },
+			undefined,
+			1_000,
+		);
+		expect(launched.status).toBe("stopped");
+		const scriptSessionId = launched.id;
+
+		// A worker_threads spawn triggers a late child attach on the launcher.
+		await root.triggerReverse("startDebugging", {
+			request: "launch",
+			configuration: { name: "[worker 1]", type: "pwa-node" },
+		});
+		expect(manager.listSessions()).toHaveLength(3);
+
+		// Focus must stay on the stopped script child, not jump to the worker.
+		const active = manager.getActiveSession();
+		expect(active?.id).toBe(scriptSessionId);
+		expect(active?.threadId).toBe(1);
+
+		// `threads` must surface every live thread across the tree, not just one.
+		const threads = await manager.threads(undefined, 1_000);
+		expect(threads.threads).toEqual(
+			expect.arrayContaining([
+				{ id: 1, name: "script.mts" },
+				{ id: 1, name: "[worker 1]" },
+			]),
+		);
+		// The threadless launcher is never queried while real children are live.
+		expect(root.requests.filter(request => request.command === "threads")).toHaveLength(0);
+
+		await manager.terminate(undefined, 1_000);
 	});
 });

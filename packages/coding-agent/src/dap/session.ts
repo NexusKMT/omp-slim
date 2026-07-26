@@ -960,16 +960,41 @@ export class DapSessionManager {
 		signal?: AbortSignal,
 		timeoutMs: number = 30_000,
 	): Promise<{ snapshot: DapSessionSummary; threads: DapThread[] }> {
-		const session = this.#touchActiveSession();
-		const response = await this.#sendRequestWithConfig<DapThreadsResponse>(
-			session,
-			"threads",
-			undefined,
-			signal,
-			timeoutMs,
-		);
-		session.threads = response?.threads ?? [];
-		return { snapshot: buildSummary(session), threads: session.threads };
+		const anchor = this.#touchActiveSession();
+		// A js-debug launch is a session tree: the root is a threadless launcher
+		// and each real thread lives in a child (main script, `[worker N]`, …).
+		// Querying only the active session would surface just one child's threads,
+		// so aggregate across every live thread-owning session in the tree.
+		const targets = this.#threadOwningSessions(anchor);
+		const merged: DapThread[] = [];
+		const seen = new Set<string>();
+		for (const target of targets) {
+			let threads: DapThread[];
+			try {
+				const response = await this.#sendRequestWithConfig<DapThreadsResponse>(
+					target,
+					"threads",
+					undefined,
+					signal,
+					timeoutMs,
+				);
+				threads = response?.threads ?? [];
+			} catch (error) {
+				logger.warn("Failed to list threads for debug session", {
+					sessionId: target.id,
+					error: toErrorMessage(error),
+				});
+				continue;
+			}
+			target.threads = threads;
+			for (const thread of threads) {
+				const key = `${thread.id}\0${thread.name}`;
+				if (seen.has(key)) continue;
+				seen.add(key);
+				merged.push(thread);
+			}
+		}
+		return { snapshot: buildSummary(anchor), threads: merged };
 	}
 
 	async stackTrace(
@@ -1371,7 +1396,13 @@ export class DapSessionManager {
 		if (parentSessionId) {
 			this.#sessions.get(parentSessionId)?.childSessionIds.add(session.id);
 		}
-		this.#activeSessionId = session.id;
+		// Focus follows stops, not registrations: a lazily-attached child (e.g. a
+		// js-debug `[worker N]` session) must not steal focus from a sibling that
+		// is already stopped at a breakpoint / entry. Only claim focus when no
+		// live, stopped session currently holds it.
+		if (!this.#hasLiveStoppedActiveSession()) {
+			this.#activeSessionId = session.id;
+		}
 		const heartbeat = setInterval(() => {
 			if (!client.isAlive()) {
 				session.status = "terminated";
@@ -1696,6 +1727,12 @@ export class DapSessionManager {
 		return session;
 	}
 
+	/** True when the current active session is live and paused at a stop. */
+	#hasLiveStoppedActiveSession(): boolean {
+		const active = this.#getActiveSessionOrNull();
+		return active !== null && active.status === "stopped" && active.client.isAlive();
+	}
+
 	#getActiveSessionOrThrow(): DapSession {
 		const session = this.#getActiveSessionOrNull();
 		if (!session) {
@@ -1727,6 +1764,27 @@ export class DapSessionManager {
 			}
 		}
 		return sessions;
+	}
+
+	/**
+	 * Live sessions in `session`'s tree that can own threads. The threadless
+	 * root launcher (a js-debug coordinator with live children) is dropped when
+	 * any real child is alive, but kept as a last resort so a collapsed tree
+	 * still has a target.
+	 */
+	#threadOwningSessions(session: DapSession): DapSession[] {
+		const live = this.#getTreeSessions(session).filter(
+			candidate => candidate.status !== "terminated" && candidate.client.isAlive(),
+		);
+		if (live.length === 0) return [session];
+		const nonLauncher = live.filter(candidate => !this.#isLauncherSession(candidate, live));
+		return nonLauncher.length > 0 ? nonLauncher : live;
+	}
+
+	/** A root session that has spawned a still-live child is a threadless launcher. */
+	#isLauncherSession(session: DapSession, live: DapSession[]): boolean {
+		if (session.parentSessionId) return false;
+		return live.some(candidate => candidate.parentSessionId === session.id);
 	}
 
 	#touchSessionAndAncestors(session: DapSession): void {
