@@ -111,6 +111,26 @@ describe("update-cli install target detection", () => {
 		expect(method).toBe("binary");
 	});
 
+	it("keeps bun update for regular-file entries in the bun global bin dir on Windows, where bun writes .exe shims", () => {
+		// On Windows a bun-managed global install is a regular-file .exe
+		// launcher, not a symlink, so the standalone-binary override must not
+		// apply there — it would clobber the shim with a raw binary. Paths use
+		// forward slashes so the lexical containment check works on the POSIX
+		// host running this suite; the platform gate is what is under test.
+		const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+		if (!platformDescriptor) throw new Error("process.platform descriptor missing");
+		Object.defineProperty(process, "platform", { ...platformDescriptor, value: "win32" });
+		try {
+			const method = resolveUpdateMethodForTest("C:/Users/test/.bun/bin/omp.exe", "C:/Users/test/.bun/bin", {
+				ompIsRegularFile: true,
+			});
+
+			expect(method).toBe("bun");
+		} finally {
+			Object.defineProperty(process, "platform", platformDescriptor);
+		}
+	});
+
 	it("still uses npm update when the npm global bin entry is a package-manager symlink, not a plain file", () => {
 		const method = resolveUpdateMethodForTest("/home/u/.local/bin/omp", undefined, {
 			npmBinDir: "/home/u/.local/bin",

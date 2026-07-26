@@ -239,12 +239,16 @@ function resolveUpdateMethod(
 	if (miseDataDir && isPathInDirectory(ompPath, path.join(miseDataDir, "shims"))) return "mise";
 	// A plain executable file in a package-manager bin dir is the standalone
 	// binary the installer placed there, not an npm/bun-managed install (those
-	// symlink into node_modules). When the global bin dir overlaps the
+	// symlink into node_modules on POSIX). When the global bin dir overlaps the
 	// installer's default (~/.local/bin), classifying by directory alone routes
 	// a binary install through npm/bun, whose reinstall then collides with the
 	// existing file (npm EEXIST). Fall through to binary replacement instead.
-	if (bunBinDir && isPathInDirectory(ompPath, bunBinDir) && !ompIsRegularFile) return "bun";
-	if ((npmBinDir && isPathInDirectory(ompPath, npmBinDir) && !ompIsRegularFile) || isWindowsScriptLauncher)
+	// Windows is excluded: there package managers write regular-file shims
+	// (bun's .exe launcher, npm's .cmd/.ps1), so a regular file is NOT evidence
+	// of a standalone install and the override would hijack managed installs.
+	const isStandaloneRegularFile = ompIsRegularFile && process.platform !== "win32";
+	if (bunBinDir && isPathInDirectory(ompPath, bunBinDir) && !isStandaloneRegularFile) return "bun";
+	if ((npmBinDir && isPathInDirectory(ompPath, npmBinDir) && !isStandaloneRegularFile) || isWindowsScriptLauncher)
 		return "npm";
 	return "binary";
 }
