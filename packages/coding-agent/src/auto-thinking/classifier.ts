@@ -15,7 +15,6 @@
  * the caller falls back to a concrete level and continues the turn.
  */
 import { type AssistantMessage, completeSimple, Effort, type Model } from "@oh-my-pi/pi-ai";
-import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { prompt } from "@oh-my-pi/pi-utils";
 
@@ -96,10 +95,9 @@ export async function classifyDifficulty(
 		backend === ONLINE_AUTO_THINKING_MODEL_KEY
 			? await classifyOnline(input, deps, ceiling)
 			: await classifyLocal(input, backend, deps);
-	// Policy clamp before the model clamp: a hallucinated `max` must not cross a
-	// ceiling the user did not opt into, even on a model that supports the tier.
-	const capped = THINKING_EFFORTS.indexOf(effort) > THINKING_EFFORTS.indexOf(ceiling) ? ceiling : effort;
-	return clampAutoThinkingEffort(deps.model, capped);
+	// The ceiling goes into the clamp itself: capping the request alone is not
+	// enough, because a sparse ladder snaps an excluded request back up.
+	return clampAutoThinkingEffort(deps.model, effort, ceiling);
 }
 
 async function classifyOnline(input: string, deps: ClassifyDifficultyDeps, ceiling: Effort): Promise<Effort> {

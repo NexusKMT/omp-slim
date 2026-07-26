@@ -325,6 +325,33 @@ describe("auto thinking classifier helpers", () => {
 		expect(await classifyDifficulty("untangle this cross-service race", fixture.deps)).toBe(Effort.XHigh);
 	});
 
+	it("never bills a max-only ladder without opt-in", async () => {
+		// `["max"]` has nothing at or below the default ceiling, so the model clamp
+		// must not snap the request back up — auto yields nothing and the session
+		// keeps its current level.
+		const defaulted = createOnlineFixture(buildLadderModel("mock-max-only", [Effort.Max]), "xhigh");
+		expect(await classifyDifficulty("cut over the storage layer", defaulted.deps)).toBeUndefined();
+
+		vi.restoreAllMocks();
+
+		const optedIn = createOnlineFixture(buildLadderModel("mock-max-only", [Effort.Max]), "max", "max");
+		expect(await classifyDifficulty("cut over the storage layer", optedIn.deps)).toBe(Effort.Max);
+	});
+
+	it("has no provisional level on a max-only ladder", () => {
+		expect(resolveProvisionalAutoLevel(buildLadderModel("mock-max-only", [Effort.Max]))).toBeUndefined();
+	});
+
+	it("keeps the ceiling out of the pool for sparse ladders", () => {
+		const maxOnly = buildLadderModel("mock-max-only", [Effort.Max]);
+
+		expect(clampAutoThinkingEffort(maxOnly, Effort.XHigh, Effort.XHigh)).toBeUndefined();
+		expect(clampAutoThinkingEffort(maxOnly, Effort.Max)).toBe(Effort.Max);
+		expect(
+			clampAutoThinkingEffort(buildLadderModel("mock-hm", [Effort.High, Effort.Max]), Effort.Max, Effort.XHigh),
+		).toBe(Effort.High);
+	});
+
 	it("keeps the provisional auto level below max even when the model defaults to it", () => {
 		const maxDefaultModel = buildModel({
 			id: "mock-max-default",

@@ -197,6 +197,11 @@ export function parseCliThinkingLevel(value: string | null | undefined): Configu
  * above Low (falling back to the full supported set only when the model maxes
  * out below Low). Within that pool the request snaps to the highest level not
  * exceeding it, or the pool minimum when the request is below the pool.
+ * `ceiling` bounds the pool from above, so a policy ceiling survives the model
+ * clamp: a sparse ladder such as `["max"]` must not snap an `xhigh` request up
+ * to `max`. When no supported tier sits at or below the ceiling there is
+ * nothing legal to pick and the result is `undefined` — auto leaves the current
+ * level alone rather than billing a tier the caller excluded.
  *
  * Returns `undefined` for reasoning-capable models without a controllable
  * effort surface (`thinking.efforts` empty — e.g. devin-agent models, where
@@ -205,12 +210,19 @@ export function parseCliThinkingLevel(value: string | null | undefined): Configu
  * forward a concrete effort that would then trip {@link requireSupportedEffort}
  * downstream.
  */
-export function clampAutoThinkingEffort(model: Model | undefined, effort: Effort): Effort | undefined {
+export function clampAutoThinkingEffort(
+	model: Model | undefined,
+	effort: Effort,
+	ceiling: Effort = Effort.Max,
+): Effort | undefined {
 	const supported = model ? getSupportedEfforts(model) : THINKING_EFFORTS;
 	if (supported.length === 0) return undefined;
 	const lowIndex = THINKING_EFFORTS.indexOf(Effort.Low);
-	const eligible = supported.filter(level => THINKING_EFFORTS.indexOf(level) >= lowIndex);
-	const pool = eligible.length > 0 ? eligible : supported;
+	const ceilingIndex = THINKING_EFFORTS.indexOf(ceiling);
+	const withinCeiling = supported.filter(level => THINKING_EFFORTS.indexOf(level) <= ceilingIndex);
+	if (withinCeiling.length === 0) return undefined;
+	const eligible = withinCeiling.filter(level => THINKING_EFFORTS.indexOf(level) >= lowIndex);
+	const pool = eligible.length > 0 ? eligible : withinCeiling;
 	const requestedIndex = THINKING_EFFORTS.indexOf(effort);
 	let chosen = pool[0];
 	for (const candidate of pool) {
@@ -253,12 +265,16 @@ export function resolveTaskEffortLevel(model: Model | undefined, effort: TaskEff
  * the model's `defaultLevel`, otherwise High, clamped into the auto range.
  *
  * Deliberately stays below {@link Effort.Max}: the placeholder must not bill the
- * top tier for a turn nobody classified, so a `defaultLevel` of `max` is capped
- * at XHigh before clamping. Classification itself may still resolve Max on
- * models that expose the tier. Returns `undefined` for non-reasoning models.
+ * top tier for a turn nobody classified, so XHigh is passed as a hard ceiling
+ * rather than only capping the preferred level — otherwise a sparse `["max"]`
+ * ladder would snap straight back up. A model whose ladder offers nothing at or
+ * below XHigh therefore has no provisional level, and `auto` leaves the current
+ * one in place. Classification itself may still resolve Max on models that
+ * expose the tier when the user opts in. Returns `undefined` for non-reasoning
+ * models.
  */
 export function resolveProvisionalAutoLevel(model: Model | undefined): Effort | undefined {
 	if (!model?.reasoning) return undefined;
 	const preferred = model.thinking?.defaultLevel ?? Effort.High;
-	return clampAutoThinkingEffort(model, preferred === Effort.Max ? Effort.XHigh : preferred);
+	return clampAutoThinkingEffort(model, preferred === Effort.Max ? Effort.XHigh : preferred, Effort.XHigh);
 }
