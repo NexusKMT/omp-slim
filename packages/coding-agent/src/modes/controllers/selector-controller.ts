@@ -420,6 +420,11 @@ export class SelectorController {
 				this.ctx.session.setAutoCompactionEnabled(value as boolean);
 				this.ctx.statusLine.setAutoCompactEnabled(value as boolean);
 				break;
+			case "advisor.enabled":
+				this.ctx.session.setAdvisorEnabled(value as boolean);
+				this.ctx.statusLine.invalidate();
+				this.ctx.ui.requestRender();
+				break;
 			case "steeringMode":
 				this.ctx.session.setSteeringMode(value as "all" | "one-at-a-time");
 				break;
