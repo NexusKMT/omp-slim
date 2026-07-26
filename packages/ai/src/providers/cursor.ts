@@ -379,6 +379,20 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 			timestamp: Date.now(),
 		};
 
+		// Declared outside the `try` because BOTH exits must drain it: an exec
+		// handler decoded from the last chunk can still be running when the
+		// transport fails, and the error path finalizes the synthesized call just
+		// like the success path does.
+		const inFlightDispatches = new Set<Promise<void>>();
+		// A dispatch can spawn another (a handler that decodes a nested frame), so
+		// re-check rather than awaiting one snapshot. Each dispatch already
+		// swallows its own rejection, so this only waits.
+		const drainInFlightDispatches = async (): Promise<void> => {
+			while (inFlightDispatches.size > 0) {
+				await Promise.all([...inFlightDispatches]);
+			}
+		};
+
 		let h2Client: http2.ClientHttp2Session | null = null;
 		let h2Request: http2.ClientHttp2Stream | null = null;
 		let heartbeatTimer: NodeJS.Timeout | null = null;
@@ -475,7 +489,6 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 			let currentToolCall: ToolCallState | null = null;
 			const resolvedMcpToolCallIds = new Set<string>();
 			const usageState: UsageState = { sawTokenDelta: false };
-			const inFlightDispatches = new Set<Promise<void>>();
 
 			const state: BlockState = {
 				get currentTextBlock() {
@@ -638,9 +651,7 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 			// buffer before such a handler reserves its entry, leaving the call
 			// unpaired and stripped from every rebuilt transcript. Each dispatch
 			// already swallows its own rejection, so this only waits.
-			while (inFlightDispatches.size > 0) {
-				await Promise.all([...inFlightDispatches]);
-			}
+			await drainInFlightDispatches();
 
 			endCurrentTextBlock(output, stream, state);
 			endCurrentThinkingBlock(output, stream, state);
@@ -667,6 +678,13 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 			});
 			stream.end();
 		} catch (error) {
+			// Same reason as the success path: the Agent finalizes the synthesized
+			// call from this terminal error and clears its Cursor result buffer, so
+			// a handler still running would land its real result after `agent_end`
+			// and be discarded — even though the tool may already have run side
+			// effects. Wait for it first. An abort has already closed the transport,
+			// and every dispatch settles rather than hanging on it.
+			await drainInFlightDispatches();
 			const result = await AIError.finalize(error, { api: model.api, signal: options?.signal });
 			output.stopReason = result.stopReason;
 			output.errorStatus = result.status;
@@ -1521,9 +1539,14 @@ export async function resolveExecHandler<TArgs, TResult>(
 		const finalToolResult = await applyToolResultHandler(toolResult, onToolResult);
 
 		if (execResult) {
+			// TResult-only is a supported return form, so the transcript entry has to
+			// be synthesized here. Deriving its state from the raw result keeps the
+			// two views consistent: every exec result is a proto oneof whose only
+			// non-failure variant is `success`, so a `rejected`/`error`/
+			// `file_not_found`/... result must not be recorded as a successful call.
 			return {
 				execResult,
-				toolResult: finalToolResult ?? (await pair("Tool produced no transcript result", false)),
+				toolResult: finalToolResult ?? (await pair(...describeExecResult(execResult))),
 			};
 		}
 		if (finalToolResult) {
@@ -1535,6 +1558,25 @@ export async function resolveExecHandler<TArgs, TResult>(
 		const message = error instanceof Error ? error.message : String(error);
 		return { execResult: buildError(message), toolResult: await pair(message, true) };
 	}
+}
+
+/**
+ * Derive the transcript state of an exec result the SDK handler returned in the
+ * TResult-only form, which carries no `toolResult` to copy it from.
+ *
+ * Every exec result in `agent.proto` is a `oneof result` whose success variant
+ * is named `success` — the rest (`error`, `rejected`, `file_not_found`,
+ * `permission_denied`, `invalid_file`, ...) are failures. Recording those as a
+ * successful call would show the user a green entry for a call Cursor was told
+ * failed. The variant's own `error`/`reason` text is the same string the server
+ * receives, so it is reused verbatim as the transcript body.
+ */
+function describeExecResult(execResult: unknown): [text: string, isError: boolean] {
+	const result = (execResult as { result?: { case?: string; value?: unknown } } | null)?.result;
+	const variant = result?.case;
+	if (!variant || variant === "success") return ["Tool produced no transcript result", false];
+	const value = result?.value as { error?: string; reason?: string } | undefined;
+	return [value?.error || value?.reason || `Tool call ${variant}`, true];
 }
 
 function splitExecHandlerResult<TResult>(result: CursorExecHandlerResult<TResult>): {

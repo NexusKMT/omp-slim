@@ -16,12 +16,17 @@ import type { AssistantMessage, Context, CursorExecHandlers, Model, ToolResultMe
 import { kCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import type { ReadResult } from "@oh-my-pi/pi-catalog/discovery/cursor-gen/agent_pb";
 import {
 	type AgentRunRequest,
 	AgentServerMessageSchema,
 	ExecServerMessageSchema,
 	McpArgsSchema,
 	ReadArgsSchema,
+	ReadErrorSchema,
+	ReadRejectedSchema,
+	ReadResultSchema,
+	ReadSuccessSchema,
 } from "@oh-my-pi/pi-catalog/discovery/cursor-gen/agent_pb";
 
 const cursorModel: Model<"cursor-agent"> = buildModel({
@@ -248,6 +253,78 @@ describe("Cursor resolveExecHandler execHandlers binding", () => {
 
 			expect(execResult).toEqual({ tag: "ok" });
 			expect(toolResult).toMatchObject({ toolCallId: "exec-1", isError: false });
+		});
+
+		it("records a rejected TResult-only return as a failed call", async () => {
+			// TResult-only is a supported handler form, so the transcript entry has
+			// to be synthesized. A `rejected` result means Cursor was told the call
+			// failed - recording it as successful hides that from the user and from
+			// downstream lifecycle logic.
+			const rejected = create(ReadResultSchema, {
+				result: { case: "rejected", value: create(ReadRejectedSchema, { path: "/tmp/foo", reason: "denied" }) },
+			});
+			// Explicit TResult: `ReadResult` has its own `result` field, so inference
+			// would otherwise match the `{ result?: TResult }` handler-return variant
+			// and unwrap the oneof as the exec result.
+			const { execResult, toolResult } = await resolveExecHandler<{ path: string }, ReadResult>(
+				{ path: "/tmp/foo" },
+				async () => rejected,
+				undefined,
+				() => rejected,
+				() => rejected,
+				() => rejected,
+				pairing,
+			);
+
+			expect(execResult).toBe(rejected);
+			// The variant's own text is what the server received, so reuse it.
+			expect(toolResult).toMatchObject({
+				toolCallId: "exec-1",
+				content: [{ type: "text", text: "denied" }],
+				isError: true,
+			});
+		});
+
+		it("records an errored TResult-only return as a failed call", async () => {
+			const errored = create(ReadResultSchema, {
+				result: { case: "error", value: create(ReadErrorSchema, { path: "/tmp/foo", error: "EIO" }) },
+			});
+			const { toolResult } = await resolveExecHandler<{ path: string }, ReadResult>(
+				{ path: "/tmp/foo" },
+				async () => errored,
+				undefined,
+				() => errored,
+				() => errored,
+				() => errored,
+				pairing,
+			);
+
+			expect(toolResult).toMatchObject({ content: [{ type: "text", text: "EIO" }], isError: true });
+		});
+
+		it("keeps a successful TResult-only return successful", async () => {
+			// `success` is the only non-failure variant; the placeholder text still
+			// applies because the handler gave the transcript nothing to show.
+			const ok = create(ReadResultSchema, {
+				result: {
+					case: "success",
+					value: create(ReadSuccessSchema, { path: "/tmp/foo", output: { case: "content", value: "hi" } }),
+				},
+			});
+			const { toolResult } = await resolveExecHandler<{ path: string }, ReadResult>(
+				{ path: "/tmp/foo" },
+				async () => ok,
+				undefined,
+				() => ok,
+				() => ok,
+				() => ok,
+				pairing,
+			);
+
+			expect(toolResult).toMatchObject({
+				content: [{ type: "text", text: "Tool produced no transcript result" }],
+				isError: false,
+			});
 		});
 
 		it("routes a synthesized result through onToolResult, like a real one", async () => {

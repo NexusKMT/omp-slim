@@ -21,7 +21,8 @@ type Scenario =
 	| { kind: "grpc-trailer-after-turn" }
 	| { kind: "end-before-turn" }
 	| { kind: "hang-after-turn" }
-	| { kind: "exec-in-final-chunk"; responseFinished: PromiseWithResolvers<void> };
+	| { kind: "exec-in-final-chunk"; responseFinished: PromiseWithResolvers<void> }
+	| { kind: "exec-then-transport-error"; responseFinished: PromiseWithResolvers<void> };
 
 let server: http2.Http2Server | undefined;
 const sessions = new Set<http2.Http2Session>();
@@ -71,14 +72,12 @@ function connectEndErrorFrame(code: string, message: string): Buffer {
 }
 
 /**
- * A `read` exec request, `turnEnded` and the stream close, all in ONE chunk.
- *
- * The provider parses every frame in a chunk synchronously and dispatches each
- * `handleServerMessage` fire-and-forget, so the exec handler is still running
- * when the transport completes. Without a barrier before `done`, the Agent
- * drains its Cursor result buffer first and the call is never paired.
+ * A `read` exec request. The provider parses every frame in a chunk
+ * synchronously and dispatches each `handleServerMessage` fire-and-forget, so
+ * pairing this with a terminal frame in ONE chunk leaves the exec handler
+ * running while the transport settles.
  */
-function execAndTurnEndedFrame(): Buffer {
+function execRequestFrame(): Buffer {
 	const message = create(AgentServerMessageSchema, {
 		message: {
 			case: "execServerMessage",
@@ -92,7 +91,16 @@ function execAndTurnEndedFrame(): Buffer {
 			}),
 		},
 	});
-	return Buffer.concat([frameConnectMessage(toBinary(AgentServerMessageSchema, message)), turnEndedFrame()]);
+	return frameConnectMessage(toBinary(AgentServerMessageSchema, message));
+}
+
+/**
+ * Exec request + `turnEnded` in one chunk: the clean-completion race. Without a
+ * barrier before `done`, the Agent drains its Cursor result buffer first and
+ * the call is never paired.
+ */
+function execAndTurnEndedFrame(): Buffer {
+	return Buffer.concat([execRequestFrame(), turnEndedFrame()]);
 }
 
 async function startServer(): Promise<string> {
@@ -147,6 +155,20 @@ async function startServer(): Promise<string> {
 			// never guesses at timing.
 			stream.on("finish", () => responseFinished.resolve());
 			stream.write(execAndTurnEndedFrame());
+			stream.end();
+			return;
+		}
+
+		if (scenario.kind === "exec-then-transport-error") {
+			const { responseFinished } = scenario;
+			stream.on("finish", () => responseFinished.resolve());
+			// The exec request and the failure land in ONE chunk: the handler is
+			// dispatched fire-and-forget and is still running when the transport
+			// rejects. `turnEnded` is deliberately absent — this is the turn dying,
+			// not ending.
+			stream.write(
+				Buffer.concat([execRequestFrame(), connectEndErrorFrame("unavailable", "mid-exec transport failure")]),
+			);
 			stream.end();
 			return;
 		}
@@ -360,6 +382,68 @@ describe("Cursor terminal lifecycle after turnEnded", () => {
 		await gate;
 
 		expect(eventTypes).toContain("done");
+		expect(paired).toEqual(["call-final"]);
+	});
+
+	it("waits for an in-flight exec handler before emitting the transport error", async () => {
+		// Same race as above, but the turn DIES instead of ending: the exec request
+		// and the transport failure arrive in one chunk. The Agent finalizes the
+		// synthesized call from the terminal error and clears its Cursor result
+		// buffer, so a handler still running would land its real result after
+		// `agent_end` and have it discarded — even though the tool may already
+		// have performed side effects. The error must not be pushed first.
+		const responseFinished = Promise.withResolvers<void>();
+		scenario = { kind: "exec-then-transport-error", responseFinished };
+		const baseUrl = await startServer();
+		const paired: string[] = [];
+		const handlerStarted = Promise.withResolvers<void>();
+		const handlerDone = Promise.withResolvers<void>();
+		const stream = streamCursor(makeModel(baseUrl), context, {
+			apiKey: "test-token",
+			execHandlers: {
+				async read() {
+					handlerStarted.resolve();
+					await handlerDone.promise;
+					return {
+						role: "toolResult",
+						toolCallId: "call-final",
+						toolName: "read",
+						content: [{ type: "text", text: "file body" }],
+						isError: false,
+						timestamp: 1,
+					};
+				},
+			},
+			onToolResult: result => {
+				paired.push(result.toolCallId);
+				return result;
+			},
+		});
+
+		const gate = (async () => {
+			await Promise.all([handlerStarted.promise, responseFinished.promise]);
+			await Bun.sleep(0);
+			try {
+				expect(stream.resultSettled).toBe(false);
+				expect(paired).toEqual([]);
+			} finally {
+				handlerDone.resolve();
+			}
+		})();
+
+		const eventTypes: string[] = [];
+		for await (const event of stream) {
+			// The handler's result must already exist by the time the terminal
+			// error is observed — that is the event the Agent drains on.
+			if (event.type === "error") expect(paired).toEqual(["call-final"]);
+			eventTypes.push(event.type);
+		}
+		await gate;
+		const result = await stream.result();
+
+		expect(eventTypes.at(-1)).toBe("error");
+		expect(eventTypes).not.toContain("done");
+		expect(result.errorMessage).toContain("mid-exec transport failure");
 		expect(paired).toEqual(["call-final"]);
 	});
 });
