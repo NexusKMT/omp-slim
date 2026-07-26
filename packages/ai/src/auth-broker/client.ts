@@ -431,7 +431,15 @@ export class AuthBrokerClient {
 					signal,
 				});
 				if (!response.ok && response.status !== 304) {
-					const text = await response.text();
+					let text = "";
+					try {
+						text = await response.text();
+					} catch (cause) {
+						throw new AuthBrokerError(`Auth broker request failed: ${response.status} ${response.statusText}`, {
+							status: response.status,
+							cause,
+						});
+					}
 					throw new AuthBrokerError(`Auth broker request failed: ${response.status} ${response.statusText}`, {
 						status: response.status,
 						body: text,
@@ -442,6 +450,7 @@ export class AuthBrokerClient {
 				lastError = error;
 				// Caller-driven abort wins over retry — the caller said stop.
 				if (opts.signal?.aborted) {
+					if (error instanceof AuthBrokerError && error.status !== undefined) throw error;
 					throw new AuthBrokerError("Auth broker request aborted", { cause: opts.signal.reason });
 				}
 				if (error instanceof AuthBrokerError && error.status !== undefined) {

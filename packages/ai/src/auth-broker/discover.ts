@@ -276,13 +276,14 @@ export async function discoverAuthStorage(options: DiscoverAuthStorageOptions = 
 				signal: cachedSnapshot ? AbortSignal.timeout(SNAPSHOT_CACHE_REVALIDATION_TIMEOUT_MS) : undefined,
 			});
 			if (initialResult.status !== 200)
-				throw new AIError.AuthBrokerError("Auth broker returned no initial snapshot", {
+				throw new AuthBrokerError("Auth broker returned no initial snapshot", {
 					status: initialResult.status,
 				});
 			initialSnapshot = initialResult.snapshot;
 			persist?.(initialSnapshot);
 		} catch (error) {
-			if (!cachedSnapshot || (error instanceof AuthBrokerError && error.status !== undefined)) throw error;
+			if (!cachedSnapshot || (error instanceof AuthBrokerError && [401, 403].includes(error.status ?? 0)))
+				throw error;
 		}
 		const store = new RemoteAuthCredentialStore({
 			client,

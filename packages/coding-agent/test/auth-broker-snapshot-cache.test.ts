@@ -141,6 +141,59 @@ describe("discoverAuthStorage auth-broker snapshot cache", () => {
 		}
 	});
 
+	test("boots from a fresh cache when revalidation returns a server error", async () => {
+		const cachePath = path.join(tempDir, "snapshot.enc");
+		const server = Bun.serve({
+			port: 0,
+			fetch: () => new Response("temporarily unavailable", { status: 503 }),
+		});
+		const url = server.url.toString();
+		let storage: AuthStorage | undefined;
+		try {
+			process.env.OMP_AUTH_BROKER_URL = url;
+			process.env.OMP_AUTH_BROKER_TOKEN = TOKEN;
+			process.env.OMP_AUTH_BROKER_SNAPSHOT_CACHE = cachePath;
+			process.env.OMP_AUTH_BROKER_SNAPSHOT_TTL_MS = "3600000";
+			await writeAuthBrokerSnapshotCache({
+				path: cachePath,
+				token: TOKEN,
+				url,
+				snapshot: makeSnapshot(Date.now()),
+			});
+
+			storage = await discoverAuthStorage(tempDir);
+			expect(await storage.getApiKey(PROVIDER)).toBe("cached-api-key");
+		} finally {
+			storage?.close();
+			server.stop(true);
+		}
+	});
+
+	test("rejects a fresh cache when the broker rejects its bearer token", async () => {
+		const cachePath = path.join(tempDir, "snapshot.enc");
+		const server = Bun.serve({
+			port: 0,
+			fetch: () => new Response("unauthorized", { status: 401 }),
+		});
+		const url = server.url.toString();
+		try {
+			process.env.OMP_AUTH_BROKER_URL = url;
+			process.env.OMP_AUTH_BROKER_TOKEN = TOKEN;
+			process.env.OMP_AUTH_BROKER_SNAPSHOT_CACHE = cachePath;
+			process.env.OMP_AUTH_BROKER_SNAPSHOT_TTL_MS = "3600000";
+			await writeAuthBrokerSnapshotCache({
+				path: cachePath,
+				token: TOKEN,
+				url,
+				snapshot: makeSnapshot(Date.now()),
+			});
+
+			await expect(discoverAuthStorage(tempDir)).rejects.toMatchObject({ status: 401 });
+		} finally {
+			server.stop(true);
+		}
+	});
+
 	test("prefers a reachable broker snapshot over a fresh cached snapshot", async () => {
 		const cachePath = path.join(tempDir, "snapshot.enc");
 		const brokerStore = await SqliteAuthCredentialStore.open(path.join(tempDir, "broker.db"));

@@ -91,6 +91,26 @@ describe("auth-broker wire surface", () => {
 		}
 	});
 
+	test("preserves an HTTP rejection when the caller aborts while reading its body", async () => {
+		const client = new AuthBrokerClient({
+			url: "http://broker.invalid",
+			token,
+			maxRetries: 0,
+			fetchImpl: (async (_input, init) => {
+				const signal = init?.signal;
+				const body = new ReadableStream<Uint8Array>({
+					start(controller) {
+						controller.enqueue(new TextEncoder().encode("forbidden"));
+						signal?.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+					},
+				});
+				return new Response(body, { status: 401 });
+			}) as typeof fetch,
+		});
+
+		await expect(client.fetchSnapshot({ signal: AbortSignal.timeout(10) })).rejects.toMatchObject({ status: 401 });
+	});
+
 	test("GET /v1/snapshot returns generation headers and 304 for unchanged long-poll", async () => {
 		const res = await fetch(`${handle!.url}/v1/snapshot`, {
 			headers: { Authorization: `Bearer ${token}` },
