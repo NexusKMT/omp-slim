@@ -26,28 +26,40 @@ const AWS_DOCUMENTED_OPUS_5_IDS = [
 // `dropUnsupportedBedrockGeoIds` generation policy — rather than the committed
 // `models.json` snapshot. A non-tool model is included to confirm the
 // descriptor's `tool_call` filter still drops it.
+const NO_TOOL_ROW_ID = "anthropic.claude-opus-5-no-tools";
+
 const OPUS_5_MODELS_DEV_FIXTURE = {
 	"amazon-bedrock": {
-		models: Object.fromEntries(
-			[
-				"anthropic.claude-opus-5",
-				"us.anthropic.claude-opus-5",
-				"eu.anthropic.claude-opus-5",
-				"au.anthropic.claude-opus-5",
-				"global.anthropic.claude-opus-5",
-				"jp.anthropic.claude-opus-5",
-			].map(id => [
-				id,
-				{
-					name: "Claude Opus 5",
-					tool_call: true,
-					reasoning: true,
-					limit: { context: 1_000_000, output: 128_000 },
-					cost: { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
-					modalities: { input: ["text", "image"] },
-				},
-			]),
-		),
+		models: {
+			...Object.fromEntries(
+				[
+					"anthropic.claude-opus-5",
+					"us.anthropic.claude-opus-5",
+					"eu.anthropic.claude-opus-5",
+					"au.anthropic.claude-opus-5",
+					"global.anthropic.claude-opus-5",
+					"jp.anthropic.claude-opus-5",
+				].map(id => [
+					id,
+					{
+						name: "Claude Opus 5",
+						tool_call: true,
+						reasoning: true,
+						limit: { context: 1_000_000, output: 128_000 },
+						cost: { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
+						modalities: { input: ["text", "image"] },
+					},
+				]),
+			),
+			[NO_TOOL_ROW_ID]: {
+				name: "Claude Opus 5 (no tools)",
+				tool_call: false,
+				reasoning: true,
+				limit: { context: 1_000_000, output: 128_000 },
+				cost: { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
+				modalities: { input: ["text", "image"] },
+			},
+		},
 	},
 };
 
@@ -57,7 +69,11 @@ describe("Amazon Bedrock Claude Opus 5", () => {
 		// bundled snapshot: the assertion must break if the mapping or policy
 		// stops reproducing the documented IDs, and must not falsely fail when
 		// upstream metadata legitimately shifts.
-		const mapped = mapModelsDevToModels(OPUS_5_MODELS_DEV_FIXTURE, MODELS_DEV_PROVIDER_DESCRIPTORS).filter(
+		const allMapped = mapModelsDevToModels(OPUS_5_MODELS_DEV_FIXTURE, MODELS_DEV_PROVIDER_DESCRIPTORS);
+		// The descriptor's `tool_call !== true` filter must drop the non-tool row
+		// (and never emit a derived `eu.` variant for it) before any policy runs.
+		expect(allMapped.some(model => model.id.includes(NO_TOOL_ROW_ID))).toBe(false);
+		const mapped = allMapped.filter(
 			model => model.provider === "amazon-bedrock" && model.id.endsWith("anthropic.claude-opus-5"),
 		);
 		const opus5Ids = dropUnsupportedBedrockGeoIds(mapped).map(model => model.id);
