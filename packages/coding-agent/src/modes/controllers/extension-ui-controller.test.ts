@@ -108,6 +108,32 @@ describe("ExtensionUiController editor UI", () => {
 		expect(harness.editorContainer.children).toEqual([harness.editor]);
 	});
 
+	it("does not fire editor-slot shortcuts that would orphan the ask dialog (#6738)", () => {
+		const harness = makeHarness();
+		harness.editor.setText("draft in progress");
+		// Simulate an editor-slot shortcut like the Agent Hub binding, whose
+		// handler clears editorContainer and would strand the pending ask.
+		let hubOpened = false;
+		harness.editor.setCustomKeyHandler("ctrl+s", () => {
+			hubOpened = true;
+			harness.editorContainer.clear();
+		});
+		const questions: ExtensionAskDialogQuestion[] = [
+			{ id: "confirm", question: "Continue?", options: [{ label: "Yes" }, { label: "No" }] },
+		];
+
+		harness.controller.showAskDialog(questions);
+		const ask = harness.editorContainer.children[0];
+		expect(ask).toBeInstanceOf(AskDialogComponent);
+
+		// Ctrl+S reaches the draft editor while ask is open; the shortcut must be
+		// swallowed, the draft untouched, and the ask surface preserved.
+		ask?.handleInput?.("\x13");
+		expect(hubOpened).toBe(false);
+		expect(harness.editor.getText()).toBe("draft in progress");
+		expect(harness.editorContainer.children).toEqual([ask, harness.editor]);
+	});
+
 	it("bridges addAutocompleteProvider factories to the interactive mode context (#4919)", async () => {
 		const harness = makeHarness();
 		const ui = await harness.init();

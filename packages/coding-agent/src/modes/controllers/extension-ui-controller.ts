@@ -627,7 +627,7 @@ export class ExtensionUiController {
 				this.ctx.editor.getText().length > 0
 					? {
 							isBlocked: () => this.ctx.editor.getText().length > 0,
-							handleInput: (keyData: string) => this.ctx.editor.handleInput(keyData),
+							handleInput: (keyData: string) => this.ctx.editor.handleDraftEdit(keyData),
 							hint: "Finish or clear the current prompt to answer",
 						}
 					: undefined;

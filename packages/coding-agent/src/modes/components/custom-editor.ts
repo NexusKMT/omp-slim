@@ -974,4 +974,18 @@ export class CustomEditor extends Editor {
 			this.insertText("\n");
 		}
 	}
+
+	/**
+	 * Route a keystroke through the base text-editor pipeline only, skipping the
+	 * app-level shortcut interception in {@link handleInput} (Agent Hub, model
+	 * selector, history search, external editor, …). Used when the editor is
+	 * mounted for draft editing beneath another focused surface — e.g. an Ask
+	 * dialog opened over a non-empty prompt — so finishing or submitting the
+	 * draft can never fire an editor-slot shortcut that clears `editorContainer`
+	 * and orphans the overlay. Only text editing, cursor movement, and
+	 * submission reach the buffer.
+	 */
+	handleDraftEdit(data: string): void {
+		super.handleInput(data);
+	}
 }
