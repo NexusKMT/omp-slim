@@ -2,7 +2,8 @@ import * as nodeCrypto from "node:crypto";
 import * as fs from "node:fs";
 import { scheduler } from "node:timers/promises";
 import * as tls from "node:tls";
-import { isOfficialAnthropicApiUrl } from "@oh-my-pi/pi-catalog/compat/anthropic";
+import { isAnthropicSigningProxyUrl, isOfficialAnthropicApiUrl } from "@oh-my-pi/pi-catalog/compat/anthropic";
+import { isVertexRawPredictUrl } from "@oh-my-pi/pi-catalog/hosts";
 import { mapEffortToAnthropicAdaptiveEffort } from "@oh-my-pi/pi-catalog/model-thinking";
 import { calculateCost, getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { isAnthropicOAuthToken } from "@oh-my-pi/pi-catalog/utils";
@@ -2850,18 +2851,21 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 	} = args;
 	const compat = model.compat;
 	const disableStrictTools = disableStrictToolsOverride ?? compat.disableStrictTools;
+	const baseUrl = resolveAnthropicBaseUrl(model, apiKey);
 	// Adaptive models (`supportsDisplay`) get native interleaved thinking on the
-	// official API, so the beta is only needed on non-official signing proxies
-	// that still validate replayed multi-thinking-block turns against it (#6717).
+	// official API, so only known non-official signing routes need the beta
+	// (#6717). Classify the effective URL: Foundry and provider overrides can
+	// reroute a model without rebuilding its materialized compat.
 	// Vertex rawPredict is excluded like every other HTTP-beta path here: it can
 	// only accept betas in the JSON body (`anthropic_beta`), never as this
 	// `anthropic-beta` HTTP header, so advertising it there earns a 400 (#5614).
 	const needsInterleavedBeta =
 		interleavedThinking &&
 		(!model.thinking?.supportsDisplay ||
-			(compat.signingEndpoint && !compat.officialEndpoint && model.provider !== "google-vertex"));
+			(!isOfficialAnthropicApiUrl(baseUrl) &&
+				isAnthropicSigningProxyUrl(baseUrl) &&
+				!isVertexRawPredictUrl(baseUrl ?? "")));
 	const oauthToken = isOAuth ?? isAnthropicOAuthToken(apiKey);
-	const baseUrl = resolveAnthropicBaseUrl(model, apiKey);
 	const supportsEagerToolInputStreaming = resolveEagerToolInputStreamingSupport(model, baseUrl);
 	const needsFineGrainedToolStreamingBeta =
 		hasTools && isOfficialAnthropicApiUrl(baseUrl) && !supportsEagerToolInputStreaming;
