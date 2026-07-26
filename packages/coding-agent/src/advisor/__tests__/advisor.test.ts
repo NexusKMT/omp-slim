@@ -3938,6 +3938,59 @@ describe("advisor", () => {
 			expect(promptInputs[1]).toContain("bbb");
 		});
 
+		it("notifies the host after the advisor persistently quarantines its output (issue #6661)", async () => {
+			const state: { messages: AgentMessage[]; error?: string } = { messages: [] };
+			let promptCalls = 0;
+			const agent: AdvisorAgent = {
+				prompt: async input => {
+					promptCalls++;
+					state.messages.push({ role: "user", content: input, timestamp: Date.now() } as AgentMessage);
+					state.messages.push({
+						role: "assistant",
+						content: [
+							{ type: "text", text: "The agent skipped the required plan step." },
+							{ type: "toolCall", id: `tc-${promptCalls}`, name: "bash", arguments: { command: "ls" } },
+						],
+						stopReason: "toolUse",
+						timestamp: Date.now(),
+					} as unknown as AgentMessage);
+					throw new AdvisorOutputQuarantinedError("Advisor response quarantined: requested unavailable tool bash");
+				},
+				abort: () => {},
+				reset: () => {
+					state.messages.length = 0;
+					state.error = undefined;
+				},
+				rollbackTo: count => {
+					if (count < state.messages.length) state.messages.length = count;
+					state.error = undefined;
+				},
+				state,
+			};
+			const notifyFailures: string[] = [];
+			const messages: AgentMessage[] = [{ role: "user", content: "aaa", timestamp: 1 } as AgentMessage];
+			const host: AdvisorRuntimeHost = {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+				notifyFailure: err => notifyFailures.push(err instanceof Error ? err.message : String(err)),
+			};
+			const runtime = new AdvisorRuntime(agent, host, 0);
+
+			// Every advisor turn calls an ungranted tool and is quarantined, so its
+			// advice never reaches the primary. A persistently-quarantining advisor is
+			// a supervision failure the user must see in the main UI, not an unbounded
+			// silent re-prime loop.
+			for (let i = 2; i <= 5; i++) {
+				messages.push({ role: "user", content: `msg-${i}`, timestamp: i } as AgentMessage);
+				runtime.onTurnEnd(messages);
+				await settleUntil(() => runtime.backlog === 0);
+			}
+
+			expect(promptCalls).toBeGreaterThanOrEqual(2);
+			expect(notifyFailures.length).toBeGreaterThanOrEqual(1);
+			expect(notifyFailures[0]).toContain("quarantined");
+		});
+
 		it("drops the in-flight batch when a reset aborts the advisor prompt", async () => {
 			const promptInputs: string[] = [];
 			const { promise: firstPromptStarted, resolve: startFirstPrompt } = Promise.withResolvers<void>();

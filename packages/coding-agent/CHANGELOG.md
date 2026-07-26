@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- Fixed the advisor silently swallowing its own quarantined turns: when an advisor called an ungranted tool (e.g. `bash`) its whole turn was discarded before dispatch, so its advice never reached the primary agent and the failure surfaced only in advisor diagnostics — every other non-recovering failure branch notifies the host UI, but quarantine re-primed silently with no bound. A persistently-quarantining advisor now surfaces a `notifyFailure` warning in the main UI (deduped, cleared on the next successful turn) and stops the unbounded silent re-prime loop ([#6661](https://github.com/can1357/oh-my-pi/issues/6661)).
 - Fixed the Docker `natives-builder` stage failing to build releases ≥ 17.1.1: the native audio stack added bindgen (miniaudio needs libclang) and a bundled-opus CMake build (needs cmake + make), none of which were installed in the slim builder image.
 - Fixed `omp usage` duplicating org-less legacy accounts as "no usage data" rows whenever any sibling report carried an organization (mixed pools of pre-org-capture rows and fresh org-scoped logins): an org-less account is now covered by its own org-less report, while org-attributed sibling reports still never count as its coverage.
 - `omp usage` revalidates the broker credential snapshot before rendering: live usage reports were previously paired with a disk-cached account list up to an hour old, so a just-completed re-login (org-less row upserted to org-scoped) rendered as a phantom duplicate until the cache expired.
