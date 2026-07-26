@@ -280,8 +280,10 @@ describe("legacy pi package root remaps (issue #1474)", () => {
 			deleteAll: string;
 			capabilities: { images: "kitty" | "iterm2" | null; trueColor: boolean; hyperlinks: boolean };
 		};
-		expect(loaded.deleteOne).toContain("a=d,d=I,i=42,q=2");
-		expect(loaded.deleteAll).toContain("a=d,d=A,q=2");
+		// Bare sequences, exactly like upstream Pi: legacy callers (pi-sprite)
+		// apply their own tmux passthrough wrapping.
+		expect(loaded.deleteOne).toBe("\x1b_Ga=d,d=I,i=42,q=2\x1b\\");
+		expect(loaded.deleteAll).toBe("\x1b_Ga=d,d=A,q=2\x1b\\");
 		expect(["kitty", "iterm2", null]).toContain(loaded.capabilities.images);
 		expect(typeof loaded.capabilities.trueColor).toBe("boolean");
 		expect(typeof loaded.capabilities.hyperlinks).toBe("boolean");
