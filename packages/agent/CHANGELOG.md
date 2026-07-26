@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed proxy-stream clients dropping finalized provider-only content blocks, including Anthropic native web-search history, by carrying terminal assistant content in `done` and `error` events ([#6703](https://github.com/can1357/oh-my-pi/issues/6703)).
+
 ## [17.1.2] - 2026-07-24
 
 ### Added
