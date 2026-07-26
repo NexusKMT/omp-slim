@@ -29,6 +29,8 @@ const callbackList: ((reason: Reason) => Promise<void> | void)[] = [];
 // Tracks cleanup run state (to prevent recursion/reentry issues)
 let cleanupStage: "idle" | "running" | "complete" = "idle";
 const CLEANUP_DEADLINE_MS = 10_000;
+const exitProcess =
+	typeof process.reallyExit === "function" ? process.reallyExit.bind(process) : process.exit.bind(process);
 let cleanupPromise: Promise<void> | undefined;
 let stdioDisconnectRegistrations = 0;
 
@@ -171,7 +173,7 @@ function formatFatalError(label: string, err: Error): string {
 }
 
 async function exitAfterFatal(label: string, logMessage: string, err: Error, reason: Reason): Promise<void> {
-	const forcedExit = setTimeout(() => process.exit(1), CLEANUP_DEADLINE_MS);
+	const forcedExit = setTimeout(() => exitProcess(1), CLEANUP_DEADLINE_MS);
 	try {
 		restoreTerminalStderr();
 		// A revoked terminal can make stream writes raise another fatal error. Use
@@ -183,7 +185,7 @@ async function exitAfterFatal(label: string, logMessage: string, err: Error, rea
 		await runCleanup(reason);
 	} finally {
 		clearTimeout(forcedExit);
-		process.exit(1);
+		exitProcess(1);
 	}
 }
 
@@ -191,7 +193,7 @@ if (isMainThread) {
 	process
 		.on("SIGINT", async () => {
 			await runCleanup(Reason.SIGINT);
-			process.exit(130); // 128 + SIGINT (2)
+			exitProcess(130); // 128 + SIGINT (2)
 		})
 		.on("SIGUSR1", () => {
 			if (inspectorOpened) return;
@@ -225,7 +227,7 @@ if (isMainThread) {
 			}
 			if (brokenPipeSource === "stdio-write" && stdioDisconnectRegistrations > 0) {
 				logger.warn("Stdio peer disconnected; shutting down gracefully", { err });
-				await quit(0);
+				await runQuit(0, "native");
 				return;
 			}
 			if (isExpectedCleanupError(reason)) {
@@ -248,11 +250,11 @@ if (isMainThread) {
 		})
 		.on("SIGTERM", async () => {
 			await runCleanup(Reason.SIGTERM);
-			process.exit(143); // 128 + SIGTERM (15)
+			exitProcess(143); // 128 + SIGTERM (15)
 		})
 		.on("SIGHUP", async () => {
 			await runCleanup(Reason.SIGHUP);
-			process.exit(129); // 128 + SIGHUP (1)
+			exitProcess(129); // 128 + SIGHUP (1)
 		});
 } else {
 	// Worker thread: only register exit handler for cleanup.
@@ -317,13 +319,7 @@ export function cleanup(): Promise<void> {
 	return runCleanup(Reason.MANUAL);
 }
 
-/**
- * Runs all cleanup callbacks and exits.
- *
- * In main thread: waits for stdout drain, then calls process.exit().
- * In workers: runs cleanup only (process.exit would kill entire process).
- */
-export async function quit(code: number = 0): Promise<void> {
+async function runQuit(code: number, exitMode: "guarded" | "native"): Promise<void> {
 	await runCleanup(Reason.MANUAL);
 
 	if (!isMainThread) {
@@ -335,5 +331,21 @@ export async function quit(code: number = 0): Promise<void> {
 		process.stdout.once("drain", resolve);
 		await Promise.race([promise, Bun.sleep(5000)]);
 	}
-	process.exit(code);
+
+	switch (exitMode) {
+		case "guarded":
+			return process.exit(code);
+		case "native":
+			return exitProcess(code);
+	}
+}
+
+/**
+ * Runs all cleanup callbacks and exits through the current `process.exit`.
+ *
+ * In main thread: waits for stdout drain, then calls `process.exit()`.
+ * In workers: runs cleanup only (process.exit would kill entire process).
+ */
+export function quit(code: number = 0): Promise<void> {
+	return runQuit(code, "guarded");
 }
