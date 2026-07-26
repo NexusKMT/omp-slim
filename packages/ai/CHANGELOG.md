@@ -10,7 +10,7 @@
 
 ### Fixed
 
-- Fixed custom `anthropic-messages` endpoints dropping native web-search call/result blocks in the leaked-thinking wrapper, preserving signed continuation history in source order ([#6703](https://github.com/can1357/oh-my-pi/issues/6703)).
+- Fixed custom `anthropic-messages` endpoints dropping native web-search call/result blocks in the leaked-thinking wrapper, preserving signed continuation history in source order without carrying a preceding text signature onto later unsigned blocks ([#6703](https://github.com/can1357/oh-my-pi/issues/6703)).
 
 ## [17.1.3] - 2026-07-24
 

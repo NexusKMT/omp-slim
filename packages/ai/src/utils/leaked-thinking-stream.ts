@@ -188,14 +188,15 @@ class LeakedThinkingProjector {
 
 	/** Feed a visible-text delta through the healer, splitting leaked fences live. */
 	text(srcIndex: number, delta: string, signature: string | undefined): void {
-		if (this.#activeTextSourceIndex !== undefined && this.#activeTextSourceIndex !== srcIndex) {
+		const startsSource = this.#activeTextSourceIndex !== srcIndex;
+		if (this.#activeTextSourceIndex !== undefined && startsSource) {
 			this.#flushHealer();
 			this.#closeText();
 			this.#closeThinking();
 		}
 		this.#activeTextSourceIndex = srcIndex;
 		this.#fedTextLengths.set(srcIndex, (this.#fedTextLengths.get(srcIndex) ?? 0) + delta.length);
-		if (signature !== undefined) this.#lastTextSignature = signature;
+		if (startsSource || signature !== undefined) this.#lastTextSignature = signature;
 		this.#apply(this.#healer.feedEvents(delta), this.#lastTextSignature, srcIndex);
 	}
 
@@ -354,7 +355,7 @@ class LeakedThinkingProjector {
 				this.#closeThinking();
 			}
 			this.#activeTextSourceIndex = srcIndex;
-			if (block.textSignature !== undefined) this.#lastTextSignature = block.textSignature;
+			this.#lastTextSignature = block.textSignature;
 			this.#apply(this.#healer.feedEvents(block.text.slice(fedLength)), this.#lastTextSignature, srcIndex);
 		}
 		this.#flushHealer();

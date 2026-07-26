@@ -541,6 +541,19 @@ describe("wrapLeakedThinkingStream", () => {
 		]);
 	});
 
+	it("resets terminal text signatures at source block boundaries", async () => {
+		const content: AssistantMessage["content"] = [
+			{ type: "text", text: "signed text", textSignature: "sig-1" },
+			{ type: "text", text: "unsigned text" },
+		];
+		const { result } = await runWrapper(inner => {
+			inner.push({ type: "start", partial: msg() });
+			inner.push({ type: "done", reason: "stop", message: msg({ content }) });
+		});
+
+		expect(result.content).toEqual(content);
+	});
+
 	it("passes clean text through unchanged and forwards native thinking", async () => {
 		const clean = "Just a normal answer.";
 		const cleanRun = await runWrapper(inner => {
