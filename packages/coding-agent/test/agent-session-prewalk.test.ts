@@ -552,4 +552,109 @@ describe("AgentSession prewalk", () => {
 		expect(requested).toEqual([`${primary.provider}/${primary.id}`, `${target.provider}/${target.id}`]);
 		expect(session.model?.id).toBe(target.id);
 	});
+
+	it("effort-only prewalk on the same model downgrades the thinking level instead of silently skipping", async () => {
+		// Regression (#6659): the switch guard compared model identity only, so a
+		// same-model target at a cheaper thinking level (a legitimate effort
+		// downgrade, common with role aliases like `prewalk: "@task"`) was dropped
+		// as a no-op. On a reasoning model the effort is the bulk of the cost, so
+		// this must still switch.
+		const model = modelOrThrow("claude-sonnet-4-5");
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
+		const checklistMarker = "grep for every other call site";
+
+		// todo excluded from the active slate → the gate opens; record then write.
+		const mock = createMockModel({
+			responses: [toolCall("t1", "record"), toolCall("t2", "write"), { content: ["done"] }],
+		});
+		const calls: Array<{ model: string; hasChecklist: boolean }> = [];
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: {
+				model,
+				systemPrompt: ["Test"],
+				tools: [recordTool as AgentTool, writeTool as AgentTool],
+				messages: [],
+				thinkingLevel: Effort.Medium,
+			},
+			convertToLlm,
+			streamFn: (streamModel, context, options) => {
+				calls.push({
+					model: `${streamModel.provider}/${streamModel.id}`,
+					hasChecklist: contextMessagesHaveMarker(context.messages, checklistMarker),
+				});
+				return mock.stream(streamModel, context, options);
+			},
+		});
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated({ "compaction.enabled": false }),
+			modelRegistry,
+			toolRegistry,
+			thinkingLevel: Effort.Medium,
+			prewalk: { target: model, thinkingLevel: Effort.Low },
+		});
+
+		expect(session.thinkingLevel).toBe(Effort.Medium);
+
+		await session.prompt("do the task");
+
+		// The model id never changes, but the effort drops after the first write.
+		expect(session.model?.id).toBe(model.id);
+		expect(session.thinkingLevel).toBe(Effort.Low);
+		// The switch ran: the post-switch checklist is present on the final turn.
+		expect(calls.at(-1)?.hasChecklist).toBe(true);
+	});
+
+	it("emits a notice and skips the checklist when the prewalk target is a genuine no-op", async () => {
+		// Same model AND same effective thinking level: nothing to switch. The
+		// early return must be visible (a notice), not silent, and must not fire
+		// the post-switch checklist.
+		const model = modelOrThrow("claude-sonnet-4-5");
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
+		const checklistMarker = "grep for every other call site";
+
+		const mock = createMockModel({
+			responses: [toolCall("t1", "record"), toolCall("t2", "write"), { content: ["done"] }],
+		});
+		const calls: Array<{ hasChecklist: boolean }> = [];
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: {
+				model,
+				systemPrompt: ["Test"],
+				tools: [recordTool as AgentTool, writeTool as AgentTool],
+				messages: [],
+				thinkingLevel: Effort.Medium,
+			},
+			convertToLlm,
+			streamFn: (streamModel, context, options) => {
+				calls.push({ hasChecklist: contextMessagesHaveMarker(context.messages, checklistMarker) });
+				return mock.stream(streamModel, context, options);
+			},
+		});
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated({ "compaction.enabled": false }),
+			modelRegistry,
+			toolRegistry,
+			thinkingLevel: Effort.Medium,
+			prewalk: { target: model, thinkingLevel: Effort.Medium },
+		});
+		const notices: string[] = [];
+		session.subscribe(event => {
+			if (event.type === "notice" && event.source === "prewalk") notices.push(event.message);
+		});
+
+		await session.prompt("do the task");
+
+		expect(session.model?.id).toBe(model.id);
+		expect(session.thinkingLevel).toBe(Effort.Medium);
+		// The no-op is announced, not silent.
+		expect(notices.some(message => message.includes("nothing to switch"))).toBe(true);
+		// The checklist steer only fires on a real switch.
+		expect(calls.every(call => !call.hasChecklist)).toBe(true);
+	});
 });
