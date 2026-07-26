@@ -853,6 +853,7 @@ export class AgentSession {
 			agent: this.agent,
 			sessionManager: this.sessionManager,
 			model: () => this.model,
+			configuredThinkingLevel: () => this.configuredThinkingLevel(),
 			emitNotice: (level, message, source) => this.emitNotice(level, message, source),
 			setModelTemporary: (model, thinkingLevel, options) => this.setModelTemporary(model, thinkingLevel, options),
 			setActiveToolsByName: names => this.setActiveToolsByName(names),
