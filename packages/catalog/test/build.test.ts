@@ -852,6 +852,94 @@ describe("model cache spec round trip", () => {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
 	});
+	it("retries an empty discovery result after the short interval and caches recovery", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-empty-discovery-"));
+		const dbPath = path.join(tempDir, "models.db");
+		const recoveredModel = completionsSpec({ id: "recovered-model", provider: "empty-discovery-test" });
+		let discoveredModels: readonly ModelSpec<"openai-completions">[] = [];
+		let fetches = 0;
+		let currentTime = 1_000_000;
+		const options = {
+			providerId: "empty-discovery-test",
+			staticModels: [],
+			dynamicModelsAuthoritative: true,
+			cacheDbPath: dbPath,
+			now: () => currentTime,
+			fetchDynamicModels: async () => {
+				fetches++;
+				return discoveredModels;
+			},
+		};
+		try {
+			const empty = await resolveProviderModels(options, "online");
+			expect(empty.models).toEqual([]);
+			// Authoritative for the cycle (drives downstream pruning) yet not pinned
+			// into the cache as authoritative (keeps the short retry interval).
+			expect(empty.stale).toBe(false);
+			expect(fetches).toBe(1);
+
+			const db = new Database(dbPath, { readonly: true });
+			const row = db
+				.query<{ authoritative: number }, [string]>("SELECT authoritative FROM model_cache WHERE provider_id = ?")
+				.get(options.providerId);
+			db.close();
+			expect(row?.authoritative).toBe(0);
+
+			discoveredModels = [recoveredModel];
+			currentTime += 5 * 60 * 1_000 - 1;
+			const beforeRetry = await resolveProviderModels(options, "online-if-uncached");
+			expect(beforeRetry.models).toEqual([]);
+			expect(fetches).toBe(1);
+
+			currentTime++;
+			const recovered = await resolveProviderModels(options, "online-if-uncached");
+			expect(recovered.models.map(model => model.id)).toEqual([recoveredModel.id]);
+			expect(recovered.stale).toBe(false);
+			expect(fetches).toBe(2);
+
+			currentTime++;
+			const cached = await resolveProviderModels(options, "online-if-uncached");
+			expect(cached.models.map(model => model.id)).toEqual([recoveredModel.id]);
+			expect(cached.stale).toBe(false);
+			expect(fetches).toBe(2);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+	it("reports an authoritative catalog emptying as non-stale so removed models prune", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-empty-transition-"));
+		const dbPath = path.join(tempDir, "models.db");
+		const model = completionsSpec({ id: "going-away", provider: "empty-transition-test" });
+		let discoveredModels: readonly ModelSpec<"openai-completions">[] = [model];
+		const options = {
+			providerId: "empty-transition-test",
+			staticModels: [],
+			dynamicModelsAuthoritative: true,
+			cacheDbPath: dbPath,
+			fetchDynamicModels: async () => discoveredModels,
+		};
+		try {
+			const populated = await resolveProviderModels(options, "online");
+			expect(populated.models.map(candidate => candidate.id)).toEqual([model.id]);
+			expect(populated.stale).toBe(false);
+
+			discoveredModels = [];
+			const emptied = await resolveProviderModels(options, "online");
+			expect(emptied.models).toEqual([]);
+			// The successful empty fetch must stay authoritative so ModelRegistry
+			// prunes the removed model instead of leaving it selectable forever.
+			expect(emptied.stale).toBe(false);
+
+			const db = new Database(dbPath, { readonly: true });
+			const row = db
+				.query<{ authoritative: number }, [string]>("SELECT authoritative FROM model_cache WHERE provider_id = ?")
+				.get(options.providerId);
+			db.close();
+			expect(row?.authoritative).toBe(0);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
 	it("restores static model headers on fresh cache reads", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-static-headers-"));
 		const dbPath = path.join(tempDir, "models.db");

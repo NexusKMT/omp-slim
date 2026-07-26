@@ -6,6 +6,7 @@
 
 - Fixed `alibaba-token-plan` locking out China (Beijing) 百炼 Token Plan subscribers: the provider hardcoded the international Singapore endpoint, so Beijing-issued `sk-sp-` keys got `401 invalid_api_key`. The wire credential now carries an optional region base URL, and model discovery targets the credential's region ([#6682](https://github.com/can1357/oh-my-pi/issues/6682)).
 - Fixed forced `tool_choice` 400s (`tool_choice 'specified' is incompatible with thinking enabled`) on Kimi Code's Anthropic-compatible endpoint for the `kimi-for-coding`, `kimi-for-coding-highspeed`, and `k3` aliases: the Anthropic-surface compat matcher only recognised Moonshot's native `kimi-k2.7-code*` ids, so thinking-locked kimi-code models kept `supportsForcedToolChoice: true` and the forced selector was sent to a host that always thinks. These models now resolve `requiresThinkingEnabled`, keeping thinking on and downgrading forced choices to `auto`.
+- Retried empty successful provider discovery responses after the short non-authoritative interval instead of caching them for the full catalog TTL ([#6620](https://github.com/can1357/oh-my-pi/issues/6620)).
 
 ## [17.1.3] - 2026-07-24
 
