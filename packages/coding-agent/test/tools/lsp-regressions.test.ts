@@ -3089,7 +3089,7 @@ describe("lsp regressions", () => {
 				cwd: "/tmp",
 				config: { command: "fake-lsp-write-epipe", fileTypes: ["ts"], rootMarkers: [] },
 				proc: {
-					exited: new Promise<number>(() => {}),
+					exited: Promise.withResolvers<number>().promise,
 					exitCode: null,
 					stdin: {
 						write: () => Promise.reject(epipe),
