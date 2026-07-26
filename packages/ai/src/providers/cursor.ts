@@ -137,6 +137,7 @@ import type {
 } from "../types";
 import { normalizeSystemPrompts } from "../utils";
 import {
+	type CursorExecResolvedCarrier,
 	clearStreamingPartialJson,
 	kCursorExecResolved,
 	kStreamingBlockIndex,
@@ -741,7 +742,7 @@ export interface BlockState {
 	currentTextBlock: (TextContent & { [kStreamingBlockIndex]: number }) | null;
 	currentThinkingBlock: (ThinkingContent & { [kStreamingBlockIndex]: number }) | null;
 	currentToolCall: ToolCallState | null;
-	/** MCP call IDs executed through Cursor's exec channel before their stream block arrives. */
+	/** MCP call IDs synthesized from exec frames before their redundant streamed block arrives. */
 	resolvedMcpToolCallIds: Set<string>;
 	firstTokenTime: number | undefined;
 	setTextBlock: (b: (TextContent & { [kStreamingBlockIndex]: number }) | null) => void;
@@ -756,6 +757,10 @@ export interface BlockState {
 	 * matching result and every transcript rebuild strips it as dangling.
 	 */
 	onToolResult?: CursorToolResultHandler;
+}
+
+function markCursorExecResolved(block: CursorExecResolvedCarrier): void {
+	block[kCursorExecResolved] = true;
 }
 
 export interface UsageState {
@@ -1412,9 +1417,20 @@ async function handleExecServerMessage(
 			const args = execMsg.message.value;
 			const mcpCall = decodeMcpCall(args);
 			if (execHandlers?.mcp) {
-				if (state.currentToolCall?.id === mcpCall.toolCallId) {
-					state.currentToolCall[kCursorExecResolved] = true;
+				const existingBlock = output.content.find(
+					block => block.type === "toolCall" && block.id === mcpCall.toolCallId,
+				);
+				if (existingBlock) {
+					markCursorExecResolved(existingBlock);
 				} else {
+					synthesizeCursorExecToolCall(
+						output,
+						stream,
+						state,
+						mcpCall.toolCallId,
+						mcpCall.toolName || mcpCall.name,
+						mcpCall.args,
+					);
 					state.resolvedMcpToolCallIds.add(mcpCall.toolCallId);
 				}
 			}
@@ -2577,14 +2593,14 @@ function endCurrentThinkingBlock(
 
 /**
  * Synthesize a completed `toolCall` content block for a Cursor exec-channel
- * native tool (`shell`, `read`, `write`, `grep`, `ls`, `delete`, `diagnostics`).
+ * native tool (`shell`, `read`, `write`, `grep`, `ls`, `delete`, `diagnostics`)
+ * or for an MCP exec frame whose corresponding interaction block is absent.
  *
  * Args arrive complete on the exec message, so the block opens and closes in
  * one step — no partial-JSON streaming path. Without this the persisted
  * assistant message carries only text/thinking blocks, and on replay the
  * following `toolResult` messages have no matching `toolCall.id` in
- * `renderSessionContext`, so they render as header-less `⎿` lines beneath the
- * last text block instead of proper tool components (issue #4348).
+ * `renderSessionContext`, so they render beneath the final answer or disappear.
  *
  * The block is stamped with {@link kCursorExecResolved} so the shared
  * `agent-loop.ts` execution pass skips it — Cursor's server-driven exec
@@ -2674,6 +2690,10 @@ export function processInteractionUpdate(
 			if (mcpCall) {
 				const args = mcpCall.args || {};
 				const id = args.toolCallId || crypto.randomUUID();
+				const resolvedByExec = state.resolvedMcpToolCallIds.delete(id);
+				if (resolvedByExec && output.content.some(block => block.type === "toolCall" && block.id === id)) {
+					return;
+				}
 				const block: ToolCallState = {
 					type: "toolCall",
 					id,
@@ -2686,8 +2706,8 @@ export function processInteractionUpdate(
 					[kStreamingPartialJson]: "",
 					[kStreamingBlockKind]: "mcp",
 				};
-				if (state.resolvedMcpToolCallIds.delete(id)) {
-					block[kCursorExecResolved] = true;
+				if (resolvedByExec) {
+					markCursorExecResolved(block);
 				}
 				output.content.push(block);
 				state.setToolCall(block);
