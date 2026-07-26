@@ -369,6 +369,8 @@ export class Agent {
 	#transformProviderContext?: (context: Context, model: Model) => Context | Promise<Context>;
 	#steeringQueue: AgentMessage[] = [];
 	#followUpQueue: AgentMessage[] = [];
+	#steeringWaiters = new Set<() => void>();
+
 	#steeringMode: "all" | "one-at-a-time";
 	#followUpMode: "all" | "one-at-a-time";
 	#interruptMode: "immediate" | "wait";
@@ -413,6 +415,7 @@ export class Agent {
 	#onAssistantMessageEvent?: (message: AssistantMessage, event: AssistantMessageEvent) => void;
 	#onHarmonyLeak?: (event: HarmonyAuditEvent) => void | Promise<void>;
 	#onBeforeYield?: () => Promise<void> | void;
+	#beforeSteeringPoll?: () => Promise<void> | void;
 	#onTurnEnd?: (messages: AgentMessage[], signal?: AbortSignal, context?: AgentTurnEndContext) => Promise<void> | void;
 	#asideMessageProvider?: () => AsideMessage[] | Promise<AsideMessage[]>;
 	#telemetry?: AgentLoopConfig["telemetry"];
@@ -793,6 +796,10 @@ export class Agent {
 	setOnBeforeYield(fn: (() => Promise<void> | void) | undefined): void {
 		this.#onBeforeYield = fn;
 	}
+
+	setBeforeSteeringPoll(fn: (() => Promise<void> | void) | undefined): void {
+		this.#beforeSteeringPoll = fn;
+	}
 	setOnTurnEnd(
 		fn:
 			| ((messages: AgentMessage[], signal?: AbortSignal, context?: AgentTurnEndContext) => Promise<void> | void)
@@ -885,6 +892,7 @@ export class Agent {
 	replaceQueues(steering: AgentMessage[], followUp: AgentMessage[]) {
 		this.#steeringQueue = steering.slice();
 		this.#followUpQueue = followUp.slice();
+		this.#notifySteeringWaiters();
 	}
 
 	appendMessage(m: AgentMessage) {
@@ -905,6 +913,7 @@ export class Agent {
 	 */
 	steer(m: AgentMessage) {
 		this.#steeringQueue.push(m);
+		this.#notifySteeringWaiters();
 	}
 
 	/**
@@ -917,6 +926,7 @@ export class Agent {
 
 	clearSteeringQueue() {
 		this.#steeringQueue = [];
+		this.#notifySteeringWaiters();
 	}
 
 	clearFollowUpQueue() {
@@ -926,6 +936,7 @@ export class Agent {
 	clearAllQueues() {
 		this.#steeringQueue = [];
 		this.#followUpQueue = [];
+		this.#notifySteeringWaiters();
 	}
 
 	hasQueuedMessages(): boolean {
@@ -1006,6 +1017,29 @@ export class Agent {
 		return this.#runningPrompt ?? Promise.resolve();
 	}
 
+	/**
+	 * Wait for a steering message without consuming the steering queue.
+	 *
+	 * The signal releases the waiter when the prompt ends, so an in-flight
+	 * tool watcher never survives the tool batch that owns it.
+	 */
+	#waitForSteeringMessages(signal?: AbortSignal): Promise<void> {
+		if (this.#steeringQueue.length > 0 || signal?.aborted) return Promise.resolve();
+		const { promise, resolve } = Promise.withResolvers<void>();
+		const onAbort = (): void => resolve();
+		this.#steeringWaiters.add(resolve);
+		signal?.addEventListener("abort", onAbort, { once: true });
+		return promise.finally(() => {
+			this.#steeringWaiters.delete(resolve);
+			signal?.removeEventListener("abort", onAbort);
+		});
+	}
+
+	#notifySteeringWaiters(): void {
+		const waiters = [...this.#steeringWaiters];
+		for (const resolve of waiters) resolve();
+	}
+
 	reset() {
 		this.#state.messages.length = 0;
 		this.#state.isStreaming = false;
@@ -1014,6 +1048,7 @@ export class Agent {
 		this.#state.error = undefined;
 		this.#steeringQueue = [];
 		this.#followUpQueue = [];
+		this.#notifySteeringWaiters();
 	}
 
 	/** Send a prompt with an AgentMessage */
@@ -1267,9 +1302,11 @@ export class Agent {
 					skipInitialSteeringPoll = false;
 					return [];
 				}
+				await this.#beforeSteeringPoll?.();
 				return this.#dequeueSteeringMessages();
 			},
-			hasSteeringMessages: () => {
+			hasSteeringMessages: async () => {
+				await this.#beforeSteeringPoll?.();
 				if (this.#steeringQueue.length === 0) {
 					return { queued: false };
 				}
@@ -1282,6 +1319,7 @@ export class Agent {
 				}
 				return { queued: true, source: "system" };
 			},
+			waitForSteeringMessages: signal => this.#waitForSteeringMessages(signal),
 			hasIrcInterrupts: this.hasIrcInterrupts,
 			getFollowUpMessages: async () => this.#dequeueFollowUpMessages(),
 			getAsideMessages: async () => (await this.#asideMessageProvider?.()) ?? [],
