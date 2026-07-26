@@ -1570,13 +1570,39 @@ export async function resolveExecHandler<TArgs, TResult>(
  * successful call would show the user a green entry for a call Cursor was told
  * failed. The variant's own `error`/`reason` text is the same string the server
  * receives, so it is reused verbatim as the transcript body.
+ *
+ * MCP is the one shape where `success` is not enough: `McpSuccess.is_error`
+ * carries an application-level tool failure inside the success variant
+ * (`agent.proto:2058`), mirroring the MCP spec's own `isError`. The transport
+ * succeeded, the tool did not — so the entry must be a failure, and its text
+ * comes from the payload's own content rather than a placeholder.
  */
 function describeExecResult(execResult: unknown): [text: string, isError: boolean] {
 	const result = (execResult as { result?: { case?: string; value?: unknown } } | null)?.result;
 	const variant = result?.case;
-	if (!variant || variant === "success") return ["Tool produced no transcript result", false];
+	if (variant === "success") {
+		const success = result?.value as { isError?: boolean; content?: unknown[] } | undefined;
+		if (!success?.isError) return ["Tool produced no transcript result", false];
+		return [mcpContentToText(success.content) || "MCP tool reported an error", true];
+	}
+	if (!variant) return ["Tool produced no transcript result", false];
 	const value = result?.value as { error?: string; reason?: string } | undefined;
 	return [value?.error || value?.reason || `Tool call ${variant}`, true];
+}
+
+/**
+ * Flatten `McpSuccess.content` into transcript text. Image items carry no text
+ * to surface, so only the text variant contributes; an all-image failure falls
+ * back to the caller's generic message.
+ */
+function mcpContentToText(content: unknown[] | undefined): string {
+	if (!Array.isArray(content)) return "";
+	const parts: string[] = [];
+	for (const item of content) {
+		const inner = (item as { content?: { case?: string; value?: { text?: string } } } | null)?.content;
+		if (inner?.case === "text" && inner.value?.text) parts.push(inner.value.text);
+	}
+	return parts.join("\n");
 }
 
 function splitExecHandlerResult<TResult>(result: CursorExecHandlerResult<TResult>): {

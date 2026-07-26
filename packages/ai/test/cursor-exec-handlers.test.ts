@@ -16,12 +16,16 @@ import type { AssistantMessage, Context, CursorExecHandlers, Model, ToolResultMe
 import { kCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import type { ReadResult } from "@oh-my-pi/pi-catalog/discovery/cursor-gen/agent_pb";
+import type { McpResult, ReadResult } from "@oh-my-pi/pi-catalog/discovery/cursor-gen/agent_pb";
 import {
 	type AgentRunRequest,
 	AgentServerMessageSchema,
 	ExecServerMessageSchema,
 	McpArgsSchema,
+	McpResultSchema,
+	McpSuccessSchema,
+	McpTextContentSchema,
+	McpToolResultContentItemSchema,
 	ReadArgsSchema,
 	ReadErrorSchema,
 	ReadRejectedSchema,
@@ -325,6 +329,67 @@ describe("Cursor resolveExecHandler execHandlers binding", () => {
 				content: [{ type: "text", text: "Tool produced no transcript result" }],
 				isError: false,
 			});
+		});
+
+		it("records an MCP success carrying is_error as a failed call", async () => {
+			// MCP is the one shape where `success` is not enough: an application-level
+			// tool failure rides inside the success variant as `is_error`, mirroring
+			// the MCP spec. Cursor sees a failed tool, so the transcript must too.
+			const mcpFailure = create(McpResultSchema, {
+				result: {
+					case: "success",
+					value: create(McpSuccessSchema, {
+						content: [
+							create(McpToolResultContentItemSchema, {
+								content: { case: "text", value: create(McpTextContentSchema, { text: "upstream 503" }) },
+							}),
+						],
+						isError: true,
+					}),
+				},
+			});
+			const { toolResult } = await resolveExecHandler<{ name: string }, McpResult>(
+				{ name: "mcp__fixture" },
+				async () => mcpFailure,
+				undefined,
+				() => mcpFailure,
+				() => mcpFailure,
+				() => mcpFailure,
+				{ toolCallId: "exec-1", toolName: "mcp__fixture" },
+			);
+
+			// The payload's own content is the failure text — not a placeholder.
+			expect(toolResult).toMatchObject({
+				content: [{ type: "text", text: "upstream 503" }],
+				isError: true,
+			});
+		});
+
+		it("keeps an MCP success without is_error successful", async () => {
+			const mcpOk = create(McpResultSchema, {
+				result: {
+					case: "success",
+					value: create(McpSuccessSchema, {
+						content: [
+							create(McpToolResultContentItemSchema, {
+								content: { case: "text", value: create(McpTextContentSchema, { text: "all good" }) },
+							}),
+						],
+						isError: false,
+					}),
+				},
+			});
+			const { toolResult } = await resolveExecHandler<{ name: string }, McpResult>(
+				{ name: "mcp__fixture" },
+				async () => mcpOk,
+				undefined,
+				() => mcpOk,
+				() => mcpOk,
+				() => mcpOk,
+				{ toolCallId: "exec-1", toolName: "mcp__fixture" },
+			);
+
+			expect(toolResult).toMatchObject({ isError: false });
 		});
 
 		it("routes a synthesized result through onToolResult, like a real one", async () => {
