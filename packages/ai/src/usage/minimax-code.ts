@@ -14,6 +14,7 @@ const INTL_BASE_URL = "https://api.minimax.io";
 const REMAINS_PATH = "/v1/token_plan/remains";
 const HOUR_MS = 60 * 60 * 1000;
 /** `current_*_status` enum reported per window: 1 normal, 2 exhausted, 3 unlimited. */
+const STATUS_EXHAUSTED = 2;
 const STATUS_UNLIMITED = 3;
 /**
  * The plan-wide token quota every chat model draws from. It is a quota category,
@@ -126,11 +127,14 @@ function buildLimit(args: {
 	durationMs?: number;
 	resetsAt?: number;
 	usedFraction: number | undefined;
+	windowStatus?: number;
 	usageCount?: number;
 	totalCount?: number;
 	accountId?: string;
 }): UsageLimit | undefined {
-	const { usedFraction } = args;
+	// The endpoint's own status outranks the percentage: an exhausted window may
+	// omit it, or keep a stale one that would otherwise render as healthy quota.
+	const usedFraction = args.windowStatus === STATUS_EXHAUSTED ? 1 : args.usedFraction;
 	if (usedFraction === undefined) return undefined;
 	const totalCount = args.totalCount;
 	return {
@@ -181,6 +185,7 @@ function buildBucketLimits(provider: string, bucket: TokenPlanBucket, accountId:
 			durationMs: intervalDuration,
 			resetsAt: bucket.intervalEnd,
 			usedFraction: usedFractionFromRemainingPercent(bucket.intervalRemainingPercent),
+			windowStatus: bucket.intervalStatus,
 			usageCount: bucket.intervalUsageCount,
 			totalCount: bucket.intervalTotalCount,
 			accountId,
@@ -193,6 +198,7 @@ function buildBucketLimits(provider: string, bucket: TokenPlanBucket, accountId:
 			durationMs: weeklyDuration,
 			resetsAt: bucket.weeklyEnd,
 			usedFraction: usedFractionFromRemainingPercent(bucket.weeklyRemainingPercent),
+			windowStatus: bucket.weeklyStatus,
 			usageCount: bucket.weeklyUsageCount,
 			totalCount: bucket.weeklyTotalCount,
 			accountId,

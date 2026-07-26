@@ -249,6 +249,26 @@ describe("MiniMax Token Plan usage", () => {
 		expect(await minimaxCodeUsageProvider.fetchUsage(params("minimax-code"), { fetch: fetchMock })).toBeNull();
 	});
 
+	test("reports a window the endpoint marks exhausted, percentage or not", async () => {
+		const noPercentage: RemainsBucket = {
+			...generalBucket(),
+			current_interval_status: 2,
+			current_interval_remaining_percent: undefined,
+		};
+		const stalePercentage: RemainsBucket = { ...generalBucket(), current_interval_status: 2 };
+
+		for (const bucket of [noPercentage, stalePercentage]) {
+			const fetchMock: FetchImpl = () => Promise.resolve(Response.json(payloadOf(bucket)));
+
+			const report = await minimaxCodeUsageProvider.fetchUsage(params("minimax-code"), { fetch: fetchMock });
+
+			const interval = report?.limits.find(limit => limit.id === "general:4h");
+			expect(interval?.status).toBe("exhausted");
+			expect(interval?.amount).toMatchObject({ usedFraction: 1, remainingFraction: 0 });
+			expect(report?.limits.find(limit => limit.id === "general:7d")?.status).toBe("ok");
+		}
+	});
+
 	test("keeps a model that is not in the plan out of the reported quota", async () => {
 		const fetchMock: FetchImpl = () =>
 			Promise.resolve(Response.json(payloadOf(generalBucket(), notInPlanBucket("video"))));
