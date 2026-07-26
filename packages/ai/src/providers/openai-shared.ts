@@ -272,6 +272,7 @@ export function resolveOpenAIRequestSetup(
 		const credential = parseAlibabaTokenPlanCredential(rawApiKey);
 		if (!credential) throw new AIError.ConfigurationError("Invalid QwenCloud Token Plan credential");
 		apiKey = credential.token;
+		if (credential.baseUrl) baseUrl = credential.baseUrl;
 	}
 
 	if (options.alibabaCodingPlanAuth && model.provider === "alibaba-coding-plan") {
