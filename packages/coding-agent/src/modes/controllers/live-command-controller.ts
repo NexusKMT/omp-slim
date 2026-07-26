@@ -103,6 +103,7 @@ export class LiveCommandController {
 		session = new LiveSessionController({
 			session: this.#ctx.session,
 			extractAssistantText: message => this.#ctx.extractAssistantText(message),
+			voice: this.#ctx.settings.get("live.voice"),
 			callbacks: {
 				onPhase: phase => {
 					if (this.#visualizer !== visualizer) return;

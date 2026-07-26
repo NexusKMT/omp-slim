@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added a selectable voice setting for `/live` realtime sessions ([#6566](https://github.com/can1357/oh-my-pi/issues/6566)).
+
 ## [17.1.3] - 2026-07-24
 
 ### Fixed
