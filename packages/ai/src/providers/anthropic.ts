@@ -85,7 +85,14 @@ import {
 	type RawMessageStreamEvent,
 	type TextBlockParam,
 } from "./anthropic-wire";
-import { claudeCodeVersion } from "./claude-code-version";
+import {
+	CLAUDE_CODE_MAX_OUTPUT_TOKENS,
+	claudeAgentSdkVersion,
+	claudeClientVersion,
+	claudeCodeSystemInstruction,
+	claudeCodeVersion,
+	claudeToolPrefix,
+} from "./claude-code-fingerprint";
 import {
 	buildCopilotDynamicHeaders,
 	hasCopilotVisionInput,
@@ -481,17 +488,9 @@ function getCacheControl(
 	};
 }
 
-// Stealth mode: mimic Claude Code's request fingerprint.
-// `claudeCodeVersion` is imported from "./claude-code-version" (leaf module) to
-// avoid a circular import with registry/oauth/anthropic.ts; see that file for detail.
-export const claudeAgentSdkVersion = "0.3.165";
-export const claudeClientVersion = "1.11187.4";
-export const claudeToolPrefix: string = "_";
-export const claudeCodeSystemInstruction = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
-// Claude Code caps requested output at 64k tokens even when the model ceiling is
-// higher (e.g. Opus 4.8 supports 128k); OAuth requests clamp to match the wire
-// fingerprint. API-key requests keep the full model ceiling.
-export const CLAUDE_CODE_MAX_OUTPUT_TOKENS = 64000;
+// Stealth mode: mimic Claude Code's request fingerprint. Constants live in the
+// leaf module so registry/usage consumers avoid an init cycle through this file.
+export * from "./claude-code-fingerprint";
 
 export function mapStainlessOs(platform: string): "MacOS" | "Windows" | "Linux" | "FreeBSD" | `Other::${string}` {
 	switch (platform.toLowerCase()) {
