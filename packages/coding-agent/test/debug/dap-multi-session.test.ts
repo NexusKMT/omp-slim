@@ -210,6 +210,9 @@ describe("DAP multi-session debugging", () => {
 				__pendingTargetId: "attached-child",
 			},
 			"attach",
+			true,
+			// Threadless launcher: answers `threads` with an empty list.
+			{ threads: [] },
 		);
 		const child = new FakeDapClient(undefined, "launch", false);
 		spyOn(DapClient, "spawn").mockResolvedValue(root as unknown as DapClient);
@@ -223,8 +226,8 @@ describe("DAP multi-session debugging", () => {
 		expect(active?.parentSessionId).toBeDefined();
 		expect(threads.threads).toEqual([{ id: 7, name: "target.js" }]);
 		expect(child.requests.filter(request => request.command === "threads")).toHaveLength(1);
-		// The root is queried too (no topology guess); here it just echoes the
-		// same thread, which dedupes away.
+		// The root is queried too (no topology guess), but being threadless it
+		// contributes nothing.
 		expect(root.requests.filter(request => request.command === "threads")).toHaveLength(1);
 
 		await manager.terminate(undefined, 100);
@@ -325,6 +328,48 @@ describe("DAP multi-session debugging", () => {
 		);
 		// The launcher is still queried, but being threadless it contributes none.
 		expect(root.requests.filter(request => request.command === "threads")).toHaveLength(1);
+
+		await manager.terminate(undefined, 1_000);
+	});
+
+	it("preserves per-session threads that share an id and name across children", async () => {
+		const root = new FakeDapClient(
+			{ name: "pool.mjs", type: "pwa-node", __pendingTargetId: "main", program: "/tmp/pool.mjs" },
+			"launch",
+			true,
+			{ threads: [] },
+		);
+		// Two identical worker scripts each expose the same session-local thread
+		// id and name; DAP scopes ids per session, so both are distinct threads.
+		const main = new FakeDapClient(undefined, "launch", true, {
+			threads: [{ id: 1, name: "worker.js" }],
+			stopThreadId: 1,
+		});
+		const worker = new FakeDapClient(undefined, "launch", false, {
+			threads: [{ id: 1, name: "worker.js" }],
+		});
+		const children = [main, worker];
+		spyOn(DapClient, "spawn").mockResolvedValue(root as unknown as DapClient);
+		spyOn(DapClient, "connect").mockImplementation(async () => {
+			const next = children.shift();
+			if (!next) throw new Error("Unexpected child DAP connection");
+			return next as unknown as DapClient;
+		});
+		const manager = new DapSessionManager();
+
+		await manager.launch({ adapter: TEST_ADAPTER, program: "/tmp/pool.mjs", cwd: "/tmp" }, undefined, 1_000);
+		await root.triggerReverse("startDebugging", {
+			request: "launch",
+			configuration: { name: "worker #2", type: "pwa-node" },
+		});
+		expect(manager.listSessions()).toHaveLength(3);
+
+		const threads = await manager.threads(undefined, 1_000);
+		// Both identical threads survive aggregation \u2014 not collapsed into one.
+		expect(threads.threads).toEqual([
+			{ id: 1, name: "worker.js" },
+			{ id: 1, name: "worker.js" },
+		]);
 
 		await manager.terminate(undefined, 1_000);
 	});

@@ -989,8 +989,12 @@ export class DapSessionManager {
 				continue;
 			}
 			target.threads = threads;
+			// DAP thread IDs are scoped per client session, so identical IDs from
+			// different sessions (e.g. two identical worker scripts) are distinct
+			// live threads and MUST be preserved; only collapse an exact repeat
+			// within a single session's response.
 			for (const thread of threads) {
-				const key = `${thread.id}\0${thread.name}`;
+				const key = `${target.id}\0${thread.id}`;
 				if (seen.has(key)) continue;
 				seen.add(key);
 				merged.push(thread);
