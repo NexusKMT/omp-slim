@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentTool, AgentToolContext } from "@oh-my-pi/pi-agent-core";
 import type { Api, ComputerAction, ComputerToolCallMetadata, Model } from "@oh-my-pi/pi-ai";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import { ExtensionToolWrapper } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
@@ -212,13 +213,14 @@ class SmokeWorker implements ComputerWorkerHandle {
 	}
 }
 
-function toolSession(settings: Settings): ToolSession {
+function toolSession(settings: Settings, model?: Model<Api>): ToolSession {
 	return {
 		cwd: ".",
 		hasUI: false,
 		settings,
 		getSessionFile: () => null,
 		getSessionSpawns: () => null,
+		getActiveModel: () => model,
 	} as ToolSession;
 }
 
@@ -535,17 +537,143 @@ describe("computer tool", () => {
 		await tool.close();
 	});
 
+	it("preserves smaller configured capture limits for Claude-family transports", async () => {
+		const settings = Settings.isolated({
+			"computer.enabled": true,
+			"computer.maxWidth": 960,
+			"computer.maxHeight": 640,
+		});
+		const model = { id: "claude-sonnet-4-6", api: "openai-completions" } as unknown as Model<Api>;
+		let receivedOptions: DesktopSessionOptions | undefined;
+		const tool = new ComputerTool(toolSession(settings, model), options => {
+			receivedOptions = options;
+			return new FakeController();
+		});
+
+		expect(receivedOptions).toMatchObject({ maxWidth: 960, maxHeight: 640 });
+		await tool.close();
+	});
+
+	it("caps Claude-family captures without changing the public defaults", async () => {
+		const settings = Settings.isolated({ "computer.enabled": true });
+		const model = { id: "claude-opus-4-8", api: "openai-completions" } as unknown as Model<Api>;
+		let receivedOptions: DesktopSessionOptions | undefined;
+		const tool = new ComputerTool(toolSession(settings, model), options => {
+			receivedOptions = options;
+			return new FakeController();
+		});
+
+		expect(settings.get("computer.maxWidth")).toBe(1920);
+		expect(settings.get("computer.maxHeight")).toBe(1200);
+		expect(receivedOptions).toMatchObject({ maxWidth: 1280, maxHeight: 896 });
+		await tool.close();
+	});
+
+	it("caps Copilot GPT-5 Responses captures when original image detail is unavailable", async () => {
+		const settings = Settings.isolated({ "computer.enabled": true });
+		const model = buildModel({
+			id: "gpt-5.5",
+			name: "GPT-5.5",
+			api: "openai-responses",
+			provider: "github-copilot",
+			baseUrl: "https://api.githubcopilot.com",
+			reasoning: true,
+			input: ["text", "image"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128_000,
+			maxTokens: 32_000,
+		});
+		let receivedOptions: DesktopSessionOptions | undefined;
+		const tool = new ComputerTool(toolSession(settings, model), options => {
+			receivedOptions = options;
+			return new FakeController();
+		});
+
+		expect(settings.get("computer.maxWidth")).toBe(1920);
+		expect(settings.get("computer.maxHeight")).toBe(1200);
+		expect(receivedOptions).toMatchObject({ maxWidth: 1280, maxHeight: 896 });
+		await tool.close();
+	});
+
+	it("recognizes Claude aliases without classifying every Anthropic-API model as Claude", async () => {
+		const settings = Settings.isolated({ "computer.enabled": true });
+		const claudeModels = [
+			{ id: "anthropic/claude-sonnet-4-6" },
+			{ id: "us.anthropic.claude-haiku-4-5-20251001-v1:0" },
+			{ id: "local-alias", requestModelId: "claude-opus-4-8" },
+			{ id: "claude-opus-4-8", requestModelId: "upstream-alias" },
+			{ id: "opaque-proxy-alias", name: "Claude Sonnet 4.6" },
+		] as unknown as Model<Api>[];
+		for (const model of claudeModels) {
+			let receivedOptions: DesktopSessionOptions | undefined;
+			const tool = new ComputerTool(toolSession(settings, model), options => {
+				receivedOptions = options;
+				return new FakeController();
+			});
+			expect(receivedOptions).toMatchObject({ maxWidth: 1280, maxHeight: 896 });
+			await tool.close();
+		}
+
+		for (const model of [{ id: "MiniMax-M2.5", api: "anthropic-messages" }, undefined] as Array<
+			Model<Api> | undefined
+		>) {
+			let receivedOptions: DesktopSessionOptions | undefined;
+			const tool = new ComputerTool(toolSession(settings, model), options => {
+				receivedOptions = options;
+				return new FakeController();
+			});
+			expect(receivedOptions).toMatchObject({ maxWidth: 1920, maxHeight: 1200 });
+			await tool.close();
+		}
+	});
+
+	it("recreates the controller when model switches cross the Claude sizing boundary", async () => {
+		const settings = Settings.isolated({ "computer.enabled": true });
+		const gpt = { id: "gpt-5.6", api: "openai-responses" } as unknown as Model<Api>;
+		const claude = { id: "claude-sonnet-4-6", api: "openai-completions" } as unknown as Model<Api>;
+		let activeModel = gpt;
+		const session = toolSession(settings);
+		session.getActiveModel = () => activeModel;
+		const receivedOptions: DesktopSessionOptions[] = [];
+		const controllers: FakeController[] = [];
+		const tool = new ComputerTool(session, options => {
+			receivedOptions.push(options);
+			const controller = new FakeController();
+			controllers.push(controller);
+			return controller;
+		});
+
+		activeModel = claude;
+		await tool.execute("call", { actions: [{ type: "screenshot" }] });
+		activeModel = gpt;
+		await tool.execute("call", { actions: [{ type: "screenshot" }] });
+
+		expect(receivedOptions.map(options => [options.maxWidth, options.maxHeight])).toEqual([
+			[1920, 1200],
+			[1280, 896],
+			[1920, 1200],
+		]);
+		expect(controllers.map(controller => controller.closeCount)).toEqual([1, 1, 0]);
+		expect(controllers.map(controller => controller.batches.length)).toEqual([0, 1, 1]);
+		await tool.close();
+	});
+
 	it("uses registered native options, adapts every GA field, and returns exactly one fresh PNG with metadata", async () => {
 		const settings = Settings.isolated({
 			"computer.enabled": true,
 			"computer.backend": "native",
 			"computer.display": "display-1",
 			"computer.maxWidth": 1600,
-			"computer.maxHeight": 900,
+			"computer.maxHeight": 1000,
 		});
+		const model = {
+			id: "gpt-5.6",
+			api: "openai-responses",
+			supportsComputerUse: true,
+		} as unknown as Model<Api>;
 		const controller = new FakeController();
 		let receivedOptions: DesktopSessionOptions | undefined;
-		const tool = new ComputerTool(toolSession(settings), options => {
+		const tool = new ComputerTool(toolSession(settings, model), options => {
 			receivedOptions = options;
 			return controller;
 		});
@@ -553,7 +681,7 @@ describe("computer tool", () => {
 			backend: "native",
 			display: "display-1",
 			maxWidth: 1600,
-			maxHeight: 900,
+			maxHeight: 1000,
 		});
 		expect(Object.isFrozen(tool.effectiveConfiguration)).toBe(true);
 		settings.override("computer.display", "all");
@@ -584,7 +712,7 @@ describe("computer tool", () => {
 			backend: "native",
 			display: "display-1",
 			maxWidth: 1600,
-			maxHeight: 900,
+			maxHeight: 1000,
 		});
 		expect(controller.batches).toEqual([
 			[

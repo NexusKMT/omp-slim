@@ -5,7 +5,8 @@ import type {
 	AgentToolUpdateCallback,
 	ToolApprovalDecision,
 } from "@oh-my-pi/pi-agent-core";
-import type { ComputerAction, ComputerSafetyCheck, ComputerToolCallMetadata } from "@oh-my-pi/pi-ai";
+import type { ComputerAction, ComputerSafetyCheck, ComputerToolCallMetadata, Model } from "@oh-my-pi/pi-ai";
+import { isClaudeModelId } from "@oh-my-pi/pi-catalog/identity";
 import type {
 	DesktopAction,
 	DesktopCapabilities,
@@ -20,6 +21,36 @@ import { truncateForPrompt } from "./approval";
 import { type ComputerController, ComputerSupervisor, registerComputerController } from "./computer/supervisor";
 import type { ToolSession } from "./index";
 import { ToolError, throwIfAborted } from "./tool-errors";
+
+// Image transports that cannot preserve native screenshot detail resize frames
+// without returning transformed dimensions. Keep their native coordinate frames
+// below the empirically verified threshold so pointer actions match what the
+// model sees. Claude paths predate the resolved transport capability and retain
+// their established model-family fallback.
+const COORDINATE_SAFE_MAX_CAPTURE_WIDTH = 1280;
+const COORDINATE_SAFE_MAX_CAPTURE_HEIGHT = 896;
+
+function usesCoordinateSafeImageSizing(model: Model | undefined): boolean {
+	if (!model) return false;
+	const compat = model.compat;
+	return (
+		(!!compat && "supportsImageDetailOriginal" in compat && compat.supportsImageDetailOriginal === false) ||
+		isClaudeModelId(model.id) ||
+		(model.requestModelId !== undefined && isClaudeModelId(model.requestModelId)) ||
+		(typeof model.name === "string" && /^claude(?:\s|$)/i.test(model.name))
+	);
+}
+
+function captureOptions(session: ToolSession, coordinateSafeImageSizing: boolean): DesktopSessionOptions {
+	const maxWidth = session.settings.get("computer.maxWidth");
+	const maxHeight = session.settings.get("computer.maxHeight");
+	return {
+		backend: session.settings.get("computer.backend"),
+		display: session.settings.get("computer.display"),
+		maxWidth: coordinateSafeImageSizing ? Math.min(maxWidth, COORDINATE_SAFE_MAX_CAPTURE_WIDTH) : maxWidth,
+		maxHeight: coordinateSafeImageSizing ? Math.min(maxHeight, COORDINATE_SAFE_MAX_CAPTURE_HEIGHT) : maxHeight,
+	};
+}
 
 // Desktop actions cross the N-API boundary as i32; out-of-range JS numbers
 // must fail closed here instead of truncating in the napi conversion.
@@ -357,10 +388,16 @@ export class ComputerTool implements AgentTool<typeof computerSchema, ComputerTo
 		const actions = args && typeof args === "object" ? (args as { actions?: unknown }).actions : undefined;
 		return approvalActionSummary(actions);
 	};
-	/** Immutable settings snapshot used to create this tool's reusable controller. */
-	readonly effectiveConfiguration: Readonly<DesktopSessionOptions>;
-	readonly #controller: ComputerController;
-	readonly #unregisterOwner: () => void;
+	/**
+	 * Settings snapshot used to create the tool's current controller; refreshed
+	 * when a model switch crosses the coordinate-safe sizing boundary. Surfaced
+	 * by `/computer status`.
+	 */
+	effectiveConfiguration: Readonly<DesktopSessionOptions>;
+	readonly #createController: ComputerControllerFactory;
+	#controller: ComputerController;
+	#unregisterOwner: () => void;
+	#usesCoordinateSafeImageSizing: boolean;
 	#closed = false;
 	#description?: string;
 
@@ -368,12 +405,9 @@ export class ComputerTool implements AgentTool<typeof computerSchema, ComputerTo
 		readonly session: ToolSession,
 		createController: ComputerControllerFactory = options => new ComputerSupervisor(options),
 	) {
-		this.effectiveConfiguration = Object.freeze({
-			backend: session.settings.get("computer.backend"),
-			display: session.settings.get("computer.display"),
-			maxWidth: session.settings.get("computer.maxWidth"),
-			maxHeight: session.settings.get("computer.maxHeight"),
-		});
+		this.#createController = createController;
+		this.#usesCoordinateSafeImageSizing = usesCoordinateSafeImageSizing(session.getActiveModel?.());
+		this.effectiveConfiguration = Object.freeze(captureOptions(session, this.#usesCoordinateSafeImageSizing));
 		this.#controller = createController(this.effectiveConfiguration);
 		this.#unregisterOwner = registerComputerController(
 			session.getEvalKernelOwnerId?.() ?? undefined,
@@ -383,6 +417,21 @@ export class ComputerTool implements AgentTool<typeof computerSchema, ComputerTo
 	get description(): string {
 		this.#description ??= prompt.render(computerDescription);
 		return this.#description;
+	}
+
+	async #refreshControllerForModel(): Promise<void> {
+		const nextUsesCoordinateSafeImageSizing = usesCoordinateSafeImageSizing(this.session.getActiveModel?.());
+		if (nextUsesCoordinateSafeImageSizing === this.#usesCoordinateSafeImageSizing) return;
+
+		const previous = this.#controller;
+		const nextOptions = Object.freeze(captureOptions(this.session, nextUsesCoordinateSafeImageSizing));
+		const next = this.#createController(nextOptions);
+		this.#unregisterOwner();
+		this.#controller = next;
+		this.#unregisterOwner = registerComputerController(this.session.getEvalKernelOwnerId?.() ?? undefined, next);
+		this.#usesCoordinateSafeImageSizing = nextUsesCoordinateSafeImageSizing;
+		this.effectiveConfiguration = nextOptions;
+		await previous.close();
 	}
 
 	async execute(
@@ -400,6 +449,8 @@ export class ComputerTool implements AgentTool<typeof computerSchema, ComputerTo
 		if (pendingSafetyChecks.length > 0 && context?.providerSafetyApproved !== true) {
 			throw new ToolError("Provider safety checks require interactive approval before computer input");
 		}
+		await this.#refreshControllerForModel();
+		throwIfAborted(signal);
 		const capture = await this.#controller.execute(actions.map(toDesktopAction), signal);
 		throwIfAborted(signal);
 		const data = Buffer.from(capture.data).toBase64();
