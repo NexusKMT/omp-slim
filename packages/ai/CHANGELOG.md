@@ -16,6 +16,9 @@
 
 - Fixed a deterministic circular-import TDZ that crashed `packages/catalog`'s test process with `ReferenceError: Cannot access 'claudeCodeVersion' before initialization`: `registry/oauth/anthropic.ts` imported `claudeCodeVersion` from `providers/anthropic.ts`, which transitively pulls the registry back in (`providers/anthropic` → `stream` → `registry` → `registry/oauth/anthropic`), so the module-level `claude-code/${claudeCodeVersion}` bootstrap user-agent const read the binding while `providers/anthropic.ts` was still mid-initialization. `claudeCodeVersion` now lives in a zero-import leaf module (`providers/claude-code-version.ts`) that `providers/anthropic.ts`, `registry/oauth/anthropic.ts`, and `usage/claude.ts` all import from, removing the cycle at the source rather than deferring the read.
 - Fixed a circular initialization between the Anthropic provider and OAuth registry that could throw before `claudeCodeVersion` was initialized when package tests or consumers loaded modules in parallel ([#6628](https://github.com/can1357/oh-my-pi/pull/6628) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
+- Stopped the account-level Codex `rate_limit.limit_reached` flag from being applied to individual chat windows. Codex reports one shared flag for the whole account, so a window with real headroom was marked `exhausted` because a different window (or a separate metered feature) was at its limit, which over-blocked sibling accounts during credential selection. Each window's status now reflects only its own usage
+- Scoped Codex reactive backoff per meter: a `usage_limit_reached` from a Spark request no longer persists a block that ordinary chat requests honour, and the reverse. Blocks written before scoping used a shared scope meaning "block everything", so requests still honour it and reconciliation still heals it
+- Implemented `scopeLimits` for the Codex ranking strategy so a request gates only on the windows it actually consumes: `-spark` models spend the Spark meter and every other model spends the 5h/weekly chat windows, instead of OR-ing every window and meter into one provider-wide block
 
 ## [17.1.3] - 2026-07-24
 
@@ -23,11 +26,6 @@
 
 - Fixed Cursor sessions exposing `ast_edit` (and other staged-preview `xd://` devices) without a reachable resolver: the built-in `write` tool — which carries the `xd://resolve` / `xd://reject` transport that finalizes a staged preview — was filtered out of Cursor's forwarded catalog, so previews could never be resolved and the session aborted after three forced `write` turns. `write` is now re-included in the forwarded catalog whenever pi-agent devices are advertised ([#6536](https://github.com/can1357/oh-my-pi/issues/6536)).
 - Fixed OpenAI Responses and chat-completions streams honoring per-model first-event watchdog policy, allowing local llama.cpp-style backends to process arbitrarily large prompts without a premature client cancellation ([#6524](https://github.com/can1357/oh-my-pi/issues/6524)).
-### Fixed
-
-- Stopped the account-level Codex `rate_limit.limit_reached` flag from being applied to individual chat windows. Codex reports one shared flag for the whole account, so a window with real headroom was marked `exhausted` because a different window (or a separate metered feature) was at its limit, which over-blocked sibling accounts during credential selection. Each window's status now reflects only its own usage
-- Scoped Codex reactive backoff per meter: a `usage_limit_reached` from a Spark request no longer persists a block that ordinary chat requests honour, and the reverse. Blocks written before scoping used a shared scope meaning "block everything", so requests still honour it and reconciliation still heals it
-- Implemented `scopeLimits` for the Codex ranking strategy so a request gates only on the windows it actually consumes: `-spark` models spend the Spark meter and every other model spends the 5h/weekly chat windows, instead of OR-ing every window and meter into one provider-wide block
 
 ## [17.1.2] - 2026-07-24
 
