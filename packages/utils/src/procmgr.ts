@@ -109,17 +109,21 @@ export function resolveBasicShell(): string | undefined {
  * 4. Fallback: sh
  */
 export function getShellConfig(customShellPath?: string, options: ShellConfigOptions = {}): ShellConfig {
-	if (cachedShellConfig) {
+	const configSource = options.configSource ?? path.join(getAgentDir(), MAIN_CONFIG_FILENAMES[0]);
+	// 1. Check user-specified shell path. Validated even on the cached path so a
+	// broken shellPath surfaces its guidance error instead of being masked by an
+	// earlier successful resolution in the same process.
+	if (customShellPath) {
+		if (!fs.existsSync(customShellPath)) {
+			throw new Error(`Custom shell path not found: ${customShellPath}\nPlease update shellPath in ${configSource}`);
+		}
+		if (cachedShellConfig?.shell !== customShellPath) {
+			cachedShellConfig = buildConfig(customShellPath);
+		}
 		return cachedShellConfig;
 	}
-	const configSource = options.configSource ?? path.join(getAgentDir(), MAIN_CONFIG_FILENAMES[0]);
-	// 1. Check user-specified shell path
-	if (customShellPath) {
-		if (fs.existsSync(customShellPath)) {
-			cachedShellConfig = buildConfig(customShellPath);
-			return cachedShellConfig;
-		}
-		throw new Error(`Custom shell path not found: ${customShellPath}\nPlease update shellPath in ${configSource}`);
+	if (cachedShellConfig) {
+		return cachedShellConfig;
 	}
 
 	if (process.platform === "win32") {
