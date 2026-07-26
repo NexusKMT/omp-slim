@@ -3367,6 +3367,43 @@ describe("agentLoop pre-model-call gate", () => {
 		expect(final.model).toBe(retryModel.id);
 	});
 
+	it("closes an open Harmony retry turn when abort lands inside the retry gate", async () => {
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [] };
+		const mock = createMockModel({
+			provider: "openai-codex",
+			responses: [{ content: ["Some prose. analysis to=functions.edit code"] }],
+		});
+		const gateEntered = Promise.withResolvers<void>();
+		const controller = new AbortController();
+		let gateCalls = 0;
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			beforeModelCall: async (_context, signal) => {
+				if (++gateCalls === 1) return undefined;
+				if (!signal) throw new Error("missing gate abort signal");
+				gateEntered.resolve();
+				const waiter = Promise.withResolvers<void>();
+				signal.addEventListener("abort", () => waiter.resolve(), { once: true });
+				await waiter.promise;
+				return undefined;
+			},
+		};
+
+		const events: AgentEvent[] = [];
+		const stream = agentLoop([createUserMessage("start")], context, config, controller.signal, mock.stream);
+		const drain = (async () => {
+			for await (const event of stream) events.push(event);
+		})();
+		await gateEntered.promise;
+		controller.abort();
+		await drain;
+
+		expect(mock.calls).toHaveLength(1);
+		expect(events.filter(event => event.type === "turn_start")).toHaveLength(1);
+		expect(events.filter(event => event.type === "turn_end")).toHaveLength(1);
+	});
+
 	it("proceeds when the gate returns undefined", async () => {
 		const executed: string[] = [];
 		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [echoTool(executed)] };

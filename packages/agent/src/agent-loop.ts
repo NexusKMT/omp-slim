@@ -1097,9 +1097,7 @@ async function runLoopBody(
 					throw error;
 				}
 				if (config.beforeModelCall && signal?.aborted) {
-					emitInputMessages(stream, turnMessages);
-					endAgentStream(stream, newMessages, telemetry, stepCounter.count);
-					return;
+					gateResult = { stop: true };
 				}
 				if (gateResult?.stop) {
 					if (gateResult.reason) {
