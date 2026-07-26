@@ -37,19 +37,35 @@ export interface SherpaRuntime {
 	};
 }
 
-function getPlatformPackage(): string {
-	const platform = os.platform() === "win32" ? "win" : os.platform();
-	return `sherpa-onnx-${platform}-${os.arch()}`;
-}
-
-/** Loads the source-workspace sherpa wrapper colocated with its native platform package. */
+/** Loads the nearest working source-workspace sherpa wrapper, including hoisted fallbacks. */
 export function loadSourceSherpaRuntime(sourceUrl: string): SherpaRuntime {
 	const sourceRequire = createRequire(sourceUrl);
-	const platformPackage = getPlatformPackage();
-	for (const nodeModules of sourceRequire.resolve.paths(SHERPA_PACKAGE) ?? []) {
-		if (!resolveRuntimeModule(nodeModules, platformPackage)) continue;
-		const entry = resolveRuntimeModule(nodeModules, SHERPA_PACKAGE);
-		if (entry) return createRequire(entry)(entry);
+	const nearestEntry = sourceRequire.resolve(SHERPA_PACKAGE);
+	try {
+		return createRequire(nearestEntry)(nearestEntry);
+	} catch (error) {
+		if (!(error instanceof Error && error.message.startsWith("Could not find sherpa-onnx-node. Tried"))) {
+			throw error;
+		}
+		const platform = os.platform();
+		const platformPackage = `sherpa-onnx-${platform === "win32" ? "win" : platform}-${os.arch()}`;
+		for (const nodeModules of sourceRequire.resolve.paths(SHERPA_PACKAGE) ?? []) {
+			if (!resolveRuntimeModule(nodeModules, platformPackage)) continue;
+			const entry = resolveRuntimeModule(nodeModules, SHERPA_PACKAGE);
+			if (!entry || entry === nearestEntry) continue;
+			try {
+				return createRequire(entry)(entry);
+			} catch (candidateError) {
+				if (
+					!(
+						candidateError instanceof Error &&
+						candidateError.message.startsWith("Could not find sherpa-onnx-node. Tried")
+					)
+				) {
+					throw candidateError;
+				}
+			}
+		}
+		throw error;
 	}
-	return sourceRequire(SHERPA_PACKAGE);
 }

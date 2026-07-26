@@ -30,11 +30,42 @@ describe("sherpa source runtime resolution", () => {
 			"module.exports = { OfflineRecognizer: { createAsync() {} } };\n",
 		);
 		await writePackage(rootNodeModules, PLATFORM_PACKAGE, "module.exports = {};\n");
-		await writePackage(packageNodeModules, "sherpa-onnx-node", "throw new Error('loaded isolated wrapper');\n");
+		await writePackage(
+			packageNodeModules,
+			"sherpa-onnx-node",
+			"throw new Error('Could not find sherpa-onnx-node. Tried');\n",
+		);
 
 		const sourceUrl = path.join(tmp, "packages", "coding-agent", "src", "stt", "asr-worker.ts");
 		const runtime = loadSourceSherpaRuntime(sourceUrl);
 
 		expect(runtime.OfflineRecognizer.createAsync).toBeTypeOf("function");
+	});
+
+	it("prefers the nearest wrapper when its nested platform addon is loadable", async () => {
+		tmp = await fs.mkdtemp(path.join(os.tmpdir(), "omp-sherpa-source-"));
+		const rootNodeModules = path.join(tmp, "node_modules");
+		const packageNodeModules = path.join(tmp, "packages", "coding-agent", "node_modules");
+		await writePackage(
+			rootNodeModules,
+			"sherpa-onnx-node",
+			"module.exports = { OfflineRecognizer: { createAsync: function rootRuntime() {} } };\n",
+		);
+		await writePackage(rootNodeModules, PLATFORM_PACKAGE, "module.exports = {};\n");
+		await writePackage(
+			packageNodeModules,
+			"sherpa-onnx-node",
+			`require("./node_modules/${PLATFORM_PACKAGE}"); module.exports = { OfflineRecognizer: { createAsync: function nestedRuntime() {} } };\n`,
+		);
+		await writePackage(
+			path.join(packageNodeModules, "sherpa-onnx-node", "node_modules"),
+			PLATFORM_PACKAGE,
+			"module.exports = {};\n",
+		);
+
+		const sourceUrl = path.join(tmp, "packages", "coding-agent", "src", "stt", "asr-worker.ts");
+		const runtime = loadSourceSherpaRuntime(sourceUrl);
+
+		expect(runtime.OfflineRecognizer.createAsync.name).toBe("nestedRuntime");
 	});
 });
