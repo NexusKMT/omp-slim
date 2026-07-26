@@ -7339,6 +7339,14 @@ export class AgentSession {
 		 * (issue #5642).
 		 */
 		reopenAsk?: { toolCallId: string; questions: AskToolInput["questions"] };
+		/**
+		 * `true` when this call committed a new sibling answer for an `ask`
+		 * re-answer (`reanswerAskResult` was applied). The interactive caller
+		 * resumes the agent via {@link resumeAfterAskReanswer} *after* rebuilding
+		 * its transcript, so the resumed turn never renders against the stale
+		 * pre-rebuild UI (issue #6483).
+		 */
+		askReanswerCommitted?: boolean;
 	}> {
 		await this.#bash.flushPending();
 		const oldLeafId = this.sessionManager.getLeafId();
@@ -7489,6 +7497,10 @@ export class AgentSession {
 		// Determine the new leaf position based on target type
 		let newLeafId: string | null;
 		let editorText: string | undefined;
+		// Set when the second-pass `ask` re-answer branch below actually commits a
+		// new sibling answer — the trigger for resuming the agent afterwards so the
+		// model consumes it, mirroring a live `ask` completion (issue #6483).
+		let isAskReanswerCompletion = false;
 
 		if (targetEntry.type === "message" && targetEntry.message.role === "user") {
 			// User message: leaf = parent (null if root), text goes to editor
@@ -7525,6 +7537,7 @@ export class AgentSession {
 				timestamp: Date.now(),
 			};
 			newLeafId = this.sessionManager.appendMessageToBranch(toolResultMessage, targetEntry.parentId);
+			isAskReanswerCompletion = true;
 		} else {
 			// Non-user message (or a user-invoked skill-prompt injection): land the
 			// leaf on the selected node so it stays on the active branch. Skill
@@ -7570,6 +7583,14 @@ export class AgentSession {
 
 		this.#branchSummaryAbortController = undefined;
 
+		// Report a committed `ask` re-answer so the interactive caller can resume
+		// the agent via `resumeAfterAskReanswer()` *after* rebuilding its
+		// transcript. Scheduling the continue here instead would start a fresh
+		// streaming turn whose `agent_start`/`turn_start` events could render
+		// against the stale pre-rebuild UI and then be clobbered by the caller's
+		// `renderInitialMessages(...)` (issue #6483). Plain leaf moves and the
+		// read-only `reopenAsk` probe leave the flag unset.
+
 		// Emit session_tree event; only handlers can mutate session entries, so skip
 		// the emit and the context rebuild when no handlers are registered (mirrors
 		// the session_before_tree guard above).
@@ -7582,9 +7603,34 @@ export class AgentSession {
 				fromExtension: summaryText ? fromExtension : undefined,
 			});
 			const rawContext = this.sessionManager.buildSessionContext();
-			return { editorText, cancelled: false, summaryEntry, sessionContext: rawContext };
+			return {
+				editorText,
+				cancelled: false,
+				summaryEntry,
+				sessionContext: rawContext,
+				askReanswerCommitted: isAskReanswerCompletion,
+			};
 		}
-		return { editorText, cancelled: false, summaryEntry, sessionContext: stateContext };
+		return {
+			editorText,
+			cancelled: false,
+			summaryEntry,
+			sessionContext: stateContext,
+			askReanswerCommitted: isAskReanswerCompletion,
+		};
+	}
+
+	/**
+	 * Resume the agent after the interactive `/tree` caller has committed an
+	 * `ask` re-answer (`navigateTree` returned `askReanswerCommitted`) and
+	 * rebuilt its transcript. Mirrors how a live `ask` completion drives a
+	 * follow-up turn, but is deferred to the caller so the resumed turn renders
+	 * against the rebuilt UI rather than the stale pre-navigation transcript
+	 * (issue #6483). The scheduled continue honors the same disposed/compacting
+	 * guards as every other post-prompt continuation.
+	 */
+	resumeAfterAskReanswer(): void {
+		this.#scheduleAgentContinue();
 	}
 
 	/**
