@@ -9,14 +9,12 @@ import type { Context } from "@oh-my-pi/pi-ai/types";
 import {
 	getDefault,
 	getEnumValues,
-	getUi,
 	onAppendOnlyModeChanged,
 	onStatusLineSessionAccentChanged,
 	resetSettingsForTest,
 	type SettingPath,
 	Settings,
 } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { DEFAULT_LIVE_VOICE, LIVE_VOICE_OPTIONS, LIVE_VOICE_VALUES } from "@oh-my-pi/pi-coding-agent/live/voices";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { AUTO_IMAGE_PROVIDER_ORDER } from "@oh-my-pi/pi-coding-agent/tools/image-providers";
 import { SEARCH_PROVIDER_ORDER } from "@oh-my-pi/pi-coding-agent/web/search/types";
@@ -143,15 +141,6 @@ describe("Settings", () => {
 			const settings = Settings.isolated();
 			expect(settings.get("providers.maxInFlightRequests")).toEqual({});
 			expect(getDefault("providers.maxInFlightRequests")).toEqual({});
-		});
-
-		it("exposes the supported live voices with sol as the default", () => {
-			expect(getDefault("live.voice")).toBe(DEFAULT_LIVE_VOICE);
-			expect(getEnumValues("live.voice")).toEqual(LIVE_VOICE_VALUES);
-			expect(getUi("live.voice")?.options).toEqual(LIVE_VOICE_OPTIONS);
-
-			const settings = Settings.isolated({ "live.voice": "vale" });
-			expect(settings.get("live.voice")).toBe("vale");
 		});
 
 		it("exposes all tool calling mode options", () => {
