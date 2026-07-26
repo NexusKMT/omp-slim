@@ -1,11 +1,16 @@
-import { beforeAll, describe, expect, it, vi } from "bun:test";
-import { Container } from "@oh-my-pi/pi-tui";
+import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
+import { Container, setKeybindings } from "@oh-my-pi/pi-tui";
+import { KeybindingsManager } from "../../config/keybindings";
 import type { ExtensionAskDialogQuestion, ExtensionUIContext } from "../../extensibility/extensions";
 import { AskDialogComponent } from "../components/ask-dialog";
 import { CustomEditor } from "../components/custom-editor";
 import { getEditorTheme, getThemeByName, setThemeInstance } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
 import { ExtensionUiController } from "./extension-ui-controller";
+
+afterEach(() => {
+	setKeybindings(KeybindingsManager.inMemory());
+});
 
 beforeAll(async () => {
 	const dark = await getThemeByName("dark");
@@ -161,6 +166,39 @@ describe("ExtensionUiController editor UI", () => {
 		harness.editor.setText("");
 		ask?.render?.(80);
 		expect(harness.editor.focused).toBe(false);
+	});
+
+	it("lets the clear action empty the draft and lift the ask guard (#6738)", () => {
+		const harness = makeHarness();
+		// Route Ctrl+C to the guard: keep app.clear on Ctrl+C but move the ask
+		// cancel key off it, so Ctrl+C reaches draft editing instead of cancelling.
+		setKeybindings(KeybindingsManager.inMemory({ "tui.select.cancel": "ctrl+g" }));
+		harness.editor.setActionKeys("app.clear", ["ctrl+c"]);
+		let cleared = 0;
+		// Mirror interactive wiring: app.clear (Ctrl+C) clears the draft.
+		harness.editor.onClear = () => {
+			cleared++;
+			harness.editor.setText("");
+		};
+		harness.editor.setText("half typed prompt");
+		const questions: ExtensionAskDialogQuestion[] = [
+			{ id: "confirm", question: "Continue?", options: [{ label: "Yes" }, { label: "No" }] },
+		];
+
+		harness.controller.showAskDialog(questions);
+		const ask = harness.editorContainer.children[0];
+		expect(ask).toBeInstanceOf(AskDialogComponent);
+
+		// Ctrl+C is reserved by the base editor and never clears; the guard must
+		// dispatch the configured clear action so the "finish or clear" hint works.
+		ask?.handleInput?.("\x03");
+		expect(cleared).toBe(1);
+		expect(harness.editor.getText()).toBe("");
+
+		// With the draft gone the guard releases: the next key reaches the ask
+		// controls and submits the highlighted option.
+		ask?.handleInput?.("\n");
+		expect(harness.editorContainer.children).toEqual([harness.editor]);
 	});
 
 	it("bridges addAutocompleteProvider factories to the interactive mode context (#4919)", async () => {
