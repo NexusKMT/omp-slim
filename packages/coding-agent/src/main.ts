@@ -946,7 +946,16 @@ export async function buildSessionOptions(
 				}
 			}
 		}
-		if (!options.model) options.model = scopedModels[0].model;
+		// A configured `default` role that doesn't resolve within the startup
+		// scope is deferred, NOT silently pinned to `scopedModels[0]`: the scope
+		// is resolved before extensions register their providers, so a role naming
+		// an extension-registered model (listed in `enabledModels`) would drop out
+		// here and the session would run on an unrelated in-scope provider without
+		// any error. Leaving `options.model` unset lets createAgentSession's
+		// post-extension default-role resolution reclaim it against the fully
+		// registered, still enabledModels-scoped catalog (issue #6694). Only seed
+		// the first scoped model when no default role is configured to reclaim.
+		if (!options.model && !remembered) options.model = scopedModels[0].model;
 	}
 
 	if (parsed.noPrewalk && (parsed.prewalk || parsed.prewalkInto !== undefined)) {
