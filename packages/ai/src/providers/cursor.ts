@@ -387,9 +387,28 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 		// A dispatch can spawn another (a handler that decodes a nested frame), so
 		// re-check rather than awaiting one snapshot. Each dispatch already
 		// swallows its own rejection, so this only waits.
+		//
+		// The wait is bounded by the abort signal: exec handlers have no
+		// cancellation contract (the coding-agent bridge invokes `tool.execute`
+		// with no signal), so a hung or long-running tool would otherwise hold
+		// the terminal event hostage after the user already gave up on the turn.
+		// Once aborted, the Agent finalizes from the abort error and discards
+		// late results regardless, so skipping the rest of the drain loses
+		// nothing that could still be delivered.
+		let abortSettled: Promise<void> | undefined;
 		const drainInFlightDispatches = async (): Promise<void> => {
+			const signal = options?.signal;
 			while (inFlightDispatches.size > 0) {
-				await Promise.all([...inFlightDispatches]);
+				if (signal?.aborted) return;
+				const settled = Promise.all([...inFlightDispatches]);
+				if (!signal) {
+					await settled;
+					continue;
+				}
+				abortSettled ??= new Promise<void>(resolve =>
+					signal.addEventListener("abort", () => resolve(), { once: true }),
+				);
+				await Promise.race([settled, abortSettled]);
 			}
 		};
 
@@ -682,8 +701,9 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 			// call from this terminal error and clears its Cursor result buffer, so
 			// a handler still running would land its real result after `agent_end`
 			// and be discarded — even though the tool may already have run side
-			// effects. Wait for it first. An abort has already closed the transport,
-			// and every dispatch settles rather than hanging on it.
+			// effects. Wait for it first; on abort the drain returns immediately
+			// (handlers have no cancellation contract and must not delay the
+			// terminal error the user asked for).
 			await drainInFlightDispatches();
 			const result = await AIError.finalize(error, { api: model.api, signal: options?.signal });
 			output.stopReason = result.stopReason;
@@ -2765,8 +2785,22 @@ export function processInteractionUpdate(
 				// carries the `details.phases` the todo renderer replays the list
 				// from — with the provider's summary standing in when the host has
 				// nothing to add.
-				const persisted = state.onTodoSnapshot?.(snapshot, state.currentToolCall.id, error) ?? undefined;
-				state.onToolResult?.(persisted ?? buildTodoToolResult(state.currentToolCall.id, snapshot, error));
+				let persisted: ToolResultMessage | undefined;
+				let hostError: string | null = null;
+				try {
+					persisted = state.onTodoSnapshot?.(snapshot, state.currentToolCall.id, error) ?? undefined;
+				} catch (callbackError) {
+					// A throwing host callback (e.g. session persistence failing on
+					// disk error) must not leave the resolved block unpaired: the
+					// exception would skip both the paired result and `toolcall_end`,
+					// stranding the live card and stripping the call from every
+					// rebuilt transcript. Settle it as a failure instead.
+					hostError = callbackError instanceof Error ? callbackError.message : String(callbackError);
+					log("error", "onTodoSnapshot", { error: hostError });
+				}
+				state.onToolResult?.(
+					persisted ?? buildTodoToolResult(state.currentToolCall.id, snapshot, hostError ?? error),
+				);
 			}
 			const idx = output.content.indexOf(state.currentToolCall);
 			clearStreamingPartialJson(state.currentToolCall);

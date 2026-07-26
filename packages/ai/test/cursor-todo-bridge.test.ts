@@ -876,6 +876,30 @@ describe("cursor native todo bridge (wire-encoded protobuf)", () => {
 		});
 	});
 
+	it("settles the call as a failure when the host sync callback throws", () => {
+		// The host callback persists to the session branch and can throw
+		// synchronously (e.g. a disk failure). The exception must not skip the
+		// paired result and `toolcall_end`: the block is already marked
+		// resolved, so left unpaired it is stripped from every rebuilt
+		// transcript and the live card never resolves.
+		const h = newHarness();
+		h.state.onTodoSnapshot = () => {
+			throw new Error("session persistence failed");
+		};
+		const toolCall = updateCall(items([["1", "task", 3]]), 1);
+		for (const kind of ["toolCallStarted", "toolCallCompleted"] as const) {
+			processInteractionUpdate(wireUpdate(kind, toolCall) as never, h.output, h.stream, h.state, h.usageState);
+		}
+
+		expect(h.state.currentToolCall).toBeNull();
+		expect(h.toolResults).toHaveLength(1);
+		expect(h.toolResults[0]).toMatchObject({
+			toolCallId: todoBlocks(h)[0].id,
+			isError: true,
+			content: [{ type: "text", text: "session persistence failed" }],
+		});
+	});
+
 	it("recognizes an MCP call through the wire-encoded oneof, start and completion", () => {
 		// Same wire-shape trap the native todo calls fell into: `ToolCall.tool` is
 		// a protobuf oneof, so a decoded message exposes the variant as

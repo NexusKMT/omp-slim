@@ -22,7 +22,8 @@ type Scenario =
 	| { kind: "end-before-turn" }
 	| { kind: "hang-after-turn" }
 	| { kind: "exec-in-final-chunk"; responseFinished: PromiseWithResolvers<void> }
-	| { kind: "exec-then-transport-error"; responseFinished: PromiseWithResolvers<void> };
+	| { kind: "exec-then-transport-error"; responseFinished: PromiseWithResolvers<void> }
+	| { kind: "exec-then-hang" };
 
 let server: http2.Http2Server | undefined;
 const sessions = new Set<http2.Http2Session>();
@@ -170,6 +171,13 @@ async function startServer(): Promise<string> {
 				Buffer.concat([execRequestFrame(), connectEndErrorFrame("unavailable", "mid-exec transport failure")]),
 			);
 			stream.end();
+			return;
+		}
+
+		if (scenario.kind === "exec-then-hang") {
+			// Exec request, then the stream stays open: the only way this turn
+			// ends is the client aborting.
+			stream.write(execRequestFrame());
 			return;
 		}
 
@@ -445,5 +453,57 @@ describe("Cursor terminal lifecycle after turnEnded", () => {
 		expect(eventTypes).not.toContain("done");
 		expect(result.errorMessage).toContain("mid-exec transport failure");
 		expect(paired).toEqual(["call-final"]);
+	});
+
+	it("does not hold the abort hostage to a hung exec handler", async () => {
+		// Exec handlers have no cancellation contract — the coding-agent bridge
+		// invokes `tool.execute` with no signal — so a hung or long-running tool
+		// cannot be interrupted. Once the user aborts, the drain must not wait
+		// for it: the Agent finalizes from the abort error and discards late
+		// results regardless, so waiting only delays the terminal event the
+		// user asked for. Without the abort-bounded drain this test times out
+		// with the stream never settling.
+		scenario = { kind: "exec-then-hang" };
+		const baseUrl = await startServer();
+		const controller = new AbortController();
+		const handlerStarted = Promise.withResolvers<void>();
+		const handlerDone = Promise.withResolvers<void>();
+		const stream = streamCursor(makeModel(baseUrl), context, {
+			apiKey: "test-token",
+			signal: controller.signal,
+			execHandlers: {
+				async read() {
+					handlerStarted.resolve();
+					await handlerDone.promise;
+					return {
+						role: "toolResult",
+						toolCallId: "call-final",
+						toolName: "read",
+						content: [{ type: "text", text: "late result" }],
+						isError: false,
+						timestamp: 1,
+					};
+				},
+			},
+		});
+
+		const gate = (async () => {
+			await handlerStarted.promise;
+			controller.abort();
+		})();
+
+		const eventTypes: string[] = [];
+		for await (const event of stream) {
+			eventTypes.push(event.type);
+		}
+		await gate;
+		const result = await stream.result();
+		// Released only AFTER the stream settled: reaching this line at all
+		// proves the terminal error did not wait for the handler.
+		handlerDone.resolve();
+
+		expect(eventTypes.at(-1)).toBe("error");
+		expect(eventTypes).not.toContain("done");
+		expect(result.stopReason).toBe("aborted");
 	});
 });
