@@ -90,6 +90,36 @@ describe("update-cli install target detection", () => {
 		expect(method).toBe("npm");
 	});
 
+	it("uses binary update when a plain file in the npm global bin dir is the standalone binary, not an npm symlink", () => {
+		// Regression: with `npm prefix -g` pointed at the installer's default
+		// (~/.local), directory containment alone misclassified the standalone
+		// binary as npm-managed, so `npm install -g` failed with EEXIST refusing
+		// to overwrite the existing executable.
+		const method = resolveUpdateMethodForTest("/home/u/.local/bin/omp", undefined, {
+			npmBinDir: "/home/u/.local/bin",
+			ompIsRegularFile: true,
+		});
+
+		expect(method).toBe("binary");
+	});
+
+	it("uses binary update when a plain file in the bun global bin dir is the standalone binary", () => {
+		const method = resolveUpdateMethodForTest("/home/u/.local/bin/omp", "/home/u/.local/bin", {
+			ompIsRegularFile: true,
+		});
+
+		expect(method).toBe("binary");
+	});
+
+	it("still uses npm update when the npm global bin entry is a package-manager symlink, not a plain file", () => {
+		const method = resolveUpdateMethodForTest("/home/u/.local/bin/omp", undefined, {
+			npmBinDir: "/home/u/.local/bin",
+			ompIsRegularFile: false,
+		});
+
+		expect(method).toBe("npm");
+	});
+
 	it("uses binary update when prioritized omp is outside bun global bin", () => {
 		const method = resolveUpdateMethodForTest("/Users/test/.local/bin/omp", "/Users/test/.bun/bin");
 

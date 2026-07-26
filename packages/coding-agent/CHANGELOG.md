@@ -40,6 +40,9 @@
 ### Fixed
 
 - Fixed advisor retry amplification after transient Codex SSE socket closures by limiting each advisor-level try to one provider transport attempt.
+### Fixed
+
+- Fixed `omp update` aborting with `npm error EEXIST` on standalone binary installs whose directory coincides with the global npm/bun bin dir (for example `npm prefix -g` set to `~/.local`, which the installer also targets). The install-target resolver classified the binary as npm/bun-managed from directory containment alone, so `npm install -g` tried to replace a regular file its symlink step would clobber; it now treats a plain executable (not a symlink) in a package-manager bin dir as the standalone binary and self-updates it in place ([#6527](https://github.com/can1357/oh-my-pi/pull/6527) by [@am423](https://github.com/am423)).
 
 ## [17.1.2] - 2026-07-24
 
