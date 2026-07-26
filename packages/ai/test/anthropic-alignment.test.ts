@@ -1831,9 +1831,22 @@ describe("Anthropic request fingerprint alignment", () => {
 			apiKey: "sk-proxy-test",
 			interleavedThinking: true,
 		});
+		// Vertex rawPredict is a signing endpoint but only accepts betas in the
+		// JSON body (`anthropic_beta`); the HTTP header would 400 (#5614).
+		const vertexProxy = buildAnthropicClientOptions({
+			model: buildModel({
+				...adaptiveProxySpec,
+				provider: "google-vertex",
+				baseUrl:
+					"https://us-east5-aiplatform.googleapis.com/v1/projects/p/locations/us-east5/publishers/anthropic/models/claude-opus-4-8:rawPredict",
+			}),
+			apiKey: "vertex-adc",
+			interleavedThinking: true,
+		});
 
 		expect(signingProxy.defaultHeaders["anthropic-beta"]).toContain("interleaved-thinking-2025-05-14");
 		expect(nonSigningProxy.defaultHeaders["anthropic-beta"] ?? "").not.toContain("interleaved-thinking-2025-05-14");
+		expect(vertexProxy.defaultHeaders["anthropic-beta"] ?? "").not.toContain("interleaved-thinking-2025-05-14");
 	});
 
 	it("adds legacy fine-grained tool-streaming beta only for tool requests on incompatible models", () => {

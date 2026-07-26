@@ -2850,8 +2850,16 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 	} = args;
 	const compat = model.compat;
 	const disableStrictTools = disableStrictToolsOverride ?? compat.disableStrictTools;
+	// Adaptive models (`supportsDisplay`) get native interleaved thinking on the
+	// official API, so the beta is only needed on non-official signing proxies
+	// that still validate replayed multi-thinking-block turns against it (#6717).
+	// Vertex rawPredict is excluded like every other HTTP-beta path here: it can
+	// only accept betas in the JSON body (`anthropic_beta`), never as this
+	// `anthropic-beta` HTTP header, so advertising it there earns a 400 (#5614).
 	const needsInterleavedBeta =
-		interleavedThinking && (!model.thinking?.supportsDisplay || (compat.signingEndpoint && !compat.officialEndpoint));
+		interleavedThinking &&
+		(!model.thinking?.supportsDisplay ||
+			(compat.signingEndpoint && !compat.officialEndpoint && model.provider !== "google-vertex"));
 	const oauthToken = isOAuth ?? isAnthropicOAuthToken(apiKey);
 	const baseUrl = resolveAnthropicBaseUrl(model, apiKey);
 	const supportsEagerToolInputStreaming = resolveEagerToolInputStreamingSupport(model, baseUrl);
