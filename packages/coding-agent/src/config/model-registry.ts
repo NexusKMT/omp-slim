@@ -803,6 +803,7 @@ export class ModelRegistry {
 	// Runtime model managers registered by extensions via fetchDynamicModels.
 	// Keyed by provider name; use the same SQLite cache path as builtins.
 	#runtimeModelManagers: Map<string, { options: ModelManagerOptions<Api>; sourceId: string }> = new Map();
+	#ignoreLocalModelConfig: boolean;
 	#fetch: FetchImpl;
 
 	#resolveCommandBackedApiKey(provider: string): CommandApiKeyResolution {
@@ -839,8 +840,18 @@ export class ModelRegistry {
 	constructor(
 		readonly authStorage: AuthStorage,
 		modelsPath?: string,
-		options?: { fetch?: FetchImpl },
+		options?: {
+			/**
+			 * Gateway mode: ignore local `models.yml` entirely (provider overrides,
+			 * config API keys, custom models, custom discovery). A broker-backed
+			 * gateway serves only bundled + broker-discovered catalog metadata and
+			 * must never apply client-side credential or routing overrides.
+			 */
+			ignoreLocalModelConfig?: boolean;
+			fetch?: FetchImpl;
+		},
 	) {
+		this.#ignoreLocalModelConfig = options?.ignoreLocalModelConfig ?? false;
 		this.#fetch =
 			options?.fetch ??
 			(isBunTestRuntime()
@@ -1377,6 +1388,24 @@ export class ModelRegistry {
 	}
 
 	#loadCustomModels(): CustomModelsResult {
+		// Gateway mode: serve bundled + broker-discovered catalog metadata only.
+		// Local models.yml provider overrides (baseUrl/apiKey/headers/transport),
+		// custom models, custom discovery, and config API keys are all client-side
+		// routing that MUST NOT reach a broker-backed gateway — applying them would
+		// send broker bearers to a configured endpoint, install config keys that
+		// shadow broker credentials (bypassing account pooling/refresh/accounting),
+		// or route a pi-native gateway back into itself.
+		if (this.#ignoreLocalModelConfig) {
+			return {
+				models: [],
+				overrides: new Map(),
+				modelOverrides: new Map(),
+				keylessProviders: new Set(),
+				discoverableProviders: [],
+				configuredProviders: new Set(),
+				found: false,
+			};
+		}
 		const { value, error, status } = this.#modelsConfigFile.tryLoad();
 
 		if (status === "error") {
