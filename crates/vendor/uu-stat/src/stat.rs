@@ -2054,6 +2054,36 @@ for details about the options it supports.";
 			s
 		}
 
+		/// On-disk allocated size in bytes for `%b`, honoring sparse and
+		/// compressed files via `GetCompressedFileSizeW`. `Metadata::len()` is
+		/// the logical size, which overstates allocation for sparse files, so
+		/// the compressed/allocated size is queried directly. Falls back to
+		/// `logical` when the query fails.
+		pub fn allocated_size(path: &Path, logical: u64) -> u64 {
+			use std::os::windows::ffi::OsStrExt;
+
+			use windows_sys::Win32::Storage::FileSystem::GetCompressedFileSizeW;
+
+			const INVALID_FILE_SIZE: u32 = u32::MAX;
+
+			let wide: Vec<u16> = path
+				.as_os_str()
+				.encode_wide()
+				.chain(std::iter::once(0))
+				.collect();
+			let mut high: u32 = 0;
+			// SAFETY: `wide` is NUL-terminated and `high` is a valid `&mut u32`.
+			let low = unsafe { GetCompressedFileSizeW(wide.as_ptr(), &mut high) };
+			// A low dword of INVALID_FILE_SIZE is ambiguous (a real 4 GiB-1 low
+			// word or an error); MSDN says to disambiguate via GetLastError.
+			if low == INVALID_FILE_SIZE
+				&& std::io::Error::last_os_error().raw_os_error().unwrap_or(0) != 0
+			{
+				return logical;
+			}
+			(u64::from(high) << 32) | u64::from(low)
+		}
+
 		/// File-system status collected for `stat --file-system` on Windows.
 		pub struct StatFs {
 			pub fs_type:      String,
@@ -2239,7 +2269,9 @@ for details about the options it supports.";
 						// access rights in human readable form
 						'A' => OutputType::Str(win::perms_string(mode)),
 						// number of blocks allocated (512-byte units, see %B)
-						'b' => OutputType::Unsigned(meta.len().div_ceil(512)),
+						'b' => {
+							OutputType::Unsigned(win::allocated_size(resolved, meta.len()).div_ceil(512))
+						},
 						// the size in bytes of each block reported by %b
 						'B' => OutputType::Unsigned(512),
 						// SELinux security context string (unsupported)
