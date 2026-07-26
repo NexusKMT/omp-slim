@@ -2,14 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { type AuthCredentialStore, AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
 import type { FetchImpl } from "@oh-my-pi/pi-ai/types";
 import type { UsageFetchParams } from "@oh-my-pi/pi-ai/usage";
-import { minimaxCodeCnUsageProvider, minimaxCodeUsageProvider } from "@oh-my-pi/pi-ai/usage/minimax-code";
+import { minimaxCodeUsageProvider } from "@oh-my-pi/pi-ai/usage/minimax-code";
 
 const INTERVAL_START = 1_785_009_600_000;
 const INTERVAL_END = 1_785_024_000_000;
 const WEEKLY_START = 1_784_505_600_000;
 const WEEKLY_END = 1_785_110_400_000;
 
-function params(provider: "minimax-code" | "minimax-code-cn", apiKey = "sk-cp-test"): UsageFetchParams {
+function params(provider: "minimax-code" = "minimax-code", apiKey = "sk-cp-test"): UsageFetchParams {
 	return { provider, credential: { type: "api_key", apiKey }, accountKey: "account-1" };
 }
 
@@ -176,19 +176,6 @@ describe("MiniMax Token Plan usage", () => {
 		expect(videoWeekly?.notes).toEqual(["Requests: 1/21"]);
 	});
 
-	test("routes the China provider to the mainland endpoint", async () => {
-		let requestedUrl = "";
-		const fetchMock: FetchImpl = input => {
-			requestedUrl = String(input);
-			return Promise.resolve(Response.json(remainsPayload()));
-		};
-
-		const report = await minimaxCodeCnUsageProvider.fetchUsage(params("minimax-code-cn"), { fetch: fetchMock });
-
-		expect(requestedUrl).toBe("https://api.minimaxi.com/v1/token_plan/remains");
-		expect(report?.provider).toBe("minimax-code-cn");
-	});
-
 	test("honors a configured base URL for the quota request", async () => {
 		// One case per trim the provider applies: trailing slash, trailing `/v1`, and both together.
 		for (const configured of ["https://proxy.example", "https://proxy.example/", "https://proxy.example/v1/"]) {
@@ -266,7 +253,7 @@ describe("MiniMax Token Plan usage", () => {
 		const fetchMock: FetchImpl = () =>
 			Promise.resolve(Response.json(payloadOf(generalBucket(), notInPlanBucket("video"))));
 
-		const report = await minimaxCodeCnUsageProvider.fetchUsage(params("minimax-code-cn"), { fetch: fetchMock });
+		const report = await minimaxCodeUsageProvider.fetchUsage(params("minimax-code"), { fetch: fetchMock });
 
 		expect(report?.limits.map(limit => limit.id)).toEqual(["general:4h", "general:7d"]);
 		expect(report?.metadata).toMatchObject({ models: ["general", "video"], unavailableModels: ["video"] });
@@ -276,7 +263,7 @@ describe("MiniMax Token Plan usage", () => {
 		const fetchMock: FetchImpl = () =>
 			Promise.resolve(Response.json(payloadOf(notInPlanBucket("general"), notInPlanBucket("video"))));
 
-		expect(await minimaxCodeCnUsageProvider.fetchUsage(params("minimax-code-cn"), { fetch: fetchMock })).toBeNull();
+		expect(await minimaxCodeUsageProvider.fetchUsage(params("minimax-code"), { fetch: fetchMock })).toBeNull();
 	});
 
 	test("keeps a bucket whose windows disagree about being in the plan", async () => {
@@ -298,7 +285,7 @@ describe("MiniMax Token Plan usage", () => {
 		for (const bucket of [meteredWeekly, meteredInterval]) {
 			const fetchMock: FetchImpl = () => Promise.resolve(Response.json(payloadOf(bucket)));
 
-			const report = await minimaxCodeCnUsageProvider.fetchUsage(params("minimax-code-cn"), { fetch: fetchMock });
+			const report = await minimaxCodeUsageProvider.fetchUsage(params("minimax-code"), { fetch: fetchMock });
 
 			expect(report?.limits.map(limit => limit.id)).toEqual(["video:4h", "video:7d"]);
 			expect(report?.metadata).not.toHaveProperty("unavailableModels");
@@ -312,12 +299,12 @@ describe("MiniMax Token Plan usage", () => {
 		expect(await minimaxCodeUsageProvider.fetchUsage(params("minimax-code"), { fetch: fetchMock })).toBeNull();
 	});
 
-	test("registers both Token Plan ids in AuthStorage's default usage resolver", async () => {
+	test("registers the Token Plan id in AuthStorage's default usage resolver", async () => {
 		const storage = new AuthStorage(emptyStore());
 		await storage.reload();
 		try {
 			expect(storage.usageProviderFor("minimax-code")).toBe(minimaxCodeUsageProvider);
-			expect(storage.usageProviderFor("minimax-code-cn")).toBe(minimaxCodeCnUsageProvider);
+			expect(storage.usageProviderFor("minimax-code-cn")).toBeUndefined();
 		} finally {
 			storage.close();
 		}
