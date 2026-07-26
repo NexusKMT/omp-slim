@@ -152,6 +152,17 @@ describe("config list output", () => {
 		expect(parsed["searxng.token"]).not.toHaveProperty("redacted");
 	});
 
+	it("does not report a cleared credential as configured", async () => {
+		// The settings panel persists "" when a credential is cleared and renders
+		// that as unset; `config list` must agree, or a cleared token looks set.
+		await runConfigCommand({ action: "set", key: "searxng.token", value: SECRET, flags: { json: true } });
+		await runConfigCommand({ action: "set", key: "searxng.token", value: "", flags: { json: true } });
+		const output = await humanList();
+		expect(output).not.toContain("searxng.token = ********");
+		const { parsed } = await jsonList();
+		expect(parsed["searxng.token"]).not.toHaveProperty("redacted");
+	});
+
 	it("leaves the Hindsight server URL readable", async () => {
 		// It sits beside the API token under the same display condition, and is an
 		// ordinary endpoint: masking it hides a value users need to inspect.

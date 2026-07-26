@@ -287,12 +287,14 @@ async function handleList(flags: { json?: boolean }): Promise<void> {
 		//
 		// Redaction is driven by the value, not by classification alone. Marking an
 		// unset credential as redacted would report every fresh install as having
-		// one configured, which leaks the opposite of what redaction is for.
+		// one configured, which leaks the opposite of what redaction is for. The
+		// settings panel persists "" when a credential is cleared and renders that
+		// as unset; the same semantics apply here (credentials are all strings).
 		const result: Record<string, { value?: unknown; redacted?: true; type: string; description: string }> = {};
 		for (const def of defs) {
 			const value = settings.get(def.path);
 			result[def.path] =
-				isCredential(def.path) && value !== undefined
+				isCredential(def.path) && value
 					? { redacted: true, type: def.type, description: def.description }
 					: { value, type: def.type, description: def.description };
 		}
@@ -321,10 +323,11 @@ async function handleList(flags: { json?: boolean }): Promise<void> {
 		for (const def of groups[group]) {
 			// `list` dumps every value without anyone asking for a specific
 			// credential, so redact here. `get <path>` stays an explicit
-			// single-value request and is left alone. An unset credential keeps its
-			// ordinary empty rendering: masking it would imply one is configured.
+			// single-value request and is left alone. An unset or cleared ("")
+			// credential keeps its ordinary rendering: masking it would imply one
+			// is configured.
 			const value = settings.get(def.path);
-			const valueStr = isCredential(def.path) && value !== undefined ? REDACTED : formatValue(value);
+			const valueStr = isCredential(def.path) && value ? REDACTED : formatValue(value);
 			const typeStr = getTypeDisplay(def);
 			console.log(`  ${chalk.white(def.path)} = ${valueStr} ${chalk.dim(typeStr)}`);
 		}
