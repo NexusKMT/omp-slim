@@ -38,10 +38,10 @@ Unlike `browser`, `computer` operates the entire visible host session. It can ac
 | `computer.enabled` | boolean | `false` | Register tool. |
 | `computer.backend` | `auto \| native` | `auto` | Both prohibit non-native fallback. |
 | `computer.display` | string | `all` | `all` or numeric native monitor ID. |
-| `computer.maxWidth` | number | `1920` | Maximum composite PNG width. Claude-family image transports cap the effective width at `1280`. |
-| `computer.maxHeight` | number | `1200` | Maximum composite PNG height. Claude-family image transports cap the effective height at `896`. |
+| `computer.maxWidth` | number | `1920` | Maximum composite PNG width. Image transports that cannot preserve original detail, including GitHub Copilot Responses and xAI OAuth, cap the effective width at `1280`; Claude-family models use the same cap as a compatibility fallback. |
+| `computer.maxHeight` | number | `1200` | Maximum composite PNG height. Those coordinate-safe transports cap the effective height at `896`; other models retain the configured limit. |
 
-The controller snapshots these settings into one `DesktopSessionOptions`. Crossing the Claude-family sizing boundary during a model switch recreates the controller, resnapshots the options, and invalidates the prior coordinate frame; the next pointer action requires a fresh screenshot.
+The controller snapshots these settings into one `DesktopSessionOptions`. Crossing the coordinate-safe sizing boundary during a model switch recreates the controller, resnapshots the options, and invalidates the prior coordinate frame; the next pointer action requires a fresh screenshot.
 
 ## Inputs
 

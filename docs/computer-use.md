@@ -46,7 +46,7 @@ omp config set computer.enabled true
 omp config get computer.enabled
 ```
 
-Inside a running session, the `/computer` slash command (`/computer`, `/computer on|off|status`) toggles the tool for that session only; it never writes settings files. Backend, display, and image-size settings snapshot when the desktop controller is created. A model switch that crosses the Claude-family sizing boundary recreates the controller and resnapshots those settings; changing config alone does not, so start a new session after a settings change.
+Inside a running session, the `/computer` slash command (`/computer`, `/computer on|off|status`) toggles the tool for that session only; it never writes settings files. Backend, display, and image-size settings snapshot when the desktop controller is created. A model switch that crosses the coordinate-safe sizing boundary recreates the controller and resnapshots those settings; changing config alone does not, so start a new session after a settings change.
 
 ### Settings
 
@@ -55,8 +55,8 @@ Inside a running session, the `/computer` slash command (`/computer`, `/computer
 | `computer.enabled` | `false` | Register the essential `computer` tool. |
 | `computer.backend` | `auto` | `auto` or `native`. Both require a native backend; neither falls back to browser or software automation. |
 | `computer.display` | `all` | Composite every active display, or select one numeric native display ID. |
-| `computer.maxWidth` | `1920` | Maximum composite screenshot width in pixels. Claude-family image transports cap the effective width at `1280`; other models retain the configured limit. |
-| `computer.maxHeight` | `1200` | Maximum composite screenshot height in pixels. Claude-family image transports cap the effective height at `896`; other models retain the configured limit. |
+| `computer.maxWidth` | `1920` | Maximum composite screenshot width in pixels. Image transports that cannot preserve original detail, including GitHub Copilot Responses and xAI OAuth, cap the effective width at `1280`; Claude-family models use the same cap as a compatibility fallback. |
+| `computer.maxHeight` | `1200` | Maximum composite screenshot height in pixels. Those coordinate-safe transports cap the effective height at `896`; other models retain the configured limit. |
 
 The first successful result lists each display ID, name, logical rectangle, screenshot-pixel rectangle, scale, and primary status. Use one of those IDs as a string when you want a single display:
 
@@ -107,14 +107,14 @@ A batch containing only `screenshot` and `wait` is observation-only. Any click, 
 
 ## Screenshot coordinates and image mapping
 
-Always choose coordinates from the immediately preceding successful computer result returned by the current desktop controller. Every coordinate action in one batch maps through that same prior frame. A model switch that crosses the Claude-family sizing boundary recreates the controller and invalidates the prior frame, so capture a fresh screenshot before the next coordinate action. Do not use OS logical coordinates, CSS pixels, terminal cell positions, coordinates copied from another screenshot, or an in-batch `screenshot` marker as a new frame.
+Always choose coordinates from the immediately preceding successful computer result returned by the current desktop controller. Every coordinate action in one batch maps through that same prior frame. A model switch that crosses the coordinate-safe sizing boundary recreates the controller and invalidates the prior frame, so capture a fresh screenshot before the next coordinate action. Do not use OS logical coordinates, CSS pixels, terminal cell positions, coordinates copied from another screenshot, or an image resized after capture.
 
 For each capture, OMP:
 
 1. Enumerates the selected native displays and their global logical rectangles.
 2. Captures every selected display at native pixel density.
 3. Builds one logical bounding rectangle, including negative monitor origins.
-4. Chooses one render scale that preserves the desktop layout and stays within the configured `maxWidth` and `maxHeight` limits. Claude-family image transports additionally cap the effective frame at `1280×896`, below their verified resize threshold; other providers retain the configured limits.
+4. Chooses one render scale that preserves the desktop layout and stays within the configured `maxWidth` and `maxHeight` limits. Image transports that cannot preserve original detail, including GitHub Copilot Responses and xAI OAuth, additionally cap the effective frame at `1280×896`; Claude-family models use the same cap as a compatibility fallback, and other providers retain the configured limits.
 5. Places each resized display image into the composite and returns a PNG.
 
 Each result's `displays` metadata maps both spaces:
