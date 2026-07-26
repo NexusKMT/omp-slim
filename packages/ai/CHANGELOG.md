@@ -8,6 +8,10 @@
 - Added `GET /v1/credentials/disabled` to the auth broker and `AuthBrokerClient.listDisabledCredentials`: disabled-credential tombstones (`DisabledCredentialSummary` — identity, verbatim disable cause, disable timestamp; never token material) so auto-disabled accounts stay visible to clients instead of silently vanishing from the snapshot. `AuthStorage.listDisabledCredentials` serves the same data locally from SQLite; clients of brokers predating the endpoint get an empty list (404 mapped, no error).
 - Added `AuthStorage.revalidateCredentials()` and the optional `AuthCredentialStore.refreshSnapshot` hook: remote broker stores re-fetch `GET /v1/snapshot` on demand so callers pairing live per-credential data with stored identities (`omp usage`) never render against the up-to-an-hour-stale disk-cached snapshot; local SQLite stores are always current and only reload.
 
+### Fixed
+
+- Fixed a deterministic circular-import TDZ that crashed `packages/catalog`'s test process with `ReferenceError: Cannot access 'claudeCodeVersion' before initialization`: `registry/oauth/anthropic.ts` imported `claudeCodeVersion` from `providers/anthropic.ts`, which transitively pulls the registry back in (`providers/anthropic` → `stream` → `registry` → `registry/oauth/anthropic`), so the module-level `claude-code/${claudeCodeVersion}` bootstrap user-agent const read the binding while `providers/anthropic.ts` was still mid-initialization. `claudeCodeVersion` now lives in a zero-import leaf module (`providers/claude-code-version.ts`) that `providers/anthropic.ts`, `registry/oauth/anthropic.ts`, and `usage/claude.ts` all import from, removing the cycle at the source rather than deferring the read.
+
 ## [17.1.3] - 2026-07-24
 
 ### Fixed
