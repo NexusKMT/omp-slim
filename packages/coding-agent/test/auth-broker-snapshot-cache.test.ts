@@ -140,4 +140,40 @@ describe("discoverAuthStorage auth-broker snapshot cache", () => {
 			brokerStore.close();
 		}
 	});
+
+	test("prefers a reachable broker snapshot over a fresh cached snapshot", async () => {
+		const cachePath = path.join(tempDir, "snapshot.enc");
+		const brokerStore = await SqliteAuthCredentialStore.open(path.join(tempDir, "broker.db"));
+		brokerStore.saveApiKey(PROVIDER, "broker-api-key");
+		const brokerStorage = new AuthStorage(brokerStore);
+		await brokerStorage.reload();
+		let handle: AuthBrokerServerHandle | undefined;
+		let storage: AuthStorage | undefined;
+		try {
+			handle = startAuthBroker({
+				storage: brokerStorage,
+				bind: "127.0.0.1:0",
+				bearerTokens: [TOKEN],
+				disableRefresher: true,
+			});
+			process.env.OMP_AUTH_BROKER_URL = handle.url;
+			process.env.OMP_AUTH_BROKER_TOKEN = TOKEN;
+			process.env.OMP_AUTH_BROKER_SNAPSHOT_CACHE = cachePath;
+			process.env.OMP_AUTH_BROKER_SNAPSHOT_TTL_MS = "3600000";
+			await writeAuthBrokerSnapshotCache({
+				path: cachePath,
+				token: TOKEN,
+				url: handle.url,
+				snapshot: makeSnapshot(Date.now()),
+			});
+
+			storage = await discoverAuthStorage(tempDir);
+			expect(await storage.getApiKey(PROVIDER)).toBe("broker-api-key");
+		} finally {
+			storage?.close();
+			await handle?.close();
+			brokerStorage.close();
+			brokerStore.close();
+		}
+	});
 });
