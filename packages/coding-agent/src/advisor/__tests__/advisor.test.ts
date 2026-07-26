@@ -3941,20 +3941,30 @@ describe("advisor", () => {
 		it("notifies the host after the advisor persistently quarantines its output (issue #6661)", async () => {
 			const state: { messages: AgentMessage[]; error?: string } = { messages: [] };
 			let promptCalls = 0;
+			let shouldQuarantine = true;
 			const agent: AdvisorAgent = {
 				prompt: async input => {
 					promptCalls++;
 					state.messages.push({ role: "user", content: input, timestamp: Date.now() } as AgentMessage);
+					if (shouldQuarantine) {
+						state.messages.push({
+							role: "assistant",
+							content: [
+								{ type: "text", text: "The agent skipped the required plan step." },
+								{ type: "toolCall", id: `tc-${promptCalls}`, name: "bash", arguments: { command: "ls" } },
+							],
+							stopReason: "toolUse",
+							timestamp: Date.now(),
+						} as unknown as AgentMessage);
+						throw new AdvisorOutputQuarantinedError(
+							"Advisor response quarantined: requested unavailable tool bash",
+						);
+					}
 					state.messages.push({
 						role: "assistant",
-						content: [
-							{ type: "text", text: "The agent skipped the required plan step." },
-							{ type: "toolCall", id: `tc-${promptCalls}`, name: "bash", arguments: { command: "ls" } },
-						],
-						stopReason: "toolUse",
+						content: [{ type: "text", text: "ok" }],
 						timestamp: Date.now(),
 					} as unknown as AgentMessage);
-					throw new AdvisorOutputQuarantinedError("Advisor response quarantined: requested unavailable tool bash");
 				},
 				abort: () => {},
 				reset: () => {
@@ -3987,8 +3997,15 @@ describe("advisor", () => {
 			}
 
 			expect(promptCalls).toBeGreaterThanOrEqual(2);
-			expect(notifyFailures.length).toBeGreaterThanOrEqual(1);
-			expect(notifyFailures[0]).toContain("quarantined");
+			expect(notifyFailures).toEqual(["Advisor response quarantined: requested unavailable tool bash"]);
+			expect(runtime.failureNotified).toBe(true);
+
+			shouldQuarantine = false;
+			messages.push({ role: "user", content: "recovered", timestamp: 6 } as AgentMessage);
+			runtime.onTurnEnd(messages);
+			await settleUntil(() => runtime.backlog === 0);
+
+			expect(runtime.failureNotified).toBe(false);
 		});
 
 		it("drops the in-flight batch when a reset aborts the advisor prompt", async () => {

@@ -461,7 +461,6 @@ export class AdvisorRuntime {
 
 	#clearAdvisorContextAtCurrentCursor(): void {
 		this.#consecutiveFailures = 0;
-		this.#failureNotified = false;
 		this.#clearSeenContext();
 		try {
 			this.agent.reset();
@@ -517,6 +516,7 @@ export class AdvisorRuntime {
 		this.#failing = false;
 		this.#droppedBacklogs = 0;
 		this.#consecutiveQuarantines = 0;
+		this.#failureNotified = false;
 		this.#resetAdvisorContext(true, true);
 	}
 
