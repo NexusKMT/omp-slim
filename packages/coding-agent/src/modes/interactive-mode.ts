@@ -3713,6 +3713,17 @@ export class InteractiveMode implements InteractiveModeContext {
 			return;
 		}
 
+		// resolveApprovedPlan may return a newer draft than the path recorded in
+		// plan-mode state. `AgentSession.#buildPlanModeMessage()` reads that state,
+		// so if the operator refines (or dismisses and keeps planning) the next
+		// planning turn must target the plan just reviewed — promote the reviewed
+		// path into plan-mode state now, mirroring the print-mode approval handler.
+		const planState = this.session.getPlanModeState();
+		if (planState?.enabled && planState.planFilePath !== planFilePath) {
+			this.session.setPlanModeState({ ...planState, planFilePath });
+			this.sessionManager.appendModeChange("plan", { planFilePath });
+		}
+
 		const contextUsage = this.#getPlanApprovalContextUsage();
 		const keepContextLabel = this.#formatKeepContextLabel(contextUsage);
 		const keepContextDisabled = this.#isKeepContextDisabled(contextUsage);

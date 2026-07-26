@@ -35,6 +35,9 @@
 ### Fixed
 
 - Fixed legacy pi extensions failing extension validation when importing `estimateTokens` from `@earendil-works/pi-coding-agent` (aliased to the legacy shim). Legacy pi re-exported `estimateTokens` from its coding-agent package root; in omp it lives in `@oh-my-pi/pi-agent-core/compaction` and the coding-agent barrel does not forward it, so the shim's `export * from "../index"` left it off the surface and a named import threw Bun's static "Export named 'estimateTokens' not found" error (e.g. `omp plugin install pi-blackhole`). The shim now re-exports it ([#6583](https://github.com/can1357/oh-my-pi/issues/6583)).
+### Fixed
+
+- Fixed plan approval presenting a completed plan instead of the newest draft when the submitted title did not match the draft filename ([#6569](https://github.com/can1357/oh-my-pi/issues/6569)).
 
 ## [17.1.3] - 2026-07-24
 
