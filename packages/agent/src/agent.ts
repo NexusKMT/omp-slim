@@ -975,11 +975,15 @@ export class Agent {
 		this.#followUpQueue = [];
 	}
 
+	clearDeferredToolChoice() {
+		this.#deferredToolChoice = undefined;
+	}
+
 	clearAllQueues() {
 		this.#steeringQueue = [];
 		this.#followUpQueue = [];
 		this.#notifySteeringWaiters();
-		this.#deferredToolChoice = undefined;
+		this.clearDeferredToolChoice();
 	}
 
 	hasQueuedMessages(): boolean {

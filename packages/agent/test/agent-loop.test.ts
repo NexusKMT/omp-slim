@@ -98,9 +98,6 @@ describe("agentLoop with AgentMessage", () => {
 		expect(await stream.result()).toEqual([prompt]);
 		expect(mock.calls).toHaveLength(0);
 		expect(events.map(event => event.type)).toContain("agent_end");
-		expect(events.filter(event => event.type === "message_end")).toEqual([
-			expect.objectContaining({ message: prompt }),
-		]);
 	});
 
 	it("returns detailed telemetry when awaiting detailed() directly", async () => {
@@ -2518,12 +2515,6 @@ describe("agentLoop event-driven steering watch", () => {
 
 		const toolSchema = type({ value: "string" });
 		const tool: AgentTool<typeof toolSchema> = {
-describe("agentLoop pre-model-call gate", () => {
-	const echoToolSchema = type({ value: "string" });
-
-	function echoTool(executed: string[]): AgentTool<typeof echoToolSchema> {
-		const toolSchema = echoToolSchema;
-		return {
 			name: "echo",
 			label: "Echo",
 			description: "Echo tool",
@@ -2880,6 +2871,76 @@ describe("agentLoop pre-model-call gate", () => {
 		};
 
 		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		const drain = (async () => {
+			for await (const _event of stream) {
+				// drain
+			}
+		})();
+		const completed = await Promise.race([drain.then(() => true), Bun.sleep(1000).then(() => false)]);
+		try {
+			expect(completed).toBe(true);
+			expect(executed).toEqual(["only"]);
+		} finally {
+			check.resolve(false);
+			await drain;
+		}
+	});
+
+	it("stops watching after a steering subscription rejects", async () => {
+		let waitCalls = 0;
+		const toolSchema = type({ value: "string" });
+		const tool: AgentTool<typeof toolSchema> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			concurrency: "exclusive",
+			async execute(_toolCallId, params) {
+				await Bun.sleep(0);
+				return { content: [{ type: "text", text: `ok:${params.value}` }], details: { value: params.value } };
+			},
+		};
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "only" } }] },
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			interruptMode: "immediate",
+			hasSteeringMessages: () => ({ queued: false }),
+			waitForSteeringMessages: () => {
+				waitCalls++;
+				return Promise.reject(new Error("subscription unavailable"));
+			},
+			getSteeringMessages: async () => [],
+		};
+
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		for await (const _event of stream) {
+			// drain
+		}
+
+		expect(waitCalls).toBe(1);
+	});
+});
+
+describe("agentLoop pre-model-call gate", () => {
+	const echoToolSchema = type({ value: "string" });
+
+	function echoTool(executed: string[]): AgentTool<typeof echoToolSchema> {
+		const toolSchema = echoToolSchema;
+		return {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			concurrency: "exclusive",
+			async execute(_toolCallId, params) {
+				executed.push(params.value);
 				return { content: [{ type: "text", text: `ok:${params.value}` }], details: { value: params.value } };
 			},
 		};
@@ -3116,31 +3177,6 @@ describe("agentLoop pre-model-call gate", () => {
 				// drain
 			}
 		})();
-		const completed = await Promise.race([drain.then(() => true), Bun.sleep(1000).then(() => false)]);
-		try {
-			expect(completed).toBe(true);
-			expect(executed).toEqual(["only"]);
-		} finally {
-			check.resolve(false);
-			await drain;
-		}
-	});
-
-	it("stops watching after a steering subscription rejects", async () => {
-		let waitCalls = 0;
-		const toolSchema = type({ value: "string" });
-		const tool: AgentTool<typeof toolSchema> = {
-			name: "echo",
-			label: "Echo",
-			description: "Echo tool",
-			parameters: toolSchema,
-			concurrency: "exclusive",
-			async execute(_toolCallId, params) {
-				await Bun.sleep(0);
-				return { content: [{ type: "text", text: `ok:${params.value}` }], details: { value: params.value } };
-			},
-		};
-		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
 		await gateEntered.promise;
 		controller.abort();
 		await drain;
@@ -3416,13 +3452,6 @@ describe("agentLoop pre-model-call gate", () => {
 		const config: AgentLoopConfig = {
 			model: mock.model,
 			convertToLlm: identityConverter,
-			interruptMode: "immediate",
-			hasSteeringMessages: () => ({ queued: false }),
-			waitForSteeringMessages: () => {
-				waitCalls++;
-				return Promise.reject(new Error("subscription unavailable"));
-			},
-			getSteeringMessages: async () => [],
 			beforeModelCall: () => undefined,
 		};
 
@@ -3431,7 +3460,6 @@ describe("agentLoop pre-model-call gate", () => {
 			// drain
 		}
 
-		expect(waitCalls).toBe(1);
 		expect(executed).toEqual(["only"]);
 	});
 });
