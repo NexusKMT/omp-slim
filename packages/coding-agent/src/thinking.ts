@@ -146,14 +146,21 @@ export function concreteThinkingLevel(level: ConfiguredThinkingLevel | undefined
 /**
  * True when a prewalk hand-off from `current`/`currentLevel` to
  * `target`/`targetLevel` would change nothing observable: same model id and the
- * same effective thinking level. Prewalk arms and switches only when this is
- * false.
+ * same model-clamped effective effort. Prewalk arms and switches only when this
+ * is false.
  *
  * An effort-only delta on the same model id is a legitimate cheapening hand-off
  * — on a reasoning model the effort is the bulk of the cost — so it is NOT a
  * no-op and must still switch. A `targetLevel` of `undefined` means the prewalk
  * pattern carried no explicit `:level` suffix (no effort change requested),
  * which on the same model is a no-op.
+ *
+ * Efforts are compared AFTER model clamping, so a target the model cannot honor
+ * (e.g. `:xhigh` on a model capped at `high`) — which `setThinkingLevel` would
+ * clamp straight back to the active effort — is recognized as a no-op instead of
+ * triggering an ephemeral reset and the plan/checklist nudges for nothing.
+ * `auto` maps to a concrete `undefined`, which never clamp-equals a fixed
+ * effort, so toggling `auto` on the same model still counts as a change.
  */
 export function prewalkWouldBeNoop(
 	current: Model | undefined,
@@ -163,7 +170,10 @@ export function prewalkWouldBeNoop(
 ): boolean {
 	if (!modelsAreEqual(current, target)) return false;
 	if (targetLevel === undefined) return true;
-	return concreteThinkingLevel(targetLevel) === concreteThinkingLevel(currentLevel);
+	return (
+		resolveThinkingLevelForModel(target, concreteThinkingLevel(targetLevel)) ===
+		resolveThinkingLevelForModel(target, concreteThinkingLevel(currentLevel))
+	);
 }
 
 /** Metadata used to render the `auto` selector value alongside concrete levels. */

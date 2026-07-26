@@ -657,4 +657,53 @@ describe("AgentSession prewalk", () => {
 		// The checklist steer only fires on a real switch.
 		expect(calls.every(call => !call.hasChecklist)).toBe(true);
 	});
+
+	it("treats a target effort the model clamps back to the active effort as a no-op", async () => {
+		// Review edge case: a model capped at `high` running at `high` with a
+		// prewalk target of `xhigh`. The raw selectors differ, but the target
+		// clamps to `high`, so switching would reset the model and inject the
+		// nudges for no effective change — it must be recognized as a no-op.
+		const model = modelOrThrow("claude-sonnet-4-6"); // supported efforts cap at high
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
+		const checklistMarker = "grep for every other call site";
+
+		const mock = createMockModel({
+			responses: [toolCall("t1", "record"), toolCall("t2", "write"), { content: ["done"] }],
+		});
+		const calls: Array<{ hasChecklist: boolean }> = [];
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: {
+				model,
+				systemPrompt: ["Test"],
+				tools: [recordTool as AgentTool, writeTool as AgentTool],
+				messages: [],
+				thinkingLevel: Effort.High,
+			},
+			convertToLlm,
+			streamFn: (streamModel, context, options) => {
+				calls.push({ hasChecklist: contextMessagesHaveMarker(context.messages, checklistMarker) });
+				return mock.stream(streamModel, context, options);
+			},
+		});
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated({ "compaction.enabled": false }),
+			modelRegistry,
+			toolRegistry,
+			thinkingLevel: Effort.High,
+			prewalk: { target: model, thinkingLevel: Effort.XHigh },
+		});
+		const notices: string[] = [];
+		session.subscribe(event => {
+			if (event.type === "notice" && event.source === "prewalk") notices.push(event.message);
+		});
+
+		await session.prompt("do the task");
+
+		expect(session.thinkingLevel).toBe(Effort.High);
+		expect(notices.some(message => message.includes("nothing to switch"))).toBe(true);
+		expect(calls.every(call => !call.hasChecklist)).toBe(true);
+	});
 });
