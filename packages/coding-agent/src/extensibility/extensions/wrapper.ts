@@ -257,7 +257,8 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 			}
 		}
 
-		// 2. Emit tool_call event - extensions can block execution
+		// 2. Emit tool_call event - extensions can block execution or revise the input the tool runs with
+		let effectiveParams = params;
 		if (this.runner.hasHandlers("tool_call")) {
 			try {
 				const callResult = (await this.runner.emitToolCall({
@@ -274,6 +275,13 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 					const reason = callResult.reason || "Tool execution was blocked by an extension";
 					throw new Error(reason);
 				}
+				// A non-blocking handler may replace the execution input. The returned object is the raw
+				// input passed to `execute` (handler-owned; not re-normalized). Skipped for `computer`
+				// tool calls, whose event input is a synthetic {actions,pendingSafetyChecks} view
+				// (see toolEventArgs) rather than the real execution params.
+				if (callResult?.input !== undefined && context?.toolCall?.providerMetadata?.type !== "computer") {
+					effectiveParams = callResult.input as typeof params;
+				}
 			} catch (err) {
 				if (err instanceof Error) {
 					throw err;
@@ -287,7 +295,7 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 		let executionError: Error | undefined;
 
 		try {
-			result = await this.tool.execute(toolCallId, params, signal, onUpdate, context);
+			result = await this.tool.execute(toolCallId, effectiveParams, signal, onUpdate, context);
 		} catch (err) {
 			executionError = err instanceof Error ? err : new Error(String(err));
 			result = {
@@ -304,7 +312,7 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 				toolCallId,
 				input: normalizeToolEventInput(
 					this.tool.name,
-					resolveToolEventInput(this.tool, toolEventArgs(params, context)),
+					resolveToolEventInput(this.tool, toolEventArgs(effectiveParams, context)),
 				),
 				content: result.content,
 				details: result.details,

@@ -1862,6 +1862,112 @@ describe("ExtensionRunner", () => {
 				},
 			]);
 		});
+
+		// A tool that records the exact params it executed with, so an input override is observable.
+		function createRecordingTool(recordPath: string): AgentTool {
+			return {
+				name: "bash",
+				label: "Bash",
+				description: "Test bash tool",
+				parameters: Type.Object({ command: Type.String() }),
+				strict: true,
+				execute: async (_id: string, params: unknown) => {
+					fs.appendFileSync(recordPath, `${JSON.stringify(params)}\n`);
+					return { content: [{ type: "text", text: "ran" }] };
+				},
+			} as AgentTool;
+		}
+
+		it("executes the tool with a non-blocking handler's replacement input", async () => {
+			const recordPath = path.join(tempDir.path(), "override-executed.jsonl");
+			const extCode = `
+				export default function(pi) {
+					pi.on("tool_call", async (event) => {
+						if (event.toolName !== "bash") return;
+						return { input: { command: "echo revised" } };
+					});
+				}
+			`;
+			fs.writeFileSync(path.join(extensionsDir, "tool-call-override.ts"), extCode);
+
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const wrapped = new ExtensionToolWrapper(createRecordingTool(recordPath), runner);
+
+			const resultMessage = await wrapped.execute("tool-call-id", { command: "echo original" });
+
+			expect(resultMessage.content).toEqual([{ type: "text", text: "ran" }]);
+			const executed = fs
+				.readFileSync(recordPath, "utf8")
+				.trim()
+				.split("\n")
+				.map(line => JSON.parse(line));
+			expect(executed).toEqual([{ command: "echo revised" }]);
+		});
+
+		it("ignores a replacement input when the handler also blocks", async () => {
+			const recordPath = path.join(tempDir.path(), "override-blocked.jsonl");
+			const extCode = `
+				export default function(pi) {
+					pi.on("tool_call", async (event) => {
+						if (event.toolName !== "bash") return;
+						return { block: true, reason: "nope", input: { command: "echo revised" } };
+					});
+				}
+			`;
+			fs.writeFileSync(path.join(extensionsDir, "tool-call-override-blocked.ts"), extCode);
+
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const wrapped = new ExtensionToolWrapper(createRecordingTool(recordPath), runner);
+
+			await expect(wrapped.execute("tool-call-id", { command: "echo original" })).rejects.toThrow("nope");
+			expect(fs.existsSync(recordPath)).toBe(false); // tool never executed
+		});
+
+		it("executes with the original input when no handler returns a replacement", async () => {
+			const recordPath = path.join(tempDir.path(), "override-absent.jsonl");
+			const extCode = `
+				export default function(pi) {
+					pi.on("tool_call", async (event) => {
+						if (event.toolName !== "bash") return;
+						// observe only; no input override
+					});
+				}
+			`;
+			fs.writeFileSync(path.join(extensionsDir, "tool-call-no-override.ts"), extCode);
+
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const wrapped = new ExtensionToolWrapper(createRecordingTool(recordPath), runner);
+
+			await wrapped.execute("tool-call-id", { command: "echo original" });
+
+			const executed = fs
+				.readFileSync(recordPath, "utf8")
+				.trim()
+				.split("\n")
+				.map(line => JSON.parse(line));
+			expect(executed).toEqual([{ command: "echo original" }]);
+		});
 	});
 	describe("hasHandlers", () => {
 		it("returns true when handlers exist for event type", async () => {

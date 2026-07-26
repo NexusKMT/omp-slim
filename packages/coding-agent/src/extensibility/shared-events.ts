@@ -287,13 +287,22 @@ export interface TodoReminderEvent {
 
 /**
  * Return type for `tool_call` handlers.
- * Allows handlers to block tool execution.
+ * Allows handlers to block tool execution or revise the input the tool runs with.
  */
 export interface ToolCallEventResult {
 	/** If true, block the tool from executing */
 	block?: boolean;
 	/** Reason for blocking (returned to LLM as error) */
 	reason?: string;
+	/**
+	 * Replacement input the tool executes with, instead of the original arguments. Ignored when
+	 * `block` is true. This is the raw execution input passed to the tool's `execute` (the handler
+	 * owns its correctness) — not the normalized `event.input` view, which may carry derived
+	 * gate-only fields (e.g. hashline `edit` `path`/`paths`) that are not real parameters. When
+	 * multiple handlers set `input`, the last one wins; handlers do not observe each other's
+	 * revisions (each sees the original `event.input`). Not applied to `computer` tool calls.
+	 */
+	input?: Record<string, unknown>;
 }
 
 /**
