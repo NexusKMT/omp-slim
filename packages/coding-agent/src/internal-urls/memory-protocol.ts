@@ -88,15 +88,13 @@ export function splitMemoryGlobPattern(input: string): MemoryGlobPattern {
 		throw toMemoryValidationError(error);
 	}
 
-	const decodedSegments = relativePath.split("/");
-	const firstGlobIndex = decodedSegments.findIndex(segment =>
-		["*", "?", "[", "{"].some(char => segment.includes(char)),
-	);
+	const rawSegments = rawPathname.replace(/^\//, "").split("/");
+	const firstGlobIndex = rawSegments.findIndex(segment => ["*", "?", "[", "{"].some(char => segment.includes(char)));
 	if (firstGlobIndex === -1) {
 		throw new Error(`memory:// URL does not contain a glob pattern: ${input}`);
 	}
 
-	const rawSegments = rawPathname.replace(/^\//, "").split("/");
+	const decodedSegments = relativePath.split("/");
 	const rawBasePath = rawSegments.slice(0, firstGlobIndex).join("/") || ".";
 	return {
 		baseUrl: `memory://${namespace}/${rawBasePath}`,

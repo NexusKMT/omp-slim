@@ -192,7 +192,9 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 					if (!resource.sourcePath) {
 						throw new ToolError(`Cannot find internal URL without a backing file: ${memoryGlob.baseUrl}`);
 					}
-					normalizedPatterns.push(path.join(resource.sourcePath, memoryGlob.globPattern));
+					normalizedPatterns.push(
+						path.join(resource.sourcePath.replace(/[*?[{]/g, "[$&]"), memoryGlob.globPattern),
+					);
 					continue;
 				}
 				const resource = await internalRouter.resolve(rawPattern, {

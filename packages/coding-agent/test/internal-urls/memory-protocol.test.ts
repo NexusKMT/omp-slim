@@ -284,6 +284,21 @@ describe("MemoryProtocolHandler", () => {
 		});
 	});
 
+	it("resolves encoded literal glob characters before the wildcard boundary", async () => {
+		await withMemoryFixture(async ({ cwd, memoryRoot }) => {
+			const encodedLiteralDir = path.join(memoryRoot, "skills", "[demo]");
+			await fs.mkdir(encodedLiteralDir, { recursive: true });
+			await Bun.write(path.join(encodedLiteralDir, "SKILL.md"), "encoded literal directory");
+
+			const result = await createGlobTool(cwd).execute("memory-encoded-literal-glob", {
+				path: "memory://root/skills/%5Bdemo%5D/*.md",
+			});
+
+			expect(result.details?.files).toHaveLength(1);
+			expect(result.details?.files?.[0]).toEndWith("/skills/[demo]/SKILL.md");
+		});
+	});
+
 	it.each(["memory://root/skills/**/../*.md", "memory://root/skills/**/%2e%2e/*.md"])(
 		"rejects traversal in a memory glob suffix: %s",
 		async pattern => {
