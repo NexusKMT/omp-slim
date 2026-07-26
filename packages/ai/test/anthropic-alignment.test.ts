@@ -20,8 +20,8 @@ import {
 	streamAnthropic,
 	stripClaudeToolPrefix,
 } from "@oh-my-pi/pi-ai/providers/anthropic";
-import { claudeCodeVersion } from "@oh-my-pi/pi-ai/providers/claude-code-version";
 import type { MessageCreateParamsStreaming } from "@oh-my-pi/pi-ai/providers/anthropic-wire";
+import { claudeCodeVersion } from "@oh-my-pi/pi-ai/providers/claude-code-version";
 import { getEnvApiKey, streamSimple } from "@oh-my-pi/pi-ai/stream";
 import type {
 	AssistantMessage,

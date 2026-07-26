@@ -1377,7 +1377,7 @@ impl DesktopWorker {
 				}
 				Ok(())
 			},
-			DesktopWorker::capture,
+			Self::capture,
 		)
 	}
 }
