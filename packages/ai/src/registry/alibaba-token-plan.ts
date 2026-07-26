@@ -9,7 +9,8 @@ const TOKEN_PLAN_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com
 const loginApiKey = createApiKeyLogin({
 	providerLabel: "QwenCloud Token Plan",
 	authUrl: "https://home.qwencloud.com/billing/subscription/token-plan-individual",
-	instructions: "Subscribe to Token Plan Individual and copy its dedicated API key",
+	instructions:
+		"Subscribe to Token Plan Individual and copy its dedicated API key. Keep this page open; the next prompt explains how to enable optional quota reporting.",
 	promptMessage: "Paste your QwenCloud Token Plan API key",
 	placeholder: "sk-sp-...",
 	validation: {
@@ -24,14 +25,29 @@ export async function loginAlibabaTokenPlan(options: OAuthController): Promise<s
 		throw new AIError.OnPromptRequiredError("QwenCloud Token Plan");
 	}
 	const apiKey = await loginApiKey(options);
-	const cookie = await options.onPrompt({
+	const rawCookie = await options.onPrompt({
 		message:
-			"Paste the Cookie request header from home.qwencloud.com for optional quota reporting, or press Enter to skip",
-		placeholder: "login_aliyunid_csrf=...; ...",
+			"Optional quota reporting: open browser DevTools → Network, reload the Token Plan page, filter for api.json, and select the cs-data.qwencloud.com/data/api.json request whose api query ends in /tokenplan/personal/api/v2/usage. Copy Request Headers → Cookie, then paste the complete name=value; ... value here, or press Enter to skip.",
+		placeholder: "name=value; name=value; ...",
 		allowEmpty: true,
 	});
+	const cookie = rawCookie
+		.trim()
+		.replace(/^Cookie:\s*/i, "")
+		.trim();
 	if (options.signal?.aborted) {
 		throw new AIError.LoginCancelledError();
+	}
+	if (
+		cookie &&
+		!cookie.split(";").some(segment => {
+			const separator = segment.indexOf("=");
+			return separator > 0 && Boolean(segment.slice(0, separator).trim() && segment.slice(separator + 1).trim());
+		})
+	) {
+		throw new AIError.ConfigurationError(
+			"Invalid QwenCloud Cookie header. Copy the complete Cookie request header from the cs-data.qwencloud.com usage request, not a single cookie value.",
+		);
 	}
 	return serializeAlibabaTokenPlanCredential(apiKey, cookie);
 }
