@@ -75,7 +75,7 @@ describe("credential masking reaches every surface", () => {
  * so these drive the real command and read its real output.
  */
 describe("config list output", () => {
-	const SECRET = "sk-live-do-not-print-me";
+	const SECRET = "credential-value-not-for-output";
 	let agentDir: TempDir | undefined;
 	const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 	const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
@@ -112,14 +112,15 @@ describe("config list output", () => {
 
 	async function jsonList(): Promise<{ raw: string; parsed: Record<string, Record<string, unknown>> }> {
 		let raw = "";
-		const write = vi
-			.spyOn(process.stdout, "write")
-			.mockImplementation(((chunk: string | Uint8Array, ...rest: unknown[]) => {
-				raw += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-				const done = rest.find(argument => typeof argument === "function");
-				if (typeof done === "function") (done as (error?: Error | null) => void)(null);
-				return true;
-			}) as typeof process.stdout.write);
+		const write = vi.spyOn(process.stdout, "write").mockImplementation(((
+			chunk: string | Uint8Array,
+			...rest: unknown[]
+		) => {
+			raw += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+			const done = rest.find(argument => typeof argument === "function");
+			if (typeof done === "function") (done as (error?: Error | null) => void)(null);
+			return true;
+		}) as typeof process.stdout.write);
 		await runConfigCommand({ action: "list", flags: { json: true } });
 		write.mockRestore();
 		return { raw, parsed: JSON.parse(raw) as Record<string, Record<string, unknown>> };
