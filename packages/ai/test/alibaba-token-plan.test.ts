@@ -5,13 +5,14 @@ import { getOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 
 describe("QwenCloud Token Plan login", () => {
-	test("opens the Individual subscription page and validates without inference", async () => {
+	test("International (default) region opens Individual page and validates without inference", async () => {
 		const authRequests: { url: string; instructions?: string }[] = [];
 		let requestedUrl = "";
 		let authorization = "";
+		const prompts = ["1", " sk-sp-test "];
 		const apiKey = await loginAlibabaTokenPlan({
 			onAuth: request => authRequests.push(request),
-			onPrompt: async prompt => (prompt.allowEmpty ? "" : " sk-sp-test "),
+			onPrompt: async prompt => (prompt.allowEmpty ? "" : (prompts.shift() ?? "")),
 			fetch: (input, init) => {
 				requestedUrl = String(input);
 				authorization = new Headers(init?.headers).get("Authorization") ?? "";
@@ -19,6 +20,7 @@ describe("QwenCloud Token Plan login", () => {
 			},
 		});
 
+		// International (default) keeps the bare-token credential form.
 		expect(apiKey).toBe("sk-sp-test");
 		expect(authRequests).toEqual([
 			{
@@ -30,8 +32,54 @@ describe("QwenCloud Token Plan login", () => {
 		expect(authorization).toBe("Bearer sk-sp-test");
 	});
 
+	test("China (Beijing) region validates against and routes inference to cn-beijing", async () => {
+		const authRequests: { url: string; instructions?: string }[] = [];
+		let requestedUrl = "";
+		const prompts = ["2", "sk-sp-beijing"];
+		const credential = await loginAlibabaTokenPlan({
+			onAuth: request => authRequests.push(request),
+			onPrompt: async prompt => (prompt.allowEmpty ? "" : (prompts.shift() ?? "")),
+			fetch: input => {
+				requestedUrl = String(input);
+				return Promise.resolve(Response.json({ data: [{ id: "qwen3.7-plus" }] }));
+			},
+		});
+
+		expect(requestedUrl).toBe("https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/models");
+		expect(authRequests[0]?.url).toBe("https://www.aliyun.com/benefit/scene/tokenplan");
+		expect(JSON.parse(credential)).toEqual({
+			token: "sk-sp-beijing",
+			baseUrl: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+		});
+
+		const model = getBundledModel<"openai-completions">("alibaba-token-plan", "qwen3.7-plus");
+		if (!model) throw new Error("expected bundled QwenCloud Token Plan model");
+		const setup = resolveOpenAIRequestSetup(model, { apiKey: credential, messages: [] });
+		expect(setup.baseUrl).toBe("https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1");
+		expect(setup.headers.Authorization).toBe("Bearer sk-sp-beijing");
+	});
+
+	test("custom region is validated against and stored as its own base URL", async () => {
+		let requestedUrl = "";
+		const prompts = ["3", "https://token-plan.example.com/v1/", "sk-sp-custom"];
+		const credential = await loginAlibabaTokenPlan({
+			onAuth: () => {},
+			onPrompt: async prompt => (prompt.allowEmpty ? "" : (prompts.shift() ?? "")),
+			fetch: input => {
+				requestedUrl = String(input);
+				return Promise.resolve(Response.json({ data: [] }));
+			},
+		});
+
+		expect(requestedUrl).toBe("https://token-plan.example.com/v1/models");
+		expect(JSON.parse(credential)).toEqual({
+			token: "sk-sp-custom",
+			baseUrl: "https://token-plan.example.com/v1",
+		});
+	});
+
 	test("stores an optional console Cookie while sending only the API key to inference", async () => {
-		const prompts = ["sk-sp-test", "session_id=test; login_aliyunid_csrf=csrf-token"];
+		const prompts = ["1", "sk-sp-test", "session_id=test; login_aliyunid_csrf=csrf-token"];
 		const credential = await loginAlibabaTokenPlan({
 			onAuth: () => {},
 			onPrompt: async () => prompts.shift() ?? "",

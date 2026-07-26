@@ -17,7 +17,7 @@ import type { ModelManagerOptions } from "../model-manager";
 import { getBundledModels } from "../models";
 import type { Api, FetchImpl, Model, ModelSpec, OpenAICompat, Provider, ThinkingConfig } from "../types";
 import { discoveryFetch, isAnthropicOAuthToken, isRecord, toBoolean, toNumber, toPositiveNumber } from "../utils";
-import { parseAlibabaTokenPlanCredential } from "../wire/alibaba-token-plan";
+import { ALIBABA_TOKEN_PLAN_BASE_URL, parseAlibabaTokenPlanCredential } from "../wire/alibaba-token-plan";
 import { coreWeaveProjectHeaders } from "../wire/coreweave";
 import {
 	COPILOT_API_HEADERS,
@@ -2434,7 +2434,7 @@ export function alibabaCodingPlanModelManagerOptions(
 // Alibaba Token Plan
 // ---------------------------------------------------------------------------
 
-export const ALIBABA_TOKEN_PLAN_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1";
+export { ALIBABA_TOKEN_PLAN_BASE_URL };
 
 const ALIBABA_TOKEN_PLAN_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } as const;
 const ALIBABA_TOKEN_PLAN_COMPAT: OpenAICompat = {
@@ -2556,7 +2556,10 @@ export function alibabaTokenPlanModelManagerOptions(
 ): ModelManagerOptions<"openai-completions"> {
 	const credential = config?.apiKey ? parseAlibabaTokenPlanCredential(config.apiKey) : undefined;
 	const apiKey = credential?.token;
-	const baseUrl = config?.baseUrl ?? ALIBABA_TOKEN_PLAN_BASE_URL;
+	// A region-locked credential (China/custom) dictates the discovery endpoint:
+	// its key only authenticates against its own region, so fetching /models from
+	// any other base URL would 401 (#6682).
+	const baseUrl = credential?.baseUrl ?? config?.baseUrl ?? ALIBABA_TOKEN_PLAN_BASE_URL;
 	return {
 		providerId: "alibaba-token-plan",
 		dynamicModelsAuthoritative: true,
