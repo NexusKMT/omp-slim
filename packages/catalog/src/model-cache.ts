@@ -228,6 +228,7 @@ export function writeModelCache<TApi extends Api>(
 	staticFingerprint: string,
 	dbPath?: string,
 	staticHeaderSources: readonly Model<TApi>[] = [],
+	restorableHeaderFallback?: Record<string, string>,
 ): void {
 	try {
 		withModelCacheDb(dbPath, db => {
@@ -244,7 +245,14 @@ export function writeModelCache<TApi extends Api>(
 					// unrestorable and dropped on the next offline read (#6037, #6284).
 					const staticHeaderSource =
 						staticById.get(model.id) ?? (model.requestModelId ? staticById.get(model.requestModelId) : undefined);
-					if (!headersEqual(model.headers, staticHeaderSource?.headers)) {
+					// A model with no static source is still restorable when its live
+					// headers equal the provider's trusted constant (a compile-time,
+					// non-credential value the reader can reattach by value). This keeps
+					// reference-less Copilot models (e.g. claude-opus-5) alive offline.
+					const matchesStatic = staticHeaderSource
+						? headersEqual(model.headers, staticHeaderSource.headers)
+						: headersEqual(model.headers, restorableHeaderFallback);
+					if (!matchesStatic) {
 						unrestorableHeaderModelIds.push(model.id);
 					}
 				}

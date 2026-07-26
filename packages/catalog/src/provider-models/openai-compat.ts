@@ -4279,6 +4279,13 @@ export function githubCopilotModelManagerOptions(config?: GithubCopilotModelMana
 	return {
 		providerId: "github-copilot",
 		dropCachedModelIdsOnStaticMismatch: COPILOT_CACHE_INVALIDATED_MODEL_IDS,
+		// COPILOT_API_HEADERS are compile-time constants (User-Agent + API
+		// version), not credentials. The cache omits all request headers for
+		// safety and can only restore them from a bundled static entry — so a
+		// Copilot model with no bundled reference (e.g. a freshly served
+		// claude-opus-5 and its synthesized -1m sibling) is dropped on offline
+		// reads. Declaring the constant lets the cache restore it by value.
+		restorableHeaderFallback: { ...COPILOT_API_HEADERS },
 		...(apiKey && {
 			fetchDynamicModels: async () => {
 				const longContextVariants: ModelSpec<Api>[] = [];
@@ -4377,6 +4384,13 @@ export function githubCopilotModelManagerOptions(config?: GithubCopilotModelMana
 									contextWindow: defaultTierWindow,
 									maxTokens,
 									headers: { ...COPILOT_API_HEADERS },
+									// Copilot's `/models` advertises no reasoning bit, so a
+									// Claude model without a bundled reference would fall back
+									// to `reasoning: false` and lose its thinking dial. Every
+									// Claude on Copilot's anthropic-messages proxy reasons;
+									// mark it so `buildModel` derives the adaptive effort
+									// ladder from the id (e.g. a newly served claude-opus-5).
+									...(api === "anthropic-messages" ? { reasoning: true } : {}),
 									...(api === "openai-completions"
 										? {
 												compat: {
