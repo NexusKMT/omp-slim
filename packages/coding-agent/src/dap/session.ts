@@ -982,6 +982,9 @@ export class DapSessionManager {
 				);
 				threads = response?.threads ?? [];
 			} catch (error) {
+				// Caller cancellation is not an adapter failure: propagate it instead
+				// of degrading a cancelled call into a successful partial result.
+				if (signal?.aborted) throw error;
 				logger.warn("Failed to list threads for debug session", {
 					sessionId: target.id,
 					error: toErrorMessage(error),
