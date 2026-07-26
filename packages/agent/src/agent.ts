@@ -1375,6 +1375,15 @@ export class Agent {
 			const shouldEmitVisibleError = !stoppedForAbort;
 			const assistantPartial = partial?.role === "assistant" ? partial : undefined;
 			const hadAssistantStart = assistantPartial !== undefined;
+			// Same contract as the normal drain in `#emitCursorSplitAssistantMessage`:
+			// a transformer still in flight must be awaited before the payload is
+			// snapshotted, or its rewrite patches an entry this catch path already
+			// detached and the original is persisted instead. A provider error is
+			// exactly when a transform is most likely to be mid-flight.
+			const pendingTransforms = this.#cursorToolResultBuffer
+				.filter(entry => entry.pending !== undefined)
+				.map(entry => entry.pending);
+			if (pendingTransforms.length > 0) await Promise.all(pendingTransforms);
 			const bufferedCursorResults = this.#cursorToolResultBuffer.map(({ toolResult }) => toolResult);
 			const retainedToolCallIds = new Set(completedToolCallIds);
 			for (const { toolCallId } of bufferedCursorResults) retainedToolCallIds.add(toolCallId);

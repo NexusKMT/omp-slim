@@ -336,6 +336,63 @@ describe("Agent", () => {
 		});
 	});
 
+	it("persists the transformed payload when the stream fails mid-transform", async () => {
+		// The error drain snapshots the Cursor buffer just like the normal one, so
+		// it needs the same await: a transformer still in flight when the provider
+		// errors would otherwise patch an entry this path already detached, and
+		// the original payload is persisted instead. A provider error is exactly
+		// when a transform is most likely to be mid-flight.
+		const mock = createMockModel({ responses: [] });
+		const toolCall = {
+			type: "toolCall" as const,
+			id: "cursor-tool-err",
+			name: "shell",
+			arguments: { command: "pwd" },
+			[kCursorExecResolved]: true,
+		};
+		const started = createAssistantMessage([toolCall]);
+		const realToolResult: ToolResultMessage = {
+			role: "toolResult",
+			toolCallId: toolCall.id,
+			toolName: toolCall.name,
+			content: [{ type: "text", text: "original" }],
+			isError: false,
+			timestamp: Date.now(),
+		};
+		// Held across the failure so the transform is guaranteed to still be
+		// pending when the catch path runs.
+		const gate = Promise.withResolvers<void>();
+		const agent = new Agent({
+			initialState: { model: mock.model, systemPrompt: ["Test"], tools: [], messages: [] },
+			cursorOnToolResult: async message => {
+				await gate.promise;
+				return { ...message, content: [{ type: "text" as const, text: "transformed" }] };
+			},
+			streamFn: (_model, _context, options) => {
+				const stream = new AssistantMessageEventStream();
+				queueMicrotask(() => {
+					// Fire-and-forget, exactly like the provider's data loop.
+					void options?.cursorOnToolResult?.(realToolResult);
+					stream.push({ type: "start", partial: started });
+					stream.fail(new Error("connection reset mid-transform"));
+				});
+				return stream;
+			},
+		});
+
+		const turn = agent.prompt("trigger");
+		await Bun.sleep(0);
+		gate.resolve();
+		await turn;
+
+		const toolResults = agent.state.messages.filter(message => message.role === "toolResult");
+		expect(toolResults).toHaveLength(1);
+		expect(toolResults[0]).toMatchObject({
+			toolCallId: toolCall.id,
+			content: [{ type: "text", text: "transformed" }],
+		});
+	});
+
 	it("buffers a Cursor result even with neither exec handlers nor a transformer", async () => {
 		// Both options are optional, but the Cursor provider resolves its native
 		// tools server-side regardless and marks those blocks
