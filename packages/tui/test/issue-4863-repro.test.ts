@@ -16,6 +16,12 @@ const PLATFORM_DESCRIPTOR = Object.getOwnPropertyDescriptor(process, "platform")
 const WSL_DISTRO_NAME = process.env.WSL_DISTRO_NAME;
 const TMUX = process.env.TMUX;
 
+// A full paint clears the viewport with ED2 (`CSI 2 J`), or — when it also
+// clears native scrollback — homes the cursor and emits ED3 (`CSI H CSI 3 J`)
+// without blanking first. Match either so the probe tracks the paint intent,
+// not one emitter's escape choice.
+const isFullPaint = (write: string): boolean => write.includes("\x1b[2J") || write.includes("\x1b[H\x1b[3J");
+
 class LargeContent implements Component {
 	#lines: string[];
 
@@ -71,7 +77,7 @@ describe("issue #4863: Ctrl+O full-view expand truncates the session on ConPTY",
 			tui.resetDisplay();
 			await term.waitForRender();
 
-			const resetPaint = writes.find(write => write.includes("\x1b[2J"));
+			const resetPaint = writes.find(isFullPaint);
 			expect(resetPaint).toBeDefined();
 			// The Ctrl+O replay must NOT hide the top of the session.
 			expect(resetPaint).not.toContain("older lines hidden");
@@ -97,7 +103,7 @@ describe("issue #4863: Ctrl+O full-view expand truncates the session on ConPTY",
 			tui.start({ clearScrollback: true });
 			await term.waitForRender();
 
-			const resumePaint = writes.find(write => write.includes("\x1b[2J"));
+			const resumePaint = writes.find(isFullPaint);
 			expect(resumePaint).toBeDefined();
 			// The first paint is a resume replay — it stays bounded.
 			expect(resumePaint).toContain("older lines hidden");
@@ -132,14 +138,14 @@ describe("issue #4863: Ctrl+O full-view expand truncates the session on ConPTY",
 			writes.length = 0;
 			tui.resetDisplay();
 			await term.waitForRender();
-			expect(writes.some(write => write.includes("\x1b[2J"))).toBe(false);
+			expect(writes.some(isFullPaint)).toBe(false);
 
 			// Then simulate /resume: the later bulk replace must still be bounded.
 			writes.length = 0;
 			tui.requestRender(true, { clearScrollback: true });
 			await term.waitForRender();
 
-			const replacePaint = writes.find(write => write.includes("\x1b[2J"));
+			const replacePaint = writes.find(isFullPaint);
 			expect(replacePaint).toBeDefined();
 			expect(replacePaint).toContain("older lines hidden");
 			expect(Buffer.byteLength(replacePaint ?? "", "utf8")).toBeLessThan(128 * 1024);
