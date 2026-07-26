@@ -84,6 +84,7 @@ import {
 	type RawMessageStreamEvent,
 	type TextBlockParam,
 } from "./anthropic-wire";
+import { claudeCodeVersion } from "./claude-code-version";
 import {
 	buildCopilotDynamicHeaders,
 	hasCopilotVisionInput,
@@ -464,7 +465,8 @@ function getCacheControl(
 }
 
 // Stealth mode: mimic Claude Code's request fingerprint.
-export const claudeCodeVersion = "2.1.165";
+// `claudeCodeVersion` is imported from "./claude-code-version" (leaf module) to
+// avoid a circular import with registry/oauth/anthropic.ts; see that file for detail.
 export const claudeAgentSdkVersion = "0.3.165";
 export const claudeClientVersion = "1.11187.4";
 export const claudeToolPrefix: string = "_";
