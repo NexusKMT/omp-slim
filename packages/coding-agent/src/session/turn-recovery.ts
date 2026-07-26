@@ -850,10 +850,18 @@ export class TurnRecovery {
 		if (!reasonlessAbort && !streamStall) return undefined;
 		if (reasonlessAbort && genericAbort) message.errorId = AIError.create(AIError.Flag.Abort);
 
+		// The Cursor server-execution marker gate applies only to the stream-stall
+		// path: an unmarked/unresolved Cursor block there means the server has not
+		// finished executing, so resuming would race it. A reasonless abort instead
+		// ends the turn and the agent loop pairs every un-run call (Cursor's unmarked
+		// `todo`/MCP blocks included) with a synthetic `executed: false` result, so
+		// the tool-result reconciliation below is the safety gate and the marker is
+		// irrelevant.
 		const resolvedToolCallIds: string[] = [];
 		for (const block of message.content) {
 			if (block.type !== "toolCall") continue;
 			if (
+				streamStall &&
 				message.provider === "cursor" &&
 				(!(kCursorExecResolved in block) || block[kCursorExecResolved] !== true)
 			) {
