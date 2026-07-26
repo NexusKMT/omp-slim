@@ -1804,6 +1804,38 @@ describe("Anthropic request fingerprint alignment", () => {
 		expect(modern.defaultHeaders["anthropic-beta"] ?? "").not.toContain("interleaved-thinking-2025-05-14");
 	});
 
+	it("adds the interleaved-thinking beta for adaptive models only on signing proxies", () => {
+		const adaptiveProxySpec: ModelSpec<"anthropic-messages"> = {
+			...ANTHROPIC_MODEL_SPEC,
+			id: "claude-opus-4-8",
+			name: "Claude Opus 4.8",
+			provider: "custom-anthropic",
+			baseUrl: "https://proxy.example.com/anthropic",
+			thinking: {
+				mode: "anthropic-adaptive",
+				efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
+				supportsDisplay: true,
+			},
+		};
+		const signingProxy = buildAnthropicClientOptions({
+			model: buildModel({
+				...adaptiveProxySpec,
+				provider: "cloudflare-ai-gateway",
+				baseUrl: "https://gateway.ai.cloudflare.com/v1/account/gateway/anthropic",
+			}),
+			apiKey: "sk-proxy-test",
+			interleavedThinking: true,
+		});
+		const nonSigningProxy = buildAnthropicClientOptions({
+			model: buildModel(adaptiveProxySpec),
+			apiKey: "sk-proxy-test",
+			interleavedThinking: true,
+		});
+
+		expect(signingProxy.defaultHeaders["anthropic-beta"]).toContain("interleaved-thinking-2025-05-14");
+		expect(nonSigningProxy.defaultHeaders["anthropic-beta"] ?? "").not.toContain("interleaved-thinking-2025-05-14");
+	});
+
 	it("adds legacy fine-grained tool-streaming beta only for tool requests on incompatible models", () => {
 		const incompatibleModel: Model<"anthropic-messages"> = buildModel({
 			...ANTHROPIC_MODEL_SPEC,

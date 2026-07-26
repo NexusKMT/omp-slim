@@ -2850,7 +2850,8 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 	} = args;
 	const compat = model.compat;
 	const disableStrictTools = disableStrictToolsOverride ?? compat.disableStrictTools;
-	const needsInterleavedBeta = interleavedThinking && !model.thinking?.supportsDisplay;
+	const needsInterleavedBeta =
+		interleavedThinking && (!model.thinking?.supportsDisplay || (compat.signingEndpoint && !compat.officialEndpoint));
 	const oauthToken = isOAuth ?? isAnthropicOAuthToken(apiKey);
 	const baseUrl = resolveAnthropicBaseUrl(model, apiKey);
 	const supportsEagerToolInputStreaming = resolveEagerToolInputStreamingSupport(model, baseUrl);
