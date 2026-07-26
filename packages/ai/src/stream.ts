@@ -1465,6 +1465,7 @@ function mapOptionsForApi<TApi extends Api>(
 		promptCacheKey: options?.promptCacheKey,
 		streamFirstEventTimeoutMs: options?.streamFirstEventTimeoutMs,
 		streamIdleTimeoutMs: options?.streamIdleTimeoutMs,
+		codexSseMaxAttempts: options?.codexSseMaxAttempts,
 		providerSessionState: options?.providerSessionState,
 		maxInFlightRequests: options?.maxInFlightRequests,
 		onPayload: options?.onPayload,

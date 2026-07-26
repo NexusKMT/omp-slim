@@ -13,7 +13,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 import { Agent, type StreamFn } from "@oh-my-pi/pi-agent-core";
-import type { Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
+import type { FetchImpl, Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
 import { streamSimple } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -73,7 +73,7 @@ describe("AgentSession advisor provider-options parity", () => {
 		} catch {}
 	});
 
-	it("inherits streamFn, promptCacheKey, and providerSessionState from the session", () => {
+	it("wraps the inherited streamFn and preserves promptCacheKey and providerSessionState", () => {
 		const advisorStreamFn: StreamFn = (m, ctx, opts) => streamSimple(m, ctx, opts);
 		const mainAgent = new Agent({
 			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
@@ -93,11 +93,10 @@ describe("AgentSession advisor provider-options parity", () => {
 		const advisor = session.getAdvisorAgent();
 		if (!advisor) throw new Error("Expected advisor agent to be live");
 
-		// Stream wrapper from the SDK reaches the advisor — without it,
-		// `providers.openrouterVariant` would never be applied to advisor
-		// requests (issue #3639) and the Agent would fall back to bare
-		// `streamSimple`.
-		expect(advisor.streamFn).toBe(advisorStreamFn);
+		// The advisor keeps an SDK-provided stream function behind its own retry
+		// budget wrapper. The capture tests below prove delegation and option
+		// forwarding; identity must differ so the advisor can apply its cap.
+		expect(advisor.streamFn).not.toBe(advisorStreamFn);
 		expect(advisor.streamFn).not.toBe(streamSimple);
 
 		// Shared transport / fast-mode state map keeps Codex websockets and
@@ -173,6 +172,44 @@ describe("AgentSession advisor provider-options parity", () => {
 		expect(opts.promptCacheKey).toBe(advisor.sessionId);
 		expect(opts.providerSessionState).toBe(session.providerSessionState);
 		expect(opts.preferWebsockets).toBe(true);
+	});
+
+	it("caps Codex SSE attempts inside each advisor-level retry", async () => {
+		authStorage.setRuntimeApiKey("openai-codex", "test-key");
+		const capturedStreamOptions: Array<SimpleStreamOptions | undefined> = [];
+		const capturedModels: Model[] = [];
+		let requestCount = 0;
+		const fetchMock: FetchImpl = async () => {
+			requestCount += 1;
+			throw new TypeError("The socket connection was closed unexpectedly");
+		};
+		const captureStreamFn: StreamFn = (requestModel, context, opts) => {
+			capturedModels.push(requestModel);
+			capturedStreamOptions.push(opts);
+			return streamSimple(requestModel, context, { ...opts, preferWebsockets: false, fetch: fetchMock });
+		};
+		const mainAgent = new Agent({
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+		});
+		session = new AgentSession({
+			agent: mainAgent,
+			sessionManager,
+			settings: settings(),
+			modelRegistry,
+			advisorTools: [],
+			advisorStreamFn: captureStreamFn,
+		});
+		session.settings.setModelRole("advisor", "openai-codex/gpt-5.6-sol");
+		expect(session.setAdvisorEnabled(true)).toBe(true);
+
+		const advisor = session.getAdvisorAgent();
+		if (!advisor) throw new Error("Expected advisor agent to be live");
+		await advisor.prompt("ping").catch(() => {});
+
+		expect(capturedModels[0]?.api).toBe("openai-codex-responses");
+		expect(capturedStreamOptions[0]?.codexSseMaxAttempts).toBe(1);
+		expect(requestCount).toBe(1);
+		expect(advisor.state.error).toContain("socket connection was closed unexpectedly");
 	});
 
 	it("reuses the main agent's providerPromptCacheKey unchanged so tan/shared sessions stay on the parent shard", () => {

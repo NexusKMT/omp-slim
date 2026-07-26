@@ -30,7 +30,7 @@ import type {
 	ServiceTier,
 	SimpleStreamOptions,
 } from "@oh-my-pi/pi-ai";
-import { isUsageLimitOutcome, resolveModelServiceTier } from "@oh-my-pi/pi-ai";
+import { isUsageLimitOutcome, resolveModelServiceTier, streamSimple } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { extractHttpStatusFromError, extractRetryHint, logger } from "@oh-my-pi/pi-utils";
@@ -95,6 +95,7 @@ import { formatSessionHistoryMarkdown } from "./session-history-format";
 import type { SessionManager } from "./session-manager";
 import type { YieldQueue } from "./yield-queue";
 
+const ADVISOR_CODEX_SSE_MAX_ATTEMPTS = 1;
 /** Advisor statistics for the advisor status command. */
 export interface AdvisorStats {
 	configured: boolean;
@@ -644,6 +645,15 @@ export class SessionAdvisors {
 				tools: advisorToolMap,
 				allowNativeDelete: advisorCanMutateFiles,
 			});
+			const baseAdvisorStreamFn = this.#advisorStreamFn ?? streamSimple;
+			const advisorStreamFn: StreamFn = (requestModel, context, options) =>
+				baseAdvisorStreamFn(
+					requestModel,
+					context,
+					requestModel.api === "openai-codex-responses"
+						? { ...options, codexSseMaxAttempts: ADVISOR_CODEX_SSE_MAX_ATTEMPTS }
+						: options,
+				);
 			const advisorAgent = new Agent({
 				initialState: {
 					systemPrompt,
@@ -659,7 +669,7 @@ export class SessionAdvisors {
 				cwdResolver: () => this.#host.sessionManager.getCwd(),
 				preferWebsockets: this.#host.preferWebsockets,
 				getApiKey: requestModel => this.#host.modelRegistry.resolver(requestModel, advisorProviderSessionId),
-				streamFn: this.#advisorStreamFn,
+				streamFn: advisorStreamFn,
 				onPayload: this.#host.onPayload,
 				onResponse: this.#host.onResponse,
 				onSseEvent: this.#host.onSseEvent,
