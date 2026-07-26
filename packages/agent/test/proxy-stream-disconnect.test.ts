@@ -178,7 +178,6 @@ describe("streamProxy — server disconnect without terminal event", () => {
 				type: "done",
 				reason: "stop",
 				usage: { ...baseUsage },
-				content: [{ type: "text", text: "Hello" }],
 			},
 		];
 		const body = buildSseBody(events);
@@ -195,7 +194,7 @@ describe("streamProxy — server disconnect without terminal event", () => {
 
 		const result = await stream.result();
 		expect(result.stopReason).toBe("stop");
-		expect(result.content.length).toBeGreaterThan(0);
+		expect(result.content).toEqual([{ type: "text", text: "Hello" }]);
 	});
 
 	it("restores terminal blocks that have no proxy stream events", async () => {
@@ -256,7 +255,6 @@ describe("streamProxy — server disconnect without terminal event", () => {
 				reason: "error",
 				errorMessage: "rate_limit_exceeded",
 				usage: { ...baseUsage },
-				content: [{ type: "text", text: "Hel" }],
 			},
 		];
 		const body = buildSseBody(events);
@@ -274,6 +272,7 @@ describe("streamProxy — server disconnect without terminal event", () => {
 		const result = await stream.result();
 		expect(result.stopReason).toBe("error");
 		expect(result.errorMessage).toBe("rate_limit_exceeded");
+		expect(result.content).toEqual([{ type: "text", text: "Hel" }]);
 	});
 
 	it("does not leak partialJson when server disconnects mid-tool-call", async () => {

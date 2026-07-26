@@ -56,14 +56,14 @@ export type ProxyAssistantMessageEvent =
 			type: "done";
 			reason: Extract<StopReason, "stop" | "length" | "toolUse">;
 			usage: AssistantMessage["usage"];
-			content: AssistantMessage["content"];
+			content?: AssistantMessage["content"];
 	  }
 	| {
 			type: "error";
 			reason: Extract<StopReason, "aborted" | "error">;
 			errorMessage?: string;
 			usage: AssistantMessage["usage"];
-			content: AssistantMessage["content"];
+			content?: AssistantMessage["content"];
 	  };
 
 export interface ProxyStreamOptions extends SimpleStreamOptions {
@@ -374,7 +374,7 @@ function processProxyEvent(
 		case "done":
 			partial.stopReason = proxyEvent.reason;
 			partial.usage = proxyEvent.usage;
-			partial.content = proxyEvent.content;
+			if (proxyEvent.content !== undefined) partial.content = proxyEvent.content;
 			calculateCost(model, partial.usage);
 			scrubPartialJson(partial);
 			return { type: "done", reason: proxyEvent.reason, message: partial };
@@ -383,7 +383,7 @@ function processProxyEvent(
 			partial.stopReason = proxyEvent.reason;
 			partial.errorMessage = proxyEvent.errorMessage;
 			partial.usage = proxyEvent.usage;
-			partial.content = proxyEvent.content;
+			if (proxyEvent.content !== undefined) partial.content = proxyEvent.content;
 			calculateCost(model, partial.usage);
 			scrubPartialJson(partial);
 			return { type: "error", reason: proxyEvent.reason, error: partial };
