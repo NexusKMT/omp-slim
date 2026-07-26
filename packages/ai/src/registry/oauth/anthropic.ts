@@ -3,7 +3,7 @@
  */
 
 import * as AIError from "../../error";
-import { claudeCodeVersion } from "../../providers/anthropic-constants";
+import { claudeCodeVersion } from "../../providers/claude-code-fingerprint";
 import type { FetchImpl } from "../../types";
 import { OAuthCallbackFlow } from "./callback-server";
 import { generatePKCE } from "./pkce";
