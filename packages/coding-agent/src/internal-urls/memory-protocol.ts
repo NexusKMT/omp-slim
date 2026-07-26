@@ -57,13 +57,20 @@ export interface MemoryGlobPattern {
  * cannot escape a safely resolved base directory.
  */
 export function splitMemoryGlobPattern(input: string): MemoryGlobPattern {
-	const url = parseInternalUrl(input);
+	const urlMatch = input.match(/^([a-z][a-z0-9+.-]*:\/\/[^/?#]*)(\/.*)?$/i);
+	if (!urlMatch) {
+		throw new Error(`Invalid memory glob URL: ${input}`);
+	}
+
+	// Parse only the scheme and authority. A literal `?` in the path is glob
+	// syntax, not a query delimiter, and must survive unchanged.
+	const url = parseInternalUrl(urlMatch[1]);
 	const namespace = url.rawHost || url.hostname;
 	if (url.protocol !== "memory:" || namespace !== MEMORY_NAMESPACE) {
 		throw new Error(`Memory glob patterns require the ${MEMORY_NAMESPACE} namespace: ${input}`);
 	}
 
-	const rawPathname = url.rawPathname ?? url.pathname;
+	const rawPathname = urlMatch[2] ?? "";
 	if (/%(?:2f|5c)/i.test(rawPathname)) {
 		throw new Error(`Encoded path separators are not allowed in memory:// glob patterns: ${input}`);
 	}
