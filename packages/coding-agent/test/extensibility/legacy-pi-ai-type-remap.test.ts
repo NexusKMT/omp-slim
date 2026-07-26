@@ -192,6 +192,20 @@ describe("legacy-pi @(scope)/pi-ai root `Type` remap (issue #1437)", () => {
 		expect(loaded.models).toBe(getBundledModels);
 	});
 
+	it("exports clampThinkingLevel with the historical off fallback", async () => {
+		const loaded = await loadLegacyPiModule(
+			await writeFixtureExtension(
+				[
+					'import { clampThinkingLevel } from "@earendil-works/pi-ai";',
+					"export const supported = clampThinkingLevel({ reasoning: true, thinking: { efforts: ['low', 'high'] } }, 'high');",
+					"export const disabled = clampThinkingLevel({ reasoning: false }, 'high');",
+				].join("\n"),
+			),
+		);
+
+		expect(loaded).toMatchObject({ supported: "high", disabled: "off" });
+	});
+
 	it("exports StringEnum as a schema builder with options support", async () => {
 		const loaded = (await loadLegacyPiModule(
 			await writeFixtureExtension(
