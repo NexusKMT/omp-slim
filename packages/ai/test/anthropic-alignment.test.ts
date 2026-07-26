@@ -1852,11 +1852,23 @@ describe("Anthropic request fingerprint alignment", () => {
 			apiKey: "vertex-adc",
 			interleavedThinking: true,
 		});
+		// A custom provider on a Copilot host is signing, but the proxy rejects
+		// Anthropic betas outright and this path bypasses the provider branch.
+		const copilotUrlProxy = buildAnthropicClientOptions({
+			model: buildModel({
+				...adaptiveProxySpec,
+				provider: "custom-copilot",
+				baseUrl: "https://api.githubcopilot.com",
+			}),
+			apiKey: "ghu_test",
+			interleavedThinking: true,
+		});
 
 		expect(signingProxy.defaultHeaders["anthropic-beta"]).toContain("interleaved-thinking-2025-05-14");
 		expect(reroutedSigningProxy.defaultHeaders["anthropic-beta"]).toContain("interleaved-thinking-2025-05-14");
 		expect(nonSigningProxy.defaultHeaders["anthropic-beta"] ?? "").not.toContain("interleaved-thinking-2025-05-14");
 		expect(vertexRawPredict.defaultHeaders["anthropic-beta"] ?? "").not.toContain("interleaved-thinking-2025-05-14");
+		expect(copilotUrlProxy.defaultHeaders["anthropic-beta"] ?? "").not.toContain("interleaved-thinking-2025-05-14");
 	});
 
 	it("adds legacy fine-grained tool-streaming beta only for tool requests on incompatible models", () => {
