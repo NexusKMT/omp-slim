@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.1.4] - 2026-07-26
+
 ### Fixed
 
 - Fixed postmortem signal and fatal shutdown exits being intercepted by temporary `process.exit` guards during extension startup ([#6488](https://github.com/can1357/oh-my-pi/issues/6488)).
