@@ -290,6 +290,11 @@ describe("tool-owned dynamic approval declarations", () => {
 		expect(bashApproval("cd /tmp && rm -rf /tmp/scratch-b && echo done", settingsOverrides)).toEqual(denied);
 		expect(bashApproval("echo start; rm -rf /var/x", settingsOverrides)).toEqual(denied);
 		expect(bashApproval("cat f | rm -rf /var/x", settingsOverrides)).toEqual(denied);
+		// Single `&` (background) and subshells are command boundaries too.
+		expect(bashApproval("sleep 1 & rm -rf /tmp/scratch-b", settingsOverrides)).toEqual(denied);
+		expect(bashApproval("(rm -rf /tmp/scratch-b)", settingsOverrides)).toEqual(denied);
+		// Quotes around the binary do not hide it from a deny rule.
+		expect(bashApproval('cd /tmp && "rm" -rf /tmp/scratch-b', settingsOverrides)).toEqual(denied);
 
 		// Segments that do not match the glob must not be denied by it. `rm -rf`
 		// on a relative target has no leading `/`, so the `/`-anchored rule stays out.

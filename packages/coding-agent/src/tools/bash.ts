@@ -48,6 +48,7 @@ import {
 	previewWindowRows,
 	replaceTabs,
 } from "./render-utils";
+import { tokenizeShellSegments } from "./shell-tokenize";
 import { ToolAbortError, ToolError } from "./tool-errors";
 import { toolResult } from "./tool-result";
 import { clampTimeout, TOOL_TIMEOUTS } from "./tool-timeouts";
@@ -189,15 +190,13 @@ function commandMatchesBashApprovalPattern(command: string, pattern: string): bo
 	return bashApprovalPatternToRegExp(pattern).test(normalizedCommand);
 }
 
-// Shell operators that separate a compound command into independently executed
-// segments. `deny`/`prompt` rules are matched per segment so a dangerous command
-// buried in a compound line (`cd x && rm -rf /`) is still caught.
-const BASH_COMMAND_SEGMENT_RE = /&&|\|\||[;|\n\r]/u;
-
+// `deny`/`prompt` rules are matched per segment so a dangerous command buried in
+// a compound line (`cd x && rm -rf /`, `sleep 1 & rm -rf /`) is still caught.
+// Reuse the shared shell tokenizer so segmentation stays in one place and honors
+// every command boundary (`;`, `&&`, `||`, `|`, `&`, subshells, newlines).
 function bashCommandSegments(command: string): string[] {
-	return command
-		.split(BASH_COMMAND_SEGMENT_RE)
-		.map(segment => normalizeBashApprovalPattern(segment))
+	return tokenizeShellSegments(command)
+		.map(segment => segment.join(" "))
 		.filter(segment => segment.length > 0);
 }
 
