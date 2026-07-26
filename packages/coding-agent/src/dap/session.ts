@@ -961,11 +961,13 @@ export class DapSessionManager {
 		timeoutMs: number = 30_000,
 	): Promise<{ snapshot: DapSessionSummary; threads: DapThread[] }> {
 		const anchor = this.#touchActiveSession();
-		// A js-debug launch is a session tree: the root is a threadless launcher
-		// and each real thread lives in a child (main script, `[worker N]`, …).
-		// Querying only the active session would surface just one child's threads,
-		// so aggregate across every live thread-owning session in the tree.
-		const targets = this.#threadOwningSessions(anchor);
+		// A js-debug launch is a session tree: the root may be a threadless
+		// launcher while each real thread lives in a child (main script,
+		// `[worker N]`, …), and other adapters keep every thread on the root.
+		// Querying only the active session would surface just one session's
+		// threads, so aggregate across the whole live tree. No topology guess:
+		// a threadless launcher simply returns no threads (or an error we skip).
+		const targets = this.#liveTreeSessions(anchor);
 		const merged: DapThread[] = [];
 		const seen = new Set<string>();
 		for (const target of targets) {
@@ -1767,24 +1769,16 @@ export class DapSessionManager {
 	}
 
 	/**
-	 * Live sessions in `session`'s tree that can own threads. The threadless
-	 * root launcher (a js-debug coordinator with live children) is dropped when
-	 * any real child is alive, but kept as a last resort so a collapsed tree
-	 * still has a target.
+	 * Live (non-terminated, connected) sessions in `session`'s tree, or the
+	 * session itself when the tree has collapsed. Used to fan `threads` out
+	 * across the whole tree; a threadless session just reports no threads, so
+	 * this makes no assumption about which node owns them.
 	 */
-	#threadOwningSessions(session: DapSession): DapSession[] {
+	#liveTreeSessions(session: DapSession): DapSession[] {
 		const live = this.#getTreeSessions(session).filter(
 			candidate => candidate.status !== "terminated" && candidate.client.isAlive(),
 		);
-		if (live.length === 0) return [session];
-		const nonLauncher = live.filter(candidate => !this.#isLauncherSession(candidate, live));
-		return nonLauncher.length > 0 ? nonLauncher : live;
-	}
-
-	/** A root session that has spawned a still-live child is a threadless launcher. */
-	#isLauncherSession(session: DapSession, live: DapSession[]): boolean {
-		if (session.parentSessionId) return false;
-		return live.some(candidate => candidate.parentSessionId === session.id);
+		return live.length > 0 ? live : [session];
 	}
 
 	#touchSessionAndAncestors(session: DapSession): void {

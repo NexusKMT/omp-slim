@@ -223,7 +223,9 @@ describe("DAP multi-session debugging", () => {
 		expect(active?.parentSessionId).toBeDefined();
 		expect(threads.threads).toEqual([{ id: 7, name: "target.js" }]);
 		expect(child.requests.filter(request => request.command === "threads")).toHaveLength(1);
-		expect(root.requests.filter(request => request.command === "threads")).toHaveLength(0);
+		// The root is queried too (no topology guess); here it just echoes the
+		// same thread, which dedupes away.
+		expect(root.requests.filter(request => request.command === "threads")).toHaveLength(1);
 
 		await manager.terminate(undefined, 100);
 	});
@@ -262,12 +264,18 @@ describe("DAP multi-session debugging", () => {
 	});
 
 	it("keeps focus on the stopped script child when a worker attaches later", async () => {
-		const root = new FakeDapClient({
-			name: "script.mts",
-			type: "pwa-node",
-			__pendingTargetId: "main",
-			program: "/tmp/script.mts",
-		});
+		const root = new FakeDapClient(
+			{
+				name: "script.mts",
+				type: "pwa-node",
+				__pendingTargetId: "main",
+				program: "/tmp/script.mts",
+			},
+			"launch",
+			true,
+			// Threadless launcher: it answers `threads` with an empty list.
+			{ threads: [] },
+		);
 		// The script child stops on entry (thread 1), then a worker session
 		// attaches afterwards via a late reverse `startDebugging`.
 		const main = new FakeDapClient(undefined, "launch", true, {
@@ -308,14 +316,15 @@ describe("DAP multi-session debugging", () => {
 
 		// `threads` must surface every live thread across the tree, not just one.
 		const threads = await manager.threads(undefined, 1_000);
+		expect(threads.threads).toHaveLength(2);
 		expect(threads.threads).toEqual(
 			expect.arrayContaining([
 				{ id: 1, name: "script.mts" },
 				{ id: 1, name: "[worker 1]" },
 			]),
 		);
-		// The threadless launcher is never queried while real children are live.
-		expect(root.requests.filter(request => request.command === "threads")).toHaveLength(0);
+		// The launcher is still queried, but being threadless it contributes none.
+		expect(root.requests.filter(request => request.command === "threads")).toHaveLength(1);
 
 		await manager.terminate(undefined, 1_000);
 	});
