@@ -388,6 +388,29 @@ describe("extractImagePastePathsFromText (issue #6578)", () => {
 			expected: undefined,
 		},
 		{
+			name: "an absolute path followed by a dot-relative path with unescaped spaces",
+			text: "/tmp/a.png ./b shot.png",
+			expected: undefined,
+		},
+		{
+			name: "an absolute path followed by a parent-relative path with unescaped spaces",
+			text: "/tmp/a.png ../pics/b shot.png",
+			expected: undefined,
+		},
+		{
+			name: "a Windows drive path followed by a dot-relative path with unescaped spaces",
+			text: "C:\\Users\\me\\a.png .\\b shot.png",
+			expected: undefined,
+		},
+		{
+			// The interior `Photos/shot` token after an unescaped space is the
+			// shape of a spaced directory name, not of a second dragged path —
+			// this is why bare relatives are not multi-path anchors.
+			name: "a single path with an unescaped spaced directory name",
+			text: "/Users/me/My Photos/shot 1.png",
+			expected: ["/Users/me/My Photos/shot 1.png"],
+		},
+		{
 			// The escape asserts the space belongs to the path, so the `/sub`
 			// that follows is a component rather than a second drag payload.
 			name: "a path whose escaped space precedes a slash-led component",

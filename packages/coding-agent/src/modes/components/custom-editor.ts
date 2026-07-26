@@ -95,12 +95,18 @@ const ABSOLUTE_PATH_PREFIX_SOURCE = String.raw`(?:\/|~\/|file:\/\/|\\\\|[A-Za-z]
  */
 const ABSOLUTE_PATH_PREFIX_REGEX = new RegExp(`^${ABSOLUTE_PATH_PREFIX_SOURCE}`);
 /**
- * A second absolute-path anchor after *unescaped* whitespace — the signature of
- * a multi-path payload (`/tmp/a.png /tmp/b shot.png`) rather than of one path
- * whose name merely contains spaces. Escaped whitespace (`/tmp/My\ Photos/x.png`)
- * is exempt: the escape is the terminal asserting the space belongs to the path.
+ * A second path anchor after *unescaped* whitespace — the signature of a
+ * multi-path payload (`/tmp/a.png /tmp/b shot.png`, `/tmp/a.png ./b shot.png`)
+ * rather than of one path whose name merely contains spaces. Anchors are the
+ * absolute prefixes plus dot-relative starts (`./`, `../`, `.\`), which never
+ * begin a component of a single sane path. Bare relatives (`dir/b shot.png`)
+ * are deliberately NOT anchors: an interior `token/` after a space is exactly
+ * the shape of a single path with a spaced directory name
+ * (`/Users/me/My Photos/shot 1.png`), which this fallback exists to recover.
+ * Escaped whitespace (`/tmp/My\ Photos/x.png`) is exempt: the escape is the
+ * terminal asserting the space belongs to the path.
  */
-const INTERIOR_PATH_ANCHOR_REGEX = new RegExp(String.raw`(?<!\\)\s${ABSOLUTE_PATH_PREFIX_SOURCE}`);
+const INTERIOR_PATH_ANCHOR_REGEX = new RegExp(String.raw`(?<!\\)\s(?:${ABSOLUTE_PATH_PREFIX_SOURCE}|\.\.?[\\/])`);
 
 /** Max gap (ms) between two spaces for the later one to count as OS key auto-repeat rather than a
  *  deliberate press. OS auto-repeat is fast; a deliberate tap (even a fast one) is slower. */
