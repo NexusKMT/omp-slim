@@ -2363,7 +2363,10 @@ for details about the options it supports.";
 			// and error messages.
 			let resolved = pi_uutils_ctx::resolve(file);
 			if self.show_fs {
-				match win::statfs(&resolved) {
+				let result = fs::metadata(&resolved)
+					.map_err(|error| error.to_string())
+					.and_then(|_| win::statfs(&resolved));
+				match result {
 					Ok(meta) => {
 						for t in &self.default_tokens {
 							process_token_filesystem(t, &meta, &display_name);
@@ -2768,5 +2771,18 @@ mod win_tests {
 		let (code, _stdout, stderr) = run_in(root, vec!["-f", "-c", "%T", "data.bin"]);
 		assert_eq!(code, 0);
 		assert_eq!(stderr, "");
+	}
+
+	#[test]
+	fn file_system_mode_rejects_missing_file() {
+		let (_dir, root) = tempdir();
+
+		let (code, stdout, stderr) = run_in(root, vec!["-f", "-c", "%T", "missing.bin"]);
+		assert_eq!(code, 1);
+		assert_eq!(stdout, "");
+		assert!(
+			stderr.contains("cannot read file system information"),
+			"unexpected stderr: {stderr:?}"
+		);
 	}
 }
