@@ -1148,7 +1148,7 @@ export class Settings {
 			return this.#unwrapYamlLoadResult(filePath, result);
 		}
 		return await this.#withYamlWriteLock(filePath, async writePath =>
-			this.#loadYamlIfPresentForWriteLocked(filePath, writePath),
+			this.#loadYamlIfPresentForWriteLocked(filePath, writePath, true),
 		);
 	}
 
@@ -1157,8 +1157,17 @@ export class Settings {
 	 * moved aside before reporting failure, so a later write can never truncate
 	 * the only copy of the user's configuration.
 	 */
-	async #loadYamlIfPresentForWriteLocked(filePath: string, writePath: string): Promise<RawSettings | null> {
+	async #loadYamlIfPresentForWriteLocked(
+		filePath: string,
+		writePath: string,
+		rejectMissing = false,
+	): Promise<RawSettings | null> {
 		let result = await this.#loadYamlIfPresent(writePath);
+		if (result.kind === "missing" && rejectMissing) {
+			throw new Error(
+				`Settings config was invalid before locking and is now missing: ${filePath}; another process may have moved it aside`,
+			);
+		}
 		if (result.kind === "invalid") {
 			result = await this.#quarantineInvalidYamlLocked(writePath, result);
 			this.#quarantinedYamlTargets.set(filePath, writePath);

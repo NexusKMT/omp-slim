@@ -181,6 +181,30 @@ describe("Settings", () => {
 			expect(await Bun.file(path.join(agentDir, backupNames[0])).text()).toBe(original);
 		});
 
+		it("rejects when another process quarantines malformed config before the lock is acquired", async () => {
+			const configPath = getConfigPath();
+			const backupPath = `${configPath}.broken-other-process`;
+			const original = 'modelRoles:\n  default: "unterminated\n';
+			await Bun.write(configPath, original);
+			const withFileLock = fileLock.withFileLock;
+			let movedAside = false;
+			vi.spyOn(fileLock, "withFileLock").mockImplementation(async (filePath, fn, options) => {
+				if (!movedAside && filePath === configPath) {
+					await fs.promises.rename(configPath, backupPath);
+					movedAside = true;
+				}
+				return await withFileLock(filePath, fn, options);
+			});
+
+			await expect(Settings.init({ cwd: projectDir, agentDir })).rejects.toThrow(
+				"invalid before locking and is now missing",
+			);
+
+			expect(movedAside).toBe(true);
+			expect(await Bun.file(configPath).exists()).toBe(false);
+			expect(await Bun.file(backupPath).text()).toBe(original);
+		});
+
 		it("keeps malformed config in place for read-only loads", async () => {
 			const configPath = getConfigPath();
 			const original = 'modelRoles:\n  default: "unterminated\n';
