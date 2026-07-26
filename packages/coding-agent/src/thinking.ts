@@ -152,7 +152,7 @@ export interface ConfiguredThinkingLevelMetadata {
 const AUTO_THINKING_METADATA: ConfiguredThinkingLevelMetadata = {
 	value: AUTO_THINKING,
 	label: "auto",
-	description: "Auto-detect per prompt (low–xhigh)",
+	description: "Auto-detect per prompt",
 };
 
 /**
@@ -249,11 +249,13 @@ export function resolveTaskEffortLevel(model: Model | undefined, effort: TaskEff
 
 /**
  * The provisional concrete level shown while `auto` is configured but before a
- * turn has been classified. Prefers the model's `defaultLevel`, otherwise High,
- * clamped into the auto range. Auto never provisions {@link Effort.Max} (the
- * classifier ceiling is XHigh; only an explicit user request reaches Max), so a
- * `defaultLevel` of `max` is capped at XHigh before clamping. Returns
- * `undefined` for non-reasoning models.
+ * turn has been classified, and the fallback when classification fails. Prefers
+ * the model's `defaultLevel`, otherwise High, clamped into the auto range.
+ *
+ * Deliberately stays below {@link Effort.Max}: the placeholder must not bill the
+ * top tier for a turn nobody classified, so a `defaultLevel` of `max` is capped
+ * at XHigh before clamping. Classification itself may still resolve Max on
+ * models that expose the tier. Returns `undefined` for non-reasoning models.
  */
 export function resolveProvisionalAutoLevel(model: Model | undefined): Effort | undefined {
 	if (!model?.reasoning) return undefined;

@@ -78,11 +78,12 @@ describe("auto thinking classifier helpers", () => {
 		expect(parseCliThinkingLevel("bogus")).toBeUndefined();
 	});
 
-	it("maps online 4-way classifier labels to effort levels", () => {
+	it("maps online level labels to effort levels", () => {
 		expect(parseDifficultyLevel("x-high")).toBe(Effort.XHigh);
 		expect(parseDifficultyLevel("The answer is HIGH.")).toBe(Effort.High);
 		expect(parseDifficultyLevel("med")).toBe(Effort.Medium);
 		expect(parseDifficultyLevel("low")).toBe(Effort.Low);
+		expect(parseDifficultyLevel("max")).toBe(Effort.Max);
 		expect(parseDifficultyLevel("unknown")).toBeUndefined();
 	});
 
@@ -200,6 +201,146 @@ describe("auto thinking classifier helpers", () => {
 
 		expect(effort).toBe(Effort.High);
 		expect(options).toMatchObject({ disableReasoning: true, maxTokens: 1024 });
+	});
+
+	function createOnlineFixture(targetModel: Model, answer: string, maxEffort: "xhigh" | "max" = "xhigh") {
+		const classifierModel = getBundledModel("anthropic", "claude-sonnet-4-6");
+		if (!classifierModel) throw new Error("Expected bundled Claude Sonnet 4.6 model");
+		const settings = {
+			get(path: string) {
+				if (path === "providers.autoThinkingModel") return "online";
+				return path === "providers.autoThinkingMaxEffort" ? maxEffort : undefined;
+			},
+			getModelRole(role: string) {
+				return role === "smol" ? `${classifierModel.provider}/${classifierModel.id}` : undefined;
+			},
+			getStorage() {
+				return undefined;
+			},
+		} as never;
+		const registry = {
+			getAvailable: () => [classifierModel],
+			getApiKey: async () => "test-key",
+			resolver: () => async () => "test-key",
+		} as never;
+		const completeSimpleMock = vi.spyOn(ai, "completeSimple").mockResolvedValue({
+			stopReason: "stop",
+			content: [{ type: "text", text: answer }],
+		} as never);
+		return { deps: { settings, registry, model: targetModel }, completeSimpleMock };
+	}
+
+	function buildLadderModel(id: string, efforts: Effort[]): Model {
+		return buildModel({
+			id,
+			name: id,
+			api: "openai-completions",
+			provider: "mock",
+			baseUrl: "https://example.com",
+			reasoning: true,
+			thinking: { mode: "effort", efforts },
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128_000,
+			maxTokens: 4096,
+		});
+	}
+
+	const MAX_LADDER = [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max];
+	const XHIGH_LADDER = [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh];
+
+	it("offers the max label only when opted in on a model that exposes the tier", async () => {
+		const optedIn = createOnlineFixture(buildLadderModel("mock-max", MAX_LADDER), "high", "max");
+		await classifyDifficulty("refactor the scheduler", optedIn.deps);
+		const optedInRequest = optedIn.completeSimpleMock.mock.calls[0]?.[1] as { systemPrompt: string[] };
+		expect(optedInRequest.systemPrompt[0]).toContain("`max`");
+
+		vi.restoreAllMocks();
+
+		const defaulted = createOnlineFixture(buildLadderModel("mock-max", MAX_LADDER), "high");
+		await classifyDifficulty("refactor the scheduler", defaulted.deps);
+		const defaultedRequest = defaulted.completeSimpleMock.mock.calls[0]?.[1] as { systemPrompt: string[] };
+		expect(defaultedRequest.systemPrompt[0]).not.toContain("`max`");
+		expect(defaultedRequest.systemPrompt[0]).toContain("`xhigh`");
+
+		vi.restoreAllMocks();
+
+		const unsupported = createOnlineFixture(buildLadderModel("mock-xhigh", XHIGH_LADDER), "high", "max");
+		await classifyDifficulty("refactor the scheduler", unsupported.deps);
+		const unsupportedRequest = unsupported.completeSimpleMock.mock.calls[0]?.[1] as { systemPrompt: string[] };
+		expect(unsupportedRequest.systemPrompt[0]).not.toContain("`max`");
+	});
+
+	it("keeps the default prompt byte-identical to the pre-max wording", async () => {
+		const fixture = createOnlineFixture(buildLadderModel("mock-max", MAX_LADDER), "high");
+		await classifyDifficulty("refactor the scheduler", fixture.deps);
+		const request = fixture.completeSimpleMock.mock.calls[0]?.[1] as { systemPrompt: string[] };
+		expect(request.systemPrompt[0]).toBe(
+			[
+				"You are a difficulty classifier for a coding agent. Read the user's request and decide how much reasoning effort the agent should spend on it this turn.",
+				"",
+				"Reply with exactly one word — one of: `low`, `medium`, `high`, `xhigh`. No punctuation, no explanation, no other text.",
+				"",
+				"Levels:",
+				"",
+				"- `low` — Trivial or mechanical. A rename, a typo, a one-line edit, a formatting tweak, a direct factual question, or a request whose solution is obvious.",
+				"- `medium` — A localized change that needs some reasoning. A small self-contained feature, a straightforward bug fix in one place, or explaining a moderate piece of code.",
+				"- `high` — A non-trivial change. Spans multiple files or callers, requires real debugging, a moderate design decision, or a refactor with several moving parts.",
+				"- `xhigh` — Deep or open-ended. Subtle concurrency or algorithmic problems, cross-system reasoning, ambiguous requirements, large or risky refactors, or hard root-cause debugging.",
+				"",
+				"Judge the inherent difficulty of the task, not how politely or verbosely it is phrased. When torn between two levels, choose the lower one.",
+			].join("\n"),
+		);
+	});
+
+	it("resolves max only when opted in, and snaps it to the ceiling otherwise", async () => {
+		const optedIn = createOnlineFixture(buildLadderModel("mock-max", MAX_LADDER), "max", "max");
+		expect(await classifyDifficulty("untangle this cross-service race", optedIn.deps)).toBe(Effort.Max);
+
+		vi.restoreAllMocks();
+
+		// Hallucinated `max` on a max-capable model must not cross the default ceiling.
+		const defaulted = createOnlineFixture(buildLadderModel("mock-max", MAX_LADDER), "max");
+		expect(await classifyDifficulty("untangle this cross-service race", defaulted.deps)).toBe(Effort.XHigh);
+	});
+
+	it("resolves the sparse ladder's max tier when opted in", async () => {
+		const fixture = createOnlineFixture(buildLadderModel("mock-sparse", [Effort.High, Effort.Max]), "max", "max");
+		expect(await classifyDifficulty("cut over the storage layer", fixture.deps)).toBe(Effort.Max);
+	});
+
+	it("takes the first label when the classifier echoes several", async () => {
+		// `earliest()` is deliberately conservative: an echoed list resolves to the
+		// lowest-positioned label rather than the model's final word.
+		const fixture = createOnlineFixture(
+			buildLadderModel("mock-max", MAX_LADDER),
+			"low, medium, high, xhigh, max",
+			"max",
+		);
+		expect(await classifyDifficulty("rename a helper", fixture.deps)).toBe(Effort.Low);
+	});
+
+	it("snaps a hallucinated max back to the model's ceiling instead of failing the turn", async () => {
+		const fixture = createOnlineFixture(buildLadderModel("mock-xhigh", XHIGH_LADDER), "max");
+		expect(await classifyDifficulty("untangle this cross-service race", fixture.deps)).toBe(Effort.XHigh);
+	});
+
+	it("keeps the provisional auto level below max even when the model defaults to it", () => {
+		const maxDefaultModel = buildModel({
+			id: "mock-max-default",
+			name: "mock-max-default",
+			api: "openai-completions",
+			provider: "mock",
+			baseUrl: "https://example.com",
+			reasoning: true,
+			thinking: { mode: "effort", efforts: MAX_LADDER, defaultLevel: Effort.Max },
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128_000,
+			maxTokens: 4096,
+		});
+
+		expect(resolveProvisionalAutoLevel(maxDefaultModel)).toBe(Effort.XHigh);
 	});
 
 	it("clamps auto effort to model support while never resolving below low", () => {

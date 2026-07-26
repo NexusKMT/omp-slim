@@ -383,6 +383,7 @@ thinkingBudgets:
 | `thinkingBudgets.high` | number | `16384` | Token budget for `high`. |
 | `thinkingBudgets.xhigh` | number | `32768` | Token budget for `xhigh`. |
 | `thinkingBudgets.max` | number | `32768` | Token budget for `max`. |
+| `providers.autoThinkingMaxEffort` | enum | `xhigh` | Highest effort `defaultThinkingLevel: auto` may resolve. `xhigh` keeps the classifier one tier below the top, so only `ultrathink` reaches `max`; `max` lets the classifier bill the top tier on models that expose it. The local on-device classifier stays capped at `xhigh` either way. |
 
 ### Sampling
 
