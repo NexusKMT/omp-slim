@@ -1,11 +1,17 @@
-import { describe, expect, it, vi } from "bun:test";
+import { beforeAll, describe, expect, it, vi } from "bun:test";
 import { Container } from "@oh-my-pi/pi-tui";
 import type { ExtensionAskDialogQuestion, ExtensionUIContext } from "../../extensibility/extensions";
 import { AskDialogComponent } from "../components/ask-dialog";
 import { CustomEditor } from "../components/custom-editor";
-import { getEditorTheme } from "../theme/theme";
+import { getEditorTheme, getThemeByName, setThemeInstance } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
 import { ExtensionUiController } from "./extension-ui-controller";
+
+beforeAll(async () => {
+	const dark = await getThemeByName("dark");
+	if (!dark) throw new Error("Failed to load dark theme");
+	setThemeInstance(dark);
+});
 
 function makeHarness() {
 	const editor = new CustomEditor(getEditorTheme());
@@ -132,6 +138,29 @@ describe("ExtensionUiController editor UI", () => {
 		expect(hubOpened).toBe(false);
 		expect(harness.editor.getText()).toBe("draft in progress");
 		expect(harness.editorContainer.children).toEqual([ask, harness.editor]);
+	});
+
+	it("exposes the draft editor cursor while it proxies input, and drops it once cleared (#6738)", () => {
+		const harness = makeHarness();
+		harness.editor.setText("finish this wor");
+		const questions: ExtensionAskDialogQuestion[] = [
+			{ id: "confirm", question: "Continue?", options: [{ label: "Yes" }, { label: "No" }] },
+		];
+
+		harness.controller.showAskDialog(questions);
+		const ask = harness.editorContainer.children[0];
+		expect(ask).toBeInstanceOf(AskDialogComponent);
+
+		// The ask dialog holds TUI focus, but rendering it must mirror focus onto
+		// the draft editor so its insertion cursor is visible.
+		ask?.render?.(80);
+		expect(harness.editor.focused).toBe(true);
+
+		// Once the draft clears, the ask controls take over and the editor cursor
+		// must not linger.
+		harness.editor.setText("");
+		ask?.render?.(80);
+		expect(harness.editor.focused).toBe(false);
 	});
 
 	it("bridges addAutocompleteProvider factories to the interactive mode context (#4919)", async () => {

@@ -623,12 +623,18 @@ export class ExtensionUiController {
 			let promptEditor: HookEditorComponent | undefined;
 			let promptResolve: ((value: string | undefined) => void) | undefined;
 			let closed = false;
+			const draftEditor = this.ctx.editor;
 			const inputGuard =
-				this.ctx.editor.getText().length > 0
+				draftEditor.getText().length > 0
 					? {
-							isBlocked: () => this.ctx.editor.getText().length > 0,
-							handleInput: (keyData: string) => this.ctx.editor.handleDraftEdit(keyData),
+							isBlocked: () => draftEditor.getText().length > 0,
+							handleInput: (keyData: string) => draftEditor.handleDraftEdit(keyData),
 							hint: "Finish or clear the current prompt to answer",
+							// Show the draft's insertion cursor while it owns input; drop it
+							// once the draft clears and the ask controls take over.
+							syncPresentation: () => {
+								draftEditor.focused = draftEditor.getText().length > 0;
+							},
 						}
 					: undefined;
 
