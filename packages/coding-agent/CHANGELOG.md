@@ -51,6 +51,9 @@
 
 - Corrected Windows shell resolution errors to identify the active global, project, overlay, or runtime source for `shellPath`, including profile and custom configuration directories, instead of directing every user to the retired `settings.json` file ([#6579](https://github.com/can1357/oh-my-pi/issues/6579)).
 - Fixed `debug` (js-debug/`pwa-node`) stateful commands misrouting after launch: a lazily-attached `[worker N]` child session (or the threadless root launcher) would steal the active-session focus from the stopped script child, so `threads` listed only the worker thread, post-launch breakpoints read back as pending/unbound, and there was no way to step/continue/evaluate the script's thread. Focus now follows stops rather than registrations, and `threads` aggregates every live thread across the session tree ([#6663](https://github.com/can1357/oh-my-pi/issues/6663)).
+### Fixed
+
+- Fixed a turn-ending provider error being truncated to 8 lines in the transcript with no way to reveal the rest: `AssistantMessageComponent` now implements `setExpanded`, so Ctrl+O (tool-output expansion) reveals the full error body and the collapsed view shows a `… +N more lines (Ctrl+O to expand)` hint ([#6555](https://github.com/can1357/oh-my-pi/issues/6555)).
 
 ## [17.1.3] - 2026-07-24
 
