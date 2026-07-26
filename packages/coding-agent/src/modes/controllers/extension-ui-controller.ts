@@ -623,6 +623,14 @@ export class ExtensionUiController {
 			let promptEditor: HookEditorComponent | undefined;
 			let promptResolve: ((value: string | undefined) => void) | undefined;
 			let closed = false;
+			const inputGuard =
+				this.ctx.editor.getText().length > 0
+					? {
+							isBlocked: () => this.ctx.editor.getText().length > 0,
+							handleInput: (keyData: string) => this.ctx.editor.handleInput(keyData),
+							hint: "Finish or clear the current prompt to answer",
+						}
+					: undefined;
 
 			const restoreAskDialog = (): void => {
 				if (closed || !askDialog) return;
@@ -670,10 +678,12 @@ export class ExtensionUiController {
 					timeout: dialogOptions?.timeout,
 					onTimeout: dialogOptions?.onTimeout,
 					tui: this.ctx.ui,
+					inputGuard,
 				},
 			);
 			this.ctx.editorContainer.clear();
 			this.ctx.editorContainer.addChild(askDialog);
+			if (inputGuard) this.ctx.editorContainer.addChild(this.ctx.editor);
 			this.ctx.ui.setFocus(askDialog);
 			this.ctx.ui.requestRender();
 

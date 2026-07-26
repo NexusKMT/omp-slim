@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "bun:test";
-import type { ExtensionUIContext } from "../../extensibility/extensions";
+import { Container } from "@oh-my-pi/pi-tui";
+import type { ExtensionAskDialogQuestion, ExtensionUIContext } from "../../extensibility/extensions";
+import { AskDialogComponent } from "../components/ask-dialog";
 import { CustomEditor } from "../components/custom-editor";
 import { getEditorTheme } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
@@ -7,14 +9,20 @@ import { ExtensionUiController } from "./extension-ui-controller";
 
 function makeHarness() {
 	const editor = new CustomEditor(getEditorTheme());
+	const editorContainer = new Container();
+	editorContainer.addChild(editor);
 	const requestRender = vi.fn();
+	const setFocus = vi.fn();
 	const addAutocompleteProvider = vi.fn();
 	let uiContext: ExtensionUIContext | undefined;
 	const ctx = {
 		editor,
 		ui: {
 			requestRender,
+			setFocus,
+			terminal: { rows: 40 },
 		},
+		editorContainer,
 		session: {
 			extensionRunner: undefined,
 			setUsageFallbackConfirmer: vi.fn(),
@@ -26,12 +34,17 @@ function makeHarness() {
 		addAutocompleteProvider,
 	} as unknown as InteractiveModeContext;
 
+	const controller = new ExtensionUiController(ctx);
+
 	return {
 		editor,
 		requestRender,
 		addAutocompleteProvider,
+		editorContainer,
+		setFocus,
+		controller,
 		async init(): Promise<ExtensionUIContext> {
-			await new ExtensionUiController(ctx).initHooksAndCustomTools();
+			await controller.initHooksAndCustomTools();
 			expect(uiContext).toBeDefined();
 			return uiContext!;
 		},
@@ -58,6 +71,41 @@ describe("ExtensionUiController editor UI", () => {
 
 		expect(harness.editor.getText()).toBe("hello");
 		expect(harness.requestRender).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps a populated prompt visible and routes input to it until the draft is cleared", async () => {
+		const harness = makeHarness();
+		harness.editor.setText("finish this wor");
+		const questions: ExtensionAskDialogQuestion[] = [
+			{ id: "confirm", question: "Continue?", options: [{ label: "Yes" }, { label: "No" }] },
+		];
+
+		const pending = harness.controller.showAskDialog(questions);
+		const ask = harness.editorContainer.children[0];
+		expect(ask).toBeInstanceOf(AskDialogComponent);
+		expect(harness.editorContainer.children).toEqual([ask, harness.editor]);
+
+		ask?.handleInput?.("d");
+		expect(harness.editor.getText()).toBe("finish this word");
+
+		harness.editor.setText("");
+		ask?.handleInput?.("\n");
+		expect(await pending).toEqual({
+			kind: "submit",
+			results: [
+				{
+					id: "confirm",
+					question: "Continue?",
+					options: ["Yes", "No"],
+					multi: false,
+					selectedOptions: ["Yes"],
+					customInput: undefined,
+					note: undefined,
+					timedOut: undefined,
+				},
+			],
+		});
+		expect(harness.editorContainer.children).toEqual([harness.editor]);
 	});
 
 	it("bridges addAutocompleteProvider factories to the interactive mode context (#4919)", async () => {

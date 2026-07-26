@@ -79,10 +79,17 @@ interface AskDialogCallbacks {
 	onPrompt(title: string, prefill?: string): Promise<string | undefined>;
 }
 
+interface AskDialogInputGuard {
+	isBlocked(): boolean;
+	handleInput(keyData: string): void;
+	hint: string;
+}
+
 interface AskDialogOptions {
 	timeout?: number;
 	onTimeout?: () => void;
 	tui?: TUI;
+	inputGuard?: AskDialogInputGuard;
 }
 
 interface QuestionState {
@@ -394,6 +401,12 @@ export class AskDialogComponent implements Component {
 			this.#finishCancel();
 			return;
 		}
+		const inputGuard = this.options.inputGuard;
+		if (inputGuard?.isBlocked()) {
+			inputGuard.handleInput(keyData);
+			this.#requestRender();
+			return;
+		}
 		if (this.#hasSubmitTab() && handleTabSwitchKey(keyData, direction => this.#switchTab(direction))) {
 			this.#requestRender();
 			return;
@@ -532,6 +545,8 @@ export class AskDialogComponent implements Component {
 
 	#footerHintText(indicator: string): string {
 		const cancel = `${cancelKeyLabel()} cancel`;
+		const inputGuard = this.options.inputGuard;
+		if (inputGuard?.isBlocked()) return `${inputGuard.hint} · ${cancel}`;
 		if (this.#isSubmitTab()) {
 			const scroll = indicator ? ` ${indicator} scroll ·` : "";
 			return `Enter submit · ↑/↓ scroll ·${scroll} ${cancel}`;
