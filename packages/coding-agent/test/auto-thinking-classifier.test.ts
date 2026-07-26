@@ -116,6 +116,34 @@ describe("auto thinking classifier helpers", () => {
 		}
 	});
 
+	it("keeps the local classifier capped at xhigh even when opted in to max", async () => {
+		// The local backend only ever emits trivial/moderate/hard, so a sparse
+		// ladder must not let the opt-in ceiling snap `hard` up to a tier the
+		// on-device model never selected. `max` is the model's only tier at or
+		// above Low, and the local ceiling hides it, so nothing is eligible —
+		// falling through to `minimal` would breach the Low floor.
+		const fixture = await createLocalClassifierFixture("qwen3-1.7b");
+		const sparse = buildLadderModel("mock-minimal-max", [Effort.Minimal, Effort.Max]);
+		vi.spyOn(tinyModelClient, "complete").mockResolvedValue("hard");
+
+		try {
+			const settings = Settings.isolated({
+				"providers.autoThinkingModel": "qwen3-1.7b",
+				"providers.autoThinkingMaxEffort": "max",
+			});
+
+			expect(
+				await classifyDifficulty("cut over the storage layer", {
+					settings,
+					registry: fixture.registry,
+					model: sparse,
+				}),
+			).toBeUndefined();
+		} finally {
+			fixture.cleanup();
+		}
+	});
+
 	it("uses a larger local non-reasoning classifier floor", async () => {
 		let maxTokens: number | undefined;
 		const fixture = await createLocalClassifierFixture("qwen2.5-1.5b");
@@ -253,7 +281,11 @@ describe("auto thinking classifier helpers", () => {
 		const optedIn = createOnlineFixture(buildLadderModel("mock-max", MAX_LADDER), "high", "max");
 		await classifyDifficulty("refactor the scheduler", optedIn.deps);
 		const optedInRequest = optedIn.completeSimpleMock.mock.calls[0]?.[1] as { systemPrompt: string[] };
+		// The label alone is inert: the criteria and the tie-break exception are
+		// what make the tier reachable, so all three must ship together.
 		expect(optedInRequest.systemPrompt[0]).toContain("`max`");
+		expect(optedInRequest.systemPrompt[0]).toContain("no reproduction to work from");
+		expect(optedInRequest.systemPrompt[0]).toContain("except between `xhigh` and `max`");
 
 		vi.restoreAllMocks();
 
@@ -265,6 +297,7 @@ describe("auto thinking classifier helpers", () => {
 		// The tie-break exception is what makes the top tier reachable, so it must
 		// not leak into the prompt of a user who did not opt in.
 		expect(defaultedRequest.systemPrompt[0]).toContain("choose the lower one.");
+		expect(defaultedRequest.systemPrompt[0]).not.toContain("no reproduction to work from");
 
 		vi.restoreAllMocks();
 
@@ -272,6 +305,7 @@ describe("auto thinking classifier helpers", () => {
 		await classifyDifficulty("refactor the scheduler", unsupported.deps);
 		const unsupportedRequest = unsupported.completeSimpleMock.mock.calls[0]?.[1] as { systemPrompt: string[] };
 		expect(unsupportedRequest.systemPrompt[0]).not.toMatch(/\bmax\b/);
+		expect(unsupportedRequest.systemPrompt[0]).toContain("choose the lower one.");
 	});
 
 	it("resolves max only when opted in, and snaps it to the ceiling otherwise", async () => {
@@ -306,7 +340,7 @@ describe("auto thinking classifier helpers", () => {
 		expect(await classifyDifficulty("untangle this cross-service race", fixture.deps)).toBe(Effort.XHigh);
 	});
 
-	it("never bills a max-only ladder without opt-in", async () => {
+	it("resolves no level on a max-only ladder without opt-in", async () => {
 		// `["max"]` has nothing at or below the default ceiling, so the model clamp
 		// must not snap the request back up — auto yields nothing and the session
 		// keeps its current level.
@@ -323,14 +357,9 @@ describe("auto thinking classifier helpers", () => {
 		expect(resolveProvisionalAutoLevel(buildLadderModel("mock-max-only", [Effort.Max]))).toBeUndefined();
 	});
 
-	it("keeps the ceiling out of the pool for sparse ladders", () => {
-		const maxOnly = buildLadderModel("mock-max-only", [Effort.Max]);
-
-		expect(clampAutoThinkingEffort(maxOnly, Effort.XHigh, Effort.XHigh)).toBeUndefined();
-		expect(clampAutoThinkingEffort(maxOnly, Effort.Max)).toBe(Effort.Max);
-		expect(
-			clampAutoThinkingEffort(buildLadderModel("mock-hm", [Effort.High, Effort.Max]), Effort.Max, Effort.XHigh),
-		).toBe(Effort.High);
+	it("stops at the highest tier under the ceiling on a sparse ladder", async () => {
+		const fixture = createOnlineFixture(buildLadderModel("mock-hm", [Effort.High, Effort.Max]), "max");
+		expect(await classifyDifficulty("cut over the storage layer", fixture.deps)).toBe(Effort.High);
 	});
 
 	it("keeps the provisional auto level below max even when the model defaults to it", () => {

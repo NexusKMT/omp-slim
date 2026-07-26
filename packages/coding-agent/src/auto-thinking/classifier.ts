@@ -90,11 +90,12 @@ export async function classifyDifficulty(
 ): Promise<Effort | undefined> {
 	const backend = deps.settings.get("providers.autoThinkingModel");
 	const input = preprocessTinyMessage(promptText);
-	const ceiling = autoEffortCeiling(deps);
-	const effort =
-		backend === ONLINE_AUTO_THINKING_MODEL_KEY
-			? await classifyOnline(input, deps, ceiling)
-			: await classifyLocal(input, backend, deps);
+	const online = backend === ONLINE_AUTO_THINKING_MODEL_KEY;
+	// The 3-bucket local classifier cannot select `max`, so its ceiling stays at
+	// XHigh whatever the setting says — otherwise a sparse ladder would snap its
+	// `hard` bucket up to a tier it never chose.
+	const ceiling = online ? autoEffortCeiling(deps) : Effort.XHigh;
+	const effort = online ? await classifyOnline(input, deps, ceiling) : await classifyLocal(input, backend, deps);
 	// The ceiling goes into the clamp itself: capping the request alone is not
 	// enough, because a sparse ladder snaps an excluded request back up.
 	return clampAutoThinkingEffort(deps.model, effort, ceiling);

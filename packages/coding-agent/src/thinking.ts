@@ -199,9 +199,10 @@ export function parseCliThinkingLevel(value: string | null | undefined): Configu
  * exceeding it, or the pool minimum when the request is below the pool.
  * `ceiling` bounds the pool from above, so a policy ceiling survives the model
  * clamp: a sparse ladder such as `["max"]` must not snap an `xhigh` request up
- * to `max`. When no supported tier sits at or below the ceiling there is
- * nothing legal to pick and the result is `undefined` — auto leaves the current
- * level alone rather than billing a tier the caller excluded.
+ * to `max`. The Low floor is resolved against the model's own ladder *before*
+ * the ceiling applies — a ceiling that hides every tier at or above Low means
+ * there is nothing legal to pick (`undefined`), not a licence to fall through
+ * to a sub-Low tier the model happens to expose.
  *
  * Returns `undefined` for reasoning-capable models without a controllable
  * effort surface (`thinking.efforts` empty — e.g. devin-agent models, where
@@ -219,10 +220,10 @@ export function clampAutoThinkingEffort(
 	if (supported.length === 0) return undefined;
 	const lowIndex = THINKING_EFFORTS.indexOf(Effort.Low);
 	const ceilingIndex = THINKING_EFFORTS.indexOf(ceiling);
-	const withinCeiling = supported.filter(level => THINKING_EFFORTS.indexOf(level) <= ceilingIndex);
-	if (withinCeiling.length === 0) return undefined;
-	const eligible = withinCeiling.filter(level => THINKING_EFFORTS.indexOf(level) >= lowIndex);
-	const pool = eligible.length > 0 ? eligible : withinCeiling;
+	const atOrAboveLow = supported.filter(level => THINKING_EFFORTS.indexOf(level) >= lowIndex);
+	const floored = atOrAboveLow.length > 0 ? atOrAboveLow : supported;
+	const pool = floored.filter(level => THINKING_EFFORTS.indexOf(level) <= ceilingIndex);
+	if (pool.length === 0) return undefined;
 	const requestedIndex = THINKING_EFFORTS.indexOf(effort);
 	let chosen = pool[0];
 	for (const candidate of pool) {
