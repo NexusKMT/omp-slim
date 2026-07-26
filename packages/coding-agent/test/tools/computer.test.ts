@@ -24,6 +24,7 @@ import {
 	type ComputerWorkerHandle,
 	registerComputerController,
 	releaseComputerSessionsForOwner,
+	smokeTestComputerWorker,
 } from "@oh-my-pi/pi-coding-agent/tools/computer/supervisor";
 import { ComputerWorkerCore, type NativeDesktopSession } from "@oh-my-pi/pi-coding-agent/tools/computer/worker";
 import { computerToolRenderer } from "@oh-my-pi/pi-coding-agent/tools/computer-renderer";
@@ -159,6 +160,38 @@ class NonClosingWorker implements ComputerWorkerHandle {
 			);
 		}
 		// Deliberately ignore close: supervisor must hit its deadline and terminate.
+	}
+
+	onMessage(handler: (message: ComputerWorkerOutbound) => void): () => void {
+		this.#messageHandlers.add(handler);
+		return () => this.#messageHandlers.delete(handler);
+	}
+
+	onError(_handler: (error: Error) => void): () => void {
+		return () => {};
+	}
+
+	async terminate(): Promise<void> {
+		this.terminateCount += 1;
+	}
+
+	#emit(message: ComputerWorkerOutbound): void {
+		for (const handler of this.#messageHandlers) handler(message);
+	}
+}
+
+class SmokeWorker implements ComputerWorkerHandle {
+	readonly sent: ComputerWorkerInbound[] = [];
+	#messageHandlers = new Set<(message: ComputerWorkerOutbound) => void>();
+	terminateCount = 0;
+
+	send(message: ComputerWorkerInbound): void {
+		this.sent.push(message);
+		if (message.type === "init") {
+			queueMicrotask(() => this.#emit({ type: "ready", capabilities }));
+		} else if (message.type === "close") {
+			queueMicrotask(() => this.#emit({ type: "closed" }));
+		}
 	}
 
 	onMessage(handler: (message: ComputerWorkerOutbound) => void): () => void {
@@ -341,6 +374,19 @@ describe("native computer worker", () => {
 });
 
 describe("computer supervisor", () => {
+	it("constructs and closes a native session during install smoke", async () => {
+		const worker = new SmokeWorker();
+		await smokeTestComputerWorker(50, () => worker);
+		expect(worker.sent).toEqual([
+			{
+				type: "init",
+				options: { backend: "auto", display: "all", maxWidth: 1920, maxHeight: 1200 },
+			},
+			{ type: "close" },
+		]);
+		expect(worker.terminateCount).toBe(1);
+	});
+
 	it("force-terminates a worker that misses the bounded close handshake", async () => {
 		const worker = new NonClosingWorker();
 		const supervisor = new ComputerSupervisor(
@@ -431,16 +477,20 @@ describe("computer tool", () => {
 		expect(tool.parameters({ actions: [], unexpected: true }) instanceof arkType.errors).toBe(true);
 	});
 
-	it("executes function-call params.actions and defaults empty batches to a screenshot", async () => {
+	it("executes function-call params.actions and defaults omitted, undefined, null, and empty batches to a screenshot", async () => {
 		const controller = new FakeController();
 		const tool = new ComputerTool(toolSession(Settings.isolated({ "computer.enabled": true })), () => controller);
 		const result = await tool.execute("call", { actions: [{ type: "click", x: 5, y: 6, button: "left" }] });
 		expect(result.content).toEqual([{ type: "image", data: "AQ==", mimeType: "image/png", detail: "original" }]);
 		expect(result.providerMetadata).toBeUndefined();
 		await tool.execute("call", {});
+		await tool.execute("call", { actions: undefined } as unknown as ComputerParams);
+		await tool.execute("call", { actions: null } as unknown as ComputerParams);
 		await tool.execute("call", { actions: [] });
 		expect(controller.batches).toEqual([
 			[{ type: "click", x: 5, y: 6, button: "left" }],
+			[{ type: "screenshot" }],
+			[{ type: "screenshot" }],
 			[{ type: "screenshot" }],
 			[{ type: "screenshot" }],
 		]);
@@ -475,9 +525,6 @@ describe("computer tool", () => {
 		for (const actions of invalidBatches) {
 			await expect(tool.execute("call", { actions })).rejects.toThrow("Computer call contains an invalid action");
 		}
-		await expect(tool.execute("call", { actions: null } as unknown as ComputerParams)).rejects.toThrow(
-			"Computer call requires an array of actions",
-		);
 		expect(controller.batches).toHaveLength(0);
 		await tool.execute("call", {
 			actions: [{ type: "scroll", x: 0, y: 0, scroll_x: -2_147_483_648, scroll_y: 2_147_483_647 }],
@@ -502,6 +549,16 @@ describe("computer tool", () => {
 			receivedOptions = options;
 			return controller;
 		});
+		expect(tool.effectiveConfiguration).toEqual({
+			backend: "native",
+			display: "display-1",
+			maxWidth: 1600,
+			maxHeight: 900,
+		});
+		expect(Object.isFrozen(tool.effectiveConfiguration)).toBe(true);
+		settings.override("computer.display", "all");
+		settings.override("computer.maxWidth", 1920);
+		expect(tool.effectiveConfiguration).toMatchObject({ display: "display-1", maxWidth: 1600 });
 		const actions: ComputerAction[] = [
 			{ type: "click", x: 11, y: 22, button: "right", keys: ["SHIFT"] },
 			{ type: "double_click", x: 30, y: 40, keys: null },
@@ -566,9 +623,19 @@ describe("computer tool", () => {
 		expect(controller.closeCount).toBe(1);
 	});
 
-	it("classifies observation-only batches as read and input as exec", () => {
-		expect(computerApproval({ actions: [{ type: "screenshot" }, { type: "wait" }] })).toBe("read");
-		expect(computerApproval({ actions: [{ type: "move", x: 1, y: 2 }] })).toBe("exec");
+	it("classifies screenshot-default and observation-only calls as read while malformed and input calls require exec", () => {
+		for (const args of [
+			{},
+			{ actions: undefined },
+			{ actions: null },
+			{ actions: [] },
+			{ actions: [{ type: "screenshot" }, { type: "wait" }] },
+		]) {
+			expect(computerApproval(args)).toBe("read");
+		}
+		for (const actions of ["screenshot", { type: "screenshot" }, [{ type: "move", x: 1, y: 2 }]]) {
+			expect(computerApproval({ actions })).toBe("exec");
+		}
 	});
 
 	it("shows exact action details at approval time", () => {

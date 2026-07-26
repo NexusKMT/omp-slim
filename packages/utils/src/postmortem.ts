@@ -9,7 +9,7 @@
 import * as fs from "node:fs";
 import inspector from "node:inspector";
 import { isMainThread } from "node:worker_threads";
-import { logger } from ".";
+import * as logger from "./logger";
 import { restoreTerminalStderr } from "./stderr-guard";
 
 // Cleanup reasons, in order of priority/meaning.
@@ -149,18 +149,12 @@ export function isExpectedCleanupError(reason: unknown): boolean {
 	return false;
 }
 
-/**
- * Interceptors consulted by the global `unhandledRejection` handler before the
- * fatal path. See {@link interceptUnhandledRejections}.
- */
+/** Interceptors consulted by the global `unhandledRejection` handler before the fatal path. */
 const rejectionInterceptors = new Set<(reason: unknown) => boolean>();
 
 /**
  * Register an interceptor consulted before an unhandled rejection tears the
- * process down. Return `true` to consume the rejection — the interceptor owns
- * reporting and the process continues. Used by embedded script runtimes (JS
- * eval cells) whose user code can float rejections the host must not die for.
- * Returns an unregister function.
+ * process down. A consuming interceptor owns reporting and keeps the process alive.
  */
 export function interceptUnhandledRejections(interceptor: (reason: unknown) => boolean): () => void {
 	rejectionInterceptors.add(interceptor);

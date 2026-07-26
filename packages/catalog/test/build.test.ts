@@ -6,11 +6,11 @@ import * as path from "node:path";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { isOfficialAnthropicApiUrl } from "@oh-my-pi/pi-catalog/compat/anthropic";
 import { buildOpenAICompat, buildOpenAIResponsesCompat } from "@oh-my-pi/pi-catalog/compat/openai";
-import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
+import { readModelCache, writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { openrouterModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
-import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import type { Model, ModelSpec } from "@oh-my-pi/pi-catalog/types";
 
 function completionsSpec(overrides: Partial<ModelSpec<"openai-completions">> = {}): ModelSpec<"openai-completions"> {
 	return {
@@ -143,6 +143,82 @@ describe("buildModel", () => {
 		for (const name of keep) {
 			expect(buildModel(completionsSpec({ name })).name).toBe(name);
 		}
+	});
+	it("limits inferred GA computer capability to first-party Responses transports", () => {
+		const common = {
+			id: "gpt-5.6-terra",
+			name: "GPT-5.6 Terra",
+			reasoning: true,
+			input: ["text", "image"] as Array<"text" | "image">,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 400_000,
+			maxTokens: 128_000,
+		};
+		const direct = {
+			...common,
+			api: "openai-responses" as const,
+			provider: "openai",
+			baseUrl: "https://api.openai.com/v1",
+		} satisfies ModelSpec<"openai-responses">;
+
+		expect(buildModel(direct).supportsComputerUse).toBe(true);
+		expect(buildModel({ ...direct, baseUrl: "https://gateway.example/v1" }).supportsComputerUse).toBe(false);
+		expect(buildModel({ ...direct, provider: "gpt-proxy" }).supportsComputerUse).toBe(false);
+
+		const subscription = {
+			...common,
+			api: "openai-codex-responses" as const,
+			provider: "openai-codex",
+			baseUrl: "https://chatgpt.com/backend-api",
+		} satisfies ModelSpec<"openai-codex-responses">;
+		for (const id of ["gpt-5.3-codex-spark", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]) {
+			expect(buildModel({ ...subscription, id, name: id }).supportsComputerUse).toBe(false);
+		}
+		expect(buildModel({ ...subscription, supportsComputerUse: true }).supportsComputerUse).toBe(true);
+
+		const azure = {
+			...common,
+			api: "azure-openai-responses" as const,
+			provider: "azure",
+			baseUrl: "",
+		} satisfies ModelSpec<"azure-openai-responses">;
+		expect(buildModel(azure).supportsComputerUse).toBe(true);
+		expect(buildModel({ ...azure, provider: "azure-openai" }).supportsComputerUse).toBe(true);
+		expect(buildModel({ ...azure, provider: "custom-azure-proxy" }).supportsComputerUse).toBe(false);
+		expect(buildModel({ ...azure, baseUrl: "https://gateway.example/openai/v1" }).supportsComputerUse).toBe(false);
+	});
+	it("recomputes inferred computer capability when a built model is rerouted while preserving explicit metadata", () => {
+		const direct = {
+			id: "gpt-5.4",
+			name: "GPT-5.4",
+			api: "openai-responses" as const,
+			provider: "openai",
+			baseUrl: "https://api.openai.com/v1",
+			reasoning: true,
+			input: ["text", "image"] as Array<"text" | "image">,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 400_000,
+			maxTokens: 128_000,
+		} satisfies ModelSpec<"openai-responses">;
+		const reroute = (model: Model<"openai-responses">, baseUrl: string) =>
+			buildModel({ ...model, baseUrl, compat: model.compatConfig } as ModelSpec<"openai-responses">);
+
+		expect(reroute(buildModel(direct), "https://gateway.example/v1").supportsComputerUse).toBe(false);
+		const inferred = buildModel(direct);
+		expect(
+			buildModel({
+				...inferred,
+				provider: "gpt-proxy",
+				compat: inferred.compatConfig,
+			} as ModelSpec<"openai-responses">).supportsComputerUse,
+		).toBe(false);
+		expect(
+			reroute(buildModel({ ...direct, supportsComputerUse: true }), "https://gateway.example/v1")
+				.supportsComputerUse,
+		).toBe(true);
+		expect(reroute(buildModel({ ...direct, supportsComputerUse: false }), direct.baseUrl).supportsComputerUse).toBe(
+			false,
+		);
 	});
 });
 
@@ -607,6 +683,111 @@ describe("model cache spec round trip", () => {
 			expect(model?.compat.supportsDeveloperRole).toBe(true);
 			expect(model?.compat.isOpenRouterHost).toBe(false);
 			expect(model?.compatConfig).toEqual(sparse);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	it("invalidates schema-v10 rows that predate computer-use capability provenance", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-legacy-computer-cache-"));
+		const dbPath = path.join(tempDir, "models.db");
+		const model = buildModel({
+			id: "legacy-inferred-computer",
+			name: "Legacy inferred computer",
+			api: "openai-responses",
+			provider: "openai",
+			baseUrl: "https://api.openai.com/v1",
+			reasoning: true,
+			input: ["text", "image"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 400_000,
+			maxTokens: 128_000,
+		} satisfies ModelSpec<"openai-responses">);
+		try {
+			writeModelCache("legacy-computer-cache-test", Date.now(), [model], true, "", dbPath);
+			const db = new Database(dbPath);
+			db.run("UPDATE model_cache SET version = 10 WHERE provider_id = ?", ["legacy-computer-cache-test"]);
+			db.close();
+
+			expect(readModelCache("legacy-computer-cache-test", Infinity, Date.now, dbPath)).toBeNull();
+			const verified = new Database(dbPath, { readonly: true });
+			const row = verified.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM model_cache").get();
+			verified.close();
+			expect(row?.count).toBe(0);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	it("preserves computer-use provenance across cache restarts and endpoint reroutes", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-computer-use-cache-"));
+		const dbPath = path.join(tempDir, "models.db");
+		const common = {
+			name: "GPT-5.4",
+			requestModelId: "gpt-5.4",
+			api: "openai-responses" as const,
+			reasoning: true,
+			input: ["text", "image"] as Array<"text" | "image">,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 400_000,
+			maxTokens: 128_000,
+		};
+		const direct = {
+			...common,
+			id: "inferred-direct",
+			provider: "openai",
+			baseUrl: "https://api.openai.com/v1",
+		} satisfies ModelSpec<"openai-responses">;
+		const proxy = {
+			...common,
+			id: "inferred-proxy",
+			provider: "gpt-proxy",
+			baseUrl: "https://gateway.example/v1",
+		} satisfies ModelSpec<"openai-responses">;
+		const explicitTrue = { ...direct, id: "explicit-true", supportsComputerUse: true };
+		const explicitFalse = { ...proxy, id: "explicit-false", supportsComputerUse: false };
+		const reroute = (model: Model<"openai-responses">, provider: string, baseUrl: string) =>
+			buildModel({ ...model, provider, baseUrl, compat: model.compatConfig } as ModelSpec<"openai-responses">);
+
+		try {
+			await resolveProviderModels<"openai-responses">(
+				{
+					providerId: "computer-use-cache-test",
+					staticModels: [],
+					cacheDbPath: dbPath,
+					fetchDynamicModels: async () => [direct, proxy, explicitTrue, explicitFalse],
+				},
+				"online",
+			);
+
+			const db = new Database(dbPath, { readonly: true });
+			const row = db
+				.query<{ models: string }, [string]>("SELECT models FROM model_cache WHERE provider_id = ?")
+				.get("computer-use-cache-test");
+			db.close();
+			const persisted = JSON.parse(row?.models ?? "[]") as Array<Record<string, unknown>>;
+			expect(persisted.find(model => model.id === direct.id)).not.toHaveProperty("supportsComputerUse");
+			expect(persisted.find(model => model.id === proxy.id)).not.toHaveProperty("supportsComputerUse");
+			expect(persisted.find(model => model.id === explicitTrue.id)?.supportsComputerUse).toBe(true);
+			expect(persisted.find(model => model.id === explicitFalse.id)?.supportsComputerUse).toBe(false);
+
+			const offline = await resolveProviderModels<"openai-responses">(
+				{ providerId: "computer-use-cache-test", staticModels: [], cacheDbPath: dbPath },
+				"offline",
+			);
+			const byId = new Map(offline.models.map(model => [model.id, model]));
+			const cachedDirect = byId.get(direct.id);
+			const cachedProxy = byId.get(proxy.id);
+			const cachedExplicitTrue = byId.get(explicitTrue.id);
+			const cachedExplicitFalse = byId.get(explicitFalse.id);
+			expect(cachedDirect?.supportsComputerUseConfig).toBeUndefined();
+			expect(cachedProxy?.supportsComputerUseConfig).toBeUndefined();
+			expect(reroute(cachedDirect!, "gpt-proxy", proxy.baseUrl).supportsComputerUse).toBe(false);
+			expect(reroute(cachedProxy!, "openai", direct.baseUrl).supportsComputerUse).toBe(true);
+			expect(cachedExplicitTrue?.supportsComputerUseConfig).toBe(true);
+			expect(cachedExplicitFalse?.supportsComputerUseConfig).toBe(false);
+			expect(reroute(cachedExplicitTrue!, "gpt-proxy", proxy.baseUrl).supportsComputerUse).toBe(true);
+			expect(reroute(cachedExplicitFalse!, "openai", direct.baseUrl).supportsComputerUse).toBe(false);
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}

@@ -261,20 +261,21 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 			const latestUsableCacheModels = latestRestoredCache.models.filter(
 				model => !latestRestoredCache.unresolvedModelIds.has(model.id),
 			);
+			const fallbackSnapshotModels = collapseBuiltModelVariants(
+				mergeDynamicModels(
+					mergeModelSources(staticModels, modelsDevModels),
+					prepareCacheModelsForStaticMismatch(
+						latestUsableCacheModels,
+						staticModels,
+						cacheFingerprintMatches,
+						options.dropCachedModelIdsOnStaticMismatch,
+					),
+				),
+			);
 			writeModelCache(
 				cacheProviderId,
 				now(),
-				collapseBuiltModelVariants(
-					mergeDynamicModels(
-						mergeModelSources(staticModels, modelsDevModels),
-						prepareCacheModelsForStaticMismatch(
-							latestUsableCacheModels,
-							staticModels,
-							cacheFingerprintMatches,
-							options.dropCachedModelIdsOnStaticMismatch,
-						),
-					),
-				),
+				fallbackSnapshotModels,
 				false,
 				staticFingerprint,
 				dbPath,
