@@ -1093,4 +1093,44 @@ describe("createAgentSession deferred model pattern resolution", () => {
 			exitSpy.mockRestore();
 		}
 	});
+	test("pins the first CLI --models scoped model even when the saved default role is out of scope", async () => {
+		const scopedTarget = getBundledModel("openai", "gpt-4o-mini");
+		const savedDefault = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!scopedTarget || !savedDefault) {
+			throw new Error("Expected bundled openai and anthropic models");
+		}
+		const authStorage = await AuthStorage.create(path.join(tempDir, "cli-scope-auth.db"));
+		authStoragesToClose.push(authStorage);
+		authStorage.setRuntimeApiKey(scopedTarget.provider, "test-key");
+		authStorage.setRuntimeApiKey(savedDefault.provider, "test-key");
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir, "cli-scope-models.yml"));
+		const settings = Settings.isolated({});
+		settings.setModelRole("default", `${savedDefault.provider}/${savedDefault.id}`);
+
+		const parsed = parseArgs(["--models", `${scopedTarget.provider}/${scopedTarget.id}`]);
+		const scopedModels = await resolveModelScope(
+			parsed.models ?? [],
+			modelRegistry,
+			getModelMatchPreferences(settings),
+			settings,
+		);
+		expect(scopedModels.map(scoped => `${scoped.model.provider}/${scoped.model.id}`)).toEqual([
+			`${scopedTarget.provider}/${scopedTarget.id}`,
+		]);
+
+		const cliOptions = await buildCliSessionOptions(
+			parsed,
+			scopedModels,
+			SessionManager.inMemory(),
+			modelRegistry,
+			settings,
+		);
+		// The issue #6694 deferral must NOT apply to an explicit CLI scope:
+		// createAgentSession re-resolves the default role against
+		// `settings.enabledModels` only and never sees `--models`, so leaving
+		// `options.model` unset would let the saved out-of-scope default
+		// silently escape the scope the user just asked for.
+		expect(cliOptions.model?.provider).toBe(scopedTarget.provider);
+		expect(cliOptions.model?.id).toBe(scopedTarget.id);
+	});
 });
