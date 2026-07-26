@@ -13,6 +13,32 @@ function params(provider: "minimax-code" | "minimax-code-cn", apiKey = "sk-cp-te
 	return { provider, credential: { type: "api_key", apiKey }, accountKey: "account-1" };
 }
 
+function emptyStore(): AuthCredentialStore {
+	return {
+		close() {},
+		listAuthCredentials() {
+			return [];
+		},
+		updateAuthCredential() {},
+		deleteAuthCredential() {},
+		tryDisableAuthCredentialIfMatches() {
+			return false;
+		},
+		replaceAuthCredentialsForProvider() {
+			return [];
+		},
+		upsertAuthCredentialForProvider() {
+			return [];
+		},
+		deleteAuthCredentialsForProvider() {},
+		getCache() {
+			return null;
+		},
+		setCache() {},
+		cleanExpiredCache() {},
+	};
+}
+
 /** One `model_remains[]` entry: percentages and statuses are optional because the endpoint omits them. */
 interface RemainsBucket {
 	model_name: string;
@@ -287,34 +313,36 @@ describe("MiniMax Token Plan usage", () => {
 	});
 
 	test("registers both Token Plan ids in AuthStorage's default usage resolver", async () => {
-		const store: AuthCredentialStore = {
-			close() {},
-			listAuthCredentials() {
-				return [];
-			},
-			updateAuthCredential() {},
-			deleteAuthCredential() {},
-			tryDisableAuthCredentialIfMatches() {
-				return false;
-			},
-			replaceAuthCredentialsForProvider() {
-				return [];
-			},
-			upsertAuthCredentialForProvider() {
-				return [];
-			},
-			deleteAuthCredentialsForProvider() {},
-			getCache() {
-				return null;
-			},
-			setCache() {},
-			cleanExpiredCache() {},
-		};
-		const storage = new AuthStorage(store);
+		const storage = new AuthStorage(emptyStore());
 		await storage.reload();
 		try {
 			expect(storage.usageProviderFor("minimax-code")).toBe(minimaxCodeUsageProvider);
 			expect(storage.usageProviderFor("minimax-code-cn")).toBe(minimaxCodeCnUsageProvider);
+		} finally {
+			storage.close();
+		}
+	});
+
+	test("reports the shared plan quota against catalog model ids", async () => {
+		const fetchMock: FetchImpl = () => Promise.resolve(Response.json(remainsPayload()));
+
+		const report = await minimaxCodeUsageProvider.fetchUsage(params("minimax-code"), { fetch: fetchMock });
+		if (!report) throw new Error("expected a usage report");
+
+		const general = report.limits.find(limit => limit.id === "general:4h");
+		expect(general?.scope).toEqual({ provider: "minimax-code", shared: true, windowId: "4h" });
+		const video = report.limits.find(limit => limit.id === "video:24h");
+		expect(video?.scope).toEqual({ provider: "minimax-code", modelId: "video", windowId: "24h" });
+
+		// Without a MiniMax ranking strategy AuthStorage matches `shared` or an exact
+		// catalog id, so a bucket-name scope would report no models at all.
+		const storage = new AuthStorage(emptyStore());
+		await storage.reload();
+		try {
+			expect(storage.getUsageReportingModelIds("minimax-code", ["MiniMax-M3", "MiniMax-M2"], [report])).toEqual([
+				"MiniMax-M3",
+				"MiniMax-M2",
+			]);
 		} finally {
 			storage.close();
 		}

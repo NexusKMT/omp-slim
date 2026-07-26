@@ -17,6 +17,14 @@ const REMAINS_PATH = "/v1/token_plan/remains";
 const HOUR_MS = 60 * 60 * 1000;
 /** `current_*_status` enum reported per window: 1 normal, 2 exhausted, 3 unlimited. */
 const STATUS_UNLIMITED = 3;
+/**
+ * The plan-wide token quota every chat model draws from. It is a quota category,
+ * not a catalog model id, so its limits are scoped `shared`: `AuthStorage` has no
+ * MiniMax ranking strategy and would otherwise match `scope.modelId` against ids
+ * like `MiniMax-M3` and drop the "models with usage data" mapping. Category
+ * buckets such as `video` meter a separate quota and keep their own model scope.
+ */
+const SHARED_BUCKET = "general";
 
 /** One `model_remains[]` bucket: a plan quota tracked over a rolling interval plus a weekly window. */
 interface TokenPlanBucket {
@@ -133,7 +141,7 @@ function buildLimit(args: {
 		scope: {
 			provider: args.provider,
 			...(args.accountId ? { accountId: args.accountId } : {}),
-			modelId: args.bucket.modelName,
+			...(args.bucket.modelName === SHARED_BUCKET ? { shared: true as const } : { modelId: args.bucket.modelName }),
 			windowId: args.windowId,
 		},
 		window: {
