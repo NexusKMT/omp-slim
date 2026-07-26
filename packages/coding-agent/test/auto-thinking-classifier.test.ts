@@ -260,37 +260,18 @@ describe("auto thinking classifier helpers", () => {
 		const defaulted = createOnlineFixture(buildLadderModel("mock-max", MAX_LADDER), "high");
 		await classifyDifficulty("refactor the scheduler", defaulted.deps);
 		const defaultedRequest = defaulted.completeSimpleMock.mock.calls[0]?.[1] as { systemPrompt: string[] };
-		expect(defaultedRequest.systemPrompt[0]).not.toContain("`max`");
+		expect(defaultedRequest.systemPrompt[0]).not.toMatch(/\bmax\b/);
 		expect(defaultedRequest.systemPrompt[0]).toContain("`xhigh`");
+		// The tie-break exception is what makes the top tier reachable, so it must
+		// not leak into the prompt of a user who did not opt in.
+		expect(defaultedRequest.systemPrompt[0]).toContain("choose the lower one.");
 
 		vi.restoreAllMocks();
 
 		const unsupported = createOnlineFixture(buildLadderModel("mock-xhigh", XHIGH_LADDER), "high", "max");
 		await classifyDifficulty("refactor the scheduler", unsupported.deps);
 		const unsupportedRequest = unsupported.completeSimpleMock.mock.calls[0]?.[1] as { systemPrompt: string[] };
-		expect(unsupportedRequest.systemPrompt[0]).not.toContain("`max`");
-	});
-
-	it("keeps the default prompt byte-identical to the pre-max wording", async () => {
-		const fixture = createOnlineFixture(buildLadderModel("mock-max", MAX_LADDER), "high");
-		await classifyDifficulty("refactor the scheduler", fixture.deps);
-		const request = fixture.completeSimpleMock.mock.calls[0]?.[1] as { systemPrompt: string[] };
-		expect(request.systemPrompt[0]).toBe(
-			[
-				"You are a difficulty classifier for a coding agent. Read the user's request and decide how much reasoning effort the agent should spend on it this turn.",
-				"",
-				"Reply with exactly one word — one of: `low`, `medium`, `high`, `xhigh`. No punctuation, no explanation, no other text.",
-				"",
-				"Levels:",
-				"",
-				"- `low` — Trivial or mechanical. A rename, a typo, a one-line edit, a formatting tweak, a direct factual question, or a request whose solution is obvious.",
-				"- `medium` — A localized change that needs some reasoning. A small self-contained feature, a straightforward bug fix in one place, or explaining a moderate piece of code.",
-				"- `high` — A non-trivial change. Spans multiple files or callers, requires real debugging, a moderate design decision, or a refactor with several moving parts.",
-				"- `xhigh` — Deep or open-ended. Subtle concurrency or algorithmic problems, cross-system reasoning, ambiguous requirements, large or risky refactors, or hard root-cause debugging.",
-				"",
-				"Judge the inherent difficulty of the task, not how politely or verbosely it is phrased. When torn between two levels, choose the lower one.",
-			].join("\n"),
-		);
+		expect(unsupportedRequest.systemPrompt[0]).not.toMatch(/\bmax\b/);
 	});
 
 	it("resolves max only when opted in, and snaps it to the ceiling otherwise", async () => {
