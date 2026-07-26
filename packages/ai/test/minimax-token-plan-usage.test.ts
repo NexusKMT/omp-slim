@@ -13,37 +13,90 @@ function params(provider: "minimax-code" | "minimax-code-cn", apiKey = "sk-cp-te
 	return { provider, credential: { type: "api_key", apiKey }, accountKey: "account-1" };
 }
 
-function remainsPayload() {
+/** One `model_remains[]` entry: percentages and statuses are optional because the endpoint omits them. */
+interface RemainsBucket {
+	model_name: string;
+	start_time: number;
+	end_time: number;
+	current_interval_total_count: number;
+	current_interval_usage_count: number;
+	current_interval_remaining_percent?: number;
+	current_interval_status?: number;
+	weekly_start_time: number;
+	weekly_end_time: number;
+	current_weekly_total_count: number;
+	current_weekly_usage_count: number;
+	current_weekly_remaining_percent?: number;
+	current_weekly_status?: number;
+}
+
+interface RemainsPayload {
+	model_remains: RemainsBucket[];
+	base_resp: { status_code: number; status_msg: string };
+}
+
+/** A live plan bucket: zero totals with status 1 still carry a real remaining percentage. */
+function generalBucket(): RemainsBucket {
 	return {
-		model_remains: [
-			{
-				model_name: "general",
-				start_time: INTERVAL_START,
-				end_time: INTERVAL_END,
-				current_interval_total_count: 0,
-				current_interval_usage_count: 0,
-				current_interval_remaining_percent: 90,
-				weekly_start_time: WEEKLY_START,
-				weekly_end_time: WEEKLY_END,
-				current_weekly_total_count: 0,
-				current_weekly_usage_count: 0,
-				current_weekly_remaining_percent: 78,
-			},
-			{
-				model_name: "video",
-				start_time: INTERVAL_END - 86_400_000,
-				end_time: INTERVAL_END,
-				current_interval_total_count: 3,
-				current_interval_usage_count: 1,
-				current_interval_remaining_percent: 100,
-				weekly_start_time: WEEKLY_START,
-				weekly_end_time: WEEKLY_END,
-				current_weekly_total_count: 21,
-				current_weekly_usage_count: 1,
-				current_weekly_remaining_percent: 100,
-			},
-		],
-		base_resp: { status_code: 0, status_msg: "success" },
+		model_name: "general",
+		start_time: INTERVAL_START,
+		end_time: INTERVAL_END,
+		current_interval_total_count: 0,
+		current_interval_usage_count: 0,
+		current_interval_remaining_percent: 90,
+		current_interval_status: 1,
+		weekly_start_time: WEEKLY_START,
+		weekly_end_time: WEEKLY_END,
+		current_weekly_total_count: 0,
+		current_weekly_usage_count: 0,
+		current_weekly_remaining_percent: 78,
+		current_weekly_status: 1,
+	};
+}
+
+/** A metered bucket: request counts on both windows. */
+function videoBucket(): RemainsBucket {
+	return {
+		model_name: "video",
+		start_time: INTERVAL_END - 86_400_000,
+		end_time: INTERVAL_END,
+		current_interval_total_count: 3,
+		current_interval_usage_count: 1,
+		current_interval_remaining_percent: 100,
+		current_interval_status: 1,
+		weekly_start_time: WEEKLY_START,
+		weekly_end_time: WEEKLY_END,
+		current_weekly_total_count: 21,
+		current_weekly_usage_count: 1,
+		current_weekly_remaining_percent: 100,
+		current_weekly_status: 1,
+	};
+}
+
+function payloadOf(...buckets: RemainsBucket[]): RemainsPayload {
+	return { model_remains: buckets, base_resp: { status_code: 0, status_msg: "success" } };
+}
+
+function remainsPayload(): RemainsPayload {
+	return payloadOf(generalBucket(), videoBucket());
+}
+
+/** The bucket shape MiniMax returns for a model the plan does not include (MiniMax-AI/cli#173). */
+function notInPlanBucket(modelName: string): RemainsBucket {
+	return {
+		model_name: modelName,
+		start_time: INTERVAL_START,
+		end_time: INTERVAL_END,
+		current_interval_total_count: 0,
+		current_interval_usage_count: 0,
+		current_interval_remaining_percent: 100,
+		current_interval_status: 3,
+		weekly_start_time: WEEKLY_START,
+		weekly_end_time: WEEKLY_END,
+		current_weekly_total_count: 0,
+		current_weekly_usage_count: 0,
+		current_weekly_remaining_percent: 100,
+		current_weekly_status: 3,
 	};
 }
 
@@ -110,6 +163,20 @@ describe("MiniMax Token Plan usage", () => {
 		expect(report?.provider).toBe("minimax-code-cn");
 	});
 
+	test("honors a configured base URL for the quota request", async () => {
+		let requestedUrl = "";
+		const fetchMock: FetchImpl = input => {
+			requestedUrl = String(input);
+			return Promise.resolve(Response.json(remainsPayload()));
+		};
+		const request: UsageFetchParams = { ...params("minimax-code"), baseUrl: "https://proxy.example/v1/" };
+
+		const report = await minimaxCodeUsageProvider.fetchUsage(request, { fetch: fetchMock });
+
+		expect(requestedUrl).toBe("https://proxy.example/v1/token_plan/remains");
+		expect(report?.provider).toBe("minimax-code");
+	});
+
 	test("fails closed when MiniMax rejects the key inside a 200 response", async () => {
 		const fetchMock: FetchImpl = () =>
 			Promise.resolve(
@@ -135,11 +202,22 @@ describe("MiniMax Token Plan usage", () => {
 	});
 
 	test("marks a spent window exhausted and drops buckets with no percentage", async () => {
-		const payload = remainsPayload();
-		payload.model_remains[0].current_interval_remaining_percent = 0;
-		payload.model_remains[1].current_interval_remaining_percent = undefined as unknown as number;
-		payload.model_remains[1].current_weekly_remaining_percent = undefined as unknown as number;
-		const fetchMock: FetchImpl = () => Promise.resolve(Response.json(payload));
+		const spentGeneral: RemainsBucket = { ...generalBucket(), current_interval_remaining_percent: 0 };
+		const videoWithoutPercentages: RemainsBucket = {
+			model_name: "video",
+			start_time: INTERVAL_END - 86_400_000,
+			end_time: INTERVAL_END,
+			current_interval_total_count: 3,
+			current_interval_usage_count: 1,
+			current_interval_status: 1,
+			weekly_start_time: WEEKLY_START,
+			weekly_end_time: WEEKLY_END,
+			current_weekly_total_count: 21,
+			current_weekly_usage_count: 1,
+			current_weekly_status: 1,
+		};
+		const fetchMock: FetchImpl = () =>
+			Promise.resolve(Response.json(payloadOf(spentGeneral, videoWithoutPercentages)));
 
 		const report = await minimaxCodeUsageProvider.fetchUsage(params("minimax-code"), { fetch: fetchMock });
 
@@ -153,6 +231,23 @@ describe("MiniMax Token Plan usage", () => {
 			Promise.resolve(Response.json({ model_remains: [], base_resp: { status_code: 0 } }));
 
 		expect(await minimaxCodeUsageProvider.fetchUsage(params("minimax-code"), { fetch: fetchMock })).toBeNull();
+	});
+
+	test("keeps a model that is not in the plan out of the reported quota", async () => {
+		const fetchMock: FetchImpl = () =>
+			Promise.resolve(Response.json(payloadOf(generalBucket(), notInPlanBucket("video"))));
+
+		const report = await minimaxCodeCnUsageProvider.fetchUsage(params("minimax-code-cn"), { fetch: fetchMock });
+
+		expect(report?.limits.map(limit => limit.id)).toEqual(["general:4h", "general:7d"]);
+		expect(report?.metadata).toMatchObject({ models: ["general", "video"], unavailableModels: ["video"] });
+	});
+
+	test("returns null when every model is outside the plan", async () => {
+		const fetchMock: FetchImpl = () =>
+			Promise.resolve(Response.json(payloadOf(notInPlanBucket("general"), notInPlanBucket("video"))));
+
+		expect(await minimaxCodeCnUsageProvider.fetchUsage(params("minimax-code-cn"), { fetch: fetchMock })).toBeNull();
 	});
 
 	test("rejects a payload with no base_resp envelope", async () => {

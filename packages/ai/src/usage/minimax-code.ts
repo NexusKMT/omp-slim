@@ -15,6 +15,8 @@ const INTL_BASE_URL = "https://api.minimax.io";
 const CN_BASE_URL = "https://api.minimaxi.com";
 const REMAINS_PATH = "/v1/token_plan/remains";
 const HOUR_MS = 60 * 60 * 1000;
+/** `current_*_status` enum reported per window: 1 normal, 2 exhausted, 3 unlimited. */
+const STATUS_UNLIMITED = 3;
 
 /** One `model_remains[]` bucket: a plan quota tracked over a rolling interval plus a weekly window. */
 interface TokenPlanBucket {
@@ -24,11 +26,13 @@ interface TokenPlanBucket {
 	intervalRemainingPercent?: number;
 	intervalTotalCount?: number;
 	intervalUsageCount?: number;
+	intervalStatus?: number;
 	weeklyStart?: number;
 	weeklyEnd?: number;
 	weeklyRemainingPercent?: number;
 	weeklyTotalCount?: number;
 	weeklyUsageCount?: number;
+	weeklyStatus?: number;
 }
 
 /** MiniMax reports epoch milliseconds; tolerate seconds in case a deployment differs. */
@@ -63,12 +67,32 @@ function parseBucket(value: unknown): TokenPlanBucket | null {
 		intervalRemainingPercent: toNumber(value.current_interval_remaining_percent),
 		intervalTotalCount: toNumber(value.current_interval_total_count),
 		intervalUsageCount: toNumber(value.current_interval_usage_count),
+		intervalStatus: toNumber(value.current_interval_status),
 		weeklyStart: parseTimestamp(value.weekly_start_time),
 		weeklyEnd: parseTimestamp(value.weekly_end_time),
 		weeklyRemainingPercent: toNumber(value.current_weekly_remaining_percent),
 		weeklyTotalCount: toNumber(value.current_weekly_total_count),
 		weeklyUsageCount: toNumber(value.current_weekly_usage_count),
+		weeklyStatus: toNumber(value.current_weekly_status),
 	};
+}
+
+/**
+ * A model outside the current plan is reported as both windows "unlimited"
+ * with zero totals and 100% remaining, which would otherwise read as a pristine
+ * quota. MiniMax's own CLI treats exactly this shape as "not in plan"
+ * ([MiniMax-AI/cli#173](https://github.com/MiniMax-AI/cli/issues/173)), so the
+ * bucket is kept out of the limits and named in `metadata.unavailableModels`.
+ * Zero totals alone are not enough: a live plan reports `0/0` with status 1 and
+ * a real remaining percentage.
+ */
+function isUnavailablePlan(bucket: TokenPlanBucket): boolean {
+	return (
+		bucket.intervalTotalCount === 0 &&
+		bucket.weeklyTotalCount === 0 &&
+		bucket.intervalStatus === STATUS_UNLIMITED &&
+		bucket.weeklyStatus === STATUS_UNLIMITED
+	);
 }
 
 /**
@@ -216,10 +240,15 @@ async function fetchMiniMaxCodeUsage(params: UsageFetchParams, ctx: UsageFetchCo
 		const accountId = params.credential.accountId;
 		const limits: UsageLimit[] = [];
 		const models: string[] = [];
+		const unavailableModels: string[] = [];
 		for (const entry of payload.model_remains) {
 			const bucket = parseBucket(entry);
 			if (!bucket) continue;
 			models.push(bucket.modelName);
+			if (isUnavailablePlan(bucket)) {
+				unavailableModels.push(bucket.modelName);
+				continue;
+			}
 			limits.push(...buildBucketLimits(params.provider, bucket, accountId));
 		}
 		if (limits.length === 0) return null;
@@ -231,6 +260,7 @@ async function fetchMiniMaxCodeUsage(params: UsageFetchParams, ctx: UsageFetchCo
 			metadata: {
 				source: "minimax-token-plan",
 				models,
+				...(unavailableModels.length > 0 ? { unavailableModels } : {}),
 				...(accountId ? { accountId } : {}),
 			},
 			raw: payload,
