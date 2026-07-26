@@ -2632,8 +2632,14 @@ export class AgentSession {
 				return;
 			}
 
-			if (this.#recovery.isRetryableReasonlessAbort(msg)) {
-				const didRetry = await this.#recovery.handleRetryableError(msg, { allowModelFallback: false });
+			const resolvedInterruptedToolTurn = this.#recovery.classifyResolvedInterruptedToolTurn(msg);
+			if (this.#recovery.isRetryableReasonlessAbort(msg) || resolvedInterruptedToolTurn === "reasonless-abort") {
+				const didRetry = await this.#recovery.handleRetryableError(
+					msg,
+					resolvedInterruptedToolTurn === "reasonless-abort"
+						? { allowModelFallback: false, preserveFailedTurn: true }
+						: { allowModelFallback: false },
+				);
 				if (didRetry) {
 					await emitAgentEndNotification({ willContinue: true });
 					return;
@@ -2659,7 +2665,7 @@ export class AgentSession {
 					return;
 				}
 			}
-			const resumeResolvedStreamStall = this.#recovery.canResumeResolvedStreamStall(msg);
+			const resumeResolvedStreamStall = resolvedInterruptedToolTurn === "stream-stall";
 			if (resumeResolvedStreamStall || this.#recovery.isRetryableError(msg)) {
 				const didRetry = await this.#recovery.handleRetryableError(
 					msg,

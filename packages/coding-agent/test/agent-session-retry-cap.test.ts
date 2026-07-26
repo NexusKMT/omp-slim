@@ -767,8 +767,10 @@ describe("AgentSession retry delay cap", () => {
 		expect(terminalError?.errorMessage).toBe("The operation timed out.");
 	});
 
-	it("resumes an OpenAI-completions stall after a synthetic unexecuted tool result", async () => {
-		const stallMessage = "OpenAI completions stream stalled while waiting for the next event";
+	it.each([
+		["OpenAI-completions stall", "error", "OpenAI completions stream stalled while waiting for the next event"],
+		["reasonless abort", "aborted", "Request was aborted"],
+	] as const)("resumes a %s after a synthetic unexecuted tool result", async (_case, stopReason, errorMessage) => {
 		const model = createMockModel({
 			id: "grok-4",
 			provider: "openrouter",
@@ -802,7 +804,7 @@ describe("AgentSession retry delay cap", () => {
 						matchingResult.details !== null &&
 						"executed" in matchingResult.details &&
 						matchingResult.details.executed === false;
-					model.push({ content: ["Recovered after Grok stall"] });
+					model.push({ content: ["Recovered after interrupted tool call"] });
 					return model.stream(model, context, options);
 				}
 
@@ -836,11 +838,11 @@ describe("AgentSession retry delay cap", () => {
 					stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial });
 					stream.push({
 						type: "error",
-						reason: "error",
+						reason: stopReason,
 						error: {
 							...partial,
-							stopReason: "error",
-							errorMessage: stallMessage,
+							stopReason,
+							errorMessage,
 						},
 					});
 				});
@@ -879,7 +881,10 @@ describe("AgentSession retry delay cap", () => {
 		).toHaveLength(1);
 		expect(retryStartEvents).toHaveLength(1);
 		expect(retryEndEvents).toContainEqual(expect.objectContaining({ success: true, attempt: 1 }));
-		expect(lastAssistant(session).content).toContainEqual({ type: "text", text: "Recovered after Grok stall" });
+		expect(lastAssistant(session).content).toContainEqual({
+			type: "text",
+			text: "Recovered after interrupted tool call",
+		});
 	});
 
 	it("resumes a stalled Cursor stream after its exec tool result", async () => {
