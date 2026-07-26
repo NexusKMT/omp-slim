@@ -2083,7 +2083,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					modelRegistry.refresh("online-if-uncached"),
 				);
 			}
-			const availableModels = modelRegistry.getAll();
+			const allModels = modelRegistry.getAll();
+			const availableModels = modelRegistry.getAvailable();
 			const expandedModelPatterns = deferredModelPatterns.flatMap(pattern =>
 				pattern.split(",").flatMap(selector => {
 					const trimmedSelector = selector.trim();
@@ -2114,7 +2115,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 							modelLookup: modelRegistry,
 						};
 						const originalSelector = resolved.configuredPatterns[0];
-						const originalModel = parseModelPattern(originalSelector, availableModels, matchPreferences).model;
+						const availableOriginal = parseModelPattern(originalSelector, availableModels, matchPreferences);
+						const originalModel =
+							availableOriginal.model ?? parseModelPattern(originalSelector, allModels, matchPreferences).model;
 						const chainKey = resolveRetryFallbackChainKey(
 							fallbackContext,
 							originalSelector,
@@ -2156,10 +2159,15 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					}));
 				}),
 			);
+			const resolutionModels = expandedModelPatterns.some(
+				({ pattern }) => parseModelPattern(pattern, availableModels, matchPreferences).model,
+			)
+				? availableModels
+				: allModels;
 			let usageFallbackTriggered = false;
 			for (let patternIndex = 0; patternIndex < expandedModelPatterns.length; patternIndex += 1) {
 				const { pattern, retryFallback } = expandedModelPatterns[patternIndex];
-				const primary = parseModelPattern(pattern, availableModels, matchPreferences);
+				const primary = parseModelPattern(pattern, resolutionModels, matchPreferences);
 				if (!primary.model || (retryFallback && !hasModelAuth(primary.model))) continue;
 				let hasUsageFallbackCandidate = false;
 				for (
@@ -2169,7 +2177,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				) {
 					const candidate = parseModelPattern(
 						expandedModelPatterns[candidateIndex].pattern,
-						availableModels,
+						resolutionModels,
 						matchPreferences,
 					);
 					if (candidate.model && hasModelAuth(candidate.model)) {
@@ -2234,7 +2242,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					if (primaryKey !== kNoAuth && !isAuthenticated(primaryKey)) {
 						const fallback = parseModelPattern(
 							options.modelPatternAuthFallback,
-							availableModels,
+							resolutionModels,
 							matchPreferences,
 						);
 						if (fallback.model) {
@@ -2256,7 +2264,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					const seenSelectors = new Set<string>([primarySelector]);
 					const fallbackSelectors: string[] = [];
 					for (const fallbackEntry of expandedModelPatterns.slice(patternIndex + 1)) {
-						const fallback = parseModelPattern(fallbackEntry.pattern, availableModels, matchPreferences);
+						const fallback = parseModelPattern(fallbackEntry.pattern, resolutionModels, matchPreferences);
 						if (!fallback.model) continue;
 						const fallbackSelector = formatModelSelectorValue(
 							formatModelStringWithRouting(fallback.model),
