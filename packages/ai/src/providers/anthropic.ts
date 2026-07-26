@@ -93,6 +93,7 @@ import {
 import { transformMessages } from "./transform-messages";
 import { NON_VISION_IMAGE_PLACEHOLDER } from "./vision-guard";
 
+
 export type AnthropicHeaderOptions = {
 	apiKey: string;
 	baseUrl?: string;
