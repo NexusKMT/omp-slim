@@ -94,4 +94,26 @@ describe("#6664 github-copilot reference-less Claude model", () => {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
 	});
+
+	it("does not fabricate a thinking dial for a pre-thinking reference-less Claude", async () => {
+		// A lagging enterprise catalog could surface an old kind-first Claude on
+		// the Messages proxy. It must stay non-reasoning so no effort dial is
+		// offered for thinking parameters the model would reject.
+		const fetchMock = vi.fn(
+			async () =>
+				new Response(JSON.stringify({ data: [tieredEntry("claude-sonnet-3.5", "Claude Sonnet 3.5")] }), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				}),
+		);
+		const options = githubCopilotModelManagerOptions({ apiKey: "copilot-test-key", fetch: fetchMock });
+		const specs = (await options.fetchDynamicModels?.()) ?? [];
+
+		const base = specs.find(m => m.id === "claude-sonnet-3.5");
+		expect(base).toBeDefined();
+		expect(base?.api).toBe("anthropic-messages");
+		expect(base?.reasoning).toBe(false);
+		if (!base) throw new Error("missing base spec");
+		expect(buildModel(base).thinking).toBeUndefined();
+	});
 });

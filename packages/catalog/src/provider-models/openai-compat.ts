@@ -7,6 +7,7 @@ import {
 import { Effort, THINKING_EFFORTS } from "../effort";
 import { FIREWORKS_FAST_SUFFIX, toFireworksPublicModelId } from "../fireworks-model-id";
 import {
+	anthropicModelSupportsThinking,
 	isGlmVisionModelId,
 	isGrokReasoningEffortCapable,
 	isKimiK3ModelId,
@@ -4385,12 +4386,16 @@ export function githubCopilotModelManagerOptions(config?: GithubCopilotModelMana
 									maxTokens,
 									headers: { ...COPILOT_API_HEADERS },
 									// Copilot's `/models` advertises no reasoning bit, so a
-									// Claude model without a bundled reference would fall back
-									// to `reasoning: false` and lose its thinking dial. Every
-									// Claude on Copilot's anthropic-messages proxy reasons;
-									// mark it so `buildModel` derives the adaptive effort
-									// ladder from the id (e.g. a newly served claude-opus-5).
-									...(api === "anthropic-messages" ? { reasoning: true } : {}),
+									// thinking-capable Claude with no bundled reference would
+									// fall back to `reasoning: false` and lose its effort dial.
+									// Gate on the id classifier (not the transport alone) so a
+									// lagging enterprise catalog serving a pre-thinking Claude
+									// (<= 3.5) over the Messages proxy is not handed a fabricated
+									// dial it would reject; a modern reference-less model (e.g.
+									// claude-opus-5) is marked so `buildModel` derives the ladder.
+									...(api === "anthropic-messages" && anthropicModelSupportsThinking(defaults.id)
+										? { reasoning: true }
+										: {}),
 									...(api === "openai-completions"
 										? {
 												compat: {
