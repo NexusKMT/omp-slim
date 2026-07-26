@@ -281,6 +281,25 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 				// (see toolEventArgs) rather than the real execution params.
 				if (callResult?.input !== undefined && context?.toolCall?.providerMetadata?.type !== "computer") {
 					effectiveParams = callResult.input as typeof params;
+					// The approval/safety gate above resolved against the original `params`. Re-resolve the
+					// policy on the revised input so a handler cannot rewrite approved args into ones a
+					// `deny`/critical policy would have blocked. This re-checks policy only (no second
+					// interactive prompt): a revised arg that newly resolves to `deny` — or, outside yolo,
+					// newly requires a prompt the original didn't — is blocked rather than run unapproved.
+					const revisedArgs = approvalArgs(effectiveParams, context);
+					const revised = resolveApproval(this.tool, revisedArgs, approvalMode, userPolicies);
+					if (revised.policy === "deny") {
+						throw new Error(
+							`Tool "${this.tool.name}" revised input is blocked by policy` +
+								`${revised.reason ? `: ${revised.reason}` : "."}`,
+						);
+					}
+					if (approvalMode !== "yolo" && revised.policy === "prompt" && resolved.policy !== "prompt") {
+						throw new Error(
+							`Tool "${this.tool.name}" revised input requires approval that the original did not; ` +
+								`blocking the unapproved revision.`,
+						);
+					}
 				}
 			} catch (err) {
 				if (err instanceof Error) {

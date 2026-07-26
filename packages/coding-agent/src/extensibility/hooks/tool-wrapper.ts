@@ -59,8 +59,9 @@ export class HookToolWrapper<TParameters extends TSchema = TSchema, TDetails = u
 					throw new Error(reason);
 				}
 				// A non-blocking handler may replace the execution input. The returned object is the raw
-				// input the tool runs with (handler-owned); it is not re-normalized.
-				if (callResult?.input !== undefined) {
+				// input the tool runs with (handler-owned); it is not re-normalized. Skipped for `computer`
+				// tool calls, whose real parameters are not represented by the event input.
+				if (callResult?.input !== undefined && context?.toolCall?.providerMetadata?.type !== "computer") {
 					effectiveParams = callResult.input as Static<TParameters>;
 				}
 			} catch (err) {

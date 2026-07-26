@@ -1968,6 +1968,134 @@ describe("ExtensionRunner", () => {
 				.map(line => JSON.parse(line));
 			expect(executed).toEqual([{ command: "echo original" }]);
 		});
+
+		// A tool whose approval policy depends on its args: the command "rm -rf" resolves to deny,
+		// anything else is exec. Lets a test prove the post-override approval re-check (P1).
+		function createArgGatedTool(recordPath: string): AgentTool {
+			return {
+				name: "bash",
+				label: "Bash",
+				description: "Test bash tool",
+				parameters: Type.Object({ command: Type.String() }),
+				strict: true,
+				approval: (args: unknown) => {
+					const command = args && typeof args === "object" && "command" in args ? args.command : undefined;
+					return command === "rm -rf" ? { policy: "deny" as const, reason: "dangerous" } : ("exec" as const);
+				},
+				execute: async (_id: string, params: unknown) => {
+					fs.appendFileSync(recordPath, `${JSON.stringify(params)}\n`);
+					return { content: [{ type: "text", text: "ran" }] };
+				},
+			} as AgentTool;
+		}
+
+		const yoloContext = {
+			settings: { get: (key: string) => (key === "tools.approvalMode" ? "yolo" : {}) },
+		} as never;
+
+		it("blocks a revised input that a deny policy would have rejected (re-checks approval)", async () => {
+			const recordPath = path.join(tempDir.path(), "regate-blocked.jsonl");
+			const extCode = `
+				export default function(pi) {
+					pi.on("tool_call", async (event) => {
+						if (event.toolName !== "bash") return;
+						return { input: { command: "rm -rf" } };
+					});
+				}
+			`;
+			fs.writeFileSync(path.join(extensionsDir, "tool-call-regate.ts"), extCode);
+
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const wrapped = new ExtensionToolWrapper(createArgGatedTool(recordPath), runner);
+
+			// Original "echo original" resolves to exec (allowed under yolo); the handler rewrites it to
+			// "rm -rf", which the tool's approval declares deny — the re-check must block it.
+			await expect(
+				wrapped.execute("tool-call-id", { command: "echo original" }, undefined, undefined, yoloContext),
+			).rejects.toThrow(/blocked by policy/);
+			expect(fs.existsSync(recordPath)).toBe(false); // tool never executed
+		});
+
+		it("allows a revised input that still passes policy", async () => {
+			const recordPath = path.join(tempDir.path(), "regate-allowed.jsonl");
+			const extCode = `
+				export default function(pi) {
+					pi.on("tool_call", async (event) => {
+						if (event.toolName !== "bash") return;
+						return { input: { command: "echo revised" } };
+					});
+				}
+			`;
+			fs.writeFileSync(path.join(extensionsDir, "tool-call-regate-ok.ts"), extCode);
+
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const wrapped = new ExtensionToolWrapper(createArgGatedTool(recordPath), runner);
+
+			await wrapped.execute("tool-call-id", { command: "echo original" }, undefined, undefined, yoloContext);
+
+			const executed = fs
+				.readFileSync(recordPath, "utf8")
+				.trim()
+				.split("\n")
+				.map(line => JSON.parse(line));
+			expect(executed).toEqual([{ command: "echo revised" }]);
+		});
+
+		it("uses the last handler's input when several handlers set it", async () => {
+			const recordPath = path.join(tempDir.path(), "regate-multi.jsonl");
+			const first = `
+				export default function(pi) {
+					pi.on("tool_call", async (event) => {
+						if (event.toolName !== "bash") return;
+						return { input: { command: "echo first" } };
+					});
+				}
+			`;
+			const second = `
+				export default function(pi) {
+					pi.on("tool_call", async (event) => {
+						if (event.toolName !== "bash") return;
+						return { input: { command: "echo second" } };
+					});
+				}
+			`;
+			// File names sort first < second, so the loader loads them in that order and second wins.
+			fs.writeFileSync(path.join(extensionsDir, "tool-call-multi-a.ts"), first);
+			fs.writeFileSync(path.join(extensionsDir, "tool-call-multi-b.ts"), second);
+
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const wrapped = new ExtensionToolWrapper(createRecordingTool(recordPath), runner);
+
+			await wrapped.execute("tool-call-id", { command: "echo original" });
+
+			const executed = fs
+				.readFileSync(recordPath, "utf8")
+				.trim()
+				.split("\n")
+				.map(line => JSON.parse(line));
+			expect(executed).toEqual([{ command: "echo second" }]);
+		});
 	});
 	describe("hasHandlers", () => {
 		it("returns true when handlers exist for event type", async () => {

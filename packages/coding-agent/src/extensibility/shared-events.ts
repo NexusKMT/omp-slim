@@ -300,7 +300,9 @@ export interface ToolCallEventResult {
 	 * owns its correctness) — not the normalized `event.input` view, which may carry derived
 	 * gate-only fields (e.g. hashline `edit` `path`/`paths`) that are not real parameters. When
 	 * multiple handlers set `input`, the last one wins; handlers do not observe each other's
-	 * revisions (each sees the original `event.input`). Not applied to `computer` tool calls.
+	 * revisions (each sees the original `event.input`). Not applied to `computer` tool calls. On an
+	 * approval-gated tool the revised input is re-checked against approval policy, so a revision that
+	 * newly resolves to `deny` (or, outside yolo, newly requires a prompt) is blocked rather than run.
 	 */
 	input?: Record<string, unknown>;
 }
