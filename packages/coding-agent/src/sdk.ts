@@ -1985,10 +1985,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		// Process provider registrations queued during extension loading.
 		// This must happen before the runner is created so that models registered by
 		// extensions are available for model selection on session resume / fallback.
-		const activeExtensionSources = extensionsResult.extensions.map(extension => extension.path);
-		modelRegistry.syncExtensionSources(activeExtensionSources);
-		for (const sourceId of new Set(activeExtensionSources)) {
-			modelRegistry.clearSourceRegistrations(sourceId);
+		if (!restrictToolNames) {
+			const activeExtensionSources = extensionsResult.extensions.map(extension => extension.path);
+			modelRegistry.syncExtensionSources(activeExtensionSources);
+			for (const sourceId of new Set(activeExtensionSources)) {
+				modelRegistry.clearSourceRegistrations(sourceId);
+			}
 		}
 		if (extensionsResult.runtime.pendingProviderRegistrations.length > 0) {
 			for (const { name, config, sourceId } of extensionsResult.runtime.pendingProviderRegistrations) {
