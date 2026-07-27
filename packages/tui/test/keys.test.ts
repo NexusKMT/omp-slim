@@ -177,6 +177,57 @@ describe("parseKey", () => {
 	});
 });
 
+describe("Windows Terminal raw 0x08 backspace disambiguation", () => {
+	const envKeys = ["WT_SESSION", "SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"] as const;
+	function withEnv(overrides: Partial<Record<(typeof envKeys)[number], string>>, run: () => void): void {
+		const saved: Record<string, string | undefined> = {};
+		for (const key of envKeys) {
+			saved[key] = process.env[key];
+			delete process.env[key];
+		}
+		for (const key in overrides) process.env[key] = overrides[key as (typeof envKeys)[number]];
+		try {
+			run();
+		} finally {
+			for (const key of envKeys) {
+				const value = saved[key];
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
+		}
+	}
+
+	it("maps raw 0x08 to ctrl+backspace only in a genuine Windows Terminal session", () => {
+		// Windows Terminal sends 0x08 for Ctrl+Backspace; the native parser reports
+		// plain `backspace` because it cannot see the environment.
+		withEnv({ WT_SESSION: "1" }, () => {
+			expect(parseKey("\x08")).toBe("ctrl+backspace");
+			expect(matchesKey("\x08", "ctrl+backspace")).toBe(true);
+			expect(matchesKey("\x08", "backspace")).toBe(false);
+		});
+		// Outside Windows Terminal 0x08 stays plain backspace.
+		withEnv({}, () => {
+			expect(parseKey("\x08")).toBe("backspace");
+			expect(matchesKey("\x08", "backspace")).toBe(true);
+			expect(matchesKey("\x08", "ctrl+backspace")).toBe(false);
+		});
+	});
+
+	it("does not apply the heuristic when WT_SESSION is forwarded over SSH", () => {
+		withEnv({ WT_SESSION: "1", SSH_CONNECTION: "1.2.3.4 5 6.7.8.9 22" }, () => {
+			expect(parseKey("\x08")).toBe("backspace");
+		});
+	});
+
+	it("leaves 0x7f as plain backspace regardless of Windows Terminal", () => {
+		withEnv({ WT_SESSION: "1" }, () => {
+			expect(parseKey("\x7f")).toBe("backspace");
+			expect(matchesKey("\x7f", "backspace")).toBe(true);
+			expect(matchesKey("\x7f", "ctrl+backspace")).toBe(false);
+		});
+	});
+});
+
 describe("extractPrintableText", () => {
 	it("extracts keypad digits from Kitty CSI-u sequences", () => {
 		expect(extractPrintableText("\x1b[57407u")).toBe("8");
