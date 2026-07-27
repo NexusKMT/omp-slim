@@ -97,7 +97,7 @@ export function parseSampleProfile(text: string): SampleProfile | null {
 	const lines = text.split("\n");
 	const analysis = ANALYSIS_RE.exec(lines[0] ?? "");
 	if (!analysis) return null;
-	const callGraphIx = lines.findIndex(line => line === "Call graph:");
+	const callGraphIx = lines.indexOf("Call graph:");
 	if (callGraphIx === -1) return null;
 
 	const header: SampleProfileHeader = {

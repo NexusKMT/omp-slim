@@ -9,7 +9,9 @@
 
 ### Changed
 
-- Optimized markdown URL tokenizer gate, inline math start scan, and autolink scheme scan for performance
+- Eliminated the dominant markdown streaming CPU cost (73% of a profiled interactive session): marked's GFM `url` tokenizer and `lheading` rule are now gated by O(1)/O(n) charCode pre-checks, the pathological `hr`/`lheading`/`table`/`html` block rules use sticky clones that fail at offset 0 instead of rescanning the source, and the inline math/autolink `start()` scans dropped their regex alternations
+- Streaming markdown now freezes the stable prefix through provably closed lists instead of re-lexing everything after the last non-list block on every delta
+- Raised the markdown render cache entry budget (32 KiB → 256 KiB) so large messages — exactly the expensive renders — are cacheable
 - Deduplicated terminal cursor-visibility writes to skip redundant escape sequences
 
 ## [17.1.6] - 2026-07-27

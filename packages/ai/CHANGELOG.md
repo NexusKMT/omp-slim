@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Usage report filtering in the auth-broker remote store is memoized per (reports, snapshot) with a precomputed per-provider OAuth credential map, replacing an O(reports × credentials) scan on every credential-selection and status refresh
+- Cursor and Devin Connect-frame readers no longer copy every stream chunk through `Buffer.concat` when the pending buffer is empty
+
 ## [17.1.6] - 2026-07-27
 
 ### Added

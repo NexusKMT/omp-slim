@@ -751,15 +751,77 @@ export function urlTokenPossible(src: string): boolean {
 	return src.charCodeAt(i) === 64 /* @ */;
 }
 
+// Setext-underline pre-gate for marked's `lheading` rule. The rule's lazy body
+// `((?:.|\n(?!<block-start>))+?)` re-runs its block-start lookahead while
+// expanding character by character, so even a FAILING attempt at offset 0
+// costs O(len × lookahead) — ~26µs per 200-char list-item body, and marked's
+// list tokenizer block-tokenizes every item's content (47.8% of a streaming
+// bench profile). A match REQUIRES the setext underline `\n {0,3}(=+|-+)`
+// somewhere in src, so this O(n) charCode scan never rejects a src the
+// built-in rule would match; single-line srcs (every tight list item) reject
+// on the first indexOf.
+function lheadingPossible(src: string): boolean {
+	let i = src.indexOf("\n");
+	while (i !== -1) {
+		let j = i + 1;
+		const limit = j + 3; // underline allows up to 3 leading spaces
+		while (j < limit && src.charCodeAt(j) === 0x20 /* space */) j++;
+		const c = src.charCodeAt(j); // NaN past the end fails both comparisons
+		if (c === 0x3d /* = */ || c === 0x2d /* - */) return true;
+		i = src.indexOf("\n", j);
+	}
+	return false;
+}
+
 markdownParser.use({
 	tokenizer: {
+		// `false` → marked falls back to the built-in tokenizer;
+		// `undefined` → no token here, built-in never runs.
 		url(src: string): Tokens.Link | undefined | false {
-			// `false` → marked falls back to the built-in `url` tokenizer;
-			// `undefined` → no url token here, built-in never runs.
 			return urlTokenPossible(src) ? false : undefined;
+		},
+		lheading(src: string): Tokens.Heading | undefined | false {
+			return lheadingPossible(src) ? false : undefined;
 		},
 	},
 });
+
+// ---------------------------------------------------------------------------
+// Sticky clones of marked's pathological block rules
+// ---------------------------------------------------------------------------
+// Bun's (JSC) regex engine skips the start-anchor fast-fail for several of
+// marked's `^`-anchored block rules — `hr`, `lheading`, `table` and `html` are
+// anchored alternations of quantified branches, and a failing `exec`/`test`
+// rescans the entire remaining source instead of stopping after offset 0.
+// marked's list tokenizer runs `hr.test` and `lheading` per list line against
+// the remaining source, so lexing a long list is quadratic (66% of a streaming
+// bench profile sat in these two regexes). A sticky (`y`) clone with
+// `lastIndex` pinned to 0 attempts the match at offset 0 only.
+//
+// Equivalence: for a flagless rule whose source is `^`-anchored, a sticky
+// clone at `lastIndex = 0` matches exactly when the original matches (same
+// match object, same captures) — `^` already restricted matches to offset 0
+// (no `m` flag), and stickiness only removes the futile later attempts. The
+// flags/anchor guard below skips any rule a future marked version changes.
+class AnchoredAtZero extends RegExp {
+	exec(str: string): RegExpExecArray | null {
+		this.lastIndex = 0; // sticky matches set lastIndex; rules are shared
+		return super.exec(str);
+	}
+	test(str: string): boolean {
+		this.lastIndex = 0;
+		return super.test(str);
+	}
+}
+
+for (const table of [Lexer.rules.block.normal, Lexer.rules.block.gfm]) {
+	for (const name of ["hr", "lheading", "table", "html"] as const) {
+		const rule = table[name];
+		if (rule.flags === "" && rule.source.startsWith("^")) {
+			table[name] = new AnchoredAtZero(rule.source, "y");
+		}
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Module-level LRU render cache
