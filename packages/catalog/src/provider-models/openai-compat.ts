@@ -2707,6 +2707,34 @@ function mapKimiApiFormat(protocol: unknown): OpenAICompat["kimiApiFormat"] {
 	return undefined;
 }
 
+/**
+ * Kimi Code output ceilings by model family. The `/coding/v1/models` discovery
+ * envelope carries no output-limit field, so the mapper supplies the documented
+ * per-family caps instead of a blanket constant. Values match models.dev's
+ * `kimi-for-coding` and `moonshotai` kimi-k3 entries. See #6711.
+ */
+export const KIMI_CODE_K3_MAX_TOKENS = 131_072;
+export const KIMI_CODE_FOR_CODING_MAX_TOKENS = 32_768;
+
+/** Fallback output cap for Kimi Code families without a documented ceiling (legacy K2 discovery rows). */
+export const KIMI_CODE_DEFAULT_MAX_TOKENS = 32_000;
+
+/**
+ * Resolve a Kimi Code model's output ceiling from its id: `k3` / `k3-256k` ->
+ * 131072, `kimi-for-coding[-highspeed]` -> 32768, everything else -> `fallback`.
+ */
+export function kimiCodeMaxTokens(modelId: string, fallback?: number): number;
+export function kimiCodeMaxTokens(modelId: string, fallback: number | null): number | null;
+export function kimiCodeMaxTokens(
+	modelId: string,
+	fallback: number | null = KIMI_CODE_DEFAULT_MAX_TOKENS,
+): number | null {
+	const id = modelId.toLowerCase();
+	if (id.startsWith("k3")) return KIMI_CODE_K3_MAX_TOKENS;
+	if (id.startsWith("kimi-for-coding")) return KIMI_CODE_FOR_CODING_MAX_TOKENS;
+	return fallback;
+}
+
 export function kimiCodeModelManagerOptions(
 	config?: KimiCodeModelManagerConfig,
 ): ModelManagerOptions<"openai-completions"> {
@@ -2739,7 +2767,7 @@ export function kimiCodeModelManagerOptions(
 							reasoning,
 							input: entry.supports_image_in === true || id.includes("k2.5") ? ["text", "image"] : ["text"],
 							contextWindow: typeof entry.context_length === "number" ? entry.context_length : 262144,
-							maxTokens: 32000,
+							maxTokens: kimiCodeMaxTokens(id),
 							thinking,
 							compat: {
 								thinkingFormat: thinking ? "kimi" : "zai",
