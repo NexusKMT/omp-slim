@@ -1310,6 +1310,9 @@ export async function runRootCommand(
 		const previousCwd = cwd;
 		cwd = await switchToResumedProject(sessionManager.getCwd(), settingsInstance, pluginPreloadPromise);
 		if (cwd !== previousCwd) {
+			// applyStartupCwd persists an explicit --cwd in parsedArgs; once resume
+			// switches projects, keep session construction on the destination too.
+			parsedArgs.cwd = cwd;
 			// Destination project may scope a different `enabledModels`; re-resolve
 			// so the model UI and session options reflect it (explicit `--models`
 			// stays fixed inside resolveScopedModels).
@@ -1363,6 +1366,7 @@ export async function runRootCommand(
 		const previousCwd = cwd;
 		cwd = await switchToResumedProject(selected.cwd, settingsInstance, pluginPreloadPromise);
 		if (cwd !== previousCwd) {
+			parsedArgs.cwd = cwd;
 			scopedModels = await resolveScopedModels(parsedArgs, modelRegistry, settingsInstance);
 		}
 		sessionManager = await SessionManager.open(selected.path);

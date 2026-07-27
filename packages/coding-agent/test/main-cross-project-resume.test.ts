@@ -126,7 +126,7 @@ describe("runRootCommand — cross-project --resume", () => {
 		await fsp.rm(root, { recursive: true, force: true });
 	});
 
-	it("preloads the destination plugin roots and re-scopes before session creation", async () => {
+	it("uses the destination cwd and preloads its plugin roots before session creation", async () => {
 		const match = buildGlobalMatch(resumedProject);
 		vi.spyOn(sessionListingModule, "resolveResumableSession").mockResolvedValue(match);
 		const settings = Settings.isolated({ "marketplace.autoUpdate": "off" });
@@ -139,7 +139,8 @@ describe("runRootCommand — cross-project --resume", () => {
 			preloadedCwds.push(cwd);
 		});
 		const authStorage = await AuthStorage.create(path.join(root, "auth.db"));
-		const parsed = parseArgs(["--resume", "019e84ed", "--print"]);
+		const rawArgs = ["--cwd", launchProject, "--resume", "019e84ed", "--print"];
+		const parsed = parseArgs(rawArgs);
 		parsed.noExtensions = true;
 		parsed.noSkills = true;
 		parsed.noRules = true;
@@ -147,14 +148,16 @@ describe("runRootCommand — cross-project --resume", () => {
 		parsed.noLsp = true;
 		let resumedManager: SessionManager | undefined;
 		let preloadedDestinationAtCreation = false;
+		let sessionOptionsCwd: string | undefined;
 
 		try {
-			await runRootCommand(parsed, ["--resume", "019e84ed", "--print"], {
+			await runRootCommand(parsed, rawArgs, {
 				discoverAuthStorage: async () => authStorage,
 				settings,
 				createAgentSession: async options => {
 					if (!options) throw new Error("Expected session options");
 					resumedManager = options.sessionManager;
+					sessionOptionsCwd = options.cwd;
 					// Awaited during the switch, so by session creation the destination
 					// preload has already been requested for the resumed project.
 					preloadedDestinationAtCreation = preloadedCwds.includes(resumedProject);
@@ -172,6 +175,8 @@ describe("runRootCommand — cross-project --resume", () => {
 		expect(process.cwd()).toBe(resumedProject);
 		expect(reloadForCwd).toHaveBeenCalledWith(resumedProject);
 		expect(resumedManager?.getCwd()).toBe(resumedProject);
+		expect(parsed.cwd).toBe(resumedProject);
+		expect(sessionOptionsCwd).toBe(resumedProject);
 		expect(preloadedDestinationAtCreation).toBe(true);
 	}, 15_000);
 
