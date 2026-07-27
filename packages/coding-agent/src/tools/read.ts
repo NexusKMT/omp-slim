@@ -57,6 +57,7 @@ import {
 import { fileHyperlink, renderCodeCell, renderMarkdownCell, renderStatusLine, tryResolveInternalUrlSync } from "../tui";
 import { CachedOutputBlock, markFramedBlockComponent } from "../tui/output-block";
 import { buildLineEntriesWithBlockContext, type LineEntry, lineEntriesToPlainText } from "../utils/block-context";
+import { isCpuProfilePath, renderCpuProfile } from "../utils/cpuprofile";
 import { resolveFileDisplayMode } from "../utils/file-display-mode";
 import {
 	ImageInputTooLargeError,
@@ -65,6 +66,7 @@ import {
 	webpExclusionForModel,
 } from "../utils/image-loading";
 import { CONVERTIBLE_EXTENSIONS, convertFileWithMarkit } from "../utils/markit";
+import { isSampleProfilePath, renderSampleProfile } from "../utils/sample-profile";
 import { type ArchiveReader, formatArchiveEntryLines, openArchive, parseArchivePathCandidates } from "../utils/zip";
 import { buildDirectoryTree, type DirectoryTree } from "../workspace-tree";
 import {
@@ -155,6 +157,8 @@ function getSummaryParseCache(session: object): LRUCache<string, SummaryResult |
 }
 
 const MAX_SUMMARY_BYTES = 2 * 1024 * 1024;
+/** Largest profile (`*.sample.txt`, `*.cpuprofile`) converted to a bottleneck summary; bigger files read as plain text. */
+const MAX_PROFILE_SUMMARY_BYTES = 32 * 1024 * 1024;
 const MAX_SUMMARY_LINES = 20_000;
 const MAX_ARTIFACT_RAW_INLINE_BYTES = DEFAULT_MAX_BYTES;
 /**
@@ -2432,6 +2436,31 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		const mimeType = imageMetadata?.mimeType;
 		const ext = path.extname(absolutePath).toLowerCase();
 		const shouldConvertWithMarkit = CONVERTIBLE_EXTENSIONS.has(ext);
+
+		// Profiler reports (macOS `sample` call trees, V8 `.cpuprofile` JSON):
+		// replace the raw dump with a bottleneck summary (hot paths, top self
+		// time/samples). `:raw` reads the original bytes; text that merely wears
+		// the extension falls through to the plain-text path.
+		if (!mimeType && !isRawSelector(parsed) && fileSize <= MAX_PROFILE_SUMMARY_BYTES) {
+			let rendered: string | null = null;
+			if (isSampleProfilePath(absolutePath)) rendered = renderSampleProfile(await Bun.file(absolutePath).text());
+			else if (isCpuProfilePath(absolutePath)) rendered = renderCpuProfile(await Bun.file(absolutePath).text());
+			if (rendered) {
+				if (isMultiRange(parsed) && parsed.kind === "lines") {
+					return this.#buildInMemoryMultiRangeResult(rendered, parsed.ranges, {
+						details: { resolvedPath: absolutePath },
+						sourcePath: absolutePath,
+						entityLabel: "profile summary",
+					});
+				}
+				const { offset, limit } = selToOffsetLimit(parsed);
+				return this.#buildInMemoryTextResult(rendered, offset, limit, {
+					details: { resolvedPath: absolutePath },
+					sourcePath: absolutePath,
+					entityLabel: "profile summary",
+				});
+			}
+		}
 		// Read the file based on type
 		let content: Array<TextContent | ImageContent> | undefined;
 		let details: ReadToolDetails = {};

@@ -24,7 +24,7 @@
  * the wrapped tool's own renderer with the decoded inner args.
  */
 import type { AgentToolContext, AgentToolResult, AgentToolUpdateCallback, ToolLoadMode } from "@oh-my-pi/pi-agent-core";
-import { type Tool as AiTool, toolWireSchema, validateToolArguments } from "@oh-my-pi/pi-ai";
+import { type Tool as AiTool, jsonSchemaToTypeScript, toolWireSchema, validateToolArguments } from "@oh-my-pi/pi-ai";
 import { type Component, Container, Text } from "@oh-my-pi/pi-tui";
 import { parseStreamingJson } from "@oh-my-pi/pi-utils";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
@@ -107,7 +107,7 @@ function schemaDeclaresIntentField(schema: unknown): boolean {
 }
 
 function renderDocs(inst: Tool, heading = "#", descriptionCap?: number): string {
-	const schema = JSON.stringify(toolWireSchema(inst as AiTool), null, 1);
+	const schema = jsonSchemaToTypeScript(toolWireSchema(inst as AiTool));
 	let description = inst.description ?? "";
 	if (descriptionCap !== undefined && description.length > descriptionCap) {
 		description = `${description.slice(0, descriptionCap).trimEnd()}… (full docs: read ${XD_URL_PREFIX}${inst.name})`;
@@ -118,8 +118,8 @@ function renderDocs(inst: Tool, heading = "#", descriptionCap?: number): string 
 		description,
 		"",
 		`${heading}# Schema`,
-		"```json",
-		schema,
+		"```ts",
+		`type Args = ${schema};`,
 		"```",
 		`Execute by writing JSON to ${XD_URL_PREFIX}${inst.name}.`,
 	].join("\n");

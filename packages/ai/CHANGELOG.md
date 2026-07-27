@@ -5,6 +5,10 @@
 ### Fixed
 
 - Fixed stateless OpenAI Responses history after an interrupted native Computer Use turn: replay now keeps the reasoning item ID paired with a retained `computer_call` ID, while continuing to strip IDs from unrelated reasoning. The next prompt no longer fails with HTTP 400 for a missing `rs_*` item.
+### Changed
+
+- Usage report filtering in the auth-broker remote store is memoized per (reports, snapshot) with a precomputed per-provider OAuth credential map, replacing an O(reports × credentials) scan on every credential-selection and status refresh
+- Cursor and Devin Connect-frame readers no longer copy every stream chunk through `Buffer.concat` when the pending buffer is empty
 
 ## [17.1.6] - 2026-07-27
 
