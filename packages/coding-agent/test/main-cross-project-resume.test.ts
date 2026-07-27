@@ -22,7 +22,7 @@ import type { SessionInfo } from "@oh-my-pi/pi-coding-agent/session/session-list
 import * as sessionListingModule from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { loadEntriesFromFile } from "@oh-my-pi/pi-coding-agent/session/session-loader";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { getProjectDir, setProjectDir } from "@oh-my-pi/pi-utils";
+import { getProjectDir, normalizePathForComparison, setProjectDir } from "@oh-my-pi/pi-utils";
 
 function buildArgs(resume: string, sessionDir?: string): Args {
 	return {
@@ -172,7 +172,9 @@ describe("runRootCommand — cross-project --resume", () => {
 		}
 
 		expect(getProjectDir()).toBe(resumedProject);
-		expect(process.cwd()).toBe(resumedProject);
+		// process.cwd() reports the physical path (/private/var/... on macOS) while
+		// the fixture path keeps the /var symlink form — compare canonicalized.
+		expect(normalizePathForComparison(process.cwd())).toBe(normalizePathForComparison(resumedProject));
 		expect(reloadForCwd).toHaveBeenCalledWith(resumedProject);
 		expect(resumedManager?.getCwd()).toBe(resumedProject);
 		expect(parsed.cwd).toBe(resumedProject);
