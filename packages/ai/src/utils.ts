@@ -136,12 +136,27 @@ export function sanitizeOpenAIResponsesHistoryItemsForReplay(
 	// a `computer_call` ID requires the reasoning item IDs from that response.
 	const computerLinkedReasoningItems = new Set<Record<string, unknown>>();
 	const responseReasoningItems: Array<Record<string, unknown>> = [];
+	const computerCallsWithLaterOutputs = new Set<Record<string, unknown>>();
+	const laterComputerOutputCallIds = new Set<string>();
+	for (let index = items.length - 1; index >= 0; index--) {
+		const item = items[index]!;
+		if (item.type === "computer_call_output" && typeof item.call_id === "string") {
+			laterComputerOutputCallIds.add(item.call_id);
+		} else if (
+			item.type === "computer_call" &&
+			typeof item.id === "string" &&
+			typeof item.call_id === "string" &&
+			laterComputerOutputCallIds.has(item.call_id)
+		) {
+			computerCallsWithLaterOutputs.add(item);
+		}
+	}
 	for (const item of items) {
 		if (isOpenAIResponsesClientInputBoundary(item)) {
 			responseReasoningItems.length = 0;
 		} else if (item.type === "reasoning") {
 			responseReasoningItems.push(item);
-		} else if (supportsComputerUse && item.type === "computer_call" && typeof item.id === "string") {
+		} else if (supportsComputerUse && computerCallsWithLaterOutputs.has(item)) {
 			for (const reasoningItem of responseReasoningItems) computerLinkedReasoningItems.add(reasoningItem);
 		}
 	}

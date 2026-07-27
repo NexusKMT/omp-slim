@@ -461,6 +461,11 @@ describe("OpenAI GA computer contract", () => {
 					pending_safety_checks: [],
 					status: "completed",
 				},
+				{
+					type: "computer_call_output",
+					call_id: "call_computer_turn",
+					output: { type: "computer_screenshot", file_id: "file_computer_turn" },
+				},
 			]);
 			const reasoningIds = sanitized
 				.filter(replayItem => replayItem.type === "reasoning")
@@ -470,6 +475,44 @@ describe("OpenAI GA computer contract", () => {
 				reasoningIds: [undefined, "rs_computer_turn"],
 			});
 		}
+	});
+
+	test("strips reasoning identity when an orphan native computer call is demoted", () => {
+		const supported = model("openai-responses");
+		const previous = {
+			...assistant([]),
+			providerPayload: {
+				type: "openaiResponsesHistory" as const,
+				provider: "openai" as const,
+				dt: true,
+				items: [
+					{
+						type: "reasoning",
+						id: "rs_orphan_computer",
+						summary: [],
+						encrypted_content: "orphan-computer-reasoning",
+					},
+					{
+						type: "computer_call",
+						id: "cu_orphan_computer",
+						call_id: "call_orphan_computer",
+						actions: [{ type: "screenshot" }],
+						pending_safety_checks: [],
+						status: "completed",
+					},
+				],
+			},
+		};
+		const replay = buildResponsesInput({
+			model: supported,
+			context: { messages: [previous] },
+			strictResponsesPairing: false,
+			supportsImageDetailOriginal: true,
+			nativeHistory: { replay: true, filterReasoning: false },
+		});
+		expect(replay.some(item => item.type === "computer_call" || item.type === "computer_call_output")).toBe(false);
+		expect(JSON.stringify(replay)).toContain("interrupted before a screenshot was recorded");
+		expect(JSON.stringify(replay)).not.toContain("rs_orphan_computer");
 	});
 
 	test("turns a failed computer call without a screenshot into valid recovery history", () => {
