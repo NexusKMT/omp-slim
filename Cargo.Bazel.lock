@@ -1,5 +1,5 @@
 {
-  "checksum": "4e1cedf8cc2475ca9c7a5ea3759f9252fc0561a94e51e3c7791d2608369805b4",
+  "checksum": "895940582b3df625bf97f8d0dbfa4e278a01598c711363c7c09b944c976796d4",
   "crates": {
     "adler2 2.0.1": {
       "name": "adler2",
@@ -29934,9 +29934,9 @@
       ],
       "license_file": "LICENSE"
     },
-    "pi-ast 17.1.6": {
+    "pi-ast 17.1.7": {
       "name": "pi-ast",
-      "version": "17.1.6",
+      "version": "17.1.7",
       "package_url": "https://github.com/can1357/oh-my-pi",
       "repository": null,
       "targets": [
@@ -30222,7 +30222,7 @@
           "selects": {}
         },
         "edition": "2024",
-        "version": "17.1.6"
+        "version": "17.1.7"
       },
       "license": "MIT",
       "license_ids": [
@@ -30230,9 +30230,9 @@
       ],
       "license_file": null
     },
-    "pi-iso 17.1.6": {
+    "pi-iso 17.1.7": {
       "name": "pi-iso",
-      "version": "17.1.6",
+      "version": "17.1.7",
       "package_url": "https://github.com/can1357/oh-my-pi",
       "repository": null,
       "targets": [
@@ -30300,7 +30300,7 @@
           ],
           "selects": {}
         },
-        "version": "17.1.6"
+        "version": "17.1.7"
       },
       "license": "MIT",
       "license_ids": [
@@ -30308,9 +30308,9 @@
       ],
       "license_file": null
     },
-    "pi-natives 17.1.6": {
+    "pi-natives 17.1.7": {
       "name": "pi-natives",
-      "version": "17.1.6",
+      "version": "17.1.7",
       "package_url": "https://github.com/can1357/oh-my-pi",
       "repository": null,
       "targets": [
@@ -30431,7 +30431,7 @@
               "target": "phf"
             },
             {
-              "id": "pi-natives 17.1.6",
+              "id": "pi-natives 17.1.7",
               "target": "build_script_build"
             },
             {
@@ -30562,7 +30562,7 @@
           ],
           "selects": {}
         },
-        "version": "17.1.6"
+        "version": "17.1.7"
       },
       "build_script_attrs": {
         "compile_data_glob": [
@@ -30598,9 +30598,9 @@
       ],
       "license_file": null
     },
-    "pi-shell 17.1.6": {
+    "pi-shell 17.1.7": {
       "name": "pi-shell",
-      "version": "17.1.6",
+      "version": "17.1.7",
       "package_url": "https://github.com/can1357/oh-my-pi",
       "repository": null,
       "targets": [
@@ -30681,7 +30681,7 @@
               "target": "parking_lot"
             },
             {
-              "id": "pi-shell 17.1.6",
+              "id": "pi-shell 17.1.7",
               "target": "build_script_build"
             },
             {
@@ -30746,7 +30746,7 @@
           "selects": {}
         },
         "edition": "2024",
-        "version": "17.1.6"
+        "version": "17.1.7"
       },
       "build_script_attrs": {
         "compile_data_glob": [
@@ -30809,9 +30809,9 @@
       ],
       "license_file": null
     },
-    "pi-walker 17.1.6": {
+    "pi-walker 17.1.7": {
       "name": "pi-walker",
-      "version": "17.1.6",
+      "version": "17.1.7",
       "package_url": "https://github.com/can1357/oh-my-pi",
       "repository": null,
       "targets": [
@@ -30872,7 +30872,7 @@
           }
         },
         "edition": "2024",
-        "version": "17.1.6"
+        "version": "17.1.7"
       },
       "license": "MIT",
       "license_ids": [
@@ -60991,12 +60991,12 @@
     "brush-builtins 0.2.0": "crates/vendor/brush-builtins",
     "brush-core 0.5.0": "crates/vendor/brush-core",
     "jaq 2.3.0": "crates/vendor/jaq",
-    "pi-ast 17.1.6": "crates/pi-ast",
-    "pi-iso 17.1.6": "crates/pi-iso",
-    "pi-natives 17.1.6": "crates/pi-natives",
-    "pi-shell 17.1.6": "crates/pi-shell",
+    "pi-ast 17.1.7": "crates/pi-ast",
+    "pi-iso 17.1.7": "crates/pi-iso",
+    "pi-natives 17.1.7": "crates/pi-natives",
+    "pi-shell 17.1.7": "crates/pi-shell",
     "pi-uutils-ctx 0.1.0": "crates/pi-uutils-ctx",
-    "pi-walker 17.1.6": "crates/pi-walker",
+    "pi-walker 17.1.7": "crates/pi-walker",
     "pi_uu_diff 0.8.0": "crates/pi-uu-diff",
     "pi_uu_grep 0.8.0": "crates/pi-uu-grep",
     "uu_b2sum 0.8.0": "crates/vendor/uu-b2sum",
