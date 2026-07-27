@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.1.5] - 2026-07-27
+
 ### Fixed
 
 - Fixed OpenAI Responses replay treating a tool output as paired with a matching call that appeared later in the input, or a tool call as paired with an earlier output. Pair repair now respects wire order before preserving or synthesizing each side.
