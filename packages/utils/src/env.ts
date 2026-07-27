@@ -53,18 +53,37 @@ export function filterProcessEnv(env: Record<string, string | undefined>): Recor
 	return result;
 }
 
+function expandDotenvValues(values: Record<string, string>, env: Record<string, string>): Record<string, string> {
+	const expanded: Record<string, string> = {};
+	for (const key in values) {
+		expanded[key] = values[key].replace(
+			/(\\)?\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/g,
+			(match, escaped: string | undefined, braced: string | undefined, bare: string | undefined) => {
+				if (escaped) return match.slice(1);
+				const name = braced ?? bare;
+				if (!name) return match;
+				return env[name] ?? expanded[name] ?? "";
+			},
+		);
+	}
+	return expanded;
+}
+
 /** Filters process env for child shells without launch-cwd dotenv values. */
 export function filterChildShellEnv(
 	env: Record<string, string | undefined>,
 	cwd: string = process.cwd(),
 ): Record<string, string> {
 	const result = filterProcessEnv(env);
-	const launchEnv = {
-		...parseEnvFile(path.join(cwd, ".env")),
-		...parseEnvFile(path.join(cwd, ".env.local")),
+	const projectEnv = parseEnvFile(path.join(cwd, ".env"));
+	const localEnv = parseEnvFile(path.join(cwd, ".env.local"));
+	const launchEnv = { ...projectEnv, ...localEnv };
+	const expandedLaunchEnv = {
+		...expandDotenvValues(projectEnv, result),
+		...expandDotenvValues(localEnv, result),
 	};
 	for (const key in launchEnv) {
-		if (result[key] === launchEnv[key]) delete result[key];
+		if (result[key] === launchEnv[key] || result[key] === expandedLaunchEnv[key]) delete result[key];
 	}
 	return result;
 }

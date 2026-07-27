@@ -61,10 +61,10 @@ describe("buildNonInteractiveEnv", () => {
 	});
 });
 
-it("keeps launch dotenv values out of child shell config", async () => {
+it("keeps expanded launch dotenv values out of child shell config", async () => {
 	const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "omp-env-"));
 	try {
-		await Bun.write(path.join(tmp, ".env"), "TEST_ENV_FROM_DOTENV=loaded-by-omp\n");
+		await Bun.write(path.join(tmp, ".env"), "BASE=loaded-by-omp\nTEST_ENV_FROM_DOTENV=$BASE-suffix\n");
 		await Bun.write(
 			path.join(tmp, ".env.local"),
 			"CONVEX_DEPLOYMENT=anonymous:root-local\nCONVEX_URL=http://127.0.0.1:3210\n",
@@ -80,37 +80,39 @@ it("keeps launch dotenv values out of child shell config", async () => {
 			"	inherited: env.OMP_TEST_INHERITED_MARKER ?? null,",
 			"}));",
 		].join("\n");
-		const proc = Bun.spawn([process.execPath, "--no-install", "--eval", script], {
-			cwd: tmp,
-			env: {
-				HOME: process.env.HOME ?? "",
-				OMP_TEST_INHERITED_MARKER: "keep-me",
-				PATH: process.env.PATH ?? "",
-				SHELL: process.env.SHELL ?? "/bin/bash",
-			},
-			stdout: "pipe",
-			stderr: "pipe",
-		});
-		const [stdout, stderr, exitCode] = await Promise.all([
-			new Response(proc.stdout).text(),
-			new Response(proc.stderr).text(),
-			proc.exited,
-		]);
+		for (const bunArgs of [[], ["--no-env-file"]]) {
+			const proc = Bun.spawn([process.execPath, ...bunArgs, "--no-install", "--eval", script], {
+				cwd: tmp,
+				env: {
+					HOME: process.env.HOME ?? "",
+					OMP_TEST_INHERITED_MARKER: "keep-me",
+					PATH: process.env.PATH ?? "",
+					SHELL: process.env.SHELL ?? "/bin/bash",
+				},
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const [stdout, stderr, exitCode] = await Promise.all([
+				new Response(proc.stdout).text(),
+				new Response(proc.stderr).text(),
+				proc.exited,
+			]);
 
-		expect(stderr).toBe("");
-		expect(exitCode).toBe(0);
-		const payload: {
-			project: string | null;
-			deployment: string | null;
-			url: string | null;
-			inherited: string | null;
-		} = JSON.parse(stdout);
-		expect(payload).toEqual({
-			project: null,
-			deployment: null,
-			url: null,
-			inherited: "keep-me",
-		});
+			expect(stderr).toBe("");
+			expect(exitCode).toBe(0);
+			const payload: {
+				project: string | null;
+				deployment: string | null;
+				url: string | null;
+				inherited: string | null;
+			} = JSON.parse(stdout);
+			expect(payload).toEqual({
+				project: null,
+				deployment: null,
+				url: null,
+				inherited: "keep-me",
+			});
+		}
 	} finally {
 		await fs.rm(tmp, { recursive: true, force: true });
 	}
