@@ -4,7 +4,15 @@ import type { AgentSession } from "../../../session/agent-session";
 import { getThemeByName, setThemeInstance } from "../../theme/theme";
 import { StatusLineComponent } from "./component";
 
-function makeSessionWithLastMessage(lastMessage: unknown, prewalkArmed: boolean = false) {
+function makeSessionWithLastMessage(
+	lastMessage: unknown,
+	prewalkArmed: boolean = false,
+	{
+		cost = 0,
+		advisorCost = 0,
+		usingSubscription = false,
+	}: { cost?: number; advisorCost?: number; usingSubscription?: boolean } = {},
+) {
 	return {
 		messages: lastMessage ? [lastMessage] : [],
 		model: { contextWindow: 128000 },
@@ -28,7 +36,7 @@ function makeSessionWithLastMessage(lastMessage: unknown, prewalkArmed: boolean 
 				orchestrationOutput: 0,
 				orchestrationCacheRead: 0,
 				premiumRequests: 0,
-				cost: 0,
+				cost,
 				tokensPerSecond: null,
 			}),
 			getSessionName: () => "test-session",
@@ -36,11 +44,15 @@ function makeSessionWithLastMessage(lastMessage: unknown, prewalkArmed: boolean 
 		getPrewalkState: () => (prewalkArmed ? { target: { id: "cheap-model", provider: "openai" } } : undefined),
 		getAsyncJobSnapshot: () => undefined,
 		isAdvisorActive: () => false,
-		getAdvisorStatusOverview: () => ({ configured: false, advisors: [] }),
+		getAdvisorStatusOverview: () => ({
+			configured: advisorCost > 0,
+			advisors: advisorCost > 0 ? [{ name: "test", status: "running" as const }] : [],
+		}),
+		getAdvisorCost: () => advisorCost,
 		isFastModeActive: () => false,
 		configuredThinkingLevel: () => undefined,
 		modelRegistry: {
-			isUsingOAuth: () => false,
+			isUsingOAuth: () => usingSubscription,
 		},
 	};
 }
@@ -80,5 +92,30 @@ describe("StatusLineComponent", () => {
 		// SGR codes might be included, so we check if the stripped content contains "Prewalk"
 		const stripped = border.content.replace(/\x1b\[[0-9;]*m/g, "");
 		expect(stripped).toContain("Prewalk");
+	});
+	it("renders primary and advisor costs separately", () => {
+		const statusLine = new StatusLineComponent(
+			makeSessionWithLastMessage(null, false, {
+				cost: 2.67,
+				advisorCost: 0.41,
+				usingSubscription: true,
+			}) as unknown as AgentSession,
+		);
+
+		const stripped = statusLine.getTopBorder(120).content.replace(/\x1b\[[0-9;]*m/g, "");
+		expect(stripped).toContain("$2.67 (sub) + $0.41 (adv)");
+	});
+
+	it("omits advisor cost when the advisor has never been active", () => {
+		const statusLine = new StatusLineComponent(
+			makeSessionWithLastMessage(null, false, {
+				cost: 2.67,
+				usingSubscription: true,
+			}) as unknown as AgentSession,
+		);
+
+		const stripped = statusLine.getTopBorder(120).content.replace(/\x1b\[[0-9;]*m/g, "");
+		expect(stripped).toContain("$2.67 (sub)");
+		expect(stripped).not.toContain("(adv)");
 	});
 });
