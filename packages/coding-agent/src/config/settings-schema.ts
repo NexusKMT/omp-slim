@@ -4600,6 +4600,20 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"task.maxEffort": {
+		type: "enum",
+		values: THINKING_EFFORTS,
+		default: "max",
+		ui: {
+			tab: "tasks",
+			group: "Subagents",
+			label: "Maximum Per-Spawn Effort",
+			description:
+				"Maximum reasoning effort allowed for the task tool's per-spawn effort hint. Lower values prevent callers from escalating subagents above this ceiling; the default preserves the model's full range.",
+			options: THINKING_EFFORTS.map(getThinkingLevelMetadata),
+		},
+	},
+
 	"task.disabledAgents": {
 		type: "array",
 		default: [] as string[],

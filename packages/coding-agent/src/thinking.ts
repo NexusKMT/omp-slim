@@ -271,19 +271,36 @@ export type TaskEffort = (typeof TASK_EFFORTS)[number];
  * at — high, xhigh, or max), `med` = the middle (lower of the two middles for
  * an even-sized range). Without a model, maps over the full canonical range.
  * Returns `undefined` when the model has no controllable effort surface, so
- * callers fall back to their default selector (e.g. `auto`).
+ * callers fall back to their default selector (e.g. `auto`). Throws when the
+ * configured ceiling is below the model's lowest supported effort.
  */
-export function resolveTaskEffortLevel(model: Model | undefined, effort: TaskEffort): Effort | undefined {
+export function resolveTaskEffortLevel(
+	model: Model | undefined,
+	effort: TaskEffort,
+	maxEffort?: Effort,
+): Effort | undefined {
 	const supported = model ? getSupportedEfforts(model) : THINKING_EFFORTS;
 	if (supported.length === 0) return undefined;
+	let resolved: Effort;
 	switch (effort) {
 		case "lo":
-			return supported[0];
+			resolved = supported[0];
+			break;
 		case "med":
-			return supported[(supported.length - 1) >> 1];
+			resolved = supported[(supported.length - 1) >> 1];
+			break;
 		case "hi":
-			return supported[supported.length - 1];
+			resolved = supported[supported.length - 1];
+			break;
 	}
+	if (maxEffort === undefined) return resolved;
+	const maxIndex = THINKING_EFFORTS.indexOf(maxEffort);
+	const ceiling = supported.findLast(candidate => THINKING_EFFORTS.indexOf(candidate) <= maxIndex);
+	if (ceiling === undefined) {
+		const modelName = model ? `${model.provider}/${model.id}` : "Selected model";
+		throw new RangeError(`${modelName} has no supported thinking effort at or below task.maxEffort=${maxEffort}`);
+	}
+	return THINKING_EFFORTS.indexOf(resolved) > THINKING_EFFORTS.indexOf(ceiling) ? ceiling : resolved;
 }
 
 /**

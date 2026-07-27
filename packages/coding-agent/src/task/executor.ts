@@ -2647,9 +2647,13 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				progress.contextWindow = model.contextWindow;
 			}
 			// Caller-requested coarse effort maps onto the resolved model's
-			// supported range; undefined (no effort, or no controllable effort
-			// surface) falls through to the normal selectors below.
-			const effortLevel = options.effort !== undefined ? resolveTaskEffortLevel(model, options.effort) : undefined;
+			// supported range, then respects the operator-configured ceiling.
+			// Undefined (no effort, or no controllable effort surface) falls
+			// through to the normal selectors below.
+			const effortLevel =
+				options.effort !== undefined
+					? resolveTaskEffortLevel(model, options.effort, settings.get("task.maxEffort"))
+					: undefined;
 			if (model) {
 				const displayLevel = effortLevel ?? (explicitThinkingLevel ? resolvedThinkingLevel : undefined);
 				progress.resolvedModel =
