@@ -419,20 +419,20 @@ export class AsyncJobManager {
 
 	/**
 	 * Immediately evict completed and failed jobs matching the filter instead of
-	 * waiting for retention expiry, dropping every queued/in-flight delivery and
-	 * keeping the delivery suppressed so a prior session's result can never be
-	 * injected into a later transcript. Returns the number of jobs evicted.
+	 * waiting for retention expiry, dropping every queued delivery so a prior
+	 * session's result can never be injected into a later transcript. Returns the
+	 * number of jobs evicted.
+	 *
+	 * A delivery whose sink call is already in flight (or drained onto a caller's
+	 * yield queue) is guarded by the owner's delivery generation, not the per-id
+	 * suppression marker — that marker is cleared when the id is reused.
 	 */
 	evictCompletedJobs(filter?: AsyncJobFilter): number {
 		let evicted = 0;
 		for (const job of this.#filterJobs(this.#jobs.values(), filter)) {
 			if (job.status !== "completed" && job.status !== "failed") continue;
-			// Suppress + drop any queued delivery. The suppression marker persists
-			// past row removal (register() clears it on id reuse) so a sink call
-			// already in flight when this runs still voids its yield-queue follow-up
-			// via the `async-result` dispatcher's isStale check.
 			this.acknowledgeDeliveries([job.id]);
-			if (this.#removeJobRow(job.id)) evicted += 1;
+			if (this.#evictJob(job.id)) evicted += 1;
 		}
 		return evicted;
 	}
@@ -600,13 +600,9 @@ export class AsyncJobManager {
 	}
 
 	#evictJob(jobId: string): boolean {
-		this.#suppressedDeliveries.delete(jobId);
-		return this.#removeJobRow(jobId);
-	}
-
-	#removeJobRow(jobId: string): boolean {
 		clearTimeout(this.#evictionTimers.get(jobId));
 		this.#evictionTimers.delete(jobId);
+		this.#suppressedDeliveries.delete(jobId);
 		this.#watchedJobs.delete(jobId);
 		return this.#jobs.delete(jobId);
 	}

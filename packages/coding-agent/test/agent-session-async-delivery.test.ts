@@ -16,6 +16,7 @@ import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import type { AsyncResultEntry } from "@oh-my-pi/pi-coding-agent/session/async-job-delivery";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -198,6 +199,63 @@ describe("AgentSession owner-routed async delivery", () => {
 			}),
 		);
 		expect(leaked).toBe(false);
+	});
+
+	it("drops a prior session's late delivery even after its job id is reused", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [] },
+			convertToLlm,
+			streamFn: mock.stream,
+		});
+		const authStorage = await AuthStorage.create(path.join(tempDir, "auth.db"));
+		authStorages.push(authStorage);
+		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		const manager = new AsyncJobManager({ retentionMs: 60_000 });
+		AsyncJobManager.setInstance(manager);
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated(),
+			modelRegistry: new ModelRegistry(authStorage),
+			agentId: "Main",
+			ownedAsyncJobManager: manager,
+		});
+
+		// The delivery generation starts at 0; a new session bumps it to 1.
+		expect(await session.newSession()).toBe(true);
+
+		// Simulate a delivery that finished formatting in the prior session (epoch
+		// 0) but only reaches the yield queue after the transition — the exact
+		// window a reused job id would reopen by clearing the manager's per-id
+		// suppression marker. It must not inject into the replacement transcript.
+		session.yieldQueue.enqueue<AsyncResultEntry>("async-result", {
+			jobId: "bg_1",
+			result: "STALE ASYNC RESULT",
+			job: undefined,
+			durationMs: 0,
+			epoch: 0,
+		});
+
+		const callsBefore = mock.calls.length;
+		await session.sendUserMessage("fresh turn");
+		await session.settleAsyncWork();
+		const leaked = mock.calls.slice(callsBefore).some(call =>
+			call.context.messages.some(message => {
+				if (typeof message.content === "string") return message.content.includes("STALE ASYNC RESULT");
+				return (
+					Array.isArray(message.content) &&
+					message.content.some(content => content.type === "text" && content.text.includes("STALE ASYNC RESULT"))
+				);
+			}),
+		);
+		expect(leaked).toBe(false);
+		// The stale entry was consumed by the run's aside/flush path and dropped,
+		// not left lingering as pending work.
+		expect(session.hasPendingAsyncWork()).toBe(false);
 	});
 
 	it("still reports pending async work while a delivered result awaits injection", async () => {
