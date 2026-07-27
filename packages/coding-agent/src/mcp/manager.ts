@@ -1108,7 +1108,10 @@ export class MCPManager {
 				listResourceTemplates(connection),
 			]);
 			if (templatesResult.status === "rejected") {
-				logger.debug("Failed to list MCP resource templates", { path: `mcp:${name}`, error: templatesResult.reason });
+				logger.debug("Failed to list MCP resource templates", {
+					path: `mcp:${name}`,
+					error: templatesResult.reason,
+				});
 			}
 			if (resourcesResult.status === "rejected") throw resourcesResult.reason;
 			const resources = resourcesResult.value;

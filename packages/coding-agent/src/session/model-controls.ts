@@ -148,7 +148,11 @@ export class ModelControls {
 		this.#autoResolvedLevel = undefined;
 		this.#thinkingLevel =
 			level === AUTO_THINKING
-				? clampThinkingLevelToCeiling(this.#model, resolveProvisionalAutoLevel(this.#model), this.#thinkingLevelCeiling)
+				? clampThinkingLevelToCeiling(
+						this.#model,
+						resolveProvisionalAutoLevel(this.#model),
+						this.#thinkingLevelCeiling,
+					)
 				: resolveThinkingLevelForModel(
 						this.#model,
 						clampThinkingLevelToCeiling(this.#model, level, this.#thinkingLevelCeiling),

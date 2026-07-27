@@ -28,7 +28,12 @@ import type { RecoveredRetryError } from "../extensibility/shared-events";
 import emptyStopRetryTemplate from "../prompts/system/empty-stop-retry.md" with { type: "text" };
 import thinkingLoopRedirectTemplate from "../prompts/system/thinking-loop-redirect.md" with { type: "text" };
 import unexpectedStopRetryTemplate from "../prompts/system/unexpected-stop-retry.md" with { type: "text" };
-import { AUTO_THINKING, clampThinkingLevelToCeiling, type ConfiguredThinkingLevel, modelSupportsEffortCeiling } from "../thinking";
+import {
+	AUTO_THINKING,
+	type ConfiguredThinkingLevel,
+	clampThinkingLevelToCeiling,
+	modelSupportsEffortCeiling,
+} from "../thinking";
 import type { AgentSessionEvent } from "./agent-session-events";
 import type { InitialRetryFallbackState } from "./agent-session-types";
 import { isEmptyErrorTurn } from "./messages";

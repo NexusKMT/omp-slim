@@ -270,8 +270,7 @@ describe("learned-lesson read-back", () => {
 		// Save a new lesson — must not destroy the header or prose, and the
 		// new lesson lands newest-first at the head of the bullet run.
 		await saveLearnedLesson(agentDir, settings.getCwd(), { content: "new lesson" });
-		const expected =
-			"# Project Lessons\n\nRemember these conventions:\n\n- new lesson\n- existing 1\n- existing 2\n";
+		const expected = "# Project Lessons\n\nRemember these conventions:\n\n- new lesson\n- existing 1\n- existing 2\n";
 		expect(await Bun.file(path.join(root, "learned.md")).text()).toBe(expected);
 		// Saving the same lesson again is byte-idempotent: no duplicate entry
 		// and no blank-line growth from the trailing-newline split artifact.

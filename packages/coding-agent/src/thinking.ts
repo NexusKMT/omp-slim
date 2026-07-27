@@ -327,12 +327,7 @@ export function clampThinkingLevelToCeiling(
 	level: ThinkingLevel | undefined,
 	ceiling: Effort | undefined,
 ): ThinkingLevel | undefined {
-	if (
-		ceiling === undefined ||
-		level === undefined ||
-		level === ThinkingLevel.Off ||
-		level === ThinkingLevel.Inherit
-	) {
+	if (ceiling === undefined || level === undefined || level === ThinkingLevel.Off || level === ThinkingLevel.Inherit) {
 		return level;
 	}
 	const maxIndex = THINKING_EFFORTS.indexOf(ceiling);
