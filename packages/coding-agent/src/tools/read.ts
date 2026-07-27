@@ -874,7 +874,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			1,
 			Math.min(session.settings.get("read.defaultLimit") ?? DEFAULT_MAX_LINES, DEFAULT_MAX_LINES),
 		);
-		this.#inspectImageActive = isInspectImageToolActive(session);
+		this.#inspectImageActive = session.isToolActive?.("inspect_image") ?? isInspectImageToolActive(session);
 		this.description = this.#renderDescription();
 	}
 
@@ -899,9 +899,16 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 	 * or the `/vision` override changes after this tool was constructed. Keeps
 	 * the behavior branch and the advertised description in lockstep. Called
 	 * per image read and by tool reconciliation before prompt rebuilds.
+	 *
+	 * Actual tool availability wins over the mode computation: restricted
+	 * sessions (explicit tool slates without `inspect_image`, e.g. subagents)
+	 * must never see metadata-only reads pointing at an absent tool. Sessions
+	 * without an `isToolActive` predicate (tests, embedded use) fall back to
+	 * the mode check.
 	 */
-	syncInspectImageState(): boolean {
-		const active = isInspectImageToolActive(this.session);
+	syncInspectImageState(availableOverride?: boolean): boolean {
+		const active =
+			availableOverride ?? this.session.isToolActive?.("inspect_image") ?? isInspectImageToolActive(this.session);
 		if (active !== this.#inspectImageActive) {
 			this.#inspectImageActive = active;
 			this.description = this.#renderDescription();

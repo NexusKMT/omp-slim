@@ -9,6 +9,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { Settings } from "../src/config/settings";
+import type { ToolSession } from "../src/tools/index";
+import { ReadTool } from "../src/tools/read";
 import { isInspectImageToolActive } from "../src/utils/inspect-image-mode";
 
 const visionModel = { provider: "kimi-code", id: "k3", input: ["text", "image"] } as unknown as Model;
@@ -89,5 +91,42 @@ describe("inspect_image.enabled migration", () => {
 			const settings = await Settings.loadReadOnly({ agentDir, cwd: agentDir });
 			expect(settings.get("inspect_image.mode")).toBe("off");
 		});
+
+		test("flat explicit mode survives alongside a flat legacy key", async () => {
+			agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-vision-migration-"));
+			fs.writeFileSync(
+				path.join(agentDir, "config.yml"),
+				'"inspect_image.enabled": true\n"inspect_image.mode": "off"\n',
+			);
+			const settings = await Settings.loadReadOnly({ agentDir, cwd: agentDir });
+			expect(settings.get("inspect_image.mode")).toBe("off");
+		});
+	});
+});
+
+describe("read tool follows actual tool availability", () => {
+	function readSession(inspectImageActive: boolean): ToolSession {
+		return {
+			cwd: os.tmpdir(),
+			hasUI: false,
+			settings: Settings.isolated(),
+			getSessionFile: () => null,
+			getSessionSpawns: () => null,
+			getActiveModel: () => textModel,
+			isToolActive: (name: string) => name === "inspect_image" && inspectImageActive,
+		} as unknown as ToolSession;
+	}
+
+	test("restricted session (tool absent) never advertises inspect_image", () => {
+		// auto mode + text-only model would compute active=true, but the tool is
+		// not in this session's slate, so read must serve inline image blocks.
+		const tool = new ReadTool(readSession(false));
+		expect(tool.description).not.toContain("call `inspect_image`");
+		expect(tool.syncInspectImageState()).toBe(false);
+	});
+
+	test("session with the tool registered advertises it", () => {
+		const tool = new ReadTool(readSession(true));
+		expect(tool.syncInspectImageState()).toBe(true);
 	});
 });

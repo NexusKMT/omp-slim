@@ -887,15 +887,23 @@ export class SessionTools {
 			getActiveModel: () => this.#host.model(),
 			getInspectImageModeOverride: () => this.#host.getInspectImageModeOverride(),
 		});
-		// Keep the read tool's advertised description in sync with the effective
-		// state BEFORE any prompt rebuild below; its per-read behavior syncs
-		// lazily, which would otherwise leave stale guidance in the system prompt.
-		const readTool = this.#toolRegistry.get("read") as { syncInspectImageState?: () => boolean } | undefined;
-		readTool?.syncInspectImageState?.();
+		// Keep the read tool's advertised description in sync BEFORE any prompt
+		// rebuild below, passing the post-change availability so the prompt never
+		// lags a flip in either direction. Per-read lazy sync is the backstop.
+		const syncReadDescription = (available: boolean): void => {
+			const readTool = this.#toolRegistry.get("read") as
+				| { syncInspectImageState?: (available?: boolean) => boolean }
+				| undefined;
+			readTool?.syncInspectImageState?.(available);
+		};
 		const active = this.getEnabledToolNames();
 		const isActive = active.includes("inspect_image");
-		if (expected === isActive) return true;
+		if (expected === isActive) {
+			syncReadDescription(isActive);
+			return true;
+		}
 		if (!expected) {
+			syncReadDescription(false);
 			await this.applyActiveToolsByName(active.filter(name => name !== "inspect_image"));
 			return true;
 		}
@@ -905,12 +913,14 @@ export class SessionTools {
 				logger.warn("inspect_image tool could not be created", {
 					model: this.#host.model()?.id,
 				});
+				syncReadDescription(false);
 				return false;
 			}
 			const wrapped = this.#wrapRuntimeTool(tool);
 			this.#toolRegistry.set(wrapped.name, wrapped);
 			this.#builtInToolNames.add(wrapped.name);
 		}
+		syncReadDescription(true);
 		await this.applyActiveToolsByName([...active, "inspect_image"]);
 		return true;
 	}
