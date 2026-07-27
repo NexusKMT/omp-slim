@@ -79,12 +79,8 @@ export type ComputerParams = {
 };
 
 type IsSameType<Left, Right> = [Left] extends [Right] ? ([Right] extends [Left] ? true : false) : false;
-type ComputerSchema<Schema extends Type = Type<ComputerParams>> = IsSameType<
-	ComputerParams,
-	Schema["infer"]
-> extends true
-	? Schema
-	: never;
+type ComputerSchema<Schema extends Type = Type<ComputerParams>> =
+	IsSameType<ComputerParams, Schema["infer"]> extends true ? Schema : never;
 
 const getComputerSchema: () => ComputerSchema = once(() => {
 	const coordinateSchema = type("0 <= number.integer <= 2147483647");
