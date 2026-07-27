@@ -16,6 +16,8 @@
  * returns the original bytes.
  */
 
+import { formatPct, mergeInto, type ProfileNode, type RenderTreeContext, renderProfileNode } from "./profile-tree";
+
 /** Matches paths the read tool should treat as macOS sample reports. */
 export function isSampleProfilePath(filePath: string): boolean {
 	return /\.sample\.txt$/i.test(filePath);
@@ -270,25 +272,11 @@ function unescapeLegacy(ident: string): string {
 // Rendering
 // ---------------------------------------------------------------------------
 
-/** Display node: demangled, CPU-annotated mirror of a SampleFrame subtree. */
-interface DisplayNode {
-	symbol: string;
-	module?: string;
-	count: number;
-	/** Samples in this subtree that were on CPU (self of non-wait frames). */
-	cpu: number;
-	/** Levels of direct recursion flattened into this node. */
-	recursion: number;
-	children: DisplayNode[];
-}
-
 /** Fraction of a thread's on-CPU samples a subtree needs to stay visible. */
 const PRUNE_FRACTION = 0.02;
 /** Threads with fewer on-CPU samples than this share of their total are "idle". */
 const IDLE_FRACTION = 0.002;
 const IDLE_MIN_SAMPLES = 10;
-/** Symbol labels longer than this are head-truncated (huge C++ templates). */
-const MAX_SYMBOL_CHARS = 160;
 const TOP_FUNCTIONS = 20;
 
 function selfOf(frame: SampleFrame): number {
@@ -297,104 +285,28 @@ function selfOf(frame: SampleFrame): number {
 	return Math.max(0, frame.count - children);
 }
 
-function buildDisplayNode(frame: SampleFrame, demangleCache: Map<string, string>): DisplayNode {
+/**
+ * Build a display node for a frame subtree: demangled label, on-CPU value
+ * (self samples of non-wait frames), same-symbol siblings merged (`sample`
+ * splits them by call-site offset, which only fragments hot totals).
+ */
+function buildProfileNode(frame: SampleFrame, demangleCache: Map<string, string>, mainModule: string): ProfileNode {
 	let symbol = demangleCache.get(frame.symbol);
 	if (symbol === undefined) {
 		symbol = demangleSymbol(frame.symbol);
 		demangleCache.set(frame.symbol, symbol);
 	}
-	// Merge same-symbol siblings: `sample` splits them by call-site offset,
-	// which only fragments hot totals when hunting bottlenecks.
-	const children: DisplayNode[] = [];
+	const children: ProfileNode[] = [];
 	for (const rawChild of frame.children) {
-		const child = buildDisplayNode(rawChild, demangleCache);
-		const existing = children.find(c => c.symbol === child.symbol);
+		const child = buildProfileNode(rawChild, demangleCache, mainModule);
+		const existing = children.find(c => c.key === child.key);
 		if (existing) mergeInto(existing, child);
 		else children.push(child);
 	}
 	let cpu = WAIT_SYMBOLS[frame.symbol] ? 0 : selfOf(frame);
-	for (const child of children) cpu += child.cpu;
-	return { symbol, module: frame.module, count: frame.count, cpu, recursion: 0, children };
-}
-
-/** Merge `b` into `a` (same symbol), combining counts and child lists. */
-function mergeInto(a: DisplayNode, b: DisplayNode): void {
-	a.count += b.count;
-	a.cpu += b.cpu;
-	a.recursion = Math.max(a.recursion, b.recursion);
-	for (const child of b.children) {
-		const existing = a.children.find(c => c.symbol === child.symbol);
-		if (existing) mergeInto(existing, child);
-		else a.children.push(child);
-	}
-}
-
-/**
- * Flatten direct recursion: children carrying the node's own symbol are
- * dissolved into it (their children promoted and merged), so a 15-deep
- * `box_measure` spine renders as one annotated node.
- */
-function flattenRecursion(node: DisplayNode): void {
-	while (node.children.some(child => child.symbol === node.symbol)) {
-		node.recursion++;
-		const next: DisplayNode[] = [];
-		for (const child of node.children) {
-			const promoted = child.symbol === node.symbol ? child.children : [child];
-			for (const item of promoted) {
-				const existing = next.find(c => c.symbol === item.symbol);
-				if (existing) mergeInto(existing, item);
-				else next.push(item);
-			}
-		}
-		node.children = next;
-	}
-}
-
-function formatPct(n: number, total: number): string {
-	if (total <= 0) return "0%";
-	return `${((100 * n) / total).toFixed(1)}%`;
-}
-
-interface RenderContext {
-	out: string[];
-	threadCpu: number;
-	minCount: number;
-	mainModule: string;
-}
-
-function nodeLabel(node: DisplayNode, mainModule: string): string {
-	let label = node.symbol.length > MAX_SYMBOL_CHARS ? `${node.symbol.slice(0, MAX_SYMBOL_CHARS - 1)}…` : node.symbol;
-	if (node.module && node.module !== mainModule) label += ` (${node.module})`;
-	if (node.recursion > 0) label += ` [recursive ×${node.recursion + 1}]`;
-	return label;
-}
-
-function renderNode(node: DisplayNode, indent: number, ctx: RenderContext): void {
-	// Collapse pass-through chains: while a node has a single kept child and
-	// contributes < minCount samples itself, fold it into one display line.
-	const chain: DisplayNode[] = [node];
-	let cur = node;
-	for (;;) {
-		flattenRecursion(cur);
-		if (cur.recursion > 0) break;
-		const kept = cur.children.filter(child => child.cpu >= ctx.minCount);
-		if (kept.length !== 1 || cur.cpu - kept[0].cpu >= ctx.minCount) break;
-		cur = kept[0];
-		chain.push(cur);
-	}
-	flattenRecursion(cur);
-
-	const labels = chain.map(n => nodeLabel(n, ctx.mainModule));
-	const path =
-		labels.length <= 4
-			? labels.join(" › ")
-			: `${labels[0]} › ⋯${labels.length - 2} frames⋯ › ${labels[labels.length - 1]}`;
-	const count = String(chain[0].cpu).padStart(6);
-	const pct = formatPct(chain[0].cpu, ctx.threadCpu).padStart(6);
-	ctx.out.push(`${count} ${pct}  ${"  ".repeat(indent)}${path}`);
-
-	const kept = cur.children.filter(child => child.cpu >= ctx.minCount).sort((a, b) => b.cpu - a.cpu);
-	for (const child of kept) renderNode(child, indent + 1, ctx);
+	for (const child of children) cpu += child.value;
+	const label = frame.module && frame.module !== mainModule ? `${symbol} (${frame.module})` : symbol;
+	return { key: symbol, label, value: cpu, recursion: 0, children };
 }
 
 /** Aggregate on-CPU self samples per demangled symbol across all threads. */
@@ -448,9 +360,9 @@ export function renderSampleProfile(text: string): string | null {
 	const demangleCache = new Map<string, string>();
 
 	const annotated = threads.map(thread => {
-		const roots = thread.roots.map(root => buildDisplayNode(root, demangleCache));
+		const roots = thread.roots.map(root => buildProfileNode(root, demangleCache, header.process));
 		let cpu = 0;
-		for (const root of roots) cpu += root.cpu;
+		for (const root of roots) cpu += root.value;
 		return { thread, roots, cpu };
 	});
 	const processCpu = annotated.reduce((sum, t) => sum + t.cpu, 0);
@@ -486,15 +398,16 @@ export function renderSampleProfile(text: string): string | null {
 		out.push("");
 		const title = thread.name ? `${thread.name} (Thread_${thread.id})` : `Thread_${thread.id}`;
 		out.push(`## ${title} — ${thread.total} samples, ${cpu} on-CPU (${formatPct(cpu, thread.total)})`);
-		const ctx: RenderContext = {
+		const ctx: RenderTreeContext = {
 			out,
-			threadCpu: cpu,
-			minCount: Math.max(3, Math.round(cpu * PRUNE_FRACTION)),
-			mainModule: header.process,
+			total: cpu,
+			minValue: Math.max(3, Math.round(cpu * PRUNE_FRACTION)),
+			formatValue: String,
+			valueWidth: 6,
 		};
-		const kept = roots.filter(root => root.cpu >= ctx.minCount).sort((a, b) => b.cpu - a.cpu);
-		for (const root of kept) renderNode(root, 0, ctx);
-		if (kept.length === 0) out.push(`  (no call path above ${ctx.minCount} on-CPU samples)`);
+		const kept = roots.filter(root => root.value >= ctx.minValue).sort((a, b) => b.value - a.value);
+		for (const root of kept) renderProfileNode(root, 0, ctx);
+		if (kept.length === 0) out.push(`  (no call path above ${ctx.minValue} on-CPU samples)`);
 	}
 
 	if (idle.length > 0) {
