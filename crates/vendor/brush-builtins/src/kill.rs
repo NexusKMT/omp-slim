@@ -67,31 +67,55 @@ impl builtins::Command for KillCommand {
 			}
 		}
 
-		// Look through the remaining args for process operands or a -sigspec option.
-		let mut saw_pid_or_job_spec = false;
+		// Parse the remaining args: an optional leading `-sigspec` in the option
+		// position, an optional `--` end-of-options marker, then pid/jobspec
+		// operands. A hyphen is only a sigspec while still in the option position;
+		// once a sigspec or an operand is seen, later hyphen-led args are operands
+		// so negative PIDs (process groups per `kill(2)`) survive — e.g.
+		// `kill -TERM -- -10 123` signals process group 10 and PID 123.
+		let mut operands: Vec<&String> = Vec::new();
+		let mut options_done = false;
+		let mut consumed_end_of_options = false;
 		for arg in &self.args {
-			if let Some(possible_sigspec) = arg.strip_prefix("-") {
-				// The sigspec may be a signal name (e.g. -TERM) or number (e.g. -9).
-				if let Ok(parsed_trap_signal) = possible_sigspec.parse::<TrapSignal>() {
-					trap_signal = parsed_trap_signal;
-				} else {
-					writeln!(context.stderr(), "{}: invalid signal name", context.command_name)?;
-					return Ok(ExecutionExitCode::InvalidUsage.into());
-				}
-			} else {
-				saw_pid_or_job_spec = true;
+			// The first `--` ends option parsing and is not itself an operand.
+			if !consumed_end_of_options && arg == "--" {
+				consumed_end_of_options = true;
+				options_done = true;
+				continue;
+			}
+			if options_done {
+				operands.push(arg);
+				continue;
+			}
+			match arg.strip_prefix('-') {
+				Some(possible_sigspec) if !possible_sigspec.is_empty() => {
+					// Option position: interpret as a signal specification. The
+					// sigspec may be a signal name (e.g. -TERM) or number (e.g. -9).
+					if let Ok(parsed_trap_signal) = possible_sigspec.parse::<TrapSignal>() {
+						trap_signal = parsed_trap_signal;
+						options_done = true;
+					} else {
+						writeln!(context.stderr(), "{}: invalid signal name", context.command_name)?;
+						return Ok(ExecutionExitCode::InvalidUsage.into());
+					}
+				},
+				_ => {
+					// First operand ends the option position.
+					operands.push(arg);
+					options_done = true;
+				},
 			}
 		}
 
 		if self.list_signals {
 			return print_signals(&context, self.args.as_ref());
 		}
-		if !saw_pid_or_job_spec {
+		if operands.is_empty() {
 			writeln!(context.stderr(), "{}: invalid usage", context.command_name)?;
 			return Ok(ExecutionExitCode::InvalidUsage.into());
 		}
 
-		for pid_or_job_spec in self.args.iter().filter(|arg| !arg.starts_with('-')) {
+		for pid_or_job_spec in operands {
 			if pid_or_job_spec.starts_with('%') {
 				// It's a job spec.
 				if let Some(job) = context.shell.jobs_mut().resolve_job_spec(pid_or_job_spec) {

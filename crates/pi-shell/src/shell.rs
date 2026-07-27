@@ -2288,6 +2288,75 @@ mod tests {
 		assert_eq!(status.expect("checked timeout").expect("child wait").code(), Some(42));
 	}
 
+	/// A negative PID after `--` targets a process group per `kill(2)` instead
+	/// of being parsed as a numeric signal, and a plain PID in the same command
+	/// is still signaled.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn kill_builtin_preserves_negative_pid_process_group_operands() {
+		let dir = tempfile::tempdir().expect("temp dir");
+		let group_ready = dir.path().join("group-ready");
+		let plain_ready = dir.path().join("plain-ready");
+		let spawn_trapping = |ready: &std::path::Path, own_group: bool| {
+			let mut cmd = Command::new("sh");
+			cmd.args([
+				"-c",
+				"trap 'exit 42' TERM; : > \"$1\"; while :; do sleep 0.05; done",
+				"sh",
+				ready.to_str().expect("utf8 path"),
+			]);
+			if own_group {
+				// pgid becomes this child's own pid, so `-pid` addresses the group.
+				cmd.process_group(0);
+			}
+			cmd.spawn().expect("trapping child")
+		};
+
+		let mut group_child = spawn_trapping(&group_ready, true);
+		let mut plain_child = spawn_trapping(&plain_ready, false);
+		let group_pid = group_child.id().expect("group pid");
+		let plain_pid = plain_child.id().expect("plain pid");
+
+		let ready_result = time::timeout(Duration::from_secs(5), async {
+			while !group_ready.exists() || !plain_ready.exists() {
+				time::sleep(Duration::from_millis(10)).await;
+			}
+		})
+		.await;
+		if ready_result.is_err() {
+			let _ = group_child.start_kill();
+			let _ = plain_child.start_kill();
+			let _ = group_child.wait().await;
+			let _ = plain_child.wait().await;
+			panic!("children did not install their SIGTERM traps");
+		}
+
+		let (mut session, params) = kill_test_context().await;
+		let source_info = SourceInfo::from("pi-natives:test");
+		let result = session
+			.shell
+			.run_string(format!("kill -TERM -- -{group_pid} {plain_pid}"), &source_info, &params)
+			.await
+			.expect("kill command");
+		let code = exit_code(&result);
+
+		let statuses = time::timeout(Duration::from_secs(5), async {
+			tokio::join!(group_child.wait(), plain_child.wait())
+		})
+		.await;
+		if statuses.is_err() {
+			let _ = group_child.start_kill();
+			let _ = plain_child.start_kill();
+			let _ = group_child.wait().await;
+			let _ = plain_child.wait().await;
+			panic!("negative-PID kill must signal the process group and the plain PID");
+		}
+		let (group_status, plain_status) = statuses.expect("checked timeout");
+		assert_eq!(code, 0, "negative-PID kill should succeed");
+		assert_eq!(group_status.expect("group wait").code(), Some(42));
+		assert_eq!(plain_status.expect("plain wait").code(), Some(42));
+	}
+
 	/// `cmp` remains available with no executable search path, proving the shell
 	/// dispatches the in-process builtin rather than a platform binary.
 	#[tokio::test(flavor = "multi_thread")]
