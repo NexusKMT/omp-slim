@@ -23,6 +23,12 @@ pub(crate) struct KillCommand {
 	// Interpretation of these depends on whether -l is present.
 	#[arg(allow_hyphen_values = true)]
 	args: Vec<String>,
+
+	/// Process/job operands given after the `--` end-of-options marker. clap
+	/// consumes `--` before `execute`, so these are captured separately and are
+	/// always operands — never signal specifications (preserves negative PIDs).
+	#[arg(last = true, allow_hyphen_values = true)]
+	post_marker_args: Vec<String>,
 }
 
 impl builtins::Command for KillCommand {
@@ -67,45 +73,46 @@ impl builtins::Command for KillCommand {
 			}
 		}
 
-		// Parse the remaining args: an optional leading `-sigspec` in the option
-		// position, an optional `--` end-of-options marker, then pid/jobspec
-		// operands. A hyphen is only a sigspec while still in the option position;
-		// once a sigspec or an operand is seen, later hyphen-led args are operands
-		// so negative PIDs (process groups per `kill(2)`) survive — e.g.
-		// `kill -TERM -- -10 123` signals process group 10 and PID 123.
+		// Interpret the pre-`--` args: an optional leading `-sigspec` in the
+		// option position, then pid/jobspec operands. A hyphen leads a sigspec
+		// only in the option position — once a signal is chosen (via `-s`/`-n`, a
+		// leading `-sigspec`, or the `--` marker) or an operand is seen, later
+		// hyphen-led args are operands, so negative PIDs (process groups per
+		// `kill(2)`) survive: `kill -TERM -- -10 123` signals process group 10 and
+		// PID 123, and `kill -s TERM -- -10` signals process group 10.
 		let mut operands: Vec<&String> = Vec::new();
-		let mut options_done = false;
-		let mut consumed_end_of_options = false;
+		let mut options_done = self.signal_name.is_some() || self.signal_number.is_some();
+		let mut consumed_marker = false;
 		for arg in &self.args {
-			// The first `--` ends option parsing and is not itself an operand.
-			if !consumed_end_of_options && arg == "--" {
-				consumed_end_of_options = true;
+			// Whether clap leaves the `--` marker here depends on whether a
+			// positional value was already collected; consume the first one and
+			// close the option position either way.
+			if !consumed_marker && arg == "--" {
+				consumed_marker = true;
 				options_done = true;
 				continue;
 			}
-			if options_done {
-				operands.push(arg);
-				continue;
-			}
-			match arg.strip_prefix('-') {
-				Some(possible_sigspec) if !possible_sigspec.is_empty() => {
-					// Option position: interpret as a signal specification. The
-					// sigspec may be a signal name (e.g. -TERM) or number (e.g. -9).
-					if let Ok(parsed_trap_signal) = possible_sigspec.parse::<TrapSignal>() {
-						trap_signal = parsed_trap_signal;
-						options_done = true;
-					} else {
+			if !options_done {
+				if let Some(possible_sigspec) = arg.strip_prefix('-') {
+					if !possible_sigspec.is_empty() {
+						// Option position: interpret as a signal specification. The
+						// sigspec may be a signal name (e.g. -TERM) or number (e.g. -9).
+						if let Ok(parsed_trap_signal) = possible_sigspec.parse::<TrapSignal>() {
+							trap_signal = parsed_trap_signal;
+							options_done = true;
+							continue;
+						}
 						writeln!(context.stderr(), "{}: invalid signal name", context.command_name)?;
 						return Ok(ExecutionExitCode::InvalidUsage.into());
 					}
-				},
-				_ => {
-					// First operand ends the option position.
-					operands.push(arg);
-					options_done = true;
-				},
+				}
+				// The first operand ends the option position.
+				options_done = true;
 			}
+			operands.push(arg);
 		}
+		// Operands after the `--` marker are always process/job specs.
+		operands.extend(self.post_marker_args.iter());
 
 		if self.list_signals {
 			return print_signals(&context, self.args.as_ref());

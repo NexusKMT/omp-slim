@@ -2357,6 +2357,81 @@ mod tests {
 		assert_eq!(plain_status.expect("plain wait").code(), Some(42));
 	}
 
+	/// When clap consumes the `--` marker before `execute` (the default-signal
+	/// and `-s SIG` forms), a following negative PID is still an operand, not a
+	/// signal: `kill -- -<pgid>` defaults to SIGTERM for the group, and
+	/// `kill -s TERM -- -<pgid>` sends the named signal to the group.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn kill_builtin_signals_group_when_marker_precedes_negative_pid() {
+		let dir = tempfile::tempdir().expect("temp dir");
+		let default_ready = dir.path().join("default-ready");
+		let named_ready = dir.path().join("named-ready");
+		let spawn_group_leader = |ready: &std::path::Path| {
+			Command::new("sh")
+				.args([
+					"-c",
+					"trap 'exit 42' TERM; : > \"$1\"; while :; do sleep 0.05; done",
+					"sh",
+					ready.to_str().expect("utf8 path"),
+				])
+				.process_group(0)
+				.spawn()
+				.expect("group leader")
+		};
+
+		let mut default_child = spawn_group_leader(&default_ready);
+		let mut named_child = spawn_group_leader(&named_ready);
+		let default_pid = default_child.id().expect("default pid");
+		let named_pid = named_child.id().expect("named pid");
+
+		let ready_result = time::timeout(Duration::from_secs(5), async {
+			while !default_ready.exists() || !named_ready.exists() {
+				time::sleep(Duration::from_millis(10)).await;
+			}
+		})
+		.await;
+		if ready_result.is_err() {
+			let _ = default_child.start_kill();
+			let _ = named_child.start_kill();
+			let _ = default_child.wait().await;
+			let _ = named_child.wait().await;
+			panic!("group leaders did not install their SIGTERM traps");
+		}
+
+		let (mut session, params) = kill_test_context().await;
+		let source_info = SourceInfo::from("pi-natives:test");
+		// Default signal (SIGTERM) with the marker consumed by clap.
+		let default_result = session
+			.shell
+			.run_string(format!("kill -- -{default_pid}"), &source_info, &params)
+			.await
+			.expect("default kill command");
+		// Named signal via -s, marker consumed by clap.
+		let named_result = session
+			.shell
+			.run_string(format!("kill -s TERM -- -{named_pid}"), &source_info, &params)
+			.await
+			.expect("named kill command");
+
+		let statuses = time::timeout(Duration::from_secs(5), async {
+			tokio::join!(default_child.wait(), named_child.wait())
+		})
+		.await;
+		if statuses.is_err() {
+			let _ = default_child.start_kill();
+			let _ = named_child.start_kill();
+			let _ = default_child.wait().await;
+			let _ = named_child.wait().await;
+			panic!("marker-preceded negative PID must signal the process group");
+		}
+		let (default_status, named_status) = statuses.expect("checked timeout");
+		assert_eq!(exit_code(&default_result), 0, "`kill -- -<pgid>` should succeed");
+		assert_eq!(exit_code(&named_result), 0, "`kill -s TERM -- -<pgid>` should succeed");
+		assert_eq!(default_status.expect("default wait").code(), Some(42));
+		assert_eq!(named_status.expect("named wait").code(), Some(42));
+	}
+
 	/// A failed target makes `kill` return non-zero without preventing later
 	/// process operands from receiving the selected signal.
 	#[cfg(unix)]
