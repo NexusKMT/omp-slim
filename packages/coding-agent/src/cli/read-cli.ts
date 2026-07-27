@@ -8,6 +8,11 @@
 import { getProjectDir } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
 import { Settings } from "../config/settings";
+import { InternalUrlRouter } from "../internal-urls/router";
+import { discoverAndLoadMCPTools } from "../mcp/loader";
+import { MCPManager } from "../mcp/manager";
+import { discoverAuthStorage } from "../session/auth-broker-config";
+import type { AuthStorage } from "../session/auth-storage";
 import type { ToolSession } from "../tools";
 import { wrapToolWithMetaNotice } from "../tools/output-meta";
 import { ReadTool } from "../tools/read";
@@ -15,6 +20,15 @@ import { renderError } from "../tools/tool-errors";
 
 export interface ReadCommandArgs {
 	path: string;
+}
+
+function shouldDiscoverMcp(path: string): boolean {
+	const match = path.match(/^([a-z][a-z0-9+.-]*):\/\//i);
+	if (!match) return false;
+	const scheme = match[1].toLowerCase();
+	if (scheme === "mcp") return true;
+	if (["conflict", "file", "http", "https"].includes(scheme)) return false;
+	return InternalUrlRouter.instance().getHandler(scheme) === undefined;
 }
 
 export async function runReadCommand(cmd: ReadCommandArgs): Promise<void> {
@@ -34,9 +48,26 @@ export async function runReadCommand(cmd: ReadCommandArgs): Promise<void> {
 		getSessionSpawns: () => "*",
 	};
 
-	const tool = wrapToolWithMetaNotice(new ReadTool(session));
+	let authStorage: AuthStorage | undefined;
+	let mcpManager: MCPManager | undefined;
+	let failed = false;
 
 	try {
+		if (shouldDiscoverMcp(cmd.path)) {
+			authStorage = await discoverAuthStorage();
+			const result = await discoverAndLoadMCPTools(cwd, {
+				enableProjectConfig: settings.get("mcp.enableProjectConfig") ?? true,
+				filterExa: true,
+				filterBrowser: settings.get("browser.enabled") ?? false,
+				cacheStorage: settings.getStorage(),
+				authStorage,
+			});
+			mcpManager = result.manager;
+			session.mcpManager = mcpManager;
+			MCPManager.setInstance(mcpManager);
+		}
+
+		const tool = wrapToolWithMetaNotice(new ReadTool(session));
 		const result = await tool.execute("omp-read", { path: cmd.path });
 
 		for (const block of result.content) {
@@ -52,6 +83,14 @@ export async function runReadCommand(cmd: ReadCommandArgs): Promise<void> {
 		}
 	} catch (err) {
 		process.stderr.write(`${chalk.red(renderError(err))}\n`);
-		process.exit(1);
+		failed = true;
+	} finally {
+		if (mcpManager) {
+			await mcpManager.disconnectAll();
+			if (MCPManager.instance() === mcpManager) MCPManager.setInstance(undefined);
+		}
+		authStorage?.close();
 	}
+
+	if (failed) process.exit(1);
 }

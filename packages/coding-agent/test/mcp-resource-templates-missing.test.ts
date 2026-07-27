@@ -93,18 +93,8 @@ describe("MCPManager loads resources for a templates-less server", () => {
 
 		try {
 			await manager.connectServers({ docs: config }, {});
-
-			// Genuine integration wait: `#loadServerResourcesAndPrompts` runs
-			// fire-and-forget against a real spawned subprocess and exposes no
-			// completion promise or event to await, and fake timers cannot drive a
-			// child process. Poll the live manager with a generous ceiling, exiting
-			// the instant resources arrive (mirrors sdk-mcp-auto-discovery.test.ts).
-			const deadline = Date.now() + 10_000;
-			let resources = manager.getServerResources("docs");
-			while ((resources?.resources.length ?? 0) === 0 && Date.now() < deadline) {
-				await Bun.sleep(25);
-				resources = manager.getServerResources("docs");
-			}
+			await manager.ensureServerResources("docs");
+			const resources = manager.getServerResources("docs");
 
 			expect(resources).toBeDefined();
 			// The -32601 from templates/list must NOT discard the concrete resources.

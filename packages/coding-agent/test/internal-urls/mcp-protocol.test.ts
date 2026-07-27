@@ -1,22 +1,38 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as os from "node:os";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
 import { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";
 import type { MCPResource, MCPResourceReadResult, MCPResourceTemplate } from "@oh-my-pi/pi-coding-agent/mcp/types";
+import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
 
 function createMockManager(opts: {
 	servers?: string[];
 	resources?: Map<string, { resources: MCPResource[]; templates: MCPResourceTemplate[] }>;
 	readResult?: MCPResourceReadResult | undefined;
 	readError?: Error;
+	ensureResources?: (name: string) => Promise<void>;
 }) {
 	return {
 		getConnectedServers: () => opts.servers ?? [],
 		getServerResources: (name: string) => opts.resources?.get(name),
+		ensureServerResources: async (name: string) => opts.ensureResources?.(name),
 		readServerResource: async (_name: string, _uri: string) => {
 			if (opts.readError) throw opts.readError;
 			return opts.readResult;
 		},
 	} as unknown as MCPManager;
+}
+
+function createToolSession(): ToolSession {
+	return {
+		cwd: os.tmpdir(),
+		hasUI: false,
+		settings: Settings.isolated(),
+		getSessionFile: () => null,
+		getSessionSpawns: () => "*",
+	};
 }
 
 describe("McpProtocolHandler", () => {
@@ -74,6 +90,61 @@ describe("McpProtocolHandler", () => {
 		const resource = await router.resolve("mcp://test://doc");
 		expect(resource.content).toBe("hello world");
 		expect(resource.notes).toEqual(["MCP server: my-server"]);
+	});
+
+	it("lets read consume a native URI advertised by an MCP server", async () => {
+		const resources = new Map<string, { resources: MCPResource[]; templates: MCPResourceTemplate[] }>();
+		resources.set("ags", {
+			resources: [{ uri: "ags://capabilities/current-host", name: "current-host" }],
+			templates: [],
+		});
+		const manager = createMockManager({
+			servers: ["ags"],
+			resources,
+			readResult: {
+				contents: [{ uri: "ags://capabilities/current-host", text: "host capabilities" }],
+			},
+		});
+		MCPManager.setInstance(manager);
+
+		const result = await new ReadTool(createToolSession()).execute("read-ags-resource", {
+			path: "ags://capabilities/current-host",
+		});
+		const output = result.content.find(block => block.type === "text");
+
+		expect(output?.type).toBe("text");
+		if (output?.type !== "text") throw new Error("Expected text output");
+		expect(output.text).toContain("host capabilities");
+	});
+
+	it("waits for the MCP resource catalog before rejecting a native URI", async () => {
+		const resources = new Map<string, { resources: MCPResource[]; templates: MCPResourceTemplate[] }>();
+		let ensureCalls = 0;
+		const manager = createMockManager({
+			servers: ["ags"],
+			resources,
+			ensureResources: async name => {
+				ensureCalls += 1;
+				resources.set(name, {
+					resources: [{ uri: "ags://capabilities/current-host", name: "current-host" }],
+					templates: [],
+				});
+			},
+			readResult: {
+				contents: [{ uri: "ags://capabilities/current-host", text: "loaded after discovery" }],
+			},
+		});
+		MCPManager.setInstance(manager);
+
+		const result = await new ReadTool(createToolSession()).execute("read-delayed-ags-resource", {
+			path: "ags://capabilities/current-host",
+		});
+		const output = result.content.find(block => block.type === "text");
+
+		expect(ensureCalls).toBe(1);
+		expect(output?.type).toBe("text");
+		if (output?.type !== "text") throw new Error("Expected text output");
+		expect(output.text).toContain("loaded after discovery");
 	});
 
 	it("preserves query parameters in MCP resource URI", async () => {

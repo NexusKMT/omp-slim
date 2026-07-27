@@ -79,6 +79,17 @@ export class InternalUrlRouter {
 		return this.#handlers.has(match[1].toLowerCase());
 	}
 
+	/**
+	 * Whether read can resolve this URL through either a native handler or the
+	 * MCP resource fallback. MCP resources may use arbitrary custom schemes.
+	 */
+	canResolve(input: string): boolean {
+		const match = input.match(/^([a-z][a-z0-9+.-]*):\/\//i);
+		if (!match) return false;
+		const scheme = match[1].toLowerCase();
+		return this.#handlers.has(scheme) || this.#isMcpResourceScheme(scheme);
+	}
+
 	/** Schemes whose handler supports host/path autocomplete. */
 	completionSchemes(): string[] {
 		const schemes: string[] = [];
@@ -98,10 +109,16 @@ export class InternalUrlRouter {
 		return handler.complete(query, context);
 	}
 
-	#route(input: string): { parsed: InternalUrl; handler: ProtocolHandler } {
+	#isMcpResourceScheme(scheme: string): boolean {
+		return !["file", "http", "https"].includes(scheme) && this.#handlers.has("mcp");
+	}
+
+	#route(input: string, allowMcpResource = false): { parsed: InternalUrl; handler: ProtocolHandler } {
 		const parsed = parseInternalUrl(input);
 		const scheme = parsed.protocol.replace(/:$/, "").toLowerCase();
-		const handler = this.#handlers.get(scheme);
+		const handler =
+			this.#handlers.get(scheme) ??
+			(allowMcpResource && this.#isMcpResourceScheme(scheme) ? this.#handlers.get("mcp") : undefined);
 		if (!handler) {
 			const available = Array.from(this.#handlers.keys())
 				.map(candidate => `${candidate}://`)
@@ -113,7 +130,7 @@ export class InternalUrlRouter {
 
 	/** Resolve an internal URL through its registered protocol handler. */
 	async resolve(input: string, context?: ResolveContext): Promise<InternalResource> {
-		const { parsed, handler } = this.#route(input);
+		const { parsed, handler } = this.#route(input, true);
 		const resource = await handler.resolve(parsed, context);
 		return { ...resource, immutable: resource.immutable ?? handler.immutable };
 	}

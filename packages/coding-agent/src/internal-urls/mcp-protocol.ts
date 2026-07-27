@@ -24,7 +24,9 @@ function extractResourceUri(url: InternalUrl): string {
 	const host = url.rawHost || url.hostname;
 	const rawPathname = url.rawPathname ?? url.pathname;
 	const hasPath = rawPathname && rawPathname !== "/";
-	const uri = `${host}${hasPath ? rawPathname : ""}${url.search}${url.hash}`.trim();
+	const scheme = url.protocol.replace(/:$/, "").toLowerCase();
+	const prefix = scheme === "mcp" ? "" : `${scheme}://`;
+	const uri = `${prefix}${host}${hasPath ? rawPathname : ""}${url.search}${url.hash}`.trim();
 	if (!uri) {
 		throw new Error("mcp:// URL requires a resource URI: mcp://<resource-uri>");
 	}
@@ -95,10 +97,11 @@ function formatAvailableResources(mcpManager: MCPManager): string {
 }
 
 /**
- * Protocol handler for mcp:// URLs.
+ * Protocol handler for MCP resources.
  *
- * URL form:
+ * URL forms:
  * - mcp://<resource-uri> (e.g. mcp://test://notes, mcp://ibkr://portfolio/positions)
+ * - A resource's native URI when its scheme has no OMP handler (e.g. ags://capabilities/current-host)
  */
 export class McpProtocolHandler implements ProtocolHandler {
 	readonly scheme = "mcp";
@@ -111,7 +114,11 @@ export class McpProtocolHandler implements ProtocolHandler {
 		}
 
 		const uri = extractResourceUri(url);
-		const targetServer = resolveTargetServer(mcpManager, uri);
+		let targetServer = resolveTargetServer(mcpManager, uri);
+		if (!targetServer) {
+			await Promise.allSettled(mcpManager.getConnectedServers().map(name => mcpManager.ensureServerResources(name)));
+			targetServer = resolveTargetServer(mcpManager, uri);
+		}
 		if (!targetServer) {
 			throw new Error(
 				`No MCP server has resource "${uri}".\n\nAvailable resources:\n${formatAvailableResources(mcpManager)}`,
