@@ -78,7 +78,13 @@ export type ComputerParams = {
 	actions?: ComputerSchemaAction[];
 };
 
-type ComputerSchema = Type<ComputerParams>;
+type IsSameType<Left, Right> = [Left] extends [Right] ? ([Right] extends [Left] ? true : false) : false;
+type ComputerSchema<Schema extends Type = Type<ComputerParams>> = IsSameType<
+	ComputerParams,
+	Schema["infer"]
+> extends true
+	? Schema
+	: never;
 
 const getComputerSchema: () => ComputerSchema = once(() => {
 	const coordinateSchema = type("0 <= number.integer <= 2147483647");
@@ -113,12 +119,13 @@ const getComputerSchema: () => ComputerSchema = once(() => {
 		"+": "reject",
 	});
 
-	return type({
+	const computerSchema = type({
 		"actions?": computerActionSchema
 			.array()
 			.describe("ordered actions executed as one batch; omit or pass [] to just capture a screenshot"),
 		"+": "reject",
 	});
+	return computerSchema satisfies ComputerSchema<typeof computerSchema>;
 });
 
 export interface ComputerToolDetails {
