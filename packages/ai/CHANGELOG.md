@@ -7,6 +7,8 @@
 - Fixed OpenAI Responses replay treating a tool output as paired with a matching call that appeared later in the input, or a tool call as paired with an earlier output. Pair repair now respects wire order before preserving or synthesizing each side.
 - Fixed adaptive-thinking Anthropic models omitting the interleaved-thinking beta on signature-enforcing proxies, which caused persisted interleaved assistant turns to fail on replay ([#6717](https://github.com/can1357/oh-my-pi/issues/6717)).
 - Kimi Code now sends its session-stable prompt cache key on both supported transports: `prompt_cache_key` for OpenAI-compatible requests and `metadata.user_id` for Anthropic-compatible requests. Explicit keys survive side-channel session IDs, while `cacheRetention: "none"` still disables automatic affinity ([#6049](https://github.com/can1357/oh-my-pi/issues/6049)).
+- Fresh encrypted auth-broker snapshot caches are revalidated within a short startup budget, so one-shot clients see newly imported or revoked credentials immediately when the broker is reachable while retaining cache fallback for transport and server failures.
+- Fixed custom `anthropic-messages` endpoints dropping native web-search call/result blocks in the leaked-thinking wrapper, preserving signed continuation history in source order without carrying a preceding text signature onto later unsigned blocks ([#6703](https://github.com/can1357/oh-my-pi/issues/6703)).
 
 ## [17.1.4] - 2026-07-26
 
@@ -21,7 +23,6 @@
 
 ### Fixed
 
-- Fresh encrypted auth-broker snapshot caches are revalidated within a short startup budget, so one-shot clients see newly imported or revoked credentials immediately when the broker is reachable while retaining cache fallback for transport and server failures.
 - Fixed OpenAI Responses native history replay sending output-only `status` fields back as input, preventing `input[N].status` failures in long-running sessions. ([#6513](https://github.com/can1357/oh-my-pi/pull/6513) by [@Ant39140](https://github.com/Ant39140))
 - Cursor no longer discards a local tool result when the transport fails mid-execution. The provider waits for in-flight exec dispatches before pushing `done`, but the error path skipped that wait, so a handler decoded from the last chunk landed its result after the Agent had already finalized the call from the terminal error and cleared its buffer — losing the real outcome of a tool that may already have run side effects. Both exits now drain the same barrier.
 - Cursor exec handlers returning the bare-result form no longer record a failed call as successful. When an SDK handler returns only a protocol result (no paired `toolResult`), the synthesized transcript entry was always `"Tool produced no transcript result"` with `isError: false`, even for a `rejected` or `error` result — so Cursor saw a failure while the rebuilt transcript showed success. The synthesized entry now derives its state and message from the result's own oneof variant — including MCP, where an application-level tool failure rides inside the `success` variant as `is_error` rather than as a separate variant.
@@ -55,10 +56,6 @@
 - Fixed Cursor exec-channel MCP calls such as `web_search` omitting `toolCall` blocks when no interaction block arrives, which rendered their tool cards below the final assistant answer or dropped them on transcript replay. ([#6501](https://github.com/can1357/oh-my-pi/issues/6501))
 - Fixed Claude scoped weekly limits (e.g. `Claude 7 Day (Fable)`) with `is_active: false` being dropped by the `/usage` parser, rendering as `not reported` in `omp usage` despite carrying real utilization. Live payloads mark only the currently binding limit active — an account pinned at a 100% Fable cap reports its 77% shared weekly row as inactive too — so `is_active` signals severity ranking, not bucket existence, and is now ignored. Exhaustion gating is unchanged: tier rows still hard-block only at confirmed 100% with a future reset.
 - Fixed a TDZ crash (`Cannot access 'claudeCodeVersion' before initialization`) when `providers/anthropic` was the first module loaded: `providers/anthropic` → `stream` → `registry` → `registry/oauth/anthropic` circled back into the still-initializing provider module. The Claude Code fingerprint constants now live in the leaf module `providers/claude-code-fingerprint` (star re-exported from `providers/anthropic`, so import paths are unchanged).
-
-### Fixed
-
-- Fixed custom `anthropic-messages` endpoints dropping native web-search call/result blocks in the leaked-thinking wrapper, preserving signed continuation history in source order without carrying a preceding text signature onto later unsigned blocks ([#6703](https://github.com/can1357/oh-my-pi/issues/6703)).
 
 ## [17.1.3] - 2026-07-24
 

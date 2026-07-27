@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed proxy-stream clients dropping finalized provider-only content blocks, including Anthropic native web-search history, by allowing `done` and `error` events to carry terminal assistant content while retaining delta-reconstructed content from older proxy servers that omit it ([#6703](https://github.com/can1357/oh-my-pi/issues/6703)).
+
 ## [17.1.4] - 2026-07-26
 
 ### Changed
@@ -15,9 +19,6 @@
 - Fixed Cursor tool results being dropped for hosts that pass neither `cursorExecHandlers` nor `cursorOnToolResult`. Both are optional, but the Cursor provider resolves native todo calls server-side and synthesizes exec blocks regardless, marking both as resolved so no placeholder result is emitted for them. The result buffer callback was only installed when one of the options was present, so a bare SDK host discarded the provider's paired result and every rebuilt transcript stripped the interaction. It is now installed unconditionally.
 - Fixed an async `cursorOnToolResult` rewrite being lost when the provider errored mid-transform. The normal drain waits for a pending transformer, but the error path snapshotted the buffer without that await, so a transform still in flight patched an entry the catch path had already detached and the pre-transform payload was persisted. A provider error is exactly when a transform is most likely to be mid-flight.
 - Reduced oversized OpenAI native compaction requests by replacing only trailing tool-output bodies that exceed the model context window, while preserving calls, assistant history, and reasoning.
-### Fixed
-
-- Fixed proxy-stream clients dropping finalized provider-only content blocks, including Anthropic native web-search history, by allowing `done` and `error` events to carry terminal assistant content while retaining delta-reconstructed content from older proxy servers that omit it ([#6703](https://github.com/can1357/oh-my-pi/issues/6703)).
 
 ## [17.1.2] - 2026-07-24
 
