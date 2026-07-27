@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added bulk-input fast path and iterative processing for bracketed paste in the editor
+- Added windowed incremental lexing for large markdown documents
+
+### Changed
+
+- Optimized markdown URL tokenizer gate, inline math start scan, and autolink scheme scan for performance
+- Deduplicated terminal cursor-visibility writes to skip redundant escape sequences
+
 ## [17.1.6] - 2026-07-27
 
 ### Fixed
