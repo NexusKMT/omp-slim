@@ -105,12 +105,16 @@ export function filterChildShellEnv(
 		...expandDotenvValues(localEnv, result),
 	};
 	for (const key in launchEnv) {
-		if (projectEnvNamesLoadedByOmp.has(key)) {
+		// Launcher-owned names always survive with the launcher's own value.
+		if (launchEnvNames?.has(key)) continue;
+		if (launchEnvNames || projectEnvNamesLoadedByOmp.has(key)) {
+			// Strong provenance: the launch environment is known and this name is
+			// absent from it, or OMP itself injected the value — either way it came
+			// from a project dotenv file, not the parent shell.
 			delete result[key];
-		} else if (
-			!launchEnvNames?.has(key) &&
-			(result[key] === launchEnv[key] || result[key] === expandedLaunchEnv[key])
-		) {
+		} else if (result[key] === launchEnv[key] || result[key] === expandedLaunchEnv[key]) {
+			// No launch-env snapshot (non-Linux source install without
+			// `--no-env-file`): best-effort value match against the Bun-parsed dotenv.
 			delete result[key];
 		}
 	}
@@ -118,35 +122,43 @@ export function filterChildShellEnv(
 }
 
 /**
- * Parses a .env file synchronously and extracts key-value string pairs.
- * Ignores lines that are empty or start with '#'. Trims whitespace.
- * Allows values to be quoted with single or double quotes.
- * Returns an object of key-value pairs.
+ * Parse one dotenv line with Bun-compatible semantics: an optional `export`
+ * prefix, full-line `#` comments, inline `#` comments after whitespace on
+ * unquoted values, and single/double/backtick quoting (a `#` inside quotes
+ * stays literal). Returns undefined for blank lines, comments, and malformed
+ * names.
+ */
+function parseEnvLine(line: string): { key: string; value: string } | undefined {
+	const trimmed = line.trim();
+	if (!trimmed || trimmed.startsWith("#")) return undefined;
+	const eqIndex = trimmed.indexOf("=");
+	if (eqIndex === -1) return undefined;
+	let key = trimmed.slice(0, eqIndex).trim();
+	const exported = key.match(/^export[ \t]+(.*)$/);
+	if (exported) key = exported[1].trim();
+	if (!isValidEnvName(key)) return undefined;
+	const raw = trimmed.slice(eqIndex + 1).replace(/^[ \t]+/, "");
+	const quote = raw[0];
+	if (quote === '"' || quote === "'" || quote === "`") {
+		const close = raw.indexOf(quote, 1);
+		return { key, value: close === -1 ? raw.slice(1) : raw.slice(1, close) };
+	}
+	const commentIndex = raw.search(/[ \t]#/);
+	return { key, value: (commentIndex === -1 ? raw : raw.slice(0, commentIndex)).trimEnd() };
+}
+
+/**
+ * Parses a .env file synchronously into key-value string pairs using
+ * {@link parseEnvLine} for Bun-compatible line semantics, then mirrors valid
+ * `OMP_` variables to their `PI_` aliases.
  */
 export function parseEnvFile(filePath: string): Record<string, string> {
 	const result: Record<string, string> = {};
 	try {
 		const content = fs.readFileSync(filePath, "utf-8");
 		for (const line of content.split("\n")) {
-			const trimmed = line.trim();
-			// Skip comments and blank lines
-			if (!trimmed || trimmed.startsWith("#")) continue;
-
-			const eqIndex = trimmed.indexOf("=");
-			if (eqIndex === -1) continue;
-
-			const key = trimmed.slice(0, eqIndex).trim();
-			if (!isValidEnvName(key)) continue;
-
-			let value = trimmed.slice(eqIndex + 1).trim();
-
-			// Remove surrounding quotes (" or ')
-			if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-				value = value.slice(1, -1);
-			}
-			if (!isSafeEnvValue(value)) continue;
-
-			result[key] = value;
+			const parsed = parseEnvLine(line);
+			if (parsed && isSafeEnvValue(parsed.value)) result[parsed.key] = parsed.value;
 		}
 	} catch {
 		// File doesn't exist or can't be read - return empty result

@@ -66,7 +66,14 @@ it("filters expanded dotenv values while preserving matching launcher values", a
 	try {
 		await Bun.write(
 			path.join(tmp, ".env"),
-			"BASE=loaded-by-omp\nTEST_ENV_FROM_DOTENV=$BASE-suffix\nNODE_ENV=development\n",
+			[
+				"BASE=loaded-by-omp",
+				"TEST_ENV_FROM_DOTENV=$BASE-suffix",
+				"NODE_ENV=development",
+				"export EXPORTED_SECRET=exported",
+				"COMMENTED_SECRET=secret # trailing comment",
+				"",
+			].join("\n"),
 		);
 		await Bun.write(
 			path.join(tmp, ".env.local"),
@@ -82,6 +89,8 @@ it("filters expanded dotenv values while preserving matching launcher values", a
 			"	url: env.CONVEX_URL ?? null,",
 			"	inherited: env.OMP_TEST_INHERITED_MARKER ?? null,",
 			"	matching: env.NODE_ENV ?? null,",
+			"	exported: env.EXPORTED_SECRET ?? null,",
+			"	commented: env.COMMENTED_SECRET ?? null,",
 			"}));",
 		].join("\n");
 		const bunArgSets = process.platform === "linux" ? [[], ["--no-env-file"]] : [["--no-env-file"]];
@@ -112,6 +121,8 @@ it("filters expanded dotenv values while preserving matching launcher values", a
 				url: string | null;
 				inherited: string | null;
 				matching: string | null;
+				exported: string | null;
+				commented: string | null;
 			} = JSON.parse(stdout);
 			expect(payload).toEqual({
 				project: null,
@@ -119,6 +130,8 @@ it("filters expanded dotenv values while preserving matching launcher values", a
 				url: null,
 				inherited: "keep-me",
 				matching: "development",
+				exported: null,
+				commented: null,
 			});
 		}
 	} finally {
