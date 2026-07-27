@@ -70,6 +70,7 @@ export function truncateResponseItemId(id: string, prefix: string): string {
 
 interface OpenAIResponsesReplaySanitizeOptions {
 	supportsImageDetailOriginal?: boolean;
+	supportsComputerUse?: boolean;
 }
 
 /**
@@ -100,27 +101,47 @@ function clampReplayItemImageDetail(
 	return changed ? { ...item, content } : item;
 }
 
+function isOpenAIResponsesClientInputBoundary(item: Record<string, unknown>): boolean {
+	if (item.type === "message") return item.role !== "assistant";
+	if (item.type === undefined && typeof item.role === "string") return item.role !== "assistant";
+
+	switch (item.type) {
+		case "function_call_output":
+		case "custom_tool_call_output":
+		case "computer_call_output":
+		case "local_shell_call_output":
+		case "shell_call_output":
+		case "apply_patch_call_output":
+		case "mcp_approval_response":
+		case "compaction_trigger":
+		case "item_reference":
+			return true;
+		case "additional_tools":
+			return item.role !== "assistant";
+		case "tool_search_output":
+			return item.execution !== "server";
+		default:
+			return false;
+	}
+}
+
 export function sanitizeOpenAIResponsesHistoryItemsForReplay(
 	items: Array<Record<string, unknown>>,
 	options: OpenAIResponsesReplaySanitizeOptions = {},
 ): ResponseInput {
 	const normalizedCallIds = new Map<string, string>();
 	const supportsImageDetailOriginal = options.supportsImageDetailOriginal !== false;
+	const supportsComputerUse = options.supportsComputerUse !== false;
 	// Stateless native computer history is an atomic Responses chain: replaying
 	// a `computer_call` ID requires the reasoning item IDs from that response.
 	const computerLinkedReasoningItems = new Set<Record<string, unknown>>();
 	const responseReasoningItems: Array<Record<string, unknown>> = [];
 	for (const item of items) {
-		const startsNewResponse =
-			(item.type === "message" && item.role !== "assistant") ||
-			item.type === "function_call_output" ||
-			item.type === "custom_tool_call_output" ||
-			item.type === "computer_call_output";
-		if (startsNewResponse) {
+		if (isOpenAIResponsesClientInputBoundary(item)) {
 			responseReasoningItems.length = 0;
 		} else if (item.type === "reasoning") {
 			responseReasoningItems.push(item);
-		} else if (item.type === "computer_call" && typeof item.id === "string") {
+		} else if (supportsComputerUse && item.type === "computer_call" && typeof item.id === "string") {
 			for (const reasoningItem of responseReasoningItems) computerLinkedReasoningItems.add(reasoningItem);
 		}
 	}

@@ -1646,6 +1646,7 @@ export function buildResponsesInput<TApi extends Api>(options: BuildResponsesInp
 			if (historyItems && shouldReplayPayloadItems) {
 				const sanitizedItems = sanitizeOpenAIResponsesHistoryItemsForReplay(filterReasoning(historyItems), {
 					supportsImageDetailOriginal,
+					supportsComputerUse: options.model.supportsComputerUse === true,
 				});
 				messages.push(
 					...adaptResponsesReplayItemsForModel(
@@ -1694,7 +1695,10 @@ export function buildResponsesInput<TApi extends Api>(options: BuildResponsesInp
 			if (historyItems) {
 				const rawSanitizedHistoryItems = sanitizeOpenAIResponsesAssistantHistoryItemsForReplay(
 					filterReasoning(historyItems),
-					{ supportsImageDetailOriginal },
+					{
+						supportsImageDetailOriginal,
+						supportsComputerUse: options.model.supportsComputerUse === true,
+					},
 				);
 				const sanitizedHistoryItems = rawSanitizedHistoryItems
 					? adaptResponsesReplayItemsForModel(

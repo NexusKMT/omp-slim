@@ -401,57 +401,75 @@ describe("OpenAI GA computer contract", () => {
 		}
 	});
 
-	test("keeps earlier tool-response reasoning IDs stripped in mixed computer history", () => {
-		const sanitized = sanitizeOpenAIResponsesHistoryItemsForReplay([
-			{
-				type: "reasoning",
-				id: "rs_unrelated_tool_turn",
-				summary: [],
-				encrypted_content: "unrelated-reasoning",
-			},
-			{
-				type: "function_call",
-				id: "fc_unrelated_tool_turn",
-				call_id: "call_unrelated_tool_turn",
-				name: "read",
-				arguments: "{}",
-				status: "completed",
-			},
-			{
-				type: "function_call_output",
-				call_id: "call_unrelated_tool_turn",
-				output: "earlier tool result",
-			},
-			{
-				type: "reasoning",
-				id: "rs_computer_turn",
-				summary: [],
-				encrypted_content: "computer-reasoning",
-			},
-			{
-				type: "message",
-				id: "msg_computer_turn",
-				role: "assistant",
-				status: "completed",
-				content: [{ type: "output_text", text: "I will inspect the screen.", annotations: [] }],
-			},
-			{
-				type: "computer_call",
-				id: "cu_computer_turn",
-				call_id: "call_computer_turn",
-				action: { type: "screenshot" },
-				pending_safety_checks: [],
-				status: "completed",
-			},
-		]);
+	test("clears reasoning candidates at every client continuation boundary", () => {
+		const boundaries: Array<[string, Record<string, unknown>]> = [
+			["input message", { role: "user", content: "next turn" }],
+			["function output", { type: "function_call_output", call_id: "call_function", output: "done" }],
+			["custom output", { type: "custom_tool_call_output", call_id: "call_custom", output: "done" }],
+			[
+				"computer output",
+				{
+					type: "computer_call_output",
+					call_id: "call_computer_output",
+					output: { type: "computer_screenshot", file_id: "file_computer_output" },
+				},
+			],
+			["local shell output", { type: "local_shell_call_output", id: "call_local_shell", output: "done" }],
+			["shell output", { type: "shell_call_output", call_id: "call_shell", output: [], status: "completed" }],
+			["apply patch output", { type: "apply_patch_call_output", call_id: "call_patch", status: "completed" }],
+			["MCP approval", { type: "mcp_approval_response", approval_request_id: "approval_1", approve: true }],
+			["client tool search output", { type: "tool_search_output", execution: "client", tools: [] }],
+			["additional tools", { type: "additional_tools", role: "developer", tools: [] }],
+			["compaction trigger", { type: "compaction_trigger" }],
+			["item reference", { type: "item_reference", id: "item_reference_1" }],
+		];
 
-		expect(sanitized[0] as unknown).toEqual({
-			type: "reasoning",
-			summary: [],
-			encrypted_content: "unrelated-reasoning",
-		});
-		expect(sanitized[3]!).toMatchObject({ type: "reasoning", id: "rs_computer_turn" });
-		expect(sanitized[5]!).toMatchObject({ type: "computer_call", id: "cu_computer_turn" });
+		for (const [boundary, item] of boundaries) {
+			const sanitized = sanitizeOpenAIResponsesHistoryItemsForReplay([
+				{
+					type: "reasoning",
+					id: "rs_unrelated_turn",
+					summary: [],
+					encrypted_content: "unrelated-reasoning",
+				},
+				item,
+				{
+					type: "reasoning",
+					id: "rs_computer_turn",
+					summary: [],
+					encrypted_content: "computer-reasoning",
+				},
+				{
+					type: "message",
+					id: "msg_computer_turn",
+					role: "assistant",
+					status: "completed",
+					content: [{ type: "output_text", text: "I will inspect the screen.", annotations: [] }],
+				},
+				{
+					type: "tool_search_output",
+					id: "tool_search_server_1",
+					execution: "server",
+					status: "completed",
+					tools: [],
+				},
+				{
+					type: "computer_call",
+					id: "cu_computer_turn",
+					call_id: "call_computer_turn",
+					action: { type: "screenshot" },
+					pending_safety_checks: [],
+					status: "completed",
+				},
+			]);
+			const reasoningIds = sanitized
+				.filter(replayItem => replayItem.type === "reasoning")
+				.map(replayItem => (replayItem as { id?: string }).id);
+			expect({ boundary, reasoningIds }).toEqual({
+				boundary,
+				reasoningIds: [undefined, "rs_computer_turn"],
+			});
+		}
 	});
 
 	test("turns a failed computer call without a screenshot into valid recovery history", () => {
@@ -494,6 +512,12 @@ describe("OpenAI GA computer contract", () => {
 
 	test("demotes native computer history when replaying to an unsupported model", () => {
 		const unsupported = model("openai-responses", "gpt-5.3");
+		const reasoning = {
+			type: "reasoning",
+			id: "rs_native_1",
+			summary: [],
+			encrypted_content: "native-computer-reasoning",
+		};
 		const call = {
 			type: "computer_call",
 			id: "item_native_1",
@@ -515,7 +539,7 @@ describe("OpenAI GA computer contract", () => {
 				type: "openaiResponsesHistory" as const,
 				provider: "openai" as const,
 				dt: true,
-				items: [call, output],
+				items: [reasoning, call, output],
 			},
 		};
 		const replay = buildResponsesInput({
@@ -528,6 +552,7 @@ describe("OpenAI GA computer contract", () => {
 		expect(replay.some(item => item.type === "computer_call" || item.type === "computer_call_output")).toBe(false);
 		expect(JSON.stringify(replay)).toContain("call_native_1");
 		expect(JSON.stringify(replay)).toContain("file_native_1");
+		expect(JSON.stringify(replay)).not.toContain("rs_native_1");
 	});
 
 	test("full native history replacement clears stale computer call pairing state", () => {
