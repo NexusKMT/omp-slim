@@ -1040,7 +1040,25 @@ export class SessionTools {
 		});
 
 		const extensionRunner = this.#host.extensionRunner();
+		const registeredMcpTools = new Map<string, CustomTool>();
 		for (const customTool of mcpTools) {
+			const existing = registeredMcpTools.get(customTool.name);
+			if (existing) {
+				if (
+					existing.mcpServerName !== customTool.mcpServerName ||
+					existing.mcpToolName !== customTool.mcpToolName
+				) {
+					logger.warn("MCP tool name collision; keeping first registration", {
+						name: customTool.name,
+						keptServer: existing.mcpServerName,
+						keptTool: existing.mcpToolName,
+						ignoredServer: customTool.mcpServerName,
+						ignoredTool: customTool.mcpToolName,
+					});
+				}
+				continue;
+			}
+			registeredMcpTools.set(customTool.name, customTool);
 			const wrapped = wrapToolWithMetaNotice(CustomToolAdapter.wrap(customTool, getCustomToolContext) as AgentTool);
 			const finalTool = (
 				extensionRunner ? new ExtensionToolWrapper(wrapped, extensionRunner) : wrapped

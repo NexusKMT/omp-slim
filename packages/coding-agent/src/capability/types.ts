@@ -122,6 +122,9 @@ export interface Capability<T> {
 	 */
 	key(item: T): string | undefined;
 
+	/** Treat items with different keys as aliases; the first equivalent item wins. */
+	equivalent?(left: T, right: T): boolean;
+
 	/**
 	 * Optional validation. Return error message if invalid, undefined if valid.
 	 */

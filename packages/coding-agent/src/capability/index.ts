@@ -164,21 +164,26 @@ async function loadImpl<T>(
 		}
 	}
 
-	// Deduplicate by key (first wins = highest priority)
-	const seen = new Map<string, number>();
+	// Deduplicate by key or semantic equivalence (first wins = highest priority)
+	const seen = new Set<string>();
 	const deduped: Array<T & { _source: SourceMeta }> = [];
+	const equivalent = capability.equivalent;
 
-	for (let i = 0; i < allItems.length; i++) {
-		const item = allItems[i];
+	for (const item of allItems) {
 		const key = capability.key(item);
 
 		if (key === undefined) {
 			deduped.push(item);
-		} else if (!seen.has(key)) {
-			seen.set(key, i);
-			deduped.push(item);
-		} else {
+			continue;
+		}
+
+		const keySeen = seen.has(key);
+		seen.add(key);
+		const aliasSeen = !keySeen && equivalent !== undefined && deduped.some(existing => equivalent(existing, item));
+		if (keySeen || aliasSeen) {
 			item._shadowed = true;
+		} else {
+			deduped.push(item);
 		}
 	}
 
