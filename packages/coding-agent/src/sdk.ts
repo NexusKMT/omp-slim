@@ -3112,6 +3112,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				return id ? `${id}-advisor` : null;
 			},
 			getAgentId: () => "advisor",
+			// The primary's availability signals are wrong for advisors: their tool
+			// slate is filtered separately at runtime (default read/grep/glob, no
+			// write transport), so xd:// devices are unreachable and read must never
+			// advertise inspect_image — images are inlined, and the provider
+			// boundary handles text-only advisor models.
+			xdevRegistry: undefined,
+			isToolActive: name => name !== "inspect_image" && toolSession.isToolActive?.(name) === true,
 		};
 		const advisorToolBuilds: Array<Tool | null | Promise<Tool | null>> = [];
 		for (const name in BUILTIN_TOOLS) {

@@ -874,7 +874,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			1,
 			Math.min(session.settings.get("read.defaultLimit") ?? DEFAULT_MAX_LINES, DEFAULT_MAX_LINES),
 		);
-		this.#inspectImageActive = session.isToolActive?.("inspect_image") ?? isInspectImageToolActive(session);
+		this.#inspectImageActive = this.#resolveInspectImageAvailability();
 		this.description = this.#renderDescription();
 	}
 
@@ -895,20 +895,32 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 	}
 
 	/**
+	 * Whether the agent can actually reach `inspect_image` right now: exposed
+	 * top-level, or mounted as an `xd://` device while the effective mode wants
+	 * it (mounted devices stay executable via `write xd://inspect_image`, so a
+	 * metadata-only read remains actionable). Sessions with neither
+	 * availability signal (tests, embedded use) fall back to the mode
+	 * computation alone. Restricted slates (subagents without the tool and
+	 * without xdev) resolve to unavailable, so those sessions get inline image
+	 * blocks instead of guidance pointing at an absent tool.
+	 */
+	#resolveInspectImageAvailability(): boolean {
+		const topLevel = this.session.isToolActive?.("inspect_image");
+		const registry = this.session.xdevRegistry;
+		if (topLevel === undefined && registry === undefined) return isInspectImageToolActive(this.session);
+		if (topLevel === true) return true;
+		return registry?.get("inspect_image") !== undefined && isInspectImageToolActive(this.session);
+	}
+
+	/**
 	 * Re-evaluate the effective inspect_image state; it can flip when the model
 	 * or the `/vision` override changes after this tool was constructed. Keeps
 	 * the behavior branch and the advertised description in lockstep. Called
-	 * per image read and by tool reconciliation before prompt rebuilds.
-	 *
-	 * Actual tool availability wins over the mode computation: restricted
-	 * sessions (explicit tool slates without `inspect_image`, e.g. subagents)
-	 * must never see metadata-only reads pointing at an absent tool. Sessions
-	 * without an `isToolActive` predicate (tests, embedded use) fall back to
-	 * the mode check.
+	 * per image read and by tool reconciliation before prompt rebuilds (which
+	 * passes the post-change availability as `availableOverride`).
 	 */
 	syncInspectImageState(availableOverride?: boolean): boolean {
-		const active =
-			availableOverride ?? this.session.isToolActive?.("inspect_image") ?? isInspectImageToolActive(this.session);
+		const active = availableOverride ?? this.#resolveInspectImageAvailability();
 		if (active !== this.#inspectImageActive) {
 			this.#inspectImageActive = active;
 			this.description = this.#renderDescription();

@@ -6493,7 +6493,7 @@ export class AgentSession {
 		return true;
 	}
 
-	#setModelWithProviderSessionReset(model: Model): void {
+	async #setModelWithProviderSessionReset(model: Model): Promise<void> {
 		const currentModel = this.model;
 		if (currentModel) {
 			this.#closeProviderSessionsForModelSwitch(currentModel, model);
@@ -6508,11 +6508,13 @@ export class AgentSession {
 
 		// inspect_image auto mode keys off model image capability. Reconcile
 		// centrally here so retry-fallback model changes (turn-recovery.ts),
-		// which bypass syncAfterModelChange, cannot leave the tool set stale.
-		// Idempotent; syncAfterModelChange's own reconcile is then a no-op.
-		void this.#tools.reconcileInspectImageAfterModelChange().catch(error => {
+		// which bypass syncAfterModelChange, cannot leave the tool set stale —
+		// callers await, so a scheduled retry never races the reconciled slate.
+		try {
+			await this.#tools.reconcileInspectImageAfterModelChange();
+		} catch (error) {
 			logger.warn("inspect_image reconcile after model change failed", { error: String(error) });
-		});
+		}
 	}
 
 	#closeCodexProviderSessionsForHistoryRewrite(): void {
@@ -7077,7 +7079,7 @@ export class AgentSession {
 								currentModel.id !== match.id ||
 								currentModel.api !== match.api));
 					if (shouldResetProviderState) {
-						this.#setModelWithProviderSessionReset(match);
+						await this.#setModelWithProviderSessionReset(match);
 					} else {
 						this.agent.setModel(match);
 					}

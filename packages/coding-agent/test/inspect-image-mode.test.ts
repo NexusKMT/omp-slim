@@ -105,28 +105,63 @@ describe("inspect_image.enabled migration", () => {
 });
 
 describe("read tool follows actual tool availability", () => {
-	function readSession(inspectImageActive: boolean): ToolSession {
+	function readSession(options: {
+		inspectImageActive: boolean;
+		xdevMounted?: boolean;
+		settings?: Record<string, unknown>;
+	}): ToolSession {
 		return {
 			cwd: os.tmpdir(),
 			hasUI: false,
-			settings: Settings.isolated(),
+			settings: Settings.isolated(options.settings ?? {}),
 			getSessionFile: () => null,
 			getSessionSpawns: () => null,
 			getActiveModel: () => textModel,
-			isToolActive: (name: string) => name === "inspect_image" && inspectImageActive,
+			isToolActive: (name: string) => name === "inspect_image" && options.inspectImageActive,
+			...(options.xdevMounted === undefined
+				? {}
+				: {
+						xdevRegistry: {
+							get: (name: string) =>
+								name === "inspect_image" && options.xdevMounted ? { name: "inspect_image" } : undefined,
+						},
+					}),
 		} as unknown as ToolSession;
 	}
 
 	test("restricted session (tool absent) never advertises inspect_image", () => {
 		// auto mode + text-only model would compute active=true, but the tool is
 		// not in this session's slate, so read must serve inline image blocks.
-		const tool = new ReadTool(readSession(false));
+		const tool = new ReadTool(readSession({ inspectImageActive: false }));
 		expect(tool.description).not.toContain("call `inspect_image`");
 		expect(tool.syncInspectImageState()).toBe(false);
 	});
 
 	test("session with the tool registered advertises it", () => {
-		const tool = new ReadTool(readSession(true));
+		const tool = new ReadTool(readSession({ inspectImageActive: true }));
 		expect(tool.syncInspectImageState()).toBe(true);
+	});
+
+	test("xd://-mounted inspect_image counts as available", () => {
+		// Default sessions mount discoverable built-ins under xd://, removing them
+		// from the top-level predicate while they stay executable via
+		// `write xd://inspect_image` — read must keep pointing at the tool.
+		const tool = new ReadTool(readSession({ inspectImageActive: false, xdevMounted: true }));
+		expect(tool.syncInspectImageState()).toBe(true);
+		expect(tool.description).toContain("call `inspect_image`");
+	});
+
+	test("mode off wins over a lingering xd:// mount", () => {
+		// Built-in devices are never reconciled out of the xdev registry, so after
+		// `/vision off` the device still resolves — the effective mode must gate it.
+		const tool = new ReadTool(
+			readSession({
+				inspectImageActive: false,
+				xdevMounted: true,
+				settings: { "inspect_image.mode": "off" },
+			}),
+		);
+		expect(tool.syncInspectImageState()).toBe(false);
+		expect(tool.description).not.toContain("call `inspect_image`");
 	});
 });
