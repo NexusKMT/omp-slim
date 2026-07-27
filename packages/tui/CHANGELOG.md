@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed emergency exits from fullscreen overlays leaving omp's main-screen Kitty keyboard frame active, which could corrupt Arrow Up input in the terminal pane after omp exited ([#6810](https://github.com/can1357/oh-my-pi/issues/6810)).
+
 ## [17.1.4] - 2026-07-26
 
 ### Fixed
