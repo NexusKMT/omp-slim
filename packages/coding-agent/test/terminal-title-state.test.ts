@@ -6,6 +6,7 @@ import {
 	setTerminalTitleState,
 } from "@oh-my-pi/pi-coding-agent/utils/title-generator";
 import { setTerminalHeadless } from "@oh-my-pi/pi-utils";
+import { mockWindowsConsoleTitle, type WindowsConsoleTitleMock } from "./terminal-title-test-utils";
 
 const LABEL = "my-project";
 
@@ -74,6 +75,7 @@ describe("disposeTerminalTitleState", () => {
 	let stdoutSpy: { mockRestore(): void } | undefined;
 	let prevHeadless = false;
 	let ttyDescriptor: PropertyDescriptor | undefined;
+	let windowsTitleMock: WindowsConsoleTitleMock | undefined;
 
 	beforeEach(() => {
 		vi.useFakeTimers();
@@ -82,6 +84,7 @@ describe("disposeTerminalTitleState", () => {
 		ttyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
 		Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
 
+		windowsTitleMock = mockWindowsConsoleTitle();
 		writes = [];
 		stdoutSpy = spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
 			writes.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk as Uint8Array));
@@ -99,6 +102,8 @@ describe("disposeTerminalTitleState", () => {
 		// A started interval must never leak between tests.
 		disposeTerminalTitleState();
 		stdoutSpy?.mockRestore();
+		windowsTitleMock?.restore();
+		windowsTitleMock = undefined;
 		stdoutSpy = undefined;
 		if (ttyDescriptor) Object.defineProperty(process.stdout, "isTTY", ttyDescriptor);
 		else Reflect.deleteProperty(process.stdout, "isTTY");

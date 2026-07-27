@@ -1,6 +1,7 @@
 /**
  * Generate session titles using a smol, fast model.
  */
+import { dlopen, FFIType, ptr } from "bun:ffi";
 import * as path from "node:path";
 
 import { type Api, type AssistantMessage, completeSimple, type Model } from "@oh-my-pi/pi-ai";
@@ -22,6 +23,59 @@ const TITLE_MARKER_INSTRUCTION = prompt.render(titleMarkerInstruction);
 
 const DEFAULT_TERMINAL_TITLE = "π";
 const TERMINAL_TITLE_CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
+
+interface WindowsConsoleTitleApi {
+	set(title: string): boolean;
+	close(): void;
+}
+
+let windowsConsoleTitleApi: WindowsConsoleTitleApi | null | undefined;
+let lastTerminalTitle: string | undefined;
+
+function getWindowsConsoleTitleApi(): WindowsConsoleTitleApi | null {
+	if (process.platform !== "win32") return null;
+	if (windowsConsoleTitleApi !== undefined) return windowsConsoleTitleApi;
+	try {
+		const kernel32 = dlopen("kernel32.dll", {
+			SetConsoleTitleW: { args: [FFIType.ptr], returns: FFIType.bool },
+		});
+		windowsConsoleTitleApi = {
+			set(title) {
+				const wideTitle = Buffer.from(`${title}\0`, "utf16le");
+				return kernel32.symbols.SetConsoleTitleW(ptr(wideTitle));
+			},
+			close: () => kernel32.close(),
+		};
+	} catch {
+		windowsConsoleTitleApi = null;
+	}
+	return windowsConsoleTitleApi;
+}
+
+function setWindowsConsoleTitle(title: string): boolean {
+	const api = getWindowsConsoleTitleApi();
+	if (!api) return false;
+	try {
+		return api.set(title);
+	} catch {
+		try {
+			api.close();
+		} catch {
+			// Ignore cleanup failures after the native title path has already failed.
+		}
+		windowsConsoleTitleApi = null;
+		return false;
+	}
+}
+
+function disposeWindowsConsoleTitleApi(): void {
+	try {
+		windowsConsoleTitleApi?.close();
+	} catch {
+		// Terminal teardown must remain best-effort.
+	}
+	windowsConsoleTitleApi = undefined;
+}
 
 // Cover the "backend ignores `disableReasoning`" case unconditionally: the
 // static `model.reasoning` catalog flag can't distinguish a thinking model that
@@ -379,11 +433,16 @@ export function formatSessionTerminalTitle(sessionName: string | undefined, cwd?
 }
 
 /**
- * Set the terminal title using OSC 0 (sets both tab and window title). Unsupported terminals ignore it.
+ * Set the terminal title through the native Win32 API or OSC 0.
+ *
+ * Repeating the same sanitized title is a no-op on every platform.
  */
 export function setTerminalTitle(title: string): void {
 	if (!process.stdout.isTTY || isTerminalHeadless()) return;
-	process.stdout.write(`\x1b]0;${sanitizeTerminalTitlePart(title) ?? DEFAULT_TERMINAL_TITLE}\x07`);
+	const next = sanitizeTerminalTitlePart(title) ?? DEFAULT_TERMINAL_TITLE;
+	if (next === lastTerminalTitle) return;
+	if (!setWindowsConsoleTitle(next)) process.stdout.write(`\x1b]0;${next}\x07`);
+	lastTerminalTitle = next;
 }
 
 export function setSessionTerminalTitle(sessionName: string | undefined, cwd?: string): void {
@@ -425,7 +484,6 @@ const terminalTitleRuntime: {
 	frame: number;
 	enabled: boolean;
 	timer: NodeJS.Timeout | undefined;
-	lastEmitted: string | undefined;
 	/** A title an extension set via `setTitle()`. While set, it owns the terminal
 	 *  title verbatim: the run-state separator never rewrites it. Cleared when the
 	 *  app next establishes an authoritative session title (rename, new session,
@@ -437,7 +495,6 @@ const terminalTitleRuntime: {
 	frame: 0,
 	enabled: true,
 	timer: undefined,
-	lastEmitted: undefined,
 	extensionOverride: undefined,
 };
 
@@ -470,7 +527,7 @@ export function buildTerminalTitleWithState(
 
 function emitTerminalTitle(): void {
 	// An extension override owns the terminal verbatim; the run-state separator and
-	// spinner ticks must not clobber it (still deduped via lastEmitted).
+	// spinner ticks must not clobber it. The terminal sink deduplicates the result.
 	const next =
 		terminalTitleRuntime.extensionOverride ??
 		buildTerminalTitleWithState(
@@ -479,8 +536,6 @@ function emitTerminalTitle(): void {
 			terminalTitleRuntime.frame,
 			terminalTitleRuntime.enabled,
 		);
-	if (next === terminalTitleRuntime.lastEmitted) return;
-	terminalTitleRuntime.lastEmitted = next;
 	setTerminalTitle(next);
 }
 
@@ -521,9 +576,11 @@ export function setTerminalTitleStateEnabled(enabled: boolean): void {
 	emitTerminalTitle();
 }
 
-/** Stop the spinner timer; call on session/UI teardown. */
+/** Stop the spinner and release terminal-title runtime resources. */
 export function disposeTerminalTitleState(): void {
 	stopTerminalTitleSpinner();
+	disposeWindowsConsoleTitleApi();
+	lastTerminalTitle = undefined;
 }
 
 /**
