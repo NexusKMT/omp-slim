@@ -1518,9 +1518,8 @@ async function loadSiliconFlowModelsDevReferences(
 	try {
 		// Bounded: this enrichment is optional, so a stalled models.dev must not
 		// hold back the authoritative endpoint request that runs after it.
-		const payload = await fetchModelsDevPayload(
-			fetchImpl,
-			AbortSignal.timeout(SILICONFLOW_MODELS_DEV_REFERENCE_TIMEOUT_MS),
+		const payload = await withCatalogDiscoveryTimeout(SILICONFLOW_MODELS_DEV_REFERENCE_TIMEOUT_MS, signal =>
+			fetchModelsDevPayload(fetchImpl, signal),
 		);
 		return createModelsDevReferenceMap<"openai-completions">(
 			mapModelsDevToModels(payload as Record<string, unknown>, [descriptor]),
@@ -1537,13 +1536,16 @@ function createSiliconFlowModelManagerOptions(
 ): ModelManagerOptions<"openai-completions"> {
 	const apiKey = config?.apiKey;
 	const baseUrl = config?.baseUrl ?? defaultBaseUrl;
-	const canonicalReferences = getBundledModelReferenceIndex();
 	return {
 		providerId,
 		dynamicModelsAuthoritative: true,
 		...(apiKey && {
 			fetchDynamicModels: async () => {
 				const modelsDevReferences = await loadSiliconFlowModelsDevReferences(providerId, config?.fetch);
+				// Resolved here, not at options construction: walking the bundled
+				// reference index is only worth paying for when dynamic discovery
+				// actually runs, keeping the ModelManager cache fast path cheap.
+				const canonicalReferences = getBundledModelReferenceIndex();
 				return fetchOpenAICompatibleModels({
 					api: "openai-completions",
 					provider: providerId,

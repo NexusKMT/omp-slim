@@ -3,8 +3,12 @@ import { getOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
 import { getEnvApiKey } from "@oh-my-pi/pi-ai/stream";
 import { getBundledModelReferenceIndex } from "@oh-my-pi/pi-catalog/identity/bundled";
 import { resolveModelReference } from "@oh-my-pi/pi-catalog/identity/reference";
-import type { GeneratedProvider } from "@oh-my-pi/pi-catalog/models";
-import { DEFAULT_MODEL_PER_PROVIDER, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
+import type { ProviderCatalogEntry } from "@oh-my-pi/pi-catalog/provider-models/descriptor-types";
+import {
+	CATALOG_PROVIDERS,
+	DEFAULT_MODEL_PER_PROVIDER,
+	PROVIDER_DESCRIPTORS,
+} from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import {
 	MODELS_DEV_PROVIDER_DESCRIPTORS,
 	siliconflowCnModelManagerOptions,
@@ -69,11 +73,15 @@ describe("siliconflow built-in providers", () => {
 	});
 
 	test("ships no bundled catalog — the model list is discovered live", () => {
-		// Compile-time: neither provider id may appear in the bundled models.json.
-		type _SiliconflowNotBundled =
-			Extract<"siliconflow" | "siliconflow-cn", GeneratedProvider> extends never ? true : never;
-		const _check: _SiliconflowNotBundled = true;
-		expect(_check).toBe(true);
+		// Source of truth: the catalog table owns generator participation via
+		// `catalogDiscovery` — the SiliconFlow entries are dynamic-authoritative
+		// and deliberately carry no catalog discovery config.
+		for (const providerId of ["siliconflow", "siliconflow-cn"] as const) {
+			const entry: ProviderCatalogEntry | undefined = CATALOG_PROVIDERS.find(item => item.id === providerId);
+			expect(entry).toBeDefined();
+			expect(entry?.dynamicModelsAuthoritative).toBe(true);
+			expect(entry?.catalogDiscovery).toBeUndefined();
+		}
 		// Runtime: no models.dev mapping may feed the generator either.
 		expect(MODELS_DEV_PROVIDER_DESCRIPTORS.some(d => d.providerId === "siliconflow")).toBe(false);
 		expect(MODELS_DEV_PROVIDER_DESCRIPTORS.some(d => d.providerId === "siliconflow-cn")).toBe(false);
