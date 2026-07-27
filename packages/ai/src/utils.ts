@@ -106,6 +106,10 @@ function isOpenAIResponsesClientInputBoundary(item: Record<string, unknown>): bo
 	if (item.type === undefined && typeof item.role === "string") return item.role !== "assistant";
 
 	switch (item.type) {
+		case "input_text":
+		case "input_image":
+		case "input_file":
+		case "input_audio":
 		case "function_call_output":
 		case "custom_tool_call_output":
 		case "computer_call_output":
@@ -113,6 +117,8 @@ function isOpenAIResponsesClientInputBoundary(item: Record<string, unknown>): bo
 		case "shell_call_output":
 		case "apply_patch_call_output":
 		case "mcp_approval_response":
+		case "compaction":
+		case "compaction_summary":
 		case "compaction_trigger":
 		case "item_reference":
 			return true;

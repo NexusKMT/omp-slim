@@ -404,6 +404,10 @@ describe("OpenAI GA computer contract", () => {
 	test("clears reasoning candidates at every client continuation boundary", () => {
 		const boundaries: Array<[string, Record<string, unknown>]> = [
 			["input message", { role: "user", content: "next turn" }],
+			["input text", { type: "input_text", text: "next turn" }],
+			["input image", { type: "input_image", file_id: "file_input_image" }],
+			["input file", { type: "input_file", file_id: "file_input_file" }],
+			["input audio", { type: "input_audio", input_audio: { data: "base64", format: "wav" } }],
 			["function output", { type: "function_call_output", call_id: "call_function", output: "done" }],
 			["custom output", { type: "custom_tool_call_output", call_id: "call_custom", output: "done" }],
 			[
@@ -420,6 +424,8 @@ describe("OpenAI GA computer contract", () => {
 			["MCP approval", { type: "mcp_approval_response", approval_request_id: "approval_1", approve: true }],
 			["client tool search output", { type: "tool_search_output", execution: "client", tools: [] }],
 			["additional tools", { type: "additional_tools", role: "developer", tools: [] }],
+			["compaction", { type: "compaction", encrypted_content: "compacted-context" }],
+			["legacy compaction summary", { type: "compaction_summary", summary: "compacted context" }],
 			["compaction trigger", { type: "compaction_trigger" }],
 			["item reference", { type: "item_reference", id: "item_reference_1" }],
 		];
