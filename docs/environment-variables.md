@@ -407,6 +407,7 @@ These are read as runtime signals; they are usually set by the terminal/OS rathe
 | ------------------------- | ------------------------------------------------------------------------------------- |
 | `PI_NOTIFICATIONS`        | `off` / `0` / `false` suppress desktop notifications                                  |
 | `PI_TUI_WRITE_LOG`        | If set, logs TUI writes to file                                                       |
+| `PI_TUI_RAW_BACKSPACE_IS_CTRL` | If `1`, interprets raw `0x08` as Ctrl+Backspace instead of Backspace; use when SSH/container hops hide a Windows Terminal client |
 | `PI_HARDWARE_CURSOR`      | If `1`, enables hardware cursor mode                                                  |
 | `PI_NO_SYNC_OUTPUT`       | If set (any non-empty value), disables DEC 2026 synchronized-output wrappers while keeping TUI autowrap guards |
 | `PI_NO_DECCARA`           | If set (truthy), disables Kitty DECCARA rectangular-SGR background fills (forces padded-string rendering) |
