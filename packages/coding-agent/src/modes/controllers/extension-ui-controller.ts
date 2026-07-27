@@ -642,6 +642,11 @@ export class ExtensionUiController {
 				if (closed || !askDialog) return;
 				this.ctx.editorContainer.clear();
 				this.ctx.editorContainer.addChild(askDialog);
+				// Keep the draft editor mounted beneath the restored ask, matching the
+				// initial presentation: the guard re-blocks whenever the draft is
+				// non-empty (e.g. a failed submit restored its text while a nested
+				// prompt was open), and routed input must land on a visible surface.
+				if (inputGuard) this.ctx.editorContainer.addChild(this.ctx.editor);
 				this.ctx.ui.setFocus(askDialog);
 				this.ctx.ui.requestRender();
 			};

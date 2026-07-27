@@ -201,6 +201,40 @@ describe("ExtensionUiController editor UI", () => {
 		expect(harness.editorContainer.children).toEqual([harness.editor]);
 	});
 
+	it("remounts the draft editor when the ask surface is restored after a nested prompt (#6738)", async () => {
+		const harness = makeHarness();
+		harness.editor.setText("half typed prompt");
+		const questions: ExtensionAskDialogQuestion[] = [
+			{ id: "confirm", question: "Continue?", options: [{ label: "Yes" }, { label: "No" }] },
+		];
+
+		harness.controller.showAskDialog(questions);
+		const ask = harness.editorContainer.children[0];
+		expect(ask).toBeInstanceOf(AskDialogComponent);
+		expect(harness.editorContainer.children).toEqual([ask, harness.editor]);
+
+		// Draft submitted: the guard lifts and ask controls take input; open the
+		// note prompt, which swaps the container to the nested editor.
+		harness.editor.setText("");
+		ask?.handleInput?.("n");
+		const promptEditor = harness.editorContainer.children[0];
+		expect(promptEditor).not.toBe(ask);
+
+		// A failed async submission restores the draft while the nested prompt is
+		// open, re-blocking the guard.
+		harness.editor.setText("half typed prompt");
+
+		// Cancelling the nested prompt restores the ask surface; the draft editor
+		// must be remounted so routed input lands on a visible surface.
+		promptEditor?.handleInput?.("\x1b");
+		expect(harness.editorContainer.children).toEqual([ask, harness.editor]);
+		// The dialog's prompt-active latch clears when the awaited onPrompt
+		// promise settles; yield a microtask before routing the next key.
+		await Promise.resolve();
+		ask?.handleInput?.("!");
+		expect(harness.editor.getText()).toBe("half typed prompt!");
+	});
+
 	it("bridges addAutocompleteProvider factories to the interactive mode context (#4919)", async () => {
 		const harness = makeHarness();
 		const ui = await harness.init();
