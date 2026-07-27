@@ -299,6 +299,22 @@ describe("MemoryProtocolHandler", () => {
 		});
 	});
 
+	it("keeps encoded glob characters literal after the wildcard boundary", async () => {
+		await withMemoryFixture(async ({ cwd, memoryRoot }) => {
+			const skillsDir = path.join(memoryRoot, "skills");
+			await fs.mkdir(skillsDir, { recursive: true });
+			await Bun.write(path.join(skillsDir, "[demo].md"), "literal brackets");
+			await Bun.write(path.join(skillsDir, "d.md"), "single character");
+
+			const result = await createGlobTool(cwd).execute("memory-encoded-suffix-glob", {
+				path: "memory://root/*/%5Bdemo%5D.md",
+			});
+
+			expect(result.details?.files).toHaveLength(1);
+			expect(result.details?.files?.[0]).toEndWith("/skills/[demo].md");
+		});
+	});
+
 	it.each(["memory://root/skills/**/../*.md", "memory://root/skills/**/%2e%2e/*.md"])(
 		"rejects traversal in a memory glob suffix: %s",
 		async pattern => {

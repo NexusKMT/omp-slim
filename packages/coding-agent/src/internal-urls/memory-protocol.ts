@@ -52,6 +52,16 @@ export interface MemoryGlobPattern {
 }
 
 /**
+ * Decode percent-escapes in a raw glob-suffix segment, bracket-escaping any
+ * glob metacharacter that was percent-encoded so it stays a literal filename
+ * character instead of becoming glob syntax.
+ */
+function decodeGlobSuffixSegment(rawSegment: string): string {
+	// Escape runs are decoded together so multi-byte UTF-8 sequences survive.
+	return rawSegment.replace(/(?:%[0-9a-f]{2})+/gi, run => decodeURIComponent(run).replace(/[*?[{]/g, "[$&]"));
+}
+
+/**
  * Split a memory:// glob at its first wildcard after validating the complete
  * decoded path. The suffix is validated before filesystem globbing so `..`
  * cannot escape a safely resolved base directory.
@@ -94,11 +104,10 @@ export function splitMemoryGlobPattern(input: string): MemoryGlobPattern {
 		throw new Error(`memory:// URL does not contain a glob pattern: ${input}`);
 	}
 
-	const decodedSegments = relativePath.split("/");
 	const rawBasePath = rawSegments.slice(0, firstGlobIndex).join("/") || ".";
 	return {
 		baseUrl: `memory://${namespace}/${rawBasePath}`,
-		globPattern: decodedSegments.slice(firstGlobIndex).join("/"),
+		globPattern: rawSegments.slice(firstGlobIndex).map(decodeGlobSuffixSegment).join("/"),
 	};
 }
 
