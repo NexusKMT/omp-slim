@@ -155,8 +155,8 @@ import { unmountAll } from "./ssh/sshfs-mount";
 import {
 	type BuildSystemPromptResult,
 	buildSystemPrompt as buildSystemPromptInternal,
-	buildSystemPromptToolMetadata,
 	loadProjectContextFiles as loadContextFilesInternal,
+	projectSystemPromptToolMetadata,
 } from "./system-prompt";
 import { AgentOutputManager } from "./task/output-manager";
 import { wrapStreamFnWithProviderConcurrency } from "./task/provider-concurrency";
@@ -812,7 +812,14 @@ export interface BuildSystemPromptOptions {
  * as separate entries so providers can cache prompt prefixes without concatenating blocks.
  */
 export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}): Promise<BuildSystemPromptResult> {
+	const toolNames = options.tools?.map(tool => tool.name);
 	const toolMap = options.tools ? new Map(options.tools.map(tool => [tool.name, tool])) : undefined;
+	const promptTools = toolMap
+		? projectSystemPromptToolMetadata(
+				toolMap,
+				options.inlineToolDescriptors ? { mode: "full" } : { mode: "compact", toolNames: toolNames ?? [] },
+			)
+		: undefined;
 	return await buildSystemPromptInternal({
 		cwd: options.cwd,
 		customPrompt: options.customPrompt,
@@ -821,8 +828,8 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		appendSystemPrompt: options.appendPrompt,
 		inlineToolDescriptors: options.inlineToolDescriptors,
 		includeWorkspaceTree: options.includeWorkspaceTree,
-		toolNames: options.tools?.map(tool => tool.name),
-		tools: toolMap ? buildSystemPromptToolMetadata(toolMap) : undefined,
+		toolNames,
+		tools: promptTools,
 	});
 }
 
@@ -2638,7 +2645,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			tools: Map<string, AgentTool>,
 		): Promise<BuildSystemPromptResult> => {
 			toolContextStore.setToolNames(toolNames);
-			const promptTools = buildSystemPromptToolMetadata(tools);
 			const memoryBackend = restrictToolNames ? undefined : await resolveMemoryBackend(settings);
 			const memoryInstructions = memoryBackend
 				? await memoryBackend.buildDeveloperInstructions(agentDir, settings, session)
@@ -2698,6 +2704,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			// Owned/in-band tool dialects (non-native) require the catalog as `# Tool:`
 			// sections; native tool calling lets the compact name list suffice.
 			const nativeTools = resolveDialect(settings.get("tools.format"), agent?.state.model ?? model) === undefined;
+			const promptTools = projectSystemPromptToolMetadata(
+				tools,
+				nativeTools && !inlineToolDescriptors ? { mode: "compact", toolNames } : { mode: "full" },
+			);
 			if (options.appendSystemPrompt) {
 				appendPrompt = appendPrompt
 					? `${appendPrompt}\n\n${options.appendSystemPrompt}`
