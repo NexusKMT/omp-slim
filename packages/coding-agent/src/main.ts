@@ -533,22 +533,6 @@ type SessionPromptResult = "accepted" | "declined" | "unavailable";
 
 type SessionPrompt = (session: SessionInfo) => Promise<SessionPromptResult>;
 
-async function promptForkSession(session: SessionInfo): Promise<SessionPromptResult> {
-	if (!process.stdin.isTTY) {
-		return "unavailable";
-	}
-	const message = `Session found in different project: ${session.cwd}. Fork into current directory? [y/N] `;
-	pauseStartupWatchdog();
-	const rl = createInterface({ input: process.stdin, output: process.stdout });
-	try {
-		const answer = (await rl.question(message)).trim().toLowerCase();
-		return answer === "y" || answer === "yes" ? "accepted" : "declined";
-	} finally {
-		rl.close();
-		resumeStartupWatchdog();
-	}
-}
-
 async function promptMoveSession(session: SessionInfo): Promise<SessionPromptResult> {
 	if (!process.stdin.isTTY) {
 		return "unavailable";
@@ -567,9 +551,9 @@ async function promptMoveSession(session: SessionInfo): Promise<SessionPromptRes
 
 /**
  * Friendly CLI failure raised by {@link createSessionManager} when the user's
- * session-resolution flags (`--resume`/`--fork`/cross-project prompts) cannot
- * be satisfied. {@link runRootCommand} catches it and prints a clean stderr
- * message instead of letting it surface as `[Uncaught Exception]`
+ * session-resolution flags (`--resume`/`--fork`/missing-directory move prompts)
+ * cannot be satisfied. {@link runRootCommand} catches it and prints a clean
+ * stderr message instead of letting it surface as `[Uncaught Exception]`
  * (see issue #2084).
  */
 export class SessionResolutionError extends Error {
@@ -615,6 +599,29 @@ async function moveMissingCwdSessionIfNeeded(
 	const manager = await SessionManager.open(session.path, sessionDir, undefined, { initialCwd: sourceCwd });
 	await manager.moveTo(cwd, sessionDir);
 	return { status: "moved", manager };
+}
+
+async function switchToResumedProject(
+	resumedCwd: string | undefined,
+	activeSettings: Settings,
+	pluginPreloadPromise: Promise<unknown>,
+): Promise<string> {
+	if (
+		!resumedCwd ||
+		normalizePathForComparison(resumedCwd) === normalizePathForComparison(getProjectDir()) ||
+		!(await directoryExists(resumedCwd))
+	) {
+		return getProjectDir();
+	}
+
+	// Let the launch-cwd preload settle before clearing and re-warming its caches.
+	await pluginPreloadPromise.catch(() => {});
+	setProjectDir(resumedCwd);
+	clearPluginRootsAndCaches();
+	resetCapabilities();
+	const cwd = getProjectDir();
+	await activeSettings.reloadForCwd(cwd);
+	return cwd;
 }
 
 async function getChangelogForDisplay(parsed: Args): Promise<string | undefined> {
@@ -672,7 +679,6 @@ export async function createSessionManager(
 	parsed: Args,
 	cwd: string,
 	activeSettings: Settings = settings,
-	askToForkSession: SessionPrompt = promptForkSession,
 	askToMoveSession: SessionPrompt = promptMoveSession,
 ): Promise<SessionManager | undefined> {
 	if (parsed.fork) {
@@ -726,35 +732,18 @@ export async function createSessionManager(
 			}
 		}
 		if (match.scope === "global") {
-			const normalizedCwd = normalizePathForComparison(cwd);
-			const normalizedMatchCwd = normalizePathForComparison(match.session.cwd || cwd);
-			if (normalizedCwd !== normalizedMatchCwd) {
-				const moveResult = await moveMissingCwdSessionIfNeeded(
-					sessionArg,
-					match.session,
-					cwd,
-					parsed.sessionDir,
-					askToMoveSession,
-				);
-				if (moveResult.status === "moved") {
-					return moveResult.manager;
-				}
-				if (moveResult.status === "declined") {
-					return undefined;
-				}
-				const forkPromptResult = await askToForkSession(match.session);
-				if (forkPromptResult === "unavailable") {
-					throw new SessionResolutionError(
-						`Session "${sessionArg}" is in another project (${match.session.cwd}); run interactively to fork it into the current project.`,
-					);
-				}
-				if (forkPromptResult === "declined") {
-					// User declined the cross-project fork prompt. Caller distinguishes
-					// this cancellation from the "default new session" undefined return
-					// by checking `typeof parsed.resume === "string"`.
-					return undefined;
-				}
-				return await SessionManager.forkFrom(match.session.path, cwd, parsed.sessionDir);
+			const moveResult = await moveMissingCwdSessionIfNeeded(
+				sessionArg,
+				match.session,
+				cwd,
+				parsed.sessionDir,
+				askToMoveSession,
+			);
+			if (moveResult.status === "moved") {
+				return moveResult.manager;
+			}
+			if (moveResult.status === "declined") {
+				return undefined;
 			}
 		}
 		return await SessionManager.open(match.session.path, parsed.sessionDir);
@@ -1296,11 +1285,14 @@ export async function runRootCommand(
 		throw error;
 	}
 
-	// User declined the cross-project fork prompt — exit cleanly with a friendly
-	// message rather than letting the decline bubble up as an uncaught exception
-	// (see issue #1668).
+	if (typeof parsedArgs.resume === "string" && sessionManager) {
+		cwd = await switchToResumedProject(sessionManager.getCwd(), settingsInstance, pluginPreloadPromise);
+	}
+
+	// User declined the missing-directory move prompt — exit cleanly instead of
+	// letting the cancellation fall through to a new session.
 	if (typeof parsedArgs.resume === "string" && !sessionManager) {
-		writeStartupNotice(parsedArgs, `${chalk.dim("Resume cancelled: session is in another project.")}\n`);
+		writeStartupNotice(parsedArgs, `${chalk.dim("Resume cancelled: session was not moved.")}\n`);
 		stopStartupWatchdog();
 		process.exit(0);
 	}
@@ -1339,28 +1331,8 @@ export async function runRootCommand(
 			stopStartupWatchdog();
 			process.exit(0);
 		}
-		// Resuming a session from another project: switch the process into that
-		// project's directory and refresh cwd-derived caches before the session is
-		// built, so settings discovery, plugins, and capabilities all scope to it.
-		// Skip the chdir when the recorded project directory is gone: `setProjectDir`
-		// would throw on the missing path. `SessionManager.open` then falls back to
-		// the launch cwd, so the resumed session simply stays where the user is.
-		if (
-			selected.cwd &&
-			normalizePathForComparison(selected.cwd) !== normalizePathForComparison(getProjectDir()) &&
-			(await directoryExists(selected.cwd))
-		) {
-			// Let the original (launch-cwd) plugin-root preload settle first so its
-			// late resolution can't clobber the re-warm we trigger below.
-			await pluginPreloadPromise.catch(() => {});
-			setProjectDir(selected.cwd);
-			clearPluginRootsAndCaches();
-			resetCapabilities();
-			cwd = getProjectDir();
-			// Re-scope project settings (.claude/settings.yml etc.) to the resumed
-			// project in place so the session is built with its configuration.
-			await settingsInstance.reloadForCwd(cwd);
-		}
+		// Re-scope every cwd-derived input before building the resumed session.
+		cwd = await switchToResumedProject(selected.cwd, settingsInstance, pluginPreloadPromise);
 		sessionManager = await SessionManager.open(selected.path);
 	}
 

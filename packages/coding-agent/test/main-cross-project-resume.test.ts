@@ -1,25 +1,26 @@
 /**
- * Regression: declining the cross-project fork prompt during `--resume <id>`
- * must exit cleanly, while non-interactive resume still fails instead of
- * silently succeeding. See #1668.
+ * Regression: `--resume <id>` must open a cross-project session in its recorded
+ * cwd instead of prompting to fork it into the launch directory.
  *
  * Also covers the moved/renamed-worktree path: when the matched session's
  * recorded directory no longer exists, `--resume <id>` offers to *move*
- * (re-root) the session rather than fork a duplicate.
+ * (re-root) the session rather than opening against a missing directory.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { Args } from "@oh-my-pi/pi-coding-agent/cli/args";
-import type { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { createSessionManager } from "@oh-my-pi/pi-coding-agent/main";
+import { type Args, parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { createSessionManager, runRootCommand } from "@oh-my-pi/pi-coding-agent/main";
+import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import type { SessionHeader } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import type { SessionInfo } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import * as sessionListingModule from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { loadEntriesFromFile } from "@oh-my-pi/pi-coding-agent/session/session-loader";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { getProjectDir, setProjectDir } from "@oh-my-pi/pi-utils";
 
 function buildArgs(resume: string, sessionDir?: string): Args {
 	return {
@@ -52,13 +53,21 @@ function buildGlobalMatch(cwd: string): { session: SessionInfo; scope: "global" 
 
 const stubSettings = { get: () => undefined } as unknown as Settings;
 
-describe("createSessionManager — cross-project --resume cancellation (#1668)", () => {
-	// An existing directory so the match is treated as a genuinely different
-	// project (fork path), not a moved/renamed worktree (move path).
+describe("createSessionManager — cross-project --resume", () => {
 	let existingProject: string;
 
 	beforeEach(async () => {
 		existingProject = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-xproj-"));
+		const match = buildGlobalMatch(existingProject);
+		await Bun.write(
+			match.session.path,
+			`${JSON.stringify({
+				type: "session",
+				id: match.session.id,
+				cwd: existingProject,
+				timestamp: new Date(0).toISOString(),
+			})}\n`,
+		);
 	});
 
 	afterEach(async () => {
@@ -66,32 +75,94 @@ describe("createSessionManager — cross-project --resume cancellation (#1668)",
 		await fsp.rm(existingProject, { recursive: true, force: true });
 	});
 
-	it("returns undefined when an interactive user declines the fork prompt instead of throwing", async () => {
-		vi.spyOn(sessionListingModule, "resolveResumableSession").mockResolvedValue(buildGlobalMatch(existingProject));
+	it("opens the existing journal in its recorded cwd without a relocation prompt", async () => {
+		const match = buildGlobalMatch(existingProject);
+		vi.spyOn(sessionListingModule, "resolveResumableSession").mockResolvedValue(match);
+		const movePrompt = vi.fn(async () => "declined" as const);
 
-		const result = await createSessionManager(
-			buildArgs("019e84ed"),
-			"/current/project",
-			stubSettings,
-			async () => "declined" as const,
-		);
+		const result = await createSessionManager(buildArgs("019e84ed"), "/current/project", stubSettings, movePrompt);
 
-		expect(result).toBeUndefined();
-	});
-
-	it("throws when the cross-project fork prompt is unavailable in non-interactive mode", async () => {
-		const originalIsTTY = process.stdin.isTTY;
-		Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+		if (!result) throw new Error("Expected resumed session manager");
 		try {
-			vi.spyOn(sessionListingModule, "resolveResumableSession").mockResolvedValue(buildGlobalMatch(existingProject));
-
-			await expect(createSessionManager(buildArgs("019e84ed"), "/current/project", stubSettings)).rejects.toThrow(
-				`Session "019e84ed" is in another project (${existingProject}); run interactively to fork it into the current project.`,
-			);
+			expect(result.getSessionFile()).toBe(match.session.path);
+			expect(result.getCwd()).toBe(existingProject);
 		} finally {
-			Object.defineProperty(process.stdin, "isTTY", { value: originalIsTTY, configurable: true });
+			await result.close();
 		}
+		expect(movePrompt).not.toHaveBeenCalled();
 	});
+});
+
+describe("runRootCommand — cross-project --resume", () => {
+	let root: string;
+	let launchProject: string;
+	let resumedProject: string;
+	let originalProject: string;
+
+	beforeEach(async () => {
+		originalProject = getProjectDir();
+		root = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-xproj-root-"));
+		launchProject = path.join(root, "launch");
+		resumedProject = path.join(root, "resumed");
+		await Promise.all([fsp.mkdir(launchProject), fsp.mkdir(resumedProject)]);
+		const match = buildGlobalMatch(resumedProject);
+		await Bun.write(
+			match.session.path,
+			`${JSON.stringify({
+				type: "session",
+				id: match.session.id,
+				cwd: resumedProject,
+				timestamp: new Date(0).toISOString(),
+			})}\n`,
+		);
+		setProjectDir(launchProject);
+	});
+
+	afterEach(async () => {
+		setProjectDir(originalProject);
+		vi.restoreAllMocks();
+		await fsp.rm(root, { recursive: true, force: true });
+	});
+
+	it("switches process and settings scope to the resumed session before session creation", async () => {
+		const match = buildGlobalMatch(resumedProject);
+		vi.spyOn(sessionListingModule, "resolveResumableSession").mockResolvedValue(match);
+		const settings = Settings.isolated({ "marketplace.autoUpdate": "off" });
+		const reloadForCwd = vi.spyOn(settings, "reloadForCwd");
+		const authStorage = await AuthStorage.create(path.join(root, "auth.db"));
+		const parsed = parseArgs(["--resume", "019e84ed", "--print"]);
+		parsed.noExtensions = true;
+		parsed.noSkills = true;
+		parsed.noRules = true;
+		parsed.noTools = true;
+		parsed.noLsp = true;
+		let resumedManager: SessionManager | undefined;
+		let reachedSessionCreation = false;
+
+		try {
+			await runRootCommand(parsed, ["--resume", "019e84ed", "--print"], {
+				discoverAuthStorage: async () => authStorage,
+				settings,
+				createAgentSession: async options => {
+					if (!options) throw new Error("Expected session options");
+					resumedManager = options.sessionManager;
+					reachedSessionCreation = true;
+					throw new Error("stop after session options");
+				},
+			});
+		} catch (error) {
+			if (!(error instanceof Error) || error.message !== "stop after session options") throw error;
+		} finally {
+			authStorage.close();
+			await resumedManager?.close();
+		}
+
+		expect(reachedSessionCreation).toBe(true);
+		expect(getProjectDir()).toBe(resumedProject);
+		expect(process.cwd()).toBe(resumedProject);
+		expect(reloadForCwd).toHaveBeenCalledWith(resumedProject);
+		expect(resumedManager?.getCwd()).toBe(resumedProject);
+	}, 15_000);
 });
 
 describe("createSessionManager — cross-project --resume relocation (moved worktree)", () => {
@@ -112,18 +183,14 @@ describe("createSessionManager — cross-project --resume relocation (moved work
 		vi.spyOn(sessionListingModule, "resolveResumableSession").mockResolvedValue(buildGlobalMatch(missingProject));
 		expect(fs.existsSync(missingProject)).toBe(false);
 
-		const forkPrompt = vi.fn(async () => "accepted" as const);
 		const result = await createSessionManager(
 			buildArgs("019e84ed"),
 			"/current/project",
 			stubSettings,
-			forkPrompt,
 			async () => "declined" as const,
 		);
 
 		expect(result).toBeUndefined();
-		// The fork prompt must NOT be used for a relocated (gone-dir) session.
-		expect(forkPrompt).not.toHaveBeenCalled();
 	});
 
 	it("throws the move-specific error when unavailable in non-interactive mode", async () => {
@@ -170,13 +237,11 @@ describe("createSessionManager — cross-project --resume relocation (moved work
 			session: sessionInfo,
 		});
 
-		const forkPrompt = vi.fn(async () => "accepted" as const);
 		const movePrompt = vi.fn(async () => "accepted" as const);
 		const result = await createSessionManager(
 			buildArgs(resumePrefix, explicitSessionDir),
 			currentProject,
 			stubSettings,
-			forkPrompt,
 			movePrompt,
 		);
 
@@ -196,7 +261,6 @@ describe("createSessionManager — cross-project --resume relocation (moved work
 		} finally {
 			await result.close();
 		}
-		expect(forkPrompt).not.toHaveBeenCalled();
 		expect(movePrompt).toHaveBeenCalledTimes(1);
 	});
 });
