@@ -212,8 +212,12 @@ class DaemonLog {
 			return DaemonLog.readFiles(this.#path, this.#previousPath, head, lines, cursor, grep);
 		});
 		// Appends that arrive after this call queue behind the file snapshot, so its
-		// cursor can never include bytes that its terminal replay did not read.
-		this.#queue = snapshot.then(() => undefined);
+		// cursor can never include bytes that its terminal replay did not read. A read
+		// failure still rejects the caller but must not poison the append queue.
+		this.#queue = snapshot.then(
+			() => undefined,
+			() => undefined,
+		);
 		return snapshot;
 	}
 
