@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Made the task tool's per-spawn `effort` parameter opt-in through `task.enableEffort`, which defaults to false and omits the field from flat and batch schemas and tool guidance until enabled.
+
 ## [17.1.5] - 2026-07-27
 
 ### Added

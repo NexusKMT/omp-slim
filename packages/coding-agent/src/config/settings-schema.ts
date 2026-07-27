@@ -4476,6 +4476,18 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"task.enableEffort": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tasks",
+			group: "Subagents",
+			label: "Per-Task Effort",
+			description:
+				"Expose the optional effort parameter on task spawns, allowing callers to override each subagent's thinking level",
+		},
+	},
+
 	"task.maxConcurrency": {
 		type: "number",
 		default: 32,
