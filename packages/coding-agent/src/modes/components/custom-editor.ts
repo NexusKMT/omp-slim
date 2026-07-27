@@ -427,6 +427,17 @@ export class CustomEditor extends Editor {
 		this.pendingImageLinks = [];
 	}
 
+	/** Replace the composer draft with a restored historical prompt: sets the text and
+	 *  re-attaches the message's images so positional `[Image #N]` markers resolve on
+	 *  resubmit instead of degrading to literal text (esc-esc branch, `/tree`). Source
+	 *  links are unknown for restored drafts, so every link slot is `undefined`. */
+	setDraft(text: string, images?: readonly ImageContent[]): void {
+		this.setText(text);
+		this.imageLinks = undefined;
+		this.pendingImages = images ? [...images] : [];
+		this.pendingImageLinks = images ? images.map(() => undefined) : [];
+	}
+
 	/** Treat image/paste markers as indivisible: a stray backspace deletes the whole token
 	 *  instead of corrupting `[Paste #1, +30 lines]` into plain text. */
 	override atomicTokenPattern = PLACEHOLDER_REGEX;
