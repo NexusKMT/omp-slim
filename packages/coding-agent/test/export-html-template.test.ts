@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { BunPlugin } from "bun";
 import { getTemplate } from "../src/export/html/index";
 
 interface HeapProbeResult {
@@ -15,6 +16,9 @@ interface TemplateProbeResult {
 	sha256: string;
 	stableCache: boolean;
 }
+interface NpmPackResult {
+	files: Array<{ path: string }>;
+}
 
 const expectedTemplate: TemplateProbeResult = {
 	chars: 377_268,
@@ -25,9 +29,11 @@ const expectedTemplate: TemplateProbeResult = {
 const assetDir = new URL("../src/export/html/", import.meta.url);
 const templateProbePath = path.resolve(import.meta.dir, "fixtures", "html-export-template-probe.ts");
 const heapProbePath = path.resolve(import.meta.dir, "fixtures", "html-export-static-import-heap-probe.ts");
+const packageDir = path.resolve(import.meta.dir, "..");
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "omp-html-template-"));
 const unrelatedCwd = path.join(tempRoot, "unrelated-cwd");
-const bundleDir = path.join(tempRoot, "bundle");
+const packDir = path.join(tempRoot, "package");
+const bundleDir = path.join(packDir, "dist");
 const compiledPath = path.join(tempRoot, "compiled-template-probe");
 let bundlePath: string;
 const bundledDependencyStubs: Record<string, string> = {
@@ -88,11 +94,19 @@ async function runProbe(command: string[]): Promise<TemplateProbeResult> {
 
 beforeAll(async () => {
 	fs.mkdirSync(unrelatedCwd);
+	fs.mkdirSync(packDir);
+	const packageManifest = JSON.parse(fs.readFileSync(path.join(packageDir, "package.json"), "utf8")) as Record<
+		string,
+		unknown
+	>;
+	packageManifest.scripts = {};
+	fs.writeFileSync(path.join(packDir, "package.json"), JSON.stringify(packageManifest));
 	const bundle = await Bun.build({
 		entrypoints: [templateProbePath],
 		outdir: bundleDir,
 		target: "bun",
 		plugins: [focusedBundlePlugin],
+		naming: { entry: "cli.js" },
 	});
 	expect(bundle.success, bundle.logs.map(log => log.message).join("\n")).toBe(true);
 	const entrypoint = bundle.outputs.find(output => output.kind === "entry-point");
@@ -131,6 +145,29 @@ describe("HTML export template", () => {
 
 	test("preserves exact bytes in a normal bundle launched from an unrelated directory", async () => {
 		expect(await runProbe([process.execPath, bundlePath])).toEqual(expectedTemplate);
+	});
+
+	test("packs every normal-bundle HTML export asset", async () => {
+		const proc = Bun.spawn(["npm", "pack", "--dry-run", "--ignore-scripts", "--json"], {
+			cwd: packDir,
+			stderr: "pipe",
+			stdout: "pipe",
+		});
+		const [stdout, stderr, exitCode] = await Promise.all([
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
+			proc.exited,
+		]);
+		expect(exitCode, stderr).toBe(0);
+		const [packResult] = JSON.parse(stdout) as NpmPackResult[];
+		const packedAssets = packResult!.files.map(file => file.path).filter(filePath =>
+			/^dist\/(?:template-[^.]+\.(?:css|html|js)|tool-views\.generated-[^.]+\.js)$/.test(filePath),
+		);
+		expect(packedAssets).toHaveLength(4);
+		expect(packedAssets.filter(filePath => /^dist\/template-[^.]+\.css$/.test(filePath))).toHaveLength(1);
+		expect(packedAssets.filter(filePath => /^dist\/template-[^.]+\.html$/.test(filePath))).toHaveLength(1);
+		expect(packedAssets.filter(filePath => /^dist\/template-[^.]+\.js$/.test(filePath))).toHaveLength(1);
+		expect(packedAssets.filter(filePath => /^dist\/tool-views\.generated-[^.]+\.js$/.test(filePath))).toHaveLength(1);
 	});
 
 	test("preserves exact bytes in a compiled bundle launched from an unrelated directory", async () => {
