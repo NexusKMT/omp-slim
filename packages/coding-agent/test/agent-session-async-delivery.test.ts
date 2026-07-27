@@ -148,6 +148,58 @@ describe("AgentSession owner-routed async delivery", () => {
 		expect(manager.getJob(otherOwnerJobId)?.status).toBe("completed");
 	});
 
+	it("does not inject a prior session's pending async result after a new session", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [] },
+			convertToLlm,
+			streamFn: mock.stream,
+		});
+		const authStorage = await AuthStorage.create(path.join(tempDir, "auth.db"));
+		authStorages.push(authStorage);
+		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		const manager = new AsyncJobManager({ retentionMs: 60_000 });
+		AsyncJobManager.setInstance(manager);
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated(),
+			modelRegistry: new ModelRegistry(authStorage),
+			agentId: "Main",
+			ownedAsyncJobManager: manager,
+		});
+
+		// Complete a job and push its result all the way onto the yield queue, so a
+		// follow-up turn is pending injection into the (soon-to-be-replaced) session.
+		manager.register("task", "prior session", async () => "STALE ASYNC RESULT", {
+			id: "prior-session-job",
+			ownerId: "Main",
+		});
+		await manager.waitForOwnerJobs("Main");
+		await manager.drainDeliveries({ filter: { ownerId: "Main" } });
+		expect(session.hasPendingAsyncWork()).toBe(true);
+
+		expect(await session.newSession()).toBe(true);
+		expect(session.hasPendingAsyncWork()).toBe(false);
+
+		// A fresh turn in the replacement session must not carry the prior result.
+		const callsBefore = mock.calls.length;
+		await session.sendUserMessage("fresh turn");
+		const leaked = mock.calls.slice(callsBefore).some(call =>
+			call.context.messages.some(message => {
+				if (typeof message.content === "string") return message.content.includes("STALE ASYNC RESULT");
+				return (
+					Array.isArray(message.content) &&
+					message.content.some(content => content.type === "text" && content.text.includes("STALE ASYNC RESULT"))
+				);
+			}),
+		);
+		expect(leaked).toBe(false);
+	});
+
 	it("still reports pending async work while a delivered result awaits injection", async () => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });

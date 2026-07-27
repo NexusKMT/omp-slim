@@ -1597,7 +1597,8 @@ export class AgentSession {
 	 * cleans up its own background work without touching its parent's jobs.
 	 *
 	 * Cleanup runs against this session's scoped manager: running jobs are
-	 * cancelled and finished rows are evicted immediately. Subagents have
+	 * cancelled, finished rows are evicted with their pending deliveries, and any
+	 * async-result follow-up already queued for injection is dropped. Subagents have
 	 * unique agent ids and inherit the parent's manager to clean up their own
 	 * jobs. A secondary in-process top-level session gets no scoped manager,
 	 * because it defaults to `MAIN_AGENT_ID`; reaching through the global
@@ -1611,6 +1612,9 @@ export class AgentSession {
 		const manager = this.#asyncJobManager;
 		manager?.cancelAll({ ownerId: this.#agentId });
 		manager?.evictCompletedJobs({ ownerId: this.#agentId });
+		// Drop any async-result follow-up already delivered onto the yield queue so
+		// a prior session's background result cannot inject into the next transcript.
+		this.yieldQueue.clear("async-result");
 	}
 
 	/**
