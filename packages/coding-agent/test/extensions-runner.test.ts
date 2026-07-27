@@ -859,6 +859,81 @@ describe("ExtensionRunner", () => {
 			]);
 		});
 
+		it("observes a session_stop signal aborted synchronously by the handler", async () => {
+			const extensionPath = path.join(tempDir.path(), "self-cancel-session-stop.ts");
+			await Bun.write(
+				extensionPath,
+				`
+				export default function(pi) {
+					pi.on("session_stop", async (_event, ctx) => {
+						ctx.abort();
+						await Promise.withResolvers().promise;
+					});
+				}
+			`,
+			);
+
+			const result = await loadTestExtensions([extensionPath]);
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const controller = new AbortController();
+			runner.initialize(
+				{
+					sendMessage: () => {},
+					sendUserMessage: () => {},
+					appendEntry: () => {},
+					setLabel: () => {},
+					getActiveTools: () => [],
+					getAllTools: () => [],
+					setActiveTools: async () => {},
+					getCommands: () => [],
+					setModel: async () => false,
+					getThinkingLevel: () => undefined,
+					setThinkingLevel: () => {},
+					getSessionName: () => undefined,
+					setSessionName: async () => {},
+				},
+				{
+					getModel: () => undefined,
+					isIdle: () => true,
+					abort: () => controller.abort(),
+					hasPendingMessages: () => false,
+					shutdown: () => {},
+					getContextUsage: () => undefined,
+					compact: async () => {},
+					getSystemPrompt: () => [],
+				},
+			);
+			vi.useFakeTimers();
+			try {
+				testSetExtensionHandlerTimeoutMs(100);
+				const emission = runner.emitSessionStop({
+					messages: [],
+					turn_id: 0,
+					session_id: "session-123",
+					stop_hook_active: false,
+					signal: controller.signal,
+				});
+				let settled = false;
+				void emission.then(() => {
+					settled = true;
+				});
+				for (let attempts = 0; attempts < 10 && !settled; attempts++) {
+					await Promise.resolve();
+				}
+
+				expect(controller.signal.aborted).toBe(true);
+				expect(settled).toBe(true);
+				await emission;
+			} finally {
+				vi.useRealTimers();
+			}
+		});
 		it("continues to later handlers after empty continuation feedback", async () => {
 			await Bun.write(
 				path.join(extensionsDir, "session-stop-empty.ts"),

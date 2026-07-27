@@ -156,19 +156,20 @@ async function raceHandlerWithTimeout<T>(
 
 	const timeoutController = new AbortController();
 	const handlerSignal = signal ? AbortSignal.any([signal, timeoutController.signal]) : timeoutController.signal;
-	const workPromise = Promise.resolve(work(handlerSignal));
 	const { promise: interruptPromise, resolve: resolveInterrupt } = Promise.withResolvers<
 		typeof EXTENSION_HANDLER_TIMEOUT | typeof EXTENSION_HANDLER_ABORTED
 	>();
+	const onAbort = () => resolveInterrupt(EXTENSION_HANDLER_ABORTED);
+	signal?.addEventListener("abort", onAbort, { once: true });
 	const timer = setTimeout(() => {
 		timeoutController.abort(new DOMException(`Handler timed out after ${timeoutMs}ms`, "TimeoutError"));
 		resolveInterrupt(EXTENSION_HANDLER_TIMEOUT);
 	}, timeoutMs);
-	const onAbort = () => resolveInterrupt(EXTENSION_HANDLER_ABORTED);
-	signal?.addEventListener("abort", onAbort, { once: true });
 	try {
+		if (signal?.aborted) return EXTENSION_HANDLER_ABORTED;
+		const workPromise = Promise.resolve(work(handlerSignal));
 		const result = await Promise.race([workPromise, interruptPromise]);
-		if (result === EXTENSION_HANDLER_TIMEOUT || result === EXTENSION_HANDLER_ABORTED) {
+		if (result === EXTENSION_HANDLER_TIMEOUT) {
 			await Promise.race([
 				workPromise.then(
 					() => undefined,
