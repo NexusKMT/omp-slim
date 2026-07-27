@@ -7,8 +7,8 @@ import { buildSystemPrompt as buildSdkSystemPrompt } from "@oh-my-pi/pi-coding-a
 import {
 	buildSystemPrompt,
 	buildSystemPromptToolMetadata,
-	projectSystemPromptToolMetadata,
 	DEFAULT_SYSTEM_PROMPT_TOOL_NAMES,
+	projectSystemPromptToolMetadata,
 	type SystemPromptToolMetadata,
 } from "@oh-my-pi/pi-coding-agent/system-prompt";
 import { createTools, type Tool, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
