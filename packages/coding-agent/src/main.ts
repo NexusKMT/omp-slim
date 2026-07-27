@@ -620,6 +620,10 @@ async function switchToResumedProject(
 	clearPluginRootsAndCaches();
 	resetCapabilities();
 	const cwd = getProjectDir();
+	// clearPluginRootsAndCaches only kicks off an unawaited re-warm; await a fresh
+	// destination preload so sync consumers (plugin-provided LSP/DAP config) never
+	// read the launch project's stale/empty roots during session creation.
+	await preloadPluginRoots(os.homedir(), cwd);
 	await activeSettings.reloadForCwd(cwd);
 	return cwd;
 }

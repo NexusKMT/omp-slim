@@ -14,6 +14,7 @@ import * as path from "node:path";
 import { type Args, parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
 import * as modelResolverModule from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import * as pluginHelpers from "@oh-my-pi/pi-coding-agent/discovery/helpers";
 import { createSessionManager, runRootCommand } from "@oh-my-pi/pi-coding-agent/main";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import type { SessionHeader } from "@oh-my-pi/pi-coding-agent/session/session-entries";
@@ -125,11 +126,18 @@ describe("runRootCommand — cross-project --resume", () => {
 		await fsp.rm(root, { recursive: true, force: true });
 	});
 
-	it("switches process and settings scope to the resumed session before session creation", async () => {
+	it("preloads the destination plugin roots and re-scopes before session creation", async () => {
 		const match = buildGlobalMatch(resumedProject);
 		vi.spyOn(sessionListingModule, "resolveResumableSession").mockResolvedValue(match);
 		const settings = Settings.isolated({ "marketplace.autoUpdate": "off" });
 		const reloadForCwd = vi.spyOn(settings, "reloadForCwd");
+		// The switch must warm the destination roots via the shared preload helper
+		// (clearPluginRootsAndCaches only fires an unawaited re-warm), so record the
+		// cwds it is invoked with.
+		const preloadedCwds: (string | undefined)[] = [];
+		vi.spyOn(pluginHelpers, "preloadPluginRoots").mockImplementation(async (_home, cwd) => {
+			preloadedCwds.push(cwd);
+		});
 		const authStorage = await AuthStorage.create(path.join(root, "auth.db"));
 		const parsed = parseArgs(["--resume", "019e84ed", "--print"]);
 		parsed.noExtensions = true;
@@ -138,7 +146,7 @@ describe("runRootCommand — cross-project --resume", () => {
 		parsed.noTools = true;
 		parsed.noLsp = true;
 		let resumedManager: SessionManager | undefined;
-		let reachedSessionCreation = false;
+		let preloadedDestinationAtCreation = false;
 
 		try {
 			await runRootCommand(parsed, ["--resume", "019e84ed", "--print"], {
@@ -147,7 +155,9 @@ describe("runRootCommand — cross-project --resume", () => {
 				createAgentSession: async options => {
 					if (!options) throw new Error("Expected session options");
 					resumedManager = options.sessionManager;
-					reachedSessionCreation = true;
+					// Awaited during the switch, so by session creation the destination
+					// preload has already been requested for the resumed project.
+					preloadedDestinationAtCreation = preloadedCwds.includes(resumedProject);
 					throw new Error("stop after session options");
 				},
 			});
@@ -158,11 +168,11 @@ describe("runRootCommand — cross-project --resume", () => {
 			await resumedManager?.close();
 		}
 
-		expect(reachedSessionCreation).toBe(true);
 		expect(getProjectDir()).toBe(resumedProject);
 		expect(process.cwd()).toBe(resumedProject);
 		expect(reloadForCwd).toHaveBeenCalledWith(resumedProject);
 		expect(resumedManager?.getCwd()).toBe(resumedProject);
+		expect(preloadedDestinationAtCreation).toBe(true);
 	}, 15_000);
 
 	it("re-resolves the model scope from the resumed project's enabledModels after the switch", async () => {
