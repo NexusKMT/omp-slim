@@ -186,10 +186,11 @@ describe("Settings", () => {
 			const backupPath = `${configPath}.broken-other-process`;
 			const original = 'modelRoles:\n  default: "unterminated\n';
 			await Bun.write(configPath, original);
+			const canonicalConfigPath = await fs.promises.realpath(configPath);
 			const withFileLock = fileLock.withFileLock;
 			let movedAside = false;
 			vi.spyOn(fileLock, "withFileLock").mockImplementation(async (filePath, fn, options) => {
-				if (!movedAside && filePath === configPath) {
+				if (!movedAside && filePath === canonicalConfigPath) {
 					await fs.promises.rename(configPath, backupPath);
 					movedAside = true;
 				}
@@ -295,10 +296,11 @@ describe("Settings", () => {
 		it("falls back to move-aside replacement when Windows reports EPERM", async () => {
 			await writeSettings({ setupVersion: 1 });
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			const canonicalConfigPath = await fs.promises.realpath(getConfigPath());
 			const rename = fs.promises.rename.bind(fs.promises);
 			let injected = false;
 			vi.spyOn(fs.promises, "rename").mockImplementation(async (source, target) => {
-				if (!injected && String(source).endsWith(".tmp") && String(target) === getConfigPath()) {
+				if (!injected && String(source).endsWith(".tmp") && String(target) === canonicalConfigPath) {
 					injected = true;
 					throw new FsCodeError("EPERM", "injected Windows replacement failure");
 				}
