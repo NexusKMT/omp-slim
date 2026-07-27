@@ -16,6 +16,10 @@
 - Raised the markdown render cache entry budget (32 KiB → 256 KiB) so large messages — exactly the expensive renders — are cacheable
 - Deduplicated terminal cursor-visibility writes to skip redundant escape sequences
 
+### Fixed
+
+- Fixed wrapped Markdown list continuations losing their hanging indentation in narrow terminal layouts.
+
 ## [17.1.6] - 2026-07-27
 
 ### Fixed
