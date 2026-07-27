@@ -86,6 +86,10 @@ RUN arch="$(dpkg --print-architecture)" \
  && USE_BAZEL_VERSION="${BAZEL_VERSION}" bazelisk version
 RUN chmod -R a+rX "$BAZELISK_HOME" \
  && rm -rf /root/.cache/bazel /root/.bazelrc
+# Pre-own ~/.cache for the runner user: kubelet otherwise creates it root-owned
+# as the parent of the omp-bazel-repo subPath mountpoint, breaking sibling dirs
+# like bazel's default output_user_root.
+RUN install -d -o 1001 -g 1001 -m 0755 /home/runner/.cache
 
 # rust toolchain + cargo helpers for the runner user; rustup default == pinned
 # nightly so Rust setup becomes a no-op on the preloaded image.

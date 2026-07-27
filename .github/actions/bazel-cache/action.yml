@@ -46,6 +46,11 @@ runs:
            if [ -n "${BAZEL_REMOTE_USER:-}" ]; then
              auth="$(printf %s "${BAZEL_REMOTE_USER}:${BAZEL_REMOTE_PASSWORD}" | base64 | tr -d '\n')"
              {
+               # kubelet creates $HOME/.cache root-owned when materializing the
+               # omp-bazel-repo subPath mountpoint, so bazel's default
+               # output_user_root ($HOME/.cache/bazel) is un-creatable; pods
+               # are single-job ephemeral, so RUNNER_TEMP is the right home.
+               echo "startup --output_user_root=$RUNNER_TEMP/bazel-root"
                echo "common --config=ci"
                echo "common --config=cache-rw"
                echo "common --remote_cache=grpcs://bazel-remote.bazel-cache.svc.cluster.local:9092"
