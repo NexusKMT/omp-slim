@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.1.6] - 2026-07-27
+
 ### Added
 
 - Added separate Advisor cost visibility to the status line, rendering primary and Advisor spend as `$2.67 (sub) + $0.41 (adv)` while keeping already-incurred Advisor cost across runtime disablement and same-session history rewrites.
