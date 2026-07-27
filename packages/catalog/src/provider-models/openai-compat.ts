@@ -93,10 +93,11 @@ function toInputCapabilities(value: unknown): ("text" | "image")[] {
 	return supportsImage ? ["text", "image"] : ["text"];
 }
 
-async function fetchModelsDevPayload(fetchImpl: FetchImpl = discoveryFetch()): Promise<unknown> {
+async function fetchModelsDevPayload(fetchImpl: FetchImpl = discoveryFetch(), signal?: AbortSignal): Promise<unknown> {
 	const response = await fetchImpl(MODELS_DEV_URL, {
 		method: "GET",
 		headers: { Accept: "application/json" },
+		signal,
 	});
 	if (!response.ok) {
 		throw new Error(`models.dev fetch failed: ${response.status}`);
@@ -1504,6 +1505,8 @@ const SILICONFLOW_MODELS_DEV_DESCRIPTORS: readonly ModelsDevProviderDescriptor[]
 	}),
 ];
 
+const SILICONFLOW_MODELS_DEV_REFERENCE_TIMEOUT_MS = 5_000;
+
 async function loadSiliconFlowModelsDevReferences(
 	providerId: "siliconflow" | "siliconflow-cn",
 	fetchImpl?: FetchImpl,
@@ -1513,7 +1516,12 @@ async function loadSiliconFlowModelsDevReferences(
 		return new Map();
 	}
 	try {
-		const payload = await fetchModelsDevPayload(fetchImpl);
+		// Bounded: this enrichment is optional, so a stalled models.dev must not
+		// hold back the authoritative endpoint request that runs after it.
+		const payload = await fetchModelsDevPayload(
+			fetchImpl,
+			AbortSignal.timeout(SILICONFLOW_MODELS_DEV_REFERENCE_TIMEOUT_MS),
+		);
 		return createModelsDevReferenceMap<"openai-completions">(
 			mapModelsDevToModels(payload as Record<string, unknown>, [descriptor]),
 		);
@@ -1548,19 +1556,26 @@ function createSiliconFlowModelManagerOptions(
 							return mapWithBundledReference(entry, defaults, modelsDevReference);
 						}
 						// ids missing from models.dev (new launches) still recover intrinsic
-						// capabilities from any bundled upstream/reseller entry — but never
-						// its pricing or limits, which are provider-specific.
+						// capabilities and canonical limits from any bundled upstream/reseller
+						// entry — but never its pricing, which is provider-specific.
 						const canonical = resolveModelReference(defaults.id, canonicalReferences) as
 							| ModelSpec<"openai-completions">
 							| undefined;
 						if (!canonical) {
 							return defaults;
 						}
+						const contextWindow = canonical.contextWindow ?? defaults.contextWindow;
+						const maxTokens =
+							canonical.maxTokens != null && contextWindow != null
+								? Math.min(canonical.maxTokens, contextWindow)
+								: (canonical.maxTokens ?? defaults.maxTokens);
 						return {
 							...defaults,
 							name: toModelName(entry.name, canonical.name ?? defaults.name),
 							reasoning: canonical.reasoning,
 							input: canonical.input,
+							contextWindow,
+							maxTokens,
 						};
 					},
 					fetch: config?.fetch,

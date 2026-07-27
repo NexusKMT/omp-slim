@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
 import { getEnvApiKey } from "@oh-my-pi/pi-ai/stream";
+import { getBundledModelReferenceIndex } from "@oh-my-pi/pi-catalog/identity/bundled";
+import { resolveModelReference } from "@oh-my-pi/pi-catalog/identity/reference";
 import type { GeneratedProvider } from "@oh-my-pi/pi-catalog/models";
 import { DEFAULT_MODEL_PER_PROVIDER, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import {
@@ -142,14 +144,20 @@ describe("siliconflow built-in providers", () => {
 		expect(glm?.api).toBe("openai-completions");
 		expect(glm?.baseUrl).toBe("https://api.siliconflow.com/v1");
 
-		// Tier 2: absent from models.dev — reasoning recovers from the bundled
-		// upstream/reseller reference, but provider-specific pricing and limits
-		// stay unknown instead of inheriting another host's values.
+		// Tier 2: absent from models.dev — reasoning and canonical limits recover
+		// from the bundled upstream/reseller reference, but provider-specific
+		// pricing stays unknown instead of inheriting another host's values.
+		const canonical = resolveModelReference("deepseek-ai/DeepSeek-V4-Pro", getBundledModelReferenceIndex());
+		expect(canonical).toBeDefined();
 		const v4pro = models?.find(model => model.id === "deepseek-ai/DeepSeek-V4-Pro");
 		expect(v4pro?.reasoning).toBe(true);
 		expect(v4pro?.cost.input).toBe(0);
-		expect(v4pro?.contextWindow).toBeNull();
-		expect(v4pro?.maxTokens).toBeNull();
+		expect(v4pro?.contextWindow).toBe(canonical?.contextWindow ?? null);
+		if (canonical?.maxTokens != null && canonical?.contextWindow != null) {
+			expect(v4pro?.maxTokens).toBe(Math.min(canonical.maxTokens, canonical.contextWindow));
+		} else {
+			expect(v4pro?.maxTokens).toBe(canonical?.maxTokens ?? null);
+		}
 
 		expect(seen.urls).toContain("https://api.siliconflow.com/v1/models");
 		expect(seen.urls.some(url => url.startsWith("https://models.dev/"))).toBe(true);
@@ -186,5 +194,28 @@ describe("siliconflow built-in providers", () => {
 		expect(pro?.cost).toEqual({ input: 2.8, output: 8.8, cacheRead: 0, cacheWrite: 0 });
 		expect(pro?.baseUrl).toBe("https://api.siliconflow.cn/v1");
 		expect(seen.urls).toContain("https://api.siliconflow.cn/v1/models");
+	});
+
+	test("models.dev lookup failure still yields endpoint-discovered models", async () => {
+		const stubFetch: FetchImpl = async input => {
+			const url = String(input);
+			if (url.startsWith("https://models.dev/")) {
+				throw new Error("models.dev stalled");
+			}
+			const payload = {
+				object: "list",
+				data: [{ id: "deepseek-ai/DeepSeek-V4-Pro", object: "model", created: 0, owned_by: "" }],
+			};
+			return new Response(JSON.stringify(payload), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		};
+
+		const options = siliconflowCnModelManagerOptions({ apiKey: "sk-test", fetch: stubFetch });
+		const models = await options.fetchDynamicModels?.();
+		expect(models?.map(model => model.id)).toEqual(["deepseek-ai/DeepSeek-V4-Pro"]);
+		// Canonical fallback still hydrates reasoning when models.dev is unreachable.
+		expect(models?.[0]?.reasoning).toBe(true);
 	});
 });
