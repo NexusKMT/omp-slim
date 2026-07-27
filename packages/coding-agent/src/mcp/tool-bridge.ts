@@ -6,7 +6,7 @@
 import type { AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import type { TSchema } from "@oh-my-pi/pi-ai";
 import { normalizeSchemaForMCP } from "@oh-my-pi/pi-ai/utils/schema";
-import { untilAborted } from "@oh-my-pi/pi-utils";
+import { logger, untilAborted } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import type { SourceMeta } from "../capability/types";
 import type {
@@ -355,6 +355,43 @@ export function createMCPToolName(serverName: string, toolName: string): string 
 	}
 
 	return `mcp__${sanitizedServerName}_${normalizedToolName}`;
+}
+
+/**
+ * Keeps the first MCP tool for each minted name and logs collisions between
+ * distinct MCP origins. Non-MCP tools pass through unchanged.
+ */
+export function deduplicateMCPToolsByName<T extends { name: string; mcpServerName?: unknown; mcpToolName?: unknown }>(
+	tools: readonly T[],
+): T[] {
+	const deduplicated: T[] = [];
+	const registered = new Map<string, T>();
+
+	for (const tool of tools) {
+		if (typeof tool.mcpServerName !== "string" || typeof tool.mcpToolName !== "string") {
+			deduplicated.push(tool);
+			continue;
+		}
+
+		const existing = registered.get(tool.name);
+		if (!existing) {
+			registered.set(tool.name, tool);
+			deduplicated.push(tool);
+			continue;
+		}
+
+		if (existing.mcpServerName !== tool.mcpServerName || existing.mcpToolName !== tool.mcpToolName) {
+			logger.warn("MCP tool name collision; keeping first registration", {
+				name: tool.name,
+				keptServer: existing.mcpServerName,
+				keptTool: existing.mcpToolName,
+				ignoredServer: tool.mcpServerName,
+				ignoredTool: tool.mcpToolName,
+			});
+		}
+	}
+
+	return deduplicated;
 }
 
 /**
