@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Moved PTY log replay into the shared project launch broker, so normal CLI and Hub startup no longer load the xterm runtime while launch logs return validated rendered terminal rows.
+
 ## [17.1.4] - 2026-07-26
 
 ### Added
