@@ -1220,6 +1220,63 @@ describe("OpenAI responses history payload", () => {
 		expect(replayHistoryItems[6]?.id).toBe(opaqueMessageId);
 	});
 
+	it("preserves the reasoning ID linked to a native computer call in the next request", async () => {
+		const nativeComputerHistory = [
+			{
+				type: "reasoning",
+				id: "rs_interrupted_computer_turn",
+				summary: [],
+				encrypted_content: "encrypted-computer-reasoning",
+				status: "completed",
+			},
+			{
+				type: "computer_call",
+				id: "cu_interrupted_computer_turn",
+				call_id: "call_interrupted_computer_turn",
+				action: { type: "screenshot" },
+				pending_safety_checks: [],
+				status: "completed",
+			},
+			{
+				type: "computer_call_output",
+				call_id: "call_interrupted_computer_turn",
+				output: { type: "computer_screenshot", image_url: "data:image/png;base64,AAEC" },
+			},
+		];
+		const context: Context = {
+			messages: [
+				makeAssistantMessage(nativeComputerHistory, false, "openai", "gpt-5.4"),
+				{ role: "user", content: "continue after interrupt", timestamp: Date.now() },
+			],
+		};
+
+		const model = getOpenAIReasoningModel("openai", "gpt-5.4");
+		const payload = (await captureResponsesPayload(model, context)) as { input?: unknown[] };
+
+		expect(payload.input).toEqual([
+			{
+				type: "reasoning",
+				id: "rs_interrupted_computer_turn",
+				summary: [],
+				encrypted_content: "encrypted-computer-reasoning",
+			},
+			{
+				type: "computer_call",
+				id: "cu_interrupted_computer_turn",
+				call_id: "call_interrupted_computer_turn",
+				action: { type: "screenshot" },
+				pending_safety_checks: [],
+				status: "completed",
+			},
+			{
+				type: "computer_call_output",
+				call_id: "call_interrupted_computer_turn",
+				output: { type: "computer_screenshot", image_url: "data:image/png;base64,AAEC" },
+			},
+			{ role: "user", content: [{ type: "input_text", text: "continue after interrupt" }] },
+		]);
+	});
+
 	it("backward compat: old full-snapshot payloads still replace history for legacy same-provider assistant turns", async () => {
 		const fullSnapshotItems = [
 			{ type: "message", role: "user", content: [{ type: "input_text", text: "Canonical user" }] },

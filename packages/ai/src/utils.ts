@@ -106,11 +106,25 @@ export function sanitizeOpenAIResponsesHistoryItemsForReplay(
 ): ResponseInput {
 	const normalizedCallIds = new Map<string, string>();
 	const supportsImageDetailOriginal = options.supportsImageDetailOriginal !== false;
+	// Stateless native computer history is an atomic Responses chain: replaying
+	// a `computer_call` ID requires the reasoning item IDs from that response.
+	const computerLinkedReasoningItems = new Set<Record<string, unknown>>();
+	const responseReasoningItems: Array<Record<string, unknown>> = [];
+	for (const item of items) {
+		if (item.type === "message") {
+			responseReasoningItems.length = 0;
+		} else if (item.type === "reasoning") {
+			responseReasoningItems.push(item);
+		} else if (item.type === "computer_call" && typeof item.id === "string") {
+			for (const reasoningItem of responseReasoningItems) computerLinkedReasoningItems.add(reasoningItem);
+		}
+	}
 	return items.flatMap(item => {
 		const sanitized = sanitizeOpenAIResponsesHistoryItemForReplay(
 			item,
 			normalizedCallIds,
 			supportsImageDetailOriginal,
+			computerLinkedReasoningItems.has(item),
 		);
 		return sanitized ? [sanitized] : [];
 	});
@@ -198,11 +212,13 @@ function sanitizeOpenAIResponsesHistoryItemForReplay(
 	item: Record<string, unknown>,
 	normalizedCallIds: Map<string, string>,
 	supportsImageDetailOriginal: boolean,
+	preserveReasoningItemIds: boolean,
 ): OpenAIResponsesReplayItem | undefined {
 	if (item.type === "item_reference") return undefined;
 	if (item.type === "image_generation_call") return sanitizeOpenAIResponsesImageGenerationCallForReplay(item);
-	if (item.type === "reasoning") return sanitizeOpenAIResponsesReasoningItemForReplay(item);
-
+	if (item.type === "reasoning") {
+		return sanitizeOpenAIResponsesReasoningItemForReplay(item, preserveReasoningItemIds);
+	}
 	// Strip status only from item types whose replay input rejects output
 	// lifecycle metadata. Hosted built-in tool items require status for replay.
 	const { id: _id, ...sanitizedItem } = item;
@@ -220,8 +236,12 @@ function sanitizeOpenAIResponsesHistoryItemForReplay(
 	) as unknown as OpenAIResponsesReplayItem;
 }
 
-function sanitizeOpenAIResponsesReasoningItemForReplay(item: Record<string, unknown>): OpenAIResponsesReplayItem {
+function sanitizeOpenAIResponsesReasoningItemForReplay(
+	item: Record<string, unknown>,
+	preserveItemId: boolean,
+): OpenAIResponsesReplayItem {
 	const sanitizedItem: Record<string, unknown> = { type: "reasoning" };
+	if (preserveItemId && typeof item.id === "string") sanitizedItem.id = item.id;
 	if (Array.isArray(item.summary)) sanitizedItem.summary = item.summary;
 	if (Array.isArray(item.content)) sanitizedItem.content = item.content;
 	if (typeof item.encrypted_content === "string" || item.encrypted_content === null) {

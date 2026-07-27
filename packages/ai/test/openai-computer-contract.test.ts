@@ -401,6 +401,92 @@ describe("OpenAI GA computer contract", () => {
 		}
 	});
 
+	test("preserves linked reasoning and computer item IDs for stateless replay", () => {
+		const sanitized = sanitizeOpenAIResponsesHistoryItemsForReplay([
+			{
+				type: "reasoning",
+				id: "rs_interrupted_turn",
+				summary: [],
+				encrypted_content: "encrypted-reasoning",
+			},
+			{
+				type: "computer_call",
+				id: "cu_interrupted_turn",
+				call_id: "call_interrupted_turn",
+				action: { type: "screenshot" },
+				pending_safety_checks: [],
+				status: "completed",
+			},
+			{
+				type: "computer_call_output",
+				call_id: "call_interrupted_turn",
+				output: { type: "computer_screenshot", image_url: "data:image/png;base64,AAEC" },
+			},
+		]);
+
+		expect(sanitized).toEqual([
+			{
+				type: "reasoning",
+				id: "rs_interrupted_turn",
+				summary: [],
+				encrypted_content: "encrypted-reasoning",
+			},
+			{
+				type: "computer_call",
+				id: "cu_interrupted_turn",
+				call_id: "call_interrupted_turn",
+				action: { type: "screenshot" },
+				pending_safety_checks: [],
+				status: "completed",
+			},
+			{
+				type: "computer_call_output",
+				call_id: "call_interrupted_turn",
+				output: { type: "computer_screenshot", image_url: "data:image/png;base64,AAEC" },
+			},
+		]);
+	});
+
+	test("keeps unrelated reasoning item IDs stripped in mixed computer history", () => {
+		const sanitized = sanitizeOpenAIResponsesHistoryItemsForReplay([
+			{
+				type: "reasoning",
+				id: "rs_unrelated_turn",
+				summary: [],
+				encrypted_content: "unrelated-reasoning",
+			},
+			{
+				type: "message",
+				id: "msg_unrelated_turn",
+				role: "assistant",
+				status: "completed",
+				content: [{ type: "output_text", text: "Earlier answer", annotations: [] }],
+			},
+			{ type: "message", role: "user", content: [{ type: "input_text", text: "Use the computer" }] },
+			{
+				type: "reasoning",
+				id: "rs_computer_turn",
+				summary: [],
+				encrypted_content: "computer-reasoning",
+			},
+			{
+				type: "computer_call",
+				id: "cu_computer_turn",
+				call_id: "call_computer_turn",
+				action: { type: "screenshot" },
+				pending_safety_checks: [],
+				status: "completed",
+			},
+		]);
+
+		expect(sanitized[0] as unknown).toEqual({
+			type: "reasoning",
+			summary: [],
+			encrypted_content: "unrelated-reasoning",
+		});
+		expect(sanitized[3]!).toMatchObject({ type: "reasoning", id: "rs_computer_turn" });
+	});
+
 	test("turns a failed computer call without a screenshot into valid recovery history", () => {
 		const context = {
 			messages: [

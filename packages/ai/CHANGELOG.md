@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed stateless OpenAI Responses history after an interrupted native Computer Use turn: replay now keeps the reasoning item ID paired with a retained `computer_call` ID, while continuing to strip IDs from unrelated reasoning. The next prompt no longer fails with HTTP 400 for a missing `rs_*` item.
+
 ## [17.1.6] - 2026-07-27
 
 ### Added
