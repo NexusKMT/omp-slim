@@ -683,6 +683,12 @@ describe("OpenAI GA computer contract", () => {
 				dt: true,
 				items: [
 					{
+						type: "reasoning",
+						id: "rs_codex_computer",
+						summary: [],
+						encrypted_content: "encrypted-codex-computer-reasoning",
+					},
+					{
 						type: "computer_call",
 						id: "item_codex_computer",
 						call_id: "call_codex_computer",
@@ -700,6 +706,8 @@ describe("OpenAI GA computer contract", () => {
 			},
 		};
 		const replay = convertCodexResponsesMessages(codex, { messages: [previous] });
+		const reasoning = replay.find(item => item.type === "reasoning") as { id?: string } | undefined;
+		expect(reasoning?.id).toBeUndefined();
 		expect(replay.some(item => item.type === "computer_call" || item.type === "computer_call_output")).toBe(false);
 		const call = replay.find(item => item.type === "function_call" && item.call_id === "call_codex_computer");
 		expect(call).toMatchObject({ type: "function_call", name: "computer" });

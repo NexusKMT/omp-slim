@@ -193,6 +193,26 @@ export function sanitizeOpenAIResponsesHistoryItemsForReplay(
 	});
 }
 
+/** Strip only reasoning IDs whose native computer calls will be demoted. */
+export function stripOpenAIResponsesComputerLinkedReasoningIdsForReplay(items: ResponseInput): ResponseInput {
+	const records = items as unknown as Array<Record<string, unknown>>;
+	const linkedReasoningItems = collectOpenAIResponsesComputerLinkedReasoningItems(records, false);
+	let sanitized: ResponseInput | undefined;
+
+	for (let index = 0; index < items.length; index++) {
+		const item = items[index]!;
+		const record = records[index]!;
+		if (item.type !== "reasoning" || typeof record.id !== "string" || !linkedReasoningItems.has(record)) {
+			sanitized?.push(item);
+			continue;
+		}
+		if (!sanitized) sanitized = items.slice(0, index);
+		const { id: _id, ...withoutId } = record;
+		sanitized.push(withoutId as unknown as ResponseInput[number]);
+	}
+	return sanitized ?? items;
+}
+
 /**
  * Finalize provisional native-computer reasoning IDs after the complete
  * Responses input has been rebuilt, model-adapted, and orphan-repaired.
