@@ -11,6 +11,7 @@
 
 - Fixed Python cell errors (`$` commands and the eval tool) leaking runner-internal traceback frames. Cell syntax errors now render as the bare caret display with a `<cell>` filename instead of a `_handle_request_async`/`ast.parse` stack dump, and runtime tracebacks start at user code, matching the Ruby runner's user-frame filtering.
 - Dropped unavailable forced tool choices through the queue rejection lifecycle and discarded their remaining sequence yields so a skipped force cannot disable tools on the next request ([#6543](https://github.com/can1357/oh-my-pi/pull/6543) by [@paralin](https://github.com/paralin)).
+- Fixed the `write` tool treating a semicolon-joined list of read selectors (e.g. `a.txt:1-2;b/c.txt:3-4`) as a filesystem path, silently creating a nested directory tree when a read-only step mis-dispatched a multi-file `read` as `write`. Such targets are now refused regardless of `content`, since no real write targets a `;`-list whose every segment carries a read selector ([#6809](https://github.com/can1357/oh-my-pi/issues/6809)).
 
 ## [17.1.5] - 2026-07-27
 
