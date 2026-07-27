@@ -94,7 +94,7 @@ describe("AgentSession owner-routed async delivery", () => {
 		expect(sawResult).toBe(true);
 	});
 
-	it("purges completed owned jobs when starting a new session", async () => {
+	it("purges finished owned jobs when starting a new session", async () => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 		const agent = new Agent({
@@ -122,16 +122,29 @@ describe("AgentSession owner-routed async delivery", () => {
 			id: "prior-session-job",
 			ownerId: "Main",
 		});
+		const failedJobId = manager.register(
+			"task",
+			"failed prior session",
+			async () => {
+				throw new Error("prior session failure");
+			},
+			{
+				id: "failed-prior-session-job",
+				ownerId: "Main",
+			},
+		);
 		const otherOwnerJobId = manager.register("task", "other session", async () => "done", {
 			id: "other-session-job",
 			ownerId: "Other",
 		});
-		manager.watchJobs([completedJobId, otherOwnerJobId]);
+		manager.watchJobs([completedJobId, failedJobId, otherOwnerJobId]);
 		await manager.waitForAll();
 
 		expect(manager.getJob(completedJobId)?.status).toBe("completed");
+		expect(manager.getJob(failedJobId)?.status).toBe("failed");
 		expect(await session.newSession()).toBe(true);
 		expect(manager.getJob(completedJobId)).toBeUndefined();
+		expect(manager.getJob(failedJobId)).toBeUndefined();
 		expect(manager.getJob(otherOwnerJobId)?.status).toBe("completed");
 	});
 

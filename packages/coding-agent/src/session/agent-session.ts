@@ -1597,7 +1597,7 @@ export class AgentSession {
 	 * cleans up its own background work without touching its parent's jobs.
 	 *
 	 * Cleanup runs against this session's scoped manager: running jobs are
-	 * cancelled and completed rows are evicted immediately. Subagents have
+	 * cancelled and finished rows are evicted immediately. Subagents have
 	 * unique agent ids and inherit the parent's manager to clean up their own
 	 * jobs. A secondary in-process top-level session gets no scoped manager,
 	 * because it defaults to `MAIN_AGENT_ID`; reaching through the global

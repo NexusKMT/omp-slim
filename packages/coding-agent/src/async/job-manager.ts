@@ -417,11 +417,11 @@ export class AsyncJobManager {
 		}
 	}
 
-	/** Immediately evict completed jobs matching the filter instead of waiting for retention expiry. */
+	/** Immediately evict completed and failed jobs matching the filter instead of waiting for retention expiry. */
 	evictCompletedJobs(filter?: AsyncJobFilter): number {
 		let evicted = 0;
 		for (const job of this.#filterJobs(this.#jobs.values(), filter)) {
-			if (job.status !== "completed") continue;
+			if (job.status !== "completed" && job.status !== "failed") continue;
 			if (this.#evictJob(job.id)) evicted += 1;
 		}
 		return evicted;
