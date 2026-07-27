@@ -29,7 +29,8 @@ let requireTarget: string;
 const tempRoots: string[] = [];
 
 beforeAll(async () => {
-	rewriteRoot = await fs.mkdtemp(path.join(os.tmpdir(), "omp-legacy-ast-rewrite-"));
+	// realpath: rewritten specifiers are canonical (macOS /var ↔ /private/var).
+	rewriteRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "omp-legacy-ast-rewrite-")));
 	tempRoots.push(rewriteRoot);
 	const dependencyPath = path.join(rewriteRoot, "node_modules", "tracked-dep", "index.js");
 	await fs.mkdir(path.dirname(dependencyPath), { recursive: true });
