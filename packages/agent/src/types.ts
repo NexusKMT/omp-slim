@@ -456,23 +456,22 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	getCwd?: () => string | undefined;
 
 	/**
-	 * Called once per tool call after argument validation, before the call is
-	 * scheduled — ahead of concurrency resolution, `tool_execution_start`, and
-	 * `tool.execute`. Hooks in a batch run in call order while earlier tools may
-	 * already be executing.
+	 * Called once per tool call after argument validation, in call order, before
+	 * the call is scheduled — ahead of concurrency resolution,
+	 * `tool_execution_start`, and `tool.execute`. On the streamed path it runs
+	 * before the assistant message's `message_start`/`message_end` are emitted.
 	 *
 	 * Return `{ block: true }` to prevent execution. The loop emits an error tool
 	 * result instead (using `reason` as the error text, or a default if omitted).
 	 *
 	 * Return `{ args }` to replace the arguments the call runs with. The
-	 * replacement is revalidated against the tool schema and governs execution:
-	 * concurrency scheduling, execution events, telemetry spans, and
-	 * `tool.execute` all see the revised arguments, while the assistant message
-	 * keeps the model's original proposal (matching `transformToolCallArguments`
-	 * semantics). Mutating `context.args` in place also survives into execution,
-	 * but a returned `args` object wins.
+	 * replacement is revalidated against the tool schema and written back to the
+	 * tool-call block, making it the single source of truth: history, execution
+	 * events, persistence, provider replay, concurrency scheduling, and
+	 * `tool.execute` all see the revised arguments. Mutating `context.args` in
+	 * place also survives into execution, but a returned `args` object wins.
 	 *
-	 * The hook receives the tool abort signal (`signal`) and is responsible for
+	 * The hook receives the run's request abort signal and is responsible for
 	 * honoring it. Throwing surfaces as a tool-error result and does not abort the
 	 * rest of the batch.
 	 */
@@ -558,8 +557,9 @@ export type AgentToolCall = Extract<AssistantMessage["content"][number], { type:
  * result instead, using `reason` as the error text (or a default if omitted).
  *
  * Set `args` to replace the tool-call arguments. The replacement is revalidated
- * against the tool schema (a failure surfaces as a validation-error tool result)
- * and is seen by scheduling, execution events, and `tool.execute` alike. It is
+ * against the tool schema (a failure surfaces as a validation-error tool result),
+ * written back to the tool-call block on the assistant message, and seen by
+ * history, scheduling, execution events, and `tool.execute` alike. It is
  * ignored when `block` is true.
  */
 export interface BeforeToolCallResult {

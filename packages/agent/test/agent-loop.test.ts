@@ -3796,7 +3796,8 @@ describe("agentLoopContinue with AgentMessage", () => {
 		expect(toolStart?.type === "tool_execution_start" && toolStart.args).toEqual({ value: "revised" });
 		const messages = await stream.result();
 		const assistant = messages.find(m => m.role === "assistant");
-		const toolCallBlock = assistant?.role === "assistant" ? assistant.content.find(c => c.type === "toolCall") : undefined;
+		const toolCallBlock =
+			assistant?.role === "assistant" ? assistant.content.find(c => c.type === "toolCall") : undefined;
 		expect(toolCallBlock?.type === "toolCall" && toolCallBlock.arguments).toEqual({ value: "revised" });
 	});
 

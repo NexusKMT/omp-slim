@@ -855,10 +855,16 @@ describe("AgentSession message pipeline", () => {
 			queueMicrotask(() => {
 				if (requests === 1) {
 					const message = createAssistantMessage("");
-					message.content = [
-						{ type: "toolCall", id: "call-revise-1", name: "bash", arguments: { command: "echo original" } },
-					];
+					const toolCall = {
+						type: "toolCall",
+						id: "call-revise-1",
+						name: "bash",
+						arguments: { command: "echo original" },
+					} as const;
+					message.content = [toolCall];
 					message.stopReason = "toolUse";
+					stream.push({ type: "toolcall_start", contentIndex: 0, partial: message });
+					stream.push({ type: "toolcall_end", contentIndex: 0, toolCall: toolCall as never, partial: message });
 					stream.push({ type: "done", reason: "toolUse", message });
 				} else {
 					const message = createAssistantMessage("done");
