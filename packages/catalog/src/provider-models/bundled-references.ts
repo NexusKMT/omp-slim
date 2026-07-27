@@ -67,11 +67,9 @@ export function createReferenceResolver<TApi extends Api>(
 			? () => (lazyProviderReferences ??= providerReferenceSource())
 			: () => providerReferenceSource;
 	return (modelId: string) => {
-		const providerRefs = getProviderReferences();
-		const globalRefs = getGlobalReferences();
-		const providerRef = providerRefs.get(modelId);
+		const providerRef = getProviderReferences().get(modelId);
 		if (providerRef) return providerRef;
-		const globalRef = globalRefs.get(modelId);
+		const globalRef = getGlobalReferences().get(modelId);
 		return globalRef ? toModelSpec(globalRef as Model<TApi>) : undefined;
 	};
 }
