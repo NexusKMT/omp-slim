@@ -12,6 +12,7 @@ import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type Args, parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
+import * as modelResolverModule from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createSessionManager, runRootCommand } from "@oh-my-pi/pi-coding-agent/main";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
@@ -162,6 +163,49 @@ describe("runRootCommand — cross-project --resume", () => {
 		expect(process.cwd()).toBe(resumedProject);
 		expect(reloadForCwd).toHaveBeenCalledWith(resumedProject);
 		expect(resumedManager?.getCwd()).toBe(resumedProject);
+	}, 15_000);
+
+	it("re-resolves the model scope from the resumed project's enabledModels after the switch", async () => {
+		const match = buildGlobalMatch(resumedProject);
+		vi.spyOn(sessionListingModule, "resolveResumableSession").mockResolvedValue(match);
+		// enabledModels scoped only to the resumed project: the launch scope
+		// yields no patterns, so any resolveModelScope call proves the recompute
+		// ran against the destination settings rather than the launch directory.
+		const settings = Settings.isolated({
+			"marketplace.autoUpdate": "off",
+			enabledModels: [{ paths: [resumedProject], models: ["model-resumed"] }],
+		});
+		const resolveModelScope = vi.spyOn(modelResolverModule, "resolveModelScope").mockResolvedValue([]);
+		const authStorage = await AuthStorage.create(path.join(root, "auth.db"));
+		const parsed = parseArgs(["--resume", "019e84ed", "--print"]);
+		parsed.noExtensions = true;
+		parsed.noSkills = true;
+		parsed.noRules = true;
+		parsed.noTools = true;
+		parsed.noLsp = true;
+		let resumedManager: SessionManager | undefined;
+
+		try {
+			await runRootCommand(parsed, ["--resume", "019e84ed", "--print"], {
+				discoverAuthStorage: async () => authStorage,
+				settings,
+				createAgentSession: async options => {
+					if (!options) throw new Error("Expected session options");
+					resumedManager = options.sessionManager;
+					throw new Error("stop after session options");
+				},
+			});
+		} catch (error) {
+			if (!(error instanceof Error) || error.message !== "stop after session options") throw error;
+		} finally {
+			authStorage.close();
+			await resumedManager?.close();
+		}
+
+		// Launch scope had no patterns, so the only resolution is the post-switch
+		// one; the pre-fix code never recomputed and would not call it at all.
+		expect(resolveModelScope).toHaveBeenCalledTimes(1);
+		expect(resolveModelScope.mock.calls[0]?.[0]).toEqual(["model-resumed"]);
 	}, 15_000);
 });
 

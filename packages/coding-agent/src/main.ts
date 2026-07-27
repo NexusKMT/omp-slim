@@ -624,6 +624,29 @@ async function switchToResumedProject(
 	return cwd;
 }
 
+/**
+ * Resolve the effective model allow-list from an explicit `--models` scope or,
+ * failing that, the active project's `enabledModels`. Re-run after a resume
+ * switches projects so the destination project's settings-derived scope wins
+ * over the launch directory's.
+ */
+async function resolveScopedModels(
+	parsed: Args,
+	modelRegistry: ModelRegistry,
+	activeSettings: Settings,
+): Promise<ScopedModel[]> {
+	const modelPatterns = parsed.models ?? activeSettings.get("enabledModels");
+	if (!modelPatterns || modelPatterns.length === 0) {
+		return [];
+	}
+	return await resolveModelScope(
+		modelPatterns,
+		modelRegistry,
+		getModelMatchPreferences(activeSettings),
+		activeSettings,
+	);
+}
+
 async function getChangelogForDisplay(parsed: Args): Promise<string | undefined> {
 	if (parsed.continue || parsed.resume) {
 		return undefined;
@@ -1242,19 +1265,13 @@ export async function runRootCommand(
 		settingsInstance.get("theme.light"),
 	);
 
-	let scopedModels: ScopedModel[] = [];
-	const modelPatterns = parsedArgs.models ?? settingsInstance.get("enabledModels");
-	const modelMatchPreferences = getModelMatchPreferences(settingsInstance);
-	if (modelPatterns && modelPatterns.length > 0) {
-		scopedModels = await logger.time(
-			"resolveModelScope",
-			resolveModelScope,
-			modelPatterns,
-			modelRegistry,
-			modelMatchPreferences,
-			settingsInstance,
-		);
-	}
+	let scopedModels = await logger.time(
+		"resolveModelScope",
+		resolveScopedModels,
+		parsedArgs,
+		modelRegistry,
+		settingsInstance,
+	);
 
 	// Resolve an explicit `--continue <id>` before extension flags are loaded.
 	// Reading the token immediately after `--continue` distinguishes the session
@@ -1286,7 +1303,14 @@ export async function runRootCommand(
 	}
 
 	if (typeof parsedArgs.resume === "string" && sessionManager) {
+		const previousCwd = cwd;
 		cwd = await switchToResumedProject(sessionManager.getCwd(), settingsInstance, pluginPreloadPromise);
+		if (cwd !== previousCwd) {
+			// Destination project may scope a different `enabledModels`; re-resolve
+			// so the model UI and session options reflect it (explicit `--models`
+			// stays fixed inside resolveScopedModels).
+			scopedModels = await resolveScopedModels(parsedArgs, modelRegistry, settingsInstance);
+		}
 	}
 
 	// User declined the missing-directory move prompt — exit cleanly instead of
@@ -1332,7 +1356,11 @@ export async function runRootCommand(
 			process.exit(0);
 		}
 		// Re-scope every cwd-derived input before building the resumed session.
+		const previousCwd = cwd;
 		cwd = await switchToResumedProject(selected.cwd, settingsInstance, pluginPreloadPromise);
+		if (cwd !== previousCwd) {
+			scopedModels = await resolveScopedModels(parsedArgs, modelRegistry, settingsInstance);
+		}
 		sessionManager = await SessionManager.open(selected.path);
 	}
 
