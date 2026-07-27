@@ -29,23 +29,25 @@ import {
 // Platform Detection
 // =============================================================================
 
-function isWindowsTerminalSession(): boolean {
+/** Whether the local process is running directly under Windows Terminal. */
+export function isWindowsTerminalSession(): boolean {
 	return (
 		Boolean(process.env.WT_SESSION) && !process.env.SSH_CONNECTION && !process.env.SSH_CLIENT && !process.env.SSH_TTY
 	);
 }
 
 /**
- * Windows Terminal encodes Ctrl+Backspace as the raw `0x08` (BS) byte and plain
- * Backspace as `0x7f` (DEL), unlike terminals that send an explicit CSI-u /
- * modifyOtherKeys sequence. The native parser has no environment access and
- * reports both bytes as `backspace`, so the ambiguous `0x08` is remapped to
- * `ctrl+backspace` here — the one layer where `WT_SESSION` is observable.
- * Returns `undefined` for every other input so explicit encodings are untouched.
+ * Match ambiguous legacy Backspace bytes against an expected modifier mask.
+ *
+ * Windows Terminal encodes Ctrl+Backspace as raw `0x08` (BS) and plain
+ * Backspace as `0x7f` (DEL). Remote/container sessions lose terminal identity,
+ * so `PI_TUI_RAW_BACKSPACE_IS_CTRL=1` explicitly opts into the same mapping.
  */
-function windowsTerminalBackspaceOverride(data: string): KeyId | undefined {
-	if (data !== "\x08") return undefined;
-	return isWindowsTerminalSession() ? "ctrl+backspace" : undefined;
+export function matchesRawBackspace(data: string, expectedModifier: number): boolean {
+	if (data === "\x7f") return expectedModifier === 0;
+	if (data !== "\x08") return false;
+	const rawBackspaceIsCtrl = process.env.PI_TUI_RAW_BACKSPACE_IS_CTRL === "1" || isWindowsTerminalSession();
+	return rawBackspaceIsCtrl ? expectedModifier === 4 : expectedModifier === 0;
 }
 
 // =============================================================================
@@ -540,8 +542,7 @@ function matchesKeypadKey(data: string, keyId: KeyId): boolean | undefined {
  * @param keyId - Key identifier (e.g., "ctrl+c", "escape", Key.ctrl("c"))
  */
 export function matchesKey(data: string, keyId: KeyId): boolean {
-	const wtOverride = windowsTerminalBackspaceOverride(data);
-	if (wtOverride !== undefined) return wtOverride === keyId;
+	if (matchesRawBackspace(data, 4)) return keyId === "ctrl+backspace";
 	return matchesKeypadKey(data, keyId) ?? matchesKeyNative(data, keyId, kittyProtocolActive);
 }
 
@@ -554,7 +555,6 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
  * @param data - Raw input data from terminal
  */
 export function parseKey(data: string): string | undefined {
-	const wtOverride = windowsTerminalBackspaceOverride(data);
-	if (wtOverride !== undefined) return wtOverride;
+	if (matchesRawBackspace(data, 4)) return "ctrl+backspace";
 	return decodeKittyKeypadText(data) ?? parseKeyNative(data, kittyProtocolActive) ?? undefined;
 }

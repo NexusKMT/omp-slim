@@ -1,5 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import { extractPrintableText, matchesKey, parseKey, setKittyProtocolActive } from "@oh-my-pi/pi-tui/keys";
+import {
+	extractPrintableText,
+	isWindowsTerminalSession,
+	matchesKey,
+	matchesRawBackspace,
+	parseKey,
+	setKittyProtocolActive,
+} from "@oh-my-pi/pi-tui/keys";
 
 describe("matchesKey", () => {
 	it("matches ctrl+letter sequences", () => {
@@ -177,8 +184,8 @@ describe("parseKey", () => {
 	});
 });
 
-describe("Windows Terminal raw 0x08 backspace disambiguation", () => {
-	const envKeys = ["WT_SESSION", "SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"] as const;
+describe("Raw 0x08 backspace disambiguation", () => {
+	const envKeys = ["WT_SESSION", "SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY", "PI_TUI_RAW_BACKSPACE_IS_CTRL"] as const;
 	function withEnv(overrides: Partial<Record<(typeof envKeys)[number], string>>, run: () => void): void {
 		const saved: Record<string, string | undefined> = {};
 		for (const key of envKeys) {
@@ -201,12 +208,18 @@ describe("Windows Terminal raw 0x08 backspace disambiguation", () => {
 		// Windows Terminal sends 0x08 for Ctrl+Backspace; the native parser reports
 		// plain `backspace` because it cannot see the environment.
 		withEnv({ WT_SESSION: "1" }, () => {
+			expect(isWindowsTerminalSession()).toBe(true);
+			expect(matchesRawBackspace("\x08", 4)).toBe(true);
+			expect(matchesRawBackspace("\x08", 0)).toBe(false);
 			expect(parseKey("\x08")).toBe("ctrl+backspace");
 			expect(matchesKey("\x08", "ctrl+backspace")).toBe(true);
 			expect(matchesKey("\x08", "backspace")).toBe(false);
 		});
 		// Outside Windows Terminal 0x08 stays plain backspace.
 		withEnv({}, () => {
+			expect(isWindowsTerminalSession()).toBe(false);
+			expect(matchesRawBackspace("\x08", 0)).toBe(true);
+			expect(matchesRawBackspace("\x08", 4)).toBe(false);
 			expect(parseKey("\x08")).toBe("backspace");
 			expect(matchesKey("\x08", "backspace")).toBe(true);
 			expect(matchesKey("\x08", "ctrl+backspace")).toBe(false);
@@ -215,12 +228,31 @@ describe("Windows Terminal raw 0x08 backspace disambiguation", () => {
 
 	it("does not apply the heuristic when WT_SESSION is forwarded over SSH", () => {
 		withEnv({ WT_SESSION: "1", SSH_CONNECTION: "1.2.3.4 5 6.7.8.9 22" }, () => {
+			expect(isWindowsTerminalSession()).toBe(false);
 			expect(parseKey("\x08")).toBe("backspace");
 		});
 	});
 
-	it("leaves 0x7f as plain backspace regardless of Windows Terminal", () => {
-		withEnv({ WT_SESSION: "1" }, () => {
+	it("supports an explicit opt-in when remote/container sessions lose terminal identity", () => {
+		withEnv(
+			{
+				PI_TUI_RAW_BACKSPACE_IS_CTRL: "1",
+				SSH_CONNECTION: "1.2.3.4 5 6.7.8.9 22",
+			},
+			() => {
+				expect(isWindowsTerminalSession()).toBe(false);
+				expect(matchesRawBackspace("\x08", 4)).toBe(true);
+				expect(matchesRawBackspace("\x08", 0)).toBe(false);
+				expect(parseKey("\x08")).toBe("ctrl+backspace");
+				expect(matchesKey("\x08", "ctrl+backspace")).toBe(true);
+			},
+		);
+	});
+
+	it("leaves 0x7f as plain backspace regardless of Windows Terminal or opt-in", () => {
+		withEnv({ WT_SESSION: "1", PI_TUI_RAW_BACKSPACE_IS_CTRL: "1" }, () => {
+			expect(matchesRawBackspace("\x7f", 0)).toBe(true);
+			expect(matchesRawBackspace("\x7f", 4)).toBe(false);
 			expect(parseKey("\x7f")).toBe("backspace");
 			expect(matchesKey("\x7f", "backspace")).toBe(true);
 			expect(matchesKey("\x7f", "ctrl+backspace")).toBe(false);
