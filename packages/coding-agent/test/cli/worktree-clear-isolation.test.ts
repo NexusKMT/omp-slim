@@ -57,6 +57,12 @@ describe("worktree clear task-isolation ownership", () => {
 		const corrupt = await makeSandbox("tbad00004");
 		await Bun.write(path.join(corrupt, ISOLATION_OWNER_FILE), "{ not json");
 
+		// Setup race: marker written before the backend materialises `m`. The
+		// dir holds only the live-owner marker and no mount yet.
+		const pending = path.join(base, "tpend0005");
+		await fs.mkdir(pending, { recursive: true });
+		await writeIsolationOwner(pending, "pend0005");
+
 		await clearWorktrees({ all: false, dryRun: false, json: true });
 
 		const exists = async (p: string): Promise<boolean> =>
@@ -68,5 +74,6 @@ describe("worktree clear task-isolation ownership", () => {
 		expect(await exists(dead)).toBe(false);
 		expect(await exists(orphan)).toBe(false);
 		expect(await exists(corrupt)).toBe(false);
+		expect(await exists(pending)).toBe(true);
 	});
 });

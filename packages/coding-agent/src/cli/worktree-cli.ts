@@ -20,7 +20,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getWorktreesDir, isEnoent } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
-import { hasLiveIsolationOwner } from "../task/isolation-ownership";
+import { hasLiveIsolationOwner, ISOLATION_OWNER_FILE } from "../task/isolation-ownership";
 import * as git from "../utils/git";
 
 type WorktreeKind = "pr-checkout" | "task-isolation" | "empty" | "stray";
@@ -214,19 +214,30 @@ async function classifyDir(dir: string): Promise<WorktreeEntry | null> {
 	if (gitStat?.isFile()) {
 		return classifyPrCheckout(dir, gitEntry);
 	}
-	for (const mountDir of TASK_ISOLATION_MOUNT_DIRS) {
-		const mountStat = await fs.stat(path.join(dir, mountDir)).catch(() => null);
-		if (!mountStat?.isDirectory()) continue;
-		const live = await hasLiveIsolationOwner(dir);
-		return {
-			path: dir,
-			kind: "task-isolation",
-			// Only after confirming no live owner is the "no live task" claim true.
-			// A running subagent's sandbox stays live so `clear` won't delete it.
-			orphanReason: live ? undefined : "task-isolation leftover (no live task owns it)",
-		};
+	// A task-isolation sandbox is identified by its ownership marker — written
+	// before the backend materialises the mount — or by the `m`/`merged` mount
+	// dir itself (legacy dirs and crashed pre-marker runs). Recognizing the
+	// marker alone keeps an in-progress sandbox from being mistaken for a stray
+	// during the window between marker creation and mount materialisation.
+	let isIsolation = await Bun.file(path.join(dir, ISOLATION_OWNER_FILE)).exists();
+	if (!isIsolation) {
+		for (const mountDir of TASK_ISOLATION_MOUNT_DIRS) {
+			const mountStat = await fs.stat(path.join(dir, mountDir)).catch(() => null);
+			if (mountStat?.isDirectory()) {
+				isIsolation = true;
+				break;
+			}
+		}
 	}
-	return null;
+	if (!isIsolation) return null;
+	const live = await hasLiveIsolationOwner(dir);
+	return {
+		path: dir,
+		kind: "task-isolation",
+		// Only after confirming no live owner is the "no live task" claim true.
+		// A running subagent's sandbox stays live so `clear` won't delete it.
+		orphanReason: live ? undefined : "task-isolation leftover (no live task owns it)",
+	};
 }
 
 async function classifyPrCheckout(dir: string, gitEntry: string): Promise<WorktreeEntry> {
