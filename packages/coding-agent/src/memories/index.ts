@@ -1361,24 +1361,31 @@ async function appendLearnedLine(filePath: string, line: string): Promise<void> 
 	} catch (err) {
 		if (!isEnoent(err)) throw err;
 	}
-	// Split existing content, preserving non-list lines (headers, prose,
-	// blank lines, blockquotes, etc.) while deduping and capping only the
-	// bullet-list lesson entries. Hand-edited content outside the list
-	// region survives every write — the read path already preserves all
-	// lines (readLearnedLessons), so this brings the write path in line.
-	const preserved: string[] = [];
-	const priorLessons: string[] = [];
-	for (const l of existing.split("\n")) {
-		const trimmed = l.trim();
-		if (trimmed.startsWith("- ")) {
-			if (trimmed !== line) priorLessons.push(trimmed);
-		} else {
-			preserved.push(l);
+	// Treat the file as an ordered line list so headings, prose, and blank
+	// lines keep their positions relative to the bullets they scope. Managed
+	// operations touch only bullet lines: dedupe removes an existing copy of
+	// the incoming lesson in place, the new lesson enters at the head of the
+	// first bullet run (newest-first, matching the read path and cap docs),
+	// and the cap drops the oldest (bottom-most) bullets. Hand-edited content
+	// outside the list region survives every write byte-for-byte.
+	const lines = existing.split("\n");
+	// A well-formed file ends with "\n"; drop the terminal split artifact so
+	// repeated saves stay idempotent instead of growing a blank line each time.
+	if (lines.at(-1) === "") lines.pop();
+	const isLesson = (l: string) => l.trimStart().startsWith("- ");
+	const out = lines.filter(l => !(isLesson(l) && l.trim() === line));
+	const firstBullet = out.findIndex(isLesson);
+	if (firstBullet === -1) out.push(line);
+	else out.splice(firstBullet, 0, line);
+	let lessonCount = 0;
+	for (const l of out) if (isLesson(l)) lessonCount++;
+	for (let i = out.length - 1; i >= 0 && lessonCount > MAX_LEARNED_LESSONS; i--) {
+		if (isLesson(out[i])) {
+			out.splice(i, 1);
+			lessonCount--;
 		}
 	}
-	const lessons = [line, ...priorLessons].slice(0, MAX_LEARNED_LESSONS);
-	const output = [...preserved, ...lessons].join("\n").trim();
-	await Bun.write(filePath, `${output}\n`);
+	await Bun.write(filePath, `${out.join("\n")}\n`);
 }
 
 /**

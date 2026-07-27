@@ -258,7 +258,7 @@ describe("learned-lesson read-back", () => {
 		expect(out).toContain("[REDACTED]");
 	});
 
-	it("preserves non-list content across subsequent lesson saves", async () => {
+	it("preserves non-list content and stays byte-idempotent across saves", async () => {
 		const settings = Settings.isolated({ "memory.backend": "local" });
 		const root = getMemoryRoot(agentDir, settings.getCwd());
 		// Hand-edit learned.md with a header, prose, and blank lines
@@ -267,19 +267,35 @@ describe("learned-lesson read-back", () => {
 			path.join(root, "learned.md"),
 			"# Project Lessons\n\nRemember these conventions:\n\n- existing 1\n- existing 2\n",
 		);
-		// Save a new lesson — must not destroy the header or prose.
+		// Save a new lesson — must not destroy the header or prose, and the
+		// new lesson lands newest-first at the head of the bullet run.
 		await saveLearnedLesson(agentDir, settings.getCwd(), { content: "new lesson" });
-		const raw = await Bun.file(path.join(root, "learned.md")).text();
-		expect(raw).toContain("# Project Lessons");
-		expect(raw).toContain("Remember these conventions:");
-		expect(raw).toContain("- new lesson");
-		expect(raw).toContain("- existing 1");
-		expect(raw).toContain("- existing 2");
-		// Dedup: saving the same lesson twice should not duplicate it.
+		const expected =
+			"# Project Lessons\n\nRemember these conventions:\n\n- new lesson\n- existing 1\n- existing 2\n";
+		expect(await Bun.file(path.join(root, "learned.md")).text()).toBe(expected);
+		// Saving the same lesson again is byte-idempotent: no duplicate entry
+		// and no blank-line growth from the trailing-newline split artifact.
 		await saveLearnedLesson(agentDir, settings.getCwd(), { content: "new lesson" });
-		const deduped = await Bun.file(path.join(root, "learned.md")).text();
-		const count = [...deduped.matchAll(/^- new lesson$/gm)].length;
-		expect(count).toBe(1);
+		expect(await Bun.file(path.join(root, "learned.md")).text()).toBe(expected);
+	});
+
+	it("keeps mixed heading/bullet relative order across saves", async () => {
+		const settings = Settings.isolated({ "memory.backend": "local" });
+		const root = getMemoryRoot(agentDir, settings.getCwd());
+		const file = path.join(root, "learned.md");
+		// Bullets scoped under distinct headings, plus a trailing footer line:
+		// a save must never hoist headings above bullets or re-scope entries.
+		await Bun.write(file, "# Python\n- use uv\n\n# TypeScript\n- use Bun\n\nFooter note.\n");
+		await saveLearnedLesson(agentDir, settings.getCwd(), { content: "prefer bun test" });
+		expect(await Bun.file(file).text()).toBe(
+			"# Python\n- prefer bun test\n- use uv\n\n# TypeScript\n- use Bun\n\nFooter note.\n",
+		);
+		// Re-saving a bullet that lives under a later heading moves it to the
+		// newest-first slot without disturbing the surrounding structure.
+		await saveLearnedLesson(agentDir, settings.getCwd(), { content: "use Bun" });
+		expect(await Bun.file(file).text()).toBe(
+			"# Python\n- use Bun\n- prefer bun test\n- use uv\n\n# TypeScript\n\nFooter note.\n",
+		);
 	});
 
 	it("drops learned lessons when the summary already fills the injection budget", async () => {
