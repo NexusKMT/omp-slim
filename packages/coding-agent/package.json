@@ -106,6 +106,7 @@
   "files": [
     "src",
     "dist/cli.js",
+    "dist/CHANGELOG-*.md",
     "dist/*.node",
     "scripts",
     "examples",
