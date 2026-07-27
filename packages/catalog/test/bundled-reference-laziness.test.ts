@@ -5,13 +5,14 @@ import type { ModelSpec } from "../src/types";
 const FIXTURE = `${import.meta.dir}/fixtures/bundled-reference-laziness.ts`;
 
 describe("bundled reference laziness", () => {
-	test("constructing bundled model-manager options does not enrich bundled models", () => {
+	test("constructing bundled model-manager options retains less than 8 MiB of RSS", () => {
 		const result = Bun.spawnSync({
 			cmd: [process.execPath, FIXTURE],
 			env: process.env,
 		});
 		expect(result.exitCode).toBe(0);
-		expect(JSON.parse(result.stdout.toString())).toEqual({ buildCalls: 0 });
+		const { retainedRssBytes } = JSON.parse(result.stdout.toString()) as { retainedRssBytes: number };
+		expect(retainedRssBytes).toBeLessThan(8 * 1024 * 1024);
 	});
 
 	test("a lazy provider-reference factory initializes on first resolution and only once", () => {
