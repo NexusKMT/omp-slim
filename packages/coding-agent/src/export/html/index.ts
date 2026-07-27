@@ -1,5 +1,4 @@
 import * as fs from "node:fs";
-import * as fsPromises from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentState } from "@oh-my-pi/pi-agent-core";
 import { APP_NAME, isEnoent } from "@oh-my-pi/pi-utils";
@@ -210,7 +209,7 @@ async function collectSubSessionsFromDir(
 ): Promise<void> {
 	let names: string[];
 	try {
-		names = await fsPromises.readdir(dir);
+		names = await fs.promises.readdir(dir);
 	} catch (err) {
 		if (isEnoent(err)) return;
 		throw err;

@@ -160,9 +160,11 @@ describe("HTML export template", () => {
 		]);
 		expect(exitCode, stderr).toBe(0);
 		const [packResult] = JSON.parse(stdout) as NpmPackResult[];
-		const packedAssets = packResult!.files.map(file => file.path).filter(filePath =>
-			/^dist\/(?:template-[^.]+\.(?:css|html|js)|tool-views\.generated-[^.]+\.js)$/.test(filePath),
-		);
+		const packedAssets = packResult!.files
+			.map(file => file.path)
+			.filter(filePath =>
+				/^dist\/(?:template-[^.]+\.(?:css|html|js)|tool-views\.generated-[^.]+\.js)$/.test(filePath),
+			);
 		expect(packedAssets).toHaveLength(4);
 		expect(packedAssets.filter(filePath => /^dist\/template-[^.]+\.css$/.test(filePath))).toHaveLength(1);
 		expect(packedAssets.filter(filePath => /^dist\/template-[^.]+\.html$/.test(filePath))).toHaveLength(1);
