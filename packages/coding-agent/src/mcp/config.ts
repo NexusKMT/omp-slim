@@ -97,14 +97,6 @@ export async function loadAllMCPConfigs(cwd: string, options?: LoadMCPConfigsOpt
 	const filterExa = options?.filterExa ?? true;
 	const filterBrowser = options?.filterBrowser ?? false;
 
-	// Load MCP servers via capability system
-	const result = await loadCapability<MCPServer>(mcpCapability.id, { cwd });
-
-	// Filter out project-level configs if disabled
-	const servers = enableProjectConfig
-		? result.items
-		: result.items.filter(server => server._source.level !== "project");
-
 	// Load user-level disable/force-enable lists. The denylist always wins; the
 	// allowlist overrides a non-writable source config's `enabled: false`.
 	const userPath = getMCPConfigPath("user", cwd);
@@ -112,14 +104,25 @@ export async function loadAllMCPConfigs(cwd: string, options?: LoadMCPConfigsOpt
 		readDisabledServers(userPath).then(list => new Set(list)),
 		readEnabledServers(userPath).then(list => new Set(list)),
 	]);
-	// Convert to legacy format and preserve source metadata
+
+	// Apply every per-name and per-scope exclusion BEFORE the capability layer's
+	// equivalence deduplication. Otherwise a disabled or out-of-scope server can
+	// shadow a differently-named but connection-equivalent enabled server during
+	// dedup and then be removed here, leaving no connection at all.
+	const includeServer = (server: MCPServer & { _source: SourceMeta }): boolean => {
+		if (!enableProjectConfig && server._source.level === "project") return false;
+		if (disabledServers.has(server.name)) return false;
+		if (server.enabled === false && !forcedEnabled.has(server.name)) return false;
+		return true;
+	};
+
+	const result = await loadCapability<MCPServer>(mcpCapability.id, { cwd, filter: includeServer });
+
+	// Convert to legacy format and preserve source metadata.
 	let configs: Record<string, MCPServerConfig> = {};
 	let sources: Record<string, SourceMeta> = {};
-	for (const server of servers) {
-		const config = convertToLegacyConfig(server);
-		if (disabledServers.has(server.name)) continue;
-		if (config.enabled === false && !forcedEnabled.has(server.name)) continue;
-		configs[server.name] = config;
+	for (const server of result.items) {
+		configs[server.name] = convertToLegacyConfig(server);
 		sources[server.name] = server._source;
 	}
 

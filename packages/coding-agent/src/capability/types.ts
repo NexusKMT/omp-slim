@@ -59,7 +59,7 @@ export interface Provider<T> {
 /**
  * Options for loading a capability.
  */
-export interface LoadOptions {
+export interface LoadOptions<T = unknown> {
 	/** Only use these providers (by ID). Default: all registered */
 	providers?: string[];
 	/** Exclude these providers (by ID). Default: none */
@@ -72,6 +72,13 @@ export interface LoadOptions {
 	includeDisabled?: boolean;
 	/** Explicit disabled extension IDs to apply instead of settings. */
 	disabledExtensions?: string[];
+	/**
+	 * Drop items before deduplication. Use when a per-name or scope filter must
+	 * precede equivalence collapse, so a to-be-filtered item cannot shadow a
+	 * differently-keyed but equivalent survivor and then be removed downstream,
+	 * leaving none. Receives the item with its attached `_source`.
+	 */
+	filter?(item: T & { _source: SourceMeta }): boolean;
 }
 
 /**
@@ -121,6 +128,9 @@ export interface Capability<T> {
 	 * Return undefined to never deduplicate (all items kept).
 	 */
 	key(item: T): string | undefined;
+
+	/** Treat items with different keys as aliases; the first equivalent item wins. */
+	equivalent?(left: T, right: T): boolean;
 
 	/**
 	 * Optional validation. Return error message if invalid, undefined if valid.
