@@ -725,6 +725,62 @@ describe("OpenAI GA computer contract", () => {
 		expect(JSON.stringify(replay)).toContain("file_codex_computer");
 	});
 
+	test("retains Codex reasoning identity when computer demotion leaves native response IDs", () => {
+		const codex = model("openai-codex-responses");
+		const compacted = {
+			role: "user" as const,
+			content: "compacted history",
+			providerPayload: {
+				type: "openaiResponsesHistory" as const,
+				provider: "openai-codex",
+				items: [
+					{
+						type: "reasoning",
+						id: "rs_codex_mixed",
+						summary: [],
+						encrypted_content: "encrypted-codex-mixed-reasoning",
+					},
+					{
+						type: "message",
+						id: "msg_codex_mixed",
+						role: "assistant",
+						status: "completed",
+						content: [{ type: "output_text", text: "Inspecting the screen." }],
+					},
+					{
+						type: "function_call",
+						id: "fc_codex_mixed",
+						call_id: "call_codex_mixed_tool",
+						name: "inspect",
+						arguments: "{}",
+						status: "completed",
+					},
+					{
+						type: "computer_call",
+						id: "item_codex_mixed_computer",
+						call_id: "call_codex_mixed_computer",
+						actions: [{ type: "screenshot" }],
+						pending_safety_checks: [],
+						status: "completed",
+					},
+					{
+						type: "computer_call_output",
+						call_id: "call_codex_mixed_computer",
+						output: { type: "computer_screenshot", file_id: "file_codex_mixed_computer" },
+						acknowledged_safety_checks: [],
+					},
+				],
+			},
+			timestamp: Date.now(),
+		};
+
+		const replay = convertCodexResponsesMessages(codex, { messages: [compacted] });
+		expect(replay).toContainEqual(expect.objectContaining({ type: "reasoning", id: "rs_codex_mixed" }));
+		expect(replay).toContainEqual(expect.objectContaining({ type: "message", id: "msg_codex_mixed" }));
+		expect(replay).toContainEqual(expect.objectContaining({ type: "function_call", id: "fc_codex_mixed" }));
+		expect(replay.some(item => item.type === "computer_call" || item.type === "computer_call_output")).toBe(false);
+	});
+
 	test("unrolls internal computer calls and screenshot results for Codex replay", () => {
 		const codex = model("openai-codex-responses");
 		const call = {

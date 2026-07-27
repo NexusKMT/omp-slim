@@ -199,16 +199,49 @@ export function sanitizeOpenAIResponsesHistoryItemsForReplay(
 	});
 }
 
-/** Strip only reasoning IDs whose native computer calls will be demoted. */
+function collectOpenAIResponsesReasoningItemsWithSurvivingOutputIds(
+	items: Array<Record<string, unknown>>,
+): Set<Record<string, unknown>> {
+	const retainedReasoningItems = new Set<Record<string, unknown>>();
+	let responseReasoningItems: Array<Record<string, unknown>> = [];
+	let hasSurvivingOutputId = false;
+	const finishResponse = (): void => {
+		if (hasSurvivingOutputId) {
+			for (const reasoningItem of responseReasoningItems) retainedReasoningItems.add(reasoningItem);
+		}
+		responseReasoningItems = [];
+		hasSurvivingOutputId = false;
+	};
+
+	for (const item of items) {
+		if (isOpenAIResponsesClientInputBoundary(item)) {
+			finishResponse();
+		} else if (item.type === "reasoning") {
+			responseReasoningItems.push(item);
+		} else if (item.type !== "computer_call" && typeof item.id === "string") {
+			hasSurvivingOutputId = true;
+		}
+	}
+	finishResponse();
+	return retainedReasoningItems;
+}
+
+/** Strip reasoning IDs whose only linked native output is a computer call that will be demoted. */
 export function stripOpenAIResponsesComputerLinkedReasoningIdsForReplay(items: ResponseInput): ResponseInput {
 	const records = items as unknown as Array<Record<string, unknown>>;
 	const linkedReasoningItems = collectOpenAIResponsesComputerLinkedReasoningItems(records, false);
+	const retainedReasoningItems = collectOpenAIResponsesReasoningItemsWithSurvivingOutputIds(records);
 	let sanitized: ResponseInput | undefined;
 
 	for (let index = 0; index < items.length; index++) {
 		const item = items[index]!;
 		const record = records[index]!;
-		if (item.type !== "reasoning" || typeof record.id !== "string" || !linkedReasoningItems.has(record)) {
+		if (
+			item.type !== "reasoning" ||
+			typeof record.id !== "string" ||
+			!linkedReasoningItems.has(record) ||
+			retainedReasoningItems.has(record)
+		) {
 			sanitized?.push(item);
 			continue;
 		}
