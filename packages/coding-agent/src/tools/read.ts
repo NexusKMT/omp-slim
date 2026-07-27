@@ -65,6 +65,7 @@ import {
 	webpExclusionForModel,
 } from "../utils/image-loading";
 import { CONVERTIBLE_EXTENSIONS, convertFileWithMarkit } from "../utils/markit";
+import { isSampleProfilePath, renderSampleProfile } from "../utils/sample-profile";
 import { type ArchiveReader, formatArchiveEntryLines, openArchive, parseArchivePathCandidates } from "../utils/zip";
 import { buildDirectoryTree, type DirectoryTree } from "../workspace-tree";
 import {
@@ -155,6 +156,8 @@ function getSummaryParseCache(session: object): LRUCache<string, SummaryResult |
 }
 
 const MAX_SUMMARY_BYTES = 2 * 1024 * 1024;
+/** Largest `*.sample.txt` report converted to a bottleneck summary; bigger files read as plain text. */
+const MAX_SAMPLE_PROFILE_BYTES = 32 * 1024 * 1024;
 const MAX_SUMMARY_LINES = 20_000;
 const MAX_ARTIFACT_RAW_INLINE_BYTES = DEFAULT_MAX_BYTES;
 /**
@@ -2432,6 +2435,34 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		const mimeType = imageMetadata?.mimeType;
 		const ext = path.extname(absolutePath).toLowerCase();
 		const shouldConvertWithMarkit = CONVERTIBLE_EXTENSIONS.has(ext);
+
+		// macOS `sample` call-tree reports: replace the 10k-line mangled call
+		// graph with a demangled bottleneck summary (hot paths, idle threads,
+		// top self samples). `:raw` reads the original bytes; text that merely
+		// wears the extension falls through to the plain-text path.
+		if (
+			!mimeType &&
+			isSampleProfilePath(absolutePath) &&
+			!isRawSelector(parsed) &&
+			fileSize <= MAX_SAMPLE_PROFILE_BYTES
+		) {
+			const rendered = renderSampleProfile(await Bun.file(absolutePath).text());
+			if (rendered) {
+				if (isMultiRange(parsed) && parsed.kind === "lines") {
+					return this.#buildInMemoryMultiRangeResult(rendered, parsed.ranges, {
+						details: { resolvedPath: absolutePath },
+						sourcePath: absolutePath,
+						entityLabel: "profile summary",
+					});
+				}
+				const { offset, limit } = selToOffsetLimit(parsed);
+				return this.#buildInMemoryTextResult(rendered, offset, limit, {
+					details: { resolvedPath: absolutePath },
+					sourcePath: absolutePath,
+					entityLabel: "profile summary",
+				});
+			}
+		}
 		// Read the file based on type
 		let content: Array<TextContent | ImageContent> | undefined;
 		let details: ReadToolDetails = {};
