@@ -37,6 +37,7 @@ import type {
 	ExtensionRuntime,
 	ExtensionShortcut,
 	ExtensionUIContext,
+	ExtensionUIDialogOptions,
 	InputEvent,
 	InputEventResult,
 	MessageRenderer,
@@ -105,6 +106,35 @@ function handlerTimeoutForEvent(eventType: string): number {
 const EXTENSION_HANDLER_TIMEOUT = Symbol("extensionHandlerTimeout");
 const EXTENSION_HANDLER_ABORTED = Symbol("extensionHandlerAborted");
 
+function attachHandlerSignal(
+	dialogOptions: ExtensionUIDialogOptions | undefined,
+	handlerSignal: AbortSignal,
+): ExtensionUIDialogOptions {
+	if (!dialogOptions) return { signal: handlerSignal };
+	if (!dialogOptions.signal) return { ...dialogOptions, signal: handlerSignal };
+	if (dialogOptions.signal === handlerSignal) return dialogOptions;
+	return { ...dialogOptions, signal: AbortSignal.any([dialogOptions.signal, handlerSignal]) };
+}
+
+function createHandlerUIContext(ui: ExtensionUIContext, handlerSignal: AbortSignal): ExtensionUIContext {
+	const askDialog = ui.askDialog;
+	return {
+		...ui,
+		select: (title, options, dialogOptions) =>
+			ui.select(title, options, attachHandlerSignal(dialogOptions, handlerSignal)),
+		confirm: (title, message, dialogOptions) =>
+			ui.confirm(title, message, attachHandlerSignal(dialogOptions, handlerSignal)),
+		input: (title, placeholder, dialogOptions) =>
+			ui.input(title, placeholder, attachHandlerSignal(dialogOptions, handlerSignal)),
+		askDialog: askDialog
+			? (questions, dialogOptions) =>
+					askDialog.call(ui, questions, attachHandlerSignal(dialogOptions, handlerSignal))
+			: undefined,
+		editor: (title, prefill, dialogOptions, editorOptions) =>
+			ui.editor(title, prefill, attachHandlerSignal(dialogOptions, handlerSignal), editorOptions),
+	};
+}
+
 /**
  * Race `work` against a `timeoutMs` budget and optional cancellation signal,
  * clearing the timer and abort listener as soon as one branch settles.
@@ -118,19 +148,36 @@ const EXTENSION_HANDLER_ABORTED = Symbol("extensionHandlerAborted");
  * can `clearTimeout` on the winning branch.
  */
 async function raceHandlerWithTimeout<T>(
-	work: Promise<T>,
+	work: (handlerSignal: AbortSignal) => Promise<T> | T,
 	timeoutMs: number,
 	signal?: AbortSignal,
 ): Promise<T | typeof EXTENSION_HANDLER_TIMEOUT | typeof EXTENSION_HANDLER_ABORTED> {
 	if (signal?.aborted) return EXTENSION_HANDLER_ABORTED;
+
+	const timeoutController = new AbortController();
+	const handlerSignal = signal ? AbortSignal.any([signal, timeoutController.signal]) : timeoutController.signal;
+	const workPromise = Promise.resolve(work(handlerSignal));
 	const { promise: interruptPromise, resolve: resolveInterrupt } = Promise.withResolvers<
 		typeof EXTENSION_HANDLER_TIMEOUT | typeof EXTENSION_HANDLER_ABORTED
 	>();
-	const timer = setTimeout(() => resolveInterrupt(EXTENSION_HANDLER_TIMEOUT), timeoutMs);
+	const timer = setTimeout(() => {
+		timeoutController.abort(new DOMException(`Handler timed out after ${timeoutMs}ms`, "TimeoutError"));
+		resolveInterrupt(EXTENSION_HANDLER_TIMEOUT);
+	}, timeoutMs);
 	const onAbort = () => resolveInterrupt(EXTENSION_HANDLER_ABORTED);
 	signal?.addEventListener("abort", onAbort, { once: true });
 	try {
-		return await Promise.race([work, interruptPromise]);
+		const result = await Promise.race([workPromise, interruptPromise]);
+		if (result === EXTENSION_HANDLER_TIMEOUT || result === EXTENSION_HANDLER_ABORTED) {
+			await Promise.race([
+				workPromise.then(
+					() => undefined,
+					() => undefined,
+				),
+				Bun.sleep(0),
+			]);
+		}
+		return result;
 	} finally {
 		clearTimeout(timer);
 		signal?.removeEventListener("abort", onAbort);
@@ -637,7 +684,15 @@ export class ExtensionRunner {
 				: undefined;
 		if (signal?.aborted) return undefined;
 		try {
-			const handlerResult = await raceHandlerWithTimeout(Promise.resolve(handler(event, ctx)), timeoutMs, signal);
+			const handlerResult = await raceHandlerWithTimeout(
+				handlerSignal =>
+					handler(event, {
+						...ctx,
+						ui: createHandlerUIContext(ctx.ui, handlerSignal),
+					}),
+				timeoutMs,
+				signal,
+			);
 			if (handlerResult === EXTENSION_HANDLER_ABORTED) return undefined;
 			if (handlerResult === EXTENSION_HANDLER_TIMEOUT) {
 				const error = `handler timed out after ${timeoutMs}ms`;
@@ -799,7 +854,14 @@ export class ExtensionRunner {
 
 			for (const handler of handlers) {
 				try {
-					const handlerResult = await raceHandlerWithTimeout(Promise.resolve(handler(event, ctx)), timeoutMs);
+					const handlerResult = await raceHandlerWithTimeout(
+						handlerSignal =>
+							handler(event, {
+								...ctx,
+								ui: createHandlerUIContext(ctx.ui, handlerSignal),
+							}),
+						timeoutMs,
+					);
 
 					if (handlerResult === EXTENSION_HANDLER_TIMEOUT) {
 						const error = `handler timed out after ${timeoutMs}ms`;
