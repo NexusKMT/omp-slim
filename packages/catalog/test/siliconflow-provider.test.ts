@@ -24,6 +24,33 @@ function withEnv(key: string, value: string, run: () => void): void {
 	}
 }
 
+const MODELS_DEV_STUB_PAYLOAD = {
+	siliconflow: {
+		models: {
+			"zai-org/GLM-5.1": {
+				name: "GLM-5.1",
+				tool_call: true,
+				reasoning: true,
+				modalities: { input: ["text"] },
+				limit: { context: 205000, output: 32768 },
+				cost: { input: 1.4, output: 4.4 },
+			},
+		},
+	},
+	"siliconflow-cn": {
+		models: {
+			"Pro/zai-org/GLM-5.1": {
+				name: "GLM-5.1 Pro",
+				tool_call: true,
+				reasoning: true,
+				modalities: { input: ["text"] },
+				limit: { context: 205000, output: 32768 },
+				cost: { input: 2.8, output: 8.8 },
+			},
+		},
+	},
+};
+
 describe("siliconflow built-in providers", () => {
 	test("registers dynamic-authoritative runtime descriptors with env-key discovery", () => {
 		const intl = PROVIDER_DESCRIPTORS.find(item => item.providerId === "siliconflow");
@@ -69,25 +96,27 @@ describe("siliconflow built-in providers", () => {
 		});
 	});
 
-	test("dynamic discovery drops non-chat models and keeps chat completions entries", async () => {
-		const seen: { url?: string; authorization?: string } = {};
+	test("dynamic discovery filters non-chat ids and hydrates metadata from models.dev and bundled references", async () => {
+		const seen: { urls: string[]; authorization?: string } = { urls: [] };
 		const stubFetch: FetchImpl = async (input, init) => {
-			seen.url = String(input);
-			const headers = new Headers(init?.headers);
-			seen.authorization = headers.get("Authorization") ?? undefined;
+			const url = String(input);
+			seen.urls.push(url);
+			if (url.startsWith("https://models.dev/")) {
+				return new Response(JSON.stringify(MODELS_DEV_STUB_PAYLOAD), {
+					status: 200,
+					headers: { "content-type": "application/json" },
+				});
+			}
+			seen.authorization = new Headers(init?.headers).get("Authorization") ?? undefined;
 			const payload = {
 				object: "list",
 				data: [
-					{ id: "Qwen/Qwen3.5-397B-A17B", object: "model", created: 0, owned_by: "siliconflow" },
 					{ id: "zai-org/GLM-5.1", object: "model", created: 0, owned_by: "siliconflow" },
+					{ id: "deepseek-ai/DeepSeek-V4-Pro", object: "model", created: 0, owned_by: "siliconflow" },
 					{ id: "BAAI/bge-m3", object: "model", created: 0, owned_by: "siliconflow" },
-					{ id: "BAAI/bge-reranker-v2-m3", object: "model", created: 0, owned_by: "siliconflow" },
-					{ id: "Qwen/Qwen3-Embedding-8B", object: "model", created: 0, owned_by: "siliconflow" },
 					{ id: "Qwen/Qwen-Image", object: "model", created: 0, owned_by: "siliconflow" },
-					{ id: "stabilityai/stable-diffusion-3-5-large", object: "model", created: 0, owned_by: "sd" },
 					{ id: "Wan-AI/Wan2.2-T2V-A14B", object: "model", created: 0, owned_by: "siliconflow" },
 					{ id: "TeleAI/TeleSpeechASR", object: "model", created: 0, owned_by: "siliconflow" },
-					{ id: "FunAudioLLM/SenseVoiceSmall", object: "model", created: 0, owned_by: "siliconflow" },
 					{ id: "IndexTeam/IndexTTS-2", object: "model", created: 0, owned_by: "siliconflow" },
 				],
 			};
@@ -101,21 +130,48 @@ describe("siliconflow built-in providers", () => {
 		expect(options.dynamicModelsAuthoritative).toBe(true);
 		const models = await options.fetchDynamicModels?.();
 		expect(models).not.toBeNull();
-		const ids = (models ?? []).map(model => model.id);
-		expect(ids).toEqual(["Qwen/Qwen3.5-397B-A17B", "zai-org/GLM-5.1"]);
-		const [first] = models ?? [];
-		expect(first?.provider).toBe("siliconflow");
-		expect(first?.api).toBe("openai-completions");
-		expect(first?.baseUrl).toBe("https://api.siliconflow.com/v1");
-		expect(seen.url).toBe("https://api.siliconflow.com/v1/models");
+		expect((models ?? []).map(model => model.id)).toEqual(["deepseek-ai/DeepSeek-V4-Pro", "zai-org/GLM-5.1"]);
+
+		// Tier 1: models.dev carries the id — pricing, limits, and reasoning hydrate.
+		const glm = models?.find(model => model.id === "zai-org/GLM-5.1");
+		expect(glm?.reasoning).toBe(true);
+		expect(glm?.contextWindow).toBe(205000);
+		expect(glm?.maxTokens).toBe(32768);
+		expect(glm?.cost).toEqual({ input: 1.4, output: 4.4, cacheRead: 0, cacheWrite: 0 });
+		expect(glm?.provider).toBe("siliconflow");
+		expect(glm?.api).toBe("openai-completions");
+		expect(glm?.baseUrl).toBe("https://api.siliconflow.com/v1");
+
+		// Tier 2: absent from models.dev — reasoning recovers from the bundled
+		// upstream/reseller reference, but provider-specific pricing and limits
+		// stay unknown instead of inheriting another host's values.
+		const v4pro = models?.find(model => model.id === "deepseek-ai/DeepSeek-V4-Pro");
+		expect(v4pro?.reasoning).toBe(true);
+		expect(v4pro?.cost.input).toBe(0);
+		expect(v4pro?.contextWindow).toBeNull();
+		expect(v4pro?.maxTokens).toBeNull();
+
+		expect(seen.urls).toContain("https://api.siliconflow.com/v1/models");
+		expect(seen.urls.some(url => url.startsWith("https://models.dev/"))).toBe(true);
 		expect(seen.authorization).toBe("Bearer sk-test");
 	});
 
-	test("cn variant discovers against the China endpoint", async () => {
-		const seen: { url?: string } = {};
+	test("cn variant discovers against the China endpoint with cn models.dev pricing", async () => {
+		const seen: { urls: string[] } = { urls: [] };
 		const stubFetch: FetchImpl = async input => {
-			seen.url = String(input);
-			return new Response(JSON.stringify({ object: "list", data: [] }), {
+			const url = String(input);
+			seen.urls.push(url);
+			if (url.startsWith("https://models.dev/")) {
+				return new Response(JSON.stringify(MODELS_DEV_STUB_PAYLOAD), {
+					status: 200,
+					headers: { "content-type": "application/json" },
+				});
+			}
+			const payload = {
+				object: "list",
+				data: [{ id: "Pro/zai-org/GLM-5.1", object: "model", created: 0, owned_by: "siliconflow" }],
+			};
+			return new Response(JSON.stringify(payload), {
 				status: 200,
 				headers: { "content-type": "application/json" },
 			});
@@ -123,7 +179,12 @@ describe("siliconflow built-in providers", () => {
 
 		const options = siliconflowCnModelManagerOptions({ apiKey: "sk-test", fetch: stubFetch });
 		const models = await options.fetchDynamicModels?.();
-		expect(models).toEqual([]);
-		expect(seen.url).toBe("https://api.siliconflow.cn/v1/models");
+		expect(models).toHaveLength(1);
+		const pro = models?.[0];
+		expect(pro?.id).toBe("Pro/zai-org/GLM-5.1");
+		expect(pro?.reasoning).toBe(true);
+		expect(pro?.cost).toEqual({ input: 2.8, output: 8.8, cacheRead: 0, cacheWrite: 0 });
+		expect(pro?.baseUrl).toBe("https://api.siliconflow.cn/v1");
+		expect(seen.urls).toContain("https://api.siliconflow.cn/v1/models");
 	});
 });

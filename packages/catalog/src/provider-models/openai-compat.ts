@@ -6,6 +6,7 @@ import {
 } from "../discovery/openai-compatible";
 import { Effort, THINKING_EFFORTS } from "../effort";
 import { FIREWORKS_FAST_SUFFIX, toFireworksPublicModelId } from "../fireworks-model-id";
+import { getBundledModelReferenceIndex } from "../identity/bundled";
 import {
 	anthropicModelSupportsThinking,
 	isGlmVisionModelId,
@@ -14,6 +15,7 @@ import {
 	isKimiModelId,
 	isReasoningGlmModelId,
 } from "../identity/family";
+import { resolveModelReference } from "../identity/reference";
 import type { ModelManagerOptions } from "../model-manager";
 import { getBundledModels } from "../models";
 import type { Api, FetchImpl, Model, ModelSpec, OpenAICompat, Provider, ThinkingConfig } from "../types";
@@ -1484,6 +1486,42 @@ export function isLikelySiliconFlowChatModelId(id: string): boolean {
 	return !SILICONFLOW_NON_CHAT_MODEL_TOKENS.some(token => normalized.includes(token));
 }
 
+/**
+ * models.dev mappings consulted ONLY as a runtime metadata reference during
+ * dynamic discovery. They are deliberately absent from
+ * `MODELS_DEV_PROVIDER_DESCRIPTORS` so `generate-models.ts` never bundles
+ * SiliconFlow models — the live endpoint decides which models exist, while
+ * these entries hydrate the pricing, limits, and reasoning metadata that the
+ * endpoint's bare `{id}` rows do not carry. No filter: the join against live
+ * discovered ids already restricts hydration to chat models.
+ */
+const SILICONFLOW_MODELS_DEV_DESCRIPTORS: readonly ModelsDevProviderDescriptor[] = [
+	openAiCompletionsDescriptor("siliconflow", "siliconflow", "https://api.siliconflow.com/v1", {
+		filterModel: () => true,
+	}),
+	openAiCompletionsDescriptor("siliconflow-cn", "siliconflow-cn", "https://api.siliconflow.cn/v1", {
+		filterModel: () => true,
+	}),
+];
+
+async function loadSiliconFlowModelsDevReferences(
+	providerId: "siliconflow" | "siliconflow-cn",
+	fetchImpl?: FetchImpl,
+): Promise<Map<string, ModelSpec<"openai-completions">>> {
+	const descriptor = SILICONFLOW_MODELS_DEV_DESCRIPTORS.find(d => d.providerId === providerId);
+	if (!descriptor) {
+		return new Map();
+	}
+	try {
+		const payload = await fetchModelsDevPayload(fetchImpl);
+		return createModelsDevReferenceMap<"openai-completions">(
+			mapModelsDevToModels(payload as Record<string, unknown>, [descriptor]),
+		);
+	} catch {
+		return new Map();
+	}
+}
+
 function createSiliconFlowModelManagerOptions(
 	providerId: "siliconflow" | "siliconflow-cn",
 	defaultBaseUrl: string,
@@ -1491,19 +1529,43 @@ function createSiliconFlowModelManagerOptions(
 ): ModelManagerOptions<"openai-completions"> {
 	const apiKey = config?.apiKey;
 	const baseUrl = config?.baseUrl ?? defaultBaseUrl;
+	const canonicalReferences = getBundledModelReferenceIndex();
 	return {
 		providerId,
 		dynamicModelsAuthoritative: true,
 		...(apiKey && {
-			fetchDynamicModels: () =>
-				fetchOpenAICompatibleModels({
+			fetchDynamicModels: async () => {
+				const modelsDevReferences = await loadSiliconFlowModelsDevReferences(providerId, config?.fetch);
+				return fetchOpenAICompatibleModels({
 					api: "openai-completions",
 					provider: providerId,
 					baseUrl,
 					apiKey,
 					filterModel: (_entry, model) => isLikelySiliconFlowChatModelId(model.id),
+					mapModel: (entry, defaults) => {
+						const modelsDevReference = modelsDevReferences.get(defaults.id);
+						if (modelsDevReference) {
+							return mapWithBundledReference(entry, defaults, modelsDevReference);
+						}
+						// ids missing from models.dev (new launches) still recover intrinsic
+						// capabilities from any bundled upstream/reseller entry — but never
+						// its pricing or limits, which are provider-specific.
+						const canonical = resolveModelReference(defaults.id, canonicalReferences) as
+							| ModelSpec<"openai-completions">
+							| undefined;
+						if (!canonical) {
+							return defaults;
+						}
+						return {
+							...defaults,
+							name: toModelName(entry.name, canonical.name ?? defaults.name),
+							reasoning: canonical.reasoning,
+							input: canonical.input,
+						};
+					},
 					fetch: config?.fetch,
-				}),
+				});
+			},
 		}),
 	};
 }
