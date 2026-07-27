@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed agent shell commands inheriting variables silently loaded from the launch directory's `.env`; OMP can still use project dotenv values for its own configuration, while commands receive only the parent environment and explicit tool overrides ([#6813](https://github.com/can1357/oh-my-pi/issues/6813)).
+
 ## [17.1.6] - 2026-07-27
 
 ### Added

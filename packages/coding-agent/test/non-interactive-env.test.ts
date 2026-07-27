@@ -61,9 +61,10 @@ describe("buildNonInteractiveEnv", () => {
 	});
 });
 
-it("keeps launch .env.local values out of child shell config", async () => {
-	const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "omp-env-local-"));
+it("keeps launch dotenv values out of child shell config", async () => {
+	const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "omp-env-"));
 	try {
+		await Bun.write(path.join(tmp, ".env"), "TEST_ENV_FROM_DOTENV=loaded-by-omp\n");
 		await Bun.write(
 			path.join(tmp, ".env.local"),
 			"CONVEX_DEPLOYMENT=anonymous:root-local\nCONVEX_URL=http://127.0.0.1:3210\n",
@@ -73,6 +74,7 @@ it("keeps launch .env.local values out of child shell config", async () => {
 			`import { getShellConfig } from ${JSON.stringify(procmgrPath)};`,
 			"const env = getShellConfig().env;",
 			"console.log(JSON.stringify({",
+			"	project: env.TEST_ENV_FROM_DOTENV ?? null,",
 			"	deployment: env.CONVEX_DEPLOYMENT ?? null,",
 			"	url: env.CONVEX_URL ?? null,",
 			"	inherited: env.OMP_TEST_INHERITED_MARKER ?? null,",
@@ -98,11 +100,13 @@ it("keeps launch .env.local values out of child shell config", async () => {
 		expect(stderr).toBe("");
 		expect(exitCode).toBe(0);
 		const payload: {
+			project: string | null;
 			deployment: string | null;
 			url: string | null;
 			inherited: string | null;
 		} = JSON.parse(stdout);
 		expect(payload).toEqual({
+			project: null,
 			deployment: null,
 			url: null,
 			inherited: "keep-me",

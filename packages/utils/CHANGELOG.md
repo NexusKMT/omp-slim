@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed child shell environment filtering to drop launch-directory `.env` values in addition to Bun-autoloaded `.env.local` values ([#6813](https://github.com/can1357/oh-my-pi/issues/6813)).
+
 ## [17.1.5] - 2026-07-27
 
 ### Fixed

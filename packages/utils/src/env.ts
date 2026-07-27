@@ -53,15 +53,18 @@ export function filterProcessEnv(env: Record<string, string | undefined>): Recor
 	return result;
 }
 
-/** Filters process env for child shells without launch-cwd `.env.local` values. */
+/** Filters process env for child shells without launch-cwd dotenv values. */
 export function filterChildShellEnv(
 	env: Record<string, string | undefined>,
 	cwd: string = process.cwd(),
 ): Record<string, string> {
 	const result = filterProcessEnv(env);
-	const launchLocalEnv = parseEnvFile(path.join(cwd, ".env.local"));
-	for (const key in launchLocalEnv) {
-		if (result[key] === launchLocalEnv[key]) delete result[key];
+	const launchEnv = {
+		...parseEnvFile(path.join(cwd, ".env")),
+		...parseEnvFile(path.join(cwd, ".env.local")),
+	};
+	for (const key in launchEnv) {
+		if (result[key] === launchEnv[key]) delete result[key];
 	}
 	return result;
 }
