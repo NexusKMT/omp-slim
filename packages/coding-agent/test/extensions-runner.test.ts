@@ -1326,6 +1326,7 @@ describe("ExtensionRunner", () => {
 
 					export default function(pi) {
 						pi.on("tool_call", async (_event, ctx) => {
+							ctx.ui.notify("Waiting for confirmation");
 							await ctx.ui.confirm("High-risk command", "Allow this command?");
 							fs.writeFileSync(${JSON.stringify(markerPath)}, "settled");
 						});
@@ -1343,14 +1344,17 @@ describe("ExtensionRunner", () => {
 			);
 			const dialog = Promise.withResolvers<boolean>();
 			let dialogSignal: AbortSignal | undefined;
-			const uiContext: ExtensionUIContext = {
-				...runner.getUIContext(),
-				confirm: async (_title, _message, dialogOptions) => {
-					dialogSignal = dialogOptions?.signal;
-					dialogSignal?.addEventListener("abort", () => dialog.resolve(false), { once: true });
-					return await dialog.promise;
-				},
+			const notify = vi.fn<ExtensionUIContext["notify"]>();
+			const confirm: ExtensionUIContext["confirm"] = async (_title, _message, dialogOptions) => {
+				dialogSignal = dialogOptions?.signal;
+				dialogSignal?.addEventListener("abort", () => dialog.resolve(false), { once: true });
+				return await dialog.promise;
 			};
+			const uiPrototype = Object.create(runner.getUIContext(), {
+				confirm: { value: confirm },
+				notify: { value: notify },
+			});
+			const uiContext: ExtensionUIContext = Object.create(uiPrototype);
 			runner.initialize(
 				{
 					sendMessage: () => {},
@@ -1395,6 +1399,7 @@ describe("ExtensionRunner", () => {
 			await expect(wrapped.execute("tool-call-id", {})).rejects.toThrow(
 				`Extension ${extensionPath} timed out after 10ms`,
 			);
+			expect(notify).toHaveBeenCalledWith("Waiting for confirmation");
 
 			expect(dialogSignal?.aborted).toBe(true);
 			expect(fs.readFileSync(markerPath, "utf8")).toBe("settled");

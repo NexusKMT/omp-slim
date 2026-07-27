@@ -118,8 +118,7 @@ function attachHandlerSignal(
 
 function createHandlerUIContext(ui: ExtensionUIContext, handlerSignal: AbortSignal): ExtensionUIContext {
 	const askDialog = ui.askDialog;
-	return {
-		...ui,
+	const dialogMethods = {
 		select: (title, options, dialogOptions) =>
 			ui.select(title, options, attachHandlerSignal(dialogOptions, handlerSignal)),
 		confirm: (title, message, dialogOptions) =>
@@ -132,7 +131,23 @@ function createHandlerUIContext(ui: ExtensionUIContext, handlerSignal: AbortSign
 			: undefined,
 		editor: (title, prefill, dialogOptions, editorOptions) =>
 			ui.editor(title, prefill, attachHandlerSignal(dialogOptions, handlerSignal), editorOptions),
-	};
+	} satisfies Pick<ExtensionUIContext, "select" | "confirm" | "input" | "askDialog" | "editor">;
+	const delegatedMethods = new Map<PropertyKey, unknown>();
+
+	return new Proxy(ui, {
+		get(target, property) {
+			if (Object.hasOwn(dialogMethods, property)) {
+				return Reflect.get(dialogMethods, property, dialogMethods);
+			}
+			const cached = delegatedMethods.get(property);
+			if (cached) return cached;
+			const value: unknown = Reflect.get(target, property, target);
+			if (typeof value !== "function") return value;
+			const delegated: unknown = value.bind(target);
+			delegatedMethods.set(property, delegated);
+			return delegated;
+		},
+	});
 }
 
 /**
