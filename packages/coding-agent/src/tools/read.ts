@@ -897,9 +897,10 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 	/**
 	 * Re-evaluate the effective inspect_image state; it can flip when the model
 	 * or the `/vision` override changes after this tool was constructed. Keeps
-	 * the behavior branch and the advertised description in lockstep.
+	 * the behavior branch and the advertised description in lockstep. Called
+	 * per image read and by tool reconciliation before prompt rebuilds.
 	 */
-	#syncInspectImageState(): boolean {
+	syncInspectImageState(): boolean {
 		const active = isInspectImageToolActive(this.session);
 		if (active !== this.#inspectImageActive) {
 			this.#inspectImageActive = active;
@@ -1297,7 +1298,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		fileSize: number;
 	}): Promise<{ content: Array<TextContent | ImageContent>; details: ReadToolDetails; sourcePath: string }> {
 		const { readPath, absolutePath, mimeType, imageMetadata, fileSize } = options;
-		if (this.#syncInspectImageState()) {
+		if (this.syncInspectImageState()) {
 			const outputMime = imageMetadata?.mimeType ?? mimeType;
 			const metadataLines = [
 				"Image metadata:",

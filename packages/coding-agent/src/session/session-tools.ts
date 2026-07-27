@@ -413,22 +413,8 @@ export class SessionTools {
 		}
 
 		// inspect_image auto mode keys off model image capability, so a model
-		// switch can flip the tool either way. Only surface a notice when the
-		// visible tool set actually changed.
-		const visionBefore = this.getEnabledToolNames().includes("inspect_image");
-		const visionReconciled = await this.#reconcileInspectImageTool();
-		const visionAfter = this.getEnabledToolNames().includes("inspect_image");
-		if (visionReconciled && visionBefore !== visionAfter) {
-			const model = this.#host.model();
-			const modelName = model ? formatModelString(model) : "the current model";
-			this.#host.emitNotice(
-				"info",
-				visionAfter
-					? `inspect_image is now available: ${modelName} has no native image input.`
-					: `inspect_image is now hidden: ${modelName} supports image input natively. Override with /vision on.`,
-				"vision",
-			);
-		}
+		// switch can flip the tool either way.
+		await this.reconcileInspectImageAfterModelChange();
 	}
 
 	/** Enabled MCP tools in their current presentation partition. */
@@ -890,16 +876,22 @@ export class SessionTools {
 	 * (mode setting, `/vision` override, active-model image capability).
 	 * Mirrors {@link setComputerToolEnabled}: enabling builds the tool through
 	 * the config factory on first use and reuses the registry entry afterwards.
+	 * Idempotent — safe to call from every model/settings change path.
 	 *
 	 * @returns false when the tool should be active but this session cannot
 	 *   build it (e.g. restricted child sessions have no factory).
 	 */
-	async #reconcileInspectImageTool(): Promise<boolean> {
+	async reconcileInspectImageTool(): Promise<boolean> {
 		const expected = isInspectImageToolActive({
 			settings: this.#host.settings,
 			getActiveModel: () => this.#host.model(),
 			getInspectImageModeOverride: () => this.#host.getInspectImageModeOverride(),
 		});
+		// Keep the read tool's advertised description in sync with the effective
+		// state BEFORE any prompt rebuild below; its per-read behavior syncs
+		// lazily, which would otherwise leave stale guidance in the system prompt.
+		const readTool = this.#toolRegistry.get("read") as { syncInspectImageState?: () => boolean } | undefined;
+		readTool?.syncInspectImageState?.();
 		const active = this.getEnabledToolNames();
 		const isActive = active.includes("inspect_image");
 		if (expected === isActive) return true;
@@ -924,6 +916,28 @@ export class SessionTools {
 	}
 
 	/**
+	 * Reconciles inspect_image after a model change and surfaces a notice when
+	 * the visible tool set actually flipped. Called from every model-change
+	 * path — including retry-fallback switches that bypass
+	 * {@link syncAfterModelChange}.
+	 */
+	async reconcileInspectImageAfterModelChange(): Promise<void> {
+		const before = this.getEnabledToolNames().includes("inspect_image");
+		const reconciled = await this.reconcileInspectImageTool();
+		const after = this.getEnabledToolNames().includes("inspect_image");
+		if (!reconciled || before === after) return;
+		const model = this.#host.model();
+		const modelName = model ? formatModelString(model) : "the current model";
+		this.#host.emitNotice(
+			"info",
+			after
+				? `inspect_image is now available: ${modelName} has no native image input.`
+				: `inspect_image is now hidden: ${modelName} supports image input natively. Override with /vision on.`,
+			"vision",
+		);
+	}
+
+	/**
 	 * Session-scoped `/vision` override. `auto` clears the override so the
 	 * persisted `inspect_image.mode` setting (itself possibly `auto`) decides;
 	 * `on`/`off` force the tool for this session only. Takes effect before the
@@ -933,7 +947,7 @@ export class SessionTools {
 	 */
 	async setInspectImageMode(mode: InspectImageMode): Promise<boolean> {
 		this.#host.setInspectImageModeOverride(mode === "auto" ? undefined : mode);
-		const applied = await this.#reconcileInspectImageTool();
+		const applied = await this.reconcileInspectImageTool();
 		const { active, model } = this.inspectImageState();
 		logger.debug("inspect_image mode changed", { mode, active, model });
 		return applied;

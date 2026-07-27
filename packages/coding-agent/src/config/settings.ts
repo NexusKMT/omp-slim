@@ -1369,18 +1369,25 @@ export class Settings {
 		// inspect_image.enabled (boolean) -> inspect_image.mode (enum). Explicit
 		// user choices are preserved: true -> "on", false -> "off". Configs with
 		// no legacy key get the new "auto" default, which hides the tool for
-		// models with native image input.
-		const inspectImageObj = raw.inspect_image as Record<string, unknown> | undefined;
-		if (inspectImageObj && typeof inspectImageObj.enabled === "boolean") {
-			if (!("mode" in inspectImageObj)) {
-				inspectImageObj.mode = inspectImageObj.enabled ? "on" : "off";
+		// models with native image input. Handles nested and quoted-dotted
+		// ("inspect_image.enabled") sources; the target is always the nested
+		// form, which is the only shape the resolver reads.
+		const inspectImageObj = isRecord(raw.inspect_image) ? (raw.inspect_image as Record<string, unknown>) : undefined;
+		const legacyEnabled =
+			typeof inspectImageObj?.enabled === "boolean"
+				? inspectImageObj.enabled
+				: typeof raw["inspect_image.enabled"] === "boolean"
+					? (raw["inspect_image.enabled"] as boolean)
+					: undefined;
+		if (legacyEnabled !== undefined) {
+			if (!inspectImageObj) {
+				raw.inspect_image = {};
 			}
-			delete inspectImageObj.enabled;
-		}
-		if (typeof raw["inspect_image.enabled"] === "boolean") {
-			if (!("inspect_image.mode" in raw)) {
-				raw["inspect_image.mode"] = raw["inspect_image.enabled"] ? "on" : "off";
+			const target = raw.inspect_image as Record<string, unknown>;
+			if (target.mode === undefined && raw["inspect_image.mode"] === undefined) {
+				target.mode = legacyEnabled ? "on" : "off";
 			}
+			delete target.enabled;
 			delete raw["inspect_image.enabled"];
 		}
 
