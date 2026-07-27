@@ -115,11 +115,12 @@ impl builtins::Command for KillCommand {
 			return Ok(ExecutionExitCode::InvalidUsage.into());
 		}
 
+		let mut had_failure = false;
 		for pid_or_job_spec in operands {
-			if pid_or_job_spec.starts_with('%') {
+			let signal_result = if pid_or_job_spec.starts_with('%') {
 				// It's a job spec.
 				if let Some(job) = context.shell.jobs_mut().resolve_job_spec(pid_or_job_spec) {
-					job.kill(trap_signal)?;
+					job.kill(trap_signal)
 				} else {
 					writeln!(
 						context.stderr(),
@@ -127,16 +128,31 @@ impl builtins::Command for KillCommand {
 						context.command_name,
 						pid_or_job_spec
 					)?;
-					return Ok(ExecutionResult::general_error());
+					had_failure = true;
+					continue;
 				}
 			} else {
-				let pid = brush_core::int_utils::parse(pid_or_job_spec.as_str(), 10)?;
+				brush_core::int_utils::parse(pid_or_job_spec.as_str(), 10)
+					.and_then(|pid| sys::signal::kill_process(pid, trap_signal))
+			};
 
-				// It's a pid.
-				sys::signal::kill_process(pid, trap_signal)?;
+			if let Err(err) = signal_result {
+				writeln!(
+					context.stderr(),
+					"{}: {}: {}",
+					context.command_name,
+					pid_or_job_spec,
+					err
+				)?;
+				had_failure = true;
 			}
 		}
-		Ok(ExecutionResult::success())
+
+		if had_failure {
+			Ok(ExecutionResult::general_error())
+		} else {
+			Ok(ExecutionResult::success())
+		}
 	}
 }
 

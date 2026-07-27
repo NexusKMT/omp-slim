@@ -2357,6 +2357,54 @@ mod tests {
 		assert_eq!(plain_status.expect("plain wait").code(), Some(42));
 	}
 
+	/// A failed target makes `kill` return non-zero without preventing later
+	/// process operands from receiving the selected signal.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn kill_builtin_continues_after_target_failure() {
+		let mut first = Command::new("sleep")
+			.arg("30")
+			.spawn()
+			.expect("first sleep");
+		let mut second = Command::new("sleep")
+			.arg("30")
+			.spawn()
+			.expect("second sleep");
+		let mut stale = Command::new("true").spawn().expect("stale process");
+		let first_pid = first.id().expect("first pid");
+		let second_pid = second.id().expect("second pid");
+		let stale_pid = stale.id().expect("stale pid");
+		stale.wait().await.expect("stale wait");
+
+		let (mut session, params) = kill_test_context().await;
+		let source_info = SourceInfo::from("pi-natives:test");
+		let result = session
+			.shell
+			.run_string(
+				format!("kill -KILL {first_pid} {stale_pid} {second_pid}"),
+				&source_info,
+				&params,
+			)
+			.await
+			.expect("kill command");
+		let code = exit_code(&result);
+
+		let statuses =
+			time::timeout(Duration::from_secs(5), async { tokio::join!(first.wait(), second.wait()) })
+				.await;
+		if statuses.is_err() {
+			let _ = first.start_kill();
+			let _ = second.start_kill();
+			let _ = first.wait().await;
+			let _ = second.wait().await;
+			panic!("kill must continue signaling after an intermediate target fails");
+		}
+		let (first_status, second_status) = statuses.expect("checked timeout");
+		assert_ne!(code, 0, "a failed target should make kill return non-zero");
+		assert_eq!(first_status.expect("first wait").signal(), Some(libc::SIGKILL));
+		assert_eq!(second_status.expect("second wait").signal(), Some(libc::SIGKILL));
+	}
+
 	/// `cmp` remains available with no executable search path, proving the shell
 	/// dispatches the in-process builtin rather than a platform binary.
 	#[tokio::test(flavor = "multi_thread")]
