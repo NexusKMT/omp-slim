@@ -1863,12 +1863,32 @@ describe("Anthropic request fingerprint alignment", () => {
 			apiKey: "ghu_test",
 			interleavedThinking: true,
 		});
+		// Issue #6717's reported configuration: an opaque proxy the URL list
+		// can't recognize, explicitly marked signing via spec compat override.
+		const flaggedOpaqueProxy = buildAnthropicClientOptions({
+			model: buildModel({ ...adaptiveProxySpec, compat: { signingEndpoint: true } }),
+			apiKey: "sk-proxy-test",
+			interleavedThinking: true,
+		});
+		// ZenMux's provider id classifies signing even on a customized mirror
+		// URL (see packages/catalog/test/anthropic-zenmux-signing-compat.test.ts).
+		const zenmuxMirror = buildAnthropicClientOptions({
+			model: buildModel({
+				...adaptiveProxySpec,
+				provider: "zenmux",
+				baseUrl: "https://mirror.example.net/api/anthropic",
+			}),
+			apiKey: "sk-proxy-test",
+			interleavedThinking: true,
+		});
 
 		expect(signingProxy.defaultHeaders["anthropic-beta"]).toContain("interleaved-thinking-2025-05-14");
 		expect(reroutedSigningProxy.defaultHeaders["anthropic-beta"]).toContain("interleaved-thinking-2025-05-14");
 		expect(nonSigningProxy.defaultHeaders["anthropic-beta"] ?? "").not.toContain("interleaved-thinking-2025-05-14");
 		expect(vertexRawPredict.defaultHeaders["anthropic-beta"] ?? "").not.toContain("interleaved-thinking-2025-05-14");
 		expect(copilotUrlProxy.defaultHeaders["anthropic-beta"] ?? "").not.toContain("interleaved-thinking-2025-05-14");
+		expect(flaggedOpaqueProxy.defaultHeaders["anthropic-beta"]).toContain("interleaved-thinking-2025-05-14");
+		expect(zenmuxMirror.defaultHeaders["anthropic-beta"]).toContain("interleaved-thinking-2025-05-14");
 	});
 
 	it("adds legacy fine-grained tool-streaming beta only for tool requests on incompatible models", () => {

@@ -2853,9 +2853,15 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 	const disableStrictTools = disableStrictToolsOverride ?? compat.disableStrictTools;
 	const baseUrl = resolveAnthropicBaseUrl(model, apiKey);
 	// Adaptive models (`supportsDisplay`) get native interleaved thinking on the
-	// official API, so only known non-official signing routes need the beta
-	// (#6717). Classify the effective URL: Foundry and provider overrides can
-	// reroute a model without rebuilding its materialized compat.
+	// official API, so only non-official signing routes need the beta (#6717).
+	// Two classifications feed the predicate: the effective URL, because Foundry
+	// and provider overrides can reroute a model without rebuilding its
+	// materialized compat, and non-official `compat.signingEndpoint`, because
+	// provider ids (e.g. ZenMux on a mirror URL) and explicit spec overrides on
+	// opaque proxies are authoritative even when the URL isn't recognized.
+	// Stale-official compat never qualifies: a canonical model rerouted to an
+	// unrecognized proxy keeps `officialEndpoint: true` (see
+	// resolveEagerToolInputStreamingSupport), and signing there is unknowable.
 	// Two signing routes still can't take the beta as this `anthropic-beta` HTTP
 	// header, so they're excluded: Vertex rawPredict accepts betas only in the
 	// JSON body (`anthropic_beta`) and 400s on the header (#5614), and GitHub
@@ -2867,7 +2873,7 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 		interleavedThinking &&
 		(!model.thinking?.supportsDisplay ||
 			(!isOfficialAnthropicApiUrl(baseUrl) &&
-				isAnthropicSigningProxyUrl(baseUrl) &&
+				(isAnthropicSigningProxyUrl(baseUrl) || (compat.signingEndpoint && !compat.officialEndpoint)) &&
 				!isVertexRawPredictUrl(baseUrl ?? "") &&
 				!hostMatchesUrl(baseUrl, "githubCopilot")));
 	const oauthToken = isOAuth ?? isAnthropicOAuthToken(apiKey);
