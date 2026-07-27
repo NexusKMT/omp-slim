@@ -273,17 +273,29 @@ export type TaskEffort = (typeof TASK_EFFORTS)[number];
  * Returns `undefined` when the model has no controllable effort surface, so
  * callers fall back to their default selector (e.g. `auto`).
  */
-export function resolveTaskEffortLevel(model: Model | undefined, effort: TaskEffort): Effort | undefined {
+export function resolveTaskEffortLevel(
+	model: Model | undefined,
+	effort: TaskEffort,
+	maxEffort?: Effort,
+): Effort | undefined {
 	const supported = model ? getSupportedEfforts(model) : THINKING_EFFORTS;
 	if (supported.length === 0) return undefined;
+	let resolved: Effort;
 	switch (effort) {
 		case "lo":
-			return supported[0];
+			resolved = supported[0];
+			break;
 		case "med":
-			return supported[(supported.length - 1) >> 1];
+			resolved = supported[(supported.length - 1) >> 1];
+			break;
 		case "hi":
-			return supported[supported.length - 1];
+			resolved = supported[supported.length - 1];
+			break;
 	}
+	if (maxEffort === undefined) return resolved;
+	const ceiling = clampThinkingLevelForModel(model, maxEffort);
+	if (ceiling === undefined) return resolved;
+	return THINKING_EFFORTS.indexOf(resolved) > THINKING_EFFORTS.indexOf(ceiling) ? ceiling : resolved;
 }
 
 /**
