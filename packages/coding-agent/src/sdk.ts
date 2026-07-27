@@ -2563,7 +2563,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			localProtocolOptions,
 			autoApprove: options.autoApprove ?? false,
 		});
-		const toolContextStore = new ToolContextStore(getSessionContext);
+		// Native built-in implementations, captured before extension re-registration replaces registry
+		// entries and before the ExtensionToolWrapper pass. Backs `ctx.invokeTool`, so a tool that
+		// wraps a built-in (e.g. a re-registered `write`) can delegate to the original — reaching the
+		// unwrapped native execute, which correctly inherits the caller's already-granted approval
+		// rather than re-running the gate. Populated at the built-in registry loop below.
+		const nativeToolsByName = new Map<string, Tool>();
+		const toolContextStore = new ToolContextStore(getSessionContext, name => nativeToolsByName.get(name));
 
 		const registeredTools = restrictToolNames ? [] : extensionRunner.getAllRegisteredTools();
 		const sdkCustomTools =
@@ -2587,11 +2593,19 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 		// All built-in tools are active (conditional tools like git/ask return null from factory if disabled)
 		const builtInRegistryToolNames = toolSession.xdev?.builtInNames ?? new Set(toolRegistry.keys());
+		// Capture the native built-in implementations before extension re-registration replaces registry
+		// entries and before the ExtensionToolWrapper pass below, so `ctx.invokeTool` reaches the
+		// unwrapped native execute (inheriting the caller's already-granted approval, not re-gating).
+		for (const [name, tool] of toolRegistry) {
+			nativeToolsByName.set(name, tool);
+		}
 		if (!restrictToolNames && !toolRegistry.has("goal") && settings.get("goal.enabled")) {
 			const goalTool = await logger.time("createTools:goal:session", HIDDEN_TOOLS.goal, toolSession);
 			if (goalTool) {
-				toolRegistry.set(goalTool.name, wrapToolWithMetaNotice(goalTool));
+				const wrapped = wrapToolWithMetaNotice(goalTool);
+				toolRegistry.set(goalTool.name, wrapped);
 				builtInRegistryToolNames.add(goalTool.name);
+				nativeToolsByName.set(goalTool.name, wrapped);
 			}
 		}
 		for (const tool of wrappedExtensionTools) {
@@ -2660,11 +2674,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			writeRegistration ??= (async () => {
 				const writeTool = await logger.time("createTools:write:session", BUILTIN_TOOLS.write, toolSession);
 				if (!writeTool || toolRegistry.has("write")) return builtInRegistryToolNames.has("write");
-				toolRegistry.set(
-					writeTool.name,
-					new ExtensionToolWrapper(wrapToolWithMetaNotice(writeTool), extensionRunner) as Tool,
-				);
+				const nativeWrite = wrapToolWithMetaNotice(writeTool);
+				toolRegistry.set(writeTool.name, new ExtensionToolWrapper(nativeWrite, extensionRunner) as Tool);
 				builtInRegistryToolNames.add(writeTool.name);
+				nativeToolsByName.set(writeTool.name, nativeWrite);
 				return true;
 			})().finally(() => {
 				writeRegistration = undefined;

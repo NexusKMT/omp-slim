@@ -312,6 +312,25 @@ execute(
 ): Promise<AgentToolResult>
 ```
 
+### Delegating to a native built-in (`ctx.invokeTool`)
+
+A tool that re-registers a built-in name (e.g. wrapping `write` to add logging or a policy check) can
+run the original instead of reimplementing it. The `ctx` passed to `execute` carries:
+
+```ts
+ctx.invokeTool?<TDetails>(
+  name: string,
+  params: Record<string, unknown>,
+  options?: { signal?: AbortSignal; onUpdate?: AgentToolUpdateCallback },
+): Promise<AgentToolResult<TDetails> | undefined>
+```
+
+It runs the **native** built-in of `name` (bypassing your own re-registration, so it does not recurse
+into your wrapper) and returns its result, including the native tool's own side effects and internal
+bookkeeping. It resolves to `undefined` when there is no native tool of that name. The invoked tool's
+approval gate is not re-run — your call already passed approval — and delegation depth is guarded
+against accidental self-recursion.
+
 Template:
 
 ```ts
