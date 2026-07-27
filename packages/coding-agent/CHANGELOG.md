@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `omp worktree clear` (without `--all`) deleting task-isolation sandboxes owned by subagents that are still running, discarding their uncaptured work; the `no live task owns it` reason was set from the mere presence of the `m` mount dir with no ownership check. `ensureIsolation` now writes a pid-stamped ownership marker into each sandbox and `worktree list`/`clear` report a sandbox as `live` (never removed without `--all`) while its owning process is alive, reclaiming only crashed leftovers ([#6761](https://github.com/can1357/oh-my-pi/issues/6761)).
+
 ## [17.1.5] - 2026-07-27
 
 ### Added

@@ -8,8 +8,10 @@
  *     `<parent-repo>/.git/worktrees/<name>/`.
  *   - **Task-isolation dirs** (`task/worktree.ts`): a wrapper dir with a
  *     compact `m` subdir mounted/cloned by `natives.isoStart`. Legacy `merged`
- *     subdirs are still recognized. These are ephemeral; `ensureIsolation`
- *     removes the base before re-creating it, so leftovers are crashed runs.
+ *     subdirs are still recognized. `ensureIsolation` writes an ownership
+ *     marker naming the live omp process; a
+ *     sandbox whose owner is still running is reported `live` and never
+ *     removed without `--all`, so `clear` reclaims only crashed leftovers.
  *
  * Legacy entries from before the encoding change keep working because git still
  * tracks them by branch name. This command exists to GC them on demand.
@@ -18,6 +20,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getWorktreesDir, isEnoent } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
+import { hasLiveIsolationOwner } from "../task/isolation-ownership";
 import * as git from "../utils/git";
 
 type WorktreeKind = "pr-checkout" | "task-isolation" | "empty" | "stray";
@@ -214,10 +217,13 @@ async function classifyDir(dir: string): Promise<WorktreeEntry | null> {
 	for (const mountDir of TASK_ISOLATION_MOUNT_DIRS) {
 		const mountStat = await fs.stat(path.join(dir, mountDir)).catch(() => null);
 		if (!mountStat?.isDirectory()) continue;
+		const live = await hasLiveIsolationOwner(dir);
 		return {
 			path: dir,
 			kind: "task-isolation",
-			orphanReason: "task-isolation leftover (no live task owns it)",
+			// Only after confirming no live owner is the "no live task" claim true.
+			// A running subagent's sandbox stays live so `clear` won't delete it.
+			orphanReason: live ? undefined : "task-isolation leftover (no live task owns it)",
 		};
 	}
 	return null;
