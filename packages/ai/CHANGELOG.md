@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.1.7] - 2026-07-27
+
 ### Changed
 
 - Usage report filtering in the auth-broker remote store is memoized per (reports, snapshot) with a precomputed per-provider OAuth credential map, replacing an O(reports × credentials) scan on every credential-selection and status refresh

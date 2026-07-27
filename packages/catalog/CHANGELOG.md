@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.1.7] - 2026-07-27
+
 ### Added
 
 - Added support for moonshotai/Kimi-K3 and kimi-k3-fast models

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.1.7] - 2026-07-27
+
 ### Added
 
 - Added bulk-input fast path and iterative processing for bracketed paste in the editor
