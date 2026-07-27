@@ -2650,9 +2650,12 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			// supported range, then respects the operator-configured ceiling.
 			// Undefined (no effort, or no controllable effort surface) falls
 			// through to the normal selectors below.
+			// The ceiling outlives initial resolution: it rides into the session so
+			// retry-fallback recovery can never clamp effort back up past it.
+			const spawnEffortCeiling = options.effort !== undefined ? settings.get("task.maxEffort") : undefined;
 			const effortLevel =
 				options.effort !== undefined
-					? resolveTaskEffortLevel(model, options.effort, settings.get("task.maxEffort"))
+					? resolveTaskEffortLevel(model, options.effort, spawnEffortCeiling)
 					: undefined;
 			if (model) {
 				const displayLevel = effortLevel ?? (explicitThinkingLevel ? resolvedThinkingLevel : undefined);
@@ -2777,6 +2780,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				modelPatternDefaultFallbackChain:
 					model || modelOverride === undefined ? undefined : defaultRetryFallbackChain,
 				thinkingLevel: effectiveThinkingLevel,
+				thinkingLevelCeiling: spawnEffortCeiling,
 				toolNames,
 				outputSchema,
 				outputSchemaMode: options.outputSchemaMode,

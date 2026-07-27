@@ -5,7 +5,8 @@
  */
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { Effort, type Model } from "@oh-my-pi/pi-ai";
+import type { Model } from "@oh-my-pi/pi-ai";
+import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import type { Rule } from "@oh-my-pi/pi-coding-agent/capability/rule";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -252,6 +253,9 @@ describe("runSubprocess parent-discovery pass-through (issue #2190)", () => {
 
 		expect(result.exitCode).toBe(0);
 		expect(spy.mock.calls[0]?.[0]?.thinkingLevel).toBe(ThinkingLevel.Low);
+		// The ceiling itself rides into the session so retry-fallback recovery
+		// can re-clamp to it after model swaps.
+		expect(spy.mock.calls[0]?.[0]?.thinkingLevelCeiling).toBe(Effort.Low);
 	});
 
 	it("rejects a spawn when task.maxEffort is below the model floor", async () => {

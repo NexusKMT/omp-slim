@@ -911,6 +911,7 @@ export class AgentSession {
 		this.#models = new ModelControls(modelControlsHost, {
 			scopedModels: config.scopedModels,
 			thinkingLevel: config.thinkingLevel,
+			thinkingLevelCeiling: config.thinkingLevelCeiling,
 			serviceTierByFamily: config.serviceTierByFamily,
 		});
 
@@ -928,6 +929,7 @@ export class AgentSession {
 			thinkingLevel: () => this.thinkingLevel,
 			configuredThinkingLevel: () => this.configuredThinkingLevel(),
 			setThinkingLevel: level => this.setThinkingLevel(level),
+			thinkingLevelCeiling: () => this.#models.thinkingLevelCeiling,
 			isDisposed: () => this.#isDisposed,
 			isStreaming: () => this.isStreaming,
 			isCompacting: () => this.isCompacting,

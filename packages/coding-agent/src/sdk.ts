@@ -12,6 +12,7 @@ import {
 import type {
 	Context,
 	CredentialDisabledEvent,
+	Effort,
 	Message,
 	Model,
 	ModelUsageHealth,
@@ -358,6 +359,8 @@ export interface CreateAgentSessionOptions {
 	modelPatternDefaultFallbackChain?: string[];
 	/** Thinking selector. Default: from settings, else unset */
 	thinkingLevel?: ConfiguredThinkingLevel;
+	/** Hard ceiling on the session's thinking effort (e.g. a task spawn's `task.maxEffort`-capped hint); retry-fallback recovery re-clamps to it. */
+	thinkingLevelCeiling?: Effort;
 	/** Models available for cycling (Ctrl+P in interactive mode) */
 	scopedModels?: Array<{ model: Model; thinkingLevel?: ThinkingLevel }>;
 	/** Prewalk from the starting model to a fast/cheap target at the first edit/write once the todo list exists. */
@@ -3136,6 +3139,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			agent,
 			pruneToolDescriptions: inlineToolDescriptors,
 			thinkingLevel: autoThinking ? AUTO_THINKING : effectiveThinkingLevel,
+			thinkingLevelCeiling: options.thinkingLevelCeiling,
 			initialRetryFallback,
 			prewalk: options.prewalk,
 			planYolo: options.planYolo,
