@@ -68,7 +68,7 @@ import {
 import { MODEL_ROLES } from "../config/model-roles";
 import { serviceTierForAllFamilies, serviceTierSettingToTier } from "../config/service-tier";
 import type { Settings } from "../config/settings";
-import { CursorExecHandlers } from "../cursor";
+import { CursorExecHandlers, type CursorMcpResourceAdapter } from "../cursor";
 import { bridgeToolMap } from "../cursor-bridge-tools";
 import { estimateToolSchemaTokens } from "../modes/utils/context-usage";
 import type { PlanModeState } from "../plan-mode/state";
@@ -201,6 +201,14 @@ export interface SessionAdvisorsOptions {
 	 * policies, so a native frame would run past a configured `ask` or `deny`.
 	 */
 	getToolContext?: () => AgentToolContext | undefined;
+	/**
+	 * The live MCP connections Cursor's resource frames answer from.
+	 *
+	 * Advisors share the session's connections and may hold tools from those
+	 * same servers, so without this their frames report that every server
+	 * advertises nothing.
+	 */
+	mcpResources?: CursorMcpResourceAdapter;
 	watchdogPrompt?: string;
 	sharedInstructions?: string;
 	contextPrompt?: string;
@@ -277,6 +285,7 @@ export class SessionAdvisors {
 	#advisorCreateGrepTool: SessionAdvisorsOptions["createGrepTool"];
 	#advisorCreateEditTool: SessionAdvisorsOptions["createEditTool"];
 	#advisorGetToolContext: SessionAdvisorsOptions["getToolContext"];
+	#advisorMcpResources: SessionAdvisorsOptions["mcpResources"];
 	#advisorWatchdogPrompt: string | undefined;
 	#advisorSharedInstructions: string | undefined;
 	#advisorContextPrompt: string | undefined;
@@ -302,6 +311,7 @@ export class SessionAdvisors {
 		this.#advisorCreateGrepTool = options.createGrepTool;
 		this.#advisorCreateEditTool = options.createEditTool;
 		this.#advisorGetToolContext = options.getToolContext;
+		this.#advisorMcpResources = options.mcpResources;
 		this.#advisorWatchdogPrompt = options.watchdogPrompt;
 		this.#advisorSharedInstructions = options.sharedInstructions;
 		this.#advisorContextPrompt = options.contextPrompt;
@@ -766,6 +776,11 @@ export class SessionAdvisors {
 				// tool, so handing it over unconditionally would give a roster
 				// without `grep` a search tool it was denied.
 				createGrepTool: advisorToolMap.has("grep") ? this.#advisorCreateGrepTool : undefined,
+				// Advisors share the session's live MCP connections, so their
+				// resource frames answer from the same catalog the primary sees.
+				// Not gated on a tool grant: reading what a server advertises is
+				// not the same permission as calling one of its tools.
+				mcpResources: this.#advisorMcpResources,
 			});
 			const baseAdvisorStreamFn = this.#advisorStreamFn ?? streamSimple;
 			const advisorStreamFn: StreamFn = (requestModel, context, options) =>
