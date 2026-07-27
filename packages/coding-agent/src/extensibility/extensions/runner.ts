@@ -151,6 +151,22 @@ function createHandlerUIContext(ui: ExtensionUIContext, handlerSignal: AbortSign
 }
 
 /**
+ * Scope `ctx` to a single handler run without spreading it: `{ ...ctx }` would
+ * snapshot live accessors (notably the `model` getter), so a handler calling
+ * `pi.setModel()` and then reading `ctx.model` would see a stale model.
+ * Prototype delegation keeps every getter live while overriding `ui`.
+ */
+function createHandlerContext(ctx: ExtensionContext, handlerSignal: AbortSignal): ExtensionContext {
+	const scoped: ExtensionContext = Object.create(ctx);
+	Object.defineProperty(scoped, "ui", {
+		value: createHandlerUIContext(ctx.ui, handlerSignal),
+		enumerable: true,
+		configurable: true,
+	});
+	return scoped;
+}
+
+/**
  * Race `work` against a `timeoutMs` budget and optional cancellation signal,
  * clearing the timer and abort listener as soon as one branch settles.
  *
@@ -701,11 +717,7 @@ export class ExtensionRunner {
 		if (signal?.aborted) return undefined;
 		try {
 			const handlerResult = await raceHandlerWithTimeout(
-				handlerSignal =>
-					handler(event, {
-						...ctx,
-						ui: createHandlerUIContext(ctx.ui, handlerSignal),
-					}),
+				handlerSignal => handler(event, createHandlerContext(ctx, handlerSignal)),
 				timeoutMs,
 				signal,
 			);
@@ -871,11 +883,7 @@ export class ExtensionRunner {
 			for (const handler of handlers) {
 				try {
 					const handlerResult = await raceHandlerWithTimeout(
-						handlerSignal =>
-							handler(event, {
-								...ctx,
-								ui: createHandlerUIContext(ctx.ui, handlerSignal),
-							}),
+						handlerSignal => handler(event, createHandlerContext(ctx, handlerSignal)),
 						timeoutMs,
 					);
 
