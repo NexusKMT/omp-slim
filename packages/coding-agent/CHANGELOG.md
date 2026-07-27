@@ -1462,6 +1462,14 @@
 - Fixed `models.yml` remote compaction schema support for V2 streaming endpoint fields. ([#4146](https://github.com/can1357/oh-my-pi/issues/4146))
 - Fixed the SSH tool to reject `cwd` values of `~` and `~/...` before sending guaranteed-bad quoted tilde paths to remote POSIX shells. ([#4002](https://github.com/can1357/oh-my-pi/issues/4002))
 
+### Added
+
+- Added a configurable per-request timeout for the `inspect_image` tool (`inspect_image.timeoutMs`, default 5 minutes; set to 0 to disable) so a stalled vision-model provider fails fast with a clear error instead of blocking until manual abort ([#4165](https://github.com/can1357/oh-my-pi/issues/4165)).
+
+### Fixed
+
+- Fixed `inspect_image` blocking indefinitely when the vision-model API stalls by combining the caller's abort signal with an `AbortSignal.timeout()` and surfacing a distinct timeout `ToolError` (separate from user-triggered abort) ([#4165](https://github.com/can1357/oh-my-pi/issues/4165)).
+
 ## [16.2.12] - 2026-07-01
 
 ### Breaking Changes
