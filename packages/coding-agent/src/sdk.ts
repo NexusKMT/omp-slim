@@ -62,6 +62,7 @@ import { applyProviderGlobalsFromSettings } from "./config/provider-globals";
 import { buildServiceTierByFamily } from "./config/service-tier";
 import { Settings, type SkillsSettings } from "./config/settings";
 import { CursorExecHandlers } from "./cursor";
+import { createBridgeGrepFactory } from "./cursor-bridge-tools";
 import "./discovery";
 import { initializeWithSettings } from "./discovery";
 import { disposeAllJuliaKernelSessions, disposeJuliaKernelSessionsByOwner } from "./eval/jl/executor";
@@ -2584,7 +2585,21 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		for (const tool of toolRegistry.values()) {
 			toolRegistry.set(tool.name, new ExtensionToolWrapper(tool, extensionRunner));
 		}
+		// Cursor's own client owns file edits, so `edit` is not advertised to the
+		// model (commit 8ba0498eb: full-file `write` is used instead). The exec
+		// bridge is a different consumer: the server sends native `pi_edit`
+		// frames regardless of the advertised catalog, and answering them needs
+		// a real tool.
+		//
+		// It must be a `replace`-mode instance. `PiEditExecArgs` carries
+		// `old_text`/`new_text` pairs, which is exactly `replace`'s schema and
+		// nothing else's — under the default `hashline` mode the frame's args do
+		// not match the tool's parameters at all. The registry instance follows
+		// the session's configured mode, so the bridge builds its own.
+		let cursorBridgeEditTool: AgentTool | undefined;
 		if (model?.provider === "cursor") {
+			const bridgeEdit: Tool = new EditTool(toolSession, "replace");
+			cursorBridgeEditTool = new ExtensionToolWrapper(bridgeEdit, extensionRunner);
 			toolRegistry.delete("edit");
 			builtInRegistryToolNames.delete("edit");
 		}
@@ -2622,6 +2637,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		// execution-only ACP decorator used by `write xd://<tool>`; docs and
 		// renderer lookup continue to use the undecorated canonical instance.
 		const resolveDeviceTool = (name: string): AgentTool | undefined => {
+			// `edit` is withheld from the model-facing registry for Cursor but the
+			// native `pi_edit` frame still needs it; see the retention above.
+			if (name === "edit" && cursorBridgeEditTool) return cursorBridgeEditTool;
 			const state = toolSession.xdev;
 			if (!state) return undefined;
 			return resolveMountedXdevExecutable(state, name);
@@ -2637,7 +2655,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			persistTodoPhases: phases => sessionManager.appendCustomEntry(USER_TODO_EDIT_CUSTOM_TYPE, { phases }),
 			// `pi_grep` carries its own context width and match cap, which the
 			// shared grep instance fixed at construction cannot express.
-			createGrepTool: grepOptions => new GrepTool(toolSession, grepOptions),
+			createGrepTool: createBridgeGrepFactory(toolSession, extensionRunner),
 		});
 
 		// Resolve the inline-descriptors setting against the session-start model.
@@ -3240,6 +3258,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			providerPromptCacheKeySource,
 			parentEvalSessionId: options.parentEvalSessionId,
 			advisorTools,
+			// Same per-call `grep` seam the primary bridge gets, built against the
+			// advisor's own tool session so a `pi_grep` frame's context width and
+			// match cap are honored there too.
+			advisorCreateGrepTool: createBridgeGrepFactory(advisorToolSession, extensionRunner),
 			titleSystemPrompt: options.titleSystemPrompt,
 		});
 		hasSession = true;
