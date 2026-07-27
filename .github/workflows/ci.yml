@@ -5,10 +5,32 @@ on:
       branches: [main]
       paths:
          - "packages/**"
+         - "crates/**"
+         - "scripts/**"
+         - "bazel/**"
+         - "MODULE.bazel"
+         - "BUILD.bazel"
+         - ".bazelrc"
+         - ".bazelversion"
+         - "Cargo.toml"
+         - "Cargo.lock"
+         - "Cargo.Bazel.lock"
+         - ".github/**"
    pull_request:
       branches: [main]
       paths:
          - "packages/**"
+         - "crates/**"
+         - "scripts/**"
+         - "bazel/**"
+         - "MODULE.bazel"
+         - "BUILD.bazel"
+         - ".bazelrc"
+         - ".bazelversion"
+         - "Cargo.toml"
+         - "Cargo.lock"
+         - "Cargo.Bazel.lock"
+         - ".github/**"
    workflow_dispatch:
       inputs:
          skip_npm:
@@ -30,14 +52,9 @@ concurrency:
 
 env:
    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-   # audiopus_sys bundles an opus tree whose CMakeLists declares a
-   # cmake_minimum_required below 3.5; CMake 4.x refuses to configure it
-   # without this override (macOS runner images ship CMake 4).
-   CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
 permissions:
    contents: read
-   actions: read
 
 jobs:
    # scripts/release.ts pushes the version-bump commit and its `v*` tag
@@ -90,33 +107,6 @@ jobs:
                 echo "release-tag=$release_tag"
               } >> "$GITHUB_OUTPUT"
 
-   # Compute one native source hash, then validate complete artifact sets from
-   # any trusted main-branch run. Run conclusion is deliberately irrelevant:
-   # an upload proves that build step completed before a later job failed or a
-   # newer push canceled the workflow.
-   #
-   # Linux x64, the full cross-platform matrix, and Rust validation are tracked
-   # independently. Consumers either use a complete prior set or build the
-   # missing set in this run; no single canary can hide a partial matrix.
-   native_artifact_lookup:
-      name: Look up cached native artifacts
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
-      outputs:
-         source-hash: ${{ steps.compute.outputs.source-hash }}
-         linux-x64-run-id: ${{ steps.find.outputs.linux-x64-run-id }}
-         cross-platform-run-id: ${{ steps.find.outputs.cross-platform-run-id }}
-         validation-run-id: ${{ steps.find.outputs.validation-run-id }}
-      steps:
-         - uses: actions/checkout@v4
-         - name: Compute native source hash
-           id: compute
-           uses: ./.github/actions/native-source-hash
-         - name: Find trusted reusable artifacts
-           id: find
-           uses: ./.github/actions/find-native-artifacts
-           with:
-              hash: ${{ steps.compute.outputs.source-hash }}
-
    check:
       name: Lint, type check & web build
       runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
@@ -128,121 +118,58 @@ jobs:
          - name: Build collab web
            run: bun run collab:web:build
 
-   rust_validation:
-      name: Validate Rust workspace
-      needs: [native_artifact_lookup]
-      if: ${{ needs.native_artifact_lookup.outputs.validation-run-id == '' }}
+   # Bazel validation and cache warm — replaces the old cargo pipeline
+   # (rust_validation + native build matrices + hand-rolled artifact caching).
+   # `bazel test` covers the Rust suite, the clippy/rustfmt aspect configs cover
+   # linting, and on main pushes (omp-kata, read-write cache) an additional
+   # //:natives-linux-all build populates the shared bazel-remote cache so every
+   # downstream job — TS tests, releases, PR runners — gets cache hits instead
+   # of rebuilding. No toolchain setup: bazelisk is on the GitHub images and
+   # baked into the kata runner image; bazel fetches the rest hermetically.
+   rust:
+      name: Validate Rust workspace (bazel)
       runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
       steps:
          - uses: actions/checkout@v4
-         - uses: ./.github/actions/build-native
+         - uses: ./.github/actions/bun-install
+         - id: cache
+           uses: ./.github/actions/bazel-cache
            with:
-              hash: ${{ needs.native_artifact_lookup.outputs.source-hash }}
-              platform: linux
-              arch: x64
-              variant: baseline
-              rust_checks: "true"
-              skip_build: "true"
-              cache_scope: validation
-              save_cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-         - name: Create validation marker
-           shell: bash
-           run: echo "${{ needs.native_artifact_lookup.outputs.source-hash }}" > "$RUNNER_TEMP/rust-validation"
-         - name: Upload validation marker
-           uses: actions/upload-artifact@v4
-           with:
-              name: pi-natives-rust-validation-h${{ needs.native_artifact_lookup.outputs.source-hash }}
-              path: ${{ runner.temp }}/rust-validation
-              retention-days: 90
-
-   # Linux x64 baseline + modern supply the TS and install jobs. Rust validation
-   # is a separate parallel job, so both matrix entries are build-only.
-   native_linux_x64:
-      name: "Native: Linux x64 (${{ matrix.variant }})"
-      needs: [native_artifact_lookup]
-      if: ${{ needs.native_artifact_lookup.outputs.linux-x64-run-id == '' }}
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
-      strategy:
-         fail-fast: false
-         matrix:
-            variant: [baseline, modern]
-      steps:
-         - uses: actions/checkout@v4
-         - uses: ./.github/actions/build-native
-           with:
-              hash: ${{ needs.native_artifact_lookup.outputs.source-hash }}
-              platform: linux
-              arch: x64
-              variant: ${{ matrix.variant }}
-              skip_validation: "true"
-              save_cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-
-   # Cross-platform builds stay in this workflow only as a release fallback.
-   # Successful main CI runs launch the non-blocking native-prewarm workflow.
-   native_cross_platform_kata:
-      name: "Native: ${{ matrix.platform }} ${{ matrix.libc || '' }} ${{ matrix.arch }}"
-      needs: [release_metadata, native_artifact_lookup]
-      if: ${{ needs.release_metadata.outputs.is-release == 'true' && needs.native_artifact_lookup.outputs.cross-platform-run-id == '' }}
-      strategy:
-         fail-fast: false
-         matrix:
-            include:
-               - { os: omp-kata, platform: linux, arch: arm64, target: aarch64-unknown-linux-gnu }
-               - { os: omp-kata, platform: linux, libc: musl, arch: x64, target: x86_64-unknown-linux-musl, variant: baseline }
-               - { os: omp-kata, platform: linux, libc: musl, arch: arm64, target: aarch64-unknown-linux-musl }
-               - { os: omp-kata, platform: win32, arch: x64, target: x86_64-pc-windows-msvc, variant: baseline }
-      runs-on: ${{ matrix.os }}
-      steps:
-         - uses: actions/checkout@v4
-         - uses: ./.github/actions/build-native
-           with:
-              hash: ${{ needs.native_artifact_lookup.outputs.source-hash }}
-              platform: ${{ matrix.platform }}
-              arch: ${{ matrix.arch }}
-              libc: ${{ matrix.libc }}
-              variant: ${{ matrix.variant }}
-              target: ${{ matrix.target }}
-              skip_validation: "true"
-              save_cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-
-   native_cross_platform_macos:
-      name: "Native: ${{ matrix.platform }} ${{ matrix.arch }}"
-      needs: [release_metadata, native_artifact_lookup]
-      if: ${{ needs.release_metadata.outputs.is-release == 'true' && needs.native_artifact_lookup.outputs.cross-platform-run-id == '' }}
-      strategy:
-         fail-fast: false
-         matrix:
-            include:
-               - { os: macos-14, platform: darwin, arch: x64, target: x86_64-apple-darwin, variant: baseline }
-               - { os: macos-14, platform: darwin, arch: arm64 }
-      runs-on: ${{ matrix.os }}
-      steps:
-         - uses: actions/checkout@v4
-         - uses: ./.github/actions/build-native
-           with:
-              hash: ${{ needs.native_artifact_lookup.outputs.source-hash }}
-              platform: ${{ matrix.platform }}
-              arch: ${{ matrix.arch }}
-              variant: ${{ matrix.variant }}
-              target: ${{ matrix.target }}
-              skip_validation: "true"
-              save_cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+              scope: validation
+         - name: Rust tests
+           run: bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" test //crates/...
+         # Clippy scope mirrors `cargo clippy --workspace` (libraries only, no
+         # test targets) plus the strict/default split: crates with
+         # `[lints] workspace = true` get the workspace policy, the vendored
+         # brush fork is exempt (same as run-rs-task.ts's cargo excludes).
+         - name: Clippy (workspace lint policy on opted-in crates)
+           run: |
+              bazelisk query "kind('rust_library|rust_shared_library', //crates/pi-ast/... + //crates/pi-iso/... + //crates/pi-natives/... + //crates/pi-shell/... + //crates/pi-walker/...)" \
+                | xargs bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=clippy-strict --
+         - name: Clippy (default lints elsewhere)
+           run: |
+              bazelisk query "kind('rust_library|rust_shared_library', //crates/... - (//crates/pi-ast/... + //crates/pi-iso/... + //crates/pi-natives/... + //crates/pi-shell/... + //crates/pi-walker/...) - //crates/vendor/brush-core/... - //crates/vendor/brush-builtins/...)" \
+                | xargs bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=clippy --
+         - name: Rustfmt
+           run: bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=rustfmt //crates/...
+         - name: Warm native addon cache (main push)
+           if: github.event_name != 'pull_request'
+           run: bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build //:natives-linux-all
 
    test_workspace:
       name: Test TS workspace fast
       runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
-      needs: [native_linux_x64, native_artifact_lookup]
-      if: ${{ !cancelled() && needs.native_linux_x64.result != 'failure' }}
+      needs: [rust]
+      if: ${{ !cancelled() && needs.rust.result == 'success' }}
       timeout-minutes: 20
       steps:
          - uses: actions/checkout@v4
          - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
-         - uses: ./.github/actions/restore-linux-native
+         - uses: ./.github/actions/bazel-natives
            with:
-              hash: ${{ needs.native_artifact_lookup.outputs.source-hash }}
-              native-job-result: ${{ needs.native_linux_x64.result }}
-              cached-run-id: ${{ needs.native_artifact_lookup.outputs.linux-x64-run-id }}
+              targets: linux-x64-baseline linux-x64-modern
+              cache-scope: linux-x64-pair
          - name: Test workspace packages and repo scripts (TS)
            env:
               OMP_TEST_CONCURRENCY: "4"
@@ -251,18 +178,17 @@ jobs:
    test_coding_agent_singleton:
       name: Test coding-agent singleton/global-state (TS)
       runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
-      needs: [native_linux_x64, native_artifact_lookup]
-      if: ${{ !cancelled() && needs.native_linux_x64.result != 'failure' }}
+      needs: [rust]
+      if: ${{ !cancelled() && needs.rust.result == 'success' }}
       timeout-minutes: 20
       steps:
          - uses: actions/checkout@v4
          - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
-         - uses: ./.github/actions/restore-linux-native
+         - uses: ./.github/actions/bazel-natives
            with:
-              hash: ${{ needs.native_artifact_lookup.outputs.source-hash }}
-              native-job-result: ${{ needs.native_linux_x64.result }}
-              cached-run-id: ${{ needs.native_artifact_lookup.outputs.linux-x64-run-id }}
+              targets: linux-x64-baseline linux-x64-modern
+              cache-scope: linux-x64-pair
          - name: Test coding-agent singleton/global-state bucket
            # Keep global Settings/env/fake-timer tests serial; native addon
            # artifacts are still available like every other coding-agent bucket.
@@ -271,19 +197,17 @@ jobs:
    test_ts_native:
       name: Test TS native/integration packages
       runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
-      needs: [native_linux_x64, native_artifact_lookup]
-      if: ${{ !cancelled() && needs.native_linux_x64.result != 'failure' }}
+      needs: [rust]
+      if: ${{ !cancelled() && needs.rust.result == 'success' }}
       timeout-minutes: 25
       steps:
          - uses: actions/checkout@v4
-
          - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
-         - uses: ./.github/actions/restore-linux-native
+         - uses: ./.github/actions/bazel-natives
            with:
-              hash: ${{ needs.native_artifact_lookup.outputs.source-hash }}
-              native-job-result: ${{ needs.native_linux_x64.result }}
-              cached-run-id: ${{ needs.native_artifact_lookup.outputs.linux-x64-run-id }}
+              targets: linux-x64-baseline linux-x64-modern
+              cache-scope: linux-x64-pair
          - name: Test native/TUI/browser-ish packages (TS)
            env:
               OMP_TEST_CONCURRENCY: "4"
@@ -292,19 +216,17 @@ jobs:
    test_coding_agent_ui:
       name: Test coding-agent UI/TUI (TS)
       runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
-      needs: [native_linux_x64, native_artifact_lookup]
-      if: ${{ !cancelled() && needs.native_linux_x64.result != 'failure' }}
+      needs: [rust]
+      if: ${{ !cancelled() && needs.rust.result == 'success' }}
       timeout-minutes: 25
       steps:
          - uses: actions/checkout@v4
-
          - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
-         - uses: ./.github/actions/restore-linux-native
+         - uses: ./.github/actions/bazel-natives
            with:
-              hash: ${{ needs.native_artifact_lookup.outputs.source-hash }}
-              native-job-result: ${{ needs.native_linux_x64.result }}
-              cached-run-id: ${{ needs.native_artifact_lookup.outputs.linux-x64-run-id }}
+              targets: linux-x64-baseline linux-x64-modern
+              cache-scope: linux-x64-pair
          - name: Test coding-agent UI/TUI bucket
            env:
               OMP_TEST_CONCURRENCY: "2"
@@ -313,18 +235,17 @@ jobs:
    test_coding_agent_runtime:
       name: Test coding-agent runtime/session (TS)
       runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
-      needs: [native_linux_x64, native_artifact_lookup]
-      if: ${{ !cancelled() && needs.native_linux_x64.result != 'failure' }}
+      needs: [rust]
+      if: ${{ !cancelled() && needs.rust.result == 'success' }}
       timeout-minutes: 25
       steps:
          - uses: actions/checkout@v4
          - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
-         - uses: ./.github/actions/restore-linux-native
+         - uses: ./.github/actions/bazel-natives
            with:
-              hash: ${{ needs.native_artifact_lookup.outputs.source-hash }}
-              native-job-result: ${{ needs.native_linux_x64.result }}
-              cached-run-id: ${{ needs.native_artifact_lookup.outputs.linux-x64-run-id }}
+              targets: linux-x64-baseline linux-x64-modern
+              cache-scope: linux-x64-pair
          - name: Test coding-agent runtime bucket
            # Runtime/session tests import native-backed barrels too; keep this
            # separate for concurrency, not as a native-free guardrail.
@@ -335,19 +256,17 @@ jobs:
    test_coding_agent_native:
       name: Test coding-agent native/unit (TS)
       runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
-      needs: [native_linux_x64, native_artifact_lookup]
-      if: ${{ !cancelled() && needs.native_linux_x64.result != 'failure' }}
+      needs: [rust]
+      if: ${{ !cancelled() && needs.rust.result == 'success' }}
       timeout-minutes: 25
       steps:
          - uses: actions/checkout@v4
-
          - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
-         - uses: ./.github/actions/restore-linux-native
+         - uses: ./.github/actions/bazel-natives
            with:
-              hash: ${{ needs.native_artifact_lookup.outputs.source-hash }}
-              native-job-result: ${{ needs.native_linux_x64.result }}
-              cached-run-id: ${{ needs.native_artifact_lookup.outputs.linux-x64-run-id }}
+              targets: linux-x64-baseline linux-x64-modern
+              cache-scope: linux-x64-pair
          - name: Test coding-agent native/unit bucket
            env:
               OMP_TEST_CONCURRENCY: "4"
@@ -356,49 +275,42 @@ jobs:
    test_smoke:
       name: Test CLI smoke (TS)
       runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
-      needs: [native_linux_x64, native_artifact_lookup]
-      if: ${{ !cancelled() && needs.native_linux_x64.result != 'failure' }}
+      needs: [rust]
+      if: ${{ !cancelled() && needs.rust.result == 'success' }}
       timeout-minutes: 15
       steps:
          - uses: actions/checkout@v4
-
          - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
-         - uses: ./.github/actions/restore-linux-native
+         - uses: ./.github/actions/bazel-natives
            with:
-              hash: ${{ needs.native_artifact_lookup.outputs.source-hash }}
-              native-job-result: ${{ needs.native_linux_x64.result }}
-              cached-run-id: ${{ needs.native_artifact_lookup.outputs.linux-x64-run-id }}
+              targets: linux-x64-baseline linux-x64-modern
+              cache-scope: linux-x64-pair
          - name: CLI smoke test
            run: bun run ci:test:smoke
 
    install_methods:
       name: Install method smoke tests
       runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
-      needs: [native_linux_x64, native_artifact_lookup]
-      if: ${{ !cancelled() && needs.native_linux_x64.result != 'failure' }}
+      needs: [rust]
+      if: ${{ !cancelled() && needs.rust.result == 'success' }}
       steps:
          - uses: actions/checkout@v4
          - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
-         - uses: ./.github/actions/restore-linux-native
+         - uses: ./.github/actions/bazel-natives
            with:
-              hash: ${{ needs.native_artifact_lookup.outputs.source-hash }}
-              native-job-result: ${{ needs.native_linux_x64.result }}
-              cached-run-id: ${{ needs.native_artifact_lookup.outputs.linux-x64-run-id }}
+              targets: linux-x64-baseline linux-x64-modern
+              cache-scope: linux-x64-pair
          - name: Install method smoke tests
            env:
               OMP_INSTALL_TEST_SKIP_NATIVE_BUILD: "1"
            run: bun run ci:test:install-methods
 
-
    release_binary:
       name: "Release binary: ${{ matrix.target_id }}"
       if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
-         needs.rust_validation.result != 'failure' &&
-         needs.native_linux_x64.result != 'failure' &&
-         needs.native_cross_platform_kata.result != 'failure' &&
-         needs.native_cross_platform_macos.result != 'failure' &&
+         needs.rust.result == 'success' &&
          needs.test_workspace.result == 'success' &&
          needs.test_coding_agent_singleton.result == 'success' &&
          needs.test_ts_native.result == 'success' &&
@@ -407,7 +319,7 @@ jobs:
          needs.test_coding_agent_native.result == 'success' &&
          needs.test_smoke.result == 'success' && needs.check.result == 'success' &&
          needs.install_methods.result == 'success' }}
-      needs: [release_metadata, check, rust_validation, native_linux_x64, native_cross_platform_kata, native_cross_platform_macos, test_workspace, test_coding_agent_singleton, test_ts_native, test_coding_agent_ui, test_coding_agent_runtime, test_coding_agent_native, test_smoke, install_methods, native_artifact_lookup]
+      needs: [release_metadata, check, rust, test_workspace, test_coding_agent_singleton, test_ts_native, test_coding_agent_ui, test_coding_agent_runtime, test_coding_agent_native, test_smoke, install_methods]
       strategy:
          fail-fast: false
          matrix:
@@ -418,7 +330,7 @@ jobs:
                     arch: x64,
                     target_id: linux-x64,
                     binary_path: packages/coding-agent/binaries/omp-linux-x64,
-                    native_artifact_pattern: pi-natives-linux-x64-*,
+                    native_targets: linux-x64-baseline linux-x64-modern,
                  }
                - {
                     os: ubuntu-22.04,
@@ -427,7 +339,7 @@ jobs:
                     arch: x64,
                     target_id: linux-musl-x64,
                     binary_path: packages/coding-agent/binaries/omp-linux-musl-x64,
-                    native_artifact_pattern: pi-natives-linux-musl-x64-*,
+                    native_targets: linux-musl-x64-baseline,
                  }
                - {
                     os: ubuntu-24.04-arm,
@@ -435,7 +347,7 @@ jobs:
                     arch: arm64,
                     target_id: linux-arm64,
                     binary_path: packages/coding-agent/binaries/omp-linux-arm64,
-                    native_artifact_pattern: pi-natives-linux-arm64*,
+                    native_targets: linux-arm64,
                  }
                - {
                     os: ubuntu-24.04-arm,
@@ -444,7 +356,7 @@ jobs:
                     arch: arm64,
                     target_id: linux-musl-arm64,
                     binary_path: packages/coding-agent/binaries/omp-linux-musl-arm64,
-                    native_artifact_pattern: pi-natives-linux-musl-arm64*,
+                    native_targets: linux-musl-arm64,
                  }
                - {
                     os: macos-15-intel,
@@ -452,7 +364,7 @@ jobs:
                     arch: x64,
                     target_id: darwin-x64,
                     binary_path: packages/coding-agent/binaries/omp-darwin-x64,
-                    native_artifact_pattern: pi-natives-darwin-x64*,
+                    native_targets: darwin-all,
                  }
                - {
                     os: macos-14,
@@ -460,7 +372,7 @@ jobs:
                     arch: arm64,
                     target_id: darwin-arm64,
                     binary_path: packages/coding-agent/binaries/omp-darwin-arm64,
-                    native_artifact_pattern: pi-natives-darwin-arm64*,
+                    native_targets: darwin-all,
                  }
                - {
                     os: ubuntu-22.04,
@@ -468,12 +380,11 @@ jobs:
                     arch: x64,
                     target_id: win32-x64,
                     binary_path: packages/coding-agent/binaries/omp-windows-x64.exe,
-                    native_artifact_pattern: pi-natives-win32-x64*,
+                    native_targets: win32-x64-baseline,
                  }
       runs-on: ${{ matrix.os }}
       permissions:
          contents: read
-         actions: read
          id-token: write
       env:
          MACOS_SIGNING: ${{ secrets.APPLE_CERTIFICATE_P12 != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_API_KEY_ID != '' && secrets.APPLE_API_ISSUER_ID != '' && secrets.APPLE_API_KEY != '' }}
@@ -482,9 +393,6 @@ jobs:
          - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
            with:
               bun-version: "1.3"
-           env:
-              SCCACHE_BUCKET: ""
-              AWS_ACCESS_KEY_ID: ""
          - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
            with:
               node-version: "24"
@@ -500,36 +408,14 @@ jobs:
               path: ~/.bun/install/cache
               key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
          - run: bun install --frozen-lockfile
-         - name: Resolve native artifact run
-           id: native-source
-           shell: bash
-           run: |
-              set -euo pipefail
-              if [ "${{ matrix.target_id }}" = "linux-x64" ]; then
-                if [ "${{ needs.native_linux_x64.result }}" = "success" ]; then
-                  run_id="${{ github.run_id }}"
-                else
-                  run_id="${{ needs.native_artifact_lookup.outputs.linux-x64-run-id }}"
-                fi
-              elif [ "${{ needs.native_cross_platform_kata.result }}" = "success" ] || \
-                   [ "${{ needs.native_cross_platform_macos.result }}" = "success" ]; then
-                run_id="${{ github.run_id }}"
-              else
-                run_id="${{ needs.native_artifact_lookup.outputs.cross-platform-run-id }}"
-              fi
-              if [ -z "$run_id" ]; then
-                echo "No native artifact run for ${{ matrix.target_id }}" >&2
-                exit 1
-              fi
-              echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
-         - name: Download native addon(s)
-           uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+         # Release runners are GitHub-hosted and never touch the private
+         # cluster cache: they build with the actions/cache-backed disk cache,
+         # so repeat releases with unchanged Rust are mostly local cache hits.
+         - name: Build native addon(s) (bazel)
+           uses: ./.github/actions/bazel-natives
            with:
-              pattern: ${{ matrix.native_artifact_pattern }}-h${{ needs.native_artifact_lookup.outputs.source-hash }}
-              path: packages/natives/native
-              merge-multiple: true
-              run-id: ${{ steps.native-source.outputs.run-id }}
-              github-token: ${{ github.token }}
+              targets: ${{ matrix.native_targets }}
+              cache-scope: release-${{ matrix.target_id }}
          - name: Build release binary
            env:
               RELEASE_TARGETS: ${{ matrix.target_id }}
@@ -548,8 +434,7 @@ jobs:
               APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
            run: bash scripts/ci-macos-sign.sh "${{ matrix.binary_path }}"
          # Windows binary is cross-built on Linux, so we have no Windows runner
-         # to smoke it on. Cross-build correctness is verified via the napi
-         # entry-point exports (see build-native action) and the bun
+         # to smoke it on. Cross-build correctness is verified via the bun
          # `--compile --target=bun-windows-x64-*` cross-compile. Musl binaries
          # need the musl loader, which glibc runners lack — they are smoked in
          # the Alpine container step below instead.
@@ -622,7 +507,6 @@ jobs:
               body_path: release-notes.md
               generate_release_notes: true
 
-
    release_github_verify:
       name: Verify published release (macOS)
       if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
@@ -663,7 +547,7 @@ jobs:
          needs.release_binary.result == 'success' &&
          needs.release_github_verify.result == 'success' &&
          !inputs.skip_npm }}
-      needs: [release_metadata, release_binary, release_github_verify, native_linux_x64, native_artifact_lookup]
+      needs: [release_metadata, release_binary, release_github_verify]
       runs-on: ubuntu-22.04
       # `id-token: write` lets npm mint the GitHub OIDC token it exchanges for a
       # short-lived publish token (trusted publishing + provenance). When a
@@ -672,7 +556,6 @@ jobs:
       permissions:
          id-token: write
          contents: read
-         actions: read
       steps:
          - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
          - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -695,23 +578,11 @@ jobs:
          # The pi-coding-agent prepack executes workspace code (bundle-dist
          # imports the pi-utils barrel, which loads the pi-natives addon), so
          # this job needs the Linux x64 native addons just like TS tests do.
-         - name: Resolve Linux x64 native artifact run
-           id: native-source
-           shell: bash
-           run: |
-              if [ "${{ needs.native_linux_x64.result }}" = "success" ]; then
-                echo "run-id=${{ github.run_id }}" >> "$GITHUB_OUTPUT"
-              else
-                echo "run-id=${{ needs.native_artifact_lookup.outputs.linux-x64-run-id }}" >> "$GITHUB_OUTPUT"
-              fi
-         - name: Download native addons
-           uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+         - name: Build native addons (bazel)
+           uses: ./.github/actions/bazel-natives
            with:
-              pattern: pi-natives-linux-x64-*-h${{ needs.native_artifact_lookup.outputs.source-hash }}
-              path: packages/natives/native
-              merge-multiple: true
-              run-id: ${{ steps.native-source.outputs.run-id }}
-              github-token: ${{ github.token }}
+              targets: linux-x64-baseline linux-x64-modern
+              cache-scope: linux-x64-pair
          - name: Publish to npm
            env:
               # Fallback auth: setup-node wrote an .npmrc referencing

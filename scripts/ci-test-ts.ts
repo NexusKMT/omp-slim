@@ -119,8 +119,7 @@ const localOnlyWorkspacePackages = ["packages/mnemopi", "python/robomp/web"];
 // silently ignores unmatched filters when at least one other filter matches.)
 const repoScriptTests = [
 	"scripts/ci-concurrency.test.ts",
-	"scripts/ci-build-native.test.ts",
-	"scripts/ci-native-artifact-cache.test.ts",
+	"scripts/bazel-natives.test.ts",
 	"scripts/ci-release-notes.test.ts",
 	"scripts/ci-release-publish.test.ts",
 	"scripts/fix-dts-extensions.test.ts",
@@ -356,7 +355,7 @@ async function commandsForMode(mode: Mode): Promise<TestCommand[]> {
 						"--parallel=4",
 						...onlyFailuresArgs,
 						"scripts/ci-concurrency.test.ts",
-						"scripts/ci-build-native.test.ts",
+						"scripts/bazel-natives.test.ts",
 						"scripts/ci-release-publish.test.ts",
 						"scripts/fix-dts-extensions.test.ts",
 					],
@@ -410,16 +409,15 @@ async function commandsForMode(mode: Mode): Promise<TestCommand[]> {
 	}
 }
 
-// The omp-kata runner pods inject sccache S3 credentials (`AWS_*`) and config
-// (`SCCACHE_*`) pod-wide via `envFrom`, GitHub Actions injects `GITHUB_TOKEN`,
+// The omp-kata runner pods may inject cloud credentials (`AWS_*`) pod-wide via
+// `envFrom`, GitHub Actions injects `GITHUB_TOKEN`,
 // and a host may carry provider API keys. Any of these make env-sensitive code
 // non-deterministic in tests — e.g. leaked AWS creds make `amazon-bedrock` look
 // authenticated and win the provider startup fallback over `anthropic`. Run the
 // suites in a hermetic environment with all credential / cloud-config variables
 // stripped so resolution depends only on the test's own fixtures.
-const SCRUBBED_ENV_PREFIXES = ["AWS_", "SCCACHE_", "GOOGLE_CLOUD_"];
+const SCRUBBED_ENV_PREFIXES = ["AWS_", "GOOGLE_CLOUD_"];
 const SCRUBBED_ENV_NAMES = new Set([
-	"RUSTC_WRAPPER",
 	"GITHUB_TOKEN",
 	"GH_TOKEN",
 	"COPILOT_GITHUB_TOKEN",

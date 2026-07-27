@@ -154,7 +154,7 @@ verify_baked_tools() {
   local runner="$1"
   "$runner" --namespace k8s.io run --rm --entrypoint bash "$IMAGE" -lc '
     set -e
-    for b in gh fd rg magick bun cargo rustc pkg-config clang lld sccache zstd zig cmake ninja cargo-nextest cargo-zigbuild cargo-xwin; do
+    for b in gh fd rg magick bun cargo rustc pkg-config clang lld sccache zstd zig cmake ninja cargo-nextest cargo-zigbuild cargo-xwin bazelisk bazel; do
       command -v "$b" >/dev/null || { echo "MISSING: $b"; exit 1; }
     done
     echo "tools OK | bun $(bun --version) | rust $(rustc --version) | sccache $(set -- $(sccache --version); echo "$2") | zstd $(zstd --version) | zig $(zig version) | cmake $(set -- $(cmake --version | head -1); echo "$3") | ninja $(ninja --version) | gh $(set -- $(gh --version | head -1); echo "$3")"
@@ -186,7 +186,7 @@ build_with_docker() {
   echo "==> [2/5] verifying baked tools"
   docker run --rm --entrypoint bash "$IMAGE" -lc '
     set -e
-    for b in gh fd rg magick bun cargo rustc pkg-config clang lld sccache zstd zig cmake ninja cargo-nextest cargo-zigbuild cargo-xwin; do
+    for b in gh fd rg magick bun cargo rustc pkg-config clang lld sccache zstd zig cmake ninja cargo-nextest cargo-zigbuild cargo-xwin bazelisk bazel; do
       command -v "$b" >/dev/null || { echo "MISSING: $b"; exit 1; }
     done
     echo "tools OK | bun $(bun --version) | rust $(rustc --version) | sccache $(set -- $(sccache --version); echo "$2") | zstd $(zstd --version) | zig $(zig version) | cmake $(set -- $(cmake --version | head -1); echo "$3") | ninja $(ninja --version) | gh $(set -- $(gh --version | head -1); echo "$3")"
@@ -233,6 +233,13 @@ esac
 echo "==> [4/5] pointing ARC runner scale set at $IMAGE"
 sed -i "s#image: omp-kata-runner:.*#image: $IMAGE#" "$ARC_VALUES"
 sed -i -E "s/^maxRunners:.*/maxRunners: $RUNNER_MAX_RUNNERS/" "$ARC_VALUES"
+# Ensure the bazel-remote cache credentials reach every runner pod (idempotent;
+# the secret is created by infra/bazel-remote/setup.sh).
+if ! grep -q 'name: bazel-remote-ci' "$ARC_VALUES"; then
+  awk '1; /^        envFrom:/ { print "          - secretRef:"; print "              name: bazel-remote-ci" }' \
+    "$ARC_VALUES" > "$ARC_VALUES.tmp" && mv "$ARC_VALUES.tmp" "$ARC_VALUES"
+  grep -q 'name: bazel-remote-ci' "$ARC_VALUES" || { echo "failed to add bazel-remote-ci envFrom to $ARC_VALUES (no 'envFrom:' anchor?)" >&2; exit 1; }
+fi
 helm upgrade "$ARC_RELEASE" --namespace "$ARC_NAMESPACE" --version "$ARC_CHART_VERSION" \
   -f "$ARC_VALUES" \
   --set-string "template.spec.containers[0].resources.requests.cpu=$RUNNER_CPU" \
