@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `getProxyForUrl()` for transports that need provider-specific and standard proxy environment resolution with `NO_PROXY` support ([#6770](https://github.com/can1357/oh-my-pi/issues/6770)).
+
 ## [17.1.5] - 2026-07-27
 
 ### Fixed
