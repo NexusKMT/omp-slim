@@ -146,7 +146,6 @@ const codingAgentSingletonPathPatterns = [
 const codingAgentUiPathPatterns = [
 	/^test\/modes\//,
 	/^test\/(interactive-mode|main-interactive|input-controller|streaming|status-line|keybindings|editor|hook|theme|setup-wizard|job-renderer|tool-args-reveal|tool-execution)[^/]*\.test\.ts$/,
-	/^src\/modes\/components\//,
 ];
 
 const codingAgentRuntimePathPatterns = [
@@ -298,10 +297,7 @@ function classifyCodingAgentTest(testFile: string, content: string): CodingAgent
 async function getCodingAgentTestPartition(): Promise<CodingAgentTestPartition> {
 	codingAgentTestPartitionPromise ??= (async () => {
 		const codingAgentDir = path.join(repoRoot, "packages/coding-agent");
-		const testFiles = [
-			...(await collectTestsUnder(path.join(codingAgentDir, "test"), codingAgentDir)),
-			...(await collectTestsUnder(path.join(codingAgentDir, "src"), codingAgentDir)),
-		].sort();
+		const testFiles = (await collectTestsUnder(path.join(codingAgentDir, "test"), codingAgentDir)).sort();
 		const partition: CodingAgentTestPartition = {
 			singleton: [],
 			ui: [],
