@@ -1366,6 +1366,24 @@ export class Settings {
 			}
 		}
 
+		// inspect_image.enabled (boolean) -> inspect_image.mode (enum). Explicit
+		// user choices are preserved: true -> "on", false -> "off". Configs with
+		// no legacy key get the new "auto" default, which hides the tool for
+		// models with native image input.
+		const inspectImageObj = raw.inspect_image as Record<string, unknown> | undefined;
+		if (inspectImageObj && typeof inspectImageObj.enabled === "boolean") {
+			if (!("mode" in inspectImageObj)) {
+				inspectImageObj.mode = inspectImageObj.enabled ? "on" : "off";
+			}
+			delete inspectImageObj.enabled;
+		}
+		if (typeof raw["inspect_image.enabled"] === "boolean") {
+			if (!("inspect_image.mode" in raw)) {
+				raw["inspect_image.mode"] = raw["inspect_image.enabled"] ? "on" : "off";
+			}
+			delete raw["inspect_image.enabled"];
+		}
+
 		// task.isolation.enabled (boolean) -> task.isolation.mode (enum)
 		const taskObj = raw.task as Record<string, unknown> | undefined;
 		const isolationObj = taskObj?.isolation as Record<string, unknown> | undefined;

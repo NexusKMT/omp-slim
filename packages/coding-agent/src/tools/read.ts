@@ -65,6 +65,7 @@ import {
 	MAX_IMAGE_INPUT_BYTES,
 	webpExclusionForModel,
 } from "../utils/image-loading";
+import { isInspectImageToolActive } from "../utils/inspect-image-mode";
 import { CONVERTIBLE_EXTENSIONS, convertFileWithMarkit } from "../utils/markit";
 import { isSampleProfilePath, renderSampleProfile } from "../utils/sample-profile";
 import { type ArchiveReader, formatArchiveEntryLines, openArchive, parseArchivePathCandidates } from "../utils/zip";
@@ -859,29 +860,52 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		pathTargetsSsh(String((args as { path?: unknown }).path ?? "")) ? "exec" : "read";
 	readonly label = "Read";
 	readonly loadMode = "essential";
-	readonly description: string;
+	description: string;
 	readonly parameters = readSchema;
 	readonly strict = true;
 
 	readonly #autoResizeImages: boolean;
 	readonly #defaultLimit: number;
-	readonly #inspectImageEnabled: boolean;
+	#inspectImageActive: boolean;
 
 	constructor(private readonly session: ToolSession) {
-		const displayMode = resolveFileDisplayMode(session);
 		this.#autoResizeImages = session.settings.get("images.autoResize");
 		this.#defaultLimit = Math.max(
 			1,
 			Math.min(session.settings.get("read.defaultLimit") ?? DEFAULT_MAX_LINES, DEFAULT_MAX_LINES),
 		);
-		this.#inspectImageEnabled = session.settings.get("inspect_image.enabled");
-		this.description = prompt.render(readDescription, {
+		this.#inspectImageActive = isInspectImageToolActive(session);
+		this.description = this.#renderDescription();
+	}
+
+	/**
+	 * Re-render the tool description for the current display mode and the
+	 * effective inspect_image state (mode setting, `/vision` override, and
+	 * active-model image capability all feed it, so it can change at runtime).
+	 */
+	#renderDescription(): string {
+		const displayMode = resolveFileDisplayMode(this.session);
+		return prompt.render(readDescription, {
 			DEFAULT_LIMIT: String(this.#defaultLimit),
 			DEFAULT_MAX_LINES: String(DEFAULT_MAX_LINES),
 			IS_HL_MODE: displayMode.hashLines,
 			IS_LINE_NUMBER_MODE: !displayMode.hashLines && displayMode.lineNumbers,
-			INSPECT_IMAGE_ENABLED: this.#inspectImageEnabled,
+			INSPECT_IMAGE_ENABLED: this.#inspectImageActive,
 		});
+	}
+
+	/**
+	 * Re-evaluate the effective inspect_image state; it can flip when the model
+	 * or the `/vision` override changes after this tool was constructed. Keeps
+	 * the behavior branch and the advertised description in lockstep.
+	 */
+	#syncInspectImageState(): boolean {
+		const active = isInspectImageToolActive(this.session);
+		if (active !== this.#inspectImageActive) {
+			this.#inspectImageActive = active;
+			this.description = this.#renderDescription();
+		}
+		return active;
 	}
 
 	/**
@@ -1260,10 +1284,10 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 
 	/**
 	 * Build content blocks for an on-disk image file: an `inspect_image`
-	 * metadata note when inspection is enabled, otherwise the decoded image
+	 * metadata note when inspection is active, otherwise the decoded image
 	 * block. Shared by the plain-file read path and the `local://` image fast
-	 * path so both honor `inspect_image.enabled`, the size cap, and auto-resize
-	 * identically. Too-large / unsupported images surface as {@link ToolError}.
+	 * path so both honor the effective inspect_image state, the size cap, and
+	 * auto-resize identically. Too-large / unsupported images surface as {@link ToolError}.
 	 */
 	async #loadImageContent(options: {
 		readPath: string;
@@ -1273,7 +1297,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		fileSize: number;
 	}): Promise<{ content: Array<TextContent | ImageContent>; details: ReadToolDetails; sourcePath: string }> {
 		const { readPath, absolutePath, mimeType, imageMetadata, fileSize } = options;
-		if (this.#inspectImageEnabled) {
+		if (this.#syncInspectImageState()) {
 			const outputMime = imageMetadata?.mimeType ?? mimeType;
 			const metadataLines = [
 				"Image metadata:",

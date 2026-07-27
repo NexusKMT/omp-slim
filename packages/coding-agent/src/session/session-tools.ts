@@ -23,6 +23,7 @@ import { wrapToolWithMetaNotice } from "../tools/output-meta";
 import { ToolAbortError, ToolError } from "../tools/tool-errors";
 import { isMountableUnderXdev, type XdevRegistry } from "../tools/xdev";
 import { type EditMode, resolveEditMode } from "../utils/edit-mode";
+import { type InspectImageMode, isInspectImageToolActive } from "../utils/inspect-image-mode";
 import { formatLocalCalendarDate } from "../utils/local-date";
 import {
 	extractPermissionLocations,
@@ -56,6 +57,9 @@ export interface SessionToolsHost {
 	emitNotice(level: "info" | "warning" | "error", message: string, source?: string): void;
 	notifyCommandMetadataChanged(): void;
 	localProtocolOptions(): LocalProtocolOptions;
+	/** Session-scoped `/vision` override; undefined means "follow the persisted setting". */
+	getInspectImageModeOverride(): InspectImageMode | undefined;
+	setInspectImageModeOverride(mode: InspectImageMode | undefined): void;
 }
 
 interface SessionToolsOptions {
@@ -63,6 +67,8 @@ interface SessionToolsOptions {
 	toolRegistry?: Map<string, AgentTool>;
 	createVibeTools?: () => AgentTool[];
 	createComputerTool?: () => Promise<AgentTool | null>;
+	/** Creates the built-in `inspect_image` tool for session-scoped runtime enablement (see {@link SessionTools.setInspectImageMode}). */
+	createInspectImageTool?: () => Promise<AgentTool | null>;
 	builtInToolNames?: Iterable<string>;
 	presentationPinnedToolNames?: ReadonlySet<string>;
 	ensureWriteRegistered?: () => Promise<boolean>;
@@ -161,6 +167,7 @@ export class SessionTools {
 	#toolRegistry: Map<string, AgentTool>;
 	#createVibeTools: (() => AgentTool[]) | undefined;
 	#createComputerTool: SessionToolsOptions["createComputerTool"];
+	#createInspectImageTool: SessionToolsOptions["createInspectImageTool"];
 	#installedVibeToolNames = new Set<string>();
 	#builtInToolNames: Set<string>;
 	#rpcHostToolNames = new Set<string>();
@@ -190,6 +197,7 @@ export class SessionTools {
 		this.#toolRegistry = options.toolRegistry ?? new Map();
 		this.#createVibeTools = options.createVibeTools;
 		this.#createComputerTool = options.createComputerTool;
+		this.#createInspectImageTool = options.createInspectImageTool;
 		this.#builtInToolNames = new Set(options.builtInToolNames ?? []);
 		this.#presentationPinnedToolNames = options.presentationPinnedToolNames;
 		this.#ensureWriteRegistered = options.ensureWriteRegistered;
@@ -402,6 +410,24 @@ export class SessionTools {
 			);
 		} else if (computerExpected) {
 			this.#logComputerState("Computer tool retained after model change", true);
+		}
+
+		// inspect_image auto mode keys off model image capability, so a model
+		// switch can flip the tool either way. Only surface a notice when the
+		// visible tool set actually changed.
+		const visionBefore = this.getEnabledToolNames().includes("inspect_image");
+		const visionReconciled = await this.#reconcileInspectImageTool();
+		const visionAfter = this.getEnabledToolNames().includes("inspect_image");
+		if (visionReconciled && visionBefore !== visionAfter) {
+			const model = this.#host.model();
+			const modelName = model ? formatModelString(model) : "the current model";
+			this.#host.emitNotice(
+				"info",
+				visionAfter
+					? `inspect_image is now available: ${modelName} has no native image input.`
+					: `inspect_image is now hidden: ${modelName} supports image input natively. Override with /vision on.`,
+				"vision",
+			);
 		}
 	}
 
@@ -847,6 +873,70 @@ export class SessionTools {
 		}
 		logState();
 		return true;
+	}
+
+	/** Current effective inspect_image state for `/vision status`. */
+	inspectImageState(): { mode: InspectImageMode; active: boolean; model: string | undefined } {
+		const model = this.#host.model();
+		return {
+			mode: this.#host.getInspectImageModeOverride() ?? this.#host.settings.get("inspect_image.mode"),
+			active: this.getEnabledToolNames().includes("inspect_image"),
+			model: model ? formatModelString(model) : undefined,
+		};
+	}
+
+	/**
+	 * Brings the active tool set in line with the effective inspect_image state
+	 * (mode setting, `/vision` override, active-model image capability).
+	 * Mirrors {@link setComputerToolEnabled}: enabling builds the tool through
+	 * the config factory on first use and reuses the registry entry afterwards.
+	 *
+	 * @returns false when the tool should be active but this session cannot
+	 *   build it (e.g. restricted child sessions have no factory).
+	 */
+	async #reconcileInspectImageTool(): Promise<boolean> {
+		const expected = isInspectImageToolActive({
+			settings: this.#host.settings,
+			getActiveModel: () => this.#host.model(),
+			getInspectImageModeOverride: () => this.#host.getInspectImageModeOverride(),
+		});
+		const active = this.getEnabledToolNames();
+		const isActive = active.includes("inspect_image");
+		if (expected === isActive) return true;
+		if (!expected) {
+			await this.applyActiveToolsByName(active.filter(name => name !== "inspect_image"));
+			return true;
+		}
+		if (!this.#toolRegistry.has("inspect_image")) {
+			const tool = await this.#createInspectImageTool?.();
+			if (tool?.name !== "inspect_image") {
+				logger.warn("inspect_image tool could not be created", {
+					model: this.#host.model()?.id,
+				});
+				return false;
+			}
+			const wrapped = this.#wrapRuntimeTool(tool);
+			this.#toolRegistry.set(wrapped.name, wrapped);
+			this.#builtInToolNames.add(wrapped.name);
+		}
+		await this.applyActiveToolsByName([...active, "inspect_image"]);
+		return true;
+	}
+
+	/**
+	 * Session-scoped `/vision` override. `auto` clears the override so the
+	 * persisted `inspect_image.mode` setting (itself possibly `auto`) decides;
+	 * `on`/`off` force the tool for this session only. Takes effect before the
+	 * next model call.
+	 *
+	 * @returns false when `on` was requested but the tool cannot be built here.
+	 */
+	async setInspectImageMode(mode: InspectImageMode): Promise<boolean> {
+		this.#host.setInspectImageModeOverride(mode === "auto" ? undefined : mode);
+		const applied = await this.#reconcileInspectImageTool();
+		const { active, model } = this.inspectImageState();
+		logger.debug("inspect_image mode changed", { mode, active, model });
+		return applied;
 	}
 
 	/** Rebuilds the stable base prompt for the current tools and model. */

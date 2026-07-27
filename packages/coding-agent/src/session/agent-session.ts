@@ -196,6 +196,7 @@ import type { EditMode } from "../utils/edit-mode";
 import { resolveFileDisplayMode } from "../utils/file-display-mode";
 import { extractFileMentions, generateFileMentionMessages } from "../utils/file-mentions";
 import { normalizeModelContextImages } from "../utils/image-loading";
+import type { InspectImageMode } from "../utils/inspect-image-mode";
 import { generateSessionTitle } from "../utils/title-generator";
 import { buildNamedToolChoice, isToolChoiceActive } from "../utils/tool-choice";
 import type { VibeModeState } from "../vibe/state";
@@ -429,6 +430,8 @@ export class AgentSession {
 	#scheduledHiddenNextTurnGeneration: number | undefined = undefined;
 	#queuedMessageDrainScheduled = false;
 	#planModeState: PlanModeState | undefined;
+	/** Session-scoped `/vision` override; undefined = follow persisted `inspect_image.mode`. */
+	#inspectImageModeOverride: InspectImageMode | undefined;
 	#vibeModeState: VibeModeState | undefined;
 	#goalModeState: GoalModeState | undefined;
 	#goalRuntime: GoalRuntime;
@@ -1081,12 +1084,17 @@ export class AgentSession {
 			emitNotice: (level, message, source) => this.emitNotice(level, message, source),
 			notifyCommandMetadataChanged: () => this.#notifyCommandMetadataChanged(),
 			localProtocolOptions: () => this.#localProtocolOptions(),
+			getInspectImageModeOverride: () => this.#inspectImageModeOverride,
+			setInspectImageModeOverride: mode => {
+				this.#inspectImageModeOverride = mode;
+			},
 		};
 		this.#tools = new SessionTools(sessionToolsHost, {
 			autoApprove: config.autoApprove,
 			toolRegistry: config.toolRegistry,
 			createVibeTools: config.createVibeTools,
 			createComputerTool: config.createComputerTool,
+			createInspectImageTool: config.createInspectImageTool,
 			builtInToolNames: config.builtInToolNames,
 			presentationPinnedToolNames: config.presentationPinnedToolNames,
 			ensureWriteRegistered: config.ensureWriteRegistered,
@@ -3948,6 +3956,25 @@ export class AgentSession {
 	 */
 	setComputerToolEnabled(enabled: boolean): Promise<boolean> {
 		return this.#tools.setComputerToolEnabled(enabled);
+	}
+
+	/**
+	 * Session-scoped inspect_image mode (`/vision`). `auto` clears the override
+	 * and returns to the persisted `inspect_image.mode` setting; `on`/`off`
+	 * force the tool for this session only. See {@link SessionTools.setInspectImageMode}.
+	 */
+	setInspectImageMode(mode: InspectImageMode): Promise<boolean> {
+		return this.#tools.setInspectImageMode(mode);
+	}
+
+	/** Effective inspect_image state for `/vision status`. */
+	inspectImageState(): { mode: InspectImageMode; active: boolean; model: string | undefined } {
+		return this.#tools.inspectImageState();
+	}
+
+	/** Session-scoped `/vision` override; undefined means "follow the persisted setting". */
+	getInspectImageModeOverride(): InspectImageMode | undefined {
+		return this.#inspectImageModeOverride;
 	}
 
 	/** Cancels the local rollout-memory startup owned by this session. */
