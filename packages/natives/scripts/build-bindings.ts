@@ -171,14 +171,30 @@ const napiArgs = [
 	"local",
 ];
 
+// napi-rs / cargo route much failure detail to stdout (e.g. `cargo metadata`
+// errors), so a stderr-only error collapses real failures to a bare message.
+const BUILD_LOG_TAIL_LINES = 40;
+
+/** Tail-cap captured build output into a labeled section for the failure report. */
+function tailSection(label: string, text: string): string {
+	const trimmed = text.trimEnd();
+	if (!trimmed) return "";
+	const lines = trimmed.split("\n");
+	const capped = lines.length > BUILD_LOG_TAIL_LINES;
+	const shown = capped ? lines.slice(-BUILD_LOG_TAIL_LINES) : lines;
+	return `\n--- ${label}${capped ? ` (last ${BUILD_LOG_TAIL_LINES} lines)` : ""} ---\n${shown.join("\n")}`;
+}
+
 try {
 	// The package declares Bun as its build runtime. Invoke napi's JavaScript
 	// entry through this Bun process instead of its `#!/usr/bin/env node` shim so
 	// an old host Node installation cannot make an otherwise supported Bun build fail.
 	const buildResult = await $`${process.execPath} ${napiBin} ${napiArgs}`.nothrow();
 	if (buildResult.exitCode !== 0) {
+		const stdout = buildResult.stdout?.toString("utf-8") ?? "";
 		const stderr = buildResult.stderr?.toString("utf-8") ?? "";
-		throw new Error(`napi build failed${stderr ? `:\n${stderr}` : ""}`);
+		const detail = `${tailSection("stdout", stdout)}${tailSection("stderr", stderr)}`;
+		throw new Error(`napi build failed (exit ${buildResult.exitCode})${detail}`);
 	}
 
 	const builtAddonPath = await resolveBuiltAddonPath(buildOutputDir, canonicalAddonFilename);
