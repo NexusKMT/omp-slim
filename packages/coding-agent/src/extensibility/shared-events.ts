@@ -302,9 +302,15 @@ export interface ToolCallEventResult {
 	 * owns its correctness) — not the normalized `event.input` view, which may carry derived
 	 * gate-only fields (e.g. hashline `edit` `path`/`paths`) that are not real parameters. When
 	 * multiple handlers set `input`, the last one wins; handlers do not observe each other's
-	 * revisions (each sees the original `event.input`). Not applied to `computer` tool calls. The
-	 * `tool_call` event fires before the approval gate, so an approval-gated tool prompts for and
-	 * resolves policy against the revised input — the user always approves what actually runs.
+	 * revisions (each sees the original `event.input`). Not applied to `computer` tool calls.
+	 *
+	 * For model-issued tool calls the event fires at arg-prep time in the agent loop, before
+	 * concurrency scheduling, `tool_execution_start`, and the approval gate: the revision is
+	 * revalidated against the tool schema and becomes what the loop schedules, displays, persists,
+	 * and executes — the user always approves what actually runs. For dispatches the loop never
+	 * sees (nested `write xd://` device calls, Cursor direct execution) the tool wrapper applies
+	 * the revision before its own approval gate; a revised nested xd:// input forfeits the outer
+	 * write gate's approval and faces the full prompt again.
 	 */
 	input?: Record<string, unknown>;
 }

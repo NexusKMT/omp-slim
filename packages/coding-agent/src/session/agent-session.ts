@@ -35,6 +35,8 @@ import {
 	type AgentTurnEndContext,
 	AppendOnlyContextManager,
 	type AsideMessage,
+	type BeforeToolCallContext,
+	type BeforeToolCallResult,
 	resolveTelemetry,
 	type StreamFn,
 	TERMINAL_TOOL_RESULT_ABORT_REASON,
@@ -133,6 +135,7 @@ import type { CompactOptions, ContextUsage } from "../extensibility/extensions/t
 import type { HookCommandContext } from "../extensibility/hooks/types";
 import type { Skill, SkillWarning } from "../extensibility/skills";
 import { expandSlashCommand, type FileSlashCommand } from "../extensibility/slash-commands";
+import { normalizeToolEventInput, resolveToolEventInput } from "../extensibility/tool-event-input";
 import { GoalRuntime } from "../goals/runtime";
 import type { GoalModeState } from "../goals/state";
 import type { HindsightSessionState } from "../hindsight/state";
@@ -176,6 +179,7 @@ import {
 	toReasoningEffort,
 } from "../thinking";
 import { shutdownTinyTitleClient } from "../tiny/title-client";
+import { resolveApproval } from "../tools/approval";
 import { type AskToolDetails, type AskToolInput, recoverAskQuestions } from "../tools/ask";
 import { releaseTabsForOwner } from "../tools/browser/tab-supervisor";
 import type { CheckpointState, CompletedRewindState } from "../tools/checkpoint";
@@ -1177,6 +1181,10 @@ export class AgentSession {
 		});
 		// Tool-result hook owns synchronous post-tool actions that must affect the current loop.
 		this.agent.afterToolCall = ctx => this.#afterToolCall(ctx);
+		// Pre-scheduling tool_call wiring: extension handlers run at arg-prep
+		// time so a block/revision lands before concurrency resolution,
+		// tool_execution_start, and the wrapper's approval gate.
+		this.agent.beforeToolCall = ctx => this.#beforeToolCall(ctx);
 		this.agent.providerSessionState = this.#providerSessionState;
 		this.#syncAgentSessionId();
 		this.#todo.syncFromBranch();
@@ -2960,6 +2968,50 @@ export class AgentSession {
 			this.agent.abort(TERMINAL_TOOL_RESULT_ABORT_REASON);
 		}
 		return this.#ttsr.afterToolCall(ctx);
+	}
+	/**
+	 * Emits the extension `tool_call` event for a loop-dispatched call at
+	 * arg-prep time — before concurrency scheduling, `tool_execution_start`,
+	 * and the wrapper's approval gate. A handler block becomes a blocked tool
+	 * result; a handler `input` revision becomes the arguments the loop
+	 * schedules, displays, persists, and executes, so approval resolves against
+	 * what actually runs. Marks the dispatch so `ExtensionToolWrapper` does not
+	 * emit a second event (nested xd:// device dispatches and direct non-loop
+	 * execution still emit there).
+	 */
+	async #beforeToolCall(ctx: BeforeToolCallContext): Promise<BeforeToolCallResult | undefined> {
+		const runner = this.#extensionRunner;
+		if (!runner?.hasHandlers("tool_call")) return undefined;
+		const metadata = ctx.toolCall.providerMetadata;
+		const computer = metadata?.type === "computer" ? metadata : undefined;
+		// Parity with the wrapper's pre-emit short-circuit: an already-denied
+		// call never reaches extensions. Deny is mode-independent (tool decision
+		// or user policy), so resolving under the most permissive mode is exact;
+		// the wrapper still enforces the mode-accurate gate before execution.
+		const userPolicies = (this.settings.get("tools.approval") ?? {}) as Record<string, unknown>;
+		const approvalArgs = computer ? { actions: computer.actions } : ctx.args;
+		if (resolveApproval(ctx.tool, approvalArgs, "yolo", userPolicies).policy === "deny") {
+			return undefined;
+		}
+		const eventArgs = computer
+			? { actions: computer.actions, pendingSafetyChecks: computer.pendingSafetyChecks }
+			: ctx.args;
+		runner.markToolCallEmitted(ctx.toolCall.id, ctx.tool.name);
+		const callResult = await runner.emitToolCall({
+			type: "tool_call",
+			toolName: ctx.tool.name,
+			toolCallId: ctx.toolCall.id,
+			input: normalizeToolEventInput(ctx.tool.name, resolveToolEventInput(ctx.tool, eventArgs)),
+		});
+		if (callResult?.block) {
+			return { block: true, reason: callResult.reason || "Tool execution was blocked by an extension" };
+		}
+		// A computer call's event input is a synthetic {actions, pendingSafetyChecks}
+		// view, not the execution params — a revision cannot map back onto them.
+		if (callResult?.input !== undefined && !computer) {
+			return { args: callResult.input };
+		}
+		return undefined;
 	}
 
 	/** Find the last assistant message in agent state (including aborted ones) */

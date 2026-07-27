@@ -2447,6 +2447,81 @@ describe("ExtensionRunner", () => {
 			expect(promptedWith).not.toContain("original-command");
 			expect(executed).toEqual([{ command: "revised-command" }]);
 		});
+		it("skips wrapper emission when the loop already emitted tool_call for the dispatch", async () => {
+			// The agent loop emits tool_call at arg-prep time (session beforeToolCall
+			// wiring) and marks the dispatch on the runner; the wrapper must not fire
+			// handlers a second time for the same call. The marker is consume-once,
+			// so a dispatch the loop never marked (nested xd://, Cursor direct)
+			// still emits.
+			const recordPath = path.join(tempDir.path(), "loop-marker.jsonl");
+			const extCode = `
+				export default function(pi) {
+					pi.on("tool_call", async (event) => {
+						if (event.toolName !== "bash") return;
+						return { input: { command: "echo revised" } };
+					});
+				}
+			`;
+			fs.writeFileSync(path.join(extensionsDir, "tool-call-loop-marker.ts"), extCode);
+
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const wrapped = new ExtensionToolWrapper(createRecordingTool(recordPath), runner);
+
+			runner.markToolCallEmitted("loop-call-id", "bash");
+			await wrapped.execute("loop-call-id", { command: "echo original" });
+			// Marker consumed above: an unmarked dispatch under the same id emits normally.
+			await wrapped.execute("loop-call-id", { command: "echo original" });
+
+			const executed = fs
+				.readFileSync(recordPath, "utf8")
+				.trim()
+				.split("\n")
+				.map(line => JSON.parse(line));
+			expect(executed).toEqual([{ command: "echo original" }, { command: "echo revised" }]);
+		});
+
+		it("forfeits the xdevApproved prompt bypass when a handler revises the input", async () => {
+			// write.ts dispatches xd:// devices with xdevApproved: true because its
+			// outer gate already approved the ORIGINAL device input. A tool_call
+			// revision may raise the tier, so revised input must face the full gate
+			// (here: no interactive UI => reject) instead of riding the outer approval.
+			const recordPath = path.join(tempDir.path(), "xdev-revised.jsonl");
+			const extCode = `
+				export default function(pi) {
+					pi.on("tool_call", async (event) => {
+						if (event.toolName !== "bash") return;
+						return { input: { command: "echo revised" } };
+					});
+				}
+			`;
+			fs.writeFileSync(path.join(extensionsDir, "tool-call-xdev-revise.ts"), extCode);
+
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const wrapped = new ExtensionToolWrapper(createRecordingTool(recordPath), runner);
+			const xdevContext = {
+				settings: { get: (key: string) => (key === "tools.approvalMode" ? "always-ask" : {}) },
+				xdevApproved: true,
+			} as never;
+
+			await expect(
+				wrapped.execute("xdev-call-id", { command: "echo original" }, undefined, undefined, xdevContext),
+			).rejects.toThrow(/requires approval but no interactive UI available/);
+			expect(fs.existsSync(recordPath)).toBe(false); // tool never executed
+		});
 
 		it("emits tool_call before the approval prompt so approval sees the final input", async () => {
 			const order: string[] = [];

@@ -178,9 +178,12 @@ describe("CursorExecHandlers mounted tool bridge", () => {
 				return { content: [{ type: "text", text: "edited" }], details: {} };
 			},
 		};
-		// The deny path throws inside resolveApproval before the runner is touched,
-		// so a bare runner stub suffices to prove the gate runs.
-		const wrapped = new ExtensionToolWrapper(device, {} as unknown as ExtensionRunner);
+		// The deny path throws inside resolveApproval before any handler runs;
+		// the stub only needs the loop-emission marker probe the wrapper always
+		// consults first.
+		const wrapped = new ExtensionToolWrapper(device, {
+			consumeToolCallEmitted: () => false,
+		} as unknown as ExtensionRunner);
 		const settings = Settings.isolated({ "tools.approval": { ast_edit: "deny" } });
 		const handlers = new CursorExecHandlers({
 			cwd: ".",

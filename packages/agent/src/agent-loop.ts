@@ -73,6 +73,7 @@ import type {
 	AgentToolResult,
 	AgentTurnEndContext,
 	AsideMessage,
+	BeforeToolCallResult,
 	SoftToolRequirement,
 	SteeringInterruptSource,
 	SteeringQueueState,
@@ -2142,6 +2143,10 @@ async function executeToolCalls(
 			skipped: false,
 			toolResultMessage: undefined as ToolResultMessage | undefined,
 			resultEmitted: false,
+			validationErrorMessage: undefined as string | undefined,
+			blocked: false,
+			blockReason: undefined as string | undefined,
+			prepareError: undefined as unknown,
 		};
 	});
 
@@ -2257,61 +2262,21 @@ async function executeToolCalls(
 		if (agentPauseGate.paused) await agentPauseGate.waitUntilResumed(record.signal);
 
 		const { toolCall, tool } = record;
-		let argsForExecution = toolCall.arguments as Record<string, unknown>;
-		if (intentTracing) {
-			const { intent, strippedArgs } = extractIntent(toolCall.arguments);
-			argsForExecution = strippedArgs;
-			if (intent) {
-				toolCall.intent = intent;
-			} else if (typeof tool?.intent === "function") {
-				try {
-					const derived = tool.intent(strippedArgs as never)?.trim();
-					if (derived) {
-						toolCall.intent = derived;
-					}
-				} catch {
-					// intent function must never break tool execution
-				}
-			}
+		// Validation (and the beforeToolCall hook) ran in the prepare phase; a
+		// failure recorded there surfaces here at the record's scheduled slot so
+		// result emission keeps batch order.
+		if (record.validationErrorMessage !== undefined) {
+			emitToolResult(
+				record,
+				{
+					content: [{ type: "text" as const, text: record.validationErrorMessage }],
+					details: { isError: true, error: record.validationErrorMessage },
+				},
+				true,
+			);
+			return;
 		}
-		let effectiveArgs: Record<string, unknown>;
-		try {
-			if (!tool) throw new Error(`Tool ${toolCall.name} not found`);
-			effectiveArgs = validateToolArguments(tool, { ...toolCall, arguments: argsForExecution });
-		} catch (validationError) {
-			if (tool?.lenientArgValidation) {
-				effectiveArgs = { ...argsForExecution };
-				delete effectiveArgs.__parseError;
-				delete effectiveArgs.__rawJson;
-			} else {
-				if ("__parseError" in argsForExecution) {
-					record.args = {
-						__parseError: argsForExecution.__parseError,
-					};
-				} else {
-					record.args = argsForExecution;
-				}
-				emitToolResult(
-					record,
-					{
-						content: [
-							{
-								type: "text" as const,
-								text: validationError instanceof Error ? validationError.message : String(validationError),
-							},
-						],
-						details: {
-							isError: true,
-							error: validationError instanceof Error ? validationError.message : String(validationError),
-						},
-					},
-					true,
-				);
-				return;
-			}
-		}
-
-		record.args = effectiveArgs;
+		const effectiveArgs = record.args;
 		if (record.signal.aborted) {
 			record.skipped = true;
 			recordSkippedTool(telemetry, {
@@ -2356,24 +2321,9 @@ async function executeToolCalls(
 					return;
 				}
 
-				if (beforeToolCall) {
-					const beforeResult = await beforeToolCall(
-						{
-							assistantMessage,
-							toolCall,
-							args: effectiveArgs,
-							context: currentContext,
-						},
-						record.signal,
-					);
-					if (beforeResult?.block) {
-						throw new ToolCallBlockedError(beforeResult.reason);
-					}
-				}
-				if (record.signal.aborted) {
-					result = createToolSignalAbortedResult(record.signal);
-					isError = true;
-					return;
+				if (record.prepareError !== undefined) throw record.prepareError;
+				if (record.blocked) {
+					throw new ToolCallBlockedError(record.blockReason);
 				}
 				const executionArgs = transformToolCallArguments
 					? transformToolCallArguments(effectiveArgs, toolCall.name)
@@ -2504,42 +2454,112 @@ async function executeToolCalls(
 		await checkSteering();
 	};
 
+	// Prepare phase, run per record in call order before the record is chained
+	// into the schedule: intent extraction, argument validation, and the
+	// `beforeToolCall` hook. A hook revision recorded here governs execution —
+	// concurrency resolution, `tool_execution_start`, telemetry, and
+	// `tool.execute` all observe it; the assistant message keeps the model's
+	// proposal (see the note inside the revision branch).
+	const prepareToolCall = async (record: (typeof records)[number]): Promise<void> => {
+		// Interrupted/aborted records are settled by runTool and the tail sweep;
+		// running hooks for a call that will never execute would be misleading.
+		if (interruptState.triggered || record.signal.aborted) return;
+		const { toolCall, tool } = record;
+		let argsForExecution = toolCall.arguments as Record<string, unknown>;
+		if (intentTracing) {
+			const { intent, strippedArgs } = extractIntent(toolCall.arguments);
+			argsForExecution = strippedArgs;
+			if (intent) {
+				toolCall.intent = intent;
+			} else if (typeof tool?.intent === "function") {
+				try {
+					const derived = tool.intent(strippedArgs as never)?.trim();
+					if (derived) {
+						toolCall.intent = derived;
+					}
+				} catch {
+					// intent function must never break tool execution
+				}
+			}
+		}
+		const validate = (args: Record<string, unknown>): Record<string, unknown> | undefined => {
+			try {
+				if (!tool) throw new Error(`Tool ${toolCall.name} not found`);
+				return validateToolArguments(tool, { ...toolCall, arguments: args });
+			} catch (validationError) {
+				if (tool?.lenientArgValidation) {
+					const fallback = { ...args };
+					delete fallback.__parseError;
+					delete fallback.__rawJson;
+					return fallback;
+				}
+				record.args = "__parseError" in args ? { __parseError: args.__parseError } : args;
+				record.validationErrorMessage =
+					validationError instanceof Error ? validationError.message : String(validationError);
+				return undefined;
+			}
+		};
+		const effectiveArgs = validate(argsForExecution);
+		if (effectiveArgs === undefined) return;
+		record.args = effectiveArgs;
+		if (!beforeToolCall || !tool) return;
+		let beforeResult: BeforeToolCallResult | undefined;
+		try {
+			beforeResult = await beforeToolCall(
+				{ assistantMessage, toolCall, tool, args: effectiveArgs, context: currentContext },
+				record.signal,
+			);
+		} catch (e) {
+			// Contract: a throwing hook surfaces as a tool-error result without
+			// aborting the batch — rethrown inside the execution span in runTool.
+			record.prepareError = e;
+			return;
+		}
+		if (beforeResult?.block) {
+			record.blocked = true;
+			record.blockReason = beforeResult.reason;
+			return;
+		}
+		if (beforeResult?.args !== undefined) {
+			// Revalidate: a hook revision is untrusted input to the tool schema.
+			const revised = validate(beforeResult.args);
+			if (revised === undefined) return;
+			// Like `transformToolCallArguments`, the revision governs execution —
+			// scheduling, execution events, telemetry, and `tool.execute` — while
+			// the assistant message keeps the model's proposal. Consumers already
+			// received `message_end` snapshots of that message, so mutating it here
+			// would fork provider replay from persisted history.
+			record.args = revised;
+			// Interruptibility may be argument-dependent; re-resolve it so the
+			// revised call runs under the right abort signal.
+			const interruptibleMode = tool.interruptible;
+			let interruptible = false;
+			if (typeof interruptibleMode === "function") {
+				try {
+					interruptible = interruptibleMode(revised);
+				} catch {
+					interruptible = false;
+				}
+			} else {
+				interruptible = interruptibleMode === true;
+			}
+			record.interruptible = interruptible;
+			record.signal = interruptible ? interruptibleSignal : nonInterruptibleSignal;
+		}
+	};
+
 	let lastExclusive: Promise<void> = Promise.resolve();
 	let sharedTasks: Promise<void>[] = [];
 	const tasks: Promise<void>[] = [];
-
-	for (let index = 0; index < records.length; index++) {
-		const record = records[index];
-		const concurrencyMode = record.tool?.concurrency;
-		let concurrency: "shared" | "exclusive";
-		if (typeof concurrencyMode === "function") {
-			// Resolved from raw pre-validation args; a throwing resolver must not
-			// take down the whole batch, so fall back to the safe (serial) mode.
-			try {
-				concurrency = concurrencyMode(record.args);
-			} catch {
-				concurrency = "exclusive";
-			}
-		} else {
-			concurrency = concurrencyMode ?? "shared";
-		}
-		const start = concurrency === "exclusive" ? Promise.all([lastExclusive, ...sharedTasks]) : lastExclusive;
-		const task = start.then(() => runTool(record, index));
-		tasks.push(task);
-		if (concurrency === "exclusive") {
-			lastExclusive = task;
-			sharedTasks = [];
-		} else {
-			sharedTasks.push(task);
-		}
-	}
 
 	// While tool calls are in flight, queued steering or interrupting IRC would
 	// otherwise wait out the tools' own window. Poll only non-consuming queues:
 	// detection hard-aborts interruptible waits, soft-signals cooperative tools
 	// (auto-background bash), and skips not-yet-started tools, so the boundary
 	// dequeue below injects the message promptly. Gated on immediate-interrupt
-	// mode; checkSteering is idempotent (no-op once triggered).
+	// mode; checkSteering is idempotent (no-op once triggered). Installed before
+	// the prepare/schedule loop so a hung `beforeToolCall` handler cannot stall
+	// steering detection.
 	const watchSteeringWhileRunning =
 		shouldInterruptImmediately && (hasSteeringMessages !== undefined || hasIrcInterrupts !== undefined);
 	const eventDrivenSteeringWatch =
@@ -2591,6 +2611,34 @@ async function executeToolCalls(
 				)
 			: undefined;
 	try {
+		for (let index = 0; index < records.length; index++) {
+			const record = records[index];
+			await prepareToolCall(record);
+			const concurrencyMode = record.tool?.concurrency;
+			let concurrency: "shared" | "exclusive";
+			if (typeof concurrencyMode === "function") {
+				// Resolved from the validated (possibly hook-revised) args — raw
+				// args only when validation failed, and those records error out
+				// before executing. A throwing resolver must not take down the
+				// whole batch, so fall back to the safe (serial) mode.
+				try {
+					concurrency = concurrencyMode(record.args);
+				} catch {
+					concurrency = "exclusive";
+				}
+			} else {
+				concurrency = concurrencyMode ?? "shared";
+			}
+			const start = concurrency === "exclusive" ? Promise.all([lastExclusive, ...sharedTasks]) : lastExclusive;
+			const task = start.then(() => runTool(record, index));
+			tasks.push(task);
+			if (concurrency === "exclusive") {
+				lastExclusive = task;
+				sharedTasks = [];
+			} else {
+				sharedTasks.push(task);
+			}
+		}
 		await Promise.allSettled(tasks);
 	} finally {
 		steeringWatchAbortController.abort();

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `beforeToolCall` now runs at arg-prep time, per call in batch order before the call is chained into the schedule — ahead of concurrency resolution, `tool_execution_start`, and telemetry span start — instead of inside the already-scheduled execution slot. It receives the resolved `tool` in its context and may return `args` to replace the call's arguments; a replacement is revalidated against the tool schema, re-resolves argument-dependent interruptibility, and becomes the single source of truth for scheduling, execution events, the persisted assistant message, and `tool.execute`. Argument validation moved into the same prepare phase, so functional `concurrency` resolvers now see validated (and possibly revised) arguments rather than raw pre-validation ones. The steering watch is installed before the prepare loop so a hung hook cannot stall interrupt detection.
+
 ## [17.1.6] - 2026-07-27
 
 ### Added

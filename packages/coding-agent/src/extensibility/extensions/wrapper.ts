@@ -157,6 +157,13 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 		onUpdate?: AgentToolUpdateCallback<TDetails, TParameters>,
 		context?: AgentToolContext,
 	): Promise<AgentToolResult<TDetails, TParameters>> {
+		// The agent loop emits `tool_call` at arg-prep time (session
+		// `beforeToolCall` wiring) so a handler revision lands before concurrency
+		// scheduling and `tool_execution_start`. Consume the marker
+		// unconditionally so it cannot go stale; emit here only for dispatches
+		// the loop never saw — nested xd:// device dispatches and direct
+		// (non-loop) execution such as Cursor exec handlers.
+		const loopEmittedToolCall = this.runner.consumeToolCallEmitted(toolCallId, this.tool.name);
 		// Resolve approval settings up front. A `deny` on the original input short-circuits before the
 		// runner is touched — an already-denied tool never emits `tool_call` — while the full gate below
 		// re-resolves against the (possibly revised) input so a handler cannot rewrite into a denied or
@@ -178,7 +185,7 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 		// input that actually executes, closing the "approve one thing, run another" gap: the prompt
 		// text, policy resolution, and provider safety checks all see `effectiveParams`.
 		let effectiveParams = params;
-		if (this.runner.hasHandlers("tool_call")) {
+		if (!loopEmittedToolCall && this.runner.hasHandlers("tool_call")) {
 			try {
 				const callResult = (await this.runner.emitToolCall({
 					type: "tool_call",
@@ -223,15 +230,17 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 		}
 		const pendingSafetyChecks = computerSafetyChecks(context);
 		// An xd:// device dispatch already cleared the write tool's outer gate at
-		// this tool's tier — re-prompting would double-ask for one action. Explicit
-		// per-tool "prompt" policies and tool-demanded overrides still prompt.
-		// Provider safety checks are stronger: yolo, per-tool allow, and xdev approval
-		// never acknowledge them on the user's behalf.
+		// this tool's tier — re-prompting would double-ask for one action. The
+		// bypass only holds while the input is exactly what that outer gate
+		// approved: a handler revision here may have raised the tier, so revised
+		// input always faces the full gate. Explicit per-tool "prompt" policies
+		// and tool-demanded overrides still prompt. Provider safety checks are
+		// stronger: yolo, per-tool allow, and xdev approval never acknowledge
+		// them on the user's behalf.
 		const explicitPrompt = resolved.override || Object.hasOwn(userPolicies, this.tool.name);
+		const xdevBypass = context?.xdevApproved === true && effectiveParams === params;
 		const approvalCheck = {
-			required:
-				pendingSafetyChecks.length > 0 ||
-				(resolved.policy === "prompt" && (explicitPrompt || context?.xdevApproved !== true)),
+			required: pendingSafetyChecks.length > 0 || (resolved.policy === "prompt" && (explicitPrompt || !xdevBypass)),
 			reason: resolved.reason,
 		};
 
