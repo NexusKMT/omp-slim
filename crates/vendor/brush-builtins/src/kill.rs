@@ -115,7 +115,7 @@ impl builtins::Command for KillCommand {
 		operands.extend(self.post_marker_args.iter());
 
 		if self.list_signals {
-			return print_signals(&context, self.args.as_ref());
+			return print_signals(&context, self.listed_signals());
 		}
 		if operands.is_empty() {
 			writeln!(context.stderr(), "{}: invalid usage", context.command_name)?;
@@ -163,12 +163,33 @@ impl builtins::Command for KillCommand {
 	}
 }
 
-fn print_signals(
+impl KillCommand {
+	/// Signal specifications to list in `-l` mode: the pre-`--` positionals
+	/// (minus the marker itself, which clap may leave in `args`; see above)
+	/// followed by the post-marker operands.
+	fn listed_signals(&self) -> impl Iterator<Item = &String> {
+		let mut consumed_marker = false;
+		self.args
+			.iter()
+			.filter(move |arg| {
+				if !consumed_marker && *arg == "--" {
+					consumed_marker = true;
+					false
+				} else {
+					true
+				}
+			})
+			.chain(&self.post_marker_args)
+	}
+}
+
+fn print_signals<'a>(
 	context: &brush_core::ExecutionContext<'_, impl brush_core::ShellExtensions>,
-	signals: &[String],
+	signals: impl IntoIterator<Item = &'a String>,
 ) -> Result<ExecutionResult, brush_core::Error> {
 	let mut exit_code = ExecutionResult::success();
-	if !signals.is_empty() {
+	let mut signals = signals.into_iter().peekable();
+	if signals.peek().is_some() {
 		for s in signals {
 			// If the user gives us a code, we print the name; if they give a name, we print
 			// its code.
@@ -209,4 +230,29 @@ fn print_signals(
 	}
 
 	Ok(exit_code)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn listed(args: &[&str]) -> Vec<String> {
+		let cmd = KillCommand::try_parse_from(args).unwrap();
+		cmd.listed_signals().cloned().collect()
+	}
+
+	#[test]
+	fn lists_post_marker_operands() {
+		assert_eq!(listed(&["kill", "-l", "--", "9"]), ["9"]);
+	}
+
+	#[test]
+	fn lists_pre_and_post_marker_operands() {
+		assert_eq!(listed(&["kill", "-l", "TERM", "--", "9"]), ["TERM", "9"]);
+	}
+
+	#[test]
+	fn lists_pre_marker_operands_without_marker() {
+		assert_eq!(listed(&["kill", "-l", "TERM", "HUP"]), ["TERM", "HUP"]);
+	}
 }
