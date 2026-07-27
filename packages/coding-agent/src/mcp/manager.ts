@@ -1041,13 +1041,7 @@ export class MCPManager {
 	async #loadServerResourcesAndPrompts(name: string, connection: MCPServerConnection): Promise<void> {
 		if (serverSupportsResources(connection.capabilities)) {
 			try {
-				const [resources] = await Promise.all([listResources(connection), listResourceTemplates(connection)]);
-
-				if (this.#notificationsEnabled && connection.capabilities.resources?.subscribe) {
-					const uris = resources.map(r => r.uri);
-					const notificationEpoch = this.#notificationsEpoch;
-					this.#subscribeAndTrack(name, connection, uris, notificationEpoch);
-				}
+				await this.refreshServerResources(name);
 			} catch (error) {
 				logger.debug("Failed to load MCP resources", { path: `mcp:${name}`, error });
 			}
@@ -1159,6 +1153,17 @@ export class MCPManager {
 		});
 		this.#pendingResourceRefresh.set(name, { connection, promise });
 		return promise;
+	}
+
+	/**
+	 * Wait until a connected server's resource catalog has been loaded.
+	 * Coalesces with initial loading and notification-driven refreshes.
+	 */
+	async ensureServerResources(name: string): Promise<void> {
+		const connection = this.#connections.get(name);
+		if (!connection || !serverSupportsResources(connection.capabilities)) return;
+		if (connection.resources !== undefined && connection.resourceTemplates !== undefined) return;
+		await this.refreshServerResources(name);
 	}
 
 	/**

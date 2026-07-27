@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * Test fixture: a stdio MCP server that advertises the `resources` capability
- * and serves `resources/list`, but does NOT implement the optional
+ * and serves `resources/list` plus `resources/read`, but does NOT implement the optional
  * `resources/templates/list` method — it answers that request with a JSON-RPC
  * -32601 ("Method not found") error, exactly like jcodemunch/jdocmunch.
  *
@@ -24,7 +24,7 @@ type JsonRpcRequest = {
 	params?: Record<string, unknown>;
 };
 
-function buildResult(method: string): Record<string, unknown> {
+function buildResult(method: string, params?: Record<string, unknown>): Record<string, unknown> {
 	switch (method) {
 		case "initialize":
 			return {
@@ -36,6 +36,10 @@ function buildResult(method: string): Record<string, unknown> {
 			return {
 				resources: RESOURCE_URIS.map((uri, i) => ({ uri, name: `Resource ${i}` })),
 			};
+		case "resources/read": {
+			const uri = String(params?.uri ?? "");
+			return { contents: [{ uri, text: `fixture content for ${uri}` }] };
+		}
 		default:
 			return {};
 	}
@@ -66,7 +70,7 @@ function startServer(): void {
 			return;
 		}
 
-		const response = { jsonrpc: "2.0" as const, id: msg.id, result: buildResult(msg.method) };
+		const response = { jsonrpc: "2.0" as const, id: msg.id, result: buildResult(msg.method, msg.params) };
 		process.stdout.write(`${JSON.stringify(response)}\n`);
 	});
 	rl.on("close", () => process.exit(0));
