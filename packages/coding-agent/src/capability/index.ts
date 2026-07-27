@@ -102,7 +102,7 @@ async function loadImpl<T>(
 	capability: Capability<T>,
 	providers: Provider<T>[],
 	ctx: LoadContext,
-	options: LoadOptions,
+	options: LoadOptions<T>,
 ): Promise<CapabilityResult<T>> {
 	const allItems: Array<T & { _source: SourceMeta; _shadowed?: boolean }> = [];
 	const allWarnings: string[] = [];
@@ -216,7 +216,7 @@ async function loadImpl<T>(
 /**
  * Filter providers based on options and disabled state.
  */
-function filterProviders<T>(capability: Capability<T>, options: LoadOptions): Provider<T>[] {
+function filterProviders<T>(capability: Capability<T>, options: LoadOptions<T>): Provider<T>[] {
 	let providers = (capability.providers as Provider<T>[]).filter(p => !disabledProviders.has(p.id));
 
 	if (options.providers) {
@@ -234,7 +234,10 @@ function filterProviders<T>(capability: Capability<T>, options: LoadOptions): Pr
 /**
  * Load a capability by ID.
  */
-export async function loadCapability<T>(capabilityId: string, options: LoadOptions = {}): Promise<CapabilityResult<T>> {
+export async function loadCapability<T>(
+	capabilityId: string,
+	options: LoadOptions<T> = {},
+): Promise<CapabilityResult<T>> {
 	const capability = capabilities.get(capabilityId) as Capability<T> | undefined;
 	if (!capability) {
 		throw new Error(`Unknown capability: "${capabilityId}"`);

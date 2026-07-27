@@ -70,4 +70,13 @@ describe("MCP scope filtering precedes connection-equivalence deduplication", ()
 		expect(Object.keys(result.configs)).toEqual(["projcontext"]);
 		expect(result.sources.projcontext?.level).toBe("project");
 	});
+
+	test("keeps the enabled alias when an equivalent higher-priority server is disabled", async () => {
+		// Higher-priority project server disabled via `enabled: false`; a differently
+		// named but connection-equivalent user server stays enabled and must survive.
+		await writeMcpJson(path.join(projectDir, ".omp"), { projcontext: { ...CONNECTION, enabled: false } });
+		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: true, filterExa: false });
+		expect(Object.keys(result.configs)).toEqual(["usercontext"]);
+		expect(result.sources.usercontext?.level).toBe("user");
+	});
 });
