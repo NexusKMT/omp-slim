@@ -4,6 +4,11 @@
  * so a project server can shadow a differently-named but connection-equivalent
  * user server during dedup. When `enableProjectConfig` is false the project entry
  * is then removed, and without pre-dedup scope filtering no server would survive.
+ *
+ * Disabled servers are different: a disabled entry must still OWN its name at
+ * key-level dedupe (a disabled project `foo` keeps a same-named user `foo`
+ * disabled) while never equivalence-shadowing a differently-named enabled
+ * server. That is the `suppress` path in loadAllMCPConfigs.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
@@ -78,5 +83,27 @@ describe("MCP scope filtering precedes connection-equivalence deduplication", ()
 		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: true, filterExa: false });
 		expect(Object.keys(result.configs)).toEqual(["usercontext"]);
 		expect(result.sources.usercontext?.level).toBe("user");
+	});
+
+	test("project-disabled server keeps a same-named enabled user server disabled", async () => {
+		// Same name in both scopes: the higher-priority project entry owns the
+		// key even while disabled, so the enabled user entry must NOT survive
+		// and connect. An equivalent user server under a DIFFERENT name is not
+		// starved by the disabled owner and still survives.
+		await writeMcpJson(path.join(projectDir, ".omp"), { shared: { ...CONNECTION, enabled: false } });
+		await writeMcpJson(userAgentDir, { shared: CONNECTION, usercontext: CONNECTION });
+		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: true, filterExa: false });
+		expect(Object.keys(result.configs)).toEqual(["usercontext"]);
+		expect(result.sources.usercontext?.level).toBe("user");
+	});
+
+	test("same-named user server survives when project config is scope-disabled", async () => {
+		// Scope exclusion removes the project entry entirely — unlike a disabled
+		// entry, it must not claim the key and shadow the user server.
+		await writeMcpJson(path.join(projectDir, ".omp"), { shared: { ...CONNECTION, enabled: false } });
+		await writeMcpJson(userAgentDir, { shared: CONNECTION });
+		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: false, filterExa: false });
+		expect(Object.keys(result.configs)).toEqual(["shared"]);
+		expect(result.sources.shared?.level).toBe("user");
 	});
 });

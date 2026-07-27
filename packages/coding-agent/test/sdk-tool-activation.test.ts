@@ -365,7 +365,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		}
 	});
 
-	it("keeps the first MCP tool-name collision during SDK startup and warns", async () => {
+	it("keeps the stable MCP tool-name collision winner during SDK startup and warns", async () => {
 		const tempDir = makeTempDir();
 		const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
 		const createMcpTool = (serverName: string, label: string): CustomTool => ({
@@ -387,7 +387,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 
 		try {
 			expect(session.getToolByName("mcp__foo_bar_lookup")?.label).toBe("foo.bar/lookup");
-			expect(warn).toHaveBeenCalledWith("MCP tool name collision; keeping first registration", {
+			expect(warn).toHaveBeenCalledWith("MCP tool name collision; keeping stable winner", {
 				name: "mcp__foo_bar_lookup",
 				keptServer: "foo.bar",
 				keptTool: "lookup",

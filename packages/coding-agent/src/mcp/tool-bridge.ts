@@ -358,14 +358,18 @@ export function createMCPToolName(serverName: string, toolName: string): string 
 }
 
 /**
- * Keeps the first MCP tool for each minted name and logs collisions between
- * distinct MCP origins. Non-MCP tools pass through unchanged.
+ * Keeps one MCP tool per minted name and logs collisions between distinct MCP
+ * origins. The winner is chosen by a stable origin key (server name + original
+ * tool name), NOT array order: MCPManager re-appends a reconnecting server's
+ * tools, so insertion order is mutable across reconnects and first-wins would
+ * silently flip ownership of the minted name. Non-MCP tools pass through
+ * unchanged.
  */
 export function deduplicateMCPToolsByName<T extends { name: string; mcpServerName?: unknown; mcpToolName?: unknown }>(
 	tools: readonly T[],
 ): T[] {
 	const deduplicated: T[] = [];
-	const registered = new Map<string, T>();
+	const registered = new Map<string, { tool: T; originKey: string; index: number }>();
 
 	for (const tool of tools) {
 		if (typeof tool.mcpServerName !== "string" || typeof tool.mcpToolName !== "string") {
@@ -373,22 +377,32 @@ export function deduplicateMCPToolsByName<T extends { name: string; mcpServerNam
 			continue;
 		}
 
+		const originKey = `${tool.mcpServerName}\u0000${tool.mcpToolName}`;
 		const existing = registered.get(tool.name);
 		if (!existing) {
-			registered.set(tool.name, tool);
+			registered.set(tool.name, { tool, originKey, index: deduplicated.length });
 			deduplicated.push(tool);
 			continue;
 		}
 
-		if (existing.mcpServerName !== tool.mcpServerName || existing.mcpToolName !== tool.mcpToolName) {
-			logger.warn("MCP tool name collision; keeping first registration", {
-				name: tool.name,
-				keptServer: existing.mcpServerName,
-				keptTool: existing.mcpToolName,
-				ignoredServer: tool.mcpServerName,
-				ignoredTool: tool.mcpToolName,
-			});
+		if (existing.originKey === originKey) continue;
+
+		// Deterministic winner regardless of encounter order across reconnects.
+		const keepExisting = existing.originKey < originKey;
+		const winner = keepExisting ? existing.tool : tool;
+		const loser = keepExisting ? tool : existing.tool;
+		if (!keepExisting) {
+			deduplicated[existing.index] = tool;
+			existing.tool = tool;
+			existing.originKey = originKey;
 		}
+		logger.warn("MCP tool name collision; keeping stable winner", {
+			name: tool.name,
+			keptServer: winner.mcpServerName,
+			keptTool: winner.mcpToolName,
+			ignoredServer: loser.mcpServerName,
+			ignoredTool: loser.mcpToolName,
+		});
 	}
 
 	return deduplicated;

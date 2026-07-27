@@ -73,12 +73,21 @@ export interface LoadOptions<T = unknown> {
 	/** Explicit disabled extension IDs to apply instead of settings. */
 	disabledExtensions?: string[];
 	/**
-	 * Drop items before deduplication. Use when a per-name or scope filter must
-	 * precede equivalence collapse, so a to-be-filtered item cannot shadow a
-	 * differently-keyed but equivalent survivor and then be removed downstream,
-	 * leaving none. Receives the item with its attached `_source`.
+	 * Drop items before deduplication as if they never existed (e.g. scope
+	 * exclusions). A dropped item neither survives nor claims its dedupe key,
+	 * so it cannot shadow anything. Receives the item with its attached
+	 * `_source`.
 	 */
 	filter?(item: T & { _source: SourceMeta }): boolean;
+	/**
+	 * Exclude items from the results while letting them claim their dedupe key.
+	 * A suppressed higher-priority item still shadows same-key lower-priority
+	 * items (a disabled project server keeps the same-named user server off),
+	 * but never equivalence-shadows a differently-keyed survivor — so a
+	 * suppressed alias cannot starve an enabled equivalent connection.
+	 * Return `true` to suppress. Receives the item with its attached `_source`.
+	 */
+	suppress?(item: T & { _source: SourceMeta }): boolean;
 }
 
 /**

@@ -105,18 +105,27 @@ export async function loadAllMCPConfigs(cwd: string, options?: LoadMCPConfigsOpt
 		readEnabledServers(userPath).then(list => new Set(list)),
 	]);
 
-	// Apply every per-name and per-scope exclusion BEFORE the capability layer's
-	// equivalence deduplication. Otherwise a disabled or out-of-scope server can
-	// shadow a differently-named but connection-equivalent enabled server during
-	// dedup and then be removed here, leaving no connection at all.
-	const includeServer = (server: MCPServer & { _source: SourceMeta }): boolean => {
-		if (!enableProjectConfig && server._source.level === "project") return false;
-		if (disabledServers.has(server.name)) return false;
-		if (server.enabled === false && !forcedEnabled.has(server.name)) return false;
-		return true;
+	// Scope exclusions drop entries entirely BEFORE deduplication: with project
+	// config disabled, a project entry must not shadow anything.
+	const includeServer = (server: MCPServer & { _source: SourceMeta }): boolean =>
+		enableProjectConfig || server._source.level !== "project";
+
+	// Disabled servers are suppressed rather than dropped: they still own their
+	// name at key-level dedupe (a disabled project `foo` keeps a same-named,
+	// lower-priority user `foo` disabled), but never equivalence-shadow a
+	// differently-named enabled server — otherwise the disabled alias would be
+	// removed downstream and starve the surviving connection.
+	const suppressServer = (server: MCPServer & { _source: SourceMeta }): boolean => {
+		if (disabledServers.has(server.name)) return true;
+		if (server.enabled === false && !forcedEnabled.has(server.name)) return true;
+		return false;
 	};
 
-	const result = await loadCapability<MCPServer>(mcpCapability.id, { cwd, filter: includeServer });
+	const result = await loadCapability<MCPServer>(mcpCapability.id, {
+		cwd,
+		filter: includeServer,
+		suppress: suppressServer,
+	});
 
 	// Convert to legacy format and preserve source metadata.
 	let configs: Record<string, MCPServerConfig> = {};

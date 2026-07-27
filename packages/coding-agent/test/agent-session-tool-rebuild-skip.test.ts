@@ -183,7 +183,7 @@ describe("AgentSession refreshMCPTools rebuild skipping", () => {
 		expect(rebuildCount).toBe(1);
 	});
 
-	it("warns and keeps the first tool when distinct MCP tools mint the same name", async () => {
+	it("warns and keeps the stable winner when distinct MCP tools mint the same name", async () => {
 		const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
 		const { session, toolRegistry } = newSession(async toolNames => `tools:${toolNames.join(",")}`);
 		const dotted = createMcpCustomTool("mcp__foo_bar_lookup", "foo.bar", "lookup", "Lookup from dotted");
@@ -192,7 +192,7 @@ describe("AgentSession refreshMCPTools rebuild skipping", () => {
 		await session.refreshMCPTools([dotted, underscored]);
 
 		expect(toolRegistry.get("mcp__foo_bar_lookup")?.label).toBe("foo.bar/lookup");
-		expect(warn).toHaveBeenCalledWith("MCP tool name collision; keeping first registration", {
+		expect(warn).toHaveBeenCalledWith("MCP tool name collision; keeping stable winner", {
 			name: "mcp__foo_bar_lookup",
 			keptServer: "foo.bar",
 			keptTool: "lookup",

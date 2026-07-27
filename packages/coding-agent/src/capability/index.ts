@@ -105,6 +105,7 @@ async function loadImpl<T>(
 	options: LoadOptions<T>,
 ): Promise<CapabilityResult<T>> {
 	const allItems: Array<T & { _source: SourceMeta; _shadowed?: boolean }> = [];
+	const suppressedItems = new Set<T & { _source: SourceMeta; _shadowed?: boolean }>();
 	const allWarnings: string[] = [];
 	const contributingProviders: string[] = [];
 	const disabledExtensionIds = options.includeDisabled
@@ -158,6 +159,17 @@ async function loadImpl<T>(
 				continue;
 			}
 
+			if (options.suppress?.(itemWithSource)) {
+				// Suppressed items still claim their dedupe key below, so a
+				// suppressed higher-priority item shadows same-key lower-priority
+				// ones, but they never survive or equivalence-shadow survivors.
+				itemWithSource._source.providerName = provider.displayName;
+				const suppressed = itemWithSource as T & { _source: SourceMeta; _shadowed?: boolean };
+				suppressedItems.add(suppressed);
+				allItems.push(suppressed);
+				continue;
+			}
+
 			itemWithSource._source.providerName = provider.displayName;
 			allItems.push(itemWithSource as T & { _source: SourceMeta; _shadowed?: boolean });
 			contributedItemCount += 1;
@@ -175,6 +187,13 @@ async function loadImpl<T>(
 
 	for (const item of allItems) {
 		const key = capability.key(item);
+
+		if (suppressedItems.has(item)) {
+			// Claim key ownership (same-name precedence, including disabled
+			// state) without surviving or equivalence-shadowing survivors.
+			if (key !== undefined) seen.add(key);
+			continue;
+		}
 
 		if (key === undefined) {
 			deduped.push(item);
@@ -207,7 +226,7 @@ async function loadImpl<T>(
 
 	return {
 		items: deduped,
-		all: allItems,
+		all: suppressedItems.size > 0 ? allItems.filter(item => !suppressedItems.has(item)) : allItems,
 		warnings: allWarnings,
 		providers: contributingProviders,
 	};
