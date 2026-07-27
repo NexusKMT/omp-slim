@@ -76,6 +76,27 @@ describe("ProcessTerminal disconnect with a revoked pty", () => {
 		expect(signals).toContain("SIGHUP");
 	});
 
+	it("propagates a raw-mode restore failure while the terminal is still live", () => {
+		let started = false;
+		Object.defineProperty(process.stdin, "setRawMode", {
+			value: () => {
+				if (started) throw new Error(REVOKED_PTY);
+				started = true;
+				return process.stdin;
+			},
+			configurable: true,
+		});
+
+		const terminal = new ProcessTerminal();
+		terminal.start(
+			() => {},
+			() => {},
+			() => {},
+		);
+
+		expect(() => terminal.stop()).toThrow(REVOKED_PTY);
+	});
+
 	it("still signals SIGHUP when the disconnect handler itself throws", () => {
 		Object.defineProperty(process.stdin, "setRawMode", { value: () => process.stdin, configurable: true });
 

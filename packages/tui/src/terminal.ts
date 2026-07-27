@@ -1462,12 +1462,16 @@ export class ProcessTerminal implements Terminal {
 		// where Ctrl+D could close the parent shell over SSH.
 		process.stdin.pause();
 
-		// Restore raw mode state, best-effort: a revoked pty (pane recycled, ssh
-		// dropped) is no longer a tty and Bun's node:tty shim throws ENOENT. There
-		// is nothing left to restore, and throwing here would abort the caller.
+		// Restore raw mode state. On a disconnected terminal (pane recycled, ssh
+		// dropped) the fd is no longer a tty and Bun's node:tty shim throws; there
+		// is nothing left to restore, and throwing would abort the caller. On a
+		// live terminal the failure still surfaces - swallowing it would silently
+		// leave stdin in raw mode.
 		try {
 			process.stdin.setRawMode?.(this.#wasRaw);
-		} catch {}
+		} catch (err) {
+			if (!this.#dead) throw err;
+		}
 		this.#stdoutErrorCleanup?.();
 		this.#stdoutErrorCleanup = undefined;
 	}
