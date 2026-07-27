@@ -430,6 +430,14 @@ export type SystemPromptToolMetadataProjection =
 
 export function buildSystemPromptToolMetadata(
 	tools: Map<string, AgentTool>,
+	overrides: Partial<Record<string, Partial<SystemPromptToolMetadata>>> = {},
+): Map<string, SystemPromptToolMetadata> {
+	return projectSystemPromptToolMetadata(tools, { mode: "full", overrides });
+}
+
+/** Builds a mode-specific metadata snapshot for internal prompt assembly. */
+export function projectSystemPromptToolMetadata(
+	tools: Map<string, AgentTool>,
 	projection: SystemPromptToolMetadataProjection,
 ): Map<string, SystemPromptToolMetadata> {
 	const metadata = new Map<string, SystemPromptToolMetadata>();

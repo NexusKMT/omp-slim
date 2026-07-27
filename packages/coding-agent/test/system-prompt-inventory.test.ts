@@ -7,6 +7,7 @@ import { buildSystemPrompt as buildSdkSystemPrompt } from "@oh-my-pi/pi-coding-a
 import {
 	buildSystemPrompt,
 	buildSystemPromptToolMetadata,
+	projectSystemPromptToolMetadata,
 	DEFAULT_SYSTEM_PROMPT_TOOL_NAMES,
 	type SystemPromptToolMetadata,
 } from "@oh-my-pi/pi-coding-agent/system-prompt";
@@ -145,6 +146,34 @@ describe("system prompt tool inventory", () => {
 		} as ToolSession;
 	}
 
+	it("preserves the one-argument full metadata builder", () => {
+		const metadata = buildSystemPromptToolMetadata(new Map([[SDK_TOOL.name, SDK_TOOL]]));
+
+		expect(Array.from(metadata.keys())).toEqual(["sdk_custom"]);
+		expect(metadata.get("sdk_custom")).toMatchObject({
+			label: "SDK Custom",
+			description: "SDK-provided custom tool.",
+			parameters: { type: "object", properties: {} },
+		});
+	});
+
+	it("preserves the legacy metadata overrides map", () => {
+		const metadata = buildSystemPromptToolMetadata(new Map([[SDK_TOOL.name, SDK_TOOL]]), {
+			sdk_custom: {
+				label: "Overridden label",
+				description: "Overridden description.",
+				wireName: "sdk_custom_wire",
+			},
+		});
+
+		expect(metadata.get("sdk_custom")).toMatchObject({
+			label: "Overridden label",
+			description: "Overridden description.",
+			parameters: { type: "object", properties: {} },
+			wireName: "sdk_custom_wire",
+		});
+	});
+
 	it("snapshots every full metadata getter once per rebuild and keeps fresh values", async () => {
 		let revision = 1;
 		const reads = new Map<string, MetadataGetterCounts>();
@@ -188,7 +217,7 @@ describe("system prompt tool inventory", () => {
 			["edit", makeTool("edit")],
 		]);
 
-		const first = buildSystemPromptToolMetadata(tools, { mode: "full" });
+		const first = projectSystemPromptToolMetadata(tools, { mode: "full" });
 		expect(Array.from(first.keys())).toEqual(["read", "edit"]);
 		expect(first.get("edit")).toEqual({
 			label: "edit label r1",
@@ -223,7 +252,7 @@ describe("system prompt tool inventory", () => {
 		expect(firstText).toContain("arg_r1: string;");
 
 		revision = 2;
-		const second = buildSystemPromptToolMetadata(tools, { mode: "full" });
+		const second = projectSystemPromptToolMetadata(tools, { mode: "full" });
 		expect(second.get("edit")?.description).toBe("edit description r2");
 		expect(second.get("edit")?.wireName).toBe("edit_wire_r2");
 		expect(first.get("edit")?.description).toBe("edit description r1");
@@ -289,7 +318,7 @@ describe("system prompt tool inventory", () => {
 			["edit", makeTool("edit", "Edit", "apply_patch")],
 		]);
 
-		const metadata = buildSystemPromptToolMetadata(tools, {
+		const metadata = projectSystemPromptToolMetadata(tools, {
 			mode: "compact",
 			toolNames: ["edit", "read"],
 		});
@@ -500,7 +529,7 @@ describe("system prompt tool inventory", () => {
 			skills: [],
 			rules: [],
 			toolNames,
-			tools: buildSystemPromptToolMetadata(new Map(tools.map(tool => [tool.name, tool])), { mode: "full" }),
+			tools: buildSystemPromptToolMetadata(new Map(tools.map(tool => [tool.name, tool]))),
 			workspaceTree: { ...EMPTY_TREE, rootPath: tempDir },
 			nativeTools: true,
 			inlineToolDescriptors: true,

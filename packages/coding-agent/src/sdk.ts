@@ -153,7 +153,7 @@ import { unmountAll } from "./ssh/sshfs-mount";
 import {
 	type BuildSystemPromptResult,
 	buildSystemPrompt as buildSystemPromptInternal,
-	buildSystemPromptToolMetadata,
+	projectSystemPromptToolMetadata,
 	loadProjectContextFiles as loadContextFilesInternal,
 } from "./system-prompt";
 import { AgentOutputManager } from "./task/output-manager";
@@ -813,7 +813,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 	const toolNames = options.tools?.map(tool => tool.name);
 	const toolMap = options.tools ? new Map(options.tools.map(tool => [tool.name, tool])) : undefined;
 	const promptTools = toolMap
-		? buildSystemPromptToolMetadata(
+		? projectSystemPromptToolMetadata(
 				toolMap,
 				options.inlineToolDescriptors ? { mode: "full" } : { mode: "compact", toolNames: toolNames ?? [] },
 			)
@@ -2682,7 +2682,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			// Owned/in-band tool dialects (non-native) require the catalog as `# Tool:`
 			// sections; native tool calling lets the compact name list suffice.
 			const nativeTools = resolveDialect(settings.get("tools.format"), agent?.state.model ?? model) === undefined;
-			const promptTools = buildSystemPromptToolMetadata(
+			const promptTools = projectSystemPromptToolMetadata(
 				tools,
 				nativeTools && !inlineToolDescriptors ? { mode: "compact", toolNames } : { mode: "full" },
 			);
