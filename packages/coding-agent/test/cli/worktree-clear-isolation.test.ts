@@ -63,6 +63,14 @@ describe("worktree clear task-isolation ownership", () => {
 		await fs.mkdir(pending, { recursive: true });
 		await writeIsolationOwner(pending, "pend0005");
 
+		// Recycled pid: the crashed owner's pid was reassigned to this live test
+		// process, but the recorded start-time token no longer matches.
+		const recycled = await makeSandbox("trecyc06");
+		await Bun.write(
+			path.join(recycled, ISOLATION_OWNER_FILE),
+			JSON.stringify({ pid: process.pid, id: "recyc06", startToken: "not-the-current-token" }),
+		);
+
 		await clearWorktrees({ all: false, dryRun: false, json: true });
 
 		const exists = async (p: string): Promise<boolean> =>
@@ -75,5 +83,6 @@ describe("worktree clear task-isolation ownership", () => {
 		expect(await exists(orphan)).toBe(false);
 		expect(await exists(corrupt)).toBe(false);
 		expect(await exists(pending)).toBe(true);
+		expect(await exists(recycled)).toBe(false);
 	});
 });
