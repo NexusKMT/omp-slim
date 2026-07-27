@@ -401,73 +401,39 @@ describe("OpenAI GA computer contract", () => {
 		}
 	});
 
-	test("preserves linked reasoning and computer item IDs for stateless replay", () => {
+	test("keeps earlier tool-response reasoning IDs stripped in mixed computer history", () => {
 		const sanitized = sanitizeOpenAIResponsesHistoryItemsForReplay([
 			{
 				type: "reasoning",
-				id: "rs_interrupted_turn",
-				summary: [],
-				encrypted_content: "encrypted-reasoning",
-			},
-			{
-				type: "computer_call",
-				id: "cu_interrupted_turn",
-				call_id: "call_interrupted_turn",
-				action: { type: "screenshot" },
-				pending_safety_checks: [],
-				status: "completed",
-			},
-			{
-				type: "computer_call_output",
-				call_id: "call_interrupted_turn",
-				output: { type: "computer_screenshot", image_url: "data:image/png;base64,AAEC" },
-			},
-		]);
-
-		expect(sanitized).toEqual([
-			{
-				type: "reasoning",
-				id: "rs_interrupted_turn",
-				summary: [],
-				encrypted_content: "encrypted-reasoning",
-			},
-			{
-				type: "computer_call",
-				id: "cu_interrupted_turn",
-				call_id: "call_interrupted_turn",
-				action: { type: "screenshot" },
-				pending_safety_checks: [],
-				status: "completed",
-			},
-			{
-				type: "computer_call_output",
-				call_id: "call_interrupted_turn",
-				output: { type: "computer_screenshot", image_url: "data:image/png;base64,AAEC" },
-			},
-		]);
-	});
-
-	test("keeps unrelated reasoning item IDs stripped in mixed computer history", () => {
-		const sanitized = sanitizeOpenAIResponsesHistoryItemsForReplay([
-			{
-				type: "reasoning",
-				id: "rs_unrelated_turn",
+				id: "rs_unrelated_tool_turn",
 				summary: [],
 				encrypted_content: "unrelated-reasoning",
 			},
 			{
-				type: "message",
-				id: "msg_unrelated_turn",
-				role: "assistant",
+				type: "function_call",
+				id: "fc_unrelated_tool_turn",
+				call_id: "call_unrelated_tool_turn",
+				name: "read",
+				arguments: "{}",
 				status: "completed",
-				content: [{ type: "output_text", text: "Earlier answer", annotations: [] }],
 			},
-			{ type: "message", role: "user", content: [{ type: "input_text", text: "Use the computer" }] },
+			{
+				type: "function_call_output",
+				call_id: "call_unrelated_tool_turn",
+				output: "earlier tool result",
+			},
 			{
 				type: "reasoning",
 				id: "rs_computer_turn",
 				summary: [],
 				encrypted_content: "computer-reasoning",
+			},
+			{
+				type: "message",
+				id: "msg_computer_turn",
+				role: "assistant",
+				status: "completed",
+				content: [{ type: "output_text", text: "I will inspect the screen.", annotations: [] }],
 			},
 			{
 				type: "computer_call",
@@ -485,6 +451,7 @@ describe("OpenAI GA computer contract", () => {
 			encrypted_content: "unrelated-reasoning",
 		});
 		expect(sanitized[3]!).toMatchObject({ type: "reasoning", id: "rs_computer_turn" });
+		expect(sanitized[5]!).toMatchObject({ type: "computer_call", id: "cu_computer_turn" });
 	});
 
 	test("turns a failed computer call without a screenshot into valid recovery history", () => {

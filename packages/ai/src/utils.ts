@@ -111,7 +111,12 @@ export function sanitizeOpenAIResponsesHistoryItemsForReplay(
 	const computerLinkedReasoningItems = new Set<Record<string, unknown>>();
 	const responseReasoningItems: Array<Record<string, unknown>> = [];
 	for (const item of items) {
-		if (item.type === "message") {
+		const startsNewResponse =
+			(item.type === "message" && item.role !== "assistant") ||
+			item.type === "function_call_output" ||
+			item.type === "custom_tool_call_output" ||
+			item.type === "computer_call_output";
+		if (startsNewResponse) {
 			responseReasoningItems.length = 0;
 		} else if (item.type === "reasoning") {
 			responseReasoningItems.push(item);
