@@ -106,11 +106,7 @@ export interface TurnRecoveryHost {
 	promptGeneration(): number;
 	sessionId(): string;
 	emitSessionEvent(event: AgentSessionEvent): Promise<void>;
-	scheduleAgentContinue(options: {
-		delayMs?: number;
-		generation?: number;
-		onError?: (error: unknown) => void;
-	}): void;
+	scheduleAgentContinue(options: { delayMs?: number; generation?: number; onError?: (error: unknown) => void }): void;
 	waitForSessionMessagePersistence(message: AssistantMessage): Promise<void>;
 	appendSessionMessage(message: AssistantMessage): void;
 	sessionMessageAlreadyPersisted(message: AssistantMessage): boolean;
