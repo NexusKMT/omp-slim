@@ -185,7 +185,20 @@ describe("parseKey", () => {
 });
 
 describe("Raw 0x08 backspace disambiguation", () => {
-	const envKeys = ["WT_SESSION", "SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY", "PI_TUI_RAW_BACKSPACE_IS_CTRL"] as const;
+	const envKeys = [
+		"WT_SESSION",
+		"SSH_CONNECTION",
+		"SSH_CLIENT",
+		"SSH_TTY",
+		"PI_TUI_RAW_BACKSPACE_IS_CTRL",
+		"TMUX",
+		"STY",
+		"ZELLIJ",
+		"TERM",
+		"CMUX_WORKSPACE_ID",
+		"CMUX_SURFACE_ID",
+		"CMUX_REMOTE_TRANSPORT",
+	] as const;
 	function withEnv(overrides: Partial<Record<(typeof envKeys)[number], string>>, run: () => void): void {
 		const saved: Record<string, string | undefined> = {};
 		for (const key of envKeys) {
@@ -230,6 +243,32 @@ describe("Raw 0x08 backspace disambiguation", () => {
 		withEnv({ WT_SESSION: "1", SSH_CONNECTION: "1.2.3.4 5 6.7.8.9 22" }, () => {
 			expect(isWindowsTerminalSession()).toBe(false);
 			expect(parseKey("\x08")).toBe("backspace");
+		});
+	});
+
+	it("does not apply the heuristic inside a multiplexer that inherited WT_SESSION", () => {
+		// tmux/screen/Zellij inherit WT_SESSION from the launching shell but emit
+		// raw 0x08 for plain Backspace themselves, so the automatic heuristic
+		// must stay off there (#6784 review).
+		const multiplexers: Array<Partial<Record<(typeof envKeys)[number], string>>> = [
+			{ WT_SESSION: "1", TMUX: "/tmp/tmux-1000/default,1,0" },
+			{ WT_SESSION: "1", STY: "1234.pts-0" },
+			{ WT_SESSION: "1", ZELLIJ: "0" },
+			{ WT_SESSION: "1", TERM: "tmux-256color" },
+			{ WT_SESSION: "1", TERM: "screen-256color" },
+		];
+		for (const env of multiplexers) {
+			withEnv(env, () => {
+				expect(matchesRawBackspace("\x08", 0)).toBe(true);
+				expect(matchesRawBackspace("\x08", 4)).toBe(false);
+				expect(parseKey("\x08")).toBe("backspace");
+			});
+		}
+		// The explicit opt-in still wins inside a multiplexer.
+		withEnv({ WT_SESSION: "1", TMUX: "/tmp/tmux-1000/default,1,0", PI_TUI_RAW_BACKSPACE_IS_CTRL: "1" }, () => {
+			expect(matchesRawBackspace("\x08", 4)).toBe(true);
+			expect(matchesRawBackspace("\x08", 0)).toBe(false);
+			expect(parseKey("\x08")).toBe("ctrl+backspace");
 		});
 	});
 

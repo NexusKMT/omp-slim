@@ -24,6 +24,7 @@ import {
 	parseKey as parseKeyNative,
 	parseKittySequence as parseKittySequenceNative,
 } from "@oh-my-pi/pi-natives";
+import { isInsideTerminalMultiplexer } from "./terminal-capabilities";
 
 // =============================================================================
 // Platform Detection
@@ -41,12 +42,17 @@ export function isWindowsTerminalSession(): boolean {
  *
  * Windows Terminal encodes Ctrl+Backspace as raw `0x08` (BS) and plain
  * Backspace as `0x7f` (DEL). Remote/container sessions lose terminal identity,
- * so `PI_TUI_RAW_BACKSPACE_IS_CTRL=1` explicitly opts into the same mapping.
+ * and multiplexers (tmux/screen/Zellij) inherit `WT_SESSION` while emitting
+ * raw `0x08` for plain Backspace themselves, so the automatic heuristic is
+ * limited to direct Windows Terminal sessions. `PI_TUI_RAW_BACKSPACE_IS_CTRL=1`
+ * explicitly opts into the mapping everywhere.
  */
 export function matchesRawBackspace(data: string, expectedModifier: number): boolean {
 	if (data === "\x7f") return expectedModifier === 0;
 	if (data !== "\x08") return false;
-	const rawBackspaceIsCtrl = process.env.PI_TUI_RAW_BACKSPACE_IS_CTRL === "1" || isWindowsTerminalSession();
+	const rawBackspaceIsCtrl =
+		process.env.PI_TUI_RAW_BACKSPACE_IS_CTRL === "1" ||
+		(isWindowsTerminalSession() && !isInsideTerminalMultiplexer(process.env));
 	return rawBackspaceIsCtrl ? expectedModifier === 4 : expectedModifier === 0;
 }
 
