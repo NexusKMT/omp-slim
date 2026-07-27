@@ -154,6 +154,10 @@ async function loadImpl<T>(
 				continue;
 			}
 
+			if (options.filter && !options.filter(itemWithSource)) {
+				continue;
+			}
+
 			itemWithSource._source.providerName = provider.displayName;
 			allItems.push(itemWithSource as T & { _source: SourceMeta; _shadowed?: boolean });
 			contributedItemCount += 1;

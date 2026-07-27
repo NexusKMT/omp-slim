@@ -97,13 +97,14 @@ export async function loadAllMCPConfigs(cwd: string, options?: LoadMCPConfigsOpt
 	const filterExa = options?.filterExa ?? true;
 	const filterBrowser = options?.filterBrowser ?? false;
 
-	// Load MCP servers via capability system
-	const result = await loadCapability<MCPServer>(mcpCapability.id, { cwd });
-
-	// Filter out project-level configs if disabled
-	const servers = enableProjectConfig
-		? result.items
-		: result.items.filter(server => server._source.level !== "project");
+	// Filter project-scoped entries BEFORE the capability layer's equivalence
+	// deduplication so a project server cannot shadow a differently-named but
+	// connection-equivalent user server and then be dropped here, leaving none.
+	const result = await loadCapability<MCPServer>(mcpCapability.id, {
+		cwd,
+		...(enableProjectConfig ? {} : { filter: server => server._source.level !== "project" }),
+	});
+	const servers = result.items;
 
 	// Load user-level disable/force-enable lists. The denylist always wins; the
 	// allowlist overrides a non-writable source config's `enabled: false`.

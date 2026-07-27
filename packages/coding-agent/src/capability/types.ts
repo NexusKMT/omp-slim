@@ -72,6 +72,12 @@ export interface LoadOptions {
 	includeDisabled?: boolean;
 	/** Explicit disabled extension IDs to apply instead of settings. */
 	disabledExtensions?: string[];
+	/**
+	 * Drop items before deduplication. Use when a downstream scope filter must
+	 * precede equivalence collapse, so a to-be-filtered item cannot shadow a
+	 * differently-keyed but equivalent survivor. Receives the item's `_source`.
+	 */
+	filter?(item: { _source: SourceMeta }): boolean;
 }
 
 /**
