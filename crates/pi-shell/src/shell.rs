@@ -2174,7 +2174,119 @@ fn uutils_env_disabled(config: &ShellConfig, key: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+	#[cfg(unix)]
+	use std::os::unix::process::ExitStatusExt as _;
+
+	#[cfg(unix)]
+	use tokio::process::Command;
+
 	use super::*;
+
+	#[cfg(unix)]
+	async fn kill_test_context() -> (ShellSessionCore, ExecutionParameters) {
+		let config = ShellConfig { session_env: None, snapshot_path: None, minimizer: None };
+		let mut session = create_session(&config).await.expect("create_session");
+		let mut params = session.shell.default_exec_params();
+		params.set_fd(OpenFiles::STDIN_FD, null_file().expect("null stdin"));
+		params.set_fd(OpenFiles::STDOUT_FD, null_file().expect("null stdout"));
+		params.set_fd(OpenFiles::STDERR_FD, null_file().expect("null stderr"));
+		(session, params)
+	}
+
+	/// The kill builtin accepts a numeric signal and applies it to every process
+	/// operand.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn kill_builtin_accepts_numeric_signal_for_multiple_processes() {
+		let mut first = Command::new("sleep")
+			.arg("30")
+			.spawn()
+			.expect("first sleep");
+		let mut second = Command::new("sleep")
+			.arg("30")
+			.spawn()
+			.expect("second sleep");
+		let first_pid = first.id().expect("first pid");
+		let second_pid = second.id().expect("second pid");
+		let (mut session, params) = kill_test_context().await;
+		let source_info = SourceInfo::from("pi-natives:test");
+
+		let result = session
+			.shell
+			.run_string(format!("kill -9 {first_pid} {second_pid}"), &source_info, &params)
+			.await
+			.expect("kill command");
+		let code = exit_code(&result);
+		if code != 0 {
+			let _ = first.kill().await;
+			let _ = second.kill().await;
+			let _ = first.wait().await;
+			let _ = second.wait().await;
+			assert_eq!(code, 0, "numeric multi-process kill should succeed");
+		}
+
+		let statuses =
+			time::timeout(Duration::from_secs(5), async { tokio::join!(first.wait(), second.wait()) })
+				.await;
+		if statuses.is_err() {
+			let _ = first.kill().await;
+			let _ = second.kill().await;
+			let _ = first.wait().await;
+			let _ = second.wait().await;
+			panic!("kill must signal every process operand");
+		}
+		let (first_status, second_status) = statuses.expect("checked timeout");
+		assert_eq!(first_status.expect("first wait").signal(), Some(libc::SIGKILL));
+		assert_eq!(second_status.expect("second wait").signal(), Some(libc::SIGKILL));
+	}
+
+	/// The kill builtin defaults to SIGTERM so processes can shut down
+	/// gracefully.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn kill_builtin_defaults_to_sigterm() {
+		let dir = tempfile::tempdir().expect("temp dir");
+		let ready = dir.path().join("ready");
+		let mut child = Command::new("sh")
+			.args([
+				"-c",
+				"trap 'exit 42' TERM; : > \"$1\"; while :; do :; done",
+				"sh",
+				ready.to_str().expect("utf8 path"),
+			])
+			.spawn()
+			.expect("trapping child");
+		let pid = child.id().expect("child pid");
+		let ready_result = time::timeout(Duration::from_secs(5), async {
+			while !ready.exists() {
+				time::sleep(Duration::from_millis(10)).await;
+			}
+		})
+		.await;
+		if ready_result.is_err() {
+			let _ = child.kill().await;
+			let _ = child.wait().await;
+			panic!("child did not install its SIGTERM trap");
+		}
+
+		let (mut session, params) = kill_test_context().await;
+		let source_info = SourceInfo::from("pi-natives:test");
+		let result = session
+			.shell
+			.run_string(format!("kill {pid}"), &source_info, &params)
+			.await
+			.expect("kill command");
+		let code = exit_code(&result);
+
+		let status = time::timeout(Duration::from_secs(5), child.wait()).await;
+		if status.is_err() {
+			let _ = child.kill().await;
+			let _ = child.wait().await;
+			panic!("default kill signal did not terminate the child");
+		}
+		assert_eq!(code, 0, "default kill should succeed");
+		assert_eq!(status.expect("checked timeout").expect("child wait").code(), Some(42));
+	}
 
 	/// `cmp` remains available with no executable search path, proving the shell
 	/// dispatches the in-process builtin rather than a platform binary.

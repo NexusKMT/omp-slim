@@ -32,8 +32,8 @@ impl builtins::Command for KillCommand {
 		&self,
 		context: brush_core::ExecutionContext<'_, SE>,
 	) -> Result<brush_core::ExecutionResult, Self::Error> {
-		// Default signal is SIGKILL.
-		let mut trap_signal = TrapSignal::Signal(nix::sys::signal::Signal::SIGKILL);
+		// Match shell and POSIX defaults by allowing graceful termination.
+		let mut trap_signal = TrapSignal::Signal(nix::sys::signal::Signal::SIGTERM);
 
 		// Try parsing the signal name (if specified).
 		if let Some(signal_name) = &self.signal_name {
@@ -67,39 +67,31 @@ impl builtins::Command for KillCommand {
 			}
 		}
 
-		// Look through the remaining args for a pid/job spec or a -sigspec style
-		// option.
-		let mut pid_or_job_spec = None;
+		// Look through the remaining args for process operands or a -sigspec option.
+		let mut saw_pid_or_job_spec = false;
 		for arg in &self.args {
-			// See if this is -sigspec syntax.
 			if let Some(possible_sigspec) = arg.strip_prefix("-") {
-				// See if this is -sigspec syntax.
-				if let Ok(parsed_trap_signal) = TrapSignal::try_from(possible_sigspec) {
+				// The sigspec may be a signal name (e.g. -TERM) or number (e.g. -9).
+				if let Ok(parsed_trap_signal) = possible_sigspec.parse::<TrapSignal>() {
 					trap_signal = parsed_trap_signal;
 				} else {
 					writeln!(context.stderr(), "{}: invalid signal name", context.command_name)?;
 					return Ok(ExecutionExitCode::InvalidUsage.into());
 				}
-			} else if pid_or_job_spec.is_none() {
-				pid_or_job_spec = Some(arg);
 			} else {
-				writeln!(
-					context.stderr(),
-					"{}: too many jobs or processes specified",
-					context.command_name
-				)?;
-				return Ok(ExecutionExitCode::InvalidUsage.into());
+				saw_pid_or_job_spec = true;
 			}
 		}
 
 		if self.list_signals {
 			return print_signals(&context, self.args.as_ref());
-		} else {
-			let Some(pid_or_job_spec) = pid_or_job_spec else {
-				writeln!(context.stderr(), "{}: invalid usage", context.command_name)?;
-				return Ok(ExecutionExitCode::InvalidUsage.into());
-			};
+		}
+		if !saw_pid_or_job_spec {
+			writeln!(context.stderr(), "{}: invalid usage", context.command_name)?;
+			return Ok(ExecutionExitCode::InvalidUsage.into());
+		}
 
+		for pid_or_job_spec in self.args.iter().filter(|arg| !arg.starts_with('-')) {
 			if pid_or_job_spec.starts_with('%') {
 				// It's a job spec.
 				if let Some(job) = context.shell.jobs_mut().resolve_job_spec(pid_or_job_spec) {

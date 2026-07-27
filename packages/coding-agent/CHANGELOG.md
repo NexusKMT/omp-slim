@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the bash tool's `kill` builtin rejecting numeric signals and multiple process operands, and changed its default signal from `SIGKILL` to the standard `SIGTERM` ([#6779](https://github.com/can1357/oh-my-pi/issues/6779)).
+
 ## [17.1.5] - 2026-07-27
 
 ### Added
