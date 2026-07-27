@@ -125,50 +125,100 @@ function isOpenAIResponsesClientInputBoundary(item: Record<string, unknown>): bo
 	}
 }
 
+function collectOpenAIResponsesComputerLinkedReasoningItems(
+	items: Array<Record<string, unknown>>,
+	requireLaterOutput: boolean,
+): Set<Record<string, unknown>> {
+	let computerCallsWithLaterOutputs: Set<Record<string, unknown>> | undefined;
+	if (requireLaterOutput) {
+		computerCallsWithLaterOutputs = new Set();
+		const laterComputerOutputCallIds = new Set<string>();
+		for (let index = items.length - 1; index >= 0; index--) {
+			const item = items[index]!;
+			if (item.type === "computer_call_output" && typeof item.call_id === "string") {
+				laterComputerOutputCallIds.add(item.call_id);
+			} else if (
+				item.type === "computer_call" &&
+				typeof item.id === "string" &&
+				typeof item.call_id === "string" &&
+				laterComputerOutputCallIds.has(item.call_id)
+			) {
+				computerCallsWithLaterOutputs.add(item);
+			}
+		}
+	}
+
+	const computerLinkedReasoningItems = new Set<Record<string, unknown>>();
+	const responseReasoningItems: Array<Record<string, unknown>> = [];
+	for (const item of items) {
+		if (isOpenAIResponsesClientInputBoundary(item)) {
+			responseReasoningItems.length = 0;
+		} else if (item.type === "reasoning") {
+			responseReasoningItems.push(item);
+		} else if (
+			item.type === "computer_call" &&
+			typeof item.id === "string" &&
+			(!computerCallsWithLaterOutputs || computerCallsWithLaterOutputs.has(item))
+		) {
+			for (const reasoningItem of responseReasoningItems) computerLinkedReasoningItems.add(reasoningItem);
+		}
+	}
+	return computerLinkedReasoningItems;
+}
+
+const provisionalOpenAIResponsesComputerReasoningItems = new WeakSet<object>();
+
 export function sanitizeOpenAIResponsesHistoryItemsForReplay(
 	items: Array<Record<string, unknown>>,
 	options: OpenAIResponsesReplaySanitizeOptions = {},
 ): ResponseInput {
 	const normalizedCallIds = new Map<string, string>();
 	const supportsImageDetailOriginal = options.supportsImageDetailOriginal !== false;
-	const supportsComputerUse = options.supportsComputerUse !== false;
-	// Stateless native computer history is an atomic Responses chain: replaying
-	// a `computer_call` ID requires the reasoning item IDs from that response.
-	const computerLinkedReasoningItems = new Set<Record<string, unknown>>();
-	const responseReasoningItems: Array<Record<string, unknown>> = [];
-	const computerCallsWithLaterOutputs = new Set<Record<string, unknown>>();
-	const laterComputerOutputCallIds = new Set<string>();
-	for (let index = items.length - 1; index >= 0; index--) {
-		const item = items[index]!;
-		if (item.type === "computer_call_output" && typeof item.call_id === "string") {
-			laterComputerOutputCallIds.add(item.call_id);
-		} else if (
-			item.type === "computer_call" &&
-			typeof item.id === "string" &&
-			typeof item.call_id === "string" &&
-			laterComputerOutputCallIds.has(item.call_id)
-		) {
-			computerCallsWithLaterOutputs.add(item);
-		}
-	}
-	for (const item of items) {
-		if (isOpenAIResponsesClientInputBoundary(item)) {
-			responseReasoningItems.length = 0;
-		} else if (item.type === "reasoning") {
-			responseReasoningItems.push(item);
-		} else if (supportsComputerUse && computerCallsWithLaterOutputs.has(item)) {
-			for (const reasoningItem of responseReasoningItems) computerLinkedReasoningItems.add(reasoningItem);
-		}
-	}
+	const computerLinkedReasoningItems =
+		options.supportsComputerUse === false
+			? undefined
+			: collectOpenAIResponsesComputerLinkedReasoningItems(items, false);
 	return items.flatMap(item => {
+		const preserveForComputer = computerLinkedReasoningItems?.has(item) === true;
 		const sanitized = sanitizeOpenAIResponsesHistoryItemForReplay(
 			item,
 			normalizedCallIds,
 			supportsImageDetailOriginal,
-			computerLinkedReasoningItems.has(item),
+			preserveForComputer,
 		);
+		if (preserveForComputer && sanitized?.type === "reasoning") {
+			provisionalOpenAIResponsesComputerReasoningItems.add(sanitized);
+		}
 		return sanitized ? [sanitized] : [];
 	});
+}
+
+/**
+ * Finalize provisional native-computer reasoning IDs after the complete
+ * Responses input has been rebuilt, model-adapted, and orphan-repaired.
+ */
+export function stripUnpairedOpenAIResponsesComputerReasoningIdsForReplay(items: ResponseInput): ResponseInput {
+	const records = items as unknown as Array<Record<string, unknown>>;
+	const linkedReasoningItems = collectOpenAIResponsesComputerLinkedReasoningItems(records, true);
+	let sanitized: ResponseInput | undefined;
+
+	for (let index = 0; index < items.length; index++) {
+		const item = items[index]!;
+		const record = records[index]!;
+		if (
+			item.type !== "reasoning" ||
+			!provisionalOpenAIResponsesComputerReasoningItems.has(item) ||
+			typeof record.id !== "string" ||
+			linkedReasoningItems.has(record)
+		) {
+			sanitized?.push(item);
+			continue;
+		}
+		if (!sanitized) sanitized = items.slice(0, index);
+		const { id: _id, ...withoutId } = record;
+		sanitized.push(withoutId as unknown as ResponseInput[number]);
+	}
+	return sanitized ?? items;
 }
 
 /**
