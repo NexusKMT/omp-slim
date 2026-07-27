@@ -13,7 +13,7 @@ import { LocalProtocolHandler } from "./local-protocol";
 import { McpProtocolHandler } from "./mcp-protocol";
 import { MemoryProtocolHandler } from "./memory-protocol";
 import { OmpProtocolHandler } from "./omp-protocol";
-import { parseInternalUrl } from "./parse";
+import { extractUriScheme, parseInternalUrl } from "./parse";
 import { RuleProtocolHandler } from "./rule-protocol";
 import { SkillProtocolHandler } from "./skill-protocol";
 import { SshProtocolHandler } from "./ssh-protocol";
@@ -81,13 +81,16 @@ export class InternalUrlRouter {
 
 	/**
 	 * Whether read can resolve this URL through either a native handler or the
-	 * MCP resource fallback. MCP resources may use arbitrary custom schemes.
+	 * MCP resource fallback. MCP resources may use arbitrary custom schemes and
+	 * may be opaque (`urn:example:document`) rather than hierarchical.
 	 */
 	canResolve(input: string): boolean {
-		const match = input.match(/^([a-z][a-z0-9+.-]*):\/\//i);
-		if (!match) return false;
-		const scheme = match[1].toLowerCase();
-		return this.#handlers.has(scheme) || this.#isMcpResourceScheme(scheme);
+		const scheme = extractUriScheme(input);
+		if (!scheme) return false;
+		// Registered handlers only accept the hierarchical `scheme://` form;
+		// opaque inputs reach the MCP resource fallback alone.
+		if (this.#handlers.has(scheme)) return this.canHandle(input);
+		return this.#isMcpResourceScheme(scheme);
 	}
 
 	/** Schemes whose handler supports host/path autocomplete. */

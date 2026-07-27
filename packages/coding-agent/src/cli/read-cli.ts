@@ -8,6 +8,7 @@
 import { getProjectDir } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
 import { Settings } from "../config/settings";
+import { extractUriScheme } from "../internal-urls/parse";
 import { InternalUrlRouter } from "../internal-urls/router";
 import { discoverAndLoadMCPTools } from "../mcp/loader";
 import { MCPManager } from "../mcp/manager";
@@ -23,9 +24,11 @@ export interface ReadCommandArgs {
 }
 
 function shouldDiscoverMcp(path: string): boolean {
-	const match = path.match(/^([a-z][a-z0-9+.-]*):\/\//i);
-	if (!match) return false;
-	const scheme = match[1].toLowerCase();
+	// MCP resource URIs may be hierarchical (`test://notes`) or opaque
+	// (`urn:example:document`); `extractUriScheme` recognizes both while
+	// rejecting Windows drive paths and selector-shaped filesystem inputs.
+	const scheme = extractUriScheme(path);
+	if (!scheme) return false;
 	if (scheme === "mcp") return true;
 	if (["conflict", "file", "http", "https"].includes(scheme)) return false;
 	return InternalUrlRouter.instance().getHandler(scheme) === undefined;

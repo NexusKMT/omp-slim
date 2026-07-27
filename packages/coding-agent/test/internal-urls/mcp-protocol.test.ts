@@ -147,6 +147,61 @@ describe("McpProtocolHandler", () => {
 		expect(output.text).toContain("loaded after discovery");
 	});
 
+	it("resolves a native URI whose path is exactly a trailing slash", async () => {
+		const resources = new Map<string, { resources: MCPResource[]; templates: MCPResourceTemplate[] }>();
+		resources.set("catalog", {
+			resources: [{ uri: "catalog://root/", name: "root" }],
+			templates: [],
+		});
+		const manager = createMockManager({
+			servers: ["catalog"],
+			resources,
+			readResult: { contents: [{ uri: "catalog://root/", text: "catalog root" }] },
+		});
+		MCPManager.setInstance(manager);
+		const router = InternalUrlRouter.instance();
+
+		const resource = await router.resolve("catalog://root/");
+		expect(resource.content).toBe("catalog root");
+		expect(resource.notes).toEqual(["MCP server: catalog"]);
+	});
+
+	it("resolves an opaque resource URI advertised by an MCP server", async () => {
+		const resources = new Map<string, { resources: MCPResource[]; templates: MCPResourceTemplate[] }>();
+		resources.set("registry", {
+			resources: [{ uri: "urn:example:document", name: "document" }],
+			templates: [],
+		});
+		const manager = createMockManager({
+			servers: ["registry"],
+			resources,
+			readResult: { contents: [{ uri: "urn:example:document", text: "opaque payload" }] },
+		});
+		MCPManager.setInstance(manager);
+
+		const result = await new ReadTool(createToolSession()).execute("read-opaque-resource", {
+			path: "urn:example:document",
+		});
+		const output = result.content.find(block => block.type === "text");
+
+		expect(output?.type).toBe("text");
+		if (output?.type !== "text") throw new Error("Expected text output");
+		expect(output.text).toContain("opaque payload");
+	});
+
+	it("recognizes opaque URIs in canResolve without swallowing path-like inputs", () => {
+		const router = InternalUrlRouter.instance();
+		expect(router.canResolve("urn:example:document")).toBe(true);
+		expect(router.canResolve("custom:item")).toBe(true);
+		// Windows drive paths and selector-shaped filesystem inputs stay on the
+		// filesystem path.
+		expect(router.canResolve("C:\\Temp\\notes.txt")).toBe(false);
+		expect(router.canResolve("C:/tmp/notes.txt")).toBe(false);
+		expect(router.canResolve("Makefile:12")).toBe(false);
+		expect(router.canResolve("foo.ts:50-80")).toBe(false);
+		expect(router.canResolve("README:raw")).toBe(false);
+	});
+
 	it("preserves query parameters in MCP resource URI", async () => {
 		const resources = new Map<string, { resources: MCPResource[]; templates: MCPResourceTemplate[] }>();
 		resources.set("query-server", {

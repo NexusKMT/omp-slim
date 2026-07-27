@@ -15,7 +15,16 @@
 import * as readline from "node:readline";
 
 /** Concrete resource URIs the fixture advertises via `resources/list`. */
-export const RESOURCE_URIS = ["test://alpha", "test://beta"];
+export const RESOURCE_URIS = ["test://alpha", "test://beta", "urn:fixture:gamma"];
+
+/**
+ * JSON-RPC error code returned for `resources/templates/list`. Defaults to
+ * -32601 ("Method not found"); tests may override via the
+ * `FIXTURE_TEMPLATES_ERROR_CODE` env var (e.g. -32603) to simulate a server
+ * whose templates listing fails outright.
+ */
+const TEMPLATES_ERROR_CODE = Number(process.env.FIXTURE_TEMPLATES_ERROR_CODE ?? "-32601");
+const TEMPLATES_ERROR_MESSAGE = TEMPLATES_ERROR_CODE === -32601 ? "Method not found" : "Internal error";
 
 type JsonRpcRequest = {
 	jsonrpc: "2.0";
@@ -60,11 +69,11 @@ function startServer(): void {
 		if (msg.id === undefined || msg.id === null) return;
 
 		if (msg.method === "resources/templates/list") {
-			// Optional method this server doesn't implement.
+			// Optional method this server doesn't implement (or fails, per env).
 			const error = {
 				jsonrpc: "2.0" as const,
 				id: msg.id,
-				error: { code: -32601, message: "Method not found" },
+				error: { code: TEMPLATES_ERROR_CODE, message: TEMPLATES_ERROR_MESSAGE },
 			};
 			process.stdout.write(`${JSON.stringify(error)}\n`);
 			return;

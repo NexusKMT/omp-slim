@@ -21,12 +21,19 @@ function getUriTemplateMatchScore(
 }
 
 function extractResourceUri(url: InternalUrl): string {
+	const scheme = url.protocol.replace(/:$/, "").toLowerCase();
+	if (scheme !== "mcp") {
+		// Server-advertised native URI (hierarchical or opaque). Preserve the
+		// input byte-for-byte: `resolveTargetServer` matches by exact string
+		// equality, so e.g. `catalog://root/` must keep its trailing slash.
+		return url.rawHref ?? url.href;
+	}
+	// Legacy `mcp://<resource-uri>` wrapper: reconstruct the wrapped URI and
+	// elide a bare trailing `/` that URL parsing adds to host-only forms.
 	const host = url.rawHost || url.hostname;
 	const rawPathname = url.rawPathname ?? url.pathname;
 	const hasPath = rawPathname && rawPathname !== "/";
-	const scheme = url.protocol.replace(/:$/, "").toLowerCase();
-	const prefix = scheme === "mcp" ? "" : `${scheme}://`;
-	const uri = `${prefix}${host}${hasPath ? rawPathname : ""}${url.search}${url.hash}`.trim();
+	const uri = `${host}${hasPath ? rawPathname : ""}${url.search}${url.hash}`.trim();
 	if (!uri) {
 		throw new Error("mcp:// URL requires a resource URI: mcp://<resource-uri>");
 	}

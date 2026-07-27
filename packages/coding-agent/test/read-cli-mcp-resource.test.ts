@@ -61,6 +61,14 @@ describe("omp read MCP resources", () => {
 		expect(output).toContain("fixture content for test://alpha");
 	}, 30_000);
 
+	it("discovers MCP before reading a server-advertised opaque URI", async () => {
+		const { exitCode, output, error } = await runRead("urn:fixture:gamma");
+
+		expect(exitCode).toBe(0);
+		expect(error).toBe("");
+		expect(output).toContain("fixture content for urn:fixture:gamma");
+	}, 30_000);
+
 	it("keeps the mcp:// wrapper working in the standalone CLI", async () => {
 		const { exitCode, output, error } = await runRead("mcp://test://beta");
 

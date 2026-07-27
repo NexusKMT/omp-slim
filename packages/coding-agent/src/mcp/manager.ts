@@ -1101,8 +1101,17 @@ export class MCPManager {
 			connection.resources = undefined;
 			connection.resourceTemplates = undefined;
 
-			// Reload
-			const [resources] = await Promise.all([listResources(connection), listResourceTemplates(connection)]);
+			// Reload. Template listing failures must not discard a successful
+			// resources/list — let both settle, then continue without templates.
+			const [resourcesResult, templatesResult] = await Promise.allSettled([
+				listResources(connection),
+				listResourceTemplates(connection),
+			]);
+			if (templatesResult.status === "rejected") {
+				logger.debug("Failed to list MCP resource templates", { path: `mcp:${name}`, error: templatesResult.reason });
+			}
+			if (resourcesResult.status === "rejected") throw resourcesResult.reason;
+			const resources = resourcesResult.value;
 			if (this.#notificationsEnabled && connection.capabilities.resources?.subscribe) {
 				const newUris = new Set(resources.map(r => r.uri));
 				const oldUris = this.#subscribedResources.get(name);
