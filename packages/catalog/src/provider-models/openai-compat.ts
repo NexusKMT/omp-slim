@@ -27,6 +27,7 @@ import {
 	parseGitHubCopilotApiKey,
 } from "../wire/github-copilot";
 import { createBundledReferenceMap, createReferenceResolver, toModelSpec } from "./bundled-references";
+import { getDefaultModelDiscoveryBaseUrl, resolveModelCacheProviderId } from "./cache-provider-id";
 
 const MODELS_DEV_URL = "https://models.dev/api.json";
 
@@ -1826,7 +1827,9 @@ export function fireworksModelManagerOptions(
 ): ModelManagerOptions<"openai-completions"> {
 	const apiKey = config?.apiKey;
 	const baseUrl = config?.baseUrl ?? "https://api.fireworks.ai/inference/v1";
-	const bundledReferences = createReferenceResolver(createBundledReferenceMap<"openai-completions">("fireworks"));
+	const bundledReferences = createReferenceResolver(() =>
+		createBundledReferenceMap<"openai-completions">("fireworks"),
+	);
 	return {
 		providerId: "fireworks",
 		...(apiKey && {
@@ -2063,28 +2066,19 @@ function openCodeBaseUrlForApi(api: Api, basePath: string): string {
 	return api === "anthropic-messages" ? basePath : `${basePath}/v1`;
 }
 
-function openCodeModelCacheProviderId(
-	providerId: "opencode-go" | "opencode-zen",
-	apiKey: string | undefined,
-	discoveryBaseUrl: string,
-): string {
-	// OpenCode catalogs are entitlement-scoped; isolate authoritative rows by credential and endpoint.
-	const scope = `${apiKey ?? ""}\u0000${discoveryBaseUrl}`;
-	return `${providerId}:models-v1:${Bun.hash(scope).toString(36)}`;
-}
-
 function openCodeModelManagerOptions(
 	providerId: "opencode-go" | "opencode-zen",
-	defaultBasePath: string,
 	config?: OpenCodeModelManagerConfig,
 ): ModelManagerOptions<Api> {
 	const apiKey = config?.apiKey;
+	const defaultBaseUrl = getDefaultModelDiscoveryBaseUrl(providerId)!;
+	const defaultBasePath = defaultBaseUrl.endsWith("/v1") ? defaultBaseUrl.slice(0, -3) : defaultBaseUrl;
 	const basePath = normalizeOpenCodeBasePath(config?.baseUrl, defaultBasePath);
 	const discoveryBaseUrl = openCodeBaseUrlForApi("openai-completions", basePath);
 	const references = createBundledReferenceMap<Api>(providerId);
 	return {
 		providerId,
-		cacheProviderId: openCodeModelCacheProviderId(providerId, apiKey, discoveryBaseUrl),
+		cacheProviderId: resolveModelCacheProviderId(providerId, { apiKey, baseUrl: discoveryBaseUrl }),
 		dynamicModelsAuthoritative: true,
 		...(apiKey && {
 			fetchDynamicModels: () =>
@@ -2118,11 +2112,11 @@ function openCodeModelManagerOptions(
 }
 
 export function opencodeZenModelManagerOptions(config?: OpenCodeModelManagerConfig): ModelManagerOptions<Api> {
-	return openCodeModelManagerOptions("opencode-zen", "https://opencode.ai/zen", config);
+	return openCodeModelManagerOptions("opencode-zen", config);
 }
 
 export function opencodeGoModelManagerOptions(config?: OpenCodeModelManagerConfig): ModelManagerOptions<Api> {
-	return openCodeModelManagerOptions("opencode-go", "https://opencode.ai/zen/go", config);
+	return openCodeModelManagerOptions("opencode-go", config);
 }
 
 // ---------------------------------------------------------------------------
@@ -2209,7 +2203,7 @@ export function openrouterModelManagerOptions(
 		// Older builds cached OpenRouter discovery rows as `api: "openai-completions"`.
 		// Namespace the refreshed pseudo-API cache separately so those rows cannot
 		// override bundled `api: "openrouter"` models during online-if-uncached startup.
-		cacheProviderId: "openrouter:pseudo-api",
+		cacheProviderId: resolveModelCacheProviderId("openrouter"),
 		fetchDynamicModels: () =>
 			fetchOpenAICompatibleModels({
 				api: "openrouter",
@@ -3996,7 +3990,7 @@ export function litellmModelManagerOptions(
 	config?: LiteLLMModelManagerConfig,
 ): ModelManagerOptions<"openai-completions"> {
 	const apiKey = config?.apiKey;
-	const baseUrl = config?.baseUrl ?? Bun.env.LITELLM_BASE_URL ?? "http://localhost:4000/v1";
+	const baseUrl = config?.baseUrl ?? getDefaultModelDiscoveryBaseUrl("litellm")!;
 	return {
 		providerId: "litellm",
 		// rich-v5 invalidates rows cached before rich metadata pricing was mapped.
@@ -4005,7 +3999,7 @@ export function litellmModelManagerOptions(
 		// and filtered placeholder-only `all-team-models` rows. Bump the version
 		// whenever the mappers below change, or warm authoritative caches keep
 		// serving pre-change rows for the full TTL.
-		cacheProviderId: `litellm:rich-v5:${Bun.hash(baseUrl).toString(36)}`,
+		cacheProviderId: resolveModelCacheProviderId("litellm", { baseUrl }),
 		// litellm is a local-only proxy and is never bundled in models.json (that
 		// would leak the machine's localhost catalog). Prefer the proxy's richer
 		// management metadata, then enrich ids against models.dev with the bundled
@@ -4052,11 +4046,11 @@ export interface VllmModelManagerConfig {
 
 export function vllmModelManagerOptions(config?: VllmModelManagerConfig): ModelManagerOptions<"openai-completions"> {
 	const apiKey = config?.apiKey;
-	const baseUrl = config?.baseUrl ?? "http://127.0.0.1:8000/v1";
+	const baseUrl = config?.baseUrl ?? getDefaultModelDiscoveryBaseUrl("vllm")!;
 	const references = createBundledReferenceMap<"openai-completions">("vllm" as Parameters<typeof getBundledModels>[0]);
 	return {
 		providerId: "vllm",
-		cacheProviderId: `vllm:${Bun.hash(baseUrl).toString(36)}`,
+		cacheProviderId: resolveModelCacheProviderId("vllm", { baseUrl }),
 		fetchDynamicModels: () =>
 			fetchOpenAICompatibleModels({
 				api: "openai-completions",
@@ -4091,7 +4085,7 @@ export function nanoGptModelManagerOptions(
 ): ModelManagerOptions<"openai-completions"> {
 	const apiKey = config?.apiKey;
 	const baseUrl = config?.baseUrl ?? "https://nano-gpt.com/api/v1";
-	const resolveReference = createReferenceResolver(
+	const resolveReference = createReferenceResolver(() =>
 		createBundledReferenceMap<"openai-completions">("nanogpt" as Parameters<typeof getBundledModels>[0]),
 	);
 	return {
@@ -4306,8 +4300,9 @@ export function githubCopilotModelManagerOptions(config?: GithubCopilotModelMana
 			: parsedApiKey?.enterpriseUrl && configuredBaseUrl.includes("githubcopilot.com")
 				? getGitHubCopilotBaseUrl(parsedApiKey.enterpriseUrl)
 				: configuredBaseUrl;
-	const providerRefs = createBundledReferenceMap<Api>("github-copilot");
-	const resolveReference = createReferenceResolver(providerRefs);
+	let providerReferences: Map<string, ModelSpec<Api>> | undefined;
+	const getProviderReferences = () => (providerReferences ??= createBundledReferenceMap<Api>("github-copilot"));
+	const resolveReference = createReferenceResolver(getProviderReferences);
 	return {
 		providerId: "github-copilot",
 		dropCachedModelIdsOnStaticMismatch: COPILOT_CACHE_INVALIDATED_MODEL_IDS,
@@ -4396,7 +4391,10 @@ export function githubCopilotModelManagerOptions(config?: GithubCopilotModelMana
 									input,
 									contextWindow: defaultTierWindow,
 									maxTokens,
-									headers: { ...COPILOT_API_HEADERS, ...(providerRefs.get(defaults.id)?.headers ?? {}) },
+									headers: {
+										...COPILOT_API_HEADERS,
+										...(getProviderReferences().get(defaults.id)?.headers ?? {}),
+									},
 									...(api === "openai-completions"
 										? {
 												compat: {
