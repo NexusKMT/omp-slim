@@ -30,5 +30,8 @@ runs:
         shell: bash
         run: |
            set -euo pipefail
+           # Raise-only fd guard: huge toolchain input trees exhaust low soft
+           # limits during sandbox setup.
+           if [ "$(ulimit -Sn)" != unlimited ] && [ "$(ulimit -Sn)" -lt 65536 ]; then ulimit -Sn 65536 || true; fi
            export OMP_BAZEL_RC="${{ steps.cache.outputs.rc }}"
            bun scripts/bazel-natives.ts ${{ inputs.targets }} --dest "${{ inputs.dest }}"

@@ -43,6 +43,10 @@ build:ci --announce_rc
 build:ci --verbose_failures
 # Fail-fast inside one invocation; job-level matrix provides isolation.
 build:ci --keep_going=false
+# Reuse sandbox trees between actions: the zig/xwin toolchains stage ~10k-file
+# input trees per action, and rebuilding+async-deleting them for thousands of
+# actions exhausts file descriptors on the kata pods (EMFILE in unix_jni).
+build:ci --reuse_sandbox_directories
 
 # --- Remote cache ------------------------------------------------------------
 # The bazel-remote endpoint is cluster-internal only; .github/actions/bazel-cache

@@ -137,7 +137,11 @@ jobs:
            with:
               scope: validation
          - name: Rust tests
-           run: bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" test //crates/...
+           # The ulimit guard runs in the step that launches the bazel server
+           # (limits are per-process and the server persists across steps).
+           run: |
+              if [ "$(ulimit -Sn)" != unlimited ] && [ "$(ulimit -Sn)" -lt 65536 ]; then ulimit -Sn 65536 || true; fi
+              bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" test //crates/...
          # Clippy scope mirrors `cargo clippy --workspace` (libraries only, no
          # test targets) plus the strict/default split: crates with
          # `[lints] workspace = true` get the workspace policy, the vendored
@@ -154,7 +158,9 @@ jobs:
            run: bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=rustfmt //crates/...
          - name: Warm native addon cache (main push)
            if: github.event_name != 'pull_request'
-           run: bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build //:natives-linux-all
+           run: |
+              if [ "$(ulimit -Sn)" != unlimited ] && [ "$(ulimit -Sn)" -lt 65536 ]; then ulimit -Sn 65536 || true; fi
+              bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build //:natives-linux-all
 
    test_workspace:
       name: Test TS workspace fast
