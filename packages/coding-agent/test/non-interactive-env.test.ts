@@ -61,10 +61,13 @@ describe("buildNonInteractiveEnv", () => {
 	});
 });
 
-it("keeps expanded launch dotenv values out of child shell config", async () => {
+it("filters expanded dotenv values while preserving matching launcher values", async () => {
 	const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "omp-env-"));
 	try {
-		await Bun.write(path.join(tmp, ".env"), "BASE=loaded-by-omp\nTEST_ENV_FROM_DOTENV=$BASE-suffix\n");
+		await Bun.write(
+			path.join(tmp, ".env"),
+			"BASE=loaded-by-omp\nTEST_ENV_FROM_DOTENV=$BASE-suffix\nNODE_ENV=development\n",
+		);
 		await Bun.write(
 			path.join(tmp, ".env.local"),
 			"CONVEX_DEPLOYMENT=anonymous:root-local\nCONVEX_URL=http://127.0.0.1:3210\n",
@@ -78,14 +81,17 @@ it("keeps expanded launch dotenv values out of child shell config", async () => 
 			"	deployment: env.CONVEX_DEPLOYMENT ?? null,",
 			"	url: env.CONVEX_URL ?? null,",
 			"	inherited: env.OMP_TEST_INHERITED_MARKER ?? null,",
+			"	matching: env.NODE_ENV ?? null,",
 			"}));",
 		].join("\n");
-		for (const bunArgs of [[], ["--no-env-file"]]) {
+		const bunArgSets = process.platform === "linux" ? [[], ["--no-env-file"]] : [["--no-env-file"]];
+		for (const bunArgs of bunArgSets) {
 			const proc = Bun.spawn([process.execPath, ...bunArgs, "--no-install", "--eval", script], {
 				cwd: tmp,
 				env: {
 					HOME: process.env.HOME ?? "",
 					OMP_TEST_INHERITED_MARKER: "keep-me",
+					NODE_ENV: "development",
 					PATH: process.env.PATH ?? "",
 					SHELL: process.env.SHELL ?? "/bin/bash",
 				},
@@ -105,12 +111,14 @@ it("keeps expanded launch dotenv values out of child shell config", async () => 
 				deployment: string | null;
 				url: string | null;
 				inherited: string | null;
+				matching: string | null;
 			} = JSON.parse(stdout);
 			expect(payload).toEqual({
 				project: null,
 				deployment: null,
 				url: null,
 				inherited: "keep-me",
+				matching: "development",
 			});
 		}
 	} finally {

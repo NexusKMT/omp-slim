@@ -52,6 +52,28 @@ export function filterProcessEnv(env: Record<string, string | undefined>): Recor
 	}
 	return result;
 }
+// Bun can mutate `process.env` from project dotenv files before user code runs.
+// Linux retains the original exec environment in procfs; compiled and explicit
+// `--no-env-file` launches can safely snapshot `Bun.env` before OMP loads files.
+function readLaunchEnvNames(): ReadonlySet<string> | undefined {
+	if (process.platform === "linux") {
+		try {
+			const names = new Set<string>();
+			for (const entry of fs.readFileSync("/proc/self/environ", "utf8").split("\0")) {
+				const separator = entry.indexOf("=");
+				if (separator > 0) names.add(entry.slice(0, separator));
+			}
+			return names;
+		} catch {}
+	}
+	if (!process.execArgv.includes("--no-env-file") && !isCompiledBinary()) return undefined;
+	const names = new Set<string>();
+	for (const key in Bun.env) names.add(key);
+	return names;
+}
+
+const launchEnvNames = readLaunchEnvNames();
+const projectEnvNamesLoadedByOmp = new Set<string>();
 
 function expandDotenvValues(values: Record<string, string>, env: Record<string, string>): Record<string, string> {
 	const expanded: Record<string, string> = {};
@@ -83,7 +105,14 @@ export function filterChildShellEnv(
 		...expandDotenvValues(localEnv, result),
 	};
 	for (const key in launchEnv) {
-		if (result[key] === launchEnv[key] || result[key] === expandedLaunchEnv[key]) delete result[key];
+		if (projectEnvNamesLoadedByOmp.has(key)) {
+			delete result[key];
+		} else if (
+			!launchEnvNames?.has(key) &&
+			(result[key] === launchEnv[key] || result[key] === expandedLaunchEnv[key])
+		) {
+			delete result[key];
+		}
 	}
 	return result;
 }
@@ -150,6 +179,7 @@ for (const file of [projectEnv, agentEnv, piEnv, homeEnv]) {
 	for (const key in file) {
 		if (!isMacosMallocStackLoggingEnvName(key) && !Bun.env[key]) {
 			Bun.env[key] = file[key];
+			if (file === projectEnv) projectEnvNamesLoadedByOmp.add(key);
 		}
 	}
 }
