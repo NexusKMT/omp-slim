@@ -417,6 +417,16 @@ export class AsyncJobManager {
 		}
 	}
 
+	/** Immediately evict completed jobs matching the filter instead of waiting for retention expiry. */
+	evictCompletedJobs(filter?: AsyncJobFilter): number {
+		let evicted = 0;
+		for (const job of this.#filterJobs(this.#jobs.values(), filter)) {
+			if (job.status !== "completed") continue;
+			if (this.#evictJob(job.id)) evicted += 1;
+		}
+		return evicted;
+	}
+
 	async waitForAll(): Promise<void> {
 		await Promise.all(Array.from(this.#jobs.values()).map(job => job.promise));
 	}
@@ -579,12 +589,18 @@ export class AsyncJobManager {
 		return candidate;
 	}
 
+	#evictJob(jobId: string): boolean {
+		clearTimeout(this.#evictionTimers.get(jobId));
+		this.#evictionTimers.delete(jobId);
+		this.#suppressedDeliveries.delete(jobId);
+		this.#watchedJobs.delete(jobId);
+		return this.#jobs.delete(jobId);
+	}
+
 	#scheduleEviction(jobId: string): void {
 		if (this.#disposed) return;
 		if (this.#retentionMs <= 0) {
-			this.#jobs.delete(jobId);
-			this.#suppressedDeliveries.delete(jobId);
-			this.#watchedJobs.delete(jobId);
+			this.#evictJob(jobId);
 			return;
 		}
 		const existing = this.#evictionTimers.get(jobId);
@@ -592,10 +608,7 @@ export class AsyncJobManager {
 			clearTimeout(existing);
 		}
 		const timer = setTimeout(() => {
-			this.#evictionTimers.delete(jobId);
-			this.#jobs.delete(jobId);
-			this.#suppressedDeliveries.delete(jobId);
-			this.#watchedJobs.delete(jobId);
+			this.#evictJob(jobId);
 		}, this.#retentionMs);
 		timer.unref();
 		this.#evictionTimers.set(jobId, timer);

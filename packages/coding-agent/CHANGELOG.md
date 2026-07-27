@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `/new` retaining completed async jobs from the prior session in `hub jobs` until the five-minute retention window expired ([#6828](https://github.com/can1357/oh-my-pi/issues/6828)).
+
 ## [17.1.6] - 2026-07-27
 
 ### Added

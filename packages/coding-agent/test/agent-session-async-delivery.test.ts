@@ -94,6 +94,47 @@ describe("AgentSession owner-routed async delivery", () => {
 		expect(sawResult).toBe(true);
 	});
 
+	it("purges completed owned jobs when starting a new session", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [] },
+			convertToLlm,
+			streamFn: mock.stream,
+		});
+		const authStorage = await AuthStorage.create(path.join(tempDir, "auth.db"));
+		authStorages.push(authStorage);
+		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		const manager = new AsyncJobManager({ retentionMs: 60_000 });
+		AsyncJobManager.setInstance(manager);
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated(),
+			modelRegistry: new ModelRegistry(authStorage),
+			agentId: "Main",
+			ownedAsyncJobManager: manager,
+		});
+
+		const completedJobId = manager.register("task", "prior session", async () => "done", {
+			id: "prior-session-job",
+			ownerId: "Main",
+		});
+		const otherOwnerJobId = manager.register("task", "other session", async () => "done", {
+			id: "other-session-job",
+			ownerId: "Other",
+		});
+		manager.watchJobs([completedJobId, otherOwnerJobId]);
+		await manager.waitForAll();
+
+		expect(manager.getJob(completedJobId)?.status).toBe("completed");
+		expect(await session.newSession()).toBe(true);
+		expect(manager.getJob(completedJobId)).toBeUndefined();
+		expect(manager.getJob(otherOwnerJobId)?.status).toBe("completed");
+	});
+
 	it("still reports pending async work while a delivered result awaits injection", async () => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
