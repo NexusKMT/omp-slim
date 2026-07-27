@@ -58,6 +58,15 @@ export interface AgentPreModelCallStop {
 export type AgentPreModelCallResult = AgentPreModelCallStop | undefined;
 
 /**
+ * A pre-model-call gate. Return {@link AgentPreModelCallStop} to refuse the
+ * request, or nothing to proceed; the signal aborts with the run.
+ */
+export type AgentBeforeModelCall = (
+	context: Context,
+	signal?: AbortSignal,
+) => AgentPreModelCallResult | void | Promise<AgentPreModelCallResult | void>;
+
+/**
  * A soft tool requirement: the host wants `toolName` called before the loop
  * runs other tools or yields, but WITHOUT paying the forced-`toolChoice` cost
  * up front (changing `tool_choice` invalidates the provider message cache).
@@ -304,13 +313,10 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * message conversion, provider transforms, normalized tools, and owned
 	 * dialect prompt injection. Returning {@link AgentPreModelCallStop} ends
 	 * the stream without emitting `turn_start`, so no turn is left open and no
-	 * request is billed. Return `undefined` to proceed. The signal aborts when
+	 * request is billed. Return nothing to proceed. The signal aborts when
 	 * the run is canceled or its deadline expires.
 	 */
-	beforeModelCall?: (
-		context: Context,
-		signal?: AbortSignal,
-	) => AgentPreModelCallResult | Promise<AgentPreModelCallResult>;
+	beforeModelCall?: AgentBeforeModelCall;
 
 	/**
 	 * Optional transform applied to tool call arguments before execution.
@@ -396,8 +402,9 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	softToolRequirementState?: SoftToolRequirementState;
 
 	/**
-	 * Returns a hard tool-choice directive obtained by {@link getToolChoice}
-	 * when the pre-model-call gate stops before serving it.
+	 * Notifies the host that the pre-model-call gate stopped the run after a
+	 * hard tool choice was obtained from {@link getToolChoice} but before it
+	 * was served, so the host can retain it for the next admitted request.
 	 */
 	onToolChoiceRejected?: () => void;
 

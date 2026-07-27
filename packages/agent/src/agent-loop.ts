@@ -1087,7 +1087,7 @@ async function runLoopBody(
 					}
 
 					preparedProviderCall = await prepareProviderCall(currentContext, config, signal);
-					gateResult = await config.beforeModelCall?.(preparedProviderCall.context, signal);
+					gateResult = (await config.beforeModelCall?.(preparedProviderCall.context, signal)) || undefined;
 				} catch (error) {
 					if (!turnOpen) {
 						stream.push({ type: "turn_start" });

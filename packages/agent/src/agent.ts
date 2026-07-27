@@ -39,11 +39,11 @@ import {
 import type { AppendOnlyContextManager } from "./append-only-context";
 import { isProviderRefusalMessage } from "./replay-policy";
 import type {
+	AgentBeforeModelCall,
 	AgentContext,
 	AgentEvent,
 	AgentLoopConfig,
 	AgentMessage,
-	AgentPreModelCallResult,
 	AgentState,
 	AgentTool,
 	AgentToolContext,
@@ -422,14 +422,8 @@ export class Agent {
 	#onHarmonyLeak?: (event: HarmonyAuditEvent) => void | Promise<void>;
 	#onBeforeYield?: () => Promise<void> | void;
 	#onTurnEnd?: (messages: AgentMessage[], signal?: AbortSignal, context?: AgentTurnEndContext) => Promise<void> | void;
-	#beforeModelCall?: (
-		context: Context,
-		signal?: AbortSignal,
-	) => AgentPreModelCallResult | Promise<AgentPreModelCallResult>;
-	#additionalBeforeModelCalls = new Set<
-		(context: Context, signal?: AbortSignal) => AgentPreModelCallResult | Promise<AgentPreModelCallResult>
-	>();
-	#beforeModelContextBuild = new Set<(context: AgentContext) => Promise<void> | void>();
+	#beforeModelCall?: AgentBeforeModelCall;
+	#additionalBeforeModelCalls = new Set<AgentBeforeModelCall>();
 	#asideMessageProvider?: () => AsideMessage[] | Promise<AsideMessage[]>;
 	#telemetry?: AgentLoopConfig["telemetry"];
 	#appendOnlyContext?: AppendOnlyContextManager;
@@ -819,31 +813,21 @@ export class Agent {
 	}
 
 	/**
-	 * Add work that must update the mutable agent context before the provider
-	 * context is converted, normalized, and passed to pre-model gates.
+	 * Install or replace the host pre-model-call gate; pass `undefined` to
+	 * remove it. Gates are sampled when a run starts: installing the first
+	 * gate while a run is in flight takes effect on the next run.
 	 */
-	addBeforeModelContextBuild(fn: (context: AgentContext) => Promise<void> | void): () => void {
-		this.#beforeModelContextBuild.add(fn);
-		return () => {
-			this.#beforeModelContextBuild.delete(fn);
-		};
-	}
-
-	setBeforeModelCall(
-		fn:
-			| ((context: Context, signal?: AbortSignal) => AgentPreModelCallResult | Promise<AgentPreModelCallResult>)
-			| undefined,
-	): void {
+	setBeforeModelCall(fn: AgentBeforeModelCall | undefined): void {
 		this.#beforeModelCall = fn;
 	}
 
 	/**
 	 * Add a pre-model callback without replacing callbacks owned by the host.
-	 * Returns a disposer that removes only this callback.
+	 * Returns a disposer that removes only this callback. Like
+	 * {@link setBeforeModelCall}, the first gate installed while a run is in
+	 * flight takes effect on the next run.
 	 */
-	addBeforeModelCall(
-		fn: (context: Context, signal?: AbortSignal) => AgentPreModelCallResult | Promise<AgentPreModelCallResult>,
-	): () => void {
+	addBeforeModelCall(fn: AgentBeforeModelCall): () => void {
 		this.#additionalBeforeModelCalls.add(fn);
 		return () => {
 			this.#additionalBeforeModelCalls.delete(fn);
@@ -975,15 +959,20 @@ export class Agent {
 		this.#followUpQueue = [];
 	}
 
-	clearDeferredToolChoice() {
+	/**
+	 * Drop tool-directive state retained across a gate-stopped run: the
+	 * deferred hard choice and the soft-requirement lifecycle.
+	 */
+	clearDeferredToolDirectives() {
 		this.#deferredToolChoice = undefined;
+		this.#softToolRequirementState = { escalations: 0 };
 	}
 
 	clearAllQueues() {
 		this.#steeringQueue = [];
 		this.#followUpQueue = [];
 		this.#notifySteeringWaiters();
-		this.clearDeferredToolChoice();
+		this.clearDeferredToolDirectives();
 	}
 
 	hasQueuedMessages(): boolean {
@@ -1096,8 +1085,7 @@ export class Agent {
 		this.#steeringQueue = [];
 		this.#followUpQueue = [];
 		this.#notifySteeringWaiters();
-		this.#deferredToolChoice = undefined;
-		this.#softToolRequirementState = { escalations: 0 };
+		this.clearDeferredToolDirectives();
 	}
 
 	/** Send a prompt with an AgentMessage */
@@ -1336,17 +1324,14 @@ export class Agent {
 				}
 				context.systemPrompt = this.#state.systemPrompt;
 				context.tools = this.#toolsForModel(this.#state.model ?? model);
-				for (const callback of this.#beforeModelContextBuild) {
-					await callback(context);
-				}
 			},
 			beforeModelCall:
 				this.#beforeModelCall || this.#additionalBeforeModelCalls.size > 0
 					? async (context, signal) => {
-							const result = await this.#beforeModelCall?.(context, signal);
+							const result = (await this.#beforeModelCall?.(context, signal)) || undefined;
 							if (result?.stop) return result;
 							for (const callback of this.#additionalBeforeModelCalls) {
-								const callbackResult = await callback(context, signal);
+								const callbackResult = (await callback(context, signal)) || undefined;
 								if (callbackResult?.stop) return callbackResult;
 							}
 							return undefined;

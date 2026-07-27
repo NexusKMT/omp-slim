@@ -85,6 +85,12 @@ interface PendingInvoker {
 
 export class ToolChoiceQueue {
 	#queue: ToolChoiceDirective[] = [];
+	/**
+	 * In-flight yield awaiting resolve()/reject(). May outlive the run that
+	 * claimed it: a pre-model gate stop ends the run without a `turn_end`, and
+	 * the claim is finalized later — by the next admitted turn's `turn_end`,
+	 * the abort safety net, or an `unavailable` rejection on redeem.
+	 */
 	#inFlight: InFlight | undefined;
 	/**
 	 * Label of the directive whose last yield was resolved this turn.

@@ -4222,7 +4222,7 @@ export class AgentSession {
 
 	/** Drop mutable tool decisions and directives owned by the previous logical session. */
 	#clearSessionScopedToolState(): void {
-		this.agent.clearDeferredToolChoice();
+		this.agent.clearDeferredToolDirectives();
 		this.#toolChoiceQueue.clear();
 		this.#tools.clearAcpPermissionDecisions();
 	}

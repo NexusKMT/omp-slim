@@ -3203,8 +3203,8 @@ describe("agentLoop pre-model-call gate", () => {
 				},
 				{ once: true },
 			);
+			// No return: a pure-observer gate may resolve void and still proceed.
 			await waiter.promise;
-			return undefined;
 		});
 
 		const prompt = agent.prompt("start");
@@ -3358,6 +3358,52 @@ describe("agentLoop pre-model-call gate", () => {
 		expect(mock.calls[1]?.options?.toolChoice).toEqual({ type: "tool", name: "echo" });
 		expect(executed).toEqual(["resolved"]);
 		expect(agent.state.messages.filter(message => message === reminder)).toHaveLength(1);
+	});
+
+	it("clears retained soft-requirement state with all queued session state", async () => {
+		const reminder = createUserMessage("resolve the pending preview");
+		const executed: string[] = [];
+		let pending = true;
+		const tool = echoTool(executed);
+		const execute = tool.execute.bind(tool);
+		tool.execute = async (...args) => {
+			pending = false;
+			return execute(...args);
+		};
+		const mock = createMockModel({
+			responses: [
+				{ content: ["not yet"] },
+				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "resolved" } }] },
+				{ content: ["done"] },
+			],
+		});
+		let gateCalls = 0;
+		const agent = new Agent({
+			streamFn: mock.stream,
+			getToolChoice: () =>
+				pending
+					? {
+							soft: true,
+							id: "preview-1",
+							toolName: "echo",
+							reminder: [reminder],
+						}
+					: undefined,
+		});
+		agent.setTools([tool]);
+		agent.setBeforeModelCall(() => (++gateCalls === 2 ? { stop: true, reason: "over budget" } : undefined));
+
+		await agent.prompt("start");
+		agent.clearAllQueues();
+		await agent.prompt("continue");
+
+		// The cleared lifecycle treats the still-pending requirement as new: the
+		// reminder is re-injected and the discarded run's earned escalation is
+		// not applied to the next request.
+		expect(mock.calls).toHaveLength(3);
+		expect(mock.calls[1]?.options?.toolChoice).toBeUndefined();
+		expect(executed).toEqual(["resolved"]);
+		expect(agent.state.messages.filter(message => message === reminder)).toHaveLength(2);
 	});
 
 	it("closes an open Harmony retry turn when the gate stops the retry", async () => {
