@@ -26,6 +26,7 @@ import {
 	type OpenAICodexAccount,
 	openaiCodexModelManagerOptions,
 	PROVIDER_DESCRIPTORS,
+	resolveModelCacheProviderId,
 } from "@oh-my-pi/pi-catalog/provider-models";
 import {
 	collapseBuiltModelVariants,
@@ -43,18 +44,6 @@ const STARTUP_MODEL_CACHE_PROVIDER_IDS: readonly string[] = [
 	...PROVIDER_DESCRIPTORS.map(descriptor => descriptor.providerId),
 	...SPECIAL_MODEL_MANAGER_PROVIDER_IDS,
 ];
-
-// Cache namespaces whose descriptor defaults intentionally differ from the
-// provider id. Keep startup cache reads lightweight: constructing all provider
-// manager options also constructs their bundled reference maps.
-const DEFAULT_STARTUP_MODEL_CACHE_PROVIDER_IDS: Readonly<Record<string, string>> = {
-	cursor: "cursor:max-mode-v2",
-	litellm: `litellm:rich-v5:${Bun.hash(Bun.env.LITELLM_BASE_URL ?? "http://localhost:4000/v1").toString(36)}`,
-	"opencode-go": `opencode-go:models-v1:${Bun.hash("\u0000https://opencode.ai/zen/go/v1").toString(36)}`,
-	"opencode-zen": `opencode-zen:models-v1:${Bun.hash("\u0000https://opencode.ai/zen/v1").toString(36)}`,
-	openrouter: "openrouter:pseudo-api",
-	vllm: `vllm:${Bun.hash("http://127.0.0.1:8000/v1").toString(36)}`,
-};
 
 // Sentinels for local-only OAuth tokens — declared inline to avoid loading
 // provider modules at startup. Must match packages/ai/src/registry/llama-cpp.ts,
@@ -1231,15 +1220,11 @@ export class ModelRegistry {
 	}
 
 	#resolveStartupModelCacheProviderId(providerId: string): string {
-		const explicitBaseUrl =
-			this.#runtimeProviderOverrides.get(providerId)?.baseUrl ?? this.#providerOverrides.get(providerId)?.baseUrl;
-		if (explicitBaseUrl === undefined && !this.#hasFullSnapshot) {
-			return DEFAULT_STARTUP_MODEL_CACHE_PROVIDER_IDS[providerId] ?? providerId;
-		}
-		const descriptor = PROVIDER_DESCRIPTORS.find(candidate => candidate.providerId === providerId);
-		if (!descriptor) return providerId;
-		const baseUrl = explicitBaseUrl ?? this.getProviderBaseUrl(providerId);
-		return descriptor.createModelManagerOptions({ baseUrl, fetch: this.#fetch }).cacheProviderId ?? providerId;
+		const baseUrl =
+			this.#runtimeProviderOverrides.get(providerId)?.baseUrl ??
+			this.#providerOverrides.get(providerId)?.baseUrl ??
+			(this.#hasFullSnapshot ? this.getProviderBaseUrl(providerId) : undefined);
+		return resolveModelCacheProviderId(providerId, { baseUrl });
 	}
 
 	#loadCachedStandardProviderModels(): { models: Model<Api>[]; authoritativeFreshProviders: Set<string> } {
