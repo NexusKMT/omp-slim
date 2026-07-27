@@ -252,7 +252,7 @@ Cancelable pre-events:
 
 ### Tool lifecycle
 
-- `tool_call` (pre-exec, may block)
+- `tool_call` (pre-exec, may block, or revise the tool's execution `input`)
 - `tool_result` (post-exec, may patch content/details/isError)
 - `tool_execution_start` / `tool_execution_update` / `tool_execution_end` (observability)
 - `tool_approval_requested` / `tool_approval_resolved` (observability; emitted by `wrapper.ts` only when a tool requires approval and an approval handler is registered)
