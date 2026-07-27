@@ -1,4 +1,5 @@
-import * as fs from "node:fs/promises";
+import * as fs from "node:fs";
+import * as fsPromises from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentState } from "@oh-my-pi/pi-agent-core";
 import { APP_NAME, isEnoent } from "@oh-my-pi/pi-utils";
@@ -7,12 +8,12 @@ import type { SessionEntry, SessionHeader } from "../../session/session-entries"
 import { loadEntriesFromFile } from "../../session/session-loader";
 import { SessionManager } from "../../session/session-manager";
 import type { ExportThemeNames } from "./args";
-import templateCss from "./template.css" with { type: "text" };
-import templateHtml from "./template.html" with { type: "text" };
-import templateJs from "./template.js" with { type: "text" };
+import templateCssPath from "./template.css" with { type: "file" };
+import templateHtmlPath from "./template.html" with { type: "file" };
+import templateJsPath from "./template.js" with { type: "file" };
 // Pre-built React tool renderers: built by `gen:tool-views` (`bun run gen:tool-views`),
 // run automatically by root `prepare` on install and by `prepack` at publish.
-import toolViewsJs from "./tool-views.generated.js" with { type: "text" };
+import toolViewsJsPath from "./tool-views.generated.js" with { type: "file" };
 import { webExportThemeVars } from "./web-palette";
 
 export { type ExportThemeNames, parseExportArgs } from "./args";
@@ -22,16 +23,18 @@ let cachedTemplate: string | undefined;
 /** Compose the standalone export template: minified CSS, tool renderers, and viewer JS inlined. */
 export function getTemplate(): string {
 	if (cachedTemplate) return cachedTemplate;
+	const templateCss = fs.readFileSync(new URL(templateCssPath, import.meta.url), "utf8");
+	const templateHtml = fs.readFileSync(new URL(templateHtmlPath as unknown as string, import.meta.url), "utf8");
+	const templateJs = fs.readFileSync(new URL(templateJsPath, import.meta.url), "utf8");
+	const toolViewsJs = fs.readFileSync(new URL(toolViewsJsPath, import.meta.url), "utf8");
 	const minifiedCss = templateCss
 		.replace(/\/\*[\s\S]*?\*\//g, "")
 		.replace(/\s+/g, " ")
 		.replace(/\s*([{}:;,])\s*/g, "$1")
 		.trim();
 	// Function replacements so `$'`, `$&`, `$$`, etc. inside the embedded
-	// CSS/JS are not interpreted as substitution patterns. The cast is safe:
-	// `with { type: "text" }` yields a string at runtime; bun-types just types
-	// every *.html import as HTMLBundle (TS can't vary types by import attribute).
-	cachedTemplate = (templateHtml as unknown as string)
+	// CSS/JS are not interpreted as substitution patterns.
+	cachedTemplate = templateHtml
 		.replace("<template-css/>", () => `<style>${minifiedCss}</style>`)
 		.replace("<template-tool-views/>", () => `<script>${toolViewsJs}</script>`)
 		.replace("<template-js/>", () => `<script>${templateJs}</script>`);
@@ -207,7 +210,7 @@ async function collectSubSessionsFromDir(
 ): Promise<void> {
 	let names: string[];
 	try {
-		names = await fs.readdir(dir);
+		names = await fsPromises.readdir(dir);
 	} catch (err) {
 		if (isEnoent(err)) return;
 		throw err;
