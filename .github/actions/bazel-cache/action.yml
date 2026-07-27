@@ -46,10 +46,11 @@ runs:
            if [ -n "${BAZEL_REMOTE_USER:-}" ]; then
              auth="$(printf %s "${BAZEL_REMOTE_USER}:${BAZEL_REMOTE_PASSWORD}" | base64 | tr -d '\n')"
              {
-               # kubelet creates $HOME/.cache root-owned when materializing the
-               # omp-bazel-repo subPath mountpoint, so bazel's default
-               # output_user_root ($HOME/.cache/bazel) is un-creatable; pods
-               # are single-job ephemeral, so RUNNER_TEMP is the right home.
+               # The PVC repo-cache mount lives OUTSIDE $HOME (/opt): kubelet
+               # creates missing mountpoint parents root-owned, and a
+               # root-owned $HOME/.cache breaks bazel's default
+               # output_user_root and zig's wrapper cache. Pods are
+               # single-job ephemeral, so RUNNER_TEMP hosts the output root.
                echo "startup --output_user_root=$RUNNER_TEMP/bazel-root"
                echo "common --config=ci"
                echo "common --config=cache-rw"
@@ -58,7 +59,7 @@ runs:
                echo "common --remote_header='authorization=Basic ${auth}'"
                # PVC-backed shared repository cache (pods are ephemeral; without
                # it every job re-downloads toolchains + crate archives).
-               echo "common --repository_cache=$HOME/.cache/omp-bazel-repo"
+               echo "common --repository_cache=/opt/bazel-repo-cache"
              } > "$rc"
            else
              {

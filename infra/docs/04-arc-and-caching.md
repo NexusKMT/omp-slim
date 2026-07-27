@@ -194,8 +194,11 @@ template:
           # Shared Bazel repository cache: pods are ephemeral, so without it
           # every job re-downloads toolchains and crate archives. Content-
           # addressed and written atomically, safe to share across pods.
+          # Deliberately OUTSIDE $HOME: kubelet creates missing mountpoint
+          # parents root-owned, and a root-owned ~/.cache breaks bazel's
+          # default output root and zig's wrapper cache.
           - name: runner-cache
-            mountPath: /home/runner/.cache/omp-bazel-repo
+            mountPath: /opt/bazel-repo-cache
             subPath: bazel-repo-cache
         resources:
           requests:
