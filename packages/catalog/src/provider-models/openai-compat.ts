@@ -1436,6 +1436,90 @@ export function deepseekModelManagerOptions(
 ): ModelManagerOptions<"openai-completions"> {
 	return createSimpleOpenAICompletionsOptions("deepseek", "https://api.deepseek.com", config);
 }
+
+// ---------------------------------------------------------------------------
+// 6.6 SiliconFlow
+// ---------------------------------------------------------------------------
+
+export interface SiliconFlowModelManagerConfig {
+	apiKey?: string;
+	baseUrl?: string;
+	fetch?: FetchImpl;
+}
+
+/**
+ * SiliconFlow's `/v1/models` lists every served model — including embeddings,
+ * rerankers, image, audio, and video generators that cannot serve chat
+ * completions — and carries no per-model type field, so non-chat entries are
+ * dropped by id to keep the picker usable.
+ */
+const SILICONFLOW_NON_CHAT_MODEL_TOKENS = [
+	"embedding",
+	"reranker",
+	"bge-",
+	"bce-",
+	"stable-diffusion",
+	"image",
+	"flux",
+	"kolors",
+	"sensevoice",
+	"cosyvoice",
+	"fish-speech",
+	"indextts",
+	"sovits",
+	"whisper",
+	"hunyuanvideo",
+	"wan2",
+	"ltx-video",
+	"speech",
+	"moderator",
+	"tts",
+] as const;
+
+export function isLikelySiliconFlowChatModelId(id: string): boolean {
+	const normalized = id.trim().toLowerCase();
+	if (!normalized) {
+		return false;
+	}
+	return !SILICONFLOW_NON_CHAT_MODEL_TOKENS.some(token => normalized.includes(token));
+}
+
+function createSiliconFlowModelManagerOptions(
+	providerId: "siliconflow" | "siliconflow-cn",
+	defaultBaseUrl: string,
+	config?: SiliconFlowModelManagerConfig,
+): ModelManagerOptions<"openai-completions"> {
+	const apiKey = config?.apiKey;
+	const baseUrl = config?.baseUrl ?? defaultBaseUrl;
+	return {
+		providerId,
+		dynamicModelsAuthoritative: true,
+		...(apiKey && {
+			fetchDynamicModels: () =>
+				fetchOpenAICompatibleModels({
+					api: "openai-completions",
+					provider: providerId,
+					baseUrl,
+					apiKey,
+					filterModel: (_entry, model) => isLikelySiliconFlowChatModelId(model.id),
+					fetch: config?.fetch,
+				}),
+		}),
+	};
+}
+
+export function siliconflowModelManagerOptions(
+	config?: SiliconFlowModelManagerConfig,
+): ModelManagerOptions<"openai-completions"> {
+	return createSiliconFlowModelManagerOptions("siliconflow", "https://api.siliconflow.com/v1", config);
+}
+
+export function siliconflowCnModelManagerOptions(
+	config?: SiliconFlowModelManagerConfig,
+): ModelManagerOptions<"openai-completions"> {
+	return createSiliconFlowModelManagerOptions("siliconflow-cn", "https://api.siliconflow.cn/v1", config);
+}
+
 // ---------------------------------------------------------------------------
 // 6.7 Zhipu Coding Plan
 // ---------------------------------------------------------------------------
