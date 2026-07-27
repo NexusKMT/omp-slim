@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `SqliteAuthCredentialStore.close()` leaking eight prepared statements (`updateIfMatches`, `updateIfMatchesWithLease`, `deleteIfMatchesWithLease`, `deleteCachePrefix`, and the four credential-refresh-lease statements), which kept the SQLite connection alive after `close()`. On Windows the auth DB and its `-wal`/`-shm` files stayed locked, so temp-dir cleanup intermittently failed with `EBUSY`; on POSIX the handle leaked silently.
+
 ## [17.1.6] - 2026-07-27
 
 ### Added
