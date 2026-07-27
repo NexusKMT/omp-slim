@@ -5,13 +5,13 @@ import type { ModelSpec } from "../src/types";
 const FIXTURE = `${import.meta.dir}/fixtures/bundled-reference-laziness.ts`;
 
 describe("bundled reference laziness", () => {
-	test("constructing bundled model-manager options does not materialize reference maps", () => {
+	test("constructing bundled model-manager options does not enrich bundled models", () => {
 		const result = Bun.spawnSync({
 			cmd: [process.execPath, FIXTURE],
 			env: process.env,
 		});
 		expect(result.exitCode).toBe(0);
-		expect(JSON.parse(result.stdout.toString())).toEqual({ mapWrites: 0 });
+		expect(JSON.parse(result.stdout.toString())).toEqual({ buildCalls: 0 });
 	});
 
 	test("a lazy provider-reference factory initializes on first resolution and only once", () => {

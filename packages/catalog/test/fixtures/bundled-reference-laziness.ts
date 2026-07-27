@@ -1,18 +1,16 @@
+import { spyOn } from "bun:test";
+import * as buildModule from "../../src/build";
 import { ollamaCloudModelManagerOptions } from "../../src/provider-models/ollama";
 import { nanoGptModelManagerOptions } from "../../src/provider-models/openai-compat";
 
-const originalSet = Map.prototype.set;
-let mapWrites = 0;
-Map.prototype.set = function (key, value) {
-	mapWrites++;
-	return originalSet.call(this, key, value);
-};
-
+const buildSpy = spyOn(buildModule, "buildModel");
+let buildCalls = 0;
 try {
 	nanoGptModelManagerOptions();
 	ollamaCloudModelManagerOptions();
+	buildCalls = buildSpy.mock.calls.length;
 } finally {
-	Map.prototype.set = originalSet;
+	buildSpy.mockRestore();
 }
 
-console.log(JSON.stringify({ mapWrites }));
+console.log(JSON.stringify({ buildCalls }));
