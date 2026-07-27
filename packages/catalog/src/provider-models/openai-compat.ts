@@ -4281,8 +4281,7 @@ export function githubCopilotModelManagerOptions(config?: GithubCopilotModelMana
 				? getGitHubCopilotBaseUrl(parsedApiKey.enterpriseUrl)
 				: configuredBaseUrl;
 	let providerReferences: Map<string, ModelSpec<Api>> | undefined;
-	const getProviderReferences = () =>
-		(providerReferences ??= createBundledReferenceMap<Api>("github-copilot"));
+	const getProviderReferences = () => (providerReferences ??= createBundledReferenceMap<Api>("github-copilot"));
 	const resolveReference = createReferenceResolver(getProviderReferences);
 	return {
 		providerId: "github-copilot",
@@ -4372,7 +4371,10 @@ export function githubCopilotModelManagerOptions(config?: GithubCopilotModelMana
 									input,
 									contextWindow: defaultTierWindow,
 									maxTokens,
-									headers: { ...COPILOT_API_HEADERS, ...(getProviderReferences().get(defaults.id)?.headers ?? {}) },
+									headers: {
+										...COPILOT_API_HEADERS,
+										...(getProviderReferences().get(defaults.id)?.headers ?? {}),
+									},
 									...(api === "openai-completions"
 										? {
 												compat: {

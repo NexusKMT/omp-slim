@@ -1,5 +1,5 @@
-import { nanoGptModelManagerOptions } from "../../src/provider-models/openai-compat";
 import { ollamaCloudModelManagerOptions } from "../../src/provider-models/ollama";
+import { nanoGptModelManagerOptions } from "../../src/provider-models/openai-compat";
 
 const originalSet = Map.prototype.set;
 let mapWrites = 0;

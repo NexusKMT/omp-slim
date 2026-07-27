@@ -1,6 +1,6 @@
 import { expect, spyOn } from "bun:test";
 import * as buildModule from "../../src/build";
-import { getBundledModel, getBundledModels, getBundledProviders, type GeneratedProvider } from "../../src/models";
+import { type GeneratedProvider, getBundledModel, getBundledModels, getBundledProviders } from "../../src/models";
 import MODELS from "../../src/models.json" with { type: "json" };
 
 const buildSpy = spyOn(buildModule, "buildModel");

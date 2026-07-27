@@ -23,9 +23,7 @@ export function createBundledReferenceMap<TApi extends Api>(
 	return references;
 }
 
-type ProviderReferenceSource<TApi extends Api> =
-	| Map<string, ModelSpec<TApi>>
-	| (() => Map<string, ModelSpec<TApi>>);
+type ProviderReferenceSource<TApi extends Api> = Map<string, ModelSpec<TApi>> | (() => Map<string, ModelSpec<TApi>>);
 
 let globalReferences: Map<string, Model<Api>> | undefined;
 

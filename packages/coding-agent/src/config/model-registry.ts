@@ -1171,10 +1171,7 @@ export class ModelRegistry {
 
 	/** Load built-in models, applying provider-level overrides only.
 	 *  Per-model overrides are applied later by #applyModelOverrides. */
-	#loadBuiltInModels(
-		overrides: Map<string, ProviderOverride>,
-		providerFilter?: ReadonlySet<string>,
-	): Model<Api>[] {
+	#loadBuiltInModels(overrides: Map<string, ProviderOverride>, providerFilter?: ReadonlySet<string>): Model<Api>[] {
 		return getBundledProviders().flatMap(provider => {
 			if (providerFilter && !providerFilter.has(provider)) return [];
 			const models = getBundledModels(provider as Parameters<typeof getBundledModels>[0]) as Model<Api>[];
@@ -2274,9 +2271,7 @@ export class ModelRegistry {
 	 * the online refresh completes.
 	 */
 	hasProvider(providerId: string): boolean {
-		const providerModels = this.#hasFullSnapshot
-			? this.#models
-			: this.#composeStaticModels(new Set([providerId]));
+		const providerModels = this.#hasFullSnapshot ? this.#models : this.#composeStaticModels(new Set([providerId]));
 		if (providerModels.some(model => model.provider === providerId)) return true;
 		if (getDisabledProviderIdsFromSettings().has(providerId)) return false;
 		return (
