@@ -161,63 +161,46 @@ githubConfigUrl: "https://github.com/<OWNER>/<REPO>"
 githubConfigSecret: arc-github
 runnerScaleSetName: omp-kata
 minRunners: 0
-maxRunners: 10
+maxRunners: 4
 # none: each job runs inside the runner container, which itself lives in a Kata microVM
 containerMode:
   type: ""
 template:
   spec:
-    runtimeClassName: kata-qemu      # <-- every runner pod boots its own KVM microVM
+    runtimeClassName: kata-qemu
     securityContext:
-      # ghcr.io/actions/actions-runner runs jobs as uid/gid 1001 ("runner").
-      # Let kubelet make the PVC writable by that user without changing image-owned
-      # ~/.cargo/bin or ~/.rustup.
       fsGroup: 1001
       fsGroupChangePolicy: OnRootMismatch
-    initContainers:
-      - name: prepare-runner-cache
-        image: omp-kata-runner:2026-06-15-002621
-        imagePullPolicy: IfNotPresent
-        command:
-          - bash
-          - -lc
-          - install -d -o 1001 -g 1001 -m 2775 /cache/bun-store /cache/cargo-registry
-        securityContext:
-          runAsUser: 0
-        volumeMounts:
-          - name: runner-cache
-            mountPath: /cache
     containers:
       - name: runner
-        # Preloaded image: stock ghcr.io/actions/actions-runner + CI deps baked in
-        # (apt cairo/pango/jpeg/gif/rsvg stack, fd/ripgrep/imagemagick, bun, rust
-        # nightly + clippy/rustfmt + arm64/msvc targets). Built + imported locally;
-        # see /root/omp-kata-runner-image/. IfNotPresent uses the local image.
-        image: omp-kata-runner:2026-06-15-002621
+        image: omp-kata-runner:2026-07-27-072222
         imagePullPolicy: IfNotPresent
         command: ["/home/runner/run.sh"]
-        # Shared sccache backend (in-cluster RustFS S3). Exposes SCCACHE_BUCKET/
-        # ENDPOINT/REGION/USE_SSL + AWS creds to every job; CI flips RUSTC_WRAPPER
-        # on for rust builds only. GitHub-hosted runners lack this env and keep the
-        # GHA cache backend. See /root/sccache-rustfs/.
         envFrom:
           - secretRef:
               name: sccache-s3
+        env:
+          - name: OMP_NATIVE_CACHE_DIR
+            value: /home/runner/.cache/omp-native-artifacts
         volumeMounts:
-          # Shared stores only. Keep node_modules, Cargo target/, and Cargo git
-          # checkouts per-job to avoid mutable build-output or checkout poisoning.
           - name: runner-cache
             mountPath: /home/runner/.bun/install/cache
             subPath: bun-store
           - name: runner-cache
-            mountPath: /home/runner/.cargo/registry
-            subPath: cargo-registry
+            mountPath: /home/runner/.cargo/registry/cache
+            subPath: cargo-registry/cache
+          - name: runner-cache
+            mountPath: /home/runner/.cargo/registry/index
+            subPath: cargo-registry/index
+          - name: runner-cache
+            mountPath: /home/runner/.cache/omp-native-artifacts
+            subPath: native-artifacts
         resources:
           requests:
-            cpu: "2"
-            memory: "4Gi"
+            cpu: "8"
+            memory: "12Gi"
           limits:
-            cpu: "16"
+            cpu: "8"
             memory: "12Gi"
     volumes:
       - name: runner-cache
@@ -232,10 +215,10 @@ Field by field:
 - **`githubConfigSecret: arc-github`** - the auth secret from [step 1](#1-github-app-and-the-arc-github-secret).
 - **`runnerScaleSetName: omp-kata`** - the runner label. This is the string that
   goes in a workflow's `runs-on:`.
-- **`minRunners: 0` / `maxRunners: 10`** - **scale-to-zero**. With no queued jobs
-  there are zero runner pods (and zero microVMs) consuming the node; the listener
-  scales up to ten concurrent runners on demand. (The older ops notes capped this
-  at 3; the live value is 10.)
+- **`minRunners: 0` / `maxRunners: 4`** - **scale-to-zero**. With no queued jobs
+  there are zero runner microVMs. Each admitted runner gets an honest 8-vCPU,
+  12-GiB request and limit; excess jobs queue instead of ten 16-vCPU guests
+  fighting over the reference host's 32 physical CPUs.
 - **`containerMode.type: ""`** - **none**. The default chart offers `dind`
   (Docker-in-Docker sidecar) or `kubernetes` mode for job-container isolation;
   both are unnecessary here because the *whole runner pod* is already isolated in
@@ -509,20 +492,25 @@ incremental enabled). The sccache backend is conditional:
 - otherwise (GitHub-hosted) - it installs the toolchains, exports
   `SCCACHE_GHA_ENABLED=true`, and uses the **GitHub Actions cache**.
 
-`Swatinem/rust-cache` runs only on GitHub-hosted runners (it caches Cargo
-`target/`). On omp-kata the mounted Cargo registry handles crate downloads and
-sccache fills the compile-output gap when `target/` is cold.
+`Swatinem/rust-cache` keeps Cargo registry/tool data on GitHub-hosted runners.
+An explicit rolling `actions/cache` entry restores and saves `target/` across
+source hashes, which is essential for the slower Intel macOS build. On omp-kata,
+[`scripts/ci-target-cache.ts`](../../scripts/ci-target-cache.ts) stores the
+rolling `target/` snapshot in RustFS while sccache covers individual compiler
+outputs.
 
-**(b) Cargo registry cache** - the scale-set pod template mounts
-`runner-cache:/cargo-registry` at `/home/runner/.cargo/registry`. Cargo uses it
-automatically because the image keeps `CARGO_HOME=/home/runner/.cargo`.
+**(b) Cargo registry cache** - the scale-set pod template mounts only the
+immutable download cache and sparse index at
+`/home/runner/.cargo/registry/cache` and `/home/runner/.cargo/registry/index`.
+Source extraction, lock files, Cargo git checkouts, and `target/` remain
+job-local; virtio-fs does not propagate Cargo's file locks safely across VMs.
 
-Only the registry cache is shared. Cargo `target/` stays per-job, and
-`/home/runner/.cargo/git` stays per-job too; this repo has no git dependencies,
-and git checkouts are a worse shared mutable-cache boundary than crates.io
-archives with lockfile checksums.
+**(c) Native addon artifacts** - completed `.node` outputs are copied atomically
+to the runner-cache PVC under their native source hash. Native-dependent jobs on
+omp-kata restore both Linux x64 variants locally; GitHub-hosted jobs fall back to
+the trusted Actions artifact run.
 
-**(c) Bun package store** -
+**(d) Bun package store** -
 [`.github/actions/bun-install`](../../.github/actions/bun-install/action.yml)
 wraps `bun install --frozen-lockfile`. On omp-kata, the pod template mounts
 `runner-cache:/bun-store` at Bun's default store path

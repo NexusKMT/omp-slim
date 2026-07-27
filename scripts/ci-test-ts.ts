@@ -120,6 +120,7 @@ const localOnlyWorkspacePackages = ["packages/mnemopi", "python/robomp/web"];
 const repoScriptTests = [
 	"scripts/ci-concurrency.test.ts",
 	"scripts/ci-build-native.test.ts",
+	"scripts/ci-native-artifact-cache.test.ts",
 	"scripts/ci-release-notes.test.ts",
 	"scripts/ci-release-publish.test.ts",
 	"scripts/fix-dts-extensions.test.ts",
@@ -560,6 +561,7 @@ function isCI(): boolean {
 // memory-constrained laptop), or `all`/`max` to launch every chunk at once.
 function testConcurrency(total: number): number {
 	const raw = Bun.env.OMP_TEST_CONCURRENCY?.trim().toLowerCase();
+	if (!raw) return Math.min(Math.max(1, os.availableParallelism()), total);
 	if (raw === "all" || raw === "max") {
 		return total;
 	}
@@ -567,7 +569,7 @@ function testConcurrency(total: number): number {
 	if (Number.isFinite(override) && override >= 1) {
 		return Math.min(Math.floor(override), total);
 	}
-	return Math.min(Math.max(1, os.availableParallelism()), total);
+	throw new Error(`Invalid OMP_TEST_CONCURRENCY=${JSON.stringify(raw)}; expected a positive integer, all, or max`);
 }
 
 // ANSI styling for interactive runs only; disabled when stdout is not a TTY or
@@ -890,9 +892,11 @@ if (import.meta.main) {
 	}
 
 	const testCommands = await commandsForMode(requestedMode as Mode);
-	// Outside CI, fan the independent chunk processes out across cores; CI keeps the
-	// sequential, fail-fast path so each memory-capped runner job stays bounded.
-	if (!isDryRun && !isCI() && testCommands.length > 1) {
+	const explicitConcurrency = Boolean(Bun.env.OMP_TEST_CONCURRENCY?.trim());
+	// CI defaults to one process at a time, but memory-sized workflow buckets
+	// explicitly opt into bounded process concurrency. Local runs fan out by
+	// default and may use the same override.
+	if (!isDryRun && testCommands.length > 1 && (!isCI() || explicitConcurrency)) {
 		await runTestCommandsInParallel(testCommands, testConcurrency(testCommands.length));
 	} else {
 		for (const testCommand of testCommands) {

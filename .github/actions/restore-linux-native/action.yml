@@ -1,0 +1,54 @@
+name: Restore Linux x64 native addons
+description: Restore both Linux x64 variants from the in-cluster cache or a trusted GitHub artifact run.
+
+inputs:
+   hash:
+      description: Native source hash embedded in artifact names
+      required: true
+   native-job-result:
+      description: Result of the current run's Linux x64 native matrix
+      required: true
+   cached-run-id:
+      description: Prior run containing both Linux x64 variants
+      required: false
+      default: ""
+
+runs:
+   using: composite
+   steps:
+      - name: Restore native addons from in-cluster cache
+        id: local
+        shell: bash
+        run: |
+           bun scripts/ci-native-artifact-cache.ts restore \
+             "${{ inputs.hash }}" \
+             packages/natives/native \
+             "pi-natives-linux-x64-baseline-h${{ inputs.hash }}" \
+             "pi-natives-linux-x64-modern-h${{ inputs.hash }}"
+
+      - name: Resolve GitHub artifact run
+        if: steps.local.outputs.hit != 'true'
+        id: source
+        shell: bash
+        run: |
+           set -euo pipefail
+           if [ "${{ inputs.native-job-result }}" = "success" ]; then
+             run_id="${{ github.run_id }}"
+           else
+             run_id="${{ inputs.cached-run-id }}"
+           fi
+           if [ -z "$run_id" ]; then
+             echo "No Linux x64 native artifact source is available" >&2
+             exit 1
+           fi
+           echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download native addons from GitHub
+        if: steps.local.outputs.hit != 'true'
+        uses: actions/download-artifact@v4
+        with:
+           pattern: pi-natives-linux-x64-*-h${{ inputs.hash }}
+           path: packages/natives/native
+           merge-multiple: true
+           run-id: ${{ steps.source.outputs.run-id }}
+           github-token: ${{ github.token }}

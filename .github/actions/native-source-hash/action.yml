@@ -1,0 +1,30 @@
+name: Compute native source hash
+description: Hash every source, toolchain, and build-or-validation input that governs reusable native artifacts.
+
+outputs:
+   source-hash:
+      description: Stable 16-hex native source fingerprint
+      value: ${{ steps.compute.outputs.source-hash }}
+
+runs:
+   using: composite
+   steps:
+      - name: Compute native source hash
+        id: compute
+        shell: bash
+        run: |
+           set -euo pipefail
+           source_hash=$(find \
+                 crates \
+                 packages/natives/scripts \
+                 Cargo.toml Cargo.lock rust-toolchain.toml rustfmt.toml \
+                 packages/natives/package.json \
+                 scripts/ci-build-native.ts scripts/ci-target-cache.ts scripts/host-detect.ts scripts/run-rs-task.ts \
+                 .github/actions/build-native/action.yml .github/actions/native-source-hash/action.yml \
+                 -type f -print0 \
+               | sort -z \
+               | xargs -0 sha256sum \
+               | sha256sum \
+               | cut -c1-16)
+           echo "source-hash=$source_hash" >> "$GITHUB_OUTPUT"
+           echo "Native source hash: $source_hash"

@@ -39,7 +39,7 @@ flowchart LR
     SEC -.->|"envFrom"| POD
     NP -.->|"filters egress"| POD
     JOB -->|"sccache (S3 SigV4)"| RUSTFS
-    JOB -->|"Bun store + Cargo registry mounts"| PVC
+    JOB -->|"Bun/Cargo stores + native artifacts"| PVC
     POD -->|"allowed egress"| NAT
     NAT -->|"checkout / API / internet"| GH
 ```
@@ -47,10 +47,10 @@ flowchart LR
 Key properties baked into this design:
 
 - **One job = one VM.** Runner pods are ephemeral and JIT-registered; there is no VM templating or pooling, so a job never inherits state from a previous job.
-- **Scale-to-zero.** `minRunners: 0` / `maxRunners: 10` — when no jobs are queued, zero runner pods (and zero microVMs) exist.
+- **Scale-to-zero.** `minRunners: 0` / `maxRunners: 4` — when no jobs are queued, zero runner pods (and zero microVMs) exist.
 - **Host-kernel isolation.** Jobs see the microVM's guest kernel, not the host kernel, so a kernel exploit in a job does not reach the host.
 - **No external registry.** The runner image is built on the host and imported straight into k3s' containerd.
-- **Shared, in-cluster cache.** `sccache` targets RustFS over the cluster network; Bun's package store and Cargo's registry cache are mounted from the runner cache PVC. Cache traffic stays on the host.
+- **Shared, in-cluster cache.** RustFS stores sccache outputs and rolling Cargo target snapshots; the runner-cache PVC stores Bun/Cargo downloads and source-hash-addressed native addons. Cache traffic stays on the host.
 
 ## End-to-end job lifecycle
 
@@ -59,7 +59,7 @@ Key properties baked into this design:
 3. The listener signals demand to the **ARC controller**, which scales the **EphemeralRunnerSet** up by one.
 4. The controller creates a single **JIT-registered ephemeral runner pod** in `arc-runners`, with `runtimeClassName: kata-qemu` and the `sccache-s3` secret injected via `envFrom`.
 5. containerd hands the pod to the Kata shim, which **boots a fresh QEMU/KVM microVM** (own guest kernel; the container rootfs is shared in over virtio-fs). No templating — every job gets a clean VM.
-6. The runner agent inside the microVM **registers just-in-time and picks up exactly one job**. Steps run isolated from the host, using RustFS over S3 for `sccache`, mounted PVC paths for Bun/Cargo package caches, and NAT egress for the public internet, all constrained by the `runner-egress-lockdown` NetworkPolicy.
+6. The runner agent inside the microVM **registers just-in-time and picks up exactly one job**. Steps run isolated from the host, using RustFS for Rust compilation caches, mounted PVC paths for package/native-artifact caches, and NAT egress for the public internet, all constrained by the `runner-egress-lockdown` NetworkPolicy.
 7. The job finishes; the ephemeral runner **deregisters and the pod (and its microVM) is destroyed** — never reused.
 8. When no jobs remain queued, the EphemeralRunnerSet **scales back to zero**, leaving no idle runners or VMs.
 
@@ -71,7 +71,7 @@ Key properties baked into this design:
 | Kata Containers runtime | QEMU/KVM microVM runtime: containerd drop-in registering `kata-qemu` + the `kata-qemu` RuntimeClass | Kata `3.31.0` | [02-kata-runtime.md](02-kata-runtime.md) |
 | Preloaded runner image | Custom `actions/runner` image (build toolchain, Bun, Rust nightly + cross targets, native-build deps) built on the host and imported into k3s containerd — no registry | local dated tag | [03-runner-image.md](03-runner-image.md) |
 | ARC (runner scale set) | actions-runner-controller, `gha-runner-scale-set` flavor: controller in `arc-systems`, one scale set + listener, GitHub App auth | ARC `0.14.2` | [04-arc-and-caching.md](04-arc-and-caching.md) |
-| Shared caches | RustFS S3 (`svc rustfs:9000`, 100Gi PVC) backs `sccache`; `arc-runners/runner-cache` (100Gi PVC) mounts Bun's package store and Cargo's registry cache into runner pods; the `sccache-s3` secret and egress NetworkPolicy wire access | in-cluster services/storage | [04-arc-and-caching.md](04-arc-and-caching.md) |
+| Shared caches | RustFS S3 (`svc rustfs:9000`, 100Gi PVC) backs sccache and rolling Cargo target snapshots; `arc-runners/runner-cache` (100Gi PVC) holds Bun/Cargo downloads and immutable native addons; the `sccache-s3` secret and egress NetworkPolicy wire access | in-cluster services/storage | [04-arc-and-caching.md](04-arc-and-caching.md) |
 
 ## Prerequisites
 

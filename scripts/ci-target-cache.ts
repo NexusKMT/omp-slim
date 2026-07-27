@@ -36,6 +36,11 @@ const MAX_SNAPSHOT_BYTES = 4 * 1024 ** 3;
 const EXISTS_TIMEOUT_MS = 30_000;
 const DOWNLOAD_TIMEOUT_MS = 180_000;
 const UPLOAD_TIMEOUT_MS = 300_000;
+const configuredCompressionThreads = Number(Bun.env.OMP_CI_CPU_COUNT);
+const COMPRESSION_THREADS =
+	Number.isInteger(configuredCompressionThreads) && configuredCompressionThreads > 0
+		? configuredCompressionThreads
+		: 2;
 
 /**
  * Resolve the S3 endpoint URL from the sccache pod env. `SCCACHE_ENDPOINT` is
@@ -140,9 +145,11 @@ async function save(s3: S3Client, objectKey: string, targetDir: string): Promise
 		// CARGO_INCREMENTAL=0 in CI, so incremental/ only exists from stray
 		// local state; exclude it regardless — it is the one cargo dir that is
 		// pure dead weight for a cold consumer. Explicit compress pipe for the
-		// same tar-flavor reason as in restore(); -T0 uses all cores.
+		// same tar-flavor reason as in restore(). Compression is capped to the
+		// runner's admitted CPU allocation; `-T0` multiplied host contention when
+		// several native matrix jobs saved snapshots together.
 		const create =
-			await $`tar -cf - --exclude=${"*/incremental"} -C ${path.dirname(targetDir)} ${path.basename(targetDir)} | zstd -q -T0 -3 -f -o ${tmpTar}`
+			await $`tar -cf - --exclude=${"*/incremental"} -C ${path.dirname(targetDir)} ${path.basename(targetDir)} | zstd -q -T${COMPRESSION_THREADS} -3 -f -o ${tmpTar}`
 				.quiet()
 				.nothrow();
 		if (create.exitCode !== 0) {

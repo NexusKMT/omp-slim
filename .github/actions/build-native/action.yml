@@ -28,10 +28,9 @@ inputs:
       default: ""
    glibc:
       description: >
-         Optional glibc floor (e.g. "2.17") for linux-gnu builds. Routes the build
-         through cargo-zigbuild against that floor without affecting the rustup
-         target or the host-arch native test steps. Combine with `target` to pin a
-         cross-arch linux build, or set alone for a host-arch (x64) linux build.
+         Optional glibc floor override for linux-gnu builds (defaults to "2.17").
+         Routes the build through cargo-zigbuild against that floor without
+         affecting the rustup target or host-arch native test steps.
       required: false
       default: ""
    libc:
@@ -43,16 +42,19 @@ inputs:
       required: false
       default: "false"
    skip_validation:
-      description: >
-         Skip clippy/rustfmt and the Rust test suite. Set on release runs: the
-         version-bump commit only changes version strings, and the tagged
-         content's Rust code already passed validation on its main-push run.
+      description: Skip clippy/rustfmt and the Rust test suite for build-only matrix entries.
       required: false
       default: "false"
+   skip_build:
+      description: Run validation and cache population without building or uploading a native addon.
+      required: false
+      default: "false"
+   cache_scope:
+      description: Separates target snapshots whose Cargo work differs (for example, build and validation).
+      required: false
+      default: "build"
    save_cache:
-      description: >
-         Whether to write build caches: Swatinem/rust-cache on GitHub-hosted
-         runners, the RustFS target/ snapshot on omp-kata.
+      description: Whether to persist the GitHub-hosted or RustFS target snapshot.
       required: false
       default: "false"
 
@@ -82,9 +84,20 @@ runs:
         env:
            TARGET: ${{ inputs.target }}
            GLIBC: ${{ inputs.glibc }}
+           PLATFORM: ${{ inputs.platform }}
+           LIBC: ${{ inputs.libc }}
            ARCH: ${{ inputs.arch }}
         run: |
            set -euo pipefail
+           # Keep the portability floor here: this action is included in the
+           # native source hash, and every workflow then consumes one value.
+           if [ "$PLATFORM" = linux ] && [ "$LIBC" != musl ]; then
+             GLIBC="${GLIBC:-2.17}"
+           elif [ -n "$GLIBC" ]; then
+             echo "::error::glibc floor '$GLIBC' is only valid for linux-gnu builds"
+             exit 1
+           fi
+
            # `cross_target` is what the napi build feeds cargo: cargo-zigbuild reads
            # the glibc floor as a `.<major>.<minor>` triple suffix. `bare_target` is
            # what rustup needs — never glibc-suffixed (rustup rejects the suffix)
@@ -98,11 +111,13 @@ runs:
            fi
            cross_target=""
            if [ -n "$GLIBC" ]; then
-             if [ -z "$base" ]; then
-               echo "::error::glibc floor '$GLIBC' set but no linux-gnu base triple for arch '$ARCH'"
-               exit 1
-             fi
-             cross_target="${base}.${GLIBC}"
+             case "$base" in
+               *-linux-gnu) cross_target="${base}.${GLIBC}" ;;
+               *)
+                 echo "::error::glibc floor '$GLIBC' requires a linux-gnu target, got '$base'"
+                 exit 1
+                 ;;
+             esac
            elif [ -n "$TARGET" ]; then
              cross_target="$TARGET"
            fi
@@ -187,25 +202,28 @@ runs:
            echo "RUSTFLAGS=$rustflags" >> "$GITHUB_ENV"
            echo "Configured RUSTFLAGS=$rustflags"
 
-      # --- target/ cache (GitHub-hosted only) ---------------------------------
-      # Swatinem keys target/ off its restore-time environment, so it must run
-      # after RUSTFLAGS is set: if x64 target-cpu were only selected later, cargo
-      # would invalidate the restored target/ while rust-cache saw an exact key
-      # and refused to save the rebuilt artifacts (macOS x64 baseline rebuilds
-      # forever). The native source hash is in the shared key too: rust-cache's
-      # lockfile scan misses the workspace-root Cargo.toml version Cargo
-      # fingerprints, so a version bump could otherwise get an exact hit for
-      # artifacts Cargo must rebuild. On omp-kata the reuse layers are the
-      # mounted Cargo registry, RustFS sccache, and the RustFS target/ snapshot
-      # (see "Restore target/ cache" below), so Swatinem stays GitHub-only.
-      - name: Cache Rust target/ (GitHub-hosted)
+      # --- Cargo + rolling target cache (GitHub-hosted only) ------------------
+      # Swatinem keeps the registry/tool cache. target/ uses an explicit rolling
+      # key: a new source hash restores the latest compatible snapshot through
+      # restore-keys, then saves the rebuilt state under a fresh immutable key.
+      # This is especially important for the three-core Intel macOS runner.
+      - name: Cache Cargo dependencies (GitHub-hosted)
         if: steps.detect.outputs.on_infra == 'false'
         uses: Swatinem/rust-cache@v2
         with:
-           shared-key: native-${{ inputs.platform }}-${{ inputs.libc || 'default' }}-${{ inputs.arch }}-${{ inputs.variant || 'default' }}-h${{ inputs.hash }}
+           shared-key: native-deps-${{ inputs.platform }}-${{ inputs.libc || 'default' }}-${{ inputs.arch }}
            cache-on-failure: true
            save-if: ${{ inputs.save_cache == 'true' }}
-           cache-workspace-crates: true
+           cache-targets: false
+      - name: Restore rolling Rust target/ (GitHub-hosted)
+        id: gha-target
+        if: steps.detect.outputs.on_infra == 'false'
+        uses: actions/cache/restore@v4
+        with:
+           path: target
+           key: native-target-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ inputs.libc || 'default' }}-${{ inputs.arch }}-${{ inputs.variant || 'default' }}-${{ inputs.cache_scope }}-${{ hashFiles('rust-toolchain.toml') }}-h${{ inputs.hash }}
+           restore-keys: |
+              native-target-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ inputs.libc || 'default' }}-${{ inputs.arch }}-${{ inputs.variant || 'default' }}-${{ inputs.cache_scope }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       # --- sccache ------------------------------------------------------------
       - name: Ensure baked sccache (omp-kata)
@@ -225,10 +243,24 @@ runs:
         env:
            CROSS_TARGET: ${{ steps.resolve.outputs.cross_target }}
         run: |
+           jobs="${OMP_CI_CPU_COUNT:-$(getconf _NPROCESSORS_ONLN)}"
+           if [ -z "${OMP_CI_CPU_COUNT:-}" ] && [ -r /sys/fs/cgroup/cpu.max ]; then
+             read -r quota period < /sys/fs/cgroup/cpu.max
+             if [ "$quota" != "max" ]; then
+               quota_jobs=$((quota / period))
+               [ "$quota_jobs" -ge 1 ] || quota_jobs=1
+               [ "$quota_jobs" -ge "$jobs" ] || jobs="$quota_jobs"
+             fi
+           fi
            {
+             echo "OMP_CI_CPU_COUNT=$jobs"
              echo "RUSTC_WRAPPER=sccache"
              echo "CARGO_INCREMENTAL=0"
+             echo "CARGO_BUILD_JOBS=$jobs"
+             echo "CMAKE_BUILD_PARALLEL_LEVEL=$jobs"
+             echo "NEXTEST_TEST_THREADS=$jobs"
            } >> "$GITHUB_ENV"
+           echo "Native build parallelism: $jobs"
            # Route CMake-built C (audiopus_sys' bundled opus) through sccache
            # too — build scripts bypass RUSTC_WRAPPER. Non-cross builds only:
            # cross builds compile C with zig cc / clang-cl wrapper scripts that
@@ -248,13 +280,13 @@ runs:
 
       # --- cargo-nextest (native test runner; non-cross builds only) ----------
       - name: Ensure baked cargo-nextest (omp-kata)
-        if: steps.detect.outputs.on_infra == 'true' && inputs.target == ''
+        if: steps.detect.outputs.on_infra == 'true' && inputs.target == '' && inputs.skip_validation != 'true'
         uses: ./.github/actions/ensure-cargo-tool
         with:
            binary: cargo-nextest
            crate: cargo-nextest
       - name: Install cargo-nextest (GitHub-hosted)
-        if: steps.detect.outputs.on_infra == 'false' && inputs.target == ''
+        if: steps.detect.outputs.on_infra == 'false' && inputs.target == '' && inputs.skip_validation != 'true'
         uses: taiki-e/install-action@v2
         with:
            tool: nextest
@@ -323,12 +355,17 @@ runs:
       # cargo's fingerprint/link work bypass it. Snapshot target/ to the same
       # RustFS S3 bucket, keyed per platform/libc/arch/variant + toolchain and
       # overwritten on each save so storage stays bounded at one snapshot per
-      # key. GitHub-hosted runners get the same effect from Swatinem above.
+      # key. GitHub-hosted runners get the same effect from the rolling cache above.
+      - name: Verify target cache compressor (omp-kata)
+        if: steps.detect.outputs.on_infra == 'true'
+        shell: bash
+        run: zstd --version
+
       - name: Restore target/ cache (omp-kata)
         if: steps.detect.outputs.on_infra == 'true'
         shell: bash
         env:
-           TARGET_CACHE_KEY: native-${{ inputs.platform }}-${{ inputs.libc || 'default' }}-${{ inputs.arch }}-${{ inputs.variant || 'default' }}
+           TARGET_CACHE_KEY: native-${{ inputs.platform }}-${{ inputs.libc || 'default' }}-${{ inputs.arch }}-${{ inputs.variant || 'default' }}-${{ inputs.cache_scope }}
         run: bun scripts/ci-target-cache.ts restore "$TARGET_CACHE_KEY"
 
       # --- Checks, build, upload (shared) -------------------------------------
@@ -345,29 +382,46 @@ runs:
         shell: bash
         run: bun run test:rs
       - name: Build native addon(s)
+        if: inputs.skip_build != 'true'
         shell: bash
         env:
            CROSS_TARGET: ${{ steps.resolve.outputs.cross_target }}
            TARGET_PLATFORM: ${{ inputs.platform }}
            TARGET_ARCH: ${{ inputs.arch }}
            TARGET_VARIANTS: ${{ inputs.variant }}
-        run: bun run ci:build:native
+        run: |
+           if [ "$CROSS_TARGET" = x86_64-apple-darwin ]; then
+             # Do not accept Homebrew's arm64 libopus through pkg-config;
+             # build audiopus_sys's bundled x64 archive.
+             export OPUS_NO_PKG_CONFIG=1
+           fi
+           bun run ci:build:native
       - name: sccache stats
         shell: bash
         run: sccache --show-stats || true
+      - name: Save native addon(s) to in-cluster cache
+        if: inputs.skip_build != 'true' && steps.detect.outputs.on_infra == 'true'
+        shell: bash
+        env:
+           ARTIFACT_NAME: pi-natives-${{ inputs.platform }}-${{ inputs.libc && format('{0}-', inputs.libc) || '' }}${{ inputs.arch }}${{ inputs.variant && format('-{0}', inputs.variant) || '' }}-h${{ inputs.hash }}
+        run: bun scripts/ci-native-artifact-cache.ts save "${{ inputs.hash }}" "$ARTIFACT_NAME"
       - name: Upload native addon(s)
+        if: inputs.skip_build != 'true'
         uses: actions/upload-artifact@v4
         with:
            name: pi-natives-${{ inputs.platform }}-${{ inputs.libc && format('{0}-', inputs.libc) || '' }}${{ inputs.arch }}${{ inputs.variant && format('-{0}', inputs.variant) || '' }}-h${{ inputs.hash }}
            path: packages/natives/native/pi_natives.${{ inputs.platform }}-${{ inputs.arch }}*.node
            if-no-files-found: error
-           # Explicit so the native_artifact_lookup canary keeps working even if
-           # org defaults shift; bump if Rust source ever stays stable for >90 days
-           # of main pushes and you want to avoid rebuilds.
            retention-days: 90
       - name: Save target/ cache (omp-kata)
         if: steps.detect.outputs.on_infra == 'true' && inputs.save_cache == 'true'
         shell: bash
         env:
-           TARGET_CACHE_KEY: native-${{ inputs.platform }}-${{ inputs.libc || 'default' }}-${{ inputs.arch }}-${{ inputs.variant || 'default' }}
+           TARGET_CACHE_KEY: native-${{ inputs.platform }}-${{ inputs.libc || 'default' }}-${{ inputs.arch }}-${{ inputs.variant || 'default' }}-${{ inputs.cache_scope }}
         run: bun scripts/ci-target-cache.ts save "$TARGET_CACHE_KEY"
+      - name: Save rolling Rust target/ (GitHub-hosted)
+        if: steps.detect.outputs.on_infra == 'false' && inputs.save_cache == 'true' && steps.gha-target.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+           path: target
+           key: native-target-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ inputs.libc || 'default' }}-${{ inputs.arch }}-${{ inputs.variant || 'default' }}-${{ inputs.cache_scope }}-${{ hashFiles('rust-toolchain.toml') }}-h${{ inputs.hash }}
