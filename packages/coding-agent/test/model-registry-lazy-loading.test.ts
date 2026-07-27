@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import * as path from "node:path";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
+import { litellmModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -14,7 +17,7 @@ function modelKeys(models: readonly Model<Api>[]): string[] {
 function expectSameModelObjects(models: readonly Model<Api>[], allModels: readonly Model<Api>[]): void {
 	const allByKey = new Map(allModels.map(model => [`${model.provider}\0${model.id}`, model]));
 	for (const model of models) {
-		expect(model).toBe(allByKey.get(`${model.provider}\0${model.id}`));
+		expect(allByKey.get(`${model.provider}\0${model.id}`)).toBe(model);
 	}
 }
 
@@ -40,6 +43,39 @@ describe("ModelRegistry lazy bundled composition", () => {
 		]);
 		expect(exitCode, stderr).toBe(0);
 		expect(JSON.parse(stdout)).toEqual({ buildCalls: 0 });
+	});
+
+	test("loads the default LiteLLM namespaced cache", async () => {
+		const tempDir = TempDir.createSync("@model-registry-lazy-litellm-cache-");
+		tempDirs.push(tempDir);
+		const authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
+		authStorages.push(authStorage);
+		const cacheProviderId = litellmModelManagerOptions().cacheProviderId;
+		if (!cacheProviderId) throw new Error("LiteLLM must define a cache namespace");
+		writeModelCache(
+			cacheProviderId,
+			Date.now(),
+			[
+				buildModel({
+					id: "cached-fixture",
+					name: "Cached Fixture",
+					api: "openai-completions",
+					provider: "litellm",
+					baseUrl: "http://localhost:4000/v1",
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 8192,
+					maxTokens: 1024,
+				}),
+			],
+			true,
+			"",
+			path.join(tempDir.path(), "models.db"),
+		);
+
+		const registry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
+		expect(registry.find("litellm", "cached-fixture")?.name).toBe("Cached Fixture");
 	});
 
 	test("query order preserves ordering, snapshots, and model identity", async () => {
