@@ -1355,6 +1355,8 @@ export class SessionAdvisors {
 		});
 
 		for (const candidate of candidates) {
+			const apiKey = await this.#host.modelRegistry.getApiKey(candidate, advisorProviderSessionId, { signal });
+			if (!apiKey) continue;
 			if (
 				nativeCompactionFailure &&
 				(candidate.provider !== nativeCompactionFailure.provider ||
@@ -1362,8 +1364,7 @@ export class SessionAdvisors {
 			) {
 				throw nativeCompactionFailure.error;
 			}
-			const apiKey = await this.#host.modelRegistry.getApiKey(candidate, advisorProviderSessionId, { signal });
-			if (!apiKey) continue;
+
 			// The advisor overflow-compaction one-shot bypasses the advisor `Agent`,
 			// so its installed metadata resolver never runs. Emit the same
 			// `metadata.user_id` identity here (resolved per candidate provider,

@@ -2490,6 +2490,9 @@ export class SessionMaintenance {
 
 				for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
 					const candidate = candidates[candidateIndex];
+					const hasMoreCandidates = candidateIndex < candidates.length - 1;
+					const apiKey = await this.#host.modelRegistry.getApiKey(candidate, this.#host.sessionId());
+					if (!apiKey) continue;
 					if (
 						nativeCompactionFailure &&
 						(candidate.provider !== nativeCompactionFailure.provider ||
@@ -2497,9 +2500,6 @@ export class SessionMaintenance {
 					) {
 						throw nativeCompactionFailure.error;
 					}
-					const hasMoreCandidates = candidateIndex < candidates.length - 1;
-					const apiKey = await this.#host.modelRegistry.getApiKey(candidate, this.#host.sessionId());
-					if (!apiKey) continue;
 
 					let attempt = 0;
 					while (true) {
