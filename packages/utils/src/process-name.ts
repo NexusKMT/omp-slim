@@ -33,21 +33,25 @@ export function setProcessName(name: string): void {
 
 	if (os.platform() !== "linux") return;
 
-	try {
-		const libc = dlopen("libc.so.6", {
-			prctl: {
-				args: [FFIType.i32, FFIType.ptr, FFIType.u64, FFIType.u64, FFIType.u64],
-				returns: FFIType.i32,
-			},
-		});
+	// glibc first, then the generic soname for musl-style layouts (see stderr-guard.ts).
+	for (const soname of ["libc.so.6", "libc.so"]) {
 		try {
-			// TASK_COMM_LEN is 16 (name + NUL); the kernel truncates the rest.
-			const buf = Buffer.from(`${name}\0`, "utf8");
-			libc.symbols.prctl(PR_SET_NAME, ptr(buf), 0n, 0n, 0n);
-		} finally {
-			libc.close();
+			const libc = dlopen(soname, {
+				prctl: {
+					args: [FFIType.i32, FFIType.ptr, FFIType.u64, FFIType.u64, FFIType.u64],
+					returns: FFIType.i32,
+				},
+			});
+			try {
+				// TASK_COMM_LEN is 16 (name + NUL); the kernel truncates the rest.
+				const buf = Buffer.from(`${name}\0`, "utf8");
+				libc.symbols.prctl(PR_SET_NAME, ptr(buf), 0n, 0n, 0n);
+			} finally {
+				libc.close();
+			}
+			return;
+		} catch {
+			// bun:ffi unavailable or this soname missing; try the next candidate.
 		}
-	} catch {
-		// bun:ffi unavailable or libc missing; process.title stands alone.
 	}
 }
