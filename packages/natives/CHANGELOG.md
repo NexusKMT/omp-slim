@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed the macOS (darwin) native addon delivering zero `AudioCapture` callbacks — `/live` could listen without ever capturing microphone audio ([#6846](https://github.com/can1357/oh-my-pi/issues/6846)). The 17.1.6 Bazel migration dropped `maudio`'s `generate-bindings` feature, so darwin shipped `maudio-sys`'s Linux-shaped pregenerated miniaudio bindings, whose `ma_device`/`ma_context` backend-state unions omit the `MA_SUPPORT_COREAUDIO` members present in the macOS build of `miniaudio.c`. The resulting Rust↔C ABI mismatch let device init/start succeed while the CoreAudio render callback never fired. `generate-bindings` is now re-enabled for apple targets only (darwin builds with host Xcode, so bindgen/libclang are available); the hermetic linux/musl/windows toolchains keep the bindgen-free pregenerated bindings, which are correct for those platforms.
+- Fixed an issue on macOS (darwin) where the native addon delivered zero AudioCapture callbacks, which prevented microphone audio from being captured.
 
 ## [17.1.6] - 2026-07-27
 

@@ -2,47 +2,38 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Changed tab.screenshot() to no longer accept a per-call save path; it now saves screenshots under browser.screenshotDir (or the OS temp directory if unset) and returns the saved path.
+
 ### Added
 
-- Added `omp cleanse`, which detects configured checkers across common language ecosystems, parses machine-readable diagnostics (including Cargo Clippy JSON), balances whole-file workloads across up to eight `@smol` subagents by default (`-n` and `-m` override concurrency and model), persists the run as a new session, reruns every checker after the repair batch, and renders a live repair-worker progress bar in interactive terminals.
+- Added omp cleanse, a new command that automatically detects language-ecosystem checkers, parses diagnostics (such as Cargo Clippy JSON), distributes repair workloads across concurrent subagents, and runs verification checks with a live progress bar.
 
 ### Changed
 
-- Reworked `/guided-goal` from a modal question-by-question popup flow into a normal conversation: the command sends a hidden interview brief to the session agent, which asks its follow-up questions as regular chat turns and, once the objective is pinned down, enables goal mode itself via `goal create`. The plan/slow-model side session, per-question editor overlays, and final review popup are gone; answers are typed in the ordinary editor and benefit from the standard secret-obfuscation path.
+- Reworked the /guided-goal command from a modal-based popup flow into a natural, conversational chat interface where the agent asks follow-up questions directly in the session.
+- Reduced startup memory usage by lazy-loading HTML session export assets only on their first use.
 
 ### Fixed
 
-- Stopped Advisor notes from appending a stale-review-window warning when newer primary turns queue during review; delivered advice now contains only the Advisor's note.
-### Fixed
-
-- Fixed bordered output blocks reserving left padding without matching right padding, including web-search result panels.
-### Fixed
-
-- Fixed excluded web search providers remaining visible in the `Web Search Provider Order` settings list ([#6860](https://github.com/can1357/oh-my-pi/issues/6860)).
-### Fixed
-
-- Fixed internal Hub peer messages being emitted over ACP as ordinary tool-call updates, which exposed inter-agent coordination text in clients such as Paseo ([#6872](https://github.com/can1357/oh-my-pi/issues/6872)).
-### Fixed
-
-- Fixed `omp plugin install` of legacy pi extensions failing Bun's static named-export validation on `isContextOverflow` (e.g. `pi-blackhole`). The `@oh-my-pi/pi-ai` root barrel dropped upstream `@earendil-works/pi-ai`'s root re-export, so `legacy-pi-ai-shim.ts` (which backs both on-disk and `omp-legacy-pi-bundled:` virtual resolution) never surfaced it. The shim now bridges every upstream-root runtime symbol that still exists in omp — `isContextOverflow` (from `@oh-my-pi/pi-ai/error`) and `parseJsonWithRepair`/`parseStreamingJson`/`repairJson` (from `@oh-my-pi/pi-utils`) ([#6859](https://github.com/can1357/oh-my-pi/issues/6859)).
-### Fixed
-
-- Fixed legacy extension plugin validation failing with `Export named 'isRetryableAssistantError' not found in module '.../legacy-pi-ai-shim.ts'` when an extension imports `isRetryableAssistantError` from `@earendil-works/pi-ai` / `@oh-my-pi/pi-ai` (e.g. `@router-for-me/pi-cliproxyapi-provider` >= 1.4.9). Historical pi-ai exports this transient-error classifier from its package root, but OMP's legacy `pi-ai` root shim never bridged it; the shim now ships a compatibility implementation matching the upstream provider-error wording tables. ([#6847](https://github.com/can1357/oh-my-pi/issues/6847))
-### Fixed
-
-- Daemon broker: a detached `restart:"always"` daemon in the `restarting` backoff window is no longer re-settled by routine ops (`list`/`logs`/`stop`/`describe`). Previously each op ran `#refreshDetached` → a re-entrant `#settle` that incremented `restartCount` and overwrote the armed `restartTimer`, orphaning the old timer; `stop` cleared only the last timer, so an orphaned timer later fired `#launch` and resurrected the daemon (`stop` reported success but the daemon kept looping). `#settle` now treats `restarting` as already-settled ([#6852](https://github.com/can1357/oh-my-pi/issues/6852)).
-### Fixed
-
-- Fixed marketplace plugin MCP discovery ignoring the `mcpServers` manifest field in `.omp-plugin/plugin.json` and `.claude-plugin/plugin.json`; both an inline server-map object and a file-path pointer are now honored (OMP manifest first) before the conventional root `.mcp.json` fallback ([#6871](https://github.com/can1357/oh-my-pi/issues/6871)).
-### Fixed
-
-- User-initiated `!`/`$` executions are no longer misread as agent actions in advisor transcripts: they now render under a `**user**:` label in watched mode and carry a `→ user-bash!` / `→ user-python!` prefix in every render path.
-### Fixed
-
-- Preserved the active auto-thinking effort when per-turn classification fails, avoiding an unnecessary full prompt-cache invalidation from reverting to the model's provisional default ([#6877](https://github.com/can1357/oh-my-pi/issues/6877)).
-### Changed
-
-- Reduced startup memory for HTML session exports by loading and composing bundled HTML, CSS, and JavaScript assets only on first export while preserving source, npm bundle, and standalone binary output bytes.
+- Fixed Advisor notes appending stale-review-window warnings when newer primary turns are queued during a review.
+- Fixed layout padding alignment issues in bordered output blocks and web-search result panels.
+- Fixed excluded web search providers remaining visible in the Web Search Provider Order settings list.
+- Fixed internal Hub peer messages being exposed as ordinary tool-call updates in clients like Paseo.
+- Fixed compatibility issues when installing legacy pi extensions by updating the legacy shim to correctly bridge missing runtime symbols and exports (such as isContextOverflow, isRetryableAssistantError, and JSON parsing utilities).
+- Fixed an issue where routine daemon operations (like list, logs, stop, or describe) could inadvertently trigger a restart loop for detached daemons in a backoff window.
+- Fixed marketplace plugin MCP discovery to correctly honor the mcpServers manifest field in plugin configuration files.
+- Fixed user-initiated shell executions (! and $) being misattributed as agent actions in advisor transcripts.
+- Fixed unnecessary prompt-cache invalidations by preserving the active auto-thinking effort level when per-turn classification fails.
+- Fixed the omp process name showing up as bun in Linux process managers (like ps and top).
+- Fixed agent shell commands inheriting environment variables from the launch directory's .env file, ensuring they only receive the parent environment and explicit tool overrides.
+- Fixed the /new command retaining completed or failed async jobs from the previous session.
+- Improved error handling in omp update to display a friendly timeout message if the download times out while streaming the binary.
+- Fixed the write tool incorrectly treating semicolon-joined read selectors as filesystem paths and creating unintended directory structures.
+- Fixed omp worktree clear prematurely deleting active task-isolation sandboxes owned by running subagents.
+- Fixed /vibe mode preventing the director from completing parent tasks after verifying worker results by keeping the built-in todo tool active.
+- Fixed numeric GitHub issue and pull request autocomplete being suppressed inside skill slash-command arguments.
 
 ## [17.1.7] - 2026-07-27
 
@@ -60,26 +51,12 @@
 
 ### Changed
 
-- `tab.screenshot()` no longer accepts a per-call save path. It saves under `browser.screenshotDir`, or the OS temp directory when unset, and returns the saved path.
-
 - Direct and `xd://` dispatch now share one canonical tool map: `write xd://<tool>` executes any enabled top-level or mounted tool, and `read xd://<tool>` returns its docs, instead of failing when the name was exposed through the other layer. Mounted names are presentation metadata only, so tool replacement and disconnection cannot leave stale device instances; disabled tools remain unreachable, and both `xd://` and Cursor/top-level fallback execution retain the tool's approval and ACP permission gates.
 - Session listing now caches parsed headers keyed on file stat identity (mtime + size), so repeated resume-picker opens and startup scans re-read only changed session files
 - Reduced per-keystroke editor dispatch overhead: keybinding resolution happens once per input chunk and the per-action interception chain is gated behind a single canonical-key set probe
 - `xd://` device docs now render the parameter schema as a comment-annotated TypeScript type (via `jsonSchemaToTypeScript`, the same renderer the in-band tool inventory uses) instead of a raw JSON Schema dump, shrinking system-prompt device sections while keeping descriptions inline.
 - Added a `/vision [on|off|auto|status]` slash command for session-scoped control of the `inspect_image` vision-delegation tool, modeled on `/computer`: `on`/`off` force the tool for the current session only, `auto` returns to the persisted setting, and `status` reports the effective mode, session override, tool state, and active-model image capability.
 - Replaced the `inspect_image.enabled` boolean with the tri-state `inspect_image.mode` (`auto`|`on`|`off`, default `auto`). In `auto` the tool is registered only when the active model lacks native image input, so vision-capable models (e.g. `kimi-code/k3`) read images inline with their own capabilities instead of delegating to a separate vision model; the tool set is re-evaluated on every model switch with a status notice when it flips. The `read` tool now follows the effective state dynamically rather than the raw setting, so it returns decoded image blocks again whenever `inspect_image` is hidden. Existing `inspect_image.enabled: true/false` configs migrate to `inspect_image.mode: on/off`.
-### Fixed
-
-- Fixed `omp` showing up as `bun` in `ps`/`pgrep`/`killall`/`top` on Linux: `process.title = "omp"` is a JS-level no-op under Bun (it never calls `prctl(PR_SET_NAME)`), so the kernel `comm` name stayed `bun`. Startup and the daemon broker now set the kernel-visible process name via `bun:ffi` ([#6815](https://github.com/can1357/oh-my-pi/issues/6815)).
-### Fixed
-
-- Fixed agent shell commands inheriting variables silently loaded from the launch directory's `.env`; OMP can still use project dotenv values for its own configuration, while commands receive only the parent environment and explicit tool overrides ([#6813](https://github.com/can1357/oh-my-pi/issues/6813)).
-### Fixed
-
-- Fixed `/new` retaining completed or failed async jobs from the prior session in `hub jobs` until the five-minute retention window expired ([#6828](https://github.com/can1357/oh-my-pi/issues/6828)).
-### Fixed
-
-- Fixed `omp update` surfacing a raw `TimeoutError: The operation timed out.` when the 15-minute download deadline fired while streaming the binary body rather than during the initial `fetch()`. The streaming-phase catch now emits the same friendly `Timed out downloading release binary after 15 minutes` message as the connection phase ([#6822](https://github.com/can1357/oh-my-pi/issues/6822)).
 
 ## [17.1.6] - 2026-07-27
 
@@ -111,11 +88,6 @@
 - Fixed `/live` sideband WebSockets ignoring standard proxy environment variables and `NO_PROXY`, which left proxied sessions stuck while the rest of the Codex connection succeeded ([#6770](https://github.com/can1357/oh-my-pi/issues/6770)).
 - Fixed the bash tool's `kill` builtin rejecting numeric signals and multiple process operands, stopping after the first failed target, and defaulting to `SIGKILL` instead of the standard `SIGTERM`. Negative PID operands (process groups per `kill(2)`) and the `--` end-of-options marker are now handled instead of being misparsed as signals ([#6779](https://github.com/can1357/oh-my-pi/issues/6779)).
 - Fixed `learned.md` saves growing a blank line on every write (trailing-newline split artifact) and hoisting all headings/prose above all bullets, which re-scoped lessons under the wrong heading in hand-organized files. Saves are now byte-idempotent and preserve mixed Markdown ordering: non-list lines keep their positions, new lessons insert newest-first at the head of the first bullet run, and dedupe/cap operate on bullet lines in place.
-- Fixed the `write` tool treating a semicolon-joined list of read selectors (e.g. `a.txt:1-2;b/c.txt:3-4`) as a filesystem path, silently creating a nested directory tree when a read-only step mis-dispatched a multi-file `read` as `write`. Such targets are now refused regardless of `content`, since no real write targets a `;`-list whose every segment carries a read selector ([#6809](https://github.com/can1357/oh-my-pi/issues/6809)).
-- Fixed the `write` tool treating a semicolon-joined list of read selectors (e.g. `a.txt:1-2;b/c.txt:3-4`) as a filesystem path, silently creating a nested directory tree when a read-only step mis-dispatched a multi-file `read` as `write`. Such targets are now refused regardless of `content` unless a file by that literal name already exists, since no real write creates a `;`-list whose every segment carries a read selector ([#6809](https://github.com/can1357/oh-my-pi/issues/6809)).
-### Fixed
-
-- Fixed `omp worktree clear` (without `--all`) deleting task-isolation sandboxes owned by subagents that are still running, discarding their uncaptured work; the `no live task owns it` reason was set from the mere presence of the `m` mount dir with no ownership check. `ensureIsolation` now writes an ownership marker (pid plus a process start-time token that survives pid reuse) into each sandbox, and `worktree list`/`clear` report a sandbox as `live` (never removed without `--all`) while its owning process is alive, reclaiming only crashed leftovers ([#6761](https://github.com/can1357/oh-my-pi/issues/6761)).
 
 ## [17.1.5] - 2026-07-27
 
@@ -166,7 +138,6 @@
 - Fixed `@czottmann/pi-automode` failing legacy extension validation because the pi-ai compatibility shim omitted `clampThinkingLevel`, then failing every classified tool call because `ctx.modelRegistry` omitted `getApiKeyAndHeaders`. ([#6648](https://github.com/can1357/oh-my-pi/issues/6648))
 - Fixed hide-secrets placeholders conflicting with hashline edit headers by replacing hash-delimited tokens with the unambiguous `$$HASH$$` format ([#6631](https://github.com/can1357/oh-my-pi/issues/6631)).
 - Fixed the advisor silently swallowing its own quarantined turns: when an advisor called an ungranted tool (e.g. `bash`) its whole turn was discarded before dispatch, so its advice never reached the primary agent and the failure surfaced only in advisor diagnostics — every other non-recovering failure branch notifies the host UI, but quarantine re-primed silently with no bound. A persistently-quarantining advisor now surfaces a `notifyFailure` warning in the main UI (deduped, cleared on the next successful turn) and stops the unbounded silent re-prime loop ([#6661](https://github.com/can1357/oh-my-pi/issues/6661)).
-- Fixed `/vibe` mode preventing the director from completing parent todos after verifying worker results: a registered built-in `todo` tool now remains active alongside `read` and Vibe controls, while normal worker sessions still do not receive it.
 - Fixed the Docker `natives-builder` stage failing to build releases ≥ 17.1.1: the native audio stack added bindgen (miniaudio needs libclang) and a bundled-opus CMake build (needs cmake + make), none of which were installed in the slim builder image.
 - Fixed a configured `modelRoles.default` naming an extension-registered model (listed in `enabledModels`) silently running on a different in-scope provider's model. The startup model scope is resolved before extensions call `registerProvider()`, so the default role dropped out of scope and `buildSessionOptions` pinned `options.model` to the first scoped model — which marked the model "explicit" and suppressed the post-extension default-role re-resolution. A configured default that can't be found in the startup scope is now deferred so it re-resolves against the fully registered, still `enabledModels`-scoped catalog once extensions load ([#6694](https://github.com/can1357/oh-my-pi/issues/6694)).
 - Fixed Parakeet speech-to-text failing to load `sherpa-onnx-node` from Windows source workspaces when Bun installed the wrapper under `packages/coding-agent/node_modules` but hoisted its native platform package to the repository root ([#6690](https://github.com/can1357/oh-my-pi/issues/6690)).
@@ -201,9 +172,6 @@
 - Fixed Escape waiting for an in-flight `session_stop` extension handler to exhaust its timeout; abort now cancels the active stop pass without reporting a false timeout or applying stale continuation context ([#6489](https://github.com/can1357/oh-my-pi/issues/6489)).
 - Fixed the agent not resuming after re-answering a past `ask` from the session tree. Committing a new answer via `/tree` branched a fresh sibling `toolResult` and rebuilt context, but nothing ever continued the agent — unlike a live `ask`, whose continuation is intrinsic to the streaming run loop — so the model never consumed the new answer and the session sat idle until a manual prompt. `navigateTree` now reports the commit (`askReanswerCommitted`) and the interactive `/tree` handler resumes the agent via `resumeAfterAskReanswer()` *after* its transcript rebuild, so the resumed turn never renders against the stale pre-rebuild UI. Plain leaf moves and the read-only `reopenAsk` probe stay idle ([#6483](https://github.com/can1357/oh-my-pi/issues/6483)).
 - Fixed Ctrl+C and fatal shutdown entering an `ExtensionExitError` rejection loop while an extension or hook was still loading ([#6488](https://github.com/can1357/oh-my-pi/issues/6488)).
-### Fixed
-
-- Fixed numeric GitHub issue/PR autocomplete being suppressed inside prompt-bearing skill slash-command arguments while preserving literal prompt-action tokens such as `#copy` ([#6604](https://github.com/can1357/oh-my-pi/issues/6604)).
 
 ## [17.1.3] - 2026-07-24
 

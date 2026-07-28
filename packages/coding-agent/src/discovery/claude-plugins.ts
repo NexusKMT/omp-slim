@@ -452,7 +452,9 @@ async function resolvePluginMCPConfig(root: ClaudePluginRoot): Promise<ResolvedM
 					sourcePath: manifestPath,
 					baseDir: root.path,
 					declared: true,
-					warnings: [`[claude-plugins] Ignoring mcpServers path outside plugin root for ${root.id}: ${configured}`],
+					warnings: [
+						`[claude-plugins] Ignoring mcpServers path outside plugin root for ${root.id}: ${configured}`,
+					],
 				};
 			}
 			return {
@@ -543,7 +545,9 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 			// occasionally ship .mcp.json entries with neither, which would register a useless
 			// server and surface as a connection error at runtime.
 			if (typeof raw.command !== "string" && typeof raw.url !== "string") {
-				warnings.push(`[claude-plugins] Skipping MCP server "${serverName}" in ${sourcePath}: missing command or url`);
+				warnings.push(
+					`[claude-plugins] Skipping MCP server "${serverName}" in ${sourcePath}: missing command or url`,
+				);
 				continue;
 			}
 			const namespacedName = root.plugin ? `${root.plugin}:${serverName}` : serverName;

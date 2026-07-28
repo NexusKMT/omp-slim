@@ -117,7 +117,10 @@ export function filterChildShellEnv(
 			// Launcher-owned name: it keeps the launcher's own value. Bun overwrites
 			// an empty launcher value with the dotenv one, so restore the launcher
 			// value whenever what survived is exactly what the dotenv file defines.
-			if (result[key] !== launchValue && (result[key] === launchEnv[key] || result[key] === expandedLaunchEnv[key])) {
+			if (
+				result[key] !== launchValue &&
+				(result[key] === launchEnv[key] || result[key] === expandedLaunchEnv[key])
+			) {
 				result[key] = launchValue;
 			}
 			continue;

@@ -2,9 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `resolveVertexEndpointHost(location)` utility to resolve the correct Vertex AI API endpoint hostnames for global, multi-region, and regional locations.
+
 ### Fixed
 
-- Fixed `calculateCost` under-reporting cache-write cost by a factor of 1.6 on the default first-party Anthropic path: writes were priced at the catalog's 5-minute rate (`cost.cacheWrite`, 1.25x base input) even though omp defaults to 1-hour retention, which Anthropic bills at 2x base input. The already-parsed `usage.cttl` breakdown is now honored — 5m tokens price at `cost.cacheWrite`, 1h tokens at `input * 2`, mixed writes per component — while providers that report no `cttl` keep the flat-rate calculation ([#6876](https://github.com/can1357/oh-my-pi/issues/6876)).
+- Fixed an issue where `calculateCost` under-reported Anthropic cache-write costs by honoring the `usage.cttl` breakdown to correctly price 1-hour retention writes at 2x the base input rate.
 
 ## [17.1.7] - 2026-07-27
 
@@ -16,9 +20,6 @@
 ### Changed
 
 - Updated pricing and token limits for selected models
-### Added
-
-- Added `resolveVertexEndpointHost(location)` for Vertex AI hostname selection: `global` → `aiplatform.googleapis.com`, multi-region `eu`/`us` → `aiplatform.{eu|us}.rep.googleapis.com`, and regional locations → `{location}-aiplatform.googleapis.com`.
 
 ## [17.1.6] - 2026-07-27
 

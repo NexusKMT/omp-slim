@@ -367,7 +367,12 @@ describe("formatSessionHistoryMarkdown", () => {
 
 	it("keeps the bare user-prefixed line without a role label outside watched mode", () => {
 		const output = formatSessionHistoryMarkdown([
-			{ role: "assistant", content: [{ type: "text", text: "Recommending cleanup." }], stopReason: "endTurn", timestamp: 1 },
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "Recommending cleanup." }],
+				stopReason: "endTurn",
+				timestamp: 1,
+			},
 			{
 				role: "bashExecution",
 				command: "rm -rf .wt/foo",
