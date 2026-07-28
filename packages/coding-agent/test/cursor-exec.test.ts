@@ -149,8 +149,8 @@ describe("CursorExecHandlers mounted tool bridge", () => {
 		};
 		const handlers = new CursorExecHandlers({
 			cwd: ".",
-			tools: new Map(),
-			getTool: name => (name === mountedTool.name ? mountedTool : undefined),
+			tools: new Map([[mountedTool.name, mountedTool]]),
+			getExecutableTool: name => (name === mountedTool.name ? mountedTool : undefined),
 		});
 
 		const result = await handlers.mcp({
@@ -187,8 +187,10 @@ describe("CursorExecHandlers mounted tool bridge", () => {
 		const settings = Settings.isolated({ "tools.approval": { ast_edit: "deny" } });
 		const handlers = new CursorExecHandlers({
 			cwd: ".",
-			tools: new Map(),
-			getTool: name => (name === device.name ? (wrapped as unknown as AgentTool) : undefined),
+			// The canonical map contains the undecorated mounted tool. The execution
+			// override must win or Cursor bypasses the approval gate.
+			tools: new Map([[device.name, device]]),
+			getExecutableTool: name => (name === device.name ? (wrapped as unknown as AgentTool) : undefined),
 			getToolContext: () => ({ settings }) as AgentToolContext,
 		});
 

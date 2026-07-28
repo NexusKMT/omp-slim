@@ -207,6 +207,7 @@ import { ToolContextStore } from "./tools/context";
 import { isIrcEnabled } from "./tools/hub";
 import { getImageGenTools } from "./tools/image-gen";
 import { wrapToolWithMetaNotice } from "./tools/output-meta";
+import { isAutoQaEnabled } from "./tools/report-tool-issue";
 import { queueResolveHandler } from "./tools/resolve";
 import { USER_TODO_EDIT_CUSTOM_TYPE } from "./tools/todo";
 import { ttsTool } from "./tools/tts";
@@ -2626,7 +2627,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		const cursorExecHandlers = new CursorExecHandlers({
 			cwd,
 			tools: toolRegistry,
-			getTool: resolveDeviceTool,
+			getExecutableTool: resolveDeviceTool,
 			getToolContext: () => toolContextStore.getContext(),
 			emitEvent: event => cursorEventEmitter?.(event),
 			getTodoPhases: () => session.getTodoPhases(),
@@ -2740,6 +2741,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				taskBatch: settings.get("task.batch"),
 				taskMaxConcurrency: settings.get("task.maxConcurrency"),
 				taskIrcEnabled: !restrictToolNames && isIrcEnabled(settings, options.taskDepth ?? 0),
+				autoQaEnabled: !restrictToolNames && isAutoQaEnabled(settings),
 				secretsEnabled,
 				workspaceTree: workspaceTreePromise,
 				includeWorkspaceTree,
