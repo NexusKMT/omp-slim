@@ -791,7 +791,16 @@ class DaemonBroker {
 	}
 
 	async #settle(record: ManagedDaemon, generation: number, exitCode?: number, error?: string): Promise<void> {
-		if (generation !== record.generation || terminalState(record.snapshot.state)) return;
+		// `restarting` is a settled state (child exited, relaunch timer armed). Any op that
+		// runs #refreshDetached on such a record must not re-settle it: re-entry double-counts
+		// restartCount and overwrites record.restartTimer, orphaning the armed timer so it fires
+		// after stop() and resurrects the daemon (issue #6852).
+		if (
+			generation !== record.generation ||
+			terminalState(record.snapshot.state) ||
+			record.snapshot.state === "restarting"
+		)
+			return;
 		await this.#readDetachedOutput(record, generation);
 		record.process = undefined;
 		record.input = undefined;
