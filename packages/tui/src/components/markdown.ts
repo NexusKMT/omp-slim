@@ -2596,7 +2596,13 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 		// Use the list's start property (defaults to 1 for ordered lists)
 		const startNumber = token.start ?? 1;
 		const pushWrapped = (text: string, firstPrefix: string, continuationPrefix: string): void => {
-			const bodyWidth = Math.max(1, width - visibleWidth(firstPrefix));
+			const prefixWidth = visibleWidth(firstPrefix);
+			if (prefixWidth >= width) {
+				lines.push(truncateToWidth(firstPrefix, width, Ellipsis.Omit));
+				lines.push(...wrapTextWithAnsi(text, Math.max(1, width)));
+				return;
+			}
+			const bodyWidth = width - prefixWidth;
 			const wrapped = wrapTextWithAnsi(text, bodyWidth);
 			if (wrapped.length === 0) {
 				lines.push(firstPrefix);

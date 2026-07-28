@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
 import { getThemeByName, initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { renderMarkdownCell } from "@oh-my-pi/pi-coding-agent/tui/code-cell";
 import { renderOutputBlock } from "@oh-my-pi/pi-coding-agent/tui/output-block";
 
 describe("renderOutputBlock", () => {
@@ -35,5 +36,22 @@ describe("renderOutputBlock", () => {
 		).map(line => stripVTControlCharacters(line));
 
 		expect(lines.filter(line => line.startsWith("│"))).toEqual(["│abcdefghijklmn│"]);
+	});
+
+	it("budgets collapsed Markdown rows against the padded block width", async () => {
+		const theme = (await getThemeByName("dark"))!;
+		const lines = renderMarkdownCell(
+			{
+				content: "x".repeat(27),
+				contentMaxLines: 1,
+				status: "complete",
+				title: "Read",
+				width: 30,
+			},
+			theme,
+		).map(line => stripVTControlCharacters(line));
+
+		expect(lines[1]).toBe(`│ ${"x".repeat(26)} │`);
+		expect(lines[2]).toStartWith("│ … 1 more line");
 	});
 });
