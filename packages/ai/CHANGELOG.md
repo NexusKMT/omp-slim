@@ -4,6 +4,9 @@
 
 ## [17.1.7] - 2026-07-27
 
+### Fixed
+
+- Fixed stateless OpenAI Responses history after an interrupted native Computer Use turn: replay now keeps the reasoning item ID paired with a retained `computer_call` ID, while continuing to strip IDs from unrelated reasoning. The next prompt no longer fails with HTTP 400 for a missing `rs_*` item.
 ### Changed
 
 - Upstream `403 Forbidden` responses (e.g. Anthropic `permission_error` plan/model denials, Copilot model-policy rejections) now rotate through sibling credentials like usage limits do, instead of failing the session on the first denied account. The denied credential is soft-blocked for 60s and re-validated — never removed — and the original 403 surfaces only once every sibling has been tried.
