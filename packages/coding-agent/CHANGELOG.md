@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Reworked `/guided-goal` from a modal question-by-question popup flow into a normal conversation: the command sends a hidden interview brief to the session agent, which asks its follow-up questions as regular chat turns and, once the objective is pinned down, enables goal mode itself via `goal create`. The plan/slow-model side session, per-question editor overlays, and final review popup are gone; answers are typed in the ordinary editor and benefit from the standard secret-obfuscation path.
+
 ### Fixed
 
 - Stopped Advisor notes from appending a stale-review-window warning when newer primary turns queue during review; delivered advice now contains only the Advisor's note.
