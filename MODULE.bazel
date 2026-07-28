@@ -153,6 +153,7 @@ crate.annotation(
     crate = "tree-sitter-just",
     build_script_env = {"CFLAGS": "-UNDEBUG"},
 )
+
 # `generate-bindings` is enabled for darwin so miniaudio's Rust bindings match
 # its CoreAudio C layout. Build scripts execute for the host, however, so a
 # macOS-hosted Linux cross-build also sees that feature. Use Cargo's TARGET to
