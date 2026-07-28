@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the Advisor cost in the status line following the active session across conversation boundaries: a handoff no longer credits the replacement session with the conversation it replaced, a fork carries only the same conversation's finalized spend, and resuming or switching to an existing session restores that session's spend from its persisted Advisor transcripts instead of restarting `(adv)` at zero. Session transitions now also cancel in-flight Advisor maintenance, credential recovery, and retry backoff before swapping conversations, preventing stale Advisor work from blocking `/new`, switch, fork, branch, or handoff ([#6883](https://github.com/can1357/oh-my-pi/pull/6883) by [@paolomazzitti](https://github.com/paolomazzitti)).
+
 ## [17.1.8] - 2026-07-28
 
 ### Breaking Changes
