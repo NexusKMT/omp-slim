@@ -30,6 +30,7 @@
 - Added interactive xAI API-key login with key validation through the xAI models endpoint.
 - Fixed Google Gemini and Vertex tool declarations carrying numeric, boolean, object-valued, or mixed `enum` arrays that the Google Schema wire type cannot represent. Unsupported enums are omitted while valid string enums remain constrained.
 - Umans usage provider: fetches `GET /v1/usage` and surfaces the rolling 5h request window + concurrency limits in `/usage`, `omp usage`, and the TUI status bar.
+- The Cursor Pi arg translation (`piReadPath`, `piJoinPath`, `piLsPath`, `piEscapeRegexLiteral`, `piLimit`) moved to `providers/cursor-pi-args`, re-exported from `providers/cursor/exec-modern` so existing imports are unaffected. The legacy pi shim shares these helpers and is compiled into the bundled virtual module registry, where a nested `providers/<dir>/<mod>` specifier is unresolvable under bunfs — and importing them from the exec module would drag the whole protobuf graph in for two string functions.
 
 ## [17.1.8] - 2026-07-28
 
