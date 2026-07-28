@@ -42,6 +42,9 @@
 - Added `fastModeEnabled` and `fastModeActive` to RPC `get_state` responses.
 - Fixed RPC fast-mode state reporting after direct Anthropic rejects `speed: "fast"`, while allowing explicit re-enable requests to retry priority service.
 - Added opt-in subagent access to `checkpoint`, `rewind`, `learn`, and `manage_skill` when explicitly listed in an agent definition's `tools:` frontmatter. Listing one of `checkpoint`/`rewind` auto-includes the other. Settings (`checkpoint.enabled`, `autolearn.enabled`) remain master toggles.
+### Fixed
+
+- Native compaction preserves provider-native success and non-authentication failure semantics while retaining authenticated cross-provider fallback when the native provider rejects credentials.
 
 ## [17.1.8] - 2026-07-28
 
@@ -77,9 +80,6 @@
 - Fixed omp worktree clear prematurely deleting active task-isolation sandboxes owned by running subagents.
 - Fixed /vibe mode preventing the director from completing parent tasks after verifying worker results by keeping the built-in todo tool active.
 - Fixed numeric GitHub issue and pull request autocomplete being suppressed inside skill slash-command arguments.
-### Fixed
-
-- Native compaction preserves provider-native success and non-authentication failure semantics while retaining authenticated cross-provider fallback when the native provider rejects credentials.
 
 ## [17.1.7] - 2026-07-27
 
