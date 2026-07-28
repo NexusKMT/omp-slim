@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed internal Hub peer messages being emitted over ACP as ordinary tool-call updates, which exposed inter-agent coordination text in clients such as Paseo ([#6872](https://github.com/can1357/oh-my-pi/issues/6872)).
+
 ## [17.1.7] - 2026-07-27
 
 ### Fixed

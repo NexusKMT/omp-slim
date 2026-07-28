@@ -219,6 +219,89 @@ describe("ACP event mapper", () => {
 		expect(update.content).toContainEqual({ type: "content", content: { type: "text", text: "$ npm run check" } });
 	});
 
+	it("keeps internal Hub traffic off the ACP session stream", () => {
+		const events: AgentSessionEvent[] = [
+			{
+				type: "tool_execution_start",
+				toolCallId: "tc-hub-send",
+				toolName: "hub",
+				args: { op: "send", to: "Scout", message: "Private coordination" },
+			},
+			{
+				type: "tool_execution_update",
+				toolCallId: "tc-hub-send",
+				toolName: "hub",
+				args: { op: "send", to: "Scout", message: "Private coordination" },
+				partialResult: { content: [{ type: "text", text: "delivering" }] },
+			},
+			{
+				type: "tool_execution_end",
+				toolCallId: "tc-hub-send",
+				toolName: "hub",
+				isError: false,
+				result: { content: [{ type: "text", text: "delivered" }] },
+			},
+		] satisfies AgentSessionEvent[];
+
+		const updates = events.flatMap(event =>
+			mapAgentSessionEventToAcpSessionUpdates(event, "session-1", {
+				getToolArgs: () => ({ op: "send", to: "Scout", message: "Private coordination" }),
+			}),
+		);
+
+		expect(updates).toEqual([]);
+	});
+
+	it("keeps xd-routed Hub traffic off the ACP session stream", () => {
+		const args = {
+			path: "xd://hub",
+			content: JSON.stringify({ op: "inbox", from: "Scout" }),
+		};
+		const events = [
+			{
+				type: "tool_execution_start",
+				toolCallId: "tc-xd-hub-inbox",
+				toolName: "write",
+				args,
+			},
+			{
+				type: "tool_execution_end",
+				toolCallId: "tc-xd-hub-inbox",
+				toolName: "write",
+				isError: false,
+				result: { content: [{ type: "text", text: "Private reply" }] },
+			},
+		] satisfies AgentSessionEvent[];
+
+		const updates = events.flatMap(event =>
+			mapAgentSessionEventToAcpSessionUpdates(event, "session-1", {
+				getToolArgs: () => args,
+			}),
+		);
+
+		expect(updates).toEqual([]);
+	});
+
+	it("keeps Hub process control visible over ACP", () => {
+		const updates = mapAgentSessionEventToAcpSessionUpdates(
+			{
+				type: "tool_execution_start",
+				toolCallId: "tc-hub-process-send",
+				toolName: "hub",
+				args: { op: "send", name: "server", text: "ping" },
+			},
+			"session-1",
+		);
+
+		expect(updates).toHaveLength(1);
+		expect(updates[0]?.update).toEqual(
+			expect.objectContaining({
+				sessionUpdate: "tool_call",
+				rawInput: { op: "send", name: "server", text: "ping" },
+			}),
+		);
+	});
+
 	it("uses command text for a new command tool even when intent is generic", () => {
 		const updates = mapAgentSessionEventToAcpSessionUpdates(
 			{
