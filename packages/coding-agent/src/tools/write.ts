@@ -170,6 +170,8 @@ function throwReadSelectorMisfire(target: string, sel: string): never {
  * fires regardless of `content` — the non-empty-content escape hatch exists for
  * a lone selector-shaped *filename*, never a `;`-list, and honoring it here
  * silently creates a nested directory tree (`a.txt:1-2;b/`) in the workspace.
+ * The caller still probes the literal target first, so an existing POSIX file
+ * by that exact name stays writable (same escape as the single-selector guard).
  */
 function readSelectorListMisfire(target: string): number | undefined {
 	if (!target.includes(";")) return undefined;
