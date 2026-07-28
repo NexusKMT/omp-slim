@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `omp cleanse`, which detects configured checkers across common language ecosystems, parses machine-readable diagnostics (including Cargo Clippy JSON), balances whole-file workloads across up to eight `@smol` subagents by default (`-n` and `-m` override concurrency and model), persists the run as a new session, reruns every checker after the repair batch, and renders a live repair-worker progress bar in interactive terminals.
+
 ### Changed
 
 - Reworked `/guided-goal` from a modal question-by-question popup flow into a normal conversation: the command sends a hidden interview brief to the session agent, which asks its follow-up questions as regular chat turns and, once the objective is pinned down, enables goal mode itself via `goal create`. The plan/slow-model side session, per-question editor overlays, and final review popup are gone; answers are typed in the ordinary editor and benefit from the standard secret-obfuscation path.
