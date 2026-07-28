@@ -174,7 +174,18 @@ describe("HTML export template", () => {
 			proc.exited,
 		]);
 		expect(exitCode, stderr).toBe(0);
-		const [packResult] = JSON.parse(stdout) as NpmPackResult[];
+		// `npm pack --json` emits an array of pack results on npm <= 11 and an object keyed by
+		// package name on npm >= 12; accept both so the packaging contract is checked either way.
+		const parsed = JSON.parse(stdout) as NpmPackResult[] | Record<string, NpmPackResult>;
+		let packResult: NpmPackResult | undefined;
+		if (Array.isArray(parsed)) packResult = parsed[0];
+		else {
+			for (const key in parsed) {
+				packResult = parsed[key];
+				break;
+			}
+		}
+		expect(packResult, stdout).toBeDefined();
 		const packedAssets = packResult!.files
 			.map(file => file.path)
 			.filter(filePath =>
