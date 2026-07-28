@@ -37,6 +37,9 @@
 ### Fixed
 
 - User-initiated `!`/`$` executions are no longer misread as agent actions in advisor transcripts: they now render under a `**user**:` label in watched mode and carry a `→ user-bash!` / `→ user-python!` prefix in every render path.
+### Fixed
+
+- Preserved the active auto-thinking effort when per-turn classification fails, avoiding an unnecessary full prompt-cache invalidation from reverting to the model's provisional default ([#6877](https://github.com/can1357/oh-my-pi/issues/6877)).
 
 ## [17.1.7] - 2026-07-27
 
