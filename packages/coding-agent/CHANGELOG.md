@@ -34,6 +34,9 @@
 ### Fixed
 
 - Fixed marketplace plugin MCP discovery ignoring the `mcpServers` manifest field in `.omp-plugin/plugin.json` and `.claude-plugin/plugin.json`; both an inline server-map object and a file-path pointer are now honored (OMP manifest first) before the conventional root `.mcp.json` fallback ([#6871](https://github.com/can1357/oh-my-pi/issues/6871)).
+### Fixed
+
+- User-initiated `!`/`$` executions are no longer misread as agent actions in advisor transcripts: they now render under a `**user**:` label in watched mode and carry a `→ user-bash!` / `→ user-python!` prefix in every render path.
 
 ## [17.1.7] - 2026-07-27
 
