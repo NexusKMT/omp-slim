@@ -49,6 +49,24 @@ describe("parseEnvFile", () => {
 			PI_FEATURE: "enabled",
 		});
 	});
+
+	it("matches Bun dotenv syntax for export prefixes and inline comments", () => {
+		const filePath = writeTempEnv(
+			[
+				"export EXPORTED=value",
+				"COMMENTED=secret # trailing comment",
+				'QUOTED_HASH="keep # this"',
+				"NO_SPACE=http://host/path#frag",
+			].join("\n"),
+		);
+
+		expect(parseEnvFile(filePath)).toEqual({
+			EXPORTED: "value",
+			COMMENTED: "secret",
+			QUOTED_HASH: "keep # this",
+			NO_SPACE: "http://host/path#frag",
+		});
+	});
 });
 
 describe("filterProcessEnv", () => {

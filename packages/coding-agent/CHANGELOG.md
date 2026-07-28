@@ -41,6 +41,9 @@
 ### Fixed
 
 - Fixed `omp` showing up as `bun` in `ps`/`pgrep`/`killall`/`top` on Linux: `process.title = "omp"` is a JS-level no-op under Bun (it never calls `prctl(PR_SET_NAME)`), so the kernel `comm` name stayed `bun`. Startup and the daemon broker now set the kernel-visible process name via `bun:ffi` ([#6815](https://github.com/can1357/oh-my-pi/issues/6815)).
+### Fixed
+
+- Fixed agent shell commands inheriting variables silently loaded from the launch directory's `.env`; OMP can still use project dotenv values for its own configuration, while commands receive only the parent environment and explicit tool overrides ([#6813](https://github.com/can1357/oh-my-pi/issues/6813)).
 
 ## [17.1.6] - 2026-07-27
 

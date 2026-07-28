@@ -5,6 +5,9 @@
 ### Added
 
 - Added `setProcessName`, which sets the OS-visible process name (`/proc/self/comm`) via `prctl(PR_SET_NAME)` through `bun:ffi` on Linux in addition to `process.title`, since Bun's `process.title` setter never reaches the kernel ([#6815](https://github.com/can1357/oh-my-pi/issues/6815)).
+### Fixed
+
+- Fixed child shell environment filtering to drop launch-directory `.env` values in addition to Bun-autoloaded `.env.local` values ([#6813](https://github.com/can1357/oh-my-pi/issues/6813)).
 
 ## [17.1.5] - 2026-07-27
 
