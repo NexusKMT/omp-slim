@@ -25,6 +25,9 @@
 ### Fixed
 
 - Fixed `omp plugin install` of legacy pi extensions failing Bun's static named-export validation on `isContextOverflow` (e.g. `pi-blackhole`). The `@oh-my-pi/pi-ai` root barrel dropped upstream `@earendil-works/pi-ai`'s root re-export, so `legacy-pi-ai-shim.ts` (which backs both on-disk and `omp-legacy-pi-bundled:` virtual resolution) never surfaced it. The shim now bridges every upstream-root runtime symbol that still exists in omp — `isContextOverflow` (from `@oh-my-pi/pi-ai/error`) and `parseJsonWithRepair`/`parseStreamingJson`/`repairJson` (from `@oh-my-pi/pi-utils`) ([#6859](https://github.com/can1357/oh-my-pi/issues/6859)).
+### Fixed
+
+- Fixed legacy extension plugin validation failing with `Export named 'isRetryableAssistantError' not found in module '.../legacy-pi-ai-shim.ts'` when an extension imports `isRetryableAssistantError` from `@earendil-works/pi-ai` / `@oh-my-pi/pi-ai` (e.g. `@router-for-me/pi-cliproxyapi-provider` >= 1.4.9). Historical pi-ai exports this transient-error classifier from its package root, but OMP's legacy `pi-ai` root shim never bridged it; the shim now ships a compatibility implementation matching the upstream provider-error wording tables. ([#6847](https://github.com/can1357/oh-my-pi/issues/6847))
 
 ## [17.1.7] - 2026-07-27
 
