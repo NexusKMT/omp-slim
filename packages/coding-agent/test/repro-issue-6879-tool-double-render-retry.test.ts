@@ -23,6 +23,7 @@ import { TempDir } from "@oh-my-pi/pi-utils";
  * rendered each call twice — exactly the parallel-probe screenshots in #6879.
  */
 const CMD = "which psql";
+const READ_PATH = "src/index.ts";
 
 const usage = {
 	input: 1,
@@ -131,6 +132,34 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 		} as Extract<AgentSessionEvent, { type: "message_end" }>);
 	}
 
+	async function streamReadToolCall(id: string, stopReason: string): Promise<void> {
+		const readCall: ToolCall = {
+			type: "toolCall",
+			id,
+			name: "read",
+			arguments: { path: READ_PATH, i: "Inspect entrypoint" },
+		};
+		const ec = mode.eventController;
+		await ec.handleEvent({ type: "message_start", message: assistantMessage([], "toolUse") } as Extract<
+			AgentSessionEvent,
+			{ type: "message_start" }
+		>);
+		await ec.handleEvent({
+			type: "message_update",
+			message: assistantMessage([readCall], "toolUse"),
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				contentIndex: 0,
+				toolCall: readCall,
+				partial: assistantMessage([readCall], "toolUse"),
+			},
+		} as Extract<AgentSessionEvent, { type: "message_update" }>);
+		await ec.handleEvent({
+			type: "message_end",
+			message: assistantMessage([readCall], stopReason),
+		} as Extract<AgentSessionEvent, { type: "message_end" }>);
+	}
+
 	async function runToolCallToCompletion(id: string): Promise<void> {
 		const ec = mode.eventController;
 		await ec.handleEvent({
@@ -179,6 +208,36 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 		await runToolCallToCompletion("call-attempt-2");
 
 		expect(countCommand(mode)).toBe(1);
+	});
+
+	it("resets a detached read group so the retry's grouped read stays visible", async () => {
+		const ec = mode.eventController;
+		await ec.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
+
+		await streamReadToolCall("read-rewound", "aborted");
+		expect(mode.pendingTools.has("read-rewound")).toBeFalse();
+
+		await streamReadToolCall("read-rerun", "toolUse");
+		const retryGroup = mode.pendingTools.get("read-rerun");
+		if (!retryGroup) throw new Error("Expected retry read group");
+		expect(mode.chatContainer.children).toContain(retryGroup);
+
+		await ec.handleEvent({
+			type: "tool_execution_start",
+			toolCallId: "read-rerun",
+			toolName: "read",
+			args: { path: READ_PATH, i: "Inspect entrypoint" },
+		} as Extract<AgentSessionEvent, { type: "tool_execution_start" }>);
+		await ec.handleEvent({
+			type: "tool_execution_end",
+			toolCallId: "read-rerun",
+			toolName: "read",
+			result: { content: [{ type: "text", text: "entrypoint contents" }] },
+			isError: false,
+		} as Extract<AgentSessionEvent, { type: "tool_execution_end" }>);
+
+		const rendered = Bun.stripANSI(mode.chatContainer.render(120).join("\n"));
+		expect(rendered).toContain(READ_PATH);
 	});
 
 	it("retracts a TTSR-rewound turn's tool card so the re-run renders it once", async () => {
