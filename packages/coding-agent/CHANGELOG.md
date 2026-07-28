@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed legacy extension plugin validation failing with `Export named 'isRetryableAssistantError' not found in module '.../legacy-pi-ai-shim.ts'` when an extension imports `isRetryableAssistantError` from `@earendil-works/pi-ai` / `@oh-my-pi/pi-ai` (e.g. `@router-for-me/pi-cliproxyapi-provider` >= 1.4.9). Historical pi-ai exports this transient-error classifier from its package root, but OMP's legacy `pi-ai` root shim never bridged it; the shim now ships a compatibility implementation matching the upstream provider-error wording tables. ([#6847](https://github.com/can1357/oh-my-pi/issues/6847))
+
 ## [17.1.7] - 2026-07-27
 
 ### Fixed
