@@ -138,3 +138,40 @@ it("filters expanded dotenv values while preserving matching launcher values", a
 		await fs.rm(tmp, { recursive: true, force: true });
 	}
 });
+
+it("keeps an empty launcher value instead of the project dotenv value", async () => {
+	const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "omp-env-empty-"));
+	try {
+		await Bun.write(path.join(tmp, ".env"), "EMPTY_PARENT_VAR=project-secret\n");
+		const procmgrPath = path.resolve(import.meta.dir, "../../utils/src/procmgr.ts");
+		const script = [
+			`import { getShellConfig } from ${JSON.stringify(procmgrPath)};`,
+			"console.log(JSON.stringify({ value: getShellConfig().env.EMPTY_PARENT_VAR ?? null }));",
+		].join("\n");
+		const bunArgSets = process.platform === "linux" ? [[], ["--no-env-file"]] : [["--no-env-file"]];
+		for (const bunArgs of bunArgSets) {
+			const proc = Bun.spawn([process.execPath, ...bunArgs, "--no-install", "--eval", script], {
+				cwd: tmp,
+				env: {
+					HOME: process.env.HOME ?? "",
+					EMPTY_PARENT_VAR: "",
+					PATH: process.env.PATH ?? "",
+					SHELL: process.env.SHELL ?? "/bin/bash",
+				},
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const [stdout, stderr, exitCode] = await Promise.all([
+				new Response(proc.stdout).text(),
+				new Response(proc.stderr).text(),
+				proc.exited,
+			]);
+
+			expect(stderr).toBe("");
+			expect(exitCode).toBe(0);
+			expect(JSON.parse(stdout)).toEqual({ value: "" });
+		}
+	} finally {
+		await fs.rm(tmp, { recursive: true, force: true });
+	}
+});

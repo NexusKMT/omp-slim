@@ -52,27 +52,31 @@ export function filterProcessEnv(env: Record<string, string | undefined>): Recor
 	}
 	return result;
 }
-// Bun can mutate `process.env` from project dotenv files before user code runs.
-// Linux retains the original exec environment in procfs; compiled and explicit
-// `--no-env-file` launches can safely snapshot `Bun.env` before OMP loads files.
-function readLaunchEnvNames(): ReadonlySet<string> | undefined {
+// Bun autoloads the project's dotenv files into `process.env` before user code
+// runs — including inside `bun build --compile` binaries — so a snapshot of
+// `Bun.env` is only pre-dotenv when autoloading was explicitly disabled. Linux
+// keeps the original exec environment in procfs, which is authoritative.
+function readLaunchEnv(): ReadonlyMap<string, string> | undefined {
 	if (process.platform === "linux") {
 		try {
-			const names = new Set<string>();
+			const values = new Map<string, string>();
 			for (const entry of fs.readFileSync("/proc/self/environ", "utf8").split("\0")) {
 				const separator = entry.indexOf("=");
-				if (separator > 0) names.add(entry.slice(0, separator));
+				if (separator > 0) values.set(entry.slice(0, separator), entry.slice(separator + 1));
 			}
-			return names;
+			return values;
 		} catch {}
 	}
-	if (!process.execArgv.includes("--no-env-file") && !isCompiledBinary()) return undefined;
-	const names = new Set<string>();
-	for (const key in Bun.env) names.add(key);
-	return names;
+	if (!process.execArgv.includes("--no-env-file")) return undefined;
+	const values = new Map<string, string>();
+	for (const key in Bun.env) {
+		const value = Bun.env[key];
+		if (value !== undefined) values.set(key, value);
+	}
+	return values;
 }
 
-const launchEnvNames = readLaunchEnvNames();
+const launchEnvValues = readLaunchEnv();
 const projectEnvNamesLoadedByOmp = new Set<string>();
 
 function expandDotenvValues(values: Record<string, string>, env: Record<string, string>): Record<string, string> {
@@ -108,16 +112,24 @@ export function filterChildShellEnv(
 		...expandDotenvValues(localEnv, result),
 	};
 	for (const key in launchEnv) {
-		// Launcher-owned names always survive with the launcher's own value.
-		if (launchEnvNames?.has(key)) continue;
-		if (launchEnvNames || projectEnvNamesLoadedByOmp.has(key)) {
+		const launchValue = launchEnvValues?.get(key);
+		if (launchValue !== undefined) {
+			// Launcher-owned name: it keeps the launcher's own value. Bun overwrites
+			// an empty launcher value with the dotenv one, so restore the launcher
+			// value whenever what survived is exactly what the dotenv file defines.
+			if (result[key] !== launchValue && (result[key] === launchEnv[key] || result[key] === expandedLaunchEnv[key])) {
+				result[key] = launchValue;
+			}
+			continue;
+		}
+		if (launchEnvValues || projectEnvNamesLoadedByOmp.has(key)) {
 			// Strong provenance: the launch environment is known and this name is
 			// absent from it, or OMP itself injected the value — either way it came
 			// from a project dotenv file, not the parent shell.
 			delete result[key];
 		} else if (result[key] === launchEnv[key] || result[key] === expandedLaunchEnv[key]) {
-			// No launch-env snapshot (non-Linux source install without
-			// `--no-env-file`): best-effort value match against the Bun-parsed dotenv.
+			// No launch-env snapshot (dotenv autoloaded without procfs): best-effort
+			// value match against the Bun-parsed dotenv.
 			delete result[key];
 		}
 	}
