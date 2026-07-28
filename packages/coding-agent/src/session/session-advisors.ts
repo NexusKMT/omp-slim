@@ -16,6 +16,7 @@ import {
 	compactionContextTokens,
 	createCompactionSummaryMessage,
 	estimateTokens,
+	NativeCompactionError,
 	prepareCompaction,
 	type SessionMessageEntry,
 	shouldCompact,
@@ -1385,6 +1386,8 @@ export class SessionAdvisors {
 				break;
 			} catch (error) {
 				if (signal.aborted) throw error;
+				const id = AIError.classify(error, candidate.api);
+				if (error instanceof NativeCompactionError && !AIError.is(id, AIError.Flag.AuthFailed)) throw error;
 				lastError = error;
 			}
 		}
