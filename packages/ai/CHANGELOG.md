@@ -2,14 +2,11 @@
 
 ## [Unreleased]
 
-### Changed
-
-- Upstream `403 Forbidden` responses (e.g. Anthropic `permission_error` plan/model denials, Copilot model-policy rejections) now rotate through sibling credentials like usage limits do, instead of failing the session on the first denied account. The denied credential is soft-blocked for 60s and re-validated — never removed — and the original 403 surfaces only once every sibling has been tried.
-
 ## [17.1.7] - 2026-07-27
 
 ### Changed
 
+- Upstream `403 Forbidden` responses (e.g. Anthropic `permission_error` plan/model denials, Copilot model-policy rejections) now rotate through sibling credentials like usage limits do, instead of failing the session on the first denied account. The denied credential is soft-blocked for 60s and re-validated — never removed — and the original 403 surfaces only once every sibling has been tried.
 - Usage report filtering in the auth-broker remote store is memoized per (reports, snapshot) with a precomputed per-provider OAuth credential map, replacing an O(reports × credentials) scan on every credential-selection and status refresh
 - Cursor and Devin Connect-frame readers no longer copy every stream chunk through `Buffer.concat` when the pending buffer is empty
 
