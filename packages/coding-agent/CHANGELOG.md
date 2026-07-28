@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `omp ttsr test <file>` silently evaluating a supplied source file against the text (prose) context when its extension was absent from the hardcoded `SOURCE_FILE_EXT` allowlist, producing a false negative indistinguishable from a non-matching regex. It now emits an explanatory note (in text and `--json` output) when a resolvable file path infers `text`, pointing at `--source tool --tool edit`, and the allowlist gained the .NET family and other common source languages (`cs`, `razor`, `cshtml`, `fs`, `fsx`, `vb`, `sh`, `bash`, `sql`, `zig`, `dart`, `scala`, `ex`, `exs`, `proto`, `tf`) ([#6887](https://github.com/can1357/oh-my-pi/issues/6887)).
+
 ## [17.1.7] - 2026-07-27
 
 ### Fixed
