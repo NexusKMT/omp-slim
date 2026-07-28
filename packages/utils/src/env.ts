@@ -98,10 +98,13 @@ export function filterChildShellEnv(
 ): Record<string, string> {
 	const result = filterProcessEnv(env);
 	const projectEnv = parseEnvFile(path.join(cwd, ".env"));
+	const nodeEnvName = `.env.${env.NODE_ENV || "development"}`;
+	const modeEnv = parseEnvFile(path.join(cwd, nodeEnvName));
 	const localEnv = parseEnvFile(path.join(cwd, ".env.local"));
-	const launchEnv = { ...projectEnv, ...localEnv };
+	const launchEnv = { ...projectEnv, ...modeEnv, ...localEnv };
 	const expandedLaunchEnv = {
 		...expandDotenvValues(projectEnv, result),
+		...expandDotenvValues(modeEnv, result),
 		...expandDotenvValues(localEnv, result),
 	};
 	for (const key in launchEnv) {
@@ -140,7 +143,8 @@ function parseEnvLine(line: string): { key: string; value: string } | undefined 
 	const raw = trimmed.slice(eqIndex + 1).replace(/^[ \t]+/, "");
 	const quote = raw[0];
 	if (quote === '"' || quote === "'" || quote === "`") {
-		const close = raw.indexOf(quote, 1);
+		let close = raw.indexOf(quote, 1);
+		while (close !== -1 && raw[close - 1] === "\\") close = raw.indexOf(quote, close + 1);
 		return { key, value: close === -1 ? raw.slice(1) : raw.slice(1, close) };
 	}
 	const commentIndex = raw.search(/[ \t]#/);

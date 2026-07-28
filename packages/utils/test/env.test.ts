@@ -67,6 +67,15 @@ describe("parseEnvFile", () => {
 			NO_SPACE: "http://host/path#frag",
 		});
 	});
+
+	it("keeps escaped quotes inside quoted values literal, matching Bun", () => {
+		const filePath = writeTempEnv(['JSON="{\\"a\\":1}"', "SINGLE='it\\'s'"].join("\n"));
+
+		expect(parseEnvFile(filePath)).toEqual({
+			JSON: '{\\"a\\":1}',
+			SINGLE: "it\\'s",
+		});
+	});
 });
 
 describe("filterProcessEnv", () => {
