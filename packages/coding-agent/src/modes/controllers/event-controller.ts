@@ -940,6 +940,7 @@ export class EventController {
 						continue;
 					}
 					if (this.ctx.chatContainer.isBlockUncommitted(component)) {
+						component.seal();
 						if (component === this.#lastReadGroup) this.#resetReadGroup();
 						this.ctx.chatContainer.removeChild(component);
 						this.ctx.pendingTools.delete(toolCallId);

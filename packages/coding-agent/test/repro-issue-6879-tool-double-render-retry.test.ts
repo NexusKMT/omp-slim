@@ -210,6 +210,52 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 		expect(countCommand(mode)).toBe(1);
 	});
 
+	it("stops an animated tool card before retracting it", async () => {
+		vi.useFakeTimers();
+		try {
+			const ec = mode.eventController;
+			const requestComponentRender = vi.spyOn(mode.ui, "requestComponentRender");
+			const writeCall: ToolCall = {
+				type: "toolCall",
+				id: "write-rewound",
+				name: "write",
+				arguments: { path: "out.txt", content: "pending content", i: "Write output" },
+			};
+			await ec.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
+			await ec.handleEvent({ type: "message_start", message: assistantMessage([], "toolUse") } as Extract<
+				AgentSessionEvent,
+				{ type: "message_start" }
+			>);
+			await ec.handleEvent({
+				type: "message_update",
+				message: assistantMessage([writeCall], "toolUse"),
+				assistantMessageEvent: {
+					type: "toolcall_end",
+					contentIndex: 0,
+					toolCall: writeCall,
+					partial: assistantMessage([writeCall], "toolUse"),
+				},
+			} as Extract<AgentSessionEvent, { type: "message_update" }>);
+			const writeComponent = mode.pendingTools.get(writeCall.id);
+			if (!writeComponent) throw new Error("Expected animated write component");
+
+			vi.advanceTimersByTime(500);
+			expect(requestComponentRender.mock.calls.some(call => call[0] === writeComponent)).toBeTrue();
+			requestComponentRender.mockClear();
+
+			await ec.handleEvent({
+				type: "message_end",
+				message: assistantMessage([writeCall], "aborted"),
+			} as Extract<AgentSessionEvent, { type: "message_end" }>);
+			expect(mode.pendingTools.has(writeCall.id)).toBeFalse();
+
+			vi.advanceTimersByTime(1_000);
+			expect(requestComponentRender.mock.calls.some(call => call[0] === writeComponent)).toBeFalse();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("resets a detached read group so the retry's grouped read stays visible", async () => {
 		const ec = mode.eventController;
 		await ec.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
