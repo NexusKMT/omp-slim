@@ -1,0 +1,43 @@
+name: Warm bazel disk cache
+
+# GitHub-hosted PR runners cannot use the cluster remote cache and only see
+# actions/cache entries created on the default branch. Bazel action keys do
+# not transfer across runner environments (a kata-produced disk cache misses
+# every action on ubuntu-22.04), so seed the disk cache from the same image
+# PR jobs run on. A warm run restores the exact-key archive, builds
+# incrementally, and saves nothing; a lockfile/config change misses, rebuilds,
+# and saves the new key.
+
+on:
+   schedule:
+      - cron: "23 */6 * * *"
+   workflow_dispatch:
+
+permissions:
+   contents: read
+
+concurrency:
+   group: bazel-cache-warm
+   cancel-in-progress: true
+
+jobs:
+   warm:
+      name: Seed hosted bazel disk cache
+      runs-on: ubuntu-22.04
+      steps:
+         - uses: actions/checkout@v4
+         - id: cache
+           uses: ./.github/actions/bazel-cache
+           with:
+              scope: linux
+         - name: Build native addons
+           run: |
+              set -euo pipefail
+              if [ "$(ulimit -Sn)" != unlimited ] && [ "$(ulimit -Sn)" -lt 65536 ]; then ulimit -Sn 65536 || true; fi
+              bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build //:natives-linux-x64-baseline //:natives-linux-x64-modern
+         - name: Save bazel disk cache
+           if: steps.cache.outputs.save-needed == 'true'
+           uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+           with:
+              path: ~/.cache/omp-bazel-disk
+              key: ${{ steps.cache.outputs.cache-key }}
