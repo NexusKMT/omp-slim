@@ -1,5 +1,5 @@
 ---
-description: "Never define `isRecord` locally — use the shared guard, then validate the actual shape"
+description: "Never use isRecord"
 condition:
   - "\\bfunction\\s+isRecord(?:\\s*<[^>]*>)?\\s*\\("
   - "\\b(?:const|let|var)\\s+isRecord\\b\\s*(?::[\\s\\S]{0,300}?)?=\\s*(?:async\\s+)?(?:function\\b|(?:<[^>\\n]*>\\s*)?(?:\\([^)]*\\)|[A-Za-z_$][\\w$]*)\\s*(?::[\\s\\S]{0,300}?)?=>)"
@@ -7,23 +7,13 @@ scope: "tool:edit(*.{ts,tsx,mts,cts}), tool:write(*.{ts,tsx,mts,cts})"
 interruptMode: never
 ---
 
-**Never define `isRecord` locally.** Import the project's shared guard instead. It gives every caller the same object semantics and leaves shape validation where it belongs.
-
 ## Why it's wrong
 
-- Local copies drift on `null`, arrays, and prototype semantics.
 - A `Record<string, unknown>` guard proves only an object, not its fields.
+- It's either unnecessarily complicated, or not strong enough.
 - Repeated guards hide the actual data contract from readers and TypeScript.
 
 ## Use
-
-```typescript
-import { isRecord } from "@oh-my-pi/pi-utils";
-
-if (!isRecord(value)) return;
-const id = value.id;
-if (typeof id !== "string") return;
-```
 
 `isRecord` narrows values to `Record<string, unknown>`; each field remains `unknown`.
 
