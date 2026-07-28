@@ -923,11 +923,27 @@ export class EventController {
 				}
 			} else {
 				// The turn ended without running these calls (abort/error/TTSR rewind),
-				// so they will never produce a result. Seal them so they stop animating
-				// and freeze instead of pinning the transcript live region while a retry
-				// streams fresh blocks below them. Background task calls keep updating.
-				for (const [toolCallId, component] of this.ctx.pendingTools.entries()) {
-					if (!this.#backgroundTaskCallIds.has(toolCallId) && component instanceof ToolExecutionComponent) {
+				// so they will never produce a result AND their assistant turn is
+				// dropped from the active context when a retry/rewind supersedes it.
+				// The retry then streams fresh tool blocks below these, so any left on
+				// screen render the same call twice (#6879, the parallel-probe screenshots
+				// on #6516's follow-up). Retract the ones still in the live region — they
+				// never reached native scrollback, so they are removable — and forget
+				// them (`pendingTools` + timeline) so a same-id retry rebuilds a fresh
+				// card instead of routing its deltas into the detached one. A block
+				// already committed to the scrollback tape cannot be retracted; seal it
+				// in place as history so it at least stops animating. Background task
+				// calls keep updating across the boundary, so preserve them.
+				for (const [toolCallId, component] of Array.from(this.ctx.pendingTools.entries())) {
+					if (this.#backgroundTaskCallIds.has(toolCallId)) continue;
+					if (!(component instanceof ToolExecutionComponent) && !(component instanceof ReadToolGroupComponent)) {
+						continue;
+					}
+					if (this.ctx.chatContainer.isBlockUncommitted(component)) {
+						this.ctx.chatContainer.removeChild(component);
+						this.ctx.pendingTools.delete(toolCallId);
+						this.#toolTimelineComponents.delete(toolCallId);
+					} else {
 						component.seal();
 					}
 				}

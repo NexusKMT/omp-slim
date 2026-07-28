@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a tool card rendering twice after an assistant turn that streamed the call ended with `error`/`aborted` and was retried or rewound (a provider blip that auto-retries, a TTSR rewind). The failed attempt's never-run cards were only sealed in place, so the retry's fresh cards rendered each call a second time; they are now retracted from the live region (and forgotten) at `message_end`, with a card already committed to native scrollback sealed in place as before ([#6879](https://github.com/can1357/oh-my-pi/issues/6879)).
+
 ## [17.1.7] - 2026-07-27
 
 ### Fixed
