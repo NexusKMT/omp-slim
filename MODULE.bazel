@@ -12,8 +12,8 @@ Layout:
 
 The cargo workspace stays authoritative for local iteration (rust-analyzer,
 `cargo nextest`, napi typedef regeneration); Bazel is the artifact and CI
-pipeline. Keep Cargo.toml/Cargo.lock and this module in sync: after editing
-either, run `bun run bazel:repin` (CARGO_BAZEL_REPIN=1) to refresh Cargo.Bazel.lock.
+pipeline. `crate_universe` derives the Bazel dependency graph directly from
+Cargo.toml/Cargo.lock and the module annotations; no separate repin step is required.
 """
 
 module(name = "oh-my-pi")
@@ -92,7 +92,6 @@ crate.render_config(
 crate.from_cargo(
     name = "crates",
     cargo_lockfile = "//:Cargo.lock",
-    lockfile = "//:Cargo.Bazel.lock",
     # Exactly the shipped addon triples: crate BUILD files get
     # target_compatible_with selects over this set (defaults omit darwin-x64
     # and musl), and features/deps resolve per-triple from Cargo.lock.

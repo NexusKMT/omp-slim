@@ -9,12 +9,15 @@ on:
          - "scripts/**"
          - "bazel/**"
          - "MODULE.bazel"
+         - "MODULE.bazel.lock"
          - "BUILD.bazel"
          - ".bazelrc"
+         - ".bazelignore"
          - ".bazelversion"
          - "Cargo.toml"
          - "Cargo.lock"
-         - "Cargo.Bazel.lock"
+         - "rust-toolchain.toml"
+         - "rustfmt.toml"
          - ".github/**"
    pull_request:
       branches: [main]
@@ -24,12 +27,15 @@ on:
          - "scripts/**"
          - "bazel/**"
          - "MODULE.bazel"
+         - "MODULE.bazel.lock"
          - "BUILD.bazel"
          - ".bazelrc"
+         - ".bazelignore"
          - ".bazelversion"
          - "Cargo.toml"
          - "Cargo.lock"
-         - "Cargo.Bazel.lock"
+         - "rust-toolchain.toml"
+         - "rustfmt.toml"
          - ".github/**"
    workflow_dispatch:
       inputs:
@@ -160,6 +166,11 @@ jobs:
          - name: Rustfmt
            if: steps.inputs.outputs.rust == 'true'
            run: bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=rustfmt //crates/...
+         # No disk-cache save here: native_addons saves this same key
+         # concurrently, and an immutable archive can have only one producer
+         # per key — a validation-only archive winning the race would
+         # suppress the addon half on every later exact hit. Validation
+         # actions are seeded by the main cache warmer's combined archive.
 
    # Builds the native addons every downstream job installs. TS-only PRs
    # restore the prebuilt Linux x64 pair published by trusted main builds
@@ -264,7 +275,10 @@ jobs:
            if: steps.decide.outputs.needed == 'true'
            shell: bash
            run: |
-              summary=$(grep -E "INFO: [0-9]+ processes:" "$RUNNER_TEMP/bazel-build.log" | tail -1 || true)
+              # Bazel runs with --color=yes (config=ci); strip ANSI before
+              # matching — escapes split "INFO:" from the process count in
+              # the raw log.
+              summary=$(sed -E 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/bazel-build.log" | grep -E '[0-9]+ processes:' | tail -1 || true)
               echo "::notice title=Bazel build summary::${summary:-no process summary found}"
          - name: Save Bazel disk cache
            if: steps.cache.outputs.save-needed == 'true'
