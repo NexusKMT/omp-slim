@@ -133,7 +133,7 @@ impl ExecutionParameters {
 	}
 
 	/// Disables external-command output marking for this execution branch.
-	pub fn disable_command_output_marking(&mut self) {
+	pub const fn disable_command_output_marking(&mut self) {
 		self.command_output_disabled = true;
 	}
 
@@ -1181,7 +1181,7 @@ impl Execute for ast::CaseClauseCommand {
 		// switched on, but that's not it.
 		if shell.options().print_commands_and_arguments {
 			shell
-				.trace_command(params, std::format!("case {} in", &self.value))
+				.trace_command(params, std::format!("case {} in", self.value))
 				.await;
 		}
 
