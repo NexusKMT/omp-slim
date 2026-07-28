@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { BunPlugin } from "bun";
-import { getTemplate } from "../src/export/html/index";
+import { getTemplate, resolveBundledHtmlAssetPath } from "../src/export/html/index";
 
 interface HeapProbeResult {
 	retainedAssetStrings: number;
@@ -15,6 +15,7 @@ interface TemplateProbeResult {
 	bytes: number;
 	sha256: string;
 	stableCache: boolean;
+	assetsRemoved: number;
 }
 interface NpmPackResult {
 	files: Array<{ path: string }>;
@@ -25,6 +26,7 @@ const expectedTemplate: TemplateProbeResult = {
 	bytes: 377_446,
 	sha256: "023cf3773498db52ff0ec508b22ef2c002710f9e9fcb90fea361659d5b0205df",
 	stableCache: true,
+	assetsRemoved: 0,
 };
 const assetDir = new URL("../src/export/html/", import.meta.url);
 const templateProbePath = path.resolve(import.meta.dir, "fixtures", "html-export-template-probe.ts");
@@ -32,8 +34,7 @@ const heapProbePath = path.resolve(import.meta.dir, "fixtures", "html-export-sta
 const packageDir = path.resolve(import.meta.dir, "..");
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "omp-html-template-"));
 const unrelatedCwd = path.join(tempRoot, "unrelated-cwd");
-const packDir = path.join(tempRoot, "package");
-const bundleDir = path.join(packDir, "dist");
+const bundleDir = path.join(tempRoot, "bundle");
 const compiledPath = path.join(tempRoot, "compiled-template-probe");
 let bundlePath: string;
 const bundledDependencyStubs: Record<string, string> = {
@@ -94,19 +95,11 @@ async function runProbe(command: string[]): Promise<TemplateProbeResult> {
 
 beforeAll(async () => {
 	fs.mkdirSync(unrelatedCwd);
-	fs.mkdirSync(packDir);
-	const packageManifest = JSON.parse(fs.readFileSync(path.join(packageDir, "package.json"), "utf8")) as Record<
-		string,
-		unknown
-	>;
-	packageManifest.scripts = {};
-	fs.writeFileSync(path.join(packDir, "package.json"), JSON.stringify(packageManifest));
 	const bundle = await Bun.build({
 		entrypoints: [templateProbePath],
 		outdir: bundleDir,
 		target: "bun",
 		plugins: [focusedBundlePlugin],
-		naming: { entry: "cli.js" },
 	});
 	expect(bundle.success, bundle.logs.map(log => log.message).join("\n")).toBe(true);
 	const entrypoint = bundle.outputs.find(output => output.kind === "entry-point");
@@ -127,6 +120,12 @@ afterAll(() => {
 });
 
 describe("HTML export template", () => {
+	test("keeps Windows drive-letter asset paths as filesystem paths", () => {
+		const windowsAssetPath = "C:\\repo\\packages\\coding-agent\\src\\export\\html\\template.css";
+		expect(resolveBundledHtmlAssetPath(windowsAssetPath, "C:\\repo\\packages\\coding-agent\\src\\export\\html")).toBe(
+			windowsAssetPath,
+		);
+	});
 	test("composes the exact source template once and returns the cached bytes", async () => {
 		const expected = composeExpectedTemplate();
 		const first = getTemplate();
@@ -147,9 +146,25 @@ describe("HTML export template", () => {
 		expect(await runProbe([process.execPath, bundlePath])).toEqual(expectedTemplate);
 	});
 
-	test("packs every normal-bundle HTML export asset", async () => {
+	test("production normal bundle packs every HTML export asset", async () => {
+		const staleAssetPath = path.join(packageDir, "dist", "template-stale.css");
+		fs.mkdirSync(path.dirname(staleAssetPath), { recursive: true });
+		fs.writeFileSync(staleAssetPath, "stale");
+		const build = Bun.spawn([process.execPath, "run", "gen:bundle"], {
+			cwd: packageDir,
+			stderr: "pipe",
+			stdout: "pipe",
+		});
+		const [buildStdout, buildStderr, buildExitCode] = await Promise.all([
+			new Response(build.stdout).text(),
+			new Response(build.stderr).text(),
+			build.exited,
+		]);
+		expect(buildExitCode, `${buildStdout}\n${buildStderr}`).toBe(0);
+		expect(fs.existsSync(staleAssetPath)).toBe(false);
+
 		const proc = Bun.spawn(["npm", "pack", "--dry-run", "--ignore-scripts", "--json"], {
-			cwd: packDir,
+			cwd: packageDir,
 			stderr: "pipe",
 			stdout: "pipe",
 		});
@@ -170,6 +185,13 @@ describe("HTML export template", () => {
 		expect(packedAssets.filter(filePath => /^dist\/template-[^.]+\.html$/.test(filePath))).toHaveLength(1);
 		expect(packedAssets.filter(filePath => /^dist\/template-[^.]+\.js$/.test(filePath))).toHaveLength(1);
 		expect(packedAssets.filter(filePath => /^dist\/tool-views\.generated-[^.]+\.js$/.test(filePath))).toHaveLength(1);
+	});
+
+	test("serves the cached normal-bundle template after its asset files are removed", async () => {
+		expect(await runProbe([process.execPath, bundlePath, "--remove-assets-after-first-use"])).toEqual({
+			...expectedTemplate,
+			assetsRemoved: 4,
+		});
 	});
 
 	test("preserves exact bytes in a compiled bundle launched from an unrelated directory", async () => {

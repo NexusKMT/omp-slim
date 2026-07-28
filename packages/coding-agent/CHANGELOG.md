@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Reduced startup memory for HTML session exports by loading and composing bundled HTML, CSS, and JavaScript assets only on first export while preserving source, npm bundle, and standalone binary output bytes.
+
 ## [17.1.7] - 2026-07-27
 
 ### Fixed
