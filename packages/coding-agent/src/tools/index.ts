@@ -574,7 +574,11 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 		if (name === "ask") return session.settings.get("ask.enabled");
 		if (name === "browser") return session.settings.get("browser.enabled");
 		if (name === "computer") return session.settings.get("computer.enabled");
-		if (name === "checkpoint" || name === "rewind") return session.settings.get("checkpoint.enabled");
+		if (name === "checkpoint" || name === "rewind")
+			return (
+				session.settings.get("checkpoint.enabled") &&
+				((session.taskDepth ?? 0) === 0 || requestedTools !== undefined)
+			);
 		if (name === "hub") {
 			return (
 				!restrictToolNames && session.enableIrc !== false && isIrcEnabled(session.settings, session.taskDepth ?? 0)
@@ -584,11 +588,15 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 			return ["hindsight", "mnemopi"].includes(session.settings.get("memory.backend") ?? "");
 		}
 		if (name === "memory_edit") return session.settings.get("memory.backend") === "mnemopi";
-		if (name === "manage_skill") return session.settings.get("autolearn.enabled") && (session.taskDepth ?? 0) === 0;
+		if (name === "manage_skill")
+			return (
+				session.settings.get("autolearn.enabled") &&
+				((session.taskDepth ?? 0) === 0 || requestedTools !== undefined)
+			);
 		if (name === "learn") {
 			return (
 				session.settings.get("autolearn.enabled") &&
-				(session.taskDepth ?? 0) === 0 &&
+				((session.taskDepth ?? 0) === 0 || requestedTools !== undefined) &&
 				["hindsight", "mnemopi", "local"].includes(session.settings.get("memory.backend") ?? "")
 			);
 		}
