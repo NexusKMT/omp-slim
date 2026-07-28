@@ -2478,6 +2478,7 @@ export class SessionMaintenance {
 				const telemetry = resolveTelemetry(this.#host.agent.telemetry, this.#host.sessionId());
 				let compactResult: CompactionResult | undefined;
 				let lastError: unknown;
+				let nativeCompactionFailure: { error: NativeCompactionError; provider: string } | undefined;
 				codexCompaction = createCodexCompactionContext({
 					trigger: "auto",
 					reason: "context_limit",
@@ -2488,6 +2489,9 @@ export class SessionMaintenance {
 
 				for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
 					const candidate = candidates[candidateIndex];
+					if (nativeCompactionFailure && candidate.provider !== nativeCompactionFailure.provider) {
+						throw nativeCompactionFailure.error;
+					}
 					const hasMoreCandidates = candidateIndex < candidates.length - 1;
 					const apiKey = await this.#host.modelRegistry.getApiKey(candidate, this.#host.sessionId());
 					if (!apiKey) continue;
@@ -2534,7 +2538,9 @@ export class SessionMaintenance {
 								break;
 							}
 							if (error instanceof NativeCompactionError) {
-								throw error;
+								nativeCompactionFailure ??= { error, provider: candidate.provider };
+								lastError = nativeCompactionFailure.error;
+								break;
 							}
 							if (AIError.is(id, AIError.Flag.Timeout)) {
 								logger.warn(
