@@ -64,12 +64,20 @@ export function calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage
  * model-independent and stays correct even for legacy entries whose stored
  * `cacheWrite` scalar drifts from 1.25x input. Providers that omit `cttl`
  * (everyone but Anthropic) keep the flat-rate calculation.
+ *
+ * The breakdown is documented to sum to `usage.cacheWrite`, but the two are written
+ * from independent wire fields (`cache_creation` vs `cache_creation_input_tokens`),
+ * so any unattributed remainder is priced at the flat rate instead of being dropped:
+ * a partial or stale breakdown must never make write tokens free.
  */
 function cacheWriteCost<TApi extends Api>(model: Model<TApi>, usage: Usage): number {
+	const rate5m = model.cost.cacheWrite / 1000000;
 	const cttl = usage.cttl;
-	if (!cttl) return (model.cost.cacheWrite / 1000000) * usage.cacheWrite;
-	const rate1h = model.cost.input * 2;
-	return (model.cost.cacheWrite / 1000000) * (cttl.ephemeral5m ?? 0) + (rate1h / 1000000) * (cttl.ephemeral1h ?? 0);
+	if (!cttl) return rate5m * usage.cacheWrite;
+	const fiveMinute = cttl.ephemeral5m ?? 0;
+	const oneHour = cttl.ephemeral1h ?? 0;
+	const residual = Math.max(0, usage.cacheWrite - fiveMinute - oneHour);
+	return rate5m * (fiveMinute + residual) + ((model.cost.input * 2) / 1000000) * oneHour;
 }
 
 /**

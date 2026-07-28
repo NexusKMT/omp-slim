@@ -141,6 +141,27 @@ describe("calculateCost", () => {
 		expect(usage.cost.cacheWrite).toBeCloseTo((6.25 * 100 + 10 * 200) / 1e6, 12);
 	});
 
+	it("prices cache-write tokens the breakdown does not account for at the flat rate", () => {
+		// message_start supplied the 5m/1h split, a later message_delta bumped
+		// cache_creation_input_tokens without repeating `cache_creation`. The
+		// unattributed remainder must still be billed, never silently free.
+		const model = getBundledModel("anthropic", "claude-opus-5");
+		const usage: Usage = {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 1000,
+			cttl: { ephemeral1h: 400 },
+			totalTokens: 1000,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+
+		calculateCost(model, usage);
+
+		// 400 * $10/MTok (1h) + 600 unattributed * $6.25/MTok (flat 5m rate).
+		expect(usage.cost.cacheWrite).toBeCloseTo((10 * 400 + 6.25 * 600) / 1e6, 12);
+	});
+
 	it("keeps the flat 5m rate for cache writes without a cttl breakdown", () => {
 		const model = getBundledModel("anthropic", "claude-opus-5");
 		const usage: Usage = {
