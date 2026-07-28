@@ -355,6 +355,48 @@ describe("createTools", () => {
 		expect(names).toContain("rewind");
 	});
 
+	it("auto-includes rewind when only checkpoint is in the explicit list", async () => {
+		const names = (
+			await createTools(
+				createTestSession({
+					taskDepth: 1,
+					settings: createSettingsWithOverrides({ "checkpoint.enabled": true }),
+				}),
+				["checkpoint"],
+			)
+		).map(t => t.name);
+		expect(names).toContain("checkpoint");
+		expect(names).toContain("rewind");
+	});
+
+	it("auto-includes checkpoint when only rewind is in the explicit list", async () => {
+		const names = (
+			await createTools(
+				createTestSession({
+					taskDepth: 1,
+					settings: createSettingsWithOverrides({ "checkpoint.enabled": true }),
+				}),
+				["rewind"],
+			)
+		).map(t => t.name);
+		expect(names).toContain("checkpoint");
+		expect(names).toContain("rewind");
+	});
+
+	it("does not auto-include checkpoint/rewind when neither is requested", async () => {
+		const names = (
+			await createTools(
+				createTestSession({
+					taskDepth: 1,
+					settings: createSettingsWithOverrides({ "checkpoint.enabled": true }),
+				}),
+				["read"],
+			)
+		).map(t => t.name);
+		expect(names).not.toContain("checkpoint");
+		expect(names).not.toContain("rewind");
+	});
+
 	it("HIDDEN_TOOLS contains yield and goal", () => {
 		expect(Object.keys(HIDDEN_TOOLS).sort()).toEqual(["goal", "yield"]);
 	});

@@ -502,6 +502,17 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 	// unreachable, in which case eval dispatches exclusively to the others.
 	const allowEval = effectivePythonAllowed || allowJs || effectiveRubyAllowed || effectiveJuliaAllowed;
 
+	// Checkpoint and rewind are a pair: listing one without the other strands
+	// the agent (it can checkpoint but not rewind, or vice versa). Auto-include
+	// the sister tool so a one-sided frontmatter `tools:` entry still works.
+	// Runs before the restricted-scope block so it applies to all sessions.
+	if (requestedTools && session.settings.get("checkpoint.enabled")) {
+		if (requestedTools.includes("checkpoint") && !requestedTools.includes("rewind")) {
+			requestedTools.push("rewind");
+		} else if (requestedTools.includes("rewind") && !requestedTools.includes("checkpoint")) {
+			requestedTools.push("checkpoint");
+		}
+	}
 	// Auto-include AST counterparts when their text-based sibling is present.
 	// Restricted callers own the active list and must not have it widened.
 	if (requestedTools && !restrictToolNames) {
