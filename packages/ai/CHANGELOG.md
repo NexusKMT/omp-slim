@@ -12,6 +12,9 @@
 - Upstream `403 Forbidden` responses (e.g. Anthropic `permission_error` plan/model denials, Copilot model-policy rejections) now rotate through sibling credentials like usage limits do, instead of failing the session on the first denied account. The denied credential is soft-blocked for 60s and re-validated — never removed — and the original 403 surfaces only once every sibling has been tried.
 - Usage report filtering in the auth-broker remote store is memoized per (reports, snapshot) with a precomputed per-provider OAuth credential map, replacing an O(reports × credentials) scan on every credential-selection and status refresh
 - Cursor and Devin Connect-frame readers no longer copy every stream chunk through `Buffer.concat` when the pending buffer is empty
+### Fixed
+
+- Fixed Google Vertex AI multi-region locations `eu` and `us` building invalid hosts (`eu-aiplatform.googleapis.com` / `us-aiplatform.googleapis.com`) that 404. Both Gemini GenerateContent and Claude/OpenAI-compat Vertex routes now resolve the REP endpoints (`aiplatform.eu.rep.googleapis.com` / `aiplatform.us.rep.googleapis.com`).
 
 ## [17.1.6] - 2026-07-27
 
