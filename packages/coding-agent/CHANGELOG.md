@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed legacy pi extensions importing `parseArgs` or `CONFIG_DIR_NAME` from the `@earendil-works/pi-coding-agent` package root failing Bun's static export check during validation, which blocked installs such as `omp install npm:pi-cursor-sdk` ([#6907](https://github.com/can1357/oh-my-pi/pull/6907) by [@Gy-Hu](https://github.com/Gy-Hu)).
+
 ## [17.1.8] - 2026-07-28
 
 ### Breaking Changes
