@@ -65,8 +65,7 @@ interface CodexUsageState {
 	omitFetchedAt?: boolean;
 }
 
-function codexUsageReport(state: CodexUsageState): unknown[] {
-	const accountId = "account-1";
+function codexUsageReport(state: CodexUsageState, accountId = "account-1"): unknown[] {
 	return [
 		{
 			provider: "openai-codex",
@@ -90,7 +89,13 @@ function codexUsageReport(state: CodexUsageState): unknown[] {
 	];
 }
 
-function makeCodexSession(fetchUsageReports: (signal?: AbortSignal) => Promise<unknown>): AgentSession {
+function makeCodexSession(
+	fetchUsageReports: (signal?: AbortSignal) => Promise<unknown>,
+	resolveActiveIdentity: () => { accountId: string; email?: string } = () => ({
+		accountId: "account-1",
+		email: "codex@example.com",
+	}),
+): AgentSession {
 	const session = makeSession(fetchUsageReports) as unknown as Record<string, unknown>;
 	session.sessionId = "session-1";
 	session.state = {
@@ -100,10 +105,7 @@ function makeCodexSession(fetchUsageReports: (signal?: AbortSignal) => Promise<u
 	session.model = { contextWindow: 200_000, provider: "openai-codex" };
 	session.modelRegistry = {
 		authStorage: {
-			getOAuthAccountIdentity: () => ({
-				accountId: "account-1",
-				email: "codex@example.com",
-			}),
+			getOAuthAccountIdentity: resolveActiveIdentity,
 		},
 	};
 	return session as unknown as AgentSession;
@@ -320,6 +322,47 @@ describe("StatusLineComponent usage refresh", () => {
 			{ kind: "unscheduled-weekly-reset" },
 			{ kind: "saved-reset-banked", added: 1, available: 1 },
 		]);
+		component.dispose();
+	});
+
+	it("binds each reset snapshot to the account identity used to normalize it", async () => {
+		Settings.instance.set("tui.codexResetFireworks", true);
+		const sevenDayResetAt = Date.now() + 80 * 3_600_000;
+		const reports = [
+			...codexUsageReport(
+				{
+					sevenDayPercent: 18,
+					sevenDayResetAt,
+					savedResets: 0,
+				},
+				"account-a",
+			),
+			...codexUsageReport(
+				{
+					sevenDayPercent: 22,
+					sevenDayResetAt,
+					savedResets: 1,
+				},
+				"account-b",
+			),
+		];
+		const identityLookups: string[] = [];
+		const component = new StatusLineComponent(
+			makeCodexSession(
+				async () => reports,
+				() => ({ accountId: identityLookups.shift() ?? "account-a" }),
+			),
+		);
+		const events: CodexResetFireworksEvent[] = [];
+		component.setCodexResetFireworksHandler(event => events.push(event));
+
+		await refreshUsage(component);
+		// The refresh starts under A, but B is active when its report is normalized.
+		// A later identity lookup must not attribute B's saved reset to A.
+		identityLookups.push("account-a", "account-b", "account-a");
+		await refreshUsage(component, 5 * 60_000);
+
+		expect(events).toEqual([]);
 		component.dispose();
 	});
 

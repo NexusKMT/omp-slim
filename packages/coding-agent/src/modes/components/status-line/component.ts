@@ -962,10 +962,8 @@ export class StatusLineComponent implements Component {
 		return this.#vibeWorkerTokenRate?.() ?? null;
 	}
 
-	#getUsageContextKey(session: AgentSession): string {
-		const activeProvider = session.state.model?.provider ?? session.model?.provider ?? "";
+	#formatUsageContextKey(activeProvider: string | undefined, identity: OAuthAccountIdentity | undefined): string {
 		if (!activeProvider) return "";
-		const identity = session.modelRegistry?.authStorage?.getOAuthAccountIdentity(activeProvider, session.sessionId);
 		// orgId is part of the key: rotating between two same-email Anthropic
 		// subscriptions must invalidate the cached usage immediately instead of
 		// showing the previous org's quota for the rest of the cache TTL.
@@ -976,6 +974,14 @@ export class StatusLineComponent implements Component {
 			identity?.projectId ?? "",
 			identity?.orgId ?? "",
 		].join("\0");
+	}
+
+	#getUsageContextKey(session: AgentSession): string {
+		const activeProvider = session.state.model?.provider ?? session.model?.provider;
+		const identity = activeProvider
+			? session.modelRegistry?.authStorage?.getOAuthAccountIdentity(activeProvider, session.sessionId)
+			: undefined;
+		return this.#formatUsageContextKey(activeProvider, identity);
 	}
 
 	/**
@@ -1042,7 +1048,7 @@ export class StatusLineComponent implements Component {
 		this.#cachedUsage = normalized;
 		this.#usageFetchedAt = Date.now();
 		if (activeProvider !== "openai-codex" || !normalized) return;
-		const contextKey = this.#getUsageContextKey(session);
+		const contextKey = this.#formatUsageContextKey(activeProvider, activeIdentity);
 		const previous = this.#codexResetSnapshots.get(contextKey);
 		this.#codexResetSnapshots.set(contextKey, normalized);
 		if (!previous || !settings.get("tui.codexResetFireworks")) return;
