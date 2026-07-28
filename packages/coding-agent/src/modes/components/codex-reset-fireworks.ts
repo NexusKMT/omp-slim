@@ -17,18 +17,21 @@ const FIREWORK_THEME_COLORS = {
 
 type FireworkColor = keyof typeof FIREWORK_THEME_COLORS;
 
+/** A Codex usage window retained between status refreshes for reset detection. */
 export interface CodexUsageWindowSnapshot {
 	percent: number;
 	resetMinutes?: number;
 	resetHours?: number;
 }
 
+/** The active Codex account fields retained between status refreshes. */
 export interface CodexResetUsageSnapshot {
 	fiveHour?: CodexUsageWindowSnapshot;
 	sevenDay?: CodexUsageWindowSnapshot;
 	savedResets?: number;
 }
 
+/** A detected Codex quota event that can trigger the fireworks presentation. */
 export type CodexResetFireworksEvent =
 	| { kind: "usage-window-reset" }
 	| { kind: "saved-reset-banked"; added: number; available: number };
@@ -51,7 +54,7 @@ interface ActiveFireworks {
 	overlay: OverlayHandle;
 }
 
-export interface CodexResetFireworksHost {
+interface CodexResetFireworksHost {
 	ui: {
 		showOverlay(component: Component, options?: OverlayOptions): OverlayHandle;
 		setFocus(component: Component): void;
@@ -247,7 +250,7 @@ function renderCanvas(canvas: Array<Array<CanvasCell | undefined>>): string[] {
 }
 
 /** Render one deterministic animation frame for the top-third overlay. */
-export function renderCodexResetFireworks(
+function renderCodexResetFireworks(
 	width: number,
 	height: number,
 	frame: number,
@@ -266,7 +269,7 @@ export function renderCodexResetFireworks(
 	return renderCanvas(canvas);
 }
 
-export class CodexResetFireworksComponent implements Component {
+class CodexResetFireworksComponent implements Component {
 	#timer: NodeJS.Timeout | undefined;
 	#done = Promise.withResolvers<void>();
 	#frame = 0;
@@ -311,8 +314,9 @@ export class CodexResetFireworksComponent implements Component {
 export class CodexResetFireworksController {
 	#active: ActiveFireworks | undefined;
 
-	constructor(readonly host: CodexResetFireworksHost) {}
+	constructor(private readonly host: CodexResetFireworksHost) {}
 
+	/** Present a celebration unless another one already owns the modal overlay. */
 	show(event: CodexResetFireworksEvent): boolean {
 		if (this.#active) return false;
 		const component = new CodexResetFireworksComponent(this.host, event);
@@ -328,6 +332,7 @@ export class CodexResetFireworksController {
 		return true;
 	}
 
+	/** Stop the active celebration and release its overlay, if present. */
 	dispose(): void {
 		const active = this.#active;
 		if (!active) return;

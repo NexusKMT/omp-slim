@@ -339,6 +339,10 @@ export class StatusLineComponent implements Component {
 	#usageFetchedAt = 0;
 	#usageInFlight = false;
 	#usageStartTimer: Timer | null = null;
+	// A timed-out request may still resolve. Its result remains eligible only
+	// until a newer request has applied.
+	#usageRefreshSequence = 0;
+	#latestAppliedUsageRefreshSequence = 0;
 	#codexResetSnapshots = new Map<string, CodexResetUsageSnapshot>();
 	#onCodexResetFireworks: ((event: CodexResetFireworksEvent) => void) | undefined;
 	// Context-usage memo. The status line redraws on every agent event, so the
@@ -559,6 +563,7 @@ export class StatusLineComponent implements Component {
 		this.#collabStatus = status;
 	}
 
+	/** Set the callback that presents detected Codex reset celebrations, or clear it with `undefined`. */
 	setCodexResetFireworksHandler(handler: ((event: CodexResetFireworksEvent) => void) | undefined): void {
 		this.#onCodexResetFireworks = handler;
 	}
@@ -1001,24 +1006,32 @@ export class StatusLineComponent implements Component {
 			this.#usageInFlight = false;
 			return;
 		}
+		const sequence = ++this.#usageRefreshSequence;
 		const signal = AbortSignal.timeout(STATUS_USAGE_REFRESH_TIMEOUT_MS);
 		let reportsPromise: Promise<unknown> | undefined;
 		try {
 			reportsPromise = fetcher.call(session, signal);
-			this.#applyUsageRefreshReports(session, await this.#raceUsageRefreshWithSignal(reportsPromise, signal));
+			this.#applyUsageRefreshReports(
+				session,
+				await this.#raceUsageRefreshWithSignal(reportsPromise, signal),
+				sequence,
+			);
 		} catch {
 			if (this.session !== session) return;
 			this.#usageFetchedAt = Date.now();
 			if (signal.aborted && reportsPromise) {
-				this.#observeLateUsageRefresh(session, reportsPromise);
+				this.#observeLateUsageRefresh(session, reportsPromise, sequence);
 			}
 		} finally {
 			if (this.session === session) this.#usageInFlight = false;
 		}
 	}
 
-	#applyUsageRefreshReports(session: AgentSession, reports: unknown): void {
-		if (this.#disposed || this.session !== session) return;
+	#applyUsageRefreshReports(session: AgentSession, reports: unknown, sequence: number): void {
+		if (this.#disposed || this.session !== session || sequence < this.#latestAppliedUsageRefreshSequence) {
+			return;
+		}
+		this.#latestAppliedUsageRefreshSequence = sequence;
 		const activeProvider = session.state.model?.provider ?? session.model?.provider;
 		const activeIdentity =
 			activeProvider && session.modelRegistry?.authStorage
@@ -1036,13 +1049,15 @@ export class StatusLineComponent implements Component {
 		if (event) this.#onCodexResetFireworks?.(event);
 	}
 
-	#observeLateUsageRefresh(session: AgentSession, reportsPromise: Promise<unknown>): void {
+	#observeLateUsageRefresh(session: AgentSession, reportsPromise: Promise<unknown>, sequence: number): void {
 		void reportsPromise
 			.then(reports => {
-				this.#applyUsageRefreshReports(session, reports);
+				this.#applyUsageRefreshReports(session, reports, sequence);
 			})
 			.catch(() => {
-				if (this.#disposed || this.session !== session) return;
+				if (this.#disposed || this.session !== session || sequence < this.#latestAppliedUsageRefreshSequence) {
+					return;
+				}
 				this.#usageFetchedAt = Date.now();
 			});
 	}
@@ -1085,10 +1100,9 @@ export class StatusLineComponent implements Component {
 			const usageReport = report as UsageReport;
 			if (provider === "openai-codex" && reportMatchesActiveAccount(usageReport, activeIdentity)) {
 				const availableCount = usageReport.resetCredits?.availableCount;
-				savedResets =
-					typeof availableCount === "number" && Number.isFinite(availableCount)
-						? Math.max(0, Math.trunc(availableCount))
-						: 0;
+				if (typeof availableCount === "number" && Number.isFinite(availableCount)) {
+					savedResets = Math.max(0, Math.trunc(availableCount));
+				}
 			}
 			for (const limit of limits) {
 				if (!limit || typeof limit !== "object") continue;

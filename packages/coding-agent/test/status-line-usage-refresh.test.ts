@@ -305,6 +305,7 @@ describe("StatusLineComponent usage refresh", () => {
 			fiveHourResetMinutes: 1,
 			sevenDayPercent: 18,
 			sevenDayResetHours: 80,
+			savedResets: 0,
 		};
 		const component = new StatusLineComponent(makeCodexSession(async () => codexUsageReport(state)));
 		const events: CodexResetFireworksEvent[] = [];
@@ -317,6 +318,7 @@ describe("StatusLineComponent usage refresh", () => {
 			fiveHourResetMinutes: 300,
 			sevenDayPercent: 18.2,
 			sevenDayResetHours: 80,
+			savedResets: 0,
 		};
 		await refreshUsage(component, 5 * 60_000);
 		state = {
@@ -324,6 +326,7 @@ describe("StatusLineComponent usage refresh", () => {
 			fiveHourResetMinutes: 1,
 			sevenDayPercent: 18.4,
 			sevenDayResetHours: 80,
+			savedResets: 0,
 		};
 		await refreshUsage(component, 5 * 60_000);
 		state = {
@@ -336,6 +339,79 @@ describe("StatusLineComponent usage refresh", () => {
 		await refreshUsage(component, 5 * 60_000);
 
 		expect(events).toEqual([{ kind: "usage-window-reset" }, { kind: "saved-reset-banked", added: 1, available: 1 }]);
+		component.dispose();
+	});
+
+	it("keeps an unavailable saved-reset count unknown across refreshes", async () => {
+		Settings.instance.set("tui.codexResetFireworks", true);
+		let state: CodexUsageState = {
+			fiveHourPercent: 25,
+			fiveHourResetMinutes: 300,
+			sevenDayPercent: 18,
+			sevenDayResetHours: 80,
+			savedResets: 1,
+		};
+		const component = new StatusLineComponent(makeCodexSession(async () => codexUsageReport(state)));
+		const events: CodexResetFireworksEvent[] = [];
+		component.setCodexResetFireworksHandler(event => events.push(event));
+
+		await refreshUsage(component);
+		state = {
+			fiveHourPercent: 25,
+			fiveHourResetMinutes: 295,
+			sevenDayPercent: 18.1,
+			sevenDayResetHours: 80,
+		};
+		await refreshUsage(component, 5 * 60_000);
+		state = { ...state, savedResets: 1 };
+		await refreshUsage(component, 5 * 60_000);
+
+		expect(events).toEqual([]);
+		component.dispose();
+	});
+
+	it("discards a timed-out report after a newer refresh applies", async () => {
+		Settings.instance.set("tui.codexResetFireworks", true);
+		const stale = Promise.withResolvers<unknown>();
+		const current: CodexUsageState = {
+			fiveHourPercent: 0,
+			fiveHourResetMinutes: 300,
+			sevenDayPercent: 18.2,
+			sevenDayResetHours: 80,
+			savedResets: 0,
+		};
+		let calls = 0;
+		const component = new StatusLineComponent(
+			makeCodexSession(async () => {
+				calls++;
+				return calls === 1 ? stale.promise : codexUsageReport(current);
+			}),
+		);
+		const events: CodexResetFireworksEvent[] = [];
+		component.setCodexResetFireworksHandler(event => events.push(event));
+
+		component.refreshUsageInBackground();
+		vi.advanceTimersByTime(0);
+		await flushMicrotasks();
+		vi.advanceTimersByTime(2_000);
+		await flushMicrotasks();
+		await refreshUsage(component, 5 * 60_000);
+		expect(calls).toBe(2);
+
+		stale.resolve(
+			codexUsageReport({
+				fiveHourPercent: 42,
+				fiveHourResetMinutes: 1,
+				sevenDayPercent: 18,
+				sevenDayResetHours: 80,
+				savedResets: 1,
+			}),
+		);
+		await flushMicrotasks();
+		await refreshUsage(component, 5 * 60_000);
+
+		expect(calls).toBe(3);
+		expect(events).toEqual([]);
 		component.dispose();
 	});
 });
