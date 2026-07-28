@@ -18,8 +18,8 @@ type FireworkColor = keyof typeof FIREWORK_THEME_COLORS;
 
 /** The active Codex account fields retained between status refreshes. */
 export interface CodexResetUsageSnapshot {
-	/** When this usage report was observed. */
-	observedAt: number;
+	/** When this usage report was observed, if supplied by the provider. */
+	observedAt?: number;
 	/** Weekly usage and its previously scheduled reset deadline. */
 	sevenDay?: { percent: number; resetsAt?: number };
 	savedResets?: number;
@@ -97,6 +97,7 @@ export function detectCodexResetFireworks(
 	if (
 		scheduledResetAt === undefined ||
 		!Number.isFinite(scheduledResetAt) ||
+		typeof current.observedAt !== "number" ||
 		!Number.isFinite(current.observedAt) ||
 		current.observedAt >= scheduledResetAt
 	) {

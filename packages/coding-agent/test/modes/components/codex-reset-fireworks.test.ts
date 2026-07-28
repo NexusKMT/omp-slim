@@ -136,6 +136,20 @@ describe("Codex reset fireworks", () => {
 		).toBeUndefined();
 	});
 
+	it("requires the provider fetch timestamp to establish that a reset was early", () => {
+		expect(
+			detectCodexResetFireworks(
+				{
+					observedAt: 1_000,
+					sevenDay: { percent: 42, resetsAt: 10_000 },
+				},
+				{
+					sevenDay: { percent: 0, resetsAt: 10_000 },
+				},
+			),
+		).toBeUndefined();
+	});
+
 	it("renders distinct copy for usage-window and saved-reset celebrations", () => {
 		const usage = makeHost();
 		const usageController = new CodexResetFireworksController(usage.host);

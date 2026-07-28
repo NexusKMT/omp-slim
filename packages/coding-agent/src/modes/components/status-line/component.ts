@@ -330,7 +330,7 @@ export class StatusLineComponent implements Component {
 
 	// Provider usage caching (5-min TTL, OAuth/sub only)
 	#cachedUsage: {
-		observedAt: number;
+		observedAt?: number;
 		tier?: string;
 		fiveHour?: { percent: number; resetMinutes?: number };
 		sevenDay?: { percent: number; resetHours?: number; resetsAt?: number };
@@ -1080,7 +1080,7 @@ export class StatusLineComponent implements Component {
 		activeProvider?: string,
 		activeIdentity?: OAuthAccountIdentity,
 	): {
-		observedAt: number;
+		observedAt?: number;
 		tier?: string;
 		fiveHour?: { percent: number; resetMinutes?: number };
 		sevenDay?: { percent: number; resetHours?: number; resetsAt?: number };
@@ -1093,7 +1093,7 @@ export class StatusLineComponent implements Component {
 		let fiveHourTier: string | undefined;
 		let sevenDayTier: string | undefined;
 		const now = Date.now();
-		let observedAt = now;
+		let observedAt: number | undefined;
 		for (const report of reports) {
 			if (!report || typeof report !== "object") continue;
 			const provider = (report as { provider?: unknown }).provider;
@@ -1147,7 +1147,13 @@ export class StatusLineComponent implements Component {
 		if (!fiveHour && !sevenDay && savedResets === undefined) return null;
 		// Single compact label; prefer the five-hour tier if displayed windows ever disagree.
 		const effectiveTier = fiveHourTier ?? sevenDayTier;
-		return { observedAt, tier: effectiveTier, fiveHour, sevenDay, savedResets };
+		return {
+			...(observedAt === undefined ? {} : { observedAt }),
+			tier: effectiveTier,
+			fiveHour,
+			sevenDay,
+			savedResets,
+		};
 	}
 
 	/**

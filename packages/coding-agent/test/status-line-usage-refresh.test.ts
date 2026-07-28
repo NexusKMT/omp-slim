@@ -62,6 +62,7 @@ interface CodexUsageState {
 	sevenDayPercent: number;
 	sevenDayResetAt: number;
 	savedResets?: number;
+	omitFetchedAt?: boolean;
 }
 
 function codexUsageReport(state: CodexUsageState): unknown[] {
@@ -69,7 +70,7 @@ function codexUsageReport(state: CodexUsageState): unknown[] {
 	return [
 		{
 			provider: "openai-codex",
-			fetchedAt: Date.now(),
+			...(state.omitFetchedAt ? {} : { fetchedAt: Date.now() }),
 			metadata: { accountId, email: "codex@example.com" },
 			...(state.savedResets === undefined ? {} : { resetCredits: { availableCount: state.savedResets } }),
 			limits: [
@@ -341,6 +342,31 @@ describe("StatusLineComponent usage refresh", () => {
 		};
 		await refreshUsage(component, 5 * 60_000);
 		state = { ...state, savedResets: 1 };
+		await refreshUsage(component, 5 * 60_000);
+
+		expect(events).toEqual([]);
+		component.dispose();
+	});
+
+	it("does not infer an observation time when the provider omits fetchedAt", async () => {
+		Settings.instance.set("tui.codexResetFireworks", true);
+		const sevenDayResetAt = Date.now() + 80 * 3_600_000;
+		let state: CodexUsageState = {
+			sevenDayPercent: 42,
+			sevenDayResetAt,
+			savedResets: 0,
+		};
+		const component = new StatusLineComponent(makeCodexSession(async () => codexUsageReport(state)));
+		const events: CodexResetFireworksEvent[] = [];
+		component.setCodexResetFireworksHandler(event => events.push(event));
+
+		await refreshUsage(component);
+		state = {
+			sevenDayPercent: 0,
+			sevenDayResetAt,
+			savedResets: 0,
+			omitFetchedAt: true,
+		};
 		await refreshUsage(component, 5 * 60_000);
 
 		expect(events).toEqual([]);
