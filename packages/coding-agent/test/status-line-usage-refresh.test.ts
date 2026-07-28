@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import type { CodexResetFireworksEvent } from "@oh-my-pi/pi-coding-agent/modes/components/codex-reset-fireworks";
 import { StatusLineComponent } from "@oh-my-pi/pi-coding-agent/modes/components/status-line";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -55,6 +56,76 @@ function usageReport(percent: number): unknown[] {
 			],
 		},
 	];
+}
+
+interface CodexUsageState {
+	fiveHourPercent: number;
+	fiveHourResetMinutes: number;
+	sevenDayPercent: number;
+	sevenDayResetHours: number;
+	savedResets?: number;
+}
+
+function codexUsageReport(state: CodexUsageState): unknown[] {
+	const accountId = "account-1";
+	return [
+		{
+			provider: "openai-codex",
+			fetchedAt: Date.now(),
+			metadata: { accountId, email: "codex@example.com" },
+			...(state.savedResets === undefined ? {} : { resetCredits: { availableCount: state.savedResets } }),
+			limits: [
+				{
+					id: "openai-codex:primary",
+					label: "Codex 5 Hour",
+					scope: { provider: "openai-codex", accountId, windowId: "5h" },
+					window: {
+						id: "5h",
+						label: "5h",
+						resetsAt: Date.now() + state.fiveHourResetMinutes * 60_000,
+					},
+					amount: { unit: "percent", usedFraction: state.fiveHourPercent / 100 },
+				},
+				{
+					id: "openai-codex:secondary",
+					label: "Codex 7 Day",
+					scope: { provider: "openai-codex", accountId, windowId: "7d" },
+					window: {
+						id: "7d",
+						label: "7d",
+						resetsAt: Date.now() + state.sevenDayResetHours * 3_600_000,
+					},
+					amount: { unit: "percent", usedFraction: state.sevenDayPercent / 100 },
+				},
+			],
+		},
+	];
+}
+
+function makeCodexSession(fetchUsageReports: (signal?: AbortSignal) => Promise<unknown>): AgentSession {
+	const session = makeSession(fetchUsageReports) as unknown as Record<string, unknown>;
+	session.sessionId = "session-1";
+	session.state = {
+		messages: [],
+		model: { contextWindow: 200_000, provider: "openai-codex" },
+	};
+	session.model = { contextWindow: 200_000, provider: "openai-codex" };
+	session.modelRegistry = {
+		authStorage: {
+			getOAuthAccountIdentity: () => ({
+				accountId: "account-1",
+				email: "codex@example.com",
+			}),
+		},
+	};
+	return session as unknown as AgentSession;
+}
+
+async function refreshUsage(component: StatusLineComponent, advanceMs = 0): Promise<void> {
+	if (advanceMs > 0) vi.advanceTimersByTime(advanceMs);
+	component.refreshUsageInBackground();
+	vi.advanceTimersByTime(0);
+	await flushMicrotasks();
 }
 
 function plain(text: string): string {
@@ -199,5 +270,72 @@ describe("StatusLineComponent usage refresh", () => {
 		vi.advanceTimersByTime(0);
 		await flushMicrotasks();
 		expect(calls).toBe(2);
+	});
+
+	it("keeps reset fireworks opt-in while advancing the disabled baseline", async () => {
+		let state: CodexUsageState = {
+			fiveHourPercent: 42,
+			fiveHourResetMinutes: 1,
+			sevenDayPercent: 18,
+			sevenDayResetHours: 80,
+			savedResets: 0,
+		};
+		const component = new StatusLineComponent(makeCodexSession(async () => codexUsageReport(state)));
+		const events: CodexResetFireworksEvent[] = [];
+		component.setCodexResetFireworksHandler(event => events.push(event));
+
+		expect(Settings.instance.get("tui.codexResetFireworks")).toBe(false);
+		await refreshUsage(component);
+		state = {
+			fiveHourPercent: 0,
+			fiveHourResetMinutes: 300,
+			sevenDayPercent: 18.2,
+			sevenDayResetHours: 80,
+			savedResets: 0,
+		};
+		await refreshUsage(component, 5 * 60_000);
+		expect(events).toEqual([]);
+		component.dispose();
+	});
+
+	it("emits distinct enabled events for a 5-hour reset and a newly banked reset", async () => {
+		Settings.instance.set("tui.codexResetFireworks", true);
+		let state: CodexUsageState = {
+			fiveHourPercent: 42,
+			fiveHourResetMinutes: 1,
+			sevenDayPercent: 18,
+			sevenDayResetHours: 80,
+		};
+		const component = new StatusLineComponent(makeCodexSession(async () => codexUsageReport(state)));
+		const events: CodexResetFireworksEvent[] = [];
+		component.setCodexResetFireworksHandler(event => events.push(event));
+
+		await refreshUsage(component);
+		expect(events).toEqual([]);
+		state = {
+			fiveHourPercent: 0,
+			fiveHourResetMinutes: 300,
+			sevenDayPercent: 18.2,
+			sevenDayResetHours: 80,
+		};
+		await refreshUsage(component, 5 * 60_000);
+		state = {
+			fiveHourPercent: 25,
+			fiveHourResetMinutes: 1,
+			sevenDayPercent: 18.4,
+			sevenDayResetHours: 80,
+		};
+		await refreshUsage(component, 5 * 60_000);
+		state = {
+			fiveHourPercent: 0,
+			fiveHourResetMinutes: 300,
+			sevenDayPercent: 18.6,
+			sevenDayResetHours: 80,
+			savedResets: 1,
+		};
+		await refreshUsage(component, 5 * 60_000);
+
+		expect(events).toEqual([{ kind: "usage-window-reset" }, { kind: "saved-reset-banked", added: 1, available: 1 }]);
+		component.dispose();
 	});
 });

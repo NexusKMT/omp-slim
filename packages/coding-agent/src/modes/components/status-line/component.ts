@@ -7,7 +7,10 @@ import { getProjectDir } from "@oh-my-pi/pi-utils";
 import { settings } from "../../../config/settings";
 import type { AgentSession } from "../../../session/agent-session";
 import type { OAuthAccountIdentity } from "../../../session/auth-storage";
-import { limitMatchesActiveAccount } from "../../../slash-commands/helpers/active-oauth-account";
+import {
+	limitMatchesActiveAccount,
+	reportMatchesActiveAccount,
+} from "../../../slash-commands/helpers/active-oauth-account";
 import { type ActiveRepoContext, resolveActiveRepoContextSync } from "../../../utils/active-repo-context";
 import * as git from "../../../utils/git";
 import * as jj from "../../../utils/jj";
@@ -15,6 +18,11 @@ import { getSessionAccentAnsi, getSessionAccentHex } from "../../../utils/sessio
 import { calculateTokensPerSecond } from "../../../utils/token-rate";
 import { sanitizeStatusText } from "../../shared";
 import { theme } from "../../theme/theme";
+import {
+	type CodexResetFireworksEvent,
+	type CodexResetUsageSnapshot,
+	detectCodexResetFireworks,
+} from "../codex-reset-fireworks";
 import { canReuseCachedPr, createPrCacheContext, isSamePrCacheContext, type PrCacheContext } from "./git-utils";
 import { getPreset } from "./presets";
 import { renderSegment, type SegmentContext } from "./segments";
@@ -325,11 +333,14 @@ export class StatusLineComponent implements Component {
 		tier?: string;
 		fiveHour?: { percent: number; resetMinutes?: number };
 		sevenDay?: { percent: number; resetHours?: number };
+		savedResets?: number;
 	} | null = null;
 	#cachedUsageContextKey: string | null = null;
 	#usageFetchedAt = 0;
 	#usageInFlight = false;
 	#usageStartTimer: Timer | null = null;
+	#codexResetSnapshots = new Map<string, CodexResetUsageSnapshot>();
+	#onCodexResetFireworks: ((event: CodexResetFireworksEvent) => void) | undefined;
 	// Context-usage memo. The status line redraws on every agent event, so the
 	// hot path must not recompute context tokens unless an input changed.
 	// `getContextUsage()` anchors on the last assistant's real prompt-token
@@ -548,6 +559,10 @@ export class StatusLineComponent implements Component {
 		this.#collabStatus = status;
 	}
 
+	setCodexResetFireworksHandler(handler: ((event: CodexResetFireworksEvent) => void) | undefined): void {
+		this.#onCodexResetFireworks = handler;
+	}
+
 	setHookStatus(key: string, text: string | undefined): void {
 		if (text === undefined) {
 			this.#hookStatuses.delete(key);
@@ -597,6 +612,8 @@ export class StatusLineComponent implements Component {
 		this.#disposed = true;
 		this.#onBranchChange = null;
 		this.#clearUsageStartTimer();
+		this.#onCodexResetFireworks = undefined;
+		this.#codexResetSnapshots.clear();
 		if (this.#gitWatcher) {
 			this.#gitWatcher.close();
 			this.#gitWatcher = null;
@@ -1007,8 +1024,16 @@ export class StatusLineComponent implements Component {
 			activeProvider && session.modelRegistry?.authStorage
 				? session.modelRegistry.authStorage.getOAuthAccountIdentity(activeProvider, session.sessionId)
 				: undefined;
-		this.#cachedUsage = this.#normalizeUsageReports(reports, activeProvider, activeIdentity);
+		const normalized = this.#normalizeUsageReports(reports, activeProvider, activeIdentity);
+		this.#cachedUsage = normalized;
 		this.#usageFetchedAt = Date.now();
+		if (activeProvider !== "openai-codex" || !normalized) return;
+		const contextKey = this.#getUsageContextKey(session);
+		const previous = this.#codexResetSnapshots.get(contextKey);
+		this.#codexResetSnapshots.set(contextKey, normalized);
+		if (!previous || !settings.get("tui.codexResetFireworks")) return;
+		const event = detectCodexResetFireworks(previous, normalized);
+		if (event) this.#onCodexResetFireworks?.(event);
 	}
 
 	#observeLateUsageRefresh(session: AgentSession, reportsPromise: Promise<unknown>): void {
@@ -1042,10 +1067,12 @@ export class StatusLineComponent implements Component {
 		tier?: string;
 		fiveHour?: { percent: number; resetMinutes?: number };
 		sevenDay?: { percent: number; resetHours?: number };
+		savedResets?: number;
 	} | null {
 		if (!Array.isArray(reports)) return null;
 		let fiveHour: { percent: number; resetMinutes?: number } | undefined;
 		let sevenDay: { percent: number; resetHours?: number } | undefined;
+		let savedResets: number | undefined;
 		let fiveHourTier: string | undefined;
 		let sevenDayTier: string | undefined;
 		const now = Date.now();
@@ -1055,12 +1082,17 @@ export class StatusLineComponent implements Component {
 			if (activeProvider && provider !== activeProvider) continue;
 			const limits = (report as { limits?: unknown }).limits;
 			if (!Array.isArray(limits)) continue;
+			const usageReport = report as UsageReport;
+			if (provider === "openai-codex" && reportMatchesActiveAccount(usageReport, activeIdentity)) {
+				const availableCount = usageReport.resetCredits?.availableCount;
+				savedResets =
+					typeof availableCount === "number" && Number.isFinite(availableCount)
+						? Math.max(0, Math.trunc(availableCount))
+						: 0;
+			}
 			for (const limit of limits) {
 				if (!limit || typeof limit !== "object") continue;
-				if (
-					activeIdentity &&
-					!limitMatchesActiveAccount(report as UsageReport, limit as UsageLimit, activeIdentity)
-				) {
+				if (activeIdentity && !limitMatchesActiveAccount(usageReport, limit as UsageLimit, activeIdentity)) {
 					continue;
 				}
 				const l = limit as {
@@ -1093,10 +1125,10 @@ export class StatusLineComponent implements Component {
 				}
 			}
 		}
-		if (!fiveHour && !sevenDay) return null;
+		if (!fiveHour && !sevenDay && savedResets === undefined) return null;
 		// Single compact label; prefer the five-hour tier if displayed windows ever disagree.
 		const effectiveTier = fiveHourTier ?? sevenDayTier;
-		return { tier: effectiveTier, fiveHour, sevenDay };
+		return { tier: effectiveTier, fiveHour, sevenDay, savedResets };
 	}
 
 	/**
