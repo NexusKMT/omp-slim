@@ -22,6 +22,9 @@
 ### Fixed
 
 - Fixed internal Hub peer messages being emitted over ACP as ordinary tool-call updates, which exposed inter-agent coordination text in clients such as Paseo ([#6872](https://github.com/can1357/oh-my-pi/issues/6872)).
+### Fixed
+
+- Fixed `omp plugin install` of legacy pi extensions failing Bun's static named-export validation on `isContextOverflow` (e.g. `pi-blackhole`). The `@oh-my-pi/pi-ai` root barrel dropped upstream `@earendil-works/pi-ai`'s root re-export, so `legacy-pi-ai-shim.ts` (which backs both on-disk and `omp-legacy-pi-bundled:` virtual resolution) never surfaced it. The shim now bridges every upstream-root runtime symbol that still exists in omp — `isContextOverflow` (from `@oh-my-pi/pi-ai/error`) and `parseJsonWithRepair`/`parseStreamingJson`/`repairJson` (from `@oh-my-pi/pi-utils`) ([#6859](https://github.com/can1357/oh-my-pi/issues/6859)).
 
 ## [17.1.7] - 2026-07-27
 
