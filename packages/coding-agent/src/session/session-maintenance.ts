@@ -26,6 +26,7 @@ import {
 	DEFAULT_SHAKE_CONFIG,
 	effectiveReserveTokens,
 	estimateTokens,
+	NativeCompactionError,
 	prepareCompaction,
 	resolveBudgetReserveTokens,
 	resolveThresholdTokens,
@@ -2531,6 +2532,9 @@ export class SessionMaintenance {
 							if (AIError.is(id, AIError.Flag.AuthFailed)) {
 								lastError = this.#buildCompactionAuthError();
 								break;
+							}
+							if (error instanceof NativeCompactionError) {
+								throw error;
 							}
 							if (AIError.is(id, AIError.Flag.Timeout)) {
 								logger.warn(
