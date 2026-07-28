@@ -445,7 +445,18 @@ export class ExtensionRunner {
 	async invokeNativeTool<TDetails = unknown>(
 		name: string,
 		params: Record<string, unknown>,
-		options?: { signal?: AbortSignal; onUpdate?: AgentToolUpdateCallback<TDetails>; depth?: number },
+		options?: {
+			signal?: AbortSignal;
+			onUpdate?: AgentToolUpdateCallback<TDetails>;
+			depth?: number;
+			/**
+			 * The caller tool's own context. Reused for the native call so metadata the native tool
+			 * reads — `toolCall` (write/edit LSP batch flushing) and provider metadata /
+			 * `providerSafetyApproved` (computer) — is preserved. Falls back to a fresh session tool
+			 * context only when the caller had none.
+			 */
+			callerContext?: AgentToolContext;
+		},
 	): Promise<AgentToolResult<TDetails>> {
 		const resolved = this.#nativeToolResolver?.(name);
 		if (!resolved) throw new Error(`invokeTool: no native built-in named "${name}" to delegate to`);
@@ -459,7 +470,7 @@ export class ExtensionRunner {
 			params as never,
 			options?.signal,
 			options?.onUpdate as never,
-			resolved.makeContext(),
+			options?.callerContext ?? resolved.makeContext(),
 		)) as AgentToolResult<TDetails>;
 	}
 
@@ -788,9 +799,11 @@ export class ExtensionRunner {
 	 * Creates an extension context, optionally scoped to a provider request model. When `toolName` is
 	 * given and a native built-in of that name exists, the context carries a same-tool `invokeTool`
 	 * that delegates to that native implementation (see {@link invokeNativeTool}); `depth` threads the
-	 * per-chain recursion counter so a wrapper that re-invokes itself is bounded.
+	 * per-chain recursion counter so a wrapper that re-invokes itself is bounded, and `callerContext`
+	 * (the context the re-registered tool itself received) is reused for the native call so its
+	 * `toolCall`/provider metadata is preserved.
 	 */
-	createContext(model?: Model, toolName?: string, depth = 0): ExtensionContext {
+	createContext(model?: Model, toolName?: string, depth = 0, callerContext?: AgentToolContext): ExtensionContext {
 		const getModel = model ? () => model : this.#getModel;
 		return {
 			ui: this.#uiContext,
@@ -822,6 +835,7 @@ export class ExtensionRunner {
 								signal: options?.signal,
 								onUpdate: options?.onUpdate,
 								depth: depth + 1,
+								callerContext,
 							})
 					: undefined,
 		};

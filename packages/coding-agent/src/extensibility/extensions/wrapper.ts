@@ -64,16 +64,18 @@ export class RegisteredToolAdapter implements AgentTool<any, any, any> {
 		params: any,
 		signal?: AbortSignal,
 		onUpdate?: AgentToolUpdateCallback<any>,
-		_context?: AgentToolContext,
+		context?: AgentToolContext,
 	) {
 		// Bind the extension context to this tool's own name so `ctx.invokeTool` delegates to the
-		// native built-in of the same name (present only when this tool re-registers a built-in).
+		// native built-in of the same name (present only when this tool re-registers a built-in). The
+		// incoming loop context is threaded through so a delegated native call keeps the caller's
+		// `toolCall`/provider metadata (write/edit LSP batching, computer safety acknowledgement).
 		return this.registeredTool.definition.execute(
 			toolCallId,
 			params,
 			signal,
 			onUpdate,
-			this.runner.createContext(undefined, this.registeredTool.definition.name),
+			this.runner.createContext(undefined, this.registeredTool.definition.name, 0, context),
 		);
 	}
 }
