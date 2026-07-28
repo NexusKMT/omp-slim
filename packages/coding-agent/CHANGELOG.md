@@ -40,6 +40,9 @@
 ### Fixed
 
 - Preserved the active auto-thinking effort when per-turn classification fails, avoiding an unnecessary full prompt-cache invalidation from reverting to the model's provisional default ([#6877](https://github.com/can1357/oh-my-pi/issues/6877)).
+### Changed
+
+- Reduced startup memory for HTML session exports by loading and composing bundled HTML, CSS, and JavaScript assets only on first export while preserving source, npm bundle, and standalone binary output bytes.
 
 ## [17.1.7] - 2026-07-27
 
