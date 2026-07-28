@@ -19,6 +19,9 @@
 ### Fixed
 
 - Fixed excluded web search providers remaining visible in the `Web Search Provider Order` settings list ([#6860](https://github.com/can1357/oh-my-pi/issues/6860)).
+### Fixed
+
+- Fixed internal Hub peer messages being emitted over ACP as ordinary tool-call updates, which exposed inter-agent coordination text in clients such as Paseo ([#6872](https://github.com/can1357/oh-my-pi/issues/6872)).
 
 ## [17.1.7] - 2026-07-27
 
