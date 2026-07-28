@@ -1342,6 +1342,7 @@ export class SessionAdvisors {
 
 		let compactResult: CompactionResult | undefined;
 		let lastError: unknown;
+		let nativeCompactionFailure: { error: NativeCompactionError; provider: string } | undefined;
 		// Instrument the advisor's overflow-compaction one-shot like the primary
 		// compaction path so the advisor model's maintenance call also emits spans.
 		const telemetry = resolveTelemetry(agent.telemetry, advisorProviderSessionId);
@@ -1353,6 +1354,9 @@ export class SessionAdvisors {
 		});
 
 		for (const candidate of candidates) {
+			if (nativeCompactionFailure && candidate.provider !== nativeCompactionFailure.provider) {
+				throw nativeCompactionFailure.error;
+			}
 			const apiKey = await this.#host.modelRegistry.getApiKey(candidate, advisorProviderSessionId, { signal });
 			if (!apiKey) continue;
 			// The advisor overflow-compaction one-shot bypasses the advisor `Agent`,
@@ -1387,10 +1391,16 @@ export class SessionAdvisors {
 			} catch (error) {
 				if (signal.aborted) throw error;
 				const id = AIError.classify(error, candidate.api);
-				if (error instanceof NativeCompactionError && !AIError.is(id, AIError.Flag.AuthFailed)) throw error;
+				if (error instanceof NativeCompactionError && !AIError.is(id, AIError.Flag.AuthFailed)) {
+					nativeCompactionFailure ??= { error, provider: candidate.provider };
+					lastError = nativeCompactionFailure.error;
+					continue;
+				}
 				lastError = error;
 			}
 		}
+
+		if (nativeCompactionFailure) throw nativeCompactionFailure.error;
 
 		if (!compactResult) {
 			logger.warn("Advisor compaction failed, falling back to re-prime", { error: String(lastError) });
