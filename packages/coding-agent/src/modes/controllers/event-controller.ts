@@ -89,6 +89,12 @@ export class EventController {
 	#readToolCallArgs = new Map<string, Record<string, unknown>>();
 	#readToolCallAssistantComponents = new Map<string, AssistantMessageComponent>();
 	#toolTimelineComponents = new Map<string, Component>();
+	// An error/aborted assistant turn is followed by synthetic start/end events
+	// for every tool call the provider emitted but the agent never executed.
+	// Its uncommitted cards are retracted at message_end; retain their ids until
+	// those synthetic completions arrive so the normal no-pending path cannot
+	// recreate failed-attempt cards below the transcript (#6879).
+	#retractedToolCallIds = new Set<string>();
 	// Completions that arrived before any component existed for their call id.
 	// Cursor's server-resolved tools (todo) emit `tool_execution_end` through a
 	// synchronous callback fired mid-parse, while the `toolcall_start` for the
@@ -943,6 +949,7 @@ export class EventController {
 						component.seal();
 						if (component === this.#lastReadGroup) this.#resetReadGroup();
 						this.ctx.chatContainer.removeChild(component);
+						this.#retractedToolCallIds.add(toolCallId);
 						this.ctx.pendingTools.delete(toolCallId);
 						this.#toolTimelineComponents.delete(toolCallId);
 						this.#clearReadToolCall(toolCallId);
@@ -1003,6 +1010,7 @@ export class EventController {
 	}
 
 	async #handleToolExecutionStart(event: Extract<AgentSessionEvent, { type: "tool_execution_start" }>): Promise<void> {
+		if (this.#retractedToolCallIds.has(event.toolCallId)) return;
 		this.#ensureWorkingLoaderWhileStreaming();
 		this.#updateWorkingMessageFromIntent(event.intent);
 		if (event.toolName === "ask" || this.#toolWillPromptForApproval(event.toolName, event.args)) {
@@ -1154,6 +1162,10 @@ export class EventController {
 	}
 
 	async #handleToolExecutionEnd(event: Extract<AgentSessionEvent, { type: "tool_execution_end" }>): Promise<void> {
+		// `createAbortedToolResult` emits start/end after an error/aborted
+		// assistant message. The matching card was deliberately retracted at
+		// message_end; consume the completion instead of recreating/updating UI.
+		if (this.#retractedToolCallIds.delete(event.toolCallId)) return;
 		// A transient overlay (auto-compaction / auto-retry / handoff) that ran
 		// between this tool's start and end could have detached the working
 		// loader. `tool_execution_update` already reconciles this so the spinner

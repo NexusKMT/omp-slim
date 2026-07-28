@@ -187,6 +187,25 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 
 		// Attempt 1: the tool call streams a card, then the turn errors out.
 		await streamToolCall("call-attempt-1", "error");
+		// agent-loop now pairs the failed assistant toolCall with a synthetic
+		// start/end event sequence. It must be absorbed rather than recreating
+		// the card that message_end just retracted.
+		await ec.handleEvent({
+			type: "tool_execution_start",
+			toolCallId: "call-attempt-1",
+			toolName: "bash",
+			args: { command: CMD },
+		} as Extract<AgentSessionEvent, { type: "tool_execution_start" }>);
+		await ec.handleEvent({
+			type: "tool_execution_end",
+			toolCallId: "call-attempt-1",
+			toolName: "bash",
+			result: {
+				content: [{ type: "text", text: "Tool call was not executed because the provider stream ended" }],
+				details: { __synthetic: true, source: "assistant_stop_error", executed: false },
+			},
+			isError: true,
+		} as Extract<AgentSessionEvent, { type: "tool_execution_end" }>);
 		// The failed card is retracted immediately (never committed to scrollback),
 		// not left frozen on screen.
 		expect(countCommand(mode)).toBe(0);
