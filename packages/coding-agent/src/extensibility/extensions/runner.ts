@@ -796,14 +796,26 @@ export class ExtensionRunner {
 	}
 
 	/**
-	 * Creates an extension context, optionally scoped to a provider request model. When `toolName` is
-	 * given and a native built-in of that name exists, the context carries a same-tool `invokeTool`
-	 * that delegates to that native implementation (see {@link invokeNativeTool}); `depth` threads the
-	 * per-chain recursion counter so a wrapper that re-invokes itself is bounded, and `callerContext`
-	 * (the context the re-registered tool itself received) is reused for the native call so its
-	 * `toolCall`/provider metadata is preserved.
+	 * Creates an extension context, optionally scoped to a provider request model.
+	 *
+	 * `delegation` wires the same-tool `ctx.invokeTool` for a re-registered built-in: when `toolName`
+	 * names an existing native built-in, the context carries an `invokeTool` that runs it (see
+	 * {@link invokeNativeTool}). The rest inherits the wrapper's own call so a bare
+	 * `ctx.invokeTool(params)` behaves like the outer call — `context` preserves `toolCall`/provider
+	 * metadata, `signal`/`onUpdate` default to the wrapper's own channels so aborting the outer tool
+	 * call stops the native one and native progress still streams, and `depth` bounds recursion per
+	 * call chain. Explicit options passed to `invokeTool` override the inherited `signal`/`onUpdate`.
 	 */
-	createContext(model?: Model, toolName?: string, depth = 0, callerContext?: AgentToolContext): ExtensionContext {
+	createContext(
+		model?: Model,
+		delegation?: {
+			toolName: string;
+			depth?: number;
+			context?: AgentToolContext;
+			signal?: AbortSignal;
+			onUpdate?: AgentToolUpdateCallback;
+		},
+	): ExtensionContext {
 		const getModel = model ? () => model : this.#getModel;
 		return {
 			ui: this.#uiContext,
@@ -829,13 +841,15 @@ export class ExtensionRunner {
 			setTimeout: (callback, ms, ...args) => this.#managedTimers.setTimeout(callback, ms, ...args),
 			clearTimer: timer => this.#managedTimers.clear(timer),
 			invokeTool:
-				toolName !== undefined && this.hasNativeTool(toolName)
+				delegation !== undefined && this.hasNativeTool(delegation.toolName)
 					? (params, options) =>
-							this.invokeNativeTool(toolName, params, {
-								signal: options?.signal,
-								onUpdate: options?.onUpdate,
-								depth: depth + 1,
-								callerContext,
+							this.invokeNativeTool(delegation.toolName, params, {
+								// Inherit the wrapper's own channels so a bare `ctx.invokeTool(params)` aborts
+								// and streams with the outer call. Explicit options win.
+								signal: options?.signal ?? delegation.signal,
+								onUpdate: options?.onUpdate ?? delegation.onUpdate,
+								depth: (delegation.depth ?? 0) + 1,
+								callerContext: delegation.context,
 							})
 					: undefined,
 		};
