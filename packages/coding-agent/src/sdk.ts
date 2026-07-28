@@ -2563,13 +2563,15 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			localProtocolOptions,
 			autoApprove: options.autoApprove ?? false,
 		});
-		// Native built-in implementations, captured before extension re-registration replaces registry
-		// entries and before the ExtensionToolWrapper pass. Backs `ctx.invokeTool`, so a tool that
-		// wraps a built-in (e.g. a re-registered `write`) can delegate to the original — reaching the
-		// unwrapped native execute, which correctly inherits the caller's already-granted approval
-		// rather than re-running the gate. Populated at the built-in registry loop below.
-		const nativeToolsByName = new Map<string, Tool>();
-		const toolContextStore = new ToolContextStore(getSessionContext, name => nativeToolsByName.get(name));
+		const toolContextStore = new ToolContextStore(getSessionContext);
+		// Native built-in implementations backing same-tool `ctx.invokeTool`, so a tool that
+		// re-registers a built-in (e.g. wrapping `write`) can delegate to the original — reaching the
+		// unwrapped native execute, which inherits the caller's already-granted approval rather than
+		// re-running the gate. Seeded from the xdev registry when present (it retains discoverable
+		// built-ins like `browser` that xdev partitioning removes from the active tool array), else
+		// from the built-in registry; captured before the ExtensionToolWrapper pass so the natives
+		// stay unwrapped. The extension runner exposes it to re-registered tools via createContext.
+		const nativeToolsByName = new Map<string, Tool>(toolSession.xdev?.tools ?? undefined);
 
 		const registeredTools = restrictToolNames ? [] : extensionRunner.getAllRegisteredTools();
 		const sdkCustomTools =
@@ -2612,6 +2614,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			toolRegistry.set(tool.name, tool);
 			builtInRegistryToolNames.delete(tool.name);
 		}
+		// Expose the native built-ins to same-tool `ctx.invokeTool` on re-registered tools. Set after
+		// the override loop so the map holds the natives, not the extension replacements. The context
+		// factory is the loop's own tool context, so a delegated native call sees ordinary session state.
+		extensionRunner.setNativeToolResolver(name => {
+			const tool = nativeToolsByName.get(name);
+			return tool ? { tool, makeContext: () => toolContextStore.getContext() } : undefined;
+		});
 		if (deferMCPDiscoveryForUI && mcpManager) {
 			for (const name of collectPendingMCPToolNames(options.toolNames)) {
 				if (!toolRegistry.has(name)) {

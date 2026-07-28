@@ -66,7 +66,15 @@ export class RegisteredToolAdapter implements AgentTool<any, any, any> {
 		onUpdate?: AgentToolUpdateCallback<any>,
 		_context?: AgentToolContext,
 	) {
-		return this.registeredTool.definition.execute(toolCallId, params, signal, onUpdate, this.runner.createContext());
+		// Bind the extension context to this tool's own name so `ctx.invokeTool` delegates to the
+		// native built-in of the same name (present only when this tool re-registers a built-in).
+		return this.registeredTool.definition.execute(
+			toolCallId,
+			params,
+			signal,
+			onUpdate,
+			this.runner.createContext(undefined, this.registeredTool.definition.name),
+		);
 	}
 }
 

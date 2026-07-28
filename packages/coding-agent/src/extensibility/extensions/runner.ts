@@ -1,7 +1,13 @@
 /**
  * Extension runner - executes extensions and manages their lifecycle.
  */
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type {
+	AgentMessage,
+	AgentTool,
+	AgentToolContext,
+	AgentToolResult,
+	AgentToolUpdateCallback,
+} from "@oh-my-pi/pi-agent-core";
 import type { CredentialDisabledEvent, ImageContent, Model, ProviderResponseMetadata } from "@oh-my-pi/pi-ai";
 import type { KeyId } from "@oh-my-pi/pi-tui";
 import { logger } from "@oh-my-pi/pi-utils";
@@ -407,6 +413,56 @@ export class ExtensionRunner {
 		return this.#emittedToolCalls.delete(`${toolCallId}:${toolName}`);
 	}
 
+	/**
+	 * Resolves a tool NAME to its native built-in implementation (the pre-extension-override,
+	 * unwrapped tool) plus a factory for the `AgentToolContext` that native tool expects, or
+	 * undefined when no native built-in of that name exists. Set by the SDK; backs same-tool
+	 * `invokeTool`. The context factory is the same one the agent loop uses for tool execution, so a
+	 * delegated native call sees the ordinary session tool context (ui, cwd, snapshot state, etc.).
+	 */
+	#nativeToolResolver?: (name: string) => { tool: AgentTool; makeContext: () => AgentToolContext } | undefined;
+
+	/** Wires the native-tool resolver used by {@link invokeNativeTool}. */
+	setNativeToolResolver(
+		resolve: (name: string) => { tool: AgentTool; makeContext: () => AgentToolContext } | undefined,
+	): void {
+		this.#nativeToolResolver = resolve;
+	}
+
+	/** Whether a native built-in of `name` is available to delegate to. */
+	hasNativeTool(name: string): boolean {
+		return this.#nativeToolResolver?.(name) !== undefined;
+	}
+
+	/**
+	 * Run the native built-in of `name` with `params` and return its result — the delegation target
+	 * of a same-tool `ctx.invokeTool`. Calls the unwrapped native `execute` directly with the loop's
+	 * ordinary tool context, so it inherits the caller's already-granted approval (the caller is the
+	 * same tool) rather than re-running the gate. `depth` guards a wrapper that recurses into itself;
+	 * it is per call chain (threaded from the caller), not session-global, so concurrent independent
+	 * delegations do not interfere.
+	 */
+	async invokeNativeTool<TDetails = unknown>(
+		name: string,
+		params: Record<string, unknown>,
+		options?: { signal?: AbortSignal; onUpdate?: AgentToolUpdateCallback<TDetails>; depth?: number },
+	): Promise<AgentToolResult<TDetails>> {
+		const resolved = this.#nativeToolResolver?.(name);
+		if (!resolved) throw new Error(`invokeTool: no native built-in named "${name}" to delegate to`);
+		const depth = options?.depth ?? 0;
+		if (depth >= 8) {
+			throw new Error(`invokeTool: delegation depth exceeded 8 (recursive invokeTool for "${name}"?)`);
+		}
+		const toolCallId = `invoke-${name}-${Date.now().toString(36)}-${depth}`;
+		return (await resolved.tool.execute(
+			toolCallId,
+			params as never,
+			options?.signal,
+			options?.onUpdate as never,
+			resolved.makeContext(),
+		)) as AgentToolResult<TDetails>;
+	}
+
 	constructor(
 		private readonly extensions: Extension[],
 		private readonly runtime: ExtensionRuntime,
@@ -728,8 +784,13 @@ export class ExtensionRunner {
 		return undefined;
 	}
 
-	/** Creates an extension context, optionally scoped to a provider request model. */
-	createContext(model?: Model): ExtensionContext {
+	/**
+	 * Creates an extension context, optionally scoped to a provider request model. When `toolName` is
+	 * given and a native built-in of that name exists, the context carries a same-tool `invokeTool`
+	 * that delegates to that native implementation (see {@link invokeNativeTool}); `depth` threads the
+	 * per-chain recursion counter so a wrapper that re-invokes itself is bounded.
+	 */
+	createContext(model?: Model, toolName?: string, depth = 0): ExtensionContext {
 		const getModel = model ? () => model : this.#getModel;
 		return {
 			ui: this.#uiContext,
@@ -754,6 +815,15 @@ export class ExtensionRunner {
 			setInterval: (callback, ms, ...args) => this.#managedTimers.setInterval(callback, ms, ...args),
 			setTimeout: (callback, ms, ...args) => this.#managedTimers.setTimeout(callback, ms, ...args),
 			clearTimer: timer => this.#managedTimers.clear(timer),
+			invokeTool:
+				toolName !== undefined && this.hasNativeTool(toolName)
+					? (params, options) =>
+							this.invokeNativeTool(toolName, params, {
+								signal: options?.signal,
+								onUpdate: options?.onUpdate,
+								depth: depth + 1,
+							})
+					: undefined,
 		};
 	}
 
