@@ -126,4 +126,15 @@ describe("write refuses read-selector misfires", () => {
 		expect(await Bun.file(path.join(dir, target)).text()).toBe("hi");
 		await fs.rm(dir, { recursive: true, force: true });
 	});
+
+	it("keeps an existing literal file whose name looks like a selector list writable", async () => {
+		const dir = await makeWorkspace();
+		const write = new WriteTool(session(dir));
+		const target = "report:1-2;archive:3-4";
+		await Bun.write(path.join(dir, target), "old");
+		const res = await write.execute("c", { path: target, content: "new" });
+		expect(res.isError).toBeUndefined();
+		expect(await Bun.file(path.join(dir, target)).text()).toBe("new");
+		await fs.rm(dir, { recursive: true, force: true });
+	});
 });

@@ -191,7 +191,9 @@ function throwReadSelectorListMisfire(target: string, count: number): never {
 
 async function assertNotReadSelectorMisfire(target: string, content: string, cwd: string): Promise<void> {
 	const listCount = readSelectorListMisfire(target);
-	if (listCount !== undefined) throwReadSelectorListMisfire(target, listCount);
+	if (listCount !== undefined && (await probeLiteralPathExists(target, cwd)) === "missing") {
+		throwReadSelectorListMisfire(target, listCount);
+	}
 	const sel = readSelectorForEmptyWrite(target, content);
 	if (sel === undefined) return;
 	if ((await probeLiteralPathExists(target, cwd)) !== "missing") return;
