@@ -134,6 +134,7 @@ import {
 } from "./sqlite-reader";
 import { ToolAbortError, ToolError, throwIfAborted } from "./tool-errors";
 import { toolResult } from "./tool-result";
+import { xdevDocs, xdevListing } from "./xdev";
 
 // Per-session memo for tree-sitter summaries. `summarizeCode` is a pure function
 // of (code, path, fold settings) but costs ~12-18ms for a ~1500-line file, and a
@@ -906,10 +907,10 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 	 */
 	#resolveInspectImageAvailability(): boolean {
 		const topLevel = this.session.isToolActive?.("inspect_image");
-		const registry = this.session.xdevRegistry;
-		if (topLevel === undefined && registry === undefined) return isInspectImageToolActive(this.session);
+		const xdev = this.session.xdev;
+		if (topLevel === undefined && xdev === undefined) return isInspectImageToolActive(this.session);
 		if (topLevel === true) return true;
-		return registry?.get("inspect_image") !== undefined && isInspectImageToolActive(this.session);
+		return xdev?.mountedNames.has("inspect_image") === true && isInspectImageToolActive(this.session);
 	}
 
 	/**
@@ -3303,9 +3304,9 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				read: async name => {
 					if (name === REPORT_ISSUE_DEVICE_NAME) return reportIssueDeviceUsage();
 					if (name && isResolutionDeviceName(name)) return resolutionDeviceUsage(name);
-					const registry = this.session.xdevRegistry;
-					if (!registry || registry.size === 0) throw new ToolError("xd:// is not mounted in this session.");
-					return name === null ? registry.listing() : registry.docs(name);
+					const xdev = this.session.xdev;
+					if (!xdev) throw new ToolError("xd:// is not mounted in this session.");
+					return name === null ? xdevListing(xdev) : xdevDocs(xdev, name);
 				},
 			},
 		});

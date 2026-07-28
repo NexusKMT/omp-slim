@@ -62,7 +62,7 @@ import { ReadTool } from "./read";
 import type { PlanProposalHandler } from "./resolve";
 import { type TodoPhase, TodoTool } from "./todo";
 import { WriteTool } from "./write";
-import { isMountableUnderXdev, XdevRegistry } from "./xdev";
+import { isMountableUnderXdev, type XdevState } from "./xdev";
 import { YieldTool } from "./yield";
 
 export * from "../edit";
@@ -244,8 +244,10 @@ export interface ToolSession {
 	isToolActive?: (name: string) => boolean;
 	/** Update the active built-in tool predicate when a session changes tools mid-run. */
 	setActiveToolNames?: (names: Iterable<string>) => void;
-	/** Tools mounted under `xd://` (set by createTools when `tools.xdev` is active); read/write consult it at execute time. */
-	xdevRegistry?: XdevRegistry;
+	/** Canonical map containing every registered tool exactly once. */
+	toolRegistry?: Map<string, Tool>;
+	/** `xd://` presentation state backed by {@link toolRegistry}. */
+	xdev?: XdevState;
 	/** Agent registry for IRC routing across live sessions. */
 	agentRegistry?: AgentRegistry;
 	/** Idle→parked→revive lifecycle owner; lets the hub kill a non-job-backed agent registration. Default: AgentLifecycleManager.global(). */
@@ -616,6 +618,10 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 		}),
 	);
 	let tools = baseResults.filter((r): r is Tool => r !== null);
+	const toolRegistry = session.toolRegistry ?? new Map<string, Tool>();
+	session.toolRegistry = toolRegistry;
+	const builtInNames = new Set(tools.map(tool => tool.name));
+	for (const tool of tools) toolRegistry.set(tool.name, tool);
 
 	// Ordinary sessions use xd:// for discoverable built-ins, custom tools, and
 	// MCP tools. Structured children must expose only their host-provided names,
@@ -624,26 +630,26 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 	const xdevEnabled = !restrictToolNames && session.settings.get("tools.xdev");
 	const mountBuiltinTools = requestedTools === undefined;
 	if (xdevEnabled) {
-		const mounted: Tool[] = [];
+		const mountedNames = new Set<string>();
 		const kept: Tool[] = [];
 		for (const tool of tools) {
 			const mountable = mountBuiltinTools && isMountableUnderXdev(tool) && tool.name in BUILTIN_TOOLS;
-			(mountable ? mounted : kept).push(tool);
+			if (mountable) mountedNames.add(tool.name);
+			else kept.push(tool);
 		}
-		session.xdevRegistry = new XdevRegistry(mounted);
+		session.xdev = {
+			tools: toolRegistry,
+			mountedNames,
+			builtInNames,
+			isActive: name => session.isToolActive?.(name) === true,
+		};
 		tools = kept;
-		const finalActiveNames = new Set(tools.map(tool => tool.name));
-		if (session.setActiveToolNames) {
-			session.setActiveToolNames(finalActiveNames);
-		} else {
-			session.isToolActive = name => finalActiveNames.has(name);
-		}
 	}
 	// The xd:// transport rides read/write: `read xd://` lists+documents devices,
 	// `write xd://<tool>` executes them. Staged previews from deferrable tools
 	// (e.g. ast_edit) also resolve through a `write` to xd://resolve/reject. Retain
 	// both whenever any device is mounted or a deferrable tool can stage one.
-	const xdevMounted = (session.xdevRegistry?.size ?? 0) > 0;
+	const xdevMounted = (session.xdev?.mountedNames.size ?? 0) > 0;
 	if (
 		!restrictToolNames &&
 		(tools.some(tool => tool.deferrable === true) || xdevMounted) &&
@@ -651,14 +657,25 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 	) {
 		const writeTool = await logger.time("createTools:write", BUILTIN_TOOLS.write, session);
 		if (writeTool) {
-			tools.push(wrapToolWithMetaNotice(writeTool));
+			const wrapped = wrapToolWithMetaNotice(writeTool);
+			tools.push(wrapped);
+			toolRegistry.set(wrapped.name, wrapped);
+			builtInNames.add(wrapped.name);
 		}
 	}
 	if (!restrictToolNames && xdevMounted && !tools.some(tool => tool.name === "read")) {
 		const readTool = await logger.time("createTools:read", BUILTIN_TOOLS.read, session);
 		if (readTool) {
-			tools.push(wrapToolWithMetaNotice(readTool));
+			const wrapped = wrapToolWithMetaNotice(readTool);
+			tools.push(wrapped);
+			toolRegistry.set(wrapped.name, wrapped);
+			builtInNames.add(wrapped.name);
 		}
+	}
+	if (xdevEnabled) {
+		const finalActiveNames = new Set(tools.map(tool => tool.name));
+		if (session.setActiveToolNames) session.setActiveToolNames(finalActiveNames);
+		else session.isToolActive = name => finalActiveNames.has(name);
 	}
 
 	return tools;

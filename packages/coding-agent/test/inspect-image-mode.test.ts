@@ -121,9 +121,11 @@ describe("read tool follows actual tool availability", () => {
 			...(options.xdevMounted === undefined
 				? {}
 				: {
-						xdevRegistry: {
-							get: (name: string) =>
-								name === "inspect_image" && options.xdevMounted ? { name: "inspect_image" } : undefined,
+						xdev: {
+							tools: new Map(),
+							mountedNames: new Set(options.xdevMounted ? ["inspect_image"] : []),
+							builtInNames: new Set(["inspect_image"]),
+							isActive: () => false,
 						},
 					}),
 		} as unknown as ToolSession;

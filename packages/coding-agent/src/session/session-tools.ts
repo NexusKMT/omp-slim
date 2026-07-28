@@ -21,7 +21,7 @@ import { isMCPToolName, normalizeToolNames } from "../tools/builtin-names";
 import { computerExposureMode } from "../tools/computer/exposure";
 import { wrapToolWithMetaNotice } from "../tools/output-meta";
 import { ToolAbortError, ToolError } from "../tools/tool-errors";
-import { isMountableUnderXdev, type XdevRegistry } from "../tools/xdev";
+import { isMountableUnderXdev, listXdevTools, type XdevState, xdevDocsFor, xdevEntries } from "../tools/xdev";
 import { type EditMode, resolveEditMode } from "../utils/edit-mode";
 import { type InspectImageMode, isInspectImageToolActive } from "../utils/inspect-image-mode";
 import { formatLocalCalendarDate } from "../utils/local-date";
@@ -75,8 +75,7 @@ interface SessionToolsOptions {
 	rebuildSystemPrompt?: (toolNames: string[], tools: Map<string, AgentTool>) => Promise<{ systemPrompt: string[] }>;
 	getLocalCalendarDate?: () => string;
 	getMcpServerInstructions?: () => Map<string, string> | undefined;
-	xdevRegistry?: XdevRegistry;
-	initialMountedXdevToolNames?: string[];
+	xdev?: XdevState;
 	setActiveToolNames?: (names: Iterable<string>) => void;
 	baseSystemPrompt: string[];
 	skills?: Skill[];
@@ -171,8 +170,7 @@ export class SessionTools {
 	#installedVibeToolNames = new Set<string>();
 	#builtInToolNames: Set<string>;
 	#rpcHostToolNames = new Set<string>();
-	#xdevRegistry: XdevRegistry | undefined;
-	#mountedXdevToolNames: Set<string>;
+	#xdev: XdevState | undefined;
 	#pendingXdevMountDelta: { added: Set<string>; removed: Set<string> } | undefined;
 	#presentationPinnedToolNames: ReadonlySet<string> | undefined;
 	#runtimeSelectedToolNames: ReadonlySet<string> | undefined;
@@ -204,8 +202,11 @@ export class SessionTools {
 		this.#rebuildSystemPrompt = options.rebuildSystemPrompt;
 		this.#getLocalCalendarDate = options.getLocalCalendarDate ?? formatLocalCalendarDate;
 		this.#getMcpServerInstructions = options.getMcpServerInstructions;
-		this.#xdevRegistry = options.xdevRegistry;
-		this.#mountedXdevToolNames = new Set(options.initialMountedXdevToolNames ?? []);
+		this.#xdev = options.xdev;
+		if (this.#xdev && this.#xdev.tools !== this.#toolRegistry) {
+			throw new Error("xd:// state must reference the canonical session tool map");
+		}
+		if (this.#xdev) this.#xdev.decorateExecution = tool => this.#wrapToolForAcpPermission(tool);
 		this.#setActiveToolNames = options.setActiveToolNames;
 		this.#baseSystemPrompt = options.baseSystemPrompt;
 		this.#skills = options.skills ?? [];
@@ -250,7 +251,7 @@ export class SessionTools {
 		this.#acpPermissionDecisions.clear();
 	}
 
-	/** Re-wraps active and mounted tools after the ACP client changes. */
+	/** Drops cached ACP decisions and re-wraps active tools after the client changes. */
 	refreshAcpPermissionGates(): void {
 		this.#acpPermissionDecisions.clear();
 		const activeTools = this.getActiveToolNames()
@@ -258,11 +259,6 @@ export class SessionTools {
 			.filter((tool): tool is AgentTool => tool !== undefined)
 			.map(tool => this.#wrapToolForAcpPermission(tool));
 		this.#host.agent.setTools(activeTools);
-		const mountedTools = [...this.#mountedXdevToolNames]
-			.map(name => this.#toolRegistry.get(name))
-			.filter((tool): tool is AgentTool => tool !== undefined)
-			.map(tool => this.#wrapToolForAcpPermission(tool));
-		this.#xdevRegistry?.reconcile(mountedTools);
 	}
 
 	#getActiveNonMCPToolNames(): string[] {
@@ -276,13 +272,14 @@ export class SessionTools {
 
 	/** Enabled top-level and discoverable tool names. */
 	getEnabledToolNames(): string[] {
-		if (this.#mountedXdevToolNames.size === 0) return this.getActiveToolNames();
-		return [...this.getActiveToolNames(), ...this.#mountedXdevToolNames];
+		const mountedNames = this.#xdev?.mountedNames;
+		if (!mountedNames || mountedNames.size === 0) return this.getActiveToolNames();
+		return [...this.getActiveToolNames(), ...mountedNames];
 	}
 
-	/** Names of dynamic tools mounted under `xd://`. */
+	/** Names currently presented as `xd://` devices. */
 	getMountedXdevToolNames(): string[] {
-		return [...this.#mountedXdevToolNames];
+		return [...(this.#xdev?.mountedNames ?? [])];
 	}
 
 	/** Whether the edit tool is registered. */
@@ -555,10 +552,7 @@ export class SessionTools {
 			this.#presentationPinnedToolNames?.has(name) === true || this.#runtimeSelectedToolNames?.has(name) === true;
 		const mountCandidates = selectedTools.filter(
 			({ name, tool }) =>
-				this.#xdevRegistry !== undefined &&
-				xdevReadAvailable &&
-				!isPresentationPinned(name) &&
-				isMountableUnderXdev(tool),
+				this.#xdev !== undefined && xdevReadAvailable && !isPresentationPinned(name) && isMountableUnderXdev(tool),
 		);
 
 		let builtInWriteAvailable = this.#builtInToolNames.has("write");
@@ -569,19 +563,15 @@ export class SessionTools {
 		const mountNames = builtInWriteAvailable ? new Set(mountCandidates.map(({ name }) => name)) : new Set<string>();
 		const tools: AgentTool[] = [];
 		const validToolNames: string[] = [];
-		const mountedTools: AgentTool[] = [];
 		for (const { name, tool } of selectedTools) {
-			if (mountNames.has(name)) {
-				mountedTools.push(this.#wrapToolForAcpPermission(tool));
-			} else {
-				tools.push(this.#wrapToolForAcpPermission(tool));
-				validToolNames.push(name);
-			}
+			if (mountNames.has(name)) continue;
+			tools.push(this.#wrapToolForAcpPermission(tool));
+			validToolNames.push(name);
 		}
 
 		const pinnedWrite = isPresentationPinned("write");
 		const activeDeferrableTool = tools.some(tool => tool.deferrable === true);
-		const transportNeeded = mountedTools.length > 0 || activeDeferrableTool || this.#host.planModeEnabled();
+		const transportNeeded = mountNames.size > 0 || activeDeferrableTool || this.#host.planModeEnabled();
 		if (transportNeeded && !builtInWriteAvailable) {
 			builtInWriteAvailable = (await this.#ensureWriteRegistered?.()) === true;
 			if (builtInWriteAvailable) this.#builtInToolNames.add("write");
@@ -602,14 +592,9 @@ export class SessionTools {
 			if (writeToolIndex >= 0) tools.splice(writeToolIndex, 1);
 		}
 
-		const previousMounted = this.#mountedXdevToolNames;
-		const previousMountedTools = [...previousMounted].flatMap(name => {
-			const tool = this.#xdevRegistry?.get(name);
-			return tool ? [tool] : [];
-		});
+		const previousMounted = new Set(this.#xdev?.mountedNames ?? []);
 		const previousActiveToolNames = this.getActiveToolNames();
-		this.#mountedXdevToolNames = new Set(mountedTools.map(tool => tool.name));
-		this.#xdevRegistry?.reconcile(mountedTools);
+		this.#setMountedNames(mountNames);
 		this.#setActiveToolNames?.(validToolNames);
 
 		let rebuiltSystemPrompt: string[] | undefined;
@@ -624,15 +609,13 @@ export class SessionTools {
 				}
 			}
 		} catch (error) {
-			this.#mountedXdevToolNames = previousMounted;
-			this.#xdevRegistry?.reconcile(previousMountedTools);
+			this.#setMountedNames(previousMounted);
 			this.#setActiveToolNames?.(previousActiveToolNames);
 			throw error;
 		}
 
 		if (this.#host.isDisposed()) {
-			this.#mountedXdevToolNames = previousMounted;
-			this.#xdevRegistry?.reconcile(previousMountedTools);
+			this.#setMountedNames(previousMounted);
 			this.#setActiveToolNames?.(previousActiveToolNames);
 			return;
 		}
@@ -649,6 +632,13 @@ export class SessionTools {
 		}
 	}
 
+	#setMountedNames(names: Iterable<string>): void {
+		const mountedNames = this.#xdev?.mountedNames;
+		if (!mountedNames) return;
+		mountedNames.clear();
+		for (const name of names) mountedNames.add(name);
+	}
+
 	/**
 	 * Record a mid-session `xd://` mount delta for the model. Non-MCP mount
 	 * churn remains notice-only, leaving the system prompt and provider cache
@@ -661,9 +651,8 @@ export class SessionTools {
 	 * Full docs join the system prompt opportunistically on a rebuild.
 	 */
 	#notifyXdevMountDelta(previousMounted: ReadonlySet<string>): void {
-		const registry = this.#xdevRegistry;
-		if (!registry) return;
-		const current = this.#mountedXdevToolNames;
+		const current = this.#xdev?.mountedNames;
+		if (!current) return;
 		const addedNames = [...current].filter(name => !previousMounted.has(name));
 		const removedNames = [...previousMounted].filter(name => !current.has(name));
 		if (addedNames.length === 0 && removedNames.length === 0) return;
@@ -690,14 +679,17 @@ export class SessionTools {
 		const pending = this.#pendingXdevMountDelta;
 		if (!pending) return undefined;
 		this.#pendingXdevMountDelta = undefined;
-		const summaries = new Map(this.#xdevRegistry?.entries().map(entry => [entry.name, entry.summary]) ?? []);
+		const summaries = new Map(this.#xdev ? xdevEntries(this.#xdev).map(entry => [entry.name, entry.summary]) : []);
 		const added = [...pending.added].map(name => ({ name, summary: summaries.get(name) ?? "" }));
 		const removed = [...pending.removed].map(name => ({ name }));
-		const docs = this.#xdevRegistry?.docsFor(
-			pending.added,
-			this.#host.settings.get("tools.xdevDocs"),
-			this.#host.settings.get("tools.xdevInlineDevices"),
-		);
+		const docs = this.#xdev
+			? xdevDocsFor(
+					this.#xdev,
+					pending.added,
+					this.#host.settings.get("tools.xdevDocs"),
+					this.#host.settings.get("tools.xdevInlineDevices"),
+				)
+			: "";
 		return {
 			role: "custom",
 			customType: XDEV_MOUNT_NOTICE_MESSAGE_TYPE,
@@ -739,7 +731,7 @@ export class SessionTools {
 		// selection change should not demote `write` unless it is already active.
 		await this.#applyToolPresentation(
 			normalized,
-			this.#mountedXdevToolNames,
+			this.#xdev?.mountedNames ?? new Set(),
 			this.getActiveToolNames().includes("write"),
 		);
 	}
@@ -748,7 +740,7 @@ export class SessionTools {
 	 * Restore an enabled tool set with its exact top-level versus `xd://` partition.
 	 *
 	 * Both inputs are required because {@link setActiveToolsByName} only receives the
-	 * enabled name list and classifies mounts from the current `#mountedXdevToolNames`.
+	 * enabled name list and classifies mounts from the current presentation set.
 	 * Rollback/restore callers must pass the snapshotted mounted subset so names that
 	 * were top-level stay pinned (`#runtimeSelectedToolNames`) and names that were under
 	 * `xd://` remain mount-eligible, even when the live mount set has drifted.
@@ -1078,7 +1070,7 @@ export class SessionTools {
 			`${tool.name}=${tool.label ?? ""}|${tool.description ?? ""}|${tool.customWireName ?? ""}`;
 		const descriptionSegment = tools.map(describeTool).join("\u0002");
 		const mountedMCPProjection = projectMountedMCPXdevGuidance(
-			collectMountedMCPToolRoutes(this.#xdevRegistry?.list() ?? []),
+			collectMountedMCPToolRoutes(this.#xdev ? listXdevTools(this.#xdev) : []),
 		);
 		const mountedMCPRouteSegment =
 			JSON.stringify({
