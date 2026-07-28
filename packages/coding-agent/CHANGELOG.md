@@ -68,6 +68,9 @@
 ### Fixed
 
 - Fixed `/new` retaining completed or failed async jobs from the prior session in `hub jobs` until the five-minute retention window expired ([#6828](https://github.com/can1357/oh-my-pi/issues/6828)).
+### Fixed
+
+- Fixed `omp update` surfacing a raw `TimeoutError: The operation timed out.` when the 15-minute download deadline fired while streaming the binary body rather than during the initial `fetch()`. The streaming-phase catch now emits the same friendly `Timed out downloading release binary after 15 minutes` message as the connection phase ([#6822](https://github.com/can1357/oh-my-pi/issues/6822)).
 
 ## [17.1.6] - 2026-07-27
 
