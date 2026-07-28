@@ -565,6 +565,47 @@ describe("listClaudePluginRoots", () => {
 		]);
 	});
 
+	test("loads inline manifest mcpServers object and roots relative stdio at plugin root", async () => {
+		const pluginsDir = path.join(tempDir, ".claude", "plugins");
+		const pluginPath = path.join(tempDir, "plugins", "inline-mcp");
+		await fs.mkdir(pluginsDir, { recursive: true });
+		await fs.mkdir(path.join(pluginPath, ".omp-plugin"), { recursive: true });
+		await fs.writeFile(
+			path.join(pluginsDir, "installed_plugins.json"),
+			JSON.stringify({
+				version: 2,
+				plugins: {
+					"inline-mcp@market": [
+						{
+							scope: "user",
+							installPath: pluginPath,
+							version: "1.0.0",
+							installedAt: "2026-07-28T00:00:00Z",
+							lastUpdated: "2026-07-28T00:00:00Z",
+						},
+					],
+				},
+			}),
+		);
+		// Inline object form: the manifest carries the server map directly, and no
+		// root .mcp.json exists, so the pre-fix fallback would register nothing.
+		await fs.writeFile(
+			path.join(pluginPath, ".omp-plugin", "plugin.json"),
+			JSON.stringify({ mcpServers: { local: { command: "./bin/server", args: ["run"] } } }),
+		);
+
+		const result = await loadCapability<MCPServer>(mcpCapability.id, {
+			cwd: tempDir,
+			providers: ["claude-plugins"],
+		});
+
+		expect(result.warnings).toEqual([]);
+		const server = result.all.find(item => item.name === "inline-mcp:local");
+		expect(server).toBeDefined();
+		expect(server?.command).toBe(path.join(pluginPath, "bin", "server"));
+		expect(server?.args).toEqual(["run"]);
+	});
+
 	test("deduplicates a plugin alias of a directly configured MCP connection", async () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const pluginPath = path.join(tempDir, "plugins", "context7");
