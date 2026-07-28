@@ -28,6 +28,9 @@
 ### Fixed
 
 - Fixed legacy extension plugin validation failing with `Export named 'isRetryableAssistantError' not found in module '.../legacy-pi-ai-shim.ts'` when an extension imports `isRetryableAssistantError` from `@earendil-works/pi-ai` / `@oh-my-pi/pi-ai` (e.g. `@router-for-me/pi-cliproxyapi-provider` >= 1.4.9). Historical pi-ai exports this transient-error classifier from its package root, but OMP's legacy `pi-ai` root shim never bridged it; the shim now ships a compatibility implementation matching the upstream provider-error wording tables. ([#6847](https://github.com/can1357/oh-my-pi/issues/6847))
+### Fixed
+
+- Daemon broker: a detached `restart:"always"` daemon in the `restarting` backoff window is no longer re-settled by routine ops (`list`/`logs`/`stop`/`describe`). Previously each op ran `#refreshDetached` → a re-entrant `#settle` that incremented `restartCount` and overwrote the armed `restartTimer`, orphaning the old timer; `stop` cleared only the last timer, so an orphaned timer later fired `#launch` and resurrected the daemon (`stop` reported success but the daemon kept looping). `#settle` now treats `restarting` as already-settled ([#6852](https://github.com/can1357/oh-my-pi/issues/6852)).
 
 ## [17.1.7] - 2026-07-27
 
