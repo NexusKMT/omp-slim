@@ -31,6 +31,9 @@
 ### Fixed
 
 - Daemon broker: a detached `restart:"always"` daemon in the `restarting` backoff window is no longer re-settled by routine ops (`list`/`logs`/`stop`/`describe`). Previously each op ran `#refreshDetached` → a re-entrant `#settle` that incremented `restartCount` and overwrote the armed `restartTimer`, orphaning the old timer; `stop` cleared only the last timer, so an orphaned timer later fired `#launch` and resurrected the daemon (`stop` reported success but the daemon kept looping). `#settle` now treats `restarting` as already-settled ([#6852](https://github.com/can1357/oh-my-pi/issues/6852)).
+### Fixed
+
+- Fixed marketplace plugin MCP discovery ignoring the `mcpServers` manifest field in `.omp-plugin/plugin.json` and `.claude-plugin/plugin.json`; both an inline server-map object and a file-path pointer are now honored (OMP manifest first) before the conventional root `.mcp.json` fallback ([#6871](https://github.com/can1357/oh-my-pi/issues/6871)).
 
 ## [17.1.7] - 2026-07-27
 
