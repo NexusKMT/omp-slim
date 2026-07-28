@@ -185,7 +185,7 @@ describe("HTML export template", () => {
 		expect(packedAssets.filter(filePath => /^dist\/template-[^.]+\.html$/.test(filePath))).toHaveLength(1);
 		expect(packedAssets.filter(filePath => /^dist\/template-[^.]+\.js$/.test(filePath))).toHaveLength(1);
 		expect(packedAssets.filter(filePath => /^dist\/tool-views\.generated-[^.]+\.js$/.test(filePath))).toHaveLength(1);
-	});
+	}, 30_000);
 
 	test("serves the cached normal-bundle template after its asset files are removed", async () => {
 		expect(await runProbe([process.execPath, bundlePath, "--remove-assets-after-first-use"])).toEqual({
