@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Stopped Advisor notes from appending a stale-review-window warning when newer primary turns queue during review; delivered advice now contains only the Advisor's note.
+
 ## [17.1.7] - 2026-07-27
 
 ### Fixed
