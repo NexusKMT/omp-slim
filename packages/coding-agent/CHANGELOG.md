@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed marketplace plugin MCP discovery ignoring `mcpServers` file pointers in `.omp-plugin/plugin.json` and `.claude-plugin/plugin.json`; OMP-specific manifests now take precedence before the conventional root `.mcp.json` fallback ([#6871](https://github.com/can1357/oh-my-pi/issues/6871)).
+
 ## [17.1.7] - 2026-07-27
 
 ### Fixed

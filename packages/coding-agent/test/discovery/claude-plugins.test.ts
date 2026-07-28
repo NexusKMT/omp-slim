@@ -491,6 +491,80 @@ describe("listClaudePluginRoots", () => {
 		}
 	});
 
+	test("uses OMP then Claude manifest mcpServers paths before .mcp.json", async () => {
+		const pluginsDir = path.join(tempDir, ".claude", "plugins");
+		const ompPluginPath = path.join(tempDir, "plugins", "omp-pointer");
+		const claudePluginPath = path.join(tempDir, "plugins", "claude-pointer");
+		await fs.mkdir(pluginsDir, { recursive: true });
+		await Promise.all([
+			fs.mkdir(path.join(ompPluginPath, ".omp-plugin"), { recursive: true }),
+			fs.mkdir(path.join(ompPluginPath, ".claude-plugin"), { recursive: true }),
+			fs.mkdir(path.join(claudePluginPath, ".claude-plugin"), { recursive: true }),
+		]);
+		await fs.writeFile(
+			path.join(pluginsDir, "installed_plugins.json"),
+			JSON.stringify({
+				version: 2,
+				plugins: {
+					"omp-pointer@market": [
+						{
+							scope: "user",
+							installPath: ompPluginPath,
+							version: "1.0.0",
+							installedAt: "2026-07-28T00:00:00Z",
+							lastUpdated: "2026-07-28T00:00:00Z",
+						},
+					],
+					"claude-pointer@market": [
+						{
+							scope: "user",
+							installPath: claudePluginPath,
+							version: "1.0.0",
+							installedAt: "2026-07-28T00:00:00Z",
+							lastUpdated: "2026-07-28T00:00:00Z",
+						},
+					],
+				},
+			}),
+		);
+		await Promise.all([
+			fs.writeFile(
+				path.join(ompPluginPath, ".omp-plugin", "plugin.json"),
+				JSON.stringify({ mcpServers: "./mcp-omp.json" }),
+			),
+			fs.writeFile(
+				path.join(ompPluginPath, ".claude-plugin", "plugin.json"),
+				JSON.stringify({ mcpServers: "./mcp-claude.json" }),
+			),
+			fs.writeFile(path.join(ompPluginPath, "mcp-omp.json"), JSON.stringify({ "from-omp": { command: "omp" } })),
+			fs.writeFile(
+				path.join(ompPluginPath, "mcp-claude.json"),
+				JSON.stringify({ "from-claude": { command: "claude" } }),
+			),
+			fs.writeFile(path.join(ompPluginPath, ".mcp.json"), JSON.stringify({ "from-root": { command: "root" } })),
+			fs.writeFile(
+				path.join(claudePluginPath, ".claude-plugin", "plugin.json"),
+				JSON.stringify({ mcpServers: "./mcp-claude.json" }),
+			),
+			fs.writeFile(
+				path.join(claudePluginPath, "mcp-claude.json"),
+				JSON.stringify({ "from-claude": { command: "claude" } }),
+			),
+			fs.writeFile(path.join(claudePluginPath, ".mcp.json"), JSON.stringify({ "from-root": { command: "root" } })),
+		]);
+
+		const result = await loadCapability<MCPServer>(mcpCapability.id, {
+			cwd: tempDir,
+			providers: ["claude-plugins"],
+		});
+
+		expect(result.warnings).toEqual([]);
+		expect(result.all.map(server => server.name).sort()).toEqual([
+			"claude-pointer:from-claude",
+			"omp-pointer:from-omp",
+		]);
+	});
+
 	test("deduplicates a plugin alias of a directly configured MCP connection", async () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const pluginPath = path.join(tempDir, "plugins", "context7");

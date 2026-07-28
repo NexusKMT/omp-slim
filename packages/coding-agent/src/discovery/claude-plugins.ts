@@ -41,6 +41,11 @@ interface ResolvedPluginDir {
 	warnings: string[];
 }
 
+interface ResolvedMCPConfig {
+	path: string | null;
+	warnings: string[];
+}
+
 async function readPluginManifest(root: ClaudePluginRoot): Promise<ClaudePluginManifest | null> {
 	const manifestPath = path.join(root.path, ".claude-plugin", "plugin.json");
 	const raw = await readFile(manifestPath);
@@ -375,6 +380,35 @@ async function loadTools(ctx: LoadContext): Promise<LoadResult<CustomTool>> {
 // MCP Servers
 // =============================================================================
 
+async function resolvePluginMCPConfig(root: ClaudePluginRoot): Promise<ResolvedMCPConfig> {
+	for (const manifestDir of [".omp-plugin", ".claude-plugin"]) {
+		const manifestPath = path.join(root.path, manifestDir, "plugin.json");
+		const raw = await readFile(manifestPath);
+		if (raw === null) continue;
+
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(raw);
+		} catch {
+			continue;
+		}
+		if (!isRecord(parsed) || typeof parsed.mcpServers !== "string") continue;
+
+		const configured = parsed.mcpServers.trim();
+		if (configured.length === 0) continue;
+		const resolved = path.resolve(root.path, configured);
+		if (!isWithinPluginRoot(root.path, resolved)) {
+			return {
+				path: null,
+				warnings: [`[claude-plugins] Ignoring mcpServers path outside plugin root for ${root.id}: ${configured}`],
+			};
+		}
+		return { path: resolved, warnings: [] };
+	}
+
+	return { path: path.join(root.path, ".mcp.json"), warnings: [] };
+}
+
 async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> {
 	const items: MCPServer[] = [];
 	const warnings: string[] = [];
@@ -383,7 +417,10 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 	warnings.push(...rootWarnings);
 
 	for (const root of roots) {
-		const mcpPath = path.join(root.path, ".mcp.json");
+		const resolved = await resolvePluginMCPConfig(root);
+		warnings.push(...resolved.warnings);
+		if (resolved.path === null) continue;
+		const mcpPath = resolved.path;
 		const raw = await readFile(mcpPath);
 		if (raw === null) continue; // file absent — skip silently
 
@@ -446,7 +483,10 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 			const substitutedCwd = raw.cwd !== undefined ? substitutePluginRoot(raw.cwd, root.path) : undefined;
 			// Root relative command/cwd at the plugin's config directory, not the
 			// session cwd (MCP stdio spawning resolves relative values there).
-			const rooted = resolvePluginStdioPaths({ command: substitutedCommand, cwd: substitutedCwd }, root.path);
+			const rooted = resolvePluginStdioPaths(
+				{ command: substitutedCommand, cwd: substitutedCwd },
+				path.dirname(mcpPath),
+			);
 			const server: MCPServer = {
 				name: namespacedName,
 				...(raw.enabled !== undefined && { enabled: raw.enabled }),
