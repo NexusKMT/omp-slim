@@ -364,4 +364,22 @@ describe("formatSessionHistoryMarkdown", () => {
 		expect(output).toContain("**user**:");
 		expect(output).toContain("→ user-python! print(1) ⇒ ok · 1 line");
 	});
+
+	it("keeps the bare user-prefixed line without a role label outside watched mode", () => {
+		const output = formatSessionHistoryMarkdown([
+			{ role: "assistant", content: [{ type: "text", text: "Recommending cleanup." }], stopReason: "endTurn", timestamp: 1 },
+			{
+				role: "bashExecution",
+				command: "rm -rf .wt/foo",
+				output: "",
+				exitCode: 0,
+				cancelled: false,
+				truncated: false,
+				timestamp: 2,
+			},
+		]);
+		expect(output).toContain("→ user-bash! rm -rf .wt/foo ⇒ ok · 0 lines");
+		expect(output).not.toContain("**user**:");
+		expect(output).toContain("## assistant");
+	});
 });
