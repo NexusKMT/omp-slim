@@ -50,6 +50,8 @@ interface ResolvedMCPConfig {
 	sourcePath: string;
 	/** Directory that relative stdio `command`/`cwd` values resolve against. */
 	baseDir: string;
+	/** True when a plugin manifest named this source, false for the conventional fallback. */
+	declared: boolean;
 	warnings: string[];
 }
 
@@ -428,7 +430,14 @@ async function resolvePluginMCPConfig(root: ClaudePluginRoot): Promise<ResolvedM
 		// Inline object form: the manifest value is the server map itself, rooted
 		// at the plugin directory (Claude's ${CLAUDE_PLUGIN_ROOT} base).
 		if (isRecord(pointer)) {
-			return { path: null, inlineServers: pointer, sourcePath: manifestPath, baseDir: root.path, warnings: [] };
+			return {
+				path: null,
+				inlineServers: pointer,
+				sourcePath: manifestPath,
+				baseDir: root.path,
+				declared: true,
+				warnings: [],
+			};
 		}
 
 		// File-pointer form: resolve the named config file within the plugin root.
@@ -442,6 +451,7 @@ async function resolvePluginMCPConfig(root: ClaudePluginRoot): Promise<ResolvedM
 					inlineServers: null,
 					sourcePath: manifestPath,
 					baseDir: root.path,
+					declared: true,
 					warnings: [`[claude-plugins] Ignoring mcpServers path outside plugin root for ${root.id}: ${configured}`],
 				};
 			}
@@ -450,12 +460,20 @@ async function resolvePluginMCPConfig(root: ClaudePluginRoot): Promise<ResolvedM
 				inlineServers: null,
 				sourcePath: resolved,
 				baseDir: path.dirname(resolved),
+				declared: true,
 				warnings: [],
 			};
 		}
 	}
 
-	return { path: fallback, inlineServers: null, sourcePath: fallback, baseDir: path.dirname(fallback), warnings: [] };
+	return {
+		path: fallback,
+		inlineServers: null,
+		sourcePath: fallback,
+		baseDir: path.dirname(fallback),
+		declared: false,
+		warnings: [],
+	};
 }
 
 async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> {
@@ -474,7 +492,17 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 			servers = resolved.inlineServers;
 		} else if (resolved.path !== null) {
 			const raw = await readFile(resolved.path);
-			if (raw === null) continue; // file absent — skip silently
+			if (raw === null) {
+				// The conventional fallback is optional, but a manifest that names a
+				// missing file is an authoring error that would otherwise register
+				// zero servers with no explanation.
+				if (resolved.declared) {
+					const warning = `[claude-plugins] Missing mcpServers file declared by ${root.id}: ${resolved.path}`;
+					warnings.push(warning);
+					logger.warn(warning);
+				}
+				continue;
+			}
 
 			let parsed: unknown;
 			try {

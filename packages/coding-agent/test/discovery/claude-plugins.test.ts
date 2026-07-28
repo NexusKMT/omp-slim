@@ -606,6 +606,47 @@ describe("listClaudePluginRoots", () => {
 		expect(server?.args).toEqual(["run"]);
 	});
 
+	test("warns when a manifest mcpServers pointer names a missing file", async () => {
+		const pluginsDir = path.join(tempDir, ".claude", "plugins");
+		const pluginPath = path.join(tempDir, "plugins", "broken-pointer");
+		await fs.mkdir(pluginsDir, { recursive: true });
+		await fs.mkdir(path.join(pluginPath, ".omp-plugin"), { recursive: true });
+		await fs.writeFile(
+			path.join(pluginsDir, "installed_plugins.json"),
+			JSON.stringify({
+				version: 2,
+				plugins: {
+					"broken-pointer@market": [
+						{
+							scope: "user",
+							installPath: pluginPath,
+							version: "1.0.0",
+							installedAt: "2026-07-28T00:00:00Z",
+							lastUpdated: "2026-07-28T00:00:00Z",
+						},
+					],
+				},
+			}),
+		);
+		// Pointer names a file the plugin never shipped: discovery must say so
+		// instead of silently registering nothing.
+		await fs.writeFile(
+			path.join(pluginPath, ".omp-plugin", "plugin.json"),
+			JSON.stringify({ mcpServers: "./mcp-omp.json" }),
+		);
+		await fs.writeFile(path.join(pluginPath, ".mcp.json"), JSON.stringify({ "from-root": { command: "root" } }));
+
+		const result = await loadCapability<MCPServer>(mcpCapability.id, {
+			cwd: tempDir,
+			providers: ["claude-plugins"],
+		});
+
+		expect(result.all.map(server => server.name)).toEqual([]);
+		expect(result.warnings).toEqual([
+			`[Claude Code Marketplace] [claude-plugins] Missing mcpServers file declared by broken-pointer@market: ${path.join(pluginPath, "mcp-omp.json")}`,
+		]);
+	});
+
 	test("deduplicates a plugin alias of a directly configured MCP connection", async () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const pluginPath = path.join(tempDir, "plugins", "context7");
