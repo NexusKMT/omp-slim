@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `ctx.invokeTool(params, options?)` to a re-registered built-in's extension context, letting a wrapper run the native tool of the same name instead of reimplementing it, and inheriting the caller's context, abort signal, and progress updates.
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
@@ -158,7 +162,6 @@
 
 - Added the bundled `ts-no-local-is-record` TTSR rule, which catches local `isRecord` function and lambda definitions and directs agents to shared guards plus explicit shape validation.
 - A `tool_call` handler (extension or hook) can now return `input` to revise the arguments a tool executes with, not just `block` it. The returned object is the raw execution input passed to the tool (ignored when `block` is set, and not applied to `computer` tool calls), enabling wrappers that normalize or rewrite a built-in's arguments without reimplementing the tool. For model-issued calls the event fires at arg-prep time in the agent loop, so a revision is revalidated against the tool schema and is what concurrency scheduling, `tool_execution_start`/transcripts, the persisted assistant message, and the approval gate all observe — the user approves exactly what runs, and a revision that changes a tool's functional concurrency (e.g. bash `pty`) schedules correctly. A revised nested `write xd://` device dispatch forfeits the outer write gate's approval and faces the full prompt again ([#6681](https://github.com/can1357/oh-my-pi/pull/6681) by [@psyrendust](https://github.com/psyrendust)).
-- A re-registered built-in tool's `execute` context now carries `ctx.invokeTool(params, options?)`, which runs the native built-in of the same name and returns its result. A tool that wraps a built-in (e.g. re-registering `write` to add logging or a policy check) can delegate to the original instead of reimplementing it: the native tool performs its own side effects and internal bookkeeping. Delegation is same-tool only, so it cannot reach an arbitrary target or escalate past the approval already granted for the call, and the native call is not re-gated. It is present only when a native built-in of that name exists, and delegation depth is guarded against self-recursion.
 - Added a parser for macOS `sample`(1) call-tree reports to the read tool: `*.sample.txt` reads now return a compact bottleneck summary — per-thread hot paths with on-CPU sample counts (blocked syscall time excluded), demangled Rust v0/legacy symbols, flattened direct recursion, merged call-site siblings, idle-thread classification, and a process-wide top-functions-by-self-samples table. `:raw` still reads the original report, and files that merely carry the extension fall back to plain text.
 - Added V8 `.cpuprofile` support to the read tool (Node/Bun `--cpu-prof`, Chrome DevTools, CDP `Profiler.stop` output): reads now return a compact bottleneck summary — hot-path call tree with on-CPU milliseconds (`(idle)` time excluded), collapsed pass-through chains, flattened direct recursion, shortened file URLs, and a top-functions-by-self-time table. `:raw` still reads the original JSON, and files that merely carry the extension fall back to plain text.
 
