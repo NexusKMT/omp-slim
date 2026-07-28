@@ -6,6 +6,7 @@
 import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { Process } from "@oh-my-pi/pi-natives";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { startDaemonBrokerFromEnvironment } from "../../src/launch/broker";
 import { createDaemonBrokerClient, type DaemonBrokerClient } from "../../src/launch/client";
@@ -19,6 +20,20 @@ import {
 function restoreEnv(name: string, value: string | undefined): void {
 	if (value === undefined) delete process.env[name];
 	else process.env[name] = value;
+}
+
+function startBroker(projectDir: string, runtimeDir: string): Promise<void> {
+	const previousProjectDir = process.env[DAEMON_PROJECT_DIR_ENV];
+	const previousRuntimeDir = process.env[DAEMON_RUNTIME_DIR_ENV];
+	const previousGrace = process.env[DAEMON_IDLE_GRACE_ENV];
+	process.env[DAEMON_PROJECT_DIR_ENV] = projectDir;
+	process.env[DAEMON_RUNTIME_DIR_ENV] = runtimeDir;
+	process.env[DAEMON_IDLE_GRACE_ENV] = "5000";
+	const broker = startDaemonBrokerFromEnvironment();
+	restoreEnv(DAEMON_PROJECT_DIR_ENV, previousProjectDir);
+	restoreEnv(DAEMON_RUNTIME_DIR_ENV, previousRuntimeDir);
+	restoreEnv(DAEMON_IDLE_GRACE_ENV, previousGrace);
+	return broker;
 }
 
 async function snapshotOf(client: DaemonBrokerClient, name: string): Promise<DaemonSnapshot> {
@@ -51,18 +66,10 @@ describe("daemon broker restart settling", () => {
 		const runtimeDir = path.join(tempDir.path(), "runtime");
 		await fs.mkdir(projectDir);
 
+		const previousTitle = process.title;
 		// Create the client (writes broker.token) before starting the broker, which reads that token.
 		const client = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
-		const previousProjectDir = process.env[DAEMON_PROJECT_DIR_ENV];
-		const previousRuntimeDir = process.env[DAEMON_RUNTIME_DIR_ENV];
-		const previousGrace = process.env[DAEMON_IDLE_GRACE_ENV];
-		process.env[DAEMON_PROJECT_DIR_ENV] = projectDir;
-		process.env[DAEMON_RUNTIME_DIR_ENV] = runtimeDir;
-		process.env[DAEMON_IDLE_GRACE_ENV] = "5000";
-		const broker = startDaemonBrokerFromEnvironment();
-		restoreEnv(DAEMON_PROJECT_DIR_ENV, previousProjectDir);
-		restoreEnv(DAEMON_RUNTIME_DIR_ENV, previousRuntimeDir);
-		restoreEnv(DAEMON_IDLE_GRACE_ENV, previousGrace);
+		const broker = startBroker(projectDir, runtimeDir);
 		const name = "crash-loop";
 		try {
 			const started = await client.request({
@@ -110,6 +117,79 @@ describe("daemon broker restart settling", () => {
 			await client.request({ op: "shutdown" }).catch(() => undefined);
 			client.close();
 			await broker;
+			process.title = previousTitle;
+		}
+	}, 20_000);
+
+	it("settles a recovered detached daemon once across concurrent refreshes", async () => {
+		using tempDir = TempDir.createSync("@omp-launch-recovered-restart-");
+		const projectDir = path.join(tempDir.path(), "project");
+		const runtimeDir = path.join(tempDir.path(), "runtime");
+		await fs.mkdir(projectDir);
+
+		const previousTitle = process.title;
+		const name = "recovered-crash";
+		let pid: number | undefined;
+
+		const firstClient = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
+		const firstBroker = startBroker(projectDir, runtimeDir);
+		try {
+			const started = await firstClient.request({
+				op: "start",
+				spec: {
+					name,
+					application: process.execPath,
+					args: ["-e", 'Bun.serve({ port: 0, fetch() { return new Response("ok"); } })'],
+					env: {},
+					cwd: projectDir,
+					pty: false,
+					restart: "always",
+					persist: true,
+					detached: true,
+				},
+			});
+			if (started.op !== "start") throw new Error(`unexpected result: ${started.op}`);
+			pid = started.daemon.pid;
+			if (pid === undefined) throw new Error("detached daemon has no pid");
+		} finally {
+			await firstClient.request({ op: "shutdown" }).catch(() => undefined);
+			firstClient.close();
+			await firstBroker;
+		}
+
+		const secondClient = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
+		const secondBroker = startBroker(projectDir, runtimeDir);
+		try {
+			const recovered = await snapshotOf(secondClient, name);
+			expect(recovered.state).toBe("running");
+			expect(recovered.pid).toBe(pid);
+
+			const processRef = Process.fromPid(pid);
+			if (!processRef) throw new Error(`recovered daemon process ${pid} is unavailable`);
+			await processRef.terminate({ group: true, gracefulMs: 0, timeoutMs: 2_000 });
+
+			// Both requests enter #settle before its detached-output read completes. The
+			// post-read guard must let only one continuation settle this generation.
+			const concurrentLists = await Promise.all([
+				secondClient.request({ op: "list" }),
+				secondClient.request({ op: "list" }),
+			]);
+			for (const listed of concurrentLists) {
+				if (listed.op !== "list") throw new Error(`unexpected result: ${listed.op}`);
+				const daemon = listed.daemons.find(entry => entry.name === name);
+				expect(daemon?.state).toBe("restarting");
+				expect(daemon?.restartCount).toBe(1);
+			}
+		} finally {
+			await secondClient.request({ op: "stop", name, timeoutMs: 2_000 }).catch(() => undefined);
+			await secondClient.request({ op: "shutdown" }).catch(() => undefined);
+			secondClient.close();
+			await secondBroker;
+			const processRef = pid === undefined ? null : Process.fromPid(pid);
+			if (processRef?.status() === "running") {
+				await processRef.terminate({ group: true, gracefulMs: 0, timeoutMs: 2_000 });
+			}
+			process.title = previousTitle;
 		}
 	}, 20_000);
 });

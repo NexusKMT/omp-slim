@@ -103,6 +103,10 @@ function terminalState(state: DaemonSnapshot["state"]): boolean {
 	return state === "exited" || state === "failed";
 }
 
+function settledState(state: DaemonSnapshot["state"]): boolean {
+	return terminalState(state) || state === "restarting";
+}
+
 /**
  * Order daemons for the `list` response: non-terminal (active) daemons first,
  * oldest to newest, so the process the user is acting on is immediately visible
@@ -754,7 +758,7 @@ class DaemonBroker {
 	}
 
 	async #refreshDetached(record: ManagedDaemon): Promise<void> {
-		if (!record.spec.detached || terminalState(record.snapshot.state)) return;
+		if (!record.spec.detached || settledState(record.snapshot.state)) return;
 		const generation = record.generation;
 		await this.#readDetachedOutput(record, generation);
 		if (generation !== record.generation || record.process) return;
@@ -795,13 +799,10 @@ class DaemonBroker {
 		// runs #refreshDetached on such a record must not re-settle it: re-entry double-counts
 		// restartCount and overwrites record.restartTimer, orphaning the armed timer so it fires
 		// after stop() and resurrects the daemon (issue #6852).
-		if (
-			generation !== record.generation ||
-			terminalState(record.snapshot.state) ||
-			record.snapshot.state === "restarting"
-		)
-			return;
+		if (generation !== record.generation || settledState(record.snapshot.state)) return;
 		await this.#readDetachedOutput(record, generation);
+		// The output read yields, so a concurrent refresh may settle this generation first.
+		if (generation !== record.generation || settledState(record.snapshot.state)) return;
 		record.process = undefined;
 		record.input = undefined;
 		record.pty = undefined;
