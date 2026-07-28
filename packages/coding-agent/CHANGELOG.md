@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed excluded web search providers remaining visible in the `Web Search Provider Order` settings list ([#6860](https://github.com/can1357/oh-my-pi/issues/6860)).
+
 ## [17.1.7] - 2026-07-27
 
 ### Fixed
