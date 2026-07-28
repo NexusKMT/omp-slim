@@ -165,7 +165,10 @@ function isInternalHubMessageTool(toolName: string, args: unknown): boolean {
 		case "send":
 			return typeof Reflect.get(hubArgs, "to") === "string";
 		case "wait":
-			return typeof Reflect.get(hubArgs, "name") !== "string";
+			// A bare wait or an `ids` wait settles on background-job delivery,
+			// whose snapshot IS the job result (hub.md) — keep those visible.
+			// Only a peer-scoped wait (`from`, no jobs) is internal messaging.
+			return typeof Reflect.get(hubArgs, "from") === "string" && Reflect.get(hubArgs, "ids") === undefined;
 		default:
 			return false;
 	}

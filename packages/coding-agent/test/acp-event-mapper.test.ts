@@ -302,6 +302,61 @@ describe("ACP event mapper", () => {
 		);
 	});
 
+	it("keeps background job-wait results visible over ACP", () => {
+		const events = [
+			{
+				type: "tool_execution_start",
+				toolCallId: "tc-hub-job-wait",
+				toolName: "hub",
+				args: { op: "wait", ids: ["bash_a1b2c3"] },
+			},
+			{
+				type: "tool_execution_end",
+				toolCallId: "tc-hub-job-wait",
+				toolName: "hub",
+				isError: false,
+				result: { content: [{ type: "text", text: "job output" }] },
+			},
+		] satisfies AgentSessionEvent[];
+
+		const updates = events.flatMap(event =>
+			mapAgentSessionEventToAcpSessionUpdates(event, "session-1", {
+				getToolArgs: () => ({ op: "wait", ids: ["bash_a1b2c3"] }),
+			}),
+		);
+
+		expect(updates.map(update => update.update.sessionUpdate)).toEqual(["tool_call", "tool_call_update"]);
+	});
+
+	it("keeps a bare Hub wait visible so job deliveries reach ACP", () => {
+		const updates = mapAgentSessionEventToAcpSessionUpdates(
+			{
+				type: "tool_execution_start",
+				toolCallId: "tc-hub-bare-wait",
+				toolName: "hub",
+				args: { op: "wait" },
+			},
+			"session-1",
+		);
+
+		expect(updates).toHaveLength(1);
+		expect(updates[0]?.update.sessionUpdate).toBe("tool_call");
+	});
+
+	it("hides a peer-scoped Hub wait from ACP", () => {
+		const updates = mapAgentSessionEventToAcpSessionUpdates(
+			{
+				type: "tool_execution_start",
+				toolCallId: "tc-hub-peer-wait",
+				toolName: "hub",
+				args: { op: "wait", from: "Scout" },
+			},
+			"session-1",
+		);
+
+		expect(updates).toEqual([]);
+	});
+
 	it("uses command text for a new command tool even when intent is generic", () => {
 		const updates = mapAgentSessionEventToAcpSessionUpdates(
 			{
