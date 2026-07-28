@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `calculateCost` under-reporting cache-write cost by a factor of 1.6 on the default first-party Anthropic path: writes were priced at the catalog's 5-minute rate (`cost.cacheWrite`, 1.25x base input) even though omp defaults to 1-hour retention, which Anthropic bills at 2x base input. The already-parsed `usage.cttl` breakdown is now honored — 5m tokens price at `cost.cacheWrite`, 1h tokens at `input * 2`, mixed writes per component — while providers that report no `cttl` keep the flat-rate calculation ([#6876](https://github.com/can1357/oh-my-pi/issues/6876)).
+
 ## [17.1.7] - 2026-07-27
 
 ### Added
