@@ -59,10 +59,8 @@ function usageReport(percent: number): unknown[] {
 }
 
 interface CodexUsageState {
-	fiveHourPercent: number;
-	fiveHourResetMinutes: number;
 	sevenDayPercent: number;
-	sevenDayResetHours: number;
+	sevenDayResetAt: number;
 	savedResets?: number;
 }
 
@@ -76,24 +74,13 @@ function codexUsageReport(state: CodexUsageState): unknown[] {
 			...(state.savedResets === undefined ? {} : { resetCredits: { availableCount: state.savedResets } }),
 			limits: [
 				{
-					id: "openai-codex:primary",
-					label: "Codex 5 Hour",
-					scope: { provider: "openai-codex", accountId, windowId: "5h" },
-					window: {
-						id: "5h",
-						label: "5h",
-						resetsAt: Date.now() + state.fiveHourResetMinutes * 60_000,
-					},
-					amount: { unit: "percent", usedFraction: state.fiveHourPercent / 100 },
-				},
-				{
 					id: "openai-codex:secondary",
 					label: "Codex 7 Day",
 					scope: { provider: "openai-codex", accountId, windowId: "7d" },
 					window: {
 						id: "7d",
 						label: "7d",
-						resetsAt: Date.now() + state.sevenDayResetHours * 3_600_000,
+						resetsAt: state.sevenDayResetAt,
 					},
 					amount: { unit: "percent", usedFraction: state.sevenDayPercent / 100 },
 				},
@@ -273,11 +260,10 @@ describe("StatusLineComponent usage refresh", () => {
 	});
 
 	it("keeps reset fireworks opt-in while advancing the disabled baseline", async () => {
+		const sevenDayResetAt = Date.now() + 80 * 3_600_000;
 		let state: CodexUsageState = {
-			fiveHourPercent: 42,
-			fiveHourResetMinutes: 1,
-			sevenDayPercent: 18,
-			sevenDayResetHours: 80,
+			sevenDayPercent: 42,
+			sevenDayResetAt,
 			savedResets: 0,
 		};
 		const component = new StatusLineComponent(makeCodexSession(async () => codexUsageReport(state)));
@@ -287,10 +273,8 @@ describe("StatusLineComponent usage refresh", () => {
 		expect(Settings.instance.get("tui.codexResetFireworks")).toBe(false);
 		await refreshUsage(component);
 		state = {
-			fiveHourPercent: 0,
-			fiveHourResetMinutes: 300,
-			sevenDayPercent: 18.2,
-			sevenDayResetHours: 80,
+			sevenDayPercent: 0,
+			sevenDayResetAt,
 			savedResets: 0,
 		};
 		await refreshUsage(component, 5 * 60_000);
@@ -298,13 +282,12 @@ describe("StatusLineComponent usage refresh", () => {
 		component.dispose();
 	});
 
-	it("emits distinct enabled events for a 5-hour reset and a newly banked reset", async () => {
+	it("emits distinct enabled events for an unscheduled weekly reset and a newly banked reset", async () => {
 		Settings.instance.set("tui.codexResetFireworks", true);
+		const sevenDayResetAt = Date.now() + 80 * 3_600_000;
 		let state: CodexUsageState = {
-			fiveHourPercent: 42,
-			fiveHourResetMinutes: 1,
-			sevenDayPercent: 18,
-			sevenDayResetHours: 80,
+			sevenDayPercent: 42,
+			sevenDayResetAt,
 			savedResets: 0,
 		};
 		const component = new StatusLineComponent(makeCodexSession(async () => codexUsageReport(state)));
@@ -314,41 +297,37 @@ describe("StatusLineComponent usage refresh", () => {
 		await refreshUsage(component);
 		expect(events).toEqual([]);
 		state = {
-			fiveHourPercent: 0,
-			fiveHourResetMinutes: 300,
-			sevenDayPercent: 18.2,
-			sevenDayResetHours: 80,
+			sevenDayPercent: 0,
+			sevenDayResetAt,
 			savedResets: 0,
 		};
 		await refreshUsage(component, 5 * 60_000);
 		state = {
-			fiveHourPercent: 25,
-			fiveHourResetMinutes: 1,
-			sevenDayPercent: 18.4,
-			sevenDayResetHours: 80,
+			sevenDayPercent: 25,
+			sevenDayResetAt,
 			savedResets: 0,
 		};
 		await refreshUsage(component, 5 * 60_000);
 		state = {
-			fiveHourPercent: 0,
-			fiveHourResetMinutes: 300,
-			sevenDayPercent: 18.6,
-			sevenDayResetHours: 80,
+			sevenDayPercent: 25.2,
+			sevenDayResetAt,
 			savedResets: 1,
 		};
 		await refreshUsage(component, 5 * 60_000);
 
-		expect(events).toEqual([{ kind: "usage-window-reset" }, { kind: "saved-reset-banked", added: 1, available: 1 }]);
+		expect(events).toEqual([
+			{ kind: "unscheduled-weekly-reset" },
+			{ kind: "saved-reset-banked", added: 1, available: 1 },
+		]);
 		component.dispose();
 	});
 
 	it("keeps an unavailable saved-reset count unknown across refreshes", async () => {
 		Settings.instance.set("tui.codexResetFireworks", true);
+		const sevenDayResetAt = Date.now() + 80 * 3_600_000;
 		let state: CodexUsageState = {
-			fiveHourPercent: 25,
-			fiveHourResetMinutes: 300,
 			sevenDayPercent: 18,
-			sevenDayResetHours: 80,
+			sevenDayResetAt,
 			savedResets: 1,
 		};
 		const component = new StatusLineComponent(makeCodexSession(async () => codexUsageReport(state)));
@@ -357,10 +336,8 @@ describe("StatusLineComponent usage refresh", () => {
 
 		await refreshUsage(component);
 		state = {
-			fiveHourPercent: 25,
-			fiveHourResetMinutes: 295,
 			sevenDayPercent: 18.1,
-			sevenDayResetHours: 80,
+			sevenDayResetAt,
 		};
 		await refreshUsage(component, 5 * 60_000);
 		state = { ...state, savedResets: 1 };
@@ -373,11 +350,10 @@ describe("StatusLineComponent usage refresh", () => {
 	it("discards a timed-out report after a newer refresh applies", async () => {
 		Settings.instance.set("tui.codexResetFireworks", true);
 		const stale = Promise.withResolvers<unknown>();
+		const sevenDayResetAt = Date.now() + 80 * 3_600_000;
 		const current: CodexUsageState = {
-			fiveHourPercent: 0,
-			fiveHourResetMinutes: 300,
-			sevenDayPercent: 18.2,
-			sevenDayResetHours: 80,
+			sevenDayPercent: 0,
+			sevenDayResetAt,
 			savedResets: 0,
 		};
 		let calls = 0;
@@ -400,10 +376,8 @@ describe("StatusLineComponent usage refresh", () => {
 
 		stale.resolve(
 			codexUsageReport({
-				fiveHourPercent: 42,
-				fiveHourResetMinutes: 1,
-				sevenDayPercent: 18,
-				sevenDayResetHours: 80,
+				sevenDayPercent: 42,
+				sevenDayResetAt,
 				savedResets: 1,
 			}),
 		);

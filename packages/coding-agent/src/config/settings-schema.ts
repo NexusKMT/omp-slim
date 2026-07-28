@@ -935,7 +935,7 @@ export const SETTINGS_SCHEMA = {
 			group: "Display",
 			label: "Codex Reset Fireworks",
 			description:
-				"Celebrate Codex 5-hour usage resets and newly banked saved resets with a top-third fireworks overlay that remains until Escape",
+				"Celebrate unscheduled Codex weekly usage resets and newly banked saved resets with a top-third fireworks overlay that remains until Escape",
 		},
 	},
 

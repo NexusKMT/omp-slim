@@ -84,53 +84,53 @@ describe("Codex reset fireworks", () => {
 		vi.useRealTimers();
 	});
 
-	it("detects a 5-hour reset and prioritizes newly banked resets", () => {
+	it("detects an unscheduled weekly reset and prioritizes newly banked resets", () => {
 		const previous = {
-			fiveHour: { percent: 42, resetMinutes: 1 },
-			sevenDay: { percent: 18, resetHours: 80 },
+			observedAt: 1_000,
+			sevenDay: { percent: 42, resetsAt: 10_000 },
 			savedResets: 0,
 		};
 		expect(
 			detectCodexResetFireworks(previous, {
-				fiveHour: { percent: 0, resetMinutes: 300 },
-				sevenDay: { percent: 18.2, resetHours: 80 },
+				observedAt: 2_000,
+				sevenDay: { percent: 0, resetsAt: 10_000 },
 				savedResets: 0,
 			}),
-		).toEqual({ kind: "usage-window-reset" });
+		).toEqual({ kind: "unscheduled-weekly-reset" });
 		expect(
 			detectCodexResetFireworks(previous, {
-				fiveHour: { percent: 0, resetMinutes: 300 },
-				sevenDay: { percent: 18.2, resetHours: 80 },
+				observedAt: 2_000,
+				sevenDay: { percent: 0, resetsAt: 10_000 },
 				savedResets: 2,
 			}),
 		).toEqual({ kind: "saved-reset-banked", added: 2, available: 2 });
 	});
 
-	it("suppresses a 5-hour transition when only the weekly countdown restarts", () => {
+	it("suppresses a weekly transition observed at its scheduled reset deadline", () => {
 		expect(
 			detectCodexResetFireworks(
 				{
-					fiveHour: { percent: 42, resetMinutes: 1 },
-					sevenDay: { percent: 18, resetHours: 80 },
+					observedAt: 1_000,
+					sevenDay: { percent: 42, resetsAt: 2_000 },
 				},
 				{
-					fiveHour: { percent: 0, resetMinutes: 300 },
-					sevenDay: { percent: 18.2, resetHours: 168 },
+					observedAt: 2_000,
+					sevenDay: { percent: 0, resetsAt: 10_000 },
 				},
 			),
 		).toBeUndefined();
 	});
 
-	it("suppresses a 5-hour transition when only weekly usage drops", () => {
+	it("requires the prior weekly reset deadline to establish that a reset was unscheduled", () => {
 		expect(
 			detectCodexResetFireworks(
 				{
-					fiveHour: { percent: 42, resetMinutes: 1 },
-					sevenDay: { percent: 18, resetHours: 80 },
+					observedAt: 1_000,
+					sevenDay: { percent: 42 },
 				},
 				{
-					fiveHour: { percent: 0, resetMinutes: 300 },
-					sevenDay: { percent: 0, resetHours: 80 },
+					observedAt: 2_000,
+					sevenDay: { percent: 0 },
 				},
 			),
 		).toBeUndefined();
@@ -139,7 +139,7 @@ describe("Codex reset fireworks", () => {
 	it("renders distinct copy for usage-window and saved-reset celebrations", () => {
 		const usage = makeHost();
 		const usageController = new CodexResetFireworksController(usage.host);
-		usageController.show({ kind: "usage-window-reset" });
+		usageController.show({ kind: "unscheduled-weekly-reset" });
 		const usageText = usage.shown[0]?.render(80).map(stripVTControlCharacters).join("\n") ?? "";
 
 		const saved = makeHost();
@@ -147,11 +147,11 @@ describe("Codex reset fireworks", () => {
 		savedController.show({ kind: "saved-reset-banked", added: 1, available: 3 });
 		const savedText = saved.shown[0]?.render(80).map(stripVTControlCharacters).join("\n") ?? "";
 
-		expect(usageText).toContain("C O D E X   R E S E T");
-		expect(usageText).toContain("5-hour window: 0% used");
+		expect(usageText).toContain("O P E N A I   R E S E T");
+		expect(usageText).toContain("Weekly usage cleared early");
 		expect(savedText).toContain("S A V E D   R E S E T");
 		expect(savedText).toContain("New reset banked · 3 available");
-		expect(savedText).not.toContain("5-hour window");
+		expect(savedText).not.toContain("Weekly usage cleared early");
 
 		usageController.dispose();
 		savedController.dispose();
@@ -160,7 +160,7 @@ describe("Codex reset fireworks", () => {
 	it("holds a top-third modal until Escape and ignores overlapping celebrations", async () => {
 		const fake = makeHost(24);
 		const controller = new CodexResetFireworksController(fake.host);
-		expect(controller.show({ kind: "usage-window-reset" })).toBe(true);
+		expect(controller.show({ kind: "unscheduled-weekly-reset" })).toBe(true);
 		expect(controller.show({ kind: "saved-reset-banked", added: 1, available: 1 })).toBe(false);
 		expect(fake.shown).toHaveLength(1);
 		expect(fake.focused).toEqual(fake.shown);

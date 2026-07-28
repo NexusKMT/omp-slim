@@ -330,9 +330,10 @@ export class StatusLineComponent implements Component {
 
 	// Provider usage caching (5-min TTL, OAuth/sub only)
 	#cachedUsage: {
+		observedAt: number;
 		tier?: string;
 		fiveHour?: { percent: number; resetMinutes?: number };
-		sevenDay?: { percent: number; resetHours?: number };
+		sevenDay?: { percent: number; resetHours?: number; resetsAt?: number };
 		savedResets?: number;
 	} | null = null;
 	#cachedUsageContextKey: string | null = null;
@@ -1079,18 +1080,20 @@ export class StatusLineComponent implements Component {
 		activeProvider?: string,
 		activeIdentity?: OAuthAccountIdentity,
 	): {
+		observedAt: number;
 		tier?: string;
 		fiveHour?: { percent: number; resetMinutes?: number };
-		sevenDay?: { percent: number; resetHours?: number };
+		sevenDay?: { percent: number; resetHours?: number; resetsAt?: number };
 		savedResets?: number;
 	} | null {
 		if (!Array.isArray(reports)) return null;
 		let fiveHour: { percent: number; resetMinutes?: number } | undefined;
-		let sevenDay: { percent: number; resetHours?: number } | undefined;
+		let sevenDay: { percent: number; resetHours?: number; resetsAt?: number } | undefined;
 		let savedResets: number | undefined;
 		let fiveHourTier: string | undefined;
 		let sevenDayTier: string | undefined;
 		const now = Date.now();
+		let observedAt = now;
 		for (const report of reports) {
 			if (!report || typeof report !== "object") continue;
 			const provider = (report as { provider?: unknown }).provider;
@@ -1099,6 +1102,7 @@ export class StatusLineComponent implements Component {
 			if (!Array.isArray(limits)) continue;
 			const usageReport = report as UsageReport;
 			if (provider === "openai-codex" && reportMatchesActiveAccount(usageReport, activeIdentity)) {
+				if (Number.isFinite(usageReport.fetchedAt)) observedAt = usageReport.fetchedAt;
 				const availableCount = usageReport.resetCredits?.availableCount;
 				if (typeof availableCount === "number" && Number.isFinite(availableCount)) {
 					savedResets = Math.max(0, Math.trunc(availableCount));
@@ -1134,6 +1138,7 @@ export class StatusLineComponent implements Component {
 						percent: fraction * 100,
 						resetHours:
 							typeof resetsAt === "number" ? Math.max(0, Math.round((resetsAt - now) / 3_600_000)) : undefined,
+						resetsAt: typeof resetsAt === "number" ? resetsAt : undefined,
 					};
 					sevenDayTier = tier || undefined;
 				}
@@ -1142,7 +1147,7 @@ export class StatusLineComponent implements Component {
 		if (!fiveHour && !sevenDay && savedResets === undefined) return null;
 		// Single compact label; prefer the five-hour tier if displayed windows ever disagree.
 		const effectiveTier = fiveHourTier ?? sevenDayTier;
-		return { tier: effectiveTier, fiveHour, sevenDay, savedResets };
+		return { observedAt, tier: effectiveTier, fiveHour, sevenDay, savedResets };
 	}
 
 	/**

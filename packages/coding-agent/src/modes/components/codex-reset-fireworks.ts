@@ -3,7 +3,6 @@ import { type ThemeColor, theme } from "../theme/theme";
 
 const FRAME_INTERVAL_MS = 85;
 const FRAME_COUNT = 34;
-const WEEKLY_COUNTDOWN_RESTART_HOURS = 12;
 
 const FIREWORK_THEME_COLORS = {
 	cyan: "mdLink",
@@ -17,23 +16,18 @@ const FIREWORK_THEME_COLORS = {
 
 type FireworkColor = keyof typeof FIREWORK_THEME_COLORS;
 
-/** A Codex usage window retained between status refreshes for reset detection. */
-export interface CodexUsageWindowSnapshot {
-	percent: number;
-	resetMinutes?: number;
-	resetHours?: number;
-}
-
 /** The active Codex account fields retained between status refreshes. */
 export interface CodexResetUsageSnapshot {
-	fiveHour?: CodexUsageWindowSnapshot;
-	sevenDay?: CodexUsageWindowSnapshot;
+	/** When this usage report was observed. */
+	observedAt: number;
+	/** Weekly usage and its previously scheduled reset deadline. */
+	sevenDay?: { percent: number; resetsAt?: number };
 	savedResets?: number;
 }
 
 /** A detected Codex quota event that can trigger the fireworks presentation. */
 export type CodexResetFireworksEvent =
-	| { kind: "usage-window-reset" }
+	| { kind: "unscheduled-weekly-reset" }
 	| { kind: "saved-reset-banked"; added: number; available: number };
 
 interface CanvasCell {
@@ -74,8 +68,9 @@ const BURSTS: readonly FireworkBurst[] = [
 
 /**
  * Compare consecutive reports for one Codex account. A saved-reset grant takes
- * precedence when both changes arrive in the same report because it carries
- * the more specific celebration copy.
+ * precedence when both changes arrive in the same report. Weekly usage is only
+ * celebrated when it visibly falls from non-zero to zero before its previously
+ * scheduled reset deadline.
  */
 export function detectCodexResetFireworks(
 	previous: CodexResetUsageSnapshot,
@@ -93,18 +88,21 @@ export function detectCodexResetFireworks(
 		};
 	}
 
-	if (!previous.fiveHour || !current.fiveHour || !previous.sevenDay || !current.sevenDay) return undefined;
-	const previousFiveHourPercent = Math.round(Math.max(0, Math.min(100, previous.fiveHour.percent)));
-	const currentFiveHourPercent = Math.round(Math.max(0, Math.min(100, current.fiveHour.percent)));
-	if (previousFiveHourPercent === 0 || currentFiveHourPercent !== 0) return undefined;
+	if (!previous.sevenDay || !current.sevenDay) return undefined;
+	const previousWeeklyPercent = Math.round(Math.max(0, Math.min(100, previous.sevenDay.percent)));
+	const currentWeeklyPercent = Math.round(Math.max(0, Math.min(100, current.sevenDay.percent)));
+	if (previousWeeklyPercent === 0 || currentWeeklyPercent !== 0) return undefined;
 
-	const weeklyCountdownRestarted =
-		previous.sevenDay.resetHours !== undefined &&
-		current.sevenDay.resetHours !== undefined &&
-		current.sevenDay.resetHours - previous.sevenDay.resetHours >= WEEKLY_COUNTDOWN_RESTART_HOURS;
-	const weeklyUsageDropped = current.sevenDay.percent + 0.01 < previous.sevenDay.percent;
-	if (weeklyCountdownRestarted || weeklyUsageDropped) return undefined;
-	return { kind: "usage-window-reset" };
+	const scheduledResetAt = previous.sevenDay.resetsAt;
+	if (
+		scheduledResetAt === undefined ||
+		!Number.isFinite(scheduledResetAt) ||
+		!Number.isFinite(current.observedAt) ||
+		current.observedAt >= scheduledResetAt
+	) {
+		return undefined;
+	}
+	return { kind: "unscheduled-weekly-reset" };
 }
 
 function setCell(
@@ -154,10 +152,11 @@ function drawBanner(
 	const panelLeft = left + Math.floor((artWidth - panelWidth) / 2);
 	const top = height - 3;
 	const innerWidth = panelWidth - 2;
-	const titleText = event.kind === "usage-window-reset" ? " C O D E X   R E S E T " : " S A V E D   R E S E T ";
+	const titleText =
+		event.kind === "unscheduled-weekly-reset" ? " O P E N A I   R E S E T " : " S A V E D   R E S E T ";
 	const subtitleText =
-		event.kind === "usage-window-reset"
-			? "5-hour window: 0% used · ESC to return"
+		event.kind === "unscheduled-weekly-reset"
+			? "Weekly usage cleared early · ESC to return"
 			: event.added === 1
 				? `New reset banked · ${event.available} available · ESC to return`
 				: `${event.added} resets banked · ${event.available} available · ESC to return`;
