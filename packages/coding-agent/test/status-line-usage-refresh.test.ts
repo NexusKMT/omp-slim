@@ -300,7 +300,7 @@ describe("StatusLineComponent usage refresh", () => {
 		await refreshUsage(component);
 		expect(events).toEqual([]);
 		state = {
-			sevenDayPercent: 0,
+			sevenDayPercent: 2,
 			sevenDayResetAt,
 			savedResets: 0,
 		};

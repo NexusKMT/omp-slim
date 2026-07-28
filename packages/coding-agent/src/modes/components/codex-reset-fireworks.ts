@@ -68,30 +68,30 @@ const BURSTS: readonly FireworkBurst[] = [
 
 /**
  * Compare consecutive reports for one Codex account. A saved-reset grant takes
- * precedence when both changes arrive in the same report. Weekly usage is only
- * celebrated when it visibly falls from non-zero to zero before its previously
+ * precedence when both changes arrive in the same report, while a verified
+ * saved-reset decrease suppresses the weekly event because the user redeemed a
+ * credit. Other weekly usage drops are celebrated only before the previously
  * scheduled reset deadline.
  */
 export function detectCodexResetFireworks(
 	previous: CodexResetUsageSnapshot,
 	current: CodexResetUsageSnapshot,
 ): CodexResetFireworksEvent | undefined {
-	if (
-		previous.savedResets !== undefined &&
-		current.savedResets !== undefined &&
-		current.savedResets > previous.savedResets
-	) {
-		return {
-			kind: "saved-reset-banked",
-			added: current.savedResets - previous.savedResets,
-			available: current.savedResets,
-		};
+	if (previous.savedResets !== undefined && current.savedResets !== undefined) {
+		if (current.savedResets > previous.savedResets) {
+			return {
+				kind: "saved-reset-banked",
+				added: current.savedResets - previous.savedResets,
+				available: current.savedResets,
+			};
+		}
+		if (current.savedResets < previous.savedResets) return undefined;
 	}
 
 	if (!previous.sevenDay || !current.sevenDay) return undefined;
 	const previousWeeklyPercent = Math.round(Math.max(0, Math.min(100, previous.sevenDay.percent)));
 	const currentWeeklyPercent = Math.round(Math.max(0, Math.min(100, current.sevenDay.percent)));
-	if (previousWeeklyPercent === 0 || currentWeeklyPercent !== 0) return undefined;
+	if (previousWeeklyPercent === 0 || currentWeeklyPercent >= previousWeeklyPercent) return undefined;
 
 	const scheduledResetAt = previous.sevenDay.resetsAt;
 	if (

@@ -93,7 +93,7 @@ describe("Codex reset fireworks", () => {
 		expect(
 			detectCodexResetFireworks(previous, {
 				observedAt: 2_000,
-				sevenDay: { percent: 0, resetsAt: 10_000 },
+				sevenDay: { percent: 2, resetsAt: 10_000 },
 				savedResets: 0,
 			}),
 		).toEqual({ kind: "unscheduled-weekly-reset" });
@@ -104,6 +104,22 @@ describe("Codex reset fireworks", () => {
 				savedResets: 2,
 			}),
 		).toEqual({ kind: "saved-reset-banked", added: 2, available: 2 });
+	});
+	it("suppresses an early weekly drop when a saved reset was redeemed", () => {
+		expect(
+			detectCodexResetFireworks(
+				{
+					observedAt: 1_000,
+					sevenDay: { percent: 42, resetsAt: 10_000 },
+					savedResets: 1,
+				},
+				{
+					observedAt: 2_000,
+					sevenDay: { percent: 0, resetsAt: 10_000 },
+					savedResets: 0,
+				},
+			),
+		).toBeUndefined();
 	});
 
 	it("suppresses a weekly transition observed at its scheduled reset deadline", () => {
