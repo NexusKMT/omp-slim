@@ -410,7 +410,10 @@ fn fill_repeat_bands_rgb(pixels: &mut [u8], width: usize, height: usize, grid: &
 		for copy in 1..grid.repeat {
 			let band_top = (row * grid.repeat + copy) * grid.cell_h;
 			for y in band_top..(band_top + grid.cell_h).min(height) {
-				for px in pixels[y * width * 3..(y + 1) * width * 3].as_chunks_mut::<3>().0 {
+				for px in pixels[y * width * 3..(y + 1) * width * 3]
+					.as_chunks_mut::<3>()
+					.0
+				{
 					px.copy_from_slice(&band);
 				}
 			}
