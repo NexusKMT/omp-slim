@@ -13,6 +13,9 @@
 ### Fixed
 
 - Stopped Advisor notes from appending a stale-review-window warning when newer primary turns queue during review; delivered advice now contains only the Advisor's note.
+### Fixed
+
+- Fixed bordered output blocks reserving left padding without matching right padding, including web-search result panels.
 
 ## [17.1.7] - 2026-07-27
 
@@ -44,10 +47,6 @@
 ### Fixed
 
 - Fixed agent shell commands inheriting variables silently loaded from the launch directory's `.env`; OMP can still use project dotenv values for its own configuration, while commands receive only the parent environment and explicit tool overrides ([#6813](https://github.com/can1357/oh-my-pi/issues/6813)).
-
-### Fixed
-
-- Fixed bordered output blocks reserving left padding without matching right padding, including web-search result panels.
 
 ## [17.1.6] - 2026-07-27
 
