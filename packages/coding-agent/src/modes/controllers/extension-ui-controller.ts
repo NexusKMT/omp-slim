@@ -532,6 +532,7 @@ export class ExtensionUiController {
 					await registeredTool.definition.onSession(event, {
 						...runner!.createContext(),
 						ui: uiContext,
+
 						hasUI: true,
 						compact: instructionsOrOptions => this.#compactSession(instructionsOrOptions),
 					});

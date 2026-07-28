@@ -2513,6 +2513,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			() => (hasSession ? createSessionMemoryRuntimeContext(session, agentDir, cwd) : undefined),
 			settings,
 			localProtocolOptions,
+			() => (hasSession ? session.getAsyncJobSnapshot() : null),
 		);
 
 		credentialDisabledTarget = extensionRunner;
