@@ -38,6 +38,9 @@
 - `xd://` device docs now render the parameter schema as a comment-annotated TypeScript type (via `jsonSchemaToTypeScript`, the same renderer the in-band tool inventory uses) instead of a raw JSON Schema dump, shrinking system-prompt device sections while keeping descriptions inline.
 - Added a `/vision [on|off|auto|status]` slash command for session-scoped control of the `inspect_image` vision-delegation tool, modeled on `/computer`: `on`/`off` force the tool for the current session only, `auto` returns to the persisted setting, and `status` reports the effective mode, session override, tool state, and active-model image capability.
 - Replaced the `inspect_image.enabled` boolean with the tri-state `inspect_image.mode` (`auto`|`on`|`off`, default `auto`). In `auto` the tool is registered only when the active model lacks native image input, so vision-capable models (e.g. `kimi-code/k3`) read images inline with their own capabilities instead of delegating to a separate vision model; the tool set is re-evaluated on every model switch with a status notice when it flips. The `read` tool now follows the effective state dynamically rather than the raw setting, so it returns decoded image blocks again whenever `inspect_image` is hidden. Existing `inspect_image.enabled: true/false` configs migrate to `inspect_image.mode: on/off`.
+### Fixed
+
+- Fixed `omp` showing up as `bun` in `ps`/`pgrep`/`killall`/`top` on Linux: `process.title = "omp"` is a JS-level no-op under Bun (it never calls `prctl(PR_SET_NAME)`), so the kernel `comm` name stayed `bun`. Startup and the daemon broker now set the kernel-visible process name via `bun:ffi` ([#6815](https://github.com/can1357/oh-my-pi/issues/6815)).
 
 ## [17.1.6] - 2026-07-27
 
