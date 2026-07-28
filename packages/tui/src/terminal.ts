@@ -141,6 +141,66 @@ export function chunkForConPTY(data: string, maxChunkBytes: number = MAX_CONPTY_
 }
 
 /**
+ * Hard cap on bytes queued to a stalled stdout before its consumer is declared
+ * gone. A live terminal drains within milliseconds, so a backlog this large —
+ * far above any legitimate paint (a full session resume is a few MiB) — means
+ * the PTY reader has stopped consuming entirely. Without the cap, `#safeWrite`
+ * keeps handing cosmetic frames (the `hub wait` spinner, 500 ms progress
+ * snapshots) to a writable buffer that never drains, growing RSS without bound
+ * until the host runs out of memory. See #6854.
+ */
+const MAX_STDOUT_BACKLOG_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Turns an unbounded, never-draining stdout writable buffer into a bounded
+ * disconnect signal.
+ *
+ * `process.stdout.write()` returns `false` once its buffer exceeds the stream
+ * high-water mark; the bytes stay queued and are only freed when the consumer
+ * drains (the `drain` event). While the consumer keeps up, writes are accepted
+ * and nothing accumulates. When it stalls, every subsequent write piles onto
+ * the buffer — a stalled-but-alive PTY reader never throws, so the write path
+ * has no other signal that output is going nowhere. This guard sums the bytes
+ * queued since backpressure began and reports when that backlog crosses the
+ * cap, at which point the caller treats the terminal as disconnected.
+ *
+ * Exported for unit testing; `ProcessTerminal` is the sole production user.
+ */
+export class OutputBacklogGuard {
+	#bytes = 0;
+	#tracking = false;
+
+	constructor(private readonly capBytes: number = MAX_STDOUT_BACKLOG_BYTES) {}
+
+	/** True once a refused write started a backlog that has not yet drained. */
+	get tracking(): boolean {
+		return this.#tracking;
+	}
+
+	/**
+	 * Record one `stdout.write()`: `accepted` is that call's return value and
+	 * `bytes` its encoded size. Returns true when the pending backlog now
+	 * exceeds the cap and the terminal should be treated as disconnected.
+	 */
+	record(accepted: boolean, bytes: number): boolean {
+		if (!this.#tracking) {
+			// Consumer is keeping up; nothing is queued.
+			if (accepted) return false;
+			// First refused write: backpressure has begun.
+			this.#tracking = true;
+		}
+		this.#bytes += bytes;
+		return this.#bytes > this.capBytes;
+	}
+
+	/** Called on the stdout `drain` event: the buffer emptied, backlog cleared. */
+	reset(): void {
+		this.#bytes = 0;
+		this.#tracking = false;
+	}
+}
+
+/**
  * Minimal terminal interface for TUI
  */
 
@@ -494,6 +554,16 @@ export class ProcessTerminal implements Terminal {
 	#stdoutErrorCleanup?: () => void;
 	#stdoutErrorHandler = (err: Error) => {
 		this.#markTerminalDisconnected("stdout failed", err);
+	};
+	// Bounds the stdout writable buffer against a stalled PTY consumer: a
+	// stalled-but-alive reader never throws, so #safeWrite has no error to catch
+	// and the writable buffer grows without bound as cosmetic frames pile up.
+	// See OutputBacklogGuard and #6854.
+	#stdoutBacklog = new OutputBacklogGuard();
+	#stdoutDrainArmed = false;
+	#stdoutDrainHandler = () => {
+		this.#stdoutDrainArmed = false;
+		this.#stdoutBacklog.reset();
 	};
 
 	#windowsVTInputRestore?: () => void;
@@ -1468,6 +1538,11 @@ export class ProcessTerminal implements Terminal {
 			process.stdout.removeListener("resize", this.#stdoutResizeListener);
 			this.#stdoutResizeListener = undefined;
 		}
+		if (this.#stdoutDrainArmed) {
+			process.stdout.removeListener("drain", this.#stdoutDrainHandler);
+			this.#stdoutDrainArmed = false;
+		}
+		this.#stdoutBacklog.reset();
 		this.#resizeHandler = undefined;
 
 		// Pause stdin to prevent any buffered input (e.g., Ctrl+D) from being
@@ -1561,13 +1636,26 @@ export class ProcessTerminal implements Terminal {
 			// `process.stdout.write(string)` UTF-8-encodes before `WriteFile`,
 			// and a code-unit cap would let CJK transcript rows expand past the
 			// threshold. See #2034 and #2095.
-			if (isConPTYHosted() && Buffer.byteLength(data, "utf8") > MAX_CONPTY_WRITE_CHUNK_BYTES) {
+			const bytes = Buffer.byteLength(data, "utf8");
+			let accepted: boolean;
+			if (isConPTYHosted() && bytes > MAX_CONPTY_WRITE_CHUNK_BYTES) {
+				accepted = true;
 				for (const chunk of chunkForConPTY(data, MAX_CONPTY_WRITE_CHUNK_BYTES)) {
 					if (this.#dead) break;
-					process.stdout.write(chunk);
+					accepted = process.stdout.write(chunk);
 				}
 			} else {
-				process.stdout.write(data);
+				accepted = process.stdout.write(data);
+			}
+			// A stalled-but-alive PTY consumer never throws: write() just returns
+			// false and queues the bytes. Bound that never-draining backlog by
+			// declaring the terminal disconnected once it crosses the cap — the
+			// same clean-exit path a dead terminal takes (#6854).
+			if (this.#stdoutBacklog.record(accepted, bytes)) {
+				this.#markTerminalDisconnected("stdout backlog exceeded cap; PTY consumer stalled");
+			} else if (this.#stdoutBacklog.tracking && !this.#stdoutDrainArmed) {
+				this.#stdoutDrainArmed = true;
+				process.stdout.once("drain", this.#stdoutDrainHandler);
 			}
 		} catch (err) {
 			this.#markTerminalDisconnected("stdout failed", err);
