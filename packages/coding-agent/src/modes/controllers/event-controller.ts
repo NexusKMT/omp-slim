@@ -1196,6 +1196,17 @@ export class EventController {
 			} else {
 				let component = this.ctx.pendingTools.get(event.toolCallId);
 				if (!component) {
+					// A persisted result can win a mid-stream transcript rebuild
+					// before this live completion handler runs. Rebuild removes the
+					// pending handle and replay owns the completed card, but the
+					// original timeline entry remains as proof that a card already
+					// existed. Do not create a fallback read group beside replay
+					// (#6879); the fallback is only for a completion that genuinely
+					// outran every streamed card.
+					if (this.#toolTimelineComponents.has(event.toolCallId)) {
+						this.#clearReadToolCall(event.toolCallId);
+						return;
+					}
 					const group = this.#getReadGroup();
 					const args = this.#readToolCallArgs.get(event.toolCallId);
 					if (args) {

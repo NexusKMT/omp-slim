@@ -9,18 +9,19 @@ import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+import { buildSessionContext } from "@oh-my-pi/pi-coding-agent/session/session-context";
+import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 /**
  * Regression for issue #6879 — a tool call renders twice (follow-up to #6516).
  *
- * When an assistant turn streams tool calls and then ends with `error` /
- * `aborted` (a provider blip that auto-retries, a TTSR rewind), the streamed
- * tool cards never execute and the whole turn is dropped from the active
- * context. The retry then re-streams fresh cards. The failed attempt's cards
- * were only *sealed* in place, so they lingered above the retry's copies and
- * rendered each call twice — exactly the parallel-probe screenshots in #6879.
+ * Failed/aborted assistant attempts used to leave never-run cards above a
+ * retry's fresh copies. Separately, when a successful read's persisted result
+ * won a transcript-rebuild race, replay rendered the completed card before the
+ * live `tool_execution_end`; its no-pending fallback then added another read
+ * group. Both paths rendered one logical call more than once.
  */
 const CMD = "which psql";
 const READ_PATH = "src/index.ts";
@@ -303,6 +304,99 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 
 		const rendered = Bun.stripANSI(mode.chatContainer.render(120).join("\n"));
 		expect(rendered).toContain(READ_PATH);
+	});
+
+	it("keeps a successful internal read single when replay beats its live completion", async () => {
+		const ec = mode.eventController;
+		const memoryPath = "memory://root/rollout_summaries/successful-read";
+		const readCall: ToolCall = {
+			type: "toolCall",
+			id: "read-success",
+			name: "read",
+			arguments: { path: memoryPath, i: "Read successful memory" },
+		};
+		await ec.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
+		await ec.handleEvent({ type: "message_start", message: assistantMessage([], "toolUse") } as Extract<
+			AgentSessionEvent,
+			{ type: "message_start" }
+		>);
+		await ec.handleEvent({
+			type: "message_update",
+			message: assistantMessage([readCall], "toolUse"),
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				contentIndex: 0,
+				toolCall: readCall,
+				partial: assistantMessage([readCall], "toolUse"),
+			},
+		} as Extract<AgentSessionEvent, { type: "message_update" }>);
+		await ec.handleEvent({
+			type: "message_end",
+			message: assistantMessage([readCall], "toolUse"),
+		} as Extract<AgentSessionEvent, { type: "message_end" }>);
+		await ec.handleEvent({
+			type: "tool_execution_start",
+			toolCallId: readCall.id,
+			toolName: readCall.name,
+			args: readCall.arguments,
+		} as Extract<AgentSessionEvent, { type: "tool_execution_start" }>);
+
+		const entries: SessionEntry[] = [
+			{
+				type: "message",
+				id: "user-success",
+				parentId: null,
+				timestamp: Date.now(),
+				message: { role: "user", content: [{ type: "text", text: "read memory" }], timestamp: 1 },
+			},
+			{
+				type: "message",
+				id: "assistant-success",
+				parentId: "user-success",
+				timestamp: Date.now(),
+				message: assistantMessage([readCall], "toolUse"),
+			},
+			{
+				type: "message",
+				id: "result-success",
+				parentId: "assistant-success",
+				timestamp: Date.now(),
+				message: {
+					role: "toolResult",
+					toolCallId: readCall.id,
+					toolName: readCall.name,
+					content: [{ type: "text", text: "successful memory contents" }],
+					isError: false,
+					timestamp: 3,
+				},
+			},
+		] as unknown as SessionEntry[];
+		vi.spyOn(session, "buildTranscriptSessionContext").mockReturnValue(
+			buildSessionContext(entries, undefined, undefined, { transcript: true }),
+		);
+		mode.rebuildChatFromMessages();
+
+		const replayCards = mode.chatContainer.children.filter(child =>
+			Bun.stripANSI(child.render(120).join("\n")).includes(memoryPath),
+		);
+		expect(replayCards).toHaveLength(1);
+		const replayChildCount = mode.chatContainer.children.length;
+
+		// Persistence/replay won the race; the delayed live completion must not
+		// create a fallback read group beside the completed replay card.
+		await ec.handleEvent({
+			type: "tool_execution_end",
+			toolCallId: readCall.id,
+			toolName: readCall.name,
+			result: { content: [{ type: "text", text: "successful memory contents" }] },
+			isError: false,
+		} as Extract<AgentSessionEvent, { type: "tool_execution_end" }>);
+
+		const matchingCards = mode.chatContainer.children.filter(child =>
+			Bun.stripANSI(child.render(120).join("\n")).includes(memoryPath),
+		);
+		expect(matchingCards).toHaveLength(1);
+		expect(mode.chatContainer.children).toHaveLength(replayChildCount);
 	});
 
 	it("retracts a TTSR-rewound turn's tool card so the re-run renders it once", async () => {
