@@ -6,7 +6,7 @@ use std::{
 };
 
 /// Normalizes shell-facing path aliases before `std::fs` sees them.
-pub const fn normalize_shell_path(path: &Path) -> Cow<'_, Path> {
+pub fn normalize_shell_path(path: &Path) -> Cow<'_, Path> {
 	#[cfg(windows)]
 	{
 		translate_unix_drive_path(path).map_or(Cow::Borrowed(path), Cow::Owned)
@@ -18,7 +18,7 @@ pub const fn normalize_shell_path(path: &Path) -> Cow<'_, Path> {
 }
 
 /// Returns a Windows drive root for a shell pattern that starts with an MSYS/WSL drive alias.
-pub const fn pattern_drive_alias_root(
+pub fn pattern_drive_alias_root(
 	starts_with_forward_slash: bool,
 	first: &str,
 	second: Option<&str>,
