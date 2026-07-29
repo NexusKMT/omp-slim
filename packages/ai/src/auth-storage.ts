@@ -65,6 +65,7 @@ import {
 } from "./usage/openai-codex-reset";
 import { opencodeGoUsageProvider } from "./usage/opencode-go";
 import { syntheticUsageProvider } from "./usage/synthetic";
+import { umansUsageProvider } from "./usage/umans";
 import { xaiOauthUsageProvider } from "./usage/xai-oauth";
 import { zaiRankingStrategy, zaiUsageProvider } from "./usage/zai";
 
@@ -660,6 +661,7 @@ const DEFAULT_USAGE_PROVIDERS: UsageProvider[] = [
 	ollamaCloudUsageProvider,
 	claudeUsageProvider,
 	zaiUsageProvider,
+	umansUsageProvider,
 	opencodeGoUsageProvider,
 	githubCopilotUsageProvider,
 	cursorUsageProvider,
