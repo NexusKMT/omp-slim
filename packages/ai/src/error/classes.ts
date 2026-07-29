@@ -134,6 +134,7 @@ export class AnthropicApiError extends ProviderHttpError {
 		const bodyChunks: string[] = [];
 		try {
 			const decoder = new TextDecoder();
+			let cleanEof = false;
 			while (!aborted && !timedOut) {
 				if (performance.now() >= deadline) {
 					timedOut = true;
@@ -141,8 +142,17 @@ export class AnthropicApiError extends ProviderHttpError {
 					break;
 				}
 
-				const result = await reader.read();
-				if (aborted || timedOut || result.done) break;
+				let result: ReadableStreamReadResult<Uint8Array>;
+				try {
+					result = await reader.read();
+				} catch {
+					break;
+				}
+				if (aborted || timedOut) break;
+				if (result.done) {
+					cleanEof = true;
+					break;
+				}
 
 				const chunk = result.value;
 				const bytesToCapture = Math.min(MAX_ANTHROPIC_ERROR_BODY_BYTES - capturedBytes, chunk.byteLength);
@@ -157,7 +167,7 @@ export class AnthropicApiError extends ProviderHttpError {
 				}
 			}
 			if (aborted || signal?.aborted) throw new AbortError("Request was aborted.");
-			if (!truncated) bodyChunks.push(decoder.decode());
+			if (cleanEof) bodyChunks.push(decoder.decode());
 			if (truncated) bodyChunks.push(ANTHROPIC_ERROR_BODY_TRUNCATION_MARKER);
 		} finally {
 			if (timeout !== undefined) clearTimeout(timeout);
