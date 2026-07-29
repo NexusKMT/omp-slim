@@ -333,9 +333,7 @@ export class AdvisorRuntime {
 		private readonly agent: AdvisorAgent,
 		private readonly host: AdvisorRuntimeHost,
 		private readonly retryDelayMs = 1000,
-	) {
-		this.#modelIdentity = host.getModelIdentity?.();
-	}
+	) {}
 
 	get backlog(): number {
 		return this.#backlog;
