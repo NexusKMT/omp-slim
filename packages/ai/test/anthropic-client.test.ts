@@ -28,6 +28,10 @@ const anthropicErrorBody = JSON.stringify({
 	type: "error",
 	error: { type: "invalid_request_error", message: "The compiled grammar is too large." },
 });
+const anthropicOverloadedErrorBody = JSON.stringify({
+	type: "error",
+	error: { type: "overloaded_error", message: "Overloaded" },
+});
 
 describe("AnthropicMessagesClient error mapping", () => {
 	it("maps non-2xx responses to AnthropicApiError with status and body in message", async () => {
@@ -134,6 +138,19 @@ describe("AnthropicMessagesClient retries", () => {
 		expect(error).toBeInstanceOf(AIError.AnthropicApiError);
 		expect(calls.length).toBe(3); // initial attempt + 2 retries
 	});
+
+	it("disables the cap when maxRetryDelayMs is negative", async () => {
+		const { calls, fetch } = createFetchMock([
+			new Response("overloaded", { status: 429, headers: { "retry-after-ms": "1" } }),
+			new Response("{}", { status: 200 }),
+		]);
+		const client = new AnthropicMessagesClient({ apiKey: "sk-test", maxRetries: 5, fetch });
+
+		const response = await client.messages.create(params, { maxRetryDelayMs: -1 }).asResponse();
+
+		expect(response.status).toBe(200);
+		expect(calls.length).toBe(2);
+	});
 });
 
 describe("AnthropicMessagesClient timeout and abort", () => {
@@ -214,9 +231,27 @@ describe("AnthropicMessagesClient request assembly", () => {
 });
 
 describe("AnthropicMessagesClient retry-after cap", () => {
+	it("uses the documented 60-second default cap when callers omit one", async () => {
+		const { calls, fetch } = createFetchMock([
+			new Response(anthropicOverloadedErrorBody, { status: 429, headers: { "retry-after": "120" } }),
+		]);
+		const client = new AnthropicMessagesClient({ apiKey: "sk-test", maxRetries: 5, fetch });
+
+		const error = await client.messages
+			.create(params)
+			.asResponse()
+			.catch(err => err as AIError.AnthropicApiError);
+
+		expect(error).toBeInstanceOf(AIError.AnthropicApiError);
+		expect(error.status).toBe(429);
+		expect(calls.length).toBe(1);
+	});
+
 	it("declines a retry and preserves original status/body/headers when retry-after exceeds maxRetryDelayMs", async () => {
 		const errorHeaders = { "retry-after": "120", "request-id": "req_cap" };
-		const { calls, fetch } = createFetchMock([new Response("overloaded", { status: 429, headers: errorHeaders })]);
+		const { calls, fetch } = createFetchMock([
+			new Response(anthropicOverloadedErrorBody, { status: 429, headers: errorHeaders }),
+		]);
 		const client = new AnthropicMessagesClient({ apiKey: "sk-test", maxRetries: 5, fetch });
 
 		const error = await client.messages
@@ -231,20 +266,7 @@ describe("AnthropicMessagesClient retry-after cap", () => {
 		expect(error.headers.get("request-id")).toBe("req_cap");
 		expect(calls.length).toBe(1);
 	});
-	it("declines a retry for a positive server hint when maxRetryDelayMs is negative", async () => {
-		const errorHeaders = { "retry-after": "1", "request-id": "req_neg" };
-		const { calls, fetch } = createFetchMock([new Response("overloaded", { status: 429, headers: errorHeaders })]);
-		const client = new AnthropicMessagesClient({ apiKey: "sk-test", maxRetries: 5, fetch });
 
-		const error = await client.messages
-			.create(params, { maxRetryDelayMs: -1 })
-			.asResponse()
-			.catch(err => err as AIError.AnthropicApiError);
-
-		expect(error).toBeInstanceOf(AIError.AnthropicApiError);
-		expect(error.status).toBe(429);
-		expect(calls.length).toBe(1);
-	});
 	it("cancels and releases an open error-body reader when the caller aborts", async () => {
 		const controller = new AbortController();
 		const encoder = new TextEncoder();
@@ -257,7 +279,7 @@ describe("AnthropicMessagesClient retry-after cap", () => {
 			},
 			pull() {
 				readBlocked = true;
-				return new Promise<void>(() => {});
+				return Promise.withResolvers<void>().promise;
 			},
 			cancel() {
 				bodyCancelled = true;
