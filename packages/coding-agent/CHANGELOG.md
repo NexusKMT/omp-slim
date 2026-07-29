@@ -22,6 +22,7 @@
 
 ### Fixed
 
+- Fixed Cursor ranged-read results losing the full file byte size after applying the requested window.
 - Fixed `/tan` agents being unable to read parent-session `local://` attachments by correctly resolving local protocol options against the parent session's artifacts.
 - Fixed Codex web search silently returning plain completions when the hosted web search tool was skipped.
 - Fixed TUI collaboration guest loader not starting when joining or reconnecting mid-turn.

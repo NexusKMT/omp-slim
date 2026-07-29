@@ -1899,6 +1899,7 @@ describe("Cursor exec answers: what the result claims about the work", () => {
 							details: {
 								truncation: { truncated: true, totalLines: 97 },
 								meta: { truncation: { totalLines: 101 } },
+								fileSize: 4096,
 							},
 						});
 					},
@@ -1910,6 +1911,7 @@ describe("Cursor exec answers: what the result claims about the work", () => {
 		if (answer.value.result.case !== "success") throw new Error(`got ${answer.value.result.case}`);
 		expect(answer.value.result.value.totalLines).toBe(101);
 		expect(answer.value.result.value.rangeApplied).toBe(true);
+		expect(answer.value.result.value.fileSize).toBe(4096n);
 	});
 
 	it("counts the payload when the read returned the file whole", async () => {

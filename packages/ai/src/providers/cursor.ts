@@ -2439,6 +2439,13 @@ function readTotalLinesFromDetails(toolResult: ToolResultMessage): number | unde
 	return typeof totalLines === "number" && Number.isFinite(totalLines) ? totalLines : undefined;
 }
 
+function readFileSizeFromDetails(toolResult: ToolResultMessage): number | undefined {
+	const details = toolResult.details;
+	if (!details || typeof details !== "object" || !("fileSize" in details)) return undefined;
+	const { fileSize } = details;
+	return typeof fileSize === "number" && Number.isSafeInteger(fileSize) && fileSize >= 0 ? fileSize : undefined;
+}
+
 function buildReadResultFromToolResult(path: string, toolResult: ToolResultMessage, rangeApplied = false) {
 	const text = toolResultToText(toolResult);
 	if (toolResult.isError) {
@@ -2455,7 +2462,7 @@ function buildReadResultFromToolResult(path: string, toolResult: ToolResultMessa
 			value: create(ReadSuccessSchema, {
 				path,
 				totalLines,
-				fileSize: BigInt(Buffer.byteLength(text, "utf-8")),
+				fileSize: BigInt(readFileSizeFromDetails(toolResult) ?? Buffer.byteLength(text, "utf-8")),
 				truncated: toolResultWasTruncated(toolResult),
 				output: { case: "content", value: text },
 				// Set when this client composed the frame's window onto the read,
