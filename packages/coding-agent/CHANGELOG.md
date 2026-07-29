@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the browser tool silently ignoring `url` when opening a new tab on an attached browser (`app.cdp_url` or `app.path`), so the tab now navigates on open exactly as it already did on reuse and in headless mode.
+
 ## [17.1.8] - 2026-07-28
 
 ### Breaking Changes
