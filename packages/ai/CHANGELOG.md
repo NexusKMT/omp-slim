@@ -13,6 +13,7 @@
 
 - Codex SSE requests to the official endpoint now use zstd-compressed bodies (level 3, `content-encoding: zstd`), matching the official Codex client; disable with `PI_CODEX_ZSTD=0`. Compression failures and HTTP 400/415 responses fall back to plain JSON, while custom Codex-compatible endpoints remain uncompressed.
 - Fixed Novita login rejecting valid API keys belonging to Developer and Basic team members. Key validation targeted the account billing balance endpoint, which requires a Balance permission those roles do not hold; it now validates against the OpenAI-compatible chat completions endpoint the key is actually used with.
+- Fixed spawn-based lazy-loading tests (`oauth-barrel-import`, `auth-broker-wire-lazy-construction`, `cursor-transport-error`) flaking under CPU contention by giving each an explicit 60s per-test timeout instead of relying on bun's 5s default ([#7018](https://github.com/can1357/oh-my-pi/issues/7018)).
 
 ## [17.1.8] - 2026-07-28
 
