@@ -502,6 +502,10 @@ const CODEX_RESERVED_METADATA_KEYS: Record<string, true> = {
 	[OPENAI_HEADERS.SUBAGENT]: true,
 	request_kind: true,
 	compaction: true,
+	// codex-rs reserves `code_mode_tool_names` for its Responses Lite Code Mode
+	// mapping (#35271); OMP never emits it, but callers must not smuggle it in
+	// as an extra either.
+	code_mode_tool_names: true,
 	turn_started_at_unix_ms: true,
 	forked_from_thread_id: true,
 	parent_thread_id: true,

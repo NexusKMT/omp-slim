@@ -5,9 +5,11 @@
 ### Added
 
 - Added first-class parentTurnId support for nested Codex requests, allowing stream options and metadata helpers to accept and safely propagate the initiating turn's ID.
+- Added preservation of the Codex `encrypted_function_args` plaintext-collaboration marker on replayed function calls, keeping server-marked plaintext tool arguments from being reinterpreted as encrypted on subsequent turns.
 
 ### Changed
 
+- Codex turn metadata now reserves the codex-rs `code_mode_tool_names` key, preventing caller-supplied client metadata extras from colliding with the core-owned field.
 - Codex SSE requests to the official endpoint now use zstd-compressed bodies by default to match the official client, which can be disabled with PI_CODEX_ZSTD=0.
 - API-key validation now preserves provider HTTP status and retry headers, allowing authentication, rate-limit, and server failures to retain their original error classifications.
 
