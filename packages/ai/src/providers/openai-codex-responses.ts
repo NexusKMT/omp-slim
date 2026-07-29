@@ -55,6 +55,7 @@ import {
 } from "../utils";
 import { clearStreamingPartialJson, kStreamingLastParseLen, kStreamingPartialJson } from "../utils/block-symbols";
 import { AssistantMessageEventStream } from "../utils/event-stream";
+import { escapeHarmonyControlTokens, isHarmonyDialectModel } from "../utils/harmony-leak";
 import type { RawHttpRequestDump } from "../utils/http-inspector";
 import {
 	armPreResponseTimeout,
@@ -104,6 +105,7 @@ import {
 	createSequentialCutoffSummaryState,
 	encodeResponsesToolCallId,
 	encodeTextSignatureV1,
+	escapeReplayedClientText,
 	finalizeCustomToolCallInputDone,
 	finalizeMessageText,
 	finalizePendingResponsesToolCalls,
@@ -4155,7 +4157,7 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 						knownCallIds.add(item.call_id);
 					}
 				}
-				messages.push(...replayItems);
+				messages.push(...(isHarmonyDialectModel(model) ? escapeReplayedClientText(replayItems) : replayItems));
 				msgIndex += 1;
 				continue;
 			}
@@ -4252,14 +4254,23 @@ function normalizeInputMessageContent(
 	model: Model<"openai-codex-responses">,
 	content: string | Array<{ type: "text"; text: string } | { type: "image"; mimeType: string; data: string }>,
 ): ResponseInputContent[] {
+	// gpt-5.x codex rejects reserved Harmony control-token spellings in input
+	// data; escape the transport copy of untrusted user text so ordinary docs or
+	// grep results cannot poison the session (#6913). History is left untouched.
+	const escapeControlTokens = isHarmonyDialectModel(model);
 	if (typeof content === "string") {
 		if (!content || content.trim() === "") return [];
-		return [{ type: "input_text", text: content.toWellFormed() }];
+		const text = content.toWellFormed();
+		return [{ type: "input_text", text: escapeControlTokens ? escapeHarmonyControlTokens(text) : text }];
 	}
 
 	return (
-		convertResponsesInputContent(content, model.input.includes("image"), model.compat.supportsImageDetailOriginal) ??
-		[]
+		convertResponsesInputContent(
+			content,
+			model.input.includes("image"),
+			model.compat.supportsImageDetailOriginal,
+			escapeControlTokens,
+		) ?? []
 	);
 }
 
