@@ -684,7 +684,11 @@ async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTa
 			timeoutMs: opts.timeoutMs,
 		};
 	}
-	const page = await pickElectronTarget(browser.browser, opts.target);
+	// A "connected" browser is one the user is driving themselves (cdp attach), so the
+	// tab we adopt and the focus we take are visible to them; owned Electron/spawned
+	// browsers keep the previous behavior.
+	const userDriven = browser.kind.kind === "connected";
+	const page = await pickElectronTarget(browser.browser, opts.target, userDriven);
 	const targetId = await targetIdForPage(page);
 	return {
 		mode: "attach",
@@ -692,6 +696,7 @@ async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTa
 		safeDir,
 		targetId,
 		dialogs: opts.dialogs,
+		activateForScreenshot: !userDriven,
 	};
 }
 
@@ -793,6 +798,7 @@ async function recycleTimedOutWorkerTab(tab: WorkerTabSession, timeoutMs: number
 		// Unblock a wedged page (open JS dialog, hung navigation) before adopting it —
 		// otherwise init stalls, times out, and the tab gets force-killed.
 		recover: true,
+		activateForScreenshot: tab.kindTag !== "connected",
 	};
 	let worker = await spawnTabWorker();
 	try {
