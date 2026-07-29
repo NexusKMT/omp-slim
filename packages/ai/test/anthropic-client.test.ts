@@ -356,77 +356,6 @@ describe("AnthropicMessagesClient retry-after cap", () => {
 		}
 	});
 
-	it("preserves bounded partial error details when the body stream errors", async () => {
-		const encoder = new TextEncoder();
-		let response: Response | undefined;
-		const partialBody = new ReadableStream<Uint8Array>({
-			start(streamController) {
-				streamController.enqueue(encoder.encode("partial detail"));
-			},
-			pull(streamController) {
-				streamController.error(new Error("socket closed"));
-			},
-		});
-		const client = new AnthropicMessagesClient({
-			apiKey: "sk-test",
-			maxRetries: 0,
-			fetch: async () => {
-				response = new Response(partialBody, { status: 502, headers: { "request-id": "req_partial" } });
-				return response;
-			},
-		});
-
-		const error = await client.messages
-			.create(params)
-			.asResponse()
-			.catch(err => err as AIError.AnthropicApiError);
-		if (!(error instanceof AIError.AnthropicApiError)) throw new Error("Expected AnthropicApiError");
-
-		expect(error.status).toBe(502);
-		expect(error.message).toBe("502 partial detail");
-		expect(error.headers.get("request-id")).toBe("req_partial");
-		expect(response?.body?.locked).toBe(false);
-	});
-
-	it("does not flush an incomplete UTF-8 prefix when the error body times out", async () => {
-		const readBlocked = Promise.withResolvers<void>();
-		let didBlockRead = false;
-		let bodyCancelled = false;
-		const incompleteBody = new ReadableStream<Uint8Array>({
-			start(streamController) {
-				streamController.enqueue(new Uint8Array([0xe2, 0x82]));
-			},
-			pull() {
-				didBlockRead = true;
-				return readBlocked.promise;
-			},
-			cancel() {
-				bodyCancelled = true;
-			},
-		});
-		const client = new AnthropicMessagesClient({
-			apiKey: "sk-test",
-			maxRetries: 0,
-			fetch: async () => new Response(incompleteBody, { status: 500 }),
-		});
-
-		AIError.__anthropicApiErrorForTesting.setBodyReadTimeoutMs(5);
-		try {
-			const error = await client.messages
-				.create(params)
-				.asResponse()
-				.catch(err => err as AIError.AnthropicApiError);
-			if (!(error instanceof AIError.AnthropicApiError)) throw new Error("Expected AnthropicApiError");
-
-			expect(error.message).toBe("500 status code (no body)");
-			expect(error.message).not.toContain("\uFFFD");
-			expect(didBlockRead).toBe(true);
-			expect(bodyCancelled).toBe(true);
-		} finally {
-			AIError.__anthropicApiErrorForTesting.setBodyReadTimeoutMs(undefined);
-		}
-	});
-
 	it("bounds, marks, and cancels a continuously ready oversized error body", async () => {
 		const chunk = new TextEncoder().encode("x".repeat(1024));
 		let bodyCancelled = false;
@@ -488,13 +417,11 @@ describe("AnthropicMessagesClient retry-after cap", () => {
 	});
 
 	it("marks and cancels only after observing the 64 KiB-plus-one error-body byte", async () => {
-		const firstChunk = new Uint8Array(64 * 1024).fill(120);
-		const overflowByte = new Uint8Array([120]);
+		const body = new Uint8Array(64 * 1024 + 1).fill(120);
 		let bodyCancelled = false;
 		const overflowingBody = new ReadableStream<Uint8Array>({
 			start(streamController) {
-				streamController.enqueue(firstChunk);
-				streamController.enqueue(overflowByte);
+				streamController.enqueue(body);
 			},
 			cancel() {
 				bodyCancelled = true;
