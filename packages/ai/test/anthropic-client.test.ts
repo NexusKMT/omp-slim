@@ -355,4 +355,75 @@ describe("AnthropicMessagesClient retry-after cap", () => {
 			AIError.__anthropicApiErrorForTesting.setBodyReadTimeoutMs(undefined);
 		}
 	});
+
+	it("bounds, marks, and cancels a continuously ready oversized error body", async () => {
+		const chunk = new TextEncoder().encode("x".repeat(1024));
+		let bodyCancelled = false;
+		let response: Response | undefined;
+		const oversizedBody = new ReadableStream<Uint8Array>({
+			pull(streamController) {
+				streamController.enqueue(chunk);
+			},
+			cancel() {
+				bodyCancelled = true;
+			},
+		});
+		const fetch: FetchImpl = async () => {
+			response = new Response(oversizedBody, { status: 400 });
+			return response;
+		};
+		const client = new AnthropicMessagesClient({ apiKey: "sk-test", maxRetries: 0, fetch });
+
+		const startedAt = performance.now();
+		const error = await client.messages
+			.create(params)
+			.asResponse()
+			.catch(err => err as AIError.AnthropicApiError);
+		if (!(error instanceof AIError.AnthropicApiError)) throw new Error("Expected AnthropicApiError");
+		for (let i = 0; i < 1000 && !bodyCancelled; i++) await Promise.resolve();
+		if (!bodyCancelled) throw new Error("Anthropic error-body reader was not cancelled");
+
+		expect(performance.now() - startedAt).toBeLessThan(1_000);
+		expect(error.message).toBe(`400 ${"x".repeat(64 * 1024)}\n[Response body truncated after 64 KiB]`);
+		expect(response?.body?.locked).toBe(false);
+	});
+
+	it("checks the deadline before an always-ready error body can starve timer callbacks", async () => {
+		let bodyCancelled = false;
+		let response: Response | undefined;
+		const alwaysReadyBody = new ReadableStream<Uint8Array>({
+			start(streamController) {
+				streamController.enqueue(new Uint8Array([120]));
+			},
+			pull(streamController) {
+				streamController.enqueue(new Uint8Array([120]));
+			},
+			cancel() {
+				bodyCancelled = true;
+			},
+		});
+		const fetch: FetchImpl = async () => {
+			response = new Response(alwaysReadyBody, { status: 500 });
+			return response;
+		};
+		const client = new AnthropicMessagesClient({ apiKey: "sk-test", maxRetries: 0, fetch });
+
+		AIError.__anthropicApiErrorForTesting.setBodyReadTimeoutMs(0);
+		try {
+			const startedAt = performance.now();
+			const error = await client.messages
+				.create(params)
+				.asResponse()
+				.catch(err => err as AIError.AnthropicApiError);
+			if (!(error instanceof AIError.AnthropicApiError)) throw new Error("Expected AnthropicApiError");
+			for (let i = 0; i < 1000 && !bodyCancelled; i++) await Promise.resolve();
+			if (!bodyCancelled) throw new Error("Anthropic error-body reader was not cancelled");
+
+			expect(performance.now() - startedAt).toBeLessThan(1_000);
+			expect(error.message).toBe("500 status code (no body)");
+			expect(response?.body?.locked).toBe(false);
+		} finally {
+			AIError.__anthropicApiErrorForTesting.setBodyReadTimeoutMs(undefined);
+		}
+	});
 });

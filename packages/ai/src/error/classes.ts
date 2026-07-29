@@ -71,6 +71,8 @@ export class OpenAIHttpError extends ProviderHttpError {
 
 /** Non-2xx response from the Anthropic API. */
 const DEFAULT_ANTHROPIC_ERROR_BODY_READ_TIMEOUT_MS = 5_000;
+const MAX_ANTHROPIC_ERROR_BODY_BYTES = 64 * 1024;
+const ANTHROPIC_ERROR_BODY_TRUNCATION_MARKER = "\n[Response body truncated after 64 KiB]";
 let anthropicErrorBodyReadTimeoutMs = DEFAULT_ANTHROPIC_ERROR_BODY_READ_TIMEOUT_MS;
 
 /** Test-only control for the otherwise bounded Anthropic error-body drain. */
@@ -106,11 +108,11 @@ export class AnthropicApiError extends ProviderHttpError {
 
 		let aborted = false;
 		let timedOut = false;
-		let resolveAbort!: (result: { type: "aborted" }) => void;
-		const abortedRead = new Promise<{ type: "aborted" }>(resolve => {
-			resolveAbort = resolve;
-		});
+		const { promise: abortedRead, resolve: resolveAbort } = Promise.withResolvers<{ type: "aborted" }>();
+		let readerCancelled = false;
 		const cancelReader = () => {
+			if (readerCancelled) return;
+			readerCancelled = true;
 			void reader.cancel().catch(() => {});
 		};
 		const onAbort = () => {
@@ -122,19 +124,27 @@ export class AnthropicApiError extends ProviderHttpError {
 		if (signal?.aborted) onAbort();
 		else signal?.addEventListener("abort", onAbort, { once: true });
 
-		let timeout: ReturnType<typeof setTimeout> | undefined;
-		const timeoutRead = new Promise<{ type: "timed-out" }>(resolve => {
-			timeout = setTimeout(() => {
-				timedOut = true;
-				cancelReader();
-				resolve({ type: "timed-out" });
-			}, anthropicErrorBodyReadTimeoutMs);
-		});
+		const deadline = performance.now() + anthropicErrorBodyReadTimeoutMs;
+		let timeout: Timer | undefined;
+		const { promise: timeoutRead, resolve: resolveTimeout } = Promise.withResolvers<{ type: "timed-out" }>();
+		timeout = setTimeout(() => {
+			timedOut = true;
+			cancelReader();
+			resolveTimeout({ type: "timed-out" });
+		}, anthropicErrorBodyReadTimeoutMs);
 
-		let body = "";
+		let capturedBytes = 0;
+		let truncated = false;
+		const bodyChunks: string[] = [];
 		try {
 			const decoder = new TextDecoder();
 			while (!aborted && !timedOut) {
+				if (performance.now() >= deadline) {
+					timedOut = true;
+					cancelReader();
+					break;
+				}
+
 				const result = await Promise.race([
 					reader.read().then(
 						value => ({ type: "read" as const, value }),
@@ -143,19 +153,30 @@ export class AnthropicApiError extends ProviderHttpError {
 					abortedRead,
 					timeoutRead,
 				]);
-				if (result.type !== "read") break;
-				if (result.value.done) break;
-				body += decoder.decode(result.value.value, { stream: true });
+				if (result.type !== "read" || result.value.done) break;
+
+				const chunk = result.value.value;
+				const bytesToCapture = Math.min(MAX_ANTHROPIC_ERROR_BODY_BYTES - capturedBytes, chunk.byteLength);
+				if (bytesToCapture > 0) {
+					bodyChunks.push(decoder.decode(chunk.subarray(0, bytesToCapture), { stream: true }));
+					capturedBytes += bytesToCapture;
+				}
+				if (capturedBytes === MAX_ANTHROPIC_ERROR_BODY_BYTES) {
+					truncated = true;
+					cancelReader();
+					break;
+				}
 			}
-			if (aborted) throw new AbortError("Request was aborted.");
-			body += decoder.decode();
+			if (aborted || signal?.aborted) throw new AbortError("Request was aborted.");
+			bodyChunks.push(decoder.decode());
+			if (truncated) bodyChunks.push(ANTHROPIC_ERROR_BODY_TRUNCATION_MARKER);
 		} finally {
 			if (timeout !== undefined) clearTimeout(timeout);
 			signal?.removeEventListener("abort", onAbort);
 			reader.releaseLock();
 		}
 
-		const detail = body.trim() || "status code (no body)";
+		const detail = bodyChunks.join("").trim() || "status code (no body)";
 		return new AnthropicApiError(response.status, `${response.status} ${detail}`, response.headers);
 	}
 }
