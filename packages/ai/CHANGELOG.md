@@ -16,6 +16,7 @@
 - Fixed spawn-based lazy-loading tests (`oauth-barrel-import`, `auth-broker-wire-lazy-construction`, `cursor-transport-error`) flaking under CPU contention by giving each an explicit 60s per-test timeout instead of relying on bun's 5s default ([#7018](https://github.com/can1357/oh-my-pi/issues/7018)).
 - API-key validation now preserves provider HTTP status and retry headers, allowing authentication, rate-limit, and server failures to retain their existing error classification instead of reporting every non-success response as a missing key.
 - Fixed bare `resource_exhausted` (the gRPC/Connect status name emitted by Cursor end-streams) classifying as `QUOTA_EXHAUSTED` in `parseRateLimitReason`, which pinned a 30-minute credential block and tripped the `retry.maxDelayMs` fail-fast at the session layer. Bare/opaque underscore status now matches the same `MODEL_CAPACITY_EXHAUSTED` branch as the space form (45–75s backoff), explicit quota details remain `QUOTA_EXHAUSTED`, and `USAGE_LIMIT_PATTERN` stays intact so stream-layer credential rotation is preserved. ([#7032](https://github.com/can1357/oh-my-pi/issues/7032))
+- Fixed the Amazon Bedrock and Devin providers crashing when `Context.systemPrompt` is a bare string (as legacy `@earendil-works/pi-ai` extensions pass it), which surfaced as `stopReason: "error"` with `systemPrompt?.map is not a function`. Both providers now route through the existing `normalizeSystemPrompts()` helper like the other providers ([#7037](https://github.com/can1357/oh-my-pi/issues/7037)).
 
 ## [17.1.8] - 2026-07-28
 
