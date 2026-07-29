@@ -1161,8 +1161,8 @@ export class ModelRegistry {
 	 * A throwing hook falls back to the catalog produced by earlier hooks instead
 	 * of failing the whole composition; one bad extension must not empty the
 	 * registry. The failure is logged (deduped per provider) so it is not silent.
-	 * Each hook receives its own array because the public contract permits
-	 * structural mutation before returning.
+	 * Each hook receives a deep clone because the public contract permits
+	 * mutation of both the array and its model records before returning.
 	 */
 	#applyRuntimeModelModifiers(models: Model<Api>[]): Model<Api>[] {
 		if (this.#runtimeModelModifiers.size === 0) return models;
@@ -1171,7 +1171,7 @@ export class ModelRegistry {
 			const credential = this.authStorage.getOAuthCredential(providerName);
 			if (!credential) continue;
 			try {
-				projected = modifyModels([...projected], credential);
+				projected = modifyModels(structuredClone(projected), credential);
 			} catch (error) {
 				this.#warnModelModifierFailure(providerName, error instanceof Error ? error.message : String(error));
 			}

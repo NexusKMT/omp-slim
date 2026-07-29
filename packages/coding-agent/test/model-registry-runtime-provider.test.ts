@@ -1159,6 +1159,9 @@ describe("ModelRegistry runtime provider registration", () => {
 		const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
 
 		try {
+			const targetBefore = registry.getAll()[0];
+			expect(targetBefore).toBeDefined();
+			const targetSnapshot = structuredClone(targetBefore!);
 			const anthropicBefore = registry.getAll().filter(model => model.provider === "anthropic").length;
 			expect(anthropicBefore).toBeGreaterThan(0);
 
@@ -1174,8 +1177,12 @@ describe("ModelRegistry runtime provider registration", () => {
 						login: async () => ({ access: "a", refresh: "r", expires: Date.now() + 60_000 }),
 						refreshToken: async credentials => credentials,
 						getApiKey: credentials => credentials.access,
-						// Wipes the array it was handed, then fails.
+						// Corrupts a model record and its nested cost, wipes the array,
+						// then fails. None of those mutations may reach the canonical
+						// unprojected catalog used for fallback or later refreshes.
 						modifyModels: models => {
+							models[0]!.name = "Corrupted by failing hook";
+							models[0]!.cost.input = -1;
 							models.length = 0;
 							throw new Error("mutated then failed");
 						},
@@ -1184,10 +1191,12 @@ describe("ModelRegistry runtime provider registration", () => {
 				"ext://oauth",
 			);
 
+			expect(registry.find(targetBefore!.provider, targetBefore!.id)).toEqual(targetSnapshot);
 			expect(registry.getAll().filter(model => model.provider === "anthropic")).toHaveLength(anthropicBefore);
 			expect(getProviderModels(registry, "mutating-provider").map(model => model.id)).toEqual(["runtime-model"]);
 
 			await registry.refresh("offline");
+			expect(registry.find(targetBefore!.provider, targetBefore!.id)).toEqual(targetSnapshot);
 			expect(registry.getAll().filter(model => model.provider === "anthropic")).toHaveLength(anthropicBefore);
 			expect(getProviderModels(registry, "mutating-provider").map(model => model.id)).toEqual(["runtime-model"]);
 		} finally {
