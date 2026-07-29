@@ -6539,13 +6539,30 @@ export class AgentSession {
 
 	async #setModelWithProviderSessionReset(model: Model): Promise<void> {
 		const currentModel = this.model;
+		const isChanging = !currentModel || !modelsAreEqual(currentModel, model);
 		if (currentModel) {
 			this.#closeProviderSessionsForModelSwitch(currentModel, model);
-			if (!modelsAreEqual(currentModel, model)) {
+			if (isChanging) {
 				this.#clearInheritedProviderPromptCacheKey();
 			}
 		}
 		this.agent.setModel(model);
+		// Model mutations driven through ModelControls (explicit /model, prewalk
+		// hand-offs, retry-fallback, model cycling) funnel through this method,
+		// so this is the single point that notifies subscribers (ACP config
+		// sync, RPC, TUI status line) — callers that bypass ModelControls never
+		// need to remember to notify separately. `switchSession`'s rollback
+		// restores via `agent.setModel` directly and emits its own corrective
+		// event.
+		//
+		// Fan-out uses the synchronous `#emit`, matching `thinking_level_changed`:
+		// `model_changed` has no extension-facing hook (`#emitExtensionEvent`
+		// never maps it), so routing it through `#emitSessionEvent` would only
+		// add an extension-delivery await inside every model switch — including
+		// retry-fallback on the error path.
+		if (isChanging) {
+			this.#emit({ type: "model_changed" });
+		}
 
 		// Re-evaluate append-only context mode — provider or setting may have changed
 		this.#syncAppendOnlyContext(model);
@@ -7232,11 +7249,29 @@ export class AgentSession {
 			this.#pendingRewindReport = previousPendingRewindReport;
 			this.#lastCompletedRewind = previousLastCompletedRewind;
 			this.#rewoundToolResultIds = previousRewoundToolResultIds;
+			// The try block may have already reached #setModelWithProviderSessionReset
+			// for the target session's model, which emits `model_changed` for it.
+			// Restoring here bypasses that method (it also resets provider-session
+			// state we're already unwinding above), so if the rollback actually
+			// changes the model back, emit the corrective event ourselves —
+			// otherwise ACP/RPC/TUI keep advertising the never-committed target.
+			// Deferred until after restoreThinkingSnapshot below: #emit's listeners
+			// (ACP's #handleLifetimeEvent -> #pushConfigOptionUpdate) read
+			// session state synchronously before their first await, so emitting
+			// here — before the target session's thinking level is unwound —
+			// would push a { previousModel, target-session-thinking } config that
+			// was never a real session state.
+			let modelRolledBack = false;
 			if (previousModel) {
+				const rolledBackModel = this.model;
 				this.agent.setModel(previousModel);
+				modelRolledBack = !modelsAreEqual(rolledBackModel, previousModel);
 			}
 			this.#models.restoreThinkingSnapshot(previousThinkingLevel, previousAutoThinking, previousAutoResolvedLevel);
 			this.#models.restoreServiceTiers(previousServiceTierByFamily);
+			if (modelRolledBack) {
+				this.#emit({ type: "model_changed" });
+			}
 			this.#todo.syncFromBranch();
 			this.#advisors.resetAllRuntimes();
 			this.#advisors.reattachRecorderFeeds();
