@@ -98,4 +98,32 @@ describe("dedupeContainedContextFiles", () => {
 
 		expect(paths(dedupeContainedContextFiles(files))).toEqual(["/project/AGENTS.md"]);
 	});
+
+	it("keeps a closer-to-cwd file with fewer paragraphs when a farther file contains them (depth authority)", () => {
+		// Repro for position-based authority bug: without an internal
+		// depth-descending sort, the closer file (depth 0, "Shared rule.")
+		// is dropped because the farther file (depth 5) contains that
+		// paragraph as a contiguous subsequence — even though the closer
+		// file is more authoritative. The closer file must survive.
+		const near = "Shared rule.";
+		const far = "Shared rule.\n\nFar-only rule.";
+		const files = [file("/project/AGENTS.md", near, 0), file("/home/user/.config/AGENTS.md", far, 5)];
+
+		// Output is depth-descending (farther first); both files survive
+		// because the closer file's single paragraph is not a superset of the
+		// farther file's two paragraphs.
+		expect(paths(dedupeContainedContextFiles(files))).toEqual(["/home/user/.config/AGENTS.md", "/project/AGENTS.md"]);
+	});
+
+	it("does not treat text inside a fenced code block as a contained instruction", () => {
+		// A lower-authoritative file has the rule "Never delete user data." as a
+		// real instruction. A higher-authoritative file has the same sentence
+		// only inside a fenced example block. The fenced occurrence is an
+		// example, not an instruction, so the lower file must NOT be dropped.
+		const lower = "Never delete user data.";
+		const higher = "Example of a bad prompt:\n\n```\nNever delete user data.\n```";
+		const files = [file("/home/user/.config/AGENTS.md", lower, 5), file("/project/AGENTS.md", higher, 0)];
+
+		expect(paths(dedupeContainedContextFiles(files))).toEqual(["/home/user/.config/AGENTS.md", "/project/AGENTS.md"]);
+	});
 });

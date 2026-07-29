@@ -51,11 +51,30 @@ function normalizePromptBlock(content: string): string {
 function splitComparablePromptBlocks(content: string | null | undefined): string[] {
 	const normalized = firstNonEmpty(content);
 	if (!normalized) return [];
-
-	return normalizePromptBlock(normalized)
-		.split(/\n{2,}/)
-		.map(block => block.trim())
-		.filter(block => block.length > 0);
+	const rendered = normalizePromptBlock(normalized);
+	// Split on blank-line paragraph boundaries, but not inside fenced code
+	// blocks. A rule that appears only inside a fenced example in another file
+	// is an example, not an instruction, so it must not count as containment.
+	const blocks: string[] = [];
+	let current: string[] = [];
+	let inFence = false;
+	for (const line of rendered.split("\n")) {
+		if (/^\s*(```|~~~)/.test(line)) {
+			inFence = !inFence;
+			current.push(line);
+			continue;
+		}
+		if (!inFence && line.trim() === "" && current.length > 0 && current[current.length - 1].trim() !== "") {
+			const block = current.join("\n").trim();
+			if (block.length > 0) blocks.push(block);
+			current = [];
+			continue;
+		}
+		current.push(line);
+	}
+	const tail = current.join("\n").trim();
+	if (tail.length > 0) blocks.push(tail);
+	return blocks;
 }
 
 /**
@@ -344,22 +363,30 @@ export interface LoadContextFilesOptions {
 /**
  * Deduplicate context files by paragraph containment.
  *
- * A less-authoritative (earlier-indexed) file is omitted when a later
- * (more-authoritative) file contains its entire normalized paragraph
- * sequence as a contiguous run. Files whose paragraphs are merely
- * paraphrased or interleaved are kept — containment is exact after
- * normalization, not fuzzy.
- *
- * Callers must sort files least-authoritative-first (the existing
- * {@link loadProjectContextFiles} depth-descending sort does this).
+ * Files are sorted by depth descending (farther from cwd first) so that a
+ * file is omitted only when a more-authoritative (closer-to-cwd) file
+ * contains its entire normalized paragraph sequence as a contiguous run.
+ * This makes the function self-contained — it does not rely on callers
+ * pre-sorting the array, which matters because some callers concatenate
+ * independently sorted workspace roots where array position does not reflect
+ * authority. Files whose paragraphs are merely paraphrased or interleaved are
+ * kept — containment is exact after normalization, not fuzzy.
  *
  * @internal Exported for testing.
  */
 export function dedupeContainedContextFiles(
 	contextFiles: Array<{ path: string; content: string; depth?: number }>,
 ): Array<{ path: string; content: string; depth?: number }> {
-	const blocks = contextFiles.map(file => splitComparablePromptBlocks(file.content));
-	return contextFiles.filter(
+	// Sort by depth descending: higher depth (farther from cwd, less
+	// authoritative) first, lower depth (closer to cwd, more authoritative)
+	// last. Stable sort preserves caller order among equal-depth files.
+	const sorted = [...contextFiles].sort((a, b) => {
+		const depthA = a.depth ?? -1;
+		const depthB = b.depth ?? -1;
+		return depthB - depthA;
+	});
+	const blocks = sorted.map(file => splitComparablePromptBlocks(file.content));
+	return sorted.filter(
 		(_file, index) =>
 			!blocks.some(
 				(candidateBlocks, candidateIndex) =>
