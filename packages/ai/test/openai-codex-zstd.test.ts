@@ -72,10 +72,7 @@ interface CapturedRequest {
 	headers: Headers;
 }
 
-async function runAndCaptureRequests(options?: {
-	baseUrl?: string;
-	statuses?: number[];
-}): Promise<CapturedRequest[]> {
+async function runAndCaptureRequests(options?: { baseUrl?: string; statuses?: number[] }): Promise<CapturedRequest[]> {
 	const token = createCodexTestToken();
 	const model = createCodexTestModel(options?.baseUrl);
 	const statuses = options?.statuses ?? [200];
