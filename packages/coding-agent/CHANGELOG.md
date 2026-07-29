@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Context file deduplication now checks paragraph containment instead of byte-exact matching: a less-authoritative file whose normalized paragraphs appear contiguously within a more authoritative file is omitted, reducing redundant prompt context.
+
 ## [17.1.8] - 2026-07-28
 
 ### Breaking Changes
