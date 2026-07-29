@@ -11,7 +11,7 @@
 - Fixed usage-based credential ranking treating a missing long-window metric as the short-window metric. Anthropic accounts whose 7-day bucket is not yet reported now keep the missing window neutral instead of letting 5-hour reset urgency shadow a sibling with reported weekly headroom ([#6980](https://github.com/can1357/oh-my-pi/pull/6980) by [@joswha](https://github.com/joswha)).
 ### Changed
 
-- Codex SSE request bodies are now zstd-compressed (level 3, `content-encoding: zstd`), matching the official Codex client; disable with `PI_CODEX_ZSTD=0`. Compression failure falls back to plain JSON.
+- Codex SSE requests to the official endpoint now use zstd-compressed bodies (level 3, `content-encoding: zstd`), matching the official Codex client; disable with `PI_CODEX_ZSTD=0`. Compression failures and HTTP 400/415 responses fall back to plain JSON, while custom Codex-compatible endpoints remain uncompressed.
 
 ## [17.1.8] - 2026-07-28
 

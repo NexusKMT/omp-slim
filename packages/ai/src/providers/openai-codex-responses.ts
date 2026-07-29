@@ -22,7 +22,7 @@ import {
 import { type } from "arktype";
 import packageJson from "../../package.json" with { type: "json" };
 import * as AIError from "../error";
-import { getEnvApiKey } from "../stream";
+import { getEnvApiKey, isOfficialCodexApiUrl } from "../stream";
 import type {
 	Api,
 	AssistantMessage,
@@ -3913,8 +3913,8 @@ async function getOrCreateCodexWebSocketConnection(
  * compression is disabled or fails, in which case the caller sends the
  * plain JSON string without a `content-encoding` header.
  */
-function compressCodexRequestBody(bodyJson: string): Uint8Array | undefined {
-	if (!$flag("PI_CODEX_ZSTD", true)) return undefined;
+function compressCodexRequestBody(bodyJson: string, baseUrl: string): Uint8Array | undefined {
+	if (!isOfficialCodexApiUrl(baseUrl) || !$flag("PI_CODEX_ZSTD", true)) return undefined;
 	try {
 		return Bun.zstdCompressSync(bodyJson, { level: 3 });
 	} catch (error) {
@@ -3969,7 +3969,7 @@ async function openCodexSseEventStream(
 		}
 	};
 	const bodyJson = JSON.stringify(body);
-	const compressedBody = compressCodexRequestBody(bodyJson);
+	const compressedBody = compressCodexRequestBody(bodyJson, url);
 	if (compressedBody !== undefined) {
 		headers.set("content-encoding", "zstd");
 	}
@@ -3982,12 +3982,11 @@ async function openCodexSseEventStream(
 			sentModelsEtagHeader: headers.has(X_MODELS_ETAG_HEADER),
 		});
 
-	let response: Response;
-	try {
-		response = await fetchWithRetry(url, {
+	const send = (requestBody: string | Uint8Array): Promise<Response> =>
+		fetchWithRetry(url, {
 			method: "POST",
 			headers,
-			body: compressedBody ?? bodyJson,
+			body: requestBody,
 			signal,
 			prepareInit: () => {
 				const watchdog = armPreResponseTimeout(signal, firstEventTimeoutMs);
@@ -4000,6 +3999,20 @@ async function openCodexSseEventStream(
 			fetch: fetchAttempt,
 			timeout: false,
 		});
+	let response: Response;
+	try {
+		response = await send(compressedBody ?? bodyJson);
+		if (compressedBody !== undefined && (response.status === 400 || response.status === 415)) {
+			const rejectedStatus = response.status;
+			await response.body?.cancel();
+			headers.delete("content-encoding");
+			CODEX_DEBUG &&
+				logger.debug("[codex] retrying request without zstd after encoding rejection", {
+					url,
+					status: rejectedStatus,
+				});
+			response = await send(bodyJson);
+		}
 	} finally {
 		clearPreResponseTimeout?.();
 	}
