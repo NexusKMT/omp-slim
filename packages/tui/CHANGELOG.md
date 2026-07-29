@@ -6,6 +6,7 @@
 
 - Fixed native Windows terminal panes freezing their host during forced closure by skipping the impossible stdout-drain wait after ConPTY disconnects ([#6917](https://github.com/can1357/oh-my-pi/issues/6917)).
 - Fixed the `Loader` spinner pegging a CPU core during idle waits: advancing the braille glyph baked it into the underlying `Text` via `setText`, invalidating the wrap cache every 80 ms tick so `wrapTextWithAnsi` and per-line width measurement re-ran over the whole message. The wrapped text now carries a stable representative for each frame display width and only the visible glyph is swapped at render time, so same-width frames reuse the wrap/width pipeline while custom themes with mixed-width frames remain correctly wrapped ([#6940](https://github.com/can1357/oh-my-pi/issues/6940)).
+- Fixed hash-prefixed UUIDs in prose being misclassified as 8-digit CSS colors and receiving spurious swatches ([#7002](https://github.com/can1357/oh-my-pi/issues/7002)).
 
 ## [17.1.8] - 2026-07-28
 
