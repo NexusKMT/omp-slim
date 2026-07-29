@@ -28,6 +28,7 @@
 ### Fixed
 
 - Fixed Anthropic retry loops ignoring `maxRetryDelayMs` for long server `retry-after` hints, so over-budget delays surface immediately without losing response details or abort cleanup ([#7003](https://github.com/can1357/oh-my-pi/issues/7003)).
+- Added interactive xAI API-key login with key validation through the xAI models endpoint.
 
 ## [17.1.8] - 2026-07-28
 
