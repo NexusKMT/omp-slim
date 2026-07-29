@@ -61,7 +61,8 @@ import { loadPromptTemplates as loadPromptTemplatesInternal, type PromptTemplate
 import { applyProviderGlobalsFromSettings } from "./config/provider-globals";
 import { buildServiceTierByFamily } from "./config/service-tier";
 import { Settings, type SkillsSettings } from "./config/settings";
-import { CursorExecHandlers } from "./cursor";
+import { CursorExecHandlers, type CursorMcpResourceAdapter } from "./cursor";
+import { createBridgeEditTool, createBridgeGrepFactory } from "./cursor-bridge-tools";
 import "./discovery";
 import { initializeWithSettings } from "./discovery";
 import { disposeAllJuliaKernelSessions, disposeJuliaKernelSessionsByOwner } from "./eval/jl/executor";
@@ -2584,6 +2585,43 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		for (const tool of toolRegistry.values()) {
 			toolRegistry.set(tool.name, new ExtensionToolWrapper(tool, extensionRunner));
 		}
+		// Cursor's own client owns file edits, so `edit` is not advertised to the
+		// model (commit 8ba0498eb: full-file `write` is used instead). The exec
+		// bridge is a different consumer: the server sends native `pi_edit`
+		// frames regardless of the advertised catalog, and answering them needs
+		// a real tool.
+		//
+		// It must be a `replace`-mode instance. `PiEditExecArgs` carries
+		// `old_text`/`new_text` pairs, which is exactly `replace`'s schema and
+		// nothing else's — under the default `hashline` mode the frame's args do
+		// not match the tool's parameters at all. The registry instance follows
+		// the session's configured mode, so the bridge builds its own.
+		//
+		// The grant is captured HERE, before the Cursor branch below deletes
+		// `edit` from the registry, and independently of the session's provider:
+		// a session that starts on another provider can switch to Cursor later,
+		// and the roster is built once, at session creation. Reading the registry
+		// at frame time would see the switched-to state, not the grant.
+		const editWasGranted = toolRegistry.has("edit");
+		// Built on first use rather than eagerly: a session that never reaches
+		// Cursor never constructs it.
+		let cursorBridgeEditTool: AgentTool | undefined;
+		const getCursorBridgeEditTool = (): AgentTool | undefined => {
+			// Only when the session actually granted `edit`. `createTools` omits
+			// it entirely for a restricted tool set, and the bridge answers native
+			// frames that arrive regardless of the advertised catalog — so
+			// building one unconditionally would hand a read-only agent a
+			// mutating tool it was denied (the issue #5680 escalation).
+			if (!editWasGranted) return undefined;
+			cursorBridgeEditTool ??= createBridgeEditTool(toolSession, extensionRunner);
+			return cursorBridgeEditTool;
+		};
+		// Whether this session granted a file-writing tool. Same capture-early
+		// reasoning, plus `write` may be auto-registered further down as an xdev
+		// transport. The exec bridge answers native `delete` and
+		// resource-download frames that mutate files without running a registry
+		// tool, so it needs the grant as the session actually made it.
+		const cursorCanMutateFiles = editWasGranted || toolRegistry.has("write");
 		if (model?.provider === "cursor") {
 			toolRegistry.delete("edit");
 			builtInRegistryToolNames.delete("edit");
@@ -2626,15 +2664,52 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			if (!state) return undefined;
 			return resolveMountedXdevExecutable(state, name);
 		};
+		// Cursor's resource frames ask what THIS client's servers advertise; only
+		// live connections have any. Built once: the advisor bridges answer from
+		// the same connections the primary does.
+		const cursorMcpResources: CursorMcpResourceAdapter | undefined = mcpManager && {
+			serverNames: () => mcpManager.getConnectedServers(),
+			getServerResources: async name => {
+				// The manager registers a server's tools before its background
+				// resource load finishes, so a frame arriving in that window
+				// would read an empty cache and report "advertises nothing".
+				await mcpManager.ensureServerResources(name);
+				return mcpManager.getServerResources(name);
+			},
+			readServerResource: (name, uri) => mcpManager.readServerResource(name, uri),
+		};
 		const cursorExecHandlers = new CursorExecHandlers({
 			cwd,
+			// The session's cwd moves (`/cd`, resume, branch restore) while this
+			// bridge is built once at startup. Path-confining frames — the native
+			// `delete` and a `download_path` resource read — resolve against
+			// whichever of the two they are given, so without the live resolver the
+			// primary would write into the workspace the session has left while
+			// reporting success for the path the server asked about. The advisor
+			// bridge already passes one.
+			getCwd: () => sessionManager.getCwd(),
 			tools: toolRegistry,
 			getExecutableTool: resolveDeviceTool,
+			// `pi_edit` needs the `replace`-mode instance specifically, and the
+			// registry may still hold the session's own `edit` (any mode) when
+			// this session did not start on Cursor.
+			getEditReplaceTool: getCursorBridgeEditTool,
 			getToolContext: () => toolContextStore.getContext(),
+			mcpResources: cursorMcpResources,
 			emitEvent: event => cursorEventEmitter?.(event),
 			getTodoPhases: () => session.getTodoPhases(),
 			setTodoPhases: phases => session.setTodoPhases(phases),
 			persistTodoPhases: phases => sessionManager.appendCustomEntry(USER_TODO_EDIT_CUSTOM_TYPE, { phases }),
+			// `pi_grep` carries its own context width and match cap, which the
+			// shared grep instance fixed at construction cannot express. Gated on
+			// the grant: the factory builds a fresh tool and `executeTool` prefers
+			// it over the registry, so installing it unconditionally would let a
+			// session without `grep` search anyway.
+			createGrepTool: toolRegistry.has("grep") ? createBridgeGrepFactory(toolSession, extensionRunner) : undefined,
+			// The native `delete` and resource-download frames mutate files
+			// without running a registry tool, so this grant is the only thing
+			// standing between a restricted session and a workspace write.
+			allowDirectFileMutation: cursorCanMutateFiles,
 		});
 
 		// Resolve the inline-descriptors setting against the session-start model.
@@ -3127,7 +3202,15 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			advisorToolBuilds.push(BUILTIN_TOOLS[name as keyof typeof BUILTIN_TOOLS](advisorToolSession));
 		}
 		const built = await Promise.all(advisorToolBuilds);
-		const advisorTools: Tool[] = built.filter((tool): tool is Tool => tool != null).map(wrapToolWithMetaNotice);
+		// Wrapped like every registry tool: `ExtensionToolWrapper` is where the
+		// approval mode, per-tool `tools.approval.<tool>` policies and
+		// `autoApprove` are enforced. The advisor's loop and its Cursor exec
+		// bridge both run these instances directly, so a raw one would execute a
+		// `bash`/`write` the user configured as `ask` or `deny`. Meta-notice
+		// first, matching the registry's wrap order.
+		const advisorTools: Tool[] = built
+			.filter((tool): tool is Tool => tool != null)
+			.map(tool => new ExtensionToolWrapper(wrapToolWithMetaNotice(tool), extensionRunner) as Tool);
 
 		const advisorWatchdogPrompts = [...watchdogFiles];
 		if (activeRepoContext) {
@@ -3237,6 +3320,20 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			providerPromptCacheKeySource,
 			parentEvalSessionId: options.parentEvalSessionId,
 			advisorTools,
+			// Same per-call `grep` seam the primary bridge gets, built against the
+			// advisor's own tool session so a `pi_grep` frame's context width and
+			// match cap are honored there too.
+			advisorCreateGrepTool: createBridgeGrepFactory(advisorToolSession, extensionRunner),
+			// Same `replace`-mode requirement as the primary bridge; the advisor
+			// path gates it on the advisor's own `edit` grant.
+			advisorCreateEditTool: () => createBridgeEditTool(advisorToolSession, extensionRunner),
+			// The advisor's bridge tools are wrapped for approval, but the wrapper
+			// reads the mode and per-tool policies only from the execute-time
+			// context — the primary bridge passes the same store.
+			advisorGetToolContext: () => toolContextStore.getContext(),
+			// Same live connections the primary bridge reads; an advisor's
+			// resource frame would otherwise report every server as empty.
+			advisorMcpResources: cursorMcpResources,
 			titleSystemPrompt: options.titleSystemPrompt,
 		});
 		hasSession = true;
