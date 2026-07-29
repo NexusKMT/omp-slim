@@ -28,8 +28,8 @@ type FireworkColor = keyof typeof FIREWORK_THEME_COLORS;
 export interface CodexResetUsageSnapshot {
 	/** When this usage report was observed, if supplied by the provider. */
 	observedAt?: number;
-	/** Weekly usage and its previously scheduled reset deadline. */
-	sevenDay?: { percent: number; resetsAt?: number };
+	/** Weekly usage, its quota identity, and its previously scheduled reset deadline. */
+	sevenDay?: { percent: number; resetsAt?: number; tier?: string; plan?: string };
 	savedResets?: number;
 }
 
@@ -103,6 +103,9 @@ export function detectCodexResetFireworks(
 	}
 
 	if (!previous.sevenDay || !current.sevenDay) return undefined;
+	if (previous.sevenDay.tier !== current.sevenDay.tier || previous.sevenDay.plan !== current.sevenDay.plan) {
+		return undefined;
+	}
 	const previousWeeklyPercent = Math.round(Math.max(0, Math.min(100, previous.sevenDay.percent)));
 	const currentWeeklyPercent = Math.round(Math.max(0, Math.min(100, current.sevenDay.percent)));
 	if (previousWeeklyPercent === 0 || currentWeeklyPercent >= previousWeeklyPercent) return undefined;

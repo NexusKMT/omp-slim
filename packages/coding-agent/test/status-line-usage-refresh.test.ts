@@ -63,6 +63,8 @@ interface CodexUsageState {
 	sevenDayResetAt: number;
 	savedResets?: number;
 	omitFetchedAt?: boolean;
+	tier?: string;
+	plan?: string;
 }
 
 function codexUsageReport(
@@ -75,13 +77,23 @@ function codexUsageReport(
 		{
 			provider: "openai-codex",
 			...(state.omitFetchedAt ? {} : { fetchedAt: Date.now() }),
-			metadata: { accountId, email, ...(orgId ? { orgId } : {}) },
+			metadata: {
+				accountId,
+				email,
+				...(orgId ? { orgId } : {}),
+				...(state.plan ? { planType: state.plan } : {}),
+			},
 			...(state.savedResets === undefined ? {} : { resetCredits: { availableCount: state.savedResets } }),
 			limits: [
 				{
 					id: "openai-codex:secondary",
 					label: "Codex 7 Day",
-					scope: { provider: "openai-codex", accountId, windowId: "7d" },
+					scope: {
+						provider: "openai-codex",
+						accountId,
+						windowId: "7d",
+						...(state.tier ? { tier: state.tier } : {}),
+					},
 					window: {
 						id: "7d",
 						label: "7d",
@@ -327,6 +339,33 @@ describe("StatusLineComponent usage refresh", () => {
 			{ kind: "unscheduled-weekly-reset" },
 			{ kind: "saved-reset-banked", added: 1, available: 1 },
 		]);
+		component.dispose();
+	});
+
+	it("compares weekly reset drops only within the same Codex quota tier", async () => {
+		Settings.instance.set("tui.codexResetFireworks", true);
+		const sevenDayResetAt = Date.now() + 80 * 3_600_000;
+		let state: CodexUsageState = {
+			sevenDayPercent: 42,
+			sevenDayResetAt,
+			savedResets: 0,
+			tier: "spark",
+			plan: "pro",
+		};
+		const component = new StatusLineComponent(makeCodexSession(async () => codexUsageReport(state)));
+		const events: CodexResetFireworksEvent[] = [];
+		component.setCodexResetFireworksHandler(event => events.push(event));
+
+		await refreshUsage(component);
+		state = { ...state, sevenDayPercent: 2, tier: undefined };
+		await refreshUsage(component, 5 * 60_000);
+		expect(events).toEqual([]);
+
+		state = { ...state, sevenDayPercent: 42, tier: "spark" };
+		await refreshUsage(component, 5 * 60_000);
+		state = { ...state, sevenDayPercent: 2 };
+		await refreshUsage(component, 5 * 60_000);
+		expect(events).toEqual([{ kind: "unscheduled-weekly-reset" }]);
 		component.dispose();
 	});
 

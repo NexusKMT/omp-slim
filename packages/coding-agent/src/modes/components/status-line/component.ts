@@ -1319,6 +1319,10 @@ export class StatusLineComponent implements Component {
 		}
 		if (!matchingReport) return null;
 
+		const plan =
+			typeof matchingReport.metadata?.planType === "string" && matchingReport.metadata.planType
+				? matchingReport.metadata.planType
+				: undefined;
 		let sevenDay: CodexResetUsageSnapshot["sevenDay"];
 		let sevenDayTier: string | undefined;
 		for (const limit of matchingReport.limits) {
@@ -1332,14 +1336,16 @@ export class StatusLineComponent implements Component {
 			if (candidate.scope?.windowId !== "7d" || typeof fraction !== "number" || !Number.isFinite(fraction)) {
 				continue;
 			}
-			const tier = candidate.scope.tier;
+			const tier = typeof candidate.scope?.tier === "string" && candidate.scope.tier ? candidate.scope.tier : undefined;
 			if (sevenDay && (sevenDayTier === undefined || tier)) continue;
 			const resetsAt = candidate.window?.resetsAt;
 			sevenDay = {
 				percent: fraction * 100,
 				resetsAt: typeof resetsAt === "number" && Number.isFinite(resetsAt) ? resetsAt : undefined,
+				tier,
+				plan,
 			};
-			sevenDayTier = tier || undefined;
+			sevenDayTier = tier;
 		}
 
 		const fetchedAt = matchingReport.fetchedAt;
