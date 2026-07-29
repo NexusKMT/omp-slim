@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed aborted usage-limit recovery waiting on a local usage fetch or marking the resolved credential blocked after the caller had already moved to another session ([#6883](https://github.com/can1357/oh-my-pi/pull/6883) by [@paolomazzitti](https://github.com/paolomazzitti)).
+
 ## [17.1.8] - 2026-07-28
 
 ### Fixed

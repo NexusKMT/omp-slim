@@ -4226,7 +4226,10 @@ export class AuthStorage {
 		let blockedUntil = now + (options?.retryAfterMs ?? AuthStorage.#defaultBackoffMs);
 
 		if (credentialType === "oauth" && target.credential.type === "oauth" && strategy) {
-			const report = await this.#getUsageReport(provider, target.credential, options);
+			const report = await raceUsageWithSignal(
+				this.#getUsageReport(provider, target.credential, options),
+				options?.signal,
+			);
 			if (report) {
 				const scopedLimits = this.#getScopedUsageLimits(strategy, report, rankingContext);
 				if (this.#isUsageLimitReached(scopedLimits)) {
@@ -4237,6 +4240,7 @@ export class AuthStorage {
 				}
 			}
 		}
+		options?.signal?.throwIfAborted();
 
 		// Usage lookup may refresh, disable, or remove a row. Re-resolve its
 		// durable id before applying positional in-memory and persisted blocks.
