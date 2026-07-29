@@ -302,7 +302,7 @@ describe("read and write route xd:// device URLs", () => {
 			name: "mcp__weather__forecast",
 			label: "Forecast",
 			description: "Weather forecast for a place.",
-			summary: `Napoved\u0007vremena ${multiByteTail}`,
+			summary: `Napoved\u0007\u2028vremena ${multiByteTail}`,
 			parameters: type({ query: "string" }),
 			async execute() {
 				return { content: [{ type: "text", text: "" }] };
@@ -324,16 +324,21 @@ describe("read and write route xd:// device URLs", () => {
 		const dynamic = entries.get("mcp__weather__forecast");
 		if (!dynamic) throw new Error("expected the dynamic device entry");
 		expect(dynamic.dynamic).toBe(true);
-		// Control characters collapse to a space instead of reaching the prompt.
+		// Control characters and Unicode line separators collapse to a space
+		// instead of reaching the prompt.
 		expect(dynamic.summary.startsWith("Napoved vremena ")).toBe(true);
 		expect(dynamic.summary.endsWith("…")).toBe(true);
 
 		const body = dynamic.summary.slice(0, -1);
 		const bodyBytes = Buffer.byteLength(body, "utf-8");
-		expect(bodyBytes).toBeLessThanOrEqual(XDEV_EXTERNAL_DESCRIPTION_CAP);
-		// The cut backs off at most one code point: the character straddling the
-		// budget is dropped whole rather than split.
-		expect(bodyBytes).toBeGreaterThan(XDEV_EXTERNAL_DESCRIPTION_CAP - 3);
+		const summaryBytes = Buffer.byteLength(dynamic.summary, "utf-8");
+		expect(summaryBytes).toBeLessThanOrEqual(XDEV_EXTERNAL_DESCRIPTION_CAP);
+		// The ellipsis is inside the byte budget, and the cut backs off at most
+		// one code point rather than splitting the character at the boundary.
+		expect(bodyBytes).toBeLessThanOrEqual(
+			XDEV_EXTERNAL_DESCRIPTION_CAP - Buffer.byteLength("…", "utf-8"),
+		);
+		expect(bodyBytes).toBeGreaterThan(XDEV_EXTERNAL_DESCRIPTION_CAP - 6);
 		expect(body.endsWith("あ")).toBe(true);
 		// A split code point would decode to U+FFFD and fail the round trip.
 		expect(Buffer.from(body, "utf-8").toString("utf-8")).toBe(body);

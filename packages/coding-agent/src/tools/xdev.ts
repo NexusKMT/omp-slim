@@ -179,8 +179,10 @@ function toolSummary(inst: Tool): string {
 	return firstLine?.trim() ?? inst.label ?? inst.name;
 }
 
-/** C0/C1 control characters; a summary must never smuggle escapes or line breaks into the prompt. */
-const SUMMARY_CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]+/g;
+/** C0/C1 controls and Unicode line/paragraph separators; summaries must remain one line. */
+const SUMMARY_CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g;
+const SUMMARY_ELLIPSIS = "…";
+const SUMMARY_ELLIPSIS_BYTES = Buffer.byteLength(SUMMARY_ELLIPSIS, "utf-8");
 
 /**
  * Bound a catalog summary for prompt rendering. External summaries are
@@ -191,9 +193,11 @@ const SUMMARY_CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]+/g;
  */
 function sanitizeCatalogSummary(summary: string, maxBytes?: number): string {
 	const cleaned = summary.replace(SUMMARY_CONTROL_CHARS, " ").trim();
-	if (maxBytes === undefined || maxBytes <= 0) return cleaned;
-	if (Buffer.byteLength(cleaned, "utf-8") <= maxBytes) return cleaned;
-	return `${truncateHeadBytes(cleaned, maxBytes).text.trimEnd()}…`;
+	if (maxBytes === undefined || Buffer.byteLength(cleaned, "utf-8") <= maxBytes) return cleaned;
+	if (maxBytes <= 0) return "";
+	if (maxBytes < SUMMARY_ELLIPSIS_BYTES) return truncateHeadBytes(cleaned, maxBytes).text;
+	const body = truncateHeadBytes(cleaned, maxBytes - SUMMARY_ELLIPSIS_BYTES).text.trimEnd();
+	return `${body}${SUMMARY_ELLIPSIS}`;
 }
 
 function promptCatalogSummary(inst: Tool, maxBytes?: number): string {
