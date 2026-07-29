@@ -322,10 +322,7 @@ describe("RPC fast mode with unsupported Fireworks model and priority tier", () 
 
 	beforeEach(async () => {
 		sessionDir = path.join(os.tmpdir(), `omp-rpc-fast-mode-test-${Snowflake.next()}`);
-		await Bun.write(
-			path.join(sessionDir, "config.yml"),
-			["providers:", "  fireworksTier: priority", ""].join("\n"),
-		);
+		await Bun.write(path.join(sessionDir, "config.yml"), ["providers:", "  fireworksTier: priority", ""].join("\n"));
 		client = new RpcClient({
 			cliPath: path.join(import.meta.dir, "..", "src", "cli.ts"),
 			cwd: path.join(import.meta.dir, ".."),
