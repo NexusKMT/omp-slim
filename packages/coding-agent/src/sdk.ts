@@ -3264,6 +3264,15 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			throw new Error(`Agent "${resolvedAgentId}" was replaced during session initialization.`);
 		}
 		hasRegistered = true;
+		// MCP notification bridge cleanup — assigned when the bridge is wired below,
+		// invoked from the dispose wrapper AND registered as a postmortem so both
+		// explicit-dispose (SDK embedders that reuse the process across sessions) and
+		// process-exit paths tear the listener down. Nulled after use so the closure
+		// graph (`extensionRunner`, `session`) can be GC'd instead of retained by the
+		// process-global postmortem list.
+		let unsubscribeMcpNotifications: (() => void) | undefined;
+		let unregisterMcpPostmortem: (() => void) | undefined;
+
 		{
 			const originalDispose = session.dispose.bind(session);
 			session.dispose = async () => {
@@ -3294,6 +3303,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				} finally {
 					unregisterUnlessParked();
 					unsubscribeCredentialDisabled?.();
+					unsubscribeMcpNotifications?.();
+					unregisterMcpPostmortem?.();
+					// Drop refs so the process-global postmortem list doesn't retain
+					// the bridge closure past explicit dispose.
+					unsubscribeMcpNotifications = undefined;
+					unregisterMcpPostmortem = undefined;
 				}
 			};
 		}
@@ -3466,19 +3481,24 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			}
 		}
 
-		// Wire MCP manager callbacks to session for reactive tool updates.
-		// Skip when reusing a parent's manager — the parent owns the callbacks.
+		// MCP manager wiring has two ownership models:
+		//   * Single-slot callbacks (tools/prompts/resources changed) — exactly one
+		//     owner per manager. When reusing a parent's manager (subagent path,
+		//     see task/executor.ts), the parent already owns these slots so we
+		//     MUST NOT overwrite them. Guarded by `!options.mcpManager`.
+		//   * Notification listener — multi-listener by design. Every session with
+		//     an MCP manager (fresh OR reused) needs its own bridge to its own
+		//     `extensionRunner` so extensions loaded in that session receive frames.
+		//     Guarded only by `mcpManager` (see the second `if` below).
 		if (mcpManager && !options.mcpManager) {
-			mcpManager.setOnToolsChanged(tools => {
-				void (async () => {
-					try {
-						await session.refreshMCPTools(tools);
-					} catch (error) {
-						logger.warn("MCP tool refresh failed", {
-							error: error instanceof Error ? error.message : String(error),
-						});
-					}
-				})();
+			mcpManager.setOnToolsChanged(async tools => {
+				try {
+					await session.refreshMCPTools(tools);
+				} catch (error) {
+					logger.warn("MCP tool refresh failed", {
+						error: error instanceof Error ? error.message : String(error),
+					});
+				}
 			});
 			// Wire prompt refresh → rebuild MCP prompt slash commands
 			mcpManager.setOnPromptsChanged(serverName => {
@@ -3509,6 +3529,29 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					}, debounceMs),
 				);
 			});
+		}
+
+		if (mcpManager) {
+			// Bridge server-initiated notifications to this session's extension
+			// handlers. Multi-listener registration: fresh-manager and reused-manager
+			// sessions both install their own listener here, so a subagent's
+			// extensions get frames even though the parent owns the single-slot
+			// tool/prompt/resource callbacks above. MCPManager fires known
+			// list/update refreshes internally, then invokes all registered
+			// listeners with (server, method, params) for every frame (including
+			// server-custom methods). Two-layer buffering protects the startup
+			// race: MCPManager buffers frames received before the first
+			// `addNotificationListener` subscriber (drains here); ExtensionRunner
+			// buffers frames received before `initialize()` and drains them on
+			// init. Both drop-oldest under pressure at cap 100.
+			unsubscribeMcpNotifications = mcpManager.addNotificationListener((server, method, params) => {
+				void extensionRunner.emitMcpNotification({ server, method, params });
+			});
+			// postmortem.register returns a cancel function; capture it so explicit
+			// session.dispose can remove this from the global list (see finally above).
+			unregisterMcpPostmortem = postmortem.register("mcp-notification-listener-cleanup", () =>
+				unsubscribeMcpNotifications?.(),
+			);
 		}
 
 		startDeferredMCPDiscovery?.(session);
