@@ -29,6 +29,7 @@
 
 - Fixed Anthropic retry loops ignoring `maxRetryDelayMs` for long server `retry-after` hints, so over-budget delays surface immediately without losing response details or abort cleanup ([#7003](https://github.com/can1357/oh-my-pi/issues/7003)).
 - Added interactive xAI API-key login with key validation through the xAI models endpoint.
+- Fixed Google Gemini and Vertex tool declarations carrying numeric, boolean, object-valued, or mixed `enum` arrays that the Google Schema wire type cannot represent. Unsupported enums are omitted while valid string enums remain constrained.
 
 ## [17.1.8] - 2026-07-28
 
