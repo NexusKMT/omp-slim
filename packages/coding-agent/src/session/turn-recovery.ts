@@ -778,9 +778,7 @@ export class TurnRecovery {
 				? undefined
 				: branch.find(
 						entry =>
-							entry.id === persistedEntryId &&
-							entry.type === "message" &&
-							entry.message.role === "assistant",
+							entry.id === persistedEntryId && entry.type === "message" && entry.message.role === "assistant",
 					)) ??
 			branch
 				.slice()

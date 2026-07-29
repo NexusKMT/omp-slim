@@ -3497,7 +3497,12 @@ describe("advisor", () => {
 						return;
 					}
 					state.error = undefined;
-					state.messages.push({ role: "assistant", content: [], stopReason: "stop", timestamp: 3 } as AgentMessage);
+					state.messages.push({
+						role: "assistant",
+						content: [],
+						stopReason: "stop",
+						timestamp: 3,
+					} as AgentMessage);
 				},
 				abort: () => {},
 				reset: () => {},
@@ -3510,7 +3515,10 @@ describe("advisor", () => {
 			const messages = [
 				{
 					role: "assistant",
-					content: [{ type: "thinking", thinking: "private reasoning" }, { type: "text", text: "answer" }],
+					content: [
+						{ type: "thinking", thinking: "private reasoning" },
+						{ type: "text", text: "answer" },
+					],
 					timestamp: 1,
 				} as AgentMessage,
 			];
@@ -3562,7 +3570,10 @@ describe("advisor", () => {
 			const messages = [
 				{
 					role: "assistant",
-					content: [{ type: "thinking", thinking: "private reasoning" }, { type: "text", text: "answer" }],
+					content: [
+						{ type: "thinking", thinking: "private reasoning" },
+						{ type: "text", text: "answer" },
+					],
 					timestamp: 1,
 				} as AgentMessage,
 			];
@@ -3607,7 +3618,12 @@ describe("advisor", () => {
 						return;
 					}
 					state.error = undefined;
-					state.messages.push({ role: "assistant", content: [], stopReason: "stop", timestamp: 3 } as AgentMessage);
+					state.messages.push({
+						role: "assistant",
+						content: [],
+						stopReason: "stop",
+						timestamp: 3,
+					} as AgentMessage);
 				},
 				abort: () => {},
 				reset: () => {},
@@ -3620,7 +3636,10 @@ describe("advisor", () => {
 			const messages = [
 				{
 					role: "assistant",
-					content: [{ type: "thinking", thinking: "private reasoning" }, { type: "text", text: "answer" }],
+					content: [
+						{ type: "thinking", thinking: "private reasoning" },
+						{ type: "text", text: "answer" },
+					],
 					timestamp: 1,
 				} as AgentMessage,
 			];

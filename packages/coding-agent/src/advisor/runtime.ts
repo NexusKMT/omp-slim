@@ -582,7 +582,10 @@ export class AdvisorRuntime {
 			.map(message => this.#dedupContextMessage(message));
 		if (delta.length === 0) return null;
 		const obfuscator = this.host.obfuscator;
-		let md = formatSessionHistoryMarkdown(delta, { ...ADVISOR_RENDER_OPTIONS, includeThinking: this.#includeThinking });
+		let md = formatSessionHistoryMarkdown(delta, {
+			...ADVISOR_RENDER_OPTIONS,
+			includeThinking: this.#includeThinking,
+		});
 		if (!md.trim()) return null;
 		if (obfuscator?.hasSecrets()) {
 			let discoveredNewRegexSecretValue = false;

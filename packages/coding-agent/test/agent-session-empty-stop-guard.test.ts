@@ -505,11 +505,7 @@ describe("AgentSession empty stop guard", () => {
 		const commentary = "Codex commentary before the empty final answer.";
 		const recovered = "Recovered after the empty final-answer retry.";
 		const { session, mock } = await createHarness(
-			[
-				{ content: [commentary], stopReason: "stop" },
-				emptyStop(),
-				{ content: [recovered], stopReason: "stop" },
-			],
+			[{ content: [commentary], stopReason: "stop" }, emptyStop(), { content: [recovered], stopReason: "stop" }],
 			{},
 			{ provider: "openai-codex", id: "gpt-5.5-codex" },
 		);

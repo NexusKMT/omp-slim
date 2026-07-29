@@ -1336,7 +1336,8 @@ export class StatusLineComponent implements Component {
 			if (candidate.scope?.windowId !== "7d" || typeof fraction !== "number" || !Number.isFinite(fraction)) {
 				continue;
 			}
-			const tier = typeof candidate.scope?.tier === "string" && candidate.scope.tier ? candidate.scope.tier : undefined;
+			const tier =
+				typeof candidate.scope?.tier === "string" && candidate.scope.tier ? candidate.scope.tier : undefined;
 			if (sevenDay && (sevenDayTier === undefined || tier)) continue;
 			const resetsAt = candidate.window?.resetsAt;
 			sevenDay = {
