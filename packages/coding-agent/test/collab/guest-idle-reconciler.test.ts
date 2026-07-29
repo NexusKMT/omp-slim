@@ -39,16 +39,20 @@ interface Fixture {
 	ctx: GuestIdleReconcilerCtx;
 	markActivityEnd: Mock<() => void>;
 	loaderStop: Mock<() => void>;
+	visibleChildren: object[];
 }
 
 function makeCtx(hasLoader: boolean): Fixture {
 	const markActivityEnd: Mock<() => void> = mock(() => {});
 	const loaderStop: Mock<() => void> = mock(() => {});
+	const loader = { stop: loaderStop };
+	const visibleChildren: object[] = hasLoader ? [loader] : [];
 	const ctx: GuestIdleReconcilerCtx = {
 		statusLine: { markActivityEnd },
-		loadingAnimation: hasLoader ? { stop: loaderStop } : undefined,
+		statusContainer: { disposeChildren: () => visibleChildren.splice(0) },
+		loadingAnimation: hasLoader ? loader : undefined,
 	};
-	return { ctx, markActivityEnd, loaderStop };
+	return { ctx, markActivityEnd, loaderStop, visibleChildren };
 }
 
 function makeSession(): ConstructorParameters<typeof StatusLineComponent>[0] {
@@ -87,12 +91,13 @@ function makeSession(): ConstructorParameters<typeof StatusLineComponent>[0] {
 
 describe("reconcileGuestIdleHostState", () => {
 	it("closes the active-time window and stops the loader when the host reports idle", () => {
-		const { ctx, markActivityEnd, loaderStop } = makeCtx(true);
+		const { ctx, markActivityEnd, loaderStop, visibleChildren } = makeCtx(true);
 		reconcileGuestIdleHostState(ctx, false);
 		expect(markActivityEnd).toHaveBeenCalledTimes(1);
 		expect(loaderStop).toHaveBeenCalledTimes(1);
 		// Loader is cleared so a second reconciliation does not re-stop it.
 		expect(ctx.loadingAnimation).toBeUndefined();
+		expect(visibleChildren).toEqual([]);
 	});
 
 	it("is a no-op while the host is still streaming so live turns keep the meter open", () => {
@@ -135,6 +140,7 @@ describe("reconcileGuestSnapshotHostState", () => {
 		const ensureLoadingAnimation = mock(() => {});
 		const ctx: GuestSnapshotActivityReconcilerCtx = {
 			statusLine,
+			statusContainer: { disposeChildren: () => {} },
 			loadingAnimation: undefined,
 			ensureLoadingAnimation,
 			autoCompactionLoader: undefined,
@@ -157,6 +163,7 @@ describe("reconcileGuestSnapshotHostState", () => {
 		const ensureLoadingAnimation = mock(() => {});
 		const ctx: GuestSnapshotActivityReconcilerCtx = {
 			statusLine,
+			statusContainer: { disposeChildren: () => {} },
 			loadingAnimation: undefined,
 			ensureLoadingAnimation,
 			autoCompactionLoader: undefined,
@@ -179,7 +186,10 @@ describe("reconcileGuestSnapshotHostState", () => {
 		});
 		const ctx: GuestSnapshotActivityReconcilerCtx & { statusContainer: { clear: () => void } } = {
 			statusLine: new StatusLineComponent(makeSession()),
-			statusContainer: { clear: () => visibleChildren.splice(0) },
+			statusContainer: {
+				clear: () => visibleChildren.splice(0),
+				disposeChildren: () => visibleChildren.splice(0),
+			},
 			loadingAnimation: undefined,
 			ensureLoadingAnimation,
 			autoCompactionLoader:
@@ -201,6 +211,7 @@ describe("reconcileGuestSnapshotHostState", () => {
 		const ensureLoadingAnimation = mock(() => {});
 		const ctx: GuestSnapshotActivityReconcilerCtx = {
 			statusLine: new StatusLineComponent(makeSession()),
+			statusContainer: { disposeChildren: () => {} },
 			loadingAnimation: undefined,
 			ensureLoadingAnimation,
 			autoCompactionLoader: undefined,
@@ -214,6 +225,7 @@ describe("reconcileGuestSnapshotHostState", () => {
 		const ensureLoadingAnimation = mock(() => {});
 		const ctx: GuestSnapshotActivityReconcilerCtx = {
 			statusLine: new StatusLineComponent(makeSession()),
+			statusContainer: { disposeChildren: () => {} },
 			loadingAnimation: undefined,
 			ensureLoadingAnimation,
 			autoCompactionLoader: {} as GuestSnapshotActivityReconcilerCtx["autoCompactionLoader"],

@@ -85,6 +85,7 @@ interface PendingSnapshot {
 /** Minimal context surface the idle-state reconciler mutates. */
 export interface GuestIdleReconcilerCtx {
 	statusLine: { markActivityEnd: () => void };
+	statusContainer: Pick<InteractiveModeContext["statusContainer"], "disposeChildren">;
 	loadingAnimation: { stop: () => void } | undefined;
 }
 
@@ -106,6 +107,7 @@ export function reconcileGuestIdleHostState(ctx: GuestIdleReconcilerCtx, isStrea
 	if (ctx.loadingAnimation) {
 		ctx.loadingAnimation.stop();
 		ctx.loadingAnimation = undefined;
+		ctx.statusContainer.disposeChildren();
 	}
 }
 
