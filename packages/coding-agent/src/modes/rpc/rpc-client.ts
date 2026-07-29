@@ -597,7 +597,16 @@ export class RpcClient {
 	 */
 	async getState(): Promise<RpcSessionState> {
 		const response = await this.#send({ type: "get_state" });
-		return this.#getData(response);
+		const state = this.#getData<RpcSessionState>(response);
+		return {
+			...state,
+			fastModeEnabled: state.fastModeEnabled === true,
+			fastModeActive: state.fastModeActive === true,
+			tokensPerSecond:
+				typeof state.tokensPerSecond === "number" && Number.isFinite(state.tokensPerSecond)
+					? state.tokensPerSecond
+					: null,
+		};
 	}
 
 	/**
