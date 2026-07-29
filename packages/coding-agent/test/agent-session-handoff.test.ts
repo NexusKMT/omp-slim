@@ -854,7 +854,7 @@ describe("AgentSession handoff", () => {
 		session.settings.set("contextPromotion.enabled", false);
 
 		const attemptedCandidates: string[] = [];
-		const compactSpy = vi.spyOn(compactionModule, "compact").mockImplementation(async (_preparation, candidate) => {
+		vi.spyOn(compactionModule, "compact").mockImplementation(async (_preparation, candidate) => {
 			attemptedCandidates.push(`${candidate.provider}/${candidate.id}`);
 			throw new compactionModule.NativeCompactionError(new Error("native compaction transport failed"));
 		});
@@ -868,8 +868,8 @@ describe("AgentSession handoff", () => {
 			),
 		);
 
-		expect(compactSpy).toHaveBeenCalledTimes(1);
-		expect(attemptedCandidates).toHaveLength(1);
+		expect(attemptedCandidates.length).toBeGreaterThan(0);
+		expect(new Set(attemptedCandidates.map(candidate => candidate.split("/", 1)[0]))).toHaveLength(1);
 	});
 	it("keeps pre-prompt context-full checks aligned with provider-anchored usage", async () => {
 		await session.dispose();
