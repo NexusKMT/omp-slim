@@ -60,6 +60,7 @@ import { isFoundryEnabled } from "../utils/foundry";
 import { finalizeErrorMessage, type RawHttpRequestDump } from "../utils/http-inspector";
 import { getStreamFirstEventTimeoutMs, getStreamIdleTimeoutMs, iterateWithIdleTimeout } from "../utils/idle-iterator";
 import { notifyProviderResponse } from "../utils/provider-response";
+import { getHeadersFromError, getRetryAfterMsFromHeaders } from "../utils/retry-after";
 import { COMBINATOR_KEYS, NO_STRICT, toolWireSchema } from "../utils/schema";
 import { spillToDescription } from "../utils/schema/spill";
 import { createSdkStreamRequestOptions } from "../utils/sdk-stream-timeout";
@@ -71,7 +72,6 @@ import {
 	AnthropicMessagesClient,
 	type AnthropicMessagesClientLike,
 	calculateAnthropicRetryDelayMs,
-	retryDelayFromHeaders,
 } from "./anthropic-client";
 import {
 	type ToolInputSchema as AnthropicToolInputSchema,
@@ -1575,16 +1575,6 @@ export function isProviderRetryableError(error: unknown, provider?: string): boo
 	});
 }
 
-function hasHeaderGetter(value: unknown): value is Pick<Headers, "get"> {
-	return typeof value === "object" && value !== null && "get" in value && typeof value.get === "function";
-}
-
-function retryDelayFromErrorHeaders(error: unknown): number | undefined {
-	if (typeof error !== "object" || error === null || !("headers" in error)) return undefined;
-	const { headers } = error as { headers?: unknown };
-	return hasHeaderGetter(headers) ? retryDelayFromHeaders(headers) : undefined;
-}
-
 const THINKING_ENVELOPE_OPEN = "<thinking>";
 const THINKING_ENVELOPE_CLOSE = "</thinking>";
 
@@ -2711,7 +2701,7 @@ const streamAnthropicOnce = (
 					// Honor the server's retry hint (`retry-after-ms`/`retry-after`) on
 					// 429/529-style failures: retrying sooner than the server asked is a
 					// guaranteed failure that just burns the retry budget.
-					const headerDelayMs = retryDelayFromErrorHeaders(streamFailure);
+					const headerDelayMs = getRetryAfterMsFromHeaders(getHeadersFromError(streamFailure));
 					// Bound the server-directed wait so a multi-hour `retry-after` cannot
 					// park the provider stream before higher-level recovery runs. A non-positive cap
 					// disables the bound; an over-cap hint surfaces the original error immediately.

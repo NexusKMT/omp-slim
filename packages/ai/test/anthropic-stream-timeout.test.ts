@@ -691,6 +691,53 @@ describe("anthropic retry-after cap (maxRetryDelayMs)", () => {
 		expect(result.errorStatus).toBe(529);
 	});
 
+	it("honors record-valued retry headers from injected SDK errors", async () => {
+		let attempt = 0;
+		const error = Object.assign(new Error("529 overloaded"), {
+			status: 529,
+			headers: { "Retry-After-Ms": "10000" },
+		});
+		const create = ((_body: unknown) => {
+			attempt += 1;
+			return createRejectedAnthropicRequest(error) as never;
+		}) as unknown as AnthropicMessagesClientLike["messages"]["create"];
+		const providerRetryWait = vi.fn(async () => {});
+
+		const result = await streamAnthropic(model, context, {
+			client: { messages: { create } },
+			providerRetryWait,
+			maxRetryDelayMs: 5_000,
+		}).result();
+
+		expect(attempt).toBe(1);
+		expect(providerRetryWait).not.toHaveBeenCalled();
+		expect(result.stopReason).toBe("error");
+		expect(result.errorStatus).toBe(529);
+	});
+
+	it("honors nested response retry headers from injected SDK errors", async () => {
+		let attempt = 0;
+		const error = Object.assign(new Error("529 overloaded"), {
+			response: { status: 529, headers: { "retry-after-ms": "10000" } },
+		});
+		const create = ((_body: unknown) => {
+			attempt += 1;
+			return createRejectedAnthropicRequest(error) as never;
+		}) as unknown as AnthropicMessagesClientLike["messages"]["create"];
+		const providerRetryWait = vi.fn(async () => {});
+
+		const result = await streamAnthropic(model, context, {
+			client: { messages: { create } },
+			providerRetryWait,
+			maxRetryDelayMs: 5_000,
+		}).result();
+
+		expect(attempt).toBe(1);
+		expect(providerRetryWait).not.toHaveBeenCalled();
+		expect(result.stopReason).toBe("error");
+		expect(result.errorStatus).toBe(529);
+	});
+
 	it("passes maxRetryDelayMs to internally constructed Anthropic clients", async () => {
 		let calls = 0;
 		const fetch: FetchImpl = async () => {
