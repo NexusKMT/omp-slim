@@ -60,19 +60,18 @@ import { isFoundryEnabled } from "../utils/foundry";
 import { finalizeErrorMessage, type RawHttpRequestDump } from "../utils/http-inspector";
 import { getStreamFirstEventTimeoutMs, getStreamIdleTimeoutMs, iterateWithIdleTimeout } from "../utils/idle-iterator";
 import { notifyProviderResponse } from "../utils/provider-response";
+import { getHeadersFromError, getRetryAfterMsFromHeaders } from "../utils/retry-after";
 import { COMBINATOR_KEYS, NO_STRICT, toolWireSchema } from "../utils/schema";
 import { spillToDescription } from "../utils/schema/spill";
 import { createSdkStreamRequestOptions } from "../utils/sdk-stream-timeout";
 import { notifyRawSseEvent } from "../utils/sse-debug";
 import { isForcedToolChoice } from "../utils/tool-choice";
 import {
-	AnthropicApiError,
 	AnthropicConnectionTimeoutError,
 	type AnthropicFetchOptions,
 	AnthropicMessagesClient,
 	type AnthropicMessagesClientLike,
 	calculateAnthropicRetryDelayMs,
-	retryDelayFromHeaders,
 } from "./anthropic-client";
 import {
 	type ToolInputSchema as AnthropicToolInputSchema,
@@ -1155,6 +1154,7 @@ export type AnthropicClientOptionsArgs = {
 	thinkingDisplay?: AnthropicThinkingDisplay;
 	disableStrictTools?: boolean;
 	fetch?: FetchImpl;
+	maxRetryDelayMs?: number;
 	claudeCodeSessionId?: string;
 };
 
@@ -1164,6 +1164,7 @@ export type AnthropicClientOptionsResult = {
 	authToken?: string | null;
 	baseURL?: string;
 	maxRetries: number;
+	maxRetryDelayMs?: number;
 	defaultHeaders: Record<string, string>;
 	fetch?: FetchImpl;
 	fetchOptions?: AnthropicFetchOptions;
@@ -1952,6 +1953,7 @@ const streamAnthropicOnce = (
 					thinkingEnabled: options?.thinkingEnabled,
 					thinkingDisplay: options?.thinkingDisplay,
 					fetch: options?.fetch,
+					maxRetryDelayMs: options?.maxRetryDelayMs,
 					claudeCodeSessionId: options?.sessionId ?? extractClaudeMetadataSessionId(options?.metadata?.user_id),
 					disableStrictTools,
 				});
@@ -2699,10 +2701,14 @@ const streamAnthropicOnce = (
 					// Honor the server's retry hint (`retry-after-ms`/`retry-after`) on
 					// 429/529-style failures: retrying sooner than the server asked is a
 					// guaranteed failure that just burns the retry budget.
-					const headerDelayMs =
-						streamFailure instanceof Error && streamFailure instanceof AnthropicApiError
-							? retryDelayFromHeaders(streamFailure.headers)
-							: undefined;
+					const headerDelayMs = getRetryAfterMsFromHeaders(getHeadersFromError(streamFailure));
+					// Bound the server-directed wait so a multi-hour `retry-after` cannot
+					// park the provider stream before higher-level recovery runs. A non-positive cap
+					// disables the bound; an over-cap hint surfaces the original error immediately.
+					const maxRetryDelayMs = options?.maxRetryDelayMs ?? 60_000;
+					if (headerDelayMs !== undefined && maxRetryDelayMs > 0 && headerDelayMs > maxRetryDelayMs) {
+						throw streamFailure;
+					}
 					const delayMs = headerDelayMs !== undefined ? Math.max(headerDelayMs, backoffDelayMs) : backoffDelayMs;
 					if (options?.providerRetryWait) {
 						await options.providerRetryWait(delayMs, options.signal);
@@ -2847,6 +2853,7 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 		thinkingEnabled = false,
 		thinkingDisplay,
 		isOAuth,
+		maxRetryDelayMs,
 		claudeCodeSessionId,
 		disableStrictTools: disableStrictToolsOverride,
 	} = args;
@@ -2917,6 +2924,7 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 			authToken: copilotApiKey,
 			baseURL: baseUrl,
 			maxRetries: 5,
+			maxRetryDelayMs,
 			defaultHeaders,
 			fetch: cchFetch,
 			fetchOptions,
@@ -2964,6 +2972,7 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 			authToken: null,
 			baseURL: baseUrl,
 			maxRetries: 5,
+			maxRetryDelayMs,
 			defaultHeaders,
 			fetch: cchFetch,
 			fetchOptions,
@@ -2982,6 +2991,7 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 			authToken: null,
 			baseURL: baseUrl,
 			maxRetries: 5,
+			maxRetryDelayMs,
 			defaultHeaders,
 			fetch: cchFetch,
 			fetchOptions,
@@ -3004,6 +3014,7 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 		authToken: oauthToken ? apiKey : undefined,
 		baseURL: baseUrl,
 		maxRetries: 5,
+		maxRetryDelayMs,
 		defaultHeaders,
 		fetch: cchFetch,
 		fetchOptions,
