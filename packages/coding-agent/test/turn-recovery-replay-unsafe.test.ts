@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import { createProviderErrorMessage } from "../../ai/src/providers/error-message";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import type { Model, Usage } from "@oh-my-pi/pi-catalog/types";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -99,7 +100,7 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		expect(recovery.isRetryableError(message)).toBe(false);
 	});
 
-	it("finds a replay-safe failed turn fallback-eligible when a fallback chain is configured (positive control)", () => {
+	it("allows replay-safe hard fallback and excludes visible text with a configured chain", () => {
 		const recovery = new TurnRecovery(
 			createHost(model, modelRegistry, {
 				[`${model.provider}/${model.id}`]: ["openai/gpt-4o-mini"],
@@ -107,6 +108,8 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		);
 		// Thinking-only output is replay-safe: nothing visible reached the user.
 		const message = makeMessage([{ type: "thinking", thinking: "safe reasoning before failing" }], model);
+		const visible = makeMessage([{ type: "text", text: "Already shown" }], model);
+		expect(recovery.isHardErrorFallbackEligible(visible)).toBe(false);
 		expect(recovery.isHardErrorFallbackEligible(message)).toBe(true);
 	});
 
@@ -235,4 +238,11 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		message.stopDetails = { type: "refusal" };
 		expect(recovery.isRetryableError(message)).toBe(false);
 	});
+
+	it("keeps pre-stream provider diagnostics replay-safe", () => {
+		const recovery = new TurnRecovery(createHost(model, modelRegistry));
+		const message = createProviderErrorMessage(model, new Error("fetch failed"));
+		expect(recovery.isRetryableError(message)).toBe(true);
+	});
+
 });
