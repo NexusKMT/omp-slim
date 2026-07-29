@@ -1,5 +1,6 @@
-import { describe, expect, it } from "bun:test";
-import { OutputBacklogGuard } from "@oh-my-pi/pi-tui/terminal";
+import { describe, expect, it, vi } from "bun:test";
+import { OutputBacklogGuard, ProcessTerminal } from "@oh-my-pi/pi-tui/terminal";
+import { setTerminalHeadless } from "@oh-my-pi/pi-utils";
 
 // Regression test for https://github.com/can1357/oh-my-pi/issues/6854
 //
@@ -52,4 +53,31 @@ describe("issue #6854: OutputBacklogGuard bounds a stalled stdout", () => {
 		expect(guard.record(false, 1024)).toBe(false);
 		expect(guard.record(false, 1)).toBe(true);
 	});
+});
+
+it("stops writing when the real terminal path crosses the backlog cap", () => {
+	const previousHeadless = setTerminalHeadless(false);
+	const isTTY = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+	let writes = 0;
+	const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => {
+		writes++;
+		return false;
+	});
+
+	try {
+		Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+		const terminal = new ProcessTerminal();
+		const frame = "x".repeat(1024 * 1024);
+		for (let i = 0; i < 70; i++) terminal.write(frame);
+
+		// The 65th MiB crosses the 64 MiB cap and marks the terminal dead;
+		// later frames must not reach stdout.
+		expect(writes).toBe(65);
+		process.stdout.emit("drain");
+	} finally {
+		stdout.mockRestore();
+		if (isTTY) Object.defineProperty(process.stdout, "isTTY", isTTY);
+		else Reflect.deleteProperty(process.stdout, "isTTY");
+		setTerminalHeadless(previousHeadless);
+	}
 });
