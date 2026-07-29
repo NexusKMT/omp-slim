@@ -3493,7 +3493,7 @@ describe("advisor", () => {
 							stopDetails: { type: "refusal", category: "reasoning_extraction" },
 							errorMessage: state.error,
 							timestamp: 2,
-						} as AgentMessage);
+						} as unknown as AgentMessage);
 						return;
 					}
 					state.error = undefined;
@@ -3502,7 +3502,7 @@ describe("advisor", () => {
 						content: [],
 						stopReason: "stop",
 						timestamp: 3,
-					} as AgentMessage);
+					} as unknown as AgentMessage);
 				},
 				abort: () => {},
 				reset: () => {},
@@ -3557,7 +3557,7 @@ describe("advisor", () => {
 						stopDetails: { type: "refusal", category: "reasoning_extraction" },
 						errorMessage: state.error,
 						timestamp: promptInputs.length + 1,
-					} as AgentMessage);
+					} as unknown as AgentMessage);
 				},
 				abort: () => {},
 				reset: () => {},
@@ -3614,7 +3614,7 @@ describe("advisor", () => {
 							stopDetails: { type: "refusal" },
 							errorMessage: state.error,
 							timestamp: 2,
-						} as AgentMessage);
+						} as unknown as AgentMessage);
 						return;
 					}
 					state.error = undefined;
@@ -3623,7 +3623,7 @@ describe("advisor", () => {
 						content: [],
 						stopReason: "stop",
 						timestamp: 3,
-					} as AgentMessage);
+					} as unknown as AgentMessage);
 				},
 				abort: () => {},
 				reset: () => {},

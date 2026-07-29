@@ -946,7 +946,7 @@ export class CursorExecHandlers implements ICursorExecHandlers {
 	 */
 	async mcpApprovalPreflight(call: CursorMcpCall) {
 		const toolName = call.toolName || call.name;
-		const tool = this.options.tools.get(toolName) ?? this.options.getTool?.(toolName);
+		const tool = this.options.getExecutableTool?.(toolName) ?? this.options.tools.get(toolName);
 		if (!tool) return false;
 		const context = this.options.getToolContext?.();
 		const settings = context?.settings;
