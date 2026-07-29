@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added a `browser.cdpUrl` setting that points browser automation at an already-running CDP endpoint by default, so `app.cdp_url` no longer has to be repeated on every call. Explicit `app` options still take precedence.
+
 ## [17.1.8] - 2026-07-28
 
 ### Breaking Changes
