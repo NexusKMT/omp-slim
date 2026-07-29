@@ -210,6 +210,15 @@ describe("omp ttsr", () => {
 			expect(report.triggered).toHaveLength(0);
 		});
 
+		it("renders the inferred text-source note in human-readable output", async () => {
+			captureStreams();
+			const rulePath = await writeTempRule("class", ["tool:edit(*.cs)"]);
+			const snippetPath = await writeTempSnippet("class A {}", "unknownext");
+			await run({ action: "test", test: { rule: rulePath, file: snippetPath, source: undefined } });
+			expect(stdout).toContain("note: inferred --source text from '.unknownext'");
+			expect(stdout).toContain("--source tool --tool edit");
+		});
+
 		it("omits the inference note when --source is explicit", async () => {
 			captureStreams();
 			const rulePath = await writeTempRule("class", ["tool:edit(*.cs)"]);
