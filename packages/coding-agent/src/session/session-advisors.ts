@@ -876,6 +876,7 @@ export class SessionAdvisors {
 				maintainContext: (incomingTokens, signal) =>
 					this.#maintainAdvisorContext(advisorRef, incomingTokens, signal),
 				obfuscator: this.#host.obfuscator,
+				getModelIdentity: () => formatModelString(advisorRef.agent.state.model),
 				beginAdvisorUpdate: () => advisorRef.emissionGuard.beginUpdate(),
 				onTurnError: (error, failedMessages, signal) =>
 					this.#recoverAdvisorTurn(advisorRef, error, failedMessages, signal),
