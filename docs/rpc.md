@@ -124,6 +124,7 @@ Important edge behavior from runtime:
 ### State
 
 - `{ id?, type: "get_state" }`
+- `{ id?, type: "set_fast_mode", enabled: boolean }`
 - `{ id?, type: "get_available_commands" }`
 - `{ id?, type: "set_todos", phases: TodoPhase[] }`
 - `{ id?, type: "set_host_tools", tools: RpcHostToolDefinition[] }`
@@ -231,6 +232,10 @@ Local-only slash commands may emit `command_output` frames before completing via
 
 ### `get_state` payload
 
+`tokensPerSecond` is a number when output throughput is available and `null`
+otherwise. `fastModeEnabled` reports the session setting, while
+`fastModeActive` reports whether the current model realizes fast mode.
+
 ```json
 {
   "model": { "provider": "...", "id": "..." },
@@ -243,6 +248,9 @@ Local-only slash commands may emit `command_output` frames before completing via
   "sessionFile": "...",
   "sessionId": "...",
   "sessionName": "...",
+  "fastModeEnabled": false,
+  "tokensPerSecond": null,
+  "fastModeActive": false,
   "autoCompactionEnabled": true,
   "messageCount": 0,
   "queuedMessageCount": 0,
@@ -272,6 +280,56 @@ Local-only slash commands may emit `command_output` frames before completing via
     "contextWindow": 200000,
     "percent": 0.55
   }
+}
+```
+
+### `set_fast_mode` payload
+
+`set_fast_mode` changes whether fast mode is enabled for the session. The
+request is:
+
+```json
+{ "id": "req_fast_on", "type": "set_fast_mode", "enabled": true }
+```
+
+On success, `data` always contains both `enabled` and `active`. `enabled`
+reports the session setting; `active` reports whether fast mode is realized by
+the current model:
+
+```json
+{
+  "id": "req_fast_on",
+  "type": "response",
+  "command": "set_fast_mode",
+  "success": true,
+  "data": { "enabled": true, "active": true }
+}
+```
+
+Enabling fast mode on a model without a service-tier family fails with the
+exact error below:
+
+```json
+{
+  "id": "req_fast_on",
+  "type": "response",
+  "command": "set_fast_mode",
+  "success": false,
+  "error": "Fast mode is unavailable for the current model."
+}
+```
+
+Disabling fast mode is idempotent, including on an unsupported model. It
+succeeds as an off/no-op result and leaves `get_state.fastModeEnabled` and
+`get_state.fastModeActive` false:
+
+```json
+{
+  "id": "req_fast_off",
+  "type": "response",
+  "command": "set_fast_mode",
+  "success": true,
+  "data": { "enabled": false, "active": false }
 }
 ```
 

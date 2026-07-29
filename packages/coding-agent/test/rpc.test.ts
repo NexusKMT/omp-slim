@@ -315,3 +315,44 @@ describe.skipIf(!e2eApiKey("ANTHROPIC_API_KEY"))("RPC mode", () => {
 		expect(text).toContain("test123");
 	}, 90000);
 });
+
+describe("RPC fast mode with unsupported model", () => {
+	let client: RpcClient;
+	let sessionDir: string;
+
+	beforeEach(() => {
+		sessionDir = path.join(os.tmpdir(), `omp-rpc-fast-mode-test-${Snowflake.next()}`);
+		client = new RpcClient({
+			cliPath: path.join(import.meta.dir, "..", "src", "cli.ts"),
+			cwd: path.join(import.meta.dir, ".."),
+			env: {
+				PI_CODING_AGENT_DIR: sessionDir,
+				FIREWORKS_API_KEY: "test-fireworks-key",
+			},
+			provider: "fireworks",
+			model: "deepseek-v4-flash",
+		});
+	});
+
+	afterEach(async () => {
+		await client.stop();
+		if (sessionDir && fs.existsSync(sessionDir)) {
+			removeSyncWithRetries(sessionDir);
+		}
+	});
+
+	test("rejects enable but idempotently accepts disable", async () => {
+		await client.start();
+
+		await expect(client.setFastMode(true)).rejects.toMatchObject({
+			message: "Fast mode is unavailable for the current model.",
+		});
+
+		const disabled = await client.setFastMode(false);
+		expect(disabled).toEqual({ enabled: false, active: false });
+
+		const state = await client.getState();
+		expect(state.fastModeEnabled).toBe(false);
+		expect(state.fastModeActive).toBe(false);
+	}, 30000);
+});

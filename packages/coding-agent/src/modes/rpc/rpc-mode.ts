@@ -1104,7 +1104,8 @@ export async function runRpcMode(
 			}
 
 			case "set_fast_mode": {
-				if (!session.setFastMode(command.enabled)) {
+				const supported = session.setFastMode(command.enabled);
+				if (command.enabled && !supported) {
 					return error(id, "set_fast_mode", "Fast mode is unavailable for the current model.");
 				}
 				return success(id, "set_fast_mode", {
