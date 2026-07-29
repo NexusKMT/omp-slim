@@ -1,4 +1,3 @@
-import { scheduler } from "node:timers/promises";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { estimateTokens } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, ImageContent, TextContent } from "@oh-my-pi/pi-ai";
@@ -1092,7 +1091,7 @@ export class AdvisorRuntime {
 								await Bun.sleep(0);
 							} else {
 								try {
-									await scheduler.wait(this.retryDelayMs, { signal: iterationAbort.signal });
+									await raceWithSignal(Bun.sleep(this.retryDelayMs), iterationAbort.signal);
 								} catch (sleepError) {
 									if (!iterationAbort.signal.aborted) throw sleepError;
 								}
