@@ -16,6 +16,7 @@ import {
 	sortAndValidateTextEdits,
 } from "@oh-my-pi/pi-coding-agent/lsp/edits";
 import { renderCall, renderResult } from "@oh-my-pi/pi-coding-agent/lsp/render";
+import { renderResult as renderLocalResult } from "../../src/lsp/render";
 import {
 	type CodeAction,
 	type CreateFile,
@@ -1352,6 +1353,22 @@ describe("lsp regressions", () => {
 		const resultText = sanitizeText(result.render(120).join("\n"));
 		expect(resultText).not.toContain("\t");
 		expect(resultText.replace(/\s+/g, " ")).toContain("too many arguments in call");
+	});
+
+	it("sanitizes expanded generic error output (#7041)", async () => {
+		const theme = await getThemeByName("dark");
+		expect(theme).toBeDefined();
+		const result = renderLocalResult(
+			{
+				content: [{ type: "text", text: `Error:\nserver\tstderr ${"x".repeat(200)}` }],
+			},
+			{ expanded: true, isPartial: false },
+			theme!,
+		);
+
+		const lines = sanitizeText(result.render(300).join("\n")).split("\n");
+		expect(lines.join("\n")).not.toContain("\t");
+		expect(lines.join("\n")).not.toContain("x".repeat(100));
 	});
 
 	for (const dynamicRegistration of [false, true]) {
