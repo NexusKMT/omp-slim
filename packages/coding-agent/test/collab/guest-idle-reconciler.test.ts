@@ -13,6 +13,7 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it, type Mock, mock, vi } from "bun:test";
 import {
+	clearGuestTransientStatus,
 	type GuestIdleReconcilerCtx,
 	type GuestSnapshotActivityReconcilerCtx,
 	reconcileGuestIdleHostState,
@@ -131,13 +132,94 @@ describe("reconcileGuestSnapshotHostState", () => {
 		now += 5_000;
 		expect(statusLine.getActiveMs()).toBe(5_000);
 
+		const ensureLoadingAnimation = mock(() => {});
 		const ctx: GuestSnapshotActivityReconcilerCtx = {
 			statusLine,
 			loadingAnimation: undefined,
+			ensureLoadingAnimation,
+			autoCompactionLoader: undefined,
+			retryLoader: undefined,
 		};
 		reconcileGuestSnapshotHostState(ctx, false);
 		const stoppedAt = statusLine.getActiveMs();
 		now += 60_000;
 		expect(statusLine.getActiveMs()).toBe(stoppedAt);
+		expect(ensureLoadingAnimation).not.toHaveBeenCalled();
+	});
+
+	it("starts the working loader for a streaming snapshot when no maintenance loader is active", () => {
+		// Regression (F4): a guest that missed the earlier `agent_start` — most
+		// often a reconnect dropped it mid-stream — showed no spinner while the
+		// host kept working, so the loader vanished mid-turn. The host builds
+		// its `state` frame at fire time, so `isStreaming` is never stale here.
+		const statusLine = new StatusLineComponent(makeSession());
+		const markActivityStart = vi.spyOn(statusLine, "markActivityStart");
+		const ensureLoadingAnimation = mock(() => {});
+		const ctx: GuestSnapshotActivityReconcilerCtx = {
+			statusLine,
+			loadingAnimation: undefined,
+			ensureLoadingAnimation,
+			autoCompactionLoader: undefined,
+			retryLoader: undefined,
+		};
+		reconcileGuestSnapshotHostState(ctx, true);
+		expect(markActivityStart).toHaveBeenCalledTimes(1);
+		expect(ensureLoadingAnimation).toHaveBeenCalledTimes(1);
+	});
+
+	it("restores an owned working loader when a streaming resync clears a maintenance loader", () => {
+		const staleStop = mock(() => {});
+		const visibleChildren: object[] = [];
+		const staleMaintenanceLoader = { stop: staleStop };
+		visibleChildren.push(staleMaintenanceLoader);
+		const workingLoader = { stop: mock(() => {}) };
+		const ensureLoadingAnimation = mock(() => {
+			ctx.loadingAnimation = workingLoader;
+			visibleChildren.push(workingLoader);
+		});
+		const ctx: GuestSnapshotActivityReconcilerCtx & { statusContainer: { clear: () => void } } = {
+			statusLine: new StatusLineComponent(makeSession()),
+			statusContainer: { clear: () => visibleChildren.splice(0) },
+			loadingAnimation: undefined,
+			ensureLoadingAnimation,
+			autoCompactionLoader:
+				staleMaintenanceLoader as unknown as GuestSnapshotActivityReconcilerCtx["autoCompactionLoader"],
+			retryLoader: undefined,
+		};
+
+		clearGuestTransientStatus(ctx);
+		reconcileGuestSnapshotHostState(ctx, true);
+
+		expect(staleStop).toHaveBeenCalledTimes(1);
+		expect(ctx.autoCompactionLoader).toBeUndefined();
+		expect(ctx.retryLoader).toBeUndefined();
+		expect(ensureLoadingAnimation).toHaveBeenCalledTimes(1);
+		expect(visibleChildren).toEqual([workingLoader]);
+	});
+
+	it("does not start the working loader while a retry loader owns the status area", () => {
+		const ensureLoadingAnimation = mock(() => {});
+		const ctx: GuestSnapshotActivityReconcilerCtx = {
+			statusLine: new StatusLineComponent(makeSession()),
+			loadingAnimation: undefined,
+			ensureLoadingAnimation,
+			autoCompactionLoader: undefined,
+			retryLoader: {} as GuestSnapshotActivityReconcilerCtx["retryLoader"],
+		};
+		reconcileGuestSnapshotHostState(ctx, true);
+		expect(ensureLoadingAnimation).not.toHaveBeenCalled();
+	});
+
+	it("does not start the working loader while an auto-compaction loader owns the status area", () => {
+		const ensureLoadingAnimation = mock(() => {});
+		const ctx: GuestSnapshotActivityReconcilerCtx = {
+			statusLine: new StatusLineComponent(makeSession()),
+			loadingAnimation: undefined,
+			ensureLoadingAnimation,
+			autoCompactionLoader: {} as GuestSnapshotActivityReconcilerCtx["autoCompactionLoader"],
+			retryLoader: undefined,
+		};
+		reconcileGuestSnapshotHostState(ctx, true);
+		expect(ensureLoadingAnimation).not.toHaveBeenCalled();
 	});
 });

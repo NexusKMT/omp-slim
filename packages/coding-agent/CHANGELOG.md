@@ -19,6 +19,7 @@
 - Fixed `/tan` agents being unable to read parent-session `local://` attachments (pasted files, generated references). `TanCommandController` now threads the parent session's `localProtocolOptions` into the tan clone, so `local://` resolves against `<parent-artifacts>/local` instead of the clone-nested `<parent-artifacts>/Tan-<id>/local` root. Subagent local mappings now remain session-bound rather than replacing the process-global override used by active-session suggestions and links ([#6971](https://github.com/can1357/oh-my-pi/issues/6971)).
 - Turn recovery now classifies a failed turn that already streamed visible (non-whitespace) assistant text as replay-unsafe, so credential rotation and model fallback no longer re-stream duplicated output. Thinking-only and whitespace-only partial turns remain retriable.
 - Fixed Codex web search silently returning a plain model completion when a GPT-5.6 Responses-Lite model skipped the hosted `web_search` tool; the provider now requires a `web_search_call` event and advances to a searching model or fails clearly instead of accepting a non-search answer ([#6988](https://github.com/can1357/oh-my-pi/issues/6988)).
+- Fixed the TUI collab guest never starting its loader when it joins or reconnects mid-turn: every host `state` frame now reconciles liveness in both directions ([#6996](https://github.com/can1357/oh-my-pi/pull/6996) by [@metaphorics](https://github.com/metaphorics)).
 
 ## [17.1.8] - 2026-07-28
 
