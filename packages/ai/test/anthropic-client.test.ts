@@ -421,11 +421,13 @@ describe("AnthropicMessagesClient retry-after cap", () => {
 		completeTextWithIncompletePrefix.set(completeText);
 		completeTextWithIncompletePrefix.set([0xe2, 0x82], completeText.byteLength);
 		let response: Response | undefined;
+		let pullErrored = false;
 		const rejectedBody = new ReadableStream<Uint8Array>({
 			start(streamController) {
 				streamController.enqueue(completeTextWithIncompletePrefix);
 			},
 			pull(streamController) {
+				pullErrored = true;
 				streamController.error(new Error("socket closed"));
 			},
 		});
@@ -447,6 +449,7 @@ describe("AnthropicMessagesClient retry-after cap", () => {
 		expect(error.message).toBe("502 complete text");
 		expect(error.message).not.toContain("\uFFFD");
 		expect(response?.body?.locked).toBe(false);
+		expect(pullErrored).toBe(true);
 	});
 
 	it("does not flush an incomplete UTF-8 prefix when the error body times out", async () => {
