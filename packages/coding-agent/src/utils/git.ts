@@ -217,6 +217,14 @@ export const GIT_COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
 export const GIT_NETWORK_TIMEOUT_MS = 30 * 60 * 1000;
 /** Maximum captured stdout or stderr bytes retained from git and gh subprocesses. */
 export const GIT_COMMAND_OUTPUT_LIMIT_BYTES = 8 * 1024 * 1024;
+/**
+ * Deadline for synchronous git plumbing commands launched via
+ * {@link gitSpawnSyncText}. These run on the render path (e.g. reftable HEAD
+ * resolution), so the deadline is short: a command that has not exited by then
+ * is killed and reported as {@link GIT_COMMAND_TIMEOUT_EXIT_CODE} so the caller
+ * degrades instead of freezing the UI indefinitely.
+ */
+export const GIT_SPAWN_SYNC_TIMEOUT_MS = 5_000;
 
 const GIT_COMMAND_TIMEOUT_EXIT_CODE = 124;
 // Exit code returned when the `git` binary cannot be launched at all (spawn
@@ -420,8 +428,17 @@ function ensureAvailable(): void {
  * exit code plus trimmed stdout; a missing `git` binary (spawn ENOENT) is
  * reported as {@link GIT_SPAWN_ENOENT_EXIT_CODE} so sync read-only callers
  * degrade to `null` instead of throwing an uncaught error during rendering.
+ *
+ * A deadline ({@link GIT_SPAWN_SYNC_TIMEOUT_MS}) is enforced so a pathological
+ * git invocation (lock contention, NFS stall, …) cannot hang the render path
+ * indefinitely: a child killed by the deadline is reported as
+ * {@link GIT_COMMAND_TIMEOUT_EXIT_CODE} rather than a successful exit.
  */
-function gitSpawnSyncText(cwd: string, args: readonly string[]): { exitCode: number; stdout: string } {
+function gitSpawnSyncText(
+	cwd: string,
+	args: readonly string[],
+	timeoutMs: number = GIT_SPAWN_SYNC_TIMEOUT_MS,
+): { exitCode: number; stdout: string } {
 	const commandArgs = withShortLivedGitConfig(withNoOptionalLocks(args));
 	try {
 		const result = Bun.spawnSync(["git", ...commandArgs], {
@@ -430,8 +447,14 @@ function gitSpawnSyncText(cwd: string, args: readonly string[]): { exitCode: num
 			stdout: "pipe",
 			stderr: "pipe",
 			windowsHide: true,
+			timeout: timeoutMs,
 		});
-		return { exitCode: result.exitCode ?? 0, stdout: new TextDecoder().decode(result.stdout).trim() };
+		// Bun's timeout marker is authoritative even when process cleanup reports
+		// exit code zero, so render-path callers never trust partial output.
+		const exitCode = result.exitedDueToTimeout
+			? GIT_COMMAND_TIMEOUT_EXIT_CODE
+			: (result.exitCode ?? GIT_COMMAND_TIMEOUT_EXIT_CODE);
+		return { exitCode, stdout: new TextDecoder().decode(result.stdout).trim() };
 	} catch (err) {
 		if (isEnoent(err)) return { exitCode: GIT_SPAWN_ENOENT_EXIT_CODE, stdout: "" };
 		throw err;

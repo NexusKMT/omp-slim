@@ -20,6 +20,7 @@
 - Turn recovery now classifies a failed turn that already streamed visible (non-whitespace) assistant text as replay-unsafe, so credential rotation and model fallback no longer re-stream duplicated output. Thinking-only and whitespace-only partial turns remain retriable.
 - Fixed Codex web search silently returning a plain model completion when a GPT-5.6 Responses-Lite model skipped the hosted `web_search` tool; the provider now requires a `web_search_call` event and advances to a searching model or fails clearly instead of accepting a non-search answer ([#6988](https://github.com/can1357/oh-my-pi/issues/6988)).
 - Fixed the TUI collab guest never starting its loader when it joins or reconnects mid-turn: every host `state` frame now reconciles liveness in both directions ([#6996](https://github.com/can1357/oh-my-pi/pull/6996) by [@metaphorics](https://github.com/metaphorics)).
+- Fixed random multi-second TUI freezes in reftable-format repos: status-line branch resolution moved off the render path onto the async-with-cache shape its siblings use, and synchronous git spawns gained a 5 s deadline ([#6997](https://github.com/can1357/oh-my-pi/pull/6997) by [@metaphorics](https://github.com/metaphorics)).
 
 ## [17.1.8] - 2026-07-28
 
