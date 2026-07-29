@@ -160,6 +160,23 @@ describe("MCP server-name autocomplete", () => {
 		expect(await mcp.getArgumentCompletions("unauth ")).toBeNull();
 	});
 
+	test("/mcp only offers disabled configured servers to subcommands that can accept them", async () => {
+		await writeConfig("user", projectDir, {
+			disabled: { type: "stdio", command: "disabled", enabled: false },
+		});
+		const { ctx } = createFakeCtx([]);
+		const runtime: TuiSlashCommandRuntime = { ctx };
+		const mcp = buildTuiBuiltinSlashCommands(runtime).find(c => c.name === "mcp");
+		if (!mcp?.getArgumentCompletions) throw new Error("expected /mcp command with getArgumentCompletions");
+
+		expect((await mcp.getArgumentCompletions("enable "))?.map(item => item.label)).toEqual(["disabled"]);
+		expect((await mcp.getArgumentCompletions("disable "))?.map(item => item.label)).toEqual(["disabled"]);
+		expect((await mcp.getArgumentCompletions("unauth "))?.map(item => item.label)).toEqual(["disabled"]);
+		expect(await mcp.getArgumentCompletions("test ")).toBeNull();
+		expect(await mcp.getArgumentCompletions("reconnect ")).toBeNull();
+		expect(await mcp.getArgumentCompletions("reauth ")).toBeNull();
+	});
+
 	test("/mcp getArgumentCompletions returns null for subcommands that don't take a server name", async () => {
 		await writeConfig("user", projectDir, { "my-server": { type: "stdio", command: "one" } });
 		const { ctx } = createFakeCtx([]);

@@ -2717,27 +2717,32 @@ function buildArgumentCompletions(subcommands: SubcommandDef[]): (prefix: string
 }
 
 /** /mcp subcommands whose argument is a server name (per their `usage: "<name>..."`). */
-const MCP_SERVER_NAME_SUBCOMMANDS: ReadonlySet<string> = new Set([
-	"enable",
-	"disable",
-	"test",
-	"remove",
-	"reconnect",
-	"reauth",
-	"unauth",
-]);
+const MCP_SERVER_NAME_SUBCOMMANDS: Readonly<Record<string, true>> = {
+	enable: true,
+	disable: true,
+	test: true,
+	remove: true,
+	reconnect: true,
+	reauth: true,
+	unauth: true,
+};
+
+/** Subcommands that accept names found only in `userConfig.disabledServers`. */
+const MCP_DISABLED_ONLY_ELIGIBLE_SUBCOMMANDS: Readonly<Record<string, true>> = {
+	enable: true,
+	disable: true,
+};
 
 /**
- * `/mcp` subcommands where a discovered server disabled via `/mcp disable`
- * (name only in `userConfig.disabledServers`, dropped from
- * `mcpManager.getAllServerNames()` by `loadAllMCPConfigs`) is still a valid
- * completion target: `enable` is the primary re-enable path, and offering
- * it for `disable` is a harmless no-op (`#handleSetEnabled` reports
- * "already disabled"). The rest (`test`/`reconnect`/`reauth`/`unauth`) need
- * a live connection or config entry that a disabled-only name never has —
- * `#resolveServerForAuth`/`reconnectServer` would report it as not found.
+ * Subcommands that accept configured servers whose `enabled` flag is false.
+ * `unauth` can clear persisted credentials without connecting; test,
+ * reconnect, and reauth explicitly require an enabled server.
  */
-const MCP_DISABLED_ONLY_ELIGIBLE_SUBCOMMANDS: ReadonlySet<string> = new Set(["enable", "disable"]);
+const MCP_DISABLED_CONFIG_ELIGIBLE_SUBCOMMANDS: Readonly<Record<string, true>> = {
+	enable: true,
+	disable: true,
+	unauth: true,
+};
 
 /**
  * Build getArgumentCompletions for /mcp. Delegates to the generic
@@ -2762,8 +2767,7 @@ function buildMcpArgumentCompletions(
 
 		const rawSubcommand = argumentPrefix.slice(0, spaceIndex);
 		const lowerSubcommand = rawSubcommand.toLowerCase();
-		if (!MCP_SERVER_NAME_SUBCOMMANDS.has(lowerSubcommand)) return null;
-
+		if (MCP_SERVER_NAME_SUBCOMMANDS[lowerSubcommand] !== true) return null;
 		const namePrefix = argumentPrefix.slice(spaceIndex + 1).toLowerCase();
 		if (lowerSubcommand === "remove") {
 			return await buildMcpRemoveCompletions(rawSubcommand, namePrefix);
@@ -2774,7 +2778,8 @@ function buildMcpArgumentCompletions(
 			serverNames = await collectMcpServerNames(
 				runtime.ctx,
 				undefined,
-				MCP_DISABLED_ONLY_ELIGIBLE_SUBCOMMANDS.has(lowerSubcommand),
+				MCP_DISABLED_ONLY_ELIGIBLE_SUBCOMMANDS[lowerSubcommand] === true,
+				MCP_DISABLED_CONFIG_ELIGIBLE_SUBCOMMANDS[lowerSubcommand] === true,
 			);
 		} catch (error) {
 			logger.warn("MCP server-name autocomplete failed to read config", { error });
