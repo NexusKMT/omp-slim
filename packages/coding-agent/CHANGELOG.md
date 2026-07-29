@@ -5,6 +5,7 @@
 ### Fixed
 
 - Force Git subprocesses to use the stable `C` message locale for predictable non-interactive command output.
+- Fixed compatibility replay for an already-running pre-upgrade launch broker evaluating xterm inside the client process; legacy raw PTY output now replays in an isolated worker while normal main/Hub ownership remains zero ([#6748](https://github.com/can1357/oh-my-pi/pull/6748)).
 
 ## [17.1.8] - 2026-07-28
 
