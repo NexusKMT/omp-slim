@@ -262,6 +262,7 @@ export class StatusLineComponent implements Component {
 	#cachedBranch: string | null | undefined = undefined;
 	#cachedBranchRepoId: string | null | undefined = undefined;
 	#cachedBranchCwd: string | undefined = undefined;
+	#cachedBranchHasGitRepository = false;
 	// In-flight reftable resolve slot. Ownership is the launch id, not the cwd:
 	// two live resolves can share a cwd string across an invalidation, and a
 	// stale one must never free (or poison) a slot it no longer owns.
@@ -677,6 +678,9 @@ export class StatusLineComponent implements Component {
 		// event, re-introducing the render-path spawn churn the async resolve
 		// was designed to avoid. Explicit Git/repository invalidation (watcher
 		// HEAD-move, cwd/repo switch) goes through {@link invalidateGitCaches}.
+		// A tool may open, close, or merge a PR without moving HEAD. Expire the
+		// settled PR context on ordinary activity while leaving HEAD work intact.
+		this.#cachedPrContext = undefined;
 	}
 	#invalidateSessionCaches(): void {
 		this.#clearUsageStartTimer();
@@ -700,6 +704,7 @@ export class StatusLineComponent implements Component {
 		this.#cachedBranch = undefined;
 		this.#cachedBranchRepoId = undefined;
 		this.#cachedBranchCwd = undefined;
+		this.#cachedBranchHasGitRepository = false;
 		// Abort before releasing the in-flight slot. Releasing alone would allow
 		// repeated invalidations to fan out still-running git subprocesses.
 		this.#branchResolveActive?.controller.abort();
@@ -805,6 +810,7 @@ export class StatusLineComponent implements Component {
 				const prev = this.#cachedBranchCwd === gitCwd ? this.#cachedBranch : undefined;
 				this.#cachedBranchCwd = gitCwd;
 				this.#cachedBranchRepoId = repoId;
+				this.#cachedBranchHasGitRepository = next === null;
 				this.#cachedBranch = next;
 				this.#branchLastFetch = Date.now();
 				if (prev !== next && this.#onBranchChange) this.#onBranchChange();
@@ -1397,7 +1403,10 @@ export class StatusLineComponent implements Component {
 		// so it must not be mistaken for an absent Git checkout and fall through to
 		// an ancestor jj workspace.
 		const gitHeadResolvePending = this.#branchResolveActive?.cwd === activeRepoCache.effectiveGitCwd;
-		const gitHeadIsJjLike = !gitHeadResolvePending && (gitBranch === "detached" || gitBranch === null);
+		const gitHeadIsJjLike =
+			!this.#cachedBranchHasGitRepository &&
+			!gitHeadResolvePending &&
+			(gitBranch === "detached" || gitBranch === null);
 		if (includeGit && gitHeadIsJjLike) {
 			gitBranch = this.#getJjBranch(activeRepoCache.effectiveGitCwd) ?? gitBranch;
 		}

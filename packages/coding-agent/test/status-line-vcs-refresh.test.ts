@@ -408,6 +408,32 @@ describe("StatusLineComponent reftable branch resolve honors mid-flight invalida
 			await fs.rm(jjRootDir, { recursive: true, force: true });
 		}
 	});
+
+	it("does not query an ancestor jj workspace after nested Git HEAD resolution fails", async () => {
+		const fakeRepo = {
+			commonDir: "/nested/.git",
+			gitDir: "/nested/.git",
+			gitEntryPath: "/nested/.git",
+			headPath: "/nested/.git/HEAD",
+			repoRoot: "/nested",
+		} satisfies GitRepository;
+		vi.spyOn(git.repo, "resolveSync").mockReturnValue(fakeRepo);
+		vi.spyOn(git.repo, "isReftableSync").mockReturnValue(true);
+		vi.spyOn(git.head, "resolve").mockResolvedValue(null);
+		vi.spyOn(git.status, "summary").mockReturnValue(Promise.withResolvers<GitStatus | null>().promise);
+		const jjRoot = vi.spyOn(jj.repo, "rootSync").mockReturnValue("/workspace/jj-root");
+
+		const component = new StatusLineComponent(makeSession());
+		component.updateSettings(gitSegment);
+		component.getTopBorder(80);
+		await Promise.resolve();
+		await Promise.resolve();
+		component.getTopBorder(80);
+
+		expect(git.head.resolve).toHaveBeenCalledTimes(1);
+		expect(jjRoot).not.toHaveBeenCalled();
+		component.dispose();
+	});
 });
 
 describe("StatusLineComponent VCS watcher and jj request lifecycle", () => {
