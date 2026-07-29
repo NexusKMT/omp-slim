@@ -28,6 +28,7 @@
 - Reduced bash, grep, and glob tool guidance while preserving supported internal-URL routes and making shell/eval boundaries and broad-search timeout avoidance explicit.
 - Fixed the spawn-based models config validator laziness test flaking under CPU contention by giving its two sequential probe processes an explicit 60s per-test timeout instead of sharing bun's 5s default ([#7018](https://github.com/can1357/oh-my-pi/issues/7018)).
 - Coalesced the models configuration resource probe into one child process to avoid startup contention while preserving retained-resource coverage.
+- Fixed quick LSP server exits being misreported as reader failures and explicit reloads being blocked by the initialization backoff ([#7041](https://github.com/can1357/oh-my-pi/issues/7041)).
 
 ## [17.1.8] - 2026-07-28
 
