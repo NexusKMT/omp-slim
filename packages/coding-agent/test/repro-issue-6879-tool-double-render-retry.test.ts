@@ -413,4 +413,80 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 
 		expect(countCommand(mode)).toBe(1);
 	});
+
+	it("re-keys a streamed tool card when its id is populated after the block appears", async () => {
+		const ec = mode.eventController;
+		await ec.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
+		await ec.handleEvent({ type: "message_start", message: assistantMessage([], "toolUse") } as Extract<
+			AgentSessionEvent,
+			{ type: "message_start" }
+		>);
+		// Provider (e.g. GitHub Copilot) streams the tool block before its id: the
+		// first delta carries an empty id, a later delta populates it.
+		await ec.handleEvent({
+			type: "message_update",
+			message: assistantMessage([bashToolCall("")], "toolUse"),
+			assistantMessageEvent: {
+				type: "toolcall_start",
+				contentIndex: 0,
+				partial: assistantMessage([bashToolCall("")], "toolUse"),
+			},
+		} as Extract<AgentSessionEvent, { type: "message_update" }>);
+		expect(countCommand(mode)).toBe(1);
+		await ec.handleEvent({
+			type: "message_update",
+			message: assistantMessage([bashToolCall("call-real")], "toolUse"),
+			assistantMessageEvent: {
+				type: "toolcall_delta",
+				contentIndex: 0,
+				delta: "{}",
+				partial: assistantMessage([bashToolCall("call-real")], "toolUse"),
+			},
+		} as Extract<AgentSessionEvent, { type: "message_update" }>);
+		// The populated id must reuse the existing card, not spawn a second one.
+		expect(countCommand(mode)).toBe(1);
+		await ec.handleEvent({
+			type: "message_end",
+			message: assistantMessage([bashToolCall("call-real")], "toolUse"),
+		} as Extract<AgentSessionEvent, { type: "message_end" }>);
+		await runToolCallToCompletion("call-real");
+		expect(countCommand(mode)).toBe(1);
+		// The result routes into the surviving card (no orphaned pending preview).
+		expect(Bun.stripANSI(mode.chatContainer.render(120).join("\n"))).toContain("(no output)");
+	});
+
+	it("re-keys a streamed tool card when its id grows across deltas (piped copilot id)", async () => {
+		const ec = mode.eventController;
+		await ec.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
+		await ec.handleEvent({ type: "message_start", message: assistantMessage([], "toolUse") } as Extract<
+			AgentSessionEvent,
+			{ type: "message_start" }
+		>);
+		await ec.handleEvent({
+			type: "message_update",
+			message: assistantMessage([bashToolCall("call-x")], "toolUse"),
+			assistantMessageEvent: {
+				type: "toolcall_start",
+				contentIndex: 0,
+				partial: assistantMessage([bashToolCall("call-x")], "toolUse"),
+			},
+		} as Extract<AgentSessionEvent, { type: "message_update" }>);
+		await ec.handleEvent({
+			type: "message_update",
+			message: assistantMessage([bashToolCall("call-x|abc123==")], "toolUse"),
+			assistantMessageEvent: {
+				type: "toolcall_delta",
+				contentIndex: 0,
+				delta: "{}",
+				partial: assistantMessage([bashToolCall("call-x|abc123==")], "toolUse"),
+			},
+		} as Extract<AgentSessionEvent, { type: "message_update" }>);
+		expect(countCommand(mode)).toBe(1);
+		await ec.handleEvent({
+			type: "message_end",
+			message: assistantMessage([bashToolCall("call-x|abc123==")], "toolUse"),
+		} as Extract<AgentSessionEvent, { type: "message_end" }>);
+		await runToolCallToCompletion("call-x|abc123==");
+		expect(countCommand(mode)).toBe(1);
+	});
 });

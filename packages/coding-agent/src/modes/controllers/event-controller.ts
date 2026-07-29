@@ -89,6 +89,18 @@ export class EventController {
 	#readToolCallArgs = new Map<string, Record<string, unknown>>();
 	#readToolCallAssistantComponents = new Map<string, AssistantMessageComponent>();
 	#toolTimelineComponents = new Map<string, Component>();
+	// Stable identity for a streamed tool call while its assistant message is
+	// live: maps the tool-call block's position in the streaming message to the
+	// id last seen at that position. A streamed id can CHANGE across cumulative
+	// `message_update`s — some providers (GitHub Copilot's `call_id|id`
+	// transport, any stream that delivers name/args before the id) emit the
+	// block with an empty or partial id first and rewrite it in a later delta
+	// (openai-completions sets `id: toolCall.id || ""` then overwrites on the
+	// next chunk). Keyed only by id, the changed id reads as a brand-new call
+	// and a second card is created — the old-id card orphans as a pending
+	// preview while the new-id card takes the result (#6879). Reset per assistant
+	// message (indices are per-message).
+	#streamedToolCallIdByIndex = new Map<number, string>();
 	// An error/aborted assistant turn is followed by synthetic start/end events
 	// for every tool call the provider emitted but the agent never executed.
 	// Its uncommitted cards are retracted at message_end; retain their ids until
@@ -274,6 +286,46 @@ export class EventController {
 		this.#readToolCallAssistantComponents.delete(toolCallId);
 	}
 
+	/**
+	 * Re-key a live streamed tool card whose id changed mid-stream (see
+	 * {@link #streamedToolCallIdByIndex}). Moves every id-keyed tracker from the
+	 * old id to the new one so the next cumulative `message_update` reuses the
+	 * existing card instead of creating a duplicate (#6879). The card component
+	 * itself is id-agnostic (routing is via `pendingTools`), so only the maps and
+	 * the shared read group's entry need re-keying.
+	 */
+	#migrateStreamedToolCallId(oldId: string, newId: string): void {
+		// `oldId` may be "" (the block streamed before its id): that empty key still
+		// owns a live card and must migrate. Skip only a no-op or an empty target.
+		if (oldId === newId || !newId) return;
+		const pending = this.ctx.pendingTools.get(oldId);
+		if (pending && !this.ctx.pendingTools.has(newId)) {
+			this.ctx.pendingTools.delete(oldId);
+			this.ctx.pendingTools.set(newId, pending);
+		}
+		const timeline = this.#toolTimelineComponents.get(oldId);
+		if (timeline && !this.#toolTimelineComponents.has(newId)) {
+			this.#toolTimelineComponents.delete(oldId);
+			this.#toolTimelineComponents.set(newId, timeline);
+		}
+		// The reveal controller is id-keyed; drop the stale target so the loop's
+		// setTarget/bind under the new id owns the paced reveal.
+		this.#toolArgsReveal.finish(oldId);
+		const readArgs = this.#readToolCallArgs.get(oldId);
+		if (readArgs !== undefined) {
+			this.#readToolCallArgs.delete(oldId);
+			this.#readToolCallArgs.set(newId, readArgs);
+		}
+		const readAssistant = this.#readToolCallAssistantComponents.get(oldId);
+		if (readAssistant !== undefined) {
+			this.#readToolCallAssistantComponents.delete(oldId);
+			this.#readToolCallAssistantComponents.set(newId, readAssistant);
+		}
+		// A collapsed read renders into a shared group keyed by id; rename its
+		// entry so the row isn't duplicated under the new id.
+		if (pending instanceof ReadToolGroupComponent) pending.renameEntry(oldId, newId);
+	}
+
 	#inlineReadToolImages(
 		toolCallId: string,
 		result: { content: Array<{ type: string; data?: string; mimeType?: string }> },
@@ -351,6 +403,7 @@ export class EventController {
 		this.#renderedCustomMessages.clear();
 		this.#lastIntent = undefined;
 		this.#toolTimelineComponents.clear();
+		this.#streamedToolCallIdByIndex.clear();
 		this.#orphanedToolCompletions.clear();
 		this.#postToolAssistantComponents.clear();
 		this.#backgroundTaskCallIds.clear();
@@ -440,6 +493,7 @@ export class EventController {
 
 	async #handleAgentStart(_event: Extract<AgentSessionEvent, { type: "agent_start" }>): Promise<void> {
 		this.#toolTimelineComponents.clear();
+		this.#streamedToolCallIdByIndex.clear();
 		this.#orphanedToolCompletions.clear();
 		this.#postToolAssistantComponents.clear();
 		this.#lastIntent = undefined;
@@ -539,6 +593,7 @@ export class EventController {
 			this.ctx.ui.requestRender();
 		} else if (event.message.role === "assistant") {
 			this.#lastVisibleBlockCount = 0;
+			this.#streamedToolCallIdByIndex.clear();
 			this.ctx.streamingComponent = createAssistantMessageComponent(this.ctx);
 			this.ctx.streamingMessage = event.message;
 			this.ctx.chatContainer.addChild(this.ctx.streamingComponent);
@@ -750,8 +805,17 @@ export class EventController {
 			if (this.ctx.streamingMessage.content.some(content => content.type === "toolCall")) {
 				this.ctx.streamingComponent.markTranscriptBlockFinalized();
 			}
-			for (const content of this.ctx.streamingMessage.content) {
+			for (let contentIndex = 0; contentIndex < this.ctx.streamingMessage.content.length; contentIndex++) {
+				const content = this.ctx.streamingMessage.content[contentIndex]!;
 				if (content.type !== "toolCall") continue;
+				// Re-key the live card when a provider rewrites this block's id
+				// across deltas, so the changed id reuses the existing card
+				// instead of spawning a duplicate (#6879).
+				const priorId = this.#streamedToolCallIdByIndex.get(contentIndex);
+				if (priorId !== undefined && priorId !== content.id) {
+					this.#migrateStreamedToolCallId(priorId, content.id);
+				}
+				this.#streamedToolCallIdByIndex.set(contentIndex, content.id);
 				if (content.name === "read") {
 					if (!readArgsHaveTarget(content.arguments)) {
 						// Args still streaming — defer until path is parseable so we can route to the
@@ -1369,6 +1433,7 @@ export class EventController {
 		this.#readToolCallArgs.clear();
 		this.#readToolCallAssistantComponents.clear();
 		this.#toolTimelineComponents.clear();
+		this.#streamedToolCallIdByIndex.clear();
 		this.#orphanedToolCompletions.clear();
 		this.#postToolAssistantComponents.clear();
 		this.#resetReadGroup();
