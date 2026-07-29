@@ -597,8 +597,8 @@ export class ModelControls {
 		let resolved: Effort | undefined;
 		if (this.#host.magicKeywordEnabled("ultrathink") && containsUltrathink(promptText)) {
 			// The user explicitly asked for maximum thinking; bypass the classifier
-			// (and its xhigh auto ceiling) and jump straight to the highest
-			// supported level for this model.
+			// (and the `providers.autoThinkingMaxEffort` ceiling) and jump straight
+			// to the highest supported level for this model.
 			resolved = clampAutoThinkingEffort(model, Effort.Max);
 		} else {
 			const controller = new AbortController();
