@@ -84,6 +84,9 @@ FAKE_SERVER = textwrap.dedent(
             "interruptMode": interrupt_mode,
             "sessionId": "fake-session",
             "sessionName": session_name,
+            "fastModeEnabled": False,
+            "fastModeActive": True,
+            "tokensPerSecond": 7.25,
             "autoCompactionEnabled": auto_compaction_enabled,
             "messageCount": len(messages),
             "queuedMessageCount": 0,
@@ -877,6 +880,9 @@ class RpcClientTests(unittest.TestCase):
             self.assertEqual(
                 state.model.id if state.model else None, "claude-sonnet-4-5"
             )
+            self.assertFalse(state.fast_mode_enabled)
+            self.assertTrue(state.fast_mode_active)
+            self.assertEqual(state.tokens_per_second, 7.25)
 
             result = client.bash("echo hello")
             self.assertEqual(result.output, "hello\n")

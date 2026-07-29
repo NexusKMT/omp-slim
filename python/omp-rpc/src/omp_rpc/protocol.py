@@ -233,6 +233,15 @@ def _optional_int(payload: JsonObject, field: str) -> int | None:
     return value
 
 
+def _optional_float(payload: JsonObject, field: str) -> float | None:
+    value = payload.get(field)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be a number")
+    return float(value)
+
+
 def _tuple_of_strings(values: object, *, field: str) -> tuple[str, ...] | None:
     if values is None:
         return None
@@ -776,6 +785,9 @@ class SessionState:
     todo_phases: tuple[TodoPhase, ...] = ()
     system_prompt: tuple[str, ...] = ()
     dump_tools: tuple[ToolDescriptor, ...] = ()
+    fast_mode_enabled: bool = False
+    fast_mode_active: bool = False
+    tokens_per_second: float | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -1344,6 +1356,9 @@ def parse_session_state(payload: JsonObject) -> SessionState:
         ),
         system_prompt=_optional_str_list(payload, "systemPrompt"),
         dump_tools=dump_tools,
+        fast_mode_enabled=bool(payload.get("fastModeEnabled", False)),
+        fast_mode_active=bool(payload.get("fastModeActive", False)),
+        tokens_per_second=_optional_float(payload, "tokensPerSecond"),
     )
 
 
