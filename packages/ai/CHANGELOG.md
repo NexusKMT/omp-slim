@@ -9,6 +9,9 @@
 - Fixed named forced `tool_choice` no longer being enforced on string-only OpenAI-compatible hosts (llama.cpp, LM Studio): the named object degrades to `"required"`, which alone lets the host call any advertised tool, so the request now narrows the advertised tools to the forced one (mirroring the Ollama chat transport). When the forced tool is absent the full tool list is kept and the choice is dropped for an unforced turn ([#6925](https://github.com/can1357/oh-my-pi/issues/6925)).
 - Fixed direct Anthropic Claude Opus 5 requests failing with HTTP 400 when the endpoint rejected `strict` tool fields; the existing non-strict retry now recognizes `tools.N.custom.strict: Extra inputs are not permitted` responses ([#6976](https://github.com/can1357/oh-my-pi/issues/6976)).
 - Fixed usage-based credential ranking treating a missing long-window metric as the short-window metric. Anthropic accounts whose 7-day bucket is not yet reported now keep the missing window neutral instead of letting 5-hour reset urgency shadow a sibling with reported weekly headroom ([#6980](https://github.com/can1357/oh-my-pi/pull/6980) by [@joswha](https://github.com/joswha)).
+### Changed
+
+- Codex SSE request bodies are now zstd-compressed (level 3, `content-encoding: zstd`), matching the official Codex client; disable with `PI_CODEX_ZSTD=0`. Compression failure falls back to plain JSON.
 
 ## [17.1.8] - 2026-07-28
 
