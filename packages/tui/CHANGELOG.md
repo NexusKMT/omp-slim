@@ -8,6 +8,9 @@
 
 - Fixed wrapped Markdown list continuations losing their hanging indentation in narrow terminal layouts.
 - Fixed an issue where emergency exits from fullscreen overlays could leave the Kitty keyboard protocol active, corrupting Arrow Up input in the terminal after exiting.
+### Fixed
+
+- Fixed unbounded memory growth when a PTY consumer stalls without dying: `ProcessTerminal.#safeWrite` handed every frame to `process.stdout.write()` and ignored its backpressure return, so a stalled-but-alive reader (never throws, unlike the terminal-death path in [#5837](https://github.com/can1357/oh-my-pi/pull/5837)) let the writable buffer grow without bound as cosmetic `hub wait` spinner/progress frames piled up — one incident reached ~48 GiB RSS and wedged the host. The write path now caps the pending stdout backlog and treats a consumer that will not drain past the cap as a disconnect, taking the same clean, supervisor-resumable exit as a dead terminal ([#6854](https://github.com/can1357/oh-my-pi/issues/6854)).
 
 ## [17.1.7] - 2026-07-27
 
