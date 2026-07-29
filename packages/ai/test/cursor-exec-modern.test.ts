@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import {
 	type BlockState,
+	CURSOR_CLIENT_VERSION,
 	flushOpenToolCalls,
 	handleServerMessage,
 	processInteractionUpdate,
@@ -191,6 +192,12 @@ function soleResult(frames: AgentClientMessage[]) {
 	if (frame.case !== "execClientMessage") throw new Error(`expected execClientMessage, got ${frame.case}`);
 	return frame.value.message;
 }
+
+describe("Cursor modern exec protocol activation", () => {
+	it("advertises the client build whose schema includes modern exec frames", () => {
+		expect(CURSOR_CLIENT_VERSION).toBe("cli-2026.07.23-e383d2b");
+	});
+});
 
 describe("Cursor stream teardown", () => {
 	it("keeps whole arguments on a block still open when the transport ends", async () => {

@@ -212,7 +212,7 @@ import {
 } from "./cursor/exec-modern";
 
 export const CURSOR_API_URL = "https://api2.cursor.sh";
-export const CURSOR_CLIENT_VERSION = "cli-2026.01.09-231024f";
+export const CURSOR_CLIENT_VERSION = "cli-2026.07.23-e383d2b";
 
 const CURSOR_PROXY_TUNNEL_TIMEOUT_MS = 30_000;
 
