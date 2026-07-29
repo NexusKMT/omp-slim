@@ -397,6 +397,21 @@ describe("createTools", () => {
 		expect(names).not.toContain("rewind");
 	});
 
+	it("auto-pairs checkpoint/rewind in a restricted subagent with one-sided list", async () => {
+		const names = (
+			await createTools(
+				createTestSession({
+					taskDepth: 1,
+					restrictToolNames: true,
+					settings: createSettingsWithOverrides({ "checkpoint.enabled": true }),
+				}),
+				["checkpoint"],
+			)
+		).map(t => t.name);
+		expect(names).toContain("checkpoint");
+		expect(names).toContain("rewind");
+	});
+
 	it("HIDDEN_TOOLS contains yield and goal", () => {
 		expect(Object.keys(HIDDEN_TOOLS).sort()).toEqual(["goal", "yield"]);
 	});

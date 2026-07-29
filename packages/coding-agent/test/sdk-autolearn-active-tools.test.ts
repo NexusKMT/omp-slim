@@ -122,4 +122,23 @@ describe("createAgentSession auto-learn tool activation", () => {
 		expect(names).toContain("checkpoint");
 		expect(names).toContain("rewind");
 	});
+
+	it("activates checkpoint and rewind in a restricted session with one-sided toolNames", async () => {
+		const { session } = await createAgentSession({
+			cwd: registryDir,
+			agentDir: registryDir,
+			modelRegistry,
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated({ "checkpoint.enabled": true }),
+			model: getBundledModel("openai", "gpt-4o-mini"),
+			disableExtensionDiscovery: true,
+			toolNames: ["checkpoint"],
+			requireYieldTool: true,
+			restrictToolNames: true,
+		});
+		sessions.push(session);
+		const names = session.getActiveToolNames();
+		expect(names).toContain("checkpoint");
+		expect(names).toContain("rewind");
+	});
 });

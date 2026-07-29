@@ -2796,8 +2796,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		// Checkpoint and rewind are a pair: `createTools` auto-includes the sister
 		// tool in the registry, but an explicit `toolNames` list would otherwise
 		// drop it from the ACTIVE set — leaving the agent able to checkpoint but
-		// unable to rewind (or vice versa). Mirror the pairing here.
-		if (!restrictToolNames && explicitlyRequestedToolNames) {
+		// unable to rewind (or vice versa). Mirror the pairing here. Unlike the
+		// manage_skill/learn mirror above, this is a safety pairing — it applies
+		// to restricted sessions too.
+		if (explicitlyRequestedToolNames) {
 			if (builtInToolNames.includes("checkpoint") && !explicitlyRequestedToolNames.includes("rewind")) {
 				explicitlyRequestedToolNames.push("rewind");
 			} else if (builtInToolNames.includes("rewind") && !explicitlyRequestedToolNames.includes("checkpoint")) {

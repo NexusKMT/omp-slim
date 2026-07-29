@@ -505,8 +505,9 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 	// Checkpoint and rewind are a pair: listing one without the other strands
 	// the agent (it can checkpoint but not rewind, or vice versa). Auto-include
 	// the sister tool so a one-sided frontmatter `tools:` entry still works.
-	// Like the AST/auto-learn siblings below, restricted callers own the list.
-	if (requestedTools && !restrictToolNames && session.settings.get("checkpoint.enabled")) {
+	// Unlike the AST/auto-learn convenience auto-includes below, this is a
+	// safety pairing — it applies to restricted sessions too.
+	if (requestedTools && session.settings.get("checkpoint.enabled")) {
 		if (requestedTools.includes("checkpoint") && !requestedTools.includes("rewind")) {
 			requestedTools.push("rewind");
 		} else if (requestedTools.includes("rewind") && !requestedTools.includes("checkpoint")) {
