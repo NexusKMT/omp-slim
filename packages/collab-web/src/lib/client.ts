@@ -334,8 +334,16 @@ export class GuestClient {
 				break;
 			case "state":
 				this.#state = frame.state;
+				// Host state is authoritative for liveness in both directions: the
+				// payload is built at fire time, so `isStreaming` is never stale.
+				// This is the only path that recovers a stuck-idle guest — a dropped
+				// `agent_start` (most often a mid-stream reconnect) otherwise leaves
+				// `#working` false forever, since nothing else sets it true.
+				this.#working = frame.state.isStreaming;
 				if (!frame.state.isStreaming) {
-					this.#working = false;
+					// Host idle implies no tool can be running, so clear any card
+					// pinned by a dropped `tool_execution_end` off this signal.
+					this.#activeTools = new Map();
 					if (this.#streamDone) {
 						this.#stream = null;
 						this.#streamDone = false;

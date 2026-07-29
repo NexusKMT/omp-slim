@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the guest rendering idle while the host agent is running (spinner vanishing mid-turn after a reconnect dropped `agent_start`): host `state` frames are now authoritative for liveness in both directions, and an idle report clears tool cards pinned by a dropped `tool_execution_end`.
+
 ## [17.1.0] - 2026-07-24
 
 ### Fixed
