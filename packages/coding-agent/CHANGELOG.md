@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added tokens-per-second throughput to RPC `get_state` responses for non-TUI clients.
+
 ## [17.1.8] - 2026-07-28
 
 ### Breaking Changes
