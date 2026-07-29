@@ -4341,6 +4341,7 @@ export class AgentSession {
 		this.agent.clearDeferredToolDirectives();
 		this.#toolChoiceQueue.clear();
 		this.#tools.clearAcpPermissionDecisions();
+		this.#tools.resetAnnouncedMounts();
 	}
 
 	/**
