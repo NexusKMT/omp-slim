@@ -385,11 +385,7 @@ function buildNonInteractiveEnv(
 	pinnedEnv: Record<string, string | undefined>,
 ): Record<string, string | undefined> {
 	const preservedCharacterLocale =
-		(env.LC_CTYPE === undefined || env.LC_CTYPE === "") &&
-		env.LC_ALL !== undefined &&
-		/(?:^|[._-])utf-?8(?:$|[.@_-])/i.test(env.LC_ALL)
-			? env.LC_ALL
-			: undefined;
+		env.LC_ALL !== undefined && /(?:^|[._-])utf-?8(?:$|[.@_-])/i.test(env.LC_ALL) ? env.LC_ALL : undefined;
 	return {
 		...env,
 		...(preservedCharacterLocale === undefined ? {} : { LC_CTYPE: preservedCharacterLocale }),

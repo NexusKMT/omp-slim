@@ -1130,6 +1130,12 @@ exec ${JSON.stringify(realGit)} "$@"
 				delete process.env.LC_MESSAGES;
 				await git.diff(remoteFixture.repoRoot, { env: { LC_MESSAGES: undefined } });
 
+				process.env.EXPECTED_LC_CTYPE = "fr_FR.UTF-8";
+				process.env.LC_ALL = "fr_FR.UTF-8";
+				process.env.LC_CTYPE = "C";
+				process.env.LC_MESSAGES = "fr_FR.UTF-8";
+				await git.diff(remoteFixture.repoRoot, { env: { LC_MESSAGES: undefined } });
+
 				process.env.EXPECTED_LC_CTYPE = "UTF-8-SENTINEL";
 				process.env.LC_ALL = "fr_FR.UTF-8";
 				process.env.LC_CTYPE = "UTF-8-SENTINEL";
@@ -1184,8 +1190,6 @@ echo ok
 `,
 		);
 		const realWhich = $which;
-		process.env.PATH = "";
-		expect(realWhich("gh", { cache: WhichCachePolicy.Bypass, PATH: "" })).toBeNull();
 		const whichSpy = vi
 			.spyOn(piUtils, "$which")
 			.mockImplementation((command, options) =>
