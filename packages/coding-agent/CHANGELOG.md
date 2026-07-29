@@ -37,6 +37,13 @@
 ### Fixed
 
 - Fixed configured `retry.maxDelayMs` not being forwarded into Anthropic retry handling, so over-budget server retry delays fail fast.
+- Added tokens-per-second throughput to RPC `get_state` responses for non-TUI clients.
+- Added the RPC `set_fast_mode` command and typed TypeScript/Python client methods for live fast-mode control.
+- Added `fastModeEnabled` and `fastModeActive` to RPC `get_state` responses.
+
+### Fixed
+
+- Fixed RPC fast-mode state reporting after direct Anthropic rejects `speed: "fast"`, while allowing explicit re-enable requests to retry priority service.
 
 ## [17.1.8] - 2026-07-28
 

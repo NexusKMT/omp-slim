@@ -3,6 +3,7 @@ import type { Model, ProviderSessionState, ServiceTier, ServiceTierByFamily, Ser
 import {
 	clearAnthropicFastModeFallback,
 	Effort,
+	isAnthropicFastModeFallbackDisabled,
 	realizesPriorityServiceTier,
 	resolveModelServiceTier,
 	serviceTierFamily,
@@ -666,7 +667,11 @@ export class ModelControls {
 	 */
 	isFastModeActive(): boolean {
 		const model = this.#model;
-		return !!model && realizesPriorityServiceTier(this.effectiveServiceTier(model), model);
+		if (!model || !realizesPriorityServiceTier(this.effectiveServiceTier(model), model)) return false;
+		if (model.provider === "anthropic") {
+			return !isAnthropicFastModeFallbackDisabled(this.#host.providerSessionState, model);
+		}
+		return true;
 	}
 
 	/**
@@ -730,6 +735,9 @@ export class ModelControls {
 		if (!enabled) {
 			if (this.#serviceTierByFamily[family] === "priority") this.setServiceTierFamily(family, undefined);
 			return true;
+		}
+		if (family === "anthropic" && this.#serviceTierByFamily.anthropic === "priority") {
+			clearAnthropicFastModeFallback(this.#host.providerSessionState);
 		}
 		this.setServiceTierFamily(family, "priority");
 		return true;
