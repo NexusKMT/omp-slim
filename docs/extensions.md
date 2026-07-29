@@ -158,6 +158,7 @@ Handlers and tool `execute` receive `ctx` with:
 - `modelRegistry`, `model`
 - `models` (read-only model query — see below)
 - `getContextUsage()`
+- `getAsyncJobSnapshot()` returns the current session's read-only async-job snapshot, or `null` when no session owns the context
 - `compact(...)`
 - `isIdle()`, `hasPendingMessages()`, `abort()`
 - `shutdown()`
