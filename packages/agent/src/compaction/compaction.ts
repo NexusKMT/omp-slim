@@ -186,6 +186,18 @@ export interface CompactionSettings {
 /** Reserve applied when {@link CompactionSettings.reserveTokens} is unset. */
 export const DEFAULT_RESERVE_TOKENS = 16384;
 
+/**
+ * Hard ceiling on a generated compaction summary.
+ *
+ * The summary budget is `floor(0.8 * reserveTokens)`, and the effective reserve is
+ * at least 15% of the declared context window, so a 1M-token window authorizes a
+ * ~120k-token summary. At that size the model copies rather than compresses, and
+ * output is the slowest and most expensive token class. Capping absolutely keeps
+ * the compression ratio improving with window size instead of degrading. The value
+ * mirrors {@link DEFAULT_RESERVE_TOKENS} so this adds no new tuning constant.
+ */
+export const MAX_SUMMARY_TOKENS = 16384;
+
 // reserveTokens is deliberately absent: an unset reserve is what marks it as
 // defaulted, which resolveBudgetReserveTokens needs to distinguish "user never
 // chose a reserve" from "user explicitly configured the default value".
@@ -827,7 +839,7 @@ export async function generateSummary(
 	previousSummary?: string,
 	options?: SummaryOptions,
 ): Promise<string> {
-	const maxTokens = Math.floor(0.8 * reserveTokens);
+	const maxTokens = Math.min(Math.floor(0.8 * reserveTokens), MAX_SUMMARY_TOKENS);
 
 	// Use update prompt if we have a previous summary, otherwise initial prompt
 	let basePrompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;

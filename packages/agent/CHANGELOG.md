@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed compaction summaries being allowed to grow with the context window: the summary output budget is now capped at `MAX_SUMMARY_TOKENS` (16384), so a large window no longer authorizes a summary big enough to copy the conversation instead of compressing it.
+
 ## [17.1.7] - 2026-07-27
 
 ### Changed
