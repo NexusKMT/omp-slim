@@ -5,7 +5,7 @@
 ### Added
 
 - Added tokens-per-second throughput to RPC `get_state` responses for non-TUI clients.
-- Added the RPC `set_fast_mode` command for live fast-mode control.
+- Added the RPC `set_fast_mode` command and typed TypeScript/Python client methods for live fast-mode control.
 - Added `fastModeEnabled` and `fastModeActive` to RPC `get_state` responses.
 
 ## [17.1.8] - 2026-07-28

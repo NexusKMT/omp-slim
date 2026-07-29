@@ -322,6 +322,21 @@ FAKE_SERVER = textwrap.dedent(
                 "compact",
                 {"summary": "trimmed", "shortSummary": "trimmed", "firstKeptEntryId": "entry-1", "tokensBefore": 123},
             )
+        elif command_type == "set_fast_mode":
+            enabled = command.get("enabled")
+            if not isinstance(enabled, bool):
+                respond(
+                    request_id,
+                    "set_fast_mode",
+                    success=False,
+                    error="set_fast_mode requires boolean enabled",
+                )
+            else:
+                respond(
+                    request_id,
+                    "set_fast_mode",
+                    {"enabled": False, "active": True},
+                )
         elif command_type == "set_auto_compaction":
             auto_compaction_enabled = command["enabled"]
             respond(request_id, "set_auto_compaction", {})
@@ -887,6 +902,13 @@ class RpcClientTests(unittest.TestCase):
             result = client.bash("echo hello")
             self.assertEqual(result.output, "hello\n")
             self.assertEqual(result.exit_code, 0)
+
+    def test_set_fast_mode_preserves_provider_tier_state(self) -> None:
+        with self.make_client() as client:
+            result = client.set_fast_mode(False)
+
+            self.assertFalse(result.enabled)
+            self.assertTrue(result.active)
 
     def test_prompt_and_wait_returns_assistant_text(self) -> None:
         with self.make_client() as client:

@@ -183,6 +183,13 @@ def _require_str(payload: JsonObject, field: str) -> str:
     return value
 
 
+def _require_bool(payload: JsonObject, field: str) -> bool:
+    value = payload.get(field)
+    if not isinstance(value, bool):
+        raise ValueError(f"{field} must be a boolean")
+    return value
+
+
 def _optional_str(payload: JsonObject, field: str) -> str | None:
     value = payload.get(field)
     if value is None:
@@ -804,6 +811,12 @@ class BashResult:
 
 
 @dataclass(slots=True, frozen=True)
+class FastModeResult:
+    enabled: bool
+    active: bool
+
+
+@dataclass(slots=True, frozen=True)
 class CompactionResult:
     summary: str
     first_kept_entry_id: str
@@ -1373,6 +1386,13 @@ def parse_bash_result(payload: JsonObject) -> BashResult:
         output_lines=int(payload.get("outputLines", 0)),
         output_bytes=int(payload.get("outputBytes", 0)),
         artifact_id=_optional_str(payload, "artifactId"),
+    )
+
+
+def parse_fast_mode_result(payload: JsonObject) -> FastModeResult:
+    return FastModeResult(
+        enabled=_require_bool(payload, "enabled"),
+        active=_require_bool(payload, "active"),
     )
 
 
