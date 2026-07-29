@@ -1,4 +1,12 @@
-import { type Component, matchesKey, type OverlayHandle, type OverlayOptions } from "@oh-my-pi/pi-tui";
+import {
+	type Component,
+	getSegmenter,
+	matchesKey,
+	type OverlayHandle,
+	type OverlayOptions,
+	truncateToWidth,
+	visibleWidth,
+} from "@oh-my-pi/pi-tui";
 import { type ThemeColor, theme } from "../theme/theme";
 
 const FRAME_INTERVAL_MS = 85;
@@ -68,24 +76,30 @@ const BURSTS: readonly FireworkBurst[] = [
 
 /**
  * Compare consecutive reports for one Codex account. A saved-reset grant takes
- * precedence when both changes arrive in the same report, while a verified
- * saved-reset decrease suppresses the weekly event because the user redeemed a
- * credit. Other weekly usage drops are celebrated only before the previously
- * scheduled reset deadline.
+ * precedence when both changes arrive in the same report. A verified decrease,
+ * or a prior positive balance becoming unavailable, suppresses the weekly event
+ * because the user may have redeemed a credit. Other weekly usage drops are
+ * celebrated only before the previously scheduled reset deadline.
  */
 export function detectCodexResetFireworks(
 	previous: CodexResetUsageSnapshot,
 	current: CodexResetUsageSnapshot,
 ): CodexResetFireworksEvent | undefined {
-	if (previous.savedResets !== undefined && current.savedResets !== undefined) {
-		if (current.savedResets > previous.savedResets) {
-			return {
-				kind: "saved-reset-banked",
-				added: current.savedResets - previous.savedResets,
-				available: current.savedResets,
-			};
+	const previousSavedResets = previous.savedResets;
+	const currentSavedResets = current.savedResets;
+	if (previousSavedResets !== undefined) {
+		if (currentSavedResets === undefined) {
+			if (previousSavedResets > 0) return undefined;
+		} else {
+			if (currentSavedResets > previousSavedResets) {
+				return {
+					kind: "saved-reset-banked",
+					added: currentSavedResets - previousSavedResets,
+					available: currentSavedResets,
+				};
+			}
+			if (currentSavedResets < previousSavedResets) return undefined;
 		}
-		if (current.savedResets < previous.savedResets) return undefined;
 	}
 
 	if (!previous.sevenDay || !current.sevenDay) return undefined;
@@ -128,17 +142,16 @@ function drawText(
 	color: FireworkColor,
 	priority: number,
 ): void {
-	for (const [offset, glyph] of Array.from(text).entries()) {
-		setCell(canvas, x + offset, y, glyph, color, priority);
+	let column = x;
+	for (const { segment } of getSegmenter().segment(text)) {
+		const width = visibleWidth(segment);
+		if (width <= 0) continue;
+		setCell(canvas, column, y, segment, color, priority);
+		for (let continuation = 1; continuation < width; continuation++) {
+			setCell(canvas, column + continuation, y, "", color, priority);
+		}
+		column += width;
 	}
-}
-
-function fitCenteredText(text: string, width: number): { offset: number; text: string } {
-	const glyphs = Array.from(text).slice(0, width);
-	return {
-		offset: Math.floor((width - glyphs.length) / 2),
-		text: glyphs.join(""),
-	};
 }
 
 function drawBanner(
@@ -161,13 +174,15 @@ function drawBanner(
 			: event.added === 1
 				? `New reset banked · ${event.available} available · ESC to return`
 				: `${event.added} resets banked · ${event.available} available · ESC to return`;
-	const title = fitCenteredText(titleText, innerWidth);
-	const subtitle = fitCenteredText(subtitleText, innerWidth);
+	const title = truncateToWidth(titleText, innerWidth, "");
+	const subtitle = truncateToWidth(subtitleText, innerWidth, "");
+	const titleOffset = Math.floor((innerWidth - visibleWidth(title)) / 2);
+	const subtitleOffset = Math.floor((innerWidth - visibleWidth(subtitle)) / 2);
 
 	drawText(canvas, panelLeft, top, `╭${"─".repeat(innerWidth)}╮`, "violet", 20);
-	drawText(canvas, panelLeft + 1 + title.offset, top, title.text, "gold", 21);
+	drawText(canvas, panelLeft + 1 + titleOffset, top, title, "gold", 21);
 	drawText(canvas, panelLeft, top + 1, `│${" ".repeat(innerWidth)}│`, "violet", 20);
-	drawText(canvas, panelLeft + 1 + subtitle.offset, top + 1, subtitle.text, "cyan", 21);
+	drawText(canvas, panelLeft + 1 + subtitleOffset, top + 1, subtitle, "cyan", 21);
 	drawText(canvas, panelLeft, top + 2, `╰${"─".repeat(innerWidth)}╯`, "violet", 20);
 }
 

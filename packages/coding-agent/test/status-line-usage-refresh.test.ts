@@ -435,6 +435,29 @@ describe("StatusLineComponent usage refresh", () => {
 		component.dispose();
 	});
 
+	it("suppresses an early weekly drop when a prior saved-reset balance becomes unavailable", async () => {
+		Settings.instance.set("tui.codexResetFireworks", true);
+		const sevenDayResetAt = Date.now() + 80 * 3_600_000;
+		let state: CodexUsageState = {
+			sevenDayPercent: 42,
+			sevenDayResetAt,
+			savedResets: 1,
+		};
+		const component = new StatusLineComponent(makeCodexSession(async () => codexUsageReport(state)));
+		const events: CodexResetFireworksEvent[] = [];
+		component.setCodexResetFireworksHandler(event => events.push(event));
+
+		await refreshUsage(component);
+		state = {
+			sevenDayPercent: 0,
+			sevenDayResetAt,
+		};
+		await refreshUsage(component, 5 * 60_000);
+
+		expect(events).toEqual([]);
+		component.dispose();
+	});
+
 	it("does not infer an observation time when the provider omits fetchedAt", async () => {
 		Settings.instance.set("tui.codexResetFireworks", true);
 		const sevenDayResetAt = Date.now() + 80 * 3_600_000;
