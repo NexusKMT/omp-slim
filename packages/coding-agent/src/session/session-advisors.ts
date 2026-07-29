@@ -16,9 +16,11 @@ import {
 	compactionContextTokens,
 	createCompactionSummaryMessage,
 	estimateTokens,
+	NativeCompactionError,
 	prepareCompaction,
 	type SessionMessageEntry,
 	shouldCompact,
+	shouldUseProviderNativeCompaction,
 } from "@oh-my-pi/pi-agent-core/compaction";
 import type {
 	AssistantMessage,
@@ -1341,6 +1343,7 @@ export class SessionAdvisors {
 
 		let compactResult: CompactionResult | undefined;
 		let lastError: unknown;
+		let nativeCompactionFailure: { error: NativeCompactionError; provider: string } | undefined;
 		// Instrument the advisor's overflow-compaction one-shot like the primary
 		// compaction path so the advisor model's maintenance call also emits spans.
 		const telemetry = resolveTelemetry(agent.telemetry, advisorProviderSessionId);
@@ -1354,6 +1357,14 @@ export class SessionAdvisors {
 		for (const candidate of candidates) {
 			const apiKey = await this.#host.modelRegistry.getApiKey(candidate, advisorProviderSessionId, { signal });
 			if (!apiKey) continue;
+			if (
+				nativeCompactionFailure &&
+				(candidate.provider !== nativeCompactionFailure.provider ||
+					!shouldUseProviderNativeCompaction(candidate, compactionSettings))
+			) {
+				throw nativeCompactionFailure.error;
+			}
+
 			// The advisor overflow-compaction one-shot bypasses the advisor `Agent`,
 			// so its installed metadata resolver never runs. Emit the same
 			// `metadata.user_id` identity here (resolved per candidate provider,
@@ -1385,9 +1396,17 @@ export class SessionAdvisors {
 				break;
 			} catch (error) {
 				if (signal.aborted) throw error;
+				const id = AIError.classify(error, candidate.api);
+				if (error instanceof NativeCompactionError && !AIError.is(id, AIError.Flag.AuthFailed)) {
+					nativeCompactionFailure ??= { error, provider: candidate.provider };
+					lastError = nativeCompactionFailure.error;
+					continue;
+				}
 				lastError = error;
 			}
 		}
+
+		if (!compactResult && nativeCompactionFailure) throw nativeCompactionFailure.error;
 
 		if (!compactResult) {
 			logger.warn("Advisor compaction failed, falling back to re-prime", { error: String(lastError) });
