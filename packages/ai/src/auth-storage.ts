@@ -2015,7 +2015,6 @@ export class AuthStorage {
 			const windows = usage ? strategy.findWindowLimits(usage, args.rankingContext) : undefined;
 			const primary = windows?.primary;
 			const secondary = windows?.secondary;
-			const secondaryTarget = secondary ?? primary;
 			ranked.push({
 				selection,
 				usage,
@@ -2024,9 +2023,9 @@ export class AuthStorage {
 				blockedUntil,
 				hasPriorityBoost: strategy.hasPriorityBoost?.(primary) ?? false,
 				planPriority: 0,
-				secondaryUsed: this.#normalizeUsageFraction(secondaryTarget),
+				secondaryUsed: this.#normalizeUsageFraction(secondary),
 				secondaryRequiredDrain: this.#computeWindowRequiredDrain(
-					secondaryTarget,
+					secondary,
 					nowMs,
 					strategy.windowDefaults.secondaryMs,
 				),
@@ -4476,7 +4475,6 @@ export class AuthStorage {
 			const windows = usage ? strategy.findWindowLimits(usage, args.rankingContext) : undefined;
 			const primary = windows?.primary;
 			const secondary = windows?.secondary;
-			const secondaryTarget = secondary ?? primary;
 			ranked.push({
 				selection,
 				usage,
@@ -4485,9 +4483,9 @@ export class AuthStorage {
 				blockedUntil,
 				hasPriorityBoost: strategy.hasPriorityBoost?.(primary) ?? false,
 				planPriority: getOpenAICodexPlanPriority(usage, args.planRequirement),
-				secondaryUsed: this.#normalizeUsageFraction(secondaryTarget),
+				secondaryUsed: this.#normalizeUsageFraction(secondary),
 				secondaryRequiredDrain: this.#computeWindowRequiredDrain(
-					secondaryTarget,
+					secondary,
 					nowMs,
 					strategy.windowDefaults.secondaryMs,
 				),
