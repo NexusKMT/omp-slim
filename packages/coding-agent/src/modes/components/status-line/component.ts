@@ -7,10 +7,7 @@ import { getProjectDir } from "@oh-my-pi/pi-utils";
 import { settings } from "../../../config/settings";
 import type { AgentSession } from "../../../session/agent-session";
 import type { OAuthAccountIdentity } from "../../../session/auth-storage";
-import {
-	limitMatchesActiveAccount,
-	reportMatchesActiveAccount,
-} from "../../../slash-commands/helpers/active-oauth-account";
+import { limitMatchesActiveAccount } from "../../../slash-commands/helpers/active-oauth-account";
 import { type ActiveRepoContext, resolveActiveRepoContextSync } from "../../../utils/active-repo-context";
 import * as git from "../../../utils/git";
 import * as jj from "../../../utils/jj";
@@ -36,6 +33,36 @@ import type {
 } from "./types";
 
 const JJ_REFRESH_TTL_MS = 5000;
+
+function normalizeCodexIdentityValue(value: unknown): string | undefined {
+	return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : undefined;
+}
+
+/**
+ * Fireworks are stateful, so their report match must be stricter than the
+ * status display's fallback matching: every known credential identifier must
+ * be present and equal or a workspace sibling can mutate this account's
+ * baseline.
+ */
+function codexReportMatchesExactIdentity(report: UsageReport, identity: OAuthAccountIdentity | undefined): boolean {
+	if (!identity) return false;
+	const accountId = normalizeCodexIdentityValue(identity.accountId);
+	const email = normalizeCodexIdentityValue(identity.email);
+	const projectId = normalizeCodexIdentityValue(identity.projectId);
+	const orgId = normalizeCodexIdentityValue(identity.orgId);
+	if (!accountId && !email && !projectId && !orgId) return false;
+
+	const metadata = report.metadata ?? {};
+	const reportAccountId =
+		normalizeCodexIdentityValue(metadata.accountId) ?? normalizeCodexIdentityValue(metadata.account_id);
+	const reportProjectId =
+		normalizeCodexIdentityValue(metadata.projectId) ?? normalizeCodexIdentityValue(metadata.project_id);
+	if (accountId && reportAccountId !== accountId) return false;
+	if (email && normalizeCodexIdentityValue(metadata.email) !== email) return false;
+	if (projectId && reportProjectId !== projectId) return false;
+	if (orgId && normalizeCodexIdentityValue(metadata.orgId) !== orgId) return false;
+	return true;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Context-usage memo
@@ -330,11 +357,9 @@ export class StatusLineComponent implements Component {
 
 	// Provider usage caching (5-min TTL, OAuth/sub only)
 	#cachedUsage: {
-		observedAt?: number;
 		tier?: string;
 		fiveHour?: { percent: number; resetMinutes?: number };
-		sevenDay?: { percent: number; resetHours?: number; resetsAt?: number };
-		savedResets?: number;
+		sevenDay?: { percent: number; resetHours?: number };
 	} | null = null;
 	#cachedUsageContextKey: string | null = null;
 	#usageFetchedAt = 0;
@@ -1045,14 +1070,16 @@ export class StatusLineComponent implements Component {
 				? session.modelRegistry.authStorage.getOAuthAccountIdentity(activeProvider, session.sessionId)
 				: undefined;
 		const normalized = this.#normalizeUsageReports(reports, activeProvider, activeIdentity);
+		const resetSnapshot =
+			activeProvider === "openai-codex" ? this.#normalizeCodexResetSnapshot(reports, activeIdentity) : null;
 		this.#cachedUsage = normalized;
 		this.#usageFetchedAt = Date.now();
-		if (activeProvider !== "openai-codex" || !normalized) return;
+		if (!resetSnapshot) return;
 		const contextKey = this.#formatUsageContextKey(activeProvider, activeIdentity);
 		const previous = this.#codexResetSnapshots.get(contextKey);
-		this.#codexResetSnapshots.set(contextKey, normalized);
+		this.#codexResetSnapshots.set(contextKey, resetSnapshot);
 		if (!previous || !settings.get("tui.codexResetFireworks")) return;
-		const event = detectCodexResetFireworks(previous, normalized);
+		const event = detectCodexResetFireworks(previous, resetSnapshot);
 		if (event) this.#onCodexResetFireworks?.(event);
 	}
 
@@ -1081,25 +1108,80 @@ export class StatusLineComponent implements Component {
 		}
 	}
 
+	#normalizeCodexResetSnapshot(
+		reports: unknown,
+		activeIdentity: OAuthAccountIdentity | undefined,
+	): CodexResetUsageSnapshot | null {
+		if (!Array.isArray(reports)) return null;
+		let matchingReport: UsageReport | undefined;
+		for (const report of reports) {
+			if (!report || typeof report !== "object") continue;
+			if (
+				!("provider" in report) ||
+				report.provider !== "openai-codex" ||
+				!("limits" in report) ||
+				!Array.isArray(report.limits)
+			) {
+				continue;
+			}
+			// The report boundary above validates the fields this extractor iterates;
+			// optional metadata and credit fields are narrowed again before use.
+			const usageReport = report as UsageReport;
+			if (!codexReportMatchesExactIdentity(usageReport, activeIdentity)) continue;
+			matchingReport = usageReport;
+			break;
+		}
+		if (!matchingReport) return null;
+
+		let sevenDay: CodexResetUsageSnapshot["sevenDay"];
+		let sevenDayTier: string | undefined;
+		for (const limit of matchingReport.limits) {
+			if (!limit || typeof limit !== "object") continue;
+			const candidate = limit as {
+				scope?: { windowId?: string; tier?: string };
+				window?: { resetsAt?: number };
+				amount?: { usedFraction?: number };
+			};
+			const fraction = candidate.amount?.usedFraction;
+			if (candidate.scope?.windowId !== "7d" || typeof fraction !== "number" || !Number.isFinite(fraction)) {
+				continue;
+			}
+			const tier = candidate.scope.tier;
+			if (sevenDay && (sevenDayTier === undefined || tier)) continue;
+			const resetsAt = candidate.window?.resetsAt;
+			sevenDay = {
+				percent: fraction * 100,
+				resetsAt: typeof resetsAt === "number" && Number.isFinite(resetsAt) ? resetsAt : undefined,
+			};
+			sevenDayTier = tier || undefined;
+		}
+
+		const fetchedAt = matchingReport.fetchedAt;
+		const availableCount = matchingReport.resetCredits?.availableCount;
+		const observedAt = typeof fetchedAt === "number" && Number.isFinite(fetchedAt) ? fetchedAt : undefined;
+		const savedResets =
+			typeof availableCount === "number" && Number.isFinite(availableCount)
+				? Math.max(0, Math.trunc(availableCount))
+				: undefined;
+		if (!sevenDay && savedResets === undefined) return null;
+		return { observedAt, sevenDay, savedResets };
+	}
+
 	#normalizeUsageReports(
 		reports: unknown,
 		activeProvider?: string,
 		activeIdentity?: OAuthAccountIdentity,
 	): {
-		observedAt?: number;
 		tier?: string;
 		fiveHour?: { percent: number; resetMinutes?: number };
-		sevenDay?: { percent: number; resetHours?: number; resetsAt?: number };
-		savedResets?: number;
+		sevenDay?: { percent: number; resetHours?: number };
 	} | null {
 		if (!Array.isArray(reports)) return null;
 		let fiveHour: { percent: number; resetMinutes?: number } | undefined;
-		let sevenDay: { percent: number; resetHours?: number; resetsAt?: number } | undefined;
-		let savedResets: number | undefined;
+		let sevenDay: { percent: number; resetHours?: number } | undefined;
 		let fiveHourTier: string | undefined;
 		let sevenDayTier: string | undefined;
 		const now = Date.now();
-		let observedAt: number | undefined;
 		for (const report of reports) {
 			if (!report || typeof report !== "object") continue;
 			const provider = (report as { provider?: unknown }).provider;
@@ -1107,13 +1189,6 @@ export class StatusLineComponent implements Component {
 			const limits = (report as { limits?: unknown }).limits;
 			if (!Array.isArray(limits)) continue;
 			const usageReport = report as UsageReport;
-			if (provider === "openai-codex" && reportMatchesActiveAccount(usageReport, activeIdentity)) {
-				if (Number.isFinite(usageReport.fetchedAt)) observedAt = usageReport.fetchedAt;
-				const availableCount = usageReport.resetCredits?.availableCount;
-				if (typeof availableCount === "number" && Number.isFinite(availableCount)) {
-					savedResets = Math.max(0, Math.trunc(availableCount));
-				}
-			}
 			for (const limit of limits) {
 				if (!limit || typeof limit !== "object") continue;
 				if (activeIdentity && !limitMatchesActiveAccount(usageReport, limit as UsageLimit, activeIdentity)) {
@@ -1144,22 +1219,15 @@ export class StatusLineComponent implements Component {
 						percent: fraction * 100,
 						resetHours:
 							typeof resetsAt === "number" ? Math.max(0, Math.round((resetsAt - now) / 3_600_000)) : undefined,
-						resetsAt: typeof resetsAt === "number" ? resetsAt : undefined,
 					};
 					sevenDayTier = tier || undefined;
 				}
 			}
 		}
-		if (!fiveHour && !sevenDay && savedResets === undefined) return null;
+		if (!fiveHour && !sevenDay) return null;
 		// Single compact label; prefer the five-hour tier if displayed windows ever disagree.
 		const effectiveTier = fiveHourTier ?? sevenDayTier;
-		return {
-			...(observedAt === undefined ? {} : { observedAt }),
-			tier: effectiveTier,
-			fiveHour,
-			sevenDay,
-			savedResets,
-		};
+		return { tier: effectiveTier, fiveHour, sevenDay };
 	}
 
 	/**

@@ -65,12 +65,17 @@ interface CodexUsageState {
 	omitFetchedAt?: boolean;
 }
 
-function codexUsageReport(state: CodexUsageState, accountId = "account-1"): unknown[] {
+function codexUsageReport(
+	state: CodexUsageState,
+	accountId = "account-1",
+	email = "codex@example.com",
+	orgId?: string,
+): unknown[] {
 	return [
 		{
 			provider: "openai-codex",
 			...(state.omitFetchedAt ? {} : { fetchedAt: Date.now() }),
-			metadata: { accountId, email: "codex@example.com" },
+			metadata: { accountId, email, ...(orgId ? { orgId } : {}) },
 			...(state.savedResets === undefined ? {} : { resetCredits: { availableCount: state.savedResets } }),
 			limits: [
 				{
@@ -91,7 +96,7 @@ function codexUsageReport(state: CodexUsageState, accountId = "account-1"): unkn
 
 function makeCodexSession(
 	fetchUsageReports: (signal?: AbortSignal) => Promise<unknown>,
-	resolveActiveIdentity: () => { accountId: string; email?: string } = () => ({
+	resolveActiveIdentity: () => { accountId: string; email?: string; orgId?: string } = () => ({
 		accountId: "account-1",
 		email: "codex@example.com",
 	}),
@@ -360,6 +365,45 @@ describe("StatusLineComponent usage refresh", () => {
 		// The refresh starts under A, but B is active when its report is normalized.
 		// A later identity lookup must not attribute B's saved reset to A.
 		identityLookups.push("account-a", "account-b", "account-a");
+		await refreshUsage(component, 5 * 60_000);
+
+		expect(events).toEqual([]);
+		component.dispose();
+	});
+
+	it("does not attribute a workspace sibling's saved resets to the active credential", async () => {
+		Settings.instance.set("tui.codexResetFireworks", true);
+		const workspaceId = "workspace-1";
+		const sevenDayResetAt = Date.now() + 80 * 3_600_000;
+		let bobSavedResets = 0;
+		const component = new StatusLineComponent(
+			makeCodexSession(
+				async () => [
+					...codexUsageReport(
+						{ sevenDayPercent: 18, sevenDayResetAt, savedResets: 0 },
+						workspaceId,
+						"alice@example.com",
+						workspaceId,
+					),
+					...codexUsageReport(
+						{ sevenDayPercent: 22, sevenDayResetAt, savedResets: bobSavedResets },
+						workspaceId,
+						"bob@example.com",
+						workspaceId,
+					),
+				],
+				() => ({
+					accountId: workspaceId,
+					email: "alice@example.com",
+					orgId: workspaceId,
+				}),
+			),
+		);
+		const events: CodexResetFireworksEvent[] = [];
+		component.setCodexResetFireworksHandler(event => events.push(event));
+
+		await refreshUsage(component);
+		bobSavedResets = 1;
 		await refreshUsage(component, 5 * 60_000);
 
 		expect(events).toEqual([]);
