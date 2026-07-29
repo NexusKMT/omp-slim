@@ -197,12 +197,14 @@ const GIT_NON_INTERACTIVE_ENV = {
 	GIT_ASKPASS: "true",
 	GIT_EDITOR: "true",
 	GIT_TERMINAL_PROMPT: "0",
+	LC_ALL: undefined,
+	LC_MESSAGES: "C",
 	SSH_ASKPASS: "/usr/bin/false",
-} satisfies Record<string, string>;
+} satisfies Record<string, string | undefined>;
 const GH_NON_INTERACTIVE_ENV = {
 	...GIT_NON_INTERACTIVE_ENV,
 	GH_PROMPT_DISABLED: "1",
-} satisfies Record<string, string>;
+} satisfies Record<string, string | undefined>;
 
 /** Default deadline for git and gh subprocesses spawned by the coding agent. */
 export const GIT_COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
@@ -378,14 +380,37 @@ function normalizeStdin(input: CommandOptions["stdin"]): "ignore" | Uint8Array {
 	return new Uint8Array(input);
 }
 
-function buildGitEnv(overrides?: Record<string, string | undefined>): Record<string, string | undefined> {
+function buildNonInteractiveEnv(
+	env: Record<string, string | undefined>,
+	pinnedEnv: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+	const preservedCharacterLocale =
+		(env.LC_CTYPE === undefined || env.LC_CTYPE === "") &&
+		env.LC_ALL !== undefined &&
+		/(?:^|[._-])utf-?8(?:$|[.@_-])/i.test(env.LC_ALL)
+			? env.LC_ALL
+			: undefined;
 	return {
-		...process.env,
-		GIT_OPTIONAL_LOCKS: "0",
-		...AMBIENT_GIT_ENV,
-		...overrides,
-		...GIT_NON_INTERACTIVE_ENV,
+		...env,
+		...(preservedCharacterLocale === undefined ? {} : { LC_CTYPE: preservedCharacterLocale }),
+		...pinnedEnv,
 	};
+}
+
+function buildGitEnv(overrides?: Record<string, string | undefined>): Record<string, string | undefined> {
+	return buildNonInteractiveEnv(
+		{
+			...process.env,
+			GIT_OPTIONAL_LOCKS: "0",
+			...AMBIENT_GIT_ENV,
+			...overrides,
+		},
+		GIT_NON_INTERACTIVE_ENV,
+	);
+}
+
+function buildGhEnv(): Record<string, string | undefined> {
+	return buildNonInteractiveEnv({ ...process.env }, GH_NON_INTERACTIVE_ENV);
 }
 
 function ensureAvailable(): void {
@@ -2374,10 +2399,7 @@ export const github = {
 		try {
 			const child = Bun.spawn(["gh", ...args], {
 				cwd,
-				env: {
-					...process.env,
-					...GH_NON_INTERACTIVE_ENV,
-				},
+				env: buildGhEnv(),
 				stdin: "ignore",
 				stdout: "pipe",
 				stderr: "pipe",

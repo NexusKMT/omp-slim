@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Force Git subprocesses to use the stable `C` message locale for predictable non-interactive command output.
+
 ## [17.1.8] - 2026-07-28
 
 ### Breaking Changes
