@@ -450,6 +450,20 @@ export function clearAnthropicFastModeFallback(
 		(value as AnthropicProviderSessionState).fastModeDisabled = false;
 	}
 }
+/**
+ * Whether the direct Anthropic model's endpoint-scoped fast-mode fallback is
+ * currently active. Reading the map directly is intentional: inspection must
+ * not materialize a state entry for a model that has never streamed.
+ */
+export function isAnthropicFastModeFallbackDisabled(
+	providerSessionState: Map<string, ProviderSessionState> | undefined,
+	model: Model<Api>,
+): boolean {
+	if (!providerSessionState || model.provider !== "anthropic" || model.api !== "anthropic-messages") return false;
+	const baseUrl = resolveAnthropicBaseUrl(model as Model<"anthropic-messages">) ?? "https://api.anthropic.com";
+	const key = anthropicProviderSessionStateKey(baseUrl, model.id);
+	return (providerSessionState.get(key) as AnthropicProviderSessionState | undefined)?.fastModeDisabled ?? false;
+}
 
 function hasStrictAnthropicTools(params: MessageCreateParamsStreaming): boolean {
 	return params.tools?.some(tool => tool.strict === true) ?? false;

@@ -239,6 +239,12 @@ otherwise. `fastModeEnabled` reports the session setting, while
 the `/fast` family setting, so `fastModeActive` may remain `true` for an
 unsupported Fireworks model.
 
+For direct Anthropic, a provider rejection of `speed: "fast"` uses a sticky
+fallback scoped by the resolved endpoint and exact model: `fastModeEnabled` may
+remain `true` while `fastModeActive` is `false`. An explicit `set_fast_mode`
+enable expresses retry intent and clears that fallback so the provider attempt
+is re-armed.
+
 ```json
 {
   "model": { "provider": "...", "id": "..." },
@@ -299,6 +305,9 @@ On success, `data` always contains both `enabled` and `active`. These are the
 actual computed values: `enabled` reports the session setting, and `active`
 reports the resulting active state, including any provider-level Fireworks
 priority setting:
+
+For direct Anthropic, an explicit enable also re-arms a provider attempt after
+the sticky rejection fallback, even when fast mode was already enabled.
 
 ```json
 {
