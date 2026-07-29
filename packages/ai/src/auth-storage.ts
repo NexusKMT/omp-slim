@@ -8,7 +8,7 @@
  * - re-exported `SqliteAuthCredentialStore`: concrete SQLite-backed implementation
  */
 import { createHash } from "node:crypto";
-import { $env, $envExact, getAgentDbPath, logger } from "@oh-my-pi/pi-utils";
+import { $env, $envExact, extractRetryHint, getAgentDbPath, logger } from "@oh-my-pi/pi-utils";
 import {
 	isSqliteCorruptionError,
 	resolveCredentialIdentityKey,
@@ -6093,8 +6093,13 @@ export class AuthStorage {
 		const status = AIError.status(error);
 		const message = error instanceof Error ? error.message : typeof error === "string" ? error : undefined;
 		if (AIError.isUsageLimit(error) || isUsageLimitOutcome(status, message)) {
+			// Thread the provider-specified reset window (e.g. Devin "Your limit
+			// will reset in 13 minutes") into the block duration so the credential
+			// is not reselected and hammered while the cap remains active.
+			const retryAfterMs = extractRetryHint(undefined, message);
 			return (
 				await this.markUsageLimitReached(provider, sessionId, {
+					retryAfterMs,
 					modelId: options?.modelId,
 					apiKey: options?.apiKey,
 					credentialId: options?.credentialId,
