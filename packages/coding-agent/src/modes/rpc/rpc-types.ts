@@ -110,6 +110,7 @@ export interface RpcSessionState {
 	autoCompactionEnabled: boolean;
 	fastModeEnabled: boolean;
 	fastModeActive: boolean;
+	tokensPerSecond: number | null;
 	messageCount: number;
 	queuedMessageCount: number;
 	todoPhases: TodoPhase[];
