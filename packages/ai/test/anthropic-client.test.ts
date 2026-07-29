@@ -388,6 +388,67 @@ describe("AnthropicMessagesClient retry-after cap", () => {
 		expect(response?.body?.locked).toBe(false);
 	});
 
+	it("flushes an incomplete UTF-8 prefix at clean error-body EOF", async () => {
+		let response: Response | undefined;
+		const incompleteBody = new ReadableStream<Uint8Array>({
+			start(streamController) {
+				streamController.enqueue(new Uint8Array([0xe2, 0x82]));
+				streamController.close();
+			},
+		});
+		const client = new AnthropicMessagesClient({
+			apiKey: "sk-test",
+			maxRetries: 0,
+			fetch: async () => {
+				response = new Response(incompleteBody, { status: 500 });
+				return response;
+			},
+		});
+
+		const error = await client.messages
+			.create(params)
+			.asResponse()
+			.catch(err => err as AIError.AnthropicApiError);
+		if (!(error instanceof AIError.AnthropicApiError)) throw new Error("Expected AnthropicApiError");
+
+		expect(error.message).toBe("500 \uFFFD");
+		expect(response?.body?.locked).toBe(false);
+	});
+
+	it("keeps complete error text without flushing an incomplete UTF-8 prefix after a read rejection", async () => {
+		const completeText = new TextEncoder().encode("complete text");
+		const completeTextWithIncompletePrefix = new Uint8Array(completeText.byteLength + 2);
+		completeTextWithIncompletePrefix.set(completeText);
+		completeTextWithIncompletePrefix.set([0xe2, 0x82], completeText.byteLength);
+		let response: Response | undefined;
+		const rejectedBody = new ReadableStream<Uint8Array>({
+			start(streamController) {
+				streamController.enqueue(completeTextWithIncompletePrefix);
+			},
+			pull(streamController) {
+				streamController.error(new Error("socket closed"));
+			},
+		});
+		const client = new AnthropicMessagesClient({
+			apiKey: "sk-test",
+			maxRetries: 0,
+			fetch: async () => {
+				response = new Response(rejectedBody, { status: 502 });
+				return response;
+			},
+		});
+
+		const error = await client.messages
+			.create(params)
+			.asResponse()
+			.catch(err => err as AIError.AnthropicApiError);
+		if (!(error instanceof AIError.AnthropicApiError)) throw new Error("Expected AnthropicApiError");
+
+		expect(error.message).toBe("502 complete text");
+		expect(error.message).not.toContain("\uFFFD");
+		expect(response?.body?.locked).toBe(false);
+	});
+
 	it("does not flush an incomplete UTF-8 prefix when the error body times out", async () => {
 		const readBlocked = Promise.withResolvers<void>();
 		let didBlockRead = false;
