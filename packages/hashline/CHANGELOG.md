@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Rejected line anchors above `Number.MAX_SAFE_INTEGER` and ranges spanning more than 100,000 lines before expansion, preventing streaming previews from exhausting CPU and memory.
+
 ## [17.1.5] - 2026-07-27
 
 ### Changed
