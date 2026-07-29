@@ -7,6 +7,7 @@
 - Force Git subprocesses to use the stable `C` message locale for predictable non-interactive command output.
 - Fixed compatibility replay for an already-running pre-upgrade launch broker evaluating xterm inside the client process; legacy raw PTY output now replays in an isolated worker while normal main/Hub ownership remains zero ([#6748](https://github.com/can1357/oh-my-pi/pull/6748)).
 - Fixed the Advisor cost in the status line following the active session across conversation boundaries: a handoff no longer credits the replacement session with the conversation it replaced, a fork carries only the same conversation's finalized spend, and resuming or switching to an existing session restores that session's spend from its persisted Advisor transcripts instead of restarting `(adv)` at zero. Session transitions now also cancel in-flight Advisor maintenance, credential recovery, and retry backoff before swapping conversations, preventing stale Advisor work from blocking `/new`, switch, fork, branch, or handoff ([#6883](https://github.com/can1357/oh-my-pi/pull/6883) by [@paolomazzitti](https://github.com/paolomazzitti)).
+- Fixed legacy pi extensions importing `parseArgs` or `CONFIG_DIR_NAME` from the `@earendil-works/pi-coding-agent` package root failing Bun's static export check during validation, which blocked installs such as `omp install npm:pi-cursor-sdk` ([#6907](https://github.com/can1357/oh-my-pi/pull/6907) by [@Gy-Hu](https://github.com/Gy-Hu)).
 
 ## [17.1.8] - 2026-07-28
 
