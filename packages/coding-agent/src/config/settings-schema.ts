@@ -4054,6 +4054,18 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"browser.cdpUrl": {
+		type: "string",
+		default: undefined,
+		ui: {
+			tab: "tools",
+			group: "Grep & Browser",
+			label: "Browser CDP URL",
+			description:
+				"Default HTTP CDP discovery endpoint (for example http://127.0.0.1:9222) to attach to instead of launching a browser. Explicit app.cdp_url or app.path on the tool call take precedence.",
+		},
+	},
+
 	"browser.headless": {
 		type: "boolean",
 		default: true,
