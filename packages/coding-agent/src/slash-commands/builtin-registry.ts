@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import { type AutocompleteItem, Spacer } from "@oh-my-pi/pi-tui";
-import { APP_NAME, getProjectDir, setProjectDir } from "@oh-my-pi/pi-utils";
+import { APP_NAME, getMCPConfigPath, getProjectDir, logger, setProjectDir } from "@oh-my-pi/pi-utils";
 import { reset as resetCapabilities } from "../capability";
 import { COLLAB_GUEST_ALLOWED_COMMANDS, CollabGuestLink } from "../collab/guest";
 import { CollabHost } from "../collab/host";
@@ -31,8 +31,10 @@ import {
 	getPluginsCacheDir,
 	MarketplaceManager,
 } from "../extensibility/plugins/marketplace";
+import { readMCPConfigFile } from "../mcp/config-writer";
 import { resolveMemoryBackend } from "../memory-backend";
 import { runPauseScreen } from "../modes/components/pause-screen";
+import { collectMcpServerNames } from "../modes/controllers/mcp-command-controller";
 import { describeLoopLimitRuntime } from "../modes/loop-limit";
 import { theme } from "../modes/theme/theme";
 import type { InteractiveModeContext } from "../modes/types";
@@ -2714,6 +2716,119 @@ function buildArgumentCompletions(subcommands: SubcommandDef[]): (prefix: string
 	};
 }
 
+/** /mcp subcommands whose argument is a server name (per their `usage: "<name>..."`). */
+const MCP_SERVER_NAME_SUBCOMMANDS: ReadonlySet<string> = new Set([
+	"enable",
+	"disable",
+	"test",
+	"remove",
+	"reconnect",
+	"reauth",
+	"unauth",
+]);
+
+/**
+ * `/mcp` subcommands where a discovered server disabled via `/mcp disable`
+ * (name only in `userConfig.disabledServers`, dropped from
+ * `mcpManager.getAllServerNames()` by `loadAllMCPConfigs`) is still a valid
+ * completion target: `enable` is the primary re-enable path, and offering
+ * it for `disable` is a harmless no-op (`#handleSetEnabled` reports
+ * "already disabled"). The rest (`test`/`reconnect`/`reauth`/`unauth`) need
+ * a live connection or config entry that a disabled-only name never has —
+ * `#resolveServerForAuth`/`reconnectServer` would report it as not found.
+ */
+const MCP_DISABLED_ONLY_ELIGIBLE_SUBCOMMANDS: ReadonlySet<string> = new Set(["enable", "disable"]);
+
+/**
+ * Build getArgumentCompletions for /mcp. Delegates to the generic
+ * declarative subcommand completer while the subcommand name itself is
+ * still being typed, then switches to MCP server-name completion (sourced
+ * from {@link collectMcpServerNames}) once a recognized server-name
+ * subcommand (enable/disable/test/remove/reconnect/reauth/unauth) is
+ * followed by a space. `remove` gets its own scope-aware completions (see
+ * {@link buildMcpRemoveCompletions}) since — unlike the others —
+ * it only ever succeeds against a config-file entry. Subcommands with a
+ * different argument shape (add, smithery-search, ...) get no argument
+ * completion.
+ */
+function buildMcpArgumentCompletions(
+	subcommands: SubcommandDef[],
+	runtime: TuiSlashCommandRuntime,
+): (argumentPrefix: string) => Promise<AutocompleteItem[] | null> {
+	const genericCompletions = buildArgumentCompletions(subcommands);
+	return async (argumentPrefix: string) => {
+		const spaceIndex = argumentPrefix.indexOf(" ");
+		if (spaceIndex === -1) return genericCompletions(argumentPrefix);
+
+		const rawSubcommand = argumentPrefix.slice(0, spaceIndex);
+		const lowerSubcommand = rawSubcommand.toLowerCase();
+		if (!MCP_SERVER_NAME_SUBCOMMANDS.has(lowerSubcommand)) return null;
+
+		const namePrefix = argumentPrefix.slice(spaceIndex + 1).toLowerCase();
+		if (lowerSubcommand === "remove") {
+			return await buildMcpRemoveCompletions(rawSubcommand, namePrefix);
+		}
+
+		let serverNames: string[];
+		try {
+			serverNames = await collectMcpServerNames(
+				runtime.ctx,
+				undefined,
+				MCP_DISABLED_ONLY_ELIGIBLE_SUBCOMMANDS.has(lowerSubcommand),
+			);
+		} catch (error) {
+			logger.warn("MCP server-name autocomplete failed to read config", { error });
+			return null;
+		}
+		const matches: AutocompleteItem[] = serverNames
+			.filter(name => name.toLowerCase().startsWith(namePrefix))
+			.map(name => ({ value: `${rawSubcommand} ${name} `, label: name }));
+		return matches.length > 0 ? matches : null;
+	};
+}
+
+/**
+ * Build `/mcp remove <name>` completions. Unlike the other server-name
+ * subcommands, `#handleRemove` only ever succeeds against a config-file
+ * `mcpServers` entry in the target scope (project by default, user with an
+ * explicit `--scope user`) — a purely runtime-discovered server has no
+ * config entry to remove and always fails with `Server "<name>" not found
+ * in <scope> config.`. Completions are therefore restricted to config-file
+ * names, and a name that exists only in the user config is completed with
+ * `--scope user` appended so the inserted command is directly executable.
+ */
+async function buildMcpRemoveCompletions(
+	rawSubcommand: string,
+	namePrefix: string,
+): Promise<AutocompleteItem[] | null> {
+	const cwd = getProjectDir();
+	let projectNames: string[];
+	let userNames: string[];
+	try {
+		const [projectConfig, userConfig] = await Promise.all([
+			readMCPConfigFile(getMCPConfigPath("project", cwd)),
+			readMCPConfigFile(getMCPConfigPath("user", cwd)),
+		]);
+		projectNames = Object.keys(projectConfig.mcpServers ?? {});
+		userNames = Object.keys(userConfig.mcpServers ?? {});
+	} catch (error) {
+		logger.warn("MCP remove autocomplete failed to read config", { error });
+		return null;
+	}
+
+	const projectNameSet = new Set(projectNames);
+	const allNames = new Set([...projectNames, ...userNames]);
+	const matches: AutocompleteItem[] = [...allNames]
+		.filter(name => name.toLowerCase().startsWith(namePrefix))
+		.map(name =>
+			projectNameSet.has(name)
+				? { value: `${rawSubcommand} ${name} `, label: name }
+				: { value: `${rawSubcommand} ${name} --scope user `, label: `${name} (user)` },
+		)
+		.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+	return matches.length > 0 ? matches : null;
+}
+
 /**
  * Build getInlineHint from declarative subcommand definitions.
  * Shows remaining completion + usage as dim ghost text after cursor.
@@ -2877,7 +2992,10 @@ function materializeTuiBuiltinSlashCommand(
 ): TuiBuiltinSlashCommand {
 	const materialized: TuiBuiltinSlashCommand = { ...cmd };
 	if (cmd.subcommands) {
-		materialized.getArgumentCompletions = buildArgumentCompletions(cmd.subcommands);
+		materialized.getArgumentCompletions =
+			cmd.name === "mcp" && runtime
+				? buildMcpArgumentCompletions(cmd.subcommands, runtime)
+				: buildArgumentCompletions(cmd.subcommands);
 		materialized.getInlineHint = buildSubcommandInlineHint(cmd.subcommands);
 	} else if (cmd.name === "move") {
 		materialized.getArgumentCompletions = buildDirectoryArgumentCompletions();
