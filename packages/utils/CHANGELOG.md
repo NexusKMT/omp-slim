@@ -4,11 +4,7 @@
 
 ### Added
 
-- Added a `postmortem.quit` option for shutdown paths where terminal output has already disconnected and cannot drain.
-
-### Changed
-
-- Replaced the central logger's Winston dispatch with a byte-compatible local dispatcher while retaining the existing `winston-daily-rotate-file` rotation and retention behavior.
+- Added a `postmortem.quit` configuration option to safely handle shutdown paths when the terminal output has already disconnected.
 
 ## [17.1.8] - 2026-07-28
 
