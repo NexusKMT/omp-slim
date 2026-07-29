@@ -23,6 +23,9 @@
 - Fixed random multi-second TUI freezes in reftable-format repos: status-line branch resolution moved off the render path onto the async-with-cache shape its siblings use, and synchronous git spawns gained a 5 s deadline ([#6997](https://github.com/can1357/oh-my-pi/pull/6997) by [@metaphorics](https://github.com/metaphorics)).
 - Fixed xd:// device summaries reaching the system prompt with control characters intact and bounded only by character count, which let a multi-byte summary carry several times its intended budget; summaries are now stripped, bounded in UTF-8 bytes on a code point boundary, and the prompt states that dynamic device summaries are untrusted metadata.
 - Fixed lowering task.softRequestBudget having no effect on bundled scout and sonic subagents, whose built-in budget previously replaced the configured value instead of acting as a ceiling.
+### Changed
+
+- Reduced bash, grep, and glob tool guidance while preserving supported internal-URL routes and making shell/eval boundaries and broad-search timeout avoidance explicit.
 
 ## [17.1.8] - 2026-07-28
 
