@@ -24,6 +24,7 @@
 
 - Fixed Codex reset fireworks comparing different quota tiers or plans, preventing false celebrations when usage reports switch between Spark and base weekly limits.
 - Fixed Cursor ranged-read results losing the full file byte size after applying the requested window.
+- Fixed empty Codex final-stop recovery discarding an earlier commentary message when both messages shared response metadata.
 - Fixed `/tan` agents being unable to read parent-session `local://` attachments by correctly resolving local protocol options against the parent session's artifacts.
 - Fixed Codex web search silently returning plain completions when the hosted web search tool was skipped.
 - Fixed TUI collaboration guest loader not starting when joining or reconnecting mid-turn.
