@@ -2703,6 +2703,14 @@ const streamAnthropicOnce = (
 						streamFailure instanceof Error && streamFailure instanceof AnthropicApiError
 							? retryDelayFromHeaders(streamFailure.headers)
 							: undefined;
+					// Bound the server-directed wait so a multi-hour `retry-after` cannot
+					// park the provider stream before higher-level recovery runs. A cap of
+					// 0 disables the bound; an over-cap hint surfaces the original error
+					// immediately without a second wire attempt or a `providerRetryWait`.
+					const maxRetryDelayMs = options?.maxRetryDelayMs ?? 60_000;
+					if (headerDelayMs !== undefined && maxRetryDelayMs !== 0 && headerDelayMs > maxRetryDelayMs) {
+						throw streamFailure;
+					}
 					const delayMs = headerDelayMs !== undefined ? Math.max(headerDelayMs, backoffDelayMs) : backoffDelayMs;
 					if (options?.providerRetryWait) {
 						await options.providerRetryWait(delayMs, options.signal);

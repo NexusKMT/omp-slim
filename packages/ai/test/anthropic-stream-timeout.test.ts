@@ -533,3 +533,146 @@ describe("anthropic provider retry delays", () => {
 		expect(JSON.parse(JSON.stringify(result.content))).toEqual([{ type: "text", text: "recovered from 502" }]);
 	});
 });
+
+describe("anthropic retry-after cap (maxRetryDelayMs)", () => {
+	it("surfaces the original error without a second attempt when retry-after exceeds the default 60s cap", async () => {
+		let attempt = 0;
+		const create = ((_body: unknown, _requestOptions?: { signal?: AbortSignal }) => {
+			attempt += 1;
+			return createRejectedAnthropicRequest(
+				new AIError.AnthropicApiError(
+					429,
+					'429 {"type":"error","error":{"type":"rate_limit_error","message":"Too many requests"}}',
+					new Headers({ "retry-after": "120" }),
+				),
+			) as never;
+		}) as unknown as AnthropicMessagesClientLike["messages"]["create"];
+		const client = { messages: { create } } as AnthropicMessagesClientLike;
+		const providerRetryWait = vi.fn(async () => {});
+
+		const result = await streamAnthropic(model, context, { client, providerRetryWait }).result();
+
+		expect(attempt).toBe(1);
+		expect(providerRetryWait).not.toHaveBeenCalled();
+		expect(result.stopReason).toBe("error");
+		expect(result.errorStatus).toBe(429);
+		expect(result.errorMessage).toContain("rate_limit_error");
+	});
+
+	it("surfaces the original error when retry-after exceeds an explicit maxRetryDelayMs cap", async () => {
+		let attempt = 0;
+		const create = ((_body: unknown, _requestOptions?: { signal?: AbortSignal }) => {
+			attempt += 1;
+			return createRejectedAnthropicRequest(
+				new AIError.AnthropicApiError(
+					529,
+					'529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}',
+					new Headers({ "retry-after-ms": "10000" }),
+				),
+			) as never;
+		}) as unknown as AnthropicMessagesClientLike["messages"]["create"];
+		const client = { messages: { create } } as AnthropicMessagesClientLike;
+		const providerRetryWait = vi.fn(async () => {});
+
+		const result = await streamAnthropic(model, context, {
+			client,
+			providerRetryWait,
+			maxRetryDelayMs: 5_000,
+		}).result();
+
+		expect(attempt).toBe(1);
+		expect(providerRetryWait).not.toHaveBeenCalled();
+		expect(result.stopReason).toBe("error");
+		expect(result.errorStatus).toBe(529);
+	});
+	it("surfaces the original error when maxRetryDelayMs is negative and a server hint is present", async () => {
+		let attempt = 0;
+		const create = (_body: unknown, _requestOptions?: { signal?: AbortSignal }) => {
+			attempt += 1;
+			return createRejectedAnthropicRequest(
+				new AIError.AnthropicApiError(
+					529,
+					'529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}',
+					new Headers({ "retry-after": "1" }),
+				),
+			);
+		};
+		const client: AnthropicMessagesClientLike = { messages: { create } };
+		const providerRetryWait = vi.fn(async () => {});
+
+		const result = await streamAnthropic(model, context, {
+			client,
+			providerRetryWait,
+			maxRetryDelayMs: -1,
+		}).result();
+
+		expect(attempt).toBe(1);
+		expect(providerRetryWait).not.toHaveBeenCalled();
+		expect(result.stopReason).toBe("error");
+		expect(result.errorStatus).toBe(529);
+	});
+
+	it("disables the cap when maxRetryDelayMs is 0 and waits the full server hint", async () => {
+		let attempt = 0;
+		const create = ((_body: unknown, requestOptions?: { signal?: AbortSignal }) => {
+			attempt += 1;
+			if (attempt === 1) {
+				return createRejectedAnthropicRequest(
+					new AIError.AnthropicApiError(
+						529,
+						'529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}',
+						new Headers({ "retry-after": "120" }),
+					),
+				) as never;
+			}
+			return createAnthropicMockStream({
+				signal: requestOptions?.signal,
+				events: createSuccessfulAnthropicEvents("after long wait"),
+			}) as never;
+		}) as unknown as AnthropicMessagesClientLike["messages"]["create"];
+		const client = { messages: { create } } as AnthropicMessagesClientLike;
+		const providerRetryWait = vi.fn(async () => {});
+
+		const result = await streamAnthropic(model, context, {
+			client,
+			providerRetryWait,
+			maxRetryDelayMs: 0,
+		}).result();
+
+		expect(attempt).toBe(2);
+		expect(providerRetryWait).toHaveBeenCalledWith(120_000, undefined);
+		expect(result.stopReason).toBe("stop");
+	});
+
+	it("keeps current behavior when the server hint is under the cap", async () => {
+		let attempt = 0;
+		const create = ((_body: unknown, requestOptions?: { signal?: AbortSignal }) => {
+			attempt += 1;
+			if (attempt === 1) {
+				return createRejectedAnthropicRequest(
+					new AIError.AnthropicApiError(
+						529,
+						'529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}',
+						new Headers({ "retry-after": "30" }),
+					),
+				) as never;
+			}
+			return createAnthropicMockStream({
+				signal: requestOptions?.signal,
+				events: createSuccessfulAnthropicEvents("after backoff"),
+			}) as never;
+		}) as unknown as AnthropicMessagesClientLike["messages"]["create"];
+		const client = { messages: { create } } as AnthropicMessagesClientLike;
+		const providerRetryWait = vi.fn(async () => {});
+
+		const result = await streamAnthropic(model, context, {
+			client,
+			providerRetryWait,
+			maxRetryDelayMs: 60_000,
+		}).result();
+
+		expect(attempt).toBe(2);
+		expect(providerRetryWait).toHaveBeenCalledWith(30_000, undefined);
+		expect(result.stopReason).toBe("stop");
+	});
+});

@@ -1,4 +1,5 @@
 import type { CapturedHttpErrorResponse } from "../utils/http-inspector";
+import { AbortError } from "./abort";
 
 /** Prefix on errors raised when an Anthropic SSE stream envelope is malformed. */
 export const STREAM_ENVELOPE_ERROR_PREFIX = "Anthropic stream envelope error:";
@@ -79,8 +80,42 @@ export class AnthropicApiError extends ProviderHttpError {
 		this.requestId = headers.get("request-id");
 	}
 
-	static async fromResponse(response: Response): Promise<AnthropicApiError> {
-		const body = await response.text().catch(() => "");
+	static async fromResponse(response: Response, signal?: AbortSignal): Promise<AnthropicApiError> {
+		// Avoid getReader() throwing when another consumer already owns the body.
+		const reader = response.body?.locked ? undefined : response.body?.getReader();
+
+		if (!reader) {
+			if (signal?.aborted) throw new AbortError("Request was aborted.");
+			const detail = "status code (no body)";
+			return new AnthropicApiError(response.status, `${response.status} ${detail}`, response.headers);
+		}
+
+		let aborted = signal?.aborted ?? false;
+		const onAbort = () => {
+			aborted = true;
+			void reader.cancel().catch(() => {});
+		};
+		if (aborted) onAbort();
+		else signal?.addEventListener("abort", onAbort, { once: true });
+
+		let body = "";
+		try {
+			const decoder = new TextDecoder();
+			while (!aborted) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				body += decoder.decode(value, { stream: true });
+			}
+			if (aborted) throw new AbortError("Request was aborted.");
+			body += decoder.decode();
+		} catch {
+			if (aborted) throw new AbortError("Request was aborted.");
+			body = "";
+		} finally {
+			signal?.removeEventListener("abort", onAbort);
+			reader.releaseLock();
+		}
+
 		const detail = body.trim() || "status code (no body)";
 		return new AnthropicApiError(response.status, `${response.status} ${detail}`, response.headers);
 	}

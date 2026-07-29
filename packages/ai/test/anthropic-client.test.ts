@@ -212,3 +212,79 @@ describe("AnthropicMessagesClient request assembly", () => {
 		expect(calls[0].url).toBe("https://api.anthropic.com/v1/messages");
 	});
 });
+
+describe("AnthropicMessagesClient retry-after cap", () => {
+	it("declines a retry and preserves original status/body/headers when retry-after exceeds maxRetryDelayMs", async () => {
+		const errorHeaders = { "retry-after": "120", "request-id": "req_cap" };
+		const { calls, fetch } = createFetchMock([new Response("overloaded", { status: 429, headers: errorHeaders })]);
+		const client = new AnthropicMessagesClient({ apiKey: "sk-test", maxRetries: 5, fetch });
+
+		const error = await client.messages
+			.create(params, { maxRetryDelayMs: 60_000 })
+			.asResponse()
+			.catch(err => err as AIError.AnthropicApiError);
+		if (!(error instanceof AIError.AnthropicApiError)) throw new Error("Expected AnthropicApiError");
+
+		expect(error).toBeInstanceOf(AIError.AnthropicApiError);
+		expect(error.status).toBe(429);
+		expect(error.message).toContain("overloaded");
+		expect(error.headers.get("request-id")).toBe("req_cap");
+		expect(calls.length).toBe(1);
+	});
+	it("declines a retry for a positive server hint when maxRetryDelayMs is negative", async () => {
+		const errorHeaders = { "retry-after": "1", "request-id": "req_neg" };
+		const { calls, fetch } = createFetchMock([new Response("overloaded", { status: 429, headers: errorHeaders })]);
+		const client = new AnthropicMessagesClient({ apiKey: "sk-test", maxRetries: 5, fetch });
+
+		const error = await client.messages
+			.create(params, { maxRetryDelayMs: -1 })
+			.asResponse()
+			.catch(err => err as AIError.AnthropicApiError);
+
+		expect(error).toBeInstanceOf(AIError.AnthropicApiError);
+		expect(error.status).toBe(429);
+		expect(calls.length).toBe(1);
+	});
+	it("cancels and releases an open error-body reader when the caller aborts", async () => {
+		const controller = new AbortController();
+		const encoder = new TextEncoder();
+		let readBlocked = false;
+		let bodyCancelled = false;
+		let response: Response | undefined;
+		const openBody = new ReadableStream<Uint8Array>({
+			start(streamController) {
+				streamController.enqueue(encoder.encode("overloaded"));
+			},
+			pull() {
+				readBlocked = true;
+				return new Promise<void>(() => {});
+			},
+			cancel() {
+				bodyCancelled = true;
+			},
+		});
+		const fetch: FetchImpl = async () => {
+			response = new Response(openBody, {
+				status: 429,
+				headers: { "retry-after": "120", "request-id": "req_abort" },
+			});
+			return response;
+		};
+		const client = new AnthropicMessagesClient({ apiKey: "sk-test", maxRetries: 5, fetch });
+
+		const pending = client.messages
+			.create(params, { signal: controller.signal, maxRetryDelayMs: 60_000 })
+			.asResponse();
+		for (let i = 0; i < 1000 && !readBlocked; i++) await Promise.resolve();
+		if (!readBlocked) throw new Error("Anthropic error-body read did not block");
+
+		controller.abort();
+		const error = await pending.catch(err => err as Error);
+		if (!(error instanceof Error)) throw new Error("Expected request abort error");
+		for (let i = 0; i < 1000 && !bodyCancelled; i++) await Promise.resolve();
+		if (!bodyCancelled) throw new Error("Anthropic error-body reader was not cancelled");
+
+		expect(error.message).toBe("Request was aborted.");
+		expect(response?.body?.locked).toBe(false);
+	});
+});
