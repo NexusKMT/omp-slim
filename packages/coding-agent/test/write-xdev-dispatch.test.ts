@@ -335,9 +335,7 @@ describe("read and write route xd:// device URLs", () => {
 		expect(summaryBytes).toBeLessThanOrEqual(XDEV_EXTERNAL_DESCRIPTION_CAP);
 		// The ellipsis is inside the byte budget, and the cut backs off at most
 		// one code point rather than splitting the character at the boundary.
-		expect(bodyBytes).toBeLessThanOrEqual(
-			XDEV_EXTERNAL_DESCRIPTION_CAP - Buffer.byteLength("…", "utf-8"),
-		);
+		expect(bodyBytes).toBeLessThanOrEqual(XDEV_EXTERNAL_DESCRIPTION_CAP - Buffer.byteLength("…", "utf-8"));
 		expect(bodyBytes).toBeGreaterThan(XDEV_EXTERNAL_DESCRIPTION_CAP - 6);
 		expect(body.endsWith("あ")).toBe(true);
 		// A split code point would decode to U+FFFD and fail the round trip.

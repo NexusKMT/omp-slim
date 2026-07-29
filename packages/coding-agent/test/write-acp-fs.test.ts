@@ -91,7 +91,7 @@ describe("write tool ACP fs routing", () => {
 		const bridge: ClientBridge = {
 			capabilities: { writeTextFile: true },
 			writeTextFile: async ({ path: target, content }) => {
-				await Bun.write(target, content.replace(/^    /gm, "\t"));
+				await Bun.write(target, content.replace(/^ {4}/gm, "\t"));
 			},
 		};
 		const session = createSession(tmpDir, { bridge });

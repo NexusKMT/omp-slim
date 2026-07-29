@@ -11,7 +11,7 @@ import {
 	executeHashlineSingle,
 	executePatchSingle,
 	executeReplaceSingle,
-	hashlineEditParamsSchema,
+	type hashlineEditParamsSchema,
 } from "@oh-my-pi/pi-coding-agent/edit";
 import { HashlineFilesystem } from "@oh-my-pi/pi-coding-agent/edit/hashline/filesystem";
 import { resolveLocalUrlToPath } from "@oh-my-pi/pi-coding-agent/internal-urls";
@@ -76,7 +76,7 @@ function makeDriftingBridge() {
 	const bridge: ClientBridge = {
 		capabilities: { writeTextFile: true },
 		writeTextFile: async ({ path: p, content: c }) => {
-			await Bun.write(p, c.replace(/^    /gm, "\t"));
+			await Bun.write(p, c.replace(/^ {4}/gm, "\t"));
 		},
 	};
 	const spy = spyOn(bridge, "writeTextFile");
@@ -316,9 +316,7 @@ describe("executeHashlineSingle model-visible payload under write-time drift", (
 		const relPath = "nb.ipynb";
 		const absPath = path.join(tmpDir, relPath);
 		const notebook = {
-			cells: [
-				{ cell_type: "code", source: ["print('old')\n"], metadata: {}, outputs: [], execution_count: null },
-			],
+			cells: [{ cell_type: "code", source: ["print('old')\n"], metadata: {}, outputs: [], execution_count: null }],
 			metadata: {},
 			nbformat: 4,
 			nbformat_minor: 5,

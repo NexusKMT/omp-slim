@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added server-name autocomplete for `/mcp enable`, `disable`, `test`, `remove`, `reconnect`, `reauth`, and `unauth`, sourced from configured and runtime-discovered MCP servers ([#5654](https://github.com/can1357/oh-my-pi/issues/5654)).
+
+### Changed
+
+- Improved grouped read-call layout by nesting each request's usage metrics beneath its final path ([#6946](https://github.com/can1357/oh-my-pi/pull/6946) by [@joshrzemien](https://github.com/joshrzemien)).
+- Fixed `/tan` agents being unable to read parent-session `local://` attachments (pasted files, generated references). `TanCommandController` now threads the parent session's `localProtocolOptions` into the tan clone, so `local://` resolves against `<parent-artifacts>/local` instead of the clone-nested `<parent-artifacts>/Tan-<id>/local` root. Subagent local mappings now remain session-bound rather than replacing the process-global override used by active-session suggestions and links ([#6971](https://github.com/can1357/oh-my-pi/issues/6971)).
+- Turn recovery now classifies a failed turn that already streamed visible (non-whitespace) assistant text as replay-unsafe, so credential rotation and model fallback no longer re-stream duplicated output. Thinking-only and whitespace-only partial turns remain retriable.
+- Fixed Codex web search silently returning a plain model completion when a GPT-5.6 Responses-Lite model skipped the hosted `web_search` tool; the provider now requires a `web_search_call` event and advances to a searching model or fails clearly instead of accepting a non-search answer ([#6988](https://github.com/can1357/oh-my-pi/issues/6988)).
+- Fixed the TUI collab guest never starting its loader when it joins or reconnects mid-turn: every host `state` frame now reconciles liveness in both directions ([#6996](https://github.com/can1357/oh-my-pi/pull/6996) by [@metaphorics](https://github.com/metaphorics)).
+- Fixed random multi-second TUI freezes in reftable-format repos: status-line branch resolution moved off the render path onto the async-with-cache shape its siblings use, and synchronous git spawns gained a 5 s deadline ([#6997](https://github.com/can1357/oh-my-pi/pull/6997) by [@metaphorics](https://github.com/metaphorics)).
+- Fixed xd:// device summaries reaching the system prompt with control characters intact and bounded only by character count, which let a multi-byte summary carry several times its intended budget; summaries are now stripped, bounded in UTF-8 bytes on a code point boundary, and the prompt states that dynamic device summaries are untrusted metadata.
+- Fixed lowering task.softRequestBudget having no effect on bundled scout and sonic subagents, whose built-in budget previously replaced the configured value instead of acting as a ceiling.
+- Reduced bash, grep, and glob tool guidance while preserving supported internal-URL routes and making shell/eval boundaries and broad-search timeout avoidance explicit.
+- Fixed the spawn-based models config validator laziness test flaking under CPU contention by giving its two sequential probe processes an explicit 60s per-test timeout instead of sharing bun's 5s default ([#7018](https://github.com/can1357/oh-my-pi/issues/7018)).
+- Coalesced the models configuration resource probe into one child process to avoid startup contention while preserving retained-resource coverage.
+- Fixed quick LSP server exits being misreported as reader failures and explicit reloads being blocked by the initialization backoff ([#7041](https://github.com/can1357/oh-my-pi/issues/7041)).
+
 ### Fixed
 
 - Force Git subprocesses to use the stable `C` message locale for predictable non-interactive command output.
@@ -13,22 +32,8 @@
 - Fixed `xd://` mount notices re-announcing already-known devices on session resume / host reconnect: the notice was diff-gated only against the in-memory mount set, which reset each resume, so reconnecting MCP/RPC-host devices re-spliced a redundant developer message into history and busted the provider prompt-cache prefix (re-billing the whole suffix at full price on metered providers). Notices now carry a structured `{ added, removed }` payload and are gated against the devices persisted history already announced—including legacy rendered notices from before the structured payload—so a resume that re-establishes the same inventory emits nothing. The announced baseline is reset when the transcript is replaced (`/new`, `switchSession`, `branch`), so a device reconnecting into the fresh history announces again ([#6921](https://github.com/can1357/oh-my-pi/issues/6921)).
 - Fixed the model picker showing an extension provider's placeholder model list instead of the credential-aware catalog it resolves at registration, so models the account actually has could be missing while unavailable ones stayed listed.
 - Fixed `edit`/`write` writes routed through the ACP client bridge (`fs/write_text_file`) trusting the requested content as "what's on disk" even when the client transforms it on save (e.g. Zed with `format_on_save: on` reformatting indentation the tool never touched). `routeWriteThroughBridge` now reads the file back after the bridge write and returns the verified content; `HashlineFilesystem.writeText` propagates it so the hashline snapshot tag matches the real file instead of the pre-write intent. Closes the reported "single-hunk `edit` call reformats the whole file" corruption, whose actual cause was every later edit resolving hunks against a stale snapshot the file had already drifted away from.
-### Changed
-
-- Improved grouped read-call layout by nesting each request's usage metrics beneath its final path ([#6946](https://github.com/can1357/oh-my-pi/pull/6946) by [@joshrzemien](https://github.com/joshrzemien)).
-- Fixed `/tan` agents being unable to read parent-session `local://` attachments (pasted files, generated references). `TanCommandController` now threads the parent session's `localProtocolOptions` into the tan clone, so `local://` resolves against `<parent-artifacts>/local` instead of the clone-nested `<parent-artifacts>/Tan-<id>/local` root. Subagent local mappings now remain session-bound rather than replacing the process-global override used by active-session suggestions and links ([#6971](https://github.com/can1357/oh-my-pi/issues/6971)).
-- Turn recovery now classifies a failed turn that already streamed visible (non-whitespace) assistant text as replay-unsafe, so credential rotation and model fallback no longer re-stream duplicated output. Thinking-only and whitespace-only partial turns remain retriable.
-- Fixed Codex web search silently returning a plain model completion when a GPT-5.6 Responses-Lite model skipped the hosted `web_search` tool; the provider now requires a `web_search_call` event and advances to a searching model or fails clearly instead of accepting a non-search answer ([#6988](https://github.com/can1357/oh-my-pi/issues/6988)).
-- Fixed the TUI collab guest never starting its loader when it joins or reconnects mid-turn: every host `state` frame now reconciles liveness in both directions ([#6996](https://github.com/can1357/oh-my-pi/pull/6996) by [@metaphorics](https://github.com/metaphorics)).
-- Fixed random multi-second TUI freezes in reftable-format repos: status-line branch resolution moved off the render path onto the async-with-cache shape its siblings use, and synchronous git spawns gained a 5 s deadline ([#6997](https://github.com/can1357/oh-my-pi/pull/6997) by [@metaphorics](https://github.com/metaphorics)).
-- Fixed xd:// device summaries reaching the system prompt with control characters intact and bounded only by character count, which let a multi-byte summary carry several times its intended budget; summaries are now stripped, bounded in UTF-8 bytes on a code point boundary, and the prompt states that dynamic device summaries are untrusted metadata.
-- Fixed lowering task.softRequestBudget having no effect on bundled scout and sonic subagents, whose built-in budget previously replaced the configured value instead of acting as a ceiling.
-### Changed
-
-- Reduced bash, grep, and glob tool guidance while preserving supported internal-URL routes and making shell/eval boundaries and broad-search timeout avoidance explicit.
-- Fixed the spawn-based models config validator laziness test flaking under CPU contention by giving its two sequential probe processes an explicit 60s per-test timeout instead of sharing bun's 5s default ([#7018](https://github.com/can1357/oh-my-pi/issues/7018)).
-- Coalesced the models configuration resource probe into one child process to avoid startup contention while preserving retained-resource coverage.
-- Fixed quick LSP server exits being misreported as reader failures and explicit reloads being blocked by the initialization backoff ([#7041](https://github.com/can1357/oh-my-pi/issues/7041)).
+- Fixed `omp ttsr test <file>` silently evaluating a supplied source file against the text (prose) context when its extension was absent from the hardcoded `SOURCE_FILE_EXT` allowlist, producing a false negative indistinguishable from a non-matching regex. It now emits an explanatory note (in text and `--json` output) when a resolvable file path infers `text`, pointing at `--source tool --tool edit`, and the allowlist gained the .NET family and other common source languages (`cs`, `razor`, `cshtml`, `fs`, `fsx`, `vb`, `sh`, `bash`, `sql`, `zig`, `dart`, `scala`, `ex`, `exs`, `proto`, `tf`) ([#6887](https://github.com/can1357/oh-my-pi/issues/6887)).
+- Fixed automatic light/dark theme switching in direct WezTerm sessions on macOS when DEC Mode 2031 is unsupported. Native appearance notifications now repaint the auto theme immediately, while a bounded, front-loaded OSC 11 validation burst keeps the terminal background authoritative and reconciles fixed terminal themes only after an actual response. Persistent update notifications now resolve their warning, muted, and accent colors at render time so they also recolor when the active theme changes ([#6923](https://github.com/can1357/oh-my-pi/pull/6923) by [@Sairen777](https://github.com/Sairen777)).
 
 ## [17.1.8] - 2026-07-28
 
@@ -64,7 +69,6 @@
 - Fixed omp worktree clear prematurely deleting active task-isolation sandboxes owned by running subagents.
 - Fixed /vibe mode preventing the director from completing parent tasks after verifying worker results by keeping the built-in todo tool active.
 - Fixed numeric GitHub issue and pull request autocomplete being suppressed inside skill slash-command arguments.
-- Fixed `omp ttsr test <file>` silently evaluating a supplied source file against the text (prose) context when its extension was absent from the hardcoded `SOURCE_FILE_EXT` allowlist, producing a false negative indistinguishable from a non-matching regex. It now emits an explanatory note (in text and `--json` output) when a resolvable file path infers `text`, pointing at `--source tool --tool edit`, and the allowlist gained the .NET family and other common source languages (`cs`, `razor`, `cshtml`, `fs`, `fsx`, `vb`, `sh`, `bash`, `sql`, `zig`, `dart`, `scala`, `ex`, `exs`, `proto`, `tf`) ([#6887](https://github.com/can1357/oh-my-pi/issues/6887)).
 
 ## [17.1.7] - 2026-07-27
 
@@ -88,9 +92,6 @@
 - `xd://` device docs now render the parameter schema as a comment-annotated TypeScript type (via `jsonSchemaToTypeScript`, the same renderer the in-band tool inventory uses) instead of a raw JSON Schema dump, shrinking system-prompt device sections while keeping descriptions inline.
 - Added a `/vision [on|off|auto|status]` slash command for session-scoped control of the `inspect_image` vision-delegation tool, modeled on `/computer`: `on`/`off` force the tool for the current session only, `auto` returns to the persisted setting, and `status` reports the effective mode, session override, tool state, and active-model image capability.
 - Replaced the `inspect_image.enabled` boolean with the tri-state `inspect_image.mode` (`auto`|`on`|`off`, default `auto`). In `auto` the tool is registered only when the active model lacks native image input, so vision-capable models (e.g. `kimi-code/k3`) read images inline with their own capabilities instead of delegating to a separate vision model; the tool set is re-evaluated on every model switch with a status notice when it flips. The `read` tool now follows the effective state dynamically rather than the raw setting, so it returns decoded image blocks again whenever `inspect_image` is hidden. Existing `inspect_image.enabled: true/false` configs migrate to `inspect_image.mode: on/off`.
-### Fixed
-
-- Fixed automatic light/dark theme switching in direct WezTerm sessions on macOS when DEC Mode 2031 is unsupported. Native appearance notifications now repaint the auto theme immediately, while a bounded, front-loaded OSC 11 validation burst keeps the terminal background authoritative and reconciles fixed terminal themes only after an actual response. Persistent update notifications now resolve their warning, muted, and accent colors at render time so they also recolor when the active theme changes ([#6923](https://github.com/can1357/oh-my-pi/pull/6923) by [@Sairen777](https://github.com/Sairen777)).
 
 ## [17.1.6] - 2026-07-27
 
@@ -270,9 +271,6 @@
 - Fixed spilled tool-output artifact descriptors leaking on error/abort paths. `OutputSink.dump()` was the only path that closed the spill `Bun.FileSink`, but the bash and Python executors re-throw on failure and their `finally` blocks never closed the sink, so a large-output command that errored leaked the artifact descriptor until an unrelated read (e.g. a `SKILL.md` load) hit `EMFILE`. `OutputSink` now exposes an idempotent `dispose()` that closes the sink exactly once, wired into every executor's `finally` ([#6463](https://github.com/can1357/oh-my-pi/issues/6463)).
 - Fixed the first submitted prompt stalling while the local tiny-title worker started: the interactive submit handler now paints the pending user row before starting title generation, and startup prewarms an idle, unref'd worker so the first submit reuses a live subprocess instead of paying spawn latency ahead of the first frame ([#6462](https://github.com/can1357/oh-my-pi/issues/6462)).
 - Fixed legacy Pi extensions failing validation when importing the upstream `keyText` keybinding helper ([#6470](https://github.com/can1357/oh-my-pi/issues/6470)).
-### Added
-
-- Added server-name autocomplete for `/mcp enable`, `disable`, `test`, `remove`, `reconnect`, `reauth`, and `unauth`, sourced from configured and runtime-discovered MCP servers ([#5654](https://github.com/can1357/oh-my-pi/issues/5654)).
 
 ## [17.1.0] - 2026-07-24
 

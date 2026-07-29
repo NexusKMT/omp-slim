@@ -159,7 +159,7 @@ describe("Patcher snapshot tag integrity", () => {
 // turned into tabs, exactly the corruption reported against the ACP bridge.
 class DriftingFilesystem extends InMemoryFilesystem {
 	async writeText(path: string, content: string): Promise<WriteResult> {
-		const drifted = content.replace(/^    /gm, "\t");
+		const drifted = content.replace(/^ {4}/gm, "\t");
 		await super.writeText(path, drifted);
 		return { text: drifted };
 	}
@@ -194,7 +194,7 @@ describe("Patcher snapshot tag stays honest across a write-time content transfor
 
 		// A follow-up edit anchored on the returned tag must succeed against
 		// the real (drifted) file instead of failing a stale-tag mismatch.
-		const followUp = await patcher.apply(Patch.parse(`[${PATH}#${section.fileHash}]\nSWAP 1.=1:\n+function g() {`));
+		await patcher.apply(Patch.parse(`[${PATH}#${section.fileHash}]\nSWAP 1.=1:\n+function g() {`));
 		expect(fs.get(PATH)).toBe("function g() {\n\treturn 2;\n}\n");
 	});
 });

@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { createProviderErrorMessage } from "../../ai/src/providers/error-message";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import type { Model, Usage } from "@oh-my-pi/pi-catalog/types";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -13,6 +12,7 @@ import {
 	type TurnRecoveryHost,
 } from "@oh-my-pi/pi-coding-agent/session/turn-recovery";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { createProviderErrorMessage } from "../../ai/src/providers/error-message";
 
 const USAGE: Usage = {
 	input: 0,
@@ -244,5 +244,4 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		const message = createProviderErrorMessage(model, new Error("fetch failed"));
 		expect(recovery.isRetryableError(message)).toBe(true);
 	});
-
 });
