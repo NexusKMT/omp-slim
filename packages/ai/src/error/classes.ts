@@ -108,7 +108,6 @@ export class AnthropicApiError extends ProviderHttpError {
 
 		let aborted = false;
 		let timedOut = false;
-		const { promise: abortedRead, resolve: resolveAbort } = Promise.withResolvers<{ type: "aborted" }>();
 		let readerCancelled = false;
 		const cancelReader = () => {
 			if (readerCancelled) return;
@@ -119,18 +118,15 @@ export class AnthropicApiError extends ProviderHttpError {
 			if (aborted) return;
 			aborted = true;
 			cancelReader();
-			resolveAbort({ type: "aborted" });
 		};
 		if (signal?.aborted) onAbort();
 		else signal?.addEventListener("abort", onAbort, { once: true });
 
 		const deadline = performance.now() + anthropicErrorBodyReadTimeoutMs;
 		let timeout: Timer | undefined;
-		const { promise: timeoutRead, resolve: resolveTimeout } = Promise.withResolvers<{ type: "timed-out" }>();
 		timeout = setTimeout(() => {
 			timedOut = true;
 			cancelReader();
-			resolveTimeout({ type: "timed-out" });
 		}, anthropicErrorBodyReadTimeoutMs);
 
 		let capturedBytes = 0;
@@ -145,30 +141,23 @@ export class AnthropicApiError extends ProviderHttpError {
 					break;
 				}
 
-				const result = await Promise.race([
-					reader.read().then(
-						value => ({ type: "read" as const, value }),
-						() => ({ type: "read-error" as const }),
-					),
-					abortedRead,
-					timeoutRead,
-				]);
-				if (result.type !== "read" || result.value.done) break;
+				const result = await reader.read();
+				if (aborted || timedOut || result.done) break;
 
-				const chunk = result.value.value;
+				const chunk = result.value;
 				const bytesToCapture = Math.min(MAX_ANTHROPIC_ERROR_BODY_BYTES - capturedBytes, chunk.byteLength);
 				if (bytesToCapture > 0) {
 					bodyChunks.push(decoder.decode(chunk.subarray(0, bytesToCapture), { stream: true }));
 					capturedBytes += bytesToCapture;
 				}
-				if (capturedBytes === MAX_ANTHROPIC_ERROR_BODY_BYTES) {
+				if (bytesToCapture < chunk.byteLength) {
 					truncated = true;
 					cancelReader();
 					break;
 				}
 			}
 			if (aborted || signal?.aborted) throw new AbortError("Request was aborted.");
-			bodyChunks.push(decoder.decode());
+			if (!truncated) bodyChunks.push(decoder.decode());
 			if (truncated) bodyChunks.push(ANTHROPIC_ERROR_BODY_TRUNCATION_MARKER);
 		} finally {
 			if (timeout !== undefined) clearTimeout(timeout);

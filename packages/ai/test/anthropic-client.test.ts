@@ -388,6 +388,117 @@ describe("AnthropicMessagesClient retry-after cap", () => {
 		expect(response?.body?.locked).toBe(false);
 	});
 
+	it("preserves an exact 64 KiB error body without marking or cancelling it", async () => {
+		const body = new Uint8Array(64 * 1024).fill(120);
+		let bodyCancelled = false;
+		const exactBody = new ReadableStream<Uint8Array>({
+			start(streamController) {
+				streamController.enqueue(body);
+				streamController.close();
+			},
+			cancel() {
+				bodyCancelled = true;
+			},
+		});
+		const client = new AnthropicMessagesClient({
+			apiKey: "sk-test",
+			maxRetries: 0,
+			fetch: async () => new Response(exactBody, { status: 400 }),
+		});
+
+		const error = await client.messages
+			.create(params)
+			.asResponse()
+			.catch(err => err as AIError.AnthropicApiError);
+		if (!(error instanceof AIError.AnthropicApiError)) throw new Error("Expected AnthropicApiError");
+
+		expect(error.message).toBe(`400 ${"x".repeat(64 * 1024)}`);
+		expect(bodyCancelled).toBe(false);
+	});
+
+	it("marks and cancels only after observing the 64 KiB-plus-one error-body byte", async () => {
+		const body = new Uint8Array(64 * 1024 + 1).fill(120);
+		let bodyCancelled = false;
+		const overflowingBody = new ReadableStream<Uint8Array>({
+			start(streamController) {
+				streamController.enqueue(body);
+			},
+			cancel() {
+				bodyCancelled = true;
+			},
+		});
+		const client = new AnthropicMessagesClient({
+			apiKey: "sk-test",
+			maxRetries: 0,
+			fetch: async () => new Response(overflowingBody, { status: 400 }),
+		});
+
+		const error = await client.messages
+			.create(params)
+			.asResponse()
+			.catch(err => err as AIError.AnthropicApiError);
+		if (!(error instanceof AIError.AnthropicApiError)) throw new Error("Expected AnthropicApiError");
+
+		expect(error.message).toBe(`400 ${"x".repeat(64 * 1024)}\n[Response body truncated after 64 KiB]`);
+		expect(bodyCancelled).toBe(true);
+	});
+
+	it("does not append a replacement character for UTF-8 split by the truncation boundary", async () => {
+		const body = new Uint8Array(64 * 1024 + 2).fill(120);
+		body.set([0xe2, 0x82, 0xac], 64 * 1024 - 1);
+		const client = new AnthropicMessagesClient({
+			apiKey: "sk-test",
+			maxRetries: 0,
+			fetch: async () => new Response(body, { status: 400 }),
+		});
+
+		const error = await client.messages
+			.create(params)
+			.asResponse()
+			.catch(err => err as AIError.AnthropicApiError);
+		if (!(error instanceof AIError.AnthropicApiError)) throw new Error("Expected AnthropicApiError");
+
+		expect(error.message).toBe(`400 ${"x".repeat(64 * 1024 - 1)}\n[Response body truncated after 64 KiB]`);
+		expect(error.message).not.toContain("\uFFFD");
+	});
+
+	it("bounds continuously-ready empty error-body chunks without accumulating read reactions", async () => {
+		let pulls = 0;
+		let bodyCancelled = false;
+		const emptyBody = new ReadableStream<Uint8Array>({
+			pull(streamController) {
+				pulls += 1;
+				streamController.enqueue(new Uint8Array());
+			},
+			cancel() {
+				bodyCancelled = true;
+			},
+		});
+		const client = new AnthropicMessagesClient({
+			apiKey: "sk-test",
+			maxRetries: 0,
+			fetch: async () => new Response(emptyBody, { status: 500 }),
+		});
+
+		AIError.__anthropicApiErrorForTesting.setBodyReadTimeoutMs(5);
+		try {
+			const startedAt = performance.now();
+			const error = await client.messages
+				.create(params)
+				.asResponse()
+				.catch(err => err as AIError.AnthropicApiError);
+			if (!(error instanceof AIError.AnthropicApiError)) throw new Error("Expected AnthropicApiError");
+
+			expect(performance.now() - startedAt).toBeLessThan(1_000);
+			expect(pulls).toBeGreaterThan(0);
+			expect(pulls).toBeLessThan(100_000);
+			expect(bodyCancelled).toBe(true);
+			expect(error.message).toBe("500 status code (no body)");
+		} finally {
+			AIError.__anthropicApiErrorForTesting.setBodyReadTimeoutMs(undefined);
+		}
+	});
+
 	it("checks the deadline before an always-ready error body can starve timer callbacks", async () => {
 		let bodyCancelled = false;
 		let response: Response | undefined;
