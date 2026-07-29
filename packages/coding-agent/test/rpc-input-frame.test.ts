@@ -324,6 +324,8 @@ describe("RpcInputDispatcher", () => {
 						interruptMode: "immediate",
 						sessionId: "session-1",
 						autoCompactionEnabled: false,
+						fastModeEnabled: false,
+						fastModeActive: false,
 						messageCount: 0,
 						queuedMessageCount: 0,
 						todoPhases: [],

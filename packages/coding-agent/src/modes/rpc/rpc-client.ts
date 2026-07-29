@@ -601,6 +601,14 @@ export class RpcClient {
 	}
 
 	/**
+	 * Enable or disable fast mode for the active model family.
+	 */
+	async setFastMode(enabled: boolean): Promise<{ enabled: boolean; active: boolean }> {
+		const response = await this.#send({ type: "set_fast_mode", enabled });
+		return this.#getData(response);
+	}
+
+	/**
 	 * Configure subagent frames emitted by the RPC server. Servers default to "off".
 	 * "progress" emits lifecycle/progress frames; "events" additionally emits raw subagent session events.
 	 */

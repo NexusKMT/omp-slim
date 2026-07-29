@@ -61,6 +61,24 @@ describe.skipIf(!e2eApiKey("ANTHROPIC_API_KEY"))("RPC mode", () => {
 		expect(state.messageCount).toBe(0);
 	}, 30000);
 
+	test("should set fast mode and expose enabled/active state", async () => {
+		await client.start();
+
+		const enabled = await client.setFastMode(true);
+		expect(enabled).toEqual({ enabled: true, active: true });
+
+		const stateWhileEnabled = await client.getState();
+		expect(stateWhileEnabled.fastModeEnabled).toBe(true);
+		expect(stateWhileEnabled.fastModeActive).toBe(true);
+
+		const disabled = await client.setFastMode(false);
+		expect(disabled).toEqual({ enabled: false, active: false });
+
+		const stateWhileDisabled = await client.getState();
+		expect(stateWhileDisabled.fastModeEnabled).toBe(false);
+		expect(stateWhileDisabled.fastModeActive).toBe(false);
+	}, 30000);
+
 	test("should save messages to session file", async () => {
 		await client.start();
 
