@@ -502,6 +502,18 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 	// unreachable, in which case eval dispatches exclusively to the others.
 	const allowEval = effectivePythonAllowed || allowJs || effectiveRubyAllowed || effectiveJuliaAllowed;
 
+	// Checkpoint and rewind are a pair: listing one without the other strands
+	// the agent (it can checkpoint but not rewind, or vice versa). Auto-include
+	// the sister tool so a one-sided frontmatter `tools:` entry still works.
+	// Unlike the AST/auto-learn convenience auto-includes below, this is a
+	// safety pairing — it applies to restricted sessions too.
+	if (requestedTools && session.settings.get("checkpoint.enabled")) {
+		if (requestedTools.includes("checkpoint") && !requestedTools.includes("rewind")) {
+			requestedTools.push("rewind");
+		} else if (requestedTools.includes("rewind") && !requestedTools.includes("checkpoint")) {
+			requestedTools.push("checkpoint");
+		}
+	}
 	// Auto-include AST counterparts when their text-based sibling is present.
 	// Restricted callers own the active list and must not have it widened.
 	if (requestedTools && !restrictToolNames) {
@@ -574,7 +586,11 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 		if (name === "ask") return session.settings.get("ask.enabled");
 		if (name === "browser") return session.settings.get("browser.enabled");
 		if (name === "computer") return session.settings.get("computer.enabled");
-		if (name === "checkpoint" || name === "rewind") return session.settings.get("checkpoint.enabled");
+		if (name === "checkpoint" || name === "rewind")
+			return (
+				session.settings.get("checkpoint.enabled") &&
+				((session.taskDepth ?? 0) === 0 || requestedTools !== undefined)
+			);
 		if (name === "hub") {
 			return (
 				!restrictToolNames && session.enableIrc !== false && isIrcEnabled(session.settings, session.taskDepth ?? 0)
@@ -584,11 +600,15 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 			return ["hindsight", "mnemopi"].includes(session.settings.get("memory.backend") ?? "");
 		}
 		if (name === "memory_edit") return session.settings.get("memory.backend") === "mnemopi";
-		if (name === "manage_skill") return session.settings.get("autolearn.enabled") && (session.taskDepth ?? 0) === 0;
+		if (name === "manage_skill")
+			return (
+				session.settings.get("autolearn.enabled") &&
+				((session.taskDepth ?? 0) === 0 || requestedTools !== undefined)
+			);
 		if (name === "learn") {
 			return (
 				session.settings.get("autolearn.enabled") &&
-				(session.taskDepth ?? 0) === 0 &&
+				((session.taskDepth ?? 0) === 0 || requestedTools !== undefined) &&
 				["hindsight", "mnemopi", "local"].includes(session.settings.get("memory.backend") ?? "")
 			);
 		}
