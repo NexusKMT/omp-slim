@@ -105,10 +105,10 @@ function mockCreateAgentSession(session: AgentSession) {
 		eventBus: new EventBus(),
 	} satisfies CreateAgentSessionResult);
 }
-// Named "task": the agent name only selects which bundled ceiling applies, and
-// these tests pin `task.softRequestBudget` to a tiny value below every ceiling.
+// Use a bundled scout so these runSubprocess tests exercise the built-in
+// ceiling together with a lower task.softRequestBudget setting.
 const baseAgent: AgentDefinition = {
-	name: "task",
+	name: "scout",
 	description: "test",
 	systemPrompt: "test",
 	source: "bundled",
