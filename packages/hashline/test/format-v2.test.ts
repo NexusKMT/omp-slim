@@ -52,8 +52,9 @@ describe("hashline format v4", () => {
 	});
 
 	it("does not recognize removed DEL or COPY headers", () => {
-		expect(() => parsePatch("DEL 2")).toThrow(/payload line has no preceding hunk header/);
-		expect(() => parsePatch("COPY 2")).toThrow(/payload line has no preceding hunk header/);
+		for (const header of ["DEL 2", "DEL.BLK 2", "COPY 2", "COPY.BLK 2"]) {
+			expect(() => parsePatch(header)).toThrow(/payload line has no preceding hunk header/);
+		}
 	});
 
 	it("auto-pipes bare body rows as literal text", () => {

@@ -210,7 +210,6 @@ function renderSection(
 	};
 }
 
-
 export async function executeHashlineSingle(
 	options: ExecuteHashlineSingleOptions,
 ): Promise<AgentToolResult<EditToolDetails, typeof hashlineEditParamsSchema>> {

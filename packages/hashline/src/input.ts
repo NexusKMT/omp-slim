@@ -314,7 +314,6 @@ export class PatchSection {
 		});
 	}
 
-
 	/** Anchor lines touched by this section, sorted ascending and deduplicated. */
 	collectAnchorLines(): readonly number[] {
 		const lines = new Set<number>();

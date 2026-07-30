@@ -263,7 +263,6 @@ export function ambiguousCloserSpareMessage(
 export const UNRESOLVED_BLOCK_INTERNAL =
 	"internal error: unresolved block edit reached the applier (resolveBlockEdits was not run).";
 
-
 /** `REM` received a body row or coexists with line edits. */
 export const REM_TAKES_NO_BODY =
 	"`REM` deletes the whole file and takes no body rows or line ops. Issue it alone under the header.";
@@ -271,7 +270,6 @@ export const REM_TAKES_NO_BODY =
 /** `MV` received a body row. */
 export const MOVE_TAKES_NO_BODY =
 	"`MV DEST` does not take body rows. Put line edits above the `MV` row; the destination path follows `MV` on the same line.";
-
 
 /** `CUT N.=M` hunk received a body row. */
 export const CUT_TAKES_NO_BODY = `\`CUT N${HL_RANGE_SEP}M\` captures + deletes lines and takes no body rows. To replace lines with new content, use \`SWAP N${HL_RANGE_SEP}M:\`.`;

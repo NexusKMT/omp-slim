@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Removed `DEL`, `DEL.BLK`, `COPY`, and `COPY.BLK` from the patch language. Use `CUT` / `CUT.BLK` for deletion; a cut does not require a following `PASTE` and leaves the removed content available to later pastes.
+
 ### Added
 
 - Added clipboard ops: `CUT N.=M` captures lines into a register (and deletes them), `CUT.BLK N` captures tree-sitter blocks, and `PASTE.PRE|POST N` / `PASTE.HEAD|TAIL` / `PASTE.BLK.POST N` insert the captured lines without retyping. The register flows top-to-bottom across sections, so content moves between files in one patch; `PASTE` does not consume it and the last capture wins.
@@ -10,7 +14,7 @@
 
 ### Changed
 
-- Regrouped `grammar.lark` around shared shapes — one `target` rule (`N.=M` | `.BLK N`) for `DEL`/`CUT` and one `pos` rule (`PRE`/`POST`/`BLK.POST`/`HEAD`/`TAIL`) for `INS`/`PASTE` — collapsing per-op hunk rules. The accepted language is byte-identical.
+- Simplified `grammar.lark` around shared target and position shapes, collapsing the concrete and block `CUT` forms plus the `INS` / `PASTE` position variants into their common grammar rules.
 
 ### Fixed
 

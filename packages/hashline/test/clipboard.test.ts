@@ -178,7 +178,6 @@ describe("clipboard across sections and batches", () => {
 		expect(fs.get("b.ts")).toBe("b1\nmove1\nmove2\n");
 	});
 
-
 	it("applies a batch-local CUT without requiring PASTE", async () => {
 		const a = "l1\nl2\n";
 		const { fs, patcher, tags } = taggedPatcher([["a.ts", a]]);
