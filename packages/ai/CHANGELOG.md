@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.0] - 2026-07-30
+
 ### Added
 
 - Added first-class parentTurnId support for nested Codex requests, allowing stream options and metadata helpers to accept and safely propagate the initiating turn's ID.
@@ -10,6 +12,7 @@
 - Added interactive Exa API-key login through `/login exa`, opening the official API-key dashboard and saving pasted keys to the credential store ([#1798](https://github.com/can1357/oh-my-pi/issues/1798)).
 - Cursor's modern exec wire protocol is now handled end to end. `agent.proto` models the frames current Cursor CLI builds emit — the seven Pi tools (`ExecServerMessage` 45-51), hooks, subagents, allowlist prechecks, MCP state, smart-mode classification, canvas diagnostics, conversation search, agent-store conflicts and git diff — and every one of them gets a typed answer. The Pi frames run their local equivalents (`read`/`bash`/`edit`/`write`/`grep`/`glob`); the rest answer with the error, not-found or empty-but-valid variant that is actually true of this client. Frames this build cannot name at all now raise `ExecClientControlMessage.throw` with `unknown_exec_variant`, and recognised frames with no truthful answer (`git_diff_request`, whose `GetDiffResponse` has no error variant) raise `exec_variant_unsupported`, instead of a silent ack that leaves the server waiting.
 - `lsp` is advertised in the MCP tool catalog again. It was filtered out as a Cursor-native tool, but the native `diagnostics` frame covers one of roughly ten LSP actions, so the other nine were unreachable.
+- Added `pinSessionOAuthAccount` support for backdating the sticky's last-use timestamp (`options.lastUsedAtMs`), so pins restored from persisted sessions keep the provider's warm-window semantics: resumes inside the prompt-cache TTL reuse the account, stale resumes still re-rank.
 
 ### Changed
 
