@@ -13,7 +13,13 @@ import {
 } from "@oh-my-pi/pi-tui";
 import type { TreeFilterMode } from "../../config/settings-schema";
 import { theme } from "../../modes/theme/theme";
-import { matchesAppInterrupt, matchesSelectDown, matchesSelectUp } from "../../modes/utils/keybinding-matchers";
+import {
+	matchesAppInterrupt,
+	matchesSelectDown,
+	matchesSelectPageDown,
+	matchesSelectPageUp,
+	matchesSelectUp,
+} from "../../modes/utils/keybinding-matchers";
 import type { SessionTreeNode } from "../../session/session-entries";
 import { toPathList } from "../../tools/path-utils";
 import { shortenPath } from "../../tools/render-utils";
@@ -822,11 +828,9 @@ class TreeList implements Component {
 		} else if (matchesKey(keyData, "end")) {
 			// Jump to the latest actual conversation turn, skipping tool and bookkeeping entries.
 			this.#jumpToTurnBoundary("last");
-		} else if (matchesKey(keyData, "left")) {
-			// Page up
+		} else if (matchesSelectPageUp(keyData) || matchesKey(keyData, "left")) {
 			this.#selectedIndex = Math.max(0, this.#selectedIndex - this.maxVisibleLines);
-		} else if (matchesKey(keyData, "right")) {
-			// Page down
+		} else if (matchesSelectPageDown(keyData) || matchesKey(keyData, "right")) {
 			this.#selectedIndex = Math.min(this.#filteredNodes.length - 1, this.#selectedIndex + this.maxVisibleLines);
 		} else if (matchesKey(keyData, "shift+enter") || matchesKey(keyData, "shift+return")) {
 			// Summarize-and-switch: fork with a branch summary without the extra prompt.
@@ -990,7 +994,7 @@ export class TreeSelectorComponent extends Container {
 			new TruncatedText(
 				theme.fg(
 					"muted",
-					"Enter: switch. Alt+↑/↓: previous/next turn. Home/End: first/latest turn. Shift+Enter: summarize & switch. Shift+L: label. Ctrl+O: filter. Alt+D/T/U/L/A: filter. Type to search",
+					"Enter: switch. Alt+↑/↓: previous/next turn. PgUp/PgDn: page. Home/End: first/latest turn. Shift+Enter: summarize & switch. Shift+L: label. Ctrl+O: filter. Alt+D/T/U/L/A: filter. Type to search",
 				),
 				0,
 				0,

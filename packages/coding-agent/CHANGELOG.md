@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added Alt+Up/Alt+Down navigation in `/tree` to traverse previous/next user or assistant turns while skipping tool and bookkeeping entries, plus Home/End shortcuts for the first/latest turn.
+- Added turn-aware `/tree` navigation: Alt+Up/Alt+Down traverses previous/next user or assistant turns while skipping tool and bookkeeping entries, Home/End jumps to the first/latest turn, and PageUp/PageDown moves by a visible page.
 
 
 ## [17.2.1] - 2026-07-30
