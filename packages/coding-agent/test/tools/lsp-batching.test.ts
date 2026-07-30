@@ -95,6 +95,35 @@ describe("createLspWritethrough batching", () => {
 		expect(await Bun.file(fileB).text()).toBe("const survivor = true;\n");
 	});
 
+	it("flushes earlier entries when the final batch write fails", async () => {
+		const loadConfigSpy = vi
+			.spyOn(lspConfig, "loadConfig")
+			.mockReturnValue({ servers: {}, idleTimeoutMs: undefined });
+		const getServersSpy = vi.spyOn(lspConfig, "getServersForFile").mockReturnValue([]);
+		const writethrough = createLspWritethrough(tempDir.path(), { enableFormat: true, enableDiagnostics: true });
+
+		const fileA = path.join(tempDir.path(), "a.ts");
+		const fileB = path.join(tempDir.path(), "b.ts");
+		const batchId = `final-write-failure-${Date.now()}`;
+		await writethrough(fileA, "const applied = true;\n", undefined, undefined, {
+			id: batchId,
+			flush: false,
+		});
+		vi.spyOn(Bun, "write").mockRejectedValueOnce(new Error("ENOSPC"));
+
+		await expect(
+			writethrough(fileB, "const failed = true;\n", undefined, undefined, {
+				id: batchId,
+				flush: true,
+			}),
+		).rejects.toThrow("ENOSPC");
+
+		expect(getServersSpy).toHaveBeenCalledTimes(1);
+		expect(loadConfigSpy).toHaveBeenCalledTimes(1);
+		expect(await Bun.file(fileA).text()).toBe("const applied = true;\n");
+		expect(await Bun.file(fileB).exists()).toBe(false);
+	});
+
 	it("runs LSP immediately when no batch is provided", async () => {
 		const loadConfigSpy = vi
 			.spyOn(lspConfig, "loadConfig")

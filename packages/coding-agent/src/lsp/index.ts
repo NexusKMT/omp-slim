@@ -1118,6 +1118,10 @@ interface PendingWritethrough {
 	changeType: FileChangeType;
 }
 
+interface RunLspWritethroughOptions {
+	contentAlreadyWritten?: boolean;
+}
+
 interface LspWritethroughBatchRequest {
 	id: string;
 	flush: boolean;
@@ -1316,9 +1320,10 @@ async function runLspWritethrough(
 		onDeferredDiagnostics: (diagnostics: FileDiagnosticsResult) => void;
 		signal: AbortSignal;
 	},
-	contentAlreadyWritten = false,
+	runOptions?: RunLspWritethroughOptions,
 ): Promise<FileDiagnosticsResult | undefined> {
 	const { enableFormat, enableDiagnostics } = options;
+	const contentAlreadyWritten = runOptions?.contentAlreadyWritten ?? false;
 
 	let finalContent = content;
 	const writeContent = async (value: string) => (file ? file.write(value) : Bun.write(dst, value));
@@ -1510,7 +1515,7 @@ async function flushWritethroughBatch(
 			signal,
 			entry.file,
 			deferredInner,
-			true,
+			{ contentAlreadyWritten: true },
 		);
 		bundle?.finalize(diag);
 		results.push(diag);
@@ -1561,7 +1566,26 @@ export function createLspWritethrough(cwd: string, options?: WritethroughOptions
 		try {
 			await writethroughNoop(dst, content, signal, file);
 		} catch (error) {
-			if (batch.flush) writethroughBatches.delete(batch.id);
+			if (batch.flush) {
+				const pending = writethroughBatches.get(batch.id);
+				if (pending) {
+					writethroughBatches.delete(batch.id);
+					try {
+						await flushWritethroughBatch(
+							Array.from(pending.entries.values()),
+							cwd,
+							pending.options,
+							signal,
+							getDeferred,
+						);
+					} catch (flushError) {
+						logger.warn("Failed to flush pending LSP batch after final write failure", {
+							batchId: batch.id,
+							error: flushError instanceof Error ? flushError.message : String(flushError),
+						});
+					}
+				}
+			}
 			throw error;
 		}
 
