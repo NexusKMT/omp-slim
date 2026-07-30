@@ -482,10 +482,10 @@ mod x11 {
 	/// Pure Wayland capture (portal/PipeWire) is not implemented, so such a
 	/// session has no usable capture path at all.
 	const ROOTLESS_XWAYLAND_CAPTURE: &str =
-		"X11 root window is not a readable drawable; this is a rootless XWayland session \
-		 (the GNOME/KDE/sway default) whose compositor keeps no X11 root pixmap, so screen \
-		 capture through XWayland is impossible, and pure Wayland capture (portal/PipeWire) is \
-		 not implemented";
+		"X11 root window is not a readable drawable; this is a rootless XWayland session (the \
+		 GNOME/KDE/sway default) whose compositor keeps no X11 root pixmap, so screen capture \
+		 through XWayland is impossible, and pure Wayland capture (portal/PipeWire) is not \
+		 implemented";
 
 	/// Translate a failed root `GetImage` reply into a capture error. A
 	/// `Match`/`Drawable` protocol error means the root has no backing pixmap
@@ -955,22 +955,20 @@ mod x11 {
 
 	#[cfg(test)]
 	mod capture_probe_tests {
-		use x11rb::errors::ReplyError;
-		use x11rb::protocol::ErrorKind;
-		use x11rb::x11_utils::X11Error as WireError;
+		use x11rb::{errors::ReplyError, protocol::ErrorKind, x11_utils::X11Error as WireError};
 
 		use super::{ROOTLESS_XWAYLAND_CAPTURE, root_capture_error};
 
 		fn wire(kind: ErrorKind) -> ReplyError {
 			ReplyError::X11Error(WireError {
-				error_kind: kind,
-				error_code: 8,
-				sequence: 6,
-				bad_value: 850,
-				minor_opcode: 0,
-				major_opcode: 73,
+				error_kind:     kind,
+				error_code:     8,
+				sequence:       6,
+				bad_value:      850,
+				minor_opcode:   0,
+				major_opcode:   73,
 				extension_name: None,
-				request_name: Some("GetImage"),
+				request_name:   Some("GetImage"),
 			})
 		}
 
