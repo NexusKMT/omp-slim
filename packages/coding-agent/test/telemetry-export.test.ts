@@ -116,4 +116,16 @@ describe("initTelemetryExport signals export path", () => {
 		expect(stdout).toContain("PROBE: RECEIVED");
 		expect(code).toBe(0);
 	}, 20_000);
+
+	it("merges OTEL_RESOURCE_ATTRIBUTES into the exported resource", async () => {
+		// Regression for #7134: the resource only carried service.name, so
+		// OTEL_RESOURCE_ATTRIBUTES entries never reached the collector. The probe
+		// asserts the merged attributes land and that OTEL_SERVICE_NAME wins
+		// service.name over an OTEL_RESOURCE_ATTRIBUTES entry.
+		const probe = fileURLToPath(new URL("./otel-resource-probe.ts", import.meta.url));
+		const proc = Bun.spawn(["bun", probe], { stdout: "pipe", stderr: "pipe" });
+		const [code, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
+		expect(stdout).toContain("PROBE: RECEIVED");
+		expect(code).toBe(0);
+	}, 20_000);
 });

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed env-driven OTLP trace export ignoring `OTEL_RESOURCE_ATTRIBUTES`: the exported resource only carried `service.name`, so backends that attribute spans via resource attributes never received them. The resource now merges the vendored `envDetector`, which parses `OTEL_RESOURCE_ATTRIBUTES` (percent-decoded, per spec) with `OTEL_SERVICE_NAME` taking precedence for `service.name` ([#7134](https://github.com/can1357/oh-my-pi/issues/7134)).
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
