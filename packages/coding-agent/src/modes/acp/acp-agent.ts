@@ -377,9 +377,9 @@ function isAcceptedElicitation(
  * symmetric with every other `sessionUpdate` call in this file
  * (`record.session.sessionId` is always evaluated at emit time).
  *
- * The non-elicitation surface (custom components, editor, theming,
- * terminal input) remains stubbed — ACP clients render those themselves
- * or not at all. Capability gating respects the client's `initialize`
+ * The non-elicitation surface (custom components, theming, terminal
+ * input) remains stubbed — ACP clients render those themselves or not
+ * at all. Capability gating respects the client's `initialize`
  * advertisement.
  */
 export function createAcpExtensionUiContext(
