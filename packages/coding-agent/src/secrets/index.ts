@@ -1,6 +1,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { SENSITIVE_TOKEN_RE } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import { getAgentDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { regexHasUnresolvableShortMatchFallback, type SecretEntry, sanitizeSecretFriendlyName } from "./obfuscator";
@@ -143,6 +144,31 @@ export function collectEnvSecrets(): SecretEntry[] {
 		entries.push({ type: "plain", content: value, mode: "obfuscate" });
 	}
 	return entries;
+}
+
+/**
+ * Built-in entries covering credential-shaped tokens (GitHub/GitLab/OpenAI-style
+ * API keys) that are NOT configured via secrets.yml or the environment. Without
+ * these, such a token in a tool result falls through to pi-ai's irreversible
+ * provider-boundary redaction (`[openai_token_redacted]`); the model then echoes
+ * that placeholder into edit-tool `old_text`, which can never match the real
+ * bytes on disk (issue #6968). Routing the same shapes through the obfuscator
+ * mints reversible keyed placeholders that `deobfuscateToolArguments` restores
+ * before tool execution, keeping exact-match edits working while the credential
+ * bytes still never reach the provider. Unlike the pi-ai redaction there is no
+ * entropy gate here — a false positive only over-obfuscates, which stays
+ * transparent because the round trip is lossless.
+ */
+export function builtinCredentialSecretEntries(): SecretEntry[] {
+	return [
+		{
+			type: "regex",
+			content: SENSITIVE_TOKEN_RE.source,
+			flags: "i",
+			mode: "obfuscate",
+			friendlyName: "Credential",
+		},
+	];
 }
 
 async function loadSecretsFile(filePath: string): Promise<SecretEntry[]> {

@@ -118,6 +118,7 @@ import lateDiagnosticTemplate from "./prompts/tools/lsp-late-diagnostic.md" with
 import { AgentLifecycleManager } from "./registry/agent-lifecycle";
 import { type AgentRef, AgentRegistry, MAIN_AGENT_ID } from "./registry/agent-registry";
 import {
+	builtinCredentialSecretEntries,
 	collectEnvSecrets,
 	deobfuscateSessionContext,
 	deobfuscateToolArguments,
@@ -1340,7 +1341,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	if (settings.get("secrets.enabled")) {
 		const fileEntries = await logger.time("loadSecrets", loadSecrets, cwd, agentDir);
 		const envEntries = collectEnvSecrets();
-		const allEntries = [...envEntries, ...fileEntries];
+		// Built-in credential-pattern entries come last so user-configured entries
+		// (plain literals, custom regexes) take precedence in the scan order.
+		const allEntries = [...envEntries, ...fileEntries, ...builtinCredentialSecretEntries()];
 		const needsPlaceholderKey = secretEntriesNeedPlaceholderKey(allEntries);
 		const placeholderKey = needsPlaceholderKey
 			? await getSecretPlaceholderKey(agentDir)

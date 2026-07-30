@@ -9,6 +9,7 @@ import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Context, Message, TextContent } from "@oh-my-pi/pi-ai";
 import {
+	builtinCredentialSecretEntries,
 	getExistingSecretPlaceholderKey,
 	getSecretPlaceholderKey,
 	loadSecrets,
@@ -48,6 +49,30 @@ describe("compileSecretRegex", () => {
 	});
 	it("rejects invalid regex flags", () => {
 		expect(() => compileSecretRegex("x", "zz")).toThrow();
+	});
+});
+
+describe("builtinCredentialSecretEntries", () => {
+	// Issue #6968: an unconfigured credential-shaped token in a tool result used
+	// to fall through to pi-ai's irreversible `[*_token_redacted]` rewrite, so an
+	// edit-tool `old_text` echoing that placeholder could never match the file.
+	// The contract: the token is hidden from provider-visible text AND restored
+	// byte-exact in tool-call arguments before tool execution.
+	it("hides unconfigured credential-shaped tokens and restores them in tool-call arguments", () => {
+		const obfuscator = new SecretObfuscator(builtinCredentialSecretEntries());
+		expect(obfuscator.hasSecrets()).toBe(true);
+
+		const tokens = [`sk-${"a1B-c2D".repeat(7)}e3F`, `ghp_${"aB1".repeat(12)}`, `glpat-${"xY2-".repeat(5)}`];
+		for (const token of tokens) {
+			const fileLine = `MOONSHOT_API_KEY=${token}`;
+			const providerView = obfuscator.obfuscate(fileLine);
+			expect(providerView).not.toContain(token);
+			// Re-obfuscation is a fixed point: the placeholder itself is never re-matched.
+			expect(obfuscator.obfuscate(providerView)).toBe(providerView);
+			// The model echoes the placeholder into edit-tool old_text verbatim.
+			const args = deobfuscateToolArguments(obfuscator, { old_text: providerView });
+			expect(args.old_text).toBe(fileLine);
+		}
 	});
 });
 
