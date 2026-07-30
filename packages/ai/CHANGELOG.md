@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.1] - 2026-07-30
+
 ### Added
 
 - Added exact OAuth credential-row resolution by durable credential id. The targeted path refreshes only that row and never ranks, rotates, or falls back to sibling accounts.
