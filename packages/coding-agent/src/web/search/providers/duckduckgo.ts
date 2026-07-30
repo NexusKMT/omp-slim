@@ -138,26 +138,111 @@ const DDG_QUERY_SYNTAX: QuerySyntax = {
 };
 
 /**
- * DuckDuckGo names the United Kingdom region `uk` where ISO 3166 uses `gb`.
- * Every other locale reuses its country code verbatim.
+ * DuckDuckGo's documented `kl` values.
+ *
+ * The codes resemble `region-language` locales but contain provider-specific
+ * identifiers (`jp-jp`, `tw-tzh`, `uk-en`) that cannot be derived mechanically.
  */
-const DDG_REGION_ALIASES: Record<string, string> = { gb: "uk" };
+const DDG_KL_CODES = new Set([
+	"xa-ar",
+	"xa-en",
+	"ar-es",
+	"au-en",
+	"at-de",
+	"be-fr",
+	"be-nl",
+	"br-pt",
+	"bg-bg",
+	"ca-en",
+	"ca-fr",
+	"ct-ca",
+	"cl-es",
+	"cn-zh",
+	"co-es",
+	"hr-hr",
+	"cz-cs",
+	"dk-da",
+	"ee-et",
+	"fi-fi",
+	"fr-fr",
+	"de-de",
+	"gr-el",
+	"hk-tzh",
+	"hu-hu",
+	"in-en",
+	"id-id",
+	"id-en",
+	"ie-en",
+	"il-he",
+	"it-it",
+	"jp-jp",
+	"kr-kr",
+	"lv-lv",
+	"lt-lt",
+	"xl-es",
+	"my-ms",
+	"my-en",
+	"mx-es",
+	"nl-nl",
+	"nz-en",
+	"no-no",
+	"pe-es",
+	"ph-en",
+	"ph-tl",
+	"pl-pl",
+	"pt-pt",
+	"ro-ro",
+	"ru-ru",
+	"sg-en",
+	"sk-sk",
+	"sl-sl",
+	"za-en",
+	"es-es",
+	"se-sv",
+	"ch-de",
+	"ch-fr",
+	"ch-it",
+	"tw-tzh",
+	"th-th",
+	"tr-tr",
+	"ua-uk",
+	"uk-en",
+	"us-en",
+	"ue-es",
+	"ve-es",
+	"vn-vi",
+	"wt-wt",
+]);
+
+/** BCP 47 locales whose DDG code does not follow a simple component swap. */
+const DDG_LOCALE_ALIASES: Record<string, string> = {
+	"ca-es": "ct-ca",
+	"en-gb": "uk-en",
+	"es-419": "xl-es",
+	"es-us": "ue-es",
+	"ja-jp": "jp-jp",
+	"ko-kr": "kr-kr",
+	"zh-hk": "hk-tzh",
+	"zh-tw": "tw-tzh",
+};
 
 /**
- * Map a parsed `lang:` locale onto DuckDuckGo's `kl` region parameter.
+ * Map a parsed `lang:` locale onto DuckDuckGo's documented `kl` values.
  *
- * DDG orders `kl` as `region-language` (`us-en`, `de-de`) — the reverse of the
- * shared `language-region` locale convention parsed into `StructuredQuery.lang`
- * (`en-us`, `de-de`). Region-qualified locales are swapped into DDG order and
- * run through {@link DDG_REGION_ALIASES}; language-only or malformed values
- * return undefined so the caller keeps its default region.
+ * Shared queries use `language-region` order while DDG generally uses
+ * `region-language`. Provider-specific exceptions resolve through
+ * {@link DDG_LOCALE_ALIASES}; all other values must survive the documented
+ * allowlist after swapping or the caller keeps its default region.
  */
 export function localeToKl(lang: string | undefined): string | undefined {
 	if (!lang) return undefined;
-	const match = /^([a-z]{2})[-_]([a-z]{2})$/.exec(lang.toLowerCase());
+	const locale = lang.toLowerCase().replaceAll("_", "-");
+	const alias = DDG_LOCALE_ALIASES[locale];
+	if (alias) return alias;
+	const match = /^([a-z]{2})-([a-z]{2})$/.exec(locale);
 	if (!match) return undefined;
-	const [, language, country] = match;
-	return `${DDG_REGION_ALIASES[country] ?? country}-${language}`;
+	const candidate = `${match[2]}-${match[1]}`;
+	return DDG_KL_CODES.has(candidate) ? candidate : undefined;
 }
 
 async function callDuckDuckGoHtml(params: SearchParams): Promise<string> {

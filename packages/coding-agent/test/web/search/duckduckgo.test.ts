@@ -4,17 +4,20 @@ import { localeToKl, searchDuckDuckGo } from "@oh-my-pi/pi-coding-agent/web/sear
 import { parseSearchQuery } from "@oh-my-pi/pi-coding-agent/web/search/query";
 
 describe("localeToKl", () => {
-	it("maps region-qualified locales into DDG region-language order", () => {
+	it("maps standard region-qualified locales to documented DDG codes", () => {
 		expect(localeToKl("de-de")).toBe("de-de");
 		expect(localeToKl("fr-fr")).toBe("fr-fr");
-		// asymmetric locales swap: our language-region -> DDG region-language
 		expect(localeToKl("en-us")).toBe("us-en");
 		expect(localeToKl("pt-br")).toBe("br-pt");
 		expect(localeToKl("zh-cn")).toBe("cn-zh");
 	});
 
-	it("applies the gb->uk region alias DDG uses for the United Kingdom", () => {
+	it("maps locales with provider-specific DDG codes", () => {
 		expect(localeToKl("en-gb")).toBe("uk-en");
+		expect(localeToKl("ja-jp")).toBe("jp-jp");
+		expect(localeToKl("ko-kr")).toBe("kr-kr");
+		expect(localeToKl("zh-hk")).toBe("hk-tzh");
+		expect(localeToKl("zh-tw")).toBe("tw-tzh");
 	});
 
 	it("normalizes case and underscore separators", () => {
@@ -22,10 +25,12 @@ describe("localeToKl", () => {
 		expect(localeToKl("De-DE")).toBe("de-de");
 	});
 
-	it("returns undefined for language-only, empty, or malformed values", () => {
+	it("returns undefined for unsupported, language-only, empty, or malformed values", () => {
 		expect(localeToKl(undefined)).toBeUndefined();
 		expect(localeToKl("de")).toBeUndefined();
 		expect(localeToKl("en")).toBeUndefined();
+		expect(localeToKl("en-jp")).toBeUndefined();
+		expect(localeToKl("zz-zz")).toBeUndefined();
 		expect(localeToKl("english")).toBeUndefined();
 		expect(localeToKl("")).toBeUndefined();
 	});
@@ -61,9 +66,13 @@ describe("searchDuckDuckGo kl parameter (integration)", () => {
 		expect(fr.get("kl")).toBe("fr-fr");
 	});
 
-	it("swaps language-region into DDG region-language order", async () => {
-		const form = await effectiveForm("news lang:en-us");
-		expect(form.get("kl")).toBe("us-en");
+	it("uses DDG's provider-specific locale codes", async () => {
+		const ja = await effectiveForm("news lang:ja-jp");
+		const ko = await effectiveForm("news lang:ko-kr");
+		const tw = await effectiveForm("news lang:zh-tw");
+		expect(ja.get("kl")).toBe("jp-jp");
+		expect(ko.get("kl")).toBe("kr-kr");
+		expect(tw.get("kl")).toBe("tw-tzh");
 	});
 
 	it("falls back to us-en when no lang: directive is supplied", async () => {
