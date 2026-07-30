@@ -296,7 +296,7 @@ function buildAcpSpeechModelsCatalog(): Record<string, unknown> {
 async function elicitFromAcpClient(
 	connection: AgentSideConnection,
 	sessionId: string,
-	method: "select" | "confirm" | "input",
+	method: "select" | "confirm" | "input" | "editor",
 	message: string,
 	property: ElicitationPropertySchema,
 	dialogOptions: ExtensionUIDialogOptions | undefined,
@@ -443,7 +443,18 @@ export function createAcpExtensionUiContext(
 		pasteToEditor: () => {},
 		setEditorText: () => {},
 		getEditorText: () => "",
-		editor: async () => undefined,
+		editor: async (title, prefill, dialogOptions) => {
+			if (!supportsForm) return undefined;
+			const value = await elicitFromAcpClient(
+				connection,
+				getSessionId(),
+				"editor",
+				title,
+				{ type: "string", ...(prefill?.trim() ? { default: prefill } : {}) },
+				dialogOptions,
+			);
+			return typeof value === "string" ? value : undefined;
+		},
 		addAutocompleteProvider: () => {},
 		setEditorComponent: () => {},
 		get theme() {
