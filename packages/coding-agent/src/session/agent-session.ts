@@ -502,6 +502,7 @@ export class AgentSession {
 	#asyncDeliveryEpoch = 0;
 
 	readonly #irc: IrcBridge;
+	#ircWakeTurnObserver: ((records: CustomMessage[]) => ((error?: unknown) => void) | undefined) | undefined;
 	// Agent identity (registry id) used for IRC routing and job ownership.
 	#agentId: string | undefined;
 	#agentKind: "main" | "sub" = "main";
@@ -726,14 +727,27 @@ export class AgentSession {
 		if (parkedFollowUps.length > 0) {
 			this.agent.replaceQueues([...this.agent.peekSteeringQueue()], []);
 		}
+		let finishObservation: ((error?: unknown) => void) | undefined;
+		try {
+			finishObservation = this.#ircWakeTurnObserver?.(records);
+		} catch (error) {
+			logger.warn("IRC wake turn observer failed to start", { error: String(error) });
+		}
 		this.#resetPromptMaintenanceState();
 		this.#beginInFlight();
+		let turnError: unknown;
 		void this.agent
 			.prompt(records)
 			.catch(error => {
+				turnError = error;
 				logger.warn("IRC wake turn failed", { error: String(error) });
 			})
 			.finally(() => {
+				try {
+					finishObservation?.(turnError);
+				} catch (error) {
+					logger.warn("IRC wake turn observer failed to finish", { error: String(error) });
+				}
 				if (parkedFollowUps.length > 0) {
 					this.agent.replaceQueues(
 						[...this.agent.peekSteeringQueue()],
@@ -6866,6 +6880,13 @@ export class AgentSession {
 	/** Delivers an IRC message into this recipient session. */
 	deliverIrcMessage(msg: IrcMessage, opts?: { expectsReply?: boolean }): Promise<"injected" | "woken"> {
 		return this.#irc.deliver(msg, opts);
+	}
+
+	/** Installs task-executor monitoring around autonomous IRC wake turns. */
+	setIrcWakeTurnObserver(
+		observer: ((records: CustomMessage[]) => ((error?: unknown) => void) | undefined) | undefined,
+	): void {
+		this.#ircWakeTurnObserver = observer;
 	}
 
 	/** Emits an IRC relay observation for UI rendering without persisting it. */

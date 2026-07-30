@@ -2544,6 +2544,102 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			}
 		});
 	};
+	const installIrcWakeTurnMonitor = (target: AgentSession): void => {
+		target.setIrcWakeTurnObserver(records => {
+			const ircTask =
+				records
+					.map(record => {
+						const body =
+							record.details && typeof record.details === "object"
+								? Reflect.get(record.details, "message")
+								: undefined;
+						return typeof body === "string" ? body : record.content;
+					})
+					.filter(Boolean)
+					.join("\n\n") || "IRC follow-up";
+			const turnStartTime = Date.now();
+			const sessionFile = AgentRegistry.global().get(id)?.sessionFile ?? subtaskSessionFile ?? undefined;
+			const turnMonitor = createSubagentRunMonitor({
+				index,
+				id,
+				agent,
+				task: ircTask,
+				description: options.description,
+				modelOverride,
+				eventBus: options.eventBus,
+				parentToolCallId: options.parentToolCallId,
+				detached: true,
+				sessionFile,
+				softRequestBudget: 0,
+				softRequestBudgetNotice: false,
+				maxRuntimeMs,
+			});
+
+			if (options.eventBus) {
+				options.eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, {
+					id,
+					agent: agent.name,
+					parentToolCallId: options.parentToolCallId,
+					detached: true,
+					agentSource: agent.source,
+					description: options.description,
+					status: "started",
+					sessionFile,
+					index,
+				});
+			}
+
+			turnMonitor.setActiveSession(target);
+			const unsubscribeTurn = turnMonitor.attach(target);
+			return turnError => {
+				unsubscribeTurn();
+				const activeSession = turnMonitor.takeActiveSession();
+				if (activeSession) turnMonitor.captureSalvage(activeSession);
+				const lastAssistant = target.getLastAssistantMessage();
+				const yielded = turnMonitor.yieldCalled();
+				const runtimeLimitExceeded = turnMonitor.runtimeLimitExceeded();
+				const aborted = runtimeLimitExceeded || (lastAssistant?.stopReason === "aborted" && !yielded);
+				const error =
+					lastAssistant?.stopReason === "error"
+						? lastAssistant.errorMessage || "Subagent failed"
+						: turnError !== undefined && !yielded
+							? turnError instanceof Error
+								? turnError.stack || turnError.message
+								: String(turnError)
+							: undefined;
+				turnMonitor.finish();
+				void finalizeRunResult({
+					monitor: turnMonitor,
+					done: {
+						exitCode: aborted || error ? 1 : 0,
+						error,
+						aborted,
+						abortReason: aborted ? turnMonitor.resolveAbortReasonText() : undefined,
+						durationMs: Date.now() - turnStartTime,
+					},
+					index,
+					id,
+					agent,
+					task: ircTask,
+					modelOverride,
+					outputSchema,
+					outputSchemaMode: options.outputSchemaMode,
+					outputSchemaSource: options.outputSchemaSource,
+					artifactsDir: options.artifactsDir,
+					eventBus: options.eventBus,
+					parentToolCallId: options.parentToolCallId,
+					detached: true,
+					sessionFile,
+					startTime: turnStartTime,
+				}).catch(error => {
+					logger.warn("IRC subagent turn finalization failed", {
+						id,
+						error: error instanceof Error ? error.message : String(error),
+					});
+				});
+			};
+		});
+	};
 
 	const runSubagent = async (): Promise<{
 		exitCode: number;
@@ -2882,6 +2978,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 						buildSubagentSessionOptions(reopened, expectedAgentRef),
 					);
 					installRegistryStatusSync(revived);
+					installIrcWakeTurnMonitor(revived);
 					return revived;
 				};
 			}
@@ -3053,6 +3150,9 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			const session = monitor.takeActiveSession();
 			if (session) {
 				monitor.captureSalvage(session);
+				if (options.keepAlive !== false && worktree === undefined) {
+					installIrcWakeTurnMonitor(session);
+				}
 				await finalizeSubagentLifecycle({
 					id,
 					session,
