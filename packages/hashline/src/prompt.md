@@ -1,4 +1,4 @@
-Line-anchored patch language: name original lines to replace, delete, or insert at, then list new content. A header ending in `:` takes `+` body rows; `DEL`, `CUT`/`COPY`, `PASTE`, `REM`, `MV` take none.
+Line-anchored patch language: name original lines to replace, cut, or insert at, then list new content. A header ending in `:` takes `+` body rows; `CUT`, `PASTE`, `REM`, `MV` take none.
 
 <headers>
 Every file section starts `[PATH#TAG]`. `TAG` = 4-hex snapshot tag from your latest `read`/`search` — REQUIRED on every section. Create new files with `write`; hashline only edits existing files.
@@ -7,14 +7,13 @@ Every file section starts `[PATH#TAG]`. `TAG` = 4-hex snapshot tag from your lat
 <ops>
 `SWAP N.=M:` — replace original lines N.=M (INCLUSIVE).
 `SWAP.BLK N:` — replace the whole syntactic block BEGINNING on line N; its closing line is resolved for you.
-`DEL N.=M` / `DEL.BLK N` — delete lines N.=M / the block beginning at N.
+`CUT N.=M` / `CUT.BLK N` — delete lines N.=M / the block beginning at N, and capture them for `PASTE`.
 `INS.PRE N:` / `INS.POST N:` — insert immediately before / after line N.
 `INS.BLK.POST N:` — insert after the END of the block beginning at N, outside it at sibling depth. Append inside a block → `INS.POST`.
 `INS.HEAD:` / `INS.TAIL:` — insert at the very start / end of the file.
-`CUT N.=M` / `COPY N.=M` — capture lines N.=M into the clipboard (`CUT` also deletes); `.BLK N` forms capture the block.
 `PASTE.PRE N` / `PASTE.POST N` / `PASTE.HEAD` / `PASTE.TAIL` / `PASTE.BLK.POST N` — insert the clipboard at the position (the clipboard IS the body).
 `REM` — delete the whole section file. `MV DEST` — move/rename to `DEST` (quote paths with spaces); edits above `MV` land on the source first, final content written at `DEST`.
-Single line: `SWAP N.=N:` / `DEL N`. Range = ORIGINAL lines touched; body length irrelevant (1 line → 10 is still `SWAP N.=N:`).
+Single line: `SWAP N.=N:` / `CUT N`. Range = ORIGINAL lines touched; body length irrelevant (1 line → 10 is still `SWAP N.=N:`).
 </ops>
 
 <body-rows>
@@ -30,11 +29,10 @@ Only under a `:` header. Every row is `+TEXT`, verbatim (leading whitespace kept
 - Ranges cover ONLY changed lines — never widen over keepers. Non-adjacent changes = separate hunks.
 - Whole construct → `SWAP.BLK N`; lines inside one → `SWAP N.=M`.
 - `SWAP.BLK` resolves EXACTLY the node at N: leading decorators/attributes/doc-comments are separate nodes — point N at the FIRST decorator to sweep both; standalone line-comments are never swept (use `SWAP N.=M`).
-- Block ops anchor the OPENING line of a MULTI-LINE construct — never the closer, last line, or a bare inner statement; one statement → plain op (`SWAP N.=N:` / `DEL N` / `INS.POST N:`). Saw the closer? `INS.POST M:`.
+- Block ops anchor the OPENING line of a MULTI-LINE construct — never the closer, last line, or a bare inner statement; one statement → plain op (`SWAP N.=N:` / `CUT N` / `INS.POST N:`). Saw the closer? `INS.POST M:`.
 - Markdown: a heading IS a block opener — block ops on `##`/`###` resolve the WHOLE section (through deeper nested headings, up to the next same-or-higher heading). `INS.BLK.POST` after a section: end the body with a blank line to keep the next heading separated.
 - Pure additions → `INS.PRE`/`INS.POST`/`INS.HEAD`/`INS.TAIL`, never a widened `SWAP`.
-- Move code with `CUT`+`PASTE`, never retype. Clipboard: top-to-bottom across the whole patch (cross-file moves), persists across edit calls, last `CUT`/`COPY` wins, `PASTE` repeats freely, pastes verbatim with indentation — re-indent via `SWAP`.
-- Paste `CUT` content before any new `CUT`/`COPY`.
+- Move code with `CUT`+`PASTE`, never retype. Clipboard: top-to-bottom across the whole patch (cross-file moves), persists across edit calls, latest `CUT` wins, and `PASTE` repeats freely. Pasted indentation is verbatim; re-indent via `SWAP`.
 - NEVER format/restyle code with this tool; run the project formatter.
 </rules>
 
@@ -65,12 +63,10 @@ INS.POST 2:
 +  - nested task
 ```
 
-Move `greet` after line 4, copy line 4 to a sibling file — clipboard flows across sections:
+Move `greet` to a sibling file — clipboard flows across sections:
 ```
 [greet.py#A1B2]
 CUT.BLK 1
-PASTE.POST 4
-COPY 4.=4
 [other.py#3C4D]
 PASTE.HEAD
 ```
@@ -94,7 +90,7 @@ SWAP.BLK 1:
 </example>
 
 <anti-patterns>
-# WRONG — empty `SWAP` to delete. RIGHT: DEL 4
+# WRONG — empty `SWAP` to delete. RIGHT: CUT 4
 SWAP 4.=4:
 
 # WRONG — range sized to the post-edit content. RIGHT: SWAP 1.=1: (body length irrelevant)

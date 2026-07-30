@@ -288,10 +288,6 @@ function hashlineOpLabel(target: HashlineBlockTarget): string {
 			return "SWAP";
 		case "block":
 			return "SWAP.BLK";
-		case "delete":
-			return "DEL";
-		case "delete_block":
-			return "DEL.BLK";
 		case "insert_before":
 			return "INS.PRE";
 		case "insert_after":
@@ -302,10 +298,10 @@ function hashlineOpLabel(target: HashlineBlockTarget): string {
 			return "INS.TAIL";
 		case "insert_after_block":
 			return "INS.BLK.POST";
-		case "copy":
-			return target.cut ? "CUT" : "COPY";
-		case "copy_block":
-			return target.cut ? "CUT.BLK" : "COPY.BLK";
+		case "cut":
+			return "CUT";
+		case "cut_block":
+			return "CUT.BLK";
 		case "paste":
 			switch (target.cursor.kind) {
 				case "before_anchor":
@@ -317,7 +313,6 @@ function hashlineOpLabel(target: HashlineBlockTarget): string {
 				case "eof":
 					return "PASTE.TAIL";
 			}
-			break;
 		case "paste_after_block":
 			return "PASTE.BLK.POST";
 		case "rem":
@@ -328,7 +323,7 @@ function hashlineOpLabel(target: HashlineBlockTarget): string {
 }
 
 /**
- * Count hashline op headers (`SWAP`, `DEL.BLK`, `CUT`, `PASTE.POST`, …) in an
+ * Count hashline op headers (`SWAP`, `CUT.BLK`, `PASTE.POST`, …) in an
  * edit call's patch input. Returns `null` when the args carry no hashline
  * patch — non-hashline edit variants and malformed calls contribute nothing.
  */
@@ -883,7 +878,7 @@ export interface TaskRunResult {
 	editFailures: EditFailure[];
 	editWarnings: string[];
 	editAutocorrectCount: number;
-	/** Hashline op counts (`SWAP`, `DEL.BLK`, `CUT`, …) — present when edit calls carried hashline patches. */
+	/** Hashline op counts (`SWAP`, `CUT.BLK`, `PASTE.POST`, …) — present when edit calls carried hashline patches. */
 	hashlineEditSubtypes?: Record<string, number>;
 	mutationIntentMatched?: boolean;
 	mutationIntentReason?: string;

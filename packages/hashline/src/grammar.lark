@@ -7,12 +7,11 @@ file_header: "[" filename "#" file_hash "]" LF
 file_hash: /[0-9A-F]{4}/
 filename: /[^#\r\n]+/
 
-hunk: swap_hunk | ins_hunk | del_hunk | copy_hunk | paste_hunk | rem_hunk | mv_hunk
+hunk: swap_hunk | ins_hunk | cut_hunk | paste_hunk | rem_hunk | mv_hunk
 swap_hunk: "SWAP " header_range ":" LF body*
          | "SWAP.BLK " LID ":" LF body+
 ins_hunk: "INS." pos ":" LF body+
-del_hunk: "DEL" target LF
-copy_hunk: ("CUT" | "COPY") target LF
+cut_hunk: "CUT" target LF
 paste_hunk: "PASTE." pos LF
 rem_hunk: "REM" LF
 mv_hunk: "MV " filename LF body*

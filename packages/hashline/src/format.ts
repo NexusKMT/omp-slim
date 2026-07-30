@@ -15,8 +15,6 @@ export const HL_PAYLOAD_REPLACE = "+";
 
 /** Hunk-header keyword for concrete line replacement. */
 export const HL_REPLACE_KEYWORD = "SWAP";
-/** Hunk-header keyword for concrete line deletion. */
-export const HL_DELETE_KEYWORD = "DEL";
 /** Hunk-header keyword for insertion operations. */
 export const HL_INSERT_KEYWORD = "INS";
 /** Insert position keyword for inserting before a concrete line. */
@@ -29,16 +27,10 @@ export const HL_INSERT_HEAD = "HEAD";
 export const HL_INSERT_TAIL = "TAIL";
 /** Hunk-header keyword: `SWAP.BLK N:` resolves N to a tree-sitter block range and replaces its span. */
 export const HL_REPLACE_BLOCK_KEYWORD = "SWAP.BLK";
-/** Hunk-header keyword: `DEL.BLK N` resolves N to a tree-sitter block range and deletes its span. */
-export const HL_DELETE_BLOCK_KEYWORD = "DEL.BLK";
 /** Hunk-header keyword: `INS.BLK.POST N:` inserts after the last line of the tree-sitter block at N. */
 export const HL_INSERT_AFTER_BLOCK_KEYWORD = "INS.BLK.POST";
-/** Hunk-header keyword: `COPY N.=M` captures lines into the clipboard register. */
-export const HL_COPY_KEYWORD = "COPY";
 /** Hunk-header keyword: `CUT N.=M` captures lines into the clipboard register and deletes them. */
 export const HL_CUT_KEYWORD = "CUT";
-/** Hunk-header keyword: `COPY.BLK N` captures the tree-sitter block at N into the clipboard. */
-export const HL_COPY_BLOCK_KEYWORD = "COPY.BLK";
 /** Hunk-header keyword: `CUT.BLK N` captures the tree-sitter block at N and deletes its span. */
 export const HL_CUT_BLOCK_KEYWORD = "CUT.BLK";
 /** Hunk-header keyword prefix: `PASTE.PRE|POST N` / `PASTE.HEAD|TAIL` inserts the clipboard. */
@@ -75,9 +67,9 @@ export function formatReplaceHeader(start: number, end: number): string {
 	return `${HL_REPLACE_KEYWORD} ${start}${HL_RANGE_SEP}${end}${HL_HEADER_COLON}`;
 }
 
-/** Format a concrete deletion hunk header. */
-export function formatDeleteHeader(start: number, end = start): string {
-	return start === end ? `${HL_DELETE_KEYWORD} ${start}` : `${HL_DELETE_KEYWORD} ${start}${HL_RANGE_SEP}${end}`;
+/** Format a concrete cut hunk header. */
+export function formatCutHeader(start: number, end = start): string {
+	return start === end ? `${HL_CUT_KEYWORD} ${start}` : `${HL_CUT_KEYWORD} ${start}${HL_RANGE_SEP}${end}`;
 }
 
 /** Format an insertion hunk header for a cursor position. */

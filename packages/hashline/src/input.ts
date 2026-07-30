@@ -10,7 +10,7 @@
 import * as path from "node:path";
 import { applyEdits } from "./apply";
 import { resolveBlockEdits } from "./block";
-import { assertClipboardConsumed, hasClipboardEdit } from "./clipboard";
+import { hasClipboardEdit } from "./clipboard";
 import { HL_FILE_HASH_EXAMPLES, HL_FILE_HASH_LENGTH, HL_FILE_HASH_SEP, HL_FILE_PREFIX, HL_FILE_SUFFIX } from "./format";
 import { CLIPBOARD_INTERLEAVED_SECTIONS } from "./messages";
 import { parsePatch, parsePatchStreaming } from "./parser";
@@ -308,27 +308,12 @@ export class PatchSection {
 			if (edit.kind === "delete") return true;
 			// A `replace_block N:` edit is anchored to concrete content on line N.
 			if (edit.kind === "block") return true;
-			// A `COPY`/`CUT` range reads concrete content.
-			if (edit.kind === "copy") return true;
+			// A `CUT` range reads concrete content.
+			if (edit.kind === "cut") return true;
 			return edit.cursor.kind === "before_anchor" || edit.cursor.kind === "after_anchor";
 		});
 	}
 
-	/**
-	 * True when this section is a pure clipboard source: at least one edit,
-	 * and every edit is a non-cut `COPY`/`COPY.BLK`. Only such a section may
-	 * legitimately change nothing in its own file (it exists to fill the
-	 * clipboard for a later `PASTE`), so only it is exempt from no-change
-	 * validation — a section mixing COPY with mutating edits that all no-op'd
-	 * still trips the guard.
-	 */
-	get isClipboardSource(): boolean {
-		const edits = this.edits;
-		return (
-			edits.length > 0 &&
-			edits.every(edit => (edit.kind === "copy" && !edit.cut) || (edit.kind === "block" && edit.mode === "copy"))
-		);
-	}
 
 	/** Anchor lines touched by this section, sorted ascending and deduplicated. */
 	collectAnchorLines(): readonly number[] {
@@ -342,7 +327,7 @@ export class PatchSection {
 				lines.add(edit.anchor.line);
 				continue;
 			}
-			if (edit.kind === "copy") {
+			if (edit.kind === "cut") {
 				for (let line = edit.range.start.line; line <= edit.range.end.line; line++) lines.add(line);
 				continue;
 			}
@@ -363,10 +348,8 @@ export class PatchSection {
 	 * `blockResolver` resolves any `replace_block N:` edits against `text`; an
 	 * unresolvable block throws (this is the final, authoritative preview path).
 	 *
-	 * `clipboard` is the register shared by `CUT`/`COPY`/`PASTE` ops. Pass one
-	 * when applying several sections of a batch so content can move across
-	 * files; when omitted, a private register is used and un-pasted `CUT`
-	 * content is rejected at the end of the call.
+	 * `clipboard` is the register shared by `CUT`/`PASTE` ops. Pass one when
+	 * applying several sections so content can move across files.
 	 */
 	applyTo(text: string, blockResolver?: BlockResolver, clipboard?: Clipboard): ApplyResult {
 		const { edits, warnings } = this.parse();
@@ -375,9 +358,7 @@ export class PatchSection {
 			onUnresolved: "throw",
 			onWarning: warning => resolveWarnings.push(warning),
 		});
-		const register = clipboard ?? {};
-		const result = applyEdits(text, resolved, { clipboard: register });
-		if (clipboard === undefined) assertClipboardConsumed(register);
+		const result = applyEdits(text, resolved, { clipboard: clipboard ?? {} });
 		// Preserve parse warnings so consumers don't need to call `parse()`
 		// separately.
 		const merged = [...warnings, ...resolveWarnings, ...(result.warnings ?? [])];
@@ -395,8 +376,7 @@ export class PatchSection {
 	 *
 	 * `blockResolver` resolves any `replace_block N:` edits against `text`; an
 	 * unresolvable block is silently dropped so a half-written file does not
-	 * throw mid-stream. A `PASTE` with an empty register is dropped for the
-	 * same reason, and un-pasted `CUT` content is never rejected here.
+	 * throw mid-stream. A `PASTE` with an empty register is dropped too.
 	 */
 	applyPartialTo(text: string, blockResolver?: BlockResolver, clipboard?: Clipboard): ApplyResult {
 		const { edits, warnings } = parsePatchStreaming(this.diff);

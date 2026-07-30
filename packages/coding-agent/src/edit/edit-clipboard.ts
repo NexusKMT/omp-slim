@@ -1,7 +1,7 @@
 /**
  * Session-bound edit clipboard register.
  *
- * `CUT`/`COPY`/`PASTE` hashline ops share one {@link Clipboard} per session so
+ * `CUT`/`PASTE` hashline ops share one {@link Clipboard} per session so
  * content captured by one edit call can be pasted by a later one (and across
  * files within one call). The executor works on a fork per batch and commits
  * it back only after every write lands — see `executeHashlineSingle`.

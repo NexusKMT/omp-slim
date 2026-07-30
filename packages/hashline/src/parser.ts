@@ -7,10 +7,7 @@ import { HL_PAYLOAD_REPLACE, HL_RANGE_SEP } from "./format";
 import {
 	type AbsoluteRangeOp,
 	BARE_BODY_AUTO_PIPED_WARNING,
-	COPY_TAKES_NO_BODY,
 	CUT_TAKES_NO_BODY,
-	DELETE_BLOCK_TAKES_NO_BODY,
-	DELETE_TAKES_NO_BODY,
 	EMPTY_BLOCK,
 	EMPTY_INSERT,
 	invalidAbsoluteRangeMessage,
@@ -84,13 +81,9 @@ function isSkippableCommentLine(line: string): boolean {
  */
 function bodylessTargetMessage(target: BlockTarget): string | null {
 	switch (target.kind) {
-		case "delete":
-			return DELETE_TAKES_NO_BODY;
-		case "delete_block":
-			return DELETE_BLOCK_TAKES_NO_BODY;
-		case "copy":
-		case "copy_block":
-			return target.cut ? CUT_TAKES_NO_BODY : COPY_TAKES_NO_BODY;
+		case "cut":
+		case "cut_block":
+			return CUT_TAKES_NO_BODY;
 		case "paste":
 		case "paste_after_block":
 			return PASTE_TAKES_NO_BODY;
@@ -126,13 +119,13 @@ function detectApplyPatchContamination(text: string, _hasPending: boolean): stri
 		return (
 			`apply_patch sentinel ${JSON.stringify(preview)} is not valid in hashline. ` +
 			"File sections start with `[path#HASH]` (no `Update File:` / `Add File:` keyword). " +
-			`Use \`SWAP N${HL_RANGE_SEP}M:\`, \`DEL N${HL_RANGE_SEP}M\`, or \`INS.PRE|POST|HEAD|TAIL:\` ops.`
+			`Use \`SWAP N${HL_RANGE_SEP}M:\`, \`CUT N${HL_RANGE_SEP}M\`, or \`INS.PRE|POST|HEAD|TAIL:\` ops.`
 		);
 	}
 	if (/^@@\s+[-+]?\d+,\d+\s+[-+]?\d+,\d+\s+@@/.test(trimmed)) {
 		return (
 			"unified-diff hunk header (`@@ -N,M +N,M @@`) is not valid in hashline. " +
-			`Use \`SWAP N${HL_RANGE_SEP}M:\`, \`DEL N${HL_RANGE_SEP}M\`, or \`INS.PRE|POST|HEAD|TAIL:\` ops.`
+			`Use \`SWAP N${HL_RANGE_SEP}M:\`, \`CUT N${HL_RANGE_SEP}M\`, or \`INS.PRE|POST|HEAD|TAIL:\` ops.`
 		);
 	}
 	if (trimmed.startsWith("@@")) {
@@ -142,9 +135,6 @@ function detectApplyPatchContamination(text: string, _hasPending: boolean): stri
 			`Drop the \`@@ ... @@\` brackets and write a verb header such as \`SWAP N${HL_RANGE_SEP}M:\`.`
 		);
 	}
-	if (/^DEL\s+[1-9]\d*(?:\s*(?:\.\.|\.=|-|…|\s)\s*[1-9]\d*)?\s*:/.test(trimmed)) {
-		return `\`DEL N${HL_RANGE_SEP}M\` has no colon and no body. Remove the colon and body rows.`;
-	}
 	// Bare `PASTE` (optionally `PASTE 5` / `PASTE:`) — the op requires an
 	// explicit position suffix; a bare form would otherwise surface as a
 	// confusing body-row rejection under the preceding hunk.
@@ -152,13 +142,13 @@ function detectApplyPatchContamination(text: string, _hasPending: boolean): stri
 		return "`PASTE` needs a position: use `PASTE.PRE N` / `PASTE.POST N` / `PASTE.HEAD` / `PASTE.TAIL` / `PASTE.BLK.POST N`.";
 	}
 	if (/^[1-9]\d*\s*$/.test(trimmed)) {
-		return `hunk headers need a verb. Use \`SWAP ${trimmed}${HL_RANGE_SEP}${trimmed}:\` to replace, or \`DEL ${trimmed}\` to delete.`;
+		return `hunk headers need a verb. Use \`SWAP ${trimmed}${HL_RANGE_SEP}${trimmed}:\` to replace, or \`CUT ${trimmed}\` to delete.`;
 	}
 	const bareRange = /^([1-9]\d*)\s*[-. …=]+\s*([1-9]\d*)\s*:?$/.exec(trimmed);
 	if (bareRange !== null) {
 		return (
 			`bare range hunk header ${JSON.stringify(trimmed)} is not valid. ` +
-			`Hunk headers need a verb: write \`SWAP ${bareRange[1]}${HL_RANGE_SEP}${bareRange[2]}:\` or \`DEL ${bareRange[1]}${HL_RANGE_SEP}${bareRange[2]}\`.`
+			`Hunk headers need a verb: write \`SWAP ${bareRange[1]}${HL_RANGE_SEP}${bareRange[2]}:\` or \`CUT ${bareRange[1]}${HL_RANGE_SEP}${bareRange[2]}\`.`
 		);
 	}
 	return null;
@@ -237,11 +227,11 @@ export class Executor {
 				return;
 			case "op-block":
 				this.#discardPendingSkippableComments();
-				if (token.target.kind === "replace" || token.target.kind === "delete") {
-					validateRange(token.target.range, token.lineNum, token.target.kind);
+				if (token.target.kind === "replace") {
+					validateRange(token.target.range, token.lineNum, "replace");
 				}
-				if (token.target.kind === "copy") {
-					validateRange(token.target.range, token.lineNum, token.target.cut ? "cut" : "copy");
+				if (token.target.kind === "cut") {
+					validateRange(token.target.range, token.lineNum, "cut");
 				}
 				if (token.target.kind === "rem") {
 					this.#flushPending();
@@ -381,7 +371,7 @@ export class Executor {
 		if (text.trim().length === 0) return;
 		throw new Error(
 			`line ${lineNum}: payload line has no preceding hunk header. ` +
-				`Use \`SWAP N${HL_RANGE_SEP}M:\`, \`DEL N${HL_RANGE_SEP}M\`, or \`INS.PRE|POST|HEAD|TAIL:\` above the body. Got ${JSON.stringify(text)}.`,
+				`Use \`SWAP N${HL_RANGE_SEP}M:\`, \`CUT N${HL_RANGE_SEP}M\`, or \`INS.PRE|POST|HEAD|TAIL:\` above the body. Got ${JSON.stringify(text)}.`,
 		);
 	}
 
@@ -486,26 +476,23 @@ export class Executor {
 		for (let line = range.start.line; line <= range.end.line; line++) this.#pushDelete({ line }, lineNum);
 	}
 
-	#pushCopy(range: ParsedRange, cut: boolean, lineNum: number): void {
+	#pushCut(range: ParsedRange, lineNum: number): void {
 		this.#edits.push({
-			kind: "copy",
+			kind: "cut",
 			range: { start: { ...range.start }, end: { ...range.end } },
-			cut,
 			lineNum,
 			index: this.#editIndex++,
 		});
-		// A CUT deletes its range exactly like `DEL N.=M`; the copy edit above
-		// only captures. Keeping the deletes as ordinary per-line edits lets
-		// overlap validation, recovery remapping, and the applier treat them
-		// identically to a plain delete.
-		if (cut) this.#pushDeleteRange(range, lineNum);
+		// Capture before ordinary per-line deletes are applied. Keeping deletion
+		// as low-level edits preserves overlap validation and recovery remapping.
+		this.#pushDeleteRange(range, lineNum);
 	}
 
 	#pushBlock(
 		anchor: Anchor,
 		payloads: readonly PayloadRow[],
 		lineNum: number,
-		mode?: "insert_after" | "copy" | "cut" | "paste_after",
+		mode?: "insert_after" | "cut" | "paste_after",
 	): void {
 		this.#edits.push({
 			kind: "block",
@@ -528,21 +515,12 @@ export class Executor {
 		this.#resolveMinusRows(payloads);
 		this.#stripBarePrefixesIfUniform(payloads);
 		this.#pending = undefined;
-		if (target.kind === "delete") {
-			this.#pushDeleteRange(target.range, lineNum);
+		if (target.kind === "cut") {
+			this.#pushCut(target.range, lineNum);
 			return;
 		}
-		if (target.kind === "delete_block") {
-			// A block edit with no payloads resolves to a pure block deletion.
-			this.#pushBlock(target.anchor, [], lineNum);
-			return;
-		}
-		if (target.kind === "copy") {
-			this.#pushCopy(target.range, target.cut, lineNum);
-			return;
-		}
-		if (target.kind === "copy_block") {
-			this.#pushBlock(target.anchor, [], lineNum, target.cut ? "cut" : "copy");
+		if (target.kind === "cut_block") {
+			this.#pushBlock(target.anchor, [], lineNum, "cut");
 			return;
 		}
 		if (target.kind === "paste") {

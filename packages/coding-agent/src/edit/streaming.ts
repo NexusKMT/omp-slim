@@ -53,7 +53,7 @@ export interface StreamingDiffContext {
 	 */
 	isStreaming?: boolean;
 	/**
-	 * Session-persistent clipboard register (`CUT`/`COPY`/`PASTE`). Previews
+	 * Session-persistent clipboard register (`CUT`/`PASTE`). Previews
 	 * fork it per frame — never mutating it — so a `PASTE` of content cut in
 	 * an earlier edit call (or an earlier section of this patch) renders the
 	 * real rows.

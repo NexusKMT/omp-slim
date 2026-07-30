@@ -31,13 +31,11 @@ export function formatAnchoredContext(anchorLines: readonly number[], fileLines:
 	return rows;
 }
 /** Concrete range operation rejected because its absolute end precedes its start. */
-export type AbsoluteRangeOp = "replace" | "delete" | "copy" | "cut";
+export type AbsoluteRangeOp = "replace" | "cut";
 
 /** Header forms per concrete-range op, used to compose retry suggestions. */
 const RANGE_OP_FORMS: Record<AbsoluteRangeOp, { keyword: string; colon: string; blockKeyword: string }> = {
 	replace: { keyword: "SWAP", colon: ":", blockKeyword: "SWAP.BLK" },
-	delete: { keyword: "DEL", colon: "", blockKeyword: "DEL.BLK" },
-	copy: { keyword: "COPY", colon: "", blockKeyword: "COPY.BLK" },
 	cut: { keyword: "CUT", colon: "", blockKeyword: "CUT.BLK" },
 };
 
@@ -112,10 +110,10 @@ export const MINUS_ROW_REJECTED =
 	"`-` rows are not valid; the range already names the lines being changed. For Markdown bullets or other literal `-` lines, prefix the literal row with `+`: `+- item`.";
 
 /** Replace hunk with no body. */
-export const EMPTY_REPLACE = `\`SWAP N${HL_RANGE_SEP}M:\` needs at least one \`+TEXT\` body row. To delete lines, use \`DEL N${HL_RANGE_SEP}M\`.`;
+export const EMPTY_REPLACE = `\`SWAP N${HL_RANGE_SEP}M:\` needs at least one \`+TEXT\` body row. To delete lines, use \`CUT N${HL_RANGE_SEP}M\`.`;
 
-/** `replace_block N:` hunk with no body. */
-export const EMPTY_BLOCK = "`SWAP.BLK N:` needs at least one `+TEXT` body row. To delete a block, use `DEL.BLK N`.";
+/** `SWAP.BLK N:` hunk with no body. */
+export const EMPTY_BLOCK = "`SWAP.BLK N:` needs at least one `+TEXT` body row. To delete a block, use `CUT.BLK N`.";
 
 /** Optional source-aware suggestions appended to block-anchor diagnostics. */
 export interface BlockDiagnosticSuggestions {
@@ -126,12 +124,9 @@ export interface BlockDiagnosticSuggestions {
 }
 
 /**
- * Block-anchored replace/delete could not resolve to a syntactic block
- * (unsupported language, blank/out-of-range line, no node beginning on N, or
- * parse error). Appends a {@link formatAnchoredContext} preview when
- * `fileLines` is given. `insert_after_block N:` never reaches this — it is
- * lowered to plain `insert after N:` instead (see
- * {@link insertAfterBlockUnresolvedLoweredWarning}).
+ * A block-anchored replace/cut could not resolve to a syntactic block.
+ * Appends a {@link formatAnchoredContext} preview when `fileLines` is given.
+ * `INS.BLK.POST N:` never reaches this path; it lowers to `INS.POST N:`.
  */
 export function blockUnresolvedMessage(
 	line: number,
@@ -170,9 +165,9 @@ export function blockUnresolvedMessage(
 	return message;
 }
 
-/** Block-anchored edit reached a path with no {@link BlockResolver} wired in — a host-configuration bug. */
+/** Block-anchored edit reached a path with no {@link BlockResolver} wired in. */
 export const BLOCK_RESOLVER_UNAVAILABLE =
-	"Block ops (`SWAP.BLK`, `DEL.BLK`, `INS.BLK.POST`, `CUT.BLK`, `COPY.BLK`, `PASTE.BLK.POST`) are not available here (no block resolver configured). Use a concrete line range.";
+	"Block ops (`SWAP.BLK`, `INS.BLK.POST`, `CUT.BLK`, `PASTE.BLK.POST`) are not available here (no block resolver configured). Use a concrete line range.";
 
 /**
  * An after-block op anchored on a closing-delimiter line, lowered to its
@@ -262,14 +257,12 @@ export function ambiguousCloserSpareMessage(
 }
 
 /**
- * Internal invariant: `applyEdits` received an unresolved `replace_block N:`
- * edit; `resolveBlockEdits` must run first. Wiring bug, not authored input.
+ * Internal invariant: `applyEdits` received an unresolved block edit;
+ * `resolveBlockEdits` must run first.
  */
 export const UNRESOLVED_BLOCK_INTERNAL =
-	"internal error: unresolved `SWAP.BLK` edit reached the applier (resolveBlockEdits was not run).";
+	"internal error: unresolved block edit reached the applier (resolveBlockEdits was not run).";
 
-/** Delete hunk received a body row. */
-export const DELETE_TAKES_NO_BODY = `\`DEL N${HL_RANGE_SEP}M\` does not take body rows. Remove the body, or use \`SWAP N${HL_RANGE_SEP}M:\`.`;
 
 /** `REM` received a body row or coexists with line edits. */
 export const REM_TAKES_NO_BODY =
@@ -279,11 +272,6 @@ export const REM_TAKES_NO_BODY =
 export const MOVE_TAKES_NO_BODY =
 	"`MV DEST` does not take body rows. Put line edits above the `MV` row; the destination path follows `MV` on the same line.";
 
-/** `delete_block N` hunk received a body row. */
-export const DELETE_BLOCK_TAKES_NO_BODY = "`DEL.BLK N` does not take body rows. Remove the body, or use `SWAP.BLK N:`.";
-
-/** `COPY N.=M` hunk received a body row. */
-export const COPY_TAKES_NO_BODY = `\`COPY N${HL_RANGE_SEP}M\` captures lines into the clipboard and takes no body rows.`;
 
 /** `CUT N.=M` hunk received a body row. */
 export const CUT_TAKES_NO_BODY = `\`CUT N${HL_RANGE_SEP}M\` captures + deletes lines and takes no body rows. To replace lines with new content, use \`SWAP N${HL_RANGE_SEP}M:\`.`;
@@ -293,22 +281,7 @@ export const PASTE_TAKES_NO_BODY =
 	"`PASTE` inserts the clipboard content and takes no `+` body rows. To insert literal text, use `INS`.";
 
 /** `PASTE` ran with an empty clipboard register. */
-export const EMPTY_PASTE = `\`PASTE\` found nothing in the clipboard. Ops run top-to-bottom across the whole patch (sections included): put \`CUT N${HL_RANGE_SEP}M\` / \`COPY N${HL_RANGE_SEP}M\` (or \`CUT.BLK N\` / \`COPY.BLK N\`) above the \`PASTE\`.`;
-
-/** A `CUT` filled the register and the whole patch finished without a `PASTE`. */
-export function unusedCutMessage(cutForm: string): string {
-	return `\`${cutForm}\` deleted lines that were never pasted — no \`PASTE\` follows it in the patch. Add a \`PASTE.PRE|POST N\` / \`PASTE.HEAD|TAIL\` op, or use \`DEL\` to delete without moving.`;
-}
-
-/** A later CUT/COPY overwrote a register whose CUT content was never pasted. */
-export function overwrittenCutMessage(cutForm: string, lineNum: number): string {
-	return `line ${lineNum}: the clipboard still holds \`${cutForm}\` content that was never pasted. \`PASTE\` it before capturing again, or use \`DEL\` if those lines should just be deleted.`;
-}
-
-/** Batch ended with un-pasted `CUT` content in a session-persistent register. */
-export function pendingCutWarning(cutForm: string): string {
-	return `\`${cutForm}\` content is in the clipboard but was not pasted by this edit. It stays available — \`PASTE\` it in a follow-up edit; capturing again before pasting it will be rejected.`;
-}
+export const EMPTY_PASTE = `\`PASTE\` found nothing in the clipboard. Ops run top-to-bottom across the whole patch (sections included): put \`CUT N${HL_RANGE_SEP}M\` or \`CUT.BLK N\` above the \`PASTE\`.`;
 
 /**
  * Clipboard ops inside a same-path section that was merged across another
@@ -316,7 +289,7 @@ export function pendingCutWarning(cutForm: string): string {
  * an interleaved layout would silently reorder the register sequence.
  */
 export const CLIPBOARD_INTERLEAVED_SECTIONS =
-	"`CUT`/`COPY`/`PASTE` cannot be used in a file whose sections are interleaved with another file's: same-path sections merge into the first occurrence, which would reorder the clipboard sequence. Keep each file's ops under ONE `[path#TAG]` header, with every capture above its `PASTE`.";
+	"`CUT`/`PASTE` cannot be used in a file whose sections are interleaved with another file's: same-path sections merge into the first occurrence, which would reorder the clipboard sequence. Keep each file's ops under ONE `[path#TAG]` header.";
 
 /** Insert hunk with no body. */
 export const EMPTY_INSERT = "`INS` needs at least one `+TEXT` body row.";
@@ -483,23 +456,20 @@ export function unseenLinesMessage(
 }
 
 /** Op kind of a deferred block edit, for {@link blockSingleLineMessage}. */
-export type BlockOp = "replace" | "delete" | "insert_after" | "copy" | "cut" | "paste_after";
+export type BlockOp = "replace" | "insert_after" | "cut" | "paste_after";
 
 /** Display forms per deferred-block op: block keyword, trailing colon, and single-line plain form. */
 const BLOCK_OP_FORMS: Record<BlockOp, { keyword: string; colon: string; plain: (line: number) => string }> = {
 	replace: { keyword: "SWAP.BLK", colon: ":", plain: line => `SWAP ${line}${HL_RANGE_SEP}${line}:` },
-	delete: { keyword: "DEL.BLK", colon: "", plain: line => `DEL ${line}` },
 	insert_after: { keyword: "INS.BLK.POST", colon: ":", plain: line => `INS.POST ${line}:` },
-	copy: { keyword: "COPY.BLK", colon: "", plain: line => `COPY ${line}` },
 	cut: { keyword: "CUT.BLK", colon: "", plain: line => `CUT ${line}` },
 	paste_after: { keyword: "PASTE.BLK.POST", colon: "", plain: line => `PASTE.POST ${line}` },
 };
 
 /**
- * A `replace_block`/`delete_block`/`insert_after_block` anchor resolved to a
- * single line: line N is a bare statement, not the opening line of a
- * multi-line construct. The plain op is exact for one line, so reject and
- * point at it (with the enclosing block as an alternative when known).
+ * A block-op anchor resolved to a single line: line N is a bare statement,
+ * not the opening line of a multi-line construct. The plain op is exact for
+ * one line, so reject and point at it.
  */
 export function blockSingleLineMessage(line: number, op: BlockOp, enclosingBlock?: BlockSpan): string {
 	const forms = BLOCK_OP_FORMS[op];

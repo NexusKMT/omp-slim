@@ -1226,10 +1226,9 @@ function repairAfterInsertLandings(
 /** Optional knobs for {@link applyEdits}. */
 export interface ApplyEditsOptions {
 	/**
-	 * Clipboard register filled by `copy` edits and read by `paste` edits.
+	 * Clipboard register filled by `cut` edits and read by `paste` edits.
 	 * Thread one register through every section of a batch to move content
-	 * across files; when omitted, the call gets a private register (same-file
-	 * cut/paste still works).
+	 * across files; omitted, the call gets a private register.
 	 */
 	clipboard?: Clipboard;
 	/** `PASTE` with an empty register: `throw` (default) or `drop` (streaming previews). */
@@ -1247,8 +1246,8 @@ export function applyEdits(text: string, edits: readonly Edit[], options: ApplyE
 
 	const fileLines = text.split("\n");
 
-	// Clipboard pre-pass: capture `copy` ranges from the original lines and
-	// expand `paste` edits into plain inserts, in authored order.
+	// Clipboard pre-pass: capture `cut` ranges from the original lines and
+	// expand `paste` edits into plain inserts in authored order.
 	const concrete = resolveClipboardEdits(edits, fileLines, options.clipboard ?? {}, {
 		...(options.onEmptyPaste === undefined ? {} : { onEmptyPaste: options.onEmptyPaste }),
 	});

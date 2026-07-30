@@ -17,7 +17,7 @@ export interface RecoveryArgs {
 	currentText: string;
 	fileHash: string;
 	edits: readonly Edit[];
-	/** Shared clipboard register for `copy`/`paste` edits, threaded into the replay apply. */
+	/** Shared clipboard register for `cut`/`paste` edits, threaded into the replay apply. */
 	clipboard?: Clipboard;
 }
 
@@ -43,9 +43,8 @@ function getEditAnchors(edit: Edit): Anchor[] {
 	// Recovery only ever receives already-resolved edits (no `block`); this arm
 	// exists for type-exhaustiveness over the full `Edit` union.
 	if (edit.kind === "block") return [edit.anchor];
-	if (edit.kind === "copy") {
-		// Every line of the captured range is an anchor: capturing a range
-		// whose interior changed would paste content the author never saw.
+	if (edit.kind === "cut") {
+		// Every captured line is an anchor: changed interior content is unsafe.
 		const anchors: Anchor[] = [];
 		for (let line = edit.range.start.line; line <= edit.range.end.line; line++) anchors.push({ line });
 		return anchors;
@@ -222,11 +221,10 @@ function remapEditsToCurrent(previousText: string, currentText: string, edits: r
 			remapped.push({ ...edit, anchor });
 			continue;
 		}
-		if (edit.kind === "copy") {
-			// Map every line of the captured range, not just its endpoints: an
-			// unmapped interior line means the content drifted and the capture
-			// would carry text the author never saw. The uniform-offset rule
-			// below keeps the mapped range contiguous.
+		if (edit.kind === "cut") {
+			// Map every captured line; an unmapped interior line means the
+			// content drifted and cannot be moved safely. Uniform offsets keep
+			// the mapped range contiguous.
 			const start = mapLine(edit.range.start.line);
 			if (start === null) return null;
 			let end = start;

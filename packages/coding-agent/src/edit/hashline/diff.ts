@@ -53,10 +53,9 @@ export interface HashlineDiffOptions {
 	skipHashValidation?: boolean;
 	/**
 	 * Clipboard register shared across the sections of one patch preview.
-	 * `CUT`/`COPY` in an earlier section feeds `PASTE` in a later one, so the
-	 * preview a user approves shows the pasted content exactly like apply
-	 * will. Callers previewing a multi-section patch MUST thread one register
-	 * through the sections in patch order; omitted, each section gets a
+	 * `CUT` in an earlier section feeds `PASTE` in a later one, so the preview
+	 * matches apply. Multi-section previews MUST thread one register through
+	 * sections in patch order; omitted, each section gets a
 	 * private register (same-file cut/paste still previews correctly).
 	 */
 	clipboard?: Clipboard;
@@ -156,7 +155,7 @@ function hasAnchorScopedEdit(edits: readonly Edit[]): boolean {
 	return edits.some(edit => {
 		if (edit.kind === "delete") return true;
 		if (edit.kind === "block") return true;
-		if (edit.kind === "copy") return true;
+		if (edit.kind === "cut") return true;
 		return edit.cursor.kind === "before_anchor" || edit.cursor.kind === "after_anchor";
 	});
 }
@@ -293,17 +292,13 @@ function buildStreamingSectionDiff(
 		resolved = resolveClipboardEdits(blockResolved, fileLines, scratch, { onEmptyPaste: "drop" });
 		if (scratch.lines === undefined) delete clipboard.lines;
 		else clipboard.lines = scratch.lines;
-		if (scratch.pendingCut === undefined) delete clipboard.pendingCut;
-		else clipboard.pendingCut = scratch.pendingCut;
 	} catch {
-		resolved = blockResolved.filter(edit => edit.kind !== "copy" && edit.kind !== "paste");
+		resolved = blockResolved.filter(edit => edit.kind !== "cut" && edit.kind !== "paste");
 	}
 	if (resolved.length === 0) {
-		// A whole-file op (REM / MV) carries no line edits: the change is the
-		// delete/move itself, conveyed by the result header, so emit an empty
-		// diff rather than a misleading "No changes" error. A copy-only section
-		// likewise changes nothing itself — it feeds a later `PASTE`.
-		if (fileOp || section.isClipboardSource) return { diff: "", firstChangedLine: undefined };
+		// A whole-file op (REM / MV) carries no line edits; the result header
+		// conveys the change, so emit an empty diff.
+		if (fileOp) return { diff: "", firstChangedLine: undefined };
 		return { error: `No changes would be made to ${section.path}.` };
 	}
 
@@ -344,10 +339,7 @@ function buildStreamingSectionDiff(
 		}
 	}
 
-	if (rows.length === 0) {
-		if (section.isClipboardSource) return { diff: "", firstChangedLine: undefined };
-		return { error: `No changes would be made to ${section.path}.` };
-	}
+	if (rows.length === 0) return { error: `No changes would be made to ${section.path}.` };
 	return { diff: rows.join("\n"), firstChangedLine };
 }
 
@@ -374,10 +366,8 @@ export async function computeHashlineSectionDiff(
 		if (options.streaming) return buildStreamingSectionDiff(section, normalized, options.clipboard ?? {});
 		const result = applyPreviewEdits({ section, absolutePath, normalized, snapshots, options });
 		if (normalized === result.text) {
-			// REM/MV-only sections change no text; the header conveys the
-			// delete/move, so don't surface a "No changes" error. A copy-only
-			// section likewise changes nothing itself — it feeds a later `PASTE`.
-			if (section.fileOp || section.isClipboardSource) return { diff: "", firstChangedLine: undefined };
+			// REM/MV-only sections change no text; the header conveys the op.
+			if (section.fileOp) return { diff: "", firstChangedLine: undefined };
 			return { error: `No changes would be made to ${section.path}.` };
 		}
 		return generateDiffString(normalized, result.text, undefined, { path: section.path });

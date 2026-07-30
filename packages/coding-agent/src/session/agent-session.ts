@@ -410,7 +410,7 @@ export class AgentSession {
 	getXdevToolEntries: () => Array<{ name: string; summary: string }>;
 	readonly yieldQueue: YieldQueue;
 	fileSnapshotStore?: InMemorySnapshotStore;
-	/** Per-session `CUT`/`COPY`/`PASTE` clipboard register shared across edit calls. */
+	/** Per-session `CUT`/`PASTE` clipboard register shared across edit calls. */
 	editClipboard?: Clipboard;
 
 	#powerAssertion: MacOSPowerAssertion | undefined;

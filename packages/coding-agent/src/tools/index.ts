@@ -351,7 +351,7 @@ export interface ToolSession {
 	 *  file changed out-of-band. Lazily initialized by `getFileSnapshotStore`. */
 	fileSnapshotStore?: InMemorySnapshotStore;
 
-	/** Per-session `CUT`/`COPY`/`PASTE` clipboard register shared across edit
+	/** Per-session `CUT`/`PASTE` clipboard register shared across edit
 	 *  calls. Lazily initialized by `getEditClipboard`. */
 	editClipboard?: Clipboard;
 

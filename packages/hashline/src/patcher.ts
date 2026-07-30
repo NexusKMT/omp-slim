@@ -25,7 +25,7 @@
 import * as path from "node:path";
 import { applyEdits } from "./apply";
 import { hasBlockEdit, resolveBlockEdits } from "./block";
-import { assertClipboardConsumed, commitClipboard, forkClipboard, validateClipboardSequence } from "./clipboard";
+import { commitClipboard, forkClipboard, validateClipboardSequence } from "./clipboard";
 import { computeFileHash, formatHashlineHeader } from "./format";
 import type { Filesystem, WriteResult } from "./fs";
 import { isNotFound } from "./fs";
@@ -34,7 +34,6 @@ import {
 	HEADTAIL_DRIFT_WARNING,
 	missingSnapshotTagMessage,
 	pathRecoveredFromTagMessage,
-	pendingCutWarning,
 	type RevealedLine,
 	unseenLinesMessage,
 	writeDriftWarning,
@@ -86,10 +85,7 @@ export interface PatcherOptions {
 	/**
 	 * Host-owned clipboard register shared across batches, so `CUT` content
 	 * can be `PASTE`d by a later {@link Patcher.apply} call. Each batch works
-	 * on a fork and publishes it back only after every write lands; un-pasted
-	 * `CUT` content at batch end becomes a warning instead of an error.
-	 * Omitted, every batch gets its own register and un-pasted `CUT` content
-	 * is rejected when the batch ends.
+	 * on a fork and publishes it back only after writes land.
 	 */
 	clipboard?: Clipboard;
 }
@@ -127,9 +123,8 @@ export interface PatchSectionResult {
 	/** Destination path when this section includes `MV DEST`. */
 	moveDest?: string;
 	/**
-	 * Resolved spans for any `replace_block`/`delete_block` ops, present when the
-	 * apply matched the tagged content. Undefined for patches with no block ops
-	 * (and for resolutions routed through drift recovery, where numbers shift).
+	 * Resolved spans for block ops, present when the apply matched the tagged
+	 * content. Undefined for patches with no block ops and for drift recovery.
 	 */
 	blockResolutions?: BlockResolution[];
 }
@@ -169,8 +164,8 @@ function hasAnchorScopedEdit(edits: readonly Edit[]): boolean {
 		if (edit.kind === "delete") return true;
 		// A `replace_block N:` edit anchors to concrete content on line N.
 		if (edit.kind === "block") return true;
-		// A `COPY`/`CUT` range reads concrete content.
-		if (edit.kind === "copy") return true;
+		// A `CUT` range reads concrete content.
+		if (edit.kind === "cut") return true;
 		return edit.cursor.kind === "before_anchor" || edit.cursor.kind === "after_anchor";
 	});
 }
@@ -246,8 +241,8 @@ export class Patcher {
 	 * {@link PatchSectionResult} per section in the original patch order.
 	 */
 	async apply(patch: Patch): Promise<PatcherApplyResult> {
-		// One register per batch: `CUT`/`COPY` in one section feeds `PASTE` in
-		// a later one, so content can move across files. A host-owned register
+		// One register per batch: `CUT` in one section feeds `PASTE` in a later
+		// one, so content can move across files. A host-owned register
 		// (see PatcherOptions.clipboard) additionally persists across batches:
 		// work on a fork and publish it per landed section, so a failed batch
 		// never poisons the persistent register and a mid-batch failure still
@@ -257,12 +252,8 @@ export class Patcher {
 		// Single-section fast path.
 		if (patch.sections.length === 1) {
 			const prepared = await this.prepare(patch.sections[0], clipboard);
-			if (this.clipboard === undefined) assertClipboardConsumed(clipboard);
 			const result = await this.commit(prepared);
-			if (this.clipboard !== undefined) {
-				commitClipboard(clipboard, this.clipboard);
-				if (clipboard.pendingCut !== undefined) result.warnings.push(pendingCutWarning(clipboard.pendingCut));
-			}
+			if (this.clipboard !== undefined) commitClipboard(clipboard, this.clipboard);
 			return { sections: [result] };
 		}
 
@@ -278,12 +269,9 @@ export class Patcher {
 			prepared.push(await this.prepare(section, clipboard));
 			sectionStates.push(forkClipboard(clipboard));
 		}
-		if (this.clipboard === undefined) assertClipboardConsumed(clipboard);
 		assertUniqueCanonicalPaths(prepared);
 		for (const entry of prepared) {
-			// A copy-only section legitimately changes nothing: it exists to
-			// fill the clipboard for a later `PASTE`.
-			if (entry.isNoop && !entry.section.isClipboardSource) {
+			if (entry.isNoop) {
 				throw new Error(`Edits to ${entry.section.path} resulted in no changes being made.`);
 			}
 		}
@@ -308,9 +296,6 @@ export class Patcher {
 			}
 			if (this.clipboard !== undefined) commitClipboard(sectionStates[index], this.clipboard);
 		}
-		if (this.clipboard !== undefined && clipboard.pendingCut !== undefined) {
-			results[results.length - 1]?.warnings.push(pendingCutWarning(clipboard.pendingCut));
-		}
 		return { sections: results };
 	}
 
@@ -323,10 +308,9 @@ export class Patcher {
 		const clipboard = forkClipboard(this.clipboard);
 		const prepared: PreparedSection[] = [];
 		for (const section of patch.sections) prepared.push(await this.prepare(section, clipboard));
-		if (this.clipboard === undefined) assertClipboardConsumed(clipboard);
 		assertUniqueCanonicalPaths(prepared);
 		for (const entry of prepared) {
-			if (entry.isNoop && !entry.section.isClipboardSource) {
+			if (entry.isNoop) {
 				throw new Error(`Edits to ${entry.section.path} resulted in no changes being made.`);
 			}
 		}
@@ -357,10 +341,8 @@ export class Patcher {
 	 * {@link PreparedSection} which can be fed to {@link commit} to land
 	 * the result on the filesystem.
 	 *
-	 * `clipboard` is the register shared by `CUT`/`COPY`/`PASTE` ops. Pass the
-	 * batch's register when preparing several sections so content can move
-	 * across files; when omitted, a private register is used and un-pasted
-	 * `CUT` content is rejected before this method returns.
+	 * `clipboard` is the register shared by `CUT`/`PASTE` ops. Pass the batch
+	 * register when preparing several sections so content can move across files.
 	 *
 	 * Throws on parse error, missing-file-for-anchored-edit, or unrecovered
 	 * tag mismatch ({@link MismatchError}).
@@ -431,7 +413,6 @@ export class Patcher {
 						edits: parsed.edits,
 						clipboard: register,
 					});
-		if (clipboard === undefined) assertClipboardConsumed(register);
 
 		return new PreparedSection(
 			target,

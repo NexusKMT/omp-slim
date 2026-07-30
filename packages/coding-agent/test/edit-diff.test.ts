@@ -301,7 +301,7 @@ describe("computeHashlineDiff", () => {
 		const tag = snapshotStore.record(sourcePath, text);
 		// Mirror the streaming-strategy contract: the session register is forked
 		// once per preview frame; sections then thread the fork in patch order.
-		const sessionRegister = { lines: ["carried"], pendingCut: "CUT 5" };
+		const sessionRegister = { lines: ["carried"] };
 		const result = await computeHashlineDiff(
 			{ input: `${formatHashlineHeader(sourcePath, tag)}\nPASTE.TAIL` },
 			tempDir,
@@ -312,7 +312,7 @@ describe("computeHashlineDiff", () => {
 		if ("diff" in result) {
 			expect(result.diff).toContain("|carried");
 		}
-		expect(sessionRegister.pendingCut).toBe("CUT 5");
+		expect(sessionRegister.lines).toEqual(["carried"]);
 	});
 
 	test("streams paste rows in the natural-order preview", async () => {

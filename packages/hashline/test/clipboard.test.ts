@@ -33,18 +33,14 @@ function taggedPatcher(files: Array<[string, string]>): {
 }
 
 describe("clipboard parsing", () => {
-	it("lowers `CUT N.=M` to a capture plus per-line deletes, `COPY N.=M` to a capture only", () => {
+	it("lowers `CUT N.=M` to a capture plus per-line deletes", () => {
 		const cut = parsePatch("CUT 2.=3").edits;
-		expect(cut.map(edit => edit.kind)).toEqual(["copy", "delete", "delete"]);
-		expect(cut[0]).toMatchObject({ kind: "copy", cut: true, range: { start: { line: 2 }, end: { line: 3 } } });
-
-		const copy = parsePatch("COPY 2.=3").edits;
-		expect(copy.map(edit => edit.kind)).toEqual(["copy"]);
-		expect(copy[0]).toMatchObject({ kind: "copy", cut: false });
+		expect(cut.map(edit => edit.kind)).toEqual(["cut", "delete", "delete"]);
+		expect(cut[0]).toMatchObject({ kind: "cut", range: { start: { line: 2 }, end: { line: 3 } } });
 	});
 
 	it("parses every PASTE position, tolerating a trailing colon", () => {
-		const cursors = parsePatch("COPY 1\nPASTE.PRE 2\nPASTE.POST 3:\nPASTE.HEAD\nPASTE.TAIL:").edits.flatMap(edit =>
+		const cursors = parsePatch("CUT 1\nPASTE.PRE 2\nPASTE.POST 3:\nPASTE.HEAD\nPASTE.TAIL:").edits.flatMap(edit =>
 			edit.kind === "paste" ? [edit.cursor] : [],
 		);
 		expect(cursors).toEqual([
@@ -56,26 +52,25 @@ describe("clipboard parsing", () => {
 	});
 
 	it("rejects bare `PASTE` without a position", () => {
-		expect(() => parsePatch("COPY 1\nPASTE")).toThrow(/`PASTE` needs a position/);
+		expect(() => parsePatch("PASTE")).toThrow(/`PASTE` needs a position/);
 	});
 
 	it("rejects body rows under clipboard ops", () => {
 		expect(() => parsePatch("CUT 1.=2\n+x")).toThrow(/`CUT N.=M` captures \+ deletes/);
-		expect(() => parsePatch("COPY 1.=2\n+x")).toThrow(/`COPY N.=M` captures lines/);
-		expect(() => parsePatch("COPY 1\nPASTE.POST 1\n+x")).toThrow(/`PASTE` inserts the clipboard content/);
+		expect(() => parsePatch("CUT 1\nPASTE.POST 1\n+x")).toThrow(/`PASTE` inserts the clipboard content/);
 	});
 
 	it("rejects a CUT range overlapping another hunk's range", () => {
 		expect(() => parsePatch("CUT 2.=4\nSWAP 3.=3:\n+x")).toThrow(/already targeted by another hunk/);
 	});
 
-	it("reports inverted CUT/COPY ranges with op-specific retry forms", () => {
+	it("reports inverted CUT ranges with op-specific retry forms", () => {
 		expect(() => parsePatch("CUT 5.=2")).toThrow(/`CUT 5`.*`CUT 5.=6`/);
 	});
 
 	it("flushes a trailing bodyless clipboard op in streaming mode", () => {
-		const { edits } = parsePatchStreaming("COPY 1\nPASTE.TAIL");
-		expect(edits.map(edit => edit.kind)).toEqual(["copy", "paste"]);
+		const { edits } = parsePatchStreaming("CUT 1\nPASTE.TAIL");
+		expect(edits.map(edit => edit.kind)).toEqual(["cut", "delete", "paste"]);
 	});
 });
 
@@ -85,9 +80,9 @@ describe("clipboard apply semantics", () => {
 		expect(section.applyTo("l1\nl2\nl3\nl4\nl5\n").text).toBe("l1\nl4\nl5\nl2\nl3\n");
 	});
 
-	it("duplicates COPY content to several places; PASTE does not consume", () => {
-		const section = Patch.parseSingle(`[${PATH}#1A2B]\nCOPY 2.=2\nPASTE.HEAD\nPASTE.TAIL`);
-		expect(section.applyTo("l1\nl2\nl3\n").text).toBe("l2\nl1\nl2\nl3\nl2\n");
+	it("repeats CUT content without consuming the clipboard", () => {
+		const section = Patch.parseSingle(`[${PATH}#1A2B]\nCUT 2.=2\nPASTE.HEAD\nPASTE.TAIL`);
+		expect(section.applyTo("l1\nl2\nl3\n").text).toBe("l2\nl1\nl3\nl2\n");
 	});
 
 	it("swaps two regions with sequential CUT/PASTE pairs on original coordinates", () => {
@@ -105,18 +100,18 @@ describe("clipboard apply semantics", () => {
 		expect(section.applyPartialTo("l1\nl2\n").text).toBe("l1\nl2\n");
 	});
 
-	it("rejects a CUT that is never pasted when the call owns the register", () => {
+	it("allows a CUT without a following PASTE", () => {
 		const section = Patch.parseSingle(`[${PATH}#1A2B]\nCUT 2.=2`);
-		expect(() => section.applyTo("l1\nl2\nl3\n")).toThrow(/never pasted/);
+		expect(section.applyTo("l1\nl2\nl3\n").text).toBe("l1\nl3\n");
 	});
 
-	it("rejects capturing over un-pasted CUT content", () => {
+	it("allows consecutive CUTs and pastes the latest capture", () => {
 		const section = Patch.parseSingle(`[${PATH}#1A2B]\nCUT 1.=1\nCUT 3.=3\nPASTE.TAIL`);
-		expect(() => section.applyTo("l1\nl2\nl3\n")).toThrow(/still holds `CUT 1` content/);
+		expect(section.applyTo("l1\nl2\nl3\n").text).toBe("l2\nl3\n");
 	});
 
 	it("rejects an out-of-range capture", () => {
-		const section = Patch.parseSingle(`[${PATH}#1A2B]\nCOPY 8.=9\nPASTE.HEAD`);
+		const section = Patch.parseSingle(`[${PATH}#1A2B]\nCUT 8.=9\nPASTE.HEAD`);
 		expect(() => section.applyTo("l1\nl2\n")).toThrow(/out of range \(file has 3 lines\)/);
 	});
 
@@ -133,8 +128,8 @@ describe("clipboard block ops", () => {
 	it("expands CUT.BLK to a span capture plus per-line deletes", () => {
 		const edits = parsePatch("CUT.BLK 2\nPASTE.TAIL").edits;
 		const resolved = resolveBlockEdits(edits, "l1\nl2\nl3\nl4", PATH, stubResolver);
-		expect(resolved.map(edit => edit.kind)).toEqual(["copy", "delete", "delete", "paste"]);
-		expect(resolved[0]).toMatchObject({ kind: "copy", cut: true, range: { start: { line: 2 }, end: { line: 3 } } });
+		expect(resolved.map(edit => edit.kind)).toEqual(["cut", "delete", "delete", "paste"]);
+		expect(resolved[0]).toMatchObject({ kind: "cut", range: { start: { line: 2 }, end: { line: 3 } } });
 	});
 
 	it("moves a block after another block via PASTE.BLK.POST", () => {
@@ -145,10 +140,10 @@ describe("clipboard block ops", () => {
 
 	it("echoes clipboard block resolutions with their op", () => {
 		const seen: string[] = [];
-		resolveBlockEdits(parsePatch("COPY.BLK 2\nPASTE.TAIL").edits, "l1\nl2\nl3", PATH, stubResolver, {
+		resolveBlockEdits(parsePatch("CUT.BLK 2\nPASTE.TAIL").edits, "l1\nl2\nl3", PATH, stubResolver, {
 			onResolved: resolution => seen.push(resolution.op),
 		});
-		expect(seen).toEqual(["copy"]);
+		expect(seen).toEqual(["cut"]);
 	});
 
 	it("rejects a single-line CUT.BLK resolution with the plain-op retry", () => {
@@ -159,10 +154,10 @@ describe("clipboard block ops", () => {
 
 	it("lowers an unresolvable PASTE.BLK.POST to a plain paste with a warning", () => {
 		const warnings: string[] = [];
-		const resolved = resolveBlockEdits(parsePatch("COPY 1\nPASTE.BLK.POST 2").edits, "a\nb\nc", PATH, () => null, {
+		const resolved = resolveBlockEdits(parsePatch("CUT 1\nPASTE.BLK.POST 2").edits, "a\nb\nc", PATH, () => null, {
 			onWarning: warning => warnings.push(warning),
 		});
-		expect(resolved.map(edit => edit.kind)).toEqual(["copy", "paste"]);
+		expect(resolved.map(edit => edit.kind)).toEqual(["cut", "delete", "paste"]);
 		expect(warnings.some(warning => warning.includes("`PASTE.BLK.POST 2`"))).toBe(true);
 	});
 });
@@ -183,48 +178,16 @@ describe("clipboard across sections and batches", () => {
 		expect(fs.get("b.ts")).toBe("b1\nmove1\nmove2\n");
 	});
 
-	it("allows a copy-only section to be a no-op clipboard source", async () => {
-		const a = "shared\n";
-		const b = "b1\n";
-		const { fs, patcher, tags } = taggedPatcher([
-			["a.ts", a],
-			["b.ts", b],
-		]);
 
-		const result = await patcher.apply(
-			Patch.parse(`[a.ts#${tags.get("a.ts")}]\nCOPY 1.=1\n[b.ts#${tags.get("b.ts")}]\nPASTE.HEAD`),
-		);
-
-		expect(result.sections[0]?.op).toBe("noop");
-		expect(fs.get("a.ts")).toBe(a);
-		expect(fs.get("b.ts")).toBe("shared\nb1\n");
-	});
-
-	it("still rejects a no-op section that mixes COPY with mutating edits", async () => {
-		const a = "l1\nl2\n";
-		const b = "b1\n";
-		const { patcher, tags } = taggedPatcher([
-			["a.ts", a],
-			["b.ts", b],
-		]);
-
-		// The SWAP restates the existing line, so the section changes nothing;
-		// the COPY beside it must not shield it from the no-change guard.
-		const patch = Patch.parse(
-			`[a.ts#${tags.get("a.ts")}]\nCOPY 1.=1\nSWAP 2.=2:\n+l2\n[b.ts#${tags.get("b.ts")}]\nPASTE.TAIL`,
-		);
-		await expect(patcher.apply(patch)).rejects.toThrow(/no changes/);
-	});
-
-	it("rejects the whole batch when a batch-local CUT is never pasted", async () => {
+	it("applies a batch-local CUT without requiring PASTE", async () => {
 		const a = "l1\nl2\n";
 		const { fs, patcher, tags } = taggedPatcher([["a.ts", a]]);
 
-		await expect(patcher.apply(Patch.parse(`[a.ts#${tags.get("a.ts")}]\nCUT 1.=1`))).rejects.toThrow(/never pasted/);
-		expect(fs.get("a.ts")).toBe(a);
+		await patcher.apply(Patch.parse(`[a.ts#${tags.get("a.ts")}]\nCUT 1.=1`));
+		expect(fs.get("a.ts")).toBe("l2\n");
 	});
 
-	it("persists a host-owned register across apply calls with a carry-forward warning", async () => {
+	it("persists a host-owned register across apply calls", async () => {
 		const a = "l1\nl2\n";
 		const b = "b1\n";
 		const fs = new InMemoryFilesystem([
@@ -239,12 +202,12 @@ describe("clipboard across sections and batches", () => {
 
 		const first = await patcher.apply(Patch.parse(`[a.ts#${tagA}]\nCUT 1.=1`));
 		expect(fs.get("a.ts")).toBe("l2\n");
-		expect(first.sections[0]?.warnings.some(warning => warning.includes("in the clipboard"))).toBe(true);
-		expect(clipboard).toMatchObject({ lines: ["l1"], pendingCut: "CUT 1" });
+		expect(first.sections[0]?.warnings).toEqual([]);
+		expect(clipboard).toEqual({ lines: ["l1"] });
 
 		await patcher.apply(Patch.parse(`[b.ts#${tagB}]\nPASTE.TAIL`));
 		expect(fs.get("b.ts")).toBe("b1\nl1\n");
-		expect(clipboard.pendingCut).toBeUndefined();
+		expect(clipboard).toEqual({ lines: ["l1"] });
 	});
 
 	it("does not publish register changes from a failed batch", async () => {
@@ -266,7 +229,6 @@ describe("clipboard across sections and batches", () => {
 
 		expect(fs.get("a.ts")).toBe(a);
 		expect(clipboard.lines).toBeUndefined();
-		expect(clipboard.pendingCut).toBeUndefined();
 	});
 
 	it("recovers clipboard anchors when the file drifted by a uniform offset", async () => {
@@ -289,9 +251,11 @@ describe("clipboard across sections and batches", () => {
 	});
 
 	it("still merges interleaved same-path sections without clipboard ops", () => {
-		const patch = Patch.parse(`[a.ts#1A2B]\nDEL 1\n[b.ts#3C4D]\nDEL 1\n[a.ts#1A2B]\nDEL 3`);
+		const patch = Patch.parse(
+			`[a.ts#1A2B]\nSWAP 1.=1:\n+a1\n[b.ts#3C4D]\nSWAP 1.=1:\n+b1\n[a.ts#1A2B]\nSWAP 3.=3:\n+a3`,
+		);
 		expect(patch.sections).toHaveLength(2);
-		expect(patch.sections[0]?.edits.map(edit => edit.kind)).toEqual(["delete", "delete"]);
+		expect(patch.sections[0]?.edits.map(edit => edit.kind)).toEqual(["insert", "delete", "insert", "delete"]);
 	});
 
 	it("surfaces a targeted sequencing error instead of a mismatch on the drift path", async () => {

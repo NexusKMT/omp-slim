@@ -1,16 +1,10 @@
 /**
- * Expand deferred block edits (`replace_block N:` / `delete_block N` /
- * `insert_after_block N:`) into concrete inserts + deletes.
+ * Expand deferred block edits into concrete inserts, cuts, pastes, and deletes.
  *
- * The hashline parser cannot expand a block edit on its own — the line span is
- * unknown until file text + path (→ language) are available. This transform
- * runs at every apply/preview boundary that has text: it calls the injected
- * {@link BlockResolver} to resolve each block's `[start, end]` span, then emits
- * the exact same edits the concrete form produces in the parser: `replace
- * start.=end:` inserts + deletes for a replace, a pure range delete for a
- * delete, and plain `after_anchor` inserts at `end` for an insert-after. After
- * it runs, no `block` edits remain, so {@link applyEdits} (and recovery) only
- * ever see resolved edits.
+ * The parser cannot expand a block edit until file text and language are
+ * available. This transform resolves each anchored span, then emits the same
+ * low-level edits as the corresponding concrete operation. After it runs, no
+ * `block` edits remain, so {@link applyEdits} and recovery see concrete edits.
  */
 import { STRUCTURAL_CLOSER_RE } from "./apply";
 import {
@@ -70,15 +64,12 @@ function findEnclosingBlock(
 	return null;
 }
 
+/** Optional knobs for {@link resolveBlockEdits}. */
 export interface ResolveBlockEditsOptions {
 	/**
-	 * How to handle a replace/delete block edit that cannot be resolved
-	 * (missing resolver or a `null` span). `"throw"` (default) raises a
-	 * `blockUnresolvedMessage` error — used by the authoritative apply + final
-	 * preview paths. `"drop"` silently skips the edit — used by the streaming
-	 * preview, where a half-written file or transient parse error must not
-	 * throw. Unresolvable `insert_after_block N:` edits never reach this: they
-	 * are lowered to plain `insert after N:` with a warning.
+	 * How to handle a replace/cut block edit that cannot be resolved. `"throw"`
+	 * (default) raises a block error; `"drop"` skips it for streaming previews.
+	 * Unresolvable after-block edits lower to their plain after-line form.
 	 */
 	onUnresolved?: "throw" | "drop";
 	/**
@@ -127,7 +118,7 @@ export function resolveBlockEdits(
 			resolved.push(edit);
 			continue;
 		}
-		const op: BlockOp = edit.mode ?? (edit.payloads.length === 0 ? "delete" : "replace");
+		const op: BlockOp = edit.mode ?? "replace";
 		const span = resolver ? resolver({ path, text, line: edit.anchor.line }) : null;
 		if (span === null) {
 			// `insert_after_block N:` never fails the patch — lower it to plain
@@ -209,20 +200,16 @@ export function resolveBlockEdits(
 			});
 			continue;
 		}
-		if (op === "copy" || op === "cut") {
-			// Capture the resolved span; a cut also deletes it line-by-line,
-			// exactly like the parser's lowering of `CUT N.=M`.
+		if (op === "cut") {
+			// Capture the resolved span before deleting it line-by-line.
 			resolved.push({
-				kind: "copy",
+				kind: "cut",
 				range: { start: { line: span.start }, end: { line: span.end } },
-				cut: op === "cut",
 				lineNum: edit.lineNum,
 				index: synthIndex++,
 			});
-			if (op === "cut") {
-				for (let line = span.start; line <= span.end; line++) {
-					resolved.push({ kind: "delete", anchor: { line }, lineNum: edit.lineNum, index: synthIndex++ });
-				}
+			for (let line = span.start; line <= span.end; line++) {
+				resolved.push({ kind: "delete", anchor: { line }, lineNum: edit.lineNum, index: synthIndex++ });
 			}
 			continue;
 		}
@@ -245,10 +232,8 @@ export function resolveBlockEdits(
 			}
 			continue;
 		}
-		// Mirror the parser's `replace start.=end:` expansion exactly: one
-		// `before_anchor` replacement insert per payload row at `span.start`,
-		// then one delete per line across `[span.start, span.end]`. An empty
-		// `payloads` (from `delete_block N`) emits no inserts — a pure deletion.
+		// Mirror `SWAP start.=end:`: replacement inserts at `span.start`, then
+		// one delete per line across the resolved span.
 		for (const payload of edit.payloads) {
 			const cursor: Cursor = { kind: "before_anchor", anchor: { line: span.start } };
 			resolved.push({
