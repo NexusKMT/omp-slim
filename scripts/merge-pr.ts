@@ -126,7 +126,8 @@ if (import.meta.main) {
 		.filter(Boolean);
 	if (subjects.length === 0) fail(`'${branch}' has no commits ahead of HEAD`);
 	const subject = subjects.find(isCompliantSubject);
-	if (!subject) fail(`no compliant commit subject in HEAD..${mergeRef}; the merge message cannot comply with the schema`);
+	if (!subject)
+		fail(`no compliant commit subject in HEAD..${mergeRef}; the merge message cannot comply with the schema`);
 	const message = `Merge PR #${meta.number}: ${subject} (@${meta.author.login})`;
 
 	if (dryRun) {
