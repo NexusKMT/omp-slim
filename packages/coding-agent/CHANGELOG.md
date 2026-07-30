@@ -22,6 +22,7 @@
 
 ### Fixed
 
+- Fixed the browser tool crashing OMP with an unhandled `EBUSY: resource busy or locked, rm '<TEMP>\puppeteer_dev_chrome_profile-<random>'` rejection when a headless Chromium profile was still locked during cleanup on Windows. `launchHeadlessBrowser` now owns the profile directory via an explicit `--user-data-dir` (disabling puppeteer's unretried temp cleanup) and removes it on dispose with lock-tolerant retry, warning and leaving the directory in place if it stays busy rather than crashing ([#7058](https://github.com/can1357/oh-my-pi/issues/7058)).
 - Fixed task tool blocks duplicating their per-agent progress rows into terminal scrollback on every update: live task frames now pin the transcript live region so mid-run rows are never recorded as frozen snapshots, and a detached background task freezes its progress the moment any of its rows commit to scrollback instead of mutating committed history.
 - Fixed Codex reset fireworks comparing different quota tiers or plans, preventing false celebrations when usage reports switch between Spark and base weekly limits.
 - Fixed Cursor ranged-read results losing the full file byte size after applying the requested window.
