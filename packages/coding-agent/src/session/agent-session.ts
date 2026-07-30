@@ -573,6 +573,7 @@ export class AgentSession {
 	// on `agent_end` can fire its next `prompt` before #promptWithMessage's finally
 	#promptGeneration = 0;
 	#pendingAgentEndEmit: AgentSessionEvent | undefined;
+	#inFlightSettledCallbacks: Array<() => void> = [];
 	#sessionStopContinuationCount = 0;
 	#sessionStopHookActive = false;
 	#obfuscator: SecretObfuscator | undefined;
@@ -638,12 +639,26 @@ export class AgentSession {
 		}
 	}
 
-	#endInFlight(): void {
+	#endInFlight(onSettled?: () => void): void {
+		if (onSettled) this.#inFlightSettledCallbacks.push(onSettled);
 		this.#promptInFlightCount = Math.max(0, this.#promptInFlightCount - 1);
 		if (this.#promptInFlightCount === 0) {
 			this.#releasePowerAssertion();
 			this.#flushPendingAgentEnd();
+			this.#flushInFlightSettledCallbacks();
 			this.#drainStrandedQueuedMessages();
+		}
+	}
+
+	#flushInFlightSettledCallbacks(): void {
+		const callbacks = this.#inFlightSettledCallbacks;
+		this.#inFlightSettledCallbacks = [];
+		for (const callback of callbacks) {
+			try {
+				callback();
+			} catch (error) {
+				logger.warn("In-flight settle callback failed", { error: String(error) });
+			}
 		}
 	}
 
@@ -742,11 +757,12 @@ export class AgentSession {
 				turnError = error;
 				logger.warn("IRC wake turn failed", { error: String(error) });
 			})
-			.finally(() => {
+			.finally(async () => {
 				try {
-					finishObservation?.(turnError);
+					await this.#waitForPostPromptRecovery();
 				} catch (error) {
-					logger.warn("IRC wake turn observer failed to finish", { error: String(error) });
+					turnError ??= error;
+					logger.warn("IRC wake turn recovery failed", { error: String(error) });
 				}
 				if (parkedFollowUps.length > 0) {
 					this.agent.replaceQueues(
@@ -754,7 +770,13 @@ export class AgentSession {
 						[...parkedFollowUps, ...this.agent.peekFollowUpQueue()],
 					);
 				}
-				this.#endInFlight();
+				this.#endInFlight(() => {
+					try {
+						finishObservation?.(turnError);
+					} catch (error) {
+						logger.warn("IRC wake turn observer failed to finish", { error: String(error) });
+					}
+				});
 			});
 	}
 
@@ -795,6 +817,7 @@ export class AgentSession {
 		this.#promptInFlightCount = 0;
 		this.#releasePowerAssertion();
 		this.#flushPendingAgentEnd();
+		this.#flushInFlightSettledCallbacks();
 		this.#drainStrandedQueuedMessages();
 	}
 
