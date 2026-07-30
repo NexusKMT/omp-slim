@@ -14,14 +14,17 @@ export interface SessionStorageStat {
 
 export interface SessionStorageWriter {
 	/**
-	 * Append one newline-terminated line. File and memory storage perform the
-	 * write synchronously in-body; indexed backends queue in call order.
+	 * Append one newline-terminated line. File storage batches same-turn appends
+	 * until its microtask boundary; memory storage updates in-body; indexed
+	 * backends queue in call order.
 	 *
 	 * `line` MUST include the trailing newline.
 	 */
 	append(line: string): Promise<void>;
 	/** Resolve once all queued appends complete. No fsync. */
 	flush(): Promise<void>;
+	/** Drain synchronously flushable queued work when the backend supports it. No fsync. */
+	flushSync?(): void;
 	/** False once close() has begun/finished. */
 	isOpen(): boolean;
 	close(): Promise<void>;
@@ -152,6 +155,11 @@ class FileSessionStorageWriter implements SessionStorageWriter {
 		if (this.#error) throw this.#error;
 	}
 
+	flushSync(): void {
+		this.#flushPendingNow();
+		if (this.#error) throw this.#error;
+	}
+
 	isOpen(): boolean {
 		return !this.#closed;
 	}
@@ -167,6 +175,7 @@ class FileSessionStorageWriter implements SessionStorageWriter {
 		} catch {
 			// Ignore close errors
 		}
+		if (this.#error) throw this.#error;
 	}
 
 	getError(): Error | undefined {
@@ -490,6 +499,10 @@ class MemorySessionStorageWriter implements SessionStorageWriter {
 	}
 
 	async flush(): Promise<void> {
+		if (this.#error) throw this.#error;
+	}
+
+	flushSync(): void {
 		if (this.#error) throw this.#error;
 	}
 
