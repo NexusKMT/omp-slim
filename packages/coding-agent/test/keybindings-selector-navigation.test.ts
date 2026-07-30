@@ -146,7 +146,7 @@ describe("selector navigation keybindings", () => {
 
 		expect(selected).toEqual(["child"]);
 	});
-	it("uses Home and End to jump between actual turns in the session tree", () => {
+	it("traverses actual turns while skipping tool results in the session tree", () => {
 		const firstUser = createMessageNode("first-user", null, "First question");
 		const assistant = createAgentMessageNode("assistant", "first-user", {
 			role: "assistant",
@@ -165,32 +165,51 @@ describe("selector navigation keybindings", () => {
 			stopReason: "toolUse",
 			timestamp: 2,
 		});
-		const toolResult = createAgentMessageNode("tool-result", "assistant", {
+		const firstToolResult = createAgentMessageNode("first-tool-result", "assistant", {
 			role: "toolResult",
 			toolCallId: "call-1",
 			toolName: "read",
-			content: [{ type: "text", text: "file contents" }],
+			content: [{ type: "text", text: "first file contents" }],
 			isError: false,
 			timestamp: 3,
 		});
+		const secondUser = createMessageNode("second-user", "first-tool-result", "Second question");
+		const trailingToolResult = createAgentMessageNode("trailing-tool-result", "second-user", {
+			role: "toolResult",
+			toolCallId: "call-2",
+			toolName: "read",
+			content: [{ type: "text", text: "second file contents" }],
+			isError: false,
+			timestamp: 5,
+		});
 		firstUser.children.push(assistant);
-		assistant.children.push(toolResult);
+		assistant.children.push(firstToolResult);
+		firstToolResult.children.push(secondUser);
+		secondUser.children.push(trailingToolResult);
 
 		const selected: string[] = [];
 		const selector = new TreeSelectorComponent(
 			[firstUser],
-			"tool-result",
+			"trailing-tool-result",
 			40,
 			id => selected.push(id),
 			() => {},
 		);
 
-		selector.handleInput("\x1b[H");
+		selector.handleInput("\x1b[1;3A");
+		selector.handleInput("\n");
+		selector.handleInput("\x1b[1;3A");
+		selector.handleInput("\n");
+		selector.handleInput("\x1b[1;3A");
+		selector.handleInput("\n");
+		selector.handleInput("\x1b[1;3B");
 		selector.handleInput("\n");
 		selector.handleInput("\x1b[F");
 		selector.handleInput("\n");
+		selector.handleInput("\x1b[H");
+		selector.handleInput("\n");
 
-		expect(selected).toEqual(["first-user", "assistant"]);
+		expect(selected).toEqual(["second-user", "assistant", "first-user", "assistant", "second-user", "first-user"]);
 	});
 
 	it("uses tui.select.up in the user message selector", () => {

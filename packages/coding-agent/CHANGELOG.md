@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added Home/End navigation in `/tree` to jump directly to the first/latest user or assistant turn while skipping tool and bookkeeping entries.
+- Added Alt+Up/Alt+Down navigation in `/tree` to traverse previous/next user or assistant turns while skipping tool and bookkeeping entries, plus Home/End shortcuts for the first/latest turn.
 
 
 ## [17.2.1] - 2026-07-30
