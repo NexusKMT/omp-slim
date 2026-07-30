@@ -110,6 +110,25 @@ function parseHtmlResults(html: string): ParsedResult[] {
 	}
 	return results;
 }
+/**
+ * Extract the hidden fields from DDG's next-page form.
+ *
+ * Attribute order varies across responses, so each input tag is parsed
+ * independently instead of matching one fixed HTML layout.
+ */
+function parseContinuationForm(html: string): URLSearchParams | undefined {
+	for (const formMatch of html.matchAll(/<form\b[^>]*>([\s\S]*?)<\/form>/gi)) {
+		const form = new URLSearchParams();
+		for (const inputMatch of formMatch[1].matchAll(/<input\b[^>]*>/gi)) {
+			const input = inputMatch[0];
+			const name = /\bname\s*=\s*(["'])(.*?)\1/i.exec(input)?.[2];
+			const value = /\bvalue\s*=\s*(["'])(.*?)\1/i.exec(input)?.[2];
+			if (name && value !== undefined) form.append(decodeHtmlText(name), decodeHtmlText(value));
+		}
+		if (form.has("s") && form.has("vqd")) return form;
+	}
+	return undefined;
+}
 
 /**
  * `true` when the page DDG returned is the bot-challenge modal instead of
@@ -137,7 +156,7 @@ const DDG_QUERY_SYNTAX: QuerySyntax = {
 	filetype: true,
 };
 
-async function callDuckDuckGoHtml(params: SearchParams): Promise<string> {
+function createDuckDuckGoForm(params: SearchParams): URLSearchParams {
 	const form = new URLSearchParams({
 		q: formatScraperQuery(params.query, params.parsedQuery, DDG_QUERY_SYNTAX),
 		kl: "us-en",
@@ -146,10 +165,13 @@ async function callDuckDuckGoHtml(params: SearchParams): Promise<string> {
 	if (df) form.set("df", df);
 	// Add b: "" parameter as specified in the browser fetch template to match real browser form submission
 	form.set("b", "");
+	return form;
+}
 
+async function callDuckDuckGoHtml(params: SearchParams, form: URLSearchParams, signal: AbortSignal): Promise<string> {
 	const page = await browserFetch(DUCKDUCKGO_HTML_URL, {
 		fetch: params.fetch ?? fetch,
-		signal: withHardTimeout(params.signal),
+		signal,
 		referer: "https://html.duckduckgo.com/",
 		init: {
 			method: "POST",
@@ -179,16 +201,23 @@ async function callDuckDuckGoHtml(params: SearchParams): Promise<string> {
 /** Execute a DuckDuckGo web search via the no-JS HTML frontend. */
 export async function searchDuckDuckGo(params: SearchParams): Promise<SearchResponse> {
 	const numResults = clampNumResults(params.numSearchResults ?? params.limit, DEFAULT_NUM_RESULTS, MAX_NUM_RESULTS);
-	const html = await callDuckDuckGoHtml(params);
-	const parsed = parseHtmlResults(html);
-
+	const signal = withHardTimeout(params.signal);
 	const sources: SearchSource[] = [];
 	const seen = new Set<string>();
-	for (const result of parsed) {
-		if (seen.has(result.url)) continue;
-		seen.add(result.url);
-		sources.push({ title: result.title, url: result.url, snippet: result.snippet });
-		if (sources.length >= numResults) break;
+	let form: URLSearchParams | undefined = createDuckDuckGoForm(params);
+
+	while (form && sources.length < numResults) {
+		const html = await callDuckDuckGoHtml(params, form, signal);
+		const sourceCount = sources.length;
+		for (const result of parseHtmlResults(html)) {
+			if (seen.has(result.url)) continue;
+			seen.add(result.url);
+			sources.push({ title: result.title, url: result.url, snippet: result.snippet });
+			if (sources.length >= numResults) break;
+		}
+
+		if (sources.length === sourceCount) break;
+		form = parseContinuationForm(html);
 	}
 
 	return { provider: "duckduckgo", sources };

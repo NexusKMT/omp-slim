@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed DuckDuckGo web search under-returning requests above the first-page result count by submitting the returned continuation form until the requested limit is reached ([#7116](https://github.com/can1357/oh-my-pi/issues/7116)).
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
