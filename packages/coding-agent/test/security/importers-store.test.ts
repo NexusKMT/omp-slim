@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { importCodexSecurityBundle, importSarifFile, SecurityStore } from "../../src/security";
+import { $ } from "bun";
+import { importCodexSecurityBundle, importSarif, importSarifFile, SecurityStore } from "../../src/security";
 
 const FIXTURE_ROOT = path.join(import.meta.dir, "..", "fixtures", "security");
 let temporaryRoot = "";
@@ -39,6 +40,37 @@ describe("security importers and store", () => {
 		expect((await store.getBundle("secscan_sariffixture"))?.findings).toHaveLength(2);
 		expect(codex.scan.producer.kind).toBe("codex-security-bundle");
 		expect(sarif.scan.producer.kind).toBe("sarif-import");
+	});
+
+	test("resolves one canonical store for a nested repository cwd", async () => {
+		const nestedCwd = path.join(repositoryRoot, "packages", "app");
+		await fs.mkdir(nestedCwd, { recursive: true });
+		const initialized = await $`git init --initial-branch=main`.cwd(repositoryRoot).quiet().nothrow();
+		if (initialized.exitCode !== 0) throw new Error("git init failed");
+		const store = await SecurityStore.openForCwd(nestedCwd, { stateRoot: path.join(temporaryRoot, "state") });
+		expect(store.repositoryRoot).toBe(await fs.realpath(repositoryRoot));
+	});
+
+	test("locationless SARIF keeps distinct results while deduplicating repeats", async () => {
+		const input = {
+			version: "2.1.0",
+			runs: [
+				{
+					tool: { driver: { name: "Fixture scanner" } },
+					results: [
+						{ ruleId: "fixture.rule", message: { text: "first result" } },
+						{ ruleId: "fixture.rule", message: { text: "second result" } },
+						{ ruleId: "fixture.rule", message: { text: "second result" } },
+					],
+				},
+			],
+		};
+		const bundle = await importSarif(input, {
+			repositoryRoot,
+			createScanId: () => "secscan_locationless",
+		});
+		expect(bundle.findings.map(finding => finding.summary)).toEqual(["first result", "second result"]);
+		expect(new Set(bundle.findings.map(finding => finding.id)).size).toBe(2);
 	});
 
 	test("serializes concurrent index updates without losing scans", async () => {

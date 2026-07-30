@@ -10,6 +10,7 @@ import type {
 	SecuritySeverityLevel,
 } from "../contracts";
 import {
+	canonicalSecurityJson,
 	createSecurityFindingFingerprint,
 	createSecurityFindingId,
 	createSecurityOccurrenceId,
@@ -119,6 +120,57 @@ function tagsForRule(rule: SarifRule | undefined): string[] {
 	const tags = rule?.properties?.tags;
 	return Array.isArray(tags) ? tags.filter((tag): tag is string => typeof tag === "string") : [];
 }
+function selectFirstVendorFingerprint(vendorFingerprints: Record<string, string>): string | undefined {
+	for (const [, value] of Object.entries(vendorFingerprints).sort(([left], [right]) =>
+		left < right ? -1 : left > right ? 1 : 0,
+	)) {
+		if (value) return value;
+	}
+	return undefined;
+}
+
+function semanticResultAnchor(
+	ruleId: string,
+	category: string,
+	message: string,
+	locations: readonly SecurityLocation[],
+): string {
+	return `sarif-result/v1:sha256:${securitySha256(
+		canonicalSecurityJson({
+			ruleId,
+			category,
+			message,
+			locations,
+		}),
+	)}`;
+}
+const canonicalValidationStatuses: Record<string, true> = {
+	unvalidated: true,
+	validated: true,
+	rejected: true,
+	partial: true,
+	error: true,
+};
+
+const canonicalDispositionStatuses: Record<string, true> = {
+	open: true,
+	false_positive: true,
+	accepted_risk: true,
+	fixed: true,
+	wont_fix: true,
+};
+
+function importedValidationStatus(value: unknown): SecurityFinding["validation"]["status"] {
+	return typeof value === "string" && canonicalValidationStatuses[value] === true
+		? (value as SecurityFinding["validation"]["status"])
+		: "unvalidated";
+}
+
+function importedDispositionStatus(value: unknown): SecurityFinding["disposition"]["status"] {
+	return typeof value === "string" && canonicalDispositionStatuses[value] === true
+		? (value as SecurityFinding["disposition"]["status"])
+		: "open";
+}
 
 export async function importSarif(input: unknown, options: SarifImportOptions): Promise<SecurityScanBundle> {
 	const sarif = input as SarifLog;
@@ -129,6 +181,7 @@ export async function importSarif(input: unknown, options: SarifImportOptions): 
 	const scanId = options.createScanId?.() ?? createSecurityScanId();
 	const createdAt = options.createdAt ?? new Date().toISOString();
 	const findings: SecurityFinding[] = [];
+	const seenFingerprints = new Set<string>();
 	let producerName = "SARIF importer";
 	let producerVersion: string | undefined;
 
@@ -145,17 +198,21 @@ export async function importSarif(input: unknown, options: SarifImportOptions): 
 				...stringRecord(result.fingerprints),
 				...stringRecord(result.partialFingerprints),
 			};
-			const firstVendorFingerprint = Object.values(vendorFingerprints)[0];
+			const firstVendorFingerprint = selectFirstVendorFingerprint(vendorFingerprints);
 			const category =
 				typeof result.properties?.category === "string"
 					? result.properties.category
 					: ruleId.split(/[./-]/)[0] || "security";
+			const message = result.message?.text ?? result.message?.markdown ?? rule?.shortDescription?.text ?? ruleId;
+			const anchor = firstVendorFingerprint ?? semanticResultAnchor(ruleId, category, message, locations);
 			const fingerprint = createSecurityFindingFingerprint({
 				ruleId,
 				category,
-				anchor: firstVendorFingerprint,
+				anchor,
 				locations,
 			});
+			if (seenFingerprints.has(fingerprint)) continue;
+			seenFingerprints.add(fingerprint);
 			const tags = tagsForRule(rule);
 			const provenance: SecurityProvenance = {
 				producer: { kind: "sarif-import", name: producerName },
@@ -165,7 +222,6 @@ export async function importSarif(input: unknown, options: SarifImportOptions): 
 			};
 			if (producerVersion !== undefined) provenance.producer.version = producerVersion;
 			if (options.sourcePath) provenance.metadata = { sourcePath: options.sourcePath };
-			const message = result.message?.text ?? result.message?.markdown ?? rule?.shortDescription?.text ?? ruleId;
 			const finding: SecurityFinding = {
 				id: createSecurityFindingId(fingerprint),
 				scanId,
@@ -182,11 +238,11 @@ export async function importSarif(input: unknown, options: SarifImportOptions): 
 				},
 				occurrences: [{ id: createSecurityOccurrenceId(fingerprint, locations), locations, evidenceIds: [] }],
 				evidence: [],
-				validation: { status: "unvalidated", evidenceIds: [] },
-				disposition: { status: "open" },
+				validation: { status: importedValidationStatus(result.properties?.validation), evidenceIds: [] },
+				disposition: { status: importedDispositionStatus(result.properties?.disposition) },
 				provenance,
 			};
-			if (firstVendorFingerprint !== undefined) finding.anchor = firstVendorFingerprint;
+			finding.anchor = anchor;
 			const score = Number(result.properties?.["security-severity"]);
 			if (Number.isFinite(score)) finding.severity.score = score;
 			findings.push(finding);

@@ -8,9 +8,24 @@ export interface ExactSecurityOAuthOptions {
 	account: SecurityAccountRef;
 }
 
-function assertIdentityMatches(account: SecurityAccountRef, resolvedAccountId: string | undefined): void {
-	if (account.accountId !== undefined && account.accountId !== resolvedAccountId) {
-		throw new Error("Security scan account mismatch: the pinned workspace identity changed during authentication");
+function assertIdentityMatches(
+	account: SecurityAccountRef,
+	resolution: {
+		credentialId?: number;
+		accountId?: string;
+		email?: string;
+		orgId?: string;
+		orgName?: string;
+	},
+): void {
+	if (
+		account.credentialId !== resolution.credentialId ||
+		(account.accountId !== undefined && account.accountId !== resolution.accountId) ||
+		(account.email !== undefined && account.email !== resolution.email) ||
+		(account.organizationId !== undefined && account.organizationId !== resolution.orgId) ||
+		(account.organizationName !== undefined && account.organizationName !== resolution.orgName)
+	) {
+		throw new Error("Security scan authentication identity mismatch");
 	}
 }
 
@@ -27,9 +42,7 @@ export function createExactSecurityOAuthResolver(
 	const { account, authStorage } = options;
 	return model => {
 		if (model.provider !== account.provider) {
-			throw new Error(
-				`Security scan model provider ${model.provider} does not match pinned account provider ${account.provider}`,
-			);
+			throw new Error("Security scan authentication provider mismatch");
 		}
 		const resolver: ApiKeyResolver = async context => {
 			if (context.lastChance) return undefined;
@@ -40,10 +53,10 @@ export function createExactSecurityOAuthResolver(
 			if (!resolution) {
 				throw new Error("The pinned security OAuth credential is unavailable");
 			}
+			assertIdentityMatches(account, resolution);
 			if (!resolution.ok) {
 				throw new Error("The pinned security OAuth credential could not be resolved");
 			}
-			assertIdentityMatches(account, resolution.accountId);
 			return resolution.accessToken;
 		};
 		return resolver;

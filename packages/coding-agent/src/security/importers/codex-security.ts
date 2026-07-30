@@ -123,6 +123,22 @@ function locationsForFinding(finding: CodexFinding): SecurityLocation[] {
 	}
 	return locations.length > 0 ? locations : [{ path: "unknown", startLine: 1, role: "unknown" }];
 }
+const canonicalValidationStatuses: Record<string, true> = {
+	unvalidated: true,
+	validated: true,
+	rejected: true,
+	partial: true,
+	error: true,
+};
+
+function validationStatus(
+	validation: Record<string, unknown> | null | undefined,
+): SecurityFinding["validation"]["status"] {
+	const status = validation?.status;
+	return typeof status === "string" && canonicalValidationStatuses[status] === true
+		? (status as SecurityFinding["validation"]["status"])
+		: "unvalidated";
+}
 
 function mapCoverage(document: CodexCoverageDocument): SecurityCoverage {
 	const allowedModes = new Set(["repository", "scoped_path", "diff", "working_tree", "deep_repository"]);
@@ -205,11 +221,18 @@ export async function importCodexSecurityBundle(
 	for (const source of findingsDocument.findings ?? []) {
 		const ruleId = source.ruleId || "codex-security.unknown";
 		const category = source.taxonomy?.category || ruleId.split(/[./-]/)[0] || "security";
+		const hasSourceLocations = (source.locations ?? []).some(
+			location => typeof location.path === "string" && typeof location.startLine === "number",
+		);
 		const locations = locationsForFinding(source);
+		const anchor =
+			source.identity?.anchor ||
+			source.fingerprints?.primary ||
+			(!hasSourceLocations ? source.findingId : undefined);
 		const fingerprint = createSecurityFindingFingerprint({
 			ruleId,
 			category,
-			anchor: source.identity?.anchor,
+			anchor,
 			locations,
 		});
 		const evidence: SecurityEvidence[] = (source.codeEvidence ?? []).map((item, index) => {
@@ -272,13 +295,13 @@ export async function importCodexSecurityBundle(
 			],
 			evidence,
 			validation: {
-				status: source.validation ? "validated" : "unvalidated",
+				status: validationStatus(source.validation),
 				evidenceIds: [],
 			},
 			disposition: { status: "open" },
 			provenance,
 		};
-		if (source.identity?.anchor !== undefined) finding.anchor = source.identity.anchor;
+		if (anchor !== undefined) finding.anchor = anchor;
 		if (source.severity?.score !== undefined) finding.severity.score = source.severity.score;
 		if (source.severity?.scoringSystem !== undefined) finding.severity.scoringSystem = source.severity.scoringSystem;
 		if (source.severity?.vector !== undefined) finding.severity.vector = source.severity.vector;

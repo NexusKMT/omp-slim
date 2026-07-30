@@ -24,6 +24,24 @@ function normalizeFingerprintPath(value: string): string {
 	return value.replaceAll("\\", "/").replace(/^\.\//, "");
 }
 
+function compareNormalizedLocationValues(
+	left: string | number | undefined,
+	right: string | number | undefined,
+): number {
+	if (left === right) return 0;
+	if (left === undefined) return -1;
+	if (right === undefined) return 1;
+	if (typeof left === "number" && typeof right === "number") {
+		const leftNaN = Number.isNaN(left);
+		const rightNaN = Number.isNaN(right);
+		if (leftNaN || rightNaN) return leftNaN ? (rightNaN ? 0 : -1) : 1;
+		return left - right;
+	}
+	return String(left) < String(right) ? -1 : 1;
+}
+
+const NORMALIZED_LOCATION_SORT_KEYS = ["path", "startLine", "endLine", "startColumn", "endColumn", "role"] as const;
+
 function normalizedLocations(
 	locations: readonly SecurityLocation[],
 ): Array<Record<string, string | number | undefined>> {
@@ -37,9 +55,11 @@ function normalizedLocations(
 			role: location.role,
 		}))
 		.sort((left, right) => {
-			const byPath = String(left.path).localeCompare(String(right.path));
-			if (byPath !== 0) return byPath;
-			return Number(left.startLine) - Number(right.startLine);
+			for (const key of NORMALIZED_LOCATION_SORT_KEYS) {
+				const comparison = compareNormalizedLocationValues(left[key], right[key]);
+				if (comparison !== 0) return comparison;
+			}
+			return 0;
 		});
 }
 

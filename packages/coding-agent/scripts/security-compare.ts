@@ -1,10 +1,17 @@
 #!/usr/bin/env bun
 import * as path from "node:path";
-import { compareSecurityProducers, parseSecurityScanBundle } from "../src/security";
+import { isEnoent } from "@oh-my-pi/pi-utils";
+import { compareSecurityProducers, importCodexSecurityBundle, parseSecurityScanBundle } from "../src/security";
 
 async function readBundle(directory: string) {
 	const root = path.resolve(directory);
-	const scan = JSON.parse(await Bun.file(path.join(root, "scan.json")).text()) as unknown;
+	let scan: unknown;
+	try {
+		scan = JSON.parse(await Bun.file(path.join(root, "scan.json")).text()) as unknown;
+	} catch (error) {
+		if (!isEnoent(error)) throw error;
+		return importCodexSecurityBundle(root, { repositoryRoot: root });
+	}
 	const findings = JSON.parse(await Bun.file(path.join(root, "findings.json")).text()) as unknown;
 	const report = await Bun.file(path.join(root, "report.md"))
 		.text()

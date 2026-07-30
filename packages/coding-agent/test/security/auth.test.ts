@@ -32,6 +32,60 @@ describe("exact security OAuth resolver", () => {
 		expect(getOAuthAccessByCredentialId.mock.calls.map(call => call[1])).toEqual([42, 42]);
 	});
 
+	test("rejects a model whose provider crosses the pinned OAuth boundary", async () => {
+		const getOAuthAccessByCredentialId = vi.fn(async () => ({
+			ok: true as const,
+			accessToken: "must-not-be-requested",
+			credentialId: 42,
+			accountId: "workspace-a",
+		}));
+		const authStorage = { getOAuthAccessByCredentialId } as unknown as AuthStorage;
+		const resolver = createExactSecurityOAuthResolver({
+			authStorage,
+			account: { provider: "openai-codex", credentialId: 42, accountId: "workspace-a" },
+		});
+		const wrongProviderModel = { ...model(), provider: "anthropic" } as unknown as Parameters<typeof resolver>[0];
+		expect(() => resolver(wrongProviderModel)).toThrow("provider mismatch");
+		expect(getOAuthAccessByCredentialId).not.toHaveBeenCalled();
+	});
+
+	test("fails closed when any durable account identity changes", async () => {
+		const account = {
+			provider: "openai-codex",
+			credentialId: 42,
+			accountId: "workspace-a",
+			email: "owner@example.com",
+			organizationId: "org-a",
+			organizationName: "Workspace A",
+		};
+		const resolved = {
+			credentialId: 42,
+			accountId: "workspace-a",
+			email: "owner@example.com",
+			orgId: "org-a",
+			orgName: "Workspace A",
+		};
+		for (const mismatch of [
+			{ credentialId: 99 },
+			{ accountId: "workspace-b" },
+			{ email: "other@example.com" },
+			{ orgId: "org-b" },
+			{ orgName: "Workspace B" },
+		]) {
+			const authStorage = {
+				getOAuthAccessByCredentialId: async () => ({
+					ok: true as const,
+					accessToken: "token",
+					...resolved,
+					...mismatch,
+				}),
+			} as unknown as AuthStorage;
+			const resolver = createExactSecurityOAuthResolver({ authStorage, account });
+			const exact = resolver(model()) as ApiKeyResolver;
+			await expect(exact({ lastChance: false, error: undefined })).rejects.toThrow("identity mismatch");
+		}
+	});
+
 	test("fails closed when the refreshed row loses its workspace identity", async () => {
 		const authStorage = {
 			getOAuthAccessByCredentialId: async () => ({
@@ -53,8 +107,8 @@ describe("exact security OAuth resolver", () => {
 			caught = error;
 		}
 		expect(caught).toBeInstanceOf(Error);
-		if (!(caught instanceof Error)) throw new Error("expected account mismatch");
-		expect(caught.message).toContain("account mismatch");
+		if (!(caught instanceof Error)) throw new Error("expected identity mismatch");
+		expect(caught.message).toContain("identity mismatch");
 		expect(caught.message).not.toContain("workspace-a");
 		expect(caught.message).not.toContain("undefined");
 	});

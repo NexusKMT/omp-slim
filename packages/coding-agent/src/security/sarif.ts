@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 import type { SecurityFinding, SecurityScanBundle } from "./contracts";
 
 function sarifLevel(finding: SecurityFinding): "error" | "warning" | "note" | "none" {
@@ -69,7 +70,7 @@ export function exportSecurityBundleToSarif(bundle: SecurityScanBundle): Record<
 					},
 				})),
 				originalUriBaseIds: {
-					"%SRCROOT%": { uri: `file://${bundle.scan.target.repositoryRoot.replaceAll("\\", "/")}/` },
+					"%SRCROOT%": { uri: pathToFileURL(bundle.scan.target.repositoryRoot).href.replace(/\/?$/, "/") },
 				},
 			},
 		],

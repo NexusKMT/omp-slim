@@ -66,6 +66,29 @@ describe("security contracts", () => {
 		expect(createSecurityFindingId(first)).toBe(createSecurityFindingId(second));
 	});
 
+	test("finding fingerprints are stable across every location ordering", () => {
+		const locations = [
+			{ path: "src/entry.ts", startLine: 4, endLine: 8, startColumn: 2, endColumn: 4, role: "source" },
+			{ path: "src/entry.ts", startLine: 4, endLine: 8, startColumn: 2, endColumn: 4, role: "sink" },
+			{ path: "src/entry.ts", startLine: 4, endLine: 9, startColumn: 1, endColumn: 3, role: "propagation" },
+			{ path: "src/entry.ts", startLine: 4, endLine: 10, startColumn: 1, endColumn: 3, role: "source" },
+		] as const;
+		const baseline = createSecurityFindingFingerprint({
+			ruleId: "fixture.rule",
+			category: "fixture",
+			locations,
+		});
+		for (const ordered of [locations.toReversed(), [locations[2], locations[0], locations[3], locations[1]]]) {
+			expect(
+				createSecurityFindingFingerprint({
+					ruleId: "fixture.rule",
+					category: "fixture",
+					locations: ordered,
+				}),
+			).toBe(baseline);
+		}
+	});
+
 	test("scan IDs remain OMP-owned", () => {
 		expect(createSecurityScanId(() => "018f0000-0000-7000-8000-000000000001")).toBe(
 			"secscan_018f0000000070008000000000000001",
