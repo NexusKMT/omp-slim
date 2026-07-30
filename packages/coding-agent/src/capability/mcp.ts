@@ -60,6 +60,9 @@ export interface MCPServer {
 /** Compare the transport inputs that determine which MCP endpoint gets connected. */
 function isSameMCPConnection(left: MCPServer, right: MCPServer): boolean {
 	if (!Bun.deepEquals(left.auth, right.auth) || !Bun.deepEquals(left.oauth, right.oauth)) return false;
+	// Normalize against the allocator's own default so an explicit "string" is
+	// equivalent to leaving the option unset, not a distinct connection.
+	if ((left.requestIdFormat ?? "string") !== (right.requestIdFormat ?? "string")) return false;
 
 	const leftTransport = left.transport ?? (left.command ? "stdio" : left.url ? "http" : "stdio");
 	const rightTransport = right.transport ?? (right.command ? "stdio" : right.url ? "http" : "stdio");

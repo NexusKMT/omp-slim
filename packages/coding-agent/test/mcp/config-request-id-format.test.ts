@@ -1,5 +1,6 @@
 /**
- * `requestIdFormat` must survive the documented config path.
+ * `requestIdFormat` must survive the documented config path, and must not be lost
+ * to connection-equivalence deduplication.
  *
  * The option is only useful if a value written in config actually reaches the
  * transport: discovery parses config into the canonical `MCPServer` shape and
@@ -9,8 +10,14 @@
  *
  * Both OMP-native loaders are covered: `.omp/mcp.json` (native provider) and a
  * standalone project-root `.mcp.json` (mcp-json provider).
+ *
+ * Separately, `isSameMCPConnection` treats two differently-named entries with the
+ * same command/args/env/cwd as aliases of one connection, keeping only the
+ * higher-priority one. `requestIdFormat` changes the bytes sent on the wire, so it
+ * must be part of that comparison — otherwise a discovered alias lacking the field
+ * could shadow a `.mcp.json` entry that set it, silently reverting to string ids.
  */
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -23,22 +30,32 @@ const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
 
 let tempAgentDir = "";
 let tempCwd = "";
+let tempHome = "";
+let originalHome: string | undefined;
 
 beforeEach(async () => {
+	originalHome = process.env.HOME;
+	tempHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-mcp-reqid-home-"));
 	tempAgentDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-mcp-reqid-agent-"));
 	tempCwd = await fs.mkdtemp(path.join(os.tmpdir(), "omp-mcp-reqid-cwd-"));
+	process.env.HOME = tempHome;
+	vi.spyOn(os, "homedir").mockReturnValue(tempHome);
 	setAgentDir(tempAgentDir);
 	clearFsCache();
 });
 
 afterEach(async () => {
+	vi.restoreAllMocks();
 	if (originalAgentDirEnv) {
 		setAgentDir(originalAgentDirEnv);
 	} else {
 		setAgentDir(fallbackAgentDir);
 		delete process.env.PI_CODING_AGENT_DIR;
 	}
+	if (originalHome === undefined) delete process.env.HOME;
+	else process.env.HOME = originalHome;
 	clearFsCache();
+	await removeWithRetries(tempHome);
 	await removeWithRetries(tempAgentDir);
 	await removeWithRetries(tempCwd);
 });
@@ -76,4 +93,20 @@ test("an unrecognized requestIdFormat is dropped rather than passed through", as
 
 	expect(configs.bogus).toBeDefined();
 	expect(configs.bogus?.requestIdFormat).toBeUndefined();
+});
+
+test("differing requestIdFormat prevents equivalence dedup from collapsing two aliases", async () => {
+	const configs = await loadFrom(path.join(".omp", "mcp.json"), {
+		"xcode-numeric": { type: "stdio", command: "/usr/bin/xcrun", args: ["mcpbridge"], requestIdFormat: "number" },
+		"xcode-default": { type: "stdio", command: "/usr/bin/xcrun", args: ["mcpbridge"] },
+	});
+
+	// Same command/args would previously make these equivalent, so the second
+	// entry (whichever loads later) would shadow the first and its distinct
+	// requestIdFormat setting would vanish. Both must survive as separate
+	// servers — assert key presence directly, since optional chaining on a
+	// shadowed (absent) key would otherwise make this pass vacuously.
+	expect(Object.keys(configs).sort()).toEqual(["xcode-default", "xcode-numeric"]);
+	expect(configs["xcode-numeric"]?.requestIdFormat).toBe("number");
+	expect(configs["xcode-default"]?.requestIdFormat).toBeUndefined();
 });
