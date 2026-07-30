@@ -146,7 +146,7 @@ On non-PR events both jobs run on `omp-kata` pods against the cluster remote cac
 bazelisk --bazelrc="$rc" test //crates/...                 # full Rust suite
 # clippy scope mirrors `cargo clippy --workspace` (libraries only), split by
 # lint policy via a query kind filter:
-bazelisk query "kind('rust_library|rust_shared_library', //crates/pi-ast/... + //crates/pi-iso/... + //crates/pi-natives/... + //crates/pi-shell/... + //crates/pi-walker/...)" \
+bazelisk query "kind('rust_library|rust_shared_library', //crates/pi-ast/... + //crates/pi-iso/... + //crates/pi-natives/... + //crates/pi-shell/... + //crates/pi-voice/... + //crates/pi-walker/...)" \
   | xargs bazelisk --bazelrc="$rc" build --config=clippy-strict --
 bazelisk query "kind('rust_library|rust_shared_library', //crates/... - (…strict set…) - //crates/vendor/brush-core/... - //crates/vendor/brush-builtins/...)" \
   | xargs bazelisk --bazelrc="$rc" build --config=clippy --
@@ -179,9 +179,9 @@ Hosted disk caches use `bazel-disk-v3-<scope>-<os>-<arch>-<config-hash>-<source-
 
 `.github/actions/bazel-natives` is the direct builder: `bazel-cache` → `OMP_BAZEL_RC=<rc> bun scripts/bazel-natives.ts <targets> --dest <dest>`, followed by a disk-cache save after a hosted miss. `.github/actions/native-artifacts` is the no-build consumer: download `native-addons` → run the same driver with `--source`.
 
-### `release_binary`
+### Release binary builds and publishing
 
-Linux and Windows release matrices install addons from the `native_addons` workflow artifact. Darwin artifacts cannot be cross-built on Linux, so each macOS matrix builds only its own architecture through `bazel-natives` with scope `release-<target_id>`, then `bun run ci:release:build-binaries` embeds and compiles the executable.
+Binary builds are build-only and run in parallel with the test fan-out. `release_binary` (Linux + Windows matrices) needs only `native_addons`, whose workflow artifact supplies their addons. `release_binary_darwin` needs only `release_metadata` and starts the moment a release run is detected: darwin artifacts cannot be cross-built on Linux, so each macOS leg builds its own architecture through `bazel-natives` with scope `release-<target_id>` (seeded near HEAD by the warm workflow — normally just the version-bump delta), then `bun run ci:release:build-binaries` embeds and compiles the executable. Publishing is held behind `release_gate` (the aggregate of every validation job): `release_native_leaves` downloads all built addons and publishes the five `@oh-my-pi/pi-natives-<tag>` leaves from one linux runner, and the GitHub release / verify / core npm chain runs beside it.
 
 ## Debugging playbook
 

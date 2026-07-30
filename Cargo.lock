@@ -4818,9 +4818,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "ast-grep-core",
- "audiopus_sys",
  "base64",
- "bytes",
  "clap",
  "clipboard-win",
  "core-graphics",
@@ -4838,17 +4836,16 @@ dependencies = [
  "image",
  "inferno",
  "libc",
- "maudio",
  "napi",
  "napi-build",
  "napi-derive",
- "opus",
  "parking_lot",
  "phf 0.13.1",
  "pi-ast",
  "pi-iso",
  "pi-shell",
  "pi-uutils-ctx",
+ "pi-voice",
  "pi-walker",
  "png",
  "portable-pty",
@@ -4865,7 +4862,6 @@ dependencies = [
  "toml",
  "unicode-segmentation",
  "unicode-width 0.2.2",
- "webrtc",
  "windows-sys 0.61.2",
  "winreg 0.56.0",
  "x11rb",
@@ -4959,6 +4955,20 @@ name = "pi-uutils-ctx"
 version = "0.1.0"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "pi-voice"
+version = "17.1.8"
+dependencies = [
+ "audiopus_sys",
+ "bytes",
+ "flume",
+ "maudio",
+ "opus",
+ "parking_lot",
+ "tokio",
+ "webrtc",
 ]
 
 [[package]]
