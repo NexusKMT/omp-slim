@@ -87,6 +87,41 @@ class ControlledTitleUpdateBackend implements SessionStorageBackend {
 		this.#firstUpdate.reject(error);
 	}
 }
+describe("FileSessionStorage writer", () => {
+	let tempDir: string;
+	let storage: FileSessionStorage;
+
+	beforeEach(async () => {
+		tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-session-writer-"));
+		storage = new FileSessionStorage();
+	});
+
+	afterEach(async () => {
+		await fsp.rm(tempDir, { recursive: true, force: true });
+	});
+
+	it("preserves append order through flush and close", async () => {
+		const sessionPath = path.join(tempDir, "batched.jsonl");
+		const writer = storage.openWriter(sessionPath, { flags: "w" });
+		await writer.append("one\n");
+		await writer.append("two\n");
+
+		await writer.flush();
+		expect(fs.readFileSync(sessionPath, "utf8")).toBe("one\ntwo\n");
+		await writer.close();
+	});
+
+	it("flushes queued appends before closing", async () => {
+		const sessionPath = path.join(tempDir, "closed.jsonl");
+		const writer = storage.openWriter(sessionPath, { flags: "w" });
+		await writer.append("one\n");
+		await writer.append("two\n");
+		await writer.close();
+
+		expect(fs.readFileSync(sessionPath, "utf8")).toBe("one\ntwo\n");
+	});
+});
+
 describe("FileSessionStorage.deleteSessionWithArtifacts", () => {
 	let tempDir: string;
 	let storage: FileSessionStorage;

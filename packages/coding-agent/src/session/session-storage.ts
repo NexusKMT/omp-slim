@@ -90,6 +90,8 @@ class FileSessionStorageWriter implements SessionStorageWriter {
 	#closed = false;
 	#error: Error | undefined;
 	#onError: ((err: Error) => void) | undefined;
+	#pending = "";
+	#flushScheduled = false;
 
 	constructor(fpath: string, options?: { flags?: "a" | "w"; onError?: (err: Error) => void }) {
 		this.#onError = options?.onError;
@@ -112,25 +114,41 @@ class FileSessionStorageWriter implements SessionStorageWriter {
 		return error;
 	}
 
-	async append(line: string): Promise<void> {
-		if (this.#closed) throw new Error("Writer closed");
-		if (this.#error) throw this.#error;
-		try {
-			const buf = Buffer.from(line, "utf-8");
-			let offset = 0;
-			while (offset < buf.length) {
-				const written = fs.writeSync(this.#fd, buf, offset, buf.length - offset);
-				if (written === 0) {
-					throw new Error("Short write");
-				}
-				offset += written;
+	#writeNow(line: string): void {
+		const buf = Buffer.from(line, "utf-8");
+		let offset = 0;
+		while (offset < buf.length) {
+			const written = fs.writeSync(this.#fd, buf, offset, buf.length - offset);
+			if (written === 0) {
+				throw new Error("Short write");
 			}
-		} catch (err) {
-			throw this.#recordError(err);
+			offset += written;
 		}
 	}
 
+	#flushPendingNow(): void {
+		this.#flushScheduled = false;
+		if (this.#pending.length === 0) return;
+		const pending = this.#pending;
+		this.#pending = "";
+		try {
+			this.#writeNow(pending);
+		} catch (err) {
+			this.#recordError(err);
+		}
+	}
+
+	async append(line: string): Promise<void> {
+		if (this.#closed) throw new Error("Writer closed");
+		if (this.#error) throw this.#error;
+		this.#pending += line;
+		if (this.#flushScheduled) return;
+		this.#flushScheduled = true;
+		queueMicrotask(() => this.#flushPendingNow());
+	}
+
 	async flush(): Promise<void> {
+		this.#flushPendingNow();
 		if (this.#error) throw this.#error;
 	}
 
@@ -140,6 +158,7 @@ class FileSessionStorageWriter implements SessionStorageWriter {
 
 	async close(): Promise<void> {
 		if (this.#closed) return;
+		this.#flushPendingNow();
 		this.#closed = true;
 		// Unregister from finalization - we're closing properly
 		writerRegistry.unregister(this);

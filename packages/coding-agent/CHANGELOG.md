@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Batched same-turn file-session appends behind the session writer's microtask boundary. Render and tool paths can now record several transcript entries without paying one synchronous file write per entry, while explicit `flush()` and `close()` still make queued lines durable in order.
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
