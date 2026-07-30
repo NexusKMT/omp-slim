@@ -2,7 +2,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import { createLspWritethrough } from "@oh-my-pi/pi-coding-agent/lsp";
 import * as lspConfig from "@oh-my-pi/pi-coding-agent/lsp/config";
+import type { LinterClient, ServerConfig } from "@oh-my-pi/pi-coding-agent/lsp/types";
 import { TempDir } from "@oh-my-pi/pi-utils";
+
+function createFormatter(format: (filePath: string, content: string) => Promise<string>): ServerConfig {
+	return {
+		command: "test-formatter",
+		fileTypes: ["ts"],
+		rootMarkers: [],
+		createClient: () =>
+			({
+				format,
+				lint: async () => [],
+			}) satisfies LinterClient,
+	};
+}
 
 describe("createLspWritethrough batching", () => {
 	let tempDir: TempDir;
@@ -93,6 +107,32 @@ describe("createLspWritethrough batching", () => {
 
 		expect(await Bun.file(fileA).exists()).toBe(false);
 		expect(await Bun.file(fileB).text()).toBe("const survivor = true;\n");
+	});
+
+	it("preserves a UTF-8 BOM when batch formatting changes content", async () => {
+		const formatter = createFormatter(async (_filePath, content) => content.replace("=1", " = 1;"));
+		vi.spyOn(lspConfig, "loadConfig").mockReturnValue({ servers: {}, idleTimeoutMs: undefined });
+		vi.spyOn(lspConfig, "getServersForFile").mockReturnValue([["formatter", formatter]]);
+		const writethrough = createLspWritethrough(tempDir.path(), {
+			enableFormat: true,
+			enableDiagnostics: false,
+		});
+
+		const fileA = path.join(tempDir.path(), "a.ts");
+		const fileB = path.join(tempDir.path(), "b.ts");
+		const batchId = `bom-${Date.now()}`;
+		await writethrough(fileA, "\uFEFFconst value=1\n", undefined, undefined, {
+			id: batchId,
+			flush: false,
+		});
+		await writethrough(fileB, "const other=1\n", undefined, undefined, {
+			id: batchId,
+			flush: true,
+		});
+
+		const bytes = new Uint8Array(await Bun.file(fileA).arrayBuffer());
+		expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+		expect(Buffer.from(bytes).toString("utf8")).toBe("\uFEFFconst value = 1;\n");
 	});
 
 	it("flushes earlier entries when the final batch write fails", async () => {

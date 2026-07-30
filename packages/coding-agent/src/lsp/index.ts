@@ -1494,7 +1494,7 @@ async function flushWritethroughBatch(
 		const bundle = getDeferred?.(entry.dst);
 		let content: string;
 		try {
-			content = await Bun.file(entry.dst).text();
+			content = await fs.promises.readFile(entry.dst, "utf8");
 		} catch (error) {
 			if (!isEnoent(error)) throw error;
 			bundle?.finalize(undefined);
