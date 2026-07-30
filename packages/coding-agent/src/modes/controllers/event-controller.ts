@@ -101,12 +101,18 @@ export class EventController {
 	// preview while the new-id card takes the result (#6879). Reset per assistant
 	// message (indices are per-message).
 	#streamedToolCallIdByIndex = new Map<number, string>();
-	// An error/aborted assistant turn is followed by synthetic start/end events
-	// for every tool call the provider emitted but the agent never executed.
-	// Its uncommitted cards are retracted at message_end; retain their ids until
-	// those synthetic completions arrive so the normal no-pending path cannot
-	// recreate failed-attempt cards below the transcript (#6879).
+	// A TTSR rewind retracts its uncommitted never-run cards at message_end;
+	// retain their ids until agent-loop's synthetic tool_execution_start/end for
+	// those calls arrive so the normal no-pending path cannot recreate the
+	// retracted card below the rewind's fresh blocks (#6879).
 	#retractedToolCallIds = new Set<string>();
+	// Cards settled by a synthetic aborted/error `tool_execution_end` (agent-loop
+	// emits one per never-run call on a terminal error/abort). They stay visible
+	// for a genuinely terminal failure, but if an auto-retry then supersedes the
+	// turn (`auto_retry_start`, decided AFTER message_end) they must be removed so
+	// the retry's fresh cards do not render the same call twice (Codex review on
+	// #6881). Keyed by call id; reset per turn.
+	#syntheticFailureCards = new Map<string, ToolExecutionHandle>();
 	// Completions that arrived before any component existed for their call id.
 	// Cursor's server-resolved tools (todo) emit `tool_execution_end` through a
 	// synchronous callback fired mid-parse, while the `toolcall_start` for the
@@ -324,6 +330,18 @@ export class EventController {
 		// A collapsed read renders into a shared group keyed by id; rename its
 		// entry so the row isn't duplicated under the new id.
 		if (pending instanceof ReadToolGroupComponent) pending.renameEntry(oldId, newId);
+		// A server-resolved completion (Cursor/todo) can land under `newId` while
+		// the card was still keyed by `oldId`, so it was parked in
+		// `#orphanedToolCompletions` instead of settling. Now that the card owns
+		// `newId`, apply the held result — the normal creation path that consumes
+		// held completions is skipped on a re-key (Codex review on #6881).
+		if (pending) {
+			const orphan = this.#orphanedToolCompletions.get(newId);
+			if (orphan) {
+				this.#orphanedToolCompletions.delete(newId);
+				this.#settleHeldCompletion(pending, orphan);
+			}
+		}
 	}
 
 	#inlineReadToolImages(
@@ -404,6 +422,8 @@ export class EventController {
 		this.#lastIntent = undefined;
 		this.#toolTimelineComponents.clear();
 		this.#streamedToolCallIdByIndex.clear();
+		this.#retractedToolCallIds.clear();
+		this.#syntheticFailureCards.clear();
 		this.#orphanedToolCompletions.clear();
 		this.#postToolAssistantComponents.clear();
 		this.#backgroundTaskCallIds.clear();
@@ -494,6 +514,8 @@ export class EventController {
 	async #handleAgentStart(_event: Extract<AgentSessionEvent, { type: "agent_start" }>): Promise<void> {
 		this.#toolTimelineComponents.clear();
 		this.#streamedToolCallIdByIndex.clear();
+		this.#retractedToolCallIds.clear();
+		this.#syntheticFailureCards.clear();
 		this.#orphanedToolCompletions.clear();
 		this.#postToolAssistantComponents.clear();
 		this.#lastIntent = undefined;
@@ -992,37 +1014,45 @@ export class EventController {
 					component.setArgsComplete(toolCallId);
 				}
 			} else {
-				// The turn ended without running these calls (abort/error/TTSR rewind),
-				// so they will never produce a result AND their assistant turn is
-				// dropped from the active context when a retry/rewind supersedes it.
-				// The retry then streams fresh tool blocks below these, so any left on
-				// screen render the same call twice (#6879, the parallel-probe screenshots
-				// on #6516's follow-up). Retract the ones still in the live region — they
-				// never reached native scrollback, so they are removable — and forget
-				// them (`pendingTools` + timeline) so a same-id retry rebuilds a fresh
-				// card instead of routing its deltas into the detached one. A block
-				// already committed to the scrollback tape cannot be retracted; seal it
-				// in place as history so it at least stops animating. Background task
-				// calls keep updating across the boundary, so preserve them.
-				for (const [toolCallId, component] of Array.from(this.ctx.pendingTools.entries())) {
-					if (this.#backgroundTaskCallIds.has(toolCallId)) continue;
-					if (!(component instanceof ToolExecutionComponent) && !(component instanceof ReadToolGroupComponent)) {
-						continue;
-					}
-					if (this.ctx.chatContainer.isBlockUncommitted(component)) {
-						component.seal();
-						if (component === this.#lastReadGroup) this.#resetReadGroup();
-						this.ctx.chatContainer.removeChild(component);
-						this.#retractedToolCallIds.add(toolCallId);
-						this.ctx.pendingTools.delete(toolCallId);
-						this.#toolTimelineComponents.delete(toolCallId);
-						this.#clearReadToolCall(toolCallId);
-					} else {
-						component.seal();
+				// The turn ended without running these calls. What happens next
+				// decides whether their cards should vanish or stay:
+				//   • TTSR rewind — known NOW via `isTtsrAbortPending` — re-runs the
+				//     turn and re-streams fresh cards, so retract the uncommitted
+				//     never-run cards here and swallow the synthetic completions
+				//     agent-loop emits for them, else the call renders twice (#6879).
+				//   • A plain terminal error/abort, or an auto-retry (whose
+				//     supersession is only known later at `auto_retry_start`), must
+				//     NOT be retracted here: agent-loop emits a synthetic
+				//     `tool_execution_end` right after this that settles each card
+				//     into a visible aborted/error result. Leave them so the terminal
+				//     failure stays visible; `#handleAutoRetryStart` removes them only
+				//     if a retry actually supersedes them (Codex review on #6881).
+				const supersededByRewind =
+					this.ctx.streamingMessage.stopReason === "aborted" && this.ctx.viewSession.isTtsrAbortPending;
+				if (supersededByRewind) {
+					for (const [toolCallId, component] of Array.from(this.ctx.pendingTools.entries())) {
+						if (this.#backgroundTaskCallIds.has(toolCallId)) continue;
+						if (
+							!(component instanceof ToolExecutionComponent) &&
+							!(component instanceof ReadToolGroupComponent)
+						) {
+							continue;
+						}
+						if (this.ctx.chatContainer.isBlockUncommitted(component)) {
+							component.seal();
+							if (component === this.#lastReadGroup) this.#resetReadGroup();
+							this.ctx.chatContainer.removeChild(component);
+							this.#retractedToolCallIds.add(toolCallId);
+							this.ctx.pendingTools.delete(toolCallId);
+							this.#toolTimelineComponents.delete(toolCallId);
+							this.#clearReadToolCall(toolCallId);
+						} else {
+							component.seal();
+						}
 					}
 				}
-				// These calls will never produce a result either, so the tracked
-				// waiting poll cannot be displaced anymore — freeze it in place.
+				// These calls will never run this attempt, so the tracked waiting
+				// poll cannot be displaced anymore — freeze it in place.
 				this.#resolveDisplaceablePoll();
 			}
 			// Surface a prompt-cache invalidation: if the previous turn cached a
@@ -1230,6 +1260,19 @@ export class EventController {
 		// assistant message. The matching card was deliberately retracted at
 		// message_end; consume the completion instead of recreating/updating UI.
 		if (this.#retractedToolCallIds.delete(event.toolCallId)) return;
+		// A synthetic aborted/error completion (agent-loop's placeholder for a
+		// never-run call on a terminal error/abort) settles the card in place so a
+		// terminal failure stays visible. Remember it so `#handleAutoRetryStart`
+		// can remove it if an auto-retry then supersedes the turn (Codex review on
+		// #6881). Capture the live component now — the settle path below drops it
+		// from `pendingTools` but leaves it in the transcript.
+		const syntheticFailureDetails = event.result.details as { __synthetic?: boolean; source?: string } | undefined;
+		const syntheticFailureCard =
+			syntheticFailureDetails?.__synthetic === true &&
+			(syntheticFailureDetails.source === "assistant_stop_error" ||
+				syntheticFailureDetails.source === "assistant_stop_aborted")
+				? this.ctx.pendingTools.get(event.toolCallId)
+				: undefined;
 		// A transient overlay (auto-compaction / auto-retry / handoff) that ran
 		// between this tool's start and end could have detached the working
 		// loader. `tool_execution_update` already reconciles this so the spinner
@@ -1327,6 +1370,7 @@ export class EventController {
 				this.#orphanedToolCompletions.set(event.toolCallId, event);
 			}
 		}
+		if (syntheticFailureCard) this.#syntheticFailureCards.set(event.toolCallId, syntheticFailureCard);
 		// Update todo display when todo tool completes
 		if (event.toolName === "todo" && !event.isError) {
 			const details = event.result.details as { phases?: TodoPhase[] } | undefined;
@@ -1434,6 +1478,8 @@ export class EventController {
 		this.#readToolCallAssistantComponents.clear();
 		this.#toolTimelineComponents.clear();
 		this.#streamedToolCallIdByIndex.clear();
+		this.#retractedToolCallIds.clear();
+		this.#syntheticFailureCards.clear();
 		this.#orphanedToolCompletions.clear();
 		this.#postToolAssistantComponents.clear();
 		this.#resetReadGroup();
@@ -1607,6 +1653,21 @@ export class EventController {
 	async #handleAutoRetryStart(event: Extract<AgentSessionEvent, { type: "auto_retry_start" }>): Promise<void> {
 		this.#retryPending = true;
 		this.#trackRetrySupersededAssistantComponent(this.#lastAssistantComponent);
+		// A retry supersedes the just-failed turn: its assistant + tool calls are
+		// pruned from context and re-streamed. Remove the cards that a synthetic
+		// aborted/error completion settled in place at message_end so the retry's
+		// fresh cards don't render the same call twice (#6879). Only uncommitted
+		// cards are removable; one already on the scrollback tape stays as history.
+		for (const [toolCallId, component] of this.#syntheticFailureCards) {
+			if (this.ctx.chatContainer.isBlockUncommitted(component)) {
+				if (component === this.#lastReadGroup) this.#resetReadGroup();
+				this.ctx.chatContainer.removeChild(component);
+				this.ctx.pendingTools.delete(toolCallId);
+				this.#toolTimelineComponents.delete(toolCallId);
+				this.#clearReadToolCall(toolCallId);
+			}
+		}
+		this.#syntheticFailureCards.clear();
 		this.#stopWorkingLoader();
 		this.ctx.statusContainer.disposeChildren();
 		if (AIError.is(event.errorId, AIError.Flag.ThinkingLoop)) {

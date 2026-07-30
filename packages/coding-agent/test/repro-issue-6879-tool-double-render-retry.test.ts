@@ -182,35 +182,54 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 		>);
 	}
 
-	it("retracts a superseded turn's never-run tool card so an auto-retry renders it once", async () => {
-		const ec = mode.eventController;
-		await ec.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
+	function enableTtsrRewind(pending: boolean): void {
+		Object.defineProperty(session, "isTtsrAbortPending", { configurable: true, get: () => pending });
+	}
 
-		// Attempt 1: the tool call streams a card, then the turn errors out.
-		await streamToolCall("call-attempt-1", "error");
-		// agent-loop now pairs the failed assistant toolCall with a synthetic
-		// start/end event sequence. It must be absorbed rather than recreating
-		// the card that message_end just retracted.
+	async function emitSyntheticAbort(id: string, source: string): Promise<void> {
+		const ec = mode.eventController;
 		await ec.handleEvent({
 			type: "tool_execution_start",
-			toolCallId: "call-attempt-1",
+			toolCallId: id,
 			toolName: "bash",
 			args: { command: CMD },
 		} as Extract<AgentSessionEvent, { type: "tool_execution_start" }>);
 		await ec.handleEvent({
 			type: "tool_execution_end",
-			toolCallId: "call-attempt-1",
+			toolCallId: id,
 			toolName: "bash",
 			result: {
-				content: [{ type: "text", text: "Tool call was not executed because the provider stream ended" }],
-				details: { __synthetic: true, source: "assistant_stop_error", executed: false },
+				content: [{ type: "text", text: "Tool execution was aborted." }],
+				details: { __synthetic: true, source, executed: false },
 			},
 			isError: true,
 		} as Extract<AgentSessionEvent, { type: "tool_execution_end" }>);
-		// The failed card is retracted immediately (never committed to scrollback),
-		// not left frozen on screen.
-		expect(countCommand(mode)).toBe(0);
+	}
 
+	it("keeps a terminally failed turn's tool card visible via its synthetic result", async () => {
+		const ec = mode.eventController;
+		await ec.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
+
+		// The turn errors after streaming the call; agent-loop then emits a
+		// synthetic aborted result for the never-run call. No retry follows.
+		await streamToolCall("call-terminal", "error");
+		await emitSyntheticAbort("call-terminal", "assistant_stop_error");
+
+		// The card stays visible (settled with the failure) instead of vanishing.
+		expect(countCommand(mode)).toBe(1);
+	});
+
+	it("removes a synthetic-settled failed card when an auto-retry supersedes the turn", async () => {
+		const ec = mode.eventController;
+		await ec.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
+
+		// Attempt 1 errors; the synthetic result settles the card in place.
+		await streamToolCall("call-attempt-1", "error");
+		await emitSyntheticAbort("call-attempt-1", "assistant_stop_error");
+		expect(countCommand(mode)).toBe(1);
+
+		// The retry supersedes the turn: the settled failed card is removed so the
+		// retry's fresh card does not render the call twice.
 		await ec.handleEvent({
 			type: "auto_retry_start",
 			attempt: 1,
@@ -218,21 +237,21 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 			delayMs: 0,
 			errorMessage: "overloaded",
 		} as Extract<AgentSessionEvent, { type: "auto_retry_start" }>);
+		expect(countCommand(mode)).toBe(0);
 		await ec.handleEvent({ type: "auto_retry_end", success: true, attempt: 1 } as Extract<
 			AgentSessionEvent,
 			{ type: "auto_retry_end" }
 		>);
 
-		// Attempt 2 (retry) regenerates the call with a fresh id and runs it.
 		await streamToolCall("call-attempt-2", "toolUse");
 		await runToolCallToCompletion("call-attempt-2");
-
 		expect(countCommand(mode)).toBe(1);
 	});
 
-	it("stops an animated tool card before retracting it", async () => {
+	it("stops and retracts an animated tool card on a TTSR rewind", async () => {
 		vi.useFakeTimers();
 		try {
+			enableTtsrRewind(true);
 			const ec = mode.eventController;
 			const requestComponentRender = vi.spyOn(mode.ui, "requestComponentRender");
 			const writeCall: ToolCall = {
@@ -263,6 +282,7 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 			expect(requestComponentRender.mock.calls.some(call => call[0] === writeComponent)).toBeTrue();
 			requestComponentRender.mockClear();
 
+			// TTSR rewind is known at message_end (isTtsrAbortPending): retract now.
 			await ec.handleEvent({
 				type: "message_end",
 				message: assistantMessage([writeCall], "aborted"),
@@ -276,13 +296,15 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 		}
 	});
 
-	it("resets a detached read group so the retry's grouped read stays visible", async () => {
+	it("resets a detached read group on a TTSR rewind so the re-run stays visible", async () => {
 		const ec = mode.eventController;
 		await ec.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
 
+		enableTtsrRewind(true);
 		await streamReadToolCall("read-rewound", "aborted");
 		expect(mode.pendingTools.has("read-rewound")).toBeFalse();
 
+		enableTtsrRewind(false);
 		await streamReadToolCall("read-rerun", "toolUse");
 		const retryGroup = mode.pendingTools.get("read-rerun");
 		if (!retryGroup) throw new Error("Expected retry read group");
@@ -403,11 +425,13 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 		const ec = mode.eventController;
 		await ec.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
 
-		// Attempt 1: card streams, turn is aborted (rewind) before executing.
+		// Attempt 1: card streams, turn is aborted for a TTSR rewind.
+		enableTtsrRewind(true);
 		await streamToolCall("call-rewound", "aborted");
 		expect(countCommand(mode)).toBe(0);
 
 		// Fresh turn re-issues and completes the call.
+		enableTtsrRewind(false);
 		await streamToolCall("call-rerun", "toolUse");
 		await runToolCallToCompletion("call-rerun");
 
@@ -488,5 +512,50 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 		} as Extract<AgentSessionEvent, { type: "message_end" }>);
 		await runToolCallToCompletion("call-x|abc123==");
 		expect(countCommand(mode)).toBe(1);
+	});
+
+	it("settles a held server-resolved completion after the tool-call id is re-keyed", async () => {
+		const ec = mode.eventController;
+		const todoAt = (id: string): ToolCall => ({ type: "toolCall", id, name: "todo", arguments: {} });
+		await ec.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
+		await ec.handleEvent({ type: "message_start", message: assistantMessage([], "toolUse") } as Extract<
+			AgentSessionEvent,
+			{ type: "message_start" }
+		>);
+		// The todo block streams before its id (placeholder empty id).
+		await ec.handleEvent({
+			type: "message_update",
+			message: assistantMessage([todoAt("")], "toolUse"),
+			assistantMessageEvent: {
+				type: "toolcall_start",
+				contentIndex: 0,
+				partial: assistantMessage([todoAt("")], "toolUse"),
+			},
+		} as Extract<AgentSessionEvent, { type: "message_update" }>);
+		// A server-resolved completion (Cursor todo) arrives under the REAL id
+		// before the id delta — no card is keyed by it yet, so it is held.
+		await ec.handleEvent({
+			type: "tool_execution_end",
+			toolCallId: "todo-real",
+			toolName: "todo",
+			result: { content: [{ type: "text", text: "todo done" }], details: { phases: [] } },
+			isError: false,
+		} as Extract<AgentSessionEvent, { type: "tool_execution_end" }>);
+		expect(mode.pendingTools.has("todo-real")).toBeFalse();
+
+		// A later delta fills the real id: the re-key must consume the held
+		// completion and settle the migrated card, not leave it pending.
+		await ec.handleEvent({
+			type: "message_update",
+			message: assistantMessage([todoAt("todo-real")], "toolUse"),
+			assistantMessageEvent: {
+				type: "toolcall_delta",
+				contentIndex: 0,
+				delta: "{}",
+				partial: assistantMessage([todoAt("todo-real")], "toolUse"),
+			},
+		} as Extract<AgentSessionEvent, { type: "message_update" }>);
+		expect(mode.pendingTools.has("todo-real")).toBeFalse();
+		expect(mode.pendingTools.has("")).toBeFalse();
 	});
 });
