@@ -1,12 +1,6 @@
+import { type } from "arktype";
 import type { ToolDefinition } from "../extensibility/extensions";
 import securityPublishDescription from "../prompts/tools/security-publish.md" with { type: "text" };
-import { type } from "arktype";
-import {
-	createSecurityEvidenceId,
-	createSecurityFindingFingerprint,
-	createSecurityFindingId,
-	createSecurityOccurrenceId,
-} from "./contracts";
 import type {
 	SecurityCoverage,
 	SecurityEvidence,
@@ -15,6 +9,12 @@ import type {
 	SecurityScan,
 	SecurityScanBundle,
 	SecurityScanPlan,
+} from "./contracts";
+import {
+	createSecurityEvidenceId,
+	createSecurityFindingFingerprint,
+	createSecurityFindingId,
+	createSecurityOccurrenceId,
 } from "./contracts";
 import { createNativeSecurityProducer, createNativeSecurityProvenance } from "./provenance";
 import { exportSecurityBundleToSarif } from "./sarif";
@@ -109,14 +109,15 @@ function normalizePublishedPath(input: string): string {
 }
 
 function toLocation(input: SecurityPublishParams["findings"][number]["locations"][number]): SecurityLocation {
-	return {
+	const location: SecurityLocation = {
 		path: normalizePublishedPath(input.path),
 		startLine: input.start_line,
-		endLine: input.end_line,
-		startColumn: input.start_column,
-		endColumn: input.end_column,
-		role: input.role,
 	};
+	if (input.end_line !== undefined) location.endLine = input.end_line;
+	if (input.start_column !== undefined) location.startColumn = input.start_column;
+	if (input.end_column !== undefined) location.endColumn = input.end_column;
+	if (input.role !== undefined) location.role = input.role;
+	return location;
 }
 
 function coverageMode(plan: SecurityScanPlan): SecurityCoverage["mode"] {
@@ -155,20 +156,22 @@ function buildFinding(
 		anchor: input.anchor,
 		locations,
 	});
-	const evidence: SecurityEvidence[] = (input.evidence ?? []).map((item, index) => ({
-		id: createSecurityEvidenceId(fingerprint, item.label, index),
-		kind: "code",
-		label: item.label,
-		explanation: item.explanation,
-		excerpt: item.excerpt,
-		location: item.location ? toLocation(item.location) : undefined,
-	}));
-	return {
+	const evidence: SecurityEvidence[] = (input.evidence ?? []).map((item, index) => {
+		const entry: SecurityEvidence = {
+			id: createSecurityEvidenceId(fingerprint, item.label, index),
+			kind: "code",
+			label: item.label,
+			explanation: item.explanation,
+		};
+		if (item.excerpt !== undefined) entry.excerpt = item.excerpt;
+		if (item.location !== undefined) entry.location = toLocation(item.location);
+		return entry;
+	});
+	const finding: SecurityFinding = {
 		id: createSecurityFindingId(fingerprint),
 		scanId: options.scanId,
 		fingerprint,
 		ruleId: input.rule_id,
-		anchor: input.anchor,
 		title: input.title,
 		summary: input.summary,
 		severity: { level: input.severity },
@@ -182,7 +185,6 @@ function buildFinding(
 			},
 		],
 		evidence,
-		remediation: input.remediation,
 		validation: { status: input.validation ?? "unvalidated", evidenceIds: [] },
 		disposition: { status: "open" },
 		provenance: createNativeSecurityProvenance({
@@ -193,38 +195,50 @@ function buildFinding(
 			sessionId: options.sessionId,
 		}),
 	};
+	if (input.anchor !== undefined) finding.anchor = input.anchor;
+	if (input.remediation !== undefined) finding.remediation = input.remediation;
+	return finding;
 }
 
 function buildCoverage(params: SecurityPublishParams, plan: SecurityScanPlan): SecurityCoverage {
-	return {
-		mode: coverageMode(plan),
-		completeness: params.coverage.completeness,
-		inventoryStrategy: inventoryStrategy(plan),
-		includePaths: plan.target.includePaths,
-		excludePaths: plan.target.excludePaths,
-		surfaces: (params.coverage.surfaces ?? []).map((surface, index) => ({
+	const surfaces: SecurityCoverage["surfaces"] = (params.coverage.surfaces ?? []).map((surface, index) => {
+		const entry: SecurityCoverage["surfaces"][number] = {
 			id: `surface-${index + 1}`,
 			label: surface.label,
 			disposition: surface.disposition,
 			receiptRefs: surface.receipt_refs ?? [],
-			riskArea: surface.risk_area,
-			notes: surface.notes,
-		})),
-		explicitExclusions: (params.coverage.explicit_exclusions ?? []).map(item => ({
-			pattern: item.pattern,
-			reason: item.reason,
-		})),
-		deferred: (params.coverage.deferred ?? []).map((item, index) => ({
+		};
+		if (surface.risk_area !== undefined) entry.riskArea = surface.risk_area;
+		if (surface.notes !== undefined) entry.notes = surface.notes;
+		return entry;
+	});
+	const deferred: SecurityCoverage["deferred"] = (params.coverage.deferred ?? []).map((item, index) => {
+		const entry: SecurityCoverage["deferred"][number] = {
 			id: `deferred-${index + 1}`,
 			reason: item.reason,
-			paths: item.paths,
-			surfaceIds: item.surface_ids,
-		})),
-		openQuestions: (params.coverage.open_questions ?? []).map(item => ({
-			question: item.question,
-			followUpPrompt: item.follow_up_prompt,
-		})),
+		};
+		if (item.paths !== undefined) entry.paths = item.paths;
+		if (item.surface_ids !== undefined) entry.surfaceIds = item.surface_ids;
+		return entry;
+	});
+	const coverage: SecurityCoverage = {
+		mode: coverageMode(plan),
+		completeness: params.coverage.completeness,
+		inventoryStrategy: inventoryStrategy(plan),
+		includePaths: [...plan.target.includePaths],
+		excludePaths: [...plan.target.excludePaths],
+		surfaces,
+		explicitExclusions: params.coverage.explicit_exclusions ?? [],
+		deferred,
 	};
+	if (params.coverage.open_questions !== undefined) {
+		coverage.openQuestions = params.coverage.open_questions.map(item => {
+			const question: NonNullable<SecurityCoverage["openQuestions"]>[number] = { question: item.question };
+			if (item.follow_up_prompt !== undefined) question.followUpPrompt = item.follow_up_prompt;
+			return question;
+		});
+	}
+	return coverage;
 }
 
 export function createSecurityPublicationTool(
@@ -240,55 +254,62 @@ export function createSecurityPublicationTool(
 		strict: true,
 		async execute(_toolCallId, params) {
 			if (published) throw new Error(`Security scan ${options.scanId} has already been published`);
-			const completedAt = new Date().toISOString();
-			const findingsByFingerprint = new Map<string, SecurityFinding>();
-			for (const input of params.findings) {
-				const finding = buildFinding(input, options, completedAt);
-				if (!findingsByFingerprint.has(finding.fingerprint)) {
-					findingsByFingerprint.set(finding.fingerprint, finding);
-				}
-			}
-			const findings = [...findingsByFingerprint.values()];
-			const producer = createNativeSecurityProducer();
-			const provenance = createNativeSecurityProvenance({
-				createdAt: options.startedAt,
-				account: options.plan.account,
-				planFingerprint: options.plan.fingerprint,
-				workflowFingerprint: options.plan.workflowFingerprint,
-				sessionId: options.sessionId,
-			});
-			const scan: SecurityScan = {
-				documentType: "omp-security.scan",
-				schemaVersion: "1.0",
-				id: options.scanId,
-				projectKey: options.store.projectKey,
-				status: "completed",
-				createdAt: options.plan.createdAt,
-				startedAt: options.startedAt,
-				completedAt,
-				plan: options.plan,
-				target: options.plan.target,
-				producer,
-				provenance,
-				findingIds: findings.map(finding => finding.id),
-				coverage: buildCoverage(params, options.plan),
-				reportRef: "report.md",
-				sarifRef: "results.sarif",
-			};
-			const provisional: SecurityScanBundle = { scan, findings, report: params.report };
-			const bundle: SecurityScanBundle = { ...provisional, sarif: exportSecurityBundleToSarif(provisional) };
-			await options.store.putBundle(bundle);
 			published = true;
-			await options.onPublished?.(bundle);
-			return {
-				content: [
-					{
-						type: "text",
-						text: `Published security scan ${options.scanId} with ${findings.length} finding(s).`,
-					},
-				],
-				details: { scanId: options.scanId, findingCount: findings.length, status: "completed" },
-			};
+			let persisted = false;
+			try {
+				const completedAt = new Date().toISOString();
+				const findingsByFingerprint = new Map<string, SecurityFinding>();
+				for (const input of params.findings) {
+					const finding = buildFinding(input, options, completedAt);
+					if (!findingsByFingerprint.has(finding.fingerprint)) {
+						findingsByFingerprint.set(finding.fingerprint, finding);
+					}
+				}
+				const findings = [...findingsByFingerprint.values()];
+				const producer = createNativeSecurityProducer();
+				const provenance = createNativeSecurityProvenance({
+					createdAt: options.startedAt,
+					account: options.plan.account,
+					planFingerprint: options.plan.fingerprint,
+					workflowFingerprint: options.plan.workflowFingerprint,
+					sessionId: options.sessionId,
+				});
+				const scan: SecurityScan = {
+					documentType: "omp-security.scan",
+					schemaVersion: "1.0",
+					id: options.scanId,
+					projectKey: options.store.projectKey,
+					status: "completed",
+					createdAt: options.plan.createdAt,
+					startedAt: options.startedAt,
+					completedAt,
+					plan: options.plan,
+					target: options.plan.target,
+					producer,
+					provenance,
+					findingIds: findings.map(finding => finding.id),
+					coverage: buildCoverage(params, options.plan),
+					reportRef: "report.md",
+					sarifRef: "results.sarif",
+				};
+				const provisional: SecurityScanBundle = { scan, findings, report: params.report };
+				const bundle: SecurityScanBundle = { ...provisional, sarif: exportSecurityBundleToSarif(provisional) };
+				await options.store.putBundle(bundle);
+				persisted = true;
+				await options.onPublished?.(bundle);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Published security scan ${options.scanId} with ${findings.length} finding(s).`,
+						},
+					],
+					details: { scanId: options.scanId, findingCount: findings.length, status: "completed" },
+				};
+			} catch (error) {
+				if (!persisted) published = false;
+				throw error;
+			}
 		},
 	};
 }

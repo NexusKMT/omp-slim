@@ -1,9 +1,4 @@
-import type {
-	SecurityComparisonReport,
-	SecurityFinding,
-	SecurityFindingMatch,
-	SecurityScanBundle,
-} from "./contracts";
+import type { SecurityComparisonReport, SecurityFinding, SecurityFindingMatch, SecurityScanBundle } from "./contracts";
 
 export interface SecurityDifferentialFindingMatch {
 	referenceFindingId: string;
@@ -68,7 +63,9 @@ export function compareSecurityProducers(
 			continue;
 		}
 		const key = fallbackKey(referenceFinding);
-		const fallback = key ? candidateByFallback.get(key)?.find(finding => !usedCandidateIds.has(finding.id)) : undefined;
+		const fallback = key
+			? candidateByFallback.get(key)?.find(finding => !usedCandidateIds.has(finding.id))
+			: undefined;
 		if (!fallback) continue;
 		usedCandidateIds.add(fallback.id);
 		matches.push({

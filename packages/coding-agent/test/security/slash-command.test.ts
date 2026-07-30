@@ -73,6 +73,24 @@ describe("/security", () => {
 			status: "false_positive",
 			rationale: "fixture rationale",
 		});
+
+		await command(`disposition ${scanId} ${finding.id} open`);
+		expect((await store.getFinding(scanId, finding.id))?.disposition).toMatchObject({
+			status: "open",
+			actor: "operator",
+		});
+		expect((await store.getFinding(scanId, finding.id))?.disposition.rationale).toBeUndefined();
+	});
+
+	test("export preserves permissions on an existing destination directory", async () => {
+		if (process.platform === "win32") return;
+		await fs.chmod(repositoryRoot, 0o755);
+		await command(`import ${JSON.stringify(SARIF_FIXTURE)}`);
+		const [scan] = await (await SecurityStore.open(repositoryRoot)).listScans();
+		if (!scan) throw new Error("expected imported scan");
+		await command(`export ${scan.id} --output exported.sarif --format sarif`);
+		expect((await fs.stat(repositoryRoot)).mode & 0o777).toBe(0o755);
+		expect(JSON.parse(await Bun.file(path.join(repositoryRoot, "exported.sarif")).text())).toHaveProperty("version");
 	});
 
 	test("validate returns a static OMP-native residual prompt", async () => {

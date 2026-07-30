@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { IsoBackendKind } from "@oh-my-pi/pi-natives";
-import {
-	assertSecurityRemediationBaselineClean,
-	prepareSecurityRemediationWorkspace,
-} from "../../src/security";
+import { assertSecurityRemediationBaselineClean, prepareSecurityRemediationWorkspace } from "../../src/security";
 import type { IsolationContext } from "../../src/task/isolation-runner";
 import type { IsolationHandle, WorktreeBaseline } from "../../src/task/worktree";
 

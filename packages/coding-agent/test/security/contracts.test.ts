@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { SecurityFinding, SecurityScanBundle } from "../../src/security/contracts";
 import {
 	createSecurityFindingFingerprint,
 	createSecurityFindingId,
@@ -8,7 +9,6 @@ import {
 	parseSecurityScanBundle,
 	securitySha256,
 } from "../../src/security/contracts";
-import type { SecurityFinding, SecurityScanBundle } from "../../src/security/contracts";
 
 const LOCATION = { path: "src/archive.ts", startLine: 10, endLine: 12, role: "sink" } as const;
 
@@ -30,7 +30,9 @@ function fixtureFinding(): SecurityFinding {
 		severity: { level: "high", score: 8.1, scoringSystem: "CVSS:3.1" },
 		confidence: { level: "high", rationale: "Direct source trace" },
 		taxonomy: { category: "path-traversal", cwe: ["CWE-22"] },
-		occurrences: [{ id: createSecurityOccurrenceId(fingerprint, [LOCATION]), locations: [LOCATION], evidenceIds: [] }],
+		occurrences: [
+			{ id: createSecurityOccurrenceId(fingerprint, [LOCATION]), locations: [LOCATION], evidenceIds: [] },
+		],
 		evidence: [],
 		remediation: "Reject paths outside the extraction root.",
 		validation: { status: "unvalidated", evidenceIds: [] },
@@ -116,13 +118,15 @@ describe("security contracts", () => {
 		};
 		expect(parseSecurityScanBundle(bundle).findings).toHaveLength(1);
 		expect(() => parseSecurityScanBundle({ ...bundle, findings: [{ ...finding, scanId: "other" }] })).toThrow();
-		expect(() => parseSecurityScanBundle({ ...bundle, findings: [finding, finding] })).toThrow("duplicate finding ids");
+		expect(() => parseSecurityScanBundle({ ...bundle, findings: [finding, finding] })).toThrow(
+			"duplicate finding ids",
+		);
 		expect(() =>
 			parseSecurityScanBundle({ ...bundle, scan: { ...bundle.scan, findingIds: [finding.id, finding.id] } }),
 		).toThrow("duplicate finding references");
-		expect(() =>
-			parseSecurityScanBundle({ ...bundle, scan: { ...bundle.scan, findingIds: [] } }),
-		).toThrow("omits finding");
+		expect(() => parseSecurityScanBundle({ ...bundle, scan: { ...bundle.scan, findingIds: [] } })).toThrow(
+			"omits finding",
+		);
 		const missingEvidence = {
 			...finding,
 			occurrences: [{ ...finding.occurrences[0], evidenceIds: ["sece_missing"] }],

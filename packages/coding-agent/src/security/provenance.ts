@@ -1,5 +1,5 @@
-import { canonicalSecurityJson, securitySha256 } from "./contracts";
 import type { SecurityAccountRef, SecurityProducer, SecurityProvenance } from "./contracts";
+import { canonicalSecurityJson, securitySha256 } from "./contracts";
 
 export const CODEX_SECURITY_UPSTREAM = {
 	repository: "https://github.com/openai/codex-security",
@@ -27,23 +27,25 @@ export function createNativeSecurityProvenance(options: {
 	sessionId?: string;
 }): SecurityProvenance {
 	const producer = createNativeSecurityProducer();
+	const account: Record<string, unknown> = {
+		provider: options.account.provider,
+		credentialId: options.account.credentialId,
+	};
+	if (options.account.accountId !== undefined) account.accountId = options.account.accountId;
+	if (options.account.email !== undefined) account.email = options.account.email;
+	if (options.account.organizationId !== undefined) account.organizationId = options.account.organizationId;
+	if (options.account.organizationName !== undefined) account.organizationName = options.account.organizationName;
+	const metadata: Record<string, unknown> = {
+		planFingerprint: options.planFingerprint,
+		workflowFingerprint: options.workflowFingerprint,
+		account,
+	};
+	if (options.sessionId !== undefined) metadata.sessionId = options.sessionId;
 	return {
 		producer,
 		createdAt: options.createdAt,
 		upstream: { ...CODEX_SECURITY_UPSTREAM },
-		metadata: {
-			planFingerprint: options.planFingerprint,
-			workflowFingerprint: options.workflowFingerprint,
-			sessionId: options.sessionId,
-			account: {
-				provider: options.account.provider,
-				credentialId: options.account.credentialId,
-				accountId: options.account.accountId,
-				email: options.account.email,
-				organizationId: options.account.organizationId,
-				organizationName: options.account.organizationName,
-			},
-		},
+		metadata,
 	};
 }
 

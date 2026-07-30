@@ -1,4 +1,14 @@
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import type {
+	SecurityCoverage,
+	SecurityFinding,
+	SecurityLocation,
+	SecurityProducer,
+	SecurityProvenance,
+	SecurityScanBundle,
+	SecuritySeverityLevel,
+} from "../contracts";
 import {
 	createSecurityFindingFingerprint,
 	createSecurityFindingId,
@@ -7,14 +17,6 @@ import {
 	encodeSecurityProjectKey,
 	parseSecurityScanBundle,
 	securitySha256,
-} from "../contracts";
-import type {
-	SecurityCoverage,
-	SecurityFinding,
-	SecurityLocation,
-	SecurityProvenance,
-	SecurityScanBundle,
-	SecuritySeverityLevel,
 } from "../contracts";
 
 interface SarifRegion {
@@ -88,16 +90,18 @@ function normalizeSarifLocations(result: SarifResult): SecurityLocation[] {
 	for (const item of result.locations ?? []) {
 		const physical = item.physicalLocation;
 		const uri = physical?.artifactLocation?.uri;
-		const startLine = physical?.region?.startLine;
+		const region = physical?.region;
+		const startLine = region?.startLine;
 		if (!uri || !startLine || startLine < 1) continue;
-		locations.push({
+		const location: SecurityLocation = {
 			path: uri.replaceAll("\\", "/").replace(/^\.\//, ""),
 			startLine,
-			endLine: physical.region?.endLine,
-			startColumn: physical.region?.startColumn,
-			endColumn: physical.region?.endColumn,
 			role: "primary",
-		});
+		};
+		if (region.endLine !== undefined) location.endLine = region.endLine;
+		if (region.startColumn !== undefined) location.startColumn = region.startColumn;
+		if (region.endColumn !== undefined) location.endColumn = region.endColumn;
+		locations.push(location);
 	}
 	return locations.length > 0 ? locations : [{ path: "unknown", startLine: 1, role: "unknown" }];
 }
@@ -119,9 +123,9 @@ function tagsForRule(rule: SarifRule | undefined): string[] {
 export async function importSarif(input: unknown, options: SarifImportOptions): Promise<SecurityScanBundle> {
 	const sarif = input as SarifLog;
 	if (sarif.version !== "2.1.0" || !Array.isArray(sarif.runs)) {
-		throw new Error("Expected a SARIF 2.1.0 log with a runs array");
+		throw new Error("Expected SARIF 2.1.0 input");
 	}
-	const canonicalRoot = path.resolve(options.repositoryRoot);
+	const canonicalRoot = await fs.realpath(path.resolve(options.repositoryRoot));
 	const scanId = options.createScanId?.() ?? createSecurityScanId();
 	const createdAt = options.createdAt ?? new Date().toISOString();
 	const findings: SecurityFinding[] = [];
@@ -154,27 +158,22 @@ export async function importSarif(input: unknown, options: SarifImportOptions): 
 			});
 			const tags = tagsForRule(rule);
 			const provenance: SecurityProvenance = {
-				producer: { kind: "sarif-import", name: producerName, version: producerVersion },
+				producer: { kind: "sarif-import", name: producerName },
 				createdAt,
 				importedAt: new Date().toISOString(),
 				vendorFingerprints,
-				metadata: options.sourcePath ? { sourcePath: options.sourcePath } : undefined,
 			};
+			if (producerVersion !== undefined) provenance.producer.version = producerVersion;
+			if (options.sourcePath) provenance.metadata = { sourcePath: options.sourcePath };
 			const message = result.message?.text ?? result.message?.markdown ?? rule?.shortDescription?.text ?? ruleId;
-			findings.push({
+			const finding: SecurityFinding = {
 				id: createSecurityFindingId(fingerprint),
 				scanId,
 				fingerprint,
 				ruleId,
-				anchor: firstVendorFingerprint,
 				title: rule?.shortDescription?.text ?? rule?.name ?? ruleId,
 				summary: message,
-				severity: {
-					level: severityFromSarif(result),
-					score: Number.isFinite(Number(result.properties?.["security-severity"]))
-						? Number(result.properties?.["security-severity"])
-						: undefined,
-				},
+				severity: { level: severityFromSarif(result) },
 				confidence: { level: "medium", rationale: "Imported from a SARIF producer" },
 				taxonomy: {
 					category,
@@ -186,7 +185,11 @@ export async function importSarif(input: unknown, options: SarifImportOptions): 
 				validation: { status: "unvalidated", evidenceIds: [] },
 				disposition: { status: "open" },
 				provenance,
-			});
+			};
+			if (firstVendorFingerprint !== undefined) finding.anchor = firstVendorFingerprint;
+			const score = Number(result.properties?.["security-severity"]);
+			if (Number.isFinite(score)) finding.severity.score = score;
+			findings.push(finding);
 		}
 	}
 
@@ -200,13 +203,14 @@ export async function importSarif(input: unknown, options: SarifImportOptions): 
 		explicitExclusions: [],
 		deferred: [{ id: "sarif-coverage", reason: "SARIF does not define repository coverage" }],
 	};
-	const producer = { kind: "sarif-import" as const, name: producerName, version: producerVersion };
+	const producer: SecurityProducer = { kind: "sarif-import", name: producerName };
+	if (producerVersion !== undefined) producer.version = producerVersion;
 	const scanProvenance: SecurityProvenance = {
 		producer,
 		createdAt,
 		importedAt: new Date().toISOString(),
-		metadata: options.sourcePath ? { sourcePath: options.sourcePath } : undefined,
 	};
+	if (options.sourcePath) scanProvenance.metadata = { sourcePath: options.sourcePath };
 	return parseSecurityScanBundle({
 		scan: {
 			documentType: "omp-security.scan",

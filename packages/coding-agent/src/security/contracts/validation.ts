@@ -1,10 +1,5 @@
 import { type } from "arktype";
-import {
-	securityFindingSchema,
-	securityScanBundleSchema,
-	securityScanPlanSchema,
-	securityScanSchema,
-} from "./schemas";
+import { securityFindingSchema, securityScanBundleSchema, securityScanPlanSchema, securityScanSchema } from "./schemas";
 import type { SecurityFinding, SecurityScan, SecurityScanBundle, SecurityScanPlan } from "./types";
 
 function schemaError(label: string, errors: type.errors): Error {
@@ -43,7 +38,8 @@ export function parseSecurityScanBundle(value: unknown): SecurityScanBundle {
 		if (!findingIds.has(findingId)) throw new Error(`Security scan references missing finding: ${findingId}`);
 	}
 	for (const findingId of findingIds) {
-		if (!referencedFindingIds.has(findingId)) throw new Error(`Security scan omits finding from manifest: ${findingId}`);
+		if (!referencedFindingIds.has(findingId))
+			throw new Error(`Security scan omits finding from manifest: ${findingId}`);
 	}
 	for (const finding of bundle.findings) {
 		if (finding.scanId !== bundle.scan.id) {

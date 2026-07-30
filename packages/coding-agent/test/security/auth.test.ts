@@ -46,6 +46,16 @@ describe("exact security OAuth resolver", () => {
 			account: { provider: "openai-codex", credentialId: 42, accountId: "workspace-a" },
 		});
 		const exact = resolver(model()) as ApiKeyResolver;
-		await expect(exact({ lastChance: false, error: undefined })).rejects.toThrow("account mismatch");
+		let caught: unknown;
+		try {
+			await exact({ lastChance: false, error: undefined });
+		} catch (error) {
+			caught = error;
+		}
+		expect(caught).toBeInstanceOf(Error);
+		if (!(caught instanceof Error)) throw new Error("expected account mismatch");
+		expect(caught.message).toContain("account mismatch");
+		expect(caught.message).not.toContain("workspace-a");
+		expect(caught.message).not.toContain("undefined");
 	});
 });

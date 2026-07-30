@@ -1,4 +1,17 @@
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import type {
+	SecurityCoverage,
+	SecurityEvidence,
+	SecurityFinding,
+	SecurityLocation,
+	SecurityProducer,
+	SecurityProvenance,
+	SecurityScan,
+	SecurityScanBundle,
+	SecurityTarget,
+	SecurityUpstreamProvenance,
+} from "../contracts";
 import {
 	createSecurityEvidenceId,
 	createSecurityFindingFingerprint,
@@ -8,14 +21,6 @@ import {
 	encodeSecurityProjectKey,
 	parseSecurityScanBundle,
 	securitySha256,
-} from "../contracts";
-import type {
-	SecurityCoverage,
-	SecurityEvidence,
-	SecurityFinding,
-	SecurityLocation,
-	SecurityProvenance,
-	SecurityScanBundle,
 } from "../contracts";
 
 interface CodexManifest {
@@ -105,14 +110,17 @@ function stringArray(value: unknown): string[] {
 }
 
 function locationsForFinding(finding: CodexFinding): SecurityLocation[] {
-	const locations = (finding.locations ?? [])
-		.filter(location => typeof location.path === "string" && typeof location.startLine === "number")
-		.map(location => ({
-			path: location.path as string,
-			startLine: location.startLine as number,
-			endLine: location.endLine,
-			role: location.role,
-		}));
+	const locations: SecurityLocation[] = [];
+	for (const location of finding.locations ?? []) {
+		if (typeof location.path !== "string" || typeof location.startLine !== "number") continue;
+		const normalized: SecurityLocation = {
+			path: location.path,
+			startLine: location.startLine,
+		};
+		if (location.endLine !== undefined) normalized.endLine = location.endLine;
+		if (location.role !== undefined) normalized.role = location.role;
+		locations.push(normalized);
+	}
 	return locations.length > 0 ? locations : [{ path: "unknown", startLine: 1, role: "unknown" }];
 }
 
@@ -131,7 +139,7 @@ function mapCoverage(document: CodexCoverageDocument): SecurityCoverage {
 	)
 		? (document.inventoryStrategy as SecurityCoverage["inventoryStrategy"])
 		: "imported";
-	return {
+	const coverage: SecurityCoverage = {
 		mode,
 		completeness,
 		inventoryStrategy,
@@ -142,10 +150,11 @@ function mapCoverage(document: CodexCoverageDocument): SecurityCoverage {
 			? (document.explicitExclusions as SecurityCoverage["explicitExclusions"])
 			: [],
 		deferred: Array.isArray(document.deferred) ? (document.deferred as SecurityCoverage["deferred"]) : [],
-		openQuestions: Array.isArray(document.openQuestions)
-			? (document.openQuestions as SecurityCoverage["openQuestions"])
-			: undefined,
 	};
+	if (Array.isArray(document.openQuestions)) {
+		coverage.openQuestions = document.openQuestions as SecurityCoverage["openQuestions"];
+	}
+	return coverage;
 }
 
 export async function importCodexSecurityBundle(
@@ -172,25 +181,26 @@ export async function importCodexSecurityBundle(
 	) {
 		throw new Error("Codex Security bundle scan IDs do not agree");
 	}
-	const fixtureProvenance = await readJson<CodexFixtureProvenance>(path.join(root, "PROVENANCE.json")).catch(() => ({}));
+	const fixtureProvenance = await readJson<CodexFixtureProvenance>(path.join(root, "PROVENANCE.json")).catch(
+		(): CodexFixtureProvenance => ({}),
+	);
 	const scanId = options.createScanId?.() ?? createSecurityScanId();
 	const createdAt = options.createdAt ?? manifest.scan.startedAt ?? new Date().toISOString();
-	const canonicalRoot = path.resolve(options.repositoryRoot);
-	const producer = {
-		kind: "codex-security-bundle" as const,
+	const canonicalRoot = await fs.realpath(path.resolve(options.repositoryRoot));
+	const producer: SecurityProducer = {
+		kind: "codex-security-bundle",
 		name: manifest.scan.producer?.name || "codex-security",
-		version: manifest.scan.producer?.version,
 		vendor: "openai",
-		revision: fixtureProvenance.revision,
-		pluginVersion: fixtureProvenance.pluginVersion,
 	};
-	const upstream = {
-		repository: fixtureProvenance.repository,
-		revision: fixtureProvenance.revision,
-		packageVersion: fixtureProvenance.packageVersion,
-		pluginVersion: fixtureProvenance.pluginVersion,
-		archiveSha256: fixtureProvenance.archiveSha256,
-	};
+	if (manifest.scan.producer?.version !== undefined) producer.version = manifest.scan.producer.version;
+	if (fixtureProvenance.revision !== undefined) producer.revision = fixtureProvenance.revision;
+	if (fixtureProvenance.pluginVersion !== undefined) producer.pluginVersion = fixtureProvenance.pluginVersion;
+	const upstream: SecurityUpstreamProvenance = {};
+	if (fixtureProvenance.repository !== undefined) upstream.repository = fixtureProvenance.repository;
+	if (fixtureProvenance.revision !== undefined) upstream.revision = fixtureProvenance.revision;
+	if (fixtureProvenance.packageVersion !== undefined) upstream.packageVersion = fixtureProvenance.packageVersion;
+	if (fixtureProvenance.pluginVersion !== undefined) upstream.pluginVersion = fixtureProvenance.pluginVersion;
+	if (fixtureProvenance.archiveSha256 !== undefined) upstream.archiveSha256 = fixtureProvenance.archiveSha256;
 	const findings: SecurityFinding[] = [];
 	for (const source of findingsDocument.findings ?? []) {
 		const ruleId = source.ruleId || "codex-security.unknown";
@@ -202,22 +212,22 @@ export async function importCodexSecurityBundle(
 			anchor: source.identity?.anchor,
 			locations,
 		});
-		const evidence: SecurityEvidence[] = (source.codeEvidence ?? []).map((item, index) => ({
-			id: createSecurityEvidenceId(fingerprint, item.label || item.id || "code evidence", index),
-			kind: "code",
-			label: item.label || item.id || `Evidence ${index + 1}`,
-			explanation: item.explanation || "",
-			location:
-				typeof item.path === "string" && typeof item.startLine === "number"
-					? {
-						path: item.path,
-						startLine: item.startLine,
-						endLine: item.endLine,
-						role: item.role,
-					}
-					: undefined,
-			excerpt: item.code,
-		}));
+		const evidence: SecurityEvidence[] = (source.codeEvidence ?? []).map((item, index) => {
+			const entry: SecurityEvidence = {
+				id: createSecurityEvidenceId(fingerprint, item.label || item.id || "code evidence", index),
+				kind: "code",
+				label: item.label || item.id || `Evidence ${index + 1}`,
+				explanation: item.explanation || "",
+			};
+			if (typeof item.path === "string" && typeof item.startLine === "number") {
+				const location: SecurityLocation = { path: item.path, startLine: item.startLine };
+				if (item.endLine !== undefined) location.endLine = item.endLine;
+				if (item.role !== undefined) location.role = item.role;
+				entry.location = location;
+			}
+			if (item.code !== undefined) entry.excerpt = item.code;
+			return entry;
+		});
 		const provenance: SecurityProvenance = {
 			producer,
 			createdAt,
@@ -227,34 +237,30 @@ export async function importCodexSecurityBundle(
 				...(source.findingId ? { findingId: source.findingId } : {}),
 				...(source.occurrenceId ? { occurrenceId: source.occurrenceId } : {}),
 			},
-			vendorFingerprints: source.fingerprints?.primary
-				? { [source.fingerprints.algorithm || "codex-security/v1"]: source.fingerprints.primary }
-				: undefined,
 			upstream,
-			metadata: source.provenance,
 		};
-		findings.push({
+		if (source.fingerprints?.primary) {
+			provenance.vendorFingerprints = {
+				[source.fingerprints.algorithm || "codex-security/v1"]: source.fingerprints.primary,
+			};
+		}
+		if (source.provenance !== undefined) provenance.metadata = source.provenance;
+		const finding: SecurityFinding = {
 			id: createSecurityFindingId(fingerprint),
 			scanId,
 			fingerprint,
 			ruleId,
-			anchor: source.identity?.anchor,
 			title: source.title || ruleId,
 			summary: source.summary || "",
 			severity: {
 				level: ["critical", "high", "medium", "low", "informational"].includes(source.severity?.level ?? "")
 					? (source.severity?.level as SecurityFinding["severity"]["level"])
 					: "informational",
-				score: source.severity?.score,
-				scoringSystem: source.severity?.scoringSystem,
-				vector: source.severity?.vector,
-				rationale: source.severity?.rationale,
 			},
 			confidence: {
 				level: ["high", "medium", "low"].includes(source.confidence?.level ?? "")
 					? (source.confidence?.level as SecurityFinding["confidence"]["level"])
 					: "medium",
-				rationale: source.confidence?.rationale,
 			},
 			taxonomy: { category, cwe: stringArray(source.taxonomy?.cwe) },
 			occurrences: [
@@ -265,16 +271,23 @@ export async function importCodexSecurityBundle(
 				},
 			],
 			evidence,
-			remediation: source.remediation,
 			validation: {
 				status: source.validation ? "validated" : "unvalidated",
-				summary: source.validation ? JSON.stringify(source.validation) : undefined,
 				evidenceIds: [],
 			},
 			disposition: { status: "open" },
 			provenance,
-			extensions: source.extensions,
-		});
+		};
+		if (source.identity?.anchor !== undefined) finding.anchor = source.identity.anchor;
+		if (source.severity?.score !== undefined) finding.severity.score = source.severity.score;
+		if (source.severity?.scoringSystem !== undefined) finding.severity.scoringSystem = source.severity.scoringSystem;
+		if (source.severity?.vector !== undefined) finding.severity.vector = source.severity.vector;
+		if (source.severity?.rationale !== undefined) finding.severity.rationale = source.severity.rationale;
+		if (source.confidence?.rationale !== undefined) finding.confidence.rationale = source.confidence.rationale;
+		if (source.remediation !== undefined) finding.remediation = source.remediation;
+		if (source.validation) finding.validation.summary = JSON.stringify(source.validation);
+		if (source.extensions !== undefined) finding.extensions = source.extensions;
+		findings.push(finding);
 	}
 
 	const target = manifest.scan.target ?? {};
@@ -283,8 +296,12 @@ export async function importCodexSecurityBundle(
 		sourceKind === "git_diff" ? "ref_diff" : sourceKind === "git_worktree" ? "working_tree" : "imported";
 	const reportPath = path.join(root, "report.md");
 	const sarifPath = path.join(root, "exports", "results.sarif");
-	const report = await Bun.file(reportPath).text().catch(() => undefined);
-	const sarifText = await Bun.file(sarifPath).text().catch(() => undefined);
+	const report = await Bun.file(reportPath)
+		.text()
+		.catch(() => undefined);
+	const sarifText = await Bun.file(sarifPath)
+		.text()
+		.catch(() => undefined);
 	const scanProvenance: SecurityProvenance = {
 		producer,
 		createdAt,
@@ -293,39 +310,39 @@ export async function importCodexSecurityBundle(
 		upstream,
 		metadata: { bundleDirectory: root },
 	};
-	return parseSecurityScanBundle({
-		scan: {
-			documentType: "omp-security.scan",
-			schemaVersion: "1.0",
-			id: scanId,
-			projectKey: encodeSecurityProjectKey(canonicalRoot),
-			status: "completed",
-			createdAt,
-			startedAt: manifest.scan.startedAt,
-			completedAt: manifest.scan.completedAt ?? createdAt,
-			target: {
-				kind: targetKind,
-				repositoryRoot: canonicalRoot,
-				displayName: String(target.displayName ?? path.basename(canonicalRoot)),
-				revision: typeof target.revision === "string" ? target.revision : undefined,
-				baseRevision: typeof target.baseRevision === "string" ? target.baseRevision : undefined,
-				headRevision: typeof target.headRevision === "string" ? target.headRevision : undefined,
-				includePaths: stringArray(manifest.scan.scope?.includePaths),
-				excludePaths: stringArray(manifest.scan.scope?.excludePaths),
-				treeDigest:
-					typeof target.snapshotDigest === "string"
-						? target.snapshotDigest
-						: securitySha256(JSON.stringify({ manifest, findingsDocument, coverageDocument })),
-			},
-			producer,
-			provenance: scanProvenance,
-			findingIds: findings.map(finding => finding.id),
-			coverage: mapCoverage(coverageDocument),
-			reportRef: report ? "report.md" : undefined,
-			sarifRef: sarifText ? "results.sarif" : undefined,
-		},
-		findings,
-		report,
-		sarif: sarifText ? (JSON.parse(sarifText) as Record<string, unknown>) : undefined,
-	});
+	const canonicalTarget: SecurityTarget = {
+		kind: targetKind,
+		repositoryRoot: canonicalRoot,
+		displayName: String(target.displayName ?? path.basename(canonicalRoot)),
+		includePaths: stringArray(manifest.scan.scope?.includePaths),
+		excludePaths: stringArray(manifest.scan.scope?.excludePaths),
+		treeDigest:
+			typeof target.snapshotDigest === "string"
+				? target.snapshotDigest
+				: securitySha256(JSON.stringify({ manifest, findingsDocument, coverageDocument })),
+	};
+	if (typeof target.revision === "string") canonicalTarget.revision = target.revision;
+	if (typeof target.baseRevision === "string") canonicalTarget.baseRevision = target.baseRevision;
+	if (typeof target.headRevision === "string") canonicalTarget.headRevision = target.headRevision;
+	const scan: SecurityScan = {
+		documentType: "omp-security.scan",
+		schemaVersion: "1.0",
+		id: scanId,
+		projectKey: encodeSecurityProjectKey(canonicalRoot),
+		status: "completed",
+		createdAt,
+		completedAt: manifest.scan.completedAt ?? createdAt,
+		target: canonicalTarget,
+		producer,
+		provenance: scanProvenance,
+		findingIds: findings.map(finding => finding.id),
+		coverage: mapCoverage(coverageDocument),
+	};
+	if (manifest.scan.startedAt !== undefined) scan.startedAt = manifest.scan.startedAt;
+	if (report !== undefined) scan.reportRef = "report.md";
+	if (sarifText !== undefined) scan.sarifRef = "results.sarif";
+	const bundle: SecurityScanBundle = { scan, findings };
+	if (report !== undefined) bundle.report = report;
+	if (sarifText !== undefined) bundle.sarif = JSON.parse(sarifText) as Record<string, unknown>;
+	return parseSecurityScanBundle(bundle);
 }

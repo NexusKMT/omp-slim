@@ -6,9 +6,9 @@ import {
 	assertSecurityScanPlanFresh,
 	createSecurityScanPlan,
 	prepareSecurityOutputDirectory,
-	StaleSecurityScanPlanError,
 	type SecurityGitAdapter,
 	type SecurityTargetRequest,
+	StaleSecurityScanPlanError,
 } from "../../src/security";
 
 let temporaryRoot = "";
@@ -106,6 +106,42 @@ describe("security preflight", () => {
 		).rejects.toBeInstanceOf(StaleSecurityScanPlanError);
 	});
 
+	test("relative knowledge-base paths resolve from the repository", async () => {
+		await Bun.write(path.join(repositoryRoot, "policy.md"), "policy v1\n");
+		const created = await createSecurityScanPlan(
+			{
+				cwd: repositoryRoot,
+				target: { kind: "repository" },
+				knowledgeBasePaths: ["policy.md"],
+				outputRoot: stateRoot,
+				model: { provider: "openai-codex", modelId: "fixture" },
+				account: { provider: "openai-codex", credentialId: 17 },
+				config: {},
+				workflowFingerprint: "fixture",
+			},
+			adapter,
+		);
+		expect(created.knowledgeBases[0]?.path).toBe(await fs.realpath(path.join(repositoryRoot, "policy.md")));
+	});
+
+	test("symlink target mutation makes a plan stale", async () => {
+		if (process.platform === "win32") return;
+		const linkedPath = path.join(repositoryRoot, "src", "a.ts");
+		await fs.rm(linkedPath);
+		await fs.symlink("first-target.ts", linkedPath);
+		statusText = " M src/a.ts";
+		const created = await plan();
+		await fs.rm(linkedPath);
+		await fs.symlink("second-target.ts", linkedPath);
+		await expect(
+			assertSecurityScanPlanFresh(
+				created,
+				{ config: { security: { enabled: true } }, workflowFingerprint: "security-reviewer@fixture" },
+				adapter,
+			),
+		).rejects.toBeInstanceOf(StaleSecurityScanPlanError);
+	});
+
 	test("configuration mutation makes a plan stale", async () => {
 		const created = await plan();
 		await expect(
@@ -163,9 +199,11 @@ describe("security preflight", () => {
 			adapter,
 		);
 		const prepared = await prepareSecurityOutputDirectory(created.output, "fixture");
-		expect(prepared.archivedTo).toBe(`${stateRoot}.archive-fixture`);
-		expect(await fs.readdir(stateRoot)).toEqual([]);
-		expect(await Bun.file(path.join(`${stateRoot}.archive-fixture`, "existing.txt")).text()).toBe("existing");
+		expect(prepared.archivedTo).toBe(`${created.output.root}.archive-fixture`);
+		expect(await fs.readdir(created.output.root)).toEqual([]);
+		expect(await Bun.file(path.join(`${created.output.root}.archive-fixture`, "existing.txt")).text()).toBe(
+			"existing",
+		);
 	});
 
 	test("symlink output is rejected", async () => {
@@ -178,9 +216,7 @@ describe("security preflight", () => {
 
 	test("scope traversal is rejected", async () => {
 		for (const candidate of ["../outside", "src/../outside", "C:\\outside", "src\\..\\outside"]) {
-			await expect(plan({ kind: "scoped_path", includePaths: [candidate] })).rejects.toThrow(
-				"repository-relative",
-			);
+			await expect(plan({ kind: "scoped_path", includePaths: [candidate] })).rejects.toThrow("repository-relative");
 		}
 	});
 });

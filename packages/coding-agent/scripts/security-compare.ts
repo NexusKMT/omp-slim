@@ -6,8 +6,12 @@ async function readBundle(directory: string) {
 	const root = path.resolve(directory);
 	const scan = JSON.parse(await Bun.file(path.join(root, "scan.json")).text()) as unknown;
 	const findings = JSON.parse(await Bun.file(path.join(root, "findings.json")).text()) as unknown;
-	const report = await Bun.file(path.join(root, "report.md")).text().catch(() => undefined);
-	const sarifText = await Bun.file(path.join(root, "results.sarif")).text().catch(() => undefined);
+	const report = await Bun.file(path.join(root, "report.md"))
+		.text()
+		.catch(() => undefined);
+	const sarifText = await Bun.file(path.join(root, "results.sarif"))
+		.text()
+		.catch(() => undefined);
 	return parseSecurityScanBundle({
 		scan,
 		findings,

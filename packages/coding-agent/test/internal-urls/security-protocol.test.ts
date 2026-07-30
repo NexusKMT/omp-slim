@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { InternalUrlRouter, SecurityProtocolHandler } from "../../src/internal-urls";
+import { parseInternalUrl } from "../../src/internal-urls/parse";
 import { importCodexSecurityBundle, importSarifFile, SecurityStore } from "../../src/security";
 
 const FIXTURE_ROOT = path.join(import.meta.dir, "..", "fixtures", "security");
@@ -28,7 +29,12 @@ beforeEach(async () => {
 		}),
 	);
 	InternalUrlRouter.resetForTests();
-	InternalUrlRouter.instance().register(new SecurityProtocolHandler(async () => store, () => true));
+	InternalUrlRouter.instance().register(
+		new SecurityProtocolHandler(
+			async () => store,
+			() => true,
+		),
+	);
 });
 
 afterEach(async () => {
@@ -74,6 +80,35 @@ describe("security://", () => {
 		expect(completions?.some(item => item.value === "scans/secscan_sariffixture/findings")).toBeTrue();
 	});
 
+	test("session settings override the process-global feature gate", async () => {
+		const enabledForSession = new SecurityProtocolHandler(
+			async () => store,
+			() => false,
+		);
+		const resource = await enabledForSession.resolve(parseInternalUrl("security://scans"), {
+			cwd: repositoryRoot,
+			settings: { get: () => true },
+		});
+		expect(resource.content).toContain("Security scans");
+
+		const disabledForSession = new SecurityProtocolHandler(
+			async () => store,
+			() => true,
+		);
+		await expect(
+			disabledForSession.resolve(parseInternalUrl("security://scans"), {
+				cwd: repositoryRoot,
+				settings: { get: () => false },
+			}),
+		).rejects.toThrow("disabled");
+		expect(
+			await disabledForSession.complete("", {
+				cwd: repositoryRoot,
+				settings: { get: () => false },
+			}),
+		).toEqual([]);
+	});
+
 	test("rejects surplus path segments instead of aliasing a canonical resource", async () => {
 		await expect(
 			InternalUrlRouter.instance().resolve("security://scans/secscan_codexfixture/manifest/extra", {
@@ -85,10 +120,9 @@ describe("security://", () => {
 		expect(findingId).toBeDefined();
 		if (!findingId) return;
 		await expect(
-			InternalUrlRouter.instance().resolve(
-				`security://scans/secscan_sariffixture/findings/${findingId}/extra`,
-				{ cwd: repositoryRoot },
-			),
+			InternalUrlRouter.instance().resolve(`security://scans/secscan_sariffixture/findings/${findingId}/extra`, {
+				cwd: repositoryRoot,
+			}),
 		).rejects.toThrow("Unknown security resource");
 	});
 

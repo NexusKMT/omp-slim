@@ -10,27 +10,28 @@ import securityReviewerPrompt from "../prompts/agents/security-reviewer.md" with
 import securityCoordinatorPrompt from "../prompts/security/scan-coordinator.md" with { type: "text" };
 import securityRequestPrompt from "../prompts/security/scan-request.md" with { type: "text" };
 import securityPublishDescription from "../prompts/tools/security-publish.md" with { type: "text" };
+import { createAgentSession } from "../sdk";
 import type { AgentSession } from "../session/agent-session";
 import type { AuthStorage } from "../session/auth-storage";
 import { SessionManager } from "../session/session-manager";
-import { createAgentSession } from "../sdk";
 import { createExactSecurityOAuthResolver } from "./auth";
-import { createSecurityScanId } from "./contracts";
 import type {
 	SecurityAccountRef,
 	SecurityCoverage,
+	SecurityModelRef,
 	SecurityScan,
 	SecurityScanBundle,
 	SecurityScanPlan,
 	SecurityTargetKind,
 } from "./contracts";
+import { createSecurityScanId } from "./contracts";
+import type { SecurityGitAdapter, SecurityTargetRequest } from "./preflight";
 import {
 	assertSecurityScanPlanFresh,
 	createSecurityScanPlan,
 	DEFAULT_SECURITY_GIT_ADAPTER,
 	prepareSecurityOutputDirectory,
 } from "./preflight";
-import type { SecurityGitAdapter, SecurityTargetRequest } from "./preflight";
 import {
 	createNativeSecurityProducer,
 	createNativeSecurityProvenance,
@@ -213,7 +214,7 @@ function resolveAccount(
 	const selected =
 		requestedCredentialId !== undefined
 			? accounts.find(account => account.credentialId === requestedCredentialId)
-			: accounts.find(account => account.active) ?? (accounts.length === 1 ? accounts[0] : undefined);
+			: (accounts.find(account => account.active) ?? (accounts.length === 1 ? accounts[0] : undefined));
 	if (!selected) {
 		if (accounts.length === 0) {
 			throw new Error(`Security scans require a stored OAuth account for ${model.provider}`);
@@ -225,14 +226,15 @@ function resolveAccount(
 			`Multiple OAuth accounts are available for ${model.provider}; supply credentialId to pin one exact account`,
 		);
 	}
-	return {
+	const account: SecurityAccountRef = {
 		provider: model.provider,
 		credentialId: selected.credentialId,
-		accountId: selected.accountId,
-		email: selected.email,
-		organizationId: selected.orgId,
-		organizationName: selected.orgName,
 	};
+	if (selected.accountId !== undefined) account.accountId = selected.accountId;
+	if (selected.email !== undefined) account.email = selected.email;
+	if (selected.orgId !== undefined) account.organizationId = selected.orgId;
+	if (selected.orgName !== undefined) account.organizationName = selected.orgName;
+	return account;
 }
 
 async function createDefaultSecuritySession(input: SecurityScanSessionFactoryInput): Promise<AgentSession> {
@@ -280,17 +282,20 @@ async function createDefaultSecuritySession(input: SecurityScanSessionFactoryInp
 }
 
 function requestText(plan: SecurityScanPlan): string {
-	return prompt.render(securityRequestPrompt, {
-		repositoryRoot: plan.repositoryRoot,
-		targetKind: plan.target.kind,
-		revision: plan.target.revision ?? "",
-		baseRevision: plan.target.baseRevision ?? "",
-		headRevision: plan.target.headRevision ?? "",
-		includePaths: plan.target.includePaths.length > 0 ? plan.target.includePaths.join(", ") : "all in-scope paths",
-		excludePaths: plan.target.excludePaths.length > 0 ? plan.target.excludePaths.join(", ") : "none",
-		knowledgeBases: plan.knowledgeBases.length > 0 ? plan.knowledgeBases.map(item => item.path).join(", ") : "none",
-		planFingerprint: plan.fingerprint,
-	}).trim();
+	return prompt
+		.render(securityRequestPrompt, {
+			repositoryRoot: plan.repositoryRoot,
+			targetKind: plan.target.kind,
+			revision: plan.target.revision ?? "",
+			baseRevision: plan.target.baseRevision ?? "",
+			headRevision: plan.target.headRevision ?? "",
+			includePaths: plan.target.includePaths.length > 0 ? plan.target.includePaths.join(", ") : "all in-scope paths",
+			excludePaths: plan.target.excludePaths.length > 0 ? plan.target.excludePaths.join(", ") : "none",
+			knowledgeBases:
+				plan.knowledgeBases.length > 0 ? plan.knowledgeBases.map(item => item.path).join(", ") : "none",
+			planFingerprint: plan.fingerprint,
+		})
+		.trim();
 }
 
 function terminalText(snapshot: SecurityOperationSnapshot): string {
@@ -334,18 +339,23 @@ export class SecurityCoordinator {
 		const workRoot = path.join(store.projectDirectory, "work");
 		await fs.mkdir(workRoot, { recursive: true, mode: 0o700 });
 		if (process.platform !== "win32") await fs.chmod(workRoot, 0o700);
-		const plan = await createSecurityScanPlan({
-			cwd: this.#host.cwd,
-			target: input.target ?? { kind: "repository" },
-			knowledgeBasePaths: input.knowledgeBasePaths,
-			outputRoot: input.outputRoot ?? path.join(workRoot, Bun.randomUUIDv7()),
-			archiveExisting: input.archiveExisting,
-			model: { provider: model.provider, modelId: model.id, thinkingLevel: input.thinkingLevel },
-			account,
-			config: input.config ?? { securityEnabled: true },
-			workflowFingerprint: SECURITY_WORKFLOW_FINGERPRINT,
-			signal: input.signal,
-		}, this.#gitAdapter);
+		const modelRef: SecurityModelRef = { provider: model.provider, modelId: model.id };
+		if (input.thinkingLevel !== undefined) modelRef.thinkingLevel = input.thinkingLevel;
+		const plan = await createSecurityScanPlan(
+			{
+				cwd: this.#host.cwd,
+				target: input.target ?? { kind: "repository" },
+				knowledgeBasePaths: input.knowledgeBasePaths,
+				outputRoot: input.outputRoot ?? path.join(workRoot, Bun.randomUUIDv7()),
+				archiveExisting: input.archiveExisting,
+				model: modelRef,
+				account,
+				config: input.config ?? { securityEnabled: true },
+				workflowFingerprint: SECURITY_WORKFLOW_FINGERPRINT,
+				signal: input.signal,
+			},
+			this.#gitAdapter,
+		);
 		await store.putPlan(plan);
 		return plan;
 	}
@@ -459,7 +469,8 @@ export class SecurityCoordinator {
 				activeModel?.provider === plan.model.provider && activeModel.id === plan.model.modelId
 					? activeModel
 					: this.#host.modelRegistry.find(plan.model.provider, plan.model.modelId);
-			if (!model) throw new Error(`Security scan model is unavailable: ${plan.model.provider}/${plan.model.modelId}`);
+			if (!model)
+				throw new Error(`Security scan model is unavailable: ${plan.model.provider}/${plan.model.modelId}`);
 			const sessionsDirectory = path.join(store.projectDirectory, "sessions");
 			await fs.mkdir(sessionsDirectory, { recursive: true, mode: 0o700 });
 			const sessionManager = SessionManager.create(plan.repositoryRoot, sessionsDirectory);
@@ -480,7 +491,9 @@ export class SecurityCoordinator {
 				plan,
 				scanId: record.snapshot.scanId,
 				model,
-				publicationTool,
+				// Bare `ToolDefinition` erases the concrete schema; the sdk.ts
+				// `as unknown as CustomTool` precedent applies to the same variance wall.
+				publicationTool: publicationTool as unknown as ToolDefinition,
 				sessionManager,
 			});
 			record.snapshot.sessionFile = session.sessionFile;
@@ -521,7 +534,13 @@ export class SecurityCoordinator {
 			}
 			const message = error instanceof Error ? error.message : String(error);
 			const cancelled = signal.aborted;
-			const terminal = initialBundle(store, plan, record.snapshot.scanId, startedAt, cancelled ? "cancelled" : "failed");
+			const terminal = initialBundle(
+				store,
+				plan,
+				record.snapshot.scanId,
+				startedAt,
+				cancelled ? "cancelled" : "failed",
+			);
 			terminal.scan.completedAt = iso(this.#now);
 			terminal.scan.error = message;
 			await store.putBundle(terminal);

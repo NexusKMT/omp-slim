@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { compareSecurityLineage, compareSecurityProducers } from "../../src/security";
 import type { SecurityFinding, SecurityScanBundle } from "../../src/security";
+import { compareSecurityLineage, compareSecurityProducers } from "../../src/security";
 
 function finding(id: string, fingerprint: string, ruleId: string, path: string, startLine: number): SecurityFinding {
 	return {

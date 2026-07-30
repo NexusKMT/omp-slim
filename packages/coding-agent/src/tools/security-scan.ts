@@ -1,9 +1,8 @@
 import type { AgentTool, AgentToolResult, ToolTier } from "@oh-my-pi/pi-agent-core";
 import { type } from "arktype";
 import securityScanDescription from "../prompts/tools/security-scan.md" with { type: "text" };
-import { getSecurityCoordinator } from "../security/coordinator";
 import type { SecurityOperationSnapshot } from "../security/coordinator";
-import type { SecurityScanPlan } from "../security/contracts";
+import { getSecurityCoordinator } from "../security/coordinator";
 import type { SecurityTargetRequest } from "../security/preflight";
 import type { ToolSession } from "./index";
 import { ToolError } from "./tool-errors";
@@ -27,7 +26,7 @@ type SecurityScanParams = typeof securityScanSchema.infer;
 
 export interface SecurityScanToolDetails {
 	action: SecurityScanParams["action"];
-	plan?: SecurityScanPlan;
+	plan?: { id: string; fingerprint: string };
 	operation?: SecurityOperationSnapshot;
 	cancelled?: boolean;
 }
@@ -36,7 +35,7 @@ function targetFromParams(params: SecurityScanParams): SecurityTargetRequest {
 	const common = { includePaths: params.include_paths, excludePaths: params.exclude_paths };
 	switch (params.target_kind ?? "repository") {
 		case "scoped_path":
-			return { kind: "scoped_path", ...common };
+			return { kind: "scoped_path", includePaths: params.include_paths ?? [], excludePaths: params.exclude_paths };
 		case "working_tree":
 			return { kind: "working_tree", ...common };
 		case "ref_diff":
@@ -114,15 +113,15 @@ export class SecurityScanTool implements AgentTool<typeof securityScanSchema, Se
 						`Fingerprint: ${plan.fingerprint}.`,
 						`Start it with action=start and plan_id=${plan.id}.`,
 					].join(" "),
-					{ action: params.action, plan },
+					{ action: params.action, plan: { id: plan.id, fingerprint: plan.fingerprint } },
 				);
 			}
 			case "start": {
 				const operation = await coordinator.start({ planId: requireValue(params.plan_id, "plan_id") });
-				return textResult(
-					`Security scan ${operation.scanId} started as ${operation.operationId}.`,
-					{ action: params.action, operation },
-				);
+				return textResult(`Security scan ${operation.scanId} started as ${operation.operationId}.`, {
+					action: params.action,
+					operation,
+				});
 			}
 			case "status": {
 				const operationId = requireValue(params.operation_id, "operation_id");

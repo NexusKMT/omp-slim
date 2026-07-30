@@ -3317,7 +3317,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				void (async () => {
 					try {
 						const codexPrewarmApiKey = options.getApiKey
-							? await resolveApiKeyOnce(options.getApiKey(codexModel))
+							? // `getApiKey` returns a value-or-promise union; unwrap the promise,
+								// then resolve the result if it is itself an ApiKeyResolver.
+								await resolveApiKeyOnce(await options.getApiKey(codexModel))
 							: await modelRegistry.getApiKey(codexModel, providerSessionId);
 						if (!codexPrewarmApiKey) return;
 						await logger.time("prewarmOpenAICodexResponses", prewarmOpenAICodexResponses, codexModel, {

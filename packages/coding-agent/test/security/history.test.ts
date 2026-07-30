@@ -34,10 +34,7 @@ describe("security history and dispositions", () => {
 		});
 		await store.putBundle(before);
 		await store.putBundle(after);
-		expect((await store.listScans()).map(scan => scan.id)).toEqual([
-			"secscan_historyafter",
-			"secscan_historybefore",
-		]);
+		expect((await store.listScans()).map(scan => scan.id)).toEqual(["secscan_historyafter", "secscan_historybefore"]);
 		const comparison = await store.compare(before.scan.id, after.scan.id);
 		expect(comparison.unchanged).toBe(2);
 		expect(comparison.introduced).toBe(0);

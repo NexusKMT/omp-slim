@@ -10,9 +10,7 @@ export interface ExactSecurityOAuthOptions {
 
 function assertIdentityMatches(account: SecurityAccountRef, resolvedAccountId: string | undefined): void {
 	if (account.accountId !== undefined && account.accountId !== resolvedAccountId) {
-		throw new Error(
-			`Security scan account mismatch: expected workspace ${account.accountId}, resolved ${resolvedAccountId}`,
-		);
+		throw new Error("Security scan account mismatch: the pinned workspace identity changed during authentication");
 	}
 }
 
@@ -40,12 +38,10 @@ export function createExactSecurityOAuthResolver(
 				signal: context.signal,
 			});
 			if (!resolution) {
-				throw new Error(`Security scan OAuth credential ${account.credentialId} is unavailable`);
+				throw new Error("The pinned security OAuth credential is unavailable");
 			}
 			if (!resolution.ok) {
-				throw new Error(
-					`Security scan OAuth credential ${account.credentialId} could not be resolved: ${resolution.error}`,
-				);
+				throw new Error("The pinned security OAuth credential could not be resolved");
 			}
 			assertIdentityMatches(account, resolution.accountId);
 			return resolution.accessToken;

@@ -327,9 +327,7 @@ describe("structured subagent primitive", () => {
 		const mcpDisabledRun = await runStructuredSubagent(
 			request({ session: mcpDisabledSession, retainArtifacts: true }),
 		);
-		const restrictedRun = await runStructuredSubagent(
-			request({ session: restrictedSession, retainArtifacts: true }),
-		);
+		const restrictedRun = await runStructuredSubagent(request({ session: restrictedSession, retainArtifacts: true }));
 
 		expect(options[0]).toMatchObject({
 			enableMCP: false,

@@ -1,11 +1,11 @@
 import * as path from "node:path";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
-import { getDefault } from "../config/settings-schema";
 import { isSettingsInitialized, settings } from "../config/settings";
-import { createSecurityResource } from "../security/resource-output";
-import { SecurityStore } from "../security/store";
-import type { SecurityScanSummary } from "../security/store";
+import { getDefault } from "../config/settings-schema";
 import type { SecurityFinding } from "../security/contracts";
+import { createSecurityResource } from "../security/resource-output";
+import type { SecurityScanSummary } from "../security/store";
+import { SecurityStore } from "../security/store";
 import * as git from "../utils/git";
 import type { InternalResource, InternalUrl, ProtocolHandler, ResolveContext, UrlCompletion } from "./types";
 
@@ -17,6 +17,18 @@ export function isSecurityEnabled(): boolean {
 		return settings.get("security.enabled");
 	} catch {
 		return getDefault("security.enabled");
+	}
+}
+
+function securityEnabledFromContext(context?: ResolveContext): boolean | undefined {
+	if (!context?.settings || typeof context.settings !== "object") return undefined;
+	try {
+		const get = Reflect.get(context.settings, "get");
+		if (typeof get !== "function") return undefined;
+		const enabled = Reflect.apply(get, context.settings, ["security.enabled"]);
+		return typeof enabled === "boolean" ? enabled : undefined;
+	} catch {
+		return undefined;
 	}
 }
 
@@ -54,7 +66,9 @@ function formatFinding(finding: SecurityFinding): string {
 			location.role ? ` (${sanitizeText(location.role)})` : "",
 		].join("");
 	});
-	const evidence = finding.evidence.map(item => `- **${sanitizeText(item.label)}** — ${sanitizeText(item.explanation)}`);
+	const evidence = finding.evidence.map(
+		item => `- **${sanitizeText(item.label)}** — ${sanitizeText(item.explanation)}`,
+	);
 	return [
 		`# ${sanitizeText(finding.title)}`,
 		"",
@@ -105,21 +119,20 @@ export class SecurityProtocolHandler implements ProtocolHandler {
 	}
 
 	async resolve(url: InternalUrl, context?: ResolveContext): Promise<InternalResource> {
-		if (!this.#enabled()) throw new SecurityDisabledError();
+		if (!(securityEnabledFromContext(context) ?? this.#enabled())) throw new SecurityDisabledError();
 		const parts = splitSecurityPath(url);
 		const store = await this.#store(context);
 		if (parts.length === 0) {
 			return createSecurityResource({
 				url: "security://",
-				content:
-					[
-						"# Security",
-						"",
-						"OMP-owned software-security analysis resources. The namespace is read-only; use explicit security commands or tools for mutations.",
-						"",
-						"- `security://scans` — list scans",
-						"",
-					].join("\n"),
+				content: [
+					"# Security",
+					"",
+					"OMP-owned software-security analysis resources. The namespace is read-only; use explicit security commands or tools for mutations.",
+					"",
+					"- `security://scans` — list scans",
+					"",
+				].join("\n"),
 				contentType: "text/markdown",
 				isDirectory: true,
 			});
@@ -165,12 +178,11 @@ export class SecurityProtocolHandler implements ProtocolHandler {
 				});
 			case "findings": {
 				if (parts.length === 3) {
-					const listing = bundle.findings.map(
-						finding =>
-							[
-								`- \`${finding.id}\` **${finding.severity.level}** — ${sanitizeText(finding.title)}`,
-								` (\`${sanitizeText(finding.ruleId)}\`)`,
-							].join(""),
+					const listing = bundle.findings.map(finding =>
+						[
+							`- \`${finding.id}\` **${finding.severity.level}** — ${sanitizeText(finding.title)}`,
+							` (\`${sanitizeText(finding.ruleId)}\`)`,
+						].join(""),
 					);
 					return createSecurityResource({
 						url: `security://scans/${scanId}/findings`,
@@ -225,13 +237,17 @@ export class SecurityProtocolHandler implements ProtocolHandler {
 	}
 
 	async complete(query = "", context?: ResolveContext): Promise<UrlCompletion[]> {
-		if (!this.#enabled()) return [];
+		if (!(securityEnabledFromContext(context) ?? this.#enabled())) return [];
 		const store = await this.#store(context);
 		const scans = await store.listScans();
 		const candidates: UrlCompletion[] = [{ value: "scans", label: "Scans", description: "Stored security scans" }];
 		for (const scan of scans.slice(0, 50)) {
 			const prefix = `scans/${scan.id}`;
-			candidates.push({ value: prefix, label: scan.id, description: `${scan.status}; ${scan.findingCount} findings` });
+			candidates.push({
+				value: prefix,
+				label: scan.id,
+				description: `${scan.status}; ${scan.findingCount} findings`,
+			});
 			for (const child of ["manifest", "findings", "coverage", "report", "sarif", "provenance"]) {
 				candidates.push({ value: `${prefix}/${child}`, label: `${scan.id}/${child}` });
 			}
@@ -239,7 +255,7 @@ export class SecurityProtocolHandler implements ProtocolHandler {
 		const normalizedQuery = query.trim().toLowerCase();
 		if (!normalizedQuery) return candidates;
 		return candidates.filter(candidate =>
-			[candidate.value, candidate.label, candidate.description ?? ""].some(value =>
+			[candidate.value, candidate.label ?? "", candidate.description ?? ""].some(value =>
 				value.toLowerCase().includes(normalizedQuery),
 			),
 		);

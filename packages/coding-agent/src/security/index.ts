@@ -6,7 +6,7 @@ export * from "./importers";
 export * from "./preflight";
 export * from "./provenance";
 export * from "./publication";
+export * from "./remediation";
 export * from "./resource-output";
 export * from "./sarif";
 export * from "./store";
-export * from "./remediation";

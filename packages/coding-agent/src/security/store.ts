@@ -2,14 +2,6 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getSecurityProjectDir, isEnoent } from "@oh-my-pi/pi-utils";
 import { withFileLock } from "../config/file-lock";
-import {
-	encodeSecurityProjectKey,
-	parseSecurityFinding,
-	parseSecurityScan,
-	parseSecurityScanBundle,
-	parseSecurityScanPlan,
-	securitySha256,
-} from "./contracts";
 import { compareSecurityLineage } from "./comparison";
 import type {
 	SecurityComparisonReport,
@@ -18,6 +10,14 @@ import type {
 	SecurityScan,
 	SecurityScanBundle,
 	SecurityScanPlan,
+} from "./contracts";
+import {
+	encodeSecurityProjectKey,
+	parseSecurityFinding,
+	parseSecurityScan,
+	parseSecurityScanBundle,
+	parseSecurityScanPlan,
+	securitySha256,
 } from "./contracts";
 
 const STORE_SCHEMA_VERSION = 1;
@@ -69,8 +69,20 @@ async function ensurePrivateDirectory(directory: string): Promise<void> {
 	if (process.platform !== "win32") await fs.chmod(directory, PRIVATE_DIRECTORY_MODE);
 }
 
-export async function writeSecurityFileAtomic(filePath: string, content: string): Promise<void> {
-	await ensurePrivateDirectory(path.dirname(filePath));
+export interface SecurityFileWriteOptions {
+	hardenParent?: boolean;
+}
+
+export async function writeSecurityFileAtomic(
+	filePath: string,
+	content: string,
+	options: SecurityFileWriteOptions = {},
+): Promise<void> {
+	if (options.hardenParent ?? true) {
+		await ensurePrivateDirectory(path.dirname(filePath));
+	} else {
+		await fs.mkdir(path.dirname(filePath), { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+	}
 	const temporaryPath = `${filePath}.${process.pid}.${Bun.randomUUIDv7()}.tmp`;
 	try {
 		await fs.writeFile(temporaryPath, content, { encoding: "utf-8", mode: PRIVATE_FILE_MODE, flag: "wx" });
@@ -274,8 +286,10 @@ export class SecurityStore {
 		const findings = rawFindings.map(parseSecurityFinding);
 		const report = await readOptionalText(path.join(this.#scanDirectory(scanId), "report.md"));
 		const sarifText = await readOptionalText(path.join(this.#scanDirectory(scanId), "results.sarif"));
-		const sarif = sarifText ? (JSON.parse(sarifText) as Record<string, unknown>) : undefined;
-		return parseSecurityScanBundle({ scan, findings, report, sarif });
+		const bundle: SecurityScanBundle = { scan, findings };
+		if (report !== undefined) bundle.report = report;
+		if (sarifText !== undefined) bundle.sarif = JSON.parse(sarifText) as Record<string, unknown>;
+		return parseSecurityScanBundle(bundle);
 	}
 
 	async getBundle(scanId: string): Promise<SecurityScanBundle | null> {
@@ -316,7 +330,11 @@ export class SecurityStore {
 			if (!bundle) throw new Error(`Unknown security scan: ${scanId}`);
 			const index = bundle.findings.findIndex(finding => finding.id === findingId);
 			if (index < 0) throw new Error(`Unknown security finding: ${findingId}`);
-			const updated = { ...bundle.findings[index], disposition };
+			const canonicalDisposition: SecurityDisposition = { status: disposition.status };
+			if (disposition.rationale !== undefined) canonicalDisposition.rationale = disposition.rationale;
+			if (disposition.updatedAt !== undefined) canonicalDisposition.updatedAt = disposition.updatedAt;
+			if (disposition.actor !== undefined) canonicalDisposition.actor = disposition.actor;
+			const updated = { ...bundle.findings[index], disposition: canonicalDisposition };
 			bundle.findings[index] = parseSecurityFinding(updated);
 			await this.#putBundleUnlocked(bundle);
 			return bundle.findings[index];

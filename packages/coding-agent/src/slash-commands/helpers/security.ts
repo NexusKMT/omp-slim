@@ -1,15 +1,15 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { prompt } from "@oh-my-pi/pi-utils";
-import { getSecurityCoordinator } from "../../security/coordinator";
-import type { SecurityPreflightInput } from "../../security/coordinator";
+import { parseInternalUrl } from "../../internal-urls/parse";
+import { SecurityProtocolHandler } from "../../internal-urls/security-protocol";
+import validationRequestPrompt from "../../prompts/security/validate-request.md" with { type: "text" };
 import type { SecurityDispositionStatus } from "../../security/contracts";
+import type { SecurityPreflightInput } from "../../security/coordinator";
+import { getSecurityCoordinator } from "../../security/coordinator";
 import { importCodexSecurityBundle, importSarifFile } from "../../security/importers";
 import type { SecurityTargetRequest } from "../../security/preflight";
-import { SecurityProtocolHandler } from "../../internal-urls/security-protocol";
-import { parseInternalUrl } from "../../internal-urls/parse";
 import { SecurityStore, writeSecurityFileAtomic } from "../../security/store";
-import validationRequestPrompt from "../../prompts/security/validate-request.md" with { type: "text" };
 import { parseCommandArgs } from "../../utils/command-args";
 import type { ParsedSlashCommand, SlashCommandResult, SlashCommandRuntime } from "../types";
 import { commandConsumed, errorMessage, parseSubcommand, usage } from "./parse";
@@ -198,7 +198,7 @@ async function exportResults(runtime: SlashCommandRuntime, rest: string): Promis
 		content = `${JSON.stringify(bundle, null, 2)}\n`;
 	}
 	const absolute = path.resolve(runtime.cwd, outputPath);
-	await writeSecurityFileAtomic(absolute, content);
+	await writeSecurityFileAtomic(absolute, content, { hardenParent: false });
 	await runtime.output(`Exported security scan ${scanId} to ${absolute}.`);
 }
 
@@ -269,7 +269,9 @@ export async function handleSecurityCommand(
 				await runtime.output(
 					scans.length === 0
 						? "No security scans are stored for this project."
-						: scans.map(scan => `${scan.id} ${scan.status} ${scan.findingCount} finding(s) ${scan.producer.name}`).join("\n"),
+						: scans
+								.map(scan => `${scan.id} ${scan.status} ${scan.findingCount} finding(s) ${scan.producer.name}`)
+								.join("\n"),
 				);
 				return commandConsumed();
 			}

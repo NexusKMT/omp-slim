@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { createSecurityPublicationTool, SecurityStore } from "../../src/security";
 import type { SecurityScanPlan } from "../../src/security";
+import { createSecurityPublicationTool, SecurityStore } from "../../src/security";
 
 let temporaryRoot = "";
 let repositoryRoot = "";
@@ -54,22 +54,61 @@ describe("security publication", () => {
 				startedAt: "2026-07-29T00:00:00.000Z",
 			});
 			await expect(
-				tool.execute("tool-call", {
-					findings: [
-						{
-							rule_id: "fixture.rule",
-							title: "Fixture finding",
-							summary: "Fixture summary",
-							severity: "high",
-							confidence: "high",
-							category: "fixture",
-							locations: [{ path: invalidPath, start_line: 1 }],
-						},
-					],
-					coverage: { completeness: "partial" },
-					report: "# Fixture\n",
-				}),
+				tool.execute(
+					"tool-call",
+					{
+						findings: [
+							{
+								rule_id: "fixture.rule",
+								title: "Fixture finding",
+								summary: "Fixture summary",
+								severity: "high",
+								confidence: "high",
+								category: "fixture",
+								locations: [{ path: invalidPath, start_line: 1 }],
+							},
+						],
+						coverage: { completeness: "partial" },
+						report: "# Fixture\n",
+					},
+					undefined,
+					undefined,
+					undefined as never,
+				),
 			).rejects.toThrow("repository-relative");
 		}
+	});
+
+	test("allows only one publication while persistence is in flight", async () => {
+		const putStarted = Promise.withResolvers<void>();
+		const releasePut = Promise.withResolvers<void>();
+		let putCalls = 0;
+		const delayedStore = {
+			projectKey: store.projectKey,
+			putBundle: async () => {
+				putCalls++;
+				putStarted.resolve();
+				await releasePut.promise;
+			},
+		} as unknown as SecurityStore;
+		const tool = createSecurityPublicationTool({
+			plan,
+			scanId: "secscan_fixture",
+			store: delayedStore,
+			startedAt: "2026-07-29T00:00:00.000Z",
+		});
+		const params = {
+			findings: [],
+			coverage: { completeness: "complete" as const },
+			report: "# Fixture\n",
+		};
+		const first = tool.execute("first", params, undefined, undefined, undefined as never);
+		await putStarted.promise;
+		await expect(tool.execute("second", params, undefined, undefined, undefined as never)).rejects.toThrow(
+			"already been published",
+		);
+		expect(putCalls).toBe(1);
+		releasePut.resolve();
+		await first;
 	});
 });

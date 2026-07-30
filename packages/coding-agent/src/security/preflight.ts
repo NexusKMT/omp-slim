@@ -1,11 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import {
-	canonicalSecurityJson,
-	createSecurityPlanId,
-	parseSecurityScanPlan,
-	securitySha256,
-} from "./contracts";
+import * as git from "../utils/git";
 import type {
 	SecurityAccountRef,
 	SecurityKnowledgeBaseRef,
@@ -14,7 +9,7 @@ import type {
 	SecurityScanPlan,
 	SecurityTarget,
 } from "./contracts";
-import * as git from "../utils/git";
+import { canonicalSecurityJson, createSecurityPlanId, parseSecurityScanPlan, securitySha256 } from "./contracts";
 
 export type SecurityTargetRequest =
 	| { kind: "repository"; includePaths?: string[]; excludePaths?: string[] }
@@ -63,7 +58,10 @@ export const DEFAULT_SECURITY_GIT_ADAPTER: SecurityGitAdapter = {
 };
 
 export class StaleSecurityScanPlanError extends Error {
-	constructor(readonly expected: string, readonly actual: string) {
+	constructor(
+		readonly expected: string,
+		readonly actual: string,
+	) {
 		super(`Security scan plan is stale: expected ${expected}, got ${actual}. Run security preflight again.`);
 		this.name = "StaleSecurityScanPlanError";
 	}
@@ -71,10 +69,6 @@ export class StaleSecurityScanPlanError extends Error {
 
 function pathIsWithin(candidate: string, root: string): boolean {
 	return candidate === root || candidate.startsWith(`${root}${path.sep}`);
-}
-
-async function canonicalExistingPath(input: string): Promise<string> {
-	return fs.realpath(path.resolve(input));
 }
 
 async function hashFile(filePath: string): Promise<{ sha256: string; size: number }> {
@@ -148,11 +142,17 @@ async function digestWorkingTree(
 		const absolutePath = path.resolve(repositoryRoot, relativePath);
 		if (!pathIsWithin(absolutePath, repositoryRoot)) throw new Error(`Git path escapes repository: ${relativePath}`);
 		const stats = await fs.lstat(absolutePath).catch(() => null);
-		if (!stats?.isFile() || stats.isSymbolicLink()) continue;
-		const bytes = new Uint8Array(await Bun.file(absolutePath).arrayBuffer());
+		if (!stats) continue;
 		hasher.update(relativePath);
 		hasher.update("\0");
-		hasher.update(bytes);
+		if (stats.isSymbolicLink()) {
+			hasher.update("symlink\0");
+			hasher.update(await fs.readlink(absolutePath));
+		} else if (stats.isFile()) {
+			hasher.update(new Uint8Array(await Bun.file(absolutePath).arrayBuffer()));
+		} else {
+			continue;
+		}
 		hasher.update("\0");
 	}
 	const head = (await adapter.headSha(repositoryRoot, signal)) ?? "unborn";
@@ -194,21 +194,25 @@ async function normalizeTarget(
 		};
 	}
 	const revision = await adapter.headSha(repositoryRoot, signal);
-	return {
+	const target: SecurityTarget = {
 		kind: request.kind,
 		repositoryRoot,
 		displayName,
-		revision: revision ?? undefined,
 		includePaths,
 		excludePaths,
 		treeDigest: await digestWorkingTree(repositoryRoot, includePaths, excludePaths, adapter, signal),
 	};
+	if (revision !== null) target.revision = revision;
+	return target;
 }
 
-async function normalizeKnowledgeBases(paths: readonly string[] | undefined): Promise<SecurityKnowledgeBaseRef[]> {
+async function normalizeKnowledgeBases(
+	paths: readonly string[] | undefined,
+	baseDirectory: string,
+): Promise<SecurityKnowledgeBaseRef[]> {
 	const results: SecurityKnowledgeBaseRef[] = [];
 	for (const input of paths ?? []) {
-		const canonical = await canonicalExistingPath(input);
+		const canonical = await fs.realpath(path.resolve(baseDirectory, input));
 		const stats = await fs.stat(canonical);
 		if (!stats.isFile()) throw new Error(`Security knowledge base is not a file: ${input}`);
 		const digest = await hashFile(canonical);
@@ -248,7 +252,6 @@ async function normalizeOutput(
 	if (process.platform !== "win32") await fs.chmod(canonicalCandidate, 0o700);
 	return { root: canonicalCandidate, archiveExisting, existingState };
 }
-
 
 export interface PreparedSecurityOutput {
 	root: string;
@@ -299,15 +302,28 @@ async function buildPlanMaterial(
 	if (!repositoryRoot) throw new Error(`Security scans require a Git repository: ${request.cwd}`);
 	const canonicalRoot = await fs.realpath(repositoryRoot);
 	const target = await normalizeTarget(canonicalRoot, request.target, adapter, request.signal);
-	const knowledgeBases = await normalizeKnowledgeBases(request.knowledgeBasePaths);
+	const knowledgeBases = await normalizeKnowledgeBases(request.knowledgeBasePaths, canonicalRoot);
 	const output = await normalizeOutput(canonicalRoot, request.outputRoot, request.archiveExisting ?? false);
+	const model: SecurityModelRef = {
+		provider: request.model.provider,
+		modelId: request.model.modelId,
+	};
+	if (request.model.thinkingLevel !== undefined) model.thinkingLevel = request.model.thinkingLevel;
+	const account: SecurityAccountRef = {
+		provider: request.account.provider,
+		credentialId: request.account.credentialId,
+	};
+	if (request.account.accountId !== undefined) account.accountId = request.account.accountId;
+	if (request.account.email !== undefined) account.email = request.account.email;
+	if (request.account.organizationId !== undefined) account.organizationId = request.account.organizationId;
+	if (request.account.organizationName !== undefined) account.organizationName = request.account.organizationName;
 	return {
 		repositoryRoot: canonicalRoot,
 		target,
 		knowledgeBases,
 		output,
-		model: request.model,
-		account: request.account,
+		model,
+		account,
 		configFingerprint: `omp-security-config/v1:sha256:${securitySha256(canonicalSecurityJson(request.config))}`,
 		workflowFingerprint: request.workflowFingerprint,
 	};
@@ -342,7 +358,11 @@ function requestFromPlan(plan: SecurityScanPlan, freshness: SecurityPlanFreshnes
 			: plan.target.kind === "scoped_path"
 				? { kind: "scoped_path", includePaths: plan.target.includePaths, excludePaths: plan.target.excludePaths }
 				: plan.target.kind === "working_tree"
-					? { kind: "working_tree", includePaths: plan.target.includePaths, excludePaths: plan.target.excludePaths }
+					? {
+							kind: "working_tree",
+							includePaths: plan.target.includePaths,
+							excludePaths: plan.target.excludePaths,
+						}
 					: { kind: "repository", includePaths: plan.target.includePaths, excludePaths: plan.target.excludePaths };
 	return {
 		cwd: plan.repositoryRoot,
