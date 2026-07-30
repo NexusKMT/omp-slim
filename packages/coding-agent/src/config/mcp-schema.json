@@ -118,6 +118,11 @@
           "minimum": 0,
           "description": "MCP request timeout in milliseconds. Set to 0 to disable client-side MCP timeouts."
         },
+        "requestIdFormat": {
+          "type": "string",
+          "enum": ["string", "number"],
+          "description": "Encoding for outgoing JSON-RPC request ids (default: \"string\"). Use \"number\" for servers that decode `id` as an integer only, such as Apple's `xcrun mcpbridge`, which never answers a string id."
+        },
         "auth": {
           "$ref": "#/$defs/authConfig"
         },

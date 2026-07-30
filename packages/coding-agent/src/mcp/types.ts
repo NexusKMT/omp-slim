@@ -59,12 +59,22 @@ export interface MCPAuthConfig {
 	resource?: string;
 }
 
+/** Encoding used for outgoing JSON-RPC request ids. */
+export type MCPRequestIdFormat = "string" | "number";
+
 /** Base server config with shared options */
 interface MCPServerConfigBase {
 	/** Whether this server is enabled (default: true) */
 	enabled?: boolean;
 	/** MCP request timeout in milliseconds (default: 30000, 0 to disable) */
 	timeout?: number;
+	/**
+	 * Encoding for outgoing JSON-RPC request ids (default: `"string"`).
+	 *
+	 * Set `"number"` for servers whose decoder accepts integers only, such as
+	 * Apple's `xcrun mcpbridge`. See `createRequestIdAllocator`.
+	 */
+	requestIdFormat?: MCPRequestIdFormat;
 	/** Authentication configuration (optional) */
 	auth?: MCPAuthConfig;
 	/** OAuth configuration for servers requiring explicit client credentials */
