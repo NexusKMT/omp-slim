@@ -129,7 +129,8 @@ export function shouldStageNodeModulesAddon({ platform, isCompiledBinary, native
 	// Check both separators independently of the host's `path.sep`: this helper
 	// is shared by the loader (running on Windows with `\`) and the test suite
 	// (typically running on POSIX hosts when CI executes the regression test).
-	return nativeDir.includes("\\node_modules\\") || nativeDir.includes("/node_modules/");
+	const normalizedNativeDir = nativeDir.toLowerCase();
+	return normalizedNativeDir.includes("\\node_modules\\") || normalizedNativeDir.includes("/node_modules/");
 }
 
 /**
@@ -699,17 +700,18 @@ function buildHelpMessage(ctx) {
  * helpers from this file doesn't trigger AVX2 detection or filesystem probes.
  */
 /**
- * @param {{ nativeDir?: string; isCompiledBinary?: boolean; leafPackageDir?: string | null }} [overrides]
+ * @param {{ nativeDir?: string; platform?: NodeJS.Platform | string; isCompiledBinary?: boolean; leafPackageDir?: string | null }} [overrides]
  */
 export function initLoaderContext(overrides = {}) {
-	const platformTag = `${process.platform}-${process.arch}`;
+	const platform = overrides.platform ?? process.platform;
+	const platformTag = `${platform}-${process.arch}`;
 	const packageVersion = packageJson.version;
 	const nativeDir = overrides.nativeDir ?? path.join(import.meta.dir, "..", "native");
 	const execDir = path.dirname(process.execPath);
 	const nativesDir = getNativesDir();
 	const versionedDir = path.join(nativesDir, packageVersion);
 	const userDataDir =
-		process.platform === "win32"
+		platform === "win32"
 			? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "omp")
 			: path.join(os.homedir(), ".local", "bin");
 
@@ -720,7 +722,7 @@ export function initLoaderContext(overrides = {}) {
 			env: process.env,
 			importMetaUrl: import.meta.url,
 		});
-	const normalizedNativeDir = nativeDir.toLowerCase();
+	const normalizedNativeDir = platform === "win32" ? nativeDir.toLowerCase() : nativeDir;
 	const isWorkspaceLoad =
 		!isCompiledBinary &&
 		!normalizedNativeDir.includes("\\node_modules\\") &&
@@ -732,9 +734,9 @@ export function initLoaderContext(overrides = {}) {
 				? resolveLeafPackageDir(platformTag)
 				: overrides.leafPackageDir;
 	const stageFromNodeModules = shouldStageNodeModulesAddon({
-		platform: process.platform,
+		platform,
 		isCompiledBinary,
-		nativeDir,
+		nativeDir: normalizedNativeDir,
 	});
 
 	const selectedVariant = resolveCpuVariant(getVariantOverride());

@@ -57,6 +57,7 @@ export function resolveLoaderCandidates(input: ResolveLoaderCandidatesInput): st
 
 export interface InitLoaderContextOverrides {
 	nativeDir?: string;
+	platform?: NodeJS.Platform | string;
 	isCompiledBinary?: boolean;
 	leafPackageDir?: string | null;
 }
