@@ -215,7 +215,10 @@ describe("fetchCursorUsableModels", () => {
 		const response = create(GetUsableModelsResponseSchema, {
 			models: [
 				create(ModelDetailsSchema, { modelId: "kimi-k3-max", displayName: "Kimi K3" }),
+				create(ModelDetailsSchema, { modelId: "moonshotai/kimi-k3", displayName: "Kimi K3" }),
 				create(ModelDetailsSchema, { modelId: "glm-5.2-max", displayName: "GLM 5.2 Max" }),
+				create(ModelDetailsSchema, { modelId: "glm-5.10-high", displayName: "GLM 5.10 High" }),
+				create(ModelDetailsSchema, { modelId: "glm-6-max", displayName: "GLM 6 Max" }),
 			],
 		});
 		const nativeBaseUrl = await startCursorDiscoveryServer(toBinary(GetUsableModelsResponseSchema, response));
@@ -223,8 +226,28 @@ describe("fetchCursorUsableModels", () => {
 		const models = await fetchCursorUsableModels({ apiKey: "test-token", baseUrl: nativeBaseUrl, timeoutMs: 1_000 });
 
 		expect(models).toEqual([
+			expect.objectContaining({ id: "glm-5.10-high", contextWindow: 1_000_000 }),
 			expect.objectContaining({ id: "glm-5.2-max", contextWindow: 1_000_000 }),
+			expect.objectContaining({ id: "glm-6-max", contextWindow: 1_000_000 }),
 			expect.objectContaining({ id: "kimi-k3-max", contextWindow: 1_000_000 }),
+			expect.objectContaining({ id: "moonshotai/kimi-k3", contextWindow: 1_000_000 }),
+		]);
+	});
+
+	it("keeps the default window below the GLM 5.2 floor and outside the coding variants", async () => {
+		const response = create(GetUsableModelsResponseSchema, {
+			models: [
+				create(ModelDetailsSchema, { modelId: "glm-5.1-high", displayName: "GLM 5.1 High" }),
+				create(ModelDetailsSchema, { modelId: "glm-5.2-flash", displayName: "GLM 5.2 Flash" }),
+			],
+		});
+		const nativeBaseUrl = await startCursorDiscoveryServer(toBinary(GetUsableModelsResponseSchema, response));
+
+		const models = await fetchCursorUsableModels({ apiKey: "test-token", baseUrl: nativeBaseUrl, timeoutMs: 1_000 });
+
+		expect(models).toEqual([
+			expect.objectContaining({ id: "glm-5.1-high", contextWindow: 200_000 }),
+			expect.objectContaining({ id: "glm-5.2-flash", contextWindow: 200_000 }),
 		]);
 	});
 
