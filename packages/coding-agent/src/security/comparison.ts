@@ -3,7 +3,7 @@ import type { SecurityComparisonReport, SecurityFinding, SecurityFindingMatch, S
 export interface SecurityDifferentialFindingMatch {
 	referenceFindingId: string;
 	candidateFindingId: string;
-	basis: "fingerprint" | "rule_location";
+	basis: "fingerprint" | "rule_location" | "taxonomy_location";
 }
 export interface SecurityDifferentialFindingSummary {
 	findingId: string;
@@ -58,6 +58,39 @@ function fallbackKey(finding: SecurityFinding): string | undefined {
 	return `${finding.ruleId.trim().toLowerCase()}\u0000${location}`;
 }
 
+function normalizedPath(value: string): string {
+	return value.replaceAll("\\", "/").replace(/^\.\//, "").toLowerCase();
+}
+
+function findingLocations(finding: SecurityFinding) {
+	return finding.occurrences.flatMap(occurrence => occurrence.locations);
+}
+
+function taxonomyLocationMatch(reference: SecurityFinding, candidate: SecurityFinding): boolean {
+	const referenceCwes = new Set(reference.taxonomy.cwe.map(value => value.trim().toUpperCase()));
+	if (
+		referenceCwes.size === 0 ||
+		!candidate.taxonomy.cwe.some(value => referenceCwes.has(value.trim().toUpperCase()))
+	) {
+		return false;
+	}
+	for (const referenceLocation of findingLocations(reference)) {
+		for (const candidateLocation of findingLocations(candidate)) {
+			if (normalizedPath(referenceLocation.path) !== normalizedPath(candidateLocation.path)) continue;
+			const referenceEnd = referenceLocation.endLine ?? referenceLocation.startLine;
+			const candidateEnd = candidateLocation.endLine ?? candidateLocation.startLine;
+			if (
+				Math.max(referenceLocation.startLine, candidateLocation.startLine) <=
+					Math.min(referenceEnd, candidateEnd) ||
+				Math.abs(referenceLocation.startLine - candidateLocation.startLine) <= 3
+			) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 function findingSummary(finding: SecurityFinding): SecurityDifferentialFindingSummary {
 	const location = finding.occurrences.flatMap(occurrence => occurrence.locations)[0];
 	return {
@@ -104,31 +137,46 @@ export function compareSecurityProducers(
 		candidateByFallback.set(key, bucket);
 	}
 	const usedCandidateIds = new Set<string>();
+	const matchedReferenceIds = new Set<string>();
 	const matches: SecurityDifferentialFindingMatch[] = [];
+	const addMatch = (
+		referenceFinding: SecurityFinding,
+		candidateFinding: SecurityFinding,
+		basis: SecurityDifferentialFindingMatch["basis"],
+	) => {
+		matchedReferenceIds.add(referenceFinding.id);
+		usedCandidateIds.add(candidateFinding.id);
+		matches.push({
+			referenceFindingId: referenceFinding.id,
+			candidateFindingId: candidateFinding.id,
+			basis,
+		});
+	};
 	for (const referenceFinding of reference.findings) {
 		const exact = candidateByFingerprint.get(referenceFinding.fingerprint);
-		if (exact && !usedCandidateIds.has(exact.id)) {
-			usedCandidateIds.add(exact.id);
-			matches.push({
-				referenceFindingId: referenceFinding.id,
-				candidateFindingId: exact.id,
-				basis: "fingerprint",
-			});
-			continue;
-		}
+		if (exact && !usedCandidateIds.has(exact.id)) addMatch(referenceFinding, exact, "fingerprint");
+	}
+	for (const referenceFinding of reference.findings) {
+		if (matchedReferenceIds.has(referenceFinding.id)) continue;
 		const key = fallbackKey(referenceFinding);
 		const fallback = key
 			? candidateByFallback.get(key)?.find(finding => !usedCandidateIds.has(finding.id))
 			: undefined;
-		if (!fallback) continue;
-		usedCandidateIds.add(fallback.id);
-		matches.push({
-			referenceFindingId: referenceFinding.id,
-			candidateFindingId: fallback.id,
-			basis: "rule_location",
-		});
+		if (fallback) addMatch(referenceFinding, fallback, "rule_location");
 	}
-	const matchedReferenceIds = new Set(matches.map(match => match.referenceFindingId));
+	const unmatchedReferences = reference.findings.filter(finding => !matchedReferenceIds.has(finding.id));
+	for (const referenceFinding of unmatchedReferences) {
+		const compatibleCandidates = candidate.findings.filter(
+			finding => !usedCandidateIds.has(finding.id) && taxonomyLocationMatch(referenceFinding, finding),
+		);
+		if (compatibleCandidates.length !== 1) continue;
+		const compatibleCandidate = compatibleCandidates[0];
+		const compatibleReferences = unmatchedReferences.filter(
+			finding => !matchedReferenceIds.has(finding.id) && taxonomyLocationMatch(finding, compatibleCandidate),
+		);
+		if (compatibleReferences.length !== 1) continue;
+		addMatch(referenceFinding, compatibleCandidate, "taxonomy_location");
+	}
 	const referenceOnlyFindingIds = reference.findings
 		.filter(finding => !matchedReferenceIds.has(finding.id))
 		.map(finding => finding.id);

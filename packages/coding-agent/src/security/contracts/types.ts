@@ -241,7 +241,7 @@ export interface SecurityFindingMatch {
 	afterFindingId?: string;
 	fingerprint: string;
 	status: "unchanged" | "new" | "resolved";
-	matchBasis?: "fingerprint" | "rule_location";
+	matchBasis?: "fingerprint" | "rule_location" | "taxonomy_location";
 }
 
 export interface SecurityComparisonReport {

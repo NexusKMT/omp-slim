@@ -2,7 +2,14 @@ import { describe, expect, test } from "bun:test";
 import type { SecurityFinding, SecurityScanBundle } from "../../src/security";
 import { compareSecurityLineage, compareSecurityProducers } from "../../src/security";
 
-function finding(id: string, fingerprint: string, ruleId: string, path: string, startLine: number): SecurityFinding {
+function finding(
+	id: string,
+	fingerprint: string,
+	ruleId: string,
+	path: string,
+	startLine: number,
+	cwe: string[] = [],
+): SecurityFinding {
 	return {
 		id,
 		scanId: "placeholder",
@@ -12,7 +19,7 @@ function finding(id: string, fingerprint: string, ruleId: string, path: string, 
 		summary: id,
 		severity: { level: "high" },
 		confidence: { level: "high" },
-		taxonomy: { category: "test", cwe: [] },
+		taxonomy: { category: "test", cwe },
 		occurrences: [{ id: `occ-${id}`, locations: [{ path, startLine }], evidenceIds: [] }],
 		evidence: [],
 		validation: { status: "unvalidated", evidenceIds: [] },
@@ -94,6 +101,37 @@ describe("security comparison", () => {
 				primaryLocation: { path: "src/c.ts", startLine: 3 },
 			}),
 		]);
+	});
+
+	test("matches producer-neutral taxonomy and nearby source locations only when unambiguous", () => {
+		const reference = bundle("secscan_reference", [
+			finding("ref-cmd", "official-fp", "official.command", "src/command.ts", 3, ["CWE-78"]),
+		]);
+		const candidate = bundle("secscan_candidate", [
+			finding("cand-cmd", "native-fp", "native.shell", "./src/command.ts", 5, ["cwe-78"]),
+		]);
+		const report = compareSecurityProducers(reference, candidate);
+		expect(report.matches).toEqual([
+			{
+				referenceFindingId: "ref-cmd",
+				candidateFindingId: "cand-cmd",
+				basis: "taxonomy_location",
+			},
+		]);
+	});
+
+	test("leaves ambiguous taxonomy and location candidates unmatched", () => {
+		const reference = bundle("secscan_reference", [
+			finding("ref-one", "ref-one-fp", "official.one", "src/shared.ts", 10, ["CWE-89"]),
+			finding("ref-two", "ref-two-fp", "official.two", "src/shared.ts", 12, ["CWE-89"]),
+		]);
+		const candidate = bundle("secscan_candidate", [
+			finding("cand", "cand-fp", "native.sql", "src/shared.ts", 11, ["CWE-89"]),
+		]);
+		const report = compareSecurityProducers(reference, candidate);
+		expect(report.matches).toEqual([]);
+		expect(report.referenceOnlyFindingIds).toEqual(["ref-one", "ref-two"]);
+		expect(report.candidateOnlyFindingIds).toEqual(["cand"]);
 	});
 
 	test("lineage classifies unchanged, resolved, and introduced findings", () => {
