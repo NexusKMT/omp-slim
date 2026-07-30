@@ -249,6 +249,7 @@ import {
 	shouldEvaluateCodexAutoRedeem,
 	shouldPromptCodexAutoRedeem,
 } from "./codex-auto-reset";
+import { recordCredentialPin, seedCredentialPins } from "./credential-pin";
 import { EvalRunner, type EvalRunnerHost } from "./eval-runner";
 import {
 	collectPendingToolCalls,
@@ -2428,6 +2429,15 @@ export class AgentSession {
 					},
 					costUsd: assistantMsg.usage.cost.total,
 				});
+				// Persist which account served this turn so a resumed process can
+				// re-pin it and keep the provider's account-scoped prompt cache
+				// warm (broker-mode sticky routing is process-local).
+				recordCredentialPin(
+					this.#modelRegistry.authStorage,
+					this.sessionManager,
+					this.sessionId,
+					assistantMsg.provider,
+				);
 			}
 			if (event.message.role === "toolResult") {
 				const { toolName, toolCallId, isError, content } = event.message;
@@ -3400,6 +3410,14 @@ export class AgentSession {
 		this.agent.setMetadataResolver((provider: string) =>
 			buildSessionMetadata(sid, provider, this.#modelRegistry.authStorage),
 		);
+		// Restore the session's recorded provider accounts before the first
+		// request routes: sticky rows are process-local under a remote auth
+		// broker, and losing them re-ranks onto a different account, cold-missing
+		// the account-scoped prompt cache. Skipped for fresh provider sessions —
+		// those explicitly want new routing identity.
+		if (!this.#freshProviderSessionId) {
+			seedCredentialPins(this.#modelRegistry.authStorage, this.sessionManager, sid);
+		}
 		// Keep every live advisor's provider identity in lockstep with the primary's
 		// across every session-boundary transition — including branch paths that
 		// skip conversation restore — so advisors never emit the previous
