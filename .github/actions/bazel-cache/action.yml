@@ -137,10 +137,14 @@ runs:
              # generations wrote would otherwise ride along forever; drop
              # anything untouched for 14 days (tar preserves mtimes across
              # the actions/cache round trip, so age survives restores).
-             # Covers the repo download/contents cache too — bazel's own
-             # contents-cache GC only runs on idle servers, which short-lived
-             # CI invocations never have.
-             find "$HOME/.cache/omp-bazel-disk" "$HOME/.cache/omp-bazel-repo" -type f -mtime +14 -delete 2>/dev/null || true
+             # DISK CACHE ONLY: never prune omp-bazel-repo file-by-file —
+             # extracted repo contents keep upstream-archive mtimes (often
+             # months old), so an mtime sweep guts contents-cache entries
+             # while bazel still trusts their recorded_inputs, materializing
+             # hollow external repos ("BUILD file not found" — v17.2.0
+             # release run 30519253683). The repo cache is bounded by the
+             # GitHub cache TTL/LRU at the archive level instead.
+             find "$HOME/.cache/omp-bazel-disk" -type f -mtime +14 -delete 2>/dev/null || true
              {
                echo "common --config=ci"
                echo "common --disk_cache=$HOME/.cache/omp-bazel-disk"
