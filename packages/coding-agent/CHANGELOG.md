@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Moved subagent model-registry refresh and session-file opening off the launch critical path. Registry refresh now runs in the background while model resolution uses the registry's static/provider lookup, and `SessionManager.open` starts before prewalk/output-schema/session-option assembly so session creation waits only at its actual input boundary.
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
