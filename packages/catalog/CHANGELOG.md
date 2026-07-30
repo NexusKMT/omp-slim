@@ -2,9 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the `bedrock-mantle` provider for OpenAI GPT-5.4, GPT-5.5, and GPT-5.6 models served through Amazon Bedrock's Responses endpoint.
+
 ### Fixed
 
-- Routed Amazon Bedrock GPT-5.4, GPT-5.5, and GPT-5.6 models through the supported Bedrock Mantle Responses endpoint instead of the unsupported Converse API.
+- Removed unusable Converse entries for OpenAI models that Amazon Bedrock serves only through Mantle.
 
 ## [17.2.0] - 2026-07-30
 

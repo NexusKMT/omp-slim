@@ -3339,6 +3339,92 @@ export const META_MUSE_STATIC_MODELS: readonly ModelSpec<"openai-responses">[] =
 	},
 ];
 
+// ---------------------------------------------------------------------------
+// 15.76 Amazon Bedrock Mantle
+// ---------------------------------------------------------------------------
+
+const BEDROCK_MANTLE_BASE_URL = "https://bedrock-mantle.{region}.api.aws/openai/v1";
+const BEDROCK_MANTLE_GPT_5_X_THINKING: ThinkingConfig = {
+	mode: "effort",
+	efforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
+};
+const BEDROCK_MANTLE_GPT_5_6_THINKING: ThinkingConfig = {
+	mode: "effort",
+	efforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max],
+};
+
+/**
+ * OpenAI frontier models served exclusively through Bedrock Mantle's Responses
+ * endpoint. Pricing is per million tokens from the Amazon Bedrock pricing page.
+ */
+export const BEDROCK_MANTLE_STATIC_MODELS: readonly ModelSpec<"openai-responses">[] = [
+	{
+		id: "openai.gpt-5.4",
+		name: "GPT-5.4",
+		api: "openai-responses",
+		provider: "bedrock-mantle",
+		baseUrl: BEDROCK_MANTLE_BASE_URL,
+		reasoning: true,
+		input: ["text", "image"],
+		cost: { input: 2.75, output: 16.5, cacheRead: 0.275, cacheWrite: 0 },
+		contextWindow: 272_000,
+		maxTokens: 128_000,
+		thinking: BEDROCK_MANTLE_GPT_5_X_THINKING,
+	},
+	{
+		id: "openai.gpt-5.5",
+		name: "GPT-5.5",
+		api: "openai-responses",
+		provider: "bedrock-mantle",
+		baseUrl: BEDROCK_MANTLE_BASE_URL,
+		reasoning: true,
+		input: ["text", "image"],
+		cost: { input: 5.5, output: 33, cacheRead: 0.55, cacheWrite: 0 },
+		contextWindow: 272_000,
+		maxTokens: 128_000,
+		thinking: BEDROCK_MANTLE_GPT_5_X_THINKING,
+	},
+	{
+		id: "openai.gpt-5.6-luna",
+		name: "GPT-5.6 Luna",
+		api: "openai-responses",
+		provider: "bedrock-mantle",
+		baseUrl: BEDROCK_MANTLE_BASE_URL,
+		reasoning: true,
+		input: ["text", "image"],
+		cost: { input: 1.1, output: 6.6, cacheRead: 0.11, cacheWrite: 1.38 },
+		contextWindow: 272_000,
+		maxTokens: 128_000,
+		thinking: BEDROCK_MANTLE_GPT_5_6_THINKING,
+	},
+	{
+		id: "openai.gpt-5.6-sol",
+		name: "GPT-5.6 Sol",
+		api: "openai-responses",
+		provider: "bedrock-mantle",
+		baseUrl: BEDROCK_MANTLE_BASE_URL,
+		reasoning: true,
+		input: ["text", "image"],
+		cost: { input: 5.5, output: 33, cacheRead: 0.55, cacheWrite: 6.88 },
+		contextWindow: 272_000,
+		maxTokens: 128_000,
+		thinking: BEDROCK_MANTLE_GPT_5_6_THINKING,
+	},
+	{
+		id: "openai.gpt-5.6-terra",
+		name: "GPT-5.6 Terra",
+		api: "openai-responses",
+		provider: "bedrock-mantle",
+		baseUrl: BEDROCK_MANTLE_BASE_URL,
+		reasoning: true,
+		input: ["text", "image"],
+		cost: { input: 2.75, output: 16.5, cacheRead: 0.28, cacheWrite: 3.44 },
+		contextWindow: 272_000,
+		maxTokens: 128_000,
+		thinking: BEDROCK_MANTLE_GPT_5_6_THINKING,
+	},
+];
+
 export interface MetaModelManagerConfig {
 	apiKey?: string;
 	baseUrl?: string;
@@ -4997,34 +5083,13 @@ function resolveGoogleVertexApi(modelId: string, raw: ModelsDevModel): { api: Ap
 	return { api: "google-vertex", baseUrl: GOOGLE_VERTEX_BASE_URL };
 }
 
-const BEDROCK_RUNTIME_RESOLUTION = {
-	api: "bedrock-converse-stream",
-	baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
-} as const;
-const BEDROCK_MANTLE_RESPONSES_RESOLUTION = {
-	api: "openai-responses",
-	baseUrl: "https://bedrock-mantle.us-east-1.api.aws/openai/v1",
-} as const;
-const BEDROCK_MANTLE_OPENAI_MODEL_IDS: Record<string, true> = {
-	"openai.gpt-5.4": true,
-	"openai.gpt-5.5": true,
-	"openai.gpt-5.6-luna": true,
-	"openai.gpt-5.6-sol": true,
-	"openai.gpt-5.6-terra": true,
-};
-
-function resolveAmazonBedrockApi(modelId: string): { api: Api; baseUrl: string } {
-	return BEDROCK_MANTLE_OPENAI_MODEL_IDS[modelId] ? BEDROCK_MANTLE_RESPONSES_RESOLUTION : BEDROCK_RUNTIME_RESOLUTION;
-}
-
 const MODELS_DEV_PROVIDER_DESCRIPTORS_BEDROCK: readonly ModelsDevProviderDescriptor[] = [
 	// --- Amazon Bedrock ---
 	{
 		modelsDevKey: "amazon-bedrock",
 		providerId: "amazon-bedrock",
-		api: BEDROCK_RUNTIME_RESOLUTION.api,
-		baseUrl: BEDROCK_RUNTIME_RESOLUTION.baseUrl,
-		resolveApi: modelId => resolveAmazonBedrockApi(modelId),
+		api: "bedrock-converse-stream",
+		baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
 		filterModel: (id, m) => {
 			if (m.tool_call !== true) return false;
 			if (id.startsWith("ai21.jamba")) return false;

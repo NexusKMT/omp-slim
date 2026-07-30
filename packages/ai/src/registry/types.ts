@@ -18,6 +18,9 @@ import type { OAuthCredentials, OAuthLoginCallbacks } from "./oauth/types";
  */
 export type KeyResolver = string | (() => string | undefined);
 
+/** Credentials are resolved by the provider transport rather than used as a bearer string. */
+export const AUTHENTICATED_SENTINEL = "<authenticated>";
+
 /**
  * Declarative description of a single provider's auth/login wiring. All
  * fields are optional except `id`/`name`; presence of a field opts the

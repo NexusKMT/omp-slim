@@ -1,57 +1,53 @@
 import { describe, expect, test } from "bun:test";
-import { MODELS_DEV_PROVIDER_DESCRIPTORS, mapModelsDevToModels } from "@oh-my-pi/pi-catalog/provider-models";
+import { DEFAULT_MODEL_PER_PROVIDER } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
+import { BEDROCK_MANTLE_STATIC_MODELS } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
+import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import { dropBedrockMantleOpenAIModels } from "../scripts/generated-policies";
 
-const BEDROCK_OPENAI_FIXTURE = {
-	"amazon-bedrock": {
-		models: Object.fromEntries(
-			[
-				"openai.gpt-5.4",
-				"openai.gpt-5.5",
-				"openai.gpt-5.6-luna",
-				"openai.gpt-5.6-sol",
-				"openai.gpt-5.6-terra",
-				"openai.gpt-oss-120b-1:0",
-			].map(id => [
-				id,
-				{
-					name: id,
-					tool_call: true,
-					reasoning: true,
-					limit: { context: 272_000, output: 128_000 },
-					cost: { input: 5, output: 30, cache_read: 0.5, cache_write: 6.25 },
-					modalities: { input: ["text", "image"] },
-				},
-			]),
-		),
-	},
-};
+const MANTLE_MODEL_IDS = [
+	"openai.gpt-5.4",
+	"openai.gpt-5.5",
+	"openai.gpt-5.6-luna",
+	"openai.gpt-5.6-sol",
+	"openai.gpt-5.6-terra",
+];
 
-const BEDROCK_MANTLE_BASE_URL = "https://bedrock-mantle.us-east-1.api.aws/openai/v1";
-const BEDROCK_RUNTIME_BASE_URL = "https://bedrock-runtime.us-east-1.amazonaws.com";
+function bedrockModel(provider: string, id: string): ModelSpec<"bedrock-converse-stream"> {
+	return {
+		id,
+		name: id,
+		api: "bedrock-converse-stream",
+		provider,
+		baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+		reasoning: true,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 272_000,
+		maxTokens: 128_000,
+	};
+}
 
 describe("Amazon Bedrock OpenAI routing", () => {
-	test("routes GPT-5.4+ frontier models through Bedrock Mantle Responses", () => {
-		const models = mapModelsDevToModels(BEDROCK_OPENAI_FIXTURE, MODELS_DEV_PROVIDER_DESCRIPTORS);
-		const frontierModels = models.filter(model => model.id.startsWith("openai.gpt-5."));
-
-		expect(frontierModels.map(model => model.id)).toEqual([
-			"openai.gpt-5.4",
-			"openai.gpt-5.5",
-			"openai.gpt-5.6-luna",
-			"openai.gpt-5.6-sol",
-			"openai.gpt-5.6-terra",
-		]);
-		for (const model of frontierModels) {
+	test("seeds Responses-only models under the Bedrock Mantle provider", () => {
+		expect(BEDROCK_MANTLE_STATIC_MODELS.map(model => model.id)).toEqual(MANTLE_MODEL_IDS);
+		for (const model of BEDROCK_MANTLE_STATIC_MODELS) {
+			expect(model.provider).toBe("bedrock-mantle");
 			expect(model.api).toBe("openai-responses");
-			expect(model.baseUrl).toBe(BEDROCK_MANTLE_BASE_URL);
+			expect(model.baseUrl).toBe("https://bedrock-mantle.{region}.api.aws/openai/v1");
 		}
+		expect(DEFAULT_MODEL_PER_PROVIDER["bedrock-mantle"]).toBe("openai.gpt-5.6-terra");
 	});
 
-	test("keeps GPT-OSS on the Bedrock Converse transport", () => {
-		const models = mapModelsDevToModels(BEDROCK_OPENAI_FIXTURE, MODELS_DEV_PROVIDER_DESCRIPTORS);
-		const model = models.find(candidate => candidate.id === "openai.gpt-oss-120b-1:0");
+	test("drops only the unusable Converse rows for Mantle models", () => {
+		const input = [
+			...MANTLE_MODEL_IDS.map(id => bedrockModel("amazon-bedrock", id)),
+			bedrockModel("amazon-bedrock", "openai.gpt-oss-120b"),
+			bedrockModel("bedrock-mantle", "openai.gpt-5.6-sol"),
+		];
 
-		expect(model?.api).toBe("bedrock-converse-stream");
-		expect(model?.baseUrl).toBe(BEDROCK_RUNTIME_BASE_URL);
+		expect(dropBedrockMantleOpenAIModels(input).map(model => `${model.provider}/${model.id}`)).toEqual([
+			"amazon-bedrock/openai.gpt-oss-120b",
+			"bedrock-mantle/openai.gpt-5.6-sol",
+		]);
 	});
 });

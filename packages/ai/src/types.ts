@@ -639,6 +639,12 @@ export interface SimpleStreamOptions extends Omit<StreamOptions, "apiKey"> {
 	 * provider. Non-Anthropic providers ignore the field.
 	 */
 	fallbacks?: FallbackParam[];
+	/** AWS region override for Amazon Bedrock transports. */
+	region?: string;
+	/** AWS profile override for Amazon Bedrock transports. */
+	profile?: string;
+	/** Amazon Bedrock API key, preferred over SigV4 credential resolution. */
+	bearerToken?: string;
 }
 
 // Generic StreamFunction with typed options

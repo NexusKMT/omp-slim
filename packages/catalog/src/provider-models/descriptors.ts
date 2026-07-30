@@ -100,6 +100,10 @@ export const CATALOG_PROVIDERS = [
 		defaultModel: "us.anthropic.claude-opus-4-8",
 	},
 	{
+		id: "bedrock-mantle",
+		defaultModel: "openai.gpt-5.6-terra",
+	},
+	{
 		id: "anthropic",
 		defaultModel: "claude-opus-4-8",
 		envVars: ["ANTHROPIC_API_KEY"],

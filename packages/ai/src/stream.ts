@@ -24,6 +24,7 @@ import { isInvalidatedOAuthTokenError } from "./error/auth-classify";
 import { isUsageLimitOutcome } from "./error/rate-limit";
 import type { BedrockOptions } from "./providers/amazon-bedrock";
 import type { AnthropicOptions } from "./providers/anthropic";
+import { type BedrockMantleOptions, prepareBedrockMantleRequest } from "./providers/bedrock-mantle";
 import type { CursorOptions } from "./providers/cursor";
 import type { DevinOptions } from "./providers/devin";
 import { isGitLabDuoModel, streamGitLabDuo } from "./providers/gitlab-duo";
@@ -811,6 +812,12 @@ function streamDispatch<TApi extends Api>(
 	} else if (model.api === "bedrock-converse-stream") {
 		// Bedrock doesn't have any API keys instead it sources credentials from standard AWS env variables or from given AWS profile.
 		return streamBedrock(model as Model<"bedrock-converse-stream">, context, requestOptions as BedrockOptions);
+	} else if (model.provider === "bedrock-mantle" && model.api === "openai-responses") {
+		const prepared = prepareBedrockMantleRequest(
+			model as Model<"openai-responses">,
+			requestOptions as BedrockMantleOptions,
+		);
+		return streamOpenAIResponses(prepared.model, context, prepared.options);
 	}
 
 	const apiKey = requestOptions.apiKey || getEnvApiKey(model.provider);
@@ -1020,12 +1027,10 @@ export function streamSimple<TApi extends Api>(
 	if (apiKeyResolver) {
 		const outer = new AssistantMessageEventStream();
 		const signal = requestOptions?.signal;
-		// One inner attempt against a resolved string key. A retryable auth error
-		// that arrives before any replay-unsafe event is buffered and returned
-		// (so the caller can retry with a fresh key) instead of surfaced. Once any
-		// non-start event escapes, retry is no longer safe and the failure is
-		// emitted directly.
-		const runAttempt = async (apiKey: string): Promise<AuthRetryFailure | undefined> => {
+		// One inner attempt against a resolved key, or against the Bedrock AWS
+		// credential chain when its optional resolver has no stored bearer key.
+		// Retryable auth failures are buffered until replay is safe.
+		const runAttempt = async (apiKey?: string): Promise<AuthRetryFailure | undefined> => {
 			const bufferedEvents: AssistantMessageEvent[] = [];
 			let emittedReplayUnsafeEvent = false;
 			const flushBuffered = (): void => {
@@ -1099,6 +1104,11 @@ export function streamSimple<TApi extends Api>(
 				return;
 			}
 			if (lastKey === undefined) {
+				if (model.provider === "bedrock-mantle") {
+					const failure = await runAttempt();
+					if (failure) emitFailure(failure);
+					return;
+				}
 				outer.fail(new AIError.MissingApiKeyError(model.provider));
 				return;
 			}
@@ -1147,6 +1157,13 @@ export function streamSimple<TApi extends Api>(
 	} else if (model.api === "bedrock-converse-stream") {
 		// Bedrock doesn't have any API keys instead it sources credentials from standard AWS env variables or from given AWS profile.
 		const providerOptions = mapOptionsForApi(model, requestOptions, undefined);
+		return stream(model, context, providerOptions);
+	} else if (model.provider === "bedrock-mantle" && model.api === "openai-responses") {
+		const providerOptions = mapOptionsForApi(
+			model,
+			requestOptions,
+			typeof requestOptions.apiKey === "string" ? requestOptions.apiKey : undefined,
+		);
 		return stream(model, context, providerOptions);
 	}
 
@@ -1660,6 +1677,11 @@ function mapOptionsForApi<TApi extends Api>(
 				textVerbosity: options?.textVerbosity,
 				promptCache: options?.promptCache,
 				statefulResponses: options?.statefulResponses,
+				...(model.provider === "bedrock-mantle" && {
+					region: options?.region,
+					profile: options?.profile,
+					bearerToken: options?.bearerToken,
+				}),
 			});
 
 		case "azure-openai-responses":

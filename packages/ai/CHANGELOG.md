@@ -22,6 +22,7 @@
 
 ### Fixed
 
+- Added Bedrock Mantle region selection and bearer-token or SigV4 authentication for OpenAI Responses models.
 - Fixed Novita login rejecting valid API keys belonging to Developer and Basic team members by validating against the chat completions endpoint instead of the billing balance endpoint.
 - Fixed Cursor resource_exhausted errors being incorrectly classified as QUOTA_EXHAUSTED (which caused 30-minute credential blocks), mapping them to MODEL_CAPACITY_EXHAUSTED with a shorter backoff instead.
 - Fixed a crash in Amazon Bedrock and Devin providers when Context.systemPrompt is passed as a bare string.
