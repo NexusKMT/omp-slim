@@ -1,0 +1,548 @@
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import type { Model } from "@oh-my-pi/pi-ai";
+import { prompt } from "@oh-my-pi/pi-utils";
+import type { AsyncJobManager } from "../async/job-manager";
+import type { ModelRegistry } from "../config/model-registry";
+import type { Settings } from "../config/settings";
+import type { ToolDefinition } from "../extensibility/extensions";
+import securityReviewerPrompt from "../prompts/agents/security-reviewer.md" with { type: "text" };
+import securityCoordinatorPrompt from "../prompts/security/scan-coordinator.md" with { type: "text" };
+import securityRequestPrompt from "../prompts/security/scan-request.md" with { type: "text" };
+import securityPublishDescription from "../prompts/tools/security-publish.md" with { type: "text" };
+import type { AgentSession } from "../session/agent-session";
+import type { AuthStorage } from "../session/auth-storage";
+import { SessionManager } from "../session/session-manager";
+import { createAgentSession } from "../sdk";
+import { createExactSecurityOAuthResolver } from "./auth";
+import { createSecurityScanId } from "./contracts";
+import type {
+	SecurityAccountRef,
+	SecurityCoverage,
+	SecurityScan,
+	SecurityScanBundle,
+	SecurityScanPlan,
+	SecurityTargetKind,
+} from "./contracts";
+import {
+	assertSecurityScanPlanFresh,
+	createSecurityScanPlan,
+	DEFAULT_SECURITY_GIT_ADAPTER,
+	prepareSecurityOutputDirectory,
+} from "./preflight";
+import type { SecurityGitAdapter, SecurityTargetRequest } from "./preflight";
+import {
+	createNativeSecurityProducer,
+	createNativeSecurityProvenance,
+	createSecurityWorkflowFingerprint,
+} from "./provenance";
+import { createSecurityPublicationTool } from "./publication";
+import { SecurityStore } from "./store";
+
+const SECURITY_SESSION_TOOLS = ["read", "grep", "glob", "lsp", "ast_grep", "task", "security_publish"];
+const SECURITY_WORKFLOW_FINGERPRINT = createSecurityWorkflowFingerprint([
+	securityCoordinatorPrompt,
+	securityRequestPrompt,
+	securityReviewerPrompt,
+	securityPublishDescription,
+]);
+
+export type SecurityOperationPhase =
+	| "queued"
+	| "preparing"
+	| "reviewing"
+	| "publishing"
+	| "completed"
+	| "partial"
+	| "cancelled"
+	| "failed";
+
+export interface SecurityOperationSnapshot {
+	operationId: string;
+	planId: string;
+	scanId: string;
+	phase: SecurityOperationPhase;
+	createdAt: string;
+	updatedAt: string;
+	jobId?: string;
+	sessionFile?: string;
+	findingCount: number;
+	error?: string;
+}
+
+export interface SecurityCoordinatorHost {
+	cwd: string;
+	settings: Settings;
+	authStorage: AuthStorage;
+	modelRegistry: ModelRegistry;
+	activeModel?: Model;
+	sessionId?: string;
+	agentId?: string;
+	asyncJobManager?: AsyncJobManager;
+}
+
+export interface SecurityPreflightInput {
+	target?: SecurityTargetRequest;
+	knowledgeBasePaths?: string[];
+	outputRoot?: string;
+	archiveExisting?: boolean;
+	credentialId?: number;
+	model?: Model;
+	thinkingLevel?: string;
+	config?: Record<string, unknown>;
+	signal?: AbortSignal;
+}
+
+export interface SecurityStartInput {
+	planId: string;
+}
+
+export interface SecurityScanSession {
+	prompt(
+		text: string,
+		options?: { expandPromptTemplates?: boolean; synthetic?: boolean; userInitiated?: boolean },
+	): Promise<boolean>;
+	waitForIdle(): Promise<void>;
+	abort(options?: { reason?: string }): Promise<void>;
+	dispose(): Promise<void>;
+	readonly sessionFile?: string;
+}
+
+export interface SecurityScanSessionFactoryInput {
+	host: SecurityCoordinatorHost;
+	plan: SecurityScanPlan;
+	scanId: string;
+	model: Model;
+	publicationTool: ToolDefinition;
+	sessionManager: SessionManager;
+}
+
+export type SecurityScanSessionFactory = (input: SecurityScanSessionFactoryInput) => Promise<SecurityScanSession>;
+
+export interface SecurityCoordinatorDependencies {
+	createSession?: SecurityScanSessionFactory;
+	openStore?: (repositoryRoot: string) => Promise<SecurityStore>;
+	gitAdapter?: SecurityGitAdapter;
+	now?: () => Date;
+	createOperationId?: () => string;
+}
+
+interface SecurityOperationRecord {
+	snapshot: SecurityOperationSnapshot;
+	promise: Promise<void>;
+	abortController?: AbortController;
+}
+
+function iso(now: () => Date): string {
+	return now().toISOString();
+}
+
+function createOperationId(): string {
+	return `secop_${Bun.randomUUIDv7().replaceAll("-", "")}`;
+}
+
+function mapCoverageMode(targetKind: SecurityTargetKind): SecurityCoverage["mode"] {
+	switch (targetKind) {
+		case "ref_diff":
+			return "diff";
+		case "working_tree":
+			return "working_tree";
+		case "scoped_path":
+			return "scoped_path";
+		case "imported":
+			return "imported";
+		default:
+			return "repository";
+	}
+}
+
+function initialCoverage(plan: SecurityScanPlan): SecurityCoverage {
+	return {
+		mode: mapCoverageMode(plan.target.kind),
+		completeness: "unknown",
+		inventoryStrategy:
+			plan.target.kind === "ref_diff" ? "diff" : plan.target.kind === "scoped_path" ? "scoped_path" : "repository",
+		includePaths: plan.target.includePaths,
+		excludePaths: plan.target.excludePaths,
+		surfaces: [],
+		explicitExclusions: [],
+		deferred: [{ id: "scan-pending", reason: "Security review has not completed" }],
+	};
+}
+
+function initialBundle(
+	store: SecurityStore,
+	plan: SecurityScanPlan,
+	scanId: string,
+	startedAt: string,
+	status: SecurityScan["status"] = "running",
+): SecurityScanBundle {
+	const producer = createNativeSecurityProducer();
+	const provenance = createNativeSecurityProvenance({
+		createdAt: startedAt,
+		account: plan.account,
+		planFingerprint: plan.fingerprint,
+		workflowFingerprint: plan.workflowFingerprint,
+	});
+	return {
+		scan: {
+			documentType: "omp-security.scan",
+			schemaVersion: "1.0",
+			id: scanId,
+			projectKey: store.projectKey,
+			status,
+			createdAt: plan.createdAt,
+			startedAt,
+			plan,
+			target: plan.target,
+			producer,
+			provenance,
+			findingIds: [],
+			coverage: initialCoverage(plan),
+		},
+		findings: [],
+	};
+}
+
+function resolveAccount(
+	host: SecurityCoordinatorHost,
+	model: Model,
+	requestedCredentialId?: number,
+): SecurityAccountRef {
+	const accounts = host.authStorage.listOAuthAccounts(model.provider, host.sessionId);
+	const selected =
+		requestedCredentialId !== undefined
+			? accounts.find(account => account.credentialId === requestedCredentialId)
+			: accounts.find(account => account.active) ?? (accounts.length === 1 ? accounts[0] : undefined);
+	if (!selected) {
+		if (accounts.length === 0) {
+			throw new Error(`Security scans require a stored OAuth account for ${model.provider}`);
+		}
+		if (requestedCredentialId !== undefined) {
+			throw new Error(`Security OAuth credential ${requestedCredentialId} is not available for ${model.provider}`);
+		}
+		throw new Error(
+			`Multiple OAuth accounts are available for ${model.provider}; supply credentialId to pin one exact account`,
+		);
+	}
+	return {
+		provider: model.provider,
+		credentialId: selected.credentialId,
+		accountId: selected.accountId,
+		email: selected.email,
+		organizationId: selected.orgId,
+		organizationName: selected.orgName,
+	};
+}
+
+async function createDefaultSecuritySession(input: SecurityScanSessionFactoryInput): Promise<AgentSession> {
+	const scanSettings = await input.host.settings.cloneForCwd(input.plan.repositoryRoot);
+	const modelSelector = `${input.model.provider}/${input.model.id}`;
+	scanSettings.override("retry.modelFallback", false);
+	scanSettings.override("retry.usageAwareFallback", false);
+	scanSettings.override("retry.fallbackChains", {});
+	scanSettings.override("task.agentModelOverrides", {
+		...scanSettings.get("task.agentModelOverrides"),
+		"security-reviewer": modelSelector,
+	});
+	scanSettings.override("task.agentPrewalk", {
+		...scanSettings.get("task.agentPrewalk"),
+		"security-reviewer": "off",
+	});
+	const { session } = await createAgentSession({
+		cwd: input.plan.repositoryRoot,
+		authStorage: input.host.authStorage,
+		modelRegistry: input.host.modelRegistry,
+		settings: scanSettings,
+		model: input.model,
+		getApiKey: createExactSecurityOAuthResolver({
+			authStorage: input.host.authStorage,
+			account: input.plan.account,
+		}),
+		providerSessionId: `security:${input.scanId}`,
+		sessionManager: input.sessionManager,
+		customTools: [input.publicationTool],
+		toolNames: SECURITY_SESSION_TOOLS,
+		restrictToolNames: true,
+		allowRestrictedCustomTools: true,
+		spawns: "security-reviewer",
+		appendSystemPrompt: securityCoordinatorPrompt.trim(),
+		disableExtensionDiscovery: true,
+		enableMCP: false,
+		enableIrc: false,
+		hasUI: false,
+		autoApprove: true,
+		skipPythonPreflight: true,
+		agentId: `Security-${input.scanId.slice(-12)}`,
+		agentDisplayName: "security",
+	});
+	return session;
+}
+
+function requestText(plan: SecurityScanPlan): string {
+	return prompt.render(securityRequestPrompt, {
+		repositoryRoot: plan.repositoryRoot,
+		targetKind: plan.target.kind,
+		revision: plan.target.revision ?? "",
+		baseRevision: plan.target.baseRevision ?? "",
+		headRevision: plan.target.headRevision ?? "",
+		includePaths: plan.target.includePaths.length > 0 ? plan.target.includePaths.join(", ") : "all in-scope paths",
+		excludePaths: plan.target.excludePaths.length > 0 ? plan.target.excludePaths.join(", ") : "none",
+		knowledgeBases: plan.knowledgeBases.length > 0 ? plan.knowledgeBases.map(item => item.path).join(", ") : "none",
+		planFingerprint: plan.fingerprint,
+	}).trim();
+}
+
+function terminalText(snapshot: SecurityOperationSnapshot): string {
+	return [
+		`Security scan ${snapshot.scanId}: ${snapshot.phase}.`,
+		`Operation: ${snapshot.operationId}`,
+		`Plan: ${snapshot.planId}`,
+		`Findings: ${snapshot.findingCount}`,
+		snapshot.error ? `Error: ${snapshot.error}` : undefined,
+	]
+		.filter((line): line is string => line !== undefined)
+		.join("\n");
+}
+
+export class SecurityCoordinator {
+	readonly #host: SecurityCoordinatorHost;
+	readonly #createSession: SecurityScanSessionFactory;
+	readonly #openStore: (repositoryRoot: string) => Promise<SecurityStore>;
+	readonly #gitAdapter: SecurityGitAdapter;
+	readonly #now: () => Date;
+	readonly #createOperationId: () => string;
+	readonly #operations = new Map<string, SecurityOperationRecord>();
+
+	constructor(host: SecurityCoordinatorHost, dependencies: SecurityCoordinatorDependencies = {}) {
+		this.#host = host;
+		this.#createSession = dependencies.createSession ?? createDefaultSecuritySession;
+		this.#openStore = dependencies.openStore ?? (repositoryRoot => SecurityStore.open(repositoryRoot));
+		this.#gitAdapter = dependencies.gitAdapter ?? DEFAULT_SECURITY_GIT_ADAPTER;
+		this.#now = dependencies.now ?? (() => new Date());
+		this.#createOperationId = dependencies.createOperationId ?? createOperationId;
+	}
+
+	async preflight(input: SecurityPreflightInput = {}): Promise<SecurityScanPlan> {
+		if (!this.#host.settings.get("security.enabled")) {
+			throw new Error("Security is disabled; enable security.enabled before planning a scan");
+		}
+		const model = input.model ?? this.#host.activeModel;
+		if (!model) throw new Error("Security scan preflight requires an active model");
+		const account = resolveAccount(this.#host, model, input.credentialId);
+		const store = await this.#openStore(this.#host.cwd);
+		const workRoot = path.join(store.projectDirectory, "work");
+		await fs.mkdir(workRoot, { recursive: true, mode: 0o700 });
+		if (process.platform !== "win32") await fs.chmod(workRoot, 0o700);
+		const plan = await createSecurityScanPlan({
+			cwd: this.#host.cwd,
+			target: input.target ?? { kind: "repository" },
+			knowledgeBasePaths: input.knowledgeBasePaths,
+			outputRoot: input.outputRoot ?? path.join(workRoot, Bun.randomUUIDv7()),
+			archiveExisting: input.archiveExisting,
+			model: { provider: model.provider, modelId: model.id, thinkingLevel: input.thinkingLevel },
+			account,
+			config: input.config ?? { securityEnabled: true },
+			workflowFingerprint: SECURITY_WORKFLOW_FINGERPRINT,
+			signal: input.signal,
+		}, this.#gitAdapter);
+		await store.putPlan(plan);
+		return plan;
+	}
+
+	async start(input: SecurityStartInput): Promise<SecurityOperationSnapshot> {
+		if (!this.#host.settings.get("security.enabled")) {
+			throw new Error("Security is disabled; enable security.enabled before starting a scan");
+		}
+		const store = await this.#openStore(this.#host.cwd);
+		const plan = await store.getPlan(input.planId);
+		if (!plan) throw new Error(`Unknown security scan plan: ${input.planId}`);
+		await assertSecurityScanPlanFresh(
+			plan,
+			{
+				config: { securityEnabled: true },
+				workflowFingerprint: SECURITY_WORKFLOW_FINGERPRINT,
+			},
+			this.#gitAdapter,
+		);
+		const operationId = this.#createOperationId();
+		const scanId = createSecurityScanId();
+		const createdAt = iso(this.#now);
+		const snapshot: SecurityOperationSnapshot = {
+			operationId,
+			planId: plan.id,
+			scanId,
+			phase: "queued",
+			createdAt,
+			updatedAt: createdAt,
+			findingCount: 0,
+		};
+		const record: SecurityOperationRecord = { snapshot, promise: Promise.resolve() };
+		this.#operations.set(operationId, record);
+		const run = async (signal: AbortSignal, reportProgress?: (text: string) => Promise<void>): Promise<void> => {
+			await this.#run(record, plan, store, signal, reportProgress);
+		};
+		const manager = this.#host.asyncJobManager;
+		if (manager) {
+			const jobId = manager.register(
+				"task",
+				`Security scan ${scanId}`,
+				async ({ signal, reportProgress }) => {
+					await run(signal, text => reportProgress(text, { operationId, scanId, phase: record.snapshot.phase }));
+					return terminalText(record.snapshot);
+				},
+				{ id: operationId, ownerId: this.#host.agentId },
+			);
+			record.snapshot.jobId = jobId;
+			record.promise = manager.getJob(jobId)?.promise ?? Promise.resolve();
+		} else {
+			const abortController = new AbortController();
+			record.abortController = abortController;
+			record.promise = run(abortController.signal);
+		}
+		return { ...record.snapshot };
+	}
+
+	status(operationId: string): SecurityOperationSnapshot | null {
+		const record = this.#operations.get(operationId);
+		return record ? { ...record.snapshot } : null;
+	}
+
+	listOperations(): SecurityOperationSnapshot[] {
+		return [...this.#operations.values()]
+			.map(record => ({ ...record.snapshot }))
+			.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+	}
+
+	cancel(operationId: string): boolean {
+		const record = this.#operations.get(operationId);
+		if (!record) return false;
+		if (["completed", "partial", "cancelled", "failed"].includes(record.snapshot.phase)) return false;
+		if (record.snapshot.jobId && this.#host.asyncJobManager) {
+			return this.#host.asyncJobManager.cancel(record.snapshot.jobId, { ownerId: this.#host.agentId });
+		}
+		record.abortController?.abort(new Error("Security scan cancelled"));
+		return true;
+	}
+
+	async wait(operationId: string): Promise<SecurityOperationSnapshot> {
+		const record = this.#operations.get(operationId);
+		if (!record) throw new Error(`Unknown security operation: ${operationId}`);
+		await record.promise;
+		return { ...record.snapshot };
+	}
+
+	async #update(record: SecurityOperationRecord, phase: SecurityOperationPhase, error?: string): Promise<void> {
+		record.snapshot.phase = phase;
+		record.snapshot.updatedAt = iso(this.#now);
+		record.snapshot.error = error;
+	}
+
+	async #run(
+		record: SecurityOperationRecord,
+		plan: SecurityScanPlan,
+		store: SecurityStore,
+		signal: AbortSignal,
+		reportProgress?: (text: string) => Promise<void>,
+	): Promise<void> {
+		const startedAt = iso(this.#now);
+		let session: SecurityScanSession | undefined;
+		let publishedBundle: SecurityScanBundle | undefined;
+		await store.putBundle(initialBundle(store, plan, record.snapshot.scanId, startedAt));
+		try {
+			if (signal.aborted) throw signal.reason ?? new Error("Security scan cancelled");
+			await prepareSecurityOutputDirectory(plan.output, record.snapshot.scanId);
+			await this.#update(record, "preparing");
+			await reportProgress?.("Preparing OMP-native security scan");
+			const activeModel = this.#host.activeModel;
+			const model =
+				activeModel?.provider === plan.model.provider && activeModel.id === plan.model.modelId
+					? activeModel
+					: this.#host.modelRegistry.find(plan.model.provider, plan.model.modelId);
+			if (!model) throw new Error(`Security scan model is unavailable: ${plan.model.provider}/${plan.model.modelId}`);
+			const sessionsDirectory = path.join(store.projectDirectory, "sessions");
+			await fs.mkdir(sessionsDirectory, { recursive: true, mode: 0o700 });
+			const sessionManager = SessionManager.create(plan.repositoryRoot, sessionsDirectory);
+			const publicationTool = createSecurityPublicationTool({
+				plan,
+				scanId: record.snapshot.scanId,
+				store,
+				startedAt,
+				sessionId: `security:${record.snapshot.scanId}`,
+				onPublished: async bundle => {
+					publishedBundle = bundle;
+					record.snapshot.findingCount = bundle.findings.length;
+					await this.#update(record, "publishing");
+				},
+			});
+			session = await this.#createSession({
+				host: this.#host,
+				plan,
+				scanId: record.snapshot.scanId,
+				model,
+				publicationTool,
+				sessionManager,
+			});
+			record.snapshot.sessionFile = session.sessionFile;
+			const abortSession = (): void => {
+				void session?.abort({ reason: "Security scan cancelled" });
+			};
+			signal.addEventListener("abort", abortSession, { once: true });
+			try {
+				if (signal.aborted) throw signal.reason ?? new Error("Security scan cancelled");
+				await this.#update(record, "reviewing");
+				await reportProgress?.("Reviewing repository with OMP security workers");
+				await session.prompt(requestText(plan), {
+					expandPromptTemplates: false,
+					synthetic: true,
+					userInitiated: false,
+				});
+				await session.waitForIdle();
+				record.snapshot.sessionFile = session.sessionFile;
+			} finally {
+				signal.removeEventListener("abort", abortSession);
+			}
+			if (signal.aborted) throw signal.reason ?? new Error("Security scan cancelled");
+			if (publishedBundle) {
+				await this.#update(record, "completed");
+				await reportProgress?.(`Published ${publishedBundle.findings.length} security finding(s)`);
+				return;
+			}
+			const partial = initialBundle(store, plan, record.snapshot.scanId, startedAt, "partial");
+			partial.scan.completedAt = iso(this.#now);
+			partial.scan.error = "The scan session ended without publishing a canonical result";
+			await store.putBundle(partial);
+			await this.#update(record, "partial", partial.scan.error);
+		} catch (error) {
+			if (publishedBundle) {
+				record.snapshot.findingCount = publishedBundle.findings.length;
+				await this.#update(record, "completed");
+				return;
+			}
+			const message = error instanceof Error ? error.message : String(error);
+			const cancelled = signal.aborted;
+			const terminal = initialBundle(store, plan, record.snapshot.scanId, startedAt, cancelled ? "cancelled" : "failed");
+			terminal.scan.completedAt = iso(this.#now);
+			terminal.scan.error = message;
+			await store.putBundle(terminal);
+			await this.#update(record, cancelled ? "cancelled" : "failed", message);
+		} finally {
+			await session?.dispose().catch(() => undefined);
+		}
+	}
+}
+
+const COORDINATORS = new Map<string, SecurityCoordinator>();
+
+export function getSecurityCoordinator(host: SecurityCoordinatorHost): SecurityCoordinator {
+	const key = `${path.resolve(host.cwd)}\u0000${host.sessionId ?? "sessionless"}`;
+	const existing = COORDINATORS.get(key);
+	if (existing) return existing;
+	const coordinator = new SecurityCoordinator(host);
+	COORDINATORS.set(key, coordinator);
+	return coordinator;
+}
+
+export function resetSecurityCoordinatorsForTests(): void {
+	COORDINATORS.clear();
+}

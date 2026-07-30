@@ -1,0 +1,115 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import { InternalUrlRouter, SecurityProtocolHandler } from "../../src/internal-urls";
+import { importCodexSecurityBundle, importSarifFile, SecurityStore } from "../../src/security";
+
+const FIXTURE_ROOT = path.join(import.meta.dir, "..", "fixtures", "security");
+let temporaryRoot = "";
+let repositoryRoot = "";
+let store: SecurityStore;
+
+beforeEach(async () => {
+	temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "omp-security-protocol-"));
+	repositoryRoot = path.join(temporaryRoot, "repo");
+	await fs.mkdir(repositoryRoot);
+	store = await SecurityStore.open(repositoryRoot, { stateRoot: path.join(temporaryRoot, "state") });
+	await store.putBundle(
+		await importCodexSecurityBundle(path.join(FIXTURE_ROOT, "codex-security-completed"), {
+			repositoryRoot,
+			createScanId: () => "secscan_codexfixture",
+		}),
+	);
+	await store.putBundle(
+		await importSarifFile(path.join(FIXTURE_ROOT, "generic-results.sarif"), {
+			repositoryRoot,
+			createScanId: () => "secscan_sariffixture",
+		}),
+	);
+	InternalUrlRouter.resetForTests();
+	InternalUrlRouter.instance().register(new SecurityProtocolHandler(async () => store, () => true));
+});
+
+afterEach(async () => {
+	InternalUrlRouter.resetForTests();
+	await fs.rm(temporaryRoot, { recursive: true, force: true });
+});
+
+describe("security://", () => {
+	test("both producers render through every stable URI level", async () => {
+		const router = InternalUrlRouter.instance();
+		for (const scanId of ["secscan_codexfixture", "secscan_sariffixture"]) {
+			for (const suffix of ["", "/manifest", "/findings", "/coverage", "/report", "/sarif", "/provenance"]) {
+				const resource = await router.resolve(`security://scans/${scanId}${suffix}`, { cwd: repositoryRoot });
+				expect(resource.immutable).toBeTrue();
+				expect(resource.content.length).toBeGreaterThan(0);
+			}
+		}
+	});
+
+	test("finding detail renders and strips terminal control sequences", async () => {
+		const bundle = await store.getBundle("secscan_sariffixture");
+		const finding = bundle?.findings[0];
+		expect(finding).toBeDefined();
+		if (!finding) return;
+		finding.title = "unsafe\u001b[31m title";
+		await store.putBundle(bundle);
+		const resource = await InternalUrlRouter.instance().resolve(
+			`security://scans/secscan_sariffixture/findings/${finding.id}`,
+			{ cwd: repositoryRoot },
+		);
+		expect(resource.content).not.toContain("\u001b");
+	});
+
+	test("write is rejected as read-only", async () => {
+		await expect(
+			InternalUrlRouter.instance().write("security://scans/secscan_codexfixture", "mutate", { cwd: repositoryRoot }),
+		).rejects.toThrow("read-only");
+	});
+
+	test("completion includes scan resources", async () => {
+		const completions = await InternalUrlRouter.instance().complete("security", "", { cwd: repositoryRoot });
+		expect(completions?.some(item => item.value === "scans/secscan_codexfixture/findings")).toBeTrue();
+		expect(completions?.some(item => item.value === "scans/secscan_sariffixture/findings")).toBeTrue();
+	});
+
+	test("rejects surplus path segments instead of aliasing a canonical resource", async () => {
+		await expect(
+			InternalUrlRouter.instance().resolve("security://scans/secscan_codexfixture/manifest/extra", {
+				cwd: repositoryRoot,
+			}),
+		).rejects.toThrow("Unknown security resource");
+		const bundle = await store.getBundle("secscan_sariffixture");
+		const findingId = bundle?.findings[0]?.id;
+		expect(findingId).toBeDefined();
+		if (!findingId) return;
+		await expect(
+			InternalUrlRouter.instance().resolve(
+				`security://scans/secscan_sariffixture/findings/${findingId}/extra`,
+				{ cwd: repositoryRoot },
+			),
+		).rejects.toThrow("Unknown security resource");
+	});
+
+	test("completion filters candidates by the requested path fragment", async () => {
+		const completions = await InternalUrlRouter.instance().complete("security", "sariffixture/coverage", {
+			cwd: repositoryRoot,
+		});
+		expect(completions?.map(item => item.value)).toEqual(["scans/secscan_sariffixture/coverage"]);
+	});
+
+	test("large untrusted reports are bounded", async () => {
+		const bundle = await store.getBundle("secscan_codexfixture");
+		expect(bundle).not.toBeNull();
+		if (!bundle) return;
+		bundle.report = `${"line\n".repeat(10_000)}\u001b[31mTAIL`;
+		await store.putBundle(bundle);
+		const resource = await InternalUrlRouter.instance().resolve("security://scans/secscan_codexfixture/report", {
+			cwd: repositoryRoot,
+		});
+		expect(Buffer.byteLength(resource.content)).toBeLessThanOrEqual(50 * 1024);
+		expect(resource.content).not.toContain("\u001b");
+		expect(resource.notes?.join(" ")).toContain("truncated");
+	});
+});

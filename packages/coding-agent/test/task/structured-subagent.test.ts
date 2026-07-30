@@ -307,6 +307,15 @@ describe("structured subagent primitive", () => {
 		Object.assign(nonPlanSession, { mcpManager, extensionPaths, customToolPaths });
 		const mcpDisabledSession = session();
 		mcpDisabledSession.enableMCP = false;
+		const restrictedSession = session();
+		const getApiKey = async () => "exact-account-key";
+		Object.assign(restrictedSession, {
+			restrictToolNames: true,
+			getApiKey,
+			mcpManager,
+			extensionPaths,
+			customToolPaths,
+		});
 		const options = [] as executorModule.ExecutorOptions[];
 		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async executorOptions => {
 			options.push(executorOptions);
@@ -317,6 +326,9 @@ describe("structured subagent primitive", () => {
 		const nonPlanRun = await runStructuredSubagent(request({ session: nonPlanSession, retainArtifacts: true }));
 		const mcpDisabledRun = await runStructuredSubagent(
 			request({ session: mcpDisabledSession, retainArtifacts: true }),
+		);
+		const restrictedRun = await runStructuredSubagent(
+			request({ session: restrictedSession, retainArtifacts: true }),
 		);
 
 		expect(options[0]).toMatchObject({
@@ -335,9 +347,18 @@ describe("structured subagent primitive", () => {
 		expect(options[1]?.restrictToolNames).toBe(false);
 		expect(options[2]).toMatchObject({ enableMCP: false });
 		expect(options[2]?.mcpManager).toBeUndefined();
+		expect(options[3]).toMatchObject({
+			enableMCP: false,
+			restrictToolNames: true,
+			preloadedExtensionPaths: [],
+			preloadedCustomToolPaths: [],
+		});
+		expect(options[3]?.mcpManager).toBeUndefined();
+		expect(options[3]?.getApiKey).toBe(getApiKey);
 		await fs.rm(planRun.artifactsDir, { recursive: true, force: true });
 		await fs.rm(nonPlanRun.artifactsDir, { recursive: true, force: true });
 		await fs.rm(mcpDisabledRun.artifactsDir, { recursive: true, force: true });
+		await fs.rm(restrictedRun.artifactsDir, { recursive: true, force: true });
 	});
 
 	it("unregisters and removes a temporary lease when output ID allocation fails", async () => {

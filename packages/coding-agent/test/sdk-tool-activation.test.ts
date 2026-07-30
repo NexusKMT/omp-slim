@@ -558,6 +558,25 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		}
 	});
 
+	it("permits only explicitly named SDK custom tools when a restricted caller opts in", async () => {
+		const tempDir = makeTempDir();
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			customTools: [sdkCustomTool],
+			toolNames: ["read", "sdk_custom_tool"],
+			restrictToolNames: true,
+			allowRestrictedCustomTools: true,
+		});
+
+		try {
+			expect(session.getAllToolNames()).toEqual(["read", "sdk_custom_tool"]);
+			expect(session.getActiveToolNames()).toEqual(["read", "sdk_custom_tool"]);
+			expect(session.getToolByName("sdk_custom_tool")).toBeDefined();
+		} finally {
+			await session.dispose();
+		}
+	});
+
 	it("renders report-issue guidance only for unrestricted sessions", async () => {
 		const normalDir = makeTempDir();
 		const restrictedDir = makeTempDir();

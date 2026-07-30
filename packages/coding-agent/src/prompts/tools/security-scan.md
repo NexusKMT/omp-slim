@@ -1,0 +1,1 @@
+Plan, start, inspect, or cancel an OMP-native repository security scan. `preflight` creates an immutable plan pinned to the repository snapshot, model, and exact OAuth credential. `start` runs the plan as a background OMP job. `status` and `cancel` operate on the returned operation ID. Security must be enabled in settings.
