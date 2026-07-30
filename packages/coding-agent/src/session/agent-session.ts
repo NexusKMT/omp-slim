@@ -749,6 +749,13 @@ export class AgentSession {
 			logger.warn("IRC wake turn observer failed to start", { error: String(error) });
 		}
 		this.#resetPromptMaintenanceState();
+		// Capture the generation before the wake so its post-prompt recovery wait
+		// bails the instant an abort (which bumps #promptGeneration) supersedes
+		// this wake — otherwise the wait would follow a successor turn (a queued
+		// follow-up or another stranded IRC wake started by abort cleanup),
+		// delaying finishObservation and mis-attributing the successor's RPC
+		// progress to this now-dead wake monitor.
+		const generation = this.#promptGeneration;
 		this.#beginInFlight();
 		let turnError: unknown;
 		void this.agent
@@ -759,7 +766,7 @@ export class AgentSession {
 			})
 			.finally(async () => {
 				try {
-					await this.#waitForPostPromptRecovery();
+					await this.#waitForPostPromptRecovery(generation);
 				} catch (error) {
 					turnError ??= error;
 					logger.warn("IRC wake turn recovery failed", { error: String(error) });
