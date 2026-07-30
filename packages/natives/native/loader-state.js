@@ -698,10 +698,13 @@ function buildHelpMessage(ctx) {
  * Called from `loadNative()` rather than at module scope so importing pure
  * helpers from this file doesn't trigger AVX2 detection or filesystem probes.
  */
-function initLoaderContext() {
+/**
+ * @param {{ nativeDir?: string; isCompiledBinary?: boolean; leafPackageDir?: string | null }} [overrides]
+ */
+export function initLoaderContext(overrides = {}) {
 	const platformTag = `${process.platform}-${process.arch}`;
 	const packageVersion = packageJson.version;
-	const nativeDir = path.join(import.meta.dir, "..", "native");
+	const nativeDir = overrides.nativeDir ?? path.join(import.meta.dir, "..", "native");
 	const execDir = path.dirname(process.execPath);
 	const nativesDir = getNativesDir();
 	const versionedDir = path.join(nativesDir, packageVersion);
@@ -710,14 +713,21 @@ function initLoaderContext() {
 			? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "omp")
 			: path.join(os.homedir(), ".local", "bin");
 
-	const isCompiledBinary = detectCompiledBinary({
-		embeddedAddon,
-		env: process.env,
-		importMetaUrl: import.meta.url,
-	});
+	const isCompiledBinary =
+		overrides.isCompiledBinary ??
+		detectCompiledBinary({
+			embeddedAddon,
+			env: process.env,
+			importMetaUrl: import.meta.url,
+		});
 	const isWorkspaceLoad =
 		!isCompiledBinary && !nativeDir.includes("\\node_modules\\") && !nativeDir.includes("/node_modules/");
-	const leafPackageDir = isCompiledBinary || isWorkspaceLoad ? null : resolveLeafPackageDir(platformTag);
+	const leafPackageDir =
+		isCompiledBinary || isWorkspaceLoad
+			? null
+			: overrides.leafPackageDir === undefined
+				? resolveLeafPackageDir(platformTag)
+				: overrides.leafPackageDir;
 	const stageFromNodeModules = shouldStageNodeModulesAddon({
 		platform: process.platform,
 		isCompiledBinary,

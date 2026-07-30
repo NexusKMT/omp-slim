@@ -26,6 +26,7 @@ import * as path from "node:path";
 import {
 	cleanupStaleNativeVersions,
 	getAddonFilenames,
+	initLoaderContext,
 	resolveLoaderCandidates,
 	shouldStageNodeModulesAddon,
 } from "../native/loader-state.js";
@@ -112,6 +113,28 @@ describe("windows native addon staging", () => {
 		// addon anyway).
 		const userDataBaseline = path.join(userDataDir, "pi_natives.win32-x64-baseline.node");
 		expect(candidates).not.toContain(userDataBaseline);
+	});
+
+	it("omits leaf-package candidates only for workspace loads", () => {
+		const leafPackageDir = "/tmp/node_modules/@oh-my-pi/pi-natives-darwin-arm64";
+		const workspace = initLoaderContext({
+			isCompiledBinary: false,
+			nativeDir: "/tmp/oh-my-pi/packages/natives/native",
+			leafPackageDir,
+		});
+		const installed = initLoaderContext({
+			isCompiledBinary: false,
+			nativeDir: "/tmp/node_modules/@oh-my-pi/pi-natives/native",
+			leafPackageDir,
+		});
+		const leafCandidate = path.join(leafPackageDir, workspace.addonFilenames[0]);
+
+		expect(workspace.isWorkspaceLoad).toBe(true);
+		expect(workspace.leafPackageDir).toBeNull();
+		expect(workspace.candidates).not.toContain(leafCandidate);
+		expect(installed.isWorkspaceLoad).toBe(false);
+		expect(installed.leafPackageDir).toBe(leafPackageDir);
+		expect(installed.candidates).toContain(leafCandidate);
 	});
 
 	it("falls back to the node_modules-only candidate list when staging is off", () => {
