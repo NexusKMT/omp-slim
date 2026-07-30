@@ -8,12 +8,12 @@ file_hash: /[0-9A-F]{4}/
 filename: /[^#\r\n]+/
 
 hunk: put_hunk | cut_hunk | rem_hunk | mv_hunk
-put_hunk: "PUT " put_locator register? ":" LF body*
+put_hunk: "PUT " put_locator ":" LF body+
         | "PUT " put_locator register LF
         | "PUT " gap_locator LF
 cut_hunk: "CUT " cut_locator register? LF
 rem_hunk: "REM" LF
-mv_hunk: "MV " filename LF body*
+mv_hunk: "MV " filename LF
 
 put_locator: range | LID "*" | gap_locator
 cut_locator: range | LID "*"

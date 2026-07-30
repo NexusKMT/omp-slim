@@ -51,7 +51,7 @@ Inside a section:
 - `PUT A*:` — replace the syntactic block beginning on line A.
 - `PUT <A:` / `PUT >A:` — insert following body rows before/after line A (`<1` = head, `>$` = tail).
 - `PUT >A*:` — insert following body rows after the resolved block's last line.
-- `PUT <A` / `PUT >A` / `PUT A.=B @name` — paste a captured register at a gap or over a range (no `:` header, no body rows; `@name` optional at gaps).
+- `PUT <A` / `PUT >A` / `PUT A.=B @name` / `PUT A* @name` — paste a captured register at a gap, over a range, or over a resolved block (no `:` header or body rows; `@name` is optional only at gaps).
 - `CUT A.=B` / `CUT A*` — delete concrete lines or a resolved block and capture them (anonymous, or `@name` when given).
 - `REM` — delete the whole file named by the section header.
 - `MV DEST` — move/rename the section file to `DEST` (optionally after line edits).

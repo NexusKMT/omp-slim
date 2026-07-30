@@ -9,7 +9,16 @@
 ### Added
 
 - Added named register support (`@reg`) and span paste capabilities to clipboard operations
-- Added auto-shifting for uniformly omitted base indents under brace openers
+- Added conservative recovery for uniformly omitted replacement indents that would otherwise escape an immediately preceding brace opener, while preserving intentional indentation-only edits
+
+### Changed
+
+- Made `.=` the canonical inclusive range separator while retaining legacy separator variants as lenient input
+- Unified replacement, insertion, register paste, block, head/tail, move, and removal headers under the composable `PUT`, `CUT`, `MV`, and `REM` grammar
+
+### Fixed
+
+- Recovered common model output mistakes including numbered read rows, summarized ranges, diff-style old/new rows, empty `PUT` deletes, harmless `CUT` colons, and single-line span shorthand without weakening overlap or stale-snapshot guards
 
 ## [17.2.0] - 2026-07-30
 

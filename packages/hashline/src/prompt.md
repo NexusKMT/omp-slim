@@ -9,7 +9,7 @@ Every file section starts `[PATH#TAG]`. `TAG` = 4-hex snapshot tag from your lat
 `PUT N*:` — replace the syntactic block BEGINNING on line N; its closing line is resolved for you.
 `PUT <N:` / `PUT >N:` — insert body rows before / after line N (`PUT <1:` = file head, `PUT >$:` = file tail).
 `PUT >N*:` — insert body rows after the END of the block beginning at N (at sibling depth). Append inside a block → `PUT >M:`.
-`PUT <N` / `PUT >N` / `PUT N.=M @name` — paste a captured register at a gap or over a range (no `:` header, no body rows). Unlabeled `PUT` pastes the anonymous register; `@name` selects a named register.
+`PUT <N` / `PUT >N` / `PUT N.=M @name` / `PUT N* @name` — paste a captured register at a gap, over a range, or over a resolved block (no `:` header, no body rows). Unlabeled gap `PUT` pastes the anonymous register; span/block paste requires `@name`.
 `CUT N.=M` / `CUT N*` — delete lines N through M / block N and capture them (anonymous, or `@name` when given).
 `REM` — delete the whole section file. `MV DEST` — move/rename to `DEST` (quote paths with spaces); edits above `MV` land on the source first, final content written at `DEST`.
 Single line: `PUT N.=N:` / `CUT N.=N`. Range = ORIGINAL lines touched (`N.=M`, inclusive); body length irrelevant.

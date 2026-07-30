@@ -9,6 +9,7 @@
 ### Changed
 
 - Moved the display-reset default chord (`app.display.reset`) from `Ctrl+L` to `Alt+L` to make room for the live-mode toggle.
+- Updated the hashline edit tool, streaming preview, and plan-mode guidance for the unified `PUT`/`CUT` grammar, `.=` ranges, and named registers.
 
 ## [17.2.1] - 2026-07-30
 
