@@ -9,27 +9,25 @@
  * every run counts as its own hunk.
  *
  * Shapes are reported at two levels:
- *   - per tool call — one sample per edit call;
- *   - per user request — all edit calls between one user message and the next
- *     grouped into one sample (one benchmark fixture ≙ one prompt, and the
- *     runner allows multiple edit calls per prompt). Retried/overlapping edits
- *     within a request are summed, so request sizes lean high, and a request
- *     spans every file a long agentic turn touched — an upper bound for
- *     single-file fixtures.
+ *   - per tool call — one sample per edit call. Fixtures are scored on the
+ *     final input→expected diff, and a single call's diff is the closest
+ *     measured proxy for a net diff, so **this is the calibration reference**
+ *     for `generate.ts`.
+ *   - per request × file — all edit calls to one file between one user message
+ *     and the next, concatenated. This double-counts retries, overlapping
+ *     edits, and reversals (no per-file net reconstruction), so treat it as an
+ *     **upper bound** on how much a single-prompt fixture could plausibly ask
+ *     for, not as a target.
  *
  * Parse coverage is printed so a format skew cannot silently bias the numbers.
  * Reference measurement (2026-07, 2,000 newest sessions against this repo,
  * 99.9% coverage):
  *
- *   per request: changed lines: 1 → 6%   2-5 → 11%  6-20 → 20%  21-60 → 25%  61+ → 39%
- *                hunks: 1 → 11%  2 → 8%   3+ → 81%   (median 40 changed lines)
- *   per call:    changed lines: 1 → 23%  2-5 → 30%  6-20 → 29%  21-60 → 14%  61+ → 5%
- *                hunks: 1 → 48%  2 → 21%  3+ → 31%   (median 5 changed lines)
+ *   per call:      changed lines: 1 → 23%  2-5 → 30%  6-20 → 29%  21-60 → 14%  61+ → 5%
+ *                  hunks: 1 → 48%  2 → 21%  3+ → 31%   (median 5 changed lines)
+ *   request×file:  changed lines: 1 → 18%  2-5 → 28%  6-20 → 28%  21-60 → 17%  61+ → 9%
+ *                  hunks: 1 → 37%  2 → 21%  3+ → 43%   (median 7; upper bound)
  *   op mix (both levels): replace 55%  insert 32%  delete 12%
- *
- * `generate.ts` fixtures are single-file, single-prompt tasks: the suite is
- * calibrated to sit between the two levels — per-call shapes for token fixes,
- * request-leaning shapes (large blocks, multi-hunk composites) for the rest.
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -157,26 +155,46 @@ function runsFromDiff(diff: string): { runs: ChangeRun[] | null; format: "number
 	return { runs: runsFromNumberedDiff(diff), format: "numbered" };
 }
 
-/** Per-session parse results: change runs per edit call and per user request, plus coverage counters. */
+/** Per-session parse results: change runs per edit call and per request×file, plus coverage counters. */
 interface SessionScan {
 	edits: ChangeRun[][];
-	/** All edit-call runs between one user message and the next, concatenated. */
-	requests: ChangeRun[][];
+	/** All edit-call runs targeting one file between one user message and the next, concatenated. */
+	requestFiles: ChangeRun[][];
 	formats: Map<string, number>;
 	skipped: number;
 }
 
+/** Resolve the edited file path from tool-call args across edit-tool variants. */
+function extractCallPath(args: Record<string, unknown>): string | null {
+	if (typeof args.path === "string" && args.path) return args.path;
+	if (typeof args.input === "string") {
+		const header =
+			args.input.match(/^\u00b6([^#\n]+)#/) ??
+			args.input.match(/^\[([^#\]\n]+)#/) ??
+			args.input.match(/^@@ ([^\n]+)$/m);
+		if (header) return header[1].trim();
+	}
+	if (Array.isArray(args.edits) && args.edits.length > 0 && args.edits[0] && typeof args.edits[0] === "object") {
+		const nested = (args.edits[0] as Record<string, unknown>).path;
+		if (typeof nested === "string" && nested) return nested;
+	}
+	return null;
+}
+
 /** Extract change runs for every successful edit in one session JSONL file. */
 async function collectSessionEdits(sessionFile: string): Promise<SessionScan> {
-	const scan: SessionScan = { edits: [], requests: [], formats: new Map(), skipped: 0 };
+	const scan: SessionScan = { edits: [], requestFiles: [], formats: new Map(), skipped: 0 };
 	const stream = Bun.file(sessionFile).stream();
 	const decoder = new TextDecoder();
 	let buffer = "";
-	let currentRequest: ChangeRun[] = [];
+	const callPaths = new Map<string, string>();
+	let currentRequest = new Map<string, ChangeRun[]>();
 
 	const flushRequest = (): void => {
-		if (currentRequest.length > 0) scan.requests.push(currentRequest);
-		currentRequest = [];
+		for (const runs of currentRequest.values()) {
+			if (runs.length > 0) scan.requestFiles.push(runs);
+		}
+		currentRequest = new Map();
 	};
 
 	const handleRecord = (record: unknown): void => {
@@ -185,9 +203,21 @@ async function collectSessionEdits(sessionFile: string): Promise<SessionScan> {
 		if (rec.type !== "message" || !rec.message || typeof rec.message !== "object") return;
 		const message = rec.message as Record<string, unknown>;
 		// A user message starts a new request; everything until the next one
-		// belongs to the same prompt (one benchmark fixture ≙ one request).
+		// belongs to the same prompt (one benchmark fixture ≙ one prompt on one file).
 		if (message.role === "user") {
 			flushRequest();
+			return;
+		}
+		if (message.role === "assistant" && Array.isArray(message.content)) {
+			for (const block of message.content) {
+				if (!block || typeof block !== "object") continue;
+				const call = block as Record<string, unknown>;
+				if (call.type !== "toolCall" || !EDIT_TOOL_NAMES[String(call.name)]) continue;
+				const args =
+					call.arguments && typeof call.arguments === "object" ? (call.arguments as Record<string, unknown>) : {};
+				const callPath = extractCallPath(args);
+				if (typeof call.id === "string" && callPath) callPaths.set(call.id, callPath);
+			}
 			return;
 		}
 		if (message.role !== "toolResult" || !EDIT_TOOL_NAMES[String(message.toolName)] || message.isError) return;
@@ -201,7 +231,12 @@ async function collectSessionEdits(sessionFile: string): Promise<SessionScan> {
 		const { runs, format } = runsFromDiff(diff);
 		if (runs) {
 			scan.edits.push(runs);
-			currentRequest.push(...runs);
+			// Unknown path → each call is its own group (conservative: no false merging).
+			const callId = typeof message.toolCallId === "string" ? message.toolCallId : `#${scan.edits.length}`;
+			const fileKey = callPaths.get(callId) ?? `call:${callId}`;
+			const group = currentRequest.get(fileKey) ?? [];
+			group.push(...runs);
+			currentRequest.set(fileKey, group);
 			scan.formats.set(format, (scan.formats.get(format) ?? 0) + 1);
 		} else {
 			scan.skipped++;
@@ -278,7 +313,7 @@ async function main(): Promise<number> {
 	};
 
 	const perCall = newCounters();
-	const perRequest = newCounters();
+	const perRequestFile = newCounters();
 	const formatCounts = new Map<string, number>();
 	let skipped = 0;
 
@@ -287,14 +322,14 @@ async function main(): Promise<number> {
 		while (next < sessionFiles.length) {
 			const file = sessionFiles[next++];
 			const scan = await collectSessionEdits(file).catch(
-				(): SessionScan => ({ edits: [], requests: [], formats: new Map(), skipped: 0 }),
+				(): SessionScan => ({ edits: [], requestFiles: [], formats: new Map(), skipped: 0 }),
 			);
 			skipped += scan.skipped;
 			for (const [format, count] of scan.formats) {
 				formatCounts.set(format, (formatCounts.get(format) ?? 0) + count);
 			}
 			for (const runs of scan.edits) accumulate(perCall, runs);
-			for (const runs of scan.requests) accumulate(perRequest, runs);
+			for (const runs of scan.requestFiles) accumulate(perRequestFile, runs);
 		}
 	});
 	await Promise.all(workers);
@@ -309,8 +344,8 @@ async function main(): Promise<number> {
 	console.log(
 		`\nParse coverage: ${parsedTotal}/${parsedTotal + skipped} diff results (${(coverage * 100).toFixed(1)}%; ${formatSummary})`,
 	);
-	report("per user request (calibration target)", perRequest);
-	report("per tool call", perCall);
+	report("per tool call (calibration reference)", perCall);
+	report("per request × file (cumulative activity — upper bound)", perRequestFile);
 	return 0;
 }
 

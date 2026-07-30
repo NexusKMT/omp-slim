@@ -53,6 +53,9 @@ async function runScenario(scenario: string): Promise<ScenarioResult> {
 				XDG_DATA_HOME: "",
 				XDG_STATE_HOME: "",
 				XDG_CACHE_HOME: "",
+				// Empty XDG_CACHE_HOME makes Bun's transpiler cache path relative,
+				// spewing bun/@t@/*.pile into the repo root (the child's cwd) — disable it.
+				BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0",
 				OMP_LOGGER_TEST_NOW: fixedNow,
 				TZ: "Etc/GMT+5",
 			},

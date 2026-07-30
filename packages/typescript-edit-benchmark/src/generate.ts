@@ -127,14 +127,7 @@ function parseArguments(): Args {
 /** Target changed-line range for a generated case. */
 type SizeRange = [number, number];
 
-/**
- * Per-mutation case counts and changed-line targets, calibrated against the
- * empirical edit-shape distribution measured from real agent sessions
- * (`edit-shape-stats.ts`): 1 → 27%, 2-5 → 30%, 6-20 → 26%, 21-60 → 13%,
- * 61+ → 4%. Token-level mutations supply the 1-line mass; small structural and
- * multi-site mutations the 2-5 band; block-level mutations cycle through the
- * larger bands via `sizes`.
- */
+/** How many cases to generate for a mutation, and which changed-line bands to cycle through. */
 interface MutationPlan {
 	count: number;
 	sizes?: SizeRange[];
@@ -151,30 +144,40 @@ const BLOCK_SIZES: SizeRange[] = [
 	[21, 60],
 ];
 
+/**
+ * Per-mutation case counts and changed-line targets, calibrated against the
+ * per-tool-call edit-shape distribution measured from real agent sessions
+ * (`edit-shape-stats.ts`, calibration reference): 1 → 23%, 2-5 → 30%,
+ * 6-20 → 29%, 21-60 → 14%, 61+ → 5%. The request×file cumulative numbers form
+ * an upper bound; the suite deliberately sits at or slightly above the
+ * per-call sizes. Token-level mutations supply the 1-line mass; small
+ * structural and multi-site mutations the 2-5 band; block-level mutations
+ * cycle through the larger bands via `sizes`.
+ */
 const MUTATION_PLANS: Record<string, MutationPlan> = {
-	"swap-comparison": { count: 2 },
-	"swap-equality": { count: 2 },
-	"swap-logical": { count: 2 },
-	"remove-negation": { count: 2 },
-	"swap-increment-decrement": { count: 2 },
-	"swap-arithmetic": { count: 2 },
-	"flip-boolean": { count: 2 },
-	"remove-optional-chain": { count: 2 },
-	"swap-call-args": { count: 2 },
-	"swap-nullish": { count: 2 },
-	"swap-regex-quantifier": { count: 2 },
-	"unicode-hyphen": { count: 2 },
-	"off-by-one": { count: 2 },
+	"swap-comparison": { count: 1 },
+	"swap-equality": { count: 1 },
+	"swap-logical": { count: 1 },
+	"remove-negation": { count: 1 },
+	"swap-increment-decrement": { count: 1 },
+	"swap-arithmetic": { count: 1 },
+	"flip-boolean": { count: 1 },
+	"remove-optional-chain": { count: 1 },
+	"swap-call-args": { count: 1 },
+	"swap-nullish": { count: 1 },
+	"swap-regex-quantifier": { count: 1 },
+	"unicode-hyphen": { count: 1 },
+	"off-by-one": { count: 1 },
 	"swap-adjacent-lines": { count: 6 },
 	"duplicate-line-flip": { count: 6 },
-	"identifier-multi-edit": { count: 8 },
+	"identifier-multi-edit": { count: 10 },
 	"swap-if-else": { count: 6 },
 	"wrap-redundant-if": { count: 12, sizes: BLOCK_SIZES },
 	"swap-sibling-blocks": { count: 12, sizes: BLOCK_SIZES },
 	"duplicate-block": { count: 6, sizes: BLOCK_SIZES },
 	"move-distant-block": { count: 14, sizes: BLOCK_SIZES },
 	"remove-case-label": { count: 8 },
-	"composite-multi-edit": { count: 14 },
+	"composite-multi-edit": { count: 16 },
 };
 
 async function ensureSourceRepo(typescriptDir: string): Promise<void> {
