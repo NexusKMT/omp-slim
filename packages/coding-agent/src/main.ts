@@ -1608,6 +1608,7 @@ export async function runRootCommand(
 				modelRegistry,
 				settings: settingsInstance,
 				enableLsp: sessionOptions.enableLsp ?? true,
+				eventBus,
 			}),
 			Math.trunc(Number(settingsInstance.get("task.agentIdleTtlMs") ?? 420_000) || 0),
 		);
