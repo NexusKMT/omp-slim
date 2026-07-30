@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the event-loop watchdog reporting system sleep as a synchronous `ui.loop-blocked` stall. A long missed probe interval is now treated as process suspension and suppressed, while shorter real stalls continue to report with their phase attribution.
+
 ## [17.2.0] - 2026-07-30
 
 ### Added
