@@ -1,6 +1,13 @@
 import type { AgentTool, AgentToolResult, ToolTier } from "@oh-my-pi/pi-agent-core";
 import { type } from "arktype";
 import securityScanDescription from "../prompts/tools/security-scan.md" with { type: "text" };
+import { selectSecurityAccount } from "../security/auth";
+import {
+	CodexSecurityCloudClient,
+	type CodexSecurityCloudConfiguration,
+	type CodexSecurityCloudStats,
+	pullCodexSecurityCloudResults,
+} from "../security/cloud";
 import { createSecurityEvidenceId, type SecurityEvidence, type SecurityValidationStatus } from "../security/contracts";
 import type { SecurityOperationSnapshot } from "../security/coordinator";
 import { getSecurityCoordinator } from "../security/coordinator";
@@ -10,7 +17,8 @@ import type { ToolSession } from "./index";
 import { ToolError } from "./tool-errors";
 
 const securityScanSchema = type({
-	action: "'preflight' | 'start' | 'status' | 'cancel' | 'validate'",
+	action:
+		"'preflight' | 'start' | 'status' | 'cancel' | 'validate' | 'cloud_scans' | 'cloud_start' | 'cloud_status' | 'cloud_pull'",
 	"plan_id?": "string",
 	"operation_id?": "string",
 	"target_kind?": "'repository' | 'scoped_path' | 'ref_diff' | 'working_tree'",
@@ -27,6 +35,11 @@ const securityScanSchema = type({
 	"validation_status?": "'unvalidated' | 'validated' | 'rejected' | 'partial' | 'error'",
 	"validation_summary?": "string",
 	"validation_evidence?": type({ label: "string > 0", explanation: "string" }).array(),
+	"cloud_configuration_id?": "string",
+	"repository_id?": "string",
+	"repository_url?": "string",
+	"environment_id?": "string",
+	"lookback_days?": "number.integer >= 1 | 'all'",
 });
 
 type SecurityScanParams = typeof securityScanSchema.infer;
@@ -37,6 +50,10 @@ export interface SecurityScanToolDetails {
 	operation?: SecurityOperationSnapshot;
 	cancelled?: boolean;
 	finding?: { id: string; validationStatus: SecurityValidationStatus };
+	cloudConfigurations?: CodexSecurityCloudConfiguration[];
+	cloudStats?: CodexSecurityCloudStats;
+	cloudScan?: { id: string; repositoryUrl: string };
+	importedScan?: { id: string; findingCount: number };
 }
 
 function targetFromParams(params: SecurityScanParams): SecurityTargetRequest {
@@ -70,6 +87,17 @@ function requireValue(value: string | undefined, label: string): string {
 	return value.trim();
 }
 
+function cloudClientForSession(session: ToolSession, credentialId?: number): CodexSecurityCloudClient {
+	if (!session.authStorage) throw new ToolError("Codex Security cloud requires the authentication registry");
+	const account = selectSecurityAccount(
+		session.authStorage,
+		"openai-codex",
+		credentialId,
+		session.getSessionId?.() ?? undefined,
+	);
+	return new CodexSecurityCloudClient({ authStorage: session.authStorage, account });
+}
+
 function textResult(text: string, details: SecurityScanToolDetails): AgentToolResult<SecurityScanToolDetails> {
 	return { content: [{ type: "text", text }], details };
 }
@@ -79,7 +107,7 @@ export class SecurityScanTool implements AgentTool<typeof securityScanSchema, Se
 	readonly approval: ToolTier = "exec";
 	readonly label = "Security Scan";
 	readonly loadMode = "discoverable";
-	readonly summary = "Plan, run, and validate an OMP-native software-security scan";
+	readonly summary = "Run OMP-native scans and explicit Codex Security cloud operations";
 	readonly description = securityScanDescription.trim();
 	readonly parameters = securityScanSchema;
 	readonly strict = true;
@@ -157,6 +185,65 @@ export class SecurityScanTool implements AgentTool<typeof securityScanSchema, Se
 						action: params.action,
 						cancelled,
 						operation: (await coordinatorForSession().status(operationId)) ?? undefined,
+					},
+				);
+			}
+			case "cloud_scans": {
+				const configurations = await cloudClientForSession(
+					this.session,
+					params.credential_id,
+				).listAllConfigurations(signal);
+				return textResult(
+					configurations.length === 0
+						? "No Codex Security cloud scan configurations are available."
+						: configurations
+								.map(
+									item =>
+										`${item.id} ${item.currentStep ?? "unknown"} repo=${item.repositoryId} environment=${item.environmentId} ${item.repositoryUrl}`,
+								)
+								.join("\n"),
+					{ action: params.action, cloudConfigurations: configurations },
+				);
+			}
+			case "cloud_start": {
+				const configuration = await cloudClientForSession(this.session, params.credential_id).startScan({
+					repositoryId: requireValue(params.repository_id, "repository_id"),
+					repositoryUrl: requireValue(params.repository_url, "repository_url"),
+					environmentId: requireValue(params.environment_id, "environment_id"),
+					lookbackDays: params.lookback_days,
+					signal,
+				});
+				return textResult(
+					`Codex Security cloud scan ${configuration.id} started for ${configuration.repositoryUrl}. This consumes cloud scan allowance.`,
+					{
+						action: params.action,
+						cloudScan: { id: configuration.id, repositoryUrl: configuration.repositoryUrl },
+					},
+				);
+			}
+			case "cloud_status": {
+				const stats = await cloudClientForSession(this.session, params.credential_id).getStats(
+					requireValue(params.cloud_configuration_id, "cloud_configuration_id"),
+					signal,
+				);
+				return textResult(
+					`Codex Security cloud scan ${stats.configurationId}: ${stats.currentStep ?? "unknown"}; ${stats.finishedCommits} finished commit(s), ${stats.pendingCommits} pending.`,
+					{ action: params.action, cloudStats: stats },
+				);
+			}
+			case "cloud_pull": {
+				const store = await SecurityStore.openForCwd(this.session.cwd, { signal });
+				const bundle = await pullCodexSecurityCloudResults({
+					client: cloudClientForSession(this.session, params.credential_id),
+					configurationId: requireValue(params.cloud_configuration_id, "cloud_configuration_id"),
+					store,
+					signal,
+				});
+				return textResult(
+					`Imported ${bundle.findings.length} Codex Security cloud finding(s) as security scan ${bundle.scan.id}.`,
+					{
+						action: params.action,
+						importedScan: { id: bundle.scan.id, findingCount: bundle.findings.length },
 					},
 				);
 			}

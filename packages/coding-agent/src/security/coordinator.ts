@@ -15,9 +15,8 @@ import type { AgentSession } from "../session/agent-session";
 import type { AuthStorage } from "../session/auth-storage";
 import { SessionManager } from "../session/session-manager";
 import * as git from "../utils/git";
-import { createExactSecurityOAuthResolver } from "./auth";
+import { createExactSecurityOAuthResolver, selectSecurityAccount } from "./auth";
 import type {
-	SecurityAccountRef,
 	SecurityCoverage,
 	SecurityModelRef,
 	SecurityScan,
@@ -224,38 +223,6 @@ function initialBundle(
 	};
 }
 
-function resolveAccount(
-	host: SecurityCoordinatorHost,
-	model: Model,
-	requestedCredentialId?: number,
-): SecurityAccountRef {
-	const accounts = host.authStorage.listOAuthAccounts(model.provider, host.sessionId);
-	const selected =
-		requestedCredentialId !== undefined
-			? accounts.find(account => account.credentialId === requestedCredentialId)
-			: (accounts.find(account => account.active) ?? (accounts.length === 1 ? accounts[0] : undefined));
-	if (!selected) {
-		if (accounts.length === 0) {
-			throw new Error(`Security scans require a stored OAuth account for ${model.provider}`);
-		}
-		if (requestedCredentialId !== undefined) {
-			throw new Error(`Security OAuth credential ${requestedCredentialId} is not available for ${model.provider}`);
-		}
-		throw new Error(
-			`Multiple OAuth accounts are available for ${model.provider}; supply credentialId to pin one exact account`,
-		);
-	}
-	const account: SecurityAccountRef = {
-		provider: model.provider,
-		credentialId: selected.credentialId,
-	};
-	if (selected.accountId !== undefined) account.accountId = selected.accountId;
-	if (selected.email !== undefined) account.email = selected.email;
-	if (selected.orgId !== undefined) account.organizationId = selected.orgId;
-	if (selected.orgName !== undefined) account.organizationName = selected.orgName;
-	return account;
-}
-
 async function createDefaultSecuritySession(input: SecurityScanSessionFactoryInput): Promise<AgentSession> {
 	const scanSettings = await input.host.settings.cloneForCwd(input.executionRoot);
 	const modelSelector = `${input.model.provider}/${input.model.id}`;
@@ -448,7 +415,12 @@ export class SecurityCoordinator {
 		}
 		const model = input.model ?? this.#host.activeModel;
 		if (!model) throw new Error("Security scan preflight requires an active model");
-		const account = resolveAccount(this.#host, model, input.credentialId);
+		const account = selectSecurityAccount(
+			this.#host.authStorage,
+			model.provider,
+			input.credentialId,
+			this.#host.sessionId,
+		);
 		const store = await this.#openStore(this.#host.cwd);
 		const workRoot = path.join(store.projectDirectory, "work");
 		await fs.mkdir(workRoot, { recursive: true, mode: 0o700 });

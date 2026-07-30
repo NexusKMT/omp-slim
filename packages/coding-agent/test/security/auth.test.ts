@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "bun:test";
 import type { ApiKeyResolver } from "@oh-my-pi/pi-ai/auth-retry";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { createExactSecurityOAuthResolver } from "../../src/security";
+import { createExactSecurityOAuthResolver, selectSecurityAccount } from "../../src/security";
 import type { AuthStorage } from "../../src/session/auth-storage";
 
 function model() {
@@ -11,6 +11,21 @@ function model() {
 }
 
 describe("exact security OAuth resolver", () => {
+	test("selects an explicit credential without account rotation", () => {
+		const listOAuthAccounts = vi.fn(() => [
+			{ credentialId: 11, position: 0, active: true, accountId: "workspace-a" },
+			{ credentialId: 42, position: 1, active: false, accountId: "workspace-b" },
+		]);
+		const selected = selectSecurityAccount(
+			{ listOAuthAccounts } as unknown as AuthStorage,
+			"openai-codex",
+			42,
+			"session-a",
+		);
+		expect(selected).toEqual({ provider: "openai-codex", credentialId: 42, accountId: "workspace-b" });
+		expect(listOAuthAccounts).toHaveBeenCalledWith("openai-codex", "session-a");
+	});
+
 	test("resolves and refreshes only the pinned durable row", async () => {
 		const getOAuthAccessByCredentialId = vi.fn(async (_provider, credentialId, options) => ({
 			ok: true as const,

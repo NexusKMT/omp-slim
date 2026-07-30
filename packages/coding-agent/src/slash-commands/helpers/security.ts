@@ -4,6 +4,8 @@ import { prompt } from "@oh-my-pi/pi-utils";
 import { parseInternalUrl } from "../../internal-urls/parse";
 import { SecurityProtocolHandler } from "../../internal-urls/security-protocol";
 import validationRequestPrompt from "../../prompts/security/validate-request.md" with { type: "text" };
+import { selectSecurityAccount } from "../../security/auth";
+import { CodexSecurityCloudClient, pullCodexSecurityCloudResults } from "../../security/cloud";
 import type { SecurityDispositionStatus } from "../../security/contracts";
 import type { SecurityPreflightInput } from "../../security/coordinator";
 import { getSecurityCoordinator } from "../../security/coordinator";
@@ -203,6 +205,130 @@ async function exportResults(runtime: SlashCommandRuntime, rest: string): Promis
 	await runtime.output(`Exported security scan ${scanId} to ${absolute}.`);
 }
 
+interface CloudCliOptions {
+	credentialId?: number;
+	configurationId?: string;
+	repositoryId?: string;
+	repositoryUrl?: string;
+	environmentId?: string;
+	lookbackDays?: number | "all";
+}
+
+function parseCloudOptions(rest: string, subcommand: string): CloudCliOptions {
+	const tokens = parseCommandArgs(rest);
+	const options: CloudCliOptions = {};
+	let positionalConsumed = false;
+	for (let index = 0; index < tokens.length; index++) {
+		const token = tokens[index]!;
+		switch (token) {
+			case "--credential":
+				options.credentialId = parsePositiveCredential(requireToken(tokens, ++index, token));
+				break;
+			case "--repo-id":
+				options.repositoryId = requireToken(tokens, ++index, token);
+				break;
+			case "--repo-url":
+				options.repositoryUrl = requireToken(tokens, ++index, token);
+				break;
+			case "--environment":
+				options.environmentId = requireToken(tokens, ++index, token);
+				break;
+			case "--lookback": {
+				const value = requireToken(tokens, ++index, token);
+				if (value === "all") {
+					options.lookbackDays = value;
+					break;
+				}
+				const days = Number(value);
+				if (!Number.isSafeInteger(days) || days < 1) throw new Error(`Invalid lookback: ${value}`);
+				options.lookbackDays = days;
+				break;
+			}
+			default:
+				if (!token.startsWith("--") && !positionalConsumed && (subcommand === "status" || subcommand === "pull")) {
+					options.configurationId = token;
+					positionalConsumed = true;
+					break;
+				}
+				throw new Error(`Unknown security cloud option: ${token}`);
+		}
+	}
+	return options;
+}
+
+function cloudClientFor(runtime: SlashCommandRuntime, credentialId?: number): CodexSecurityCloudClient {
+	const authStorage = runtime.session.modelRegistry.authStorage;
+	const account = selectSecurityAccount(authStorage, "openai-codex", credentialId, runtime.session.sessionId);
+	return new CodexSecurityCloudClient({ authStorage, account });
+}
+
+async function handleCloudCommand(runtime: SlashCommandRuntime, rest: string): Promise<void> {
+	const { verb, rest: optionsText } = parseSubcommand(rest);
+	const subcommand = verb || "scans";
+	const options = parseCloudOptions(optionsText, subcommand);
+	const client = cloudClientFor(runtime, options.credentialId);
+	switch (subcommand) {
+		case "scans": {
+			const configurations = await client.listAllConfigurations();
+			await runtime.output(
+				configurations.length === 0
+					? "No Codex Security cloud scan configurations are available for this account."
+					: configurations
+							.map(item =>
+								[
+									item.id,
+									item.state ?? "unknown",
+									item.currentStep ?? "unknown",
+									`repo=${item.repositoryId}`,
+									`environment=${item.environmentId}`,
+									item.repositoryUrl,
+									item.remainingScans === undefined ? "" : `${item.remainingScans} scan(s) remaining`,
+								]
+									.filter(Boolean)
+									.join(" "),
+							)
+							.join("\n"),
+			);
+			return;
+		}
+		case "start": {
+			if (!options.repositoryId || !options.repositoryUrl || !options.environmentId) {
+				throw new Error("cloud start requires --repo-id, --repo-url, and --environment");
+			}
+			const configuration = await client.startScan({
+				repositoryId: options.repositoryId,
+				repositoryUrl: options.repositoryUrl,
+				environmentId: options.environmentId,
+				lookbackDays: options.lookbackDays,
+			});
+			await runtime.output(
+				`Codex Security cloud scan ${configuration.id} started for ${configuration.repositoryUrl}. This consumes cloud scan allowance.`,
+			);
+			return;
+		}
+		case "status": {
+			if (!options.configurationId) throw new Error("cloud status requires a configuration id");
+			await runtime.output(JSON.stringify(await client.getStats(options.configurationId), null, 2));
+			return;
+		}
+		case "pull": {
+			if (!options.configurationId) throw new Error("cloud pull requires a configuration id");
+			const store = await SecurityStore.openForCwd(runtime.cwd);
+			const bundle = await pullCodexSecurityCloudResults({
+				client,
+				configurationId: options.configurationId,
+				store,
+			});
+			await runtime.output(
+				`Imported ${bundle.findings.length} Codex Security cloud finding(s) as security scan ${bundle.scan.id}.`,
+			);
+			return;
+		}
+		default:
+			throw new Error("Usage: /security cloud <scans|start|status|pull>");
+	}
+}
+
 async function updateDisposition(runtime: SlashCommandRuntime, rest: string): Promise<void> {
 	const [scanId, findingId, status, ...rationaleParts] = parseCommandArgs(rest);
 	if (!scanId || !findingId || !status) {
@@ -304,12 +430,15 @@ export async function handleSecurityCommand(
 				await runtime.output(JSON.stringify(report, null, 2));
 				return commandConsumed();
 			}
+			case "cloud":
+				await handleCloudCommand(runtime, rest);
+				return commandConsumed();
 			case "disposition":
 				await updateDisposition(runtime, rest);
 				return commandConsumed();
 			default:
 				return usage(
-					"Usage: /security <plan|scan|status|cancel|scans|show|import|export|validate|compare|disposition>",
+					"Usage: /security <plan|scan|status|cancel|scans|cloud|show|import|export|validate|compare|disposition>",
 					runtime,
 				);
 		}

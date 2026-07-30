@@ -4,7 +4,7 @@ const stringRecordSchema = type({ "[string]": "string" });
 const unknownRecordSchema = type({ "[string]": "unknown" });
 
 export const securityProducerSchema = type({
-	kind: "'omp-native' | 'codex-security-bundle' | 'sarif-import'",
+	kind: "'omp-native' | 'codex-security-bundle' | 'codex-security-cloud' | 'sarif-import'",
 	name: "string > 0",
 	"version?": "string",
 	"vendor?": "string",
