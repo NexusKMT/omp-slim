@@ -137,10 +137,33 @@ const DDG_QUERY_SYNTAX: QuerySyntax = {
 	filetype: true,
 };
 
+/**
+ * DuckDuckGo names the United Kingdom region `uk` where ISO 3166 uses `gb`.
+ * Every other locale reuses its country code verbatim.
+ */
+const DDG_REGION_ALIASES: Record<string, string> = { gb: "uk" };
+
+/**
+ * Map a parsed `lang:` locale onto DuckDuckGo's `kl` region parameter.
+ *
+ * DDG orders `kl` as `region-language` (`us-en`, `de-de`) — the reverse of the
+ * shared `language-region` locale convention parsed into `StructuredQuery.lang`
+ * (`en-us`, `de-de`). Region-qualified locales are swapped into DDG order and
+ * run through {@link DDG_REGION_ALIASES}; language-only or malformed values
+ * return undefined so the caller keeps its default region.
+ */
+export function localeToKl(lang: string | undefined): string | undefined {
+	if (!lang) return undefined;
+	const match = /^([a-z]{2})[-_]([a-z]{2})$/.exec(lang.toLowerCase());
+	if (!match) return undefined;
+	const [, language, country] = match;
+	return `${DDG_REGION_ALIASES[country] ?? country}-${language}`;
+}
+
 async function callDuckDuckGoHtml(params: SearchParams): Promise<string> {
 	const form = new URLSearchParams({
 		q: formatScraperQuery(params.query, params.parsedQuery, DDG_QUERY_SYNTAX),
-		kl: "us-en",
+		kl: localeToKl(params.parsedQuery?.lang) ?? "us-en",
 	});
 	const df = params.recency ? RECENCY_TO_DDG_DF[params.recency] : undefined;
 	if (df) form.set("df", df);
