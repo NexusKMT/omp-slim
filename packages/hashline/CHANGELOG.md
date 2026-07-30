@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Replaced legacy `SWAP`, `INS`, and `PASTE` syntax with unified `PUT` and `CUT` hunks
+
+### Added
+
+- Added named register support (`@reg`) and span paste capabilities to clipboard operations
+- Added auto-shifting for uniformly omitted base indents under brace openers
+
 ## [17.2.0] - 2026-07-30
 
 ### Breaking Changes

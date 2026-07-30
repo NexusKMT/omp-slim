@@ -16,6 +16,7 @@ import {
 	type Clipboard,
 	commitClipboard,
 	forkClipboard,
+	startClipboardBatch,
 	MismatchError as HashlineMismatchError,
 	Patch,
 	Patcher,
@@ -48,7 +49,7 @@ export interface ExecuteHashlineSingleOptions {
 
 function noChangeDiagnostic(path: string): string {
 	// The patch parsed and applied cleanly but produced no change — the
-	// `|literal` body rows matched the file content at the targeted lines
+	// `+TEXT` body rows matched the file content at the targeted lines
 	// byte-for-byte. The model usually misreads this as "wrong anchor, try
 	// again with a bigger payload" and starts duplicating content; the
 	// message below names the cause directly so the next turn can re-read
@@ -103,10 +104,10 @@ interface RenderedSection {
 }
 
 const BLOCK_OP_LABELS: Record<BlockResolution["op"], string> = {
-	replace: "SWAP.BLK",
-	insert_after: "INS.BLK.POST",
-	cut: "CUT.BLK",
-	paste_after: "PASTE.BLK.POST",
+	replace: "PUT N*:",
+	insert_after: "PUT >N*:",
+	cut: "CUT N*",
+	paste_after: "PUT >N*",
 };
 
 function formatBlockResolution(resolution: BlockResolution): string {
@@ -229,11 +230,11 @@ export async function executeHashlineSingle(
 	const enforceSeenLines = options.session.settings.get("edit.enforceSeenLines");
 	const patcher = new Patcher({ fs, snapshots, blockResolver: nativeBlockResolver, enforceSeenLines });
 
-	// The clipboard register is session-persistent: `CUT` in one edit call can
-	// `PASTE` in a later one. Each batch works on a fork and publishes it back
-	// only after writes land.
+	// Named registers persist across edit calls; the anonymous register is
+	// batch-local. Each batch starts without anonymous state and publishes
+	// named registers only after writes land.
 	const sessionClipboard = getEditClipboard(options.session);
-	const clipboard = forkClipboard(sessionClipboard);
+	const clipboard = startClipboardBatch(sessionClipboard);
 
 	// Single-section fast path: prepare, commit, render.
 	const inputHash = hashPatchInput(options.input);
@@ -254,8 +255,8 @@ export async function executeHashlineSingle(
 	}
 
 	// Multi-section: prepare every section up front so we fail fast before
-	// any write hits the filesystem. One clipboard register spans the batch,
-	// so `CUT` in one section feeds `PASTE` in a later one.
+	// any write hits the filesystem. One batch-local register spans the batch,
+	// so `CUT` in one section feeds a register-backed `PUT` in a later one.
 	const prepared: PreparedSection[] = [];
 	// Register state after each section's prepare. Commits are non-atomic: a
 	// mid-batch write failure leaves earlier sections on disk, so the session
