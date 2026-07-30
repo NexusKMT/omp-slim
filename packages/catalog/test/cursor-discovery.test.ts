@@ -216,6 +216,8 @@ describe("fetchCursorUsableModels", () => {
 			models: [
 				create(ModelDetailsSchema, { modelId: "kimi-k3-max", displayName: "Kimi K3" }),
 				create(ModelDetailsSchema, { modelId: "moonshotai/kimi-k3", displayName: "Kimi K3" }),
+				create(ModelDetailsSchema, { modelId: "k3", displayName: "K3" }),
+				create(ModelDetailsSchema, { modelId: "kimi/k3", displayName: "K3" }),
 				create(ModelDetailsSchema, { modelId: "glm-5.2-max", displayName: "GLM 5.2 Max" }),
 				create(ModelDetailsSchema, { modelId: "glm-5.10-high", displayName: "GLM 5.10 High" }),
 				create(ModelDetailsSchema, { modelId: "glm-6-max", displayName: "GLM 6 Max" }),
@@ -229,7 +231,9 @@ describe("fetchCursorUsableModels", () => {
 			expect.objectContaining({ id: "glm-5.10-high", contextWindow: 1_000_000 }),
 			expect.objectContaining({ id: "glm-5.2-max", contextWindow: 1_000_000 }),
 			expect.objectContaining({ id: "glm-6-max", contextWindow: 1_000_000 }),
+			expect.objectContaining({ id: "k3", contextWindow: 1_000_000 }),
 			expect.objectContaining({ id: "kimi-k3-max", contextWindow: 1_000_000 }),
+			expect.objectContaining({ id: "kimi/k3", contextWindow: 1_000_000 }),
 			expect.objectContaining({ id: "moonshotai/kimi-k3", contextWindow: 1_000_000 }),
 		]);
 	});
@@ -239,6 +243,7 @@ describe("fetchCursorUsableModels", () => {
 			models: [
 				create(ModelDetailsSchema, { modelId: "glm-5.1-high", displayName: "GLM 5.1 High" }),
 				create(ModelDetailsSchema, { modelId: "glm-5.2-flash", displayName: "GLM 5.2 Flash" }),
+				create(ModelDetailsSchema, { modelId: "k3-256k", displayName: "K3-256k" }),
 			],
 		});
 		const nativeBaseUrl = await startCursorDiscoveryServer(toBinary(GetUsableModelsResponseSchema, response));
@@ -248,6 +253,7 @@ describe("fetchCursorUsableModels", () => {
 		expect(models).toEqual([
 			expect.objectContaining({ id: "glm-5.1-high", contextWindow: 200_000 }),
 			expect.objectContaining({ id: "glm-5.2-flash", contextWindow: 200_000 }),
+			expect.objectContaining({ id: "k3-256k", contextWindow: 200_000 }),
 		]);
 	});
 

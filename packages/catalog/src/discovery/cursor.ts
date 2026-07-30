@@ -25,6 +25,8 @@ const DEFAULT_MAX_TOKENS = 64_000;
 const CURSOR_1M_CONTEXT_WINDOW = 1_000_000;
 const CURSOR_1M_NAME_PATTERN = /\b1m\b/i;
 const CURSOR_MAX_MODE_1M_ID_PATTERN = /claude|gemini/;
+/** Kimi's official bare K3 id (`k3`, `kimi/k3`); `k3-256k` is the 256k SKU and stays out. */
+const CURSOR_KIMI_K3_BARE_ID_PATTERN = /(^|\/)k3$/i;
 
 /**
  * Model-id families whose native catalogs (anthropic, openai/openai-codex,
@@ -351,7 +353,7 @@ function resolveCursorContextWindow(
  * `isGlm52ReasoningEffortModelId`.
  */
 function isCursorNative1MModelId(id: string): boolean {
-	if (isKimiK3ModelId(id)) {
+	if (isKimiK3ModelId(id) || CURSOR_KIMI_K3_BARE_ID_PATTERN.test(id)) {
 		return true;
 	}
 	const glm = parseGlmModel(bareModelId(id));
