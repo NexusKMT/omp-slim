@@ -237,7 +237,7 @@ function createTestToolSession(
 		getArtifactsDir: () => sessionDir,
 		allocateOutputArtifact: async (toolType: string) => {
 			fs.mkdirSync(sessionDir, { recursive: true });
-			const id = `artifact-${++artifactCounter}`;
+			const id = String(++artifactCounter);
 			return { id, path: path.join(sessionDir, `${id}.${toolType}.log`) };
 		},
 		settings,
@@ -640,30 +640,60 @@ describe("Coding Agent Tools", () => {
 		it("should spill oversized read output to an artifact", async () => {
 			const testFile = path.join(testDir, "oversized-read.txt");
 			const line = "0123456789".repeat(20);
-			fs.writeFileSync(testFile, `${Array.from({ length: 600 }, () => line).join("\n")}\n`);
+			fs.writeFileSync(testFile, `${Array.from({ length: 3500 }, () => line).join("\n")}\n`);
 			const spillSettings = Settings.isolated({
 				"tools.artifactSpillThreshold": 20,
 				"tools.artifactTailBytes": 1,
 				"tools.artifactTailLines": 10,
 				"tools.artifactHeadBytes": 0,
 			});
-			const spillSession = createTestToolSession(testDir, spillSettings);
+			const defaultLimit = spillSettings.get("read.defaultLimit");
+			const spillManager = SessionManager.create(testDir, path.join(testDir, "spill-sessions"));
+			await spillManager.ensureOnDisk();
+			const spillSession = createTestToolSession(testDir, spillSettings, {
+				getSessionFile: () => spillManager.getSessionFile() ?? null,
+				getArtifactsDir: () => spillManager.getArtifactsDir(),
+				localProtocolOptions: {
+					getArtifactsDir: () => spillManager.getArtifactsDir(),
+					getSessionId: () => spillManager.getSessionId(),
+				},
+			});
 			const spillReadTool = wrapToolWithMetaNotice(new ReadTool(spillSession));
-			const context = { ...createTestToolContext(["read"]), settings: spillSettings };
+			const context = {
+				...createTestToolContext(["read"]),
+				settings: spillSettings,
+				sessionManager: spillManager,
+			};
 
-			const result = await spillReadTool.execute(
-				"test-call-read-spill",
-				{ path: testFile },
-				undefined,
-				undefined,
-				context,
-			);
-			const truncation = result.details?.meta?.truncation;
-			const output = getTextOutput(result);
+			try {
+				const result = await spillReadTool.execute(
+					"test-call-read-spill",
+					{ path: testFile },
+					undefined,
+					undefined,
+					context,
+				);
+				const truncation = result.details?.meta?.truncation;
+				const output = getTextOutput(result);
 
-			expect(truncation?.artifactId).toBeDefined();
-			expect(Buffer.byteLength(output, "utf-8")).toBeLessThan(20 * 1024);
-			expect(output).toContain("artifact://");
+				expect(truncation?.artifactId).toBeDefined();
+				expect(Buffer.byteLength(output, "utf-8")).toBeLessThan(20 * 1024);
+				expect(output).toContain("artifact://");
+				expect(truncation?.nextOffset).toBe(defaultLimit + 1);
+
+				const saveArtifact = vi.spyOn(spillManager, "saveArtifact");
+				const artifactResult = await spillReadTool.execute(
+					"test-call-read-spilled-artifact",
+					{ path: `artifact://${truncation?.artifactId}` },
+					undefined,
+					undefined,
+					context,
+				);
+				expect(getTextOutput(artifactResult)).toContain(line);
+				expect(saveArtifact).not.toHaveBeenCalled();
+			} finally {
+				await spillManager.close();
+			}
 		});
 
 		it("should render directories as a two-level tree without capping root entries", async () => {

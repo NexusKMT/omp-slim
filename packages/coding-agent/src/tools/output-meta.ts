@@ -680,6 +680,17 @@ async function spillLargeResultToArtifact(
 	const existingMeta: OutputMeta | undefined = result.details?.meta;
 	if (existingMeta?.truncation?.artifactId) return result;
 
+	// Reading an artifact already addresses recoverable full output. Spilling that
+	// read would only create a redundant artifact containing another artifact's
+	// page (and can repeat indefinitely on subsequent reads).
+	if (
+		toolName === "read" &&
+		existingMeta?.source?.type === "internal" &&
+		existingMeta.source.value.startsWith("artifact://")
+	) {
+		return result;
+	}
+
 	// Measure total text content
 	const textParts: string[] = [];
 	for (const block of result.content) {
@@ -759,6 +770,7 @@ async function spillLargeResultToArtifact(
 			elidedLines,
 			elidedBytes,
 			artifactId,
+			nextOffset: existingMeta?.truncation?.nextOffset,
 		};
 	} else {
 		const shownStart = truncated.totalLines - outputLines + 1;
@@ -772,6 +784,7 @@ async function spillLargeResultToArtifact(
 			maxBytes: tailBytes,
 			shownRange: { start: shownStart, end: truncated.totalLines },
 			artifactId,
+			nextOffset: existingMeta?.truncation?.nextOffset,
 		};
 	}
 
