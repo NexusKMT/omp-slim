@@ -1,4 +1,4 @@
-import type { SecurityAccountRef, SecurityProducer, SecurityProvenance } from "./contracts";
+import type { SecurityAccountRef, SecurityProducer, SecurityProvenance, SecurityScan } from "./contracts";
 import { canonicalSecurityJson, securitySha256 } from "./contracts";
 
 export const CODEX_SECURITY_UPSTREAM = {
@@ -19,28 +19,73 @@ export function createNativeSecurityProducer(): SecurityProducer {
 	};
 }
 
+export function createSecurityCredentialAffinity(account: SecurityAccountRef): string {
+	return `omp-security-credential/v1:sha256:${securitySha256(canonicalSecurityJson(account))}`;
+}
+const PRIVATE_SECURITY_KEYS = new Set([
+	"account",
+	"accountid",
+	"accesstoken",
+	"apikey",
+	"credentialid",
+	"email",
+	"organizationid",
+	"organizationname",
+	"orgid",
+	"orgname",
+	"refreshtoken",
+	"secret",
+	"sessionid",
+	"token",
+]);
+
+export function redactPrivateSecurityMetadata(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(redactPrivateSecurityMetadata);
+	if (!value || typeof value !== "object") return value;
+	const result: Record<string, unknown> = {};
+	for (const [key, item] of Object.entries(value)) {
+		const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+		if (PRIVATE_SECURITY_KEYS.has(normalizedKey)) continue;
+		result[key] = redactPrivateSecurityMetadata(item);
+	}
+	return result;
+}
+
+export function createPublicSecurityScan(scan: SecurityScan, options: { includePlan?: boolean } = {}): unknown {
+	const plan =
+		options.includePlan && scan.plan
+			? {
+					...scan.plan,
+					account: {
+						provider: scan.plan.account.provider,
+						credentialAffinity: createSecurityCredentialAffinity(scan.plan.account),
+					},
+				}
+			: undefined;
+	return redactPrivateSecurityMetadata({
+		...scan,
+		plan,
+	});
+}
+
 export function createNativeSecurityProvenance(options: {
 	createdAt: string;
 	account: SecurityAccountRef;
 	planFingerprint: string;
 	workflowFingerprint: string;
 	sessionId?: string;
+	operationId?: string;
 }): SecurityProvenance {
 	const producer = createNativeSecurityProducer();
-	const account: Record<string, unknown> = {
-		provider: options.account.provider,
-		credentialId: options.account.credentialId,
-	};
-	if (options.account.accountId !== undefined) account.accountId = options.account.accountId;
-	if (options.account.email !== undefined) account.email = options.account.email;
-	if (options.account.organizationId !== undefined) account.organizationId = options.account.organizationId;
-	if (options.account.organizationName !== undefined) account.organizationName = options.account.organizationName;
 	const metadata: Record<string, unknown> = {
 		planFingerprint: options.planFingerprint,
 		workflowFingerprint: options.workflowFingerprint,
-		account,
+		credentialAffinity: createSecurityCredentialAffinity(options.account),
 	};
-	if (options.sessionId !== undefined) metadata.sessionId = options.sessionId;
+	if (options.sessionId !== undefined) {
+		metadata.sessionAffinity = `omp-security-session/v1:sha256:${securitySha256(options.sessionId)}`;
+	}
+	if (options.operationId !== undefined) metadata.operationId = options.operationId;
 	return {
 		producer,
 		createdAt: options.createdAt,

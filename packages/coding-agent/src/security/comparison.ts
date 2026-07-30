@@ -5,6 +5,28 @@ export interface SecurityDifferentialFindingMatch {
 	candidateFindingId: string;
 	basis: "fingerprint" | "rule_location";
 }
+export interface SecurityDifferentialFindingSummary {
+	findingId: string;
+	ruleId: string;
+	title: string;
+	severity: SecurityFinding["severity"]["level"];
+	confidence: SecurityFinding["confidence"]["level"];
+	validationStatus: SecurityFinding["validation"]["status"];
+	dispositionStatus: SecurityFinding["disposition"]["status"];
+	primaryLocation?: { path: string; startLine: number };
+}
+
+export interface SecurityDifferentialScanSummary {
+	scanId: string;
+	producer: SecurityScanBundle["scan"]["producer"];
+	status: SecurityScanBundle["scan"]["status"];
+	findingCount: number;
+	actionableFindingCount: number;
+	validatedFindingCount: number;
+	rejectedFindingCount: number;
+	coverage: SecurityScanBundle["scan"]["coverage"];
+	metrics?: SecurityScanBundle["scan"]["metrics"];
+}
 
 export interface SecurityDifferentialReport {
 	referenceScanId: string;
@@ -12,6 +34,10 @@ export interface SecurityDifferentialReport {
 	matches: SecurityDifferentialFindingMatch[];
 	referenceOnlyFindingIds: string[];
 	candidateOnlyFindingIds: string[];
+	reference: SecurityDifferentialScanSummary;
+	candidate: SecurityDifferentialScanSummary;
+	referenceOnlyFindings: SecurityDifferentialFindingSummary[];
+	candidateOnlyFindings: SecurityDifferentialFindingSummary[];
 	referenceFindingCount: number;
 	candidateFindingCount: number;
 	matchedFindingCount: number;
@@ -30,6 +56,34 @@ function fallbackKey(finding: SecurityFinding): string | undefined {
 	const location = normalizedPrimaryLocation(finding);
 	if (!location) return undefined;
 	return `${finding.ruleId.trim().toLowerCase()}\u0000${location}`;
+}
+
+function findingSummary(finding: SecurityFinding): SecurityDifferentialFindingSummary {
+	const location = finding.occurrences.flatMap(occurrence => occurrence.locations)[0];
+	return {
+		findingId: finding.id,
+		ruleId: finding.ruleId,
+		title: finding.title,
+		severity: finding.severity.level,
+		confidence: finding.confidence.level,
+		validationStatus: finding.validation.status,
+		dispositionStatus: finding.disposition.status,
+		...(location ? { primaryLocation: { path: location.path, startLine: location.startLine } } : {}),
+	};
+}
+
+function scanSummary(bundle: SecurityScanBundle): SecurityDifferentialScanSummary {
+	return {
+		scanId: bundle.scan.id,
+		producer: bundle.scan.producer,
+		status: bundle.scan.status,
+		findingCount: bundle.findings.length,
+		actionableFindingCount: bundle.findings.filter(finding => finding.disposition.status === "open").length,
+		validatedFindingCount: bundle.findings.filter(finding => finding.validation.status === "validated").length,
+		rejectedFindingCount: bundle.findings.filter(finding => finding.validation.status === "rejected").length,
+		coverage: bundle.scan.coverage,
+		...(bundle.scan.metrics ? { metrics: bundle.scan.metrics } : {}),
+	};
 }
 
 function ratio(numerator: number, denominator: number): number {
@@ -87,6 +141,14 @@ export function compareSecurityProducers(
 		candidateScanId: candidate.scan.id,
 		matches,
 		referenceOnlyFindingIds,
+		reference: scanSummary(reference),
+		candidate: scanSummary(candidate),
+		referenceOnlyFindings: referenceOnlyFindingIds.map(findingId =>
+			findingSummary(reference.findings.find(finding => finding.id === findingId)!),
+		),
+		candidateOnlyFindings: candidateOnlyFindingIds.map(findingId =>
+			findingSummary(candidate.findings.find(finding => finding.id === findingId)!),
+		),
 		candidateOnlyFindingIds,
 		referenceFindingCount: reference.findings.length,
 		candidateFindingCount: candidate.findings.length,

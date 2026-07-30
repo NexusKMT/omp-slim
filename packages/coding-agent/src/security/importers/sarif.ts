@@ -1,5 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type {
 	SecurityCoverage,
 	SecurityFinding,
@@ -27,8 +28,13 @@ interface SarifRegion {
 	endColumn?: number;
 }
 
+interface SarifArtifactLocation {
+	uri?: string;
+	uriBaseId?: string;
+}
+
 interface SarifPhysicalLocation {
-	artifactLocation?: { uri?: string };
+	artifactLocation?: SarifArtifactLocation;
 	region?: SarifRegion;
 }
 
@@ -52,6 +58,7 @@ interface SarifRule {
 interface SarifRun {
 	tool?: { driver?: { name?: string; version?: string; rules?: SarifRule[] } };
 	results?: SarifResult[];
+	originalUriBaseIds?: Record<string, { uri?: string }>;
 }
 
 interface SarifLog {
@@ -86,16 +93,58 @@ function severityFromSarif(result: SarifResult): SecuritySeverityLevel {
 	}
 }
 
-function normalizeSarifLocations(result: SarifResult): SecurityLocation[] {
+function pathIsWithin(candidate: string, root: string): boolean {
+	return candidate === root || candidate.startsWith(`${root}${path.sep}`);
+}
+
+async function resolveSarifArtifactPath(
+	artifact: SarifArtifactLocation,
+	run: SarifRun,
+	repositoryRoot: string,
+): Promise<string> {
+	const uri = artifact.uri;
+	if (!uri) throw new Error("SARIF artifact location is missing its URI");
+	const rootUrl = pathToFileURL(`${repositoryRoot}${path.sep}`);
+	let baseUrl = rootUrl;
+	if (artifact.uriBaseId) {
+		const declaredBase = run.originalUriBaseIds?.[artifact.uriBaseId]?.uri;
+		if (!declaredBase && artifact.uriBaseId !== "%SRCROOT%") {
+			throw new Error(`SARIF artifact uses an unknown URI base: ${artifact.uriBaseId}`);
+		}
+		baseUrl = declaredBase ? new URL(declaredBase, rootUrl) : rootUrl;
+	}
+	const resolvedUrl = new URL(uri.replaceAll("\\", "/"), baseUrl);
+	if (resolvedUrl.protocol !== "file:") {
+		throw new Error(`SARIF artifact URI must resolve to a repository file: ${uri}`);
+	}
+	const absolute = path.resolve(fileURLToPath(resolvedUrl));
+	if (!pathIsWithin(absolute, repositoryRoot)) {
+		throw new Error(`SARIF artifact resolves outside the repository: ${uri}`);
+	}
+	const canonical = await fs.realpath(absolute).catch(error => {
+		if (error instanceof Error && "code" in error && error.code === "ENOENT") return absolute;
+		throw error;
+	});
+	if (!pathIsWithin(canonical, repositoryRoot)) {
+		throw new Error(`SARIF artifact resolves outside the repository through a symbolic link: ${uri}`);
+	}
+	return path.relative(repositoryRoot, canonical).replaceAll(path.sep, "/");
+}
+
+async function normalizeSarifLocations(
+	result: SarifResult,
+	run: SarifRun,
+	repositoryRoot: string,
+): Promise<SecurityLocation[]> {
 	const locations: SecurityLocation[] = [];
 	for (const item of result.locations ?? []) {
 		const physical = item.physicalLocation;
-		const uri = physical?.artifactLocation?.uri;
+		const artifact = physical?.artifactLocation;
 		const region = physical?.region;
 		const startLine = region?.startLine;
-		if (!uri || !startLine || startLine < 1) continue;
+		if (!artifact?.uri || !startLine || startLine < 1) continue;
 		const location: SecurityLocation = {
-			path: uri.replaceAll("\\", "/").replace(/^\.\//, ""),
+			path: await resolveSarifArtifactPath(artifact, run, repositoryRoot),
 			startLine,
 			role: "primary",
 		};
@@ -193,7 +242,7 @@ export async function importSarif(input: unknown, options: SarifImportOptions): 
 		for (const result of run.results ?? []) {
 			const ruleId = result.ruleId || "sarif.unknown";
 			const rule = rules.get(ruleId);
-			const locations = normalizeSarifLocations(result);
+			const locations = await normalizeSarifLocations(result, run, canonicalRoot);
 			const vendorFingerprints = {
 				...stringRecord(result.fingerprints),
 				...stringRecord(result.partialFingerprints),

@@ -194,6 +194,20 @@ export interface SecurityScanPlan {
 	fingerprint: string;
 }
 
+export interface SecurityScanMetrics {
+	runtimeMs?: number;
+	tokenUsage?: {
+		input: number;
+		output: number;
+		reasoning: number;
+		cacheRead: number;
+		cacheWrite: number;
+		total: number;
+	};
+	cost?: number;
+	premiumRequests?: number;
+}
+
 export interface SecurityScan {
 	documentType: "omp-security.scan";
 	schemaVersion: "1.0";
@@ -212,6 +226,7 @@ export interface SecurityScan {
 	reportRef?: string;
 	sarifRef?: string;
 	error?: string;
+	metrics?: SecurityScanMetrics;
 }
 
 export interface SecurityScanBundle {

@@ -125,6 +125,28 @@ describe("security://", () => {
 		).toEqual([]);
 	});
 
+	test("public resources recursively redact private account and token metadata", async () => {
+		const bundle = await store.getBundle("secscan_codexfixture");
+		if (!bundle) throw new Error("expected fixture bundle");
+		bundle.scan.provenance.metadata = {
+			operationId: "secop_public",
+			nested: {
+				accountId: "workspace-secret",
+				token: "access-secret",
+				children: [{ email: "person@example.invalid", safe: "visible" }],
+			},
+		};
+		await store.putBundle(bundle);
+		const resource = await InternalUrlRouter.instance().resolve("security://scans/secscan_codexfixture/provenance", {
+			cwd: repositoryRoot,
+		});
+		expect(resource.content).toContain("secop_public");
+		expect(resource.content).toContain("visible");
+		expect(resource.content).not.toContain("workspace-secret");
+		expect(resource.content).not.toContain("access-secret");
+		expect(resource.content).not.toContain("person@example.invalid");
+	});
+
 	test("rejects surplus path segments instead of aliasing a canonical resource", async () => {
 		await expect(
 			InternalUrlRouter.instance().resolve("security://scans/secscan_codexfixture/manifest/extra", {

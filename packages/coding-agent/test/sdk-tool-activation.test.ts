@@ -494,8 +494,8 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		});
 
 		try {
-			expect(restricted.getAllToolNames()).toEqual(["read", "yield"]);
-			expect(restricted.getActiveToolNames()).toEqual(["read", "yield"]);
+			expect(restricted.getAllToolNames()).toEqual(["read", "lsp", "yield"]);
+			expect(restricted.getActiveToolNames()).toEqual(["read", "lsp", "yield"]);
 			for (const name of [
 				"generate_image",
 				"tts",
@@ -507,7 +507,6 @@ describe("createAgentSession defaultInactive tool activation", () => {
 				"default_active_tool",
 				"default_inactive_tool",
 				"sdk_custom_tool",
-				"lsp",
 				"hub",
 			]) {
 				expect(restricted.getToolByName(name)).toBeUndefined();

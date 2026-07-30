@@ -108,7 +108,7 @@ function scopeContainsPath(candidate: string, normalizedPath: string): boolean {
 	);
 }
 
-function pathMatchesScope(
+export function pathMatchesSecurityScope(
 	relativePath: string,
 	includePaths: readonly string[],
 	excludePaths: readonly string[],
@@ -143,7 +143,7 @@ async function digestWorkingTree(
 	const untracked = await adapter.untracked(repositoryRoot, signal);
 	const files = [...new Set([...tracked, ...untracked])]
 		.map(normalizeRelativePath)
-		.filter(candidate => pathMatchesScope(candidate, includePaths, excludePaths))
+		.filter(candidate => pathMatchesSecurityScope(candidate, includePaths, excludePaths))
 		.sort();
 	const hasher = new Bun.CryptoHasher("sha256");
 	for (const relativePath of files) {
@@ -151,24 +151,25 @@ async function digestWorkingTree(
 		const absolutePath = path.resolve(repositoryRoot, relativePath);
 		if (!pathIsWithin(absolutePath, repositoryRoot)) throw new Error(`Git path escapes repository: ${relativePath}`);
 		const stats = await fs.lstat(absolutePath).catch(() => null);
-		if (!stats) continue;
 		hasher.update(relativePath);
 		hasher.update("\0");
+		if (!stats) {
+			hasher.update("missing\0");
+			continue;
+		}
+		hasher.update(`mode:${stats.mode & 0o111}\0`);
 		if (stats.isSymbolicLink()) {
 			hasher.update("symlink\0");
 			hasher.update(await fs.readlink(absolutePath));
 		} else if (stats.isFile()) {
 			hasher.update(new Uint8Array(await Bun.file(absolutePath).arrayBuffer()));
 		} else {
-			continue;
+			hasher.update("unsupported\0");
 		}
 		hasher.update("\0");
 	}
 	const head = (await adapter.headSha(repositoryRoot, signal)) ?? "unborn";
-	const status = await adapter.status(repositoryRoot, signal);
 	hasher.update(head);
-	hasher.update("\0");
-	hasher.update(status);
 	return `omp-security-tree/v1:sha256:${hasher.digest("hex")}`;
 }
 

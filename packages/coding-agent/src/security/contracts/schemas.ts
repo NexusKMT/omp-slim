@@ -158,6 +158,20 @@ export const securityScanPlanSchema = type({
 	fingerprint: "string > 0",
 });
 
+export const securityScanMetricsSchema = type({
+	"runtimeMs?": "number >= 0",
+	"tokenUsage?": {
+		input: "number >= 0",
+		output: "number >= 0",
+		reasoning: "number >= 0",
+		cacheRead: "number >= 0",
+		cacheWrite: "number >= 0",
+		total: "number >= 0",
+	},
+	"cost?": "number >= 0",
+	"premiumRequests?": "number >= 0",
+});
+
 export const securityScanSchema = type({
 	documentType: "'omp-security.scan'",
 	schemaVersion: "'1.0'",
@@ -176,6 +190,7 @@ export const securityScanSchema = type({
 	"reportRef?": "string",
 	"sarifRef?": "string",
 	"error?": "string",
+	"metrics?": securityScanMetricsSchema,
 });
 
 export const securityScanBundleSchema = type({

@@ -362,6 +362,10 @@ export async function importCodexSecurityBundle(
 		coverage: mapCoverage(coverageDocument),
 	};
 	if (manifest.scan.startedAt !== undefined) scan.startedAt = manifest.scan.startedAt;
+	if (scan.startedAt !== undefined) {
+		const runtimeMs = new Date(scan.completedAt ?? createdAt).getTime() - new Date(scan.startedAt).getTime();
+		if (Number.isFinite(runtimeMs) && runtimeMs >= 0) scan.metrics = { runtimeMs };
+	}
 	if (report !== undefined) scan.reportRef = "report.md";
 	if (sarifText !== undefined) scan.sarifRef = "results.sarif";
 	const bundle: SecurityScanBundle = { scan, findings };

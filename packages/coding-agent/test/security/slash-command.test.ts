@@ -7,6 +7,8 @@ import { Settings } from "../../src/config/settings";
 import { SecurityStore } from "../../src/security";
 import { handleSecurityCommand } from "../../src/slash-commands/helpers/security";
 import type { SlashCommandRuntime } from "../../src/slash-commands/types";
+import type { ToolSession } from "../../src/tools";
+import { SecurityScanTool } from "../../src/tools/security-scan";
 
 const SARIF_FIXTURE = path.join(import.meta.dir, "..", "fixtures", "security", "generic-results.sarif");
 let temporaryRoot = "";
@@ -80,6 +82,44 @@ describe("/security", () => {
 			actor: "operator",
 		});
 		expect((await store.getFinding(scanId, finding.id))?.disposition.rationale).toBeUndefined();
+	});
+
+	test("validation agent result is persisted through the explicit tool mutation", async () => {
+		await command(`import ${JSON.stringify(SARIF_FIXTURE)}`);
+		const store = await SecurityStore.open(repositoryRoot);
+		const [scan] = await store.listScans();
+		if (!scan) throw new Error("expected imported scan");
+		const bundle = await store.getBundle(scan.id);
+		const finding = bundle?.findings[0];
+		if (!finding) throw new Error("expected imported finding");
+		const tool = new SecurityScanTool({
+			cwd: repositoryRoot,
+			settings,
+		} as ToolSession);
+		await tool.execute("validation", {
+			action: "validate",
+			scan_id: scan.id,
+			finding_id: finding.id,
+			validation_status: "validated",
+			validation_summary: "Reproduced with the cited source flow.",
+			validation_evidence: [{ label: "reproduction", explanation: "Observed the unsafe sink." }],
+		});
+		const updatedBundle = await store.getBundle(scan.id);
+		const updated = updatedBundle?.findings.find(item => item.id === finding.id);
+		expect(updated?.validation).toMatchObject({
+			status: "validated",
+			summary: "Reproduced with the cited source flow.",
+			evidenceIds: [expect.stringContaining("sece_")],
+		});
+		expect(updated?.evidence.at(-1)).toMatchObject({
+			kind: "validation",
+			label: "reproduction",
+		});
+		const sarifRuns = updatedBundle?.sarif?.runs as
+			| Array<{ results: Array<{ properties?: Record<string, unknown> }> }>
+			| undefined;
+		const sarifResult = sarifRuns?.[0]?.results.find(result => result.properties?.findingId === finding.id);
+		expect(sarifResult?.properties?.validation).toBe("validated");
 	});
 
 	test("export preserves permissions on an existing destination directory", async () => {

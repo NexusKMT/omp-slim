@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Settings } from "../../src/config/settings";
+import { LspTool } from "../../src/lsp";
 import { buildSystemPrompt } from "../../src/system-prompt";
 import { createTools, type ToolSession } from "../../src/tools";
 
@@ -47,6 +48,31 @@ describe("security feature gate", () => {
 		} finally {
 			disabled.cancelPendingSaves();
 			enabled.cancelPendingSaves();
+		}
+	});
+
+	test("restricted security sessions retain read-only LSP access", async () => {
+		const restricted = Settings.isolated();
+		const session = {
+			...toolSession(restricted),
+			enableLsp: true,
+			lspReadOnly: true,
+			restrictToolNames: true,
+		};
+		try {
+			expect((await createTools(session, ["lsp"])).map(tool => tool.name)).toEqual(["lsp"]);
+			const lsp = new LspTool(session);
+			await expect(
+				lsp.execute("rename", {
+					action: "rename",
+					file: "src/example.ts",
+					line: 1,
+					symbol: "example",
+					new_name: "renamed",
+				}),
+			).rejects.toThrow("disabled in this read-only session");
+		} finally {
+			restricted.cancelPendingSaves();
 		}
 	});
 

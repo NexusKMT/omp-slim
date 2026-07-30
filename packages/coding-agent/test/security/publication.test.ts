@@ -79,6 +79,39 @@ describe("security publication", () => {
 		}
 	});
 
+	test("creates an absent approved output directory and writes the complete bundle", async () => {
+		const tool = createSecurityPublicationTool({
+			plan,
+			scanId: "secscan_output",
+			store,
+			startedAt: "2026-07-29T00:00:00.000Z",
+		});
+		await tool.execute(
+			"publish",
+			{
+				findings: [],
+				coverage: { completeness: "complete" },
+				report: "# No findings\n",
+			},
+			undefined,
+			undefined,
+			undefined as never,
+		);
+		expect((await fs.stat(plan.output.root)).isDirectory()).toBeTrue();
+		expect((await fs.stat(plan.output.root)).mode & 0o777).toBe(0o700);
+		expect((await fs.readdir(plan.output.root)).sort()).toEqual([
+			"findings.json",
+			"provenance.json",
+			"report.md",
+			"results.sarif",
+			"scan.json",
+		]);
+		const serializedScan = await Bun.file(path.join(plan.output.root, "scan.json")).text();
+		expect(serializedScan).not.toContain("fixture-workspace");
+		expect(serializedScan).not.toContain("credentialId");
+		expect(JSON.parse(serializedScan)).not.toHaveProperty("plan");
+	});
+
 	test("allows only one publication while persistence is in flight", async () => {
 		const putStarted = Promise.withResolvers<void>();
 		const releasePut = Promise.withResolvers<void>();

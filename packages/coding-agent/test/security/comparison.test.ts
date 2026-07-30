@@ -68,12 +68,32 @@ describe("security comparison", () => {
 			finding("cand-fallback", "fp-candidate", "rule.fallback", "src/b.ts", 9),
 			finding("cand-only", "fp-only", "rule.only", "src/c.ts", 3),
 		]);
+		reference.scan.producer = { kind: "codex-security-bundle", name: "Codex Security" };
+		reference.scan.metrics = { runtimeMs: 12_000 };
+		candidate.scan.metrics = {
+			runtimeMs: 8_000,
+			tokenUsage: { input: 100, output: 50, reasoning: 25, cacheRead: 10, cacheWrite: 0, total: 185 },
+		};
 		const report = compareSecurityProducers(reference, candidate);
 		expect(report.matches.map(match => match.basis)).toEqual(["fingerprint", "rule_location"]);
 		expect(report.referenceOnlyFindingIds).toEqual([]);
 		expect(report.candidateOnlyFindingIds).toEqual(["cand-only"]);
 		expect(report.recallAgainstReference).toBe(1);
 		expect(report.precisionAgainstReference).toBeCloseTo(2 / 3);
+		expect(report.reference).toMatchObject({
+			producer: { kind: "codex-security-bundle" },
+			findingCount: 2,
+			metrics: { runtimeMs: 12_000 },
+		});
+		expect(report.candidate.metrics?.tokenUsage?.total).toBe(185);
+		expect(report.candidateOnlyFindings).toEqual([
+			expect.objectContaining({
+				findingId: "cand-only",
+				ruleId: "rule.only",
+				title: "cand-only",
+				primaryLocation: { path: "src/c.ts", startLine: 3 },
+			}),
+		]);
 	});
 
 	test("lineage classifies unchanged, resolved, and introduced findings", () => {

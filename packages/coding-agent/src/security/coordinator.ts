@@ -14,6 +14,7 @@ import { createAgentSession } from "../sdk";
 import type { AgentSession } from "../session/agent-session";
 import type { AuthStorage } from "../session/auth-storage";
 import { SessionManager } from "../session/session-manager";
+import * as git from "../utils/git";
 import { createExactSecurityOAuthResolver } from "./auth";
 import type {
 	SecurityAccountRef,
@@ -38,7 +39,7 @@ import {
 	createSecurityWorkflowFingerprint,
 } from "./provenance";
 import { createSecurityPublicationTool } from "./publication";
-import { SecurityStore } from "./store";
+import { SecurityStore, writeSecurityBundleToDirectory } from "./store";
 
 const SECURITY_SESSION_TOOLS = ["read", "grep", "glob", "lsp", "ast_grep", "task", "security_publish"];
 const SECURITY_WORKFLOW_FINGERPRINT = createSecurityWorkflowFingerprint([
@@ -103,6 +104,18 @@ export interface SecurityScanSession {
 		options?: { expandPromptTemplates?: boolean; synthetic?: boolean; userInitiated?: boolean },
 	): Promise<boolean>;
 	waitForIdle(): Promise<void>;
+	getSessionStats?(): {
+		tokens: {
+			input: number;
+			output: number;
+			reasoning: number;
+			cacheRead: number;
+			cacheWrite: number;
+			total: number;
+		};
+		cost: number;
+		premiumRequests: number;
+	};
 	abort(options?: { reason?: string }): Promise<void>;
 	dispose(): Promise<void>;
 	readonly sessionFile?: string;
@@ -111,6 +124,7 @@ export interface SecurityScanSession {
 export interface SecurityScanSessionFactoryInput {
 	host: SecurityCoordinatorHost;
 	plan: SecurityScanPlan;
+	executionRoot: string;
 	scanId: string;
 	model: Model;
 	publicationTool: ToolDefinition;
@@ -178,6 +192,7 @@ function initialBundle(
 	store: SecurityStore,
 	plan: SecurityScanPlan,
 	scanId: string,
+	operationId: string,
 	startedAt: string,
 	status: SecurityScan["status"] = "running",
 ): SecurityScanBundle {
@@ -186,6 +201,7 @@ function initialBundle(
 		createdAt: startedAt,
 		account: plan.account,
 		planFingerprint: plan.fingerprint,
+		operationId,
 		workflowFingerprint: plan.workflowFingerprint,
 	});
 	return {
@@ -241,7 +257,7 @@ function resolveAccount(
 }
 
 async function createDefaultSecuritySession(input: SecurityScanSessionFactoryInput): Promise<AgentSession> {
-	const scanSettings = await input.host.settings.cloneForCwd(input.plan.repositoryRoot);
+	const scanSettings = await input.host.settings.cloneForCwd(input.executionRoot);
 	const modelSelector = `${input.model.provider}/${input.model.id}`;
 	scanSettings.override("retry.modelFallback", false);
 	scanSettings.override("retry.usageAwareFallback", false);
@@ -255,7 +271,7 @@ async function createDefaultSecuritySession(input: SecurityScanSessionFactoryInp
 		"security-reviewer": "off",
 	});
 	const { session } = await createAgentSession({
-		cwd: input.plan.repositoryRoot,
+		cwd: input.executionRoot,
 		authStorage: input.host.authStorage,
 		modelRegistry: input.host.modelRegistry,
 		settings: scanSettings,
@@ -275,6 +291,8 @@ async function createDefaultSecuritySession(input: SecurityScanSessionFactoryInp
 		disableExtensionDiscovery: true,
 		enableMCP: false,
 		enableIrc: false,
+		enableLsp: true,
+		lspReadOnly: true,
 		hasUI: false,
 		autoApprove: true,
 		skipPythonPreflight: true,
@@ -284,10 +302,10 @@ async function createDefaultSecuritySession(input: SecurityScanSessionFactoryInp
 	return session;
 }
 
-function requestText(plan: SecurityScanPlan): string {
+function requestText(plan: SecurityScanPlan, executionRoot: string, diffText?: string): string {
 	return prompt
 		.render(securityRequestPrompt, {
-			repositoryRoot: plan.repositoryRoot,
+			repositoryRoot: executionRoot,
 			targetKind: plan.target.kind,
 			revision: plan.target.revision ?? "",
 			baseRevision: plan.target.baseRevision ?? "",
@@ -297,6 +315,7 @@ function requestText(plan: SecurityScanPlan): string {
 			knowledgeBases:
 				plan.knowledgeBases.length > 0 ? plan.knowledgeBases.map(item => item.path).join(", ") : "none",
 			planFingerprint: plan.fingerprint,
+			diffText: diffText ?? "",
 		})
 		.trim();
 }
@@ -313,6 +332,60 @@ function terminalText(snapshot: SecurityOperationSnapshot): string {
 		.join("\n");
 }
 
+interface PreparedSecurityExecutionTarget {
+	cwd: string;
+	diffText?: string;
+	cleanup(): Promise<void>;
+}
+
+const ACTIVE_SECURITY_OPERATIONS = new Set<string>();
+
+function operationIdFromBundle(bundle: SecurityScanBundle): string | undefined {
+	const value = bundle.scan.provenance.metadata?.operationId;
+	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function operationPhaseFromStatus(status: SecurityScan["status"]): SecurityOperationPhase {
+	return status === "running" || status === "planned" ? "failed" : status;
+}
+
+async function prepareSecurityExecutionTarget(
+	plan: SecurityScanPlan,
+	store: SecurityStore,
+	scanId: string,
+	adapter: SecurityGitAdapter,
+	signal: AbortSignal,
+): Promise<PreparedSecurityExecutionTarget> {
+	if (plan.target.kind !== "ref_diff") {
+		return { cwd: plan.repositoryRoot, cleanup: async () => undefined };
+	}
+	const headRevision = plan.target.headRevision;
+	const baseRevision = plan.target.baseRevision;
+	if (!headRevision || !baseRevision) throw new Error("ref_diff security plan is missing resolved revisions");
+	const targetsRoot = path.join(store.projectDirectory, "targets");
+	await fs.mkdir(targetsRoot, { recursive: true, mode: 0o700 });
+	if (process.platform !== "win32") await fs.chmod(targetsRoot, 0o700);
+	const cwd = path.join(targetsRoot, scanId);
+	let added = false;
+	try {
+		await git.worktree.add(plan.repositoryRoot, cwd, headRevision, { detach: true, signal });
+		added = true;
+		const diffText = await adapter.diffTree(plan.repositoryRoot, baseRevision, headRevision, signal);
+		return {
+			cwd,
+			diffText,
+			async cleanup() {
+				const removed = await git.worktree.tryRemove(plan.repositoryRoot, cwd, { force: true });
+				if (!removed) await fs.rm(cwd, { recursive: true, force: true });
+			},
+		};
+	} catch (error) {
+		if (added) await git.worktree.tryRemove(plan.repositoryRoot, cwd, { force: true });
+		await fs.rm(cwd, { recursive: true, force: true });
+		throw error;
+	}
+}
+
 export class SecurityCoordinator {
 	readonly #host: SecurityCoordinatorHost;
 	readonly #createSession: SecurityScanSessionFactory;
@@ -321,6 +394,7 @@ export class SecurityCoordinator {
 	readonly #now: () => Date;
 	readonly #createOperationId: () => string;
 	readonly #operations = new Map<string, SecurityOperationRecord>();
+	#recovery?: Promise<void>;
 
 	constructor(host: SecurityCoordinatorHost, dependencies: SecurityCoordinatorDependencies = {}) {
 		this.#host = host;
@@ -329,6 +403,43 @@ export class SecurityCoordinator {
 		this.#gitAdapter = dependencies.gitAdapter ?? DEFAULT_SECURITY_GIT_ADAPTER;
 		this.#now = dependencies.now ?? (() => new Date());
 		this.#createOperationId = dependencies.createOperationId ?? createOperationId;
+	}
+	async #ensureRecovered(): Promise<void> {
+		this.#recovery ??= this.#recoverInterruptedOperations();
+		await this.#recovery;
+	}
+
+	async #recoverInterruptedOperations(): Promise<void> {
+		const store = await this.#openStore(this.#host.cwd);
+		for (const summary of await store.listScans()) {
+			const bundle = await store.getBundle(summary.id);
+			if (!bundle) continue;
+			const operationId = operationIdFromBundle(bundle);
+			if (!operationId || this.#operations.has(operationId) || ACTIVE_SECURITY_OPERATIONS.has(operationId)) continue;
+			if (bundle.scan.status === "running" || bundle.scan.status === "planned") {
+				const message = "Security scan was interrupted by a process restart";
+				bundle.scan.status = "failed";
+				bundle.scan.completedAt = toIsoTimestamp(this.#now);
+				bundle.scan.error = message;
+				await store.putBundle(bundle);
+				if (bundle.scan.target.kind === "ref_diff") {
+					const targetPath = path.join(store.projectDirectory, "targets", bundle.scan.id);
+					await git.worktree.tryRemove(bundle.scan.target.repositoryRoot, targetPath, { force: true });
+					await fs.rm(targetPath, { recursive: true, force: true });
+				}
+			}
+			const snapshot: SecurityOperationSnapshot = {
+				operationId,
+				planId: bundle.scan.plan?.id ?? "",
+				scanId: bundle.scan.id,
+				phase: operationPhaseFromStatus(bundle.scan.status),
+				createdAt: bundle.scan.createdAt,
+				updatedAt: bundle.scan.completedAt ?? bundle.scan.startedAt ?? bundle.scan.createdAt,
+				findingCount: bundle.findings.length,
+			};
+			if (bundle.scan.error !== undefined) snapshot.error = bundle.scan.error;
+			this.#operations.set(operationId, { snapshot, promise: Promise.resolve() });
+		}
 	}
 
 	async preflight(input: SecurityPreflightInput = {}): Promise<SecurityScanPlan> {
@@ -367,6 +478,7 @@ export class SecurityCoordinator {
 		if (!this.#host.settings.get("security.enabled")) {
 			throw new Error("Security is disabled; enable security.enabled before starting a scan");
 		}
+		await this.#ensureRecovered();
 		const store = await this.#openStore(this.#host.cwd);
 		const plan = await store.getPlan(input.planId);
 		if (!plan) throw new Error(`Unknown security scan plan: ${input.planId}`);
@@ -392,6 +504,7 @@ export class SecurityCoordinator {
 		};
 		const record: SecurityOperationRecord = { snapshot, promise: Promise.resolve() };
 		this.#operations.set(operationId, record);
+		ACTIVE_SECURITY_OPERATIONS.add(operationId);
 		const run = async (signal: AbortSignal, reportProgress?: (text: string) => Promise<void>): Promise<void> => {
 			await this.#run(record, plan, store, signal, reportProgress);
 		};
@@ -416,18 +529,21 @@ export class SecurityCoordinator {
 		return { ...record.snapshot };
 	}
 
-	status(operationId: string): SecurityOperationSnapshot | null {
+	async status(operationId: string): Promise<SecurityOperationSnapshot | null> {
+		await this.#ensureRecovered();
 		const record = this.#operations.get(operationId);
 		return record ? { ...record.snapshot } : null;
 	}
 
-	listOperations(): SecurityOperationSnapshot[] {
+	async listOperations(): Promise<SecurityOperationSnapshot[]> {
+		await this.#ensureRecovered();
 		return [...this.#operations.values()]
 			.map(record => ({ ...record.snapshot }))
 			.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 	}
 
-	cancel(operationId: string): boolean {
+	async cancel(operationId: string): Promise<boolean> {
+		await this.#ensureRecovered();
 		const record = this.#operations.get(operationId);
 		if (!record) return false;
 		if (["completed", "partial", "cancelled", "failed"].includes(record.snapshot.phase)) return false;
@@ -439,6 +555,7 @@ export class SecurityCoordinator {
 	}
 
 	async wait(operationId: string): Promise<SecurityOperationSnapshot> {
+		await this.#ensureRecovered();
 		const record = this.#operations.get(operationId);
 		if (!record) throw new Error(`Unknown security operation: ${operationId}`);
 		await record.promise;
@@ -461,12 +578,22 @@ export class SecurityCoordinator {
 		const startedAt = toIsoTimestamp(this.#now);
 		let session: SecurityScanSession | undefined;
 		let publishedBundle: SecurityScanBundle | undefined;
+		let executionTarget: PreparedSecurityExecutionTarget | undefined;
 		try {
-			await store.putBundle(initialBundle(store, plan, record.snapshot.scanId, startedAt));
+			await store.putBundle(
+				initialBundle(store, plan, record.snapshot.scanId, record.snapshot.operationId, startedAt),
+			);
 			if (signal.aborted) throw signal.reason ?? new Error("Security scan cancelled");
 			await prepareSecurityOutputDirectory(plan.output, record.snapshot.scanId);
 			this.#update(record, "preparing");
 			await reportProgress?.("Preparing OMP-native security scan");
+			executionTarget = await prepareSecurityExecutionTarget(
+				plan,
+				store,
+				record.snapshot.scanId,
+				this.#gitAdapter,
+				signal,
+			);
 			const activeModel = this.#host.activeModel;
 			const model =
 				activeModel?.provider === plan.model.provider && activeModel.id === plan.model.modelId
@@ -476,13 +603,14 @@ export class SecurityCoordinator {
 				throw new Error(`Security scan model is unavailable: ${plan.model.provider}/${plan.model.modelId}`);
 			const sessionsDirectory = path.join(store.projectDirectory, "sessions");
 			await fs.mkdir(sessionsDirectory, { recursive: true, mode: 0o700 });
-			const sessionManager = SessionManager.create(plan.repositoryRoot, sessionsDirectory);
+			const sessionManager = SessionManager.create(executionTarget.cwd, sessionsDirectory);
 			const publicationTool = createSecurityPublicationTool({
 				plan,
 				scanId: record.snapshot.scanId,
 				store,
 				startedAt,
 				sessionId: `security:${record.snapshot.scanId}`,
+				operationId: record.snapshot.operationId,
 				onPublished: async bundle => {
 					publishedBundle = bundle;
 					record.snapshot.findingCount = bundle.findings.length;
@@ -493,6 +621,7 @@ export class SecurityCoordinator {
 				host: this.#host,
 				plan,
 				scanId: record.snapshot.scanId,
+				executionRoot: executionTarget.cwd,
 				model,
 				// Bare `ToolDefinition` erases the concrete schema; the sdk.ts
 				// `as unknown as CustomTool` precedent applies to the same variance wall.
@@ -508,13 +637,28 @@ export class SecurityCoordinator {
 				if (signal.aborted) throw signal.reason ?? new Error("Security scan cancelled");
 				this.#update(record, "reviewing");
 				await reportProgress?.("Reviewing repository with OMP security workers");
-				await session.prompt(requestText(plan), {
+				await session.prompt(requestText(plan, executionTarget.cwd, executionTarget.diffText), {
 					expandPromptTemplates: false,
 					synthetic: true,
 					userInitiated: false,
 				});
 				await session.waitForIdle();
 				record.snapshot.sessionFile = session.sessionFile;
+				if (publishedBundle) {
+					const stats = session.getSessionStats?.();
+					publishedBundle.scan.metrics = {
+						runtimeMs: Math.max(0, this.#now().getTime() - new Date(startedAt).getTime()),
+						...(stats
+							? {
+									tokenUsage: { ...stats.tokens },
+									cost: stats.cost,
+									premiumRequests: stats.premiumRequests,
+								}
+							: {}),
+					};
+					await writeSecurityBundleToDirectory(plan.output.root, publishedBundle);
+					await store.putBundle(publishedBundle);
+				}
 			} finally {
 				signal.removeEventListener("abort", abortSession);
 			}
@@ -524,7 +668,14 @@ export class SecurityCoordinator {
 				await reportProgress?.(`Published ${publishedBundle.findings.length} security finding(s)`);
 				return;
 			}
-			const partial = initialBundle(store, plan, record.snapshot.scanId, startedAt, "partial");
+			const partial = initialBundle(
+				store,
+				plan,
+				record.snapshot.scanId,
+				record.snapshot.operationId,
+				startedAt,
+				"partial",
+			);
 			partial.scan.completedAt = toIsoTimestamp(this.#now);
 			partial.scan.error = "The scan session ended without publishing a canonical result";
 			this.#update(record, "partial", partial.scan.error);
@@ -541,6 +692,7 @@ export class SecurityCoordinator {
 				store,
 				plan,
 				record.snapshot.scanId,
+				record.snapshot.operationId,
 				startedAt,
 				cancelled ? "cancelled" : "failed",
 			);
@@ -550,6 +702,8 @@ export class SecurityCoordinator {
 			await store.putBundle(terminal);
 		} finally {
 			await session?.dispose().catch(() => undefined);
+			await executionTarget?.cleanup().catch(() => undefined);
+			ACTIVE_SECURITY_OPERATIONS.delete(record.snapshot.operationId);
 		}
 	}
 }

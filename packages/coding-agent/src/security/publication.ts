@@ -16,9 +16,10 @@ import {
 	createSecurityFindingId,
 	createSecurityOccurrenceId,
 } from "./contracts";
+import { pathMatchesSecurityScope } from "./preflight";
 import { createNativeSecurityProducer, createNativeSecurityProvenance } from "./provenance";
 import { exportSecurityBundleToSarif } from "./sarif";
-import type { SecurityStore } from "./store";
+import { type SecurityStore, writeSecurityBundleToDirectory } from "./store";
 
 const publishLocationSchema = type({
 	path: type("string > 0").describe("repository-relative source path"),
@@ -91,6 +92,7 @@ export interface SecurityPublicationOptions {
 	store: SecurityStore;
 	startedAt: string;
 	sessionId?: string;
+	operationId?: string;
 	onPublished?: (bundle: SecurityScanBundle) => void | Promise<void>;
 }
 
@@ -108,9 +110,16 @@ function normalizePublishedPath(input: string): string {
 	return normalized;
 }
 
-function toLocation(input: SecurityPublishParams["findings"][number]["locations"][number]): SecurityLocation {
+function toLocation(
+	input: SecurityPublishParams["findings"][number]["locations"][number],
+	plan: SecurityScanPlan,
+): SecurityLocation {
+	const normalizedPath = normalizePublishedPath(input.path);
+	if (!pathMatchesSecurityScope(normalizedPath, plan.target.includePaths, plan.target.excludePaths)) {
+		throw new Error(`Security finding path is outside the immutable scan scope: ${input.path}`);
+	}
 	const location: SecurityLocation = {
-		path: normalizePublishedPath(input.path),
+		path: normalizedPath,
 		startLine: input.start_line,
 	};
 	if (input.end_line !== undefined) location.endLine = input.end_line;
@@ -149,7 +158,7 @@ function buildFinding(
 	options: SecurityPublicationOptions,
 	createdAt: string,
 ): SecurityFinding {
-	const locations = input.locations.map(toLocation);
+	const locations = input.locations.map(location => toLocation(location, options.plan));
 	const fingerprint = createSecurityFindingFingerprint({
 		ruleId: input.rule_id,
 		category: input.category,
@@ -164,7 +173,7 @@ function buildFinding(
 			explanation: item.explanation,
 		};
 		if (item.excerpt !== undefined) entry.excerpt = item.excerpt;
-		if (item.location !== undefined) entry.location = toLocation(item.location);
+		if (item.location !== undefined) entry.location = toLocation(item.location, options.plan);
 		return entry;
 	});
 	const finding: SecurityFinding = {
@@ -273,6 +282,7 @@ export function createSecurityPublicationTool(
 					planFingerprint: options.plan.fingerprint,
 					workflowFingerprint: options.plan.workflowFingerprint,
 					sessionId: options.sessionId,
+					operationId: options.operationId,
 				});
 				const scan: SecurityScan = {
 					documentType: "omp-security.scan",
@@ -294,6 +304,7 @@ export function createSecurityPublicationTool(
 				};
 				const provisional: SecurityScanBundle = { scan, findings, report: params.report };
 				const bundle: SecurityScanBundle = { ...provisional, sarif: exportSecurityBundleToSarif(provisional) };
+				await writeSecurityBundleToDirectory(options.plan.output.root, bundle);
 				await options.store.putBundle(bundle);
 				persisted = true;
 				await options.onPublished?.(bundle);

@@ -7,10 +7,12 @@ import { compareSecurityLineage } from "./comparison";
 import type {
 	SecurityComparisonReport,
 	SecurityDisposition,
+	SecurityEvidence,
 	SecurityFinding,
 	SecurityScan,
 	SecurityScanBundle,
 	SecurityScanPlan,
+	SecurityValidation,
 } from "./contracts";
 import {
 	encodeSecurityProjectKey,
@@ -20,6 +22,7 @@ import {
 	parseSecurityScanPlan,
 	securitySha256,
 } from "./contracts";
+import { createPublicSecurityScan, redactPrivateSecurityMetadata } from "./provenance";
 import { exportSecurityBundleToSarif } from "./sarif";
 
 const STORE_SCHEMA_VERSION = 1;
@@ -102,6 +105,31 @@ export async function writeSecurityFileAtomic(
 	} finally {
 		await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
 	}
+}
+export async function writeSecurityBundleToDirectory(directory: string, input: SecurityScanBundle): Promise<void> {
+	const bundle = parseSecurityScanBundle(input);
+	const root = path.resolve(directory);
+	await ensurePrivateDirectory(root);
+	await writeSecurityFileAtomic(path.join(root, "findings.json"), `${JSON.stringify(bundle.findings, null, 2)}\n`);
+	if (bundle.report !== undefined) {
+		await writeSecurityFileAtomic(path.join(root, "report.md"), bundle.report);
+	} else {
+		await fs.rm(path.join(root, "report.md"), { force: true });
+	}
+	if (bundle.sarif !== undefined) {
+		await writeSecurityFileAtomic(path.join(root, "results.sarif"), `${JSON.stringify(bundle.sarif, null, 2)}\n`);
+	} else {
+		await fs.rm(path.join(root, "results.sarif"), { force: true });
+	}
+	await writeSecurityFileAtomic(
+		path.join(root, "provenance.json"),
+		`${JSON.stringify(redactPrivateSecurityMetadata(bundle.scan.provenance), null, 2)}\n`,
+	);
+	// The scan manifest is the commit marker for directory consumers.
+	await writeSecurityFileAtomic(
+		path.join(root, "scan.json"),
+		`${JSON.stringify(createPublicSecurityScan(bundle.scan), null, 2)}\n`,
+	);
 }
 
 async function readJsonFile(filePath: string): Promise<unknown> {
@@ -346,6 +374,42 @@ export class SecurityStore {
 			if (disposition.actor !== undefined) canonicalDisposition.actor = disposition.actor;
 			const updated = { ...bundle.findings[index], disposition: canonicalDisposition };
 			bundle.findings[index] = parseSecurityFinding(updated);
+			if (bundle.sarif !== undefined) bundle.sarif = exportSecurityBundleToSarif(bundle);
+			await this.#putBundleUnlocked(bundle);
+			return bundle.findings[index];
+		});
+	}
+
+	async updateValidation(
+		scanId: string,
+		findingId: string,
+		validation: SecurityValidation,
+		evidence: readonly SecurityEvidence[] = [],
+	): Promise<SecurityFinding> {
+		return withSecurityStoreWrite(this.#projectDirectory, async () => {
+			const bundle = await this.#getBundleUnlocked(scanId);
+			if (!bundle) throw new Error(`Unknown security scan: ${scanId}`);
+			const index = bundle.findings.findIndex(finding => finding.id === findingId);
+			if (index < 0) throw new Error(`Unknown security finding: ${findingId}`);
+			const finding = bundle.findings[index];
+			const evidenceById = new Map(finding.evidence.map(item => [item.id, item]));
+			for (const item of evidence) evidenceById.set(item.id, item);
+			const canonicalValidation: SecurityValidation = {
+				status: validation.status,
+				evidenceIds: [...new Set(validation.evidenceIds)],
+			};
+			if (validation.summary !== undefined) canonicalValidation.summary = validation.summary;
+			if (validation.validatedAt !== undefined) canonicalValidation.validatedAt = validation.validatedAt;
+			for (const evidenceId of canonicalValidation.evidenceIds) {
+				if (!evidenceById.has(evidenceId)) {
+					throw new Error(`Unknown security validation evidence: ${evidenceId}`);
+				}
+			}
+			bundle.findings[index] = parseSecurityFinding({
+				...finding,
+				evidence: [...evidenceById.values()],
+				validation: canonicalValidation,
+			});
 			if (bundle.sarif !== undefined) bundle.sarif = exportSecurityBundleToSarif(bundle);
 			await this.#putBundleUnlocked(bundle);
 			return bundle.findings[index];

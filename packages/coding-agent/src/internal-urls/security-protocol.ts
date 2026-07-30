@@ -3,6 +3,7 @@ import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { isSettingsInitialized, settings } from "../config/settings";
 import { getDefault } from "../config/settings-schema";
 import type { SecurityFinding } from "../security/contracts";
+import { createPublicSecurityScan, redactPrivateSecurityMetadata } from "../security/provenance";
 import { createSecurityResource } from "../security/resource-output";
 import type { SecurityScanSummary } from "../security/store";
 import { SecurityStore } from "../security/store";
@@ -170,7 +171,7 @@ export class SecurityProtocolHandler implements ProtocolHandler {
 				if (parts.length !== 3) throw new Error(`Unknown security resource: security://${parts.join("/")}`);
 				return createSecurityResource({
 					url: `security://scans/${scanId}/manifest`,
-					content: `${JSON.stringify(bundle.scan, null, 2)}\n`,
+					content: `${JSON.stringify(createPublicSecurityScan(bundle.scan, { includePlan: true }), null, 2)}\n`,
 					contentType: "application/json",
 				});
 			case "findings": {
@@ -225,7 +226,7 @@ export class SecurityProtocolHandler implements ProtocolHandler {
 				if (parts.length !== 3) throw new Error(`Unknown security resource: security://${parts.join("/")}`);
 				return createSecurityResource({
 					url: `security://scans/${scanId}/provenance`,
-					content: `${JSON.stringify(bundle.scan.provenance, null, 2)}\n`,
+					content: `${JSON.stringify(redactPrivateSecurityMetadata(bundle.scan.provenance), null, 2)}\n`,
 					contentType: "application/json",
 				});
 			default:

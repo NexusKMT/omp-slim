@@ -136,12 +136,13 @@ function scanIdFromInput(value: string): string {
 	return match?.[1] ?? trimmed;
 }
 
-function findingUri(value: string): string {
+function findingTarget(value: string): { uri: string; scanId: string; findingId: string } {
 	const trimmed = value.trim();
-	if (/^security:\/\/scans\/[^/]+\/findings\/[^/]+$/.test(trimmed)) return trimmed;
+	const uriMatch = trimmed.match(/^security:\/\/scans\/([^/]+)\/findings\/([^/]+)$/);
+	if (uriMatch) return { uri: trimmed, scanId: uriMatch[1]!, findingId: uriMatch[2]! };
 	const [scanId, findingId] = parseCommandArgs(trimmed);
 	if (!scanId || !findingId) throw new Error("validate requires a finding URI or <scan-id> <finding-id>");
-	return `security://scans/${scanId}/findings/${findingId}`;
+	return { uri: `security://scans/${scanId}/findings/${findingId}`, scanId, findingId };
 }
 
 async function showResource(runtime: SlashCommandRuntime, rest: string): Promise<void> {
@@ -246,11 +247,11 @@ export async function handleSecurityCommand(
 				const coordinator = coordinatorFor(runtime);
 				const operationId = rest.trim();
 				if (operationId) {
-					const operation = coordinator.status(operationId);
+					const operation = await coordinator.status(operationId);
 					if (!operation) throw new Error(`Unknown security operation: ${operationId}`);
 					await runtime.output(JSON.stringify(operation, null, 2));
 				} else {
-					await runtime.output(JSON.stringify(coordinator.listOperations(), null, 2));
+					await runtime.output(JSON.stringify(await coordinator.listOperations(), null, 2));
 				}
 				return commandConsumed();
 			}
@@ -258,7 +259,7 @@ export async function handleSecurityCommand(
 				const operationId = rest.trim();
 				if (!operationId) throw new Error("cancel requires an operation id");
 				await runtime.output(
-					coordinatorFor(runtime).cancel(operationId)
+					(await coordinatorFor(runtime).cancel(operationId))
 						? `Cancellation requested for ${operationId}.`
 						: `No cancellable security operation ${operationId}.`,
 				);
@@ -284,8 +285,18 @@ export async function handleSecurityCommand(
 			case "export":
 				await exportResults(runtime, rest);
 				return commandConsumed();
-			case "validate":
-				return { prompt: prompt.render(validationRequestPrompt, { findingUri: findingUri(rest) }).trim() };
+			case "validate": {
+				const target = findingTarget(rest);
+				return {
+					prompt: prompt
+						.render(validationRequestPrompt, {
+							findingUri: target.uri,
+							scanId: target.scanId,
+							findingId: target.findingId,
+						})
+						.trim(),
+				};
+			}
 			case "compare": {
 				const [beforeScanId, afterScanId] = parseCommandArgs(rest);
 				if (!beforeScanId || !afterScanId) throw new Error("compare requires <before-scan-id> <after-scan-id>");
