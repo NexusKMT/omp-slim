@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed GitHub Copilot routing `grok-4.5` through the unsupported Chat Completions endpoint instead of the Responses endpoint ([#7096](https://github.com/can1357/oh-my-pi/issues/7096)).
+
 ## [17.2.0] - 2026-07-30
 
 ### Added

@@ -319,6 +319,20 @@ describe("github copilot model limits mapping", () => {
 		expect(model).toBeDefined();
 		expect(model?.api).toBe("openai-responses");
 	});
+	it("routes grok-4.5 to the openai-responses endpoint (#7096)", async () => {
+		const { models } = await discoverCopilotModels({
+			data: [
+				{
+					id: "grok-4.5",
+					name: "Grok 4.5",
+				},
+			],
+		});
+
+		const model = models.find(candidate => candidate.id === "grok-4.5");
+		expect(model).toBeDefined();
+		expect(model?.api).toBe("openai-responses");
+	});
 	it("invalidates a cached MAI-Code completion route after the endpoint migration", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-ai-copilot-mai-cache-"));
 		const cacheDbPath = path.join(tempDir, "models.db");
