@@ -39,7 +39,7 @@ export interface ModelManagerOptions<TApi extends Api = Api, TModelsDevPayload =
 	cacheTtlMs?: number;
 	/** When true, a successful dynamic fetch is the complete provider catalog and prunes static-only models. */
 	dynamicModelsAuthoritative?: boolean;
-	/** Cached model ids to ignore when the cache was written against a different static catalog fingerprint. */
+	/** Cached model ids whose presence forces refresh when the static or migration-policy fingerprint changes. */
 	dropCachedModelIdsOnStaticMismatch?: readonly string[];
 	/**
 	 * Trusted, provider-wide request headers (compile-time constants, never
@@ -199,10 +199,24 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 	const usableCachedModels = restoredCache.models.filter(model => !restoredCache.unresolvedModelIds.has(model.id));
 	const cacheHasUnresolvedHeaders = restoredCache.unresolvedModelIds.size > 0;
 	const dynamicModelsAuthoritative = options.dynamicModelsAuthoritative ?? false;
-	const staticFingerprint = fingerprintStatic(staticModels, dynamicModelsAuthoritative);
+	const cacheDropIds = options.dropCachedModelIdsOnStaticMismatch;
+	const staticCatalogFingerprint = fingerprintStatic(staticModels, dynamicModelsAuthoritative);
+	// Endpoint-migration policy is cache identity: adding an id must invalidate
+	// matching-static-catalog caches written by the prior resolver.
+	const staticFingerprint =
+		cacheDropIds && cacheDropIds.length > 0
+			? `${staticCatalogFingerprint}:drop:${Bun.hash(cacheDropIds.join("\0")).toString(36)}`
+			: staticCatalogFingerprint;
 	const cacheFingerprintMatches = cache?.staticFingerprint === staticFingerprint && staticFingerprint.length > 0;
+	const cacheNeedsModelMigration =
+		!cacheFingerprintMatches &&
+		cacheDropIds !== undefined &&
+		usableCachedModels.some(model => cacheDropIds.includes(model.id));
 	const hasUsableFreshCache =
-		(cache?.fresh ?? false) && !cacheHasUnresolvedHeaders && (!dynamicModelsAuthoritative || cacheFingerprintMatches);
+		(cache?.fresh ?? false) &&
+		!cacheHasUnresolvedHeaders &&
+		!cacheNeedsModelMigration &&
+		(!dynamicModelsAuthoritative || cacheFingerprintMatches);
 	const dynamicFetcher = options.fetchDynamicModels;
 	const hasDynamicFetcher = typeof dynamicFetcher === "function";
 	const hasAuthoritativeCache = ((cache?.authoritative ?? false) && hasUsableFreshCache) || !hasDynamicFetcher;

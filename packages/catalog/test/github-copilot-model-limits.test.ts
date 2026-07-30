@@ -334,10 +334,10 @@ describe("github copilot model limits mapping", () => {
 		expect(model?.api).toBe("openai-responses");
 	});
 	for (const migration of [
-		{ id: "mai-code-1-flash-picker", name: "MAI-Code-1-Flash", expectedApi: "openai-responses" },
-		{ id: "grok-4.5", name: "Grok 4.5", expectedApi: undefined },
+		{ id: "mai-code-1-flash-picker", name: "MAI-Code-1-Flash" },
+		{ id: "grok-4.5", name: "Grok 4.5" },
 	]) {
-		it(`invalidates a cached ${migration.name} completion route after the endpoint migration`, async () => {
+		it(`refreshes a cached ${migration.name} completion route after the endpoint migration`, async () => {
 			const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), `pi-ai-copilot-${migration.id}-cache-`));
 			const cacheDbPath = path.join(tempDir, "models.db");
 			const cacheProviderId = `github-copilot-${migration.id}-cache-test`;
@@ -346,7 +346,6 @@ describe("github copilot model limits mapping", () => {
 					providerId: "github-copilot",
 					cacheProviderId,
 					cacheDbPath,
-					staticModels: [],
 					fetchDynamicModels: async () => [
 						{
 							id: migration.id,
@@ -365,7 +364,15 @@ describe("github copilot model limits mapping", () => {
 				await oldManager.refresh("online");
 
 				const fetchMock = vi.fn(async () => {
-					throw new Error("a fresh cache must avoid discovery");
+					return new Response(
+						JSON.stringify({
+							data: [{ id: migration.id, name: migration.name }],
+						}),
+						{
+							status: 200,
+							headers: { "Content-Type": "application/json" },
+						},
+					);
 				});
 				const manager = createModelManager({
 					...githubCopilotModelManagerOptions({ apiKey: "copilot-test-key", fetch: fetchMock }),
@@ -375,8 +382,8 @@ describe("github copilot model limits mapping", () => {
 				const { models } = await manager.refresh("online-if-uncached");
 				const model = models.find(candidate => candidate.id === migration.id);
 
-				expect(fetchMock).not.toHaveBeenCalled();
-				expect(model?.api).toBe(migration.expectedApi);
+				expect(fetchMock).toHaveBeenCalledTimes(1);
+				expect(model?.api).toBe("openai-responses");
 			} finally {
 				await fs.rm(tempDir, { recursive: true, force: true });
 			}
