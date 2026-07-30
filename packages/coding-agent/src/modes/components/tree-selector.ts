@@ -781,11 +781,29 @@ class TreeList implements Component {
 		}
 	}
 
+	#jumpToTurnBoundary(boundary: "first" | "last"): void {
+		const start = boundary === "first" ? 0 : this.#filteredNodes.length - 1;
+		const step = boundary === "first" ? 1 : -1;
+		for (let index = start; index >= 0 && index < this.#filteredNodes.length; index += step) {
+			const entry = this.#filteredNodes[index].node.entry;
+			if (entry.type === "message" && (entry.message.role === "user" || entry.message.role === "assistant")) {
+				this.#selectedIndex = index;
+				return;
+			}
+		}
+	}
+
 	handleInput(keyData: string): void {
 		if (matchesSelectUp(keyData)) {
 			this.#selectedIndex = this.#selectedIndex === 0 ? this.#filteredNodes.length - 1 : this.#selectedIndex - 1;
 		} else if (matchesSelectDown(keyData)) {
 			this.#selectedIndex = this.#selectedIndex === this.#filteredNodes.length - 1 ? 0 : this.#selectedIndex + 1;
+		} else if (matchesKey(keyData, "home")) {
+			// Jump to the earliest actual conversation turn, skipping tool and bookkeeping entries.
+			this.#jumpToTurnBoundary("first");
+		} else if (matchesKey(keyData, "end")) {
+			// Jump to the latest actual conversation turn, skipping tool and bookkeeping entries.
+			this.#jumpToTurnBoundary("last");
 		} else if (matchesKey(keyData, "left")) {
 			// Page up
 			this.#selectedIndex = Math.max(0, this.#selectedIndex - this.maxVisibleLines);
@@ -954,7 +972,7 @@ export class TreeSelectorComponent extends Container {
 			new TruncatedText(
 				theme.fg(
 					"muted",
-					"Enter: switch. Shift+Enter: summarize & switch. Shift+L: label. Ctrl+O: filter. Alt+D/T/U/L/A: filter. Type to search",
+					"Enter: switch. Home/End: first/latest turn. Shift+Enter: summarize & switch. Shift+L: label. Ctrl+O: filter. Alt+D/T/U/L/A: filter. Type to search",
 				),
 				0,
 				0,

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Home/End navigation in `/tree` to jump directly to the first/latest user or assistant turn while skipping tool and bookkeeping entries.
+
+
 ## [17.2.1] - 2026-07-30
 
 ### Added

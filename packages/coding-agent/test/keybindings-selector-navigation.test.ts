@@ -62,6 +62,18 @@ function createMessageNode(id: string, parentId: string | null, content: string)
 		children: [],
 	};
 }
+function createAgentMessageNode(id: string, parentId: string | null, message: AgentMessage): SessionTreeNode {
+	return {
+		entry: {
+			type: "message",
+			id,
+			parentId,
+			timestamp: "2024-01-01T00:00:00Z",
+			message,
+		},
+		children: [],
+	};
+}
 
 function createExtension(id: string, displayName: string): Extension {
 	return {
@@ -133,6 +145,52 @@ describe("selector navigation keybindings", () => {
 		selector.handleInput("\n");
 
 		expect(selected).toEqual(["child"]);
+	});
+	it("uses Home and End to jump between actual turns in the session tree", () => {
+		const firstUser = createMessageNode("first-user", null, "First question");
+		const assistant = createAgentMessageNode("assistant", "first-user", {
+			role: "assistant",
+			content: [{ type: "text", text: "Working on it" }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "test",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "toolUse",
+			timestamp: 2,
+		});
+		const toolResult = createAgentMessageNode("tool-result", "assistant", {
+			role: "toolResult",
+			toolCallId: "call-1",
+			toolName: "read",
+			content: [{ type: "text", text: "file contents" }],
+			isError: false,
+			timestamp: 3,
+		});
+		firstUser.children.push(assistant);
+		assistant.children.push(toolResult);
+
+		const selected: string[] = [];
+		const selector = new TreeSelectorComponent(
+			[firstUser],
+			"tool-result",
+			40,
+			id => selected.push(id),
+			() => {},
+		);
+
+		selector.handleInput("\x1b[H");
+		selector.handleInput("\n");
+		selector.handleInput("\x1b[F");
+		selector.handleInput("\n");
+
+		expect(selected).toEqual(["first-user", "assistant"]);
 	});
 
 	it("uses tui.select.up in the user message selector", () => {
