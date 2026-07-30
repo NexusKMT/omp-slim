@@ -192,6 +192,95 @@ describe("fetchCursorUsableModels", () => {
 		]);
 	});
 
+	it("assigns the 1M window from display-name labels across families", async () => {
+		const response = create(GetUsableModelsResponseSchema, {
+			models: [
+				create(ModelDetailsSchema, { modelId: "claude-opus-5-high", displayName: "Opus 5 1M" }),
+				create(ModelDetailsSchema, { modelId: "gpt-5.5-high", displayName: "GPT-5.5 1M High" }),
+				create(ModelDetailsSchema, { modelId: "gpt-5.6-sol-medium", displayName: "GPT-5.6 Sol 1M" }),
+			],
+		});
+		const labeledBaseUrl = await startCursorDiscoveryServer(toBinary(GetUsableModelsResponseSchema, response));
+
+		const models = await fetchCursorUsableModels({ apiKey: "test-token", baseUrl: labeledBaseUrl, timeoutMs: 1_000 });
+
+		expect(models).toEqual([
+			expect.objectContaining({ id: "claude-opus-5-high", contextWindow: 1_000_000 }),
+			expect.objectContaining({ id: "gpt-5.5-high", contextWindow: 1_000_000 }),
+			expect.objectContaining({ id: "gpt-5.6-sol-medium", contextWindow: 1_000_000 }),
+		]);
+	});
+
+	it("assigns the 1M window to natively 1M families Cursor serves unlabeled", async () => {
+		const response = create(GetUsableModelsResponseSchema, {
+			models: [
+				create(ModelDetailsSchema, { modelId: "kimi-k3-max", displayName: "Kimi K3" }),
+				create(ModelDetailsSchema, { modelId: "glm-5.2-max", displayName: "GLM 5.2 Max" }),
+			],
+		});
+		const nativeBaseUrl = await startCursorDiscoveryServer(toBinary(GetUsableModelsResponseSchema, response));
+
+		const models = await fetchCursorUsableModels({ apiKey: "test-token", baseUrl: nativeBaseUrl, timeoutMs: 1_000 });
+
+		expect(models).toEqual([
+			expect.objectContaining({ id: "glm-5.2-max", contextWindow: 1_000_000 }),
+			expect.objectContaining({ id: "kimi-k3-max", contextWindow: 1_000_000 }),
+		]);
+	});
+
+	it("assigns the 1M window to unlabeled max-mode Claude models", async () => {
+		const response = create(GetUsableModelsResponseSchema, {
+			models: [
+				create(ModelDetailsSchema, {
+					modelId: "claude-opus-4-8-high-fast",
+					displayName: "Opus 4.8 Fast",
+					maxMode: true,
+				}),
+			],
+		});
+		const maxModeBaseUrl = await startCursorDiscoveryServer(toBinary(GetUsableModelsResponseSchema, response));
+
+		const models = await fetchCursorUsableModels({ apiKey: "test-token", baseUrl: maxModeBaseUrl, timeoutMs: 1_000 });
+
+		expect(models).toEqual([
+			expect.objectContaining({ id: "claude-opus-4-8-high-fast", cursorMaxMode: true, contextWindow: 1_000_000 }),
+		]);
+	});
+
+	it("keeps the default window for unlabeled non-max models and max-mode models outside 1M families", async () => {
+		const response = create(GetUsableModelsResponseSchema, {
+			models: [
+				create(ModelDetailsSchema, { modelId: "cursor-composer-max", maxMode: true }),
+				create(ModelDetailsSchema, { modelId: "claude-opus-4-8-high", displayName: "Opus 4.8" }),
+			],
+		});
+		const defaultBaseUrl = await startCursorDiscoveryServer(toBinary(GetUsableModelsResponseSchema, response));
+
+		const models = await fetchCursorUsableModels({ apiKey: "test-token", baseUrl: defaultBaseUrl, timeoutMs: 1_000 });
+
+		expect(models).toEqual([
+			expect.objectContaining({ id: "claude-opus-4-8-high", cursorMaxMode: false, contextWindow: 200_000 }),
+			expect.objectContaining({ id: "cursor-composer-max", cursorMaxMode: true, contextWindow: 200_000 }),
+		]);
+	});
+
+	it("raises a bundled reference window when the reference id is served with a 1M label", async () => {
+		// `claude-4.5-sonnet` is a bundled cursor reference with a 200k window;
+		// served with a 1M display name it must expose the 1M ceiling.
+		const response = create(GetUsableModelsResponseSchema, {
+			models: [create(ModelDetailsSchema, { modelId: "claude-4.5-sonnet", displayName: "Sonnet 4.5 1M" })],
+		});
+		const referenceBaseUrl = await startCursorDiscoveryServer(toBinary(GetUsableModelsResponseSchema, response));
+
+		const models = await fetchCursorUsableModels({
+			apiKey: "test-token",
+			baseUrl: referenceBaseUrl,
+			timeoutMs: 1_000,
+		});
+
+		expect(models).toEqual([expect.objectContaining({ id: "claude-4.5-sonnet", contextWindow: 1_000_000 })]);
+	});
+
 	it("ignores Cursor cache rows written before max-mode metadata was persisted", async () => {
 		const cacheDbPath = await createTempCachePath();
 		const staleSpec = cursorModelSpec("cursor-composer-max");

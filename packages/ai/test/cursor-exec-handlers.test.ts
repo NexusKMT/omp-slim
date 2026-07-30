@@ -458,6 +458,40 @@ describe("Cursor request action encoding", () => {
 		expect(payload.requestedModel?.maxMode).toBe(true);
 	});
 
+	it("sends max-mode metadata with prior history when switching providers mid-conversation", async () => {
+		const payload = await captureCursorPayload(
+			{
+				messages: [
+					{ role: "user", content: "Summarize this repo.", timestamp: 0 },
+					{
+						role: "assistant",
+						api: "anthropic-messages",
+						provider: "anthropic",
+						model: "claude-sonnet-4.5",
+						content: [{ type: "text", text: "It is a monorepo." }],
+						usage: {
+							input: 0,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							totalTokens: 0,
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+						},
+						stopReason: "stop",
+						timestamp: 1,
+					},
+					{ role: "user", content: "continue", timestamp: 2 },
+				],
+			},
+			cursorMaxModeModel,
+		);
+
+		expect(payload.modelDetails?.maxMode).toBe(true);
+		expect(payload.requestedModel?.maxMode).toBe(true);
+		// History from the other provider is carried into the fresh Cursor conversation.
+		expect(payload.conversationState?.turns.length).toBeGreaterThan(0);
+	});
+
 	it("uses a resume action when a tool result is the final context message", async () => {
 		const payload = await captureCursorPayload(toolResultContext());
 

@@ -22,7 +22,9 @@ export function getDefaultModelDiscoveryBaseUrl(providerId: string): string | un
 export function resolveModelCacheProviderId(providerId: string, options: ModelCacheProviderIdOptions = {}): string {
 	switch (providerId) {
 		case "cursor":
-			return "cursor:max-mode-v2";
+			// v3: max-mode Claude/Gemini rows cached before the 1M context-window
+			// discovery fix carry a stale 200k window and must be refetched.
+			return "cursor:max-mode-v3";
 		case "litellm": {
 			const baseUrl = options.baseUrl ?? getDefaultModelDiscoveryBaseUrl(providerId)!;
 			return `litellm:rich-v5:${Bun.hash(baseUrl).toString(36)}`;

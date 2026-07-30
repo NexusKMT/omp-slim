@@ -14,6 +14,18 @@ const DEFAULT_CONTEXT_WINDOW = 200_000;
 const DEFAULT_MAX_TOKENS = 64_000;
 
 /**
+ * `GetUsableModels` carries no context-window field, so the 1M ceiling is
+ * recovered from the signals Cursor does send:
+ * - display-name labels ("Opus 5 1M", "GPT-5.5 1M High") across families,
+ * - natively 1M families Cursor serves unlabeled (Kimi K3, GLM 5.2+),
+ * - the max-mode flag on Claude/Gemini ids, whose max-mode ceiling is 1M.
+ */
+const CURSOR_1M_CONTEXT_WINDOW = 1_000_000;
+const CURSOR_1M_NAME_PATTERN = /\b1m\b/i;
+const CURSOR_NATIVE_1M_ID_PATTERN = /^(?:kimi-k3|glm-5\.[2-9])/;
+const CURSOR_MAX_MODE_1M_ID_PATTERN = /claude|gemini/;
+
+/**
  * Model-id families whose native catalogs (anthropic, openai/openai-codex,
  * google) are multimodal. Cursor-only or text-only families (`composer-*`,
  * `grok-code-*`) intentionally stay outside this pattern.
@@ -291,6 +303,7 @@ function normalizeCursorModel(
 			name,
 			baseUrl: baseUrlOverride ?? reference.baseUrl,
 			reasoning,
+			contextWindow: resolveCursorContextWindow(details, id, reference.contextWindow),
 			cursorMaxMode: details.maxMode,
 		};
 	}
@@ -303,10 +316,30 @@ function normalizeCursorModel(
 		reasoning,
 		input: inferInputFromCursorId(id),
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: DEFAULT_CONTEXT_WINDOW,
+		contextWindow: resolveCursorContextWindow(details, id, DEFAULT_CONTEXT_WINDOW),
 		maxTokens: DEFAULT_MAX_TOKENS,
 		cursorMaxMode: details.maxMode,
 	};
+}
+
+/**
+ * Context window for a discovered Cursor model: the 1M ceiling when any 1M
+ * signal fires (never below a larger bundled reference), else the fallback.
+ */
+function resolveCursorContextWindow(
+	model: CursorModelDetailsValue,
+	id: string,
+	fallback: number | null,
+): number | null {
+	const labeled1M =
+		CURSOR_1M_NAME_PATTERN.test(id) ||
+		[model.displayName, model.displayNameShort, model.displayModelId, ...model.aliases].some(
+			candidate => typeof candidate === "string" && CURSOR_1M_NAME_PATTERN.test(candidate),
+		);
+	if (labeled1M || CURSOR_NATIVE_1M_ID_PATTERN.test(id) || (model.maxMode && CURSOR_MAX_MODE_1M_ID_PATTERN.test(id))) {
+		return Math.max(fallback ?? 0, CURSOR_1M_CONTEXT_WINDOW);
+	}
+	return fallback;
 }
 
 function pickModelDisplayName(model: CursorModelDetailsValue, fallbackId: string): string {
