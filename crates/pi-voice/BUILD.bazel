@@ -27,3 +27,12 @@ rust_test(
     proc_macro_deps = all_crate_deps(proc_macro_dev = True),
     deps = all_crate_deps(normal_dev = True),
 )
+
+# Direct C/Rust ABI comparison for miniaudio's opaque device state. This test
+# needs the patched maudio-sys C probe, so it is intentionally Bazel-only.
+rust_test(
+    name = "maudio_layout_test",
+    srcs = ["bazel/maudio_layout.rs"],
+    edition = "2024",
+    deps = ["@crates//:maudio"],
+)
