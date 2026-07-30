@@ -23,6 +23,7 @@ import { type SlashCommand, slashCommandCapability } from "../capability/slash-c
 import { type SystemPrompt, systemPromptCapability } from "../capability/system-prompt";
 import { type CustomTool, toolCapability } from "../capability/tool";
 import type { LoadContext, LoadResult } from "../capability/types";
+import type { MCPRequestIdFormat } from "../mcp/types";
 import { expandTilde } from "../tools/path-utils";
 import {
 	buildRuleFromMarkdown,
@@ -154,10 +155,23 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 				timeout = undefined;
 			}
 
+			// Validate requestIdFormat: only the two documented encodings
+			let requestIdFormat: MCPRequestIdFormat | undefined;
+			if (serverConfig.requestIdFormat !== undefined && serverConfig.requestIdFormat !== null) {
+				if (serverConfig.requestIdFormat === "string" || serverConfig.requestIdFormat === "number") {
+					requestIdFormat = serverConfig.requestIdFormat;
+				} else {
+					logger.warn(
+						`MCP server "${serverName}": invalid requestIdFormat ${JSON.stringify(serverConfig.requestIdFormat)}, ignoring`,
+					);
+				}
+			}
+
 			result.push({
 				name: serverName,
 				enabled,
 				timeout,
+				requestIdFormat,
 				command: serverConfig.command as string | undefined,
 				args: serverConfig.args as string[] | undefined,
 				env: serverConfig.env as Record<string, string> | undefined,

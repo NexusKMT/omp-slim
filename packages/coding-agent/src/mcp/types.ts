@@ -72,7 +72,7 @@ interface MCPServerConfigBase {
 	 * Encoding for outgoing JSON-RPC request ids (default: `"string"`).
 	 *
 	 * Set `"number"` for servers whose decoder accepts integers only, such as
-	 * Apple's `xcrun mcpbridge`. See `createRequestIdAllocator`.
+	 * Apple's `xcrun mcpbridge`. See `RequestIdAllocator` in `./request-id`.
 	 */
 	requestIdFormat?: MCPRequestIdFormat;
 	/** Authentication configuration (optional) */

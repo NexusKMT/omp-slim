@@ -4,6 +4,8 @@
  * Canonical shape for MCP server configurations, regardless of source format.
  * All providers translate their native format to this shape.
  */
+
+import type { MCPRequestIdFormat } from "../mcp/types";
 import { defineCapability } from ".";
 import type { SourceMeta } from "./types";
 
@@ -17,6 +19,8 @@ export interface MCPServer {
 	enabled?: boolean;
 	/** Connection timeout in milliseconds */
 	timeout?: number;
+	/** Encoding for outgoing JSON-RPC request ids (default: `"string"`) */
+	requestIdFormat?: MCPRequestIdFormat;
 	/** Command to run (for stdio transport) */
 	command?: string;
 	/** Command arguments */

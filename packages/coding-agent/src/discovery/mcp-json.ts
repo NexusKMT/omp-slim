@@ -26,6 +26,7 @@ interface MCPConfigFile {
 		{
 			enabled?: boolean;
 			timeout?: number;
+			requestIdFormat?: "string" | "number";
 			command?: string;
 			args?: string[];
 			env?: Record<string, string>;
@@ -83,10 +84,23 @@ function transformMCPConfig(config: MCPConfigFile, source: SourceMeta): MCPServe
 				}
 			}
 
+			let requestIdFormat: "string" | "number" | undefined;
+			if (serverConfig.requestIdFormat !== undefined) {
+				if (serverConfig.requestIdFormat === "string" || serverConfig.requestIdFormat === "number") {
+					requestIdFormat = serverConfig.requestIdFormat;
+				} else {
+					logger.warn("MCP server has invalid 'requestIdFormat' value, ignoring", {
+						name,
+						value: serverConfig.requestIdFormat,
+					});
+				}
+			}
+
 			const server: MCPServer = {
 				name,
 				enabled,
 				timeout,
+				requestIdFormat,
 				command: serverConfig.command,
 				args: serverConfig.args,
 				env: serverConfig.env,
