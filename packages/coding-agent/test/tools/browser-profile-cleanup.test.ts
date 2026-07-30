@@ -12,7 +12,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { removeUserDataDir } from "@oh-my-pi/pi-coding-agent/tools/browser/launch";
 import { type BrowserHandle, releaseBrowser } from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
-import { logger } from "@oh-my-pi/pi-utils";
+import * as piUtils from "@oh-my-pi/pi-utils";
 
 async function makeProfileDir(): Promise<string> {
 	const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "omp-chrome-profile-test-"));
@@ -23,8 +23,8 @@ async function makeProfileDir(): Promise<string> {
 
 describe("headless Chromium profile cleanup (issue #7058)", () => {
 	afterEach(() => {
-		spyOn(fs.promises, "rm").mockRestore();
-		spyOn(logger, "warn").mockRestore();
+		spyOn(piUtils, "removeWithRetries").mockRestore();
+		spyOn(piUtils.logger, "warn").mockRestore();
 	});
 
 	it("removes an owned profile directory", async () => {
@@ -36,15 +36,15 @@ describe("headless Chromium profile cleanup (issue #7058)", () => {
 	it("warns and leaves the directory instead of throwing when it stays locked (EBUSY)", async () => {
 		const dir = await makeProfileDir();
 		const ebusy = Object.assign(new Error(`EBUSY: resource busy or locked, rm '${dir}'`), { code: "EBUSY" });
-		const rmSpy = spyOn(fs.promises, "rm").mockRejectedValue(ebusy);
-		const warnSpy = spyOn(logger, "warn");
+		const removeSpy = spyOn(piUtils, "removeWithRetries").mockRejectedValue(ebusy);
+		const warnSpy = spyOn(piUtils.logger, "warn");
 		try {
 			// Must resolve — a cleanup failure never propagates as a crash.
 			await expect(removeUserDataDir(dir)).resolves.toBeUndefined();
-			expect(rmSpy).toHaveBeenCalledTimes(1);
+			expect(removeSpy).toHaveBeenCalledTimes(1);
 			expect(warnSpy).toHaveBeenCalledTimes(1);
 		} finally {
-			rmSpy.mockRestore();
+			removeSpy.mockRestore();
 			// Real removal so the fixture does not leak.
 			await fs.promises.rm(dir, { recursive: true, force: true });
 		}

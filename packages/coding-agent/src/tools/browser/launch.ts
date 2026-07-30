@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { $which, getPuppeteerDir, logger } from "@oh-my-pi/pi-utils";
+import { $which, getPuppeteerDir, logger, removeWithRetries } from "@oh-my-pi/pi-utils";
 import type * as BrowsersNs from "@puppeteer/browsers";
 import type { Browser, CDPSession, Page, default as Puppeteer, Target } from "puppeteer-core";
 import stealthTamperingScript from "../puppeteer/00_stealth_tampering.txt" with { type: "text" };
@@ -360,14 +360,14 @@ export async function launchHeadlessBrowser(opts: LaunchHeadlessOptions): Promis
 /**
  * Remove an OMP-owned headless Chromium profile directory, tolerating the brief
  * window on Windows in which Chromium (or an orphaned browser subprocess) still
- * holds the profile lock. `fs.rm`'s native `maxRetries`/`retryDelay` back off on
- * EBUSY/EPERM/ENOTEMPTY; if the directory is still busy afterwards we warn and
- * leave it for a later cleanup pass rather than throwing — a shutdown cleanup
+ * holds the profile lock. The shared temp remover centralizes retry handling
+ * for EBUSY/EPERM/ENOTEMPTY; if the directory is still busy afterwards we warn
+ * and leave it for a later cleanup pass rather than throwing — a shutdown cleanup
  * failure must never crash the process (issue #7058).
  */
 export async function removeUserDataDir(dir: string): Promise<void> {
 	try {
-		await fs.promises.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+		await removeWithRetries(dir);
 	} catch (error) {
 		logger.warn("Left Chromium profile directory in place after cleanup failure", {
 			dir,
