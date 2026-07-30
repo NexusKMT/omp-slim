@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed Ollama model-manager caches being reused after the configured base URL changed by scoping cache namespaces to the normalized discovery endpoint ([#7087](https://github.com/can1357/oh-my-pi/issues/7087)).
+- Fixed Ollama model-manager caches being reused after the configured base URL changed by scoping cache namespaces to the normalized native discovery endpoint, including reverse-proxy path prefixes ([#7087](https://github.com/can1357/oh-my-pi/issues/7087)).
 
 ## [17.2.0] - 2026-07-30
 

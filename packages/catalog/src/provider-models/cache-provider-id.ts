@@ -26,7 +26,9 @@ export function resolveOllamaModelCacheProviderId(providerId: string, baseUrl?: 
 	let endpoint = defaultBaseUrl;
 	try {
 		const parsed = new URL(baseUrl ?? defaultBaseUrl);
-		endpoint = `${parsed.protocol}//${parsed.host}`;
+		const trimmedPath = parsed.pathname.replace(/\/+$/g, "");
+		const nativePath = trimmedPath.endsWith("/v1") ? trimmedPath.slice(0, -3) : trimmedPath;
+		endpoint = `${parsed.protocol}//${parsed.host}${nativePath}`;
 	} catch {
 		// Malformed URLs fall back during discovery, so share the default endpoint's cache.
 	}
