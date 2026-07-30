@@ -2,10 +2,6 @@
 
 ## [Unreleased]
 
-### Added
-
-- Added a `postmortem.quit` configuration option to safely handle shutdown paths when the terminal output has already disconnected.
-
 ## [17.1.8] - 2026-07-28
 
 ### Added

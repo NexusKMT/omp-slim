@@ -135,8 +135,8 @@ interface MutationPlan {
 
 const BLOCK_SIZES: SizeRange[] = [
 	[6, 20],
-	[6, 20],
 	[21, 60],
+	[61, 150],
 	[6, 20],
 	[21, 60],
 	[6, 20],
@@ -171,11 +171,11 @@ const MUTATION_PLANS: Record<string, MutationPlan> = {
 	"swap-adjacent-lines": { count: 6 },
 	"duplicate-line-flip": { count: 6 },
 	"identifier-multi-edit": { count: 10 },
-	"swap-if-else": { count: 6 },
-	"wrap-redundant-if": { count: 12, sizes: BLOCK_SIZES },
-	"swap-sibling-blocks": { count: 12, sizes: BLOCK_SIZES },
+	"swap-if-else": { count: 8 },
+	"wrap-redundant-if": { count: 14, sizes: BLOCK_SIZES },
+	"swap-sibling-blocks": { count: 14, sizes: BLOCK_SIZES },
 	"duplicate-block": { count: 6, sizes: BLOCK_SIZES },
-	"move-distant-block": { count: 14, sizes: BLOCK_SIZES },
+	"move-distant-block": { count: 10, sizes: BLOCK_SIZES },
 	"remove-case-label": { count: 8 },
 	"composite-multi-edit": { count: 16 },
 };
