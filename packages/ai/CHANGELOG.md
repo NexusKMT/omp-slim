@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added exact OAuth credential-row resolution by durable credential id. The targeted path refreshes only that row and never ranks, rotates, or falls back to sibling accounts.
+
 ### Changed
 
 - Anthropic OAuth requests now reproduce Cowork's current `claude-desktop` request profile, including client/runtime metadata, beta selection, system and billing attestation, the 64K output cap, and stable HTTP/1.1 header ordering.
