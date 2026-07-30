@@ -6,6 +6,7 @@ import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { createModelManager } from "@oh-my-pi/pi-catalog/model-manager";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { githubCopilotModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
+import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 
 function getHeaderValue(headers: unknown, key: string): string | undefined {
 	if (!headers) return undefined;
@@ -55,6 +56,21 @@ async function discoverCopilotModels(
 	const models = await options.fetchDynamicModels?.();
 	expect(models).not.toBeNull();
 	return { models: models ?? [], fetchMock, requestApiVersions };
+}
+
+function cachedCopilotCompletionModel(id: string, name: string): ModelSpec<"openai-completions"> {
+	return {
+		id,
+		name,
+		api: "openai-completions",
+		provider: "github-copilot",
+		baseUrl: "https://api.githubcopilot.com",
+		reasoning: true,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 256_000,
+		maxTokens: 128_000,
+	};
 }
 
 describe("github copilot model limits mapping", () => {
@@ -346,20 +362,7 @@ describe("github copilot model limits mapping", () => {
 					providerId: "github-copilot",
 					cacheProviderId,
 					cacheDbPath,
-					fetchDynamicModels: async () => [
-						{
-							id: migration.id,
-							name: migration.name,
-							api: "openai-completions" as const,
-							provider: "github-copilot",
-							baseUrl: "https://api.githubcopilot.com",
-							reasoning: true,
-							input: ["text"],
-							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-							contextWindow: 256_000,
-							maxTokens: 128_000,
-						},
-					],
+					fetchDynamicModels: async () => [cachedCopilotCompletionModel(migration.id, migration.name)],
 				});
 				await oldManager.refresh("online");
 
@@ -389,6 +392,41 @@ describe("github copilot model limits mapping", () => {
 			}
 		});
 	}
+	it("drops cached Grok 4.5 context variants when the migration refresh fails", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-ai-copilot-grok-variant-cache-"));
+		const cacheDbPath = path.join(tempDir, "models.db");
+		const cacheProviderId = "github-copilot-grok-variant-cache-test";
+		try {
+			const oldManager = createModelManager({
+				providerId: "github-copilot",
+				cacheProviderId,
+				cacheDbPath,
+				fetchDynamicModels: async () => [
+					cachedCopilotCompletionModel("grok-4.5", "Grok 4.5"),
+					{
+						...cachedCopilotCompletionModel("grok-4.5-1m", "Grok 4.5 (1M)"),
+						requestModelId: "grok-4.5",
+						contextWindow: 500_000,
+					},
+				],
+			});
+			await oldManager.refresh("online");
+
+			const fetchMock = vi.fn(async () => new Response(null, { status: 503 }));
+			const manager = createModelManager({
+				...githubCopilotModelManagerOptions({ apiKey: "copilot-test-key", fetch: fetchMock }),
+				cacheProviderId,
+				cacheDbPath,
+			});
+			const { models } = await manager.refresh("online-if-uncached");
+
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(models.find(candidate => candidate.id === "grok-4.5")).toBeUndefined();
+			expect(models.find(candidate => candidate.id === "grok-4.5-1m")).toBeUndefined();
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
 });
 
 /**
