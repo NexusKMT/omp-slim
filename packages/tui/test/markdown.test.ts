@@ -969,25 +969,18 @@ more text`,
 			const markdown = new Markdown("```sh\ncat <<'EOF'\nEOF\n```", 1, 0, defaultMarkdownTheme, undefined, 0);
 			markdown.setIgnoreTight(true);
 
-			const plainLines = markdown
-				.render(80)
-				.map(line => stripVTControlCharacters(line).trimEnd());
+			const plainLines = markdown.render(80).map(line => stripVTControlCharacters(line).trimEnd());
 
 			expect(plainLines).toEqual(["```sh", "cat <<'EOF'", "EOF", "```"]);
 		});
 
 		it("keeps opt-in fenced code rows literal inside containers", () => {
-			const cases = [
-				"- shell:\n\n  ```sh\n  cat <<'EOF'\n  EOF\n  ```",
-				"> ```sh\n> cat <<'EOF'\n> EOF\n> ```",
-			];
+			const cases = ["- shell:\n\n  ```sh\n  cat <<'EOF'\n  EOF\n  ```", "> ```sh\n> cat <<'EOF'\n> EOF\n> ```"];
 
 			for (const text of cases) {
 				const markdown = new Markdown(text, 1, 0, defaultMarkdownTheme, undefined, 0);
 				markdown.setIgnoreTight(true);
-				const plainLines = markdown
-					.render(80)
-					.map(line => stripVTControlCharacters(line).trimEnd());
+				const plainLines = markdown.render(80).map(line => stripVTControlCharacters(line).trimEnd());
 
 				expect(plainLines).toContain("cat <<'EOF'");
 				expect(plainLines).toContain("EOF");
