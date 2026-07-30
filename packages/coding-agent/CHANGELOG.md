@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `omp commit` failing to resolve extension-provided models in both the agentic and legacy pipelines ([#7099](https://github.com/can1357/oh-my-pi/issues/7099)).
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
