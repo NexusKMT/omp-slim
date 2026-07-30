@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.0] - 2026-07-30
+
 ### Added
 
 - Added first-class parentTurnId support for nested Codex requests, allowing stream options and metadata helpers to accept and safely propagate the initiating turn's ID.
