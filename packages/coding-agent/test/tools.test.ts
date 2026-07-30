@@ -637,6 +637,35 @@ describe("Coding Agent Tools", () => {
 			expect(result.details?.truncation?.outputLines).toBe(defaultLimit);
 		});
 
+		it("should spill oversized read output to an artifact", async () => {
+			const testFile = path.join(testDir, "oversized-read.txt");
+			const line = "0123456789".repeat(20);
+			fs.writeFileSync(testFile, `${Array.from({ length: 600 }, () => line).join("\n")}\n`);
+			const spillSettings = Settings.isolated({
+				"tools.artifactSpillThreshold": 20,
+				"tools.artifactTailBytes": 1,
+				"tools.artifactTailLines": 10,
+				"tools.artifactHeadBytes": 0,
+			});
+			const spillSession = createTestToolSession(testDir, spillSettings);
+			const spillReadTool = wrapToolWithMetaNotice(new ReadTool(spillSession));
+			const context = { ...createTestToolContext(["read"]), settings: spillSettings };
+
+			const result = await spillReadTool.execute(
+				"test-call-read-spill",
+				{ path: testFile },
+				undefined,
+				undefined,
+				context,
+			);
+			const truncation = result.details?.meta?.truncation;
+			const output = getTextOutput(result);
+
+			expect(truncation?.artifactId).toBeDefined();
+			expect(Buffer.byteLength(output, "utf-8")).toBeLessThan(20 * 1024);
+			expect(output).toContain("artifact://");
+		});
+
 		it("should render directories as a two-level tree without capping root entries", async () => {
 			const childDir = path.join(testDir, "child");
 			const base = Date.now() - 60_000;

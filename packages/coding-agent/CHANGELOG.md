@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Removed the `read` exemption from the centralized artifact spill wrapper. Oversized read results now persist to a recoverable session artifact and return the configured inline head/tail instead of bypassing the threshold shared by other tools.
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
