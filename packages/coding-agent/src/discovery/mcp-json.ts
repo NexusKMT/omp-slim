@@ -12,7 +12,7 @@ import { registerProvider } from "../capability";
 import { readFile } from "../capability/fs";
 import { type MCPServer, mcpCapability } from "../capability/mcp";
 import type { LoadContext, LoadResult, SourceMeta } from "../capability/types";
-import { createSourceMeta, expandEnvVarsDeep } from "./helpers";
+import { createSourceMeta, expandEnvVarsDeep, parseRequestIdFormat } from "./helpers";
 
 const PROVIDER_ID = "mcp-json";
 const DISPLAY_NAME = "MCP Config";
@@ -84,16 +84,12 @@ function transformMCPConfig(config: MCPConfigFile, source: SourceMeta): MCPServe
 				}
 			}
 
-			let requestIdFormat: "string" | "number" | undefined;
-			if (serverConfig.requestIdFormat !== undefined) {
-				if (serverConfig.requestIdFormat === "string" || serverConfig.requestIdFormat === "number") {
-					requestIdFormat = serverConfig.requestIdFormat;
-				} else {
-					logger.warn("MCP server has invalid 'requestIdFormat' value, ignoring", {
-						name,
-						value: serverConfig.requestIdFormat,
-					});
-				}
+			const requestIdFormat = parseRequestIdFormat(serverConfig.requestIdFormat);
+			if (requestIdFormat === undefined && serverConfig.requestIdFormat !== undefined) {
+				logger.warn("MCP server has invalid 'requestIdFormat' value, ignoring", {
+					name,
+					value: serverConfig.requestIdFormat,
+				});
 			}
 
 			const server: MCPServer = {
