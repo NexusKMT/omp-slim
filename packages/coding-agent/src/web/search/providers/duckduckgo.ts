@@ -2,7 +2,7 @@ import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import type { SearchResponse, SearchSource } from "../../../web/search/types";
 import { SearchProviderError } from "../../../web/search/types";
 import type { QuerySyntax } from "../query";
-import { formatScraperQuery } from "../query";
+import { formatScraperQuery, parseSearchQuery } from "../query";
 import { clampNumResults } from "../utils";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
@@ -246,9 +246,10 @@ export function localeToKl(lang: string | undefined): string | undefined {
 }
 
 async function callDuckDuckGoHtml(params: SearchParams): Promise<string> {
+	const parsed = params.parsedQuery ?? parseSearchQuery(params.query);
 	const form = new URLSearchParams({
-		q: formatScraperQuery(params.query, params.parsedQuery, DDG_QUERY_SYNTAX),
-		kl: localeToKl(params.parsedQuery?.lang) ?? "us-en",
+		q: formatScraperQuery(params.query, parsed, DDG_QUERY_SYNTAX),
+		kl: localeToKl(parsed.lang) ?? "us-en",
 	});
 	const df = params.recency ? RECENCY_TO_DDG_DF[params.recency] : undefined;
 	if (df) form.set("df", df);

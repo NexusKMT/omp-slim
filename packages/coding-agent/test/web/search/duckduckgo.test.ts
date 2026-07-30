@@ -39,7 +39,8 @@ describe("localeToKl", () => {
 describe("searchDuckDuckGo kl parameter (integration)", () => {
 	const fakeAuthStorage = {} as unknown as AuthStorage;
 
-	async function effectiveForm(query: string): Promise<URLSearchParams> {
+	async function effectiveForm(query: string, opts: { withParsedQuery?: boolean } = {}): Promise<URLSearchParams> {
+		const withParsedQuery = opts.withParsedQuery ?? true;
 		let body: string | undefined;
 		const fetchMock: FetchImpl = async (_input, init) => {
 			body = init?.body as string;
@@ -50,7 +51,7 @@ describe("searchDuckDuckGo kl parameter (integration)", () => {
 		};
 		await searchDuckDuckGo({
 			query,
-			parsedQuery: parseSearchQuery(query),
+			parsedQuery: withParsedQuery ? parseSearchQuery(query) : undefined,
 			systemPrompt: "",
 			authStorage: fakeAuthStorage,
 			fetch: fetchMock,
@@ -83,5 +84,11 @@ describe("searchDuckDuckGo kl parameter (integration)", () => {
 	it("falls back to us-en for language-only locales", async () => {
 		const form = await effectiveForm("weather lang:de");
 		expect(form.get("kl")).toBe("us-en");
+	});
+
+	it("parses lang: from the raw query when parsedQuery is omitted (direct call)", async () => {
+		const form = await effectiveForm("weather lang:de-de", { withParsedQuery: false });
+		expect(form.get("q")).toBe("weather");
+		expect(form.get("kl")).toBe("de-de");
 	});
 });
