@@ -146,7 +146,7 @@ describe("selector navigation keybindings", () => {
 
 		expect(selected).toEqual(["child"]);
 	});
-	it("traverses actual turns while skipping tool results in the session tree", () => {
+	it("traverses actual turns and jumps to first/last visible tree items", () => {
 		const firstUser = createMessageNode("first-user", null, "First question");
 		const assistant = createAgentMessageNode("assistant", "first-user", {
 			role: "assistant",
@@ -209,7 +209,74 @@ describe("selector navigation keybindings", () => {
 		selector.handleInput("\x1b[H");
 		selector.handleInput("\n");
 
-		expect(selected).toEqual(["second-user", "assistant", "first-user", "assistant", "second-user", "first-user"]);
+		expect(selected).toEqual([
+			"second-user",
+			"assistant",
+			"first-user",
+			"assistant",
+			"trailing-tool-result",
+			"first-user",
+		]);
+	});
+
+	it("honors configured row bindings before Alt+Up and Alt+Down turn traversal", () => {
+		setKeybindings(
+			KeybindingsManager.inMemory({
+				"tui.select.up": "alt+up",
+				"tui.select.down": "alt+down",
+			}),
+		);
+		const firstUser = createMessageNode("first-user", null, "First question");
+		const toolResult = createAgentMessageNode("tool-result", "first-user", {
+			role: "toolResult",
+			toolCallId: "call-1",
+			toolName: "read",
+			content: [{ type: "text", text: "file contents" }],
+			isError: false,
+			timestamp: 2,
+		});
+		const secondUser = createMessageNode("second-user", "tool-result", "Second question");
+		firstUser.children.push(toolResult);
+		toolResult.children.push(secondUser);
+
+		const selected: string[] = [];
+		const selector = new TreeSelectorComponent(
+			[firstUser],
+			"first-user",
+			40,
+			id => selected.push(id),
+			() => {},
+		);
+
+		selector.handleInput("\x1b[1;3B");
+		selector.handleInput("\n");
+		selector.handleInput("\x1b[1;3A");
+		selector.handleInput("\n");
+
+		expect(selected).toEqual(["tool-result", "first-user"]);
+	});
+
+	it("uses rendered tree order for Home and End across branches", () => {
+		const root = createMessageNode("root", null, "Root");
+		const activeBranch = createMessageNode("active-branch", "root", "Active branch");
+		const inactiveBranch = createMessageNode("inactive-branch", "root", "Inactive branch");
+		root.children.push(activeBranch, inactiveBranch);
+
+		const selected: string[] = [];
+		const selector = new TreeSelectorComponent(
+			[root],
+			"active-branch",
+			40,
+			id => selected.push(id),
+			() => {},
+		);
+
+		selector.handleInput("\x1b[F");
+		selector.handleInput("\n");
+		selector.handleInput("\x1b[H");
+		selector.handleInput("\n");
+
+		expect(selected).toEqual(["inactive-branch", "root"]);
 	});
 
 	it("uses PageUp and PageDown to move by a visible page in the session tree", () => {
