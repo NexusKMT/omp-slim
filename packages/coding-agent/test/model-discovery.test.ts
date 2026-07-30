@@ -9,7 +9,7 @@ import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import type { ModelSpec, OpenAICompat } from "@oh-my-pi/pi-catalog/types";
-import { applyLlamaCppQwenThinking } from "@oh-my-pi/pi-coding-agent/config/model-discovery";
+import { applyLlamaCppQwenThinking, discoveryProbeTimeoutMs } from "@oh-my-pi/pi-coding-agent/config/model-discovery";
 import { kNoAuth, ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
@@ -1201,6 +1201,36 @@ describe("ModelRegistry runtime discovery", () => {
 		// (meta/status.args/architecture.input_modalities) must stay on /models.
 		expect(requested).toContain("http://127.0.0.1:8080/models");
 		expect(requested).not.toContain("http://127.0.0.1:8080/v1/models");
+	});
+
+	test("discoveryProbeTimeoutMs keeps loopback fast but gives non-loopback hosts a larger budget", () => {
+		// Regression: the loopback-tuned probe timeout was applied to every host,
+		// so a remote/LAN LLAMA_CPP_BASE_URL with normal round-trip latency timed
+		// out and the model list came back empty (#7087). Loopback keeps the tight
+		// budget; anything reached over the network gets a strictly larger one.
+		const loopbackMs = 250;
+		for (const host of [
+			"http://127.0.0.1:8080",
+			"http://127.5.6.7:8080",
+			"http://localhost:8080",
+			"http://[::1]:8080",
+			"http://0.0.0.0:8080",
+		]) {
+			expect(discoveryProbeTimeoutMs(host, loopbackMs)).toBe(loopbackMs);
+		}
+		const remoteBudgets = [
+			"http://remote-llama.test:8080",
+			"http://192.168.1.50:8080",
+			"http://172.18.0.3:8080",
+			"http://10.0.0.4:8080",
+			"http://box.local:8080",
+		].map(host => discoveryProbeTimeoutMs(host, loopbackMs));
+		for (const budget of remoteBudgets) {
+			expect(budget).toBeGreaterThan(loopbackMs);
+		}
+		// A consistent budget for every non-loopback host, independent of the tight cap.
+		expect(new Set(remoteBudgets).size).toBe(1);
+		expect(discoveryProbeTimeoutMs("http://remote-llama.test:8080", 150)).toBe(remoteBudgets[0]);
 	});
 
 	test("llama.cpp discovery marks per-model architecture image modalities as vision-capable", async () => {

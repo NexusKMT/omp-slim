@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a remote or LAN `LLAMA_CPP_BASE_URL` (and `OLLAMA_BASE_URL`/`OLLAMA_HOST`) being ignored during model discovery: the `/models` and `/props` probes used a 250ms timeout tuned for a loopback server, so a host reached over the network exceeded it, discovery returned no models, and the picker fell back to stale `127.0.0.1:8080` entries. Non-loopback hosts now get a generous discovery timeout while the loopback default keeps its fast fail ([#7087](https://github.com/can1357/oh-my-pi/issues/7087)).
+
 ## [17.2.0] - 2026-07-30
 
 ### Breaking Changes
