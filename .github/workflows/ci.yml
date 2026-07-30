@@ -18,6 +18,13 @@ on:
          - "Cargo.lock"
          - "rust-toolchain.toml"
          - "rustfmt.toml"
+         # A root dependency change (lockfile/catalog/patches) affects every
+         # job; without these a lockfile-only push shipped untested — and a
+         # release retagged onto such a commit never triggered its run.
+         - "bun.lock"
+         - "bunfig.toml"
+         - "package.json"
+         - "patches/**"
          - ".github/**"
    pull_request:
       branches: [main]
@@ -36,6 +43,10 @@ on:
          - "Cargo.lock"
          - "rust-toolchain.toml"
          - "rustfmt.toml"
+         - "bun.lock"
+         - "bunfig.toml"
+         - "package.json"
+         - "patches/**"
          - ".github/**"
    workflow_dispatch:
       inputs:
