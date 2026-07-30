@@ -41,7 +41,6 @@ function isOsc66Line(line: string): boolean {
 	return line.includes(OSC66_LINE_PREFIX);
 }
 
-
 function normalizeHtmlEntitiesForTerminal(raw: string): string {
 	const parseCodePoint = (value: number): string => {
 		if (Number.isFinite(value) && value >= 0 && value <= 0x10ffff) {
@@ -2258,7 +2257,8 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 			case "paragraph": {
 				const displayMath = soleDisplayMath(token.tokens);
 				if (displayMath) {
-					for (const mathLine of latexToBlock(displayMath.text)) lines.push(renderedLine(this.#applyDefaultStyle(mathLine)));
+					for (const mathLine of latexToBlock(displayMath.text))
+						lines.push(renderedLine(this.#applyDefaultStyle(mathLine)));
 					if (nextTokenType && nextTokenType !== "list" && nextTokenType !== "space") lines.push(renderedLine(""));
 					break;
 				}
@@ -2283,7 +2283,13 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 					const ascii = this.#theme.resolveMermaidAscii(token.text, width);
 					if (ascii) {
 						for (const asciiLine of ascii.split("\n")) {
-							lines.push(renderedLine(visibleWidth(asciiLine) > width ? truncateToWidth(asciiLine, width, Ellipsis.Omit) : asciiLine));
+							lines.push(
+								renderedLine(
+									visibleWidth(asciiLine) > width
+										? truncateToWidth(asciiLine, width, Ellipsis.Omit)
+										: asciiLine,
+								),
+							);
 						}
 						if (nextTokenType && nextTokenType !== "space") {
 							lines.push(renderedLine(""));
@@ -2361,10 +2367,7 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 					}
 				}
 
-				while (
-					renderedQuoteLines.length > 0 &&
-					renderedQuoteLines[renderedQuoteLines.length - 1]!.text === ""
-				) {
+				while (renderedQuoteLines.length > 0 && renderedQuoteLines[renderedQuoteLines.length - 1]!.text === "") {
 					renderedQuoteLines.pop();
 				}
 
