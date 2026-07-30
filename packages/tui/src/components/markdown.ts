@@ -1463,7 +1463,7 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 		paddingY: number,
 		theme: MarkdownTheme,
 		defaultTextStyle?: DefaultTextStyle,
-		codeBlockIndent: number = 0,
+		codeBlockIndent: number = 2,
 	) {
 		this.#text = normalizeOsc8Terminators(text);
 		this.#paddingX = paddingX;
@@ -1858,7 +1858,7 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 		rowOffset: number,
 		startingSourceOffset: number,
 	): string[] {
-		const wrappedLines: string[] = [];
+		const wrappedLines: Array<{ text: string; unpadded: boolean }> = [];
 		let sourceOffset = startingSourceOffset;
 		for (let i = start; i < end; i++) {
 			const token = tokens[i];
@@ -1878,10 +1878,13 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 				// Lists wrap while their structural prefixes are still available, so
 				// continuation rows retain the correct hanging indent. Re-wrapping the
 				// flattened rows here would discard that structure.
+				const unpadded = token.type === "code" && this.#codeBlockIndent === 0;
 				if (token.type === "list" || TERMINAL.isImageLine(line) || isOsc66Line(line)) {
-					wrappedLines.push(line);
+					wrappedLines.push({ text: line, unpadded });
 				} else {
-					wrappedLines.push(...wrapTextWithAnsi(line, contentWidth));
+					for (const wrappedLine of wrapTextWithAnsi(line, contentWidth)) {
+						wrappedLines.push({ text: wrappedLine, unpadded });
+					}
 				}
 				tokenLineOffsets.push(wrappedLines.length - tokenWrappedRowStart);
 			}
@@ -1915,7 +1918,7 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 		const contentLines: string[] = [];
 		let previousLineWasOsc66 = false;
 
-		for (const line of wrappedLines) {
+		for (const { text: line, unpadded } of wrappedLines) {
 			// The first empty row after a scale>1 OSC 66 heading is structural:
 			// it reserves the lower cells occupied by the multicell glyphs. Do
 			// not pad or background-fill it, because real spaces on that row can
@@ -1935,7 +1938,7 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 			}
 
 			previousLineWasOsc66 = false;
-			const lineWithMargins = leftMargin + line + rightMargin;
+			const lineWithMargins = (unpadded ? "" : leftMargin) + line + rightMargin;
 
 			if (bgFn) {
 				contentLines.push(applyBackgroundToLine(lineWithMargins, signature.width, bgFn));

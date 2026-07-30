@@ -954,7 +954,7 @@ code block
 
 more text`,
 			];
-			const expectedLines = ["hello this is text", "", "```", "code block", "```", "", "more text"];
+			const expectedLines = ["hello this is text", "", "```", "  code block", "```", "", "more text"];
 
 			for (const text of cases) {
 				const markdown = new Markdown(text, 0, 0, defaultMarkdownTheme);
@@ -963,6 +963,17 @@ more text`,
 
 				expect(plainLines).toEqual(expectedLines);
 			}
+		});
+
+		it("keeps opt-in top-level fenced code rows at column zero", () => {
+			const markdown = new Markdown("```sh\ncat <<'EOF'\nEOF\n```", 1, 0, defaultMarkdownTheme, undefined, 0);
+			markdown.setIgnoreTight(true);
+
+			const plainLines = markdown
+				.render(80)
+				.map(line => stripVTControlCharacters(line).trimEnd());
+
+			expect(plainLines).toEqual(["```sh", "cat <<'EOF'", "EOF", "```"]);
 		});
 
 		it("should not add a trailing blank line when code block is the last rendered block", () => {
@@ -1011,7 +1022,7 @@ more text`,
 			});
 
 			expect(seenSources).toEqual([invalidSource]);
-			expect(plainLines).toEqual(["```mermaid", "flowchart TD", "  A --", "```"]);
+			expect(plainLines).toEqual(["```mermaid", "  flowchart TD", "    A --", "```"]);
 		});
 	});
 
