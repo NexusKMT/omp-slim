@@ -4,16 +4,11 @@
  * Chain (first hit wins):
  *  1. Static credentials from the environment
  *     (`AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` [+ `AWS_SESSION_TOKEN`]).
- *  2. Profile in `~/.aws/credentials` (and `~/.aws/config` for SSO):
- *      - static `aws_access_key_id` / `aws_secret_access_key` / `aws_session_token`
- *      - SSO profile referencing a cached token in `~/.aws/sso/cache/*.json`,
- *        which we exchange for short-lived role credentials via
- *        `https://portal.sso.{region}.amazonaws.com/federation/credentials`.
- *      - `credential_process` — an external command emitting the AWS SDK
- *        `Version: 1` JSON envelope on stdout. Used by `aws-vault`, `granted`,
- *        in-house brokers, etc.
- *  3. EC2 IMDSv2 (only when `AWS_EC2_METADATA_DISABLED` is unset / falsey and
- *     `169.254.169.254` is reachable within a 1 s timeout).
+ *  2. Web identity (`AWS_WEB_IDENTITY_TOKEN_FILE` + `AWS_ROLE_ARN`).
+ *  3. Profile in `~/.aws/credentials` (and `~/.aws/config` for SSO):
+ *      - static keys, SSO, or `credential_process`.
+ *  4. ECS/container credentials from `AWS_CONTAINER_CREDENTIALS_*`.
+ *  5. EC2 IMDSv2 when metadata is enabled.
  *
  * Resolved credentials are cached process-wide per profile and refreshed
  * 60 s before `Expiration` to absorb clock skew.
@@ -26,6 +21,7 @@ import { $env, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
 import type { FetchImpl } from "../types";
 import { raceWithSignal } from "../utils/abort";
+import { isLocalOrMetadataHost } from "../utils/proxy";
 import type { AwsCredentials } from "./aws-sigv4";
 
 export interface ResolvedCredentials extends AwsCredentials {
@@ -102,19 +98,27 @@ async function resolveFresh(
 	const envCreds = readEnvCredentials();
 	if (envCreds) return envCreds;
 
-	// 2. Profile (static or SSO).
+	// 2. Web identity.
+	const webIdentityCreds = await readWebIdentityCredentials(region, signal, fetchImpl);
+	if (webIdentityCreds) return webIdentityCreds;
+
+	// 3. Profile (static, SSO, or credential_process).
 	const profileCreds = await readProfileCredentials(profile, region, signal, fetchImpl);
 	if (profileCreds) return profileCreds;
 
-	// 3. EC2 IMDSv2.
+	// 4. ECS/container credentials.
+	const containerCreds = await readContainerCredentials(signal, fetchImpl);
+	if (containerCreds) return containerCreds;
+
+	// 5. EC2 IMDSv2.
 	if ($env.AWS_EC2_METADATA_DISABLED?.toLowerCase() !== "true") {
 		const imdsCreds = await readImdsCredentials(signal, fetchImpl);
 		if (imdsCreds) return imdsCreds;
 	}
 
 	throw new AIError.AwsCredentialsError(
-		`Unable to resolve AWS credentials. Set AWS_ACCESS_KEY_ID+AWS_SECRET_ACCESS_KEY, ` +
-			`or configure profile '${profile}' in ~/.aws/credentials (or ~/.aws/config for SSO).`,
+		`Unable to resolve AWS credentials. Configure static environment keys, web identity, ` +
+			`an AWS profile, ECS credentials, or an EC2 instance role.`,
 		"resolution",
 	);
 }
@@ -513,6 +517,159 @@ export function tokenizeCredentialProcessCommand(cmd: string): string[] {
 	}
 	if (hasToken) tokens.push(current);
 	return tokens;
+}
+
+// ---------- Web identity ----------
+
+function xmlTag(xml: string, tag: string): string | undefined {
+	const value = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(xml)?.[1];
+	if (!value) return undefined;
+	return value
+		.replaceAll("&amp;", "&")
+		.replaceAll("&lt;", "<")
+		.replaceAll("&gt;", ">")
+		.replaceAll("&quot;", '"')
+		.replaceAll("&apos;", "'");
+}
+
+async function readWebIdentityCredentials(
+	region: string,
+	signal: AbortSignal | undefined,
+	fetchImpl: FetchImpl,
+): Promise<ResolvedCredentials | undefined> {
+	const tokenFile = $env.AWS_WEB_IDENTITY_TOKEN_FILE;
+	const roleArn = $env.AWS_ROLE_ARN;
+	if (!tokenFile || !roleArn) return undefined;
+	let token: string;
+	try {
+		token = (await Bun.file(tokenFile).text()).trim();
+	} catch (err) {
+		throw new AIError.AwsCredentialsError(
+			`Unable to read AWS web identity token file: ${String(err)}`,
+			"web-identity",
+			{
+				cause: err,
+			},
+		);
+	}
+	if (!token) {
+		throw new AIError.AwsCredentialsError("AWS web identity token file is empty.", "web-identity");
+	}
+	const body = new URLSearchParams({
+		Action: "AssumeRoleWithWebIdentity",
+		Version: "2011-06-15",
+		RoleArn: roleArn,
+		RoleSessionName: $env.AWS_ROLE_SESSION_NAME || `omp-${process.pid}`,
+		WebIdentityToken: token,
+	});
+	const response = await fetchImpl(`https://sts.${region}.amazonaws.com/`, {
+		method: "POST",
+		headers: { "content-type": "application/x-www-form-urlencoded" },
+		body: body.toString(),
+		signal,
+	});
+	const xml = await response.text();
+	if (!response.ok) {
+		throw new AIError.AwsCredentialsError(
+			`AWS AssumeRoleWithWebIdentity failed: ${response.status} ${xmlTag(xml, "Message") ?? xml.slice(0, 200)}`,
+			"web-identity",
+		);
+	}
+	const accessKeyId = xmlTag(xml, "AccessKeyId");
+	const secretAccessKey = xmlTag(xml, "SecretAccessKey");
+	const sessionToken = xmlTag(xml, "SessionToken");
+	if (!accessKeyId || !secretAccessKey || !sessionToken) {
+		throw new AIError.AwsCredentialsError(
+			"AWS AssumeRoleWithWebIdentity response is missing credentials.",
+			"web-identity",
+		);
+	}
+	const credentials: ResolvedCredentials = { accessKeyId, secretAccessKey, sessionToken };
+	const expiration = xmlTag(xml, "Expiration");
+	if (expiration) credentials.expiresAt = Date.parse(expiration);
+	return credentials;
+}
+
+// ---------- ECS/container credentials ----------
+
+interface ContainerCredentialResponse {
+	AccessKeyId?: string;
+	SecretAccessKey?: string;
+	Token?: string;
+	Expiration?: string;
+}
+
+async function readContainerCredentials(
+	signal: AbortSignal | undefined,
+	fetchImpl: FetchImpl,
+): Promise<ResolvedCredentials | undefined> {
+	const relativeUri = $env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI;
+	const fullUri = $env.AWS_CONTAINER_CREDENTIALS_FULL_URI;
+	if (!relativeUri && !fullUri) return undefined;
+	let endpoint: URL;
+	if (relativeUri) {
+		if (!relativeUri.startsWith("/")) {
+			throw new AIError.AwsCredentialsError(
+				"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI must start with '/'.",
+				"container",
+			);
+		}
+		endpoint = new URL(`http://169.254.170.2${relativeUri}`);
+	} else {
+		try {
+			endpoint = new URL(fullUri as string);
+		} catch (err) {
+			throw new AIError.AwsCredentialsError(
+				`AWS_CONTAINER_CREDENTIALS_FULL_URI is invalid: ${String(err)}`,
+				"container",
+				{ cause: err },
+			);
+		}
+		if (endpoint.protocol !== "https:" && !isLocalOrMetadataHost(endpoint.hostname)) {
+			throw new AIError.AwsCredentialsError(
+				"AWS_CONTAINER_CREDENTIALS_FULL_URI must use HTTPS or a local metadata host.",
+				"container",
+			);
+		}
+	}
+	let authorization = $env.AWS_CONTAINER_AUTHORIZATION_TOKEN;
+	const authorizationTokenFile = $env.AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE;
+	if (!authorization && authorizationTokenFile) {
+		try {
+			authorization = (await Bun.file(authorizationTokenFile).text()).trim();
+		} catch (err) {
+			throw new AIError.AwsCredentialsError(
+				`Unable to read AWS container authorization token file: ${String(err)}`,
+				"container",
+				{ cause: err },
+			);
+		}
+	}
+	const response = await fetchImpl(endpoint, {
+		headers: authorization ? { authorization } : undefined,
+		signal,
+	});
+	if (!response.ok) {
+		const body = await response.text().catch(() => "");
+		throw new AIError.AwsCredentialsError(
+			`AWS container credential endpoint failed: ${response.status} ${body.slice(0, 200)}`,
+			"container",
+		);
+	}
+	const body = (await response.json()) as ContainerCredentialResponse;
+	if (!body.AccessKeyId || !body.SecretAccessKey) {
+		throw new AIError.AwsCredentialsError(
+			"AWS container credential response is missing AccessKeyId/SecretAccessKey.",
+			"container",
+		);
+	}
+	const credentials: ResolvedCredentials = {
+		accessKeyId: body.AccessKeyId,
+		secretAccessKey: body.SecretAccessKey,
+	};
+	if (body.Token) credentials.sessionToken = body.Token;
+	if (body.Expiration) credentials.expiresAt = Date.parse(body.Expiration);
+	return credentials;
 }
 
 // ---------- IMDSv2 ----------

@@ -7,6 +7,7 @@ import {
 	resolveAwsCredentials,
 	tokenizeCredentialProcessCommand,
 } from "@oh-my-pi/pi-ai/providers/aws-credentials";
+import type { FetchImpl } from "@oh-my-pi/pi-ai/types";
 import { removeWithRetries } from "../../utils/src/temp";
 
 // `credential_process` integration coverage. Drives a real `Bun.spawn`
@@ -24,6 +25,13 @@ const ENV_KEYS = [
 	"AWS_CONFIG_FILE",
 	"AWS_SHARED_CREDENTIALS_FILE",
 	"AWS_EC2_METADATA_DISABLED",
+	"AWS_WEB_IDENTITY_TOKEN_FILE",
+	"AWS_ROLE_ARN",
+	"AWS_ROLE_SESSION_NAME",
+	"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+	"AWS_CONTAINER_CREDENTIALS_FULL_URI",
+	"AWS_CONTAINER_AUTHORIZATION_TOKEN",
+	"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
 ] as const;
 
 function quoteForConfig(p: string): string {
@@ -75,7 +83,7 @@ describe("tokenizeCredentialProcessCommand", () => {
 	});
 });
 
-describe("resolveAwsCredentials credential_process", () => {
+describe("resolveAwsCredentials", () => {
 	let tmp: string;
 	const saved = new Map<string, string | undefined>();
 
@@ -175,5 +183,76 @@ describe("resolveAwsCredentials credential_process", () => {
 		const promise = resolveAwsCredentials({ profile: "hangs", signal: ctrl.signal });
 		setTimeout(() => ctrl.abort(new Error("test abort")), 50);
 		await expect(promise).rejects.toBeDefined();
+	});
+
+	test("resolves ECS container credentials with the authorization token", async () => {
+		const credentialsPath = path.join(tmp, "empty-credentials");
+		const configPath = path.join(tmp, "empty-config");
+		await Promise.all([Bun.write(credentialsPath, ""), Bun.write(configPath, "")]);
+		Bun.env.AWS_SHARED_CREDENTIALS_FILE = credentialsPath;
+		Bun.env.AWS_CONFIG_FILE = configPath;
+		Bun.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI = "/v2/credentials/test";
+		Bun.env.AWS_CONTAINER_AUTHORIZATION_TOKEN = "container-auth";
+		const capture: { url?: string; authorization?: string | null } = {};
+		const fetchImpl: FetchImpl = Object.assign(
+			async (input: string | URL | Request, init?: RequestInit) => {
+				capture.url = String(input);
+				capture.authorization = new Headers(init?.headers).get("authorization");
+				return Response.json({
+					AccessKeyId: "AKIAECS",
+					SecretAccessKey: "ecs-secret",
+					Token: "ecs-token",
+					Expiration: "2099-01-01T00:00:00Z",
+				});
+			},
+			{ preconnect: fetch.preconnect },
+		);
+
+		const credentials = await resolveAwsCredentials({ fetch: fetchImpl });
+
+		expect(capture.url).toBe("http://169.254.170.2/v2/credentials/test");
+		expect(capture.authorization).toBe("container-auth");
+		expect(credentials).toEqual({
+			accessKeyId: "AKIAECS",
+			secretAccessKey: "ecs-secret",
+			sessionToken: "ecs-token",
+			expiresAt: Date.parse("2099-01-01T00:00:00Z"),
+		});
+	});
+
+	test("exchanges web identity tokens for STS credentials", async () => {
+		const tokenPath = path.join(tmp, "web-identity-token");
+		await Bun.write(tokenPath, "signed-identity-token\n");
+		Bun.env.AWS_WEB_IDENTITY_TOKEN_FILE = tokenPath;
+		Bun.env.AWS_ROLE_ARN = "arn:aws:iam::123456789012:role/test-role";
+		Bun.env.AWS_ROLE_SESSION_NAME = "test-session";
+		let requestedUrl = "";
+		let requestBody = "";
+		const fetchImpl: FetchImpl = Object.assign(
+			async (input: string | URL | Request, init?: RequestInit) => {
+				requestedUrl = String(input);
+				requestBody = String(init?.body);
+				return new Response(
+					`<AssumeRoleWithWebIdentityResponse><AssumeRoleWithWebIdentityResult><Credentials>
+						<AccessKeyId>AKIAWEB</AccessKeyId><SecretAccessKey>web-secret</SecretAccessKey>
+						<SessionToken>web-token</SessionToken><Expiration>2099-01-01T00:00:00Z</Expiration>
+					</Credentials></AssumeRoleWithWebIdentityResult></AssumeRoleWithWebIdentityResponse>`,
+					{ headers: { "content-type": "text/xml" } },
+				);
+			},
+			{ preconnect: fetch.preconnect },
+		);
+
+		const credentials = await resolveAwsCredentials({ region: "us-east-2", fetch: fetchImpl });
+
+		expect(requestedUrl).toBe("https://sts.us-east-2.amazonaws.com/");
+		expect(new URLSearchParams(requestBody).get("WebIdentityToken")).toBe("signed-identity-token");
+		expect(new URLSearchParams(requestBody).get("RoleSessionName")).toBe("test-session");
+		expect(credentials).toEqual({
+			accessKeyId: "AKIAWEB",
+			secretAccessKey: "web-secret",
+			sessionToken: "web-token",
+			expiresAt: Date.parse("2099-01-01T00:00:00Z"),
+		});
 	});
 });
