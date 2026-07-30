@@ -25,6 +25,7 @@ const ENV_KEYS = [
 	"AWS_CONFIG_FILE",
 	"AWS_SHARED_CREDENTIALS_FILE",
 	"AWS_EC2_METADATA_DISABLED",
+	"AWS_EC2_METADATA_SERVICE_ENDPOINT",
 	"AWS_WEB_IDENTITY_TOKEN_FILE",
 	"AWS_ROLE_ARN",
 	"AWS_ROLE_SESSION_NAME",
@@ -218,6 +219,42 @@ describe("resolveAwsCredentials", () => {
 			sessionToken: "ecs-token",
 			expiresAt: Date.parse("2099-01-01T00:00:00Z"),
 		});
+	});
+
+	test("honors AWS_EC2_METADATA_SERVICE_ENDPOINT for instance-role credentials", async () => {
+		const credentialsPath = path.join(tmp, "empty-imds-credentials");
+		const configPath = path.join(tmp, "empty-imds-config");
+		await Promise.all([Bun.write(credentialsPath, ""), Bun.write(configPath, "")]);
+		Bun.env.AWS_SHARED_CREDENTIALS_FILE = credentialsPath;
+		Bun.env.AWS_CONFIG_FILE = configPath;
+		Bun.env.AWS_EC2_METADATA_DISABLED = "false";
+		Bun.env.AWS_EC2_METADATA_SERVICE_ENDPOINT = "http://imds.internal:8181/";
+		const requestedUrls: string[] = [];
+		const fetchImpl: FetchImpl = Object.assign(
+			async (input: string | URL | Request) => {
+				const url = String(input);
+				requestedUrls.push(url);
+				if (url.endsWith("/latest/api/token")) return new Response("imds-token");
+				if (url.endsWith("/latest/meta-data/iam/security-credentials/")) return new Response("test-role");
+				return Response.json({
+					AccessKeyId: "AKIAIMDS",
+					SecretAccessKey: "imds-secret",
+					Token: "imds-session",
+					Expiration: "2099-01-01T00:00:00Z",
+				});
+			},
+			{ preconnect: fetch.preconnect },
+		);
+
+		const credentials = await resolveAwsCredentials({ fetch: fetchImpl });
+
+		expect(requestedUrls).toEqual([
+			"http://imds.internal:8181/latest/api/token",
+			"http://imds.internal:8181/latest/meta-data/iam/security-credentials/",
+			"http://imds.internal:8181/latest/meta-data/iam/security-credentials/test-role",
+		]);
+		expect(credentials.accessKeyId).toBe("AKIAIMDS");
+		expect(credentials.sessionToken).toBe("imds-session");
 	});
 
 	test("exchanges web identity tokens for STS credentials", async () => {

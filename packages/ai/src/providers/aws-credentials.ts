@@ -21,6 +21,7 @@ import { $env, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
 import type { FetchImpl } from "../types";
 import { raceWithSignal } from "../utils/abort";
+import { type AwsIniFile, parseAwsIni } from "../utils/aws-profile";
 import { isLocalOrMetadataHost } from "../utils/proxy";
 import type { AwsCredentials } from "./aws-sigv4";
 
@@ -133,42 +134,10 @@ function readEnvCredentials(): ResolvedCredentials | undefined {
 		: { accessKeyId: ak, secretAccessKey: sk };
 }
 
-// ---------- INI parsing ----------
-
-/** Map of section name -> map of key -> value. Section names are stripped of
- * any leading `profile ` (so `~/.aws/config` aligns with `~/.aws/credentials`). */
-type IniFile = Record<string, Record<string, string>>;
-
-function parseIni(text: string): IniFile {
-	const out: IniFile = {};
-	let current: Record<string, string> | null = null;
-	for (const rawLine of text.split(/\r?\n/)) {
-		const line = rawLine.trim();
-		if (!line || line.startsWith("#") || line.startsWith(";")) continue;
-		if (line.startsWith("[") && line.endsWith("]")) {
-			let name = line.slice(1, -1).trim();
-			if (name.startsWith("profile ")) name = name.slice(8).trim();
-			if (name.startsWith("sso-session ")) name = `sso-session:${name.slice(12).trim()}`;
-			let section = out[name];
-			if (!section) {
-				section = {};
-				out[name] = section;
-			}
-			current = section;
-			continue;
-		}
-		if (!current) continue;
-		const eq = line.indexOf("=");
-		if (eq === -1) continue;
-		current[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
-	}
-	return out;
-}
-
-async function readIniFile(p: string): Promise<IniFile | undefined> {
+async function readIniFile(p: string): Promise<AwsIniFile | undefined> {
 	try {
 		const text = await fs.promises.readFile(p, "utf8");
-		return parseIni(text);
+		return parseAwsIni(text);
 	} catch (err) {
 		if (isEnoent(err)) return undefined;
 		throw err;
@@ -229,7 +198,7 @@ interface SsoCachedToken {
 
 async function readSsoCredentials(
 	profileCfg: Record<string, string>,
-	configIni: IniFile | undefined,
+	configIni: AwsIniFile | undefined,
 	defaultRegion: string,
 	signal: AbortSignal | undefined,
 	fetchImpl: FetchImpl,
@@ -683,8 +652,9 @@ async function readImdsCredentials(
 ): Promise<ResolvedCredentials | undefined> {
 	const timeout = AbortSignal.timeout(IMDS_TIMEOUT_MS);
 	const signal = parentSignal ? AbortSignal.any([parentSignal, timeout]) : timeout;
+	const endpoint = ($env.AWS_EC2_METADATA_SERVICE_ENDPOINT || `http://${IMDS_HOST}`).replace(/\/+$/, "");
 	try {
-		const tokenRes = await fetchImpl(`http://${IMDS_HOST}/latest/api/token`, {
+		const tokenRes = await fetchImpl(`${endpoint}/latest/api/token`, {
 			method: "PUT",
 			headers: { "x-aws-ec2-metadata-token-ttl-seconds": "21600" },
 			signal,
@@ -692,7 +662,7 @@ async function readImdsCredentials(
 		if (!tokenRes.ok) return undefined;
 		const token = await tokenRes.text();
 
-		const roleRes = await fetchImpl(`http://${IMDS_HOST}/latest/meta-data/iam/security-credentials/`, {
+		const roleRes = await fetchImpl(`${endpoint}/latest/meta-data/iam/security-credentials/`, {
 			headers: { "x-aws-ec2-metadata-token": token },
 			signal,
 		});
@@ -701,7 +671,7 @@ async function readImdsCredentials(
 		if (!role) return undefined;
 
 		const credsRes = await fetchImpl(
-			`http://${IMDS_HOST}/latest/meta-data/iam/security-credentials/${encodeURIComponent(role)}`,
+			`${endpoint}/latest/meta-data/iam/security-credentials/${encodeURIComponent(role)}`,
 			{
 				headers: { "x-aws-ec2-metadata-token": token },
 				signal,

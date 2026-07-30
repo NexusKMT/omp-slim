@@ -24,7 +24,7 @@ describe("AWS provider availability", () => {
 		const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "aws-registry-"));
 		try {
 			const credentialsPath = path.join(tmp, "credentials");
-			await Bun.write(credentialsPath, "[default]\naws_access_key_id = test\n");
+			await Bun.write(credentialsPath, "[default]\naws_access_key_id = test\naws_secret_access_key = test-secret\n");
 			await withEnv(
 				{
 					...EMPTY_AWS_ENV,
@@ -39,6 +39,28 @@ describe("AWS provider availability", () => {
 		}
 	});
 
+	test("ignores profile files without a usable credential mechanism", async () => {
+		const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "aws-registry-empty-"));
+		try {
+			const credentialsPath = path.join(tmp, "credentials");
+			const configPath = path.join(tmp, "config");
+			await Promise.all([
+				Bun.write(credentialsPath, "[default]\naws_access_key_id = incomplete\n"),
+				Bun.write(configPath, "[default]\nregion = us-east-1\n"),
+			]);
+			await withEnv(
+				{
+					...EMPTY_AWS_ENV,
+					AWS_SHARED_CREDENTIALS_FILE: credentialsPath,
+					AWS_CONFIG_FILE: configPath,
+					AWS_EC2_METADATA_DISABLED: "true",
+				},
+				async () => expect(getEnvApiKey("bedrock-mantle")).toBeUndefined(),
+			);
+		} finally {
+			await removeWithRetries(tmp);
+		}
+	});
 	test("recognizes an explicitly configured EC2 metadata endpoint", async () => {
 		await withEnv(
 			{
