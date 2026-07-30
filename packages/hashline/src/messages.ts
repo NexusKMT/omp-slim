@@ -31,7 +31,21 @@ export function formatAnchoredContext(anchorLines: readonly number[], fileLines:
 	return rows;
 }
 /** Concrete range operation rejected because its absolute end precedes its start. */
-export type AbsoluteRangeOp = "replace" | "delete";
+export type AbsoluteRangeOp = "replace" | "delete" | "copy" | "cut";
+
+/** Header forms per concrete-range op, used to compose retry suggestions. */
+const RANGE_OP_FORMS: Record<AbsoluteRangeOp, { keyword: string; colon: string; blockKeyword: string }> = {
+	replace: { keyword: "SWAP", colon: ":", blockKeyword: "SWAP.BLK" },
+	delete: { keyword: "DEL", colon: "", blockKeyword: "DEL.BLK" },
+	copy: { keyword: "COPY", colon: "", blockKeyword: "COPY.BLK" },
+	cut: { keyword: "CUT", colon: "", blockKeyword: "CUT.BLK" },
+};
+
+/** `OP.BLK N`-style header for a concrete-range op (`SWAP.BLK 5:` / `CUT.BLK 5`). */
+function blockFormAt(op: AbsoluteRangeOp, line: number): string {
+	const forms = RANGE_OP_FORMS[op];
+	return `${forms.blockKeyword} ${line}${forms.colon}`;
+}
 
 /** Explain absolute range endpoints and provide safe, non-applying retry forms. */
 export function invalidAbsoluteRangeMessage(
@@ -41,15 +55,14 @@ export function invalidAbsoluteRangeMessage(
 	op: AbsoluteRangeOp,
 	block?: BlockSpan,
 ): string {
-	const single = op === "replace" ? `SWAP ${start}${HL_RANGE_SEP}${start}:` : `DEL ${start}`;
+	const forms = RANGE_OP_FORMS[op];
+	const single = op === "replace" ? `SWAP ${start}${HL_RANGE_SEP}${start}:` : `${forms.keyword} ${start}`;
 	const countedEnd = start + end - 1;
 	const counted =
 		Number.isSafeInteger(countedEnd) && countedEnd >= start
-			? op === "replace"
-				? `SWAP ${start}${HL_RANGE_SEP}${countedEnd}:`
-				: `DEL ${start}${HL_RANGE_SEP}${countedEnd}`
+			? `${forms.keyword} ${start}${HL_RANGE_SEP}${countedEnd}${forms.colon}`
 			: null;
-	const blockForm = op === "replace" ? `SWAP.BLK ${start}:` : `DEL.BLK ${start}`;
+	const blockForm = blockFormAt(op, start);
 	let message =
 		`line ${patchLine}: Invalid absolute range: start ${start}, end ${end}. ` +
 		`The value after \`${HL_RANGE_SEP}\` is an absolute source line, not a line count or replacement length. ` +
@@ -122,17 +135,18 @@ export interface BlockDiagnosticSuggestions {
  */
 export function blockUnresolvedMessage(
 	line: number,
-	op: "replace" | "delete" = "replace",
+	op: AbsoluteRangeOp = "replace",
 	fileLines?: readonly string[],
 	suggestions: BlockDiagnosticSuggestions = {},
 ): string {
-	const phrase = op === "delete" ? `DEL.BLK ${line}` : `SWAP.BLK ${line}:`;
-	const fallback = op === "delete" ? `DEL ${line}${HL_RANGE_SEP}M` : `SWAP ${line}${HL_RANGE_SEP}M:`;
+	const forms = RANGE_OP_FORMS[op];
+	const phrase = blockFormAt(op, line);
+	const fallback = `${forms.keyword} ${line}${HL_RANGE_SEP}M${forms.colon}`;
 	const anchorText = fileLines?.[line - 1];
 	const nextBlock = suggestions.nextBlock;
 	let message: string;
 	if (anchorText !== undefined && anchorText.trim().length === 0 && nextBlock) {
-		const retry = op === "delete" ? `DEL.BLK ${nextBlock.start}` : `SWAP.BLK ${nextBlock.start}:`;
+		const retry = blockFormAt(op, nextBlock.start);
 		message =
 			`Line ${line} is blank; no syntactic block can begin there. ` +
 			`The next multi-line block begins at line ${nextBlock.start} and ends at line ${nextBlock.end}. ` +
@@ -144,7 +158,7 @@ export function blockUnresolvedMessage(
 	}
 	const enclosingBlock = suggestions.enclosingBlock;
 	if (enclosingBlock) {
-		const retry = op === "delete" ? `DEL.BLK ${enclosingBlock.start}` : `SWAP.BLK ${enclosingBlock.start}:`;
+		const retry = blockFormAt(op, enclosingBlock.start);
 		message +=
 			` The nearest enclosing multi-line block begins at line ${enclosingBlock.start} ` +
 			`and ends at line ${enclosingBlock.end}; use \`${retry}\` to target it.`;
@@ -158,24 +172,44 @@ export function blockUnresolvedMessage(
 
 /** Block-anchored edit reached a path with no {@link BlockResolver} wired in — a host-configuration bug. */
 export const BLOCK_RESOLVER_UNAVAILABLE =
-	"`SWAP.BLK`/`DEL.BLK`/`INS.BLK.POST` are not available here (no block resolver configured). Use a concrete line range.";
+	"Block ops (`SWAP.BLK`, `DEL.BLK`, `INS.BLK.POST`, `CUT.BLK`, `COPY.BLK`, `PASTE.BLK.POST`) are not available here (no block resolver configured). Use a concrete line range.";
 
 /**
- * `insert_after_block N:` anchored on a closing-delimiter line, lowered to
- * plain `insert after N:` — the closer ends a block, and inserting after it
- * is exactly what the plain form does.
+ * An after-block op anchored on a closing-delimiter line, lowered to its
+ * plain after-line form — the closer ends a block, and inserting after it is
+ * exactly what the plain form does.
  */
-export function insertAfterBlockCloserLoweredWarning(line: number): string {
-	return `\`INS.BLK.POST ${line}:\` anchors on a closing delimiter, so it was applied as plain \`INS.POST ${line}:\`. Anchor on the line that OPENS the construct.`;
+function closerLoweredWarning(blockForm: string, plainForm: string): string {
+	return `\`${blockForm}\` anchors on a closing delimiter, so it was applied as plain \`${plainForm}\`. Anchor on the line that OPENS the construct.`;
 }
 
 /**
- * `insert_after_block N:` anchor unresolvable (unsupported language, blank
- * line, parse error, or no resolver), lowered to plain `insert after N:` —
- * applying with a warning beats failing the patch.
+ * An after-block op whose anchor was unresolvable (unsupported language,
+ * blank line, parse error, or no resolver), lowered to its plain after-line
+ * form — applying with a warning beats failing the patch.
  */
+function unresolvedLoweredWarning(blockForm: string, line: number, plainForm: string): string {
+	return `\`${blockForm}\` could not resolve a syntactic block on line ${line}, so it was applied as plain \`${plainForm}\`. Verify the landing line; anchor on a line that OPENS a construct.`;
+}
+
+/** `INS.BLK.POST N:` anchored on a closing-delimiter line; applied as `INS.POST N:`. */
+export function insertAfterBlockCloserLoweredWarning(line: number): string {
+	return closerLoweredWarning(`INS.BLK.POST ${line}:`, `INS.POST ${line}:`);
+}
+
+/** `INS.BLK.POST N:` anchor unresolvable; applied as `INS.POST N:`. */
 export function insertAfterBlockUnresolvedLoweredWarning(line: number): string {
-	return `\`INS.BLK.POST ${line}:\` could not resolve a syntactic block on line ${line}, so it was applied as plain \`INS.POST ${line}:\`. Verify the landing line; anchor on a line that OPENS a construct.`;
+	return unresolvedLoweredWarning(`INS.BLK.POST ${line}:`, line, `INS.POST ${line}:`);
+}
+
+/** `PASTE.BLK.POST N` anchored on a closing-delimiter line; applied as `PASTE.POST N`. */
+export function pasteAfterBlockCloserLoweredWarning(line: number): string {
+	return closerLoweredWarning(`PASTE.BLK.POST ${line}`, `PASTE.POST ${line}`);
+}
+
+/** `PASTE.BLK.POST N` anchor unresolvable; applied as `PASTE.POST N`. */
+export function pasteAfterBlockUnresolvedLoweredWarning(line: number): string {
+	return unresolvedLoweredWarning(`PASTE.BLK.POST ${line}`, line, `PASTE.POST ${line}`);
 }
 /**
  * A one-sided boundary echo whose payload is too short to be the widened
@@ -247,6 +281,42 @@ export const MOVE_TAKES_NO_BODY =
 
 /** `delete_block N` hunk received a body row. */
 export const DELETE_BLOCK_TAKES_NO_BODY = "`DEL.BLK N` does not take body rows. Remove the body, or use `SWAP.BLK N:`.";
+
+/** `COPY N.=M` hunk received a body row. */
+export const COPY_TAKES_NO_BODY = `\`COPY N${HL_RANGE_SEP}M\` captures lines into the clipboard and takes no body rows.`;
+
+/** `CUT N.=M` hunk received a body row. */
+export const CUT_TAKES_NO_BODY = `\`CUT N${HL_RANGE_SEP}M\` captures + deletes lines and takes no body rows. To replace lines with new content, use \`SWAP N${HL_RANGE_SEP}M:\`.`;
+
+/** `PASTE` hunk received a body row. */
+export const PASTE_TAKES_NO_BODY =
+	"`PASTE` inserts the clipboard content and takes no `+` body rows. To insert literal text, use `INS`.";
+
+/** `PASTE` ran with an empty clipboard register. */
+export const EMPTY_PASTE = `\`PASTE\` found nothing in the clipboard. Ops run top-to-bottom across the whole patch (sections included): put \`CUT N${HL_RANGE_SEP}M\` / \`COPY N${HL_RANGE_SEP}M\` (or \`CUT.BLK N\` / \`COPY.BLK N\`) above the \`PASTE\`.`;
+
+/** A `CUT` filled the register and the whole patch finished without a `PASTE`. */
+export function unusedCutMessage(cutForm: string): string {
+	return `\`${cutForm}\` deleted lines that were never pasted — no \`PASTE\` follows it in the patch. Add a \`PASTE.PRE|POST N\` / \`PASTE.HEAD|TAIL\` op, or use \`DEL\` to delete without moving.`;
+}
+
+/** A later CUT/COPY overwrote a register whose CUT content was never pasted. */
+export function overwrittenCutMessage(cutForm: string, lineNum: number): string {
+	return `line ${lineNum}: the clipboard still holds \`${cutForm}\` content that was never pasted. \`PASTE\` it before capturing again, or use \`DEL\` if those lines should just be deleted.`;
+}
+
+/** Batch ended with un-pasted `CUT` content in a session-persistent register. */
+export function pendingCutWarning(cutForm: string): string {
+	return `\`${cutForm}\` content is in the clipboard but was not pasted by this edit. It stays available — \`PASTE\` it in a follow-up edit; capturing again before pasting it will be rejected.`;
+}
+
+/**
+ * Clipboard ops inside a same-path section that was merged across another
+ * file's section. Same-path sections coalesce into their first occurrence, so
+ * an interleaved layout would silently reorder the register sequence.
+ */
+export const CLIPBOARD_INTERLEAVED_SECTIONS =
+	"`CUT`/`COPY`/`PASTE` cannot be used in a file whose sections are interleaved with another file's: same-path sections merge into the first occurrence, which would reorder the clipboard sequence. Keep each file's ops under ONE `[path#TAG]` header, with every capture above its `PASTE`.";
 
 /** Insert hunk with no body. */
 export const EMPTY_INSERT = "`INS` needs at least one `+TEXT` body row.";
@@ -413,33 +483,32 @@ export function unseenLinesMessage(
 }
 
 /** Op kind of a deferred block edit, for {@link blockSingleLineMessage}. */
-export type BlockOp = "replace" | "delete" | "insert_after";
+export type BlockOp = "replace" | "delete" | "insert_after" | "copy" | "cut" | "paste_after";
+
+/** Display forms per deferred-block op: block keyword, trailing colon, and single-line plain form. */
+const BLOCK_OP_FORMS: Record<BlockOp, { keyword: string; colon: string; plain: (line: number) => string }> = {
+	replace: { keyword: "SWAP.BLK", colon: ":", plain: line => `SWAP ${line}${HL_RANGE_SEP}${line}:` },
+	delete: { keyword: "DEL.BLK", colon: "", plain: line => `DEL ${line}` },
+	insert_after: { keyword: "INS.BLK.POST", colon: ":", plain: line => `INS.POST ${line}:` },
+	copy: { keyword: "COPY.BLK", colon: "", plain: line => `COPY ${line}` },
+	cut: { keyword: "CUT.BLK", colon: "", plain: line => `CUT ${line}` },
+	paste_after: { keyword: "PASTE.BLK.POST", colon: "", plain: line => `PASTE.POST ${line}` },
+};
 
 /**
  * A `replace_block`/`delete_block`/`insert_after_block` anchor resolved to a
- * single line — almost always a bare statement the model mis-anchored, not a
- * multi-line construct. The plain op is unambiguous for one line; the block
- * form only earns its keep when it spares counting a closing line you cannot
- * see. Reject and point at both fixes.
+ * single line: line N is a bare statement, not the opening line of a
+ * multi-line construct. The plain op is exact for one line, so reject and
+ * point at it (with the enclosing block as an alternative when known).
  */
 export function blockSingleLineMessage(line: number, op: BlockOp, enclosingBlock?: BlockSpan): string {
-	const blockForm = op === "insert_after" ? "INS.BLK.POST" : op === "delete" ? "DEL.BLK" : "SWAP.BLK";
-	const plainForm =
-		op === "insert_after"
-			? `INS.POST ${line}:`
-			: op === "delete"
-				? `DEL ${line}`
-				: `SWAP ${line}${HL_RANGE_SEP}${line}:`;
+	const forms = BLOCK_OP_FORMS[op];
+	const plainForm = forms.plain(line);
 	let message =
-		`\`${blockForm} ${line}\` resolved a single-line block — line ${line} is a bare statement, not the opening line ` +
+		`\`${forms.keyword} ${line}\` resolved a single-line block — line ${line} is a bare statement, not the opening line ` +
 		`of a multi-line construct. For only this statement use \`${plainForm}\`.`;
 	if (enclosingBlock) {
-		const enclosingForm =
-			op === "insert_after"
-				? `INS.BLK.POST ${enclosingBlock.start}:`
-				: op === "delete"
-					? `DEL.BLK ${enclosingBlock.start}`
-					: `SWAP.BLK ${enclosingBlock.start}:`;
+		const enclosingForm = `${forms.keyword} ${enclosingBlock.start}${forms.colon}`;
 		message +=
 			` The nearest enclosing multi-line block begins at line ${enclosingBlock.start} ` +
 			`and ends at line ${enclosingBlock.end}; use \`${enclosingForm}\` to target it.`;

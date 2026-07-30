@@ -25,6 +25,7 @@
 import * as path from "node:path";
 import { applyEdits } from "./apply";
 import { hasBlockEdit, resolveBlockEdits } from "./block";
+import { assertClipboardConsumed, commitClipboard, forkClipboard, validateClipboardSequence } from "./clipboard";
 import { computeFileHash, formatHashlineHeader } from "./format";
 import type { Filesystem, WriteResult } from "./fs";
 import { isNotFound } from "./fs";
@@ -33,6 +34,7 @@ import {
 	HEADTAIL_DRIFT_WARNING,
 	missingSnapshotTagMessage,
 	pathRecoveredFromTagMessage,
+	pendingCutWarning,
 	type RevealedLine,
 	unseenLinesMessage,
 	writeDriftWarning,
@@ -42,7 +44,7 @@ import { detectLineEnding, type LineEnding, normalizeToLF, restoreLineEndings, s
 import { InvalidAbsoluteRangeError } from "./parser";
 import { Recovery, type RecoveryResult } from "./recovery";
 import type { Snapshot, SnapshotStore } from "./snapshots";
-import type { ApplyResult, BlockResolution, BlockResolver, BlockSpan, Edit, FileOp } from "./types";
+import type { ApplyResult, BlockResolution, BlockResolver, BlockSpan, Clipboard, Edit, FileOp } from "./types";
 
 /**
  * Upper bound on the number of unseen anchor lines whose actual file content
@@ -81,6 +83,15 @@ export interface PatcherOptions {
 	 * validate on content hash alone and any anchor into the tagged content applies.
 	 */
 	enforceSeenLines?: boolean;
+	/**
+	 * Host-owned clipboard register shared across batches, so `CUT` content
+	 * can be `PASTE`d by a later {@link Patcher.apply} call. Each batch works
+	 * on a fork and publishes it back only after every write lands; un-pasted
+	 * `CUT` content at batch end becomes a warning instead of an error.
+	 * Omitted, every batch gets its own register and un-pasted `CUT` content
+	 * is rejected when the batch ends.
+	 */
+	clipboard?: Clipboard;
 }
 
 /** Per-section result returned by {@link Patcher.apply} / {@link Patcher.commit}. */
@@ -158,6 +169,8 @@ function hasAnchorScopedEdit(edits: readonly Edit[]): boolean {
 		if (edit.kind === "delete") return true;
 		// A `replace_block N:` edit anchors to concrete content on line N.
 		if (edit.kind === "block") return true;
+		// A `COPY`/`CUT` range reads concrete content.
+		if (edit.kind === "copy") return true;
 		return edit.cursor.kind === "before_anchor" || edit.cursor.kind === "after_anchor";
 	});
 }
@@ -211,6 +224,7 @@ export class Patcher {
 	readonly snapshots: SnapshotStore;
 	readonly recovery: Recovery;
 	readonly blockResolver: BlockResolver | undefined;
+	readonly clipboard: Clipboard | undefined;
 	readonly #enforceSeenLines: boolean;
 
 	constructor(options: PatcherOptions) {
@@ -221,6 +235,7 @@ export class Patcher {
 		this.snapshots = options.snapshots;
 		this.recovery = new Recovery(options.snapshots);
 		this.blockResolver = options.blockResolver;
+		this.clipboard = options.clipboard;
 		this.#enforceSeenLines = options.enforceSeenLines ?? true;
 	}
 
@@ -231,19 +246,44 @@ export class Patcher {
 	 * {@link PatchSectionResult} per section in the original patch order.
 	 */
 	async apply(patch: Patch): Promise<PatcherApplyResult> {
+		// One register per batch: `CUT`/`COPY` in one section feeds `PASTE` in
+		// a later one, so content can move across files. A host-owned register
+		// (see PatcherOptions.clipboard) additionally persists across batches:
+		// work on a fork and publish it per landed section, so a failed batch
+		// never poisons the persistent register and a mid-batch failure still
+		// preserves content already cut from disk.
+		const clipboard = forkClipboard(this.clipboard);
+
 		// Single-section fast path.
 		if (patch.sections.length === 1) {
-			const prepared = await this.prepare(patch.sections[0]);
-			return { sections: [await this.commit(prepared)] };
+			const prepared = await this.prepare(patch.sections[0], clipboard);
+			if (this.clipboard === undefined) assertClipboardConsumed(clipboard);
+			const result = await this.commit(prepared);
+			if (this.clipboard !== undefined) {
+				commitClipboard(clipboard, this.clipboard);
+				if (clipboard.pendingCut !== undefined) result.warnings.push(pendingCutWarning(clipboard.pendingCut));
+			}
+			return { sections: [result] };
 		}
 
 		// Prepare every section first so any failure (stale hash, missing
 		// file, parse error, in-memory no-op) surfaces before any write.
 		const prepared: PreparedSection[] = [];
-		for (const section of patch.sections) prepared.push(await this.prepare(section));
+		// Register state after each section's prepare. Commits are non-atomic:
+		// when a later write fails, the sections before it are already on disk,
+		// so the host register must reflect exactly the landed prefix — content
+		// a landed CUT deleted would otherwise be lost.
+		const sectionStates: Clipboard[] = [];
+		for (const section of patch.sections) {
+			prepared.push(await this.prepare(section, clipboard));
+			sectionStates.push(forkClipboard(clipboard));
+		}
+		if (this.clipboard === undefined) assertClipboardConsumed(clipboard);
 		assertUniqueCanonicalPaths(prepared);
 		for (const entry of prepared) {
-			if (entry.isNoop) {
+			// A copy-only section legitimately changes nothing: it exists to
+			// fill the clipboard for a later `PASTE`.
+			if (entry.isNoop && !entry.section.isClipboardSource) {
 				throw new Error(`Edits to ${entry.section.path} resulted in no changes being made.`);
 			}
 		}
@@ -266,6 +306,10 @@ export class Patcher {
 					{ cause: error },
 				);
 			}
+			if (this.clipboard !== undefined) commitClipboard(sectionStates[index], this.clipboard);
+		}
+		if (this.clipboard !== undefined && clipboard.pendingCut !== undefined) {
+			results[results.length - 1]?.warnings.push(pendingCutWarning(clipboard.pendingCut));
 		}
 		return { sections: results };
 	}
@@ -275,11 +319,14 @@ export class Patcher {
 	 * No writes hit the filesystem. Use for CI checks and dry runs.
 	 */
 	async preflight(patch: Patch): Promise<void> {
+		// Dry run: fork the register and never publish it back.
+		const clipboard = forkClipboard(this.clipboard);
 		const prepared: PreparedSection[] = [];
-		for (const section of patch.sections) prepared.push(await this.prepare(section));
+		for (const section of patch.sections) prepared.push(await this.prepare(section, clipboard));
+		if (this.clipboard === undefined) assertClipboardConsumed(clipboard);
 		assertUniqueCanonicalPaths(prepared);
 		for (const entry of prepared) {
-			if (entry.isNoop) {
+			if (entry.isNoop && !entry.section.isClipboardSource) {
 				throw new Error(`Edits to ${entry.section.path} resulted in no changes being made.`);
 			}
 		}
@@ -310,10 +357,15 @@ export class Patcher {
 	 * {@link PreparedSection} which can be fed to {@link commit} to land
 	 * the result on the filesystem.
 	 *
+	 * `clipboard` is the register shared by `CUT`/`COPY`/`PASTE` ops. Pass the
+	 * batch's register when preparing several sections so content can move
+	 * across files; when omitted, a private register is used and un-pasted
+	 * `CUT` content is rejected before this method returns.
+	 *
 	 * Throws on parse error, missing-file-for-anchored-edit, or unrecovered
 	 * tag mismatch ({@link MismatchError}).
 	 */
-	async prepare(section: PatchSection): Promise<PreparedSection> {
+	async prepare(section: PatchSection, clipboard?: Clipboard): Promise<PreparedSection> {
 		const parsed = await this.#parseWithRangeDiagnostics(section);
 		const parseWarnings = [...parsed.warnings];
 		const fileOp = parsed.fileOp;
@@ -360,6 +412,7 @@ export class Patcher {
 		const lineEnding = detectLineEnding(text);
 		const normalized = normalizeToLF(text);
 
+		const register = clipboard ?? {};
 		const applyResult =
 			fileOp?.kind === "rem"
 				? this.#applyWithRecovery({
@@ -368,6 +421,7 @@ export class Patcher {
 						exists: read.exists,
 						normalized,
 						edits: [],
+						clipboard: register,
 					})
 				: this.#applyWithRecovery({
 						section: target,
@@ -375,7 +429,9 @@ export class Patcher {
 						exists: read.exists,
 						normalized,
 						edits: parsed.edits,
+						clipboard: register,
 					});
+		if (clipboard === undefined) assertClipboardConsumed(register);
 
 		return new PreparedSection(
 			target,
@@ -639,8 +695,9 @@ export class Patcher {
 		exists: boolean;
 		normalized: string;
 		edits: readonly Edit[];
+		clipboard: Clipboard;
 	}): ApplyResult {
-		const { section, canonicalPath, exists, normalized, edits } = args;
+		const { section, canonicalPath, exists, normalized, edits, clipboard } = args;
 		const expected = exists ? section.fileHash : undefined;
 		// The 4-hex tag is content-derived: when the live text hashes to it,
 		// trust the match and apply directly. `storedSnapshotForTag` feeds the
@@ -673,6 +730,11 @@ export class Patcher {
 				onWarning: warning => resolveWarnings.push(warning),
 			});
 		}
+		// Surface clipboard sequencing mistakes (`PASTE` before any capture,
+		// capturing over un-pasted `CUT` content) with their targeted message
+		// before the recovery path below, which swallows apply failures and
+		// re-surfaces them as tag-mismatch errors.
+		validateClipboardSequence(resolved, clipboard);
 		const withResolveWarnings = (result: ApplyResult): ApplyResult =>
 			resolveWarnings.length === 0
 				? result
@@ -689,7 +751,7 @@ export class Patcher {
 			if (expected !== undefined && this.#enforceSeenLines) {
 				this.#assertSeenLines(section, expected, matchedSnapshot);
 			}
-			const result = applyEdits(normalized, resolved);
+			const result = applyEdits(normalized, resolved, { clipboard });
 			return withResolveWarnings(blockResolutions.length > 0 ? { ...result, blockResolutions } : result);
 		}
 		// Head/tail-only inserts are position-stable: "start"/"end" cannot move
@@ -697,7 +759,7 @@ export class Patcher {
 		// content and warn instead of hard-failing — unlike an anchored
 		// mismatch, which cannot be safely relocated and must reject.
 		if (!hasAnchorScopedEdit(resolved)) {
-			const result = applyEdits(normalized, resolved);
+			const result = applyEdits(normalized, resolved, { clipboard });
 			return withResolveWarnings({ ...result, warnings: [HEADTAIL_DRIFT_WARNING, ...(result.warnings ?? [])] });
 		}
 		// File drifted: map every anchor from the tagged snapshot to unchanged
@@ -707,6 +769,7 @@ export class Patcher {
 			currentText: normalized,
 			fileHash: expected,
 			edits: resolved,
+			clipboard,
 		});
 		if (recovered) return withResolveWarnings(recoveryToApplyResult(recovered));
 		const hashRecognized = this.snapshots.byHash(canonicalPath, expected) !== null;

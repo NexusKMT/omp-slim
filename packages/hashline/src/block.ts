@@ -16,10 +16,13 @@ import { STRUCTURAL_CLOSER_RE } from "./apply";
 import {
 	BLOCK_RESOLVER_UNAVAILABLE,
 	type BlockDiagnosticSuggestions,
+	type BlockOp,
 	blockSingleLineMessage,
 	blockUnresolvedMessage,
 	insertAfterBlockCloserLoweredWarning,
 	insertAfterBlockUnresolvedLoweredWarning,
+	pasteAfterBlockCloserLoweredWarning,
+	pasteAfterBlockUnresolvedLoweredWarning,
 } from "./messages";
 import type { BlockResolution, BlockResolver, BlockSpan, Cursor, Edit } from "./types";
 
@@ -124,7 +127,7 @@ export function resolveBlockEdits(
 			resolved.push(edit);
 			continue;
 		}
-		const op = edit.mode === "insert_after" ? "insert_after" : edit.payloads.length === 0 ? "delete" : "replace";
+		const op: BlockOp = edit.mode ?? (edit.payloads.length === 0 ? "delete" : "replace");
 		const span = resolver ? resolver({ path, text, line: edit.anchor.line }) : null;
 		if (span === null) {
 			// `insert_after_block N:` never fails the patch — lower it to plain
@@ -135,9 +138,19 @@ export function resolveBlockEdits(
 			// - otherwise (unsupported language, blank line, unparsable block,
 			//   or no resolver wired): "after the block at N" degrades to
 			//   "after line N" — warn to verify the landing line.
-			if (op === "insert_after") {
+			if (op === "insert_after" || op === "paste_after") {
 				const anchorText = text.split("\n")[edit.anchor.line - 1];
 				const isCloser = anchorText !== undefined && STRUCTURAL_CLOSER_RE.test(anchorText);
+				if (op === "paste_after") {
+					options.onWarning?.(
+						isCloser
+							? pasteAfterBlockCloserLoweredWarning(edit.anchor.line)
+							: pasteAfterBlockUnresolvedLoweredWarning(edit.anchor.line),
+					);
+					const cursor: Cursor = { kind: "after_anchor", anchor: { line: edit.anchor.line } };
+					resolved.push({ kind: "paste", cursor, lineNum: edit.lineNum, index: synthIndex++ });
+					continue;
+				}
 				options.onWarning?.(
 					isCloser
 						? insertAfterBlockCloserLoweredWarning(edit.anchor.line)
@@ -183,6 +196,36 @@ export function resolveBlockEdits(
 			end: span.end,
 			op,
 		});
+		if (op === "paste_after") {
+			// Mirror the block-lowered insert: paste after the block's last
+			// line, tagging `blockStart` so landing correction can slide a body
+			// claiming a depth inside the block back across its trailing closers.
+			resolved.push({
+				kind: "paste",
+				cursor: { kind: "after_anchor", anchor: { line: span.end } },
+				lineNum: edit.lineNum,
+				index: synthIndex++,
+				blockStart: span.start,
+			});
+			continue;
+		}
+		if (op === "copy" || op === "cut") {
+			// Capture the resolved span; a cut also deletes it line-by-line,
+			// exactly like the parser's lowering of `CUT N.=M`.
+			resolved.push({
+				kind: "copy",
+				range: { start: { line: span.start }, end: { line: span.end } },
+				cut: op === "cut",
+				lineNum: edit.lineNum,
+				index: synthIndex++,
+			});
+			if (op === "cut") {
+				for (let line = span.start; line <= span.end; line++) {
+					resolved.push({ kind: "delete", anchor: { line }, lineNum: edit.lineNum, index: synthIndex++ });
+				}
+			}
+			continue;
+		}
 		if (op === "insert_after") {
 			// Mirror the parser's `insert after N:` lowering: one `after_anchor`
 			// insert per payload row, anchored on the block's last line. The

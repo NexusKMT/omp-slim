@@ -42,6 +42,37 @@ export type Edit =
 	| { kind: "delete"; anchor: Anchor; lineNum: number; index: number; oldAssertion?: string }
 	| {
 			/**
+			 * Clipboard capture (`COPY N.=M` / `CUT N.=M`, or the resolved form of
+			 * `COPY.BLK N` / `CUT.BLK N`). Captures the range's current lines into
+			 * the {@link Clipboard} register during the applier's clipboard
+			 * pre-pass. Emits no text change itself — a `CUT` additionally lowers
+			 * to one `delete` per range line at parse/resolve time, exactly like
+			 * `DEL N.=M`.
+			 */
+			kind: "copy";
+			range: ParsedRange;
+			/** True for `CUT` (capture + delete), false for `COPY` (capture only). */
+			cut: boolean;
+			lineNum: number;
+			index: number;
+	  }
+	| {
+			/**
+			 * Clipboard insertion (`PASTE.PRE N` / `PASTE.POST N` / `PASTE.HEAD` /
+			 * `PASTE.TAIL`, or the resolved form of `PASTE.BLK.POST N`). Expanded
+			 * by the clipboard pre-pass into one plain insert per captured line.
+			 * `blockStart` mirrors the insert variant's field for block-lowered
+			 * pastes so landing correction can slide the body across trailing
+			 * closer lines.
+			 */
+			kind: "paste";
+			cursor: Cursor;
+			lineNum: number;
+			index: number;
+			blockStart?: number;
+	  }
+	| {
+			/**
 			 * Deferred block edit (`replace_block N:` / `delete_block N` /
 			 * `insert_after_block N:`). The exact line span is unknown at parse
 			 * time — it is computed by {@link resolveBlockEdits} once file text +
@@ -50,13 +81,15 @@ export type Edit =
 			 * the same `replacement` inserts + deletes that `replace start.=end:`
 			 * produces; an empty `payloads` (from `delete_block`) becomes a pure
 			 * range deletion; `mode: "insert_after"` becomes plain `after_anchor`
-			 * inserts at the block's last line. `applyEdits` never sees this
-			 * variant.
+			 * inserts at the block's last line; `mode: "copy"`/`"cut"` becomes a
+			 * `copy` edit over the resolved span (plus per-line deletes for cut);
+			 * `mode: "paste_after"` becomes a `paste` edit anchored after the
+			 * block's last line. `applyEdits` never sees this variant.
 			 */
 			kind: "block";
 			anchor: Anchor;
 			payloads: string[];
-			mode?: "insert_after";
+			mode?: "insert_after" | "copy" | "cut" | "paste_after";
 			lineNum: number;
 			index: number;
 	  };
@@ -149,7 +182,7 @@ export interface BlockResolution {
 	/** Last line of the resolved span (1-indexed, inclusive). */
 	end: number;
 	/** Which block op produced this resolution. */
-	op: "replace" | "delete" | "insert_after";
+	op: "replace" | "delete" | "insert_after" | "copy" | "cut" | "paste_after";
 }
 
 /** Request handed to a {@link BlockResolver} to resolve one `replace_block N:` anchor. */
@@ -170,3 +203,22 @@ export interface BlockResolverRequest {
  * the contract; the host injects a tree-sitter-backed implementation.
  */
 export type BlockResolver = (request: BlockResolverRequest) => BlockSpan | null;
+
+/**
+ * Mutable clipboard register threaded through one patch application. Filled
+ * by `CUT`/`COPY` edits, read by `PASTE` edits, in patch source order —
+ * across sections, so content can move between files. Create one per batch
+ * (`{}`) and hand it to every {@link Patcher.prepare} / `applyTo` call in
+ * that batch; callers that omit it get a private per-call register.
+ */
+export interface Clipboard {
+	/** Lines captured by the most recent `CUT`/`COPY`, or unset. */
+	lines?: readonly string[];
+	/**
+	 * Human-readable form of the `CUT` that filled the register (e.g.
+	 * `CUT 5.=10`), cleared by the first `PASTE`. A register that still has a
+	 * pending cut at batch end (or when overwritten) is an authoring error:
+	 * lines were deleted but never landed anywhere.
+	 */
+	pendingCut?: string;
+}

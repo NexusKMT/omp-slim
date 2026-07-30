@@ -1,4 +1,4 @@
-Your patch language names lines to replace, delete, or insert at, then lists the new content. Rule of thumb: a header ending in `:` is followed by `+` body rows; `DEL` has no body.
+Your patch language names lines to replace, delete, or insert at, then lists the new content. Rule of thumb: a header ending in `:` is followed by `+` body rows; `DEL`, `CUT`/`COPY`, and `PASTE` have no body.
 
 <headers>
 Every file section starts with `[PATH#TAG]`. `TAG` = 4-hex snapshot tag from your latest `read`/`search`, REQUIRED on every section — no hashless form. Create new files with `write`; hashline only edits existing files.
@@ -13,6 +13,9 @@ Every file section starts with `[PATH#TAG]`. `TAG` = 4-hex snapshot tag from you
 `INS.POST N:` — insert the body rows immediately after line N.
 `INS.BLK.POST N:` — insert the body rows after the END of the block that BEGINS on line N — outside it, at sibling depth. To append inside a block, use `INS.POST`.
 `INS.HEAD:` / `INS.TAIL:` — insert the body rows at the very start / end of the file.
+`CUT N.=M` / `COPY N.=M` — capture original lines N.=M into the clipboard (CUT also deletes them, like `DEL`). No body.
+`CUT.BLK N` / `COPY.BLK N` — capture the whole syntactic block that BEGINS on line N.
+`PASTE.PRE N` / `PASTE.POST N` / `PASTE.HEAD` / `PASTE.TAIL` / `PASTE.BLK.POST N` — insert the clipboard at the position. No body — the clipboard IS the body.
 `REM` — delete the whole file named by the section header. No body, no line ops.
 `MV DEST` — move/rename the section file to `DEST` (a path, quoted when it contains spaces). Line edits above `MV` land on the source first, then the final content is written at `DEST`.
 Single line: `SWAP N.=N:` / `DEL N`. The range is the ORIGINAL lines you touch; body length is irrelevant (replacing 1 line with 10 is still `SWAP N.=N:`).
@@ -39,6 +42,8 @@ Body rows appear only under a `:` header. Every body row is `+TEXT` — add a li
 - Markdown: a heading line IS a block opener — `SWAP.BLK`/`DEL.BLK`/`INS.BLK.POST` on a `##`/`###` heading resolves its WHOLE section (heading through every nested deeper heading, up to the next same-or-higher heading). So `DEL.BLK` drops the section, `SWAP.BLK` rewrites it, `INS.BLK.POST` lands after it (end the inserted body with a blank line to keep the next heading separated).
 - Non-adjacent changes = separate hunks; untouched lines stay out of every range.
 - Pure additions use `INS.PRE` / `INS.POST` / `INS.HEAD` / `INS.TAIL`, never a widened `SWAP` — retyped keepers are exactly what gets dropped. (A multi-line `SWAP` whose body restates the line just past the range is auto-dropped as an off-by-one keeper with a warning — issue the payload for the range only; never lean on the repair.)
+- Move code with `CUT`+`PASTE`, never by retyping it in a body. The clipboard runs top-to-bottom through the whole patch — across `[file]` sections, so content moves between files — and persists across edit calls. The last `CUT`/`COPY` wins; `PASTE` may repeat (it does not consume). Content pastes verbatim, indentation included — re-indenting a move needs `SWAP`.
+- `CUT` content must land: un-pasted `CUT` content is rejected or carried to the next call with a warning, and a new `CUT`/`COPY` before pasting it is an error.
 - NEVER format/restyle code with this tool; run the project formatter instead.
 </rules>
 
@@ -111,6 +116,16 @@ INS.POST 2:
 +  - nested task
 ```
 
+Move the `greet` function after line 4 without retyping it, then copy line 4 into a sibling file — the clipboard flows top-to-bottom across sections:
+```
+[greet.py#A1B2]
+CUT.BLK 1
+PASTE.POST 4
+COPY 4.=4
+[other.py#3C4D]
+PASTE.HEAD
+```
+
 Replace the whole `greet` function block — `SWAP.BLK 1:` resolves lines 1–3 (the `def` header through `print(msg)`); line 4 is a separate statement and stays:
 ```
 [greet.py#A1B2]
@@ -162,6 +177,10 @@ INS.BLK.POST 3:
 # RIGHT
 INS.POST 3:
 +after()
+
+# WRONG — body rows under PASTE; the clipboard is the body. RIGHT: capture first, then a bodyless `PASTE.POST 20` (no colon, no rows).
+PASTE.POST 20:
++function f() {}
 </anti-patterns>
 
 <critical>

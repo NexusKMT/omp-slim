@@ -52,6 +52,9 @@ Inside a section:
 - `DEL A.=B` / `DEL.BLK A` — delete concrete lines or a resolved block.
 - `INS.PRE A:` / `INS.POST A:` / `INS.HEAD:` / `INS.TAIL:` — insert following body rows.
 - `INS.BLK.POST A:` — insert following body rows after the resolved block's last line.
+- `CUT A.=B` / `COPY A.=B` — capture lines into the clipboard register (`CUT` also deletes them).
+- `CUT.BLK A` / `COPY.BLK A` — capture the resolved block (`CUT.BLK` also deletes it).
+- `PASTE.PRE A` / `PASTE.POST A` / `PASTE.HEAD` / `PASTE.TAIL` / `PASTE.BLK.POST A` — insert the clipboard; no body rows. The register flows top-to-bottom across sections (cross-file moves) and can be host-persisted across batches via `PatcherOptions.clipboard`.
 - `REM` — delete the whole file named by the section header.
 - `MV DEST` — move/rename the section file to `DEST` (optionally after line edits).
 - `+TEXT` — literal body row (use `+` alone for a blank line).

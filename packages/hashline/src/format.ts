@@ -33,6 +33,18 @@ export const HL_REPLACE_BLOCK_KEYWORD = "SWAP.BLK";
 export const HL_DELETE_BLOCK_KEYWORD = "DEL.BLK";
 /** Hunk-header keyword: `INS.BLK.POST N:` inserts after the last line of the tree-sitter block at N. */
 export const HL_INSERT_AFTER_BLOCK_KEYWORD = "INS.BLK.POST";
+/** Hunk-header keyword: `COPY N.=M` captures lines into the clipboard register. */
+export const HL_COPY_KEYWORD = "COPY";
+/** Hunk-header keyword: `CUT N.=M` captures lines into the clipboard register and deletes them. */
+export const HL_CUT_KEYWORD = "CUT";
+/** Hunk-header keyword: `COPY.BLK N` captures the tree-sitter block at N into the clipboard. */
+export const HL_COPY_BLOCK_KEYWORD = "COPY.BLK";
+/** Hunk-header keyword: `CUT.BLK N` captures the tree-sitter block at N and deletes its span. */
+export const HL_CUT_BLOCK_KEYWORD = "CUT.BLK";
+/** Hunk-header keyword prefix: `PASTE.PRE|POST N` / `PASTE.HEAD|TAIL` inserts the clipboard. */
+export const HL_PASTE_KEYWORD = "PASTE";
+/** Hunk-header keyword: `PASTE.BLK.POST N` inserts the clipboard after the tree-sitter block at N. */
+export const HL_PASTE_AFTER_BLOCK_KEYWORD = "PASTE.BLK.POST";
 /** File-level keyword: `REM` deletes the whole file named by the section header. */
 export const HL_REM_KEYWORD = "REM";
 /** File-level keyword: `MV DEST` renames/moves the section file to `DEST`. */

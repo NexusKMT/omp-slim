@@ -10,6 +10,10 @@
  */
 import {
 	describeAnchorExamples,
+	HL_COPY_BLOCK_KEYWORD,
+	HL_COPY_KEYWORD,
+	HL_CUT_BLOCK_KEYWORD,
+	HL_CUT_KEYWORD,
 	HL_DELETE_BLOCK_KEYWORD,
 	HL_DELETE_KEYWORD,
 	HL_FILE_HASH_LENGTH,
@@ -24,6 +28,8 @@ import {
 	HL_INSERT_KEYWORD,
 	HL_INSERT_TAIL,
 	HL_MOVE_KEYWORD,
+	HL_PASTE_AFTER_BLOCK_KEYWORD,
+	HL_PASTE_KEYWORD,
 	HL_PAYLOAD_REPLACE,
 	HL_REM_KEYWORD,
 	HL_REPLACE_BLOCK_KEYWORD,
@@ -220,6 +226,10 @@ export type BlockTarget =
 	| { kind: "insert_before"; anchor: Anchor }
 	| { kind: "insert_after"; anchor: Anchor }
 	| { kind: "insert_after_block"; anchor: Anchor }
+	| { kind: "copy"; range: ParsedRange; cut: boolean }
+	| { kind: "copy_block"; anchor: Anchor; cut: boolean }
+	| { kind: "paste"; cursor: Cursor }
+	| { kind: "paste_after_block"; anchor: Anchor }
 	| { kind: "rem" }
 	| { kind: "move"; dest: string }
 	| { kind: "bof" }
@@ -270,28 +280,50 @@ function consumeReplaceColon(line: string, index: number, end: number): number {
 	return skipWhitespace(line, afterEquals + 1, end);
 }
 
-function scanInsertTarget(line: string, index: number, end: number): TargetScan | null {
+interface PositionScan {
+	cursor: Cursor;
+	nextIndex: number;
+}
+
+/** Scan the `.PRE N` / `.POST N` / `.HEAD` / `.TAIL` positional suffix shared by `INS` and `PASTE`. */
+function scanPositionalSuffix(line: string, index: number, end: number): PositionScan | null {
 	if (index >= end || line.charCodeAt(index) !== CHAR_DOT) return null;
-	const cursor = skipWhitespace(line, index + 1, end);
-	const beforeEnd = scanKeyword(line, cursor, end, HL_INSERT_BEFORE);
+	const probe = skipWhitespace(line, index + 1, end);
+	const beforeEnd = scanKeyword(line, probe, end, HL_INSERT_BEFORE);
 	if (beforeEnd !== null) {
 		const anchor = scanLineNumber(line, skipWhitespace(line, beforeEnd, end), end);
 		if (anchor === null) return null;
 		const nextIndex = consumeOptionalColon(line, anchor.nextIndex, end);
-		return { target: { kind: "insert_before", anchor: { line: anchor.line } }, nextIndex };
+		return { cursor: { kind: "before_anchor", anchor: { line: anchor.line } }, nextIndex };
 	}
-	const afterEnd = scanKeyword(line, cursor, end, HL_INSERT_AFTER);
+	const afterEnd = scanKeyword(line, probe, end, HL_INSERT_AFTER);
 	if (afterEnd !== null) {
 		const anchor = scanLineNumber(line, skipWhitespace(line, afterEnd, end), end);
 		if (anchor === null) return null;
 		const nextIndex = consumeOptionalColon(line, anchor.nextIndex, end);
-		return { target: { kind: "insert_after", anchor: { line: anchor.line } }, nextIndex };
+		return { cursor: { kind: "after_anchor", anchor: { line: anchor.line } }, nextIndex };
 	}
-	const headEnd = scanKeyword(line, cursor, end, HL_INSERT_HEAD);
-	if (headEnd !== null) return { target: { kind: "bof" }, nextIndex: consumeOptionalColon(line, headEnd, end) };
-	const tailEnd = scanKeyword(line, cursor, end, HL_INSERT_TAIL);
-	if (tailEnd !== null) return { target: { kind: "eof" }, nextIndex: consumeOptionalColon(line, tailEnd, end) };
+	const headEnd = scanKeyword(line, probe, end, HL_INSERT_HEAD);
+	if (headEnd !== null) return { cursor: { kind: "bof" }, nextIndex: consumeOptionalColon(line, headEnd, end) };
+	const tailEnd = scanKeyword(line, probe, end, HL_INSERT_TAIL);
+	if (tailEnd !== null) return { cursor: { kind: "eof" }, nextIndex: consumeOptionalColon(line, tailEnd, end) };
 	return null;
+}
+
+function scanInsertTarget(line: string, index: number, end: number): TargetScan | null {
+	const scan = scanPositionalSuffix(line, index, end);
+	if (scan === null) return null;
+	const { cursor, nextIndex } = scan;
+	switch (cursor.kind) {
+		case "before_anchor":
+			return { target: { kind: "insert_before", anchor: cursor.anchor }, nextIndex };
+		case "after_anchor":
+			return { target: { kind: "insert_after", anchor: cursor.anchor }, nextIndex };
+		case "bof":
+			return { target: { kind: "bof" }, nextIndex };
+		case "eof":
+			return { target: { kind: "eof" }, nextIndex };
+	}
 }
 
 function unquotePath(pathText: string): string {
@@ -394,6 +426,68 @@ function scanHunkAnchor(line: string, start: number, end: number): TargetScan | 
 			nextIndex: consumeOptionalColon(line, anchor.nextIndex, end),
 		};
 	}
+	// `PASTE.BLK.POST N` — insert the clipboard after the tree-sitter block
+	// at N. Like all clipboard ops, takes no body rows.
+	const pasteAfterBlockEnd = scanKeyword(line, cursor, end, HL_PASTE_AFTER_BLOCK_KEYWORD);
+	if (pasteAfterBlockEnd !== null) {
+		const anchor = scanLineNumber(line, skipWhitespace(line, pasteAfterBlockEnd, end), end);
+		if (anchor === null) return null;
+		return {
+			target: { kind: "paste_after_block", anchor: { line: anchor.line } },
+			nextIndex: consumeOptionalColon(line, anchor.nextIndex, end),
+		};
+	}
+	// `PASTE.PRE|POST N` / `PASTE.HEAD|TAIL` — insert the clipboard at the position.
+	const pasteEnd = scanKeyword(line, cursor, end, HL_PASTE_KEYWORD);
+	if (pasteEnd !== null) {
+		const scan = scanPositionalSuffix(line, pasteEnd, end);
+		if (scan === null) return null;
+		return { target: { kind: "paste", cursor: scan.cursor }, nextIndex: scan.nextIndex };
+	}
+	// `CUT.BLK N` / `COPY.BLK N` — capture the tree-sitter block at N into the
+	// clipboard (cut also deletes its span). Scanned before the plain forms so
+	// the `.BLK` suffix is not consumed as a malformed range.
+	const cutBlockEnd = scanKeyword(line, cursor, end, HL_CUT_BLOCK_KEYWORD);
+	if (cutBlockEnd !== null) {
+		const anchor = scanLineNumber(line, skipWhitespace(line, cutBlockEnd, end), end);
+		if (anchor === null) return null;
+		return {
+			target: { kind: "copy_block", anchor: { line: anchor.line }, cut: true },
+			nextIndex: consumeOptionalColon(line, anchor.nextIndex, end),
+		};
+	}
+	const copyBlockEnd = scanKeyword(line, cursor, end, HL_COPY_BLOCK_KEYWORD);
+	if (copyBlockEnd !== null) {
+		const anchor = scanLineNumber(line, skipWhitespace(line, copyBlockEnd, end), end);
+		if (anchor === null) return null;
+		return {
+			target: { kind: "copy_block", anchor: { line: anchor.line }, cut: false },
+			nextIndex: consumeOptionalColon(line, anchor.nextIndex, end),
+		};
+	}
+	// `CUT N.=M` / `COPY N.=M` — capture concrete lines (cut also deletes
+	// them). A trailing colon is tolerated and ignored; body rows are rejected
+	// by the parser.
+	const cutEnd = scanKeyword(line, cursor, end, HL_CUT_KEYWORD);
+	if (cutEnd !== null) {
+		const range = scanHeaderRange(line, cutEnd, end, true);
+		if (range === null) return null;
+		const next = skipStrayDot(line, range.nextIndex, end);
+		return {
+			target: { kind: "copy", range: range.range, cut: true },
+			nextIndex: consumeOptionalColon(line, next, end),
+		};
+	}
+	const copyEnd = scanKeyword(line, cursor, end, HL_COPY_KEYWORD);
+	if (copyEnd !== null) {
+		const range = scanHeaderRange(line, copyEnd, end, true);
+		if (range === null) return null;
+		const next = skipStrayDot(line, range.nextIndex, end);
+		return {
+			target: { kind: "copy", range: range.range, cut: false },
+			nextIndex: consumeOptionalColon(line, next, end),
+		};
+	}
 	const insertEnd = scanKeyword(line, cursor, end, HL_INSERT_KEYWORD);
 	if (insertEnd !== null) return scanInsertTarget(line, insertEnd, end);
 	return null;
@@ -491,7 +585,10 @@ function classifyLine(line: string, lineNum: number): Token {
 		line.startsWith(HL_DELETE_KEYWORD, lead) ||
 		line.startsWith(HL_INSERT_KEYWORD, lead) ||
 		line.startsWith(HL_REM_KEYWORD, lead) ||
-		line.startsWith(HL_MOVE_KEYWORD, lead);
+		line.startsWith(HL_MOVE_KEYWORD, lead) ||
+		line.startsWith(HL_CUT_KEYWORD, lead) ||
+		line.startsWith(HL_COPY_KEYWORD, lead) ||
+		line.startsWith(HL_PASTE_KEYWORD, lead);
 	if (isHunkLead) {
 		const hunk = tryParseHunkHeader(line);
 		if (hunk !== null) return { kind: "op-block", lineNum, target: hunk.target };

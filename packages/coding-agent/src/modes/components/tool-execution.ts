@@ -1,4 +1,4 @@
-import type { SnapshotStore } from "@oh-my-pi/hashline";
+import type { Clipboard, SnapshotStore } from "@oh-my-pi/hashline";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import {
 	Box,
@@ -222,6 +222,8 @@ export interface ToolExecutionUi {
 
 export interface ToolExecutionOptions {
 	snapshots?: SnapshotStore;
+	/** Session-persistent edit clipboard register, forked per preview frame. */
+	clipboard?: Clipboard;
 	showImages?: boolean; // default: true (only used if terminal supports images)
 	editFuzzyThreshold?: number;
 	editAllowFuzzy?: boolean;
@@ -285,6 +287,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	#editFuzzyThreshold: number | undefined;
 	#editAllowFuzzy: boolean | undefined;
 	#snapshots?: SnapshotStore;
+	#clipboard?: Clipboard;
 	#isPartial = true;
 	#resultVersion = 0;
 	#lastDisplayKey: string | undefined;
@@ -393,6 +396,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		this.#editFuzzyThreshold = options.editFuzzyThreshold;
 		this.#editAllowFuzzy = options.editAllowFuzzy;
 		this.#snapshots = options.snapshots;
+		this.#clipboard = options.clipboard;
 		this.#liveRegion = options.liveRegion;
 		this.#tool = tool;
 		this.#ui = ui;
@@ -550,6 +554,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 				cwd: this.#cwd,
 				signal: controller.signal,
 				snapshots: this.#snapshots!,
+				clipboard: this.#clipboard,
 				fuzzyThreshold: this.#editFuzzyThreshold,
 				allowFuzzy: this.#editAllowFuzzy,
 				isStreaming,

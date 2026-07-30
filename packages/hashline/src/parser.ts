@@ -7,6 +7,8 @@ import { HL_PAYLOAD_REPLACE, HL_RANGE_SEP } from "./format";
 import {
 	type AbsoluteRangeOp,
 	BARE_BODY_AUTO_PIPED_WARNING,
+	COPY_TAKES_NO_BODY,
+	CUT_TAKES_NO_BODY,
 	DELETE_BLOCK_TAKES_NO_BODY,
 	DELETE_TAKES_NO_BODY,
 	EMPTY_BLOCK,
@@ -15,6 +17,7 @@ import {
 	MINUS_BULLET_AUTO_PIPED_WARNING,
 	MINUS_ROW_REJECTED,
 	MOVE_TAKES_NO_BODY,
+	PASTE_TAKES_NO_BODY,
 	REM_TAKES_NO_BODY,
 } from "./messages";
 import { stripOneLeadingHashlinePrefix } from "./prefixes";
@@ -76,6 +79,27 @@ function isSkippableCommentLine(line: string): boolean {
 }
 
 /**
+ * Body-row rejection message for targets that take no `+TEXT` rows, or `null`
+ * for targets whose header is followed by a body.
+ */
+function bodylessTargetMessage(target: BlockTarget): string | null {
+	switch (target.kind) {
+		case "delete":
+			return DELETE_TAKES_NO_BODY;
+		case "delete_block":
+			return DELETE_BLOCK_TAKES_NO_BODY;
+		case "copy":
+		case "copy_block":
+			return target.cut ? CUT_TAKES_NO_BODY : COPY_TAKES_NO_BODY;
+		case "paste":
+		case "paste_after_block":
+			return PASTE_TAKES_NO_BODY;
+		default:
+			return null;
+	}
+}
+
+/**
  * Stripped remainder of a bare `N: <value>` row that is a lone quoted or
  * numeric literal (optionally comma-terminated) — the shape of a numeric-keyed
  * dict/YAML body rather than read-output paste.
@@ -120,6 +144,12 @@ function detectApplyPatchContamination(text: string, _hasPending: boolean): stri
 	}
 	if (/^DEL\s+[1-9]\d*(?:\s*(?:\.\.|\.=|-|…|\s)\s*[1-9]\d*)?\s*:/.test(trimmed)) {
 		return `\`DEL N${HL_RANGE_SEP}M\` has no colon and no body. Remove the colon and body rows.`;
+	}
+	// Bare `PASTE` (optionally `PASTE 5` / `PASTE:`) — the op requires an
+	// explicit position suffix; a bare form would otherwise surface as a
+	// confusing body-row rejection under the preceding hunk.
+	if (/^PASTE(?:\s+[1-9]\d*)?\s*:?\s*$/.test(trimmed)) {
+		return "`PASTE` needs a position: use `PASTE.PRE N` / `PASTE.POST N` / `PASTE.HEAD` / `PASTE.TAIL` / `PASTE.BLK.POST N`.";
 	}
 	if (/^[1-9]\d*\s*$/.test(trimmed)) {
 		return `hunk headers need a verb. Use \`SWAP ${trimmed}${HL_RANGE_SEP}${trimmed}:\` to replace, or \`DEL ${trimmed}\` to delete.`;
@@ -210,6 +240,9 @@ export class Executor {
 				if (token.target.kind === "replace" || token.target.kind === "delete") {
 					validateRange(token.target.range, token.lineNum, token.target.kind);
 				}
+				if (token.target.kind === "copy") {
+					validateRange(token.target.range, token.lineNum, token.target.cut ? "cut" : "copy");
+				}
 				if (token.target.kind === "rem") {
 					this.#flushPending();
 					this.#setFileOp({ kind: "rem" }, token.lineNum);
@@ -241,8 +274,7 @@ export class Executor {
 	endStreaming(): { edits: Edit[]; fileOp?: FileOp; warnings: string[] } {
 		this.#consumePendingSkippableComments();
 		if (this.#pending && this.#pending.payloads.length > 0) this.#flushPending();
-		else if (this.#pending?.target.kind === "delete" || this.#pending?.target.kind === "delete_block")
-			this.#flushPending();
+		else if (this.#pending && bodylessTargetMessage(this.#pending.target) !== null) this.#flushPending();
 		else this.#pending = undefined;
 		this.#validateFileOp();
 		this.#validateNoOverlappingDeletes();
@@ -312,8 +344,8 @@ export class Executor {
 					`Got ${JSON.stringify(`${HL_PAYLOAD_REPLACE}${text}`)}.`,
 			);
 		}
-		if (pending.target.kind === "delete") throw new Error(`line ${lineNum}: ${DELETE_TAKES_NO_BODY}`);
-		if (pending.target.kind === "delete_block") throw new Error(`line ${lineNum}: ${DELETE_BLOCK_TAKES_NO_BODY}`);
+		const noBodyOnLiteral = bodylessTargetMessage(pending.target);
+		if (noBodyOnLiteral !== null) throw new Error(`line ${lineNum}: ${noBodyOnLiteral}`);
 		this.#commitDeferredBlanks(pending);
 		pending.payloads.push({ kind: "literal", text, lineNum });
 	}
@@ -327,9 +359,8 @@ export class Executor {
 				this.#handleBlank(text, lineNum);
 				return;
 			}
-			if (this.#pending.target.kind === "delete") throw new Error(`line ${lineNum}: ${DELETE_TAKES_NO_BODY}`);
-			if (this.#pending.target.kind === "delete_block")
-				throw new Error(`line ${lineNum}: ${DELETE_BLOCK_TAKES_NO_BODY}`);
+			const noBodyOnRaw = bodylessTargetMessage(this.#pending.target);
+			if (noBodyOnRaw !== null) throw new Error(`line ${lineNum}: ${noBodyOnRaw}`);
 			const row: PayloadRow = { kind: "literal", text, lineNum, bare: true };
 			// `-` rows are held and judged at flush time by #resolveMinusRows,
 			// once the whole body is visible.
@@ -364,7 +395,7 @@ export class Executor {
 	#handleBlank(text: string, lineNum: number): void {
 		const pending = this.#pending;
 		if (!pending) return;
-		if (pending.target.kind === "delete" || pending.target.kind === "delete_block") return;
+		if (bodylessTargetMessage(pending.target) !== null) return;
 		if (pending.payloads.length === 0) return;
 		pending.deferredBlanks.push({ kind: "literal", text, lineNum, bare: true });
 	}
@@ -455,7 +486,27 @@ export class Executor {
 		for (let line = range.start.line; line <= range.end.line; line++) this.#pushDelete({ line }, lineNum);
 	}
 
-	#pushBlock(anchor: Anchor, payloads: readonly PayloadRow[], lineNum: number, mode?: "insert_after"): void {
+	#pushCopy(range: ParsedRange, cut: boolean, lineNum: number): void {
+		this.#edits.push({
+			kind: "copy",
+			range: { start: { ...range.start }, end: { ...range.end } },
+			cut,
+			lineNum,
+			index: this.#editIndex++,
+		});
+		// A CUT deletes its range exactly like `DEL N.=M`; the copy edit above
+		// only captures. Keeping the deletes as ordinary per-line edits lets
+		// overlap validation, recovery remapping, and the applier treat them
+		// identically to a plain delete.
+		if (cut) this.#pushDeleteRange(range, lineNum);
+	}
+
+	#pushBlock(
+		anchor: Anchor,
+		payloads: readonly PayloadRow[],
+		lineNum: number,
+		mode?: "insert_after" | "copy" | "cut" | "paste_after",
+	): void {
 		this.#edits.push({
 			kind: "block",
 			anchor: { ...anchor },
@@ -484,6 +535,22 @@ export class Executor {
 		if (target.kind === "delete_block") {
 			// A block edit with no payloads resolves to a pure block deletion.
 			this.#pushBlock(target.anchor, [], lineNum);
+			return;
+		}
+		if (target.kind === "copy") {
+			this.#pushCopy(target.range, target.cut, lineNum);
+			return;
+		}
+		if (target.kind === "copy_block") {
+			this.#pushBlock(target.anchor, [], lineNum, target.cut ? "cut" : "copy");
+			return;
+		}
+		if (target.kind === "paste") {
+			this.#edits.push({ kind: "paste", cursor: cloneCursor(target.cursor), lineNum, index: this.#editIndex++ });
+			return;
+		}
+		if (target.kind === "paste_after_block") {
+			this.#pushBlock(target.anchor, [], lineNum, "paste_after");
 			return;
 		}
 		if (target.kind === "block") {

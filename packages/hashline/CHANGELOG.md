@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added clipboard ops: `CUT N.=M` / `COPY N.=M` capture lines into a register (`CUT` also deletes them), `CUT.BLK N` / `COPY.BLK N` capture tree-sitter blocks, and `PASTE.PRE|POST N` / `PASTE.HEAD|TAIL` / `PASTE.BLK.POST N` insert the captured lines without retyping. The register flows top-to-bottom across sections, so content moves between files in one patch; `PASTE` does not consume it and the last capture wins.
+- Added `PatcherOptions.clipboard` for a host-owned register that persists across `Patcher.apply` batches. Batches work on a fork (`forkClipboard`) published per landed section (`commitClipboard`), so failed batches never poison the register and a mid-batch write failure still preserves content already cut from disk; un-pasted `CUT` content becomes a carry-forward warning instead of an error.
+- Added clipboard safety guards: a `PASTE` with an empty register, a capture overwriting un-pasted `CUT` content, a batch-local `CUT` that is never pasted, and clipboard ops in same-path sections interleaved across another file's section are all rejected with targeted diagnostics. `CUT`/`COPY` ranges participate in overlap validation, the seen-lines guard, and drift recovery (every captured line must remap).
+
 ### Fixed
 
 - Prevented CPU and memory exhaustion in streaming previews by rejecting line anchors above Number.MAX_SAFE_INTEGER and ranges spanning more than 100,000 lines.

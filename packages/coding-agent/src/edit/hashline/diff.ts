@@ -13,6 +13,7 @@ import * as path from "node:path";
 import {
 	type ApplyResult,
 	applyEdits,
+	type Clipboard,
 	type Cursor,
 	computeFileHash,
 	type Edit,
@@ -26,8 +27,10 @@ import {
 	parsePatchStreaming,
 	Recovery,
 	resolveBlockEdits,
+	resolveClipboardEdits,
 	type SnapshotStore,
 	stripBom,
+	validateClipboardSequence,
 } from "@oh-my-pi/hashline";
 import { resolveToCwd } from "../../tools/path-utils";
 import { generateDiffString } from "../diff";
@@ -48,6 +51,15 @@ export interface HashlineDiffOptions {
 	 * authoring input; the final apply path still validates through Patcher.
 	 */
 	skipHashValidation?: boolean;
+	/**
+	 * Clipboard register shared across the sections of one patch preview.
+	 * `CUT`/`COPY` in an earlier section feeds `PASTE` in a later one, so the
+	 * preview a user approves shows the pasted content exactly like apply
+	 * will. Callers previewing a multi-section patch MUST thread one register
+	 * through the sections in patch order; omitted, each section gets a
+	 * private register (same-file cut/paste still previews correctly).
+	 */
+	clipboard?: Clipboard;
 }
 
 async function readSectionText(absolutePath: string, sectionPath: string): Promise<string> {
@@ -144,6 +156,7 @@ function hasAnchorScopedEdit(edits: readonly Edit[]): boolean {
 	return edits.some(edit => {
 		if (edit.kind === "delete") return true;
 		if (edit.kind === "block") return true;
+		if (edit.kind === "copy") return true;
 		return edit.cursor.kind === "before_anchor" || edit.cursor.kind === "after_anchor";
 	});
 }
@@ -204,14 +217,24 @@ function applyPreviewEdits(args: {
 	const liveMatches = expected !== undefined && computeFileHash(normalized) === expected;
 	const edits = parsePreviewEdits(section, options.streaming);
 	const resolved = resolvePreviewEdits({ section, absolutePath, normalized, snapshots, expected, liveMatches, edits });
-	if (options.skipHashValidation || expected === undefined || liveMatches) return applyEdits(normalized, resolved);
-	if (!hasAnchorScopedEdit(resolved)) return applyEdits(normalized, resolved);
+	const clipboard = options.clipboard ?? {};
+	// Mirror the Patcher: surface clipboard sequencing mistakes with their
+	// targeted message before the recovery path below swallows them. Streaming
+	// previews stay lenient — a mid-typed op transiently violating sequencing
+	// must not flash an error frame.
+	if (!options.streaming) validateClipboardSequence(resolved, clipboard);
+	const applyOptions = { clipboard, ...(options.streaming ? { onEmptyPaste: "drop" as const } : {}) };
+	if (options.skipHashValidation || expected === undefined || liveMatches) {
+		return applyEdits(normalized, resolved, applyOptions);
+	}
+	if (!hasAnchorScopedEdit(resolved)) return applyEdits(normalized, resolved, applyOptions);
 
 	const recovered = new Recovery(snapshots).tryRecover({
 		path: absolutePath,
 		currentText: normalized,
 		fileHash: expected,
 		edits: resolved,
+		clipboard,
 	});
 	if (recovered) return recovered;
 	throw createMismatchError(section, absolutePath, normalized, snapshots, expected);
@@ -250,18 +273,40 @@ function insertCursorLine(cursor: Cursor, fileLineCount: number): number {
 function buildStreamingSectionDiff(
 	section: PatchSection,
 	normalized: string,
+	clipboard: Clipboard,
 ): { diff: string; firstChangedLine: number | undefined } | { error: string } {
 	const { edits, fileOp } = parsePatchStreaming(section.diff);
-	const resolved = resolveBlockEdits(edits, normalized, section.path, nativeBlockResolver, { onUnresolved: "drop" });
+	const blockResolved = resolveBlockEdits(edits, normalized, section.path, nativeBlockResolver, {
+		onUnresolved: "drop",
+	});
+	const fileLines = normalized.split("\n");
+	// Expand clipboard ops so a `PASTE` previews the moved rows. Resolve into
+	// a scratch register and commit it back only on success: a mid-typed
+	// capture (out-of-range while the range digits are still streaming,
+	// transient sequencing violations) throws AFTER earlier captures may have
+	// landed, and leaking those into the shared register would let a later
+	// section preview a paste that never happened. On failure, fall back to
+	// filtering the clipboard edits out of this section's frame.
+	const scratch: Clipboard = { ...clipboard };
+	let resolved: readonly Edit[];
+	try {
+		resolved = resolveClipboardEdits(blockResolved, fileLines, scratch, { onEmptyPaste: "drop" });
+		if (scratch.lines === undefined) delete clipboard.lines;
+		else clipboard.lines = scratch.lines;
+		if (scratch.pendingCut === undefined) delete clipboard.pendingCut;
+		else clipboard.pendingCut = scratch.pendingCut;
+	} catch {
+		resolved = blockResolved.filter(edit => edit.kind !== "copy" && edit.kind !== "paste");
+	}
 	if (resolved.length === 0) {
 		// A whole-file op (REM / MV) carries no line edits: the change is the
 		// delete/move itself, conveyed by the result header, so emit an empty
-		// diff rather than a misleading "No changes" error.
-		if (fileOp) return { diff: "", firstChangedLine: undefined };
+		// diff rather than a misleading "No changes" error. A copy-only section
+		// likewise changes nothing itself — it feeds a later `PASTE`.
+		if (fileOp || section.isClipboardSource) return { diff: "", firstChangedLine: undefined };
 		return { error: `No changes would be made to ${section.path}.` };
 	}
 
-	const fileLines = normalized.split("\n");
 	const rows: string[] = [];
 	let firstChangedLine: number | undefined;
 
@@ -299,7 +344,10 @@ function buildStreamingSectionDiff(
 		}
 	}
 
-	if (rows.length === 0) return { error: `No changes would be made to ${section.path}.` };
+	if (rows.length === 0) {
+		if (section.isClipboardSource) return { diff: "", firstChangedLine: undefined };
+		return { error: `No changes would be made to ${section.path}.` };
+	}
 	return { diff: rows.join("\n"), firstChangedLine };
 }
 
@@ -323,12 +371,13 @@ export async function computeHashlineSectionDiff(
 		// diff: feed the in-flight ops through the natural-order builder so the
 		// streamed cursor stays pinned to the bottom. The args-complete pass
 		// (`streaming` unset) falls through to the real Myers diff below.
-		if (options.streaming) return buildStreamingSectionDiff(section, normalized);
+		if (options.streaming) return buildStreamingSectionDiff(section, normalized, options.clipboard ?? {});
 		const result = applyPreviewEdits({ section, absolutePath, normalized, snapshots, options });
 		if (normalized === result.text) {
 			// REM/MV-only sections change no text; the header conveys the
-			// delete/move, so don't surface a "No changes" error.
-			if (section.fileOp) return { diff: "", firstChangedLine: undefined };
+			// delete/move, so don't surface a "No changes" error. A copy-only
+			// section likewise changes nothing itself — it feeds a later `PASTE`.
+			if (section.fileOp || section.isClipboardSource) return { diff: "", firstChangedLine: undefined };
 			return { error: `No changes would be made to ${section.path}.` };
 		}
 		return generateDiffString(normalized, result.text, undefined, { path: section.path });

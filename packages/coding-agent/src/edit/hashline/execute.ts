@@ -13,11 +13,15 @@
 import {
 	type BlockResolution,
 	buildCompactDiffPreview,
+	type Clipboard,
+	commitClipboard,
+	forkClipboard,
 	MismatchError as HashlineMismatchError,
 	Patch,
 	Patcher,
 	type PatchSectionResult,
 	type PreparedSection,
+	pendingCutWarning,
 } from "@oh-my-pi/hashline";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { FileDiagnosticsResult, WritethroughCallback, WritethroughDeferredHandle } from "../../lsp";
@@ -25,6 +29,7 @@ import type { ToolSession } from "../../tools";
 import { outputMeta } from "../../tools/output-meta";
 import { ToolError } from "../../tools/tool-errors";
 import { generateDiffString } from "../diff";
+import { getEditClipboard } from "../edit-clipboard";
 import { getFileSnapshotStore } from "../file-snapshot-store";
 import type { EditToolDetails, EditToolPerFileResult, LspBatchRequest } from "../renderer";
 import { pruneOversizedEditSnapshots } from "../snapshot-details";
@@ -98,12 +103,26 @@ interface RenderedSection {
 	perFileResult: EditToolPerFileResult;
 }
 
+const BLOCK_OP_LABELS: Record<BlockResolution["op"], string> = {
+	replace: "SWAP.BLK",
+	delete: "DEL.BLK",
+	insert_after: "INS.BLK.POST",
+	copy: "COPY.BLK",
+	cut: "CUT.BLK",
+	paste_after: "PASTE.BLK.POST",
+};
+
 function formatBlockResolution(resolution: BlockResolution): string {
-	const op = resolution.op === "delete" ? "DEL.BLK" : resolution.op === "insert_after" ? "INS.BLK.POST" : "SWAP.BLK";
+	const op = BLOCK_OP_LABELS[resolution.op];
 	const lines = resolution.end - resolution.start + 1;
 	const span =
 		resolution.start === resolution.end ? `line ${resolution.start}` : `lines ${resolution.start}-${resolution.end}`;
-	const suffix = resolution.op === "insert_after" ? `; body lands after line ${resolution.end}` : "";
+	const suffix =
+		resolution.op === "insert_after"
+			? `; body lands after line ${resolution.end}`
+			: resolution.op === "paste_after"
+				? `; clipboard lands after line ${resolution.end}`
+				: "";
 	return `${op} ${resolution.anchorLine} → resolved ${span} (${lines} line${lines === 1 ? "" : "s"})${suffix}`;
 }
 
@@ -194,6 +213,25 @@ function renderSection(
 	};
 }
 
+/**
+ * Render a copy-only (`COPY`/`COPY.BLK`) section: it filled the clipboard for
+ * a later `PASTE` and intentionally left its own file unchanged, so the
+ * standard "no changes" diagnostics do not apply. The fresh header still
+ * re-mints the snapshot tag for follow-up edits.
+ */
+function clipboardSourceResult(result: PatchSectionResult): RenderedSection {
+	const warningsBlock = result.warnings.length > 0 ? `\n\nWarnings:\n${result.warnings.join("\n")}` : "";
+	return {
+		toolResult: {
+			content: [
+				{ type: "text", text: `${result.header}\nCopied lines to the clipboard; file unchanged.${warningsBlock}` },
+			],
+			details: { diff: "", op: "update", meta: outputMeta().get() },
+		},
+		perFileResult: { path: result.path, diff: "", op: "update" },
+	};
+}
+
 export async function executeHashlineSingle(
 	options: ExecuteHashlineSingleOptions,
 ): Promise<AgentToolResult<EditToolDetails, typeof hashlineEditParamsSchema>> {
@@ -213,13 +251,25 @@ export async function executeHashlineSingle(
 	const enforceSeenLines = options.session.settings.get("edit.enforceSeenLines");
 	const patcher = new Patcher({ fs, snapshots, blockResolver: nativeBlockResolver, enforceSeenLines });
 
+	// The clipboard register is session-persistent: `CUT` in one edit call can
+	// `PASTE` in a later one. Each batch works on a fork and publishes it back
+	// only after every write lands, so a failed batch never poisons the
+	// register (a retried `CUT` would otherwise trip the overwrite guard).
+	const sessionClipboard = getEditClipboard(options.session);
+	const clipboard = forkClipboard(sessionClipboard);
+
 	// Single-section fast path: prepare, commit, render.
 	const inputHash = hashPatchInput(options.input);
 	if (patch.sections.length === 1) {
 		fs.setBatchRequest(narrowBatchRequest(options.batchRequest, true));
-		const prepared = await patcher.prepare(patch.sections[0]);
+		const prepared = await patcher.prepare(patch.sections[0], clipboard);
 		const sectionResult = await patcher.commit(prepared);
+		commitClipboard(clipboard, sessionClipboard);
+		if (clipboard.pendingCut !== undefined) sectionResult.warnings.push(pendingCutWarning(clipboard.pendingCut));
 		if (sectionResult.op === "noop") {
+			if (prepared.section.isClipboardSource) {
+				return clipboardSourceResult(sectionResult).toolResult;
+			}
 			const { count, escalate } = recordNoopEdit(options.session, sectionResult.canonicalPath, inputHash);
 			if (escalate) {
 				throw new ToolError(noChangeLoopDiagnostic(sectionResult.path, count));
@@ -231,12 +281,23 @@ export async function executeHashlineSingle(
 	}
 
 	// Multi-section: prepare every section up front so we fail fast before
-	// any write hits the filesystem.
+	// any write hits the filesystem. One clipboard register spans the batch,
+	// so `CUT`/`COPY` in one section feeds `PASTE` in a later one.
 	const prepared: PreparedSection[] = [];
-	for (const section of patch.sections) prepared.push(await patcher.prepare(section));
+	// Register state after each section's prepare. Commits are non-atomic: a
+	// mid-batch write failure leaves earlier sections on disk, so the session
+	// register must reflect exactly the landed prefix — content a landed CUT
+	// deleted would otherwise be lost.
+	const sectionStates: Clipboard[] = [];
+	for (const section of patch.sections) {
+		prepared.push(await patcher.prepare(section, clipboard));
+		sectionStates.push(forkClipboard(clipboard));
+	}
 	assertUniqueCanonicalPaths(prepared);
 	for (const entry of prepared) {
-		if (entry.isNoop) {
+		// A copy-only section legitimately changes nothing: it exists to fill
+		// the clipboard for a `PASTE` in a later section.
+		if (entry.isNoop && !entry.section.isClipboardSource) {
 			const { count, escalate } = recordNoopEdit(options.session, entry.canonicalPath, inputHash);
 			throw escalate
 				? new ToolError(noChangeLoopDiagnostic(entry.section.path, count))
@@ -251,7 +312,12 @@ export async function executeHashlineSingle(
 		const isLast = i === prepared.length - 1;
 		fs.setBatchRequest(narrowBatchRequest(options.batchRequest, isLast));
 		const sectionResult = await patcher.commit(prepared[i]);
+		commitClipboard(sectionStates[i], sessionClipboard);
 		if (sectionResult.op === "noop") {
+			if (prepared[i].section.isClipboardSource) {
+				rendered.push(clipboardSourceResult(sectionResult));
+				continue;
+			}
 			const { count, escalate } = recordNoopEdit(options.session, sectionResult.canonicalPath, inputHash);
 			throw escalate
 				? new ToolError(noChangeLoopDiagnostic(sectionResult.path, count))
@@ -260,14 +326,18 @@ export async function executeHashlineSingle(
 		resetNoopEdit(options.session, sectionResult.canonicalPath);
 		rendered.push(renderSection(sectionResult, fs.consumeDiagnostics(sectionResult.path), prepared[i].section.path));
 	}
+	// Every write landed; carry any still-pending cut forward as a warning.
+	const pendingCutNote =
+		clipboard.pendingCut === undefined ? "" : `\n\nWarnings:\n${pendingCutWarning(clipboard.pendingCut)}`;
 
 	return {
 		content: [
 			{
 				type: "text",
-				text: rendered
-					.map(r => r.toolResult.content.map(part => (part.type === "text" ? part.text : "")).join("\n"))
-					.join("\n\n"),
+				text:
+					rendered
+						.map(r => r.toolResult.content.map(part => (part.type === "text" ? part.text : "")).join("\n"))
+						.join("\n\n") + pendingCutNote,
 			},
 		],
 		details: pruneOversizedEditSnapshots({
