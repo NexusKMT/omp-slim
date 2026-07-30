@@ -45,11 +45,27 @@ afterEach(async () => {
 describe("security://", () => {
 	test("both producers render through every stable URI level", async () => {
 		const router = InternalUrlRouter.instance();
+		const expectations: Record<string, { contentType: "application/json" | "text/markdown"; marker: string }> = {
+			"": { contentType: "text/markdown", marker: "# Security" },
+			"/manifest": { contentType: "application/json", marker: `"id"` },
+			"/findings": { contentType: "text/markdown", marker: "# Findings for" },
+			"/coverage": { contentType: "application/json", marker: `"mode"` },
+			"/report": { contentType: "text/markdown", marker: "#" },
+			"/sarif": { contentType: "application/json", marker: `"version"` },
+			"/provenance": { contentType: "application/json", marker: `"producer"` },
+		};
 		for (const scanId of ["secscan_codexfixture", "secscan_sariffixture"]) {
-			for (const suffix of ["", "/manifest", "/findings", "/coverage", "/report", "/sarif", "/provenance"]) {
+			for (const [suffix, expectation] of Object.entries(expectations)) {
 				const resource = await router.resolve(`security://scans/${scanId}${suffix}`, { cwd: repositoryRoot });
 				expect(resource.immutable).toBeTrue();
-				expect(resource.content.length).toBeGreaterThan(0);
+				expect(resource.contentType).toBe(expectation.contentType);
+				const marker =
+					suffix === "/report"
+						? scanId === "secscan_codexfixture"
+							? "# Codex Security"
+							: "# Imported SARIF"
+						: expectation.marker;
+				expect(resource.content).toContain(marker);
 			}
 		}
 	});

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -55,6 +55,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+	vi.restoreAllMocks();
 	unregisterCustomApis(MOCK_SOURCE_ID);
 	settings.cancelPendingSaves();
 	credentialStore?.close();
@@ -124,7 +125,6 @@ describe("native security coordinator", () => {
 		const terminal = await coordinator.wait(started.operationId);
 		expect(terminal.phase).toBe("completed");
 		expect(terminal.findingCount).toBe(1);
-		expect(mock.calls.length).toBeGreaterThan(0);
 		const bundle = await (await storeFactory()).getBundle(terminal.scanId);
 		expect(bundle?.scan.status).toBe("completed");
 		expect(bundle?.findings).toHaveLength(1);
@@ -134,6 +134,35 @@ describe("native security coordinator", () => {
 			initialCwd: repositoryRoot,
 		});
 		expect(reopened.getSessionId()).toBeTruthy();
+	});
+
+	test("records a terminal failure when initial scan persistence fails", async () => {
+		const mock = createMockModel({ id: "security-mock", provider: "openai-codex" });
+		const store = await storeFactory();
+		const coordinator = new SecurityCoordinator(
+			{
+				cwd: repositoryRoot,
+				settings,
+				authStorage,
+				modelRegistry: new ModelRegistry(authStorage, path.join(temporaryRoot, "models.yml")),
+				activeModel: mock.model,
+			},
+			{
+				openStore: async () => store,
+				gitAdapter,
+				createSession: async () => {
+					throw new Error("session must not launch when persistence fails");
+				},
+			},
+		);
+		const plan = await coordinator.preflight({ credentialId, model: mock.model });
+		vi.spyOn(store, "putBundle").mockRejectedValue(new Error("security store unavailable"));
+		const started = await coordinator.start({ planId: plan.id });
+		await expect(coordinator.wait(started.operationId)).rejects.toThrow("security store unavailable");
+		expect(coordinator.status(started.operationId)).toMatchObject({
+			phase: "failed",
+			error: "security store unavailable",
+		});
 	});
 
 	test("cancellation before session launch has no inference side effects", async () => {

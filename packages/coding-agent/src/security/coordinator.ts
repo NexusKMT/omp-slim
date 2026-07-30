@@ -90,7 +90,6 @@ export interface SecurityPreflightInput {
 	credentialId?: number;
 	model?: Model;
 	thinkingLevel?: string;
-	config?: Record<string, unknown>;
 	signal?: AbortSignal;
 }
 
@@ -134,8 +133,12 @@ interface SecurityOperationRecord {
 	abortController?: AbortController;
 }
 
-function iso(now: () => Date): string {
+function toIsoTimestamp(now: () => Date): string {
 	return now().toISOString();
+}
+
+function securityConfigSnapshot(settings: Settings): Record<string, boolean> {
+	return { securityEnabled: settings.get("security.enabled") };
 }
 
 function createOperationId(): string {
@@ -322,7 +325,7 @@ export class SecurityCoordinator {
 	constructor(host: SecurityCoordinatorHost, dependencies: SecurityCoordinatorDependencies = {}) {
 		this.#host = host;
 		this.#createSession = dependencies.createSession ?? createDefaultSecuritySession;
-		this.#openStore = dependencies.openStore ?? (repositoryRoot => SecurityStore.open(repositoryRoot));
+		this.#openStore = dependencies.openStore ?? (cwd => SecurityStore.openForCwd(cwd));
 		this.#gitAdapter = dependencies.gitAdapter ?? DEFAULT_SECURITY_GIT_ADAPTER;
 		this.#now = dependencies.now ?? (() => new Date());
 		this.#createOperationId = dependencies.createOperationId ?? createOperationId;
@@ -350,7 +353,7 @@ export class SecurityCoordinator {
 				archiveExisting: input.archiveExisting,
 				model: modelRef,
 				account,
-				config: input.config ?? { securityEnabled: true },
+				config: securityConfigSnapshot(this.#host.settings),
 				workflowFingerprint: SECURITY_WORKFLOW_FINGERPRINT,
 				signal: input.signal,
 			},
@@ -370,14 +373,14 @@ export class SecurityCoordinator {
 		await assertSecurityScanPlanFresh(
 			plan,
 			{
-				config: { securityEnabled: true },
+				config: securityConfigSnapshot(this.#host.settings),
 				workflowFingerprint: SECURITY_WORKFLOW_FINGERPRINT,
 			},
 			this.#gitAdapter,
 		);
 		const operationId = this.#createOperationId();
 		const scanId = createSecurityScanId();
-		const createdAt = iso(this.#now);
+		const createdAt = toIsoTimestamp(this.#now);
 		const snapshot: SecurityOperationSnapshot = {
 			operationId,
 			planId: plan.id,
@@ -442,9 +445,9 @@ export class SecurityCoordinator {
 		return { ...record.snapshot };
 	}
 
-	async #update(record: SecurityOperationRecord, phase: SecurityOperationPhase, error?: string): Promise<void> {
+	#update(record: SecurityOperationRecord, phase: SecurityOperationPhase, error?: string): void {
 		record.snapshot.phase = phase;
-		record.snapshot.updatedAt = iso(this.#now);
+		record.snapshot.updatedAt = toIsoTimestamp(this.#now);
 		record.snapshot.error = error;
 	}
 
@@ -455,14 +458,14 @@ export class SecurityCoordinator {
 		signal: AbortSignal,
 		reportProgress?: (text: string) => Promise<void>,
 	): Promise<void> {
-		const startedAt = iso(this.#now);
+		const startedAt = toIsoTimestamp(this.#now);
 		let session: SecurityScanSession | undefined;
 		let publishedBundle: SecurityScanBundle | undefined;
-		await store.putBundle(initialBundle(store, plan, record.snapshot.scanId, startedAt));
 		try {
+			await store.putBundle(initialBundle(store, plan, record.snapshot.scanId, startedAt));
 			if (signal.aborted) throw signal.reason ?? new Error("Security scan cancelled");
 			await prepareSecurityOutputDirectory(plan.output, record.snapshot.scanId);
-			await this.#update(record, "preparing");
+			this.#update(record, "preparing");
 			await reportProgress?.("Preparing OMP-native security scan");
 			const activeModel = this.#host.activeModel;
 			const model =
@@ -483,7 +486,7 @@ export class SecurityCoordinator {
 				onPublished: async bundle => {
 					publishedBundle = bundle;
 					record.snapshot.findingCount = bundle.findings.length;
-					await this.#update(record, "publishing");
+					this.#update(record, "publishing");
 				},
 			});
 			session = await this.#createSession({
@@ -503,7 +506,7 @@ export class SecurityCoordinator {
 			signal.addEventListener("abort", abortSession, { once: true });
 			try {
 				if (signal.aborted) throw signal.reason ?? new Error("Security scan cancelled");
-				await this.#update(record, "reviewing");
+				this.#update(record, "reviewing");
 				await reportProgress?.("Reviewing repository with OMP security workers");
 				await session.prompt(requestText(plan), {
 					expandPromptTemplates: false,
@@ -517,19 +520,19 @@ export class SecurityCoordinator {
 			}
 			if (signal.aborted) throw signal.reason ?? new Error("Security scan cancelled");
 			if (publishedBundle) {
-				await this.#update(record, "completed");
+				this.#update(record, "completed");
 				await reportProgress?.(`Published ${publishedBundle.findings.length} security finding(s)`);
 				return;
 			}
 			const partial = initialBundle(store, plan, record.snapshot.scanId, startedAt, "partial");
-			partial.scan.completedAt = iso(this.#now);
+			partial.scan.completedAt = toIsoTimestamp(this.#now);
 			partial.scan.error = "The scan session ended without publishing a canonical result";
+			this.#update(record, "partial", partial.scan.error);
 			await store.putBundle(partial);
-			await this.#update(record, "partial", partial.scan.error);
 		} catch (error) {
 			if (publishedBundle) {
 				record.snapshot.findingCount = publishedBundle.findings.length;
-				await this.#update(record, "completed");
+				this.#update(record, "completed");
 				return;
 			}
 			const message = error instanceof Error ? error.message : String(error);
@@ -541,10 +544,10 @@ export class SecurityCoordinator {
 				startedAt,
 				cancelled ? "cancelled" : "failed",
 			);
-			terminal.scan.completedAt = iso(this.#now);
+			terminal.scan.completedAt = toIsoTimestamp(this.#now);
 			terminal.scan.error = message;
+			this.#update(record, cancelled ? "cancelled" : "failed", message);
 			await store.putBundle(terminal);
-			await this.#update(record, cancelled ? "cancelled" : "failed", message);
 		} finally {
 			await session?.dispose().catch(() => undefined);
 		}

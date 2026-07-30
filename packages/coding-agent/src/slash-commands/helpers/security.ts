@@ -156,12 +156,12 @@ async function showResource(runtime: SlashCommandRuntime, rest: string): Promise
 async function importResults(runtime: SlashCommandRuntime, rest: string): Promise<void> {
 	const [source] = parseCommandArgs(rest);
 	if (!source) throw new Error("import requires a SARIF file or Codex Security bundle directory");
+	const store = await SecurityStore.openForCwd(runtime.cwd);
 	const absolute = path.resolve(runtime.cwd, source);
 	const stats = await fs.stat(absolute);
 	const bundle = stats.isDirectory()
-		? await importCodexSecurityBundle(absolute, { repositoryRoot: runtime.cwd })
-		: await importSarifFile(absolute, { repositoryRoot: runtime.cwd });
-	const store = await SecurityStore.open(runtime.cwd);
+		? await importCodexSecurityBundle(absolute, { repositoryRoot: store.repositoryRoot })
+		: await importSarifFile(absolute, { repositoryRoot: store.repositoryRoot });
 	await store.putBundle(bundle);
 	await runtime.output(`Imported ${bundle.findings.length} finding(s) as security scan ${bundle.scan.id}.`);
 }
@@ -184,7 +184,7 @@ async function exportResults(runtime: SlashCommandRuntime, rest: string): Promis
 		} else throw new Error(`Unknown export option: ${token}`);
 	}
 	if (!outputPath) throw new Error("export requires --output <path>");
-	const store = await SecurityStore.open(runtime.cwd);
+	const store = await SecurityStore.openForCwd(runtime.cwd);
 	const bundle = await store.getBundle(scanIdFromInput(scanId));
 	if (!bundle) throw new Error(`Unknown security scan: ${scanId}`);
 	let content: string;
@@ -210,7 +210,7 @@ async function updateDisposition(runtime: SlashCommandRuntime, rest: string): Pr
 	if (!DISPOSITIONS.has(status as SecurityDispositionStatus)) throw new Error(`Unknown disposition: ${status}`);
 	const rationale = rationaleParts.join(" ").trim();
 	if (status !== "open" && !rationale) throw new Error(`${status} requires a rationale`);
-	const store = await SecurityStore.open(runtime.cwd);
+	const store = await SecurityStore.openForCwd(runtime.cwd);
 	const finding = await store.updateDisposition(scanId, findingId, {
 		status: status as SecurityDispositionStatus,
 		rationale: rationale || undefined,
@@ -265,7 +265,7 @@ export async function handleSecurityCommand(
 				return commandConsumed();
 			}
 			case "scans": {
-				const scans = await (await SecurityStore.open(runtime.cwd)).listScans();
+				const scans = await (await SecurityStore.openForCwd(runtime.cwd)).listScans();
 				await runtime.output(
 					scans.length === 0
 						? "No security scans are stored for this project."
@@ -289,7 +289,7 @@ export async function handleSecurityCommand(
 			case "compare": {
 				const [beforeScanId, afterScanId] = parseCommandArgs(rest);
 				if (!beforeScanId || !afterScanId) throw new Error("compare requires <before-scan-id> <after-scan-id>");
-				const report = await (await SecurityStore.open(runtime.cwd)).compare(beforeScanId, afterScanId);
+				const report = await (await SecurityStore.openForCwd(runtime.cwd)).compare(beforeScanId, afterScanId);
 				await runtime.output(JSON.stringify(report, null, 2));
 				return commandConsumed();
 			}

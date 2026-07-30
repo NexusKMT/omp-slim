@@ -81,7 +81,8 @@ function normalizeRelativePath(input: string): string {
 	if (slashed.includes("\0")) throw new Error(`Security scope path contains a null byte: ${input}`);
 	const rawSegments = slashed.split("/");
 	const normalized = path.posix.normalize(slashed).replace(/^\.\//, "").replace(/\/$/, "");
-	if (!normalized || normalized === ".") return "";
+	if (!slashed) return "";
+	if (normalized === ".") return ".";
 	if (
 		rawSegments.includes("..") ||
 		normalized.startsWith("../") ||
@@ -98,6 +99,15 @@ function normalizeScopePaths(values: readonly string[] | undefined): string[] {
 	return [...new Set((values ?? []).map(normalizeRelativePath))].sort();
 }
 
+function scopeContainsPath(candidate: string, normalizedPath: string): boolean {
+	return (
+		candidate === "" ||
+		candidate === "." ||
+		normalizedPath === candidate ||
+		normalizedPath.startsWith(`${candidate}/`)
+	);
+}
+
 function pathMatchesScope(
 	relativePath: string,
 	includePaths: readonly string[],
@@ -105,9 +115,8 @@ function pathMatchesScope(
 ): boolean {
 	const normalized = normalizeRelativePath(relativePath);
 	const included =
-		includePaths.length === 0 ||
-		includePaths.some(candidate => normalized === candidate || normalized.startsWith(`${candidate}/`));
-	const excluded = excludePaths.some(candidate => normalized === candidate || normalized.startsWith(`${candidate}/`));
+		includePaths.length === 0 || includePaths.some(candidate => scopeContainsPath(candidate, normalized));
+	const excluded = excludePaths.some(candidate => scopeContainsPath(candidate, normalized));
 	return included && !excluded;
 }
 
@@ -169,6 +178,9 @@ async function normalizeTarget(
 	adapter: SecurityGitAdapter,
 	signal?: AbortSignal,
 ): Promise<SecurityTarget> {
+	if (request.kind === "scoped_path" && !request.includePaths?.some(value => value.trim().length > 0)) {
+		throw new Error("scoped_path security scans require at least one include path");
+	}
 	const includePaths = normalizeScopePaths(request.includePaths);
 	const excludePaths = normalizeScopePaths(request.excludePaths);
 	await validateScopePaths(repositoryRoot, includePaths);

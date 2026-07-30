@@ -214,6 +214,19 @@ describe("security preflight", () => {
 		await expect(plan()).rejects.toThrow("symbolic link");
 	});
 
+	test("a root-dot scoped target includes repository descendants", async () => {
+		const scoped = await plan({ kind: "scoped_path", includePaths: ["."] });
+		const repository = await plan();
+		expect(scoped.target.includePaths).toEqual(["."]);
+		expect(scoped.target.treeDigest).toBe(repository.target.treeDigest);
+	});
+
+	test("an empty scoped target is rejected before planning", async () => {
+		await expect(plan({ kind: "scoped_path", includePaths: [] })).rejects.toThrow(
+			"scoped_path security scans require at least one include path",
+		);
+	});
+
 	test("scope traversal is rejected", async () => {
 		for (const candidate of ["../outside", "src/../outside", "C:\\outside", "src\\..\\outside"]) {
 			await expect(plan({ kind: "scoped_path", includePaths: [candidate] })).rejects.toThrow("repository-relative");

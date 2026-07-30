@@ -6,10 +6,9 @@ import type { SecurityFinding } from "../security/contracts";
 import { createSecurityResource } from "../security/resource-output";
 import type { SecurityScanSummary } from "../security/store";
 import { SecurityStore } from "../security/store";
-import * as git from "../utils/git";
 import type { InternalResource, InternalUrl, ProtocolHandler, ResolveContext, UrlCompletion } from "./types";
 
-export type SecurityStoreResolver = (repositoryRoot: string) => Promise<SecurityStore>;
+export type SecurityStoreResolver = (cwd: string, signal?: AbortSignal) => Promise<SecurityStore>;
 
 export function isSecurityEnabled(): boolean {
 	if (!isSettingsInitialized()) return getDefault("security.enabled");
@@ -105,7 +104,7 @@ export class SecurityProtocolHandler implements ProtocolHandler {
 	readonly #enabled: () => boolean;
 
 	constructor(
-		resolveStore: SecurityStoreResolver = repositoryRoot => SecurityStore.open(repositoryRoot),
+		resolveStore: SecurityStoreResolver = (cwd, signal) => SecurityStore.openForCwd(cwd, { signal }),
 		enabled: () => boolean = isSecurityEnabled,
 	) {
 		this.#resolveStore = resolveStore;
@@ -113,9 +112,7 @@ export class SecurityProtocolHandler implements ProtocolHandler {
 	}
 
 	async #store(context?: ResolveContext): Promise<SecurityStore> {
-		const cwd = path.resolve(context?.cwd ?? process.cwd());
-		const repositoryRoot = (await git.repo.root(cwd, context?.signal)) ?? cwd;
-		return this.#resolveStore(repositoryRoot);
+		return this.#resolveStore(path.resolve(context?.cwd ?? process.cwd()), context?.signal);
 	}
 
 	async resolve(url: InternalUrl, context?: ResolveContext): Promise<InternalResource> {

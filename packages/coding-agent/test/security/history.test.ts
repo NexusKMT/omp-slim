@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { importSarifFile, SecurityStore } from "../../src/security";
+import { pathToFileURL } from "node:url";
+import { exportSecurityBundleToSarif, importSarif, importSarifFile, SecurityStore } from "../../src/security";
 
 const FIXTURE = path.join(import.meta.dir, "..", "fixtures", "security", "generic-results.sarif");
 let temporaryRoot = "";
@@ -65,5 +66,50 @@ describe("security history and dispositions", () => {
 			actor: "test-operator",
 		});
 		expect((await store.getFinding(bundle.scan.id, original.id))?.disposition).toEqual(updated.disposition);
+		const persisted = await store.getBundle(bundle.scan.id);
+		const persistedResult = (
+			persisted?.sarif?.runs as Array<{ results: Array<{ properties?: Record<string, unknown> }> }> | undefined
+		)?.[0]?.results[0];
+		expect(persistedResult?.properties?.disposition).toBe("false_positive");
+	});
+
+	test("SARIF disposition round-trips without changing its finding identity", async () => {
+		const bundle = await importSarif(
+			{
+				version: "2.1.0",
+				runs: [
+					{
+						tool: { driver: { name: "Fixture scanner" } },
+						results: [
+							{
+								ruleId: "fixture.rule",
+								message: { text: "fixture finding" },
+								properties: { disposition: "false_positive" },
+							},
+						],
+					},
+				],
+			},
+			{ repositoryRoot, createScanId: () => "secscan_sarifdisposition" },
+		);
+		const finding = bundle.findings[0];
+		if (!finding) throw new Error("expected imported finding");
+		expect(finding.disposition.status).toBe("false_positive");
+		const exported = exportSecurityBundleToSarif(bundle);
+		const result = (exported.runs as Array<{ results: Array<{ properties?: Record<string, unknown> }> }>)[0]
+			?.results[0];
+		expect(result?.properties?.disposition).toBe("false_positive");
+		expect(finding.id).toBe(bundle.scan.findingIds[0]);
+	});
+
+	test("SARIF base URI escapes repository path characters", async () => {
+		const specialRoot = path.join(temporaryRoot, "repo with #hash");
+		await fs.mkdir(specialRoot);
+		const bundle = await importSarif({ version: "2.1.0", runs: [] }, { repositoryRoot: specialRoot });
+		const exported = exportSecurityBundleToSarif(bundle);
+		const run = (exported.runs as Array<{ originalUriBaseIds: Record<string, { uri: string }> }>)[0];
+		expect(run?.originalUriBaseIds["%SRCROOT%"]?.uri).toBe(
+			pathToFileURL(`${await fs.realpath(specialRoot)}${path.sep}`).href,
+		);
 	});
 });

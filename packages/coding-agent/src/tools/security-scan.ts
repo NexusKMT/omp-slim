@@ -34,8 +34,12 @@ export interface SecurityScanToolDetails {
 function targetFromParams(params: SecurityScanParams): SecurityTargetRequest {
 	const common = { includePaths: params.include_paths, excludePaths: params.exclude_paths };
 	switch (params.target_kind ?? "repository") {
-		case "scoped_path":
-			return { kind: "scoped_path", includePaths: params.include_paths ?? [], excludePaths: params.exclude_paths };
+		case "scoped_path": {
+			if (!params.include_paths?.some(value => value.trim().length > 0)) {
+				throw new ToolError("scoped_path security scans require at least one include path");
+			}
+			return { kind: "scoped_path", includePaths: params.include_paths, excludePaths: params.exclude_paths };
+		}
 		case "working_tree":
 			return { kind: "working_tree", ...common };
 		case "ref_diff":

@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getSecurityProjectDir, isEnoent } from "@oh-my-pi/pi-utils";
 import { withFileLock } from "../config/file-lock";
+import * as git from "../utils/git";
 import { compareSecurityLineage } from "./comparison";
 import type {
 	SecurityComparisonReport,
@@ -19,6 +20,7 @@ import {
 	parseSecurityScanPlan,
 	securitySha256,
 } from "./contracts";
+import { exportSecurityBundleToSarif } from "./sarif";
 
 const STORE_SCHEMA_VERSION = 1;
 const PRIVATE_DIRECTORY_MODE = 0o700;
@@ -62,6 +64,7 @@ export interface SecurityScanSummary {
 
 export interface SecurityStoreOptions {
 	stateRoot?: string;
+	signal?: AbortSignal;
 }
 
 async function ensurePrivateDirectory(directory: string): Promise<void> {
@@ -85,6 +88,7 @@ export async function writeSecurityFileAtomic(
 	}
 	const temporaryPath = `${filePath}.${process.pid}.${Bun.randomUUIDv7()}.tmp`;
 	try {
+		// Bun.write cannot create exclusively; `wx` keeps concurrent atomic writers from sharing a temp file.
 		await fs.writeFile(temporaryPath, content, { encoding: "utf-8", mode: PRIVATE_FILE_MODE, flag: "wx" });
 		if (process.platform !== "win32") await fs.chmod(temporaryPath, PRIVATE_FILE_MODE);
 		try {
@@ -134,6 +138,12 @@ export class SecurityStore {
 		const store = new SecurityStore(canonicalRoot, projectKey, projectDirectory);
 		await withSecurityStoreWrite(projectDirectory, () => store.#ensureIndex());
 		return store;
+	}
+
+	static async openForCwd(cwd: string, options: SecurityStoreOptions = {}): Promise<SecurityStore> {
+		const resolvedCwd = path.resolve(cwd);
+		const repositoryRoot = (await git.repo.root(resolvedCwd, options.signal)) ?? resolvedCwd;
+		return SecurityStore.open(repositoryRoot, options);
 	}
 
 	get repositoryRoot(): string {
@@ -336,6 +346,7 @@ export class SecurityStore {
 			if (disposition.actor !== undefined) canonicalDisposition.actor = disposition.actor;
 			const updated = { ...bundle.findings[index], disposition: canonicalDisposition };
 			bundle.findings[index] = parseSecurityFinding(updated);
+			if (bundle.sarif !== undefined) bundle.sarif = exportSecurityBundleToSarif(bundle);
 			await this.#putBundleUnlocked(bundle);
 			return bundle.findings[index];
 		});
