@@ -121,7 +121,7 @@
         "requestIdFormat": {
           "type": "string",
           "enum": ["string", "number"],
-          "description": "Encoding for outgoing JSON-RPC request ids (default: \"string\"). Use \"number\" for servers that decode `id` as an integer only, such as Apple's `xcrun mcpbridge`, which never answers a string id."
+          "description": "Encoding for outgoing JSON-RPC request ids (default: \"string\"). Use \"number\" for servers that decode `id` as an integer only, such as Apple's `xcrun mcpbridge`, which never answers a string id. OMP-specific: set it in an OMP-owned config (`.omp/mcp.json`, `~/.omp/agent/mcp.json`, a project `mcp.json`/`.mcp.json`, or an OMP plugin). Servers imported from another tool's config (Claude, Cursor, VS Code, Gemini, OpenCode, Windsurf) ignore it, since that key is not part of those formats."
         },
         "auth": {
           "$ref": "#/$defs/authConfig"

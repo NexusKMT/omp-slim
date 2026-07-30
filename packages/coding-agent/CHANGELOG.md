@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `requestIdFormat` (`"string"` | `"number"`, default `"string"`) to MCP server config, honored by the stdio, HTTP, and SSE transports. JSON-RPC 2.0 permits both id shapes, but Apple's `xcrun mcpbridge` decodes `id` as an integer only and silently drops OMP's snowflake strings (`mcpbridge.DecodeError Code=1`), hanging every request until it times out. Opting a server into `"number"` allocates per-connection sequential integer ids instead. The option is OMP-specific, so set it in an OMP-owned config (`.omp/mcp.json`, `~/.omp/agent/mcp.json`, a project `mcp.json`/`.mcp.json`, or an OMP plugin); servers imported from another tool's config ignore it ([#7053](https://github.com/can1357/oh-my-pi/issues/7053)).
+
 ## [17.2.2] - 2026-07-31
 
 ### Added
@@ -48,9 +52,6 @@
 - Fixed the Python RPC client dropping context, compaction, OAuth URL, and terminal-settlement fields.
 - Fixed the browser tool ignoring the url parameter when opening a new tab on an attached browser.
 - Fixed browser automation disrupting attached browsers by adopting the active foreground tab and avoiding raising new tabs during screenshots.
-- Moved the display-reset default chord (`app.display.reset`) from `Ctrl+L` to `Alt+L` to make room for the live-mode toggle.
-- Updated the hashline edit tool, streaming preview, and plan-mode guidance for the unified `PUT`/`CUT` grammar, `.=` ranges, and named registers.
-- Added `requestIdFormat` (`"string"` | `"number"`, default `"string"`) to MCP server config, honored by the stdio, HTTP, and SSE transports. JSON-RPC 2.0 permits both id shapes, but Apple's `xcrun mcpbridge` decodes `id` as an integer only and silently drops OMP's snowflake strings (`mcpbridge.DecodeError Code=1`), hanging every request until it times out. Opting a server into `"number"` allocates per-connection sequential integer ids instead ([#7053](https://github.com/can1357/oh-my-pi/issues/7053)).
 
 ## [17.2.1] - 2026-07-30
 
