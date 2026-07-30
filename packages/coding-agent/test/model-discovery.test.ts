@@ -8,6 +8,7 @@ import type { OAuthCredentials } from "@oh-my-pi/pi-ai/oauth/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { resolveOllamaModelCacheProviderId } from "@oh-my-pi/pi-catalog/provider-models";
 import type { ModelSpec, OpenAICompat } from "@oh-my-pi/pi-catalog/types";
 import { applyLlamaCppQwenThinking, discoveryProbeTimeoutMs } from "@oh-my-pi/pi-coding-agent/config/model-discovery";
 import { kNoAuth, ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -74,7 +75,7 @@ describe("ModelRegistry runtime discovery", () => {
 	});
 
 	function writeCachedOllamaModels(models: Model<"openai-completions">[], updatedAt = Date.now()) {
-		writeModelCache("ollama", updatedAt, models, true, "", cacheDbPath);
+		writeModelCache(resolveOllamaModelCacheProviderId("ollama"), updatedAt, models, true, "", cacheDbPath);
 	}
 
 	function getModelsForProvider(registry: ModelRegistry, provider: string) {
@@ -541,6 +542,41 @@ describe("ModelRegistry runtime discovery", () => {
 
 		const model = registry.find("ollama", "phi4-mini");
 		expect(model?.baseUrl).toBe("http://omp-ollama.example:2222/v1");
+	});
+
+	test("refreshes implicit Ollama discovery when the configured endpoint changes", async () => {
+		const requested: string[] = [];
+		{
+			using _baseUrl = withEnv("OLLAMA_BASE_URL", "http://old-ollama.example:11434/v1/");
+			const fetchOld = mockOllamaDiscovery(["old-model"], "http://old-ollama.example:11434");
+			const registry = new ModelRegistry(authStorage, modelsJsonPath, {
+				fetch: async (input, init) => {
+					requested.push(String(input));
+					return fetchOld(input, init);
+				},
+			});
+			await registry.refresh();
+			expect(registry.find("ollama", "old-model")).toBeDefined();
+		}
+
+		{
+			using _baseUrl = withEnv("OLLAMA_BASE_URL", "http://new-ollama.example:11434");
+			const fetchNew = mockOllamaDiscovery(["new-model"], "http://new-ollama.example:11434");
+			const registry = new ModelRegistry(authStorage, modelsJsonPath, {
+				fetch: async (input, init) => {
+					requested.push(String(input));
+					return fetchNew(input, init);
+				},
+			});
+			// The old endpoint has a fresh cache row, but default refresh must
+			// miss that namespace and discover against the new endpoint.
+			await registry.refresh();
+			expect(registry.find("ollama", "old-model")).toBeUndefined();
+			expect(registry.find("ollama", "new-model")?.baseUrl).toBe("http://new-ollama.example:11434/v1");
+		}
+
+		expect(requested).toContain("http://old-ollama.example:11434/api/tags");
+		expect(requested).toContain("http://new-ollama.example:11434/api/tags");
 	});
 
 	test("uses OLLAMA_CONTEXT_LENGTH for implicit ollama context accounting", async () => {
