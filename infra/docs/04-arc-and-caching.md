@@ -161,7 +161,7 @@ githubConfigUrl: "https://github.com/<OWNER>/<REPO>"
 githubConfigSecret: arc-github
 runnerScaleSetName: omp-kata
 minRunners: 0
-maxRunners: 4
+maxRunners: 8
 # none: each job runs inside the runner container, which itself lives in a Kata microVM
 containerMode:
   type: ""
@@ -220,10 +220,14 @@ Field by field:
 - **`githubConfigSecret: arc-github`** - the auth secret from [step 1](#1-github-app-and-the-arc-github-secret).
 - **`runnerScaleSetName: omp-kata`** - the runner label. This is the string that
   goes in a workflow's `runs-on:`.
-- **`minRunners: 0` / `maxRunners: 4`** - **scale-to-zero**. With no queued jobs
-  there are zero runner microVMs. Each admitted runner gets an honest 8-vCPU,
-  24-GiB request and limit; excess jobs queue instead of ten 16-vCPU guests
-  fighting over the reference host's 32 physical CPUs.
+- **`minRunners: 0` / `maxRunners: 8`** - **scale-to-zero**. With no queued jobs
+  there are zero runner microVMs. Runner pods are **burstable**: a small
+  request (3 vCPU / 10 GiB) bin-packs eight runners onto the reference host,
+  while the limit (8 vCPU / 14 GiB) is each Kata VM's hotplug ceiling, so a
+  lone heavy job still gets 8 vCPUs. Keep the sum of memory *limits* under
+  host RAM — host OOM under Kata kills VMs unpredictably. (The original
+  guaranteed sizing, 4 x 8 vCPU / 24 GiB requests=limits, reserved the whole
+  host and queued every >4-job workflow fan-out for minutes.)
 - **`containerMode.type: ""`** - **none**. The default chart offers `dind`
   (Docker-in-Docker sidecar) or `kubernetes` mode for job-container isolation;
   both are unnecessary here because the *whole runner pod* is already isolated in
