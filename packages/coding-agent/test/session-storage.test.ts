@@ -97,6 +97,7 @@ describe("FileSessionStorage writer", () => {
 	});
 
 	afterEach(async () => {
+		vi.restoreAllMocks();
 		await fsp.rm(tempDir, { recursive: true, force: true });
 	});
 
@@ -119,6 +120,17 @@ describe("FileSessionStorage writer", () => {
 		await writer.close();
 
 		expect(fs.readFileSync(sessionPath, "utf8")).toBe("one\ntwo\n");
+	});
+
+	it("rejects close when draining a queued append fails", async () => {
+		const sessionPath = path.join(tempDir, "close-error.jsonl");
+		const writer = storage.openWriter(sessionPath, { flags: "w" });
+		void writer.append("one\n");
+		vi.spyOn(fs, "writeSync").mockImplementation(() => {
+			throw new Error("disk full");
+		});
+
+		await expect(writer.close()).rejects.toThrow("disk full");
 	});
 });
 
