@@ -29,7 +29,7 @@
 
 ### Fixed
 
-- Fixed workspace native addon loads preferring an installed leaf package over the workspace build.
+- Fixed workspace native addon loads preferring an installed leaf package over the workspace build ([#7059](https://github.com/can1357/oh-my-pi/pull/7059) by [@GratefulDave](https://github.com/GratefulDave)).
 
 ## [17.1.8] - 2026-07-28
 
