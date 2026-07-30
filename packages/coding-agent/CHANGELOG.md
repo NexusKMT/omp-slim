@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added an `app.live.toggle` keybinding (default `Ctrl+L`) that starts or stops live voice mode, same as `/live`.
+
+### Changed
+
+- Moved the display-reset default chord (`app.display.reset`) from `Ctrl+L` to `Alt+L` to make room for the live-mode toggle.
+
 ## [17.2.1] - 2026-07-30
 
 ### Added

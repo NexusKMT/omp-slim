@@ -456,7 +456,7 @@ export interface Terminal {
 	 * Issue a single OSC 11 background-color re-query, driving the appearance
 	 * callbacks through the same parse/dedup pipeline used at startup and on Mode
 	 * 2031 notifications. Bounded: one probe per call, no timers. Invoked on the
-	 * user's explicit display-reset gesture (Ctrl+L) so terminals that cannot
+	 * user's explicit display-reset gesture so terminals that cannot
 	 * deliver end-to-end Mode 2031 notifications still pick up a light/dark switch
 	 * without a restart. Optional so custom Terminals built against older pi-tui
 	 * versions keep working.

@@ -2122,7 +2122,7 @@ export class AgentSession {
 	 * On a user-interrupted (`Esc`) abort, copy the trailing thinking run into a
 	 * hidden `display: false` continuity message for the next turn WITHOUT
 	 * mutating the assistant message. The original thinking stays on the message
-	 * so live render, reload, and Ctrl+L rebuilds keep showing it; `convertToLlm`
+	 * so live render, reload, and display-reset rebuilds keep showing it; `convertToLlm`
 	 * strips the run from the provider request (incomplete/unsigned thinking is
 	 * rejected on resend) when this continuity message follows the assistant turn.
 	 */

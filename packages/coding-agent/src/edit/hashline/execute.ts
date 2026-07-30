@@ -16,12 +16,12 @@ import {
 	type Clipboard,
 	commitClipboard,
 	forkClipboard,
-	startClipboardBatch,
 	MismatchError as HashlineMismatchError,
 	Patch,
 	Patcher,
 	type PatchSectionResult,
 	type PreparedSection,
+	startClipboardBatch,
 } from "@oh-my-pi/hashline";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { FileDiagnosticsResult, WritethroughCallback, WritethroughDeferredHandle } from "../../lsp";
