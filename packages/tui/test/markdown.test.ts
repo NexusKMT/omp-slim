@@ -954,7 +954,7 @@ code block
 
 more text`,
 			];
-			const expectedLines = ["hello this is text", "", "```", "  code block", "```", "", "more text"];
+			const expectedLines = ["hello this is text", "", "```", "code block", "```", "", "more text"];
 
 			for (const text of cases) {
 				const markdown = new Markdown(text, 0, 0, defaultMarkdownTheme);
@@ -1011,7 +1011,7 @@ more text`,
 			});
 
 			expect(seenSources).toEqual([invalidSource]);
-			expect(plainLines).toEqual(["```mermaid", "  flowchart TD", "    A --", "```"]);
+			expect(plainLines).toEqual(["```mermaid", "flowchart TD", "  A --", "```"]);
 		});
 	});
 

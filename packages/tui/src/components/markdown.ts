@@ -1463,7 +1463,7 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 		paddingY: number,
 		theme: MarkdownTheme,
 		defaultTextStyle?: DefaultTextStyle,
-		codeBlockIndent: number = 2,
+		codeBlockIndent: number = 0,
 	) {
 		this.#text = normalizeOsc8Terminators(text);
 		this.#paddingX = paddingX;
