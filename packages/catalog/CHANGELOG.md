@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Routed Amazon Bedrock GPT-5.4, GPT-5.5, and GPT-5.6 models through the supported Bedrock Mantle Responses endpoint instead of the unsupported Converse API.
+
 ## [17.2.0] - 2026-07-30
 
 ### Added
