@@ -338,16 +338,23 @@ export async function launchHeadlessBrowser(opts: LaunchHeadlessOptions): Promis
 		userDataDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "omp-chrome-profile-"));
 		launchArgs.push(`--user-data-dir=${userDataDir}`);
 	}
-	const executablePath = await ensureChromiumExecutable();
-	const browser = await puppeteer.launch({
-		headless: opts.headless,
-		defaultViewport: opts.headless ? initialViewport : null,
-		executablePath,
-		args: launchArgs,
-		ignoreDefaultArgs: [...new Set([...stealthIgnoreDefaultArgs(executablePath), ...(opts.ignoreDefaultArgs ?? [])])],
-		protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
-	});
-	return { browser, userDataDir };
+	try {
+		const executablePath = await ensureChromiumExecutable();
+		const browser = await puppeteer.launch({
+			headless: opts.headless,
+			defaultViewport: opts.headless ? initialViewport : null,
+			executablePath,
+			args: launchArgs,
+			ignoreDefaultArgs: [
+				...new Set([...stealthIgnoreDefaultArgs(executablePath), ...(opts.ignoreDefaultArgs ?? [])]),
+			],
+			protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
+		});
+		return { browser, userDataDir };
+	} catch (error) {
+		if (userDataDir) await removeUserDataDir(userDataDir);
+		throw error;
+	}
 }
 
 /**
