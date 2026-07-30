@@ -12,6 +12,7 @@ import { getSecurityCoordinator } from "../../security/coordinator";
 import { importCodexSecurityBundle, importSarifFile } from "../../security/importers";
 import type { SecurityTargetRequest } from "../../security/preflight";
 import { SecurityStore, writeSecurityFileAtomic } from "../../security/store";
+import { shortenPath } from "../../tools/render-utils";
 import { parseCommandArgs } from "../../utils/command-args";
 import type { ParsedSlashCommand, SlashCommandResult, SlashCommandRuntime } from "../types";
 import { commandConsumed, errorMessage, parseSubcommand, usage } from "./parse";
@@ -73,7 +74,8 @@ function parsePlanOptions(rest: string): SecurityPlanCliOptions {
 		switch (token) {
 			case "--path":
 				includePaths.push(requireToken(tokens, ++index, token));
-				kind = "scoped_path";
+				// `--path` scopes the target; it never overrides an explicit --diff/--working-tree selection.
+				if (kind === "repository") kind = "scoped_path";
 				break;
 			case "--exclude":
 				excludePaths.push(requireToken(tokens, ++index, token));
@@ -202,7 +204,7 @@ async function exportResults(runtime: SlashCommandRuntime, rest: string): Promis
 	}
 	const absolute = path.resolve(runtime.cwd, outputPath);
 	await writeSecurityFileAtomic(absolute, content, { hardenParent: false });
-	await runtime.output(`Exported security scan ${scanId} to ${absolute}.`);
+	await runtime.output(`Exported security scan ${scanId} to ${shortenPath(absolute)}.`);
 }
 
 interface CloudCliOptions {

@@ -148,4 +148,13 @@ describe("security comparison", () => {
 		expect(report.resolved).toBe(1);
 		expect(report.introduced).toBe(1);
 	});
+
+	test("never marks findings resolved from an incomplete after-scan", () => {
+		const before = bundle("secscan_before", [finding("before-open", "fp-open", "rule.open", "src/open.ts", 1)]);
+		const after = bundle("secscan_after", []);
+		after.scan.status = "cancelled";
+		expect(() => compareSecurityLineage(before, after)).toThrow(
+			"requires a completed after-scan; secscan_after is cancelled",
+		);
+	});
 });

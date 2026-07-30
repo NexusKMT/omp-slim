@@ -7,7 +7,6 @@ import {
 	createSecurityScanId,
 	parseSecurityFinding,
 	parseSecurityScanBundle,
-	securitySha256,
 } from "../../src/security/contracts";
 
 const LOCATION = { path: "src/archive.ts", startLine: 10, endLine: 12, role: "sink" } as const;
@@ -121,7 +120,7 @@ describe("security contracts", () => {
 					displayName: "fixture",
 					includePaths: [],
 					excludePaths: [],
-					treeDigest: securitySha256("fixture"),
+					treeDigest: Bun.SHA256.hash("fixture", "hex"),
 				},
 				producer: { kind: "sarif-import", name: "FixtureScanner", version: "1.2.3" },
 				provenance: finding.provenance,

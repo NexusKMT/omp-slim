@@ -18,7 +18,6 @@ import {
 	createSecurityScanId,
 	encodeSecurityProjectKey,
 	parseSecurityScanBundle,
-	securitySha256,
 } from "../contracts";
 
 interface SarifRegion {
@@ -184,13 +183,14 @@ function semanticResultAnchor(
 	message: string,
 	locations: readonly SecurityLocation[],
 ): string {
-	return `sarif-result/v1:sha256:${securitySha256(
+	return `sarif-result/v1:sha256:${Bun.SHA256.hash(
 		canonicalSecurityJson({
 			ruleId,
 			category,
 			message,
 			locations,
 		}),
+		"hex",
 	)}`;
 }
 const canonicalValidationStatuses: Record<string, true> = {
@@ -331,7 +331,7 @@ export async function importSarif(input: unknown, options: SarifImportOptions): 
 				displayName: path.basename(canonicalRoot),
 				includePaths: [],
 				excludePaths: [],
-				treeDigest: securitySha256(JSON.stringify(input)),
+				treeDigest: Bun.SHA256.hash(JSON.stringify(input), "hex"),
 			},
 			producer,
 			provenance: scanProvenance,

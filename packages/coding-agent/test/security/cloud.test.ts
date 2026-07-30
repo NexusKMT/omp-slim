@@ -144,6 +144,8 @@ describe("Codex Security cloud client", () => {
 	test("imports cloud findings into the canonical store and SARIF", async () => {
 		const repositoryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "omp-cloud-security-repo-"));
 		const stateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "omp-cloud-security-state-"));
+		await $`git init --initial-branch=main`.cwd(repositoryRoot).quiet();
+		await $`git remote add origin https://github.com/example/repository.git`.cwd(repositoryRoot).quiet();
 		const store = await SecurityStore.open(repositoryRoot, { stateRoot });
 		const fetchMock: CodexSecurityCloudFetch = async input => {
 			const url = new URL(String(input));
@@ -246,6 +248,62 @@ describe("Codex Security cloud client", () => {
 			cloudScanId: "cloud-scan-a",
 		});
 		expect(JSON.stringify(bundle)).not.toContain("workspace-a");
+	});
+
+	test("drops finding details attributed to another cloud configuration", async () => {
+		const client = new CodexSecurityCloudClient({
+			authStorage: authStorage(),
+			account: ACCOUNT,
+			baseUrl: "https://example.test/backend-api/aardvark",
+			fetch: async input => {
+				const url = new URL(String(input));
+				if (url.pathname.endsWith("/scan-findings")) {
+					return json({ items: [{ hid: "finding-public" }] });
+				}
+				if (url.pathname.endsWith("/scan-findings/finding-public")) {
+					return json({ hid: "finding-public", configured_scan_id: "different-config" });
+				}
+				throw new Error(`Unexpected request: ${url}`);
+			},
+		});
+		const details = await client.listFindingDetails("https://github.com/example/repository", {
+			id: "config-public",
+			sourceId: "config-source",
+			repositoryId: "repo-a",
+			repositoryUrl: "https://github.com/example/repository",
+			environmentId: "env-a",
+		});
+		expect(details).toEqual([]);
+	});
+
+	test("refuses cloud imports when repository identity cannot be verified", async () => {
+		const repositoryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "omp-cloud-security-no-origin-repo-"));
+		const stateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "omp-cloud-security-no-origin-state-"));
+		const store = await SecurityStore.open(repositoryRoot, { stateRoot });
+		const client = new CodexSecurityCloudClient({
+			authStorage: authStorage(),
+			account: ACCOUNT,
+			baseUrl: "https://example.test/backend-api/aardvark",
+			fetch: async input => {
+				const url = new URL(String(input));
+				if (url.pathname.endsWith("/scan_configurations")) {
+					return json({ items: [configuration()], total_in_account: 1 });
+				}
+				if (url.pathname.endsWith("/scan_configurations/config-public/stats")) {
+					return json({
+						config_id: "config-source",
+						pending_commits: 0,
+						finished_commits: 1,
+						failed_commits: 0,
+					});
+				}
+				throw new Error(`Finding data should not be fetched without repository identity: ${url}`);
+			},
+		});
+
+		await expect(pullCodexSecurityCloudResults({ client, configurationId: "config-public", store })).rejects.toThrow(
+			"has no 'origin' remote",
+		);
 	});
 
 	test("refuses to import a cloud configuration for another repository", async () => {

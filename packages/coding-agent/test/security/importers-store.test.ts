@@ -42,6 +42,47 @@ describe("security importers and store", () => {
 		expect(sarif.scan.producer.kind).toBe("sarif-import");
 	});
 
+	test("rejects Codex bundle locations outside the selected repository", async () => {
+		const bundleRoot = path.join(temporaryRoot, "codex-outside");
+		await fs.mkdir(bundleRoot);
+		await Promise.all([
+			Bun.write(
+				path.join(bundleRoot, "scan-manifest.json"),
+				JSON.stringify({
+					documentType: "codex-security.scan-manifest",
+					schemaVersion: "1.0",
+					scan: { id: "scan-outside", producer: { name: "fixture" }, status: "completed" },
+				}),
+			),
+			Bun.write(
+				path.join(bundleRoot, "findings.json"),
+				JSON.stringify({
+					documentType: "codex-security.findings",
+					schemaVersion: "1.0",
+					scanId: "scan-outside",
+					findings: [
+						{
+							findingId: "finding-outside",
+							ruleId: "path.traversal",
+							locations: [{ path: "../outside.ts", startLine: 1 }],
+						},
+					],
+				}),
+			),
+			Bun.write(
+				path.join(bundleRoot, "coverage.json"),
+				JSON.stringify({
+					documentType: "codex-security.coverage",
+					schemaVersion: "1.0",
+					scanId: "scan-outside",
+				}),
+			),
+		]);
+		await expect(importCodexSecurityBundle(bundleRoot, { repositoryRoot })).rejects.toThrow(
+			"locations must be repository-relative",
+		);
+	});
+
 	test("resolves one canonical store for a nested repository cwd", async () => {
 		const nestedCwd = path.join(repositoryRoot, "packages", "app");
 		await fs.mkdir(nestedCwd, { recursive: true });

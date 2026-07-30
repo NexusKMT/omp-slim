@@ -20,7 +20,6 @@ import {
 	parseSecurityScan,
 	parseSecurityScanBundle,
 	parseSecurityScanPlan,
-	securitySha256,
 } from "./contracts";
 import { createPublicSecurityScan, redactPrivateSecurityMetadata } from "./provenance";
 import { exportSecurityBundleToSarif } from "./sarif";
@@ -426,6 +425,6 @@ export class SecurityStore {
 
 	async storeDigest(): Promise<string> {
 		const index = await this.#readIndex();
-		return securitySha256(JSON.stringify(index));
+		return Bun.SHA256.hash(JSON.stringify(index), "hex");
 	}
 }

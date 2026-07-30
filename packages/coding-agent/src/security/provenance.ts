@@ -1,5 +1,5 @@
 import type { SecurityAccountRef, SecurityProducer, SecurityProvenance, SecurityScan } from "./contracts";
-import { canonicalSecurityJson, securitySha256 } from "./contracts";
+import { canonicalSecurityJson } from "./contracts";
 
 export const CODEX_SECURITY_UPSTREAM = {
 	repository: "https://github.com/openai/codex-security",
@@ -20,7 +20,7 @@ export function createNativeSecurityProducer(): SecurityProducer {
 }
 
 export function createSecurityCredentialAffinity(account: SecurityAccountRef): string {
-	return `omp-security-credential/v1:sha256:${securitySha256(canonicalSecurityJson(account))}`;
+	return `omp-security-credential/v1:sha256:${Bun.SHA256.hash(canonicalSecurityJson(account), "hex")}`;
 }
 const PRIVATE_SECURITY_KEYS = new Set([
 	"account",
@@ -83,7 +83,7 @@ export function createNativeSecurityProvenance(options: {
 		credentialAffinity: createSecurityCredentialAffinity(options.account),
 	};
 	if (options.sessionId !== undefined) {
-		metadata.sessionAffinity = `omp-security-session/v1:sha256:${securitySha256(options.sessionId)}`;
+		metadata.sessionAffinity = `omp-security-session/v1:sha256:${Bun.SHA256.hash(options.sessionId, "hex")}`;
 	}
 	if (options.operationId !== undefined) metadata.operationId = options.operationId;
 	return {
@@ -95,11 +95,12 @@ export function createNativeSecurityProvenance(options: {
 }
 
 export function createSecurityWorkflowFingerprint(inputs: readonly string[]): string {
-	return `omp-security-workflow/v1:sha256:${securitySha256(
+	return `omp-security-workflow/v1:sha256:${Bun.SHA256.hash(
 		canonicalSecurityJson({
 			workflowVersion: OMP_SECURITY_WORKFLOW_VERSION,
 			upstream: CODEX_SECURITY_UPSTREAM,
 			inputs,
 		}),
+		"hex",
 	)}`;
 }

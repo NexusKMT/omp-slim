@@ -20,7 +20,6 @@ import {
 	createSecurityScanId,
 	encodeSecurityProjectKey,
 	parseSecurityScanBundle,
-	securitySha256,
 } from "../contracts";
 
 interface CodexManifest {
@@ -109,12 +108,25 @@ function stringArray(value: unknown): string[] {
 	return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+function importedLocationPath(value: string): string {
+	const normalized = value.replaceAll("\\", "/").replace(/^\.\//, "");
+	if (
+		!normalized ||
+		normalized.startsWith("/") ||
+		/^[a-zA-Z]:\//.test(normalized) ||
+		normalized.split("/").includes("..")
+	) {
+		throw new Error(`Codex Security bundle locations must be repository-relative: ${value}`);
+	}
+	return normalized;
+}
+
 function locationsForFinding(finding: CodexFinding): SecurityLocation[] {
 	const locations: SecurityLocation[] = [];
 	for (const location of finding.locations ?? []) {
 		if (typeof location.path !== "string" || typeof location.startLine !== "number") continue;
 		const normalized: SecurityLocation = {
-			path: location.path,
+			path: importedLocationPath(location.path),
 			startLine: location.startLine,
 		};
 		if (location.endLine !== undefined) normalized.endLine = location.endLine;
@@ -243,7 +255,7 @@ export async function importCodexSecurityBundle(
 				explanation: item.explanation || "",
 			};
 			if (typeof item.path === "string" && typeof item.startLine === "number") {
-				const location: SecurityLocation = { path: item.path, startLine: item.startLine };
+				const location: SecurityLocation = { path: importedLocationPath(item.path), startLine: item.startLine };
 				if (item.endLine !== undefined) location.endLine = item.endLine;
 				if (item.role !== undefined) location.role = item.role;
 				entry.location = location;
@@ -342,7 +354,7 @@ export async function importCodexSecurityBundle(
 		treeDigest:
 			typeof target.snapshotDigest === "string"
 				? target.snapshotDigest
-				: securitySha256(JSON.stringify({ manifest, findingsDocument, coverageDocument })),
+				: Bun.SHA256.hash(JSON.stringify({ manifest, findingsDocument, coverageDocument }), "hex"),
 	};
 	if (typeof target.revision === "string") canonicalTarget.revision = target.revision;
 	if (typeof target.baseRevision === "string") canonicalTarget.baseRevision = target.baseRevision;

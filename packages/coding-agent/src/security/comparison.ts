@@ -211,6 +211,13 @@ export function compareSecurityLineage(
 	before: SecurityScanBundle,
 	after: SecurityScanBundle,
 ): SecurityComparisonReport {
+	// An incomplete after-scan proves nothing about unmatched earlier findings;
+	// claiming them "resolved" against a cancelled/partial/failed run would be a lie.
+	if (after.scan.status !== "completed") {
+		throw new Error(
+			`Security lineage comparison requires a completed after-scan; ${after.scan.id} is ${after.scan.status}`,
+		);
+	}
 	const differential = compareSecurityProducers(before, after);
 	const beforeById = new Map(before.findings.map(finding => [finding.id, finding]));
 	const afterById = new Map(after.findings.map(finding => [finding.id, finding]));

@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { Model } from "@oh-my-pi/pi-ai";
-import { prompt } from "@oh-my-pi/pi-utils";
+import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { AsyncJobManager } from "../async/job-manager";
 import type { ModelRegistry } from "../config/model-registry";
 import type { Settings } from "../config/settings";
@@ -503,7 +503,13 @@ export class SecurityCoordinator {
 
 	async status(operationId: string): Promise<SecurityOperationSnapshot | null> {
 		await this.#ensureRecovered();
-		const record = this.#operations.get(operationId);
+		let record = this.#operations.get(operationId);
+		if (!record && !ACTIVE_SECURITY_OPERATIONS.has(operationId)) {
+			// The operation may have run under another session's coordinator; once it
+			// is terminal its bundle is on disk, so rescan before reporting unknown.
+			await this.#recoverInterruptedOperations();
+			record = this.#operations.get(operationId);
+		}
 		return record ? { ...record.snapshot } : null;
 	}
 
@@ -654,6 +660,12 @@ export class SecurityCoordinator {
 			await store.putBundle(partial);
 		} catch (error) {
 			if (publishedBundle) {
+				// The canonical bundle is already persisted by security_publish; a late
+				// failure (metrics/output-directory write) degrades, not invalidates it.
+				logger.warn("Security scan post-publication step failed", {
+					scanId: record.snapshot.scanId,
+					error: error instanceof Error ? error.message : String(error),
+				});
 				record.snapshot.findingCount = publishedBundle.findings.length;
 				this.#update(record, "completed");
 				return;

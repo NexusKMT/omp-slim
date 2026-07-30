@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { decodeJwt } from "@oh-my-pi/pi-ai/registry/oauth/openai-codex";
 import type { AuthStorage } from "../session/auth-storage";
 import * as git from "../utils/git";
 import { resolveExactSecurityOAuthAccess } from "./auth";
@@ -126,10 +126,6 @@ function positiveInteger(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isInteger(value) && value >= 1 ? value : undefined;
 }
 
-function sha256(value: string): string {
-	return createHash("sha256").update(value).digest("hex");
-}
-
 function normalizeConfiguration(value: unknown): CodexSecurityCloudConfiguration {
 	const raw = object(value);
 	const scanInput = object(raw.scan_input);
@@ -161,14 +157,8 @@ function normalizeConfiguration(value: unknown): CodexSecurityCloudConfiguration
 }
 
 function jwtSubject(accessToken: string): string {
-	const payload = accessToken.split(".")[1];
-	if (!payload) throw new Error("The selected ChatGPT credential is not a JWT");
-	let claims: JsonObject;
-	try {
-		claims = object(JSON.parse(Buffer.from(payload, "base64url").toString("utf8")));
-	} catch {
-		throw new Error("The selected ChatGPT credential has an invalid JWT payload");
-	}
+	const claims = decodeJwt(accessToken);
+	if (!claims) throw new Error("The selected ChatGPT credential is not a valid JWT");
 	return requiredString(claims.sub ?? claims.user_id, "authenticated user id");
 }
 
@@ -355,10 +345,11 @@ export class CodexSecurityCloudClient {
 			cursor = optionalString(page.next_cursor);
 		} while (cursor);
 		const configurationIds = new Set([configuration.id, configuration.sourceId].filter((id): id is string => !!id));
-		const selected = summaries.filter(item => {
+		const attributed = (item: JsonObject): boolean => {
 			const configuredScanId = optionalString(item.configured_scan_id);
 			return configuredScanId === undefined || configurationIds.has(configuredScanId);
-		});
+		};
+		const selected = summaries.filter(attributed);
 		const details: JsonObject[] = [];
 		for (let index = 0; index < selected.length; index += 8) {
 			const batch = selected.slice(index, index + 8);
@@ -371,7 +362,9 @@ export class CodexSecurityCloudClient {
 				)),
 			);
 		}
-		return details;
+		// The list request is scoped only by repository URL; a summary may omit its
+		// configuration id, so re-verify attribution on each detail response before import.
+		return details.filter(attributed);
 	}
 }
 
@@ -483,7 +476,9 @@ function normalizeFinding(
 ): SecurityFinding {
 	const commit = optionalObject(raw.commit_analysis);
 	const title = requiredString(commit.title ?? raw.title, "finding title");
-	const ruleId = optionalString(commit.rule_id) ?? `codex-security:${sha256(title.trim().toLowerCase()).slice(0, 16)}`;
+	const ruleId =
+		optionalString(commit.rule_id) ??
+		`codex-security:${Bun.SHA256.hash(title.trim().toLowerCase(), "hex").slice(0, 16)}`;
 	const category = optionalString(commit.category) ?? "codex-security";
 	const cloudId = requiredString(raw.hid ?? raw.id, "finding id");
 	const preliminary = locationsAndEvidence(commit, cloudId);
@@ -587,7 +582,11 @@ async function assertCloudRepositoryMatchesStore(
 	signal?: AbortSignal,
 ): Promise<void> {
 	const origin = await git.remote.url(store.repositoryRoot, "origin", signal);
-	if (!origin) return;
+	if (!origin) {
+		throw new Error(
+			"Codex Security cloud import requires a verifiable repository identity; this project has no 'origin' remote",
+		);
+	}
 	if (repositoryIdentity(origin) !== repositoryIdentity(configuration.repositoryUrl)) {
 		throw new Error("Codex Security cloud configuration does not match this project's origin remote");
 	}
@@ -643,7 +642,7 @@ export async function pullCodexSecurityCloudResults(
 				displayName: configuration.repositoryUrl,
 				includePaths: [],
 				excludePaths: [],
-				treeDigest: sha256(`${configuration.repositoryUrl}\0${revision ?? "unknown"}`),
+				treeDigest: Bun.SHA256.hash(`${configuration.repositoryUrl}\0${revision ?? "unknown"}`, "hex"),
 			},
 			producer,
 			provenance: {
