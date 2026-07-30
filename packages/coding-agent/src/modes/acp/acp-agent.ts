@@ -450,7 +450,7 @@ export function createAcpExtensionUiContext(
 				getSessionId(),
 				"editor",
 				title,
-				{ type: "string", ...(prefill?.trim() ? { default: prefill } : {}) },
+				{ type: "string", ...(prefill ? { default: prefill } : {}) },
 				dialogOptions,
 			);
 			return typeof value === "string" ? value : undefined;

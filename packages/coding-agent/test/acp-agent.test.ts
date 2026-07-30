@@ -2469,18 +2469,31 @@ describe("ACP agent", () => {
 			});
 		});
 
-		it("omits default on editor when the prefill is empty or whitespace-only", async () => {
+		it("omits default on editor only when the prefill is empty, but preserves whitespace-only prefill", async () => {
 			const { connection, calls } = createElicitConnection(async () => ({
 				action: "accept",
 				content: { value: "text" },
 			}));
 			const ctx = createAcpExtensionUiContext(connection, () => "session-editor-empty", FORM_CAPABILITIES);
 
+			await ctx.editor("Title", "");
+
+			const emptyRequest = calls[0]!;
+			if (!isFormElicitation(emptyRequest)) throw new Error("expected form-mode elicitation");
+			expect(emptyRequest.requestedSchema.properties?.value).toEqual({ type: "string" });
+
+			// Unlike `input`'s placeholder, `editor` prefill is the document being
+			// edited: whitespace/blank lines are meaningful content, not absence,
+			// so they must round-trip verbatim (matching the interactive/RPC
+			// implementations, which set the editor's text to any truthy prefill).
 			await ctx.editor("Title", "   ");
 
-			const request = calls[0]!;
-			if (!isFormElicitation(request)) throw new Error("expected form-mode elicitation");
-			expect(request.requestedSchema.properties?.value).toEqual({ type: "string" });
+			const whitespaceRequest = calls[1]!;
+			if (!isFormElicitation(whitespaceRequest)) throw new Error("expected form-mode elicitation");
+			expect(whitespaceRequest.requestedSchema.properties?.value).toEqual({
+				type: "string",
+				default: "   ",
+			});
 		});
 
 		it("returns undefined / false for decline and cancel actions", async () => {
