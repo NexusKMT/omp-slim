@@ -720,8 +720,11 @@ export function initLoaderContext(overrides = {}) {
 			env: process.env,
 			importMetaUrl: import.meta.url,
 		});
+	const normalizedNativeDir = nativeDir.toLowerCase();
 	const isWorkspaceLoad =
-		!isCompiledBinary && !nativeDir.includes("\\node_modules\\") && !nativeDir.includes("/node_modules/");
+		!isCompiledBinary &&
+		!normalizedNativeDir.includes("\\node_modules\\") &&
+		!normalizedNativeDir.includes("/node_modules/");
 	const leafPackageDir =
 		isCompiledBinary || isWorkspaceLoad
 			? null

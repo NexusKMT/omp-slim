@@ -130,6 +130,11 @@ describe("windows native addon staging", () => {
 				nativeDir: "/tmp/node_modules/@oh-my-pi/pi-natives/native",
 				leafPackageDir,
 			});
+			const installedWithUppercaseNodeModules = initLoaderContext({
+				isCompiledBinary: false,
+				nativeDir: "/tmp/NODE_MODULES/@oh-my-pi/pi-natives/native",
+				leafPackageDir,
+			});
 			const leafCandidate = path.join(leafPackageDir, workspace.addonFilenames[0]);
 
 			expect(workspace.isWorkspaceLoad).toBe(true);
@@ -138,6 +143,9 @@ describe("windows native addon staging", () => {
 			expect(installed.isWorkspaceLoad).toBe(false);
 			expect(installed.leafPackageDir).toBe(leafPackageDir);
 			expect(installed.candidates).toContain(leafCandidate);
+			expect(installedWithUppercaseNodeModules.isWorkspaceLoad).toBe(false);
+			expect(installedWithUppercaseNodeModules.leafPackageDir).toBe(leafPackageDir);
+			expect(installedWithUppercaseNodeModules.candidates).toContain(leafCandidate);
 		} finally {
 			if (previousVariantCache === undefined) delete process.env[variantCacheKey];
 			else process.env[variantCacheKey] = previousVariantCache;
