@@ -92,7 +92,9 @@ describe("InteractiveMode tiny-title prewarm", () => {
 		// microtasks that can resolve without yielding to the immediate
 		// queue, so the prewarm may not have fired yet when init() settles.
 		// Flush one immediate tick before asserting.
-		await new Promise<void>(resolve => setImmediate(resolve));
+		const immediateFlushed = Promise.withResolvers<void>();
+		setImmediate(immediateFlushed.resolve);
+		await immediateFlushed.promise;
 
 		expect(prewarm).toHaveBeenCalledWith("lfm2-350m");
 	});
