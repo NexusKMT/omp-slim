@@ -20,6 +20,10 @@
 - Fixed `omp install` failing extension validation for pi extensions that import `createEditTool` or `createWriteTool` (e.g. gentle-pi) — the legacy `@oh-my-pi/pi-coding-agent` shim exported the read/bash/grep/find/ls tool factories but omitted the edit and write ones, so a named import threw Bun's static "Export named X not found" error. Added `createEditTool`/`createEditToolDefinition` and `createWriteTool`/`createWriteToolDefinition` to match the upstream pi surface ([#7094](https://github.com/can1357/oh-my-pi/issues/7094)).
 - Fixed Python eval's loopback tool bridge being routed through macOS system HTTP proxies, which caused `parallel()` tool reads to fail with `ConnectionRefusedError` after a local proxy stopped.
 
+### Fixed
+
+- Fixed copied fenced-code body rows in assistant messages retaining component and container margins ([#7055](https://github.com/can1357/oh-my-pi/pull/7055) by [@GratefulDave](https://github.com/GratefulDave)).
+
 ## [17.2.0] - 2026-07-30
 
 ### Breaking Changes

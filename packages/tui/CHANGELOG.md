@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed terminal copies of literal fenced-code body rows retaining component, list, or blockquote margins in coding-agent assistant messages ([#7055](https://github.com/can1357/oh-my-pi/pull/7055) by [@GratefulDave](https://github.com/GratefulDave)).
+
 ## [17.2.0] - 2026-07-30
 
 ### Added
@@ -15,7 +19,6 @@
 - Fixed hash-prefixed UUIDs in prose being misclassified as 8-digit CSS colors and receiving spurious swatches.
 - Fixed unbounded memory growth and potential host freezes when a PTY consumer stalls by capping the pending stdout backlog and treating undrained consumers as a disconnect.
 
-- Fixed terminal selection copying leading whitespace into fenced-code rows in coding-agent assistant messages, which could prevent pasted heredoc terminators from closing.
 
 ## [17.1.8] - 2026-07-28
 
