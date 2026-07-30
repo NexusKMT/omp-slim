@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed LSP write batching replaying stale whole-file snapshots over newer external changes made before the batch flushed.
+
 ## [17.1.8] - 2026-07-28
 
 ### Breaking Changes

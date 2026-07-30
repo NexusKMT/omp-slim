@@ -49,6 +49,52 @@ describe("createLspWritethrough batching", () => {
 		expect(await Bun.file(fileB).text()).toBe("const b = 2;\n");
 	});
 
+	it("preserves a newer external change made before the batch flush", async () => {
+		vi.spyOn(lspConfig, "loadConfig").mockReturnValue({ servers: {}, idleTimeoutMs: undefined });
+		vi.spyOn(lspConfig, "getServersForFile").mockReturnValue([]);
+		const writethrough = createLspWritethrough(tempDir.path(), { enableFormat: true, enableDiagnostics: true });
+
+		const fileA = path.join(tempDir.path(), "a.ts");
+		const fileB = path.join(tempDir.path(), "b.ts");
+		const batchId = `external-change-${Date.now()}`;
+		await writethrough(fileA, "const value = 'tool';\n", undefined, undefined, {
+			id: batchId,
+			flush: false,
+		});
+
+		await Bun.write(fileA, "const value = 'external';\n");
+		await writethrough(fileB, "const other = true;\n", undefined, undefined, {
+			id: batchId,
+			flush: true,
+		});
+
+		expect(await Bun.file(fileA).text()).toBe("const value = 'external';\n");
+		expect(await Bun.file(fileB).text()).toBe("const other = true;\n");
+	});
+
+	it("does not recreate a file deleted before the batch flush", async () => {
+		vi.spyOn(lspConfig, "loadConfig").mockReturnValue({ servers: {}, idleTimeoutMs: undefined });
+		vi.spyOn(lspConfig, "getServersForFile").mockReturnValue([]);
+		const writethrough = createLspWritethrough(tempDir.path(), { enableFormat: true, enableDiagnostics: true });
+
+		const fileA = path.join(tempDir.path(), "a.ts");
+		const fileB = path.join(tempDir.path(), "b.ts");
+		const batchId = `external-delete-${Date.now()}`;
+		await writethrough(fileA, "const removed = true;\n", undefined, undefined, {
+			id: batchId,
+			flush: false,
+		});
+
+		await Bun.file(fileA).unlink();
+		await writethrough(fileB, "const survivor = true;\n", undefined, undefined, {
+			id: batchId,
+			flush: true,
+		});
+
+		expect(await Bun.file(fileA).exists()).toBe(false);
+		expect(await Bun.file(fileB).text()).toBe("const survivor = true;\n");
+	});
+
 	it("runs LSP immediately when no batch is provided", async () => {
 		const loadConfigSpy = vi
 			.spyOn(lspConfig, "loadConfig")
