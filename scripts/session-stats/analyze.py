@@ -570,7 +570,9 @@ _ANCHOR_BARE = re.compile(r"^[a-zA-Z]?[0-9]+[a-z]{2}$")
 
 
 _HASHLINE_OP = re.compile(
-    r"^(SWAP\.BLK|SWAP|XCHG\.BLK|XCHG|DEL\.BLK|DEL|INS\.PRE|INS\.POST|INS\.HEAD|INS\.TAIL|"
+    r"^(SWAP\.BLK|SWAP|XCHG\.BLK|XCHG|DEL\.BLK|DEL|CUT\.BLK|CUT|"
+    r"PASTE\.BLK\.POST|PASTE\.PRE|PASTE\.POST|PASTE\.HEAD|PASTE\.TAIL|"
+    r"INS\.BLK\.POST|INS\.PRE|INS\.POST|INS\.HEAD|INS\.TAIL|REM|MV|"
     r"replace_block|replace block|replace|delete_block|delete block|delete|"
     r"insert_after_block|insert after block|insert before|insert after|insert head|insert tail)\b",
     re.I,
