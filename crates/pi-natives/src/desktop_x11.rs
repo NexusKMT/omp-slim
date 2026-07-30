@@ -477,7 +477,7 @@ mod x11 {
 	}
 
 	/// Actionable message for a root capture that failed because the X11 root is
-	/// not a readable drawable — the signature of a rootless XWayland session
+	/// not a readable drawable — the signature of a rootless `XWayland` session
 	/// (the GNOME/KDE/sway default), whose compositor keeps no X11 root pixmap.
 	/// Pure Wayland capture (portal/PipeWire) is not implemented, so such a
 	/// session has no usable capture path at all.
@@ -489,7 +489,7 @@ mod x11 {
 
 	/// Translate a failed root `GetImage` reply into a capture error. A
 	/// `Match`/`Drawable` protocol error means the root has no backing pixmap
-	/// (rootless XWayland) and gets [`ROOTLESS_XWAYLAND_CAPTURE`]; every other
+	/// (rootless `XWayland`) and gets [`ROOTLESS_XWAYLAND_CAPTURE`]; every other
 	/// failure is surfaced verbatim so genuine capture faults stay visible.
 	fn root_capture_error(error: &ReplyError) -> X11Error {
 		if let ReplyError::X11Error(x11) = error
