@@ -1902,7 +1902,6 @@ class RpcClient:
                     self._normalize_host_tool_event(payload)
                 try:
                     notification = parse_notification(payload)
-                    listener_notification = parse_notification(payload)
                 except (TypeError, ValueError) as exc:
                     # Protocol drift must not terminate the reader. This also
                     # demotes parser defects to UnknownNotification; consumers
@@ -1910,14 +1909,11 @@ class RpcClient:
                     notification = UnknownNotification(
                         _clone_json_object(payload), parse_error=str(exc)
                     )
-                    listener_notification = UnknownNotification(
-                        _clone_json_object(payload), parse_error=str(exc)
-                    )
                 self._dispatch_listeners(
                     "notification",
-                    listener_notification.type,
+                    notification.type,
                     self._notification_listeners,
-                    listener_notification,
+                    notification,
                 )
 
                 if isinstance(notification, ReadyEvent):
@@ -1926,9 +1922,9 @@ class RpcClient:
                     self._ready.set()
                     self._dispatch_listeners(
                         "ready",
-                        listener_notification.type,
+                        notification.type,
                         self._ready_listeners,
-                        listener_notification,
+                        notification,
                     )
                     continue
 
@@ -1936,45 +1932,45 @@ class RpcClient:
                     self._ui_requests.put(notification)
                     self._dispatch_listeners(
                         "ui_request",
-                        listener_notification.type,
+                        notification.type,
                         self._ui_request_listeners,
-                        cast(ExtensionUiRequest, listener_notification),
+                        notification,
                     )
                     continue
 
                 if isinstance(notification, ExtensionError):
                     self._dispatch_listeners(
                         "extension_error",
-                        listener_notification.type,
+                        notification.type,
                         self._extension_error_listeners,
-                        cast(ExtensionError, listener_notification),
+                        notification,
                     )
                     continue
 
                 if isinstance(notification, UnknownNotification):
                     self._dispatch_listeners(
                         "unknown_notification",
-                        listener_notification.type,
+                        notification.type,
                         self._unknown_notification_listeners,
-                        cast(UnknownNotification, listener_notification),
+                        notification,
                     )
                     continue
 
-                listener_event = cast(RpcAgentEvent, listener_notification)
+                event = cast(RpcAgentEvent, notification)
                 self._append_event(payload)
                 if (
-                    isinstance(listener_event, AgentEndEvent)
-                    and listener_event.is_terminal is not False
+                    isinstance(event, AgentEndEvent)
+                    and event.is_terminal is not False
                 ):
                     self._mark_agent_run_completed()
                 self._dispatch_listeners(
-                    "event", listener_event.type, self._event_listeners, listener_event
+                    "event", event.type, self._event_listeners, event
                 )
                 self._dispatch_listeners(
                     "typed_event",
-                    listener_event.type,
-                    self._typed_event_listeners.get(listener_event.type, []),
-                    listener_event,
+                    event.type,
+                    self._typed_event_listeners.get(event.type, []),
+                    event,
                 )
         except Exception as exc:
             self._mark_closed(exc)
