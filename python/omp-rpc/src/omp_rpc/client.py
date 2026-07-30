@@ -1904,6 +1904,9 @@ class RpcClient:
                     notification = parse_notification(payload)
                     listener_notification = parse_notification(payload)
                 except (TypeError, ValueError) as exc:
+                    # Protocol drift must not terminate the reader. This also
+                    # demotes parser defects to UnknownNotification; consumers
+                    # that need visibility should register an unknown listener.
                     notification = UnknownNotification(
                         _clone_json_object(payload), parse_error=str(exc)
                     )
