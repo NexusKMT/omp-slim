@@ -46,6 +46,9 @@
 ### Fixed
 
 - Fixed DuckDuckGo web search silently ignoring `after:`/`before:` date bounds: DuckDuckGo does not parse date operators, so the provider relies on the shared post-filter to enforce them, but `parseHtmlResults()` discarded the ISO timestamps DuckDuckGo now emits in each result row — every source was treated as undated and passed the filter. The parser now extracts those timestamps into `publishedDate`/`ageSeconds` so date bounds are honored ([#7115](https://github.com/can1357/oh-my-pi/issues/7115)).
+### Changed
+
+- Moved subagent model-registry refresh and session-file opening off the launch critical path. Registry refresh now runs in the background while model resolution uses the registry's static/provider lookup, and `SessionManager.open` starts before prewalk/output-schema/session-option assembly so session creation waits only at its actual input boundary.
 
 ## [17.2.1] - 2026-07-30
 

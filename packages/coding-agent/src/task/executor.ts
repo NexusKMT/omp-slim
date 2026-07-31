@@ -2604,7 +2604,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			}
 			checkAbort();
 			if (!registryFromParent) {
-				await awaitAbortable(modelRegistry.refresh());
+				modelRegistry.refreshInBackground();
 			} else {
 				logger.debug("runSubagent: reusing parent modelRegistry; skipping refresh");
 			}
@@ -2719,19 +2719,12 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			}
 
 			const effectiveCwd = worktree ?? cwd;
-			const sessionManager = sessionFile
-				? await awaitAbortable(
-						SessionManager.open(sessionFile, undefined, undefined, {
-							initialCwd: effectiveCwd,
-							suppressBreadcrumb: true,
-						}),
-					)
-				: SessionManager.inMemory(effectiveCwd);
-			if (options.parentArtifactManager) {
-				sessionManager.adoptArtifactManager(options.parentArtifactManager);
-			}
-			sessionOpenedAt = performance.now();
-
+			const sessionManagerPromise = sessionFile
+				? SessionManager.open(sessionFile, undefined, undefined, {
+						initialCwd: effectiveCwd,
+						suppressBreadcrumb: true,
+					})
+				: Promise.resolve(SessionManager.inMemory(effectiveCwd));
 			const restrictToolNames = options.restrictToolNames === true;
 			const enableMCP = !restrictToolNames && (options.enableMCP ?? true);
 			const mcpManager = enableMCP ? options.mcpManager : undefined;
@@ -2850,6 +2843,12 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					firstChatDispatchAt ??= performance.now();
 				},
 			});
+
+			const sessionManager = await awaitAbortable(sessionManagerPromise);
+			if (options.parentArtifactManager) {
+				sessionManager.adoptArtifactManager(options.parentArtifactManager);
+			}
+			sessionOpenedAt = performance.now();
 
 			const sessionPromise = createAgentSession(buildSubagentSessionOptions(sessionManager, null));
 			let session: AgentSession;
