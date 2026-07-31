@@ -20,6 +20,10 @@ const FIXTURE_MODEL_IDS = [
 	"gemini-4-pro-exp",
 	// Reference-less ids from text-only families.
 	"composer-3",
+	// Reference-less K3 effort variants omit Cursor thinkingDetails.
+	"kimi-k3-high",
+	"kimi-k3-low",
+	"kimi-k3-max",
 	"grok-code-fast-2",
 	// Bundled-reference ids: the reference stays authoritative.
 	"claude-4.5-opus-high",
@@ -79,6 +83,13 @@ describe("cursor discovery input modalities (issue #4726)", () => {
 		const byId = await discover();
 		expect(byId.get("composer-3")?.input).toEqual(["text"]);
 		expect(byId.get("grok-code-fast-2")?.input).toEqual(["text"]);
+	});
+
+	it("recognizes reference-less Kimi K3 effort variants as reasoning models", async () => {
+		const byId = await discover();
+		expect(byId.get("kimi-k3-high")?.reasoning).toBe(true);
+		expect(byId.get("kimi-k3-low")?.reasoning).toBe(true);
+		expect(byId.get("kimi-k3-max")?.reasoning).toBe(true);
 	});
 
 	it("keeps bundled references authoritative for input modalities", async () => {

@@ -1,6 +1,7 @@
 import * as http2 from "node:http2";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { type } from "arktype";
+import { isKimiK3ModelId } from "../identity";
 import { getBundledModels } from "../models";
 import { toModelSpec } from "../provider-models/bundled-references";
 import type { Model, ModelSpec } from "../types";
@@ -282,7 +283,7 @@ function normalizeCursorModel(
 
 	const name = pickModelDisplayName(details, id);
 	const reference = references.get(id);
-	const reasoning = Boolean(details.thinkingDetails) || reference?.reasoning === true;
+	const reasoning = isKimiK3ModelId(id) || Boolean(details.thinkingDetails) || reference?.reasoning === true;
 
 	if (reference) {
 		return {
