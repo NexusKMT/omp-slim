@@ -203,6 +203,29 @@ describe("Synthetic provider discovery", () => {
 		expect(built.thinking).toBeUndefined();
 	});
 
+	test("treats a single advertised tier as reasoning, unlike the none-only off-switch", async () => {
+		// `high` alone is a real wire-accepted effort, not an off-switch: the
+		// model must stay reasoning so `reasoning_effort: "high"` reaches it.
+		const { fetch } = syntheticModelsFetch([
+			{
+				id: "hf:example/single-tier",
+				object: "model",
+				name: "example/single-tier",
+				reasoning_parameters: { efforts: ["high"] },
+				input_modalities: ["text"],
+				context_length: 131072,
+				max_output_length: 32768,
+				supported_features: ["tools", "reasoning"],
+			},
+		]);
+		const models = await syntheticModelManagerOptions({ apiKey: "syn-test-key", fetch }).fetchDynamicModels?.();
+
+		const single = models?.find(model => model.id === "hf:example/single-tier");
+		expect(single?.reasoning).toBe(true);
+		expect(single?.thinking).toEqual({ mode: "effort", efforts: [Effort.High] });
+		expect(buildModel(single!).thinking).toEqual({ mode: "effort", efforts: [Effort.High] });
+	});
+
 	test("treats an explicitly empty supported_features list as authoritative no-tools", async () => {
 		// A present-but-empty array is the route advertising zero features, not a
 		// missing field: the model must come out tool-less so the request layer

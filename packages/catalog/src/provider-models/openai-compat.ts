@@ -3222,13 +3222,16 @@ export function syntheticModelManagerOptions(
 						// An advertised effort vocabulary is authoritative over the bundled
 						// reference: when the wire names tiers (even only `none`), the
 						// reference's reasoning flag must not re-add a dial the route
-						// doesn't expose. A route whose only wire surface is `none` is not
-						// a reasoning model from the user's side — reporting
-						// `reasoning: true` with a minimal-only ladder would light up the
-						// effort dial for a dial with one stop. Only when the wire is
-						// silent on reasoning does the reference get a vote.
+						// doesn't expose. A route with at least one named tier reasons —
+						// even a single tier is a real effort the wire accepts. Only a
+						// vocabulary of `none`/unrecognized values alone is the pure
+						// off-switch: reporting `reasoning: true` there would light up the
+						// effort dial for a dial with one stop. When the wire is silent on
+						// reasoning entirely, the reference gets a vote.
+						const namedTierCount =
+							(thinking?.efforts.length ?? 0) - (wireEfforts.includes(SYNTHETIC_WIRE_EFFORT_NONE) ? 1 : 0);
 						const reasoning =
-							wireReasoning && (thinking?.efforts.length ?? 0) > 1
+							wireReasoning && namedTierCount > 0
 								? true
 								: wireEfforts.length > 0
 									? false
