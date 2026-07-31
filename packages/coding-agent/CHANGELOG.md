@@ -68,6 +68,9 @@
 ### Fixed
 
 - Fixed `ctx.ui.editor()` in ACP mode always resolving to `undefined`: it now routes through the same elicitation bridge as `select`/`confirm`/`input`, so `/review`'s custom-instructions prompt and the `ask` tool's custom-input path reach the ACP client instead of silently no-opping.
+### Fixed
+
+- Fixed `omp commit` failing to resolve extension-provided models in both the agentic and legacy pipelines ([#7099](https://github.com/can1357/oh-my-pi/issues/7099)).
 
 ## [17.2.1] - 2026-07-30
 
