@@ -409,8 +409,7 @@ export class InputController {
 			// path (#5352). The appearance callback re-evaluates the auto theme; the
 			// repaint below then renders the resolved palette. Bounded to one OSC 11
 			// probe per gesture — no timers, no periodic polling.
-			this.ctx.ui.terminal.refreshAppearance?.();
-			this.ctx.ui.resetDisplay();
+			this.ctx.resetDisplayAfterAppearanceRefresh();
 		};
 		this.ctx.editor.onExit = () => this.handleCtrlD();
 		this.ctx.editor.setActionKeys("app.suspend", this.ctx.keybindings.getKeys("app.suspend"));
