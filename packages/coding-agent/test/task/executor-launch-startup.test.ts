@@ -75,7 +75,7 @@ it("overlaps registry refresh with session-file opening and session setup", asyn
 			extensionsResult: {},
 			setToolUIContext: () => {},
 			eventBus: new EventBus(),
-		} as CreateAgentSessionResult;
+		} as unknown as CreateAgentSessionResult;
 	});
 
 	const run = runSubprocess({
