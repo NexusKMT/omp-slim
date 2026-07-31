@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed local Bazel addon builds on NixOS by exposing system CMake tools to sandboxed build scripts and forcing bundled Opus into the library directory expected by `audiopus_sys`.
+
 ## [17.2.1] - 2026-07-30
 
 ### Fixed
