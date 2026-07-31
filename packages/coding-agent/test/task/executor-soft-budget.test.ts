@@ -63,7 +63,6 @@ function createMockSession(
 	};
 
 	const session: Partial<AgentSession> = {
-		setIrcWakeTurnObserver: () => {},
 		state: { messages: [] } as never,
 		agent: { state: { systemPrompt: ["test"] } } as never,
 		model: { api: "anthropic-messages" } as never,

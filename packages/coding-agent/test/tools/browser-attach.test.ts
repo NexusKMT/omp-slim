@@ -5,9 +5,9 @@ import {
 } from "@oh-my-pi/pi-coding-agent/tools/browser/attach";
 import {
 	acquireBrowser,
+	type BrowserHandle,
 	normalizeConnectedCdpUrl,
 	releaseBrowser,
-	type BrowserHandle,
 } from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
 import { acquireTab, releaseTab } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import type { Browser, Page, Target } from "puppeteer-core";

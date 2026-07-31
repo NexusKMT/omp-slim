@@ -729,7 +729,6 @@ export async function preparePageForScreenshot(
 	}
 }
 
-
 /** Summarize still-running helpers (oldest first) so a cell timeout names what stalled. */
 export function describeInflight(inflight: Map<number, InflightOp>): string {
 	const now = Date.now();

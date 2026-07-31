@@ -163,10 +163,7 @@ async function enrichPages(pages: Page[]): Promise<Array<{ page: Page; url: stri
 	);
 }
 
-async function pickPageFromList(
-	pages: Page[],
-	options: { matcher?: string; preferVisible?: boolean },
-): Promise<Page> {
+async function pickPageFromList(pages: Page[], options: { matcher?: string; preferVisible?: boolean }): Promise<Page> {
 	const enriched = await enrichPages(pages);
 	if (options.matcher) {
 		const needle = options.matcher.toLowerCase();
