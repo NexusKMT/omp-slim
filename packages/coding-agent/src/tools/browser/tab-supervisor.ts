@@ -139,6 +139,18 @@ const GRACE_MS = 750;
 const killedTabs = new Map<string, string>();
 const DEFAULT_TAB_CLOSE_TIMEOUT_MS = 5_000;
 class RecoverableWorkerError extends ToolError {}
+const REPORTED_INIT_FAILURE = Symbol("reported-init-failure");
+
+type ReportedInitFailure = Error & { [REPORTED_INIT_FAILURE]?: true };
+
+function markReportedInitFailure(error: Error): Error {
+	(error as ReportedInitFailure)[REPORTED_INIT_FAILURE] = true;
+	return error;
+}
+
+function isReportedInitFailure(error: unknown): boolean {
+	return error instanceof Error && (error as ReportedInitFailure)[REPORTED_INIT_FAILURE] === true;
+}
 
 async function waitForTabCleanup<T>(
 	tab: TabSession,
@@ -265,7 +277,7 @@ async function acquireTabImpl(
 		// after `spawnTabWorker`'s synchronous try/catch has already returned. Fall back to
 		// the inline worker here so module-resolution failures don't poison every tab open.
 		await worker.terminate().catch(() => undefined);
-		if (worker.mode === "inline") {
+		if (worker.mode === "inline" || isReportedInitFailure(error)) {
 			if (tempHold || browser.refCount === 0) await releaseBrowser(browser, { kill: false });
 			throw error;
 		}
@@ -1014,7 +1026,7 @@ async function initializeTabWorker(
 	const { promise, resolve, reject } = Promise.withResolvers<ReadyInfo>();
 	const unlisten = worker.onMessage(msg => {
 		if (msg.type === "ready") resolve(msg.info);
-		else if (msg.type === "init-failed") reject(errorFromPayload(msg.error));
+		else if (msg.type === "init-failed") reject(markReportedInitFailure(errorFromPayload(msg.error)));
 		else if (msg.type === "log") logWorkerMessage(msg);
 	});
 	const unlistenError = worker.onError(error => {
