@@ -54,4 +54,17 @@ describe("shipped dequeue defaults", () => {
 		expect(keys).toContain("alt+up");
 		expect(keys).toContain("shift+up");
 	});
+	it("routes the shipped shift+up default through DEFAULT_ACTION_KEYS to the dequeue handler", () => {
+		// F12: the registry test above does not cover DEFAULT_ACTION_KEYS, the second
+		// defaults table that custom-editor.ts seeds its match set from. Drive a real
+		// editor without calling setActionKeys, so the shipped entry is the only thing
+		// that can make the shift+up wire form (CSI 1;2A) reach onDequeue.
+		const editor = new CustomEditor(getEditorTheme());
+		const onDequeue = vi.fn();
+
+		editor.onDequeue = onDequeue;
+		editor.handleInput("\x1b[1;2A");
+
+		expect(onDequeue).toHaveBeenCalledTimes(1);
+	});
 });
