@@ -2604,12 +2604,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			}
 			checkAbort();
 			if (!registryFromParent) {
-				void modelRegistry.refresh().catch(err => {
-					logger.warn("Subagent model registry refresh failed", {
-						id,
-						error: err instanceof Error ? err.message : String(err),
-					});
-				});
+				modelRegistry.refreshInBackground();
 			} else {
 				logger.debug("runSubagent: reusing parent modelRegistry; skipping refresh");
 			}
