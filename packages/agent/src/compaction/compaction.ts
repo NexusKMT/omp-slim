@@ -221,12 +221,15 @@ export function shouldUseProviderNativeCompaction(
 
 /**
  * Calculate total context tokens from usage.
- * Uses the native totalTokens field when available, falls back to computing from components.
- * Provider-side orchestration tokens are billable but never replay into the
- * conversation prefix, so they are excluded from context sizing to keep
- * auto-compaction and context-promotion thresholds honest.
+ * Prefers an explicit provider-reported context occupancy when available.
+ * Otherwise uses totalTokens and falls back to computing from billable
+ * components. Provider-side orchestration tokens are billable but never replay
+ * into the conversation prefix, so they are excluded from context sizing.
  */
 export function calculateContextTokens(usage: Usage): number {
+	if (usage.contextTokens !== undefined) {
+		return Math.max(0, usage.contextTokens);
+	}
 	const orchestration = usage.orchestration;
 	const orchestrationTotal = orchestration
 		? (orchestration.input ?? 0) + (orchestration.output ?? 0) + (orchestration.cacheRead ?? 0)
@@ -236,11 +239,18 @@ export function calculateContextTokens(usage: Usage): number {
 }
 
 export function calculatePromptTokens(usage: Usage): number {
+	if (usage.contextTokens !== undefined) {
+		return Math.max(0, usage.contextTokens);
+	}
 	const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
 	if (promptTokens > 0) {
 		return promptTokens;
 	}
 	return calculateContextTokens(usage);
+}
+
+export function hasContextTokenUsage(usage: Usage): boolean {
+	return (usage.contextTokens ?? 0) > 0 || usage.input + usage.cacheRead + usage.cacheWrite > 0;
 }
 
 /**
