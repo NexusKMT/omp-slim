@@ -184,7 +184,10 @@ export interface AgentSessionConfig {
 	/** Current session message-to-LLM conversion pipeline. */
 	convertToLlm?: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	/** System prompt builder that can consider tool availability. */
-	rebuildSystemPrompt?: (toolNames: string[], tools: Map<string, AgentTool>) => Promise<{ systemPrompt: string[] }>;
+	rebuildSystemPrompt?: (
+		toolNames: string[],
+		tools: Map<string, AgentTool>,
+	) => Promise<{ systemPrompt: string[]; xdevCatalogNames?: readonly string[] }>;
 	/** Local calendar date provider used by prompt-cache invalidation. */
 	getLocalCalendarDate?: () => string;
 	/** Tools mounted under `xd://`, for `/tools` display. */
