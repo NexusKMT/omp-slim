@@ -40,6 +40,7 @@ pub fn html_to_markdown(
 				remove_navigation: true,
 				remove_forms:      true,
 			},
+			tier_strategy: html_to_markdown_rs::TierStrategy::Tier2,
 			..Default::default()
 		};
 
