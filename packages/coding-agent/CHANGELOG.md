@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed Anthropic web search sending unsupported temperature parameters to sampling-restricted Claude models.
+- Fixed Anthropic web search sending unsupported temperature parameters to sampling-restricted Claude models ([#7195](https://github.com/can1357/oh-my-pi/pull/7195) by [@will-bogusz](https://github.com/will-bogusz)).
 
 ## [17.2.2] - 2026-07-31
 
