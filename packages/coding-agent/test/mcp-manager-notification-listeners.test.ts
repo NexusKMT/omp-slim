@@ -71,14 +71,8 @@ describe("MCPManager notification listeners", () => {
 		expect(typeof unsubscribe).toBe("function");
 
 		try {
-			// Don't assert on `result.connectedServers` here: it's only populated
-			// if the real subprocess handshake lands inside MCPManager's internal
-			// 250 ms startup race (`STARTUP_TIMEOUT_MS`), which is prone to
-			// scheduling jitter under CI load even though the connection still
-			// succeeds. This test's contract is notification delivery, not that
-			// race's timing — awaiting the frames below already proves the
-			// server connected.
-			await manager.connectServers({ alpha: serverConfig() }, {});
+			const result = await manager.connectServers({ alpha: serverConfig() }, {});
+			expect(result.connectedServers).toContain("alpha");
 
 			// Await both the known list_changed and the server-custom frame
 			// independently. Arrival order across the two isn't guaranteed
