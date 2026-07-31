@@ -484,13 +484,25 @@ function mergeDynamicModel<TApi extends Api>(existingModel: Model<TApi>, dynamic
 	const supportsImage = dynamicInputAuthoritative
 		? dynamicModel.input.includes("image")
 		: existingModel.input.includes("image") || dynamicModel.input.includes("image");
+	// Synthetic's discovery is authoritative (`dynamicModelsAuthoritative`) and
+	// its per-model `reasoning_parameters.efforts` vocabulary is the route's
+	// whole truth: when the wire advertises only the `none` off-state the
+	// mapper emits `reasoning: false`, and OR-ing the bundled reference's
+	// stale `reasoning: true` back would re-arm an effort dial the route
+	// doesn't expose. Other providers keep the OR so a bundled reasoning flag
+	// survives a discovery row that simply omits the capability.
+	const dynamicReasoningAuthoritative =
+		existingModel.provider === "synthetic" && dynamicModel.provider === "synthetic";
+	const reasoning = dynamicReasoningAuthoritative
+		? dynamicModel.reasoning
+		: existingModel.reasoning || dynamicModel.reasoning;
 	// Re-build from spec stage: sparse compat comes from `compatConfig` (the
 	// verbatim override vocabulary), never the resolved `compat` record.
 	return buildModel({
 		...existingModel,
 		...dynamicModel,
 		name: preferDiscoveryName(dynamicModel.name, existingModel.name, dynamicModel.id),
-		reasoning: existingModel.reasoning || dynamicModel.reasoning,
+		reasoning,
 		input: supportsImage ? ["text", "image"] : ["text"],
 		cost: {
 			input: preferDiscoveryCost(dynamicModel.cost.input, existingModel.cost.input),
