@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed provider-native Codex compaction streams bypassing WebSocket-first transport selection and SSE transport fallback ([#7198](https://github.com/can1357/oh-my-pi/issues/7198)).
+
 ## [17.2.2] - 2026-07-31
 
 ### Added
