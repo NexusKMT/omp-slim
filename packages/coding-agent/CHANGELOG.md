@@ -25,6 +25,9 @@
 ### Fixed
 
 - Fixed `omp plugin install` failing extension validation for pi extensions that import `compact` from `@earendil-works/pi-coding-agent` (e.g. pi-claude-bridge) — the legacy `@oh-my-pi/pi-coding-agent` shim did not forward `compact` (it lives in `@oh-my-pi/pi-agent-core/compaction`, the same module as the already-bridged `estimateTokens`), so a named import threw Bun's static "Export named 'compact' not found" error. Added the missing `compact` re-export ([#7174](https://github.com/can1357/oh-my-pi/issues/7174)).
+### Fixed
+
+- Fixed Bash interceptor rules matching only the complete command input, so an anchored rule such as `^\s*git\s+commit\b` missed a later command in a flat compound command. Rules now also inspect unquoted/unescaped `&&`, `||`, `;`, `|`, `&`, and newline-separated command fragments, including forms with leading environment-variable assignments, while retaining the original whole-input match and conservatively skipping complex shell syntax.
 
 ## [17.2.1] - 2026-07-30
 
