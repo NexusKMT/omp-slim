@@ -1909,6 +1909,14 @@ class RpcClient:
                     notification = UnknownNotification(
                         _clone_json_object(payload), parse_error=str(exc)
                     )
+                    if (
+                        payload_type == "agent_end"
+                        and payload.get("isTerminal") is not False
+                    ):
+                        self._append_async_error(
+                            RpcError(f"Failed to parse terminal agent_end: {exc}")
+                        )
+                        self._mark_agent_run_completed()
                 self._dispatch_listeners(
                     "notification",
                     notification.type,

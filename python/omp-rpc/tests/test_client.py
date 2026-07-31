@@ -835,6 +835,19 @@ FORWARD_COMPAT_SERVER = textwrap.dedent(
         )
         if command["type"] != "prompt":
             continue
+        if command.get("message") == "malformed terminal":
+            print(
+                json.dumps(
+                    {
+                        "type": "agent_end",
+                        "messages": [{"role": "future_role"}],
+                        "isTerminal": True,
+                    }
+                ),
+                flush=True,
+            )
+            time.sleep(2)
+            continue
         print(
             json.dumps(
                 {
@@ -1332,6 +1345,21 @@ class RpcClientTests(unittest.TestCase):
         )
         self.assertEqual(len(unknown_errors), 1)
         self.assertIn("auto_compaction_start.reason", unknown_errors[0] or "")
+
+    def test_malformed_terminal_agent_end_wakes_waiter(self) -> None:
+        unknown_errors: list[str | None] = []
+
+        with self.make_client(server=FORWARD_COMPAT_SERVER) as client:
+            client.on_unknown_notification(
+                lambda event: unknown_errors.append(event.parse_error)
+            )
+            with self.assertRaisesRegex(
+                RpcError, "Failed to parse terminal agent_end"
+            ):
+                client.prompt_and_wait("malformed terminal", timeout=1.0)
+
+        self.assertEqual(len(unknown_errors), 1)
+        self.assertIn("messages[0].role", unknown_errors[0] or "")
 
     def test_ui_confirmation_and_cancel_round_trip(self) -> None:
         with self.make_client() as client:
