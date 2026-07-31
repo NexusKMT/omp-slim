@@ -72,7 +72,10 @@ interface SessionToolsOptions {
 	builtInToolNames?: Iterable<string>;
 	presentationPinnedToolNames?: ReadonlySet<string>;
 	ensureWriteRegistered?: () => Promise<boolean>;
-	rebuildSystemPrompt?: (toolNames: string[], tools: Map<string, AgentTool>) => Promise<{ systemPrompt: string[] }>;
+	rebuildSystemPrompt?: (
+		toolNames: string[],
+		tools: Map<string, AgentTool>,
+	) => Promise<{ systemPrompt: string[]; xdevCatalogNames?: readonly string[] }>;
 	getLocalCalendarDate?: () => string;
 	getMcpServerInstructions?: () => Map<string, string> | undefined;
 	xdev?: XdevState;
@@ -619,6 +622,7 @@ export class SessionTools {
 
 		let rebuiltSystemPrompt: string[] | undefined;
 		let rebuiltSignature: string | undefined;
+		let rebuiltXdevCatalogNames: readonly string[] | undefined;
 		try {
 			if (this.#rebuildSystemPrompt) {
 				const signature = this.#computeAppliedToolSignature(validToolNames, tools);
@@ -626,6 +630,7 @@ export class SessionTools {
 					const built = await this.#rebuildSystemPrompt(validToolNames, this.#toolRegistry);
 					rebuiltSystemPrompt = built.systemPrompt;
 					rebuiltSignature = signature;
+					rebuiltXdevCatalogNames = built.xdevCatalogNames;
 				}
 			}
 		} catch (error) {
@@ -649,6 +654,7 @@ export class SessionTools {
 			this.#host.agent.setSystemPrompt(this.#baseSystemPrompt);
 			this.#lastAppliedToolSignature = rebuiltSignature;
 			this.#promptModelKey = this.#currentPromptModelKey();
+			this.#absorbExposedXdevIntoAnnounced(rebuiltXdevCatalogNames);
 		}
 	}
 
@@ -692,6 +698,31 @@ export class SessionTools {
 		if (addedNames.length > 0) parts.push(`mounted ${addedNames.join(", ")}`);
 		if (removedNames.length > 0) parts.push(`unmounted ${removedNames.join(", ")}`);
 		this.#host.emitNotice("info", `xd://: ${parts.join("; ")}`, "xdev");
+	}
+
+	/**
+	 * Fold the devices a just-applied prompt rebuild already advertises into the
+	 * announced-mount baseline. `rebuildSystemPrompt` reports the `xd://` catalog it
+	 * rendered ({@link BuildSystemPromptResult.xdevCatalogNames}); those devices are
+	 * now visible in the base prompt every following request carries, so a same-turn
+	 * mount notice would re-list the identical catalog before the first user turn —
+	 * on a fresh deferred-discovery session that double-billed the entire mounted MCP
+	 * inventory (issue #7139). Marking them announced and dropping them from the
+	 * pending delta suppresses that duplicate, while notices for mount changes the
+	 * rebuild did NOT expose (non-MCP churn that keeps the prompt byte-stable, or a
+	 * custom prompt that omits the catalog) and all unmount notices stay intact.
+	 *
+	 * Seeding first lets a fresh rebuild win over any stale history entry that marked
+	 * the device removed, so a currently-exposed device is never treated as unknown.
+	 */
+	#absorbExposedXdevIntoAnnounced(exposedNames: readonly string[] | undefined): void {
+		if (!exposedNames || exposedNames.length === 0) return;
+		this.#ensureAnnouncedMountsSeeded();
+		for (const name of exposedNames) this.#announcedMounts.add(name);
+		const pending = this.#pendingXdevMountDelta;
+		if (!pending) return;
+		for (const name of exposedNames) pending.added.delete(name);
+		this.#pendingXdevMountDelta = pending.added.size > 0 || pending.removed.size > 0 ? pending : undefined;
 	}
 
 	/**

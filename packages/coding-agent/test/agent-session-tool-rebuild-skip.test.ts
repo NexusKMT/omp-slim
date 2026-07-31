@@ -104,6 +104,12 @@ describe("AgentSession refreshMCPTools rebuild skipping", () => {
 		responses?: MockResponseSource;
 		/** Persisted history seeded into the agent, e.g. to model a resumed session. */
 		initialMessages?: AgentMessage[];
+		/**
+		 * Make the rebuild stub render the mounted xd:// catalog into the prompt and
+		 * report it via `xdevCatalogNames`, modelling the production `xdevDocsAll`
+		 * path. Existing tests leave this off, so their rebuild carries no catalog.
+		 */
+		exposeXdevCatalog?: boolean;
 	}
 
 	function newSession(
@@ -157,9 +163,12 @@ describe("AgentSession refreshMCPTools rebuild skipping", () => {
 				if (!toolRegistry.has("write")) toolRegistry.set("write", writeTool);
 				return true;
 			},
-			rebuildSystemPrompt: async (toolNames, _tools) => ({
-				systemPrompt: [await rebuildSystemPrompt(toolNames)],
-			}),
+			rebuildSystemPrompt: async (toolNames, _tools) => {
+				const base = await rebuildSystemPrompt(toolNames);
+				if (!options.exposeXdevCatalog) return { systemPrompt: [base] };
+				const catalog = options.xdev ? [...options.xdev.mountedNames] : [];
+				return { systemPrompt: [`${base}\nxd:// catalog: ${catalog.join(",")}`], xdevCatalogNames: catalog };
+			},
 			getMcpServerInstructions: options.getMcpServerInstructions,
 			getLocalCalendarDate: options.getLocalCalendarDate,
 			xdev: options.xdev,
@@ -995,6 +1004,35 @@ These tools became available:
 		const fetchText = typeof fetchNotice.content === "string" ? fetchNotice.content : "";
 		expect(fetchText).toContain("xd://mcp__nucleus_fetch");
 		expect(fetchText).not.toContain("xd://mcp__nucleus_search");
+	});
+
+	it("does not re-list catalog devices in a mount notice when the rebuild exposes them (#7139)", async () => {
+		const { session, contexts } = newSession(async toolNames => `tools:${toolNames.join(",")}`, {
+			xdev: createTestXdevState(),
+			responses: [{ content: ["ok"] }, { content: ["ok"] }],
+			exposeXdevCatalog: true,
+		});
+		const search = createMcpCustomTool("mcp__nucleus_search", "nucleus", "search", "Search nucleus");
+		const fetch = createMcpCustomTool("mcp__nucleus_fetch", "nucleus", "fetch", "Fetch nucleus");
+
+		// Fresh deferred-discovery session: the post-refresh rebuild renders the
+		// mounted catalog into the base prompt, so a same-turn mount notice would
+		// duplicate the whole catalog verbatim before the first user turn.
+		await session.refreshMCPTools([search]);
+		await session.prompt("hi");
+		expect(session.systemPrompt.join("\n")).toContain("mcp__nucleus_search");
+		expect(
+			session.agent.state.messages.filter(m => m.role === "custom" && m.customType === "xdev-mount-notice"),
+		).toHaveLength(0);
+		expect(mountNoticesIn(contexts[0])).toHaveLength(0);
+
+		// A later device the next rebuild also exposes stays notice-free too.
+		await session.refreshMCPTools([search, fetch]);
+		await session.prompt("again");
+		expect(session.systemPrompt.join("\n")).toContain("mcp__nucleus_fetch");
+		expect(
+			session.agent.state.messages.filter(m => m.role === "custom" && m.customType === "xdev-mount-notice"),
+		).toHaveLength(0);
 	});
 
 	it("re-announces a device after the transcript is replaced by /new", async () => {

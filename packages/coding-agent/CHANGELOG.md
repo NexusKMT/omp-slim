@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a fresh session with deferred MCP discovery injecting the newly mounted `xd://` tool catalog twice into the first model request: the post-discovery prompt rebuild already renders the full device catalog, but the pre-user `xdev-mount-notice` re-listed the same names because the rebuild never updated announcement tracking. The rebuild now reports the catalog it exposed and those devices are folded into the announced-mount baseline, so the notice is suppressed for anything the prompt already carries while non-rebuild mount changes and unmount notices still fire ([#7139](https://github.com/can1357/oh-my-pi/issues/7139)).
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
