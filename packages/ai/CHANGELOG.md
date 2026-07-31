@@ -5,6 +5,9 @@
 ### Added
 
 - Added the `gmi-cloud` provider registry definition with an API-key paste login (validates against `https://api.gmi-serving.com/v1/models`) and wired it into the provider registry, pairing with the catalog entry in `@oh-my-pi/pi-catalog`.
+### Fixed
+
+- Fixed Cursor conversation checkpoints being recorded as billable output tokens; authoritative context occupancy is now tracked separately so usage totals remain accurate while the context gauge retains the server-reported value ([#7163](https://github.com/can1357/oh-my-pi/pull/7163) by [@harshav167](https://github.com/harshav167)).
 
 ## [17.2.1] - 2026-07-30
 

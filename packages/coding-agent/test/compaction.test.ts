@@ -195,6 +195,12 @@ describe("Token calculation", () => {
 		expect(hasContextTokenUsage(usage)).toBe(true);
 		expect(hasContextTokenUsage({ ...usage, contextTokens: 0 })).toBe(false);
 	});
+
+	it("preserves total-only provider context without accepting response-only totals", () => {
+		const responseOnly = createMockUsage(0, 29, 0, 0);
+		expect(hasContextTokenUsage(responseOnly)).toBe(false);
+		expect(hasContextTokenUsage({ ...responseOnly, totalTokens: 120_000 })).toBe(true);
+	});
 });
 
 describe("getLastAssistantUsage", () => {

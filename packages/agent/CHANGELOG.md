@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed response-only usage records being treated as authoritative context anchors while preserving prompt and total-only provider telemetry ([#7163](https://github.com/can1357/oh-my-pi/pull/7163) by [@harshav167](https://github.com/harshav167)).
+
 ## [17.2.0] - 2026-07-30
 
 ### Fixed
