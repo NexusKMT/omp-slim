@@ -2,7 +2,7 @@ import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import type { SearchResponse, SearchSource } from "../../../web/search/types";
 import { SearchProviderError } from "../../../web/search/types";
 import type { QuerySyntax } from "../query";
-import { formatScraperQuery } from "../query";
+import { formatScraperQuery, parseSearchQuery } from "../query";
 import { clampNumResults, dateToAgeSeconds } from "../utils";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
@@ -181,10 +181,119 @@ const DDG_QUERY_SYNTAX: QuerySyntax = {
 	filetype: true,
 };
 
+/**
+ * DuckDuckGo's documented `kl` values.
+ *
+ * The codes resemble `region-language` locales but contain provider-specific
+ * identifiers (`jp-jp`, `tw-tzh`, `uk-en`) that cannot be derived mechanically.
+ */
+const DDG_KL_CODES = new Set([
+	"xa-ar",
+	"xa-en",
+	"ar-es",
+	"au-en",
+	"at-de",
+	"be-fr",
+	"be-nl",
+	"br-pt",
+	"bg-bg",
+	"ca-en",
+	"ca-fr",
+	"ct-ca",
+	"cl-es",
+	"cn-zh",
+	"co-es",
+	"hr-hr",
+	"cz-cs",
+	"dk-da",
+	"ee-et",
+	"fi-fi",
+	"fr-fr",
+	"de-de",
+	"gr-el",
+	"hk-tzh",
+	"hu-hu",
+	"in-en",
+	"id-id",
+	"id-en",
+	"ie-en",
+	"il-he",
+	"it-it",
+	"jp-jp",
+	"kr-kr",
+	"lv-lv",
+	"lt-lt",
+	"xl-es",
+	"my-ms",
+	"my-en",
+	"mx-es",
+	"nl-nl",
+	"nz-en",
+	"no-no",
+	"pe-es",
+	"ph-en",
+	"ph-tl",
+	"pl-pl",
+	"pt-pt",
+	"ro-ro",
+	"ru-ru",
+	"sg-en",
+	"sk-sk",
+	"sl-sl",
+	"za-en",
+	"es-es",
+	"se-sv",
+	"ch-de",
+	"ch-fr",
+	"ch-it",
+	"tw-tzh",
+	"th-th",
+	"tr-tr",
+	"ua-uk",
+	"uk-en",
+	"us-en",
+	"ue-es",
+	"ve-es",
+	"vn-vi",
+	"wt-wt",
+]);
+
+/** BCP 47 locales whose DDG code does not follow a simple component swap. */
+const DDG_LOCALE_ALIASES: Record<string, string> = {
+	"ca-es": "ct-ca",
+	"en-gb": "uk-en",
+	"es-419": "xl-es",
+	"es-us": "ue-es",
+	"ja-jp": "jp-jp",
+	"ko-kr": "kr-kr",
+	"zh-hk": "hk-tzh",
+	"zh-tw": "tw-tzh",
+};
+
+/**
+ * Map a parsed `lang:` locale onto DuckDuckGo's documented `kl` values.
+ *
+ * Shared queries use `language-region` order while DDG generally uses
+ * `region-language`. Provider-specific exceptions resolve through
+ * {@link DDG_LOCALE_ALIASES}; all other values must survive the documented
+ * allowlist after swapping or the caller keeps its default region.
+ */
+export function localeToKl(lang: string | undefined): string | undefined {
+	if (!lang) return undefined;
+	const locale = lang.toLowerCase().replaceAll("_", "-");
+	const alias = DDG_LOCALE_ALIASES[locale];
+	if (alias) return alias;
+	const match = /^([a-z]{2})-([a-z]{2})$/.exec(locale);
+	if (!match) return undefined;
+	const candidate = `${match[2]}-${match[1]}`;
+	return DDG_KL_CODES.has(candidate) ? candidate : undefined;
+}
+
 function createDuckDuckGoForm(params: SearchParams): URLSearchParams {
+	const parsed = params.parsedQuery ?? parseSearchQuery(params.query);
 	const form = new URLSearchParams({
-		q: formatScraperQuery(params.query, params.parsedQuery, DDG_QUERY_SYNTAX),
-		kl: "us-en",
+		q: formatScraperQuery(params.query, parsed, DDG_QUERY_SYNTAX),
+		kl: localeToKl(parsed.lang) ?? "us-en",
 	});
 	const df = params.recency ? RECENCY_TO_DDG_DF[params.recency] : undefined;
 	if (df) form.set("df", df);
