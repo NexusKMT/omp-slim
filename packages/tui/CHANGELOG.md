@@ -5,6 +5,9 @@
 ### Added
 
 - Added request tokens to explicit OSC 11 appearance refreshes so consumers can correlate responses across queued and coalesced terminal probes.
+### Fixed
+
+- Fixed the event-loop watchdog reporting system sleep as a synchronous `ui.loop-blocked` stall. A long missed probe interval is now treated as process suspension and suppressed, while shorter real stalls continue to report with their phase attribution.
 
 ## [17.2.0] - 2026-07-30
 
