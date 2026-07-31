@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the web-search provider picker describing xAI/Grok as requiring `XAI_API_KEY`, which hid that the `xai` search provider already accepts a SuperGrok/X Premium+ `xai-oauth` sign-in (via `/login xai-oauth` or `XAI_OAUTH_TOKEN`). The description now matches the OAuth-aware wording used by the Anthropic, OpenAI, and Gemini rows.
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
