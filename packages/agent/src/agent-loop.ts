@@ -2723,13 +2723,20 @@ async function executeToolCalls(
  * (#4321): a provider-side stream error after tool-call emission (e.g. Codex
  * websocket close) was surfaced by the CLI as if the local tool had failed.
  *
- * `source` names the assistant-side termination state that prevented
- * execution; `upstreamError` is the provider-reported message when the turn
- * ended with `stopReason === "error"`.
+ * `source` names the state that prevented execution — either an assistant-side
+ * turn termination (`assistant_stop_*`) or a mid-batch interrupt that skipped a
+ * still-pending call to service queued steering/peer input (`interrupt_skipped`).
+ * `upstreamError` is the provider-reported message when the turn ended with
+ * `stopReason === "error"`.
  */
 export interface SyntheticToolResultDetails {
 	__synthetic: true;
-	source: "assistant_stop_aborted" | "assistant_stop_error" | "assistant_stop_skipped" | "assistant_stop_length";
+	source:
+		| "assistant_stop_aborted"
+		| "assistant_stop_error"
+		| "assistant_stop_skipped"
+		| "assistant_stop_length"
+		| "interrupt_skipped";
 	executed: false;
 	upstreamError?: string;
 }
@@ -2844,7 +2851,9 @@ function createToolSignalAbortedResult(signal: AbortSignal): AgentToolResult<unk
 	};
 }
 
-function createSkippedToolResult(source: SteeringInterruptSource | "irc" | undefined): AgentToolResult<any> {
+function createSkippedToolResult(
+	source: SteeringInterruptSource | "irc" | undefined,
+): AgentToolResult<SyntheticToolResultDetails> {
 	let reason = "pending steering message";
 	let blocker = "queued message";
 	if (source === "user") {
@@ -2864,6 +2873,6 @@ function createSkippedToolResult(source: SteeringInterruptSource | "irc" | undef
 				text: `Skipped due to ${reason}. Do not count this skipped result as completed work or verification. After the ${blocker} is handled on the next step, retry the skipped tool if it is still needed.`,
 			},
 		],
-		details: {},
+		details: { __synthetic: true, source: "interrupt_skipped", executed: false },
 	};
 }

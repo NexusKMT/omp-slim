@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Tool calls skipped mid-batch to service a queued steering/peer interrupt now carry the `SyntheticToolResultDetails` discriminator (`source: "interrupt_skipped"`, `executed: false`), so UI/telemetry consumers can classify them as "call emitted, not executed" instead of a real tool failure ([#7199](https://github.com/can1357/oh-my-pi/issues/7199)).
+
 ## [17.2.2] - 2026-07-31
 
 ### Fixed
