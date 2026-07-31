@@ -61,9 +61,8 @@ const isProcessEntry = import.meta.main || process.env.PI_COMPILED === "true";
 // import time, so it must not be imported before `setProfile` runs.
 
 async function showHelp(config: CliConfig<CommandMetadata>): Promise<void> {
-	// Root help historically loads the selected profile's environment. Keep that
-	// contract after profile bootstrap without pulling in command/provider graphs.
-	await import("@oh-my-pi/pi-utils/env");
+	// Root help historically loads the selected profile's environment. The
+	// lazily loaded help module imports it statically after profile bootstrap.
 	const [{ renderRootHelp }, { getExtraHelpText }] = await Promise.all([
 		import("@oh-my-pi/pi-utils/cli"),
 		import("./cli/help-extra"),
