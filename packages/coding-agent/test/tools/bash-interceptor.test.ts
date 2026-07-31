@@ -114,9 +114,13 @@ describe("compound command interception", () => {
 			"echo hi >| git commit -m message",
 			"echo hi >&git commit -m message",
 			"echo hi >& git commit -m message",
+			"echo hi <&3 git commit -m message",
 		]) {
 			expect(checkBashInterception(command, ["commit"], rules).block).toBe(false);
 		}
+		// <& is a redirect operator, so the & does not split the command;
+		// but when a && follows the redirect, the later command is still extracted.
+		expect(checkBashInterception("echo hi <&3 && git commit -m message", ["commit"], rules).block).toBe(true);
 	});
 
 	it("does not add matches for unsupported shell syntax", () => {
