@@ -10,6 +10,9 @@
 
 - Moved the display-reset default chord (`app.display.reset`) from `Ctrl+L` to `Alt+L` to make room for the live-mode toggle.
 - Updated the hashline edit tool, streaming preview, and plan-mode guidance for the unified `PUT`/`CUT` grammar, `.=` ranges, and named registers.
+### Fixed
+
+- Fixed Kitty terminals crashing while rendering live or restored non-PNG tool-result images when the runtime throws synchronously during PNG conversion ([#7160](https://github.com/can1357/oh-my-pi/issues/7160)).
 
 ## [17.2.1] - 2026-07-30
 
