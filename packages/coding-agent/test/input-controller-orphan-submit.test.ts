@@ -76,6 +76,7 @@ function createContext(sessionOverride?: InteractiveModeContext["session"]) {
 			extensionRunner: undefined,
 			steer,
 			prompt,
+			maybeStartTitleGeneration: vi.fn(),
 			queuedMessageCount: 0,
 			getQueuedMessages: () => ({ steering: [], followUp: [] }),
 		} as unknown as InteractiveModeContext["session"]);

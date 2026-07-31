@@ -81,6 +81,7 @@ import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { MacOSPowerAssertion } from "@oh-my-pi/pi-natives";
 import {
+	$env,
 	escapeXmlText,
 	formatDuration,
 	getAgentDbPath,
@@ -179,6 +180,7 @@ import {
 	shouldDisableReasoning,
 	toReasoningEffort,
 } from "../thinking";
+import { isLowSignalTitleInput } from "../tiny/text";
 import { shutdownTinyTitleClient } from "../tiny/title-client";
 import { resolveApproval } from "../tools/approval";
 import { type AskToolDetails, type AskToolInput, recoverAskQuestions } from "../tools/ask";
@@ -5878,6 +5880,33 @@ export class AgentSession {
 				}
 			});
 		this.#replanTitleRefreshInFlight = refresh;
+	}
+
+	/**
+	 * Start automatic title generation when the session and input are eligible.
+	 * Interactive and CLI-bootstrap submissions share this gate so every first
+	 * user message persists titles with the same environment and signal policy.
+	 */
+	maybeStartTitleGeneration(firstMessage: string, onStart?: () => void): void {
+		if (this.sessionName || $env.PI_NO_TITLE || isLowSignalTitleInput(firstMessage)) {
+			return;
+		}
+		onStart?.();
+		this.generateTitle(firstMessage)
+			.then(async title => {
+				// Re-check after generation so concurrent attempts cannot replace
+				// the first title that completed.
+				if (title && !this.sessionName) {
+					await this.sessionManager.setSessionName(title, "auto");
+				}
+			})
+			.catch(err => {
+				logger.warn("title-generator: uncaught auto-title error", {
+					sessionId: this.sessionId,
+					reason: "uncaught-auto-title-error",
+					error: err instanceof Error ? err.message : String(err),
+				});
+			});
 	}
 
 	/**
