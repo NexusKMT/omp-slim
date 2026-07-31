@@ -5,6 +5,10 @@
 ### Added
 
 - Added the `gmi-cloud` provider registry definition with an API-key paste login (validates against `https://api.gmi-serving.com/v1/models`) and wired it into the provider registry, pairing with the catalog entry in `@oh-my-pi/pi-catalog`.
+### Changed
+
+- `AuthStorage.redeemResetCredit` now spends the account's soonest-expiring available saved reset (via the new `pickSoonestExpiringCredit`) instead of the first credit the backend lists, and reports a distinct retryable `credit_list_failed` outcome when the credit listing itself fails in transport instead of conflating it with a genuine `no_credit`.
+### Fixed
 
 ### Changed
 

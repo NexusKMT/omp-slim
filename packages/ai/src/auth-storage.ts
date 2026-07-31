@@ -62,6 +62,7 @@ import {
 	type CodexResetCredit,
 	consumeCodexResetCredit,
 	listCodexResetCredits,
+	pickSoonestExpiringCredit,
 } from "./usage/openai-codex-reset";
 import { opencodeGoUsageProvider } from "./usage/opencode-go";
 import { syntheticUsageProvider } from "./usage/synthetic";
@@ -952,7 +953,9 @@ export interface ResetCreditRedeemOutcome {
 	 * Result code. Backend codes: `reset` (success), `already_redeemed`,
 	 * `no_credit`, `nothing_to_reset`. Locally-synthesized: `no_account`
 	 * (target not found), `account_unavailable` (token refresh failed),
-	 * `http_<status>` (unexpected HTTP).
+	 * `credit_list_failed` (transport/auth failure while listing credits —
+	 * retryable, unlike a genuine `no_credit`), `http_<status>` (unexpected
+	 * HTTP).
 	 */
 	code: CodexResetConsumeCode;
 	accountId?: string;
@@ -5606,7 +5609,13 @@ export class AuthStorage {
 				fetch: this.#usageFetch,
 				signal: options.signal,
 			});
-			const credit = list?.credits.find(entry => (entry.status ?? "available") === "available") ?? list?.credits[0];
+			// Transport/auth failure is NOT "no credits": callers treat `no_credit`
+			// as terminal for the episode, so conflating them would bury a live
+			// credit behind one flaky request.
+			if (!list) {
+				return { ok: false, code: "credit_list_failed", accountId: match.accountId, email: match.email };
+			}
+			const credit = pickSoonestExpiringCredit(list.credits);
 			if (!credit) return { ok: false, code: "no_credit", accountId: match.accountId, email: match.email };
 			creditId = credit.id;
 		}
