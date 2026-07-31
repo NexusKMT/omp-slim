@@ -34,6 +34,9 @@
 ### Fixed
 
 - Fixed the web-search provider picker describing xAI/Grok as requiring `XAI_API_KEY`, which hid that the `xai` search provider already accepts a SuperGrok/X Premium+ `xai-oauth` sign-in (via `/login xai-oauth` or `XAI_OAUTH_TOKEN`). The description now matches the OAuth-aware wording used by the Anthropic, OpenAI, and Gemini rows.
+### Fixed
+
+- Fixed `/reload-plugins` not reconnecting MCP servers or refreshing the session's MCP tool and prompt-command registries despite listing MCP in its documented reload scope, so `.mcp.json` edits stayed inactive and removed prompt commands remained invocable until restart. The TUI reload pipeline now clears stale MCP prompt commands and runs the same disconnect/rediscover/`refreshMCPTools` path as `/mcp reload`, deriving discovery filters from settings so the reload keeps honoring `mcp.enableProjectConfig: false` instead of starting opted-out project servers ([#7189](https://github.com/can1357/oh-my-pi/issues/7189)).
 
 ## [17.2.1] - 2026-07-30
 
