@@ -49,6 +49,8 @@ describe("AgentSession mid-turn compaction dead-end", () => {
 		responses: MockResponse[];
 		/** Optional `session_before_compact` short-circuit so a viable compaction makes no LLM call. */
 		shortCircuitCompaction?: boolean;
+		/** Delay message-end hooks so the turn is absent until the persistence barrier resolves. */
+		delayMessageEndPersistence?: boolean;
 	}): Promise<{ notices: string[]; compactionStarts: number[]; compactionResults: number }> {
 		tempDir = TempDir.createSync("@pi-mid-turn-compaction-dead-end-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
@@ -59,14 +61,16 @@ describe("AgentSession mid-turn compaction dead-end", () => {
 
 		let extensionRunner: ExtensionRunner | undefined;
 		const sessionManager = SessionManager.inMemory(tempDir.path());
-		if (options.shortCircuitCompaction) {
+		if (options.shortCircuitCompaction || options.delayMessageEndPersistence) {
 			const extensionsDir = path.join(getProjectAgentDir(tempDir.path()), "extensions");
 			fs.mkdirSync(extensionsDir, { recursive: true });
 			const extensionPath = path.join(extensionsDir, "compaction-short-circuit.ts");
-			fs.writeFileSync(
-				extensionPath,
-				[
-					"export default function(pi) {",
+			const extensionLines = ["export default function(pi) {"];
+			if (options.delayMessageEndPersistence) {
+				extensionLines.push('\tpi.on("message_end", async () => {', "\t\tawait Bun.sleep(50);", "\t});");
+			}
+			if (options.shortCircuitCompaction) {
+				extensionLines.push(
 					'\tpi.on("session_before_compact", async (event) => ({',
 					"\t\tcompaction: {",
 					'\t\t\tsummary: "compacted",',
@@ -76,9 +80,10 @@ describe("AgentSession mid-turn compaction dead-end", () => {
 					"\t\t\tdetails: {},",
 					"\t\t},",
 					"\t}));",
-					"}",
-				].join("\n"),
-			);
+				);
+			}
+			extensionLines.push("}");
+			fs.writeFileSync(extensionPath, extensionLines.join("\n"));
 			const loaded = await loadExtensions([extensionPath], tempDir.path());
 			extensionRunner = new ExtensionRunner(
 				loaded.extensions,
@@ -154,15 +159,22 @@ describe("AgentSession mid-turn compaction dead-end", () => {
 		expect(state.compactionStarts).toHaveLength(2);
 	});
 
-	it("re-attempts compaction once a later tool result creates a cut point", async () => {
-		// Reviewer regression (#7153): the live context keeps growing, so a dead end
-		// at the first boundary MUST NOT permanently suppress maintenance. Once a
-		// later, smaller turn lets prepareCompaction cut before the now-older
-		// oversized turn, compaction has to run instead of parking until overflow.
-		let preparable = false;
-		const branch = () => session.sessionManager.getBranch();
-		const fakePreparation = (): compactionModule.CompactionPreparation => {
-			const entries = branch();
+	it("re-attempts after the new tool boundary finishes persisting", async () => {
+		// Reviewer regression (#7153): message_end persistence is fire-and-forget,
+		// so the live loop can reach onTurnEnd while the branch still lacks the
+		// just-finished assistant/toolResult pair. The re-arm probe must wait for
+		// the same persistence barrier as normal compaction; otherwise it sees the
+		// old no-cutpoint branch and sends another over-threshold provider request.
+		let cutPointSeen = false;
+		vi.spyOn(compactionModule, "prepareCompaction").mockImplementation(entries => {
+			const secondBoundaryPersisted = entries.some(
+				entry =>
+					entry.type === "message" &&
+					entry.message.role === "assistant" &&
+					entry.message.content.some(block => block.type === "toolCall" && block.id === "noop-2"),
+			);
+			if (!secondBoundaryPersisted) return undefined;
+			cutPointSeen = true;
 			const firstKeptEntryId = entries[entries.length - 1]?.id;
 			if (!firstKeptEntryId) throw new Error("branch has no entry to keep");
 			return {
@@ -175,18 +187,13 @@ describe("AgentSession mid-turn compaction dead-end", () => {
 				fileOps: { read: new Set(), written: new Set(), edited: new Set() },
 				settings: session.settings.getGroup("compaction"),
 			};
-		};
-		vi.spyOn(compactionModule, "prepareCompaction").mockImplementation(() =>
-			preparable ? fakePreparation() : undefined,
-		);
+		});
 
 		const state = await createSession({
-			responses: [toolTurn("noop-1"), toolTurn("noop-2"), toolTurn("noop-3"), { content: ["done"] }],
+			responses: [toolTurn("noop-1"), toolTurn("noop-2"), { content: ["done"] }],
 			shortCircuitCompaction: true,
+			delayMessageEndPersistence: true,
 		});
-		// The first boundary hits the no-preparation dead end (nothing summarizable
-		// and the elide rescue frees nothing). Once its warning lands, mark the
-		// context "preparable" to model the later cut point appearing.
 		vi.spyOn(session, "shake").mockResolvedValue({
 			mode: "elide",
 			toolResultsDropped: 0,
@@ -194,21 +201,15 @@ describe("AgentSession mid-turn compaction dead-end", () => {
 			tokensFreed: 0,
 		});
 		vi.spyOn(session, "getContextUsage").mockImplementation(() =>
-			preparable
+			cutPointSeen
 				? { tokens: 1_000, contextWindow: 200_000, percent: 0.5 }
 				: { tokens: 190_000, contextWindow: 200_000, percent: 95 },
 		);
-		session.subscribe(event => {
-			if (event.type === "notice" && event.message.includes(DEAD_END_WARNING)) preparable = true;
-		});
 
-		await session.prompt("Run three tools before answering");
+		await session.prompt("Run two tools before answering");
 
-		// First dead end warned once; a later boundary re-attempted (start #2) and,
-		// with a cut point now available, produced a real compaction result instead
-		// of staying parked.
-		expect(state.notices.filter(m => m.includes(DEAD_END_WARNING))).toHaveLength(1);
-		expect(state.compactionStarts.length).toBeGreaterThanOrEqual(2);
-		expect(state.compactionResults).toBeGreaterThanOrEqual(1);
+		expect(state.notices.filter(message => message.includes(DEAD_END_WARNING))).toHaveLength(1);
+		expect(state.compactionStarts).toHaveLength(2);
+		expect(state.compactionResults).toBe(1);
 	});
 });
