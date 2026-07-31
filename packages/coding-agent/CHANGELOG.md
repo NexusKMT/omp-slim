@@ -65,6 +65,10 @@
 ### Fixed
 
 - Fixed LSP write batching replaying stale whole-file snapshots over newer external changes made before the batch flushed.
+### Fixed
+
+- Fixed `ctx.ui.editor()` in ACP mode always resolving to `undefined`: it now routes through the same elicitation bridge as `select`/`confirm`/`input`, so `/review`'s custom-instructions prompt and the `ask` tool's custom-input path reach the ACP client instead of silently no-opping.
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
