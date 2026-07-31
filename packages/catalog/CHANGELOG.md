@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed dynamically discovered Cursor Kimi K3 effort variants being classified as non-reasoning models when Cursor omits `thinkingDetails` ([#7184](https://github.com/can1357/oh-my-pi/issues/7184)).
+
 ## [17.2.1] - 2026-07-30
 
 ### Fixed

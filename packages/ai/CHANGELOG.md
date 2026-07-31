@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Cursor history replay flattening assistant tool calls/results and dropping same-model Kimi K3 thinking, preserving Cursor's structured message order and rejecting unsafe mid-session switches to K3 ([#7184](https://github.com/can1357/oh-my-pi/issues/7184)).
+
 ## [17.2.1] - 2026-07-30
 
 ### Added

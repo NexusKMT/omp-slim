@@ -59,6 +59,30 @@ const cursorMaxModeModel: Model<"cursor-agent"> = buildModel({
 	maxTokens: 1,
 	cursorMaxMode: true,
 });
+function cursorAssistant(
+	model: string,
+	content: AssistantMessage["content"],
+	timestamp: number,
+	stopReason: AssistantMessage["stopReason"] = "stop",
+): AssistantMessage {
+	return {
+		role: "assistant",
+		api: "cursor-agent",
+		provider: "cursor",
+		model,
+		content,
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason,
+		timestamp,
+	};
+}
 
 function captureCursorPayload(context: Context, model: Model<"cursor-agent"> = cursorModel): Promise<AgentRunRequest> {
 	const { promise, resolve, reject } = Promise.withResolvers<AgentRunRequest>();
@@ -492,6 +516,147 @@ describe("Cursor request action encoding", () => {
 });
 
 describe("Cursor history encoding", () => {
+	it("preserves same-model K3 thinking and paired tool structure in request history", () => {
+		const messages: Context["messages"] = [
+			{ role: "user", content: "Inspect package.json", timestamp: 1 },
+			cursorAssistant(
+				"kimi-k3-high",
+				[
+					{ type: "thinking", thinking: "I should inspect the package." },
+					{ type: "toolCall", id: "call-read", name: "read", arguments: { path: "package.json" } },
+				],
+				2,
+				"toolUse",
+			),
+			{
+				role: "toolResult",
+				toolCallId: "call-read",
+				toolName: "read",
+				content: [{ type: "text", text: "package contents" }],
+				isError: false,
+				timestamp: 3,
+			},
+			cursorAssistant(
+				"kimi-k3-high",
+				[
+					{ type: "thinking", thinking: "The package is valid." },
+					{ type: "text", text: "Verified." },
+				],
+				4,
+			),
+			{ role: "user", content: "What did you verify?", timestamp: 5 },
+		];
+
+		const history = buildCursorHistoryForTest(messages, undefined, "kimi-k3-high");
+
+		expect(history.rootPromptMessagesJson).toEqual([
+			{ role: "user", content: [{ type: "text", text: "Inspect package.json" }] },
+			{
+				role: "assistant",
+				content: [
+					{
+						type: "reasoning",
+						text: "I should inspect the package.",
+						providerOptions: { cursor: { modelName: "kimi-k3-high" } },
+					},
+					{
+						type: "tool-call",
+						toolCallId: "call-read",
+						toolName: "read",
+						args: { path: "package.json" },
+					},
+				],
+			},
+			{
+				role: "tool",
+				id: "call-read",
+				content: [
+					{
+						type: "tool-result",
+						toolName: "read",
+						toolCallId: "call-read",
+						result: "package contents",
+					},
+				],
+			},
+			{
+				role: "assistant",
+				content: [
+					{
+						type: "reasoning",
+						text: "The package is valid.",
+						providerOptions: { cursor: { modelName: "kimi-k3-high" } },
+					},
+					{ type: "text", text: "Verified." },
+				],
+			},
+		]);
+		expect(history.turnStepMessagesJson).toEqual([
+			[
+				expect.objectContaining({ thinkingMessage: { text: "I should inspect the package." } }),
+				expect.objectContaining({
+					toolCall: expect.objectContaining({
+						toolCallId: "call-read",
+						mcpToolCall: expect.objectContaining({
+							args: expect.objectContaining({ toolCallId: "call-read", toolName: "read" }),
+							result: { success: { content: [{ text: { text: "package contents" } }] } },
+						}),
+					}),
+				}),
+				expect.objectContaining({ thinkingMessage: { text: "The package is valid." } }),
+				expect.objectContaining({ assistantMessage: { text: "Verified." } }),
+			],
+		]);
+		expect(buildCursorHistoryForTest(messages, undefined, "kimi-k3-high")).toEqual(history);
+	});
+
+	it("rejects switching existing foreign history to K3", () => {
+		const messages: Context["messages"] = [
+			{ role: "user", content: "Plan this change.", timestamp: 1 },
+			{
+				...cursorAssistant(
+					"claude-4.6-opus-high",
+					[{ type: "thinking", thinking: "Foreign signed reasoning.", thinkingSignature: "signature" }],
+					2,
+				),
+				api: "anthropic-messages",
+				provider: "anthropic",
+			},
+			{ role: "user", content: "Continue with K3.", timestamp: 3 },
+		];
+
+		expect(() => buildCursorHistoryForTest(messages, undefined, "kimi-k3-high")).toThrow(
+			"start a new session instead of continuing history from anthropic/claude-4.6-opus-high",
+		);
+	});
+
+	it("keeps non-K3 Cursor thinking out of model-facing history", () => {
+		const messages: Context["messages"] = [
+			{ role: "user", content: "Inspect package.json", timestamp: 1 },
+			cursorAssistant(
+				"cursor-composer-2.5",
+				[
+					{ type: "thinking", thinking: "Internal reasoning." },
+					{ type: "text", text: "Visible answer." },
+				],
+				2,
+			),
+			{ role: "user", content: "Continue.", timestamp: 3 },
+		];
+
+		const history = buildCursorHistoryForTest(messages, undefined, "cursor-composer-2.5");
+		expect(history.rootPromptMessagesJson).toEqual([
+			{ role: "user", content: [{ type: "text", text: "Inspect package.json" }] },
+			{ role: "assistant", content: [{ type: "text", text: "Visible answer." }] },
+		]);
+		expect(history.turnStepMessagesJson).toEqual([
+			[
+				expect.objectContaining({ thinkingMessage: { text: "Internal reasoning." } }),
+				expect.objectContaining({ assistantMessage: { text: "Visible answer." } }),
+			],
+		]);
+	});
+
 	it("preserves image-only user turns in root prompt history and conversation turns", () => {
 		const imageData = "aW1hZ2U=";
 		const history = buildCursorHistoryForTest([
@@ -553,17 +718,45 @@ describe("Cursor history encoding", () => {
 				content: [{ type: "text", text: "Use the read tool." }],
 			},
 			{
-				role: "user",
-				content: [{ type: "text", text: "[Tool Result]\npackage contents" }],
+				role: "assistant",
+				content: [
+					{
+						type: "tool-call",
+						toolCallId: "call-read",
+						toolName: "read",
+						args: { path: "package.json" },
+					},
+				],
+			},
+			{
+				role: "tool",
+				id: "call-read",
+				content: [
+					{
+						type: "tool-result",
+						toolName: "read",
+						toolCallId: "call-read",
+						result: "package contents",
+					},
+				],
 			},
 		]);
 		expect(history.turnUserMessagesJson).toEqual([expect.objectContaining({ text: "Use the read tool." })]);
 		expect(history.turnStepMessagesJson).toEqual([
-			[expect.objectContaining({ assistantMessage: { text: "[Tool Result]\npackage contents" } })],
+			[
+				expect.objectContaining({
+					toolCall: expect.objectContaining({
+						toolCallId: "call-read",
+						mcpToolCall: expect.objectContaining({
+							result: { success: { content: [{ text: { text: "package contents" } }] } },
+						}),
+					}),
+				}),
+			],
 		]);
 	});
 
-	it("formats tool errors with [Tool Error] prefix", () => {
+	it("preserves structured tool errors", () => {
 		const errorContext: Context = {
 			messages: [
 				{
@@ -614,12 +807,41 @@ describe("Cursor history encoding", () => {
 				content: [{ type: "text", text: "Search for nothing." }],
 			},
 			{
-				role: "user",
-				content: [{ type: "text", text: "[Tool Error]\nPattern must not be empty" }],
+				role: "assistant",
+				content: [
+					{
+						type: "tool-call",
+						toolCallId: "call-search",
+						toolName: "search",
+						args: { pattern: "" },
+					},
+				],
+			},
+			{
+				role: "tool",
+				id: "call-search",
+				content: [
+					{
+						type: "tool-result",
+						toolName: "search",
+						toolCallId: "call-search",
+						result: "Pattern must not be empty",
+						isError: true,
+					},
+				],
 			},
 		]);
 		expect(history.turnStepMessagesJson).toEqual([
-			[expect.objectContaining({ assistantMessage: { text: "[Tool Error]\nPattern must not be empty" } })],
+			[
+				expect.objectContaining({
+					toolCall: expect.objectContaining({
+						toolCallId: "call-search",
+						mcpToolCall: expect.objectContaining({
+							result: { error: { error: "Pattern must not be empty" } },
+						}),
+					}),
+				}),
+			],
 		]);
 	});
 });
