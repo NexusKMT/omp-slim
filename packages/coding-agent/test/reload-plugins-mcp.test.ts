@@ -24,6 +24,7 @@ function createFakeCtx(cwd: string, settingsValues: Record<string, unknown> = {}
 	};
 	const session = {
 		refreshMCPTools: vi.fn(async (_tools: unknown) => {}),
+		setMCPPromptCommands: vi.fn((_commands: unknown) => {}),
 	};
 	const ctx = {
 		mcpManager,
@@ -52,7 +53,7 @@ describe("/reload-plugins MCP reconnect (#7189)", () => {
 		await removeWithRetries(projectDir);
 	});
 
-	test("reconnects MCP servers and rebinds session MCP tools", async () => {
+	test("reconnects MCP servers, rebinds tools, and clears stale prompt commands", async () => {
 		const { ctx, mcpManager, session, mcpTools } = createFakeCtx(projectDir);
 		const runtime: TuiSlashCommandRuntime = { ctx };
 
@@ -62,6 +63,8 @@ describe("/reload-plugins MCP reconnect (#7189)", () => {
 		expect(mcpManager.discoverAndConnect).toHaveBeenCalledTimes(1);
 		expect(session.refreshMCPTools).toHaveBeenCalledTimes(1);
 		expect(session.refreshMCPTools).toHaveBeenCalledWith(mcpTools);
+		expect(session.setMCPPromptCommands).toHaveBeenCalledTimes(1);
+		expect(session.setMCPPromptCommands).toHaveBeenCalledWith([]);
 	});
 
 	test("honors mcp.enableProjectConfig=false so opted-out project servers are not started on reload", async () => {

@@ -1997,6 +1997,10 @@ export class MCPCommandController {
 
 		// Disconnect all existing servers
 		await this.ctx.mcpManager.disconnectAll();
+		// Prompt enrichment is asynchronous. Clear commands before rediscovery so
+		// removed/disabled servers cannot leave stale `/server:prompt` entries;
+		// newly loaded prompts repopulate them through the manager callback.
+		this.ctx.session.setMCPPromptCommands([]);
 
 		// Rediscover and connect, mirroring startup's discovery filters.
 		const result = await this.ctx.mcpManager.discoverAndConnect({
