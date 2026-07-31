@@ -76,6 +76,7 @@ function createContext(sessionOverride?: InteractiveModeContext["session"]) {
 			extensionRunner: undefined,
 			steer,
 			prompt,
+			maybeStartTitleGeneration: vi.fn(),
 			queuedMessageCount: 0,
 			getQueuedMessages: () => ({ steering: [], followUp: [] }),
 		} as unknown as InteractiveModeContext["session"]);
@@ -298,6 +299,9 @@ describe("InputController orphaned submit", () => {
 			ctx.settings = settings;
 			const controller = new InputController(ctx);
 			controller.setupEditorSubmitHandler();
+
+			session.maybeStartTitleGeneration("/widget-status");
+			expect(titleSpy).not.toHaveBeenCalled();
 
 			await editor.onSubmit?.("/widget-status");
 

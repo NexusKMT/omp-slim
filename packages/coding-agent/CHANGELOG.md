@@ -16,6 +16,9 @@
 ### Fixed
 
 - Fixed the copy selector and ask dialog rendering raw key IDs instead of human-readable keybinding labels ([#7164](https://github.com/can1357/oh-my-pi/issues/7164)).
+### Fixed
+
+- Fixed CLI positional initial messages bypassing automatic session-title generation, which left shell-launched sessions unnamed until a later editor submission ([#7166](https://github.com/can1357/oh-my-pi/issues/7166)).
 
 ## [17.2.1] - 2026-07-30
 
