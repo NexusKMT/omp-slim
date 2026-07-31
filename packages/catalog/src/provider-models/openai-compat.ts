@@ -903,7 +903,8 @@ const GMI_CLOUD_BASE_URL = "https://api.gmi-serving.com/v1";
  * direct-tariff values: V4-Flash at $0.14/$0.28 per 1M with Think High/Max
  * modes per GMI's launch post
  * (https://www.gmicloud.ai/en/blog/deepseek-v4-is-here-we-tested-it), not
- * discounted gateway-route pricing.
+ * discounted gateway-route pricing. GMI publishes no cache-read tariff, so
+ * cacheRead stays 0 until a direct source confirms cached-token billing.
  */
 export const GMI_CLOUD_STATIC_MODELS: readonly ModelSpec<"openai-completions">[] = [
 	{
@@ -914,7 +915,7 @@ export const GMI_CLOUD_STATIC_MODELS: readonly ModelSpec<"openai-completions">[]
 		baseUrl: GMI_CLOUD_BASE_URL,
 		reasoning: true,
 		input: ["text"],
-		cost: { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0 },
+		cost: { input: 0.14, output: 0.28, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 1048576,
 		maxTokens: 384000,
 		thinking: { mode: "effort", efforts: [Effort.High, Effort.Max] },
