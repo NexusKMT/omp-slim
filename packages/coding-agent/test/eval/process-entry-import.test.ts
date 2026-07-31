@@ -60,7 +60,7 @@ it("starts ordinary CLI paths without loading the native computer addon", async 
 		const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
 		expect(exitCode, `${args.at(-1)}: ${stderr}`).toBe(0);
 	}
-}, 15_000);
+});
 
 it("dispatches the computer worker through the CLI host selector in a child process", async () => {
 	const fixture = path.resolve(import.meta.dir, "../fixtures/computer-worker-cli-selector.ts");
