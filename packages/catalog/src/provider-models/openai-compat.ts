@@ -3132,14 +3132,20 @@ function toSyntheticStringList(value: unknown): readonly string[] {
  * is the thinking-off state rather than a tier of its own, so it backs the
  * `minimal` selector through the wire map (same shape as the Fireworks
  * `minimal → none` map) and gives these routes a real no-thinking tier.
- * Routes with no recognizable tier fall through to identity inference.
+ * A route that advertises only `none` (or tiers this client doesn't know)
+ * still gets the minimal-off mapping: falling through to identity inference
+ * would fabricate an unadvertised ladder, and leaving thinking unset would
+ * leak any stale reference ladder past the wire vocabulary.
  */
 function resolveSyntheticThinking(wireEfforts: readonly string[]): ThinkingConfig | undefined {
 	const efforts = THINKING_EFFORTS.filter(effort => wireEfforts.includes(effort));
+	const wireHasNone = wireEfforts.includes(SYNTHETIC_WIRE_EFFORT_NONE);
 	if (efforts.length === 0) {
-		return undefined;
+		return wireHasNone
+			? { mode: "effort", efforts: [Effort.Minimal], effortMap: { [Effort.Minimal]: SYNTHETIC_WIRE_EFFORT_NONE } }
+			: undefined;
 	}
-	if (!wireEfforts.includes(SYNTHETIC_WIRE_EFFORT_NONE) || efforts.includes(Effort.Minimal)) {
+	if (!wireHasNone || efforts.includes(Effort.Minimal)) {
 		return { mode: "effort", efforts };
 	}
 	return {
@@ -3211,7 +3217,16 @@ export function syntheticModelManagerOptions(
 						const wireEfforts = isRecord(record.reasoning_parameters)
 							? toSyntheticStringList(record.reasoning_parameters.efforts)
 							: [];
+						const wireReasoning = features.includes("reasoning") || wireEfforts.length > 0;
 						const thinking = resolveSyntheticThinking(wireEfforts);
+						// A route whose only thinking surface is the router's off state is
+						// not a reasoning model from the user's side — reporting
+						// `reasoning: true` with a minimal-only ladder would light up the
+						// effort dial for a dial with one stop.
+						const reasoning =
+							(wireReasoning && (thinking?.efforts.length ?? 0) > 1) ||
+							entry.supports_reasoning === true ||
+							(reference?.reasoning ?? false);
 						// The router aliases (`syn:*`) and newly added routes carry no
 						// bundled reference, so these advertised capabilities are the only
 						// truth available. Without them such a model lands non-reasoning
@@ -3223,17 +3238,18 @@ export function syntheticModelManagerOptions(
 						return {
 							...base,
 							name: toModelName(entry.name, reference?.name ?? defaults.name),
-							reasoning:
-								features.includes("reasoning") ||
-								wireEfforts.length > 0 ||
-								entry.supports_reasoning === true ||
-								(reference?.reasoning ?? false),
+							reasoning,
 							...(thinking ? { thinking } : {}),
 							input:
 								modalities.includes("image") || entry.supports_vision === true || referenceSupportsImage
 									? ["text", "image"]
 									: ["text"],
-							...(features.length > 0 && !features.includes("tools") ? { supportsTools: false } : {}),
+							// Wire proves absence only when the route advertises OTHER
+							// features (a populated but tool-less list); a reference
+							// that already ruled tools out stays ruled out either way.
+							...((features.length > 0 && !features.includes("tools")) || reference?.supportsTools === false
+								? { supportsTools: false }
+								: {}),
 							cost: resolveSyntheticCost(record.pricing, base.cost),
 							contextWindow: toPositiveNumber(
 								entry.context_length,

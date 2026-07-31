@@ -9,10 +9,18 @@ import type { FetchImpl } from "@oh-my-pi/pi-catalog/types";
  * output cap in `max_output_length`, the accepted `reasoning_effort` values in
  * `reasoning_parameters.efforts`, and `$`-prefixed per-token prices.
  */
-function syntheticModelsFetch(): { calls: string[]; fetch: FetchImpl } {
+type SyntheticPayloadEntry = Record<string, unknown>;
+
+function syntheticModelsFetch(extraEntries: SyntheticPayloadEntry[] = []): {
+	calls: string[];
+	authorizations: (string | null)[];
+	fetch: FetchImpl;
+} {
 	const calls: string[] = [];
-	const fetch: FetchImpl = async (input: string | URL | Request) => {
+	const authorizations: (string | null)[] = [];
+	const fetch: FetchImpl = async (input: string | URL | Request, init?: RequestInit) => {
 		calls.push(String(input));
+		authorizations.push(new Headers(init?.headers).get("authorization"));
 		return new Response(
 			JSON.stringify({
 				data: [
@@ -57,20 +65,22 @@ function syntheticModelsFetch(): { calls: string[]; fetch: FetchImpl } {
 						context_length: 131072,
 						supported_features: ["json_mode"],
 					},
+					...extraEntries,
 				],
 			}),
 			{ status: 200, headers: { "content-type": "application/json" } },
 		);
 	};
-	return { calls, fetch };
+	return { calls, authorizations, fetch };
 }
 
 describe("Synthetic provider discovery", () => {
 	test("reads capabilities from Synthetic's own schema instead of the bundled reference", async () => {
-		const { calls, fetch } = syntheticModelsFetch();
+		const { calls, authorizations, fetch } = syntheticModelsFetch();
 		const models = await syntheticModelManagerOptions({ apiKey: "syn-test-key", fetch }).fetchDynamicModels?.();
 
 		expect(calls).toEqual(["https://api.synthetic.new/openai/v1/models"]);
+		expect(authorizations).toEqual(["Bearer syn-test-key"]);
 
 		// `syn:*` router aliases ship a bundled reference baked from the era when
 		// this mapper read field names Synthetic never sends: `reasoning: false`,
@@ -129,6 +139,58 @@ describe("Synthetic provider discovery", () => {
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		});
 		expect(plain?.thinking).toBeUndefined();
+	});
+
+	test("maps a none-only effort vocabulary onto minimal instead of inferring a phantom ladder", async () => {
+		const { fetch } = syntheticModelsFetch([
+			{
+				id: "hf:example/off-switch-only",
+				object: "model",
+				name: "example/off-switch-only",
+				reasoning_parameters: { efforts: ["none"] },
+				input_modalities: ["text"],
+				context_length: 131072,
+				max_output_length: 32768,
+				supported_features: ["tools", "reasoning"],
+			},
+		]);
+		const models = await syntheticModelManagerOptions({ apiKey: "syn-test-key", fetch }).fetchDynamicModels?.();
+
+		// `none` alone is the router's off state, not a reasoning dial: reporting
+		// `reasoning: true` here would let identity inference fabricate an
+		// unadvertised low/medium/high ladder for the request layer.
+		const offOnly = models?.find(model => model.id === "hf:example/off-switch-only");
+		expect(offOnly?.reasoning).toBe(false);
+		expect(offOnly?.thinking).toEqual({
+			mode: "effort",
+			efforts: [Effort.Minimal],
+			effortMap: { minimal: "none" },
+		});
+	});
+
+	test("overrides a stale bundled reference with the wire's effort vocabulary", async () => {
+		// `hf:zai-org/GLM-5.2` ships a bundled reference with a baked effort
+		// ladder; the wire saying the route only accepts `none` must win.
+		const { fetch } = syntheticModelsFetch([
+			{
+				id: "hf:zai-org/GLM-5.2",
+				object: "model",
+				name: "zai-org/GLM-5.2",
+				reasoning_parameters: { efforts: ["none"] },
+				input_modalities: ["text"],
+				context_length: 202752,
+				max_output_length: 32768,
+				supported_features: ["tools"],
+			},
+		]);
+		const models = await syntheticModelManagerOptions({ apiKey: "syn-test-key", fetch }).fetchDynamicModels?.();
+
+		const glm = models?.find(model => model.id === "hf:zai-org/GLM-5.2");
+		expect(glm?.thinking).toEqual({
+			mode: "effort",
+			efforts: [Effort.Minimal],
+			effortMap: { minimal: "none" },
+		});
 	});
 
 	test("serves no dynamic models without an API key", () => {
