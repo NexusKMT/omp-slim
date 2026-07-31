@@ -195,6 +195,9 @@
 ### Fixed
 
 - Fixed the Python RPC client dropping current context, compaction, OAuth URL, and terminal-settlement fields, and made additive notification variants observable without stopping the stdout reader.
+### Fixed
+
+- Fixed the browser tool silently ignoring `url` when opening a new tab on an attached browser (`app.cdp_url` or `app.path`), so the tab now navigates on open exactly as it already did on reuse and in headless mode.
 
 ## [17.1.8] - 2026-07-28
 

@@ -810,6 +810,13 @@ export class WorkerCore {
 				this.#page = page;
 				this.#observeDialogs();
 				if (payload.dialogs) this.#applyDialogPolicy(payload.dialogs);
+				if (payload.url) {
+					await this.#page.goto(payload.url, {
+						// Same default as the headless arm: dev servers with HMR/WS never reach networkidle.
+						waitUntil: payload.waitUntil ?? "load",
+						timeout: payload.timeoutMs,
+					});
+				}
 			}
 			this.#targetId = await targetIdForPage(this.#page);
 			this.#transport.send({ type: "ready", info: await this.#currentReadyInfo() });
