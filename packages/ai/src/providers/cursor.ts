@@ -3914,9 +3914,8 @@ function handleConversationCheckpointUpdate(
 	if (usedTokens <= 0) {
 		return;
 	}
-	if (output.usage.output !== usedTokens) {
-		output.usage.output = usedTokens;
-		output.usage.totalTokens = output.usage.input + output.usage.output;
+	if (output.usage.contextTokens !== usedTokens) {
+		output.usage.contextTokens = usedTokens;
 	}
 }
 
