@@ -91,8 +91,7 @@ function unwrapResultUrl(href: string): string | undefined {
  * as publication metadata.
  */
 function extractPublishedDate(block: string): string | undefined {
-	const extrasUrl =
-		/<div\b[^>]*\bclass="[^"]*\bresult__extras__url\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i.exec(block)?.[1];
+	const extrasUrl = /<div\b[^>]*\bclass="[^"]*\bresult__extras__url\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i.exec(block)?.[1];
 	if (!extrasUrl) return undefined;
 	for (const match of extrasUrl.matchAll(/<span\b[^>]*>([\s\S]*?)<\/span>/gi)) {
 		const text = decodeHtmlText(match[1]);

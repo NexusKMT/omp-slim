@@ -149,13 +149,7 @@ describe("DuckDuckGo web search provider", () => {
 
 	it("does not mistake a date-leading span snippet for a publication timestamp", async () => {
 		const html = resultsPage(
-			resultBlock(
-				"https://example.com/undated-span",
-				"Undated span result",
-				"2020-01-02",
-				undefined,
-				"span",
-			),
+			resultBlock("https://example.com/undated-span", "Undated span result", "2020-01-02", undefined, "span"),
 		);
 		const fetchMock: FetchImpl = () => Promise.resolve(new Response(html, { status: 200 }));
 

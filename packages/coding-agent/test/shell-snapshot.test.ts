@@ -106,7 +106,6 @@ describe("sanitizeSnapshotForBrush", () => {
 // function but discard the sidecar var, so the replay shell ran
 // `command "" "$@"` and died with `command: command not found:` (issue #3470).
 
-
 async function runBashWithCapturedOutput(
 	script: string,
 	options: { env?: Record<string, string | undefined>; stdin?: string } = {},
@@ -115,7 +114,11 @@ async function runBashWithCapturedOutput(
 	const stdinPath = path.join(ioDir, "stdin");
 	const stdoutPath = path.join(ioDir, "stdout");
 	const stderrPath = path.join(ioDir, "stderr");
-	await Promise.all([fs.writeFile(stdinPath, options.stdin ?? ""), fs.writeFile(stdoutPath, ""), fs.writeFile(stderrPath, "")]);
+	await Promise.all([
+		fs.writeFile(stdinPath, options.stdin ?? ""),
+		fs.writeFile(stdoutPath, ""),
+		fs.writeFile(stderrPath, ""),
+	]);
 
 	try {
 		// Bun 1.4's test worker can inherit an invalid IPC descriptor on macOS,
