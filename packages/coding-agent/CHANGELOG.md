@@ -19,6 +19,9 @@
 ### Fixed
 
 - Fixed CLI positional initial messages bypassing automatic session-title generation, which left shell-launched sessions unnamed until a later editor submission ([#7166](https://github.com/can1357/oh-my-pi/issues/7166)).
+### Fixed
+
+- Fixed the environment-variable reference omitting the Kitty Unicode placeholder controls and tmux placement caveat ([#7172](https://github.com/can1357/oh-my-pi/issues/7172)).
 
 ## [17.2.1] - 2026-07-30
 
