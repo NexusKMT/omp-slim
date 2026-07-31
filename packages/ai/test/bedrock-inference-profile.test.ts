@@ -1,9 +1,24 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { streamBedrock } from "@oh-my-pi/pi-ai/providers/amazon-bedrock";
 import type { Context, FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { withEnv } from "./helpers";
+
+// These suites capture the request payload from a fire-and-forget stream, so a
+// credential lookup that rejects after the test ends surfaces as an unhandled
+// error against whatever runs next. Skip Bedrock auth: the payload is built
+// before signing and no request leaves the process.
+const originalSkipAuth = process.env.AWS_BEDROCK_SKIP_AUTH;
+
+beforeAll(() => {
+	process.env.AWS_BEDROCK_SKIP_AUTH = "1";
+});
+
+afterAll(() => {
+	if (originalSkipAuth === undefined) delete process.env.AWS_BEDROCK_SKIP_AUTH;
+	else process.env.AWS_BEDROCK_SKIP_AUTH = originalSkipAuth;
+});
 
 const profileArn = "arn:aws:bedrock:us-east-2:1234567890:application-inference-profile/company-opus-48";
 const profileModel: Model<"bedrock-converse-stream"> = buildModel({
