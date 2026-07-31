@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed automatic terminal appearance changes clearing native scrollback and snapping readers away from their current scroll position; the active output grid now repaints non-destructively, while Ctrl+L remains the explicit full-history recolor.
+
 ## [17.2.0] - 2026-07-30
 
 ### Breaking Changes
