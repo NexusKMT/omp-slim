@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BeamMemory } from "@oh-my-pi/pi-mnemopi/core/beam";
-import { openDatabase } from "@oh-my-pi/pi-mnemopi/db";
+import { AnnotationStore } from "@oh-my-pi/pi-mnemopi/core/annotations";
 
 const cleanup: string[] = [];
 
@@ -40,10 +40,8 @@ describe("prepared statement lifetime", () => {
 		expect(() => beam.db.close(true)).not.toThrow();
 	});
 
-	// SQLite removes the -wal/-shm sidecars when the last connection closes
-	// cleanly, so their presence after close() means the connection outlived it.
-	// On Windows that also makes the bank undeletable, which is the user-visible
-	// half of the bug; on POSIX an open file can still be unlinked.
+	// close() swallows SQLite close failures, so verify the connection is actually
+	// closed before testing the user-visible ability to delete its backing file.
 	it("releases the database file so a closed bank can be deleted", () => {
 		const dbPath = join(tempDir(), "mnemopi.db");
 		const beam = new BeamMemory({ sessionId: "lifetime", dbPath });
@@ -52,21 +50,20 @@ describe("prepared statement lifetime", () => {
 		beam.forgetWorking(id);
 		beam.close();
 
-		expect(existsSync(`${dbPath}-wal`)).toBe(false);
-		expect(existsSync(`${dbPath}-shm`)).toBe(false);
+		expect(() => beam.db.run("SELECT 1")).toThrow(/closed/i);
 		expect(() => rmSync(dbPath)).not.toThrow();
 		expect(existsSync(dbPath)).toBe(false);
 	});
 
 	it("leaves no statement holding the connection after an annotation import round-trip", () => {
-		const dbPath = join(tempDir(), "mnemopi.db");
-		const beam = new BeamMemory({ sessionId: "lifetime", dbPath });
-		beam.remember("annotated row", { source: "test" });
-		const exported = beam.exportToDict();
-		beam.close();
+		const source = new AnnotationStore(join(tempDir(), "source.db"));
+		source.add("mem-1", "mentions", "Alice", "test");
+		const exported = source.exportAll();
+		expect(() => source.db.close(true)).not.toThrow();
 
-		const db = openDatabase(dbPath);
-		expect(() => db.close(true)).not.toThrow();
-		expect(exported.working_memory).toBeDefined();
+		const target = new AnnotationStore(join(tempDir(), "target.db"));
+		expect(target.importAll(exported).inserted).toBe(1);
+		expect(target.queryByMemory("mem-1", "mentions").map(row => row.value)).toEqual(["Alice"]);
+		expect(() => target.db.close(true)).not.toThrow();
 	});
 });
