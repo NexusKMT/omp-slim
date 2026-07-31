@@ -40,6 +40,9 @@
 ### Fixed
 
 - Removed the `read` exemption from the centralized artifact spill wrapper. Oversized read results now persist to a recoverable session artifact and return the configured inline head/tail instead of bypassing the threshold shared by other tools.
+### Fixed
+
+- Fixed DuckDuckGo web search under-returning requests above the first-page result count by submitting the returned continuation form until the requested limit is reached ([#7116](https://github.com/can1357/oh-my-pi/issues/7116)).
 
 ## [17.2.1] - 2026-07-30
 
