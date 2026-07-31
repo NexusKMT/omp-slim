@@ -268,6 +268,8 @@ export interface SessionMaintenanceHost {
 export class SessionMaintenance {
 	#compactionAbortController: AbortController | undefined;
 	#autoCompactionAbortController: AbortController | undefined;
+	/** Live tool-loop contexts whose mid-turn maintenance reached a no-progress dead end. */
+	readonly #midTurnCompactionDeadEnds = new WeakSet<AgentMessage[]>();
 	#skipPostTurnMaintenanceAssistantTimestamp: number | undefined;
 	readonly #host: SessionMaintenanceHost;
 
@@ -1032,6 +1034,7 @@ export class SessionMaintenance {
 		) {
 			return;
 		}
+		if (this.#midTurnCompactionDeadEnds.has(activeMessages)) return;
 
 		const lastAssistant = [...activeMessages]
 			.reverse()
@@ -1061,13 +1064,16 @@ export class SessionMaintenance {
 		}
 
 		const messagesBefore = activeMessages.length;
-		await this.runAutoCompaction("threshold", false, false, false, {
+		const result = await this.runAutoCompaction("threshold", false, false, false, {
 			autoContinue: false,
 			suppressContinuation: true,
 			suppressHandoff: true,
 			triggerContextTokens: contextTokens,
 			phase: "mid_turn",
 		});
+		if (result.automaticContinuationBlocked) {
+			this.#midTurnCompactionDeadEnds.add(activeMessages);
+		}
 
 		if (signal?.aborted) return;
 		const compactedMessages = this.#host.agent.state.messages;
