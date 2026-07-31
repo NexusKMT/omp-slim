@@ -47,18 +47,25 @@ async function pingComputerWorker(
 	}
 }
 
-it("starts ordinary CLI paths without loading the native computer addon", async () => {
+it("starts lightweight CLI paths without loading the native addon", async () => {
 	const cliPath = path.resolve(import.meta.dir, "../../src/cli.ts");
 	for (const args of [
 		["--no-addons", cliPath, "--version"],
 		[cliPath, "--help"],
 	]) {
 		const proc = Bun.spawn([process.execPath, ...args], {
+			env: { ...process.env, PI_DEBUG_STARTUP: "1" },
 			stdout: "pipe",
 			stderr: "pipe",
 		});
-		const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+		const [exitCode, stdout, stderr] = await Promise.all([
+			proc.exited,
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
+		]);
 		expect(exitCode, `${args.at(-1)}: ${stderr}`).toBe(0);
+		expect(stdout).toContain(args.at(-1) === "--help" ? "USAGE" : "omp/");
+		expect(stderr).not.toContain("native:loadNative");
 	}
 	// Two cold CLI spawns (`--version`, `--help`) per run; the assertion is the exit
 	// code, not the wall time.

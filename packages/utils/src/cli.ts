@@ -133,15 +133,18 @@ export interface ParseOutput<
 // Command base class
 // ---------------------------------------------------------------------------
 
-export interface CommandCtor {
-	new (argv: string[], config: CliConfig): Command;
+export interface CommandMetadata {
 	description?: string;
 	hidden?: boolean;
-	strict?: boolean;
-	aliases?: string[];
-	examples?: string[];
 	flags?: Record<string, FlagDescriptor>;
 	args?: Record<string, ArgDescriptor>;
+	examples?: string[];
+}
+
+export interface CommandCtor extends CommandMetadata {
+	new (argv: string[], config: CliConfig): Command;
+	strict?: boolean;
+	aliases?: string[];
 }
 
 /** Configuration passed to every command instance and help renderers. */
@@ -149,7 +152,7 @@ export interface CliConfig {
 	bin: string;
 	version: string;
 	/** All registered commands keyed by their canonical name. */
-	commands: Map<string, CommandCtor>;
+	commands: Map<string, CommandMetadata>;
 }
 
 /** Minimal Command base matching the oclif surface we use. */
@@ -299,7 +302,7 @@ export function renderRootHelp(config: CliConfig): void {
 
 	// Show the default command's flags/args/examples inline.
 	// The default command is the one marked hidden (it's the implicit entry point).
-	const defaultCmd = [...commands.values()].find(C => C.hidden);
+	const defaultCmd = [...commands.values()].find(command => command.hidden);
 	if (defaultCmd) {
 		renderCommandBody(lines, defaultCmd);
 	}
@@ -309,8 +312,8 @@ export function renderRootHelp(config: CliConfig): void {
 	if (visible.length > 0) {
 		lines.push("COMMANDS");
 		const maxLen = Math.max(...visible.map(([n]) => n.length));
-		for (const [name, C] of visible.sort((a, b) => a[0].localeCompare(b[0]))) {
-			lines.push(`  ${name.padEnd(maxLen + 2)}${C.description ?? ""}`);
+		for (const [name, command] of visible.sort((a, b) => a[0].localeCompare(b[0]))) {
+			lines.push(`  ${name.padEnd(maxLen + 2)}${command.description ?? ""}`);
 		}
 		lines.push("");
 	}
@@ -350,9 +353,9 @@ export function renderCommandHelp(bin: string, id: string, Cmd: CommandCtor): vo
 	process.stdout.write(lines.join("\n"));
 }
 
-function renderCommandBody(lines: string[], Cmd: CommandCtor): void {
-	const argDefs = Cmd.args ?? {};
-	const flagDefs = Cmd.flags ?? {};
+function renderCommandBody(lines: string[], command: CommandMetadata): void {
+	const argDefs = command.args ?? {};
+	const flagDefs = command.flags ?? {};
 
 	// Arguments
 	const argEntries = Object.entries(argDefs);
@@ -387,9 +390,9 @@ function renderCommandBody(lines: string[], Cmd: CommandCtor): void {
 	}
 
 	// Examples
-	if (Cmd.examples && Cmd.examples.length > 0) {
+	if (command.examples && command.examples.length > 0) {
 		lines.push("EXAMPLES");
-		for (const ex of Cmd.examples) {
+		for (const ex of command.examples) {
 			for (const line of ex.split("\n")) {
 				lines.push(`  ${line}`);
 			}
@@ -406,6 +409,7 @@ function renderCommandBody(lines: string[], Cmd: CommandCtor): void {
 export interface CommandEntry {
 	name: string;
 	load: () => Promise<CommandCtor>;
+	help?: CommandMetadata;
 	aliases?: string[];
 }
 
@@ -506,10 +510,12 @@ async function loadEntry(entry: CommandEntry): Promise<CommandCtor> {
 
 /** Resolve all command loaders for help/alias display. */
 async function loadAllCommands(opts: RunOptions): Promise<CliConfig> {
-	const commands = new Map<string, CommandCtor>();
-	const loaded = await Promise.all(opts.commands.map(async e => [e.name, await loadEntry(e)] as const));
-	for (const [name, Cmd] of loaded) {
-		commands.set(name, Cmd);
+	const commands = new Map<string, CommandMetadata>();
+	const loaded = await Promise.all(
+		opts.commands.map(async entry => [entry.name, entry.help ?? (await loadEntry(entry))] as const),
+	);
+	for (const [name, command] of loaded) {
+		commands.set(name, command);
 	}
 	return { bin: opts.bin, version: opts.version, commands };
 }

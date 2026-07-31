@@ -54,6 +54,50 @@ describe("run() per-command help", () => {
 	});
 });
 
+describe("run() root help", () => {
+	// Contract: root help renders registered metadata without importing command
+	// implementations. Heavy or unavailable optional commands must not make
+	// `omp --help` slow or crash.
+	it("renders static metadata without loading command modules", async () => {
+		let loads = 0;
+		const commands: CommandEntry[] = [
+			{
+				name: "launch",
+				load: async () => {
+					loads++;
+					throw new Error("runtime graph loaded");
+				},
+				help: {
+					hidden: true,
+					flags: { model: Flags.string({ description: "model selector" }) },
+				},
+			},
+			{
+				name: "good",
+				load: async () => {
+					loads++;
+					throw new Error("runtime graph loaded");
+				},
+				help: { description: "prints good things" },
+			},
+		];
+		const writes: string[] = [];
+		const stdoutSpy = spyOn(process.stdout, "write").mockImplementation(chunk => {
+			writes.push(String(chunk));
+			return true;
+		});
+		try {
+			await run({ bin: "omp", version: "0.0.0", argv: ["--help"], commands });
+		} finally {
+			stdoutSpy.mockRestore();
+		}
+		const output = writes.join("");
+		expect(loads).toBe(0);
+		expect(output).toContain("--model=<value>");
+		expect(output).toContain("good  prints good things");
+	});
+});
+
 describe("run() usage errors", () => {
 	// Contract: a missing required arg prints a concise `error:` + USAGE line to
 	// stderr and exits 1 — it must NOT throw past run() (which would dump a

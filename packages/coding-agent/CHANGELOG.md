@@ -91,6 +91,7 @@
 - Optimized tool guidance for bash, grep, and glob to be more concise while clarifying shell boundaries and search timeouts.
 - Optimized models configuration resource probing to run in a single child process, reducing startup contention.
 - Startup release notes now default to a compact change-count summary. Use `startup.changelogMode` (`summary` | `expanded` | `hidden`) to control them; legacy `collapseChangelog` choices migrate automatically ([#6771](https://github.com/can1357/oh-my-pi/issues/6771)).
+- Reduced `omp --help` cold-start latency and memory use by rendering lightweight command metadata without loading runtime command, provider, or native-addon graphs.
 
 ### Fixed
 
