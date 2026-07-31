@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added a configurable per-request web search timeout via `providers.webSearchTimeoutSeconds`.
+- Added a configurable per-request web search timeout via `providers.webSearchTimeoutSeconds` ([#7197](https://github.com/can1357/oh-my-pi/pull/7197) by [@will-bogusz](https://github.com/will-bogusz)).
 
 ## [17.2.2] - 2026-07-31
 
