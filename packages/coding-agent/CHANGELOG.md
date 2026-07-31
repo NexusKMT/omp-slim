@@ -49,6 +49,9 @@
 ### Changed
 
 - Moved subagent model-registry refresh and session-file opening off the launch critical path. Registry refresh now runs in the background while model resolution uses the registry's static/provider lookup, and `SessionManager.open` starts before prewalk/output-schema/session-option assembly so session creation waits only at its actual input boundary.
+### Changed
+
+- Batched same-turn file-session appends behind the session writer's microtask boundary. Render and tool paths can now record several transcript entries without paying one synchronous file write per entry, while explicit `flush()` and `close()` still make queued lines durable in order.
 
 ## [17.2.1] - 2026-07-30
 
