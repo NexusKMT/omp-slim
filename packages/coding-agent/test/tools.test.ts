@@ -645,7 +645,7 @@ describe("Coding Agent Tools", () => {
 				"tools.artifactSpillThreshold": 20,
 				"tools.artifactTailBytes": 1,
 				"tools.artifactTailLines": 10,
-				"tools.artifactHeadBytes": 0,
+				"tools.artifactHeadBytes": 1,
 			});
 			const defaultLimit = spillSettings.get("read.defaultLimit");
 			const spillManager = SessionManager.create(testDir, path.join(testDir, "spill-sessions"));
@@ -680,6 +680,7 @@ describe("Coding Agent Tools", () => {
 				expect(Buffer.byteLength(output, "utf-8")).toBeLessThan(20 * 1024);
 				expect(output).toContain("artifact://");
 				expect(truncation?.nextOffset).toBe(defaultLimit + 1);
+				expect(output).toContain(`Use :${defaultLimit + 1} to continue`);
 
 				const saveArtifact = vi.spyOn(spillManager, "saveArtifact");
 				const artifactResult = await spillReadTool.execute(

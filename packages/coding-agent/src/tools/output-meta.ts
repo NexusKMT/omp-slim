@@ -458,6 +458,9 @@ export function formatTruncationMetaNotice(truncation: TruncationMeta): string {
 		} else {
 			notice = `Showing ${truncation.outputLines} of ${totalLines} lines; middle elided`;
 		}
+		if (truncation.nextOffset != null) {
+			notice += `. Use :${truncation.nextOffset} to continue`;
+		}
 		if (truncation.artifactId != null) {
 			notice += `. ${formatFullOutputReference(truncation.artifactId)}`;
 		}
