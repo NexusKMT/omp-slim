@@ -699,6 +699,20 @@ export class SecretObfuscator {
 		return key;
 	}
 
+	/** Whether this pass will mint a keyed placeholder from a regex match. */
+	#willMintRegexPlaceholder(secretValues: ReadonlySet<string>): boolean {
+		for (const entry of this.#regexEntries) {
+			if (entry.mode !== "obfuscate") continue;
+			for (const value of secretValues) {
+				entry.regex.lastIndex = 0;
+				const matches = entry.regex.test(value);
+				entry.regex.lastIndex = 0;
+				if (matches) return true;
+			}
+		}
+		return false;
+	}
+
 	hasSecrets(): boolean {
 		return this.#hasAny;
 	}
@@ -709,6 +723,13 @@ export class SecretObfuscator {
 		this.#currentRegexSecretValues = this.collectRegexSecretValuesForObfuscation(text);
 		for (const secretValue of sharedRegexSecretValues ?? []) {
 			this.#currentRegexSecretValues.add(secretValue);
+		}
+		// Resolve a lazy key before the replace phase whenever this pass will mint
+		// a regex placeholder. The key registers itself as a replace-mode secret;
+		// resolving it later, while processing the regex match, would expose key
+		// bytes already present in this same provider-visible input.
+		if (this.#keyProvider !== undefined && this.#willMintRegexPlaceholder(this.#currentRegexSecretValues)) {
+			this.#getKey();
 		}
 		let result = text;
 		// `origin` runs parallel to `result` (one tag char per result char): "I" for

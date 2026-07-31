@@ -103,6 +103,17 @@ describe("lazy placeholder key", () => {
 		expect(args.old_text).toBe(`MOONSHOT_API_KEY=${token}`);
 	});
 
+	it("redacts a lazily resolved key from the same input that triggers resolution", () => {
+		const key = "K".repeat(43);
+		const obfuscator = new SecretObfuscator(builtinCredentialSecretEntries(), () => key);
+		const token = `sk-${"a1B-c2D".repeat(7)}e3F`;
+
+		const providerView = obfuscator.obfuscate(`key=${key}\ncredential=${token}`);
+
+		expect(providerView).not.toContain(key);
+		expect(providerView).not.toContain(token);
+	});
+
 	it("getSecretPlaceholderKeySync creates the key file on demand and shares it with the async readers", async () => {
 		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-lazy-placeholder-key-"));
 		try {
