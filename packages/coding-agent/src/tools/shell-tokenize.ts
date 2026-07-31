@@ -161,7 +161,9 @@ export function extractFlatShellCommandSegments(command: string): string[] {
 			atWordStart = true;
 			continue;
 		}
-		if (ch === "\n" || ch === ";" || ch === "|" || ch === "&") {
+		const isRedirectionOperatorCharacter =
+			(ch === "|" || ch === "&") && (command[i - 1] === ">" || (ch === "&" && command[i + 1] === ">"));
+		if ((ch === "\n" || ch === ";" || ch === "|" || ch === "&") && !isRedirectionOperatorCharacter) {
 			pushSegment(i);
 			if ((ch === "|" || ch === "&") && command[i + 1] === ch) i++;
 			segmentStart = i + 1;

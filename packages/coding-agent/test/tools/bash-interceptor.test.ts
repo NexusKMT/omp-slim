@@ -108,6 +108,17 @@ describe("compound command interception", () => {
 		}
 	});
 
+	it("does not treat redirection targets as later commands", () => {
+		for (const command of [
+			"echo hi >|git commit -m message",
+			"echo hi >| git commit -m message",
+			"echo hi >&git commit -m message",
+			"echo hi >& git commit -m message",
+		]) {
+			expect(checkBashInterception(command, ["commit"], rules).block).toBe(false);
+		}
+	});
+
 	it("does not add matches for unsupported shell syntax", () => {
 		for (const command of [
 			'echo "$(git commit -m message)"',
