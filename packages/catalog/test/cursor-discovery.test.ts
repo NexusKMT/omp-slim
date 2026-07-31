@@ -321,13 +321,13 @@ describe("fetchCursorUsableModels", () => {
 		expect(models).toEqual([expect.objectContaining({ id: "claude-4.5-sonnet", contextWindow: 1_000_000 })]);
 	});
 
-	it("ignores Cursor cache rows written before max-mode metadata was persisted", async () => {
+	it("ignores Cursor cache rows written before 1M context windows were persisted", async () => {
 		const cacheDbPath = await createTempCachePath();
-		const staleSpec = cursorModelSpec("cursor-composer-max");
+		const staleSpec = { ...cursorModelSpec("claude-opus-4-8-high-fast"), cursorMaxMode: true };
 		await resolveProviderModels(
 			{
 				providerId: "cursor",
-				cacheProviderId: "cursor",
+				cacheProviderId: "cursor:max-mode-v2",
 				cacheDbPath,
 				staticModels: [],
 				fetchDynamicModels: async () => [staleSpec],
@@ -360,6 +360,7 @@ describe("fetchCursorUsableModels", () => {
 			expect.objectContaining({
 				id: staleSpec.id,
 				cursorMaxMode: true,
+				contextWindow: 1_000_000,
 			}),
 		]);
 	});
