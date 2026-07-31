@@ -410,7 +410,8 @@ export class ExtensionRunner {
 	constructor(
 		private readonly extensions: Extension[],
 		private readonly runtime: ExtensionRuntime,
-		private readonly cwd: string,
+		/** Ignored: `cwd` is always read live via the `cwd` getter below, not cached here. */
+		_initialCwd: string,
 		private readonly sessionManager: SessionManager,
 		private readonly modelRegistry: ModelRegistry,
 		getMemory?: () => MemoryRuntimeContext | undefined,
@@ -421,6 +422,24 @@ export class ExtensionRunner {
 		this.#uiContext = noOpUIContext;
 		this.#getMemoryFn = getMemory;
 		this.#getAsyncJobSnapshotFn = getAsyncJobSnapshot ?? (() => null);
+	}
+
+	/**
+	 * Live session directory, not a session-start snapshot: `/move`
+	 * (`SessionManager.moveTo()`) relocates the owning session by updating
+	 * `sessionManager`'s own `#cwd`, not a process-global. Reading it here
+	 * via the getter — instead of caching the constructor-time value in a
+	 * field — keeps every `ExtensionContext` built below in sync with this
+	 * session's actual, current directory. Deliberately `sessionManager.getCwd()`
+	 * rather than `getProjectDir()`: the latter is a single process-wide value
+	 * that only the interactive TUI's `/move` handler happens to also update
+	 * (`InteractiveModeContext#applyCwdChange`) — an SDK/ACP host running
+	 * several concurrent sessions each with their own `cwd` (see
+	 * `CreateAgentSessionOptions.cwd`) must never have one session's move
+	 * leak into another's `ctx.cwd` by reading a shared global.
+	 */
+	get cwd(): string {
+		return this.sessionManager.getCwd();
 	}
 
 	initialize(

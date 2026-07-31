@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `ExtensionContext.cwd` staying pinned to the directory a session started in, even after it moved: `ExtensionRunner` cached `cwd` from its constructor argument instead of reading the owning session's live directory, so extensions watching `ctx.cwd` (e.g. for git-worktree tracking) kept observing a stale path for the rest of the session — reachable via the interactive `/move` command, a programmatic `AgentSession.moveSession()`/`SessionManager.moveTo()` call, or an SDK/ACP session opened with a `cwd` different from the process's own. `ExtensionRunner.cwd` is now a getter over `this.sessionManager.getCwd()`, the same session-scoped value `moveTo()` updates directly, instead of the process-global project directory.
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
