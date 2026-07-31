@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Synthetic models losing their thinking selector, vision input, output cap and pricing: the discovery mapper read `supports_reasoning`, `supports_vision` and `max_tokens`, none of which Synthetic sends. It advertises `supported_features`, `reasoning_parameters.efforts`, `input_modalities`, `max_output_length` and `$`-prefixed `pricing`, so any route without a bundled reference (the `syn:*` router aliases, newly added routes such as `hf:moonshotai/Kimi-K3`) resolved to `reasoning: false` — hiding the effort dial and dropping `reasoning_effort` from every request — plus text-only input, zero cost, and an 8k output cap low enough to end turns on `length` and trigger recovery compaction. Effort ladders now come from the per-model wire vocabulary, with the router's `none` tier mapped onto `minimal`.
+
 ## [17.2.1] - 2026-07-30
 
 ### Fixed
