@@ -158,8 +158,7 @@ export async function executeInVmContext(options: {
 }
 
 export async function resetVmContext(sessionKey: string): Promise<void> {
-	const session =
-		sessions.get(sessionKey) ?? (await startingSessions.get(sessionKey)?.promise.catch(() => undefined));
+	const session = sessions.get(sessionKey) ?? (await startingSessions.get(sessionKey)?.promise.catch(() => undefined));
 	if (!session) return;
 	sessions.delete(sessionKey);
 	await killSession(session, new ToolError("JS context reset"), { force: false });
