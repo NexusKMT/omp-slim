@@ -186,6 +186,9 @@
 ### Removed
 
 - Removed the dangling `MCPManager.setOnNotification` single-slot setter, which had no callers in the runtime. Replaced by `MCPManager.addNotificationListener` — multi-listener, per-listener error isolation, returns an unsubscribe function.
+### Fixed
+
+- Fixed the Python RPC client dropping current context, compaction, OAuth URL, and terminal-settlement fields, and made additive notification variants observable without stopping the stdout reader.
 
 ## [17.1.8] - 2026-07-28
 
