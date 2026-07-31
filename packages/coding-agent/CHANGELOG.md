@@ -58,6 +58,9 @@
 ### Fixed
 
 - Fixed a fresh session with deferred MCP discovery injecting the newly mounted `xd://` tool catalog twice into the first model request: the post-discovery prompt rebuild already renders the full device catalog, but the pre-user `xdev-mount-notice` re-listed the same names because the rebuild never updated announcement tracking. The rebuild now reports the catalog it exposed and those devices are folded into the announced-mount baseline, so the notice is suppressed for anything the prompt already carries while non-rebuild mount changes and unmount notices still fire ([#7139](https://github.com/can1357/oh-my-pi/issues/7139)).
+### Fixed
+
+- Fixed the bash tool failing every command with `EACCES: permission denied, open '/tmp/omp-shell-snapshots/snapshot-bash-<uuid>.sh'` on machines where more than one Unix account runs `omp`. The snapshot directory was a single fixed name under the shared `os.tmpdir()` created 0700, so the first account to run `omp` owned it and every other account's pre-create write was denied; the throw escaped `getOrCreateSnapshot` into `executeBash`, and nothing was cached, so the failure repeated for every command. The directory is now scoped per uid (`omp-shell-snapshots-<uid>`), and an unusable snapshot directory degrades to running without a snapshot instead of failing the command.
 
 ## [17.2.1] - 2026-07-30
 
