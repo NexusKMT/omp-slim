@@ -504,7 +504,9 @@ export class AgentSession {
 	#asyncDeliveryEpoch = 0;
 
 	readonly #irc: IrcBridge;
-	#ircWakeTurnObserver: ((records: CustomMessage[]) => ((error?: unknown) => void) | undefined) | undefined;
+	#ircWakeTurnObserver:
+		| ((records: CustomMessage[]) => ((error?: unknown) => void | Promise<void>) | undefined)
+		| undefined;
 	// Agent identity (registry id) used for IRC routing and job ownership.
 	#agentId: string | undefined;
 	#agentKind: "main" | "sub" = "main";
@@ -575,7 +577,7 @@ export class AgentSession {
 	// on `agent_end` can fire its next `prompt` before #promptWithMessage's finally
 	#promptGeneration = 0;
 	#pendingAgentEndEmit: AgentSessionEvent | undefined;
-	#inFlightSettledCallbacks: Array<() => void> = [];
+	#inFlightSettledCallbacks: Array<() => void | Promise<void>> = [];
 	#sessionStopContinuationCount = 0;
 	#sessionStopHookActive = false;
 	#obfuscator: SecretObfuscator | undefined;
@@ -641,23 +643,25 @@ export class AgentSession {
 		}
 	}
 
-	#endInFlight(onSettled?: () => void): void {
+	#endInFlight(onSettled?: () => void | Promise<void>): void {
 		if (onSettled) this.#inFlightSettledCallbacks.push(onSettled);
 		this.#promptInFlightCount = Math.max(0, this.#promptInFlightCount - 1);
-		if (this.#promptInFlightCount === 0) {
-			this.#releasePowerAssertion();
-			this.#flushPendingAgentEnd();
-			this.#flushInFlightSettledCallbacks();
+		if (this.#promptInFlightCount !== 0) return;
+		this.#releasePowerAssertion();
+		this.#flushPendingAgentEnd();
+		if (this.#inFlightSettledCallbacks.length === 0) {
 			this.#drainStrandedQueuedMessages();
+			return;
 		}
+		void this.#flushInFlightSettledCallbacks().finally(() => this.#drainStrandedQueuedMessages());
 	}
 
-	#flushInFlightSettledCallbacks(): void {
+	async #flushInFlightSettledCallbacks(): Promise<void> {
 		const callbacks = this.#inFlightSettledCallbacks;
 		this.#inFlightSettledCallbacks = [];
 		for (const callback of callbacks) {
 			try {
-				callback();
+				await callback();
 			} catch (error) {
 				logger.warn("In-flight settle callback failed", { error: String(error) });
 			}
@@ -744,7 +748,7 @@ export class AgentSession {
 		if (parkedFollowUps.length > 0) {
 			this.agent.replaceQueues([...this.agent.peekSteeringQueue()], []);
 		}
-		let finishObservation: ((error?: unknown) => void) | undefined;
+		let finishObservation: ((error?: unknown) => void | Promise<void>) | undefined;
 		try {
 			finishObservation = this.#ircWakeTurnObserver?.(records);
 		} catch (error) {
@@ -779,9 +783,9 @@ export class AgentSession {
 						[...parkedFollowUps, ...this.agent.peekFollowUpQueue()],
 					);
 				}
-				this.#endInFlight(() => {
+				this.#endInFlight(async () => {
 					try {
-						finishObservation?.(turnError);
+						await finishObservation?.(turnError);
 					} catch (error) {
 						logger.warn("IRC wake turn observer failed to finish", { error: String(error) });
 					}
@@ -826,8 +830,11 @@ export class AgentSession {
 		this.#promptInFlightCount = 0;
 		this.#releasePowerAssertion();
 		this.#flushPendingAgentEnd();
-		this.#flushInFlightSettledCallbacks();
-		this.#drainStrandedQueuedMessages();
+		if (this.#inFlightSettledCallbacks.length === 0) {
+			this.#drainStrandedQueuedMessages();
+			return;
+		}
+		void this.#flushInFlightSettledCallbacks().finally(() => this.#drainStrandedQueuedMessages());
 	}
 
 	#flushPendingAgentEnd(): void {
@@ -6953,7 +6960,7 @@ export class AgentSession {
 
 	/** Installs task-executor monitoring around autonomous IRC wake turns. */
 	setIrcWakeTurnObserver(
-		observer: ((records: CustomMessage[]) => ((error?: unknown) => void) | undefined) | undefined,
+		observer: ((records: CustomMessage[]) => ((error?: unknown) => void | Promise<void>) | undefined) | undefined,
 	): void {
 		this.#ircWakeTurnObserver = observer;
 	}

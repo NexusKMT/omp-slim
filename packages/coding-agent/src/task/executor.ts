@@ -2277,7 +2277,7 @@ export function attachIrcWakeTurnMonitor(session: AgentSession, options: IrcWake
 
 		turnMonitor.setActiveSession(session);
 		const unsubscribeTurn = turnMonitor.attach(session);
-		return turnError => {
+		return async turnError => {
 			unsubscribeTurn();
 			const activeSession = turnMonitor.takeActiveSession();
 			if (activeSession) turnMonitor.captureSalvage(activeSession);
@@ -2294,35 +2294,37 @@ export function attachIrcWakeTurnMonitor(session: AgentSession, options: IrcWake
 							: String(turnError)
 						: undefined;
 			turnMonitor.finish();
-			void finalizeRunResult({
-				monitor: turnMonitor,
-				done: {
-					exitCode: aborted || error ? 1 : 0,
-					error,
-					aborted,
-					abortReason: aborted ? turnMonitor.resolveAbortReasonText() : undefined,
-					durationMs: Date.now() - turnStartTime,
-				},
-				index,
-				id,
-				agent,
-				task: ircTask,
-				modelOverride: options.modelOverride,
-				outputSchema: options.outputSchema,
-				outputSchemaMode: options.outputSchemaMode,
-				outputSchemaSource: options.outputSchemaSource,
-				artifactsDir: options.artifactsDir,
-				eventBus: options.eventBus,
-				parentToolCallId: options.parentToolCallId,
-				detached: true,
-				sessionFile,
-				startTime: turnStartTime,
-			}).catch(finalizeError => {
+			try {
+				await finalizeRunResult({
+					monitor: turnMonitor,
+					done: {
+						exitCode: aborted || error ? 1 : 0,
+						error,
+						aborted,
+						abortReason: aborted ? turnMonitor.resolveAbortReasonText() : undefined,
+						durationMs: Date.now() - turnStartTime,
+					},
+					index,
+					id,
+					agent,
+					task: ircTask,
+					modelOverride: options.modelOverride,
+					outputSchema: options.outputSchema,
+					outputSchemaMode: options.outputSchemaMode,
+					outputSchemaSource: options.outputSchemaSource,
+					artifactsDir: options.artifactsDir,
+					eventBus: options.eventBus,
+					parentToolCallId: options.parentToolCallId,
+					detached: true,
+					sessionFile,
+					startTime: turnStartTime,
+				});
+			} catch (finalizeError) {
 				logger.warn("IRC subagent turn finalization failed", {
 					id,
 					error: finalizeError instanceof Error ? finalizeError.message : String(finalizeError),
 				});
-			});
+			}
 		};
 	});
 }

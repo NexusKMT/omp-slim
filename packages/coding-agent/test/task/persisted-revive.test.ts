@@ -39,7 +39,7 @@ function createRef(sessionFile: string): AgentRef {
 	};
 }
 
-type IrcWakeObserver = (records: CustomMessage[]) => ((error?: unknown) => void) | undefined;
+type IrcWakeObserver = (records: CustomMessage[]) => ((error?: unknown) => void | Promise<void>) | undefined;
 
 interface RevivedSessionHandle {
 	session: AgentSession;
@@ -223,7 +223,7 @@ describe("persisted subagent revival", () => {
 			timestamp: Date.now(),
 		};
 		const finish = observer?.([record]);
-		finish?.();
+		await finish?.();
 		await terminal.promise;
 
 		expect(frames[0]).toMatchObject({

@@ -54,7 +54,9 @@ function createMockSession(
 	let abortCount = 0;
 	let disposeCount = 0;
 	let promptIndex = 0;
-	let ircWakeTurnObserver: ((records: CustomMessage[]) => ((error?: unknown) => void) | undefined) | undefined;
+	let ircWakeTurnObserver:
+		| ((records: CustomMessage[]) => ((error?: unknown) => void | Promise<void>) | undefined)
+		| undefined;
 
 	const emit = (event: AgentSessionEvent) => {
 		for (const listener of [...listeners]) listener(event);
@@ -125,7 +127,7 @@ function createMockSession(
 				isError: false,
 			} as AgentSessionEvent);
 			emit({ type: "agent_end", messages: [yieldMessage] } as unknown as AgentSessionEvent);
-			finishObservation?.();
+			await finishObservation?.();
 			return "woken";
 		},
 		abort: async () => {
