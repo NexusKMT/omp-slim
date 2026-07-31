@@ -37,6 +37,9 @@
 ### Fixed
 
 - Fixed `/reload-plugins` not reconnecting MCP servers or refreshing the session's MCP tool and prompt-command registries despite listing MCP in its documented reload scope, so `.mcp.json` edits stayed inactive and removed prompt commands remained invocable until restart. The TUI reload pipeline now clears stale MCP prompt commands and runs the same disconnect/rediscover/`refreshMCPTools` path as `/mcp reload`, deriving discovery filters from settings so the reload keeps honoring `mcp.enableProjectConfig: false` instead of starting opted-out project servers ([#7189](https://github.com/can1357/oh-my-pi/issues/7189)).
+### Fixed
+
+- Removed the `read` exemption from the centralized artifact spill wrapper. Oversized read results now persist to a recoverable session artifact and return the configured inline head/tail instead of bypassing the threshold shared by other tools.
 
 ## [17.2.1] - 2026-07-30
 
