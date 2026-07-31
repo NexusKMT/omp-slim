@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Bash interceptor rules matching only the complete command input, so an anchored rule such as `^\s*git\s+commit\b` missed a later command in a flat compound command. Rules now also inspect unquoted/unescaped `&&`, `||`, `;`, `|`, `&`, and newline-separated command fragments, including forms with leading environment-variable assignments, while retaining the original whole-input match and conservatively skipping complex shell syntax.
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
