@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Anthropic web search sending unsupported temperature parameters to sampling-restricted Claude models.
+
 ## [17.2.2] - 2026-07-31
 
 ### Added
