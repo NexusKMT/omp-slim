@@ -1985,6 +1985,10 @@ export class MCPCommandController {
 	 * calls `session.refreshMCPTools(...)` so config edits take effect without a
 	 * restart. Public because `/reload-plugins` reuses it alongside `/mcp reload`
 	 * and the config-mutation flows in this controller.
+	 *
+	 * Discovery options are derived from settings so the reload honors the same
+	 * opt-outs as startup — notably `mcp.enableProjectConfig: false`, which must
+	 * keep project `.mcp.json` servers from being started on reload.
 	 */
 	async reloadServers(): Promise<void> {
 		if (!this.ctx.mcpManager) {
@@ -1994,8 +1998,12 @@ export class MCPCommandController {
 		// Disconnect all existing servers
 		await this.ctx.mcpManager.disconnectAll();
 
-		// Rediscover and connect
-		const result = await this.ctx.mcpManager.discoverAndConnect();
+		// Rediscover and connect, mirroring startup's discovery filters.
+		const result = await this.ctx.mcpManager.discoverAndConnect({
+			enableProjectConfig: this.ctx.settings.get("mcp.enableProjectConfig") ?? true,
+			filterExa: true,
+			filterBrowser: this.ctx.settings.get("browser.enabled") ?? false,
+		});
 		await this.ctx.session.refreshMCPTools(this.ctx.mcpManager.getTools());
 
 		this.#showMCPConnectionErrors(result.errors);

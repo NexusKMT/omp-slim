@@ -15,11 +15,11 @@ import { getProjectDir, removeWithRetries, setProjectDir } from "@oh-my-pi/pi-ut
 
 const originalProjectDir = getProjectDir();
 
-function createFakeCtx(cwd: string) {
+function createFakeCtx(cwd: string, settingsValues: Record<string, unknown> = {}) {
 	const mcpTools = [{ name: "mcp__srv_do" }];
 	const mcpManager = {
 		disconnectAll: vi.fn(async () => {}),
-		discoverAndConnect: vi.fn(async () => ({ errors: new Map<string, string>() })),
+		discoverAndConnect: vi.fn(async (_options?: unknown) => ({ errors: new Map<string, string>() })),
 		getTools: vi.fn(() => mcpTools),
 	};
 	const session = {
@@ -29,6 +29,7 @@ function createFakeCtx(cwd: string) {
 		mcpManager,
 		session,
 		sessionManager: { getCwd: () => cwd },
+		settings: { get: (key: string): unknown => settingsValues[key] },
 		refreshSkillState: vi.fn(async () => {}),
 		refreshSlashCommandState: vi.fn(async () => {}),
 		showStatus: vi.fn(() => {}),
@@ -61,5 +62,17 @@ describe("/reload-plugins MCP reconnect (#7189)", () => {
 		expect(mcpManager.discoverAndConnect).toHaveBeenCalledTimes(1);
 		expect(session.refreshMCPTools).toHaveBeenCalledTimes(1);
 		expect(session.refreshMCPTools).toHaveBeenCalledWith(mcpTools);
+	});
+
+	test("honors mcp.enableProjectConfig=false so opted-out project servers are not started on reload", async () => {
+		const { ctx, mcpManager } = createFakeCtx(projectDir, { "mcp.enableProjectConfig": false });
+		const runtime: TuiSlashCommandRuntime = { ctx };
+
+		await executeBuiltinSlashCommand("/reload-plugins", runtime);
+
+		expect(mcpManager.discoverAndConnect).toHaveBeenCalledTimes(1);
+		expect(mcpManager.discoverAndConnect).toHaveBeenCalledWith(
+			expect.objectContaining({ enableProjectConfig: false }),
+		);
 	});
 });
