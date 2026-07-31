@@ -2327,10 +2327,19 @@ export class AuthStorage {
 			if (!current) {
 				return { credential: undefined, refreshed: false, removed: false };
 			}
-			if (options.observedCredential && !authCredentialEquals(current, options.observedCredential)) {
+			const currentIsFresh = Date.now() + refreshSkewMs < current.expires;
+			// A peer rotated the credential out from under the caller's observation.
+			// Adopt the stored copy only when it is still usable; a stored copy that
+			// is itself expired must fall through to a refresh rather than be handed
+			// back and fail the downstream `getOAuthApiKey` expiry precondition.
+			if (
+				options.observedCredential &&
+				!authCredentialEquals(current, options.observedCredential) &&
+				currentIsFresh
+			) {
 				return { credential: current, refreshed: false, removed: false };
 			}
-			if (!options.forceRefresh && Date.now() + refreshSkewMs < current.expires) {
+			if (!options.forceRefresh && currentIsFresh) {
 				return { credential: current, refreshed: false, removed: false };
 			}
 			if (options.canRefresh && !options.canRefresh(current)) {
@@ -2370,10 +2379,17 @@ export class AuthStorage {
 			if (!current) {
 				return { credential: undefined, refreshed: false, removed: false };
 			}
-			if (options.observedCredential && !authCredentialEquals(current, options.observedCredential)) {
+			const currentIsFresh = Date.now() + refreshSkewMs < current.expires;
+			// Re-check after acquiring the lease: only adopt the stored copy on an
+			// observed mismatch when it is still usable, mirroring the pre-lease guard.
+			if (
+				options.observedCredential &&
+				!authCredentialEquals(current, options.observedCredential) &&
+				currentIsFresh
+			) {
 				return { credential: current, refreshed: false, removed: false };
 			}
-			if (!options.forceRefresh && Date.now() + refreshSkewMs < current.expires) {
+			if (!options.forceRefresh && currentIsFresh) {
 				return { credential: current, refreshed: false, removed: false };
 			}
 			if (options.canRefresh && !options.canRefresh(current)) {
