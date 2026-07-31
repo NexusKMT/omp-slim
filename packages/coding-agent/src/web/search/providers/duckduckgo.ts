@@ -3,7 +3,7 @@ import type { SearchResponse, SearchSource } from "../../../web/search/types";
 import { SearchProviderError } from "../../../web/search/types";
 import type { QuerySyntax } from "../query";
 import { formatScraperQuery } from "../query";
-import { clampNumResults } from "../utils";
+import { clampNumResults, dateToAgeSeconds } from "../utils";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
 import { browserFetch } from "./browser-page";
@@ -35,6 +35,8 @@ interface ParsedResult {
 	title: string;
 	url: string;
 	snippet?: string;
+	/** ISO timestamp lifted from the result row, when DDG emits one. */
+	publishedDate?: string;
 }
 
 /**
@@ -82,6 +84,21 @@ function unwrapResultUrl(href: string): string | undefined {
 }
 
 /**
+ * Lift a result row's publication timestamp from DDG markup. Recent DDG HTML
+ * renders it as a bare `<span>&nbsp; &nbsp; 2026-07-30T20:19:00.0000000</span>`
+ * inside `result__extras__url`. Other spans in the row (`result__icon`) decode
+ * to non-date text, so we scan every span and keep the first whose decoded
+ * content is an ISO date — undated rows return `undefined`.
+ */
+function extractPublishedDate(block: string): string | undefined {
+	for (const match of block.matchAll(/<span\b[^>]*>([\s\S]*?)<\/span>/gi)) {
+		const text = decodeHtmlText(match[1]);
+		if (/^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}|$)/.test(text)) return text;
+	}
+	return undefined;
+}
+
+/**
  * Walk the HTML page and pull out result blocks in document order.
  *
  * DDG renders each result inside a `<div class="result …">` container with
@@ -106,7 +123,12 @@ function parseHtmlResults(html: string): ParsedResult[] {
 		if (!titleText) continue;
 		const snippet = snippetRe.exec(block);
 		const snippetText = snippet ? decodeHtmlText(snippet[1]) : undefined;
-		results.push({ title: titleText, url, snippet: snippetText || undefined });
+		results.push({
+			title: titleText,
+			url,
+			snippet: snippetText || undefined,
+			publishedDate: extractPublishedDate(block),
+		});
 	}
 	return results;
 }
@@ -212,7 +234,13 @@ export async function searchDuckDuckGo(params: SearchParams): Promise<SearchResp
 		for (const result of parseHtmlResults(html)) {
 			if (seen.has(result.url)) continue;
 			seen.add(result.url);
-			sources.push({ title: result.title, url: result.url, snippet: result.snippet });
+			sources.push({
+				title: result.title,
+				url: result.url,
+				snippet: result.snippet,
+				publishedDate: result.publishedDate,
+				ageSeconds: dateToAgeSeconds(result.publishedDate),
+			});
 			if (sources.length >= numResults) break;
 		}
 
