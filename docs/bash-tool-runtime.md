@@ -43,7 +43,7 @@ Interception behavior:
 - on block, `BashTool` throws `ToolError` with message:
   - `Blocked: ...`
   - original command included.
-- heredocs, command substitutions, backticks, grouping, and malformed quoting do not produce extra fragments; they retain only the complete-input check. Interception is best-effort routing to dedicated tools, not a shell-security policy.
+- heredocs, parameter expansion, command substitutions, backticks, grouping, and malformed quoting do not produce extra fragments; they retain only the complete-input check. Interception is best-effort routing to dedicated tools, not a shell-security policy.
 
 Default rule patterns (defined in code) target common misuses:
 

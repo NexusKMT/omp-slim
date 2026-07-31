@@ -145,6 +145,7 @@ export function extractFlatShellCommandSegments(command: string): string[] {
 			ch === "(" ||
 			ch === ")" ||
 			(ch === "$" && command[i + 1] === "(") ||
+			(ch === "$" && command[i + 1] === "{") ||
 			(ch === "<" && command[i + 1] === "<") ||
 			((ch === "{" || ch === "}") &&
 				atWordStart &&

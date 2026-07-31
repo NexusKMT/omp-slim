@@ -110,7 +110,7 @@ git add file && git commit -m "message"
 GIT_AUTHOR_NAME=Dev git commit -m "message"
 ```
 
-An anchored rule such as `^\s*git\s+commit\b` can therefore match the `git commit` command in both examples. Quoted, escaped, and commented text is not treated as a command. Heredocs, command substitution, backticks, grouping, and malformed quoting retain only the complete-command check; the interceptor deliberately does not attempt to become a full shell parser.
+An anchored rule such as `^\s*git\s+commit\b` can therefore match the `git commit` command in both examples. Quoted, escaped, and commented text is not treated as a command. Heredocs, parameter expansion, command substitution, backticks, grouping, and malformed quoting retain only the complete-command check; the interceptor deliberately does not attempt to become a full shell parser.
 
 ### Interaction and selection guide
 
@@ -221,7 +221,7 @@ Choose the setting by the desired outcome:
 - `strict = true` is set on `BashTool`; `concurrency` is resolved per call: `pty: true` is `"exclusive"` (it takes over the terminal UI), everything else is `"shared"`, so multiple non-pty bash calls in one assistant message run in parallel. When parallel calls overlap on the same shell session key, the first owns the persistent `Shell`; the rest run in isolated one-shot shells (see `shellSessionsInUse` in `bash-executor.ts`).
 - `command` URL expansions shell-escape replacements; `env` and `cwd` expansion use `noEscape: true` because they become environment values / filesystem paths, not shell text.
 - `checkBashInterception()` blocks only when the matching rule's `tool` name is present in `ctx.toolNames`; missing tools disable their corresponding rule.
-- Interceptor configuration syntax is unchanged. It handles common flat command lists, not full shell parsing: heredocs, command substitution, backticks, grouping, and malformed quoting only receive the existing whole-input check. This is best-effort routing toward dedicated tools, not a security boundary.
+- Interceptor configuration syntax is unchanged. It handles common flat command lists, not full shell parsing: heredocs, parameter expansion, command substitution, backticks, grouping, and malformed quoting only receive the existing whole-input check. This is best-effort routing toward dedicated tools, not a security boundary.
 - Default interceptor rules come from `DEFAULT_BASH_INTERCEPTOR_RULES` in `packages/coding-agent/src/config/settings-schema.ts`:
   - `cat|head|tail|less|more` -> `read`
   - `grep|rg|ripgrep|ag|ack` -> `grep`

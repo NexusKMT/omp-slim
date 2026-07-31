@@ -127,6 +127,7 @@ describe("compound command interception", () => {
 		for (const command of [
 			'echo "$(git commit -m message)"',
 			"echo `git commit -m message`",
+			"echo ${x:-foo;git commit -m message}",
 			"( git commit -m message )",
 			"echo start; { true; git commit -m message; }",
 			"cat <<'EOF'\ngit commit -m message\nEOF",
