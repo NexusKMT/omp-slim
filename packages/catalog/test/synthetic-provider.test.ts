@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { createModelManager } from "@oh-my-pi/pi-catalog/model-manager";
 import { syntheticModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import type { FetchImpl } from "@oh-my-pi/pi-catalog/types";
 
@@ -245,6 +246,32 @@ describe("Synthetic provider discovery", () => {
 		const bare = models?.find(model => model.id === "hf:example/no-features");
 		expect(bare?.supportsTools).toBe(false);
 		expect(bare?.reasoning).toBe(false);
+	});
+
+	test("keeps the wire-off state authoritative through the production manager merge", async () => {
+		// The CLI resolves models through `createModelManager`, which merges the
+		// dynamic row over the bundled reference. `hf:zai-org/GLM-5.2` has a baked
+		// `reasoning: true` reference; without the wire-vocabulary override the
+		// merge would OR that flag back and `buildModel` would fabricate a ladder
+		// for a route that advertised only `none`.
+		const { fetch } = syntheticModelsFetch([
+			{
+				id: "hf:zai-org/GLM-5.2",
+				object: "model",
+				name: "zai-org/GLM-5.2",
+				reasoning_parameters: { efforts: ["none"] },
+				input_modalities: ["text"],
+				context_length: 202752,
+				max_output_length: 32768,
+				supported_features: ["tools"],
+			},
+		]);
+		const manager = createModelManager(syntheticModelManagerOptions({ apiKey: "syn-test-key", fetch }));
+		const { models } = await manager.refresh("online");
+
+		const glm = models.find(model => model.id === "hf:zai-org/GLM-5.2");
+		expect(glm?.reasoning).toBe(false);
+		expect(glm?.thinking).toBeUndefined();
 	});
 
 	test("serves no dynamic models without an API key", () => {
