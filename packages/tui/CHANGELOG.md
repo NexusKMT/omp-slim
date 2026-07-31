@@ -8,6 +8,9 @@
 ### Fixed
 
 - Fixed the event-loop watchdog reporting system sleep as a synchronous `ui.loop-blocked` stall. A long missed probe interval is now treated as process suspension and suppressed, while shorter real stalls continue to report with their phase attribution.
+### Fixed
+
+- Fixed terminal copies of literal fenced-code body rows retaining component, list, or blockquote margins in coding-agent assistant messages ([#7055](https://github.com/can1357/oh-my-pi/pull/7055) by [@GratefulDave](https://github.com/GratefulDave)).
 
 ## [17.2.0] - 2026-07-30
 
@@ -21,6 +24,7 @@
 - Fixed high CPU usage in the Loader spinner during idle waits by optimizing text wrapping and caching during frame updates.
 - Fixed hash-prefixed UUIDs in prose being misclassified as 8-digit CSS colors and receiving spurious swatches.
 - Fixed unbounded memory growth and potential host freezes when a PTY consumer stalls by capping the pending stdout backlog and treating undrained consumers as a disconnect.
+
 
 ## [17.1.8] - 2026-07-28
 
