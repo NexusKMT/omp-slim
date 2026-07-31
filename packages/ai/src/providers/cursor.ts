@@ -4193,8 +4193,8 @@ function buildRootPromptMessagesJson(
 			if (content.length === 0) continue;
 			pushJson({ role: "assistant", content });
 		} else if (msg.role === "toolResult") {
-			const result = toolResultToText(msg);
-			if (!result) continue;
+			// Emit even when the result text is empty: the assistant `tool-call` is
+			// already in history, so dropping the pair would replay an orphaned call.
 			pushJson({
 				role: "tool",
 				id: msg.toolCallId,
@@ -4203,7 +4203,7 @@ function buildRootPromptMessagesJson(
 						type: "tool-result",
 						toolName: msg.toolName,
 						toolCallId: msg.toolCallId,
-						result,
+						result: toolResultToText(msg),
 						...(msg.isError ? { isError: true } : {}),
 					},
 				],

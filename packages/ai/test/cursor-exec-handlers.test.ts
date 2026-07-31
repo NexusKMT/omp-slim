@@ -516,6 +516,43 @@ describe("Cursor request action encoding", () => {
 });
 
 describe("Cursor history encoding", () => {
+	it("keeps an empty tool result paired with its structured call", () => {
+		const messages: Context["messages"] = [
+			{ role: "user", content: "Read the empty window.", timestamp: 1 },
+			cursorAssistant(
+				"cursor-composer-2.5",
+				[{ type: "toolCall", id: "call-read", name: "read", arguments: { path: "empty.txt", limit: 0 } }],
+				2,
+				"toolUse",
+			),
+			{
+				role: "toolResult",
+				toolCallId: "call-read",
+				toolName: "read",
+				content: [{ type: "text", text: "" }],
+				isError: false,
+				timestamp: 3,
+			},
+			{ role: "user", content: "What did it say?", timestamp: 4 },
+		];
+
+		const history = buildCursorHistoryForTest(messages);
+		expect(history.rootPromptMessagesJson).toEqual([
+			{ role: "user", content: [{ type: "text", text: "Read the empty window." }] },
+			{
+				role: "assistant",
+				content: [
+					{ type: "tool-call", toolCallId: "call-read", toolName: "read", args: { path: "empty.txt", limit: 0 } },
+				],
+			},
+			{
+				role: "tool",
+				id: "call-read",
+				content: [{ type: "tool-result", toolName: "read", toolCallId: "call-read", result: "" }],
+			},
+		]);
+	});
+
 	it("preserves same-model K3 thinking and paired tool structure in request history", () => {
 		const messages: Context["messages"] = [
 			{ role: "user", content: "Inspect package.json", timestamp: 1 },
