@@ -97,6 +97,7 @@ export interface AnthropicSearchParams {
 	max_tokens?: number;
 	temperature?: number;
 	signal?: AbortSignal;
+	timeoutMs?: number;
 	fetch?: FetchImpl;
 }
 
@@ -152,6 +153,7 @@ async function callSearch(
 	temperature?: number,
 	signal?: AbortSignal,
 	fetchImpl: FetchImpl = fetch,
+	timeoutMs?: number,
 ): Promise<AnthropicApiResponse> {
 	const url = buildAnthropicUrl(auth);
 	const headers = buildAnthropicSearchHeaders(auth);
@@ -191,7 +193,7 @@ async function callSearch(
 		method: "POST",
 		headers,
 		body: JSON.stringify(body),
-		signal: withHardTimeout(signal),
+		signal: withHardTimeout(signal, timeoutMs),
 	});
 
 	if (!response.ok) {
@@ -367,6 +369,7 @@ export async function searchAnthropic(
 				params.temperature,
 				params.signal,
 				params.fetch,
+				params.timeoutMs,
 			);
 		},
 		{

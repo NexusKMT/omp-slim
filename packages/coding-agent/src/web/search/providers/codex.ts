@@ -145,6 +145,7 @@ function shouldRetryWithNextDefaultModel(error: unknown): boolean {
 
 export interface CodexSearchParams {
 	signal?: AbortSignal;
+	timeoutMs?: number;
 	fetch?: FetchImpl;
 	query: string;
 	system_prompt?: string;
@@ -418,6 +419,7 @@ async function callCodexSearch(
 	query: string,
 	options: {
 		signal?: AbortSignal;
+		timeoutMs?: number;
 		systemPrompt?: string;
 		searchContextSize?: "low" | "medium" | "high";
 		model: CodexModelCandidate;
@@ -472,7 +474,7 @@ async function callCodexSearch(
 		method: "POST",
 		headers,
 		body: JSON.stringify(body),
-		signal: withHardTimeout(options.signal),
+		signal: withHardTimeout(options.signal, options.timeoutMs),
 	});
 
 	if (!response.ok) {
@@ -620,6 +622,7 @@ async function runCodexSearchCandidates(options: {
 		try {
 			return await callCodexSearch(options.auth, options.query, {
 				signal: options.params.signal,
+				timeoutMs: options.params.timeoutMs,
 				systemPrompt: options.params.systemPrompt,
 				searchContextSize: "high",
 				model: candidate,

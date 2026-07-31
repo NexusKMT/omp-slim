@@ -1,5 +1,10 @@
 import type { AgentStorage } from "../../../session/agent-storage";
-import { SearchProviderError, type SearchProviderId, type SearchSource } from "../../../web/search/types";
+import {
+	DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS,
+	SearchProviderError,
+	type SearchProviderId,
+	type SearchSource,
+} from "../../../web/search/types";
 import { dateToAgeSeconds } from "../utils";
 
 /**
@@ -53,7 +58,7 @@ export function findCredential(
  * settle far faster in practice; reusing the same ceiling keeps the wiring
  * uniform without compromising correctness.
  */
-export const SEARCH_HARD_TIMEOUT_MS = 60_000;
+export const SEARCH_HARD_TIMEOUT_MS = DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS * 1_000;
 
 /**
  * Compose a caller-supplied {@link AbortSignal} with a hard timeout so an

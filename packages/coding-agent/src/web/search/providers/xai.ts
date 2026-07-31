@@ -139,7 +139,7 @@ async function postXAIResponses(
 			Authorization: `Bearer ${apiKey}`,
 		},
 		body: JSON.stringify(body),
-		signal: withHardTimeout(params.signal),
+		signal: withHardTimeout(params.signal, params.timeoutMs),
 	});
 }
 

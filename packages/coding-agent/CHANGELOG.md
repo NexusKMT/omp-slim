@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added a configurable per-request web search timeout via `providers.webSearchTimeoutSeconds`.
+
 ## [17.2.2] - 2026-07-31
 
 ### Added

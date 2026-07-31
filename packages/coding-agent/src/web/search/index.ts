@@ -29,8 +29,12 @@ import {
 } from "./provider";
 import { applyQueryConstraints, parseSearchQuery } from "./query";
 import { renderSearchCall, renderSearchResult, type SearchRenderDetails } from "./render";
-import type { SearchProviderId, SearchResponse } from "./types";
-import { SearchProviderError } from "./types";
+import {
+	DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS,
+	SearchProviderError,
+	type SearchProviderId,
+	type SearchResponse,
+} from "./types";
 
 /** Web search tool parameters schema */
 export const webSearchSchema = type({
@@ -164,6 +168,16 @@ async function executeSearch(
 		geminiModel = undefined;
 	}
 
+	let timeoutMs = DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS * 1_000;
+	try {
+		const configuredSeconds = settings.get("providers.webSearchTimeoutSeconds");
+		if (Number.isFinite(configuredSeconds) && configuredSeconds > 0) {
+			timeoutMs = Math.ceil(configuredSeconds * 1_000);
+		}
+	} catch {
+		// Preserve the default for one-shot callers that do not initialize Settings.
+	}
+
 	const failures: Array<{ provider: Pick<SearchProvider, "id" | "label">; error: unknown }> = [];
 	let availableProviderCount = 0;
 	let lastProvider: Pick<SearchProvider, "id" | "label"> | undefined;
@@ -196,6 +210,7 @@ async function executeSearch(
 				numSearchResults: params.num_search_results,
 				temperature: params.temperature,
 				signal,
+				timeoutMs,
 				authStorage,
 				modelRegistry,
 				sessionId,
