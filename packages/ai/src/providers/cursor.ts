@@ -4235,6 +4235,7 @@ function encodeCursorMcpArguments(toolCall: ToolCall): Record<string, Uint8Array
 	const encoded: Record<string, Uint8Array> = {};
 	for (const name in toolCall.arguments) {
 		const value = toolCall.arguments[name];
+		if (value === undefined) continue;
 		if (!isJsonValue(value)) {
 			throw new AIError.ValidationError(`Cursor tool argument ${toolCall.name}.${name} is not JSON-serializable`);
 		}

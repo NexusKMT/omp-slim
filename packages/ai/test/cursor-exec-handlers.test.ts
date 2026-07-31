@@ -553,6 +553,66 @@ describe("Cursor history encoding", () => {
 		]);
 	});
 
+	it("omits undefined optional tool arguments from protobuf replay", () => {
+		const messages: Context["messages"] = [
+			{ role: "user", content: "Search for TODOs.", timestamp: 1 },
+			cursorAssistant(
+				"cursor-composer-2.5",
+				[
+					{
+						type: "toolCall",
+						id: "call-grep",
+						name: "grep",
+						arguments: {
+							pattern: "TODO",
+							path: ".",
+							case: undefined,
+							context: undefined,
+							limit: undefined,
+						},
+					},
+				],
+				2,
+				"toolUse",
+			),
+			{
+				role: "toolResult",
+				toolCallId: "call-grep",
+				toolName: "grep",
+				content: [{ type: "text", text: "No matches" }],
+				isError: false,
+				timestamp: 3,
+			},
+			{ role: "user", content: "Continue.", timestamp: 4 },
+		];
+
+		const history = buildCursorHistoryForTest(messages);
+		expect(history.rootPromptMessagesJson[1]).toEqual({
+			role: "assistant",
+			content: [
+				{
+					type: "tool-call",
+					toolCallId: "call-grep",
+					toolName: "grep",
+					args: { pattern: "TODO", path: "." },
+				},
+			],
+		});
+		expect(history.turnStepMessagesJson).toEqual([
+			[
+				expect.objectContaining({
+					toolCall: expect.objectContaining({
+						mcpToolCall: expect.objectContaining({
+							args: expect.objectContaining({
+								args: { pattern: expect.any(String), path: expect.any(String) },
+							}),
+						}),
+					}),
+				}),
+			],
+		]);
+	});
+
 	it("preserves same-model K3 thinking and paired tool structure in request history", () => {
 		const messages: Context["messages"] = [
 			{ role: "user", content: "Inspect package.json", timestamp: 1 },
