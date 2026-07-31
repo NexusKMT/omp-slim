@@ -89,7 +89,13 @@ function makeParams(query: string, fetch: FetchImpl): SearchParams {
 }
 
 /** One result block in the shape DuckDuckGo's no-JS HTML page renders live. */
-function resultBlock(url: string, title: string, snippet: string, timestamp?: string): string {
+function resultBlock(
+	url: string,
+	title: string,
+	snippet: string,
+	timestamp?: string,
+	snippetTag: "a" | "span" = "a",
+): string {
 	return `
 		<div class="result results_links results_links_deep web-result ">
 			<div class="links_main links_deep result__body">
@@ -105,7 +111,7 @@ function resultBlock(url: string, title: string, snippet: string, timestamp?: st
 						${timestamp ? `<span>&nbsp; &nbsp; ${timestamp}</span>` : ""}
 					</div>
 				</div>
-				<a class="result__snippet" href="${url}">${snippet}</a>
+				<${snippetTag} class="result__snippet" href="${url}">${snippet}</${snippetTag}>
 				<div class="clear"></div>
 			</div>
 		</div>`;
@@ -139,6 +145,24 @@ describe("DuckDuckGo web search provider", () => {
 		expect(undated.url).toBe("https://example.com/undated");
 		expect(undated.publishedDate).toBeUndefined();
 		expect(undated.ageSeconds).toBeUndefined();
+	});
+
+	it("does not mistake a date-leading span snippet for a publication timestamp", async () => {
+		const html = resultsPage(
+			resultBlock(
+				"https://example.com/undated-span",
+				"Undated span result",
+				"2020-01-02",
+				undefined,
+				"span",
+			),
+		);
+		const fetchMock: FetchImpl = () => Promise.resolve(new Response(html, { status: 200 }));
+
+		const response = await searchDuckDuckGo(makeParams("history", fetchMock));
+
+		expect(response.sources[0].publishedDate).toBeUndefined();
+		expect(response.sources[0].ageSeconds).toBeUndefined();
 	});
 
 	it("honors after:/before: bounds against DuckDuckGo's extracted timestamps", async () => {
