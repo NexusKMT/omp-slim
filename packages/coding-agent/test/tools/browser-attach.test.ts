@@ -12,12 +12,14 @@ import type { Browser, Page, Target } from "puppeteer-core";
 interface FakePageOptions {
 	url: string;
 	title: string;
+	visible?: boolean;
 }
 
 function fakePage(options: FakePageOptions): Page {
 	return {
 		url: () => options.url,
 		title: async () => options.title,
+		evaluate: async () => options.visible === true,
 	} as unknown as Page;
 }
 
@@ -64,6 +66,29 @@ describe("pickElectronTarget", () => {
 		await expect(pickElectronTarget(browser, "missing")).rejects.toThrow(
 			'No page target matched "missing". Available pages:\n- Example  https://example.com/',
 		);
+	});
+
+	test("prefers the foreground tab when asked to, without disturbing default order", async () => {
+		const background = fakePage({ url: "https://example.com/", title: "Example" });
+		const foreground = fakePage({ url: "https://example.org/", title: "Example Org", visible: true });
+		const browser = {
+			targets: () => [fakeTarget("page", background), fakeTarget("page", foreground)],
+			pages: async () => [],
+		} as unknown as Browser;
+
+		await expect(pickElectronTarget(browser, undefined, true)).resolves.toBe(foreground);
+		await expect(pickElectronTarget(browser)).resolves.toBe(background);
+	});
+
+	test("falls back to the first usable tab when no tab reports itself visible", async () => {
+		const first = fakePage({ url: "https://example.com/", title: "Example" });
+		const second = fakePage({ url: "https://example.org/", title: "Example Org" });
+		const browser = {
+			targets: () => [fakeTarget("page", first), fakeTarget("page", second)],
+			pages: async () => [],
+		} as unknown as Browser;
+
+		await expect(pickElectronTarget(browser, undefined, true)).resolves.toBe(first);
 	});
 
 	test("rejects websocket cdp_url values with an actionable diagnostic", () => {

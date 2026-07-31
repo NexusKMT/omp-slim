@@ -122,8 +122,12 @@ export async function findReusableCdp(
  * Pick the best page target on an attached browser. Prefer discoverable page
  * targets first so Chromium/Edge attach flows that hide pages from
  * `browser.pages()` can still return a usable tab.
+ *
+ * `preferVisible` is for attaching to a browser a human is using: among equally
+ * usable tabs, take the one that is actually foregrounded rather than whichever
+ * target CDP happens to enumerate first.
  */
-export async function pickElectronTarget(browser: Browser, matcher?: string): Promise<Page> {
+export async function pickElectronTarget(browser: Browser, matcher?: string, preferVisible = false): Promise<Page> {
 	const discoveredPages = await Promise.all(
 		browser.targets().map(async target => {
 			if (String(target.type()) !== "page") return null;
@@ -132,14 +136,14 @@ export async function pickElectronTarget(browser: Browser, matcher?: string): Pr
 	);
 	const usablePages = discoveredPages.filter((page): page is Page => page !== null);
 	if (usablePages.length > 0) {
-		return pickPageFromList(usablePages, matcher);
+		return pickPageFromList(usablePages, matcher, preferVisible);
 	}
 
 	const fallbackPages = await browser.pages();
 	if (!fallbackPages.length) {
 		throw new ToolError("No page targets available on the attached browser");
 	}
-	return pickPageFromList(fallbackPages, matcher);
+	return pickPageFromList(fallbackPages, matcher, preferVisible);
 }
 
 async function enrichPages(pages: Page[]): Promise<Array<{ page: Page; url: string; title: string }>> {
@@ -152,7 +156,7 @@ async function enrichPages(pages: Page[]): Promise<Array<{ page: Page; url: stri
 	);
 }
 
-async function pickPageFromList(pages: Page[], matcher?: string): Promise<Page> {
+async function pickPageFromList(pages: Page[], matcher?: string, preferVisible = false): Promise<Page> {
 	const enriched = await enrichPages(pages);
 	if (matcher) {
 		const needle = matcher.toLowerCase();
@@ -161,10 +165,24 @@ async function pickPageFromList(pages: Page[], matcher?: string): Promise<Page> 
 		const summary = enriched.map(p => `- ${p.title || "(untitled)"}  ${p.url}`).join("\n");
 		throw new ToolError(`No page target matched ${JSON.stringify(matcher)}. Available pages:\n${summary}`);
 	}
-	return (
-		enriched.find(p => !ATTACH_TARGET_SKIP_PATTERN.test(p.url) && !ATTACH_TARGET_SKIP_PATTERN.test(p.title))?.page ??
-		enriched[0]!.page
+	const usable = enriched.filter(
+		p => !ATTACH_TARGET_SKIP_PATTERN.test(p.url) && !ATTACH_TARGET_SKIP_PATTERN.test(p.title),
 	);
+	if (preferVisible && usable.length > 1) {
+		// Best-effort foreground probe; a tab that cannot answer counts as hidden.
+		const visibility = await Promise.all(
+			usable.map(async p => {
+				try {
+					return (await p.page.evaluate(() => document.visibilityState === "visible")) === true;
+				} catch {
+					return false;
+				}
+			}),
+		);
+		const foreground = visibility.indexOf(true);
+		if (foreground >= 0) return usable[foreground]!.page;
+	}
+	return usable[0]?.page ?? enriched[0]!.page;
 }
 
 /**

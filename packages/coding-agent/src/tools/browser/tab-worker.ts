@@ -72,6 +72,7 @@ declare global {
 	var innerHeight: number;
 	var document: {
 		elementFromPoint(x: number, y: number): Element | null;
+		readonly visibilityState: "visible" | "hidden";
 	};
 }
 
@@ -732,6 +733,7 @@ export class WorkerCore {
 	#runtime: JsRuntime | null = null;
 	#unsub: () => void;
 	#mode?: WorkerInitPayload["mode"];
+	#activateForScreenshot = true;
 	#dialogPolicy?: DialogPolicy;
 	#dialogHandler?: (dialog: Dialog) => void;
 	#openDialog?: OpenDialogInfo;
@@ -780,6 +782,7 @@ export class WorkerCore {
 	async #init(payload: WorkerInitPayload): Promise<void> {
 		try {
 			this.#mode = payload.mode;
+			this.#activateForScreenshot = payload.mode === "headless" || payload.activateForScreenshot !== false;
 			const puppeteer = await loadPuppeteerInWorker(payload.safeDir);
 			this.#browser = await puppeteer.connect({
 				browserWSEndpoint: payload.browserWSEndpoint,
@@ -1528,11 +1531,17 @@ export class WorkerCore {
 		const page = this.#requirePage();
 		// Multiple tabs can share one Chromium (sibling headless tabs on a shared
 		// endpoint, cdp/app attach). CDP `Page.captureScreenshot` reads the
-		// compositor surface, which follows the *active* target — a backgrounded
+		// compositor surface, which follows the *active* target: a backgrounded
 		// page can stall waiting for a fresh frame (the 20s screenshot timeouts)
 		// or hand back a sibling tab's pixels. Activate first; best-effort so an
 		// already-active or freshly-closed target never fails the capture.
-		await untilAborted(signal, () => page.bringToFront()).catch(() => undefined);
+		//
+		// Browsers we do not own are the exception: raising a tab in the human's
+		// running Chrome switches their visible tab and pulls window focus, so a
+		// connected browser stays backgrounded and takes the stall risk instead.
+		if (this.#activateForScreenshot) {
+			await untilAborted(signal, () => page.bringToFront()).catch(() => undefined);
+		}
 		const fullPage = opts.selector ? false : (opts.fullPage ?? false);
 		const captureType = "png";
 		const captureMime = "image/png" as const;

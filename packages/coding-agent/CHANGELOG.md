@@ -198,6 +198,9 @@
 ### Fixed
 
 - Fixed the browser tool silently ignoring `url` when opening a new tab on an attached browser (`app.cdp_url` or `app.path`), so the tab now navigates on open exactly as it already did on reuse and in headless mode.
+### Fixed
+
+- Fixed browser automation disrupting a browser it attached to over `app.cdp_url`: the tool now adopts the tab the user actually has in the foreground and no longer raises its own tab when taking a screenshot. Owned and headless browsers keep activating the target before capture.
 
 ## [17.1.8] - 2026-07-28
 

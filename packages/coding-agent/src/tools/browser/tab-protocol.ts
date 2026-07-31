@@ -68,6 +68,11 @@ export type WorkerInitPayload =
 			 * previously force-killed the tab). Never set for first-time Electron attach.
 			 */
 			recover?: boolean;
+			/**
+			 * Whether the worker may raise this tab before capturing a screenshot. Unset
+			 * behaves as `true`; the supervisor clears it for browsers we did not launch.
+			 */
+			activateForScreenshot?: boolean;
 	  };
 
 export type ToolReply = { ok: true; value: unknown } | { ok: false; error: RunErrorPayload };
