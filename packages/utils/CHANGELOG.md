@@ -2,16 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Added static command metadata support to the lightweight CLI runner so root help can render without importing command implementations.
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
 
 - Added a `postmortem.quit` configuration option to safely handle shutdown paths when the terminal output has already disconnected.
 - Added project-keyed OMP security-state directory helpers under the user state root.
-
-### Changed
-
-- Added static command metadata support to the lightweight CLI runner so root help can render without importing command implementations.
 
 ## [17.1.8] - 2026-07-28
 

@@ -96,6 +96,29 @@ describe("run() root help", () => {
 		expect(output).toContain("--model=<value>");
 		expect(output).toContain("good  prints good things");
 	});
+
+	it("preserves constructable commands for existing custom help callbacks", async () => {
+		const commands: CommandEntry[] = [
+			{ name: "good", load: async () => GoodCommand, help: { description: "static summary" } },
+		];
+		let receivedConstructor = false;
+
+		await run({
+			bin: "omp",
+			version: "0.0.0",
+			argv: ["--help"],
+			commands,
+			help: config => {
+				const Command = config.commands.get("good");
+				expect(Command).toBe(GoodCommand);
+				if (Command) {
+					receivedConstructor = new Command([], config) instanceof GoodCommand;
+				}
+			},
+		});
+
+		expect(receivedConstructor).toBe(true);
+	});
 });
 
 describe("run() usage errors", () => {

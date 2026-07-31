@@ -15,7 +15,7 @@ try {
  * lightweight CLI runner from pi-utils.
  */
 import { parentPort } from "node:worker_threads";
-import type { CliConfig } from "@oh-my-pi/pi-utils/cli";
+import type { CliConfig, CommandMetadata } from "@oh-my-pi/pi-utils/cli";
 import {
 	APP_NAME,
 	getActiveProfile,
@@ -29,10 +29,13 @@ import { setProcessName } from "@oh-my-pi/pi-utils/process-name";
 import { declareWorkerHostEntry, installWorkerInbox, isWorkerHostSelector } from "@oh-my-pi/pi-utils/worker-host";
 import { installProfileAlias, resolveProfileAliasCommandFromProcess } from "./cli/profile-alias";
 import { extractProfileFlags } from "./cli/profile-bootstrap";
+import { startJsEvalProcess } from "./eval/js/process-entry";
 import type { WorkerInbound as JsWorkerInbound, WorkerOutbound as JsWorkerOutbound } from "./eval/js/worker-protocol";
 import { DAEMON_BROKER_WORKER_ARG } from "./launch/protocol";
 import { TERMINAL_OUTPUT_WORKER_ARG } from "./launch/terminal-output-worker-protocol";
 import { COMPUTER_WORKER_ARG } from "./tools/computer/protocol";
+import { smokeTestComputerWorker } from "./tools/computer/supervisor";
+import { startComputerWorker } from "./tools/computer/worker-entry";
 
 if (Bun.semver.order(Bun.version, MIN_BUN_VERSION) < 0) {
 	process.stderr.write(
@@ -57,7 +60,7 @@ const isProcessEntry = import.meta.main || process.env.PI_COMPILED === "true";
 // `@oh-my-pi/pi-utils/env` eagerly loads `.env` from the agent directory at
 // import time, so it must not be imported before `setProfile` runs.
 
-async function showHelp(config: CliConfig): Promise<void> {
+async function showHelp(config: CliConfig<CommandMetadata>): Promise<void> {
 	// Root help historically loads the selected profile's environment. Keep that
 	// contract after profile bootstrap without pulling in command/provider graphs.
 	await import("@oh-my-pi/pi-utils/env");
@@ -88,7 +91,6 @@ async function runSmokeTest(): Promise<void> {
 	const { smokeTestSttWorker } = await import("./stt/asr-client");
 	const { smokeTestTtsWorker } = await import("./tts/tts-client");
 	const { smokeTestMnemopiEmbedWorker } = await import("./mnemopi/embed-client");
-	const { smokeTestComputerWorker } = await import("./tools/computer/supervisor");
 	const { smokeTestJsEvalWorker } = await import("./eval/js/context-manager");
 	// Other smoke dependencies stay lazy so normal CLI startup does not load their worker clients.
 	const { smokeTestDaemonBroker } = await import("./launch/client");
@@ -166,8 +168,6 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 	}
 	if (arg === COMPUTER_WORKER_ARG) {
 		if (parentPort) installWorkerInbox(parentPort);
-		// This selector is the module-loading boundary; desktop capture dependencies are worker-only.
-		const { startComputerWorker } = await import("./tools/computer/worker-entry");
 		startComputerWorker();
 		return true;
 	}
@@ -177,13 +177,11 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 		return true;
 	}
 	if (arg === JS_EVAL_PROCESS_ARG) {
-		// This selector is the module-loading boundary; the evaluator process entry is worker-only.
-		// The bootstrap-safe interceptor stays linked statically so profile-scoped
-		// environment state cannot load after dispatch has begun. The JS evaluator
-		// forwards user-controlled payloads (tool-call args, display outputs); a
-		// non-serializable one must fail that cell, not SIGKILL the kernel and erase
-		// the eval session's state.
-		const { startJsEvalProcess } = await import("./eval/js/process-entry");
+		// The bootstrap-safe interceptor seam is linked statically so this selector
+		// cannot load profile-scoped environment state after dispatch has begun.
+		// The JS evaluator forwards user-controlled payloads (tool-call args,
+		// display outputs); a non-serializable one must fail that cell, not
+		// SIGKILL the kernel and erase the eval session's state.
 		await runIpcSubprocessWorker<JsWorkerInbound, JsWorkerOutbound>(
 			transport => startJsEvalProcess(transport, interceptUnhandledRejections),
 			{ rethrowConnectedSendErrors: true },
@@ -404,7 +402,7 @@ export async function runCli(argv: string[]): Promise<void> {
 		process.exitCode = 1;
 		return;
 	}
-	return run({ bin: APP_NAME, version: VERSION, argv: resolved.argv, commands, help: showHelp });
+	return run({ bin: APP_NAME, version: VERSION, argv: resolved.argv, commands, metadataHelp: showHelp });
 }
 
 // Floating call instead of top-level await: TLA forces `--bytecode` (CJS

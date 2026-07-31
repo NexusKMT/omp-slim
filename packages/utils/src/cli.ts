@@ -148,11 +148,11 @@ export interface CommandCtor extends CommandMetadata {
 }
 
 /** Configuration passed to every command instance and help renderers. */
-export interface CliConfig {
+export interface CliConfig<TCommand extends CommandMetadata = CommandCtor> {
 	bin: string;
 	version: string;
 	/** All registered commands keyed by their canonical name. */
-	commands: Map<string, CommandMetadata>;
+	commands: Map<string, TCommand>;
 }
 
 /** Minimal Command base matching the oclif surface we use. */
@@ -293,7 +293,7 @@ export abstract class Command {
 // ---------------------------------------------------------------------------
 
 /** Render full root help: header, default command details, subcommand list. */
-export function renderRootHelp(config: CliConfig): void {
+export function renderRootHelp(config: CliConfig<CommandMetadata>): void {
 	const { bin, version, commands } = config;
 	const lines: string[] = [];
 	lines.push(`${bin} v${version}\n`);
@@ -418,8 +418,10 @@ export interface RunOptions {
 	version: string;
 	argv: string[];
 	commands: CommandEntry[];
-	/** Custom help renderer. Receives fully-populated config. */
+	/** Custom help renderer with the fully loaded command constructors. */
 	help?: (config: CliConfig) => Promise<void> | void;
+	/** Lightweight help renderer backed by static command metadata. */
+	metadataHelp?: (config: CliConfig<CommandMetadata>) => Promise<void> | void;
 }
 
 /** Find a command entry by exact name or alias. */
@@ -441,11 +443,15 @@ export async function run(opts: RunOptions): Promise<void> {
 
 	// Top-level help
 	if (commandId === "--help" || commandId === "-h" || commandId === "help" || commandId === "") {
-		const config = await loadAllCommands(opts);
 		if (opts.help) {
-			await opts.help(config);
+			await opts.help(await loadAllCommands(opts));
 		} else {
-			renderRootHelp(config);
+			const config = await loadAllCommandMetadata(opts);
+			if (opts.metadataHelp) {
+				await opts.metadataHelp(config);
+			} else {
+				renderRootHelp(config);
+			}
 		}
 		return;
 	}
@@ -508,14 +514,16 @@ async function loadEntry(entry: CommandEntry): Promise<CommandCtor> {
 	return Cmd;
 }
 
-/** Resolve all command loaders for help/alias display. */
+/** Load every command constructor for backward-compatible custom help callbacks. */
 async function loadAllCommands(opts: RunOptions): Promise<CliConfig> {
-	const commands = new Map<string, CommandMetadata>();
+	const loaded = await Promise.all(opts.commands.map(async entry => [entry.name, await loadEntry(entry)] as const));
+	return { bin: opts.bin, version: opts.version, commands: new Map(loaded) };
+}
+
+/** Resolve static command metadata for lightweight root help. */
+async function loadAllCommandMetadata(opts: RunOptions): Promise<CliConfig<CommandMetadata>> {
 	const loaded = await Promise.all(
 		opts.commands.map(async entry => [entry.name, entry.help ?? (await loadEntry(entry))] as const),
 	);
-	for (const [name, command] of loaded) {
-		commands.set(name, command);
-	}
-	return { bin: opts.bin, version: opts.version, commands };
+	return { bin: opts.bin, version: opts.version, commands: new Map(loaded) };
 }
