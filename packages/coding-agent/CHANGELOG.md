@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the bash tool failing every command with `EACCES: permission denied, open '/tmp/omp-shell-snapshots/snapshot-bash-<uuid>.sh'` on machines where more than one Unix account runs `omp`. The snapshot directory was a single fixed name under the shared `os.tmpdir()` created 0700, so the first account to run `omp` owned it and every other account's pre-create write was denied; the throw escaped `getOrCreateSnapshot` into `executeBash`, and nothing was cached, so the failure repeated for every command. The directory is now scoped per uid (`omp-shell-snapshots-<uid>`), and an unusable snapshot directory degrades to running without a snapshot instead of failing the command.
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
