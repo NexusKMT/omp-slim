@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the `gmi-cloud` provider registry definition with an API-key paste login (validates against `https://api.gmi-serving.com/v1/models`) and wired it into the provider registry, pairing with the catalog entry in `@oh-my-pi/pi-catalog`.
+
 ## [17.2.1] - 2026-07-30
 
 ### Added

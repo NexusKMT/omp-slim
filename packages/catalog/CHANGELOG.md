@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the GMI Cloud provider (`gmi-cloud`), an OpenAI-compatible inference gateway at `https://api.gmi-serving.com/v1` with dynamic model discovery via `/v1/models` and an API-key paste login. Authenticates with the `GMI_API_KEY` environment variable. The default model (`deepseek-ai/DeepSeek-V4-Flash`) is seeded into the bundled catalog so a fresh install resolves it before the first discovery pass.
+
 ## [17.2.1] - 2026-07-30
 
 ### Fixed
