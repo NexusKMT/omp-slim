@@ -167,7 +167,7 @@ describe("InteractiveMode theme scrollback refresh", () => {
 		expect(writes.join("")).toContain("\x1b[3J");
 	});
 
-	it("preserves the viewport on automatic appearance changes until Ctrl+L requests a full replay", async () => {
+	it("preserves the viewport on automatic appearance changes until Alt+L requests a full replay", async () => {
 		terminal.emitAppearanceReport("dark");
 		enableAutoTheme();
 		await terminal.waitForRender();
@@ -189,13 +189,13 @@ describe("InteractiveMode theme scrollback refresh", () => {
 		expect(writes.join("")).not.toContain("\x1b[3J");
 
 		writes.length = 0;
-		terminal.sendInput("\x0c");
+		terminal.sendInput("\x1bl");
 		await terminal.waitForRender();
 
 		expect(mode.ui.fullRedraws).toBe(fullRedraws + 1);
 		expect(writes.join("")).toContain("\x1b[3J");
 	});
-	it("keeps a queued Ctrl+L token correlated across an unrelated automatic report", async () => {
+	it("keeps a queued Alt+L token correlated across an unrelated automatic report", async () => {
 		terminal.emitAppearanceReport("dark");
 		enableAutoTheme();
 		await terminal.waitForRender();
@@ -211,9 +211,9 @@ describe("InteractiveMode theme scrollback refresh", () => {
 		terminal.appearanceOnRefresh = "light";
 
 		const epoch = getThemeEpoch();
-		terminal.sendInput("\x0c");
+		terminal.sendInput("\x1bl");
 		// A queued automatic response may arrive before the explicit probe. It must
-		// neither consume the Ctrl+L correlation nor classify its own change as the
+		// neither consume the Alt+L correlation nor classify its own change as the
 		// explicit response.
 		terminal.emitAppearanceReport("dark");
 		await waitForThemeEpochToAdvance(epoch);
@@ -224,7 +224,7 @@ describe("InteractiveMode theme scrollback refresh", () => {
 		expect(writes.join("").split("\x1b[3J")).toHaveLength(3);
 	});
 
-	it("replays with the new palette when an automatic response wins the queued Ctrl+L race", async () => {
+	it("replays with the new palette when an automatic response wins the queued Alt+L race", async () => {
 		terminal.emitAppearanceReport("dark");
 		enableAutoTheme();
 		await terminal.waitForRender();
@@ -238,7 +238,7 @@ describe("InteractiveMode theme scrollback refresh", () => {
 		terminal.appearanceOnRefresh = "light";
 
 		const epoch = getThemeEpoch();
-		terminal.sendInput("\x0c");
+		terminal.sendInput("\x1bl");
 		terminal.emitAppearanceReport("light");
 		await waitForThemeEpochToAdvance(epoch);
 		await terminal.waitForRender();
@@ -266,7 +266,7 @@ describe("InteractiveMode theme scrollback refresh", () => {
 		terminal.deferRefreshReport = false;
 
 		const epoch = getThemeEpoch();
-		terminal.sendInput("\x0c");
+		terminal.sendInput("\x1bl");
 		await waitForThemeEpochToAdvance(epoch);
 		await terminal.waitForRender();
 
@@ -275,7 +275,7 @@ describe("InteractiveMode theme scrollback refresh", () => {
 		expect(writes.join("").split("\x1b[3J")).toHaveLength(3);
 	});
 
-	it("consumes an unchanged Ctrl+L appearance report before a later automatic change", async () => {
+	it("consumes an unchanged Alt+L appearance report before a later automatic change", async () => {
 		terminal.emitAppearanceReport("dark");
 		enableAutoTheme();
 		await terminal.waitForRender();
@@ -290,7 +290,7 @@ describe("InteractiveMode theme scrollback refresh", () => {
 		});
 		terminal.appearanceOnRefresh = "dark";
 
-		terminal.sendInput("\x0c");
+		terminal.sendInput("\x1bl");
 		await terminal.waitForRender();
 		await Promise.resolve();
 
@@ -324,7 +324,7 @@ describe("InteractiveMode theme scrollback refresh", () => {
 		terminal.appearanceOnRefresh = "light";
 
 		const epoch = getThemeEpoch();
-		terminal.sendInput("\x0c");
+		terminal.sendInput("\x1bl");
 		await waitForThemeEpochToAdvance(epoch);
 		await terminal.waitForRender();
 

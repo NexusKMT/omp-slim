@@ -275,6 +275,12 @@ export class SessionMaintenance {
 	 * tool result makes `prepareCompaction` viable again.
 	 */
 	readonly #midTurnCompactionDeadEnds = new WeakSet<AgentMessage[]>();
+	/**
+	 * Carries a mid-turn dead end across the loop's final answer to the next
+	 * pre-prompt check. That check must not warn again for the same oversized
+	 * persisted turn, but a new agent loop still gets its own live-array guard.
+	 */
+	#midTurnDeadEndPendingPrePrompt = false;
 	#skipPostTurnMaintenanceAssistantTimestamp: number | undefined;
 	readonly #host: SessionMaintenanceHost;
 
@@ -975,7 +981,18 @@ export class SessionMaintenance {
 		if (contextWindow <= 0) return;
 		const compactionSettings = this.#host.settings.getGroup("compaction");
 		const contextTokens = this.#estimatePrePromptContextTokens(messages, contextWindow);
+		const pendingMidTurnDeadEnd = this.#midTurnDeadEndPendingPrePrompt;
+		this.#midTurnDeadEndPendingPrePrompt = false;
 		if (!shouldCompact(contextTokens, contextWindow, compactionSettings)) return;
+		if (
+			pendingMidTurnDeadEnd &&
+			prepareCompaction(this.#host.sessionManager.getBranch(), compactionSettings, model) === undefined
+		) {
+			// The prior tool loop already attempted the rescue and warned for this
+			// persisted oversized turn. Only a later persisted cut point makes a
+			// pre-prompt retry useful; the new agent loop may warn for its own turn.
+			return;
+		}
 
 		// Auto-promote first: switching to a larger-context model avoids compacting
 		// the history at all. The post-turn threshold path already promotes before
@@ -1063,6 +1080,7 @@ export class SessionMaintenance {
 				return;
 			}
 			this.#midTurnCompactionDeadEnds.delete(activeMessages);
+			this.#midTurnDeadEndPendingPrePrompt = false;
 		}
 
 		const billedContextTokens = calculateContextTokens(lastAssistant.usage);
@@ -1095,6 +1113,7 @@ export class SessionMaintenance {
 		});
 		if (result.automaticContinuationBlocked) {
 			this.#midTurnCompactionDeadEnds.add(activeMessages);
+			this.#midTurnDeadEndPendingPrePrompt = true;
 		}
 
 		if (signal?.aborted) return;
