@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the environment-variable reference omitting the Kitty Unicode placeholder controls and tmux placement caveat ([#7172](https://github.com/can1357/oh-my-pi/issues/7172)).
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
