@@ -16,6 +16,7 @@
 ### Fixed
 
 - Fixed Kitty terminals crashing while rendering live or restored non-PNG tool-result images when the runtime throws synchronously during PNG conversion ([#7160](https://github.com/can1357/oh-my-pi/issues/7160)).
+- Fixed a subagent's eval `reset: true` wiping the shared kernel it inherits from its parent, destroying every co-owner's interpreter state mid-session. A reset from a non-exclusive owner now forks into a private per-owner kernel (sticky for that owner and reaped on its teardown) across the Python, JavaScript, Ruby, and Julia executors, while an exclusive owner still resets in place.
 - Fixed the copy selector and ask dialog rendering raw key IDs instead of human-readable keybinding labels ([#7164](https://github.com/can1357/oh-my-pi/issues/7164)).
 - Fixed CLI positional initial messages bypassing automatic session-title generation, which left shell-launched sessions unnamed until a later editor submission ([#7166](https://github.com/can1357/oh-my-pi/issues/7166)).
 - Fixed the environment-variable reference omitting the Kitty Unicode placeholder controls and tmux placement caveat ([#7172](https://github.com/can1357/oh-my-pi/issues/7172)).
