@@ -39,6 +39,7 @@ import {
 import { EDIT_MODES } from "../utils/edit-mode";
 import {
 	DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS,
+	MAX_WEB_SEARCH_TIMEOUT_SECONDS,
 	SEARCH_PROVIDER_CHOICES,
 	type SearchProviderId,
 } from "../web/search/types";
@@ -4880,15 +4881,13 @@ export const SETTINGS_SCHEMA = {
 			tab: "providers",
 			group: "Services",
 			label: "Web Search Timeout",
-			description:
-				"Hard timeout for each provider's search transport before web_search advances to the next fallback, in seconds",
+			description: `Hard timeout for each provider's search transport before web_search advances to the next fallback, in seconds (maximum ${MAX_WEB_SEARCH_TIMEOUT_SECONDS})`,
 			options: [
 				{ value: "30", label: "30 seconds" },
 				{ value: "60", label: "1 minute" },
 				{ value: "120", label: "2 minutes" },
 				{ value: "180", label: "3 minutes" },
 				{ value: "300", label: "5 minutes" },
-				{ value: "600", label: "10 minutes" },
 			],
 		},
 	},

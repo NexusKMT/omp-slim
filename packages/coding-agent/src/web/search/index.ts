@@ -31,6 +31,7 @@ import { applyQueryConstraints, parseSearchQuery } from "./query";
 import { renderSearchCall, renderSearchResult, type SearchRenderDetails } from "./render";
 import {
 	DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS,
+	MAX_WEB_SEARCH_TIMEOUT_SECONDS,
 	SearchProviderError,
 	type SearchProviderId,
 	type SearchResponse,
@@ -172,7 +173,7 @@ async function executeSearch(
 	try {
 		const configuredSeconds = settings.get("providers.webSearchTimeoutSeconds");
 		if (Number.isFinite(configuredSeconds) && configuredSeconds > 0) {
-			timeoutMs = Math.ceil(configuredSeconds * 1_000);
+			timeoutMs = Math.ceil(Math.min(configuredSeconds, MAX_WEB_SEARCH_TIMEOUT_SECONDS) * 1_000);
 		}
 	} catch {
 		// Preserve the default for one-shot callers that do not initialize Settings.

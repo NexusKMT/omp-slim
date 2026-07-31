@@ -92,6 +92,9 @@ export const SEARCH_PROVIDER_OPTIONS = [
 /** Default hard timeout for each web-search provider transport. */
 export const DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS = 60;
 
+/** Maximum configurable hard timeout for each web-search provider transport. */
+export const MAX_WEB_SEARCH_TIMEOUT_SECONDS = 300;
+
 /** Supported web search providers (every option except `auto`). */
 export type SearchProviderId = Exclude<(typeof SEARCH_PROVIDER_OPTIONS)[number]["value"], "auto">;
 

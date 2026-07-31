@@ -213,6 +213,26 @@ describe("executeSearch abort propagation", () => {
 		expect(timeoutMs).toBe(180_000);
 	});
 
+	it("caps the configured provider-request timeout at five minutes", async () => {
+		resetSettingsForTest();
+		const config = await Settings.init({ inMemory: true });
+		config.set("providers.webSearchTimeoutSeconds", 600);
+		let timeoutMs: number | undefined;
+		mockProviderChain([
+			fakeProvider("codex", async params => {
+				timeoutMs = params.timeoutMs;
+				return {
+					provider: "codex",
+					sources: [{ title: "Capped result", url: "https://example.com/capped" }],
+				};
+			}),
+		]);
+
+		await new WebSearchTool(FAKE_SESSION).execute("test-id", { query: "anything" });
+
+		expect(timeoutMs).toBe(300_000);
+	});
+
 	it("uses the default provider timeout for a non-positive setting", async () => {
 		resetSettingsForTest();
 		const config = await Settings.init({ inMemory: true });
