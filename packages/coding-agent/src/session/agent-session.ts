@@ -5885,10 +5885,17 @@ export class AgentSession {
 	/**
 	 * Start automatic title generation when the session and input are eligible.
 	 * Interactive and CLI-bootstrap submissions share this gate so every first
-	 * user message persists titles with the same environment and signal policy.
+	 * user message persists titles with the same environment, signal, and local
+	 * extension-command policy.
 	 */
 	maybeStartTitleGeneration(firstMessage: string, onStart?: () => void): void {
-		if (this.sessionName || $env.PI_NO_TITLE || isLowSignalTitleInput(firstMessage)) {
+		const extensionCommandSpace = firstMessage.indexOf(" ");
+		const isLocalExtensionCommand =
+			firstMessage.startsWith("/") &&
+			this.#extensionRunner?.getCommand(
+				extensionCommandSpace === -1 ? firstMessage.slice(1) : firstMessage.slice(1, extensionCommandSpace),
+			) !== undefined;
+		if (isLocalExtensionCommand || this.sessionName || $env.PI_NO_TITLE || isLowSignalTitleInput(firstMessage)) {
 			return;
 		}
 		onStart?.();

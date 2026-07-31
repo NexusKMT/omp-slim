@@ -300,6 +300,9 @@ describe("InputController orphaned submit", () => {
 			const controller = new InputController(ctx);
 			controller.setupEditorSubmitHandler();
 
+			session.maybeStartTitleGeneration("/widget-status");
+			expect(titleSpy).not.toHaveBeenCalled();
+
 			await editor.onSubmit?.("/widget-status");
 
 			expect(localHandler).toHaveBeenCalledTimes(1);
