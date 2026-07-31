@@ -747,11 +747,41 @@ describe("Cursor history encoding", () => {
 			{ role: "assistant", content: [{ type: "text", text: "Visible answer." }] },
 		]);
 		expect(history.turnStepMessagesJson).toEqual([
-			[
-				expect.objectContaining({ thinkingMessage: { text: "Internal reasoning." } }),
-				expect.objectContaining({ assistantMessage: { text: "Visible answer." } }),
-			],
+			[expect.objectContaining({ assistantMessage: { text: "Visible answer." } })],
 		]);
+	});
+
+	it("keeps foreign thinking out of turns when switching to a non-K3 Cursor model", () => {
+		const messages: Context["messages"] = [
+			{ role: "user", content: "Plan this change.", timestamp: 1 },
+			{
+				...cursorAssistant(
+					"claude-4.6-opus-high",
+					[
+						{ type: "thinking", thinking: "Foreign signed reasoning.", thinkingSignature: "signature" },
+						{ type: "text", text: "Here is the plan." },
+					],
+					2,
+				),
+				api: "anthropic-messages",
+				provider: "anthropic",
+			},
+			{ role: "user", content: "Continue.", timestamp: 3 },
+		];
+
+		const history = buildCursorHistoryForTest(messages, undefined, "cursor-composer-2.5");
+		expect(history.rootPromptMessagesJson).toEqual([
+			{ role: "user", content: [{ type: "text", text: "Plan this change." }] },
+			{ role: "assistant", content: [{ type: "text", text: "Here is the plan." }] },
+		]);
+		expect(history.turnStepMessagesJson).toEqual([
+			[expect.objectContaining({ assistantMessage: { text: "Here is the plan." } })],
+		]);
+		for (const steps of history.turnStepMessagesJson) {
+			for (const step of steps) {
+				expect(step).not.toHaveProperty("thinkingMessage");
+			}
+		}
 	});
 
 	it("preserves image-only user turns in root prompt history and conversation turns", () => {

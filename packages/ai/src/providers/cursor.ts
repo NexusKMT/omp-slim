@@ -4311,6 +4311,7 @@ function buildConversationTurns(
 	messages: Message[],
 	blobStore: Map<string, Uint8Array>,
 	activeUserMessageIndex = findLastUserMessageIndex(messages),
+	targetModelId?: string,
 ): Uint8Array[] {
 	const turns: Uint8Array[] = [];
 	const historyEnd = activeUserMessageIndex >= 0 ? activeUserMessageIndex : messages.length;
@@ -4365,7 +4366,10 @@ function buildConversationTurns(
 							},
 						});
 					} else if (item.type === "thinking") {
-						if (!item.thinking) continue;
+						// Same guard as root-prompt replay: only same-model Cursor K3
+						// thinking is replayed, so foreign/hidden reasoning never leaks
+						// into Cursor's turn history as native thinking.
+						if (!item.thinking || !canReplayCursorThinking(stepMsg, targetModelId)) continue;
 						step = create(ConversationStepSchema, {
 							message: {
 								case: "thinkingMessage",
@@ -4431,7 +4435,7 @@ export function buildCursorHistoryForTest(
 	).map(blobId => JSON.parse(new TextDecoder().decode(readCursorBlob(blobStore, blobId))));
 	const turnUserMessagesJson: JsonValue[] = [];
 	const turnStepMessagesJson: JsonValue[][] = [];
-	for (const turnBlobId of buildConversationTurns(messages, blobStore, activeUserMessageIndex)) {
+	for (const turnBlobId of buildConversationTurns(messages, blobStore, activeUserMessageIndex, targetModelId)) {
 		const turn = fromBinary(ConversationTurnStructureSchema, readCursorBlob(blobStore, turnBlobId));
 		if (turn.turn.case !== "agentConversationTurn") {
 			continue;
@@ -4535,7 +4539,12 @@ function buildGrpcRequest(
 
 	// Build conversation turns from prior messages, excluding only the active user message
 	// when the request is sending one. Resume actions must preserve trailing tool results.
-	const turns = buildConversationTurns(context.messages, blobStore, activeUserMessage ? activeUserMessageIndex : -1);
+	const turns = buildConversationTurns(
+		context.messages,
+		blobStore,
+		activeUserMessage ? activeUserMessageIndex : -1,
+		model.id,
+	);
 
 	// Build `rootPromptMessagesJson` from prior messages. Cursor's server uses this
 	// field (not `turns[]`) to construct the actual model prompt; if we only send the
