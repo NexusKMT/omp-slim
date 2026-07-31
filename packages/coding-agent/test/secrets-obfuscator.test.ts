@@ -3,6 +3,7 @@
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -12,6 +13,7 @@ import {
 	builtinCredentialSecretEntries,
 	getExistingSecretPlaceholderKey,
 	getSecretPlaceholderKey,
+	getSecretPlaceholderKeySync,
 	loadSecrets,
 } from "@oh-my-pi/pi-coding-agent/secrets";
 import {
@@ -72,6 +74,45 @@ describe("builtinCredentialSecretEntries", () => {
 			// The model echoes the placeholder into edit-tool old_text verbatim.
 			const args = deobfuscateToolArguments(obfuscator, { old_text: providerView });
 			expect(args.old_text).toBe(fileLine);
+		}
+	});
+});
+
+describe("lazy placeholder key", () => {
+	// The built-in credential entries match dynamically, so they must not force
+	// `secret-placeholder.key` creation for every secrets.enabled session: the
+	// key provider is only invoked when a credential-shaped token is actually
+	// obfuscated, and exactly once across the obfuscator's lifetime.
+	it("resolves the key provider only on the first real credential match", () => {
+		let resolutions = 0;
+		const obfuscator = new SecretObfuscator(builtinCredentialSecretEntries(), () => {
+			resolutions++;
+			return crypto.randomBytes(32).toString("base64url");
+		});
+		expect(resolutions).toBe(0);
+		obfuscator.obfuscate("MOONSHOT_API_KEY=huntsville");
+		expect(resolutions).toBe(0);
+
+		const token = `sk-${"a1B-c2D".repeat(7)}e3F`;
+		const providerView = obfuscator.obfuscate(`MOONSHOT_API_KEY=${token}`);
+		expect(resolutions).toBe(1);
+		expect(providerView).not.toContain(token);
+		obfuscator.obfuscate(`repeat: ${token}`);
+		expect(resolutions).toBe(1);
+		const args = deobfuscateToolArguments(obfuscator, { old_text: providerView });
+		expect(args.old_text).toBe(`MOONSHOT_API_KEY=${token}`);
+	});
+
+	it("getSecretPlaceholderKeySync creates the key file on demand and shares it with the async readers", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-lazy-placeholder-key-"));
+		try {
+			expect(await getExistingSecretPlaceholderKey(dir)).toBeUndefined();
+			const key = getSecretPlaceholderKeySync(dir);
+			expect(key).toMatch(/^[A-Za-z0-9_-]{43}$/);
+			expect(await getExistingSecretPlaceholderKey(dir)).toBe(key);
+			expect(await getSecretPlaceholderKey(dir)).toBe(key);
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true });
 		}
 	});
 });

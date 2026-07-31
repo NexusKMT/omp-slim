@@ -124,6 +124,7 @@ import {
 	deobfuscateToolArguments,
 	getExistingSecretPlaceholderKey,
 	getSecretPlaceholderKey,
+	getSecretPlaceholderKeySync,
 	loadSecrets,
 	obfuscateMessages,
 	obfuscateProviderContext,
@@ -1344,20 +1345,23 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		// Built-in credential-pattern entries come last so user-configured entries
 		// (plain literals, custom regexes) take precedence in the scan order.
 		const allEntries = [...envEntries, ...fileEntries, ...builtinCredentialSecretEntries()];
-		const needsPlaceholderKey = secretEntriesNeedPlaceholderKey(allEntries);
+		// Only CONFIGURED entries force startup key creation: a configured
+		// obfuscate-mode secret — or a default (no custom `replacement`)
+		// replace-mode regex whose key-derived idempotent fallback marker needs a
+		// stable key across restarts (see `secretEntryNeedsPlaceholderKey`) —
+		// mints placeholders as soon as the obfuscator is built. The built-in
+		// credential-pattern entry matches dynamically, so it resolves the
+		// persisted key lazily on first match instead of creating the key file
+		// for every secrets.enabled session; a session whose content never
+		// contains a credential-shaped token must not require the key, otherwise a
+		// headless run on an unwritable default config root pays for a feature it
+		// does not use.
+		const needsPlaceholderKey = secretEntriesNeedPlaceholderKey([...envEntries, ...fileEntries]);
 		const placeholderKey = needsPlaceholderKey
 			? await getSecretPlaceholderKey(agentDir)
 			: await getExistingSecretPlaceholderKey(agentDir);
 		if (allEntries.length > 0) {
-			// The persisted placeholder key — and creating its key file under the
-			// configured agentDir — is only needed for reversible obfuscate-mode
-			// placeholders, or for a default (no custom `replacement`) replace-mode
-			// regex whose key-derived idempotent fallback marker needs a stable key
-			// across restarts (see `secretEntryNeedsPlaceholderKey`). A replace-only
-			// secrets set with no such regex must not require the key; otherwise a
-			// headless run with an unwritable default config root fails startup for a
-			// feature it does not use.
-			obfuscator = new SecretObfuscator(allEntries, placeholderKey);
+			obfuscator = new SecretObfuscator(allEntries, placeholderKey ?? (() => getSecretPlaceholderKeySync(agentDir)));
 		}
 		if (obfuscator?.hasSecrets() !== true && placeholderKey !== undefined) {
 			// No configured entry produced an active secret (e.g. only ignored short
