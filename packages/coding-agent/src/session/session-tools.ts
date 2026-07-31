@@ -199,6 +199,14 @@ export class SessionTools {
 	#runtimeSelectedToolNames: ReadonlySet<string> | undefined;
 	#baseSystemPrompt: string[];
 	#lastAppliedToolSignature: string | undefined;
+	/**
+	 * `xd://` device names the current base system prompt renders in its catalog
+	 * (the last rebuild's {@link BuildSystemPromptResult.xdevCatalogNames}). Consulted
+	 * when a pending mount notice is delivered: a device the outgoing prompt already
+	 * lists is recorded as announced without a redundant notice line. Empty when the
+	 * prompt carries no catalog (no mounts, or a custom prompt that omits the section).
+	 */
+	#basePromptXdevNames: ReadonlySet<string> = new Set();
 	#mcpRefreshTail: Promise<void> = Promise.resolve();
 	#promptModelKey: string | undefined;
 	#rebuildSystemPrompt: SessionToolsOptions["rebuildSystemPrompt"];
@@ -654,7 +662,7 @@ export class SessionTools {
 			this.#host.agent.setSystemPrompt(this.#baseSystemPrompt);
 			this.#lastAppliedToolSignature = rebuiltSignature;
 			this.#promptModelKey = this.#currentPromptModelKey();
-			this.#absorbExposedXdevIntoAnnounced(rebuiltXdevCatalogNames);
+			this.#basePromptXdevNames = new Set(rebuiltXdevCatalogNames);
 		}
 	}
 
@@ -698,31 +706,6 @@ export class SessionTools {
 		if (addedNames.length > 0) parts.push(`mounted ${addedNames.join(", ")}`);
 		if (removedNames.length > 0) parts.push(`unmounted ${removedNames.join(", ")}`);
 		this.#host.emitNotice("info", `xd://: ${parts.join("; ")}`, "xdev");
-	}
-
-	/**
-	 * Fold the devices a just-applied prompt rebuild already advertises into the
-	 * announced-mount baseline. `rebuildSystemPrompt` reports the `xd://` catalog it
-	 * rendered ({@link BuildSystemPromptResult.xdevCatalogNames}); those devices are
-	 * now visible in the base prompt every following request carries, so a same-turn
-	 * mount notice would re-list the identical catalog before the first user turn —
-	 * on a fresh deferred-discovery session that double-billed the entire mounted MCP
-	 * inventory (issue #7139). Marking them announced and dropping them from the
-	 * pending delta suppresses that duplicate, while notices for mount changes the
-	 * rebuild did NOT expose (non-MCP churn that keeps the prompt byte-stable, or a
-	 * custom prompt that omits the catalog) and all unmount notices stay intact.
-	 *
-	 * Seeding first lets a fresh rebuild win over any stale history entry that marked
-	 * the device removed, so a currently-exposed device is never treated as unknown.
-	 */
-	#absorbExposedXdevIntoAnnounced(exposedNames: readonly string[] | undefined): void {
-		if (!exposedNames || exposedNames.length === 0) return;
-		this.#ensureAnnouncedMountsSeeded();
-		for (const name of exposedNames) this.#announcedMounts.add(name);
-		const pending = this.#pendingXdevMountDelta;
-		if (!pending) return;
-		for (const name of exposedNames) pending.added.delete(name);
-		this.#pendingXdevMountDelta = pending.added.size > 0 || pending.removed.size > 0 ? pending : undefined;
 	}
 
 	/**
@@ -801,6 +784,16 @@ export class SessionTools {
 		if (!pending) return undefined;
 		this.#pendingXdevMountDelta = undefined;
 		this.#ensureAnnouncedMountsSeeded();
+		// A pending add for a device the outgoing base prompt already lists in its
+		// catalog needs no notice line — but the delivery makes the model aware of
+		// it, so record it announced. Doing this here (at delivery) rather than when
+		// the prompt was rebuilt keeps add/remove coalescing intact: a device mounted
+		// then unmounted before any prompt is sent cancels out in
+		// {@link #notifyXdevMountDelta} and never emits a spurious "No longer mounted"
+		// notice for a device the model never saw (issue #7139 review).
+		for (const name of pending.added) {
+			if (this.#basePromptXdevNames.has(name)) this.#announcedMounts.add(name);
+		}
 		// Only announce a net change relative to what the model already knows (from
 		// this session and persisted history): a re-mount of an already-announced
 		// device — the common resume/reconnect case — and an unmount for a device
@@ -1097,6 +1090,7 @@ export class SessionTools {
 		const built = await this.#rebuildSystemPrompt(activeToolNames, this.#toolRegistry);
 		if (this.#host.isDisposed()) return;
 		this.#baseSystemPrompt = built.systemPrompt;
+		this.#basePromptXdevNames = new Set(built.xdevCatalogNames);
 		this.#host.clearMemoryPromotionSnapshot();
 		if (
 			previousBaseSystemPrompt.length !== this.#baseSystemPrompt.length ||

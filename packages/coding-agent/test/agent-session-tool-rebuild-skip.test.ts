@@ -1035,6 +1035,27 @@ These tools became available:
 		).toHaveLength(0);
 	});
 
+	it("does not emit an unmount notice for a catalog device unmounted before delivery (#7139)", async () => {
+		const { session } = newSession(async toolNames => `tools:${toolNames.join(",")}`, {
+			xdev: createTestXdevState(),
+			responses: [{ content: ["ok"] }],
+			exposeXdevCatalog: true,
+		});
+		const search = createMcpCustomTool("mcp__nucleus_search", "nucleus", "search", "Search nucleus");
+
+		// Deferred discovery mounts the device, then the server disconnects before
+		// the first user prompt is ever sent. Because the pending add is only marked
+		// announced at delivery, the unmount coalesces it away — the model, which
+		// never saw a request carrying the device, must not receive a "No longer
+		// mounted" notice for it.
+		await session.refreshMCPTools([search]);
+		await session.refreshMCPTools([]);
+		await session.prompt("hi");
+		expect(
+			session.agent.state.messages.filter(m => m.role === "custom" && m.customType === "xdev-mount-notice"),
+		).toHaveLength(0);
+	});
+
 	it("re-announces a device after the transcript is replaced by /new", async () => {
 		const xdev = createTestXdevState();
 		const { session } = newSession(async toolNames => `tools:${toolNames.join(",")}`, {
