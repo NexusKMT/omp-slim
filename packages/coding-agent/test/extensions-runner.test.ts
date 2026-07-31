@@ -99,6 +99,25 @@ describe("ExtensionRunner", () => {
 		expect(runner.createContext().localProtocolOptions).toBe(localProtocolOptions);
 	});
 
+	it("reflects SessionManager.moveTo() changes instead of the constructor-time snapshot (/move)", async () => {
+		const dirA = tempDir.join("dirA");
+		const dirB = tempDir.join("dirB");
+		fs.mkdirSync(dirA, { recursive: true });
+		fs.mkdirSync(dirB, { recursive: true });
+		const movableSessionManager = SessionManager.inMemory(dirA);
+
+		const result = await loadTestExtensions();
+		const runner = new ExtensionRunner(result.extensions, result.runtime, dirA, movableSessionManager, modelRegistry);
+
+		expect(runner.cwd).toBe(dirA);
+		expect(runner.createContext().cwd).toBe(dirA);
+
+		await movableSessionManager.moveTo(dirB);
+
+		expect(runner.cwd).toBe(dirB);
+		expect(runner.createContext().cwd).toBe(dirB);
+	});
+
 	describe("shortcut conflicts", () => {
 		it("warns when extension shortcut conflicts with built-in", async () => {
 			const extCode = `
