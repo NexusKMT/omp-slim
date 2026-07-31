@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `/reload-plugins` not reconnecting MCP servers or refreshing the session's MCP tool registry despite listing MCP in its documented reload scope, so `.mcp.json` edits stayed inactive until restart. The TUI reload pipeline now runs the same disconnect/rediscover/`refreshMCPTools` path as `/mcp reload` ([#7189](https://github.com/can1357/oh-my-pi/issues/7189)).
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
