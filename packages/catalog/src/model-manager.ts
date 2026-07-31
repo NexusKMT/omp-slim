@@ -14,10 +14,10 @@ const NON_AUTHORITATIVE_RETRY_MS = 5 * 60 * 1000;
 export type ModelRefreshStrategy = "online" | "offline" | "online-if-uncached";
 
 /**
- * Hook for loading and mapping models.dev fallback data into canonical model objects.
+ * Hook for loading and mapping stencil.so fallback data into canonical model objects.
  */
 export interface ModelsDevFallback<TApi extends Api = Api, TPayload = unknown> {
-	/** Fetches raw fallback payload (for example from models.dev). */
+	/** Fetches raw fallback payload (for example from stencil.so). */
 	fetch(): Promise<TPayload>;
 	/** Maps payload into provider models. */
 	map(payload: TPayload, providerId: Provider): readonly ModelSpec<TApi>[];
@@ -51,7 +51,7 @@ export interface ModelManagerOptions<TApi extends Api = Api, TModelsDevPayload =
 	restorableHeaderFallback?: Record<string, string>;
 	/** Optional dynamic endpoint fetcher. */
 	fetchDynamicModels?: () => Promise<readonly ModelSpec<TApi>[] | null>;
-	/** Optional models.dev fallback hook. */
+	/** Optional stencil.so fallback hook. */
 	modelsDev?: ModelsDevFallback<TApi, TModelsDevPayload>;
 	/** Clock override for deterministic tests. */
 	now?: () => number;
@@ -171,7 +171,7 @@ function restoreCachedModelHeaders<TApi extends Api>(
 
 /**
  * Resolves provider models with source precedence:
- * static -> models.dev -> cache -> dynamic.
+ * static -> stencil.so -> cache -> dynamic.
  *
  * Later sources override earlier ones by model id.
  */

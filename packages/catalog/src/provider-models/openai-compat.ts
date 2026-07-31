@@ -1,3 +1,4 @@
+import { VERSION } from "@oh-my-pi/pi-utils";
 import * as logger from "@oh-my-pi/pi-utils/logger";
 import {
 	fetchOpenAICompatibleModels,
@@ -31,7 +32,10 @@ import {
 import { createBundledReferenceMap, createReferenceResolver, toModelSpec } from "./bundled-references";
 import { getDefaultModelDiscoveryBaseUrl, resolveModelCacheProviderId } from "./cache-provider-id";
 
-const MODELS_DEV_URL = "https://models.dev/api.json";
+const MODELS_DEV_URL = "https://catalog.stencil.so/models.json.zstd";
+
+/** Little-endian magic number opening every zstd frame (RFC 8878). */
+const ZSTD_MAGIC = 0xfd2fb528;
 
 /**
  * Uses a cancellable timer rather than the native abort-timeout helper so
@@ -93,16 +97,74 @@ function toInputCapabilities(value: unknown): ("text" | "image")[] {
 	return supportsImage ? ["text", "image"] : ["text"];
 }
 
-async function fetchModelsDevPayload(fetchImpl: FetchImpl = discoveryFetch(), signal?: AbortSignal): Promise<unknown> {
-	const response = await fetchImpl(MODELS_DEV_URL, {
-		method: "GET",
-		headers: { Accept: "application/json" },
-		signal,
-	});
-	if (!response.ok) {
-		throw new Error(`models.dev fetch failed: ${response.status}`);
+/**
+ * Process-wide catalog session: the first call downloads the payload (the one
+ * request the server logs); later calls revalidate with `If-None-Match` and
+ * reuse the decoded payload on `304`. Failure after a successful load falls
+ * back to the session copy.
+ */
+const catalogSession: {
+	inflight: Promise<unknown> | null;
+	payload: unknown;
+	etag: string | null;
+	hasPayload: boolean;
+} = { inflight: null, payload: undefined, etag: null, hasPayload: false };
+
+const CATALOG_USER_AGENT = `omp/${VERSION} (+https://omp.sh)`;
+
+/**
+ * Fetches the models.dev catalog via catalog.stencil.so, which serves a
+ * field-pruned copy precompressed as a zstd blob (~93 KB vs ~3.3 MB raw).
+ * The frame magic is sniffed rather than trusting content-type so plain-JSON
+ * responses (test stubs, fallback mirrors) parse identically.
+ *
+ * Fetched fully once per process: concurrent callers share the in-flight
+ * request, repeat callers send a conditional GET that the server answers
+ * (and deliberately does not log) with `304`.
+ */
+export function fetchWellKnownModels(fetchImpl?: FetchImpl, signal?: AbortSignal): Promise<unknown> {
+	if (!catalogSession.inflight) {
+		catalogSession.inflight = fetchCatalogPayload(fetchImpl ?? discoveryFetch(), signal).finally(() => {
+			catalogSession.inflight = null;
+		});
 	}
-	return response.json();
+	return catalogSession.inflight;
+}
+
+async function fetchCatalogPayload(fetchImpl: FetchImpl, signal?: AbortSignal): Promise<unknown> {
+	const headers: Record<string, string> = {
+		Accept: "application/zstd, application/json",
+		"User-Agent": CATALOG_USER_AGENT,
+	};
+	if (catalogSession.hasPayload && catalogSession.etag) {
+		headers["If-None-Match"] = catalogSession.etag;
+	}
+	let response: Response;
+	try {
+		response = await fetchImpl(MODELS_DEV_URL, { method: "GET", headers, signal });
+	} catch (error) {
+		if (catalogSession.hasPayload) {
+			return catalogSession.payload;
+		}
+		throw error;
+	}
+	if (response.status === 304 && catalogSession.hasPayload) {
+		return catalogSession.payload;
+	}
+	if (!response.ok) {
+		if (catalogSession.hasPayload) {
+			return catalogSession.payload;
+		}
+		throw new Error(`models catalog fetch failed: ${response.status}`);
+	}
+	const bytes = new Uint8Array(await response.arrayBuffer());
+	const isZstd = bytes.length >= 4 && new DataView(bytes.buffer, bytes.byteOffset).getUint32(0, true) === ZSTD_MAGIC;
+	const text = new TextDecoder().decode(isZstd ? await Bun.zstdDecompress(bytes) : bytes);
+	const payload: unknown = JSON.parse(text);
+	catalogSession.payload = payload;
+	catalogSession.etag = response.headers.get("etag");
+	catalogSession.hasPayload = true;
+	return payload;
 }
 
 function mapAnthropicModelsDev(payload: unknown, baseUrl: string): ModelSpec<"anthropic-messages">[] {
@@ -1566,7 +1628,7 @@ async function loadSiliconFlowModelsDevReferences(
 		// Bounded: this enrichment is optional, so a stalled models.dev must not
 		// hold back the authoritative endpoint request that runs after it.
 		const payload = await withCatalogDiscoveryTimeout(SILICONFLOW_MODELS_DEV_REFERENCE_TIMEOUT_MS, signal =>
-			fetchModelsDevPayload(fetchImpl, signal),
+			fetchWellKnownModels(fetchImpl, signal),
 		);
 		return createModelsDevReferenceMap<"openai-completions">(
 			mapModelsDevToModels(payload as Record<string, unknown>, [descriptor]),
@@ -2024,7 +2086,7 @@ function createModelsDevReferenceMap<TApi extends Api>(
 
 async function loadModelsDevReferences<TApi extends Api>(fetchImpl?: FetchImpl): Promise<Map<string, ModelSpec<TApi>>> {
 	try {
-		const payload = await fetchModelsDevPayload(fetchImpl);
+		const payload = await fetchWellKnownModels(fetchImpl);
 		return createModelsDevReferenceMap<TApi>(
 			mapModelsDevToModels(payload as Record<string, unknown>, MODELS_DEV_PROVIDER_DESCRIPTORS),
 		);
@@ -4842,12 +4904,12 @@ export function anthropicModelManagerOptions(
 	return {
 		providerId: "anthropic",
 		modelsDev: {
-			fetch: () => fetchModelsDevPayload(config?.fetch),
+			fetch: () => fetchWellKnownModels(config?.fetch),
 			map: payload => mapAnthropicModelsDev(payload, baseUrl),
 		},
 		...(apiKey && {
 			fetchDynamicModels: async () => {
-				const modelsDevModels = await fetchModelsDevPayload(config?.fetch)
+				const modelsDevModels = await fetchWellKnownModels(config?.fetch)
 					.then(payload => mapAnthropicModelsDev(payload, baseUrl))
 					.catch(() => []);
 				const references = buildAnthropicReferenceMap(modelsDevModels);
