@@ -83,6 +83,9 @@
 ### Fixed
 
 - Fixed automatic terminal appearance changes clearing native scrollback and snapping readers away from their current scroll position; the active output grid now repaints non-destructively, while Ctrl+L remains the explicit full-history recolor.
+### Fixed
+
+- Fixed exact-match edits failing on files containing credential-shaped tokens when `secrets.enabled` (Hide Secrets) is on: unconfigured API keys (GitHub/GitLab/OpenAI-shaped) in tool results now get reversible keyed placeholders from the secret obfuscator — restored byte-exact in tool-call arguments before execution — instead of pi-ai's irreversible `[*_token_redacted]` rewrite, so the model's `old_text` matches the real file bytes while credentials still never reach the provider ([#6968](https://github.com/can1357/oh-my-pi/issues/6968)).
 
 ## [17.2.0] - 2026-07-30
 

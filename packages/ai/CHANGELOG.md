@@ -24,6 +24,7 @@
 ### Changed
 
 - Anthropic OAuth requests now reproduce Cowork's current `claude-desktop` request profile, including client/runtime metadata, beta selection, system and billing attestation, the 64K output cap, and stable HTTP/1.1 header ordering.
+- Exported `SENSITIVE_TOKEN_RE` from `providers/transform-messages` so hosts can route the same credential shapes through reversible obfuscation instead of the irreversible redaction fallback ([#6968](https://github.com/can1357/oh-my-pi/issues/6968)).
 
 ## [17.2.0] - 2026-07-30
 
