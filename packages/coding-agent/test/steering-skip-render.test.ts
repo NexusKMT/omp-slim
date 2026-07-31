@@ -23,23 +23,25 @@ function renderSkippedEdit(details: unknown): string {
 }
 
 describe("mid-turn steering skip rendering", () => {
-	it("renders a synthetic interrupt-skip as info, not an error", async () => {
+	it("renders both pending and in-flight interrupt skips as info, not errors", async () => {
 		const uiTheme = await getThemeByName("dark");
 		if (!uiTheme) throw new Error("dark theme missing");
 		const errorIcon = Bun.stripANSI(formatStatusIcon("error", uiTheme));
 		const infoIcon = Bun.stripANSI(formatStatusIcon("info", uiTheme));
+		const skipDetails = [
+			{ __synthetic: true, source: "interrupt_skipped", executed: false },
+			{ __interrupted: true, source: "interrupt_skipped", execution: "started" },
+		];
 
-		const rendered = renderSkippedEdit({
-			__synthetic: true,
-			source: "interrupt_skipped",
-			executed: false,
-		});
+		for (const details of skipDetails) {
+			const rendered = renderSkippedEdit(details);
 
-		expect(rendered).toContain(infoIcon);
-		expect(rendered).not.toContain(errorIcon);
-		// The bespoke edit error frame must be gone — a skip is not a failure.
-		expect(rendered).not.toContain("╭");
-		expect(rendered).toContain("Skipped due to pending peer interrupt");
+			expect(rendered).toContain(infoIcon);
+			expect(rendered).not.toContain(errorIcon);
+			// The bespoke edit error frame must be gone — a skip is not a failure.
+			expect(rendered).not.toContain("╭");
+			expect(rendered).toContain("Skipped due to pending peer interrupt");
+		}
 	}, 15_000);
 
 	it("still renders a genuine edit failure as an error", async () => {

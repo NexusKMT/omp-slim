@@ -1419,14 +1419,18 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	}
 
 	/**
-	 * True when the settled result is the synthetic placeholder emitted for a
-	 * tool call skipped mid-batch to service queued steering/peer input. Such a
-	 * call never executed, so it must not render as an error (#7199).
+	 * True for a steering/peer-interrupt placeholder. A synthetic placeholder
+	 * identifies a call that never entered `tool.execute`; an interrupted
+	 * placeholder identifies one that started but threw before returning usable
+	 * output. Both are normal steering control flow and render neutrally (#7199).
 	 */
 	#isBenignSkip(): boolean {
 		if (this.#isPartial || !this.#result) return false;
-		const details = this.#result.details as { __synthetic?: boolean; source?: string } | undefined;
-		return details?.__synthetic === true && details.source === "interrupt_skipped";
+		const details = this.#result.details as
+			| { __synthetic?: boolean; __interrupted?: boolean; source?: string; execution?: string }
+			| undefined;
+		if (details?.source !== "interrupt_skipped") return false;
+		return details.__synthetic === true || (details.__interrupted === true && details.execution === "started");
 	}
 
 	/**

@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed mid-turn steering/peer-interrupt tool skips rendering as errors (red ✘, red border/text) in the TUI; the synthetic skip placeholder now renders as a neutral info card, matching its "call emitted, not executed" meaning ([#7199](https://github.com/can1357/oh-my-pi/issues/7199)).
+- Fixed mid-turn steering/peer-interrupt tool skips rendering as errors (red ✘, red border/text) in the TUI; pending and in-flight interrupt placeholders now render as neutral info cards while preserving whether `tool.execute` started ([#7199](https://github.com/can1357/oh-my-pi/issues/7199)).
 
 ## [17.2.2] - 2026-07-31
 
