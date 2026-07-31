@@ -4039,10 +4039,6 @@ export class AgentSession {
 		return this.#tools.applyActiveToolsByName(toolNames);
 	}
 
-	#takePendingXdevMountNotice(): CustomMessage | undefined {
-		return this.#tools.takePendingXdevMountNotice();
-	}
-
 	/** Rediscovers reloadable skills and refreshes prompt metadata. */
 	refreshSkills(): Promise<void> {
 		return this.#tools.refreshSkills();
@@ -5018,11 +5014,10 @@ export class AgentSession {
 			}
 
 			// A pending xd:// delta accompanies the next user-authored prompt,
-			// never an agent-initiated continuation.
-			const xdevMountNotice = isUserQueuedMessage(message) ? this.#takePendingXdevMountNotice() : undefined;
-			if (xdevMountNotice) {
-				messages.push(xdevMountNotice);
-			}
+			// never an agent-initiated continuation. Reserve its pre-user position,
+			// but consume it only after before_agent_start determines whether the
+			// final provider prompt still carries the base xd:// catalog.
+			const xdevMountNoticeIndex = messages.length;
 			messages.push(message);
 			// Inject any pending "nextTurn" messages as context alongside the user message
 			for (const msg of this.#pendingNextTurnMessages) {
@@ -5053,6 +5048,7 @@ export class AgentSession {
 			if ((this.#isDisposed && !disposingBeforeTransition) || this.#promptGeneration !== generation) return;
 			const beforeAgentStartSystemPrompt = await this.#buildSystemPromptForAgentStart(expandedText);
 
+			let baseXdevCatalogDelivered = true;
 			// Emit before_agent_start extension event
 			if (this.#extensionRunner) {
 				const result = await this.#extensionRunner.emitBeforeAgentStart(
@@ -5087,6 +5083,7 @@ export class AgentSession {
 				}
 
 				if (result?.systemPrompt !== undefined) {
+					baseXdevCatalogDelivered = false;
 					this.agent.setSystemPrompt(result.systemPrompt);
 				} else {
 					this.agent.setSystemPrompt(beforeAgentStartSystemPrompt);
@@ -5109,6 +5106,12 @@ export class AgentSession {
 				if (this.#promptGeneration !== generation) {
 					return;
 				}
+			}
+			const xdevMountNotice = isUserQueuedMessage(message)
+				? this.#tools.takePendingXdevMountNotice(baseXdevCatalogDelivered)
+				: undefined;
+			if (xdevMountNotice) {
+				messages.splice(xdevMountNoticeIndex, 0, xdevMountNotice);
 			}
 
 			await this.#maintenance.runPrePromptCompactionIfNeeded(messages);

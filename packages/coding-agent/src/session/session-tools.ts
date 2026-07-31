@@ -779,20 +779,23 @@ export class SessionTools {
 	}
 
 	/** Consumes the hidden notice for unannounced `xd://` mount changes. */
-	takePendingXdevMountNotice(): CustomMessage<XdevMountNoticeDetails> | undefined {
+	takePendingXdevMountNotice(baseCatalogDelivered: boolean): CustomMessage<XdevMountNoticeDetails> | undefined {
 		const pending = this.#pendingXdevMountDelta;
 		if (!pending) return undefined;
 		this.#pendingXdevMountDelta = undefined;
 		this.#ensureAnnouncedMountsSeeded();
 		// A pending add for a device the outgoing base prompt already lists in its
-		// catalog needs no notice line — but the delivery makes the model aware of
-		// it, so record it announced. Doing this here (at delivery) rather than when
-		// the prompt was rebuilt keeps add/remove coalescing intact: a device mounted
-		// then unmounted before any prompt is sent cancels out in
-		// {@link #notifyXdevMountDelta} and never emits a spurious "No longer mounted"
-		// notice for a device the model never saw (issue #7139 review).
-		for (const name of pending.added) {
-			if (this.#basePromptXdevNames.has(name)) this.#announcedMounts.add(name);
+		// catalog needs no notice line — but only when the final provider prompt
+		// still carries that base catalog. A `before_agent_start` replacement drops
+		// it, so its additions must remain in the notice. Record prompt-carried
+		// devices announced here, after the final prompt is known and immediately
+		// before delivery. The pending delta remains untouched by rebuilds, letting
+		// {@link #notifyXdevMountDelta} cancel a mount followed by an unmount before
+		// any request is sent (issue #7139 reviews).
+		if (baseCatalogDelivered) {
+			for (const name of pending.added) {
+				if (this.#basePromptXdevNames.has(name)) this.#announcedMounts.add(name);
+			}
 		}
 		// Only announce a net change relative to what the model already knows (from
 		// this session and persisted history): a re-mount of an already-announced
