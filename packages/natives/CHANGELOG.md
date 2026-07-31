@@ -4,8 +4,7 @@
 
 ### Fixed
 
-- Fixed `/live` corrupting the heap when opening PulseAudio on Linux ARM64 by shipping target-specific miniaudio Rust layouts for GNU and musl native addons.
-- Fixed local Bazel addon builds on NixOS by exposing system CMake tools to sandboxed build scripts and forcing bundled Opus into the library directory expected by `audiopus_sys`.
+- Fixed `/live` corrupting the heap when opening PulseAudio on Linux ARM64 by shipping target-specific miniaudio Rust layouts for GNU and musl native addons ([#7138](https://github.com/can1357/oh-my-pi/pull/7138) by [@olegpulatov](https://github.com/olegpulatov)).
 
 ## [17.2.1] - 2026-07-30
 

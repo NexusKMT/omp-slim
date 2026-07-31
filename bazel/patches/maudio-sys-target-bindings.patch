@@ -2,9 +2,7 @@ diff --git a/build.rs b/build.rs
 index 419076b76e63bf1acbf92d0c7ffebfbe00fcebed..6abe69957113d92429b395e9d4b5cbc6a140a7c4 100644
 --- a/build.rs
 +++ b/build.rs
-@@ -5,6 +5,12 @@ use cc::Build;
- 
- #[cfg(feature = "generate-bindings")]
+@@ -7,2 +7,8 @@ use cc::Build;
  fn write_bindings(out_bindings: &std::path::Path) {
 +    let target = env::var("TARGET").expect("TARGET must be set by Cargo");
 +    if !target.contains("apple-darwin") {
@@ -13,11 +11,7 @@ index 419076b76e63bf1acbf92d0c7ffebfbe00fcebed..6abe69957113d92429b395e9d4b5cbc6
 +    }
 +
      let mut builder = bindgen::Builder::default()
-         .header("native/miniaudio/miniaudio.h")
-         .clang_arg("-Inative")
-@@ -25,12 +31,20 @@ fn write_bindings(out_bindings: &std::path::Path) {
- 
- #[cfg(not(feature = "generate-bindings"))]
+@@ -27,8 +33,16 @@ fn write_bindings(out_bindings: &std::path::Path) {
  fn write_bindings(out_bindings: &std::path::Path) {
 +    let target = env::var("TARGET").expect("TARGET must be set by Cargo");
 +    copy_bindings(&target, out_bindings);
@@ -39,18 +33,33 @@ index 419076b76e63bf1acbf92d0c7ffebfbe00fcebed..6abe69957113d92429b395e9d4b5cbc6
 +    };
 +    std::fs::copy(source, out_bindings)
          .expect("Failed to copy pre-generated bindings to OUT_DIR");
- }
- 
 diff --git a/native/miniaudio_version_check.c b/native/miniaudio_version_check.c
-index 58b5fee15748c92f21825948907b3535cb68bac9..b943c65b3e0c03f4442ba9569deaf27972853a73 100644
+index 58b5fee15748c92f21825948907b3535cb68bac9..d257fa23d945ad44f8a5e0956f6d8fd6d2a6fdf7 100644
 --- a/native/miniaudio_version_check.c
 +++ b/native/miniaudio_version_check.c
-@@ -4,4 +4,11 @@
- #error "Unsupported miniaudio version. Expected 0.11.23."
- #endif
- 
+@@ -7 +7,28 @@
 -int miniaudio_version_check(void) { return 0; }
 +int miniaudio_version_check(void) { return 0; }
++
++/* Cross-build baseline: validate the C target without executing its binary. */
++#if defined(__linux__)
++#if defined(__aarch64__) && defined(__GLIBC__)
++#define OMP_MAUDIO_MUTEX_SIZE 48
++#define OMP_MAUDIO_CONTEXT_SIZE 1056
++#define OMP_MAUDIO_DEVICE_SIZE 3832
++#else
++#define OMP_MAUDIO_MUTEX_SIZE 40
++#define OMP_MAUDIO_CONTEXT_SIZE 1024
++#define OMP_MAUDIO_DEVICE_SIZE 3776
++#endif
++_Static_assert(sizeof(ma_mutex) == OMP_MAUDIO_MUTEX_SIZE, "unexpected ma_mutex size");
++_Static_assert(_Alignof(ma_mutex) == 8, "unexpected ma_mutex alignment");
++_Static_assert(sizeof(ma_context) == OMP_MAUDIO_CONTEXT_SIZE, "unexpected ma_context size");
++_Static_assert(_Alignof(ma_context) == 8, "unexpected ma_context alignment");
++_Static_assert(sizeof(ma_device) == OMP_MAUDIO_DEVICE_SIZE, "unexpected ma_device size");
++_Static_assert(_Alignof(ma_device) == 8, "unexpected ma_device alignment");
++#endif
++
 +/* Hardware-independent ABI probe used by OMP's Rust layout regression test. */
 +size_t omp_maudio_sizeof_mutex(void) { return sizeof(ma_mutex); }
 +size_t omp_maudio_alignof_mutex(void) { return _Alignof(ma_mutex); }
@@ -59,29 +68,53 @@ index 58b5fee15748c92f21825948907b3535cb68bac9..b943c65b3e0c03f4442ba9569deaf279
 +size_t omp_maudio_sizeof_device(void) { return sizeof(ma_device); }
 +size_t omp_maudio_alignof_device(void) { return _Alignof(ma_device); }
 diff --git a/src/lib.rs b/src/lib.rs
-index af13b9ceb9f0816bc71ba9aebdc601047a77feae..479fc9172f91f475d5c89ce31bad5c4bd5ec9bf6 100644
+index af13b9ceb9f0816bc71ba9aebdc601047a77feae..04c3b659bc537980062076c5c553b2c191a3ef6c 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -4,19 +4,7 @@
- #![allow(dead_code)]
- #![no_std]
- 
+@@ -7,5 +7,3 @@
 -#[cfg(feature = "generate-bindings")]
  #[doc(hidden)]
  pub mod ffi {
 -    // Check if the version is at least 1.70
      include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
- }
--
+@@ -14,9 +12,28 @@ pub mod ffi {
 -#[cfg(not(feature = "generate-bindings"))]
 -#[doc(hidden)]
 -pub mod ffi {
 -    #[cfg(unix)]
 -    include!("pregen_bindings/unix.rs");
++// These target-gated checks pair with the C static assertions in
++// miniaudio_version_check.c, so cross-builds validate both sides without
++// executing a target binary.
++#[cfg(all(target_os = "linux", target_arch = "aarch64", target_env = "gnu"))]
++const _: () = {
++    assert!(core::mem::size_of::<ffi::ma_mutex>() == 48);
++    assert!(core::mem::align_of::<ffi::ma_mutex>() == 8);
++    assert!(core::mem::size_of::<ffi::ma_context>() == 1056);
++    assert!(core::mem::align_of::<ffi::ma_context>() == 8);
++    assert!(core::mem::size_of::<ffi::ma_device>() == 3832);
++    assert!(core::mem::align_of::<ffi::ma_device>() == 8);
++};
 -
++
 -    #[cfg(windows)]
 -    include!("pregen_bindings/windows.rs");
 -}
++#[cfg(all(
++    target_os = "linux",
++    any(
++        target_env = "musl",
++        all(target_arch = "x86_64", target_env = "gnu")
++    )
++))]
++const _: () = {
++    assert!(core::mem::size_of::<ffi::ma_mutex>() == 40);
++    assert!(core::mem::align_of::<ffi::ma_mutex>() == 8);
++    assert!(core::mem::size_of::<ffi::ma_context>() == 1024);
++    assert!(core::mem::align_of::<ffi::ma_context>() == 8);
++    assert!(core::mem::size_of::<ffi::ma_device>() == 3776);
++    assert!(core::mem::align_of::<ffi::ma_device>() == 8);
++};
 diff --git a/src/pregen_bindings/linux-aarch64-gnu.rs b/src/pregen_bindings/linux-aarch64-gnu.rs
 new file mode 100644
 index 0000000000000000000000000000000000000000..1a810aa6dfb98dda7de868d0ab13d2660911bcde
