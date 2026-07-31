@@ -161,6 +161,9 @@ crate.annotation(
     patch_args = ["-p1"],
     build_script_env = {
         "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
+        # Release artifacts must use the vendored Opus rather than a host
+        # pkg-config result whose library may not exist on the target system.
+        "OPUS_NO_PKG": "1",
         # msvc cross only (cmake-rs reads VAR_<triple> before VAR; the key is
         # inert for every other target): without a generator override cmake-rs
         # insists on a Visual Studio generator for msvc targets, which cannot
