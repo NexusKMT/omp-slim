@@ -106,50 +106,9 @@ describe("sanitizeSnapshotForBrush", () => {
 // function but discard the sidecar var, so the replay shell ran
 // `command "" "$@"` and died with `command: command not found:` (issue #3470).
 
-async function runBashWithCapturedOutput(
-	script: string,
-	options: { env?: Record<string, string | undefined>; stdin?: string } = {},
-): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
-	const ioDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-snap-stdio-"));
-	const stdinPath = path.join(ioDir, "stdin");
-	const stdoutPath = path.join(ioDir, "stdout");
-	const stderrPath = path.join(ioDir, "stderr");
-	await Promise.all([
-		fs.writeFile(stdinPath, options.stdin ?? ""),
-		fs.writeFile(stdoutPath, ""),
-		fs.writeFile(stderrPath, ""),
-	]);
-
-	try {
-		// Bun 1.4's test worker can inherit an invalid IPC descriptor on macOS,
-		// which makes posix_spawn reject pipe-backed stdio with EBADF. Redirect
-		// inside bash and keep the spawn's own stdio detached from that descriptor.
-		const child = Bun.spawn(
-			[
-				REAL_BASH,
-				"--noprofile",
-				"--norc",
-				"-c",
-				`{ ${script}\n} < "$OMP_TEST_STDIN" > "$OMP_TEST_STDOUT" 2> "$OMP_TEST_STDERR"`,
-			],
-			{
-				env: {
-					...options.env,
-					OMP_TEST_STDIN: stdinPath,
-					OMP_TEST_STDOUT: stdoutPath,
-					OMP_TEST_STDERR: stderrPath,
-				},
-				stdin: "ignore",
-				stdout: "ignore",
-				stderr: "ignore",
-			},
-		);
-		await child.exited;
-		const [stdout, stderr] = await Promise.all([fs.readFile(stdoutPath, "utf8"), fs.readFile(stderrPath, "utf8")]);
-		return { exitCode: child.exitCode, stdout, stderr };
-	} finally {
-		await fs.rm(ioDir, { recursive: true, force: true });
-	}
+async function readStream(stream: ReadableStream<Uint8Array> | null): Promise<string> {
+	if (!stream) return "";
+	return await new Response(stream).text();
 }
 
 describe("shell-snapshot fn-env helper", () => {
@@ -164,17 +123,22 @@ describe("shell-snapshot fn-env helper", () => {
 			``,
 		].join("\n");
 
-		const result = await runBashWithCapturedOutput(`${fnEnvHelper}\n__omp_emit_referenced_exports`, {
+		const child = Bun.spawn(["bash", "-c", `${fnEnvHelper}\n__omp_emit_referenced_exports`], {
 			env: {
 				PATH: process.env.PATH ?? "/usr/bin:/bin",
 				__MISE_EXE: "/opt/echo",
 				FOO_TEST_DIR: "/opt/dir",
 				LC_ALL: "C",
 			},
-			stdin: funcs,
+			stdin: "pipe",
+			stdout: "pipe",
+			stderr: "pipe",
 		});
-		const out = result.stdout;
-		expect(result.exitCode).toBe(0);
+		child.stdin.write(funcs);
+		await child.stdin.end();
+		const out = await readStream(child.stdout as ReadableStream<Uint8Array> | null);
+		await child.exited;
+		expect(child.exitCode).toBe(0);
 
 		expect(out).toContain("export __MISE_EXE='/opt/echo'");
 		expect(out).toContain("export FOO_TEST_DIR='/opt/dir'");
@@ -200,7 +164,7 @@ describe("shell-snapshot fn-env helper", () => {
 			``,
 		].join("\n");
 
-		const result = await runBashWithCapturedOutput(`${fnEnvHelper}\n__omp_emit_referenced_exports`, {
+		const child = Bun.spawn(["bash", "-c", `${fnEnvHelper}\n__omp_emit_referenced_exports`], {
 			env: {
 				PATH: process.env.PATH ?? "/usr/bin:/bin",
 				GITHUB_TOKEN: "ghp_REDACTED",
@@ -213,10 +177,15 @@ describe("shell-snapshot fn-env helper", () => {
 				AZURE_CREDENTIAL: "xyz",
 				__MISE_EXE: "/opt/echo",
 			},
-			stdin: funcs,
+			stdin: "pipe",
+			stdout: "pipe",
+			stderr: "ignore",
 		});
-		const out = result.stdout;
-		expect(result.exitCode).toBe(0);
+		child.stdin.write(funcs);
+		await child.stdin.end();
+		const out = await readStream(child.stdout as ReadableStream<Uint8Array> | null);
+		await child.exited;
+		expect(child.exitCode).toBe(0);
 
 		for (const secret of [
 			"GITHUB_TOKEN",
@@ -241,25 +210,32 @@ describe("shell-snapshot fn-env helper", () => {
 
 	it("single-quote-escapes values containing apostrophes and preserves newlines", async () => {
 		const funcs = `shout () { echo "$TRICKY_VAL $NL_VAL"; }\n`;
-		const result = await runBashWithCapturedOutput(`${fnEnvHelper}\n__omp_emit_referenced_exports`, {
+		const child = Bun.spawn(["bash", "-c", `${fnEnvHelper}\n__omp_emit_referenced_exports`], {
 			env: {
 				PATH: process.env.PATH ?? "/usr/bin:/bin",
 				TRICKY_VAL: "it's 'tricky'",
 				NL_VAL: "line1\nline2",
 			},
-			stdin: funcs,
+			stdin: "pipe",
+			stdout: "pipe",
+			stderr: "ignore",
 		});
-		const out = result.stdout;
+		child.stdin.write(funcs);
+		await child.stdin.end();
+		const out = await readStream(child.stdout as ReadableStream<Uint8Array> | null);
+		await child.exited;
 
 		expect(out).toContain(`export TRICKY_VAL='it'\\''s '\\''tricky'\\'''`);
 		expect(out).toContain(`export NL_VAL='line1\nline2'`);
 
 		// Eval the emitted lines and verify the round-trip values match.
-		const round = await runBashWithCapturedOutput(
-			`__omp_exports=$(cat); eval "$__omp_exports"; printf '%s\\n' "$TRICKY_VAL"; printf '%s\\n' "$NL_VAL"`,
-			{ env: { PATH: process.env.PATH ?? "/usr/bin:/bin" }, stdin: out },
+		const round = Bun.spawn(
+			["bash", "-c", `eval "$1"; printf '%s\\n' "$TRICKY_VAL"; printf '%s\\n' "$NL_VAL"`, "_", out],
+			{ stdout: "pipe", stderr: "ignore" },
 		);
-		expect(round.stdout).toBe("it's 'tricky'\nline1\nline2\n");
+		const echoed = await readStream(round.stdout as ReadableStream<Uint8Array> | null);
+		await round.exited;
+		expect(echoed).toBe("it's 'tricky'\nline1\nline2\n");
 	});
 });
 
@@ -298,11 +274,15 @@ describe("getOrCreateSnapshot", () => {
 
 		// Replay the snapshot in a fresh bash with `set -u` and confirm the
 		// mise() function resolves cleanly instead of dying on the empty var.
-		const replay = await runBashWithCapturedOutput(`set -u; source "$OMP_TEST_SNAPSHOT"; mise hello world; shout`, {
-			env: { ...process.env, OMP_TEST_SNAPSHOT: snapshotPath! },
-		});
-		expect({ exitCode: replay.exitCode, stderr: replay.stderr }).toEqual({ exitCode: 0, stderr: "" });
-		expect(replay.stdout).toBe("hello world\n/opt/foo\n");
+		const replay = Bun.spawn(
+			[realBash, "--noprofile", "--norc", "-c", `set -u; source "$1"; mise hello world; shout`, "_", snapshotPath!],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		const stdout = await readStream(replay.stdout as ReadableStream<Uint8Array> | null);
+		const stderr = await readStream(replay.stderr as ReadableStream<Uint8Array> | null);
+		await replay.exited;
+		expect({ exitCode: replay.exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
+		expect(stdout).toBe("hello world\n/opt/foo\n");
 
 		// PR-review hardening: snapshot file must be group/world-unreadable since
 		// it now inlines env-var values. Directory must be 0700 for the same
