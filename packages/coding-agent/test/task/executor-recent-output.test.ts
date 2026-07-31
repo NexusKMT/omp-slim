@@ -196,6 +196,7 @@ function createScriptedSession(
 	// AgentSession is a concrete class; the executor consumes only this
 	// structural subset. Deliberate documented test-double escape hatch,
 	// mirroring test/task/executor-pass-through.test.ts.
+	session.setIrcWakeTurnObserver = () => {};
 	return { session: session as unknown as AgentSession, emitted: emittedGate.promise };
 }
 

@@ -76,6 +76,7 @@ function createFakeSession(config: FakeSessionConfig = {}): FakeSessionHandle {
 	if (!config.hang) releaseHang();
 
 	const session: Partial<AgentSession> = {
+		setIrcWakeTurnObserver: () => {},
 		state: { messages: [] } as never,
 		agent: { state: { systemPrompt: ["test"] } } as never,
 		extensionRunner: undefined as never,
@@ -108,6 +109,7 @@ function createFakeSession(config: FakeSessionConfig = {}): FakeSessionHandle {
 			releaseHang();
 		},
 		dispose: async () => {},
+		setIrcWakeTurnObserver: () => {},
 	};
 	return {
 		session: session as AgentSession,

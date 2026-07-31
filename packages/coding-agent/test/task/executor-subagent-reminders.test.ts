@@ -81,6 +81,7 @@ function createMockSession(
 		dispose: async () => {},
 	};
 
+	session.setIrcWakeTurnObserver = () => {};
 	return session as unknown as AgentSession;
 }
 

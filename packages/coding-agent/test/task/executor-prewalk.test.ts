@@ -74,6 +74,7 @@ function yieldEmittingSession(
 		abort: async () => {},
 		dispose: async () => {},
 	};
+	session.setIrcWakeTurnObserver = () => {};
 	return session as unknown as AgentSession;
 }
 

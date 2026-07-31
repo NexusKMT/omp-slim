@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "bun:test";
 import { AuthStorage } from "@oh-my-pi/pi-ai";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { ExtensionRuntime } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import type { CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
 import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession, AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -66,16 +67,18 @@ it("overlaps registry refresh with session-file opening and session setup", asyn
 		getLastAssistantMessage: () => undefined,
 		abort: async () => {},
 		dispose: async () => {},
+		setIrcWakeTurnObserver: () => {},
 	} as unknown as AgentSession;
 	vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async () => {
 		sessionCreationStarted.resolve();
 		sessionCreated = true;
-		return {
+		const result: CreateAgentSessionResult = {
 			session,
-			extensionsResult: {},
+			extensionsResult: { extensions: [], errors: [], runtime: new ExtensionRuntime() },
 			setToolUIContext: () => {},
 			eventBus: new EventBus(),
-		} as unknown as CreateAgentSessionResult;
+		};
+		return result;
 	});
 
 	const run = runSubprocess({
