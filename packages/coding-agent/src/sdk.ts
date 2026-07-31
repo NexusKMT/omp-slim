@@ -2572,6 +2572,14 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			autoApprove: options.autoApprove ?? false,
 		});
 		const toolContextStore = new ToolContextStore(getSessionContext);
+		// Native built-in implementations backing same-tool `ctx.invokeTool`, so a tool that
+		// re-registers a built-in (e.g. wrapping `write`) can delegate to the original — reaching the
+		// unwrapped native execute, which inherits the caller's already-granted approval rather than
+		// re-running the gate. Seeded from the xdev registry when present (it retains discoverable
+		// built-ins like `browser` that xdev partitioning removes from the active tool array), else
+		// from the built-in registry; captured before the ExtensionToolWrapper pass so the natives
+		// stay unwrapped. The extension runner exposes it to re-registered tools via createContext.
+		const nativeToolsByName = new Map<string, Tool>(toolSession.xdev?.tools ?? undefined);
 
 		const registeredTools = restrictToolNames ? [] : extensionRunner.getAllRegisteredTools();
 		const sdkCustomTools =
@@ -2595,17 +2603,32 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 		// All built-in tools are active (conditional tools like git/ask return null from factory if disabled)
 		const builtInRegistryToolNames = toolSession.xdev?.builtInNames ?? new Set(toolRegistry.keys());
+		// Capture the native built-in implementations before extension re-registration replaces registry
+		// entries and before the ExtensionToolWrapper pass below, so `ctx.invokeTool` reaches the
+		// unwrapped native execute (inheriting the caller's already-granted approval, not re-gating).
+		for (const [name, tool] of toolRegistry) {
+			nativeToolsByName.set(name, tool);
+		}
 		if (!restrictToolNames && !toolRegistry.has("goal") && settings.get("goal.enabled")) {
 			const goalTool = await logger.time("createTools:goal:session", HIDDEN_TOOLS.goal, toolSession);
 			if (goalTool) {
-				toolRegistry.set(goalTool.name, wrapToolWithMetaNotice(goalTool));
+				const wrapped = wrapToolWithMetaNotice(goalTool);
+				toolRegistry.set(goalTool.name, wrapped);
 				builtInRegistryToolNames.add(goalTool.name);
+				nativeToolsByName.set(goalTool.name, wrapped);
 			}
 		}
 		for (const tool of wrappedExtensionTools) {
 			toolRegistry.set(tool.name, tool);
 			builtInRegistryToolNames.delete(tool.name);
 		}
+		// Expose the native built-ins to same-tool `ctx.invokeTool` on re-registered tools. Set after
+		// the override loop so the map holds the natives, not the extension replacements. The context
+		// factory is the loop's own tool context, so a delegated native call sees ordinary session state.
+		extensionRunner.setNativeToolResolver(name => {
+			const tool = nativeToolsByName.get(name);
+			return tool ? { tool, makeContext: () => toolContextStore.getContext() } : undefined;
+		});
 		if (deferMCPDiscoveryForUI && mcpManager) {
 			for (const name of collectPendingMCPToolNames(options.toolNames)) {
 				if (!toolRegistry.has(name)) {
@@ -2668,11 +2691,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			writeRegistration ??= (async () => {
 				const writeTool = await logger.time("createTools:write:session", BUILTIN_TOOLS.write, toolSession);
 				if (!writeTool || toolRegistry.has("write")) return builtInRegistryToolNames.has("write");
-				toolRegistry.set(
-					writeTool.name,
-					new ExtensionToolWrapper(wrapToolWithMetaNotice(writeTool), extensionRunner) as Tool,
-				);
+				const nativeWrite = wrapToolWithMetaNotice(writeTool);
+				toolRegistry.set(writeTool.name, new ExtensionToolWrapper(nativeWrite, extensionRunner) as Tool);
 				builtInRegistryToolNames.add(writeTool.name);
+				nativeToolsByName.set(writeTool.name, nativeWrite);
 				return true;
 			})().finally(() => {
 				writeRegistration = undefined;
