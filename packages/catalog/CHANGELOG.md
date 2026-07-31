@@ -24,6 +24,9 @@
 ### Fixed
 
 - Fixed Cursor 1M-context model discovery to expose the 1M-token context window for models Cursor labels with a "1M" display name (Claude and GPT families), natively 1M families Cursor serves unlabeled (Kimi K3, GLM 5.2+), and max-mode Claude/Gemini variants, instead of pinning every discovered model to the 200k default. Bumped the Cursor model-cache namespace so windows cached before this fix are refetched. ([#4798](https://github.com/can1357/oh-my-pi/issues/4798))
+### Fixed
+
+- Fixed GitHub Copilot routing `grok-4.5` through the unsupported Chat Completions endpoint instead of the Responses endpoint ([#7096](https://github.com/can1357/oh-my-pi/issues/7096)).
 
 ## [17.2.0] - 2026-07-30
 
