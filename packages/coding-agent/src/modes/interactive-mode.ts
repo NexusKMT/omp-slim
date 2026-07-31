@@ -1167,13 +1167,16 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.terminal.onAppearanceChange((mode, requestToken) => {
 			const request = this.#appearanceRefreshRequest;
 			const appearanceRefreshWasRequested =
-				request !== undefined && requestToken === request.token && Date.now() <= request.deadline;
+				request !== undefined &&
+				Date.now() <= request.deadline &&
+				(requestToken === request.token || requestToken === undefined);
 			if (request !== undefined && requestToken === request.token) {
 				this.#appearanceRefreshRequest = undefined;
 			}
-			// Ctrl+L already replays immediately below. If its asynchronous OSC 11
-			// response reveals a theme change, commit that change so theme loading
-			// performs a second full replay with the newly detected palette.
+			// Ctrl+L already replays immediately below. If either its asynchronous
+			// OSC 11 response or an automatic query ahead of it reveals a theme
+			// change, commit that change so theme loading performs a second full
+			// replay with the newly detected palette.
 			onTerminalAppearanceChange(mode, appearanceRefreshWasRequested ? {} : undefined);
 		});
 

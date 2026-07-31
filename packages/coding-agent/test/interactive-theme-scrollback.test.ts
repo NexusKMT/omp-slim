@@ -224,6 +224,31 @@ describe("InteractiveMode theme scrollback refresh", () => {
 		expect(writes.join("").split("\x1b[3J")).toHaveLength(3);
 	});
 
+	it("replays with the new palette when an automatic response wins the queued Ctrl+L race", async () => {
+		terminal.emitAppearanceReport("dark");
+		enableAutoTheme();
+		await terminal.waitForRender();
+		const fullRedraws = mode.ui.fullRedraws;
+		const writes: string[] = [];
+		const realWrite = terminal.write.bind(terminal);
+		vi.spyOn(terminal, "write").mockImplementation(data => {
+			writes.push(data);
+			realWrite(data);
+		});
+		terminal.appearanceOnRefresh = "light";
+
+		const epoch = getThemeEpoch();
+		terminal.sendInput("\x0c");
+		terminal.emitAppearanceReport("light");
+		await waitForThemeEpochToAdvance(epoch);
+		await terminal.waitForRender();
+		await Promise.resolve();
+
+		expect(getCurrentThemeName()).toBe("light");
+		expect(mode.ui.fullRedraws).toBe(fullRedraws + 2);
+		expect(writes.join("").split("\x1b[3J")).toHaveLength(3);
+	});
+
 	it("owns a synchronous refresh response before invoking the terminal", async () => {
 		terminal.emitAppearanceReport("dark");
 		enableAutoTheme();
