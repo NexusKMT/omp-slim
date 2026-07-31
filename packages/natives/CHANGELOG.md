@@ -4,14 +4,14 @@
 
 ### Changed
 
-- Updated native HTML-to-Markdown rendering to html-to-markdown-rs 3.9.2 defaults; Markdown formatting can differ from 2.30.0, including fenced code blocks and cycling nested-list bullets.
+- Updated native HTML-to-Markdown rendering to html-to-markdown-rs 3.9.2 defaults, which may result in formatting differences (such as fenced code blocks and cycling nested-list bullets) compared to version 2.30.0.
 
 ### Fixed
 
-- Fixed `/live` corrupting the heap when opening PulseAudio on Linux ARM64 by shipping target-specific miniaudio Rust layouts for GNU and musl native addons ([#7138](https://github.com/can1357/oh-my-pi/pull/7138) by [@olegpulatov](https://github.com/olegpulatov)).
-- Fixed local Bazel addon builds on NixOS by exposing system CMake tools to sandboxed build scripts and forcing bundled Opus into the library directory expected by `audiopus_sys` ([#7136](https://github.com/can1357/oh-my-pi/pull/7136) by [@olegpulatov](https://github.com/olegpulatov)).
-- Fixed workspace native addon loads preferring an installed leaf package over the workspace build ([#7059](https://github.com/can1357/oh-my-pi/pull/7059) by [@GratefulDave](https://github.com/GratefulDave)).
-- Fixed pathological HTML inputs crashing the process; conversions that reach the native-stack DOM depth limit now reject instead of returning silently truncated Markdown.
+- Fixed a heap corruption crash when opening PulseAudio on Linux ARM64 by shipping target-specific miniaudio Rust layouts for GNU and musl native addons.
+- Fixed local Bazel addon builds on NixOS by exposing system CMake tools to sandboxed build scripts and correctly bundling Opus.
+- Fixed workspace native addon loading to correctly prefer the workspace build over an installed leaf package.
+- Fixed process crashes caused by pathological HTML inputs; conversions that exceed the native-stack DOM depth limit now reject instead of returning silently truncated Markdown.
 
 ## [17.2.1] - 2026-07-30
 

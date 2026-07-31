@@ -4,8 +4,8 @@
 
 ### Fixed
 
-- Fixed response-only usage records being treated as authoritative context anchors while preserving prompt and total-only provider telemetry ([#7163](https://github.com/can1357/oh-my-pi/pull/7163) by [@harshav167](https://github.com/harshav167)).
-- Fixed compaction summaries being allowed to grow with the context window: the summary output budget is now capped at `MAX_SUMMARY_TOKENS` (16384), so a large window no longer authorizes a summary big enough to copy the conversation instead of compressing it.
+- Fixed an issue where response-only usage records were incorrectly treated as authoritative context anchors, while ensuring prompt and total-only provider telemetry remains preserved.
+- Fixed context compaction summaries growing excessively with large context windows by capping the summary output budget to 16,384 tokens, ensuring conversations are properly compressed rather than duplicated.
 
 ## [17.2.0] - 2026-07-30
 

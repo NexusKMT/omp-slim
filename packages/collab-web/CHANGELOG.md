@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed the guest rendering idle while the host agent is running (spinner vanishing mid-turn after a reconnect dropped `agent_start`): host `state` frames are now authoritative for liveness in both directions, and an idle report clears tool cards pinned by a dropped `tool_execution_end` ([#6990](https://github.com/can1357/oh-my-pi/pull/6990) by [@metaphorics](https://github.com/metaphorics)).
+- Fixed an issue where the guest UI could incorrectly appear idle (such as the loading spinner disappearing) while the host agent was still running after a reconnection, and ensured tool cards are properly cleared if a connection drop occurs.
 
 ## [17.2.0] - 2026-07-30
 

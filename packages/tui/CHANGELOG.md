@@ -4,12 +4,12 @@
 
 ### Added
 
-- Added request tokens to explicit OSC 11 appearance refreshes so consumers can correlate responses across queued and coalesced terminal probes.
+- Added request tokens to explicit OSC 11 appearance refreshes to allow consumers to correlate responses across queued and coalesced terminal probes.
 
 ### Fixed
 
-- Fixed the event-loop watchdog reporting system sleep as a synchronous `ui.loop-blocked` stall. A long missed probe interval is now treated as process suspension and suppressed, while shorter real stalls continue to report with their phase attribution.
-- Fixed terminal copies of literal fenced-code body rows retaining component, list, or blockquote margins in coding-agent assistant messages ([#7055](https://github.com/can1357/oh-my-pi/pull/7055) by [@GratefulDave](https://github.com/GratefulDave)).
+- Fixed the event-loop watchdog incorrectly reporting system sleep or suspension as a synchronous ui.loop-blocked stall.
+- Fixed terminal copies of fenced-code blocks retaining margins from components, lists, or blockquotes in assistant messages (#7055 by @GratefulDave).
 
 ## [17.2.0] - 2026-07-30
 

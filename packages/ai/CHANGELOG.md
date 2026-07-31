@@ -4,21 +4,18 @@
 
 ### Added
 
-- Added the `gmi-cloud` provider registry definition with an API-key paste login (validates against `https://api.gmi-serving.com/v1/models`) and wired it into the provider registry, pairing with the catalog entry in `@oh-my-pi/pi-catalog`.
-### Changed
-
-- `AuthStorage.redeemResetCredit` now spends the account's soonest-expiring available saved reset (via the new `pickSoonestExpiringCredit`) instead of the first credit the backend lists, and reports a distinct retryable `credit_list_failed` outcome when the credit listing itself fails in transport instead of conflating it with a genuine `no_credit`.
-### Fixed
+- Added support for the `gmi-cloud` provider registry, including API-key paste login validation and integration with `@oh-my-pi/pi-catalog`.
 
 ### Changed
 
-- Exported `SENSITIVE_TOKEN_RE` from `providers/transform-messages` so hosts can route the same credential shapes through reversible obfuscation instead of the irreversible redaction fallback ([#6968](https://github.com/can1357/oh-my-pi/issues/6968)).
+- Updated `AuthStorage.redeemResetCredit` to prioritize spending the soonest-expiring available saved reset credit, and improved error handling to distinguish between transport failures (`credit_list_failed`) and a genuine lack of credits.
+- Exported `SENSITIVE_TOKEN_RE` from `providers/transform-messages` to allow hosts to route credential shapes through reversible obfuscation instead of irreversible redaction.
 
 ### Fixed
 
-- Fixed Cursor conversation checkpoints being recorded as billable output tokens; authoritative context occupancy is now tracked separately so usage totals remain accurate while the context gauge retains the server-reported value ([#7163](https://github.com/can1357/oh-my-pi/pull/7163) by [@harshav167](https://github.com/harshav167)).
-- Fixed `AuthStorage.refreshStoredOAuthCredential` returning an expired-but-refreshable OAuth credential without refreshing it when the caller's observed credential mismatched the stored row. A concurrent usage-fetch cycle could rotate the in-memory selected credential out from under a request (e.g. plan finalization); the observed-mismatch guard then adopted the stored copy verbatim, and if that copy was itself expired it flowed into `getOAuthApiKey`, which refused it — surfacing as a misleading `No API key found for <provider>`. The mismatch guard now only short-circuits when the stored credential is still fresh; expired stored copies fall through to a normal refresh ([#7179](https://github.com/can1357/oh-my-pi/issues/7179)).
-- Fixed Cursor history replay flattening assistant tool calls/results and dropping same-model Kimi K3 thinking, preserving Cursor's structured message order and rejecting unsafe mid-session switches to K3 ([#7184](https://github.com/can1357/oh-my-pi/issues/7184)).
+- Fixed an issue where Cursor conversation checkpoints were incorrectly recorded as billable output tokens, ensuring accurate usage totals.
+- Fixed an issue in `AuthStorage.refreshStoredOAuthCredential` where expired OAuth credentials were returned without being refreshed when a credential mismatch occurred, which previously resulted in misleading "No API key found" errors.
+- Fixed Cursor history replay issues by preserving structured message order for assistant tool calls/results, retaining Kimi K3 thinking blocks, and preventing unsafe mid-session switches to K3.
 
 ## [17.2.1] - 2026-07-30
 
