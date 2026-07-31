@@ -197,7 +197,7 @@ export const DEFAULT_RESERVE_TOKENS = 16384;
  * the compression ratio improving with window size instead of degrading. The value
  * mirrors {@link DEFAULT_RESERVE_TOKENS} so this adds no new tuning constant.
  */
-export const MAX_SUMMARY_TOKENS = 16384;
+export const MAX_SUMMARY_TOKENS = DEFAULT_RESERVE_TOKENS;
 
 // reserveTokens is deliberately absent: an unset reserve is what marks it as
 // defaulted, which resolveBudgetReserveTokens needs to distinguish "user never
@@ -907,7 +907,7 @@ export async function generateSummary(
 			key =>
 				requestRemoteCompaction(
 					endpoint,
-					{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, prompt: promptText },
+					{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, prompt: promptText, maxTokens },
 					signal,
 					{ fetch: options.fetch, model, apiKey: key },
 				),
@@ -1112,7 +1112,7 @@ async function generateShortSummary(
 			key =>
 				requestRemoteCompaction(
 					endpoint,
-					{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, prompt: promptText },
+					{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, prompt: promptText, maxTokens },
 					signal,
 					{ fetch: options?.fetch, model, apiKey: key },
 				),
@@ -1683,7 +1683,7 @@ async function generateTurnPrefixSummary(
 	signal?: AbortSignal,
 	options?: SummaryOptions,
 ): Promise<string> {
-	const maxTokens = Math.floor(0.5 * reserveTokens); // Smaller budget for turn prefix
+	const maxTokens = Math.min(Math.floor(0.5 * reserveTokens), MAX_SUMMARY_TOKENS); // Smaller budget for turn prefix
 
 	const llmMessages = (options?.convertToLlm ?? defaultConvertToLlm)(messages);
 	const conversationText = serializeConversationForSummary(llmMessages, preferredDialect(model.id));
