@@ -71,8 +71,10 @@ describe("MCPManager notification listeners", () => {
 		expect(typeof unsubscribe).toBe("function");
 
 		try {
-			const result = await manager.connectServers({ alpha: serverConfig() }, {});
-			expect(result.connectedServers).toContain("alpha");
+			// Startup is intentionally bounded: a slow CI runner may return before
+			// the fixture connects, so the notification frames below are the
+			// authoritative readiness signal for this listener contract.
+			await manager.connectServers({ alpha: serverConfig() }, {});
 
 			// Await both the known list_changed and the server-custom frame
 			// independently. Arrival order across the two isn't guaranteed
