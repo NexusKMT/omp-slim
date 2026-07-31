@@ -712,6 +712,23 @@ export function describeScreenshot(opts?: ScreenshotOptions): string {
 	if (opts?.fullPage) return "tab.screenshot({ fullPage: true })";
 	return "tab.screenshot()";
 }
+export async function preparePageForScreenshot(
+	page: Pick<Page, "bringToFront" | "evaluate">,
+	signal: AbortSignal | undefined,
+	activate: boolean,
+): Promise<void> {
+	if (activate) {
+		await untilAborted(signal, () => page.bringToFront()).catch(() => undefined);
+		return;
+	}
+	const visible = await untilAborted(signal, () => page.evaluate(() => document.visibilityState === "visible")).catch(
+		() => false,
+	);
+	if (!visible) {
+		throw new ToolError("The attached browser tab is not visible; switch to it before taking a screenshot");
+	}
+}
+
 
 /** Summarize still-running helpers (oldest first) so a cell timeout names what stalled. */
 export function describeInflight(inflight: Map<number, InflightOp>): string {
@@ -1536,12 +1553,10 @@ export class WorkerCore {
 		// or hand back a sibling tab's pixels. Activate first; best-effort so an
 		// already-active or freshly-closed target never fails the capture.
 		//
-		// Browsers we do not own are the exception: raising a tab in the human's
-		// running Chrome switches their visible tab and pulls window focus, so a
-		// connected browser stays backgrounded and takes the stall risk instead.
-		if (this.#activateForScreenshot) {
-			await untilAborted(signal, () => page.bringToFront()).catch(() => undefined);
-		}
+		// For a user-driven browser, redundant activation would steal window focus.
+		// The supervisor disables it only after adopting the visible tab; if the user
+		// later switches away, reject capture rather than risk sibling-tab pixels.
+		await preparePageForScreenshot(page, signal, this.#activateForScreenshot);
 		const fullPage = opts.selector ? false : (opts.fullPage ?? false);
 		const captureType = "png";
 		const captureMime = "image/png" as const;

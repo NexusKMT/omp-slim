@@ -5,7 +5,7 @@ import { webpExclusionForModel } from "../../utils/image-loading";
 import type { ToolSession } from "../index";
 import { expandPath } from "../path-utils";
 import { ToolAbortError, ToolError } from "../tool-errors";
-import { pickElectronTarget } from "./attach";
+import { pickElectronTarget, shouldPreserveConnectedBrowserFocus } from "./attach";
 import { CmuxTab, runCmuxCode } from "./cmux/cmux-tab";
 import { mapWaitUntil } from "./cmux/rpc";
 import { DEFAULT_VIEWPORT } from "./launch";
@@ -81,6 +81,7 @@ interface TabSessionBase<TBrowser extends BrowserHandle = BrowserHandle> {
 export interface WorkerTabSession extends TabSessionBase<PuppeteerBrowserHandle> {
 	backend: "worker";
 	worker: WorkerHandle;
+	activateForScreenshot: boolean;
 }
 
 export interface CmuxTabSession extends TabSessionBase<CmuxBrowserHandle> {
@@ -324,6 +325,7 @@ async function acquireTabImpl(
 		pending: new Map(),
 		dialogPolicy: opts.dialogs,
 		kindTag: browser.kind.kind,
+		activateForScreenshot: initPayload.mode === "headless" || initPayload.activateForScreenshot !== false,
 		ownerSessionId: opts.ownerSessionId,
 	};
 	worker.onMessage(msg => handleTabMessage(tab, msg));
@@ -696,11 +698,15 @@ async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTa
 			timeoutMs: opts.timeoutMs,
 		};
 	}
-	// A "connected" browser is one the user is driving themselves (cdp attach), so the
-	// tab we adopt and the focus we take are visible to them; owned Electron/spawned
-	// browsers keep the previous behavior.
-	const userDriven = browser.kind.kind === "connected";
-	const page = await pickElectronTarget(browser.browser, opts.target, userDriven);
+	// A connected browser is user-driven. When no target is requested, adopt its
+	// visible tab and avoid raising it before screenshots. An explicit target may
+	// be backgrounded, so retain activation to guarantee target-correct pixels.
+	const activateForScreenshot =
+		browser.kind.kind !== "connected" || !shouldPreserveConnectedBrowserFocus(opts.target);
+	const page = await pickElectronTarget(browser.browser, {
+		matcher: opts.target,
+		preferVisible: !activateForScreenshot,
+	});
 	const targetId = await targetIdForPage(page);
 	return {
 		mode: "attach",
@@ -711,7 +717,7 @@ async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTa
 		url: opts.url,
 		waitUntil: opts.waitUntil,
 		timeoutMs: opts.timeoutMs,
-		activateForScreenshot: !userDriven,
+		activateForScreenshot,
 	};
 }
 
@@ -814,7 +820,7 @@ async function recycleTimedOutWorkerTab(tab: WorkerTabSession, timeoutMs: number
 		// otherwise init stalls, times out, and the tab gets force-killed.
 		recover: true,
 		timeoutMs,
-		activateForScreenshot: tab.kindTag !== "connected",
+		activateForScreenshot: tab.activateForScreenshot,
 	};
 	let worker = await spawnTabWorker();
 	try {

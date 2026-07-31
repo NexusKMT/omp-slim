@@ -118,6 +118,10 @@ export async function findReusableCdp(
 	return null;
 }
 
+export function shouldPreserveConnectedBrowserFocus(target?: string): boolean {
+	return !target;
+}
+
 /**
  * Pick the best page target on an attached browser. Prefer discoverable page
  * targets first so Chromium/Edge attach flows that hide pages from
@@ -127,7 +131,10 @@ export async function findReusableCdp(
  * usable tabs, take the one that is actually foregrounded rather than whichever
  * target CDP happens to enumerate first.
  */
-export async function pickElectronTarget(browser: Browser, matcher?: string, preferVisible = false): Promise<Page> {
+export async function pickElectronTarget(
+	browser: Browser,
+	options: { matcher?: string; preferVisible?: boolean } = {},
+): Promise<Page> {
 	const discoveredPages = await Promise.all(
 		browser.targets().map(async target => {
 			if (String(target.type()) !== "page") return null;
@@ -136,14 +143,14 @@ export async function pickElectronTarget(browser: Browser, matcher?: string, pre
 	);
 	const usablePages = discoveredPages.filter((page): page is Page => page !== null);
 	if (usablePages.length > 0) {
-		return pickPageFromList(usablePages, matcher, preferVisible);
+		return pickPageFromList(usablePages, options);
 	}
 
 	const fallbackPages = await browser.pages();
 	if (!fallbackPages.length) {
 		throw new ToolError("No page targets available on the attached browser");
 	}
-	return pickPageFromList(fallbackPages, matcher, preferVisible);
+	return pickPageFromList(fallbackPages, options);
 }
 
 async function enrichPages(pages: Page[]): Promise<Array<{ page: Page; url: string; title: string }>> {
@@ -156,19 +163,22 @@ async function enrichPages(pages: Page[]): Promise<Array<{ page: Page; url: stri
 	);
 }
 
-async function pickPageFromList(pages: Page[], matcher?: string, preferVisible = false): Promise<Page> {
+async function pickPageFromList(
+	pages: Page[],
+	options: { matcher?: string; preferVisible?: boolean },
+): Promise<Page> {
 	const enriched = await enrichPages(pages);
-	if (matcher) {
-		const needle = matcher.toLowerCase();
+	if (options.matcher) {
+		const needle = options.matcher.toLowerCase();
 		const hit = enriched.find(p => p.url.toLowerCase().includes(needle) || p.title.toLowerCase().includes(needle));
 		if (hit) return hit.page;
 		const summary = enriched.map(p => `- ${p.title || "(untitled)"}  ${p.url}`).join("\n");
-		throw new ToolError(`No page target matched ${JSON.stringify(matcher)}. Available pages:\n${summary}`);
+		throw new ToolError(`No page target matched ${JSON.stringify(options.matcher)}. Available pages:\n${summary}`);
 	}
 	const usable = enriched.filter(
 		p => !ATTACH_TARGET_SKIP_PATTERN.test(p.url) && !ATTACH_TARGET_SKIP_PATTERN.test(p.title),
 	);
-	if (preferVisible && usable.length > 1) {
+	if (options.preferVisible && usable.length > 1) {
 		// Best-effort foreground probe; a tab that cannot answer counts as hidden.
 		const visibility = await Promise.all(
 			usable.map(async p => {

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { pickElectronTarget } from "@oh-my-pi/pi-coding-agent/tools/browser/attach";
+import {
+	pickElectronTarget,
+	shouldPreserveConnectedBrowserFocus,
+} from "@oh-my-pi/pi-coding-agent/tools/browser/attach";
 import {
 	acquireBrowser,
 	normalizeConnectedCdpUrl,
@@ -42,7 +45,7 @@ describe("pickElectronTarget", () => {
 			},
 		} as unknown as Browser;
 
-		await expect(pickElectronTarget(browser, "google")).resolves.toBe(page);
+		await expect(pickElectronTarget(browser, { matcher: "google" })).resolves.toBe(page);
 		expect(pagesCalled).toBe(false);
 	});
 
@@ -63,7 +66,7 @@ describe("pickElectronTarget", () => {
 			pages: async () => [],
 		} as unknown as Browser;
 
-		await expect(pickElectronTarget(browser, "missing")).rejects.toThrow(
+		await expect(pickElectronTarget(browser, { matcher: "missing" })).rejects.toThrow(
 			'No page target matched "missing". Available pages:\n- Example  https://example.com/',
 		);
 	});
@@ -76,7 +79,7 @@ describe("pickElectronTarget", () => {
 			pages: async () => [],
 		} as unknown as Browser;
 
-		await expect(pickElectronTarget(browser, undefined, true)).resolves.toBe(foreground);
+		await expect(pickElectronTarget(browser, { preferVisible: true })).resolves.toBe(foreground);
 		await expect(pickElectronTarget(browser)).resolves.toBe(background);
 	});
 
@@ -88,7 +91,12 @@ describe("pickElectronTarget", () => {
 			pages: async () => [],
 		} as unknown as Browser;
 
-		await expect(pickElectronTarget(browser, undefined, true)).resolves.toBe(first);
+		await expect(pickElectronTarget(browser, { preferVisible: true })).resolves.toBe(first);
+	});
+
+	test("preserves connected-browser focus only for automatic target selection", () => {
+		expect(shouldPreserveConnectedBrowserFocus()).toBe(true);
+		expect(shouldPreserveConnectedBrowserFocus("example.com")).toBe(false);
 	});
 
 	test("rejects websocket cdp_url values with an actionable diagnostic", () => {
