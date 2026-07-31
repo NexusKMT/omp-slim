@@ -79,9 +79,9 @@ function createMockSession(
 		getLastAssistantMessage: () => state.messages[state.messages.length - 1],
 		abort: async () => {},
 		dispose: async () => {},
+		setIrcWakeTurnObserver: () => {},
 	};
 
-	session.setIrcWakeTurnObserver = () => {};
 	return session as unknown as AgentSession;
 }
 

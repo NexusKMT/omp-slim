@@ -145,8 +145,8 @@ function createAsyncSession(
 			abortCount += 1;
 		},
 		dispose: async () => {},
+		setIrcWakeTurnObserver: () => {},
 	};
-	session.setIrcWakeTurnObserver = () => {};
 	harness.session = session as unknown as AgentSession;
 	return harness;
 }
