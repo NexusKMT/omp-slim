@@ -268,7 +268,12 @@ export interface SessionMaintenanceHost {
 export class SessionMaintenance {
 	#compactionAbortController: AbortController | undefined;
 	#autoCompactionAbortController: AbortController | undefined;
-	/** Live tool-loop contexts whose mid-turn maintenance reached a no-progress dead end. */
+	/**
+	 * Live tool-loop contexts parked after mid-turn maintenance hit a no-progress
+	 * dead end. Membership suppresses the repeated rescue + warning while no cut
+	 * point exists; {@link maintainContextMidRun} re-arms the entry once a later
+	 * tool result makes `prepareCompaction` viable again.
+	 */
 	readonly #midTurnCompactionDeadEnds = new WeakSet<AgentMessage[]>();
 	#skipPostTurnMaintenanceAssistantTimestamp: number | undefined;
 	readonly #host: SessionMaintenanceHost;
@@ -1034,7 +1039,24 @@ export class SessionMaintenance {
 		) {
 			return;
 		}
-		if (this.#midTurnCompactionDeadEnds.has(activeMessages)) return;
+		if (this.#midTurnCompactionDeadEnds.has(activeMessages)) {
+			// A prior boundary already ran the dead-end rescue and could not reduce
+			// this turn. Re-running the rescue and re-emitting its warning on every
+			// following tool boundary is wasted work while nothing summarizable
+			// exists. But the tool loop keeps appending turns: once a later
+			// (smaller) tool result gives prepareCompaction a cut point before the
+			// now-older oversized turn, compaction can finally make progress and
+			// MUST run rather than stay suppressed until provider overflow (#7153
+			// review). Stay parked only while no cut point is available; re-arm as
+			// soon as one appears.
+			if (
+				!model ||
+				prepareCompaction(this.#host.sessionManager.getBranch(), compactionSettings, model) === undefined
+			) {
+				return;
+			}
+			this.#midTurnCompactionDeadEnds.delete(activeMessages);
+		}
 
 		const lastAssistant = [...activeMessages]
 			.reverse()
