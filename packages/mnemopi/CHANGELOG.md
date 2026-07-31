@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed one-shot prepared statements never being released, which kept the SQLite connection alive after `close()`. Every `db.prepare(...)` in `beam/store.ts`, `annotations.ts`, `memory.ts`, `beam/consolidate.ts`, `beam/helpers.ts`, and the e6 migration now either goes through `db.run()` or is bound with `using`, so the statement is finalized when it leaves scope. On Windows this left the memory DB and its `-wal`/`-shm` sidecars locked, so the file could not be deleted, moved, or rotated after mnemopi closed it; on POSIX the handle leaked silently because open files can be unlinked.
+
 ## [17.0.8] - 2026-07-22
 
 ### Changed
