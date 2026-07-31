@@ -11,6 +11,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
 import { acquireTab, releaseTab } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import type { Browser, Page, Target } from "puppeteer-core";
+import { CHROMIUM_AVAILABLE } from "./chromium-probe";
 
 interface FakePageOptions {
 	url: string;
@@ -106,68 +107,77 @@ describe("pickElectronTarget", () => {
 		expect(normalizeConnectedCdpUrl("http://127.0.0.1:9222/")).toBe("http://127.0.0.1:9222");
 	});
 
-	test("navigates a fresh attached tab to the requested URL", async () => {
-		const launched = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
-		if (!("browser" in launched)) throw new Error("Expected a Puppeteer browser");
-		const endpoint = new URL(launched.browser.wsEndpoint());
-		let attached: BrowserHandle | undefined;
-		let opened = false;
-		const tabName = `attach-navigation-${process.pid}-${Math.random().toString(36).slice(2)}`;
-		const requested = "data:text/html,<title>attached-navigation-target</title>";
+	// Launches real headless Chromium; skipped where Chrome's system libraries are absent.
+	test.skipIf(!CHROMIUM_AVAILABLE)(
+		"navigates a fresh attached tab to the requested URL",
+		async () => {
+			const launched = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+			if (!("browser" in launched)) throw new Error("Expected a Puppeteer browser");
+			const endpoint = new URL(launched.browser.wsEndpoint());
+			let attached: BrowserHandle | undefined;
+			let opened = false;
+			const tabName = `attach-navigation-${process.pid}-${Math.random().toString(36).slice(2)}`;
+			const requested = "data:text/html,<title>attached-navigation-target</title>";
 
-		try {
-			attached = await acquireBrowser(
-				{ kind: "connected", cdpUrl: `http://${endpoint.host}` },
-				{ cwd: process.cwd() },
-			);
-			const { tab } = await acquireTab(tabName, attached, {
-				url: requested,
-				waitUntil: "domcontentloaded",
-				timeoutMs: 10_000,
-			});
-			opened = true;
-
-			expect(tab.info.url).toBe(requested);
-		} finally {
-			if (opened) await releaseTab(tabName, { kill: false });
-			else if (attached) await releaseBrowser(attached, { kill: false });
-			await releaseBrowser(launched, { kill: true });
-		}
-	});
-
-	test("does not retry an attached navigation failure as worker startup", async () => {
-		let requestCount = 0;
-		const server = Bun.serve({
-			port: 0,
-			fetch: () => {
-				requestCount++;
-				return new Promise<Response>(() => {});
-			},
-		});
-		const launched = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
-		if (!("browser" in launched)) throw new Error("Expected a Puppeteer browser");
-		const endpoint = new URL(launched.browser.wsEndpoint());
-		let attached: BrowserHandle | undefined;
-
-		let attempted = false;
-		try {
-			attached = await acquireBrowser(
-				{ kind: "connected", cdpUrl: `http://${endpoint.host}` },
-				{ cwd: process.cwd() },
-			);
-			attempted = true;
-			await expect(
-				acquireTab(`attach-failure-${process.pid}-${Math.random().toString(36).slice(2)}`, attached, {
-					url: `http://127.0.0.1:${server.port}/hang`,
+			try {
+				attached = await acquireBrowser(
+					{ kind: "connected", cdpUrl: `http://${endpoint.host}` },
+					{ cwd: process.cwd() },
+				);
+				const { tab } = await acquireTab(tabName, attached, {
+					url: requested,
 					waitUntil: "domcontentloaded",
-					timeoutMs: 100,
-				}),
-			).rejects.toThrow(/Navigation timeout/i);
-			expect(requestCount).toBe(1);
-		} finally {
-			if (attached && !attempted) await releaseBrowser(attached, { kill: false });
-			await releaseBrowser(launched, { kill: true });
-			await server.stop(true);
-		}
-	});
+					timeoutMs: 10_000,
+				});
+				opened = true;
+
+				expect(tab.info.url).toBe(requested);
+			} finally {
+				if (opened) await releaseTab(tabName, { kill: false });
+				else if (attached) await releaseBrowser(attached, { kill: false });
+				await releaseBrowser(launched, { kill: true });
+			}
+		},
+		30_000,
+	);
+
+	test.skipIf(!CHROMIUM_AVAILABLE)(
+		"does not retry an attached navigation failure as worker startup",
+		async () => {
+			let requestCount = 0;
+			const server = Bun.serve({
+				port: 0,
+				fetch: () => {
+					requestCount++;
+					return new Promise<Response>(() => {});
+				},
+			});
+			const launched = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+			if (!("browser" in launched)) throw new Error("Expected a Puppeteer browser");
+			const endpoint = new URL(launched.browser.wsEndpoint());
+			let attached: BrowserHandle | undefined;
+
+			let attempted = false;
+			try {
+				attached = await acquireBrowser(
+					{ kind: "connected", cdpUrl: `http://${endpoint.host}` },
+					{ cwd: process.cwd() },
+				);
+				attempted = true;
+				await expect(
+					acquireTab(`attach-failure-${process.pid}-${Math.random().toString(36).slice(2)}`, attached, {
+						url: `http://127.0.0.1:${server.port}/hang`,
+						waitUntil: "domcontentloaded",
+						timeoutMs: 100,
+					}),
+				).rejects.toThrow(/Navigation timeout/i);
+				expect(requestCount).toBe(1);
+			} finally {
+				if (attached && !attempted) await releaseBrowser(attached, { kill: false });
+				await releaseBrowser(launched, { kill: true });
+				await server.stop(true);
+			}
+		},
+		30_000,
+	);
 });
