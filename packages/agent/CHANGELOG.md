@@ -5,13 +5,13 @@
 ### Fixed
 
 - Fixed response-only usage records being treated as authoritative context anchors while preserving prompt and total-only provider telemetry ([#7163](https://github.com/can1357/oh-my-pi/pull/7163) by [@harshav167](https://github.com/harshav167)).
+- Fixed compaction summaries being allowed to grow with the context window: the summary output budget is now capped at `MAX_SUMMARY_TOKENS` (16384), so a large window no longer authorizes a summary big enough to copy the conversation instead of compressing it.
 
 ## [17.2.0] - 2026-07-30
 
 ### Fixed
 
 - Provider-native compaction failures now surface their transport error instead of silently switching to generic summarization; streaming V2 still falls back to native V1 when available.
-- Fixed compaction summaries being allowed to grow with the context window: the summary output budget is now capped at `MAX_SUMMARY_TOKENS` (16384), so a large window no longer authorizes a summary big enough to copy the conversation instead of compressing it.
 
 ## [17.1.7] - 2026-07-27
 

@@ -2,16 +2,15 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Fixed `/live` corrupting the heap when opening PulseAudio on Linux ARM64 by shipping target-specific miniaudio Rust layouts for GNU and musl native addons ([#7138](https://github.com/can1357/oh-my-pi/pull/7138) by [@olegpulatov](https://github.com/olegpulatov)).
-- Fixed local Bazel addon builds on NixOS by exposing system CMake tools to sandboxed build scripts and forcing bundled Opus into the library directory expected by `audiopus_sys` ([#7136](https://github.com/can1357/oh-my-pi/pull/7136) by [@olegpulatov](https://github.com/olegpulatov)).
 ### Changed
 
 - Updated native HTML-to-Markdown rendering to html-to-markdown-rs 3.9.2 defaults; Markdown formatting can differ from 2.30.0, including fenced code blocks and cycling nested-list bullets.
 
 ### Fixed
 
+- Fixed `/live` corrupting the heap when opening PulseAudio on Linux ARM64 by shipping target-specific miniaudio Rust layouts for GNU and musl native addons ([#7138](https://github.com/can1357/oh-my-pi/pull/7138) by [@olegpulatov](https://github.com/olegpulatov)).
+- Fixed local Bazel addon builds on NixOS by exposing system CMake tools to sandboxed build scripts and forcing bundled Opus into the library directory expected by `audiopus_sys` ([#7136](https://github.com/can1357/oh-my-pi/pull/7136) by [@olegpulatov](https://github.com/olegpulatov)).
+- Fixed workspace native addon loads preferring an installed leaf package over the workspace build ([#7059](https://github.com/can1357/oh-my-pi/pull/7059) by [@GratefulDave](https://github.com/GratefulDave)).
 - Fixed pathological HTML inputs crashing the process; conversions that reach the native-stack DOM depth limit now reject instead of returning silently truncated Markdown.
 
 ## [17.2.1] - 2026-07-30
@@ -20,19 +19,12 @@
 
 - Fixed the `computer` tool advertising Wayland support that never worked: on the default rootless XWayland (GNOME/KDE/sway) the X11 root window has no readable pixmap, so root `GetImage` failed on every screenshot with a raw `BadMatch` protocol dump. `Monitor::all` now probes root drawability at initialization and fails fast with an actionable `DESKTOP_BACKEND_UNAVAILABLE` message naming the rootless-XWayland constraint, and `docs/computer-use.md` now lists rootless XWayland as unsupported ([#7085](https://github.com/can1357/oh-my-pi/issues/7085)).
 
-### Fixed
-
-- Fixed workspace native addon loads preferring an installed leaf package over the workspace build ([#7059](https://github.com/can1357/oh-my-pi/pull/7059) by [@GratefulDave](https://github.com/GratefulDave)).
-
 ## [17.2.0] - 2026-07-30
 
 ### Changed
 
 - Split the native voice engine (miniaudio capture/playback, WebRTC peer, Opus media) out of the `pi-natives` addon crate into a napi-free `pi-voice` rlib. The addon keeps thin `#[napi]` adapters, so the JS API is unchanged; the webrtc/opus/miniaudio dependency graph now compiles once into the library and no longer rebuilds with the addon leaf (which recompiles every release via its version-sentinel edit).
 - Release binaries now build in parallel with the test fan-out; npm leaf publishing moved to a dedicated post-validation job (`release_native_leaves`), and darwin release bazel caches are pre-warmed on native-affecting main pushes — cutting release wall time from the previous serialized tests → cold darwin build pipeline.
-
-### Fixed
-
 
 ## [17.1.8] - 2026-07-28
 

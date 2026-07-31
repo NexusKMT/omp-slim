@@ -5,14 +5,15 @@
 ### Added
 
 - Added the `gmi-cloud` provider registry definition with an API-key paste login (validates against `https://api.gmi-serving.com/v1/models`) and wired it into the provider registry, pairing with the catalog entry in `@oh-my-pi/pi-catalog`.
+
+### Changed
+
+- Exported `SENSITIVE_TOKEN_RE` from `providers/transform-messages` so hosts can route the same credential shapes through reversible obfuscation instead of the irreversible redaction fallback ([#6968](https://github.com/can1357/oh-my-pi/issues/6968)).
+
 ### Fixed
 
 - Fixed Cursor conversation checkpoints being recorded as billable output tokens; authoritative context occupancy is now tracked separately so usage totals remain accurate while the context gauge retains the server-reported value ([#7163](https://github.com/can1357/oh-my-pi/pull/7163) by [@harshav167](https://github.com/harshav167)).
-### Fixed
-
 - Fixed `AuthStorage.refreshStoredOAuthCredential` returning an expired-but-refreshable OAuth credential without refreshing it when the caller's observed credential mismatched the stored row. A concurrent usage-fetch cycle could rotate the in-memory selected credential out from under a request (e.g. plan finalization); the observed-mismatch guard then adopted the stored copy verbatim, and if that copy was itself expired it flowed into `getOAuthApiKey`, which refused it — surfacing as a misleading `No API key found for <provider>`. The mismatch guard now only short-circuits when the stored credential is still fresh; expired stored copies fall through to a normal refresh ([#7179](https://github.com/can1357/oh-my-pi/issues/7179)).
-### Fixed
-
 - Fixed Cursor history replay flattening assistant tool calls/results and dropping same-model Kimi K3 thinking, preserving Cursor's structured message order and rejecting unsafe mid-session switches to K3 ([#7184](https://github.com/can1357/oh-my-pi/issues/7184)).
 
 ## [17.2.1] - 2026-07-30
@@ -24,7 +25,6 @@
 ### Changed
 
 - Anthropic OAuth requests now reproduce Cowork's current `claude-desktop` request profile, including client/runtime metadata, beta selection, system and billing attestation, the 64K output cap, and stable HTTP/1.1 header ordering.
-- Exported `SENSITIVE_TOKEN_RE` from `providers/transform-messages` so hosts can route the same credential shapes through reversible obfuscation instead of the irreversible redaction fallback ([#6968](https://github.com/can1357/oh-my-pi/issues/6968)).
 
 ## [17.2.0] - 2026-07-30
 

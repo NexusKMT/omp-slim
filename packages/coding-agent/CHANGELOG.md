@@ -10,73 +10,39 @@
 
 - Moved the display-reset default chord (`app.display.reset`) from `Ctrl+L` to `Alt+L` to make room for the live-mode toggle.
 - Updated the hashline edit tool, streaming preview, and plan-mode guidance for the unified `PUT`/`CUT` grammar, `.=` ranges, and named registers.
+- Moved subagent model-registry refresh and session-file opening off the launch critical path. Registry refresh now runs in the background while model resolution uses the registry's static/provider lookup, and `SessionManager.open` starts before prewalk/output-schema/session-option assembly so session creation waits only at its actual input boundary.
+- Batched same-turn file-session appends behind the session writer's microtask boundary. Render and tool paths can now record several transcript entries without paying one synchronous file write per entry, while explicit `flush()` and `close()` still make queued lines durable in order.
+
 ### Fixed
 
 - Fixed Kitty terminals crashing while rendering live or restored non-PNG tool-result images when the runtime throws synchronously during PNG conversion ([#7160](https://github.com/can1357/oh-my-pi/issues/7160)).
-### Fixed
-
 - Fixed the copy selector and ask dialog rendering raw key IDs instead of human-readable keybinding labels ([#7164](https://github.com/can1357/oh-my-pi/issues/7164)).
-### Fixed
-
 - Fixed CLI positional initial messages bypassing automatic session-title generation, which left shell-launched sessions unnamed until a later editor submission ([#7166](https://github.com/can1357/oh-my-pi/issues/7166)).
-### Fixed
-
 - Fixed the environment-variable reference omitting the Kitty Unicode placeholder controls and tmux placement caveat ([#7172](https://github.com/can1357/oh-my-pi/issues/7172)).
-### Fixed
-
 - Fixed `omp plugin install` failing extension validation for pi extensions that import `compact` from `@earendil-works/pi-coding-agent` (e.g. pi-claude-bridge) — the legacy `@oh-my-pi/pi-coding-agent` shim did not forward `compact` (it lives in `@oh-my-pi/pi-agent-core/compaction`, the same module as the already-bridged `estimateTokens`), so a named import threw Bun's static "Export named 'compact' not found" error. Added the missing `compact` re-export ([#7174](https://github.com/can1357/oh-my-pi/issues/7174)).
-### Fixed
-
 - Fixed Bash interceptor rules matching only the complete command input, so an anchored rule such as `^\s*git\s+commit\b` missed a later command in a flat compound command. Rules now also inspect unquoted/unescaped `&&`, `||`, `;`, `|`, `&`, and newline-separated command fragments, including forms with leading environment-variable assignments, while retaining the original whole-input match and conservatively skipping complex shell syntax.
-### Fixed
-
 - Fixed `ExtensionContext.cwd` staying pinned to the directory a session started in, even after it moved: `ExtensionRunner` cached `cwd` from its constructor argument instead of reading the owning session's live directory, so extensions watching `ctx.cwd` (e.g. for git-worktree tracking) kept observing a stale path for the rest of the session — reachable via the interactive `/move` command, a programmatic `AgentSession.moveSession()`/`SessionManager.moveTo()` call, or an SDK/ACP session opened with a `cwd` different from the process's own. `ExtensionRunner.cwd` is now a getter over `this.sessionManager.getCwd()`, the same session-scoped value `moveTo()` updates directly, instead of the process-global project directory.
-### Fixed
-
 - Fixed the web-search provider picker describing xAI/Grok as requiring `XAI_API_KEY`, which hid that the `xai` search provider already accepts a SuperGrok/X Premium+ `xai-oauth` sign-in (via `/login xai-oauth` or `XAI_OAUTH_TOKEN`). The description now matches the OAuth-aware wording used by the Anthropic, OpenAI, and Gemini rows.
-### Fixed
-
 - Fixed `/reload-plugins` not reconnecting MCP servers or refreshing the session's MCP tool and prompt-command registries despite listing MCP in its documented reload scope, so `.mcp.json` edits stayed inactive and removed prompt commands remained invocable until restart. The TUI reload pipeline now clears stale MCP prompt commands and runs the same disconnect/rediscover/`refreshMCPTools` path as `/mcp reload`, deriving discovery filters from settings so the reload keeps honoring `mcp.enableProjectConfig: false` instead of starting opted-out project servers ([#7189](https://github.com/can1357/oh-my-pi/issues/7189)).
-### Fixed
-
 - Removed the `read` exemption from the centralized artifact spill wrapper. Oversized read results now persist to a recoverable session artifact and return the configured inline head/tail instead of bypassing the threshold shared by other tools.
-### Fixed
-
 - Fixed DuckDuckGo web search under-returning requests above the first-page result count by submitting the returned continuation form until the requested limit is reached ([#7116](https://github.com/can1357/oh-my-pi/issues/7116)).
-### Fixed
-
 - Fixed DuckDuckGo web search silently ignoring `after:`/`before:` date bounds: DuckDuckGo does not parse date operators, so the provider relies on the shared post-filter to enforce them, but `parseHtmlResults()` discarded the ISO timestamps DuckDuckGo now emits in each result row — every source was treated as undated and passed the filter. The parser now extracts those timestamps into `publishedDate`/`ageSeconds` so date bounds are honored ([#7115](https://github.com/can1357/oh-my-pi/issues/7115)).
-### Changed
-
-- Moved subagent model-registry refresh and session-file opening off the launch critical path. Registry refresh now runs in the background while model resolution uses the registry's static/provider lookup, and `SessionManager.open` starts before prewalk/output-schema/session-option assembly so session creation waits only at its actual input boundary.
-### Changed
-
-- Batched same-turn file-session appends behind the session writer's microtask boundary. Render and tool paths can now record several transcript entries without paying one synchronous file write per entry, while explicit `flush()` and `close()` still make queued lines durable in order.
-### Fixed
-
 - Fixed env-driven OTLP trace export ignoring `OTEL_RESOURCE_ATTRIBUTES`: the exported resource only carried `service.name`, so backends that attribute spans via resource attributes never received them. The resource now merges the vendored `envDetector`, which parses `OTEL_RESOURCE_ATTRIBUTES` (percent-decoded, per spec) with `OTEL_SERVICE_NAME` taking precedence for `service.name` ([#7134](https://github.com/can1357/oh-my-pi/issues/7134)).
-### Fixed
-
 - Fixed a fresh session with deferred MCP discovery injecting the newly mounted `xd://` tool catalog twice into the first model request: the post-discovery prompt rebuild already renders the full device catalog, but the pre-user `xdev-mount-notice` re-listed the same names because the rebuild never updated announcement tracking. The rebuild now reports the catalog it exposed and those devices are folded into the announced-mount baseline, so the notice is suppressed for anything the prompt already carries while non-rebuild mount changes and unmount notices still fire ([#7139](https://github.com/can1357/oh-my-pi/issues/7139)).
-### Fixed
-
 - Fixed the bash tool failing every command with `EACCES: permission denied, open '/tmp/omp-shell-snapshots/snapshot-bash-<uuid>.sh'` on machines where more than one Unix account runs `omp`. The snapshot directory was a single fixed name under the shared `os.tmpdir()` created 0700, so the first account to run `omp` owned it and every other account's pre-create write was denied; the throw escaped `getOrCreateSnapshot` into `executeBash`, and nothing was cached, so the failure repeated for every command. The directory is now scoped per uid (`omp-shell-snapshots-<uid>`), and an unusable snapshot directory degrades to running without a snapshot instead of failing the command.
-
-### Fixed
-
 - Fixed LSP write batching replaying stale whole-file snapshots over newer external changes made before the batch flushed.
-### Fixed
-
 - Fixed `ctx.ui.editor()` in ACP mode always resolving to `undefined`: it now routes through the same elicitation bridge as `select`/`confirm`/`input`, so `/review`'s custom-instructions prompt and the `ask` tool's custom-input path reach the ACP client instead of silently no-opping.
-### Fixed
-
 - Fixed `omp commit` failing to resolve extension-provided models in both the agentic and legacy pipelines ([#7099](https://github.com/can1357/oh-my-pi/issues/7099)).
-### Fixed
-
 - Fixed RPC hosts receiving no subagent lifecycle or progress frames when an IRC message revives an idle or parked keep-alive subagent ([#7105](https://github.com/can1357/oh-my-pi/issues/7105)).
-### Fixed
-
 - Fixed copied fenced-code body rows in assistant messages retaining component and container margins ([#7055](https://github.com/can1357/oh-my-pi/pull/7055) by [@GratefulDave](https://github.com/GratefulDave)).
+- Fixed mid-turn auto-compaction repeating dead-end rescue work and warnings at every tool boundary within one oversized turn ([#7151](https://github.com/can1357/oh-my-pi/issues/7151)).
+- Fixed automatic terminal appearance changes clearing native scrollback and snapping readers away from their current scroll position; the active output grid now repaints non-destructively, while Ctrl+L remains the explicit full-history recolor.
+- Fixed exact-match edits failing on files containing credential-shaped tokens when `secrets.enabled` (Hide Secrets) is on: unconfigured API keys (GitHub/GitLab/OpenAI-shaped) in tool results now get reversible keyed placeholders from the secret obfuscator — restored byte-exact in tool-call arguments before execution — instead of pi-ai's irreversible `[*_token_redacted]` rewrite, so the model's `old_text` matches the real file bytes while credentials still never reach the provider ([#6968](https://github.com/can1357/oh-my-pi/issues/6968)).
+- Fixed context usage collapsing to the latest response size for Cursor models that omit prompt-token usage. Output-only assistant turns no longer become context anchors, so active and resumed sessions fall back to full local context reconstruction while compaction retains its conservative stored-context floor ([#7163](https://github.com/can1357/oh-my-pi/pull/7163) by [@harshav167](https://github.com/harshav167)).
+- Fixed the browser tool crashing OMP with an unhandled `EBUSY: resource busy or locked, rm '<TEMP>\puppeteer_dev_chrome_profile-<random>'` rejection when a headless Chromium profile was still locked during cleanup on Windows. `launchHeadlessBrowser` now owns the profile directory via an explicit `--user-data-dir` (disabling puppeteer's unretried temp cleanup) and removes it on dispose with lock-tolerant retry, warning and leaving the directory in place if it stays busy rather than crashing ([#7058](https://github.com/can1357/oh-my-pi/issues/7058)).
+- Fixed the Python RPC client dropping current context, compaction, OAuth URL, and terminal-settlement fields, and made additive notification variants observable without stopping the stdout reader.
+- Fixed the browser tool silently ignoring `url` when opening a new tab on an attached browser (`app.cdp_url` or `app.path`), so the tab now navigates on open exactly as it already did on reuse and in headless mode.
+- Fixed browser automation disrupting a browser it attached to over `app.cdp_url`: the tool now adopts the tab the user actually has in the foreground and no longer raises its own tab when taking a screenshot. Owned and headless browsers keep activating the target before capture.
 
 ## [17.2.1] - 2026-07-30
 
@@ -92,17 +58,9 @@
 
 ### Fixed
 
-- Fixed mid-turn auto-compaction repeating dead-end rescue work and warnings at every tool boundary within one oversized turn ([#7151](https://github.com/can1357/oh-my-pi/issues/7151)).
 - Fixed remote or LAN local-engine endpoints being ignored during model discovery: the llama.cpp and Ollama probes used timeouts tuned for loopback, so a host reached over the network could exceed them and return no models, while changing `OLLAMA_BASE_URL`/`OLLAMA_HOST` could keep reusing a fresh cache from the previous endpoint. Non-loopback hosts now get a generous discovery timeout, and Ollama cache rows are scoped to the normalized endpoint ([#7087](https://github.com/can1357/oh-my-pi/issues/7087)).
 - Fixed `omp install` failing extension validation for pi extensions that import `createEditTool` or `createWriteTool` (e.g. gentle-pi) — the legacy `@oh-my-pi/pi-coding-agent` shim exported the read/bash/grep/find/ls tool factories but omitted the edit and write ones, so a named import threw Bun's static "Export named X not found" error. Added `createEditTool`/`createEditToolDefinition` and `createWriteTool`/`createWriteToolDefinition` to match the upstream pi surface ([#7094](https://github.com/can1357/oh-my-pi/issues/7094)).
 - Fixed Python eval's loopback tool bridge being routed through macOS system HTTP proxies, which caused `parallel()` tool reads to fail with `ConnectionRefusedError` after a local proxy stopped.
-### Fixed
-
-- Fixed automatic terminal appearance changes clearing native scrollback and snapping readers away from their current scroll position; the active output grid now repaints non-destructively, while Ctrl+L remains the explicit full-history recolor.
-### Fixed
-
-- Fixed exact-match edits failing on files containing credential-shaped tokens when `secrets.enabled` (Hide Secrets) is on: unconfigured API keys (GitHub/GitLab/OpenAI-shaped) in tool results now get reversible keyed placeholders from the secret obfuscator — restored byte-exact in tool-call arguments before execution — instead of pi-ai's irreversible `[*_token_redacted]` rewrite, so the model's `old_text` matches the real file bytes while credentials still never reach the provider ([#6968](https://github.com/can1357/oh-my-pi/issues/6968)).
-
 
 ## [17.2.0] - 2026-07-30
 
@@ -130,12 +88,10 @@
 - Startup release notes now default to a compact change-count summary. Use `startup.changelogMode` (`summary` | `expanded` | `hidden`) to control them; legacy `collapseChangelog` choices migrate automatically ([#6771](https://github.com/can1357/oh-my-pi/issues/6771)).
 
 ### Fixed
-- Fixed context usage collapsing to the latest response size for Cursor models that omit prompt-token usage. Output-only assistant turns no longer become context anchors, so active and resumed sessions fall back to full local context reconstruction while compaction retains its conservative stored-context floor ([#7163](https://github.com/can1357/oh-my-pi/pull/7163) by [@harshav167](https://github.com/harshav167)).
 
 - Fixed Anthropic prompt-cache cold misses on session resume with multiple OAuth accounts: the account that served a session is now recorded in the session file (as a `credential_pin` sha-256 of the account + org/project scope, so exports carry no plaintext identity) and re-pinned on resume with the session's effective last-use time, so a fresh process no longer re-ranks accounts by usage headroom — which systematically routed away from the just-used account and cold-missed the entire account-scoped cache prefix. Sticky routing was previously stored only in the auth store's KV cache, which is in-memory when a remote auth broker is configured.
 - Fixed Anthropic prompt-cache cold misses on session resume with multiple OAuth accounts: the account that served a session is now recorded in the session file (as a PII-free `credential_pin` hash) and re-pinned on resume, so a fresh process no longer re-ranks accounts by usage headroom — which systematically routed away from the just-used account and cold-missed the entire account-scoped cache prefix. Sticky routing was previously stored only in the auth store's KV cache, which is in-memory when a remote auth broker is configured.
 - Fixed concurrent `createAgentSession` calls with the default agent id failing initialization with `Agent "Main" was replaced during session initialization` — each in-process embedder (e.g. the edit benchmark runner) can now pass a private registry via the newly exported `AgentRegistry`, keeping every top-level session's "Main" out of the process-global roster race.
-- Fixed the browser tool crashing OMP with an unhandled `EBUSY: resource busy or locked, rm '<TEMP>\puppeteer_dev_chrome_profile-<random>'` rejection when a headless Chromium profile was still locked during cleanup on Windows. `launchHeadlessBrowser` now owns the profile directory via an explicit `--user-data-dir` (disabling puppeteer's unretried temp cleanup) and removes it on dispose with lock-tolerant retry, warning and leaving the directory in place if it stays busy rather than crashing ([#7058](https://github.com/can1357/oh-my-pi/issues/7058)).
 - Fixed task tool blocks duplicating their per-agent progress rows into terminal scrollback on every update: live task frames now pin the transcript live region so mid-run rows are never recorded as frozen snapshots, and a detached background task freezes its progress the moment any of its rows commit to scrollback instead of mutating committed history.
 - Fixed Codex reset fireworks comparing different quota tiers or plans, preventing false celebrations when usage reports switch between Spark and base weekly limits.
 - Fixed Cursor ranged-read results losing the full file byte size after applying the requested window.
@@ -197,15 +153,6 @@
 ### Removed
 
 - Removed the dangling `MCPManager.setOnNotification` single-slot setter, which had no callers in the runtime. Replaced by `MCPManager.addNotificationListener` — multi-listener, per-listener error isolation, returns an unsubscribe function.
-### Fixed
-
-- Fixed the Python RPC client dropping current context, compaction, OAuth URL, and terminal-settlement fields, and made additive notification variants observable without stopping the stdout reader.
-### Fixed
-
-- Fixed the browser tool silently ignoring `url` when opening a new tab on an attached browser (`app.cdp_url` or `app.path`), so the tab now navigates on open exactly as it already did on reuse and in headless mode.
-### Fixed
-
-- Fixed browser automation disrupting a browser it attached to over `app.cdp_url`: the tool now adopts the tab the user actually has in the foreground and no longer raises its own tab when taking a screenshot. Owned and headless browsers keep activating the target before capture.
 
 ## [17.1.8] - 2026-07-28
 
