@@ -74,6 +74,9 @@
 ### Fixed
 
 - Fixed RPC hosts receiving no subagent lifecycle or progress frames when an IRC message revives an idle or parked keep-alive subagent ([#7105](https://github.com/can1357/oh-my-pi/issues/7105)).
+### Fixed
+
+- Fixed copied fenced-code body rows in assistant messages retaining component and container margins ([#7055](https://github.com/can1357/oh-my-pi/pull/7055) by [@GratefulDave](https://github.com/GratefulDave)).
 
 ## [17.2.1] - 2026-07-30
 
@@ -100,9 +103,6 @@
 
 - Fixed exact-match edits failing on files containing credential-shaped tokens when `secrets.enabled` (Hide Secrets) is on: unconfigured API keys (GitHub/GitLab/OpenAI-shaped) in tool results now get reversible keyed placeholders from the secret obfuscator — restored byte-exact in tool-call arguments before execution — instead of pi-ai's irreversible `[*_token_redacted]` rewrite, so the model's `old_text` matches the real file bytes while credentials still never reach the provider ([#6968](https://github.com/can1357/oh-my-pi/issues/6968)).
 
-### Fixed
-
-- Fixed copied fenced-code body rows in assistant messages retaining component and container margins ([#7055](https://github.com/can1357/oh-my-pi/pull/7055) by [@GratefulDave](https://github.com/GratefulDave)).
 
 ## [17.2.0] - 2026-07-30
 
