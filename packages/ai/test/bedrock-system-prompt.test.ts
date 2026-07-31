@@ -1,22 +1,7 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { streamBedrock } from "@oh-my-pi/pi-ai/providers/amazon-bedrock";
 import type { Context, Model } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-
-// These suites capture the request payload from a fire-and-forget stream, so a
-// credential lookup that rejects after the test ends surfaces as an unhandled
-// error against whatever runs next. Skip Bedrock auth: the payload is built
-// before signing and no request leaves the process.
-const originalSkipAuth = process.env.AWS_BEDROCK_SKIP_AUTH;
-
-beforeAll(() => {
-	process.env.AWS_BEDROCK_SKIP_AUTH = "1";
-});
-
-afterAll(() => {
-	if (originalSkipAuth === undefined) delete process.env.AWS_BEDROCK_SKIP_AUTH;
-	else process.env.AWS_BEDROCK_SKIP_AUTH = originalSkipAuth;
-});
 
 interface Payload {
 	system?: Array<{ text: string } | { cachePoint: unknown }>;
@@ -52,6 +37,7 @@ async function capturePayload(systemPrompt: Context["systemPrompt"]): Promise<Pa
 	};
 	const { promise, resolve } = Promise.withResolvers<Payload | undefined>();
 	const stream = streamBedrock(model(), context, {
+		bearerToken: "test-token",
 		signal: abortedSignal(),
 		onPayload: payload => {
 			resolve(payload as Payload);
