@@ -3219,14 +3219,20 @@ export function syntheticModelManagerOptions(
 							: [];
 						const wireReasoning = features.includes("reasoning") || wireEfforts.length > 0;
 						const thinking = resolveSyntheticThinking(wireEfforts);
-						// A route whose only thinking surface is the router's off state is
-						// not a reasoning model from the user's side — reporting
+						// An advertised effort vocabulary is authoritative over the bundled
+						// reference: when the wire names tiers (even only `none`), the
+						// reference's reasoning flag must not re-add a dial the route
+						// doesn't expose. A route whose only wire surface is `none` is not
+						// a reasoning model from the user's side — reporting
 						// `reasoning: true` with a minimal-only ladder would light up the
-						// effort dial for a dial with one stop.
+						// effort dial for a dial with one stop. Only when the wire is
+						// silent on reasoning does the reference get a vote.
 						const reasoning =
-							(wireReasoning && (thinking?.efforts.length ?? 0) > 1) ||
-							entry.supports_reasoning === true ||
-							(reference?.reasoning ?? false);
+							wireReasoning && (thinking?.efforts.length ?? 0) > 1
+								? true
+								: wireEfforts.length > 0
+									? false
+									: entry.supports_reasoning === true || (reference?.reasoning ?? false);
 						// The router aliases (`syn:*`) and newly added routes carry no
 						// bundled reference, so these advertised capabilities are the only
 						// truth available. Without them such a model lands non-reasoning
@@ -3244,12 +3250,18 @@ export function syntheticModelManagerOptions(
 								modalities.includes("image") || entry.supports_vision === true || referenceSupportsImage
 									? ["text", "image"]
 									: ["text"],
-							// Wire proves absence only when the route advertises OTHER
-							// features (a populated but tool-less list); a reference
-							// that already ruled tools out stays ruled out either way.
-							...((features.length > 0 && !features.includes("tools")) || reference?.supportsTools === false
+							// A present `supported_features` list (even empty) is the route's
+							// whole advertised surface: no `tools` entry means no tool
+							// support. The reference still wins when it already vouched for
+							// tools, since a populated wire list can be incomplete; an
+							// explicit reference `false` stays `false` either way.
+							...(record.supported_features !== undefined &&
+							!features.includes("tools") &&
+							reference?.supportsTools !== true
 								? { supportsTools: false }
-								: {}),
+								: reference?.supportsTools === false
+									? { supportsTools: false }
+									: {}),
 							cost: resolveSyntheticCost(record.pricing, base.cost),
 							contextWindow: toPositiveNumber(
 								entry.context_length,

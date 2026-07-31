@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { syntheticModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import type { FetchImpl } from "@oh-my-pi/pi-catalog/types";
@@ -169,8 +170,10 @@ describe("Synthetic provider discovery", () => {
 	});
 
 	test("overrides a stale bundled reference with the wire's effort vocabulary", async () => {
-		// `hf:zai-org/GLM-5.2` ships a bundled reference with a baked effort
-		// ladder; the wire saying the route only accepts `none` must win.
+		// `hf:zai-org/GLM-5.2` ships a bundled reference that is `reasoning: true`
+		// with a baked multi-tier ladder. The wire saying the route only accepts
+		// `none` must win all the way through `buildModel` — identity tables would
+		// otherwise re-expand the off-state into an unadvertised ladder.
 		const { fetch } = syntheticModelsFetch([
 			{
 				id: "hf:zai-org/GLM-5.2",
@@ -185,12 +188,40 @@ describe("Synthetic provider discovery", () => {
 		]);
 		const models = await syntheticModelManagerOptions({ apiKey: "syn-test-key", fetch }).fetchDynamicModels?.();
 
-		const glm = models?.find(model => model.id === "hf:zai-org/GLM-5.2");
-		expect(glm?.thinking).toEqual({
+		const glmSpec = models?.find(model => model.id === "hf:zai-org/GLM-5.2");
+		expect(glmSpec?.reasoning).toBe(false);
+		expect(glmSpec?.thinking).toEqual({
 			mode: "effort",
 			efforts: [Effort.Minimal],
 			effortMap: { minimal: "none" },
 		});
+
+		// Production consumes models through `buildModel`; a non-reasoning model
+		// must surface no thinking metadata there either.
+		const built = buildModel(glmSpec!);
+		expect(built.reasoning).toBe(false);
+		expect(built.thinking).toBeUndefined();
+	});
+
+	test("treats an explicitly empty supported_features list as authoritative no-tools", async () => {
+		// A present-but-empty array is the route advertising zero features, not a
+		// missing field: the model must come out tool-less so the request layer
+		// does not offer tools to a route that rejects them.
+		const { fetch } = syntheticModelsFetch([
+			{
+				id: "hf:example/no-features",
+				object: "model",
+				name: "example/no-features",
+				input_modalities: ["text"],
+				context_length: 131072,
+				supported_features: [],
+			},
+		]);
+		const models = await syntheticModelManagerOptions({ apiKey: "syn-test-key", fetch }).fetchDynamicModels?.();
+
+		const bare = models?.find(model => model.id === "hf:example/no-features");
+		expect(bare?.supportsTools).toBe(false);
+		expect(bare?.reasoning).toBe(false);
 	});
 
 	test("serves no dynamic models without an API key", () => {
