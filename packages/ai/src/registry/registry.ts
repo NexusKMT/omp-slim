@@ -130,7 +130,6 @@ const ALL = [
 	siliconflowCnProvider,
 	syntheticProvider,
 	nanogptProvider,
-	gmiCloudProvider,
 	waferServerlessProvider,
 	coreWeaveProvider,
 	vercelAiGatewayProvider,
@@ -156,6 +155,7 @@ const ALL = [
 	mistralProvider,
 	minimaxProvider,
 	amazonBedrockProvider,
+	gmiCloudProvider,
 ];
 
 export type RegistryDef = (typeof ALL)[number];
