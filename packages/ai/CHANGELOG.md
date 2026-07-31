@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.2] - 2026-07-31
+
 ### Added
 
 - Added support for the `gmi-cloud` provider registry, including API-key paste login validation and integration with `@oh-my-pi/pi-catalog`.

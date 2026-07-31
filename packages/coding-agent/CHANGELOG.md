@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.2] - 2026-07-31
+
 ### Added
 
 - Added an app.live.toggle keybinding (default Ctrl+L) to start or stop live voice mode.

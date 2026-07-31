@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.2] - 2026-07-31
+
 ### Added
 
 - Added request tokens to explicit OSC 11 appearance refreshes to allow consumers to correlate responses across queued and coalesced terminal probes.

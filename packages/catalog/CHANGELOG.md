@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.2] - 2026-07-31
+
 ### Added
 
 - Added support for the GMI Cloud provider (`gmi-cloud`), an OpenAI-compatible inference gateway with dynamic model discovery and API-key authentication via the `GMI_API_KEY` environment variable.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.2] - 2026-07-31
+
 ### Breaking Changes
 
 - Replaced legacy SWAP, INS, and PASTE syntax with unified PUT and CUT hunks

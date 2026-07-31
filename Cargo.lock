@@ -1082,9 +1082,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.6.4"
+version = "4.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d91e0c145792ef73a6ad36d27c75ac09f1832222a3c209689d90f534685ee5b7"
+checksum = "301b56658598e48f3648647ac6fc887be7e7108eddfa4e9b63fcf3ec58c0cadf"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1092,9 +1092,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.6.2"
+version = "4.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f09628afdcc538b57f3c6341e9c8e9970f18e4a481690a64974d7023bd33548b"
+checksum = "94a65403d1a1bd28f7dc68eb8506e8874808ee5eecb59298de588e2e1407a078"
 dependencies = [
  "anstream",
  "anstyle",
@@ -2721,9 +2721,9 @@ checksum = "46c1ff2d1cbf39efe5af0900ced8a069b5e61557a17544eb0c4a50239937389e"
 
 [[package]]
 name = "html-to-markdown-rs"
-version = "3.9.2"
+version = "3.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac9408651be7d7f6a6f51d7bebe5f30815ef2fe620314ad5713f989cee7d70d0"
+checksum = "9de16fbeb15a99cb3c38fc55603d110a090210125437f67dd7384f5bbd26ceb8"
 dependencies = [
  "ahash",
  "astral-tl",
@@ -2751,9 +2751,9 @@ dependencies = [
 
 [[package]]
 name = "hybrid-array"
-version = "0.4.13"
+version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "818356c5132c1fede50f837ca96afbe78ff42413047f4abb886217845e1b6c8c"
+checksum = "707114b52a152fa7bdb290cd7cd5912d9467273b6d74e21b8d81aca1f8533f6b"
 dependencies = [
  "typenum",
 ]
@@ -3674,9 +3674,9 @@ dependencies = [
 
 [[package]]
 name = "maudio-sys"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f00ae1969d0a389937161b834623e5cba2d8449752a0970d71382cf9a905bb35"
+checksum = "ce19c16dbabd0e3db47e88c4ef9d1071236ae66d625647ccd26b5f7570832e05"
 dependencies = [
  "bindgen",
  "cc",
@@ -4789,7 +4789,7 @@ dependencies = [
 
 [[package]]
 name = "pi-ast"
-version = "17.2.1"
+version = "17.2.2"
 dependencies = [
  "anyhow",
  "ast-grep-core",
@@ -4858,7 +4858,7 @@ dependencies = [
 
 [[package]]
 name = "pi-iso"
-version = "17.2.1"
+version = "17.2.2"
 dependencies = [
  "async-trait",
  "libc",
@@ -4870,7 +4870,7 @@ dependencies = [
 
 [[package]]
 name = "pi-natives"
-version = "17.2.1"
+version = "17.2.2"
 dependencies = [
  "anyhow",
  "arboard",
@@ -4929,7 +4929,7 @@ dependencies = [
 
 [[package]]
 name = "pi-shell"
-version = "17.2.1"
+version = "17.2.2"
 dependencies = [
  "anyhow",
  "brush-builtins",
@@ -5016,7 +5016,7 @@ dependencies = [
 
 [[package]]
 name = "pi-voice"
-version = "17.2.1"
+version = "17.2.2"
 dependencies = [
  "audiopus_sys",
  "bytes",
@@ -5030,7 +5030,7 @@ dependencies = [
 
 [[package]]
 name = "pi-walker"
-version = "17.2.1"
+version = "17.2.2"
 dependencies = [
  "dashmap",
  "globset",
@@ -6816,9 +6816,9 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter-elisp"
-version = "1.7.0"
+version = "1.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d68ec866ff7af14f1514f11b0eba7aa837adf2ad1837fa9b30c360461bff481"
+checksum = "6b8b82ab7474028f20d2119285566f219209ebdbeec767fa28025b70f94f8cf3"
 dependencies = [
  "cc",
  "tree-sitter-language",
