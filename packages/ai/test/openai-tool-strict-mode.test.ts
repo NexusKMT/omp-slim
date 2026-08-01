@@ -701,6 +701,45 @@ describe("OpenAI tool strict mode", () => {
 		expect(strictFlags).toEqual([[true], [false], [false]]);
 	});
 
+	it("preserves strict OpenRouter tools when an opaque envelope includes an unrelated upstream error", async () => {
+		const model = getBundledModel("openrouter", "deepseek/deepseek-v4-flash-0731") as Model<"openai-completions">;
+		const providerSessionState = new Map<string, ProviderSessionState>();
+		const strictFlags: boolean[][] = [];
+		const fetchMock: FetchImpl = Object.assign(
+			async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+				const bodyText = typeof init?.body === "string" ? init.body : "";
+				const tools = toRecord(JSON.parse(bodyText)).tools;
+				strictFlags.push(
+					Array.isArray(tools)
+						? tools.map(tool => toRecord(toRecord(tool).function).strict === true)
+						: [],
+				);
+				return new Response(
+					JSON.stringify({
+						error: {
+							message: "Provider returned error",
+							code: 400,
+							metadata: { raw: "Input tokens exceed the model context window." },
+						},
+					}),
+					{ status: 400, headers: { "content-type": "application/json" } },
+				);
+			},
+			{ preconnect: fetch.preconnect },
+		);
+
+		for (let request = 0; request < 2; request += 1) {
+			const result = await streamOpenAICompletions(model, testContext, {
+				apiKey: "test-key",
+				providerSessionState,
+				fetch: fetchMock,
+			}).result();
+			expect(result.stopReason).toBe("error");
+			expect(result.errorMessage).toContain("Provider returned error");
+		}
+		expect(strictFlags).toEqual([[true], [true]]);
+	});
+
 	it("retries opaque OpenRouter provider errors without strict Responses tools and remembers it", async () => {
 		const model = buildModel({
 			id: "deepseek/deepseek-v4-flash-0731",
