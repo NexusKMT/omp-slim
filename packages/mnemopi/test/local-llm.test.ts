@@ -61,6 +61,28 @@ describe("local LLM TypeScript port", () => {
 		expect(model).toBe("test-model");
 	});
 
+	it("removes leading reasoning blocks from remote summaries", async () => {
+		process.env.MNEMOPI_LLM_BASE_URL = "http://reasoning-llm/v1";
+		const fetchMock: FetchImpl = async () =>
+			new Response(
+				JSON.stringify({
+					choices: [
+						{
+							message: {
+								content:
+									"<think>\nThe user requested a one-sentence summary.\n</think>\nMnemopi uses multilingual-e5-large.",
+							},
+						},
+					],
+				}),
+				{ status: 200, headers: { "Content-Type": "application/json" } },
+			);
+
+		expect(await summarizeMemories(["Mnemopi uses multilingual-e5-large."], "", { fetch: fetchMock })).toBe(
+			"Mnemopi uses multilingual-e5-large.",
+		);
+	});
+
 	it("keeps local GGUF unavailable and returns null for local completion", async () => {
 		expect(localGgufAvailable()).toBe(false);
 		expect(await callLocalLlm("prompt")).toBeNull();
