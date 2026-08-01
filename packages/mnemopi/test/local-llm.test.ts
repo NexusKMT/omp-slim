@@ -11,6 +11,7 @@ import {
 	callLocalLlm,
 	callRemoteLlm,
 	chunkMemoriesByBudget,
+	cleanOutput,
 	complete,
 	llmAvailable,
 	localGgufAvailable,
@@ -81,6 +82,10 @@ describe("local LLM TypeScript port", () => {
 		expect(await summarizeMemories(["Mnemopi uses multilingual-e5-large."], "", { fetch: fetchMock })).toBe(
 			"Mnemopi uses multilingual-e5-large.",
 		);
+	});
+
+	it("preserves a literal think tag that follows real content", () => {
+		expect(cleanOutput("The XML tag is <think>keep</think>")).toBe("The XML tag is <think>keep</think>");
 	});
 
 	it("keeps local GGUF unavailable and returns null for local completion", async () => {
