@@ -405,11 +405,11 @@ export class SessionPersistenceIndeterminateError extends AggregateError {
  * tree by `(id, parentId)`, and the mutable leaf pointer selects which path is
  * active for future appends and for LLM context construction.
  *
- * Durability is software-crash safe but not power-loss safe: appends are handed
- * to the OS synchronously in-body (so an entry survives an OOM/SIGKILL the
- * instant `appendMessage` returns) but never `fsync`'d. Full-file rewrites go
- * through the storage layer's atomic temp-write+rename so a crash mid-rewrite
- * cannot truncate the prior good file.
+ * Durability is software-crash safe but not power-loss safe: appends are normally
+ * handed to the OS synchronously in-body but never `fsync`'d. During an atomic
+ * move or rewrite, synchronous appends are fenced in memory and folded into the
+ * full-file rewrite before the operation resolves, so the replaced file cannot
+ * detach their writer.
  */
 export class SessionManager {
 	#cwd: string;
@@ -1325,90 +1325,103 @@ export class SessionManager {
 				: computeDefaultSessionDir(resolvedCwd, this.#storage));
 
 		let sessionFileExisted = false;
-
+		let moveFenceEpoch: number | undefined;
+		// Prevent synchronous appends from reopening the old path while the rename is in flight.
 		if (this.#persist && this.#sessionFile) {
-			this.#storage.ensureDirSync(nextSessionDir);
-			await this.#drainAndCloseWriter();
-			this.#clearDiskError();
+			moveFenceEpoch = ++this.#diskEpoch;
+			this.#atomicRewriteFenceEpoch = moveFenceEpoch;
+		}
 
-			const oldSessionFile = this.#sessionFile;
-			const newSessionFile = path.join(nextSessionDir, path.basename(oldSessionFile));
-			const oldArtifactsDir = artifactsDirectoryFor(oldSessionFile)!;
-			const newArtifactsDir = artifactsDirectoryFor(newSessionFile)!;
-			const sessionPathChanged = path.resolve(oldSessionFile) !== path.resolve(newSessionFile);
-			const artifactPathChanged = path.resolve(oldArtifactsDir) !== path.resolve(newArtifactsDir);
-			sessionFileExisted = this.#storage.existsSync(oldSessionFile);
+		try {
+			if (this.#persist && this.#sessionFile) {
+				this.#storage.ensureDirSync(nextSessionDir);
+				await this.#drainAndCloseWriter();
+				this.#clearDiskError();
 
-			let sessionMoved = false;
-			let artifactsMoved = false;
+				const oldSessionFile = this.#sessionFile;
+				const newSessionFile = path.join(nextSessionDir, path.basename(oldSessionFile));
+				const oldArtifactsDir = artifactsDirectoryFor(oldSessionFile)!;
+				const newArtifactsDir = artifactsDirectoryFor(newSessionFile)!;
+				const sessionPathChanged = path.resolve(oldSessionFile) !== path.resolve(newSessionFile);
+				const artifactPathChanged = path.resolve(oldArtifactsDir) !== path.resolve(newArtifactsDir);
+				sessionFileExisted = this.#storage.existsSync(oldSessionFile);
 
-			try {
-				if (sessionFileExisted && sessionPathChanged) {
-					await fs.promises.rename(oldSessionFile, newSessionFile);
-					sessionMoved = true;
-				}
+				let sessionMoved = false;
+				let artifactsMoved = false;
 
-				if (artifactPathChanged) {
-					try {
-						const artifactStat = await fs.promises.stat(oldArtifactsDir);
-						if (artifactStat.isDirectory()) {
-							await fs.promises.rename(oldArtifactsDir, newArtifactsDir);
-							artifactsMoved = true;
+				try {
+					if (sessionFileExisted && sessionPathChanged) {
+						await fs.promises.rename(oldSessionFile, newSessionFile);
+						sessionMoved = true;
+					}
+
+					if (artifactPathChanged) {
+						try {
+							const artifactStat = await fs.promises.stat(oldArtifactsDir);
+							if (artifactStat.isDirectory()) {
+								await fs.promises.rename(oldArtifactsDir, newArtifactsDir);
+								artifactsMoved = true;
+							}
+						} catch (err) {
+							if (!isEnoent(err)) throw err;
 						}
-					} catch (err) {
-						if (!isEnoent(err)) throw err;
 					}
-				}
-			} catch (err) {
-				if (artifactsMoved) {
-					try {
-						await fs.promises.rename(newArtifactsDir, oldArtifactsDir);
-					} catch (rollbackErr) {
-						throw new Error(
-							`Failed to move artifacts and rollback: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}`,
-						);
+				} catch (err) {
+					if (artifactsMoved) {
+						try {
+							await fs.promises.rename(newArtifactsDir, oldArtifactsDir);
+						} catch (rollbackErr) {
+							throw new Error(
+								`Failed to move artifacts and rollback: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}`,
+							);
+						}
 					}
+
+					if (sessionMoved) {
+						try {
+							await fs.promises.rename(newSessionFile, oldSessionFile);
+						} catch (rollbackErr) {
+							throw new Error(
+								`Failed to move session file and rollback: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}`,
+							);
+						}
+					}
+
+					throw err;
 				}
 
-				if (sessionMoved) {
-					try {
-						await fs.promises.rename(newSessionFile, oldSessionFile);
-					} catch (rollbackErr) {
-						throw new Error(
-							`Failed to move session file and rollback: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}`,
-						);
-					}
-				}
-
-				throw err;
+				this.#sessionFile = newSessionFile;
+				this.#artifactManager = null;
+				this.#artifactManagerSessionFile = null;
 			}
 
-			this.#sessionFile = newSessionFile;
-			this.#artifactManager = null;
-			this.#artifactManagerSessionFile = null;
-		}
+			this.#cwd = resolvedCwd;
+			this.#sessionDir = nextSessionDir;
+			this.#header.cwd = resolvedCwd;
+			// Re-filter additional roots: the new cwd may have been an additional root,
+			// or it may now contain/subsume one. Re-normalize to keep the invariant
+			// that cwd is never also listed as an additional directory.
+			if (this.#additionalDirectories.length > 0) {
+				this.#additionalDirectories = this.#additionalDirectories.filter(d => d !== resolvedCwd);
+				this.#header.additionalDirectories =
+					this.#additionalDirectories.length > 0 ? this.#additionalDirectories : undefined;
+			}
 
-		this.#cwd = resolvedCwd;
-		this.#sessionDir = nextSessionDir;
-		this.#header.cwd = resolvedCwd;
-		// Re-filter additional roots: the new cwd may have been an additional root,
-		// or it may now contain/subsume one. Re-normalize to keep the invariant
-		// that cwd is never also listed as an additional directory.
-		if (this.#additionalDirectories.length > 0) {
-			this.#additionalDirectories = this.#additionalDirectories.filter(d => d !== resolvedCwd);
-			this.#header.additionalDirectories =
-				this.#additionalDirectories.length > 0 ? this.#additionalDirectories : undefined;
-		}
+			// Rewrite at the new location when the file already existed (update cwd) or
+			// there is in-memory output worth materializing; otherwise stay lazy.
+			const hasAssistant = this.#historyContainsAssistantMessage();
+			if (this.#persist && this.#sessionFile && (sessionFileExisted || hasAssistant)) {
+				this.#forceFileCreation = true;
+				await this.#rewriteAtomically();
+			}
 
-		// Rewrite at the new location when the file already existed (update cwd) or
-		// there is in-memory output worth materializing; otherwise stay lazy.
-		const hasAssistant = this.#historyContainsAssistantMessage();
-		if (this.#persist && this.#sessionFile && (sessionFileExisted || hasAssistant)) {
-			this.#forceFileCreation = true;
-			await this.#rewriteAtomically();
+			if (this.#sessionFile) this.#rememberBreadcrumb(resolvedCwd, this.#sessionFile);
+		} finally {
+			// Rewrites release this fence themselves; lazy and failed moves release it here.
+			if (moveFenceEpoch !== undefined && this.#atomicRewriteFenceEpoch === moveFenceEpoch) {
+				this.#atomicRewriteFenceEpoch = null;
+			}
 		}
-
-		if (this.#sessionFile) this.#rememberBreadcrumb(resolvedCwd, this.#sessionFile);
 	}
 
 	/**

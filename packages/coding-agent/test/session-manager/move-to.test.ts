@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
@@ -241,5 +241,47 @@ describe("SessionManager.moveTo", () => {
 		const newFile = session.getSessionFile()!;
 		const newArtifactDir = newFile.slice(0, -6); // strip .jsonl
 		expect(fs.existsSync(newArtifactDir)).toBe(true);
+	});
+	it("does not orphan appends that race the session file rename", async () => {
+		const session = SessionManager.create(cwdA);
+		session.appendMessage({ role: "user", content: "before move", timestamp: 1 });
+		session.appendMessage(makeAssistantMessage());
+		await session.flush();
+
+		const oldFile = session.getSessionFile();
+		if (!oldFile) throw new Error("Expected session file");
+
+		const renameFinished = Promise.withResolvers<void>();
+		const allowMoveToResume = Promise.withResolvers<void>();
+		const rename = fs.promises.rename.bind(fs.promises);
+		const renameSpy = spyOn(fs.promises, "rename").mockImplementation(async (source, target) => {
+			await rename(source, target);
+			if (path.resolve(source.toString()) !== path.resolve(oldFile)) return;
+			renameFinished.resolve();
+			await allowMoveToResume.promise;
+		});
+
+		try {
+			const move = session.moveTo(cwdB);
+			await renameFinished.promise;
+			session.appendMessage({ role: "user", content: "during move", timestamp: 2 });
+			allowMoveToResume.resolve();
+			await move;
+			await session.flush();
+		} finally {
+			allowMoveToResume.resolve();
+			renameSpy.mockRestore();
+		}
+
+		expect(fs.existsSync(oldFile)).toBe(false);
+		const movedFile = session.getSessionFile();
+		if (!movedFile) throw new Error("Expected moved session file");
+		const entries = await loadEntriesFromFile(movedFile);
+		expect(
+			entries.some(
+				entry =>
+					entry.type === "message" && entry.message.role === "user" && entry.message.content === "during move",
+			),
+		).toBe(true);
 	});
 });
