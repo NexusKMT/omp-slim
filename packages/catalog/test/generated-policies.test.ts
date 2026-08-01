@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import type { Api, ModelSpec, Provider } from "@oh-my-pi/pi-catalog/types";
 import {
+	applyAntigravityPricingFallback,
 	applyGeneratedModelPolicies,
 	applyOllamaCloudOutputCap,
 	linkOpenAIPromotionTargets,
@@ -500,5 +501,62 @@ describe("applyOllamaCloudOutputCap", () => {
 		applyOllamaCloudOutputCap(models);
 
 		expect(models[0]?.maxTokens).toBe(1048576);
+	});
+});
+
+describe("applyAntigravityPricingFallback", () => {
+	it("prices Gemini and Claude ids at their first-party peers, including preview-id aliases", () => {
+		const googleCost = { input: 1.5, output: 9, cacheRead: 0.15, cacheWrite: 0 };
+		const previewCost = { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 0 };
+		const anthropicCost = { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 };
+		const models: ModelSpec<Api>[] = [
+			createSpec({ id: "gemini-3.5-flash", api: "google-generative-ai", provider: "google", cost: googleCost }),
+			createSpec({
+				id: "gemini-3.1-pro-preview",
+				api: "google-generative-ai",
+				provider: "google",
+				cost: previewCost,
+			}),
+			createSpec({ id: "claude-opus-4-6", api: "anthropic-messages", provider: "anthropic", cost: anthropicCost }),
+			createSpec({ id: "gemini-3.5-flash", api: "google-gemini-cli", provider: "google-antigravity" }),
+			createSpec({ id: "gemini-3.1-pro", api: "google-gemini-cli", provider: "google-antigravity" }),
+			createSpec({ id: "claude-opus-4-6", api: "google-gemini-cli", provider: "google-antigravity" }),
+		];
+
+		const result = applyAntigravityPricingFallback(models);
+
+		expect(result[3]?.cost).toEqual(googleCost);
+		expect(result[4]?.cost).toEqual(previewCost);
+		expect(result[5]?.cost).toEqual(anthropicCost);
+	});
+
+	it("keeps zero cost for ids without a priced peer and never overwrites billable antigravity cost", () => {
+		const zeroCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+		const pricedCost = { input: 0.5, output: 3, cacheRead: 0.05, cacheWrite: 0 };
+		const models: ModelSpec<Api>[] = [
+			createSpec({ id: "gemini-3-flash-preview", api: "google-generative-ai", provider: "google", cost: zeroCost }),
+			createSpec({ id: "tab_flash_lite_preview", api: "google-gemini-cli", provider: "google-antigravity" }),
+			createSpec({ id: "gemini-3-flash", api: "google-gemini-cli", provider: "google-antigravity" }),
+			createSpec({
+				id: "gemini-3.6-flash",
+				api: "google-gemini-cli",
+				provider: "google-antigravity",
+				cost: pricedCost,
+			}),
+			createSpec({
+				id: "gemini-3.6-flash",
+				api: "google-generative-ai",
+				provider: "google",
+				cost: { input: 9, output: 9, cacheRead: 9, cacheWrite: 9 },
+			}),
+		];
+
+		const result = applyAntigravityPricingFallback(models);
+
+		// No billable google peer (zero-cost peer is not a pricing source).
+		expect(result[1]?.cost).toEqual(zeroCost);
+		expect(result[2]?.cost).toEqual(zeroCost);
+		// Already-billable antigravity rows keep their own pricing.
+		expect(result[3]?.cost).toEqual(pricedCost);
 	});
 });

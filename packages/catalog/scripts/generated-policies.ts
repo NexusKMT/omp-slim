@@ -66,6 +66,49 @@ export function dropUnsupportedBedrockGeoIds(models: readonly ModelSpec[]): Mode
 	return models.filter(model => !(model.provider === "amazon-bedrock" && model.id === "jp.anthropic.claude-opus-5"));
 }
 
+/** True when any component of a model's per-million-token cost is nonzero. */
+export function hasBillableCost(cost: ModelSpec["cost"]): boolean {
+	return cost.input !== 0 || cost.output !== 0 || cost.cacheRead !== 0 || cost.cacheWrite !== 0;
+}
+
+/**
+ * Providers whose first-party list prices back-fill Antigravity's unpriced
+ * rows, in lookup order. Antigravity discovery reports no pricing (the
+ * subscription bills upstream), so without this the whole provider surfaces
+ * $0 cost for every request.
+ */
+const ANTIGRAVITY_PRICING_PEERS = ["google", "anthropic"] as const;
+
+/** Antigravity ids whose Google API peer ships under a different id. */
+const ANTIGRAVITY_PRICING_ID_ALIASES: Readonly<Record<string, string>> = {
+	"gemini-3-flash": "gemini-3-flash-preview",
+	"gemini-3-pro": "gemini-3-pro-preview",
+	"gemini-3.1-pro": "gemini-3.1-pro-preview",
+};
+
+/**
+ * Price `google-antigravity` models at their first-party equivalents: Gemini
+ * ids at Google API list prices, Claude ids at Anthropic list prices. Models
+ * without a priced peer (gpt-oss, internal tab models) keep zero cost.
+ */
+export function applyAntigravityPricingFallback(models: readonly ModelSpec[]): ModelSpec[] {
+	const peerCosts = new Map<string, ModelSpec["cost"]>();
+	for (const peer of ANTIGRAVITY_PRICING_PEERS) {
+		for (const model of models) {
+			if (model.provider === peer && hasBillableCost(model.cost) && !peerCosts.has(model.id)) {
+				peerCosts.set(model.id, model.cost);
+			}
+		}
+	}
+	return models.map(model => {
+		if (model.provider !== "google-antigravity" || hasBillableCost(model.cost)) {
+			return model;
+		}
+		const cost = peerCosts.get(ANTIGRAVITY_PRICING_ID_ALIASES[model.id] ?? model.id);
+		return cost ? { ...model, cost: { ...cost } } : model;
+	});
+}
+
 const CODEX_GPT_5_4_PRIORITY_BY_VARIANT: Partial<Record<OpenAIVariant, number>> = {
 	base: 0,
 	mini: 1,
