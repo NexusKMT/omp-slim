@@ -8,6 +8,7 @@
 ### Added
 
 - Added `AnthropicCompat.streamIdleTimeoutMs` and propagated it through `buildAnthropicCompat` so direct Anthropic provider streams can configure their inter-event idle watchdog.
+- Fixed Ollama Cloud DeepSeek V4 Pro/Flash models (including dated tag variants such as `deepseek-v4-flash:0731`) reporting an incorrect max-output-tokens figure by pinning it to the deployment's enforced 65536-token output ceiling ([#7266](https://github.com/can1357/oh-my-pi/issues/7266)).
 
 ## [17.2.3] - 2026-08-01
 

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import type { Api, ModelSpec, Provider } from "@oh-my-pi/pi-catalog/types";
-import { applyGeneratedModelPolicies, linkOpenAIPromotionTargets } from "../scripts/generated-policies";
+import {
+	applyGeneratedModelPolicies,
+	applyOllamaCloudOutputCap,
+	linkOpenAIPromotionTargets,
+} from "../scripts/generated-policies";
 
 function createSpec<TApi extends Api>(overrides: {
 	id: string;
@@ -406,5 +410,95 @@ describe("generated model policies", () => {
 		expect(models[1]?.applyPatchToolType).toBe("freeform");
 		expect(models[2]?.applyPatchToolType).toBeUndefined();
 		expect(models[3]?.applyPatchToolType).toBeUndefined();
+	});
+});
+
+describe("applyOllamaCloudOutputCap", () => {
+	it("pins DeepSeek V4 Pro/Flash (and their tag variants) to the enforced ceiling (#7266)", () => {
+		const models: ModelSpec<Api>[] = [
+			createSpec({
+				id: "deepseek-v4-flash",
+				api: "ollama-chat",
+				provider: "ollama-cloud",
+				contextWindow: 1048576,
+				maxTokens: 1048576,
+			}),
+			createSpec({
+				id: "deepseek-v4-flash:0731",
+				api: "ollama-chat",
+				provider: "ollama-cloud",
+				contextWindow: 1048576,
+				maxTokens: 8192,
+			}),
+			createSpec({
+				id: "deepseek-v4-pro",
+				api: "ollama-chat",
+				provider: "ollama-cloud",
+				contextWindow: 1048576,
+				maxTokens: 1048576,
+			}),
+		];
+
+		applyOllamaCloudOutputCap(models);
+
+		expect(models[0]?.maxTokens).toBe(65536);
+		expect(models[1]?.maxTokens).toBe(65536);
+		expect(models[2]?.maxTokens).toBe(65536);
+	});
+
+	it("leaves other Ollama Cloud models' discovered limits untouched", () => {
+		const models: ModelSpec<Api>[] = [
+			createSpec({
+				id: "kimi-k2.5",
+				api: "ollama-chat",
+				provider: "ollama-cloud",
+				contextWindow: 262144,
+				maxTokens: 262144,
+			}),
+			createSpec({
+				id: "deepseek-v3.1:671b",
+				api: "ollama-chat",
+				provider: "ollama-cloud",
+				contextWindow: 163840,
+				maxTokens: 163840,
+			}),
+		];
+
+		applyOllamaCloudOutputCap(models);
+
+		expect(models[0]?.maxTokens).toBe(262144);
+		expect(models[1]?.maxTokens).toBe(163840);
+	});
+
+	it("caps by the context window when a capped model's window is below the ceiling", () => {
+		const models: ModelSpec<Api>[] = [
+			createSpec({
+				id: "deepseek-v4-flash",
+				api: "ollama-chat",
+				provider: "ollama-cloud",
+				contextWindow: 32768,
+				maxTokens: 32768,
+			}),
+		];
+
+		applyOllamaCloudOutputCap(models);
+
+		expect(models[0]?.maxTokens).toBe(32768);
+	});
+
+	it("does not touch other providers", () => {
+		const models: ModelSpec<Api>[] = [
+			createSpec({
+				id: "deepseek-v4-flash",
+				api: "openai-completions",
+				provider: "deepseek",
+				contextWindow: 1048576,
+				maxTokens: 1048576,
+			}),
+		];
+
+		applyOllamaCloudOutputCap(models);
+
+		expect(models[0]?.maxTokens).toBe(1048576);
 	});
 });

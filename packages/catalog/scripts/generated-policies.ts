@@ -18,6 +18,7 @@ import { isMimoModelIdOrName } from "../src/identity/family";
 import { getLongestModelLikeIdSegment } from "../src/identity/id";
 import { buildModelReferenceIndex, resolveModelReference } from "../src/identity/reference";
 import { resolveModelThinking } from "../src/model-thinking";
+import { isOllamaCloudOutputCapped, OLLAMA_CLOUD_MAX_OUTPUT_TOKENS } from "../src/provider-models/ollama";
 import {
 	ALIBABA_TOKEN_PLAN_STATIC_MODELS,
 	resolveWaferServerlessThinkingFormat,
@@ -217,6 +218,26 @@ export function applyCanonicalLimitFallback(models: ModelSpec<Api>[]): void {
 				break;
 			}
 		}
+	}
+}
+
+/**
+ * Pin the max-output figure for Ollama Cloud models whose deployment enforces a
+ * lower ceiling than their advertised window.
+ *
+ * Ollama's `/api/show` never reports a per-model output cap, so discovery and
+ * previous snapshots leave `maxTokens` at the full context window (or a stale
+ * conservative fallback, as with `deepseek-v4-flash:0731`). DeepSeek V4
+ * Pro/Flash deployments actually reject any output budget above
+ * {@link OLLAMA_CLOUD_MAX_OUTPUT_TOKENS} (ollama/ollama#16890, #3392/#3394), so
+ * pin those ids to `min(contextWindow, ceiling)` — the true amount the endpoint
+ * accepts (#7266). Other cloud models keep their discovered limits.
+ */
+export function applyOllamaCloudOutputCap(models: ModelSpec<Api>[]): void {
+	for (const model of models) {
+		if (model.provider !== "ollama-cloud" || model.contextWindow === null) continue;
+		if (!isOllamaCloudOutputCapped(model.id)) continue;
+		model.maxTokens = Math.min(model.contextWindow, OLLAMA_CLOUD_MAX_OUTPUT_TOKENS);
 	}
 }
 
