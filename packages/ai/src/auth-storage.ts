@@ -1844,6 +1844,12 @@ export class AuthStorage {
 		return true;
 	}
 
+	#assertPersistedBlockStoreWritable(): void {
+		if (!this.#persistedBlockStoreDamaged) return;
+		const store = this.#sourceLabel ?? `local ${getAgentDbPath()}`;
+		throw new Error(`Persistent credential block store ${store} is unavailable after SQLite corruption`);
+	}
+
 	/**
 	 * Latches {@link AuthStorage.#persistedBlockStoreDamaged} on the first
 	 * unrecoverable persisted-block store error and surfaces it once at `error`
@@ -6406,13 +6412,13 @@ export class AuthStorage {
 	 * Broker-server seam: persist one credential block and notify snapshot waiters.
 	 */
 	upsertCredentialBlock(block: StoredCredentialBlock): void {
-		if (this.#persistedBlockStoreDamaged) return;
+		this.#assertPersistedBlockStoreWritable();
 		const upsertCredentialBlock = this.#store.upsertCredentialBlock?.bind(this.#store);
 		if (!upsertCredentialBlock) return;
 		try {
 			upsertCredentialBlock(block);
 		} catch (err) {
-			if (this.#handlePersistedBlockStoreError(err)) return;
+			if (this.#handlePersistedBlockStoreError(err)) this.#assertPersistedBlockStoreWritable();
 			throw err;
 		}
 		this.#invalidateUsageReportCacheForProviderKey(block.providerKey);
@@ -6423,13 +6429,13 @@ export class AuthStorage {
 	 * Broker-server seam: clear all persisted blocks for one credential and notify snapshot waiters.
 	 */
 	deleteCredentialBlock(credentialId: number, providerKey: string, blockScope: string): void {
-		if (this.#persistedBlockStoreDamaged) return;
+		this.#assertPersistedBlockStoreWritable();
 		const deleteCredentialBlock = this.#store.deleteCredentialBlock?.bind(this.#store);
 		if (!deleteCredentialBlock) return;
 		try {
 			deleteCredentialBlock(credentialId, providerKey, blockScope);
 		} catch (err) {
-			if (this.#handlePersistedBlockStoreError(err)) return;
+			if (this.#handlePersistedBlockStoreError(err)) this.#assertPersistedBlockStoreWritable();
 			throw err;
 		}
 		this.#invalidateUsageReportCacheForProviderKey(providerKey);
@@ -6437,13 +6443,13 @@ export class AuthStorage {
 	}
 
 	deleteCredentialBlocks(credentialId: number): void {
-		if (this.#persistedBlockStoreDamaged) return;
+		this.#assertPersistedBlockStoreWritable();
 		const deleteCredentialBlocks = this.#store.deleteCredentialBlocks?.bind(this.#store);
 		if (!deleteCredentialBlocks) return;
 		try {
 			deleteCredentialBlocks(credentialId);
 		} catch (err) {
-			if (this.#handlePersistedBlockStoreError(err)) return;
+			if (this.#handlePersistedBlockStoreError(err)) this.#assertPersistedBlockStoreWritable();
 			throw err;
 		}
 		this.#bumpGeneration("credential-block");

@@ -534,6 +534,7 @@ describe("AuthStorage corrupt persisted block store", () => {
 			install: (store: AuthCredentialStore, recordCall: () => void) => void;
 			invoke: (storage: AuthStorage) => unknown;
 			fallback: unknown;
+			failsWhenLatched: boolean;
 		}> = [
 			{
 				name: "listCredentialBlocks",
@@ -545,6 +546,7 @@ describe("AuthStorage corrupt persisted block store", () => {
 				},
 				invoke: storage => storage.listCredentialBlocks([1]),
 				fallback: [],
+				failsWhenLatched: false,
 			},
 			{
 				name: "upsertCredentialBlock",
@@ -556,6 +558,7 @@ describe("AuthStorage corrupt persisted block store", () => {
 				},
 				invoke: storage => storage.upsertCredentialBlock(block),
 				fallback: undefined,
+				failsWhenLatched: true,
 			},
 			{
 				name: "deleteCredentialBlock",
@@ -567,6 +570,7 @@ describe("AuthStorage corrupt persisted block store", () => {
 				},
 				invoke: storage => storage.deleteCredentialBlock(1, block.providerKey, block.blockScope),
 				fallback: undefined,
+				failsWhenLatched: true,
 			},
 			{
 				name: "deleteCredentialBlocks",
@@ -578,6 +582,7 @@ describe("AuthStorage corrupt persisted block store", () => {
 				},
 				invoke: storage => storage.deleteCredentialBlocks(1),
 				fallback: undefined,
+				failsWhenLatched: true,
 			},
 		];
 		const errorSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
@@ -592,8 +597,13 @@ describe("AuthStorage corrupt persisted block store", () => {
 			await storage.reload();
 			storages.push(storage);
 
-			expect(scenario.invoke(storage), scenario.name).toEqual(scenario.fallback);
-			expect(scenario.invoke(storage), scenario.name).toEqual(scenario.fallback);
+			if (scenario.failsWhenLatched) {
+				expect(() => scenario.invoke(storage), scenario.name).toThrow("unavailable after SQLite corruption");
+				expect(() => scenario.invoke(storage), scenario.name).toThrow("unavailable after SQLite corruption");
+			} else {
+				expect(scenario.invoke(storage), scenario.name).toEqual(scenario.fallback);
+				expect(scenario.invoke(storage), scenario.name).toEqual(scenario.fallback);
+			}
 			expect(calls, scenario.name).toBe(1);
 		}
 		expect(errorSpy).toHaveBeenCalledTimes(scenarios.length);
