@@ -625,6 +625,244 @@ describe("runGcCommand cold-session archive", () => {
 		expect(remaining).toEqual(Object.fromEntries(tables.map(table => [table, [keepSession]])));
 	});
 
+	test("transfers shared stats among retained branches while pruning archived lineage members", async () => {
+		const sessionsDir = path.join(getSessionsDir(root), "project");
+		await fs.mkdir(sessionsDir, { recursive: true });
+		const parent = path.join(sessionsDir, "20260626_parent-session.jsonl");
+		const child = path.join(sessionsDir, "20260726_child-session.jsonl");
+		const sibling = path.join(sessionsDir, "20260725_sibling-session.jsonl");
+		const timestamp = "2026-06-26T12:00:00.000Z";
+		const sharedUser = {
+			type: "message",
+			id: "shared-user",
+			parentId: null,
+			timestamp,
+			message: { role: "user", content: "shared" },
+		};
+		const sharedAssistant = {
+			type: "message",
+			id: "shared-assistant",
+			parentId: "shared-user",
+			timestamp,
+			message: { role: "assistant", content: [] },
+		};
+		const parentOnlyUser = {
+			type: "message",
+			id: "parent-only-user",
+			parentId: "shared-assistant",
+			timestamp,
+			message: { role: "user", content: "abandoned branch" },
+		};
+		const parentOnlyAssistant = {
+			type: "message",
+			id: "parent-only-assistant",
+			parentId: "parent-only-user",
+			timestamp,
+			message: { role: "assistant", content: [] },
+		};
+		await Bun.write(
+			parent,
+			[
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "parent-session",
+					timestamp,
+					cwd: "/tmp",
+				}),
+				sharedUser,
+				sharedAssistant,
+				parentOnlyUser,
+				parentOnlyAssistant,
+				"",
+			]
+				.map(entry => (typeof entry === "string" ? entry : JSON.stringify(entry)))
+				.join("\n"),
+		);
+		await agePath(parent, 90);
+		await Bun.write(
+			child,
+			[
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "child-session",
+					timestamp,
+					cwd: "/tmp",
+					parentSession: parent,
+				}),
+				JSON.stringify(sharedUser),
+				JSON.stringify(sharedAssistant),
+				"",
+			].join("\n"),
+		);
+		await Bun.write(
+			sibling,
+			[
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "sibling-session",
+					timestamp,
+					cwd: "/tmp",
+					parentSession: parent,
+				}),
+				JSON.stringify(sharedUser),
+				JSON.stringify(sharedAssistant),
+				"",
+			].join("\n"),
+		);
+		await agePath(sibling, 1);
+		const siblingStat = await fs.stat(sibling);
+		const childStat = await fs.stat(child);
+
+		const statsDbPath = path.join(root, "stats.db");
+		const db = new Database(statsDbPath);
+		db.run(
+			"CREATE TABLE messages (session_file TEXT NOT NULL, entry_id TEXT NOT NULL, UNIQUE(session_file, entry_id))",
+		);
+		db.run(
+			"CREATE TABLE user_messages (session_file TEXT NOT NULL, entry_id TEXT NOT NULL, UNIQUE(session_file, entry_id))",
+		);
+		db.run(
+			"CREATE TABLE tool_calls (session_file TEXT NOT NULL, entry_id TEXT NOT NULL, tool_call_id TEXT NOT NULL, UNIQUE(session_file, tool_call_id))",
+		);
+		db.run(
+			"CREATE TABLE file_offsets (session_file TEXT PRIMARY KEY, offset INTEGER NOT NULL, last_modified INTEGER NOT NULL)",
+		);
+		for (const [table, sharedId, parentOnlyId] of [
+			["messages", "shared-assistant", "parent-only-assistant"],
+			["user_messages", "shared-user", "parent-only-user"],
+		] as const) {
+			const insert = db.prepare(`INSERT INTO ${table} (session_file, entry_id) VALUES (?, ?)`);
+			insert.run(parent, sharedId);
+			insert.run(parent, parentOnlyId);
+		}
+		const insertToolCall = db.prepare(
+			"INSERT INTO tool_calls (session_file, entry_id, tool_call_id) VALUES (?, ?, ?)",
+		);
+		insertToolCall.run(parent, "shared-assistant", "shared-tool");
+		insertToolCall.run(parent, "parent-only-assistant", "parent-only-tool");
+		db.prepare("INSERT INTO file_offsets (session_file, offset, last_modified) VALUES (?, ?, ?)").run(parent, 444, 1);
+		const insertOffset = db.prepare(
+			"INSERT INTO file_offsets (session_file, offset, last_modified) VALUES (?, ?, ?)",
+		);
+		insertOffset.run(child, childStat.size, childStat.mtimeMs);
+		insertOffset.run(sibling, siblingStat.size, siblingStat.mtimeMs);
+		db.close();
+
+		const result = await runGcCommand({
+			flags: {
+				agentDir: root,
+				archive: true,
+				coldArchiveAfterDays: 30,
+				retainNewestGlobal: 0,
+				retainNewestPerCwd: 0,
+				apply: true,
+			},
+		});
+
+		const check = new Database(statsDbPath);
+		const messages = check.prepare("SELECT session_file, entry_id FROM messages").all();
+		const userMessages = check.prepare("SELECT session_file, entry_id FROM user_messages").all();
+		const toolCalls = check.prepare("SELECT session_file, entry_id, tool_call_id FROM tool_calls").all();
+		const offsets = check
+			.prepare("SELECT session_file, offset, last_modified FROM file_offsets ORDER BY session_file")
+			.all();
+		check.close();
+
+		expect(result.archive?.archived).toBe(1);
+		expect(result.archive?.statsRowsDeleted).toBe(4);
+		expect(result.archive?.errors).toEqual([]);
+		expect(messages).toEqual([{ session_file: child, entry_id: "shared-assistant" }]);
+		expect(userMessages).toEqual([{ session_file: child, entry_id: "shared-user" }]);
+		expect(toolCalls).toEqual([{ session_file: child, entry_id: "shared-assistant", tool_call_id: "shared-tool" }]);
+		expect(offsets).toEqual([
+			{ session_file: sibling, offset: siblingStat.size, last_modified: siblingStat.mtimeMs },
+			{ session_file: child, offset: childStat.size, last_modified: childStat.mtimeMs },
+		]);
+
+		await agePath(child, 90);
+		const second = await runGcCommand({
+			flags: {
+				agentDir: root,
+				archive: true,
+				coldArchiveAfterDays: 30,
+				retainNewestGlobal: 0,
+				retainNewestPerCwd: 0,
+				apply: true,
+			},
+		});
+		const secondCheck = new Database(statsDbPath);
+		const secondMessages = secondCheck.prepare("SELECT session_file, entry_id FROM messages").all();
+		const secondUserMessages = secondCheck.prepare("SELECT session_file, entry_id FROM user_messages").all();
+		const secondToolCalls = secondCheck.prepare("SELECT session_file, entry_id, tool_call_id FROM tool_calls").all();
+		const secondOffsets = secondCheck.prepare("SELECT session_file, offset, last_modified FROM file_offsets").all();
+		secondCheck.close();
+
+		expect(second.archive?.archived).toBe(1);
+		expect(second.archive?.statsRowsDeleted).toBe(1);
+		expect(second.archive?.errors).toEqual([]);
+		expect(secondMessages).toEqual([{ session_file: sibling, entry_id: "shared-assistant" }]);
+		expect(secondUserMessages).toEqual([{ session_file: sibling, entry_id: "shared-user" }]);
+		expect(secondToolCalls).toEqual([
+			{ session_file: sibling, entry_id: "shared-assistant", tool_call_id: "shared-tool" },
+		]);
+		expect(secondOffsets).toEqual([
+			{ session_file: sibling, offset: siblingStat.size, last_modified: siblingStat.mtimeMs },
+		]);
+	});
+
+	test("prunes stats still owned by a session's paths from before it moved", async () => {
+		const original = await writeSession(root, "before-move", "moved-session", "complete", {
+			filename: "20260626_moved-session",
+		});
+		const moved = path.join(getSessionsDir(root), "after-move", path.basename(original));
+		await fs.mkdir(path.dirname(moved), { recursive: true });
+		await fs.rename(original, moved);
+		await agePath(moved, 90);
+		const historicalNested = path.join(original.slice(0, -".jsonl".length), "nested.jsonl");
+
+		const statsDbPath = path.join(root, "stats.db");
+		const tables = ["messages", "user_messages", "tool_calls", "file_offsets"] as const;
+		const db = new Database(statsDbPath);
+		for (const table of tables) {
+			db.run(`CREATE TABLE ${table} (session_file TEXT NOT NULL)`);
+			const insert = db.prepare(`INSERT INTO ${table} (session_file) VALUES (?)`);
+			insert.run(original);
+			insert.run(historicalNested);
+		}
+		db.prepare("INSERT INTO file_offsets (session_file) VALUES (?)").run(moved);
+		db.close();
+
+		const result = await runGcCommand({
+			flags: {
+				agentDir: root,
+				archive: true,
+				coldArchiveAfterDays: 30,
+				retainNewestGlobal: 0,
+				retainNewestPerCwd: 0,
+				apply: true,
+			},
+		});
+
+		const check = new Database(statsDbPath);
+		const remaining = Object.fromEntries(
+			tables.map(table => [
+				table,
+				(check.prepare(`SELECT session_file FROM ${table}`).all() as Array<{ session_file: string }>).map(
+					row => row.session_file,
+				),
+			]),
+		);
+		check.close();
+
+		expect(result.archive?.archived).toBe(1);
+		expect(result.archive?.statsRowsDeleted).toBe(9);
+		expect(result.archive?.errors).toEqual([]);
+		expect(remaining).toEqual(Object.fromEntries(tables.map(table => [table, []])));
+	});
+
 	test("reports stats cleanup failures and retries rows for already archived sessions", async () => {
 		const session = await writeSession(root, "project", "archive-me", "complete", {
 			ageDays: 90,
