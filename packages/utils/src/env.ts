@@ -315,6 +315,23 @@ export function setInteractiveHost(interactive: boolean): boolean {
 }
 
 /**
+ * SQLite `busy_timeout` for the session-critical databases (agent.db,
+ * history.db, stats.db).
+ *
+ * Interactive hosts tolerate a longer synchronous wait on lock contention
+ * (SQLITE_BUSY during WAL recovery/checkpoint — see oh-my-pi#2421): the
+ * operator sees a brief freeze and the statement eventually completes.
+ * Headless hosts (print/RPC/ACP/eval/SDK) run a protocol on the same thread —
+ * a multi-second synchronous busy-wait freezes their event loop and stalls
+ * every in-flight frame with no liveness signal, so they use a short timeout
+ * and rely on the existing asynchronous open/retry paths to recover from
+ * contention instead of blocking.
+ */
+export function getDbBusyTimeoutMs(): number {
+	return isInteractiveHost() ? 5000 : 1000;
+}
+
+/**
  * True when this code is running inside a `bun build --compile` standalone
  * binary. Detects via the embedded virtual-filesystem path markers
  * (`$bunfs`, `~BUN`, or its URL-encoded form `%7EBUN`) in `import.meta.url`,
