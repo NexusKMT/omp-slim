@@ -335,6 +335,26 @@ describe("Anthropic request fingerprint alignment", () => {
 		});
 	});
 
+	it("never caches OAuth cloak blocks when no caller system prompt exists", async () => {
+		const payload = (await captureAnthropicPayload(ANTHROPIC_MODEL, {
+			messages: [{ role: "user", content: "Hi", timestamp: Date.now() }],
+		})) as {
+			system?: Array<{ text?: string; cache_control?: unknown }>;
+			messages?: Array<{ content?: Array<{ cache_control?: unknown }> | string }>;
+		};
+
+		expect(payload.system).toHaveLength(2);
+		expect(payload.system?.[0]?.text).toStartWith("x-anthropic-billing-header:");
+		expect(payload.system?.[0]?.cache_control).toBeUndefined();
+		expect(payload.system?.[1]?.text).toBe(claudeCodeSystemInstruction);
+		expect(payload.system?.[1]?.cache_control).toBeUndefined();
+		const content = payload.messages?.[0]?.content;
+		expect(Array.isArray(content) ? content[0]?.cache_control : undefined).toEqual({
+			type: "ephemeral",
+			ttl: "1h",
+		});
+	});
+
 	it("caches tool-result-only user messages in OAuth request payloads", async () => {
 		const payload = (await captureAnthropicPayload(ANTHROPIC_MODEL, {
 			systemPrompt: ["Stay concise."],

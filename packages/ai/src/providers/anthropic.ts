@@ -3151,9 +3151,7 @@ function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?:
 	let isCCLayout = false;
 
 	if (params.system && Array.isArray(params.system) && params.system.length > 0) {
-		isCCLayout =
-			params.system.length >= 3 &&
-			(params.system[0] as { text?: string }).text?.startsWith(CLAUDE_BILLING_HEADER_PREFIX) === true;
+		isCCLayout = params.system[0]?.text?.startsWith(CLAUDE_BILLING_HEADER_PREFIX) === true;
 		cacheBreakpointsUsed += cacheSystemPrefixBreakpoints(
 			params.system as AnthropicSystemBlock[],
 			cacheControl,
