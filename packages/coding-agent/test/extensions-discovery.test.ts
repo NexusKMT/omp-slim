@@ -9,6 +9,7 @@ import {
 	discoverExtensionPaths,
 	loadExtensions,
 } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
+import { discoverSessionExtensionPaths } from "@oh-my-pi/pi-coding-agent/sdk";
 import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 import { filterUserScoped } from "./utils/filter-user-extensions";
 
@@ -138,12 +139,22 @@ describe("extensions discovery", () => {
 		expect(result.extensions[0].path).toContain("main.ts");
 	});
 
-	it("explicit-only discovery resolves a package manifest and excludes ambient factories", async () => {
-		fs.writeFileSync(path.join(extensionsDir, "ambient.ts"), extensionCodeWithTool("ambient-tool"));
+	it("SDK explicit-only discovery loads package hooks without ambient package hooks", async () => {
+		const ambientPackage = path.join(tempDir.path(), "ambient-package");
+		fs.mkdirSync(path.join(ambientPackage, "hooks", "pre"), { recursive: true });
+		fs.writeFileSync(path.join(ambientPackage, "hooks", "pre", "ambient.ts"), extensionCodeWithTool("ambient-tool"));
+		fs.writeFileSync(
+			path.join(getProjectAgentDir(tempDir.path()), "settings.json"),
+			JSON.stringify({ extensions: [ambientPackage] }),
+		);
+
 		const packageDir = path.join(tempDir.path(), "explicit-package");
 		const sourceDir = path.join(packageDir, "src");
+		const hookDir = path.join(packageDir, "hooks", "pre");
 		fs.mkdirSync(sourceDir, { recursive: true });
+		fs.mkdirSync(hookDir, { recursive: true });
 		fs.writeFileSync(path.join(sourceDir, "main.ts"), extensionCodeWithTool("explicit-tool"));
+		fs.writeFileSync(path.join(hookDir, "read.ts"), extensionCodeWithTool("explicit-hook-tool"));
 		fs.writeFileSync(
 			path.join(packageDir, "package.json"),
 			JSON.stringify({
@@ -154,13 +165,27 @@ describe("extensions discovery", () => {
 			}),
 		);
 
-		const result = await discoverAndLoadExtensions([packageDir], tempDir.path(), undefined, undefined, {
-			ambient: false,
+		const settings = await Settings.init({
+			inMemory: true,
+			cwd: tempDir.path(),
+			overrides: { extensions: [ambientPackage] },
 		});
+		const paths = await discoverSessionExtensionPaths(
+			{ disableExtensionDiscovery: true, additionalExtensionPaths: [packageDir] },
+			tempDir.path(),
+			settings,
+		);
+		const result = await loadExtensions(paths, tempDir.path());
 
 		expect(result.errors).toHaveLength(0);
-		expect(result.extensions.map(extension => extension.path)).toEqual([path.join(sourceDir, "main.ts")]);
-		expect(result.extensions.flatMap(extension => [...extension.tools.keys()])).toEqual(["explicit-tool"]);
+		expect(result.extensions.map(extension => extension.path)).toEqual([
+			path.join(hookDir, "read.ts"),
+			path.join(sourceDir, "main.ts"),
+		]);
+		expect(result.extensions.flatMap(extension => [...extension.tools.keys()])).toEqual([
+			"explicit-hook-tool",
+			"explicit-tool",
+		]);
 	});
 
 	it("discovers a symlinked extension package directory", async () => {

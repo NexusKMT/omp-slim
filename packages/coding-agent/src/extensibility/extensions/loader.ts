@@ -509,6 +509,26 @@ async function discoverExtensionsInDir(dir: string): Promise<string[]> {
 
 	return discovered;
 }
+async function discoverHooksInPackageRoot(root: string): Promise<string[]> {
+	const hooks: string[] = [];
+	for (const hookType of ["pre", "post"]) {
+		const hookDir = path.join(root, "hooks", hookType);
+		let entries: fs1.Dirent[];
+		try {
+			entries = await fs.readdir(hookDir, { withFileTypes: true });
+		} catch (err) {
+			if (isEnoent(err) || hasFsCode(err, "ENOTDIR")) continue;
+			throw err;
+		}
+		for (const entry of entries) {
+			if ((entry.isFile() || entry.isSymbolicLink()) && isExtensionFile(entry.name)) {
+				hooks.push(path.join(hookDir, entry.name));
+			}
+		}
+	}
+	return hooks;
+}
+
 /**
  * Discover absolute paths of extensions to load, without importing or
  * binding factories. Hot path on session startup — the scan walks native
@@ -573,17 +593,20 @@ export async function discoverExtensionPaths(
 	}
 
 	// 2. Discover JS/TS hook factories and bind them through the extension
-	// runner, which owns the current runtime event bus. Explicit-only discovery
-	// still loads hooks from explicitly injected OMP package roots, while
-	// excluding every ambient hook provider.
-	const hooks = await loadCapability<Hook>(
-		hookCapability.id,
-		ambient ? loadOptions : { ...loadOptions, providers: ["omp-plugins"] },
-	);
-	for (const hookPath of hooks.items
-		.map(hook => hook.path)
-		.filter(hookPath => isExtensionFile(path.basename(hookPath)))) {
-		addPath(hookPath);
+	// runner, which owns the current runtime event bus. Non-ambient discovery
+	// scans only this invocation's configured package roots; it must not consult
+	// settings, installed packages, or process-global CLI injection state.
+	if (ambient) {
+		const hooks = await loadCapability<Hook>(hookCapability.id, loadOptions);
+		for (const hookPath of hooks.items
+			.map(hook => hook.path)
+			.filter(hookPath => isExtensionFile(path.basename(hookPath)))) {
+			addPath(hookPath);
+		}
+	} else {
+		for (const configuredPath of configuredPaths) {
+			addPaths(await discoverHooksInPackageRoot(resolvePath(configuredPath, cwd)));
+		}
 	}
 
 	// 3. Discover extension entry points from installed plugins.
