@@ -40,9 +40,12 @@ describe("getDbBusyTimeoutMs", () => {
 		}
 	});
 });
-async function runRuntimeProbe(env: Record<string, string | undefined>): Promise<boolean> {
+async function runRuntimeProbe(
+	env: Record<string, string | undefined>,
+	probePath = runtimeProbePath,
+): Promise<boolean> {
 	const cwd = path.dirname(writeTempEnv(""));
-	const proc = Bun.spawn([process.execPath, runtimeProbePath], {
+	const proc = Bun.spawn([process.execPath, probePath], {
 		cwd,
 		env: { ...process.env, ...env },
 		stdout: "pipe",
@@ -167,5 +170,21 @@ describe("isBunTestRuntime", () => {
 
 	it("honors the private test runner signal", async () => {
 		expect(await runRuntimeProbe({ NODE_ENV: undefined, BUN_ENV: undefined, PI_TEST_RUNTIME: "1" })).toBe(true);
+	});
+
+	it("recognizes Bun's underscore test entrypoints", async () => {
+		const dir = path.dirname(writeTempEnv(""));
+		const underscoreProbePath = path.join(dir, "runtime_test.ts");
+		const envModulePath = path.join(import.meta.dir, "..", "src", "env.ts");
+		fs.writeFileSync(
+			underscoreProbePath,
+			`import { isBunTestRuntime } from ${JSON.stringify(envModulePath)};\nprocess.stdout.write(JSON.stringify(isBunTestRuntime()));\n`,
+		);
+		expect(
+			await runRuntimeProbe(
+				{ NODE_ENV: "test", BUN_ENV: undefined, PI_TEST_RUNTIME: undefined },
+				underscoreProbePath,
+			),
+		).toBe(true);
 	});
 });

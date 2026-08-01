@@ -258,7 +258,7 @@ export function $envpos(name: string, defaultValue: number): number {
 	return parsed;
 }
 
-const BUN_TEST_ENTRY_PATTERN = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
+const BUN_TEST_ENTRY_PATTERN = /[._](?:test|spec)\.[cm]?[jt]sx?$/;
 
 /** True when the process is an explicitly marked test child or Bun is running a test entrypoint. */
 export function isBunTestRuntime(): boolean {
