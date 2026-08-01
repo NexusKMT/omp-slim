@@ -658,7 +658,11 @@ export class CommandController {
 			try {
 				const payload = await hook?.(agentDir, this.ctx.sessionManager.getCwd(), this.ctx.session);
 				if (!payload) {
-					this.ctx.showWarning(`Memory ${action} is not available for the ${backend.id} backend.`);
+					if (backend.id === "off") {
+						this.ctx.showWarning("Memory backend is off — there is nothing to show.");
+					} else {
+						this.ctx.showWarning(`Memory ${action} is not available for the ${backend.id} backend.`);
+					}
 					return;
 				}
 				showMarkdownPanel(this.ctx, `Memory ${action === "stats" ? "Stats" : "Diagnostics"}`, payload);
