@@ -26,6 +26,7 @@ import {
 	DEFAULT_SHAKE_CONFIG,
 	effectiveReserveTokens,
 	estimateTokens,
+	hasContextTokenUsage,
 	NativeCompactionError,
 	prepareCompaction,
 	resolveBudgetReserveTokens,
@@ -483,7 +484,12 @@ export class SessionMaintenance {
 			const entry = branchEntries[index];
 			if (entry.type !== "message" || entry.message.role !== "assistant") continue;
 			const assistant = entry.message;
-			if (assistant.stopReason !== "aborted" && assistant.stopReason !== "error" && assistant.usage) {
+			if (
+				assistant.stopReason !== "aborted" &&
+				assistant.stopReason !== "error" &&
+				assistant.usage &&
+				hasContextTokenUsage(assistant.usage)
+			) {
 				anchorIndex = index;
 				break;
 			}

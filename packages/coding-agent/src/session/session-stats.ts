@@ -279,7 +279,14 @@ export class SessionStatsTracker {
 			const entry = branchEntries[index];
 			if (entry.type !== "message" || entry.message.role !== "assistant") continue;
 			const assistant = entry.message;
-			if (assistant.stopReason === "aborted" || assistant.stopReason === "error" || !assistant.usage) continue;
+			if (
+				assistant.stopReason === "aborted" ||
+				assistant.stopReason === "error" ||
+				!assistant.usage ||
+				!hasContextTokenUsage(assistant.usage)
+			) {
+				continue;
+			}
 
 			if (!assistant.contextSnapshot) {
 				assistant.contextSnapshot = {

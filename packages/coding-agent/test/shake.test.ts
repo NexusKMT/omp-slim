@@ -153,6 +153,54 @@ describe("AgentSession shake", () => {
 			).toBe(result.tokensFreed);
 		});
 
+		it("skips response-only usage when selecting the correction anchor", async () => {
+			seedHeavyToolResult("X".repeat(20_000));
+			sessionManager.appendMessage({
+				role: "assistant",
+				content: [{ type: "text", text: "anchored" }],
+				...apiInfo,
+				stopReason: "stop",
+				usage: { ...usage, input: 20_000, totalTokens: 20_008 },
+				timestamp: Date.now(),
+			});
+			sessionManager.appendMessage({
+				role: "assistant",
+				content: [{ type: "text", text: "response-only" }],
+				...apiInfo,
+				stopReason: "stop",
+				usage: { ...usage, input: 0, output: 8, totalTokens: 8 },
+				timestamp: Date.now() + 1,
+			});
+			session.agent.replaceMessages(
+				sessionManager
+					.getBranch()
+					.filter(entry => entry.type === "message")
+					.map(entry => entry.message as AgentMessage),
+			);
+			const before = session.getContextUsage()?.tokens;
+			expect(before).toBeDefined();
+
+			const result = await session.shake("elide");
+
+			expect(result.tokensFreed).toBeGreaterThan(0);
+			expect(session.getContextUsage()?.tokens).toBe(before! - result.tokensFreed);
+			const assistants = sessionManager
+				.getBranch()
+				.filter(entry => entry.type === "message" && entry.message.role === "assistant");
+			const usableAnchor = assistants.at(-2);
+			const responseOnly = assistants.at(-1);
+			expect(
+				usableAnchor?.type === "message" && usableAnchor.message.role === "assistant"
+					? usableAnchor.message.contextSnapshot?.historyRewriteTokensRemoved
+					: undefined,
+			).toBe(result.tokensFreed);
+			expect(
+				responseOnly?.type === "message" && responseOnly.message.role === "assistant"
+					? responseOnly.message.contextSnapshot?.historyRewriteTokensRemoved
+					: undefined,
+			).toBeUndefined();
+		});
+
 		it("returns zero counts for an empty branch", async () => {
 			const result = await session.shake("elide");
 			expect(result.toolResultsDropped).toBe(0);
