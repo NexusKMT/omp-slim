@@ -47,7 +47,7 @@ function configuredPageSize(): SqlitePageSize | undefined {
 function resolvePageSize(requested?: SqlitePageSize): number | undefined {
 	const pageSize = requested ?? configuredPageSize();
 	if (pageSize === "os") return detectSystemPageSize();
-	return pageSize;
+	return pageSize !== undefined && isValidPageSize(pageSize) ? pageSize : undefined;
 }
 
 function applyPageSize(db: Database, path: DatabasePath, requested?: SqlitePageSize): void {

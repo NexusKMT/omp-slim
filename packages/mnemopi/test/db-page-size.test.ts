@@ -1,16 +1,16 @@
 import type { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { closeQuietly, openDatabase } from "../src/db";
 
 const roots: string[] = [];
 
 function tempDb(): string {
-	const root = mkdtempSync(join(tmpdir(), "mnemopi-page-size-"));
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "mnemopi-page-size-"));
 	roots.push(root);
-	return join(root, "test.db");
+	return path.join(root, "test.db");
 }
 
 interface PageSizeRow {
@@ -26,7 +26,7 @@ afterEach(() => {
 	for (;;) {
 		const root = roots.pop();
 		if (root === undefined) break;
-		rmSync(root, { recursive: true, force: true });
+		fs.rmSync(root, { recursive: true, force: true });
 	}
 });
 
@@ -40,16 +40,25 @@ describe("db page size", () => {
 		}
 	});
 
+	it("ignores invalid explicit page sizes", () => {
+		const db = openDatabase(tempDb(), { pageSize: 12345 });
+		try {
+			expect(pageSize(db)).toBe(4096);
+		} finally {
+			closeQuietly(db);
+		}
+	});
+
 	it("keeps the existing page size when reopening a database with another request", () => {
-		const path = tempDb();
-		const initial = openDatabase(path, { pageSize: 4096 });
+		const dbPath = tempDb();
+		const initial = openDatabase(dbPath, { pageSize: 4096 });
 		try {
 			initial.run("CREATE TABLE existing_data (value TEXT NOT NULL)");
 		} finally {
 			closeQuietly(initial);
 		}
 
-		const reopened = openDatabase(path, { pageSize: 16384 });
+		const reopened = openDatabase(dbPath, { pageSize: 16384 });
 		try {
 			expect(pageSize(reopened)).toBe(4096);
 		} finally {
