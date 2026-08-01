@@ -1,4 +1,6 @@
 import { describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { AuthStorage } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -17,7 +19,7 @@ async function createContextSession(
 	cwd: string,
 	settings: Settings,
 	options: { advisor?: boolean } = {},
-): Promise<{ session: AgentSession; authStorage: AuthStorage }> {
+): Promise<{ session: AgentSession; authStorage: AuthStorage; sessionManager: SessionManager }> {
 	const authStorage = await AuthStorage.create(`${cwd}/auth.db`);
 	const model = getBundledModel("openai", "gpt-4o-mini");
 	if (options.advisor) {
@@ -26,11 +28,12 @@ async function createContextSession(
 		settings.setModelRole("advisor", `${model.provider}/${model.id}`);
 	}
 	const modelRegistry = new ModelRegistry(authStorage);
+	const sessionManager = SessionManager.inMemory(cwd);
 	const { session } = await createAgentSession({
 		cwd,
 		agentDir: cwd,
 		modelRegistry,
-		sessionManager: SessionManager.inMemory(cwd),
+		sessionManager,
 		settings,
 		model,
 		disableExtensionDiscovery: true,
@@ -40,7 +43,7 @@ async function createContextSession(
 		enableLsp: false,
 		skipPythonPreflight: true,
 	});
-	return { session, authStorage };
+	return { session, authStorage, sessionManager };
 }
 
 describe("context-file prompt refresh", () => {
@@ -127,6 +130,32 @@ describe("context-file prompt refresh", () => {
 			const refreshed = advisorPrompt();
 			expect(refreshed).toContain(UPDATED_CONTEXT);
 			expect(refreshed).not.toContain(INITIAL_CONTEXT);
+		} finally {
+			await session.dispose();
+			authStorage.close();
+		}
+	});
+
+	it("recomputes active repo context after the session cwd changes", async () => {
+		using tempDir = TempDir.createSync("@omp-context-refresh-cwd-");
+		const cwdA = tempDir.join("cwd-a");
+		const cwdB = tempDir.join("cwd-b");
+		fs.mkdirSync(path.join(cwdA, "old-repo", ".git"), { recursive: true });
+		fs.mkdirSync(path.join(cwdB, "new-repo", ".git"), { recursive: true });
+		const { session, authStorage, sessionManager } = await createContextSession(
+			cwdA,
+			Settings.isolated({}),
+		);
+
+		try {
+			expect(session.systemPrompt.join("\n")).toContain("old-repo");
+
+			await sessionManager.moveTo(cwdB);
+			await session.refreshSkills();
+
+			const refreshedPrompt = session.systemPrompt.join("\n");
+			expect(refreshedPrompt).toContain("new-repo");
+			expect(refreshedPrompt).not.toContain("old-repo");
 		} finally {
 			await session.dispose();
 			authStorage.close();

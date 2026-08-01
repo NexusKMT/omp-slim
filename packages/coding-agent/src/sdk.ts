@@ -1290,14 +1290,15 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		? Promise.resolve(options.contextFiles)
 		: logger.time("discoverContextFiles", discoverContextFiles, cwd, agentDir);
 	contextFilesPromise.catch(() => {});
-	const activeRepoContextPromise = logger.time("resolveActiveRepoContext", async () => {
+	const resolveRepoContext = async (repoCwd: string) => {
 		try {
-			return await resolveActiveRepoContext(cwd);
+			return await resolveActiveRepoContext(repoCwd);
 		} catch (err) {
 			logger.debug("Failed to resolve active repo context", { err: String(err) });
 			return null;
 		}
-	});
+	};
+	const activeRepoContextPromise = logger.time("resolveActiveRepoContext", resolveRepoContext, cwd);
 	activeRepoContextPromise.catch(() => {});
 	const watchdogFilesPromise = logger.time("discoverWatchdogFiles", () => discoverWatchdogFiles(cwd, agentDir));
 	watchdogFilesPromise.catch(() => {});
@@ -1604,7 +1605,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		}
 		return result;
 	};
-	const [initialContextFiles, resolvedWorkspaceTree, watchdogFiles, activeRepoContext, discoveredAdvisors] =
+	const [initialContextFiles, resolvedWorkspaceTree, watchdogFiles, initialActiveRepoContext, discoveredAdvisors] =
 		await Promise.all([
 			contextFilesPromise,
 			raceWithDeadline("buildWorkspaceTree", workspaceTreePromise),
@@ -2798,6 +2799,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		): Promise<BuildSystemPromptResult> => {
 			toolContextStore.setToolNames(toolNames);
 			const promptCwd = sessionManager.getCwd();
+			const activeRepoContext = hasSession
+				? await logger.time("resolveActiveRepoContext", resolveRepoContext, promptCwd)
+				: initialActiveRepoContext;
 			if (hasSession && options.contextFiles === undefined) {
 				contextFiles = await logger.time("discoverContextFiles", discoverContextFiles, promptCwd, agentDir, [
 					...(settings.get("disabledExtensions") ?? []),
@@ -3293,8 +3297,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			.map(tool => new ExtensionToolWrapper(wrapToolWithMetaNotice(tool), extensionRunner) as Tool);
 
 		const advisorWatchdogPrompts = [...watchdogFiles];
-		if (activeRepoContext) {
-			advisorWatchdogPrompts.push(formatActiveRepoWatchdogPrompt(activeRepoContext));
+		if (initialActiveRepoContext) {
+			advisorWatchdogPrompts.push(formatActiveRepoWatchdogPrompt(initialActiveRepoContext));
 		}
 		const advisorWatchdogPrompt = advisorWatchdogPrompts.length > 0 ? advisorWatchdogPrompts.join("\n\n") : undefined;
 		// Hand the advisor the same project context files (AGENTS.md, etc.) the
