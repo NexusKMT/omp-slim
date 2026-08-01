@@ -36,6 +36,9 @@
 - Preserved explicit `-e`/`--extension` and `--hook` packages under
   `--no-extensions` while excluding ambient extension factories and sibling
   capabilities from settings or installed OMP packages.
+### Fixed
+
+- Fixed explicit `thinking` metadata in `models.yml` custom definitions and `modelOverrides` being replaced by canonical catalog policy during model rebuilding. ([#7307](https://github.com/can1357/oh-my-pi/issues/7307))
 
 ## [17.2.3] - 2026-08-01
 
