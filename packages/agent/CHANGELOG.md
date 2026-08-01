@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Codex V2 remote compaction bypassing the provider's live WebSocket transport before trying SSE ([#7198](https://github.com/can1357/oh-my-pi/issues/7198)).
+
 ## [17.2.2] - 2026-07-31
 
 ### Fixed
