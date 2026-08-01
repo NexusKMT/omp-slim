@@ -920,6 +920,16 @@ export class SessionManager {
 			return;
 		}
 
+		// Title changes use their own asynchronous append path rather than
+		// #appendToSessionFile. Defer them under the same move fence so they cannot
+		// recreate the vacated source path before #sessionFile is repointed.
+		if (this.#sessionFileRelocating) {
+			this.#fileIsCurrent = false;
+			this.#rewriteRequired = true;
+			this.#atomicRewriteDirty = true;
+			return;
+		}
+
 		if (
 			!this.#fileIsCurrent ||
 			this.#rewriteRequired ||

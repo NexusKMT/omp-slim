@@ -331,6 +331,44 @@ describe("SessionManager.moveTo", () => {
 		).toBe(true);
 	});
 
+	it("does not orphan title changes that race the session file rename", async () => {
+		const session = SessionManager.create(cwdA);
+		session.appendMessage({ role: "user", content: "before move", timestamp: 1 });
+		session.appendMessage(makeAssistantMessage());
+		await session.flush();
+
+		const oldFile = session.getSessionFile();
+		if (!oldFile) throw new Error("Expected session file");
+
+		const renameFinished = Promise.withResolvers<void>();
+		const allowMoveToResume = Promise.withResolvers<void>();
+		const rename = fs.promises.rename.bind(fs.promises);
+		const renameSpy = spyOn(fs.promises, "rename").mockImplementation(async (source, target) => {
+			await rename(source, target);
+			if (path.resolve(source.toString()) !== path.resolve(oldFile)) return;
+			renameFinished.resolve();
+			await allowMoveToResume.promise;
+		});
+
+		try {
+			const move = session.moveTo(cwdB);
+			await renameFinished.promise;
+			await session.setSessionName("during move", "user");
+			allowMoveToResume.resolve();
+			await move;
+			await session.flush();
+		} finally {
+			allowMoveToResume.resolve();
+			renameSpy.mockRestore();
+		}
+
+		expect(fs.existsSync(oldFile)).toBe(false);
+		const movedFile = session.getSessionFile();
+		if (!movedFile) throw new Error("Expected moved session file");
+		const entries = await loadEntriesFromFile(movedFile);
+		expect(entries.some(entry => entry.type === "title_change" && entry.title === "during move")).toBe(true);
+	});
+
 	it("materializes an ensureOnDisk session when moveTo races the queued rewrite", async () => {
 		// A header-only session (ACP session/new, drafts) forces creation via
 		// ensureOnDisk(), which schedules its materializing rewrite on the disk
