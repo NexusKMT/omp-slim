@@ -378,6 +378,14 @@ export class AgentLifecycleManager {
 			await park.promise;
 		}
 
+		if (options?.tombstone) {
+			// Mark the tombstone terminal BEFORE disposing. A live session's wrapped
+			// dispose (createAgentSession) unregisters any non-terminal ref via
+			// `unregisterUnlessParked`, which would otherwise delete the ref out from
+			// under the detach/status calls below. Setting `aborted` first makes that
+			// guard preserve the ref, so a later persisted-subagent rescan skips it.
+			this.#registry.setStatus(id, "aborted", ref);
+		}
 		if (this.#registry.get(id) === ref && ref.session) {
 			try {
 				await ref.session.dispose();
@@ -387,7 +395,6 @@ export class AgentLifecycleManager {
 		}
 		if (options?.tombstone) {
 			this.#registry.detachSession(id, ref);
-			this.#registry.setStatus(id, "aborted", ref);
 		} else {
 			this.#registry.unregister(id, ref);
 		}

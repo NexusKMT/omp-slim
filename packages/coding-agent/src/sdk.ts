@@ -1634,13 +1634,14 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	let registeredAgentRef: AgentRef | undefined;
 	/**
 	 * Forget the agent ref on teardown — unless the agent is being parked (or is
-	 * already parked). Parking disposes the session but keeps the ref addressable
-	 * (history://, revive); only process teardown / explicit kill unregisters.
+	 * already parked/aborted). Parking disposes the session but keeps the ref
+	 * addressable (history://, revive); a hard kill leaves it as a terminal
+	 * `aborted` tombstone. Only process teardown / a plain release unregisters.
 	 */
 	const unregisterUnlessParked = (): void => {
 		const ref = registeredAgentRef;
 		if (!ref || agentRegistry.get(resolvedAgentId) !== ref) return;
-		if (ref.status === "parked") return;
+		if (ref.status === "parked" || ref.status === "aborted") return;
 		if (AgentLifecycleManager.global().isParking(resolvedAgentId, ref)) return;
 		agentRegistry.unregister(resolvedAgentId, ref);
 	};

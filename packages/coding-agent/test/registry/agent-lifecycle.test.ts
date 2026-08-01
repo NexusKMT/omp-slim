@@ -524,12 +524,25 @@ describe("AgentLifecycleManager", () => {
 		await Bun.write(rootSessionFile, "");
 		await Bun.write(workerSessionFile, "");
 
-		const stub = makeSessionStub();
+		// Mirror the real wrapped session dispose (createAgentSession's
+		// `unregisterUnlessParked`): disposing a live session unregisters the ref
+		// unless it is already terminal (parked/aborted). This is what defeated the
+		// naive fix — the ref must be marked `aborted` *before* dispose runs.
+		let disposeCalls = 0;
+		const session = {
+			dispose: async () => {
+				disposeCalls++;
+				const live = registry.get(workerId);
+				if (live && live.status !== "parked" && live.status !== "aborted") {
+					registry.unregister(workerId, live);
+				}
+			},
+		} as unknown as AgentSession;
 		const ref = registry.register({
 			id: workerId,
 			displayName: "task",
 			kind: "sub",
-			session: stub.session,
+			session,
 			sessionFile: workerSessionFile,
 			status: "running",
 		});
@@ -537,7 +550,7 @@ describe("AgentLifecycleManager", () => {
 		expect(await lifecycle.release(workerId, ref, { tombstone: true })).toBe(true);
 		// The kill disposes the live session but keeps the ref registered as a
 		// terminal, hard-killed row (session detached) instead of removing it.
-		expect(stub.disposeCalls()).toBe(1);
+		expect(disposeCalls).toBe(1);
 		expect(registry.get(workerId)?.status).toBe("aborted");
 		expect(registry.get(workerId)?.session).toBeNull();
 
