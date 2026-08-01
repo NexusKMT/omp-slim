@@ -158,6 +158,24 @@ test("`--extension` CLI injection is wired through the same provider", async () 
 	expect(tools.map(t => t.name)).toEqual(expect.arrayContaining(["wcount", "deep-tool"]));
 });
 
+test("relative CLI roots rebind when resume switches projects", async () => {
+	const relativeRoot = "relative-extension";
+	const launchRoot = path.join(project, relativeRoot);
+	const destination = path.join(tempDir, "destination");
+	const destinationRoot = path.join(destination, relativeRoot);
+	buildExtensionPackage(launchRoot, "launch-skill");
+	buildExtensionPackage(destinationRoot, "destination-skill");
+
+	injectOmpExtensionCliRoots([`./${relativeRoot}`], home, project);
+
+	const destinationContext = { cwd: destination, home, repoRoot: destination };
+	const roots = await listOmpExtensionRoots(destinationContext);
+	const skills = await loadFromPlugin<{ name: string }>(skillCapability.id, destinationContext);
+	expect(roots.map(root => root.path)).toEqual([destinationRoot]);
+	expect(skills.map(skill => skill.name)).toContain("destination-skill");
+	expect(skills.map(skill => skill.name)).not.toContain("launch-skill");
+});
+
 test("explicit-only CLI roots replace stale state and exclude every ambient package source", async () => {
 	const stale = path.join(tempDir, "stale-extension");
 	const projectExt = path.join(tempDir, "project-extension");

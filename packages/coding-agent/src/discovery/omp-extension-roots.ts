@@ -36,6 +36,8 @@ export interface OmpExtensionRoot {
 
 interface InjectedRoot {
 	path: string;
+	/** Relative CLI spelling, rebound against the active project on discovery. */
+	relativePath?: string;
 	level: "user" | "project";
 }
 
@@ -73,13 +75,16 @@ export function injectOmpExtensionCliRoots(
 	if (paths.length === 0) return;
 	const expanded = paths.map(raw => {
 		const tilde = expandTilde(raw, home);
-		return path.isAbsolute(tilde) ? tilde : path.resolve(cwd, tilde);
+		return {
+			path: path.isAbsolute(tilde) ? tilde : path.resolve(cwd, tilde),
+			relativePath: path.isAbsolute(tilde) ? undefined : tilde,
+		};
 	});
 	const merged = new Map<string, InjectedRoot>();
 	for (const root of injectedCliRoots) merged.set(root.path, root);
-	for (const resolved of expanded) {
+	for (const { path: resolved, relativePath } of expanded) {
 		// CLI scope mirrors how `--extension` is treated elsewhere — user-level overrides win.
-		if (!merged.has(resolved)) merged.set(resolved, { path: resolved, level: "user" });
+		if (!merged.has(resolved)) merged.set(resolved, { path: resolved, relativePath, level: "user" });
 	}
 	injectedCliRoots = [...merged.values()];
 }
@@ -154,7 +159,9 @@ async function isDirectory(p: string): Promise<boolean> {
  * other sources still surface.
  */
 export async function listOmpExtensionRoots(ctx: LoadContext): Promise<OmpExtensionRoot[]> {
-	let candidates: InjectedRoot[] = [...injectedCliRoots];
+	let candidates: InjectedRoot[] = injectedCliRoots.map(root =>
+		root.relativePath ? { ...root, path: path.resolve(ctx.cwd, root.relativePath) } : root,
+	);
 	if (injectedCliRootMode === "merge") {
 		const { project, user } = scopeDirs(ctx);
 		const [projectExtensions, userExtensions, installedPlugins] = await Promise.all([
