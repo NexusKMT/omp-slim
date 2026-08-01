@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Removed archived main and nested session rows from `stats.db` during applied archive GC, including retry cleanup for sessions archived by an earlier run ([#7286](https://github.com/can1357/oh-my-pi/issues/7286)).
+
 ## [17.2.3] - 2026-08-01
 
 ### Changed

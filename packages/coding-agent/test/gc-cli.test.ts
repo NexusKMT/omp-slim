@@ -566,6 +566,113 @@ describe("runGcCommand cold-session archive", () => {
 		expect(ftsRows.map(row => row.session_id)).toEqual(["keep-me"]);
 	});
 
+	test("removes archived main and nested session rows from stats", async () => {
+		const session = await writeSession(root, "project", "archive-me", "complete", { ageDays: 90 });
+		const nestedSession = path.join(session.slice(0, -".jsonl".length), "nested.jsonl");
+		const keepSession = path.join(getSessionsDir(root), "project", "keep.jsonl");
+		const statsDbPath = path.join(root, "stats.db");
+		const tables = ["messages", "user_messages", "tool_calls", "file_offsets"] as const;
+		const db = new Database(statsDbPath);
+		for (const table of tables) {
+			db.run(`CREATE TABLE ${table} (session_file TEXT NOT NULL)`);
+			const insert = db.prepare(`INSERT INTO ${table} (session_file) VALUES (?)`);
+			insert.run(session);
+			insert.run(nestedSession);
+			insert.run(keepSession);
+		}
+		db.close();
+
+		const dryRun = await runGcCommand({
+			flags: {
+				agentDir: root,
+				archive: true,
+				coldArchiveAfterDays: 30,
+				retainNewestGlobal: 0,
+				retainNewestPerCwd: 0,
+			},
+		});
+		const dryCheck = new Database(statsDbPath);
+		for (const table of tables) {
+			const row = dryCheck.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number };
+			expect(row.count).toBe(3);
+		}
+		dryCheck.close();
+		expect(dryRun.archive?.statsRowsDeleted).toBe(0);
+
+		const result = await runGcCommand({
+			flags: {
+				agentDir: root,
+				archive: true,
+				coldArchiveAfterDays: 30,
+				retainNewestGlobal: 0,
+				retainNewestPerCwd: 0,
+				apply: true,
+			},
+		});
+
+		const check = new Database(statsDbPath);
+		const remaining = Object.fromEntries(
+			tables.map(table => [
+				table,
+				(check.prepare(`SELECT session_file FROM ${table}`).all() as Array<{ session_file: string }>).map(
+					row => row.session_file,
+				),
+			]),
+		);
+		check.close();
+
+		expect(result.archive?.statsRowsDeleted).toBe(8);
+		expect(remaining).toEqual(Object.fromEntries(tables.map(table => [table, [keepSession]])));
+	});
+
+	test("reports stats cleanup failures and retries rows for already archived sessions", async () => {
+		const session = await writeSession(root, "project", "archive-me", "complete", {
+			ageDays: 90,
+			filename: "20260626_archive-me",
+		});
+		const statsDbPath = path.join(root, "stats.db");
+		await Bun.write(statsDbPath, "not sqlite");
+
+		const first = await runGcCommand({
+			flags: {
+				agentDir: root,
+				archive: true,
+				coldArchiveAfterDays: 30,
+				retainNewestGlobal: 0,
+				retainNewestPerCwd: 0,
+				apply: true,
+			},
+		});
+
+		expect(first.archive?.archived).toBe(1);
+		expect(first.archive?.errors.some(error => error.startsWith("stats cleanup: "))).toBe(true);
+
+		await fs.rm(statsDbPath, { force: true });
+		const db = new Database(statsDbPath);
+		db.run("CREATE TABLE messages (session_file TEXT NOT NULL)");
+		db.prepare("INSERT INTO messages (session_file) VALUES (?)").run(session);
+		db.close();
+
+		const second = await runGcCommand({
+			flags: {
+				agentDir: root,
+				archive: true,
+				coldArchiveAfterDays: 30,
+				retainNewestGlobal: 0,
+				retainNewestPerCwd: 0,
+				apply: true,
+			},
+		});
+		const check = new Database(statsDbPath);
+		const rows = check.prepare("SELECT session_file FROM messages").all();
+		check.close();
+
+		expect(second.archive?.archived).toBe(0);
+		expect(second.archive?.statsRowsDeleted).toBe(1);
+		expect(second.archive?.errors).toEqual([]);
+		expect(rows).toEqual([]);
+	});
+
 	test("reports history cleanup failures and retries rows for already archived sessions", async () => {
 		await writeSession(root, "project", "archive-me", "complete", {
 			ageDays: 90,

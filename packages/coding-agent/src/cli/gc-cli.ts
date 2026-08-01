@@ -2,7 +2,14 @@ import { Database } from "bun:sqlite";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
-import { getAgentDir, getBlobsDir, getHistoryDbPath, getModelDbPath, getSessionsDir } from "@oh-my-pi/pi-utils";
+import {
+	getAgentDir,
+	getBlobsDir,
+	getHistoryDbPath,
+	getModelDbPath,
+	getSessionsDir,
+	getStatsDbPath,
+} from "@oh-my-pi/pi-utils";
 import { Settings } from "../config/settings";
 import { getDefault } from "../config/settings-schema";
 import { BLOB_HASH_RE } from "../session/blob-store";
@@ -54,6 +61,7 @@ export interface ArchiveGcResult {
 	wouldArchive: number;
 	archived: number;
 	historyRowsDeleted: number;
+	statsRowsDeleted: number;
 	ftsRebuilt: boolean;
 	errors: string[];
 }
@@ -594,6 +602,74 @@ async function cleanupHistoryRowsForArchivedSessions(
 	}
 }
 
+const STATS_SESSION_TABLES = ["messages", "user_messages", "tool_calls", "file_offsets"] as const;
+
+function deleteStatsRowsForSessions(dbPath: string, sessionPaths: string[]): number {
+	if (sessionPaths.length === 0) return 0;
+	const db = new Database(dbPath);
+	try {
+		db.run("PRAGMA busy_timeout = 5000");
+		const statements = STATS_SESSION_TABLES.filter(table => tableExists(db, table)).map(table =>
+			db.prepare(`DELETE FROM ${table} WHERE session_file = ? OR instr(session_file, ?) = 1`),
+		);
+		let deleted = 0;
+		const tx = db.transaction((paths: string[]) => {
+			for (const sessionPath of paths) {
+				const nestedPrefix = `${sessionArtifactsPath(sessionPath)}${path.sep}`;
+				for (const statement of statements) {
+					const result = statement.run(sessionPath, nestedPrefix) as SqliteRunResult;
+					deleted += sqliteNumber(result.changes);
+				}
+			}
+		});
+		tx([...new Set(sessionPaths)]);
+		return deleted;
+	} finally {
+		db.close();
+	}
+}
+
+async function collectArchivedSessionSourcePaths(archiveRoot: string, sessionsRoot: string): Promise<string[]> {
+	const sessionPaths = new Set<string>();
+	for (const file of await collectCompressedJsonlFiles(archiveRoot)) {
+		const relative = path.relative(archiveRoot, file);
+		if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) continue;
+		sessionPaths.add(path.join(sessionsRoot, relative.slice(0, -".gz".length)));
+	}
+	return [...sessionPaths].sort();
+}
+
+async function cleanupStatsRowsForArchivedSessions(
+	options: ResolvedGcOptions,
+	archiveRoot: string,
+	archivedSessionPaths: string[],
+	result: ArchiveGcResult,
+): Promise<void> {
+	const dbPath =
+		path.resolve(options.agentDir) === path.resolve(getAgentDir())
+			? getStatsDbPath()
+			: path.join(options.agentDir, "stats.db");
+	if (!(await pathExists(dbPath))) return;
+
+	const cleanupPaths = new Set(archivedSessionPaths);
+	try {
+		for (const sessionPath of await collectArchivedSessionSourcePaths(
+			archiveRoot,
+			getSessionsDir(options.agentDir),
+		)) {
+			cleanupPaths.add(sessionPath);
+		}
+	} catch (error) {
+		result.errors.push(`stats cleanup scan: ${errorMessage(error)}`);
+	}
+
+	try {
+		result.statsRowsDeleted = deleteStatsRowsForSessions(dbPath, [...cleanupPaths]);
+	} catch (error) {
+		result.errors.push(`stats cleanup: ${errorMessage(error)}`);
+	}
+}
+
 async function runArchiveGc(options: ResolvedGcOptions, archiveRoot: string): Promise<ArchiveGcResult> {
 	const sessionsRoot = getSessionsDir(options.agentDir);
 	const sessions = await listActiveSessions(sessionsRoot);
@@ -606,6 +682,7 @@ async function runArchiveGc(options: ResolvedGcOptions, archiveRoot: string): Pr
 		wouldArchive: 0,
 		archived: 0,
 		historyRowsDeleted: 0,
+		statsRowsDeleted: 0,
 		ftsRebuilt: false,
 		errors: [],
 	};
@@ -651,17 +728,20 @@ async function runArchiveGc(options: ResolvedGcOptions, archiveRoot: string): Pr
 	if (!options.apply) return result;
 
 	const archivedSessionIds: string[] = [];
+	const archivedSessionPaths: string[] = [];
 	for (const candidate of candidates) {
 		try {
 			await moveSessionWithArtifacts(candidate);
 			result.archived += 1;
 			archivedSessionIds.push(candidate.session.id);
+			archivedSessionPaths.push(candidate.session.path);
 		} catch (error) {
 			result.errors.push(`${candidate.session.path}: ${errorMessage(error)}`);
 		}
 	}
 
 	await cleanupHistoryRowsForArchivedSessions(options, archiveRoot, archivedSessionIds, result);
+	await cleanupStatsRowsForArchivedSessions(options, archiveRoot, archivedSessionPaths, result);
 	return result;
 }
 
@@ -917,7 +997,7 @@ function renderText(result: GcResult): string {
 	}
 	if (result.archive) {
 		lines.push(
-			`sessions: ${result.archive.archived}/${result.archive.wouldArchive} archived, ${result.archive.historyRowsDeleted} history rows removed`,
+			`sessions: ${result.archive.archived}/${result.archive.wouldArchive} archived, ${result.archive.historyRowsDeleted} history rows and ${result.archive.statsRowsDeleted} stats rows removed`,
 		);
 		if (result.archive.skippedActive > 0) lines.push(`sessions skipped active: ${result.archive.skippedActive}`);
 		if (result.archive.errors.length > 0) lines.push(`session errors: ${result.archive.errors.length}`);
