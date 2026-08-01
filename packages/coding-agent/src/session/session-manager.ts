@@ -477,6 +477,14 @@ export class SessionManager {
 	#atomicRewriteFenceEpoch: number | null = null;
 	/** Set by synchronous appends that land while an atomic replacement is active. */
 	#atomicRewriteDirty = false;
+	/**
+	 * True while {@link moveTo} is renaming the session file but has not yet
+	 * repointed `#sessionFile`. A synchronous rewrite (`flushSync` on Ctrl+C)
+	 * during this window would `writeTextSync` the full body to the pre-rename
+	 * path, recreating the very orphan the move fence prevents. Sync rewrites
+	 * defer while this is set; the move's trailing atomic rewrite persists them.
+	 */
+	#sessionFileRelocating = false;
 	/** Atomic entry batch currently staged for a full-file commit. */
 	#atomicEntryBatch: AtomicEntryBatch | undefined;
 
@@ -754,6 +762,10 @@ export class SessionManager {
 	 */
 	#rewriteSynchronously(): void {
 		if (!this.#persist || !this.#sessionFile || !this.#shouldHaveSessionFile()) return;
+		// A move is renaming the file out from under `#sessionFile`; writing the
+		// full body now would recreate an orphan at the pre-rename path. Defer to
+		// moveTo's trailing atomic rewrite, which folds in the fenced appends.
+		if (this.#sessionFileRelocating) return;
 
 		try {
 			const body = this.#fileBody();
@@ -1326,10 +1338,12 @@ export class SessionManager {
 
 		let sessionFileExisted = false;
 		let moveFenceEpoch: number | undefined;
-		// Prevent synchronous appends from reopening the old path while the rename is in flight.
+		// Prevent synchronous appends and rewrites from touching the old path while
+		// the rename is in flight (see `#sessionFileRelocating`).
 		if (this.#persist && this.#sessionFile) {
 			moveFenceEpoch = ++this.#diskEpoch;
 			this.#atomicRewriteFenceEpoch = moveFenceEpoch;
+			this.#sessionFileRelocating = true;
 		}
 
 		try {
@@ -1393,6 +1407,8 @@ export class SessionManager {
 				this.#sessionFile = newSessionFile;
 				this.#artifactManager = null;
 				this.#artifactManagerSessionFile = null;
+				// Path is repointed; a sync rewrite may now safely target the new file.
+				this.#sessionFileRelocating = false;
 			}
 
 			this.#cwd = resolvedCwd;
@@ -1417,6 +1433,7 @@ export class SessionManager {
 
 			if (this.#sessionFile) this.#rememberBreadcrumb(resolvedCwd, this.#sessionFile);
 		} finally {
+			this.#sessionFileRelocating = false;
 			// Rewrites release this fence themselves; lazy and failed moves release it here.
 			if (moveFenceEpoch !== undefined && this.#atomicRewriteFenceEpoch === moveFenceEpoch) {
 				this.#atomicRewriteFenceEpoch = null;
