@@ -1730,33 +1730,59 @@ describe("kimi model detection via detectCompat", () => {
 	// mode, so the compat descriptor itself must mark forced tool choice
 	// unsupported (no per-model override) and buildParams must downgrade the
 	// selector to "auto" while keeping the tool advertised.
-	it("downgrades forced tool_choice to auto for bundled DeepSeek reasoning on OpenCode Zen", async () => {
-		const model = getBundledModel("opencode-zen", "deepseek-v4-flash-free") as Model<"openai-completions">;
-		expect(model.compat.supportsForcedToolChoice).toBe(false);
+	it("scopes the DeepSeek forced tool_choice downgrade to OpenCode gateways", async () => {
 		const todoTool: Tool = {
 			name: "todo",
 			description: "Manage the todo list",
 			parameters: { type: "object", properties: {}, required: [] },
 		};
-		const { promise, resolve } = Promise.withResolvers<unknown>();
-		streamOpenAICompletions(
-			model,
-			{
-				messages: [{ role: "user", content: "do it", timestamp: Date.now() }],
-				tools: [todoTool],
-			},
-			{
-				apiKey: "test-key",
-				fetch: createMockFetch(["[DONE]"]),
-				reasoning: "high",
-				toolChoice: { type: "tool", name: "todo" },
-				signal: createAbortedSignal(),
-				onPayload: payload => resolve(payload),
-			},
-		);
-		const payload = (await promise) as { tool_choice?: unknown; tools?: Array<{ function?: { name?: string } }> };
-		expect(payload.tool_choice).toBe("auto");
-		expect(payload.tools?.some(t => t.function?.name === "todo")).toBe(true);
+		async function captureToolChoice(model: Model<"openai-completions">): Promise<Record<string, unknown>> {
+			const { promise, resolve } = Promise.withResolvers<Record<string, unknown>>();
+			streamOpenAICompletions(
+				model,
+				{
+					messages: [{ role: "user", content: "do it", timestamp: Date.now() }],
+					tools: [todoTool],
+				},
+				{
+					apiKey: "test-key",
+					fetch: createMockFetch(["[DONE]"]),
+					reasoning: "high",
+					toolChoice: { type: "tool", name: "todo" },
+					signal: createAbortedSignal(),
+					onPayload: payload => {
+						const object = toObject(payload);
+						if (!object) throw new Error("Expected object payload");
+						resolve(object);
+					},
+				},
+			);
+			return promise;
+		}
+
+		const openCode = getBundledModel<"openai-completions">("opencode-zen", "deepseek-v4-flash-free");
+		expect(openCode.compat.supportsForcedToolChoice).toBe(false);
+		const openCodePayload = await captureToolChoice(openCode);
+		expect(openCodePayload.tool_choice).toBe("auto");
+		expect(
+			Array.isArray(openCodePayload.tools) &&
+				openCodePayload.tools.some(tool => getNestedObject(tool, "function")?.name === "todo"),
+		).toBe(true);
+
+		const nvidia = buildModel({
+			...gpt4oMiniSpec,
+			api: "openai-completions",
+			provider: "nvidia",
+			baseUrl: "https://integrate.api.nvidia.com/v1",
+			id: "deepseek-ai/deepseek-v4-flash",
+			reasoning: true,
+		} satisfies ModelSpec<"openai-completions">);
+		expect(nvidia.compat.supportsForcedToolChoice).toBe(true);
+		const nvidiaPayload = await captureToolChoice(nvidia);
+		expect(nvidiaPayload.tool_choice).toEqual({
+			type: "function",
+			function: { name: "todo" },
+		});
 	});
 
 	// #1484 follow-up: DeepSeek V4 on opencode-go exhibits the same gateway
