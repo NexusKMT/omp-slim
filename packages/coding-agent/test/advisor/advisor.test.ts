@@ -1957,7 +1957,11 @@ describe("advisor", () => {
 
 			runtime.onTurnEnd();
 			await runtime.waitForCatchup(1000, 1);
-			agent.state.messages.push({ role: "user", content: promptText(promptInputs[0]!), timestamp: 1 } as AgentMessage);
+			agent.state.messages.push({
+				role: "user",
+				content: promptText(promptInputs[0]!),
+				timestamp: 1,
+			} as AgentMessage);
 			expect(firstStoredPrompt()).toContain("TOKABC123_");
 
 			messages.push({ role: "user", content: "later tok_abc123", timestamp: 2 } as AgentMessage);
@@ -2224,6 +2228,49 @@ describe("advisor", () => {
 			expect(promptInputs).toHaveLength(2);
 			expect(promptText(promptInputs[1])).toContain("unchanged — still in effect");
 			expect(promptText(promptInputs[1])).not.toContain("except the single plan file named below");
+		});
+
+		it("re-expands first-time primary context when a failed turn is retried", async () => {
+			// Regression: the failed turn is rolled back, so the advisor history no
+			// longer contains the full plan-mode context; the retry must not collapse
+			// it to "(unchanged — still in effect)" against the pre-failure dedup map.
+			const promptInputs: Array<string | AgentMessage[]> = [];
+			const state: { messages: AgentMessage[]; error?: string } = { messages: [] };
+			let promptCalls = 0;
+			const agent: AdvisorAgent = {
+				prompt: async input => {
+					promptInputs.push(input);
+					promptCalls++;
+					state.error = promptCalls === 1 ? "transient provider 500" : undefined;
+				},
+				abort: () => {},
+				reset: () => {},
+				state,
+			};
+			const rule =
+				"Plan mode is active. You MUST perform READ-ONLY work only:\n- You NEVER create, edit, or delete files — except the single plan file named below.";
+			const messages: AgentMessage[] = [];
+			const host: AdvisorRuntimeHost = {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+			};
+			const runtime = new AdvisorRuntime(agent, host, 0);
+
+			messages.push({ role: "user", content: "start planning", timestamp: 1 } as AgentMessage);
+			messages.push({
+				role: "custom",
+				customType: "plan-mode-context",
+				content: rule,
+				display: false,
+				timestamp: 2,
+			} as AgentMessage);
+			runtime.onTurnEnd();
+			await settleUntil(() => promptInputs.length >= 2 && runtime.backlog === 0);
+
+			expect(promptInputs).toHaveLength(2);
+			expect(promptText(promptInputs[0])).toContain("except the single plan file named below");
+			expect(promptText(promptInputs[1])).toContain("except the single plan file named below");
+			expect(promptText(promptInputs[1])).not.toContain("unchanged — still in effect");
 		});
 
 		it("renders the watched delta with a heading, watched-role labels, and no inner ## headings", async () => {
@@ -3088,7 +3135,11 @@ describe("advisor", () => {
 				) as AgentMessage;
 			};
 
-			const waitForPrompts = async (prompts: Array<string | AgentMessage[]>, count: number, timeoutMs = 10_000): Promise<void> => {
+			const waitForPrompts = async (
+				prompts: Array<string | AgentMessage[]>,
+				count: number,
+				timeoutMs = 10_000,
+			): Promise<void> => {
 				const deadline = Date.now() + timeoutMs;
 				while (prompts.length < count && Date.now() < deadline) await Bun.sleep(5);
 			};
@@ -3222,7 +3273,9 @@ describe("advisor", () => {
 				await waitForPrompts(promptInputs, 1);
 				// The aborted pre-reset render must not have advanced the cursor:
 				// the post-reset replay carries the whole transcript.
-				const replay = promptInputs.find(input => promptText(input).includes("msg-0 ") && promptText(input).includes("msg-399 "));
+				const replay = promptInputs.find(
+					input => promptText(input).includes("msg-0 ") && promptText(input).includes("msg-399 "),
+				);
 				expect(replay).toBeDefined();
 				runtime.dispose();
 			}, 20_000);
@@ -3248,7 +3301,14 @@ describe("advisor", () => {
 				messages.push({ role: "user", content: "late-arrival tail", timestamp: 300 } as AgentMessage);
 				runtime.onTurnEnd(messages);
 				const deadline = Date.now() + 10_000;
-				while (Date.now() < deadline && !promptInputs.map(i => promptText(i)).join("\n").includes("late-arrival tail")) await Bun.sleep(5);
+				while (
+					Date.now() < deadline &&
+					!promptInputs
+						.map(i => promptText(i))
+						.join("\n")
+						.includes("late-arrival tail")
+				)
+					await Bun.sleep(5);
 				const combined = promptInputs.map(i => promptText(i)).join("\n");
 				// Every message exactly once, ordering preserved.
 				expect(combined).toContain("msg-0 ");

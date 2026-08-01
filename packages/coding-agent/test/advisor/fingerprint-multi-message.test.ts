@@ -16,9 +16,14 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 
-import { AdvisorRuntime, type AdvisorAgent, type AdvisorRuntimeHost } from "../../src/advisor/runtime";
+import { type AdvisorAgent, AdvisorRuntime, type AdvisorRuntimeHost } from "../../src/advisor/runtime";
 
-function mkMsg(role: AgentMessage["role"], text: string, timestamp: number, extra: Record<string, unknown> = {}): AgentMessage {
+function mkMsg(
+	role: AgentMessage["role"],
+	text: string,
+	timestamp: number,
+	extra: Record<string, unknown> = {},
+): AgentMessage {
 	return { role, content: text, timestamp, ...extra } as AgentMessage;
 }
 
@@ -97,7 +102,10 @@ describe("fingerprint: field-selective fingerprint (applied)", () => {
 		const { prompts } = await runScenario(
 			history(["seed-body-000", "seed-body-001"]),
 			messages => {
-				messages[0] = { ...messages[0], content: "[shaken ~10 tokens — recover: artifact://1 (region 1)]" } as AgentMessage;
+				messages[0] = {
+					...messages[0],
+					content: "[shaken ~10 tokens — recover: artifact://1 (region 1)]",
+				} as AgentMessage;
 			},
 			[mkMsg("user", "tail-body-002", 3)],
 		);
@@ -152,5 +160,29 @@ describe("fingerprint: field-selective fingerprint (applied)", () => {
 		const d = describeDelta(prompts);
 		expect(d.full).toBe(false);
 		expect(d.tailOnly).toBe(true);
+	});
+
+	it("scenario G: rendered field change (bashExecution.command) triggers FULL replay", async () => {
+		// command is rendered by formatSessionHistoryMarkdown (executionLine), so
+		// a clone changing only command must not pass the prefix check.
+		const { prompts } = await runScenario(
+			[mkMsg("bashExecution", "", 1, { command: "ls -la" }), mkMsg("user", "seed-body-001", 2)],
+			messages => {
+				messages[0] = { ...messages[0], command: "ls -la /tmp" } as unknown as AgentMessage;
+			},
+			[mkMsg("user", "tail-body-002", 3)],
+		);
+		expect(describeDelta(prompts).full).toBe(true);
+	});
+
+	it("scenario H: rendered field change (compaction summary) triggers FULL replay", async () => {
+		const { prompts } = await runScenario(
+			[mkMsg("compactionSummary", "", 1, { summary: "seed summary" }), mkMsg("user", "seed-body-001", 2)],
+			messages => {
+				messages[0] = { ...messages[0], summary: "rewritten summary" } as unknown as AgentMessage;
+			},
+			[mkMsg("user", "tail-body-002", 3)],
+		);
+		expect(describeDelta(prompts).full).toBe(true);
 	});
 });

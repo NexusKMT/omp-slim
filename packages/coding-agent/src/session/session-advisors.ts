@@ -839,7 +839,10 @@ export class SessionAdvisors {
 						currentAdvisorInput = Array.isArray(input)
 							? formatSessionHistoryMarkdown(input, { watchedRoles: true })
 							: input;
-						await (Array.isArray(input) ? advisorAgent.prompt(input) : advisorAgent.prompt(input));
+						// Agent.prompt's overloads accept string OR AgentMessage[] but not
+						// the union, so narrow first; both branches intentionally identical.
+						if (Array.isArray(input)) await advisorAgent.prompt(input);
+						else await advisorAgent.prompt(input);
 						quarantined = quarantinedAdvisorOutput;
 					} finally {
 						quarantinedAdvisorOutput = undefined;

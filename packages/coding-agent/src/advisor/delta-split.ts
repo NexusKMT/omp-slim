@@ -60,23 +60,20 @@ export function renderAdvisorDeltaChunks(
 		});
 
 	const heading = "### Session update";
-	const chunks: AgentMessage[] = [];
+	// Concrete local chunk type: content blocks are minted here, so the WIP
+	// marker append below is a plain field access (no double-cast).
+	const chunks: { role: "user"; content: TextContent[]; timestamp: number }[] = [];
 	for (let i = 0; i < delta.length; i++) {
 		let text = renderChunk([delta[i]]);
 		if (!text.trim()) continue;
 		if (opts.obfuscator) text = opts.obfuscator.obfuscate(text, opts.advisorRegexSecretValues);
 		if (i === 0) text = `${heading}\n\n${text}`;
-		chunks.push({
-			role: "user",
-			content: [{ type: "text", text }],
-			timestamp: Date.now(),
-		} as AgentMessage);
+		chunks.push({ role: "user", content: [{ type: "text", text }], timestamp: Date.now() });
 	}
 	if (chunks.length === 0) return null;
 	if (opts.wip) {
 		const last = chunks[chunks.length - 1];
-		const blocks = (last as { content: unknown }).content as TextContent[];
-		blocks[0].text += `\n\n---\n\n[in progress — more steps follow]`;
+		last.content[0].text += `\n\n---\n\n[in progress — more steps follow]`;
 	}
-	return chunks;
+	return chunks as AgentMessage[];
 }

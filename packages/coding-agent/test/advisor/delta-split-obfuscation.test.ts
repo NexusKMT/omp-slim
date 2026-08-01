@@ -40,7 +40,11 @@ describe("renderAdvisorDeltaChunks obfuscation", () => {
 	});
 
 	it("redacts secrets in user message text", () => {
-		const msg = { role: "user", content: [{ type: "text", text: "prefix SECRETVALUE123 suffix" }], timestamp: 1 } as AgentMessage;
+		const msg = {
+			role: "user",
+			content: [{ type: "text", text: "prefix SECRETVALUE123 suffix" }],
+			timestamp: 1,
+		} as AgentMessage;
 		const chunks = renderAdvisorDeltaChunks([msg], {
 			wip: false,
 			includeThinking: true,

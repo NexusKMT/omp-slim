@@ -37,7 +37,13 @@ function toolResult(id: string, ts: number): AgentMessage {
 	return { role: "toolResult", toolCallId: id, content: "file content", timestamp: ts } as unknown as AgentMessage;
 }
 
-const OPTS = { includeToolIntent: true, watchedRoles: true, expandPrimaryContext: true, expandEditDiffs: true, includeThinking: true } as const;
+const OPTS = {
+	includeToolIntent: true,
+	watchedRoles: true,
+	expandPrimaryContext: true,
+	expandEditDiffs: true,
+	includeThinking: true,
+} as const;
 
 function chunksToText(chunks: AgentMessage[] | null): string | null {
 	if (!chunks) return null;
@@ -48,37 +54,62 @@ describe("renderAdvisorDeltaChunks (delta-split)", () => {
 	it("alternating user/agent byte-identical to single-block", () => {
 		const msgs = [user("first", 1), agent("a1", 2), user("second", 3), agent("a2", 4)];
 		const old = "### Session update\n\n" + formatSessionHistoryMarkdown(msgs, OPTS);
-		const chunks = renderAdvisorDeltaChunks(msgs, { wip: false, includeThinking: true, advisorRegexSecretValues: new Set() });
+		const chunks = renderAdvisorDeltaChunks(msgs, {
+			wip: false,
+			includeThinking: true,
+			advisorRegexSecretValues: new Set(),
+		});
 		expect(chunksToText(chunks)).toBe(old);
 	});
 
 	it("consecutive same-role user byte-identical", () => {
 		const msgs = [user("u1", 1), user("u2", 2), agent("a", 3)];
 		const old = "### Session update\n\n" + formatSessionHistoryMarkdown(msgs, OPTS);
-		expect(chunksToText(renderAdvisorDeltaChunks(msgs, { wip: false, includeThinking: true, advisorRegexSecretValues: new Set() }))).toBe(old);
+		expect(
+			chunksToText(
+				renderAdvisorDeltaChunks(msgs, { wip: false, includeThinking: true, advisorRegexSecretValues: new Set() }),
+			),
+		).toBe(old);
 	});
 
 	it("toolCall + toolResult pairing byte-identical", () => {
 		const msgs = [toolCall("call_1", 1), toolResult("call_1", 2), user("done", 3)];
 		const old = "### Session update\n\n" + formatSessionHistoryMarkdown(msgs, OPTS);
-		const chunks = renderAdvisorDeltaChunks(msgs, { wip: false, includeThinking: true, advisorRegexSecretValues: new Set() });
-		console.log("OLD:", JSON.stringify(old));
-		console.log("NEW:", JSON.stringify(chunksToText(chunks)));
+		const chunks = renderAdvisorDeltaChunks(msgs, {
+			wip: false,
+			includeThinking: true,
+			advisorRegexSecretValues: new Set(),
+		});
 		expect(chunksToText(chunks)).toBe(old);
 	});
 
 	it("complex mixed history byte-identical", () => {
-		const msgs = [user("question", 1), agent("thinking", 2), toolCall("c2", 3), toolResult("c2", 4), agent("answer", 5), user("follow-up", 6), user("steering", 7), agent("final", 8)];
+		const msgs = [
+			user("question", 1),
+			agent("thinking", 2),
+			toolCall("c2", 3),
+			toolResult("c2", 4),
+			agent("answer", 5),
+			user("follow-up", 6),
+			user("steering", 7),
+			agent("final", 8),
+		];
 		const old = "### Session update\n\n" + formatSessionHistoryMarkdown(msgs, OPTS);
-		const chunks = renderAdvisorDeltaChunks(msgs, { wip: false, includeThinking: true, advisorRegexSecretValues: new Set() });
-		console.log("OLD:", JSON.stringify(old));
-		console.log("NEW:", JSON.stringify(chunksToText(chunks)));
+		const chunks = renderAdvisorDeltaChunks(msgs, {
+			wip: false,
+			includeThinking: true,
+			advisorRegexSecretValues: new Set(),
+		});
 		expect(chunksToText(chunks)).toBe(old);
 	});
 
 	it("wip marker lands on LAST chunk only", () => {
 		const msgs = [user("u1", 1), agent("a1", 2), user("u2", 3)];
-		const chunks = renderAdvisorDeltaChunks(msgs, { wip: true, includeThinking: true, advisorRegexSecretValues: new Set() });
+		const chunks = renderAdvisorDeltaChunks(msgs, {
+			wip: true,
+			includeThinking: true,
+			advisorRegexSecretValues: new Set(),
+		});
 		expect(chunks).not.toBeNull();
 		const texts = chunks!.map(c => ((c as { content: unknown }).content as { text: string }[])[0].text);
 		// Marker only in the final chunk; earlier chunks unchanged.
@@ -90,7 +121,11 @@ describe("renderAdvisorDeltaChunks (delta-split)", () => {
 
 	it("splits into multiple user messages for multi-message history", () => {
 		const msgs = [user("u1", 1), agent("a1", 2), user("u2", 3), agent("a2", 4)];
-		const chunks = renderAdvisorDeltaChunks(msgs, { wip: false, includeThinking: true, advisorRegexSecretValues: new Set() });
+		const chunks = renderAdvisorDeltaChunks(msgs, {
+			wip: false,
+			includeThinking: true,
+			advisorRegexSecretValues: new Set(),
+		});
 		expect(chunks!.length).toBeGreaterThan(1);
 	});
 });
