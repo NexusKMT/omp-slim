@@ -1990,6 +1990,7 @@ mod proc_snapshot {
 		rss_pages:  i64,
 	}
 
+	#[allow(clippy::unnecessary_wraps, reason = "Option returns match the cross-platform ProcInfo contract")]
 	impl ProcInfo {
 		pub fn all() -> Vec<Self> {
 			let Ok(entries) = fs::read_dir("/proc") else {
@@ -2037,11 +2038,11 @@ mod proc_snapshot {
 			})
 		}
 
-		pub fn pid(&self) -> i32 {
+		pub const fn pid(&self) -> i32 {
 			self.pid
 		}
 
-		pub fn ppid(&self) -> Option<i32> {
+		pub const fn ppid(&self) -> Option<i32> {
 			Some(self.stat.ppid)
 		}
 
@@ -2049,11 +2050,11 @@ mod proc_snapshot {
 			self.args.clone()
 		}
 
-		pub fn group_id(&self) -> Option<i32> {
+		pub const fn group_id(&self) -> Option<i32> {
 			Some(self.stat.pgrp)
 		}
 
-		pub fn session_id(&self) -> Option<i32> {
+		pub const fn session_id(&self) -> Option<i32> {
 			Some(self.stat.session)
 		}
 
@@ -2065,7 +2066,7 @@ mod proc_snapshot {
 			self.uid.map(|ids| ids.1)
 		}
 
-		pub fn real_group_id(&self) -> Option<u32> {
+		pub const fn real_group_id(&self) -> Option<u32> {
 			self.gid
 		}
 
@@ -2073,11 +2074,11 @@ mod proc_snapshot {
 			(self.stat.tty != 0).then_some(self.stat.tty as u32 as u64)
 		}
 
-		pub fn state(&self) -> char {
+		pub const fn state(&self) -> char {
 			self.stat.state
 		}
 
-		pub fn start_time(&self) -> u64 {
+		pub const fn start_time(&self) -> u64 {
 			self.stat.start_time
 		}
 
@@ -2116,7 +2117,7 @@ mod proc_snapshot {
 			let Some(pidfd) = open_pidfd(self.pid) else {
 				return false;
 			};
-			if !read_stat(self.pid).is_some_and(|stat| stat.start_time == self.stat.start_time) {
+			if read_stat(self.pid).is_none_or(|stat| stat.start_time != self.stat.start_time) {
 				return false;
 			}
 			if let Some(value) = queue {
@@ -2150,15 +2151,15 @@ mod proc_snapshot {
 			Some(pages.saturating_mul(page_size()?))
 		}
 
-		pub fn virtual_bytes(&self) -> Option<u64> {
+		pub const fn virtual_bytes(&self) -> Option<u64> {
 			Some(self.stat.virtual_)
 		}
 
-		pub fn thread_count(&self) -> Option<u32> {
+		pub const fn thread_count(&self) -> Option<u32> {
 			Some(self.stat.threads)
 		}
 
-		pub fn nice(&self) -> Option<i32> {
+		pub const fn nice(&self) -> Option<i32> {
 			Some(self.stat.nice)
 		}
 	}
@@ -2247,6 +2248,7 @@ mod proc_snapshot {
 		args: Vec<String>,
 	}
 
+	#[allow(clippy::unnecessary_wraps, reason = "Option returns match the cross-platform ProcInfo contract")]
 	impl ProcInfo {
 		pub fn all() -> Vec<Self> {
 			// SAFETY: null/zero is libproc's documented sizing query.
@@ -2605,6 +2607,7 @@ mod proc_snapshot {
 		creation:      u64,
 	}
 
+	#[allow(clippy::unnecessary_wraps, reason = "Option returns match the cross-platform ProcInfo contract")]
 	impl ProcInfo {
 		pub fn all() -> Vec<Self> {
 			let mut handles = HashMap::new();
@@ -2957,7 +2960,7 @@ impl builtins::Command for ProcMatchCommand {
 			});
 			let mut stdin = io::BufReader::new(context.stdin());
 			let mut options = match parse_proc_match_args(mode, &argv, &cwd, &mut stdin) {
-				Ok(ParseProcResult::Options(options)) => options,
+				Ok(ParseProcResult::Options(options)) => *options,
 				Ok(ParseProcResult::Help) => {
 					write_proc_match_help(context.stdout(), &command_name, mode)?;
 					return Ok(ExecutionResult::success());
@@ -3161,7 +3164,7 @@ async fn read_proc_confirmation<R: io::Read>(
 }
 
 enum ParseProcResult {
-	Options(ProcMatchOptions),
+	Options(Box<ProcMatchOptions>),
 	Help,
 	Version,
 }
@@ -3456,7 +3459,7 @@ fn parse_proc_match_args(
 	{
 		return Err((2, "unsupported output-format option for this command".to_string()));
 	}
-	Ok(ParseProcResult::Options(options))
+	Ok(ParseProcResult::Options(Box::new(options)))
 }
 
 fn has_proc_selectors(options: &ProcMatchOptions) -> bool {
@@ -3774,9 +3777,8 @@ impl builtins::Command for KillCommand {
 		&self,
 		context: ExecutionContext<'_, SE>,
 	) -> std::result::Result<ExecutionResult, Self::Error> {
-		let mut signal = KillSignal::parse("TERM")?;
-		if let Some(signal_name) = &self.signal_name {
-			signal = if let Ok(signal) = KillSignal::parse(signal_name) {
+		let default_signal = if let Some(signal_name) = &self.signal_name {
+			if let Ok(signal) = KillSignal::parse(signal_name) {
 				signal
 			} else {
 				writeln!(
@@ -3786,30 +3788,35 @@ impl builtins::Command for KillCommand {
 					signal_name
 				)?;
 				return Ok(ExecutionExitCode::InvalidUsage.into());
-			};
-		}
-		if let Some(signal_number) = self.signal_number {
-			let Ok(signal_number) = i32::try_from(signal_number) else {
-				writeln!(
-					context.stderr(),
-					"{}: invalid signal number: {}",
-					context.command_name,
-					signal_number
-				)?;
-				return Ok(ExecutionExitCode::InvalidUsage.into());
-			};
-			signal = if let Ok(signal) = KillSignal::parse(&signal_number.to_string()) {
-				signal
-			} else {
-				writeln!(
-					context.stderr(),
-					"{}: invalid signal number: {}",
-					context.command_name,
-					signal_number
-				)?;
-				return Ok(ExecutionExitCode::InvalidUsage.into());
-			};
-		}
+			}
+		} else {
+			KillSignal::parse("TERM")?
+		};
+		let mut signal = match self.signal_number {
+			Some(signal_number) => {
+				let Ok(signal_number) = i32::try_from(signal_number) else {
+					writeln!(
+						context.stderr(),
+						"{}: invalid signal number: {}",
+						context.command_name,
+						signal_number
+					)?;
+					return Ok(ExecutionExitCode::InvalidUsage.into());
+				};
+				if let Ok(signal) = KillSignal::parse(&signal_number.to_string()) {
+					signal
+				} else {
+					writeln!(
+						context.stderr(),
+						"{}: invalid signal number: {}",
+						context.command_name,
+						signal_number
+					)?;
+					return Ok(ExecutionExitCode::InvalidUsage.into());
+				}
+			},
+			None => default_signal,
+		};
 
 		let mut operands: Vec<&String> = Vec::new();
 		let mut options_done = self.signal_name.is_some() || self.signal_number.is_some();
