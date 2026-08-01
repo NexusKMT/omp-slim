@@ -3,6 +3,24 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { dbPath } from "./config";
 
+let _osPageSize: number | undefined;
+
+function osPageSize(): number {
+	if (_osPageSize !== undefined) return _osPageSize;
+	try {
+		const proc = Bun.spawnSync(["getconf", "PAGE_SIZE"], { stdout: "pipe" });
+		if (proc.exitCode === 0) {
+			const size = Number.parseInt(proc.stdout.toString().trim(), 10);
+			if (size >= 512 && size <= 65536 && (size & (size - 1)) === 0) {
+				_osPageSize = size;
+				return size;
+			}
+		}
+	} catch { /* fall through */ }
+	_osPageSize = 4096;
+	return 4096;
+}
+
 export type DatabasePath = string | ":memory:";
 
 export interface OpenDatabaseOptions {
@@ -33,11 +51,14 @@ export function openDatabase(path: DatabasePath = dbPath(), options: OpenDatabas
 	if (options.loadExtension !== undefined) loadExtensions(db, options.loadExtension);
 	return db;
 }
-
 export function enablePragmas(db: Database, path?: DatabasePath): void {
 	db.exec("PRAGMA foreign_keys=ON");
 	db.exec("PRAGMA busy_timeout=5000");
-	if (path !== ":memory:") db.exec("PRAGMA journal_mode=WAL");
+	if (path !== ":memory:") {
+		const pageSize = osPageSize();
+		if (pageSize !== 4096) db.exec(`PRAGMA page_size=${pageSize}`);
+		db.exec("PRAGMA journal_mode=WAL");
+	}
 }
 
 export function loadExtensions(db: Database, extensions: string | readonly string[]): void {

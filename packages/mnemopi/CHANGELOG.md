@@ -7,6 +7,9 @@
 ### Fixed
 
 - Stripped `<think>…</think>` reasoning blocks from remote LLM output in `cleanOutput`, so reasoning-model responses no longer leak into consolidated memories or corrupt fact extraction (the reasoning wrapper previously survived parsing and every stored fact became reasoning prose). ([#7231](https://github.com/can1357/oh-my-pi/issues/7231))
+### Fixed
+
+- Fixed SQLite databases being created with a hardcoded 4 KB page size regardless of the OS page size. On systems with larger pages (e.g. Apple Silicon / Asahi Linux at 16 KB), every SQLite page read touches 4 OS pages, causing 4x I/O amplification. Mnemopi now detects the OS page size at startup via `getconf PAGE_SIZE` and sets `PRAGMA page_size` before any tables are created, eliminating the write amplification on non-4K-page systems.
 
 ## [17.2.2] - 2026-07-31
 
