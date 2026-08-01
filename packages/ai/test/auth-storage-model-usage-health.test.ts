@@ -469,6 +469,59 @@ describe("AuthStorage corrupt persisted block store", () => {
 		expect(errorSpy).toHaveBeenCalledTimes(1);
 	});
 
+	it("skips reconcile-after reads after a corrupt Codex block write latches the store", async () => {
+		const credential: AuthCredential = {
+			type: "oauth",
+			access: "access-1",
+			refresh: "refresh-1",
+			expires: Date.now() + 60 * 60_000,
+			accountId: "account-1",
+		};
+		const rows: StoredAuthCredential[] = [{ id: 1, provider: "openai-codex", credential, disabledCause: null }];
+		const healthyReport: UsageReport = {
+			provider: "openai-codex",
+			fetchedAt: Date.now(),
+			limits: [limit("short", 0.2)],
+			metadata: { accountId: "account-1", allowed: true, limitReached: false },
+		};
+		const usageProvider: UsageProvider = {
+			id: "openai-codex",
+			fetchUsage: async () => healthyReport,
+		};
+		const store = makeStore(rows);
+		let upsertCalls = 0;
+		let reconcileAfterCalls = 0;
+		store.upsertCredentialBlock = () => {
+			upsertCalls += 1;
+			throw sqliteCorruptError();
+		};
+		store.getCredentialBlockReconcileAfter = () => {
+			reconcileAfterCalls += 1;
+			throw sqliteCorruptError();
+		};
+		const errorSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
+		const storage = new AuthStorage(store, {
+			usageProviderResolver: provider => (provider === "openai-codex" ? usageProvider : undefined),
+			rankingStrategyResolver: provider => (provider === "openai-codex" ? strategy : undefined),
+			configValueResolver: async value => value,
+		});
+		await storage.reload();
+		storages.push(storage);
+
+		await storage.markUsageLimitReached("openai-codex", undefined, {
+			credentialId: 1,
+			modelId: "claude",
+		});
+		const health = await storage.getModelUsageHealth("openai-codex", {
+			modelId: "claude",
+			reserveFraction: 0.1,
+		});
+
+		expect(upsertCalls).toBe(1);
+		expect(reconcileAfterCalls).toBe(0);
+		expect(errorSpy).toHaveBeenCalledTimes(1);
+		expect(health.state).toBe("depleted");
+	});
 	it("latches every broker-facing block operation independently", async () => {
 		const block = {
 			credentialId: 1,

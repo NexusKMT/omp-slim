@@ -1727,6 +1727,18 @@ export class AuthStorage {
 		}
 	}
 
+	#readPersistedCredentialBlockReconcileAfter(credentialId: number, providerKey: string, blockScope: string): number {
+		if (this.#persistedBlockStoreDamaged) return 0;
+		const getCredentialBlockReconcileAfter = this.#store.getCredentialBlockReconcileAfter?.bind(this.#store);
+		if (!getCredentialBlockReconcileAfter) return 0;
+		try {
+			return getCredentialBlockReconcileAfter(credentialId, providerKey, blockScope) ?? 0;
+		} catch (err) {
+			if (this.#handlePersistedBlockStoreError(err)) return 0;
+			throw err;
+		}
+	}
+
 	/** Returns block expiry timestamp for a credential, checking unscoped and scoped blocks. */
 	#getCredentialBlockedUntil(
 		provider: string,
@@ -5898,9 +5910,12 @@ export class AuthStorage {
 		const scopedBackoffKey = this.#toScopedBackoffKey(providerKey, blockScope);
 		const globalProbeAfterMs = this.#credentialBackoffProbeAfter.get(providerKey)?.get(credentialIndex) ?? 0;
 		const scopedProbeAfterMs = this.#credentialBackoffProbeAfter.get(scopedBackoffKey)?.get(credentialIndex) ?? 0;
-		const getStoreReconcileAfter = this.#store.getCredentialBlockReconcileAfter?.bind(this.#store);
-		const storeGlobalProbeAfterMs = getStoreReconcileAfter?.(credentialId, providerKey, "") ?? 0;
-		const storeScopedProbeAfterMs = getStoreReconcileAfter?.(credentialId, providerKey, blockScope ?? "") ?? 0;
+		const storeGlobalProbeAfterMs = this.#readPersistedCredentialBlockReconcileAfter(credentialId, providerKey, "");
+		const storeScopedProbeAfterMs = this.#readPersistedCredentialBlockReconcileAfter(
+			credentialId,
+			providerKey,
+			blockScope ?? "",
+		);
 		if (Math.max(globalProbeAfterMs, scopedProbeAfterMs, storeGlobalProbeAfterMs, storeScopedProbeAfterMs) > nowMs) {
 			return;
 		}
