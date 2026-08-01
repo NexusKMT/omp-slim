@@ -75,6 +75,13 @@ describe("AgentLifecycleManager", () => {
 		expect(registry.registerIfAvailable(next, parked)).toBe(parked);
 		expect(registry.get("generation-Sub")).toBe(parked);
 
+		registry.setStatus("generation-Sub", "aborted", parked);
+		expect(registry.registerIfAvailable(next, parked)).toBeUndefined();
+		const staleSession = makeSessionStub().session;
+		expect(registry.attachSession("generation-Sub", staleSession, undefined, parked)).toBe(false);
+		expect(registry.setStatus("generation-Sub", "idle", parked)).toBe(false);
+		expect(registry.get("generation-Sub")).toMatchObject({ status: "aborted", session: null });
+
 		registry.unregister("generation-Sub", parked);
 		expect(registry.registerIfAvailable(next, parked)).toBeUndefined();
 		expect(registry.get("generation-Sub")).toBeUndefined();
@@ -167,6 +174,39 @@ describe("AgentLifecycleManager", () => {
 		expect(reviverRuns).toBe(1);
 		expect(a).toBe(revived.session);
 		expect(b).toBe(revived.session);
+	});
+
+	it("tombstoning a parked agent during revive prevents the stale session from attaching", async () => {
+		const gate = deferred();
+		const revived = makeSessionStub();
+		const ref = registry.register({
+			id: "Revive-Killed",
+			displayName: "task",
+			kind: "sub",
+			session: null,
+			sessionFile: "/tmp/Revive-Killed.jsonl",
+			status: "parked",
+		});
+		lifecycle.adopt(
+			"Revive-Killed",
+			{
+				idleTtlMs: 0,
+				revive: async () => {
+					await gate.promise;
+					return revived.session;
+				},
+			},
+			ref,
+		);
+
+		const revival = lifecycle.ensureLive("Revive-Killed");
+		expect(await lifecycle.release("Revive-Killed", ref, { tombstone: true })).toBe(true);
+		expect(registry.get("Revive-Killed")).toMatchObject({ status: "aborted", session: null });
+
+		gate.resolve();
+		await expect(revival).rejects.toThrow(/became terminal/);
+		expect(revived.disposeCalls()).toBe(1);
+		expect(registry.get("Revive-Killed")).toMatchObject({ status: "aborted", session: null });
 	});
 
 	it("ensureLive on an unknown id throws and points at history://", async () => {
