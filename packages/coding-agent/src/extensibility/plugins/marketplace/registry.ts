@@ -15,7 +15,9 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-import { getConfigRootDir, getPluginsDir, isEnoent, logger, tryParseJson } from "@oh-my-pi/pi-utils";
+import { getPluginsDir, isEnoent, logger, tryParseJson } from "@oh-my-pi/pi-utils";
+
+export { getMarketplacesRegistryPath } from "@oh-my-pi/pi-utils";
 
 import type {
 	InstalledPluginEntry,
@@ -23,12 +25,6 @@ import type {
 	MarketplaceRegistryEntry,
 	MarketplacesRegistry,
 } from "./types";
-
-// ── Path helpers ─────────────────────────────────────────────────────
-
-export function getMarketplacesRegistryPath(): string {
-	return path.join(getConfigRootDir(), "marketplaces.json");
-}
 
 export function getInstalledPluginsRegistryPath(): string {
 	return path.join(getPluginsDir(), "installed_plugins.json");

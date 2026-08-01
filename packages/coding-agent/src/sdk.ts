@@ -1391,11 +1391,15 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// headless run on an unwritable default config root pays for a feature it
 		// does not use.
 		const needsPlaceholderKey = secretEntriesNeedPlaceholderKey([...envEntries, ...fileEntries]);
+		const explicitAgentDir = options.agentDir;
 		const placeholderKey = needsPlaceholderKey
-			? await getSecretPlaceholderKey(agentDir)
-			: await getExistingSecretPlaceholderKey(agentDir);
+			? await getSecretPlaceholderKey(explicitAgentDir)
+			: await getExistingSecretPlaceholderKey(explicitAgentDir);
 		if (allEntries.length > 0) {
-			obfuscator = new SecretObfuscator(allEntries, placeholderKey ?? (() => getSecretPlaceholderKeySync(agentDir)));
+			obfuscator = new SecretObfuscator(
+				allEntries,
+				placeholderKey ?? (() => getSecretPlaceholderKeySync(explicitAgentDir)),
+			);
 		}
 		if (obfuscator?.hasSecrets() !== true && placeholderKey !== undefined) {
 			// No configured entry produced an active secret (e.g. only ignored short
