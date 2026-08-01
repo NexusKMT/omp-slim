@@ -71,6 +71,14 @@ describe("shipped dequeue defaults", () => {
 		expect(keys).toContain("alt+up");
 		expect(keys).toContain("shift+up");
 	});
+	it("does not steal shift+up from an explicit user binding", () => {
+		const keybindings = KeybindingsManager.inMemory({
+			"tui.editor.cursorUp": "shift+up",
+		});
+
+		expect(keybindings.getKeys("app.message.dequeue")).toEqual(["alt+up"]);
+		expect(keybindings.getKeys("tui.editor.cursorUp")).toEqual(["shift+up"]);
+	});
 	it("routes the shipped shift+up default through DEFAULT_ACTION_KEYS to the dequeue handler", () => {
 		// F12: the registry test above does not cover DEFAULT_ACTION_KEYS, the second
 		// defaults table that custom-editor.ts seeds its match set from. Drive a real
