@@ -345,12 +345,19 @@ export class AgentLifecycleManager {
 	}
 
 	/**
-	 * Hard removal: dispose if live, unregister from registry, drop timers.
-	 * When `expected` is given, only a ref matching it is released; a stale
-	 * release can never take down a newer same-id ref. Returns true when a
-	 * matching ref was released.
+	 * Dispose if live and drop timers. When `expected` is given, only a ref
+	 * matching it is released; a stale release can never take down a newer
+	 * same-id ref. Returns true when a matching ref was released.
+	 *
+	 * By default the ref is unregistered (teardown / one-shot removal). Pass
+	 * `tombstone: true` for an explicit kill: the ref is kept registered as a
+	 * terminal `aborted` row (session detached) instead of being removed, so a
+	 * later persisted-subagent scan (e.g. Agent Hub reopen) skips it via its
+	 * `if (!registry.get(id))` guard rather than re-adopting the surviving
+	 * on-disk transcript as a fresh `parked` row. Mirrors
+	 * `finalizeSubagentLifecycle`'s genuine-kill path.
 	 */
-	async release(id: string, expected?: AgentRefExpectation): Promise<boolean> {
+	async release(id: string, expected?: AgentRefExpectation, options?: { tombstone?: boolean }): Promise<boolean> {
 		const adopted = this.#adopted.get(id);
 		const current = this.#registry.get(id);
 		const currentMatches =
@@ -378,7 +385,12 @@ export class AgentLifecycleManager {
 				logger.warn("AgentLifecycleManager.release: session dispose failed", { id, error: String(error) });
 			}
 		}
-		this.#registry.unregister(id, ref);
+		if (options?.tombstone) {
+			this.#registry.detachSession(id, ref);
+			this.#registry.setStatus(id, "aborted", ref);
+		} else {
+			this.#registry.unregister(id, ref);
+		}
 		return true;
 	}
 

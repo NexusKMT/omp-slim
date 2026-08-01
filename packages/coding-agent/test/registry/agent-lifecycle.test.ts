@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as path from "node:path";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { registerPersistedSubagents } from "@oh-my-pi/pi-coding-agent/registry/persisted-agents";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { TempDir } from "@oh-my-pi/pi-utils";
 
 interface SessionStub {
 	session: AgentSession;
@@ -511,5 +514,37 @@ describe("AgentLifecycleManager", () => {
 		expect(ref?.session).toBe(stub.session);
 		expect(stub.disposeCalls()).toBe(0);
 		expect(lifecycle.has("8-Sub")).toBe(true);
+	});
+
+	it("tombstone release keeps a killed ref as terminal `aborted` so a persisted-subagent rescan cannot resurrect it as parked", async () => {
+		using tempDir = TempDir.createSync("@omp-lifecycle-tombstone-");
+		const rootSessionFile = path.join(tempDir.path(), "main.jsonl");
+		const workerId = "Killed-Sub";
+		const workerSessionFile = path.join(tempDir.path(), "main", `${workerId}.jsonl`);
+		await Bun.write(rootSessionFile, "");
+		await Bun.write(workerSessionFile, "");
+
+		const stub = makeSessionStub();
+		const ref = registry.register({
+			id: workerId,
+			displayName: "task",
+			kind: "sub",
+			session: stub.session,
+			sessionFile: workerSessionFile,
+			status: "running",
+		});
+
+		expect(await lifecycle.release(workerId, ref, { tombstone: true })).toBe(true);
+		// The kill disposes the live session but keeps the ref registered as a
+		// terminal, hard-killed row (session detached) instead of removing it.
+		expect(stub.disposeCalls()).toBe(1);
+		expect(registry.get(workerId)?.status).toBe("aborted");
+		expect(registry.get(workerId)?.session).toBeNull();
+
+		// Reopening the Agent Hub rescans on-disk transcripts. The surviving
+		// `.jsonl` must not be re-adopted as a fresh `parked` row, because the
+		// id is still present in the registry.
+		await registerPersistedSubagents(registry, rootSessionFile);
+		expect(registry.get(workerId)?.status).toBe("aborted");
 	});
 });
