@@ -12,6 +12,7 @@ import {
 	formatToolResultErrorPreview,
 	PRIMARY_CONTEXT_CUSTOM_TYPES,
 } from "../session/session-history-format";
+import { ADVISOR_RENDER_OPTIONS, renderAdvisorDeltaChunks } from "./delta-split";
 
 /**
  * Minimal slice of `Agent` the runtime drives — satisfied by pi-agent-core
@@ -20,7 +21,7 @@ import {
  * this field after every prompt to detect a failed turn.
  */
 export interface AdvisorAgent {
-	prompt(input: string): Promise<void>;
+	prompt(input: string | AgentMessage[]): Promise<void>;
 	abort(reason?: unknown): void;
 	reset(): void;
 	/**
@@ -231,13 +232,6 @@ const MAX_COALESCE_ROUNDS = 3;
  */
 const MAX_QUARANTINE_RETRIES = 2;
 
-const ADVISOR_RENDER_OPTIONS = {
-	includeToolIntent: true,
-	watchedRoles: true,
-	expandPrimaryContext: true,
-	expandEditDiffs: true,
-} as const;
-
 interface PendingDelta {
 	text: string;
 	rawMessages: AgentMessage[];
@@ -261,9 +255,29 @@ interface DeliveredMessage {
 
 function fingerprintMessage(message: AgentMessage): bigint | undefined {
 	try {
-		const serialized = JSON.stringify(message);
-		if (serialized === undefined) return undefined;
-		return Bun.hash.wyhash(serialized);
+		// Field-selective fingerprint: hash every top-level field the advisor
+		// renderer actually reads (mirrors AppendOnlyContextManager.#messageDigest,
+		// issue #3406). Unrendered metadata (timestamp, usage, provider internals)
+		// churns on provider round-trips and would otherwise trigger a full
+		// transcript replay for a no-op change. Rendered fields (from
+		// session-history-format.ts): role, content, customType, display, isError,
+		// toolResult: cancelled/exitCode/output, custom: details.
+		const m = message as unknown as Record<string, unknown>;
+		const payload = JSON.stringify({
+			r: m.role ?? null,
+			c: m.content ?? null,
+			toolCallId: m.toolCallId ?? null,
+			toolName: m.toolName ?? null,
+			err: m.isError ?? null,
+			ct: m.customType ?? null,
+			disp: m.display ?? null,
+			cancel: m.cancelled ?? null,
+			exit: m.exitCode ?? null,
+			out: m.output ?? null,
+			det: m.details ?? null,
+		});
+		if (payload === undefined) return undefined;
+		return Bun.hash.wyhash(payload);
 	} catch {
 		return undefined;
 	}
@@ -574,10 +588,123 @@ export class AdvisorRuntime {
 		this.#includeThinking = true;
 	}
 
-	#formatRawDelta(rawMessages: AgentMessage[], wip = false): string | null {
+	// Candidate 4 (multi-message split): render the Session update as MULTIPLE
+	// user messages — one per source message — instead of one ever-growing user
+	// message. Provider prompt caches are prefix-based: a single user message
+	// whose text keeps growing invalidates the whole message on every turn, so
+	// cache_read stays pinned at the instructions/tools boundary (observed
+	// 14491 in production, 11066 in tests). Splitting into per-source user
+	// messages lets the provider cache each appended message (verified
+	// experimentally: cache_read 11066 → 11091 → 11112 vs pinned 11066).
+	//
+	// Each source message is rendered INDEPENDENTLY via
+	// formatSessionHistoryMarkdown in chunked mode (shared toolResultIndex +
+	// consumedToolCallIds over the WHOLE delta), so a toolCall finds its
+	// toolResult across chunk boundaries and consecutive same-role collapsing
+	// is preserved. Concatenating the chunk texts with the same separator the
+	// old single-block render used yields byte-identical advisor context.
+	// Each chunk is delivered as its own user AgentMessage via a SINGLE
+	// Agent.prompt(AgentMessage[]) call, so the advisor model still runs ONCE
+	// per update (no per-message assistant turns).
+	#formatRawDeltaMessageChunks(preparedMessages: AgentMessage[], wip = false): AgentMessage[] | null {
+		// Consumes the ALREADY-prepared view from #prepareBatch: advisor custom
+		// messages are filtered and primary-context dedup is applied there, so
+		// splitting here never double-folds or leaks hidden messages.
+		const delta = preparedMessages;
+		if (delta.length === 0) return null;
+
+		const obfuscator = this.host.obfuscator;
+		// Side effects the pure renderer cannot own: scrub the advisor's own
+		// history and refresh pending placeholder prefixes.
+		let discoveredNewRegexSecretValue = false;
+		const addRegexValues = (text: string): void => {
+			for (const secretValue of obfuscator?.collectRegexSecretValuesForObfuscation(text) ?? []) {
+				if (this.#advisorRegexSecretValues.has(secretValue)) continue;
+				this.#advisorRegexSecretValues.add(secretValue);
+				discoveredNewRegexSecretValue = true;
+			}
+		};
+		const probeMd = formatSessionHistoryMarkdown(delta, {
+			...ADVISOR_RENDER_OPTIONS,
+			includeThinking: this.#includeThinking,
+		});
+		if (obfuscator?.hasSecrets()) {
+			for (const message of delta) {
+				if (
+					message.role === "custom" &&
+					PRIMARY_CONTEXT_CUSTOM_TYPES.has(message.customType) &&
+					typeof message.content === "string"
+				) {
+					addRegexValues(message.content);
+				}
+			}
+			addRegexValues(probeMd);
+			scrubAdvisorHistory(obfuscator, this.agent.state.messages, this.#advisorRegexSecretValues);
+			if (discoveredNewRegexSecretValue) {
+				this.#pending = this.#pending.map(delta => ({
+					...delta,
+					text: obfuscator.stripUnsafeFriendlyPlaceholderPrefixes(delta.text, this.#advisorRegexSecretValues),
+				}));
+			}
+		}
+
+		// Message-level obfuscation mirrors the old #formatRawDelta path EXACTLY:
+		// only primary-context custom messages are mapped (tool args, details.diff,
+		// structured fields), because the old path's contract is whole-delta text
+		// obfuscation as the final pass. Expanding to every role would mint
+		// different placeholders and break byte-equivalence with the old render.
+		const renderDelta =
+			obfuscator?.hasSecrets()
+				? delta.map(message =>
+						message.role === "custom" && PRIMARY_CONTEXT_CUSTOM_TYPES.has(message.customType)
+							? obfuscateAdvisorMessage(obfuscator, message, this.#advisorRegexSecretValues)
+							: message,
+					)
+				: delta;
+
+		const chunks = renderAdvisorDeltaChunks(renderDelta, {
+			wip,
+			includeThinking: this.#includeThinking,
+			obfuscator: obfuscator?.hasSecrets() ? obfuscator : undefined,
+			advisorRegexSecretValues: this.#advisorRegexSecretValues,
+		});
+		return chunks;
+	}
+
+	#formatRawDelta(rawMessages: AgentMessage[], wip = false, updateSeenContext = true): string | null {
 		const delta = rawMessages
 			.filter(message => !(message.role === "custom" && message.customType === "advisor"))
-			.map(message => this.#dedupContextMessage(message));
+			.map(message =>
+				updateSeenContext ? this.#dedupContextMessage(message) : this.#dedupContextMessageReadOnly(message),
+			);
+		return this.#renderPreparedDelta(delta, wip);
+	}
+
+	/**
+	 * Preview variant of #dedupContextMessage: returns the collapse decision
+	 * WITHOUT advancing the live #seenContext map. Used by #renderDelta so the
+	 * preview text does not make the batch's first real delivery look like a
+	 * re-injection.
+	 */
+	#dedupContextMessageReadOnly(msg: AgentMessage): AgentMessage {
+		if (msg.role !== "custom") return msg;
+		if (!PRIMARY_CONTEXT_CUSTOM_TYPES.has(msg.customType)) return msg;
+		if (typeof msg.content !== "string") return msg;
+		if (this.#seenContext.get(msg.customType) === msg.content) {
+			return { ...msg, content: "(unchanged — still in effect)" };
+		}
+		return msg;
+	}
+
+	/**
+	 * Render already-prepared (deduped + advisor-filtered) messages to the
+	 * single-block Session update text. Does NOT dedup again — callers that
+	 * prepared the list must pass it here directly, and callers that prepared
+	 * via #prepareBatch get byte-identical batch text to what the multi-message
+	 * split consumes.
+	 */
+	#renderPreparedDelta(preparedMessages: AgentMessage[], wip = false): string | null {
+		const delta = preparedMessages;
 		if (delta.length === 0) return null;
 		const obfuscator = this.host.obfuscator;
 		let md = formatSessionHistoryMarkdown(delta, {
@@ -621,8 +748,15 @@ export class AdvisorRuntime {
 			);
 			md = obfuscator.obfuscate(md, this.#advisorRegexSecretValues);
 		}
-		const heading = wip ? "### Session update [in progress — more steps follow]" : "### Session update";
-		return `${heading}\n\n${md}`;
+		// Candidate 3: keep the heading byte-identical between wip and final turns
+		// and put the WIP marker at the END of the batch, so a wip/final flip
+		// never changes the batch prefix. The provider prompt cache is
+		// prefix-based; a heading that flips between turns re-prefills the whole
+		// user message on every in-progress turn.
+		const heading = "### Session update";
+		const mdHead = `${heading}\n\n${md}`;
+		if (!wip) return mdHead;
+		return `${mdHead}\n\n---\n\n[in progress — more steps follow]`;
 	}
 
 	#renderDelta(messages?: AgentMessage[], wip = false): Omit<PendingDelta, "turns" | "overflowRecovery"> | null {
@@ -643,12 +777,26 @@ export class AdvisorRuntime {
 				delivered.fingerprint !== fingerprint
 			) {
 				prefixChanged = true;
+				// Full replays are expensive (the whole transcript is re-sent and
+				// the provider prompt cache re-prefills from the system prompt), so
+				// record exactly which delivered message diverged and which
+				// top-level fields changed — without this the trigger is invisible.
+				try {
+					const oldMsg: Record<string, unknown> = delivered.message as unknown as Record<string, unknown>;
+					const newMsg: Record<string, unknown> = current as unknown as Record<string, unknown>;
+					const differingFields: string[] = [];
+					for (const key of new Set([...Object.keys(oldMsg), ...Object.keys(newMsg)])) {
+						if (JSON.stringify(oldMsg[key]) !== JSON.stringify(newMsg[key])) differingFields.push(key);
+					}
+					logger.debug("advisor delivered prefix changed", { index: i, role: newMsg.role, differingFields });
+				} catch {}
 				break;
 			}
 			delivered.message = current;
 		}
 		if (prefixChanged) {
 			this.#epoch++;
+			logger.debug("advisor context reset", { reason: "delivered-prefix-changed", lastCount: this.#lastCount });
 			this.#resetAdvisorContext(true, true);
 		}
 		const rawMessages = all.slice(this.#lastCount);
@@ -658,7 +806,11 @@ export class AdvisorRuntime {
 			this.#deliveredPrefix.push({ message, fingerprint: fingerprintMessage(message) });
 		}
 		this.#lastCount = all.length;
-		const text = this.#formatRawDelta(rawMessages, wip);
+		// Preview render: do NOT advance #seenContext — the batch's real dedup
+		// happens once in #prepareBatch. Advancing here would make the first
+		// real delivery of a re-injected primary-context message collapse to
+		// "(unchanged…)" (double-fold).
+		const text = this.#formatRawDelta(rawMessages, wip, false);
 		return text ? { text, rawMessages, renderRevision: this.#renderRevision, wip } : null;
 	}
 
@@ -747,6 +899,7 @@ export class AdvisorRuntime {
 	): Promise<{
 		batch: string | null;
 		rawMessages: AgentMessage[];
+		preparedMessages: AgentMessage[];
 		finalTurns: number;
 		wip: boolean;
 		resetContext: boolean;
@@ -794,10 +947,11 @@ export class AdvisorRuntime {
 					// this already-popped raw batch so active plan/reference bodies are
 					// restored without replaying any older primary transcript.
 					this.#clearAdvisorContextAtCurrentCursor();
-					const rerendered = this.#formatRawDelta(rawMessages, wip);
+					const { batch: rerendered, preparedMessages } = this.#prepareBatch(rawMessages, wip, batchText);
 					return {
 						batch: rerendered ?? (batchText || null),
 						rawMessages,
+						preparedMessages,
 						finalTurns: turns,
 						wip,
 						resetContext: true,
@@ -826,11 +980,43 @@ export class AdvisorRuntime {
 			wip = late.at(-1)!.wip;
 		}
 
-		const batchObfuscator = this.host.obfuscator;
-		if (batchObfuscator?.hasSecrets()) {
-			batchText = batchObfuscator.stripUnsafeFriendlyPlaceholderPrefixes(batchText, this.#advisorRegexSecretValues);
-		}
-		return { batch: batchText || null, rawMessages, finalTurns: turns, wip, resetContext: false };
+		// Prepare the deduped view AFTER coalescing (rawMessages is complete by
+		// now): filters advisor custom messages and collapses re-injected
+		// primary-context to "(unchanged…)". BOTH the single-block text and the
+		// multi-message split derive from this exact list so they never diverge.
+		const { batch: preparedBatch, preparedMessages } = this.#prepareBatch(rawMessages, wip, batchText);
+		return {
+			batch: preparedBatch ?? (batchText || null),
+			rawMessages,
+			preparedMessages,
+			finalTurns: turns,
+			wip,
+			resetContext: false,
+		};
+	}
+
+	/**
+	 * Single dedup+render pass shared by every batch finalization path (normal
+	 * and context-reset). Filters advisor custom messages, collapses re-injected
+	 * primary-context to "(unchanged…)" via #dedupContextMessage, renders the
+	 * single-block batch text from the SAME prepared list the multi-message
+	 * split consumes, so the two views can never diverge.
+	 */
+	#prepareBatch(
+		rawMessages: AgentMessage[],
+		wip: boolean,
+		fallback: string | null,
+	): { batch: string | null; preparedMessages: AgentMessage[] } {
+		// Dedup against the LIVE #seenContext (populated by previous turns via
+		// #renderDelta -> #formatRawDelta) so re-injected primary context that
+		// was ALREADY shown collapses to "(unchanged…)", while a FIRST delivery
+		// in this batch stays expanded. This pass advances the live map exactly
+		// once per batch — #renderDelta's text is a preview and must not set it.
+		const preparedMessages = rawMessages
+			.filter(message => !(message.role === "custom" && message.customType === "advisor"))
+			.map(message => this.#dedupContextMessage(message));
+		const batch = this.#renderPreparedDelta(preparedMessages, wip);
+		return { batch: batch ?? fallback, preparedMessages };
 	}
 
 	#terminalAssistantFailure(snapshot: number): AssistantMessage | undefined {
@@ -872,8 +1058,11 @@ export class AdvisorRuntime {
 				const epoch = this.#epoch;
 				for (const delta of popped) {
 					if (delta.renderRevision === this.#renderRevision) continue;
-					const refreshed = this.#formatRawDelta(delta.rawMessages, delta.wip);
-					if (refreshed) delta.text = refreshed;
+					// Batch text is finalized by #collectAndMaintainBatch -> #prepareBatch
+					// (single dedup+render pass). Refreshing here would run
+					// #dedupContextMessage a SECOND time and double-fold re-injected
+					// primary-context custom messages ("(unchanged…)" on first
+					// delivery). Mark the revision so the delta is not re-refreshed.
 					delta.renderRevision = this.#renderRevision;
 				}
 				const recoveringOverflow = popped.some(delta => delta.overflowRecovery === true);
@@ -891,7 +1080,7 @@ export class AdvisorRuntime {
 					continue;
 				}
 
-				const { batch, rawMessages, finalTurns, wip, resetContext } = result;
+				const { batch, rawMessages, preparedMessages, finalTurns, wip, resetContext } = result;
 
 				if (this.disposed || batch === null) {
 					this.#backlog = Math.max(0, this.#backlog - finalTurns);
@@ -908,10 +1097,18 @@ export class AdvisorRuntime {
 				const messageSnapshot = this.agent.state.messages.length;
 				const contextWasFresh = resetContext || recoveringOverflow || messageSnapshot === 0;
 				try {
-					// Reset the host's per-update advisor state (one-advise-per-update
-					// gate) and pass through whether this batch reviews partial work.
 					this.host.beginAdvisorUpdate?.(wip);
-					const prompt = this.agent.prompt(batch);
+					// Candidate 4 (multi-message split): deliver the Session update as
+					// multiple user messages so the provider prompt cache can
+					// incrementally hit each appended message (cache_read grows with
+					// the session instead of staying pinned at the instructions/tools
+					// boundary). Falls back to the single-block string when the chunk
+					// renderer cannot split (e.g. empty delta). The split is
+					// byte-equivalent to the old single-block render (equivalence
+					// tested), so the advisor sees identical context.
+					const splitMessages = this.#formatRawDeltaMessageChunks(preparedMessages, wip);
+					const promptInput: string | AgentMessage[] = splitMessages ?? batch;
+					const prompt = this.agent.prompt(promptInput);
 					this.#promptInFlight = prompt;
 					try {
 						await prompt;

@@ -1,0 +1,82 @@
+// Candidate 4 (multi-message split) pure renderer, extracted for direct unit
+// testing. Renders an advisor delta as MULTIPLE user messages — one per source
+// message — instead of one ever-growing user message, so the provider prompt
+// cache can incrementally hit each appended message. Provider caches are
+// prefix-based: a single user message whose text keeps growing invalidates the
+// whole message on every turn, pinning cache_read at the instructions/tools
+// boundary (observed 14491 in production, 11066 in tests). Splitting into
+// per-source user messages grows cache_read with the session (verified
+// experimentally: 11066 → 11091 → 11112).
+//
+// Each source message is rendered INDEPENDENTLY via formatSessionHistoryMarkdown
+// in chunked mode (shared toolResultIndex + consumedToolCallIds + watchedRoleState
+// over the WHOLE delta), so toolCall/toolResult pairings resolve across chunk
+// boundaries and consecutive same-role collapsing is byte-identical to the old
+// single-block render. Concatenating the chunk texts reproduces the old advisor
+// context exactly (equivalence-tested).
+//
+// The heading stays on the FIRST chunk; the WIP marker stays on the LAST chunk
+// (candidate 3) so a wip/final flip never changes the stable prefix.
+import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
+import type { SecretObfuscator } from "../secrets/obfuscator";
+import { formatSessionHistoryMarkdown } from "../session/session-history-format";
+
+/** Render options shared by the advisor single-block and multi-message paths. */
+export const ADVISOR_RENDER_OPTIONS = {
+	includeToolIntent: true,
+	watchedRoles: true,
+	expandPrimaryContext: true,
+	expandEditDiffs: true,
+} as const;
+
+export interface RenderAdvisorDeltaChunksOptions {
+	wip: boolean;
+	includeThinking: boolean;
+	obfuscator?: SecretObfuscator;
+	advisorRegexSecretValues: ReadonlySet<string>;
+}
+
+export function renderAdvisorDeltaChunks(
+	delta: AgentMessage[],
+	opts: RenderAdvisorDeltaChunksOptions,
+): AgentMessage[] | null {
+	if (delta.length === 0) return null;
+
+	const resultsByCallId = new Map<string, ToolResultMessage>();
+	for (const msg of delta) {
+		if (msg.role === "toolResult") resultsByCallId.set(msg.toolCallId, msg);
+	}
+	const consumed = new Set<string>();
+	const watchedRoleState = { lastLabel: undefined as string | undefined };
+
+	const renderChunk = (chunk: AgentMessage[]): string =>
+		formatSessionHistoryMarkdown(chunk, {
+			...ADVISOR_RENDER_OPTIONS,
+			includeThinking: opts.includeThinking,
+			toolResultIndex: resultsByCallId,
+			consumedToolCallIds: consumed,
+			watchedRoleState,
+		});
+
+	const heading = "### Session update";
+	const chunks: AgentMessage[] = [];
+	for (let i = 0; i < delta.length; i++) {
+		let text = renderChunk([delta[i]]);
+		if (!text.trim()) continue;
+		if (opts.obfuscator) text = opts.obfuscator.obfuscate(text, opts.advisorRegexSecretValues);
+		if (i === 0) text = `${heading}\n\n${text}`;
+		chunks.push({
+			role: "user",
+			content: [{ type: "text", text }],
+			timestamp: Date.now(),
+		} as AgentMessage);
+	}
+	if (chunks.length === 0) return null;
+	if (opts.wip) {
+		const last = chunks[chunks.length - 1];
+		const blocks = (last as { content: unknown }).content as TextContent[];
+		blocks[0].text += `\n\n---\n\n[in progress — more steps follow]`;
+	}
+	return chunks;
+}

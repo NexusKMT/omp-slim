@@ -832,8 +832,14 @@ export class SessionAdvisors {
 					let quarantined: string | undefined;
 					try {
 						quarantinedAdvisorOutput = undefined;
-						currentAdvisorInput = input;
-						await advisorAgent.prompt(input);
+						// Multi-message input (candidate 4) must serialize deterministically
+						// for quarantine source text; reuse the session history formatter
+						// rather than ad-hoc joins so all message kinds (text/tool/
+						// custom/structured) are preserved exactly as rendered.
+						currentAdvisorInput = Array.isArray(input)
+							? formatSessionHistoryMarkdown(input, { watchedRoles: true })
+							: input;
+						await (Array.isArray(input) ? advisorAgent.prompt(input) : advisorAgent.prompt(input));
 						quarantined = quarantinedAdvisorOutput;
 					} finally {
 						quarantinedAdvisorOutput = undefined;
