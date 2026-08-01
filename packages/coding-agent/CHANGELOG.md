@@ -104,6 +104,10 @@
 - Fixed the browser tool ignoring the url parameter when opening a new tab on an attached browser.
 - Fixed browser automation disrupting attached browsers by adopting the active foreground tab and avoiding raising new tabs during screenshots.
 
+### Fixed
+
+- Fixed manual `/shake` leaving the context budget and next pre-turn compaction decision anchored to the stale pre-shake provider token count until another model response arrived.
+
 ## [17.2.1] - 2026-07-30
 
 ### Added

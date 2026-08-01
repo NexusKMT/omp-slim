@@ -235,6 +235,7 @@ export interface SessionMaintenanceHost {
 	syncTodoPhasesFromBranch(): void;
 	resetAdvisorRuntimes(): void;
 	rebaseAfterCompaction(): void;
+	recordAnchoredHistoryRewrite(tokensRemoved: number): void;
 	getContextBreakdown(options?: {
 		contextWindow?: number;
 		pendingMessages?: AgentMessage[];
@@ -461,11 +462,12 @@ export class SessionMaintenance {
 		}
 
 		const branchEntries = this.#host.sessionManager.getBranch();
+		const latestCompaction = getLatestCompactionEntry(branchEntries);
 		const config = this.#withPlanProtection({
 			...(opts.config ?? AGGRESSIVE_SHAKE_CONFIG),
 			// Skip entries summarized away by the latest compaction — shaking them
 			// only churns persisted history with no prompt/cache effect.
-			keepBoundaryId: getLatestCompactionEntry(branchEntries)?.firstKeptEntryId,
+			keepBoundaryId: latestCompaction?.firstKeptEntryId,
 		});
 		const regions = collectShakeRegions(branchEntries, config);
 		if (regions.length === 0) {
@@ -475,20 +477,40 @@ export class SessionMaintenance {
 		const artifactId = await this.#saveShakeArtifact(regions);
 		const replacements = regions.map((region, index) => this.#shakeElidePlaceholder(region, index, artifactId));
 
+		const compactionIndex = latestCompaction ? branchEntries.lastIndexOf(latestCompaction) : -1;
+		let anchorIndex = -1;
+		for (let index = branchEntries.length - 1; index > compactionIndex; index--) {
+			const entry = branchEntries[index];
+			if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+			const assistant = entry.message;
+			if (assistant.stopReason !== "aborted" && assistant.stopReason !== "error" && assistant.usage) {
+				anchorIndex = index;
+				break;
+			}
+		}
+		const entryIndexes = new Map(branchEntries.map((entry, index) => [entry, index]));
+
 		let toolResultsDropped = 0;
 		let blocksDropped = 0;
 		let originalTokens = 0;
 		let replacementTokens = 0;
+		let anchoredTokensRemoved = 0;
 		const items = regions.map((region, index) => {
 			if (region.kind === "toolResult") toolResultsDropped++;
 			else blocksDropped++;
 			originalTokens += region.tokens;
 			const replacement = replacements[index];
-			if (replacement.length > 0) replacementTokens += countTokens(replacement);
+			const replacementTokenCount = replacement.length > 0 ? countTokens(replacement) : 0;
+			replacementTokens += replacementTokenCount;
+			const entryIndex = entryIndexes.get(region.entry) ?? -1;
+			if (entryIndex >= 0 && entryIndex < anchorIndex) {
+				anchoredTokensRemoved += Math.max(0, region.tokens - replacementTokenCount);
+			}
 			return { region, replacement };
 		});
 
 		applyShakeRegions(items);
+		this.#host.recordAnchoredHistoryRewrite(anchoredTokensRemoved);
 
 		await this.#host.sessionManager.rewriteEntries();
 		const sessionContext = this.#host.buildDisplaySessionContext();

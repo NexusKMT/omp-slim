@@ -844,6 +844,8 @@ export interface AssistantRetryRecovery {
 export interface ContextSnapshot {
 	promptTokens: number; // authoritative provider prompt/input tokens
 	nonMessageTokens: number; // estimated non-message total at send time
+	/** Estimated prompt tokens removed by local history rewrites after this provider snapshot was recorded. */
+	historyRewriteTokensRemoved?: number;
 	lastMessageTimestamp?: number;
 }
 
