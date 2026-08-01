@@ -1,21 +1,26 @@
+import type { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDatabase, closeQuietly } from "../src/db";
-
-function expectedOsPageSize(): number {
-	try {
-		const proc = Bun.spawnSync(["getconf", "PAGE_SIZE"], { stdout: "pipe" });
-		if (proc.exitCode === 0) {
-			const size = Number.parseInt(proc.stdout.toString().trim(), 10);
-			if (size >= 512 && size <= 65536 && (size & (size - 1)) === 0) return size;
-		}
-	} catch { /* fall through */ }
-	return 4096;
-}
+import { closeQuietly, openDatabase } from "../src/db";
 
 const roots: string[] = [];
+
+function tempDb(): string {
+	const root = mkdtempSync(join(tmpdir(), "mnemopi-page-size-"));
+	roots.push(root);
+	return join(root, "test.db");
+}
+
+interface PageSizeRow {
+	page_size: number;
+}
+
+function pageSize(db: Database): number {
+	const row = db.query("PRAGMA page_size").get() as PageSizeRow;
+	return row.page_size;
+}
 
 afterEach(() => {
 	for (;;) {
@@ -26,27 +31,36 @@ afterEach(() => {
 });
 
 describe("db page size", () => {
-	it("creates a new database with page size matching the OS page size", () => {
-		const root = mkdtempSync(join(tmpdir(), "mnemopi-page-size-"));
-		roots.push(root);
-		const path = join(root, "test.db");
-
-		const db = openDatabase(path);
+	it("uses an explicitly requested page size for a new file-backed database", () => {
+		const db = openDatabase(tempDb(), { pageSize: 16384 });
 		try {
-			const pageSize = db.query("PRAGMA page_size").get() as { page_size: number };
-			expect(pageSize.page_size).toBe(expectedOsPageSize());
+			expect(pageSize(db)).toBe(16384);
 		} finally {
 			closeQuietly(db);
 		}
 	});
 
-	it("does not set page_size on in-memory databases", () => {
-		const db = openDatabase(":memory:");
+	it("keeps the existing page size when reopening a database with another request", () => {
+		const path = tempDb();
+		const initial = openDatabase(path, { pageSize: 4096 });
 		try {
-			const pageSize = db.query("PRAGMA page_size").get() as { page_size: number };
-			// In-memory DBs keep the SQLite default (4096) since there is no
-			// persistent file whose I/O would benefit from OS page alignment.
-			expect(pageSize.page_size).toBe(4096);
+			initial.run("CREATE TABLE existing_data (value TEXT NOT NULL)");
+		} finally {
+			closeQuietly(initial);
+		}
+
+		const reopened = openDatabase(path, { pageSize: 16384 });
+		try {
+			expect(pageSize(reopened)).toBe(4096);
+		} finally {
+			closeQuietly(reopened);
+		}
+	});
+
+	it("does not set page size on in-memory databases", () => {
+		const db = openDatabase(":memory:", { pageSize: 16384 });
+		try {
+			expect(pageSize(db)).toBe(4096);
 		} finally {
 			closeQuietly(db);
 		}
