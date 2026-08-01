@@ -102,6 +102,7 @@ describe("context-file prompt refresh", () => {
 
 			expect(session.systemPrompt.join("\n")).toContain(INITIAL_CONTEXT);
 		} finally {
+			initializeWithSettings(settings);
 			await session.dispose();
 			authStorage.close();
 		}
