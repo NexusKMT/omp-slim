@@ -258,9 +258,13 @@ export function $envpos(name: string, defaultValue: number): number {
 	return parsed;
 }
 
-/** True when `BUN_ENV` or `NODE_ENV` is the string `test`. */
+const BUN_TEST_ENTRY_PATTERN = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
+
+/** True when the process is an explicitly marked test child or Bun is running a test entrypoint. */
 export function isBunTestRuntime(): boolean {
-	return Bun.env.BUN_ENV === "test" || Bun.env.NODE_ENV === "test";
+	if (Bun.env.PI_TEST_RUNTIME === "1") return true;
+	const hasTestEnvironment = Bun.env.BUN_ENV === "test" || Bun.env.NODE_ENV === "test";
+	return hasTestEnvironment && BUN_TEST_ENTRY_PATTERN.test(Bun.main);
 }
 
 let terminalHeadless = isBunTestRuntime();

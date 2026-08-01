@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { filterProcessEnv, getDbBusyTimeoutMs, parseEnvFile, setInteractiveHost } from "@oh-my-pi/pi-utils/env";
 
 const tempDirs: string[] = [];
+const runtimeProbePath = path.join(import.meta.dir, "fixtures", "test-runtime-probe.ts");
 
 afterEach(() => {
 	for (const dir of tempDirs.splice(0)) {
@@ -39,6 +40,22 @@ describe("getDbBusyTimeoutMs", () => {
 		}
 	});
 });
+async function runRuntimeProbe(env: Record<string, string | undefined>): Promise<boolean> {
+	const cwd = path.dirname(writeTempEnv(""));
+	const proc = Bun.spawn([process.execPath, runtimeProbePath], {
+		cwd,
+		env: { ...process.env, ...env },
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [stdout, stderr, exitCode] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+		proc.exited,
+	]);
+	expect(exitCode, stderr).toBe(0);
+	return JSON.parse(stdout) as boolean;
+}
 
 describe("parseEnvFile", () => {
 	it("ignores malformed names and nul-containing values", () => {
@@ -139,5 +156,16 @@ describe("filterProcessEnv", () => {
 			"ProgramFiles(x86)": "C:\\Program Files (x86)",
 			"CommonProgramFiles(x86)": "C:\\Program Files (x86)\\Common Files",
 		});
+	});
+});
+
+describe("isBunTestRuntime", () => {
+	it("does not treat shared application env names as a test runner signal", async () => {
+		expect(await runRuntimeProbe({ NODE_ENV: "test", BUN_ENV: undefined, PI_TEST_RUNTIME: undefined })).toBe(false);
+		expect(await runRuntimeProbe({ NODE_ENV: undefined, BUN_ENV: "test", PI_TEST_RUNTIME: undefined })).toBe(false);
+	});
+
+	it("honors the private test runner signal", async () => {
+		expect(await runRuntimeProbe({ NODE_ENV: undefined, BUN_ENV: undefined, PI_TEST_RUNTIME: "1" })).toBe(true);
 	});
 });
