@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Headless hosts (print/RPC/ACP/eval/SDK) now use a 1s SQLite `busy_timeout` for the session-critical databases (agent.db, history.db, stats.db) via `getDbBusyTimeoutMs()`, so lock contention no longer freezes the protocol loop for the full interactive 5s timeout; interactive hosts keep the 5s timeout.
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
