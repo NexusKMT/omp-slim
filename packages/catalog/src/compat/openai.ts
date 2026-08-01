@@ -318,7 +318,8 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 		isDeepseekModelIdOrName(spec.name ?? "") ||
 		isOpenCodeDeepseekAlias;
 	const isDirectDeepseekApi = modelMatchesHost(hostModel, "deepseekDirect");
-	const isDirectDeepseekReasoning = isDirectDeepseekApi && isDeepseekFamily && Boolean(spec.reasoning);
+	const isDeepseekReasoning = isDeepseekFamily && Boolean(spec.reasoning);
+	const isDirectDeepseekReasoning = isDirectDeepseekApi && isDeepseekReasoning;
 	const isGrok = modelMatchesHost(hostModel, "xai");
 	const isMistral = modelMatchesHost(hostModel, "mistral");
 	const isOpenCodeHost = modelMatchesHost(hostModel, "opencode");
@@ -490,7 +491,14 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 		disableReasoningOnForcedToolChoice: (isKimiModel && !isMoonshotKimiK3) || isAnthropicModel,
 		disableReasoningOnToolChoice: isDeepseekFamily && Boolean(spec.reasoning) && !isOpenRouter,
 		supportsToolChoice: !isDirectDeepseekReasoning,
-		supportsForcedToolChoice: !requiresEnabledThinking,
+		// DeepSeek reasoning models (deepseek-reasoner, DeepSeek V4 thinking) 400
+		// with "Thinking mode does not support this tool_choice" when a specific
+		// function is forced while thinking is active. Direct-API DeepSeek drops
+		// tool_choice entirely (supportsToolChoice above); gateway-hosted DeepSeek
+		// (OpenCode Zen/Go, etc.) keeps tools available but must downgrade a forced
+		// selector to `auto`, since dropping `reasoning_effort` alone does not turn
+		// the gateway's default thinking mode off (#7315).
+		supportsForcedToolChoice: !requiresEnabledThinking && !isDeepseekReasoning,
 		supportsNamedToolChoice: STRING_ONLY_NAMED_TOOL_CHOICE_PROVIDERS[provider] !== true,
 		maxTokensField: useMaxTokens ? "max_tokens" : "max_completion_tokens",
 		requiresToolResultName: isMistral,
