@@ -9,6 +9,7 @@
  * regression that motivated the split.
  */
 import type { CommandEntry } from "@oh-my-pi/pi-utils/cli";
+import * as commandHelp from "./cli/command-help";
 import { flagConsumesValue } from "./cli/flag-tables";
 import { launchHelp } from "./commands/launch-help";
 
@@ -17,162 +18,164 @@ export const commands: CommandEntry[] = [
 	{
 		name: "acp",
 		load: () => import("./commands/acp").then(m => m.default),
-		help: { description: "Run Oh My Pi as an ACP (Agent Client Protocol) server over stdio" },
+		help: commandHelp.acpHelp,
 	},
 	{
 		name: "auth-broker",
 		load: () => import("./commands/auth-broker").then(m => m.default),
-		help: { description: "Manage the omp auth-broker (credential vault)" },
+		help: commandHelp.authBrokerHelp,
 	},
 	{
 		name: "auth-gateway",
 		load: () => import("./commands/auth-gateway").then(m => m.default),
-		help: { description: "Run an auth-gateway forward proxy backed by the configured broker" },
+		help: commandHelp.authGatewayHelp,
 	},
 	{
 		name: "agents",
 		load: () => import("./commands/agents").then(m => m.default),
-		help: { description: "Manage bundled task agents" },
+		help: commandHelp.agentsHelp,
 	},
 	{
 		name: "bench",
 		load: () => import("./commands/bench").then(m => m.default),
-		help: {
-			description: "Benchmark models with the same prompt: time-to-first-token and generation throughput (tokens/s)",
-		},
+		help: commandHelp.benchHelp,
 	},
 	{
 		name: "cleanse",
 		load: () => import("./commands/cleanse").then(m => m.default),
-		help: { description: "Detect and fix project diagnostics with weighted parallel subagents" },
+		help: commandHelp.cleanseHelp,
 	},
 	{
 		name: "commit",
 		load: () => import("./commands/commit").then(m => m.default),
-		help: { description: "Generate a commit message and update changelogs" },
+		help: commandHelp.commitHelp,
 	},
 	{
 		name: "completions",
 		load: () => import("./commands/completions").then(m => m.default),
-		help: { description: "Print a shell completion script (bash, zsh, or fish)" },
+		help: commandHelp.completionsHelp,
 	},
-	{ name: "__complete", load: () => import("./commands/complete").then(m => m.default), help: { hidden: true } },
+	{
+		name: "__complete",
+		load: () => import("./commands/complete").then(m => m.default),
+		help: commandHelp.completeHelp,
+	},
 	{
 		name: "config",
 		load: () => import("./commands/config").then(m => m.default),
-		help: { description: "Manage configuration settings" },
+		help: commandHelp.configHelp,
 	},
 	{
 		name: "dry-balance",
 		load: () => import("./commands/dry-balance").then(m => m.default),
-		help: { description: "Dry-run OAuth account balancing across random session ids" },
+		help: commandHelp.dryBalanceHelp,
 	},
 	{
 		name: "gc",
 		load: () => import("./commands/gc").then(m => m.default),
-		help: { description: "Run storage garbage collection" },
+		help: commandHelp.gcHelp,
 	},
 	{
 		name: "grep",
 		load: () => import("./commands/grep").then(m => m.default),
-		help: { description: "Test grep tool" },
+		help: commandHelp.grepHelp,
 	},
 	{
 		name: "gallery",
 		load: () => import("./commands/gallery").then(m => m.default),
-		help: { description: "Preview tool renderers across streaming, in-progress, success, and failure states" },
+		help: commandHelp.galleryHelp,
 	},
 	{
 		name: "grievances",
 		load: () => import("./commands/grievances").then(m => m.default),
-		help: { description: "View, clean, or push reported tool issues (auto-QA grievances)" },
+		help: commandHelp.grievancesHelp,
 	},
 	{
 		name: "install",
 		load: () => import("./commands/install").then(m => m.default),
-		help: { description: "Install or link an extension package (alias of `plugin install`/`plugin link`)" },
+		help: commandHelp.installHelp,
 	},
 	{
 		name: "join",
 		load: () => import("./commands/join").then(m => m.default),
-		help: { description: "Join a shared collab session (same as /join)" },
+		help: commandHelp.joinHelp,
 	},
 	{
 		name: "models",
 		load: () => import("./commands/models").then(m => m.default),
-		help: { description: "List, search, and refresh available models" },
+		help: commandHelp.modelsHelp,
 	},
 	{
 		name: "plugin",
 		load: () => import("./commands/plugin").then(m => m.default),
-		help: { description: "Manage plugins (install, uninstall, list, etc.)" },
+		help: commandHelp.pluginHelp,
 	},
 	{
 		name: "say",
 		load: () => import("./commands/say").then(m => m.default),
-		help: { description: "Synthesize text with the local TTS engine and play it through the speakers" },
+		help: commandHelp.sayHelp,
 	},
 	{
 		name: "setup",
 		load: () => import("./commands/setup").then(m => m.default),
-		help: { description: "Run onboarding setup or install dependencies for optional features" },
+		help: commandHelp.setupHelp,
 	},
 	{
 		name: "shell",
 		load: () => import("./commands/shell").then(m => m.default),
-		help: { description: "Interactive shell console" },
+		help: commandHelp.shellHelp,
 	},
 	{
 		name: "read",
 		load: () => import("./commands/read").then(m => m.default),
-		help: { description: "Show what the read tool will return for a path, URL, or internal URI" },
+		help: commandHelp.readHelp,
 	},
 	{
 		name: "ssh",
 		load: () => import("./commands/ssh").then(m => m.default),
-		help: { description: "Manage SSH host configurations" },
+		help: commandHelp.sshHelp,
 	},
 	{
 		name: "stats",
 		load: () => import("./commands/stats").then(m => m.default),
-		help: { description: "View usage statistics" },
+		help: commandHelp.statsHelp,
 	},
 	{
 		name: "update",
 		load: () => import("./commands/update").then(m => m.default),
-		help: { description: "Check for and install updates" },
+		help: commandHelp.updateHelp,
 	},
 	{
 		name: "usage",
 		load: () => import("./commands/usage").then(m => m.default),
-		help: { description: "Show provider usage limits for every authenticated account" },
+		help: commandHelp.usageHelp,
 	},
 	{
 		name: "tiny-models",
 		load: () => import("./commands/tiny-models").then(m => m.default),
-		help: { description: "Download tiny local models (session titles + memory)" },
+		help: commandHelp.tinyModelsHelp,
 	},
 	{
 		name: "token",
 		load: () => import("./commands/token").then(m => m.default),
-		help: { description: "Get the API key or OAuth token for a provider" },
+		help: commandHelp.tokenHelp,
 	},
 	{
 		name: "ttsr",
 		load: () => import("./commands/ttsr").then(m => m.default),
-		help: { description: "Inspect and test Time-Traveling Stream Rules (TTSR)" },
+		help: commandHelp.ttsrHelp,
 	},
 	{
 		name: "worktree",
 		load: () => import("./commands/worktree").then(m => m.default),
 		aliases: ["wt"],
-		help: { description: "List or clear agent-managed git worktrees (~/.omp/wt)" },
+		help: commandHelp.worktreeHelp,
 	},
 	{
 		name: "search",
 		load: () => import("./commands/web-search").then(m => m.default),
 		aliases: ["q"],
-		help: { description: "Test web search providers" },
+		help: commandHelp.searchHelp,
 	},
 ];
 
