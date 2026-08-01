@@ -4,18 +4,22 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 
-import { renderAdvisorDeltaChunks } from "../../src/advisor/delta-split";
+import {
+	type AdvisorObfuscator,
+	renderAdvisorDeltaChunks,
+} from "../../src/advisor/delta-split";
 
 function chunksToText(chunks: AgentMessage[] | null): string | null {
 	if (!chunks) return null;
 	return chunks.map(c => ((c as { content: unknown }).content as { text: string }[])[0].text).join("\n");
 }
 
-// Fake SecretObfuscator-compatible object for the pure renderer's text pass.
-function makeObfuscator() {
+// Fake obfuscator for the pure renderer's text pass, typed against the narrow
+// AdvisorObfuscator contract so the test exercises redaction without `any`.
+function makeObfuscator(): AdvisorObfuscator {
 	return {
 		obfuscate: (text: string) => text.replace(/SECRETVALUE123/g, "[REDACTED]"),
-	} as any;
+	};
 }
 
 describe("renderAdvisorDeltaChunks obfuscation", () => {
@@ -34,7 +38,6 @@ describe("renderAdvisorDeltaChunks obfuscation", () => {
 			advisorRegexSecretValues: new Set(),
 		});
 		const text = chunksToText(chunks) ?? "";
-		console.log("diff chunk:", JSON.stringify(text));
 		expect(text).not.toContain("SECRETVALUE123");
 		expect(text).toContain("[REDACTED]");
 	});
@@ -52,7 +55,6 @@ describe("renderAdvisorDeltaChunks obfuscation", () => {
 			advisorRegexSecretValues: new Set(),
 		});
 		const text = chunksToText(chunks) ?? "";
-		console.log("user chunk:", JSON.stringify(text));
 		expect(text).not.toContain("SECRETVALUE123");
 		expect(text).toContain("[REDACTED]");
 	});

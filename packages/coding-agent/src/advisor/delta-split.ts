@@ -19,8 +19,17 @@
 // (candidate 3) so a wip/final flip never changes the stable prefix.
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
-import type { SecretObfuscator } from "../secrets/obfuscator";
 import { formatSessionHistoryMarkdown } from "../session/session-history-format";
+
+/**
+ * Obfuscation surface the split renderer needs: a single text redaction pass.
+ * Narrowed from the full SecretObfuscator class to the method actually
+ * consumed, so tests can satisfy the contract with a typed helper instead of
+ * an `as any` escape. A SecretObfuscator instance is structurally assignable.
+ */
+export interface AdvisorObfuscator {
+	obfuscate(text: string, sharedRegexSecretValues?: ReadonlySet<string>): string;
+}
 
 /** Render options shared by the advisor single-block and multi-message paths. */
 export const ADVISOR_RENDER_OPTIONS = {
@@ -33,7 +42,7 @@ export const ADVISOR_RENDER_OPTIONS = {
 export interface RenderAdvisorDeltaChunksOptions {
 	wip: boolean;
 	includeThinking: boolean;
-	obfuscator?: SecretObfuscator;
+	obfuscator?: AdvisorObfuscator;
 	advisorRegexSecretValues: ReadonlySet<string>;
 }
 
