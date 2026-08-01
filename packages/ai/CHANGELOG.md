@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed Codex WebSocket tool-result turns replaying full history when the preceding tool-call ID required Responses API normalization ([#7279](https://github.com/can1357/oh-my-pi/issues/7279)).
+- Fixed direct Anthropic provider streams ignoring `model.compat.streamIdleTimeoutMs`. Requests dispatched through `streamAnthropic` can now widen the inter-event idle watchdog or set it to `0` to disable that watchdog; caller options and environment overrides retain precedence. Setting the compat value to `0` disables only the inter-event watchdog and leaves the first-event watchdog enabled; wider idle values continue to floor the first-event budget under the existing timeout contract.
 
 ## [17.2.3] - 2026-08-01
 
