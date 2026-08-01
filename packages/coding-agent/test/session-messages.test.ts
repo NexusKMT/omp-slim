@@ -383,7 +383,7 @@ describe("wrapSteeringForModel", () => {
 		expect(wrappedText).not.toContain("&amp;");
 	});
 
-	it("presents user-attributed collab prompts as wrapped user turns", () => {
+	it("presents user-attributed collab prompts as wrapped user turns on every conversion path", () => {
 		const message: AgentMessage = {
 			role: "custom",
 			customType: COLLAB_PROMPT_MESSAGE_TYPE,
@@ -394,14 +394,19 @@ describe("wrapSteeringForModel", () => {
 			timestamp: 1,
 		};
 
+		const directlyConverted = convertToLlm([message]);
 		const wrapped = wrapSteeringForModel([message]);
-		const providerMessages = convertToLlm(wrapped);
+		const primaryProviderMessages = convertToLlm(wrapped);
 
+		expect(directlyConverted).toHaveLength(1);
+		expect(directlyConverted[0]?.role).toBe("user");
+		expect(getUserText(directlyConverted[0])).toContain("<system-notice>");
+		expect(getUserText(directlyConverted[0])).toContain("Reply with exactly PONG");
 		expect(wrapped[0]?.role).toBe("user");
 		expect(getUserText(wrapped[0])).toContain("<system-notice>");
 		expect(getUserText(wrapped[0])).toContain("Reply with exactly PONG");
-		expect(providerMessages).toHaveLength(1);
-		expect(providerMessages[0]?.role).toBe("user");
+		expect(primaryProviderMessages).toHaveLength(1);
+		expect(primaryProviderMessages[0]?.role).toBe("user");
 		expect(message).toMatchObject({
 			role: "custom",
 			details: { from: "guest" },

@@ -1166,6 +1166,10 @@ function convertOne(m: AgentMessage, interruptedNext: boolean): Message[] {
 		}
 		case "custom": {
 			if (!isCustomMessageContent(m.content)) return [];
+			if (isSteeringUserMessage(m)) {
+				const converted = convertMessageToLlm(wrapSteeringUserMessage(m));
+				return converted ? [converted] : [];
+			}
 			if (isUserInvokedSkillPrompt(m)) {
 				return [
 					{
