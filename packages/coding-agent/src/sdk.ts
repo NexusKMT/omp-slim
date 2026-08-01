@@ -778,9 +778,11 @@ export async function discoverSkills(
 export async function discoverContextFiles(
 	cwd?: string,
 	_agentDir?: string,
+	disabledExtensions?: string[],
 ): Promise<Array<{ path: string; content: string; depth?: number }>> {
 	return await loadContextFilesInternal({
 		cwd: cwd ?? getProjectDir(),
+		disabledExtensions,
 	});
 }
 
@@ -2786,7 +2788,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			toolContextStore.setToolNames(toolNames);
 			const promptCwd = sessionManager.getCwd();
 			if (hasSession && options.contextFiles === undefined) {
-				contextFiles = await logger.time("discoverContextFiles", discoverContextFiles, promptCwd, agentDir);
+				contextFiles = await logger.time("discoverContextFiles", discoverContextFiles, promptCwd, agentDir, [
+					...(settings.get("disabledExtensions") ?? []),
+				]);
 				toolSession.contextFiles = contextFiles;
 			}
 			const memoryBackend = restrictToolNames ? undefined : await resolveMemoryBackend(settings);

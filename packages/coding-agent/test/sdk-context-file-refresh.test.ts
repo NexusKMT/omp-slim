@@ -3,6 +3,7 @@ import { AuthStorage } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { initializeWithSettings } from "@oh-my-pi/pi-coding-agent/discovery";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -70,6 +71,29 @@ describe("context-file prompt refresh", () => {
 			await session.refreshSkills();
 
 			expect(session.systemPrompt.join("\n")).not.toContain(INITIAL_CONTEXT);
+		} finally {
+			await session.dispose();
+			authStorage.close();
+		}
+	});
+
+	it("honors the session's own disabledExtensions, not the process-global settings", async () => {
+		using tempDir = TempDir.createSync("@omp-context-refresh-isolation-");
+		await Bun.write(tempDir.join("AGENTS.md"), INITIAL_CONTEXT);
+		const settings = Settings.isolated({});
+		const { session, authStorage } = await createContextSession(tempDir.path(), settings);
+
+		try {
+			expect(session.systemPrompt.join("\n")).toContain(INITIAL_CONTEXT);
+
+			// A concurrently-created session installs different global settings that
+			// disable this session's context file. The refresh must consult this
+			// session's own settings, so the entry survives.
+			const competingSettings = Settings.isolated({ disabledExtensions: [PROJECT_CONTEXT_EXTENSION_ID] });
+			initializeWithSettings(competingSettings);
+			await session.refreshSkills();
+
+			expect(session.systemPrompt.join("\n")).toContain(INITIAL_CONTEXT);
 		} finally {
 			await session.dispose();
 			authStorage.close();
