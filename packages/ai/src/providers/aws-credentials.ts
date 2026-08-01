@@ -21,7 +21,13 @@ import { $env, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
 import type { FetchImpl } from "../types";
 import { raceWithSignal } from "../utils/abort";
-import { type AwsIniFile, parseAwsIni } from "../utils/aws-profile";
+import {
+	type AwsIniFile,
+	parseAwsIni,
+	resolveAwsProfile,
+	resolveAwsRegion,
+	shouldLoadAwsSharedConfig,
+} from "../utils/aws-profile";
 import { isLocalOrMetadataHost } from "../utils/proxy";
 import type { AwsCredentials } from "./aws-sigv4";
 
@@ -52,6 +58,23 @@ const FILE_SESSION_CREDS_TTL_MS = 5 * 60_000;
  */
 const SHARED_RESOLVE_TIMEOUT_MS = 30_000;
 
+function requireDynamicCredentialExpiration(
+	value: string | undefined,
+	source: "AWS web identity" | "AWS container credential",
+	kind: "web-identity" | "container",
+): number {
+	const expiresAt = value ? Date.parse(value) : Number.NaN;
+	if (Number.isFinite(expiresAt)) return expiresAt;
+	throw new AIError.AwsCredentialsError(`${source} response has a missing or invalid Expiration.`, kind);
+}
+
+/** Credential-process expiry is optional; missing/malformed values disable caching. */
+function dynamicCredentialExpiration(value: string | undefined): number {
+	if (!value) return Date.now();
+	const expiresAt = Date.parse(value);
+	return Number.isFinite(expiresAt) ? expiresAt : Date.now();
+}
+
 interface CacheEntry {
 	creds: ResolvedCredentials;
 	expiresAt: number;
@@ -60,10 +83,15 @@ interface CacheEntry {
 const cache: Map<string, CacheEntry> = new Map();
 const inflight: Map<string, Promise<ResolvedCredentials>> = new Map();
 
+function credentialCacheKey(profile: string, region: string, loadSharedConfig: boolean): string {
+	return `${profile}\x00${region}\x00${loadSharedConfig ? "config" : "credentials"}`;
+}
+
 export async function resolveAwsCredentials(opts: CredentialResolveOptions = {}): Promise<ResolvedCredentials> {
-	const profile = opts.profile || $env.AWS_PROFILE || "default";
-	const region = opts.region || $env.AWS_REGION || $env.AWS_DEFAULT_REGION || "us-east-1";
-	const cacheKey = `${profile}\x00${region}`;
+	const profile = resolveAwsProfile(opts.profile);
+	const region = resolveAwsRegion(opts.region, opts.profile);
+	const loadSharedConfig = shouldLoadAwsSharedConfig(opts.profile);
+	const cacheKey = credentialCacheKey(profile, region, loadSharedConfig);
 
 	const hit = cache.get(cacheKey);
 	if (hit && hit.expiresAt - REFRESH_SKEW_MS > Date.now()) return hit.creds;
@@ -78,7 +106,13 @@ export async function resolveAwsCredentials(opts: CredentialResolveOptions = {})
 	const fetchImpl = opts.fetch ?? (globalThis.fetch as FetchImpl);
 	const promise = (async () => {
 		try {
-			const creds = await resolveFresh(profile, region, AbortSignal.timeout(SHARED_RESOLVE_TIMEOUT_MS), fetchImpl);
+			const creds = await resolveFresh(
+				profile,
+				region,
+				loadSharedConfig,
+				AbortSignal.timeout(SHARED_RESOLVE_TIMEOUT_MS),
+				fetchImpl,
+			);
 			cache.set(cacheKey, { creds, expiresAt: creds.expiresAt ?? Number.POSITIVE_INFINITY });
 			return creds;
 		} finally {
@@ -92,6 +126,7 @@ export async function resolveAwsCredentials(opts: CredentialResolveOptions = {})
 async function resolveFresh(
 	profile: string,
 	region: string,
+	loadSharedConfig: boolean,
 	signal?: AbortSignal,
 	fetchImpl: FetchImpl = globalThis.fetch as FetchImpl,
 ): Promise<ResolvedCredentials> {
@@ -104,7 +139,7 @@ async function resolveFresh(
 	if (webIdentityCreds) return webIdentityCreds;
 
 	// 3. Profile (static, SSO, or credential_process).
-	const profileCreds = await readProfileCredentials(profile, region, signal, fetchImpl);
+	const profileCreds = await readProfileCredentials(profile, region, loadSharedConfig, signal, fetchImpl);
 	if (profileCreds) return profileCreds;
 
 	// 4. ECS/container credentials.
@@ -149,6 +184,7 @@ async function readIniFile(p: string): Promise<AwsIniFile | undefined> {
 async function readProfileCredentials(
 	profile: string,
 	region: string,
+	loadSharedConfig: boolean,
 	signal: AbortSignal | undefined,
 	fetchImpl: FetchImpl,
 ): Promise<ResolvedCredentials | undefined> {
@@ -157,7 +193,7 @@ async function readProfileCredentials(
 	const configPath = $env.AWS_CONFIG_FILE || path.join(home, ".aws", "config");
 
 	const credentialsIni = await readIniFile(credentialsPath);
-	const configIni = await readIniFile(configPath);
+	const configIni = loadSharedConfig ? await readIniFile(configPath) : undefined;
 
 	// Static credentials live in ~/.aws/credentials; SSO config lives in
 	// ~/.aws/config under `[profile foo]`. Merge into a single view.
@@ -380,10 +416,11 @@ async function readCredentialProcess(
 		accessKeyId: parsed.AccessKeyId,
 		secretAccessKey: parsed.SecretAccessKey,
 	};
-	if (parsed.SessionToken) out.sessionToken = parsed.SessionToken;
-	if (parsed.Expiration) {
-		const exp = Date.parse(parsed.Expiration);
-		if (!Number.isNaN(exp)) out.expiresAt = exp;
+	if (parsed.SessionToken) {
+		out.sessionToken = parsed.SessionToken;
+		out.expiresAt = dynamicCredentialExpiration(parsed.Expiration);
+	} else if (parsed.Expiration) {
+		out.expiresAt = dynamicCredentialExpiration(parsed.Expiration);
 	}
 	return out;
 }
@@ -501,6 +538,11 @@ function xmlTag(xml: string, tag: string): string | undefined {
 		.replaceAll("&apos;", "'");
 }
 
+function stsEndpoint(region: string): string {
+	const dnsSuffix = region.startsWith("cn-") ? "amazonaws.com.cn" : "amazonaws.com";
+	return `https://sts.${region}.${dnsSuffix}/`;
+}
+
 async function readWebIdentityCredentials(
 	region: string,
 	signal: AbortSignal | undefined,
@@ -531,7 +573,7 @@ async function readWebIdentityCredentials(
 		RoleSessionName: $env.AWS_ROLE_SESSION_NAME || `omp-${process.pid}`,
 		WebIdentityToken: token,
 	});
-	const response = await fetchImpl(`https://sts.${region}.amazonaws.com/`, {
+	const response = await fetchImpl(stsEndpoint(region), {
 		method: "POST",
 		headers: { "content-type": "application/x-www-form-urlencoded" },
 		body: body.toString(),
@@ -553,10 +595,13 @@ async function readWebIdentityCredentials(
 			"web-identity",
 		);
 	}
-	const credentials: ResolvedCredentials = { accessKeyId, secretAccessKey, sessionToken };
-	const expiration = xmlTag(xml, "Expiration");
-	if (expiration) credentials.expiresAt = Date.parse(expiration);
-	return credentials;
+	const expiresAt = requireDynamicCredentialExpiration(xmlTag(xml, "Expiration"), "AWS web identity", "web-identity");
+	return {
+		accessKeyId,
+		secretAccessKey,
+		sessionToken,
+		expiresAt,
+	};
 }
 
 // ---------- ECS/container credentials ----------
@@ -568,6 +613,8 @@ interface ContainerCredentialResponse {
 	Expiration?: string;
 }
 
+const ECS_TASK_CREDENTIALS_BASE_URL = new URL("http://169.254.170.2/");
+
 async function readContainerCredentials(
 	signal: AbortSignal | undefined,
 	fetchImpl: FetchImpl,
@@ -577,13 +624,13 @@ async function readContainerCredentials(
 	if (!relativeUri && !fullUri) return undefined;
 	let endpoint: URL;
 	if (relativeUri) {
-		if (!relativeUri.startsWith("/")) {
+		if (!relativeUri.startsWith("/") || relativeUri.startsWith("//")) {
 			throw new AIError.AwsCredentialsError(
-				"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI must start with '/'.",
+				"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI must be a single-host absolute path.",
 				"container",
 			);
 		}
-		endpoint = new URL(`http://169.254.170.2${relativeUri}`);
+		endpoint = new URL(relativeUri.slice(1), ECS_TASK_CREDENTIALS_BASE_URL);
 	} else {
 		try {
 			endpoint = new URL(fullUri as string);
@@ -626,55 +673,66 @@ async function readContainerCredentials(
 		);
 	}
 	const body = (await response.json()) as ContainerCredentialResponse;
-	if (!body.AccessKeyId || !body.SecretAccessKey) {
+	if (!body.AccessKeyId || !body.SecretAccessKey || !body.Token) {
 		throw new AIError.AwsCredentialsError(
-			"AWS container credential response is missing AccessKeyId/SecretAccessKey.",
+			"AWS container credential response is missing AccessKeyId/SecretAccessKey/Token.",
 			"container",
 		);
 	}
-	const credentials: ResolvedCredentials = {
+	return {
 		accessKeyId: body.AccessKeyId,
 		secretAccessKey: body.SecretAccessKey,
+		sessionToken: body.Token,
+		expiresAt: requireDynamicCredentialExpiration(body.Expiration, "AWS container credential", "container"),
 	};
-	if (body.Token) credentials.sessionToken = body.Token;
-	if (body.Expiration) credentials.expiresAt = Date.parse(body.Expiration);
-	return credentials;
 }
 
 // ---------- IMDSv2 ----------
 
-const IMDS_HOST = "169.254.169.254";
+const IMDS_IPV4_BASE_URL = "http://169.254.169.254/";
+const IMDS_IPV6_BASE_URL = "http://[fd00:ec2::254]/";
 const IMDS_TIMEOUT_MS = 1000;
+
+function imdsRequestSignal(parentSignal: AbortSignal | undefined): AbortSignal {
+	const timeout = AbortSignal.timeout(IMDS_TIMEOUT_MS);
+	return parentSignal ? AbortSignal.any([parentSignal, timeout]) : timeout;
+}
+
+function imdsBaseUrl(): URL {
+	const mode = $env.AWS_EC2_METADATA_SERVICE_ENDPOINT_MODE?.toLowerCase();
+	const fallback = mode === "ipv6" ? IMDS_IPV6_BASE_URL : IMDS_IPV4_BASE_URL;
+	const endpoint = new URL($env.AWS_EC2_METADATA_SERVICE_ENDPOINT || fallback);
+	if (!endpoint.pathname.endsWith("/")) endpoint.pathname += "/";
+	return endpoint;
+}
 
 async function readImdsCredentials(
 	parentSignal: AbortSignal | undefined,
 	fetchImpl: FetchImpl,
 ): Promise<ResolvedCredentials | undefined> {
-	const timeout = AbortSignal.timeout(IMDS_TIMEOUT_MS);
-	const signal = parentSignal ? AbortSignal.any([parentSignal, timeout]) : timeout;
-	const endpoint = ($env.AWS_EC2_METADATA_SERVICE_ENDPOINT || `http://${IMDS_HOST}`).replace(/\/+$/, "");
 	try {
-		const tokenRes = await fetchImpl(`${endpoint}/latest/api/token`, {
+		const endpoint = imdsBaseUrl();
+		const tokenRes = await fetchImpl(new URL("latest/api/token", endpoint), {
 			method: "PUT",
 			headers: { "x-aws-ec2-metadata-token-ttl-seconds": "21600" },
-			signal,
+			signal: imdsRequestSignal(parentSignal),
 		});
 		if (!tokenRes.ok) return undefined;
 		const token = await tokenRes.text();
 
-		const roleRes = await fetchImpl(`${endpoint}/latest/meta-data/iam/security-credentials/`, {
+		const roleRes = await fetchImpl(new URL("latest/meta-data/iam/security-credentials/", endpoint), {
 			headers: { "x-aws-ec2-metadata-token": token },
-			signal,
+			signal: imdsRequestSignal(parentSignal),
 		});
 		if (!roleRes.ok) return undefined;
 		const role = (await roleRes.text()).trim();
 		if (!role) return undefined;
 
 		const credsRes = await fetchImpl(
-			`${endpoint}/latest/meta-data/iam/security-credentials/${encodeURIComponent(role)}`,
+			new URL(`latest/meta-data/iam/security-credentials/${encodeURIComponent(role)}`, endpoint),
 			{
 				headers: { "x-aws-ec2-metadata-token": token },
-				signal,
+				signal: imdsRequestSignal(parentSignal),
 			},
 		);
 		if (!credsRes.ok) return undefined;
@@ -684,14 +742,15 @@ async function readImdsCredentials(
 			Token?: string;
 			Expiration?: string;
 		};
-		if (!body.AccessKeyId || !body.SecretAccessKey) return undefined;
-		const out: ResolvedCredentials = {
+		if (!body.AccessKeyId || !body.SecretAccessKey || !body.Token || !body.Expiration) return undefined;
+		const expiresAt = Date.parse(body.Expiration);
+		if (!Number.isFinite(expiresAt)) return undefined;
+		return {
 			accessKeyId: body.AccessKeyId,
 			secretAccessKey: body.SecretAccessKey,
+			sessionToken: body.Token,
+			expiresAt,
 		};
-		if (body.Token) out.sessionToken = body.Token;
-		if (body.Expiration) out.expiresAt = Date.parse(body.Expiration);
-		return out;
 	} catch {
 		return undefined;
 	}
@@ -707,7 +766,7 @@ export function clearAwsCredentialCache(): void {
  * 401/403 responses so stale credentials are re-resolved instead of served until restart.
  */
 export function invalidateAwsCredentialCache(opts: { profile?: string; region?: string } = {}): void {
-	const profile = opts.profile || $env.AWS_PROFILE || "default";
-	const region = opts.region || $env.AWS_REGION || $env.AWS_DEFAULT_REGION || "us-east-1";
-	cache.delete(`${profile}\x00${region}`);
+	const profile = resolveAwsProfile(opts.profile);
+	const region = resolveAwsRegion(opts.region, opts.profile);
+	cache.delete(credentialCacheKey(profile, region, shouldLoadAwsSharedConfig(opts.profile)));
 }

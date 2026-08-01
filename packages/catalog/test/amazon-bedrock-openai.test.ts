@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_MODEL_PER_PROVIDER } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
-import { BEDROCK_MANTLE_STATIC_MODELS } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
-import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import { DEFAULT_MODEL_PER_PROVIDER, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
+import {
+	BEDROCK_MANTLE_STATIC_MODELS,
+	bedrockMantleModelManagerOptions,
+} from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
+import type { FetchImpl, ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import { dropBedrockMantleOpenAIModels } from "../scripts/generated-policies";
 
 const MANTLE_MODEL_IDS = [
@@ -36,6 +39,56 @@ describe("Amazon Bedrock OpenAI routing", () => {
 			expect(model.baseUrl).toBe("https://bedrock-mantle.{region}.api.aws/openai/v1");
 		}
 		expect(DEFAULT_MODEL_PER_PROVIDER["bedrock-mantle"]).toBe("openai.gpt-5.6-terra");
+	});
+
+	test("uses current Luna and Terra pricing", () => {
+		const byId = Object.fromEntries(BEDROCK_MANTLE_STATIC_MODELS.map(model => [model.id, model]));
+		expect(byId["openai.gpt-5.6-luna"]?.cost).toEqual({
+			input: 0.22,
+			output: 1.32,
+			cacheRead: 0.022,
+			cacheWrite: 0.275,
+		});
+		expect(byId["openai.gpt-5.6-terra"]?.cost).toEqual({
+			input: 2.2,
+			output: 13.2,
+			cacheRead: 0.22,
+			cacheWrite: 2.75,
+		});
+	});
+
+	test("builds bearer-authenticated Mantle runtime discovery", async () => {
+		let requestedUrl = "";
+		const fetchImpl: FetchImpl = Object.assign(
+			async (input: string | URL | Request) => {
+				requestedUrl = String(input);
+				return Response.json({
+					data: [
+						{ id: "openai.gpt-5.6-luna", name: "GPT-5.6 Luna" },
+						{ id: "openai.gpt-5.7-preview", name: "GPT-5.7 Preview" },
+					],
+				});
+			},
+			{ preconnect: fetch.preconnect },
+		);
+		const managerOptions = bedrockMantleModelManagerOptions({
+			authenticated: true,
+			baseUrl: "https://bedrock-mantle.eu-west-2.api.aws/openai/v1",
+			fetch: fetchImpl,
+		});
+
+		const models = await managerOptions.fetchDynamicModels?.();
+
+		expect(requestedUrl).toBe("https://bedrock-mantle.eu-west-2.api.aws/v1/models");
+		expect(models).toHaveLength(2);
+		expect(models?.[0]).toMatchObject({
+			id: "openai.gpt-5.6-luna",
+			baseUrl: "https://bedrock-mantle.{region}.api.aws/openai/v1",
+			cost: { input: 0.22, output: 1.32, cacheRead: 0.022, cacheWrite: 0.275 },
+		});
+		const descriptor = PROVIDER_DESCRIPTORS.find(descriptor => descriptor.providerId === "bedrock-mantle");
+		expect(descriptor).toMatchObject({ dynamicModelsAuthoritative: true });
+		expect(descriptor?.catalogDiscovery).toBeUndefined();
 	});
 
 	test("drops only the unusable Converse rows for Mantle models", () => {

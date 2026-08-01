@@ -11,6 +11,7 @@ const EMPTY_AWS_ENV = {
 	AWS_SECRET_ACCESS_KEY: undefined,
 	AWS_BEARER_TOKEN_BEDROCK: undefined,
 	AWS_PROFILE: undefined,
+	AWS_SDK_LOAD_CONFIG: undefined,
 	AWS_WEB_IDENTITY_TOKEN_FILE: undefined,
 	AWS_ROLE_ARN: undefined,
 	AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: undefined,
@@ -56,6 +57,30 @@ describe("AWS provider availability", () => {
 					AWS_EC2_METADATA_DISABLED: "true",
 				},
 				async () => expect(getEnvApiKey("bedrock-mantle")).toBeUndefined(),
+			);
+		} finally {
+			await removeWithRetries(tmp);
+		}
+	});
+
+	test("loads implicit default config profiles only when AWS_SDK_LOAD_CONFIG is enabled", async () => {
+		const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "aws-registry-load-config-"));
+		try {
+			const credentialsPath = path.join(tmp, "credentials");
+			const configPath = path.join(tmp, "config");
+			await Promise.all([
+				Bun.write(credentialsPath, ""),
+				Bun.write(configPath, "[default]\ncredential_process = /bin/credential-helper\n"),
+			]);
+			const env = {
+				...EMPTY_AWS_ENV,
+				AWS_SHARED_CREDENTIALS_FILE: credentialsPath,
+				AWS_CONFIG_FILE: configPath,
+				AWS_EC2_METADATA_DISABLED: "true",
+			};
+			await withEnv(env, async () => expect(getEnvApiKey("bedrock-mantle")).toBeUndefined());
+			await withEnv({ ...env, AWS_SDK_LOAD_CONFIG: "1" }, async () =>
+				expect(getEnvApiKey("bedrock-mantle")).toBeDefined(),
 			);
 		} finally {
 			await removeWithRetries(tmp);

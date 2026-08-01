@@ -434,6 +434,11 @@ export interface StreamOptions {
 	 * For example, Anthropic uses `user_id` for abuse tracking and rate limiting.
 	 */
 	metadata?: Record<string, unknown>;
+	/**
+	 * Provider-owned request configuration. Provider hooks interpret this bag;
+	 * generic API transports do not forward its fields onto the wire.
+	 */
+	providerOptions?: Readonly<Record<string, unknown>>;
 	/** OpenAI Responses/Codex response fields to include verbatim. */
 	include?: OpenAIResponseInclude[];
 	/**
@@ -639,12 +644,6 @@ export interface SimpleStreamOptions extends Omit<StreamOptions, "apiKey"> {
 	 * provider. Non-Anthropic providers ignore the field.
 	 */
 	fallbacks?: FallbackParam[];
-	/** AWS region override for Amazon Bedrock transports. */
-	region?: string;
-	/** AWS profile override for Amazon Bedrock transports. */
-	profile?: string;
-	/** Amazon Bedrock API key, preferred over SigV4 credential resolution. */
-	bearerToken?: string;
 }
 
 // Generic StreamFunction with typed options

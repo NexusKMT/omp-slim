@@ -40,12 +40,45 @@ function readAwsIniSync(filePath: string): AwsIniFile | undefined {
 	}
 }
 
-export function hasConfiguredAwsProfile(profile = $env.AWS_PROFILE || "default"): boolean {
+/** Resolve the selected shared-credentials profile. */
+export function resolveAwsProfile(profile?: string): string {
+	return profile || $env.AWS_PROFILE || "default";
+}
+
+/**
+ * Whether the shared config file participates in profile/region resolution.
+ * Explicit profile selection enables it; the implicit default profile follows
+ * the AWS SDK's `AWS_SDK_LOAD_CONFIG` opt-in.
+ */
+export function shouldLoadAwsSharedConfig(profile?: string): boolean {
+	if (profile || $env.AWS_PROFILE) return true;
+	const value = $env.AWS_SDK_LOAD_CONFIG?.toLowerCase();
+	return value === "1" || value === "true";
+}
+
+export function resolveAwsProfileRegion(profile?: string): string | undefined {
+	if (!shouldLoadAwsSharedConfig(profile)) return undefined;
+	const configPath = $env.AWS_CONFIG_FILE || path.join(os.homedir(), ".aws", "config");
+	return readAwsIniSync(configPath)?.[resolveAwsProfile(profile)]?.region;
+}
+
+/** Region selected by the environment or active shared-config profile. */
+export function resolveAwsAmbientRegion(profile?: string): string | undefined {
+	return $env.AWS_REGION || $env.AWS_DEFAULT_REGION || resolveAwsProfileRegion(profile);
+}
+
+/** Resolve the region precedence shared by AWS transports and credential exchanges. */
+export function resolveAwsRegion(explicitRegion?: string, profile?: string): string {
+	return explicitRegion || resolveAwsAmbientRegion(profile) || "us-east-1";
+}
+
+export function hasConfiguredAwsProfile(profile?: string): boolean {
+	const selectedProfile = resolveAwsProfile(profile);
 	const credentialsPath = $env.AWS_SHARED_CREDENTIALS_FILE || path.join(os.homedir(), ".aws", "credentials");
 	const configPath = $env.AWS_CONFIG_FILE || path.join(os.homedir(), ".aws", "config");
 	const credentialsIni = readAwsIniSync(credentialsPath);
-	const configIni = readAwsIniSync(configPath);
-	const merged = { ...(configIni?.[profile] ?? {}), ...(credentialsIni?.[profile] ?? {}) };
+	const configIni = shouldLoadAwsSharedConfig(profile) ? readAwsIniSync(configPath) : undefined;
+	const merged = { ...(configIni?.[selectedProfile] ?? {}), ...(credentialsIni?.[selectedProfile] ?? {}) };
 	if (merged.aws_access_key_id && merged.aws_secret_access_key) return true;
 	if (merged.credential_process) return true;
 	if (!merged.sso_account_id || !merged.sso_role_name) return false;

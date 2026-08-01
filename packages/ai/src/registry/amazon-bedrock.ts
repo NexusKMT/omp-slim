@@ -1,9 +1,17 @@
-import { hasAwsCredentialSource } from "./aws";
-import { AUTHENTICATED_SENTINEL, type ProviderDefinition } from "./types";
+import { type AwsBedrockProviderOptions, resolveAwsRegistryApiKey } from "./aws";
+import type { ProviderDefinition } from "./types";
 
 export const amazonBedrockProvider = {
 	id: "amazon-bedrock",
 	name: "Amazon Bedrock",
 	// Amazon Bedrock accepts bearer tokens, IAM keys, profiles, ECS/IRSA credential chains.
-	envKeys: () => (hasAwsCredentialSource() ? AUTHENTICATED_SENTINEL : undefined),
+	envKeys: resolveAwsRegistryApiKey,
+	mapSimpleOptions: options => {
+		const awsOptions = options.providerOptions as AwsBedrockProviderOptions | undefined;
+		return {
+			region: awsOptions?.region,
+			profile: awsOptions?.profile,
+			bearerToken: awsOptions?.bearerToken,
+		};
+	},
 } as const satisfies ProviderDefinition;

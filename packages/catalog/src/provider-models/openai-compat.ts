@@ -30,6 +30,7 @@ import {
 } from "../wire/github-copilot";
 import { createBundledReferenceMap, createReferenceResolver, toModelSpec } from "./bundled-references";
 import { getDefaultModelDiscoveryBaseUrl, resolveModelCacheProviderId } from "./cache-provider-id";
+import type { ModelManagerConfig } from "./descriptor-types";
 
 const MODELS_DEV_URL = "https://models.dev/api.json";
 
@@ -3392,7 +3393,7 @@ export const BEDROCK_MANTLE_STATIC_MODELS: readonly ModelSpec<"openai-responses"
 		baseUrl: BEDROCK_MANTLE_BASE_URL,
 		reasoning: true,
 		input: ["text", "image"],
-		cost: { input: 1.1, output: 6.6, cacheRead: 0.11, cacheWrite: 1.38 },
+		cost: { input: 0.22, output: 1.32, cacheRead: 0.022, cacheWrite: 0.275 },
 		contextWindow: 272_000,
 		maxTokens: 128_000,
 		thinking: BEDROCK_MANTLE_GPT_5_6_THINKING,
@@ -3418,12 +3419,42 @@ export const BEDROCK_MANTLE_STATIC_MODELS: readonly ModelSpec<"openai-responses"
 		baseUrl: BEDROCK_MANTLE_BASE_URL,
 		reasoning: true,
 		input: ["text", "image"],
-		cost: { input: 2.75, output: 16.5, cacheRead: 0.28, cacheWrite: 3.44 },
+		cost: { input: 2.2, output: 13.2, cacheRead: 0.22, cacheWrite: 2.75 },
 		contextWindow: 272_000,
 		maxTokens: 128_000,
 		thinking: BEDROCK_MANTLE_GPT_5_6_THINKING,
 	},
 ];
+
+const BEDROCK_MANTLE_MODEL_BY_ID: Partial<Record<string, ModelSpec<"openai-responses">>> = Object.fromEntries(
+	BEDROCK_MANTLE_STATIC_MODELS.map(model => [model.id, model]),
+);
+
+export function bedrockMantleModelManagerOptions(
+	config: ModelManagerConfig = {},
+): ModelManagerOptions<"openai-responses"> {
+	const inferenceBaseUrl = config.baseUrl ?? BEDROCK_MANTLE_BASE_URL;
+	const discoveryBaseUrl = inferenceBaseUrl.replace(/\/openai\/v1\/?$/, "/v1");
+	return {
+		providerId: "bedrock-mantle",
+		staticModels: BEDROCK_MANTLE_STATIC_MODELS,
+		...(config.authenticated && {
+			fetchDynamicModels: () =>
+				fetchOpenAICompatibleModels({
+					api: "openai-responses",
+					provider: "bedrock-mantle",
+					baseUrl: discoveryBaseUrl,
+					fetch: config.fetch,
+					mapModel: (entry, defaults) =>
+						mapWithBundledReference(
+							entry,
+							{ ...defaults, baseUrl: BEDROCK_MANTLE_BASE_URL },
+							BEDROCK_MANTLE_MODEL_BY_ID[defaults.id],
+						),
+				}),
+		}),
+	};
+}
 
 export interface MetaModelManagerConfig {
 	apiKey?: string;
