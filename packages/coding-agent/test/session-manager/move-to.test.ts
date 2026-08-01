@@ -330,4 +330,23 @@ describe("SessionManager.moveTo", () => {
 			),
 		).toBe(true);
 	});
+
+	it("materializes an ensureOnDisk session when moveTo races the queued rewrite", async () => {
+		// A header-only session (ACP session/new, drafts) forces creation via
+		// ensureOnDisk(), which schedules its materializing rewrite on the disk
+		// chain. Starting moveTo() before that task runs must not cancel it, or
+		// the explicitly materialized session is lost and never discoverable.
+		const session = SessionManager.create(cwdA);
+		const ensure = session.ensureOnDisk();
+		await session.moveTo(cwdB);
+		await ensure;
+		await session.flush();
+
+		const movedFile = session.getSessionFile();
+		if (!movedFile) throw new Error("Expected moved session file");
+		expect(fs.existsSync(movedFile)).toBe(true);
+
+		const targetSessions = await SessionManager.list(cwdB);
+		expect(targetSessions.some(item => item.path === movedFile)).toBe(true);
+	});
 });

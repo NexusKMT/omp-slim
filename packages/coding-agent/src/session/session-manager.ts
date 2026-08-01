@@ -479,10 +479,12 @@ export class SessionManager {
 	#atomicRewriteDirty = false;
 	/**
 	 * True while {@link moveTo} is renaming the session file but has not yet
-	 * repointed `#sessionFile`. A synchronous rewrite (`flushSync` on Ctrl+C)
-	 * during this window would `writeTextSync` the full body to the pre-rename
-	 * path, recreating the very orphan the move fence prevents. Sync rewrites
-	 * defer while this is set; the move's trailing atomic rewrite persists them.
+	 * repointed `#sessionFile`. Both the synchronous append hot path
+	 * ({@link #appendToSessionFile}) and synchronous rewrites
+	 * ({@link #rewriteSynchronously}, reached via `flushSync` on Ctrl+C) would
+	 * otherwise touch the pre-rename path — opening a fresh writer or writing the
+	 * full body — recreating the very orphan the move eliminates. Both defer
+	 * while this is set; the move's trailing atomic rewrite persists them.
 	 */
 	#sessionFileRelocating = false;
 	/** Atomic entry batch currently staged for a full-file commit. */
@@ -863,13 +865,18 @@ export class SessionManager {
 		}
 
 		// Atomic replacement window: the old path may be moved aside underneath
-		// any newly-opened append handle (Windows EPERM fallback). Do not open a
-		// writer here; the active rewrite loops and serializes a fresh full body.
+		// any newly-opened append handle (Windows EPERM fallback), or a `moveTo`
+		// may be renaming the session file to a new directory. Do not open a
+		// writer here; the active rewrite loops and serializes a fresh full body,
+		// and the move's trailing atomic rewrite folds in these deferred entries.
 		// A superseding synchronous rewrite bumps `#diskEpoch`, at which point
 		// the pending atomic publish is guaranteed to abandon via its
 		// `commitGuard`, so appends can (and must) take the hot path so they
 		// don't strand in memory while `close()` returns without a rewrite.
-		if (this.#atomicRewriteFenceEpoch !== null && this.#atomicRewriteFenceEpoch === this.#diskEpoch) {
+		if (
+			this.#sessionFileRelocating ||
+			(this.#atomicRewriteFenceEpoch !== null && this.#atomicRewriteFenceEpoch === this.#diskEpoch)
+		) {
 			this.#fileIsCurrent = false;
 			this.#rewriteRequired = true;
 			this.#atomicRewriteDirty = true;
@@ -1337,12 +1344,13 @@ export class SessionManager {
 				: computeDefaultSessionDir(resolvedCwd, this.#storage));
 
 		let sessionFileExisted = false;
-		let moveFenceEpoch: number | undefined;
-		// Prevent synchronous appends and rewrites from touching the old path while
-		// the rename is in flight (see `#sessionFileRelocating`).
+		// Fence synchronous appends and rewrites away from the session file for the
+		// duration of the relocation (see `#sessionFileRelocating`). This flag —
+		// not a `#diskEpoch` bump — is used deliberately: bumping the epoch here
+		// would cancel any disk task already queued at the current epoch (e.g. a
+		// header-only `ensureOnDisk()` materializing rewrite) before the drain
+		// below runs it, silently dropping an explicitly materialized session.
 		if (this.#persist && this.#sessionFile) {
-			moveFenceEpoch = ++this.#diskEpoch;
-			this.#atomicRewriteFenceEpoch = moveFenceEpoch;
 			this.#sessionFileRelocating = true;
 		}
 
@@ -1434,10 +1442,6 @@ export class SessionManager {
 			if (this.#sessionFile) this.#rememberBreadcrumb(resolvedCwd, this.#sessionFile);
 		} finally {
 			this.#sessionFileRelocating = false;
-			// Rewrites release this fence themselves; lazy and failed moves release it here.
-			if (moveFenceEpoch !== undefined && this.#atomicRewriteFenceEpoch === moveFenceEpoch) {
-				this.#atomicRewriteFenceEpoch = null;
-			}
 		}
 	}
 
