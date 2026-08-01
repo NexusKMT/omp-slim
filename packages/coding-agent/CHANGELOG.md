@@ -67,6 +67,9 @@
 - Fixed the Python RPC client dropping context, compaction, OAuth URL, and terminal-settlement fields.
 - Fixed the browser tool ignoring the url parameter when opening a new tab on an attached browser.
 - Fixed browser automation disrupting attached browsers by adopting the active foreground tab and avoiding raising new tabs during screenshots.
+### Added
+
+- Added `Shift+Up` as a second default for the message dequeue, so the shortcut is reachable in macOS Terminal.app where Option is consumed for character composition.
 
 ## [17.2.1] - 2026-07-30
 
