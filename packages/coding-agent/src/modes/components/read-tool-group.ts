@@ -404,7 +404,7 @@ export class ReadToolGroupComponent extends Container implements ToolExecutionHa
 	 * not visibly reshuffled, and no-ops when the rename would collide.
 	 */
 	renameEntry(oldId: string, newId: string): void {
-		if (!oldId || oldId === newId) return;
+		if (oldId === newId || !newId) return;
 		const entry = this.#entries.get(oldId);
 		if (!entry || this.#entries.has(newId)) return;
 		entry.toolCallId = newId;
@@ -415,6 +415,12 @@ export class ReadToolGroupComponent extends Container implements ToolExecutionHa
 		this.#entries.clear();
 		for (const [key, value] of reordered) this.#entries.set(key, value);
 		this.#updateDisplay();
+	}
+	/** Remove one call without discarding successful siblings in the shared group. */
+	removeEntry(toolCallId: string): boolean {
+		if (!this.#entries.delete(toolCallId)) return this.#entries.size === 0;
+		this.#updateDisplay();
+		return this.#entries.size === 0;
 	}
 
 	updateResult(

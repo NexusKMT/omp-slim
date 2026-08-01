@@ -298,6 +298,19 @@ export class EventController {
 		this.#readToolCallAssistantComponents.delete(toolCallId);
 	}
 
+	#retractToolCardEntry(toolCallId: string, component: ToolExecutionHandle): void {
+		component.seal();
+		let removeComponent = true;
+		if (component instanceof ReadToolGroupComponent) {
+			removeComponent = component.removeEntry(toolCallId);
+			if (component === this.#lastReadGroup) this.#resetReadGroup();
+		}
+		if (removeComponent) this.ctx.chatContainer.removeChild(component);
+		this.ctx.pendingTools.delete(toolCallId);
+		this.#toolTimelineComponents.delete(toolCallId);
+		this.#clearReadToolCall(toolCallId);
+	}
+
 	/**
 	 * Re-key a live streamed tool card whose id changed mid-stream (see
 	 * {@link #streamedToolCallIdByIndex}). Moves every id-keyed tracker from the
@@ -1046,13 +1059,8 @@ export class EventController {
 							continue;
 						}
 						if (this.ctx.chatContainer.isBlockUncommitted(component)) {
-							component.seal();
-							if (component === this.#lastReadGroup) this.#resetReadGroup();
-							this.ctx.chatContainer.removeChild(component);
+							this.#retractToolCardEntry(toolCallId, component);
 							this.#retractedToolCallIds.add(toolCallId);
-							this.ctx.pendingTools.delete(toolCallId);
-							this.#toolTimelineComponents.delete(toolCallId);
-							this.#clearReadToolCall(toolCallId);
 						} else {
 							component.seal();
 						}
@@ -1682,11 +1690,7 @@ export class EventController {
 		// cards are removable; one already on the scrollback tape stays as history.
 		for (const [toolCallId, component] of this.#syntheticFailureCards) {
 			if (this.ctx.chatContainer.isBlockUncommitted(component)) {
-				if (component === this.#lastReadGroup) this.#resetReadGroup();
-				this.ctx.chatContainer.removeChild(component);
-				this.ctx.pendingTools.delete(toolCallId);
-				this.#toolTimelineComponents.delete(toolCallId);
-				this.#clearReadToolCall(toolCallId);
+				this.#retractToolCardEntry(toolCallId, component);
 			}
 		}
 		this.#syntheticFailureCards.clear();

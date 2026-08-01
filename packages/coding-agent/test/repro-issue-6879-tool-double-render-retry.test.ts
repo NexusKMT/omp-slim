@@ -133,12 +133,12 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 		} as Extract<AgentSessionEvent, { type: "message_end" }>);
 	}
 
-	async function streamReadToolCall(id: string, stopReason: string): Promise<void> {
+	async function streamReadToolCall(id: string, stopReason: string, path = READ_PATH): Promise<void> {
 		const readCall: ToolCall = {
 			type: "toolCall",
 			id,
 			name: "read",
-			arguments: { path: READ_PATH, i: "Inspect entrypoint" },
+			arguments: { path, i: "Inspect entrypoint" },
 		};
 		const ec = mode.eventController;
 		await ec.handleEvent({ type: "message_start", message: assistantMessage([], "toolUse") } as Extract<
@@ -328,6 +328,36 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 		expect(rendered).toContain(READ_PATH);
 	});
 
+	it("preserves successful siblings when retracting a pending read from a shared group", async () => {
+		const ec = mode.eventController;
+		const keptPath = "/tmp/kept.ts";
+		const supersededPath = "/tmp/superseded.ts";
+		await ec.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
+
+		await streamReadToolCall("read-kept", "toolUse", keptPath);
+		await ec.handleEvent({
+			type: "tool_execution_start",
+			toolCallId: "read-kept",
+			toolName: "read",
+			args: { path: keptPath, i: "Read kept file" },
+		} as Extract<AgentSessionEvent, { type: "tool_execution_start" }>);
+		await ec.handleEvent({
+			type: "tool_execution_end",
+			toolCallId: "read-kept",
+			toolName: "read",
+			result: { content: [{ type: "text", text: "kept contents" }] },
+			isError: false,
+		} as Extract<AgentSessionEvent, { type: "tool_execution_end" }>);
+
+		enableTtsrRewind(true);
+		await streamReadToolCall("read-superseded", "aborted", supersededPath);
+
+		const rendered = Bun.stripANSI(mode.chatContainer.render(120).join("\n"));
+		expect(mode.pendingTools.has("read-superseded")).toBeFalse();
+		expect(rendered).toContain(keptPath);
+		expect(rendered).not.toContain(supersededPath);
+	});
+
 	it("keeps a successful internal read single when replay beats its live completion", async () => {
 		const ec = mode.eventController;
 		const memoryPath = "memory://root/rollout_summaries/successful-read";
@@ -477,6 +507,47 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 		expect(countCommand(mode)).toBe(1);
 		// The result routes into the surviving card (no orphaned pending preview).
 		expect(Bun.stripANSI(mode.chatContainer.render(120).join("\n"))).toContain("(no output)");
+	});
+
+	it("re-keys a grouped read when its id is populated after the block appears", async () => {
+		const ec = mode.eventController;
+		const readAt = (id: string): ToolCall => ({
+			type: "toolCall",
+			id,
+			name: "read",
+			arguments: { path: READ_PATH, i: "Inspect entrypoint" },
+		});
+		await ec.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
+		await ec.handleEvent({ type: "message_start", message: assistantMessage([], "toolUse") } as Extract<
+			AgentSessionEvent,
+			{ type: "message_start" }
+		>);
+		await ec.handleEvent({
+			type: "message_update",
+			message: assistantMessage([readAt("")], "toolUse"),
+			assistantMessageEvent: {
+				type: "toolcall_start",
+				contentIndex: 0,
+				partial: assistantMessage([readAt("")], "toolUse"),
+			},
+		} as Extract<AgentSessionEvent, { type: "message_update" }>);
+		await ec.handleEvent({
+			type: "message_update",
+			message: assistantMessage([readAt("read-real")], "toolUse"),
+			assistantMessageEvent: {
+				type: "toolcall_delta",
+				contentIndex: 0,
+				delta: "{}",
+				partial: assistantMessage([readAt("read-real")], "toolUse"),
+			},
+		} as Extract<AgentSessionEvent, { type: "message_update" }>);
+
+		expect(mode.pendingTools.has("")).toBeFalse();
+		expect(mode.pendingTools.has("read-real")).toBeTrue();
+		const matchingCards = mode.chatContainer.children.filter(child =>
+			Bun.stripANSI(child.render(120).join("\n")).includes(READ_PATH),
+		);
+		expect(matchingCards).toHaveLength(1);
 	});
 
 	it("re-keys a streamed tool card when its id grows across deltas (piped copilot id)", async () => {
