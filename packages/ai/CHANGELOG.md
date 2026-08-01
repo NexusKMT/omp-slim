@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed OpenRouter DeepSeek models failing structured subagents when the upstream returns an opaque HTTP 400 for a strict yield schema, retrying once without strict tools and remembering the fallback for the provider session ([#7264](https://github.com/can1357/oh-my-pi/issues/7264)).
+
 ## [17.2.3] - 2026-08-01
 
 ### Added
