@@ -2581,6 +2581,56 @@ describe("advisor", () => {
 			expect(resetCount).toBe(1);
 		});
 
+		it("does not double-fold first-time primary context on overflow-recovery retry", async () => {
+			// Regression: the recovery render previews the retry batch; if it advances
+			// #seenContext, the retry's #prepareBatch re-dedup would collapse first-time
+			// plan-mode-context to "(unchanged — still in effect)" even though the
+			// advisor history was rolled back — the retry would lose the constraints.
+			const overflowMessage = "context_length_exceeded: Your input exceeds the context window of this model.";
+			const promptInputs: Array<string | AgentMessage[]> = [];
+			const state: { messages: AgentMessage[]; error?: string } = {
+				messages: [{ role: "user", content: "existing advisor context", timestamp: 1 } as AgentMessage],
+			};
+			let promptCalls = 0;
+			const agent: AdvisorAgent = {
+				prompt: async input => {
+					promptInputs.push(input);
+					promptCalls++;
+					state.error = promptCalls === 1 ? overflowMessage : undefined;
+				},
+				abort: () => {},
+				reset: () => {
+					state.messages.length = 0;
+					state.error = undefined;
+				},
+				state,
+			};
+			const messages: AgentMessage[] = [{ role: "user", content: "seed-primary", timestamp: 1 } as AgentMessage];
+			const host: AdvisorRuntimeHost = {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+			};
+			const runtime = new AdvisorRuntime(agent, host, 0);
+			runtime.seedTo(messages.length);
+
+			const rule =
+				"Plan mode is active. You MUST perform READ-ONLY work only:\n- You NEVER create, edit, or delete files — except the single plan file named below.";
+			messages.push({ role: "user", content: "overflowing-current-update", timestamp: 2 } as AgentMessage);
+			messages.push({
+				role: "custom",
+				customType: "plan-mode-context",
+				content: rule,
+				display: false,
+				timestamp: 3,
+			} as AgentMessage);
+			runtime.onTurnEnd(messages);
+			await settleUntil(() => promptInputs.length >= 2 && runtime.backlog === 0);
+
+			expect(promptInputs).toHaveLength(2);
+			expect(promptText(promptInputs[1])).toContain("except the single plan file named below");
+			expect(promptText(promptInputs[1])).not.toContain("unchanged — still in effect");
+		});
+
 		it("classifies structured overflow metadata before rolling back the failed turn", async () => {
 			const promptInputs: Array<string | AgentMessage[]> = [];
 			const state: { messages: AgentMessage[]; error?: string } = {

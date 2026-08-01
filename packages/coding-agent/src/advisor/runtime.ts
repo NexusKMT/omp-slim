@@ -1221,7 +1221,11 @@ export class AdvisorRuntime {
 					if (classifierRefusal) {
 						if (this.#includeThinking) {
 							this.#includeThinking = false;
-							const strippedBatch = this.#formatRawDelta(rawMessages, wip);
+							// Do NOT advance #seenContext here: the requeued batch is
+							// re-deduped by #prepareBatch on the next drain, so a mutation
+							// now would double-fold first-time primary context into
+							// "(unchanged — still in effect)" on the retry.
+							const strippedBatch = this.#formatRawDelta(rawMessages, wip, false);
 							if (strippedBatch) {
 								this.#pending.unshift({
 									text: strippedBatch,
@@ -1338,7 +1342,10 @@ export class AdvisorRuntime {
 						} else {
 							// Retry once against the fresh advisor context, using only the same
 							// bounded raw batch. Pending updates remain queued behind it.
-							const recoveryBatch = this.#formatRawDelta(rawMessages, wip) ?? batch;
+							// Same double-fold guard as the refusal branch: #prepareBatch
+							// re-dedups on retry, so this preview render must not mutate
+							// #seenContext.
+							const recoveryBatch = this.#formatRawDelta(rawMessages, wip, false) ?? batch;
 							this.#pending.unshift({
 								text: recoveryBatch,
 								rawMessages,
