@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import {
 	type ApiKeyCredential,
 	type AuthCredential,
@@ -7,6 +7,7 @@ import {
 	type StoredAuthCredential,
 } from "@oh-my-pi/pi-ai/auth-storage";
 import type { CredentialRankingStrategy, UsageLimit, UsageProvider, UsageReport } from "@oh-my-pi/pi-ai/usage";
+import { logger } from "@oh-my-pi/pi-utils";
 
 interface CacheEntry {
 	value: string;
@@ -394,5 +395,77 @@ describe("AuthStorage model usage health", () => {
 		controller.abort();
 		await expect(health).rejects.toThrow("usage fetch aborted");
 		pending.resolve(report("key-1", [limit("short", 0.2)]));
+	});
+});
+
+function sqliteCorruptError(): Error & { code: string } {
+	const err = new Error("database disk image is malformed (11) (Rowid 77291 out of order)") as Error & {
+		code: string;
+	};
+	err.code = "SQLITE_CORRUPT";
+	return err;
+}
+
+describe("AuthStorage corrupt persisted block store", () => {
+	const storages: AuthStorage[] = [];
+	afterEach(() => {
+		for (const storage of storages) storage.close();
+		storages.length = 0;
+		vi.restoreAllMocks();
+	});
+
+	it("latches a corrupt block read, reports once, and stops re-querying the store", async () => {
+		const rows = [oauthRow(1)];
+		const store = makeStore(rows);
+		let getBlockCalls = 0;
+		store.getCredentialBlock = () => {
+			getBlockCalls += 1;
+			throw sqliteCorruptError();
+		};
+		const errorSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
+		const storage = new AuthStorage(store, {
+			usageProviderResolver: provider =>
+				provider === "anthropic"
+					? makeUsageProvider({ "account-1": report("account-1", [limit("short", 0.2)]) })
+					: undefined,
+			rankingStrategyResolver: provider => (provider === "anthropic" ? strategy : undefined),
+			configValueResolver: async value => value,
+		});
+		await storage.reload();
+		storages.push(storage);
+
+		const first = await storage.getModelUsageHealth("anthropic", { modelId: "claude", reserveFraction: 0.1 });
+		const second = await storage.getModelUsageHealth("anthropic", { modelId: "claude", reserveFraction: 0.1 });
+
+		// Availability is preserved: a corrupt persisted read fails open to the
+		// in-memory backoff (no block) instead of spuriously forcing depletion.
+		expect(first.state).toBe("healthy");
+		expect(second.state).toBe("healthy");
+		// Latched on the first unrecoverable error: the broken store is queried
+		// exactly once despite three block-scope reads per health check across two calls.
+		expect(getBlockCalls).toBe(1);
+		expect(errorSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it("latches a corrupt block write and stops attempting persistence", async () => {
+		const rows = [apiKeyRow(1)];
+		const store = makeStore(rows);
+		let upsertCalls = 0;
+		store.upsertCredentialBlock = () => {
+			upsertCalls += 1;
+			throw sqliteCorruptError();
+		};
+		const errorSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
+		const storage = new AuthStorage(store);
+		await storage.reload();
+		storages.push(storage);
+
+		await storage.markUsageLimitReached("anthropic", undefined, { apiKey: "key-1" });
+		await storage.markUsageLimitReached("anthropic", undefined, { apiKey: "key-1" });
+
+		// First upsert throws SQLITE_CORRUPT and latches; the second mark skips
+		// the store entirely rather than retrying a broken write on every 429.
+		expect(upsertCalls).toBe(1);
+		expect(errorSpy).toHaveBeenCalledTimes(1);
 	});
 });

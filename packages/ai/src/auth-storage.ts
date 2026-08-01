@@ -1264,6 +1264,15 @@ export class AuthStorage {
 	#credentialBackoff: Map<string, Map<number, number>> = new Map();
 	/** Earliest time a freshly-set in-memory block may be cleared by live usage reconciliation. */
 	#credentialBackoffProbeAfter: Map<string, Map<number, number>> = new Map();
+	/**
+	 * Latched true once the persistent credential-block store reports an
+	 * unrecoverable error (SQLite corruption / not-a-database). While set, every
+	 * persisted-block read and write short-circuits for the life of the process:
+	 * availability is preserved through {@link AuthStorage.#credentialBackoff}, but
+	 * cross-process persistence is abandoned rather than re-querying a broken store
+	 * on every credential evaluation.
+	 */
+	#persistedBlockStoreDamaged = false;
 	#usageProviderResolver?: (provider: Provider) => UsageProvider | undefined;
 	#rankingStrategyResolver?: (provider: Provider) => CredentialRankingStrategy | undefined;
 	#usageCache: UsageCache;
@@ -1701,11 +1710,16 @@ export class AuthStorage {
 		providerKey: string,
 		blockScope: string | undefined,
 	): number | undefined {
+		if (this.#persistedBlockStoreDamaged) return undefined;
 		const getCredentialBlock = this.#store.getCredentialBlock?.bind(this.#store);
 		if (!getCredentialBlock) return undefined;
 		try {
 			return getCredentialBlock(credentialId, providerKey, blockScope ?? "");
 		} catch (err) {
+			if (isSqliteCorruptionError(err)) {
+				this.#reportDamagedBlockStore(err);
+				return undefined;
+			}
 			logger.debug("Failed to read credential block from persistent store", {
 				err,
 				credentialId,
@@ -1792,7 +1806,7 @@ export class AuthStorage {
 		this.#invalidateUsageReportCache(provider);
 
 		const upsertCredentialBlock = this.#store.upsertCredentialBlock?.bind(this.#store);
-		if (!upsertCredentialBlock) return;
+		if (!upsertCredentialBlock || this.#persistedBlockStoreDamaged) return;
 		const credentialId = this.#getStoredCredentials(provider)[credentialIndex]?.id;
 		if (credentialId === undefined) return;
 		try {
@@ -1803,6 +1817,10 @@ export class AuthStorage {
 				blockedUntilMs: nextBlockedUntil,
 			});
 		} catch (err) {
+			if (isSqliteCorruptionError(err)) {
+				this.#reportDamagedBlockStore(err);
+				return;
+			}
 			logger.debug("Failed to persist credential block", {
 				err,
 				credentialId,
@@ -1812,6 +1830,24 @@ export class AuthStorage {
 				blockedUntilMs: nextBlockedUntil,
 			});
 		}
+	}
+
+	/**
+	 * Latches {@link AuthStorage.#persistedBlockStoreDamaged} on the first
+	 * unrecoverable persisted-block store error and surfaces it once at `error`
+	 * level with the store location, so an operator can repair or replace it.
+	 * Later reads/writes short-circuit silently — the in-memory backoff map keeps
+	 * rate-limit blocks applying for the life of the process; only cross-process
+	 * persistence is lost.
+	 */
+	#reportDamagedBlockStore(err: unknown): void {
+		if (this.#persistedBlockStoreDamaged) return;
+		this.#persistedBlockStoreDamaged = true;
+		const store = this.#sourceLabel ?? `local ${getAgentDbPath()}`;
+		logger.error(
+			"Persistent credential store is corrupt; cross-process rate-limit persistence is disabled for this process. In-memory backoff still applies. Repair the store with `sqlite3 <path> '.recover'` or delete it to recreate on next login.",
+			{ err, store },
+		);
 	}
 
 	/**
@@ -6480,6 +6516,19 @@ export function isSqliteBusyError(err: unknown): boolean {
 	if (err === null || typeof err !== "object") return false;
 	const code = (err as { code?: unknown }).code;
 	return typeof code === "string" && code.startsWith("SQLITE_BUSY");
+}
+
+/**
+ * SQLite's unrecoverable-corruption result codes — the `SQLITE_CORRUPT` family
+ * (base plus extended variants like `SQLITE_CORRUPT_VTAB` / `SQLITE_CORRUPT_INDEX`)
+ * and `SQLITE_NOTADB` (the file header is not a database). Unlike
+ * {@link isSqliteBusyError}, these never clear by retrying: the store must be
+ * repaired or replaced, so callers latch and stop touching it.
+ */
+export function isSqliteCorruptionError(err: unknown): boolean {
+	if (err === null || typeof err !== "object" || !("code" in err)) return false;
+	const code = err.code;
+	return typeof code === "string" && (code.startsWith("SQLITE_CORRUPT") || code === "SQLITE_NOTADB");
 }
 
 function normalizeStoredAccountId(accountId: string | null | undefined): string | null {
