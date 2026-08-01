@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { logger } from "@oh-my-pi/pi-utils";
 
-import { AdvisorRuntime, type AdvisorAgent, type AdvisorRuntimeHost } from "../../src/advisor/runtime";
+import { type AdvisorAgent, AdvisorRuntime, type AdvisorRuntimeHost } from "../../src/advisor/runtime";
 
 function userMessage(text: string, timestamp: number): AgentMessage {
 	return { role: "user", content: text, timestamp } as AgentMessage;
@@ -58,6 +58,35 @@ describe("advisor context reset observability", () => {
 				event =>
 					event.message === "advisor context reset" &&
 					(event.details as { reason: string }).reason === "delivered-prefix-changed",
+			);
+			expect(reset).toBeDefined();
+		} finally {
+			debugSpy.mockRestore();
+		}
+	});
+
+	it("logs the caller-supplied reason on external reset (compaction/shake/prune triggers)", () => {
+		const debugSpy = vi.spyOn(logger, "debug").mockImplementation(() => {});
+		try {
+			const agent: AdvisorAgent = {
+				prompt: async () => {},
+				abort: () => {},
+				reset: () => {},
+				state: { messages: [] },
+			};
+			const host: AdvisorRuntimeHost = {
+				snapshotMessages: () => [],
+				enqueueAdvice: () => {},
+			};
+			const runtime = new AdvisorRuntime(agent, host);
+
+			runtime.reset("auto-compaction");
+
+			const events = debugSpy.mock.calls.map(call => ({ message: call[0], details: call[1] }));
+			const reset = events.find(
+				event =>
+					event.message === "advisor context reset" &&
+					(event.details as { reason: string }).reason === "auto-compaction",
 			);
 			expect(reset).toBeDefined();
 		} finally {

@@ -418,8 +418,8 @@ export class SessionAdvisors {
 	}
 
 	/** Re-primes advisor transcript views after an in-conversation history rewrite. */
-	resetAllRuntimes(): void {
-		this.#resetAllAdvisorRuntimes();
+	resetAllRuntimes(reason?: string): void {
+		this.#resetAllAdvisorRuntimes(reason);
 	}
 
 	/** Whether live runtimes still match the resolved advisor configuration. */
@@ -535,7 +535,7 @@ export class SessionAdvisors {
 		for (const a of this.#advisors) {
 			a.agentUnsubscribe?.();
 			a.agentUnsubscribe = undefined;
-			a.runtime.reset();
+			a.runtime.reset("conversation-boundary");
 			a.adviseTool.resetDeliveredNotes();
 			a.emissionGuard.reset();
 			this.#attachAdvisorRecorderFeed(a);
@@ -1066,8 +1066,8 @@ export class SessionAdvisors {
 	}
 
 	/** Re-prime every advisor's transcript view after an in-conversation history rewrite. */
-	#resetAllAdvisorRuntimes(): void {
-		for (const a of this.#advisors) a.runtime.reset();
+	#resetAllAdvisorRuntimes(reason?: string): void {
+		for (const a of this.#advisors) a.runtime.reset(reason);
 	}
 
 	#stopAdvisorRuntime(): void {

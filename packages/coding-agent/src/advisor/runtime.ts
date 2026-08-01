@@ -565,7 +565,17 @@ export class AdvisorRuntime {
 	 * post-compaction — transcript, giving the advisor fresh context instead of
 	 * leaving it blind to everything before the rewrite.
 	 */
-	reset(): void {
+	reset(reason = "external"): void {
+		// Step-1 observability (issue #7226): every re-prime logs its trigger so
+		// live investigations can attribute full-transcript replays (cached_tokens
+		// pinned at the instructions/tools boundary) to a concrete path instead of
+		// inferring it from payload markers after the fact.
+		logger.debug("advisor context reset", {
+			reason,
+			lastCount: this.#lastCount,
+			pending: this.#pending.length,
+			backlog: this.#backlog,
+		});
 		this.#iterationAbort?.abort("advisor reset");
 		this.#epoch++;
 		this.#sessionTransitionPaused = false;
@@ -968,6 +978,12 @@ export class AdvisorRuntime {
 					// waiters, latest snapshot, and epoch stay untouched. Re-render only
 					// this already-popped raw batch so active plan/reference bodies are
 					// restored without replaying any older primary transcript.
+					logger.debug("advisor context reset", {
+						reason: "context-maintenance",
+						lastCount: this.#lastCount,
+						pending: this.#pending.length,
+						backlog: this.#backlog,
+					});
 					this.#clearAdvisorContextAtCurrentCursor();
 					const { batch: rerendered, preparedMessages } = this.#prepareBatch(rawMessages, wip, batchText);
 					return {
