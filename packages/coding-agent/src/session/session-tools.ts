@@ -831,23 +831,21 @@ export class SessionTools {
 
 	/** Rediscovers reloadable skills and refreshes prompt metadata. */
 	async refreshSkills(): Promise<void> {
-		if (!this.#skillsReloadable) {
-			return;
-		}
-
 		resetCapabilities();
-		const skillsSettings = this.#host.settings.getGroup("skills");
-		const discovered = await loadSkills({
-			...skillsSettings,
-			cwd: this.#host.sessionManager.getCwd(),
-			disabledExtensions: this.#host.settings.get("disabledExtensions") ?? [],
-		});
-		this.#skills = discovered.skills;
-		this.#skillWarnings = discovered.warnings;
-		this.#skillsSettings = skillsSettings;
+		if (this.#skillsReloadable) {
+			const skillsSettings = this.#host.settings.getGroup("skills");
+			const discovered = await loadSkills({
+				...skillsSettings,
+				cwd: this.#host.sessionManager.getCwd(),
+				disabledExtensions: this.#host.settings.get("disabledExtensions") ?? [],
+			});
+			this.#skills = discovered.skills;
+			this.#skillWarnings = discovered.warnings;
+			this.#skillsSettings = skillsSettings;
 
-		if (this.#host.agentKind() === "main") {
-			setActiveSkills(this.#skills);
+			if (this.#host.agentKind() === "main") {
+				setActiveSkills(this.#skills);
+			}
 		}
 		await this.refreshBaseSystemPrompt();
 		this.#host.notifyCommandMetadataChanged();

@@ -1581,6 +1581,20 @@ export class SessionAdvisors {
 	}
 
 	/**
+	 * Swap the project context prompt handed to advisor sessions after context
+	 * files change (`/reload-plugins` edit/disable). Rebuilds live runtimes in
+	 * place so the next advisor turn evaluates against the current instructions;
+	 * a no-op when the rendered prompt is unchanged.
+	 */
+	setContextPrompt(contextPrompt: string | undefined): void {
+		if (contextPrompt === this.#advisorContextPrompt) return;
+		this.#advisorContextPrompt = contextPrompt;
+		if (!this.#advisorEnabled || this.#advisors.length === 0) return;
+		this.#stopAdvisorRuntime();
+		this.#buildAdvisorRuntime(true);
+	}
+
+	/**
 	 * Whether the advisor setting is enabled for this session.
 	 */
 	isAdvisorEnabled(): boolean {

@@ -782,9 +782,11 @@ export async function discoverSkills(
 export async function discoverContextFiles(
 	cwd?: string,
 	_agentDir?: string,
+	disabledExtensions?: string[],
 ): Promise<Array<{ path: string; content: string; depth?: number }>> {
 	return await loadContextFilesInternal({
 		cwd: cwd ?? getProjectDir(),
+		disabledExtensions,
 	});
 }
 
@@ -1602,7 +1604,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		}
 		return result;
 	};
-	const [contextFiles, resolvedWorkspaceTree, watchdogFiles, activeRepoContext, discoveredAdvisors] =
+	const [initialContextFiles, resolvedWorkspaceTree, watchdogFiles, activeRepoContext, discoveredAdvisors] =
 		await Promise.all([
 			contextFilesPromise,
 			raceWithDeadline("buildWorkspaceTree", workspaceTreePromise),
@@ -1610,6 +1612,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			activeRepoContextPromise,
 			advisorConfigsPromise,
 		]);
+	let contextFiles = initialContextFiles;
 
 	let agent: Agent;
 	let session!: AgentSession;
@@ -2794,6 +2797,14 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			tools: Map<string, AgentTool>,
 		): Promise<BuildSystemPromptResult> => {
 			toolContextStore.setToolNames(toolNames);
+			const promptCwd = sessionManager.getCwd();
+			if (hasSession && options.contextFiles === undefined) {
+				contextFiles = await logger.time("discoverContextFiles", discoverContextFiles, promptCwd, agentDir, [
+					...(settings.get("disabledExtensions") ?? []),
+				]);
+				toolSession.contextFiles = contextFiles;
+				session.setAdvisorContextPrompt(formatAdvisorContextPrompt(contextFiles));
+			}
 			const memoryBackend = restrictToolNames ? undefined : await resolveMemoryBackend(settings);
 			const memoryInstructions = memoryBackend
 				? await memoryBackend.buildDeveloperInstructions(agentDir, settings, session)
@@ -2863,7 +2874,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					: options.appendSystemPrompt;
 			}
 			const defaultPrompt = await buildSystemPromptInternal({
-				cwd,
+				cwd: promptCwd,
 				additionalWorkspaceRoots: sessionManager.getAdditionalDirectories(),
 				xdevTools: toolSession.xdev ? xdevEntries(toolSession.xdev) : [],
 				xdevDocs: toolSession.xdev
