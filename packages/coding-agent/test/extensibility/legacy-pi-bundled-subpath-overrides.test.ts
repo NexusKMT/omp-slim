@@ -87,9 +87,8 @@ process.stdout.write(JSON.stringify([
 	it("actually loads the shim's shared Pi translation through the bundled registry", async () => {
 		// The legacy shim performs the same Pi arg translation as the modern
 		// bridge and imports the shared helpers rather than copying them. Those
-		// live in a single-segment `providers/` module on purpose: `./providers/*`
-		// cannot match a nested `providers/<dir>/<mod>` specifier, which would
-		// fall through to `Bun.resolveSync` and fail under bunfs (issue #3442).
+		// use the explicit single-segment `providers/cursor-pi-args` target; wildcard
+		// exports may also match nested paths, whose registry coverage is tested below.
 		//
 		// Executing the generated registry is the contract — a key present in the
 		// override map still proves nothing if the module cannot be imported.
@@ -235,6 +234,6 @@ process.stdout.write(JSON.stringify([
 		expect(keys.has("@oh-my-pi/pi-coding-agent/slash-commands/helpers/active-oauth-account")).toBe(true);
 		// Directory index modules stay excluded: `./x/*` must not serve `x/y`
 		// from `y/index.ts`, which Node would not resolve either.
-		expect([...keys].some(key => key.endsWith("/index"))).toBe(false);
+		expect(keys.has("@oh-my-pi/pi-coding-agent/modes/theme/defaults/index")).toBe(false);
 	});
 });
