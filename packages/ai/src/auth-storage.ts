@@ -1321,8 +1321,10 @@ export class AuthStorage {
 		}
 		try {
 			this.#store.cleanExpiredCredentialBlocks?.(Date.now());
-		} catch {
-			// Best-effort.
+		} catch (err) {
+			// Best-effort, but init-time corruption must latch the block store
+			// immediately so the first evaluation doesn't re-query a broken DB.
+			this.#handlePersistedBlockStoreError(err);
 		}
 		this.#usageFetch = options.usageFetch ?? fetch;
 		this.#usageRequestTimeoutMs = options.usageRequestTimeoutMs ?? DEFAULT_USAGE_REQUEST_TIMEOUT_MS;
@@ -1492,7 +1494,16 @@ export class AuthStorage {
 	 * Reload credentials from storage.
 	 */
 	async reload(): Promise<void> {
-		const records = this.#store.listAuthCredentials();
+		let records: StoredAuthCredential[];
+		try {
+			records = this.#store.listAuthCredentials();
+		} catch (err) {
+			// Latch + surface repair guidance on corruption, but still fail the
+			// reload: silently continuing with zero credentials would log the
+			// user out of every provider without explanation.
+			this.#handlePersistedBlockStoreError(err);
+			throw err;
+		}
 		const grouped = new Map<string, StoredCredential[]>();
 		for (const record of records) {
 			const list = grouped.get(record.provider) ?? [];
@@ -1735,7 +1746,15 @@ export class AuthStorage {
 			return getCredentialBlockReconcileAfter(credentialId, providerKey, blockScope) ?? 0;
 		} catch (err) {
 			if (this.#handlePersistedBlockStoreError(err)) return 0;
-			throw err;
+			// Advisory read: transient failures (e.g. SQLITE_BUSY) fall back to
+			// the in-memory probe window, mirroring #readPersistedCredentialBlock.
+			logger.debug("Failed to read credential block reconcile-after time from persistent store", {
+				err,
+				credentialId,
+				providerKey,
+				blockScope,
+			});
+			return 0;
 		}
 	}
 
