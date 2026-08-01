@@ -1475,7 +1475,7 @@ async function buildCodexRequestContext(
 	context: Context,
 	options: OpenAICodexResponsesOptions | undefined,
 ): Promise<CodexRequestContext> {
-	const promptCacheKey = normalizeOpenAIPromptCacheKey(options?.promptCacheKey ?? options?.sessionId);
+	const promptCacheKey = getOpenAIPromptCacheKey(options);
 	const transformedBody = await buildTransformedCodexRequestBody(model, context, options, promptCacheKey);
 	return createCodexRequestContext(model, transformedBody, options, {
 		isolateCompactionTransport: true,
