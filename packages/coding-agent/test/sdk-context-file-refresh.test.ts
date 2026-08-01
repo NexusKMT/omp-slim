@@ -142,10 +142,7 @@ describe("context-file prompt refresh", () => {
 		const cwdB = tempDir.join("cwd-b");
 		fs.mkdirSync(path.join(cwdA, "old-repo", ".git"), { recursive: true });
 		fs.mkdirSync(path.join(cwdB, "new-repo", ".git"), { recursive: true });
-		const { session, authStorage, sessionManager } = await createContextSession(
-			cwdA,
-			Settings.isolated({}),
-		);
+		const { session, authStorage, sessionManager } = await createContextSession(cwdA, Settings.isolated({}));
 
 		try {
 			expect(session.systemPrompt.join("\n")).toContain("old-repo");

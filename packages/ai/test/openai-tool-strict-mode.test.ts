@@ -710,9 +710,7 @@ describe("OpenAI tool strict mode", () => {
 				const bodyText = typeof init?.body === "string" ? init.body : "";
 				const tools = toRecord(JSON.parse(bodyText)).tools;
 				strictFlags.push(
-					Array.isArray(tools)
-						? tools.map(tool => toRecord(toRecord(tool).function).strict === true)
-						: [],
+					Array.isArray(tools) ? tools.map(tool => toRecord(toRecord(tool).function).strict === true) : [],
 				);
 				return new Response(
 					JSON.stringify({
