@@ -32,6 +32,7 @@ import {
 	clearOmpExtensionCliRoots,
 	injectOmpExtensionCliRoots,
 	listOmpExtensionRoots,
+	withOmpExtensionRootScope,
 } from "@oh-my-pi/pi-coding-agent/discovery/omp-extension-roots";
 import { discoverExtensionPaths } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import { getConfigRootDir, removeSyncWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
@@ -211,6 +212,45 @@ test("explicit-only CLI roots replace stale state and exclude every ambient pack
 			[stale, projectExt, userExt, installed].some(ambientRoot => candidate.startsWith(ambientRoot)),
 		),
 	).toBe(false);
+});
+
+test("invocation scopes isolate concurrent SDK roots and merge ambient roots only when requested", async () => {
+	const otherExplicit = path.join(tempDir, "other-explicit-extension");
+	const projectExt = path.join(tempDir, "project-extension");
+	const installed = path.join(home, ".omp", "plugins", "node_modules", "installed-extension");
+	const staleCli = path.join(tempDir, "stale-cli-extension");
+	buildExtensionPackage(otherExplicit, "other-explicit-skill");
+	buildExtensionPackage(projectExt, "project-skill");
+	buildExtensionPackage(installed, "installed-skill");
+	buildExtensionPackage(staleCli, "stale-cli-skill");
+	writeFile(path.join(project, ".omp", "settings.json"), JSON.stringify({ extensions: [projectExt] }));
+	writeFile(
+		path.join(home, ".omp", "plugins", "package.json"),
+		JSON.stringify({ name: "omp-plugins", dependencies: { "installed-extension": "1.0.0" } }),
+	);
+	injectOmpExtensionCliRoots([staleCli], home, project);
+
+	const firstEntered = Promise.withResolvers<void>();
+	const secondEntered = Promise.withResolvers<void>();
+	const [firstRoots, secondRoots] = await Promise.all([
+		withOmpExtensionRootScope([ext], "explicit-only", async () => {
+			firstEntered.resolve();
+			await secondEntered.promise;
+			return listOmpExtensionRoots(ctx());
+		}),
+		withOmpExtensionRootScope([otherExplicit], "explicit-only", async () => {
+			secondEntered.resolve();
+			await firstEntered.promise;
+			return listOmpExtensionRoots(ctx());
+		}),
+	]);
+
+	expect(firstRoots.map(root => root.path)).toEqual([ext]);
+	expect(secondRoots.map(root => root.path)).toEqual([otherExplicit]);
+
+	const mergedRoots = await withOmpExtensionRootScope([ext], "merge", () => listOmpExtensionRoots(ctx()));
+	expect(mergedRoots.map(root => root.path)).toEqual(expect.arrayContaining([ext, projectExt, installed]));
+	expect(mergedRoots.map(root => root.path)).not.toContain(staleCli);
 });
 
 test("file-extension entrypoints contribute zero sub-surface (the file has no siblings to scan)", async () => {
