@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed prewalk switching to the fast model during read-only investigation: `xd://` devices are dispatched through the `write` tool, so a read-only call such as an `lsp` navigation counted as the first edit/write and armed the one-way hand-off mid-planning. Device dispatches now carry the wrapped tool's approval tier and only trigger the switch at a `write`/`exec` tier — read-only `lsp`, `debug` inspection, and internal-URL `ast_edit` calls no longer downgrade the model ([#7312](https://github.com/can1357/oh-my-pi/issues/7312)).
+
 ## [17.2.3] - 2026-08-01
 
 ### Changed
