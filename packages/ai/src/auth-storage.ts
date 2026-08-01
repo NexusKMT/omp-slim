@@ -1716,10 +1716,7 @@ export class AuthStorage {
 		try {
 			return getCredentialBlock(credentialId, providerKey, blockScope ?? "");
 		} catch (err) {
-			if (isSqliteCorruptionError(err)) {
-				this.#reportDamagedBlockStore(err);
-				return undefined;
-			}
+			if (this.#handlePersistedBlockStoreError(err)) return undefined;
 			logger.debug("Failed to read credential block from persistent store", {
 				err,
 				credentialId,
@@ -1817,10 +1814,7 @@ export class AuthStorage {
 				blockedUntilMs: nextBlockedUntil,
 			});
 		} catch (err) {
-			if (isSqliteCorruptionError(err)) {
-				this.#reportDamagedBlockStore(err);
-				return;
-			}
+			if (this.#handlePersistedBlockStoreError(err)) return;
 			logger.debug("Failed to persist credential block", {
 				err,
 				credentialId,
@@ -1830,6 +1824,12 @@ export class AuthStorage {
 				blockedUntilMs: nextBlockedUntil,
 			});
 		}
+	}
+
+	#handlePersistedBlockStoreError(err: unknown): boolean {
+		if (!isSqliteCorruptionError(err)) return false;
+		this.#reportDamagedBlockStore(err);
+		return true;
 	}
 
 	/**
@@ -6376,16 +6376,30 @@ export class AuthStorage {
 	 * Broker-server seam: list non-expired persisted blocks for snapshot entries.
 	 */
 	listCredentialBlocks(credentialIds: readonly number[]): StoredCredentialBlock[] {
-		return this.#store.listCredentialBlocks?.(credentialIds) ?? [];
+		if (this.#persistedBlockStoreDamaged) return [];
+		const listCredentialBlocks = this.#store.listCredentialBlocks?.bind(this.#store);
+		if (!listCredentialBlocks) return [];
+		try {
+			return listCredentialBlocks(credentialIds);
+		} catch (err) {
+			if (this.#handlePersistedBlockStoreError(err)) return [];
+			throw err;
+		}
 	}
 
 	/**
 	 * Broker-server seam: persist one credential block and notify snapshot waiters.
 	 */
 	upsertCredentialBlock(block: StoredCredentialBlock): void {
+		if (this.#persistedBlockStoreDamaged) return;
 		const upsertCredentialBlock = this.#store.upsertCredentialBlock?.bind(this.#store);
 		if (!upsertCredentialBlock) return;
-		upsertCredentialBlock(block);
+		try {
+			upsertCredentialBlock(block);
+		} catch (err) {
+			if (this.#handlePersistedBlockStoreError(err)) return;
+			throw err;
+		}
 		this.#invalidateUsageReportCacheForProviderKey(block.providerKey);
 		this.#bumpGeneration("credential-block");
 	}
@@ -6394,17 +6408,29 @@ export class AuthStorage {
 	 * Broker-server seam: clear all persisted blocks for one credential and notify snapshot waiters.
 	 */
 	deleteCredentialBlock(credentialId: number, providerKey: string, blockScope: string): void {
+		if (this.#persistedBlockStoreDamaged) return;
 		const deleteCredentialBlock = this.#store.deleteCredentialBlock?.bind(this.#store);
 		if (!deleteCredentialBlock) return;
-		deleteCredentialBlock(credentialId, providerKey, blockScope);
+		try {
+			deleteCredentialBlock(credentialId, providerKey, blockScope);
+		} catch (err) {
+			if (this.#handlePersistedBlockStoreError(err)) return;
+			throw err;
+		}
 		this.#invalidateUsageReportCacheForProviderKey(providerKey);
 		this.#bumpGeneration("credential-block");
 	}
 
 	deleteCredentialBlocks(credentialId: number): void {
+		if (this.#persistedBlockStoreDamaged) return;
 		const deleteCredentialBlocks = this.#store.deleteCredentialBlocks?.bind(this.#store);
 		if (!deleteCredentialBlocks) return;
-		deleteCredentialBlocks(credentialId);
+		try {
+			deleteCredentialBlocks(credentialId);
+		} catch (err) {
+			if (this.#handlePersistedBlockStoreError(err)) return;
+			throw err;
+		}
 		this.#bumpGeneration("credential-block");
 	}
 

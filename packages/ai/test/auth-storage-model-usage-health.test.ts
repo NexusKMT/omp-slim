@@ -468,4 +468,81 @@ describe("AuthStorage corrupt persisted block store", () => {
 		expect(upsertCalls).toBe(1);
 		expect(errorSpy).toHaveBeenCalledTimes(1);
 	});
+
+	it("latches every broker-facing block operation independently", async () => {
+		const block = {
+			credentialId: 1,
+			providerKey: "anthropic:api_key",
+			blockScope: "",
+			blockedUntilMs: Date.now() + 60_000,
+		};
+		const scenarios: Array<{
+			name: string;
+			install: (store: AuthCredentialStore, recordCall: () => void) => void;
+			invoke: (storage: AuthStorage) => unknown;
+			fallback: unknown;
+		}> = [
+			{
+				name: "listCredentialBlocks",
+				install: (store, recordCall) => {
+					store.listCredentialBlocks = () => {
+						recordCall();
+						throw sqliteCorruptError();
+					};
+				},
+				invoke: storage => storage.listCredentialBlocks([1]),
+				fallback: [],
+			},
+			{
+				name: "upsertCredentialBlock",
+				install: (store, recordCall) => {
+					store.upsertCredentialBlock = () => {
+						recordCall();
+						throw sqliteCorruptError();
+					};
+				},
+				invoke: storage => storage.upsertCredentialBlock(block),
+				fallback: undefined,
+			},
+			{
+				name: "deleteCredentialBlock",
+				install: (store, recordCall) => {
+					store.deleteCredentialBlock = () => {
+						recordCall();
+						throw sqliteCorruptError();
+					};
+				},
+				invoke: storage => storage.deleteCredentialBlock(1, block.providerKey, block.blockScope),
+				fallback: undefined,
+			},
+			{
+				name: "deleteCredentialBlocks",
+				install: (store, recordCall) => {
+					store.deleteCredentialBlocks = () => {
+						recordCall();
+						throw sqliteCorruptError();
+					};
+				},
+				invoke: storage => storage.deleteCredentialBlocks(1),
+				fallback: undefined,
+			},
+		];
+		const errorSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
+
+		for (const scenario of scenarios) {
+			const store = makeStore([]);
+			let calls = 0;
+			scenario.install(store, () => {
+				calls += 1;
+			});
+			const storage = new AuthStorage(store);
+			await storage.reload();
+			storages.push(storage);
+
+			expect(scenario.invoke(storage), scenario.name).toEqual(scenario.fallback);
+			expect(scenario.invoke(storage), scenario.name).toEqual(scenario.fallback);
+			expect(calls, scenario.name).toBe(1);
+		}
+		expect(errorSpy).toHaveBeenCalledTimes(scenarios.length);
+	});
 });
