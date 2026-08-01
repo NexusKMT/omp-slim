@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Anthropic prompt caching writing a fresh entry for the entire system prefix whenever the trailing project footer (cwd, date, workspace tree) changed. `applyPromptCaching` placed its only system breakpoint on the last block — the volatile footer — so starting omp in a new directory or crossing midnight re-wrote the whole cached system prefix instead of reusing it (issue [#7324](https://github.com/can1357/oh-my-pi/issues/7324)). System caching now also marks the block that ends the stable prefix (the block before the footer), skipping the OAuth cloak blocks (billing header + Claude Code identity), so a footer change only re-writes its own delta. This does not address open-weight chat templates that render tool schemas after the system block; keeping those cached requires relocating the per-request footer out of the system message.
+
 ## [17.2.4] - 2026-08-01
 
 ### Fixed

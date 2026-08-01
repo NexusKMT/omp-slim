@@ -2780,15 +2780,50 @@ type SystemBlockOptions = {
 	cacheControl?: AnthropicCacheControl;
 };
 
-function applyClaudeCodeSystemCache(
+/**
+ * Place system-block cache breakpoints that survive a volatile trailing block.
+ *
+ * omp appends per-request project context (cwd, date, workspace tree) as the
+ * final system block, so a single trailing breakpoint hashes the whole prefix
+ * *including* that block — a new cwd or a midnight rollover then re-writes the
+ * entire system cache (issue #7324). This caches the trailing block (full-match
+ * reuse when nothing changed) AND the block that ends the stable prefix (the
+ * one before the footer), so a footer change only re-writes its own delta.
+ *
+ * @returns breakpoints placed (0-2, capped by `maxBreakpoints`).
+ */
+function cacheSystemPrefixBreakpoints(
 	blocks: AnthropicSystemBlock[],
 	cacheControl: AnthropicCacheControl | undefined,
+	maxBreakpoints: number,
+	firstCacheableIndex: number,
 ): number {
-	if (!cacheControl || blocks.length === 0) return 0;
+	if (!cacheControl || maxBreakpoints <= 0) return 0;
+	let placed = 0;
 	const lastIndex = blocks.length - 1;
-	if (blocks[lastIndex].cache_control != null) return 0;
-	blocks[lastIndex] = { ...blocks[lastIndex], cache_control: cloneAnthropicCacheControl(cacheControl) };
-	return 1;
+	if (lastIndex >= firstCacheableIndex && blocks[lastIndex].cache_control == null) {
+		blocks[lastIndex] = { ...blocks[lastIndex], cache_control: cloneAnthropicCacheControl(cacheControl) };
+		placed++;
+	}
+	if (placed >= maxBreakpoints) return placed;
+	const stableIndex = lastIndex - 1;
+	if (stableIndex >= firstCacheableIndex && blocks[stableIndex].cache_control == null) {
+		blocks[stableIndex] = { ...blocks[stableIndex], cache_control: cloneAnthropicCacheControl(cacheControl) };
+		placed++;
+	}
+	return placed;
+}
+
+/**
+ * First system-block index that may carry a cache breakpoint. Skips the OAuth
+ * cloak blocks that must stay uncached: the CC billing header (block 0, a
+ * per-request fingerprint) and the Claude Code identity instruction (block 1).
+ */
+function firstCacheableSystemIndex(blocks: readonly AnthropicSystemBlock[]): number {
+	let index = 0;
+	if (blocks[index]?.text?.startsWith(CLAUDE_BILLING_HEADER_PREFIX)) index++;
+	if (blocks[index]?.text === claudeCodeSystemInstruction) index++;
+	return index;
 }
 
 export function buildAnthropicSystemBlocks(
@@ -2812,7 +2847,7 @@ export function buildAnthropicSystemBlocks(
 		for (const prompt of sanitizedPrompts) {
 			blocks.push({ type: "text", text: prompt });
 		}
-		applyClaudeCodeSystemCache(blocks, cacheControl);
+		cacheSystemPrefixBreakpoints(blocks, cacheControl, 2, firstCacheableSystemIndex(blocks));
 
 		return blocks;
 	}
@@ -3083,17 +3118,6 @@ type CacheControlBlock = {
 	cache_control?: AnthropicCacheControl | null;
 };
 
-function applyCacheControlToLastBlock<T extends CacheControlBlock>(
-	blocks: T[],
-	cacheControl: AnthropicCacheControl,
-): boolean {
-	if (blocks.length === 0) return false;
-	const lastIndex = blocks.length - 1;
-	if (blocks[lastIndex].cache_control != null) return false;
-	blocks[lastIndex] = { ...blocks[lastIndex], cache_control: cloneAnthropicCacheControl(cacheControl) };
-	return true;
-}
-
 function applyCacheControlToLastTextBlock(
 	blocks: Array<ContentBlockParam & CacheControlBlock>,
 	cacheControl: AnthropicCacheControl,
@@ -3130,15 +3154,12 @@ function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?:
 		isCCLayout =
 			params.system.length >= 3 &&
 			(params.system[0] as { text?: string }).text?.startsWith(CLAUDE_BILLING_HEADER_PREFIX) === true;
-		if (isCCLayout) {
-			const placed = Math.min(
-				MAX_CACHE_BREAKPOINTS - cacheBreakpointsUsed,
-				applyClaudeCodeSystemCache(params.system as AnthropicSystemBlock[], cacheControl),
-			);
-			cacheBreakpointsUsed += placed;
-		} else if (applyCacheControlToLastBlock(params.system, cacheControl)) {
-			cacheBreakpointsUsed++;
-		}
+		cacheBreakpointsUsed += cacheSystemPrefixBreakpoints(
+			params.system as AnthropicSystemBlock[],
+			cacheControl,
+			MAX_CACHE_BREAKPOINTS - cacheBreakpointsUsed,
+			isCCLayout ? firstCacheableSystemIndex(params.system as AnthropicSystemBlock[]) : 0,
+		);
 	}
 
 	if (cacheBreakpointsUsed >= MAX_CACHE_BREAKPOINTS) return;
