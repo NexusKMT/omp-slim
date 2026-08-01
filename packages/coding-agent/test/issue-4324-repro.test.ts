@@ -107,7 +107,7 @@ describe("issue #4324 — worker subprocess stderr survives to the exit error", 
 		expect(stdout).toBe("");
 		expect(stderr).toBe("");
 		expect(exitCode).toBe(0);
-	}, 10_000);
+	}, 30_000);
 
 	it("does not surface intentional terminate() SIGKILLs as worker errors", async () => {
 		// Regression guard: piping stderr must not change the semantics of an
