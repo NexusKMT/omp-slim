@@ -1,9 +1,9 @@
 import type { Database } from "bun:sqlite";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import * as os from "node:os";
+import * as path from "node:path";
 import { openDatabase } from "../db";
-export const DEFAULT_LOG_DIR = join(homedir(), ".mnemopi", "data");
-export const DEFAULT_LOG_DB = join(DEFAULT_LOG_DIR, "cost_log.db");
+export const DEFAULT_LOG_DIR = path.join(os.homedir(), ".mnemopi", "data");
+export const DEFAULT_LOG_DB = path.join(DEFAULT_LOG_DIR, "cost_log.db");
 
 export interface CostStats {
 	total_calls: number;
