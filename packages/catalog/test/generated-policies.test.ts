@@ -505,9 +505,10 @@ describe("applyOllamaCloudOutputCap", () => {
 });
 
 describe("applyAntigravityPricingFallback", () => {
-	it("prices Gemini and Claude ids at their first-party peers, including preview-id aliases", () => {
+	it("prices Gemini ids at Google API peers and Claude ids at Vertex, falling back to Anthropic", () => {
 		const googleCost = { input: 1.5, output: 9, cacheRead: 0.15, cacheWrite: 0 };
 		const previewCost = { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 0 };
+		const vertexCost = { input: 6, output: 30, cacheRead: 0.6, cacheWrite: 7.5 };
 		const anthropicCost = { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 };
 		const models: ModelSpec<Api>[] = [
 			createSpec({ id: "gemini-3.5-flash", api: "google-generative-ai", provider: "google", cost: googleCost }),
@@ -517,17 +518,28 @@ describe("applyAntigravityPricingFallback", () => {
 				provider: "google",
 				cost: previewCost,
 			}),
+			createSpec({
+				id: "claude-opus-4-6@default",
+				api: "anthropic-messages",
+				provider: "google-vertex",
+				cost: vertexCost,
+			}),
 			createSpec({ id: "claude-opus-4-6", api: "anthropic-messages", provider: "anthropic", cost: anthropicCost }),
+			createSpec({ id: "claude-sonnet-4-6", api: "anthropic-messages", provider: "anthropic", cost: anthropicCost }),
 			createSpec({ id: "gemini-3.5-flash", api: "google-gemini-cli", provider: "google-antigravity" }),
 			createSpec({ id: "gemini-3.1-pro", api: "google-gemini-cli", provider: "google-antigravity" }),
 			createSpec({ id: "claude-opus-4-6", api: "google-gemini-cli", provider: "google-antigravity" }),
+			createSpec({ id: "claude-sonnet-4-6", api: "google-gemini-cli", provider: "google-antigravity" }),
 		];
 
 		const result = applyAntigravityPricingFallback(models);
 
-		expect(result[3]?.cost).toEqual(googleCost);
-		expect(result[4]?.cost).toEqual(previewCost);
-		expect(result[5]?.cost).toEqual(anthropicCost);
+		expect(result[5]?.cost).toEqual(googleCost);
+		expect(result[6]?.cost).toEqual(previewCost);
+		// Vertex list price wins over Anthropic for aliased Claude ids.
+		expect(result[7]?.cost).toEqual(vertexCost);
+		// Dangling Vertex alias (no google-vertex row) falls back to Anthropic.
+		expect(result[8]?.cost).toEqual(anthropicCost);
 	});
 
 	it("keeps zero cost for ids without a priced peer and never overwrites billable antigravity cost", () => {

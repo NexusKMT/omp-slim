@@ -75,21 +75,32 @@ export function hasBillableCost(cost: ModelSpec["cost"]): boolean {
  * Providers whose first-party list prices back-fill Antigravity's unpriced
  * rows, in lookup order. Antigravity discovery reports no pricing (the
  * subscription bills upstream), so without this the whole provider surfaces
- * $0 cost for every request.
+ * $0 cost for every request. Antigravity bills through Google, so Vertex
+ * prices outrank Anthropic list prices for Claude ids.
  */
-const ANTIGRAVITY_PRICING_PEERS = ["google", "anthropic"] as const;
+const ANTIGRAVITY_PRICING_PEERS = ["google", "google-vertex", "anthropic"] as const;
 
-/** Antigravity ids whose Google API peer ships under a different id. */
+/**
+ * Antigravity ids whose Google peer ships under a different id: Gemini
+ * previews carry a `-preview` suffix on the Google API, Claude ids carry a
+ * Vertex `@<version>` suffix. A dangling alias (retired Vertex id) falls back
+ * to the plain-id lookup, i.e. Anthropic list prices for Claude.
+ */
 const ANTIGRAVITY_PRICING_ID_ALIASES: Readonly<Record<string, string>> = {
 	"gemini-3-flash": "gemini-3-flash-preview",
 	"gemini-3-pro": "gemini-3-pro-preview",
 	"gemini-3.1-pro": "gemini-3.1-pro-preview",
+	"claude-opus-4-5": "claude-opus-4-5@20251101",
+	"claude-opus-4-6": "claude-opus-4-6@default",
+	"claude-sonnet-4-5": "claude-sonnet-4-5@20250929",
+	"claude-sonnet-4-6": "claude-sonnet-4-6@default",
 };
 
 /**
  * Price `google-antigravity` models at their first-party equivalents: Gemini
- * ids at Google API list prices, Claude ids at Anthropic list prices. Models
- * without a priced peer (gpt-oss, internal tab models) keep zero cost.
+ * ids at Google API list prices, Claude ids at Google Vertex list prices
+ * (falling back to Anthropic). Models without a priced peer (gpt-oss,
+ * internal tab models) keep zero cost.
  */
 export function applyAntigravityPricingFallback(models: readonly ModelSpec[]): ModelSpec[] {
 	const peerCosts = new Map<string, ModelSpec["cost"]>();
@@ -104,7 +115,8 @@ export function applyAntigravityPricingFallback(models: readonly ModelSpec[]): M
 		if (model.provider !== "google-antigravity" || hasBillableCost(model.cost)) {
 			return model;
 		}
-		const cost = peerCosts.get(ANTIGRAVITY_PRICING_ID_ALIASES[model.id] ?? model.id);
+		const alias = ANTIGRAVITY_PRICING_ID_ALIASES[model.id];
+		const cost = (alias ? peerCosts.get(alias) : undefined) ?? peerCosts.get(model.id);
 		return cost ? { ...model, cost: { ...cost } } : model;
 	});
 }
