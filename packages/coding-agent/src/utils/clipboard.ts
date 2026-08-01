@@ -1,6 +1,6 @@
 import type { ClipboardImage } from "@oh-my-pi/pi-natives";
 import * as native from "@oh-my-pi/pi-natives";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger, SUPPORTED_IMAGE_MIME_TYPES } from "@oh-my-pi/pi-utils";
 import MAC_FILE_URL_SCRIPT from "./mac-file-urls.applescript" with { type: "text" };
 
 type SpawnCaptureOptions = { input?: string; timeoutMs?: number };
@@ -264,7 +264,7 @@ async function readTextViaPowerShell(): Promise<string | null> {
  * because terminal clipboard paths can leave image payloads invisible to the
  * native bridge.
  *
- * @returns PNG payload or null when no image is available.
+ * @returns A supported image payload or null when no image is available.
  */
 export async function readImageFromClipboard(): Promise<ClipboardImage | null> {
 	if (process.env.TERMUX_VERSION) {
@@ -291,10 +291,14 @@ export async function readImageFromClipboard(): Promise<ClipboardImage | null> {
 
 	if (process.platform === "linux" && process.env.WAYLAND_DISPLAY) {
 		try {
-			const data = await spawnCapture(["wl-paste", "--type", "image/png"], { encoding: "bytes" });
-			if (data.byteLength > 0) return { data, mimeType: "image/png" };
+			const offeredMimeTypes = new Set((await spawnCapture(["wl-paste", "--list-types"])).split(/\r?\n/));
+			for (const mimeType of SUPPORTED_IMAGE_MIME_TYPES) {
+				if (!offeredMimeTypes.has(mimeType)) continue;
+				const data = await spawnCapture(["wl-paste", "--type", mimeType], { encoding: "bytes" });
+				if (data.byteLength > 0) return { data, mimeType };
+			}
 		} catch {
-			// Fall through to arboard when wl-clipboard is absent or has no PNG payload.
+			// Fall through when wl-clipboard is absent or no advertised image payload can be read.
 		}
 	}
 

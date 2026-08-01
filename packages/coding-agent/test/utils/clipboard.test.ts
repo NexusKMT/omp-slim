@@ -14,14 +14,15 @@ type SpawnOptions = Bun.SpawnOptions.SpawnOptions<
 >;
 
 type SpawnCall = { cmd: string[]; options: SpawnOptions };
+type SpawnOutput = string | Uint8Array;
 
-function streamOf(body: string | Uint8Array): ReadableStream<Uint8Array> {
+function streamOf(body: SpawnOutput): ReadableStream<Uint8Array> {
 	const stream = new Response(body).body;
 	if (!stream) throw new Error("Failed to create response stream.");
 	return stream;
 }
 
-function fakeProcess(stdout: string | Uint8Array, exitCode = 0): Subprocess {
+function fakeProcess(stdout: SpawnOutput, exitCode = 0): Subprocess {
 	return {
 		pid: 1,
 		stdout: streamOf(stdout),
@@ -32,14 +33,15 @@ function fakeProcess(stdout: string | Uint8Array, exitCode = 0): Subprocess {
 	} as unknown as Subprocess;
 }
 
-function spySpawn(calls: SpawnCall[], stdout: string | Uint8Array, exitCode = 0) {
+function spySpawn(calls: SpawnCall[], stdout: SpawnOutput | SpawnOutput[], exitCode = 0) {
 	function mockSpawn(opts: SpawnOptions & { cmd: string[] }): Subprocess;
 	function mockSpawn(cmd: string[], opts?: SpawnOptions): Subprocess;
 	function mockSpawn(first: string[] | (SpawnOptions & { cmd: string[] }), second?: SpawnOptions): Subprocess {
 		const cmd = Array.isArray(first) ? first : first.cmd;
 		const options = Array.isArray(first) ? (second ?? ({} as SpawnOptions)) : (first as SpawnOptions);
 		calls.push({ cmd, options });
-		return fakeProcess(stdout, exitCode);
+		const output = Array.isArray(stdout) ? (stdout[calls.length - 1] ?? "") : stdout;
+		return fakeProcess(output, exitCode);
 	}
 	return vi.spyOn(Bun, "spawn").mockImplementation(mockSpawn);
 }
@@ -194,21 +196,25 @@ describe("readImageFromClipboard dispatch", () => {
 		expect(nativeSpy).toHaveBeenCalledTimes(1);
 	});
 
-	it("reads PNG bytes through wl-paste before the native bridge on Wayland-only Linux", async () => {
-		setPlatform("linux");
-		process.env.WAYLAND_DISPLAY = "wayland-0";
-		const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47]);
-		const calls: SpawnCall[] = [];
-		spySpawn(calls, png);
-		const nativeSpy = vi.spyOn(native, "readImageFromClipboard");
+	it.each(["image/png", "image/jpeg", "image/gif", "image/webp"] as const)(
+		"reads %s bytes through wl-paste before the native bridge on Wayland-only Linux",
+		async mimeType => {
+			setPlatform("linux");
+			process.env.WAYLAND_DISPLAY = "wayland-0";
+			const data = Uint8Array.from([0x89, 0x50, 0x4e, 0x47]);
+			const calls: SpawnCall[] = [];
+			spySpawn(calls, [`text/plain\n${mimeType}\n`, data]);
+			const nativeSpy = vi.spyOn(native, "readImageFromClipboard");
 
-		const image = await readImageFromClipboard();
+			const image = await readImageFromClipboard();
 
-		expect(calls).toHaveLength(1);
-		expect(calls[0]?.cmd).toEqual(["wl-paste", "--type", "image/png"]);
-		expect(image).toEqual({ data: png, mimeType: "image/png" });
-		expect(nativeSpy).not.toHaveBeenCalled();
-	});
+			expect(calls).toHaveLength(2);
+			expect(calls[0]?.cmd).toEqual(["wl-paste", "--list-types"]);
+			expect(calls[1]?.cmd).toEqual(["wl-paste", "--type", mimeType]);
+			expect(image).toEqual({ data, mimeType });
+			expect(nativeSpy).not.toHaveBeenCalled();
+		},
+	);
 
 	it("returns null on Termux without spawning anything", async () => {
 		setPlatform("linux");
