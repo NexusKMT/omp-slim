@@ -16,8 +16,15 @@ const PROJECT_CONTEXT_EXTENSION_ID = "context-file:project:AGENTS.md";
 async function createContextSession(
 	cwd: string,
 	settings: Settings,
+	options: { advisor?: boolean } = {},
 ): Promise<{ session: AgentSession; authStorage: AuthStorage }> {
 	const authStorage = await AuthStorage.create(`${cwd}/auth.db`);
+	const model = getBundledModel("openai", "gpt-4o-mini");
+	if (options.advisor) {
+		authStorage.setRuntimeApiKey("openai", "test-key");
+		settings.set("advisor.enabled", true);
+		settings.setModelRole("advisor", `${model.provider}/${model.id}`);
+	}
 	const modelRegistry = new ModelRegistry(authStorage);
 	const { session } = await createAgentSession({
 		cwd,
@@ -25,7 +32,7 @@ async function createContextSession(
 		modelRegistry,
 		sessionManager: SessionManager.inMemory(cwd),
 		settings,
-		model: getBundledModel("openai", "gpt-4o-mini"),
+		model,
 		disableExtensionDiscovery: true,
 		promptTemplates: [],
 		slashCommands: [],
@@ -94,6 +101,31 @@ describe("context-file prompt refresh", () => {
 			await session.refreshSkills();
 
 			expect(session.systemPrompt.join("\n")).toContain(INITIAL_CONTEXT);
+		} finally {
+			await session.dispose();
+			authStorage.close();
+		}
+	});
+
+	it("refreshes the advisor context prompt when context files change", async () => {
+		using tempDir = TempDir.createSync("@omp-context-refresh-advisor-");
+		const contextPath = tempDir.join("AGENTS.md");
+		await Bun.write(contextPath, INITIAL_CONTEXT);
+		const { session, authStorage } = await createContextSession(tempDir.path(), Settings.isolated({}), {
+			advisor: true,
+		});
+
+		try {
+			const advisorPrompt = () => session.getAdvisorAgent()?.state.systemPrompt.join("\n") ?? "";
+			expect(session.isAdvisorActive()).toBe(true);
+			expect(advisorPrompt()).toContain(INITIAL_CONTEXT);
+
+			await Bun.write(contextPath, UPDATED_CONTEXT);
+			await session.refreshSkills();
+
+			const refreshed = advisorPrompt();
+			expect(refreshed).toContain(UPDATED_CONTEXT);
+			expect(refreshed).not.toContain(INITIAL_CONTEXT);
 		} finally {
 			await session.dispose();
 			authStorage.close();

@@ -8720,6 +8720,15 @@ export class AgentSession {
 	}
 
 	/**
+	 * Refresh the project context prompt advisor sessions run against after
+	 * context files change on `/reload-plugins`. Rebuilds live advisor runtimes so
+	 * they stop evaluating turns against stale `AGENTS.md` instructions.
+	 */
+	setAdvisorContextPrompt(contextPrompt: string | undefined): void {
+		this.#advisors.setContextPrompt(contextPrompt);
+	}
+
+	/**
 	 * Whether the advisor setting is enabled for this session.
 	 */
 	isAdvisorEnabled(): boolean {

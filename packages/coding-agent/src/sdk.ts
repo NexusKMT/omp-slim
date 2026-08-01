@@ -2792,6 +2792,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					...(settings.get("disabledExtensions") ?? []),
 				]);
 				toolSession.contextFiles = contextFiles;
+				session.setAdvisorContextPrompt(formatAdvisorContextPrompt(contextFiles));
 			}
 			const memoryBackend = restrictToolNames ? undefined : await resolveMemoryBackend(settings);
 			const memoryInstructions = memoryBackend
