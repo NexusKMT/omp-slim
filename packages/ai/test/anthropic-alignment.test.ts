@@ -486,9 +486,9 @@ describe("Anthropic request fingerprint alignment", () => {
 			{ isOAuth: false },
 		)) as { messages?: Array<{ role: string; content: string | Array<{ type: string; cache_control?: unknown }> }> };
 
-		// The thinking-only assistant turn sits inside the trailing two-message
-		// cache window (the Continue. pad is appended after it) but must not get
-		// a breakpoint — Anthropic rejects cache_control on thinking blocks.
+		// The thinking-only assistant cannot accept cache_control, so the
+		// preceding real user turn gets the fallback breakpoint. The synthetic
+		// trailing Continue. pad must never consume it.
 		const assistant = payload.messages?.find(message => message.role === "assistant");
 		expect(assistant).toBeDefined();
 		const assistantContent = assistant?.content;
@@ -496,11 +496,52 @@ describe("Anthropic request fingerprint alignment", () => {
 		for (const block of (assistantContent ?? []) as Array<{ type: string; cache_control?: unknown }>) {
 			expect(block.cache_control).toBeUndefined();
 		}
+		const user = payload.messages?.[0];
+		const userContent = user?.content;
+		expect(Array.isArray(userContent)).toBe(true);
+		expect(Array.isArray(userContent) ? userContent[0]?.cache_control : undefined).toBeDefined();
 		const last = payload.messages?.at(-1);
-		expect(last).toBeDefined();
-		const lastContent = last?.content;
-		expect(Array.isArray(lastContent)).toBe(true);
-		expect((lastContent as Array<{ cache_control?: unknown }>)[0]?.cache_control).toBeDefined();
+		expect(last?.content).toBe("Continue.");
+	});
+
+	it("caches the real assistant before a synthetic Continue pad when the breakpoint budget is tight", async () => {
+		const assistant: AssistantMessage = {
+			role: "assistant",
+			content: [{ type: "text", text: "real assistant answer" }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: ANTHROPIC_MODEL.id,
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: Date.now(),
+		};
+		const payload = (await captureAnthropicPayload(
+			ANTHROPIC_MODEL,
+			{
+				systemPrompt: ["stable system", "volatile project footer", "active repo context"],
+				messages: [{ role: "user", content: "question", timestamp: Date.now() }, assistant],
+			},
+			{ isOAuth: false },
+		)) as {
+			system?: Array<{ cache_control?: unknown }>;
+			messages?: Array<{ role: string; content: string | Array<{ cache_control?: unknown }> }>;
+		};
+
+		expect(payload.system?.filter(block => block.cache_control != null)).toHaveLength(3);
+		const assistantContent = payload.messages?.find(message => message.role === "assistant")?.content;
+		expect(Array.isArray(assistantContent) ? assistantContent[0]?.cache_control : undefined).toEqual({
+			type: "ephemeral",
+			ttl: "1h",
+		});
+		const pad = payload.messages?.at(-1);
+		expect(pad?.content).toBe("Continue.");
 	});
 
 	it("adds effort and mid-conversation betas to API-key requests that use those features", async () => {

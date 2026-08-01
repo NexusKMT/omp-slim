@@ -3161,8 +3161,20 @@ function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?:
 
 	if (cacheBreakpointsUsed >= MAX_CACHE_BREAKPOINTS) return;
 
-	const start = isCCLayout ? Math.max(0, params.messages.length - 1) : Math.max(0, params.messages.length - 2);
-	for (let i = params.messages.length - 1; i >= start; i--) {
+	// `convertAnthropicMessages` appends this neutral pad after a trailing
+	// assistant because Anthropic rejects assistant-prefill endings. It is absent
+	// from the next normal turn, so caching it wastes a scarce breakpoint; anchor
+	// the cache window on the preceding real assistant instead.
+	const trailingIndex = params.messages.length - 1;
+	const trailingMessage = params.messages[trailingIndex];
+	const hasTrailingAssistantPad =
+		trailingMessage?.role === "user" &&
+		trailingMessage.content === "Continue." &&
+		params.messages[trailingIndex - 1]?.role === "assistant";
+	const messageEnd = hasTrailingAssistantPad ? trailingIndex - 1 : trailingIndex;
+	const messageWindowSize = isCCLayout ? 1 : 2;
+	const start = Math.max(0, messageEnd - messageWindowSize + 1);
+	for (let i = messageEnd; i >= start; i--) {
 		if (cacheBreakpointsUsed >= MAX_CACHE_BREAKPOINTS) break;
 		const message = params.messages[i];
 		if (!message) continue;
