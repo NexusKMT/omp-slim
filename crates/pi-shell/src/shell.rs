@@ -1990,7 +1990,10 @@ mod proc_snapshot {
 		rss_pages:  i64,
 	}
 
-	#[allow(clippy::unnecessary_wraps, reason = "Option returns match the cross-platform ProcInfo contract")]
+	#[allow(
+		clippy::unnecessary_wraps,
+		reason = "Option returns match the cross-platform ProcInfo contract"
+	)]
 	impl ProcInfo {
 		pub fn all() -> Vec<Self> {
 			let Ok(entries) = fs::read_dir("/proc") else {
@@ -2248,7 +2251,10 @@ mod proc_snapshot {
 		args: Vec<String>,
 	}
 
-	#[allow(clippy::unnecessary_wraps, reason = "Option returns match the cross-platform ProcInfo contract")]
+	#[allow(
+		clippy::unnecessary_wraps,
+		reason = "Option returns match the cross-platform ProcInfo contract"
+	)]
 	impl ProcInfo {
 		pub fn all() -> Vec<Self> {
 			// SAFETY: null/zero is libproc's documented sizing query.
@@ -2607,7 +2613,10 @@ mod proc_snapshot {
 		creation:      u64,
 	}
 
-	#[allow(clippy::unnecessary_wraps, reason = "Option returns match the cross-platform ProcInfo contract")]
+	#[allow(
+		clippy::unnecessary_wraps,
+		reason = "Option returns match the cross-platform ProcInfo contract"
+	)]
 	impl ProcInfo {
 		pub fn all() -> Vec<Self> {
 			let mut handles = HashMap::new();
