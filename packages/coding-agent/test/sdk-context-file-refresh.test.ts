@@ -1,0 +1,78 @@
+import { describe, expect, it } from "bun:test";
+import { AuthStorage } from "@oh-my-pi/pi-ai";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
+import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { TempDir } from "@oh-my-pi/pi-utils";
+
+const INITIAL_CONTEXT = "reload-context-initial-marker";
+const UPDATED_CONTEXT = "reload-context-updated-marker";
+const PROJECT_CONTEXT_EXTENSION_ID = "context-file:project:AGENTS.md";
+
+async function createContextSession(
+	cwd: string,
+	settings: Settings,
+): Promise<{ session: AgentSession; authStorage: AuthStorage }> {
+	const authStorage = await AuthStorage.create(`${cwd}/auth.db`);
+	const modelRegistry = new ModelRegistry(authStorage);
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: cwd,
+		modelRegistry,
+		sessionManager: SessionManager.inMemory(cwd),
+		settings,
+		model: getBundledModel("openai", "gpt-4o-mini"),
+		disableExtensionDiscovery: true,
+		promptTemplates: [],
+		slashCommands: [],
+		enableMCP: false,
+		enableLsp: false,
+		skipPythonPreflight: true,
+	});
+	return { session, authStorage };
+}
+
+describe("context-file prompt refresh", () => {
+	it("replaces edited context-file content in the current system prompt", async () => {
+		using tempDir = TempDir.createSync("@omp-context-refresh-edit-");
+		const contextPath = tempDir.join("AGENTS.md");
+		await Bun.write(contextPath, INITIAL_CONTEXT);
+		const { session, authStorage } = await createContextSession(tempDir.path(), Settings.isolated({}));
+
+		try {
+			expect(session.systemPrompt.join("\n")).toContain(INITIAL_CONTEXT);
+
+			await Bun.write(contextPath, UPDATED_CONTEXT);
+			await session.refreshSkills();
+
+			const refreshedPrompt = session.systemPrompt.join("\n");
+			expect(refreshedPrompt).toContain(UPDATED_CONTEXT);
+			expect(refreshedPrompt).not.toContain(INITIAL_CONTEXT);
+		} finally {
+			await session.dispose();
+			authStorage.close();
+		}
+	});
+
+	it("removes a disabled context file from the current system prompt", async () => {
+		using tempDir = TempDir.createSync("@omp-context-refresh-disable-");
+		await Bun.write(tempDir.join("AGENTS.md"), INITIAL_CONTEXT);
+		const settings = Settings.isolated({});
+		const { session, authStorage } = await createContextSession(tempDir.path(), settings);
+
+		try {
+			expect(session.systemPrompt.join("\n")).toContain(INITIAL_CONTEXT);
+
+			settings.set("disabledExtensions", [PROJECT_CONTEXT_EXTENSION_ID]);
+			await session.refreshSkills();
+
+			expect(session.systemPrompt.join("\n")).not.toContain(INITIAL_CONTEXT);
+		} finally {
+			await session.dispose();
+			authStorage.close();
+		}
+	});
+});

@@ -1591,7 +1591,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		}
 		return result;
 	};
-	const [contextFiles, resolvedWorkspaceTree, watchdogFiles, activeRepoContext, discoveredAdvisors] =
+	const [initialContextFiles, resolvedWorkspaceTree, watchdogFiles, activeRepoContext, discoveredAdvisors] =
 		await Promise.all([
 			contextFilesPromise,
 			raceWithDeadline("buildWorkspaceTree", workspaceTreePromise),
@@ -1599,6 +1599,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			activeRepoContextPromise,
 			advisorConfigsPromise,
 		]);
+	let contextFiles = initialContextFiles;
 
 	let agent: Agent;
 	let session!: AgentSession;
@@ -2783,6 +2784,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			tools: Map<string, AgentTool>,
 		): Promise<BuildSystemPromptResult> => {
 			toolContextStore.setToolNames(toolNames);
+			const promptCwd = sessionManager.getCwd();
+			if (hasSession && options.contextFiles === undefined) {
+				contextFiles = await logger.time("discoverContextFiles", discoverContextFiles, promptCwd, agentDir);
+				toolSession.contextFiles = contextFiles;
+			}
 			const memoryBackend = restrictToolNames ? undefined : await resolveMemoryBackend(settings);
 			const memoryInstructions = memoryBackend
 				? await memoryBackend.buildDeveloperInstructions(agentDir, settings, session)
@@ -2852,7 +2858,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					: options.appendSystemPrompt;
 			}
 			const defaultPrompt = await buildSystemPromptInternal({
-				cwd,
+				cwd: promptCwd,
 				additionalWorkspaceRoots: sessionManager.getAdditionalDirectories(),
 				xdevTools: toolSession.xdev ? xdevEntries(toolSession.xdev) : [],
 				xdevDocs: toolSession.xdev
