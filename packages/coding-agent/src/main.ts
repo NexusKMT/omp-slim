@@ -1205,6 +1205,19 @@ export async function runRootCommand(
 	});
 
 	let cwd = getProjectDir();
+	// Declare the interactive-host flag BEFORE Settings.init so the very first
+	// session-critical database opens (agent.db/stats.db during settings load)
+	// can pick the right busy timeout. See getDbBusyTimeoutMs().
+	const isProtocolMode = mode === "rpc" || mode === "rpc-ui" || mode === "acp";
+	// Protocol modes own stdin; treating it as prompt text would consume JSON-RPC frames before their transports start.
+	const pipedInput = isProtocolMode ? undefined : await logger.time("readPipedInput", readPipedInput);
+	const autoPrint = pipedInput !== undefined && !parsedArgs.print && parsedArgs.mode === undefined;
+	const isInteractive = !parsedArgs.print && !autoPrint && parsedArgs.mode === undefined;
+	// Only the interactive host renders a focusable Agent Hub / subagent session
+	// tree; declare it so headless subagent optimizations (e.g. skipping replan
+	// title refresh) can tell a focusable process from a print/RPC/eval one.
+	setInteractiveHost(isInteractive);
+
 	const settingsInstance =
 		deps.settings ?? (await logger.time("settings:init", Settings.init, { cwd, configFiles: parsedArgs.config }));
 	if (parsedArgs.approvalMode) {
@@ -1227,15 +1240,6 @@ export async function runRootCommand(
 	if (parsedArgs.noTitle || parsedArgs.mode === "rpc" || parsedArgs.mode === "rpc-ui" || parsedArgs.mode === "acp") {
 		Bun.env.PI_NO_TITLE = "1";
 	}
-	const isProtocolMode = mode === "rpc" || mode === "rpc-ui" || mode === "acp";
-	// Protocol modes own stdin; treating it as prompt text would consume JSON-RPC frames before their transports start.
-	const pipedInput = isProtocolMode ? undefined : await logger.time("readPipedInput", readPipedInput);
-	const autoPrint = pipedInput !== undefined && !parsedArgs.print && parsedArgs.mode === undefined;
-	const isInteractive = !parsedArgs.print && !autoPrint && parsedArgs.mode === undefined;
-	// Only the interactive host renders a focusable Agent Hub / subagent session
-	// tree; declare it so headless subagent optimizations (e.g. skipping replan
-	// title refresh) can tell a focusable process from a print/RPC/eval one.
-	setInteractiveHost(isInteractive);
 
 	// Initialize discovery system with settings for provider persistence
 	logger.time("initializeWithSettings", initializeWithSettings, settingsInstance);

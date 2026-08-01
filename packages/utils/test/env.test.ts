@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { filterProcessEnv, parseEnvFile } from "@oh-my-pi/pi-utils/env";
+import { filterProcessEnv, getDbBusyTimeoutMs, parseEnvFile, setInteractiveHost } from "@oh-my-pi/pi-utils/env";
 
 const tempDirs: string[] = [];
 
@@ -19,6 +19,26 @@ function writeTempEnv(content: string): string {
 	fs.writeFileSync(filePath, content);
 	return filePath;
 }
+
+describe("getDbBusyTimeoutMs", () => {
+	it("defaults to the bounded headless timeout", () => {
+		const previous = setInteractiveHost(false);
+		try {
+			expect(getDbBusyTimeoutMs()).toBe(1000);
+		} finally {
+			setInteractiveHost(previous);
+		}
+	});
+
+	it("keeps the interactive timeout for interactive hosts", () => {
+		const previous = setInteractiveHost(true);
+		try {
+			expect(getDbBusyTimeoutMs()).toBe(5000);
+		} finally {
+			setInteractiveHost(previous);
+		}
+	});
+});
 
 describe("parseEnvFile", () => {
 	it("ignores malformed names and nul-containing values", () => {
