@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
+import { withStatsSyncLock } from "@oh-my-pi/omp-stats/aggregator";
 import {
 	getAgentDir,
 	getBlobsDir,
@@ -429,18 +430,6 @@ function sessionArtifactsPath(sessionPath: string): string {
 	return sessionPath.slice(0, -SESSION_SUFFIX.length);
 }
 
-function sessionIdFromSessionPath(sessionPath: string): string | undefined {
-	const basename = path.basename(sessionPath);
-	if (basename.endsWith(COMPRESSED_SESSION_SUFFIX)) {
-		const id = basename.slice(0, -COMPRESSED_SESSION_SUFFIX.length);
-		return id || undefined;
-	}
-	if (basename.endsWith(SESSION_SUFFIX)) {
-		const id = basename.slice(0, -SESSION_SUFFIX.length);
-		return id || undefined;
-	}
-	return undefined;
-}
 interface SessionLineageHeader {
 	id: string;
 	parentSession?: string;
@@ -467,10 +456,6 @@ function sessionLineageHeaderFromText(text: string): SessionLineageHeader | unde
 		}
 	}
 	return undefined;
-}
-
-async function archivedSessionIdFromFile(file: string): Promise<string | undefined> {
-	return sessionLineageHeaderFromText(await readTextIfPresent(file))?.id ?? sessionIdFromSessionPath(file);
 }
 
 async function gzipSessionFile(source: string, destination: string): Promise<void> {
@@ -578,7 +563,7 @@ function deleteHistoryRowsForSessions(dbPath: string, sessionIds: string[]): { d
 async function collectArchivedSessionIds(archiveRoot: string): Promise<string[]> {
 	const ids = new Set<string>();
 	for (const file of await collectCompressedJsonlFiles(archiveRoot)) {
-		const id = await archivedSessionIdFromFile(file);
+		const id = sessionLineageHeaderFromText(await readTextIfPresent(file))?.id;
 		if (id) ids.add(id);
 	}
 	return [...ids].sort();
@@ -611,6 +596,13 @@ async function cleanupHistoryRowsForArchivedSessions(
 
 const STATS_SESSION_TABLES = ["messages", "user_messages", "tool_calls", "file_offsets"] as const;
 const STATS_ENTRY_TABLES = ["messages", "user_messages", "tool_calls"] as const;
+type StatsEntryTable = (typeof STATS_ENTRY_TABLES)[number];
+
+const STATS_IDENTITY_COLUMNS: Record<StatsEntryTable, readonly string[]> = {
+	messages: ["entry_id", "timestamp"],
+	user_messages: ["entry_id", "timestamp"],
+	tool_calls: ["entry_id", "timestamp", "tool_call_id"],
+};
 
 interface ArchivedStatsSession {
 	path: string;
@@ -622,9 +614,15 @@ interface StatsLineageNode extends ArchivedStatsSession {
 	statsPaths: Set<string>;
 }
 
+interface StatsEntryIdentity {
+	entryId: string;
+	timestamp: number;
+	toolCallId: string;
+}
+
 interface StatsTransferTarget {
 	path: string;
-	entryIds: string[];
+	identities: Record<StatsEntryTable, StatsEntryIdentity[]>;
 }
 
 interface StatsCleanupPlan {
@@ -692,7 +690,7 @@ function resolveLogicalSessionMatch(
 	const stem = matches[0] ? path.basename(matches[0].logicalRoot, SESSION_SUFFIX) : "";
 	const idMatches = matches.filter(match => stem === match.node.id || stem.endsWith(`_${match.node.id}`));
 	if (idMatches.length === 1) return idMatches[0];
-	return matches.length === 1 ? matches[0] : undefined;
+	return undefined;
 }
 
 /**
@@ -787,31 +785,84 @@ function buildStatsCleanupPlans(
 	});
 }
 
-async function collectSessionMessageEntryIds(sessionPath: string): Promise<string[]> {
+async function collectSessionStatsIdentities(
+	sessionPath: string,
+): Promise<Record<StatsEntryTable, StatsEntryIdentity[]>> {
+	const identities: Record<StatsEntryTable, StatsEntryIdentity[]> = {
+		messages: [],
+		user_messages: [],
+		tool_calls: [],
+	};
 	const decoder = new TextDecoder();
-	const entryIds: string[] = [];
 	for await (const line of readLines(Bun.file(sessionPath).stream())) {
 		if (line.length === 0) continue;
 		try {
-			const entry = JSON.parse(decoder.decode(line)) as { type?: unknown; id?: unknown };
-			if (entry.type === "message" && typeof entry.id === "string" && entry.id.length > 0) entryIds.push(entry.id);
+			const record: unknown = JSON.parse(decoder.decode(line));
+			if (
+				!record ||
+				typeof record !== "object" ||
+				!("type" in record) ||
+				record.type !== "message" ||
+				!("id" in record) ||
+				typeof record.id !== "string" ||
+				record.id.length === 0 ||
+				!("message" in record) ||
+				!record.message ||
+				typeof record.message !== "object"
+			) {
+				continue;
+			}
+			const message = record.message;
+			if (!("role" in message)) continue;
+			const parsedEntryTimestamp =
+				"timestamp" in record && typeof record.timestamp === "string" ? Date.parse(record.timestamp) : Number.NaN;
+			if (message.role === "user") {
+				identities.user_messages.push({
+					entryId: record.id,
+					timestamp: Number.isFinite(parsedEntryTimestamp) ? parsedEntryTimestamp : 0,
+					toolCallId: "",
+				});
+				continue;
+			}
+			if (message.role !== "assistant") continue;
+			const timestamp =
+				"timestamp" in message && typeof message.timestamp === "number" && Number.isFinite(message.timestamp)
+					? message.timestamp
+					: Number.isFinite(parsedEntryTimestamp)
+						? parsedEntryTimestamp
+						: 0;
+			identities.messages.push({ entryId: record.id, timestamp, toolCallId: "" });
+			if (!("content" in message) || !Array.isArray(message.content)) continue;
+			for (const block of message.content) {
+				if (
+					block &&
+					typeof block === "object" &&
+					"type" in block &&
+					block.type === "toolCall" &&
+					"id" in block &&
+					typeof block.id === "string" &&
+					block.id.length > 0
+				) {
+					identities.tool_calls.push({ entryId: record.id, timestamp, toolCallId: block.id });
+				}
+			}
 		} catch {
 			// Stats parsing is also lenient: a malformed line cannot own a retained row.
 		}
 	}
-	return entryIds;
+	return identities;
 }
 
 async function populateStatsTransferTargets(plans: StatsCleanupPlan[]): Promise<void> {
-	const entryIdsBySession = new Map<string, Promise<string[]>>();
+	const identitiesBySession = new Map<string, Promise<Record<StatsEntryTable, StatsEntryIdentity[]>>>();
 	for (const plan of plans) {
 		for (const retained of plan.retainedSessions) {
-			let entryIds = entryIdsBySession.get(retained.path);
-			if (!entryIds) {
-				entryIds = collectSessionMessageEntryIds(retained.path);
-				entryIdsBySession.set(retained.path, entryIds);
+			let identities = identitiesBySession.get(retained.path);
+			if (!identities) {
+				identities = collectSessionStatsIdentities(retained.path);
+				identitiesBySession.set(retained.path, identities);
 			}
-			plan.transfers.push({ path: retained.path, entryIds: await entryIds });
+			plan.transfers.push({ path: retained.path, identities: await identities });
 		}
 	}
 }
@@ -830,50 +881,83 @@ function reconcileStatsRowsForSessions(dbPath: string, plans: StatsCleanupPlan[]
 			table => tableExists(db, table) && tableHasColumn(db, table, "session_file"),
 		);
 		const entryTables = STATS_ENTRY_TABLES.filter(
-			table => sessionTables.includes(table) && tableHasColumn(db, table, "entry_id"),
+			table =>
+				sessionTables.includes(table) &&
+				STATS_IDENTITY_COLUMNS[table].every(column => tableHasColumn(db, table, column)),
 		);
-		const missingEntryIdentity = STATS_ENTRY_TABLES.filter(
-			table => sessionTables.includes(table) && !tableHasColumn(db, table, "entry_id"),
-		);
-		if (
-			missingEntryIdentity.length > 0 &&
-			plans.some(plan => plan.transfers.some(target => target.entryIds.length > 0))
-		) {
-			throw new Error(`stats tables missing entry_id: ${missingEntryIdentity.join(", ")}`);
-		}
-		db.run("CREATE TEMP TABLE gc_retained_entries (entry_id TEXT PRIMARY KEY, target_session_file TEXT NOT NULL)");
+
+		db.run(`
+			CREATE TEMP TABLE gc_retained_entries (
+				table_name TEXT NOT NULL,
+				entry_id TEXT NOT NULL,
+				timestamp INTEGER NOT NULL,
+				tool_call_id TEXT NOT NULL,
+				target_session_file TEXT NOT NULL,
+				PRIMARY KEY (table_name, entry_id, timestamp, tool_call_id)
+			)
+		`);
 		const clearRetainedEntries = db.prepare("DELETE FROM gc_retained_entries");
-		const insertRetainedEntry = db.prepare(
-			"INSERT OR IGNORE INTO gc_retained_entries (entry_id, target_session_file) VALUES (?, ?)",
-		);
-		const transferStatements = entryTables.map(table =>
-			db.prepare(`
+		const insertRetainedEntry = db.prepare(`
+			INSERT OR IGNORE INTO gc_retained_entries (
+				table_name, entry_id, timestamp, tool_call_id, target_session_file
+			) VALUES (?, ?, ?, ?, ?)
+		`);
+		const transferStatements = entryTables.map(table => {
+			const toolCallMatch =
+				table === "tool_calls" ? `retained.tool_call_id = ${table}.tool_call_id` : "retained.tool_call_id = ''";
+			const identityMatch = `
+				retained.table_name = '${table}'
+				AND retained.entry_id = ${table}.entry_id
+				AND retained.timestamp = ${table}.timestamp
+				AND ${toolCallMatch}
+			`;
+			return db.prepare(`
 				UPDATE OR IGNORE ${table}
 				SET session_file = (
-					SELECT target_session_file
-					FROM gc_retained_entries
-					WHERE gc_retained_entries.entry_id = ${table}.entry_id
+					SELECT retained.target_session_file
+					FROM gc_retained_entries AS retained
+					WHERE ${identityMatch}
 				)
 				WHERE session_file = ?
-					AND entry_id IN (SELECT entry_id FROM gc_retained_entries)
-			`),
-		);
-		const deleteStatements = sessionTables.map(table =>
-			db.prepare(`DELETE FROM ${table} WHERE session_file = ? OR instr(session_file, ?) = 1`),
-		);
+					AND EXISTS (
+						SELECT 1
+						FROM gc_retained_entries AS retained
+						WHERE ${identityMatch}
+					)
+			`);
+		});
+		const deletionStatements = sessionTables.map(table => ({
+			table,
+			statement: db.prepare(`DELETE FROM ${table} WHERE session_file = ? OR instr(session_file, ?) = 1`),
+		}));
 		let deleted = 0;
 		const tx = db.transaction((cleanupPlans: StatsCleanupPlan[]) => {
 			for (const plan of cleanupPlans) {
 				clearRetainedEntries.run();
 				for (const target of plan.transfers) {
-					for (const entryId of target.entryIds) insertRetainedEntry.run(entryId, target.path);
+					for (const table of entryTables) {
+						for (const identity of target.identities[table]) {
+							insertRetainedEntry.run(
+								table,
+								identity.entryId,
+								identity.timestamp,
+								identity.toolCallId,
+								target.path,
+							);
+						}
+					}
 				}
 				for (const sessionPath of new Set(plan.sessionPaths)) {
 					for (const statement of transferStatements) statement.run(sessionPath);
 				}
 				for (const sessionPath of new Set(plan.sessionPaths)) {
 					const nestedPrefix = `${sessionArtifactsPath(sessionPath)}${path.sep}`;
-					for (const statement of deleteStatements) {
+					for (const { table, statement } of deletionStatements) {
+						const requiresTransfer =
+							plan.retainedSessions.length > 0 &&
+							table !== "file_offsets" &&
+							!entryTables.some(entryTable => entryTable === table);
+						if (requiresTransfer) continue;
 						const result = statement.run(sessionPath, nestedPrefix) as SqliteRunResult;
 						deleted += sqliteNumber(result.changes);
 					}
@@ -890,18 +974,24 @@ function reconcileStatsRowsForSessions(dbPath: string, plans: StatsCleanupPlan[]
 async function collectArchivedStatsSessions(
 	archiveRoot: string,
 	sessionsRoot: string,
+	onError: (file: string, error: unknown) => void,
 ): Promise<ArchivedStatsSession[]> {
 	const sessions: ArchivedStatsSession[] = [];
 	for (const file of await collectCompressedJsonlFiles(archiveRoot)) {
 		const relative = path.relative(archiveRoot, file);
 		if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) continue;
 		const sourcePath = path.join(sessionsRoot, relative.slice(0, -".gz".length));
-		const header = sessionLineageHeaderFromText(await readTextIfPresent(file));
-		sessions.push({
-			path: sourcePath,
-			id: header?.id ?? sessionIdFromSessionPath(sourcePath) ?? sourcePath,
-			parentSession: header?.parentSession,
-		});
+		try {
+			const header = sessionLineageHeaderFromText(await readTextIfPresent(file));
+			if (!header) throw new Error("archive is missing a valid session header");
+			sessions.push({
+				path: sourcePath,
+				id: header.id,
+				parentSession: header.parentSession,
+			});
+		} catch (error) {
+			onError(file, error);
+		}
 	}
 	return sessions;
 }
@@ -929,9 +1019,19 @@ async function cleanupStatsRowsForArchivedSessions(
 
 	let retainedSessions: SessionInfo[];
 	try {
-		for (const session of await collectArchivedStatsSessions(archiveRoot, getSessionsDir(options.agentDir))) {
+		for (const session of await collectArchivedStatsSessions(
+			archiveRoot,
+			getSessionsDir(options.agentDir),
+			(file, error) => {
+				result.errors.push(`stats cleanup scan ${file}: ${errorMessage(error)}`);
+			},
+		)) {
 			archivedByPath.set(path.resolve(session.path), session);
 		}
+	} catch (error) {
+		result.errors.push(`stats cleanup scan: ${errorMessage(error)}`);
+	}
+	try {
 		retainedSessions = await listActiveSessions(getSessionsDir(options.agentDir));
 	} catch (error) {
 		result.errors.push(`stats cleanup scan: ${errorMessage(error)}`);
@@ -939,10 +1039,12 @@ async function cleanupStatsRowsForArchivedSessions(
 	}
 
 	try {
-		const storedSessionPaths = collectStoredStatsSessionPaths(dbPath);
-		const plans = buildStatsCleanupPlans([...archivedByPath.values()], retainedSessions, storedSessionPaths);
-		await populateStatsTransferTargets(plans);
-		result.statsRowsDeleted = reconcileStatsRowsForSessions(dbPath, plans);
+		await withStatsSyncLock(dbPath, async () => {
+			const storedSessionPaths = collectStoredStatsSessionPaths(dbPath);
+			const plans = buildStatsCleanupPlans([...archivedByPath.values()], retainedSessions, storedSessionPaths);
+			await populateStatsTransferTargets(plans);
+			result.statsRowsDeleted = reconcileStatsRowsForSessions(dbPath, plans);
+		});
 	} catch (error) {
 		result.errors.push(`stats cleanup: ${errorMessage(error)}`);
 	}

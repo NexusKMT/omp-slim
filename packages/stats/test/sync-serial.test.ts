@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { syncAllSessions } from "@oh-my-pi/omp-stats/aggregator";
+import { syncAllSessions, withStatsSyncLock } from "@oh-my-pi/omp-stats/aggregator";
 import { getOverallStats } from "@oh-my-pi/omp-stats/db";
 import { getSessionsDir } from "@oh-my-pi/pi-utils";
 import { installStatsTestIsolation } from "./helpers/temp-agent";
@@ -92,5 +92,79 @@ describe("stats sync serial mode", () => {
 
 		await expect(syncAllSessions({ workers: 2 })).rejects.toBe(workerProbe);
 		expect(workerSpy).toHaveBeenCalled();
+	});
+
+	it("reclaims a dead owner's abandoned stale breaker", async () => {
+		const dbPath = path.join(getSessionsDir(), "stats-lock.db");
+		const lockPath = `${dbPath}.sync.lock`;
+		const breakerPath = `${lockPath}.break`;
+		const deadPid = 424_242;
+		await fs.mkdir(path.dirname(dbPath), { recursive: true });
+		await Bun.write(lockPath, `${deadPid}\n1\nprimary\n`);
+		await Bun.write(breakerPath, `${deadPid}\n1\nbreaker\n`);
+		const staleTime = new Date(Date.now() - 2 * 60 * 60 * 1000);
+		await fs.utimes(lockPath, staleTime, staleTime);
+		await fs.utimes(breakerPath, staleTime, staleTime);
+		vi.spyOn(process, "kill").mockImplementation(pid => {
+			if (pid === deadPid) throw Object.assign(new Error("dead owner"), { code: "ESRCH" });
+			return true;
+		});
+
+		vi.spyOn(globalThis, "setTimeout").mockImplementation(callback => {
+			queueMicrotask(callback as () => void);
+			return 0;
+		});
+		const result = await withStatsSyncLock(dbPath, async () => "acquired");
+
+		expect(result).toBe("acquired");
+		expect(await Bun.file(lockPath).exists()).toBe(false);
+		expect(await Bun.file(breakerPath).exists()).toBe(false);
+	});
+
+	it("never reclaims a live owner-stamped breaker even when its mtime is stale", async () => {
+		const dbPath = path.join(getSessionsDir(), "stats-live-breaker.db");
+		const lockPath = `${dbPath}.sync.lock`;
+		const breakerPath = `${lockPath}.break`;
+		const deadPid = 424_243;
+		const liveBreakerToken = `${process.pid}\n1\nlive-breaker\n`;
+		await fs.mkdir(path.dirname(dbPath), { recursive: true });
+		await Bun.write(lockPath, `${deadPid}\n1\nprimary\n`);
+		await Bun.write(breakerPath, liveBreakerToken);
+		const staleTime = new Date(Date.now() - 2 * 60 * 60 * 1000);
+		await fs.utimes(lockPath, staleTime, staleTime);
+		await fs.utimes(breakerPath, staleTime, staleTime);
+		vi.spyOn(process, "kill").mockImplementation(pid => {
+			if (pid === deadPid) throw Object.assign(new Error("dead owner"), { code: "ESRCH" });
+			return true;
+		});
+		const retryScheduled = Promise.withResolvers<void>();
+		let resumeRetry: (() => void) | undefined;
+		let breakerReleased = false;
+		vi.spyOn(globalThis, "setTimeout").mockImplementation(callback => {
+			const run = callback as () => void;
+			if (breakerReleased) {
+				queueMicrotask(run);
+			} else {
+				resumeRetry = run;
+				retryScheduled.resolve();
+			}
+			return 0;
+		});
+
+		let acquired = false;
+		const pending = withStatsSyncLock(dbPath, async () => {
+			acquired = true;
+		});
+		try {
+			await retryScheduled.promise;
+			expect(acquired).toBe(false);
+			expect(await Bun.file(breakerPath).text()).toBe(liveBreakerToken);
+		} finally {
+			breakerReleased = true;
+			await fs.rm(breakerPath, { force: true });
+			resumeRetry?.();
+			await pending;
+		}
+		expect(acquired).toBe(true);
 	});
 });

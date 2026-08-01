@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { gunzipSync } from "node:zlib";
-import { runGcCommand } from "@oh-my-pi/pi-coding-agent/cli/gc-cli";
+import { gunzipSync, gzipSync } from "node:zlib";
+import { withStatsSyncLock } from "@oh-my-pi/omp-stats/aggregator";
+import { type GcResult, runGcCommand } from "@oh-my-pi/pi-coding-agent/cli/gc-cli";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
 	getAgentDir,
@@ -632,6 +633,8 @@ describe("runGcCommand cold-session archive", () => {
 		const child = path.join(sessionsDir, "20260726_child-session.jsonl");
 		const sibling = path.join(sessionsDir, "20260725_sibling-session.jsonl");
 		const timestamp = "2026-06-26T12:00:00.000Z";
+		const timestampMs = Date.parse(timestamp);
+		const collisionTimestamp = "2026-06-27T12:00:00.000Z";
 		const sharedUser = {
 			type: "message",
 			id: "shared-user",
@@ -644,7 +647,12 @@ describe("runGcCommand cold-session archive", () => {
 			id: "shared-assistant",
 			parentId: "shared-user",
 			timestamp,
-			message: { role: "assistant", content: [] },
+			message: {
+				role: "assistant",
+				model: "test-model",
+				provider: "test-provider",
+				content: [{ type: "toolCall", id: "shared-tool", name: "read" }],
+			},
 		};
 		const parentOnlyUser = {
 			type: "message",
@@ -657,6 +665,41 @@ describe("runGcCommand cold-session archive", () => {
 			type: "message",
 			id: "parent-only-assistant",
 			parentId: "parent-only-user",
+			timestamp,
+			message: { role: "assistant", content: [] },
+		};
+		const archivedCollisionUser = {
+			type: "message",
+			id: "collision-user",
+			parentId: "parent-only-assistant",
+			timestamp,
+			message: { role: "user", content: "archived collision" },
+		};
+		const archivedCollisionAssistant = {
+			type: "message",
+			id: "collision-assistant",
+			parentId: "collision-user",
+			timestamp,
+			message: {
+				role: "assistant",
+				model: "test-model",
+				provider: "test-provider",
+				content: [{ type: "toolCall", id: "collision-tool", name: "read" }],
+			},
+		};
+		const retainedCollisionUser = {
+			...archivedCollisionUser,
+			timestamp: collisionTimestamp,
+			message: { role: "user", content: "different retained entry" },
+		};
+		const retainedCollisionAssistant = {
+			...archivedCollisionAssistant,
+			timestamp: collisionTimestamp,
+		};
+		const terminalAssistant = {
+			type: "message",
+			id: "terminal-assistant",
+			parentId: null,
 			timestamp,
 			message: { role: "assistant", content: [] },
 		};
@@ -674,6 +717,9 @@ describe("runGcCommand cold-session archive", () => {
 				sharedAssistant,
 				parentOnlyUser,
 				parentOnlyAssistant,
+				archivedCollisionUser,
+				archivedCollisionAssistant,
+				terminalAssistant,
 				"",
 			]
 				.map(entry => (typeof entry === "string" ? entry : JSON.stringify(entry)))
@@ -693,6 +739,9 @@ describe("runGcCommand cold-session archive", () => {
 				}),
 				JSON.stringify(sharedUser),
 				JSON.stringify(sharedAssistant),
+				JSON.stringify(retainedCollisionUser),
+				JSON.stringify(retainedCollisionAssistant),
+				JSON.stringify(terminalAssistant),
 				"",
 			].join("\n"),
 		);
@@ -709,6 +758,7 @@ describe("runGcCommand cold-session archive", () => {
 				}),
 				JSON.stringify(sharedUser),
 				JSON.stringify(sharedAssistant),
+				JSON.stringify(terminalAssistant),
 				"",
 			].join("\n"),
 		);
@@ -719,13 +769,13 @@ describe("runGcCommand cold-session archive", () => {
 		const statsDbPath = path.join(root, "stats.db");
 		const db = new Database(statsDbPath);
 		db.run(
-			"CREATE TABLE messages (session_file TEXT NOT NULL, entry_id TEXT NOT NULL, UNIQUE(session_file, entry_id))",
+			"CREATE TABLE messages (session_file TEXT NOT NULL, entry_id TEXT NOT NULL, timestamp INTEGER NOT NULL, UNIQUE(session_file, entry_id))",
 		);
 		db.run(
-			"CREATE TABLE user_messages (session_file TEXT NOT NULL, entry_id TEXT NOT NULL, UNIQUE(session_file, entry_id))",
+			"CREATE TABLE user_messages (session_file TEXT NOT NULL, entry_id TEXT NOT NULL, timestamp INTEGER NOT NULL, UNIQUE(session_file, entry_id))",
 		);
 		db.run(
-			"CREATE TABLE tool_calls (session_file TEXT NOT NULL, entry_id TEXT NOT NULL, tool_call_id TEXT NOT NULL, UNIQUE(session_file, tool_call_id))",
+			"CREATE TABLE tool_calls (session_file TEXT NOT NULL, entry_id TEXT NOT NULL, timestamp INTEGER NOT NULL, tool_call_id TEXT NOT NULL, UNIQUE(session_file, tool_call_id))",
 		);
 		db.run(
 			"CREATE TABLE file_offsets (session_file TEXT PRIMARY KEY, offset INTEGER NOT NULL, last_modified INTEGER NOT NULL)",
@@ -734,15 +784,17 @@ describe("runGcCommand cold-session archive", () => {
 			["messages", "shared-assistant", "parent-only-assistant"],
 			["user_messages", "shared-user", "parent-only-user"],
 		] as const) {
-			const insert = db.prepare(`INSERT INTO ${table} (session_file, entry_id) VALUES (?, ?)`);
-			insert.run(parent, sharedId);
-			insert.run(parent, parentOnlyId);
+			const insert = db.prepare(`INSERT INTO ${table} (session_file, entry_id, timestamp) VALUES (?, ?, ?)`);
+			insert.run(parent, sharedId, timestampMs);
+			insert.run(parent, parentOnlyId, timestampMs);
+			insert.run(parent, table === "messages" ? "collision-assistant" : "collision-user", timestampMs);
 		}
 		const insertToolCall = db.prepare(
-			"INSERT INTO tool_calls (session_file, entry_id, tool_call_id) VALUES (?, ?, ?)",
+			"INSERT INTO tool_calls (session_file, entry_id, timestamp, tool_call_id) VALUES (?, ?, ?, ?)",
 		);
-		insertToolCall.run(parent, "shared-assistant", "shared-tool");
-		insertToolCall.run(parent, "parent-only-assistant", "parent-only-tool");
+		insertToolCall.run(parent, "shared-assistant", timestampMs, "shared-tool");
+		insertToolCall.run(parent, "parent-only-assistant", timestampMs, "parent-only-tool");
+		insertToolCall.run(parent, "collision-assistant", timestampMs, "collision-tool");
 		db.prepare("INSERT INTO file_offsets (session_file, offset, last_modified) VALUES (?, ?, ?)").run(parent, 444, 1);
 		const insertOffset = db.prepare(
 			"INSERT INTO file_offsets (session_file, offset, last_modified) VALUES (?, ?, ?)",
@@ -772,7 +824,7 @@ describe("runGcCommand cold-session archive", () => {
 		check.close();
 
 		expect(result.archive?.archived).toBe(1);
-		expect(result.archive?.statsRowsDeleted).toBe(4);
+		expect(result.archive?.statsRowsDeleted).toBe(7);
 		expect(result.archive?.errors).toEqual([]);
 		expect(messages).toEqual([{ session_file: child, entry_id: "shared-assistant" }]);
 		expect(userMessages).toEqual([{ session_file: child, entry_id: "shared-user" }]);
@@ -811,6 +863,91 @@ describe("runGcCommand cold-session archive", () => {
 		expect(secondOffsets).toEqual([
 			{ session_file: sibling, offset: siblingStat.size, last_modified: siblingStat.mtimeMs },
 		]);
+	});
+
+	test("scopes incompatible retained-entry deletion decisions to each cleanup plan", async () => {
+		const sessionsDir = path.join(getSessionsDir(root), "project");
+		await fs.mkdir(sessionsDir, { recursive: true });
+		const parent = path.join(sessionsDir, "20260626_partial-parent.jsonl");
+		const child = path.join(sessionsDir, "20260726_partial-child.jsonl");
+		const timestamp = "2026-06-26T12:00:00.000Z";
+		const sharedAssistant = {
+			type: "message",
+			id: "shared-assistant",
+			parentId: null,
+			timestamp,
+			message: { role: "assistant", content: [] },
+		};
+		await Bun.write(
+			parent,
+			[
+				JSON.stringify({ type: "session", version: 3, id: "partial-parent", timestamp, cwd: "/tmp" }),
+				JSON.stringify(sharedAssistant),
+				"",
+			].join("\n"),
+		);
+		await agePath(parent, 90);
+		await Bun.write(
+			child,
+			[
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "partial-child",
+					timestamp,
+					cwd: "/tmp",
+					parentSession: parent,
+				}),
+				JSON.stringify(sharedAssistant),
+				"",
+			].join("\n"),
+		);
+		const unrelated = await writeSession(root, "project", "partial-unrelated", "complete", {
+			ageDays: 90,
+			filename: "20260625_partial-unrelated",
+		});
+
+		const statsDbPath = path.join(root, "stats.db");
+		const db = new Database(statsDbPath);
+		db.run(
+			"CREATE TABLE messages (session_file TEXT NOT NULL, entry_id TEXT NOT NULL, timestamp INTEGER NOT NULL, UNIQUE(session_file, entry_id))",
+		);
+		db.run("CREATE TABLE user_messages (session_file TEXT NOT NULL)");
+		db.run(
+			"CREATE TABLE file_offsets (session_file TEXT PRIMARY KEY, offset INTEGER NOT NULL, last_modified INTEGER NOT NULL)",
+		);
+		db.prepare("INSERT INTO messages (session_file, entry_id, timestamp) VALUES (?, ?, ?)").run(
+			parent,
+			"shared-assistant",
+			Date.parse(timestamp),
+		);
+		db.prepare("INSERT INTO user_messages (session_file) VALUES (?)").run(parent);
+		db.prepare("INSERT INTO user_messages (session_file) VALUES (?)").run(unrelated);
+		db.prepare("INSERT INTO file_offsets (session_file, offset, last_modified) VALUES (?, ?, ?)").run(parent, 10, 1);
+		db.close();
+
+		const result = await runGcCommand({
+			flags: {
+				agentDir: root,
+				archive: true,
+				coldArchiveAfterDays: 30,
+				retainNewestGlobal: 0,
+				retainNewestPerCwd: 0,
+				apply: true,
+			},
+		});
+		const check = new Database(statsDbPath);
+		const messages = check.prepare("SELECT session_file, entry_id FROM messages").all();
+		const legacyRows = check.prepare("SELECT session_file FROM user_messages").all();
+		const offsets = check.prepare("SELECT session_file FROM file_offsets").all();
+		check.close();
+
+		expect(result.archive?.archived).toBe(2);
+		expect(result.archive?.statsRowsDeleted).toBe(2);
+		expect(result.archive?.errors).toEqual([]);
+		expect(messages).toEqual([{ session_file: child, entry_id: "shared-assistant" }]);
+		expect(legacyRows).toEqual([{ session_file: parent }]);
+		expect(offsets).toEqual([]);
 	});
 
 	test("prunes stats still owned by a session's paths from before it moved", async () => {
@@ -861,6 +998,163 @@ describe("runGcCommand cold-session archive", () => {
 		expect(result.archive?.statsRowsDeleted).toBe(9);
 		expect(result.archive?.errors).toEqual([]);
 		expect(remaining).toEqual(Object.fromEntries(tables.map(table => [table, []])));
+	});
+
+	test("does not claim an unrelated historical path by basename alone", async () => {
+		const session = await writeSession(root, "project", "actual-session-id", "complete", {
+			ageDays: 90,
+			filename: "custom-name",
+		});
+		const unrelated = path.join(root, "unrelated", path.basename(session));
+		const statsDbPath = path.join(root, "stats.db");
+		const db = new Database(statsDbPath);
+		db.run("CREATE TABLE messages (session_file TEXT NOT NULL)");
+		const insert = db.prepare("INSERT INTO messages (session_file) VALUES (?)");
+		insert.run(session);
+		insert.run(unrelated);
+		db.close();
+
+		const result = await runGcCommand({
+			flags: {
+				agentDir: root,
+				archive: true,
+				coldArchiveAfterDays: 30,
+				retainNewestGlobal: 0,
+				retainNewestPerCwd: 0,
+				apply: true,
+			},
+		});
+		const check = new Database(statsDbPath);
+		const rows = check.prepare("SELECT session_file FROM messages").all();
+		check.close();
+
+		expect(result.archive?.archived).toBe(1);
+		expect(result.archive?.statsRowsDeleted).toBe(1);
+		expect(result.archive?.errors).toEqual([]);
+		expect(rows).toEqual([{ session_file: unrelated }]);
+	});
+
+	test("continues stats cleanup past a corrupt historical archive", async () => {
+		const session = await writeSession(root, "project", "archive-me", "complete", { ageDays: 90 });
+		const corruptArchive = path.join(root, "archive", "sessions", "older", "corrupt.jsonl.gz");
+		await fs.mkdir(path.dirname(corruptArchive), { recursive: true });
+		await Bun.write(corruptArchive, "not gzip");
+		const statsDbPath = path.join(root, "stats.db");
+		const db = new Database(statsDbPath);
+		db.run("CREATE TABLE messages (session_file TEXT NOT NULL)");
+		db.prepare("INSERT INTO messages (session_file) VALUES (?)").run(session);
+		db.close();
+
+		const result = await runGcCommand({
+			flags: {
+				agentDir: root,
+				archive: true,
+				coldArchiveAfterDays: 30,
+				retainNewestGlobal: 0,
+				retainNewestPerCwd: 0,
+				apply: true,
+			},
+		});
+		const check = new Database(statsDbPath);
+		const rows = check.prepare("SELECT session_file FROM messages").all();
+		check.close();
+
+		expect(result.archive?.archived).toBe(1);
+		expect(result.archive?.statsRowsDeleted).toBe(1);
+		expect(result.archive?.errors.some(error => error.startsWith(`stats cleanup scan ${corruptArchive}: `))).toBe(
+			true,
+		);
+		expect(rows).toEqual([]);
+	});
+
+	test("skips decompressible historical archives without a valid session header", async () => {
+		const archive = path.join(root, "archive", "sessions", "older", "headerless-session.jsonl.gz");
+		await fs.mkdir(path.dirname(archive), { recursive: true });
+		await Bun.write(
+			archive,
+			gzipSync(`${JSON.stringify({ type: "message", message: { role: "assistant", content: [] } })}\n`),
+		);
+		const historicalStatsPath = path.join(root, "unrelated", "headerless-session.jsonl");
+		const statsDbPath = path.join(root, "stats.db");
+		const stats = new Database(statsDbPath);
+		stats.run("CREATE TABLE messages (session_file TEXT NOT NULL)");
+		stats.prepare("INSERT INTO messages (session_file) VALUES (?)").run(historicalStatsPath);
+		stats.close();
+		const historyDbPath = getHistoryDbPath(root);
+		const history = new Database(historyDbPath);
+		history.run("CREATE TABLE history (id INTEGER PRIMARY KEY, prompt TEXT NOT NULL, session_id TEXT)");
+		history.run("INSERT INTO history (prompt, session_id) VALUES ('keep me', 'headerless-session')");
+		history.close();
+
+		const result = await runGcCommand({
+			flags: {
+				agentDir: root,
+				archive: true,
+				coldArchiveAfterDays: 30,
+				retainNewestGlobal: 0,
+				retainNewestPerCwd: 0,
+				apply: true,
+			},
+		});
+		const statsCheck = new Database(statsDbPath);
+		const statsRows = statsCheck.prepare("SELECT session_file FROM messages").all();
+		statsCheck.close();
+		const historyCheck = new Database(historyDbPath);
+		const historyRows = historyCheck.prepare("SELECT session_id FROM history").all();
+		historyCheck.close();
+
+		expect(result.archive?.statsRowsDeleted).toBe(0);
+		expect(result.archive?.historyRowsDeleted).toBe(0);
+		expect(result.archive?.errors).toContain(
+			`stats cleanup scan ${archive}: archive is missing a valid session header`,
+		);
+		expect(statsRows).toEqual([{ session_file: historicalStatsPath }]);
+		expect(historyRows).toEqual([{ session_id: "headerless-session" }]);
+	});
+
+	test("waits for the shared stats lock before archive reconciliation", async () => {
+		const session = await writeSession(root, "project", "archive-me", "complete", { ageDays: 90 });
+		const statsDbPath = path.join(root, "stats.db");
+		const db = new Database(statsDbPath);
+		db.run("CREATE TABLE messages (session_file TEXT NOT NULL)");
+		db.prepare("INSERT INTO messages (session_file) VALUES (?)").run(session);
+		db.close();
+		const sessionMoved = (async () => {
+			for await (const event of fs.watch(path.dirname(session))) {
+				if (event.filename === path.basename(session)) return true;
+			}
+			return false;
+		})();
+
+		let gcPromise: Promise<GcResult> | undefined;
+		let archivedWhileLocked = false;
+		let rowsWhileLocked: unknown[] = [];
+		await withStatsSyncLock(statsDbPath, async () => {
+			gcPromise = runGcCommand({
+				flags: {
+					agentDir: root,
+					archive: true,
+					coldArchiveAfterDays: 30,
+					retainNewestGlobal: 0,
+					retainNewestPerCwd: 0,
+					apply: true,
+				},
+			});
+			archivedWhileLocked = await sessionMoved;
+			const lockedCheck = new Database(statsDbPath);
+			rowsWhileLocked = lockedCheck.prepare("SELECT session_file FROM messages").all();
+			lockedCheck.close();
+		});
+		if (!gcPromise) throw new Error("GC did not start");
+		const result = await gcPromise;
+		const check = new Database(statsDbPath);
+		const rows = check.prepare("SELECT session_file FROM messages").all();
+		check.close();
+
+		expect(archivedWhileLocked).toBe(true);
+		expect(rowsWhileLocked).toEqual([{ session_file: session }]);
+		expect(result.archive?.statsRowsDeleted).toBe(1);
+		expect(rows).toEqual([]);
 	});
 
 	test("reports stats cleanup failures and retries rows for already archived sessions", async () => {
