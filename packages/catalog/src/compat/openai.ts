@@ -496,7 +496,7 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 		// function is forced while the gateway's default thinking mode is active.
 		// Downgrade only on those gateways: other hosts can turn thinking off via
 		// disableReasoningOnToolChoice and must retain hard tool selection.
-		supportsForcedToolChoice: !requiresEnabledThinking && !(isOpenCodeProvider && isDeepseekReasoning),
+		supportsForcedToolChoice: !requiresEnabledThinking && !(isOpenCodeHost && isDeepseekReasoning),
 		supportsNamedToolChoice: STRING_ONLY_NAMED_TOOL_CHOICE_PROVIDERS[provider] !== true,
 		maxTokensField: useMaxTokens ? "max_tokens" : "max_completion_tokens",
 		requiresToolResultName: isMistral,

@@ -1769,6 +1769,20 @@ describe("kimi model detection via detectCompat", () => {
 				openCodePayload.tools.some(tool => getNestedObject(tool, "function")?.name === "todo"),
 		).toBe(true);
 
+		// A custom provider id pointed at the OpenCode gateway URL is still
+		// classified as OpenCode by baseUrl, so the downgrade must apply there too.
+		const customOpenCode = buildModel({
+			...gpt4oMiniSpec,
+			api: "openai-completions",
+			provider: "my-opencode",
+			baseUrl: "https://opencode.ai/zen/v1",
+			id: "deepseek-v4-flash",
+			reasoning: true,
+		} satisfies ModelSpec<"openai-completions">);
+		expect(customOpenCode.compat.supportsForcedToolChoice).toBe(false);
+		const customPayload = await captureToolChoice(customOpenCode);
+		expect(customPayload.tool_choice).toBe("auto");
+
 		const nvidia = buildModel({
 			...gpt4oMiniSpec,
 			api: "openai-completions",
