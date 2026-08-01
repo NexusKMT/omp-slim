@@ -2,7 +2,7 @@
  * Registry read/write operations for the marketplace plugin system.
  *
  * Two registries:
- *   - marketplaces.json under getConfigRootDir() — which catalogs the user has added
+ *   - marketplaces.json at getMarketplacesRegistryPath() — which catalogs the user has added
  *   - installed_plugins.json under getPluginsDir() — which plugins are installed
  *
  * Read/write functions accept explicit file paths so callers control the
