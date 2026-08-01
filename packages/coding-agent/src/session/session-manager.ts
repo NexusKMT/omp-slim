@@ -406,10 +406,16 @@ export class SessionPersistenceIndeterminateError extends AggregateError {
  * active for future appends and for LLM context construction.
  *
  * Durability is software-crash safe but not power-loss safe: appends are normally
- * handed to the OS synchronously in-body but never `fsync`'d. During an atomic
- * move or rewrite, synchronous appends are fenced in memory and folded into the
- * full-file rewrite before the operation resolves, so the replaced file cannot
- * detach their writer.
+ * handed to the OS synchronously in-body but never `fsync`'d. While an in-place
+ * atomic rewrite publishes, a synchronous `flushSync` still persists fenced
+ * appends by superseding the pending publish against the same (stable) path.
+ * A {@link moveTo} relocation is the one exception: the session file is being
+ * renamed to a new path, so appends landing in the rename window are held in
+ * memory and persisted only by the move's trailing rewrite. A `flushSync` in
+ * that narrow window cannot durably place them — writing the vacated source
+ * would recreate the orphan the move eliminates, and a queued backend publish
+ * (fire-and-forget on `IndexedSessionStorage`) could land after the rename all
+ * the same. This gap is inherent to closing the writer for a Windows-safe rename.
  */
 export class SessionManager {
 	#cwd: string;
@@ -764,9 +770,11 @@ export class SessionManager {
 	 */
 	#rewriteSynchronously(): void {
 		if (!this.#persist || !this.#sessionFile || !this.#shouldHaveSessionFile()) return;
-		// A move is renaming the file out from under `#sessionFile`; writing the
-		// full body now would recreate an orphan at the pre-rename path. Defer to
-		// moveTo's trailing atomic rewrite, which folds in the fenced appends.
+		// A move is renaming the file out from under `#sessionFile`. Writing the
+		// full body now would target either the vacated source (recreating the
+		// orphan the move eliminates) or a path a queued backend publish may clobber
+		// post-rename, so defer to moveTo's trailing atomic rewrite. This narrows
+		// flushSync durability for entries in the rename window (see class doc).
 		if (this.#sessionFileRelocating) return;
 
 		try {
