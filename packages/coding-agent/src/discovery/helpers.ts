@@ -143,7 +143,7 @@ export function parseBoolean(value: unknown): boolean | undefined {
 
 /**
  * Parse an MCP `requestIdFormat` value. Unrecognized values are dropped so a typo
- * degrades to the default string ids rather than reaching a transport.
+ * degrades to the default integer ids rather than reaching a transport.
  */
 export function parseRequestIdFormat(value: unknown): MCPRequestIdFormat | undefined {
 	if (value === "string" || value === "number") return value;

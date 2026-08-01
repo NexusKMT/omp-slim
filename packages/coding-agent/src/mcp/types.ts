@@ -69,10 +69,11 @@ interface MCPServerConfigBase {
 	/** MCP request timeout in milliseconds (default: 30000, 0 to disable) */
 	timeout?: number;
 	/**
-	 * Encoding for outgoing JSON-RPC request ids (default: `"string"`).
+	 * Encoding for outgoing JSON-RPC request ids (default: `"number"`).
 	 *
-	 * Set `"number"` for servers whose decoder accepts integers only, such as
-	 * Apple's `xcrun mcpbridge`. See `RequestIdAllocator` in `./request-id`.
+	 * Set `"string"` for servers that need collision-resistant snowflake string
+	 * ids instead of per-transport integers. See `RequestIdAllocator` in
+	 * `./request-id`.
 	 *
 	 * OMP-specific, so only the OMP-owned discovery providers parse it (native,
 	 * standalone `mcp.json`, OMP plugins). Providers that translate another

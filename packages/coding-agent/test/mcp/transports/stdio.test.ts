@@ -445,16 +445,17 @@ describe.skipIf(process.platform === "win32")("StdioTransport request ids", () =
 		}
 	}
 
-	it("sends integers to servers that decode ids as integers only", async () => {
-		// Apple's `xcrun mcpbridge` answers nothing on a string id (#7053).
-		expect(await observeIds("number", ["first", "second"])).toEqual([
+	it("sends integer ids by default", async () => {
+		// The MCP ecosystem norm; integer-only decoders like Apple's `xcrun
+		// mcpbridge` (#7053) work without configuration.
+		expect(await observeIds(undefined, ["first", "second"])).toEqual([
 			{ idType: "number", id: 1 },
 			{ idType: "number", id: 2 },
 		]);
 	}, 15000);
 
-	it("sends string ids by default", async () => {
-		const [observed] = await observeIds(undefined, ["probe"]);
+	it("sends snowflake strings for servers opting into string ids", async () => {
+		const [observed] = await observeIds("string", ["probe"]);
 
 		expect(observed.idType).toBe("string");
 	}, 15000);

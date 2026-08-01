@@ -3,18 +3,18 @@ import { describe, expect, it } from "bun:test";
 import { RequestIdAllocator } from "../../src/mcp/request-id";
 
 describe("RequestIdAllocator", () => {
-	it("defaults to unique string ids", () => {
+	it("defaults to sequential integer ids", () => {
 		const allocator = new RequestIdAllocator();
-		const ids = [allocator.next(undefined), allocator.next(undefined), allocator.next("string")];
+
+		expect([allocator.next(undefined), allocator.next(undefined), allocator.next("number")]).toEqual([1, 2, 3]);
+	});
+
+	it("issues unique snowflake strings for servers opting into string ids", () => {
+		const allocator = new RequestIdAllocator();
+		const ids = [allocator.next("string"), allocator.next("string"), allocator.next("string")];
 
 		expect(ids.every(id => typeof id === "string")).toBe(true);
 		expect(new Set(ids).size).toBe(3);
-	});
-
-	it("issues sequential integers from 1 for integer-only decoders", () => {
-		const allocator = new RequestIdAllocator();
-
-		expect([allocator.next("number"), allocator.next("number"), allocator.next("number")]).toEqual([1, 2, 3]);
 	});
 
 	it("counts independently per transport instance", () => {
@@ -30,8 +30,8 @@ describe("RequestIdAllocator", () => {
 	it("reads the format at call time so a reconfigured server takes effect", () => {
 		const allocator = new RequestIdAllocator();
 
-		expect(typeof allocator.next(undefined)).toBe("string");
-		expect(allocator.next("number")).toBe(1);
+		expect(typeof allocator.next("string")).toBe("string");
+		expect(allocator.next(undefined)).toBe(1);
 	});
 
 	it("never reuses a numeric id, so a reconnect cannot collide with a late reply", () => {

@@ -74,7 +74,7 @@ test("requestIdFormat from .omp/mcp.json reaches the transport config", async ()
 	});
 
 	expect(configs.xcode?.requestIdFormat).toBe("number");
-	// Unset stays unset so the allocator keeps its snowflake-string default.
+	// Unset stays unset so the allocator keeps its integer default.
 	expect(configs.plain?.requestIdFormat).toBeUndefined();
 });
 
@@ -97,7 +97,7 @@ test("an unrecognized requestIdFormat is dropped rather than passed through", as
 
 test("differing requestIdFormat prevents equivalence dedup from collapsing two aliases", async () => {
 	const configs = await loadFrom(path.join(".omp", "mcp.json"), {
-		"xcode-numeric": { type: "stdio", command: "/usr/bin/xcrun", args: ["mcpbridge"], requestIdFormat: "number" },
+		"xcode-string": { type: "stdio", command: "/usr/bin/xcrun", args: ["mcpbridge"], requestIdFormat: "string" },
 		"xcode-default": { type: "stdio", command: "/usr/bin/xcrun", args: ["mcpbridge"] },
 	});
 
@@ -106,7 +106,18 @@ test("differing requestIdFormat prevents equivalence dedup from collapsing two a
 	// requestIdFormat setting would vanish. Both must survive as separate
 	// servers — assert key presence directly, since optional chaining on a
 	// shadowed (absent) key would otherwise make this pass vacuously.
-	expect(Object.keys(configs).sort()).toEqual(["xcode-default", "xcode-numeric"]);
-	expect(configs["xcode-numeric"]?.requestIdFormat).toBe("number");
+	expect(Object.keys(configs).sort()).toEqual(["xcode-default", "xcode-string"]);
+	expect(configs["xcode-string"]?.requestIdFormat).toBe("string");
 	expect(configs["xcode-default"]?.requestIdFormat).toBeUndefined();
+});
+
+test('an explicit "number" is the default, so dedup collapses it with an unset alias', async () => {
+	const configs = await loadFrom(path.join(".omp", "mcp.json"), {
+		"xcode-numeric": { type: "stdio", command: "/usr/bin/xcrun", args: ["mcpbridge"], requestIdFormat: "number" },
+		"xcode-default": { type: "stdio", command: "/usr/bin/xcrun", args: ["mcpbridge"] },
+	});
+
+	// Explicit "number" matches the allocator default, so both entries name the
+	// same connection and only one survives.
+	expect(Object.keys(configs)).toHaveLength(1);
 });
