@@ -553,6 +553,9 @@ describe("AgentLifecycleManager", () => {
 		expect(disposeCalls).toBe(1);
 		expect(registry.get(workerId)?.status).toBe("aborted");
 		expect(registry.get(workerId)?.session).toBeNull();
+		// The tombstone is terminal: ensureLive must not hand back the disposed
+		// session (the ref carries session === null), it treats it as unrevivable.
+		await expect(lifecycle.ensureLive(workerId)).rejects.toThrow(/aborted/);
 
 		// Reopening the Agent Hub rescans on-disk transcripts. The surviving
 		// `.jsonl` must not be re-adopted as a fresh `parked` row, because the

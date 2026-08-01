@@ -379,25 +379,25 @@ export class AgentLifecycleManager {
 		}
 
 		if (options?.tombstone) {
-			// Mark the tombstone terminal BEFORE disposing. A live session's wrapped
-			// dispose (createAgentSession) unregisters any non-terminal ref via
-			// `unregisterUnlessParked`, which would otherwise delete the ref out from
-			// under the detach/status calls below. Setting `aborted` first makes that
-			// guard preserve the ref, so a later persisted-subagent rescan skips it.
+			// Explicit kill: mark the ref terminal `aborted` and detach the session
+			// BEFORE disposing. aborted refs must satisfy the AgentRef invariant
+			// (session === null) so ensureLive / hub focus can never route into a
+			// disposed session; setting the terminal status first also makes
+			// createAgentSession's dispose wrapper (unregisterUnlessParked) preserve
+			// the ref instead of removing it, so a later persisted-subagent rescan
+			// skips it. The transcript file is left intact (history://<id>).
 			this.#registry.setStatus(id, "aborted", ref);
 		}
-		if (this.#registry.get(id) === ref && ref.session) {
+		const live = this.#registry.get(id) === ref ? ref.session : null;
+		if (options?.tombstone) this.#registry.detachSession(id, ref);
+		if (live) {
 			try {
-				await ref.session.dispose();
+				await live.dispose();
 			} catch (error) {
 				logger.warn("AgentLifecycleManager.release: session dispose failed", { id, error: String(error) });
 			}
 		}
-		if (options?.tombstone) {
-			this.#registry.detachSession(id, ref);
-		} else {
-			this.#registry.unregister(id, ref);
-		}
+		if (!options?.tombstone) this.#registry.unregister(id, ref);
 		return true;
 	}
 
