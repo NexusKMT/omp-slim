@@ -289,14 +289,14 @@ describe("Anthropic request fingerprint alignment", () => {
 
 	it("keeps the stable-prefix breakpoint when the trailing project footer (cwd/date) changes (#7324)", () => {
 		const staticInstructions = "STATIC INSTRUCTIONS BLOCK";
-		const build = (footer: string) =>
-			buildAnthropicSystemBlocks([staticInstructions, footer], {
-				includeClaudeCodeInstruction: true,
-				cacheControl: { type: "ephemeral" },
-			});
-		// blocks: [billing, CC identity, staticInstructions, project footer]
-		const runA = build("PROJECT\nToday is 2026-08-01, cwd '/tmp/a'.");
-		const runB = build("PROJECT\nToday is 2026-08-02, cwd '/tmp/b'.");
+		const runA = buildAnthropicSystemBlocks([staticInstructions, "PROJECT\nToday is 2026-08-01, cwd '/tmp/a'."], {
+			includeClaudeCodeInstruction: true,
+			cacheControl: { type: "ephemeral" },
+		});
+		const runB = buildAnthropicSystemBlocks([staticInstructions, "PROJECT\nToday is 2026-08-02, cwd '/tmp/b'."], {
+			includeClaudeCodeInstruction: true,
+			cacheControl: { type: "ephemeral" },
+		});
 
 		for (const blocks of [runA, runB]) {
 			expect(blocks).toHaveLength(4);
@@ -309,8 +309,37 @@ describe("Anthropic request fingerprint alignment", () => {
 			expect(blocks?.[2].cache_control).toEqual({ type: "ephemeral" });
 			expect(blocks?.[3].cache_control).toEqual({ type: "ephemeral" });
 		}
-		// The cached stable prefix is byte-identical across the two runs.
 		expect(runA?.[2].text).toBe(runB?.[2].text);
+	});
+
+	it("caches before the project footer when active-repo context follows it (#7324)", () => {
+		const staticInstructions = "STATIC INSTRUCTIONS BLOCK";
+		const projectFooter = "PROJECT\nToday is 2026-08-01, cwd '/tmp'.";
+		const activeRepoContext = "The active repository is './repo'.";
+		const blocks = buildAnthropicSystemBlocks([staticInstructions, projectFooter, activeRepoContext], {
+			includeClaudeCodeInstruction: true,
+			cacheControl: { type: "ephemeral" },
+		});
+
+		// blocks: [billing, CC identity, static, project footer, active-repo context]
+		expect(blocks).toHaveLength(5);
+		expect(blocks?.[0].cache_control).toBeUndefined();
+		expect(blocks?.[1].cache_control).toBeUndefined();
+		expect(blocks?.[2]).toEqual({
+			type: "text",
+			text: staticInstructions,
+			cache_control: { type: "ephemeral" },
+		});
+		expect(blocks?.[3]).toEqual({
+			type: "text",
+			text: projectFooter,
+			cache_control: { type: "ephemeral" },
+		});
+		expect(blocks?.[4]).toEqual({
+			type: "text",
+			text: activeRepoContext,
+			cache_control: { type: "ephemeral" },
+		});
 	});
 
 	it("caches Claude Code context and the last user block in OAuth request payloads", async () => {

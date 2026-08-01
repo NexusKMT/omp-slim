@@ -2781,16 +2781,20 @@ type SystemBlockOptions = {
 };
 
 /**
- * Place system-block cache breakpoints that survive a volatile trailing block.
+ * Place system-block cache breakpoints that survive volatile project context.
  *
- * omp appends per-request project context (cwd, date, workspace tree) as the
- * final system block, so a single trailing breakpoint hashes the whole prefix
- * *including* that block — a new cwd or a midnight rollover then re-writes the
- * entire system cache (issue #7324). This caches the trailing block (full-match
- * reuse when nothing changed) AND the block that ends the stable prefix (the
- * one before the footer), so a footer change only re-writes its own delta.
+ * omp normally appends its project footer (cwd, date, workspace tree) after the
+ * stable system prefix. When cwd is outside a single direct child repository,
+ * an active-repo context block follows that footer. Caching up to the last three
+ * eligible blocks therefore covers both layouts:
  *
- * @returns breakpoints placed (0-2, capped by `maxBreakpoints`).
+ * - stable prefix, project footer
+ * - stable prefix, project footer, active-repo context
+ *
+ * A footer change can then fall back to the stable-prefix entry instead of
+ * re-writing the entire system cache (issue #7324).
+ *
+ * @returns breakpoints placed, capped by `maxBreakpoints`.
  */
 function cacheSystemPrefixBreakpoints(
 	blocks: AnthropicSystemBlock[],
@@ -2800,15 +2804,9 @@ function cacheSystemPrefixBreakpoints(
 ): number {
 	if (!cacheControl || maxBreakpoints <= 0) return 0;
 	let placed = 0;
-	const lastIndex = blocks.length - 1;
-	if (lastIndex >= firstCacheableIndex && blocks[lastIndex].cache_control == null) {
-		blocks[lastIndex] = { ...blocks[lastIndex], cache_control: cloneAnthropicCacheControl(cacheControl) };
-		placed++;
-	}
-	if (placed >= maxBreakpoints) return placed;
-	const stableIndex = lastIndex - 1;
-	if (stableIndex >= firstCacheableIndex && blocks[stableIndex].cache_control == null) {
-		blocks[stableIndex] = { ...blocks[stableIndex], cache_control: cloneAnthropicCacheControl(cacheControl) };
+	for (let index = blocks.length - 1; index >= firstCacheableIndex && placed < maxBreakpoints; index--) {
+		if (blocks[index].cache_control != null) continue;
+		blocks[index] = { ...blocks[index], cache_control: cloneAnthropicCacheControl(cacheControl) };
 		placed++;
 	}
 	return placed;
@@ -2847,7 +2845,7 @@ export function buildAnthropicSystemBlocks(
 		for (const prompt of sanitizedPrompts) {
 			blocks.push({ type: "text", text: prompt });
 		}
-		cacheSystemPrefixBreakpoints(blocks, cacheControl, 2, firstCacheableSystemIndex(blocks));
+		cacheSystemPrefixBreakpoints(blocks, cacheControl, 3, firstCacheableSystemIndex(blocks));
 
 		return blocks;
 	}
@@ -3152,10 +3150,11 @@ function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?:
 
 	if (params.system && Array.isArray(params.system) && params.system.length > 0) {
 		isCCLayout = params.system[0]?.text?.startsWith(CLAUDE_BILLING_HEADER_PREFIX) === true;
+		const maxSystemBreakpoints = Math.min(3, MAX_CACHE_BREAKPOINTS - cacheBreakpointsUsed);
 		cacheBreakpointsUsed += cacheSystemPrefixBreakpoints(
 			params.system as AnthropicSystemBlock[],
 			cacheControl,
-			MAX_CACHE_BREAKPOINTS - cacheBreakpointsUsed,
+			maxSystemBreakpoints,
 			isCCLayout ? firstCacheableSystemIndex(params.system as AnthropicSystemBlock[]) : 0,
 		);
 	}
@@ -3163,7 +3162,7 @@ function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?:
 	if (cacheBreakpointsUsed >= MAX_CACHE_BREAKPOINTS) return;
 
 	const start = isCCLayout ? Math.max(0, params.messages.length - 1) : Math.max(0, params.messages.length - 2);
-	for (let i = start; i < params.messages.length; i++) {
+	for (let i = params.messages.length - 1; i >= start; i--) {
 		if (cacheBreakpointsUsed >= MAX_CACHE_BREAKPOINTS) break;
 		const message = params.messages[i];
 		if (!message) continue;
