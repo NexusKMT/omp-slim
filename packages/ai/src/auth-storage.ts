@@ -12,7 +12,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { parseAlibabaTokenPlanCredential } from "@oh-my-pi/pi-catalog/wire/alibaba-token-plan";
-import { $env, getAgentDbPath, logger } from "@oh-my-pi/pi-utils";
+import { $env, getAgentDbPath, getDbBusyTimeoutMs, logger } from "@oh-my-pi/pi-utils";
 import type { ApiKeyResolver } from "./auth-retry";
 import * as AIError from "./error";
 import { isUsageLimitOutcome } from "./error/rate-limit";
@@ -6929,8 +6929,10 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		// Install the busy handler BEFORE any lock-taking statement (incl.
 		// `PRAGMA journal_mode=WAL`, which acquires an exclusive lock during WAL
 		// recovery). Without this, concurrent omp startups can crash here with
-		// `SQLITE_BUSY` / `SQLITE_BUSY_RECOVERY`. See issue #2421.
-		this.#db.run("PRAGMA busy_timeout = 5000");
+		// `SQLITE_BUSY` / `SQLITE_BUSY_RECOVERY`. See issue #2421. Uses the
+		// centralized timeout so a headless host keeps its bounded busy wait
+		// instead of overwriting it with the interactive 5s value.
+		this.#db.run(`PRAGMA busy_timeout = ${getDbBusyTimeoutMs()}`);
 		this.#db.run(`
 			PRAGMA journal_mode=WAL;
 			PRAGMA synchronous=NORMAL;
