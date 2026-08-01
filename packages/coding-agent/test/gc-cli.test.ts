@@ -1000,6 +1000,135 @@ describe("runGcCommand cold-session archive", () => {
 		expect(remaining).toEqual(Object.fromEntries(tables.map(table => [table, []])));
 	});
 
+	test("uses persisted move history to prune custom names without claiming identity collisions", async () => {
+		const timestamp = "2026-06-26T12:00:00.000Z";
+		const timestampMs = Date.parse(timestamp);
+		const original = await writeSession(root, "before-move", "custom-session-id", "complete", {
+			filename: "custom-name",
+		});
+		const sharedAssistant = {
+			type: "message",
+			id: "custom-entry",
+			parentId: null,
+			timestamp,
+			message: { role: "assistant", content: [] },
+		};
+		await Bun.write(
+			original,
+			[
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "custom-session-id",
+					timestamp,
+					cwd: "/tmp",
+					previousSessionFiles: [original],
+				}),
+				JSON.stringify(sharedAssistant),
+				"",
+			].join("\n"),
+		);
+		const moved = path.join(getSessionsDir(root), "after-move", path.basename(original));
+		await fs.mkdir(path.dirname(moved), { recursive: true });
+		await fs.rename(original, moved);
+		await agePath(moved, 90);
+		const historicalNested = path.join(original.slice(0, -".jsonl".length), "nested.jsonl");
+		const unrelated = path.join(getSessionsDir(root), "unrelated", path.basename(original));
+
+		const statsDbPath = path.join(root, "stats.db");
+		const db = new Database(statsDbPath);
+		db.run(
+			"CREATE TABLE messages (session_file TEXT NOT NULL, entry_id TEXT NOT NULL, timestamp INTEGER NOT NULL, UNIQUE(session_file, entry_id))",
+		);
+		db.run(
+			"CREATE TABLE file_offsets (session_file TEXT PRIMARY KEY, offset INTEGER NOT NULL, last_modified INTEGER NOT NULL)",
+		);
+		const insertMessage = db.prepare("INSERT INTO messages (session_file, entry_id, timestamp) VALUES (?, ?, ?)");
+		insertMessage.run(original, sharedAssistant.id, timestampMs);
+		insertMessage.run(historicalNested, "nested-entry", timestampMs);
+		insertMessage.run(unrelated, sharedAssistant.id, timestampMs);
+		const insertOffset = db.prepare(
+			"INSERT INTO file_offsets (session_file, offset, last_modified) VALUES (?, ?, ?)",
+		);
+		insertOffset.run(original, 1, 1);
+		insertOffset.run(moved, 2, 2);
+		db.close();
+
+		const result = await runGcCommand({
+			flags: {
+				agentDir: root,
+				archive: true,
+				coldArchiveAfterDays: 30,
+				retainNewestGlobal: 0,
+				retainNewestPerCwd: 0,
+				apply: true,
+			},
+		});
+		const check = new Database(statsDbPath);
+		const messages = check.prepare("SELECT session_file, entry_id FROM messages").all();
+		const offsets = check.prepare("SELECT session_file FROM file_offsets").all();
+		check.close();
+
+		expect(result.archive?.archived).toBe(1);
+		expect(result.archive?.statsRowsDeleted).toBe(4);
+		expect(result.archive?.errors).toEqual([]);
+		expect(messages).toEqual([{ session_file: unrelated, entry_id: sharedAssistant.id }]);
+		expect(offsets).toEqual([]);
+	});
+
+	test("preserves a historical path claimed by multiple archived sessions", async () => {
+		const timestamp = "2026-06-26T12:00:00.000Z";
+		const previousSessionFile = path.join(getSessionsDir(root), "before-move", "custom-name.jsonl");
+		for (const [project, id] of [
+			["archive-one", "session-one"],
+			["archive-two", "session-two"],
+		] as const) {
+			const current = path.join(getSessionsDir(root), project, "custom-name.jsonl");
+			await fs.mkdir(path.dirname(current), { recursive: true });
+			await Bun.write(
+				current,
+				[
+					JSON.stringify({
+						type: "session",
+						version: 3,
+						id,
+						timestamp,
+						cwd: "/tmp",
+						previousSessionFiles: [previousSessionFile],
+					}),
+					JSON.stringify({ type: "message", message: { role: "assistant", content: [] } }),
+					"",
+				].join("\n"),
+			);
+			await agePath(current, 90);
+		}
+
+		const statsDbPath = path.join(root, "stats.db");
+		const db = new Database(statsDbPath);
+		db.run("CREATE TABLE messages (session_file TEXT NOT NULL)");
+		db.prepare("INSERT INTO messages (session_file) VALUES (?)").run(previousSessionFile);
+		db.close();
+
+		const result = await runGcCommand({
+			flags: {
+				agentDir: root,
+				archive: true,
+				coldArchiveAfterDays: 30,
+				retainNewestGlobal: 0,
+				retainNewestPerCwd: 0,
+				apply: true,
+			},
+		});
+		const check = new Database(statsDbPath);
+		const rows = check.prepare("SELECT session_file FROM messages").all();
+		check.close();
+
+		expect(result.archive?.archived).toBe(2);
+		expect(result.archive?.statsRowsDeleted).toBe(0);
+		expect(result.archive?.errors).toEqual([]);
+		expect(rows).toEqual([{ session_file: previousSessionFile }]);
+	});
+
 	test("does not claim an unrelated historical path by basename alone", async () => {
 		const session = await writeSession(root, "project", "actual-session-id", "complete", {
 			ageDays: 90,
@@ -1065,6 +1194,232 @@ describe("runGcCommand cold-session archive", () => {
 			true,
 		);
 		expect(rows).toEqual([]);
+	});
+
+	test("preserves shared stats through an unreadable intermediate archive", async () => {
+		const sessionsDir = path.join(getSessionsDir(root), "project");
+		const archiveDir = path.join(root, "archive", "sessions", "project");
+		await fs.mkdir(sessionsDir, { recursive: true });
+		await fs.mkdir(archiveDir, { recursive: true });
+		const ancestorPath = path.join(sessionsDir, "20260625_ancestor.jsonl");
+		const intermediatePath = path.join(sessionsDir, "20260626_intermediate.jsonl");
+		const retainedPath = path.join(sessionsDir, "20260726_retained.jsonl");
+		const ancestorArchive = path.join(archiveDir, `${path.basename(ancestorPath)}.gz`);
+		const corruptArchive = path.join(archiveDir, `${path.basename(intermediatePath)}.gz`);
+		const timestamp = "2026-06-25T12:00:00.000Z";
+		const timestampMs = Date.parse(timestamp);
+		const sharedAssistant = {
+			type: "message",
+			id: "shared-assistant",
+			parentId: null,
+			timestamp,
+			message: { role: "assistant", content: [] },
+		};
+		await Bun.write(
+			ancestorArchive,
+			gzipSync(
+				[
+					JSON.stringify({ type: "session", version: 3, id: "ancestor", timestamp, cwd: "/tmp" }),
+					JSON.stringify(sharedAssistant),
+					"",
+				].join("\n"),
+			),
+		);
+		await Bun.write(corruptArchive, "not gzip");
+		await Bun.write(
+			retainedPath,
+			[
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "retained",
+					timestamp,
+					cwd: "/tmp",
+					parentSession: intermediatePath,
+				}),
+				JSON.stringify(sharedAssistant),
+				"",
+			].join("\n"),
+		);
+		const retainedStat = await fs.stat(retainedPath);
+
+		const statsDbPath = path.join(root, "stats.db");
+		const db = new Database(statsDbPath);
+		db.run(
+			"CREATE TABLE messages (session_file TEXT NOT NULL, entry_id TEXT NOT NULL, timestamp INTEGER NOT NULL, UNIQUE(session_file, entry_id))",
+		);
+		db.run(
+			"CREATE TABLE file_offsets (session_file TEXT PRIMARY KEY, offset INTEGER NOT NULL, last_modified INTEGER NOT NULL)",
+		);
+		db.prepare("INSERT INTO messages (session_file, entry_id, timestamp) VALUES (?, ?, ?)").run(
+			ancestorPath,
+			sharedAssistant.id,
+			timestampMs,
+		);
+		const insertOffset = db.prepare(
+			"INSERT INTO file_offsets (session_file, offset, last_modified) VALUES (?, ?, ?)",
+		);
+		insertOffset.run(ancestorPath, 1, 1);
+		insertOffset.run(retainedPath, retainedStat.size, retainedStat.mtimeMs);
+		db.close();
+
+		const first = await runGcCommand({
+			flags: {
+				agentDir: root,
+				archive: true,
+				coldArchiveAfterDays: 30,
+				retainNewestGlobal: 0,
+				retainNewestPerCwd: 0,
+				apply: true,
+			},
+		});
+		const firstCheck = new Database(statsDbPath);
+		const firstMessages = firstCheck.prepare("SELECT session_file, entry_id FROM messages").all();
+		const firstOffsets = firstCheck
+			.prepare("SELECT session_file, offset, last_modified FROM file_offsets ORDER BY session_file")
+			.all();
+		firstCheck.close();
+
+		expect(first.archive?.archived).toBe(0);
+		expect(first.archive?.statsRowsDeleted).toBe(0);
+		expect(first.archive?.errors.some(error => error.startsWith(`stats cleanup scan ${corruptArchive}: `))).toBe(
+			true,
+		);
+		expect(firstMessages).toEqual([{ session_file: ancestorPath, entry_id: sharedAssistant.id }]);
+		expect(firstOffsets).toEqual([
+			{ session_file: ancestorPath, offset: 1, last_modified: 1 },
+			{ session_file: retainedPath, offset: retainedStat.size, last_modified: retainedStat.mtimeMs },
+		]);
+
+		await Bun.write(
+			corruptArchive,
+			gzipSync(
+				[
+					JSON.stringify({
+						type: "session",
+						version: 3,
+						id: "intermediate",
+						timestamp,
+						cwd: "/tmp",
+						parentSession: ancestorPath,
+					}),
+					JSON.stringify(sharedAssistant),
+					"",
+				].join("\n"),
+			),
+		);
+		const second = await runGcCommand({
+			flags: {
+				agentDir: root,
+				archive: true,
+				coldArchiveAfterDays: 30,
+				retainNewestGlobal: 0,
+				retainNewestPerCwd: 0,
+				apply: true,
+			},
+		});
+		const secondCheck = new Database(statsDbPath);
+		const secondMessages = secondCheck.prepare("SELECT session_file, entry_id FROM messages").all();
+		const secondOffsets = secondCheck.prepare("SELECT session_file, offset, last_modified FROM file_offsets").all();
+		secondCheck.close();
+
+		expect(second.archive?.archived).toBe(0);
+		expect(second.archive?.statsRowsDeleted).toBe(1);
+		expect(second.archive?.errors).toEqual([]);
+		expect(secondMessages).toEqual([{ session_file: retainedPath, entry_id: sharedAssistant.id }]);
+		expect(secondOffsets).toEqual([
+			{ session_file: retainedPath, offset: retainedStat.size, last_modified: retainedStat.mtimeMs },
+		]);
+	});
+
+	test("transfers shared tool calls with empty ids before pruning archived ownership", async () => {
+		const sessionsDir = path.join(getSessionsDir(root), "project");
+		const archiveDir = path.join(root, "archive", "sessions", "project");
+		await fs.mkdir(sessionsDir, { recursive: true });
+		await fs.mkdir(archiveDir, { recursive: true });
+		const parentPath = path.join(sessionsDir, "20260625_parent.jsonl");
+		const childPath = path.join(sessionsDir, "20260726_child.jsonl");
+		const parentArchive = path.join(archiveDir, `${path.basename(parentPath)}.gz`);
+		const timestamp = "2026-06-25T12:00:00.000Z";
+		const timestampMs = Date.parse(timestamp);
+		const assistant = {
+			type: "message",
+			id: "assistant",
+			parentId: null,
+			timestamp,
+			message: {
+				role: "assistant",
+				content: [{ type: "toolCall", id: "", name: "read" }],
+			},
+		};
+		await Bun.write(
+			parentArchive,
+			gzipSync(
+				[
+					JSON.stringify({ type: "session", version: 3, id: "parent", timestamp, cwd: "/tmp" }),
+					JSON.stringify(assistant),
+					"",
+				].join("\n"),
+			),
+		);
+		await Bun.write(
+			childPath,
+			[
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "child",
+					timestamp,
+					cwd: "/tmp",
+					parentSession: parentPath,
+				}),
+				JSON.stringify(assistant),
+				"",
+			].join("\n"),
+		);
+		const childStat = await fs.stat(childPath);
+
+		const statsDbPath = path.join(root, "stats.db");
+		const db = new Database(statsDbPath);
+		db.run(
+			"CREATE TABLE tool_calls (session_file TEXT NOT NULL, entry_id TEXT NOT NULL, timestamp INTEGER NOT NULL, tool_call_id TEXT NOT NULL, UNIQUE(session_file, tool_call_id))",
+		);
+		db.run(
+			"CREATE TABLE file_offsets (session_file TEXT PRIMARY KEY, offset INTEGER NOT NULL, last_modified INTEGER NOT NULL)",
+		);
+		db.prepare("INSERT INTO tool_calls (session_file, entry_id, timestamp, tool_call_id) VALUES (?, ?, ?, ?)").run(
+			parentPath,
+			assistant.id,
+			timestampMs,
+			"",
+		);
+		const insertOffset = db.prepare(
+			"INSERT INTO file_offsets (session_file, offset, last_modified) VALUES (?, ?, ?)",
+		);
+		insertOffset.run(parentPath, 1, 1);
+		insertOffset.run(childPath, childStat.size, childStat.mtimeMs);
+		db.close();
+
+		const result = await runGcCommand({
+			flags: {
+				agentDir: root,
+				archive: true,
+				coldArchiveAfterDays: 30,
+				retainNewestGlobal: 0,
+				retainNewestPerCwd: 0,
+				apply: true,
+			},
+		});
+		const check = new Database(statsDbPath);
+		const toolCalls = check.prepare("SELECT session_file, entry_id, tool_call_id FROM tool_calls").all();
+		const offsets = check.prepare("SELECT session_file, offset, last_modified FROM file_offsets").all();
+		check.close();
+
+		expect(result.archive?.archived).toBe(0);
+		expect(result.archive?.statsRowsDeleted).toBe(1);
+		expect(result.archive?.errors).toEqual([]);
+		expect(toolCalls).toEqual([{ session_file: childPath, entry_id: assistant.id, tool_call_id: "" }]);
+		expect(offsets).toEqual([{ session_file: childPath, offset: childStat.size, last_modified: childStat.mtimeMs }]);
 	});
 
 	test("skips decompressible historical archives without a valid session header", async () => {

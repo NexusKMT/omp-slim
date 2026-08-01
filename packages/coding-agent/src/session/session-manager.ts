@@ -1383,6 +1383,12 @@ export class SessionManager {
 				throw err;
 			}
 
+			if (sessionFileExisted && sessionPathChanged) {
+				this.#header.previousSessionFiles = [
+					...new Set([...(this.#header.previousSessionFiles ?? []), path.resolve(oldSessionFile)]),
+				];
+			}
+
 			this.#sessionFile = newSessionFile;
 			this.#artifactManager = null;
 			this.#artifactManagerSessionFile = null;
