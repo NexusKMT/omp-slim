@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `SqliteAuthCredentialStore.open()` running the `auth_credential_refresh_leases` DDL (`CREATE TABLE`/`CREATE INDEX`) with Bun's default `busy_timeout=0`, before the constructor's `#initializeSchema()` installed the busy handler. Under a concurrent write lock (e.g. WAL recovery on parallel omp startups) the lock-taking DDL failed immediately and, since the error wasn't BUSY-classified, bypassed `open()`'s bounded retry loop. The busy handler is now installed on the connection immediately after it opens, before any lock-taking statement, honoring the issue-#2421 invariant on every entry path. ([#7298](https://github.com/can1357/oh-my-pi/issues/7298))
+
 ## [17.2.3] - 2026-08-01
 
 ### Added

@@ -6482,6 +6482,14 @@ export function isSqliteBusyError(err: unknown): boolean {
 	return typeof code === "string" && code.startsWith("SQLITE_BUSY");
 }
 
+/**
+ * Busy handler window (ms) installed on every auth-DB connection before any
+ * lock-taking statement. Concurrent omp startups race WAL recovery; without a
+ * non-zero `busy_timeout` (Bun defaults to 0) the first lock-taking statement
+ * fails immediately with `SQLITE_BUSY`. See issue #2421.
+ */
+const AUTH_DB_BUSY_TIMEOUT_MS = 5000;
+
 function normalizeStoredAccountId(accountId: string | null | undefined): string | null {
 	const normalized = accountId?.trim();
 	return normalized && normalized.length > 0 ? normalized : null;
@@ -6914,6 +6922,12 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 			let db: Database | undefined;
 			try {
 				db = new Database(dbPath);
+				// Install the busy handler BEFORE the first lock-taking statement
+				// on this connection. The leases DDL below and the constructor's
+				// schema init both acquire locks during WAL recovery; without a
+				// non-zero `busy_timeout` they fail immediately with SQLITE_BUSY.
+				// See issue #2421.
+				SqliteAuthCredentialStore.#installBusyTimeout(db);
 				try {
 					await fs.chmod(dbPath, 0o600);
 				} catch {
@@ -6950,12 +6964,22 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		`);
 	}
 
+	/**
+	 * Install the per-connection busy handler so lock-taking statements wait for
+	 * a contended writer instead of failing immediately. MUST run before the
+	 * first lock-taking statement on the connection. See issue #2421.
+	 */
+	static #installBusyTimeout(db: Database): void {
+		db.run(`PRAGMA busy_timeout = ${AUTH_DB_BUSY_TIMEOUT_MS}`);
+	}
+
 	#initializeSchema(): void {
 		// Install the busy handler BEFORE any lock-taking statement (incl.
 		// `PRAGMA journal_mode=WAL`, which acquires an exclusive lock during WAL
 		// recovery). Without this, concurrent omp startups can crash here with
-		// `SQLITE_BUSY` / `SQLITE_BUSY_RECOVERY`. See issue #2421.
-		this.#db.run("PRAGMA busy_timeout = 5000");
+		// `SQLITE_BUSY` / `SQLITE_BUSY_RECOVERY`. Re-setting when opened via
+		// `open()` (which already installed it) is idempotent. See issue #2421.
+		SqliteAuthCredentialStore.#installBusyTimeout(this.#db);
 		this.#db.run(`
 			PRAGMA journal_mode=WAL;
 			PRAGMA synchronous=NORMAL;

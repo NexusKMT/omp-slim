@@ -81,6 +81,33 @@ describe("SqliteAuthCredentialStore.open SQLITE_BUSY handling", () => {
 		}
 	});
 
+	test("installs the busy handler before the open()-path leases DDL (#7298)", async () => {
+		const dbPath = path.join(tempDir, "ordering.db");
+		const realRun = Database.prototype.run;
+		const executed: string[] = [];
+		vi.spyOn(Database.prototype, "run").mockImplementation(function (
+			this: Database,
+			...args: Parameters<typeof realRun>
+		) {
+			executed.push(typeof args[0] === "string" ? args[0] : "");
+			return realRun.apply(this, args);
+		});
+
+		const store = await SqliteAuthCredentialStore.open(dbPath);
+		try {
+			const busyIdx = executed.findIndex(sql => /busy_timeout/i.test(sql));
+			const leasesIdx = executed.findIndex(sql => /auth_credential_refresh_leases/i.test(sql));
+			expect(busyIdx).toBeGreaterThanOrEqual(0);
+			expect(leasesIdx).toBeGreaterThanOrEqual(0);
+			// `open()` runs the leases DDL before constructing the store. The busy
+			// handler MUST be installed first, or that lock-taking DDL races WAL
+			// recovery with busy_timeout=0 and fails immediately.
+			expect(busyIdx).toBeLessThan(leasesIdx);
+		} finally {
+			store.close();
+		}
+	});
+
 	test("retries through a transient SQLITE_BUSY_RECOVERY and eventually succeeds", async () => {
 		const dbPath = path.join(tempDir, "retry.db");
 		let throws = 2;
