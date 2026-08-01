@@ -1647,6 +1647,9 @@ async function* streamCodexCompactionEvents(
 	},
 ): AsyncGenerator<Record<string, unknown>> {
 	let completed = false;
+	const websocketState = requestContext.websocketState;
+	const previousTurnState = websocketState?.turnState;
+	const previousModelsEtag = websocketState?.modelsEtag;
 	try {
 		if (initial.transport === "websocket") {
 			// Do not expose a WebSocket attempt until it finishes: an SSE replay
@@ -1677,7 +1680,13 @@ async function* streamCodexCompactionEvents(
 		}
 		completed = true;
 	} finally {
-		if (!completed) requestSetup.requestAbortController.abort();
+		if (!completed) {
+			requestSetup.requestAbortController.abort();
+			if (websocketState) {
+				websocketState.turnState = previousTurnState;
+				websocketState.modelsEtag = previousModelsEtag;
+			}
+		}
 	}
 }
 

@@ -1208,6 +1208,53 @@ describe("Responses Lite remote compaction", () => {
 		}
 	});
 
+	test("V2 compaction rolls back SSE metadata when the attempt fails", async () => {
+		const model = makeCodexLiteModel();
+		const sessionId = "codex-sse-failed-turn-state";
+		const providerSessionState = new Map<string, ProviderSessionState>();
+		const request = buildCompactionV2Request(
+			model,
+			[{ type: "message", role: "user", content: [{ type: "input_text", text: "real user" }] }],
+			"compact instructions",
+			{ sessionId },
+		);
+		let requestCount = 0;
+		let replay: CapturedLiteExchange | undefined;
+		const fetchMock: FetchImpl = async (_input, init) => {
+			requestCount += 1;
+			if (requestCount === 1) {
+				return sseResponse([
+					{ type: "response.metadata", headers: { "x-codex-turn-state": "discarded-turn-state" } },
+					{
+						type: "response.failed",
+						response: { error: { code: "data_residency_mismatch", message: "wrong transport route" } },
+					},
+				]);
+			}
+			replay = captureStreamLite(init);
+			return sseResponse(compactionV2Events("enc-replay"));
+		};
+		const options = {
+			fetch: fetchMock,
+			preferWebsockets: false,
+			providerSessionState,
+			codexCompaction: { ...TEST_CODEX_COMPACTION, phase: "mid_turn" as const },
+		};
+		try {
+			await expect(requestCompactionV2Streaming(model, "test-key", request, undefined, options)).rejects.toThrow(
+				"data_residency_mismatch",
+			);
+			await requestCompactionV2Streaming(model, "test-key", request, undefined, options);
+
+			const clientMetadata = isRecord(replay?.body.client_metadata) ? replay.body.client_metadata : undefined;
+			expect(requestCount).toBe(2);
+			expect(clientMetadata?.["x-codex-turn-state"]).toBeUndefined();
+		} finally {
+			for (const state of providerSessionState.values()) state.close();
+			providerSessionState.clear();
+		}
+	});
+
 	test("compact fan-out keeps local Codex summaries on one classified turn", async () => {
 		const model = makeCodexLiteModel();
 		const captured: CapturedLiteExchange[] = [];
