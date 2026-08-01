@@ -55,6 +55,7 @@ import { JWT_CLAIM_PATH } from "../src/wire/codex";
 import {
 	applyCanonicalLimitFallback,
 	applyGeneratedModelPolicies,
+	applyOllamaCloudOutputCap,
 	CLOUDFLARE_FALLBACK_MODEL,
 	dropUnsupportedBedrockGeoIds,
 	linkOpenAIPromotionTargets,
@@ -678,6 +679,9 @@ async function generateModels() {
 	// Fill remaining null endpoint limits from each model's canonical-family
 	// reference. Runs last so canonical ids and explicit policy limits are final.
 	applyCanonicalLimitFallback(allModels);
+	// Pin every Ollama Cloud model's max-output to the enforced ceiling; runs
+	// after canonical fallback so finalized context windows drive the cap.
+	applyOllamaCloudOutputCap(allModels);
 
 	for (const model of allModels) {
 		canonicalizeModelCompat(model);
