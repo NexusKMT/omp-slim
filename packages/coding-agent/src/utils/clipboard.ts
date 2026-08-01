@@ -3,6 +3,8 @@ import * as native from "@oh-my-pi/pi-natives";
 import { logger } from "@oh-my-pi/pi-utils";
 import MAC_FILE_URL_SCRIPT from "./mac-file-urls.applescript" with { type: "text" };
 
+type SpawnCaptureOptions = { input?: string; timeoutMs?: number };
+
 /**
  * Run a subprocess and capture its stdout without blocking the event loop.
  *
@@ -10,15 +12,20 @@ import MAC_FILE_URL_SCRIPT from "./mac-file-urls.applescript" with { type: "text
  * path all shell out to CLI clipboard tools. The synchronous `execSync` API
  * parks the render loop until the child exits or the timeout fires, so a hung
  * clipboard daemon freezes the TUI for the full 2000ms budget (#4235). This
- * helper mirrors the previous semantics — read stdout as UTF-8, throw on
- * non-zero exit or timeout, forward optional stdin — but yields to the event
- * loop while the child runs.
+ * helper mirrors the previous semantics — capture stdout, throw on non-zero
+ * exit or timeout, forward optional stdin — but yields to the event loop while
+ * the child runs.
  *
  * @throws Error when the child fails to spawn, is killed by the timeout, or
- *   exits with a non-zero status. Callers rely on this to fall through to the
- *   outer catch and return an empty string / empty list.
+ *   exits with a non-zero status. Callers rely on this to use platform
+ *   fallbacks or report an empty clipboard.
  */
-async function spawnCapture(cmd: string[], options: { input?: string; timeoutMs?: number } = {}): Promise<string> {
+async function spawnCapture(cmd: string[], options: SpawnCaptureOptions & { encoding: "bytes" }): Promise<Uint8Array>;
+async function spawnCapture(cmd: string[], options?: SpawnCaptureOptions): Promise<string>;
+async function spawnCapture(
+	cmd: string[],
+	options: SpawnCaptureOptions & { encoding?: "bytes" } = {},
+): Promise<string | Uint8Array> {
 	const timeoutMs = options.timeoutMs ?? 2000;
 	const proc = Bun.spawn(cmd, {
 		stdout: "pipe",
@@ -31,7 +38,9 @@ async function spawnCapture(cmd: string[], options: { input?: string; timeoutMs?
 		proc.kill();
 	}, timeoutMs);
 	try {
-		const stdout = await new Response(proc.stdout).text();
+		const response = new Response(proc.stdout);
+		const stdout =
+			options.encoding === "bytes" ? new Uint8Array(await response.arrayBuffer()) : await response.text();
 		await proc.exited;
 		if (timedOut) {
 			throw new Error(`${cmd[0]} timed out after ${timeoutMs}ms`);
@@ -278,6 +287,15 @@ export async function readImageFromClipboard(): Promise<ClipboardImage | null> {
 			logger.warn("clipboard: native Windows image read failed", { error: String(err) });
 		}
 		return await readImageViaPowerShell();
+	}
+
+	if (process.platform === "linux" && process.env.WAYLAND_DISPLAY) {
+		try {
+			const data = await spawnCapture(["wl-paste", "--type", "image/png"], { encoding: "bytes" });
+			if (data.byteLength > 0) return { data, mimeType: "image/png" };
+		} catch {
+			// Fall through to arboard when wl-clipboard is absent or has no PNG payload.
+		}
 	}
 
 	if (!hasDisplay()) {

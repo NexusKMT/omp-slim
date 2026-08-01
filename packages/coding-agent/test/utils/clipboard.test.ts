@@ -15,13 +15,13 @@ type SpawnOptions = Bun.SpawnOptions.SpawnOptions<
 
 type SpawnCall = { cmd: string[]; options: SpawnOptions };
 
-function streamOf(text: string): ReadableStream<Uint8Array> {
-	const body = new Response(text).body;
-	if (!body) throw new Error("Failed to create response stream.");
-	return body;
+function streamOf(body: string | Uint8Array): ReadableStream<Uint8Array> {
+	const stream = new Response(body).body;
+	if (!stream) throw new Error("Failed to create response stream.");
+	return stream;
 }
 
-function fakeProcess(stdout: string, exitCode = 0): Subprocess {
+function fakeProcess(stdout: string | Uint8Array, exitCode = 0): Subprocess {
 	return {
 		pid: 1,
 		stdout: streamOf(stdout),
@@ -32,7 +32,7 @@ function fakeProcess(stdout: string, exitCode = 0): Subprocess {
 	} as unknown as Subprocess;
 }
 
-function spyPowershell(calls: SpawnCall[], stdout: string, exitCode = 0) {
+function spySpawn(calls: SpawnCall[], stdout: string | Uint8Array, exitCode = 0) {
 	function mockSpawn(opts: SpawnOptions & { cmd: string[] }): Subprocess;
 	function mockSpawn(cmd: string[], opts?: SpawnOptions): Subprocess;
 	function mockSpawn(first: string[] | (SpawnOptions & { cmd: string[] }), second?: SpawnOptions): Subprocess {
@@ -86,7 +86,7 @@ describe("readImageFromClipboard on WSL", () => {
 		process.env.WAYLAND_DISPLAY = "wayland-0";
 
 		const calls: SpawnCall[] = [];
-		spyPowershell(calls, RED_1X1_PNG_BASE64);
+		spySpawn(calls, RED_1X1_PNG_BASE64);
 		const nativeSpy = vi.spyOn(native, "readImageFromClipboard");
 
 		const image = await readImageFromClipboard();
@@ -106,7 +106,7 @@ describe("readImageFromClipboard on WSL", () => {
 		process.env.WSL_INTEROP = "/run/WSL/1_interop";
 		process.env.WAYLAND_DISPLAY = "wayland-0";
 
-		spyPowershell([], "");
+		spySpawn([], "");
 		const nativeSpy = vi.spyOn(native, "readImageFromClipboard").mockResolvedValue(null);
 
 		const image = await readImageFromClipboard();
@@ -120,7 +120,7 @@ describe("readImageFromClipboard on WSL", () => {
 		process.env.WSL_DISTRO_NAME = "Ubuntu";
 		process.env.DISPLAY = ":0";
 
-		spyPowershell([], "noise", 1);
+		spySpawn([], "noise", 1);
 		const nativeSpy = vi.spyOn(native, "readImageFromClipboard").mockResolvedValue(null);
 
 		await readImageFromClipboard();
@@ -132,7 +132,7 @@ describe("readImageFromClipboard on WSL", () => {
 		process.env.WSL_DISTRO_NAME = "Ubuntu";
 		// No DISPLAY / WAYLAND_DISPLAY — arboard would reject, so we must short-circuit.
 
-		spyPowershell([], "");
+		spySpawn([], "");
 		const nativeSpy = vi.spyOn(native, "readImageFromClipboard");
 
 		expect(await readImageFromClipboard()).toBeNull();
@@ -154,7 +154,7 @@ describe("readImageFromClipboard dispatch", () => {
 	it("uses the PowerShell bridge on native Windows when arboard has no image payload", async () => {
 		setPlatform("win32");
 		const calls: SpawnCall[] = [];
-		spyPowershell(calls, RED_1X1_PNG_BASE64);
+		spySpawn(calls, RED_1X1_PNG_BASE64);
 		vi.spyOn(native, "readImageFromClipboard").mockResolvedValue(null);
 
 		const image = await readImageFromClipboard();
@@ -169,7 +169,7 @@ describe("readImageFromClipboard dispatch", () => {
 	it("falls back to PowerShell when native Windows image conversion fails", async () => {
 		setPlatform("win32");
 		const calls: SpawnCall[] = [];
-		spyPowershell(calls, RED_1X1_PNG_BASE64);
+		spySpawn(calls, RED_1X1_PNG_BASE64);
 		vi.spyOn(native, "readImageFromClipboard").mockRejectedValue(
 			new Error("The clipboard image could not be converted to the appropriate format."),
 		);
@@ -192,6 +192,22 @@ describe("readImageFromClipboard dispatch", () => {
 		await readImageFromClipboard();
 		expect(spawnSpy).not.toHaveBeenCalled();
 		expect(nativeSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it("reads PNG bytes through wl-paste before the native bridge on Wayland-only Linux", async () => {
+		setPlatform("linux");
+		process.env.WAYLAND_DISPLAY = "wayland-0";
+		const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47]);
+		const calls: SpawnCall[] = [];
+		spySpawn(calls, png);
+		const nativeSpy = vi.spyOn(native, "readImageFromClipboard");
+
+		const image = await readImageFromClipboard();
+
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.cmd).toEqual(["wl-paste", "--type", "image/png"]);
+		expect(image).toEqual({ data: png, mimeType: "image/png" });
+		expect(nativeSpy).not.toHaveBeenCalled();
 	});
 
 	it("returns null on Termux without spawning anything", async () => {
@@ -219,7 +235,7 @@ describe("readMacFileUrlsFromClipboard", () => {
 	it("splits osascript output into one path per non-empty line on darwin", async () => {
 		setPlatform("darwin");
 		const calls: SpawnCall[] = [];
-		spyPowershell(calls, "/Users/me/Pictures/photo.png\n/Users/me/Pictures/clip.jpg\n\n");
+		spySpawn(calls, "/Users/me/Pictures/photo.png\n/Users/me/Pictures/clip.jpg\n\n");
 
 		const paths = await readMacFileUrlsFromClipboard();
 
@@ -235,7 +251,7 @@ describe("readMacFileUrlsFromClipboard", () => {
 
 	it("returns an empty list when osascript exits non-zero (e.g. binary missing)", async () => {
 		setPlatform("darwin");
-		spyPowershell([], "", 127);
+		spySpawn([], "", 127);
 
 		expect(await readMacFileUrlsFromClipboard()).toEqual([]);
 	});
@@ -245,7 +261,7 @@ describe("readTextFromClipboard", () => {
 	it("returns pbpaste stdout on darwin without touching execSync", async () => {
 		setPlatform("darwin");
 		const calls: SpawnCall[] = [];
-		spyPowershell(calls, "hello from pbpaste");
+		spySpawn(calls, "hello from pbpaste");
 
 		expect(await readTextFromClipboard()).toBe("hello from pbpaste");
 		expect(calls).toHaveLength(1);
@@ -254,7 +270,7 @@ describe("readTextFromClipboard", () => {
 
 	it("returns an empty string when the subprocess exits non-zero", async () => {
 		setPlatform("darwin");
-		spyPowershell([], "", 1);
+		spySpawn([], "", 1);
 
 		expect(await readTextFromClipboard()).toBe("");
 	});
