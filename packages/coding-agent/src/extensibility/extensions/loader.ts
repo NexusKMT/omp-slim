@@ -517,7 +517,7 @@ async function discoverHooksInPackageRoot(root: string): Promise<string[]> {
 		try {
 			entries = await fs.readdir(hookDir, { withFileTypes: true });
 		} catch (err) {
-			if (isEnoent(err) || hasFsCode(err, "ENOTDIR")) continue;
+			if (isEnoent(err) || isEacces(err) || hasFsCode(err, "ENOTDIR") || hasFsCode(err, "EPERM")) continue;
 			throw err;
 		}
 		for (const entry of entries) {

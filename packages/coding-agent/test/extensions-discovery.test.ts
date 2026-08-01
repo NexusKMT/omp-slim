@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
+import * as fsPromises from "node:fs/promises";
 import * as path from "node:path";
 import { type ExtensionModule, extensionModuleCapability } from "@oh-my-pi/pi-coding-agent/capability/extension-module";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -186,6 +187,32 @@ describe("extensions discovery", () => {
 			"explicit-hook-tool",
 			"explicit-tool",
 		]);
+	});
+
+	it("explicit-only discovery ignores unreadable optional hook directories", async () => {
+		const packageDir = path.join(tempDir.path(), "explicit-package");
+		const sourceDir = path.join(packageDir, "src");
+		fs.mkdirSync(sourceDir, { recursive: true });
+		fs.writeFileSync(path.join(sourceDir, "main.ts"), extensionCode);
+		fs.writeFileSync(
+			path.join(packageDir, "package.json"),
+			JSON.stringify({
+				name: "explicit-package",
+				omp: {
+					extensions: ["./src/main.ts"],
+				},
+			}),
+		);
+
+		const permissionError = Object.assign(new Error("permission denied"), { code: "EACCES" });
+		const readdirSpy = vi.spyOn(fsPromises, "readdir").mockRejectedValueOnce(permissionError);
+		try {
+			await expect(
+				discoverExtensionPaths([packageDir], tempDir.path(), undefined, { ambient: false }),
+			).resolves.toEqual([path.join(sourceDir, "main.ts")]);
+		} finally {
+			readdirSpy.mockRestore();
+		}
 	});
 
 	it("discovers a symlinked extension package directory", async () => {
