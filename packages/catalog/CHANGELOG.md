@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `gen:models` Codex discovery to union models across every stored OAuth account and fail closed on partial resolution, matching runtime discovery ([#6265](https://github.com/can1357/oh-my-pi/issues/6265)); restored the bundled `gpt-5.4`, `gpt-5.6-sol`, and `gpt-5.3-codex-spark` entries a single-account regen had dropped.
+
 ## [17.2.3] - 2026-08-01
 
 ### Added
