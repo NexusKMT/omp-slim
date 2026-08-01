@@ -2724,10 +2724,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 		// Existing staged/device paths need write registered before active-set assembly.
 		// Deferred MCP also registers it now, but refresh activates it only after a server connects.
+		// xd:// mounts never register write: xdev state only exists when the session
+		// already granted a write tool (see createTools), so mounting rides that grant.
 		const hasDeferrableTools = Array.from(toolRegistry.values()).some(tool => tool.deferrable === true);
-		const hasXdevTools = (toolSession.xdev?.mountedNames.size ?? 0) > 0;
 		const planModeAvailable = settings.get("plan.enabled");
-		if (!restrictToolNames && (hasDeferrableTools || hasXdevTools || planModeAvailable || deferMCPDiscoveryForUI)) {
+		if (!restrictToolNames && (hasDeferrableTools || planModeAvailable || deferMCPDiscoveryForUI)) {
 			await ensureWriteRegistered();
 		}
 
@@ -2984,6 +2985,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		const xdevReadAvailable =
 			builtInRegistryToolNames.has("read") &&
 			(explicitlyRequestedToolNameSet === undefined || explicitlyRequestedToolNameSet.has("read"));
+		const xdevWriteAvailable =
+			builtInRegistryToolNames.has("write") &&
+			(explicitlyRequestedToolNameSet === undefined || explicitlyRequestedToolNameSet.has("write"));
 		const initialRequestedActiveToolNames = options.toolNames
 			? requestedActiveToolNames
 			: requestedActiveToolNames.filter(name => !defaultInactiveToolNames.has(name));
@@ -3029,23 +3033,23 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 		// Partition the initial enabled set for the xd:// transport. Tool instances
 		// remain in the canonical map; only presentation names move between layers.
+		// Mounting requires both transport halves in the granted set (`read xd://`
+		// discovers, `write xd://<tool>` executes); a session without either keeps
+		// every tool top-level instead of auto-granting the missing transport.
 		if (toolSession.xdev) {
 			const topLevelToolNames: string[] = [];
 			const mountedNames: string[] = [];
 			for (const name of initialToolNames) {
 				const tool = toolRegistry.get(name);
 				const explicitlyRequested = explicitlyRequestedToolNameSet?.has(name) === true;
-				if (tool && xdevReadAvailable && !explicitlyRequested && isMountableUnderXdev(tool))
+				if (tool && xdevReadAvailable && xdevWriteAvailable && !explicitlyRequested && isMountableUnderXdev(tool))
 					mountedNames.push(name);
 				else topLevelToolNames.push(name);
 			}
-			const writeTransportAvailable = mountedNames.length === 0 || (await ensureWriteRegistered());
 			toolSession.xdev.mountedNames.clear();
-			if (writeTransportAvailable) {
-				for (const name of mountedNames) toolSession.xdev.mountedNames.add(name);
-				initialToolNames = topLevelToolNames;
-				if (mountedNames.length > 0 && !initialToolNames.includes("write")) initialToolNames.push("write");
-			}
+			for (const name of mountedNames) toolSession.xdev.mountedNames.add(name);
+			initialToolNames = topLevelToolNames;
+			if (mountedNames.length > 0 && !initialToolNames.includes("write")) initialToolNames.push("write");
 		}
 
 		setActiveToolNames(initialToolNames);
