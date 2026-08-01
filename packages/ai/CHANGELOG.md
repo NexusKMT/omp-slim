@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.3] - 2026-08-01
+
 ### Added
 
 - Added the ai& (`aiand`) provider registry entry with API-key paste login validated against `https://api.aiand.com/v1/models`.

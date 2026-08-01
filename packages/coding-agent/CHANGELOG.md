@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.3] - 2026-08-01
+
 ### Changed
 
 - Tightened the system prompt notation: the legend now defines `⟺`, `≠`, `∉`/`∌`, and operator binding order; replaced undefined symbols (`⊭`, `≢`) in prompt bodies; removed delegation guidance duplicated between the eager-tasks preamble and the delegation gates.
