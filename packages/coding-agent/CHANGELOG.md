@@ -21,6 +21,9 @@
 - Fixed the browser relay creating duplicate "omp" tab groups: the bridge now keeps at most one group RPC in flight (a queued drain replaces fire-and-forget per-tab requests), so concurrent requests can no longer race the extension's non-atomic query→create→set-title sequence in the same window. Also fixed an extension reconnect (relay daemon restart, service-worker recycle) being misread as the user dragging every tab out of the omp group — grouping state is reset when the extension socket closes, so tabs regroup on the next hello instead of being permanently opted out.
 - Fixed retained computer `Win` and `El` handles carrying a completed run's abort signal and permissions into later runs; handles now obey the current run while leaked async continuations remain denied.
 - Fixed computer-tool `win.ref("eN")` fabricating an element with empty role/title metadata; it now resolves the ref through the accessibility registry, returning a populated element and throwing `StaleRef` for expired refs.
+- Fixed macOS background keyboard input silently reaching a different window in the same application; ambiguous multi-window delivery now fails with `BackgroundUnavailable`, and foreground retries establish the addressed window as the app's main/focused window before typing.
+- Fixed macOS Chrome accessibility snapshots exposing only browser chrome by activating Chromium's renderer accessibility tree before resolving a window.
+- Fixed unnamed macOS accessibility controls such as Chrome's Back, Forward, and Reload buttons by using `AXDescription` when `AXTitle` is empty in snapshots and title queries.
 
 ## [17.2.4] - 2026-08-01
 

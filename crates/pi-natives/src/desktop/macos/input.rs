@@ -17,6 +17,7 @@ use super::{
 		keys::KeyName,
 		types::{DesktopWindow, Target},
 	},
+	ax,
 	capture::MacCapture,
 	skylight,
 };
@@ -83,12 +84,11 @@ impl MacInput {
 				match mode {
 					DeliveryMode::Background => {
 						background_guard(&window, "keyboard", None)?;
-						if !window.focused {
-							skylight::activate_without_raise(pid, wid)?;
-						}
+						prepare_background_keys(&window, pid, wid, capture)?;
 						background_type(pid, text)
 					},
 					DeliveryMode::Foreground => skylight::with_foreground(pid, wid, || {
+						let _ = ax::prepare_foreground_input(&window);
 						self.global.text(text).map_err(input_error)
 					}),
 				}
@@ -111,14 +111,13 @@ impl MacInput {
 				match mode {
 					DeliveryMode::Background => {
 						background_guard(&window, "keyboard", None)?;
-						if !window.focused {
-							skylight::activate_without_raise(pid, wid)?;
-						}
+						prepare_background_keys(&window, pid, wid, capture)?;
 						background_chord(pid, keys)
 					},
-					DeliveryMode::Foreground => {
-						skylight::with_foreground(pid, wid, || global_chord(&mut self.global, keys))
-					},
+					DeliveryMode::Foreground => skylight::with_foreground(pid, wid, || {
+						let _ = ax::prepare_foreground_input(&window);
+						global_chord(&mut self.global, keys)
+					}),
 				}
 			},
 		}
@@ -136,6 +135,42 @@ fn window_identity(window: &DesktopWindow) -> CoreResult<(libc::pid_t, u32)> {
 		DesktopError::invalid_target(format!("invalid macOS window id '{}'", window.id))
 	})?;
 	Ok((pid, wid))
+}
+
+/// Prepares background keyboard delivery for `window`, or refuses it.
+///
+/// macOS posts key events to a *process*, which hands them to whichever window
+/// it treats as key; unlike pointer events they carry no window id, and neither
+/// the `SkyLight` focus records nor any accessibility attribute reliably
+/// predicts or redirects that choice. Delivery is therefore refused whenever
+/// the process owns more than one window, rather than typing into another of
+/// the user's windows. `DesktopWindow::focused` cannot disambiguate: xcap
+/// reports every window owned by the active application as focused on macOS.
+///
+/// The refusal decision itself reads no mutable state, so it cannot be fooled
+/// by the activation below.
+fn prepare_background_keys(
+	window: &DesktopWindow,
+	pid: libc::pid_t,
+	wid: u32,
+	capture: &MacCapture,
+) -> CoreResult<()> {
+	let siblings = capture
+		.windows()?
+		.into_iter()
+		.filter(|candidate| candidate.pid == window.pid)
+		.count();
+	if siblings > 1 {
+		return Err(DesktopError::background_unavailable(format!(
+			"window {wid} is one of {siblings} windows in its application; macOS delivers background \
+			 keystrokes to whichever window the application treats as key, so retry with \
+			 delivery:\"foreground\" or use ax actions",
+		)));
+	}
+	// Sole window of its process, so the target is unambiguous: make it key
+	// without raising it or changing the frontmost application. A background app
+	// otherwise has no key window and drops the keystrokes entirely.
+	skylight::activate_without_raise(pid, wid)
 }
 
 const fn pointer_kind(event: &PointerEvent) -> &'static str {

@@ -1,10 +1,9 @@
 use std::{
-	collections::HashMap,
 	ffi::{CStr, c_void},
 	mem,
 	os::raw::{c_char, c_int, c_uint},
 	ptr,
-	sync::{LazyLock, Mutex},
+	sync::LazyLock,
 	thread,
 	time::Duration,
 };
@@ -18,22 +17,9 @@ use super::super::error::{CoreResult, DesktopError};
 
 const EVENT_RECORD_LENGTH: usize = 248;
 const EVENT_RECORD_LENGTH_BYTE: u8 = 0xf8;
-const EVENT_RECORD_KIND_OFFSET: usize = 0x08;
+const EVENT_RECORD_KIND: u8 = 0x0d;
 const WINDOW_ID_OFFSET: usize = 0x3c;
-/// Kind `0x0d` is an intra-application focus transfer; its marker byte selects
-/// the defocus or focus half and each half names the window it applies to.
-const FOCUS_RECORD_KIND: u8 = 0x0d;
 const FOCUS_MARKER_OFFSET: usize = 0x8a;
-const FOCUS_MARKER_DEFOCUS: u8 = 0x02;
-const FOCUS_MARKER_FOCUS: u8 = 0x01;
-/// Kinds `0x01`/`0x02` are the key-window handshake, a distinct record format:
-/// no focus marker, but a flag byte and a filled 16-byte wildcard span.
-const KEY_WINDOW_ACTIVATE_KIND: u8 = 0x01;
-const KEY_WINDOW_DEACTIVATE_KIND: u8 = 0x02;
-const KEY_WINDOW_FLAG_OFFSET: usize = 0x3a;
-const KEY_WINDOW_FLAG: u8 = 0x10;
-const WILDCARD_OFFSET: usize = 0x20;
-const WILDCARD_LENGTH: usize = 0x10;
 
 unsafe extern "C" {
 	fn CGEventPostToPid(pid: pid_t, event: core_graphics::sys::CGEventRef);
@@ -110,11 +96,6 @@ struct AuthenticationSpi {
 static REQUIRED: LazyLock<Option<RequiredSpi>> = LazyLock::new(resolve_required);
 static AUTHENTICATION: LazyLock<Option<AuthenticationSpi>> = LazyLock::new(resolve_authentication);
 static FOREGROUND: LazyLock<Option<ForegroundSpi>> = LazyLock::new(resolve_foreground);
-
-/// Last window each process was asked to focus. The defocus half of a focus
-/// transfer must name the window losing focus, not the one gaining it.
-static LAST_FOCUSED: LazyLock<Mutex<HashMap<pid_t, u32>>> =
-	LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub(super) fn is_available() -> bool {
 	required().is_ok()
@@ -246,92 +227,41 @@ pub(super) fn post_keyboard(pid: pid_t, event: &CGEvent) -> CoreResult<()> {
 	Ok(())
 }
 
-/// Posts one 248-byte event record, reporting whether the window server took it.
-fn post_record(
-	spi: &RequiredSpi,
-	psn: &ProcessSerialNumber,
-	record: &[u8; EVENT_RECORD_LENGTH],
-) -> bool {
-	// SAFETY: The PSN and the complete 248-byte record live through the
-	// synchronous SPI call.
-	unsafe { (spi.post_record)(psn, record.as_ptr()) == 0 }
-}
-
-/// Promotes `wid` to key window inside its owning application, which is what
-/// routes subsequent keystrokes. Never changes the frontmost application.
-fn make_key_window(spi: &RequiredSpi, psn: &ProcessSerialNumber, wid: u32) -> bool {
-	let mut record = [0u8; EVENT_RECORD_LENGTH];
-	record[0x04] = EVENT_RECORD_LENGTH_BYTE;
-	record[KEY_WINDOW_FLAG_OFFSET] = KEY_WINDOW_FLAG;
-	record[WILDCARD_OFFSET..WILDCARD_OFFSET + WILDCARD_LENGTH].fill(0xff);
-	record[WINDOW_ID_OFFSET..WINDOW_ID_OFFSET + 4].copy_from_slice(&wid.to_le_bytes());
-	record[EVENT_RECORD_KIND_OFFSET] = KEY_WINDOW_ACTIVATE_KIND;
-	let activated = post_record(spi, psn, &record);
-	record[EVENT_RECORD_KIND_OFFSET] = KEY_WINDOW_DEACTIVATE_KIND;
-	activated && post_record(spi, psn, &record)
-}
-
-/// Moves keyboard focus from `previous` to `wid` within the frontmost
-/// application; the defocus half is skipped when no prior window is known.
-fn transfer_focus(
-	spi: &RequiredSpi,
-	psn: &ProcessSerialNumber,
-	previous: Option<u32>,
-	wid: u32,
-) -> bool {
-	let mut record = [0u8; EVENT_RECORD_LENGTH];
-	record[0x04] = EVENT_RECORD_LENGTH_BYTE;
-	record[EVENT_RECORD_KIND_OFFSET] = FOCUS_RECORD_KIND;
-	if let Some(previous) = previous.filter(|previous| *previous != wid) {
-		record[FOCUS_MARKER_OFFSET] = FOCUS_MARKER_DEFOCUS;
-		record[WINDOW_ID_OFFSET..WINDOW_ID_OFFSET + 4].copy_from_slice(&previous.to_le_bytes());
-		if !post_record(spi, psn, &record) {
-			return false;
-		}
-	}
-	record[FOCUS_MARKER_OFFSET] = FOCUS_MARKER_FOCUS;
-	record[WINDOW_ID_OFFSET..WINDOW_ID_OFFSET + 4].copy_from_slice(&wid.to_le_bytes());
-	post_record(spi, psn, &record)
-}
-
-/// Makes `wid` the key window of its owning app without raising it or changing
-/// the frontmost app, so background keystrokes reach the addressed window
-/// instead of whichever window of that app was last key.
 pub(super) fn activate_without_raise(pid: pid_t, wid: u32) -> CoreResult<()> {
 	let spi = required()?;
+	let mut previous = ProcessSerialNumber::default();
+	// SAFETY: `previous` is writable and exactly the 8-byte PSN record expected by
+	// this SPI.
+	if unsafe { (spi.get_front)(&mut previous) } != 0 {
+		return Err(DesktopError::background_unavailable(format!(
+			"window {wid} could not resolve the front process for background input; retry with \
+			 delivery:\"foreground\" or use ax actions",
+		)));
+	}
 	let target = process_psn(spi.psn, pid, wid).ok_or_else(|| {
 		DesktopError::background_unavailable(format!(
 			"window {wid} could not resolve its process serial number for background input; retry \
 			 with delivery:\"foreground\" or use ax actions",
 		))
 	})?;
-	let previous = LAST_FOCUSED
-		.lock()
-		.unwrap_or_else(|error| error.into_inner())
-		.get(&pid)
-		.copied();
-	let mut front = ProcessSerialNumber::default();
-	// SAFETY: `front` is writable and exactly the 8-byte PSN record this SPI
-	// fills.
-	let front_known = unsafe { (spi.get_front)(&mut front) } == 0;
-	// A focus transfer only applies inside the frontmost application; for a
-	// background app the key-window handshake alone moves its internal focus.
-	if front_known && front == target && !transfer_focus(spi, &target, previous, wid) {
+	let mut record = [0u8; EVENT_RECORD_LENGTH];
+	record[0x04] = EVENT_RECORD_LENGTH_BYTE;
+	record[0x08] = EVENT_RECORD_KIND;
+	record[WINDOW_ID_OFFSET..WINDOW_ID_OFFSET + 4].copy_from_slice(&wid.to_le_bytes());
+	record[FOCUS_MARKER_OFFSET] = 0x02;
+	// SAFETY: Both PSNs and the complete 248-byte record live through the
+	// synchronous SPI call.
+	let defocused = unsafe { (spi.post_record)(&previous, record.as_ptr()) } == 0;
+	record[FOCUS_MARKER_OFFSET] = 0x01;
+	// SAFETY: Both PSNs and the complete 248-byte record live through the
+	// synchronous SPI call.
+	let focused = unsafe { (spi.post_record)(&target, record.as_ptr()) } == 0;
+	if !defocused || !focused {
 		return Err(DesktopError::background_unavailable(format!(
-			"window {wid} rejected the SkyLight focus-transfer record; retry with \
+			"window {wid} rejected the 248-byte SkyLight focus-without-raise record; retry with \
 			 delivery:\"foreground\" or use ax actions",
 		)));
 	}
-	if !make_key_window(spi, &target, wid) {
-		return Err(DesktopError::background_unavailable(format!(
-			"window {wid} rejected the SkyLight key-window handshake; retry with \
-			 delivery:\"foreground\" or use ax actions",
-		)));
-	}
-	LAST_FOCUSED
-		.lock()
-		.unwrap_or_else(|error| error.into_inner())
-		.insert(pid, wid);
 	thread::sleep(Duration::from_millis(50));
 	Ok(())
 }

@@ -644,6 +644,31 @@ mod tests {
 		assert_eq!(s.node_count, 2);
 	}
 	#[test]
+	fn description_labels_unnamed_controls_without_changing_raw_title() {
+		let mut reload = p("button", None);
+		reload.description = Some("Reload".into());
+		reload.actions.push("press".into());
+		let mut m = Mock {
+			props:    [(1, p("window", Some("Title"))), (2, reload)].into(),
+			children: [(1, vec![2])].into(),
+		};
+		let snapshot =
+			snapshot(&mut m, &mut AxRegistry::default(), &window(), &AxSnapshotOptions::default())
+				.unwrap();
+		assert!(snapshot.text.contains("- button \"Reload\""));
+
+		let nodes = query(&mut m, &mut AxRegistry::default(), &window(), &AxQuery {
+			role:  Some("button".into()),
+			title: Some("reload".into()),
+			value: None,
+			limit: None,
+		})
+		.unwrap();
+		assert_eq!(nodes.len(), 1);
+		assert_eq!(nodes[0].title, None);
+		assert_eq!(nodes[0].description.as_deref(), Some("Reload"));
+	}
+	#[test]
 	fn truncation_sets_flag_and_trailer() {
 		let mut m = Mock {
 			props:    [(1, p("window", Some("Title"))), (2, p("button", Some("A")))].into(),

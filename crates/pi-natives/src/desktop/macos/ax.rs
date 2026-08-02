@@ -63,6 +63,21 @@ impl MacAx {
 		self.perform(&root, "AXRaise")
 	}
 }
+/// Make the addressed window the app's main/focused window while foreground
+/// delivery has deliberately activated the app. This is best-effort at the
+/// input callsite because keyboard delivery must still work without AX trust.
+pub(super) fn prepare_foreground_input(window: &DesktopWindow) -> CoreResult<()> {
+	let mut backend = MacAx::new();
+	let root = backend.window_root(window)?;
+	let element = mac_handle(&root)?;
+	for attribute in ["AXMain", "AXFocused"] {
+		let attribute = CFString::from_str(attribute);
+		// SAFETY: The retained element, attribute, and singleton CFBoolean remain
+		// valid for the synchronous setter call.
+		let _ = unsafe { element.set_attribute_value(&attribute, CFBoolean::new(true)) };
+	}
+	backend.perform(&root, "AXRaise")
+}
 
 impl AxBackend for MacAx {
 	fn window_root(&mut self, win: &DesktopWindow) -> CoreResult<AxHandle> {
@@ -256,11 +271,14 @@ fn create_application(pid: libc::pid_t) -> CoreResult<CFRetained<AXUIElement>> {
 	Ok(unsafe { CFRetained::from_raw(pointer) })
 }
 
-/// Chromium-family apps build their renderer accessibility tree only once a
-/// client sets `AXManualAccessibility`; until then the web area is an empty
-/// leaf and no page content is reachable. Every other app rejects the attribute
-/// as unsupported, which costs one ignored setter call.
+/// Chromium-family apps build their renderer accessibility tree lazily. Reading
+/// the application role activates modern Chrome's native AX mode, while older
+/// Chromium/Electron builds also honor `AXManualAccessibility`. A process that
+/// rejects the manual setter incurs no readiness delay.
 fn enable_web_accessibility(pid: libc::pid_t, app: &AXUIElement) {
+	// Modern Chromium treats an assistive client's role query as the activation
+	// signal. Older Chromium/Electron builds use the manual setter below.
+	let _ = copy_string(app, "AXRole");
 	{
 		let mut enabled = MANUAL_ACCESSIBILITY
 			.lock()
@@ -273,13 +291,13 @@ fn enable_web_accessibility(pid: libc::pid_t, app: &AXUIElement) {
 		// valid for the synchronous setter call.
 		let error = unsafe { app.set_attribute_value(&attribute, CFBoolean::new(true)) };
 		if error != AXError::Success {
-			// Not a Chromium-family app; drop the marker so a relaunched pid retries.
+			// Manual activation is unsupported; leave no stale pid marker.
 			enabled.remove(&pid);
 			return;
 		}
 	}
 	// The renderers publish their trees over IPC after the switch flips, so the
-	// first snapshot would otherwise race an still-empty web area.
+	// first snapshot would otherwise race a still-empty web area.
 	thread::sleep(Duration::from_millis(500));
 }
 
