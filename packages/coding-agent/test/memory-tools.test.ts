@@ -729,6 +729,14 @@ describe("Mnemopi backend lifecycle", () => {
 		expect(sharedDbPath).toBeDefined();
 		const lock = new Database(sharedDbPath!);
 		lock.exec("BEGIN IMMEDIATE");
+		const sharedMemory = state.globalMemory;
+		expect(sharedMemory).toBeDefined();
+		const sharedFlushSpy = vi.spyOn(sharedMemory!, "flushExtractions").mockImplementation(async () => {
+			// Model a pending extraction/embedding commit. An idle shared bank performs
+			// no SQLite work during flush, so merely locking it would not exercise its
+			// connection's busy timeout.
+			sharedMemory!.beam.db.exec("PRAGMA user_version=7351");
+		});
 
 		const started = performance.now();
 		try {
@@ -740,6 +748,7 @@ describe("Mnemopi backend lifecycle", () => {
 		}
 
 		expect(performance.now() - started).toBeLessThan(500);
+		expect(sharedFlushSpy).toHaveBeenCalledTimes(1);
 	});
 
 	it("dispose with no timeoutMs retains, flushes, and closes without sleeping (#3641)", async () => {
