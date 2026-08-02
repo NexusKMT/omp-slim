@@ -2833,7 +2833,13 @@ export const ALIBABA_TOKEN_PLAN_STATIC_MODELS: readonly ModelSpec<"openai-comple
 	},
 ];
 
-const ALIBABA_TOKEN_PLAN_NON_CHAT_MODEL_PREFIXES = ["happyhorse-", "qwen-audio-", "qwen-image-", "wan2.7-"] as const;
+const ALIBABA_TOKEN_PLAN_NON_CHAT_MODEL_PREFIXES = [
+	"happyhorse-",
+	"qwen-audio-",
+	"qwen-image-",
+	"text-embedding-",
+	"wan2.7-",
+] as const;
 
 function isAlibabaTokenPlanChatModelId(id: string): boolean {
 	const normalized = id.trim().toLowerCase();

@@ -68,6 +68,7 @@ describe("QwenCloud Token Plan provider", () => {
 						{ id: "qwen-image-2.0-pro", owned_by: "qwencloud" },
 						{ id: "qwen-audio-3.0-tts-plus", owned_by: "qwencloud" },
 						{ id: "happyhorse-1.1-t2v", owned_by: "qwencloud" },
+						{ id: "text-embedding-v4", owned_by: "qwencloud" },
 						{ id: "wan2.7-image", owned_by: "qwencloud" },
 					],
 				}),
