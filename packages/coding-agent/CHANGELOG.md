@@ -41,6 +41,9 @@
 ### Fixed
 
 - Removed hard-coded `scout` references from agent, system, and tool prompts that leaked into the model even when the scout agent was disabled (`task.disabledAgents`) or absent from the spawn list: the init agent prompt, task tool description, delegation gates, plan-mode and workflowz notices, and glob/grep/ast-grep guidance no longer recommend an unavailable agent, including after live settings changes ([#7313](https://github.com/can1357/oh-my-pi/issues/7313)).
+### Fixed
+
+- Fixed compiled Windows launches misclassifying ConPTY-backed terminals as console-less when `GetConsoleWindow()` returned no HWND, which spawned Python eval kernels with `CREATE_NO_WINDOW` and could deadlock imports of NumPy-backed packages such as Matplotlib ([#7343](https://github.com/can1357/oh-my-pi/issues/7343)).
 
 ## [17.2.4] - 2026-08-01
 
