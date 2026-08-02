@@ -246,7 +246,7 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser tab evaluation", () => {
 		}
 	}, 30_000);
 
-	it("fails a floated user continuation without killing the tab worker", async () => {
+	it("fails floated user continuations without killing the tab worker", async () => {
 		const tool = new BrowserTool(makeSession());
 		const name = `continuation-rejection-${process.pid}`;
 
@@ -274,6 +274,27 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser tab evaluation", () => {
 				failure = error instanceof Error ? error.message : String(error);
 			}
 			expect(failure).toContain("Unhandled rejection (missing await?): continuation failed");
+
+			let rethrowFailure = "";
+			try {
+				await tool.execute("run", {
+					action: "run",
+					name,
+					timeout: 2,
+					code: `
+						void tab.waitForResponse("/never", { timeout: 10 }).catch(reason => {
+							throw reason;
+						});
+						await Bun.sleep(50);
+						return "incorrect success";
+					`,
+				});
+			} catch (error) {
+				rethrowFailure = error instanceof Error ? error.message : String(error);
+			}
+			expect(rethrowFailure).toContain(
+				"Unhandled rejection (missing await?): tab.waitForResponse() timed out after 10ms",
+			);
 
 			const followup = await tool.execute("run", {
 				action: "run",

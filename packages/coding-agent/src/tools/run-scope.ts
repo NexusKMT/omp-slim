@@ -25,6 +25,7 @@ type FloatingRejectionHandler = (reason: unknown) => void;
 
 interface ObservedPromiseState {
 	handled: boolean;
+	userContinuationFailed: boolean;
 }
 
 const observedBrowserPromises = new WeakMap<Promise<unknown>, ObservedPromiseState>();
@@ -40,15 +41,27 @@ export function observeBrowserRunPromise<T>(
 	owner: object,
 	onFloatingRejection: FloatingRejectionHandler,
 ): Promise<T> {
+	return observeBrowserRunPromiseWithState(promise, owner, onFloatingRejection, {
+		handled: false,
+		userContinuationFailed: false,
+	});
+}
+
+function observeBrowserRunPromiseWithState<T>(
+	promise: Promise<T>,
+	owner: object,
+	onFloatingRejection: FloatingRejectionHandler,
+	state: ObservedPromiseState,
+): Promise<T> {
 	if (observedBrowserPromises.has(promise)) return promise;
-	const state: ObservedPromiseState = { handled: false };
 	observedBrowserPromises.set(promise, state);
 	const originalThen = promise.then.bind(promise);
 	const originalFinally = promise.finally.bind(promise);
 	void originalThen(undefined, reason => {
-		if (isBrowserRunRejection(reason, owner)) return;
 		setTimeout(() => {
-			if (!state.handled) onFloatingRejection(reason);
+			if (!state.handled && (state.userContinuationFailed || !isBrowserRunRejection(reason, owner))) {
+				onFloatingRejection(reason);
+			}
 		}, 0);
 	});
 	Object.defineProperties(promise, {
@@ -61,7 +74,16 @@ export function observeBrowserRunPromise<T>(
 				onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
 			): Promise<TResult1 | TResult2> => {
 				state.handled = true;
-				return observeBrowserRunPromise(originalThen(onFulfilled, onRejected), owner, onFloatingRejection);
+				const childState = createContinuationState();
+				return observeBrowserRunPromiseWithState(
+					originalThen(
+						recordContinuationFailure(onFulfilled, childState),
+						recordContinuationFailure(onRejected, childState),
+					),
+					owner,
+					onFloatingRejection,
+					childState,
+				);
 			},
 		},
 		catch: {
@@ -70,18 +92,59 @@ export function observeBrowserRunPromise<T>(
 				onRejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null,
 			): Promise<T | TResult> => {
 				state.handled = true;
-				return observeBrowserRunPromise(originalThen(undefined, onRejected), owner, onFloatingRejection);
+				const childState = createContinuationState();
+				return observeBrowserRunPromiseWithState(
+					originalThen(undefined, recordContinuationFailure(onRejected, childState)),
+					owner,
+					onFloatingRejection,
+					childState,
+				);
 			},
 		},
 		finally: {
 			configurable: true,
 			value: (onFinally?: (() => void) | null): Promise<T> => {
 				state.handled = true;
-				return observeBrowserRunPromise(originalFinally(onFinally), owner, onFloatingRejection);
+				const childState = createContinuationState();
+				return observeBrowserRunPromiseWithState(
+					originalFinally(recordContinuationFailure(onFinally, childState)),
+					owner,
+					onFloatingRejection,
+					childState,
+				);
 			},
 		},
 	});
 	return promise;
+}
+
+function createContinuationState(): ObservedPromiseState {
+	return { handled: false, userContinuationFailed: false };
+}
+
+function recordContinuationFailure<TArgs extends unknown[], TResult>(
+	continuation: ((...args: TArgs) => TResult | PromiseLike<TResult>) | null | undefined,
+	state: ObservedPromiseState,
+): ((...args: TArgs) => TResult | PromiseLike<TResult>) | null | undefined {
+	if (!continuation) return continuation;
+	return (...args) => {
+		try {
+			const result = continuation(...args);
+			if (!isThenable(result)) return result;
+			return Promise.resolve(result).catch(reason => {
+				state.userContinuationFailed = true;
+				throw reason;
+			}) as PromiseLike<TResult>;
+		} catch (reason) {
+			state.userContinuationFailed = true;
+			throw reason;
+		}
+	};
+}
+
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+	if (value === null || (typeof value !== "object" && typeof value !== "function")) return false;
+	return typeof Reflect.get(value, "then") === "function";
 }
 
 function trackBrowserRunPromise<T>(

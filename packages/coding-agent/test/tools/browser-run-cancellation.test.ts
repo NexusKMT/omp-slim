@@ -326,6 +326,29 @@ describe("browser run cancellation", () => {
 		expect(messages).toEqual(["catch failed", "finally failed", "then failed"]);
 	});
 
+	it("reports a browser error rethrown by a user rejection continuation", async () => {
+		vi.useRealTimers();
+		const owner = {};
+		const browserFailure = new Error("browser failure");
+		const floatingRejections: unknown[] = [];
+		const facade = bindBrowserRunFacade(
+			{
+				fail: (): Promise<never> => Promise.reject(browserFailure),
+			},
+			new AbortController().signal,
+			owner,
+			reason => floatingRejections.push(reason),
+		);
+
+		void facade.fail().catch(reason => {
+			throw reason;
+		});
+		await Bun.sleep(20);
+
+		expect(isBrowserRunRejection(browserFailure, owner)).toBe(true);
+		expect(floatingRejections).toEqual([browserFailure]);
+	});
+
 	it("rejects awaited facade method calls that settle after abort", async () => {
 		const controller = new AbortController();
 		const deferred = Promise.withResolvers<string>();
