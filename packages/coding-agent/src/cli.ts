@@ -15,7 +15,7 @@ try {
  * lightweight CLI runner from pi-utils.
  */
 import { parentPort } from "node:worker_threads";
-import type { CliConfig } from "@oh-my-pi/pi-utils/cli";
+import type { CliConfig, CommandMetadata } from "@oh-my-pi/pi-utils/cli";
 import {
 	APP_NAME,
 	getActiveProfile,
@@ -61,9 +61,13 @@ const isProcessEntry = import.meta.main || process.env.PI_COMPILED === "true";
 // `@oh-my-pi/pi-utils/env` eagerly loads `.env` from the agent directory at
 // import time, so it must not be imported before `setProfile` runs.
 
-async function showHelp(config: CliConfig): Promise<void> {
-	const { renderRootHelp } = await import("@oh-my-pi/pi-utils/cli");
-	const { getExtraHelpText } = await import("./cli/args");
+async function showHelp(config: CliConfig<CommandMetadata>): Promise<void> {
+	// Root help historically loads the selected profile's environment. The
+	// lazily loaded help module imports it statically after profile bootstrap.
+	const [{ renderRootHelp }, { getExtraHelpText }] = await Promise.all([
+		import("@oh-my-pi/pi-utils/cli"),
+		import("./cli/help-extra"),
+	]);
 	renderRootHelp(config);
 	const extra = getExtraHelpText();
 	if (extra.trim().length > 0) {
@@ -405,7 +409,7 @@ export async function runCli(argv: string[]): Promise<void> {
 		process.exitCode = 1;
 		return;
 	}
-	return run({ bin: APP_NAME, version: VERSION, argv: resolved.argv, commands, help: showHelp });
+	return run({ bin: APP_NAME, version: VERSION, argv: resolved.argv, commands, metadataHelp: showHelp });
 }
 
 // Floating call instead of top-level await: TLA forces `--bytecode` (CJS
