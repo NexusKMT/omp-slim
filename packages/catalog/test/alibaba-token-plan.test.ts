@@ -65,6 +65,7 @@ describe("QwenCloud Token Plan provider", () => {
 						{ id: "deepseek-v4-flash", owned_by: "qwencloud" },
 						{ id: "kimi-k2.7-code", owned_by: "qwencloud" },
 						{ id: "MiniMax-M2.5", owned_by: "qwencloud" },
+						{ id: "fun-asr", owned_by: "qwencloud" },
 						{ id: "qwen-image-2.0-pro", owned_by: "qwencloud" },
 						{ id: "qwen-audio-3.0-tts-plus", owned_by: "qwencloud" },
 						{ id: "happyhorse-1.1-t2v", owned_by: "qwencloud" },

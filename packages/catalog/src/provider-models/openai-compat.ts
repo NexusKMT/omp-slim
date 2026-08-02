@@ -2834,6 +2834,7 @@ export const ALIBABA_TOKEN_PLAN_STATIC_MODELS: readonly ModelSpec<"openai-comple
 ];
 
 const ALIBABA_TOKEN_PLAN_NON_CHAT_MODEL_PREFIXES = [
+	"fun-asr",
 	"happyhorse-",
 	"qwen-audio-",
 	"qwen-image-",
