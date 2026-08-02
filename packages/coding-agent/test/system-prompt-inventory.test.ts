@@ -679,7 +679,7 @@ describe("system prompt tool inventory", () => {
 			})
 		).systemPrompt.join("\n\n");
 
-		expect(withScout).toContain("a read-only scout keeping bulk exploration");
+		expect(withScout).toContain("a single read-only scout while you keep working is fine");
 		expect(withoutScout).not.toContain("read-only scout");
 	});
 });
