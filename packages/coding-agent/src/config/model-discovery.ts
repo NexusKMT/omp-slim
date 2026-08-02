@@ -424,6 +424,7 @@ async function discoverOllamaModelMetadata(
 	try {
 		const payload = await withTimeoutSignal(discoveryProbeTimeoutMs(endpoint, 150, customTimeoutMs), async signal => {
 			const response = await ctx.fetch(showUrl, {
+				method: "POST",
 				headers: { ...(headers ?? {}), "Content-Type": "application/json" },
 				body: JSON.stringify({ model: modelId }),
 				signal,

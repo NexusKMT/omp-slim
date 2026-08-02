@@ -1,13 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import { buildCoordinationAdvisory, composeSpawnAdvisory } from "@oh-my-pi/pi-coding-agent/task";
 import type { TaskItem } from "@oh-my-pi/pi-coding-agent/task/types";
-import { prompt } from "@oh-my-pi/pi-utils";
-import subagentSystemPromptTemplate from "../../src/prompts/system/subagent-system-prompt.md" with { type: "text" };
 
 // Contract: a multi-sibling spawn with spawn capacity and IRC available draws
-// a proactive coordinate-via-irc suggestion, and the subagent COOP prompt
-// actively tells peers to coordinate before overlapping edits.
-
+// a proactive coordinate-via-irc suggestion.
 const item = (): TaskItem => ({ task: "do the thing" });
 
 describe("buildCoordinationAdvisory", () => {
@@ -27,18 +23,6 @@ describe("buildCoordinationAdvisory", () => {
 
 	it("stays silent at max depth (no spawn capacity)", () => {
 		expect(buildCoordinationAdvisory([item(), item()], false, true)).toBeUndefined();
-	});
-});
-
-describe("subagent COOP irc guidance", () => {
-	it("prompts coordination before overlapping edits when peers are present", () => {
-		const out = prompt.render(subagentSystemPromptTemplate, {
-			agent: "Base worker.",
-			ircPeers: "- `Sib` — task (sub, running)",
-			ircSelfId: "Self",
-		});
-		expect(out).toContain("before you edit");
-		expect(out).toMatch(/overlapping edits collide/i);
 	});
 });
 

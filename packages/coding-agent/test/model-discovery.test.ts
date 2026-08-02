@@ -1170,6 +1170,7 @@ providers:
   custom-remote:
     baseUrl: "http://127.0.0.1:8080"
     api: "openai-completions"
+    auth: "none"
     discovery:
       type: "llama.cpp"
       timeoutMs: 45000
@@ -1194,7 +1195,7 @@ providers:
 			throw new Error(`Unexpected URL: ${url}`);
 		};
 
-		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock, modelsConfigPath: customConfigPath });
+		const registry = new ModelRegistry(authStorage, customConfigPath, { fetch: fetchMock });
 		await registry.refresh();
 		const state = registry.getProviderDiscoveryState("custom-remote");
 		expect(state?.status).toBe("ok");
