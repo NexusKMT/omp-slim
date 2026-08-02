@@ -51,7 +51,10 @@ export const DEFAULT_SHAKE_CONFIG: ShakeConfig = {
 	fenceMinTokens: 400,
 };
 
-/** Manual `/shake`: aggressive — drops every eligible region across history. */
+/**
+ * Manual `/shake`: aggressive — drops every eligible region across history,
+ * artifact recovery reads included (the user's full escape hatch).
+ */
 export const AGGRESSIVE_SHAKE_CONFIG: ShakeConfig = {
 	protectTokens: 0,
 	minSavings: 0,
@@ -61,10 +64,8 @@ export const AGGRESSIVE_SHAKE_CONFIG: ShakeConfig = {
 
 /** Compaction dead-end rescue: aggressive reach, but artifact recovery reads stay protected. */
 export const RESCUE_SHAKE_CONFIG: ShakeConfig = {
-	protectTokens: 0,
-	minSavings: 0,
-	protectedTools: ["skill", isSkillReadToolResult, isArtifactRecoveryToolResult],
-	fenceMinTokens: 400,
+	...AGGRESSIVE_SHAKE_CONFIG,
+	protectedTools: [...AGGRESSIVE_SHAKE_CONFIG.protectedTools, isArtifactRecoveryToolResult],
 };
 
 /** Rough token cost of a placeholder line; used only for the savings gate. */

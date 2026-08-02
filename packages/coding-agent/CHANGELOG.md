@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed shake re-eliding artifact recovery reads into a new artifact indefinitely.
+
 ## [17.2.4] - 2026-08-01
 
 ### Added
