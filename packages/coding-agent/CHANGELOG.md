@@ -72,6 +72,10 @@
 - Fixed `omp setup python` to validate the same configured or discovered interpreter used by the Python eval runtime.
 
 
+### Fixed
+
+- Fixed self-update misclassifying glibc Linux hosts with an installed musl loader as musl hosts, which could download an unusable musl binary instead of the glibc release.
+
 ## [17.2.4] - 2026-08-01
 
 ### Added
