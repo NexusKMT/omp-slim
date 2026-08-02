@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import { isEnoent, logger, once, untilAborted } from "@oh-my-pi/pi-utils";
 import type { BunFile } from "bun";
+import { writeFileWithFallback } from "../tools/file-write-fallback";
 import { FileChangeType, notifyWorkspaceWatchedFiles } from "./client";
 import { getServersForFile } from "./config";
 import {
@@ -66,11 +67,7 @@ export async function writethroughNoop(
 	_batch?: LspWritethroughBatchRequest,
 	_getDeferred?: (dst: string) => WritethroughDeferredHandle | undefined,
 ): Promise<FileDiagnosticsResult | undefined> {
-	if (file) {
-		await file.write(content);
-	} else {
-		await Bun.write(dst, content);
-	}
+	await writeFileWithFallback(dst, content, file);
 	return undefined;
 }
 
@@ -288,7 +285,7 @@ async function runLspWritethrough(
 	const contentAlreadyWritten = runOptions?.contentAlreadyWritten ?? false;
 
 	let finalContent = content;
-	const writeContent = async (value: string) => (file ? file.write(value) : Bun.write(dst, value));
+	const writeContent = async (value: string) => writeFileWithFallback(dst, value, file);
 	const getWritePromise = once(() =>
 		contentAlreadyWritten && finalContent === content ? Promise.resolve() : writeContent(finalContent),
 	);

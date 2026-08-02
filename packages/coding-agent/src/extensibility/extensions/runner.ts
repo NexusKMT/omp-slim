@@ -19,6 +19,7 @@ import type { MemoryRuntimeContext } from "../../memory-backend";
 import { type Theme, theme } from "../../modes/theme/theme";
 import type { AsyncJobSnapshot } from "../../session/agent-session";
 import type { SessionManager } from "../../session/session-manager";
+import { addFileDeleteFallback, addFileWriteFallback } from "../../tools/file-write-fallback";
 import type { BranchHandler, NavigateTreeHandler, NewSessionHandler } from "../session-handler-types";
 import { ManagedTimers } from "./managed-timers";
 import { createExtensionModelQuery } from "./model-api";
@@ -288,10 +289,12 @@ export type SwitchSessionHandler = (sessionPath: string) => Promise<{ cancelled:
 export type ShutdownHandler = () => void;
 
 /**
- * Emit `session_shutdown` and clear timers owned by an extension runner.
+ * Emit `session_shutdown`, dispose file-write-fallback registrations, and clear
+ * timers owned by an extension runner.
  *
- * Returns whether any shutdown handlers were present. Timer cleanup runs even
- * when a handler fails so extension background work cannot outlive its host.
+ * Returns whether any shutdown handlers were present. Fallback disposal and timer
+ * cleanup run even when a handler fails so extension background work — and a
+ * fallback bound to this session's context — cannot outlive its host.
  */
 export async function emitSessionShutdownEvent(extensionRunner: ExtensionRunner | undefined): Promise<boolean> {
 	if (!extensionRunner) return false;
@@ -302,6 +305,7 @@ export async function emitSessionShutdownEvent(extensionRunner: ExtensionRunner 
 		});
 		return true;
 	} finally {
+		extensionRunner.disposeFileFallbacks();
 		extensionRunner.clearManagedTimers();
 	}
 }
@@ -399,6 +403,23 @@ export class ExtensionRunner {
 	#managedTimers = new ManagedTimers((event, error, stack) =>
 		this.emitError({ extensionPath: "<timer>", event, error, stack }),
 	);
+	/**
+	 * Disposers for the trampolines installed via {@link addFileWriteFallback} and
+	 * {@link addFileDeleteFallback} — one per extension per seam it registered for.
+	 * Installed during {@link initialize} (after the UI/runtime context is live, so
+	 * the bound handler sees a working `ctx.ui`) and drained by
+	 * {@link disposeFileFallbacks} on session shutdown so a handler from a
+	 * torn-down session can never fire for a later one sharing the same process.
+	 *
+	 * Each trampoline re-reads its extension's handler list at call time rather than
+	 * closing over a snapshot, matching how `ext.handlers` is re-read on every emit,
+	 * so an extension that already had a handler for that seam at `initialize` picks
+	 * up later additions to it. A seam the extension registered NOTHING for gets no
+	 * trampoline at all, which keeps the registry empty for a host with no fallbacks;
+	 * the cost is that a first registration for that seam after `initialize` never
+	 * takes effect, which is why the API documents load-time registration.
+	 */
+	#fileFallbackDisposers: Array<() => void> = [];
 	/**
 	 * Dedup markers for `tool_call` emission, keyed `${toolCallId}:${toolName}`.
 	 * The agent loop emits `tool_call` at arg-prep time (before scheduling and
@@ -578,6 +599,44 @@ export class ExtensionRunner {
 		this.#uiContext = uiContext ?? noOpUIContext;
 		this.#mode = mode;
 		this.#initialized = true;
+
+		// Re-initialize (e.g. a mode switch rewiring UI/runtime actions) must not
+		// accumulate duplicate global registrations — drop the prior generation
+		// before installing trampolines bound to the freshly wired context.
+		this.disposeFileFallbacks();
+		for (const ext of this.extensions) {
+			// Nothing registered by this extension means no trampoline, so a host with
+			// no fallback-registering extension leaves the seam genuinely empty and
+			// `hasFileWriteFallback()`/`hasFileDeleteFallback()` false — the invariant
+			// the whole feature rests on. Each seam is checked separately, so an
+			// extension that only brokers writes never appears in the delete registry.
+			if (ext.fileWriteFallbackHandlers.length === 0 && ext.fileDeleteFallbackHandlers.length === 0) continue;
+			// One trampoline per extension per seam, not per handler: the list is walked
+			// at write time so a handler this extension adds later still takes effect,
+			// and `createContext()` takes no extension argument so a single context per
+			// extension is all any of its handlers would have received anyway.
+			const ctx = this.createContext();
+			if (ext.fileWriteFallbackHandlers.length > 0) {
+				this.#fileFallbackDisposers.push(
+					addFileWriteFallback(async req => {
+						for (const handler of ext.fileWriteFallbackHandlers) {
+							if (await handler(req, ctx)) return true;
+						}
+						return false;
+					}),
+				);
+			}
+			if (ext.fileDeleteFallbackHandlers.length > 0) {
+				this.#fileFallbackDisposers.push(
+					addFileDeleteFallback(async req => {
+						for (const handler of ext.fileDeleteFallbackHandlers) {
+							if (await handler(req, ctx)) return true;
+						}
+						return false;
+					}),
+				);
+			}
+		}
 
 		// Drain events buffered by emitCredentialDisabled() before initialize ran. The
 		// spread adds the `type` discriminator — `event` is the pi-ai shape (no `type`).
@@ -1009,6 +1068,16 @@ export class ExtensionRunner {
 	 */
 	clearManagedTimers(): void {
 		this.#managedTimers.clearAll();
+	}
+
+	/**
+	 * Remove every file write and delete fallback this runner installed into the
+	 * process-wide registries. Called on session shutdown (and before reinstalling
+	 * on a re-{@link initialize}) so a handler bound to a torn-down session's
+	 * context can never fire for another session sharing this process.
+	 */
+	disposeFileFallbacks(): void {
+		for (const dispose of this.#fileFallbackDisposers.splice(0)) dispose();
 	}
 
 	createCommandContext(): ExtensionCommandContext {

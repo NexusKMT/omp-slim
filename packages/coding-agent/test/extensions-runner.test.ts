@@ -3484,6 +3484,8 @@ describe("ExtensionRunner", () => {
 				handlers: new Map([["input", [async (...args: unknown[]) => handler(args[0] as InputEvent)]]]),
 				tools: new Map(),
 				assistantThinkingRenderers: [],
+				fileWriteFallbackHandlers: [],
+				fileDeleteFallbackHandlers: [],
 				messageRenderers: new Map(),
 				commands: new Map(),
 				flags: new Map(),
