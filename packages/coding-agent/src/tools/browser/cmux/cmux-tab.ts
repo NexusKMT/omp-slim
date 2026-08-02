@@ -16,12 +16,12 @@ import {
 	resolvePredicateTimeout,
 	type WaitPredicateOptions,
 	waitForRun,
+	withBrowserPromiseCombinatorTracking,
 } from "../../run-scope";
 import { ToolAbortError, ToolError, throwIfAborted } from "../../tool-errors";
 import { type AriaSnapshotOptions, assertSelectorString, buildAriaSnapshotScript } from "../aria/aria-snapshot";
 import { DEFAULT_VIEWPORT } from "../launch";
 import { extractReadableFromHtml, type ReadableFormat } from "../readable";
-
 import { cloneSafe, RunOutput } from "../run-output";
 import type { Observation, ReadyInfo, RunResultOk, ScreenshotResult, SessionSnapshot } from "../tab-protocol";
 import {
@@ -1409,9 +1409,9 @@ export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promi
 		rejectFloatingFailure(error);
 	};
 	const uninstallRejectionInterceptor = postmortem.interceptUnhandledRejections(reason => {
-		if (isBrowserRunRejection(reason, rejectionOwner)) return true;
+		const browserRunRejection = isBrowserRunRejection(reason, rejectionOwner);
 		const stack = reason instanceof Error && typeof reason.stack === "string" ? reason.stack : undefined;
-		if (stack?.includes(`cmux-run-${runId}.js`) !== true) return false;
+		if (!browserRunRejection && stack?.includes(`cmux-run-${runId}.js`) !== true) return false;
 		recordFloatingFailure(reason);
 		return true;
 	});
@@ -1483,11 +1483,16 @@ export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promi
 		let runError: unknown;
 		let runFailed = false;
 		try {
-			returnValue = await Promise.race([
-				runtime.run(opts.code, filename, hooks, { runId, cwd: opts.snapshot.cwd }),
-				cancelRejection,
-				floatingFailure,
-			]);
+			returnValue = await withBrowserPromiseCombinatorTracking(
+				rejectionOwner,
+				recordFloatingFailure,
+				async () =>
+					await Promise.race([
+						runtime.run(opts.code, filename, hooks, { runId, cwd: opts.snapshot.cwd }),
+						cancelRejection,
+						floatingFailure,
+					]),
+			);
 		} catch (error) {
 			runFailed = true;
 			runError = error;

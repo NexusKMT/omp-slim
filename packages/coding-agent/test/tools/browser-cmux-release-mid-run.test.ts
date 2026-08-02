@@ -336,6 +336,50 @@ describe("browser tab-supervisor — cmux tab close mid-run (#4499)", () => {
 		});
 	});
 
+	it("fails a browser error rethrown through a native promise combinator", async () => {
+		spyOn(CmuxSocketClient.prototype, "connect").mockResolvedValue(undefined);
+		spyOn(CmuxSocketClient.prototype, "close").mockImplementation(() => undefined);
+		spyOn(CmuxSocketClient.prototype, "request").mockImplementation(
+			async (method: string): Promise<Record<string, unknown>> => {
+				switch (method) {
+					case "browser.open_split":
+						return { surface_id: "surface-combinator-rejection", url: "about:blank" };
+					case "browser.url.get":
+						return { url: "about:blank" };
+					case "browser.snapshot":
+						return { page: { html: "" } };
+					case "browser.eval":
+						return { value: "" };
+					case "browser.navigate":
+						throw new Error("navigation failed");
+					default:
+						return {};
+				}
+			},
+		);
+		const browser = await acquireBrowser(makeKind("combinator-rejection"), { cwd: "/tmp" });
+		await acquireTab("combinator-rejection", browser, {
+			timeoutMs: 5_000,
+			ownerSessionId: "session-combinator-rejection",
+		});
+
+		const run = runInTab("combinator-rejection", {
+			code: `
+				void Promise.all([
+					tab.goto("https://example.test"),
+				]).catch(reason => {
+					throw reason;
+				});
+				await wait(50);
+				return "incorrect success";
+			`,
+			timeoutMs: 5_000,
+			session: makeSession("/tmp"),
+		});
+
+		await expect(run).rejects.toThrow("Unhandled rejection (missing await?): navigation failed");
+	});
+
 	it("ignores the daemon screenshot path when no screenshot directory is configured", async () => {
 		spyOn(CmuxSocketClient.prototype, "connect").mockResolvedValue(undefined);
 		spyOn(CmuxSocketClient.prototype, "close").mockImplementation(() => undefined);

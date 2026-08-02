@@ -308,6 +308,48 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser tab evaluation", () => {
 		}
 	}, 30_000);
 
+	it("fails a browser error rethrown through a native promise combinator", async () => {
+		const tool = new BrowserTool(makeSession());
+		const name = `combinator-rejection-${process.pid}`;
+
+		try {
+			await tool.execute("open", {
+				action: "open",
+				name,
+				url: "data:text/html,<h1>ready</h1>",
+			});
+			let failure = "";
+			try {
+				await tool.execute("run", {
+					action: "run",
+					name,
+					timeout: 2,
+					code: `
+						void Promise.all([
+							tab.waitForResponse("/never", { timeout: 10 }),
+						]).catch(reason => {
+							throw reason;
+						});
+						await Bun.sleep(50);
+						return "incorrect success";
+					`,
+				});
+			} catch (error) {
+				failure = error instanceof Error ? error.message : String(error);
+			}
+			expect(failure).toContain("Unhandled rejection (missing await?): tab.waitForResponse() timed out after 10ms");
+
+			const followup = await tool.execute("run", {
+				action: "run",
+				name,
+				code: "return 42;",
+			});
+			expect(followup.content).toEqual([{ type: "text", text: "42" }]);
+		} finally {
+			await tool.execute("close", { action: "close", name, kill: true });
+		}
+	}, 30_000);
+
 	it("folds a user continuation rejection that settles during cleanup", async () => {
 		const tool = new BrowserTool(makeSession());
 		const name = `cleanup-continuation-rejection-${process.pid}`;

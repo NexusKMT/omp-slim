@@ -8,6 +8,7 @@ import {
 	markBrowserRunRejection,
 	markHandled,
 	waitForRun,
+	withBrowserPromiseCombinatorTracking,
 } from "../../src/tools/run-scope";
 import { ToolAbortError } from "../../src/tools/tool-errors";
 
@@ -191,6 +192,75 @@ describe("browser run cancellation", () => {
 		expect(isBrowserRunRejection(caught, owner)).toBe(true);
 	});
 
+	it("reports user rethrows from native browser-promise combinators", async () => {
+		vi.useRealTimers();
+		for (const name of ["all", "race"] as const) {
+			const owner = {};
+			const browserFailure = new Error(`${name} browser failure`);
+			const floatingRejections: unknown[] = [];
+			const facade = bindRunFacade(
+				{
+					fail(): Promise<never> {
+						return Promise.reject(browserFailure);
+					},
+				},
+				new AbortController().signal,
+				owner,
+				reason => floatingRejections.push(reason),
+			);
+			const originalCombinator = Promise[name];
+
+			await withBrowserPromiseCombinatorTracking(
+				owner,
+				reason => floatingRejections.push(reason),
+				async () => {
+					const combined = name === "all" ? Promise.all([facade.fail()]) : Promise.race([facade.fail()]);
+					void combined.catch(reason => {
+						throw reason;
+					});
+					await Bun.sleep(20);
+				},
+			);
+
+			expect(floatingRejections).toEqual([browserFailure]);
+			expect(Promise[name]).toBe(originalCombinator);
+		}
+	});
+
+	it("preserves native await through a tracked browser-promise combinator", async () => {
+		vi.useRealTimers();
+		const owner = {};
+		const browserFailure = new Error("browser failed");
+		const floatingRejections: unknown[] = [];
+		const facade = bindRunFacade(
+			{
+				fail(): Promise<never> {
+					return Promise.reject(browserFailure);
+				},
+			},
+			new AbortController().signal,
+			owner,
+			reason => floatingRejections.push(reason),
+		);
+
+		let caught: unknown;
+		await withBrowserPromiseCombinatorTracking(
+			owner,
+			reason => floatingRejections.push(reason),
+			async () => {
+				try {
+					await Promise.all([facade.fail()]);
+				} catch (error) {
+					caught = error;
+				}
+				await Bun.sleep(10);
+			},
+		);
+
+		expect(caught).toBe(browserFailure);
+		expect(floatingRejections).toEqual([]);
+	});
+
 	it("keeps a real worker alive after floating browser and continuation rejections", async () => {
 		vi.useRealTimers();
 		const workerPath = `/tmp/omp-browser-rejections-${process.pid}.ts`;
@@ -331,7 +401,7 @@ describe("browser run cancellation", () => {
 		const owner = {};
 		const browserFailure = new Error("browser failure");
 		const floatingRejections: unknown[] = [];
-		const facade = bindBrowserRunFacade(
+		const facade = bindRunFacade(
 			{
 				fail: (): Promise<never> => Promise.reject(browserFailure),
 			},

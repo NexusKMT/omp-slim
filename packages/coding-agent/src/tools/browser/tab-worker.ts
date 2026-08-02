@@ -31,6 +31,7 @@ import {
 	resolvePredicateTimeout,
 	type WaitPredicateOptions,
 	waitForRun,
+	withBrowserPromiseCombinatorTracking,
 } from "../run-scope";
 import { ToolAbortError, ToolError, throwIfAborted } from "../tool-errors";
 import {
@@ -783,10 +784,10 @@ export class WorkerCore {
 	#consumeUnhandledRejection(reason: unknown): boolean {
 		const active = this.#active;
 		if (!active) return false;
-		if (isBrowserRunRejection(reason, active.rejectionOwner)) return true;
+		const browserRunRejection = isBrowserRunRejection(reason, active.rejectionOwner);
 		const stack = reason instanceof Error && typeof reason.stack === "string" ? reason.stack : undefined;
 		const fromRun = stack?.includes(`browser-run-${active.id}.js`) === true;
-		if (!this.#isolated && !fromRun) return false;
+		if (!browserRunRejection && !this.#isolated && !fromRun) return false;
 		this.#recordFloatingRejection(active, reason);
 		return true;
 	}
@@ -1127,11 +1128,19 @@ export class WorkerCore {
 			try {
 				const hooks = this.#hooksForActiveRun();
 				if (!hooks) throw new ToolError("Browser runtime started without an active run");
-				returnValue = await Promise.race([
-					runtime.run(msg.code, `browser-run-${msg.id}.js`, hooks, { runId: msg.id, cwd: msg.session.cwd }),
-					cancelRejection,
-					floatingFailure.promise,
-				]);
+				returnValue = await withBrowserPromiseCombinatorTracking(
+					active.rejectionOwner,
+					onFloatingRejection,
+					async () =>
+						await Promise.race([
+							runtime.run(msg.code, `browser-run-${msg.id}.js`, hooks, {
+								runId: msg.id,
+								cwd: msg.session.cwd,
+							}),
+							cancelRejection,
+							floatingFailure.promise,
+						]),
+				);
 				completed = true;
 			} finally {
 				signal.removeEventListener("abort", onCancel);

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { postmortem } from "@oh-my-pi/pi-utils";
 import { untilAborted } from "@oh-my-pi/pi-utils/abortable";
 import { ToolError, throwIfAborted } from "./tool-errors";
@@ -30,6 +31,82 @@ interface ObservedPromiseState {
 
 const observedBrowserPromises = new WeakMap<Promise<unknown>, ObservedPromiseState>();
 const observedPromiseConstructor = { [Symbol.species]: Promise };
+
+type PromiseCombinatorName = "all" | "race";
+
+interface PromiseCombinatorTrackingContext {
+	owner: object;
+	onFloatingRejection: FloatingRejectionHandler;
+}
+
+const PROMISE_COMBINATORS: readonly PromiseCombinatorName[] = ["all", "race"];
+const promiseCombinatorTracking = new AsyncLocalStorage<PromiseCombinatorTrackingContext>();
+const originalPromiseCombinatorDescriptors = new Map<PromiseCombinatorName, PropertyDescriptor>();
+let promiseCombinatorTrackingScopes = 0;
+
+/**
+ * Observes native promise-combinator results derived from browser promises for
+ * the duration of one evaluated run. Native `await` remains unchanged; dropped
+ * user continuations from `Promise.all` and `Promise.race` are routed to the
+ * owning run.
+ */
+export async function withBrowserPromiseCombinatorTracking<T>(
+	owner: object,
+	onFloatingRejection: FloatingRejectionHandler,
+	run: () => Promise<T>,
+): Promise<T> {
+	installPromiseCombinatorTracking();
+	try {
+		return await promiseCombinatorTracking.run({ owner, onFloatingRejection }, run);
+	} finally {
+		restorePromiseCombinatorTracking();
+	}
+}
+
+function installPromiseCombinatorTracking(): void {
+	promiseCombinatorTrackingScopes++;
+	if (promiseCombinatorTrackingScopes !== 1) return;
+	for (const name of PROMISE_COMBINATORS) {
+		const descriptor = Object.getOwnPropertyDescriptor(Promise, name);
+		if (!descriptor || typeof descriptor.value !== "function") continue;
+		originalPromiseCombinatorDescriptors.set(name, descriptor);
+		const original = descriptor.value as (this: PromiseConstructor, values: Iterable<unknown>) => Promise<unknown>;
+		Object.defineProperty(Promise, name, {
+			...descriptor,
+			value(this: PromiseConstructor, values: Iterable<unknown>): Promise<unknown> {
+				let hasObservedInput = false;
+				const result = Reflect.apply(original, this, [
+					tapObservedBrowserPromises(values, () => {
+						hasObservedInput = true;
+					}),
+				]) as Promise<unknown>;
+				const context = promiseCombinatorTracking.getStore();
+				return hasObservedInput && context
+					? observeBrowserRunPromise(result, context.owner, context.onFloatingRejection)
+					: result;
+			},
+		});
+	}
+}
+
+function restorePromiseCombinatorTracking(): void {
+	promiseCombinatorTrackingScopes--;
+	if (promiseCombinatorTrackingScopes !== 0) return;
+	for (const [name, descriptor] of originalPromiseCombinatorDescriptors) {
+		Object.defineProperty(Promise, name, descriptor);
+	}
+	originalPromiseCombinatorDescriptors.clear();
+}
+
+function* tapObservedBrowserPromises(
+	values: Iterable<unknown>,
+	onObserved: () => void,
+): Generator<unknown, void, undefined> {
+	for (const value of values) {
+		if (observedBrowserPromises.has(value as Promise<unknown>)) onObserved();
+		yield value;
+	}
+}
 
 /**
  * Observes every explicit continuation of a browser promise without replacing
