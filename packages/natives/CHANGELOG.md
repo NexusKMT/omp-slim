@@ -8,6 +8,7 @@
 
 ### Added
 
+- Added a cross-platform, in-process `ps` shell builtin with BSD/procps selection forms, custom output columns, sorting, process metrics, and header suppression.
 - Added macOS, Win32, X11, and Wayland desktop backends behind one session API, including capture-free window discovery, isolated capture, explicit background/foreground delivery, native AX/UIA/AT-SPI trees with generational refs, and structured errors when a platform cannot honestly deliver background input.
 
 ### Fixed
