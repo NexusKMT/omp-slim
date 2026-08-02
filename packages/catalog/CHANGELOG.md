@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `alibaba-token-plan` dynamic discovery dropping newly advertised chat models by replacing the stale static allowlist with dedicated non-chat media-model filters ([#7391](https://github.com/can1357/oh-my-pi/issues/7391)).
+
 ## [17.2.4] - 2026-08-01
 
 ### Added
