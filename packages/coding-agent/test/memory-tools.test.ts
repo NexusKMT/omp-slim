@@ -1138,6 +1138,34 @@ describe("recall.execute (Mnemopi backend)", () => {
 		expect(result.content[0]).toEqual({ type: "text", text: "No relevant memories found." });
 	});
 
+	it("surfaces recall engine failures instead of the no-results sentinel", async () => {
+		const settings = Settings.isolated({ "memory.backend": "mnemopi" });
+		const state = registerMnemopiState();
+		const failure = new TypeError("mmrRerankIndices is not a function");
+		vi.spyOn(state.getScopedRecallTargets()[0].memory, "recallEnhanced").mockRejectedValue(failure);
+
+		const tool = MemoryRecallTool.createIf(makeSession(settings))!;
+		await expect(tool.execute("call-mnemopi-failure", { query: "existing memory" })).rejects.toThrow(failure);
+	});
+
+	it("keeps healthy scoped targets available when another target fails", async () => {
+		const settings = Settings.isolated({ "memory.backend": "mnemopi" });
+		const state = registerMnemopiState(
+			makeMnemopiConfig({
+				scoping: "per-project-tagged",
+				bank: "project-bank",
+				globalBank: "global-bank",
+			}),
+		);
+		vi.spyOn(state.getScopedRecallTargets()[0].memory, "recallEnhanced").mockRejectedValue(
+			new Error("project bank unavailable"),
+		);
+
+		const tool = MemoryRecallTool.createIf(makeSession(settings))!;
+		const result = await tool.execute("call-mnemopi-partial-failure", { query: "nonexistent query" });
+		expect(result.content[0]).toEqual({ type: "text", text: "No relevant memories found." });
+	});
+
 	it("returns a populated text block when a retained memory exists", async () => {
 		const settings = Settings.isolated({ "memory.backend": "mnemopi" });
 		registerMnemopiState();
