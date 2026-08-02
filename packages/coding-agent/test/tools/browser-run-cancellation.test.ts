@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs/promises";
 import { postmortem } from "@oh-my-pi/pi-utils";
 import { JsRuntime, type RuntimeHooks } from "../../src/eval/js/shared/runtime";
-import { bindRunFacade, markHandled, waitForRun } from "../../src/tools/run-scope";
+import {
+	bindRunFacade,
+	isBrowserRunRejection,
+	markBrowserRunRejection,
+	markHandled,
+	waitForRun,
+} from "../../src/tools/run-scope";
 import { ToolAbortError } from "../../src/tools/tool-errors";
 
-const runCancellationModuleUrl = new URL("../../src/tools/browser/run-cancellation.ts", import.meta.url).href;
-const toolErrorsModuleUrl = new URL("../../src/tools/tool-errors.ts", import.meta.url).href;
+const runScopeModuleUrl = new URL("../../src/tools/run-scope.ts", import.meta.url).href;
 
 async function collectUnhandledRejections(action: () => void | Promise<void>): Promise<unknown[]> {
 	const reasons: unknown[] = [];
@@ -130,38 +136,194 @@ describe("browser run cancellation", () => {
 		expect(reasons).toEqual([]);
 	});
 
-	it("contains an unhandled descendant of a timed-out browser helper promise", async () => {
-		const script = `
-			import { bindBrowserRunFacade } from ${JSON.stringify(runCancellationModuleUrl)};
-			import { ToolError } from ${JSON.stringify(toolErrorsModuleUrl)};
+	it("scopes browser rejection markers to the owning run and direct reason", () => {
+		const owner = {};
+		const browserFailure = new Error("browser failed");
+		markBrowserRunRejection(browserFailure, owner);
 
-			const facade = bindBrowserRunFacade(
-				{
-					waitForResponse() {
-						return Promise.reject(new ToolError("tab.waitForResponse() timed out after 15ms"));
-					},
-				},
-				new AbortController().signal,
-			);
-			void facade.waitForResponse().then(() => undefined);
+		expect(isBrowserRunRejection(browserFailure, owner)).toBe(true);
+		expect(isBrowserRunRejection(browserFailure, {})).toBe(false);
+		expect(isBrowserRunRejection(new Error("unrelated", { cause: browserFailure }), owner)).toBe(false);
+	});
+
+	it("keeps a later cause-wrapped rejection on the fatal path", async () => {
+		vi.useRealTimers();
+		const script = `
+			import { markBrowserRunRejection } from ${JSON.stringify(runScopeModuleUrl)};
+
+			const browserFailure = new Error("browser failure");
+			markBrowserRunRejection(browserFailure, {});
+			Promise.reject(new Error("unrelated fatal", { cause: browserFailure }));
 			await Promise.resolve();
-			await Promise.resolve();
-			console.log("browser probe survived");
 		`;
 		const proc = Bun.spawn([process.execPath, "-e", script], {
 			cwd: process.cwd(),
 			stdout: "pipe",
 			stderr: "pipe",
 		});
-		const [exitCode, stdout, stderr] = await Promise.all([
-			proc.exited,
-			new Response(proc.stdout).text(),
-			new Response(proc.stderr).text(),
-		]);
+		const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
 
-		expect(exitCode, stderr).toBe(0);
-		expect(stdout).toContain("browser probe survived");
-		expect(stderr).not.toContain("[Unhandled Rejection]");
+		expect(exitCode).toBe(1);
+		expect(stderr).toContain("[Unhandled Rejection] Error: unrelated fatal");
+	});
+
+	it("preserves a browser rejection marker through native await", async () => {
+		const owner = {};
+		const browserFailure = new Error("browser failed");
+		const facade = bindRunFacade(
+			{
+				fail(): Promise<never> {
+					return Promise.reject(browserFailure);
+				},
+			},
+			new AbortController().signal,
+			owner,
+		);
+
+		let caught: unknown;
+		try {
+			await (async () => await facade.fail())();
+		} catch (error) {
+			caught = error;
+		}
+
+		expect(caught).toBe(browserFailure);
+		expect(isBrowserRunRejection(caught, owner)).toBe(true);
+	});
+
+	it("keeps a real worker alive after floating browser and continuation rejections", async () => {
+		vi.useRealTimers();
+		const workerPath = `/tmp/omp-browser-rejections-${process.pid}.ts`;
+		await Bun.write(
+			workerPath,
+			`
+				import {
+					bindRunFacade,
+					installBrowserWorkerRejectionGuard,
+				} from ${JSON.stringify(runScopeModuleUrl)};
+
+				const failures = [];
+				const uninstall = installBrowserWorkerRejectionGuard(reason => {
+					failures.push(reason instanceof Error ? reason.message : String(reason));
+					return true;
+				});
+				const facade = bindRunFacade(
+					{
+						waitForResponse() {
+							return Promise.reject(new Error("browser timeout"));
+						},
+						title() {
+							return Promise.resolve("ready");
+						},
+					},
+					new AbortController().signal,
+					{},
+				);
+				void (async () => {
+					await facade.waitForResponse();
+				})();
+				void facade.title().then(() => {
+					throw new Error("continuation failed");
+				});
+				setTimeout(() => {
+					uninstall();
+					postMessage({ alive: true, failures });
+				}, 50);
+			`,
+		);
+		try {
+			const script = `
+				const worker = new Worker(${JSON.stringify(workerPath)}, { type: "module" });
+				const done = Promise.withResolvers();
+				worker.onmessage = event => done.resolve(event.data);
+				worker.onerror = event => done.reject(new Error(event.message));
+				try {
+					const result = await Promise.race([
+						done.promise,
+						Bun.sleep(1000).then(() => {
+							throw new Error("worker timed out");
+						}),
+					]);
+					console.log(JSON.stringify(result));
+				} finally {
+					await worker.terminate();
+				}
+			`;
+			const proc = Bun.spawn([process.execPath, "-e", script], {
+				cwd: process.cwd(),
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const [exitCode, stdout, stderr] = await Promise.all([
+				proc.exited,
+				new Response(proc.stdout).text(),
+				new Response(proc.stderr).text(),
+			]);
+
+			expect(exitCode, stderr).toBe(0);
+			expect(stdout).toContain("browser timeout");
+			expect(stdout).toContain("continuation failed");
+		} finally {
+			await fs.rm(workerPath, { force: true });
+		}
+	});
+
+	it("does not mark errors thrown by user continuations", async () => {
+		const owner = {};
+		const continuationFailure = new Error("continuation failed");
+		const floatingRejections: unknown[] = [];
+		const facade = bindRunFacade(
+			{
+				ok: async (): Promise<string> => "ok",
+			},
+			new AbortController().signal,
+			owner,
+			reason => floatingRejections.push(reason),
+		);
+
+		const root = facade.ok();
+		expect(root).toBeInstanceOf(Promise);
+		expect(Object.getPrototypeOf(root)).toBe(Promise.prototype);
+		const continuation = root.then(() => {
+			throw continuationFailure;
+		});
+
+		await expect(continuation).rejects.toBe(continuationFailure);
+		expect(isBrowserRunRejection(continuationFailure, owner)).toBe(false);
+		expect(floatingRejections).toEqual([]);
+	});
+
+	it("reports unhandled errors from then, catch, and finally continuations", async () => {
+		vi.useRealTimers();
+		const owner = {};
+		const floatingRejections: unknown[] = [];
+		const facade = bindRunFacade(
+			{
+				fail: async (): Promise<never> => {
+					throw new Error("browser failure");
+				},
+				ok: async (): Promise<string> => "ok",
+			},
+			new AbortController().signal,
+			owner,
+			reason => floatingRejections.push(reason),
+		);
+
+		void facade.ok().then(() => {
+			throw new Error("then failed");
+		});
+		void facade.fail().catch(() => {
+			throw new Error("catch failed");
+		});
+		void facade.ok().finally(() => {
+			throw new Error("finally failed");
+		});
+		await Bun.sleep(20);
+
+		const messages = floatingRejections
+			.map(reason => (reason instanceof Error ? reason.message : String(reason)))
+			.sort();
+		expect(messages).toEqual(["catch failed", "finally failed", "then failed"]);
 	});
 
 	it("rejects awaited facade method calls that settle after abort", async () => {

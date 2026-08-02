@@ -246,6 +246,46 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser tab evaluation", () => {
 		}
 	}, 30_000);
 
+	it("fails a floated user continuation without killing the tab worker", async () => {
+		const tool = new BrowserTool(makeSession());
+		const name = `continuation-rejection-${process.pid}`;
+
+		try {
+			await tool.execute("open", {
+				action: "open",
+				name,
+				url: "data:text/html,<h1>ready</h1>",
+			});
+			let failure = "";
+			try {
+				await tool.execute("run", {
+					action: "run",
+					name,
+					timeout: 2,
+					code: `
+						void tab.title().then(() => {
+							throw new Error("continuation failed");
+						});
+						await Bun.sleep(50);
+						return "incorrect success";
+					`,
+				});
+			} catch (error) {
+				failure = error instanceof Error ? error.message : String(error);
+			}
+			expect(failure).toContain("Unhandled rejection (missing await?): continuation failed");
+
+			const followup = await tool.execute("run", {
+				action: "run",
+				name,
+				code: "return 42;",
+			});
+			expect(followup.content).toEqual([{ type: "text", text: "42" }]);
+		} finally {
+			await tool.execute("close", { action: "close", name, kill: true });
+		}
+	}, 30_000);
+
 	it("observes floating raw page promises when the target closes", async () => {
 		const tool = new BrowserTool(makeSession());
 		const name = `target-close-${process.pid}`;

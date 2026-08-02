@@ -8,11 +8,20 @@ import { resizeImage } from "../../../utils/image-resize";
 import type { ToolSession } from "../../index";
 import { resolveToCwd } from "../../path-utils";
 import { formatScreenshot } from "../../render-utils";
-import { bindRunFacade, resolvePredicateTimeout, type WaitPredicateOptions, waitForRun } from "../../run-scope";
+import {
+	bindRunFacade,
+	isBrowserRunRejection,
+	markBrowserRunRejection,
+	observeBrowserRunPromise,
+	resolvePredicateTimeout,
+	type WaitPredicateOptions,
+	waitForRun,
+} from "../../run-scope";
 import { ToolAbortError, ToolError, throwIfAborted } from "../../tool-errors";
 import { type AriaSnapshotOptions, assertSelectorString, buildAriaSnapshotScript } from "../aria/aria-snapshot";
 import { DEFAULT_VIEWPORT } from "../launch";
 import { extractReadableFromHtml, type ReadableFormat } from "../readable";
+
 import { cloneSafe, RunOutput } from "../run-output";
 import type { Observation, ReadyInfo, RunResultOk, ScreenshotResult, SessionSnapshot } from "../tab-protocol";
 import {
@@ -1382,6 +1391,26 @@ export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promi
 	// handler to this promise; keep its armed rejection from surfacing as an
 	// unhandled rejection — the postmortem-fatal path this run guards against.
 	cancelRejection.catch(() => {});
+	const rejectionOwner = {};
+	const { promise: floatingFailure, reject: rejectFloatingFailure } = Promise.withResolvers<never>();
+	floatingFailure.catch(() => {});
+	let runActive = true;
+	let hasFloatingFailure = false;
+	const recordFloatingFailure = (reason: unknown): void => {
+		if (!runActive || hasFloatingFailure || postmortem.isExpectedCleanupError(reason)) return;
+		hasFloatingFailure = true;
+		const message = reason instanceof Error ? reason.message : String(reason);
+		const error = new Error(`Unhandled rejection (missing await?): ${message}`, { cause: reason });
+		if (reason instanceof Error) error.name = reason.name;
+		rejectFloatingFailure(error);
+	};
+	const uninstallRejectionInterceptor = postmortem.interceptUnhandledRejections(reason => {
+		if (isBrowserRunRejection(reason, rejectionOwner)) return true;
+		const stack = reason instanceof Error && typeof reason.stack === "string" ? reason.stack : undefined;
+		if (stack?.includes(`cmux-run-${runId}.js`) !== true) return false;
+		recordFloatingFailure(reason);
+		return true;
+	});
 	const onAbort = (): void => {
 		if (timeoutSignal.aborted) {
 			reject(new ToolError(`Browser code execution timed out after ${opts.timeoutMs}ms`));
@@ -1402,24 +1431,30 @@ export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promi
 		// Keep both inside try so a concurrent in-process eval/browser run surfaces as
 		// a rejected promise the supervisor can report, never an unhandled rejection.
 		runtime.setCwd(opts.snapshot.cwd);
-		const runTab = bindRunFacade(tab, signal);
+		const runTab = bindRunFacade(tab, signal, rejectionOwner, recordFloatingFailure);
 		runtime.setRunScope({
-			page: bindRunFacade(tab.page, signal),
-			browser: bindRunFacade(tab.browser, signal),
+			page: bindRunFacade(tab.page, signal, rejectionOwner, recordFloatingFailure),
+			browser: bindRunFacade(tab.browser, signal, rejectionOwner, recordFloatingFailure),
 			tab: runTab,
 			assert: (cond: unknown, text?: string): void => {
 				if (!cond) throw new ToolError(text ?? "Assertion failed");
 			},
 			wait: (msOrPredicate: number | (() => unknown), waitOpts?: WaitPredicateOptions): Promise<unknown> =>
-				waitForRun(
-					msOrPredicate,
-					signal,
-					typeof msOrPredicate === "number"
-						? waitOpts
-						: {
-								timeout: resolvePredicateTimeout(opts.timeoutMs, waitOpts?.timeout),
-								interval: waitOpts?.interval,
-							},
+				observeBrowserRunPromise(
+					waitForRun(
+						msOrPredicate,
+						signal,
+						typeof msOrPredicate === "number"
+							? waitOpts
+							: {
+									timeout: resolvePredicateTimeout(opts.timeoutMs, waitOpts?.timeout),
+									interval: waitOpts?.interval,
+								},
+					).catch(error => {
+						throw markBrowserRunRejection(error, rejectionOwner);
+					}),
+					rejectionOwner,
+					recordFloatingFailure,
 				),
 		});
 
@@ -1447,6 +1482,7 @@ export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promi
 			returnValue = await Promise.race([
 				runtime.run(opts.code, filename, hooks, { runId, cwd: opts.snapshot.cwd }),
 				cancelRejection,
+				floatingFailure,
 			]);
 		} catch (error) {
 			runFailed = true;
@@ -1454,6 +1490,7 @@ export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promi
 		}
 		// Let rejection callbacks run while this run can still own guest-created promises.
 		await Bun.sleep(0);
+		if (hasFloatingFailure && !runFailed) await floatingFailure;
 		if (runFailed) {
 			for (const reason of activeRun.floatingRejections) {
 				logger.warn("Unhandled rejection accompanied a failed cmux browser run", { filename, error: reason });
@@ -1470,6 +1507,8 @@ export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promi
 		}
 		return { displays: output.finish(), returnValue: cloneSafe(returnValue), screenshots };
 	} finally {
+		runActive = false;
+		uninstallRejectionInterceptor();
 		signal.removeEventListener("abort", onAbort);
 		runAc.abort(postmortem.markExpectedCleanupError(new ToolAbortError("Browser run ended")));
 		activeCmuxRuns.delete(filename);

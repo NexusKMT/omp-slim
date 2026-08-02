@@ -1014,7 +1014,7 @@ async function spawnInlineWorker(): Promise<WorkerHandle> {
 		close: () => {},
 	};
 	const { WorkerCore } = await import("./tab-worker");
-	new WorkerCore(workerTransport);
+	new WorkerCore(workerTransport, false);
 	return {
 		mode: "inline",
 		send: msg =>
