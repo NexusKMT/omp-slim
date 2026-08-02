@@ -18,7 +18,7 @@ try {
 	await runCmuxCode(tab, {
 		code: \`
 			const { promise, reject } = Promise.withResolvers();
-			reject(new Error("boom"));
+			reject("boom");
 			await Bun.file("package.json").text();
 			await promise.catch(() => undefined);
 		\`,

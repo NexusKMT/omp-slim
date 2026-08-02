@@ -270,36 +270,45 @@ const recentCmuxRunFiles = new Set<string>();
 
 function consumeCmuxRunRejection(reason: unknown): boolean {
 	const stack = reason instanceof Error && typeof reason.stack === "string" ? reason.stack : undefined;
-	if (!stack) return false;
+	if (stack) {
+		let owner: ActiveCmuxRun | undefined;
+		let ownerIndex = -1;
+		for (const run of activeCmuxRuns.values()) {
+			const index = stack.lastIndexOf(run.filename);
+			if (index > ownerIndex) {
+				ownerIndex = index;
+				owner = run;
+			}
+		}
+		if (owner) {
+			owner.floatingRejections.push(reason);
+			return true;
+		}
 
-	let owner: ActiveCmuxRun | undefined;
-	let ownerIndex = -1;
-	for (const run of activeCmuxRuns.values()) {
-		const index = stack.lastIndexOf(run.filename);
-		if (index > ownerIndex) {
-			ownerIndex = index;
-			owner = run;
+		let recent: string | undefined;
+		let recentIndex = -1;
+		for (const filename of recentCmuxRunFiles) {
+			const index = stack.lastIndexOf(filename);
+			if (index > recentIndex) {
+				recentIndex = index;
+				recent = filename;
+			}
+		}
+		if (recent) {
+			logger.warn("Unhandled rejection from a finished cmux browser run (missing await?)", {
+				filename: recent,
+				error: reason,
+			});
+			return true;
 		}
 	}
-	if (owner) {
-		owner.floatingRejections.push(reason);
-		return true;
-	}
 
-	let recent: string | undefined;
-	let recentIndex = -1;
-	for (const filename of recentCmuxRunFiles) {
-		const index = stack.lastIndexOf(filename);
-		if (index > recentIndex) {
-			recentIndex = index;
-			recent = filename;
-		}
-	}
-	if (!recent) return false;
-	logger.warn("Unhandled rejection from a finished cmux browser run (missing await?)", {
-		filename: recent,
-		error: reason,
-	});
+	// Rejection interceptors receive no promise identity. With one live cmux run,
+	// it is the only guest owner available for stackless or library-created reasons.
+	if (activeCmuxRuns.size !== 1) return false;
+	const only = activeCmuxRuns.values().next().value;
+	if (!only) return false;
+	only.floatingRejections.push(reason);
 	return true;
 }
 
