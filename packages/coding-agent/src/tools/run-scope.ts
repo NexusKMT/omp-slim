@@ -33,6 +33,7 @@ const observedBrowserPromises = new WeakMap<Promise<unknown>, ObservedPromiseSta
 const observedPromiseConstructor = { [Symbol.species]: Promise };
 
 type PromiseCombinatorName = "all" | "race";
+type PromiseCombinator = (this: PromiseConstructor, values: Iterable<unknown>) => Promise<unknown>;
 
 interface PromiseCombinatorTrackingContext {
 	owner: object;
@@ -40,8 +41,13 @@ interface PromiseCombinatorTrackingContext {
 }
 
 const PROMISE_COMBINATORS: readonly PromiseCombinatorName[] = ["all", "race"];
+const NativePromise = Promise;
+const nativePromiseCombinators: Record<PromiseCombinatorName, PromiseCombinator> = {
+	all: Promise.all,
+	race: Promise.race,
+};
 const promiseCombinatorTracking = new AsyncLocalStorage<PromiseCombinatorTrackingContext>();
-const originalPromiseCombinatorDescriptors = new Map<PromiseCombinatorName, PropertyDescriptor>();
+let previousPromiseDescriptor: PropertyDescriptor | undefined;
 let promiseCombinatorTrackingScopes = 0;
 
 /**
@@ -64,15 +70,40 @@ export async function withBrowserPromiseCombinatorTracking<T>(
 }
 
 function installPromiseCombinatorTracking(): void {
-	promiseCombinatorTrackingScopes++;
-	if (promiseCombinatorTrackingScopes !== 1) return;
+	if (promiseCombinatorTrackingScopes > 0) {
+		promiseCombinatorTrackingScopes++;
+		return;
+	}
+	const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Promise");
+	if (!descriptor) throw new Error("Global Promise descriptor is unavailable");
+	const trackedPromise = createTrackedPromiseConstructor();
+	Object.defineProperty(globalThis, "Promise", { ...descriptor, value: trackedPromise });
+	previousPromiseDescriptor = descriptor;
+	promiseCombinatorTrackingScopes = 1;
+}
+
+function restorePromiseCombinatorTracking(): void {
+	if (promiseCombinatorTrackingScopes > 1) {
+		promiseCombinatorTrackingScopes--;
+		return;
+	}
+	const descriptor = previousPromiseDescriptor;
+	try {
+		if (!descriptor) throw new Error("Global Promise tracking scope is not installed");
+		Object.defineProperty(globalThis, "Promise", descriptor);
+	} finally {
+		previousPromiseDescriptor = undefined;
+		promiseCombinatorTrackingScopes = 0;
+	}
+}
+
+function createTrackedPromiseConstructor(): PromiseConstructor {
+	class TrackedPromise<T> extends NativePromise<T> {}
 	for (const name of PROMISE_COMBINATORS) {
-		const descriptor = Object.getOwnPropertyDescriptor(Promise, name);
-		if (!descriptor || typeof descriptor.value !== "function") continue;
-		originalPromiseCombinatorDescriptors.set(name, descriptor);
-		const original = descriptor.value as (this: PromiseConstructor, values: Iterable<unknown>) => Promise<unknown>;
-		Object.defineProperty(Promise, name, {
-			...descriptor,
+		const original = nativePromiseCombinators[name];
+		Object.defineProperty(TrackedPromise, name, {
+			configurable: true,
+			writable: true,
 			value(this: PromiseConstructor, values: Iterable<unknown>): Promise<unknown> {
 				let hasObservedInput = false;
 				const result = Reflect.apply(original, this, [
@@ -87,15 +118,7 @@ function installPromiseCombinatorTracking(): void {
 			},
 		});
 	}
-}
-
-function restorePromiseCombinatorTracking(): void {
-	promiseCombinatorTrackingScopes--;
-	if (promiseCombinatorTrackingScopes !== 0) return;
-	for (const [name, descriptor] of originalPromiseCombinatorDescriptors) {
-		Object.defineProperty(Promise, name, descriptor);
-	}
-	originalPromiseCombinatorDescriptors.clear();
+	return TrackedPromise;
 }
 
 function* tapObservedBrowserPromises(

@@ -350,6 +350,37 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser tab evaluation", () => {
 		}
 	}, 30_000);
 
+	it("restores promise tracking after evaluated code freezes Promise", async () => {
+		const tool = new BrowserTool(makeSession());
+		const name = `frozen-promise-${process.pid}`;
+
+		try {
+			await tool.execute("open", {
+				action: "open",
+				name,
+				url: "data:text/html,<h1>ready</h1>",
+			});
+			const frozen = await tool.execute("run", {
+				action: "run",
+				name,
+				code: `
+					Object.freeze(Promise);
+					return Object.isFrozen(Promise);
+				`,
+			});
+			expect(frozen.content).toEqual([{ type: "text", text: "true" }]);
+
+			const followup = await tool.execute("run", {
+				action: "run",
+				name,
+				code: "return (await Promise.all([42]))[0];",
+			});
+			expect(followup.content).toEqual([{ type: "text", text: "42" }]);
+		} finally {
+			await tool.execute("close", { action: "close", name, kill: true });
+		}
+	}, 30_000);
+
 	it("folds a user continuation rejection that settles during cleanup", async () => {
 		const tool = new BrowserTool(makeSession());
 		const name = `cleanup-continuation-rejection-${process.pid}`;
