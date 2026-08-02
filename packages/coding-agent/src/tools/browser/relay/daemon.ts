@@ -14,9 +14,9 @@
  */
 import { logger } from "@oh-my-pi/pi-utils";
 import { daemonClientForGlobal } from "../../../launch/client";
+import { describeQuietly, stopQuietly, waitReady } from "../../../launch/ensure";
 import { resolveWorkerSpawnCmd } from "../../../subprocess/worker-client";
 import { throwIfAborted } from "../../tool-errors";
-import { describeQuietly, stopQuietly, waitReady } from "../shared-daemon";
 
 /** Stable broker daemon name for the relay server. */
 export const RELAY_DAEMON_NAME = "omp.browser.relay";

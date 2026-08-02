@@ -11,7 +11,8 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
-import { type DaemonBrokerClient, daemonClientForProject } from "../../launch/client";
+import { daemonClientForProject } from "../../launch/client";
+import { describeQuietly, stopQuietly, waitReady } from "../../launch/ensure";
 import { daemonRuntimeDir } from "../../launch/paths";
 import type { DaemonSnapshot } from "../../launch/protocol";
 import { throwIfAborted } from "../tool-errors";
@@ -20,7 +21,6 @@ import { resolveSharedBrowserLaunchSpec } from "./launch";
 /** Chrome prints this on stderr once the CDP listener is up; the broker's ready probe captures the line. */
 const READY_LOG_PATTERN = String.raw`DevTools listening on ws://\S+`;
 const READY_TIMEOUT_MS = 30_000;
-const STOP_TIMEOUT_MS = 5_000;
 const PROBE_TIMEOUT_MS = 1_500;
 /** describe→start rounds before giving up; bounds cross-process start races and wedged-Chrome replacement. */
 const ENSURE_ATTEMPTS = 3;
@@ -56,65 +56,6 @@ async function probeEndpoint(wsEndpoint: string): Promise<boolean> {
 		return res.ok;
 	} catch {
 		return false;
-	}
-}
-
-/** Snapshot a broker daemon, treating "unknown daemon" and broker errors as absent. */
-export async function describeQuietly(
-	client: DaemonBrokerClient,
-	name: string,
-	label: string,
-	signal?: AbortSignal,
-): Promise<DaemonSnapshot | undefined> {
-	try {
-		const result = await client.request({ op: "describe", name }, signal);
-		return result.op === "describe" ? result.daemon : undefined;
-	} catch (error) {
-		throwIfAborted(signal);
-		logger.debug(`${label} describe failed`, {
-			name,
-			error: error instanceof Error ? error.message : String(error),
-		});
-		return undefined;
-	}
-}
-
-/** Block until the daemon reports ready; undefined on timeout or pre-ready exit. */
-export async function waitReady(
-	client: DaemonBrokerClient,
-	name: string,
-	label: string,
-	signal?: AbortSignal,
-): Promise<DaemonSnapshot | undefined> {
-	try {
-		const result = await client.request({ op: "wait", name, for: "ready", timeoutMs: READY_TIMEOUT_MS }, signal);
-		if (result.op !== "wait" || result.timedOut) return undefined;
-		return result.daemon;
-	} catch (error) {
-		throwIfAborted(signal);
-		logger.debug(`${label} ready wait failed`, {
-			name,
-			error: error instanceof Error ? error.message : String(error),
-		});
-		return undefined;
-	}
-}
-
-/** Best-effort stop before replacing a wedged or endpoint-less daemon. */
-export async function stopQuietly(
-	client: DaemonBrokerClient,
-	name: string,
-	label: string,
-	signal?: AbortSignal,
-): Promise<void> {
-	try {
-		await client.request({ op: "stop", name, timeoutMs: STOP_TIMEOUT_MS }, signal);
-	} catch (error) {
-		throwIfAborted(signal);
-		logger.debug(`${label} stop failed`, {
-			name,
-			error: error instanceof Error ? error.message : String(error),
-		});
 	}
 }
 
