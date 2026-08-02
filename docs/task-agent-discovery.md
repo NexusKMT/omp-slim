@@ -71,6 +71,23 @@ For a dispatch, set the agent name and task:
 
 `/model` changes the current or default session selection. It is not the worker-role configuration mechanism; edit `modelRoles` instead.
 
+### `vibe_spawn` tier routing
+
+`vibe_spawn` maps `fast` to bundled `sonic` and `good` to bundled `task`. Both resolve through `task.agentModelOverrides` before their bundled agent model defaults (`src/vibe/runtime.ts`, `src/task/agents.ts`).
+
+Route these tiers through roles by keeping aliases in `task.agentModelOverrides` and concrete selectors only in `modelRoles`:
+
+```yaml
+task:
+  agentModelOverrides:
+    sonic: "@fast_worker"
+    task: "@good_worker"
+modelRoles:
+  fast_worker: spark/minimax-m3
+  good_worker: spark/minimax-m3:high
+```
+
+The `vibe_spawn` `cli` remains `fast` or `good`; update `modelRoles` to change the worker model.
 
 ## Bundled agents
 
