@@ -1100,9 +1100,9 @@ export class ProcessTerminal implements Terminal {
 				const reportedFlags = parseInt(match[1]!, 10);
 				this.#kittyProtocolActive = true;
 				setKittyProtocolActive(true);
-				if (reportedFlags >= 3) {
-					// Already enriched (Ghostty/foot may keep flags from a parent app).
-					// Push level-2 to lock in event reporting.
+				if ((reportedFlags & 2) !== 0) {
+					// Preserve event-type reporting already enabled by a parent app.
+					// Push level-2 to keep its shortcuts reporting consistently.
 					this.#kittyEnableSeq = "\x1b[>7u";
 					this.#safeWrite(this.#kittyEnableSeq);
 				} else {
