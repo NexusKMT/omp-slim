@@ -7,6 +7,7 @@
  * session — these tools only need a populated state accessor and Settings.
  */
 
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -17,6 +18,7 @@ import { HindsightSessionState } from "@oh-my-pi/pi-coding-agent/hindsight/state
 import { mnemopiBackend } from "@oh-my-pi/pi-coding-agent/mnemopi/backend";
 import { loadMnemopiConfig, type MnemopiBackendConfig } from "@oh-my-pi/pi-coding-agent/mnemopi/config";
 import {
+	getMnemopiScopedDbPaths,
 	getMnemopiSessionState,
 	loadMnemopi,
 	loadMnemopiCore,
@@ -707,6 +709,37 @@ describe("Mnemopi backend lifecycle", () => {
 		expect(closeSpy).toHaveBeenCalledTimes(1);
 
 		registeredMnemopiState = undefined;
+	});
+
+	it("bounds synchronous SQLite lock waits on every owned bank during final retention (#7351)", async () => {
+		// per-project-tagged owns a project retain bank AND the shared bank; lock the
+		// shared bank so a retain-only busy-timeout fix would still stall teardown.
+		const config = makeMnemopiConfig({
+			scoping: "per-project-tagged",
+			bank: "project-alpha",
+			globalBank: "default",
+		});
+		const entries = [
+			{ type: "message", message: { role: "user", content: "hello" } },
+			{ type: "message", message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
+		];
+		const state = registerMnemopiState(config, { cwd: "/work/project-alpha", entries: () => entries });
+		const ownedDbPaths = getMnemopiScopedDbPaths(config);
+		const sharedDbPath = ownedDbPaths.find(dbPath => dbPath === config.dbPath);
+		expect(sharedDbPath).toBeDefined();
+		const lock = new Database(sharedDbPath!);
+		lock.exec("BEGIN IMMEDIATE");
+
+		const started = performance.now();
+		try {
+			await state.dispose({ timeoutMs: 50 });
+		} finally {
+			lock.exec("ROLLBACK");
+			lock.close();
+			registeredMnemopiState = undefined;
+		}
+
+		expect(performance.now() - started).toBeLessThan(500);
 	});
 
 	it("dispose with no timeoutMs retains, flushes, and closes without sleeping (#3641)", async () => {

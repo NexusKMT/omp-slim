@@ -44,6 +44,9 @@
 ### Fixed
 
 - Fixed compiled Windows launches misclassifying ConPTY-backed terminals as console-less when `GetConsoleWindow()` returned no HWND, which spawned Python eval kernels with `CREATE_NO_WINDOW` and could deadlock imports of NumPy-backed packages such as Matplotlib ([#7343](https://github.com/can1357/oh-my-pi/issues/7343)).
+### Fixed
+
+- Fixed headless print-mode teardown exceeding its Mnemopi consolidation budget when final retention blocks on a locked SQLite writer, leaving the parent process, embed worker, and MCP children alive after the turn completed ([#7351](https://github.com/can1357/oh-my-pi/issues/7351)).
 
 ## [17.2.4] - 2026-08-01
 
