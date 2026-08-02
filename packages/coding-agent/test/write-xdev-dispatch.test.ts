@@ -138,8 +138,7 @@ describe("read and write route xd:// device URLs", () => {
 			label: "Peek",
 			description: "Argument-dependent device",
 			parameters: type({ q: "string" }),
-			approval: args =>
-				args && typeof args === "object" && "q" in args && args.q === "mutate" ? "write" : "read",
+			approval: args => (args && typeof args === "object" && "q" in args && args.q === "mutate" ? "write" : "read"),
 			async execute(_id, args) {
 				if (!args || typeof args !== "object" || !("q" in args) || typeof args.q !== "string") {
 					throw new Error("Expected a string query");
