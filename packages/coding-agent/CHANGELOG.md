@@ -142,6 +142,9 @@
 - Fixed heavily branched conversation trees shifting linear continuations into disconnected columns.
 - Fixed plugin installation validation failures for legacy compatibility shims.
 - Removed hard-coded references to disabled or absent agents in system and tool prompts.
+### Fixed
+
+- Fixed unobserved promise continuations from browser helpers such as `tab.waitForResponse()` wedging or killing the tab worker when they reject; browser facade promises now retain native promise behavior while observing every `then`, `catch`, and `finally` continuation.
 
 ## [17.2.4] - 2026-08-01
 

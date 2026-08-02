@@ -208,6 +208,44 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser tab evaluation", () => {
 		}
 	}, 30_000);
 
+	it("keeps the tab worker alive after an unhandled waitForResponse timeout descendant", async () => {
+		const tool = new BrowserTool(makeSession());
+		const name = `response-timeout-descendant-${process.pid}`;
+
+		try {
+			await tool.execute("open", {
+				action: "open",
+				name,
+				url: "data:text/html,<h1>ready</h1>",
+			});
+			const tabSession = getTabsMapForTest().get(name);
+			if (tabSession?.backend !== "worker") throw new Error("Worker tab was not created");
+			expect(tabSession.worker.mode).toBe("worker");
+			const result = await tool.execute("run", {
+				action: "run",
+				name,
+				timeout: 2,
+				// Real worker timers are intentional: the rejection must cross an
+				// unhandledRejection turn while the browser run remains active.
+				code: `
+					void tab.waitForResponse("/never", { timeout: 10 }).then(() => undefined);
+					await Bun.sleep(50);
+					return "survived timeout";
+				`,
+			});
+			expect(result.content).toEqual([{ type: "text", text: "survived timeout" }]);
+
+			const followup = await tool.execute("run", {
+				action: "run",
+				name,
+				code: "return 42;",
+			});
+			expect(followup.content).toEqual([{ type: "text", text: "42" }]);
+		} finally {
+			await tool.execute("close", { action: "close", name, kill: true });
+		}
+	}, 30_000);
+
 	it("observes floating raw page promises when the target closes", async () => {
 		const tool = new BrowserTool(makeSession());
 		const name = `target-close-${process.pid}`;

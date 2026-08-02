@@ -4,6 +4,9 @@ import { JsRuntime, type RuntimeHooks } from "../../src/eval/js/shared/runtime";
 import { bindRunFacade, markHandled, waitForRun } from "../../src/tools/run-scope";
 import { ToolAbortError } from "../../src/tools/tool-errors";
 
+const runCancellationModuleUrl = new URL("../../src/tools/browser/run-cancellation.ts", import.meta.url).href;
+const toolErrorsModuleUrl = new URL("../../src/tools/tool-errors.ts", import.meta.url).href;
+
 async function collectUnhandledRejections(action: () => void | Promise<void>): Promise<unknown[]> {
 	const reasons: unknown[] = [];
 	const onUnhandled = (reason: unknown) => reasons.push(reason);
@@ -125,6 +128,40 @@ describe("browser run cancellation", () => {
 		});
 
 		expect(reasons).toEqual([]);
+	});
+
+	it("contains an unhandled descendant of a timed-out browser helper promise", async () => {
+		const script = `
+			import { bindBrowserRunFacade } from ${JSON.stringify(runCancellationModuleUrl)};
+			import { ToolError } from ${JSON.stringify(toolErrorsModuleUrl)};
+
+			const facade = bindBrowserRunFacade(
+				{
+					waitForResponse() {
+						return Promise.reject(new ToolError("tab.waitForResponse() timed out after 15ms"));
+					},
+				},
+				new AbortController().signal,
+			);
+			void facade.waitForResponse().then(() => undefined);
+			await Promise.resolve();
+			await Promise.resolve();
+			console.log("browser probe survived");
+		`;
+		const proc = Bun.spawn([process.execPath, "-e", script], {
+			cwd: process.cwd(),
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const [exitCode, stdout, stderr] = await Promise.all([
+			proc.exited,
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
+		]);
+
+		expect(exitCode, stderr).toBe(0);
+		expect(stdout).toContain("browser probe survived");
+		expect(stderr).not.toContain("[Unhandled Rejection]");
 	});
 
 	it("rejects awaited facade method calls that settle after abort", async () => {

@@ -1,5 +1,78 @@
+import { logger, postmortem } from "@oh-my-pi/pi-utils";
 import { untilAborted } from "@oh-my-pi/pi-utils/abortable";
 import { ToolError, throwIfAborted } from "./tool-errors";
+
+const BROWSER_RUN_REJECTION = Symbol.for("omp.browserRunRejection");
+
+export function markBrowserRunRejection<T>(reason: T): T {
+	if (reason !== null && (typeof reason === "object" || typeof reason === "function")) {
+		Reflect.set(reason, BROWSER_RUN_REJECTION, true);
+	}
+	return reason;
+}
+
+function isBrowserRunRejection(reason: unknown): boolean {
+	let current = reason;
+	for (let depth = 0; depth < 8 && current !== null && typeof current === "object"; depth++) {
+		if (Reflect.get(current, BROWSER_RUN_REJECTION) === true) return true;
+		current = "cause" in current ? current.cause : undefined;
+	}
+	return false;
+}
+
+function consumeBrowserRunRejection(reason: unknown): boolean {
+	if (!isBrowserRunRejection(reason)) return false;
+	logger.warn("Contained unhandled browser-run rejection (missing await?)", {
+		error: reason instanceof Error ? reason.message : String(reason),
+	});
+	return true;
+}
+
+postmortem.interceptUnhandledRejections(consumeBrowserRunRejection);
+
+/**
+ * Observe every continuation created from a browser facade promise. A catch on
+ * only the original promise does not cover `tab.waitForResponse(...).then(...)`:
+ * `then` creates a fresh rejection that can otherwise kill or wedge the worker.
+ */
+const observedPromiseTrees = new WeakSet<Promise<unknown>>();
+
+function observePromiseTree<T>(promise: Promise<T>): Promise<T> {
+	if (observedPromiseTrees.has(promise)) return promise;
+	observedPromiseTrees.add(promise);
+	markHandled(promise);
+	const originalThen = promise.then.bind(promise);
+	const originalCatch = promise.catch.bind(promise);
+	const originalFinally = promise.finally.bind(promise);
+	Object.defineProperties(promise, {
+		// biome-ignore lint/suspicious/noThenProperty: native Promise continuations must remain thenable.
+		then: {
+			configurable: true,
+			value: <TResult1 = T, TResult2 = never>(
+				onFulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
+				onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+			): Promise<TResult1 | TResult2> => observePromiseTree(originalThen(onFulfilled, onRejected)),
+		},
+		catch: {
+			configurable: true,
+			value: <TResult = never>(
+				onRejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null,
+			): Promise<T | TResult> => observePromiseTree(originalCatch(onRejected)),
+		},
+		finally: {
+			configurable: true,
+			value: (onFinally?: (() => void) | null): Promise<T> => observePromiseTree(originalFinally(onFinally)),
+		},
+	});
+	return promise;
+}
+
+function trackBrowserRunPromise<T>(promise: Promise<T>): Promise<T> {
+	const tracked = promise.catch(error => {
+		throw markBrowserRunRejection(error);
+	});
+	return observePromiseTree(tracked);
+}
 
 /**
  * Marks a run-scoped promise as observed without changing its behavior for awaited callers.
@@ -83,7 +156,7 @@ export function waitForRun(
 			await untilAborted(signal, async () => await Bun.sleep(interval));
 		}
 	})();
-	return markHandled(promise);
+	return trackBrowserRunPromise(promise);
 }
 
 /** Binds a long-lived scope facade (page/tab/desktop objects) to one evaluated run's abort signal. */
@@ -102,11 +175,16 @@ export function bindRunFacade<T extends object>(target: T, signal: AbortSignal):
 					if (result && typeof result === "object") {
 						const then = Reflect.get(result, "then");
 						if (typeof then === "function") {
-							return markHandled(
-								Promise.resolve(result).then(resolved => {
-									throwIfAborted(signal);
-									return resolved;
-								}),
+							return trackBrowserRunPromise(
+								Promise.resolve(result).then(
+									resolved => {
+										throwIfAborted(signal);
+										return resolved;
+									},
+									error => {
+										throw markBrowserRunRejection(error);
+									},
+								),
 							);
 						}
 					}

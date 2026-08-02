@@ -24,6 +24,7 @@ import {
 	bindRunFacade,
 	CELL_BUDGET_SLACK_MS,
 	markHandled,
+	markBrowserRunRejection,
 	resolvePredicateTimeout,
 	type WaitPredicateOptions,
 	waitForRun,
@@ -44,6 +45,7 @@ import {
 	loadPuppeteerInWorker,
 } from "./launch";
 import { extractReadableFromHtml, type ReadableFormat } from "./readable";
+
 import { cloneSafe, RunOutput } from "./run-output";
 import type {
 	Observation,
@@ -1182,9 +1184,9 @@ export class WorkerCore {
 				(opTimeout?.aborted || (err instanceof Error && err.name === "TimeoutError"))
 			) {
 				const hint = selector ? await this.#selectorTimeoutHint(selector) : "";
-				throw new ToolError(`${label} timed out after ${perOpTimeoutMs}ms${hint}`);
+				throw markBrowserRunRejection(new ToolError(`${label} timed out after ${perOpTimeoutMs}ms${hint}`));
 			}
-			throw err;
+			throw markBrowserRunRejection(err);
 		} finally {
 			earlyAc.abort();
 			active.inflight.delete(opId);
