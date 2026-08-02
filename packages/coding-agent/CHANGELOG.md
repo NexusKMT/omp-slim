@@ -47,6 +47,9 @@
 ### Fixed
 
 - Fixed headless print-mode teardown exceeding its Mnemopi consolidation budget when final retention blocks on a locked SQLite writer, leaving the parent process, embed worker, and MCP children alive after the turn completed ([#7351](https://github.com/can1357/oh-my-pi/issues/7351)).
+### Fixed
+
+- Fixed headless `-p` / `--mode json` runs with `memory.backend: mnemopi` hanging after a completed turn and leaving `__omp_worker_mnemopi_embed` unreaped when the embed worker's fastembed/onnxruntime runtime wedged. Steady-state embed requests were unbounded, so a stuck native runtime blocked the turn's memory recall or shutdown consolidation forever; embeds are now bounded and the wedged worker is reaped on timeout so the next call respawns a fresh child, while initialization remains unbounded so first-time runtime installation and model bootstrap are not killed mid-install (regression of [#5753](https://github.com/can1357/oh-my-pi/issues/5753); [#7352](https://github.com/can1357/oh-my-pi/issues/7352)).
 
 ## [17.2.4] - 2026-08-01
 
