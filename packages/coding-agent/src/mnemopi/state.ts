@@ -639,17 +639,23 @@ export class MnemopiSessionState {
 	 * tokens on memories that will be wiped on the next line is wasted work
 	 * (PR #2327 review).
 	 *
-	 * `timeoutMs` caps how long the consolidate await blocks the caller
-	 * (the user-visible `/quit` / `/exit` shutdown path passes this so
-	 * dispose returns within a UX budget — issue #3641). When the cap is
-	 * hit, dispose returns immediately and detaches the still-in-flight
-	 * consolidate; the SQLite handles are closed in the background once
-	 * the consolidate settles so writes never race a closed handle, and
-	 * any pending embeddings are SIGKILL'd along with the embed worker
+	 * `timeoutMs` caps both synchronous SQLite lock waits during final retention
+	 * and the asynchronous consolidation drain (the user-visible `/quit`,
+	 * `/exit`, and print paths pass this so disposal stays within their shutdown
+	 * budget). When the cap is hit, dispose returns immediately and detaches the
+	 * still-in-flight consolidate; the SQLite handles are closed in the
+	 * background once the consolidate settles so writes never race a closed handle,
+	 * and any pending embeddings are SIGKILL'd along with the embed worker
 	 * (a tolerable loss — working memory rows are durable; only the
 	 * episodic promotion / embedding for the LAST few turns is skipped,
 	 * and `maybeRetainOnAgentEnd` has already retained earlier turns).
 	 */
+	#boundRetainBusyTimeout(timeoutMs: number): void {
+		// SQLite lock waits block the JS thread, so a Promise race cannot interrupt them.
+		const busyTimeoutMs = Math.max(1, Math.floor(timeoutMs));
+		this.memory.beam.db.exec(`PRAGMA busy_timeout=${busyTimeoutMs}`);
+	}
+
 	async dispose(options: { consolidate?: boolean; timeoutMs?: number } = {}): Promise<void> {
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
@@ -661,19 +667,22 @@ export class MnemopiSessionState {
 			closeOwned();
 			return;
 		}
+		const { timeoutMs } = options;
+		const boundedTimeoutMs = timeoutMs !== undefined && timeoutMs > 0 ? timeoutMs : undefined;
+		const deadline = boundedTimeoutMs !== undefined ? performance.now() + boundedTimeoutMs : undefined;
+		if (boundedTimeoutMs !== undefined) this.#boundRetainBusyTimeout(boundedTimeoutMs);
 		const consolidatePromise = this.consolidate({ full: false, extract: false, sleep: false }).catch(
 			(error: unknown) => {
 				logger.warn("Mnemopi: consolidation on dispose failed.", { error: String(error) });
 			},
 		);
-		const { timeoutMs } = options;
-		if (timeoutMs !== undefined && timeoutMs > 0) {
-			const TIMED_OUT = Symbol("mnemopi.dispose.timedOut");
-			const winner = await Promise.race([
-				consolidatePromise.then(() => undefined as unknown),
-				Bun.sleep(timeoutMs).then(() => TIMED_OUT as unknown),
-			]);
-			if (winner === TIMED_OUT) {
+		if (deadline !== undefined) {
+			const remainingMs = deadline - performance.now();
+			const completed =
+				remainingMs > 0
+					? await Promise.race([consolidatePromise.then(() => true), Bun.sleep(remainingMs).then(() => false)])
+					: false;
+			if (!completed) {
 				logger.warn("Mnemopi: consolidate-on-dispose exceeded shutdown budget; detaching to background.", {
 					timeoutMs,
 				});

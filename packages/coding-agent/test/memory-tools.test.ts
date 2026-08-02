@@ -7,6 +7,7 @@
  * session — these tools only need a populated state accessor and Settings.
  */
 
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -707,6 +708,28 @@ describe("Mnemopi backend lifecycle", () => {
 		expect(closeSpy).toHaveBeenCalledTimes(1);
 
 		registeredMnemopiState = undefined;
+	});
+
+	it("bounds synchronous SQLite lock waits during final retention (#7351)", async () => {
+		const config = makeMnemopiConfig({ baseBank: "test-bank" });
+		const entries = [
+			{ type: "message", message: { role: "user", content: "hello" } },
+			{ type: "message", message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
+		];
+		const state = registerMnemopiState(config, { entries: () => entries });
+		const lock = new Database(config.dbPath);
+		lock.exec("BEGIN IMMEDIATE");
+
+		const started = performance.now();
+		try {
+			await state.dispose({ timeoutMs: 50 });
+		} finally {
+			lock.exec("ROLLBACK");
+			lock.close();
+			registeredMnemopiState = undefined;
+		}
+
+		expect(performance.now() - started).toBeLessThan(500);
 	});
 
 	it("dispose with no timeoutMs retains, flushes, and closes without sleeping (#3641)", async () => {
