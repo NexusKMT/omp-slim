@@ -46,7 +46,7 @@ describe("ProcessTerminal kitty keyboard progressive-enhancement ordering", () =
 		Object.defineProperty(TERMINAL, "id", { value: originalTerminalId, configurable: true });
 	});
 
-	it("enables kitty when the kitty reply arrives before the DA1 sentinel", async () => {
+	it("requests alternate keys when the kitty reply arrives before the DA1 sentinel", async () => {
 		harness = createProcessTerminalRenderHarness(100, 30);
 		await harness.settle();
 		expect(harness.writes.join("")).toContain("\x1b[?u\x1b[c");
@@ -56,7 +56,7 @@ describe("ProcessTerminal kitty keyboard progressive-enhancement ordering", () =
 
 		const out = harness.writes.join("");
 		expect(harness.terminal.kittyProtocolActive).toBe(true);
-		expect(out).toContain("\x1b[>1u");
+		expect(out).toContain("\x1b[>5u");
 		expect(out).not.toContain("\x1b[>4;2m");
 	});
 
@@ -71,10 +71,10 @@ describe("ProcessTerminal kitty keyboard progressive-enhancement ordering", () =
 
 		const out = harness.writes.join("");
 		expect(harness.terminal.kittyProtocolActive).toBe(true);
-		expect(out).toContain("\x1b[>1u");
+		expect(out).toContain("\x1b[>5u");
 		const enableIdx = out.indexOf("\x1b[>4;2m");
 		const disableIdx = out.indexOf("\x1b[>4;0m");
-		const kittyIdx = out.indexOf("\x1b[>1u");
+		const kittyIdx = out.indexOf("\x1b[>5u");
 		expect(enableIdx).toBeGreaterThanOrEqual(0);
 		expect(disableIdx).toBeGreaterThan(enableIdx);
 		expect(kittyIdx).toBeGreaterThan(enableIdx);
@@ -92,7 +92,7 @@ describe("ProcessTerminal kitty keyboard progressive-enhancement ordering", () =
 		const out = harness.writes.join("");
 		expect(harness.terminal.kittyProtocolActive).toBe(false);
 		expect(out).toContain("\x1b[>4;2m");
-		expect(out).not.toContain("\x1b[>1u");
+		expect(out).not.toContain("\x1b[>5u");
 	});
 
 	it("skips modifyOtherKeys fallback for SSH_CONNECTION-only unknown terminals", async () => {
@@ -131,7 +131,7 @@ describe("ProcessTerminal kitty keyboard progressive-enhancement ordering", () =
 		const out = harness.writes.join("");
 		expect(harness.terminal.kittyProtocolActive).toBe(false);
 		expect(out).toContain("\x1b[>4;2m");
-		expect(out).not.toContain("\x1b[>1u");
+		expect(out).not.toContain("\x1b[>5u");
 		expect(harness.terminal.keyboardEnhancementEnterSequence).toBe("\x1b[>4;2m");
 	});
 
@@ -182,7 +182,7 @@ describe("ProcessTerminal kitty keyboard progressive-enhancement ordering", () =
 			margin: 0,
 		});
 		await harness.settle();
-		expect(harness.writes.join("")).toContain("\x1b[?1049h\x1b[>1u");
+		expect(harness.writes.join("")).toContain("\x1b[?1049h\x1b[>5u");
 		harness.writes.length = 0;
 
 		overlay.hide();

@@ -404,7 +404,7 @@ export interface Terminal {
 	// Whether Kitty keyboard protocol is active
 	get kittyProtocolActive(): boolean;
 
-	// The exact kitty keyboard push sequence in effect ("\x1b[>1u" or "\x1b[>7u"),
+	// The exact kitty keyboard push sequence in effect ("\x1b[>5u" or "\x1b[>7u"),
 	// or null when the protocol is not active. Kitty keyboard flags are per-screen,
 	// so the TUI re-pushes this after entering the alternate screen.
 	get kittyEnableSequence(): string | null;
@@ -1106,9 +1106,9 @@ export class ProcessTerminal implements Terminal {
 					this.#kittyEnableSeq = "\x1b[>7u";
 					this.#safeWrite(this.#kittyEnableSeq);
 				} else {
-					// Level 1 (disambiguate escape codes) — enough for Shift+Enter
-					// without the modifyOtherKeys fallback that caused regression #3259.
-					this.#kittyEnableSeq = "\x1b[>1u";
+					// Disambiguate escape codes and report base-layout keys for physical
+					// shortcut matching, without event reporting that caused regression #3259.
+					this.#kittyEnableSeq = "\x1b[>5u";
 					this.#safeWrite(this.#kittyEnableSeq);
 				}
 				return;
