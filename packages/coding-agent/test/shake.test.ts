@@ -117,6 +117,125 @@ describe("AgentSession shake", () => {
 			expect(text).toContain("shaken");
 		});
 
+		it("updates provider-anchored context usage immediately after rewriting prompt history", async () => {
+			seedHeavyToolResult("X".repeat(20_000));
+			sessionManager.appendMessage({
+				role: "assistant",
+				content: [{ type: "text", text: "done" }],
+				...apiInfo,
+				stopReason: "stop",
+				usage: { ...usage, input: 20_000, totalTokens: 20_008 },
+				timestamp: Date.now(),
+			});
+			session.agent.replaceMessages(
+				sessionManager
+					.getBranch()
+					.filter(entry => entry.type === "message")
+					.map(entry => entry.message as AgentMessage),
+			);
+			const before = session.getContextUsage()?.tokens;
+			expect(before).toBe(20_000);
+
+			const result = await session.shake("elide");
+
+			expect(result.tokensFreed).toBeGreaterThan(0);
+			expect(session.getContextUsage()?.tokens).toBe(20_000 - result.tokensFreed);
+			const anchor = sessionManager
+				.getBranch()
+				.findLast(
+					entry =>
+						entry.type === "message" && entry.message.role === "assistant" && entry.message.stopReason === "stop",
+				);
+			expect(
+				anchor?.type === "message" && anchor.message.role === "assistant"
+					? anchor.message.contextSnapshot?.historyRewriteTokensRemoved
+					: undefined,
+			).toBe(result.tokensFreed);
+		});
+
+		it("skips response-only usage when selecting the correction anchor", async () => {
+			seedHeavyToolResult("X".repeat(20_000));
+			sessionManager.appendMessage({
+				role: "assistant",
+				content: [{ type: "text", text: "anchored" }],
+				...apiInfo,
+				stopReason: "stop",
+				usage: { ...usage, input: 20_000, totalTokens: 20_008 },
+				timestamp: Date.now(),
+			});
+			sessionManager.appendMessage({
+				role: "assistant",
+				content: [{ type: "text", text: "response-only" }],
+				...apiInfo,
+				stopReason: "stop",
+				usage: { ...usage, input: 0, output: 8, totalTokens: 8 },
+				timestamp: Date.now() + 1,
+			});
+			session.agent.replaceMessages(
+				sessionManager
+					.getBranch()
+					.filter(entry => entry.type === "message")
+					.map(entry => entry.message as AgentMessage),
+			);
+			const before = session.getContextUsage()?.tokens;
+			expect(before).toBeDefined();
+
+			const result = await session.shake("elide");
+
+			expect(result.tokensFreed).toBeGreaterThan(0);
+			expect(session.getContextUsage()?.tokens).toBe(before! - result.tokensFreed);
+			const assistants = sessionManager
+				.getBranch()
+				.filter(entry => entry.type === "message" && entry.message.role === "assistant");
+			const usableAnchor = assistants.at(-2);
+			const responseOnly = assistants.at(-1);
+			expect(
+				usableAnchor?.type === "message" && usableAnchor.message.role === "assistant"
+					? usableAnchor.message.contextSnapshot?.historyRewriteTokensRemoved
+					: undefined,
+			).toBe(result.tokensFreed);
+			expect(
+				responseOnly?.type === "message" && responseOnly.message.role === "assistant"
+					? responseOnly.message.contextSnapshot?.historyRewriteTokensRemoved
+					: undefined,
+			).toBeUndefined();
+		});
+
+		it("does not subtract remote-compacted entries omitted from the provider prompt", async () => {
+			seedHeavyToolResult("X".repeat(20_000));
+			const firstKeptEntryId = sessionManager.getBranch()[0]?.id;
+			if (!firstKeptEntryId) throw new Error("Expected seeded branch");
+			sessionManager.appendCompaction("remote summary", undefined, firstKeptEntryId, 10_000, {}, false, {
+				openaiRemoteCompaction: {
+					provider: "openai",
+					replacementHistory: [],
+				},
+			});
+			sessionManager.appendMessage({
+				role: "assistant",
+				content: [{ type: "text", text: "post-compaction" }],
+				...apiInfo,
+				stopReason: "stop",
+				usage: { ...usage, input: 20_000, totalTokens: 20_008 },
+				timestamp: Date.now(),
+			});
+			session.agent.replaceMessages(session.buildDisplaySessionContext().messages);
+			expect(session.getContextUsage()?.tokens).toBe(20_000);
+
+			const result = await session.shake("elide");
+
+			expect(result.tokensFreed).toBeGreaterThan(0);
+			expect(session.getContextUsage()?.tokens).toBe(20_000);
+			const anchor = sessionManager
+				.getBranch()
+				.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
+			expect(
+				anchor?.type === "message" && anchor.message.role === "assistant"
+					? anchor.message.contextSnapshot?.historyRewriteTokensRemoved
+					: undefined,
+			).toBeUndefined();
+		});
+
 		it("returns zero counts for an empty branch", async () => {
 			const result = await session.shake("elide");
 			expect(result.toolResultsDropped).toBe(0);

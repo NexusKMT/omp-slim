@@ -84,6 +84,10 @@
 
 - Fixed project-scoped session directories using leading-hyphen names and collapsing distinct paths such as `~/project/hail-mary` and `~/project-hail-mary` into one bucket; directory names now use a portable readable prefix plus the canonical cwd hash, and colliding legacy buckets are split by their recorded session cwd during migration ([#7396](https://github.com/can1357/oh-my-pi/issues/7396)).
 
+### Fixed
+
+- Fixed manual `/shake` leaving the context budget and next pre-turn compaction decision anchored to the stale pre-shake provider token count until another model response arrived.
+
 ## [17.2.4] - 2026-08-01
 
 ### Added
