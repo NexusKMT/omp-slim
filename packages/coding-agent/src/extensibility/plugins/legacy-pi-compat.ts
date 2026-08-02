@@ -665,7 +665,6 @@ const bareRequireResolutionCache = new Map<string, Promise<string | null>>();
 const realpathCache = new Map<string, Promise<string>>();
 const nativeAddonResolutionCache = new Map<string, Promise<string | null>>();
 const nativeAddonRequireScanCache = new Map<string, Promise<boolean>>();
-const nativeAddonLoaderModulePaths = new Set<string>();
 
 function clearLegacyPiResolutionCaches(): void {
 	resolvedSpecifierFallbacks.clear();
@@ -677,7 +676,6 @@ function clearLegacyPiResolutionCaches(): void {
 	bareRequireResolutionCache.clear();
 	nativeAddonResolutionCache.clear();
 	nativeAddonRequireScanCache.clear();
-	nativeAddonLoaderModulePaths.clear();
 	realpathCache.clear();
 }
 
@@ -1076,6 +1074,23 @@ async function resolveSourceModuleFile(basePath: string): Promise<string | null>
 	return null;
 }
 
+async function resolveRelativeCommonJsRequire(specifier: string, importerPath: string): Promise<string | null> {
+	const candidate = path.resolve(path.dirname(importerPath), specifier);
+	try {
+		const stats = await fs.promises.stat(candidate);
+		if (stats.isDirectory()) {
+			const manifest = await readPackageManifest(candidate);
+			if (typeof manifest?.main === "string") {
+				const main = await resolveSourceModuleFile(path.resolve(candidate, manifest.main));
+				if (main) return main;
+			}
+		}
+	} catch {
+		// Missing candidates fall through to extension and index resolution.
+	}
+	return resolveSourceModuleFile(candidate);
+}
+
 function isPathInsideRoot(rootPath: string, candidatePath: string): boolean {
 	const relative = path.relative(rootPath, candidatePath);
 	return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
@@ -1255,7 +1270,7 @@ function isBareExtensionDependencySpecifier(specifier: string): boolean {
 		return false;
 	}
 	const packageName = specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : specifier.split("/")[0];
-	return Boolean(packageName && !isBuiltin(packageName));
+	return Boolean(packageName && !isBuiltin(specifier));
 }
 
 interface BarePackageSpecifier {
@@ -1319,7 +1334,6 @@ async function readPackageManifestUncached(packageRoot: string): Promise<Record<
 }
 
 type ExtensionModuleKind = "commonjs" | "esm";
-class ExtensionModuleKindConflictError extends Error {}
 
 async function isCommonJsModulePath(
 	modulePath: string,
@@ -1440,7 +1454,7 @@ async function resolveNodePackageFallback(
 	subpath: string | null,
 	manifest: Record<string, unknown>,
 ): Promise<string | null> {
-	if (subpath !== null) {
+	if (subpath) {
 		return resolvePackageSourceTarget(packageRoot, path.join(packageRoot, subpath));
 	}
 	for (const field of ["module", "main"]) {
@@ -1476,7 +1490,7 @@ async function resolveNodePackageRequire(specifier: string, importerPath: string
 	if (Object.hasOwn(manifest, "exports")) {
 		return resolveNodePackageExport(packageRoot, parsed.subpath, manifest, SUPPORTED_PACKAGE_REQUIRE_CONDITIONS);
 	}
-	if (parsed.subpath !== null) {
+	if (parsed.subpath) {
 		return resolvePackageSourceTarget(packageRoot, path.join(packageRoot, parsed.subpath));
 	}
 	const main = manifest.main;
@@ -1638,6 +1652,9 @@ async function resolveExtensionBareRequire(specifier: string, importerPath: stri
 }
 
 async function resolveExtensionCommonJsRequire(specifier: string, importerPath: string): Promise<string | null> {
+	if (specifier.startsWith(".")) {
+		return resolveRelativeCommonJsRequire(specifier, importerPath);
+	}
 	const remappedSpecifier = remapLegacyPiSpecifier(specifier);
 	if (remappedSpecifier) {
 		try {
@@ -1886,6 +1903,7 @@ interface ExtensionModuleGraph {
 	readonly modules: Map<string, string>;
 	readonly cacheBustResolvedImportModules: Set<string>;
 	readonly commonJsPaths: Set<string>;
+	readonly synchronousSourcePaths: Set<string>;
 }
 
 /**
@@ -1901,6 +1919,7 @@ interface ExtensionModuleGraph {
 async function collectExtensionModules(entryRealPath: string): Promise<ExtensionModuleGraph> {
 	const modules = new Map<string, string>();
 	const commonJsPaths = new Set<string>();
+	const synchronousSourcePaths = new Set<string>();
 	const queuedCacheBustResolvedImports = new Map<string, boolean>([[entryRealPath, true]]);
 	const queuedModuleKinds = new Map<string, ExtensionModuleKind>([[entryRealPath, "esm"]]);
 	const queuedEsmBranchPaths = new Set<string>();
@@ -1949,10 +1968,13 @@ async function collectExtensionModules(entryRealPath: string): Promise<Extension
 				let resolvedModuleKind: ExtensionModuleKind | undefined;
 				let resolvedEsmBranch = false;
 				let requiresNativeAddonRewrite = false;
+				let requiresSynchronousSourceHook = false;
 				const isRequired = reference.kind === "require";
 				if (specifier.startsWith(".")) {
-					const candidate = Bun.resolveSync(specifier, dir);
-					if (hasSourceModuleExtension(candidate)) {
+					const candidate = isRequired
+						? await resolveRelativeCommonJsRequire(specifier, file)
+						: Bun.resolveSync(specifier, dir);
+					if (candidate && hasSourceModuleExtension(candidate)) {
 						const inheritedTargetKind = isRequired
 							? sourceIsCommonJs
 								? "commonjs"
@@ -1966,10 +1988,11 @@ async function collectExtensionModules(entryRealPath: string): Promise<Extension
 						const isCommonJsDescendant = isRequired && sourceIsCommonJs && targetIsCommonJs;
 						requiresNativeAddonRewrite =
 							isRequired && !isCommonJsDescendant && (await moduleRequiresNativeAddon(candidate));
-						if (!isRequired || isCommonJsDescendant || requiresNativeAddonRewrite) {
+						if (!isRequired || isCommonJsDescendant || requiresNativeAddonRewrite || !targetIsCommonJs) {
 							resolved = await realpathOrSelf(candidate);
 							resolvedModuleKind = targetIsCommonJs ? "commonjs" : "esm";
 							resolvedEsmBranch = !targetIsCommonJs && esmBranch;
+							requiresSynchronousSourceHook = isRequired && !targetIsCommonJs;
 						}
 					}
 				} else if (specifier.startsWith("#")) {
@@ -1988,10 +2011,11 @@ async function collectExtensionModules(entryRealPath: string): Promise<Extension
 						const isCommonJsDescendant = isRequired && sourceIsCommonJs && targetIsCommonJs;
 						requiresNativeAddonRewrite =
 							isRequired && !isCommonJsDescendant && (await moduleRequiresNativeAddon(candidate));
-						if (!isRequired || isCommonJsDescendant || requiresNativeAddonRewrite) {
+						if (!isRequired || isCommonJsDescendant || requiresNativeAddonRewrite || !targetIsCommonJs) {
 							resolved = candidate;
 							resolvedModuleKind = targetIsCommonJs ? "commonjs" : "esm";
 							resolvedEsmBranch = !targetIsCommonJs && esmBranch;
+							requiresSynchronousSourceHook = isRequired && !targetIsCommonJs;
 						}
 					}
 				} else if (
@@ -2022,6 +2046,9 @@ async function collectExtensionModules(entryRealPath: string): Promise<Extension
 							: false;
 					if (isHookableEntry && dependencyEntry && (!isRequired || (sourceIsCommonJs && isCommonJsEntry))) {
 						resolved = await realpathOrSelf(dependencyEntry);
+					} else if (isHookableEntry && dependencyEntry && isRequired && !isCommonJsEntry) {
+						resolved = await realpathOrSelf(dependencyEntry);
+						requiresSynchronousSourceHook = true;
 					} else if (isHookableEntry && dependencyEntry && isRequired) {
 						requiresNativeAddonRewrite = await moduleRequiresNativeAddon(dependencyEntry);
 						if (requiresNativeAddonRewrite) {
@@ -2034,25 +2061,35 @@ async function collectExtensionModules(entryRealPath: string): Promise<Extension
 					}
 					nextCacheBustResolvedImports = false;
 				}
-				if (resolved && requiresNativeAddonRewrite) {
-					nativeAddonLoaderModulePaths.add(resolved);
+				if (
+					resolved &&
+					(requiresNativeAddonRewrite ||
+						requiresSynchronousSourceHook ||
+						(synchronousSourcePaths.has(file) && resolvedModuleKind === "esm"))
+				) {
+					synchronousSourcePaths.add(resolved);
 				}
 				if (resolved) {
 					const queuedCacheBust = queuedCacheBustResolvedImports.get(resolved) ?? false;
 					const mergedCacheBust = queuedCacheBust || nextCacheBustResolvedImports;
 					queuedCacheBustResolvedImports.set(resolved, mergedCacheBust);
 					const queuedModuleKind = queuedModuleKinds.get(resolved);
-					if (queuedModuleKind && resolvedModuleKind && queuedModuleKind !== resolvedModuleKind) {
-						throw new ExtensionModuleKindConflictError(
-							`Conflicting extension module kinds for ${resolved}: ${queuedModuleKind} and ${resolvedModuleKind}`,
-						);
-					}
-					const mergedModuleKind = queuedModuleKind ?? resolvedModuleKind;
+					const mergedEsmBranch = queuedEsmBranchPaths.has(resolved) || resolvedEsmBranch;
+					const mergedModuleKind =
+						queuedModuleKind && resolvedModuleKind && queuedModuleKind !== resolvedModuleKind
+							? mergedEsmBranch
+								? "esm"
+								: "commonjs"
+							: (queuedModuleKind ?? resolvedModuleKind);
 					if (mergedModuleKind) {
 						queuedModuleKinds.set(resolved, mergedModuleKind);
 					}
-					if (resolvedEsmBranch) {
+					if (mergedEsmBranch) {
 						queuedEsmBranchPaths.add(resolved);
+					}
+					if (modules.has(resolved) && queuedModuleKind !== mergedModuleKind) {
+						modules.delete(resolved);
+						commonJsPaths.delete(resolved);
 					}
 					if (!modules.has(resolved)) {
 						queue.push({
@@ -2063,28 +2100,37 @@ async function collectExtensionModules(entryRealPath: string): Promise<Extension
 						});
 					}
 				}
-			} catch (error) {
-				if (error instanceof ExtensionModuleKindConflictError) {
-					throw error;
-				}
+			} catch {
 				// Unresolvable import (e.g. a type-only path); skip it.
 			}
 		}
 	}
 	for (const [modulePath, source] of modules) {
-		if (commonJsPaths.has(modulePath) || nativeAddonLoaderModulePaths.has(modulePath)) {
-			modules.set(modulePath, await rewriteExtensionSpecifiers(source, modulePath, commonJsPaths.has(modulePath)));
+		if (commonJsPaths.has(modulePath)) {
+			modules.set(modulePath, await rewriteExtensionSpecifiers(source, modulePath, true));
+		} else if (synchronousSourcePaths.has(modulePath)) {
+			modules.set(modulePath, await rewriteLegacyExtensionSource(source, modulePath));
 		}
 	}
 	return {
 		modules,
 		commonJsPaths,
+		synchronousSourcePaths,
 		cacheBustResolvedImportModules: new Set(
 			[...queuedCacheBustResolvedImports]
 				.filter(([modulePath, enabled]) => enabled && modules.has(modulePath))
 				.map(([modulePath]) => modulePath),
 		),
 	};
+}
+
+/** Test seam for compiled-binary dependency graph discovery and rewriting. */
+export async function __collectLegacyPiExtensionSourcesForTests(
+	entryPath: string,
+): Promise<ReadonlyMap<string, string>> {
+	const entryRealPath = await realpathOrSelf(path.resolve(entryPath));
+	const graph = await collectExtensionModules(entryRealPath);
+	return graph.modules;
 }
 
 /**
@@ -2252,6 +2298,7 @@ async function installExtensionGraphHook(
 	entryRealPath: string,
 	modules: Map<string, string>,
 	commonJsPaths: Set<string>,
+	synchronousSourcePaths: ReadonlySet<string>,
 	cacheBustResolvedImportModules: ReadonlySet<string>,
 ): Promise<{ asyncModules: Map<string, string>; syncSourceModules: Map<string, string> }> {
 	const asyncModules = new Map<string, string>();
@@ -2260,7 +2307,7 @@ async function installExtensionGraphHook(
 		if (commonJsPaths.has(modulePath)) {
 			continue;
 		}
-		if (nativeAddonLoaderModulePaths.has(modulePath)) {
+		if (synchronousSourcePaths.has(modulePath)) {
 			syncSourceModules.set(modulePath, source);
 		} else {
 			asyncModules.set(modulePath, source);
@@ -2356,6 +2403,7 @@ async function ensureExtensionGraphHook(entryRealPath: string): Promise<{ clear(
 		modules: currentModules,
 		commonJsPaths,
 		cacheBustResolvedImportModules: discoveredCacheBustModules,
+		synchronousSourcePaths,
 	} = await collectExtensionModules(entryRealPath);
 	let cacheBustResolvedImportModules = extensionGraphCacheBustResolvedImportModules.get(entryRealPath);
 	if (!cacheBustResolvedImportModules) {
@@ -2379,11 +2427,15 @@ async function ensureExtensionGraphHook(entryRealPath: string): Promise<{ clear(
 
 	const pendingModules = new Map<string, string>();
 	const pendingCommonJsPaths = new Set<string>();
+	const pendingSynchronousSourcePaths = new Set<string>();
 	for (const [modulePath, source] of currentModules) {
 		if (!hookedModules.has(modulePath)) {
 			pendingModules.set(modulePath, source);
 			if (commonJsPaths.has(modulePath)) {
 				pendingCommonJsPaths.add(modulePath);
+			}
+			if (synchronousSourcePaths.has(modulePath)) {
+				pendingSynchronousSourcePaths.add(modulePath);
 			}
 		}
 	}
@@ -2398,6 +2450,7 @@ async function ensureExtensionGraphHook(entryRealPath: string): Promise<{ clear(
 			entryRealPath,
 			pendingModules,
 			pendingCommonJsPaths,
+			pendingSynchronousSourcePaths,
 			cacheBustResolvedImportModules,
 		));
 		for (const modulePath of pendingModules.keys()) {

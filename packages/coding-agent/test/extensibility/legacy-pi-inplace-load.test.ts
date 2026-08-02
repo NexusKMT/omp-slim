@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as url from "node:url";
 import {
+	__collectLegacyPiExtensionSourcesForTests,
 	__rewriteLegacyExtensionSourceForTests,
 	loadLegacyPiModule,
 } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/legacy-pi-compat";
@@ -1003,6 +1004,103 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 		expect(expectedEsmDepUrls.some(expected => rewritten.includes(expected))).toBe(true);
 		expect(expectedRootDepUrls.some(expected => rewritten.includes(expected))).toBe(true);
 		expect(rewritten).toContain('from "node:path"');
+	});
+
+	it("pre-rewrites a nested ESM cluster required by CommonJS", async () => {
+		const dir = await writePackage({
+			"package.json": JSON.stringify({ name: "nested-esm-ext", version: "1.0.0", type: "module" }),
+			"node_modules/cjs-parent/package.json": JSON.stringify({
+				name: "cjs-parent",
+				version: "1.0.0",
+				main: "index.js",
+			}),
+			"node_modules/cjs-parent/index.js": 'module.exports = require("nested-esm");',
+			"node_modules/cjs-parent/node_modules/nested-esm/package.json": JSON.stringify({
+				name: "nested-esm",
+				version: "1.0.0",
+				type: "module",
+				main: "index.js",
+			}),
+			"node_modules/cjs-parent/node_modules/nested-esm/index.js":
+				'import { value } from "nested-leaf"; export default value;',
+			"node_modules/cjs-parent/node_modules/nested-leaf/package.json": JSON.stringify({
+				name: "nested-leaf",
+				version: "1.0.0",
+				type: "module",
+				main: "index.js",
+			}),
+			"node_modules/cjs-parent/node_modules/nested-leaf/index.js": 'export const value = "nested-ok";',
+			"index.js": 'import value from "cjs-parent"; export { value };',
+		});
+		const entry = path.join(dir, "index.js");
+		const nestedEntry = await fs.realpath(path.join(dir, "node_modules/cjs-parent/node_modules/nested-esm/index.js"));
+		const nestedLeaf = await fs.realpath(path.join(dir, "node_modules/cjs-parent/node_modules/nested-leaf/index.js"));
+
+		const sources = await __collectLegacyPiExtensionSourcesForTests(entry);
+
+		expect(sources.has(nestedEntry)).toBe(true);
+		expect(sources.get(nestedEntry)).toContain(url.pathToFileURL(nestedLeaf).href);
+	});
+
+	it("chooses the ESM branch when dual package graphs converge", async () => {
+		const dir = await writePackage({
+			"package.json": JSON.stringify({ name: "dual-convergence-ext", version: "1.0.0", type: "module" }),
+			"node_modules/dual/package.json": JSON.stringify({
+				name: "dual",
+				version: "1.0.0",
+				exports: { import: "./esm.js", require: "./cjs.js" },
+			}),
+			"node_modules/dual/esm.js": 'import "./shared.js"; export const mode = "esm";',
+			"node_modules/dual/cjs.js": 'if (false) require("./shared.js"); module.exports = { mode: "cjs" };',
+			"node_modules/dual/shared.js": "globalThis.__ompDualGraphLoaded = true;",
+			"node_modules/dual-consumer/package.json": JSON.stringify({
+				name: "dual-consumer",
+				version: "1.0.0",
+				main: "index.js",
+			}),
+			"node_modules/dual-consumer/index.js": 'module.exports = require("dual");',
+			"index.js": 'import "dual"; import "dual-consumer";',
+		});
+		const shared = await fs.realpath(path.join(dir, "node_modules/dual/shared.js"));
+
+		const sources = await __collectLegacyPiExtensionSourcesForTests(path.join(dir, "index.js"));
+
+		expect(sources.has(shared)).toBe(true);
+	});
+
+	it("rewrites directory and builtin-named package requires through package main", async () => {
+		const dir = await writePackage({
+			"package.json": JSON.stringify({ name: "directory-require-ext", version: "1.0.0" }),
+			"node_modules/directory-package/package.json": JSON.stringify({
+				name: "directory-package",
+				version: "1.0.0",
+				main: "lib/plumbing.js",
+			}),
+			"node_modules/directory-package/lib/plumbing.js": 'module.exports = "directory-ok";',
+			"node_modules/directory-package/configure/request.js": "",
+			"node_modules/punycode/package.json": JSON.stringify({
+				name: "punycode",
+				version: "1.0.0",
+				main: "punycode.js",
+			}),
+			"node_modules/punycode/punycode.js": 'module.exports = "punycode-ok";',
+			"index.js": "",
+		});
+		const importer = path.join(dir, "node_modules/directory-package/configure/request.js");
+		const rewritten = await __rewriteLegacyExtensionSourceForTests(
+			'const directory = require("../"); const punycode = require("punycode/");',
+			importer,
+		);
+		const directoryEntry = (
+			await fs.realpath(path.join(dir, "node_modules/directory-package/lib/plumbing.js"))
+		).replaceAll("\\", "/");
+		const punycodeEntry = (await fs.realpath(path.join(dir, "node_modules/punycode/punycode.js"))).replaceAll(
+			"\\",
+			"/",
+		);
+
+		expect(rewritten).toContain(`require("${directoryEntry}")`);
+		expect(rewritten).toContain(`require("${punycodeEntry}")`);
 	});
 
 	it("honors export pattern specificity and package encapsulation", async () => {
