@@ -37,6 +37,7 @@ Parsing comes from frontmatter via `parseAgentFields()` (`src/discovery/helpers.
 - `output` is passed through as opaque schema data
 - `read-summarize: false` (parsed as `readSummarize`) forces the subagent's `read` tool to return verbatim file content instead of structural summaries — `runSubprocess` applies it as a `read.summarize.enabled: false` override on the subagent's isolated settings (`src/task/executor.ts`). `scout` and `librarian` ship with it disabled. Defaults to enabled when the field is absent.
 - `prewalk: true` starts the subagent on its resolved model and hands off to the default prewalk target (the `smol` role) at its first edit/write, exactly like the session-level `--prewalk`; a string value (e.g. `prewalk: "@smol"` or `prewalk: "openai/gpt-5-mini"`) picks a custom target. The `task.agentPrewalk` settings record (agent name → `"on"` / `"off"` / pattern, toggled per agent from `/agents` with `P`) overrides the frontmatter. Resolution happens in `runSubprocess` (`src/task/executor.ts`); an unresolvable target or a target equal to the starting model skips the hand-off instead of failing the spawn.
+
 ## Role-backed custom agents
 
 OMP discovers user agents from `~/.omp/agent/agents/*.md` and project agents from `.omp/agents/*.md`.
@@ -66,10 +67,10 @@ modelRoles:
 For a dispatch, set the agent name and task:
 
 ```json
-{"tasks":[{"agent":"reviewer","task":"Review the current change and report concrete findings."}]}
+{"context":"Review the current change in this repository.","tasks":[{"agent":"reviewer","task":"Report concrete correctness findings."}]}
 ```
 
-`/model` changes the current or default session selection. It is not the worker-role configuration mechanism; edit `modelRoles` instead.
+`/model`'s Roles view can assign and persist custom role mappings such as `review`, `fast`, and `good`. Changing only the active or default session selection does not remap those roles.
 
 ### `vibe_spawn` tier routing
 
