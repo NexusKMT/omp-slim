@@ -177,8 +177,8 @@ describe("status line focused-agent dimming", () => {
 		const border = component.getTopBorder(80).content;
 
 		expect(border).toStartWith("\x1b[2m");
-		expect(border).toContain(`\x1b[22m${theme.sep.powerlineLeft}\x1b[2m`);
-		expect(border).toContain(`\x1b[22m${theme.sep.powerlineRight}\x1b[2m`);
+		expect(border).toContain(`\x1b[22m${theme.sep.powerlineLeft}\x1b[0m\x1b[2m`);
+		expect(border).toContain(`\x1b[22m${theme.sep.powerlineRight}\x1b[0m\x1b[2m`);
 		expect(border).toContain("\x1b[0m\x1b[2m");
 		expect(border).toEndWith("\x1b[22m");
 	});

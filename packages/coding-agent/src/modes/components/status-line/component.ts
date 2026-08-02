@@ -1786,7 +1786,7 @@ export class StatusLineComponent implements Component {
 					: "";
 			const capPrefix = separatorDef.endCaps?.useBgAsFg ? bgAnsi.replace("\x1b[48;", "\x1b[38;") : bgAnsi + sepAnsi;
 			const capText = cap
-				? `${capPrefix}${this.#focusedAgentId ? "\x1b[22m" : ""}${cap}${this.#focusedAgentId ? "\x1b[2m" : ""}\x1b[0m`
+				? `${capPrefix}${this.#focusedAgentId ? "\x1b[22m" : ""}${cap}\x1b[0m`
 				: "";
 
 			let content = bgAnsi + fgAnsi;
