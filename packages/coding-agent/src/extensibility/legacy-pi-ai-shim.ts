@@ -19,7 +19,15 @@
  * `types.ts` via the `export *` below — pi-ai still exports both as types,
  * only the runtime `Type` builder and `StringEnum()` helper were removed.
  */
-import type { Api, AssistantMessage, Model } from "@oh-my-pi/pi-ai";
+import {
+	type Api,
+	type AssistantMessage,
+	type AssistantMessageEventStream,
+	type Context,
+	type Model,
+	type SimpleStreamOptions,
+	streamSimple,
+} from "@oh-my-pi/pi-ai";
 import type { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { clampThinkingLevelForModel } from "@oh-my-pi/pi-catalog/model-thinking";
 import {
@@ -121,11 +129,19 @@ export { calculateCost, getBundledModel, getBundledModels, getBundledProviders, 
 export const getModel = getBundledModel;
 export const getModels = getBundledModels;
 
-// Upstream's `/compat` entrypoint exposes this legacy name for the simple
-// OpenAI Responses stream. OMP's provider uses the same simple-options
-// contract under `streamOpenAIResponses`; alias it for rewritten compat
-// imports from extensions such as pi-openai-server-compaction.
-export { streamOpenAIResponses as streamSimpleOpenAIResponses } from "@oh-my-pi/pi-ai";
+/**
+ * Stream OpenAI Responses through the historical simple-options contract.
+ *
+ * Legacy `/compat` callers pass {@link SimpleStreamOptions}; routing through
+ * `streamSimple` preserves option normalization before provider dispatch.
+ */
+export function streamSimpleOpenAIResponses(
+	model: Model<"openai-responses">,
+	context: Context,
+	options?: SimpleStreamOptions,
+): AssistantMessageEventStream {
+	return streamSimple(model, context, options);
+}
 /**
  * Compatibility re-exports for runtime helpers that upstream
  * `@earendil-works/pi-ai` exposed from its package root but omp's

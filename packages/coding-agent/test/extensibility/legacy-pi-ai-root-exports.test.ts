@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { streamOpenAIResponses } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, FetchImpl } from "@oh-my-pi/pi-ai";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import {
 	isContextOverflow,
 	parseJsonWithRepair,
@@ -55,7 +56,56 @@ describe("legacy pi-ai shim root exports", () => {
 		// parseStreamingJson completes a truncated object at the streaming edge.
 		expect(parseStreamingJson<{ a: number }>('{"a": 1')).toEqual({ a: 1 });
 	});
-	it("aliases the legacy simple OpenAI Responses stream", () => {
-		expect(streamSimpleOpenAIResponses).toBe(streamOpenAIResponses);
+	it("maps legacy simple options before streaming OpenAI Responses", async () => {
+		const requests: unknown[] = [];
+		const fetchMock: FetchImpl = Object.assign(
+			async () =>
+				new Response(
+					JSON.stringify({
+						error: { message: "intentional test response", type: "invalid_request_error" },
+					}),
+					{ status: 400, headers: { "content-type": "application/json" } },
+				),
+			{ preconnect: fetch.preconnect },
+		);
+		const model = buildModel({
+			id: "legacy-simple-options",
+			name: "Legacy Simple Options",
+			api: "openai-responses",
+			provider: "openai",
+			baseUrl: "https://responses.example.test/v1",
+			reasoning: true,
+			compat: {
+				supportsReasoningParams: true,
+				supportsReasoningEffort: true,
+			},
+			thinking: {
+				mode: "effort",
+				efforts: [Effort.High],
+			},
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128_000,
+			maxTokens: 16_384,
+		});
+
+		const result = await streamSimpleOpenAIResponses(
+			model,
+			{ messages: [{ role: "user", content: "hello", timestamp: 0 }] },
+			{
+				apiKey: "test-key",
+				reasoning: Effort.High,
+				hideThinkingSummary: true,
+				fetch: fetchMock,
+				onPayload: request => {
+					requests.push(request);
+				},
+			},
+		).result();
+
+		expect(result.stopReason).toBe("error");
+		expect(requests).toHaveLength(1);
+		expect(requests[0]).toMatchObject({ reasoning: { effort: "high" } });
+		expect(JSON.stringify(requests[0])).not.toContain('"summary"');
 	});
 });
