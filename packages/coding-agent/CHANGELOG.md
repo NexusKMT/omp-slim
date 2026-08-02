@@ -1,9 +1,6 @@
 # Changelog
 
 ## [Unreleased]
-### Fixed
-
-- Fixed focused-agent status bar dimming darkening Powerline end caps.
 
 ### Breaking Changes
 
@@ -20,73 +17,38 @@
 ### Changed
 
 - Exposed the script-driven `computer` schema to every model, including models with provider-native Computer Use support, because native action declarations cannot express persistent desktop sessions or accessibility handles.
+- Reduced `omp --help` cold-start latency and memory use by rendering lightweight command metadata without loading every runtime command and provider graph.
 
 ### Fixed
 
+- Fixed focused-agent status bar dimming darkening Powerline end caps.
 - Fixed the browser relay creating duplicate "omp" tab groups: the bridge now keeps at most one group RPC in flight (a queued drain replaces fire-and-forget per-tab requests), so concurrent requests can no longer race the extension's non-atomic query→create→set-title sequence in the same window. Also fixed an extension reconnect (relay daemon restart, service-worker recycle) being misread as the user dragging every tab out of the omp group — grouping state is reset when the extension socket closes, so tabs regroup on the next hello instead of being permanently opted out.
 - Fixed retained computer `Win` and `El` handles carrying a completed run's abort signal and permissions into later runs; handles now obey the current run while leaked async continuations remain denied.
 - Fixed computer-tool `win.ref("eN")` fabricating an element with empty role/title metadata; it now resolves the ref through the accessibility registry, returning a populated element and throwing `StaleRef` for expired refs.
 - Fixed macOS background keyboard input silently reaching a different window in the same application; ambiguous multi-window delivery now fails with `BackgroundUnavailable`, and foreground retries establish the addressed window as the app's main/focused window before typing.
 - Fixed macOS Chrome accessibility snapshots exposing only browser chrome by activating Chromium's renderer accessibility tree before resolving a window.
 - Fixed unnamed macOS accessibility controls such as Chrome's Back, Forward, and Reload buttons by using `AXDescription` when `AXTitle` is empty in snapshots and title queries.
-### Fixed
-
 - Fixed shake re-eliding artifact recovery reads into a new artifact indefinitely.
-### Fixed
-
 - Fixed Esc during a streaming `/loop` iteration pausing the loop instead of only aborting the current turn ([#7329](https://github.com/can1357/oh-my-pi/issues/7329)).
-### Fixed
-
 - Fixed heavily branched conversation trees shifting linear continuations into disconnected gutter columns and accumulating unnecessary indentation ([#7332](https://github.com/can1357/oh-my-pi/issues/7332)).
-### Fixed
-
 - Fixed the vibe pre-init-kill test racing `registry.kill()` against the worker's job-body dispatch (the mock only registered its AgentRef after the abort signal landed, so a loaded runner could observe no registration); the test now waits for the worker to be mid-initialization before killing.
-### Fixed
-
 - Removed hard-coded `scout` references from agent, system, and tool prompts that leaked into the model even when the scout agent was disabled (`task.disabledAgents`) or absent from the spawn list: the init agent prompt, task tool description, delegation gates, plan-mode and workflowz notices, and glob/grep/ast-grep guidance no longer recommend an unavailable agent, including after live settings changes ([#7313](https://github.com/can1357/oh-my-pi/issues/7313)).
-### Fixed
-
 - Fixed compiled Windows launches misclassifying ConPTY-backed terminals as console-less when `GetConsoleWindow()` returned no HWND, which spawned Python eval kernels with `CREATE_NO_WINDOW` and could deadlock imports of NumPy-backed packages such as Matplotlib ([#7343](https://github.com/can1357/oh-my-pi/issues/7343)).
-### Fixed
-
 - Fixed headless print-mode teardown exceeding its Mnemopi consolidation budget when final retention blocks on a locked SQLite writer, leaving the parent process, embed worker, and MCP children alive after the turn completed ([#7351](https://github.com/can1357/oh-my-pi/issues/7351)).
-### Fixed
-
 - Fixed headless `-p` / `--mode json` runs with `memory.backend: mnemopi` hanging after a completed turn and leaving `__omp_worker_mnemopi_embed` unreaped when the embed worker's fastembed/onnxruntime runtime wedged. Steady-state embed requests were unbounded, so a stuck native runtime blocked the turn's memory recall or shutdown consolidation forever; embeds are now bounded and the wedged worker is reaped on timeout so the next call respawns a fresh child, while initialization remains unbounded so first-time runtime installation and model bootstrap are not killed mid-install (regression of [#5753](https://github.com/can1357/oh-my-pi/issues/5753); [#7352](https://github.com/can1357/oh-my-pi/issues/7352)).
-### Fixed
-
 - Fixed a literal API key configured via `/login` (e.g. OpenCode Zen's free `public` key) being hijacked on Windows by a case-differing system environment variable, causing 401s. `process.env`/`Bun.env` reads are case-insensitive on Windows, so the config-value resolvers' "env var name, else literal" fallback resolved `public` to the built-in `PUBLIC=C:\Users\Public`. Resolution now requires an exact-case env entry (via the new `$envExact` helper) before treating a value as an env-var reference ([#7361](https://github.com/can1357/oh-my-pi/issues/7361)).
-### Fixed
-
 - Fixed redirected stdin being ignored when Bun reports a pipe with an undefined `isTTY`, so JSON/print sessions now process piped prompts and persist them under `--session-dir` or `PI_CODING_AGENT_SESSION_DIR` as requested ([#7378](https://github.com/can1357/oh-my-pi/issues/7378)).
-### Fixed
-
 - Fixed Chromium-backed tests failing during suite registration when the shared availability probe was still initializing ([#7384](https://github.com/can1357/oh-my-pi/pull/7384) by [@paralin](https://github.com/paralin)).
-
-### Fixed
-
 - Fixed the terminal-tab title dropping to idle (`>`) while an unsuppressed async job was still running — a `/vibe` worker turn or a bash `async` job that re-wakes the director after it settles. `EventController.#handleAgentEnd` now skips the idle/loader teardown on a non-terminal `agent_end` (`isTerminal: false`) and only tears down at the true terminal settle ([#7386](https://github.com/can1357/oh-my-pi/issues/7386)).
-
-### Fixed
-
 - Fixed `omp setup python` to validate the same configured or discovered interpreter used by the Python eval runtime.
-
-
-### Fixed
-
 - Fixed self-update misclassifying glibc Linux hosts with an installed musl loader as musl hosts, which could download an unusable musl binary instead of the glibc release.
-
-### Fixed
-
 - Fixed a crash where opening the Agent Hub after a resume and moving the selection triggered an unbounded `ExtensionExitError` unhandled-rejection storm and exit 129. The postmortem module bound the native hard-exit at first evaluation; when the bundler deferred that evaluation into a `withHostGuard` window it froze the guard's throwing replacement, poisoning every later signal/fatal exit. The native exit is now resolved per call, and the guard stamps its replacement with the native primitive it shadows so mid-guard signals still exit ([#7393](https://github.com/can1357/oh-my-pi/issues/7393)).
-
-### Fixed
-
 - Fixed project-scoped session directories using leading-hyphen names and collapsing distinct paths such as `~/project/hail-mary` and `~/project-hail-mary` into one bucket; directory names now use a portable readable prefix plus the canonical cwd hash, and colliding legacy buckets are split by their recorded session cwd during migration ([#7396](https://github.com/can1357/oh-my-pi/issues/7396)).
-
-### Fixed
-
 - Fixed manual `/shake` leaving the context budget and next pre-turn compaction decision anchored to the stale pre-shake provider token count until another model response arrived.
+- Fixed Mnemopi scoped recall reporting "No relevant memories found" when every scoped target failed internally; target failures now warn, and total recall failure preserves the underlying engine error while healthy targets remain available ([#7364](https://github.com/can1357/oh-my-pi/issues/7364)).
+- Fixed `skill://` resolution ignoring explicitly configured `skills.customDirectories` entries when a same-named skill existed in a default discovery path: the custom-directory skill now wins as the higher-priority source ([#7190](https://github.com/can1357/oh-my-pi/issues/7190)).
+- Fixed image paste failing on Wayland-only Linux sessions by reading PNG clipboard payloads through `wl-paste` before falling back to the native bridge ([#7316](https://github.com/can1357/oh-my-pi/issues/7316)).
+- Fixed prewalk switching to the fast model during read-only investigation: `xd://` devices are dispatched through the `write` tool, so a read-only call such as an `lsp` navigation counted as the first edit/write and armed the one-way hand-off mid-planning. Device dispatches now carry the wrapped tool's approval tier and only trigger the switch at a `write`/`exec` tier — read-only `lsp`, `debug` inspection, and internal-URL `ast_edit` calls no longer downgrade the model ([#7312](https://github.com/can1357/oh-my-pi/issues/7312)).
 
 ## [17.2.4] - 2026-08-01
 
@@ -110,8 +72,6 @@
 
 ### Fixed
 
-- Fixed Mnemopi scoped recall reporting "No relevant memories found" when every scoped target failed internally; target failures now warn, and total recall failure preserves the underlying engine error while healthy targets remain available ([#7364](https://github.com/can1357/oh-my-pi/issues/7364)).
-
 - Fixed sessions without a granted `write` tool hiding discoverable and MCP tools behind the unusable `xd://` transport; those sessions now disable device mounting and expose the tools directly without gaining write access.
 - Fixed collab guest prompts being sent to models as unframed developer context, so guest messages now retain their transcript attribution while reaching the model as prioritized user interjections ([#7288](https://github.com/can1357/oh-my-pi/issues/7288)).
 - Fixed `/memory stats` and `/memory diagnose` showing "Memory stats is not available for the off backend" when memory is off, in both the TUI and ACP/RPC slash-command handlers; the off backend now says memory is off directly instead of naming itself as an unsupported backend ([#7251](https://github.com/can1357/oh-my-pi/pull/7251) by [@KennethHoff](https://github.com/KennethHoff)).
@@ -131,18 +91,6 @@
 - Fixed the auto-titler installing a model's whole answer as the session title when the tiny title model ignored the titling task and answered the first user message instead. `normalizeGeneratedTitle` now rejects overlong output (>80 chars or >12 words) so the caller defers titling to the next user turn rather than accepting a full sentence ([#7303](https://github.com/can1357/oh-my-pi/issues/7303)).
 - Fixed the in-process `kill` builtin to validate signals, preserve negative PID operands, signal every process in pipeline jobs, continue after bad targets, and refuse non-probe signals aimed at the host process or process group.
 
-### Fixed
-
-- Fixed `skill://` resolution ignoring explicitly configured `skills.customDirectories` entries when a same-named skill existed in a default discovery path: the custom-directory skill now wins as the higher-priority source ([#7190](https://github.com/can1357/oh-my-pi/issues/7190)).
-
-### Fixed
-
-- Fixed image paste failing on Wayland-only Linux sessions by reading PNG clipboard payloads through `wl-paste` before falling back to the native bridge ([#7316](https://github.com/can1357/oh-my-pi/issues/7316)).
-
-### Fixed
-
-- Fixed prewalk switching to the fast model during read-only investigation: `xd://` devices are dispatched through the `write` tool, so a read-only call such as an `lsp` navigation counted as the first edit/write and armed the one-way hand-off mid-planning. Device dispatches now carry the wrapped tool's approval tier and only trigger the switch at a `write`/`exec` tier — read-only `lsp`, `debug` inspection, and internal-URL `ast_edit` calls no longer downgrade the model ([#7312](https://github.com/can1357/oh-my-pi/issues/7312)).
-
 ## [17.2.3] - 2026-08-01
 
 ### Changed
@@ -156,10 +104,6 @@
 - Fixed ephemeral side turns and native compaction bypassing an explicit or fork-inherited prompt cache key ([#7218](https://github.com/can1357/oh-my-pi/issues/7218)).
 - Fixed the live Ask dialog crashing the whole session with a `replaceTabs` TypeError when a question reached `AskDialogComponent` without a string `question` field; questions are now normalized at dialog entry, mirroring the transcript renderer ([#7211](https://github.com/can1357/oh-my-pi/issues/7211)).
 - Fixed Codex web search collapsing backend errors to `Codex error (): Unknown error`; the SSE error parser now preserves the backend code and message from top-level, nested `error`, and `response.error` envelopes ([#7200](https://github.com/can1357/oh-my-pi/issues/7200)).
-
-### Changed
-
-- Reduced `omp --help` cold-start latency and memory use by rendering lightweight command metadata without loading every runtime command and provider graph.
 
 ## [17.2.2] - 2026-07-31
 

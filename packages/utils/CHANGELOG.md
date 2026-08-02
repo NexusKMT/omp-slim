@@ -6,6 +6,10 @@
 
 - Added `parseFlag()` (boolean-ish env value parsing backing `$flag()`), `getBrowserRelayDir()` (~/.omp/browser-relay, XDG data category), and `getGlobalDaemonRuntimeDir()` (profile-independent broker state) for the browser relay mode.
 
+### Changed
+
+- Added static command metadata support to the lightweight CLI runner so root help can render without importing command implementations.
+
 ## [17.2.4] - 2026-08-01
 
 ### Added
@@ -20,9 +24,6 @@
 ### Fixed
 
 - Fixed Bun test-runtime detection treating application-owned `NODE_ENV=test` and `BUN_ENV=test` values as test-runner signals ([#7261](https://github.com/can1357/oh-my-pi/issues/7261)).
-### Changed
-
-- Added static command metadata support to the lightweight CLI runner so root help can render without importing command implementations.
 
 ## [17.2.1] - 2026-07-30
 
