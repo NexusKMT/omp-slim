@@ -380,6 +380,50 @@ describe("browser tab-supervisor — cmux tab close mid-run (#4499)", () => {
 		await expect(run).rejects.toThrow("Unhandled rejection (missing await?): navigation failed");
 	});
 
+	it("aborts the cmux run facade before draining floated continuations", async () => {
+		spyOn(CmuxSocketClient.prototype, "connect").mockResolvedValue(undefined);
+		spyOn(CmuxSocketClient.prototype, "close").mockImplementation(() => undefined);
+		const navigatedUrls: string[] = [];
+		spyOn(CmuxSocketClient.prototype, "request").mockImplementation(
+			async (method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> => {
+				switch (method) {
+					case "browser.open_split":
+						return { surface_id: "surface-drain-abort", url: "about:blank" };
+					case "browser.url.get":
+						return { url: "about:blank" };
+					case "browser.snapshot":
+						return { page: { html: "" } };
+					case "browser.eval":
+						await Bun.sleep(0);
+						return { value: "ready" };
+					case "browser.navigate":
+						navigatedUrls.push(String(params.url));
+						return { url: params.url };
+					default:
+						return {};
+				}
+			},
+		);
+		const browser = await acquireBrowser(makeKind("drain-abort"), { cwd: "/tmp" });
+		await acquireTab("drain-abort", browser, {
+			timeoutMs: 5_000,
+			ownerSessionId: "session-drain-abort",
+		});
+
+		const result = await runInTab("drain-abort", {
+			code: `
+				void tab.title().then(() => tab.goto("https://late.example"));
+				return "completed";
+			`,
+			timeoutMs: 5_000,
+			session: makeSession("/tmp"),
+		});
+		expect(result.returnValue).toBe("completed");
+
+		await Bun.sleep(20);
+		expect(navigatedUrls).toEqual([]);
+	});
+
 	it("ignores the daemon screenshot path when no screenshot directory is configured", async () => {
 		spyOn(CmuxSocketClient.prototype, "connect").mockResolvedValue(undefined);
 		spyOn(CmuxSocketClient.prototype, "close").mockImplementation(() => undefined);

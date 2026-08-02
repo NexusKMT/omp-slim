@@ -381,6 +381,43 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser tab evaluation", () => {
 		}
 	}, 30_000);
 
+	it("aborts the run facade before draining floated continuations", async () => {
+		const tool = new BrowserTool(makeSession());
+		const name = `drain-abort-${process.pid}`;
+		const url = "data:text/html,<title>original</title><h1>ready</h1>";
+
+		try {
+			await tool.execute("open", {
+				action: "open",
+				name,
+				url,
+			});
+			const result = await tool.execute("run", {
+				action: "run",
+				name,
+				code: `
+					page.title = async () => {
+						await Bun.sleep(0);
+						return "ready";
+					};
+					void tab.title().then(() => tab.goto("data:text/html,<title>late</title>"));
+					return "completed";
+				`,
+			});
+			expect(result.content).toEqual([{ type: "text", text: "completed" }]);
+
+			await Bun.sleep(100);
+			const followup = await tool.execute("run", {
+				action: "run",
+				name,
+				code: "return tab.url();",
+			});
+			expect(followup.content).toEqual([{ type: "text", text: url }]);
+		} finally {
+			await tool.execute("close", { action: "close", name, kill: true });
+		}
+	}, 30_000);
+
 	it("folds a user continuation rejection that settles during cleanup", async () => {
 		const tool = new BrowserTool(makeSession());
 		const name = `cleanup-continuation-rejection-${process.pid}`;

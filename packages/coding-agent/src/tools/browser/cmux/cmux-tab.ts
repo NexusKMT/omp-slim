@@ -1377,6 +1377,7 @@ export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promi
 	const signal = AbortSignal.any(
 		opts.signal ? [timeoutSignal, opts.signal, runAc.signal] : [timeoutSignal, runAc.signal],
 	);
+	const runEndedError = postmortem.markExpectedCleanupError(new ToolAbortError("Browser run ended"));
 	const output = new RunOutput();
 	const screenshots: ScreenshotResult[] = [];
 	const runId = crypto.randomUUID();
@@ -1495,6 +1496,7 @@ export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promi
 			runFailed = true;
 			runError = error;
 		}
+		runAc.abort(runEndedError);
 		// Let rejection callbacks run while this run can still own guest-created promises.
 		await Bun.sleep(0);
 		if (hasFloatingFailure && !runFailed) await floatingFailure;
@@ -1517,7 +1519,7 @@ export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promi
 		runActive = false;
 		uninstallRejectionInterceptor();
 		signal.removeEventListener("abort", onAbort);
-		runAc.abort(postmortem.markExpectedCleanupError(new ToolAbortError("Browser run ended")));
+		runAc.abort(runEndedError);
 		activeCmuxRuns.delete(filename);
 		rememberCmuxRunFile(filename);
 		tab.clearRunContext();

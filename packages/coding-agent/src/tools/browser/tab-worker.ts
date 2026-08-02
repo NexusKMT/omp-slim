@@ -1145,8 +1145,8 @@ export class WorkerCore {
 		} catch (error) {
 			failure = { error };
 		} finally {
-			await Bun.sleep(0);
 			runAc.abort(postmortem.markExpectedCleanupError(new ToolAbortError("Browser run ended")));
+			await Bun.sleep(0);
 			try {
 				await runPage?.cleanup();
 			} catch (error) {
