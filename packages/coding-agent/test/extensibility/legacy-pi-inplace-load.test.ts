@@ -1082,6 +1082,47 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 		expect(loadValue()).toBe("lazy-nested-ok");
 	});
 
+	it("rewalks an ESM graph when a later require upgrades it to synchronous loading", async () => {
+		const dir = await writePackage({
+			"package.json": JSON.stringify({ name: "sync-upgrade-ext", version: "1.0.0", type: "module" }),
+			"node_modules/cjs-parent/package.json": JSON.stringify({
+				name: "cjs-parent",
+				version: "1.0.0",
+				main: "index.js",
+			}),
+			"node_modules/cjs-parent/index.js": 'module.exports = { load: () => require("shared").default };',
+			"node_modules/shared/package.json": JSON.stringify({
+				name: "shared",
+				version: "1.0.0",
+				type: "module",
+				main: "index.js",
+			}),
+			"node_modules/shared/index.js": 'import { value } from "shared-leaf"; export default value;',
+			"node_modules/shared-leaf/package.json": JSON.stringify({
+				name: "shared-leaf",
+				version: "1.0.0",
+				type: "module",
+				main: "index.js",
+			}),
+			"node_modules/shared-leaf/index.js": 'export const value = "sync-upgrade-ok";',
+			"index.ts": [
+				'import parent from "cjs-parent";',
+				'import type { Marker } from "shared";',
+				"export const loadValue = parent.load;",
+				"export type SharedMarker = Marker;",
+				"export default function (pi) { void pi; }",
+			].join("\n"),
+		});
+
+		const mod = await loadLegacyPiModule(path.join(dir, "index.ts"));
+		const loadValue = Reflect.get(Object(mod), "loadValue");
+		if (typeof loadValue !== "function") {
+			throw new Error("sync-upgrade fixture did not export loadValue");
+		}
+
+		expect(loadValue()).toBe("sync-upgrade-ok");
+	});
+
 	it("chooses the ESM branch when dual package graphs converge", async () => {
 		const dir = await writePackage({
 			"package.json": JSON.stringify({ name: "dual-convergence-ext", version: "1.0.0", type: "module" }),

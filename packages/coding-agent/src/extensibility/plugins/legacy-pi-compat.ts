@@ -1970,6 +1970,7 @@ async function collectExtensionModules(entryRealPath: string): Promise<Extension
 				let resolvedEsmBranch = false;
 				let requiresNativeAddonRewrite = false;
 				let requiresSynchronousSourceHook = false;
+				let synchronousSourceUpgraded = false;
 				const isRequired = reference.kind === "require";
 				if (specifier.startsWith(".")) {
 					const candidate = isRequired
@@ -2068,6 +2069,7 @@ async function collectExtensionModules(entryRealPath: string): Promise<Extension
 						requiresSynchronousSourceHook ||
 						(synchronousSourcePaths.has(file) && resolvedModuleKind === "esm"))
 				) {
+					synchronousSourceUpgraded = !synchronousSourcePaths.has(resolved);
 					synchronousSourcePaths.add(resolved);
 				}
 				if (resolved) {
@@ -2088,7 +2090,7 @@ async function collectExtensionModules(entryRealPath: string): Promise<Extension
 					if (mergedEsmBranch) {
 						queuedEsmBranchPaths.add(resolved);
 					}
-					if (modules.has(resolved) && queuedModuleKind !== mergedModuleKind) {
+					if (modules.has(resolved) && (queuedModuleKind !== mergedModuleKind || synchronousSourceUpgraded)) {
 						modules.delete(resolved);
 						commonJsPaths.delete(resolved);
 					}
