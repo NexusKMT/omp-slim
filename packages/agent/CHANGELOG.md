@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The error→toolUse salvage in the agent loop (`recoverTransientErrorToolTurn`) now recognizes Anthropic stream-envelope truncation errors, so a turn cut after streaming complete tool calls runs those calls instead of ending the run with an error.
+
 ## [17.2.4] - 2026-08-01
 
 ### Fixed

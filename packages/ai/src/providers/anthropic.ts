@@ -2563,7 +2563,22 @@ const streamAnthropicOnce = (
 					if (!sawEvent || !sawMessageStart) {
 						throw new AIError.AnthropicStreamEnvelopeError("stream ended before message_start");
 					}
+					if (!sawTerminalEnvelope) {
+						// Neither a message_delta stop_reason nor message_stop arrived: the
+						// connection died mid-generation. Finalizing the partial message as
+						// a clean "stop" would make the agent loop treat the truncated turn
+						// as complete (silent mid-sentence halt), so fail the turn. The
+						// envelope error is transparently retried before replay-unsafe
+						// content streams; afterwards it surfaces as an error turn whose
+						// complete tool calls the agent loop salvages
+						// (`recoverTransientErrorToolTurn` recognizes the envelope-error
+						// text and `retainCompletedToolCalls` drops half-streamed calls).
+						throw new AIError.AnthropicStreamEnvelopeError("stream ended before message_stop");
+					}
 					if (!sawMessageStop) {
+						// A stop_reason arrived via message_delta, so generation finished;
+						// only the trailing message_stop frame is missing (non-conforming
+						// gateway). Degrade to best-effort instead of discarding the turn.
 						reportAnthropicEnvelopeAnomaly("stream ended before message_stop");
 					}
 					if (openBlocks.size > 0) {

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Anthropic streams truncated mid-generation (connection closed with neither a `message_delta` stop_reason nor a `message_stop` frame) finalizing the partial message as a clean `stop`, which made the agent loop treat a truncated turn as complete and halt silently mid-sentence. Such streams raise the stream-envelope error again: transparently retried before replay-unsafe content streams; afterwards the turn surfaces as an error whose complete tool calls the agent loop still runs (`recoverTransientErrorToolTurn` now recognizes the envelope-error text after `retainCompletedToolCalls` drops half-streamed calls). Streams that delivered a `stop_reason` (or `message_stop`) keep degrading to best-effort content when the other terminal frame is missing.
+
 ## [17.2.4] - 2026-08-01
 
 ### Fixed
