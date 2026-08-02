@@ -34,7 +34,7 @@ describe("skill:// resolution honors skills.customDirectories (#7190)", () => {
 		tempDirs.push(tempDir);
 		const skillDir = path.join(tempDir, "my-custom-skill");
 		await fs.mkdir(skillDir, { recursive: true });
-		await fs.writeFile(path.join(skillDir, "SKILL.md"), makeSkillMd("my-custom-skill", tempDir));
+		await Bun.write(path.join(skillDir, "SKILL.md"), makeSkillMd("my-custom-skill", tempDir));
 
 		const { skills } = await loadSkills({
 			...ALL_DEFAULT_SOURCES_DISABLED,
@@ -57,8 +57,8 @@ describe("skill:// resolution honors skills.customDirectories (#7190)", () => {
 		const skillB = path.join(dirB, "same-name");
 		await fs.mkdir(skillA, { recursive: true });
 		await fs.mkdir(skillB, { recursive: true });
-		await fs.writeFile(path.join(skillA, "SKILL.md"), makeSkillMd("same-name", dirA));
-		await fs.writeFile(path.join(skillB, "SKILL.md"), makeSkillMd("same-name", dirB));
+		await Bun.write(path.join(skillA, "SKILL.md"), makeSkillMd("same-name", dirA));
+		await Bun.write(path.join(skillB, "SKILL.md"), makeSkillMd("same-name", dirB));
 
 		const { skills, warnings } = await loadSkills({
 			...ALL_DEFAULT_SOURCES_DISABLED,
@@ -86,12 +86,12 @@ describe("skill:// resolution honors skills.customDirectories (#7190)", () => {
 		// A default discovery path (Claude project skills) claims the name first.
 		const defaultSkill = path.join(cwd, ".claude", "skills", "shared-name");
 		await fs.mkdir(defaultSkill, { recursive: true });
-		await fs.writeFile(path.join(defaultSkill, "SKILL.md"), makeSkillMd("shared-name", "default"));
+		await Bun.write(path.join(defaultSkill, "SKILL.md"), makeSkillMd("shared-name", "default"));
 
 		// The explicitly configured custom directory holds the same name.
 		const customSkill = path.join(customDir, "shared-name");
 		await fs.mkdir(customSkill, { recursive: true });
-		await fs.writeFile(path.join(customSkill, "SKILL.md"), makeSkillMd("shared-name", "custom"));
+		await Bun.write(path.join(customSkill, "SKILL.md"), makeSkillMd("shared-name", "custom"));
 
 		const { skills } = await loadSkills({
 			cwd,
