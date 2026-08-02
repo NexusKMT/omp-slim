@@ -46,6 +46,20 @@ describe("composeSpawnAdvisory", () => {
 		expect(advisory).toContain("Coordinate:");
 	});
 
+	it("drops the scout example from the specialization tip when scout is unavailable", () => {
+		const advisory = composeSpawnAdvisory({
+			agents: ["task", "task"],
+			items: [worker(), worker()],
+			depthCapacity: true,
+			ircEnabled: true,
+			willRunAsync: true,
+			scoutAvailable: false,
+		});
+		expect(advisory).toContain("generic");
+		expect(advisory).not.toContain("scout");
+		expect(advisory).toContain("Coordinate:");
+	});
+
 	it("drops the coordination suggestion on the sync path but keeps the specialization tip", () => {
 		const advisory = composeSpawnAdvisory({
 			agents: ["task", "task"],

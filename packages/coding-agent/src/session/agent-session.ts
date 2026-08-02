@@ -518,6 +518,7 @@ export class AgentSession {
 	// Agent identity (registry id) used for IRC routing and job ownership.
 	#agentId: string | undefined;
 	#agentKind: "main" | "sub" = "main";
+	#scoutAvailable = true;
 	#providerSessionId: string | undefined;
 	#freshProviderSessionId: string | undefined;
 	#inheritedProviderPromptCacheKey: string | undefined;
@@ -1237,6 +1238,7 @@ export class AgentSession {
 		this.#loopGuards = new LoopGuards(streamGuardsHost);
 		this.#agentId = config.agentId;
 		this.#agentKind = config.agentKind ?? "main";
+		this.#scoutAvailable = config.scoutAvailable ?? true;
 		this.#providerSessionId = config.providerSessionId;
 		this.#inheritedProviderPromptCacheKey =
 			config.providerPromptCacheKeySource === "fork" ? this.agent.promptCacheKey : undefined;
@@ -4658,6 +4660,7 @@ export class AgentSession {
 			isHashlineEditMode: this.#resolveActiveEditMode() === "hashline",
 			reentry: state.reentry ?? false,
 			iterative: state.workflow === "iterative",
+			scoutAvailable: this.#scoutAvailable,
 		});
 
 		return {
@@ -4789,7 +4792,10 @@ export class AgentSession {
 				keywordNotices.push({
 					role: "custom",
 					customType: "workflow-notice",
-					content: renderWorkflowNotice({ taskBatch: this.settings.get("task.batch") }),
+					content: renderWorkflowNotice({
+						taskBatch: this.settings.get("task.batch"),
+						scoutAvailable: this.#scoutAvailable,
+					}),
 					display: false,
 					attribution: "user",
 					timestamp,
