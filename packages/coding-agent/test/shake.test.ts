@@ -201,6 +201,41 @@ describe("AgentSession shake", () => {
 			).toBeUndefined();
 		});
 
+		it("does not subtract remote-compacted entries omitted from the provider prompt", async () => {
+			seedHeavyToolResult("X".repeat(20_000));
+			const firstKeptEntryId = sessionManager.getBranch()[0]?.id;
+			if (!firstKeptEntryId) throw new Error("Expected seeded branch");
+			sessionManager.appendCompaction("remote summary", undefined, firstKeptEntryId, 10_000, {}, false, {
+				openaiRemoteCompaction: {
+					provider: "openai",
+					replacementHistory: [],
+				},
+			});
+			sessionManager.appendMessage({
+				role: "assistant",
+				content: [{ type: "text", text: "post-compaction" }],
+				...apiInfo,
+				stopReason: "stop",
+				usage: { ...usage, input: 20_000, totalTokens: 20_008 },
+				timestamp: Date.now(),
+			});
+			session.agent.replaceMessages(session.buildDisplaySessionContext().messages);
+			expect(session.getContextUsage()?.tokens).toBe(20_000);
+
+			const result = await session.shake("elide");
+
+			expect(result.tokensFreed).toBeGreaterThan(0);
+			expect(session.getContextUsage()?.tokens).toBe(20_000);
+			const anchor = sessionManager
+				.getBranch()
+				.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
+			expect(
+				anchor?.type === "message" && anchor.message.role === "assistant"
+					? anchor.message.contextSnapshot?.historyRewriteTokensRemoved
+					: undefined,
+			).toBeUndefined();
+		});
+
 		it("returns zero counts for an empty branch", async () => {
 			const result = await session.shake("elide");
 			expect(result.toolResultsDropped).toBe(0);
