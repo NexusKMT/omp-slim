@@ -28,6 +28,7 @@ import {
 	estimateTokens,
 	NativeCompactionError,
 	prepareCompaction,
+	RESCUE_SHAKE_CONFIG,
 	resolveBudgetReserveTokens,
 	resolveThresholdTokens,
 	type ShakeConfig,
@@ -1859,7 +1860,7 @@ export class SessionMaintenance {
 		let elideSink = "placeholders";
 		if (!options.skipElide) {
 			try {
-				const result = await this.#host.shake("elide", { signal });
+				const result = await this.#host.shake("elide", { config: RESCUE_SHAKE_CONFIG, signal });
 				elided = result.toolResultsDropped + result.blocksDropped;
 				elidedTokens = result.tokensFreed;
 				if (result.artifactId) elideSink = "an artifact";

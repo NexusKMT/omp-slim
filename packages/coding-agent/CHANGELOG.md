@@ -26,6 +26,9 @@
 - Fixed macOS background keyboard input silently reaching a different window in the same application; ambiguous multi-window delivery now fails with `BackgroundUnavailable`, and foreground retries establish the addressed window as the app's main/focused window before typing.
 - Fixed macOS Chrome accessibility snapshots exposing only browser chrome by activating Chromium's renderer accessibility tree before resolving a window.
 - Fixed unnamed macOS accessibility controls such as Chrome's Back, Forward, and Reload buttons by using `AXDescription` when `AXTitle` is empty in snapshots and title queries.
+### Fixed
+
+- Fixed shake re-eliding artifact recovery reads into a new artifact indefinitely.
 
 ## [17.2.4] - 2026-08-01
 

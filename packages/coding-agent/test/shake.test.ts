@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import { scheduler } from "node:timers/promises";
-import { Agent, type AgentMessage } from "@oh-my-pi/pi-agent-core";
+import { Agent, type AgentMessage, RESCUE_SHAKE_CONFIG } from "@oh-my-pi/pi-agent-core";
 import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, ImageContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -150,6 +150,62 @@ describe("AgentSession shake", () => {
 			seedHeavyToolResult("S".repeat(4000), "skill");
 			const result = await session.shake("elide");
 			expect(result.toolResultsDropped).toBe(0);
+		});
+
+		/** Seed a user → assistant(read toolCall) → toolResult turn recovering an artifact. */
+		function seedArtifactRecoveryResult(text: string, args: Record<string, unknown>, details?: unknown): void {
+			const toolCallId = `call_read_${Math.random().toString(36).slice(2)}`;
+			sessionManager.appendMessage({
+				role: "user",
+				content: [{ type: "text", text: "recover it" }],
+				timestamp: Date.now() - 3,
+			});
+			sessionManager.appendMessage({
+				role: "assistant",
+				content: [
+					{ type: "text", text: "recovering" },
+					{ type: "toolCall", id: toolCallId, name: "read", arguments: args },
+				],
+				...apiInfo,
+				stopReason: "toolUse",
+				usage,
+				timestamp: Date.now() - 2,
+			});
+			sessionManager.appendMessage({
+				role: "toolResult",
+				toolCallId,
+				toolName: "read",
+				content: [{ type: "text", text }],
+				...(details === undefined ? {} : { details }),
+				isError: false,
+				timestamp: Date.now() - 1,
+			});
+		}
+
+		it("rescue config never re-elides artifact recovery reads, by path or by source meta", async () => {
+			seedArtifactRecoveryResult("R".repeat(4000), { path: "artifact://0" });
+			seedArtifactRecoveryResult(
+				"F".repeat(4000),
+				{ path: "/tmp/artifacts/3.shake.log" },
+				{
+					meta: { source: { type: "internal", value: "artifact://3" } },
+				},
+			);
+			const result = await session.shake("elide", { config: RESCUE_SHAKE_CONFIG });
+			expect(result.toolResultsDropped).toBe(0);
+			const texts = branchToolResults().map(m => (m.content[0] as { text: string }).text);
+			expect(texts.some(t => t.startsWith("R"))).toBe(true);
+			expect(texts.some(t => t.startsWith("F"))).toBe(true);
+		});
+
+		it("rescue config still elides ordinary oversized results", async () => {
+			seedHeavyToolResult("B".repeat(4000));
+			seedArtifactRecoveryResult("R".repeat(4000), { path: "artifact://0" });
+			const result = await session.shake("elide", { config: RESCUE_SHAKE_CONFIG });
+			expect(result.toolResultsDropped).toBe(1);
+			const texts = branchToolResults().map(m => (m.content[0] as { text: string }).text);
+			expect(texts.some(t => t.startsWith("B"))).toBe(false);
+			expect(texts.some(t => t.startsWith("R"))).toBe(true);
 		});
 	});
 
