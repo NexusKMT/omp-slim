@@ -1454,6 +1454,15 @@ export class EventController {
 		}
 	}
 	async #handleAgentEnd(event: Extract<AgentSessionEvent, { type: "agent_end" }>): Promise<void> {
+		// A non-terminal settle (`isTerminal: false`) is a scheduling pause, not the
+		// end of the run: an unsuppressed async job (a `/vibe` worker turn, a bash
+		// `async` job, etc.) will re-wake the loop when its result is delivered.
+		// `AgentSession` tags this on the deferred event (see `#hasPendingAsyncWake`
+		// in agent-session.ts); flipping the title to `idle` and tearing down the
+		// loader here would make the tab read idle while work is still running. The
+		// later terminal `agent_end` performs the normal teardown. Mirrors the same
+		// guard already used by `#appendFinalResponse` and `sendErrorNotification`.
+		if (event.isTerminal === false) return;
 		// A superseded agent_end: the agent is already streaming a fresh turn, so
 		// this event belongs to a turn that has already been replaced. The session
 		// dispatches to listeners fire-and-forget across an async extension-emit hop
