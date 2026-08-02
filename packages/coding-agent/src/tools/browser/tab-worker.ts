@@ -792,7 +792,14 @@ export class WorkerCore {
 	}
 
 	#recordFloatingRejection(active: ActiveRun, reason: unknown): void {
-		if (this.#active !== active || postmortem.isExpectedCleanupError(reason)) return;
+		if (postmortem.isExpectedCleanupError(reason)) return;
+		if (this.#active !== active) {
+			this.#log("warn", "Unhandled rejection after browser run ended", {
+				runId: active.id,
+				error: reason instanceof Error ? reason.message : String(reason),
+			});
+			return;
+		}
 		const isFirst = active.floatingRejections.length === 0;
 		active.floatingRejections.push(reason);
 		if (isFirst) active.floatingFailure.reject(this.#floatingRejectionError(reason));

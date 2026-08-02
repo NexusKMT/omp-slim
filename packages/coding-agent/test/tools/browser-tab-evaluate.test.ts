@@ -1,8 +1,9 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import { BrowserTool } from "@oh-my-pi/pi-coding-agent/tools/browser";
 import { getTabsMapForTest } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
+import * as logger from "@oh-my-pi/pi-utils/logger";
 import { chromiumAvailable } from "./chromium-probe";
 
 const CHROMIUM_AVAILABLE = await chromiumAvailable();
@@ -303,6 +304,44 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser tab evaluation", () => {
 			});
 			expect(followup.content).toEqual([{ type: "text", text: "42" }]);
 		} finally {
+			await tool.execute("close", { action: "close", name, kill: true });
+		}
+	}, 30_000);
+
+	it("logs a user continuation rejection after its browser run ends", async () => {
+		const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+		const tool = new BrowserTool(makeSession());
+		const name = `late-continuation-rejection-${process.pid}`;
+
+		try {
+			await tool.execute("open", {
+				action: "open",
+				name,
+				url: "data:text/html,<h1>ready</h1>",
+			});
+			const result = await tool.execute("run", {
+				action: "run",
+				name,
+				code: `
+					const continuationStarted = Promise.withResolvers();
+					void tab.title().then(async () => {
+						continuationStarted.resolve();
+						await Bun.sleep(50);
+						throw new Error("late continuation failed");
+					});
+					await continuationStarted.promise;
+					return "completed";
+				`,
+			});
+			expect(result.content).toEqual([{ type: "text", text: "completed" }]);
+
+			await Bun.sleep(150);
+			expect(warn).toHaveBeenCalledWith("Unhandled rejection after browser run ended", {
+				runId: expect.any(String),
+				error: "late continuation failed",
+			});
+		} finally {
+			warn.mockRestore();
 			await tool.execute("close", { action: "close", name, kill: true });
 		}
 	}, 30_000);
