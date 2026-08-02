@@ -5,7 +5,7 @@ import type {
 	AgentToolUpdateCallback,
 	ToolApprovalDecision,
 } from "@oh-my-pi/pi-agent-core";
-import type { ComputerAction, ComputerSafetyCheck, ComputerToolCallMetadata, Model } from "@oh-my-pi/pi-ai";
+import type { ComputerAction, Model } from "@oh-my-pi/pi-ai";
 import { isClaudeModelId } from "@oh-my-pi/pi-catalog/identity";
 import type {
 	DesktopAction,
@@ -13,6 +13,7 @@ import type {
 	DesktopCapture,
 	DesktopDisplay,
 	DesktopSessionOptions,
+	DesktopWindow,
 } from "@oh-my-pi/pi-natives";
 import { once, prompt, sanitizeText } from "@oh-my-pi/pi-utils";
 import { type Type, type } from "arktype";
@@ -74,7 +75,9 @@ type ComputerSchemaAction = {
 	text?: string;
 };
 
+/** Parameters for listing targets or one window-targeted capture/action batch. */
 export type ComputerParams = {
+	window?: string;
 	actions?: ComputerSchemaAction[];
 };
 
@@ -116,17 +119,23 @@ const getComputerSchema: () => ComputerSchema = once(() => {
 	});
 
 	const computerSchema = type({
+		"window?": type("string").describe(
+			"capture target: omit to list windows without a screenshot, use 'desktop' for all selected displays, or pass an id from the preceding list",
+		),
 		"actions?": computerActionSchema
 			.array()
-			.describe("ordered actions executed as one batch; omit or pass [] to just capture a screenshot"),
+			.describe("ordered actions executed as one batch; requires window; omit or pass [] to just capture it"),
 		"+": "reject",
 	});
 	return computerSchema satisfies ComputerSchema<typeof computerSchema>;
 });
 
+/** Window-list or native capture metadata shown with each computer result. */
 export interface ComputerToolDetails {
-	width: number;
-	height: number;
+	width?: number;
+	height?: number;
+	window?: string;
+	windows: DesktopWindow[];
 	backend: DesktopCapture["backend"];
 	displayServer?: string;
 	capturePermission: string;
@@ -144,6 +153,46 @@ function isInt32(value: unknown): value is number {
 
 function isCoordinate(value: unknown): value is number {
 	return isInt32(value) && value >= 0;
+}
+
+function parseWindow(value: unknown): string {
+	if (typeof value !== "string" || value.trim().length === 0) {
+		throw new ToolError("Computer call requires a window target");
+	}
+	const normalized = value.trim();
+	if (normalized.toLowerCase() === "desktop") return "desktop";
+	if (!/^\d+$/.test(normalized)) {
+		throw new ToolError("Computer window must be 'desktop' or a numeric id from the preceding result");
+	}
+	const id = normalized.replace(/^0+/, "");
+	if (id.length === 0 || id.length > 10 || (id.length === 10 && id > "4294967295")) {
+		throw new ToolError("Computer window id must be between 1 and 4294967295");
+	}
+	return id;
+}
+
+function windowList(windows: readonly DesktopWindow[]): string {
+	const lines = ["Window targets (pass the id as `window`):", "- desktop — Desktop"];
+	for (const window of windows) {
+		const identity = [window.app, window.title].filter(Boolean).join(" — ") || "Untitled";
+		const focused = window.focused ? " · focused" : "";
+		const line = `- ${window.id} — ${identity} · ${window.width}×${window.height} at ${window.x},${window.y}${focused}`;
+		lines.push(truncateForPrompt(sanitizeText(line).replace(/[\r\n\t]+/g, " "), 240));
+	}
+	return lines.join("\n");
+}
+
+function captureSummary(capture: DesktopCapture): string {
+	const dimensions = `${capture.width}×${capture.height}`;
+	let line = `Captured desktop · ${dimensions}`;
+	if (capture.target !== "desktop") {
+		const window = capture.windows.find(candidate => candidate.id === capture.target);
+		const identity = window ? [window.app, window.title].filter(Boolean).join(" — ") : "";
+		line = identity
+			? `Captured ${capture.target} — ${identity} · ${dimensions}`
+			: `Captured ${capture.target} · ${dimensions}`;
+	}
+	return truncateForPrompt(sanitizeText(line).replace(/[\r\n\t]+/g, " "), 240);
 }
 
 type AllowedFields = Record<string, true>;
@@ -335,11 +384,6 @@ function toDesktopAction(action: ComputerAction): DesktopAction {
 	}
 }
 
-function callMetadata(context: AgentToolContext | undefined): ComputerToolCallMetadata | undefined {
-	const metadata = context?.toolCall?.providerMetadata;
-	return metadata?.type === "computer" ? metadata : undefined;
-}
-
 export function computerApproval(args: unknown): ToolApprovalDecision {
 	const actions =
 		args && typeof args === "object" && "actions" in args ? (args as { actions?: unknown }).actions : undefined;
@@ -402,19 +446,25 @@ function approvalActionSummary(actions: unknown): string[] {
 
 export class ComputerTool implements AgentTool<ComputerSchema, ComputerToolDetails> {
 	readonly name = "computer";
-	readonly native = { type: "computer" } as const;
 	readonly label = "Computer";
 	readonly loadMode = "essential" as const;
 	readonly concurrency = "exclusive" as const;
-	readonly summary = "Capture and control the host desktop through native OS APIs";
+	readonly summary = "Capture and control host windows or the full Desktop through native OS APIs";
 	get parameters(): ComputerSchema {
 		return getComputerSchema();
 	}
 	readonly strict = false;
 	readonly approval = computerApproval;
 	readonly formatApprovalDetails = (args: unknown): string[] => {
-		const actions = args && typeof args === "object" ? (args as { actions?: unknown }).actions : undefined;
-		return approvalActionSummary(actions);
+		const record = args && typeof args === "object" ? (args as { window?: unknown; actions?: unknown }) : undefined;
+		if (
+			record?.window === undefined &&
+			(record?.actions == null || (Array.isArray(record.actions) && record.actions.length === 0))
+		) {
+			return ["list windows"];
+		}
+		const actions = approvalActionSummary(record?.actions);
+		return typeof record?.window === "string" ? [`window=${record.window}`, ...actions] : actions;
 	};
 	/**
 	 * Settings snapshot used to create the tool's current controller; refreshed
@@ -467,26 +517,50 @@ export class ComputerTool implements AgentTool<ComputerSchema, ComputerToolDetai
 		params: ComputerParams,
 		signal?: AbortSignal,
 		_onUpdate?: AgentToolUpdateCallback<ComputerToolDetails>,
-		context?: AgentToolContext,
+		_context?: AgentToolContext,
 	): Promise<AgentToolResult<ComputerToolDetails>> {
 		throwIfAborted(signal);
 		if (this.#closed) throw new ToolError("Computer session is closed");
-		const metadata = callMetadata(context);
-		const actions = parseActions(metadata?.actions ?? params.actions);
-		const pendingSafetyChecks: ComputerSafetyCheck[] = metadata?.pendingSafetyChecks ?? [];
-		if (pendingSafetyChecks.length > 0 && context?.providerSafetyApproved !== true) {
-			throw new ToolError("Provider safety checks require interactive approval before computer input");
+		if (params.window === undefined) {
+			if (params.actions != null && (!Array.isArray(params.actions) || params.actions.length > 0)) {
+				throw new ToolError("Computer actions require a window target");
+			}
+			await this.#refreshControllerForModel();
+			throwIfAborted(signal);
+			const windows = await this.#controller.list(signal);
+			throwIfAborted(signal);
+			const capabilities = this.#controller.capabilities;
+			return {
+				content: [{ type: "text", text: windowList(windows) }],
+				details: {
+					windows,
+					backend: capabilities?.backend ?? "unavailable",
+					displayServer: capabilities?.displayServer,
+					capturePermission: capabilities?.capturePermission ?? "unavailable",
+					inputPermission: capabilities?.inputPermission ?? "unavailable",
+					displays: [],
+					capabilities,
+					actions: [],
+				},
+			};
 		}
+		const window = parseWindow(params.window);
+		const actions = parseActions(params.actions);
 		await this.#refreshControllerForModel();
 		throwIfAborted(signal);
-		const capture = await this.#controller.execute(actions.map(toDesktopAction), signal);
+		const capture = await this.#controller.execute(window, actions.map(toDesktopAction), signal);
 		throwIfAborted(signal);
 		const data = Buffer.from(capture.data).toBase64();
 		return {
-			content: [{ type: "image", data, mimeType: "image/png", detail: "original" }],
+			content: [
+				{ type: "text", text: captureSummary(capture) },
+				{ type: "image", data, mimeType: "image/png", detail: "original" },
+			],
 			details: {
 				width: capture.width,
 				height: capture.height,
+				window: capture.target,
+				windows: capture.windows,
 				backend: capture.backend,
 				displayServer: capture.displayServer,
 				capturePermission: capture.capturePermission,
@@ -495,15 +569,6 @@ export class ComputerTool implements AgentTool<ComputerSchema, ComputerToolDetai
 				capabilities: this.#controller.capabilities,
 				actions: actions.map(action => action.type),
 			},
-			...(metadata
-				? {
-						providerMetadata: {
-							type: "computer" as const,
-							screenshot: { type: "computer_screenshot" as const, image_url: `data:image/png;base64,${data}` },
-							acknowledgedSafetyChecks: pendingSafetyChecks,
-						},
-					}
-				: {}),
 		};
 	}
 

@@ -8,8 +8,6 @@ function acpRuntime(options?: {
 	applyResult?: boolean;
 	supportsComputerUse?: boolean;
 	codex?: boolean;
-	azure?: boolean;
-	baseUrl?: string;
 }) {
 	const store = {
 		"computer.enabled": options?.enabled ?? false,
@@ -47,27 +45,19 @@ function acpRuntime(options?: {
 		controllerConfiguration ? { name: "computer", effectiveConfiguration: controllerConfiguration } : undefined,
 	);
 	const output = vi.fn();
-	const model = options?.azure
+	const model = options?.codex
 		? {
-				provider: "azure",
-				id: "gpt-5.5",
-				api: "azure-openai-responses",
-				baseUrl: options.baseUrl ?? "",
+				provider: "openai-codex",
+				id: "gpt-5.6-sol",
+				api: "openai-codex-responses",
 				supportsComputerUse: options.supportsComputerUse ?? false,
 			}
-		: options?.codex
-			? {
-					provider: "openai-codex",
-					id: "gpt-5.6-sol",
-					api: "openai-codex-responses",
-					supportsComputerUse: options.supportsComputerUse ?? false,
-				}
-			: {
-					provider: "google",
-					id: "gemini-2.5-flash",
-					api: "google-generative-ai",
-					supportsComputerUse: options?.supportsComputerUse ?? false,
-				};
+		: {
+				provider: "google",
+				id: "gemini-2.5-flash",
+				api: "google-generative-ai",
+				supportsComputerUse: options?.supportsComputerUse ?? false,
+			};
 	const runtime = {
 		session: {
 			settings: { get, override, set },
@@ -153,31 +143,14 @@ describe("/computer slash command", () => {
 		);
 	});
 
-	it("reports explicit Codex native opt-in without masking the override", async () => {
+	it("reports native-capable Codex computer exposure as a callable function", async () => {
 		const h = acpRuntime({ enabled: true, codex: true, supportsComputerUse: true });
 
 		await executeAcpBuiltinSlashCommand("/computer status", h.runtime);
 
 		expect(h.output).toHaveBeenCalledWith(
-			"Computer use: enabled · tool: active · backend: auto · display: all · capture: 1920×1200 · model: openai-codex/gpt-5.6-sol · exposure: native",
+			"Computer use: enabled · tool: active · backend: auto · display: all · capture: 1920×1200 · model: openai-codex/gpt-5.6-sol · exposure: function",
 		);
-	});
-
-	it("reports an Azure custom gateway override as function exposure", async () => {
-		const previous = process.env.AZURE_OPENAI_BASE_URL;
-		process.env.AZURE_OPENAI_BASE_URL = "https://gateway.example/openai/v1";
-		try {
-			const h = acpRuntime({ enabled: true, azure: true, supportsComputerUse: true });
-
-			await executeAcpBuiltinSlashCommand("/computer status", h.runtime);
-
-			expect(h.output).toHaveBeenCalledWith(
-				"Computer use: enabled · tool: active · backend: auto · display: all · capture: 1920×1200 · model: azure/gpt-5.5 · exposure: function",
-			);
-		} finally {
-			if (previous === undefined) delete process.env.AZURE_OPENAI_BASE_URL;
-			else process.env.AZURE_OPENAI_BASE_URL = previous;
-		}
 	});
 
 	it("leaves the override untouched when the session cannot build the tool", async () => {

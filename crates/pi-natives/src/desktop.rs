@@ -6,6 +6,12 @@
 //! last composite frame returned to JavaScript.
 
 #[cfg(target_os = "macos")]
+#[path = "desktop_macos.rs"]
+mod window_input;
+#[cfg(target_os = "windows")]
+#[path = "desktop_win32.rs"]
+mod window_input;
+#[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
 use std::{
 	collections::HashSet,
@@ -29,10 +35,12 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use parking_lot::Mutex;
 #[cfg(not(target_os = "linux"))]
-use xcap::Monitor;
+use xcap::{Monitor, Window as PlatformWindow};
 
 #[cfg(target_os = "linux")]
-use crate::desktop_x11::{Axis, Button, Coordinate, Direction, Input as Enigo, Key, Monitor};
+use crate::desktop_x11::{
+	Axis, Button, Coordinate, Direction, Input as Enigo, Key, Monitor, Window as PlatformWindow,
+};
 use crate::task;
 
 const OPERATION_TIMEOUT: Duration = Duration::from_mins(1);
@@ -41,6 +49,12 @@ const WAIT_ACTION_DURATION: Duration = Duration::from_secs(2);
 #[cfg(any(target_os = "macos", test))]
 const MACOS_POST_INPUT_SETTLE_DURATION: Duration = Duration::from_millis(100);
 const MAX_COMPOSITE_PIXELS: u64 = 268_435_456;
+/// Window listings are session-transcript payload; cap them so pathological
+/// desktops (hundreds of utility windows) stay bounded.
+const MAX_LISTED_WINDOWS: usize = 48;
+/// Windows smaller than this edge are menu extras, tooltips, and status
+/// chrome, not interaction targets.
+const MIN_WINDOW_EDGE: u32 = 16;
 
 const PERMISSION_GRANTED: &str = "granted";
 const PERMISSION_DENIED: &str = "denied";
@@ -111,6 +125,25 @@ pub struct DesktopDisplay {
 	pub is_primary:   bool,
 }
 
+/// One capturable top-level window in global logical desktop coordinates.
+#[napi(object)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DesktopWindow {
+	/// Stable numeric window id, valid as a capture target while the window
+	/// lives.
+	pub id:      String,
+	/// Window title; may be empty for untitled windows.
+	pub title:   String,
+	/// Owning application name.
+	pub app:     String,
+	pub x:       i32,
+	pub y:       i32,
+	pub width:   u32,
+	pub height:  u32,
+	/// Whether the window currently holds input focus.
+	pub focused: bool,
+}
+
 /// Native desktop backend and permission state.
 #[napi(object)]
 #[derive(Clone, Debug)]
@@ -140,6 +173,11 @@ pub struct DesktopCapture {
 	pub width:              u32,
 	pub height:             u32,
 	pub displays:           Vec<DesktopDisplay>,
+	/// Capture target this frame was rendered from: `desktop` or a window id.
+	pub target:             String,
+	/// Top-level windows visible at capture time, topmost first. Best-effort
+	/// on full-desktop captures; empty when enumeration is unsupported.
+	pub windows:            Vec<DesktopWindow>,
 	pub backend:            String,
 	pub display_server:     Option<String>,
 	pub capture_permission: String,
@@ -252,6 +290,40 @@ impl ConcreteBackend {
 enum DisplaySelection {
 	All,
 	Id(u32),
+}
+
+/// What one request targets: the full selected-display composite, or one
+/// top-level window. Every capture and action batch names its target
+/// explicitly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CaptureTarget {
+	Desktop,
+	Window(u32),
+}
+
+impl CaptureTarget {
+	fn as_string(self) -> String {
+		match self {
+			Self::Desktop => "desktop".to_string(),
+			Self::Window(id) => id.to_string(),
+		}
+	}
+}
+
+/// Parse the required JS-side window target.
+fn parse_capture_target(target: String) -> CoreResult<CaptureTarget> {
+	if target.eq_ignore_ascii_case("desktop") {
+		return Ok(CaptureTarget::Desktop);
+	}
+	target
+		.parse::<u32>()
+		.map(CaptureTarget::Window)
+		.map_err(|_| {
+			DesktopError::new(
+				ErrorCode::InvalidOptions,
+				format!("window must be `desktop` or a numeric window id, got `{target}`"),
+			)
+		})
 }
 
 #[derive(Clone, Debug)]
@@ -417,6 +489,41 @@ enum MouseButton {
 	Wheel,
 	Back,
 	Forward,
+}
+
+/// One validated window action after screenshot pixels have been mapped into
+/// global desktop coordinates.
+#[derive(Debug)]
+enum MappedWindowAction {
+	Click {
+		x:         i32,
+		y:         i32,
+		button:    MouseButton,
+		count:     u8,
+		modifiers: Vec<Key>,
+	},
+	Drag {
+		path:      Vec<(i32, i32)>,
+		modifiers: Vec<Key>,
+	},
+	Keypress {
+		keys: Vec<Key>,
+	},
+	Move {
+		x:         i32,
+		y:         i32,
+		modifiers: Vec<Key>,
+	},
+	Scroll {
+		x:         i32,
+		y:         i32,
+		scroll_x:  i32,
+		scroll_y:  i32,
+		modifiers: Vec<Key>,
+	},
+	Type {
+		text: String,
+	},
 }
 
 impl MouseButton {
@@ -586,8 +693,82 @@ struct MonitorSnapshot {
 	display: LayoutDisplay,
 }
 
+/// Pure geometry/identity of one enumerated window, in the same global
+/// logical coordinate space as [`LayoutDisplay`].
+#[derive(Clone, Debug, PartialEq)]
+struct WindowRect {
+	id:      u32,
+	title:   String,
+	app:     String,
+	x:       i32,
+	y:       i32,
+	width:   u32,
+	height:  u32,
+	focused: bool,
+}
+
+impl WindowRect {
+	/// `App — Title` label reported through display metadata.
+	fn label(&self) -> String {
+		match (self.app.is_empty(), self.title.is_empty()) {
+			(false, false) => format!("{} — {}", self.app, self.title),
+			(false, true) => self.app.clone(),
+			_ => self.title.clone(),
+		}
+	}
+
+	/// The window as a single-region capture layout.
+	fn to_layout_display(&self, scale: f64) -> LayoutDisplay {
+		LayoutDisplay {
+			id: self.id.to_string(),
+			name: self.label(),
+			x: self.x,
+			y: self.y,
+			width: self.width,
+			height: self.height,
+			scale,
+			is_primary: false,
+		}
+	}
+}
+
+fn into_desktop_window(window: WindowRect) -> DesktopWindow {
+	DesktopWindow {
+		id:      window.id.to_string(),
+		title:   window.title,
+		app:     window.app,
+		x:       window.x,
+		y:       window.y,
+		width:   window.width,
+		height:  window.height,
+		focused: window.focused,
+	}
+}
+
+#[derive(Debug)]
+struct WindowSnapshot {
+	#[cfg(not(target_os = "macos"))]
+	window: PlatformWindow,
+	#[cfg(target_os = "macos")]
+	pid:    u32,
+	rect:   WindowRect,
+}
+
 #[cfg(target_os = "macos")]
 fn capture_quartz_screenshot(display: &LayoutDisplay) -> CoreResult<RgbaImage> {
+	let rect = format!("-R{},{},{},{}", display.x, display.y, display.width, display.height);
+	run_screencapture(&["-x".to_string(), rect])
+}
+
+/// Capture one window's own content (`screencapture -l`), shadow-free so the
+/// image maps 1:1 onto the window bounds reported by enumeration.
+#[cfg(target_os = "macos")]
+fn capture_quartz_window(window_id: u32) -> CoreResult<RgbaImage> {
+	run_screencapture(&["-x".to_string(), "-o".to_string(), "-l".to_string(), window_id.to_string()])
+}
+
+#[cfg(target_os = "macos")]
+fn run_screencapture(args: &[String]) -> CoreResult<RgbaImage> {
 	let file = tempfile::Builder::new()
 		.prefix("omp-computer-")
 		.suffix(".png")
@@ -598,10 +779,8 @@ fn capture_quartz_screenshot(display: &LayoutDisplay) -> CoreResult<RgbaImage> {
 				format!("failed to create temporary screenshot file: {error}"),
 			)
 		})?;
-	let rect = format!("-R{},{},{},{}", display.x, display.y, display.width, display.height);
 	let mut child = Command::new("/usr/sbin/screencapture")
-		.arg("-x")
-		.arg(rect)
+		.args(args)
 		.arg(file.path())
 		.stdin(Stdio::null())
 		.stdout(Stdio::null())
@@ -665,6 +844,18 @@ fn capture_monitor_image(snapshot: &MonitorSnapshot) -> CoreResult<RgbaImage> {
 	})
 }
 
+fn capture_window_image(snapshot: &WindowSnapshot) -> CoreResult<RgbaImage> {
+	#[cfg(target_os = "macos")]
+	return capture_quartz_window(snapshot.rect.id);
+	#[cfg(not(target_os = "macos"))]
+	snapshot.window.capture_image().map_err(|source| {
+		DesktopError::permission_or(
+			ErrorCode::CaptureFailed,
+			format!("capture of window `{}` failed: {source}", snapshot.rect.id),
+		)
+	})
+}
+
 const fn same_display_rect(left: &LayoutDisplay, right: &LayoutDisplay) -> bool {
 	left.x == right.x
 		&& left.y == right.y
@@ -686,6 +877,9 @@ struct FrameGeometry {
 	width:    u32,
 	height:   u32,
 	displays: Vec<FrameDisplay>,
+	/// Target the frame was rendered from; decides how coordinate input is
+	/// revalidated against the live desktop before synthesis.
+	target:   CaptureTarget,
 }
 
 impl FrameGeometry {
@@ -738,6 +932,7 @@ impl FrameGeometry {
 struct CoreCapture {
 	png:      Vec<u8>,
 	geometry: FrameGeometry,
+	windows:  Vec<WindowRect>,
 }
 
 impl CoreCapture {
@@ -766,6 +961,8 @@ impl CoreCapture {
 					is_primary:   frame.display.is_primary,
 				})
 				.collect(),
+			target:             self.geometry.target.as_string(),
+			windows:            self.windows.into_iter().map(into_desktop_window).collect(),
 			backend:            capabilities.backend,
 			display_server:     capabilities.display_server,
 			capture_permission: capabilities.capture_permission,
@@ -898,13 +1095,24 @@ impl BatchCoordinateFrame {
 		Self(frame.cloned())
 	}
 
-	fn validate(&self, current: &[LayoutDisplay]) -> CoreResult<FrameGeometry> {
-		let frame = self.0.clone().ok_or_else(|| {
+	/// The frozen frame's capture target; `None` when no frame was ever
+	/// returned.
+	fn target(&self) -> Option<CaptureTarget> {
+		self.0.as_ref().map(|frame| frame.target)
+	}
+
+	fn frame(&self) -> CoreResult<FrameGeometry> {
+		self.0.clone().ok_or_else(|| {
 			DesktopError::new(
 				ErrorCode::InvalidAction,
 				"coordinate input requires a screenshot returned by a completed prior request",
 			)
-		})?;
+		})
+	}
+
+	/// Validate a full-desktop frame against the live monitor layout.
+	fn validate(&self, current: &[LayoutDisplay]) -> CoreResult<FrameGeometry> {
+		let frame = self.frame()?;
 		if !same_layout(&frame, current) {
 			return Err(DesktopError::new(
 				ErrorCode::LayoutChanged,
@@ -912,6 +1120,34 @@ impl BatchCoordinateFrame {
 				 input",
 			));
 		}
+		validate_coordinate_backend(&frame)?;
+		Ok(frame)
+	}
+
+	/// Validate a window frame against the window's live geometry. A moved
+	/// window rebases the frame to its current origin — coordinates are
+	/// window-relative — while a resize invalidates the frame because the
+	/// captured pixels no longer describe the window's layout.
+	fn validate_window(&self, current: &WindowRect) -> CoreResult<FrameGeometry> {
+		let mut frame = self.frame()?;
+		let [region] = frame.displays.as_mut_slice() else {
+			return Err(DesktopError::new(
+				ErrorCode::LayoutChanged,
+				"window frame geometry is malformed; capture a new frame before input",
+			));
+		};
+		if region.display.width != current.width || region.display.height != current.height {
+			return Err(DesktopError::new(
+				ErrorCode::LayoutChanged,
+				format!(
+					"target window `{}` was resized since the preceding screenshot; capture a new \
+					 frame before input",
+					current.id
+				),
+			));
+		}
+		region.display.x = current.x;
+		region.display.y = current.y;
 		validate_coordinate_backend(&frame)?;
 		Ok(frame)
 	}
@@ -1081,7 +1317,9 @@ impl DesktopWorker {
 		})
 	}
 
-	fn enumerate_monitors(&self) -> CoreResult<Vec<MonitorSnapshot>> {
+	/// Backend availability, Linux `XWayland` `DISPLAY`, and macOS Screen
+	/// Recording permission gates shared by monitor and window enumeration.
+	fn ensure_capture_backend(&self) -> CoreResult<ConcreteBackend> {
 		let backend = self.config.backend.ok_or_else(|| {
 			DesktopError::new(
 				ErrorCode::BackendUnavailable,
@@ -1108,6 +1346,11 @@ impl DesktopWorker {
 				"macOS Screen Recording permission is not granted for this process",
 			));
 		}
+		Ok(backend)
+	}
+
+	fn enumerate_monitors(&self) -> CoreResult<Vec<MonitorSnapshot>> {
+		let backend = self.ensure_capture_backend()?;
 		let monitors = match Monitor::all() {
 			Ok(monitors) => monitors,
 			Err(source) => {
@@ -1189,21 +1432,75 @@ impl DesktopWorker {
 			.collect())
 	}
 
-	fn capture(&mut self) -> CoreResult<CoreCapture> {
-		let snapshots = self.enumerate_monitors()?;
-		let displays: Vec<_> = snapshots.iter().map(|item| item.display.clone()).collect();
-		let (min_x, min_y, max_x, max_y) = validate_layout(&displays)?;
-		let logical_width = u32::try_from(max_x - i64::from(min_x)).map_err(|_| {
-			DesktopError::new(ErrorCode::LayoutChanged, "desktop logical width overflow")
+	/// Enumerate capturable top-level windows, topmost first, filtered down to
+	/// plausible interaction targets and capped at [`MAX_LISTED_WINDOWS`].
+	fn enumerate_windows(&self) -> CoreResult<Vec<WindowSnapshot>> {
+		self.ensure_capture_backend()?;
+		let windows = PlatformWindow::all().map_err(|source| {
+			DesktopError::permission_or(
+				ErrorCode::CaptureFailed,
+				format!("native window enumeration failed: {source}"),
+			)
 		})?;
-		let logical_height = u32::try_from(max_y - i64::from(min_y)).map_err(|_| {
-			DesktopError::new(ErrorCode::LayoutChanged, "desktop logical height overflow")
-		})?;
+		let mut snapshots = Vec::new();
+		let mut seen = HashSet::new();
+		for window in windows {
+			if snapshots.len() >= MAX_LISTED_WINDOWS {
+				break;
+			}
+			// Enumeration races window teardown, so a window that fails any
+			// metadata read is skipped instead of failing the listing.
+			let Ok(id) = window.id() else { continue };
+			if !seen.insert(id) || window.is_minimized().unwrap_or(true) {
+				continue;
+			}
+			let (Ok(x), Ok(y), Ok(width), Ok(height)) =
+				(window.x(), window.y(), window.width(), window.height())
+			else {
+				continue;
+			};
+			if width < MIN_WINDOW_EDGE || height < MIN_WINDOW_EDGE {
+				continue;
+			}
+			#[cfg(target_os = "macos")]
+			let Ok(pid) = window.pid() else { continue };
+			let title = window.title().unwrap_or_default();
+			let app = window.app_name().unwrap_or_default();
+			if title.is_empty() && app.is_empty() {
+				continue;
+			}
+			let focused = window.is_focused().unwrap_or(false);
+			snapshots.push(WindowSnapshot {
+				#[cfg(not(target_os = "macos"))]
+				window,
+				#[cfg(target_os = "macos")]
+				pid,
+				rect: WindowRect { id, title, app, x, y, width, height, focused },
+			});
+		}
+		Ok(snapshots)
+	}
 
-		let mut images = Vec::with_capacity(snapshots.len());
-		let mut native_scale = 1.0f64;
-		for snapshot in &snapshots {
-			let image = match capture_monitor_image(snapshot) {
+	fn list_windows(&self) -> CoreResult<Vec<WindowRect>> {
+		Ok(self
+			.enumerate_windows()?
+			.into_iter()
+			.map(|snapshot| snapshot.rect)
+			.collect())
+	}
+
+	fn capture(&mut self, target: CaptureTarget) -> CoreResult<CoreCapture> {
+		match target {
+			CaptureTarget::Desktop => self.capture_desktop(),
+			CaptureTarget::Window(id) => self.capture_window(id),
+		}
+	}
+
+	fn capture_desktop(&mut self) -> CoreResult<CoreCapture> {
+		let snapshots = self.enumerate_monitors()?;
+		let mut regions = Vec::with_capacity(snapshots.len());
+		for snapshot in snapshots {
+			let image = match capture_monitor_image(&snapshot) {
 				Ok(image) => image,
 				Err(error) => {
 					self.record_capture_failure(&error);
@@ -1218,10 +1515,72 @@ impl DesktopWorker {
 				self.record_capture_failure(&error);
 				return Err(error);
 			}
+			regions.push((snapshot.display, image));
+		}
+		// The window listing is auxiliary metadata on desktop frames;
+		// enumeration failure must not fail an otherwise good capture.
+		let windows = self
+			.enumerate_windows()
+			.map(|snapshots| {
+				snapshots
+					.into_iter()
+					.map(|snapshot| snapshot.rect)
+					.collect()
+			})
+			.unwrap_or_default();
+		self.compose(regions, CaptureTarget::Desktop, windows)
+	}
+
+	fn capture_window(&mut self, id: u32) -> CoreResult<CoreCapture> {
+		let snapshots = self.enumerate_windows()?;
+		let Some(target) = snapshots.iter().find(|snapshot| snapshot.rect.id == id) else {
+			return Err(DesktopError::new(
+				ErrorCode::InvalidOptions,
+				format!(
+					"target window `{id}` was not found; it may be closed or minimized. Target \
+					 `desktop` to recover a full-desktop frame and a fresh window list"
+				),
+			));
+		};
+		let image = capture_window_image(target)?;
+		if image.width() == 0 || image.height() == 0 {
+			return Err(DesktopError::new(
+				ErrorCode::CaptureFailed,
+				format!("capture of window `{id}` returned an empty image"),
+			));
+		}
+		let scale = (f64::from(image.width()) / f64::from(target.rect.width))
+			.max(f64::from(image.height()) / f64::from(target.rect.height));
+		let display = target.rect.to_layout_display(scale);
+		let windows = snapshots
+			.iter()
+			.map(|snapshot| snapshot.rect.clone())
+			.collect();
+		self.compose(vec![(display, image)], CaptureTarget::Window(id), windows)
+	}
+
+	/// Composite captured regions into one PNG frame and publish it as the
+	/// coordinate frame subsequent input maps against.
+	fn compose(
+		&mut self,
+		regions: Vec<(LayoutDisplay, RgbaImage)>,
+		target: CaptureTarget,
+		windows: Vec<WindowRect>,
+	) -> CoreResult<CoreCapture> {
+		let displays: Vec<LayoutDisplay> =
+			regions.iter().map(|(display, _)| display.clone()).collect();
+		let (min_x, min_y, max_x, max_y) = validate_layout(&displays)?;
+		let logical_width = u32::try_from(max_x - i64::from(min_x)).map_err(|_| {
+			DesktopError::new(ErrorCode::LayoutChanged, "desktop logical width overflow")
+		})?;
+		let logical_height = u32::try_from(max_y - i64::from(min_y)).map_err(|_| {
+			DesktopError::new(ErrorCode::LayoutChanged, "desktop logical height overflow")
+		})?;
+		let mut native_scale = 1.0f64;
+		for (display, image) in &regions {
 			native_scale = native_scale
-				.max(f64::from(image.width()) / f64::from(snapshot.display.width))
-				.max(f64::from(image.height()) / f64::from(snapshot.display.height));
-			images.push(image);
+				.max(f64::from(image.width()) / f64::from(display.width))
+				.max(f64::from(image.height()) / f64::from(display.height));
 		}
 		let mut render_scale = native_scale;
 		if let Some(max_width) = self.config.max_width {
@@ -1245,8 +1604,8 @@ impl DesktopWorker {
 			));
 		}
 		let mut composite = RgbaImage::from_pixel(target_width, target_height, Rgba([0, 0, 0, 255]));
-		let mut frame_displays = Vec::with_capacity(displays.len());
-		for ((snapshot, image), display) in snapshots.iter().zip(images).zip(displays) {
+		let mut frame_displays = Vec::with_capacity(regions.len());
+		for (display, image) in regions {
 			let offset_x = u32::try_from(i64::from(display.x) - i64::from(min_x)).map_err(|_| {
 				DesktopError::new(ErrorCode::LayoutChanged, "display x offset overflow")
 			})?;
@@ -1266,7 +1625,6 @@ impl DesktopWorker {
 			};
 			image::imageops::replace(&mut composite, &resized, i64::from(pixel_x), i64::from(pixel_y));
 			frame_displays.push(FrameDisplay { display, pixel_x, pixel_y, pixel_width, pixel_height });
-			let _ = snapshot;
 		}
 		let mut png = Vec::with_capacity(composite.len() / 2);
 		DynamicImage::ImageRgba8(composite)
@@ -1275,23 +1633,47 @@ impl DesktopWorker {
 				DesktopError::new(ErrorCode::CaptureFailed, format!("PNG encoding failed: {error}"))
 			})?;
 		let geometry = FrameGeometry {
-			width:    target_width,
-			height:   target_height,
+			width: target_width,
+			height: target_height,
 			displays: frame_displays,
+			target,
 		};
 		self.returned_frame = Some(geometry.clone());
 		let mut caps = self.capabilities.lock();
 		caps.capture = true;
 		caps.capture_permission = PERMISSION_GRANTED.to_string();
-		caps.display_count = geometry.displays.len() as u32;
+		if target == CaptureTarget::Desktop {
+			caps.display_count = geometry.displays.len() as u32;
+		}
 		drop(caps);
-		Ok(CoreCapture { png, geometry })
+		Ok(CoreCapture { png, geometry, windows })
 	}
 
-	fn ensure_coordinate_frame(
+	fn ensure_frame_target(
+		batch_frame: &BatchCoordinateFrame,
+		target: CaptureTarget,
+	) -> CoreResult<()> {
+		if let Some(frame_target) = batch_frame.target()
+			&& frame_target != target
+		{
+			return Err(DesktopError::new(
+				ErrorCode::InvalidAction,
+				format!(
+					"input window `{}` does not match the preceding screenshot window `{}`; capture \
+					 the requested window before coordinate input",
+					target.as_string(),
+					frame_target.as_string()
+				),
+			));
+		}
+		Ok(())
+	}
+
+	fn ensure_desktop_frame(
 		&mut self,
 		batch_frame: &BatchCoordinateFrame,
 	) -> CoreResult<FrameGeometry> {
+		Self::ensure_frame_target(batch_frame, CaptureTarget::Desktop)?;
 		let current = self.current_layout()?;
 		let frame = batch_frame.validate(&current);
 		if matches!(&frame, Err(error) if error.code == ErrorCode::LayoutChanged) {
@@ -1300,9 +1682,161 @@ impl DesktopWorker {
 		frame
 	}
 
+	fn find_window(&self, id: u32) -> CoreResult<WindowSnapshot> {
+		self
+			.enumerate_windows()?
+			.into_iter()
+			.find(|snapshot| snapshot.rect.id == id)
+			.ok_or_else(|| {
+				DesktopError::new(
+					ErrorCode::LayoutChanged,
+					format!("target window `{id}` is no longer present; request a fresh window list"),
+				)
+			})
+	}
+
+	fn ensure_window_frame(
+		&mut self,
+		batch_frame: &BatchCoordinateFrame,
+		snapshot: &WindowSnapshot,
+	) -> CoreResult<FrameGeometry> {
+		Self::ensure_frame_target(batch_frame, CaptureTarget::Window(snapshot.rect.id))?;
+		let frame = batch_frame.validate_window(&snapshot.rect);
+		if matches!(&frame, Err(error) if error.code == ErrorCode::LayoutChanged) {
+			self.returned_frame = None;
+		}
+		frame
+	}
+
+	fn record_window_input(&self, result: &CoreResult<()>) {
+		let mut caps = self.capabilities.lock();
+		match result {
+			Ok(()) => {
+				caps.input = true;
+				caps.input_permission = PERMISSION_GRANTED.to_string();
+			},
+			Err(error) => {
+				caps.input = false;
+				caps.input_permission = if error.code == ErrorCode::PermissionDenied {
+					PERMISSION_DENIED.to_string()
+				} else {
+					PERMISSION_UNAVAILABLE.to_string()
+				};
+			},
+		}
+	}
+
+	fn execute_desktop_action(
+		&mut self,
+		batch_frame: &BatchCoordinateFrame,
+		action: ValidatedAction,
+	) -> CoreResult<()> {
+		match action {
+			ValidatedAction::Click { x, y, button, count, modifiers } => {
+				let frame = self.ensure_desktop_frame(batch_frame)?;
+				let (x, y) = frame.map_point(x, y)?;
+				let input = self.ensure_input()?;
+				with_modifiers(input, &modifiers, |input| {
+					click_at(input, x, y, button, count, &modifiers)
+				})
+			},
+			ValidatedAction::Drag { path, modifiers } => {
+				let frame = self.ensure_desktop_frame(batch_frame)?;
+				let mapped = path
+					.into_iter()
+					.map(|point| frame.map_point(point.x, point.y))
+					.collect::<CoreResult<Vec<_>>>()?;
+				let input = self.ensure_input()?;
+				with_modifiers(input, &modifiers, |input| drag_path(input, &mapped, &modifiers))
+			},
+			ValidatedAction::Keypress { keys } => {
+				let parsed = parse_keypress(&keys)?;
+				execute_keypress(self.ensure_input()?, &parsed)
+			},
+			ValidatedAction::Move { x, y, modifiers } => {
+				let frame = self.ensure_desktop_frame(batch_frame)?;
+				let (x, y) = frame.map_point(x, y)?;
+				with_modifiers(self.ensure_input()?, &modifiers, |input| move_mouse(input, x, y))
+			},
+			ValidatedAction::Scroll { x, y, scroll_x, scroll_y, modifiers } => {
+				let frame = self.ensure_desktop_frame(batch_frame)?;
+				let (x, y) = frame.map_point(x, y)?;
+				let input = self.ensure_input()?;
+				with_modifiers(input, &modifiers, |input| {
+					move_mouse(input, x, y)?;
+					let horizontal = scroll_steps(scroll_x);
+					let vertical = scroll_steps(scroll_y);
+					if horizontal != 0 {
+						input
+							.scroll(horizontal, Axis::Horizontal)
+							.map_err(input_error)?;
+					}
+					if vertical != 0 {
+						input
+							.scroll(vertical, Axis::Vertical)
+							.map_err(input_error)?;
+					}
+					Ok(())
+				})
+			},
+			ValidatedAction::Type { text } => self.ensure_input()?.text(&text).map_err(input_error),
+			ValidatedAction::Screenshot | ValidatedAction::Wait => {
+				unreachable!("non-input batch steps are handled before target dispatch")
+			},
+		}
+	}
+
+	fn execute_window_action(
+		&mut self,
+		batch_frame: &BatchCoordinateFrame,
+		id: u32,
+		action: ValidatedAction,
+	) -> CoreResult<()> {
+		let snapshot = self.find_window(id)?;
+		let mapped = match action {
+			ValidatedAction::Click { x, y, button, count, modifiers } => {
+				let frame = self.ensure_window_frame(batch_frame, &snapshot)?;
+				let (x, y) = frame.map_point(x, y)?;
+				MappedWindowAction::Click { x, y, button, count, modifiers }
+			},
+			ValidatedAction::Drag { path, modifiers } => {
+				let frame = self.ensure_window_frame(batch_frame, &snapshot)?;
+				let path = path
+					.into_iter()
+					.map(|point| frame.map_point(point.x, point.y))
+					.collect::<CoreResult<Vec<_>>>()?;
+				MappedWindowAction::Drag { path, modifiers }
+			},
+			ValidatedAction::Keypress { keys } => {
+				MappedWindowAction::Keypress { keys: parse_keypress(&keys)? }
+			},
+			ValidatedAction::Move { x, y, modifiers } => {
+				let frame = self.ensure_window_frame(batch_frame, &snapshot)?;
+				let (x, y) = frame.map_point(x, y)?;
+				MappedWindowAction::Move { x, y, modifiers }
+			},
+			ValidatedAction::Scroll { x, y, scroll_x, scroll_y, modifiers } => {
+				let frame = self.ensure_window_frame(batch_frame, &snapshot)?;
+				let (x, y) = frame.map_point(x, y)?;
+				MappedWindowAction::Scroll { x, y, scroll_x, scroll_y, modifiers }
+			},
+			ValidatedAction::Type { text } => MappedWindowAction::Type { text },
+			ValidatedAction::Screenshot | ValidatedAction::Wait => {
+				unreachable!("non-input batch steps are handled before target dispatch")
+			},
+		};
+		#[cfg(any(target_os = "macos", target_os = "windows"))]
+		let result = window_input::execute(&snapshot, mapped);
+		#[cfg(target_os = "linux")]
+		let result = execute_x11_window_action(&snapshot, mapped);
+		self.record_window_input(&result);
+		result
+	}
+
 	fn execute(
 		&mut self,
 		actions: Vec<ValidatedAction>,
+		target: CaptureTarget,
 		deadline: Instant,
 	) -> CoreResult<CoreCapture> {
 		// Freeze coordinate mapping to the last frame returned before this batch.
@@ -1312,72 +1846,22 @@ impl DesktopWorker {
 			self,
 			actions,
 			deadline,
-			|worker, action| {
-				match action {
-					ValidatedAction::Click { x, y, button, count, modifiers } => {
-						let frame = worker.ensure_coordinate_frame(&batch_frame)?;
-						let (x, y) = frame.map_point(x, y)?;
-						let input = worker.ensure_input()?;
-						with_modifiers(input, &modifiers, |input| {
-							click_at(input, x, y, button, count, &modifiers)
-						})?;
-					},
-					ValidatedAction::Drag { path, modifiers } => {
-						let frame = worker.ensure_coordinate_frame(&batch_frame)?;
-						let mapped = path
-							.into_iter()
-							.map(|point| frame.map_point(point.x, point.y))
-							.collect::<CoreResult<Vec<_>>>()?;
-						let input = worker.ensure_input()?;
-						with_modifiers(input, &modifiers, |input| drag_path(input, &mapped, &modifiers))?;
-					},
-					ValidatedAction::Keypress { keys } => {
-						let parsed = parse_keypress(&keys)?;
-						execute_keypress(worker.ensure_input()?, &parsed)?;
-					},
-					ValidatedAction::Move { x, y, modifiers } => {
-						let frame = worker.ensure_coordinate_frame(&batch_frame)?;
-						let (x, y) = frame.map_point(x, y)?;
-						with_modifiers(worker.ensure_input()?, &modifiers, |input| {
-							move_mouse(input, x, y)
-						})?;
-					},
-					ValidatedAction::Screenshot => unreachable!("screenshot actions are deferred"),
-					ValidatedAction::Scroll { x, y, scroll_x, scroll_y, modifiers } => {
-						let frame = worker.ensure_coordinate_frame(&batch_frame)?;
-						let (x, y) = frame.map_point(x, y)?;
-						let input = worker.ensure_input()?;
-						with_modifiers(input, &modifiers, |input| {
-							move_mouse(input, x, y)?;
-							let horizontal = scroll_steps(scroll_x);
-							let vertical = scroll_steps(scroll_y);
-							if horizontal != 0 {
-								input
-									.scroll(horizontal, Axis::Horizontal)
-									.map_err(input_error)?;
-							}
-							if vertical != 0 {
-								input
-									.scroll(vertical, Axis::Vertical)
-									.map_err(input_error)?;
-							}
-							Ok(())
-						})?;
-					},
-					ValidatedAction::Type { text } => {
-						worker.ensure_input()?.text(&text).map_err(input_error)?;
-					},
-					ValidatedAction::Wait => {
-						let remaining = deadline.saturating_duration_since(Instant::now());
-						if remaining.is_zero() {
-							return Err(deadline_exceeded());
-						}
-						thread::sleep(WAIT_ACTION_DURATION.min(remaining));
-					},
-				}
-				Ok(())
+			|worker, action| match action {
+				ValidatedAction::Screenshot => unreachable!("screenshot actions are deferred"),
+				ValidatedAction::Wait => {
+					let remaining = deadline.saturating_duration_since(Instant::now());
+					if remaining.is_zero() {
+						return Err(deadline_exceeded());
+					}
+					thread::sleep(WAIT_ACTION_DURATION.min(remaining));
+					Ok(())
+				},
+				action => match target {
+					CaptureTarget::Desktop => worker.execute_desktop_action(&batch_frame, action),
+					CaptureTarget::Window(id) => worker.execute_window_action(&batch_frame, id, action),
+				},
 			},
-			Self::capture,
+			|worker| worker.capture(target),
 		)
 	}
 }
@@ -1899,10 +2383,58 @@ fn with_modifiers(
 	operation_result.and(release_result)
 }
 
+#[cfg(target_os = "linux")]
+fn execute_x11_window_action(
+	snapshot: &WindowSnapshot,
+	action: MappedWindowAction,
+) -> CoreResult<()> {
+	let mut input = Enigo::for_window(&snapshot.window).map_err(input_error)?;
+	match action {
+		MappedWindowAction::Click { x, y, button, count, modifiers } => {
+			with_modifiers(&mut input, &modifiers, |input| {
+				click_at(input, x, y, button, count, &modifiers)
+			})
+		},
+		MappedWindowAction::Drag { path, modifiers } => {
+			with_modifiers(&mut input, &modifiers, |input| drag_path(input, &path, &modifiers))
+		},
+		MappedWindowAction::Keypress { keys } => execute_keypress(&mut input, &keys),
+		MappedWindowAction::Move { x, y, modifiers } => {
+			with_modifiers(&mut input, &modifiers, |input| move_mouse(input, x, y))
+		},
+		MappedWindowAction::Scroll { x, y, scroll_x, scroll_y, modifiers } => {
+			with_modifiers(&mut input, &modifiers, |input| {
+				move_mouse(input, x, y)?;
+				let horizontal = scroll_steps(scroll_x);
+				let vertical = scroll_steps(scroll_y);
+				if horizontal != 0 {
+					input
+						.scroll(horizontal, Axis::Horizontal)
+						.map_err(input_error)?;
+				}
+				if vertical != 0 {
+					input
+						.scroll(vertical, Axis::Vertical)
+						.map_err(input_error)?;
+				}
+				Ok(())
+			})
+		},
+		MappedWindowAction::Type { text } => input.text(&text).map_err(input_error),
+	}
+}
+
 enum WorkerRequest {
-	Capture(flume::Sender<CoreResult<CoreCapture>>),
+	Capture {
+		target: CaptureTarget,
+		reply:  flume::Sender<CoreResult<CoreCapture>>,
+	},
+	ListWindows {
+		reply: flume::Sender<CoreResult<Vec<WindowRect>>>,
+	},
 	Execute {
 		actions:  Vec<ValidatedAction>,
+		target:   CaptureTarget,
 		deadline: Instant,
 		reply:    flume::Sender<CoreResult<CoreCapture>>,
 	},
@@ -1934,11 +2466,14 @@ impl SessionCore {
 				let _ = ready_tx.send(());
 				while let Ok(request) = rx.recv() {
 					match request {
-						WorkerRequest::Capture(reply) => {
-							let _ = reply.send(worker.capture());
+						WorkerRequest::Capture { target, reply } => {
+							let _ = reply.send(worker.capture(target));
 						},
-						WorkerRequest::Execute { actions, deadline, reply } => {
-							let _ = reply.send(worker.execute(actions, deadline));
+						WorkerRequest::ListWindows { reply } => {
+							let _ = reply.send(worker.list_windows());
+						},
+						WorkerRequest::Execute { actions, target, deadline, reply } => {
+							let _ = reply.send(worker.execute(actions, target, deadline));
 						},
 						WorkerRequest::Close(reply) => {
 							let _ = reply.send(());
@@ -1969,19 +2504,31 @@ impl SessionCore {
 		}))
 	}
 
-	fn capture(&self) -> CoreResult<CoreCapture> {
+	fn capture(&self, target: CaptureTarget) -> CoreResult<CoreCapture> {
 		let (reply_tx, reply_rx) = flume::bounded(1);
-		self.send(WorkerRequest::Capture(reply_tx))?;
+		self.send(WorkerRequest::Capture { target, reply: reply_tx })?;
 		reply_rx
 			.recv_timeout(OPERATION_TIMEOUT)
 			.map_err(worker_receive_error)?
 	}
 
-	fn execute(&self, actions: Vec<ValidatedAction>) -> CoreResult<CoreCapture> {
+	fn list_windows(&self) -> CoreResult<Vec<WindowRect>> {
+		let (reply_tx, reply_rx) = flume::bounded(1);
+		self.send(WorkerRequest::ListWindows { reply: reply_tx })?;
+		reply_rx
+			.recv_timeout(OPERATION_TIMEOUT)
+			.map_err(worker_receive_error)?
+	}
+
+	fn execute(
+		&self,
+		actions: Vec<ValidatedAction>,
+		target: CaptureTarget,
+	) -> CoreResult<CoreCapture> {
 		validate_batch_wait_budget(&actions)?;
 		let deadline = Instant::now() + OPERATION_TIMEOUT;
 		let (reply_tx, reply_rx) = flume::bounded(1);
-		self.send(WorkerRequest::Execute { actions, deadline, reply: reply_tx })?;
+		self.send(WorkerRequest::Execute { actions, target, deadline, reply: reply_tx })?;
 		// The worker enforces `deadline` itself; the extra slack guarantees its
 		// DeadlineExceeded error reports before this channel timeout can fire.
 		reply_rx
@@ -2081,23 +2628,44 @@ impl DesktopSession {
 		self.capabilities.lock().clone()
 	}
 
-	/// Capture a fresh PNG composite of the selected display(s).
+	/// List current capturable top-level windows without capturing a display.
 	#[napi]
-	pub fn capture(&self) -> task::Promise<DesktopCapture> {
+	pub fn list_windows(&self) -> Result<task::Promise<Vec<DesktopWindow>>> {
 		let core = Arc::clone(&self.core);
-		let capabilities = Arc::clone(&self.capabilities);
-		task::blocking("desktop.capture", (), move |_| {
+		Ok(task::blocking("desktop.listWindows", (), move |_| {
 			core
-				.capture()
-				.map(|capture| capture.into_napi(&capabilities))
+				.list_windows()
+				.map(|windows| windows.into_iter().map(into_desktop_window).collect())
 				.map_err(napi::Error::from)
-		})
+		}))
 	}
 
-	/// Execute a validated action batch in order, then return a fresh
-	/// screenshot.
+	/// Capture a fresh PNG frame of `window`: `desktop` for the selected
+	/// display composite, or a numeric id from a prior capture's `windows`
+	/// listing.
 	#[napi]
-	pub fn execute(&self, actions: Vec<DesktopAction>) -> Result<task::Promise<DesktopCapture>> {
+	pub fn capture(&self, window: String) -> Result<task::Promise<DesktopCapture>> {
+		let target = parse_capture_target(window).map_err(napi::Error::from)?;
+		let core = Arc::clone(&self.core);
+		let capabilities = Arc::clone(&self.capabilities);
+		Ok(task::blocking("desktop.capture", (), move |_| {
+			core
+				.capture(target)
+				.map(|capture| capture.into_napi(&capabilities))
+				.map_err(napi::Error::from)
+		}))
+	}
+
+	/// Execute a validated action batch against `window`, then return its
+	/// fresh screenshot. Coordinate actions require the same window as the
+	/// preceding frame.
+	#[napi]
+	pub fn execute(
+		&self,
+		actions: Vec<DesktopAction>,
+		window: String,
+	) -> Result<task::Promise<DesktopCapture>> {
+		let target = parse_capture_target(window).map_err(napi::Error::from)?;
 		let actions = actions
 			.into_iter()
 			.map(ValidatedAction::try_from)
@@ -2107,7 +2675,7 @@ impl DesktopSession {
 		let capabilities = Arc::clone(&self.capabilities);
 		Ok(task::blocking("desktop.execute", (), move |_| {
 			core
-				.execute(actions)
+				.execute(actions, target)
 				.map(|capture| capture.into_napi(&capabilities))
 				.map_err(napi::Error::from)
 		}))
@@ -2143,6 +2711,15 @@ mod tests {
 		width: u32,
 		height: u32,
 	) -> FrameGeometry {
+		frame_for(displays, width, height, CaptureTarget::Desktop)
+	}
+
+	fn frame_for(
+		displays: Vec<(LayoutDisplay, u32, u32, u32, u32)>,
+		width: u32,
+		height: u32,
+		target: CaptureTarget,
+	) -> FrameGeometry {
 		FrameGeometry {
 			width,
 			height,
@@ -2156,6 +2733,7 @@ mod tests {
 					pixel_height,
 				})
 				.collect(),
+			target,
 		}
 	}
 
@@ -2577,7 +3155,7 @@ mod tests {
 		.unwrap();
 		core.close().unwrap();
 		core.close().unwrap();
-		assert_eq!(core.capture().unwrap_err().code, ErrorCode::SessionClosed);
+		assert_eq!(core.capture(CaptureTarget::Desktop).unwrap_err().code, ErrorCode::SessionClosed);
 	}
 
 	fn unavailable_capabilities() -> Arc<Mutex<DesktopCapabilities>> {
@@ -2620,7 +3198,7 @@ mod tests {
 		let core = SessionCore::start(unavailable_config(), unavailable_capabilities()).unwrap();
 		assert_eq!(
 			core
-				.execute(vec![ValidatedAction::Wait; 28])
+				.execute(vec![ValidatedAction::Wait; 28], CaptureTarget::Desktop)
 				.unwrap_err()
 				.code,
 			ErrorCode::InvalidAction
@@ -2632,7 +3210,7 @@ mod tests {
 	fn expired_deadline_short_circuits_before_any_action() {
 		let mut worker = DesktopWorker::new(unavailable_config(), unavailable_capabilities());
 		let error = worker
-			.execute(vec![ValidatedAction::Wait], Instant::now())
+			.execute(vec![ValidatedAction::Wait], CaptureTarget::Desktop, Instant::now())
 			.unwrap_err();
 		assert_eq!(error.code, ErrorCode::DeadlineExceeded);
 	}
@@ -2642,7 +3220,11 @@ mod tests {
 		let mut worker = DesktopWorker::new(unavailable_config(), unavailable_capabilities());
 		let start = Instant::now();
 		let error = worker
-			.execute(vec![ValidatedAction::Wait], start + Duration::from_millis(50))
+			.execute(
+				vec![ValidatedAction::Wait],
+				CaptureTarget::Desktop,
+				start + Duration::from_millis(50),
+			)
 			.unwrap_err();
 		assert_eq!(error.code, ErrorCode::DeadlineExceeded);
 		assert!(start.elapsed() < WAIT_ACTION_DURATION);
@@ -2663,7 +3245,7 @@ mod tests {
 		let capabilities = Arc::new(Mutex::new(capabilities));
 		let mut worker = DesktopWorker::new(config, capabilities);
 		let capture = worker
-			.capture()
+			.capture(CaptureTarget::Desktop)
 			.expect("real native capture should succeed when opted in");
 		let decoded = image::load_from_memory_with_format(&capture.png, ImageFormat::Png)
 			.expect("capture must be a real PNG");
@@ -2672,5 +3254,93 @@ mod tests {
 			(capture.geometry.width, capture.geometry.height)
 		);
 		assert!(!capture.geometry.displays.is_empty());
+	}
+
+	fn window_rect(id: u32, x: i32, y: i32, width: u32, height: u32) -> WindowRect {
+		WindowRect {
+			id,
+			title: "Doc".to_string(),
+			app: "Editor".to_string(),
+			x,
+			y,
+			width,
+			height,
+			focused: false,
+		}
+	}
+
+	fn window_frame(rect: &WindowRect, pixel_width: u32, pixel_height: u32) -> FrameGeometry {
+		frame_for(
+			vec![(rect.to_layout_display(1.0), 0, 0, pixel_width, pixel_height)],
+			pixel_width,
+			pixel_height,
+			CaptureTarget::Window(rect.id),
+		)
+	}
+
+	#[test]
+	fn window_frames_rebase_to_the_moved_window_origin() {
+		let captured = window_rect(7, 100, 50, 400, 300);
+		let batch =
+			BatchCoordinateFrame::from_returned_frame(Some(&window_frame(&captured, 400, 300)));
+		// Same size, new origin: window-relative coordinates keep working.
+		let moved = window_rect(7, 700, 20, 400, 300);
+		let mapped = batch
+			.validate_window(&moved)
+			.unwrap()
+			.map_point(10, 10)
+			.unwrap();
+		assert_eq!(mapped, (710, 30));
+	}
+
+	#[test]
+	fn window_frames_scale_composite_pixels_back_to_window_logical_size() {
+		let captured = window_rect(7, 100, 50, 400, 300);
+		// Frame rendered at 2x native pixels: composite pixel -> logical point.
+		let batch =
+			BatchCoordinateFrame::from_returned_frame(Some(&window_frame(&captured, 800, 600)));
+		let mapped = batch
+			.validate_window(&captured)
+			.unwrap()
+			.map_point(798, 598)
+			.unwrap();
+		assert_eq!(mapped, (499, 349));
+	}
+
+	#[test]
+	fn resized_window_invalidates_the_prior_frame() {
+		let captured = window_rect(7, 100, 50, 400, 300);
+		let batch =
+			BatchCoordinateFrame::from_returned_frame(Some(&window_frame(&captured, 400, 300)));
+		let resized = window_rect(7, 100, 50, 500, 300);
+		let error = batch.validate_window(&resized).unwrap_err();
+		assert_eq!(error.code, ErrorCode::LayoutChanged);
+		assert!(error.message.contains("resized"));
+	}
+
+	#[test]
+	fn capture_targets_parse_desktop_and_numeric_window_ids() {
+		assert_eq!(parse_capture_target("desktop".to_string()).unwrap(), CaptureTarget::Desktop);
+		assert_eq!(parse_capture_target("Desktop".to_string()).unwrap(), CaptureTarget::Desktop);
+		assert_eq!(parse_capture_target("42".to_string()).unwrap(), CaptureTarget::Window(42));
+		assert_eq!(
+			parse_capture_target("main window".to_string())
+				.unwrap_err()
+				.code,
+			ErrorCode::InvalidOptions
+		);
+		assert_eq!(CaptureTarget::Window(42).as_string(), "42");
+		assert_eq!(CaptureTarget::Desktop.as_string(), "desktop");
+	}
+
+	#[test]
+	fn window_labels_prefer_app_and_title_pairs() {
+		assert_eq!(window_rect(1, 0, 0, 10, 10).label(), "Editor — Doc");
+		let mut untitled = window_rect(1, 0, 0, 10, 10);
+		untitled.title = String::new();
+		assert_eq!(untitled.label(), "Editor");
+		let mut appless = window_rect(1, 0, 0, 10, 10);
+		appless.app = String::new();
+		assert_eq!(appless.label(), "Doc");
 	}
 }

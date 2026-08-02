@@ -1,11 +1,18 @@
-import type { DesktopAction, DesktopCapture, DesktopSession, DesktopSessionOptions } from "@oh-my-pi/pi-natives";
+import type {
+	DesktopAction,
+	DesktopCapture,
+	DesktopSession,
+	DesktopSessionOptions,
+	DesktopWindow,
+} from "@oh-my-pi/pi-natives";
 import { createDesktopSession } from "@oh-my-pi/pi-natives/desktop";
 import type { ComputerWorkerError, ComputerWorkerInbound, ComputerWorkerTransport } from "./protocol";
 
 export interface NativeDesktopSession {
 	readonly capabilities: DesktopSession["capabilities"];
-	capture(): Promise<DesktopCapture>;
-	execute(actions: DesktopAction[]): Promise<DesktopCapture>;
+	/** Enumerate current native window targets without capturing an image. */
+	listWindows(): Promise<DesktopWindow[]>;
+	execute(actions: DesktopAction[], window: string): Promise<DesktopCapture>;
 	close(): Promise<void>;
 }
 
@@ -33,7 +40,7 @@ function captureTransfer(capture: DesktopCapture): Bun.Transferable[] {
 
 export class ComputerWorkerCore {
 	#session?: NativeDesktopSession;
-	#hasReturnedFrame = false;
+	#returnedWindow?: string;
 	#closed = false;
 	#tail: Promise<void> = Promise.resolve();
 	readonly #unsubscribe: () => void;
@@ -58,7 +65,10 @@ export class ComputerWorkerCore {
 			this.#tail = this.#tail.then(() => this.#init(message.options));
 			return;
 		}
-		this.#tail = this.#tail.then(() => this.#execute(message.id, message.actions));
+		this.#tail =
+			message.type === "list"
+				? this.#tail.then(() => this.#list(message.id))
+				: this.#tail.then(() => this.#execute(message.id, message.window, message.actions));
 	}
 
 	async #init(options: DesktopSessionOptions): Promise<void> {
@@ -72,14 +82,14 @@ export class ComputerWorkerCore {
 		}
 		try {
 			this.#session = this.createSession(options);
-			this.#hasReturnedFrame = false;
+			this.#returnedWindow = undefined;
 			this.transport.send({ type: "ready", capabilities: this.#session.capabilities });
 		} catch (error) {
 			this.transport.send({ type: "error", error: serializeError(error) });
 		}
 	}
 
-	async #execute(id: string, actions: DesktopAction[]): Promise<void> {
+	async #list(id: string): Promise<void> {
 		const session = this.#session;
 		if (!session) {
 			this.transport.send({
@@ -90,24 +100,41 @@ export class ComputerWorkerCore {
 			return;
 		}
 		try {
-			if (!this.#hasReturnedFrame && actions.some(action => COORDINATE_ACTIONS.has(action.type))) {
+			const windows = await session.listWindows();
+			this.transport.send({ type: "windows", id, windows, capabilities: session.capabilities });
+		} catch (error) {
+			this.transport.send({ type: "error", id, error: serializeError(error) });
+		}
+	}
+
+	async #execute(id: string, window: string, actions: DesktopAction[]): Promise<void> {
+		const session = this.#session;
+		if (!session) {
+			this.transport.send({
+				type: "error",
+				id,
+				error: { name: "Error", message: "Computer worker is not initialized" },
+			});
+			return;
+		}
+		try {
+			if (this.#returnedWindow !== window && actions.some(action => COORDINATE_ACTIONS.has(action.type))) {
 				this.transport.send({
 					type: "error",
 					id,
 					error: {
 						name: "Error",
-						message:
-							"Coordinate computer actions require a screenshot returned to the provider; request a screenshot first",
+						message: `Coordinate computer actions require a screenshot of window \`${window}\` returned to the provider; request that window first`,
 					},
 				});
 				return;
 			}
-			const capture = await session.execute(actions);
+			const capture = await session.execute(actions, window);
 			this.transport.send(
 				{ type: "result", id, capture, capabilities: session.capabilities },
 				captureTransfer(capture),
 			);
-			this.#hasReturnedFrame = true;
+			this.#returnedWindow = capture.target;
 		} catch (error) {
 			this.transport.send({ type: "error", id, error: serializeError(error) });
 		}
@@ -122,7 +149,7 @@ export class ComputerWorkerCore {
 			this.transport.send({ type: "error", error: serializeError(error) });
 		} finally {
 			this.#session = undefined;
-			this.#hasReturnedFrame = false;
+			this.#returnedWindow = undefined;
 			this.#unsubscribe();
 			this.transport.send({ type: "closed" });
 			this.transport.close();

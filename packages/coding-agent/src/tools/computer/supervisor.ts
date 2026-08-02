@@ -1,4 +1,10 @@
-import type { DesktopAction, DesktopCapabilities, DesktopCapture, DesktopSessionOptions } from "@oh-my-pi/pi-natives";
+import type {
+	DesktopAction,
+	DesktopCapabilities,
+	DesktopCapture,
+	DesktopSessionOptions,
+	DesktopWindow,
+} from "@oh-my-pi/pi-natives";
 import { withTimeout } from "@oh-my-pi/pi-utils/async";
 import * as logger from "@oh-my-pi/pi-utils/logger";
 import { workerHostEntry } from "@oh-my-pi/pi-utils/worker-host";
@@ -16,7 +22,9 @@ const SMOKE_TIMEOUT_MS = 5_000;
 
 export interface ComputerController {
 	readonly capabilities: DesktopCapabilities | undefined;
-	execute(actions: DesktopAction[], signal?: AbortSignal): Promise<DesktopCapture>;
+	/** Enumerate current targets without capturing a display. */
+	list(signal?: AbortSignal): Promise<DesktopWindow[]>;
+	execute(window: string, actions: DesktopAction[], signal?: AbortSignal): Promise<DesktopCapture>;
 	close(): Promise<void>;
 }
 
@@ -75,8 +83,8 @@ export function spawnComputerWorker(): ComputerWorkerHandle {
 	return wrapWorker(worker);
 }
 
-interface PendingRequest {
-	resolve(capture: DesktopCapture): void;
+interface PendingRequest<T> {
+	resolve(value: T): void;
 	reject(error: unknown): void;
 }
 
@@ -84,7 +92,8 @@ export class ComputerSupervisor implements ComputerController {
 	#worker?: ComputerWorkerHandle;
 	#startPromise?: Promise<void>;
 	#capabilities?: DesktopCapabilities;
-	#pending = new Map<string, PendingRequest>();
+	#pending = new Map<string, PendingRequest<DesktopCapture>>();
+	#pendingWindows = new Map<string, PendingRequest<DesktopWindow[]>>();
 	#nextId = 0;
 	#serial: Promise<void> = Promise.resolve();
 	#closed = false;
@@ -101,9 +110,18 @@ export class ComputerSupervisor implements ComputerController {
 		return this.#capabilities;
 	}
 
-	execute(actions: DesktopAction[], signal?: AbortSignal): Promise<DesktopCapture> {
+	execute(window: string, actions: DesktopAction[], signal?: AbortSignal): Promise<DesktopCapture> {
 		if (this.#closed) return Promise.reject(new ToolError("Computer session is closed"));
-		const run = (): Promise<DesktopCapture> => this.#execute(actions, signal);
+		return this.#serialize(() => this.#execute(window, actions, signal));
+	}
+
+	/** Enumerate current targets without capturing a display. */
+	list(signal?: AbortSignal): Promise<DesktopWindow[]> {
+		if (this.#closed) return Promise.reject(new ToolError("Computer session is closed"));
+		return this.#serialize(() => this.#list(signal));
+	}
+
+	#serialize<T>(run: () => Promise<T>): Promise<T> {
 		const result = this.#serial.then(run, run);
 		this.#serial = result.then(
 			() => undefined,
@@ -112,15 +130,27 @@ export class ComputerSupervisor implements ComputerController {
 		return result;
 	}
 
-	async #execute(actions: DesktopAction[], signal?: AbortSignal): Promise<DesktopCapture> {
+	#execute(window: string, actions: DesktopAction[], signal?: AbortSignal): Promise<DesktopCapture> {
+		return this.#request(this.#pending, id => this.#worker!.send({ type: "execute", id, window, actions }), signal);
+	}
+
+	#list(signal?: AbortSignal): Promise<DesktopWindow[]> {
+		return this.#request(this.#pendingWindows, id => this.#worker!.send({ type: "list", id }), signal);
+	}
+
+	async #request<T>(
+		pending: Map<string, PendingRequest<T>>,
+		send: (id: string) => void,
+		signal?: AbortSignal,
+	): Promise<T> {
 		if (this.#closed) throw new ToolError("Computer session is closed");
 		if (signal?.aborted) throw new ToolAbortError();
 		await this.#start();
 		if (signal?.aborted) throw new ToolAbortError();
 		const id = `computer-${++this.#nextId}`;
-		const request = Promise.withResolvers<DesktopCapture>();
-		this.#pending.set(id, request);
-		this.#worker!.send({ type: "execute", id, actions });
+		const request = Promise.withResolvers<T>();
+		pending.set(id, request);
+		send(id);
 		if (!signal) return request.promise;
 
 		const aborted = Promise.withResolvers<never>();
@@ -160,6 +190,17 @@ export class ComputerSupervisor implements ComputerController {
 					ready.resolve();
 					return;
 				}
+				if (message.type === "windows") {
+					this.#capabilities = message.capabilities;
+					const pending = this.#pendingWindows.get(message.id);
+					this.#pendingWindows.delete(message.id);
+					pending?.resolve(message.windows);
+					logger.debug("Native computer windows listed", {
+						requestId: message.id,
+						windowCount: message.windows.length,
+					});
+					return;
+				}
 				if (message.type === "result") {
 					this.#capabilities = message.capabilities;
 					const pending = this.#pending.get(message.id);
@@ -167,6 +208,7 @@ export class ComputerSupervisor implements ComputerController {
 					pending?.resolve(message.capture);
 					logger.debug("Native computer capture completed", {
 						requestId: message.id,
+						window: message.capture.target,
 						backend: message.capture.backend,
 						capturePermission: message.capture.capturePermission,
 						inputPermission: message.capture.inputPermission,
@@ -182,8 +224,9 @@ export class ComputerSupervisor implements ComputerController {
 						errorName: message.error.name,
 					});
 					if (message.id) {
-						const pending = this.#pending.get(message.id);
+						const pending = this.#pending.get(message.id) ?? this.#pendingWindows.get(message.id);
 						this.#pending.delete(message.id);
+						this.#pendingWindows.delete(message.id);
 						pending?.reject(error);
 					} else {
 						ready.reject(error);
@@ -223,6 +266,8 @@ export class ComputerSupervisor implements ComputerController {
 		this.#unsubscribeError = undefined;
 		for (const pending of this.#pending.values()) pending.reject(reason);
 		this.#pending.clear();
+		for (const pending of this.#pendingWindows.values()) pending.reject(reason);
+		this.#pendingWindows.clear();
 		await worker?.terminate();
 	}
 

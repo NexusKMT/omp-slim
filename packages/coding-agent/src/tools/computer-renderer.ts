@@ -5,9 +5,10 @@ import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import type { Theme } from "../modes/theme/theme";
 import { framedBlock, renderStatusLine } from "../tui";
 import type { ComputerToolDetails } from "./computer";
-import { replaceTabs, truncateToWidth } from "./render-utils";
+import { PREVIEW_LIMITS, replaceTabs, truncateToWidth } from "./render-utils";
 
 interface ComputerRenderArgs {
+	window?: unknown;
 	actions?: Array<{ type?: unknown }>;
 }
 
@@ -28,18 +29,34 @@ function isComputerToolDetails(value: unknown): value is ComputerToolDetails {
 	return (
 		Array.isArray(details.actions) &&
 		Array.isArray(details.displays) &&
-		typeof details.width === "number" &&
-		typeof details.height === "number"
+		Array.isArray(details.windows) &&
+		(details.window === undefined || typeof details.window === "string") &&
+		(details.width === undefined || typeof details.width === "number") &&
+		(details.height === undefined || typeof details.height === "number")
 	);
 }
 
 function actionDescription(args: ComputerRenderArgs | undefined): string | undefined {
-	if (!Array.isArray(args?.actions) || args.actions.length === 0) return undefined;
-	return clean(args.actions.map(action => (typeof action?.type === "string" ? action.type : "action")).join(" → "));
+	const window = typeof args?.window === "string" ? args.window : undefined;
+	if (!window) return "list windows";
+	const actions =
+		Array.isArray(args?.actions) && args.actions.length > 0
+			? args.actions.map(action => (typeof action?.type === "string" ? action.type : "action")).join(" → ")
+			: "screenshot";
+	return clean(`${window} · ${actions}`);
+}
+
+function windowName(details: ComputerToolDetails): string {
+	if (!details.window) return "Windows";
+	if (details.window === "desktop") return "Desktop";
+	const window = details.windows.find(candidate => candidate.id === details.window);
+	if (!window) return `window ${details.window}`;
+	return [window.app, window.title].filter(Boolean).join(" — ") || `window ${details.window}`;
 }
 
 function resultDescription(details: ComputerToolDetails): string {
-	return clean(`${details.actions.join(" → ")} · ${details.width}×${details.height}`, 120);
+	if (!details.window) return clean(`Listed ${details.windows.length + 1} window targets`, 120);
+	return clean(`${windowName(details)} · ${details.actions.join(" → ")} · ${details.width}×${details.height}`, 120);
 }
 
 function errorDescription(result: ComputerRenderResult, args: ComputerRenderArgs | undefined): string | undefined {
@@ -77,7 +94,9 @@ export const computerToolRenderer = {
 					`backend ${clean(details.backend)}${details.displayServer ? ` · server ${clean(details.displayServer)}` : ""} · capture ${clean(details.capturePermission)} · input ${clean(details.inputPermission)} · ${details.displays.length} display(s)`,
 				),
 			];
-			const displayLimit = options.expanded ? details.displays.length : Math.min(details.displays.length, 3);
+			const displayLimit = options.expanded
+				? details.displays.length
+				: Math.min(details.displays.length, PREVIEW_LIMITS.COLLAPSED_LINES);
 			for (const display of details.displays.slice(0, displayLimit)) {
 				body.push(
 					theme.fg(
@@ -91,6 +110,31 @@ export const computerToolRenderer = {
 			}
 			if (displayLimit < details.displays.length) {
 				body.push(theme.fg("dim", `… ${details.displays.length - displayLimit} more display(s)`));
+			}
+			body.push(theme.fg("dim", `${details.windows.length + 1} window target(s)`));
+			body.push(
+				theme.fg(
+					details.window === "desktop" ? "success" : "toolOutput",
+					`desktop Desktop${details.window === "desktop" ? " · selected" : ""}`,
+				),
+			);
+			const windowLimit = options.expanded
+				? details.windows.length
+				: Math.min(details.windows.length, PREVIEW_LIMITS.OUTPUT_COLLAPSED);
+			for (const window of details.windows.slice(0, windowLimit)) {
+				const identity = [window.app, window.title].filter(Boolean).join(" — ") || "Untitled";
+				body.push(
+					theme.fg(
+						window.id === details.window ? "success" : "toolOutput",
+						clean(
+							`${window.id} ${identity}: ${window.x},${window.y} ${window.width}×${window.height}${window.focused ? " · focused" : ""}${window.id === details.window ? " · selected" : ""}`,
+							160,
+						),
+					),
+				);
+			}
+			if (windowLimit < details.windows.length) {
+				body.push(theme.fg("dim", `… ${details.windows.length - windowLimit} more window(s)`));
 			}
 			if (details.capabilities) {
 				body.push(theme.fg("dim", `capabilities ${clean(details.capabilities, 160)}`));

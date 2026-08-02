@@ -68,12 +68,15 @@ xcap = { version = "=0.9.6", default-features = false }
 [target.'cfg(target_os = "macos")'.dependencies]
 tempfile = "=3.27.0"
 core-graphics = "0.25"
+objc2-app-kit = "=0.3.2"
+objc2-core-graphics = "=0.3.2"
+objc2-foundation = "=0.3.2"
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Wdk_Storage_FileSystem", "Win32_Security", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { workspace = true, features = ["Wdk_Storage_FileSystem", "Win32_Graphics_Gdi", "Win32_Security", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 clipboard-win.workspace = true
 winreg.workspace = true
 

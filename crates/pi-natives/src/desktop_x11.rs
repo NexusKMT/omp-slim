@@ -415,6 +415,41 @@ fn cleanup_x11_keyboard_state<E>(
 	}
 }
 
+/// Application name from a raw `WM_CLASS` property value: two NUL-terminated
+/// strings (instance, class). The class name is preferred; the instance name
+/// is the fallback for clients that only set one field.
+fn parse_wm_class(value: &[u8]) -> String {
+	let mut parts = value
+		.split(|&byte| byte == 0)
+		.filter(|part| !part.is_empty());
+	let instance = parts.next();
+	let class = parts.next();
+	class
+		.or(instance)
+		.map(|part| String::from_utf8_lossy(part).into_owned())
+		.unwrap_or_default()
+}
+
+/// Clip a window rectangle to the root geometry so a root `GetImage` of the
+/// result is always addressable. Returns `None` when nothing is visible.
+fn clip_to_root(
+	x: i32,
+	y: i32,
+	width: u32,
+	height: u32,
+	root_width: u32,
+	root_height: u32,
+) -> Option<(i32, i32, u32, u32)> {
+	let left = i64::from(x).max(0);
+	let top = i64::from(y).max(0);
+	let right = (i64::from(x) + i64::from(width)).min(i64::from(root_width));
+	let bottom = (i64::from(y) + i64::from(height)).min(i64::from(root_height));
+	if right <= left || bottom <= top {
+		return None;
+	}
+	Some((left as i32, top as i32, (right - left) as u32, (bottom - top) as u32))
+}
+
 #[cfg(target_os = "linux")]
 mod x11 {
 	use std::sync::Arc;
@@ -427,8 +462,10 @@ mod x11 {
 			ErrorKind,
 			randr::ConnectionExt as _,
 			xproto::{
-				BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ConnectionExt as _, ImageFormat, ImageOrder,
-				KEY_PRESS_EVENT, KEY_RELEASE_EVENT, MOTION_NOTIFY_EVENT, VisualClass, Window,
+				Atom, AtomEnum, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ButtonPressEvent,
+				ConnectionExt as _, EventMask, GetPropertyReply, ImageFormat, ImageOrder,
+				KEY_PRESS_EVENT, KEY_RELEASE_EVENT, KeyButMask, KeyPressEvent, MOTION_NOTIFY_EVENT,
+				MapState, Motion, MotionNotifyEvent, VisualClass, Window as XWindow,
 			},
 			xtest::ConnectionExt as _,
 		},
@@ -438,9 +475,9 @@ mod x11 {
 
 	use super::{
 		Axis, Button, ColorMasks, Coordinate, Direction, HeldTempReleaseOperation, Key, KeymapView,
-		X11CleanupOperation, button_detail, cleanup_x11_keyboard_state, color_components,
-		finish_held_temp_release, keysym_for_char, keysym_for_key, keysym_position, scroll_button,
-		spare_keycode, zpixmap_to_rgba,
+		X11CleanupOperation, button_detail, cleanup_x11_keyboard_state, clip_to_root,
+		color_components, finish_held_temp_release, keysym_for_char, keysym_for_key, keysym_position,
+		parse_wm_class, scroll_button, spare_keycode, zpixmap_to_rgba,
 	};
 
 	/// Capture/metadata-side failure. Stringly typed on purpose: the session
@@ -505,6 +542,109 @@ mod x11 {
 		X11InputError(format!("X11 input request failed: {error}"))
 	}
 
+	/// A validated root connection shared by enumerated monitors/windows for
+	/// their captures: TrueColor root visual, verified-readable root pixmap.
+	struct RootConnection {
+		conn:        Arc<RustConnection>,
+		root:        XWindow,
+		root_width:  u32,
+		root_height: u32,
+		color_masks: ColorMasks,
+	}
+
+	/// Connect, validate the root visual, and probe root readability.
+	///
+	/// A rootless `XWayland` root window has no backing pixmap, so root
+	/// `GetImage` fails with a Match error even though `DISPLAY` is set and
+	/// RandR enumerates monitors. Probing a 1x1 read up front fails fast with
+	/// an actionable message instead of emitting a raw protocol dump on the
+	/// first screenshot.
+	fn connect_root() -> Result<RootConnection, X11Error> {
+		let (conn, screen_num) =
+			x11rb::connect(None).map_err(|error| X11Error(connect_error(error)))?;
+		let conn = Arc::new(conn);
+		let screen = conn
+			.setup()
+			.roots
+			.get(screen_num)
+			.ok_or_else(|| X11Error("X11 setup reported no default screen".to_string()))?;
+		let root = screen.root;
+		let root_width = u32::from(screen.width_in_pixels);
+		let root_height = u32::from(screen.height_in_pixels);
+		let root_visual = screen
+			.allowed_depths
+			.iter()
+			.flat_map(|depth| &depth.visuals)
+			.find(|visual| visual.visual_id == screen.root_visual)
+			.ok_or_else(|| {
+				X11Error(format!("X server setup does not describe root visual {}", screen.root_visual))
+			})?;
+		if root_visual.class != VisualClass::TRUE_COLOR {
+			return Err(X11Error(format!(
+				"unsupported X11 root visual class {:?}; TrueColor is required",
+				root_visual.class
+			)));
+		}
+		let color_masks = ColorMasks {
+			red:   root_visual.red_mask,
+			green: root_visual.green_mask,
+			blue:  root_visual.blue_mask,
+		};
+		color_components(color_masks, 32).map_err(X11Error)?;
+		if let Err(error) = conn
+			.get_image(ImageFormat::Z_PIXMAP, root, 0, 0, 1, 1, !0)
+			.map_err(capture_error)?
+			.reply()
+		{
+			return Err(root_capture_error(&error));
+		}
+		Ok(RootConnection { conn, root, root_width, root_height, color_masks })
+	}
+
+	/// Capture one root-window rectangle as RGBA.
+	fn capture_root_rect(
+		conn: &RustConnection,
+		root: XWindow,
+		color_masks: ColorMasks,
+		x: i32,
+		y: i32,
+		width: u32,
+		height: u32,
+	) -> Result<RgbaImage, X11Error> {
+		let x = i16::try_from(x)
+			.map_err(|_| X11Error("capture origin exceeds the X11 coordinate space".into()))?;
+		let y = i16::try_from(y)
+			.map_err(|_| X11Error("capture origin exceeds the X11 coordinate space".into()))?;
+		let clamped_width = u16::try_from(width)
+			.map_err(|_| X11Error("capture size exceeds the X11 coordinate space".into()))?;
+		let clamped_height = u16::try_from(height)
+			.map_err(|_| X11Error("capture size exceeds the X11 coordinate space".into()))?;
+		let reply = conn
+			.get_image(ImageFormat::Z_PIXMAP, root, x, y, clamped_width, clamped_height, !0)
+			.map_err(capture_error)?
+			.reply()
+			.map_err(|error| root_capture_error(&error))?;
+		let setup = conn.setup();
+		let format = setup
+			.pixmap_formats
+			.iter()
+			.find(|format| format.depth == reply.depth)
+			.ok_or_else(|| {
+				X11Error(format!("X server advertises no pixmap format for depth {}", reply.depth))
+			})?;
+		zpixmap_to_rgba(
+			&reply.data,
+			width,
+			height,
+			reply.depth,
+			format.bits_per_pixel,
+			format.scanline_pad,
+			setup.image_byte_order == ImageOrder::LSB_FIRST,
+			color_masks,
+		)
+		.map_err(X11Error)
+	}
+
 	/// One `RandR` monitor plus the shared session connection used to capture
 	/// it.
 	///
@@ -513,7 +653,7 @@ mod x11 {
 	#[derive(Debug)]
 	pub struct Monitor {
 		conn:        Arc<RustConnection>,
-		root:        Window,
+		root:        XWindow,
 		color_masks: ColorMasks,
 		id:          u32,
 		name:        String,
@@ -532,50 +672,7 @@ mod x11 {
 		/// Enumerate active `RandR` monitors over a fresh connection shared by
 		/// the returned monitors for their captures.
 		pub fn all() -> Result<Vec<Self>, X11Error> {
-			let (conn, screen_num) =
-				x11rb::connect(None).map_err(|error| X11Error(connect_error(error)))?;
-			let conn = Arc::new(conn);
-			let screen = conn
-				.setup()
-				.roots
-				.get(screen_num)
-				.ok_or_else(|| X11Error("X11 setup reported no default screen".to_string()))?;
-			let root = screen.root;
-			let root_visual = screen
-				.allowed_depths
-				.iter()
-				.flat_map(|depth| &depth.visuals)
-				.find(|visual| visual.visual_id == screen.root_visual)
-				.ok_or_else(|| {
-					X11Error(format!(
-						"X server setup does not describe root visual {}",
-						screen.root_visual
-					))
-				})?;
-			if root_visual.class != VisualClass::TRUE_COLOR {
-				return Err(X11Error(format!(
-					"unsupported X11 root visual class {:?}; TrueColor is required",
-					root_visual.class
-				)));
-			}
-			let color_masks = ColorMasks {
-				red:   root_visual.red_mask,
-				green: root_visual.green_mask,
-				blue:  root_visual.blue_mask,
-			};
-			color_components(color_masks, 32).map_err(X11Error)?;
-			// A rootless XWayland root window has no backing pixmap, so root
-			// `GetImage` fails with a Match error even though `DISPLAY` is set and
-			// RandR enumerates monitors. Probe a 1x1 read up front and fail fast
-			// with an actionable message instead of emitting a raw protocol dump
-			// on the first screenshot.
-			if let Err(error) = conn
-				.get_image(ImageFormat::Z_PIXMAP, root, 0, 0, 1, 1, !0)
-				.map_err(capture_error)?
-				.reply()
-			{
-				return Err(root_capture_error(&error));
-			}
+			let RootConnection { conn, root, root_width, root_height, color_masks } = connect_root()?;
 			let reply = conn
 				.randr_get_monitors(root, true)
 				.map_err(capture_error)?
@@ -617,8 +714,8 @@ mod x11 {
 					name: "Screen".to_string(),
 					x: 0,
 					y: 0,
-					width: u32::from(screen.width_in_pixels),
-					height: u32::from(screen.height_in_pixels),
+					width: root_width,
+					height: root_height,
 					primary: true,
 				});
 			}
@@ -666,52 +763,267 @@ mod x11 {
 
 		/// Capture this monitor's rectangle from the root window as RGBA.
 		pub fn capture_image(&self) -> Result<RgbaImage, X11Error> {
-			let x = i16::try_from(self.x)
-				.map_err(|_| X11Error("monitor origin exceeds the X11 coordinate space".into()))?;
-			let y = i16::try_from(self.y)
-				.map_err(|_| X11Error("monitor origin exceeds the X11 coordinate space".into()))?;
-			let width = u16::try_from(self.width)
-				.map_err(|_| X11Error("monitor size exceeds the X11 coordinate space".into()))?;
-			let height = u16::try_from(self.height)
-				.map_err(|_| X11Error("monitor size exceeds the X11 coordinate space".into()))?;
-			let reply = self
-				.conn
-				.get_image(ImageFormat::Z_PIXMAP, self.root, x, y, width, height, !0)
-				.map_err(capture_error)?
-				.reply()
-				.map_err(|error| root_capture_error(&error))?;
-			let setup = self.conn.setup();
-			let format = setup
-				.pixmap_formats
-				.iter()
-				.find(|format| format.depth == reply.depth)
-				.ok_or_else(|| {
-					X11Error(format!("X server advertises no pixmap format for depth {}", reply.depth))
-				})?;
-			zpixmap_to_rgba(
-				&reply.data,
+			capture_root_rect(
+				&self.conn,
+				self.root,
+				self.color_masks,
+				self.x,
+				self.y,
 				self.width,
 				self.height,
-				reply.depth,
-				format.bits_per_pixel,
-				format.scanline_pad,
-				setup.image_byte_order == ImageOrder::LSB_FIRST,
-				self.color_masks,
 			)
-			.map_err(X11Error)
 		}
 	}
 
-	/// XTest-backed input synthesizer owning its own connection, mirroring the
-	/// `enigo::Enigo` call shapes.
+	/// One mapped top-level client window, enumerated through EWMH.
 	///
-	/// The keyboard mapping is cached; it only changes underneath us if the
-	/// user swaps layouts mid-session, and our own temporary bindings are
-	/// written back before anyone else can observe them.
+	/// Matches the `xcap::Window` call shapes `crate::desktop` uses; the
+	/// `Result` accessors exist purely for that signature parity. Geometry is
+	/// pre-clipped to the root so `capture_image` (a root `GetImage` crop, the
+	/// only readable source on a rootful server) is always addressable and
+	/// matches the reported rectangle exactly.
+	#[derive(Debug)]
+	pub struct Window {
+		conn:        Arc<RustConnection>,
+		root:        XWindow,
+		color_masks: ColorMasks,
+		id:          u32,
+		title:       String,
+		app_name:    String,
+		x:           i32,
+		y:           i32,
+		width:       u32,
+		/// Unclipped client origin used by direct window events.
+		event_x:     i32,
+		event_y:     i32,
+		height:      u32,
+		minimized:   bool,
+		focused:     bool,
+	}
+
+	/// Interned EWMH atoms used per window during enumeration.
+	struct WindowAtoms {
+		net_wm_name:         Atom,
+		utf8_string:         Atom,
+		net_wm_state:        Atom,
+		net_wm_state_hidden: Atom,
+	}
+
+	fn intern(conn: &RustConnection, name: &str) -> Result<Atom, X11Error> {
+		Ok(conn
+			.intern_atom(false, name.as_bytes())
+			.map_err(capture_error)?
+			.reply()
+			.map_err(capture_error)?
+			.atom)
+	}
+
+	/// Read a property, tolerating protocol errors (a window can be destroyed
+	/// mid-enumeration). `None` covers both errors and missing properties.
+	fn read_property(
+		conn: &RustConnection,
+		window: XWindow,
+		property: Atom,
+		r#type: impl Into<Atom>,
+		long_length: u32,
+	) -> Option<GetPropertyReply> {
+		let reply = conn
+			.get_property(false, window, property, r#type, 0, long_length)
+			.ok()?
+			.reply()
+			.ok()?;
+		(reply.value_len > 0).then_some(reply)
+	}
+
+	#[allow(
+		clippy::unnecessary_wraps,
+		reason = "accessor signatures mirror xcap::Window so desktop.rs call sites stay identical"
+	)]
+	impl Window {
+		/// Enumerate mapped EWMH client windows, topmost first, over a fresh
+		/// connection shared by the returned windows for their captures.
+		///
+		/// Servers without an EWMH window manager (bare Xvfb) report no client
+		/// list; that yields an empty vec rather than an error so full-desktop
+		/// capture keeps working there.
+		pub fn all() -> Result<Vec<Self>, X11Error> {
+			let RootConnection { conn, root, root_width, root_height, color_masks } = connect_root()?;
+			let stacking = intern(&conn, "_NET_CLIENT_LIST_STACKING")?;
+			let fallback = intern(&conn, "_NET_CLIENT_LIST")?;
+			let clients = read_property(&conn, root, stacking, AtomEnum::WINDOW, 4096)
+				.or_else(|| read_property(&conn, root, fallback, AtomEnum::WINDOW, 4096));
+			let Some(clients) = clients else {
+				return Ok(Vec::new());
+			};
+			let Some(client_ids) = clients.value32() else {
+				return Ok(Vec::new());
+			};
+			let active_atom = intern(&conn, "_NET_ACTIVE_WINDOW")?;
+			let active = read_property(&conn, root, active_atom, AtomEnum::WINDOW, 1)
+				.and_then(|reply| reply.value32()?.next());
+			let atoms = WindowAtoms {
+				net_wm_name:         intern(&conn, "_NET_WM_NAME")?,
+				utf8_string:         intern(&conn, "UTF8_STRING")?,
+				net_wm_state:        intern(&conn, "_NET_WM_STATE")?,
+				net_wm_state_hidden: intern(&conn, "_NET_WM_STATE_HIDDEN")?,
+			};
+			// _NET_CLIENT_LIST_STACKING is bottom-to-top; report topmost first.
+			let mut ids: Vec<XWindow> = client_ids.collect();
+			ids.reverse();
+			let mut windows = Vec::with_capacity(ids.len());
+			for id in ids {
+				if let Some(window) =
+					Self::query(&conn, root, root_width, root_height, color_masks, &atoms, active, id)
+				{
+					windows.push(window);
+				}
+			}
+			Ok(windows)
+		}
+
+		/// Snapshot one client window; `None` when it vanished mid-enumeration
+		/// or has no visible area on the root.
+		#[allow(
+			clippy::too_many_arguments,
+			reason = "internal enumeration plumbing shared by exactly one caller"
+		)]
+		fn query(
+			conn: &Arc<RustConnection>,
+			root: XWindow,
+			root_width: u32,
+			root_height: u32,
+			color_masks: ColorMasks,
+			atoms: &WindowAtoms,
+			active: Option<XWindow>,
+			id: XWindow,
+		) -> Option<Self> {
+			let attributes = conn.get_window_attributes(id).ok()?.reply().ok()?;
+			let geometry = conn.get_geometry(id).ok()?.reply().ok()?;
+			let origin = conn
+				.translate_coordinates(id, root, 0, 0)
+				.ok()?
+				.reply()
+				.ok()?;
+			let (x, y, width, height) = clip_to_root(
+				i32::from(origin.dst_x),
+				i32::from(origin.dst_y),
+				u32::from(geometry.width),
+				u32::from(geometry.height),
+				root_width,
+				root_height,
+			)?;
+			let hidden = read_property(conn, id, atoms.net_wm_state, AtomEnum::ATOM, 64)
+				.and_then(|reply| {
+					let mut states = reply.value32()?;
+					Some(states.any(|state| state == atoms.net_wm_state_hidden))
+				})
+				.unwrap_or(false);
+			let title = read_property(conn, id, atoms.net_wm_name, atoms.utf8_string, 1024)
+				.or_else(|| read_property(conn, id, AtomEnum::WM_NAME.into(), AtomEnum::ANY, 1024))
+				.map(|reply| String::from_utf8_lossy(&reply.value).into_owned())
+				.unwrap_or_default();
+			let app_name = read_property(conn, id, AtomEnum::WM_CLASS.into(), AtomEnum::STRING, 1024)
+				.map(|reply| parse_wm_class(&reply.value))
+				.unwrap_or_default();
+			Some(Self {
+				conn: Arc::clone(conn),
+				root,
+				color_masks,
+				id,
+				title,
+				app_name,
+				event_x: i32::from(origin.dst_x),
+				event_y: i32::from(origin.dst_y),
+				x,
+				y,
+				width,
+				height,
+				minimized: attributes.map_state != MapState::VIEWABLE || hidden,
+				focused: active == Some(id),
+			})
+		}
+
+		pub const fn id(&self) -> Result<u32, X11Error> {
+			Ok(self.id)
+		}
+
+		pub fn title(&self) -> Result<String, X11Error> {
+			Ok(self.title.clone())
+		}
+
+		pub fn app_name(&self) -> Result<String, X11Error> {
+			Ok(self.app_name.clone())
+		}
+
+		pub const fn x(&self) -> Result<i32, X11Error> {
+			Ok(self.x)
+		}
+
+		pub const fn y(&self) -> Result<i32, X11Error> {
+			Ok(self.y)
+		}
+
+		pub const fn width(&self) -> Result<u32, X11Error> {
+			Ok(self.width)
+		}
+
+		pub const fn height(&self) -> Result<u32, X11Error> {
+			Ok(self.height)
+		}
+
+		pub const fn is_minimized(&self) -> Result<bool, X11Error> {
+			Ok(self.minimized)
+		}
+
+		pub const fn is_focused(&self) -> Result<bool, X11Error> {
+			Ok(self.focused)
+		}
+
+		/// Capture the window's visible rectangle from the root window as
+		/// RGBA. Root pixels are what input coordinates map against, so an
+		/// occluding window is captured as seen rather than hidden.
+		pub fn capture_image(&self) -> Result<RgbaImage, X11Error> {
+			capture_root_rect(
+				&self.conn,
+				self.root,
+				self.color_masks,
+				self.x,
+				self.y,
+				self.width,
+				self.height,
+			)
+		}
+	}
+
+	#[derive(Debug)]
+	struct WindowInputTarget {
+		window:    XWindow,
+		origin_x:  i16,
+		origin_y:  i16,
+		pointer_x: i16,
+		pointer_y: i16,
+		state:     KeyButMask,
+	}
+
+	fn button_state_mask(detail: u8) -> Option<KeyButMask> {
+		match detail {
+			1 => Some(KeyButMask::BUTTON1),
+			2 => Some(KeyButMask::BUTTON2),
+			3 => Some(KeyButMask::BUTTON3),
+			4 => Some(KeyButMask::BUTTON4),
+			5 => Some(KeyButMask::BUTTON5),
+			_ => None,
+		}
+	}
+
+	/// Native X11 input. Desktop mode uses XTest; window mode sends events
+	/// directly to one client and therefore leaves focus and the real pointer
+	/// unchanged.
 	#[derive(Debug)]
 	pub struct Input {
-		conn:                RustConnection,
-		root:                Window,
+		conn:                Arc<RustConnection>,
+		root:                XWindow,
+		target:              Option<WindowInputTarget>,
 		min_keycode:         u8,
 		keysyms_per_keycode: u8,
 		keysyms:             Vec<u32>,
@@ -721,27 +1033,82 @@ mod x11 {
 	}
 
 	impl Input {
-		/// Connect and verify the XTEST extension is usable.
+		/// Connect and verify the XTEST extension used for global desktop input.
 		pub fn new() -> Result<Self, X11InputError> {
 			let (conn, screen_num) =
 				x11rb::connect(None).map_err(|error| X11InputError(connect_error(error)))?;
-			let setup = conn.setup();
-			let root = setup
+			let conn = Arc::new(conn);
+			let root = conn
+				.setup()
 				.roots
 				.get(screen_num)
 				.ok_or_else(|| X11InputError("X11 setup reported no default screen".to_string()))?
 				.root;
+			Self::from_connection(conn, root, None, true)
+		}
+
+		/// Reuse an enumerated window's connection for direct, focus-preserving
+		/// client events. XTEST is intentionally not required in this mode.
+		pub fn for_window(window: &Window) -> Result<Self, X11InputError> {
+			let origin_x = i16::try_from(window.event_x).map_err(|_| {
+				X11InputError(format!(
+					"window x origin {} exceeds the X11 coordinate space",
+					window.event_x
+				))
+			})?;
+			let origin_y = i16::try_from(window.event_y).map_err(|_| {
+				X11InputError(format!(
+					"window y origin {} exceeds the X11 coordinate space",
+					window.event_y
+				))
+			})?;
+			let pointer_x = i16::try_from(window.x).map_err(|_| {
+				X11InputError(format!(
+					"window x coordinate {} exceeds the X11 coordinate space",
+					window.x
+				))
+			})?;
+			let pointer_y = i16::try_from(window.y).map_err(|_| {
+				X11InputError(format!(
+					"window y coordinate {} exceeds the X11 coordinate space",
+					window.y
+				))
+			})?;
+			Self::from_connection(
+				Arc::clone(&window.conn),
+				window.root,
+				Some(WindowInputTarget {
+					window: window.id,
+					origin_x,
+					origin_y,
+					pointer_x,
+					pointer_y,
+					state: KeyButMask::default(),
+				}),
+				false,
+			)
+		}
+
+		fn from_connection(
+			conn: Arc<RustConnection>,
+			root: XWindow,
+			target: Option<WindowInputTarget>,
+			require_xtest: bool,
+		) -> Result<Self, X11InputError> {
+			let setup = conn.setup();
 			let (min_keycode, max_keycode) = (setup.min_keycode, setup.max_keycode);
-			conn
-				.xtest_get_version(2, 2)
-				.map_err(input_request_error)?
-				.reply()
-				.map_err(|error| {
-					X11InputError(format!(
-						"the X server does not support the XTEST extension required for native input: \
-						 {error}"
-					))
-				})?;
+			if require_xtest {
+				conn
+					.xtest_get_version(2, 2)
+					.map_err(input_request_error)?
+					.reply()
+					.map_err(|error| {
+						X11InputError(format!(
+							"the X server does not support the XTEST extension required for native \
+							 input: {error}"
+						))
+					})?;
+			}
 			let mapping = conn
 				.get_keyboard_mapping(min_keycode, max_keycode - min_keycode + 1)
 				.map_err(input_request_error)?
@@ -750,11 +1117,168 @@ mod x11 {
 			Ok(Self {
 				conn,
 				root,
+				target,
 				min_keycode,
 				keysyms_per_keycode: mapping.keysyms_per_keycode,
 				keysyms: mapping.keysyms,
 				held_temp: Vec::new(),
 			})
+		}
+
+		fn fake_input(
+			&mut self,
+			event_type: u8,
+			detail: u8,
+			x: i16,
+			y: i16,
+		) -> Result<(), X11InputError> {
+			if self.target.is_none() {
+				return self
+					.conn
+					.xtest_fake_input(event_type, detail, x11rb::CURRENT_TIME, self.root, x, y, 0)
+					.map_err(input_request_error)?
+					.check()
+					.map_err(input_request_error);
+			}
+
+			let key_mask = self.keycode_state_mask(detail);
+			let conn = Arc::clone(&self.conn);
+			let root = self.root;
+			let target = self.target.as_mut().expect("checked window input target");
+			if event_type == MOTION_NOTIFY_EVENT {
+				target.pointer_x = x;
+				target.pointer_y = y;
+			}
+			let event_x = i16::try_from(i32::from(target.pointer_x) - i32::from(target.origin_x))
+				.map_err(|_| X11InputError("window-relative X11 x coordinate overflow".to_string()))?;
+			let event_y = i16::try_from(i32::from(target.pointer_y) - i32::from(target.origin_y))
+				.map_err(|_| X11InputError("window-relative X11 y coordinate overflow".to_string()))?;
+
+			match event_type {
+				MOTION_NOTIFY_EVENT => conn
+					.send_event(false, target.window, EventMask::POINTER_MOTION, MotionNotifyEvent {
+						response_type: event_type,
+						detail: Motion::NORMAL,
+						sequence: 0,
+						time: x11rb::CURRENT_TIME,
+						root,
+						event: target.window,
+						child: 0,
+						root_x: target.pointer_x,
+						root_y: target.pointer_y,
+						event_x,
+						event_y,
+						state: target.state,
+						same_screen: true,
+					})
+					.map_err(input_request_error)?
+					.check()
+					.map_err(input_request_error)?,
+				BUTTON_PRESS_EVENT | BUTTON_RELEASE_EVENT => {
+					let event_mask = if event_type == BUTTON_PRESS_EVENT {
+						EventMask::BUTTON_PRESS
+					} else {
+						EventMask::BUTTON_RELEASE
+					};
+					conn
+						.send_event(false, target.window, event_mask, ButtonPressEvent {
+							response_type: event_type,
+							detail,
+							sequence: 0,
+							time: x11rb::CURRENT_TIME,
+							root,
+							event: target.window,
+							child: 0,
+							root_x: target.pointer_x,
+							root_y: target.pointer_y,
+							event_x,
+							event_y,
+							state: target.state,
+							same_screen: true,
+						})
+						.map_err(input_request_error)?
+						.check()
+						.map_err(input_request_error)?;
+					if let Some(mask) = button_state_mask(detail) {
+						if event_type == BUTTON_PRESS_EVENT {
+							target.state |= mask;
+						} else {
+							target.state = KeyButMask::from(u16::from(target.state) & !u16::from(mask));
+						}
+					}
+				},
+				KEY_PRESS_EVENT | KEY_RELEASE_EVENT => {
+					let event_mask = if event_type == KEY_PRESS_EVENT {
+						EventMask::KEY_PRESS
+					} else {
+						EventMask::KEY_RELEASE
+					};
+					conn
+						.send_event(false, target.window, event_mask, KeyPressEvent {
+							response_type: event_type,
+							detail,
+							sequence: 0,
+							time: x11rb::CURRENT_TIME,
+							root,
+							event: target.window,
+							child: 0,
+							root_x: target.pointer_x,
+							root_y: target.pointer_y,
+							event_x,
+							event_y,
+							state: target.state,
+							same_screen: true,
+						})
+						.map_err(input_request_error)?
+						.check()
+						.map_err(input_request_error)?;
+					if let Some(mask) = key_mask {
+						if event_type == KEY_PRESS_EVENT {
+							target.state |= mask;
+						} else {
+							target.state = KeyButMask::from(u16::from(target.state) & !u16::from(mask));
+						}
+					}
+				},
+				_ => {
+					return Err(X11InputError(format!(
+						"unsupported direct X11 event opcode {event_type}"
+					)));
+				},
+			}
+			Ok(())
+		}
+
+		fn keycode_state_mask(&self, keycode: u8) -> Option<KeyButMask> {
+			let row = usize::from(keycode.checked_sub(self.min_keycode)?);
+			let width = usize::from(self.keysyms_per_keycode);
+			let keysyms = self.keysyms.get(row * width..row * width + width)?;
+			for &keysym in keysyms {
+				let mask = match keysym {
+					value if value == Keysym::Shift_L.raw() || value == Keysym::Shift_R.raw() => {
+						KeyButMask::SHIFT
+					},
+					value if value == Keysym::Control_L.raw() || value == Keysym::Control_R.raw() => {
+						KeyButMask::CONTROL
+					},
+					value if value == Keysym::Alt_L.raw() || value == Keysym::Alt_R.raw() => {
+						KeyButMask::MOD1
+					},
+					value
+						if value == Keysym::Meta_L.raw()
+							|| value == Keysym::Meta_R.raw()
+							|| value == Keysym::Super_L.raw()
+							|| value == Keysym::Super_R.raw() =>
+					{
+						KeyButMask::MOD4
+					},
+					value if value == Keysym::Caps_Lock.raw() => KeyButMask::LOCK,
+					value if value == Keysym::Num_Lock.raw() => KeyButMask::MOD2,
+					_ => continue,
+				};
+				return Some(mask);
+			}
+			None
 		}
 
 		/// Absolute pointer motion in root (global desktop) coordinates.
@@ -813,21 +1337,6 @@ mod x11 {
 			}
 		}
 
-		fn fake_input(
-			&self,
-			event_type: u8,
-			detail: u8,
-			x: i16,
-			y: i16,
-		) -> Result<(), X11InputError> {
-			self
-				.conn
-				.xtest_fake_input(event_type, detail, x11rb::CURRENT_TIME, self.root, x, y, 0)
-				.map_err(input_request_error)?
-				.check()
-				.map_err(input_request_error)
-		}
-
 		fn send_keysym(&mut self, keysym: u32, direction: Direction) -> Result<(), X11InputError> {
 			if keysym == 0 {
 				return Err(X11InputError(
@@ -850,7 +1359,7 @@ mod x11 {
 		}
 
 		fn send_key_transition(
-			&self,
+			&mut self,
 			keycode: u8,
 			direction: Direction,
 		) -> Result<(), X11InputError> {
@@ -865,7 +1374,7 @@ mod x11 {
 
 		/// The keysym only exists at shift level 1, so wrap the transition in
 		/// a synthetic Shift press/release.
-		fn send_shifted(&self, keycode: u8, direction: Direction) -> Result<(), X11InputError> {
+		fn send_shifted(&mut self, keycode: u8, direction: Direction) -> Result<(), X11InputError> {
 			let (shift, _) = keysym_position(&self.view(), Keysym::Shift_L.raw())
 				.ok_or_else(|| X11InputError("keyboard mapping has no Shift keycode".to_string()))?;
 			self.fake_input(KEY_PRESS_EVENT, shift, 0, 0)?;
@@ -994,7 +1503,7 @@ mod x11 {
 }
 
 #[cfg(target_os = "linux")]
-pub use x11::{Input, Monitor, X11Error, X11InputError};
+pub use x11::{Input, Monitor, Window, X11Error, X11InputError};
 
 #[cfg(test)]
 mod tests {
@@ -1029,6 +1538,27 @@ mod tests {
 		assert_eq!(keysym_for_char('\r'), 0xff0d);
 		assert_eq!(keysym_for_char('\t'), 0xff09);
 		assert_eq!(keysym_for_char('あ'), 0x0100_0000 + 0x3042);
+	}
+
+	#[test]
+	fn wm_class_prefers_the_class_name_over_the_instance() {
+		assert_eq!(parse_wm_class(b"navigator\0Firefox\0"), "Firefox");
+		assert_eq!(parse_wm_class(b"xterm\0"), "xterm");
+		assert_eq!(parse_wm_class(b"\0Konsole\0"), "Konsole");
+		assert_eq!(parse_wm_class(b""), "");
+	}
+
+	#[test]
+	fn window_rects_clip_to_the_root_and_drop_offscreen_windows() {
+		// Fully visible: unchanged.
+		assert_eq!(clip_to_root(10, 20, 300, 200, 1920, 1080), Some((10, 20, 300, 200)));
+		// Hanging off the top-left: origin clamps, size shrinks.
+		assert_eq!(clip_to_root(-50, -20, 300, 200, 1920, 1080), Some((0, 0, 250, 180)));
+		// Hanging off the bottom-right: size shrinks.
+		assert_eq!(clip_to_root(1900, 1000, 300, 200, 1920, 1080), Some((1900, 1000, 20, 80)));
+		// Entirely offscreen: no visible area.
+		assert_eq!(clip_to_root(2000, 0, 300, 200, 1920, 1080), None);
+		assert_eq!(clip_to_root(-400, 0, 300, 200, 1920, 1080), None);
 	}
 
 	#[test]

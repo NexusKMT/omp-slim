@@ -33,13 +33,20 @@ export declare class DesktopSession {
   constructor(options?: DesktopSessionOptions | undefined | null)
   /** Current backend capability and permission state. */
   get capabilities(): DesktopCapabilities
-  /** Capture a fresh PNG composite of the selected display(s). */
-  capture(): Promise<DesktopCapture>
+  /** List current capturable top-level windows without capturing a display. */
+  listWindows(): Promise<Array<DesktopWindow>>
   /**
-   * Execute a validated action batch in order, then return a fresh
-   * screenshot.
+   * Capture a fresh PNG frame of `window`: `desktop` for the selected
+   * display composite, or a numeric id from a prior capture's `windows`
+   * listing.
    */
-  execute(actions: Array<DesktopAction>): Promise<DesktopCapture>
+  capture(window: string): Promise<DesktopCapture>
+  /**
+   * Execute a validated action batch against `window`, then return its
+   * fresh screenshot. Coordinate actions require the same window as the
+   * preceding frame.
+   */
+  execute(actions: Array<DesktopAction>, window: string): Promise<DesktopCapture>
   /** Close the worker and native platform connections. Idempotent and bounded. */
   close(): Promise<undefined>
 }
@@ -615,6 +622,13 @@ export interface DesktopCapture {
   width: number
   height: number
   displays: Array<DesktopDisplay>
+  /** Capture target this frame was rendered from: `desktop` or a window id. */
+  target: string
+  /**
+   * Top-level windows visible at capture time, topmost first. Best-effort
+   * on full-desktop captures; empty when enumeration is unsupported.
+   */
+  windows: Array<DesktopWindow>
   backend: string
   displayServer?: string
   capturePermission: string
@@ -659,6 +673,25 @@ export interface DesktopSessionOptions {
   maxWidth?: number
   /** Maximum composite screenshot height in pixels. */
   maxHeight?: number
+}
+
+/** One capturable top-level window in global logical desktop coordinates. */
+export interface DesktopWindow {
+  /**
+   * Stable numeric window id, valid as a capture target while the window
+   * lives.
+   */
+  id: string
+  /** Window title; may be empty for untitled windows. */
+  title: string
+  /** Owning application name. */
+  app: string
+  x: number
+  y: number
+  width: number
+  height: number
+  /** Whether the window currently holds input focus. */
+  focused: boolean
 }
 
 /**

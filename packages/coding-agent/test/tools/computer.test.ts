@@ -1,10 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import type { AgentTool, AgentToolContext } from "@oh-my-pi/pi-agent-core";
-import type { Api, ComputerAction, ComputerToolCallMetadata, Model } from "@oh-my-pi/pi-ai";
+import type { Api, ComputerAction, Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
-import { ExtensionToolWrapper } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import { getThemeByName } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { buildSystemPrompt } from "@oh-my-pi/pi-coding-agent/system-prompt";
 import {
@@ -29,7 +26,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/tools/computer/supervisor";
 import { ComputerWorkerCore, type NativeDesktopSession } from "@oh-my-pi/pi-coding-agent/tools/computer/worker";
 import { computerToolRenderer } from "@oh-my-pi/pi-coding-agent/tools/computer-renderer";
-import { buildNamedToolChoice, isToolChoiceActive } from "@oh-my-pi/pi-coding-agent/utils/tool-choice";
+import { buildNamedToolChoice } from "@oh-my-pi/pi-coding-agent/utils/tool-choice";
 import type { DesktopAction, DesktopCapabilities, DesktopCapture, DesktopSessionOptions } from "@oh-my-pi/pi-natives";
 import { type as arkType } from "arktype";
 
@@ -42,11 +39,24 @@ const capabilities: DesktopCapabilities = {
 	inputPermission: "granted",
 	displayCount: 1,
 };
-function capture(byte: number): DesktopCapture {
+function capture(byte: number, target = "desktop"): DesktopCapture {
 	return {
 		data: Uint8Array.of(byte),
 		width: 1280,
 		height: 720,
+		target,
+		windows: [
+			{
+				id: "42",
+				title: "Editor",
+				app: "Code",
+				x: 100,
+				y: 50,
+				width: 800,
+				height: 600,
+				focused: true,
+			},
+		],
 		backend: "test-native",
 		displayServer: "test",
 		capturePermission: "granted",
@@ -67,15 +77,24 @@ function capture(byte: number): DesktopCapture {
 				isPrimary: true,
 			},
 		],
-	} as DesktopCapture;
+	};
 }
 
 class TestTransport implements ComputerWorkerTransport {
 	readonly outbound: ComputerWorkerOutbound[] = [];
 	#handler?: (message: ComputerWorkerInbound) => void;
+	#waiters = new Set<{
+		predicate: (message: ComputerWorkerOutbound) => boolean;
+		resolve: (message: ComputerWorkerOutbound) => void;
+	}>();
 
 	send(message: ComputerWorkerOutbound): void {
 		this.outbound.push(message);
+		for (const waiter of this.#waiters) {
+			if (!waiter.predicate(message)) continue;
+			this.#waiters.delete(waiter);
+			waiter.resolve(message);
+		}
 	}
 
 	onMessage(handler: (message: ComputerWorkerInbound) => void): () => void {
@@ -90,15 +109,19 @@ class TestTransport implements ComputerWorkerTransport {
 	inbound(message: ComputerWorkerInbound): void {
 		this.#handler?.(message);
 	}
-}
 
-async function settle(): Promise<void> {
-	await Bun.sleep(100);
+	waitFor(predicate: (message: ComputerWorkerOutbound) => boolean): Promise<ComputerWorkerOutbound> {
+		const existing = this.outbound.find(predicate);
+		if (existing) return Promise.resolve(existing);
+		const pending = Promise.withResolvers<ComputerWorkerOutbound>();
+		this.#waiters.add({ predicate, resolve: pending.resolve });
+		return pending.promise;
+	}
 }
 
 class FakeNativeSession implements NativeDesktopSession {
 	capabilityDisplayCount = 0;
-	readonly calls: Array<{ type: "capture" } | { type: "execute"; actions: DesktopAction[] }> = [];
+	readonly calls: Array<{ type: "list" } | { type: "execute"; window: string; actions: DesktopAction[] }> = [];
 	active = 0;
 	maxActive = 0;
 	closeCount = 0;
@@ -107,20 +130,20 @@ class FakeNativeSession implements NativeDesktopSession {
 		return { ...capabilities, displayCount: this.capabilityDisplayCount };
 	}
 
-	async capture(): Promise<DesktopCapture> {
-		this.calls.push({ type: "capture" });
+	async listWindows(): Promise<DesktopCapture["windows"]> {
+		this.calls.push({ type: "list" });
 		this.capabilityDisplayCount = 1;
-		return capture(++this.#captureId);
+		return capture(0).windows;
 	}
 
-	async execute(actions: DesktopAction[]): Promise<DesktopCapture> {
-		this.calls.push({ type: "execute", actions });
+	async execute(actions: DesktopAction[], window: string): Promise<DesktopCapture> {
+		this.calls.push({ type: "execute", window, actions });
 		this.capabilityDisplayCount = 2;
 		this.active += 1;
 		this.maxActive = Math.max(this.maxActive, this.active);
-		await Bun.sleep(5);
+		await Promise.resolve();
 		this.active -= 1;
-		return capture(++this.#captureId);
+		return capture(++this.#captureId, window);
 	}
 
 	async close(): Promise<void> {
@@ -131,11 +154,19 @@ class FakeNativeSession implements NativeDesktopSession {
 class FakeController implements ComputerController {
 	readonly capabilities = capabilities;
 	readonly batches: DesktopAction[][] = [];
+	readonly windows: string[] = [];
+	listCount = 0;
 	closeCount = 0;
 
-	async execute(actions: DesktopAction[]): Promise<DesktopCapture> {
+	async list(): Promise<DesktopCapture["windows"]> {
+		this.listCount += 1;
+		return capture(0).windows;
+	}
+
+	async execute(window: string, actions: DesktopAction[]): Promise<DesktopCapture> {
+		this.windows.push(window);
 		this.batches.push(actions);
-		return capture(this.batches.length);
+		return capture(this.batches.length, window);
 	}
 
 	async close(): Promise<void> {
@@ -150,12 +181,21 @@ class NonClosingWorker implements ComputerWorkerHandle {
 	send(message: ComputerWorkerInbound): void {
 		if (message.type === "init") {
 			queueMicrotask(() => this.#emit({ type: "ready", capabilities: { ...capabilities, displayCount: 0 } }));
+		} else if (message.type === "list") {
+			queueMicrotask(() =>
+				this.#emit({
+					type: "windows",
+					id: message.id,
+					windows: capture(0).windows,
+					capabilities: { ...capabilities, displayCount: 1 },
+				}),
+			);
 		} else if (message.type === "execute") {
 			queueMicrotask(() =>
 				this.#emit({
 					type: "result",
 					id: message.id,
-					capture: capture(9),
+					capture: capture(9, message.window),
 					capabilities: { ...capabilities, displayCount: 2 },
 				}),
 			);
@@ -224,31 +264,9 @@ function toolSession(settings: Settings, model?: Model<Api>): ToolSession {
 	} as ToolSession;
 }
 
-function callContext(
-	settings: Settings,
-	actions: ComputerAction[],
-	pendingSafetyChecks: ComputerToolCallMetadata["pendingSafetyChecks"] = [],
-): AgentToolContext {
-	return {
-		settings,
-		toolCall: {
-			batchId: "batch",
-			index: 0,
-			total: 1,
-			toolCalls: [{ id: "call", name: "computer" }],
-			providerMetadata: {
-				type: "computer",
-				providerItemId: "provider-call",
-				actions,
-				pendingSafetyChecks,
-			},
-		},
-	} as AgentToolContext;
-}
-
 describe("native computer worker", () => {
 	const unseenFrameMessage =
-		"Coordinate computer actions require a screenshot returned to the provider; request a screenshot first";
+		"Coordinate computer actions require a screenshot of window `desktop` returned to the provider; request that window first";
 
 	it("rejects every first-call coordinate action without capturing or executing native input", async () => {
 		const transport = new TestTransport();
@@ -271,9 +289,14 @@ describe("native computer worker", () => {
 
 		transport.inbound({ type: "init", options });
 		for (const [index, action] of coordinateActions.entries()) {
-			transport.inbound({ type: "execute", id: `coordinate-${String(index)}`, actions: [action] });
+			transport.inbound({
+				type: "execute",
+				id: `coordinate-${String(index)}`,
+				window: "desktop",
+				actions: [action],
+			});
 		}
-		await settle();
+		await transport.waitFor(message => message.type === "error" && message.id === "coordinate-4");
 
 		expect(native.calls).toEqual([]);
 		expect(transport.outbound.filter(message => message.type === "error")).toEqual(
@@ -283,6 +306,32 @@ describe("native computer worker", () => {
 				error: { name: "Error", message: unseenFrameMessage },
 			})),
 		);
+	});
+
+	it("lists windows without capturing or establishing a coordinate frame", async () => {
+		const transport = new TestTransport();
+		const native = new FakeNativeSession();
+		const options: DesktopSessionOptions = { backend: "native", display: "all", maxWidth: 1920, maxHeight: 1200 };
+		new ComputerWorkerCore(transport, () => native);
+
+		transport.inbound({ type: "init", options });
+		transport.inbound({ type: "list", id: "targets" });
+		const listed = await transport.waitFor(message => message.type === "windows" && message.id === "targets");
+		expect(listed).toEqual({
+			type: "windows",
+			id: "targets",
+			windows: capture(0).windows,
+			capabilities: { ...capabilities, displayCount: 1 },
+		});
+
+		transport.inbound({
+			type: "execute",
+			id: "coordinate-after-list",
+			window: "desktop",
+			actions: [{ type: "move", x: 10, y: 20 }],
+		});
+		await transport.waitFor(message => message.type === "error" && message.id === "coordinate-after-list");
+		expect(native.calls).toEqual([{ type: "list" }]);
 	});
 
 	it("uses a returned screenshot for later coordinates while preserving ordered fresh results", async () => {
@@ -295,19 +344,25 @@ describe("native computer worker", () => {
 		});
 
 		transport.inbound({ type: "init", options });
-		transport.inbound({ type: "execute", id: "screenshot", actions: [{ type: "screenshot" }] });
+		transport.inbound({ type: "execute", id: "screenshot", window: "desktop", actions: [{ type: "screenshot" }] });
 		transport.inbound({
 			type: "execute",
 			id: "coordinate",
+			window: "desktop",
 			actions: [{ type: "click", x: 10, y: 20, button: "left" }],
 		});
-		transport.inbound({ type: "execute", id: "keyboard", actions: [{ type: "keypress", keys: ["CTRL", "L"] }] });
-		await settle();
+		transport.inbound({
+			type: "execute",
+			id: "keyboard",
+			window: "desktop",
+			actions: [{ type: "keypress", keys: ["CTRL", "L"] }],
+		});
+		await transport.waitFor(message => message.type === "result" && message.id === "keyboard");
 
 		expect(native.calls).toEqual([
-			{ type: "execute", actions: [{ type: "screenshot" }] },
-			{ type: "execute", actions: [{ type: "click", x: 10, y: 20, button: "left" }] },
-			{ type: "execute", actions: [{ type: "keypress", keys: ["CTRL", "L"] }] },
+			{ type: "execute", window: "desktop", actions: [{ type: "screenshot" }] },
+			{ type: "execute", window: "desktop", actions: [{ type: "click", x: 10, y: 20, button: "left" }] },
+			{ type: "execute", window: "desktop", actions: [{ type: "keypress", keys: ["CTRL", "L"] }] },
 		]);
 		expect(native.maxActive).toBe(1);
 		const results = transport.outbound.filter(message => message.type === "result");
@@ -320,7 +375,7 @@ describe("native computer worker", () => {
 
 		transport.inbound({ type: "close" });
 		transport.inbound({ type: "close" });
-		await settle();
+		await transport.waitFor(message => message.type === "closed");
 		expect(native.closeCount).toBe(1);
 	});
 
@@ -331,17 +386,78 @@ describe("native computer worker", () => {
 		new ComputerWorkerCore(transport, () => native);
 
 		transport.inbound({ type: "init", options });
-		transport.inbound({ type: "execute", id: "keyboard", actions: [{ type: "keypress", keys: ["TAB"] }] });
-		transport.inbound({ type: "execute", id: "coordinate", actions: [{ type: "move", x: 30, y: 40 }] });
-		await settle();
+		transport.inbound({
+			type: "execute",
+			id: "keyboard",
+			window: "desktop",
+			actions: [{ type: "keypress", keys: ["TAB"] }],
+		});
+		transport.inbound({
+			type: "execute",
+			id: "coordinate",
+			window: "desktop",
+			actions: [{ type: "move", x: 30, y: 40 }],
+		});
+		await transport.waitFor(message => message.type === "result" && message.id === "coordinate");
 
 		expect(native.calls).toEqual([
-			{ type: "execute", actions: [{ type: "keypress", keys: ["TAB"] }] },
-			{ type: "execute", actions: [{ type: "move", x: 30, y: 40 }] },
+			{ type: "execute", window: "desktop", actions: [{ type: "keypress", keys: ["TAB"] }] },
+			{ type: "execute", window: "desktop", actions: [{ type: "move", x: 30, y: 40 }] },
 		]);
 		expect(transport.outbound.filter(message => message.type === "result").map(result => result.id)).toEqual([
 			"keyboard",
 			"coordinate",
+		]);
+	});
+
+	it("requires a fresh frame after switching window targets", async () => {
+		const transport = new TestTransport();
+		const native = new FakeNativeSession();
+		const options: DesktopSessionOptions = { backend: "native", display: "all", maxWidth: 1920, maxHeight: 1200 };
+		new ComputerWorkerCore(transport, () => native);
+
+		transport.inbound({ type: "init", options });
+		transport.inbound({
+			type: "execute",
+			id: "desktop-frame",
+			window: "desktop",
+			actions: [{ type: "screenshot" }],
+		});
+		await transport.waitFor(message => message.type === "result" && message.id === "desktop-frame");
+
+		transport.inbound({
+			type: "execute",
+			id: "wrong-frame",
+			window: "42",
+			actions: [{ type: "click", x: 10, y: 20, button: "left" }],
+		});
+		const wrongFrame = await transport.waitFor(message => message.type === "error" && message.id === "wrong-frame");
+		expect(wrongFrame).toMatchObject({
+			error: {
+				message:
+					"Coordinate computer actions require a screenshot of window `42` returned to the provider; request that window first",
+			},
+		});
+
+		transport.inbound({
+			type: "execute",
+			id: "window-frame",
+			window: "42",
+			actions: [{ type: "keypress", keys: ["TAB"] }],
+		});
+		await transport.waitFor(message => message.type === "result" && message.id === "window-frame");
+		transport.inbound({
+			type: "execute",
+			id: "window-coordinate",
+			window: "42",
+			actions: [{ type: "move", x: 30, y: 40 }],
+		});
+		await transport.waitFor(message => message.type === "result" && message.id === "window-coordinate");
+
+		expect(native.calls).toEqual([
+			{ type: "execute", window: "desktop", actions: [{ type: "screenshot" }] },
+			{ type: "execute", window: "42", actions: [{ type: "keypress", keys: ["TAB"] }] },
+			{ type: "execute", window: "42", actions: [{ type: "move", x: 30, y: 40 }] },
 		]);
 	});
 
@@ -351,8 +467,13 @@ describe("native computer worker", () => {
 		const firstNative = new FakeNativeSession();
 		new ComputerWorkerCore(firstTransport, () => firstNative);
 		firstTransport.inbound({ type: "init", options });
-		firstTransport.inbound({ type: "execute", id: "screenshot", actions: [{ type: "screenshot" }] });
-		await settle();
+		firstTransport.inbound({
+			type: "execute",
+			id: "screenshot",
+			window: "desktop",
+			actions: [{ type: "screenshot" }],
+		});
+		await firstTransport.waitFor(message => message.type === "result" && message.id === "screenshot");
 		expect(firstTransport.outbound.some(message => message.type === "result")).toBe(true);
 
 		const recreatedTransport = new TestTransport();
@@ -362,9 +483,10 @@ describe("native computer worker", () => {
 		recreatedTransport.inbound({
 			type: "execute",
 			id: "coordinate-first",
+			window: "desktop",
 			actions: [{ type: "scroll", x: 10, y: 20, scroll_x: 0, scroll_y: 100 }],
 		});
-		await settle();
+		await recreatedTransport.waitFor(message => message.type === "error" && message.id === "coordinate-first");
 
 		expect(recreatedNative.calls).toEqual([]);
 		expect(recreatedTransport.outbound).toContainEqual({
@@ -396,7 +518,10 @@ describe("computer supervisor", () => {
 			() => worker,
 			{ startMs: 50, closeMs: 10 },
 		);
-		await supervisor.execute([{ type: "screenshot" }]);
+		const windows = await supervisor.list();
+		expect(windows).toEqual(capture(0).windows);
+		expect(supervisor.capabilities?.displayCount).toBe(1);
+		await supervisor.execute("desktop", [{ type: "screenshot" }]);
 		expect(supervisor.capabilities?.displayCount).toBe(2);
 		await supervisor.close();
 		await supervisor.close();
@@ -413,15 +538,13 @@ describe("computer supervisor", () => {
 });
 
 describe("computer tool choice", () => {
-	it("uses native forced choice for GA models and named function choice for the fallback", () => {
-		const supported = { api: "openai-responses", supportsComputerUse: true } as unknown as Model<Api>;
-		expect(buildNamedToolChoice("computer", supported)).toEqual({ type: "computer" });
+	it("uses named function choice for computer models regardless of native capability", () => {
 		for (const api of ["openai-responses", "openai-codex-responses", "azure-openai-responses"] as const) {
-			const unsupported = { api, supportsComputerUse: false } as unknown as Model<Api>;
-			expect(buildNamedToolChoice("computer", unsupported)).toEqual({ type: "function", name: "computer" });
+			for (const supportsComputerUse of [false, true]) {
+				const model = { api, supportsComputerUse } as unknown as Model<Api>;
+				expect(buildNamedToolChoice("computer", model)).toEqual({ type: "function", name: "computer" });
+			}
 		}
-		expect(isToolChoiceActive({ type: "computer" }, [{ name: "computer" }])).toBe(true);
-		expect(isToolChoiceActive({ type: "computer" }, [{ name: "read" }])).toBe(false);
 	});
 });
 
@@ -440,6 +563,7 @@ describe("computer tool", () => {
 			() => new FakeController(),
 		);
 		const ok = tool.parameters({
+			window: "desktop",
 			actions: [
 				{ type: "click", x: 1, y: 2, button: "left", keys: null },
 				{ type: "double_click", x: 3, y: 4 },
@@ -474,21 +598,38 @@ describe("computer tool", () => {
 				},
 			],
 		]) {
-			expect(tool.parameters({ actions }) instanceof arkType.errors).toBe(true);
+			expect(tool.parameters({ window: "desktop", actions }) instanceof arkType.errors).toBe(true);
 		}
-		expect(tool.parameters({ actions: [], unexpected: true }) instanceof arkType.errors).toBe(true);
+		expect(tool.parameters({ window: "desktop", actions: [], unexpected: true }) instanceof arkType.errors).toBe(
+			true,
+		);
+		expect(tool.parameters({ actions: [] }) instanceof arkType.errors).toBe(false);
 	});
 
 	it("executes function-call params.actions and defaults omitted, undefined, null, and empty batches to a screenshot", async () => {
 		const controller = new FakeController();
 		const tool = new ComputerTool(toolSession(Settings.isolated({ "computer.enabled": true })), () => controller);
-		const result = await tool.execute("call", { actions: [{ type: "click", x: 5, y: 6, button: "left" }] });
-		expect(result.content).toEqual([{ type: "image", data: "AQ==", mimeType: "image/png", detail: "original" }]);
+		const result = await tool.execute("call", {
+			window: "42",
+			actions: [{ type: "click", x: 5, y: 6, button: "left" }],
+		});
+		expect(result.content).toEqual([
+			{
+				type: "text",
+				text: "Captured 42 — Code — Editor · 1280×720",
+			},
+			{ type: "image", data: "AQ==", mimeType: "image/png", detail: "original" },
+		]);
 		expect(result.providerMetadata).toBeUndefined();
-		await tool.execute("call", {});
-		await tool.execute("call", { actions: undefined } as unknown as ComputerParams);
-		await tool.execute("call", { actions: null } as unknown as ComputerParams);
-		await tool.execute("call", { actions: [] });
+		const desktopResult = await tool.execute("call", { window: "desktop" });
+		expect(desktopResult.content[0]).toEqual({
+			type: "text",
+			text: "Captured desktop · 1280×720",
+		});
+		await tool.execute("call", { window: "desktop", actions: undefined });
+		await tool.execute("call", { window: "desktop", actions: null } as unknown as ComputerParams);
+		await tool.execute("call", { window: "desktop", actions: [] });
+		expect(controller.windows).toEqual(["42", "desktop", "desktop", "desktop", "desktop"]);
 		expect(controller.batches).toEqual([
 			[{ type: "click", x: 5, y: 6, button: "left" }],
 			[{ type: "screenshot" }],
@@ -499,6 +640,52 @@ describe("computer tool", () => {
 		await tool.close();
 	});
 
+	it("lists targets without taking a screenshot and rejects actions without a target", async () => {
+		const controller = new FakeController();
+		const tool = new ComputerTool(toolSession(Settings.isolated({ "computer.enabled": true })), () => controller);
+
+		const result = await tool.execute("call", {});
+		expect(result.content).toEqual([
+			{
+				type: "text",
+				text: "Window targets (pass the id as `window`):\n- desktop — Desktop\n- 42 — Code — Editor · 800×600 at 100,50 · focused",
+			},
+		]);
+		expect(result.details).toMatchObject({
+			windows: capture(0).windows,
+			backend: "test-native",
+			displayServer: "test",
+			capturePermission: "granted",
+			inputPermission: "granted",
+			displays: [],
+			actions: [],
+		});
+		expect(result.details?.window).toBeUndefined();
+		expect(result.details?.width).toBeUndefined();
+		expect(controller.listCount).toBe(1);
+		expect(controller.batches).toHaveLength(0);
+
+		await tool.execute("call", { actions: [] });
+		expect(controller.listCount).toBe(2);
+		await expect(tool.execute("call", { actions: [{ type: "wait" }] })).rejects.toThrow(
+			"Computer actions require a window target",
+		);
+		expect(controller.batches).toHaveLength(0);
+		await tool.close();
+	});
+
+	it("normalizes listed numeric window ids and rejects invalid targets before dispatch", async () => {
+		const controller = new FakeController();
+		const tool = new ComputerTool(toolSession(Settings.isolated({ "computer.enabled": true })), () => controller);
+		for (const window of ["", "unknown", "0", "4294967296", "9".repeat(10_000)]) {
+			await expect(tool.execute("call", { window, actions: [] })).rejects.toThrow(/window/i);
+		}
+		expect(controller.batches).toHaveLength(0);
+
+		await tool.execute("call", { window: "00042", actions: [] });
+		expect(controller.windows).toEqual(["42"]);
+		await tool.close();
+	});
 	it("fails closed on malformed action fields before native dispatch", async () => {
 		const controller = new FakeController();
 		const tool = new ComputerTool(toolSession(Settings.isolated({ "computer.enabled": true })), () => controller);
@@ -525,10 +712,13 @@ describe("computer tool", () => {
 			[{ type: "type", text: "hello", y: 2 }],
 		] as unknown as ComputerParams["actions"][];
 		for (const actions of invalidBatches) {
-			await expect(tool.execute("call", { actions })).rejects.toThrow("Computer call contains an invalid action");
+			await expect(tool.execute("call", { window: "desktop", actions })).rejects.toThrow(
+				"Computer call contains an invalid action",
+			);
 		}
 		expect(controller.batches).toHaveLength(0);
 		await tool.execute("call", {
+			window: "desktop",
 			actions: [{ type: "scroll", x: 0, y: 0, scroll_x: -2_147_483_648, scroll_y: 2_147_483_647 }],
 		});
 		expect(controller.batches).toEqual([
@@ -644,9 +834,9 @@ describe("computer tool", () => {
 		});
 
 		activeModel = claude;
-		await tool.execute("call", { actions: [{ type: "screenshot" }] });
+		await tool.execute("call", { window: "desktop", actions: [{ type: "screenshot" }] });
 		activeModel = gpt;
-		await tool.execute("call", { actions: [{ type: "screenshot" }] });
+		await tool.execute("call", { window: "desktop", actions: [{ type: "screenshot" }] });
 
 		expect(receivedOptions.map(options => [options.maxWidth, options.maxHeight])).toEqual([
 			[1920, 1200],
@@ -658,7 +848,7 @@ describe("computer tool", () => {
 		await tool.close();
 	});
 
-	it("uses registered native options, adapts every GA field, and returns exactly one fresh PNG with metadata", async () => {
+	it("exposes window-aware function calls, adapts every action, and returns one fresh PNG", async () => {
 		const settings = Settings.isolated({
 			"computer.enabled": true,
 			"computer.backend": "native",
@@ -677,6 +867,7 @@ describe("computer tool", () => {
 			receivedOptions = options;
 			return controller;
 		});
+		expect("native" in tool).toBe(false);
 		expect(tool.effectiveConfiguration).toEqual({
 			backend: "native",
 			display: "display-1",
@@ -705,8 +896,7 @@ describe("computer tool", () => {
 			{ type: "type", text: "hello" },
 			{ type: "wait" },
 		];
-		const context = callContext(settings, actions);
-		const result = await tool.execute("call", {}, undefined, undefined, context);
+		const result = await tool.execute("call", { window: "42", actions });
 
 		expect(receivedOptions).toEqual({
 			backend: "native",
@@ -734,18 +924,23 @@ describe("computer tool", () => {
 				{ type: "wait" },
 			],
 		]);
-		expect(result.content).toEqual([{ type: "image", data: "AQ==", mimeType: "image/png", detail: "original" }]);
+		expect(controller.windows).toEqual(["42"]);
+		expect(result.content).toEqual([
+			{
+				type: "text",
+				text: "Captured 42 — Code — Editor · 1280×720",
+			},
+			{ type: "image", data: "AQ==", mimeType: "image/png", detail: "original" },
+		]);
 		expect(result.details).toMatchObject({
 			width: 1280,
 			height: 720,
+			window: "42",
+			windows: capture(0).windows,
 			backend: "test-native",
 			capabilities,
 		});
-		expect(result.providerMetadata).toEqual({
-			type: "computer",
-			screenshot: { type: "computer_screenshot", image_url: "data:image/png;base64,AQ==" },
-			acknowledgedSafetyChecks: [],
-		});
+		expect(result.providerMetadata).toBeUndefined();
 		await tool.close();
 		await tool.close();
 		expect(controller.closeCount).toBe(1);
@@ -772,6 +967,7 @@ describe("computer tool", () => {
 			() => new FakeController(),
 		);
 		const details = tool.formatApprovalDetails({
+			window: "42",
 			actions: [
 				{ type: "click", x: 1, y: 2, button: "right", keys: ["SHIFT"] },
 				{ type: "keypress", keys: ["ENTER"] },
@@ -787,6 +983,7 @@ describe("computer tool", () => {
 			],
 		});
 		expect(details).toEqual([
+			"window=42",
 			'1. click button=right at (1, 2) keys=["SHIFT"]',
 			'2. keypress keys=["ENTER"]',
 			'3. scroll at (3, 4) delta=(-5, 6) keys=["ALT"]',
@@ -794,7 +991,7 @@ describe("computer tool", () => {
 		]);
 	});
 
-	it("bounds provider-supplied approval details", () => {
+	it("bounds approval details", () => {
 		const tool = new ComputerTool(
 			toolSession(Settings.isolated({ "computer.enabled": true })),
 			() => new FakeController(),
@@ -808,123 +1005,6 @@ describe("computer tool", () => {
 	});
 });
 
-describe("provider computer safety", () => {
-	it("fails closed in headless yolo mode despite a per-tool allow", async () => {
-		const settings = Settings.isolated({
-			"computer.enabled": true,
-			"tools.approvalMode": "yolo",
-			"tools.approval": { computer: "allow" },
-		});
-		const controller = new FakeController();
-		const tool = new ComputerTool(toolSession(settings), () => controller);
-		const runner = {
-			hasHandlers: () => false,
-			hasUI: () => false,
-			consumeToolCallEmitted: () => false,
-		} as unknown as ExtensionRunner;
-		const wrapped = new ExtensionToolWrapper(tool as unknown as AgentTool, runner);
-		const context = callContext(
-			settings,
-			[{ type: "click", x: 1, y: 2, button: "left" }],
-			[{ id: "risk-1", code: "external_side_effect", message: "This action submits the form" }],
-		);
-		await expect(wrapped.execute("call", {}, undefined, undefined, context)).rejects.toThrow(
-			/pending provider safety checks but no interactive UI/,
-		);
-		expect(controller.batches).toHaveLength(0);
-	});
-
-	it("asks with provider safety details and acknowledges only after approval", async () => {
-		const settings = Settings.isolated({ "computer.enabled": true, "tools.approvalMode": "yolo" });
-		const controller = new FakeController();
-		const tool = new ComputerTool(toolSession(settings), () => controller);
-		let promptText = "";
-		const runner = {
-			hasHandlers: () => false,
-			hasUI: () => true,
-			consumeToolCallEmitted: () => false,
-			getUIContext: () => ({
-				select: async (message: string) => {
-					promptText = message;
-					return "Approve";
-				},
-			}),
-		} as unknown as ExtensionRunner;
-		const wrapped = new ExtensionToolWrapper(tool as unknown as AgentTool, runner);
-		const checks = [{ id: "risk-1", message: "Submit external form" }];
-		const result = await wrapped.execute(
-			"call",
-			{},
-			undefined,
-			undefined,
-			callContext(settings, [{ type: "click", x: 1, y: 2, button: "left" }], checks),
-		);
-		expect(promptText).toContain("Provider safety checks:\n1. Submit external form");
-		expect(promptText).toContain("click button=left at (1, 2)");
-		expect(result.providerMetadata).toMatchObject({ acknowledgedSafetyChecks: checks });
-		expect(controller.batches).toHaveLength(1);
-	});
-});
-
-it("passes provider-native actions and safety checks to extension policy hooks", async () => {
-	const settings = Settings.isolated({ "computer.enabled": true, "tools.approvalMode": "yolo" });
-	const controller = new FakeController();
-	const tool = new ComputerTool(toolSession(settings), () => controller);
-	const actions: ComputerAction[] = [{ type: "click", x: 21, y: 34, button: "right", keys: ["SHIFT"] }];
-	const checks = [{ id: "risk-hook", code: "external_side_effect", message: "Submit form" }];
-	let hookInput: Record<string, unknown> | undefined;
-	const runner = {
-		hasHandlers: (type: string) => type === "tool_call",
-		hasUI: () => true,
-		consumeToolCallEmitted: () => false,
-		getUIContext: () => ({ select: async () => "Approve" }),
-		emitToolCall: async (event: { input: Record<string, unknown> }) => {
-			hookInput = event.input;
-			return { block: true, reason: "blocked by audit policy" };
-		},
-	} as unknown as ExtensionRunner;
-	const wrapped = new ExtensionToolWrapper(tool as unknown as AgentTool, runner);
-	await expect(
-		wrapped.execute("call", {}, undefined, undefined, callContext(settings, actions, checks)),
-	).rejects.toThrow("blocked by audit policy");
-	expect(hookInput).toEqual({ actions, pendingSafetyChecks: checks });
-	expect(controller.batches).toHaveLength(0);
-});
-
-it("sanitizes provider safety text as approval data", async () => {
-	const settings = Settings.isolated({ "computer.enabled": true, "tools.approvalMode": "yolo" });
-	const tool = new ComputerTool(toolSession(settings), () => new FakeController());
-	let promptText = "";
-	const runner = {
-		hasHandlers: () => false,
-		hasUI: () => true,
-		consumeToolCallEmitted: () => false,
-		getUIContext: () => ({
-			select: async (message: string) => {
-				promptText = message;
-				return "Deny";
-			},
-		}),
-	} as unknown as ExtensionRunner;
-	const wrapped = new ExtensionToolWrapper(tool as unknown as AgentTool, runner);
-	await expect(
-		wrapped.execute(
-			"call",
-			{},
-			undefined,
-			undefined,
-			callContext(
-				settings,
-				[{ type: "keypress", keys: ["ENTER"] }],
-				[{ id: "risk", message: "\u001b]8;;https://evil.test\u0007**spoof**\u001b]8;;\u0007" }],
-			),
-		),
-	).rejects.toThrow(/denied by user/);
-	expect(promptText).not.toContain("\u001b");
-	expect(promptText).not.toContain("evil.test");
-	expect(promptText).toContain("\\*\\*spoof\\*\\*");
-});
-
 describe("computer renderer", () => {
 	it("sanitizes native metadata and handles normalized empty error details", async () => {
 		const theme = await getThemeByName("dark");
@@ -933,7 +1013,7 @@ describe("computer renderer", () => {
 			{ content: [{ type: "text", text: "\u001b[31mpermission denied\u001b[0m" }], details: {}, isError: true },
 			{ expanded: false, isPartial: false },
 			theme,
-			{ actions: [{ type: "click" }] },
+			{ window: "desktop", actions: [{ type: "click" }] },
 		);
 		expect(Bun.stripANSI(error.render(160).join("\n"))).toContain("permission denied");
 
@@ -943,6 +1023,14 @@ describe("computer renderer", () => {
 				details: {
 					width: 10,
 					height: 20,
+					window: "42",
+					windows: [
+						{
+							...capture(1).windows[0],
+							app: "\u001b]8;;https://evil.test\u0007Code\u001b]8;;\u0007",
+							title: "\u001b[31mEditor\u001b[0m",
+						},
+					],
 					backend: "\u001b]8;;https://evil.test\u0007native\u001b]8;;\u0007",
 					displayServer: "\u001b[31mQuartz\u001b[0m",
 					capturePermission: "granted",
@@ -957,7 +1045,28 @@ describe("computer renderer", () => {
 		const rendered = Bun.stripANSI(success.render(160).join("\n"));
 		expect(rendered).toContain("native");
 		expect(rendered).toContain("Quartz");
+		expect(rendered).toContain("42 Code — Editor");
+		expect(rendered).toContain("selected");
 		expect(rendered).not.toContain("evil.test");
+
+		const listed = computerToolRenderer.renderResult(
+			{
+				content: [{ type: "text", text: "Window targets" }],
+				details: {
+					windows: capture(0).windows,
+					backend: "test-native",
+					capturePermission: "granted",
+					inputPermission: "granted",
+					displays: [],
+					actions: [],
+				},
+			},
+			{ expanded: true, isPartial: false },
+			theme,
+		);
+		const listedText = Bun.stripANSI(listed.render(160).join("\n"));
+		expect(listedText).toContain("Listed 2 window targets");
+		expect(listedText).toContain("42 Code — Editor");
 	});
 });
 

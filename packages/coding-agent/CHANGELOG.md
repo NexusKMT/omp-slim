@@ -5,6 +5,11 @@
 ### Added
 
 - Added a `relay` browser mode that drives the user's own Chrome tabs through a local CDP relay plus the OMP Browser Relay extension: `omp browser-relay install` writes the bundled extension to disk, and `browser.relay` / `browser.relayUrl` (or per-call `app.relay`) route the browser tool through it. The relay server auto-starts under a profile-independent global daemon broker when the browser tool needs it; every relay consumer holds a broker lease, so the fixed-port singleton stops only after its last consumer across all projects exits. `omp browser-relay` remains available for `--token`/`--no-group`/custom ports, and a relay already serving the port is adopted. It multiplexes the supervisor and per-tab worker puppeteer connections over the single `chrome.debugger` attachment Chrome allows per tab, and gathers controllable tabs into a per-window "omp" tab group (dissolved on disconnect, never re-grouping tabs the user pulls out).
+- Added individual-window computer use: a capture-free discovery call lists current window ids alongside a `desktop` target, then the model can capture and control one selected window without stealing focus or moving the user's pointer.
+
+### Changed
+
+- Exposed `computer` through its window-aware function schema for every model, including models with provider-native Computer Use support, because native computer declarations cannot carry the required window target.
 
 ## [17.2.4] - 2026-08-01
 

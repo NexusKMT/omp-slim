@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `DesktopSession.capture(window)` and `DesktopSession.execute(actions, window)` now require an explicit capture target: `"desktop"` for the selected-display composite or a numeric id from `DesktopCapture.windows`.
+
+### Added
+
+- Added cross-platform top-level window enumeration, capture-free `DesktopSession.listWindows()` discovery, and isolated window capture. Window-targeted mouse and keyboard actions route directly to the selected macOS, Win32, or X11 window without changing the user's foreground application or moving the real pointer.
+
 ## [17.2.2] - 2026-07-31
 
 ### Changed
