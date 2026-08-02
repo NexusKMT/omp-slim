@@ -1140,13 +1140,13 @@ export class WorkerCore {
 			failure = { error };
 		} finally {
 			await Bun.sleep(0);
-			failure = this.#foldFloatingRejections(active, failure);
 			runAc.abort(postmortem.markExpectedCleanupError(new ToolAbortError("Browser run ended")));
 			try {
 				await runPage?.cleanup();
 			} catch (error) {
 				failure = { error };
 			}
+			failure = this.#foldFloatingRejections(active, failure);
 			if (this.#active?.id === msg.id) this.#active = null;
 		}
 		if (failure) {

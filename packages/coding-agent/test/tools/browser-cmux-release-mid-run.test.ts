@@ -42,6 +42,7 @@ import {
 	runInTab,
 } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
+import * as logger from "@oh-my-pi/pi-utils/logger";
 
 function makeKind(socketSuffix: string): CmuxKind {
 	return {
@@ -284,6 +285,55 @@ describe("browser tab-supervisor — cmux tab close mid-run (#4499)", () => {
 		} finally {
 			process.removeListener("unhandledRejection", onUnhandled);
 		}
+	});
+
+	it("logs a user continuation rejection after its cmux run ends", async () => {
+		spyOn(CmuxSocketClient.prototype, "connect").mockResolvedValue(undefined);
+		spyOn(CmuxSocketClient.prototype, "close").mockImplementation(() => undefined);
+		spyOn(CmuxSocketClient.prototype, "request").mockImplementation(
+			async (method: string): Promise<Record<string, unknown>> => {
+				switch (method) {
+					case "browser.open_split":
+						return { surface_id: "surface-late-rejection", url: "about:blank" };
+					case "browser.url.get":
+						return { url: "about:blank" };
+					case "browser.snapshot":
+						return { page: { html: "" } };
+					case "browser.eval":
+						return { value: "" };
+					default:
+						return {};
+				}
+			},
+		);
+		const warn = spyOn(logger, "warn").mockImplementation(() => {});
+		const browser = await acquireBrowser(makeKind("late-rejection"), { cwd: "/tmp" });
+		await acquireTab("late-rejection", browser, {
+			timeoutMs: 5_000,
+			ownerSessionId: "session-late-rejection",
+		});
+
+		const result = await runInTab("late-rejection", {
+			code: `
+				const continuationStarted = Promise.withResolvers();
+				void tab.title().then(async () => {
+					continuationStarted.resolve();
+					await Bun.sleep(50);
+					throw new Error("late cmux continuation failed");
+				});
+				await continuationStarted.promise;
+				return "completed";
+			`,
+			timeoutMs: 5_000,
+			session: makeSession("/tmp"),
+		});
+		expect(result.returnValue).toBe("completed");
+
+		await Bun.sleep(150);
+		expect(warn).toHaveBeenCalledWith("Unhandled rejection after browser run ended", {
+			runId: expect.any(String),
+			error: "late cmux continuation failed",
+		});
 	});
 
 	it("ignores the daemon screenshot path when no screenshot directory is configured", async () => {

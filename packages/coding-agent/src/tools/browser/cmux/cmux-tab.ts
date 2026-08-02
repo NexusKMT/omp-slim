@@ -1397,9 +1397,13 @@ export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promi
 	let runActive = true;
 	let hasFloatingFailure = false;
 	const recordFloatingFailure = (reason: unknown): void => {
-		if (!runActive || hasFloatingFailure || postmortem.isExpectedCleanupError(reason)) return;
-		hasFloatingFailure = true;
+		if (hasFloatingFailure || postmortem.isExpectedCleanupError(reason)) return;
 		const message = reason instanceof Error ? reason.message : String(reason);
+		if (!runActive) {
+			logger.warn("Unhandled rejection after browser run ended", { runId, error: message });
+			return;
+		}
+		hasFloatingFailure = true;
 		const error = new Error(`Unhandled rejection (missing await?): ${message}`, { cause: reason });
 		if (reason instanceof Error) error.name = reason.name;
 		rejectFloatingFailure(error);

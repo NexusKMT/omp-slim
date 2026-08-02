@@ -308,6 +308,45 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser tab evaluation", () => {
 		}
 	}, 30_000);
 
+	it("folds a user continuation rejection that settles during cleanup", async () => {
+		const tool = new BrowserTool(makeSession());
+		const name = `cleanup-continuation-rejection-${process.pid}`;
+
+		try {
+			await tool.execute("open", {
+				action: "open",
+				name,
+				url: "data:text/html,<h1>ready</h1>",
+			});
+			let failure = "";
+			try {
+				await tool.execute("run", {
+					action: "run",
+					name,
+					code: `
+						await page.setRequestInterception(true);
+						page.setRequestInterception = async () => {
+							await Bun.sleep(50);
+						};
+						const continuationStarted = Promise.withResolvers();
+						void tab.title().then(async () => {
+							continuationStarted.resolve();
+							await Bun.sleep(10);
+							throw new Error("cleanup continuation failed");
+						});
+						await continuationStarted.promise;
+						return "incorrect success";
+					`,
+				});
+			} catch (error) {
+				failure = error instanceof Error ? error.message : String(error);
+			}
+			expect(failure).toContain("Unhandled rejection (missing await?): cleanup continuation failed");
+		} finally {
+			await tool.execute("close", { action: "close", name, kill: true });
+		}
+	}, 30_000);
+
 	it("logs a user continuation rejection after its browser run ends", async () => {
 		const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
 		const tool = new BrowserTool(makeSession());
