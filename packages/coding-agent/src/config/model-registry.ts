@@ -972,14 +972,18 @@ export class ModelRegistry {
 	 * Refresh dynamic metadata that can appear only after a local model loads.
 	 */
 	async refreshSelectedModelMetadata(model: Model<Api>): Promise<Model<Api>> {
-		const isLlamaCppDiscovery = this.#discoverableProviders.some(
+		const llamaCppDiscoveryConfig = this.#discoverableProviders.find(
 			providerConfig => providerConfig.provider === model.provider && providerConfig.discovery.type === "llama.cpp",
 		);
-		if (!isLlamaCppDiscovery) {
+		if (!llamaCppDiscoveryConfig) {
 			return model;
 		}
 		this.#ensureFullSnapshot();
-		const runtimeMetadata = await discoverLlamaCppModelRuntimeMetadata(model, this.#nonResolvingDiscoveryContext());
+		const runtimeMetadata = await discoverLlamaCppModelRuntimeMetadata(
+			model,
+			this.#nonResolvingDiscoveryContext(),
+			llamaCppDiscoveryConfig.discovery.timeoutMs,
+		);
 		if (runtimeMetadata === undefined) {
 			return this.find(model.provider, model.id) ?? model;
 		}
