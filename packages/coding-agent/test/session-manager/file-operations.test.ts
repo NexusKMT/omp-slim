@@ -163,7 +163,9 @@ describe("SessionManager temp cwd session dirs", () => {
 	const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
 
 	function expectedTempSessionDirName(tempCwd: string): string {
-		return `-tmp-${path.relative(os.tmpdir(), path.resolve(tempCwd)).replace(/[/\\:]/g, "-")}`;
+		const normalized = path.resolve(tempCwd).replaceAll("\\", "/");
+		const digest = Bun.SHA256.hash(normalized, "hex");
+		return `tmp-${path.basename(tempCwd)}-${digest}`;
 	}
 
 	function toLegacyAbsoluteSessionDirName(cwd: string): string {
@@ -188,7 +190,7 @@ describe("SessionManager temp cwd session dirs", () => {
 		removeSyncWithRetries(testAgentDir);
 	});
 
-	it("stores temp-root cwd sessions under -tmp-prefixed directories", () => {
+	it("stores temp-root cwd sessions under safe hashed directories", () => {
 		const tempCwd = path.join(testAgentDir, `temp-cwd-${Snowflake.next()}`);
 		fs.mkdirSync(tempCwd, { recursive: true });
 
@@ -199,7 +201,7 @@ describe("SessionManager temp cwd session dirs", () => {
 		expect(path.dirname(sessionFile)).toBe(path.join(getSessionsDir(), expectedTempSessionDirName(tempCwd)));
 	});
 
-	it("migrates legacy temp-root absolute session dirs to -tmp prefixes", () => {
+	it("migrates legacy temp-root absolute session dirs to safe names", () => {
 		const tempCwd = path.join(testAgentDir, `legacy-cwd-${Snowflake.next()}`);
 		fs.mkdirSync(tempCwd, { recursive: true });
 
@@ -216,6 +218,41 @@ describe("SessionManager temp cwd session dirs", () => {
 		expect(fs.existsSync(legacyDir)).toBe(false);
 		expect(path.dirname(sessionFile)).toBe(expectedDir);
 		expect(fs.existsSync(path.join(expectedDir, "carried.jsonl"))).toBe(true);
+	});
+
+	it("separates colliding legacy cwd buckets into safe directories", () => {
+		const firstCwd = path.join(testAgentDir, "project", "hail-mary");
+		const secondCwd = path.join(testAgentDir, "project-hail-mary");
+		fs.mkdirSync(firstCwd, { recursive: true });
+		fs.mkdirSync(secondCwd, { recursive: true });
+
+		const legacyName = `-tmp-${path.relative(os.tmpdir(), firstCwd).replace(/[/\\:]/g, "-")}`;
+		expect(legacyName).toBe(`-tmp-${path.relative(os.tmpdir(), secondCwd).replace(/[/\\:]/g, "-")}`);
+		const legacyDir = path.join(getSessionsDir(), legacyName);
+		fs.mkdirSync(path.join(legacyDir, "first"), { recursive: true });
+		fs.mkdirSync(path.join(legacyDir, "second"), { recursive: true });
+		fs.writeFileSync(
+			path.join(legacyDir, "first.jsonl"),
+			`${JSON.stringify({ type: "session", id: "first", cwd: firstCwd })}\n`,
+		);
+		fs.writeFileSync(
+			path.join(legacyDir, "second.jsonl"),
+			`${JSON.stringify({ type: "session", id: "second", cwd: secondCwd })}\n`,
+		);
+		fs.writeFileSync(path.join(legacyDir, "first", "artifact.txt"), "first");
+		fs.writeFileSync(path.join(legacyDir, "second", "artifact.txt"), "second");
+
+		const firstDir = path.dirname(SessionManager.create(firstCwd).getSessionFile()!);
+		const secondDir = path.dirname(SessionManager.create(secondCwd).getSessionFile()!);
+
+		expect(firstDir).not.toBe(secondDir);
+		expect(path.basename(firstDir).startsWith("-")).toBe(false);
+		expect(path.basename(secondDir).startsWith("-")).toBe(false);
+		expect(fs.existsSync(path.join(firstDir, "first.jsonl"))).toBe(true);
+		expect(fs.existsSync(path.join(firstDir, "first", "artifact.txt"))).toBe(true);
+		expect(fs.existsSync(path.join(secondDir, "second.jsonl"))).toBe(true);
+		expect(fs.existsSync(path.join(secondDir, "second", "artifact.txt"))).toBe(true);
+		expect(fs.existsSync(legacyDir)).toBe(false);
 	});
 });
 
