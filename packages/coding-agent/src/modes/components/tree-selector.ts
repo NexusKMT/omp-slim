@@ -226,9 +226,10 @@ class TreeList implements Component {
 				return [...prioritized, ...rest];
 			})();
 
-			// Only branch points add visual depth. Linear continuations remain
-			// aligned with the branch head's content.
-			const childIndent = multipleChildren ? indent + 1 : indent;
+			// Real branch points add visual depth, and a virtual root's direct
+			// children (the session roots) nest one level under the shared column-0
+			// root. Linear continuations otherwise stay aligned with their head.
+			const childIndent = multipleChildren || isVirtualRootChild ? indent + 1 : indent;
 
 			// Build gutters for children
 			// If this node showed a connector, add a gutter entry for descendants

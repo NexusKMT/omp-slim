@@ -229,9 +229,10 @@
             Number(containsActive.get(b)) - Number(containsActive.get(a))
           );
 
-          // Only branch points add visual depth. Linear continuations remain
-          // aligned with the branch head's content.
-          const childIndent = multipleChildren ? indent + 1 : indent;
+          // Real branch points add visual depth, and a virtual root's direct
+          // children (the session roots) nest one level under the shared
+          // column-0 root. Linear continuations otherwise stay aligned.
+          const childIndent = multipleChildren || isVirtualRootChild ? indent + 1 : indent;
 
           // Build gutters for children
           const connectorDisplayed = showConnector && !isVirtualRootChild;

@@ -103,3 +103,37 @@ describe("issue #7332: terminal branch chains keep compact alignment", () => {
 		}
 	});
 });
+
+// Multiple roots (e.g. orphaned parent chains after `resetLeaf`) render as
+// children of a virtual branching root: the roots share column 0 and their
+// own descendants must nest one level in rather than collapsing back.
+describe("issue #7332: single-child roots stay nested under the virtual root", () => {
+	beforeAll(async () => {
+		await themeModule.initTheme(false, undefined, undefined, "dark", "light");
+	});
+
+	it("indents linear descendants of a root past the shared column-0 roots", () => {
+		counter = 0;
+		const root1 = makeNode("user", "root one head");
+		chain(root1, ["assistant", "root one reply"], ["user", "root one follow"]);
+		const root2 = makeNode("user", "root two head");
+		const leaf = chain(root2, ["assistant", "root two reply"]);
+
+		const rendered = renderStripped([root1, root2], leaf.entry.id);
+		const findRow = (needle: string): string => {
+			const row = rendered.find(line => line.includes(needle));
+			if (!row) throw new Error(`row containing ${JSON.stringify(needle)} not rendered`);
+			return row;
+		};
+
+		// root1 is not on the active path: its head sits at the shared column 0
+		// (2-space cursor, no gutter prefix).
+		expect(findRow("user: root one head")).toMatch(/^\s{2}\S/);
+
+		// Its linear descendants nest one level in; before the fix they collapsed
+		// back to the root's column.
+		for (const needle of ["assistant: root one reply", "user: root one follow"]) {
+			expect(findRow(needle)).toMatch(/^\s{5}\S/);
+		}
+	});
+});
