@@ -35,6 +35,9 @@
 ### Fixed
 
 - Fixed heavily branched conversation trees shifting linear continuations into disconnected gutter columns and accumulating unnecessary indentation ([#7332](https://github.com/can1357/oh-my-pi/issues/7332)).
+### Fixed
+
+- Fixed the vibe pre-init-kill test racing `registry.kill()` against the worker's job-body dispatch (the mock only registered its AgentRef after the abort signal landed, so a loaded runner could observe no registration); the test now waits for the worker to be mid-initialization before killing.
 
 ## [17.2.4] - 2026-08-01
 
