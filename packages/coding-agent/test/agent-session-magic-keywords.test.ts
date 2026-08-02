@@ -144,6 +144,21 @@ describe("AgentSession magic keyword settings", () => {
 		expect(notice?.content).toContain("**JavaScript (`eval`, JavaScript backend):**");
 	});
 
+	it("updates the workflowz notice when scout is disabled during the session", async () => {
+		const created = await createMagicKeywordSession(root);
+		session = created.session;
+		authStorage = created.authStorage;
+		created.settings.set("task.disabledAgents", ["scout"]);
+		const promptSpy = vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined);
+
+		await session.prompt("please workflowz this");
+
+		const promptMessages = promptSpy.mock.calls[0]![0] as unknown as Array<{ content?: string; customType?: string }>;
+		const notice = promptMessages.find(message => message.customType === "workflow-notice")?.content ?? "";
+		expect(notice.toLowerCase()).not.toContain("scout");
+		expect(notice).toContain("Explore inline FIRST");
+	});
+
 	it("skips workflowz notice when the task tool is inactive", async () => {
 		const created = await createMagicKeywordSession(root, []);
 		session = created.session;

@@ -40,7 +40,7 @@
 - Fixed the vibe pre-init-kill test racing `registry.kill()` against the worker's job-body dispatch (the mock only registered its AgentRef after the abort signal landed, so a loaded runner could observe no registration); the test now waits for the worker to be mid-initialization before killing.
 ### Fixed
 
-- Removed hard-coded `scout` references from system and tool prompts that leaked into the model even when the scout agent was disabled (`task.disabledAgents`) or absent from the spawn list: the task tool description, delegation gates, plan-mode and workflowz notices, and the glob/grep/ast-grep guidance now only mention scout when it is actually spawnable ([#7313](https://github.com/can1357/oh-my-pi/issues/7313)).
+- Removed hard-coded `scout` references from agent, system, and tool prompts that leaked into the model even when the scout agent was disabled (`task.disabledAgents`) or absent from the spawn list: the init agent prompt, task tool description, delegation gates, plan-mode and workflowz notices, and glob/grep/ast-grep guidance no longer recommend an unavailable agent, including after live settings changes ([#7313](https://github.com/can1357/oh-my-pi/issues/7313)).
 
 ## [17.2.4] - 2026-08-01
 
