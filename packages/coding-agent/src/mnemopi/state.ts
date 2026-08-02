@@ -650,10 +650,13 @@ export class MnemopiSessionState {
 	 * episodic promotion / embedding for the LAST few turns is skipped,
 	 * and `maybeRetainOnAgentEnd` has already retained earlier turns).
 	 */
-	#boundRetainBusyTimeout(timeoutMs: number): void {
-		// SQLite lock waits block the JS thread, so a Promise race cannot interrupt them.
+	#boundOwnedBusyTimeout(timeoutMs: number): void {
+		// SQLite lock waits block the JS thread, so a Promise race cannot interrupt
+		// them. consolidate() flushes every owned bank, so bound each one — not just
+		// the retain bank — or a locked shared bank (per-project-tagged) still stalls
+		// teardown for Mnemopi's default 5s busy timeout (#7351 review).
 		const busyTimeoutMs = Math.max(1, Math.floor(timeoutMs));
-		this.memory.beam.db.exec(`PRAGMA busy_timeout=${busyTimeoutMs}`);
+		for (const memory of this.scoped.owned) memory.beam.db.exec(`PRAGMA busy_timeout=${busyTimeoutMs}`);
 	}
 
 	async dispose(options: { consolidate?: boolean; timeoutMs?: number } = {}): Promise<void> {
@@ -670,7 +673,7 @@ export class MnemopiSessionState {
 		const { timeoutMs } = options;
 		const boundedTimeoutMs = timeoutMs !== undefined && timeoutMs > 0 ? timeoutMs : undefined;
 		const deadline = boundedTimeoutMs !== undefined ? performance.now() + boundedTimeoutMs : undefined;
-		if (boundedTimeoutMs !== undefined) this.#boundRetainBusyTimeout(boundedTimeoutMs);
+		if (boundedTimeoutMs !== undefined) this.#boundOwnedBusyTimeout(boundedTimeoutMs);
 		const consolidatePromise = this.consolidate({ full: false, extract: false, sleep: false }).catch(
 			(error: unknown) => {
 				logger.warn("Mnemopi: consolidation on dispose failed.", { error: String(error) });

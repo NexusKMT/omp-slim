@@ -18,6 +18,7 @@ import { HindsightSessionState } from "@oh-my-pi/pi-coding-agent/hindsight/state
 import { mnemopiBackend } from "@oh-my-pi/pi-coding-agent/mnemopi/backend";
 import { loadMnemopiConfig, type MnemopiBackendConfig } from "@oh-my-pi/pi-coding-agent/mnemopi/config";
 import {
+	getMnemopiScopedDbPaths,
 	getMnemopiSessionState,
 	loadMnemopi,
 	loadMnemopiCore,
@@ -710,14 +711,23 @@ describe("Mnemopi backend lifecycle", () => {
 		registeredMnemopiState = undefined;
 	});
 
-	it("bounds synchronous SQLite lock waits during final retention (#7351)", async () => {
-		const config = makeMnemopiConfig({ baseBank: "test-bank" });
+	it("bounds synchronous SQLite lock waits on every owned bank during final retention (#7351)", async () => {
+		// per-project-tagged owns a project retain bank AND the shared bank; lock the
+		// shared bank so a retain-only busy-timeout fix would still stall teardown.
+		const config = makeMnemopiConfig({
+			scoping: "per-project-tagged",
+			bank: "project-alpha",
+			globalBank: "default",
+		});
 		const entries = [
 			{ type: "message", message: { role: "user", content: "hello" } },
 			{ type: "message", message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
 		];
-		const state = registerMnemopiState(config, { entries: () => entries });
-		const lock = new Database(config.dbPath);
+		const state = registerMnemopiState(config, { cwd: "/work/project-alpha", entries: () => entries });
+		const ownedDbPaths = getMnemopiScopedDbPaths(config);
+		const sharedDbPath = ownedDbPaths.find(dbPath => dbPath === config.dbPath);
+		expect(sharedDbPath).toBeDefined();
+		const lock = new Database(sharedDbPath!);
 		lock.exec("BEGIN IMMEDIATE");
 
 		const started = performance.now();
