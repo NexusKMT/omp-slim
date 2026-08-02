@@ -1042,6 +1042,46 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 		expect(sources.get(nestedEntry)).toContain(url.pathToFileURL(nestedLeaf).href);
 	});
 
+	it("loads a nested ESM cluster required after the extension import settles", async () => {
+		const dir = await writePackage({
+			"package.json": JSON.stringify({ name: "lazy-nested-esm-ext", version: "1.0.0", type: "module" }),
+			"node_modules/cjs-parent/package.json": JSON.stringify({
+				name: "cjs-parent",
+				version: "1.0.0",
+				main: "index.js",
+			}),
+			"node_modules/cjs-parent/index.js": 'module.exports = { load: () => require("nested-esm").default };',
+			"node_modules/cjs-parent/node_modules/nested-esm/package.json": JSON.stringify({
+				name: "nested-esm",
+				version: "1.0.0",
+				type: "module",
+				main: "index.js",
+			}),
+			"node_modules/cjs-parent/node_modules/nested-esm/index.js":
+				'import { value } from "nested-leaf"; export default value;',
+			"node_modules/cjs-parent/node_modules/nested-leaf/package.json": JSON.stringify({
+				name: "nested-leaf",
+				version: "1.0.0",
+				type: "module",
+				main: "index.js",
+			}),
+			"node_modules/cjs-parent/node_modules/nested-leaf/index.js": 'export const value = "lazy-nested-ok";',
+			"index.js": [
+				'import parent from "cjs-parent";',
+				"export const loadValue = parent.load;",
+				"export default function (pi) { void pi; }",
+			].join("\n"),
+		});
+
+		const mod = await loadLegacyPiModule(path.join(dir, "index.js"));
+		const loadValue = Reflect.get(Object(mod), "loadValue");
+		if (typeof loadValue !== "function") {
+			throw new Error("lazy nested ESM fixture did not export loadValue");
+		}
+
+		expect(loadValue()).toBe("lazy-nested-ok");
+	});
+
 	it("chooses the ESM branch when dual package graphs converge", async () => {
 		const dir = await writePackage({
 			"package.json": JSON.stringify({ name: "dual-convergence-ext", version: "1.0.0", type: "module" }),

@@ -1774,6 +1774,7 @@ const extensionGraphCacheBustResolvedImportModules = new Map<string, Set<string>
 const commonJsModuleSources = new Map<string, string>();
 const commonJsFallbackModulePaths = new Map<string, string>();
 const extensionSynchronousSpecifierTargets = new Map<string, Map<string, string>>();
+const synchronousModuleSources = new Map<string, string>();
 const commonJsGraphModulePaths = new Set<string>();
 const COMMONJS_REQUIRE_GLOBAL = "__ompLegacyPiRequireGraphModule";
 const commonJsModuleDefinitions = new Map<string, { source: string; filename: string; dirname: string }>();
@@ -2300,18 +2301,13 @@ async function installExtensionGraphHook(
 	commonJsPaths: Set<string>,
 	synchronousSourcePaths: ReadonlySet<string>,
 	cacheBustResolvedImportModules: ReadonlySet<string>,
-): Promise<{ asyncModules: Map<string, string>; syncSourceModules: Map<string, string> }> {
+): Promise<{ asyncModules: Map<string, string> }> {
 	const asyncModules = new Map<string, string>();
-	const syncSourceModules = new Map<string, string>();
 	for (const [modulePath, source] of modules) {
-		if (commonJsPaths.has(modulePath)) {
+		if (commonJsPaths.has(modulePath) || synchronousSourcePaths.has(modulePath)) {
 			continue;
 		}
-		if (synchronousSourcePaths.has(modulePath)) {
-			syncSourceModules.set(modulePath, source);
-		} else {
-			asyncModules.set(modulePath, source);
-		}
+		asyncModules.set(modulePath, source);
 	}
 
 	if (asyncModules.size > 0) {
@@ -2366,28 +2362,26 @@ async function installExtensionGraphHook(
 		});
 	}
 
-	if (syncSourceModules.size > 0) {
-		const alternation = [...syncSourceModules.keys()].map(escapeRegExp).join("|");
+	if (synchronousSourcePaths.size > 0) {
+		const alternation = [...synchronousSourcePaths].map(escapeRegExp).join("|");
 		const filter = new RegExp(`^(?:${alternation})(?:\\?mtime=\\d+)?$`);
-		const hookId = Bun.hash(`${entryRealPath}\0sync-source\0${[...syncSourceModules.keys()].join("\0")}`).toString(
-			36,
-		);
+		const hookId = Bun.hash(`${entryRealPath}\0sync-source\0${[...synchronousSourcePaths].join("\0")}`).toString(36);
 		Bun.plugin({
 			name: `omp:legacy-pi-ext:${hookId}`,
 			setup(build) {
 				build.onLoad({ filter, namespace: "file" }, args => {
 					const queryIndex = args.path.indexOf("?mtime=");
 					const sourcePath = queryIndex >= 0 ? args.path.slice(0, queryIndex) : args.path;
-					const source = syncSourceModules.get(sourcePath);
+					const source = synchronousModuleSources.get(sourcePath);
 					if (source === undefined) {
-						throw new Error(`Missing pre-rewritten CommonJS extension source: ${sourcePath}`);
+						throw new Error(`Missing pre-rewritten synchronous extension source: ${sourcePath}`);
 					}
 					return { contents: source, loader: getLoader(sourcePath) };
 				});
 			},
 		});
 	}
-	return { asyncModules, syncSourceModules };
+	return { asyncModules };
 }
 
 /**
@@ -2418,6 +2412,9 @@ async function ensureExtensionGraphHook(entryRealPath: string): Promise<{ clear(
 			commonJsModuleSources.set(modulePath, await prepareCommonJsDefaultModule(modulePath, source));
 			commonJsGraphModulePaths.add(modulePath);
 		}
+		if (synchronousSourcePaths.has(modulePath)) {
+			synchronousModuleSources.set(modulePath, source);
+		}
 	}
 	let hookedModules = extensionGraphHookModules.get(entryRealPath);
 	if (!hookedModules) {
@@ -2444,9 +2441,8 @@ async function ensureExtensionGraphHook(entryRealPath: string): Promise<{ clear(
 	}
 
 	let asyncModules = new Map<string, string>();
-	let syncSourceModules = new Map<string, string>();
 	if (pendingModules.size > 0) {
-		({ asyncModules, syncSourceModules } = await installExtensionGraphHook(
+		({ asyncModules } = await installExtensionGraphHook(
 			entryRealPath,
 			pendingModules,
 			pendingCommonJsPaths,
@@ -2460,7 +2456,6 @@ async function ensureExtensionGraphHook(entryRealPath: string): Promise<{ clear(
 	return {
 		clear() {
 			asyncModules.clear();
-			syncSourceModules.clear();
 			for (const modulePath of commonJsPaths) {
 				commonJsModuleSources.delete(modulePath);
 				commonJsModuleDefinitions.delete(modulePath);
