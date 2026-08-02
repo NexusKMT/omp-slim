@@ -96,6 +96,9 @@ describe("read and write route xd:// device URLs", () => {
 			expect(previewResult.isError).toBeUndefined();
 			expect(previewResult.details?.xdev?.tool).toBe("ast_edit");
 			expect(previewResult.details?.xdev?.mode).toBe("execute");
+			// The dispatch records the wrapped tool's approval tier so prewalk can
+			// tell a mutation from a read-only device call (issue #7312).
+			expect(previewResult.details?.xdev?.tier).toBe("write");
 			const previewText = previewResult.content.find(entry => entry.type === "text")?.text ?? "";
 			expect(previewText).toContain("modernWrap");
 
@@ -107,6 +110,25 @@ describe("read and write route xd:// device URLs", () => {
 		} finally {
 			await removeWithRetries(tempDir);
 		}
+	});
+
+	it("records a read tier on the dispatch of a read-only device", async () => {
+		const readDevice: AgentTool = {
+			name: "peek",
+			label: "Peek",
+			description: "Read-only device",
+			parameters: type({ q: "string" }),
+			approval: () => "read",
+			async execute() {
+				return { content: [{ type: "text", text: "peeked" }] };
+			},
+		};
+		const xdev = createTestXdevState([readDevice]);
+		const write = new WriteTool(xdevSession(process.cwd(), { xdev }));
+
+		const result = await write.execute("write-xdev-read", { path: "xd://peek", content: JSON.stringify({ q: "x" }) });
+		expect(result.isError).toBeUndefined();
+		expect(result.details?.xdev).toMatchObject({ tool: "peek", mode: "execute", tier: "read" });
 	});
 
 	it("rejects near-miss xd addresses before filesystem fallback", async () => {
