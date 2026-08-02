@@ -106,7 +106,7 @@ import {
 	createSequentialCutoffSummaryState,
 	encodeResponsesToolCallId,
 	encodeTextSignatureV1,
-	escapeReplayedClientText,
+	escapeReplayedControlTokens,
 	finalizeCustomToolCallInputDone,
 	finalizeMessageText,
 	finalizePendingResponsesToolCalls,
@@ -4339,6 +4339,9 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 	};
 
 	const transformedMessages = transformMessages(context.messages, model, normalizeToolCallId);
+	// gpt-5.x reject raw Harmony control-token spellings anywhere in replayed
+	// input, including the model's own tool-call arguments (#6913).
+	const escapeControlTokens = isHarmonyDialectModel(model);
 	let msgIndex = 0;
 	// Track call_ids that originated as custom tool calls so paired tool-result
 	// messages can be replayed as `custom_tool_call_output` rather than
@@ -4368,7 +4371,7 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 						knownCallIds.add(item.call_id);
 					}
 				}
-				messages.push(...(isHarmonyDialectModel(model) ? escapeReplayedClientText(replayItems) : replayItems));
+				messages.push(...(escapeControlTokens ? escapeReplayedControlTokens(replayItems) : replayItems));
 				msgIndex += 1;
 				continue;
 			}
@@ -4394,10 +4397,11 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 			if (historyItems) {
 				const sanitizedHistoryItems = sanitizeOpenAIResponsesAssistantHistoryItemsForReplay(historyItems);
 				if (sanitizedHistoryItems) {
-					const replayItems =
+					const rawReplayItems =
 						model.supportsComputerUse === true
 							? sanitizedHistoryItems
 							: unrollCodexComputerItems(sanitizedHistoryItems, model.compat.supportsImageDetailOriginal);
+					const replayItems = escapeControlTokens ? escapeReplayedControlTokens(rawReplayItems) : rawReplayItems;
 					for (const item of replayItems) {
 						if (item.type === "custom_tool_call") {
 							customCallIds.add(item.call_id);
@@ -4435,7 +4439,7 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 				? sanitizeOpenAIResponsesAssistantFallbackItemsForReplay(convertedOutputItems)
 				: convertedOutputItems;
 			if (outputItems.length > 0) {
-				messages.push(...outputItems);
+				messages.push(...(escapeControlTokens ? escapeReplayedControlTokens(outputItems) : outputItems));
 			}
 			msgIndex += 1;
 			continue;

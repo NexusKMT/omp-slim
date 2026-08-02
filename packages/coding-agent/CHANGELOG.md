@@ -5,6 +5,7 @@
 ### Breaking Changes
 
 - Replaced the computer tool's `{ window, actions }` coordinate batches with persistent JavaScript runs using `{ code, read_only?, timeout? }`; removed `computer.backend` and model-specific controller switching.
+- Changed the `edit` tool's replace mode from a `{ path, edits: [{ old_text, new_text, all? }] }` batch to Claude Code's single-edit shape `{ path, old_string, new_string, replace_all? }` — one replacement per call. The Cursor `pi_edit` exec bridge maps single-replacement frames onto this schema directly and routes multi-replacement frames through an internal, bridge-only batch form so a frame still runs as one tool lifecycle with one aggregate diff.
 
 ### Added
 

@@ -1012,24 +1012,31 @@ export function findContextLine(
 	return { index: undefined, confidence: bestScore };
 }
 
-export const replaceEditEntrySchema = type({
-	old_text: "string",
-	new_text: "string",
-	"all?": "boolean",
-});
-
 export const replaceEditSchema = type({
 	path: "string",
-	edits: replaceEditEntrySchema.array(),
+	old_string: "string",
+	new_string: "string",
+	"replace_all?": "boolean",
 });
 
-export type ReplaceEditEntry = typeof replaceEditEntrySchema.infer;
 export type ReplaceParams = typeof replaceEditSchema.infer;
 
-export interface ExecuteReplaceSingleOptions {
+/**
+ * Internal batch form of {@link ReplaceParams}, produced only by the Cursor
+ * exec bridge: a `pi_edit` frame carries several replacements against one
+ * path but must run as a single tool lifecycle with one aggregate result.
+ * Never advertised to the model — the agent loop validates model calls
+ * against {@link replaceEditSchema}, which has no `edits` field.
+ */
+export interface ReplaceBatchParams {
+	path: string;
+	edits: Omit<ReplaceParams, "path">[];
+}
+
+export interface ExecuteReplaceOptions {
 	session: ToolSession;
 	path: string;
-	params: ReplaceEditEntry;
+	params: Omit<ReplaceParams, "path">;
 	signal?: AbortSignal;
 	batchRequest?: LspBatchRequest;
 	allowFuzzy: boolean;
@@ -1038,9 +1045,9 @@ export interface ExecuteReplaceSingleOptions {
 	beginDeferredDiagnosticsForPath: (path: string) => WritethroughDeferredHandle;
 }
 
-export async function executeReplaceSingle(
-	options: ExecuteReplaceSingleOptions,
-): Promise<AgentToolResult<EditToolDetails, ReplaceEditEntry>> {
+export async function executeReplace(
+	options: ExecuteReplaceOptions,
+): Promise<AgentToolResult<EditToolDetails, ReplaceParams>> {
 	const {
 		session,
 		path,
@@ -1052,12 +1059,12 @@ export async function executeReplaceSingle(
 		writethrough,
 		beginDeferredDiagnosticsForPath,
 	} = options;
-	const { old_text, new_text, all } = params;
+	const { old_string, new_string, replace_all } = params;
 
 	enforcePlanModeWrite(session, path);
 
-	if (old_text.length === 0) {
-		throw new Error("old_text must not be empty.");
+	if (old_string.length === 0) {
+		throw new Error("old_string must not be empty.");
 	}
 
 	const absolutePath = resolvePlanPath(session, path);
@@ -1065,12 +1072,12 @@ export async function executeReplaceSingle(
 	const { bom, text: content } = stripBom(rawContent);
 	const originalEnding = detectLineEnding(content);
 	const normalizedContent = normalizeToLF(content);
-	const normalizedOldText = normalizeToLF(old_text);
-	const normalizedNewText = normalizeToLF(new_text);
+	const normalizedOldText = normalizeToLF(old_string);
+	const normalizedNewText = normalizeToLF(new_string);
 
 	const result = replaceText(normalizedContent, normalizedOldText, normalizedNewText, {
 		fuzzy: allowFuzzy,
-		all: all ?? false,
+		all: replace_all ?? false,
 		threshold: fuzzyThreshold,
 	});
 
