@@ -19,7 +19,7 @@ export interface RelayServerOptions {
 	port: number;
 	/** Shared secret the extension must present as `?token=`; unset disables the check. */
 	token?: string;
-	/** Group controllable tabs under one per-window Chrome tab group (default on); `false` disables. */
+	/** Group tabs the agent actively drives under one per-window Chrome tab group (default on); `false` disables. */
 	group?: boolean | { title: string; color: string };
 	log?: (message: string, data?: Record<string, unknown>) => void;
 }

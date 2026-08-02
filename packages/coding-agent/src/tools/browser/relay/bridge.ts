@@ -55,6 +55,8 @@ class CdpConnection {
 	autoAttach = false;
 	/** Minted pseudo-sessions owned by this connection. */
 	readonly sessions = new Map<string, SessionRef>();
+	/** Tabs this connection claimed as drive targets (`OMP.claimTarget` / `Target.createTarget`). */
+	readonly claims = new Set<number>();
 
 	constructor(
 		readonly id: number,
@@ -159,13 +161,17 @@ export class RelayBridge {
 	/** Real child session id → owning tab, learned from `Target.attachedToTarget` events. */
 	#realSessionTabs = new Map<string, number>();
 	#log: (message: string, data?: Record<string, unknown>) => void;
-	/** Tab-group appearance for controllable tabs; null disables grouping. */
+	/** Tab-group appearance for driven tabs; null disables grouping. */
 	#group: { title: string; color: string } | null;
+	/** Tabs awaiting the next group RPC; drained one batch at a time. */
+	#groupQueue: TabState[] = [];
+	/** True while {@link #drainGroupQueue} runs — group RPCs must never overlap. */
+	#groupDraining = false;
 
 	constructor(
 		opts: {
 			log?: (message: string, data?: Record<string, unknown>) => void;
-			/** Group controllable tabs under one per-window Chrome tab group. */
+			/** Group tabs the agent actively drives under one per-window Chrome tab group. */
 			group?: { title: string; color: string } | null;
 		} = {},
 	) {
@@ -224,7 +230,15 @@ export class RelayBridge {
 		for (const tab of this.#tabs.values()) {
 			tab.attached = false;
 			tab.attaching = null;
+			// The extension dissolves omp groups on disconnect (or died along
+			// with them); grouping state is unknowable until the next hello.
+			// Without this reset, the next hello's groupId=-1 snapshots would
+			// read as the user dragging every tab out (permanent opt-out).
+			tab.grouped = false;
+			tab.grouping = false;
+			tab.ompGroupId = undefined;
 		}
+		this.#groupQueue.length = 0;
 	}
 
 	extMessage(socket: RelaySocket, raw: string): void {
@@ -314,6 +328,14 @@ export class RelayBridge {
 		const touched = new Set<number>();
 		for (const ref of conn.sessions.values()) touched.add(ref.tabId);
 		conn.sessions.clear();
+		// Tabs this client claimed leave the omp group unless another claimant
+		// remains — session holders don't count: the long-lived registry
+		// connection holds sessions on every tab without driving any of them.
+		for (const tabId of conn.claims) {
+			const tab = this.#tabs.get(tabId);
+			if (tab) this.#syncTabGrouping(tab);
+		}
+		conn.claims.clear();
 		// Drop the debugger (and its infobar) from tabs nobody drives anymore.
 		for (const tabId of touched) {
 			if (this.#sessionHolders(tabId).length > 0) continue;
@@ -377,6 +399,13 @@ export class RelayBridge {
 			this.#reply(conn, msg, {});
 			return;
 		}
+		// Relay-private claim: the omp tab worker marks the page it was spawned
+		// to drive. Never forwarded — real Chrome rejects the unknown method.
+		if (msg.method === "OMP.claimTarget") {
+			this.#claimTab(conn, tabId);
+			this.#reply(conn, msg, {});
+			return;
+		}
 		try {
 			const result = await this.#rpc({
 				op: "send",
@@ -389,6 +418,30 @@ export class RelayBridge {
 		} catch (err) {
 			this.#replyError(conn, msg, err instanceof Error ? err.message : String(err));
 		}
+	}
+
+	/**
+	 * Record `conn` as a driver of the tab and reconcile grouping. Claims are
+	 * explicit (worker adoption or tab creation) rather than inferred from
+	 * command traffic: target discovery scans every page with the same
+	 * commands a driver sends, so inference would sweep all tabs.
+	 */
+	#claimTab(conn: CdpConnection, tabId: number): void {
+		const tab = this.#tabs.get(tabId);
+		if (!tab) return;
+		if (!conn.claims.has(tabId)) {
+			conn.claims.add(tabId);
+			this.#log("tab claimed", { conn: conn.id, tabId });
+		}
+		this.#syncTabGrouping(tab);
+	}
+
+	/** True while any downstream connection claims the tab as its drive target. */
+	#claimed(tabId: number): boolean {
+		for (const conn of this.#conns.values()) {
+			if (conn.claims.has(tabId)) return true;
+		}
+		return false;
 	}
 
 	/** Tab pseudo-sessions only exist to satisfy puppeteer's Target hierarchy. */
@@ -500,6 +553,8 @@ export class RelayBridge {
 					typeof msg.params?.url === "string" && msg.params.url.length > 0 ? msg.params.url : "about:blank";
 				const result = (await this.#rpc({ op: "createTab", url })) as { tab: TabSnapshot };
 				this.#onTabUpsert(result.tab);
+				// Creating a tab is an explicit act of driving it.
+				this.#claimTab(conn, result.tab.tabId);
 				this.#reply(conn, msg, { targetId: pageTargetId(result.tab.tabId) });
 				return;
 			}
@@ -605,6 +660,9 @@ export class RelayBridge {
 		tab.attached = false;
 		tab.attaching = null;
 		tab.banned = true;
+		// The user dismissed the debugger infobar (or the attach was torn
+		// down): release the tab's omp-group membership too.
+		this.#syncTabGrouping(tab);
 		this.#retractTab(tab);
 	}
 
@@ -613,6 +671,7 @@ export class RelayBridge {
 		if (!tab) return;
 		this.#retractTab(tab);
 		this.#tabs.delete(tabId);
+		for (const conn of this.#conns.values()) conn.claims.delete(tabId);
 	}
 
 	#onTabUpsert(snap: TabSnapshot, opts: { silent?: boolean } = {}): void {
@@ -632,7 +691,7 @@ export class RelayBridge {
 		}
 		if (opts.silent) return;
 		const eligible = this.#eligible(tab);
-		this.#syncTabGrouping(tab, eligible);
+		this.#syncTabGrouping(tab);
 		if (eligible && !tab.announced) {
 			tab.announced = true;
 			for (const conn of this.#conns.values()) {
@@ -663,13 +722,13 @@ export class RelayBridge {
 
 	// ---- tab grouping -----------------------------------------------------------
 
-	/** A tab belongs in the omp group when controllable, unpinned, not user-opted-out, and not already in a user group. */
+	/** A tab belongs in the omp group when claimed by a client, controllable, unpinned, not user-opted-out, and not already in a user group. */
 	#groupWorthy(tab: TabState): boolean {
-		if (!this.#eligible(tab) || tab.pinned || tab.groupOptOut) return false;
+		if (!this.#claimed(tab.tabId) || !this.#eligible(tab) || tab.pinned || tab.groupOptOut) return false;
 		return tab.grouped || tab.groupId === -1;
 	}
 
-	/** Group every currently worthy tab (extension hello / reconnect). */
+	/** Re-group every claimed tab (extension hello / reconnect). */
 	#syncGrouping(): void {
 		if (!this.#group) return;
 		const worthy = [...this.#tabs.values()].filter(tab => this.#groupWorthy(tab) && !tab.grouped && !tab.grouping);
@@ -677,49 +736,68 @@ export class RelayBridge {
 	}
 
 	/** Reconcile one tab's group membership after a lifecycle event. */
-	#syncTabGrouping(tab: TabState, eligible: boolean): void {
+	#syncTabGrouping(tab: TabState): void {
 		if (!this.#group) return;
-		if (eligible && this.#groupWorthy(tab) && !tab.grouped && !tab.grouping) {
-			this.#requestGroup([tab]);
+		if (this.#groupWorthy(tab)) {
+			if (!tab.grouped && !tab.grouping) this.#requestGroup([tab]);
 			return;
 		}
-		if (!eligible && tab.grouped) {
+		if (tab.grouped) {
 			tab.grouped = false;
 			tab.ompGroupId = undefined;
 			void this.#rpc({ op: "ungroup", tabIds: [tab.tabId] }).catch(() => {});
 		}
 	}
 
+	/**
+	 * Queue tabs for grouping and drain serially. Overlapping group RPCs race
+	 * the extension's non-atomic query→create→set-title sequence and mint
+	 * duplicate omp groups, so at most one group RPC is ever in flight.
+	 */
 	#requestGroup(tabs: TabState[]): void {
+		if (!this.#group) return;
+		for (const tab of tabs) {
+			tab.grouping = true;
+			this.#groupQueue.push(tab);
+		}
+		if (!this.#groupDraining) void this.#drainGroupQueue();
+	}
+
+	async #drainGroupQueue(): Promise<void> {
 		const group = this.#group;
 		if (!group) return;
-		const tabIds = tabs.map(tab => tab.tabId);
-		for (const tab of tabs) tab.grouping = true;
-		void this.#rpc({ op: "group", tabIds, title: group.title, color: group.color })
-			.then(result => {
-				// Extension replies { grouped: { [tabId]: groupId } }; validate per entry.
-				const grouped: Record<string, unknown> =
-					result &&
-					typeof result === "object" &&
-					"grouped" in result &&
-					result.grouped &&
-					typeof result.grouped === "object"
-						? (result.grouped as Record<string, unknown>)
-						: {};
-				for (const tab of tabs) {
-					const groupId = grouped[String(tab.tabId)];
-					if (typeof groupId !== "number") continue;
-					tab.grouped = true;
-					tab.ompGroupId = groupId;
+		this.#groupDraining = true;
+		try {
+			while (this.#groupQueue.length > 0) {
+				const batch = this.#groupQueue.splice(0);
+				const tabIds = batch.map(tab => tab.tabId);
+				try {
+					const result = await this.#rpc({ op: "group", tabIds, title: group.title, color: group.color });
+					// Extension replies { grouped: { [tabId]: groupId } }; validate per entry.
+					const grouped: Record<string, unknown> =
+						result &&
+						typeof result === "object" &&
+						"grouped" in result &&
+						result.grouped &&
+						typeof result.grouped === "object"
+							? (result.grouped as Record<string, unknown>)
+							: {};
+					for (const tab of batch) {
+						const groupId = grouped[String(tab.tabId)];
+						if (typeof groupId !== "number") continue;
+						tab.grouped = true;
+						tab.ompGroupId = groupId;
+					}
+					this.#log("grouped tabs", { tabIds, grouped });
+				} catch (err) {
+					this.#log("tab grouping failed", { error: err instanceof Error ? err.message : String(err) });
+				} finally {
+					for (const tab of batch) tab.grouping = false;
 				}
-				this.#log("grouped tabs", { tabIds, grouped });
-			})
-			.catch(err => {
-				this.#log("tab grouping failed", { error: err instanceof Error ? err.message : String(err) });
-			})
-			.finally(() => {
-				for (const tab of tabs) tab.grouping = false;
-			});
+			}
+		} finally {
+			this.#groupDraining = false;
+		}
 	}
 
 	/** Tear a tab out of every downstream connection (closed, detached, or now ineligible). */

@@ -1,4 +1,4 @@
-// packages/browser-relay/extension/background.ts
+// extension/background.ts
 var DEFAULT_PORT = 9224;
 var PING_INTERVAL_MS = 20000;
 var RECONNECT_MIN_MS = 1000;
@@ -28,8 +28,15 @@ function snapshot(tab) {
   };
 }
 var ompGroupTitle = null;
+var groupOps = Promise.resolve();
+function enqueueGroupOp(fn) {
+  const result = groupOps.then(fn, fn);
+  groupOps = result.catch(() => {});
+  return result;
+}
 async function groupTabs(tabIds, title, color) {
   ompGroupTitle = title;
+  chrome.storage.session.set({ ompGroupTitle: title });
   const byWindow = new Map;
   for (const tabId of tabIds) {
     try {
@@ -44,7 +51,19 @@ async function groupTabs(tabIds, title, color) {
   const grouped = {};
   for (const [windowId, ids] of byWindow) {
     const existing = await chrome.tabGroups.query({ title, windowId });
-    const groupId = await chrome.tabs.group(existing[0] ? { tabIds: ids, groupId: existing[0].id } : { tabIds: ids });
+    let groupId;
+    if (existing[0]) {
+      groupId = existing[0].id;
+      for (const dupe of existing.slice(1)) {
+        const dupeTabs = await chrome.tabs.query({ groupId: dupe.id });
+        const dupeIds = dupeTabs.map((tab) => tab.id).filter((id) => id !== undefined);
+        if (dupeIds.length > 0)
+          await chrome.tabs.group({ tabIds: dupeIds, groupId });
+      }
+      await chrome.tabs.group({ tabIds: ids, groupId });
+    } else {
+      groupId = await chrome.tabs.group({ tabIds: ids });
+    }
     await chrome.tabGroups.update(groupId, { title, color });
     for (const id of ids)
       grouped[String(id)] = groupId;
@@ -52,6 +71,10 @@ async function groupTabs(tabIds, title, color) {
   return { grouped };
 }
 async function restoreGroups() {
+  if (!ompGroupTitle) {
+    const stored = await chrome.storage.session.get({ ompGroupTitle: "" }).catch(() => ({ ompGroupTitle: "" }));
+    ompGroupTitle = typeof stored.ompGroupTitle === "string" && stored.ompGroupTitle ? stored.ompGroupTitle : null;
+  }
   if (!ompGroupTitle)
     return;
   const groups = await chrome.tabGroups.query({ title: ompGroupTitle }).catch(() => []);
@@ -121,9 +144,9 @@ async function runRpc(msg) {
       return {};
     }
     case "group":
-      return await groupTabs(msg.tabIds, msg.title, msg.color);
+      return await enqueueGroupOp(() => groupTabs(msg.tabIds, msg.title, msg.color));
     case "ungroup":
-      await chrome.tabs.ungroup(msg.tabIds).catch(() => {});
+      await enqueueGroupOp(() => chrome.tabs.ungroup(msg.tabIds).catch(() => {}));
       return {};
   }
 }

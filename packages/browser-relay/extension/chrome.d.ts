@@ -81,6 +81,10 @@ declare const chrome: {
 			get(keys: Record<string, unknown>): Promise<Record<string, unknown>>;
 			set(items: Record<string, unknown>): Promise<void>;
 		};
+		session: {
+			get(keys: Record<string, unknown>): Promise<Record<string, unknown>>;
+			set(items: Record<string, unknown>): Promise<void>;
+		};
 		onChanged: ChromeEvent<(changes: Record<string, unknown>, areaName: string) => void>;
 	};
 	alarms: {

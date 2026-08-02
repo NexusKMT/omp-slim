@@ -22,7 +22,7 @@ export interface BrowserRelayCommandArgs {
 	token?: string;
 	/** Install target directory; defaults to ~/.omp/browser-relay/extension. */
 	dir?: string;
-	/** Gather controllable tabs into an 'omp' Chrome tab group (default true). */
+	/** Gather tabs the agent actively drives into an 'omp' Chrome tab group (default true). */
 	group?: boolean;
 	verbose?: boolean;
 }

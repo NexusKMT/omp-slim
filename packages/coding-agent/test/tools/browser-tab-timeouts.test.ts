@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "bun:test";
-import { resolvePredicateTimeout } from "@oh-my-pi/pi-coding-agent/tools/browser/run-cancellation";
+import { resolvePredicateTimeout } from "@oh-my-pi/pi-coding-agent/tools/run-scope";
 import {
 	dispatchScroll,
 	normalizeSelector,
