@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed headless `-p` / `--mode json` runs with `memory.backend: mnemopi` hanging after a completed turn and leaving `__omp_worker_mnemopi_embed` unreaped when the embed worker's fastembed/onnxruntime runtime wedged. Embed-worker IPC requests (`init`/`embed`) were unbounded, so a stuck native runtime blocked the turn's memory recall or the shutdown consolidation forever; requests are now bounded and the wedged worker is reaped on timeout so the next call respawns a fresh child (regression of [#5753](https://github.com/can1357/oh-my-pi/issues/5753); [#7352](https://github.com/can1357/oh-my-pi/issues/7352)).
+
 ## [17.2.4] - 2026-08-01
 
 ### Added
