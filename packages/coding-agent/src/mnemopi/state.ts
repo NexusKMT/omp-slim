@@ -4,7 +4,7 @@ import type * as MnemopiNs from "@oh-my-pi/pi-mnemopi";
 import type { Mnemopi, RecallResult } from "@oh-my-pi/pi-mnemopi";
 import type * as MnemopiCoreNs from "@oh-my-pi/pi-mnemopi/core";
 import type { LocalModelInitializer } from "@oh-my-pi/pi-mnemopi/core";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger, toError } from "@oh-my-pi/pi-utils";
 import {
 	composeRecallQuery,
 	formatCurrentTime,
@@ -386,6 +386,8 @@ export class MnemopiSessionState {
 		const merged: RecallResult[] = [];
 		const byId = new Map<string, number>();
 		const byContent = new Map<string, number>();
+		const failures: Array<{ bank: string; error: Error }> = [];
+		let successfulTargets = 0;
 		const sharedFallbackQuery = deriveSharedRecallFallbackQuery(
 			query,
 			this.scoped.retain.bank,
@@ -394,24 +396,35 @@ export class MnemopiSessionState {
 		for (const target of this.scoped.recall) {
 			const queries =
 				target.bank === this.scoped.global?.bank && sharedFallbackQuery ? [query, sharedFallbackQuery] : [query];
+			let targetSucceeded = false;
 			try {
 				for (const recallQuery of queries) {
 					const results = await target.memory.recallEnhanced(recallQuery, this.config.recallLimit, {
 						includeFacts: true,
 						channelId: target.bank,
 					});
+					targetSucceeded = true;
 					for (const result of results) {
 						mergeRecallResult(merged, byId, byContent, result);
 					}
 				}
 			} catch (error) {
-				if (this.config.debug) {
-					logger.debug("Mnemopi: scoped recall target failed", {
-						bank: target.bank,
-						error: String(error),
-					});
-				}
+				const failure = toError(error);
+				failures.push({ bank: target.bank, error: failure });
+				logger.warn("Mnemopi: scoped recall target failed", {
+					bank: target.bank,
+					error: failure.message,
+				});
 			}
+			if (targetSucceeded) successfulTargets++;
+		}
+		if (successfulTargets === 0 && failures.length > 0) {
+			if (failures.length === 1) throw failures[0].error;
+			const details = failures.map(({ bank, error }) => `${bank}: ${error.message}`).join("; ");
+			throw new AggregateError(
+				failures.map(({ error }) => error),
+				`Mnemopi recall failed for all scoped targets (${details})`,
+			);
 		}
 		merged.sort(compareRecallResults);
 		if (merged.length > this.config.recallLimit) merged.length = this.config.recallLimit;
@@ -575,7 +588,16 @@ export class MnemopiSessionState {
 		if (!lastUser) return;
 		const query = composeRecallQuery(lastUser.content, messages, this.config.recallContextTurns);
 		const truncated = truncateRecallQuery(query, lastUser.content, this.config.recallMaxQueryChars);
-		const context = await this.recallForContext(truncated);
+		let context: string | undefined;
+		try {
+			context = await this.recallForContext(truncated);
+		} catch (error) {
+			logger.warn("Mnemopi: auto-recall failed", {
+				bank: this.config.bank,
+				error: toError(error).message,
+			});
+			return;
+		}
 		this.hasRecalledForFirstTurn = true;
 		if (!context) return;
 		this.lastRecallSnippet = context;

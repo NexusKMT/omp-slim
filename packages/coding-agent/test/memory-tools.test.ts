@@ -470,6 +470,18 @@ describe("Mnemopi backend lifecycle", () => {
 		tempDbPath = undefined;
 	});
 
+	it("keeps background auto-recall engine failures from escaping", async () => {
+		const entries = [{ type: "message", message: { role: "user", content: "existing memory" } }];
+		const state = registerMnemopiState(makeMnemopiConfig({ autoRecall: true }), {
+			entries: () => entries,
+		});
+		vi.spyOn(state.getScopedRecallTargets()[0].memory, "recallEnhanced").mockRejectedValue(
+			new TypeError("mmrRerankIndices is not a function"),
+		);
+
+		await expect(state.maybeRecallOnAgentStart()).resolves.toBeUndefined();
+		expect(state.hasRecalledForFirstTurn).toBe(false);
+	});
 	it("auto-retain stores only the not-yet-retained suffix", async () => {
 		const entries = Array.from({ length: 4 }, (_, index) => ({
 			type: "message",
@@ -1177,6 +1189,34 @@ describe("recall.execute (Mnemopi backend)", () => {
 		const tool = MemoryRecallTool.createIf(makeSession(settings))!;
 		const result = await tool.execute("call-mnemopi-empty", { query: "nonexistent query" });
 
+		expect(result.content[0]).toEqual({ type: "text", text: "No relevant memories found." });
+	});
+
+	it("surfaces recall engine failures instead of the no-results sentinel", async () => {
+		const settings = Settings.isolated({ "memory.backend": "mnemopi" });
+		const state = registerMnemopiState();
+		const failure = new TypeError("mmrRerankIndices is not a function");
+		vi.spyOn(state.getScopedRecallTargets()[0].memory, "recallEnhanced").mockRejectedValue(failure);
+
+		const tool = MemoryRecallTool.createIf(makeSession(settings))!;
+		await expect(tool.execute("call-mnemopi-failure", { query: "existing memory" })).rejects.toThrow(failure);
+	});
+
+	it("keeps healthy scoped targets available when another target fails", async () => {
+		const settings = Settings.isolated({ "memory.backend": "mnemopi" });
+		const state = registerMnemopiState(
+			makeMnemopiConfig({
+				scoping: "per-project-tagged",
+				bank: "project-bank",
+				globalBank: "global-bank",
+			}),
+		);
+		vi.spyOn(state.getScopedRecallTargets()[0].memory, "recallEnhanced").mockRejectedValue(
+			new Error("project bank unavailable"),
+		);
+
+		const tool = MemoryRecallTool.createIf(makeSession(settings))!;
+		const result = await tool.execute("call-mnemopi-partial-failure", { query: "nonexistent query" });
 		expect(result.content[0]).toEqual({ type: "text", text: "No relevant memories found." });
 	});
 
