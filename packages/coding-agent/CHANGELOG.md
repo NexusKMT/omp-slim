@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `omp setup python` to validate the same configured or discovered interpreter used by the Python eval runtime.
+
+
 ## [17.2.4] - 2026-08-01
 
 ### Added
