@@ -131,6 +131,10 @@
 - Fixed the auto-titler installing a model's whole answer as the session title when the tiny title model ignored the titling task and answered the first user message instead. `normalizeGeneratedTitle` now rejects overlong output (>80 chars or >12 words) so the caller defers titling to the next user turn rather than accepting a full sentence ([#7303](https://github.com/can1357/oh-my-pi/issues/7303)).
 - Fixed the in-process `kill` builtin to validate signals, preserve negative PID operands, signal every process in pipeline jobs, continue after bad targets, and refuse non-probe signals aimed at the host process or process group.
 
+### Fixed
+
+- Fixed `skill://` resolution ignoring explicitly configured `skills.customDirectories` entries when a same-named skill existed in a default discovery path: the custom-directory skill now wins as the higher-priority source ([#7190](https://github.com/can1357/oh-my-pi/issues/7190)).
+
 ## [17.2.3] - 2026-08-01
 
 ### Changed
