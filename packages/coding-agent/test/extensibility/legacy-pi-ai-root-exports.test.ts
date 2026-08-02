@@ -1,10 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import { streamOpenAIResponses } from "@oh-my-pi/pi-ai";
 import {
 	isContextOverflow,
 	parseJsonWithRepair,
 	parseStreamingJson,
 	repairJson,
+	streamSimpleOpenAIResponses,
 } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-pi-ai-shim";
 
 // Issue #6859: pi extensions import runtime helpers from the `@earendil-works/pi-ai`
@@ -52,5 +54,8 @@ describe("legacy pi-ai shim root exports", () => {
 		expect(parseJsonWithRepair<{ a: number }>("{a: 1,}")).toEqual({ a: 1 });
 		// parseStreamingJson completes a truncated object at the streaming edge.
 		expect(parseStreamingJson<{ a: number }>('{"a": 1')).toEqual({ a: 1 });
+	});
+	it("aliases the legacy simple OpenAI Responses stream", () => {
+		expect(streamSimpleOpenAIResponses).toBe(streamOpenAIResponses);
 	});
 });

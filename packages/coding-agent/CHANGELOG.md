@@ -23,6 +23,7 @@
 - Reduced `omp --help` cold-start latency and memory use by rendering lightweight command metadata without loading every runtime command and provider graph.
 
 ### Fixed
+- Fixed `omp plugin install git:github.com/algal/pi-openai-server-compaction` failing extension validation because the legacy Pi compatibility shims omitted `serializeConversation` and the `/compat` alias `streamSimpleOpenAIResponses` ([#7403](https://github.com/can1357/oh-my-pi/issues/7403)).
 
 - Fixed template argument substitution (`substituteArgs`) executing recursive placeholder expansion when positional argument values contain literal `$@` or `$ARGUMENTS` tokens.
 - Fixed focused-agent status bar dimming darkening Powerline end caps.

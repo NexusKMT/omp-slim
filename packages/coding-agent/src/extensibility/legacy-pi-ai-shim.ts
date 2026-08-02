@@ -121,6 +121,11 @@ export { calculateCost, getBundledModel, getBundledModels, getBundledProviders, 
 export const getModel = getBundledModel;
 export const getModels = getBundledModels;
 
+// Upstream's `/compat` entrypoint exposes this legacy name for the simple
+// OpenAI Responses stream. OMP's provider uses the same simple-options
+// contract under `streamOpenAIResponses`; alias it for rewritten compat
+// imports from extensions such as pi-openai-server-compaction.
+export { streamOpenAIResponses as streamSimpleOpenAIResponses } from "@oh-my-pi/pi-ai";
 /**
  * Compatibility re-exports for runtime helpers that upstream
  * `@earendil-works/pi-ai` exposed from its package root but omp's
