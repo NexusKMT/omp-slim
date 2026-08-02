@@ -53,6 +53,9 @@
 ### Fixed
 
 - Fixed a literal API key configured via `/login` (e.g. OpenCode Zen's free `public` key) being hijacked on Windows by a case-differing system environment variable, causing 401s. `process.env`/`Bun.env` reads are case-insensitive on Windows, so the config-value resolvers' "env var name, else literal" fallback resolved `public` to the built-in `PUBLIC=C:\Users\Public`. Resolution now requires an exact-case env entry (via the new `$envExact` helper) before treating a value as an env-var reference ([#7361](https://github.com/can1357/oh-my-pi/issues/7361)).
+### Fixed
+
+- Fixed redirected stdin being ignored when Bun reports a pipe with an undefined `isTTY`, so JSON/print sessions now process piped prompts and persist them under `--session-dir` or `PI_CODING_AGENT_SESSION_DIR` as requested ([#7378](https://github.com/can1357/oh-my-pi/issues/7378)).
 
 ## [17.2.4] - 2026-08-01
 

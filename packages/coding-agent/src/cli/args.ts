@@ -1,7 +1,7 @@
 /**
  * CLI argument parsing and help display
  */
-import { APP_NAME, CONFIG_DIR_NAME, logger } from "@oh-my-pi/pi-utils";
+import { $env, APP_NAME, CONFIG_DIR_NAME, logger } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
 import { CLI_THINKING_LEVELS, type ConfiguredThinkingLevel, parseCliThinkingLevel } from "../thinking";
 import { BUILTIN_TOOL_NAMES, HIDDEN_TOOL_NAMES, normalizeToolNames } from "../tools/builtin-names";
@@ -145,6 +145,7 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 		fileArgs: [],
 		unknownFlags: new Map(),
 		unrecognizedFlags: [],
+		sessionDir: $env.PI_CODING_AGENT_SESSION_DIR || undefined,
 	};
 
 	// `--` ends option parsing (POSIX end-of-options). Everything after it is
