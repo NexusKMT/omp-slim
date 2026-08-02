@@ -13,7 +13,13 @@ import {
 } from "@oh-my-pi/pi-tui";
 import type { TreeFilterMode } from "../../config/settings-schema";
 import { theme } from "../../modes/theme/theme";
-import { matchesAppInterrupt, matchesSelectDown, matchesSelectUp } from "../../modes/utils/keybinding-matchers";
+import {
+	matchesAppInterrupt,
+	matchesSelectDown,
+	matchesSelectPageDown,
+	matchesSelectPageUp,
+	matchesSelectUp,
+} from "../../modes/utils/keybinding-matchers";
 import type { SessionTreeNode } from "../../session/session-entries";
 import { toPathList } from "../../tools/path-utils";
 import { shortenPath } from "../../tools/render-utils";
@@ -753,16 +759,36 @@ class TreeList implements Component {
 		}
 	}
 
+	#moveToAdjacentTurn(direction: -1 | 1): void {
+		for (
+			let index = this.#selectedIndex + direction;
+			index >= 0 && index < this.#filteredNodes.length;
+			index += direction
+		) {
+			const entry = this.#filteredNodes[index]?.node.entry;
+			if (entry?.type === "message" && (entry.message.role === "user" || entry.message.role === "assistant")) {
+				this.#selectedIndex = index;
+				return;
+			}
+		}
+	}
+
 	handleInput(keyData: string): void {
 		if (matchesSelectUp(keyData)) {
 			this.#selectedIndex = this.#selectedIndex === 0 ? this.#filteredNodes.length - 1 : this.#selectedIndex - 1;
 		} else if (matchesSelectDown(keyData)) {
 			this.#selectedIndex = this.#selectedIndex === this.#filteredNodes.length - 1 ? 0 : this.#selectedIndex + 1;
-		} else if (matchesKey(keyData, "left")) {
-			// Page up
+		} else if (matchesKey(keyData, "alt+up")) {
+			this.#moveToAdjacentTurn(-1);
+		} else if (matchesKey(keyData, "alt+down")) {
+			this.#moveToAdjacentTurn(1);
+		} else if (matchesKey(keyData, "home")) {
+			this.#selectedIndex = 0;
+		} else if (matchesKey(keyData, "end")) {
+			this.#selectedIndex = Math.max(0, this.#filteredNodes.length - 1);
+		} else if (matchesSelectPageUp(keyData) || matchesKey(keyData, "left")) {
 			this.#selectedIndex = Math.max(0, this.#selectedIndex - this.maxVisibleLines);
-		} else if (matchesKey(keyData, "right")) {
-			// Page down
+		} else if (matchesSelectPageDown(keyData) || matchesKey(keyData, "right")) {
 			this.#selectedIndex = Math.min(this.#filteredNodes.length - 1, this.#selectedIndex + this.maxVisibleLines);
 		} else if (matchesKey(keyData, "shift+enter") || matchesKey(keyData, "shift+return")) {
 			// Summarize-and-switch: fork with a branch summary without the extra prompt.
@@ -926,7 +952,7 @@ export class TreeSelectorComponent extends Container {
 			new TruncatedText(
 				theme.fg(
 					"muted",
-					"Enter: switch. Shift+Enter: summarize & switch. Shift+L: label. Ctrl+O: filter. Alt+D/T/U/L/A: filter. Type to search",
+					"Enter: switch. Alt+↑/↓: previous/next turn. PgUp/PgDn (←/→): page. Home/End: first/last item. Shift+Enter: summarize & switch. Shift+L: label. Ctrl+O: filter. Alt+D/T/U/L/A: filter. Type to search",
 				),
 				0,
 				0,

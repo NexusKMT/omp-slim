@@ -159,6 +159,11 @@
 - Fixed the browser tool ignoring the url parameter when opening a new tab on an attached browser.
 - Fixed browser automation disrupting attached browsers by adopting the active foreground tab and avoiding raising new tabs during screenshots.
 
+### Added
+
+- Added turn-aware `/tree` navigation: Alt+Up/Alt+Down traverses previous/next user or assistant turns while skipping tool and bookkeeping entries, Home/End jumps to the first/last visible item, and PageUp/PageDown moves by a visible page.
+
+
 ## [17.2.1] - 2026-07-30
 
 ### Added
