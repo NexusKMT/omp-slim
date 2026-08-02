@@ -444,7 +444,15 @@ export async function dispatchXdevTool(
 					})
 			: undefined;
 		const executable = state.decorateExecution?.(canonical) ?? canonical;
-		const result = await executable.execute(toolCallId, validated as never, signal, innerOnUpdate, context);
+		const executionContext = context
+			? {
+					...context,
+					xdevTierResolved: (effectiveTier: ToolTier) => {
+						xdev = { ...xdev, tier: effectiveTier };
+					},
+				}
+			: undefined;
+		const result = await executable.execute(toolCallId, validated as never, signal, innerOnUpdate, executionContext);
 		return { result, xdev: { ...xdev, inner: result.details } };
 	} catch (error) {
 		if (
