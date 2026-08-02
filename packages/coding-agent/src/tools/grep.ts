@@ -910,7 +910,17 @@ export class GrepTool implements AgentTool<typeof searchSchema, GrepToolDetails>
 	readonly label = "Grep";
 	readonly loadMode = "discoverable";
 	readonly summary = "Grep file contents using ripgrep (fast regex search)";
-	readonly description: string;
+	get description(): string {
+		const displayMode = resolveFileDisplayMode(this.session);
+		return prompt.render(grepDescription, {
+			IS_HL_MODE: displayMode.hashLines,
+			IS_LINE_NUMBER_MODE: !displayMode.hashLines && displayMode.lineNumbers,
+			scoutAvailable: isScoutSpawnable(
+				this.session.settings.get("task.disabledAgents") as string[] | undefined,
+				this.session.getSessionSpawns?.() ?? "*",
+			),
+		});
+	}
 	readonly parameters = searchSchema;
 	readonly strict = true;
 
@@ -925,15 +935,6 @@ export class GrepTool implements AgentTool<typeof searchSchema, GrepToolDetails>
 		this.#contextOverride = context !== undefined ? Math.max(0, Math.floor(context)) : undefined;
 		const total = options?.totalMatchLimit;
 		this.#totalMatchLimit = total !== undefined ? Math.max(1, Math.floor(total)) : undefined;
-		const displayMode = resolveFileDisplayMode(session);
-		this.description = prompt.render(grepDescription, {
-			IS_HL_MODE: displayMode.hashLines,
-			IS_LINE_NUMBER_MODE: !displayMode.hashLines && displayMode.lineNumbers,
-			scoutAvailable: isScoutSpawnable(
-				session.settings.get("task.disabledAgents") as string[] | undefined,
-				session.getSessionSpawns?.() ?? "*",
-			),
-		});
 	}
 
 	async execute(

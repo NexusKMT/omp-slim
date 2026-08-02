@@ -107,7 +107,14 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 	readonly approval = "read" as const;
 	readonly loadMode = "essential";
 	readonly label = "Glob";
-	readonly description: string;
+	get description(): string {
+		return prompt.render(globDescription, {
+			scoutAvailable: isScoutSpawnable(
+				this.session.settings.get("task.disabledAgents") as string[] | undefined,
+				this.session.getSessionSpawns?.() ?? "*",
+			),
+		});
+	}
 	readonly parameters = findSchema;
 
 	readonly examples: readonly ToolExample<typeof findSchema.infer>[] = [
@@ -139,12 +146,6 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 	) {
 		this.#customOps = options?.operations;
 		this.#rootPathAlias = options?.rootPathAlias === true;
-		this.description = prompt.render(globDescription, {
-			scoutAvailable: isScoutSpawnable(
-				this.session.settings.get("task.disabledAgents") as string[] | undefined,
-				this.session.getSessionSpawns?.() ?? "*",
-			),
-		});
 	}
 
 	async execute(
