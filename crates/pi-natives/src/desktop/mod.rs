@@ -31,7 +31,7 @@ pub use types::*;
 
 use crate::task;
 
-const OPERATION_TIMEOUT: Duration = Duration::from_secs(60);
+const OPERATION_TIMEOUT: Duration = Duration::from_mins(1);
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 
 enum Response {
