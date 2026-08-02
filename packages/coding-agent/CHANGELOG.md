@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+
+- Fixed focused-agent status bar dimming darkening Powerline end caps.
 
 ## [17.2.4] - 2026-08-01
 
