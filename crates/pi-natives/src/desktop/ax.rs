@@ -445,6 +445,9 @@ pub fn ax_press(backend: &mut dyn AxBackend, handle: &AxHandle) -> CoreResult<()
 	backend.perform(handle, "press")
 }
 
+/// Maps a raw `AX*` macOS accessibility role onto the cross-platform role
+/// vocabulary. Compiled only where it has a caller (macOS backend + tests).
+#[cfg(any(target_os = "macos", test))]
 pub fn normalize_role_macos(native: &str) -> String {
 	match native {
 		"AXTextArea" => "textarea",
@@ -481,7 +484,7 @@ pub(crate) fn normalize_role_uia(native: &str) -> String {
 	.to_string()
 }
 #[cfg(any(target_os = "linux", test))]
-pub(crate) fn normalize_role_atspi(native: &str, multiline: bool) -> String {
+pub fn normalize_role_atspi(native: &str, multiline: bool) -> String {
 	match native.to_ascii_lowercase().as_str() {
 		"push button" | "toggle button" => "button".into(),
 		"entry" | "text" if multiline => "textarea".into(),

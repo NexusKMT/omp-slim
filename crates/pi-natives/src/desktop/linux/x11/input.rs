@@ -38,7 +38,7 @@ use crate::desktop::{
 const CLICK_DELAY: Duration = Duration::from_millis(12);
 const MPX_SETTLE: Duration = Duration::from_millis(100);
 
-pub(crate) struct X11Input {
+pub struct X11Input {
 	conn:                Arc<RustConnection>,
 	root:                Window,
 	min_keycode:         u8,
@@ -93,10 +93,8 @@ impl X11Input {
 			(Target::Window(id), DeliveryMode::Background) => {
 				let window = parse_window(id)?;
 				let filtering = self.send_event_filtering_toolkit(window);
-				if filtering && self.mpx_probe {
-					if self.pointer_mpx(window, &event).is_ok() {
-						return Ok(());
-					}
+				if filtering && self.mpx_probe && self.pointer_mpx(window, &event).is_ok() {
+					return Ok(());
 				}
 				if filtering {
 					return Err(background_unavailable(
@@ -283,7 +281,6 @@ impl X11Input {
 	}
 
 	fn pointer_mpx(&self, window: Window, event: &PointerEvent) -> CoreResult<()> {
-		let kind = event_kind(event);
 		if matches!(
 			 event,
 			 PointerEvent::Click { modifiers, .. } | PointerEvent::Drag { modifiers, .. }
@@ -334,16 +331,13 @@ impl X11Input {
 				session.warp(x, y)
 			},
 		};
-		let cleanup = session.finish();
+		session.finish();
 		if let Some(previous) = previous_focus
 			&& self.active_window() != Some(previous)
 		{
 			let _ = self.activate(previous);
 		}
-		result?;
-		cleanup.map_err(|error| {
-			DesktopError::input_failed(format!("XI2-MPX {kind} cleanup failed: {}", error.message))
-		})
+		result
 	}
 
 	fn with_foreground<T>(
@@ -731,11 +725,11 @@ fn checked_i16(value: f64, axis: &str) -> CoreResult<i16> {
 	Ok(value.round() as i16)
 }
 
-pub(crate) fn validate_xtest_point(x: f64, y: f64) -> CoreResult<(i16, i16)> {
+pub fn validate_xtest_point(x: f64, y: f64) -> CoreResult<(i16, i16)> {
 	Ok((checked_i16(x, "x")?, checked_i16(y, "y")?))
 }
 
-fn button_detail(button: MouseButton) -> u8 {
+const fn button_detail(button: MouseButton) -> u8 {
 	match button {
 		MouseButton::Left => 1,
 		MouseButton::Middle => 2,
@@ -743,7 +737,7 @@ fn button_detail(button: MouseButton) -> u8 {
 	}
 }
 
-fn button_mask(detail: u8) -> Option<KeyButMask> {
+const fn button_mask(detail: u8) -> Option<KeyButMask> {
 	match detail {
 		1 => Some(KeyButMask::BUTTON1),
 		2 => Some(KeyButMask::BUTTON2),
@@ -782,7 +776,7 @@ fn scroll_buttons(dx: f64, dy: f64) -> Vec<(u8, u32)> {
 	result
 }
 
-fn event_kind(event: &PointerEvent) -> &'static str {
+const fn event_kind(event: &PointerEvent) -> &'static str {
 	match event {
 		PointerEvent::Click { .. } => "click",
 		PointerEvent::Move { .. } => "move",
@@ -1054,10 +1048,9 @@ impl<'a> MpxSession<'a> {
 		self.uinput.scroll(dx, dy)
 	}
 
-	fn finish(mut self) -> CoreResult<()> {
+	fn finish(mut self) {
 		self.cleanup();
 		self.finished = true;
-		Ok(())
 	}
 
 	fn cleanup(&mut self) {

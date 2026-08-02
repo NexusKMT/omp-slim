@@ -16,7 +16,7 @@ use crate::desktop::{
 	},
 };
 
-pub(crate) struct X11Backend {
+pub struct X11Backend {
 	capture:        X11Capture,
 	input:          X11Input,
 	ax:             Option<AtSpiAx>,

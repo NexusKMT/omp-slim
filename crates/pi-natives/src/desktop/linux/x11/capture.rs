@@ -58,7 +58,7 @@ impl ComponentMask {
 	}
 }
 
-pub(crate) struct X11Capture {
+pub struct X11Capture {
 	conn:        Arc<RustConnection>,
 	root:        Window,
 	root_width:  u32,

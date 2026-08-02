@@ -16,7 +16,11 @@ use crate::desktop::{
 	},
 };
 
-pub(crate) struct WaylandBackend {
+pub struct WaylandBackend {
+	#[cfg_attr(
+		not(feature = "wayland-pipewire"),
+		expect(dead_code, reason = "only read by the pipewire capture path")
+	)]
 	display:     DisplaySelector,
 	ax:          Option<AtSpiAx>,
 	ax_error:    Option<DesktopError>,
@@ -26,7 +30,7 @@ pub(crate) struct WaylandBackend {
 }
 
 impl WaylandBackend {
-	pub(crate) fn new(display: DisplaySelector) -> CoreResult<Self> {
+	pub fn new(display: DisplaySelector) -> Self {
 		let (ax, ax_error) = match AtSpiAx::new() {
 			Ok(ax) => (Some(ax), None),
 			Err(err) => (None, Some(err)),
@@ -35,7 +39,7 @@ impl WaylandBackend {
 			Ok(input) => (Some(input), None),
 			Err(err) => (None, Some(err)),
 		};
-		Ok(Self { display, ax, ax_error, input, input_error, displays: Vec::new() })
+		Self { display, ax, ax_error, input, input_error, displays: Vec::new() }
 	}
 
 	fn background_error(target: &Target, kind: &str) -> CoreResult<()> {
@@ -52,10 +56,10 @@ impl WaylandBackend {
 		if mode == DeliveryMode::Background {
 			Self::background_error(target, kind)?;
 		}
-		if mode == DeliveryMode::Foreground {
-			if let Target::Window(id) = target {
-				self.raise_window(id)?;
-			}
+		if mode == DeliveryMode::Foreground
+			&& let Target::Window(id) = target
+		{
+			self.raise_window(id)?;
 		}
 		if self.input.is_none() {
 			return Err(self.input_error.clone().unwrap_or_else(|| {
@@ -67,6 +71,7 @@ impl WaylandBackend {
 		Ok(())
 	}
 
+	#[cfg(feature = "wayland-pipewire")]
 	fn synthetic_display(image: &RgbaImage) -> DesktopDisplay {
 		DesktopDisplay {
 			id:           "wayland-portal-0".to_string(),
@@ -84,6 +89,7 @@ impl WaylandBackend {
 		}
 	}
 
+	#[cfg(feature = "wayland-pipewire")]
 	fn selected_display_allowed(&self) -> CoreResult<()> {
 		match &self.display {
 			DisplaySelector::All => Ok(()),
@@ -145,9 +151,7 @@ impl Backend for WaylandBackend {
 		#[cfg(not(feature = "wayland-pipewire"))]
 		{
 			let _ = target;
-			return Err(DesktopError::capture_failed(
-				"Wayland capture requires the wayland-pipewire feature",
-			));
+			Err(DesktopError::capture_failed("Wayland capture requires the wayland-pipewire feature"))
 		}
 		#[cfg(feature = "wayland-pipewire")]
 		{

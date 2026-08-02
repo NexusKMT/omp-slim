@@ -8,7 +8,7 @@ use crate::desktop::{
 	types::DesktopWindow,
 };
 
-pub(crate) struct AtSpiAx {
+pub struct AtSpiAx {
 	rt:         Runtime,
 	connection: atspi::AccessibilityConnection,
 }
@@ -25,12 +25,15 @@ impl AtSpiAx {
 		Ok(Self { rt, connection })
 	}
 
-	fn object(h: &AxHandle) -> CoreResult<&ObjectRefOwned> {
-		let AxHandle::AtSpi(object) = h;
-		Ok(object)
+	const fn object(h: &AxHandle) -> &ObjectRefOwned {
+		match h {
+			AxHandle::AtSpi(object) => object,
+			#[cfg(test)]
+			_ => panic!("AT-SPI backend received a non-AT-SPI handle"),
+		}
 	}
 
-	pub(crate) fn windows(&mut self) -> CoreResult<Vec<DesktopWindow>> {
+	pub(crate) fn windows(&self) -> CoreResult<Vec<DesktopWindow>> {
 		self.rt.block_on(async {
 			let mut windows = Vec::new();
 			for app in Self::apps(&self.connection)
@@ -228,8 +231,7 @@ impl AtSpiAx {
 		if proxy
 			.get_state()
 			.await
-			.map(|state| state.contains(State::Focused))
-			.unwrap_or(false)
+			.is_ok_and(|state| state.contains(State::Focused))
 		{
 			return Ok(Some(root));
 		}
@@ -268,7 +270,7 @@ impl AxBackend for AtSpiAx {
 	}
 
 	fn props(&mut self, h: &AxHandle) -> CoreResult<AxProps> {
-		let object = Self::object(h)?.clone();
+		let object = Self::object(h).clone();
 		self.rt.block_on(async {
 			let proxy = object
 				.as_accessible_proxy(self.connection.connection())
@@ -351,7 +353,7 @@ impl AxBackend for AtSpiAx {
 	}
 
 	fn children(&mut self, h: &AxHandle) -> CoreResult<Vec<AxHandle>> {
-		let object = Self::object(h)?.clone();
+		let object = Self::object(h).clone();
 		self.rt.block_on(async {
 			let proxy = object
 				.as_accessible_proxy(self.connection.connection())
@@ -372,7 +374,7 @@ impl AxBackend for AtSpiAx {
 	}
 
 	fn parent(&mut self, h: &AxHandle) -> CoreResult<Option<AxHandle>> {
-		let object = Self::object(h)?.clone();
+		let object = Self::object(h).clone();
 		self.rt.block_on(async {
 			let proxy = object
 				.as_accessible_proxy(self.connection.connection())
@@ -387,7 +389,7 @@ impl AxBackend for AtSpiAx {
 	}
 
 	fn perform(&mut self, h: &AxHandle, action: &str) -> CoreResult<()> {
-		let object = Self::object(h)?.clone();
+		let object = Self::object(h).clone();
 		self.rt.block_on(async {
 			let proxy = Self::action(&self.connection, &object)
 				.await
@@ -420,7 +422,7 @@ impl AxBackend for AtSpiAx {
 	}
 
 	fn set_value(&mut self, h: &AxHandle, value: &str) -> CoreResult<()> {
-		let object = Self::object(h)?.clone();
+		let object = Self::object(h).clone();
 		self.rt.block_on(async {
 			let name = object
 				.name()
@@ -433,14 +435,13 @@ impl AxBackend for AtSpiAx {
 					.map_err(|err| DesktopError::ax_failed(err.to_string()))?
 					.build()
 					.await;
-			if let Ok(editable) = editable {
-				if editable
+			if let Ok(editable) = editable
+				&& editable
 					.set_text_contents(value)
 					.await
 					.map_err(|err| DesktopError::ax_failed(format!("AT-SPI text value: {err}")))?
-				{
-					return Ok(());
-				}
+			{
+				return Ok(());
 			}
 			let numeric = value.parse::<f64>().map_err(|_| {
 				DesktopError::ax_failed("AT-SPI value is not editable text or a number")
@@ -460,7 +461,7 @@ impl AxBackend for AtSpiAx {
 	}
 
 	fn focus(&mut self, h: &AxHandle) -> CoreResult<()> {
-		let object = Self::object(h)?.clone();
+		let object = Self::object(h).clone();
 		self.rt.block_on(async {
 			let component = Self::component(&self.connection, &object)
 				.await
@@ -530,7 +531,7 @@ impl AxBackend for AtSpiAx {
 	}
 
 	fn attributes(&mut self, h: &AxHandle) -> CoreResult<Vec<(String, String)>> {
-		let object = Self::object(h)?.clone();
+		let object = Self::object(h).clone();
 		self.rt.block_on(async {
 			let proxy = object
 				.as_accessible_proxy(self.connection.connection())

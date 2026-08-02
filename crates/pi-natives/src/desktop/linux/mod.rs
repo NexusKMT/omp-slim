@@ -1,6 +1,6 @@
-pub(crate) mod ax;
-pub(crate) mod wayland;
-pub(crate) mod x11;
+pub mod ax;
+pub mod wayland;
+pub mod x11;
 
 use super::{
 	backend::Backend,
@@ -8,9 +8,9 @@ use super::{
 	types::DisplaySelector,
 };
 
-pub(crate) fn new_backend(display: DisplaySelector) -> CoreResult<Box<dyn Backend>> {
+pub fn new_backend(display: DisplaySelector) -> CoreResult<Box<dyn Backend>> {
 	if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-		return Ok(Box::new(wayland::WaylandBackend::new(display)?));
+		return Ok(Box::new(wayland::WaylandBackend::new(display)));
 	}
 	if std::env::var_os("DISPLAY").is_some() {
 		return Ok(Box::new(x11::X11Backend::new(display)?));
