@@ -1,6 +1,7 @@
 import { Args, type CommandMetadata, Flags } from "@oh-my-pi/pi-utils/cli";
 import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
 import { CLI_THINKING_LEVELS } from "../cli/thinking-levels";
+import { SERVICE_TIER_OPENAI_VALUES } from "../config/service-tier";
 
 export const launchHelp = {
 	description: "AI coding assistant",
@@ -65,6 +66,10 @@ export const launchHelp = {
 		thinking: Flags.string({
 			description: `Set thinking level: ${CLI_THINKING_LEVELS.join(", ")}`,
 			options: [...CLI_THINKING_LEVELS],
+		}),
+		"service-tier": Flags.string({
+			description: "OpenAI service tier for this session (none omits service_tier)",
+			options: [...SERVICE_TIER_OPENAI_VALUES],
 		}),
 		"hide-thinking": Flags.boolean({
 			description: "Hide thinking blocks in TUI output (display only, does not disable model thinking)",
