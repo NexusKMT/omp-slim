@@ -4,18 +4,19 @@
  * A headless `omp --mode json --no-session -p @<file>` run with
  * `memory.backend: mnemopi` hung after its turn completed and left an
  * unreaped `__omp_worker_mnemopi_embed` child. The embed-worker IPC request
- * (`init` / `embed`) had no timeout, so a wedged native runtime (fastembed /
+ * (`embed`) had no timeout, so a wedged native runtime (fastembed /
  * onnxruntime hanging, cf. #4792) blocked whatever awaited the embed — the
  * turn's memory recall or the shutdown consolidation — forever. #5753 only
  * bounded the dispose-time consolidate *await*; the embed IPC underneath it
  * stayed unbounded, so the wedge escaped that budget.
  *
- * The fix bounds every embed-worker request: on expiry the request fails and
+ * The fix bounds steady-state embed requests: on expiry the request fails and
  * the wedged worker is SIGKILL-reaped so the next call respawns a fresh child.
- * These tests drive the client with fake, deliberately-silent workers so the
- * contract is exercised without fastembed/onnxruntime.
+ * Initialization stays unbounded because first use may install fastembed and
+ * bootstrap the model. These tests use fake workers so the contract is
+ * exercised without fastembed/onnxruntime.
  */
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
 import { MnemopiEmbedClient, type MnemopiEmbedWorkerHandle } from "@oh-my-pi/pi-coding-agent/mnemopi/embed-client";
 import type {
 	MnemopiEmbedWorkerInbound,
@@ -112,30 +113,49 @@ describe("issue #7352 — mnemopi embed requests are bounded and reap a wedged w
 		}
 	}, 10_000);
 
-	it("returns null and reaps the worker when init itself wedges", async () => {
+	it("allows initialization to outlive the steady-state embed budget", async () => {
+		vi.useFakeTimers();
 		const state = { spawns: 0, terminated: 0 };
-		// Worker that never answers anything, including init.
+		const { promise: initStarted, resolve: markInitStarted } = Promise.withResolvers<void>();
+		let completeInit: (() => void) | undefined;
 		const client = new MnemopiEmbedClient(() => {
 			state.spawns += 1;
+			let handler: ((message: MnemopiEmbedWorkerOutbound) => void) | undefined;
 			return {
-				send() {},
-				onMessage() {
-					return () => {};
+				send(message) {
+					if (message.type !== "init") return;
+					completeInit = () => handler?.({ type: "ready", id: message.id });
+					markInitStarted();
+				},
+				onMessage(next) {
+					handler = next;
+					return () => {
+						if (handler === next) handler = undefined;
+					};
 				},
 				onError() {
 					return () => {};
 				},
 				async terminate() {
 					state.terminated += 1;
+					handler = undefined;
 				},
 			};
 		}, 50);
 		try {
-			const model = await client.initialize("fast-bge-base-en-v1.5", undefined);
-			expect(model).toBeNull();
-			expect(state.terminated).toBeGreaterThanOrEqual(1);
+			const initializing = client.initialize("fast-bge-base-en-v1.5", undefined);
+			await initStarted;
+			vi.advanceTimersByTime(10_000);
+			expect(completeInit).toBeDefined();
+			completeInit?.();
+
+			const model = await initializing;
+			expect(model).not.toBeNull();
+			expect(state.spawns).toBe(1);
+			expect(state.terminated).toBe(0);
 		} finally {
 			await client.terminate();
+			vi.useRealTimers();
 		}
 	}, 10_000);
 });

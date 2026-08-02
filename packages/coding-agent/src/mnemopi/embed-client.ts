@@ -85,13 +85,14 @@ export interface MnemopiSubprocessEmbeddingModel {
 }
 
 /**
- * Upper bound on how long a single embed-worker IPC round-trip (init or embed)
- * may block before the worker is treated as wedged. fastembed's steady-state
- * embed and even a cold model load settle well within this; a longer stall
+ * Upper bound on a steady-state embed IPC round-trip. Initialization is
+ * intentionally exempt: bundled installs may spend several minutes installing
+ * fastembed and bootstrapping the model, and killing that worker can strand the
+ * runtime install lock. Once initialization succeeds, a longer embed stall
  * means a hung native runtime (issue #4792) that would otherwise pin whatever
  * awaits the embed — a turn's memory recall or the headless shutdown
  * consolidation — indefinitely, leaving the process alive with an unreaped
- * `__omp_worker_mnemopi_embed` child (issue #7352). On expiry the request fails
+ * `__omp_worker_mnemopi_embed` child (issue #7352). On expiry the embed fails
  * and the worker is SIGKILL-reaped so the next request respawns a fresh one.
  */
 const EMBED_REQUEST_TIMEOUT_MS = 120_000;
@@ -135,7 +136,7 @@ export class MnemopiEmbedClient {
 			this.#pending.set(id, { kind: "init", model, resolve });
 			try {
 				worker.send({ type: "init", id, model, cacheDir });
-				const ok = await this.#awaitRequest(promise);
+				const ok = await promise;
 				if (!ok) return null;
 			} finally {
 				this.#pending.delete(id);
@@ -195,13 +196,14 @@ export class MnemopiEmbedClient {
 	}
 
 	/**
-	 * Await one embed-worker IPC reply, bounded by {@link EMBED_REQUEST_TIMEOUT_MS}.
-	 * The timeout timer is `unref`'d so a pending request never keeps the parent
-	 * event loop alive on its own (the awaiting caller does). On expiry the
-	 * wedged worker is SIGKILL-reaped via {@link terminate} — faulting any other
-	 * in-flight request and letting the next call respawn a fresh child — before
-	 * the request rejects, so a hung native runtime cannot pin a turn's recall or
-	 * the shutdown consolidation forever (issue #7352).
+	 * Await one steady-state embed reply, bounded by
+	 * {@link EMBED_REQUEST_TIMEOUT_MS}. The timeout timer is `unref`'d so a
+	 * pending request never keeps the parent event loop alive on its own (the
+	 * awaiting caller does). On expiry the wedged worker is SIGKILL-reaped via
+	 * {@link terminate} — faulting any other in-flight request and letting the
+	 * next call respawn a fresh child — before the request rejects, so a hung
+	 * native runtime cannot pin a turn's recall or shutdown consolidation
+	 * forever (issue #7352).
 	 */
 	async #awaitRequest<T>(promise: Promise<T>): Promise<T> {
 		const { promise: timedOut, resolve: fire } = Promise.withResolvers<typeof REQUEST_TIMED_OUT>();
