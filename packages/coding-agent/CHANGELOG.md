@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Removed hard-coded `scout` references from system and tool prompts that leaked into the model even when the scout agent was disabled (`task.disabledAgents`) or absent from the spawn list: the task tool description, delegation gates, plan-mode and workflowz notices, and the glob/grep/ast-grep guidance now only mention scout when it is actually spawnable ([#7313](https://github.com/can1357/oh-my-pi/issues/7313)).
+
 ## [17.2.4] - 2026-08-01
 
 ### Added

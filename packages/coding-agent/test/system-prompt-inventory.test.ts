@@ -668,4 +668,33 @@ describe("system prompt tool inventory", () => {
 		expect(text).toContain("<skills>");
 		expect(text).toContain("- frontend-design: Frontend UI workflow");
 	});
+
+	it("omits the read-only scout delegation gate when scout is unavailable", async () => {
+		const opts = { toolNames: ["read", "bash", "task"], tools: TOOLS };
+		const withScout = (
+			await buildSystemPrompt({
+				...opts,
+				cwd: tempDir,
+				contextFiles: [],
+				skills: [],
+				rules: [],
+				workspaceTree: { ...EMPTY_TREE, rootPath: tempDir },
+				scoutAvailable: true,
+			})
+		).systemPrompt.join("\n\n");
+		const withoutScout = (
+			await buildSystemPrompt({
+				...opts,
+				cwd: tempDir,
+				contextFiles: [],
+				skills: [],
+				rules: [],
+				workspaceTree: { ...EMPTY_TREE, rootPath: tempDir },
+				scoutAvailable: false,
+			})
+		).systemPrompt.join("\n\n");
+
+		expect(withScout).toContain("a read-only scout keeping bulk exploration");
+		expect(withoutScout).not.toContain("read-only scout");
+	});
 });
