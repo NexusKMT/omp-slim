@@ -24,7 +24,7 @@ import {
 	bindRunFacade,
 	CELL_BUDGET_SLACK_MS,
 	installBrowserWorkerRejectionGuard,
-	isBrowserRunRejection,
+	isBrowserRunOwnedRejection,
 	markBrowserRunRejection,
 	markHandled,
 	observeBrowserRunPromise,
@@ -784,10 +784,7 @@ export class WorkerCore {
 	#consumeUnhandledRejection(reason: unknown): boolean {
 		const active = this.#active;
 		if (!active) return false;
-		const browserRunRejection = isBrowserRunRejection(reason, active.rejectionOwner);
-		const stack = reason instanceof Error && typeof reason.stack === "string" ? reason.stack : undefined;
-		const fromRun = stack?.includes(`browser-run-${active.id}.js`) === true;
-		if (!browserRunRejection && !this.#isolated && !fromRun) return false;
+		if (!isBrowserRunOwnedRejection(reason, active.rejectionOwner, `browser-run-${active.id}.js`)) return false;
 		this.#recordFloatingRejection(active, reason);
 		return true;
 	}

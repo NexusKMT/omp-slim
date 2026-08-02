@@ -10,7 +10,7 @@ import { resolveToCwd } from "../../path-utils";
 import { formatScreenshot } from "../../render-utils";
 import {
 	bindRunFacade,
-	isBrowserRunRejection,
+	isBrowserRunOwnedRejection,
 	markBrowserRunRejection,
 	observeBrowserRunPromise,
 	resolvePredicateTimeout,
@@ -1409,9 +1409,7 @@ export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promi
 		rejectFloatingFailure(error);
 	};
 	const uninstallRejectionInterceptor = postmortem.interceptUnhandledRejections(reason => {
-		const browserRunRejection = isBrowserRunRejection(reason, rejectionOwner);
-		const stack = reason instanceof Error && typeof reason.stack === "string" ? reason.stack : undefined;
-		if (!browserRunRejection && stack?.includes(`cmux-run-${runId}.js`) !== true) return false;
+		if (!isBrowserRunOwnedRejection(reason, rejectionOwner, `cmux-run-${runId}.js`)) return false;
 		recordFloatingFailure(reason);
 		return true;
 	});

@@ -4,6 +4,7 @@ import { postmortem } from "@oh-my-pi/pi-utils";
 import { JsRuntime, type RuntimeHooks } from "../../src/eval/js/shared/runtime";
 import {
 	bindRunFacade,
+	isBrowserRunOwnedRejection,
 	isBrowserRunRejection,
 	markBrowserRunRejection,
 	markHandled,
@@ -145,6 +146,20 @@ describe("browser run cancellation", () => {
 		expect(isBrowserRunRejection(browserFailure, owner)).toBe(true);
 		expect(isBrowserRunRejection(browserFailure, {})).toBe(false);
 		expect(isBrowserRunRejection(new Error("unrelated", { cause: browserFailure }), owner)).toBe(false);
+	});
+
+	it("keeps unrelated worker rejections outside the active browser run", () => {
+		const owner = {};
+		const workerFailure = new Error("transport failed");
+		workerFailure.stack = "Error: transport failed\n    at tab-worker.ts:1:1";
+		const evaluatedFailure = new Error("evaluated failure");
+		evaluatedFailure.stack = "Error: evaluated failure\n    at browser-run-run-1.js:1:1";
+
+		expect(isBrowserRunOwnedRejection(workerFailure, owner, "browser-run-run-1.js")).toBe(false);
+		expect(isBrowserRunOwnedRejection(evaluatedFailure, owner, "browser-run-run-1.js")).toBe(true);
+		expect(
+			isBrowserRunOwnedRejection(markBrowserRunRejection(workerFailure, owner), owner, "browser-run-run-1.js"),
+		).toBe(true);
 	});
 
 	it("keeps a later cause-wrapped rejection on the fatal path", async () => {

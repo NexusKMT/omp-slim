@@ -22,6 +22,12 @@ export function isBrowserRunRejection(reason: unknown, owner: object): boolean {
 	);
 }
 
+/** Returns whether a rejection belongs to the marked browser run or its evaluated source file. */
+export function isBrowserRunOwnedRejection(reason: unknown, owner: object, filename: string): boolean {
+	if (isBrowserRunRejection(reason, owner)) return true;
+	return reason instanceof Error && typeof reason.stack === "string" && reason.stack.includes(filename);
+}
+
 type FloatingRejectionHandler = (reason: unknown) => void;
 
 interface ObservedPromiseState {
