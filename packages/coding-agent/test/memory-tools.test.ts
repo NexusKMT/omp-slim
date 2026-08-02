@@ -468,6 +468,18 @@ describe("Mnemopi backend lifecycle", () => {
 		tempDbPath = undefined;
 	});
 
+	it("keeps background auto-recall engine failures from escaping", async () => {
+		const entries = [{ type: "message", message: { role: "user", content: "existing memory" } }];
+		const state = registerMnemopiState(makeMnemopiConfig({ autoRecall: true }), {
+			entries: () => entries,
+		});
+		vi.spyOn(state.getScopedRecallTargets()[0].memory, "recallEnhanced").mockRejectedValue(
+			new TypeError("mmrRerankIndices is not a function"),
+		);
+
+		await expect(state.maybeRecallOnAgentStart()).resolves.toBeUndefined();
+		expect(state.hasRecalledForFirstTurn).toBe(false);
+	});
 	it("auto-retain stores only the not-yet-retained suffix", async () => {
 		const entries = Array.from({ length: 4 }, (_, index) => ({
 			type: "message",

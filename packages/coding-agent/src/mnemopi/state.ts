@@ -588,7 +588,16 @@ export class MnemopiSessionState {
 		if (!lastUser) return;
 		const query = composeRecallQuery(lastUser.content, messages, this.config.recallContextTurns);
 		const truncated = truncateRecallQuery(query, lastUser.content, this.config.recallMaxQueryChars);
-		const context = await this.recallForContext(truncated);
+		let context: string | undefined;
+		try {
+			context = await this.recallForContext(truncated);
+		} catch (error) {
+			logger.warn("Mnemopi: auto-recall failed", {
+				bank: this.config.bank,
+				error: toError(error).message,
+			});
+			return;
+		}
 		this.hasRecalledForFirstTurn = true;
 		if (!context) return;
 		this.lastRecallSnippet = context;
