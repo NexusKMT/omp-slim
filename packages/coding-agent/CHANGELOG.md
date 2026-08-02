@@ -108,6 +108,10 @@
 - Fixed the live Ask dialog crashing the whole session with a `replaceTabs` TypeError when a question reached `AskDialogComponent` without a string `question` field; questions are now normalized at dialog entry, mirroring the transcript renderer ([#7211](https://github.com/can1357/oh-my-pi/issues/7211)).
 - Fixed Codex web search collapsing backend errors to `Codex error (): Unknown error`; the SSE error parser now preserves the backend code and message from top-level, nested `error`, and `response.error` envelopes ([#7200](https://github.com/can1357/oh-my-pi/issues/7200)).
 
+### Added
+
+- Added a configurable per-request web search timeout via `providers.webSearchTimeoutSeconds` ([#7197](https://github.com/can1357/oh-my-pi/pull/7197) by [@will-bogusz](https://github.com/will-bogusz)).
+
 ## [17.2.2] - 2026-07-31
 
 ### Added
