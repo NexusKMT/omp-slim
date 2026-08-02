@@ -1760,7 +1760,20 @@ describe("kimi model detection via detectCompat", () => {
 			return promise;
 		}
 
-		const openCode = getBundledModel<"openai-completions">("opencode-zen", "deepseek-v4-flash-free");
+		const deepseekSpec = {
+			id: "deepseek-v4-flash",
+			name: "DeepSeek V4 Flash",
+			api: "openai-completions",
+			provider: "opencode-zen",
+			baseUrl: "https://opencode.ai/zen/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128_000,
+			maxTokens: 8_192,
+		} satisfies ModelSpec<"openai-completions">;
+
+		const openCode = buildModel(deepseekSpec);
 		expect(openCode.compat.supportsForcedToolChoice).toBe(false);
 		const openCodePayload = await captureToolChoice(openCode);
 		expect(openCodePayload.tool_choice).toBe("auto");
@@ -1772,24 +1785,18 @@ describe("kimi model detection via detectCompat", () => {
 		// A custom provider id pointed at the OpenCode gateway URL is still
 		// classified as OpenCode by baseUrl, so the downgrade must apply there too.
 		const customOpenCode = buildModel({
-			...gpt4oMiniSpec,
-			api: "openai-completions",
+			...deepseekSpec,
 			provider: "my-opencode",
-			baseUrl: "https://opencode.ai/zen/v1",
-			id: "deepseek-v4-flash",
-			reasoning: true,
 		} satisfies ModelSpec<"openai-completions">);
 		expect(customOpenCode.compat.supportsForcedToolChoice).toBe(false);
 		const customPayload = await captureToolChoice(customOpenCode);
 		expect(customPayload.tool_choice).toBe("auto");
 
 		const nvidia = buildModel({
-			...gpt4oMiniSpec,
-			api: "openai-completions",
+			...deepseekSpec,
 			provider: "nvidia",
 			baseUrl: "https://integrate.api.nvidia.com/v1",
 			id: "deepseek-ai/deepseek-v4-flash",
-			reasoning: true,
 		} satisfies ModelSpec<"openai-completions">);
 		expect(nvidia.compat.supportsForcedToolChoice).toBe(true);
 		const nvidiaPayload = await captureToolChoice(nvidia);
