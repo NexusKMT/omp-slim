@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `skill://` resolution ignoring explicitly configured `skills.customDirectories` entries when a same-named skill existed in a default discovery path: the custom-directory skill now wins as the higher-priority source ([#7190](https://github.com/can1357/oh-my-pi/issues/7190)).
+
 ## [17.2.3] - 2026-08-01
 
 ### Changed

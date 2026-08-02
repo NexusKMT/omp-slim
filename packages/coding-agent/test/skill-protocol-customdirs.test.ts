@@ -2,17 +2,29 @@ import { afterEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { loadSkills, setActiveSkills } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
+import { loadSkills, resetActiveSkillsForTests, setActiveSkills } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
+import { parseInternalUrl } from "@oh-my-pi/pi-coding-agent/internal-urls/parse";
 import { SkillProtocolHandler } from "@oh-my-pi/pi-coding-agent/internal-urls/skill-protocol";
 
 function makeSkillMd(name: string, dir: string) {
 	return `---\nname: ${name}\ndescription: ${name} skill.\n---\n\n# ${name} from ${dir}\n`;
 }
 
+const ALL_DEFAULT_SOURCES_DISABLED = {
+	enableCodexUser: false,
+	enableClaudeUser: false,
+	enableClaudeProject: false,
+	enablePiUser: false,
+	enablePiProject: false,
+	enableAgentsUser: false,
+	enableAgentsProject: false,
+} as const;
+
 describe("skill:// resolution honors skills.customDirectories (#7190)", () => {
 	const tempDirs: string[] = [];
 
 	afterEach(async () => {
+		resetActiveSkillsForTests();
 		for (const dir of tempDirs) await fs.rm(dir, { recursive: true, force: true });
 		tempDirs.length = 0;
 	});
@@ -25,25 +37,13 @@ describe("skill:// resolution honors skills.customDirectories (#7190)", () => {
 		await fs.writeFile(path.join(skillDir, "SKILL.md"), makeSkillMd("my-custom-skill", tempDir));
 
 		const { skills } = await loadSkills({
-			enableCodexUser: false,
-			enableClaudeUser: false,
-			enableClaudeProject: false,
-			enablePiUser: false,
-			enablePiProject: false,
-			enableAgentsUser: false,
-			enableAgentsProject: false,
+			...ALL_DEFAULT_SOURCES_DISABLED,
 			customDirectories: [tempDir],
 		});
 		setActiveSkills(skills);
 
 		const handler = new SkillProtocolHandler();
-		const resource = await handler.resolve({
-			scheme: "skill",
-			href: "skill://my-custom-skill",
-			rawHost: "my-custom-skill",
-			hostname: "my-custom-skill",
-			pathname: "/",
-		} as any);
+		const resource = await handler.resolve(parseInternalUrl("skill://my-custom-skill/"));
 		expect(resource.sourcePath).toBe(path.join(skillDir, "SKILL.md"));
 		expect(resource.content).toContain(`from ${tempDir}`);
 	});
@@ -61,13 +61,7 @@ describe("skill:// resolution honors skills.customDirectories (#7190)", () => {
 		await fs.writeFile(path.join(skillB, "SKILL.md"), makeSkillMd("same-name", dirB));
 
 		const { skills, warnings } = await loadSkills({
-			enableCodexUser: false,
-			enableClaudeUser: false,
-			enableClaudeProject: false,
-			enablePiUser: false,
-			enablePiProject: false,
-			enableAgentsUser: false,
-			enableAgentsProject: false,
+			...ALL_DEFAULT_SOURCES_DISABLED,
 			customDirectories: [dirA, dirB],
 		});
 		setActiveSkills(skills);
@@ -79,13 +73,47 @@ describe("skill:// resolution honors skills.customDirectories (#7190)", () => {
 		expect(warnings.some(w => w.message.includes("collision"))).toBe(true);
 
 		const handler = new SkillProtocolHandler();
-		const resource = await handler.resolve({
-			scheme: "skill",
-			href: "skill://same-name",
-			rawHost: "same-name",
-			hostname: "same-name",
-			pathname: "/",
-		} as any);
+		const resource = await handler.resolve(parseInternalUrl("skill://same-name/"));
 		expect(resource.sourcePath).toBe(path.join(skillA, "SKILL.md"));
+	});
+
+	it("lets a custom-directory skill override a same-named default-path skill", async () => {
+		const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "pi-default-skill-"));
+		tempDirs.push(cwd);
+		const customDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-custom-skill-"));
+		tempDirs.push(customDir);
+
+		// A default discovery path (Claude project skills) claims the name first.
+		const defaultSkill = path.join(cwd, ".claude", "skills", "shared-name");
+		await fs.mkdir(defaultSkill, { recursive: true });
+		await fs.writeFile(path.join(defaultSkill, "SKILL.md"), makeSkillMd("shared-name", "default"));
+
+		// The explicitly configured custom directory holds the same name.
+		const customSkill = path.join(customDir, "shared-name");
+		await fs.mkdir(customSkill, { recursive: true });
+		await fs.writeFile(path.join(customSkill, "SKILL.md"), makeSkillMd("shared-name", "custom"));
+
+		const { skills } = await loadSkills({
+			cwd,
+			enableCodexUser: false,
+			enableClaudeUser: false,
+			enableClaudeProject: true,
+			enablePiUser: false,
+			enablePiProject: false,
+			enableAgentsUser: false,
+			enableAgentsProject: false,
+			customDirectories: [customDir],
+		});
+		setActiveSkills(skills);
+
+		const dup = skills.find(s => s.name === "shared-name");
+		expect(dup).toBeDefined();
+		// The explicitly configured custom directory is the higher-priority source.
+		expect(dup!.filePath).toBe(path.join(customSkill, "SKILL.md"));
+
+		const handler = new SkillProtocolHandler();
+		const resource = await handler.resolve(parseInternalUrl("skill://shared-name/"));
+		expect(resource.sourcePath).toBe(path.join(customSkill, "SKILL.md"));
+		expect(resource.content).toContain("from custom");
 	});
 });
