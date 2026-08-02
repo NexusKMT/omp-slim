@@ -11,11 +11,12 @@ interface CliProcessResult {
 	error: string;
 }
 
-async function runSetupPython(cwd: string): Promise<CliProcessResult> {
+async function runSetupPython(cwd: string, envOverrides?: NodeJS.ProcessEnv): Promise<CliProcessResult> {
 	const env: NodeJS.ProcessEnv = {
 		...process.env,
 		NO_COLOR: "1",
 		PI_CODING_AGENT_DIR: path.join(cwd, "agent"),
+		...envOverrides,
 	};
 	delete env.VIRTUAL_ENV;
 	delete env.CONDA_DEFAULT_ENV;
@@ -74,6 +75,24 @@ describe("omp setup python", () => {
 		expect(result.exitCode).toBe(0);
 		expect(JSON.parse(result.output)).toMatchObject({
 			available: true,
+			pythonPath: interpreter,
+			usingManagedEnv: false,
+		});
+	});
+	it.skipIf(process.platform === "win32")("does not let the global probe bypass skip setup validation", async () => {
+		projectDir = TempDir.createSync("@omp-setup-python-");
+		const cwd = projectDir.path();
+		const interpreter = path.join(cwd, "configured-python");
+		await Bun.write(interpreter, "#!/bin/sh\nexit 23\n");
+		await fs.chmod(interpreter, 0o755);
+		await Bun.write(path.join(cwd, ".omp", "config.yml"), `python:\n  interpreter: ${interpreter}\n`);
+
+		const result = await runSetupPython(cwd, { PI_PYTHON_SKIP_CHECK: "1" });
+
+		expect(result.error).toBe("");
+		expect(result.exitCode).toBe(1);
+		expect(JSON.parse(result.output)).toMatchObject({
+			available: false,
 			pythonPath: interpreter,
 			usingManagedEnv: false,
 		});

@@ -83,7 +83,7 @@ function managedPythonPath(): string {
  * Check Python environment and kernel dependencies.
  */
 async function checkPythonSetup(cwd: string, interpreter?: string): Promise<PythonCheckResult> {
-	const availability = await checkPythonKernelAvailability(cwd, interpreter);
+	const availability = await checkPythonKernelAvailability(cwd, interpreter, { forceProbe: true });
 	return {
 		available: availability.ok,
 		pythonPath: availability.pythonPath,
