@@ -443,7 +443,7 @@ describe("system prompt tool inventory", () => {
 		expect(text).toContain("The `computer` tool is explicitly enabled and available");
 		expect(text).toContain("MUST use `computer` for requests to view or control host desktop applications");
 		expect(text).toContain("NEVER claim Computer Use is unavailable");
-		expect(text).toContain("Inspect the fresh screenshot returned by every successful `computer` call");
+		expect(text).toContain("Ground every action in fresh evidence: re-run `ax()` or `screenshot()` after UI changes");
 	});
 
 	it("renders `# Tool:` sections (not a name list) when tools are not native", async () => {

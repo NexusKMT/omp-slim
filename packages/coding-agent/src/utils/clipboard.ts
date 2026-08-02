@@ -1,6 +1,9 @@
-import type { ClipboardImage } from "@oh-my-pi/pi-natives";
-import * as native from "@oh-my-pi/pi-natives";
-import { logger } from "@oh-my-pi/pi-utils";
+import {
+	type ClipboardImage,
+	copyToClipboard as nativeCopyToClipboard,
+	readImageFromClipboard as nativeReadImageFromClipboard,
+} from "@oh-my-pi/pi-natives/clipboard";
+import * as logger from "@oh-my-pi/pi-utils/logger";
 import MAC_FILE_URL_SCRIPT from "./mac-file-urls.applescript" with { type: "text" };
 
 /**
@@ -125,7 +128,7 @@ export async function copyToClipboard(text: string): Promise<void> {
 			}
 		}
 
-		await native.copyToClipboard(text);
+		await nativeCopyToClipboard(text);
 	} catch {
 		// Ignore — clipboard copy is best-effort
 	}
@@ -272,7 +275,7 @@ export async function readImageFromClipboard(): Promise<ClipboardImage | null> {
 
 	if (process.platform === "win32") {
 		try {
-			const image = await native.readImageFromClipboard();
+			const image = await nativeReadImageFromClipboard();
 			if (image) return image;
 		} catch (err) {
 			logger.warn("clipboard: native Windows image read failed", { error: String(err) });
@@ -284,7 +287,7 @@ export async function readImageFromClipboard(): Promise<ClipboardImage | null> {
 		return null;
 	}
 
-	return (await native.readImageFromClipboard()) ?? null;
+	return (await nativeReadImageFromClipboard()) ?? null;
 }
 
 /**

@@ -2,19 +2,25 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Replaced the computer tool's `{ window, actions }` coordinate batches with persistent JavaScript runs using `{ code, read_only?, timeout? }`; removed `computer.backend` and model-specific controller switching.
+
 ### Added
 
 - Added a `relay` browser mode that drives the user's own Chrome tabs through a local CDP relay plus the OMP Browser Relay extension: `omp browser-relay install` writes the bundled extension to disk, and `browser.relay` / `browser.relayUrl` (or per-call `app.relay`) route the browser tool through it. The relay server auto-starts under a profile-independent global daemon broker when the browser tool needs it; every relay consumer holds a broker lease, so the fixed-port singleton stops only after its last consumer across all projects exits. `omp browser-relay` remains available for `--token`/`--no-group`/custom ports, and a relay already serving the port is adopted. It multiplexes the supervisor and per-tab worker puppeteer connections over the single `chrome.debugger` attachment Chrome allows per tab, and gathers only the tabs the agent actively drives into a per-window "omp" tab group (released when the last client lets go of the tab, dissolved on disconnect, never re-grouping tabs the user pulls out).
-- Added individual-window computer use: a capture-free discovery call lists current window ids alongside a `desktop` target, then the model can capture and control one selected window without stealing focus or moving the user's pointer.
+- Added a scriptable desktop session with persistent `desktop`/`Win`/`El` handles, window-targeted capture and input, native accessibility trees with `[ref=eN]` actions, clipboard access, streamed screenshots, and enforced read-only runs.
 - Added broker-shared language servers: one LSP server per (server, project) is now spawned by an `omp lsp mux` daemon under the per-project daemon broker (the same broker that owns the shared Chromium and `hub start` processes) and multiplexed to every omp instance in the project over a local socket — instances share the server's index, initialize result, diagnostics, and document state instead of each paying a private cold start. The mux reference-counts `didOpen`/`didClose`, remaps request ids and document versions per client, replays cached diagnostics/registrations/progress to late joiners, routes `workspace/applyEdit` to the most recently active instance, and intercepts per-session `shutdown`/`exit` so one instance leaving never kills the server for the rest; the broker still reaps everything when the last omp process in the project exits. Controlled by the new `lsp.shared` setting (default on); any broker/mux failure falls back to a private server spawn, and an external `lspmux` wrapper keeps precedence when configured.
 
 ### Changed
 
-- Exposed `computer` through its window-aware function schema for every model, including models with provider-native Computer Use support, because native computer declarations cannot carry the required window target.
+- Exposed the script-driven `computer` schema to every model, including models with provider-native Computer Use support, because native action declarations cannot express persistent desktop sessions or accessibility handles.
 
 ### Fixed
 
 - Fixed the browser relay creating duplicate "omp" tab groups: the bridge now keeps at most one group RPC in flight (a queued drain replaces fire-and-forget per-tab requests), so concurrent requests can no longer race the extension's non-atomic query→create→set-title sequence in the same window. Also fixed an extension reconnect (relay daemon restart, service-worker recycle) being misread as the user dragging every tab out of the omp group — grouping state is reset when the extension socket closes, so tabs regroup on the next hello instead of being permanently opted out.
+- Fixed retained computer `Win` and `El` handles carrying a completed run's abort signal and permissions into later runs; handles now obey the current run while leaked async continuations remain denied.
+- Fixed computer-tool `win.ref("eN")` fabricating an element with empty role/title metadata; it now resolves the ref through the accessibility registry, returning a populated element and throwing `StaleRef` for expired refs.
 
 ## [17.2.4] - 2026-08-01
 

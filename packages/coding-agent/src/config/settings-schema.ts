@@ -3909,23 +3909,7 @@ export const SETTINGS_SCHEMA = {
 			tab: "tools",
 			group: "Available Tools",
 			label: "Computer",
-			description: "Enable native host-desktop screenshots and input for OpenAI computer use",
-		},
-	},
-
-	"computer.backend": {
-		type: "enum",
-		values: ["auto", "native"] as const,
-		default: "auto",
-		ui: {
-			tab: "tools",
-			group: "Computer",
-			label: "Computer Backend",
-			description: "Select automatic or explicit platform-native desktop capture and input",
-			options: [
-				{ value: "auto", label: "Auto" },
-				{ value: "native", label: "Native" },
-			],
+			description: "Enable the scriptable host-desktop control tool (screenshots, input, accessibility)",
 		},
 	},
 
@@ -3942,7 +3926,7 @@ export const SETTINGS_SCHEMA = {
 
 	"computer.maxWidth": {
 		type: "number",
-		default: 1920,
+		default: 3840,
 		ui: {
 			tab: "tools",
 			group: "Computer",
@@ -3953,7 +3937,7 @@ export const SETTINGS_SCHEMA = {
 
 	"computer.maxHeight": {
 		type: "number",
-		default: 1200,
+		default: 2400,
 		ui: {
 			tab: "tools",
 			group: "Computer",
