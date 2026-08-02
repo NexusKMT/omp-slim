@@ -360,8 +360,12 @@ const TRUTHY: Dict<boolean> = {
 	ON: true,
 	on: true,
 };
-export function $flag(name: string, def: boolean = false): boolean {
-	const value = $env[name];
+/** Parse a boolean-ish env value ("1", "yes", "on", …); `def` when unset/empty. */
+export function parseFlag(value: string | undefined, def = false): boolean {
 	if (!value) return def;
 	return TRUTHY[value] === true;
+}
+
+export function $flag(name: string, def: boolean = false): boolean {
+	return parseFlag($env[name], def);
 }

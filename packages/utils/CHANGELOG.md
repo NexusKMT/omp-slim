@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `parseFlag()` (boolean-ish env value parsing backing `$flag()`), `getBrowserRelayDir()` (~/.omp/browser-relay, XDG data category), and `getGlobalDaemonRuntimeDir()` (profile-independent broker state) for the browser relay mode.
+
 ## [17.2.4] - 2026-08-01
 
 ### Added
