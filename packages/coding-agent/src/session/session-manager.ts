@@ -44,6 +44,7 @@ import {
 	type ModeChangeEntry,
 	type ModelChangeEntry,
 	type NewSessionOptions,
+	type ResetBoundaryEntry,
 	type ServiceTierChangeEntry,
 	type SessionEntry,
 	type SessionHeader,
@@ -2088,6 +2089,18 @@ export class SessionManager {
 			fromExtension,
 			preserveData,
 		};
+		this.#recordEntry(entry);
+		return entry.id;
+	}
+
+	/**
+	 * Append the durable conversation boundary recorded by `/reset`. The
+	 * collapsed live transcript and the model-context rebuild start after the
+	 * latest one, while the full history stays on disk (the plain
+	 * `transcript:true` export walks it unchanged).
+	 */
+	appendResetBoundary(): string {
+		const entry: ResetBoundaryEntry = { type: "reset_boundary", ...this.#freshEntryFields() };
 		this.#recordEntry(entry);
 		return entry.id;
 	}

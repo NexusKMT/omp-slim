@@ -223,6 +223,7 @@ import type {
 	Prewalk,
 	PromptOptions,
 	ResolvedRoleModel,
+	ResetSessionContextResult,
 	RestoredQueuedMessage,
 	RoleModelCycle,
 	RoleModelCycleResult,
@@ -3809,6 +3810,101 @@ export class AgentSession {
 			sessionId: this.sessionId,
 			closedProviderSessions,
 		};
+	}
+
+	/**
+	 * Reset the current conversation in place: drop every message, queued turn,
+	 * and pending tool call from the model's context while keeping the session
+	 * itself — its id, title, cwd, model, settings, and on-disk transcript all
+	 * survive. The next turn is sent with only the base system prompt plus the
+	 * project rules/AGENTS.md.
+	 *
+	 * This is the in-place sibling of {@link newSession}: it reuses the same
+	 * conversation-boundary teardown (drop the conversation, rotate provider-side
+	 * session state so providers that keep history server-side resume nothing,
+	 * re-prime the advisors, and undo any memory promotion) but skips minting a
+	 * new session id and opening a fresh transcript file. Unlike
+	 * {@link freshSession} (which only rotates provider stream state) it also
+	 * clears the conversation.
+	 *
+	 * Returns `undefined` without mutating anything while a response is
+	 * streaming or a foreground bash/python execution is in flight.
+	 */
+	async resetSessionContext(): Promise<ResetSessionContextResult | undefined> {
+		// Refuse while a response streams OR a foreground user bash/python
+		// execution is in flight: those complete via recordBashResult()/
+		// recordPythonResult(), which append directly to agent.state when not
+		// streaming, so a command finishing after the reset would land its output
+		// after the boundary and re-enter the supposedly empty context. The
+		// sibling boundary op (branchFromBtw) guards on the same predicates.
+		if (this.isStreaming || this.isBashRunning || this.isEvalRunning) return undefined;
+		const droppedCount = this.agent.state.messages.length;
+
+		// Tear down the same per-turn runtime state that newSession() resets across
+		// a conversation boundary, so work scheduled from the pre-reset turn cannot
+		// re-enter the cleared context:
+		//   - bump #promptGeneration + drain post-prompt tasks so an already-queued
+		//     post-prompt continuation (recovery can be scheduled after agent_end
+		//     while isStreaming is false) sees a stale generation and skips
+		//     (mirrors abort()).
+		//   - cancel this agent's async bash/task jobs so their completions can't
+		//     re-deliver stale tool output into the cleared conversation
+		//     (mirrors newSession()).
+		this.#promptGeneration++;
+		await this.#cancelPostPromptTasks();
+		this.#cancelOwnAsyncJobs();
+
+		// Drop the conversation: messages, queued steers/follow-ups, pending tool
+		// calls, and error state. agent.reset() keeps the model and system prompt.
+		this.agent.reset();
+		this.#pendingNextTurnMessages = [];
+		this.#scheduledHiddenNextTurnGeneration = undefined;
+		// Reset the session_stop continuation chain: the queued continuation
+		// message is gone with the conversation, but the counters would otherwise
+		// carry over, so the next post-reset turn is reported to hooks as part of
+		// the old chain and can hit SESSION_STOP_CONTINUATION_CAP early (mirrors
+		// abort()/newSession()).
+		this.#resetSessionStopContinuationState();
+
+		// Drop checkpoint/rewind runtime state and deferred tool directives
+		// alongside the messages that carried them: the checkpoint tool result is
+		// gone from agent.state, so an intact #checkpointState would otherwise
+		// force a rewind onto the pre-reset transcript on the next turn (mirrors
+		// newSession()).
+		this.#clearCheckpointRuntimeState();
+		this.#clearSessionScopedToolState();
+
+		// Rotate provider-side session state so a provider that keeps conversation
+		// history server-side starts a brand-new exchange rather than resuming the
+		// context we just dropped (mirrors freshSession()).
+		this.#closeAllProviderSessions("reset context");
+		this.#freshProviderSessionId = Bun.randomUUIDv7();
+		this.#syncAgentSessionId();
+		this.#memory.rekeyForCurrentSessionId();
+		this.agent.appendOnlyContext?.invalidateForModelChange();
+
+		// Re-arm the approved-plan reference: the reset dropped the plan-approved
+		// prompt/reference from agent.state, so mark it unsent (preserving the
+		// path — the plan file on disk is still the active plan) to let
+		// #buildPlanReferenceMessage re-read and re-inject it on the next turn.
+		// Mirrors the sent-flag reset newSession() and compaction perform after a
+		// history rewrite (issue #1246).
+		this.#planReferenceSent = false;
+
+		// Re-prime the advisors across the conversation boundary and undo any
+		// memory promotion so the next turn rebuilds from the base system prompt.
+		this.#advisors.resetSessionState();
+		await this.#memory.resetContextForNewTranscript();
+
+		// Record a durable boundary on the persisted branch. The collapsed live
+		// transcript and the model-context rebuild start emission after the latest
+		// boundary, so a rebuild across a `/reset` (theme change, focus attach,
+		// /shake, resume) does not resurrect the pre-reset conversation. The
+		// on-disk record and the plain `transcript:true` export path keep the full
+		// pre-reset history.
+		this.sessionManager.appendResetBoundary();
+
+		return { droppedCount };
 	}
 
 	// =========================================================================
