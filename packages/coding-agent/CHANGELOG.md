@@ -372,6 +372,7 @@
 - Included `reasoning.encrypted_content` in Responses `include` for paid xAI and SuperGrok OAuth models.
 - Replayed encrypted xAI reasoning on follow-up Responses turns for `xai` and `xai-oauth`.
 - Kept automatic model selection on paid `xai/grok-4.5` when only `XAI_API_KEY` is set, instead of preferring SuperGrok `xai-oauth/grok-4.5`.
+- Stopped sending presence/frequency penalties and stop sequences to xAI reasoning models such as `grok-4.5`, which reject them.
 
 ## [17.2.5] - 2026-08-03
 
