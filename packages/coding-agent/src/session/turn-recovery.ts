@@ -1152,11 +1152,13 @@ export class TurnRecovery {
 		const role = this.#activeRetryFallback?.role ?? this.resolveRetryFallbackRole(currentSelector, currentModel);
 		if (!role) return false;
 		let fallback: { selector: RetryFallbackSelector; apiKey: string } | undefined;
+		const ceiling = this.#host.thinkingLevelCeiling();
 		for (const candidate of this.findRetryFallbackCandidates(role, currentSelector, currentModel)) {
 			if (this.isRetryFallbackSelectorSuppressed(candidate)) continue;
 			const resolved = resolveModelOverride([candidate.raw], this.#host.modelRegistry, this.#host.settings);
 			const candidateModel = resolved.model ?? this.#host.modelRegistry.find(candidate.provider, candidate.id);
 			if (!candidateModel || !this.#host.modelRegistry.hasConfiguredAuth(candidateModel)) continue;
+			if (ceiling !== undefined && !modelSupportsEffortCeiling(candidateModel, ceiling)) continue;
 			try {
 				const candidateHealth = await this.#host.modelRegistry.authStorage.getModelUsageHealth(
 					candidateModel.provider,
@@ -1288,6 +1290,7 @@ export class TurnRecovery {
 			}
 			return false;
 		}
+		if (this.#host.model() !== candidate) return false;
 		this.#host.sessionManager.appendModelChange(candidateSelector, EPHEMERAL_MODEL_CHANGE_ROLE);
 		this.#host.settings.getStorage()?.recordModelUsage(candidateSelector);
 		this.#host.setThinkingLevel(nextThinkingLevel);

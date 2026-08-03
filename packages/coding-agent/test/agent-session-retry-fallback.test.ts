@@ -3576,6 +3576,54 @@ describe("AgentSession retry fallback", () => {
 		expect(session.thinkingLevel).toBe(Effort.Low);
 	});
 
+	it("skips usage fallbacks whose effort floor exceeds the session ceiling", async () => {
+		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const incompatibleFallback = getBundledModel("fireworks", "deepseek-v4-pro");
+		const compatibleFallback = getBundledModel("openai", "gpt-4o-mini");
+		if (!primaryModel || !incompatibleFallback || !compatibleFallback) {
+			throw new Error("Expected bundled usage fallback effort models");
+		}
+		const requestedModels: string[] = [];
+		const usageChecks: string[] = [];
+		const agent = createFallbackAgent(primaryModel, requestedModels);
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.usageAwareFallback": true,
+			"retry.usageReservePolicy": "auto",
+			"retry.fallbackChains": {
+				default: [
+					`${incompatibleFallback.provider}/${incompatibleFallback.id}`,
+					`${compatibleFallback.provider}/${compatibleFallback.id}`,
+				],
+			},
+		});
+		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
+		vi.spyOn(modelRegistry.authStorage, "getModelUsageHealth").mockImplementation(async (_provider, options) => {
+			usageChecks.push(options.modelId ?? "");
+			return options.modelId === primaryModel.id
+				? {
+						state: "depleted",
+						accounts: [{ credentialId: 1, credentialType: "oauth", state: "depleted" }],
+					}
+				: { state: "healthy", accounts: [] };
+		});
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+			thinkingLevel: Effort.Low,
+			thinkingLevelCeiling: Effort.Low,
+		});
+
+		await session.prompt("Use an effort-compatible fallback");
+		await session.waitForIdle();
+
+		expect(usageChecks).toEqual([primaryModel.id, compatibleFallback.id]);
+		expect(requestedModels).toEqual([`${compatibleFallback.provider}/${compatibleFallback.id}`]);
+		expect(session.model?.id).toBe(compatibleFallback.id);
+	});
+
 	it("accepts cached Ollama Cloud fallback selectors during startup validation", () => {
 		const primaryModel = getBundledModel("openai", "gpt-4o-mini");
 		if (!primaryModel) {

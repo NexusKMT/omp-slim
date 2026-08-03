@@ -382,6 +382,43 @@ describe("Agent", () => {
 		expect(agent.state.isStreaming).toBe(false);
 	});
 
+	it("resolves a predecessor idle waiter when agent_end starts a successor", async () => {
+		const secondStarted = Promise.withResolvers<void>();
+		const releaseSecond = Promise.withResolvers<void>();
+		const mock = createMockModel({
+			responses: [
+				{ content: ["first"] },
+				async () => {
+					secondStarted.resolve();
+					await releaseSecond.promise;
+					return { content: ["second"] };
+				},
+			],
+		});
+		const agent = new Agent({ streamFn: mock.stream });
+		let successor: Promise<void> | undefined;
+		agent.subscribe(event => {
+			if (event.type === "agent_end" && !successor) {
+				successor = agent.prompt("successor");
+			}
+		});
+
+		const predecessor = agent.prompt("predecessor");
+		let predecessorIdleResolved = false;
+		void agent.waitForIdle().then(() => {
+			predecessorIdleResolved = true;
+		});
+		await secondStarted.promise;
+		await predecessor;
+		expect(agent.state.isStreaming).toBe(true);
+
+		releaseSecond.resolve();
+		await successor;
+		await Promise.resolve();
+		expect(predecessorIdleResolved).toBe(true);
+		expect(agent.state.isStreaming).toBe(false);
+	});
+
 	it("classifies an in-flight continuation cancellation as aborted", async () => {
 		const providerStarted = Promise.withResolvers<AbortSignal>();
 		const agent = new Agent({

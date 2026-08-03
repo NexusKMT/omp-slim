@@ -1281,6 +1281,7 @@ export class Agent {
 			this.#resolveRunningPrompt = resolve;
 			this.#abortController = new AbortController();
 		}
+		const resolveRun = this.#resolveRunningPrompt;
 		const loopAbortController = this.#abortController;
 		if (!loopAbortController) throw new Error("Agent run state was not initialized");
 		const loopSignal = continuationSignal
@@ -1672,12 +1673,12 @@ export class Agent {
 				this.#emit({ type: "agent_end", messages: [errorMsg] });
 			}
 		} finally {
+			resolveRun?.();
 			if (this.#abortController === loopAbortController) {
 				this.#state.isStreaming = false;
 				this.#state.streamMessage = null;
 				this.#state.pendingToolCalls.clear();
 				this.#abortController = undefined;
-				this.#resolveRunningPrompt?.();
 				this.#runningPrompt = undefined;
 				this.#resolveRunningPrompt = undefined;
 			}
