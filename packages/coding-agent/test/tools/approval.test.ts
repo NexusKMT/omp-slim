@@ -331,6 +331,7 @@ describe("tool-owned dynamic approval declarations", () => {
 			"git status > /etc/passwd",
 			"git -c alias.x='!touch /tmp/pwn; printf ok' x",
 			'git -c alias.x="!touch /tmp/pwn; printf ok" x',
+			"git -c alias.x=!touch\\ /tmp/pwn\\;\\ printf\\ ok x",
 			"git status < seed",
 			// Different binary resolution than the pattern names.
 			"FOO=1 git status",

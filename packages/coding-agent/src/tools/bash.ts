@@ -75,18 +75,22 @@ const BASH_APPROVAL_REINTERPRETED_ARGUMENT_RE = /(?:^|[ \t])(?:-[^-]*[ce]|--(?:c
 
 function hasBashApprovalShellControl(command: string): boolean {
 	let quote: "'" | '"' | undefined;
-	let hasQuotedShellControl = false;
+	let hasReinterpretableShellControl = false;
 	for (let i = 0; i < command.length; i++) {
 		const ch = command[i];
 		if (quote === "'") {
 			if (ch === "'") {
 				quote = undefined;
 			} else if (Object.hasOwn(BASH_APPROVAL_SHELL_CONTROL_CHARS, ch)) {
-				hasQuotedShellControl = true;
+				hasReinterpretableShellControl = true;
 			}
 			continue;
 		}
 		if (ch === "\\") {
+			const escaped = command[i + 1];
+			if (escaped && Object.hasOwn(BASH_APPROVAL_SHELL_CONTROL_CHARS, escaped)) {
+				hasReinterpretableShellControl = true;
+			}
 			i++;
 			continue;
 		}
@@ -99,7 +103,7 @@ function hasBashApprovalShellControl(command: string): boolean {
 			if (ch === "`" || ch === "$") return true;
 			// Other control characters are literal here but become executable if a
 			// `-c`/`-e` option reinterprets the argument through another shell.
-			if (Object.hasOwn(BASH_APPROVAL_SHELL_CONTROL_CHARS, ch)) hasQuotedShellControl = true;
+			if (Object.hasOwn(BASH_APPROVAL_SHELL_CONTROL_CHARS, ch)) hasReinterpretableShellControl = true;
 			continue;
 		}
 		if (ch === "'" || ch === '"') {
@@ -109,8 +113,8 @@ function hasBashApprovalShellControl(command: string): boolean {
 		if (Object.hasOwn(BASH_APPROVAL_SHELL_CONTROL_CHARS, ch)) return true;
 	}
 	// Options such as `git -c alias.x='!...'` and `sh -c "..."` reinterpret
-	// otherwise literal quoted arguments as executable code.
-	return hasQuotedShellControl && BASH_APPROVAL_REINTERPRETED_ARGUMENT_RE.test(command);
+	// otherwise literal quoted or escaped arguments as executable code.
+	return hasReinterpretableShellControl && BASH_APPROVAL_REINTERPRETED_ARGUMENT_RE.test(command);
 }
 
 const BASH_PATTERN_APPROVAL_VALUES = new Set(["allow", "deny", "prompt"]);
