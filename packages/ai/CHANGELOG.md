@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed Ollama requests with no `user`-role turn (e.g. a plan-approval handoff whose only non-system message is an agent-attributed developer turn) returning `done_reason: "load"` and generating nothing, which was laundered into a clean empty stop and retried until the cap surfaced a misleading error. `convertMessages` now demotes the last non-prefix `system` turn to `user` so the request can produce output, and `mapDoneReason` surfaces `done_reason: "load"` as an error instead of a silent stop ([#7465](https://github.com/can1357/oh-my-pi/issues/7465)).
+- Added profile-aware Bedrock Mantle region selection, authenticated model discovery, bearer-token or SigV4 authentication, and credential refresh handling for OpenAI Responses models ([#7080](https://github.com/can1357/oh-my-pi/pull/7080) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
 ## [17.2.5] - 2026-08-03
 
@@ -90,7 +91,6 @@
 
 ### Fixed
 
-- Added profile-aware Bedrock Mantle region selection, authenticated model discovery, bearer-token or SigV4 authentication, and credential refresh handling for OpenAI Responses models ([#7080](https://github.com/can1357/oh-my-pi/pull/7080) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 - Fixed Novita login rejecting valid API keys belonging to Developer and Basic team members by validating against the chat completions endpoint instead of the billing balance endpoint.
 - Fixed Cursor resource_exhausted errors being incorrectly classified as QUOTA_EXHAUSTED (which caused 30-minute credential blocks), mapping them to MODEL_CAPACITY_EXHAUSTED with a shorter backoff instead.
 - Fixed a crash in Amazon Bedrock and Devin providers when Context.systemPrompt is passed as a bare string.
