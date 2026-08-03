@@ -2873,8 +2873,8 @@ function createSkippedToolResult(
 		reason = "queued user message";
 		blocker = "queued message";
 	} else if (source === "system") {
-		reason = "pending system advisory";
-		blocker = "advisory";
+		reason = "pending internal steering message";
+		blocker = "steering message";
 	} else if (source === "irc") {
 		reason = "pending peer interrupt";
 		blocker = "interrupt";
