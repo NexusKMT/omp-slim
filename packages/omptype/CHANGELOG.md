@@ -18,3 +18,4 @@
 
 - Fixed TS2589 ("type instantiation is excessively deep") on every generic fluent call (`.pipe`/`.narrow`/`.filter`) over schemas embedding other schemas: `InferDef`/`InferDefIn` now cut off `any` up front so TypeScript's permissive instantiation cannot recurse through spread/index members, spread and index-signature recursion is boxed behind an interface member, primitive keyword lookup is a flat map instead of a nested conditional chain, and member inference tail-chains its fallbacks.
 - `type.raw()` results (`BaseType`) now expose the fluent composition methods (`.array()`, `.or()`, `.pipe()`, …) instead of only the callable validator surface.
+- TypeBox adapter's `withJsonSchemaKeywords` now binds `toJsonSchema` before wrapping it, so keyword-carrying schemas (e.g. `uniqueItems` arrays) no longer throw `undefined is not an object` when emitted.
