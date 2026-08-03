@@ -22,6 +22,7 @@ pub fn try_acquire(path: &str) -> io::Result<Option<PlatformFileLock>> {
 }
 
 impl PlatformFileLock {
+	#[allow(clippy::unnecessary_wraps, reason = "uniform cross-platform interface")]
 	pub fn release(&mut self) -> io::Result<()> {
 		drop(self.socket.take());
 		Ok(())

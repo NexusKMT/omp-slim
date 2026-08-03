@@ -57,6 +57,7 @@ impl FileLock {
 
 	/// Whether this handle owns the requested lock.
 	#[napi(getter)]
+	#[allow(clippy::missing_const_for_fn, reason = "napi method signature")]
 	pub fn acquired(&self) -> bool {
 		self.inner.is_some()
 	}

@@ -14,6 +14,7 @@ pub fn try_acquire(path: &str) -> io::Result<Option<PlatformFileLock>> {
 		.read(true)
 		.write(true)
 		.create(true)
+		.truncate(false)
 		.mode(0o600)
 		.open(path)?;
 	// SAFETY: `file` owns a live descriptor for the duration of this call. The
@@ -31,6 +32,7 @@ pub fn try_acquire(path: &str) -> io::Result<Option<PlatformFileLock>> {
 }
 
 impl PlatformFileLock {
+	#[allow(clippy::unnecessary_wraps, reason = "uniform cross-platform interface")]
 	pub fn release(&mut self) -> io::Result<()> {
 		drop(self.file.take());
 		Ok(())
