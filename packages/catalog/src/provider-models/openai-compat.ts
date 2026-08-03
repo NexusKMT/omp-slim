@@ -3721,6 +3721,10 @@ export function bedrockMantleModelManagerOptions(
 	return {
 		providerId: "bedrock-mantle",
 		staticModels: BEDROCK_MANTLE_STATIC_MODELS,
+		// The bearer-scoped /v1/models response lists only the models enabled for
+		// the account; a successful fetch replaces the static seed instead of
+		// merging, so disabled models are not selectable.
+		dynamicModelsAuthoritative: true,
 		...(config.authenticated && {
 			fetchDynamicModels: () =>
 				fetchOpenAICompatibleModels({

@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
 import { DEFAULT_MODEL_PER_PROVIDER, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import {
 	BEDROCK_MANTLE_STATIC_MODELS,
@@ -57,7 +61,7 @@ describe("Amazon Bedrock OpenAI routing", () => {
 		});
 	});
 
-	test("builds bearer-authenticated Mantle runtime discovery", async () => {
+	test("account-scoped discovery is authoritative over the static seed", async () => {
 		let requestedUrl = "";
 		const fetchImpl: FetchImpl = Object.assign(
 			async (input: string | URL | Request) => {
@@ -89,6 +93,23 @@ describe("Amazon Bedrock OpenAI routing", () => {
 		const descriptor = PROVIDER_DESCRIPTORS.find(descriptor => descriptor.providerId === "bedrock-mantle");
 		expect(descriptor).toMatchObject({ dynamicModelsAuthoritative: true });
 		expect(descriptor?.catalogDiscovery).toBeUndefined();
+
+		// The bearer-scoped /v1/models response is the complete account catalog:
+		// a successful refresh must prune static seeds the account cannot use.
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-bedrock-mantle-"));
+		try {
+			const refreshed = await resolveProviderModels(
+				{ ...managerOptions, cacheDbPath: path.join(tempDir, "models.db") },
+				"online",
+			);
+			expect(refreshed.stale).toBe(false);
+			expect(refreshed.models.map(model => model.id).sort()).toEqual([
+				"openai.gpt-5.6-luna",
+				"openai.gpt-5.7-preview",
+			]);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
 	});
 
 	test("drops only the unusable Converse rows for Mantle models", () => {
