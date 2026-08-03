@@ -156,8 +156,8 @@ function regionServesGeo(region: string, geo: string): boolean {
  * ambient region (`AWS_REGION` / `AWS_DEFAULT_REGION`) is honored only when it
  * can serve the profile's geo; a mismatched or absent ambient region is
  * corrected to the geo default so an `eu.`/`apac.` profile never POSTs to a `us`
- * endpoint (and vice versa). `global.` profiles have no geo entry, so the
- * ambient region (or `us-east-1`) is used unchanged.
+ * endpoint (and vice versa). `global.` profiles have no geo entry, so the ambient
+ * region (or, when absent, a guardrail ARN's region or `us-east-1`) is used unchanged.
  */
 function resolveBedrockRegion(modelId: string, options: BedrockOptions): string {
 	const explicit = options.region || inferRegionFromBedrockArn(modelId);
@@ -168,7 +168,7 @@ function resolveBedrockRegion(modelId: string, options: BedrockOptions): string 
 		if (ambient && regionServesGeo(ambient, geo)) return ambient;
 		return INFERENCE_PROFILE_GEO_DEFAULT_REGION[geo];
 	}
-	return ambient || "us-east-1";
+	return ambient || inferRegionFromBedrockArn(options.guardrailIdentifier ?? "") || "us-east-1";
 }
 
 type Block = (TextContent | ThinkingContent | ToolCall) & {
