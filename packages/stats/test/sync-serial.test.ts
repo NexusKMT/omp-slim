@@ -110,15 +110,27 @@ describe("stats sync serial mode", () => {
 			return true;
 		});
 
-		vi.spyOn(globalThis, "setTimeout").mockImplementation(callback => {
-			queueMicrotask(callback as () => void);
-			return 0;
-		});
+		vi.spyOn(Bun, "sleep").mockResolvedValue(undefined);
 		const result = await withStatsSyncLock(dbPath, async () => "acquired");
 
 		expect(result).toBe("acquired");
 		expect(await Bun.file(lockPath).exists()).toBe(false);
 		expect(await Bun.file(breakerPath).exists()).toBe(false);
+	});
+
+	it("reclaims an unstamped lock after the acquisition grace period", async () => {
+		const dbPath = path.join(getSessionsDir(), "stats-unstamped-lock.db");
+		const lockPath = `${dbPath}.sync.lock`;
+		await fs.mkdir(path.dirname(dbPath), { recursive: true });
+		await Bun.write(lockPath, "");
+		const staleTime = new Date(Date.now() - 11_000);
+		await fs.utimes(lockPath, staleTime, staleTime);
+		vi.spyOn(Bun, "sleep").mockResolvedValue(undefined);
+
+		const result = await withStatsSyncLock(dbPath, async () => "acquired");
+
+		expect(result).toBe("acquired");
+		expect(await Bun.file(lockPath).exists()).toBe(false);
 	});
 
 	it("never reclaims a live owner-stamped breaker even when its mtime is stale", async () => {
@@ -138,17 +150,12 @@ describe("stats sync serial mode", () => {
 			return true;
 		});
 		const retryScheduled = Promise.withResolvers<void>();
-		let resumeRetry: (() => void) | undefined;
+		const resumeRetry = Promise.withResolvers<void>();
 		let breakerReleased = false;
-		vi.spyOn(globalThis, "setTimeout").mockImplementation(callback => {
-			const run = callback as () => void;
-			if (breakerReleased) {
-				queueMicrotask(run);
-			} else {
-				resumeRetry = run;
-				retryScheduled.resolve();
-			}
-			return 0;
+		vi.spyOn(Bun, "sleep").mockImplementation(async () => {
+			if (breakerReleased) return;
+			retryScheduled.resolve();
+			await resumeRetry.promise;
 		});
 
 		let acquired = false;
@@ -162,7 +169,7 @@ describe("stats sync serial mode", () => {
 		} finally {
 			breakerReleased = true;
 			await fs.rm(breakerPath, { force: true });
-			resumeRetry?.();
+			resumeRetry.resolve();
 			await pending;
 		}
 		expect(acquired).toBe(true);

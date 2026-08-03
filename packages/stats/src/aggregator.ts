@@ -50,6 +50,7 @@ import type {
 import { computeUsageWindowStats, fetchUsageSnapshots } from "./usage-windows";
 
 const STATS_SYNC_LOCK_RETRY_MS = 25;
+const STATS_SYNC_LOCK_ACQUIRE_STALE_MS = 10 * 1000;
 const STATS_SYNC_LOCK_STALE_MS = 60 * 60 * 1000;
 
 interface StatsLockSnapshot {
@@ -103,7 +104,9 @@ async function readStatsLockSnapshot(lockPath: string): Promise<StatsLockSnapsho
 
 function statsLockOwnerIsRunning(snapshot: StatsLockSnapshot): boolean {
 	const pid = Number.parseInt(snapshot.text.split(/\r?\n/, 1)[0] ?? "", 10);
-	if (!Number.isSafeInteger(pid) || pid <= 0) return Date.now() - snapshot.mtimeMs < STATS_SYNC_LOCK_STALE_MS;
+	if (!Number.isSafeInteger(pid) || pid <= 0) {
+		return Date.now() - snapshot.mtimeMs < STATS_SYNC_LOCK_ACQUIRE_STALE_MS;
+	}
 	try {
 		process.kill(pid, 0);
 		return true;
@@ -214,9 +217,7 @@ export async function withStatsSyncLock<T>(dbPath: string, fn: () => Promise<T>)
 		} catch (error) {
 			if (errorCode(error) !== "EEXIST") throw error;
 			await removeAbandonedStatsLock(lockPath);
-			const { promise, resolve } = Promise.withResolvers<void>();
-			setTimeout(resolve, STATS_SYNC_LOCK_RETRY_MS);
-			await promise;
+			await Bun.sleep(STATS_SYNC_LOCK_RETRY_MS);
 		}
 	}
 
