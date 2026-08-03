@@ -2459,6 +2459,26 @@ export function computerCallMetadata(item: ResponseComputerToolCall): ComputerTo
 	};
 }
 
+/** Append a native Responses image result and emit its completion event. */
+export function appendResponsesImageResult(
+	output: AssistantMessage,
+	stream: AssistantMessageEventStream,
+	result: string,
+): void {
+	const image: ImageContent = {
+		type: "image",
+		data: result,
+		mimeType: parseImageMetadata(Buffer.from(result, "base64"))?.mimeType ?? "image/png",
+	};
+	output.content.push(image);
+	stream.push({
+		type: "image_end",
+		contentIndex: output.content.length - 1,
+		content: image,
+		partial: output,
+	});
+}
+
 export async function processResponsesStream<TApi extends Api>(
 	openaiStream: AsyncIterable<ResponseStreamEvent>,
 	output: AssistantMessage,
@@ -2972,18 +2992,7 @@ export async function processResponsesStream<TApi extends Api>(
 				closeOpenItem(event.output_index, item.id, entry, item.call_id, prefixedFunctionCallItemKey(item.call_id));
 				stream.push({ type: "toolcall_end", contentIndex, toolCall, partial: output });
 			} else if (item.type === "image_generation_call" && item.status === "completed" && item.result) {
-				const image: ImageContent = {
-					type: "image",
-					data: item.result,
-					mimeType: parseImageMetadata(Buffer.from(item.result, "base64"))?.mimeType ?? "image/png",
-				};
-				output.content.push(image);
-				stream.push({
-					type: "image_end",
-					contentIndex: output.content.length - 1,
-					content: image,
-					partial: output,
-				});
+				appendResponsesImageResult(output, stream, item.result);
 			}
 		} else if (terminalEvent) {
 			const response = terminalEvent.response;
