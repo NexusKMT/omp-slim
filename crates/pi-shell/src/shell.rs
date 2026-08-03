@@ -5019,8 +5019,8 @@ fn parse_ps_format(
 			"sid" | "sess" => PsField::Sid,
 			"tpgid" => PsField::Tpgid,
 			"tty" | "tt" | "tname" => PsField::Tty,
-			"stat" => PsField::State,
-			"state" | "s" => PsField::StateChar,
+			"stat" | "state" => PsField::State,
+			"s" => PsField::StateChar,
 			"start" | "stime" | "bsdstart" => PsField::Start,
 			"lstart" | "start_time" => PsField::LongStart,
 			"etime" | "elapsed" => PsField::Elapsed,
@@ -6591,6 +6591,27 @@ mod tests {
 			assert_ne!(fields[12], "?", "ruser should resolve to a name");
 			assert_ne!(fields[13], "?", "rgroup should resolve to a name");
 		}
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn ps_builtin_accepts_tpgid_alongside_job_control_columns() {
+		// Exact form from the field report that failed with
+		// "unknown output format specifier 'tpgid'".
+		let pid = std::process::id();
+		let (result, output) =
+			execute_captured(format!("ps -o pid,ppid,pgid,tpgid,sess,stat,tty,command -p {pid}"))
+				.await;
+		assert_eq!(result.exit_code, Some(0), "{output:?}");
+		let header = output.lines().next().unwrap_or_default();
+		for label in ["PID", "PPID", "PGID", "TPGID", "SID", "STAT", "TTY", "COMMAND"] {
+			assert!(header.contains(label), "missing {label} in {header:?}");
+		}
+		assert!(output.lines().skip(1).any(|line| {
+			line
+				.split_whitespace()
+				.next()
+				.is_some_and(|value| value == pid.to_string())
+		}));
 	}
 
 	#[tokio::test(flavor = "multi_thread")]

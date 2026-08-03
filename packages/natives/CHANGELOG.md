@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added the missing procps/BSD output format specifiers to the in-process ps shell builtin: `tpgid`, `pri`, `f`/`flags`, `ruser`/`logname`, `ruid`, `rgroup`, `rgid`, `group`/`egroup`, `gid`/`egid`, `wchan`, `min_flt`/`maj_flt`, `times`/`cputimes`, `sz`, single-character `s`/`state`, and aliases `tgid`/`tid`/`spid`, `euser`, `bsdtime`, and `rsz`. `ps -j` now includes a TPGID column, `ps -l` prints the single-character S column, and STAT gains the `+` foreground flag for processes in their terminal's foreground process group.
+- Added the missing procps/BSD output format specifiers to the in-process ps shell builtin: `tpgid`, `pri`, `f`/`flags`, `ruser`/`logname`, `ruid`, `rgroup`, `rgid`, `group`/`egroup`, `gid`/`egid`, `wchan`, `min_flt`/`maj_flt`, `times`/`cputimes`, `sz`, single-character `s`, and aliases `state`, `tgid`/`tid`/`spid`, `euser`, `bsdtime`, and `rsz`. `ps -j` now includes a TPGID column, `ps -l` prints the single-character S column, and STAT gains the `+` foreground flag for processes in their terminal's foreground process group.
 
 ## [17.2.6] - 2026-08-03
 
