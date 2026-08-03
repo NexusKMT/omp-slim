@@ -35,6 +35,7 @@ use smallvec::SmallVec;
 use crate::{glob_util, iofs, task};
 
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
+const PCRE2_JIT_ENABLED: bool = !cfg!(target_os = "macos");
 
 /// Output mode for [`search`] and [`grep`] (string values match JS callers).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1015,7 +1016,7 @@ fn build_pcre_matcher(
 		.multi_line(multiline)
 		.utf(true)
 		.ucp(true)
-		.jit_if_available(true);
+		.jit_if_available(PCRE2_JIT_ENABLED);
 	builder.build(pattern)
 }
 
@@ -2411,10 +2412,16 @@ mod tests {
 		let root = TempDirGuard::new();
 		write_file(&root.path().join("lookahead.txt"), "foobar\nfoobaz\n");
 		write_file(&root.path().join("backreference.txt"), "same same\nsame other\n");
+		write_file(&root.path().join("models.txt"), "dim_customers_status_accepted_values\n");
 
 		for (pattern, path, line) in [
 			(r"foo(?=bar)", "lookahead.txt", "foobar"),
 			(r"\b(\w+)\s+\1\b", "backreference.txt", "same same"),
+			(
+				r"(final_incremental_account_id_relationships|dim_customers_status_accepted_values|stg_orders_customer_id_relationships)(?!_[0-9a-f]{32})",
+				"models.txt",
+				"dim_customers_status_accepted_values",
+			),
 		] {
 			let mut config = base_grep_config(root.path());
 			config.pattern = pattern.to_string();
@@ -2427,6 +2434,25 @@ mod tests {
 			assert_eq!(result.matches[0].line_number, 1);
 			assert_eq!(result.matches[0].line, line);
 		}
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn grep_supports_multiline_pcre2_backreferences_and_lookahead() {
+		let root = TempDirGuard::new();
+		write_file(&root.path().join("schema.yml"), "  - not_null:\n      severity: warn\n");
+
+		let mut config = base_grep_config(root.path());
+		config.pattern = r"^(\s+)- (not_null|unique|accepted_values|relationships|expression_is_true|[a-z_]+):\s*$\n(?!\1    (arguments|config|description|name):)".to_string();
+		config.multiline = Some(true);
+
+		let result = grep_sync(config, None, task::CancelToken::default())
+			.expect("multiline PCRE2 pattern should search without terminating the process");
+
+		assert_eq!(result.total_matches, 1);
+		assert_eq!(result.matches.len(), 1);
+		assert_eq!(result.matches[0].path, "schema.yml");
+		assert_eq!(result.matches[0].line_number, 1);
 	}
 	#[cfg(unix)]
 	#[test]
