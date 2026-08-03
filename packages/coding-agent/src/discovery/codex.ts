@@ -87,23 +87,28 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 	]);
 
 	const items: MCPServer[] = [];
-	if (userConfig) {
-		const servers = extractMCPServersFromToml(userConfig, path.dirname(userConfigPath));
-		for (const [name, config] of Object.entries(servers)) {
-			items.push({
-				name,
-				...config,
-				_source: createSourceMeta(PROVIDER_ID, userConfigPath, "user"),
-			});
-		}
-	}
+	// Capability dedupe is first-wins, including suppressed items claiming their
+	// key. Load project entries first so a project `enabled = false` keeps a
+	// same-named user server disabled.
 	if (projectConfig) {
 		const servers = extractMCPServersFromToml(projectConfig, path.dirname(projectConfigPath));
-		for (const [name, config] of Object.entries(servers)) {
+		for (const name in servers) {
+			const config = servers[name];
 			items.push({
 				name,
 				...config,
 				_source: createSourceMeta(PROVIDER_ID, projectConfigPath, "project"),
+			});
+		}
+	}
+	if (userConfig) {
+		const servers = extractMCPServersFromToml(userConfig, path.dirname(userConfigPath));
+		for (const name in servers) {
+			const config = servers[name];
+			items.push({
+				name,
+				...config,
+				_source: createSourceMeta(PROVIDER_ID, userConfigPath, "user"),
 			});
 		}
 	}
@@ -153,7 +158,8 @@ function extractMCPServersFromToml(
 	const codexServers = toml.mcp_servers as Record<string, CodexMCPConfig>;
 	const result: Record<string, Partial<MCPServer>> = {};
 
-	for (const [name, config] of Object.entries(codexServers)) {
+	for (const name in codexServers) {
+		const config = codexServers[name];
 		// Root relative cwd/command against the Codex config directory. Codex
 		// spawns the process with the resolved cwd, so a relative command is
 		// resolved by the OS from there — pass "cwd" so e.g. cwd="server",

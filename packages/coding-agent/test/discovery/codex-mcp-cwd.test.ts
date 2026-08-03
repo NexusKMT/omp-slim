@@ -77,6 +77,30 @@ test("disabled Codex MCP servers survive discovery tagged enabled: false (#7538)
 	expect(context7?.enabled).toBeUndefined();
 });
 
+test("project Codex disable suppresses a same-named user server (#7538)", async () => {
+	const userCodexDir = path.join(tempHome, ".codex");
+	const projectCodexDir = path.join(tempCwd, ".codex");
+	await fs.mkdir(projectCodexDir, { recursive: true });
+	await Promise.all([
+		fs.writeFile(
+			path.join(userCodexDir, "config.toml"),
+			["[mcp_servers.shared]", 'command = "user-server"', ""].join("\n"),
+		),
+		fs.writeFile(
+			path.join(projectCodexDir, "config.toml"),
+			["[mcp_servers.shared]", 'command = "project-server"', "enabled = false", ""].join("\n"),
+		),
+	]);
+
+	const result = await loadCapability<MCPServer>(mcpCapability.id, {
+		cwd: tempCwd,
+		providers: ["codex"],
+		suppress: server => server.enabled === false,
+	});
+
+	expect(result.items.find(server => server.name === "shared")).toBeUndefined();
+});
+
 test("relative path-like command and cwd resolve against the Codex config directory (#5561)", async () => {
 	const codexDir = path.join(tempHome, ".codex");
 	await fs.writeFile(
