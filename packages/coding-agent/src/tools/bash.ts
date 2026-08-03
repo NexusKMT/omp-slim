@@ -95,9 +95,11 @@ function hasBashApprovalShellControl(command: string): boolean {
 				quote = undefined;
 				continue;
 			}
-			// Expansion remains active inside double quotes; other control-looking
-			// characters are literal argument text.
+			// Expansion is active inside double quotes even in the original line.
 			if (ch === "`" || ch === "$") return true;
+			// Other control characters are literal here but become executable if a
+			// `-c`/`-e` option reinterprets the argument through another shell.
+			if (Object.hasOwn(BASH_APPROVAL_SHELL_CONTROL_CHARS, ch)) hasQuotedShellControl = true;
 			continue;
 		}
 		if (ch === "'" || ch === '"') {
@@ -106,8 +108,8 @@ function hasBashApprovalShellControl(command: string): boolean {
 		}
 		if (Object.hasOwn(BASH_APPROVAL_SHELL_CONTROL_CHARS, ch)) return true;
 	}
-	// Options such as `git -c alias.x='!...'` and `sh -c '...'` reinterpret
-	// otherwise literal single-quoted arguments as executable code.
+	// Options such as `git -c alias.x='!...'` and `sh -c "..."` reinterpret
+	// otherwise literal quoted arguments as executable code.
 	return hasQuotedShellControl && BASH_APPROVAL_REINTERPRETED_ARGUMENT_RE.test(command);
 }
 
