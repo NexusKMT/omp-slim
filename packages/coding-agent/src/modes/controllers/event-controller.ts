@@ -170,6 +170,22 @@ export class EventController {
 	#prevHideThinking = false;
 	#handlers: AgentSessionEventHandlers;
 	#terminalProgressActive = false;
+	// Coalescing window for `message_update` events at the subscription boundary.
+	// `message_update` carries the CUMULATIVE assistant message (every update
+	// re-lists all content blocks), so when a burst of deltas arrives faster than
+	// this window only the latest snapshot needs to rebuild streaming state — the
+	// intermediate rebuilds are redundant work. The TUI already caps the paint
+	// rate via its own render cadence; this caps the per-token handler work that
+	// feeds it. Speech stays intact: `#vocalizeDelta` runs at ARRIVAL for every
+	// delta before the snapshot is coalesced away.
+	#pendingMessageUpdate: Extract<AgentSessionEvent, { type: "message_update" }> | undefined = undefined;
+	#messageUpdateTimer: NodeJS.Timeout | undefined = undefined;
+	// Deltas already fed to speech at arrival by the coalescer. `#handleMessageUpdate`
+	// also vocalizes so the direct `handleEvent` path (tests, session focus replay)
+	// keeps working — the WeakSet makes the coalesced path speak each delta exactly
+	// once instead of twice.
+	#vocalizedMessageUpdates = new WeakSet<object>();
+	static readonly #MESSAGE_UPDATE_COALESCE_MS = 33;
 
 	constructor(private ctx: InteractiveModeContext) {
 		// Enhanced speech (`speech.enhanced`) rewrites blocks through the
@@ -253,6 +269,11 @@ export class EventController {
 	}
 
 	dispose(): void {
+		if (this.#messageUpdateTimer) {
+			clearTimeout(this.#messageUpdateTimer);
+			this.#messageUpdateTimer = undefined;
+		}
+		this.#pendingMessageUpdate = undefined;
 		this.#streamingReveal.stop();
 		this.#toolArgsReveal.stop();
 		this.#cancelIdleCompaction();
@@ -426,8 +447,56 @@ export class EventController {
 
 	subscribeToAgent(): void {
 		this.ctx.unsubscribe = this.ctx.session.subscribe(async (event: AgentSessionEvent) => {
+			// Coalesce the cumulative `message_update` deltas of a streaming turn
+			// into at most one handler run per window. `#handleMessageUpdate` is
+			// synchronous, so without this every token re-runs the whole
+			// streaming rebuild (splitAssistantMessageToolTimeline, reveal
+			// setTarget, per-block tool-call reconciliation) even though the TUI
+			// paints at most ~30fps — at 40-100 tps the handler work then
+			// dominates the CPU profile of an idle-looking streaming session
+			// (issue #7443). Only the latest snapshot is meaningful; non-update
+			// events flush the pending snapshot first so ordering is preserved.
+			if (event.type === "message_update") {
+				this.#enqueueMessageUpdate(event);
+				return;
+			}
+			await this.#flushPendingMessageUpdate();
 			await this.handleEvent(event);
 		});
+	}
+
+	/**
+	 * Queue a streaming `message_update` for the next coalesced handler run.
+	 * Speech is per-delta, so the delta is vocalized at arrival before the
+	 * snapshot is (possibly) superseded by a newer one.
+	 */
+	#enqueueMessageUpdate(event: Extract<AgentSessionEvent, { type: "message_update" }>): void {
+		// Speech is per-delta: every delta is spoken at arrival even when its
+		// cumulative snapshot is later superseded and never rebuilt.
+		this.#vocalizeDelta(event);
+		this.#vocalizedMessageUpdates.add(event);
+		this.#pendingMessageUpdate = event;
+		if (this.#messageUpdateTimer) return;
+		this.#messageUpdateTimer = setTimeout(() => {
+			this.#messageUpdateTimer = undefined;
+			void this.#flushPendingMessageUpdate();
+		}, EventController.#MESSAGE_UPDATE_COALESCE_MS);
+	}
+
+	/**
+	 * Run the coalesced `message_update` handler on the latest pending snapshot
+	 * (dropping any superseded intermediates) and clear the queue. Safe to call
+	 * more than once; no-ops when nothing is pending.
+	 */
+	async #flushPendingMessageUpdate(): Promise<void> {
+		if (this.#messageUpdateTimer) {
+			clearTimeout(this.#messageUpdateTimer);
+			this.#messageUpdateTimer = undefined;
+		}
+		const event = this.#pendingMessageUpdate;
+		if (!event) return;
+		this.#pendingMessageUpdate = undefined;
+		await this.handleEvent(event);
 	}
 	/**
 	 * Clear every transcript-anchored/turn-scoped piece of state. Used by the
@@ -436,6 +505,11 @@ export class EventController {
 	 * session's transcript and must not bleed into the new one.
 	 */
 	resetTranscriptAnchors(): void {
+		if (this.#messageUpdateTimer) {
+			clearTimeout(this.#messageUpdateTimer);
+			this.#messageUpdateTimer = undefined;
+		}
+		this.#pendingMessageUpdate = undefined;
 		this.#resetReadGroup();
 		this.#lastVisibleBlockCount = 0;
 		this.#renderedCustomMessages.clear();
@@ -814,7 +888,9 @@ export class EventController {
 
 	async #handleMessageUpdate(event: Extract<AgentSessionEvent, { type: "message_update" }>): Promise<void> {
 		this.#ensureWorkingLoaderWhileStreaming();
-		this.#vocalizeDelta(event);
+		if (!this.#vocalizedMessageUpdates.delete(event)) {
+			this.#vocalizeDelta(event);
+		}
 		if (this.ctx.streamingComponent && event.message.role === "assistant") {
 			const unlockedThinkingVisibility = this.ctx.noteDisplayableThinkingContent(event.message);
 			if (unlockedThinkingVisibility) {
