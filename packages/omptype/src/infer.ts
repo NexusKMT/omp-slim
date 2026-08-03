@@ -6,33 +6,30 @@ type TrimLeft<s extends string> = s extends `${Whitespace}${infer rest}` ? TrimL
 type TrimRight<s extends string> = s extends `${infer rest}${Whitespace}` ? TrimRight<rest> : s;
 type Trim<s extends string> = TrimLeft<TrimRight<s>>;
 
-type InferPrimitive<s extends string> = s extends "string" | "string.url"
-	? string
-	: s extends "number" | "number.integer"
-		? number
-		: s extends "boolean"
-			? boolean
-			: s extends "null"
-				? null
-				: s extends "undefined"
-					? undefined
-					: s extends "unknown" | "any"
-						? unknown
-						: s extends "object"
-							? object
-							: s extends "bigint"
-								? bigint
-								: s extends "symbol"
-									? symbol
-									: s extends "never"
-										? never
-										: s extends "Date"
-											? Date
-											: s extends "true"
-												? true
-												: s extends "false"
-													? false
-													: never;
+/**
+ * Flat keyword lookup. An indexed access is one instantiation level, unlike a
+ * nested conditional chain — this sits under every string-DSL property, so its
+ * depth is multiplied by every layer of object nesting above it.
+ * `never` is intentionally absent: the parser rejects it and the fallback in
+ * `InferMember` treats a missing entry as "not a primitive".
+ */
+interface PrimitiveMap {
+	string: string;
+	"string.url": string;
+	number: number;
+	"number.integer": number;
+	boolean: boolean;
+	null: null;
+	undefined: undefined;
+	unknown: unknown;
+	any: unknown;
+	object: object;
+	bigint: bigint;
+	symbol: symbol;
+	Date: Date;
+	true: true;
+	false: false;
+}
 
 type Merge<left, right> = left extends object
 	? right extends object
@@ -56,40 +53,45 @@ type InferUtility<s extends string> = s extends `Record<${string},${infer value}
 							? Merge<InferString<left>, InferString<right>>
 							: never;
 
-type InferMember<member extends string> =
-	Trim<member> extends infer s extends string
-		? s extends `(${infer inner})`
-			? InferString<inner>
-			: s extends `${infer element}[]`
-				? InferMember<element>[]
-				: s extends `'${infer literal}'` | `"${infer literal}"`
-					? literal
-					: s extends `d'${string}'` | `d"${string}"`
-						? Date
-						: s extends `\`${string}\``
-							? string
-							: s extends `/${string}/${string}` | `/${string}/`
-								? string
-								: s extends `${infer literal extends number}`
-									? literal
-									: InferPrimitive<s> extends infer primitive
-										? [primitive] extends [never]
-											? InferUtility<s> extends infer utility
-												? [utility] extends [never]
-													? s extends `string.${string}`
-														? string
-														: s extends `${string}Date${string}`
-															? Date
-															: s extends `${string}string${string}`
-																? string
-																: s extends `${string}number${string}`
-																	? number
-																	: unknown
-													: utility
-												: unknown
-											: primitive
-										: unknown
-		: unknown;
+/**
+ * Member inference as a flat false-branch chain: TypeScript tail-evaluates
+ * chained conditionals in the false position, so this stays at constant
+ * instantiation depth where the previous `extends infer` ladder nested every
+ * fallback inside a true branch and accumulated depth per step.
+ */
+type InferMember<member extends string> = Trim<member> extends infer s extends string ? InferMemberTrimmed<s> : unknown;
+
+type InferMemberTrimmed<s extends string> = s extends `(${infer inner})`
+	? InferString<inner>
+	: s extends `${infer element}[]`
+		? InferMember<element>[]
+		: s extends `'${infer literal}'` | `"${infer literal}"`
+			? literal
+			: s extends `d'${string}'` | `d"${string}"`
+				? Date
+				: s extends `\`${string}\``
+					? string
+					: s extends `/${string}/${string}` | `/${string}/`
+						? string
+						: s extends `${infer literal extends number}`
+							? literal
+							: s extends keyof PrimitiveMap
+								? PrimitiveMap[s]
+								: InferUtility<s> extends infer utility
+									? [utility] extends [never]
+										? InferMemberFallback<s>
+										: utility
+									: unknown;
+
+type InferMemberFallback<s extends string> = s extends `string.${string}`
+	? string
+	: s extends `${string}Date${string}`
+		? Date
+		: s extends `${string}string${string}`
+			? string
+			: s extends `${string}number${string}`
+				? number
+				: unknown;
 
 /** Split unions without distributing over the accumulated members. */
 type InferUnion<s extends string, result = never> = s extends `${infer head}|${infer tail}`
@@ -197,22 +199,42 @@ type InputOptional<def extends object> = {
 			: never]?: InferDefIn<UnwrapProperty<def[key]>>;
 };
 
-type OutputSpread<def extends object> = "..." extends keyof def ? InferDef<def["..."]> : unknown;
-type InputSpread<def extends object> = "..." extends keyof def ? InferDefIn<def["..."]> : unknown;
-type OutputProperties<def extends object> = Simplify<OutputRequired<def> & OutputOptional<def> & OutputSpread<def>>;
-type InputProperties<def extends object> = Simplify<InputRequired<def> & InputOptional<def> & InputSpread<def>>;
+/**
+ * CYCLE SAFETY: when a fluent generic method is called on a schema whose def
+ * embeds other schemas, TypeScript instantiates `InferDef<def>` while `def`
+ * is still generic. `"..." extends keyof def` resolves TRUE under permissive
+ * instantiation (`keyof any` contains every literal), so spread/index members
+ * cannot be deferred by wrapper conditionals — a bare `InferDef<def["..."]>`
+ * member re-enters this expansion and instantiates without bound (TS2589).
+ * Interface members only instantiate when resolved, so routing the recursive
+ * reference through `DefBox` keeps generic instantiation shallow: it stops at
+ * a type reference plus an indexed access instead of expanding `InferDef`.
+ */
+interface DefBox<def> {
+	readonly out: InferDef<def>;
+	readonly in: InferDefIn<def>;
+}
+
+type OutputSpread<def extends object> = "..." extends keyof def ? DefBox<def["..."]>["out"] : unknown;
+type InputSpread<def extends object> = "..." extends keyof def ? DefBox<def["..."]>["in"] : unknown;
+type OutputIndex<def extends object> = "[string]" extends keyof def
+	? Record<string, DefBox<def["[string]"]>["out"]>
+	: unknown;
+type InputIndex<def extends object> = "[string]" extends keyof def
+	? Record<string, DefBox<def["[string]"]>["in"]>
+	: unknown;
 
 type InferObject<def extends object> = "[string]" extends keyof def
 	? [DefinitionKeys<def>] extends [never]
-		? Record<string, InferDef<def["[string]"]>>
-		: OutputProperties<def> & Record<string, InferDef<def["[string]"]>>
-	: OutputProperties<def>;
+		? Record<string, DefBox<def["[string]"]>["out"]>
+		: Simplify<OutputRequired<def> & OutputOptional<def> & OutputSpread<def>> & OutputIndex<def>
+	: Simplify<OutputRequired<def> & OutputOptional<def> & OutputSpread<def>>;
 
 type InferObjectIn<def extends object> = "[string]" extends keyof def
 	? [DefinitionKeys<def>] extends [never]
-		? Record<string, InferDefIn<def["[string]"]>>
-		: InputProperties<def> & Record<string, InferDefIn<def["[string]"]>>
-	: InputProperties<def>;
+		? Record<string, DefBox<def["[string]"]>["in"]>
+		: Simplify<InputRequired<def> & InputOptional<def> & InputSpread<def>> & InputIndex<def>
+	: Simplify<InputRequired<def> & InputOptional<def> & InputSpread<def>>;
 
 /** Object-literal inference used by fluent composition overloads. */
 export type InferObjectDef<def extends object> = InferObject<def>;
@@ -268,62 +290,78 @@ type InferTupleInput<defs extends readonly unknown[], result extends unknown[] =
 				: InferTupleInput<rest, [...result, InferDefIn<head>]>
 			: result;
 
+/**
+ * True only for `any` (`1 & any` is `any`; `0 extends any` holds). During
+ * relation checking TypeScript instantiates these aliases permissively with
+ * every type parameter replaced by `any`, and under `any` the object branch
+ * recurses forever (`any["..."]` is `any` again). Cutting `any` off up front
+ * makes permissive instantiation terminate immediately, mirroring ArkType's
+ * `anyOrNever` guards.
+ */
+type IsAny<def> = 0 extends 1 & def ? true : false;
+
 /** Infer the validated output type produced by a definition. */
-export type InferDef<def = unknown> = def extends { readonly infer: infer output }
-	? output
-	: def extends string
-		? InferString<def>
-		: def extends RegExp
-			? string
-			: def extends readonly [infer element, "[]"]
-				? InferDef<element>[]
-				: def extends readonly [infer left, "|", infer right]
-					? InferDef<left> | InferDef<right>
-					: def extends readonly [infer left, "&", infer right]
-						? InferDef<left> & InferDef<right>
-						: def extends readonly [unknown, "=>", (...args: never[]) => infer output]
-							? output
-							: def extends readonly [unknown, "|>", infer output]
-								? InferDef<output>
-								: def extends readonly [infer base, ":", unknown] | readonly [infer base, "@", unknown]
-									? InferDef<base>
-									: def extends readonly ["keyof", infer base]
-										? keyof InferDef<base>
-										: def extends readonly ["instanceof", ...infer constructors]
-											? InstanceOf<constructors[number]>
-											: def extends readonly ["===", ...infer values]
-												? values[number]
-												: def extends readonly unknown[]
-													? InferTupleOutput<def>
-													: def extends object
-														? InferObject<def>
-														: unknown;
+export type InferDef<def = unknown> =
+	IsAny<def> extends true
+		? unknown
+		: def extends { readonly infer: infer output }
+			? output
+			: def extends string
+				? InferString<def>
+				: def extends RegExp
+					? string
+					: def extends readonly [infer element, "[]"]
+						? InferDef<element>[]
+						: def extends readonly [infer left, "|", infer right]
+							? InferDef<left> | InferDef<right>
+							: def extends readonly [infer left, "&", infer right]
+								? InferDef<left> & InferDef<right>
+								: def extends readonly [unknown, "=>", (...args: never[]) => infer output]
+									? output
+									: def extends readonly [unknown, "|>", infer output]
+										? InferDef<output>
+										: def extends readonly [infer base, ":", unknown] | readonly [infer base, "@", unknown]
+											? InferDef<base>
+											: def extends readonly ["keyof", infer base]
+												? keyof InferDef<base>
+												: def extends readonly ["instanceof", ...infer constructors]
+													? InstanceOf<constructors[number]>
+													: def extends readonly ["===", ...infer values]
+														? values[number]
+														: def extends readonly unknown[]
+															? InferTupleOutput<def>
+															: def extends object
+																? InferObject<def>
+																: unknown;
 
 /** Infer values accepted before defaults and morphs are applied. */
-export type InferDefIn<def = unknown> = def extends { readonly inferIn: infer input }
-	? input
-	: def extends string
-		? InferStringIn<def>
-		: def extends RegExp
-			? string
-			: def extends readonly [infer element, "[]"]
-				? InferDefIn<element>[]
-				: def extends readonly [infer left, "|", infer right]
-					? InferDefIn<left> | InferDefIn<right>
-					: def extends readonly [infer left, "&", infer right]
-						? InferDefIn<left> & InferDefIn<right>
-						: def extends readonly [infer input, "=>", unknown] | readonly [infer input, "|>", unknown]
-							? InferDefIn<input>
-							: def extends readonly [infer base, ":", unknown] | readonly [infer base, "@", unknown]
-								? InferDefIn<base>
-								: def extends readonly ["keyof", infer base]
-									? keyof InferDefIn<base>
-									: def extends readonly ["instanceof", ...infer constructors]
-										? InstanceOf<constructors[number]>
-										: def extends readonly ["===", ...infer values]
-											? values[number]
-											: def extends readonly unknown[]
-												? InferTupleInput<def>
-												: def extends object
-													? InferObjectIn<def>
-													: unknown;
+export type InferDefIn<def = unknown> =
+	IsAny<def> extends true
+		? unknown
+		: def extends { readonly inferIn: infer input }
+			? input
+			: def extends string
+				? InferStringIn<def>
+				: def extends RegExp
+					? string
+					: def extends readonly [infer element, "[]"]
+						? InferDefIn<element>[]
+						: def extends readonly [infer left, "|", infer right]
+							? InferDefIn<left> | InferDefIn<right>
+							: def extends readonly [infer left, "&", infer right]
+								? InferDefIn<left> & InferDefIn<right>
+								: def extends readonly [infer input, "=>", unknown] | readonly [infer input, "|>", unknown]
+									? InferDefIn<input>
+									: def extends readonly [infer base, ":", unknown] | readonly [infer base, "@", unknown]
+										? InferDefIn<base>
+										: def extends readonly ["keyof", infer base]
+											? keyof InferDefIn<base>
+											: def extends readonly ["instanceof", ...infer constructors]
+												? InstanceOf<constructors[number]>
+												: def extends readonly ["===", ...infer values]
+													? values[number]
+													: def extends readonly unknown[]
+														? InferTupleInput<def>
+														: def extends object
+															? InferObjectIn<def>
+															: unknown;

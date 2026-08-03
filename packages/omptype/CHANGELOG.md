@@ -13,3 +13,8 @@
 
 - Expanded the lazy JIT across tuples, refinements, morphs, intersections, instances, and recursive aliases; reused compiled validators for shared IR; added allocation-free statement code generation for `.allows()`; and tightened object, array, number, and literal-union checks.
 - Reduced schema construction overhead with direct nested-object parsing, non-Date DSL dispatch guards, and ASCII-fast whitespace and optional-key scans.
+
+### Fixed
+
+- Fixed TS2589 ("type instantiation is excessively deep") on every generic fluent call (`.pipe`/`.narrow`/`.filter`) over schemas embedding other schemas: `InferDef`/`InferDefIn` now cut off `any` up front so TypeScript's permissive instantiation cannot recurse through spread/index members, spread and index-signature recursion is boxed behind an interface member, primitive keyword lookup is a flat map instead of a nested conditional chain, and member inference tail-chains its fallbacks.
+- `type.raw()` results (`BaseType`) now expose the fluent composition methods (`.array()`, `.or()`, `.pipe()`, …) instead of only the callable validator surface.

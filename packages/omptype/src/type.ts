@@ -1403,7 +1403,7 @@ export namespace type {
 			}
 			const aliases: Record<string, unknown> = {};
 			for (let index = 0; index < names.length; index++) aliases[names[index]] = arguments_[index];
-			return scope(aliases).type(definition) as BaseType;
+			return scope(aliases).type(definition) as unknown as BaseType;
 		};
 	}
 
@@ -1478,7 +1478,7 @@ function buildScope(aliases: Record<string, unknown>, _options?: ScopeOptions): 
 }
 
 /** A schema whose output type is not statically known (`type.raw` results). */
-export type BaseType = Type<unknown, unknown>;
+export type BaseType = FluentType<unknown, unknown>;
 
 /** `hasMorph` re-export for diagnostics/tooling. */
 export { hasMorph };
