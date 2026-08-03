@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a supervised process reaching a terminal state without telling the session that launched it. The broker recorded the final snapshot for `hub ps` to read but emitted no event, so an idle owner only learned that a process had exited by polling. The broker now sends one `daemon-completed` notification per terminal exit to the owner socket recorded at launch, and the session turns it into a model-visible message. Restart transitions stay live, and a stale or disposed session drops the notification without changing explicit `hub wait` or persistence behavior.
+
 ## [17.2.5] - 2026-08-03
 
 ### Breaking Changes
