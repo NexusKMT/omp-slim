@@ -682,9 +682,6 @@
 - Fixed in-progress aborts awaiting `session_stop` extension handlers whose results would be discarded.
 - Fixed `/retry` reporting "Nothing to retry" after a stream stalled or aborted mid-tool-call.
 - Fixed locally consumed extension commands triggering automatic title generation and exposing their command text to the title model.
-### Added
-
-- Added `guardrailIdentifier`, `guardrailVersion`, and `guardrailTrace` Amazon Bedrock provider settings ([#6276](https://github.com/can1357/oh-my-pi/issues/6276)).
 
 ## [17.0.7] - 2026-07-21
 
