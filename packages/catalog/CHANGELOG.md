@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed `deepseek-v4` family models (e.g. `deepseek-v4-flash-0731`) discovered dynamically by `alibaba-token-plan` missing reasoning configuration and the `max` thinking effort.
+- Fixed GitHub Copilot dynamic discovery retaining stale bundled prices for default-context models instead of using the provider's reported default-tier prices ([#7471](https://github.com/can1357/oh-my-pi/issues/7471)).
 
 ## [17.2.5] - 2026-08-03
 
