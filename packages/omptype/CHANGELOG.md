@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.7] - 2026-08-03
+
 ### Added
 
 - Introduced omptype, an ArkType-compatible schema validation library featuring a lazy JIT runtime that compiles specialized validators on the third call for ultra-fast hot-path validation and low construction overhead.

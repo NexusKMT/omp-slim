@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.7] - 2026-08-03
+
 ### Added
 
 - Added missing procps/BSD output format specifiers and aliases to the in-process `ps` shell builtin, including support for columns like `tpgid`, `pri`, `flags`, `wchan`, and various user/group/time fields.

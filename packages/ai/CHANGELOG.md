@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.7] - 2026-08-03
+
 ### Changed
 
 - Replaced `arktype` with `@oh-my-pi/omptype` for schema validation, delivering up to 100x faster schema construction and 60-100x faster validation while maintaining full compatibility with existing `type`/`Type` exports and the `isArkSchema` contract.

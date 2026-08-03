@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.7] - 2026-08-03
+
 ### Changed
 
 - Replaced arktype with @oh-my-pi/omptype for tool parameter and config schemas, significantly improving startup performance with ~100x faster schema construction. Config schema errors are now reported via OmpErrors using the same path/problem structure.
