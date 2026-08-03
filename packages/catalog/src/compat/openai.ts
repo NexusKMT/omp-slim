@@ -684,24 +684,28 @@ export function buildOpenAIResponsesCompat(spec: OpenAIResponsesSpecLike): Resol
 	const isLocalServingBackend =
 		(!PROXY_OPENAI_COMPAT_PROVIDERS.has(spec.provider) && LOCAL_OPENAI_COMPAT_PROVIDERS.has(spec.provider)) ||
 		hasLocalLoopbackBaseUrl(baseUrl);
+	const isXaiHost = modelMatchesHost({ provider: spec.provider, baseUrl }, "xai");
 
 	const compat: ResolvedOpenAIResponsesCompat = {
 		supportsDeveloperRole: isAzure || isOpenAIUrl || hostMatchesUrl(baseUrl, "githubCopilot"),
 		supportsStrictMode: isAzure || detectStrictModeSupport(spec.provider, baseUrl),
-		supportsReasoningEffort: spec.provider !== "xai-oauth" || isGrokReasoningEffortCapable(id),
+		// Paid `xai` and SuperGrok `xai-oauth` share api.x.ai `/v1/responses`.
+		// Only the Grok effort-capable allowlist accepts `reasoning.effort`;
+		// other reasoners (grok-build, grok-code-fast-1, …) 400 if it is sent.
+		supportsReasoningEffort: !isXaiHost || isGrokReasoningEffortCapable(id),
 		supportsLongPromptCacheRetention: isOpenAIUrl,
 		supportsPromptCacheBreakpoints,
 		promptCacheBreakpointTtl: supportsPromptCacheBreakpoints ? "30m" : undefined,
 		// Azure OpenAI and GitHub Copilot Responses paths require tool results
 		// to strictly match prior tool calls when building Responses inputs.
 		strictResponsesPairing: isAzure || spec.provider === "github-copilot",
-		// GitHub Copilot and xAI OAuth reject `detail: "original"` (400 / 422).
-		// Every other host preserves native-resolution frames (snapcompact relies
-		// on `original`). Detect Copilot by provider id or base-URL host so a
-		// model pointed at the Copilot host under a different provider id still
-		// clamps; xai-oauth is provider-id only (same host family as paid `xai`).
+		// GitHub Copilot and first-party xAI `/v1/responses` reject
+		// `detail: "original"` (400 / 422). Every other host preserves
+		// native-resolution frames (snapcompact relies on `original`). Detect
+		// Copilot by provider id or base-URL host so a model pointed at the
+		// Copilot host under a different provider id still clamps.
 		supportsImageDetailOriginal:
-			spec.provider !== "xai-oauth" && !modelMatchesHost({ provider: spec.provider, baseUrl }, "githubCopilot"),
+			!isXaiHost && !modelMatchesHost({ provider: spec.provider, baseUrl }, "githubCopilot"),
 		reasoningEffortMap: {},
 		supportsReasoningParams: true,
 		// OpenAI proprietary reasoning models (o-series, gpt-5+) reject explicit
@@ -710,8 +714,12 @@ export function buildOpenAIResponsesCompat(spec: OpenAIResponsesSpecLike): Resol
 		thinkingFormat,
 		reasoningDisableMode: resolveReasoningDisableMode(thinkingFormat),
 		omitReasoningEffort: false,
-		includeEncryptedReasoning: spec.provider !== "xai-oauth",
-		filterReasoningHistory: spec.provider === "xai-oauth" || (isOpenRouter && isAnthropicModel),
+		// Ask xAI `/v1/responses` for `reasoning.encrypted_content` the same way
+		// first-party OpenAI Responses does. History still drops `type:
+		// "reasoning"` wrappers (`filterReasoningHistory`) independently —
+		// those two flags must not be collapsed.
+		includeEncryptedReasoning: true,
+		filterReasoningHistory: isXaiHost || (isOpenRouter && isAnthropicModel),
 		disableReasoningOnForcedToolChoice: isKimiModel,
 		disableReasoningOnToolChoice: isDeepseekFamily && reasoningCapable && !isOpenRouter,
 		supportsToolChoice: true,
@@ -752,7 +760,7 @@ export function buildOpenAIResponsesCompat(spec: OpenAIResponsesSpecLike): Resol
 			MINIMAX_PROVIDER_OR_ID_PATTERN.test(spec.provider) || (id ? MINIMAX_PROVIDER_OR_ID_PATTERN.test(id) : false),
 		emptyLengthFinishIsContextError: spec.provider === "ollama",
 		usesOpenAIToolCallIdLimit: spec.provider === "openai",
-		promptCacheSessionHeader: spec.provider === "xai-oauth" ? "x-grok-conv-id" : undefined,
+		promptCacheSessionHeader: isXaiHost ? "x-grok-conv-id" : undefined,
 		streamFirstEventTimeoutMs: isLocalServingBackend ? 0 : spec.compat?.streamFirstEventTimeoutMs,
 		streamIdleTimeoutMs: isLocalServingBackend
 			? LOCAL_OPENAI_COMPAT_STREAM_IDLE_TIMEOUT_MS

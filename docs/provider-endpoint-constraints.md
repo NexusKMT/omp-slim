@@ -235,12 +235,13 @@ Reasoning fields are not interchangeable.
 - Compat needs both policies: disable reasoning for any tool choice, and disable
   reasoning only for forced tool choice.
 
-### xAI Grok through Responses/SuperGrok
+### xAI Grok through Responses (`xai` and `xai-oauth`)
 
-Keep these independent:
+Both the paid API-key provider (`xai` / `XAI_API_KEY`) and SuperGrok OAuth
+(`xai-oauth`) chat over `https://api.x.ai/v1/responses`. Keep these independent:
 
 - omit `reasoning.effort`
-- include or drop encrypted reasoning replay
+- include `reasoning.encrypted_content` (request `include`) vs replay history
 - filter reasoning-history wrappers
 
 Some models reject only one of those fields; do not collapse them into one

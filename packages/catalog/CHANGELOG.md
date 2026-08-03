@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Switched the paid xAI provider (`xai` / `XAI_API_KEY`) from Chat Completions to the OpenAI Responses API (`POST https://api.x.ai/v1/responses`), matching SuperGrok `xai-oauth`. Prompt-cache affinity (`x-grok-conv-id`), reasoning-effort allowlisting, and encrypted-reasoning replay rules are now shared across both first-party xAI hosts.
+- Changed the paid xAI (`XAI_API_KEY`) default model from `grok-4-fast-non-reasoning` to `grok-4.5`.
+- Changed the SuperGrok (`xai-oauth`) default model from `grok-4.3` to `grok-4.5`.
+- Requested `reasoning.encrypted_content` on first-party xAI Responses calls (`xai` and `xai-oauth`) via the `include` parameter.
+
 ## [17.3.4] - 2026-08-14
 
 ### Added
