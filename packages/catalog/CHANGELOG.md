@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `deepseek-v4` family models (e.g. `deepseek-v4-flash-0731`) discovered dynamically by `alibaba-token-plan` missing reasoning configuration and the `max` thinking effort.
+
 ## [17.2.5] - 2026-08-03
 
 ### Fixed
