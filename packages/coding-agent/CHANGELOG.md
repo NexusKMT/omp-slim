@@ -132,6 +132,7 @@
 - Fixed explicit `thinking` metadata in `models.yml` custom definitions and `modelOverrides` being replaced by canonical catalog policy during model rebuilding. ([#7307](https://github.com/can1357/oh-my-pi/issues/7307))
 - Fixed the auto-titler installing a model's whole answer as the session title when the tiny title model ignored the titling task and answered the first user message instead. `normalizeGeneratedTitle` now rejects overlong output (>80 chars or >12 words) so the caller defers titling to the next user turn rather than accepting a full sentence ([#7303](https://github.com/can1357/oh-my-pi/issues/7303)).
 - Fixed the in-process `kill` builtin to validate signals, preserve negative PID operands, signal every process in pipeline jobs, continue after bad targets, and refuse non-probe signals aimed at the host process or process group.
+- Removed archived main and nested session rows from `stats.db` during applied archive GC, including retry cleanup for sessions archived by an earlier run ([#7286](https://github.com/can1357/oh-my-pi/issues/7286)).
 
 ## [17.2.3] - 2026-08-01
 

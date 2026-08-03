@@ -39,6 +39,8 @@ export interface SessionHeader {
 	 */
 	additionalDirectories?: string[];
 	parentSession?: string;
+	/** Prior absolute JSONL locations recorded by successful session moves. */
+	previousSessionFiles?: string[];
 	/** Provider prompt-cache identity inherited by exact-route full forks. */
 	providerPromptCacheKey?: string;
 }
