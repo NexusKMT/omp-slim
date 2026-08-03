@@ -358,7 +358,9 @@ describe("runSubprocess async quiescence fresh-yield contract", () => {
 		expect(result.exitCode).toBe(1);
 		expect(result.aborted).toBe(true);
 		expect(result.abortReason).toBe("cleanup exceeded 10000 ms");
-		expect(result.error).toContain("Cleanup did not finish within 10000 ms");
+		expect(result.error).toBe(
+			"Task aborted. Cleanup did not finish within 10000 ms. This task was not isolated, so its changes may remain in the working directory.",
+		);
 		expect(result.output).toContain("yielded output");
 		expect(result.usage?.totalTokens).toBe(7);
 		expect(lateJobId).toBeDefined();

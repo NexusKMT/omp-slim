@@ -3204,6 +3204,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			}
 		} finally {
 			const cleanupDeadlineAt = Date.now() + TASK_ABORT_CLEANUP_GRACE_MS;
+			const cleanupChangeStatus =
+				worktree === undefined
+					? "This task was not isolated, so its changes may remain in the working directory."
+					: "No isolated changes were applied.";
 			const lateCleanups: Promise<void>[] = [];
 			let deferredSessionShutdown: Promise<void> | undefined;
 			const deferCleanup = (completion: Promise<void>): void => {
@@ -3211,7 +3215,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				exitCode = 1;
 				aborted = true;
 				abortReasonText = `cleanup exceeded ${TASK_ABORT_CLEANUP_GRACE_MS} ms`;
-				error ??= `Task aborted. Cleanup did not finish within ${TASK_ABORT_CLEANUP_GRACE_MS} ms. No isolated changes were applied.`;
+				error ??= `Task aborted. Cleanup did not finish within ${TASK_ABORT_CLEANUP_GRACE_MS} ms. ${cleanupChangeStatus}`;
 			};
 			if (abortSignal.aborted) {
 				aborted = monitor.isAbortedRun();
