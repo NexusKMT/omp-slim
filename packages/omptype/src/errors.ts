@@ -169,7 +169,7 @@ export class OmpErrors implements Iterable<OmpError> {
 
 	#getEntry(): OmpError {
 		if (this.#entry) return this.#entry;
-		const path = this.#path === undefined ? [] : Array.isArray(this.#path) ? this.#path : [this.#path];
+		const path = this.#path === undefined ? [] : Array.isArray(this.#path) ? [...this.#path] : [this.#path];
 		const entry = new OmpError(path, this.#expected, this.#data, this.#config);
 		this.#entry = entry;
 		return entry;

@@ -396,11 +396,16 @@ class StrParser {
 const STRING_DEF_CACHE_MAX = 1_024;
 const stringDefCache = new Map<string, ParsedTop>();
 
+function isWhitespaceAt(src: string, index: number): boolean {
+	const code = src.charCodeAt(index);
+	return code === 32 || (code >= 9 && code <= 13) || (code > 127 && /\s/.test(src[index]));
+}
+
 /** Fast path for the literal unions pervasive in command schemas. */
 function parseLiteralUnion(src: string): IR | undefined {
 	const members: IR[] = [];
 	let index = 0;
-	while (index < src.length && /\s/.test(src[index])) index++;
+	while (index < src.length && isWhitespaceAt(src, index)) index++;
 	for (;;) {
 		const quote = src[index];
 		if (quote !== "'" && quote !== '"') return undefined;
@@ -408,13 +413,13 @@ function parseLiteralUnion(src: string): IR | undefined {
 		if (end < 0) return undefined;
 		members.push({ k: "lit", v: src.slice(index + 1, end) });
 		index = end + 1;
-		while (index < src.length && /\s/.test(src[index])) index++;
+		while (index < src.length && isWhitespaceAt(src, index)) index++;
 		if (index === src.length) {
 			return members.length === 1 ? members[0] : { k: "union", members };
 		}
 		if (src[index] !== "|") return undefined;
 		index++;
-		while (index < src.length && /\s/.test(src[index])) index++;
+		while (index < src.length && isWhitespaceAt(src, index)) index++;
 	}
 }
 
@@ -520,6 +525,8 @@ function dateLiteral(source: string): Date {
 }
 
 function parseDateExpression(src: string): IR | undefined {
+	const first = src.charCodeAt(0);
+	if (first !== 68 && first !== 100) return undefined;
 	const literal = src.match(/^d(['"])(.*)\1$/);
 	if (literal) return { k: "lit", v: dateLiteral(literal[2]) };
 	const forward = src.match(/^Date\s*(<=|<|>=|>)\s*d(['"])(.*)\2$/);
@@ -802,69 +809,67 @@ function parseArrayExpression(def: readonly unknown[], resolve?: AliasResolver):
 	return parseTuple(def, resolve);
 }
 
-/** Parse a definition, optionally resolving names from an enclosing scope. */
-export function parseDef(def: unknown, resolve?: AliasResolver): IR {
-	if (typeof def === "string") {
-		const parsed = parseStringDef(def, resolve);
-		if (parsed.optional) {
-			throw new OmpTypeError(`optional "?" marker is only valid on object property values`);
+function isObjectDefinition(def: unknown): def is Record<string, unknown> {
+	return (
+		typeof def === "object" &&
+		def !== null &&
+		!Array.isArray(def) &&
+		!(def instanceof RegExp) &&
+		!(def instanceof Date)
+	);
+}
+
+function parseObjectDefinition(def: Record<string, unknown>, resolve?: AliasResolver): IR {
+	const props: PropIR[] = [];
+	let index: IR | undefined;
+	let extras: Extras = "keep";
+	for (const rawKey in def) {
+		const val = def[rawKey];
+		if (rawKey === "+") {
+			if (val === "reject" || val === "delete") extras = val;
+			else if (val === "ignore") extras = "keep";
+			else throw new OmpTypeError(`bad "+" value ${String(val)}`);
+			continue;
 		}
-		return parsed.ir;
-	}
-	if (isEmbedded(def)) return embed(def);
-	if (def instanceof RegExp) return patternIR(def);
-	if (def instanceof Date) return { k: "lit", v: def };
-	if (Array.isArray(def)) return parseArrayExpression(def, resolve);
-	if (typeof def === "object" && def !== null) {
-		const props: PropIR[] = [];
-		let index: IR | undefined;
-		let extras: Extras = "keep";
-		for (const rawKey in def) {
-			const val: unknown = Reflect.get(def, rawKey);
-			if (rawKey === "+") {
-				if (val === "reject" || val === "delete") extras = val;
-				else if (val === "ignore") extras = "keep";
-				else throw new OmpTypeError(`bad "+" value ${String(val)}`);
-				continue;
+		if (rawKey === "...") {
+			const spread = parseDef(val, resolve);
+			if (spread.k !== "object") throw new OmpTypeError("object spread must resolve to an object");
+			for (const prop of spread.props) {
+				const previous = props.findIndex(candidate => candidate.key === prop.key);
+				if (previous < 0) props.push(prop);
+				else props[previous] = prop;
 			}
-			if (rawKey === "...") {
-				const spread = parseDef(val, resolve);
-				if (spread.k !== "object") throw new OmpTypeError("object spread must resolve to an object");
-				for (const prop of spread.props) {
-					const previous = props.findIndex(candidate => candidate.key === prop.key);
-					if (previous < 0) props.push(prop);
-					else props[previous] = prop;
-				}
-				index ??= spread.index;
-				if (spread.extras !== "keep") extras = spread.extras;
-				continue;
+			index ??= spread.index;
+			if (spread.extras !== "keep") extras = spread.extras;
+			continue;
+		}
+		if (rawKey === "[string]") {
+			index = parseDef(val, resolve);
+			continue;
+		}
+		const opt = rawKey.charCodeAt(rawKey.length - 1) === 63;
+		const key = opt ? rawKey.slice(0, -1) : rawKey;
+		if (typeof val === "string") {
+			const parsed = parseStringDef(val, resolve);
+			const prop: PropIR = { key, opt: opt || parsed.optional, val: parsed.ir };
+			if (parsed.hasDefault) {
+				prop.def = parsed.def;
+				prop.hasDefault = true;
 			}
-			if (rawKey === "[string]") {
-				index = parseDef(val, resolve);
-				continue;
-			}
-			const opt = rawKey.endsWith("?");
-			const key = opt ? rawKey.slice(0, -1) : rawKey;
-			if (typeof val === "string") {
-				const parsed = parseStringDef(val, resolve);
-				const prop: PropIR = { key, opt: opt || parsed.optional, val: parsed.ir };
-				if (parsed.hasDefault) {
-					prop.def = parsed.def;
-					prop.hasDefault = true;
-				}
-				props.push(prop);
-			} else if (Array.isArray(val) && val.length === 2 && val[1] === "?") {
-				props.push({ key, opt: true, val: parseDef(val[0], resolve) });
-			} else if (Array.isArray(val) && val.length === 3 && val[1] === "=") {
-				props.push({
-					key,
-					opt,
-					val: parseDef(val[0], resolve),
-					def: val[2],
-					defFactory: typeof val[2] === "function",
-					hasDefault: true,
-				});
-			} else if (isEmbedded(val) && val.hasDefault) {
+			props.push(prop);
+		} else if (Array.isArray(val) && val.length === 2 && val[1] === "?") {
+			props.push({ key, opt: true, val: parseDef(val[0], resolve) });
+		} else if (Array.isArray(val) && val.length === 3 && val[1] === "=") {
+			props.push({
+				key,
+				opt,
+				val: parseDef(val[0], resolve),
+				def: val[2],
+				defFactory: typeof val[2] === "function",
+				hasDefault: true,
+			});
+		} else if (isEmbedded(val)) {
+			if (val.hasDefault) {
 				props.push({
 					key,
 					opt,
@@ -874,11 +879,31 @@ export function parseDef(def: unknown, resolve?: AliasResolver): IR {
 					hasDefault: true,
 				});
 			} else {
-				props.push({ key, opt, val: parseDef(val, resolve) });
+				props.push({ key, opt, val: embed(val) });
 			}
+		} else if (isObjectDefinition(val)) {
+			props.push({ key, opt, val: parseObjectDefinition(val, resolve) });
+		} else {
+			props.push({ key, opt, val: parseDef(val, resolve) });
 		}
-		return { k: "object", props, index, extras };
 	}
+	return { k: "object", props, index, extras };
+}
+
+/** Parse a definition, optionally resolving names from an enclosing scope. */
+export function parseDef(def: unknown, resolve?: AliasResolver): IR {
+	if (typeof def === "string") {
+		const parsed = parseStringDef(def, resolve);
+		if (parsed.optional) {
+			throw new OmpTypeError(`optional "?" marker is only valid on object property values`);
+		}
+		return parsed.ir;
+	}
+	if (Array.isArray(def)) return parseArrayExpression(def, resolve);
+	if (def instanceof RegExp) return patternIR(def);
+	if (def instanceof Date) return { k: "lit", v: def };
+	if (isEmbedded(def)) return embed(def);
+	if (isObjectDefinition(def)) return parseObjectDefinition(def, resolve);
 	throw new OmpTypeError(`unsupported definition ${String(def)}`);
 }
 

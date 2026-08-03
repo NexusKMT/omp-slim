@@ -211,6 +211,17 @@ describe("methods", () => {
 		expect(piped).toBe(0);
 	});
 
+	it(".allows() preserves nested and optional-property validation", () => {
+		const s = type({
+			context: "string",
+			tasks: [{ "name?": "1 <= string <= 32", task: "string" }, "[]"],
+		});
+		expect(s.allows({ context: "goal", tasks: [{ task: "run" }] })).toBe(true);
+		expect(s.allows({ context: "goal", tasks: [{ name: "", task: "run" }] })).toBe(false);
+		expect(s.allows({ context: "goal", tasks: [{ name: undefined, task: "run" }] })).toBe(false);
+		expect(s.allows({ context: "goal", tasks: [{ task: 1 }] })).toBe(false);
+	});
+
 	it(".assert() returns output or throws with the summary", () => {
 		const s = type({ a: "string" });
 		expect(s.assert({ a: "x" })).toEqual({ a: "x" });

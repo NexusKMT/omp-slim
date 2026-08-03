@@ -43,6 +43,35 @@ function litSource(v: unknown): string | undefined {
 
 type PathSeg = { s: PropertyKey } | { d: string };
 
+type LiteralIR = Extract<IR, { k: "lit" }>;
+
+function isPrimitiveLiteral(node: IR): node is LiteralIR {
+	return node.k === "lit" && (node.v === null || (typeof node.v !== "object" && typeof node.v !== "function"));
+}
+
+/** Whether `undefined` necessarily fails, allowing property-presence checks to be elided. */
+function rejectsUndefined(node: IR): boolean {
+	switch (node.k) {
+		case "unknown":
+		case "undefined":
+		case "alias":
+		case "sub":
+			return false;
+		case "lit":
+			return node.v !== undefined;
+		case "union":
+			return node.members.every(rejectsUndefined);
+		case "intersection":
+			return node.members.some(rejectsUndefined);
+		case "refine":
+			return rejectsUndefined(node.base);
+		case "morph":
+			return rejectsUndefined(node.input);
+		default:
+			return true;
+	}
+}
+
 class CompiledMorphContext implements MorphContext {
 	#path: PropertyKey[] | PropertyKey | undefined;
 	#data: unknown;
@@ -97,7 +126,12 @@ class Builder {
 			const seg = segs[0];
 			return "s" in seg ? JSON.stringify(seg.s) : seg.d;
 		}
-		return this.pathExpr(segs);
+		const staticParts: PropertyKey[] = [];
+		for (const seg of segs) {
+			if ("d" in seg) return this.pathExpr(segs);
+			staticParts.push(seg.s);
+		}
+		return this.ref(staticParts);
 	}
 
 	fail(segs: PathSeg[], expected: string, dataExpr: string): string {
@@ -144,11 +178,7 @@ class Builder {
 				return out;
 			}
 			case "union": {
-				const lits = node.members.filter(
-					(member): member is Extract<IR, { k: "lit" }> =>
-						member.k === "lit" &&
-						(member.v === null || (typeof member.v !== "object" && typeof member.v !== "function")),
-				);
+				const lits = node.members.filter(isPrimitiveLiteral);
 				if (lits.length > 8) {
 					const values = this.ref(new Set(lits.map(member => member.v)));
 					const literalNodes = new Set<IR>(lits);
@@ -162,11 +192,13 @@ class Builder {
 			case "intersection":
 				return `(${node.members.map(member => `(${this.predicate(member, v)})`).join("&&")})`;
 			case "array": {
-				const x = this.next("x");
+				const array = this.next("a");
+				const index = this.next("i");
 				let out = `Array.isArray(${v})`;
 				if (node.min !== undefined) out += `&&${v}.length>=${node.min}`;
 				if (node.max !== undefined) out += `&&${v}.length<=${node.max}`;
-				out += `&&${v}.every(${x}=>${this.predicate(node.el, x)})`;
+				const item = `${array}[${index}]`;
+				out += `&&((${array})=>{for(let ${index}=0;${index}<${array}.length;${index}++)if(!(${this.predicate(node.el, item)}))return false;return true})(${v})`;
 				return out;
 			}
 			case "object": {
@@ -174,10 +206,15 @@ class Builder {
 				for (const p of node.props) {
 					const av = access(v, p.key);
 					const present = `${JSON.stringify(p.key)} in ${v}`;
+					const predicate = this.predicate(p.val, av);
 					checks.push(
 						p.opt || p.hasDefault
-							? `(!(${present})||(${this.predicate(p.val, av)}))`
-							: `((${present})&&(${this.predicate(p.val, av)}))`,
+							? rejectsUndefined(p.val)
+								? `((${av}!==undefined&&(${predicate}))||!(${present}))`
+								: `(!(${present})||(${predicate}))`
+							: rejectsUndefined(p.val)
+								? predicate
+								: `((${present})&&(${predicate}))`,
 					);
 				}
 				if (node.index) {
@@ -330,7 +367,13 @@ class Builder {
 				const failure = node.members.some(canRefineUnionFailure)
 					? `return UF(${this.ref(node)},${failureData},${this.pathExpr(segs)},${JSON.stringify(expectedOf(node))})`
 					: this.fail(segs, expectedOf(node), failureData);
-				this.push(`if(!(${this.predicate(node, v)}))${failure};`);
+				const literals = node.members.filter(isPrimitiveLiteral);
+				if (literals.length === node.members.length && literals.length >= 4) {
+					const cases = literals.map(member => `case ${this.lit(member.v)}:`).join("");
+					this.push(`switch(${v}){${cases}break;default:${failure};}`);
+				} else {
+					this.push(`if(!(${this.predicate(node, v)}))${failure};`);
+				}
 				return;
 			}
 			case "null":
@@ -600,6 +643,89 @@ class Builder {
 		) => (value: unknown) => unknown;
 		return make(this.#refs, OmpErrors, MISSING, prefixErrors, unionFail, CompiledMorphContext, own);
 	}
+
+	emitAllows(node: IR, v: string): void {
+		switch (node.k) {
+			case "array": {
+				const array = this.next("a");
+				const index = this.next("i");
+				this.push(`const ${array}=${v};if(!Array.isArray(${array}))return false;`);
+				if (node.min !== undefined) this.push(`if(${array}.length<${node.min})return false;`);
+				if (node.max !== undefined) this.push(`if(${array}.length>${node.max})return false;`);
+				this.push(`for(let ${index}=0;${index}<${array}.length;${index}++){`);
+				this.emitAllows(node.el, `${array}[${index}]`);
+				this.push("}");
+				return;
+			}
+			case "object": {
+				const object = this.next("o");
+				this.push(
+					`const ${object}=${v};if(typeof ${object}!=="object"||${object}===null||Array.isArray(${object}))return false;`,
+				);
+				for (const prop of node.props) {
+					const value = this.next("p");
+					const present = `${JSON.stringify(prop.key)} in ${object}`;
+					this.push(`const ${value}=${access(object, prop.key)};`);
+					if (prop.opt || prop.hasDefault) {
+						if (rejectsUndefined(prop.val)) {
+							this.push(`if(${value}!==undefined){`);
+							this.emitAllows(prop.val, value);
+							this.push(`}else if(${present})return false;`);
+						} else {
+							this.push(`if(${present}){`);
+							this.emitAllows(prop.val, value);
+							this.push("}");
+						}
+					} else {
+						if (!rejectsUndefined(prop.val)) this.push(`if(!(${present}))return false;`);
+						this.emitAllows(prop.val, value);
+					}
+				}
+				if (node.index) {
+					const key = this.next("k");
+					this.push(`for(const ${key} in ${object}){if(!own.call(${object},${key}))continue;`);
+					this.emitAllows(node.index, `${object}[${key}]`);
+					this.push("}");
+				} else if (node.extras === "reject") {
+					const key = this.next("k");
+					this.push(
+						`for(const ${key} in ${object})if(own.call(${object},${key})&&!(${this.declaredCheck(node.props, key)}))return false;`,
+					);
+				}
+				return;
+			}
+			case "union": {
+				const sources: string[] = [];
+				for (const member of node.members) {
+					if (!isPrimitiveLiteral(member)) break;
+					const source = litSource(member.v);
+					if (source === undefined) break;
+					sources.push(source);
+				}
+				if (sources.length === node.members.length && sources.length >= 4) {
+					this.push(
+						`switch(${v}){${sources.map(source => `case ${source}:`).join("")}break;default:return false;}`,
+					);
+					return;
+				}
+				this.push(`if(!(${this.predicate(node, v)}))return false;`);
+				return;
+			}
+			default:
+				this.push(`if(!(${this.predicate(node, v)}))return false;`);
+		}
+	}
+
+	buildAllows(ir: IR): (value: unknown) => boolean {
+		this.emitAllows(ir, "v");
+		const src = `return function(v){${this.#lines.join("")}return true}`;
+		const make = new Function("R", "AE", "own", src) as (
+			refs: unknown[],
+			ae: typeof OmpErrors,
+			ownFn: typeof own,
+		) => (value: unknown) => boolean;
+		return make(this.#refs, OmpErrors, own);
+	}
 }
 
 function prefixErrors(errs: OmpErrors, parts: PropertyKey[]): OmpErrors {
@@ -629,6 +755,7 @@ function resolvedRoot(ir: IR): IR {
 }
 
 const compiledCache = new WeakMap<IR, (value: unknown) => unknown>();
+const allowsCache = new WeakMap<IR, (value: unknown) => boolean>();
 
 /** Compile `ir` into a specialized validator. */
 export function compile(ir: IR): (value: unknown) => unknown {
@@ -637,6 +764,17 @@ export function compile(ir: IR): (value: unknown) => unknown {
 	if (validator === undefined) {
 		validator = new Builder().build(root);
 		compiledCache.set(root, validator);
+	}
+	return validator;
+}
+
+/** Compile `ir` into an allocation-free boolean validator. */
+export function compileAllows(ir: IR): (value: unknown) => boolean {
+	const root = resolvedRoot(ir);
+	let validator = allowsCache.get(root);
+	if (validator === undefined) {
+		validator = new Builder().buildAllows(root);
+		allowsCache.set(root, validator);
 	}
 	return validator;
 }

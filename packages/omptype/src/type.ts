@@ -10,7 +10,7 @@
  * A schema is a callable: `schema(data)` returns the (possibly morphed)
  * output, or an `OmpErrors` on failure (`result instanceof type.errors`).
  */
-import { compile } from "./compile";
+import { compile, compileAllows } from "./compile";
 import { type ErrorConfig, OmpErrors, OmpTypeError, TraversalError } from "./errors";
 import type { InferDef, InferDefIn, InferObjectLiteral, InferString } from "./infer";
 import { walk } from "./interp";
@@ -237,6 +237,7 @@ class Ctx implements NarrowContext {
 }
 
 type Validator = (data: unknown) => unknown;
+type Allows = (data: unknown) => boolean;
 
 const kBase = Symbol("omptype.base");
 const kSteps = Symbol("omptype.steps");
@@ -249,6 +250,7 @@ interface InternalType {
 	[IR_BRAND]: true;
 	[kBase]: Validator;
 	[kSteps]: Step[];
+	allows: Allows;
 	ir: IR;
 	hasSteps: boolean;
 	hasDefault: boolean;
@@ -547,12 +549,26 @@ const typeMethods = {
 	},
 
 	allows(this: InternalType, data: unknown): boolean {
-		for (const step of this[kSteps]) {
+		const steps = this[kSteps];
+		let needsPredicates = false;
+		for (const step of steps) {
+			if (step.kind !== "pipe") {
+				needsPredicates = true;
+				break;
+			}
+		}
+		if (!needsPredicates) {
+			const allows = compileAllows(this.ir);
+			// Shadow the shared dispatcher once this schema has its specialized check.
+			this.allows = allows;
+			return allows(data);
+		}
+		for (const step of steps) {
 			if (step.kind === "filter" && !step.fn(data, new Ctx())) return false;
 		}
 		const out = this[kBase](data);
 		if (out instanceof OmpErrors) return false;
-		for (const step of this[kSteps]) {
+		for (const step of steps) {
 			if (step.kind === "narrow" && !step.fn(out, new Ctx())) return false;
 		}
 		return true;

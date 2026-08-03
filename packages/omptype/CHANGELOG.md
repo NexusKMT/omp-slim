@@ -11,4 +11,5 @@
 
 ### Changed
 
-- Expanded the lazy JIT across tuples, refinements, morphs, intersections, instances, and recursive aliases; reused compiled validators for shared IR and tightened number and literal-union code generation.
+- Expanded the lazy JIT across tuples, refinements, morphs, intersections, instances, and recursive aliases; reused compiled validators for shared IR; added allocation-free statement code generation for `.allows()`; and tightened object, array, number, and literal-union checks.
+- Reduced schema construction overhead with direct nested-object parsing, non-Date DSL dispatch guards, and ASCII-fast whitespace and optional-key scans.
