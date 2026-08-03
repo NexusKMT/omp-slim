@@ -757,8 +757,46 @@ describe("Cursor history encoding", () => {
 		];
 
 		expect(() => buildCursorHistoryForTest(messages, undefined, "kimi-k3-high")).toThrow(
-			"start a new session instead of continuing history from anthropic/claude-4.6-opus-high",
+			"cannot continue history from a different model (anthropic/claude-4.6-opus-high)",
 		);
+	});
+
+	it("replays a same-model K3 turn missing thinking instead of bricking the session", () => {
+		const messages: Context["messages"] = [
+			{ role: "user", content: "Do a big multi-tool task", timestamp: 1 },
+			cursorAssistant(
+				"kimi-k3-high",
+				[{ type: "toolCall", id: "call-read", name: "read", arguments: { path: "package.json" } }],
+				2,
+				"toolUse",
+			),
+			{
+				role: "toolResult",
+				toolCallId: "call-read",
+				toolName: "read",
+				content: [{ type: "text", text: "package contents" }],
+				isError: false,
+				timestamp: 3,
+			},
+			cursorAssistant("kimi-k3-high", [{ type: "text", text: "Done." }], 4),
+			{ role: "user", content: "Continue the same session", timestamp: 5 },
+		];
+
+		const history = buildCursorHistoryForTest(messages, undefined, "kimi-k3-high");
+
+		expect(history.rootPromptMessagesJson).toEqual([
+			{ role: "user", content: [{ type: "text", text: "Do a big multi-tool task" }] },
+			{
+				role: "assistant",
+				content: [{ type: "tool-call", toolCallId: "call-read", toolName: "read", args: { path: "package.json" } }],
+			},
+			{
+				role: "tool",
+				id: "call-read",
+				content: [{ type: "tool-result", toolName: "read", toolCallId: "call-read", result: "package contents" }],
+			},
+			{ role: "assistant", content: [{ type: "text", text: "Done." }] },
+		]);
 	});
 
 	it("keeps non-K3 Cursor thinking out of model-facing history", () => {

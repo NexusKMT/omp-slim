@@ -144,6 +144,7 @@ import { isKimiK3ModelId } from "@oh-my-pi/pi-catalog/identity";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import {
 	$env,
+	logger,
 	parseJsonWithRepair,
 	parseStreamingJson,
 	parseStreamingJsonThrottled,
@@ -4113,16 +4114,34 @@ function assertCursorKimiK3HistoryReplayable(
 ): void {
 	if (!targetModelId || !isKimiK3ModelId(targetModelId)) return;
 	const historyEnd = activeUserMessageIndex >= 0 ? activeUserMessageIndex : messages.length;
+	let sawSameModelMissingThinking = false;
 	for (let i = 0; i < historyEnd; i++) {
 		const msg = messages[i];
 		if (msg.role !== "assistant") continue;
 		const isSameCursorModel = msg.api === "cursor-agent" && msg.provider === "cursor" && msg.model === targetModelId;
-		const hasThinking = msg.content.some(item => item.type === "thinking" && item.thinking.length > 0);
-		if (!isSameCursorModel || !hasThinking) {
+		if (!isSameCursorModel) {
+			// Foreign history genuinely cannot replay K3 thinking: another model's
+			// turns carry no K3-signed reasoning to reconstruct, so continuation
+			// is unsafe and must fail hard.
 			throw new AIError.ValidationError(
-				`Cursor ${targetModelId} requires complete same-model thinking history; start a new session instead of continuing history from ${msg.provider}/${msg.model}.`,
+				`Cursor ${targetModelId} cannot continue history from a different model (${msg.provider}/${msg.model}); start a new session.`,
 			);
 		}
+		const hasThinking = msg.content.some(item => item.type === "thinking" && item.thinking.length > 0);
+		if (!hasThinking) sawSameModelMissingThinking = true;
+	}
+	if (sawSameModelMissingThinking) {
+		// A same-model turn whose stream carried no `thinkingDelta` events is
+		// persisted without thinking blocks. `buildCursorAssistantContent` still
+		// replays its text/tool-call structure and simply omits the reasoning
+		// part, so the history remains usable — degrade with a one-time warning
+		// rather than permanently bricking the session. Per Kimi's
+		// preserved-thinking caveat, K3 generation may be less stable across the
+		// affected span.
+		logger.warn(
+			"Cursor kimi-k3 history contains a same-model assistant turn without thinking blocks; replaying without reasoning for that span (generation may be less stable)",
+			{ model: targetModelId },
+		);
 	}
 }
 
