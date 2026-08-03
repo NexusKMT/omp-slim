@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the shared `file-lock` module (moved from the coding agent) with an `acquireStaleMs` grace for locks abandoned mid-acquisition; the stats sync lock now uses it instead of a parallel implementation.
+
 ## [17.2.5] - 2026-08-03
 
 ### Added
