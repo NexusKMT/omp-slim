@@ -250,4 +250,41 @@ describe("runSubprocess async quiescence fresh-yield contract", () => {
 		expect(result.exitCode).toBe(0);
 		expect(result.output).toContain("done");
 	});
+
+	it("does not wait on a second idle barrier after a terminal yield", async () => {
+		const harness = createAsyncSession(({ promptIndex, harness: h }) => {
+			if (promptIndex === 1) {
+				h.finishJob();
+				h.emitTerminalYield({ report: "done" });
+			}
+		});
+		const idleStarted = Promise.withResolvers<void>();
+		const releaseIdle = Promise.withResolvers<void>();
+		let idleCalls = 0;
+		harness.session.waitForIdle = async () => {
+			idleCalls += 1;
+			idleStarted.resolve();
+			await releaseIdle.promise;
+		};
+		mockCreateAgentSession(harness.session);
+
+		const run = runSubprocess({
+			cwd: "/tmp",
+			agent: baseAgent,
+			task: "do the work",
+			index: 0,
+			id: "quiescence-no-second-idle",
+		});
+		const outcome = await Promise.race([
+			run.then(() => "completed" as const),
+			idleStarted.promise.then(() => "blocked" as const),
+		]);
+		releaseIdle.resolve();
+		const result = await run;
+
+		expect(outcome).toBe("completed");
+		expect(idleCalls).toBe(0);
+		expect(result.exitCode).toBe(0);
+		expect(result.output).toContain("done");
+	});
 });
