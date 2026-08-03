@@ -15,6 +15,7 @@ function makeCtx(isStreaming = false) {
 	const handleMCPCommand = vi.fn(async () => {});
 	const followUp = vi.fn(async (_text: string, _images?: ImageContent[]) => {});
 	const steer = vi.fn(async (_text: string, _images?: ImageContent[]) => {});
+	const prompt = vi.fn(async () => false);
 	const onInputCallback = vi.fn();
 	let text = "";
 	const editor = {
@@ -44,6 +45,7 @@ function makeCtx(isStreaming = false) {
 			extensionRunner: undefined,
 			followUp,
 			steer,
+			prompt,
 		},
 		focusedAgentId: undefined,
 		collabGuest: undefined,
@@ -75,6 +77,7 @@ function makeCtx(isStreaming = false) {
 		onInputCallback,
 		handleMCPCommand,
 		showStatus: ctx.showStatus,
+		prompt,
 	};
 }
 
@@ -115,6 +118,23 @@ describe("input controller — slash command history (#3148)", () => {
 		expect(handleMCPCommand).toHaveBeenCalledWith("/mcp add srv --url http://x --token sk-secret123");
 		// ...but the secret-bearing text is kept out of recallable history.
 		expect(addToHistory).not.toHaveBeenCalled();
+	});
+
+	it("executes extension commands without rendering them as user prompts", async () => {
+		const { ctx, editor, addToHistory, onInputCallback, prompt } = makeCtx();
+		Object.defineProperty(ctx.session, "extensionRunner", {
+			value: {
+				getCommand: (name: string) => (name === "id" ? { name } : undefined),
+				hasHandlers: () => false,
+			},
+		});
+		controllerFor(ctx);
+
+		await editor.onSubmit?.("/id");
+
+		expect(prompt).toHaveBeenCalledWith("/id", { images: undefined });
+		expect(addToHistory).toHaveBeenCalledWith("/id");
+		expect(onInputCallback).not.toHaveBeenCalled();
 	});
 
 	it("routes /queue through the yield-only follow-up queue while streaming", async () => {
