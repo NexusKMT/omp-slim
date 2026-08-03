@@ -1379,6 +1379,9 @@ export class Agent {
 					const message = this.#steeringQueue[i];
 					const role = "role" in message ? message.role : undefined;
 					const attribution = "attribution" in message ? message.attribution : undefined;
+					if (attribution === "user") {
+						return { queued: true, source: "user" };
+					}
 					if (role !== "user") continue;
 					if (attribution !== "agent") {
 						return { queued: true, source: "user" };
