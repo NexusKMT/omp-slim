@@ -561,6 +561,8 @@ describe("/mcp auth commands", () => {
 	test("passes env-expanded OAuth client credentials to the reauth flow", async () => {
 		const authStorage = freshAuthStorage();
 		await authStorage.reload();
+		const originalClientId = Bun.env.MCP_OAUTH_CLIENT_ID;
+		const originalClientSecret = Bun.env.MCP_OAUTH_CLIENT_SECRET;
 		Bun.env.MCP_OAUTH_CLIENT_ID = "expanded-client-id";
 		Bun.env.MCP_OAUTH_CLIENT_SECRET = "expanded-client-secret";
 		await Bun.write(
@@ -617,8 +619,8 @@ describe("/mcp auth commands", () => {
 			expect(savedServer?.oauth?.clientSecret).toBe("${MCP_OAUTH_CLIENT_SECRET}");
 			expect(savedServer?.oauth?.clientId).toBe("${MCP_OAUTH_CLIENT_ID}");
 		} finally {
-			delete Bun.env.MCP_OAUTH_CLIENT_ID;
-			delete Bun.env.MCP_OAUTH_CLIENT_SECRET;
+			restoreEnvValue("MCP_OAUTH_CLIENT_ID", originalClientId);
+			restoreEnvValue("MCP_OAUTH_CLIENT_SECRET", originalClientSecret);
 		}
 	});
 });
