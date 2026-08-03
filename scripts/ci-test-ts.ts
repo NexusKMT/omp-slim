@@ -111,7 +111,6 @@ const nativeAndIntegrationPackages = [
 // and is outside every CI TS bucket.
 const localOnlyWorkspacePackages = ["packages/mnemopi", "python/robomp/web"];
 
-
 const codingAgentNativePathPatterns = [
 	/(^|\/)[^/]*(bash|native|browser|cmux|mnemopi|hindsight|memory)[^/]*\.test\.ts$/i,
 	/^test\/[^/]*(ask|gh|irc|task|eval|search|read|write|edit|ast|resolve|sqlite|web-search|fetch|image|ssh|tool)[^/]*\.test\.ts$/,
@@ -326,9 +325,7 @@ async function codingAgentTestCommands(bucket: CodingAgentBucket): Promise<TestC
 async function commandsForMode(mode: Mode): Promise<TestCommand[]> {
 	switch (mode) {
 		case "workspace":
-			return [
-				...fastWorkspacePackages.map(pkg => workspaceTestCommand(pkg, 8)),
-			];
+			return fastWorkspacePackages.map(pkg => workspaceTestCommand(pkg, 8));
 		case "native":
 			return nativeAndIntegrationPackages.map(pkg => workspaceTestCommand(pkg, 4, { smol: true }));
 		case "coding-agent-singleton":
