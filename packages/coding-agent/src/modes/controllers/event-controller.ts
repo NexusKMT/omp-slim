@@ -479,7 +479,14 @@ export class EventController {
 		if (this.#messageUpdateTimer) return;
 		this.#messageUpdateTimer = setTimeout(() => {
 			this.#messageUpdateTimer = undefined;
-			void this.#flushPendingMessageUpdate();
+			// Mirror AgentSession.#emit: attach a catch so a streaming rebuild
+			// failure surfaces as a logged warning instead of a process-level
+			// unhandled rejection (the timer path has no listener to attach one).
+			void this.#flushPendingMessageUpdate().catch(err => {
+				logger.warn("Message update flush rejected", {
+					error: err instanceof Error ? err.message : String(err),
+				});
+			});
 		}, EventController.#MESSAGE_UPDATE_COALESCE_MS);
 	}
 
