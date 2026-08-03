@@ -71,13 +71,19 @@ const BASH_APPROVAL_SHELL_CONTROL_CHARS: Record<string, true> = {
 	"(": true,
 	")": true,
 };
+const BASH_APPROVAL_REINTERPRETED_ARGUMENT_RE = /(?:^|[ \t])(?:-[^-]*[ce]|--(?:command|eval))(?:[= \t]|$)/u;
 
 function hasBashApprovalShellControl(command: string): boolean {
 	let quote: "'" | '"' | undefined;
+	let hasQuotedShellControl = false;
 	for (let i = 0; i < command.length; i++) {
 		const ch = command[i];
 		if (quote === "'") {
-			if (ch === "'") quote = undefined;
+			if (ch === "'") {
+				quote = undefined;
+			} else if (Object.hasOwn(BASH_APPROVAL_SHELL_CONTROL_CHARS, ch)) {
+				hasQuotedShellControl = true;
+			}
 			continue;
 		}
 		if (ch === "\\") {
@@ -100,7 +106,9 @@ function hasBashApprovalShellControl(command: string): boolean {
 		}
 		if (Object.hasOwn(BASH_APPROVAL_SHELL_CONTROL_CHARS, ch)) return true;
 	}
-	return false;
+	// Options such as `git -c alias.x='!...'` and `sh -c '...'` reinterpret
+	// otherwise literal single-quoted arguments as executable code.
+	return hasQuotedShellControl && BASH_APPROVAL_REINTERPRETED_ARGUMENT_RE.test(command);
 }
 
 const BASH_PATTERN_APPROVAL_VALUES = new Set(["allow", "deny", "prompt"]);

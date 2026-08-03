@@ -329,6 +329,7 @@ describe("tool-owned dynamic approval declarations", () => {
 			"git $(rm file.txt)",
 			"git `rm file.txt` status",
 			"git status > /etc/passwd",
+			"git -c alias.x='!touch /tmp/pwn; printf ok' x",
 			"git status < seed",
 			// Different binary resolution than the pattern names.
 			"FOO=1 git status",
