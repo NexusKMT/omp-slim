@@ -37,20 +37,20 @@ root and nested extras before dispatch.
 ## Core translation table (Zod → ArkType)
 
 | Zod                                         | ArkType                                                                                                 |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------ | ----------------------------- |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `z.object({ a: ... })`                      | `type({ a: ... })`                                                                                      |
 | `z.string()` / `z.number()` / `z.boolean()` | `"string"` / `"number"` / `"boolean"`                                                                   |
 | `z.number().int()`                          | `"number.integer"`                                                                                      |
 | `z.literal("x")`                            | `"'x'"` ; `z.literal(5)` → `"5"`                                                                        |
-| `z.enum(["a","b"])` (static)                | `"'a'                                                                                                   | 'b'"`  |
-| `z.enum(RUNTIME_ARRAY)` (dynamic)           | `type.enumerated(...RUNTIME_ARRAY)` — NOT `type(arr.join("                                              | "))`   |
+| `z.enum(["a","b"])` (static)                | `"'a' \| 'b'"`                                                                                          |
+| `z.enum(RUNTIME_ARRAY)` (dynamic)           | `type.enumerated(...RUNTIME_ARRAY)` — NOT `type(arr.join("\|"))`                                        |
 | `z.array(z.string())`                       | `"string[]"`                                                                                            |
 | `z.array(Item)` (Item is a `type`)          | `Item.array()`                                                                                          |
-| `z.union([A,B])`                            | `A.or(B)` or `"a                                                                                        | b"`    |
+| `z.union([A,B])`                            | `A.or(B)` or `"a \| b"`                                                                                 |
 | `z.record(z.string(), z.number())`          | `type({ "[string]": "number" })` — use the real value type, NOT `"unknown"` unless it was `z.unknown()` |
 | `z.unknown()` / `z.any()`                   | `"unknown"`                                                                                             |
 | `z.null()`                                  | `"null"`                                                                                                |
-| `z.nullable(X)`                             | `X.or("null")` or `"X                                                                                   | null"` |
+| `z.nullable(X)`                             | `X.or("null")` or `"X \| null"`                                                                         |
 | field `.optional()`                         | optional **key**: `{ "a?": "string" }` (NOT a value method)                                             |
 | string length `.min(n)`/`.max(n)`           | `"string >= n"` / `"string <= n"` / `"1 <= string <= 10"`                                               |
 | number `.min/.max/.gt/.lt`                  | `"number >= n"` / `"number > n"` / `"1 <= number <= 10"`                                                |
@@ -59,7 +59,7 @@ root and nested extras before dispatch.
 | `.strict()` (reject extras)                 | add key `"+": "reject"`: `type({ "+": "reject", ... })`                                                 |
 | `.strip()` (drop extras — Zod default)      | add key `"+": "delete"`                                                                                 |
 | `.passthrough()` / `.loose()`               | drop it (ArkType keeps undeclared keys by default)                                                      |
-| `.refine(fn, msg)`                          | `.narrow((d, ctx) => fn(d)                                                                              |        | ctx.mustBe("<expectation>"))` |
+| `.refine(fn, msg)`                          | `.narrow((d, ctx) => fn(d) \|\| ctx.mustBe("<expectation>"))`                                           |
 | `z.infer<typeof S>`                         | `typeof S.infer`                                                                                        |
 | `z.input<typeof S>`                         | `typeof S.inferIn`                                                                                      |
 
