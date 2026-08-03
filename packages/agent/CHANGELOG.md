@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Parent-agent steering interruptions now use parent steering wording while advisor interruptions keep system-advisory wording ([#7199](https://github.com/can1357/oh-my-pi/issues/7199)).
+
 ## [17.2.4] - 2026-08-01
 
 ### Fixed
