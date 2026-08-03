@@ -98,6 +98,7 @@ import { renderSegmentTrack } from "../components/segment-track";
 import { SessionAccountSelectorComponent } from "../components/session-account-selector";
 import { SessionSelectorComponent, type SessionSelectorOptions } from "../components/session-selector";
 import { SettingsSelectorComponent } from "../components/settings-selector";
+import { StrippedToolCallsPlaceholder } from "../components/stripped-tool-calls-placeholder";
 import { ToolExecutionComponent } from "../components/tool-execution";
 import { TranscriptBlock } from "../components/transcript-container";
 import { TreeSelectorComponent } from "../components/tree-selector";
@@ -485,6 +486,8 @@ export class SelectorController {
 						child.setToolActivityVisible(!hidden);
 					} else if (child instanceof AssistantMessageComponent) {
 						child.setToolResultImagesVisible(!hidden);
+					} else if (child instanceof StrippedToolCallsPlaceholder) {
+						child.setToolActivityVisible(!hidden);
 					}
 				}
 				if (hidden) this.ctx.ui.clearInlineImages();

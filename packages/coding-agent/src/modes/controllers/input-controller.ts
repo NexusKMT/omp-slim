@@ -10,6 +10,7 @@ import { AssistantMessageComponent } from "../../modes/components/assistant-mess
 import { extractImagePathFromText } from "../../modes/components/custom-editor";
 import { ReadToolGroupComponent } from "../../modes/components/read-tool-group";
 import { renderSegmentTrack } from "../../modes/components/segment-track";
+import { StrippedToolCallsPlaceholder } from "../../modes/components/stripped-tool-calls-placeholder";
 import { TinyTitleDownloadProgressComponent } from "../../modes/components/tiny-title-download-progress";
 import { ToolExecutionComponent } from "../../modes/components/tool-execution";
 import { expandEmoticons } from "../../modes/emoji-autocomplete";
@@ -1875,6 +1876,8 @@ export class InputController {
 				child.setToolActivityVisible(!this.ctx.hideToolActivity);
 			} else if (child instanceof AssistantMessageComponent) {
 				child.setToolResultImagesVisible(!this.ctx.hideToolActivity);
+			} else if (child instanceof StrippedToolCallsPlaceholder) {
+				child.setToolActivityVisible(!this.ctx.hideToolActivity);
 			}
 		}
 

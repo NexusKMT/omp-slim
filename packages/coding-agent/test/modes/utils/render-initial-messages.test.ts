@@ -17,10 +17,11 @@ import type { AssistantMessage, ImageContent, Usage } from "@oh-my-pi/pi-ai";
 import { kStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AssistantMessageComponent } from "@oh-my-pi/pi-coding-agent/modes/components/assistant-message";
+import { StrippedToolCallsPlaceholder } from "@oh-my-pi/pi-coding-agent/modes/components/stripped-tool-calls-placeholder";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { UiHelpers } from "@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers";
-import type { SessionContext } from "@oh-my-pi/pi-coding-agent/session/session-context";
+import type { SessionContext, StrippedToolCallsMarker } from "@oh-my-pi/pi-coding-agent/session/session-context";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { type Component, Container, Image, ImageProtocol, setTerminalImageProtocol, TERMINAL } from "@oh-my-pi/pi-tui";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -431,6 +432,35 @@ describe("UiHelpers.renderInitialMessages — hidden tool activity", () => {
 		const visibleRender = Bun.stripANSI(visible.chatContainer.render(120).join("\n"));
 		expect(visibleRender).toContain(toolArgumentMarker);
 		expect(visibleRender).toContain(toolResultMarker);
+	});
+
+	it("hides the stripped-tool-calls placeholder with tool activity and restores it on reveal", () => {
+		const strippedAssistant: AgentMessage & StrippedToolCallsMarker = {
+			role: "assistant",
+			content: [{ type: "text", text: "narration" }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet",
+			usage: emptyUsage,
+			stopReason: "stop",
+			timestamp: 1,
+			strippedToolCalls: 2,
+		};
+		const transcript = transcriptWith([strippedAssistant]);
+
+		const hidden = makeRenderCtx(transcript, true, true);
+		new UiHelpers(hidden.ctx).renderInitialMessages();
+		expect(Bun.stripANSI(hidden.chatContainer.render(120).join("\n"))).not.toContain(
+			"elided — no result on this branch",
+		);
+
+		// A live reveal must restore the placeholder without a transcript rebuild.
+		for (const child of hidden.chatContainer.children) {
+			if (child instanceof StrippedToolCallsPlaceholder) child.setToolActivityVisible(true);
+		}
+		expect(Bun.stripANSI(hidden.chatContainer.render(120).join("\n"))).toContain(
+			"2 tool calls elided — no result on this branch",
+		);
 	});
 });
 
