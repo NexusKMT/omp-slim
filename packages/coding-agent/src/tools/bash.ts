@@ -58,7 +58,51 @@ export const BASH_DEFAULT_PREVIEW_LINES = DEFAULT_TERMINAL_PREVIEW_LINES;
 
 const BASH_ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const DEFAULT_AUTO_BACKGROUND_THRESHOLD_MS = 60_000;
-const BASH_APPROVAL_SHELL_CONTROL_RE = /[\n\r;&|<>`$()]/u;
+const BASH_APPROVAL_SHELL_CONTROL_CHARS: Record<string, true> = {
+	"\n": true,
+	"\r": true,
+	";": true,
+	"&": true,
+	"|": true,
+	"<": true,
+	">": true,
+	"`": true,
+	$: true,
+	"(": true,
+	")": true,
+};
+
+function hasBashApprovalShellControl(command: string): boolean {
+	let quote: "'" | '"' | undefined;
+	for (let i = 0; i < command.length; i++) {
+		const ch = command[i];
+		if (quote === "'") {
+			if (ch === "'") quote = undefined;
+			continue;
+		}
+		if (ch === "\\") {
+			i++;
+			continue;
+		}
+		if (quote === '"') {
+			if (ch === '"') {
+				quote = undefined;
+				continue;
+			}
+			// Expansion remains active inside double quotes; other control-looking
+			// characters are literal argument text.
+			if (ch === "`" || ch === "$") return true;
+			continue;
+		}
+		if (ch === "'" || ch === '"') {
+			quote = ch;
+			continue;
+		}
+		if (Object.hasOwn(BASH_APPROVAL_SHELL_CONTROL_CHARS, ch)) return true;
+	}
+	return false;
+}
+
 const BASH_PATTERN_APPROVAL_VALUES = new Set(["allow", "deny", "prompt"]);
 
 /**
@@ -218,7 +262,7 @@ function commandSegmentMatchesBashApprovalPattern(command: string, pattern: stri
 // `prompt` fire on any matching segment so they mean what they appear to.
 function bashApprovalRuleMatches(command: string, rule: BashApprovalPatternRule): boolean {
 	if (rule.approval === "allow") {
-		if (BASH_APPROVAL_SHELL_CONTROL_RE.test(command)) return false;
+		if (hasBashApprovalShellControl(command)) return false;
 		return commandMatchesBashApprovalPattern(command, rule.match);
 	}
 	return commandSegmentMatchesBashApprovalPattern(command, rule.match);

@@ -347,6 +347,16 @@ describe("tool-owned dynamic approval declarations", () => {
 		}
 	});
 
+	it("allows literal shell metacharacters in quoted arguments", () => {
+		const settingsOverrides = {
+			"bash.patterns": [{ match: "cargo *", approval: "allow" }],
+		};
+		const command =
+			"cargo bench --manifest-path layers/layer3/Cargo.toml --bench standardized_criterion -- --full '^layer3/write/file-wal/batch-(10|1000|10000)$'";
+
+		expect(bashApproval(command, settingsOverrides)).toEqual({ tier: "write", policy: "allow" });
+	});
+
 	it("honors bash pattern rules in yolo mode", () => {
 		const tool = createBashTool({
 			"bash.patterns": [
