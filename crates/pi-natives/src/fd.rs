@@ -227,9 +227,7 @@ impl TopMatches {
 		}
 		// The root is the worst retained candidate; replace it only when the new
 		// candidate outranks it under the final comparator.
-		if let Some(worst) = self.heap.peek()
-			&& candidate < *worst
-		{
+		if self.heap.peek().is_some_and(|worst| candidate < *worst) {
 			self.heap.pop();
 			self.heap.push(candidate);
 		}
