@@ -15,6 +15,9 @@
 ### Fixed
 
 - Fixed `install.sh` reporting success (exit 0) for a musl binary that cannot start: the installer now smoke-runs the downloaded binary and, on failure, prints the captured error plus the `apk add libstdc++ libgcc` remediation for musl targets and exits non-zero. Documented the Alpine/musl runtime requirement in the README ([#7545](https://github.com/can1357/oh-my-pi/issues/7545)).
+### Fixed
+
+- Fixed Codex `config.toml` discovery importing MCP servers with `enabled = false` ([#7538](https://github.com/can1357/oh-my-pi/issues/7538)).
 
 ## [17.2.6] - 2026-08-03
 
