@@ -864,7 +864,7 @@ fn build_pcre_matcher(patterns: &[String], cli: &RgCli) -> Result<PcreMatcher, S
 		.crlf(cli.crlf && !cli.no_crlf && !cli.null_data)
 		.utf(unicode)
 		.ucp(unicode)
-		.jit_if_available(crate::PCRE2_JIT_ENABLED);
+		.jit_if_available(*crate::PCRE2_JIT_ENABLED);
 	builder
 		.build_many(patterns)
 		.map_err(|error| error.to_string())
