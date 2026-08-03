@@ -1109,6 +1109,88 @@ describe("AgentSession retry fallback", () => {
 		expect(requestedModels).toEqual([]);
 	});
 
+	it("restarts usage preflight when the model changes during a health request", async () => {
+		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const selectedModel = getBundledModel("anthropic", "claude-sonnet-4-6");
+		if (!primaryModel || !selectedModel) throw new Error("Expected bundled preflight race models");
+		const requestedModels: string[] = [];
+		const usageChecks: string[] = [];
+		const healthStarted = Promise.withResolvers<void>();
+		const releaseHealth = Promise.withResolvers<void>();
+		const mock = createMockModel({ responses: [{ content: ["must not run"] }] });
+		const agent = new Agent({
+			getApiKey: model => `${model.provider}-test-key`,
+			initialState: { model: primaryModel, systemPrompt: ["Test"], tools: [], messages: [] },
+			streamFn: (model, context, options) => {
+				requestedModels.push(`${model.provider}/${model.id}`);
+				return mock.stream(model, context, options);
+			},
+		});
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.usageAwareFallback": true,
+			"retry.usageReservePolicy": "fail-closed",
+		});
+		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
+		const usageHealth = vi
+			.spyOn(modelRegistry.authStorage, "getModelUsageHealth")
+			.mockImplementation(async (_provider, options) => {
+				usageChecks.push(options.modelId ?? "");
+				if (options.modelId === primaryModel.id) {
+					healthStarted.resolve();
+					await releaseHealth.promise;
+				}
+				const reserve = options.modelId === selectedModel.id;
+				return {
+					state: reserve ? "reserve" : "healthy",
+					accounts: [
+						{
+							credentialId: 1,
+							credentialType: "oauth",
+							state: reserve ? "reserve" : "healthy",
+							remainingFraction: reserve ? 0.05 : 0.8,
+						},
+					],
+				};
+			});
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+
+		const prompting = session.prompt("Change models during preflight");
+		await healthStarted.promise;
+		await session.setModelTemporary(selectedModel, undefined, { ephemeral: true });
+		releaseHealth.resolve();
+		await expect(prompting).rejects.toThrow(`reserve reached for ${selectedModel.provider}/${selectedModel.id}`);
+
+		expect(usageHealth).toHaveBeenCalledTimes(2);
+		expect(usageChecks).toEqual([primaryModel.id, selectedModel.id]);
+		expect(session.model?.id).toBe(selectedModel.id);
+		expect(requestedModels).toEqual([]);
+	});
+
+	it("finishes usage preflight when no model is selected", async () => {
+		const agent = new Agent({
+			initialState: { model: undefined, systemPrompt: ["Test"], tools: [], messages: [] },
+		});
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.usageAwareFallback": true,
+		});
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+
+		await expect(session.prompt("No model configured")).rejects.toThrow("No model selected");
+		expect(agent.state.isStreaming).toBe(false);
+	});
+
 	it("continues a startup-owned role fallback chain from the active fallback", async () => {
 		const firstFallback = getBundledModel("openai", "gpt-4o-mini");
 		const secondFallback = getBundledModel("openai", "gpt-4o");

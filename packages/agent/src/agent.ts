@@ -1174,17 +1174,21 @@ export class Agent {
 	 * Continue from current context (used for retries and resuming queued messages).
 	 */
 	#continuationDequeueSignal(signal?: AbortSignal): AbortSignal | undefined {
-		if (this.#deadline === undefined) return signal;
-		const delay = this.#deadline - Date.now();
-		let deadlineSignal: AbortSignal;
-		if (delay <= 0) {
-			const controller = new AbortController();
-			controller.abort(new DOMException("Deadline exceeded", "TimeoutError"));
-			deadlineSignal = controller.signal;
-		} else {
-			deadlineSignal = AbortSignal.timeout(delay);
+		const signals: AbortSignal[] = [];
+		if (this.#abortController) signals.push(this.#abortController.signal);
+		if (signal) signals.push(signal);
+		if (this.#deadline !== undefined) {
+			const delay = this.#deadline - Date.now();
+			if (delay <= 0) {
+				const controller = new AbortController();
+				controller.abort(new DOMException("Deadline exceeded", "TimeoutError"));
+				signals.push(controller.signal);
+			} else {
+				signals.push(AbortSignal.timeout(delay));
+			}
 		}
-		return signal ? AbortSignal.any([signal, deadlineSignal]) : deadlineSignal;
+		if (signals.length === 0) return undefined;
+		return signals.length === 1 ? signals[0] : AbortSignal.any(signals);
 	}
 
 	async continue(signal?: AbortSignal) {
@@ -1192,44 +1196,67 @@ export class Agent {
 			throw new AgentBusyError();
 		}
 
-		const dequeueSignal = this.#continuationDequeueSignal(signal);
-		const messages = this.#state.messages;
-		if (messages.length === 0) {
-			// An empty transcript has nothing to resume, but a queued steer/follow-up
-			// must still be delivered as the opening turn — mirroring the assistant-tail
-			// branch below. Throwing here leaves the message undeliverable, and idle-drain
-			// callers (AgentSession#scheduleQueuedMessageDrain) re-arm continue() on every
-			// microtask because hasQueuedMessages() never clears, spinning an unbounded
-			// allocation loop until OOM (issue #6344).
-			const queuedSteering = await this.#dequeueSteeringMessagesAfterHooks(dequeueSignal);
-			if (queuedSteering.length > 0) {
-				await this.#runLoop(queuedSteering, { skipInitialSteeringPoll: true }, signal);
-				return;
+		const { promise, resolve } = Promise.withResolvers<void>();
+		this.#runningPrompt = promise;
+		this.#resolveRunningPrompt = resolve;
+		const continuationAbortController = new AbortController();
+		this.#abortController = continuationAbortController;
+		this.#state.isStreaming = true;
+		this.#state.streamMessage = null;
+		this.#state.error = undefined;
+
+		try {
+			const dequeueSignal = this.#continuationDequeueSignal(signal);
+			const messages = this.#state.messages;
+			if (messages.length === 0) {
+				// An empty transcript has nothing to resume, but a queued steer/follow-up
+				// must still be delivered as the opening turn — mirroring the assistant-tail
+				// branch below. Throwing here leaves the message undeliverable, and idle-drain
+				// callers (AgentSession#scheduleQueuedMessageDrain) re-arm continue() on every
+				// microtask because hasQueuedMessages() never clears, spinning an unbounded
+				// allocation loop until OOM (issue #6344).
+				const queuedSteering = await this.#dequeueSteeringMessagesAfterHooks(dequeueSignal);
+				if (queuedSteering.length > 0) {
+					await this.#runLoop(queuedSteering, { skipInitialSteeringPoll: true }, signal, true);
+					return;
+				}
+				const queuedFollowUp = await this.#dequeueFollowUpMessagesAfterHooks(dequeueSignal);
+				if (queuedFollowUp.length > 0) {
+					await this.#runLoop(queuedFollowUp, undefined, signal, true);
+					return;
+				}
+				throw new Error("No messages to continue from");
 			}
-			const queuedFollowUp = await this.#dequeueFollowUpMessagesAfterHooks(dequeueSignal);
-			if (queuedFollowUp.length > 0) {
-				await this.#runLoop(queuedFollowUp, undefined, signal);
-				return;
+			if (messages[messages.length - 1].role === "assistant") {
+				const queuedSteering = await this.#dequeueSteeringMessagesAfterHooks(dequeueSignal);
+				if (queuedSteering.length > 0) {
+					await this.#runLoop(queuedSteering, { skipInitialSteeringPoll: true }, signal, true);
+					return;
+				}
+
+				const queuedFollowUp = await this.#dequeueFollowUpMessagesAfterHooks(dequeueSignal);
+				if (queuedFollowUp.length > 0) {
+					await this.#runLoop(queuedFollowUp, undefined, signal, true);
+					return;
+				}
+
+				throw new Error("Cannot continue from message role: assistant");
 			}
-			throw new Error("No messages to continue from");
+
+			await this.#runLoop(undefined, undefined, signal, true);
+		} finally {
+			resolve();
+			if (this.#abortController === continuationAbortController) {
+				this.#state.isStreaming = false;
+				this.#state.streamMessage = null;
+				this.#state.pendingToolCalls.clear();
+				this.#abortController = undefined;
+				if (this.#runningPrompt === promise) {
+					this.#runningPrompt = undefined;
+					this.#resolveRunningPrompt = undefined;
+				}
+			}
 		}
-		if (messages[messages.length - 1].role === "assistant") {
-			const queuedSteering = await this.#dequeueSteeringMessagesAfterHooks(dequeueSignal);
-			if (queuedSteering.length > 0) {
-				await this.#runLoop(queuedSteering, { skipInitialSteeringPoll: true }, signal);
-				return;
-			}
-
-			const queuedFollowUp = await this.#dequeueFollowUpMessagesAfterHooks(dequeueSignal);
-			if (queuedFollowUp.length > 0) {
-				await this.#runLoop(queuedFollowUp, undefined, signal);
-				return;
-			}
-
-			throw new Error("Cannot continue from message role: assistant");
-		}
-
-		await this.#runLoop(undefined, undefined, signal);
 	}
 
 	/**
@@ -1241,20 +1268,24 @@ export class Agent {
 		messages?: AgentMessage[],
 		options?: AgentPromptOptions & { skipInitialSteeringPoll?: boolean },
 		continuationSignal?: AbortSignal,
+		runStateClaimed = false,
 	) {
 		const model = this.#state.model;
 		if (!model) throw new Error("No model configured");
 
 		let skipInitialSteeringPoll = options?.skipInitialSteeringPoll === true;
 		using _ = new EventLoopKeepalive();
-		const { promise, resolve } = Promise.withResolvers<void>();
-		this.#runningPrompt = promise;
-		this.#resolveRunningPrompt = resolve;
-
-		this.#abortController = new AbortController();
+		if (!runStateClaimed) {
+			const { promise, resolve } = Promise.withResolvers<void>();
+			this.#runningPrompt = promise;
+			this.#resolveRunningPrompt = resolve;
+			this.#abortController = new AbortController();
+		}
+		const loopAbortController = this.#abortController;
+		if (!loopAbortController) throw new Error("Agent run state was not initialized");
 		const loopSignal = continuationSignal
-			? AbortSignal.any([this.#abortController.signal, continuationSignal])
-			: this.#abortController.signal;
+			? AbortSignal.any([loopAbortController.signal, continuationSignal])
+			: loopAbortController.signal;
 		this.#state.isStreaming = true;
 		this.#state.streamMessage = null;
 		this.#state.error = undefined;
@@ -1641,13 +1672,15 @@ export class Agent {
 				this.#emit({ type: "agent_end", messages: [errorMsg] });
 			}
 		} finally {
-			this.#state.isStreaming = false;
-			this.#state.streamMessage = null;
-			this.#state.pendingToolCalls.clear();
-			this.#abortController = undefined;
-			this.#resolveRunningPrompt?.();
-			this.#runningPrompt = undefined;
-			this.#resolveRunningPrompt = undefined;
+			if (this.#abortController === loopAbortController) {
+				this.#state.isStreaming = false;
+				this.#state.streamMessage = null;
+				this.#state.pendingToolCalls.clear();
+				this.#abortController = undefined;
+				this.#resolveRunningPrompt?.();
+				this.#runningPrompt = undefined;
+				this.#resolveRunningPrompt = undefined;
+			}
 		}
 	}
 

@@ -21,6 +21,7 @@ import { calculateRateLimitBackoffMs, parseRateLimitReason } from "@oh-my-pi/pi-
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { kCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { isFireworksFastModelId, toFireworksBaseModelId } from "@oh-my-pi/pi-catalog/fireworks-model-id";
+import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { extractRetryHint, logger, prompt } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import { formatModelStringWithRouting, resolveModelOverride } from "../config/model-resolver";
@@ -1102,7 +1103,7 @@ export class TurnRecovery {
 				signal,
 			});
 		} catch (error) {
-			if (signal.aborted) return false;
+			if (signal.aborted || !modelsAreEqual(this.#host.model(), currentModel)) return false;
 			logger.debug("Usage-aware runtime preflight failed open", {
 				provider: currentModel.provider,
 				model: currentModel.id,
@@ -1110,7 +1111,7 @@ export class TurnRecovery {
 			});
 			return false;
 		}
-		if (signal.aborted) return false;
+		if (signal.aborted || !modelsAreEqual(this.#host.model(), currentModel)) return false;
 		const selectedAccount = health.accounts.find(account => account.selected);
 		if (health.state === "healthy") {
 			this.#usageReserveApprovedSelector = undefined;
@@ -1167,7 +1168,7 @@ export class TurnRecovery {
 						signal,
 					},
 				);
-				if (signal.aborted) return false;
+				if (signal.aborted || !modelsAreEqual(this.#host.model(), currentModel)) return false;
 				if (candidateHealth.state === "depleted" || candidateHealth.state === "reserve") continue;
 				if (candidateHealth.state === "healthy") {
 					const selected = candidateHealth.accounts.find(account => account.selected);
@@ -1183,18 +1184,18 @@ export class TurnRecovery {
 					}
 				}
 			} catch {
-				if (signal.aborted) return false;
+				if (signal.aborted || !modelsAreEqual(this.#host.model(), currentModel)) return false;
 				// Unknown usage fails open for an otherwise valid fallback.
 			}
-			if (signal.aborted) return false;
+			if (signal.aborted || !modelsAreEqual(this.#host.model(), currentModel)) return false;
 			let apiKey: string | undefined;
 			try {
 				apiKey = await this.#host.modelRegistry.getApiKey(candidateModel, this.#host.sessionId(), { signal });
 			} catch {
-				if (signal.aborted) return false;
+				if (signal.aborted || !modelsAreEqual(this.#host.model(), currentModel)) return false;
 				continue;
 			}
-			if (signal.aborted) return false;
+			if (signal.aborted || !modelsAreEqual(this.#host.model(), currentModel)) return false;
 			if (!apiKey) continue;
 			fallback = { selector: candidate, apiKey };
 			break;
@@ -1218,7 +1219,7 @@ export class TurnRecovery {
 				},
 				signal,
 			);
-			if (signal.aborted) return false;
+			if (signal.aborted || !modelsAreEqual(this.#host.model(), currentModel)) return false;
 		}
 		if (!shouldFallback) {
 			this.#usageReserveApprovedSelector = currentSelector;

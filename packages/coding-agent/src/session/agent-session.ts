@@ -4006,14 +4006,22 @@ export class AgentSession {
 		signal?.addEventListener("abort", onAbort, { once: true });
 		this.#usagePreflightAbortControllers.add(controller);
 		try {
-			const fallbackCommitted = await this.#recovery.maybeApplyUsageAwareFallback(
-				controller.signal,
-				this.#usageFallbackConfirmer,
-			);
-			return fallbackCommitted || (!controller.signal.aborted && this.#promptGeneration === generation);
-		} catch (error) {
-			if (controller.signal.aborted || this.#promptGeneration !== generation) return false;
-			throw error;
+			while (true) {
+				const model = this.model;
+				try {
+					const fallbackCommitted = await this.#recovery.maybeApplyUsageAwareFallback(
+						controller.signal,
+						this.#usageFallbackConfirmer,
+					);
+					if (fallbackCommitted) return true;
+					if (controller.signal.aborted || this.#promptGeneration !== generation) return false;
+					if (this.model === model || modelsAreEqual(this.model, model)) return true;
+				} catch (error) {
+					if (controller.signal.aborted || this.#promptGeneration !== generation) return false;
+					if (this.model !== model && !modelsAreEqual(this.model, model)) continue;
+					throw error;
+				}
+			}
 		} finally {
 			signal?.removeEventListener("abort", onAbort);
 			this.#usagePreflightAbortControllers.delete(controller);

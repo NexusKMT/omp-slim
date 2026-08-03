@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { Agent, type AgentEvent, type AgentTool, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import { Agent, AgentBusyError, type AgentEvent, type AgentTool, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { type SimpleStreamOptions, type ToolResultMessage, z } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { kCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
@@ -310,6 +310,76 @@ describe("Agent", () => {
 		await expect(agent.continue()).rejects.toThrow("Cannot continue from message role: assistant");
 
 		expect(agent.peekFollowUpQueue()).toHaveLength(1);
+	});
+
+	it("claims an abortable busy state while continue() awaits dequeue hooks", async () => {
+		const agent = new Agent();
+		agent.replaceMessages([createAssistantMessage([{ type: "text", text: "ready" }])]);
+		agent.followUp({ role: "user", content: "stay queued", timestamp: Date.now() });
+		const hookStarted = Promise.withResolvers<void>();
+		agent.addBeforeQueuedMessageDequeueHook(async signal => {
+			if (!signal) throw new Error("Expected continuation dequeue signal");
+			hookStarted.resolve();
+			if (signal.aborted) return;
+			const { promise, resolve } = Promise.withResolvers<void>();
+			signal.addEventListener("abort", () => resolve(), { once: true });
+			await promise;
+		});
+
+		const continuing = agent.continue();
+		await hookStarted.promise;
+		let idleResolved = false;
+		const idle = agent.waitForIdle().then(() => {
+			idleResolved = true;
+		});
+		await Promise.resolve();
+
+		expect(agent.state.isStreaming).toBe(true);
+		expect(idleResolved).toBe(false);
+		await expect(agent.prompt("must not overlap")).rejects.toBeInstanceOf(AgentBusyError);
+
+		agent.abort("cancel dequeue");
+		await expect(continuing).rejects.toThrow("Cannot continue from message role: assistant");
+		await idle;
+		expect(idleResolved).toBe(true);
+		expect(agent.state.isStreaming).toBe(false);
+		expect(agent.peekFollowUpQueue()).toHaveLength(1);
+	});
+
+	it("does not clear a successor prompt after continue() releases idle waiters", async () => {
+		const firstStarted = Promise.withResolvers<void>();
+		const releaseFirst = Promise.withResolvers<void>();
+		const secondStarted = Promise.withResolvers<void>();
+		const releaseSecond = Promise.withResolvers<void>();
+		const mock = createMockModel({
+			responses: [
+				async () => {
+					firstStarted.resolve();
+					await releaseFirst.promise;
+					return { content: ["continued"] };
+				},
+				async () => {
+					secondStarted.resolve();
+					await releaseSecond.promise;
+					return { content: ["successor"] };
+				},
+			],
+		});
+		const agent = new Agent({ streamFn: mock.stream });
+		agent.replaceMessages([createAssistantMessage([{ type: "text", text: "ready" }])]);
+		agent.followUp({ role: "user", content: "continue", timestamp: Date.now() });
+
+		const continuing = agent.continue();
+		await firstStarted.promise;
+		const successor = agent.waitForIdle().then(() => agent.prompt("next prompt"));
+		releaseFirst.resolve();
+		await secondStarted.promise;
+		await continuing;
+
+		expect(agent.state.isStreaming).toBe(true);
+		releaseSecond.resolve();
+		await successor;
+		expect(agent.state.isStreaming).toBe(false);
 	});
 
 	it("classifies an in-flight continuation cancellation as aborted", async () => {

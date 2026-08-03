@@ -3947,11 +3947,8 @@ export class AuthStorage {
 				};
 			}),
 		);
-		if (
-			planRequirement !== "none" &&
-			accounts.some(account => planEligibilityByCredential.get(account.credentialId) === true)
-		) {
-			accounts = accounts.filter(account => planEligibilityByCredential.get(account.credentialId) === true);
+		if (planRequirement !== "none") {
+			accounts = accounts.filter(account => planEligibilityByCredential.get(account.credentialId) !== false);
 		}
 		if (selectedCredentialId !== undefined) {
 			const selectedAccount = accounts.find(account => account.credentialId === selectedCredentialId);

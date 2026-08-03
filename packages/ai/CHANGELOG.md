@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Made model-scoped usage health ignore Codex accounts that cannot use the requested plan-gated model while retaining conservative unknown-state handling and independent usage-window resets.
+
 ## [17.2.6] - 2026-08-03
 
 ### Added
@@ -9,7 +13,6 @@
 - Added profile-aware Bedrock Mantle region selection, authenticated model discovery, bearer-token or SigV4 authentication, and credential refresh handling for OpenAI Responses models.
 
 ### Fixed
-- Made model-scoped usage health ignore Codex accounts that cannot use the requested plan-gated model while retaining conservative unknown-state handling and independent usage-window resets.
 
 - Fixed an issue where Ollama requests without a user-role message would fail to generate output or silently fail with a misleading error.
 

@@ -2071,6 +2071,46 @@ describe("AuthStorage codex oauth ranking", () => {
 		expect(health.accounts[0]?.state).toBe("depleted");
 	});
 
+	test("reports an all-plan-ineligible Codex pool as depleted", async () => {
+		if (!authStorage) throw new Error("test setup failed");
+
+		await authStorage.set("openai-codex", [
+			{ type: "oauth", ...createCredential("acct-free", "free@example.com") },
+			{ type: "oauth", ...createCredential("acct-plus", "plus@example.com") },
+		]);
+		usageByAccount.set(
+			"acct-free",
+			createCodexUsageReport({
+				accountId: "acct-free",
+				primary: { usedFraction: 0.05, resetInMs: 30 * 60 * 1000 },
+				secondary: { usedFraction: 0.05, resetInMs: 6 * 24 * 60 * 60 * 1000 },
+				metadata: { planType: "free", email: "free@example.com" },
+			}),
+		);
+		usageByAccount.set(
+			"acct-plus",
+			createCodexUsageReport({
+				accountId: "acct-plus",
+				primary: { usedFraction: 0.05, resetInMs: 30 * 60 * 1000 },
+				secondary: { usedFraction: 0.05, resetInMs: 6 * 24 * 60 * 60 * 1000 },
+				metadata: { planType: "plus", email: "plus@example.com" },
+			}),
+		);
+
+		const paidHealth = await authStorage.getModelUsageHealth("openai-codex", {
+			modelId: "gpt-5.6-sol",
+			reserveFraction: 0.1,
+		});
+		const proHealth = await authStorage.getModelUsageHealth("openai-codex", {
+			modelId: "gpt-5.3-codex-spark",
+			reserveFraction: 0.1,
+		});
+
+		expect(paidHealth.state).toBe("healthy");
+		expect(paidHealth.accounts).toHaveLength(1);
+		expect(proHealth).toEqual({ state: "depleted", accounts: [] });
+	});
+
 	test("routes codex spark to a single Plus account when no Pro is connected", async () => {
 		if (!authStorage) throw new Error("test setup failed");
 
