@@ -227,6 +227,13 @@ describe("default grep rule and pipeline stdin", () => {
 			checkBashInterception("tr -d '\\r' < input.log | grep -v '^ *foo'", tools, DEFAULT_BASH_INTERCEPTOR_RULES)
 				.block,
 		).toBe(false);
+		expect(checkBashInterception("printf 'x\\n' |\n grep x", tools, DEFAULT_BASH_INTERCEPTOR_RULES).block).toBe(
+			false,
+		);
+		expect(
+			checkBashInterception("printf 'x\\n' |\n # filter\n grep x", tools, DEFAULT_BASH_INTERCEPTOR_RULES).block,
+		).toBe(false);
+		expect(checkBashInterception("printf 'x\\n' |& grep x", tools, DEFAULT_BASH_INTERCEPTOR_RULES).block).toBe(false);
 	});
 
 	it("still blocks a standalone grep sequenced after a pipeline", () => {

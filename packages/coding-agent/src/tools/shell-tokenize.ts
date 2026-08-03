@@ -92,9 +92,10 @@ export interface FlatShellCommandSegment {
 	text: string;
 	/**
 	 * True when this segment consumes the previous stage's stdout via an
-	 * unquoted `|`. Such a stage reads piped stdin, so path-based dedicated
-	 * tools (read/grep/glob) cannot replace it. `||`, `;`, `&`, `&&`, and
-	 * newlines start an independent command and leave this false.
+	 * unquoted `|` or `|&`. Blank and comment-only continuation lines preserve
+	 * the pending pipe state. Such a stage reads piped stdin, so path-based
+	 * dedicated tools (read/grep/glob) cannot replace it. `||`, `;`, `&`, and
+	 * `&&` start an independent command and leave this false.
 	 */
 	pipedStdin: boolean;
 }
@@ -118,9 +119,11 @@ export function extractFlatShellCommandSegments(command: string): FlatShellComma
 	let atWordStart = true;
 	let currentPiped = false;
 
-	const pushSegment = (end: number) => {
+	const pushSegment = (end: number): boolean => {
 		const segment = command.slice(segmentStart, end).trim();
-		if (segment.length > 0) segments.push({ text: segment, pipedStdin: currentPiped });
+		if (segment.length === 0) return false;
+		segments.push({ text: segment, pipedStdin: currentPiped });
+		return true;
 	};
 
 	for (let i = 0; i < command.length; i++) {
@@ -173,13 +176,14 @@ export function extractFlatShellCommandSegments(command: string): FlatShellComma
 			return [];
 		}
 		if (ch === "#" && atWordStart) {
-			pushSegment(i);
+			const pushed = pushSegment(i);
 			const newline = command.indexOf("\n", i + 1);
 			if (newline === -1) return segments;
 			i = newline;
 			segmentStart = newline + 1;
 			atWordStart = true;
-			currentPiped = false;
+			// Preserve a pending pipe through a comment-only continuation.
+			if (pushed) currentPiped = false;
 			continue;
 		}
 		const isRedirectionOperatorCharacter =
@@ -189,13 +193,13 @@ export function extractFlatShellCommandSegments(command: string): FlatShellComma
 					? command[i - 1] === ">" || command[i - 1] === "<" || command[i + 1] === ">"
 					: false;
 		if ((ch === "\n" || ch === ";" || ch === "|" || ch === "&") && !isRedirectionOperatorCharacter) {
-			pushSegment(i);
+			const pushed = pushSegment(i);
 			const doubled = (ch === "|" || ch === "&") && command[i + 1] === ch;
-			if (doubled) i++;
-			// A single unquoted `|` pipes the previous stage's stdout into the
-			// next segment; `||`, `;`, `&`, `&&`, and newlines start a fresh
-			// command whose stdin is not the previous stage's output.
-			currentPiped = ch === "|" && !doubled;
+			const pipeStderr = ch === "|" && command[i + 1] === "&";
+			if (doubled || pipeStderr) i++;
+			// `|` and `|&` pipe into the next segment. Blank continuation
+			// lines preserve that pending state; all other operators reset it.
+			if (pushed || ch !== "\n") currentPiped = ch === "|" && !doubled;
 			segmentStart = i + 1;
 			atWordStart = true;
 			continue;
