@@ -134,10 +134,7 @@ describe("stats sync serial mode", () => {
 		const lockPath = `${dbPath}.sync.lock`;
 		const infoPath = path.join(lockPath, "info");
 		await fs.mkdir(lockPath, { recursive: true });
-		await Bun.write(
-			infoPath,
-			JSON.stringify({ pid: process.pid, timestamp: Date.now(), token: "live-owner" }),
-		);
+		await Bun.write(infoPath, JSON.stringify({ pid: process.pid, timestamp: Date.now(), token: "live-owner" }));
 		const retryScheduled = Promise.withResolvers<void>();
 		const resumeRetry = Promise.withResolvers<void>();
 		let lockReleased = false;
