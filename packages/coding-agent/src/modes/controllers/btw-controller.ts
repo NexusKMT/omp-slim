@@ -50,15 +50,21 @@ export class BtwController {
 	}
 
 	canBranch(): boolean {
-		return (
-			!this.#branchInFlight &&
-			this.#activeRequest?.component.isBranchable() === true &&
-			this.#lastQuestion !== undefined &&
-			this.#lastReplyText !== undefined &&
-			this.#lastAssistantMessage !== undefined &&
-			this.#lastLeafId !== null &&
-			this.#lastLeafId === this.ctx.sessionManager.getLeafId()
-		);
+		return this.#branchUnavailableReason() === undefined;
+	}
+
+	#branchUnavailableReason(): string | undefined {
+		if (this.#branchInFlight) return "a branch is already in progress";
+		if (this.#activeRequest?.component.isBranchable() !== true) return "the answer is not ready";
+		if (!this.#lastQuestion || !this.#lastReplyText || !this.#lastAssistantMessage) {
+			return "the answer is unavailable";
+		}
+		if (!this.#lastLeafId) return "the session has no branch point";
+		if (this.#lastLeafId !== this.ctx.sessionManager.getLeafId()) {
+			return "the session changed since /btw started";
+		}
+		if (this.ctx.session.isStreaming) return "a turn is still running";
+		return undefined;
 	}
 
 	canCopy(): boolean {
@@ -83,17 +89,33 @@ export class BtwController {
 	}
 
 	async handleBranch(): Promise<boolean> {
-		if (!this.canBranch() || !this.#lastQuestion || !this.#lastAssistantMessage) return false;
+		const unavailableReason = this.#branchUnavailableReason();
+		if (unavailableReason) {
+			this.ctx.showStatus(`/btw branch unavailable: ${unavailableReason}`, { dim: true });
+			return false;
+		}
+		const request = this.#activeRequest;
+		const question = this.#lastQuestion;
+		const assistantMessage = this.#lastAssistantMessage;
+		const leafId = this.#lastLeafId;
+		if (!request || !question || !assistantMessage || !leafId) return false;
+
 		this.#branchInFlight = true;
+		request.component.markBranching();
 		try {
-			await this.ctx.handleBtwBranch(this.#lastQuestion, this.#lastAssistantMessage);
+			await this.ctx.handleBtwBranch(question, assistantMessage, leafId);
 			return true;
 		} finally {
 			this.#branchInFlight = false;
+			if (this.#activeRequest === request) request.component.markComplete();
 		}
 	}
 
 	handleEscape(): boolean {
+		if (this.#branchInFlight) {
+			this.ctx.showStatus("/btw branch is in progress", { dim: true });
+			return true;
+		}
 		if (!this.#activeRequest) return false;
 		this.#closeActiveRequest({ abort: this.#activeRequest.abortController.signal.aborted === false });
 		return true;
@@ -119,7 +141,11 @@ export class BtwController {
 		this.#closeActiveRequest({ abort: true });
 
 		const request: BtwRequest = {
-			component: new BtwPanelComponent({ question: trimmedQuestion, tui: this.ctx.ui }),
+			component: new BtwPanelComponent({
+				question: trimmedQuestion,
+				tui: this.ctx.ui,
+				canBranch: () => this.canBranch(),
+			}),
 			abortController: new AbortController(),
 			question: trimmedQuestion,
 			leafId: this.ctx.sessionManager.getLeafId(),

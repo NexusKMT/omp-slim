@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `/btw` branch promotion parking behind active turns, cutting from an outdated session leaf, and leaving rejected branch keys indistinguishable from composer input ([#7474](https://github.com/can1357/oh-my-pi/issues/7474)).
+
 ## [17.2.5] - 2026-08-03
 
 ### Breaking Changes

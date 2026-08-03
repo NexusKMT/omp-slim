@@ -340,6 +340,7 @@ import { TodoTracker, type TodoTrackerHost } from "./todo-tracker";
 import { TtsrCoordinator, type TtsrCoordinatorHost } from "./ttsr-coordinator";
 
 const PLAN_MODE_REMINDER_MAX = 3;
+const POST_PROMPT_DRAIN_TIMEOUT_MS = 5_000;
 
 /** Internal marker for hook messages queued through the agent loop */
 // ============================================================================
@@ -3676,7 +3677,11 @@ export class AgentSession {
 		const postPromptDrain = this.#cancelPostPromptTasks();
 		this.agent.abort();
 		try {
-			await withTimeout(postPromptDrain, 5_000, "Timed out draining post-prompt tasks during dispose");
+			await withTimeout(
+				postPromptDrain,
+				POST_PROMPT_DRAIN_TIMEOUT_MS,
+				"Timed out draining post-prompt tasks during dispose",
+			);
 		} catch (error) {
 			logger.warn("Post-prompt tasks still draining at dispose deadline", { error: String(error) });
 		}
@@ -7553,21 +7558,23 @@ export class AgentSession {
 		}
 	}
 
+	/** Promotes a completed /btw answer from the explicitly authorized session leaf. */
 	async branchFromBtw(
 		question: string,
 		assistantMessage: AssistantMessage,
+		leafId: string,
 	): Promise<{ cancelled: boolean; sessionFile: string | undefined }> {
 		const previousSessionFile = this.sessionFile;
 		if (!this.sessionManager.getSessionFile()) {
 			throw new Error("Cannot branch /btw: session is not persisted");
 		}
 
-		const leafId = this.sessionManager.getLeafId();
-		if (!leafId) {
-			throw new Error("Cannot branch /btw: current session has no leaf");
+		if (!leafId || this.sessionManager.getLeafId() !== leafId) {
+			throw new Error("Cannot branch /btw: session changed since /btw started");
 		}
 
 		if (
+			this.isStreaming ||
 			this.isBashRunning ||
 			this.isEvalRunning ||
 			this.isCompacting ||
@@ -7588,8 +7595,17 @@ export class AgentSession {
 			}
 		}
 
-		await this.#cancelPostPromptTasks();
+		if (this.sessionManager.getLeafId() !== leafId) {
+			throw new Error("Cannot branch /btw: session changed since /btw started");
+		}
+
+		await withTimeout(
+			this.#cancelPostPromptTasks(),
+			POST_PROMPT_DRAIN_TIMEOUT_MS,
+			"Timed out draining post-prompt tasks before /btw branch",
+		);
 		if (
+			this.isStreaming ||
 			this.isBashRunning ||
 			this.isEvalRunning ||
 			this.isCompacting ||
@@ -7602,10 +7618,6 @@ export class AgentSession {
 		this.#pendingNextTurnMessages = [];
 		this.#scheduledHiddenNextTurnGeneration = undefined;
 		this.agent.replaceQueues([], []);
-		if (this.isStreaming) {
-			await this.abort({ goalReason: "internal", reason: "branching /btw" });
-			this.agent.replaceQueues([], []);
-		}
 		await this.#bash.flushPending();
 		await this.sessionManager.flush();
 		const bashTransition = this.#bash.beginSessionTransition();
@@ -7619,6 +7631,9 @@ export class AgentSession {
 			advisorRecordersDetached = true;
 			await this.#advisors.drainAndDetachRecorders();
 			try {
+				if (this.sessionManager.getLeafId() !== leafId) {
+					throw new Error("Cannot branch /btw: session changed since /btw started");
+				}
 				this.sessionManager.createBranchedSession(leafId);
 				this.#bash.markSessionTransition(bashTransition);
 				this.#advisors.clearCost();
