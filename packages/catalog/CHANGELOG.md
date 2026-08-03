@@ -2,13 +2,9 @@
 
 ## [Unreleased]
 
-### Changed
-
-- Replaced arktype with `@oh-my-pi/omptype` for discovery payload schemas (same definition DSL, lazy JIT validation).
-
 ### Fixed
 
-- Fixed `thinking-level: off` still enabling reasoning on direct DeepSeek V4 requests by emitting the provider's disabled thinking toggle and migrating stale cached model metadata ([#7559](https://github.com/can1357/oh-my-pi/issues/7559)).
+- Fixed an issue where setting `thinking-level: off` failed to disable reasoning on direct DeepSeek V4 requests.
 
 ## [17.2.6] - 2026-08-03
 

@@ -4,14 +4,12 @@
 
 ### Changed
 
-- Replaced arktype with `@oh-my-pi/omptype`, an ArkType-compatible validator with lazy JIT compilation: ~100x faster schema construction and 60-100x faster hot-path validation. `packages/ai` re-exports `type`/`Type` from omptype; the wire schema detection contract (`isArkSchema`) is unchanged.
+- Replaced `arktype` with `@oh-my-pi/omptype` for schema validation, delivering up to 100x faster schema construction and 60-100x faster validation while maintaining full compatibility with existing `type`/`Type` exports and the `isArkSchema` contract.
 
 ### Fixed
 
-- Fixed OpenAI-Codex (ChatGPT OAuth) requests failing with `Unsupported service_tier: auto` on default/legacy sessions. `shouldSendServiceTier` no longer forwards `auto` on the wire — it is OpenAI's implicit default, so omitting `service_tier` is equivalent, and the Codex endpoint rejects an explicit `auto`. Explicit `default`/`flex`/`scale`/`priority` are unaffected ([#7517](https://github.com/can1357/oh-my-pi/issues/7517)).
-### Fixed
-
-- Fixed Cursor `kimi-k3` sessions bricking permanently when a same-model assistant turn was persisted without thinking blocks (a turn whose stream carried no `thinkingDelta` events). `assertCursorKimiK3HistoryReplayable` now only hard-errors on genuinely foreign history; same-model turns missing thinking replay without the reasoning part, with warnings at turn completion and first degraded replay that identify the affected assistant-turn positions ([#7516](https://github.com/can1357/oh-my-pi/issues/7516)).
+- Fixed OpenAI-Codex (ChatGPT OAuth) requests failing with an `Unsupported service_tier: auto` error on default or legacy sessions by omitting the implicit `auto` service tier on the wire.
+- Fixed an issue where Cursor `kimi-k3` sessions would break permanently when a same-model assistant turn was persisted without thinking blocks, replacing hard errors with graceful warnings.
 
 ## [17.2.6] - 2026-08-03
 

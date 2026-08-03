@@ -4,18 +4,18 @@
 
 ### Added
 
-- Initial release: ArkType-compatible schema validation with a lazy JIT runtime. Schemas interpret their first two calls and compile a specialized validator via `new Function` on the third, making `type()` construction ~100x cheaper than arktype while beating its hot-path validation speed. Supports the string definition DSL (primitives, literals, unions, arrays, bounds, `number.integer`, `string.url`, inline defaults, value-suffix `?` optionals), object definitions (`"+": "reject"/"delete"`, `"[string]"` index signatures), `type.errors`/`OmpErrors` with per-entry `path`/`problem`, `type.enumerated`, `type.raw`, keyword statics, composition methods (`.or/.and/.array/.pipe/.narrow/.describe/.default/.allows/.assert`), static inference via `typeof schema.infer`, and draft-2020-12 `toJsonSchema()` emission.
-- TypeBox-style (`@oh-my-pi/omptype/typebox`) and Zod-style (`@oh-my-pi/omptype/zod`) authoring adapters producing native omptype schemas.
-- Added recursive named scopes, modules and runtime generics; fixed/optional/variadic tuples; Date literals and bounds; nested string and parse keyword modules; disjointness-aware intersections; structural mapping, selection, distribution and semantic comparison; separate input/output inference; configurable error codes and `byPath`; and JSON Schema target, dialect and fallback handling.
-- npm package now ships transpiled ESM in `dist/js` and declarations in `dist/types`, so it runs on plain Node without Bun or a TS loader; Bun consumers keep resolving TS source via the `bun` export condition.
+- Introduced omptype, an ArkType-compatible schema validation library featuring a lazy JIT runtime that compiles specialized validators on the third call for ultra-fast hot-path validation and low construction overhead.
+- Added support for a rich string definition DSL (primitives, literals, unions, arrays, bounds, inline defaults, and optional keys), object definitions (including index signatures and strict key rejection/deletion), and comprehensive composition methods (.or, .and, .array, .pipe, .narrow, .describe, .default, .allows, .assert).
+- Added TypeBox-style (@oh-my-pi/omptype/typebox) and Zod-style (@oh-my-pi/omptype/zod) authoring adapters that produce native omptype schemas.
+- Added support for recursive named scopes, modules, runtime generics, fixed/optional/variadic tuples, Date literals/bounds, disjointness-aware intersections, separate input/output inference, and draft-2020-12 JSON Schema emission.
+- Shipped transpiled ESM and TypeScript declarations in the npm package to support plain Node.js environments, while preserving TS source resolution for Bun consumers.
 
 ### Changed
 
-- Expanded the lazy JIT across tuples, refinements, morphs, intersections, instances, and recursive aliases; reused compiled validators for shared IR; added allocation-free statement code generation for `.allows()`; and tightened object, array, number, and literal-union checks.
-- Reduced schema construction overhead with direct nested-object parsing, non-Date DSL dispatch guards, and ASCII-fast whitespace and optional-key scans.
+- Optimized the lazy JIT compiler to support tuples, refinements, morphs, intersections, instances, and recursive aliases, while reducing schema construction overhead.
 
 ### Fixed
 
-- Fixed TS2589 ("type instantiation is excessively deep") on every generic fluent call (`.pipe`/`.narrow`/`.filter`) over schemas embedding other schemas: `InferDef`/`InferDefIn` now cut off `any` up front so TypeScript's permissive instantiation cannot recurse through spread/index members, spread and index-signature recursion is boxed behind an interface member, primitive keyword lookup is a flat map instead of a nested conditional chain, and member inference tail-chains its fallbacks.
-- `type.raw()` results (`BaseType`) now expose the fluent composition methods (`.array()`, `.or()`, `.pipe()`, …) instead of only the callable validator surface.
-- TypeBox adapter's `withJsonSchemaKeywords` now binds `toJsonSchema` before wrapping it, so keyword-carrying schemas (e.g. `uniqueItems` arrays) no longer throw `undefined is not an object` when emitted.
+- Fixed a TypeScript compiler error (TS2589: "type instantiation is excessively deep") when using generic fluent composition methods on nested schemas.
+- Fixed type.raw() results (BaseType) to correctly expose fluent composition methods like .array(), .or(), and .pipe().
+- Fixed an issue in the TypeBox adapter where keyword-carrying schemas (e.g., uniqueItems arrays) would throw an error during JSON Schema emission.
