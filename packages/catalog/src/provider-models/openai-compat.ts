@@ -1258,7 +1258,15 @@ export interface XaiModelManagerConfig {
 }
 
 export function xaiModelManagerOptions(config?: XaiModelManagerConfig): ModelManagerOptions<"openai-responses"> {
-	return createSimpleOpenAIResponsesOptions("xai", "https://api.x.ai/v1", config);
+	return {
+		...createSimpleOpenAIResponsesOptions("xai", "https://api.x.ai/v1", config),
+		// Completions → Responses migration: a fresh authoritative cache written
+		// by the old resolver stores `api: "openai-completions"` for these ids.
+		// Without a drop list, `online-if-uncached` skips the network and
+		// `mergeDynamicModel` lets the cached api win over the new static
+		// Responses entries until TTL expiry.
+		dropCachedModelIdsOnStaticMismatch: getBundledModels("xai").map(model => model.id),
+	};
 }
 
 export interface XaiOAuthModelManagerConfig {

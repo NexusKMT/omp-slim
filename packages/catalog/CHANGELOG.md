@@ -143,6 +143,10 @@
 - Requested `reasoning.encrypted_content` on first-party xAI Responses calls (`xai` and `xai-oauth`) via the `include` parameter.
 - Replayed xAI encrypted reasoning items on later Responses turns instead of stripping `type: "reasoning"` history.
 
+### Fixed
+
+- Invalidated stale paid-xAI model-cache rows written under Chat Completions so the Responses migration takes effect immediately instead of waiting for TTL expiry.
+
 ## [17.2.5] - 2026-08-03
 
 ### Fixed
