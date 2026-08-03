@@ -60,6 +60,7 @@ describe("InputController tool activity visibility", () => {
 		const addChild = vi.fn();
 		const rebuildChatFromMessages = vi.fn();
 		const set = vi.fn();
+		const clearInlineImages = vi.fn();
 		const resetDisplay = vi.fn();
 		const showStatus = vi.fn();
 		const ctx = {
@@ -69,7 +70,7 @@ describe("InputController tool activity visibility", () => {
 			chatContainer: { children, clear, addChild },
 			rebuildChatFromMessages,
 			showStatus,
-			ui: { resetDisplay },
+			ui: { clearInlineImages, resetDisplay },
 		};
 		const controller = new InputController(ctx as unknown as InteractiveModeContext) as unknown as InputController & {
 			toggleToolActivityVisibility(): void;
@@ -83,7 +84,9 @@ describe("InputController tool activity visibility", () => {
 		expect(clear).not.toHaveBeenCalled();
 		expect(addChild).not.toHaveBeenCalled();
 		expect(rebuildChatFromMessages).not.toHaveBeenCalled();
-		expect(resetDisplay).toHaveBeenCalled();
+		expect(clearInlineImages).toHaveBeenCalledTimes(1);
+		expect(resetDisplay).toHaveBeenCalledTimes(1);
+		expect(clearInlineImages.mock.invocationCallOrder[0]).toBeLessThan(resetDisplay.mock.invocationCallOrder[0]);
 		expect(showStatus).toHaveBeenLastCalledWith("Tool activity: hidden");
 		expect(setToolResultImagesVisible).toHaveBeenLastCalledWith(false);
 
@@ -96,6 +99,8 @@ describe("InputController tool activity visibility", () => {
 		expect(clear).not.toHaveBeenCalled();
 		expect(addChild).not.toHaveBeenCalled();
 		expect(rebuildChatFromMessages).not.toHaveBeenCalled();
+		expect(clearInlineImages).toHaveBeenCalledTimes(1);
+		expect(resetDisplay).toHaveBeenCalledTimes(2);
 		expect(showStatus).toHaveBeenLastCalledWith("Tool activity: visible");
 		expect(setToolResultImagesVisible).toHaveBeenLastCalledWith(true);
 	});

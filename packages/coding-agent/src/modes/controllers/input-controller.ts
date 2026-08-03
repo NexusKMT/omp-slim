@@ -1878,6 +1878,7 @@ export class InputController {
 			}
 		}
 
+		if (this.ctx.hideToolActivity) this.ctx.ui.clearInlineImages();
 		this.ctx.ui.resetDisplay();
 		this.ctx.showStatus(`Tool activity: ${this.ctx.hideToolActivity ? "hidden" : "visible"}`);
 	}

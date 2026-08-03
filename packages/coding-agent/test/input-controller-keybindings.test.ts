@@ -74,6 +74,7 @@ async function createContext() {
 		customHandlers.clear();
 	});
 	const resetDisplay = vi.fn();
+	const clearInlineImages = vi.fn();
 	const showModelSelector = vi.fn();
 	const requestRender = vi.fn();
 	const showError = vi.fn();
@@ -142,6 +143,7 @@ async function createContext() {
 		ui: {
 			requestRender,
 			resetDisplay,
+			clearInlineImages,
 			addInputListener,
 			addStartListener,
 			getFocused: vi.fn(() => focused),
@@ -234,6 +236,7 @@ async function createContext() {
 			retry,
 			abort,
 			resetDisplay,
+			clearInlineImages,
 			refreshAppearance,
 			resetDisplayAfterAppearanceRefresh,
 			handleBtwBranchKey,
@@ -283,6 +286,7 @@ describe("InputController keybinding setup", () => {
 
 		expect(ctx.hideToolActivity).toBe(true);
 		expect(ctx.settings.set).toHaveBeenCalledWith("display.hideToolActivity", true);
+		expect(spies.clearInlineImages).toHaveBeenCalledTimes(1);
 		expect(spies.resetDisplay).toHaveBeenCalledTimes(1);
 	});
 

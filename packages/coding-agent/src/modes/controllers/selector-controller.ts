@@ -487,6 +487,7 @@ export class SelectorController {
 						child.setToolResultImagesVisible(!hidden);
 					}
 				}
+				if (hidden) this.ctx.ui.clearInlineImages();
 				this.ctx.ui.resetDisplay();
 				break;
 			}
