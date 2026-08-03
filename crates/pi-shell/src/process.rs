@@ -1391,6 +1391,20 @@ impl Process {
 	}
 
 	fn signal_tree(&self, signal: i32) -> u32 {
+		self.signal_tree_excluding(signal, &host_protected_pids())
+	}
+
+	/// Signal this process and its live descendants (children first), skipping
+	/// any pid in `protected`.
+	///
+	/// `protected` shields the harness and its ancestor chain: a
+	/// run-cancellation sweep must never hard-kill the host. On Windows the
+	/// descendant tree is derived from raw `th32ParentProcessID` values that
+	/// outlive their recorded parent, so a freshly spawned child whose recycled
+	/// pid matches the harness's stale parent pid makes the harness enumerate
+	/// as a false descendant; `TerminateProcess`-ing it drops the whole session
+	/// with no cleanup and no `session_exit` record (#7452, related #4605).
+	fn signal_tree_excluding(&self, signal: i32, protected: &HashSet<i32>) -> u32 {
 		let descendants = self.live_descendants();
 		let mut signaled = 0u32;
 		// If self leads its own process group, also signal the group — this catches
@@ -1402,11 +1416,14 @@ impl Process {
 			let _ = kill_process_group(pgid, signal);
 		}
 		for child in &descendants {
+			if protected.contains(&child.pid()) {
+				continue;
+			}
 			if child.inner.kill(signal) {
 				signaled += 1;
 			}
 		}
-		if self.inner.kill(signal) {
+		if !protected.contains(&self.pid()) && self.inner.kill(signal) {
 			signaled += 1;
 		}
 		signaled
@@ -1424,6 +1441,7 @@ impl Process {
 		}
 
 		let process_group = if group { self.group_id() } else { None };
+		let protected = host_protected_pids();
 
 		// Polite wave: SIGTERM the group, every live descendant, then the root.
 		if let Some(pgid) = process_group {
@@ -1431,9 +1449,14 @@ impl Process {
 		}
 		let mut descendants = self.live_descendants();
 		for child in &descendants {
+			if protected.contains(&child.pid()) {
+				continue;
+			}
 			let _ = child.inner.kill(TERM_SIGNAL);
 		}
-		let _ = self.inner.kill(TERM_SIGNAL);
+		if !protected.contains(&self.pid()) {
+			let _ = self.inner.kill(TERM_SIGNAL);
+		}
 
 		// Optional grace wait. A negative `graceful_ms` skips the wait entirely
 		// (we still emit the polite signal so cleanup handlers can run before KILL).
@@ -1457,13 +1480,53 @@ impl Process {
 		}
 		descendants = self.live_descendants();
 		for child in &descendants {
+			if protected.contains(&child.pid()) {
+				continue;
+			}
 			let _ = child.inner.kill(KILL_SIGNAL);
 		}
-		let _ = self.inner.kill(KILL_SIGNAL);
+		if !protected.contains(&self.pid()) {
+			let _ = self.inner.kill(KILL_SIGNAL);
+		}
 
 		wait_for_exit(self, &descendants, Some(Duration::from_millis(u64::from(timeout_ms))), ct)
 			.await
 	}
+}
+
+/// The harness pid plus its resolvable ancestor chain — the set of processes a
+/// run-cancellation sweep must never signal.
+///
+/// On Unix the descendant walk is identity-pinned (pidfd / start-time), so the
+/// host can never appear as a false descendant and this set is a harmless
+/// no-op safety net. On Windows the descendant tree is derived from raw
+/// `th32ParentProcessID` values that survive their recorded parent's death: a
+/// freshly spawned child whose recycled pid matches the harness's stale parent
+/// pid makes the harness (and any of its ancestors) enumerate as a false
+/// descendant, so cancelling a timed-out bash run would `TerminateProcess` the
+/// host with no cleanup and no `session_exit` record (#7452, related #4605).
+///
+/// The host pid is inserted first, before any `Process::from_pid`, so the
+/// harness stays protected even when an ancestor handle cannot be opened.
+fn host_protected_pids() -> HashSet<i32> {
+	let mut protected = HashSet::new();
+	let Ok(mut pid) = i32::try_from(std::process::id()) else {
+		return protected;
+	};
+	// Bound the walk: a corrupted or cyclic parent chain must not loop forever.
+	for _ in 0..64 {
+		if !protected.insert(pid) {
+			break;
+		}
+		let Some(parent) = Process::from_pid(pid).and_then(|process| process.ppid()) else {
+			break;
+		};
+		if parent <= 0 || parent == pid {
+			break;
+		}
+		pid = parent;
+	}
+	protected
 }
 
 async fn wait_for_exit(
@@ -1814,6 +1877,59 @@ const fn platform_process_group_alive(_pgid: i32) -> bool {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// The harness pid must always be in the protected set, even before any
+	/// ancestor handle can be resolved: it is inserted before the first
+	/// `Process::from_pid`. Without this, a run-cancellation sweep that
+	/// enumerated the host as a false descendant would hard-kill the session.
+	#[test]
+	fn host_protected_pids_includes_self() {
+		let self_pid = i32::try_from(std::process::id()).expect("self pid fits in i32");
+		assert!(
+			host_protected_pids().contains(&self_pid),
+			"the harness pid must always be protected from cancellation sweeps",
+		);
+	}
+
+	/// Regression test for #7452: a cancellation sweep must never signal a pid
+	/// in the protected (host + ancestors) set, even when it is enumerated as
+	/// the sweep root. On Windows a recycled pid can make the harness surface as
+	/// a false descendant of a just-spawned child; `TerminateProcess`-ing it
+	/// killed the whole session with no `session_exit` record. The observable
+	/// defense — provable cross-platform — is that `signal_tree_excluding`
+	/// leaves a protected pid untouched.
+	#[cfg(unix)]
+	#[test]
+	fn signal_tree_spares_protected_pids() {
+		use std::{process::Command, thread, time::Duration};
+
+		let mut child = Command::new("sleep")
+			.arg("30")
+			.spawn()
+			.expect("spawn sleep");
+		let child_pid = i32::try_from(child.id()).expect("child pid fits in i32");
+		let root = Process::from_pid(child_pid).expect("pin child");
+
+		// Treat the child's pid as protected (standing in for the harness/an
+		// ancestor). The sweep must refuse to signal it.
+		let protected: HashSet<i32> = [child_pid].into_iter().collect();
+		let signaled = root.signal_tree_excluding(KILL_SIGNAL, &protected);
+		assert_eq!(signaled, 0, "a protected root must never be signalled");
+
+		// The protected process is still alive after the sweep.
+		thread::sleep(Duration::from_millis(50));
+		assert_eq!(
+			root.status(),
+			ProcessStatus::Running,
+			"a protected pid must survive a cancellation sweep",
+		);
+
+		// With no protection the same sweep reaps it — proves the skip is what
+		// spared it, not a dead target.
+		let reaped = root.signal_tree_excluding(KILL_SIGNAL, &HashSet::new());
+		assert!(reaped >= 1, "an unprotected root must be signalled");
+		let _ = child.wait();
+	}
 
 	/// `kill_process_group` is the last line of defense: even if a future
 	/// caller manages to feed the harness's own pgid into the signal path,
