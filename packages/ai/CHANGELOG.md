@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Amazon Bedrock Converse guardrail configuration with provider-scoped identifier, version, and trace settings.
+
 ### Changed
 
 - Replaced arktype with `@oh-my-pi/omptype`, an ArkType-compatible validator with lazy JIT compilation: ~100x faster schema construction and 60-100x faster hot-path validation. `packages/ai` re-exports `type`/`Type` from omptype; the wire schema detection contract (`isArkSchema`) is unchanged.

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added provider-wide Amazon Bedrock guardrail settings to models configuration, including custom models.
+
 ### Changed
 
 - Replaced arktype with `@oh-my-pi/omptype` across all tool parameter and config schemas: ~100x faster schema construction removes the arktype startup tax (the `scope({}, { jitless: true })` workarounds are gone). Config schema errors now report via `OmpErrors` entries with the same `path`/`problem` shape.

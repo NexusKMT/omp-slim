@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Amazon Bedrock guardrail metadata to model definitions for Converse requests.
+
 ### Changed
 
 - Replaced arktype with `@oh-my-pi/omptype` for discovery payload schemas (same definition DSL, lazy JIT validation).
