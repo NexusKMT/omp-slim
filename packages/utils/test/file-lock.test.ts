@@ -3,10 +3,10 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { __internalsForTesting, withFileLock } from "../src/file-lock";
+import { isEnoent } from "../src/fs-error";
 import { removeWithRetries } from "../src/temp";
 
-const { tryAcquireLock, releaseLock, readLockInfo, getStaleLockIdentity, reapStaleLock, getLockPath } =
-	__internalsForTesting;
+const { tryAcquireLock, getLockPath } = __internalsForTesting;
 
 const ROOTS: string[] = [];
 
@@ -22,91 +22,74 @@ afterAll(async () => {
 	}
 });
 
-describe("file-lock token ownership (F1)", () => {
-	test("releaseLock with the wrong token leaves the lock intact", async () => {
+describe("native file-lock ownership", () => {
+	test("process death hands ownership to B while excluding C", async () => {
 		const root = await mkRoot();
-		const target = path.join(root, "data.json");
+		const target = path.join(root, "abandoned.json");
+		const readyPath = path.join(root, "holder-ready");
 		const lockPath = getLockPath(target);
-
-		const token = await tryAcquireLock(lockPath);
-		expect(token).not.toBeNull();
-		expect(typeof token).toBe("string");
-
-		// A contender that lost a race calling release with a guessed/empty token
-		// must NOT remove the rightful owner's lock.
-		await releaseLock(lockPath, "not-the-real-token");
-
-		const info = await readLockInfo(lockPath);
-		expect(info).not.toBeNull();
-		expect(info?.token).toBe(token!);
-
-		// The rightful owner can still release.
-		await releaseLock(lockPath, token!);
-		expect(await readLockInfo(lockPath)).toBeNull();
-	});
-
-	test("getStaleLockIdentity does NOT declare a freshly-created empty dir stale", async () => {
-		const root = await mkRoot();
-		const target = path.join(root, "race.json");
-		const lockPath = getLockPath(target);
-
-		// Simulate the precise window: mkdir succeeded for the winner but the
-		// info file has not been written yet.
-		await fs.mkdir(lockPath);
-
-		const stale = await getStaleLockIdentity(lockPath, 10_000, 10_000);
-		expect(stale).toBeNull();
-
-		await removeWithRetries(lockPath);
-	});
-
-	test("a slow second reaper cannot destroy a reaped-and-reacquired lock", async () => {
-		const root = await mkRoot();
-		const target = path.join(root, "contested.json");
-		const lockPath = getLockPath(target);
-
-		// A dead owner's stale lock, judged stale by two contenders.
-		await fs.mkdir(lockPath);
-		await Bun.write(
-			path.join(lockPath, "info"),
-			JSON.stringify({ pid: 999_999_999, timestamp: Date.now() - 60_000, token: "dead-token" }),
+		const holder = Bun.spawn(
+			[process.execPath, path.join(import.meta.dir, "fixtures/file-lock-holder.ts"), target, readyPath],
+			{
+				cwd: path.resolve(import.meta.dir, "../../.."),
+				env: { HOME: process.env.HOME ?? "", PATH: process.env.PATH ?? "" },
+				stdin: "ignore",
+				stdout: "ignore",
+				stderr: "pipe",
+			},
 		);
-		const judged = await getStaleLockIdentity(lockPath, 10_000, 10_000);
-		expect(judged).toMatchObject({ token: "dead-token" });
 
-		// Reaper 1 wins: reaps and immediately re-acquires.
-		await reapStaleLock(lockPath, judged!);
-		const freshToken = await tryAcquireLock(lockPath);
-		expect(freshToken).not.toBeNull();
+		try {
+			for (;;) {
+				try {
+					await fs.access(readyPath);
+					break;
+				} catch (error) {
+					if (!isEnoent(error)) throw error;
+					if (holder.exitCode !== null) {
+						throw new Error(
+							`lock holder exited before readiness (${holder.exitCode}): ${await new Response(holder.stderr).text()}`,
+						);
+					}
+				}
+			}
 
-		// Reaper 2 acts on its stale pre-reap judgment: it must not remove the
-		// fresh owner's lock.
-		await reapStaleLock(lockPath, judged!);
+			holder.kill();
+			expect(await holder.exited).not.toBe(0);
 
-		const info = await readLockInfo(lockPath);
-		expect(info?.token).toBe(freshToken!);
+			const ownerB = tryAcquireLock(lockPath);
+			if (!ownerB) throw new Error("B failed to acquire the abandoned lock");
+			const ownerC = tryAcquireLock(lockPath);
+			expect(ownerC).toBeNull();
+			expect(ownerB.acquired).toBe(true);
+			ownerB.release();
+		} finally {
+			if (holder.exitCode === null) {
+				holder.kill();
+				await holder.exited;
+			}
+		}
+	}, 10_000);
 
-		// The fresh owner can still release normally.
-		await releaseLock(lockPath, freshToken!);
-		expect(await readLockInfo(lockPath)).toBeNull();
-	});
-
-	test("concurrent reapers of a vanished lock are a no-op", async () => {
+	test("a former owner's late release cannot unlock its successor", async () => {
 		const root = await mkRoot();
-		const target = path.join(root, "gone.json");
-		const lockPath = getLockPath(target);
+		const lockPath = getLockPath(path.join(root, "handoff.json"));
+		const formerOwner = tryAcquireLock(lockPath);
+		if (!formerOwner) throw new Error("former owner failed to acquire");
+		formerOwner.release();
 
-		await fs.mkdir(lockPath);
-		await Bun.write(
-			path.join(lockPath, "info"),
-			JSON.stringify({ pid: 999_999_999, timestamp: Date.now() - 60_000, token: "dead-token" }),
-		);
-		const judged = await getStaleLockIdentity(lockPath, 10_000, 10_000);
-		await reapStaleLock(lockPath, judged!);
-		// Second reap of the already-removed lock must not throw or recreate it.
-		await reapStaleLock(lockPath, judged!);
-		expect(await readLockInfo(lockPath)).toBeNull();
-		expect(await fs.stat(lockPath).catch(() => null)).toBeNull();
+		const successor = tryAcquireLock(lockPath);
+		if (!successor) throw new Error("successor failed to acquire");
+
+		// Force the old release path after the successor owns the same name.
+		formerOwner.release();
+		expect(tryAcquireLock(lockPath)).toBeNull();
+		expect(successor.acquired).toBe(true);
+
+		successor.release();
+		const finalOwner = tryAcquireLock(lockPath);
+		if (!finalOwner) throw new Error("final owner failed to acquire");
+		finalOwner.release();
 	});
 
 	test("withFileLock serializes N concurrent writers without lost updates", async () => {
@@ -123,9 +106,7 @@ describe("file-lock token ownership (F1)", () => {
 						const text = await fs.readFile(target, "utf-8");
 						const data = JSON.parse(text) as { counter: number };
 						data.counter += 1;
-						// Widen the critical-section window so any concurrency leak
-						// surfaces as a lost update.
-						await Bun.sleep(2);
+						await Promise.resolve();
 						await fs.writeFile(target, JSON.stringify(data));
 					},
 					{ retries: 500, retryDelayMs: 5 },

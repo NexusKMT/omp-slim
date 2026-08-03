@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added a shared `file-lock` utility module featuring configurable stale-lock acquisition grace periods (`acquireStaleMs`) to safely handle abandoned locks.
+- Added a shared `file-lock` utility backed by process-owned native OS locks with automatic crash release and bounded asynchronous retry.
 
 ## [17.2.5] - 2026-08-03
 

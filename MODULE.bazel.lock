@@ -505,7 +505,7 @@
           "FILE:@@//Cargo.toml 882e091720fde608c21c051c8efec1ddf8dda31f2274416699bebe2f2a5e66ec",
           "FILE:@@//crates/pi-ast/Cargo.toml 4467b5854e91088ad1669756f7a0aaec3c2208fc28057a29982ccc902ecaf356",
           "FILE:@@//crates/pi-iso/Cargo.toml 1cd7ed7e5e8cbe9b1683f38f1250d475d6bec29cd84c757af817eb5a79cffdb2",
-          "FILE:@@//crates/pi-natives/Cargo.toml fd137965d107e533777486cacd6142c5199cd6761de33dc4e43437149ba29d44",
+          "FILE:@@//crates/pi-natives/Cargo.toml 8e2e2be6de8b3b765683fc7a75617ec869bafb8cff45741bc4589d7d0dddf3c0",
           "FILE:@@//crates/pi-shell/Cargo.toml dff7badd2729fe8ba492500bab6119cb994f3d0bb21d559587b2c6a17168408a",
           "FILE:@@//crates/vendor/brush-builtins/Cargo.toml 9799575fe609133927291fbca4c4e190e0378c7efe20aa9f66bb0ae6a08cb6ef",
           "FILE:@@//crates/vendor/brush-core/Cargo.toml a15b65352d399a599153c739a69064c82c12170fd989bf96adeaee87bed98c2c",

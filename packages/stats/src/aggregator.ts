@@ -51,24 +51,20 @@ import type {
 import { computeUsageWindowStats, fetchUsageSnapshots } from "./usage-windows";
 
 const STATS_SYNC_LOCK_RETRY_MS = 25;
-const STATS_SYNC_LOCK_ACQUIRE_STALE_MS = 10 * 1000;
-const STATS_SYNC_LOCK_STALE_MS = 60 * 60 * 1000;
+const STATS_SYNC_LOCK_WAIT_MS = 60 * 60 * 1000;
 
 /**
  * Serialize stats ingestion and archive reconciliation across processes.
  * The lock covers file discovery, parsing, and the final SQLite write so a
  * parse result for a session moved by GC can never commit after cleanup.
- * The lock lives at `${dbPath}.sync.lock`; a dead owner is reclaimed
- * immediately, a live-but-wedged one after an hour, and a lock abandoned
- * mid-acquisition after ten seconds.
+ * The native lock is owned by an operating-system primitive, so an interrupted
+ * owner is released automatically and a live owner is never displaced.
  */
 export async function withStatsSyncLock<T>(dbPath: string, fn: () => Promise<T>): Promise<T> {
 	await fs.promises.mkdir(path.dirname(dbPath), { recursive: true });
 	return await withFileLock(`${dbPath}.sync`, fn, {
-		staleMs: STATS_SYNC_LOCK_STALE_MS,
-		acquireStaleMs: STATS_SYNC_LOCK_ACQUIRE_STALE_MS,
 		retryDelayMs: STATS_SYNC_LOCK_RETRY_MS,
-		retries: Math.ceil(STATS_SYNC_LOCK_STALE_MS / STATS_SYNC_LOCK_RETRY_MS),
+		retries: Math.ceil(STATS_SYNC_LOCK_WAIT_MS / STATS_SYNC_LOCK_RETRY_MS),
 	});
 }
 

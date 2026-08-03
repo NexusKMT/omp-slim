@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { syncAllSessions, withStatsSyncLock } from "@oh-my-pi/omp-stats/aggregator";
+import { syncAllSessions } from "@oh-my-pi/omp-stats/aggregator";
 import { getOverallStats } from "@oh-my-pi/omp-stats/db";
 import { getSessionsDir } from "@oh-my-pi/pi-utils";
 import { installStatsTestIsolation } from "./helpers/temp-agent";
@@ -92,72 +92,5 @@ describe("stats sync serial mode", () => {
 
 		await expect(syncAllSessions({ workers: 2 })).rejects.toBe(workerProbe);
 		expect(workerSpy).toHaveBeenCalled();
-	});
-
-	it("reclaims a dead owner's abandoned lock", async () => {
-		const dbPath = path.join(getSessionsDir(), "stats-lock.db");
-		const lockPath = `${dbPath}.sync.lock`;
-		const deadPid = 424_242;
-		await fs.mkdir(lockPath, { recursive: true });
-		await Bun.write(
-			path.join(lockPath, "info"),
-			JSON.stringify({ pid: deadPid, timestamp: Date.now() - 60_000, token: "dead-owner" }),
-		);
-		vi.spyOn(process, "kill").mockImplementation(pid => {
-			if (pid === deadPid) throw Object.assign(new Error("dead owner"), { code: "ESRCH" });
-			return true;
-		});
-
-		vi.spyOn(Bun, "sleep").mockResolvedValue(undefined);
-		const result = await withStatsSyncLock(dbPath, async () => "acquired");
-
-		expect(result).toBe("acquired");
-		expect(await fs.stat(lockPath).catch(() => null)).toBeNull();
-	});
-
-	it("reclaims an unstamped lock after the acquisition grace period", async () => {
-		const dbPath = path.join(getSessionsDir(), "stats-unstamped-lock.db");
-		const lockPath = `${dbPath}.sync.lock`;
-		await fs.mkdir(lockPath, { recursive: true });
-		const staleTime = new Date(Date.now() - 11_000);
-		await fs.utimes(lockPath, staleTime, staleTime);
-		vi.spyOn(Bun, "sleep").mockResolvedValue(undefined);
-
-		const result = await withStatsSyncLock(dbPath, async () => "acquired");
-
-		expect(result).toBe("acquired");
-		expect(await fs.stat(lockPath).catch(() => null)).toBeNull();
-	});
-
-	it("waits for a live recently-stamped owner instead of reclaiming it", async () => {
-		const dbPath = path.join(getSessionsDir(), "stats-live-lock.db");
-		const lockPath = `${dbPath}.sync.lock`;
-		const infoPath = path.join(lockPath, "info");
-		await fs.mkdir(lockPath, { recursive: true });
-		await Bun.write(infoPath, JSON.stringify({ pid: process.pid, timestamp: Date.now(), token: "live-owner" }));
-		const retryScheduled = Promise.withResolvers<void>();
-		const resumeRetry = Promise.withResolvers<void>();
-		let lockReleased = false;
-		vi.spyOn(Bun, "sleep").mockImplementation(async () => {
-			if (lockReleased) return;
-			retryScheduled.resolve();
-			await resumeRetry.promise;
-		});
-
-		let acquired = false;
-		const pending = withStatsSyncLock(dbPath, async () => {
-			acquired = true;
-		});
-		try {
-			await retryScheduled.promise;
-			expect(acquired).toBe(false);
-			expect(JSON.parse(await Bun.file(infoPath).text())).toMatchObject({ token: "live-owner" });
-		} finally {
-			lockReleased = true;
-			await fs.rm(lockPath, { recursive: true, force: true });
-			resumeRetry.resolve();
-			await pending;
-		}
-		expect(acquired).toBe(true);
 	});
 });
