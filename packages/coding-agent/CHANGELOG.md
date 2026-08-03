@@ -24,6 +24,7 @@
 
 ### Fixed
 
+- Fixed `/mcp reauth` sending literal `${VAR}` placeholders instead of env-expanded OAuth client credentials during the token exchange, and `MCPOAuthFlow.exchangeToken()` accepting an HTTP-200 token response with no `access_token` (e.g. a Slack `{ ok: false, error }` body), which stored an empty access token and only surfaced `invalid_token` on a later MCP request ([#7440](https://github.com/can1357/oh-my-pi/issues/7440)).
 - Fixed template argument substitution (`substituteArgs`) executing recursive placeholder expansion when positional argument values contain literal `$@` or `$ARGUMENTS` tokens.
 - Fixed focused-agent status bar dimming darkening Powerline end caps.
 - Fixed the browser relay creating duplicate "omp" tab groups: the bridge now keeps at most one group RPC in flight (a queued drain replaces fire-and-forget per-tab requests), so concurrent requests can no longer race the extension's non-atomic query→create→set-title sequence in the same window. Also fixed an extension reconnect (relay daemon restart, service-worker recycle) being misread as the user dragging every tab out of the omp group — grouping state is reset when the extension socket closes, so tabs regroup on the next hello instead of being permanently opted out.
