@@ -5050,6 +5050,11 @@ export function githubCopilotModelManagerOptions(config?: GithubCopilotModelMana
 											}
 										: {}),
 								};
+						const defaultCost = copilotTierCost(tokenPrices.defaultTier);
+						if (defaultCost) {
+							// Cache writes are not reported per tier; retain the bundled provider rate.
+							base.cost = { ...defaultCost, cacheWrite: base.cost.cacheWrite };
+						}
 						const variant = createCopilotLongContextVariant(
 							base,
 							contextWindow,

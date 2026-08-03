@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed GitHub Copilot dynamic discovery retaining stale bundled prices for default-context models instead of using the provider's reported default-tier prices ([#7471](https://github.com/can1357/oh-my-pi/issues/7471)).
+
 ## [17.2.5] - 2026-08-03
 
 ### Fixed
