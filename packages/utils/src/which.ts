@@ -215,9 +215,7 @@ function cacheKey(command: string, options?: Bun.WhichOptions): CacheKey {
 export function $which(command: string, options?: WhichOptions): string | null {
 	const cachePolicy = options?.cache ?? WhichCachePolicy.Cached;
 	const lookupOptions =
-		options?.PATH !== undefined || process.env.PATH === undefined
-			? options
-			: { ...options, PATH: process.env.PATH };
+		options?.PATH !== undefined || process.env.PATH === undefined ? options : { ...options, PATH: process.env.PATH };
 	let key: CacheKey | undefined;
 
 	if (cachePolicy !== WhichCachePolicy.Bypass) {
