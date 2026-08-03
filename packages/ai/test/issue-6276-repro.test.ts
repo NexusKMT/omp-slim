@@ -31,7 +31,7 @@ const context: Context = {
 	tools: [],
 };
 
-function capturePayload(options: {
+async function capturePayload(options: {
 	guardrailIdentifier?: string;
 	guardrailVersion?: string;
 	guardrailTrace?: "enabled" | "disabled" | "enabled_full";
@@ -39,15 +39,23 @@ function capturePayload(options: {
 	const controller = new AbortController();
 	controller.abort();
 	const { promise, resolve } = Promise.withResolvers<GuardrailPayload>();
-	void streamBedrock(model(), context, {
+	const stream = streamBedrock(model(), context, {
 		...options,
+		bearerToken: "test-token",
 		signal: controller.signal,
+		fetch: async () => new Response(new Uint8Array(), { status: 200 }),
 		onPayload: payload => {
 			resolve(payload as GuardrailPayload);
 			return undefined;
 		},
 	});
-	return promise;
+	const drain = (async () => {
+		for await (const _ of stream) {
+			// Drain the provider stream so request errors are observed.
+		}
+	})();
+	const [payload] = await Promise.all([promise, drain]);
+	return payload;
 }
 
 describe("issue #6276 — Amazon Bedrock guardrails", () => {
