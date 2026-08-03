@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed extension slash commands appearing as user prompts after being handled locally.
+
 ## [17.2.5] - 2026-08-03
 
 ### Breaking Changes

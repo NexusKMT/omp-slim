@@ -752,6 +752,25 @@ export class InputController {
 				}
 			}
 
+			// Extension commands are local actions. Execute them before the normal
+			// submission path creates an optimistic user message; otherwise a
+			// consumed command remains rendered like a prompt sent to the model.
+			const extensionCommandSpace = text.indexOf(" ");
+			const isLocalExtensionCommand =
+				text.startsWith("/") &&
+				runner?.getCommand(extensionCommandSpace === -1 ? text.slice(1) : text.slice(1, extensionCommandSpace)) !==
+					undefined;
+			if (isLocalExtensionCommand) {
+				this.ctx.editor.addToHistory(text);
+				try {
+					await this.ctx.session.prompt(text, { images: inputImages });
+				} catch (error) {
+					this.ctx.editor.setText(text);
+					this.ctx.showError(error instanceof Error ? error.message : String(error));
+				}
+				return;
+			}
+
 			// Handle bash command (! for normal, !! for excluded from context)
 			if (text.startsWith("!")) {
 				const isExcluded = text.startsWith("!!");
