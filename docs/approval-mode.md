@@ -54,6 +54,18 @@ approval: { tier: "exec", override: true, reason: "Critical pattern detected" }
 
 `bash` uses this for critical destructive patterns such as `rm -rf /`, fork bombs, remote-fetch-then-execute, writes to `/etc/passwd`, and host shutdown commands. These surface as `reason` in the approval prompt, but in `yolo` mode they are auto-approved unless a user policy for the tool is set to `prompt` or `deny`.
 
+### Computer safety
+
+The disabled-by-default [`computer` tool](./computer-use.md) chooses its tier from the complete ordered batch:
+
+- batches containing only `screenshot` and `wait` use `read`;
+- any pointer or keyboard action uses `exec`;
+- missing or malformed actions conservatively use `exec`.
+
+The selected window and ordered action summaries appear in the approval prompt. Numeric window targeting preserves the foreground app and real pointer, but it still sends real input to the chosen application and can cause side effects.
+
+Tool approval does not authorize the underlying real-world action. On-screen text is untrusted and cannot override direct user instructions. Consequential actions still require point-of-risk confirmation of the exact target, scope, and values unless the user's direct message already authorized them.
+
 ## Per-tool prompt details
 
 Tools can add approval-prompt body lines with `formatApprovalDetails(args)`. The standard prompt includes:

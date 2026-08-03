@@ -1,6 +1,13 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
-import { clearRenderCache, Markdown, renderInlineMarkdown } from "@oh-my-pi/pi-tui/components/markdown";
+import {
+	autolinkSchemeScanIndex,
+	clearRenderCache,
+	Markdown,
+	mathStartIndex,
+	renderInlineMarkdown,
+	urlTokenPossible,
+} from "@oh-my-pi/pi-tui/components/markdown";
 import { setTerminalTextSizing, TERMINAL } from "@oh-my-pi/pi-tui/terminal-capabilities";
 import { type Component, TUI } from "@oh-my-pi/pi-tui/tui";
 import { visibleWidth } from "@oh-my-pi/pi-tui/utils";
@@ -16,6 +23,16 @@ function getCellItalic(terminal: VirtualTerminal, row: number, col: number): boo
 }
 
 describe("renderInlineMarkdown", () => {
+	it("preserves ST-terminated OSC 8 links before inline lexing", () => {
+		const st = "\x1b\\";
+		const input = `\x1b]8;;file:///tmp/example.ts${st}\`example.ts\`\x1b]8;;${st}`;
+		const rendered = renderInlineMarkdown(input, defaultMarkdownTheme);
+		const plain = stripVTControlCharacters(rendered.replace(/\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)/g, ""));
+
+		expect(rendered.includes("\x1b]8;;file:///tmp/example.ts\x07")).toBeTruthy();
+		expect(plain).toBe("example.ts");
+	});
+
 	it("preserves ordered list items as visible inline text", () => {
 		const rendered = renderInlineMarkdown("1. Review against a base branch (PR Style)", defaultMarkdownTheme);
 		const plain = stripVTControlCharacters(rendered);
@@ -125,6 +142,33 @@ describe("Markdown component", () => {
 			expect(plainLines.some(line => line.includes("2. Second ordered"))).toBeTruthy();
 		});
 
+		it("wraps unordered list continuations under the item text", () => {
+			const markdown = new Markdown("- Alpha beta gamma delta epsilon", 0, 0, defaultMarkdownTheme);
+
+			const plainLines = markdown.render(16).map(line => stripVTControlCharacters(line).trimEnd());
+
+			expect(plainLines).toEqual(["- Alpha beta", "  gamma delta", "  epsilon"]);
+			expect(plainLines.every(line => visibleWidth(line) <= 16)).toBe(true);
+		});
+
+		it("uses the full ordered-list marker width as the hanging indent", () => {
+			const markdown = new Markdown("10. Alpha beta gamma delta", 0, 0, defaultMarkdownTheme);
+
+			const plainLines = markdown.render(16).map(line => stripVTControlCharacters(line).trimEnd());
+
+			expect(plainLines).toEqual(["10. Alpha beta", "    gamma delta"]);
+			expect(plainLines.every(line => visibleWidth(line) <= 16)).toBe(true);
+		});
+
+		it("keeps list rows within width when the marker consumes the line", () => {
+			const markdown = new Markdown("123456789. x", 0, 0, defaultMarkdownTheme);
+
+			const plainLines = markdown.render(8).map(line => stripVTControlCharacters(line).trimEnd());
+
+			expect(plainLines.every(line => visibleWidth(line) <= 8)).toBe(true);
+			expect(plainLines.join("")).toContain("x");
+		});
+
 		it("should maintain numbering when code blocks are not indented (LLM output)", () => {
 			// When code blocks aren't indented, marked parses each item as a separate list.
 			// We use token.start to preserve the original numbering.
@@ -164,6 +208,31 @@ describe("Markdown component", () => {
 	});
 
 	describe("Tables", () => {
+		it("preserves ST-terminated OSC 8 links inside table cells", () => {
+			const st = "\x1b\\";
+			const fileLink = `\x1b]8;;file:///tmp/DisplayTypeEnum.java${st}\`DisplayTypeEnum.java\`\x1b]8;;${st}`;
+			const markdown = new Markdown(
+				`| Module | Local file | Change |
+| --- | --- | --- |
+| common | ${fileLink} | Added display type |`,
+				0,
+				0,
+				defaultMarkdownTheme,
+			);
+
+			const width = 80;
+			const lines = markdown.render(width);
+			const output = lines.join("\n");
+			const plainOutput = stripVTControlCharacters(output.replace(/\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)/g, ""));
+
+			expect(output.includes("\x1b]8;;file:///tmp/DisplayTypeEnum.java\x07")).toBeTruthy();
+			expect(plainOutput.includes("DisplayTypeEnum.java")).toBeTruthy();
+			expect(plainOutput.includes("`DisplayTypeEnum.java`")).toBeFalsy();
+			for (const line of lines) {
+				expect(visibleWidth(line), `Line exceeds width ${width}`).toBeLessThanOrEqual(width);
+			}
+		});
+
 		it("should render simple table", () => {
 			const markdown = new Markdown(
 				`| Name | Age |
@@ -896,6 +965,48 @@ more text`,
 			}
 		});
 
+		it("keeps coding-agent's padded fenced code body at column zero", () => {
+			const markdown = new Markdown("```sh\ncat <<'EOF'\nEOF\n```", 1, 0, defaultMarkdownTheme, undefined, 0);
+
+			const plainLines = markdown.render(80).map(line => stripVTControlCharacters(line).trimEnd());
+
+			expect(plainLines).toEqual([" ```sh", "cat <<'EOF'", "EOF", " ```"]);
+		});
+
+		it("keeps literal code body rows unprefixed through nested container wrapping", () => {
+			const longCodeLine = "x".repeat(24);
+			const cases = [
+				`- shell:
+
+  \`\`\`sh
+  ${longCodeLine}
+  EOF
+  \`\`\``,
+				`> \`\`\`sh
+> ${longCodeLine}
+> EOF
+> \`\`\``,
+			];
+
+			for (const text of cases) {
+				const markdown = new Markdown(text, 1, 0, defaultMarkdownTheme, undefined, 0);
+				const plainLines = markdown.render(12).map(line => stripVTControlCharacters(line).trimEnd());
+				const literalRows = plainLines.filter(line => line.includes("x") || line === "EOF");
+
+				expect(literalRows.join("")).toBe(`${longCodeLine}EOF`);
+				expect(literalRows.length).toBeGreaterThan(2);
+				expect(literalRows.every(line => line.startsWith("x") || line === "EOF")).toBe(true);
+			}
+		});
+
+		it("keeps ordinary prose NUL bytes as ordinary padded text", () => {
+			const markdown = new Markdown("before\0after", 1, 0, defaultMarkdownTheme);
+
+			const plainLines = markdown.render(80).map(line => stripVTControlCharacters(line).trimEnd());
+
+			expect(plainLines).toEqual([" before\0after"]);
+		});
+
 		it("should not add a trailing blank line when code block is the last rendered block", () => {
 			const cases = ["```js\nconst hello = 'world';\n```", "hello world\n\n```js\nconst hello = 'world';\n```"];
 
@@ -929,6 +1040,21 @@ more text`,
 			expect(seenSources).toEqual([mermaidSource]);
 			expect(plainLines).toEqual(["Start", "  |", "Stop"]);
 			expect(plainLines.some(line => line.includes("```mermaid"))).toBeFalsy();
+		});
+
+		it("keeps resolved Mermaid art inside the coding-agent margin", () => {
+			const markdown = new Markdown(
+				"```mermaid\nflowchart TD\n```",
+				1,
+				0,
+				{ ...defaultMarkdownTheme, resolveMermaidAscii: () => "Start\n  |\nStop" },
+				undefined,
+				0,
+			);
+
+			const plainLines = markdown.render(80).map(line => stripVTControlCharacters(line).trimEnd());
+
+			expect(plainLines).toEqual([" Start", "   |", " Stop"]);
 		});
 
 		it("falls back to the original fenced code block when mermaid resolution returns null", () => {
@@ -1332,6 +1458,33 @@ bar`,
 			terminalState.hyperlinks = originalHyperlinks;
 		});
 
+		function inspectHyperlinks(line: string): { visible: string; targets: Array<string | null> } {
+			let activeTarget: string | null = null;
+			let visible = "";
+			const targets: Array<string | null> = [];
+
+			for (let i = 0; i < line.length; ) {
+				if (line.startsWith("\x1b]8;;", i)) {
+					const terminator = line.indexOf("\x07", i + 5);
+					activeTarget = line.slice(i + 5, terminator) || null;
+					i = terminator + 1;
+					continue;
+				}
+				if (line.startsWith("\x1b[", i)) {
+					i += 2;
+					while (i < line.length && (line.charCodeAt(i) < 0x40 || line.charCodeAt(i) > 0x7e)) i++;
+					i++;
+					continue;
+				}
+
+				visible += line[i];
+				targets.push(activeTarget);
+				i++;
+			}
+
+			return { visible, targets };
+		}
+
 		it("should not duplicate URL for autolinked emails", () => {
 			const markdown = new Markdown("Contact user@example.com for help", 0, 0, defaultMarkdownTheme);
 
@@ -1364,24 +1517,107 @@ bar`,
 			expect(output.includes("\x1b]8;;\x07")).toBeTruthy();
 		});
 
-		it("should keep wrapped URLs inside a single OSC 8 hyperlink span", () => {
+		it("should balance the complete OSC 8 target around every wrapped URL fragment", () => {
+			const url = "https://example.com/really/long/path/that/will/wrap/on/narrow/width";
+			const markdown = new Markdown(`Visit ${url} for more`, 0, 0, defaultMarkdownTheme);
+
+			const lines = markdown.render(32);
+			const linkedLines = lines.filter(line => inspectHyperlinks(line).targets.includes(url));
+			expect(linkedLines.length).toBeGreaterThan(1);
+			for (const line of linkedLines) {
+				expect(line.split(`\x1b]8;;${url}\x07`)).toHaveLength(2);
+				expect(line.match(/\x1b\]8;;\x07/g)).toHaveLength(1);
+				expect(new Set(inspectHyperlinks(line).targets.filter(target => target !== null))).toEqual(new Set([url]));
+			}
+		});
+
+		it("should isolate wrapped OSC 8 links from adjacent table cells", () => {
+			const issueUrl = "https://github.com/can1357/oh-my-pi/issues/5860";
 			const markdown = new Markdown(
-				"Visit https://example.com/really/long/path/that/will/wrap/on/narrow/width for more",
+				`| Issue | Title |
+|---|---|
+| [#5860](${issueUrl}) | feat(extensions): expose live service-tier state (/fast) to extensions |`,
 				0,
 				0,
 				defaultMarkdownTheme,
 			);
 
-			const lines = markdown.render(32);
-			expect(lines.length).toBeGreaterThan(1);
-			const output = lines.join("\n");
-			const openMatches =
-				output.match(
-					/\x1b\]8;;https:\/\/example\.com\/really\/long\/path\/that\/will\/wrap\/on\/narrow\/width\x07/g,
-				) || [];
-			const closeMatches = output.match(/\x1b\]8;;\x07/g) || [];
-			expect(openMatches.length).toBe(1);
-			expect(closeMatches.length).toBeGreaterThan(0);
+			const lines = markdown.render(80).map(inspectHyperlinks);
+			const issueRow = lines.find(line => line.visible.includes("#5860"));
+			expect(issueRow).toBeDefined();
+			if (!issueRow) throw new Error("Expected rendered issue row");
+
+			for (const line of lines) {
+				for (let i = 0; i < line.visible.length; i++) {
+					if (line.visible[i] === "|") expect(line.targets[i]).toBeNull();
+				}
+			}
+
+			const labelStart = issueRow.visible.indexOf("#5860");
+			const separator = issueRow.visible.indexOf("|", labelStart);
+			expect(issueRow.targets.slice(labelStart, labelStart + "#5860".length)).toEqual(
+				new Array("#5860".length).fill(issueUrl),
+			);
+			expect(issueRow.targets.slice(labelStart + "#5860".length, separator)).toEqual(
+				new Array(separator - labelStart - "#5860".length).fill(null),
+			);
+
+			const titleStart = issueRow.visible.indexOf("feat(extensions)");
+			expect(issueRow.targets.slice(titleStart, titleStart + "feat(extensions)".length)).toEqual(
+				new Array("feat(extensions)".length).fill(null),
+			);
+
+			const linkedText = lines
+				.flatMap(line => [...line.visible].filter((_, index) => line.targets[index] === issueUrl))
+				.join("");
+			expect(linkedText).toContain("#5860");
+			expect(linkedText).toContain(issueUrl);
+			expect(new Set(lines.flatMap(line => line.targets).filter(target => target !== null))).toEqual(
+				new Set([issueUrl]),
+			);
+		});
+
+		it("should balance OSC 8 links across explicit newlines in a table cell", () => {
+			const issueUrl = "https://github.com/can1357/oh-my-pi/issues/5860";
+			const markdown = new Markdown(
+				`| Issue | Title |
+|---|---|
+| [first<br>second](${issueUrl}) | plain title cell |`,
+				0,
+				0,
+				defaultMarkdownTheme,
+			);
+
+			const lines = markdown.render(40).map(inspectHyperlinks);
+			const firstRow = lines.find(line => line.visible.includes("first"));
+			const secondRow = lines.find(line => line.visible.includes("second"));
+			expect(firstRow).toBeDefined();
+			expect(secondRow).toBeDefined();
+			if (!firstRow || !secondRow) throw new Error("Expected both wrapped label rows");
+
+			// No cell border or padding may carry the link on either physical row.
+			for (const line of lines) {
+				for (let i = 0; i < line.visible.length; i++) {
+					if (line.visible[i] === "|") expect(line.targets[i]).toBeNull();
+				}
+			}
+
+			// Both label fragments split by <br> must still target the full URL.
+			for (const [row, label] of [
+				[firstRow, "first"],
+				[secondRow, "second"],
+			] as const) {
+				const start = row.visible.indexOf(label);
+				expect(row.targets.slice(start, start + label.length)).toEqual(new Array(label.length).fill(issueUrl));
+				const separator = row.visible.indexOf("|", start);
+				expect(row.targets.slice(start + label.length, separator)).toEqual(
+					new Array(separator - start - label.length).fill(null),
+				);
+			}
+
+			expect(new Set(lines.flatMap(line => line.targets).filter(target => target !== null))).toEqual(
+				new Set([issueUrl]),
+			);
 		});
 
 		it("should show URL for explicit markdown links with different text", () => {
@@ -1409,6 +1645,36 @@ bar`,
 				joinedPlain.includes("(mailto:test@example.com)"),
 				"Should show mailto URL in parentheses",
 			).toBeTruthy();
+		});
+
+		it("does not autolink www. glued to a path separator (issue #5652)", () => {
+			const filePath = "~/meta/www.share/blog/A5-memory-safety-type-system/index.dj";
+			const markdown = new Markdown(filePath, 0, 0, defaultMarkdownTheme);
+
+			const output = markdown.render(120).join("\n");
+			const plain = stripTerminalSequences(output);
+
+			// The bare path must render verbatim, with no injected `(http…)` URL.
+			expect(plain).toContain(filePath);
+			expect(plain.includes("http://www.share")).toBe(false);
+			// No OSC 8 hyperlink target should be emitted for the path.
+			expect(output.includes("\x1b]8;;http://www.share")).toBe(false);
+		});
+
+		it("does not autolink a scheme glued to preceding text", () => {
+			const text = "path/to/foohttp://bar.com/x";
+			const markdown = new Markdown(text, 0, 0, defaultMarkdownTheme);
+
+			const plain = stripTerminalSequences(markdown.render(120).join("\n"));
+			expect(plain).toContain(text);
+			expect(plain.includes("(http")).toBe(false);
+		});
+
+		it("still autolinks www. at a valid left boundary", () => {
+			const markdown = new Markdown("see www.example.com here", 0, 0, defaultMarkdownTheme);
+
+			const output = markdown.render(80).join("\n");
+			expect(output.includes("\x1b]8;;http://www.example.com\x07")).toBe(true);
 		});
 	});
 
@@ -1540,6 +1806,21 @@ describe("Inline color swatches", () => {
 		expect(prose.includes("■")).toBe(false);
 		const code = new Markdown("Tag `#6C5E` stays plain.", 0, 0, defaultMarkdownTheme).render(80).join("");
 		expect(code.includes("■")).toBe(false);
+	});
+
+	it("does not swatch hash-prefixed UUIDs in prose", () => {
+		const uuid = new Markdown(
+			"Use feedback ID #6635765d-4a44-4a5e-a536-a8b72b0395b5 for testing.",
+			0,
+			0,
+			defaultMarkdownTheme,
+		)
+			.render(80)
+			.join("");
+		expect(uuid.includes("■")).toBe(false);
+
+		const color = new Markdown("Use color #6635765d.", 0, 0, defaultMarkdownTheme).render(80).join("");
+		expect(color.includes(swatchFor("6635765d"))).toBeTruthy();
 	});
 
 	it("uses the theme's colorSwatch symbol when provided", () => {
@@ -1765,9 +2046,11 @@ describe("Markdown.render reference stability", () => {
 	});
 
 	it("does not share oversized renders through the L2 cache", () => {
+		// Fixture must exceed RENDER_CACHE_MAX_ENTRY_SIZE (256 KiB of rendered
+		// lines) so the entry is rejected and each render owns its array.
 		const width = 80;
 		const paragraph = `cache-budget sentinel ${"x".repeat(120)}`;
-		const largeText = Array.from({ length: 160 }, (_, index) => `Paragraph ${index}: ${paragraph}`).join("\n\n");
+		const largeText = Array.from({ length: 1400 }, (_, index) => `Paragraph ${index}: ${paragraph}`).join("\n\n");
 
 		const first = new Markdown(largeText, 0, 0, defaultMarkdownTheme).render(width);
 		const second = new Markdown(largeText, 0, 0, defaultMarkdownTheme).render(width);
@@ -2142,5 +2425,148 @@ describe("Math rendering", () => {
 		expect(lines.join("\n")).not.toContain("begin{cases}");
 		// The cases body follows immediately: folding the lhs in avoids a blank-line paragraph split.
 		expect(lines[fxIdx + 1]).toContain("x > 0");
+	});
+});
+
+describe("inline start()/url-gate scanners (perf rewrites)", () => {
+	// The hand-rolled scanners replaced regex scans that marked runs on the
+	// remaining source at every inline position. They must return exactly what
+	// the old regexes returned for every input.
+	const OLD_MATH_START = /\$|\\\(|\\\[/;
+	const OLD_AUTOLINK_SCAN = /www\.|https?:\/\/|ftp:\/\//i;
+	// marked's bundled GFM inline url rule (verbatim, no flags).
+	const GFM_URL_REGEX =
+		/^((?:[hH][tT][tT][pP][sS]?|[fF][tT][pP]):\/\/|www\.)(?:[a-zA-Z0-9-]+\.?)+[^\s<]*|^[A-Za-z0-9._+-]+(@)[a-zA-Z0-9-_]+(?:\.[a-zA-Z0-9-_]*[a-zA-Z0-9])+(?![-_])/;
+
+	const fixtures = [
+		"",
+		"plain prose with no candidates at all",
+		"$x$ math first",
+		"prose then $inline$ math",
+		"prose then \\(paren\\) math",
+		"prose then \\[bracket\\] math",
+		"\\( before $ dollar",
+		"$ before \\( paren",
+		"backslash only \\ then ( apart",
+		"ends with backslash \\",
+		"ends with dollar $",
+		"www.example.com leading",
+		"see www.example.com mid-string",
+		"see WWW.EXAMPLE.COM upper",
+		"mixed WwW.case.com scan",
+		"http://example.com leading",
+		"prose http://example.com mid",
+		"prose HTTPS://EXAMPLE.COM upper",
+		"HtTpS://mixed.example",
+		"ftp://files.example mid ftp",
+		"prose FTP://FILES.EXAMPLE",
+		"ftps:// is not ftp:// until here ftp://x",
+		"wwww.overlap.example",
+		"hhttp://overlap.example",
+		"http:/ missing slash then https://real.example",
+		"www without dot www. with dot",
+		"w h f teaser chars but no scheme",
+		"user@example.com email",
+		"prose user.name+tag@example.co.uk",
+		"trailing at sign only@ ",
+		"@leading-at no local part",
+		"a".repeat(400), // long identifier run, no @
+		`${"a".repeat(400)}@example.com`, // long local part (past gate scan limit)
+		"short@x",
+		"dots...and+plus_under-score@host.tld",
+	];
+
+	it("mathStartIndex matches the old /\\$|\\\\\\(|\\\\\\[/ scan on every fixture", () => {
+		for (const src of fixtures) {
+			const m = OLD_MATH_START.exec(src);
+			expect(mathStartIndex(src)).toBe(m ? m.index : undefined);
+		}
+	});
+
+	it("autolinkSchemeScanIndex matches the old /www\\.|https?:\\/\\/|ftp:\\/\\//i scan on every fixture", () => {
+		for (const src of fixtures) {
+			const m = OLD_AUTOLINK_SCAN.exec(src);
+			expect(autolinkSchemeScanIndex(src)).toBe(m ? m.index : undefined);
+		}
+	});
+
+	it("urlTokenPossible is conservative: never false when the GFM url regex matches", () => {
+		for (const src of fixtures) {
+			if (GFM_URL_REGEX.test(src)) {
+				expect(urlTokenPossible(src)).toBeTrue();
+			}
+		}
+		// And it actually gates: plain prose with no scheme/email head is rejected.
+		expect(urlTokenPossible("plain prose, nothing linkable here")).toBeFalse();
+		expect(urlTokenPossible("@leading-at no local part")).toBeFalse();
+	});
+
+	it("gated tokenizer still autolinks urls and emails end-to-end", () => {
+		const rendered = renderInlineMarkdown("see https://example.com and mail user@example.com now", {
+			...defaultMarkdownTheme,
+			link: (text: string) => `<L>${text}</L>`,
+		});
+		const plain = stripVTControlCharacters(rendered);
+		expect(plain).toContain("<L>https://example.com</L>");
+		expect(plain).toContain("<L>user@example.com</L>");
+	});
+});
+
+describe("windowed lexing (documents past WINDOWED_LEX_MIN_BYTES)", () => {
+	// Large documents are lexed in bounded windows because Bun's regex engine
+	// rescans the whole remaining source for marked's `^`-anchored block rules.
+	// Every construct below straddles window cuts; a bad cut is visible in the
+	// rendered output.
+	afterEach(() => clearRenderCache());
+
+	const filler = (label: string, lines: number) =>
+		Array.from({ length: lines }, (_, i) => `${label} paragraph ${i} with enough prose to fill a window.`).join(
+			"\n\n",
+		);
+
+	const plain = (text: string, width = 100) =>
+		new Markdown(text, 0, 0, defaultMarkdownTheme)
+			.render(width)
+			.map(line => stripVTControlCharacters(line).trimEnd());
+
+	it("resolves a reference definition that lands in a later window", () => {
+		const doc = `Follow [the label][ref] first.\n\n${filler("body", 400)}\n\n[ref]: https://example.com/late\n`;
+		expect(doc.length).toBeGreaterThan(16 * 1024);
+
+		const rendered = plain(doc, 120);
+		// The reflink resolved: marked emitted a link token (rendered as
+		// `label (href)`), so the raw `[label][ref]` syntax is gone and the
+		// definition line itself produced no output block of its own.
+		expect(rendered[0]).toBe("Follow the label (https://example.com/late) first.");
+		expect(rendered.filter(line => line.includes("https://example.com/late"))).toHaveLength(1);
+	});
+
+	it("keeps a fenced block longer than one window intact", () => {
+		const code = Array.from({ length: 200 }, (_, i) => `const value${i} = ${i};`).join("\n");
+		const doc = `${filler("intro", 300)}\n\n\`\`\`ts\n${code}\n\`\`\`\n\n${filler("outro", 20)}`;
+		expect(code.length).toBeGreaterThan(2 * 1024);
+
+		const rendered = plain(doc);
+		// Exactly one fence pair: a window cut inside the block would close and
+		// reopen it (or spill code lines into prose).
+		expect(rendered.filter(line => line.trimStart().startsWith("```"))).toHaveLength(2);
+		const first = rendered.findIndex(line => line.includes("const value0 = 0;"));
+		expect(first).toBeGreaterThan(-1);
+		for (let i = 0; i < 200; i++) {
+			expect(rendered[first + i]).toContain(`const value${i} = ${i};`);
+		}
+	});
+
+	it("numbers an ordered list continuously across window cuts", () => {
+		const items = Array.from({ length: 400 }, (_, i) => `${i + 1}. item ${i} padded with extra words to add bytes`);
+		const doc = `${filler("intro", 60)}\n\n${items.join("\n")}\n`;
+		expect(doc.length).toBeGreaterThan(16 * 1024);
+
+		const rendered = plain(doc, 120);
+		for (const n of [1, 137, 400]) {
+			expect(rendered.some(line => line.includes(`${n}. item ${n - 1} `))).toBe(true);
+		}
+		// A window cut that restarted the list would renumber later items.
+		expect(rendered.filter(line => line.includes(" 1. item 0 ")).length).toBeLessThanOrEqual(1);
 	});
 });

@@ -29,8 +29,11 @@ import { decontaminateZodInstance } from "./zod-decontaminate";
 export type ResidualSchemaIncompatibility = "type-array" | "type-null" | "nullable" | "combiners" | "not";
 
 export interface NormalizeSchemaOptions {
-	/** Coerce JSON Schema boolean subschemas for providers whose wire cannot encode them. */
-	coerceBooleanSubschemas?: boolean;
+	/**
+	 * Coerce boolean subschemas to object forms. `standard` preserves `false`
+	 * with `not`; `permissive` uses `{}` when the provider cannot express it.
+	 */
+	coerceBooleanSubschemas?: "standard" | "permissive";
 	unsupportedFields: (key: string) => boolean;
 	normalizeFieldNames: boolean;
 	collapseNullFields: boolean;
@@ -52,6 +55,7 @@ export interface NormalizeSchemaOptions {
 	inferTypeForBareEnum: boolean;
 	foldOneOfIntoAnyOf: boolean;
 	dropNonScalarEnum: boolean;
+	stringEnumsOnly?: boolean;
 	rejectResidualIncompatibilities?: ReadonlyArray<ResidualSchemaIncompatibility>;
 	validateAndFallback?: { fallback: unknown };
 }
@@ -103,6 +107,15 @@ const SUBSCHEMA_VALUE_KEYS: Record<string, true> = {
 	contentSchema: true,
 };
 
+/**
+ * Keywords whose value is either a boolean keyword value or an object
+ * subschema. Object values must be walked, while bare booleans stay literal.
+ */
+const BOOLEAN_OR_SCHEMA_VALUE_KEYS: Record<string, true> = {
+	additionalProperties: true,
+	unevaluatedProperties: true,
+};
+
 /** Keywords whose value is an array of subschemas. */
 const SUBSCHEMA_ARRAY_KEYS: Record<string, true> = {
 	anyOf: true,
@@ -120,6 +133,61 @@ const SUBSCHEMA_MAP_KEYS: Record<string, true> = {
 	$defs: true,
 	definitions: true,
 };
+
+type SchemaChildKind = "schema" | "map";
+
+/** Classify only JSON Schema-valued children; instance payloads remain opaque. */
+function classifySchemaChild(key: string, value: unknown, insideSchemaMap: boolean): SchemaChildKind | undefined {
+	if (insideSchemaMap) return "schema";
+	const normalizedKey = SNAKE_TO_CAMEL_RENAMES.get(key) ?? key;
+	if (Object.hasOwn(SUBSCHEMA_MAP_KEYS, normalizedKey)) return "map";
+	if (Object.hasOwn(SUBSCHEMA_VALUE_KEYS, normalizedKey) || Object.hasOwn(SUBSCHEMA_ARRAY_KEYS, normalizedKey)) {
+		return "schema";
+	}
+	if (Object.hasOwn(BOOLEAN_OR_SCHEMA_VALUE_KEYS, normalizedKey) && isJsonObject(value)) return "schema";
+	return undefined;
+}
+
+function hasUnrepresentableGoogleEnumConstraint(
+	value: unknown,
+	insideSchemaMap = false,
+	seen = new Set<object>(),
+): boolean {
+	if (Array.isArray(value)) {
+		if (seen.has(value)) return false;
+		seen.add(value);
+		return value.some(entry => hasUnrepresentableGoogleEnumConstraint(entry, false, seen));
+	}
+	if (!isJsonObject(value)) return false;
+	if (seen.has(value)) return false;
+	seen.add(value);
+
+	if (insideSchemaMap) {
+		for (const key in value) {
+			if (Object.hasOwn(value, key) && hasUnrepresentableGoogleEnumConstraint(value[key], false, seen)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	if (
+		Array.isArray(value.enum) &&
+		(value.enum.length === 0 || value.enum.some(enumValue => typeof enumValue !== "string"))
+	) {
+		return true;
+	}
+	if (Object.hasOwn(value, "const") && typeof value.const !== "string") return true;
+
+	for (const key in value) {
+		if (!Object.hasOwn(value, key)) continue;
+		const childKind = classifySchemaChild(key, value[key], false);
+		if (childKind && hasUnrepresentableGoogleEnumConstraint(value[key], childKind === "map", seen)) {
+			return true;
+		}
+	}
+	return false;
+}
 
 const CLOUD_CODE_ASSIST_CLAUDE_FALLBACK_SCHEMA = {
 	type: "object",
@@ -284,12 +352,12 @@ function normalizeSchemaNode(value: unknown, options: NormalizeSchemaWalkOptions
 	}
 	if (typeof value === "boolean") {
 		// A bare boolean is a JSON Schema subschema only in a subschema slot.
-		// The Google/CCA protobuf Schema wire has no representation for it
-		// (issue #5604): `true` accepts anything -> `{}`, `false` accepts nothing
-		// -> `{ not: {} }`. In a keyword slot (`nullable`, `enum` entry, …) a
-		// boolean is a plain value and is left untouched.
-		if (!options.coerceBooleanSubschemas || !options.booleanIsSubschema) return value;
-		return value ? {} : { not: {} };
+		// Some provider wires have no boolean-schema representation: `true`
+		// becomes `{}`; `false` uses `not` when supported, or the permissive
+		// `{}` fallback when the provider cannot express an impossible schema.
+		const mode = options.coerceBooleanSubschemas;
+		if (!mode || !options.booleanIsSubschema) return value;
+		return value || mode === "permissive" ? {} : { not: {} };
 	}
 	if (!isJsonObject(value)) {
 		return value;
@@ -358,14 +426,22 @@ function normalizeSchemaObjectNode(value: JsonObject, options: NormalizeSchemaWa
 				continue;
 			}
 			if (options.stripNullableKeyword && key === "nullable") continue;
-			result[key] = normalizeSchemaNode(entry, {
-				...options,
-				insideSchemaMap: !options.insideSchemaMap && Object.hasOwn(SUBSCHEMA_MAP_KEYS, key),
-				booleanIsSubschema:
-					options.insideSchemaMap ||
-					Object.hasOwn(SUBSCHEMA_VALUE_KEYS, key) ||
-					Object.hasOwn(SUBSCHEMA_ARRAY_KEYS, key),
-			});
+			if (
+				options.stringEnumsOnly &&
+				!options.insideSchemaMap &&
+				key === "not" &&
+				hasUnrepresentableGoogleEnumConstraint(entry)
+			) {
+				continue;
+			}
+			const childKind = classifySchemaChild(key, entry, options.insideSchemaMap);
+			result[key] = childKind
+				? normalizeSchemaNode(entry, {
+						...options,
+						insideSchemaMap: childKind === "map",
+						booleanIsSubschema: childKind === "schema",
+					})
+				: entry;
 		}
 		applyDescriptionSpill(result, spill, options);
 		return applyNodePostProcessing(result, options);
@@ -384,14 +460,22 @@ function normalizeSchemaObjectNode(value: JsonObject, options: NormalizeSchemaWa
 			constValue = entry;
 			continue;
 		}
-		result[key] = normalizeSchemaNode(entry, {
-			...options,
-			insideSchemaMap: !options.insideSchemaMap && Object.hasOwn(SUBSCHEMA_MAP_KEYS, key),
-			booleanIsSubschema:
-				options.insideSchemaMap ||
-				Object.hasOwn(SUBSCHEMA_VALUE_KEYS, key) ||
-				Object.hasOwn(SUBSCHEMA_ARRAY_KEYS, key),
-		});
+		if (
+			options.stringEnumsOnly &&
+			!options.insideSchemaMap &&
+			key === "not" &&
+			hasUnrepresentableGoogleEnumConstraint(entry)
+		) {
+			continue;
+		}
+		const childKind = classifySchemaChild(key, entry, options.insideSchemaMap);
+		result[key] = childKind
+			? normalizeSchemaNode(entry, {
+					...options,
+					insideSchemaMap: childKind === "map",
+					booleanIsSubschema: childKind === "schema",
+				})
+			: entry;
 	}
 
 	if (options.normalizeTypeArrayToNullable && Array.isArray(result.type)) {
@@ -461,6 +545,7 @@ function applyNodePostProcessing(schema: JsonObject, options: NormalizeSchemaWal
 	}
 	if (options.foldOneOfIntoAnyOf) current = foldOneOfIntoAnyOf(current);
 	if (options.dropNonScalarEnum) current = dropNonScalarEnumForMfjs(current);
+	if (options.stringEnumsOnly && options.booleanIsSubschema) current = dropNonStringEnumForGoogle(current);
 	return current;
 }
 
@@ -479,6 +564,13 @@ function dropNonScalarEnumForMfjs(schema: JsonObject): JsonObject {
 	const allScalar = (schema.enum as unknown[]).every(v => typeof v === "string" || typeof v === "number");
 	if (allScalar) return schema;
 	return copySchemaWithout(schema, "enum");
+}
+
+/** Google's Schema enum field accepts string values only; omit unsupported enums without dropping the node's type. */
+function dropNonStringEnumForGoogle(schema: JsonObject): JsonObject {
+	if (!Array.isArray(schema.enum)) return schema;
+	const isStringEnum = schema.enum.length > 0 && schema.enum.every(value => typeof value === "string");
+	return isStringEnum ? schema : copySchemaWithout(schema, "enum");
 }
 
 /** Copy all keys from a schema except the specified combiner key. */
@@ -729,16 +821,25 @@ function collapseSameTypeCombinerVariants(schema: JsonObject, combiner: "anyOf" 
  * create new anyOf in merged subtrees after child normalization already ran.
  */
 export function stripResidualCombiners(value: unknown, epoch: number = epochNext()): unknown {
+	return stripResidualCombinersNode(value, epoch, false);
+}
+
+function stripResidualCombinersNode(value: unknown, epoch: number, insideSchemaMap: boolean): unknown {
 	if (Array.isArray(value)) {
 		if (!once(value, epoch)) return [];
-		return value.map(entry => stripResidualCombiners(entry, epoch));
+		return value.map(entry => stripResidualCombinersNode(entry, epoch, false));
 	}
 	if (!isJsonObject(value)) return value;
 	if (!once(value, epoch)) return {};
 	const result: JsonObject = {};
 	for (const key in value) {
-		if (Object.hasOwn(value, key)) result[key] = stripResidualCombiners(value[key], epoch);
+		if (!Object.hasOwn(value, key)) continue;
+		const entry = value[key];
+		const childKind = classifySchemaChild(key, entry, insideSchemaMap);
+		result[key] = childKind ? stripResidualCombinersNode(entry, epoch, childKind === "map") : entry;
 	}
+	if (insideSchemaMap) return result;
+
 	let current: JsonObject = result;
 	let changed = true;
 	while (changed) {
@@ -837,6 +938,7 @@ function normalizeNullablePropertiesForCloudCodeAssist(
 	value: unknown,
 	isPropertySchema = false,
 	epoch: number = epochNext(),
+	insideSchemaMap = false,
 ): NullableNormalizationResult {
 	if (Array.isArray(value)) {
 		if (!once(value, epoch)) {
@@ -856,9 +958,14 @@ function normalizeNullablePropertiesForCloudCodeAssist(
 
 	const normalized: JsonObject = {};
 	for (const key in value) {
-		if (Object.hasOwn(value, key))
-			normalized[key] = normalizeNullablePropertiesForCloudCodeAssist(value[key], false, epoch).schema;
+		if (!Object.hasOwn(value, key)) continue;
+		const entry = value[key];
+		const childKind = classifySchemaChild(key, entry, insideSchemaMap);
+		normalized[key] = childKind
+			? normalizeNullablePropertiesForCloudCodeAssist(entry, false, epoch, childKind === "map").schema
+			: entry;
 	}
+	if (insideSchemaMap) return { schema: normalized, nullable: false };
 
 	if (isJsonObject(normalized.properties)) {
 		const properties = normalized.properties;
@@ -930,7 +1037,7 @@ function hasResidualSchemaIncompatibilities(
 ): boolean {
 	if (Array.isArray(value)) {
 		if (!once(value, epoch)) return false;
-		return value.some(entry => hasResidualSchemaIncompatibilities(entry, checks, epoch, insideSchemaMap));
+		return value.some(entry => hasResidualSchemaIncompatibilities(entry, checks, epoch, false));
 	}
 	if (!isJsonObject(value)) {
 		return false;
@@ -939,25 +1046,22 @@ function hasResidualSchemaIncompatibilities(
 		return false;
 	}
 
-	if (checks.typeArray && Array.isArray(value.type)) return true;
-	if (checks.typeNull && value.type === "null") return true;
-	if (checks.nullable && Object.hasOwn(value, "nullable")) return true;
-	if (!insideSchemaMap && checks.not && Object.hasOwn(value, "not")) return true;
-	if (!insideSchemaMap && checks.combiners) {
-		for (const combiner of CCA_FORBIDDEN_COMBINERS) {
-			if (Array.isArray(value[combiner])) return true;
+	if (!insideSchemaMap) {
+		if (checks.typeArray && Array.isArray(value.type)) return true;
+		if (checks.typeNull && value.type === "null") return true;
+		if (checks.nullable && Object.hasOwn(value, "nullable")) return true;
+		if (checks.not && Object.hasOwn(value, "not")) return true;
+		if (checks.combiners) {
+			for (const combiner of CCA_FORBIDDEN_COMBINERS) {
+				if (Array.isArray(value[combiner])) return true;
+			}
 		}
 	}
-	for (const k in value) {
-		if (!Object.hasOwn(value, k)) continue;
-		if (
-			hasResidualSchemaIncompatibilities(
-				value[k],
-				checks,
-				epoch,
-				!insideSchemaMap && Object.hasOwn(SUBSCHEMA_MAP_KEYS, k),
-			)
-		) {
+	for (const key in value) {
+		if (!Object.hasOwn(value, key)) continue;
+		const entry = value[key];
+		const childKind = classifySchemaChild(key, entry, insideSchemaMap);
+		if (childKind && hasResidualSchemaIncompatibilities(entry, checks, epoch, childKind === "map")) {
 			return true;
 		}
 	}
@@ -993,7 +1097,7 @@ export function normalizeSchema(value: unknown, options: NormalizeSchemaOptions)
 
 export function normalizeSchemaForGoogle(value: unknown): unknown {
 	return normalizeSchema(value, {
-		coerceBooleanSubschemas: true,
+		coerceBooleanSubschemas: "standard",
 		unsupportedFields: isGoogleUnsupportedSchemaField,
 		normalizeFieldNames: true,
 		collapseNullFields: true,
@@ -1009,13 +1113,14 @@ export function normalizeSchemaForGoogle(value: unknown): unknown {
 		extractNullableFromUnions: false,
 		inferTypeForBareEnum: true,
 		dropNonScalarEnum: false,
+		stringEnumsOnly: true,
 		foldOneOfIntoAnyOf: false,
 	});
 }
 
 export function normalizeSchemaForCCA(value: unknown): unknown {
 	return normalizeSchema(value, {
-		coerceBooleanSubschemas: true,
+		coerceBooleanSubschemas: "standard",
 		unsupportedFields: isGoogleUnsupportedSchemaField,
 		normalizeFieldNames: true,
 		collapseNullFields: false,
@@ -1080,6 +1185,9 @@ export function normalizeSchemaForMCP(value: unknown): unknown {
  *    `default` and `description` are MFJS Meta Data fields and are preserved.
  *  - `additionalProperties` (boolean or schema) and `type: "null"` (incl.
  *    inside `anyOf`) are kept.
+ *  - Boolean subschemas are object-coerced; MFJS has no exact `false` schema,
+ *    so both values become the permissive empty schema while local tool
+ *    validation remains authoritative.
  *
  * Out of scope (absent from the built-in tool surface, spec-ambiguous to
  * rewrite blindly): `allOf` intersection merging, external/recursive `$ref`,
@@ -1087,6 +1195,7 @@ export function normalizeSchemaForMCP(value: unknown): unknown {
  */
 export function normalizeSchemaForMoonshot(value: unknown): unknown {
 	return normalizeSchema(value, {
+		coerceBooleanSubschemas: "permissive",
 		unsupportedFields: isMoonshotUnsupportedSchemaField,
 		normalizeFieldNames: false,
 		collapseNullFields: false,
@@ -1126,18 +1235,19 @@ const OLLAMA_SCHEMA_VALUE_KEYS = new Set([
 ]);
 
 /**
- * Widened stand-in for a `true` / `{}` subschema in an Ollama-bound tool.
+ * Widened stand-in for a `true` / `{}` open subschema on a tool bound for a
+ * backend whose wire cannot encode a bare boolean subschema.
  *
  * `toolWireSchema()` normalizes empty schemas to boolean `true` upstream so
- * grammar-constrained samplers (llama.cpp, etc.) don't treat `{}` as
- * "generate an empty object" (issue #1179). Ollama's Go tool parser can't
- * unmarshal a boolean into its object-shaped `Schema` struct, so this
- * sanitizer replaces every open subschema with an explicit union of every
- * primitive JSON type. Both invariants survive: the wire has no boolean
- * subschema (Go accepts it), and llama.cpp's grammar sees a real value
- * union rather than a closed empty object.
+ * grammar-constrained samplers don't treat `{}` as "generate an empty object"
+ * (issue #1179). Two backends then choke on the bare boolean: Ollama's Go tool
+ * parser can't unmarshal it into its object-shaped `Schema` struct, and
+ * llama.cpp's JSON-schema→GBNF converter has no case for a boolean schema
+ * (issue #5914). Both sanitizers replace the open subschema with an explicit
+ * union of every primitive JSON type — the wire has no boolean subschema, and
+ * a grammar sampler sees a real value union rather than a closed empty object.
  */
-const OLLAMA_OPEN_SUBSCHEMA_WIDENING = Object.freeze({
+const OPEN_SUBSCHEMA_WIDENING = Object.freeze({
 	anyOf: [
 		{ type: "string" },
 		{ type: "number" },
@@ -1154,8 +1264,8 @@ const OLLAMA_OPEN_SUBSCHEMA_WIDENING = Object.freeze({
  */
 export function sanitizeSchemaForOllama(schema: JsonObject): JsonObject {
 	const normalizeNode = (value: unknown): unknown => {
-		if (value === true) return OLLAMA_OPEN_SUBSCHEMA_WIDENING;
-		if (value === false) return { not: OLLAMA_OPEN_SUBSCHEMA_WIDENING };
+		if (value === true) return OPEN_SUBSCHEMA_WIDENING;
+		if (value === false) return { not: OPEN_SUBSCHEMA_WIDENING };
 		if (!isJsonObject(value)) {
 			if (!Array.isArray(value)) return value;
 			let changed = false;
@@ -1226,6 +1336,97 @@ export function sanitizeSchemaForOllama(schema: JsonObject): JsonObject {
 		return changed ? output : value;
 	};
 	return normalizeNode(schema) as JsonObject;
+}
+
+/**
+ * Schema-valued keywords whose bare boolean value must be widened for a
+ * grammar-constrained backend. Excludes `additionalProperties` and
+ * `unevaluatedProperties`: llama.cpp's `_build_object_rule` reads their boolean
+ * form as meaningful closed/open-object semantics, and `additionalProperties:
+ * false` is exactly what `toolWireSchema` emits to pin a strict object shape.
+ */
+const GRAMMAR_SCHEMA_VALUE_KEYS: Record<string, true> = {
+	items: true,
+	additionalItems: true,
+	contains: true,
+	contentSchema: true,
+	propertyNames: true,
+	if: true,
+	// biome-ignore lint/suspicious/noThenProperty: JSON Schema keyword
+	then: true,
+	else: true,
+	not: true,
+	unevaluatedItems: true,
+};
+
+/**
+ * Rewrites the one JSON Schema form that grammar-constrained OpenAI-compatible
+ * backends (llama.cpp, LM Studio, vLLM) cannot compile to GBNF: a bare boolean
+ * subschema. `toolWireSchema` normalizes `{}` open subschemas to boolean `true`
+ * (issue #1179); llama.cpp's `json-schema-to-grammar.cpp` `visit()` has no case
+ * for a boolean schema and throws `Unrecognized schema: true` → HTTP 400 before
+ * the model is consulted (issue #5914).
+ *
+ * Narrower than {@link sanitizeSchemaForOllama}: only genuine subschema slots
+ * are widened. Boolean `additionalProperties`/`unevaluatedProperties` stay
+ * intact because the converter reads those as closed/open-object grammar
+ * semantics, and dropping `additionalProperties: false` would silently reopen
+ * every declared object.
+ */
+export function sanitizeSchemaForGrammar(schema: JsonObject): JsonObject {
+	const normalizeNode = (value: unknown, isSubschema: boolean): unknown => {
+		if (value === true) return isSubschema ? OPEN_SUBSCHEMA_WIDENING : value;
+		if (value === false) return isSubschema ? { not: OPEN_SUBSCHEMA_WIDENING } : value;
+		if (Array.isArray(value)) {
+			let changed = false;
+			const output = value.map(item => {
+				const next = normalizeNode(item, isSubschema);
+				if (next !== item) changed = true;
+				return next;
+			});
+			return changed ? output : value;
+		}
+		if (!isJsonObject(value)) return value;
+
+		let changed = false;
+		const output: JsonObject = {};
+		for (const key in value) {
+			if (!Object.hasOwn(value, key)) continue;
+			const child = value[key];
+			let next = child;
+			if (Object.hasOwn(SUBSCHEMA_MAP_KEYS, key) && isJsonObject(child)) {
+				let mapChanged = false;
+				const mapOutput: JsonObject = {};
+				for (const childKey in child) {
+					if (!Object.hasOwn(child, childKey)) continue;
+					const mapChild = child[childKey];
+					const normalizedChild = normalizeNode(mapChild, true);
+					if (normalizedChild !== mapChild) mapChanged = true;
+					mapOutput[childKey] = normalizedChild;
+				}
+				next = mapChanged ? mapOutput : child;
+			} else if (Object.hasOwn(SUBSCHEMA_ARRAY_KEYS, key) && Array.isArray(child)) {
+				let arrayChanged = false;
+				const arrayOutput = child.map(item => {
+					const normalizedItem = normalizeNode(item, true);
+					if (normalizedItem !== item) arrayChanged = true;
+					return normalizedItem;
+				});
+				next = arrayChanged ? arrayOutput : child;
+			} else if (Object.hasOwn(GRAMMAR_SCHEMA_VALUE_KEYS, key)) {
+				next = normalizeNode(child, true);
+			} else if ((key === "additionalProperties" || key === "unevaluatedProperties") && typeof child !== "boolean") {
+				// Boolean form is meaningful closed/open-object grammar semantics and
+				// stays intact; the object form is a genuine subschema whose interior
+				// may still hold bare booleans emitted by `toolWireSchema`.
+				next = normalizeNode(child, true);
+			}
+			if (next !== child) changed = true;
+			output[key] = next;
+		}
+		return changed ? output : value;
+	};
+	return normalizeNode(schema, true) as JsonObject;
 }
 
 // ---------------------------------------------------------------------------

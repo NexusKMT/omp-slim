@@ -23,8 +23,31 @@ describe("parseRateLimitReason", () => {
 		).toBe("QUOTA_EXHAUSTED");
 	});
 
-	it("classifies 'resource exhausted' (exact gRPC phrase) as MODEL_CAPACITY_EXHAUSTED", () => {
+	it("classifies 'resource exhausted' (space phrase) as MODEL_CAPACITY_EXHAUSTED", () => {
 		expect(parseRateLimitReason("resource exhausted")).toBe("MODEL_CAPACITY_EXHAUSTED");
+	});
+
+	// Connect/gRPC end-streams carry the status name `resource_exhausted` (underscore),
+	// not the space phrase. It must classify identically to the space form so the
+	// session retry path uses the 45–75s MODEL_CAPACITY backoff instead of the 30-min
+	// QUOTA_EXHAUSTED block. Regression for #7032.
+	it("classifies bare Connect resource_exhausted as MODEL_CAPACITY_EXHAUSTED", () => {
+		expect(parseRateLimitReason("Connect error resource_exhausted: Error")).toBe("MODEL_CAPACITY_EXHAUSTED");
+	});
+
+	// parseConnectEndStream repeats the default status phrase in the message body:
+	// `Connect error resource_exhausted: resource exhausted`. Both tokens must be
+	// stripped so the leftover "exhausted" doesn't trip the generic quota branch.
+	it("classifies repeated bare resource-exhausted tokens as MODEL_CAPACITY_EXHAUSTED", () => {
+		expect(parseRateLimitReason("Connect error resource_exhausted: resource exhausted")).toBe(
+			"MODEL_CAPACITY_EXHAUSTED",
+		);
+	});
+
+	it("keeps explicit quota details authoritative after resource_exhausted", () => {
+		expect(parseRateLimitReason("Connect error resource_exhausted: Quota exceeded for this account")).toBe(
+			"QUOTA_EXHAUSTED",
+		);
 	});
 
 	it("classifies Too many requests as RATE_LIMIT_EXCEEDED", () => {
@@ -226,12 +249,36 @@ describe("isUsageLimitOutcome", () => {
 		).toBe(true);
 	});
 
+	// The MODEL_CAPACITY reclassification of resource_exhausted (#7032) must NOT
+	// remove stream/session credential rotation: USAGE_LIMIT_PATTERN's
+	// `resource.?exhausted` still flags both forms as a usage-limit outcome so a
+	// sibling credential is tried before the short backoff.
+	it("still rotates on bare Connect resource_exhausted regardless of status", () => {
+		expect(isUsageLimitOutcome(undefined, "Connect error resource_exhausted: Error")).toBe(true);
+		expect(isUsageLimitOutcome(undefined, "Connect error resource exhausted: Error")).toBe(true);
+	});
+
 	it("rotates on xAI Grok 403 credit/spending-limit exhaustion regardless of status", () => {
 		const message =
 			"403 You have run out of credits or need a Grok subscription. Add credits at https://grok.com/?_s=usage or upgrade at https://grok.com/supergrok. (type=personal-team-blocked:spending-limit)";
 		expect(isUsageLimitOutcome(403, message)).toBe(true);
 		expect(isUsageLimitOutcome(undefined, message)).toBe(true);
 		expect(isUsageLimitOutcome(429, message)).toBe(true);
+	});
+
+	it("rotates on xAI Grok Build 402 usage-balance exhaustion regardless of status", () => {
+		const message = "402 Grok Build usage balance exhausted";
+		expect(isUsageLimitOutcome(402, message)).toBe(true);
+		expect(isUsageLimitOutcome(undefined, message)).toBe(true);
+		expect(isUsageLimit(message)).toBe(true);
+	});
+
+	it("treats 402 as a usage-limit status (opaque body rotates, informative non-quota body does not)", () => {
+		expect(isUsageLimitStatus(402)).toBe(true);
+		expect(isUsageLimitOutcome(402, undefined)).toBe(true);
+		expect(isUsageLimitOutcome(402, "HTTP 402")).toBe(true);
+		expect(isUsageLimitOutcome(402, "A subscription is required for this endpoint")).toBe(false);
+		expect(isUsageLimit(new ProviderHttpError("HTTP 402", 402))).toBe(true);
 	});
 
 	it("does not rotate on auth/invalid-request statuses with unrelated bodies", () => {

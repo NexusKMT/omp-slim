@@ -5,7 +5,7 @@ import { webpExclusionForModel } from "../../utils/image-loading";
 import type { ToolSession } from "../index";
 import { expandPath } from "../path-utils";
 import { ToolAbortError, ToolError } from "../tool-errors";
-import { pickElectronTarget } from "./attach";
+import { pickElectronTarget, shouldPreserveConnectedBrowserFocus } from "./attach";
 import { CmuxTab, runCmuxCode } from "./cmux/cmux-tab";
 import { mapWaitUntil } from "./cmux/rpc";
 import { DEFAULT_VIEWPORT } from "./launch";
@@ -81,6 +81,7 @@ interface TabSessionBase<TBrowser extends BrowserHandle = BrowserHandle> {
 export interface WorkerTabSession extends TabSessionBase<PuppeteerBrowserHandle> {
 	backend: "worker";
 	worker: WorkerHandle;
+	activateForScreenshot: boolean;
 }
 
 export interface CmuxTabSession extends TabSessionBase<CmuxBrowserHandle> {
@@ -138,6 +139,19 @@ const GRACE_MS = 750;
 // vanished instead of a bare "not alive". Cleared when the name is opened again.
 const killedTabs = new Map<string, string>();
 const DEFAULT_TAB_CLOSE_TIMEOUT_MS = 5_000;
+class RecoverableWorkerError extends ToolError {}
+const REPORTED_INIT_FAILURE = Symbol("reported-init-failure");
+
+type ReportedInitFailure = Error & { [REPORTED_INIT_FAILURE]?: true };
+
+function markReportedInitFailure(error: Error): Error {
+	(error as ReportedInitFailure)[REPORTED_INIT_FAILURE] = true;
+	return error;
+}
+
+function isReportedInitFailure(error: unknown): boolean {
+	return error instanceof Error && (error as ReportedInitFailure)[REPORTED_INIT_FAILURE] === true;
+}
 
 async function waitForTabCleanup<T>(
 	tab: TabSession,
@@ -264,7 +278,7 @@ async function acquireTabImpl(
 		// after `spawnTabWorker`'s synchronous try/catch has already returned. Fall back to
 		// the inline worker here so module-resolution failures don't poison every tab open.
 		await worker.terminate().catch(() => undefined);
-		if (worker.mode === "inline") {
+		if (worker.mode === "inline" || isReportedInitFailure(error)) {
 			if (tempHold || browser.refCount === 0) await releaseBrowser(browser, { kill: false });
 			throw error;
 		}
@@ -285,13 +299,16 @@ async function acquireTabImpl(
 		}
 	}
 
-	// If the caller aborted while we were spawning/initializing the worker,
-	// tear the freshly-built worker down before publishing the tab so the
-	// browser refCount (which `holdBrowser` below would take) never grows for
-	// a tab nobody is waiting for.
+	// If the caller aborted while we were spawning/initializing the worker, tear
+	// the freshly-built worker down before publishing the tab so the browser
+	// refCount (which `holdBrowser` below would take) never grows for a tab
+	// nobody is waiting for. Mirror the error paths' `refCount === 0` release so
+	// a fresh browser held by nothing but this aborted open is not orphaned in
+	// the registry; a browser still leased/held elsewhere (refCount > 0) is left
+	// for its owner to release.
 	if (opts.signal?.aborted) {
 		await worker.terminate().catch(() => undefined);
-		if (tempHold) await releaseBrowser(browser, { kill: false }).catch(() => undefined);
+		if (tempHold || browser.refCount === 0) await releaseBrowser(browser, { kill: false }).catch(() => undefined);
 		throw new ToolAbortError("Browser tab open aborted");
 	}
 
@@ -308,6 +325,7 @@ async function acquireTabImpl(
 		pending: new Map(),
 		dialogPolicy: opts.dialogs,
 		kindTag: browser.kind.kind,
+		activateForScreenshot: initPayload.mode === "headless" || initPayload.activateForScreenshot !== false,
 		ownerSessionId: opts.ownerSessionId,
 	};
 	worker.onMessage(msg => handleTabMessage(tab, msg));
@@ -488,16 +506,23 @@ async function runInTabWithSnapshot(
 				async reason => await forceKillTab(name, reason),
 			);
 		} catch (error) {
-			if (error instanceof ToolError && error.message.startsWith("Browser code execution timed out after ")) {
+			const runTimedOut =
+				error instanceof ToolError && error.message.startsWith("Browser code execution timed out after ");
+			if (runTimedOut || error instanceof RecoverableWorkerError) {
 				try {
-					if (tab.worker.mode === "inline")
-						await forceKillTab(name, "Browser code execution timed out; tab killed");
-					else await recycleTimedOutWorkerTab(tab, opts.timeoutMs + GRACE_MS);
+					if (tab.worker.mode === "inline") {
+						const reason = runTimedOut
+							? "Browser code execution timed out; tab killed"
+							: "Browser request interception cleanup failed; tab killed";
+						await forceKillTab(name, reason);
+					} else {
+						await recycleTimedOutWorkerTab(tab, opts.timeoutMs + GRACE_MS);
+					}
 				} catch (recycleError) {
-					logger.warn("Failed to recycle timed-out browser tab worker; killing tab", {
+					logger.warn("Failed to recycle browser tab worker; killing tab", {
 						error: recycleError instanceof Error ? recycleError.message : String(recycleError),
 					});
-					await forceKillTab(name, "Browser code execution timed out; tab killed");
+					await forceKillTab(name, "Browser tab worker recovery failed; tab killed");
 				}
 			}
 			throw error;
@@ -673,7 +698,15 @@ async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTa
 			timeoutMs: opts.timeoutMs,
 		};
 	}
-	const page = await pickElectronTarget(browser.browser, opts.target);
+	// Connected and relay browsers are user-driven. When no target is requested,
+	// adopt the visible tab and avoid raising it before screenshots. An explicit
+	// target may be backgrounded, so retain activation for target-correct pixels.
+	const userDriven = browser.kind.kind === "connected" || browser.kind.kind === "relay";
+	const activateForScreenshot = !userDriven || !shouldPreserveConnectedBrowserFocus(opts.target);
+	const page = await pickElectronTarget(browser.browser, {
+		matcher: opts.target,
+		preferVisible: !activateForScreenshot,
+	});
 	const targetId = await targetIdForPage(page);
 	return {
 		mode: "attach",
@@ -681,6 +714,10 @@ async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTa
 		safeDir,
 		targetId,
 		dialogs: opts.dialogs,
+		url: opts.url,
+		waitUntil: opts.waitUntil,
+		timeoutMs: opts.timeoutMs,
+		activateForScreenshot,
 	};
 }
 
@@ -782,6 +819,8 @@ async function recycleTimedOutWorkerTab(tab: WorkerTabSession, timeoutMs: number
 		// Unblock a wedged page (open JS dialog, hung navigation) before adopting it —
 		// otherwise init stalls, times out, and the tab gets force-killed.
 		recover: true,
+		timeoutMs,
+		activateForScreenshot: tab.activateForScreenshot,
 	};
 	let worker = await spawnTabWorker();
 	try {
@@ -873,11 +912,13 @@ async function targetIdForTarget(target: Target): Promise<string> {
 }
 
 function errorFromPayload(payload: RunErrorPayload): Error {
-	const error = payload.isAbort
-		? new ToolAbortError()
-		: payload.isToolError
-			? new ToolError(payload.message)
-			: new Error(payload.message);
+	const error = payload.recoverTab
+		? new RecoverableWorkerError(payload.message)
+		: payload.isAbort
+			? new ToolAbortError()
+			: payload.isToolError
+				? new ToolError(payload.message)
+				: new Error(payload.message);
 	error.name = payload.name;
 	if (payload.stack) error.stack = payload.stack;
 	return error;
@@ -997,7 +1038,7 @@ async function initializeTabWorker(
 	const { promise, resolve, reject } = Promise.withResolvers<ReadyInfo>();
 	const unlisten = worker.onMessage(msg => {
 		if (msg.type === "ready") resolve(msg.info);
-		else if (msg.type === "init-failed") reject(errorFromPayload(msg.error));
+		else if (msg.type === "init-failed") reject(markReportedInitFailure(errorFromPayload(msg.error)));
 		else if (msg.type === "log") logWorkerMessage(msg);
 	});
 	const unlistenError = worker.onError(error => {

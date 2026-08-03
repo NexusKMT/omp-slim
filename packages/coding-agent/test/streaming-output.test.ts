@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+	enforceInlineByteCap,
 	formatHeadTruncationNotice,
 	formatMiddleElisionMarker,
 	formatTailTruncationNotice,
@@ -225,6 +226,20 @@ describe("OutputSink", () => {
 		await sink.push("abc");
 		await sink.push("def");
 		expect(chunks).toEqual(["abc", "def"]);
+	});
+
+	test("normalizes carriage-return progress frames across chunk boundaries", async () => {
+		const chunks: string[] = [];
+		const sink = new OutputSink({ onChunk: chunk => chunks.push(chunk) });
+
+		sink.push("start\r");
+		sink.push("one\r");
+		sink.push("two\r");
+		sink.push("\n");
+		const dumped = await sink.dump();
+
+		expect(chunks.join("")).toBe("start\none\ntwo\n");
+		expect(dumped.output).toBe("start\none\ntwo\n");
 	});
 
 	test("preserves SIXEL chunks when passthrough gates are enabled", async () => {
@@ -671,6 +686,36 @@ describe("OutputSink head-retain mode", () => {
 		expect(dumped.truncated).toBe(false);
 		// Counters realign to the authoritative buffer + the subsequent push.
 		expect(dumped.totalBytes).toBe(byteLength("OK\n[raw output: artifact://8]\n"));
+	});
+
+	test("middle-elided dump body fits the inline budget (no double truncation)", async () => {
+		// Regression: the head and tail windows each had their own full budget,
+		// so an elided dump body could reach headBytes + spillThreshold and
+		// re-trip enforceInlineByteCap at the tool-result boundary — truncating
+		// a second time and saving a duplicate artifact whose id disagreed with
+		// the truncation notice's `Read artifact://N for full output`.
+		const spillThreshold = 1000;
+		const sink = new OutputSink({ spillThreshold, headBytes: 400 });
+		const lines = Array.from({ length: 400 }, (_, i) => `line ${i}`).join("\n");
+		sink.push(lines);
+
+		const dumped = await sink.dump();
+		expect(dumped.truncated).toBe(true);
+		expect(dumped.elidedLines ?? 0).toBeGreaterThan(0);
+		// Head window + elision marker + tail window share the one budget
+		// (small slack for the marker and separators).
+		expect(byteLength(dumped.output)).toBeLessThanOrEqual(spillThreshold + 64);
+
+		let saved: string | undefined;
+		const capped = await enforceInlineByteCap(dumped.output, {
+			maxBytes: spillThreshold + 2048,
+			saveArtifact: full => {
+				saved = full;
+				return "duplicate";
+			},
+		});
+		expect(capped).toBe(dumped.output);
+		expect(saved).toBeUndefined();
 	});
 });
 
