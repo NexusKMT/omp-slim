@@ -83,25 +83,44 @@ export function tokenizeShellSegments(command: string): string[][] {
 }
 
 /**
- * Returns the original text of flat shell command segments. Unlike
+ * A flat shell command segment with the context needed to decide interception.
+ *
+ * @see extractFlatShellCommandSegments
+ */
+export interface FlatShellCommandSegment {
+	/** Original segment text with quoting and escaping preserved. */
+	text: string;
+	/**
+	 * True when this segment consumes the previous stage's stdout via an
+	 * unquoted `|`. Such a stage reads piped stdin, so path-based dedicated
+	 * tools (read/grep/glob) cannot replace it. `||`, `;`, `&`, `&&`, and
+	 * newlines start an independent command and leave this false.
+	 */
+	pipedStdin: boolean;
+}
+
+/**
+ * Returns the flat shell command segments with the original text of each. Unlike
  * `tokenizeShellSegments`, this preserves quoting and escaping so the results
- * are safe to match against user-configured regular expressions.
+ * are safe to match against user-configured regular expressions, and flags
+ * segments that receive piped stdin.
  *
  * The extractor deliberately declines to split syntax whose execution context
  * cannot be determined with this small scanner (heredocs, command substitution,
  * backticks, grouping, and malformed quoting). Callers must still check the
  * complete input in that case.
  */
-export function extractFlatShellCommandSegments(command: string): string[] {
-	const segments: string[] = [];
+export function extractFlatShellCommandSegments(command: string): FlatShellCommandSegment[] {
+	const segments: FlatShellCommandSegment[] = [];
 	let segmentStart = 0;
 	let inSingle = false;
 	let inDouble = false;
 	let atWordStart = true;
+	let currentPiped = false;
 
 	const pushSegment = (end: number) => {
 		const segment = command.slice(segmentStart, end).trim();
-		if (segment.length > 0) segments.push(segment);
+		if (segment.length > 0) segments.push({ text: segment, pipedStdin: currentPiped });
 	};
 
 	for (let i = 0; i < command.length; i++) {
@@ -160,6 +179,7 @@ export function extractFlatShellCommandSegments(command: string): string[] {
 			i = newline;
 			segmentStart = newline + 1;
 			atWordStart = true;
+			currentPiped = false;
 			continue;
 		}
 		const isRedirectionOperatorCharacter =
@@ -170,7 +190,12 @@ export function extractFlatShellCommandSegments(command: string): string[] {
 					: false;
 		if ((ch === "\n" || ch === ";" || ch === "|" || ch === "&") && !isRedirectionOperatorCharacter) {
 			pushSegment(i);
-			if ((ch === "|" || ch === "&") && command[i + 1] === ch) i++;
+			const doubled = (ch === "|" || ch === "&") && command[i + 1] === ch;
+			if (doubled) i++;
+			// A single unquoted `|` pipes the previous stage's stdout into the
+			// next segment; `||`, `;`, `&`, `&&`, and newlines start a fresh
+			// command whose stdin is not the previous stage's output.
+			currentPiped = ch === "|" && !doubled;
 			segmentStart = i + 1;
 			atWordStart = true;
 			continue;
