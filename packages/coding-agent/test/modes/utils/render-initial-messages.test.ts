@@ -139,6 +139,7 @@ function hasImageComponent(component: Component): boolean {
 function makeRenderCtx(
 	transcript: SessionContext,
 	showImages = true,
+	hideToolActivity = false,
 ): { ctx: InteractiveModeContext; chatContainer: Container } {
 	const chatContainer = new Container();
 	let helpers: UiHelpers;
@@ -156,8 +157,15 @@ function makeRenderCtx(
 		resetTranscript: () => chatContainer.clear(),
 		// Rebuild paths honor terminal.showImages since the native-image work;
 		// keep it on so the image-replay contracts below stay meaningful.
-		settings: { get: (key: string) => key === "terminal.showImages" && showImages },
+		settings: {
+			get: (key: string) => {
+				if (key === "terminal.showImages") return showImages;
+				if (key === "display.hideToolActivity") return hideToolActivity;
+				return false;
+			},
+		},
 		toolOutputExpanded: false,
+		hideToolActivity,
 		hideThinkingBlock: false,
 		focusedAgentId: undefined,
 		editor: { addToHistory: vi.fn() },
@@ -306,6 +314,33 @@ describe("UiHelpers.renderInitialMessages — image replay", () => {
 		expect(hasImageComponent(chatContainer)).toBe(true);
 	});
 
+	it("preserves tool-result images while tool activity is hidden so revealing it can replay the image", async () => {
+		await Settings.init({ inMemory: true, overrides: { "terminal.showImages": true } });
+		setTerminalImageProtocol(ImageProtocol.Sixel);
+		const transcript = transcriptWith([
+			assistantToolCall("read-tool-hidden", "read", { path: "tool-hidden.png" }),
+			{
+				role: "toolResult",
+				toolCallId: "read-tool-hidden",
+				toolName: "read",
+				content: [{ type: "text", text: "Read image: tool-hidden.png" }, pngImage],
+				isError: false,
+				timestamp: 2,
+			},
+		]);
+		const { ctx, chatContainer } = makeRenderCtx(transcript, true, true);
+
+		new UiHelpers(ctx).renderInitialMessages();
+
+		expect(hasImageComponent(chatContainer)).toBe(false);
+		const assistant = chatContainer.children.find(
+			(child): child is AssistantMessageComponent => child instanceof AssistantMessageComponent,
+		);
+		expect(assistant).toBeDefined();
+		assistant?.setToolResultImagesVisible(true);
+		expect(hasImageComponent(chatContainer)).toBe(true);
+	});
+
 	it("replays reopened session image blocks through the cold-start rebuild path", async () => {
 		await Settings.init({ inMemory: true, overrides: { "terminal.showImages": true } });
 		setTerminalImageProtocol(ImageProtocol.Sixel);
@@ -345,6 +380,57 @@ describe("UiHelpers.renderInitialMessages — image replay", () => {
 		expect(countImageComponents(chatContainer)).toBe(2);
 		expect(Bun.stripANSI(chatContainer.render(100).join("\n"))).toContain("Read reopened.png");
 		expect(ctx.ui.requestRender).toHaveBeenCalledWith(true, { clearScrollback: true });
+	});
+});
+
+describe("UiHelpers.renderInitialMessages — hidden tool activity", () => {
+	it("hides replayed tool cards without discarding them from the persisted transcript", () => {
+		const toolCallId = "replayed-hidden-tool";
+		const toolArgumentMarker = "REPLAYED TOOL ARGUMENT MARKER";
+		const toolResultMarker = "REPLAYED TOOL RESULT MARKER";
+		const narrationMarker = "ASSISTANT NARRATION STAYS VISIBLE";
+		const finalMarker = "FINAL ASSISTANT RESPONSE STAYS VISIBLE";
+		const transcript = transcriptWith([
+			{
+				...assistantToolCall(toolCallId, "contract_probe", { value: toolArgumentMarker }),
+				content: [
+					{ type: "text", text: narrationMarker },
+					{ type: "toolCall", id: toolCallId, name: "contract_probe", arguments: { value: toolArgumentMarker } },
+				],
+			},
+			{
+				role: "toolResult",
+				toolCallId,
+				toolName: "contract_probe",
+				content: [{ type: "text", text: toolResultMarker }],
+				isError: false,
+				timestamp: 2,
+			},
+			{
+				role: "assistant",
+				content: [{ type: "text", text: finalMarker }],
+				api: "anthropic-messages",
+				provider: "anthropic",
+				model: "claude-sonnet",
+				usage: emptyUsage,
+				stopReason: "stop",
+				timestamp: 3,
+			},
+		]);
+
+		const hidden = makeRenderCtx(transcript, true, true);
+		new UiHelpers(hidden.ctx).renderInitialMessages();
+		const hiddenRender = Bun.stripANSI(hidden.chatContainer.render(120).join("\n"));
+		expect(hiddenRender).toContain(narrationMarker);
+		expect(hiddenRender).toContain(finalMarker);
+		expect(hiddenRender).not.toContain(toolArgumentMarker);
+		expect(hiddenRender).not.toContain(toolResultMarker);
+
+		const visible = makeRenderCtx(transcript, true, false);
+		new UiHelpers(visible.ctx).renderInitialMessages();
+		const visibleRender = Bun.stripANSI(visible.chatContainer.render(120).join("\n"));
+		expect(visibleRender).toContain(toolArgumentMarker);
+		expect(visibleRender).toContain(toolResultMarker);
 	});
 });
 

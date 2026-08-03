@@ -444,6 +444,7 @@ export class UiHelpers {
 									showContentPreview: this.ctx.settings.get("read.toolResultPreview"),
 								});
 								readGroup.setExpanded(this.ctx.toolOutputExpanded);
+								readGroup.setToolActivityVisible(!this.ctx.hideToolActivity);
 								this.ctx.chatContainer.addChild(readGroup);
 							}
 							readGroup.updateArgs(content.arguments, content.id);
@@ -458,6 +459,7 @@ export class UiHelpers {
 									showContentPreview: this.ctx.settings.get("read.toolResultPreview"),
 								});
 								readGroup.setExpanded(this.ctx.toolOutputExpanded);
+								readGroup.setToolActivityVisible(!this.ctx.hideToolActivity);
 								this.ctx.chatContainer.addChild(readGroup);
 							}
 							readGroup.updateArgs(content.arguments, content.id);
@@ -510,6 +512,7 @@ export class UiHelpers {
 						content.id,
 					);
 					component.setExpanded(this.ctx.toolOutputExpanded);
+					component.setToolActivityVisible(!this.ctx.hideToolActivity);
 					this.ctx.chatContainer.addChild(component);
 
 					if (hasErrorStop && errorMessage) {
@@ -578,6 +581,7 @@ export class UiHelpers {
 								showContentPreview: this.ctx.settings.get("read.toolResultPreview"),
 							});
 							readGroup.setExpanded(this.ctx.toolOutputExpanded);
+							readGroup.setToolActivityVisible(!this.ctx.hideToolActivity);
 							this.ctx.chatContainer.addChild(readGroup);
 						}
 						const args = readToolCallArgs.get(message.toolCallId);
