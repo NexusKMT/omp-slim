@@ -34,14 +34,21 @@ export interface ClassifyUnexpectedStopDeps {
 
 export function isUnexpectedStopCandidate(message: AssistantMessage): boolean {
 	if (message.stopReason !== "stop") return false;
-	let hasText = false;
+	let hasContent = false;
 	for (const content of message.content) {
 		if (content.type === "toolCall") return false;
 		if (content.type === "text" && /\S/.test(content.text)) {
-			hasText = true;
+			hasContent = true;
+		}
+		// A thinking-only stop is still a candidate: reasoning models can trap the
+		// intended response (or a truncated fragment) in a signed thinking block
+		// with no text, which #isEmptyAssistantStop treats as terminal rather than
+		// empty. Feed it to the classifier instead of silently ending the turn.
+		if (content.type === "thinking" && /\S/.test(content.thinking)) {
+			hasContent = true;
 		}
 	}
-	return hasText;
+	return hasContent;
 }
 
 export async function classifyUnexpectedStop(

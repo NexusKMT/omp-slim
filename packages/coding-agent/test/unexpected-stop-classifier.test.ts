@@ -76,6 +76,30 @@ describe("isUnexpectedStopCandidate", () => {
 		});
 		expect(isUnexpectedStopCandidate(message)).toBe(false);
 	});
+
+	it("returns true for a signed thinking-only stop", () => {
+		const message = makeAssistantMessage({
+			stopReason: "stop",
+			content: [{ type: "thinking", thinking: " 响应", thinkingSignature: "reasoning_content" }],
+		});
+		expect(isUnexpectedStopCandidate(message)).toBe(true);
+	});
+
+	it("returns true for an unsigned thinking-only stop with real content", () => {
+		const message = makeAssistantMessage({
+			stopReason: "stop",
+			content: [{ type: "thinking", thinking: "responseAll four reviewers complete." }],
+		});
+		expect(isUnexpectedStopCandidate(message)).toBe(true);
+	});
+
+	it("returns false when the thinking block is only whitespace", () => {
+		const message = makeAssistantMessage({
+			stopReason: "stop",
+			content: [{ type: "thinking", thinking: "   \n\t  ", thinkingSignature: "reasoning_content" }],
+		});
+		expect(isUnexpectedStopCandidate(message)).toBe(false);
+	});
 });
 
 describe("classifyUnexpectedStop", () => {
