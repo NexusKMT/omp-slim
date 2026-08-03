@@ -512,9 +512,11 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 							// A guardrail block ends the turn with `guardrail_intervened` and often no
 							// content — surface it explicitly so it never reads as an empty completion.
 							output.errorMessage =
-								ev.stopReason === "guardrail_intervened" || ev.stopReason === "content_filtered"
+								ev.stopReason === "guardrail_intervened"
 									? `Response blocked by Amazon Bedrock guardrail (stop reason: ${ev.stopReason}).`
-									: `Generation failed with stop reason: ${ev.stopReason ?? "unknown"}`;
+									: ev.stopReason === "content_filtered"
+										? `Response filtered by Amazon Bedrock content filters (stop reason: ${ev.stopReason}).`
+										: `Generation failed with stop reason: ${ev.stopReason ?? "unknown"}`;
 						}
 						break;
 					}
