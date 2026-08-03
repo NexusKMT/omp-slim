@@ -94,17 +94,15 @@ describe("stats sync serial mode", () => {
 		expect(workerSpy).toHaveBeenCalled();
 	});
 
-	it("reclaims a dead owner's abandoned stale breaker", async () => {
+	it("reclaims a dead owner's abandoned lock", async () => {
 		const dbPath = path.join(getSessionsDir(), "stats-lock.db");
 		const lockPath = `${dbPath}.sync.lock`;
-		const breakerPath = `${lockPath}.break`;
 		const deadPid = 424_242;
-		await fs.mkdir(path.dirname(dbPath), { recursive: true });
-		await Bun.write(lockPath, `${deadPid}\n1\nprimary\n`);
-		await Bun.write(breakerPath, `${deadPid}\n1\nbreaker\n`);
-		const staleTime = new Date(Date.now() - 2 * 60 * 60 * 1000);
-		await fs.utimes(lockPath, staleTime, staleTime);
-		await fs.utimes(breakerPath, staleTime, staleTime);
+		await fs.mkdir(lockPath, { recursive: true });
+		await Bun.write(
+			path.join(lockPath, "info"),
+			JSON.stringify({ pid: deadPid, timestamp: Date.now() - 60_000, token: "dead-owner" }),
+		);
 		vi.spyOn(process, "kill").mockImplementation(pid => {
 			if (pid === deadPid) throw Object.assign(new Error("dead owner"), { code: "ESRCH" });
 			return true;
@@ -114,15 +112,13 @@ describe("stats sync serial mode", () => {
 		const result = await withStatsSyncLock(dbPath, async () => "acquired");
 
 		expect(result).toBe("acquired");
-		expect(await Bun.file(lockPath).exists()).toBe(false);
-		expect(await Bun.file(breakerPath).exists()).toBe(false);
+		expect(await fs.stat(lockPath).catch(() => null)).toBeNull();
 	});
 
 	it("reclaims an unstamped lock after the acquisition grace period", async () => {
 		const dbPath = path.join(getSessionsDir(), "stats-unstamped-lock.db");
 		const lockPath = `${dbPath}.sync.lock`;
-		await fs.mkdir(path.dirname(dbPath), { recursive: true });
-		await Bun.write(lockPath, "");
+		await fs.mkdir(lockPath, { recursive: true });
 		const staleTime = new Date(Date.now() - 11_000);
 		await fs.utimes(lockPath, staleTime, staleTime);
 		vi.spyOn(Bun, "sleep").mockResolvedValue(undefined);
@@ -130,30 +126,23 @@ describe("stats sync serial mode", () => {
 		const result = await withStatsSyncLock(dbPath, async () => "acquired");
 
 		expect(result).toBe("acquired");
-		expect(await Bun.file(lockPath).exists()).toBe(false);
+		expect(await fs.stat(lockPath).catch(() => null)).toBeNull();
 	});
 
-	it("never reclaims a live owner-stamped breaker even when its mtime is stale", async () => {
-		const dbPath = path.join(getSessionsDir(), "stats-live-breaker.db");
+	it("waits for a live recently-stamped owner instead of reclaiming it", async () => {
+		const dbPath = path.join(getSessionsDir(), "stats-live-lock.db");
 		const lockPath = `${dbPath}.sync.lock`;
-		const breakerPath = `${lockPath}.break`;
-		const deadPid = 424_243;
-		const liveBreakerToken = `${process.pid}\n1\nlive-breaker\n`;
-		await fs.mkdir(path.dirname(dbPath), { recursive: true });
-		await Bun.write(lockPath, `${deadPid}\n1\nprimary\n`);
-		await Bun.write(breakerPath, liveBreakerToken);
-		const staleTime = new Date(Date.now() - 2 * 60 * 60 * 1000);
-		await fs.utimes(lockPath, staleTime, staleTime);
-		await fs.utimes(breakerPath, staleTime, staleTime);
-		vi.spyOn(process, "kill").mockImplementation(pid => {
-			if (pid === deadPid) throw Object.assign(new Error("dead owner"), { code: "ESRCH" });
-			return true;
-		});
+		const infoPath = path.join(lockPath, "info");
+		await fs.mkdir(lockPath, { recursive: true });
+		await Bun.write(
+			infoPath,
+			JSON.stringify({ pid: process.pid, timestamp: Date.now(), token: "live-owner" }),
+		);
 		const retryScheduled = Promise.withResolvers<void>();
 		const resumeRetry = Promise.withResolvers<void>();
-		let breakerReleased = false;
+		let lockReleased = false;
 		vi.spyOn(Bun, "sleep").mockImplementation(async () => {
-			if (breakerReleased) return;
+			if (lockReleased) return;
 			retryScheduled.resolve();
 			await resumeRetry.promise;
 		});
@@ -165,10 +154,10 @@ describe("stats sync serial mode", () => {
 		try {
 			await retryScheduled.promise;
 			expect(acquired).toBe(false);
-			expect(await Bun.file(breakerPath).text()).toBe(liveBreakerToken);
+			expect(JSON.parse(await Bun.file(infoPath).text())).toMatchObject({ token: "live-owner" });
 		} finally {
-			breakerReleased = true;
-			await fs.rm(breakerPath, { force: true });
+			lockReleased = true;
+			await fs.rm(lockPath, { recursive: true, force: true });
 			resumeRetry.resolve();
 			await pending;
 		}

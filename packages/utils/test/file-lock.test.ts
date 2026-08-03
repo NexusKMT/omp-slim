@@ -2,10 +2,11 @@ import { afterAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { __internalsForTesting, withFileLock } from "@oh-my-pi/pi-coding-agent/config/file-lock";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { __internalsForTesting, withFileLock } from "../src/file-lock";
+import { removeWithRetries } from "../src/temp";
 
-const { tryAcquireLock, releaseLock, readLockInfo, isLockStale, getLockPath } = __internalsForTesting;
+const { tryAcquireLock, releaseLock, readLockInfo, getStaleLockIdentity, reapStaleLock, getLockPath } =
+	__internalsForTesting;
 
 const ROOTS: string[] = [];
 
@@ -44,7 +45,7 @@ describe("file-lock token ownership (F1)", () => {
 		expect(await readLockInfo(lockPath)).toBeNull();
 	});
 
-	test("isLockStale does NOT declare a freshly-created empty dir stale", async () => {
+	test("getStaleLockIdentity does NOT declare a freshly-created empty dir stale", async () => {
 		const root = await mkRoot();
 		const target = path.join(root, "race.json");
 		const lockPath = getLockPath(target);
@@ -53,10 +54,59 @@ describe("file-lock token ownership (F1)", () => {
 		// info file has not been written yet.
 		await fs.mkdir(lockPath);
 
-		const stale = await isLockStale(lockPath, 10_000);
-		expect(stale).toBe(false);
+		const stale = await getStaleLockIdentity(lockPath, 10_000, 10_000);
+		expect(stale).toBeNull();
 
 		await removeWithRetries(lockPath);
+	});
+
+	test("a slow second reaper cannot destroy a reaped-and-reacquired lock", async () => {
+		const root = await mkRoot();
+		const target = path.join(root, "contested.json");
+		const lockPath = getLockPath(target);
+
+		// A dead owner's stale lock, judged stale by two contenders.
+		await fs.mkdir(lockPath);
+		await Bun.write(
+			path.join(lockPath, "info"),
+			JSON.stringify({ pid: 999_999_999, timestamp: Date.now() - 60_000, token: "dead-token" }),
+		);
+		const judged = await getStaleLockIdentity(lockPath, 10_000, 10_000);
+		expect(judged).toMatchObject({ token: "dead-token" });
+
+		// Reaper 1 wins: reaps and immediately re-acquires.
+		await reapStaleLock(lockPath, judged!);
+		const freshToken = await tryAcquireLock(lockPath);
+		expect(freshToken).not.toBeNull();
+
+		// Reaper 2 acts on its stale pre-reap judgment: it must not remove the
+		// fresh owner's lock.
+		await reapStaleLock(lockPath, judged!);
+
+		const info = await readLockInfo(lockPath);
+		expect(info?.token).toBe(freshToken!);
+
+		// The fresh owner can still release normally.
+		await releaseLock(lockPath, freshToken!);
+		expect(await readLockInfo(lockPath)).toBeNull();
+	});
+
+	test("concurrent reapers of a vanished lock are a no-op", async () => {
+		const root = await mkRoot();
+		const target = path.join(root, "gone.json");
+		const lockPath = getLockPath(target);
+
+		await fs.mkdir(lockPath);
+		await Bun.write(
+			path.join(lockPath, "info"),
+			JSON.stringify({ pid: 999_999_999, timestamp: Date.now() - 60_000, token: "dead-token" }),
+		);
+		const judged = await getStaleLockIdentity(lockPath, 10_000, 10_000);
+		await reapStaleLock(lockPath, judged!);
+		// Second reap of the already-removed lock must not throw or recreate it.
+		await reapStaleLock(lockPath, judged!);
+		expect(await readLockInfo(lockPath)).toBeNull();
+		expect(await fs.stat(lockPath).catch(() => null)).toBeNull();
 	});
 
 	test("withFileLock serializes N concurrent writers without lost updates", async () => {

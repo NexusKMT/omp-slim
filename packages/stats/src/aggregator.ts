@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getStatsDbPath, workerHostEntry } from "@oh-my-pi/pi-utils";
+import { withFileLock } from "@oh-my-pi/pi-utils/file-lock";
 import {
 	getRecentErrors as dbGetRecentErrors,
 	getRecentRequests as dbGetRecentRequests,
@@ -53,204 +54,22 @@ const STATS_SYNC_LOCK_RETRY_MS = 25;
 const STATS_SYNC_LOCK_ACQUIRE_STALE_MS = 10 * 1000;
 const STATS_SYNC_LOCK_STALE_MS = 60 * 60 * 1000;
 
-interface StatsLockSnapshot {
-	dev: number;
-	ino: number;
-	size: number;
-	mtimeMs: number;
-	text: string;
-}
-
-function errorCode(error: unknown): string | undefined {
-	if (!error || typeof error !== "object" || !("code" in error)) return undefined;
-	return typeof error.code === "string" ? error.code : undefined;
-}
-
-function sameStatsLock(left: StatsLockSnapshot, right: StatsLockSnapshot): boolean {
-	return (
-		left.dev === right.dev &&
-		left.ino === right.ino &&
-		left.size === right.size &&
-		left.mtimeMs === right.mtimeMs &&
-		left.text === right.text
-	);
-}
-
-async function readStatsLockSnapshot(lockPath: string): Promise<StatsLockSnapshot | null> {
-	try {
-		const before = await fs.promises.stat(lockPath);
-		const text = await fs.promises.readFile(lockPath, "utf8");
-		const after = await fs.promises.stat(lockPath);
-		const first = {
-			dev: before.dev,
-			ino: before.ino,
-			size: before.size,
-			mtimeMs: before.mtimeMs,
-			text,
-		};
-		const second = {
-			dev: after.dev,
-			ino: after.ino,
-			size: after.size,
-			mtimeMs: after.mtimeMs,
-			text,
-		};
-		return sameStatsLock(first, second) ? second : null;
-	} catch (error) {
-		if (errorCode(error) === "ENOENT") return null;
-		throw error;
-	}
-}
-
-function statsLockOwnerIsRunning(snapshot: StatsLockSnapshot): boolean {
-	const pid = Number.parseInt(snapshot.text.split(/\r?\n/, 1)[0] ?? "", 10);
-	if (!Number.isSafeInteger(pid) || pid <= 0) {
-		return Date.now() - snapshot.mtimeMs < STATS_SYNC_LOCK_ACQUIRE_STALE_MS;
-	}
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (error) {
-		return errorCode(error) !== "ESRCH";
-	}
-}
-
-function createStatsLockToken(): string {
-	return `${process.pid}\n${Date.now()}\n${Math.random()}\n`;
-}
-
-async function removeAbandonedStatsLockFile(lockPath: string): Promise<boolean> {
-	const snapshot = await readStatsLockSnapshot(lockPath);
-	if (!snapshot || statsLockOwnerIsRunning(snapshot)) return false;
-
-	const current = await readStatsLockSnapshot(lockPath);
-	if (!current || !sameStatsLock(snapshot, current) || statsLockOwnerIsRunning(current)) return false;
-	try {
-		await fs.promises.unlink(lockPath);
-		return true;
-	} catch (error) {
-		if (errorCode(error) === "ENOENT") return false;
-		throw error;
-	}
-}
-
-async function removeOwnedStatsLockFile(lockPath: string, owned: StatsLockSnapshot): Promise<void> {
-	const current = await readStatsLockSnapshot(lockPath);
-	if (!current || !sameStatsLock(owned, current)) return;
-	try {
-		await fs.promises.unlink(lockPath);
-	} catch (error) {
-		if (errorCode(error) !== "ENOENT") throw error;
-	}
-}
-
-async function removeAbandonedStatsLock(lockPath: string): Promise<boolean> {
-	const snapshot = await readStatsLockSnapshot(lockPath);
-	if (!snapshot || statsLockOwnerIsRunning(snapshot)) return false;
-
-	const breakerPath = `${lockPath}.break`;
-	let breaker: fs.promises.FileHandle;
-	try {
-		breaker = await fs.promises.open(breakerPath, "wx");
-	} catch (error) {
-		if (errorCode(error) === "EEXIST") {
-			await removeAbandonedStatsLockFile(breakerPath);
-			return false;
-		}
-		throw error;
-	}
-
-	const breakerToken = createStatsLockToken();
-	let breakerSnapshot: StatsLockSnapshot | null = null;
-	let breakerTokenWritten = false;
-	let removed = false;
-	let cleanupError: unknown;
-	try {
-		await breaker.writeFile(breakerToken);
-		breakerTokenWritten = true;
-		breakerSnapshot = await readStatsLockSnapshot(breakerPath);
-		if (!breakerSnapshot || breakerSnapshot.text !== breakerToken) {
-			throw new Error(`Stats lock breaker changed while acquiring ${breakerPath}`);
-		}
-
-		const current = await readStatsLockSnapshot(lockPath);
-		if (current && sameStatsLock(snapshot, current) && !statsLockOwnerIsRunning(current)) {
-			try {
-				await fs.promises.unlink(lockPath);
-				removed = true;
-			} catch (error) {
-				if (errorCode(error) !== "ENOENT") throw error;
-			}
-		}
-	} finally {
-		try {
-			await breaker.close();
-		} catch (error) {
-			cleanupError = error;
-		}
-		try {
-			if (!breakerSnapshot && breakerTokenWritten) {
-				const current = await readStatsLockSnapshot(breakerPath);
-				if (current?.text === breakerToken) breakerSnapshot = current;
-			}
-			if (breakerSnapshot) await removeOwnedStatsLockFile(breakerPath, breakerSnapshot);
-		} catch (error) {
-			cleanupError ??= error;
-		}
-	}
-	if (cleanupError) throw cleanupError;
-	return removed;
-}
-
 /**
  * Serialize stats ingestion and archive reconciliation across processes.
  * The lock covers file discovery, parsing, and the final SQLite write so a
  * parse result for a session moved by GC can never commit after cleanup.
+ * The lock lives at `${dbPath}.sync.lock`; a dead owner is reclaimed
+ * immediately, a live-but-wedged one after an hour, and a lock abandoned
+ * mid-acquisition after ten seconds.
  */
 export async function withStatsSyncLock<T>(dbPath: string, fn: () => Promise<T>): Promise<T> {
-	const lockPath = `${dbPath}.sync.lock`;
 	await fs.promises.mkdir(path.dirname(dbPath), { recursive: true });
-	let handle: fs.promises.FileHandle | undefined;
-	while (!handle) {
-		try {
-			handle = await fs.promises.open(lockPath, "wx");
-		} catch (error) {
-			if (errorCode(error) !== "EEXIST") throw error;
-			await removeAbandonedStatsLock(lockPath);
-			await Bun.sleep(STATS_SYNC_LOCK_RETRY_MS);
-		}
-	}
-
-	const token = createStatsLockToken();
-	let result: T | undefined;
-	let operationError: unknown;
-	let operationFailed = false;
-	let tokenWritten = false;
-	try {
-		await handle.writeFile(token);
-		tokenWritten = true;
-		result = await fn();
-	} catch (error) {
-		operationFailed = true;
-		operationError = error;
-	}
-
-	let cleanupError: unknown;
-	try {
-		await handle.close();
-	} catch (error) {
-		cleanupError = error;
-	}
-	try {
-		const current = await fs.promises.readFile(lockPath, "utf8");
-		if (!tokenWritten || current === token) await fs.promises.unlink(lockPath);
-	} catch (error) {
-		if (errorCode(error) !== "ENOENT") cleanupError ??= error;
-	}
-
-	if (operationFailed) throw operationError;
-	if (cleanupError) throw cleanupError;
-	return result as T;
+	return await withFileLock(`${dbPath}.sync`, fn, {
+		staleMs: STATS_SYNC_LOCK_STALE_MS,
+		acquireStaleMs: STATS_SYNC_LOCK_ACQUIRE_STALE_MS,
+		retryDelayMs: STATS_SYNC_LOCK_RETRY_MS,
+		retries: Math.ceil(STATS_SYNC_LOCK_STALE_MS / STATS_SYNC_LOCK_RETRY_MS),
+	});
 }
 
 /**
