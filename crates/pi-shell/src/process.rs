@@ -1,6 +1,9 @@
 //! Cross-platform process tree management.
 
-use std::{collections::HashSet, time::Duration};
+use std::{
+	collections::{HashMap, HashSet},
+	time::Duration,
+};
 
 use anyhow::Result;
 use parking_lot::Mutex;
@@ -1405,7 +1408,7 @@ impl Process {
 	/// as a false descendant; `TerminateProcess`-ing it drops the whole session
 	/// with no cleanup and no `session_exit` record (#7452, related #4605).
 	fn signal_tree_excluding(&self, signal: i32, protected: &HashSet<i32>) -> u32 {
-		let descendants = self.live_descendants();
+		let descendants = self.signalable_descendants(protected);
 		let mut signaled = 0u32;
 		// If self leads its own process group, also signal the group — this catches
 		// grandchildren reparented to init when their immediate parent died inside
@@ -1416,9 +1419,6 @@ impl Process {
 			let _ = kill_process_group(pgid, signal);
 		}
 		for child in &descendants {
-			if protected.contains(&child.pid()) {
-				continue;
-			}
 			if child.inner.kill(signal) {
 				signaled += 1;
 			}
@@ -1427,6 +1427,27 @@ impl Process {
 			signaled += 1;
 		}
 		signaled
+	}
+
+	/// Live descendants with every protected subtree pruned, not just the exact
+	/// protected pids.
+	///
+	/// The flattened descendant list can contain a protected node (the harness,
+	/// on a Windows PID-reuse false-descendant) *together with* that node's real
+	/// children, which were collected by recursing through it. Skipping only the
+	/// exact protected pid would still terminate those unrelated worker/tool
+	/// subprocesses, so drop every node whose recorded parent chain — within the
+	/// enumerated set — passes through a protected pid (#7452 review).
+	fn signalable_descendants(&self, protected: &HashSet<i32>) -> Vec<Self> {
+		let descendants = self.live_descendants();
+		let parents: HashMap<i32, i32> = descendants
+			.iter()
+			.filter_map(|descendant| descendant.ppid().map(|parent| (descendant.pid(), parent)))
+			.collect();
+		descendants
+			.into_iter()
+			.filter(|descendant| !pid_in_protected_subtree(descendant.pid(), protected, &parents))
+			.collect()
 	}
 
 	async fn terminate_tree_impl(
@@ -1447,11 +1468,8 @@ impl Process {
 		if let Some(pgid) = process_group {
 			let _ = kill_process_group(pgid, TERM_SIGNAL);
 		}
-		let mut descendants = self.live_descendants();
+		let mut descendants = self.signalable_descendants(&protected);
 		for child in &descendants {
-			if protected.contains(&child.pid()) {
-				continue;
-			}
 			let _ = child.inner.kill(TERM_SIGNAL);
 		}
 		if !protected.contains(&self.pid()) {
@@ -1478,11 +1496,8 @@ impl Process {
 		if let Some(pgid) = process_group {
 			let _ = kill_process_group(pgid, KILL_SIGNAL);
 		}
-		descendants = self.live_descendants();
+		descendants = self.signalable_descendants(&protected);
 		for child in &descendants {
-			if protected.contains(&child.pid()) {
-				continue;
-			}
 			let _ = child.inner.kill(KILL_SIGNAL);
 		}
 		if !protected.contains(&self.pid()) {
@@ -1527,6 +1542,30 @@ fn host_protected_pids() -> HashSet<i32> {
 		pid = parent;
 	}
 	protected
+}
+
+/// True when `pid` is itself protected or descends — within the enumerated
+/// `parents` map (pid -> recorded parent pid) — from a protected pid. Used to
+/// prune a whole protected subtree from a cancellation sweep so a false
+/// descendant of the harness cannot drag the harness's real children into the
+/// kill set (#7452).
+fn pid_in_protected_subtree(
+	pid: i32,
+	protected: &HashSet<i32>,
+	parents: &HashMap<i32, i32>,
+) -> bool {
+	let mut current = pid;
+	// Bound the walk against a corrupted or cyclic parent chain.
+	for _ in 0..256 {
+		if protected.contains(&current) {
+			return true;
+		}
+		match parents.get(&current) {
+			Some(&parent) if parent != current => current = parent,
+			_ => return false,
+		}
+	}
+	false
 }
 
 async fn wait_for_exit(
@@ -1929,6 +1968,36 @@ mod tests {
 		let reaped = root.signal_tree_excluding(KILL_SIGNAL, &HashSet::new());
 		assert!(reaped >= 1, "an unprotected root must be signalled");
 		let _ = child.wait();
+	}
+
+	/// Regression test for the #7453 review: pruning a protected node must drop
+	/// its whole subtree, not just the exact protected pid. A Windows PID-reuse
+	/// false-descendant collects the harness together with the harness's real
+	/// children (LSP servers, worker/tool subprocesses); skipping only the host
+	/// pid would still terminate those. `pid_in_protected_subtree` walks the
+	/// enumerated parent map so any node under a protected pid is excluded.
+	#[test]
+	fn protected_subtree_is_pruned_not_just_the_pid() {
+		// root(1) -> host(2, protected) -> worker(3); root(1) -> real_child(4).
+		let parents: HashMap<i32, i32> = [(2, 1), (3, 2), (4, 1)].into_iter().collect();
+		let protected: HashSet<i32> = [2].into_iter().collect();
+
+		assert!(
+			pid_in_protected_subtree(2, &protected, &parents),
+			"the protected node itself must be excluded",
+		);
+		assert!(
+			pid_in_protected_subtree(3, &protected, &parents),
+			"a child collected through the protected node must be excluded too",
+		);
+		assert!(
+			!pid_in_protected_subtree(4, &protected, &parents),
+			"a real child of the sweep root must still be signalled",
+		);
+		assert!(
+			!pid_in_protected_subtree(1, &protected, &parents),
+			"the sweep root must not be pruned",
+		);
 	}
 
 	/// `kill_process_group` is the last line of defense: even if a future
