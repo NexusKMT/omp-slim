@@ -125,6 +125,7 @@ async function loadTomlConfig(_ctx: LoadContext, path: string): Promise<Record<s
 
 /** Codex MCP server config format (from config.toml) */
 interface CodexMCPConfig {
+	enabled?: boolean;
 	command?: string;
 	args?: string[];
 	env?: Record<string, string>;
@@ -153,6 +154,8 @@ function extractMCPServersFromToml(
 	const result: Record<string, Partial<MCPServer>> = {};
 
 	for (const [name, config] of Object.entries(codexServers)) {
+		if (config.enabled === false) continue;
+
 		// Root relative cwd/command against the Codex config directory. Codex
 		// spawns the process with the resolved cwd, so a relative command is
 		// resolved by the OS from there — pass "cwd" so e.g. cwd="server",

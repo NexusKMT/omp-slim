@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Codex `config.toml` discovery importing MCP servers with `enabled = false` ([#7538](https://github.com/can1357/oh-my-pi/issues/7538)).
+
 ## [17.2.6] - 2026-08-03
 
 ### Added

@@ -1,5 +1,5 @@
 /**
- * Regression tests for #5561.
+ * Regression tests for Codex MCP config discovery (#5561, #7538).
  *
  * The Codex `config.toml` MCP importer in `packages/coding-agent/src/discovery/codex.ts`
  * used to copy only `command`/`args`/`url` into the returned `MCPServer`, dropping
@@ -47,6 +47,27 @@ async function loadCodexServers(): Promise<MCPServer[]> {
 	});
 	return result.items;
 }
+
+test("disabled Codex MCP servers are not discovered (#7538)", async () => {
+	const codexDir = path.join(tempHome, ".codex");
+	await fs.writeFile(
+		path.join(codexDir, "config.toml"),
+		[
+			"[mcp_servers.computer-use]",
+			'command = "./Codex Computer Use.app/Contents/MacOS/SkyComputerUseClient"',
+			"enabled = false",
+			"",
+			"[mcp_servers.context7]",
+			'command = "npx"',
+			"enabled = true",
+			"",
+		].join("\n"),
+	);
+
+	const servers = await loadCodexServers();
+	expect(servers.find(server => server.name === "computer-use")).toBeUndefined();
+	expect(servers.find(server => server.name === "context7")?.command).toBe("npx");
+});
 
 test("relative path-like command and cwd resolve against the Codex config directory (#5561)", async () => {
 	const codexDir = path.join(tempHome, ".codex");
