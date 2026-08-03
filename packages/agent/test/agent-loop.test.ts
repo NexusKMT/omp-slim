@@ -1532,7 +1532,7 @@ describe("agentLoop with AgentMessage", () => {
 		expect(sawInterruptInContext).toBe(true);
 	});
 
-	it("should skip remaining tool calls with internal steering wording when non-user steering is queued", async () => {
+	it("should skip remaining tool calls with system advisory wording when advisor steering is queued", async () => {
 		const toolSchema = type({ value: "string" });
 		const executed: string[] = [];
 		const tool: AgentTool<typeof toolSchema, { value: string }> = {
@@ -1610,9 +1610,7 @@ describe("agentLoop with AgentMessage", () => {
 		const skippedContent = toolEnds[1].result.content[0];
 		expect(skippedContent?.type).toBe("text");
 		if (skippedContent?.type !== "text") throw new Error("skipped tool result must be text");
-		expect(skippedContent.text).toContain("Skipped due to pending internal steering message");
-		expect(skippedContent.text).toContain("After the steering message is handled on the next step");
-		expect(skippedContent.text).not.toContain("advisory");
+		expect(skippedContent.text).toContain("Skipped due to pending system advisory");
 		expect(skippedContent.text).not.toContain("queued user message");
 		expect(skippedContent.text).toContain("Do not count this skipped result as completed work");
 		expect(skippedContent.text).toContain("retry the skipped tool if it is still needed");
