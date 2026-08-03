@@ -8,6 +8,9 @@
 - Changed the default model for `XAI_API_KEY` (`xai`) from `grok-4-fast-non-reasoning` to `grok-4.5`.
 - Changed the default model for SuperGrok OAuth (`xai-oauth`) from `grok-4.3` to `grok-4.5`.
 - Included `reasoning.encrypted_content` in Responses `include` for paid xAI and SuperGrok OAuth models.
+- Replayed encrypted xAI reasoning on follow-up Responses turns for `xai` and `xai-oauth`.
+- Kept automatic model selection on paid `xai/grok-4.5` when only `XAI_API_KEY` is set, instead of preferring SuperGrok `xai-oauth/grok-4.5`.
+- Stopped sending presence/frequency penalties and stop sequences to xAI reasoning models such as `grok-4.5`, which reject them.
 
 ## [17.3.4] - 2026-08-14
 
@@ -364,15 +367,6 @@
 - Fixed issues with `/btw` branch promotion where branches could park behind active turns, cut from outdated session leaves, or leave rejected branch keys indistinguishable from composer input.
 - Fixed database bloat by ensuring archived main and nested session rows are properly cleaned up from `stats.db` during garbage collection.
 - Fixed startup hanging during local model discovery when a timed-out transport left its request pending, which blocked the CLI before OAuth login could finish ([#7482](https://github.com/can1357/oh-my-pi/issues/7482)).
-### Changed
-
-- Routed paid xAI models (`XAI_API_KEY` / `xai/…`) through the Responses API used by SuperGrok OAuth instead of Chat Completions.
-- Changed the default model for `XAI_API_KEY` (`xai`) from `grok-4-fast-non-reasoning` to `grok-4.5`.
-- Changed the default model for SuperGrok OAuth (`xai-oauth`) from `grok-4.3` to `grok-4.5`.
-- Included `reasoning.encrypted_content` in Responses `include` for paid xAI and SuperGrok OAuth models.
-- Replayed encrypted xAI reasoning on follow-up Responses turns for `xai` and `xai-oauth`.
-- Kept automatic model selection on paid `xai/grok-4.5` when only `XAI_API_KEY` is set, instead of preferring SuperGrok `xai-oauth/grok-4.5`.
-- Stopped sending presence/frequency penalties and stop sequences to xAI reasoning models such as `grok-4.5`, which reject them.
 
 ## [17.2.5] - 2026-08-03
 

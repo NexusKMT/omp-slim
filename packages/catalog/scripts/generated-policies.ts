@@ -22,6 +22,7 @@ import { isOllamaCloudOutputCapped, OLLAMA_CLOUD_MAX_OUTPUT_TOKENS } from "../sr
 import {
 	ALIBABA_TOKEN_PLAN_STATIC_MODELS,
 	OPENAI_GPT_56_LONG_CONTEXT_COSTS,
+	applyXaiResponsesThinkingPolicy,
 	resolveWaferServerlessThinkingFormat,
 } from "../src/provider-models/openai-compat";
 import type { Api, LongContextTokenCost, Model, ModelSpec } from "../src/types";
@@ -353,6 +354,10 @@ export function applyOllamaCloudOutputCap(models: ModelSpec<Api>[]): void {
 }
 
 function applyGeneratedModelPolicy(model: ModelSpec<Api>): void {
+	if (model.provider === "xai" && model.api === "openai-responses") {
+		const updated = applyXaiResponsesThinkingPolicy(model as ModelSpec<"openai-responses">);
+		model.compat = updated.compat;
+	}
 	const copilotLimits = model.provider === "github-copilot" ? COPILOT_GENERATED_LIMITS[model.id] : undefined;
 	if (copilotLimits) {
 		model.contextWindow = copilotLimits.contextWindow;

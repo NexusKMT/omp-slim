@@ -1376,6 +1376,36 @@ function withXaiOAuthCompatDefaults(model: ModelSpec<"openai-responses">): Model
 // of the omitReasoningEffort gate in pi-ai's stream.ts.
 const XAI_REASONING_EFFORT_MAP = { minimal: "low" } as const;
 
+/**
+ * Bake first-party xAI Responses effort-dial metadata onto a catalog spec.
+ *
+ * models.dev marks many Grok SKUs as reasoners and the thinking rebake would
+ * otherwise emit a default `minimal/low/medium/high` dial. api.x.ai only
+ * accepts `reasoning.effort` for {@link isGrokReasoningEffortCapable} ids —
+ * off-allowlist reasoners (`grok-code-fast-1`, `grok-build-0.1`,
+ * `grok-4.20-0309-reasoning`, …) 400 if the param is sent. SuperGrok
+ * (`xai-oauth`) already curates this via {@link mergeCuratedIntoModel}; paid
+ * `xai` rows come from stencil.so and need the same wire facts in the exported
+ * `models.json` so direct catalog readers do not present an unsupported dial.
+ *
+ * Explicit `compat.supportsReasoningEffort` / `omitReasoningEffort` win.
+ */
+export function applyXaiResponsesThinkingPolicy(model: ModelSpec<"openai-responses">): ModelSpec<"openai-responses"> {
+	const effortCapable = model.compat?.supportsReasoningEffort ?? isGrokReasoningEffortCapable(model.id);
+	return {
+		...model,
+		compat: {
+			...(model.compat ?? {}),
+			reasoningEffortMap: {
+				...XAI_REASONING_EFFORT_MAP,
+				...(model.compat?.reasoningEffortMap ?? {}),
+			},
+			supportsReasoningEffort: effortCapable,
+			omitReasoningEffort: model.compat?.omitReasoningEffort ?? !effortCapable,
+		},
+	};
+}
+
 // xai-oauth's /v1/models exposes no per-request output limit on the OAuth
 // (Grok Build / SuperGrok) surface, so the curated catalog owns `maxTokens`
 // like it owns `contextWindow`: each entry mirrors its context window. The
@@ -5854,7 +5884,9 @@ const MODELS_DEV_PROVIDER_DESCRIPTORS_CORE: readonly ModelsDevProviderDescriptor
 		defaultContextWindow: 131072,
 	}),
 	// --- xAI ---
-	openAiResponsesDescriptor("xai", "xai", "https://api.x.ai/v1"),
+	openAiResponsesDescriptor("xai", "xai", "https://api.x.ai/v1", {
+		transformModel: model => applyXaiResponsesThinkingPolicy(model as ModelSpec<"openai-responses">),
+	}),
 	// --- DeepSeek ---
 	openAiCompletionsDescriptor("deepseek", "deepseek", "https://api.deepseek.com", {
 		// Only ship the v4 family as built-ins; older deepseek-chat / deepseek-reasoner

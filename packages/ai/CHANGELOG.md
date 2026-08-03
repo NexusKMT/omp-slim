@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Stopped treating `XAI_API_KEY` as SuperGrok (`xai-oauth`) sign-in for availability, so paid-key-only setups default to `xai/grok-4.5` instead of the zero-cost SuperGrok catalog path.
+
 ## [17.3.4] - 2026-08-14
 
 ### Fixed
@@ -148,9 +152,6 @@
 ### Fixed
 
 - Fixed an issue where Ollama requests without a user-role message would fail to generate output or silently fail with a misleading error.
-### Fixed
-
-- Stopped treating `XAI_API_KEY` as SuperGrok (`xai-oauth`) sign-in for availability, so paid-key-only setups default to `xai/grok-4.5` instead of the zero-cost SuperGrok catalog path.
 
 ## [17.2.5] - 2026-08-03
 
