@@ -1233,7 +1233,8 @@ export class ModelRegistry {
 		const withConfigModels = this.#mergeCustomModels(resolvedDefaults, select(this.#customModelOverlays));
 		const combined = this.#mergeCustomModels(withConfigModels, select(this.#runtimeModelOverlays));
 		const withModelOverrides = this.#applyModelOverrides(collapseBuiltModelVariants(combined), this.#modelOverrides);
-		return this.#applyLlamaCppQwenThinkingToModels(this.#applyRuntimeProviderOverrides(withModelOverrides));
+		const withProviderGuardrails = this.#applyProviderGuardrailOverrides(withModelOverrides);
+		return this.#applyLlamaCppQwenThinkingToModels(this.#applyRuntimeProviderOverrides(withProviderGuardrails));
 	}
 
 	#composeStaticModels(providerFilter?: ReadonlySet<string>): Model<Api>[] {
@@ -1270,7 +1271,6 @@ export class ModelRegistry {
 				return buildModel({
 					...withTransportOverride,
 					compat: mergeCompat(m.compatConfig, providerOverride.compat),
-					...guardrailOverrideFields(providerOverride),
 				} as ModelSpec<Api>);
 			});
 		});
@@ -1725,8 +1725,9 @@ export class ModelRegistry {
 		const withConfigModels = this.#mergeCustomModels(resolved, this.#customModelOverlays);
 		const combined = this.#mergeCustomModels(withConfigModels, this.#runtimeModelOverlays);
 		const withModelOverrides = this.#applyModelOverrides(collapseBuiltModelVariants(combined), this.#modelOverrides);
+		const withProviderGuardrails = this.#applyProviderGuardrailOverrides(withModelOverrides);
 		this.#unprojectedModels = this.#applyLlamaCppQwenThinkingToModels(
-			this.#applyRuntimeProviderOverrides(withModelOverrides),
+			this.#applyRuntimeProviderOverrides(withProviderGuardrails),
 		);
 		this.#models = this.#applyRuntimeModelModifiers(this.#unprojectedModels);
 	}
@@ -2165,6 +2166,23 @@ export class ModelRegistry {
 		>,
 	): Model<Api> {
 		return buildModel(this.#applyProviderTransportOverride(toModelSpec(model), override));
+	}
+
+	#applyProviderGuardrailOverrides(models: Model<Api>[]): Model<Api>[] {
+		if (this.#providerOverrides.size === 0) return models;
+		return models.map(model => {
+			const override = this.#providerOverrides.get(model.provider);
+			if (!override) return model;
+			const guardrailFields = guardrailOverrideFields(override);
+			if (
+				guardrailFields.guardrailIdentifier === undefined &&
+				guardrailFields.guardrailVersion === undefined &&
+				guardrailFields.guardrailTrace === undefined
+			) {
+				return model;
+			}
+			return buildModel({ ...toModelSpec(model), ...guardrailFields } as ModelSpec<Api>);
+		});
 	}
 
 	#applyRuntimeProviderOverrides(models: Model<Api>[]): Model<Api>[] {
