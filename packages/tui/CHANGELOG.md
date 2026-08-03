@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed Kitty/Ghostty shortcuts on non-Latin keyboard layouts by requesting base-layout key reporting from the terminal ([#7320](https://github.com/can1357/oh-my-pi/issues/7320)).
+- Fixed Kitty and Ghostty keyboard shortcuts on non-Latin keyboard layouts by requesting base-layout key reporting from the terminal.
 
 ## [17.2.4] - 2026-08-01
 
