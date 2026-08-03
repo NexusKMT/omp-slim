@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added opt-in SQLite page-size selection for file-backed databases. Set `MNEMOPI_DB_PAGE_SIZE` to a valid SQLite page size (a power of two from 512 to 65536) or `os`, or pass `pageSize` to `openDatabase`. The default remains SQLite's own page size because the virtual-memory page size does not establish storage-block behavior and larger WAL pages can increase sparse-write cost. Existing databases retain their page size.
+
 ## [17.2.3] - 2026-08-01
 
 ### Fixed
