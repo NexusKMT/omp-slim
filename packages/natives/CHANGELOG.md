@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.5] - 2026-08-03
+
 ### Breaking Changes
 
 - Replaced DesktopSession.execute(actions, window) and action batches with dedicated per-operation methods for capture, pointer, keyboard, window, and accessibility. Capture capabilities now apply per call, and coordinate input requires a prior frame for the same target.

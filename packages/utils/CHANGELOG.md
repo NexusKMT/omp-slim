@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.5] - 2026-08-03
+
 ### Added
 
 - Added utility functions `parseFlag()`, `getBrowserRelayDir()`, and `getGlobalDaemonRuntimeDir()` to support browser relay mode and global daemon runtime directory resolution.

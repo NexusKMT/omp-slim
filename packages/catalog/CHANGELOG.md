@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.5] - 2026-08-03
+
 ### Fixed
 
 - Fixed an issue where newly advertised chat models were dropped during dynamic discovery for the `alibaba-token-plan` provider.

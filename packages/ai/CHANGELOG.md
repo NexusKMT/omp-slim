@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.5] - 2026-08-03
+
 ### Changed
 
 - Standardized tool-call examples in `renderToolExamples` and `renderToolInventory` to use Python keyword-argument syntax (`name(key="value")`) across all models, removing the model-specific dialect parameter and the `DialectRenderOptions.example` flag.

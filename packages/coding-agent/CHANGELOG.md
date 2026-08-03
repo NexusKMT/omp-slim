@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.5] - 2026-08-03
+
 ### Breaking Changes
 
 - Replaced the computer tool's coordinate-batch schema with persistent JavaScript runs, and removed computer.backend and model-specific controller switching.
