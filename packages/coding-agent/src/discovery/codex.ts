@@ -154,14 +154,18 @@ function extractMCPServersFromToml(
 	const result: Record<string, Partial<MCPServer>> = {};
 
 	for (const [name, config] of Object.entries(codexServers)) {
-		if (config.enabled === false) continue;
-
 		// Root relative cwd/command against the Codex config directory. Codex
 		// spawns the process with the resolved cwd, so a relative command is
 		// resolved by the OS from there — pass "cwd" so e.g. cwd="server",
 		// command="./bin/mcp" resolves to <configDir>/server/bin/mcp.
 		const rooted = resolvePluginStdioPaths({ command: config.command, cwd: config.cwd }, configDir, "cwd");
 		const server: Partial<MCPServer> = {
+			// Carry `enabled: false` through rather than dropping the entry: the
+			// central MCP loader (`loadAllMCPConfigs`) suppresses disabled servers
+			// so they still claim their dedupe key (keeping a same-named,
+			// lower-priority source disabled) and remain overridable via the user
+			// force-enable allowlist. Dropping here would defeat both.
+			...(config.enabled === false && { enabled: false }),
 			...(rooted.command !== undefined && { command: rooted.command }),
 			args: config.args,
 			url: config.url,

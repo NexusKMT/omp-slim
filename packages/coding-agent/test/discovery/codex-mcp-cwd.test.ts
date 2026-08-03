@@ -48,7 +48,7 @@ async function loadCodexServers(): Promise<MCPServer[]> {
 	return result.items;
 }
 
-test("disabled Codex MCP servers are not discovered (#7538)", async () => {
+test("disabled Codex MCP servers survive discovery tagged enabled: false (#7538)", async () => {
 	const codexDir = path.join(tempHome, ".codex");
 	await fs.writeFile(
 		path.join(codexDir, "config.toml"),
@@ -65,8 +65,16 @@ test("disabled Codex MCP servers are not discovered (#7538)", async () => {
 	);
 
 	const servers = await loadCodexServers();
-	expect(servers.find(server => server.name === "computer-use")).toBeUndefined();
-	expect(servers.find(server => server.name === "context7")?.command).toBe("npx");
+	const cu = servers.find(server => server.name === "computer-use");
+	const context7 = servers.find(server => server.name === "context7");
+
+	// The disabled entry is NOT dropped: it stays so loadAllMCPConfigs' suppress
+	// path can claim its dedupe key (keeping a same-named, lower-priority source
+	// disabled) and honor the user force-enable allowlist. `enabled: true` is the
+	// default, so it is not persisted onto the enabled sibling.
+	expect(cu?.enabled).toBe(false);
+	expect(context7?.command).toBe("npx");
+	expect(context7?.enabled).toBeUndefined();
 });
 
 test("relative path-like command and cwd resolve against the Codex config directory (#5561)", async () => {
