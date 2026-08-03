@@ -48,6 +48,13 @@
 ### Fixed
 
 - Fixed Ollama model-manager caches being reused after the configured base URL changed by scoping cache namespaces to the normalized native discovery endpoint, including reverse-proxy path prefixes ([#7087](https://github.com/can1357/oh-my-pi/issues/7087)).
+### Added
+
+- Added the `bedrock-mantle` provider with authenticated model discovery for OpenAI GPT-5.4, GPT-5.5, and GPT-5.6 models served through Amazon Bedrock's Responses endpoint ([#7080](https://github.com/can1357/oh-my-pi/pull/7080) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
+
+### Fixed
+
+- Removed unusable Converse entries for OpenAI models that Amazon Bedrock serves only through Mantle and corrected GPT-5.6 Luna and Terra pricing ([#7080](https://github.com/can1357/oh-my-pi/pull/7080) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
 ## [17.2.0] - 2026-07-30
 
