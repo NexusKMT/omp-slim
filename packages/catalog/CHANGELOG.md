@@ -143,6 +143,8 @@
 - Requested `reasoning.encrypted_content` on first-party xAI Responses calls (`xai` and `xai-oauth`) via the `include` parameter.
 - Replayed xAI encrypted reasoning items on later Responses turns instead of stripping `type: "reasoning"` history.
 
+## [17.2.5] - 2026-08-03
+
 ### Fixed
 
 - Fixed an issue where newly advertised chat models were dropped during dynamic discovery for the `alibaba-token-plan` provider.
