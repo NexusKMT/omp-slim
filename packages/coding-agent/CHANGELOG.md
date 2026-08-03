@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserved explicit session titles when branching from an earlier conversation turn.
+
 ## [17.2.5] - 2026-08-03
 
 ### Breaking Changes

@@ -453,6 +453,16 @@ describe("createBranchedSession", () => {
 		expect(entries[1].id).toBe(id2);
 	});
 
+	it("preserves the session title when creating a branch", async () => {
+		const session = SessionManager.inMemory();
+		const leafId = session.appendMessage(userMsg("hello"));
+		await session.setSessionName("new-ds", "user");
+
+		session.createBranchedSession(leafId);
+
+		expect(session.getSessionName()).toBe("new-ds");
+	});
+
 	it("extracts correct path from branched tree", () => {
 		const session = SessionManager.inMemory();
 
