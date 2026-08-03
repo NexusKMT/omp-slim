@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Fixed Agent Hub opening and selection becoming O(all rows) on large rosters: row rendering is now lazy around the selected viewport, and observer lookup is O(1) by id instead of copy-sorting every session per row.
 - Fixed extension slash commands appearing as user prompts after being handled locally.
 - Preserved explicit session titles when branching from an earlier conversation turn.
 - Fixed floating rejections from cmux browser guest JavaScript terminating the main process and every active session; attributable rejections now fail the browser run as tool errors while unrelated process rejections retain the fatal path ([#7365](https://github.com/can1357/oh-my-pi/issues/7365)).
