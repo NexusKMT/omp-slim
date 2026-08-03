@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Ollama requests with no `user`-role turn (e.g. a plan-approval handoff whose only non-system message is an agent-attributed developer turn) returning `done_reason: "load"` and generating nothing, which was laundered into a clean empty stop and retried until the cap surfaced a misleading error. `convertMessages` now demotes the last non-prefix `system` turn to `user` so the request can produce output, and `mapDoneReason` surfaces `done_reason: "load"` as an error instead of a silent stop ([#7465](https://github.com/can1357/oh-my-pi/issues/7465)).
+
 ## [17.2.5] - 2026-08-03
 
 ### Changed
