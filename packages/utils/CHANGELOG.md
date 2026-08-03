@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.6] - 2026-08-03
+
 ### Added
 
 - Added a shared `file-lock` utility backed by process-owned native OS locks with automatic crash release and bounded asynchronous retry.

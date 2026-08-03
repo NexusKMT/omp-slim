@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.6] - 2026-08-03
+
 ### Added
 
 - Added the `bedrock-mantle` provider with authenticated model discovery for OpenAI GPT-5.4, GPT-5.5, and GPT-5.6 models (including Luna and Terra variants with corrected pricing) served through Amazon Bedrock's Responses endpoint.
