@@ -1184,6 +1184,55 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 		expect(secondLoad()).toBe("reload-upgrade-ok");
 	});
 
+	it("serves fresh source after a reload drops a module's require edge", async () => {
+		const dir = await writePackage({
+			"package.json": JSON.stringify({ name: "reload-downgrade-ext", version: "1.0.0", type: "module" }),
+			"node_modules/cjs-parent/package.json": JSON.stringify({
+				name: "cjs-parent",
+				version: "1.0.0",
+				main: "index.js",
+			}),
+			"node_modules/cjs-parent/index.js": 'module.exports = { load: () => require("../../lib.js").value };',
+			// v1 reaches `lib.js` through a require() edge, so the first load
+			// flags it synchronous and snapshots its pre-rewritten source.
+			"lib.js": 'export const value = "downgrade-v1";',
+			"index.js": [
+				'import parent from "cjs-parent";',
+				"export const loadValue = parent.load;",
+				"export default function (pi) { void pi; }",
+			].join("\n"),
+		});
+		const entry = path.join(dir, "index.js");
+
+		const first = await loadLegacyPiModule(entry);
+		const firstLoad = Reflect.get(Object(first), "loadValue");
+		if (typeof firstLoad !== "function") {
+			throw new Error("reload-downgrade fixture v1 did not export loadValue");
+		}
+		expect(firstLoad()).toBe("downgrade-v1");
+
+		// v2 drops the require edge and edits lib.js. The permanent hooks still
+		// serve the path from the synchronous snapshot, so the reload walk must
+		// refresh it instead of replaying the v1 bytes.
+		await fs.writeFile(path.join(dir, "lib.js"), 'export const value = "downgrade-v2";', "utf8");
+		await fs.writeFile(
+			entry,
+			[
+				'import { value } from "./lib.js";',
+				"export const loadValue = () => value;",
+				"export default function (pi) { void pi; }",
+			].join("\n"),
+			"utf8",
+		);
+
+		const second = await loadLegacyPiModule(entry);
+		const secondLoad = Reflect.get(Object(second), "loadValue");
+		if (typeof secondLoad !== "function") {
+			throw new Error("reload-downgrade fixture v2 did not export loadValue");
+		}
+		expect(secondLoad()).toBe("downgrade-v2");
+	});
+
 	it("chooses the ESM branch when dual package graphs converge", async () => {
 		const dir = await writePackage({
 			"package.json": JSON.stringify({ name: "dual-convergence-ext", version: "1.0.0", type: "module" }),

@@ -2427,6 +2427,12 @@ async function ensureExtensionGraphHook(entryRealPath: string): Promise<{ clear(
 		}
 		if (synchronousSourcePaths.has(modulePath)) {
 			synchronousModuleSources.set(modulePath, source);
+		} else if (synchronousModuleSources.has(modulePath)) {
+			// The path lost its require() edges on this walk, but the permanent
+			// hooks installed while it was synchronous still serve it from this
+			// map — keep the pre-rewritten bytes fresh instead of serving the
+			// stale snapshot from the walk that flagged it.
+			synchronousModuleSources.set(modulePath, await rewriteLegacyExtensionSource(source, modulePath));
 		}
 	}
 	let hookedModules = extensionGraphHookModules.get(entryRealPath);
