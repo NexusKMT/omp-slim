@@ -1123,6 +1123,67 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 		expect(loadValue()).toBe("sync-upgrade-ok");
 	});
 
+	it("serves an async-hooked module synchronously after a reload adds a require edge", async () => {
+		const dir = await writePackage({
+			"package.json": JSON.stringify({ name: "reload-upgrade-ext", version: "1.0.0", type: "module" }),
+			"node_modules/cjs-parent/package.json": JSON.stringify({
+				name: "cjs-parent",
+				version: "1.0.0",
+				main: "index.js",
+			}),
+			"node_modules/cjs-parent/index.js": 'module.exports = { load: () => require("shared").default };',
+			"node_modules/shared/package.json": JSON.stringify({
+				name: "shared",
+				version: "1.0.0",
+				type: "module",
+				main: "index.js",
+			}),
+			"node_modules/shared/index.js": 'import { value } from "shared-leaf"; export default value;',
+			"node_modules/shared-leaf/package.json": JSON.stringify({
+				name: "shared-leaf",
+				version: "1.0.0",
+				type: "module",
+				main: "index.js",
+			}),
+			"node_modules/shared-leaf/index.js": 'export const value = "reload-upgrade-ok";',
+			// v1 reaches `shared` through `import` only, so the first load
+			// registers it with the async rewrite hook.
+			"index.js": [
+				'import shared from "shared";',
+				"export const loadValue = () => shared;",
+				"export default function (pi) { void pi; }",
+			].join("\n"),
+		});
+		const entry = path.join(dir, "index.js");
+
+		const first = await loadLegacyPiModule(entry);
+		const firstLoad = Reflect.get(Object(first), "loadValue");
+		if (typeof firstLoad !== "function") {
+			throw new Error("reload-upgrade fixture v1 did not export loadValue");
+		}
+		expect(firstLoad()).toBe("reload-upgrade-ok");
+
+		// v2 upgrades `shared` to synchronous loading via a new require() edge.
+		// The async hook from the first load still owns the path, so it must
+		// serve the pre-rewritten synchronous source inline.
+		await fs.writeFile(
+			entry,
+			[
+				'import parent from "cjs-parent";',
+				"export const loadValue = parent.load;",
+				"export default function (pi) { void pi; }",
+			].join("\n"),
+			"utf8",
+		);
+
+		const second = await loadLegacyPiModule(entry);
+		const secondLoad = Reflect.get(Object(second), "loadValue");
+		if (typeof secondLoad !== "function") {
+			throw new Error("reload-upgrade fixture v2 did not export loadValue");
+		}
+		expect(secondLoad()).toBe("reload-upgrade-ok");
+	});
+
 	it("chooses the ESM branch when dual package graphs converge", async () => {
 		const dir = await writePackage({
 			"package.json": JSON.stringify({ name: "dual-convergence-ext", version: "1.0.0", type: "module" }),

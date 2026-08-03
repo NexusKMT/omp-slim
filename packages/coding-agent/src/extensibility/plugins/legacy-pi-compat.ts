@@ -2319,24 +2319,35 @@ async function installExtensionGraphHook(
 		Bun.plugin({
 			name: `omp:legacy-pi-ext:${hookId}`,
 			setup(build) {
-				build.onLoad({ filter, namespace: "file" }, async args => {
+				build.onLoad({ filter, namespace: "file" }, args => {
 					const queryIndex = args.path.indexOf("?mtime=");
 					const sourcePath = queryIndex >= 0 ? args.path.slice(0, queryIndex) : args.path;
 					const mtimeTag = queryIndex >= 0 ? args.path.slice(queryIndex + "?mtime=".length) : null;
-					const cached = asyncModules.get(sourcePath);
-					let raw: string;
-					if (cached !== undefined) {
-						// consume-once: preserves ?mtime edit-pickup for re-imports
-						asyncModules.delete(sourcePath);
-						raw = cached;
-					} else {
-						raw = await Bun.file(sourcePath).text();
+					// A later reload can upgrade this module to synchronous loading (a
+					// new `require()` edge reaches it) without re-registering hooks:
+					// this filter keeps matching and `require()` rejects async onLoad
+					// results, so serve the pre-rewritten synchronous source inline.
+					// `ensureExtensionGraphHook` refreshes it on every (re)load.
+					const synchronousSource = synchronousModuleSources.get(sourcePath);
+					if (synchronousSource !== undefined) {
+						return { contents: synchronousSource, loader: getLoader(sourcePath) };
 					}
+					const cached = asyncModules.get(sourcePath);
 					const resolvedImportMtimeTag = cacheBustResolvedImportModules.has(sourcePath) ? mtimeTag : null;
-					return {
-						contents: await rewriteLegacyExtensionSource(raw, sourcePath, mtimeTag, resolvedImportMtimeTag),
-						loader: getLoader(sourcePath),
-					};
+					return (async () => {
+						let raw: string;
+						if (cached !== undefined) {
+							// consume-once: preserves ?mtime edit-pickup for re-imports
+							asyncModules.delete(sourcePath);
+							raw = cached;
+						} else {
+							raw = await Bun.file(sourcePath).text();
+						}
+						return {
+							contents: await rewriteLegacyExtensionSource(raw, sourcePath, mtimeTag, resolvedImportMtimeTag),
+							loader: getLoader(sourcePath),
+						};
+					})();
 				});
 			},
 		});
