@@ -24,6 +24,7 @@
 
 ### Fixed
 
+- Fixed fuzzy replace-all edits re-matching replacement text indefinitely, which could freeze the TUI and exhaust memory ([#7432](https://github.com/can1357/oh-my-pi/issues/7432)).
 - Fixed template argument substitution (`substituteArgs`) executing recursive placeholder expansion when positional argument values contain literal `$@` or `$ARGUMENTS` tokens.
 - Fixed focused-agent status bar dimming darkening Powerline end caps.
 - Fixed the browser relay creating duplicate "omp" tab groups: the bridge now keeps at most one group RPC in flight (a queued drain replaces fire-and-forget per-tab requests), so concurrent requests can no longer race the extension's non-atomic query→create→set-title sequence in the same window. Also fixed an extension reconnect (relay daemon restart, service-worker recycle) being misread as the user dragging every tab out of the omp group — grouping state is reset when the extension socket closes, so tabs regroup on the next hello instead of being permanently opted out.
