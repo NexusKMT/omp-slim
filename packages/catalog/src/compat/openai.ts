@@ -713,6 +713,8 @@ export function buildOpenAIResponsesCompat(spec: OpenAIResponsesSpecLike): Resol
 		// Copilot host under a different provider id still clamps.
 		supportsImageDetailOriginal:
 			!isXaiHost && !modelMatchesHost({ provider: spec.provider, baseUrl }, "githubCopilot"),
+		// api.x.ai rejects `reasoning.summary` (SuperGrok and paid key alike).
+		supportsReasoningSummary: !isXaiHost,
 		reasoningEffortMap: isXaiHost ? { ...XAI_RESPONSES_REASONING_EFFORT_MAP } : {},
 		supportsReasoningParams: true,
 		// OpenAI proprietary reasoning models (o-series, gpt-5+) reject explicit
@@ -796,6 +798,7 @@ function pickResponsesOnly(compat: ResolvedOpenAIResponsesCompat): ResponsesOnly
 		strictResponsesPairing: compat.strictResponsesPairing,
 		supportsImageDetailOriginal: compat.supportsImageDetailOriginal,
 		supportsObfuscationOptOut: compat.supportsObfuscationOptOut,
+		supportsReasoningSummary: compat.supportsReasoningSummary,
 		isVercelGatewayHost: compat.isVercelGatewayHost,
 	} satisfies ResponsesOnlyCompat;
 }

@@ -152,6 +152,10 @@
 ### Fixed
 
 - Fixed an issue where Ollama requests without a user-role message would fail to generate output or silently fail with a misleading error.
+### Fixed
+
+- Stopped treating `XAI_API_KEY` as SuperGrok (`xai-oauth`) sign-in for availability, so paid-key-only setups default to `xai/grok-4.5` instead of the zero-cost SuperGrok catalog path.
+- Omitted unsupported `reasoning.summary` on paid xAI Responses requests (`xai/grok-4.5`), matching SuperGrok, so a thinking level no longer serializes `summary: "auto"`.
 
 ## [17.2.5] - 2026-08-03
 

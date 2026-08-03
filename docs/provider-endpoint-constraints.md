@@ -240,7 +240,8 @@ Reasoning fields are not interchangeable.
 Both the paid API-key provider (`xai` / `XAI_API_KEY`) and SuperGrok OAuth
 (`xai-oauth`) chat over `https://api.x.ai/v1/responses`. Keep these independent:
 
-- omit `reasoning.effort`
+- omit `reasoning.effort` unless the model is on the Grok effort-capable allowlist
+- omit `reasoning.summary` (the host rejects it; do not fall back to `"auto"`)
 - include `reasoning.encrypted_content` on the request
 - replay encrypted reasoning items on later turns
 

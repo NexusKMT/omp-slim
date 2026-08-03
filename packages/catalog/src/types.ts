@@ -719,6 +719,12 @@ export interface ResolvedOpenAIResponsesCompat extends ResolvedOpenAISharedCompa
 	strictResponsesPairing: boolean;
 	supportsImageDetailOriginal: boolean;
 	supportsObfuscationOptOut: boolean;
+	/**
+	 * Whether `reasoning.summary` may be sent. First-party xAI `/v1/responses`
+	 * rejects the field; handlers pass `null` so the wire omits it instead of
+	 * filling `"auto"`.
+	 */
+	supportsReasoningSummary: boolean;
 	streamIdleTimeoutMs?: number;
 	vercelGatewayRouting?: OpenAICompat["vercelGatewayRouting"];
 	/** The model sits behind Vercel AI Gateway's Responses endpoint. */

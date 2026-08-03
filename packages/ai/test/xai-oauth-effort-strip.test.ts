@@ -87,6 +87,16 @@ describe("xAI OAuth Responses reasoning payload (regression)", () => {
 		expect(params.include).toContain("reasoning.encrypted_content");
 	});
 
+	test("paid xai/grok-4.5 omits unsupported reasoning summary", () => {
+		const grok45 = getBundledModel<"openai-responses">("xai", "grok-4.5");
+		if (!grok45) throw new Error("xai/grok-4.5 must be in bundled models.json");
+
+		const { params } = buildParams(grok45, singleUserContext, { reasoning: Effort.High }, undefined);
+
+		expect(params.reasoning).toEqual({ effort: "high" });
+		expect(params.include).toContain("reasoning.encrypted_content");
+	});
+
 	test("paid xai/grok-4.5 requests encrypted reasoning content", () => {
 		const grok45 = getBundledModel<"openai-responses">("xai", "grok-4.5");
 		if (!grok45) throw new Error("xai/grok-4.5 must be in bundled models.json");
@@ -117,7 +127,7 @@ describe("xAI OAuth Responses reasoning payload (regression)", () => {
 
 		const { params } = buildParams(grok45, singleUserContext, { reasoning: Effort.Minimal }, undefined);
 
-		expect(params.reasoning).toMatchObject({ effort: "low" });
+		expect(params.reasoning).toEqual({ effort: "low" });
 	});
 
 	test("xai-oauth/grok-4.5 clamps minimal reasoning effort to low", () => {
@@ -126,7 +136,7 @@ describe("xAI OAuth Responses reasoning payload (regression)", () => {
 
 		const { params } = buildParams(grok45, singleUserContext, { reasoning: Effort.Minimal }, undefined);
 
-		expect(params.reasoning).toMatchObject({ effort: "low" });
+		expect(params.reasoning).toEqual({ effort: "low" });
 	});
 
 	test("xai-oauth/grok-4.5 replays encrypted reasoning on the next turn", () => {

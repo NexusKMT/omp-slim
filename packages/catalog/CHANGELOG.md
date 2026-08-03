@@ -143,6 +143,23 @@
 - Fixed GitHub Copilot dynamic discovery retaining stale bundled prices for default-context models instead of using the provider's reported default-tier prices.
 
 ## [17.2.5] - 2026-08-03
+### Changed
+
+- Switched the paid xAI provider (`xai` / `XAI_API_KEY`) from Chat Completions to the OpenAI Responses API (`POST https://api.x.ai/v1/responses`), matching SuperGrok `xai-oauth`. Prompt-cache affinity (`x-grok-conv-id`), reasoning-effort allowlisting, and encrypted-reasoning replay rules are now shared across both first-party xAI hosts.
+- Changed the paid xAI (`XAI_API_KEY`) default model from `grok-4-fast-non-reasoning` to `grok-4.5`.
+- Changed the SuperGrok (`xai-oauth`) default model from `grok-4.3` to `grok-4.5`.
+- Requested `reasoning.encrypted_content` on first-party xAI Responses calls (`xai` and `xai-oauth`) via the `include` parameter.
+- Replayed xAI encrypted reasoning items on later Responses turns instead of stripping `type: "reasoning"` history.
+
+### Fixed
+
+- Invalidated stale paid-xAI model-cache rows written under Chat Completions so the Responses migration takes effect immediately instead of waiting for TTL expiry.
+- Clamped paid xAI Responses `minimal` reasoning effort to `low` (same wire map as SuperGrok) so `xai/grok-4.5` does not 400.
+- Suppressed presence/frequency penalties and stop sequences on xAI reasoning models so a configured `presencePenalty` does not 400 after the `grok-4.5` default change.
+- Stopped emitting stale `thinking.efforts` dials on paid xAI Responses catalog rows that reject `reasoning.effort` (`grok-code-fast-1`, `grok-build-0.1`, `grok-4.20-0309-reasoning`, and other off-allowlist reasoners).
+- Marked first-party xAI Responses hosts (`xai` and `xai-oauth`) as not supporting `reasoning.summary`, so paid `xai/grok-4.5` effort requests omit the unsupported field instead of sending `summary: "auto"`.
+
+## [17.2.5] - 2026-08-03
 
 ### Fixed
 

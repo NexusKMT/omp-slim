@@ -268,6 +268,8 @@ describe("xAI Responses reasoning-effort suppression", () => {
 		expect(oauth.reasoningEffortMap).toEqual({ minimal: "low" });
 		expect(paid.supportsPenaltyAndStopParams).toBe(false);
 		expect(oauth.supportsPenaltyAndStopParams).toBe(false);
+		expect(paid.supportsReasoningSummary).toBe(false);
+		expect(oauth.supportsReasoningSummary).toBe(false);
 	});
 
 	it("keeps penalty and stop params on non-reasoning paid xAI models", () => {
