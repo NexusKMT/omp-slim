@@ -1373,8 +1373,10 @@ export class Agent {
 				if (this.#steeringQueue.length === 0) {
 					return { queued: false };
 				}
+				const messageCount = this.#steeringMode === "one-at-a-time" ? 1 : this.#steeringQueue.length;
 				let hasAgentSteering = false;
-				for (const message of this.#steeringQueue) {
+				for (let i = 0; i < messageCount; i++) {
+					const message = this.#steeringQueue[i];
 					const role = "role" in message ? message.role : undefined;
 					const attribution = "attribution" in message ? message.attribution : undefined;
 					if (role !== "user") continue;
