@@ -752,7 +752,6 @@ export class InputController {
 				}
 			}
 
-
 			// Handle bash command (! for normal, !! for excluded from context)
 			if (text.startsWith("!")) {
 				const isExcluded = text.startsWith("!!");
@@ -815,7 +814,6 @@ export class InputController {
 				}
 				return;
 			}
-
 
 			// If streaming, use prompt() with steer behavior
 			// This handles extension commands (execute immediately), prompt template expansion, and queueing
