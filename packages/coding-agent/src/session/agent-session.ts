@@ -7558,18 +7558,19 @@ export class AgentSession {
 		}
 	}
 
-	/** Promotes a completed /btw answer from the explicitly authorized session leaf. */
+	/** Promotes a completed /btw answer from the explicitly authorized session and leaf. */
 	async branchFromBtw(
 		question: string,
 		assistantMessage: AssistantMessage,
 		leafId: string,
+		sessionId: string,
 	): Promise<{ cancelled: boolean; sessionFile: string | undefined }> {
 		const previousSessionFile = this.sessionFile;
 		if (!this.sessionManager.getSessionFile()) {
 			throw new Error("Cannot branch /btw: session is not persisted");
 		}
 
-		if (!leafId || this.sessionManager.getLeafId() !== leafId) {
+		if (!leafId || this.sessionManager.getSessionId() !== sessionId || this.sessionManager.getLeafId() !== leafId) {
 			throw new Error("Cannot branch /btw: session changed since /btw started");
 		}
 
@@ -7595,7 +7596,7 @@ export class AgentSession {
 			}
 		}
 
-		if (this.sessionManager.getLeafId() !== leafId) {
+		if (this.sessionManager.getSessionId() !== sessionId || this.sessionManager.getLeafId() !== leafId) {
 			throw new Error("Cannot branch /btw: session changed since /btw started");
 		}
 
@@ -7631,7 +7632,7 @@ export class AgentSession {
 			advisorRecordersDetached = true;
 			await this.#advisors.drainAndDetachRecorders();
 			try {
-				if (this.sessionManager.getLeafId() !== leafId) {
+				if (this.sessionManager.getSessionId() !== sessionId || this.sessionManager.getLeafId() !== leafId) {
 					throw new Error("Cannot branch /btw: session changed since /btw started");
 				}
 				this.sessionManager.createBranchedSession(leafId);

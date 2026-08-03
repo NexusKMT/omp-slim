@@ -52,18 +52,28 @@ function makeFakeSession(
 
 function makeCtx(session: InteractiveModeContext["session"], btwContainer = new Container()): InteractiveModeContext {
 	let leafId: string | null = "leaf-1";
+	let sessionId = "session-1";
 	return {
 		ui: { requestRender: vi.fn(), requestComponentRender: vi.fn() } as unknown as TUI,
 		btwContainer,
 		session,
-		sessionManager: { getLeafId: () => leafId } as unknown as InteractiveModeContext["sessionManager"],
+		sessionManager: {
+			getLeafId: () => leafId,
+			getSessionId: () => sessionId,
+		} as unknown as InteractiveModeContext["sessionManager"],
 		showStatus: vi.fn(),
 		showError: vi.fn(),
 		handleBtwBranch: vi.fn(async () => {}),
 		setTestLeafId(nextLeafId: string | null) {
 			leafId = nextLeafId;
 		},
-	} as unknown as InteractiveModeContext & { setTestLeafId(nextLeafId: string | null): void };
+		setTestSessionId(nextSessionId: string) {
+			sessionId = nextSessionId;
+		},
+	} as unknown as InteractiveModeContext & {
+		setTestLeafId(nextLeafId: string | null): void;
+		setTestSessionId(nextSessionId: string): void;
+	};
 }
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -268,6 +278,30 @@ describe("BtwController", () => {
 		expect(controller.canBranch()).toBe(true);
 	});
 
+	it("refuses branch when the loaded session changed but the leaf id still matches", async () => {
+		const assistantMessage = createAssistantMessage("Answer");
+		const runEphemeralTurn = vi.fn(async () => ({ replyText: "Answer", assistantMessage }));
+		const ctx = makeCtx(makeFakeSession(runEphemeralTurn)) as InteractiveModeContext & {
+			setTestSessionId(nextSessionId: string): void;
+		};
+		const controller = new BtwController(ctx);
+
+		await controller.start("Question?");
+		await drainBtwRequest();
+		expect(controller.canBranch()).toBe(true);
+
+		// A resumed/branched session preserves the entry id, so the leaf still matches;
+		// the session id must still gate the promotion.
+		ctx.setTestSessionId("session-2");
+
+		expect(controller.canBranch()).toBe(false);
+		expect(await controller.handleBranch()).toBe(false);
+		expect(ctx.handleBtwBranch).not.toHaveBeenCalled();
+		expect(ctx.showStatus).toHaveBeenCalledWith("/btw branch unavailable: the session changed since /btw started", {
+			dim: true,
+		});
+	});
+
 	it("refuses a completed branch while the main turn is streaming", async () => {
 		const assistantMessage = createAssistantMessage("Answer");
 		const runEphemeralTurn = vi.fn(async () => ({ replyText: "Answer", assistantMessage }));
@@ -341,7 +375,7 @@ describe("BtwController", () => {
 		await drainBtwRequest();
 
 		expect(await controller.handleBranch()).toBe(true);
-		expect(ctx.handleBtwBranch).toHaveBeenCalledWith("Question?", assistantMessage, "leaf-1");
+		expect(ctx.handleBtwBranch).toHaveBeenCalledWith("Question?", assistantMessage, "leaf-1", "session-1");
 	});
 
 	it("keeps a pending branch visible and refuses to dismiss it", async () => {
@@ -403,6 +437,7 @@ describe("BtwController", () => {
 				],
 			},
 			"leaf-1",
+			"session-1",
 		);
 	});
 
@@ -493,6 +528,7 @@ describe("BtwController", () => {
 				providerPayload: undefined,
 			},
 			"leaf-1",
+			"session-1",
 		);
 	});
 

@@ -10,6 +10,7 @@ interface BtwRequest {
 	abortController: AbortController;
 	question: string;
 	leafId: string | null;
+	sessionId: string;
 }
 
 function assistantMessageWithReplyText(assistantMessage: AssistantMessage, replyText: string): AssistantMessage {
@@ -39,6 +40,7 @@ export class BtwController {
 	#lastReplyText: string | undefined;
 	#lastAssistantMessage: AssistantMessage | undefined;
 	#lastLeafId: string | null | undefined;
+	#lastSessionId: string | undefined;
 	#branchInFlight = false;
 	#lastCopyText: string | undefined;
 	#copyInFlight = false;
@@ -60,7 +62,10 @@ export class BtwController {
 			return "the answer is unavailable";
 		}
 		if (!this.#lastLeafId) return "the session has no branch point";
-		if (this.#lastLeafId !== this.ctx.sessionManager.getLeafId()) {
+		if (
+			this.#lastSessionId !== this.ctx.sessionManager.getSessionId() ||
+			this.#lastLeafId !== this.ctx.sessionManager.getLeafId()
+		) {
 			return "the session changed since /btw started";
 		}
 		if (this.ctx.session.isStreaming) return "a turn is still running";
@@ -98,12 +103,13 @@ export class BtwController {
 		const question = this.#lastQuestion;
 		const assistantMessage = this.#lastAssistantMessage;
 		const leafId = this.#lastLeafId;
-		if (!request || !question || !assistantMessage || !leafId) return false;
+		const sessionId = this.#lastSessionId;
+		if (!request || !question || !assistantMessage || !leafId || !sessionId) return false;
 
 		this.#branchInFlight = true;
 		request.component.markBranching();
 		try {
-			await this.ctx.handleBtwBranch(question, assistantMessage, leafId);
+			await this.ctx.handleBtwBranch(question, assistantMessage, leafId, sessionId);
 			return true;
 		} finally {
 			this.#branchInFlight = false;
@@ -149,6 +155,7 @@ export class BtwController {
 			abortController: new AbortController(),
 			question: trimmedQuestion,
 			leafId: this.ctx.sessionManager.getLeafId(),
+			sessionId: this.ctx.sessionManager.getSessionId(),
 		};
 		this.ctx.btwContainer.clear();
 		this.ctx.btwContainer.addChild(request.component);
@@ -182,6 +189,7 @@ export class BtwController {
 				this.#lastCopyText = copyText;
 				this.#lastAssistantMessage = assistantMessageWithReplyText(assistantMessage, replyText);
 				this.#lastLeafId = request.leafId;
+				this.#lastSessionId = request.sessionId;
 			} else {
 				this.#clearCompletedState();
 			}
@@ -216,6 +224,7 @@ export class BtwController {
 		this.#lastAssistantMessage = undefined;
 		this.#lastCopyText = undefined;
 		this.#lastLeafId = undefined;
+		this.#lastSessionId = undefined;
 	}
 
 	#isActiveRequest(request: BtwRequest): boolean {
