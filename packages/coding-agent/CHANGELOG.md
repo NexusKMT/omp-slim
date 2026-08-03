@@ -6,12 +6,12 @@
 
 - Fixed extension slash commands appearing as user prompts after being handled locally.
 - Preserved explicit session titles when branching from an earlier conversation turn.
-- Fixed floating rejections from cmux browser guest JavaScript terminating the main process and every active session; attributable rejections now fail the browser run as tool errors while unrelated process rejections retain the fatal path ([#7365](https://github.com/can1357/oh-my-pi/issues/7365)).
-- Fixed the Windows bash tool silently taking down the whole omp process when a command blocked until its timeout: cancelling a timed-out run walked the spawned child's descendant tree from raw `th32ParentProcessID` links, and a recycled pid matching the harness's stale recorded parent pid could enumerate omp as a false descendant and `TerminateProcess` it, killing the session with no `session_exit` record. Run-cancellation sweeps now refuse to signal the harness or any process collected beneath it, while still reaping the timed-out target when it owns a recycled ancestor pid ([#7452](https://github.com/can1357/oh-my-pi/issues/7452)).
-- Fixed a supervised process reaching a terminal state without telling the session that launched it. The broker recorded the final snapshot for `hub ps` to read but emitted no event, so an idle owner only learned that a process had exited by polling. The broker now sends one `daemon-completed` notification per terminal exit to the owner socket recorded at launch, and the session turns it into a model-visible message. Restart transitions stay live, and a stale or disposed session drops the notification without changing explicit `hub wait` or persistence behavior.
-- Fixed PCRE2-only grep patterns terminating Bun on macOS by using the interpreted PCRE2 engine instead of its unsafe same-process JIT in native grep, embedded `grep -P`, and embedded `rg --pcre2`/`--engine=auto`; `OMP_PCRE2_JIT=1` forces the JIT back on and `0` forces it off on every platform ([#7399](https://github.com/can1357/oh-my-pi/issues/7399)).
-- Fixed `/btw` branch promotion parking behind active turns, cutting from an outdated session leaf, and leaving rejected branch keys indistinguishable from composer input ([#7474](https://github.com/can1357/oh-my-pi/issues/7474)).
-- Removed archived main and nested session rows from `stats.db` during applied archive GC, including retry cleanup for sessions archived by an earlier run ([#7286](https://github.com/can1357/oh-my-pi/issues/7286)).
+- Fixed an issue where unhandled JavaScript rejections in the browser guest could crash the main process and active sessions, converting them into tool errors instead.
+- Fixed a critical issue on Windows where cancelling a timed-out bash tool command could mistakenly terminate the main process due to PID recycling.
+- Fixed an issue where supervised processes reaching a terminal state failed to notify their launching session, requiring polling; the broker now actively notifies the session upon process completion.
+- Fixed crashes on macOS when using PCRE2-only grep patterns with Bun by defaulting to the interpreted PCRE2 engine instead of JIT, and introduced the `OMP_PCRE2_JIT` environment variable to manually control JIT compilation.
+- Fixed issues with `/btw` branch promotion where branches could park behind active turns, cut from outdated session leaves, or leave rejected branch keys indistinguishable from composer input.
+- Fixed database bloat by ensuring archived main and nested session rows are properly cleaned up from `stats.db` during garbage collection.
 
 ## [17.2.5] - 2026-08-03
 

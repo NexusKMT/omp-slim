@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added the shared `file-lock` module (moved from the coding agent) with an `acquireStaleMs` grace for locks abandoned mid-acquisition; the stats sync lock now uses it instead of a parallel implementation.
+- Added a shared `file-lock` utility module featuring configurable stale-lock acquisition grace periods (`acquireStaleMs`) to safely handle abandoned locks.
 
 ## [17.2.5] - 2026-08-03
 
