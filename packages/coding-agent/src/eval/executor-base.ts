@@ -158,6 +158,15 @@ export async function waitForPromiseWithCancellation<T>(
 	return await resultPromise;
 }
 
+/**
+ * Derived abort signal for the kernel, holding back an external abort while a
+ * bridge call marked `deferExternalAbort` is in flight.
+ *
+ * Scope is deliberately narrow: only `kernel.execute` consumes
+ * {@link BridgeAbortShield.signal}. Work dispatched through the tool bridge
+ * keeps the caller's real signal so a turn cancel reaches spawned subagents
+ * immediately — deferral protects the runtime, never the delegated work.
+ */
 interface BridgeAbortShield {
 	signal: AbortSignal | undefined;
 	abortRequested: boolean;
@@ -428,11 +437,18 @@ export async function executeWithKernelBase<
 	const emitStatus: (event: JsStatusEvent) => void =
 		options?.emitStatus ?? (event => collectDisplay({ type: "status", event }));
 	const runId = `${runIdPrefix}-${crypto.randomUUID()}`;
+	// The shield is a *kernel* protection: it keeps the runtime alive across a
+	// critical bridge phase (isolation worktree setup, merge/cherry-pick) so the
+	// cell can't be torn down mid-git-operation. Host-side work reached through
+	// the bridge — above all the subagents `agent()` spawns — must stay directly
+	// cancellable, so it gets the caller's real signal. Shielding it here made
+	// Python/Ruby/Julia `agent()` fan-outs survive a turn cancel indefinitely,
+	// while JS cells (which never route through this shield) cancelled fine.
 	const unregisterBridge =
 		options?.toolSession && options?.bridgeSessionId
 			? registerPyToolBridge(options.bridgeSessionId, runId, {
 					toolSession: options.toolSession,
-					signal: abortShield.signal,
+					signal: options.signal,
 					emitStatus,
 					abortRequested: () => {
 						return abortShield.abortRequested;

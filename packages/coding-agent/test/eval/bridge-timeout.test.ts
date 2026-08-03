@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import {
 	EVAL_TIMEOUT_PAUSE_OP,
 	EVAL_TIMEOUT_RESUME_OP,
@@ -8,6 +8,12 @@ import {
 import { executeWithKernelBase, type GenericKernel } from "../../src/eval/executor-base";
 import type { JsStatusEvent } from "../../src/eval/js/shared/types";
 import type { KernelDisplayOutput } from "../../src/eval/py/display";
+import * as pyToolBridge from "../../src/eval/py/tool-bridge";
+import type { ToolSession } from "../../src/tools";
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
 
 describe("withBridgeTimeoutPause", () => {
 	it("emits one pause before the operation and one resume after it settles", async () => {
@@ -167,4 +173,67 @@ it("does not defer external aborts for a completion bridge call", async () => {
 	const result = await resultPromise;
 	expect(result.cancelled).toBe(true);
 	expect(result.exitCode).toBeUndefined();
+});
+
+it("hands the tool bridge the unshielded signal so a deferred phase still cancels subagents", async () => {
+	// Regression: the bridge used to receive the kernel shield, so `agent()`
+	// fan-outs from a Python/Ruby/Julia cell survived a turn cancel and kept
+	// running until they finished on their own.
+	const abortController = new AbortController();
+	const entered = Promise.withResolvers<void>();
+	const observedKernelAbort = Promise.withResolvers<boolean>();
+	const release = Promise.withResolvers<void>();
+	let bridgeSignal: AbortSignal | undefined;
+	const registerSpy = vi
+		.spyOn(pyToolBridge, "registerPyToolBridge")
+		.mockImplementation((_sessionId, _runId, entry) => {
+			bridgeSignal = entry.signal;
+			return () => {};
+		});
+
+	const kernel: GenericKernel<Record<string, string | null>> = {
+		async execute(_code, options) {
+			entered.resolve();
+			options.onDisplay({
+				type: "status",
+				event: { op: EVAL_TIMEOUT_PAUSE_OP, deferExternalAbort: true },
+			} satisfies KernelDisplayOutput);
+			abortController.abort(new Error("external interrupt"));
+			observedKernelAbort.resolve(options.signal?.aborted ?? false);
+			await release.promise;
+			options.onDisplay({
+				type: "status",
+				event: { op: EVAL_TIMEOUT_RESUME_OP, deferExternalAbort: true },
+			} satisfies KernelDisplayOutput);
+			return { status: "ok", cancelled: false, timedOut: false };
+		},
+	};
+
+	const resultPromise = executeWithKernelBase({
+		kernel,
+		code: "agent('slow')",
+		options: {
+			signal: abortController.signal,
+			toolSession: {} as ToolSession,
+			bridgeSessionId: "bridge-session",
+		},
+		runIdPrefix: "test",
+		errorLogLabel: "test",
+		cancelledErrorClass: TestCancelledError,
+		buildKernelEnvPatch: () => ({}),
+		formatKernelTimeoutAnnotation: () => "kernel timed out",
+		formatTimeoutAnnotation: () => "timed out",
+	});
+
+	await entered.promise;
+	// The kernel stays shielded mid-phase so the runtime can't die during an
+	// isolation merge...
+	expect(await observedKernelAbort.promise).toBe(false);
+	// ...but everything dispatched through the bridge cancels right away.
+	expect(registerSpy).toHaveBeenCalledTimes(1);
+	expect(bridgeSignal?.aborted).toBe(true);
+
+	release.resolve();
+	const result = await resultPromise;
+	expect(result.cancelled).toBe(true);
 });

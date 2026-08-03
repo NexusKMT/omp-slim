@@ -32,16 +32,16 @@ const registrations = new Map<string, PyToolBridgeEntry>();
 let serverPromise: Promise<BridgeServer> | null = null;
 
 /**
- * Forward a bridge call to {@link callSessionTool} while respecting eval abort
- * shielding.
+ * Forward a bridge call to {@link callSessionTool}, failing fast once the cell
+ * has been interrupted.
  *
  * Python invokes this bridge with blocking `urllib` requests from worker threads
- * (each `agent()` / `tool.*` call). The base executor defers the registered
- * signal while a bridge call is already paused so in-flight subagents can finish
- * and persist output instead of being orphaned. Once an abort has been requested,
- * later bridge calls are rejected before starting; once the shielded signal
- * finally aborts, this handler still resolves the HTTP request promptly so the
- * kernel can unwind without being hard-killed.
+ * (each `agent()` / `tool.*` call). The registered signal is the caller's real
+ * abort signal, not the executor's kernel shield, so a turn cancel tears down
+ * delegated work — subagents included — instead of leaving it running past the
+ * cell. Calls that arrive after an abort are rejected before starting, and an
+ * abort mid-call resolves the HTTP request promptly so the kernel can unwind
+ * without being hard-killed.
  */
 async function callSessionToolPromptOnAbort(name: string, args: unknown, entry: PyToolBridgeEntry): Promise<unknown> {
 	if (entry.abortRequested?.()) {

@@ -897,7 +897,9 @@ describe("agent() through eval runtimes", () => {
 
 		// The bridge paused the watchdog; the subprocess is now blocked in flight.
 		await inFlight;
-		expect(observedMaxRuntimeMs).toBe(0);
+		// `agent()` must not pin the wall-clock cap: leaving it unset lets the
+		// executor inherit `task.maxRuntimeMs` exactly like the task tool does.
+		expect(observedMaxRuntimeMs).toBeUndefined();
 		// Burn far more than the 20ms budget while paused: the watchdog stays armed-off.
 		vi.advanceTimersByTime(1_000);
 		expect(idle.signal.aborted).toBe(false);
