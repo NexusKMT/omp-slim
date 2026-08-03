@@ -426,6 +426,8 @@ export class Agent {
 	#asideMessageProvider?: () => AsideMessage[] | Promise<AsideMessage[]>;
 	#telemetry?: AgentLoopConfig["telemetry"];
 	#appendOnlyContext?: AppendOnlyContextManager;
+	#beforeQueuedMessageDequeueHooks = new Set<(signal?: AbortSignal) => Promise<void> | void>();
+	#beforeModelCallHooks = new Set<(signal?: AbortSignal) => Promise<void> | void>();
 
 	/** Buffered Cursor tool results with text length at time of call (for correct ordering) */
 	#cursorToolResultBuffer: CursorToolResultEntry[] = [];
@@ -784,6 +786,40 @@ export class Agent {
 		return () => this.#listeners.delete(fn);
 	}
 
+	/** Register an independently removable hook that runs before queued messages are consumed. */
+	addBeforeQueuedMessageDequeueHook(hook: (signal?: AbortSignal) => Promise<void> | void): () => void {
+		const registration = (signal?: AbortSignal) => hook(signal);
+		this.#beforeQueuedMessageDequeueHooks.add(registration);
+		return () => this.#beforeQueuedMessageDequeueHooks.delete(registration);
+	}
+
+	/** Register an independently removable hook that runs immediately before each model call. */
+	addBeforeModelCallHook(hook: (signal?: AbortSignal) => Promise<void> | void): () => void {
+		const registration = (signal?: AbortSignal) => hook(signal);
+		this.#beforeModelCallHooks.add(registration);
+		return () => this.#beforeModelCallHooks.delete(registration);
+	}
+
+	async #runBeforeModelCallHooks(signal?: AbortSignal): Promise<void> {
+		for (const hook of this.#beforeModelCallHooks) await hook(signal);
+	}
+
+	async #runBeforeQueuedMessageDequeueHooks(signal?: AbortSignal): Promise<void> {
+		for (const hook of this.#beforeQueuedMessageDequeueHooks) await hook(signal);
+	}
+
+	async #dequeueSteeringMessagesAfterHooks(signal?: AbortSignal): Promise<AgentMessage[]> {
+		if (signal?.aborted || this.#steeringQueue.length === 0) return [];
+		await this.#runBeforeQueuedMessageDequeueHooks(signal);
+		return signal?.aborted ? [] : this.#dequeueSteeringMessages();
+	}
+
+	async #dequeueFollowUpMessagesAfterHooks(signal?: AbortSignal): Promise<AgentMessage[]> {
+		if (signal?.aborted || this.#followUpQueue.length === 0) return [];
+		await this.#runBeforeQueuedMessageDequeueHooks(signal);
+		return signal?.aborted ? [] : this.#dequeueFollowUpMessages();
+	}
+
 	setProviderResponseInterceptor(fn: SimpleStreamOptions["onResponse"] | undefined): void {
 		this.#onResponse = fn;
 	}
@@ -1137,11 +1173,26 @@ export class Agent {
 	/**
 	 * Continue from current context (used for retries and resuming queued messages).
 	 */
-	async continue() {
+	#continuationDequeueSignal(signal?: AbortSignal): AbortSignal | undefined {
+		if (this.#deadline === undefined) return signal;
+		const delay = this.#deadline - Date.now();
+		let deadlineSignal: AbortSignal;
+		if (delay <= 0) {
+			const controller = new AbortController();
+			controller.abort(new DOMException("Deadline exceeded", "TimeoutError"));
+			deadlineSignal = controller.signal;
+		} else {
+			deadlineSignal = AbortSignal.timeout(delay);
+		}
+		return signal ? AbortSignal.any([signal, deadlineSignal]) : deadlineSignal;
+	}
+
+	async continue(signal?: AbortSignal) {
 		if (this.#state.isStreaming) {
 			throw new AgentBusyError();
 		}
 
+		const dequeueSignal = this.#continuationDequeueSignal(signal);
 		const messages = this.#state.messages;
 		if (messages.length === 0) {
 			// An empty transcript has nothing to resume, but a queued steer/follow-up
@@ -1150,35 +1201,35 @@ export class Agent {
 			// callers (AgentSession#scheduleQueuedMessageDrain) re-arm continue() on every
 			// microtask because hasQueuedMessages() never clears, spinning an unbounded
 			// allocation loop until OOM (issue #6344).
-			const queuedSteering = this.#dequeueSteeringMessages();
+			const queuedSteering = await this.#dequeueSteeringMessagesAfterHooks(dequeueSignal);
 			if (queuedSteering.length > 0) {
-				await this.#runLoop(queuedSteering, { skipInitialSteeringPoll: true });
+				await this.#runLoop(queuedSteering, { skipInitialSteeringPoll: true }, signal);
 				return;
 			}
-			const queuedFollowUp = this.#dequeueFollowUpMessages();
+			const queuedFollowUp = await this.#dequeueFollowUpMessagesAfterHooks(dequeueSignal);
 			if (queuedFollowUp.length > 0) {
-				await this.#runLoop(queuedFollowUp);
+				await this.#runLoop(queuedFollowUp, undefined, signal);
 				return;
 			}
 			throw new Error("No messages to continue from");
 		}
 		if (messages[messages.length - 1].role === "assistant") {
-			const queuedSteering = this.#dequeueSteeringMessages();
+			const queuedSteering = await this.#dequeueSteeringMessagesAfterHooks(dequeueSignal);
 			if (queuedSteering.length > 0) {
-				await this.#runLoop(queuedSteering, { skipInitialSteeringPoll: true });
+				await this.#runLoop(queuedSteering, { skipInitialSteeringPoll: true }, signal);
 				return;
 			}
 
-			const queuedFollowUp = this.#dequeueFollowUpMessages();
+			const queuedFollowUp = await this.#dequeueFollowUpMessagesAfterHooks(dequeueSignal);
 			if (queuedFollowUp.length > 0) {
-				await this.#runLoop(queuedFollowUp);
+				await this.#runLoop(queuedFollowUp, undefined, signal);
 				return;
 			}
 
 			throw new Error("Cannot continue from message role: assistant");
 		}
 
-		await this.#runLoop(undefined);
+		await this.#runLoop(undefined, undefined, signal);
 	}
 
 	/**
@@ -1186,7 +1237,11 @@ export class Agent {
 	 * If messages are provided, starts a new conversation turn with those messages.
 	 * Otherwise, continues from existing context.
 	 */
-	async #runLoop(messages?: AgentMessage[], options?: AgentPromptOptions & { skipInitialSteeringPoll?: boolean }) {
+	async #runLoop(
+		messages?: AgentMessage[],
+		options?: AgentPromptOptions & { skipInitialSteeringPoll?: boolean },
+		continuationSignal?: AbortSignal,
+	) {
 		const model = this.#state.model;
 		if (!model) throw new Error("No model configured");
 
@@ -1197,6 +1252,9 @@ export class Agent {
 		this.#resolveRunningPrompt = resolve;
 
 		this.#abortController = new AbortController();
+		const loopSignal = continuationSignal
+			? AbortSignal.any([this.#abortController.signal, continuationSignal])
+			: this.#abortController.signal;
 		this.#state.isStreaming = true;
 		this.#state.streamMessage = null;
 		this.#state.error = undefined;
@@ -1315,7 +1373,8 @@ export class Agent {
 			onSseEvent: this.#onSseEvent,
 			getApiKey: this.getApiKey,
 			getToolContext: this.#getToolContext,
-			syncContextBeforeModelCall: async context => {
+			syncContextBeforeModelCall: async (context, signal) => {
+				await this.#runBeforeModelCallHooks(signal);
 				if (this.#listeners.size > 0) {
 					await Bun.sleep(0);
 				}
@@ -1362,12 +1421,12 @@ export class Agent {
 			getReasoning: () => this.#state.thinkingLevel,
 			getDisableReasoning: () => this.#state.disableReasoning,
 			getServiceTier: this.#serviceTierResolver,
-			getSteeringMessages: async () => {
+			getSteeringMessages: async signal => {
 				if (skipInitialSteeringPoll) {
 					skipInitialSteeringPoll = false;
 					return [];
 				}
-				return this.#dequeueSteeringMessages();
+				return this.#dequeueSteeringMessagesAfterHooks(signal);
 			},
 			hasSteeringMessages: () => {
 				if (this.#steeringQueue.length === 0) {
@@ -1392,7 +1451,7 @@ export class Agent {
 			},
 			waitForSteeringMessages: signal => this.#waitForSteeringMessages(signal),
 			hasIrcInterrupts: this.hasIrcInterrupts,
-			getFollowUpMessages: async () => this.#dequeueFollowUpMessages(),
+			getFollowUpMessages: signal => this.#dequeueFollowUpMessagesAfterHooks(signal),
 			getAsideMessages: async () => (await this.#asideMessageProvider?.()) ?? [],
 			onBeforeYield: () => this.#onBeforeYield?.(),
 			telemetry: this.#telemetry,
@@ -1404,8 +1463,8 @@ export class Agent {
 
 		try {
 			const stream = messages
-				? agentLoop(messages, context, config, this.#abortController.signal, this.streamFn)
-				: agentLoopContinue(context, config, this.#abortController.signal, this.streamFn);
+				? agentLoop(messages, context, config, loopSignal, this.streamFn)
+				: agentLoopContinue(context, config, loopSignal, this.streamFn);
 
 			for await (const event of stream) {
 				if (event.type === "turn_start") turnOpen = true;
@@ -1472,15 +1531,15 @@ export class Agent {
 				if (!onlyEmpty) {
 					this.appendMessage(partial);
 				} else {
-					if (this.#abortController?.signal.aborted) {
+					if (loopSignal.aborted) {
 						throw new Error("Request was aborted");
 					}
 				}
 			}
 		} catch (err) {
-			const stoppedForAbort = this.#abortController?.signal.aborted === true;
+			const stoppedForAbort = loopSignal.aborted;
 			const errorMessage = stoppedForAbort
-				? abortReasonText(this.#abortController?.signal)
+				? abortReasonText(loopSignal)
 				: err instanceof Error
 					? err.message
 					: String(err);

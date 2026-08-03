@@ -5,6 +5,7 @@
 ## [17.2.6] - 2026-08-03
 
 ### Fixed
+- Preserved queued steering and follow-up messages when a continuation is cancelled before or during pre-dequeue hooks, and propagated the caller's cancellation signal through every continuation model-call loop.
 
 - Fixed an issue where peer-IRC interrupts (such as subagent messages) incorrectly skipped non-interruptible tool calls queued in the same batch.
 - Improved interruption messaging to clearly distinguish between parent-agent steering and system-advisory interruptions.

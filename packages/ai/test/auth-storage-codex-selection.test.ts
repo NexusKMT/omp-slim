@@ -2027,6 +2027,50 @@ describe("AuthStorage codex oauth ranking", () => {
 		expect(apiKey).toBe("api-acct-pro");
 	});
 
+	test("ignores plan-ineligible headroom when reporting Spark model health", async () => {
+		if (!authStorage) throw new Error("test setup failed");
+
+		await authStorage.set("openai-codex", [
+			{ type: "oauth", ...createCredential("acct-free", "free@example.com") },
+			{ type: "oauth", ...createCredential("acct-pro", "pro@example.com") },
+		]);
+		usageByAccount.set(
+			"acct-free",
+			addSparkUsage(
+				createCodexUsageReport({
+					accountId: "acct-free",
+					primary: { usedFraction: 0.05, resetInMs: 30 * 60 * 1000 },
+					secondary: { usedFraction: 0.05, resetInMs: 6 * 24 * 60 * 60 * 1000 },
+					metadata: { planType: "free", email: "free@example.com" },
+				}),
+				0.05,
+				0.05,
+			),
+		);
+		usageByAccount.set(
+			"acct-pro",
+			addSparkUsage(
+				createCodexUsageReport({
+					accountId: "acct-pro",
+					primary: { usedFraction: 1, resetInMs: 2 * HOUR_MS },
+					secondary: { usedFraction: 1, resetInMs: 6 * 24 * 60 * 60 * 1000 },
+					metadata: { planType: "pro", email: "pro@example.com", limitReached: true },
+				}),
+				1,
+				1,
+			),
+		);
+
+		const health = await authStorage.getModelUsageHealth("openai-codex", {
+			modelId: "gpt-5.3-codex-spark",
+			reserveFraction: 0.1,
+		});
+
+		expect(health.state).toBe("depleted");
+		expect(health.accounts).toHaveLength(1);
+		expect(health.accounts[0]?.state).toBe("depleted");
+	});
+
 	test("routes codex spark to a single Plus account when no Pro is connected", async () => {
 		if (!authStorage) throw new Error("test setup failed");
 
