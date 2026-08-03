@@ -55,6 +55,19 @@ export class BtwController {
 		return this.#branchUnavailableReason() === undefined;
 	}
 
+	/** Whether plain `b` is currently reserved for a completed or pending branch action. */
+	handlesBranchKey(): boolean {
+		if (this.#branchInFlight) return true;
+		if (this.#activeRequest?.component.isBranchable() !== true) return false;
+		return (
+			this.#lastQuestion !== undefined &&
+			this.#lastReplyText !== undefined &&
+			this.#lastAssistantMessage !== undefined &&
+			this.#lastLeafId !== undefined &&
+			this.#lastSessionId !== undefined
+		);
+	}
+
 	#branchUnavailableReason(): string | undefined {
 		if (this.#branchInFlight) return "a branch is already in progress";
 		if (this.#activeRequest?.component.isBranchable() !== true) return "the answer is not ready";

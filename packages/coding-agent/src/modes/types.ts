@@ -418,6 +418,7 @@ export interface InteractiveModeContext {
 	handleBtwEscape(): boolean;
 	handleBtwBranchKey(): Promise<boolean>;
 	canBranchBtw(): boolean;
+	handlesBtwBranchKey(): boolean;
 	canCopyBtw(): boolean;
 	handleBtwCopyKey(): Promise<boolean>;
 	handleBtwBranch(

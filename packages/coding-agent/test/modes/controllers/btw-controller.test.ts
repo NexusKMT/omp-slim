@@ -249,6 +249,7 @@ describe("BtwController", () => {
 		await controller.start("Question?");
 
 		expect(controller.canBranch()).toBe(false);
+		expect(controller.handlesBranchKey()).toBe(false);
 	});
 
 	it("does not allow branch when the completed answer has no originating leaf", async () => {
@@ -264,6 +265,7 @@ describe("BtwController", () => {
 		await drainBtwRequest();
 
 		expect(controller.canBranch()).toBe(false);
+		expect(controller.handlesBranchKey()).toBe(true);
 	});
 
 	it("allows branch after a complete non-empty reply", async () => {
@@ -276,6 +278,7 @@ describe("BtwController", () => {
 		await drainBtwRequest();
 
 		expect(controller.canBranch()).toBe(true);
+		expect(controller.handlesBranchKey()).toBe(true);
 	});
 
 	it("refuses branch when the loaded session changed but the leaf id still matches", async () => {
@@ -295,6 +298,7 @@ describe("BtwController", () => {
 		ctx.setTestSessionId("session-2");
 
 		expect(controller.canBranch()).toBe(false);
+		expect(controller.handlesBranchKey()).toBe(true);
 		expect(await controller.handleBranch()).toBe(false);
 		expect(ctx.handleBtwBranch).not.toHaveBeenCalled();
 		expect(ctx.showStatus).toHaveBeenCalledWith("/btw branch unavailable: the session changed since /btw started", {
@@ -315,6 +319,7 @@ describe("BtwController", () => {
 		await drainBtwRequest();
 
 		expect(controller.canBranch()).toBe(false);
+		expect(controller.handlesBranchKey()).toBe(true);
 		const panel = btwContainer.children[0];
 		expect(Bun.stripANSI(panel?.render(120).join("\n") ?? "")).not.toContain("b branch to chat");
 		expect(await controller.handleBranch()).toBe(false);
@@ -335,6 +340,7 @@ describe("BtwController", () => {
 		await drainBtwRequest();
 
 		expect(controller.canBranch()).toBe(false);
+		expect(controller.handlesBranchKey()).toBe(false);
 	});
 
 	it("does not allow branch after aborted or errored requests", async () => {
@@ -393,6 +399,7 @@ describe("BtwController", () => {
 		await drainBtwRequest();
 		const branchPromise = controller.handleBranch();
 		await Promise.resolve();
+		expect(controller.handlesBranchKey()).toBe(true);
 
 		const panel = btwContainer.children[0];
 		expect(Bun.stripANSI(panel?.render(120).join("\n") ?? "")).toContain("Branching to chat");
