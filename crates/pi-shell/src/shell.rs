@@ -6622,21 +6622,22 @@ mod tests {
 	/// Regression: builtin tail upstream of an early-exiting consumer printed
 	/// "tail: Broken pipe" and failed (`tail -c N big.jsonl | jq …` with jq
 	/// aborting on a parse error). Real tail dies silently from SIGPIPE; the
-	/// builtin must exit 141 with no diagnostic, leaving the pipeline status
-	/// to the last stage.
+	/// builtin must exit 141 with no diagnostic. `pipefail` exposes tail's own
+	/// status, so rc=141 proves the broken pipe actually fired (head closed
+	/// the pipe early) and was mapped to the silent SIGPIPE exit, not 1.
 	#[tokio::test(flavor = "multi_thread")]
 	async fn tail_builtin_is_silent_when_downstream_closes_pipe() {
 		let dir = tempfile::tempdir().expect("tempdir");
 		let file = dir.path().join("big.txt");
-		// ~589 KiB: forces the seekable bounded_tail path and overflows the OS
-		// pipe buffer so tail is still writing when head exits.
+		// ~589 KiB: forces the seekable bounded_tail path, and the 400 KB tail
+		// overflows the OS pipe buffer so tail is still writing when head exits.
 		let command = format!(
-			"seq 1 100000 > '{file}'; tail -c 400000 '{file}' | head -c 10 > /dev/null; echo rc=$?",
+			"seq 1 100000 > '{file}'; set -o pipefail; tail -c 400000 '{file}' | head -c 10 > /dev/null; echo rc=$?",
 			file = file.display()
 		);
 		let (result, output) = execute_captured(command).await;
 		assert_eq!(result.exit_code, Some(0));
-		assert!(output.contains("rc=0"), "{output:?}");
+		assert!(output.contains("rc=141"), "{output:?}");
 		assert!(!output.contains("Broken pipe"), "{output:?}");
 	}
 
