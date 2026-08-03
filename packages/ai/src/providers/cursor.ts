@@ -234,6 +234,7 @@ const NOT_IMPLEMENTED = `Not implemented by this client`;
 
 const conversationStateCache = new Map<string, ConversationStateStructure>();
 const conversationBlobStores = new Map<string, Map<string, Uint8Array>>();
+const warnedCursorKimiK3ReplayMessages = new Set<string>();
 
 export interface CursorOptions extends StreamOptions {
 	customSystemPrompt?: string;
@@ -3903,6 +3904,15 @@ export function processInteractionUpdate(
 		}
 	} else if (updateCase === "turnEnded") {
 		output.stopReason = "stop";
+		if (
+			isKimiK3ModelId(output.model) &&
+			!output.content.some(item => item.type === "thinking" && item.thinking.length > 0)
+		) {
+			logger.warn(
+				"Cursor kimi-k3 turn completed without thinking blocks; persisted history will replay this turn without reasoning",
+				{ model: output.model, messageTimestamp: output.timestamp },
+			);
+		}
 	} else if (updateCase === "tokenDelta") {
 		const tokenDelta = update.message.value;
 		usageState.sawTokenDelta = true;
@@ -4114,35 +4124,34 @@ function assertCursorKimiK3HistoryReplayable(
 ): void {
 	if (!targetModelId || !isKimiK3ModelId(targetModelId)) return;
 	const historyEnd = activeUserMessageIndex >= 0 ? activeUserMessageIndex : messages.length;
-	let sawSameModelMissingThinking = false;
+	const missingThinkingTurns: number[] = [];
+	const newlyWarnedKeys: string[] = [];
+	let assistantTurn = 0;
 	for (let i = 0; i < historyEnd; i++) {
 		const msg = messages[i];
 		if (msg.role !== "assistant") continue;
+		assistantTurn++;
 		const isSameCursorModel = msg.api === "cursor-agent" && msg.provider === "cursor" && msg.model === targetModelId;
 		if (!isSameCursorModel) {
 			// Foreign history genuinely cannot replay K3 thinking: another model's
-			// turns carry no K3-signed reasoning to reconstruct, so continuation
-			// is unsafe and must fail hard.
+			// turns carry no K3-signed reasoning to reconstruct.
 			throw new AIError.ValidationError(
 				`Cursor ${targetModelId} cannot continue history from a different model (${msg.provider}/${msg.model}); start a new session.`,
 			);
 		}
 		const hasThinking = msg.content.some(item => item.type === "thinking" && item.thinking.length > 0);
-		if (!hasThinking) sawSameModelMissingThinking = true;
+		if (hasThinking) continue;
+		const warningKey = `${msg.api}\0${msg.provider}\0${msg.model}\0${msg.timestamp}`;
+		if (warnedCursorKimiK3ReplayMessages.has(warningKey)) continue;
+		missingThinkingTurns.push(assistantTurn);
+		newlyWarnedKeys.push(warningKey);
 	}
-	if (sawSameModelMissingThinking) {
-		// A same-model turn whose stream carried no `thinkingDelta` events is
-		// persisted without thinking blocks. `buildCursorAssistantContent` still
-		// replays its text/tool-call structure and simply omits the reasoning
-		// part, so the history remains usable — degrade with a one-time warning
-		// rather than permanently bricking the session. Per Kimi's
-		// preserved-thinking caveat, K3 generation may be less stable across the
-		// affected span.
-		logger.warn(
-			"Cursor kimi-k3 history contains a same-model assistant turn without thinking blocks; replaying without reasoning for that span (generation may be less stable)",
-			{ model: targetModelId },
-		);
-	}
+	if (missingThinkingTurns.length === 0) return;
+	for (const key of newlyWarnedKeys) warnedCursorKimiK3ReplayMessages.add(key);
+	logger.warn(
+		`Cursor kimi-k3 history contains same-model assistant turn(s) ${missingThinkingTurns.join(", ")} without thinking blocks; replaying those spans without reasoning may make generation less stable`,
+		{ model: targetModelId, assistantTurns: missingThinkingTurns },
+	);
 }
 
 /**

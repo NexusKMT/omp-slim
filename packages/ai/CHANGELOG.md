@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed Cursor `kimi-k3` sessions bricking permanently when a same-model assistant turn was persisted without thinking blocks (a turn whose stream carried no `thinkingDelta` events). `assertCursorKimiK3HistoryReplayable` now only hard-errors on genuinely foreign history; same-model turns missing thinking degrade to a one-time warning and replay without the reasoning part ([#7516](https://github.com/can1357/oh-my-pi/issues/7516)).
+- Fixed Cursor `kimi-k3` sessions bricking permanently when a same-model assistant turn was persisted without thinking blocks (a turn whose stream carried no `thinkingDelta` events). `assertCursorKimiK3HistoryReplayable` now only hard-errors on genuinely foreign history; same-model turns missing thinking replay without the reasoning part, with warnings at turn completion and first degraded replay that identify the affected assistant-turn positions ([#7516](https://github.com/can1357/oh-my-pi/issues/7516)).
 
 ## [17.2.6] - 2026-08-03
 
