@@ -461,6 +461,9 @@ describe("createBranchedSession", () => {
 		session.createBranchedSession(leafId);
 
 		expect(session.getSessionName()).toBe("new-ds");
+		expect(session.titleSource).toBe("user");
+		expect(await session.setSessionName("automatic", "auto")).toBe(false);
+		expect(session.getSessionName()).toBe("new-ds");
 	});
 
 	it("extracts correct path from branched tree", () => {
