@@ -2884,6 +2884,9 @@ function createSkippedToolResult(
 	if (source === "user") {
 		reason = "queued user message";
 		blocker = "queued message";
+	} else if (source === "agent") {
+		reason = "pending parent steering message";
+		blocker = "steering message";
 	} else if (source === "system") {
 		reason = "pending system advisory";
 		blocker = "advisory";
