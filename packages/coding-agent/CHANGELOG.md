@@ -388,6 +388,13 @@
 
 - Exposed the script-driven computer schema to all models, including those with provider-native Computer Use support.
 - Reduced omp --help cold-start latency and memory usage by rendering lightweight command metadata.
+- Exposed the script-driven `computer` schema to every model, including models with provider-native Computer Use support, because native action declarations cannot express persistent desktop sessions or accessibility handles.
+- Reduced `omp --help` cold-start latency and memory use by rendering lightweight command metadata without loading every runtime command and provider graph.
+- Routed paid xAI models (`XAI_API_KEY` / `xai/…`) through the Responses API used by SuperGrok OAuth instead of Chat Completions.
+- Changed the default model for `XAI_API_KEY` (`xai`) from `grok-4-fast-non-reasoning` to `grok-4.5`.
+- Changed the default model for SuperGrok OAuth (`xai-oauth`) from `grok-4.3` to `grok-4.5`.
+- Included `reasoning.encrypted_content` in Responses `include` for paid xAI and SuperGrok OAuth models.
+- Replayed encrypted xAI reasoning on follow-up Responses turns for `xai` and `xai-oauth`.
 
 ### Fixed
 

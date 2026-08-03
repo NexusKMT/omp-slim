@@ -714,12 +714,11 @@ export function buildOpenAIResponsesCompat(spec: OpenAIResponsesSpecLike): Resol
 		thinkingFormat,
 		reasoningDisableMode: resolveReasoningDisableMode(thinkingFormat),
 		omitReasoningEffort: false,
-		// Ask xAI `/v1/responses` for `reasoning.encrypted_content` the same way
-		// first-party OpenAI Responses does. History still drops `type:
-		// "reasoning"` wrappers (`filterReasoningHistory`) independently —
-		// those two flags must not be collapsed.
+		// Ask xAI `/v1/responses` for `reasoning.encrypted_content` and replay
+		// those items on later turns. OpenRouter Anthropic still filters
+		// reasoning wrappers independently.
 		includeEncryptedReasoning: true,
-		filterReasoningHistory: isXaiHost || (isOpenRouter && isAnthropicModel),
+		filterReasoningHistory: isOpenRouter && isAnthropicModel,
 		disableReasoningOnForcedToolChoice: isKimiModel,
 		disableReasoningOnToolChoice: isDeepseekFamily && reasoningCapable && !isOpenRouter,
 		supportsToolChoice: true,

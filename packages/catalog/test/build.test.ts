@@ -258,8 +258,8 @@ describe("xAI Responses reasoning-effort suppression", () => {
 		expect(oauth.promptCacheSessionHeader).toBe("x-grok-conv-id");
 		expect(paid.includeEncryptedReasoning).toBe(true);
 		expect(oauth.includeEncryptedReasoning).toBe(true);
-		expect(paid.filterReasoningHistory).toBe(true);
-		expect(oauth.filterReasoningHistory).toBe(true);
+		expect(paid.filterReasoningHistory).toBe(false);
+		expect(oauth.filterReasoningHistory).toBe(false);
 		expect(paid.supportsImageDetailOriginal).toBe(false);
 		expect(oauth.supportsImageDetailOriginal).toBe(false);
 		expect(paid.supportsReasoningEffort).toBe(true);
