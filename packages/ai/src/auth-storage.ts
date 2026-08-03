@@ -2687,7 +2687,7 @@ export class AuthStorage {
 		if (this.#runtimeOverrides.has(provider)) return true;
 		if (this.#configOverrides.has(provider)) return true;
 		if (this.#getCredentialsForProvider(provider).length > 0) return true;
-		if (getEnvApiKey(provider)) return true;
+		if (this.#hasDedicatedEnvAuth(provider)) return true;
 		if (this.#fallbackResolver?.(provider)) return true;
 		return false;
 	}
@@ -2712,6 +2712,22 @@ export class AuthStorage {
 	}
 
 	/**
+	 * Env auth that belongs to this provider, not a cross-provider alias.
+	 *
+	 * `getEnvApiKey("xai-oauth")` also accepts `XAI_API_KEY` so an explicit
+	 * `xai-oauth/…` stream can still borrow the paid key. Availability and
+	 * origin must not: otherwise an API-key-only setup marks SuperGrok as
+	 * signed in and `pickDefaultAvailableModel` prefers `xai-oauth/grok-4.5`
+	 * over paid `xai/grok-4.5`.
+	 */
+	#hasDedicatedEnvAuth(provider: string): boolean {
+		if (provider === "xai-oauth") {
+			return Boolean($env.XAI_OAUTH_TOKEN?.trim());
+		}
+		return Boolean(getEnvApiKey(provider));
+	}
+
+	/**
 	 * Classify where a provider's auth comes from, following the same precedence
 	 * as {@link AuthStorage.getApiKey}: runtime override → config override →
 	 * stored OAuth → login-stored api_key → env var → stored api_key →
@@ -2727,7 +2743,7 @@ export class AuthStorage {
 		if (stored.some(credential => credential.type === "api_key" && credential.source === "login")) {
 			return { kind: "api_key" };
 		}
-		if (getEnvApiKey(provider)) return { kind: "env", envVar: getEnvApiKeyName(provider) };
+		if (this.#hasDedicatedEnvAuth(provider)) return { kind: "env", envVar: getEnvApiKeyName(provider) };
 		if (stored.some(credential => credential.type === "api_key")) return { kind: "api_key" };
 		if (this.#fallbackResolver?.(provider)) return { kind: "fallback" };
 		return undefined;
