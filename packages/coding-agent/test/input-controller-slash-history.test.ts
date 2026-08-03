@@ -120,7 +120,7 @@ describe("input controller — slash command history (#3148)", () => {
 		expect(addToHistory).not.toHaveBeenCalled();
 	});
 
-	it("executes extension commands without rendering them as user prompts", async () => {
+	it("executes extension commands without rendering them as user prompts or retaining image drafts", async () => {
 		const { ctx, editor, addToHistory, onInputCallback, prompt } = makeCtx();
 		Object.defineProperty(ctx.session, "extensionRunner", {
 			value: {
@@ -128,13 +128,18 @@ describe("input controller — slash command history (#3148)", () => {
 				hasHandlers: () => false,
 			},
 		});
+		const image: ImageContent = { type: "image", data: "image-data", mimeType: "image/png" };
+		editor.pendingImages = [image];
+		editor.pendingImageLinks = ["file:///draft.png"];
 		controllerFor(ctx);
 
 		await editor.onSubmit?.("/id");
 
-		expect(prompt).toHaveBeenCalledWith("/id", { images: undefined });
+		expect(prompt).toHaveBeenCalledWith("/id", { images: [image] });
 		expect(addToHistory).toHaveBeenCalledWith("/id");
 		expect(onInputCallback).not.toHaveBeenCalled();
+		expect(editor.pendingImages).toEqual([]);
+		expect(editor.pendingImageLinks).toEqual([]);
 	});
 
 	it("routes /queue through the yield-only follow-up queue while streaming", async () => {
