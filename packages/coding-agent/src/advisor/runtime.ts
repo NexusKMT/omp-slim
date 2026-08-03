@@ -501,7 +501,15 @@ export class AdvisorRuntime {
 		} catch {}
 	}
 
-	#resetAdvisorContext(clearBacklog: boolean, wakeWaiters: boolean): void {
+	#resetAdvisorContext(clearBacklog: boolean, wakeWaiters: boolean, reason?: string): void {
+		if (reason) {
+			logger.debug("advisor context reset", {
+				reason,
+				lastCount: this.#lastCount,
+				pending: this.#pending.length,
+				backlog: this.#backlog,
+			});
+		}
 		this.#lastCount = 0;
 		this.#deliveredPrefix = [];
 		this.#pending = [];
@@ -570,12 +578,6 @@ export class AdvisorRuntime {
 		// live investigations can attribute full-transcript replays (cached_tokens
 		// pinned at the instructions/tools boundary) to a concrete path instead of
 		// inferring it from payload markers after the fact.
-		logger.debug("advisor context reset", {
-			reason,
-			lastCount: this.#lastCount,
-			pending: this.#pending.length,
-			backlog: this.#backlog,
-		});
 		this.#iterationAbort?.abort("advisor reset");
 		this.#epoch++;
 		this.#sessionTransitionPaused = false;
@@ -585,7 +587,7 @@ export class AdvisorRuntime {
 		this.#droppedBacklogs = 0;
 		this.#consecutiveQuarantines = 0;
 		this.#failureNotified = false;
-		this.#resetAdvisorContext(true, true);
+		this.#resetAdvisorContext(true, true, reason);
 	}
 
 	/**
@@ -1270,13 +1272,13 @@ export class AdvisorRuntime {
 						if (this.#consecutiveQuarantines >= MAX_QUARANTINE_RETRIES) {
 							this.#notifyFailureOnce(err);
 							this.#consecutiveQuarantines = 0;
-							this.#resetAdvisorContext(true, true);
+							this.#resetAdvisorContext(true, true, "quarantine-retry-exhausted");
 							continue;
 						}
 						const rePrime = this.#pending.length > 0 ? this.#latestMessages : undefined;
 						// Wake catchup waiters only when nothing is re-primed; otherwise the
 						// re-primed turn restores the backlog and waiters resolve on its completion.
-						this.#resetAdvisorContext(true, !rePrime);
+						this.#resetAdvisorContext(true, !rePrime, "quarantine-recovery");
 						if (rePrime) this.onTurnEnd(rePrime);
 						continue;
 					}

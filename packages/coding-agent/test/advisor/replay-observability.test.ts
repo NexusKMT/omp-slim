@@ -8,7 +8,12 @@ import { describe, expect, it, vi } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { logger } from "@oh-my-pi/pi-utils";
 
-import { type AdvisorAgent, AdvisorRuntime, type AdvisorRuntimeHost } from "../../src/advisor/runtime";
+import {
+	type AdvisorAgent,
+	AdvisorOutputQuarantinedError,
+	AdvisorRuntime,
+	type AdvisorRuntimeHost,
+} from "../../src/advisor/runtime";
 
 function userMessage(text: string, timestamp: number): AgentMessage {
 	return { role: "user", content: text, timestamp } as AgentMessage;
@@ -16,6 +21,10 @@ function userMessage(text: string, timestamp: number): AgentMessage {
 
 async function settle() {
 	for (let i = 0; i < 50; i++) await Promise.resolve();
+}
+
+function hasResetReason(details: unknown, reason: string): details is { reason: string } {
+	return typeof details === "object" && details !== null && "reason" in details && details.reason === reason;
 }
 
 describe("advisor context reset observability", () => {
@@ -89,6 +98,55 @@ describe("advisor context reset observability", () => {
 					(event.details as { reason: string }).reason === "auto-compaction",
 			);
 			expect(reset).toBeDefined();
+		} finally {
+			debugSpy.mockRestore();
+		}
+	});
+
+	it("logs quarantine reset reasons while preserving the retry limit", async () => {
+		const debugSpy = vi.spyOn(logger, "debug").mockImplementation(() => {});
+		try {
+			const messages: AgentMessage[] = [userMessage("turn body", 1)];
+			let agentResetCalls = 0;
+			const failures: unknown[] = [];
+			const agent: AdvisorAgent = {
+				prompt: async () => {
+					throw new AdvisorOutputQuarantinedError("quarantined");
+				},
+				abort: () => {},
+				reset: () => {
+					agentResetCalls++;
+				},
+				state: { messages: [] },
+			};
+			const runtime = new AdvisorRuntime(agent, {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+				notifyFailure: error => failures.push(error),
+			});
+
+			runtime.onTurnEnd();
+			await settle();
+			runtime.onTurnEnd();
+			await settle();
+
+			const events = debugSpy.mock.calls.map(call => ({ message: call[0], details: call[1] }));
+			expect(
+				events.some(
+					event =>
+						event.message === "advisor context reset" && hasResetReason(event.details, "quarantine-recovery"),
+				),
+			).toBe(true);
+			expect(
+				events.some(
+					event =>
+						event.message === "advisor context reset" &&
+						hasResetReason(event.details, "quarantine-retry-exhausted"),
+				),
+			).toBe(true);
+			expect(agentResetCalls).toBe(2);
+			expect(failures).toHaveLength(1);
+			expect(failures[0]).toBeInstanceOf(AdvisorOutputQuarantinedError);
 		} finally {
 			debugSpy.mockRestore();
 		}

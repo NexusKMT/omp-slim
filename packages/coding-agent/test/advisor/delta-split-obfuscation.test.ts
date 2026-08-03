@@ -4,10 +4,7 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 
-import {
-	type AdvisorObfuscator,
-	renderAdvisorDeltaChunks,
-} from "../../src/advisor/delta-split";
+import { type AdvisorObfuscator, renderAdvisorDeltaChunks } from "../../src/advisor/delta-split";
 
 function chunksToText(chunks: AgentMessage[] | null): string | null {
 	if (!chunks) return null;
