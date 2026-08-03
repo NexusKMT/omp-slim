@@ -18,6 +18,7 @@
 ### Fixed
 
 - Fixed Codex `config.toml` discovery importing MCP servers with `enabled = false` ([#7538](https://github.com/can1357/oh-my-pi/issues/7538)).
+- Fixed `bash.patterns` allow rules rejecting simple commands when quoted arguments contained shell metacharacters such as Cargo benchmark regex filters ([#7552](https://github.com/can1357/oh-my-pi/issues/7552)).
 
 ## [17.2.6] - 2026-08-03
 
