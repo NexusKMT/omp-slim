@@ -146,6 +146,7 @@
 ### Fixed
 
 - Invalidated stale paid-xAI model-cache rows written under Chat Completions so the Responses migration takes effect immediately instead of waiting for TTL expiry.
+- Clamped paid xAI Responses `minimal` reasoning effort to `low` (same wire map as SuperGrok) so `xai/grok-4.5` does not 400.
 
 ## [17.2.5] - 2026-08-03
 

@@ -177,6 +177,11 @@ const MIMO_REASONING_EFFORT_MAP: NonNullable<OpenAICompat["reasoningEffortMap"]>
 	xhigh: "high",
 };
 
+/** xAI `/v1/responses` accepts `low|medium|high` (and `xhigh` on some SKUs), not `minimal`. */
+const XAI_RESPONSES_REASONING_EFFORT_MAP: NonNullable<OpenAICompat["reasoningEffortMap"]> = {
+	minimal: "low",
+};
+
 function mergeModelReasoningEffortMap(
 	compat: ResolvedOpenAISharedCompat,
 	modelId: string,
@@ -706,7 +711,7 @@ export function buildOpenAIResponsesCompat(spec: OpenAIResponsesSpecLike): Resol
 		// Copilot host under a different provider id still clamps.
 		supportsImageDetailOriginal:
 			!isXaiHost && !modelMatchesHost({ provider: spec.provider, baseUrl }, "githubCopilot"),
-		reasoningEffortMap: {},
+		reasoningEffortMap: isXaiHost ? { ...XAI_RESPONSES_REASONING_EFFORT_MAP } : {},
 		supportsReasoningParams: true,
 		// OpenAI proprietary reasoning models (o-series, gpt-5+) reject explicit
 		// temperature/top_p/… with a 400 on every serving host (#5606).
@@ -766,6 +771,9 @@ export function buildOpenAIResponsesCompat(spec: OpenAIResponsesSpecLike): Resol
 			: spec.compat?.streamIdleTimeoutMs,
 	};
 	applyCompatOverrides(compat, spec.compat);
+	if (isXaiHost) {
+		compat.reasoningEffortMap = { ...XAI_RESPONSES_REASONING_EFFORT_MAP, ...compat.reasoningEffortMap };
+	}
 	if (spec.compat?.reasoningDisableMode === undefined) {
 		compat.reasoningDisableMode = resolveReasoningDisableMode(compat.thinkingFormat);
 	}

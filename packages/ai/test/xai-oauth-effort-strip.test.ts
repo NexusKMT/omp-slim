@@ -96,6 +96,24 @@ describe("xAI OAuth Responses reasoning payload (regression)", () => {
 		expect(params.include).toContain("reasoning.encrypted_content");
 	});
 
+	test("paid xai/grok-4.5 clamps minimal reasoning effort to low", () => {
+		const grok45 = getBundledModel<"openai-responses">("xai", "grok-4.5");
+		if (!grok45) throw new Error("xai/grok-4.5 must be in bundled models.json");
+
+		const { params } = buildParams(grok45, singleUserContext, { reasoning: Effort.Minimal }, undefined);
+
+		expect(params.reasoning).toMatchObject({ effort: "low" });
+	});
+
+	test("xai-oauth/grok-4.5 clamps minimal reasoning effort to low", () => {
+		const grok45 = getBundledModel<"openai-responses">("xai-oauth", "grok-4.5");
+		if (!grok45) throw new Error("xai-oauth/grok-4.5 must be in bundled models.json");
+
+		const { params } = buildParams(grok45, singleUserContext, { reasoning: Effort.Minimal }, undefined);
+
+		expect(params.reasoning).toMatchObject({ effort: "low" });
+	});
+
 	test("xai-oauth/grok-4.5 replays encrypted reasoning on the next turn", () => {
 		const grok45 = getBundledModel<"openai-responses">("xai-oauth", "grok-4.5");
 		if (!grok45) throw new Error("xai-oauth/grok-4.5 must be in bundled models.json");

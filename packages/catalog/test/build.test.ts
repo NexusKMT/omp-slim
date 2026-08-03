@@ -264,6 +264,8 @@ describe("xAI Responses reasoning-effort suppression", () => {
 		expect(oauth.supportsImageDetailOriginal).toBe(false);
 		expect(paid.supportsReasoningEffort).toBe(true);
 		expect(oauth.supportsReasoningEffort).toBe(true);
+		expect(paid.reasoningEffortMap).toEqual({ minimal: "low" });
+		expect(oauth.reasoningEffortMap).toEqual({ minimal: "low" });
 	});
 
 	it("omits effort for paid xai models off the Grok allowlist", () => {
