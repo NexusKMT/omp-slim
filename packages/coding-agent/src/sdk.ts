@@ -2880,8 +2880,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				}
 			}
 			let appendPrompt: string | undefined = appendParts.length > 0 ? appendParts.join("\n\n") : undefined;
-			// Owned/in-band tool dialects (non-native) require the catalog as `# Tool:`
-			// sections; native tool calling lets the compact name list suffice.
+			// Owned/in-band tool dialects (non-native) require the full functions-
+			// namespace catalog; native tool calling lets the compact name list suffice.
 			const nativeTools = resolveDialect(settings.get("tools.format"), agent?.state.model ?? model) === undefined;
 			const promptTools = projectSystemPromptToolMetadata(
 				tools,

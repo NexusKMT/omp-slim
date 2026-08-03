@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Changed `renderToolExamples` and `renderToolInventory` to render tool-call examples in Python keyword-argument syntax (`name(key="value")`) for every model instead of the model's native tool-call dialect; `renderToolExamples` no longer takes a dialect parameter, and the now-unused `DialectRenderOptions.example` flag was removed. Multiline string arguments render as verbatim `"""…"""` blocks (falling back to escaped literals when the content collides with the fence), and a call whose only argument is a string renders as the bare payload value with the intent placeholder carried on the `<example i="…">` envelope.
+- Changed `renderToolInventory` (the verbose system-prompt inventory and `/dump`) to render the catalog as one OpenAI-Harmony-style `## functions` / `namespace functions { … }` block — per tool, the description and examples as `//` comment lines above a flat `type <name> = (_: {…});` declaration — instead of per-tool `# Tool: <name>` markdown sections; the model parameter and the description header-demotion pass were removed. Added a `style: "harmony"` option to `jsonSchemaToTypeScript` (`//` comments, `,` delimiters, no indentation); the default JSDoc-style output is unchanged.
+
 ### Fixed
 
 - Fixed Harmony control-token escaping skipping model-owned replay items. The issue-#6913 fix only escaped user/developer text and tool results, so a model that legitimately wrote about the Harmony format (e.g. `<|channel|>`, `<|call|>` in article or test content) sampled those spellings into its own `function_call.arguments`; the next full-transcript replay (stale or blocked `previous_response_id`, provider fallback) fed them back as input and gpt-5.x rejected every retry with `invalid_prompt` / "Request blocked", permanently poisoning the session. Replayed `function_call.arguments` (JSON-preserving escape), `custom_tool_call.input`, and assistant `output_text`/`refusal` blocks are now escaped on the wire copy for Harmony-dialect models, on both the shared Responses builder and the Codex builder.
