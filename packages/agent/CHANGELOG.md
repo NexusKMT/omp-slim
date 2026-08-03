@@ -7,6 +7,7 @@
 - A peer-IRC interrupt (e.g. a subagent message) no longer skips a non-interruptible tool call that was queued behind an interruptible wait in the same batch, so a batched `todo`/`write` update ordered after `hub wait` now runs instead of failing with "Skipped due to pending peer interrupt"; IRC still aborts only interruptible waits, and user/system steering still preempts queued work ([#7493](https://github.com/can1357/oh-my-pi/issues/7493)).
 
 - Parent-agent steering interruptions now use parent steering wording while advisor interruptions keep system-advisory wording ([#7199](https://github.com/can1357/oh-my-pi/issues/7199)).
+
 ## [17.2.5] - 2026-08-03
 
 ### Breaking Changes
