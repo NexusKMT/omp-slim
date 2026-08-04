@@ -7,6 +7,9 @@ import {
 	STATS_DASHBOARD_SECURITY_VERSION,
 } from "../src/port-conflict";
 import { startServer } from "../src/server";
+import { installStatsTestIsolation } from "./helpers/temp-agent";
+
+installStatsTestIsolation("@pi-stats-port-conflict-");
 
 /**
  * Directly probe a TCP endpoint, bypassing any configured HTTP proxy so the
