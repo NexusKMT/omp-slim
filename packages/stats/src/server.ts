@@ -22,6 +22,7 @@ import { decodeEmbeddedClientArchive } from "./embedded-client";
 import embeddedClientArchiveTxt from "./embedded-client.generated.txt";
 import { getGainDashboardStats } from "./gain-aggregator";
 import {
+	prepareStatsPort,
 	recoverStatsPort,
 	STATS_DASHBOARD_HEADER,
 	STATS_DASHBOARD_HOSTNAME,
@@ -359,6 +360,10 @@ function createDashboardServer(port: number) {
  */
 export async function startServer(port = 3847): Promise<{ hostname: string; port: number; stop: () => void }> {
 	await ensureClientBuild();
+	const preparation = await prepareStatsPort(port);
+	if (preparation === "reuse") {
+		return { hostname: STATS_DASHBOARD_HOSTNAME, port, stop: () => {} };
+	}
 
 	try {
 		const server = createDashboardServer(port);

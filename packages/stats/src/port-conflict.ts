@@ -24,7 +24,9 @@ export const STATS_DASHBOARD_SECURITY_VERSION = "2";
 /** IPv4 loopback address shared by the dashboard server and reuse probe. */
 export const STATS_DASHBOARD_HOSTNAME = "127.0.0.1";
 
-async function probeReusableStatsDashboard(port: number): Promise<boolean> {
+type StatsDashboardProbe = "reusable" | "occupied" | "unreachable";
+
+async function probeStatsDashboard(port: number): Promise<StatsDashboardProbe> {
 	try {
 		const response = await fetch(`http://${STATS_DASHBOARD_HOSTNAME}:${port}/api/stats/models`, {
 			signal: AbortSignal.timeout(STATS_PROBE_TIMEOUT_MS),
@@ -34,9 +36,9 @@ async function probeReusableStatsDashboard(port: number): Promise<boolean> {
 			response.headers.get(STATS_DASHBOARD_HEADER) === STATS_DASHBOARD_SECURITY_VERSION &&
 			!response.headers.has("Access-Control-Allow-Origin");
 		await response.body?.cancel();
-		return reusable;
+		return reusable ? "reusable" : "occupied";
 	} catch {
-		return false;
+		return "unreachable";
 	}
 }
 
@@ -211,10 +213,7 @@ async function terminatePortHolder(holder: PortHolder): Promise<void> {
 	await Bun.sleep(PROCESS_EXIT_POLL_MS);
 }
 
-/** Reuse a securely configured dashboard or reclaim the port from an older omp runtime. */
-export async function recoverStatsPort(port: number): Promise<"retry" | "reuse"> {
-	if (await probeReusableStatsDashboard(port)) return "reuse";
-
+async function reclaimStatsPort(port: number): Promise<"retry"> {
 	const holder = await findPortHolder(port);
 	if (!holder) {
 		throw new Error(`Port ${port} is in use, but the listening process could not be identified.`);
@@ -242,4 +241,23 @@ export async function recoverStatsPort(port: number): Promise<"retry" | "reuse">
 
 	await terminatePortHolder(holder);
 	return "retry";
+}
+
+/**
+ * Reuse a secure dashboard or reclaim an insecure HTTP dashboard before binding.
+ * The preflight is needed on platforms that permit wildcard and loopback-specific
+ * listeners to coexist on one port.
+ */
+export async function prepareStatsPort(port: number): Promise<"retry" | "reuse"> {
+	if (port === 0) return "retry";
+	const probe = await probeStatsDashboard(port);
+	if (probe === "reusable") return "reuse";
+	if (probe === "occupied") return reclaimStatsPort(port);
+	return "retry";
+}
+
+/** Reuse or reclaim a listener found after the server bind reports EADDRINUSE. */
+export async function recoverStatsPort(port: number): Promise<"retry" | "reuse"> {
+	if ((await probeStatsDashboard(port)) === "reusable") return "reuse";
+	return reclaimStatsPort(port);
 }

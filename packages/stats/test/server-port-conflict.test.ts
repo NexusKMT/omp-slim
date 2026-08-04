@@ -1,3 +1,4 @@
+import { networkInterfaces } from "node:os";
 import { afterEach, describe, expect, it } from "bun:test";
 import { connect, type Subprocess } from "bun";
 import {
@@ -24,9 +25,11 @@ async function tcpConnects(hostname: string, port: number): Promise<boolean> {
 
 const holderProcesses: Array<Subprocess<"ignore", "pipe", "pipe">> = [];
 
-async function startBunHolder(responseExpr: string, options?: { statsOwned?: boolean }) {
-	// Bind the same loopback address as `startServer` so macOS cannot let a
-	// wildcard and address-specific listener coexist on the reserved port.
+async function startBunHolder(
+	responseExpr: string,
+	options?: { hostname?: string; statsOwned?: boolean },
+) {
+	const hostname = options?.hostname ?? STATS_DASHBOARD_HOSTNAME;
 	const reservation = Bun.serve({
 		port: 0,
 		hostname: STATS_DASHBOARD_HOSTNAME,
@@ -35,7 +38,7 @@ async function startBunHolder(responseExpr: string, options?: { statsOwned?: boo
 	const port = reservation.port;
 	reservation.stop(true);
 
-	const source = `Bun.serve({ port: ${port}, hostname: "${STATS_DASHBOARD_HOSTNAME}", fetch: () => ${responseExpr} }); process.stdout.write("ready"); await Promise.withResolvers().promise;`;
+	const source = `Bun.serve({ port: ${port}, hostname: "${hostname}", fetch: () => ${responseExpr} }); process.stdout.write("ready"); await Promise.withResolvers().promise;`;
 	const args = [process.execPath, "-e", source];
 	if (options?.statsOwned) args.push("omp-stats");
 	const child = Bun.spawn(args, {
@@ -77,10 +80,23 @@ describe("startServer access", () => {
 			expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
 			await response.body?.cancel();
 
-			// 127.0.0.2 also routes to the loopback interface, but the server bound
-			// only 127.0.0.1, so a direct connection there must be refused.
+			let nonLoopbackHostname: string | undefined;
+			const interfaces = networkInterfaces();
+			for (const name in interfaces) {
+				const addresses = interfaces[name] ?? [];
+				for (const address of addresses) {
+					if (address.family === "IPv4" && !address.internal) {
+						nonLoopbackHostname = address.address;
+						break;
+					}
+				}
+				if (nonLoopbackHostname) break;
+			}
+			expect(nonLoopbackHostname).toBeDefined();
 			expect(await tcpConnects(server.hostname, server.port)).toBe(true);
-			expect(await tcpConnects("127.0.0.2", server.port)).toBe(false);
+			if (nonLoopbackHostname) {
+				expect(await tcpConnects(nonLoopbackHostname, server.port)).toBe(false);
+			}
 		} finally {
 			server.stop();
 		}
@@ -117,14 +133,19 @@ describe("startServer port conflicts", () => {
 		{
 			name: "reclaims a version 1 dashboard with wildcard CORS",
 			response: `Response.json([], { headers: { "${STATS_DASHBOARD_HEADER}": "1", "Access-Control-Allow-Origin": "*" } })`,
+			hostname: "0.0.0.0",
 		},
 		{
 			name: "reclaims a headerless legacy dashboard",
 			response: "Response.json([])",
+			hostname: STATS_DASHBOARD_HOSTNAME,
 		},
 	]) {
 		it(fixture.name, async () => {
-			const holder = await startBunHolder(fixture.response, { statsOwned: true });
+			const holder = await startBunHolder(fixture.response, {
+				hostname: fixture.hostname,
+				statsOwned: true,
+			});
 			const server = await startServer(holder.port);
 
 			try {
