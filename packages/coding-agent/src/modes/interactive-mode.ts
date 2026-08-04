@@ -4154,6 +4154,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#pendingCommandOutputSessionId = sessionId;
 		const items = Array.isArray(content) ? content : [content as Component];
 		this.#pendingCommandOutput.push(...items);
+		// Deferring silently reads as a dead command: the panel can be minutes
+		// away on a long turn, so say where it went.
+		this.showStatus("Command output queued until the current turn finishes.", { dim: true });
 	}
 
 	/** Mount every command panel queued for the current session while the agent was streaming. */
