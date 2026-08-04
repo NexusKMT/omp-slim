@@ -18,28 +18,23 @@ interface PortHolder {
 /** Header stamped on every dashboard response so reuse probes can identify us. */
 export const STATS_DASHBOARD_HEADER = "x-omp-stats-dashboard";
 
-async function probeStatsDashboard(port: number): Promise<boolean> {
+/** Identity-header value for dashboards enforcing loopback-only, same-origin access. */
+export const STATS_DASHBOARD_SECURITY_VERSION = "2";
+
+/** IPv4 loopback address shared by the dashboard server and reuse probe. */
+export const STATS_DASHBOARD_HOSTNAME = "127.0.0.1";
+
+async function probeReusableStatsDashboard(port: number): Promise<boolean> {
 	try {
-		const response = await fetch(`http://localhost:${port}/api/stats/models`, {
+		const response = await fetch(`http://${STATS_DASHBOARD_HOSTNAME}:${port}/api/stats/models`, {
 			signal: AbortSignal.timeout(STATS_PROBE_TIMEOUT_MS),
 		});
-		if (response.status !== 200) {
-			await response.body?.cancel();
-			return false;
-		}
-		// A live omp-stats dashboard stamps this header on every response.
-		if (response.headers.get(STATS_DASHBOARD_HEADER)) {
-			await response.body?.cancel();
-			return true;
-		}
-		// Older dashboards predate the header; fall back to the response shape
-		// (`/api/stats/models` returns a JSON array) so we never reuse — or later
-		// kill — a foreign 200 responder such as an SPA dev server catch-all.
-		if (!(response.headers.get("content-type") ?? "").includes("application/json")) {
-			await response.body?.cancel();
-			return false;
-		}
-		return Array.isArray(await response.json());
+		const reusable =
+			response.status === 200 &&
+			response.headers.get(STATS_DASHBOARD_HEADER) === STATS_DASHBOARD_SECURITY_VERSION &&
+			!response.headers.has("Access-Control-Allow-Origin");
+		await response.body?.cancel();
+		return reusable;
 	} catch {
 		return false;
 	}
@@ -216,9 +211,9 @@ async function terminatePortHolder(holder: PortHolder): Promise<void> {
 	await Bun.sleep(PROCESS_EXIT_POLL_MS);
 }
 
-/** Reuse a live stats dashboard or reclaim the port from a stale omp runtime. */
+/** Reuse a securely configured dashboard or reclaim the port from an older omp runtime. */
 export async function recoverStatsPort(port: number): Promise<"retry" | "reuse"> {
-	if (await probeStatsDashboard(port)) return "reuse";
+	if (await probeReusableStatsDashboard(port)) return "reuse";
 
 	const holder = await findPortHolder(port);
 	if (!holder) {
