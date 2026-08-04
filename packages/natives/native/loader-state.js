@@ -651,20 +651,18 @@ function maybeStageNodeModulesAddon(ctx, errors) {
 
 
 /**
- * The desktop adapter can bridge the pre-parity DesktopSession shape even when
- * the addon's version sentinel predates this JS package. Keep the exception
- * narrow: only an on-disk addon (never a resident old module) with the exact
- * legacy capture/execute/close shape may pass.
+ * Before version sentinels were exported, published native addons still shared
+ * this stable core ABI. Let those on-disk addons bridge a package-version bump
+ * when they expose the signature; keep every versioned addon and a current
+ * on-disk file paired with resident old exports on the strict path below.
  */
-function isCompatibleLegacyDesktopSession(bindings, diskHasExpectedSentinel) {
+function isCompatiblePreSentinelNativeAddon(bindings, diskHasExpectedSentinel) {
 	if (diskHasExpectedSentinel) return false;
-	const DesktopSession = bindings.DesktopSession;
+	if (Object.keys(bindings).some(key => /^__piNativesV[A-Za-z0-9_]+$/.test(key))) return false;
 	return (
-		typeof DesktopSession === "function" &&
-		typeof DesktopSession.prototype.capture === "function" &&
-		typeof DesktopSession.prototype.execute === "function" &&
-		typeof DesktopSession.prototype.close === "function" &&
-		typeof DesktopSession.prototype.click !== "function"
+		typeof bindings.countTokens === "function" &&
+		typeof bindings.executeShell === "function" &&
+		typeof bindings.visibleWidth === "function"
 	);
 }
 
@@ -700,7 +698,7 @@ export function validateLoadedBindings(ctx, bindings, candidate) {
 		// The successful require above normally guarantees readability. If the
 		// file disappears concurrently, retain the safe reinstall diagnosis.
 	}
-	if (isCompatibleLegacyDesktopSession(bindings, diskHasExpectedSentinel)) return;
+	if (isCompatiblePreSentinelNativeAddon(bindings, diskHasExpectedSentinel)) return;
 	if (residentSentinel && diskHasExpectedSentinel) {
 		const residentVersion = residentSentinel.slice("__piNativesV".length).replace(/_/g, ".");
 		throw new Error(
