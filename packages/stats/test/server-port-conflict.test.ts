@@ -1,7 +1,22 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import type { Subprocess } from "bun";
+import { connect, type Subprocess } from "bun";
 import { STATS_DASHBOARD_HEADER, STATS_DASHBOARD_HOSTNAME } from "../src/port-conflict";
 import { startServer } from "../src/server";
+
+/**
+ * Directly probe a TCP endpoint, bypassing any configured HTTP proxy so the
+ * loopback-only bind is asserted against the real listener rather than a proxy
+ * response. Resolves true when the connection is accepted, false when refused.
+ */
+async function tcpConnects(hostname: string, port: number): Promise<boolean> {
+	try {
+		const socket = await connect({ hostname, port, socket: { data() {}, open() {}, close() {}, error() {} } });
+		socket.end();
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 const holderProcesses: Array<Subprocess<"ignore", "pipe", "pipe">> = [];
 
@@ -58,11 +73,10 @@ describe("startServer access", () => {
 			expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
 			await response.body?.cancel();
 
-			await expect(
-				fetch(`http://127.0.0.2:${server.port}/api/stats/models`, {
-					signal: AbortSignal.timeout(1_000),
-				}),
-			).rejects.toThrow();
+			// 127.0.0.2 also routes to the loopback interface, but the server bound
+			// only 127.0.0.1, so a direct connection there must be refused.
+			expect(await tcpConnects(server.hostname, server.port)).toBe(true);
+			expect(await tcpConnects("127.0.0.2", server.port)).toBe(false);
 		} finally {
 			server.stop();
 		}
