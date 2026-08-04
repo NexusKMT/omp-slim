@@ -826,8 +826,8 @@ export async function discoverOpenAIModelsList(
 				baseUrl,
 				reasoning: reference?.reasoning ?? false,
 				thinking: inheritReferenceThinking(undefined, reference, providerConfig.provider),
-				input: extractOpenAIModelsListInputCapabilities(item) ??
-					nativeMetadataForModel?.input ??
+				input: nativeMetadataForModel?.input ??
+					extractOpenAIModelsListInputCapabilities(item) ??
 					reference?.input ?? ["text"],
 				...(providerConfig.discovery.type === "lm-studio" ? { imageInputDecoder: "stb" as const } : {}),
 				// Proxy/gateway pricing is provider-specific and rarely matches
