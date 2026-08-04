@@ -101,6 +101,8 @@ export interface TurnRecoveryHost {
 	modelRegistry: ModelRegistry;
 	configWarnings: string[];
 	model(): Model | undefined;
+	/** Whether streamed text has already been committed to the active output sink. */
+	textOutputCommitted(): boolean;
 	thinkingLevel(): ThinkingLevel | undefined;
 	configuredThinkingLevel(): ConfiguredThinkingLevel | undefined;
 	setThinkingLevel(level: ConfiguredThinkingLevel | undefined): void;
@@ -890,8 +892,8 @@ export class TurnRecovery {
 		if (AIError.isContextOverflow(message, contextWindow)) return false;
 
 		// A classifier refusal/sensitivity stop is the model's decision, not a route
-		// failure, but only after we confirm no user-visible output has already been
-		// streamed. Visible text, images, tool calls, or server tools must not be
+		// failure, but only after we confirm no replay-unsafe output has already
+		// streamed. Committed text, images, tool calls, or server tools must not be
 		// discarded and replayed.
 		if (this.#hasReplayUnsafeOutput(message)) return false;
 		if (this.isClassifierRefusal(message)) return true;
@@ -966,10 +968,10 @@ export class TurnRecovery {
 	 * Thinking-only partials are safe to discard and replay: reasoning models
 	 * routinely stall after long thinking with no visible output, and duplicated
 	 * thinking display is materially lower harm than duplicated final text.
-	 * Whitespace-only text is likewise safe since nothing meaningful reached the
-	 * user. Visible text, generated images, server tools, and retained tool calls
-	 * are NOT safe: each has already rendered or may have side effects, so replaying
-	 * the turn can duplicate user-visible output or work.
+	 * Whitespace-only and buffered text are likewise safe since nothing meaningful
+	 * reached the user. Committed text, generated images, server tools, and retained
+	 * tool calls are NOT safe: each has already rendered or may have side effects,
+	 * so replaying the turn can duplicate user-visible output or work.
 	 */
 	#hasReplayUnsafeOutput(message: AssistantMessage): boolean {
 		return message.content.some(
@@ -977,7 +979,7 @@ export class TurnRecovery {
 				block.type === "toolCall" ||
 				block.type === "image" ||
 				block.type === "anthropicServerTool" ||
-				(block.type === "text" && block.text.trim().length > 0),
+				(block.type === "text" && this.#host.textOutputCommitted() && block.text.trim().length > 0),
 		);
 	}
 

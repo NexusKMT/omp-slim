@@ -186,12 +186,14 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 	// Send initial message with attachments
 	if (initialMessage !== undefined) {
 		writeTextWorkingIndicator();
+		if (mode === "text") session.setTextOutputCommitted(false);
 		await logger.time("print:prompt:initial", () => session.prompt(initialMessage, { images: initialImages }));
 	}
 
 	// Send remaining messages
 	for (const message of messages) {
 		writeTextWorkingIndicator();
+		if (mode === "text") session.setTextOutputCommitted(false);
 		await logger.time("print:prompt:next", () => session.prompt(message));
 	}
 
@@ -249,6 +251,7 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 				}
 			}
 		}
+		session.setTextOutputCommitted(true);
 	}
 
 	await session.waitForAdvisorCatchup(PRINT_MODE_ADVISOR_DRAIN_TIMEOUT_MS);

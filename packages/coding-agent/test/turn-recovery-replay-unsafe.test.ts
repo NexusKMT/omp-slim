@@ -40,9 +40,12 @@ function makeMessage(content: AssistantMessage["content"], model: Model): Assist
 function createHost(
 	model: Model,
 	modelRegistry: ModelRegistry,
-	fallbackChains?: Record<string, string[]>,
+	options: {
+		fallbackChains?: Record<string, string[]>;
+		textOutputCommitted?: boolean;
+	} = {},
 ): TurnRecoveryHost {
-	const settings = Settings.isolated(fallbackChains ? { "retry.fallbackChains": fallbackChains } : {});
+	const settings = Settings.isolated(options.fallbackChains ? { "retry.fallbackChains": options.fallbackChains } : {});
 	return {
 		agent: undefined as never,
 		sessionManager: undefined as never,
@@ -51,6 +54,7 @@ function createHost(
 		modelRegistry,
 		configWarnings: [],
 		model: () => model,
+		textOutputCommitted: () => options.textOutputCommitted !== false,
 		thinkingLevel: () => undefined,
 		configuredThinkingLevel: () => undefined,
 		setThinkingLevel: () => {},
@@ -101,16 +105,27 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		expect(recovery.isRetryableError(message)).toBe(false);
 	});
 
-	it("allows replay-safe hard fallback and excludes visible text with a configured chain", () => {
-		const recovery = new TurnRecovery(
-			createHost(model, modelRegistry, {
-				[`${model.provider}/${model.id}`]: ["openai/gpt-4o-mini"],
-			}),
-		);
+	it("allows replay-safe hard fallback and excludes committed text with a configured chain", () => {
+		const fallbackChains = {
+			[`${model.provider}/${model.id}`]: ["openai/gpt-4o-mini"],
+		};
+		const recovery = new TurnRecovery(createHost(model, modelRegistry, { fallbackChains }));
 		// Thinking-only output is replay-safe: nothing visible reached the user.
 		const message = makeMessage([{ type: "thinking", thinking: "safe reasoning before failing" }], model);
 		const visible = makeMessage([{ type: "text", text: "Already shown" }], model);
 		expect(recovery.isHardErrorFallbackEligible(visible)).toBe(false);
+		expect(recovery.isHardErrorFallbackEligible(message)).toBe(true);
+	});
+
+	it("retries partial text while its buffered output remains uncommitted", () => {
+		const fallbackChains = {
+			[`${model.provider}/${model.id}`]: ["openai/gpt-4o-mini"],
+		};
+		const recovery = new TurnRecovery(
+			createHost(model, modelRegistry, { fallbackChains, textOutputCommitted: false }),
+		);
+		const message = makeMessage([{ type: "text", text: "Buffered partial answer" }], model);
+		expect(recovery.isRetryableError(message)).toBe(true);
 		expect(recovery.isHardErrorFallbackEligible(message)).toBe(true);
 	});
 
@@ -148,6 +163,19 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		const recovery = new TurnRecovery(createHost(model, modelRegistry));
 		const message = makeMessage(
 			[{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "ls" } }],
+			model,
+		);
+		expect(recovery.isRetryableError(message)).toBe(false);
+		expect(recovery.isHardErrorFallbackEligible(message)).toBe(false);
+	});
+
+	it("keeps side-effecting output replay-unsafe while text is uncommitted", () => {
+		const recovery = new TurnRecovery(createHost(model, modelRegistry, { textOutputCommitted: false }));
+		const message = makeMessage(
+			[
+				{ type: "text", text: "Buffered partial answer" },
+				{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "ls" } },
+			],
 			model,
 		);
 		expect(recovery.isRetryableError(message)).toBe(false);
