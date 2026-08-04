@@ -6,6 +6,10 @@
 
 - Restored the legacy project-scoped session directory naming scheme and removed its automatic migration ([#7646](https://github.com/can1357/oh-my-pi/issues/7646)).
 
+### Fixed
+
+- Fixed LSP diagnostics being dropped when servers normalize file URI percent-encoding or Windows path casing.
+
 ## [17.2.8] - 2026-08-04
 
 ### Changed
