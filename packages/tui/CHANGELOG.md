@@ -135,6 +135,7 @@
 - Prevented temporary dashboard frame updates from cluttering the terminal's native scrollback history.
 - Added support for cleaning up tracked Kitty graphics, allowing inline images to be properly deleted before falling back to text.
 - Fixed an issue where resizing or growing a multiplexer pane would incorrectly overwrite newly exposed rows with blank padding.
+- Fixed inline images not rendering under WSL + Windows Terminal: the SIXEL capability probe gated on `process.platform === "win32"`, but WSL reports `linux`, so the probe never ran and images fell back to the text placeholder even on Sixel-capable Windows Terminal. The probe now runs on any ConPTY host (native win32 or WSL) ([#6009](https://github.com/can1357/oh-my-pi/issues/6009)).
 
 ## [17.0.3] - 2026-07-17
 
