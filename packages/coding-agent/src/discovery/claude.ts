@@ -103,17 +103,19 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 		});
 	};
 
-	for (let i = 0; i < userPaths.length; i++) {
-		const servers = parseMcpServers(contents[i], userPaths[i].path, userPaths[i].level);
+	// Load project entries before user entries so a project `enabled: false`
+	// claims its dedupe key before a same-named user server can survive (#7654).
+	const projectOffset = userPaths.length;
+	for (let i = 0; i < projectPaths.length; i++) {
+		const servers = parseMcpServers(contents[projectOffset + i], projectPaths[i].path, projectPaths[i].level);
 		if (servers.length > 0) {
 			items.push(...servers);
 			break;
 		}
 	}
 
-	const projectOffset = userPaths.length;
-	for (let i = 0; i < projectPaths.length; i++) {
-		const servers = parseMcpServers(contents[projectOffset + i], projectPaths[i].path, projectPaths[i].level);
+	for (let i = 0; i < userPaths.length; i++) {
+		const servers = parseMcpServers(contents[i], userPaths[i].path, userPaths[i].level);
 		if (servers.length > 0) {
 			items.push(...servers);
 			break;

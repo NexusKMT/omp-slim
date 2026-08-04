@@ -64,6 +64,32 @@ const FIXTURES: Fixture[] = [
 	},
 ];
 
+interface CompoundFixture {
+	/** Discovery provider id passed to `loadCapability`. */
+	provider: string;
+	/** User-scope config file, relative to the temp HOME. */
+	userFile: string;
+	/** Project-scope config file, relative to the temp cwd. */
+	projectFile: string;
+}
+
+// Providers exposing both a user and a project MCP scope. A project
+// `enabled: false` must claim the dedupe key ahead of the same-named user
+// server so the disable actually suppresses it (#7654). VS Code MCP is
+// project-only, so it has no user/project compound case.
+const COMPOUND_FIXTURES: CompoundFixture[] = [
+	{ provider: "claude", userFile: ".claude.json", projectFile: ".claude/.mcp.json" },
+	{ provider: "cursor", userFile: ".cursor/mcp.json", projectFile: ".cursor/mcp.json" },
+	{ provider: "gemini", userFile: ".gemini/settings.json", projectFile: ".gemini/settings.json" },
+	{ provider: "windsurf", userFile: ".codeium/windsurf/mcp_config.json", projectFile: ".windsurf/mcp_config.json" },
+];
+
+function mcpServersJson(enabled: boolean, command: string): string {
+	return JSON.stringify({
+		mcpServers: { markitdown: { command, args: ["markitdown-mcp"], type: "stdio", enabled } },
+	});
+}
+
 describe("translated MCP importers propagate enabled: false", () => {
 	let tempCwd = "";
 	let tempHome = "";
@@ -96,6 +122,25 @@ describe("translated MCP importers propagate enabled: false", () => {
 
 			expect(server).toBeDefined();
 			expect(server?.enabled).toBe(false);
+		});
+	}
+
+	for (const { provider, userFile, projectFile } of COMPOUND_FIXTURES) {
+		test(`${provider} project enabled: false suppresses a same-named user server`, async () => {
+			const userPath = path.join(tempHome, userFile);
+			const projectPath = path.join(tempCwd, projectFile);
+			await fs.mkdir(path.dirname(userPath), { recursive: true });
+			await fs.mkdir(path.dirname(projectPath), { recursive: true });
+			await fs.writeFile(userPath, mcpServersJson(true, "user-markitdown"));
+			await fs.writeFile(projectPath, mcpServersJson(false, "project-markitdown"));
+
+			const result = await loadCapability<MCPServer>(mcpCapability.id, {
+				cwd: tempCwd,
+				providers: [provider],
+				suppress: server => server.enabled === false,
+			});
+
+			expect(result.items.find(server => server.name === "markitdown")).toBeUndefined();
 		});
 	}
 });

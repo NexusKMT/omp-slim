@@ -48,18 +48,20 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 	const items: MCPServer[] = [];
 	const warnings: string[] = [];
 
-	// User-level: ~/.gemini/settings.json → mcpServers
-	const userPath = getUserPath(ctx, "gemini", "settings.json");
-	if (userPath) {
-		const result = await loadMCPFromSettings(ctx, userPath, "user");
-		items.push(...result.items);
-		if (result.warnings) warnings.push(...result.warnings);
-	}
-
+	// Load project entries before user entries so a project `enabled: false`
+	// claims its dedupe key before a same-named user server can survive (#7654).
 	// Project-level: .gemini/settings.json → mcpServers
 	const projectPath = getProjectPath(ctx, "gemini", "settings.json");
 	if (projectPath) {
 		const result = await loadMCPFromSettings(ctx, projectPath, "project");
+		items.push(...result.items);
+		if (result.warnings) warnings.push(...result.warnings);
+	}
+
+	// User-level: ~/.gemini/settings.json → mcpServers
+	const userPath = getUserPath(ctx, "gemini", "settings.json");
+	if (userPath) {
+		const result = await loadMCPFromSettings(ctx, userPath, "user");
 		items.push(...result.items);
 		if (result.warnings) warnings.push(...result.warnings);
 	}
