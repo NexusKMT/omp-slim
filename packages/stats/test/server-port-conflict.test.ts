@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { connect, type Subprocess } from "bun";
-import { STATS_DASHBOARD_HEADER, STATS_DASHBOARD_HOSTNAME } from "../src/port-conflict";
+import {
+	STATS_DASHBOARD_HEADER,
+	STATS_DASHBOARD_HOSTNAME,
+	STATS_DASHBOARD_SECURITY_VERSION,
+} from "../src/port-conflict";
 import { startServer } from "../src/server";
 
 /**
@@ -69,7 +73,7 @@ describe("startServer access", () => {
 			expect(server.hostname).toBe(STATS_DASHBOARD_HOSTNAME);
 			const response = await fetch(`http://${server.hostname}:${server.port}/api/stats/models`);
 			expect(response.status).toBe(200);
-			expect(response.headers.get(STATS_DASHBOARD_HEADER)).toBe("1");
+			expect(response.headers.get(STATS_DASHBOARD_HEADER)).toBe(STATS_DASHBOARD_SECURITY_VERSION);
 			expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
 			await response.body?.cancel();
 
@@ -90,7 +94,7 @@ describe("startServer port conflicts", () => {
 			hostname: STATS_DASHBOARD_HOSTNAME,
 			fetch: request =>
 				new URL(request.url).pathname === "/api/stats/models"
-					? Response.json([], { headers: { [STATS_DASHBOARD_HEADER]: "1" } })
+					? Response.json([], { headers: { [STATS_DASHBOARD_HEADER]: STATS_DASHBOARD_SECURITY_VERSION } })
 					: new Response("dashboard"),
 		});
 
@@ -102,12 +106,38 @@ describe("startServer port conflicts", () => {
 			// The existing dashboard is untouched: it still answers on the port.
 			const response = await fetch(`http://${STATS_DASHBOARD_HOSTNAME}:${existing.port}/api/stats/models`);
 			expect(response.status).toBe(200);
-			expect(response.headers.get(STATS_DASHBOARD_HEADER)).toBe("1");
+			expect(response.headers.get(STATS_DASHBOARD_HEADER)).toBe(STATS_DASHBOARD_SECURITY_VERSION);
 			await response.body?.cancel();
 		} finally {
 			existing.stop(true);
 		}
 	});
+
+	for (const fixture of [
+		{
+			name: "reclaims a version 1 dashboard with wildcard CORS",
+			response: `Response.json([], { headers: { "${STATS_DASHBOARD_HEADER}": "1", "Access-Control-Allow-Origin": "*" } })`,
+		},
+		{
+			name: "reclaims a headerless legacy dashboard",
+			response: "Response.json([])",
+		},
+	]) {
+		it(fixture.name, async () => {
+			const holder = await startBunHolder(fixture.response, { statsOwned: true });
+			const server = await startServer(holder.port);
+
+			try {
+				expect(await holder.child.exited).not.toBe(0);
+				const response = await fetch(`http://${STATS_DASHBOARD_HOSTNAME}:${server.port}/api/stats/models`);
+				expect(response.headers.get(STATS_DASHBOARD_HEADER)).toBe(STATS_DASHBOARD_SECURITY_VERSION);
+				expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+				await response.body?.cancel();
+			} finally {
+				server.stop();
+			}
+		});
+	}
 
 	it("refuses to stop a foreign 200 responder", async () => {
 		const holder = await startBunHolder('Response.json({ app: "spa" })');

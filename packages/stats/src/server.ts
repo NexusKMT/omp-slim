@@ -21,7 +21,12 @@ import {
 import { decodeEmbeddedClientArchive } from "./embedded-client";
 import embeddedClientArchiveTxt from "./embedded-client.generated.txt";
 import { getGainDashboardStats } from "./gain-aggregator";
-import { recoverStatsPort, STATS_DASHBOARD_HEADER, STATS_DASHBOARD_HOSTNAME } from "./port-conflict";
+import {
+	recoverStatsPort,
+	STATS_DASHBOARD_HEADER,
+	STATS_DASHBOARD_HOSTNAME,
+	STATS_DASHBOARD_SECURITY_VERSION,
+} from "./port-conflict";
 
 const EMBEDDED_CLIENT_ARCHIVE = decodeEmbeddedClientArchive(embeddedClientArchiveTxt);
 
@@ -311,7 +316,7 @@ function createDashboardServer(port: number) {
 			// The identity header lets another omp session's reuse probe positively
 			// recognize this dashboard without allowing cross-origin API reads.
 			const dashboardHeaders: Record<string, string> = {
-				[STATS_DASHBOARD_HEADER]: "1",
+				[STATS_DASHBOARD_HEADER]: STATS_DASHBOARD_SECURITY_VERSION,
 			};
 
 			if (req.method === "OPTIONS") {
