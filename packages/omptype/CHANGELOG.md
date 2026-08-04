@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added `io: 'input'` and `io: 'output'` options to `toJsonSchema()`, supporting input validation shapes and piped `.to()` target types
 - Added Standard Schema V1 interop: every schema exposes `~standard` with synchronous validation, enabling direct use with `@t3-oss/env`, tRPC, and other Standard Schema consumers.
 - Added `fromJsonSchema()`, rebuilding callable schemas from JSON Schema documents (draft-07 / draft-2020-12 structural keywords, string formats, `$defs` recursion, enums, and `anyOf`/`oneOf`/`allOf` composition) — the inverse of `Type.toJsonSchema()`.
 

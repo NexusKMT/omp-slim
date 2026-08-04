@@ -81,7 +81,7 @@ describe("validation", () => {
 });
 
 describe("interp/JIT parity", () => {
-	const cases: { def: Parameters<typeof type.infer[0]; inputs: unknown[] }[] = [
+	const cases: { def: Parameters<typeof type>[0]; inputs: unknown[] }[] = [
 		{
 			def: { a: "string", "b?": "number.integer >= 0", c: "'x' | 'y'" },
 			inputs: [{ a: "s", c: "x" }, { a: "s", b: -1, c: "x" }, { a: 1, c: "x" }, "nope", { a: "s", c: "z" }],

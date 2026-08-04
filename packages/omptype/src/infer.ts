@@ -53,6 +53,25 @@ type InferUtility<s extends string> = s extends `Record<${string},${infer value}
 							? Merge<InferString<left>, InferString<right>>
 							: never;
 
+/** Output types of morph (`.parse`) keywords; `never` when `s` is not one. */
+type InferParse<s extends string> = s extends
+	| "string.numeric.parse"
+	| "string.integer.parse"
+	| "parse.number"
+	| "parse.integer"
+	? number
+	: s extends "string.date.parse" | "string.date.iso.parse" | "string.date.epoch.parse" | "parse.date"
+		? Date
+		: s extends "string.url.parse" | "parse.url"
+			? URL
+			: s extends "string.json.parse" | "parse.json"
+				? unknown
+				: s extends "parse.boolean"
+					? boolean
+					: s extends "parse.bigint"
+						? bigint
+						: never;
+
 /**
  * Member inference as a flat false-branch chain: TypeScript tail-evaluates
  * chained conditionals in the false position, so this stays at constant
@@ -77,11 +96,13 @@ type InferMemberTrimmed<s extends string> = s extends `(${infer inner})`
 							? literal
 							: s extends keyof PrimitiveMap
 								? PrimitiveMap[s]
-								: InferUtility<s> extends infer utility
-									? [utility] extends [never]
-										? InferMemberFallback<s>
-										: utility
-									: unknown;
+								: [InferParse<s>] extends [never]
+									? InferUtility<s> extends infer utility
+										? [utility] extends [never]
+											? InferMemberFallback<s>
+											: utility
+										: unknown
+									: InferParse<s>;
 
 type InferMemberFallback<s extends string> = s extends `string.${string}`
 	? string
@@ -98,6 +119,19 @@ type InferUnion<s extends string, result = never> = s extends `${infer head}|${i
 	? InferUnion<tail, result | InferMember<head>>
 	: result | InferMember<s>;
 
+/** Input side of one union member: morph keywords accept their source type. */
+type InferMemberIn<member extends string> =
+	Trim<member> extends infer s extends string
+		? s extends `${string}.parse` | `parse.${string}`
+			? string
+			: InferMemberTrimmed<s>
+		: unknown;
+
+/** Split unions on the input side without distributing over accumulated members. */
+type InferUnionIn<s extends string, result = never> = s extends `${infer head}|${infer tail}`
+	? InferUnionIn<tail, result | InferMemberIn<head>>
+	: result | InferMemberIn<s>;
+
 type HasInlineDefault<s extends string> = s extends `${string}=${string}`
 	? s extends `${string}<${string}` | `${string}>${string}`
 		? false
@@ -107,23 +141,7 @@ type HasInlineDefault<s extends string> = s extends `${string}=${string}`
 type WithoutInlineDefault<s extends string> =
 	HasInlineDefault<s> extends true ? (s extends `${infer base}=${string}` ? Trim<base> : s) : s;
 
-type InferStringOutput<s extends string> = s extends
-	| "string.numeric.parse"
-	| "string.integer.parse"
-	| "parse.number"
-	| "parse.integer"
-	? number
-	: s extends "string.date.parse" | "string.date.iso.parse" | "string.date.epoch.parse" | "parse.date"
-		? Date
-		: s extends "string.url.parse" | "parse.url"
-			? URL
-			: s extends "string.json.parse" | "parse.json"
-				? unknown
-				: s extends "parse.boolean"
-					? boolean
-					: s extends "parse.bigint"
-						? bigint
-						: InferUnion<s>;
+type InferStringOutput<s extends string> = InferUnion<s>;
 
 /** String-DSL output inference. */
 export type InferString<s extends string> =
@@ -138,9 +156,11 @@ export type InferString<s extends string> =
 /** String-DSL input inference, preserving the source side of morph keywords. */
 export type InferStringIn<s extends string> =
 	WithoutInlineDefault<Trim<s>> extends infer trimmed extends string
-		? trimmed extends `${string}.parse` | `parse.${string}`
-			? string
-			: InferString<trimmed>
+		? trimmed extends `${infer base}?`
+			? InferStringIn<base>
+			: trimmed extends `(${infer inner})[]`
+				? InferUnionIn<inner>[]
+				: InferUnionIn<trimmed>
 		: unknown;
 
 type HasDefault<def> = def extends string

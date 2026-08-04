@@ -249,6 +249,8 @@ export const Type = Object.defineProperty(function Type(): void {}, Symbol.hasIn
 interface Step {
 	kind: "pipe" | "narrow" | "filter";
 	fn: (data: unknown, ctx: NarrowContext) => unknown;
+	/** Output IR when the step is a `.to(target)` pipe; drives `io: 'output'` JSON Schema. */
+	out?: IR;
 }
 
 interface TypeMeta {
@@ -290,6 +292,10 @@ interface InternalType {
 	ir: IR;
 	hasSteps: boolean;
 	hasDefault: boolean;
+	/** Output IR of the last `.to(target)` step, when any. */
+	stepOut?: IR;
+	/** True when the last pipe step is bare — output shape statically unknown. */
+	opaqueOutput?: boolean;
 	defaultValue?: unknown;
 	description?: string;
 	errorConfig?: ErrorConfig;
@@ -307,6 +313,9 @@ function metaOf(schema: InternalType): TypeMeta {
 		errorConfig: schema.errorConfig,
 	};
 }
+
+/** Emitted for `io: 'output'` when a bare pipe makes the output unknowable. */
+const OPAQUE_OUTPUT_IR: IR = { k: "unknown" };
 
 const typeMethods = {
 	describe(this: InternalType, description: string): InternalType {
@@ -478,6 +487,7 @@ const typeMethods = {
 				{
 					kind: "pipe",
 					fn: value => output(value),
+					out: output.ir,
 				},
 			],
 			metaOf(this),
@@ -623,9 +633,11 @@ const typeMethods = {
 	},
 
 	toJsonSchema(this: InternalType, options?: ToJsonSchemaOptions): Record<string, unknown> {
+		const ir =
+			options?.io === "output" ? (this.opaqueOutput ? OPAQUE_OUTPUT_IR : (this.stepOut ?? this.ir)) : this.ir;
 		const description = options?.description ?? this.description;
 		return irToJsonSchema(
-			this.ir,
+			ir,
 			options === undefined && description === undefined
 				? undefined
 				: { ...options, ...(description === undefined ? {} : { description }) },
@@ -733,6 +745,17 @@ function makeType(ir: IR, steps: Step[], meta: TypeMeta): unknown {
 	self.description = meta.description;
 	self.errorConfig = meta.errorConfig;
 	self.run = callable;
+	// Walk steps backwards: the last pipe decides the output state — `.to`
+	// gives a known output IR, a bare pipe makes the output opaque; narrow and
+	// filter steps never change the value and are skipped. No pipes at all
+	// means the structural IR is the output.
+	for (let i = steps.length - 1; i >= 0; i--) {
+		const step = steps[i];
+		if (step.kind !== "pipe") continue;
+		self.stepOut = step.out;
+		self.opaqueOutput = step.out === undefined;
+		break;
+	}
 	Object.setPrototypeOf(self, typeMethods);
 	return self;
 }

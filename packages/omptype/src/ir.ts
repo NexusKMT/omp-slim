@@ -32,6 +32,10 @@ export interface EmbeddableSchema {
 	ir: IR;
 	/** True when the schema carries `.pipe()`/`.narrow()` steps. */
 	hasSteps: boolean;
+	/** Output IR of the last `.to(target)` step, when statically known. */
+	stepOut?: IR;
+	/** True when the last pipe step is bare — output shape statically unknown. */
+	opaqueOutput?: boolean;
 	/** `.default()` payload; a function is a factory invoked per fill. */
 	defaultValue?: unknown;
 	hasDefault: boolean;

@@ -4,6 +4,15 @@ export interface JsonSchemaOptions {
 	description?: string;
 	target?: string;
 	dialect?: string;
+	/**
+	 * Which side of morphs and defaults to describe:
+	 * - `'input'` — accepted payloads: morphs emit their input shape, defaulted
+	 *   properties are optional (with `default` annotations).
+	 * - `'output'` — produced values: morphs emit their output shape, defaulted
+	 *   properties are required (always present after validation).
+	 * Unset keeps the hybrid legacy behavior (morph output, defaults optional).
+	 */
+	io?: "input" | "output";
 	fallback?: (context: { base: Record<string, unknown> }) => unknown;
 }
 
@@ -149,7 +158,7 @@ function emit(ir: IR, ctx: EmitCtx): JsonSchema {
 			if (ir.json !== undefined) Object.assign(schema, ir.json);
 			break;
 		case "morph":
-			schema = fallback(emit(ir.out ?? ir.input, ctx), ctx);
+			schema = ctx.options?.io === "input" ? emit(ir.input, ctx) : fallback(emit(ir.out ?? ir.input, ctx), ctx);
 			break;
 		case "alias": {
 			const known = ctx.refs.get(ir.resolve);
@@ -167,7 +176,15 @@ function emit(ir: IR, ctx: EmitCtx): JsonSchema {
 			break;
 		}
 		case "sub":
-			schema = ir.schema.hasSteps ? fallback(emit(ir.schema.ir, ctx), ctx) : emit(ir.schema.ir, ctx);
+			if (ctx.options?.io === "output" && ir.schema.opaqueOutput) {
+				schema = {};
+			} else if (ctx.options?.io === "output" && ir.schema.stepOut !== undefined) {
+				schema = emit(ir.schema.stepOut, ctx);
+			} else if (ctx.options?.io === "input") {
+				schema = emit(ir.schema.ir, ctx);
+			} else {
+				schema = ir.schema.hasSteps ? fallback(emit(ir.schema.ir, ctx), ctx) : emit(ir.schema.ir, ctx);
+			}
 			if (ir.schema.description !== undefined) schema.description = ir.schema.description;
 			break;
 	}
@@ -255,14 +272,15 @@ function emitObject(
 	const required: string[] = [];
 	// ArkType emits required properties first (each group in declaration
 	// order); downstream wire consumers rely on that stable ordering.
-	const ordered = [...props.filter(p => !p.opt && !p.hasDefault), ...props.filter(p => p.opt || p.hasDefault)];
+	const filled = (prop: PropIR): boolean => !prop.opt && (ctx.options?.io === "output" || !prop.hasDefault);
+	const ordered = [...props.filter(filled), ...props.filter(prop => !filled(prop))];
 	for (const prop of ordered) {
 		const propertySchema = emit(prop.val, ctx);
 		if (prop.hasDefault) {
 			propertySchema.default = prop.defFactory ? (prop.def as () => unknown)() : prop.def;
 		}
 		properties[prop.key] = propertySchema;
-		if (!prop.opt && !prop.hasDefault) required.push(prop.key);
+		if (filled(prop)) required.push(prop.key);
 	}
 	const schema: JsonSchema = { type: "object", properties };
 	if (required.length > 0) schema.required = required;

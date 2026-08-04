@@ -110,4 +110,53 @@ describe("fromJsonSchema", () => {
 		expect(JSON.stringify(draft7)).toContain("#/definitions/");
 		expect(JSON.stringify(draft7)).not.toContain("$defs");
 	});
+
+	it("emits io-aware schemas: input keeps morph sources and optional defaults, output the reverse", () => {
+		const S = type({ port: "number = 8080", raw: "string.integer.parse" });
+
+		const input = S.toJsonSchema({ io: "input" });
+		const inputProps = input.properties as Record<string, Record<string, unknown>>;
+		expect(inputProps.raw.type).toBe("string");
+		expect(input.required).toEqual(["raw"]);
+		expect(inputProps.port.default).toBe(8080);
+
+		const output = S.toJsonSchema({ io: "output" });
+		const outputProps = output.properties as Record<string, Record<string, unknown>>;
+		expect(outputProps.raw.type).toBe("integer");
+		expect(output.required).toEqual(["port", "raw"]);
+
+		// The emitted input schema accepts what the source schema accepts.
+		const imported = fromJsonSchema(input);
+		expect(imported({ raw: "42" })).toEqual({ raw: "42", port: 8080 });
+		expect(imported({ raw: 42 })).toBeInstanceOf(OmpErrors);
+	});
+
+	it("io output uses the .to() target for piped schemas", () => {
+		const Uid = type("number.integer > 0 | string.integer.parse | bigint")
+			.pipe(value => (typeof value === "bigint" ? Number(value) : value))
+			.to("number.integer > 0");
+		expect(Uid.assert("42")).toBe(42);
+		expect(Uid.assert(7n)).toBe(7);
+		expect(Uid(0)).toBeInstanceOf(OmpErrors);
+
+		const output = Uid.toJsonSchema({ io: "output" });
+		expect(output).toEqual({ type: "integer", exclusiveMinimum: 0 });
+
+		const input = Uid.toJsonSchema({ io: "input" });
+		expect(JSON.stringify(input)).toContain("anyOf");
+
+		// A bare pipe AFTER .to() makes the output statically unknown again —
+		// output emission degrades to the unconstrained schema, never the stale
+		// .to target and never the input union.
+		const stringified = Uid.pipe(value => String(value));
+		expect(stringified.toJsonSchema({ io: "output" })).toEqual({});
+
+		// Structural-only schemas keep emitting their own IR for output io.
+		expect(type("string").toJsonSchema({ io: "output" })).toEqual({ type: "string" });
+		// Embedded in an object property, the .to target still drives output io.
+		const wrapped = type({ id: Uid });
+		const wrappedOut = wrapped.toJsonSchema({ io: "output" });
+		const props = wrappedOut.properties as Record<string, unknown>;
+		expect(props.id).toEqual({ type: "integer", exclusiveMinimum: 0 });
+	});
 });
