@@ -5,6 +5,7 @@ class LegacyDesktopSession {
 	static instances: LegacyDesktopSession[] = [];
 
 	readonly actions: Array<Record<string, unknown>> = [];
+	readonly options: Record<string, unknown>;
 	readonly capabilities = {
 		backend: "unavailable",
 		capture: true,
@@ -15,12 +16,17 @@ class LegacyDesktopSession {
 	};
 	closed = false;
 
-	constructor(_options: Record<string, unknown>) {
+	constructor(options: Record<string, unknown>) {
+		this.options = options;
 		LegacyDesktopSession.instances.push(this);
 	}
 
 	async capture() {
-		return { width: 20, height: 10, data: new Uint8Array() };
+		return {
+			width: (this.options.maxWidth as number | undefined) ?? 20,
+			height: (this.options.maxHeight as number | undefined) ?? 10,
+			data: new Uint8Array(),
+		};
 	}
 
 	async execute(actions: Array<Record<string, unknown>>) {
@@ -60,6 +66,25 @@ describe("legacy DesktopSession adapter", () => {
 		await session.click("desktop", 1.4, 2.6);
 
 		expect(legacy?.actions).toEqual([{ type: "click", x: 1, y: 3, keys: [], button: "left" }]);
+	});
+
+	it("preserves capture caps and pointer semantics for legacy sessions", async () => {
+		const DesktopSession = adaptDesktopSession(LegacyDesktopSession);
+		const session = new DesktopSession({ display: "all" });
+		const capture = await session.capture("desktop", { maxWidth: 10, maxHeight: 5 });
+		const legacy = LegacyDesktopSession.instances.at(-1);
+
+		expect(capture).toMatchObject({ width: 10, height: 5, target: "desktop" });
+		expect(legacy?.options).toMatchObject({ display: "all", maxWidth: 10, maxHeight: 5 });
+		await session.click("desktop", 1, 2, { button: "middle", count: 3 });
+		await session.click("desktop", 1, 2, { button: "right", count: 2 });
+		expect(legacy?.actions).toEqual([
+			{ type: "click", x: 1, y: 2, keys: [], button: "wheel" },
+			{ type: "click", x: 1, y: 2, keys: [], button: "wheel" },
+			{ type: "click", x: 1, y: 2, keys: [], button: "wheel" },
+			{ type: "click", x: 1, y: 2, keys: [], button: "right" },
+			{ type: "click", x: 1, y: 2, keys: [], button: "right" },
+		]);
 	});
 
 	it("fails closed for unsupported targets, background input, and closed sessions", async () => {
