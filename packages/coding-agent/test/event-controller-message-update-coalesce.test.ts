@@ -76,14 +76,19 @@ function createStreamingFixture() {
 	};
 	return { controller, ctx, ui, emit };
 }
+async function flushMicrotasks(): Promise<void> {
+	for (let i = 0; i < 12; i++) await Promise.resolve();
+}
 
 describe("EventController message_update coalescing", () => {
 	beforeEach(async () => {
 		resetSettingsForTest();
 		await Settings.init({ inMemory: true, overrides: { "display.smoothStreaming": false } });
+		vi.useFakeTimers();
 	});
 
 	afterEach(() => {
+		vi.useRealTimers();
 		vi.restoreAllMocks();
 		resetSettingsForTest();
 	});
@@ -97,12 +102,24 @@ describe("EventController message_update coalescing", () => {
 		emit(messageUpdate("tok1 tok2 tok3 tok4"));
 		emit(messageUpdate("tok1 tok2 tok3 tok4 tok5"));
 
-		// The coalescing window is 33ms; give the trailing flush a chance to fire.
-		await Bun.sleep(60);
+		vi.advanceTimersByTime(32);
+		expect(ui.requestRender).not.toHaveBeenCalled();
+		vi.advanceTimersByTime(1);
+		await flushMicrotasks();
 
 		expect(ui.requestRender).toHaveBeenCalledTimes(1);
 		expect((ctx.streamingMessage as AssistantMessage | undefined)?.content).toEqual([
 			{ type: "text", text: "tok1 tok2 tok3 tok4 tok5" },
+		]);
+
+		emit(messageUpdate("tok1 tok2 tok3 tok4 tok5 tok6"));
+		emit(messageUpdate("tok1 tok2 tok3 tok4 tok5 tok6 tok7"));
+		vi.advanceTimersByTime(33);
+		await flushMicrotasks();
+
+		expect(ui.requestRender).toHaveBeenCalledTimes(2);
+		expect((ctx.streamingMessage as AssistantMessage | undefined)?.content).toEqual([
+			{ type: "text", text: "tok1 tok2 tok3 tok4 tok5 tok6 tok7" },
 		]);
 	});
 
@@ -131,7 +148,8 @@ describe("EventController message_update coalescing", () => {
 		emit(messageUpdate("one two "));
 		emit(messageUpdate("one two three "));
 
-		await Bun.sleep(60);
+		vi.advanceTimersByTime(33);
+		await flushMicrotasks();
 
 		expect(pushDelta).toHaveBeenCalledTimes(3);
 		expect(pushDelta).toHaveBeenNthCalledWith(1, "one ");
@@ -155,19 +173,19 @@ describe("EventController message_update coalescing", () => {
 		});
 
 		emit(messageUpdate("tok1 tok2"));
-		await Bun.sleep(45); // window fires; flush suspends on init (call 1)
+		vi.advanceTimersByTime(33); // window fires; flush suspends on init (call 1)
 
 		emit({ type: "message_end", message: assistantMessage("tok1 tok2") } as Extract<
 			AgentSessionEvent,
 			{ type: "message_end" }
 		>);
-		await Bun.sleep(0);
+		await flushMicrotasks();
 
 		// The end handler must be queued behind the suspended flush, not
 		// running alongside it (which would double-init).
 		expect(initCalls).toBe(1);
 		initGate.resolve();
-		await Bun.sleep(0);
+		await flushMicrotasks();
 
 		// Flush completed, then the end handler ran to completion.
 		expect(initCalls).toBe(2);
@@ -190,7 +208,7 @@ describe("EventController message_update coalescing", () => {
 		});
 
 		emit(messageUpdate("tok1"));
-		await Bun.sleep(45); // window fires; flush run 1 suspends on gate 1
+		vi.advanceTimersByTime(33); // window fires; flush run 1 suspends on gate 1
 
 		// Two non-update events land while the flush is still suspended.
 		emit({ type: "message_end", message: assistantMessage("tok1") } as Extract<
@@ -201,7 +219,7 @@ describe("EventController message_update coalescing", () => {
 			AgentSessionEvent,
 			{ type: "message_end" }
 		>);
-		await Bun.sleep(0);
+		await flushMicrotasks();
 
 		// Neither queued handler has started yet — both are chained behind
 		// the suspended flush.
@@ -209,12 +227,12 @@ describe("EventController message_update coalescing", () => {
 
 		// Release run 1: run 2 starts and suspends on gate 2; run 3 is queued.
 		gates[0]!.resolve();
-		await Bun.sleep(0);
+		await flushMicrotasks();
 		expect(initCalls).toBe(2);
 
 		// Release run 2: run 3 finally runs to completion.
 		gates[1]!.resolve();
-		await Bun.sleep(0);
+		await flushMicrotasks();
 		expect(initCalls).toBe(3);
 	});
 });
