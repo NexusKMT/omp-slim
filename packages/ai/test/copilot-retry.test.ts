@@ -1,8 +1,18 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
+import { scheduler } from "node:timers/promises";
 import { callWithCopilotModelRetry, isCopilotTransientModelError } from "@oh-my-pi/pi-ai/utils/retry";
 import { isRetryableError } from "@oh-my-pi/pi-utils";
 
-type ErrorShape = { status: number; code?: string; error?: { code?: string; message?: string }; message: string };
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+
+type ErrorShape = {
+	status: number;
+	code?: string;
+	error?: { code?: string; message?: string } | { error: { code?: string; message?: string } };
+	message: string;
+};
 
 function copilotError({ status, code, error, message }: ErrorShape): Error {
 	const err = new Error(message);
@@ -27,6 +37,31 @@ describe("isCopilotTransientModelError", () => {
 			status: 400,
 			error: { code: "model_not_supported", message: "The requested model is not supported." },
 			message: "400 The requested model is not supported.",
+		});
+		expect(isCopilotTransientModelError(err)).toBe(true);
+	});
+
+	it("matches 400 model_not_available_for_integrator nested two envelopes deep (Anthropic SDK shape)", () => {
+		// api.githubcopilot.com/v1/messages: the SDK stores the parsed body on
+		// `.error`, and that body is itself `{ error: { code } }`.
+		const err = copilotError({
+			status: 400,
+			error: {
+				error: {
+					code: "model_not_available_for_integrator",
+					message: 'The requested model is not available for integrator "copilot-language-server".',
+				},
+			},
+			message:
+				'400 {"error":{"message":"The requested model is not available for integrator \\"copilot-language-server\\". Available models: [gpt-4.1 claude-opus-4.7]","code":"model_not_available_for_integrator","param":"model","type":"invalid_request_error"}}',
+		});
+		expect(isCopilotTransientModelError(err)).toBe(true);
+	});
+
+	it("falls back to the stringified body when no envelope exposes a code", () => {
+		const err = copilotError({
+			status: 400,
+			message: '400 {"error":{"message":"The requested model is not available for integrator \\"x\\"."}}',
 		});
 		expect(isCopilotTransientModelError(err)).toBe(true);
 	});
@@ -74,7 +109,7 @@ describe("callWithCopilotModelRetry", () => {
 		expect(calls).toBe(1);
 	});
 
-	it("retries up to 3 attempts for Copilot transient errors and eventually throws the last error", async () => {
+	it("retries up to 8 attempts for Copilot transient errors and eventually throws the last error", async () => {
 		let calls = 0;
 		const err = copilotError({ status: 400, code: "model_not_supported", message: "transient" });
 		await expect(
@@ -86,7 +121,7 @@ describe("callWithCopilotModelRetry", () => {
 				{ provider: "github-copilot", retryBaseDelayMs: 0 },
 			),
 		).rejects.toBe(err);
-		expect(calls).toBe(3);
+		expect(calls).toBe(8);
 	});
 
 	it("succeeds on the second attempt when the first is transient", async () => {
@@ -169,6 +204,45 @@ describe("callWithCopilotModelRetry", () => {
 		);
 		expect(result).toBe("ok");
 		expect(calls).toBe(2);
+	});
+
+	it("keeps the model-flap delay flat while generic retryable failures ramp", async () => {
+		const flatWaits: number[] = [];
+		const rampWaits: number[] = [];
+		const record = (into: number[]) => {
+			const spy = vi.spyOn(scheduler, "wait");
+			spy.mockImplementation(async (delay?: number) => {
+				into.push(delay ?? 0);
+			});
+			return spy;
+		};
+
+		record(flatWaits);
+		await expect(
+			callWithCopilotModelRetry(
+				async () => {
+					throw copilotError({ status: 400, code: "model_not_available_for_integrator", message: "flap" });
+				},
+				{ provider: "github-copilot", retryBaseDelayMs: 100 },
+			),
+		).rejects.toBeInstanceOf(Error);
+		vi.restoreAllMocks();
+
+		record(rampWaits);
+		await expect(
+			callWithCopilotModelRetry(
+				async () => {
+					throw new Error(
+						'HTTP2StreamReset fetching "https://api.example.com/x". For more information, pass `verbose: true` in the second argument to fetch()',
+					);
+				},
+				{ provider: "github-copilot", retryBaseDelayMs: 100 },
+			),
+		).rejects.toBeInstanceOf(Error);
+		vi.restoreAllMocks();
+
+		expect(flatWaits).toEqual([100, 100, 100, 100, 100, 100, 100]);
+		expect(rampWaits).toEqual([100, 200, 300, 400, 500, 600, 700]);
 	});
 
 	it("stops retrying when the caller aborts during backoff", async () => {
