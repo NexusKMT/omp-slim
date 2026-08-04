@@ -18,9 +18,12 @@ interface PortHolder {
 /** Header stamped on every dashboard response so reuse probes can identify us. */
 export const STATS_DASHBOARD_HEADER = "x-omp-stats-dashboard";
 
+/** IPv4 loopback address shared by the dashboard server and reuse probe. */
+export const STATS_DASHBOARD_HOSTNAME = "127.0.0.1";
+
 async function probeStatsDashboard(port: number): Promise<boolean> {
 	try {
-		const response = await fetch(`http://localhost:${port}/api/stats/models`, {
+		const response = await fetch(`http://${STATS_DASHBOARD_HOSTNAME}:${port}/api/stats/models`, {
 			signal: AbortSignal.timeout(STATS_PROBE_TIMEOUT_MS),
 		});
 		if (response.status !== 200) {

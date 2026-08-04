@@ -1,22 +1,22 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { Subprocess } from "bun";
-import { STATS_DASHBOARD_HEADER } from "../src/port-conflict";
+import { STATS_DASHBOARD_HEADER, STATS_DASHBOARD_HOSTNAME } from "../src/port-conflict";
 import { startServer } from "../src/server";
 
 const holderProcesses: Array<Subprocess<"ignore", "pipe", "pipe">> = [];
 
 async function startBunHolder(responseExpr: string, options?: { statsOwned?: boolean }) {
-	// Bind the wildcard address: `startServer` binds the wildcard too, and on
-	// macOS SO_REUSEADDR lets a wildcard bind coexist with a 127.0.0.1-only
-	// listener, which would bypass the EADDRINUSE path this suite exercises.
+	// Bind the same loopback address as `startServer` so macOS cannot let a
+	// wildcard and address-specific listener coexist on the reserved port.
 	const reservation = Bun.serve({
 		port: 0,
+		hostname: STATS_DASHBOARD_HOSTNAME,
 		fetch: () => new Response("reserved"),
 	});
 	const port = reservation.port;
 	reservation.stop(true);
 
-	const source = `Bun.serve({ port: ${port}, fetch: () => ${responseExpr} }); process.stdout.write("ready"); await Promise.withResolvers().promise;`;
+	const source = `Bun.serve({ port: ${port}, hostname: "${STATS_DASHBOARD_HOSTNAME}", fetch: () => ${responseExpr} }); process.stdout.write("ready"); await Promise.withResolvers().promise;`;
 	const args = [process.execPath, "-e", source];
 	if (options?.statsOwned) args.push("omp-stats");
 	const child = Bun.spawn(args, {
@@ -46,10 +46,34 @@ afterEach(async () => {
 	holderProcesses.length = 0;
 });
 
+describe("startServer access", () => {
+	it("only serves loopback requests without cross-origin access", async () => {
+		const server = await startServer(0);
+
+		try {
+			expect(server.hostname).toBe(STATS_DASHBOARD_HOSTNAME);
+			const response = await fetch(`http://${server.hostname}:${server.port}/api/stats/models`);
+			expect(response.status).toBe(200);
+			expect(response.headers.get(STATS_DASHBOARD_HEADER)).toBe("1");
+			expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+			await response.body?.cancel();
+
+			await expect(
+				fetch(`http://127.0.0.2:${server.port}/api/stats/models`, {
+					signal: AbortSignal.timeout(1_000),
+				}),
+			).rejects.toThrow();
+		} finally {
+			server.stop();
+		}
+	});
+});
+
 describe("startServer port conflicts", () => {
 	it("reuses a live stats dashboard identified by its header", async () => {
 		const existing = Bun.serve({
 			port: 0,
+			hostname: STATS_DASHBOARD_HOSTNAME,
 			fetch: request =>
 				new URL(request.url).pathname === "/api/stats/models"
 					? Response.json([], { headers: { [STATS_DASHBOARD_HEADER]: "1" } })
@@ -62,7 +86,7 @@ describe("startServer port conflicts", () => {
 			server.stop();
 
 			// The existing dashboard is untouched: it still answers on the port.
-			const response = await fetch(`http://127.0.0.1:${existing.port}/api/stats/models`);
+			const response = await fetch(`http://${STATS_DASHBOARD_HOSTNAME}:${existing.port}/api/stats/models`);
 			expect(response.status).toBe(200);
 			expect(response.headers.get(STATS_DASHBOARD_HEADER)).toBe("1");
 			await response.body?.cancel();
@@ -76,7 +100,7 @@ describe("startServer port conflicts", () => {
 
 		await expect(startServer(holder.port)).rejects.toThrow("not identifiable as an omp stats dashboard");
 		expect(holder.child.exitCode).toBeNull();
-		const response = await fetch(`http://127.0.0.1:${holder.port}/api/stats/models`);
+		const response = await fetch(`http://${STATS_DASHBOARD_HOSTNAME}:${holder.port}/api/stats/models`);
 		expect(await response.json()).toEqual({ app: "spa" });
 	});
 
