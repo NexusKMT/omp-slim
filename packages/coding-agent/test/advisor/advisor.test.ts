@@ -1438,6 +1438,29 @@ describe("advisor", () => {
 			expect(promptText(promptInputs[0])).not.toContain(secret);
 		});
 
+		it("falls back to one redacted update when a regex secret spans source messages", async () => {
+			const obfuscator = new SecretObfuscator([{ type: "regex", content: "BEGIN[\\s\\S]*END" }]);
+			const promptInputs: Array<string | AgentMessage[]> = [];
+			const agent = makeAgent(promptInputs);
+			const messages: AgentMessage[] = [
+				{ role: "user", content: "BEGIN", timestamp: 1 } as AgentMessage,
+				{ role: "user", content: "sensitive END", timestamp: 2 } as AgentMessage,
+			];
+			const runtime = new AdvisorRuntime(agent, {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+				obfuscator,
+			});
+
+			runtime.onTurnEnd(messages);
+			await Promise.resolve();
+
+			expect(promptInputs).toHaveLength(1);
+			expect(typeof promptInputs[0]).toBe("string");
+			expect(promptText(promptInputs[0]!)).not.toContain("BEGIN");
+			expect(promptText(promptInputs[0]!)).not.toContain("sensitive END");
+		});
+
 		it("redacts expanded primary context before XML escaping", async () => {
 			const secret = "ADVISOR&SECRET<TOKEN>123";
 			const obfuscator = new SecretObfuscator([{ type: "plain", content: secret }]);
@@ -2581,6 +2604,78 @@ describe("advisor", () => {
 			expect(resetCount).toBe(1);
 		});
 
+		it("re-renders a queued primary context before its maintenance budget after overflow resets advisor context", async () => {
+			const overflowMessage = "context_length_exceeded: Your input exceeds the context window of this model.";
+			const firstOverflowPromptStarted = Promise.withResolvers<void>();
+			const releaseOverflowPrompt = Promise.withResolvers<void>();
+			const fourthMaintenance = Promise.withResolvers<void>();
+			const maintenanceTokens: number[] = [];
+			const state: { messages: AgentMessage[]; error?: string } = { messages: [] };
+			let promptCalls = 0;
+			const agent: AdvisorAgent = {
+				prompt: async () => {
+					promptCalls++;
+					if (promptCalls === 2) {
+						firstOverflowPromptStarted.resolve();
+						await releaseOverflowPrompt.promise;
+						state.error = overflowMessage;
+					} else {
+						state.error = undefined;
+					}
+				},
+				abort: () => {},
+				reset: () => {
+					state.messages.length = 0;
+					state.error = undefined;
+				},
+				state,
+			};
+			const planRule = "keep-expanded ".repeat(300);
+			const messages: AgentMessage[] = [
+				{ role: "user", content: "seed", timestamp: 1 } as AgentMessage,
+				{
+					role: "custom",
+					customType: "plan-mode-context",
+					content: planRule,
+					display: false,
+					timestamp: 2,
+				} as AgentMessage,
+			];
+			const runtime = new AdvisorRuntime(
+				agent,
+				{
+					snapshotMessages: () => messages,
+					enqueueAdvice: () => {},
+					maintainContext: async incomingTokens => {
+						maintenanceTokens.push(incomingTokens);
+						if (maintenanceTokens.length === 4) fourthMaintenance.resolve();
+						return false;
+					},
+				},
+				0,
+			);
+			runtime.onTurnEnd(messages);
+			await settleUntil(() => promptCalls === 1 && runtime.backlog === 0);
+
+			messages.push({ role: "user", content: "overflow", timestamp: 3 } as AgentMessage);
+			runtime.onTurnEnd(messages);
+			await firstOverflowPromptStarted.promise;
+			messages.push({ role: "user", content: "after overflow", timestamp: 4 } as AgentMessage);
+			messages.push({
+				role: "custom",
+				customType: "plan-mode-context",
+				content: planRule,
+				display: false,
+				timestamp: 5,
+			} as AgentMessage);
+			runtime.onTurnEnd(messages);
+			releaseOverflowPrompt.resolve();
+			await fourthMaintenance.promise;
+
+			expect(maintenanceTokens).toHaveLength(4);
+			expect(maintenanceTokens[3]).toBeGreaterThan(500);
+		});
+
 		it("does not double-fold first-time primary context on overflow-recovery retry", async () => {
 			// Regression: the recovery render previews the retry batch; if it advances
 			// #seenContext, the retry's #prepareBatch re-dedup would collapse first-time
@@ -2612,7 +2707,6 @@ describe("advisor", () => {
 			};
 			const runtime = new AdvisorRuntime(agent, host, 0);
 			runtime.seedTo(messages.length);
-
 			const rule =
 				"Plan mode is active. You MUST perform READ-ONLY work only:\n- You NEVER create, edit, or delete files — except the single plan file named below.";
 			messages.push({ role: "user", content: "overflowing-current-update", timestamp: 2 } as AgentMessage);
@@ -4366,6 +4460,53 @@ describe("advisor", () => {
 			await settleUntil(() => runtime.backlog === 0);
 			expect(promptInputs).toHaveLength(2);
 			expect(promptText(promptInputs[1])).toContain("keep me");
+		});
+
+		it("re-expands first-time primary context after a session transition pauses before dispatch", async () => {
+			const promptInputs: Array<string | AgentMessage[]> = [];
+			const planRule = "Plan mode is active. Keep this first delivery expanded.";
+			const maintenancePaused = Promise.withResolvers<void>();
+			const prompted = Promise.withResolvers<void>();
+			let maintenanceCalls = 0;
+			let runtime: AdvisorRuntime;
+			const agent: AdvisorAgent = {
+				prompt: async input => {
+					promptInputs.push(input);
+					prompted.resolve();
+				},
+				abort: () => {},
+				reset: () => {},
+				state: { messages: [] },
+			};
+			const messages: AgentMessage[] = [
+				{ role: "user", content: "start planning", timestamp: 1 } as AgentMessage,
+				{
+					role: "custom",
+					customType: "plan-mode-context",
+					content: planRule,
+					display: false,
+					timestamp: 2,
+				} as AgentMessage,
+			];
+			runtime = new AdvisorRuntime(agent, {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+				maintainContext: async () => {
+					if (++maintenanceCalls === 1) {
+						void runtime.pauseForSessionTransition();
+						maintenancePaused.resolve();
+					}
+					return false;
+				},
+			});
+
+			runtime.onTurnEnd(messages);
+			await maintenancePaused.promise;
+			runtime.resumeAfterSessionTransition();
+			await prompted.promise;
+
+			expect(promptText(promptInputs[0]!)).toContain(planRule);
+			expect(promptText(promptInputs[0]!)).not.toContain("unchanged — still in effect");
 		});
 
 		it.each(["success", "error"] as const)(

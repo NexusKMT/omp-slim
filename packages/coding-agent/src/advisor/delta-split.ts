@@ -73,12 +73,22 @@ export function renderAdvisorDeltaChunks(
 	// marker append below is a plain field access (no double-cast).
 	const chunks: { role: "user"; content: TextContent[]; timestamp: number }[] = [];
 	for (let i = 0; i < delta.length; i++) {
-		let text = renderChunk([delta[i]]);
+		const text = renderChunk([delta[i]]);
 		if (!text.trim()) continue;
-		if (opts.obfuscator) text = opts.obfuscator.obfuscate(text, opts.advisorRegexSecretValues);
-		if (i === 0) text = `${heading}\n\n${text}`;
 		chunks.push({ role: "user", content: [{ type: "text", text }], timestamp: Date.now() });
 	}
+	if (chunks.length === 0) return null;
+	if (opts.obfuscator) {
+		const fullText = chunks.map(chunk => chunk.content[0].text).join("\n");
+		const individuallyObfuscated = chunks.map(chunk =>
+			opts.obfuscator!.obfuscate(chunk.content[0].text, opts.advisorRegexSecretValues),
+		);
+		if (opts.obfuscator.obfuscate(fullText, opts.advisorRegexSecretValues) !== individuallyObfuscated.join("\n")) {
+			return null;
+		}
+		for (let i = 0; i < chunks.length; i++) chunks[i].content[0].text = individuallyObfuscated[i];
+	}
+	chunks[0].content[0].text = `${heading}\n\n${chunks[0].content[0].text}`;
 	if (chunks.length === 0) return null;
 	if (opts.wip) {
 		const last = chunks[chunks.length - 1];

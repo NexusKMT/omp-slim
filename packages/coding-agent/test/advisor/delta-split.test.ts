@@ -128,4 +128,20 @@ describe("renderAdvisorDeltaChunks (delta-split)", () => {
 		});
 		expect(chunks!.length).toBeGreaterThan(1);
 	});
+
+	it("puts the heading on the first emitted chunk when earlier messages render empty", () => {
+		const empty = {
+			role: "custom",
+			customType: "advisor",
+			content: "internal advice",
+			display: false,
+			timestamp: 1,
+		} as AgentMessage;
+		const chunks = renderAdvisorDeltaChunks([empty, user("visible", 2)], {
+			wip: false,
+			includeThinking: true,
+			advisorRegexSecretValues: new Set(),
+		});
+		expect(chunksToText(chunks)).toStartWith("### Session update\n\n");
+	});
 });

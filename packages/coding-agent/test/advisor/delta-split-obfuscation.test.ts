@@ -55,4 +55,24 @@ describe("renderAdvisorDeltaChunks obfuscation", () => {
 		expect(text).not.toContain("SECRETVALUE123");
 		expect(text).toContain("[REDACTED]");
 	});
+
+	it("falls back when full-delta redaction spans source chunks", () => {
+		const crossChunkObfuscator: AdvisorObfuscator = {
+			obfuscate: text => text.replace(/first[\s\S]*second/g, "[REDACTED]"),
+		};
+		const chunks = renderAdvisorDeltaChunks(
+			[
+				{ role: "user", content: "first", timestamp: 1 } as AgentMessage,
+				{ role: "user", content: "second", timestamp: 2 } as AgentMessage,
+			],
+			{
+				wip: false,
+				includeThinking: true,
+				obfuscator: crossChunkObfuscator,
+				advisorRegexSecretValues: new Set(),
+			},
+		);
+
+		expect(chunks).toBeNull();
+	});
 });

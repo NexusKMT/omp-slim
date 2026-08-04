@@ -882,16 +882,19 @@ export class AdvisorRuntime {
 	 * append-only context); falls back to truncating `state.messages` for tests
 	 * that hand-roll a minimal facade.
 	 */
+	#restoreSeenContextInFlight(): void {
+		if (!this.#seenContextInFlight) return;
+		this.#seenContext.clear();
+		for (const [key, value] of this.#seenContextInFlight) this.#seenContext.set(key, value);
+		this.#seenContextInFlight = undefined;
+	}
+
 	#rollbackFailedTurn(snapshot: number): void {
 		// Restore the primary-context dedup map to its pre-batch state: the
 		// failed turn never reached the advisor, so first-time context collapsed
 		// to "(unchanged…)" by this batch's #prepareBatch must expand again on
 		// the retry/requeue pass.
-		if (this.#seenContextInFlight) {
-			this.#seenContext.clear();
-			for (const [key, value] of this.#seenContextInFlight) this.#seenContext.set(key, value);
-			this.#seenContextInFlight = undefined;
-		}
+		this.#restoreSeenContextInFlight();
 		const messages = this.agent.state.messages;
 		if (messages.length <= snapshot) return;
 		try {
@@ -1102,11 +1105,10 @@ export class AdvisorRuntime {
 				const epoch = this.#epoch;
 				for (const delta of popped) {
 					if (delta.renderRevision === this.#renderRevision) continue;
-					// Batch text is finalized by #collectAndMaintainBatch -> #prepareBatch
-					// (single dedup+render pass). Refreshing here would run
-					// #dedupContextMessage a SECOND time and double-fold re-injected
-					// primary-context custom messages ("(unchanged…)" on first
-					// delivery). Mark the revision so the delta is not re-refreshed.
+					// Context maintenance estimates this preview before #prepareBatch makes
+					// its final deduped render. Rebuild stale text against the new context
+					// so the maintenance budget cannot undercount an expanded re-injection.
+					delta.text = this.#formatRawDelta(delta.rawMessages, delta.wip, false) ?? delta.text;
 					delta.renderRevision = this.#renderRevision;
 				}
 				const recoveringOverflow = popped.some(delta => delta.overflowRecovery === true);
@@ -1120,6 +1122,7 @@ export class AdvisorRuntime {
 				// Epoch was invalidated during batch collection; restart the loop.
 				if (result === null) continue;
 				if (this.#sessionTransitionPaused) {
+					this.#restoreSeenContextInFlight();
 					this.#pending.unshift(...popped);
 					continue;
 				}
