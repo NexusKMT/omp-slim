@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Cursor personal monthly USD quota and remaining-balance reporting with verified profile email account labels.
+
 ## [17.2.7] - 2026-08-03
 
 ### Changed
