@@ -258,7 +258,7 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	/** Tear down every subscription and timer. Called by the overlay owner on close. */
-	dispose(): void {
+	override dispose(): void {
 		for (const unsubscribe of this.#unsubscribers.splice(0)) unsubscribe();
 		if (this.#ageTimer) {
 			clearInterval(this.#ageTimer);

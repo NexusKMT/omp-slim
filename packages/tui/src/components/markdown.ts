@@ -804,11 +804,11 @@ markdownParser.use({
 // (no `m` flag), and stickiness only removes the futile later attempts. The
 // flags/anchor guard below skips any rule a future marked version changes.
 class AnchoredAtZero extends RegExp {
-	exec(str: string): RegExpExecArray | null {
+	override exec(str: string): RegExpExecArray | null {
 		this.lastIndex = 0; // sticky matches set lastIndex; rules are shared
 		return super.exec(str);
 	}
-	test(str: string): boolean {
+	override test(str: string): boolean {
 		this.lastIndex = 0;
 		return super.test(str);
 	}
