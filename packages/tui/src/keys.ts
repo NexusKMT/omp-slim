@@ -307,32 +307,6 @@ const KITTY_MOD_CTRL = 4;
 const KITTY_MOD_SUPER = 8;
 const KITTY_MOD_NUM_LOCK = 128;
 const KITTY_LOCK_MASK = 64 + KITTY_MOD_NUM_LOCK; // Caps Lock + Num Lock
-const SHIFT_MAP: Record<number, number> = {
-	// US layout: unshifted codepoint → shifted codepoint
-	// digits
-	48: 41, // 0 → )
-	49: 33, // 1 → !
-	50: 64, // 2 → @
-	51: 35, // 3 → #
-	52: 36, // 4 → $
-	53: 37, // 5 → %
-	54: 94, // 6 → ^
-	55: 38, // 7 → &
-	56: 42, // 8 → *
-	57: 40, // 9 → (
-	// symbols
-	45: 95, // - → _
-	61: 43, // = → +
-	91: 123, // [ → {
-	93: 125, // ] → }
-	92: 124, // \ → |
-	59: 58, // ; → :
-	39: 34, // ' → "
-	96: 126, // ` → ~
-	44: 60, // , → <
-	46: 62, // . → >
-	47: 63, // / → ?
-};
 const MODIFY_OTHER_KEYS_PATTERN = /^\x1b\[27;(\d+);(\d+)~$/;
 const KITTY_KEYPAD_OPERATOR_TEXT: Record<number, string> = {
 	57410: "/",
@@ -456,15 +430,8 @@ function decodeKittyPrintable(data: string): string | undefined {
 	}
 
 	let effectiveCodepoint = codepoint;
-	if (effectiveMod & KITTY_MOD_SHIFT) {
-		if (typeof shiftedKey === "number") {
-			effectiveCodepoint = shiftedKey;
-		} else if (codepoint >= 97 && codepoint <= 122) {
-			effectiveCodepoint = codepoint - 32;
-		} else {
-			const shifted = SHIFT_MAP[codepoint];
-			if (shifted !== undefined) effectiveCodepoint = shifted;
-		}
+	if (effectiveMod & KITTY_MOD_SHIFT && typeof shiftedKey === "number") {
+		effectiveCodepoint = shiftedKey;
 	}
 
 	if (effectiveCodepoint >= 0xe000 && effectiveCodepoint <= 0xf8ff) {

@@ -1100,16 +1100,16 @@ export class ProcessTerminal implements Terminal {
 				const reportedFlags = parseInt(match[1]!, 10);
 				this.#kittyProtocolActive = true;
 				setKittyProtocolActive(true);
-				if ((reportedFlags & 2) !== 0) {
+				if (process.platform === "win32") {
+					// WezTerm/ConPTY on Windows drops Shift+letter keypresses entirely
+					// when flag 4 (report alternate keys) is set. Use flag 1
+					// (disambiguate only), preserving flag 2 if already active.
+					this.#kittyEnableSeq = (reportedFlags & 2) !== 0 ? "\x1b[>3u" : "\x1b[>1u";
+					this.#safeWrite(this.#kittyEnableSeq);
+				} else if ((reportedFlags & 2) !== 0) {
 					// Preserve event-type reporting already enabled by a parent app.
 					// Push level-2 to keep its shortcuts reporting consistently.
 					this.#kittyEnableSeq = "\x1b[>7u";
-					this.#safeWrite(this.#kittyEnableSeq);
-				} else if (process.platform === "win32") {
-					// WezTerm/ConPTY on Windows drops Shift+letter keypresses entirely
-					// when flag 4 (report alternate keys) is set. Use flag 1
-					// (disambiguate only) to keep shifted printable keys working.
-					this.#kittyEnableSeq = "\x1b[>1u";
 					this.#safeWrite(this.#kittyEnableSeq);
 				} else {
 					// Disambiguate escape codes and report base-layout keys for physical
