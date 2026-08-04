@@ -172,4 +172,49 @@ describe("EventController message_update coalescing", () => {
 		// Flush completed, then the end handler ran to completion.
 		expect(initCalls).toBe(2);
 	});
+
+	it("does not run two events queued in the same window concurrently", async () => {
+		// A burst that lands while a run is in flight must dispatch strictly
+		// one after the other: each waiter is chained onto the current tail,
+		// so two events sharing one suspended handler cannot both resume into
+		// parallel dispatch after the gate opens (regression: the shared
+		// `await this.#dispatchTail` let every queued callback start its own
+		// run once the tail settled).
+		const { ctx, emit } = createStreamingFixture();
+		ctx.isInitialized = false;
+		const gates = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+		let initCalls = 0;
+		ctx.init = vi.fn(async () => {
+			initCalls += 1;
+			if (initCalls <= 2) await gates[initCalls - 1]!.promise; // first two runs each suspend on their own gate
+		});
+
+		emit(messageUpdate("tok1"));
+		await Bun.sleep(45); // window fires; flush run 1 suspends on gate 1
+
+		// Two non-update events land while the flush is still suspended.
+		emit({ type: "message_end", message: assistantMessage("tok1") } as Extract<
+			AgentSessionEvent,
+			{ type: "message_end" }
+		>);
+		emit({ type: "message_end", message: assistantMessage("tok1") } as Extract<
+			AgentSessionEvent,
+			{ type: "message_end" }
+		>);
+		await Bun.sleep(0);
+
+		// Neither queued handler has started yet — both are chained behind
+		// the suspended flush.
+		expect(initCalls).toBe(1);
+
+		// Release run 1: run 2 starts and suspends on gate 2; run 3 is queued.
+		gates[0]!.resolve();
+		await Bun.sleep(0);
+		expect(initCalls).toBe(2);
+
+		// Release run 2: run 3 finally runs to completion.
+		gates[1]!.resolve();
+		await Bun.sleep(0);
+		expect(initCalls).toBe(3);
+	});
 });

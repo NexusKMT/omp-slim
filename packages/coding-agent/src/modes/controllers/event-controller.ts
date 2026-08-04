@@ -483,33 +483,54 @@ export class EventController {
 	}
 
 	/**
-	 * Run `run` in the serialized dispatch chain: when another run is already
-	 * in flight (awaiting its own awaits), wait for it first, so a rapid
-	 * stream tail (message_update → message_end → agent_end) cannot overtake
-	 * the coalesced flush mid-await — agent_end removing `streamingComponent`
-	 * before #handleMessageEnd finalizes and records the final message (issue
-	 * #7443 follow-up). The timer-based flush uses the same chain, closing the
-	 * same race for the ~33ms window path. When the chain is idle, `run`
-	 * starts synchronously (no intermediate microtask), preserving the
-	 * synchronous-flush timing the coalescing tests assert on. A rejection
-	 * propagates to the caller (the session's fire-and-forget emit) and the
-	 * next event starts a fresh chain link instead of being dropped.
+	 * Run `run` in the serialized dispatch chain: every run is its own link on
+	 * the tail, so a burst of events queued behind an in-flight run start one
+	 * after the other, never concurrently. This closes two races (issue #7443
+	 * follow-up): a rapid stream tail (message_update → message_end →
+	 * agent_end) cannot overtake the coalesced flush mid-await — agent_end
+	 * removing `streamingComponent` before #handleMessageEnd finalizes and
+	 * records the final message — and two+ events landing in the same window
+	 * cannot all resume from one shared await and dispatch in parallel. When
+	 * the chain is drained, `run` starts synchronously (no intermediate
+	 * microtask), preserving the synchronous-flush timing the coalescing
+	 * tests assert on. A rejection propagates to the caller (the session's
+	 * fire-and-forget emit) and the next event starts a fresh chain link
+	 * instead of being dropped.
 	 */
 	async #runSerialized(run: () => Promise<void>): Promise<void> {
-		if (this.#dispatchInFlight) await this.#dispatchTail.catch(() => {});
-		const link = run();
-		if (!this.#dispatchInFlight) {
-			this.#dispatchInFlight = true;
+		if (this.#dispatchInFlight) {
+			// Queue behind the CURRENT tail: the next run starts only after
+			// the previous one settles. Each waiter gets its own link, so a
+			// burst cannot fan out from the same shared await.
+			const link = this.#dispatchTail.then(
+				() => run(),
+				() => run(),
+			);
+			this.#dispatchTail = link;
 			void link.then(
 				() => {
-					this.#dispatchInFlight = false;
+					// Only the tail owner clears the flag: a later chained
+					// link clears it when it settles as the tail.
+					if (this.#dispatchTail === link) this.#dispatchInFlight = false;
 				},
 				() => {
-					this.#dispatchInFlight = false;
+					if (this.#dispatchTail === link) this.#dispatchInFlight = false;
 				},
 			);
+			await link;
+			return;
 		}
+		this.#dispatchInFlight = true;
+		const link = run();
 		this.#dispatchTail = link;
+		void link.then(
+			() => {
+				if (this.#dispatchTail === link) this.#dispatchInFlight = false;
+			},
+			() => {
+				if (this.#dispatchTail === link) this.#dispatchInFlight = false;
+			},
+		);
 		await link;
 	}
 
