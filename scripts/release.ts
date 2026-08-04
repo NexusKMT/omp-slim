@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { compareVersions } from "@oh-my-pi/pi-utils";
 /**
  * Release script for pi-mono
  *
@@ -184,14 +185,6 @@ function bumpVersion(current: string, bump: "major" | "minor" | "patch"): string
 		case "patch":
 			return `${major}.${minor}.${patch + 1}`;
 	}
-}
-
-function compareVersions(a: string, b: string): number {
-	const [aMajor, aMinor, aPatch] = parseVersion(a);
-	const [bMajor, bMinor, bPatch] = parseVersion(b);
-	if (aMajor !== bMajor) return aMajor - bMajor;
-	if (aMinor !== bMinor) return aMinor - bMinor;
-	return aPatch - bPatch;
 }
 
 async function cmdRelease(versionOrBump: string): Promise<void> {
