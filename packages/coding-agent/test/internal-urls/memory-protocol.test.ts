@@ -524,3 +524,50 @@ describe("MemoryProtocolHandler — mnemopi bridge (issue #4443)", () => {
 		});
 	});
 });
+
+/**
+ * Register a live session simulating memory.backend=hindsight: it exposes a
+ * Hindsight state but no mnemopi state, so the handler must treat memory://<id>
+ * as unaddressable and return a corrective pointer (issue #7587).
+ */
+function withHindsightSession(fn: () => Promise<void>): Promise<void> {
+	const session = {
+		getHindsightSessionState: () => ({ bankId: "test-bank" }),
+	} as unknown as AgentSession;
+	AgentRegistry.global().register({
+		id: "test-hindsight",
+		displayName: "test-hindsight",
+		kind: "main",
+		session,
+		sessionFile: null,
+	});
+	return fn();
+}
+
+describe("MemoryProtocolHandler — hindsight (issue #7587)", () => {
+	beforeEach(() => {
+		AgentRegistry.resetGlobalForTests();
+		InternalUrlRouter.resetForTests();
+	});
+
+	afterEach(() => {
+		AgentRegistry.resetGlobalForTests();
+		InternalUrlRouter.resetForTests();
+	});
+
+	it("returns a corrective error for memory://<id> when hindsight is active", async () => {
+		await withHindsightSession(async () => {
+			const router = InternalUrlRouter.instance();
+			await expect(router.resolve("memory://a1b2c3d4e5f6")).rejects.toThrow(
+				/Hindsight memories are not addressable via memory:\/\/.*use `recall`.*`reflect`/s,
+			);
+		});
+	});
+
+	it("keeps the generic namespace error when no memory backend is active", async () => {
+		const router = InternalUrlRouter.instance();
+		await expect(router.resolve("memory://a1b2c3d4e5f6")).rejects.toThrow(
+			/Unknown memory namespace: a1b2c3d4e5f6\. Supported: root/,
+		);
+	});
+});
