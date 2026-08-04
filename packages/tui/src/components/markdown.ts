@@ -2816,7 +2816,13 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 		while (wrapped.length > 1 && wrapped[wrapped.length - 1] === "") {
 			wrapped.pop();
 		}
-		return wrapped;
+		// The native wrap deliberately leaves fg color and bold/italic open at
+		// line ends so continuation lines can re-open them. Table rows splice
+		// every cell line between unstyled border glyphs, so an open style
+		// (e.g. mdCode) would bleed into the "│" and the following cells.
+		// Terminate each line at default fg, clearing bold/italic but keeping
+		// any ambient background (message-bg rendering) intact.
+		return wrapped.map(line => `${line}\x1b[22m\x1b[23m\x1b[39m`);
 	}
 
 	/**
