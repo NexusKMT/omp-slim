@@ -101,6 +101,7 @@ import {
 	expandPath,
 	findUniqueWorkspaceSuffix,
 	formatPathRelativeToCwd,
+	isInternalUrlPath,
 	isReadableUrlPath,
 	type LineRange,
 	parseLineRanges,
@@ -2300,6 +2301,11 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			}
 			return executeReadUrl(this.session, { path: parsedUrlTarget.path, raw: urlRaw }, signal);
 		}
+
+		const delimitedInternalResult = isInternalUrlPath(readPath)
+			? await this.#tryReadDelimitedPaths(readPath, signal)
+			: null;
+		if (delimitedInternalResult) return delimitedInternalResult;
 
 		// Handle native OMP URLs and custom-scheme resources advertised by MCP servers.
 		// Use the internal-URL-aware splitter so malformed selectors are peeled
