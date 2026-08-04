@@ -30,10 +30,10 @@ class LegacyDesktopSession {
 }
 
 describe("legacy DesktopSession addon loading", () => {
-	it("accepts the immediately preceding legacy desktop ABI from disk", async () => {
+	it("accepts a legacy desktop ABI from disk without a matching sentinel", async () => {
 		const ctx = ctxFor("17.2.8");
-		const bindings = { __piNativesV17_2_7: () => {}, DesktopSession: LegacyDesktopSession };
-		await withCandidate("__piNativesV17_2_7", candidate => {
+		const bindings = { DesktopSession: LegacyDesktopSession };
+		await withCandidate("legacy native addon", candidate => {
 			expect(() => validateLoadedBindings(ctx, bindings, candidate)).not.toThrow();
 		});
 	});
