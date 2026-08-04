@@ -29,8 +29,8 @@
  * underneath; this only adds curated context.
  */
 
-import { compareVersions } from "@oh-my-pi/pi-utils";
 import { $, Glob } from "bun";
+import { compareVersions } from "../packages/utils/src/version";
 
 const changelogGlob = new Glob("packages/*/CHANGELOG.md");
 const REPO = process.env.OMP_REPO ?? process.env.GITHUB_REPOSITORY ?? "can1357/oh-my-pi";

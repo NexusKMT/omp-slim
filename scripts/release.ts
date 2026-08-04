@@ -15,6 +15,14 @@ import { runChangelogFixer } from "./fix-changelogs";
 const changelogGlob = new Glob("packages/*/CHANGELOG.md");
 const packageJsonGlob = new Glob("packages/*/package.json");
 const cargoTomlGlob = new Glob("crates/*/Cargo.toml");
+/**
+ * Strict explicit-version guard: three numeric dot-segments, optional leading
+ * `v`, optional SemVer-2.0 prerelease suffix. Bump keywords (major/minor/patch)
+ * are handled separately and must not be routed through this check.
+ */
+export function isValidExplicitVersion(version: string): boolean {
+	return /^v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version);
+}
 
 function git(args: readonly string[]) {
 	return $`git -c core.fsmonitor=false -c core.untrackedCache=false -c fetch.pruneTags=false ${args}`;
@@ -189,6 +197,17 @@ function bumpVersion(current: string, bump: "major" | "minor" | "patch"): string
 
 async function cmdRelease(versionOrBump: string): Promise<void> {
 	console.log("\n=== Release Script ===\n");
+	// Validate explicit versions before any compare: the shared compareVersions
+	// never throws, so without this guard garbage like "999.bad" would be
+	// accepted and written into every package.json / Cargo.toml / tag.
+	if (versionOrBump !== "major" && versionOrBump !== "minor" && versionOrBump !== "patch") {
+		if (!isValidExplicitVersion(versionOrBump)) {
+			console.error(
+				`Error: Invalid version "${versionOrBump}". Expected a semver like 17.2.8 or v17.2.8-rc.1, or a bump keyword (major/minor/patch).`,
+			);
+			process.exit(1);
+		}
+	}
 
 	// 1. Pre-flight checks
 	console.log("Pre-flight checks...");
@@ -390,23 +409,25 @@ async function cmdRelease(versionOrBump: string): Promise<void> {
 // Main
 // =============================================================================
 
-const arg = process.argv[2];
+if (import.meta.main) {
+	const arg = process.argv[2];
 
-if (!arg) {
-	console.error("Usage:");
-	console.error("  bun scripts/release.ts <version|major|minor|patch>   Full release");
-	console.error("  bun scripts/release.ts watch                         Watch CI for current commit");
-	process.exit(1);
-}
+	if (!arg) {
+		console.error("Usage:");
+		console.error("  bun scripts/release.ts <version|major|minor|patch>   Full release");
+		console.error("  bun scripts/release.ts watch                         Watch CI for current commit");
+		process.exit(1);
+	}
 
-if (arg === "watch") {
-	await cmdWatch();
-} else if (arg === "major" || arg === "minor" || arg === "patch" || /^\d+\.\d+\.\d+$/.test(arg)) {
-	await cmdRelease(arg);
-} else {
-	console.error(`Unknown command or invalid version: ${arg}`);
-	console.error("Usage:");
-	console.error("  bun scripts/release.ts <version|major|minor|patch>   Full release");
-	console.error("  bun scripts/release.ts watch                         Watch CI for current commit");
-	process.exit(1);
+	if (arg === "watch") {
+		await cmdWatch();
+	} else if (arg === "major" || arg === "minor" || arg === "patch" || isValidExplicitVersion(arg)) {
+		await cmdRelease(arg);
+	} else {
+		console.error(`Unknown command or invalid version: ${arg}`);
+		console.error("Usage:");
+		console.error("  bun scripts/release.ts <version|major|minor|patch>   Full release");
+		console.error("  bun scripts/release.ts watch                         Watch CI for current commit");
+		process.exit(1);
+	}
 }

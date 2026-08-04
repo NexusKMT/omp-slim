@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added a public `compareVersions` utility (`@oh-my-pi/pi-utils`) that compares two version strings with SemVer-2.0 prerelease ordering, build-metadata stripping, and numeric segment comparison without float overflow; never throws.
+
 ## [17.2.6] - 2026-08-03
 
 ### Added

@@ -514,42 +514,6 @@ function stripBunCacheVersionSuffix(name: string): string {
 	return metadataIndex === -1 ? name : name.slice(0, metadataIndex);
 }
 
-function compareSemverIdentifier(a: string, b: string): number {
-	const aNumber = /^\d+$/.test(a);
-	const bNumber = /^\d+$/.test(b);
-	if (aNumber && bNumber) return Number(a) - Number(b);
-	if (aNumber) return -1;
-	if (bNumber) return 1;
-	return a.localeCompare(b);
-}
-
-function compareSemverLikeVersions(a: string, b: string): number {
-	const [aCoreWithPrerelease] = a.split("+", 1);
-	const [bCoreWithPrerelease] = b.split("+", 1);
-	const [aCore, aPrerelease] = aCoreWithPrerelease.split("-", 2);
-	const [bCore, bPrerelease] = bCoreWithPrerelease.split("-", 2);
-	const aParts = aCore.split(".");
-	const bParts = bCore.split(".");
-	for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
-		const diff = Number(aParts[i] ?? 0) - Number(bParts[i] ?? 0);
-		if (diff !== 0 && Number.isFinite(diff)) return diff;
-	}
-	if (!aPrerelease && !bPrerelease) return 0;
-	if (!aPrerelease) return 1;
-	if (!bPrerelease) return -1;
-	const aPrereleaseParts = aPrerelease.split(".");
-	const bPrereleaseParts = bPrerelease.split(".");
-	for (let i = 0; i < Math.max(aPrereleaseParts.length, bPrereleaseParts.length); i++) {
-		const aPart = aPrereleaseParts[i];
-		const bPart = bPrereleaseParts[i];
-		if (aPart === undefined) return -1;
-		if (bPart === undefined) return 1;
-		const diff = compareSemverIdentifier(aPart, bPart);
-		if (diff !== 0) return diff;
-	}
-	return 0;
-}
-
 async function readdirIfExists(dir: string): Promise<fs.Dirent[]> {
 	try {
 		return await fs.promises.readdir(dir, { withFileTypes: true });
@@ -671,7 +635,7 @@ export async function pruneBunInstallCache(
 		scannedPackages++;
 		let latestVersion: string | undefined;
 		for (const version of group.actualDirs.keys()) {
-			if (!latestVersion || compareSemverLikeVersions(version, latestVersion) > 0) latestVersion = version;
+			if (!latestVersion || compareVersions(version, latestVersion) > 0) latestVersion = version;
 		}
 		if (!latestVersion) continue;
 		for (const [version, paths] of group.actualDirs) {
