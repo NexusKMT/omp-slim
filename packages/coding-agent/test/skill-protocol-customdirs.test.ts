@@ -51,7 +51,7 @@ describe("skill:// resolution honors skills.customDirectories (#7190)", () => {
 		expect(resource.content).toContain(`from ${tempDir}`);
 	});
 
-	it("reads a semicolon-delimited list of skill URLs", async () => {
+	it("reads semicolon-delimited lists across routed URL schemes", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-delimited-skills-"));
 		tempDirs.push(tempDir);
 		for (const name of ["first-skill", "second-skill"]) {
@@ -80,6 +80,18 @@ describe("skill:// resolution honors skills.customDirectories (#7190)", () => {
 		expect(text).toContain("Note: interpreted as 2 paths: skill://first-skill:1-3, skill://second-skill:1-3");
 		expect(text).toContain("first-skill skill.");
 		expect(text).toContain("second-skill skill.");
+
+		const historyResult = await new ReadTool(session).execute("read-delimited-history", {
+			path: "history://missing-first:1-3; history://missing-second:1-3",
+		});
+		const historyText = historyResult.content
+			.flatMap(block => (block.type === "text" ? [block.text] : []))
+			.join("\n");
+		expect(historyText).toContain(
+			"Note: interpreted as 2 paths: history://missing-first:1-3, history://missing-second:1-3",
+		);
+		expect(historyText).toContain("Could not read history://missing-first:1-3");
+		expect(historyText).toContain("Could not read history://missing-second:1-3");
 	});
 
 	it("keeps first-wins across multiple custom directories", async () => {

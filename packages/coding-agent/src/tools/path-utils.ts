@@ -806,15 +806,19 @@ async function tryDelimitedPathSplit(
 export async function splitDelimitedPathEntry(
 	entry: string,
 	cwd: string,
-	options: { splitter?: PathEntrySplitter } = {},
+	options: {
+		splitter?: PathEntrySplitter;
+		routedUrlPredicate?: (entry: string) => boolean;
+	} = {},
 ): Promise<string[] | null> {
 	const normalizedEntry = normalizePathLikeInput(entry);
 	if (!hasTopLevelPathDelimiter(normalizedEntry)) return null;
-	// Internal URLs may contain whitespace; only the documented semicolon delimiter may fan them out.
 	const splitter = options.splitter ?? parseSearchPath;
-	if (isInternalUrlPath(normalizedEntry)) {
-		return tryDelimitedPathSplit(normalizedEntry, cwd, splitter, "semicolon", "none");
+	if (options.routedUrlPredicate?.(normalizedEntry)) {
+		const parts = await tryDelimitedPathSplit(normalizedEntry, cwd, splitter, "semicolon", "none");
+		return parts?.every(options.routedUrlPredicate) ? parts : null;
 	}
+	if (isInternalUrlPath(normalizedEntry)) return null;
 	// A real POSIX file may contain the delimiter and a selector-shaped tail
 	// (`a;b:1-2`, `a b:1-2`). Preserve the raw entry whenever the full literal
 	// resolves — or is only ambiguous — so downstream literal-preferring
