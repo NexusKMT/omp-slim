@@ -17,6 +17,9 @@
 ### Changed
 
 - Updated the lightweight CLI runner to support static command metadata, allowing root help to render without importing full command implementations.
+### Fixed
+
+- Honor the current process `PATH` when caching executable lookups, preventing stale tool paths after environment reloads.
 
 ## [17.2.4] - 2026-08-01
 
