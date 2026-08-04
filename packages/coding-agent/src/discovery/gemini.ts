@@ -102,6 +102,7 @@ async function loadMCPFromSettings(
 
 		items.push({
 			name,
+			enabled: typeof raw.enabled === "boolean" ? raw.enabled : undefined,
 			command: typeof raw.command === "string" ? raw.command : undefined,
 			args: Array.isArray(raw.args) ? (raw.args as string[]) : undefined,
 			env: raw.env && typeof raw.env === "object" ? (raw.env as Record<string, string>) : undefined,

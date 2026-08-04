@@ -48,6 +48,7 @@ function parseServerConfig(
 	return {
 		server: {
 			name,
+			enabled: typeof server.enabled === "boolean" ? server.enabled : undefined,
 			command: server.command as string | undefined,
 			args: server.args as string[] | undefined,
 			env: server.env as Record<string, string> | undefined,

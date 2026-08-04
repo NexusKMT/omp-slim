@@ -57,6 +57,7 @@ function parseMCPServers(
 		const serverConfig = config as Record<string, unknown>;
 		items.push({
 			name,
+			enabled: typeof serverConfig.enabled === "boolean" ? serverConfig.enabled : undefined,
 			command: serverConfig.command as string | undefined,
 			args: serverConfig.args as string[] | undefined,
 			env: serverConfig.env as Record<string, string> | undefined,
