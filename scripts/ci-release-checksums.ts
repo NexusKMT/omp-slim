@@ -37,8 +37,11 @@ async function main(): Promise<void> {
 
 	const entries = await Promise.all(
 		assetPaths.map(async assetPath => {
-			const bytes = await Bun.file(assetPath).bytes();
-			return { name: path.basename(assetPath), sha256: Bun.SHA256.hash(bytes, "hex") };
+			const hasher = new Bun.CryptoHasher("sha256");
+			for await (const chunk of Bun.file(assetPath).stream()) {
+				hasher.update(chunk);
+			}
+			return { name: path.basename(assetPath), sha256: hasher.digest("hex") };
 		}),
 	);
 
