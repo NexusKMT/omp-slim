@@ -561,6 +561,49 @@ mod tests {
 	}
 
 	#[test]
+	fn bounded_retention_matches_full_sort_on_large_corpus() {
+		use super::{FuzzyFindMatch, TopMatches, path_depth};
+
+		const CANDIDATE_COUNT: usize = 100_000;
+		const MAX_RESULTS: usize = 128;
+
+		let mut reference = Vec::with_capacity(CANDIDATE_COUNT);
+		let mut bounded = TopMatches::new(MAX_RESULTS);
+		for index in 0..CANDIDATE_COUNT {
+			let depth = index % 7;
+			let path = format!("{}{index:06}-item.txt", "nested/".repeat(depth));
+			let score = 50 + (index % 83) as u32;
+			reference.push((score, path_depth(&path), path.clone()));
+			bounded.push(FuzzyFindMatch { path, is_directory: false, score });
+			assert!(
+				bounded.heap.len() <= MAX_RESULTS,
+				"retention exceeded maxResults after candidate {index}"
+			);
+		}
+		assert_eq!(reference.len(), CANDIDATE_COUNT);
+		assert_eq!(bounded.heap.len(), MAX_RESULTS);
+		assert_eq!(bounded.total_matches(), CANDIDATE_COUNT as u32);
+
+		reference.sort_by(|a, b| {
+			b.0.cmp(&a.0)
+				.then_with(|| a.1.cmp(&b.1))
+				.then_with(|| a.2.cmp(&b.2))
+		});
+		let expected: Vec<String> = reference
+			.into_iter()
+			.take(MAX_RESULTS)
+			.map(|(_, _, path)| path)
+			.collect();
+		let actual: Vec<String> = bounded
+			.into_sorted_matches()
+			.into_iter()
+			.map(|entry| entry.path)
+			.collect();
+
+		assert_eq!(actual, expected, "bounded top-K must match the complete baseline sort");
+	}
+
+	#[test]
 	fn bounded_retention_counts_hits_with_zero_capacity() {
 		use super::{FuzzyFindMatch, TopMatches};
 
