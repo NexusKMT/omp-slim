@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { compareVersions } from "@oh-my-pi/pi-utils/version";
+import { compareVersions } from "../packages/utils/src/version.ts";
 /**
  * Release script for pi-mono
  *
@@ -30,7 +30,7 @@ const cargoTomlGlob = new Glob("crates/*/Cargo.toml");
  * prefix — Cargo rejects `version = "v17.2.8"`.
  */
 export function validateExplicitVersion(version: string): string | null {
-	const match = /^v?(\d+\.\d+\.\d+)$/.exec(version);
+	const match = /^v?((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$/.exec(version);
 	return match ? match[1] : null;
 }
 

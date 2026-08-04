@@ -14,6 +14,13 @@ describe("validateExplicitVersion", () => {
 		expect(validateExplicitVersion("17.2.8-")).toBe(null);
 	});
 
+	test("rejects leading zeroes in numeric segments", () => {
+		expect(validateExplicitVersion("018.0.0")).toBe(null);
+		expect(validateExplicitVersion("v018.0.0")).toBe(null);
+		expect(validateExplicitVersion("18.00.0")).toBe(null);
+		expect(validateExplicitVersion("18.0.00")).toBe(null);
+	});
+
 	test("rejects prerelease suffixes (not supported by this release path)", () => {
 		// Prereleases would be published as npm `latest` because the downstream
 		// publish runs `npm publish` with no `--tag`.
