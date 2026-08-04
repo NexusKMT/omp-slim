@@ -222,6 +222,18 @@ function mnemopiSessionStatesFromRegistry(): MnemopiSessionState[] {
 	return states;
 }
 
+function memoryBackendFromContext(context?: ResolveContext): string | undefined {
+	if (!context?.settings || typeof context.settings !== "object") return undefined;
+	try {
+		const get = Reflect.get(context.settings, "get");
+		if (typeof get !== "function") return undefined;
+		const backend = Reflect.apply(get, context.settings, ["memory.backend"]);
+		return typeof backend === "string" ? backend : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * Look up a mnemopi memory row by id across every live session's scoped banks.
  * First hit wins; returns `null` when the id is not stored anywhere in scope.
@@ -290,21 +302,24 @@ export class MemoryProtocolHandler implements ProtocolHandler {
 		// clipped recall preview before overwriting it (issue #4443).
 		if (namespace !== MEMORY_NAMESPACE) {
 			const mnemopiStates = mnemopiSessionStatesFromRegistry();
-			if (mnemopiStates.length === 0) {
+			const hindsightActive =
+				memoryBackendFromContext(context) === "hindsight" ||
+				(mnemopiStates.length === 0 &&
+					AgentRegistry.global()
+						.list()
+						.some(ref => ref.session?.getHindsightSessionState?.()));
+			if (hindsightActive) {
 				// Hindsight keeps memories server-side and exposes no
 				// `memory://<id>` addressing, yet the shared `recall` tool
 				// description still steers a follow-up `read memory://<id>`.
 				// Return a corrective pointer so that stray read self-corrects in
 				// one turn instead of derailing on the generic namespace error
 				// (issue #7587).
-				const hindsightActive = AgentRegistry.global()
-					.list()
-					.some(ref => ref.session?.getHindsightSessionState?.());
-				if (hindsightActive) {
-					throw new Error(
-						"Hindsight memories are not addressable via memory://. Recall results are final — use `recall` to search or `reflect` to synthesize. `read memory://<id>` is only available with memory.backend=mnemopi.",
-					);
-				}
+				throw new Error(
+					"Hindsight memories are not addressable via memory://. Recall results are final — use `recall` to search or `reflect` to synthesize. `read memory://<id>` is only available with memory.backend=mnemopi.",
+				);
+			}
+			if (mnemopiStates.length === 0) {
 				throw new Error(
 					`Unknown memory namespace: ${namespace}. Supported: ${MEMORY_NAMESPACE} (file-backed memory summary), or a mnemopi memory id when memory.backend=mnemopi is active.`,
 				);

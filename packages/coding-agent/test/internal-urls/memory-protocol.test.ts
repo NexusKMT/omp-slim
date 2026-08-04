@@ -564,6 +564,18 @@ describe("MemoryProtocolHandler — hindsight (issue #7587)", () => {
 		});
 	});
 
+	it("uses the calling session backend when hindsight and mnemopi sessions coexist", async () => {
+		await withMnemopiSession(async () => {
+			await withHindsightSession(async () => {
+				const router = InternalUrlRouter.instance();
+				const settings = Settings.isolated({ "memory.backend": "hindsight" });
+				await expect(router.resolve("memory://a1b2c3d4e5f6", { settings })).rejects.toThrow(
+					/Hindsight memories are not addressable via memory:\/\//,
+				);
+			});
+		});
+	});
+
 	it("keeps the generic namespace error when no memory backend is active", async () => {
 		const router = InternalUrlRouter.instance();
 		await expect(router.resolve("memory://a1b2c3d4e5f6")).rejects.toThrow(
