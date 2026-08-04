@@ -296,6 +296,14 @@ export class AdvisorRuntime {
 	#failureNotified = false;
 	/** Consecutive quarantined turns since the last success/reset (issue #6661). */
 	#consecutiveQuarantines = 0;
+	/**
+	 * Model identities this refusal cascade has already tried. The cascade walks
+	 * the fallback chain to exhaustion — that is what the chain is for — but
+	 * visits each model at most once, so a chain whose keys point back at each
+	 * other (A→B, B→A) cannot ping-pong forever. Cleared by a successful turn or
+	 * a reset, so a later refusal starts a fresh walk.
+	 */
+	readonly #refusalModelsTried = new Set<string>();
 	/** Whether primary reasoning is included in advisor deltas for the current model. */
 	#includeThinking = true;
 	#modelIdentity: string | undefined;
@@ -541,6 +549,7 @@ export class AdvisorRuntime {
 		this.#failing = false;
 		this.#droppedBacklogs = 0;
 		this.#consecutiveQuarantines = 0;
+		this.#refusalModelsTried.clear();
 		this.#failureNotified = false;
 		this.#resetAdvisorContext(true, true);
 	}
@@ -936,6 +945,7 @@ export class AdvisorRuntime {
 					this.#failureNotified = false;
 					this.#droppedBacklogs = 0;
 					this.#consecutiveQuarantines = 0;
+					this.#refusalModelsTried.clear();
 					if (this.host.onTurnSuccess) {
 						try {
 							await raceWithSignal(Promise.resolve(this.host.onTurnSuccess()), iterationAbort.signal);
@@ -994,6 +1004,47 @@ export class AdvisorRuntime {
 								logger.debug("advisor refusal recovered by stripping primary reasoning");
 								continue;
 							}
+						}
+						// A refusal that outlives the strip is this model's policy call, not
+						// a malformed request, so hand it to the host's model fallback before
+						// declaring the advisor dead. The cascade walks the chain to
+						// exhaustion (the host returns false once candidates run out); the
+						// tried-set only stops a cyclic chain from revisiting a model. The
+						// primary turn-recovery path already allows fallback on refusals.
+						const refusalModel = this.host.getModelIdentity?.() ?? this.#modelIdentity ?? "";
+						let refusalRecovered = false;
+						try {
+							if (!this.#refusalModelsTried.has(refusalModel)) {
+								this.#refusalModelsTried.add(refusalModel);
+								refusalRecovered =
+									(await raceWithSignal(
+										Promise.resolve(this.host.onTurnError?.(err, failedMessages, iterationAbort.signal)),
+										iterationAbort.signal,
+									)) === true;
+							} else {
+								logger.debug("advisor refusal chain exhausted", { model: refusalModel });
+							}
+						} catch (hookErr) {
+							logger.debug("advisor onTurnError hook failed after refusal", { err: String(hookErr) });
+						}
+						if (this.#epoch !== epoch) continue;
+						if (this.#sessionTransitionPaused) {
+							this.#pending.unshift(...popped);
+							continue;
+						}
+						if (refusalRecovered) {
+							this.#consecutiveFailures = 0;
+							this.#failureNotified = false;
+							this.#pending.unshift({
+								text: batch,
+								rawMessages,
+								renderRevision: this.#renderRevision,
+								turns: finalTurns,
+								wip,
+								overflowRecovery: recoveringOverflow || undefined,
+							});
+							logger.debug("advisor refusal recovered by model fallback");
+							continue;
 						}
 						this.#notifyFailureOnce(err);
 						this.#clearSeenContext();

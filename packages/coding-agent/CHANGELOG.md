@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed an advisor refusal skipping the model fallback chain. `AdvisorRuntime` treated a classifier refusal as terminal once its one stripped-reasoning resend failed, returning before the `onTurnError` hook that owns fallback (`#recoverAdvisorTurn`), so a `Refusal (cyber)` on one model disabled the advisor even with a configured chain. The refusal path now takes the same fallback pass the primary turn-recovery path already allows, and only reports the advisor unavailable when the host declines to switch.
+- Bounded advisor refusal recovery to one attempt per model. The cascade walks the fallback chain to exhaustion, but a model switch re-arms `#includeThinking` via `#syncModelIdentity`, so a chain whose keys point back at each other (A→B, B→A) would strip-and-resend against the same pair forever. Each cascade now visits a model at most once; a successful turn or a reset starts a fresh walk.
+- Fixed `/advisor status` throwing when the roster is empty but an advisor is live. `formatAdvisorStatus` dereferenced `stats.advisors[0]` after a guard that only covered the inactive case, so a status call landing in the window where `#advisorStatuses` is cleared for a rebuild hit `undefined.contextWindow`. Reporting status now never throws.
+
 ## [17.2.8] - 2026-08-04
 
 ### Changed
