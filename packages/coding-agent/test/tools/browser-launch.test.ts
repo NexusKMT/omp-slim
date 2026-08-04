@@ -45,24 +45,23 @@ describe("browser launch stealth defaults", () => {
 
 const UNGOOGLED_CHROMIUM_FLATPAK_ID = "io.github.ungoogled_software.ungoogled_chromium";
 
-describe("system Chromium candidates on Linux", () => {
-	it("offers Ungoogled Chromium executables", () => {
-		if (process.platform !== "linux") return;
-		const candidates = systemChromiumCandidatesForTest();
+describe("system Chromium candidates", () => {
+	const linuxCandidates = (which: (name: string) => string | undefined = () => undefined) =>
+		systemChromiumCandidatesForTest("linux", "/home/test", which);
+
+	it("offers Ungoogled Chromium executables on Linux", () => {
+		const candidates = linuxCandidates();
 
 		expect(candidates).toContain("/usr/bin/ungoogled-chromium");
 		expect(candidates).toContain("/usr/bin/ungoogled-chromium-browser");
 		expect(candidates).toContain(`/var/lib/flatpak/exports/bin/${UNGOOGLED_CHROMIUM_FLATPAK_ID}`);
-
-		const perUserFlatpak = candidates.find(candidate =>
-			candidate.endsWith(`/.local/share/flatpak/exports/bin/${UNGOOGLED_CHROMIUM_FLATPAK_ID}`),
+		expect(candidates).toContain(
+			`/home/test/.local/share/flatpak/exports/bin/${UNGOOGLED_CHROMIUM_FLATPAK_ID}`,
 		);
-		expect(perUserFlatpak).toBeDefined();
 	});
 
-	it("keeps the previously supported executables", () => {
-		if (process.platform !== "linux") return;
-		const candidates = systemChromiumCandidatesForTest();
+	it("keeps the previously supported Linux executables", () => {
+		const candidates = linuxCandidates();
 
 		for (const executablePath of [
 			"/usr/bin/google-chrome-stable",
@@ -77,10 +76,10 @@ describe("system Chromium candidates on Linux", () => {
 		}
 	});
 
-	it("ranks Ungoogled Chromium below the stock builds", () => {
-		if (process.platform !== "linux") return;
-		const candidates = systemChromiumCandidatesForTest();
-		const ungoogled = candidates.indexOf("/usr/bin/ungoogled-chromium");
+	it("ranks PATH-resolved Ungoogled Chromium below stock builds", () => {
+		const ungoogledPath = "/custom/bin/ungoogled-chromium";
+		const candidates = linuxCandidates(name => (name === "ungoogled-chromium" ? ungoogledPath : undefined));
+		const ungoogled = candidates.indexOf(ungoogledPath);
 
 		for (const executablePath of [
 			"/usr/bin/google-chrome-stable",
@@ -89,6 +88,13 @@ describe("system Chromium candidates on Linux", () => {
 			"/var/lib/flatpak/exports/bin/org.chromium.Chromium",
 		]) {
 			expect(ungoogled).toBeGreaterThan(candidates.indexOf(executablePath));
+		}
+	});
+
+	it("does not add Ungoogled Chromium candidates on macOS or Windows", () => {
+		for (const platform of ["darwin", "win32"] as const) {
+			const candidates = systemChromiumCandidatesForTest(platform, "/home/test", () => "/custom/ungoogled");
+			expect(candidates.some(candidate => candidate.toLowerCase().includes("ungoogled"))).toBeFalse();
 		}
 	});
 });

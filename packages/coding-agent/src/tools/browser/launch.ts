@@ -202,10 +202,13 @@ function isExecutableFile(p: string): boolean {
 /** Flatpak application id published by the Ungoogled Chromium project. */
 const UNGOOGLED_CHROMIUM_FLATPAK_ID = "io.github.ungoogled_software.ungoogled_chromium";
 
-function systemChromiumCandidates(): string[] {
-	const home = os.homedir();
+function systemChromiumCandidates(
+	platform: NodeJS.Platform = process.platform,
+	home = os.homedir(),
+	which: (name: string) => string | undefined = $which,
+): string[] {
 	const candidates: string[] = [];
-	switch (process.platform) {
+	switch (platform) {
 		case "darwin": {
 			for (const root of ["/Applications", path.join(home, "Applications")]) {
 				candidates.push(
@@ -220,17 +223,9 @@ function systemChromiumCandidates(): string[] {
 			break;
 		}
 		case "linux": {
-			const names = [
-				"google-chrome-stable",
-				"google-chrome",
-				"chromium",
-				"chromium-browser",
-				"chrome",
-				"ungoogled-chromium",
-				"ungoogled-chromium-browser",
-			];
+			const names = ["google-chrome-stable", "google-chrome", "chromium", "chromium-browser", "chrome"];
 			for (const name of names) {
-				const found = $which(name);
+				const found = which(name);
 				if (found) candidates.push(found);
 			}
 			candidates.push(
@@ -241,13 +236,6 @@ function systemChromiumCandidates(): string[] {
 				"/snap/bin/chromium",
 				"/var/lib/flatpak/exports/bin/com.google.Chrome",
 				"/var/lib/flatpak/exports/bin/org.chromium.Chromium",
-				// Ungoogled Chromium. Distro and AUR packages that keep the plain
-				// `chromium` name are already covered above; these are the paths
-				// unique to it, including the system and per-user Flatpak shims.
-				"/usr/bin/ungoogled-chromium",
-				"/usr/bin/ungoogled-chromium-browser",
-				`/var/lib/flatpak/exports/bin/${UNGOOGLED_CHROMIUM_FLATPAK_ID}`,
-				path.join(home, ".local/share/flatpak/exports/bin", UNGOOGLED_CHROMIUM_FLATPAK_ID),
 			);
 			let onNixos = false;
 			try {
@@ -256,6 +244,19 @@ function systemChromiumCandidates(): string[] {
 			if (onNixos) {
 				candidates.push(path.join(home, ".nix-profile/bin/chromium"), "/run/current-system/sw/bin/chromium");
 			}
+			for (const name of ["ungoogled-chromium", "ungoogled-chromium-browser"]) {
+				const found = which(name);
+				if (found) candidates.push(found);
+			}
+			candidates.push(
+				// Ungoogled Chromium. Distro and AUR packages that keep the plain
+				// `chromium` name are already covered above; these are the paths
+				// unique to it, including the system and per-user Flatpak shims.
+				"/usr/bin/ungoogled-chromium",
+				"/usr/bin/ungoogled-chromium-browser",
+				`/var/lib/flatpak/exports/bin/${UNGOOGLED_CHROMIUM_FLATPAK_ID}`,
+				path.join(home, ".local/share/flatpak/exports/bin", UNGOOGLED_CHROMIUM_FLATPAK_ID),
+			);
 			break;
 		}
 		case "win32": {
@@ -884,9 +885,13 @@ export async function applyStealthPatches(
 	await injectStealthScripts(page);
 }
 
-/** Exposes the resolved executable candidate list for detection tests. */
-export function systemChromiumCandidatesForTest(): string[] {
-	return systemChromiumCandidates();
+/** Exposes executable candidates for detection tests. */
+export function systemChromiumCandidatesForTest(
+	platform: NodeJS.Platform = process.platform,
+	home?: string,
+	which?: (name: string) => string | undefined,
+): string[] {
+	return systemChromiumCandidates(platform, home, which);
 }
 
 export function stealthIgnoreDefaultArgsForTest(executablePath: string | undefined): string[] {
