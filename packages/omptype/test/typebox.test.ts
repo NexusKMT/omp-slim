@@ -151,10 +151,10 @@ describe("TypeBox adapter", () => {
 		const literal = Type.Literal("yes");
 		const tuple = Type.Tuple([Type.String(), Type.Number()] as const);
 		const object = Type.Object({ id: Type.Number(), label: Type.Optional(Type.String()) });
-		type _Literal = Assert<Eq<Static<typeof literal>, "yes">>;
-		type _Tuple = Assert<Eq<Static<typeof tuple>, [string, number]>>;
+		type _Literal = Assert<Eq<Static<typeof literal.infer, "yes">>;
+		type _Tuple = Assert<Eq<Static<typeof tuple.infer, [string, number]>>;
 		type ExpectedObject = { id: number } & { label?: string };
-		type _Object = Assert<Eq<Static<typeof object>, ExpectedObject>>;
+		type _Object = Assert<Eq<Static<typeof object.infer, ExpectedObject>>;
 		expect(valid(object, { id: 1 })).toBe(true);
 	});
 });

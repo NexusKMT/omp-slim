@@ -73,6 +73,40 @@ export interface SelectedNode {
 	readonly unit?: unknown;
 }
 
+/**
+ * Standard Schema V1 (https://standardschema.dev) — the cross-library
+ * validation interface consumed by tools like @t3-oss/env, tRPC, and
+ * Hono validators. Inlined per the spec's recommendation; no dependency.
+ */
+export interface StandardSchemaV1<Input = unknown, Output = Input> {
+	readonly "~standard": StandardSchemaV1.Props<Input, Output>;
+}
+
+export namespace StandardSchemaV1 {
+	export interface Props<Input = unknown, Output = Input> {
+		readonly version: 1;
+		readonly vendor: string;
+		readonly validate: (value: unknown) => Result<Output> | Promise<Result<Output>>;
+		readonly types?: Types<Input, Output> | undefined;
+	}
+	export type Result<Output> = SuccessResult<Output> | FailureResult;
+	export interface SuccessResult<Output> {
+		readonly value: Output;
+		readonly issues?: undefined;
+	}
+	export interface FailureResult {
+		readonly issues: readonly Issue[];
+	}
+	export interface Issue {
+		readonly message: string;
+		readonly path?: readonly PropertyKey[] | undefined;
+	}
+	export interface Types<Input = unknown, Output = Input> {
+		readonly input: Input;
+		readonly output: Output;
+	}
+}
+
 /** A compiled schema: callable validator plus composition methods. */
 export interface Type<out t = unknown, i = t> {
 	(data: unknown): t | OmpErrors;
@@ -100,6 +134,8 @@ export interface Type<out t = unknown, i = t> {
 	from(data: i): t;
 	/** JSON Schema for this schema's structural base. */
 	toJsonSchema(options?: ToJsonSchemaOptions): Record<string, unknown>;
+	/** Standard Schema V1 interop (synchronous validation). */
+	readonly "~standard": StandardSchemaV1.Props<i, t>;
 }
 
 type MergeTypes<left, right> = left extends object
@@ -601,6 +637,22 @@ Object.defineProperty(typeMethods, "props", {
 	get(this: InternalType): readonly TypeProperty[] {
 		const object = requireObject(this.ir, "props");
 		return object.props.map(prop => propertyFromIR(prop));
+	},
+});
+
+Object.defineProperty(typeMethods, "~standard", {
+	get(this: InternalType): StandardSchemaV1.Props {
+		return {
+			version: 1,
+			vendor: "omptype",
+			validate: (value: unknown): StandardSchemaV1.Result<unknown> => {
+				const out = this.run(value);
+				if (out instanceof OmpErrors) {
+					return { issues: out.map(error => ({ message: error.problem, path: error.path })) };
+				}
+				return { value: out };
+			},
+		};
 	},
 });
 

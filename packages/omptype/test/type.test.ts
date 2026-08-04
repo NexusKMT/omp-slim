@@ -81,7 +81,7 @@ describe("validation", () => {
 });
 
 describe("interp/JIT parity", () => {
-	const cases: { def: Parameters<typeof type>[0]; inputs: unknown[] }[] = [
+	const cases: { def: Parameters<typeof type.infer[0]; inputs: unknown[] }[] = [
 		{
 			def: { a: "string", "b?": "number.integer >= 0", c: "'x' | 'y'" },
 			inputs: [{ a: "s", c: "x" }, { a: "s", b: -1, c: "x" }, { a: 1, c: "x" }, "nope", { a: "s", c: "z" }],
@@ -454,5 +454,19 @@ describe("advanced ArkType compatibility", () => {
 				expect(Object.keys(out.byPath)).toEqual(["user.age"]);
 			}
 		}
+	});
+});
+
+describe("Standard Schema V1", () => {
+	it("validates synchronously with morphs and path-aware issues", () => {
+		const s = type({ port: "string.integer.parse", name: "string" });
+		const std = s["~standard"];
+		expect(std.version).toBe(1);
+		expect(std.vendor).toBe("omptype");
+		expect(std.validate({ port: "8080", name: "api" })).toEqual({ value: { port: 8080, name: "api" } });
+		const failed = std.validate({ port: "8080", name: 42 });
+		if (failed instanceof Promise || failed.issues === undefined) throw new Error("expected sync failure");
+		expect(failed.issues[0].path).toEqual(["name"]);
+		expect(failed.issues[0].message).toContain("a string");
 	});
 });
