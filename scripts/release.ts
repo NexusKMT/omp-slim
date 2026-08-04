@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { compareVersions } from "@oh-my-pi/pi-utils";
+import { compareVersions } from "@oh-my-pi/pi-utils/version";
 /**
  * Release script for pi-mono
  *
