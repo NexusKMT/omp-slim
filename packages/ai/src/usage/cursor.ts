@@ -112,7 +112,7 @@ export function parseCursorIndividualUsage(payload: unknown, fetchedAt = Date.no
 		} else {
 			return null;
 		}
-		const remaining = hasValidRemaining ? reportedRemaining : Math.max(0, limit - used);
+		const remaining = Math.max(0, limit - used);
 		amount = {
 			used: used / 100,
 			limit: limit / 100,

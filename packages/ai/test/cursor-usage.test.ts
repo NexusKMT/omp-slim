@@ -257,6 +257,29 @@ describe("cursor usage provider", () => {
 			});
 			expect(report?.limits[0]?.status).toBe("ok");
 		});
+
+		it("derives remaining from selected used when reported values conflict", () => {
+			const report = parseCursorIndividualUsage({
+				individualUsage: {
+					overall: {
+						used: 100,
+						limit: 1000,
+						remaining: 0,
+					},
+				},
+			});
+			expect(report?.limits[0]).toMatchObject({
+				amount: {
+					used: 1,
+					limit: 10,
+					remaining: 9,
+					usedFraction: 0.1,
+					remainingFraction: 0.9,
+					unit: "usd",
+				},
+				status: "ok",
+			});
+		});
 	});
 
 	describe("default registration", () => {
@@ -480,6 +503,42 @@ describe("cursor usage provider", () => {
 				},
 			});
 			expect(report?.raw).toEqual(usageSummaryPayload);
+		});
+
+		it("ignores a profile email returned for a different subject", async () => {
+			const accessToken = createCursorAccessToken("auth0|user_123");
+			const mockFetch = (async (input: string | URL): Promise<Response> => {
+				const url = typeof input === "string" ? input : input.toString();
+				if (url === "https://api2.cursor.sh/auth/usage") {
+					return Response.json({});
+				}
+				if (url === "https://cursor.com/api/usage-summary") {
+					return Response.json({
+						individualUsage: {
+							overall: {
+								used: 2000,
+								limit: 10000,
+								remaining: 8000,
+							},
+						},
+					});
+				}
+				return Response.json({ email: "other@example.com", sub: "different_user" });
+			}) as unknown as typeof fetch;
+
+			const report = await cursorUsageProvider.fetchUsage(
+				{
+					provider: "cursor",
+					credential: {
+						type: "oauth",
+						accessToken,
+						email: "stored@example.com",
+					},
+				},
+				{ fetch: mockFetch },
+			);
+
+			expect(report?.metadata).toEqual({ email: "stored@example.com" });
 		});
 
 		it("merges legacy request usage before personal usage", async () => {
