@@ -651,25 +651,13 @@ function maybeStageNodeModulesAddon(ctx, errors) {
 
 
 /**
- * The desktop adapter supports exactly the preceding patch release's pre-parity
- * DesktopSession ABI. Keep this exception narrow: it is only for an on-disk
- * addon (never a resident old module), only one patch behind, and only when
- * the legacy capture/execute/close shape is present.
+ * The desktop adapter can bridge the pre-parity DesktopSession shape even when
+ * the addon's version sentinel predates this JS package. Keep the exception
+ * narrow: only an on-disk addon (never a resident old module) with the exact
+ * legacy capture/execute/close shape may pass.
  */
-function isCompatibleLegacyDesktopSession(ctx, bindings, residentSentinel, diskHasExpectedSentinel) {
-	if (!residentSentinel || diskHasExpectedSentinel) return false;
-	const legacyVersion = residentSentinel.slice("__piNativesV".length).replace(/_/g, ".");
-	const currentParts = parseReleaseVersion(ctx.packageVersion);
-	const legacyParts = parseReleaseVersion(legacyVersion);
-	if (
-		!currentParts ||
-		!legacyParts ||
-		currentParts[0] !== legacyParts[0] ||
-		currentParts[1] !== legacyParts[1] ||
-		currentParts[2] !== legacyParts[2] + 1
-	) {
-		return false;
-	}
+function isCompatibleLegacyDesktopSession(bindings, diskHasExpectedSentinel) {
+	if (diskHasExpectedSentinel) return false;
 	const DesktopSession = bindings.DesktopSession;
 	return (
 		typeof DesktopSession === "function" &&
@@ -712,7 +700,7 @@ export function validateLoadedBindings(ctx, bindings, candidate) {
 		// The successful require above normally guarantees readability. If the
 		// file disappears concurrently, retain the safe reinstall diagnosis.
 	}
-	if (isCompatibleLegacyDesktopSession(ctx, bindings, residentSentinel, diskHasExpectedSentinel)) return;
+	if (isCompatibleLegacyDesktopSession(bindings, diskHasExpectedSentinel)) return;
 	if (residentSentinel && diskHasExpectedSentinel) {
 		const residentVersion = residentSentinel.slice("__piNativesV".length).replace(/_/g, ".");
 		throw new Error(
