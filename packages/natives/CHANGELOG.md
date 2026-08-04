@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Bounded fuzzy-find scored-match retention to the top-K results (worst-first heap) instead of collecting and fully sorting every hit; ranking and totals are unchanged ([#7415](https://github.com/can1357/oh-my-pi/issues/7415)).
+
 ## [17.2.7] - 2026-08-03
 
 ### Added
