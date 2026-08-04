@@ -2,11 +2,6 @@
 
 ## [Unreleased]
 
-## [17.2.8] - 2026-08-04
-
-### Changed
-
-- Upgraded the bundled omptype schema engine: intersection and pipe operators, bigint and RegExp literals in the string DSL, Standard Schema V1 interop, JSON Schema import via fromJsonSchema(), and richer union/collection error reporting.
 ### Breaking Changes
 
 - Renamed `compareVersions` to `compareChangelogEntries` in `@oh-my-pi/pi-coding-agent/utils/changelog`. The function signature and behavior are unchanged; update imports to use the new name.
@@ -14,6 +9,12 @@
 ### Changed
 
 - Routed Bun install-cache pruning in `update-cli` through the shared `compareVersions` utility (`@oh-my-pi/pi-utils`), removing a duplicate local comparator that rounded large numeric version identifiers via `Number`.
+
+## [17.2.8] - 2026-08-04
+
+### Changed
+
+- Upgraded the bundled omptype schema engine: intersection and pipe operators, bigint and RegExp literals in the string DSL, Standard Schema V1 interop, JSON Schema import via fromJsonSchema(), and richer union/collection error reporting.
 
 ## [17.2.7] - 2026-08-03
 
