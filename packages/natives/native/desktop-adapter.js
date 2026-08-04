@@ -62,7 +62,7 @@ export function adaptDesktopSession(NativeDesktopSession) {
 
 	class DesktopSession {
 		#native;
-		#NativeDesktopSession;
+		#nativeDesktopSession;
 		#options;
 		#sessions;
 		#closed = false;
@@ -70,7 +70,7 @@ export function adaptDesktopSession(NativeDesktopSession) {
 
 		constructor(options) {
 			try {
-				this.#NativeDesktopSession = NativeDesktopSession;
+				this.#nativeDesktopSession = NativeDesktopSession;
 				this.#options = options;
 				this.#native = new NativeDesktopSession(options);
 				this.#sessions = new Map([[captureCapsKey(), this.#native]]);
@@ -101,7 +101,7 @@ export function adaptDesktopSession(NativeDesktopSession) {
 			const existing = this.#sessions.get(key);
 			if (existing) return existing;
 			try {
-				const native = new this.#NativeDesktopSession({
+				const native = new this.#nativeDesktopSession({
 					...this.#options,
 					maxWidth: caps?.maxWidth,
 					maxHeight: caps?.maxHeight,
