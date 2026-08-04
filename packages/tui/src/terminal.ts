@@ -1105,6 +1105,12 @@ export class ProcessTerminal implements Terminal {
 					// Push level-2 to keep its shortcuts reporting consistently.
 					this.#kittyEnableSeq = "\x1b[>7u";
 					this.#safeWrite(this.#kittyEnableSeq);
+				} else if (process.platform === "win32") {
+					// WezTerm/ConPTY on Windows drops Shift+letter keypresses entirely
+					// when flag 4 (report alternate keys) is set. Use flag 1
+					// (disambiguate only) to keep shifted printable keys working.
+					this.#kittyEnableSeq = "\x1b[>1u";
+					this.#safeWrite(this.#kittyEnableSeq);
 				} else {
 					// Disambiguate escape codes and report base-layout keys for physical
 					// shortcut matching, without event reporting that caused regression #3259.
