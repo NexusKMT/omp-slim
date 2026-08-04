@@ -3846,13 +3846,15 @@ export class AuthStorage {
 				: undefined;
 
 		const rankingContext: CredentialRankingContext = { modelId: options.modelId };
+		const planRequirement = resolveOpenAICodexPlanRequirement(provider, options.modelId);
+		const planEligibilityByCredential = new Map<number, boolean | undefined>();
 		const blockScope = strategy.blockScope?.(rankingContext);
 		const blockScopes = strategy.blockScopes?.(rankingContext) ?? (blockScope ? [blockScope] : []);
 		const reserveFraction = Number.isFinite(options.reserveFraction)
 			? Math.max(0, Math.min(1, options.reserveFraction))
 			: 0;
 		const nowMs = Date.now();
-		const accounts = await Promise.all(
+		let accounts = await Promise.all(
 			pool.map(async ({ entry, index }): Promise<ModelUsageAccountHealth> => {
 				const credentialType = entry.credential.type;
 				const providerKey = this.#getProviderTypeKey(provider, credentialType);
@@ -3879,6 +3881,9 @@ export class AuthStorage {
 				} catch (error) {
 					if (options.signal?.aborted) throw error;
 					report = null;
+				}
+				if (planRequirement !== "none") {
+					planEligibilityByCredential.set(entry.id, getOpenAICodexPlanEligibility(report, planRequirement));
 				}
 
 				if (provider === "openai-codex") {
@@ -3932,6 +3937,9 @@ export class AuthStorage {
 				};
 			}),
 		);
+		if (planRequirement !== "none") {
+			accounts = accounts.filter(account => planEligibilityByCredential.get(account.credentialId) !== false);
+		}
 		if (selectedCredentialId !== undefined) {
 			const selectedAccount = accounts.find(account => account.credentialId === selectedCredentialId);
 			if (selectedAccount) selectedAccount.selected = true;

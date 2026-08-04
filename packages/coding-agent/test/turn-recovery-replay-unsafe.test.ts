@@ -99,6 +99,149 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		tempDir.removeSync();
 	});
 
+	it("rolls back a usage fallback cancelled during model reconciliation", async () => {
+		const fallback = getBundledModel("openai", "gpt-4o-mini");
+		if (!fallback) throw new Error("Expected bundled fallback model");
+		let activeModel = model;
+		const fallbackApplied = Promise.withResolvers<void>();
+		const releaseReconciliation = Promise.withResolvers<void>();
+		const modelChanges: string[] = [];
+		const emittedEvents: string[] = [];
+		const host = createHost(model, modelRegistry);
+		host.model = () => activeModel;
+		host.sessionManager = {
+			appendModelChange: (selector: string) => modelChanges.push(selector),
+		} as never;
+		host.setModelWithProviderSessionReset = async nextModel => {
+			activeModel = nextModel;
+			if (nextModel.provider === fallback.provider && nextModel.id === fallback.id) {
+				fallbackApplied.resolve();
+				await releaseReconciliation.promise;
+			}
+		};
+		host.emitSessionEvent = async event => {
+			emittedEvents.push(event.type);
+		};
+		const recovery = new TurnRecovery(host);
+		const controller = new AbortController();
+		const applying = recovery.applyRetryFallbackCandidate(
+			"default",
+			{
+				raw: `${fallback.provider}/${fallback.id}`,
+				provider: fallback.provider,
+				id: fallback.id,
+				thinkingLevel: undefined,
+			},
+			`${model.provider}/${model.id}`,
+			{ pinFallback: true, apiKey: "test-key", signal: controller.signal },
+		);
+
+		await fallbackApplied.promise;
+		controller.abort();
+		releaseReconciliation.resolve();
+		const committed = await applying;
+
+		expect(committed).toBe(false);
+		expect(activeModel).toBe(model);
+		expect(modelChanges).toEqual([]);
+		expect(emittedEvents).toEqual([]);
+	});
+
+	it("does not commit a fallback superseded during model reconciliation", async () => {
+		const fallback = getBundledModel("openai", "gpt-4o-mini");
+		if (!fallback) throw new Error("Expected bundled fallback race model");
+		const selectedModel = { ...fallback, baseUrl: "https://user-selected-route.example" };
+		let activeModel = model;
+		const fallbackApplied = Promise.withResolvers<void>();
+		const releaseReconciliation = Promise.withResolvers<void>();
+		const modelChanges: string[] = [];
+		const emittedEvents: string[] = [];
+		const thinkingChanges: unknown[] = [];
+		const host = createHost(model, modelRegistry);
+		host.model = () => activeModel;
+		host.sessionManager = {
+			appendModelChange: (selector: string) => modelChanges.push(selector),
+		} as never;
+		host.setThinkingLevel = level => thinkingChanges.push(level);
+		host.setModelWithProviderSessionReset = async nextModel => {
+			activeModel = nextModel;
+			if (nextModel.provider === fallback.provider && nextModel.id === fallback.id) {
+				fallbackApplied.resolve();
+				await releaseReconciliation.promise;
+			}
+		};
+		host.emitSessionEvent = async event => {
+			emittedEvents.push(event.type);
+		};
+		const recovery = new TurnRecovery(host);
+		const applying = recovery.applyRetryFallbackCandidate(
+			"default",
+			{
+				raw: `${fallback.provider}/${fallback.id}`,
+				provider: fallback.provider,
+				id: fallback.id,
+				thinkingLevel: undefined,
+			},
+			`${model.provider}/${model.id}`,
+			{ pinFallback: true, apiKey: "test-key" },
+		);
+
+		await fallbackApplied.promise;
+		activeModel = selectedModel;
+		releaseReconciliation.resolve();
+		const committed = await applying;
+
+		expect(committed).toBe(false);
+		expect(activeModel).toBe(selectedModel);
+		expect(modelChanges).toEqual([]);
+		expect(thinkingChanges).toEqual([]);
+		expect(emittedEvents).toEqual([]);
+	});
+	it("keeps a committed fallback when cancellation arrives during applied-event delivery", async () => {
+		const fallback = getBundledModel("openai", "gpt-4o-mini");
+		if (!fallback) throw new Error("Expected bundled fallback model");
+		let activeModel = model;
+		const eventStarted = Promise.withResolvers<void>();
+		const releaseEvent = Promise.withResolvers<void>();
+		const modelChanges: string[] = [];
+		const host = createHost(model, modelRegistry);
+		host.model = () => activeModel;
+		host.sessionManager = {
+			appendModelChange: (selector: string) => modelChanges.push(selector),
+		} as never;
+		host.setModelWithProviderSessionReset = async nextModel => {
+			activeModel = nextModel;
+		};
+		host.emitSessionEvent = async event => {
+			if (event.type !== "retry_fallback_applied") return;
+			eventStarted.resolve();
+			await releaseEvent.promise;
+		};
+		const recovery = new TurnRecovery(host);
+		const controller = new AbortController();
+		const applying = recovery.applyRetryFallbackCandidate(
+			"default",
+			{
+				raw: `${fallback.provider}/${fallback.id}`,
+				provider: fallback.provider,
+				id: fallback.id,
+				thinkingLevel: undefined,
+			},
+			`${model.provider}/${model.id}`,
+			{ pinFallback: true, apiKey: "test-key", signal: controller.signal },
+		);
+
+		await eventStarted.promise;
+		controller.abort();
+		releaseEvent.resolve();
+		const committed = await applying;
+
+		expect(committed).toBe(true);
+		expect(activeModel.provider).toBe(fallback.provider);
+		expect(activeModel.id).toBe(fallback.id);
+		expect(modelChanges).toEqual([`${fallback.provider}/${fallback.id}`]);
+	});
+
 	it("treats a failed turn with partial non-whitespace text as NOT retriable", () => {
 		const recovery = new TurnRecovery(createHost(model, modelRegistry));
 		const message = makeMessage([{ type: "text", text: "Here is the first part of my answer" }], model);

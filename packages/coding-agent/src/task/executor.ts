@@ -168,9 +168,11 @@ function resolveSubagentRetryFallbackCandidates(
 ): SubagentRetryFallbackCandidate[] {
 	const candidates: SubagentRetryFallbackCandidate[] = [];
 	const seen = new Set<string>();
+	const disabledProviders = new Set(settings.get("disabledProviders"));
 	for (const pattern of modelPatterns) {
 		const resolved = resolveModelOverride([pattern], modelRegistry, settings);
 		if (!resolved.model) continue;
+		if (disabledProviders.has(resolved.model.provider)) continue;
 		const selector = resolved.explicitThinkingLevel
 			? formatModelSelectorValue(formatModelStringWithRouting(resolved.model), resolved.thinkingLevel)
 			: formatModelStringWithRouting(resolved.model);
@@ -181,7 +183,10 @@ function resolveSubagentRetryFallbackCandidates(
 	return candidates;
 }
 
-function resolveSubagentDefaultRetryFallbackChain(settings: Settings): string[] | undefined {
+function resolveSubagentDefaultRetryFallbackChain(
+	settings: Settings,
+	modelRegistry: ModelRegistry,
+): string[] | undefined {
 	const fallbackChain = settings.get("retry.fallbackChains")?.default;
 	if (
 		!Array.isArray(fallbackChain) ||
@@ -190,7 +195,11 @@ function resolveSubagentDefaultRetryFallbackChain(settings: Settings): string[] 
 	) {
 		return undefined;
 	}
-	return fallbackChain;
+	const disabledProviders = new Set(settings.get("disabledProviders"));
+	return fallbackChain.filter(entry => {
+		const resolved = resolveModelOverride([entry], modelRegistry, settings);
+		return !resolved.model || !disabledProviders.has(resolved.model.provider);
+	});
 }
 
 function installSubagentRetryFallbackChain(args: {
@@ -2783,7 +2792,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			const configuredModelPatterns = resolveConfiguredModelPatterns(modelPatterns, settings);
 			const defaultRetryFallbackChain =
 				configuredModelPatterns.length === 1
-					? resolveSubagentDefaultRetryFallbackChain(subagentSettings)
+					? resolveSubagentDefaultRetryFallbackChain(subagentSettings, modelRegistry)
 					: undefined;
 			const {
 				model,
@@ -2817,7 +2826,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			const retryFallbackRole = installSubagentRetryFallbackChain({
 				settings: subagentSettings,
 				id,
-				candidates: resolveSubagentRetryFallbackCandidates(modelPatterns, modelRegistry, settings),
+				candidates: resolveSubagentRetryFallbackCandidates(modelPatterns, modelRegistry, subagentSettings),
 				defaultFallbackChain: defaultRetryFallbackChain,
 				model,
 				authFallbackUsed,
