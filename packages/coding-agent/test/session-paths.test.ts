@@ -14,7 +14,10 @@ function makeTempDir(prefix: string): string {
 }
 
 function legacySessionDir(sessionsRoot: string, cwd: string): string {
-	const name = `--${path.resolve(cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+	const name = `--${path
+		.resolve(cwd)
+		.replace(/^[/\\]/, "")
+		.replace(/[/\\:]/g, "-")}--`;
 	return path.join(sessionsRoot, name);
 }
 

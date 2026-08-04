@@ -1,5 +1,5 @@
-import { networkInterfaces } from "node:os";
 import { afterEach, describe, expect, it } from "bun:test";
+import { networkInterfaces } from "node:os";
 import { connect, type Subprocess } from "bun";
 import {
 	STATS_DASHBOARD_HEADER,
@@ -25,10 +25,7 @@ async function tcpConnects(hostname: string, port: number): Promise<boolean> {
 
 const holderProcesses: Array<Subprocess<"ignore", "pipe", "pipe">> = [];
 
-async function startBunHolder(
-	responseExpr: string,
-	options?: { hostname?: string; statsOwned?: boolean },
-) {
+async function startBunHolder(responseExpr: string, options?: { hostname?: string; statsOwned?: boolean }) {
 	const hostname = options?.hostname ?? STATS_DASHBOARD_HOSTNAME;
 	const reservation = Bun.serve({
 		port: 0,
