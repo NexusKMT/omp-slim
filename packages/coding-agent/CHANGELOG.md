@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `/usage`, `/advisor status`, and every other panel command looking dead mid-turn. `presentCommandOutput` defers panels while the agent streams so a growing turn cannot bury them, but said nothing, and on a long multi-subagent turn the panel is minutes away. The deferral is now acknowledged in the status line. A non-terminal settle also flushes the queue: `isStreaming` is already false by then, so a command issued after an async fan-out settles used to mount ahead of the panels queued before it.
+
 ## [17.2.8] - 2026-08-04
 
 ### Changed
@@ -23,12 +27,6 @@
 - Fixed install.sh falsely reporting success on musl-based systems (such as Alpine Linux) when the binary fails to start; the installer now smoke-tests the binary, exits non-zero on failure, and provides remediation steps.
 - Fixed Codex config.toml discovery incorrectly importing MCP servers that are configured with enabled = false.
 - Fixed bash.patterns allow rules rejecting valid commands when quoted arguments contained shell metacharacters (such as Cargo benchmark regex filters).
-- Fixed `tier.autoFastMode` failing silently when a provider rejects the priority request. The rejection notice only fired for an explicit `/fast on` (family tier `priority`), so an auto lease that Anthropic refused (e.g. `429 Usage credits are required for fast mode`) dropped the status-line `⚡` with no explanation. Auto-lease rejections now emit their own warning, deduped per `provider/model` because `disabledFeatures` repeats the marker on every later turn, and leave the auto lease intact for other models.
-- Fixed an advisor refusal skipping the model fallback chain. `AdvisorRuntime` treated a classifier refusal as terminal once its one stripped-reasoning resend failed, returning before the `onTurnError` hook that owns fallback (`#recoverAdvisorTurn`), so a `Refusal (cyber)` on one model disabled the advisor even with a configured chain. The refusal path now takes the same fallback pass the primary turn-recovery path already allows, and only reports the advisor unavailable when the host declines to switch.
-- Bounded advisor refusal recovery to one attempt per model. The cascade walks the fallback chain to exhaustion, but a model switch re-arms `#includeThinking` via `#syncModelIdentity`, so a chain whose keys point back at each other (A→B, B→A) would strip-and-resend against the same pair forever. Each cascade now visits a model at most once; a successful turn or a reset starts a fresh walk.
-- Fixed `/advisor status` throwing when the roster is empty but an advisor is live. `formatAdvisorStatus` dereferenced `stats.advisors[0]` after a guard that only covered the inactive case, so a status call landing in the window where `#advisorStatuses` is cleared for a rebuild hit `undefined.contextWindow`. Reporting status now never throws.
-- Fixed `/usage`, `/advisor status`, and every other panel command looking dead mid-turn. `presentCommandOutput` defers panels while the agent streams so a growing turn cannot bury them, but said nothing, and on a long multi-subagent turn the panel is minutes away. The deferral is now acknowledged in the status line.
-
 
 ## [17.2.6] - 2026-08-03
 

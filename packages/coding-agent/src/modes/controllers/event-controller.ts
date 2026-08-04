@@ -1479,6 +1479,12 @@ export class EventController {
 		// model/thinking level until the terminal settle.
 		if (event.isTerminal === false) {
 			await this.ctx.flushPendingModelSwitch();
+			// Reaching here means the first guard passed, so `isStreaming` is already
+			// false: a command issued from now on mounts immediately. Leaving earlier
+			// panels queued would render them out of order, minutes later, after the
+			// user was told they were only waiting for the turn. The transcript is
+			// quiescent at a settle, which is the condition #4806 wanted.
+			this.ctx.flushPendingCommandOutput();
 			return;
 		}
 		setTerminalTitleState("idle");
