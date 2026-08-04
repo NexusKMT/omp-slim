@@ -121,9 +121,9 @@ async function loadBrowsers(): Promise<typeof BrowsersNs> {
 }
 
 /**
- * Resolve the Chromium executable puppeteer will launch, lazily downloading it
- * on first use via @puppeteer/browsers. Skipped when a system Chromium (NixOS)
- * or PUPPETEER_EXECUTABLE_PATH is set. The browser is cached under
+ * Resolve the Chromium executable puppeteer will launch, honoring
+ * PUPPETEER_EXECUTABLE_PATH before system browser detection and lazily
+ * downloading Chromium otherwise. The browser is cached under
  * ~/.omp/puppeteer (getPuppeteerDir). Returns undefined when platform
  * detection fails (puppeteer default resolution takes over). Exported so
  * real-browser tests can probe launchability and skip on hosts missing
@@ -131,10 +131,10 @@ async function loadBrowsers(): Promise<typeof BrowsersNs> {
  */
 let chromiumExecutablePromise: Promise<string | undefined> | undefined;
 export async function ensureChromiumExecutable(): Promise<string | undefined> {
-	const sysChrome = resolveSystemChromium();
-	if (sysChrome) return sysChrome;
 	const envPath = process.env.PUPPETEER_EXECUTABLE_PATH;
 	if (envPath) return envPath;
+	const sysChrome = resolveSystemChromium();
+	if (sysChrome) return sysChrome;
 	if (chromiumExecutablePromise) return chromiumExecutablePromise;
 
 	chromiumExecutablePromise = (async () => {

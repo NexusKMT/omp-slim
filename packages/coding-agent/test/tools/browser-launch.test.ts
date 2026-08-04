@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test";
+import * as path from "node:path";
 import { stealthIgnoreDefaultArgsForTest } from "@oh-my-pi/pi-coding-agent/tools/browser/launch";
+import { TempDir } from "@oh-my-pi/pi-utils";
+
+const EXECUTABLE_PROBE = path.resolve(import.meta.dir, "../fixtures/browser-executable-probe.ts");
 
 const AUTOMATION_FLAG = "--enable-automation";
 
@@ -30,6 +34,37 @@ describe("browser launch stealth defaults", () => {
 			const ignoreDefaultArgs = stealthIgnoreDefaultArgsForTest(executablePath);
 
 			expect(ignoreDefaultArgs).toContain(AUTOMATION_FLAG);
+		}
+	});
+});
+
+describe("browser executable selection", () => {
+	it("honors PUPPETEER_EXECUTABLE_PATH before a detected Windows system Chrome", async () => {
+		const tempDir = TempDir.createSync("@browser-executable-");
+		try {
+			const override = path.join(tempDir.path(), "chrome-headless-shell.exe");
+			const systemChrome = path.join(tempDir.path(), "Google\\Chrome\\Application\\chrome.exe");
+			await Bun.write(override, "override");
+			await Bun.write(systemChrome, "system");
+
+			const result = Bun.spawnSync([process.execPath, EXECUTABLE_PROBE], {
+				env: {
+					...process.env,
+					OMP_BROWSER_PROBE_PLATFORM: "win32",
+					ProgramFiles: tempDir.path(),
+					"ProgramFiles(x86)": path.join(tempDir.path(), "missing-x86"),
+					LOCALAPPDATA: path.join(tempDir.path(), "missing-local"),
+					PUPPETEER_EXECUTABLE_PATH: override,
+				},
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const stderr = new TextDecoder().decode(result.stderr);
+
+			expect(result.exitCode, stderr).toBe(0);
+			expect(new TextDecoder().decode(result.stdout)).toBe(override);
+		} finally {
+			await tempDir.remove();
 		}
 	});
 });
