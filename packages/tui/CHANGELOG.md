@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Shift+letter and shifted symbol input (capital letters, `?`, `!`, etc.) being silently dropped on Windows and WSL terminals using ConPTY (e.g. WezTerm stable) by avoiding Kitty keyboard protocol flag 4 in that context.
+
 ## [17.2.5] - 2026-08-03
 
 ### Fixed
