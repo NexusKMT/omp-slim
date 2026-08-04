@@ -138,4 +138,38 @@ describe("EventController message_update coalescing", () => {
 		expect(pushDelta).toHaveBeenNthCalledWith(2, "one two ");
 		expect(pushDelta).toHaveBeenNthCalledWith(3, "one two three ");
 	});
+
+	it("serializes a tail event behind an in-flight window flush", async () => {
+		// The coalesced flush fires from a 33ms timer, NOT from the listener
+		// path, so AgentSession's fire-and-forget dispatch cannot serialize it:
+		// a message_end landing mid-flush used to run its handler concurrently,
+		// both calling init while the flush was suspended. The dispatch chain
+		// must hold the tail event until the window flush completed.
+		const { ctx, emit } = createStreamingFixture();
+		ctx.isInitialized = false;
+		const initGate = Promise.withResolvers<void>();
+		let initCalls = 0;
+		ctx.init = vi.fn(async () => {
+			initCalls += 1;
+			if (initCalls === 1) await initGate.promise;
+		});
+
+		emit(messageUpdate("tok1 tok2"));
+		await Bun.sleep(45); // window fires; flush suspends on init (call 1)
+
+		emit({ type: "message_end", message: assistantMessage("tok1 tok2") } as Extract<
+			AgentSessionEvent,
+			{ type: "message_end" }
+		>);
+		await Bun.sleep(0);
+
+		// The end handler must be queued behind the suspended flush, not
+		// running alongside it (which would double-init).
+		expect(initCalls).toBe(1);
+		initGate.resolve();
+		await Bun.sleep(0);
+
+		// Flush completed, then the end handler ran to completion.
+		expect(initCalls).toBe(2);
+	});
 });

@@ -180,6 +180,10 @@ export class EventController {
 	// delta before the snapshot is coalesced away.
 	#pendingMessageUpdate: Extract<AgentSessionEvent, { type: "message_update" }> | undefined = undefined;
 	#messageUpdateTimer: NodeJS.Timeout | undefined = undefined;
+	/** Tail of the serialized dispatch chain; see #runSerialized. */
+	#dispatchTail: Promise<void> = Promise.resolve();
+	/** Whether a chained run is currently in flight (awaiting its own awaits). */
+	#dispatchInFlight = false;
 	// Deltas already fed to speech at arrival by the coalescer. `#handleMessageUpdate`
 	// also vocalizes so the direct `handleEvent` path (tests, session focus replay)
 	// keeps working — the WeakSet makes the coalesced path speak each delta exactly
@@ -446,6 +450,17 @@ export class EventController {
 	}
 
 	subscribeToAgent(): void {
+		// Serialize non-update dispatch behind any in-flight handler run:
+		// AgentSession.#emit fires listeners fire-and-forget (it does not await
+		// listener promises), so without this a rapid stream tail
+		// (message_update → message_end → agent_end) could let a later callback
+		// overtake the coalesced flush's handler mid-await — agent_end removing
+		// `streamingComponent` before #handleMessageEnd finalizes and records
+		// the final message (issue #7443 follow-up). When the tail has settled,
+		// dispatch stays synchronous: the flush's streaming rebuild runs before
+		// the listener's first await, preserving the timing the coalescing
+		// tests assert on. `message_update` enqueue is itself synchronous and
+		// needs no serialization.
 		this.ctx.unsubscribe = this.ctx.session.subscribe(async (event: AgentSessionEvent) => {
 			// Coalesce the cumulative `message_update` deltas of a streaming turn
 			// into at most one handler run per window. `#handleMessageUpdate` is
@@ -460,9 +475,42 @@ export class EventController {
 				this.#enqueueMessageUpdate(event);
 				return;
 			}
-			await this.#flushPendingMessageUpdate();
-			await this.handleEvent(event);
+			await this.#runSerialized(async () => {
+				await this.#flushPendingMessageUpdate();
+				await this.handleEvent(event);
+			});
 		});
+	}
+
+	/**
+	 * Run `run` in the serialized dispatch chain: when another run is already
+	 * in flight (awaiting its own awaits), wait for it first, so a rapid
+	 * stream tail (message_update → message_end → agent_end) cannot overtake
+	 * the coalesced flush mid-await — agent_end removing `streamingComponent`
+	 * before #handleMessageEnd finalizes and records the final message (issue
+	 * #7443 follow-up). The timer-based flush uses the same chain, closing the
+	 * same race for the ~33ms window path. When the chain is idle, `run`
+	 * starts synchronously (no intermediate microtask), preserving the
+	 * synchronous-flush timing the coalescing tests assert on. A rejection
+	 * propagates to the caller (the session's fire-and-forget emit) and the
+	 * next event starts a fresh chain link instead of being dropped.
+	 */
+	async #runSerialized(run: () => Promise<void>): Promise<void> {
+		if (this.#dispatchInFlight) await this.#dispatchTail.catch(() => {});
+		const link = run();
+		if (!this.#dispatchInFlight) {
+			this.#dispatchInFlight = true;
+			void link.then(
+				() => {
+					this.#dispatchInFlight = false;
+				},
+				() => {
+					this.#dispatchInFlight = false;
+				},
+			);
+		}
+		this.#dispatchTail = link;
+		await link;
 	}
 
 	/**
@@ -482,7 +530,12 @@ export class EventController {
 			// Mirror AgentSession.#emit: attach a catch so a streaming rebuild
 			// failure surfaces as a logged warning instead of a process-level
 			// unhandled rejection (the timer path has no listener to attach one).
-			void this.#flushPendingMessageUpdate().catch(err => {
+			// Runs inside the serialized dispatch chain so a message_end /
+			// agent_end landing mid-window cannot overtake this flush (issue
+			// #7443 follow-up).
+			void this.#runSerialized(async () => {
+				await this.#flushPendingMessageUpdate();
+			}).catch(err => {
 				logger.warn("Message update flush rejected", {
 					error: err instanceof Error ? err.message : String(err),
 				});
