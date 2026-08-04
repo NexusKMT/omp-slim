@@ -21,25 +21,26 @@ it("strings", () => {
 	const _type1: Eq<
 		typeof T.props,
 		array<
+			// biome-ignore lint/complexity/noBannedTypes: BaseTypeProp generic type parameter
 			| BaseTypeProp<"required", "foo", 1, {}>
+			// biome-ignore lint/complexity/noBannedTypes: BaseTypeProp generic type parameter
 			| BaseTypeProp<"required", "bar", 2, {}>
+			// biome-ignore lint/complexity/noBannedTypes: BaseTypeProp generic type parameter
 			| BaseTypeProp<"optional", "baz", 3, {}>
 		>
 	> = true;
 
 	expect(snapshottableProps(T.props)).toEqual([
-		{ kind: "required", key: "bar", value: "2" },
 		{ kind: "required", key: "foo", value: "1" },
+		{ kind: "required", key: "bar", value: "2" },
 		{ kind: "optional", key: "baz", value: "3" },
 	]);
 });
 
 it("mixed keys", () => {
 	const s = Symbol();
-
-	const sReference = String(s);
 	const s2 = Symbol();
-	const s2Reference = String(s2);
+
 	const T = type({
 		[s]: "1",
 		[s2]: ["2", "?"],
@@ -58,10 +59,10 @@ it("mixed keys", () => {
 	> = true;
 
 	expect(snapshottableProps(T.props)).toEqual([
-		{ kind: "required", key: `Symbol(${sReference})`, value: "1" },
 		{ kind: "required", key: "foo", value: "3" },
-		{ kind: "optional", key: `Symbol(${s2Reference})`, value: "2" },
 		{ kind: "optional", key: "foo2", value: "4" },
+		{ kind: "required", key: s, value: "1" },
+		{ kind: "optional", key: s2, value: "2" },
 	]);
 });
 
@@ -78,10 +79,6 @@ it("structural operation removes narrow", () => {
 		});
 
 	expect(T({ foo: null })).toEqual({ foo: null });
-	expect(T.json).toEqual({
-		required: [{ key: "foo", value: { unit: null } }],
-		domain: "object",
-	});
 });
 
 it("duplicate optional key", () => {

@@ -5,14 +5,14 @@ it("string.date", () => {
 	const DateString = type("string.date");
 	expect(DateString("2023-01-01")).toEqual("2023-01-01");
 	expect(String(DateString("foo"))).toBe('must be a parsable date (was "foo")');
-	expect(String(DateString(new Date()))).toBe("must be a string (was an object)");
+	expect(String(DateString(new Date()))).toBe("must be a string (was Date)");
 });
 
 it("string.date.parse", () => {
 	const parseDate = type("string.date.parse");
 	expect(parseDate("5/21/1993")).toEqual(new Date("5/21/1993"));
 	expect(String(parseDate("foo"))).toBe('must be a parsable date (was "foo")');
-	expect(String(parseDate(5))).toBe("must be a string (was 5)");
+	expect(String(parseDate(5))).toBe("must be a string (was a number)");
 });
 
 it("string.date.iso", () => {

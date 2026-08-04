@@ -13,7 +13,7 @@ it("base", () => {
 it("with punctuation", () => {
 	const ISO = type("d'2000-05-05T04:00:00.000Z'");
 	const _type: Eq<typeof ISO.infer, Date> = true;
-	expect(ISO.allows(new Date("2000/05/05"))).toEqual(true);
+	expect(ISO.allows(new Date("2000-05-05T04:00:00.000Z"))).toEqual(true);
 	expect(ISO.allows(new Date("2000/07/05"))).toEqual(false);
 });
 
@@ -35,5 +35,6 @@ it("invalid date", () => {
 
 it("morphable", () => {
 	const T = type(["Date", "=>", d => d.toISOString()]);
-	expect(T.from(new Date(2000, 1))).toBe("2000-02-01T05:00:00.000Z");
+	const input = new Date(2000, 1);
+	expect(T.from(input)).toBe(input.toISOString());
 });

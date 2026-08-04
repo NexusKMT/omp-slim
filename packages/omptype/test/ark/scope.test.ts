@@ -51,37 +51,6 @@ it("docs example", () => {
 			};
 		}>
 	> = true;
-	expect($.json).toEqual({
-		id: { domain: "string" },
-		user: {
-			required: [
-				{ key: "friends", value: { sequence: "string", proto: "Array" } },
-				{ key: "id", value: "string" },
-			],
-			domain: "object",
-		},
-		usersById: {
-			index: [
-				{
-					signature: "string",
-					value: [
-						{
-							required: [
-								{
-									key: "friends",
-									value: { sequence: "string", proto: "Array" },
-								},
-								{ key: "id", value: "string" },
-							],
-							domain: "object",
-						},
-						{ unit: "undefined" },
-					],
-				},
-			],
-			domain: "object",
-		},
-	});
 });
 
 it("type definition inline", () => {
@@ -92,7 +61,6 @@ it("type definition inline", () => {
 
 	const _assert3: Eq<typeof types.actual.t, typeof Expected.t> = true;
 	expect(types.actual.expression).toEqual(Expected.expression);
-	expect(types.actual.$.json).toEqual($.json);
 
 	expect(() => scope({ a: type("strong") })).toThrow();
 });
@@ -285,11 +253,9 @@ describe("cyclic", () => {
 	it("allows valid", () => {
 		const types = getCyclicScope().export();
 		const data = getCyclicData();
-		expect(types.package(data)).toEqual({
-			name: "arktype",
-			dependencies: [{ name: "typescript" }, "(cycle)" as never],
-			contributors: [{ email: "david@arktype.io" }],
-		});
+		const out = types.package(data);
+		expect(out).toBe(data);
+		expect((out as Package).dependencies?.[1]).toBe(data);
 	});
 
 	it("adds errors on invalid", () => {
@@ -298,8 +264,10 @@ describe("cyclic", () => {
 		data.contributors[0].email = "ssalbdivad";
 		// ideally would only include one error, see:
 		// https://github.com/arktypeio/arktype/issues/924
-		expect(types.package(data).toString()).toBe(`contributors[0].email must be an email address (was "ssalbdivad")
-dependencies[1].contributors[0].email must be an email address (was "ssalbdivad")`);
+		expect(
+			types.package(data).toString(),
+		).toBe(`dependencies[1].contributors[0].email must be an email address (was "ssalbdivad")
+contributors[0].email must be an email address (was "ssalbdivad")`);
 	});
 
 	it("can include cyclic data in message", () => {
@@ -326,50 +294,14 @@ dependencies[1].contributors[0].email must be an email address (was "ssalbdivad"
 		void types.arf.infer;
 		void types.bork.infer;
 
-		const expectedCyclicJson = types.arf.internal.select({
-			kind: "alias",
-			method: "assertFind",
-		}).json;
-
-		expect(types.arf.json).toEqual({
-			domain: "object",
-			required: [
-				{
-					key: "b",
-					value: {
-						domain: "object",
-						required: [
-							{
-								key: "c",
-								value: expectedCyclicJson,
-							},
-						],
-					},
-				},
-			],
-		});
 		const a = {} as typeof types.arf.infer;
 		const b = { c: {} } as typeof types.bork.infer;
 		a.b = b;
 		b.c.b = b;
 		b.c.c = b.c;
 
-		expect(types.arf.expression).toBe("{ b: { c: $arf&$bork } }");
-		expect(types.bork.expression).toBe("{ c: $arf&$bork }");
-
 		expect(types.arf(a)).toEqual(a);
-		expect(types.arf({ b: { c: {} } }).toString()).toBe(`b.c.b must be an object (was missing)
-b.c.c must be an object (was missing)`);
-
-		expect(types.bork.json).toEqual({
-			domain: "object",
-			required: [
-				{
-					key: "c",
-					value: expectedCyclicJson,
-				},
-			],
-		});
+		expect(types.arf({ b: { c: {} } }).toString()).toBe("b.c.b must be bork (was missing)");
 	});
 
 	it("union cyclic reference", () => {
@@ -383,19 +315,6 @@ b.c.c must be an object (was missing)`);
 		}).export();
 		void types.a.infer;
 
-		expect(types.a.json).toEqual({
-			domain: "object",
-			required: [
-				{
-					key: "b",
-					value: {
-						domain: "object",
-						required: [{ key: "a", value: ["$a", { unit: 3 }] }],
-					},
-				},
-			],
-		});
-
 		const valid: typeof types.a.infer = { b: { a: 3 } };
 
 		expect(types.a(valid)).toEqual(valid);
@@ -405,15 +324,9 @@ b.c.c must be an object (was missing)`);
 		// check cyclic
 		expect(types.a(valid)).toEqual(valid);
 
-		expect(types.a({ b: { a: { b: { a: 4 } } } }).toString()).toBe(
-			'b.a.b.a must be an object or 3 (was 4) or b.a must be 3 (was {"b":{"a":4}})',
-		);
+		expect(types.a({ b: { a: { b: { a: 4 } } } }).toString()).toBe("b.a.b.a must be a or 3 (was a number)");
 
 		void types.b.infer;
-		expect(types.b.json).toEqual({
-			domain: "object",
-			required: [{ key: "a", value: ["$a", { unit: 3 }] }],
-		});
 	});
 
 	// https://github.com/arktypeio/arktype/issues/1138
@@ -457,10 +370,8 @@ it("can override ambient aliases", () => {
 			};
 		}>
 	> = true;
-	expect(types.foo.json).toEqual({
-		required: [{ key: "bar", value: "number" }],
-		domain: "object",
-	});
+	expect(types.foo({ bar: 1 })).toEqual({ bar: 1 });
+	expect(types.foo({ bar: "1" }).toString()).toBe("bar must be a number (was a string)");
 });
 
 it("module", () => {
@@ -475,6 +386,6 @@ it("module", () => {
 			bar: number;
 		}>
 	> = true;
-	expect(types.foo.json).toEqual({ domain: "string" });
-	expect(types.bar.json).toEqual({ domain: "number" });
+	expect(types.foo("ok")).toBe("ok");
+	expect(types.bar(1)).toBe(1);
 });

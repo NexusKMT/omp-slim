@@ -5,7 +5,7 @@ import type { Eq } from "./type-assert";
 it("two types", () => {
 	const T = type("boolean&true");
 	const _1: Eq<typeof T.infer, true> = true;
-	expect(T.json).toBe(type("true").json);
+	expect(T.json).toEqual(type("true").json);
 });
 
 it("intersection parsed before union", () => {
@@ -72,9 +72,7 @@ it("double and", () => {
 });
 
 it("implicit never", () => {
-	expect(() => type("string&number")).toThrow(
-		"ParseError: Intersection of string and number results in an unsatisfiable type",
-	);
+	expect(() => type("string&number")).toThrow("intersection of string and number is unsatisfiable");
 });
 
 it("intersection with never", () => {
@@ -106,5 +104,5 @@ it("never subtype comparisons", () => {
 
 	expect(type.never.extends(MyType)).toEqual(true);
 
-	expect(MyType.internal.subsumes(type.never)).toEqual(true);
+	expect(MyType.extends(type.never)).toEqual(false);
 });

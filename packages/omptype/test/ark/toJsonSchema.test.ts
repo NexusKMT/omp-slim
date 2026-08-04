@@ -2,11 +2,10 @@ import { describe, expect, it } from "bun:test";
 import { type } from "@oh-my-pi/omptype/ark";
 
 describe("target option", () => {
-	it("generates draft-2020-12 schema by default", () => {
+	it("omits the dialect until a target is requested", () => {
 		const T = type({ foo: "string" });
 		const schema = T.toJsonSchema();
 		expect(schema).toEqual({
-			$schema: "https://json-schema.org/draft/2020-12/schema",
 			type: "object",
 			properties: { foo: { type: "string" } },
 			required: ["foo"],

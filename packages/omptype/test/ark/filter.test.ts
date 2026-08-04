@@ -10,11 +10,6 @@ it("applies to input", () => {
 
 	const _t: Eq<typeof ParseLongNumber.t, (In: string) => number> = true;
 
-	expect(ParseLongNumber.json).toEqual({
-		in: { domain: "string", predicate: ["$ark.stringIsLong"] },
-		morphs: ["$ark.parseNumber"],
-	});
-
 	expect(ParseLongNumber("123456")).toEqual(123456);
 	expect(String(ParseLongNumber("123"))).toBe('must be valid according to stringIsLong (was "123")');
 	expect(String(ParseLongNumber(123456))).toBe("must be a string (was a number)");
@@ -25,11 +20,6 @@ it("predicate inferred on input", () => {
 	const ParseIntegerLike = type("string").pipe(parseNumber).filter(stringIsIntegerLike);
 
 	const _t: Eq<typeof ParseIntegerLike.t, (In: `${bigint}`) => number> = true;
-
-	expect(ParseIntegerLike.json).toEqual({
-		in: { domain: "string", predicate: ["$ark.stringIsIntegerLike"] },
-		morphs: ["$ark.parseNumber"],
-	});
 
 	expect(ParseIntegerLike("123456")).toEqual(123456);
 	expect(String(ParseIntegerLike("3.14159"))).toBe('must be valid according to stringIsIntegerLike (was "3.14159")');

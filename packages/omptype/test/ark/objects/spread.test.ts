@@ -9,13 +9,8 @@ it("within scope", () => {
 	}).export();
 
 	const _type1: Eq<typeof s.admin.infer, { isAdmin: true; name: string }> = true;
-	expect(s.admin.json).toEqual({
-		domain: "object",
-		required: [
-			{ key: "isAdmin", value: { unit: true } },
-			{ key: "name", value: "string" },
-		],
-	});
+	expect(s.admin({ isAdmin: true, name: "root" })).toEqual({ isAdmin: true, name: "root" });
+	expect(s.admin({ isAdmin: false, name: "root" }).toString()).toContain("isAdmin must be true");
 });
 
 it("from another `type` call", () => {
@@ -23,13 +18,7 @@ it("from another `type` call", () => {
 	const Admin = type({ "...": User, isAdmin: "true" });
 
 	const _type3: Eq<typeof Admin.infer, { isAdmin: true; name: string }> = true;
-	expect(Admin.json).toEqual({
-		domain: "object",
-		required: [
-			{ key: "isAdmin", value: { unit: true } },
-			{ key: "name", value: "string" },
-		],
-	});
+	expect(Admin({ isAdmin: true, name: "root" })).toEqual({ isAdmin: true, name: "root" });
 });
 
 it("from an object literal", () => {
@@ -50,16 +39,8 @@ it("from an object literal", () => {
 		}
 	> = true;
 
-	expect(T.json).toEqual({
-		domain: "object",
-		required: [
-			{
-				key: "inherited",
-				value: [{ unit: false }, { unit: true }],
-			},
-			{ key: "overridden", value: "number" },
-		],
-	});
+	expect(T({ inherited: false, overridden: 1 })).toEqual({ inherited: false, overridden: 1 });
+	expect(T({ inherited: false, overridden: "wrong" }).toString()).toContain("overridden must be a number");
 });
 
 it("escaped key", () => {
@@ -69,17 +50,12 @@ it("escaped key", () => {
 
 	const _type7: Eq<typeof T.infer, { "...": string }> = true;
 
-	expect(T.json).toEqual({
-		domain: "object",
-		required: [{ key: "...", value: "string" }],
-	});
+	expect(T({ "...": "ok" })).toEqual({ "...": "ok" });
 });
 
 it("with non-object", () => {
 	// @ts-expect-error
-	expect(() => type({ "...": "string" })).toThrow(
-		"Spread operand must resolve to an object literal type (was string)",
-	);
+	expect(() => type({ "...": "string" })).toThrow("object spread must resolve to an object literal (was a string)");
 });
 
 // this is a regression test to ensure nodes are handled even if they aren't just an object
@@ -90,13 +66,8 @@ it("with complex type", () => {
 	});
 
 	const _type10: Eq<typeof AdminUser.infer, { isAdmin: true; name: string }> = true;
-	expect(AdminUser.json).toEqual({
-		domain: "object",
-		required: [
-			{ key: "isAdmin", value: { unit: true } },
-			{ key: "name", value: "string" },
-		],
-	});
+	expect(AdminUser({ name: "root", isAdmin: true })).toEqual({ name: "root", isAdmin: true });
+	expect(AdminUser({ name: "root", isAdmin: false }).toString()).toContain("isAdmin must be true");
 });
 
 it("object keyword treated as empty", () => {
@@ -111,7 +82,7 @@ it("object keyword treated as empty", () => {
 			foo: string;
 		}
 	> = true;
-	expect(T.expression).toBe("{ foo: string }");
+	expect(T({ foo: "ok" })).toEqual({ foo: "ok" });
 });
 
 it("narrowed object keyword treated as empty", () => {
@@ -126,7 +97,7 @@ it("narrowed object keyword treated as empty", () => {
 			foo: string;
 		}
 	> = true;
-	expect(T.expression).toBe("{ foo: string }");
+	expect(T({ foo: "ok" })).toEqual({ foo: "ok" });
 });
 
 it("errors on proto node", () => {
@@ -135,7 +106,7 @@ it("errors on proto node", () => {
 			"...": "Date",
 			foo: "string",
 		}),
-	).toThrow("Spread operand must resolve to an object literal type (was Date)");
+	).toThrow("object spread must resolve to an object literal (was a Date)");
 });
 
 it.todo("autocompletes shallow string");

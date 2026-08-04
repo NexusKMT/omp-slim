@@ -28,5 +28,5 @@ it("chained", () => {
 
 	const _0: Eq<typeof T.t, { [x: string]: number | undefined; foo?: 1; bar?: 1 }> = true;
 
-	expect(T.expression).toEqual("{ [string]: number, bar?: 1, foo?: 1 }");
+	expect(T.expression).toEqual("{ [string]: number, foo?: 1, bar?: 1 }");
 });

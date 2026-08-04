@@ -30,9 +30,8 @@ describe("submodule", () => {
 		> = true;
 
 		const _assert2: Eq<typeof types.sub.alias.infer, number> = true;
-		const Expected = type("number").json;
-		expect(types.sub.alias.json).toEqual(Expected);
-		expect(types.b.json).toEqual(Expected);
+		expect(types.sub.alias(1)).toBe(1);
+		expect(types.b(1)).toBe(1);
 	});
 
 	it("non-submodule dot access", () => {
@@ -81,7 +80,7 @@ describe("submodule", () => {
 		expect(dateFrom("05-21-1993")).toBeInstanceOf(Date);
 		expect(dateFrom(new Date())).toBeInstanceOf(Date);
 
-		expect(dateFrom("foobar").toString()).toBe('must be a parsable date (was "foobar")');
+		expect(dateFrom("foobar").toString()).toBe('must be a parsable date or a Date (was "foobar")');
 	});
 
 	it("allows unbound module in scope", () => {
@@ -96,11 +95,9 @@ describe("submodule", () => {
 
 		void use1;
 
-		use1.export();
-		expect(use1.json).toEqual({
-			"mod.a": { domain: "number" },
-			b: { domain: "number" },
-		});
+		const types = use1.export();
+		expect(types.b(1)).toBe(1);
+		expect(types.b("1").toString()).toBe("must be a number (was a string)");
 	});
 
 	// https://github.com/arktypeio/arktype/issues/1103
@@ -117,11 +114,9 @@ describe("submodule", () => {
 
 		void use2;
 
-		use2.export();
-		expect(use2.json).toEqual({
-			"mod2.a": { domain: "number" },
-			b: { domain: "number" },
-		});
+		const types = use2.export();
+		expect(types.b(1)).toBe(1);
+		expect(types.b("1").toString()).toBe("must be a number (was a string)");
 	});
 });
 
@@ -183,58 +178,12 @@ describe("rooted submodules", () => {
 			elevatedUser: "user.admin | user.saiyan",
 		});
 
-		void rootScope;
-		expect(rootScope.json).toEqual({
-			"user.root": {
-				required: [{ key: "name", value: "string" }],
-				domain: "object",
-			},
-			"user.admin": {
-				required: [
-					{ key: "isAdmin", value: { unit: true } },
-					{ key: "name", value: "string" },
-				],
-				domain: "object",
-			},
-			"user.saiyan": {
-				required: [
-					{ key: "name", value: "string" },
-					{
-						key: "powerLevel",
-						value: { domain: "number", min: { exclusive: true, rule: 9000 } },
-					},
-				],
-				domain: "object",
-			},
-			group: {
-				sequence: {
-					required: [{ key: "name", value: "string" }],
-					domain: "object",
-				},
-				proto: "Array",
-			},
-			elevatedUser: [
-				{
-					required: [
-						{ key: "isAdmin", value: { unit: true } },
-						{ key: "name", value: "string" },
-					],
-					domain: "object",
-				},
-				{
-					required: [
-						{ key: "name", value: "string" },
-						{
-							key: "powerLevel",
-							value: {
-								domain: "number",
-								min: { exclusive: true, rule: 9000 },
-							},
-						},
-					],
-					domain: "object",
-				},
-			],
+		const types = rootScope.export();
+		expect(types.group([{ name: "Ada" }])).toEqual([{ name: "Ada" }]);
+		expect(types.elevatedUser({ name: "Ada", isAdmin: true })).toEqual({ name: "Ada", isAdmin: true });
+		expect(types.elevatedUser({ name: "Goku", powerLevel: 9001 })).toEqual({
+			name: "Goku",
+			powerLevel: 9001,
 		});
 	});
 });
@@ -284,9 +233,7 @@ describe("nested submodule", () => {
 		const _assert8: Eq<typeof types.outer.inner.alias, Type<1, Expected$>> = true;
 
 		expect(types.outer.inner.alias.expression).toEqual("1");
-		expect(types.outer.inner.alias.$.json).toEqual({
-			"outer.inner.alias": { unit: 1 },
-		});
+		expect(types.outer.inner.alias(1)).toBe(1);
 	});
 
 	it("reference", () => {

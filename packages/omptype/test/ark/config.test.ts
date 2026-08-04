@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { scope, type } from "@oh-my-pi/omptype/ark";
-
+import type { Eq } from "./type-assert";
 
 it("tuple expression", () => {
 	const description = "a series of characters";
@@ -10,10 +10,10 @@ it("tuple expression", () => {
 			a: "a",
 		},
 	}).export();
-	expect<string>(types.a.infer);
+	const _tupleAInference: Eq<typeof types.a.infer, string> = true;
 	expect(types.a.description).toEqual(description);
 	expect(types.a(1).toString()).toEqual("must be a series of characters (was a number)");
-	expect<{ a: string }>(types.b.infer);
+	const _tupleBInference: Eq<typeof types.b.infer, { a: string }> = true;
 	expect(types.b({ a: true }).toString()).toEqual("a must be a series of characters (was boolean)");
 });
 
@@ -22,7 +22,7 @@ it("tuple expression at path", () => {
 	const T = type({
 		monster: ["196883", "@", description],
 	});
-	expect<{ monster: 196883 }>(T.infer);
+	const _tuplePathInference: Eq<typeof T.infer, { monster: 196883 }> = true;
 	expect(T.description).toEqual("{ monster: the number of dimensions in the monster group }");
 	expect(T({ monster: 196882 }).toString()).toEqual(
 		"monster must be the number of dimensions in the monster group (was 196882)",
@@ -31,7 +31,7 @@ it("tuple expression at path", () => {
 
 it("anonymous type config", () => {
 	const T = type(type("true", "@", { description: "unfalse" }));
-	expect<true>(T.infer);
+	const _anonymousConfigInference: Eq<typeof T.infer, true> = true;
 	expect(T(false).toString()).toEqual("must be unfalse (was false)");
 });
 
@@ -43,7 +43,7 @@ it("anonymous type config at path", () => {
 
 it("anonymous type thunk", () => {
 	const T = type(() => type("false", "@", { description: "untrue" }));
-	expect<false>(T.infer);
+	const _anonymousThunkInference: Eq<typeof T.infer, false> = true;
 	expect(T.description).toEqual("untrue");
 });
 
@@ -51,7 +51,7 @@ it("anonymous type thunk at path", () => {
 	const T = type({
 		myKey: () => type("false", "@", { description: "untrue" }),
 	});
-	expect<{ myKey: false }>(T.infer);
+	const _anonymousThunkPathInference: Eq<typeof T.infer, { myKey: false }> = true;
 	expect(T({ myKey: true }).toString()).toEqual("myKey must be untrue (was true)");
 });
 
@@ -62,7 +62,7 @@ it("shallow node writer config", () => {
 		problem: ctx => `custom problem ${ctx.expected} ${ctx.actual}`,
 		message: ctx => `custom message ${ctx.problem}`,
 	});
-	expect<1>(CustomOne.infer);
+	const _shallowWriterInference: Eq<typeof CustomOne.infer, 1> = true;
 	expect(CustomOne(2).toString()).toEqual("custom message custom problem custom expected 1 custom actual 2");
 });
 
@@ -73,7 +73,7 @@ it("string node configs", () => {
 		problem: "was terrible",
 		message: "root was terrible",
 	});
-	expect<2>(CustomTwo.infer);
+	const _stringConfigInference: Eq<typeof CustomTwo.infer, 2> = true;
 	expect(CustomTwo(1).toString()).toEqual("root was terrible");
 });
 
@@ -84,7 +84,7 @@ it("node writer config works on nested constraint", () => {
 		problem: ctx => `custom problem ${ctx.expected} ${ctx.actual}`,
 		message: ctx => `custom message ${ctx.problem}`,
 	});
-	expect<number>(CustomEven.infer);
+	const _nestedWriterInference: Eq<typeof CustomEven.infer, number> = true;
 	expect(CustomEven(3).toString()).toEqual("custom message custom problem custom expected even custom actual 3");
 });
 
@@ -105,11 +105,6 @@ it("applies config to shallow descendants", () => {
 	// should give the shallow custom error
 	expect(User(null).toString()).toEqual("must be a valid user (was null)");
 });
-
-});
-
-
-
 
 it("docs actual example", () => {
 	// avoid logging "was supersecret" for password
@@ -156,7 +151,7 @@ describe("select", () => {
 		const T = Base.configure({ description: "root-only" }, "self");
 		expect(T.description).toBe("root-only");
 		expect(T("not an object").toString()).toBe("must be root-only (was a string)");
-		expect(T({ foo: 5 }).toString()).toBe("foo must be a string (was 5)");
+		expect(T({ foo: 5 }).toString()).toBe("foo must be a string (was a number)");
 	});
 	describe("completions", () => {
 		// based on completion tests at ark/schema/select.test.ts

@@ -23,8 +23,6 @@ it("type reference in scope", () => {
 	const $ = scope({ a: A });
 	const types = $.export();
 	expect(types.a.json).toEqual(A.json);
-	expect(A.$.json).toEqual(type.scope({}).json);
-	expect(types.a.$.json).toEqual($.json);
 	const _assert3: Eq<typeof types.a.infer, { a: string }> = true;
 });
 

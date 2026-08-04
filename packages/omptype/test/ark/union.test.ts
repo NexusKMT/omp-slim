@@ -103,6 +103,15 @@ it("length stress", () => {
 
 	expect(T.json).toEqual([
 		{ unit: 0 },
+		{ unit: 1 },
+		{ unit: 2 },
+		{ unit: 3 },
+		{ unit: 4 },
+		{ unit: 5 },
+		{ unit: 6 },
+		{ unit: 7 },
+		{ unit: 8 },
+		{ unit: 9 },
 		{ unit: 10 },
 		{ unit: 11 },
 		{ unit: 12 },
@@ -113,7 +122,6 @@ it("length stress", () => {
 		{ unit: 17 },
 		{ unit: 18 },
 		{ unit: 19 },
-		{ unit: 1 },
 		{ unit: 20 },
 		{ unit: 21 },
 		{ unit: 22 },
@@ -124,7 +132,6 @@ it("length stress", () => {
 		{ unit: 27 },
 		{ unit: 28 },
 		{ unit: 29 },
-		{ unit: 2 },
 		{ unit: 30 },
 		{ unit: 31 },
 		{ unit: 32 },
@@ -135,50 +142,29 @@ it("length stress", () => {
 		{ unit: 37 },
 		{ unit: 38 },
 		{ unit: 39 },
-		{ unit: 3 },
 		{ unit: 40 },
 		{ unit: 41 },
 		{ unit: 42 },
 		{ unit: 43 },
 		{ unit: 44 },
 		{ unit: 45 },
-		{ unit: 4 },
-		{ unit: 5 },
-		{ unit: 6 },
-		{ unit: 7 },
-		{ unit: 8 },
-		{ unit: 9 },
 	]);
 });
-
-const expected = () =>
-	rootSchema([
-		{
-			domain: "object",
-			required: {
-				key: "a",
-				value: { domain: "string" },
-			},
-		},
-		{
-			domain: "object",
-			required: {
-				key: "b",
-				value: { domain: "number" },
-			},
-		},
-	]).json;
 
 it("tuple", () => {
 	const T = type([{ a: "string" }, "|", { b: "number" }]);
 	const _7: Eq<typeof T.infer, { a: string } | { b: number }> = true;
-	expect(T.json).toEqual(expected());
+	expect(T.allows({ a: "ok" })).toBe(true);
+	expect(T.allows({ b: 1 })).toBe(true);
+	expect(T.allows({ a: 1 })).toBe(false);
 });
 
 it("root", () => {
 	const T = type({ a: "string" }, "|", { b: "number" });
 	const _8: Eq<typeof T.infer, { a: string } | { b: number }> = true;
-	expect(T.json).toEqual(expected());
+	expect(T.allows({ a: "ok" })).toBe(true);
+	expect(T.allows({ b: 1 })).toBe(true);
+	expect(T.allows({ b: "bad" })).toBe(false);
 });
 
 it("chained", () => {
@@ -192,7 +178,9 @@ it("chained", () => {
 				b: number;
 		  }
 	> = true;
-	expect(T.json).toEqual(expected());
+	expect(T.allows({ a: "ok" })).toBe(true);
+	expect(T.allows({ b: 1 })).toBe(true);
+	expect(T.allows({ a: 1, b: "bad" })).toBe(false);
 });
 
 it.todo("root autocompletion");
@@ -227,11 +215,8 @@ it("chained bad reference", () => {
 
 it("chained description", () => {
 	const T = type("number|string").describe("My custom type");
-	expect(T.json).toEqual({
-		branches: [
-			{ meta: "My custom type", domain: "number" },
-			{ meta: "My custom type", domain: "string" },
-		],
-		meta: "My custom type",
-	});
+	expect(T.description).toBe("My custom type");
+	expect(T.toJsonSchema().description).toBe("My custom type");
+	expect(T.allows(1)).toBe(true);
+	expect(T.allows("one")).toBe(true);
 });

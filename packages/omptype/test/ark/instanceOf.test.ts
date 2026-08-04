@@ -1,16 +1,17 @@
 import { describe, expect, it } from "bun:test";
 import { type } from "@oh-my-pi/omptype/ark";
+import type { Eq } from "./type-assert";
 
 describe("tuple expression", () => {
 	it("base", () => {
 		const T = type(["instanceof", Error]);
-		expect<Error>(T.infer);
-		const Expected = rootSchema(Error);
+		const _1: Eq<typeof T.infer, Error> = true;
+		const Expected = type.instanceOf(Error);
 		expect(T.json).toEqual(Expected.json);
 		const e = new Error();
 		expect(T(e)).toEqual(e);
 		expect(T(e)).toEqual(e);
-		expect(T({}).toString()).toEqual("must be an Error (was object)");
+		expect(T({}).toString()).toEqual("must be an Error (was an object)");
 		expect(T(undefined).toString()).toEqual("must be an Error (was undefined)");
 	});
 
@@ -19,7 +20,7 @@ describe("tuple expression", () => {
 
 		const Expected = type(["instanceof", Error]);
 
-		expect<typeof Expected.t>(T.t);
+		const _2: Eq<typeof T.t, typeof Expected.t> = true;
 		expect(T.expression).toEqual(Expected.expression);
 	});
 
@@ -40,17 +41,17 @@ describe("tuple expression", () => {
 			foo = "";
 		}
 		const T = type(["instanceof", Base]);
-		expect<Base>(T.infer);
+		const _3: Eq<typeof T.infer, Base> = true;
 		const sub = new Sub();
 		expect(T(sub)).toEqual(sub);
 	});
 	it("multiple branches", () => {
 		const T = type(["instanceof", Date, Array]);
-		expect<Date | unknown[]>(T.infer);
+		const _4: Eq<typeof T.infer, Date | unknown[]> = true;
 	});
 	it("non-constructor", () => {
-		// @ts-expect-error
-		expect(() => type(["instanceof", () => {}])).toThrow("Type '() => void' is not assignable to type");
+		// @ts-expect-error exercises runtime validation for untyped JavaScript callers
+		expect(() => type(["instanceof", () => {}])).toThrow("instanceof operands must be constructors");
 	});
 
 	// If perf cost too high can use global type config to expand ArkEnv.preserve
@@ -59,53 +60,51 @@ describe("tuple expression", () => {
 			isArk = true;
 		}
 		const Ark = type(["instanceof", ArkClass]);
-		expect<ArkClass>(Ark.t);
+		const _5: Eq<typeof Ark.t, ArkClass> = true;
 		// not expanded since there are no morphs
-		expect(Ark.infer).toEqual("ArkClass");
-		expect(Ark.in.infer).toEqual("ArkClass");
+		const _6: Eq<typeof Ark.infer, ArkClass> = true;
+		const _7: Eq<typeof Ark.in.infer, ArkClass> = true;
 		const a = new ArkClass();
 		expect(Ark(a)).toEqual(a);
-		expect(Ark({}).toString()).toEqual("must be an instance of ArkClass (was object)");
+		expect(Ark({}).toString()).toEqual("must be an instance of ArkClass (was an object)");
 	});
 	it("bidirectional checks doesn't break pipe inference", () => {
 		const T = type({
 			f: ["string", "=>", () => [] as unknown],
 		});
 		// Should be inferred as {f: unknown}
-		expect<{ f: unknown }>(T.infer);
+		const _8: Eq<typeof T.infer, { f: unknown }> = true;
 	});
 
 	it("class with private properties", () => {
 		class ArkClass {}
 		const Ark = type(["instanceof", ArkClass]);
 
-		expect<ArkClass>(Ark.t);
+		const _9: Eq<typeof Ark.t, ArkClass> = true;
 		// not expanded since there are no morphs
-		expect(Ark.infer).toEqual("ArkClass");
-		expect(Ark.in.infer).toEqual("ArkClass");
+		const _10: Eq<typeof Ark.infer, ArkClass> = true;
+		const _11: Eq<typeof Ark.in.infer, ArkClass> = true;
 	});
 
 	it("parse error on non-function", () => {
-		// @ts-expect-error
-		expect(() => type.instanceOf({}))
-			.throws(Proto.writeInvalidSchemaMessage({}))
-			.toThrow("not assignable to parameter of type 'Constructor<object>'");
+		// @ts-expect-error exercises runtime validation for untyped JavaScript callers
+		expect(() => type.instanceOf({})).toThrow();
 	});
 });
 
 describe("root expression", () => {
 	it("class", () => {
 		const T = type("instanceof", Error);
-		expect<Error>(T.infer);
+		const _12: Eq<typeof T.infer, Error> = true;
 		expect(T.json).toEqual(type(["instanceof", Error]).json);
 	});
 	it("instance branches", () => {
 		const T = type("instanceof", Date, Map);
-		expect<Date | Map<unknown, unknown>>(T.infer);
+		const _13: Eq<typeof T.infer, Date | Map<unknown, unknown>> = true;
 		expect(T.json).toEqual(type("Date | Map").json);
 	});
 	it("non-constructor", () => {
-		// @ts-expect-error just an assignability failure so we can't validate an error message
-		expect(() => type("instanceof", new Error())).toThrow(writeInvalidConstructorMessage("Error"));
+		// @ts-expect-error exercises runtime validation for untyped JavaScript callers
+		expect(() => type("instanceof", new Error())).toThrow("instanceof operands must be constructors");
 	});
 });

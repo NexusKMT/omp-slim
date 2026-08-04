@@ -1,6 +1,5 @@
 import { expect, it } from "bun:test";
 import { scope, type } from "@oh-my-pi/omptype/ark";
-import { keywords } from "arktype";
 import type { Eq } from "../type-assert";
 
 it("parsed", () => {
@@ -27,7 +26,7 @@ it("parsed", () => {
 
 it("invoked", () => {
 	const s = Symbol();
-	const T = keywords.Merge(
+	const T = type.keywords.Merge(
 		{
 			"[string]": "number | bigint",
 			foo: "0",

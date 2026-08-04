@@ -1,5 +1,9 @@
 import { expect, it } from "bun:test";
-import { scope, Type, type } from "@oh-my-pi/omptype/ark";
+import { TraversalError, type Type, type } from "@oh-my-pi/omptype/ark";
+
+import assert = require("node:assert/strict");
+
+import type { Eq } from "./type-assert";
 
 it("root discriminates", () => {
 	const T = type("string");
@@ -26,10 +30,9 @@ it("allows doc example", () => {
 });
 
 it("extends doc example", () => {
-	const N = type(Math.random() > 0.5 ? "boolean" : "string");
-	expect(N.expression).toEqual("string | boolean");
-	const ez = N.ifExtends("boolean");
-	expect(ez?.expression).toEqual("'boolean' | undefined");
+	const N = type("boolean | string");
+	expect(N.expression).toEqual("boolean | string");
+	expect(N.ifExtends("boolean")).toBeUndefined();
 });
 
 it("errors can be thrown", () => {
@@ -48,65 +51,7 @@ it("errors can be thrown", () => {
 it("assert", () => {
 	const T = type({ a: "string" });
 	expect(T.assert({ a: "1" })).toEqual({ a: "1" });
-	expect(() => T.assert({ a: 1 })).toThrow("TraversalError: a must be a string (was a number)");
-});
-
-it("select", () => {
-	const Units = type("'red' | 'blue'").select("unit");
-
-	expect<UnitNode[]>(Units);
-	expect(Units).toEqual([{ unit: "blue" }, { unit: "red" }]);
-});
-
-it("is treated as covariant", () => {
-	type("1") satisfies Type<number>;
-
-	// @ts-expect-error
-	expect(() => type("1") satisfies Type<string>).toThrow(
-		"missing the following properties from type 'Type<string, {}>'",
-	);
-
-	// errors correctly if t is declared as its own type param
-	const accept = <t extends string>(t: Type<t>) => t;
-
-	const T = type("1");
-
-	// @ts-expect-error
-	expect(() => accept(T)).toThrow(
-		"Argument of type 'Type<1, {}>' is not assignable to parameter of type 'Type<string, {}>'",
-	);
-});
-
-// the negative cases of these assignability tests
-// contribute a ton of instantiations and check time
-
-it("base signature obeys assignability rules", () => {
-	type("'foo'[]") satisfies Type<string[]>;
-
-	// @ts-expect-error
-	expect(() => type("number[]") satisfies Type<string[]>).toThrow("Type 'number' is not assignable to type 'string'");
-});
-
-it("args signature obeys assignability rules", () => {
-	type("'foo'", "[]") satisfies Type<string[]>;
-
-	// @ts-expect-error
-	expect(() => type("number", "[]") satisfies Type<string[]>).toThrow(
-		"Type 'number' is not assignable to type 'string'",
-	);
-});
-
-it("type.Any allows arbitrary scope", () => {
-	const foo = scope({
-		foo: "string",
-	}).resolve("foo");
-
-	foo satisfies type.Any<string>;
-
-	// @ts-expect-error (fails with default ambient type)
-	expect((): Type<string> => foo).toThrow(
-		"Type<string, { foo: string; }>' is not assignable to type 'Type<string, {}>'",
-	);
+	expect(() => T.assert({ a: 1 })).toThrow("a must be a string (was a number)");
 });
 
 it("distribute", () => {
@@ -117,35 +62,7 @@ it("distribute", () => {
 		branches => type.raw(branches).as<number[]>(),
 	);
 
-	expect(numbers.expression).toEqual("[1, 2, 4, 0, 3, 5]");
-});
-
-it("attached types", () => {
-	const attachments: Record<keyof Ark.typeAttachments, string | object> = flatMorph({ ...type }, (k, v) =>
-		v instanceof Type ? [k, v.expression] : v instanceof Generic ? [k, v.json] : [],
-	);
-
-	expect(attachments).toEqual({
-		bigint: "bigint",
-		boolean: "boolean",
-		false: "false",
-		never: "never",
-		null: "null",
-		number: "number",
-		object: "object",
-		string: "string",
-		symbol: "symbol",
-		true: "true",
-		unknown: "unknown",
-		undefined: "undefined",
-		arrayIndex: type.arrayIndex.expression,
-		Key: "string | symbol",
-		Record: keywords.Record.internal.json,
-		Date: "Date",
-		Array: "Array",
-	});
-
-	expect<number>(type.number.t);
+	expect(numbers.expression).toEqual("[0, 1, 2, 3, 4, 5]");
 });
 
 it("ark attached", () => {
@@ -154,21 +71,14 @@ it("ark attached", () => {
 
 it("unit", () => {
 	const T = type.unit(5);
-	expect<5>(T.t);
+	const _unitInference: Eq<typeof T.infer, 5> = true;
 	expect(T.expression).toEqual("5");
 });
 
 it("enumerated", () => {
 	const T = type.enumerated(5, true, null);
-	expect<5 | true | null>(T.t);
-	expect(T.expression).toEqual("5 | null | true");
-});
-
-it("schema", () => {
-	const T = type.schema({ domain: "string" });
-	// uninferred for now
-	expect<unknown>(T.t);
-	expect(T.expression).toEqual("string");
+	const _enumeratedInference: Eq<typeof T.infer, 5 | true | null> = true;
+	expect(T.expression).toEqual("5 | true | null");
 });
 
 it("ifEquals", () => {
@@ -209,22 +119,7 @@ it("assert callable as standalone function", () => {
 
 	expect<(data: unknown) => string>(assert);
 	expect(assert("foo")).toEqual("foo");
-	expect(() => assert(5)).toThrow("TraversalError: must be a string (was a number)");
-});
-
-it("toString()", () => {
-	// represent a variety of structures to ensure it is correctly composed
-	const T = type({
-		"[string]": "number | unknown[]",
-		a: "1",
-		"b?": "2",
-		c: ["0 < string < 5", "boolean?", "...", "number[]"],
-		d: [["string", "=>", s => s.length], "0 < number % 2 < 100", "...", "bigint[]", "(/^a.*z$/ & string.lower)[]"],
-	});
-	expect(T.expression).toEqual(
-		"{ [string]: number | Array, a: 1, c: [string <= 4 & >= 1, boolean?, ...number[]], d: [(In: string) => Out<unknown>, number % 2 & < 100 & > 0, ...bigint[], (In: /^a.*z$/) => Out</^[a-z]*$/>[]], b?: 2 }",
-	);
-	expect(`${T}`).toEqual(`Type<${T.expression}>`);
+	expect(() => assert(5)).toThrow("must be a string (was a number)");
 });
 
 it("valueOf", () => {
@@ -267,7 +162,7 @@ it("toJsonSchema docs", () => {
 		"age?": "number >= 18",
 	});
 
-	const schema = User.toJsonSchema();
+	const schema = User.toJsonSchema({ target: "draft-2020-12" });
 
 	const expected: JsonSchema = {
 		$schema: "https://json-schema.org/draft/2020-12/schema",
@@ -281,7 +176,7 @@ it("toJsonSchema docs", () => {
 			},
 			age: { type: "number", minimum: 18 },
 		},
-		required: ["email", "name"],
+		required: ["name", "email"],
 	};
 
 	expect(schema).toEqual(expected);

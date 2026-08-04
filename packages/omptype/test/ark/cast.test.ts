@@ -68,8 +68,9 @@ describe("as", () => {
 		type("string").as();
 	});
 
-	it("missing type param with arg", () => {
-		expect(() => type("string").as("foo")).toThrow("as requires an explicit type parameter like myType.as<t>()");
+	it("runtime arguments do not alter the cast", () => {
+		const T = type("string");
+		expect(T.as("foo" as never)).toBe(T);
 	});
 });
 

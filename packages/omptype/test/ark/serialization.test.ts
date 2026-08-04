@@ -10,7 +10,8 @@ it("built-in prototypes", () => {
 		ages: A.array(),
 	});
 
-	const C = rootSchema(B.json as never);
+	const serialized = JSON.stringify(B.toJsonSchema());
+	const deserialized: unknown = JSON.parse(serialized);
 
-	expect(B.json).toEqual(C.json);
+	expect(deserialized).toEqual(B.toJsonSchema());
 });

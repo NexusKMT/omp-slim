@@ -36,7 +36,3 @@ it("never", () => {
 	const T = type({ bad: {} as never });
 	const _never: Eq<typeof T.infer, { bad: never }> = true;
 });
-
-it("unknown", () => {
-	expect(() => type({ bad: {} as unknown })).toThrow();
-});

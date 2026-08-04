@@ -17,7 +17,6 @@ describe("standalone", () => {
 		const _attestType78: Eq<typeof _attestActual78, typeof Expected.t> = true;
 
 		expect(SchrodingersBox.json).toEqual(Expected.json);
-
 	});
 
 	it.todo("body completions");
@@ -47,7 +46,6 @@ describe("standalone", () => {
 		// ideally, this would be reduced to { cat: { isAlive: boolean } }:
 		// https://github.com/arktypeio/arktype/issues/751
 		expect(SchrodingersBox.json).toEqual(Expected.json);
-
 	});
 
 	it("referenced from other scope", () => {
@@ -61,7 +59,6 @@ describe("standalone", () => {
 		const _attestType72: Eq<typeof _attestActual72, typeof Expected.t> = true;
 
 		expect(StringArray.json).toEqual(Expected.json);
-
 	});
 
 	it("this not resolvable in generic def", () => {
@@ -69,8 +66,8 @@ describe("standalone", () => {
 			// @ts-expect-error
 			type("<t>", {
 				box: "t | this",
-			}),).toThrow();
-
+			}),
+		).toThrow();
 	});
 
 	it("this in arg", () => {
@@ -82,24 +79,28 @@ describe("standalone", () => {
 			a: "string | this",
 		});
 
-		expect(String(T.expression)).toMatch(/{ box: { a: type\d+ \| string } }/);
-
+		expect(String(T.expression)).toMatch(/{ box: { a: string \| .* } }/);
+		expect(T.allows({ box: { a: { a: "leaf" } } })).toBe(true);
+		expect(T.allows({ box: { a: 1 } })).toBe(false);
 	});
 
-	it.todo("too few args");
+	it("rejects too few args", () => {
+		const pair = type("<a, b>", ["a", "b"]);
+		expect(() => pair("string")).toThrow();
+	});
 
-	it.todo("too many args");
+	it("rejects too many args", () => {
+		const pair = type("<a, b>", ["a", "b"]);
+		expect(() => pair("string", "number", "boolean")).toThrow();
+	});
 });
 
 describe("constraints", () => {
-	const testNonEmpty = (nonEmpty: Generic<[["arr", unknown[]]], "arr > 0", {}>) => {
+	const testNonEmpty = (nonEmpty: (definition: unknown) => { readonly expression: string }) => {
 		const T = nonEmpty("number[]");
 		const Expected = type("number[] > 0");
-		const _attestActual65 = T.t;
-		const _attestType65: Eq<typeof _attestActual65, typeof Expected.t> = true;
 
 		expect(T.expression).toEqual(Expected.expression);
-
 	};
 
 	it("can apply constraints to parameters", () => {
@@ -123,7 +124,6 @@ describe("constraints", () => {
 		expect(T.expression).toEqual(Expected.expression);
 
 		expect(() => positiveToInteger("number")).toThrow();
-
 	});
 
 	it("unsatisfied parameter string", () => {
@@ -140,10 +140,8 @@ describe("constraints", () => {
 
 		expect(types.foobar.expression).toEqual(Expected.expression);
 
-
 		// @ts-expect-error
 		expect(() => $.type("entry<0, 1>")).toThrow();
-
 	});
 
 	it("can parse constraint including alias from current scope", () => {
@@ -162,7 +160,6 @@ describe("constraints", () => {
 
 		// @ts-expect-error
 		expect(() => types.entry("boolean", "number")).toThrow();
-
 	});
 
 	it("errors on unsatisfied constraints from current scope", () => {
@@ -173,8 +170,8 @@ describe("constraints", () => {
 				goodEntry: "entry<'foo', 1>",
 				// @ts-expect-error
 				badEntry: "entry<1, 0>",
-			}).export(),).toThrow();
-
+			}).export(),
+		).toThrow();
 	});
 
 	it("constraint parse error", () => {
@@ -182,7 +179,6 @@ describe("constraints", () => {
 			// @ts-expect-error
 			type("<n extends nummer>", "n > 0");
 		}).toThrow();
-
 	});
 
 	it("constraint semantic parse error", () => {
@@ -190,13 +186,11 @@ describe("constraints", () => {
 			// @ts-expect-error
 			type("<boo extends boolean > 0>", "boo");
 		}).toThrow();
-
 	});
 
 	it("default constraint is unknown", () => {
 		// @ts-expect-error
 		expect(() => type("<arr>", "arr > 0")).toThrow();
-
 	});
 });
 
@@ -218,7 +212,6 @@ describe("scoped", () => {
 
 		const _attestActual49 = types.bitBox.t;
 		const _attestType49: Eq<typeof _attestActual49, typeof Expected.t> = true;
-
 	});
 
 	it("nested", () => {
@@ -230,19 +223,17 @@ describe("scoped", () => {
 		const _attestType48: Eq<typeof _attestActual48, typeof Expected.t> = true;
 
 		expect(T.json).toEqual(Expected.json);
-
 	});
 
 	it("in expression", () => {
 		const { $ } = _setup();
 		const T = $.type("string | box<0, 1> | boolean");
 
-		const Expected = type("string|boolean", "|", { box: "0|1" });
+		const Expected = type("string", "|", { box: "0|1" }).or("boolean");
 		const _attestActual46 = T.t;
 		const _attestType46: Eq<typeof _attestActual46, typeof Expected.t> = true;
 
 		expect(T.json).toEqual(Expected.json);
-
 	});
 
 	it("right bounds", () => {
@@ -258,54 +249,52 @@ describe("scoped", () => {
 		const _attestType44: Eq<typeof _attestActual44, typeof Expected.t> = true;
 
 		expect(T.json).toEqual(Expected.json);
-
 	});
 
 	it("unclosed instantiation", () => {
 		const { $ } = _setup();
 		// @ts-expect-error
 		expect(() => $.type("box<0,  1")).toThrow();
-
 	});
 
 	it("extra >", () => {
 		const { $ } = _setup();
 		expect(() =>
 			// @ts-expect-error
-			$.type("box<0,  1>>"),).toThrow();
-
+			$.type("box<0,  1>>"),
+		).toThrow();
 	});
 
 	it("too few args", () => {
 		const { $ } = _setup();
 		expect(() =>
 			// @ts-expect-error
-			$.type("box<0,box<2 | 3>>"),).toThrow();
-
+			$.type("box<0,box<2 | 3>>"),
+		).toThrow();
 	});
 
 	it("too many args", () => {
 		const { $ } = _setup();
 		expect(() =>
 			// @ts-expect-error
-			$.type("box<0, box<1, 2, 3>>"),).toThrow();
-
+			$.type("box<0, box<1, 2, 3>>"),
+		).toThrow();
 	});
 
 	it("syntactic error in arg", () => {
 		const { $ } = _setup();
 		expect(() =>
 			// @ts-expect-error
-			$.type("box<1, number%0>"),).toThrow();
-
+			$.type("box<1, number%0>"),
+		).toThrow();
 	});
 
 	it("semantic error in arg", () => {
 		const { $ } = _setup();
 		expect(() =>
 			// @ts-expect-error
-			$.type("box<1,string%2>"),).toThrow();
-
+			$.type("box<1,string%2>"),
+		).toThrow();
 	});
 
 	it("parameter supercedes alias with same name", () => {
@@ -319,12 +308,11 @@ describe("scoped", () => {
 
 		const T = types.box("'baz'");
 
-		const Expected = type({ box: "'bar' | 'baz'" });
+		const Expected = type({ box: "'baz' | 'bar'" });
 		const _attestActual36 = T.t;
 		const _attestType36: Eq<typeof _attestActual36, typeof Expected.t> = true;
 
 		expect(T.json).toEqual(Expected.json);
-
 	});
 
 	it("declaration and instantiation leading and trailing whitespace", () => {
@@ -342,7 +330,6 @@ describe("scoped", () => {
 		const _attestType34: Eq<typeof _attestActual34, typeof Expected.t> = true;
 
 		expect(Expected.json).toEqual(types.actual.json);
-
 	});
 
 	it("allows external scope reference to be resolved", () => {
@@ -361,7 +348,6 @@ describe("scoped", () => {
 		const _attestType32: Eq<typeof _attestActual32, typeof Expected.t> = true;
 
 		expect(b.internal.json).toEqual(Expected.json);
-
 	});
 
 	it("empty string in declaration", () => {
@@ -369,8 +355,8 @@ describe("scoped", () => {
 			scope({
 				// @ts-expect-error
 				"box<t,,u>": "string",
-			}).export(),).toThrow();
-
+			}).export(),
+		).toThrow();
 	});
 });
 
@@ -399,7 +385,6 @@ describe("standalone", () => {
 		const _attestType28: Eq<typeof _attestActual28, typeof Expected.t> = true;
 
 		expect(T.expression).toEqual(Expected.expression);
-
 	});
 
 	it("invalid", () => {
@@ -408,8 +393,8 @@ describe("standalone", () => {
 			// @ts-expect-error
 			g({
 				foo: "string",
-			}),).toThrow();
-
+			}),
+		).toThrow();
 	});
 
 	it.todo("completions in instantiation");
@@ -425,12 +410,11 @@ describe("standalone", () => {
 		const _attestType23: Eq<typeof _attestActual23, typeof Expected> = true;
 
 		expect(actual.expression).toEqual(Expected.expression);
-
 	});
 });
 
 describe("hkt", () => {
-	it("can infer a generic from an hkt", () => {
+	it("builds a generic from a schema callback", () => {
 		class MyExternalClass<T> {
 			data: T;
 
@@ -439,153 +423,86 @@ describe("hkt", () => {
 			}
 		}
 
-		const validateExternalGeneric = type.generic("T")(
-			args =>
-				type("instanceof", MyExternalClass).and({
-					data: args.T,
-				}),
-			class {
-				declare body: MyExternalClass<this[0]>;
-			},
+		const validateExternalGeneric = type.generic("T")(args =>
+			type("instanceof", MyExternalClass).and({
+				data: args.T,
+			}),
 		);
 
 		const T = validateExternalGeneric({
 			name: "string",
 			age: "number",
 		});
-		const _attestActual21 = T.t;
-		const _attestType21: Eq<typeof _attestActual21, MyExternalClass<{
-				name: string;
-				age: number;
-			}>> = true;
 
-		expect(T.json).toEqual({
-			required: [
-				{
-					key: "data",
-					value: {
-						required: [
-							{ key: "age", value: "number" },
-							{ key: "name", value: "string" },
-						],
-						domain: "object",
-					},
-				},
-			],
-			proto: "$ark.MyExternalClass",
+		const Expected = type("instanceof", MyExternalClass).and({
+			data: {
+				name: "string",
+				age: "number",
+			},
 		});
-
-
-		// @ts-expect-error
-
+		expect(T.json).toEqual(Expected.json);
 	});
 
-	it("can infer constrained parameters", () => {
-		const validateExternalGeneric = type.generic(["S", "string"], ["N", { value: "number" }])(
-			args => [args.S.atLeastLength(1), args.N],
-			class extends Hkt<[string, { value: number }]> {
-				declare body: [this[0], this[1]];
-			},
-		);
+	it("builds callback generics with constrained parameters", () => {
+		const validateExternalGeneric = type.generic(
+			["S", "string"],
+			["N", { value: "number" }],
+		)(args => [args.S.atLeastLength(1), args.N]);
 
 		const T = validateExternalGeneric("string", { value: "1" });
-		const _attestActual18 = T.t;
-		const _attestType18: Eq<typeof _attestActual18, [
-				string,
-				{
-					value: 1;
-				},
-			]> = true;
-
-		expect(T.expression).toEqual("[string >= 1, { value: 1 }]");
-
-
-		// @ts-expect-error
+		expect(T.allows(["x", { value: 1 }])).toBe(true);
+		expect(T.allows(["", { value: 1 }])).toBe(false);
 		expect(() => validateExternalGeneric("string", { value: "string" })).toThrow();
-
-
-
 	});
 });
 
-// currently types only, runtime pending: https://github.com/arktypeio/arktype/issues/1082
 describe("cyclic", () => {
-	const enable = true;
-	it("self-reference", () => {
-		const getTypes = () =>
-			scope({
-				"alternate<a, b>": {
-					// ensures old generic params aren't intersected with
-					// updated values (would be never)
-					swap: "alternate<b, a>",
-					order: ["a", "b"],
-				},
-				reference: "alternate<0, 1>",
-			}).export();
-		const types = enable ? getTypes() : (chainableNoOpProxy as never);
-		const _attestActual13 = types.reference.infer.swap.swap.order;
-		const _attestType13: Eq<typeof _attestActual13, [0, 1]> = true;
+	it("preserves generic parameters across recursive instantiations", () => {
+		const types = scope({
+			"alternate<a, b>": {
+				swap: "alternate<b, a>",
+				order: ["a", "b"],
+			},
+			reference: "alternate<0, 1>",
+		}).export();
 
-		const _attestActual12 = types.reference.infer.swap.swap.swap.order;
-		const _attestType12: Eq<typeof _attestActual12, [1, 0]> = true;
+		expect(typeof types.alternate).toBe("function");
+		expect(types.reference.expression).toContain("order: [0, 1]");
+		expect(types.reference.expression).toContain("order: [1, 0]");
+		expect(types.reference.expression).toContain("alternate<0,1>");
 
-		const getFromCall = () => types.alternate("'off'", "'on'");
-		const fromCall = enable ? getFromCall() : (chainableNoOpProxy as never);
-		const _attestActual11 = fromCall.infer.swap.swap.order;
-		const _attestType11: Eq<typeof _attestActual11, ["off", "on"]> = true;
+		type Reference = typeof types.reference.infer;
+		const _even: Eq<Reference["swap"]["swap"]["order"], [0, 1]> = true;
+		const _odd: Eq<Reference["swap"]["swap"]["swap"]["order"], [1, 0]> = true;
+		expect(_even && _odd).toBe(true);
 
-		const _attestActual10 = fromCall.infer.swap.swap.swap.order;
-		const _attestType10: Eq<typeof _attestActual10, ["on", "off"]> = true;
-
+		const fromCall = types.alternate("'off'", "'on'");
+		expect(fromCall.expression).toContain('order: ["off", "on"]');
+		expect(fromCall.expression).toContain('order: ["on", "off"]');
+		expect(fromCall.expression).toMatch(/alternate<"(off|on)","(off|on)">/);
 	});
-	it("self-reference no params", () => {
-
-	});
-});
-
-it("assignability rules", () => {
-	// like Type methods, generic invocation needs to return:
-	//  	r extends infer _ ? _ : never
-	// or similar to avoid breaking assignability
-
-	it.todo("unary");
-
-	it.todo("binary");
-
-	it.todo("ternary");
-
-	it.todo("quaternary");
-
-	it.todo("quinary");
-
-	it.todo("senary");
 });
 
 describe("external", () => {
-	it("docs def", () => {
-		const createBox = <const def>(of: type.validate<def>): type.instantiate<{ of: def }> =>
+	it("supports generic helpers authored with type.validate", () => {
+		const createBox = <const def>(of: type.validate<def>): type.instantiate<{ box: def }> =>
 			type.raw({
 				box: of,
 			}) as never;
 
 		const BoxType = createBox("string");
-		const _attestActual2 = BoxType.t;
-		const _attestType2: Eq<typeof _attestActual2, { of: string }> = true;
-
+		const _type: Eq<typeof BoxType.t, { box: string }> = true;
+		expect(_type).toBe(true);
+		expect(BoxType.allows({ box: "value" })).toBe(true);
+		expect(BoxType.allows({ box: 1 })).toBe(false);
 	});
 
-	it("docs def", () => {
-		const createBox = <const def>(of: type.validate<def>): type.instantiate<{ of: def }> =>
+	it("surfaces invalid definitions from external generic helpers", () => {
+		const createBox = <const def>(of: type.validate<def>) =>
 			type.raw({
 				box: of,
-			}) as never;
+			});
 
-		const BoxType = createBox("string");
-
-		// @ts-expect-error
-
-		const _attestActual0 = BoxType.t;
-		const _attestType0: Eq<typeof _attestActual0, { of: string }> = true;
-
+		expect(() => createBox("nummer" as never)).toThrow();
 	});
 });

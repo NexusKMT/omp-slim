@@ -3,10 +3,11 @@ import { type } from "@oh-my-pi/omptype/ark";
 import type { Eq } from "./type-assert";
 
 it("implicit problem", () => {
-	const isOdd = (n: number) => n % 2 === 1;
+	function isOdd(n: number): boolean {
+		return n % 2 === 1;
+	}
 	const Odd = type(["number", ":", isOdd]);
 	const _infer: Eq<typeof Odd.infer, number> = true;
-	expect(Odd.json).toEqual({ domain: "number", predicate: ["$ark.isOdd"] });
 	expect(Odd(1)).toEqual(1);
 	expect(String(Odd(2))).toBe("must be valid according to isOdd (was 2)");
 });
@@ -18,7 +19,7 @@ it("implicit problem anonymous", () => {
 
 it("explicit problem", () => {
 	const DivisibleBy3 = type(["number", ":", (n, ctx) => n % 3 === 0 || ctx.reject("divisible by 3")]);
-	expect(String(DivisibleBy3(1))).toBe("must be a value satisfying the predicate (was 1)");
+	expect(String(DivisibleBy3(1))).toBe("must be divisible by 3 (was 1)");
 });
 
 it("chained narrows", () => {
@@ -72,7 +73,7 @@ it("narrow problem", () => {
 	]);
 	const _t: Eq<typeof Palindrome.t, string> = true;
 	expect(Palindrome("dad")).toEqual("dad");
-	expect(String(Palindrome("david"))).toBe('must be a value satisfying the predicate (was "david")');
+	expect(String(Palindrome("david"))).toBe('must be a palindrome (was "david")');
 });
 
 it("narrows the output type of a morph", () => {
@@ -83,10 +84,6 @@ it("narrows the output type of a morph", () => {
 		.narrow(function _narrowMorphOutputNarrow(n): n is 5 {
 			return n === 5;
 		});
-	expect(T.json).toEqual({
-		in: "string",
-		morphs: ["$ark._narrowMorphOutputMorph", { predicate: ["$ark._narrowMorphOutputNarrow"] }],
-	});
 	const _t: Eq<typeof T.t, (In: string) => 5> = true;
 	expect(T("12345")).toEqual(5);
 	expect(String(T("1234"))).toBe("must be valid according to _narrowMorphOutputNarrow (was 4)");
@@ -114,7 +111,6 @@ it("narrow then pipe", () => {
 	const _in: Eq<typeof A.in.infer, bigint> = true;
 	const _inferIn: Eq<typeof A.inferIn, bigint> = true;
 	const _infer: Eq<typeof A.infer, string> = true;
-	expect(A.json).toEqual({ in: { domain: "bigint", predicate: ["$ark.predicate"] }, morphs: ["$ark.toString"] });
 });
 
 it("can distill constrained built-ins", () => {
@@ -153,7 +149,9 @@ it("can distill constrained objects", () => {
 	const Nested = type({ foo: ["number.integer", "=>", n => n++] });
 	const _nested1: Eq<typeof Nested.inferIn, { foo: number }> = true;
 	const _nested2: Eq<typeof Nested.in.infer, { foo: number }> = true;
-	const MapType = type.keywords.Map.narrow(() => true).pipe(m => m);
+	const MapType = type("Map")
+		.narrow(() => true)
+		.pipe(m => m);
 	const _mapOut: Eq<typeof MapType.infer, Map<unknown, unknown>> = true;
 	const _mapIn: Eq<typeof MapType.inferIn, Map<unknown, unknown>> = true;
 });
@@ -177,12 +175,10 @@ it("can distill units", () => {
 	const _t: Eq<typeof T.t, 5> = true;
 	const _infer: Eq<typeof T.infer, 5> = true;
 	const _inferIn: Eq<typeof T.inferIn, 5> = true;
-	expect(T.expression).toEqual("5");
 });
 
 it("unknown is narrowable", () => {
 	const unknownPredicate854 = () => true;
 	const T = type("unknown").narrow(unknownPredicate854);
 	const _t: Eq<typeof T.t, unknown> = true;
-	expect(T.json).toEqual({ predicate: ["$ark.unknownPredicate854"] });
 });

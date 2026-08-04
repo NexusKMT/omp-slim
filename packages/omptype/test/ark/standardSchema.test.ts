@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { type } from "@oh-my-pi/omptype/ark";
+import type { Eq } from "./type-assert";
 
 it("validation conforms to spec", () => {
 	const T = type({ foo: "string" });
@@ -29,8 +30,8 @@ it("can infer generic parameter from standard schema", () => {
 
 	const result = acceptsStandardSchema(type({ foo: "string.numeric.parse" }));
 
-	expect<{ foo: string }>(result.input);
-	expect<{ foo: number }>(result.output);
+	const _1: Eq<typeof result.input, { foo: string }> = true;
+	const _2: Eq<typeof result.output, { foo: number }> = true;
 });
 
 describe("~standard.jsonSchema", () => {
@@ -113,7 +114,7 @@ describe("~standard.jsonSchema", () => {
 			standard["~standard"].jsonSchema.input({
 				target: "openapi-3.0",
 			}),
-		).throws(writeInvalidJsonSchemaTargetMessage("openapi-3.0"));
+		).toThrow('JSONSchema target \'openapi-3.0\' is not supported (must be "draft-2020-12" or "draft-07")');
 	});
 
 	it("generates different input/output schemas for morphs", () => {

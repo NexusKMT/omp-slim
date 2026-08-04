@@ -410,7 +410,7 @@ describe("advanced ArkType compatibility", () => {
 		const and = Reflect.get(stringSchema, "and");
 		if (typeof and !== "function") throw new Error("schema is missing and()");
 		expect(() => Reflect.apply(and, stringSchema, ["number"])).toThrow("unsatisfiable");
-		expect(type("0 < number").equals("number > 0")).toBe(true);
+		expect(type("0 < number <= 3600").equals(type("number > 0").and("number <= 3600"))).toBe(true);
 		expect(type("number.integer > 0").extends("number")).toBe(true);
 		expect(type("'a' | 'b'").overlaps("'b' | 'c'")).toBe(true);
 		expect(type("string").overlaps("number")).toBe(false);
@@ -441,9 +441,15 @@ describe("advanced ArkType compatibility", () => {
 		expect(type.string.date.iso.parse("2024-01-02")).toBeInstanceOf(Date);
 		expect(type.parse.url("https://omp.sh")).toBeInstanceOf(URL);
 
-		const configured = type({ user: { age: "number >= 18" } }).configure({
-			expected: context => `expected:${context.code}`,
-			message: context => `${context.path.join("/")}: ${context.problem}`,
+		// ArkType applies `.configure()` to the node it is called on (and its shallow
+		// descendants), so the constraint that should carry the config owns it here.
+		const configured = type({
+			user: {
+				age: type("number >= 18").configure({
+					expected: context => `expected:${context.code}`,
+					message: context => `${context.path.join("/")}: ${context.problem}`,
+				}),
+			},
 		});
 		for (let index = 0; index < JIT; index++) {
 			const out = configured({ user: { age: 10 } });

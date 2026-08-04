@@ -86,7 +86,7 @@ it("tuple expression", () => {
 	expect(T({ a: "foo" })).toEqual({ a: "foo" });
 	expect(T({ b: { a: "bar" } })).toEqual({ b: { a: "bar" } });
 	expect(T({ b: { b: {} } }).toString()).toBe(
-		"a must be a string (was missing), b.a must be a string (was missing) or b.b must be b.b.a must be a string (was missing) or b.b.b must be an object (was missing) (was {})",
+		"a must be a string (was missing) or b.a must be a string (was missing) or b.b.a must be a string (was missing) or b.b.b must be an object (was missing)",
 	);
 });
 
@@ -96,6 +96,6 @@ it("root expression", () => {
 	expect(T({ a: "foo" })).toEqual({ a: "foo" });
 	expect(T({ b: { a: "bar" } })).toEqual({ b: { a: "bar" } });
 	expect(T({ b: { b: {} } }).toString()).toBe(
-		"a must be a string (was missing), b.a must be a string (was missing) or b.b must be b.b.a must be a string (was missing) or b.b.b must be an object (was missing) (was {})",
+		"a must be a string (was missing) or b.a must be a string (was missing) or b.b.a must be a string (was missing) or b.b.b must be an object (was missing)",
 	);
 });

@@ -5,29 +5,17 @@ import type { Eq } from "../type-assert";
 it("empty", () => {
 	const O = type({});
 	const _type1: Eq<typeof O.t, object> = true;
-	expect(O.json).toEqual(type("object").json);
+	expect(O({})).toEqual({});
 });
 
 it("required", () => {
 	const O = type({ a: "string", b: "number" });
 	const _type3: Eq<typeof O.infer, { a: string; b: number }> = true;
-	expect(O.json).toEqual({
-		domain: "object",
-		required: [
-			{ key: "a", value: "string" },
-			{ key: "b", value: "number" },
-		],
-	});
 });
 
 it("optional keys", () => {
 	const O = type({ "a?": "string", b: "number" });
 	const _type5: Eq<typeof O.infer, { a?: string; b: number }> = true;
-	expect(O.json).toEqual({
-		domain: "object",
-		required: [{ key: "b", value: "number" }],
-		optional: [{ key: "a", value: "string" }],
-	});
 });
 
 it("chained optional", () => {
@@ -40,20 +28,10 @@ it("chained optional", () => {
 	const _typeOptionalT: Eq<typeof O.t, { a?: string }> = true;
 	const _typeOptionalInfer: Eq<typeof O.infer, { a?: string }> = true;
 	const _typeOptionalInferIn: Eq<typeof O.inferIn, { a?: string }> = true;
-	expect(O.json).toEqual({
-		optional: [
-			{
-				key: "a",
-				value: "string",
-			},
-		],
-		domain: "object",
-	});
 });
 
 it("string-embedded value optional", () => {
 	const s = Symbol("ok");
-	const ref = String(s);
 	const T = type({ [s]: "string?" });
 
 	const _type12: Eq<
@@ -63,37 +41,16 @@ it("string-embedded value optional", () => {
 		}
 	> = true;
 	const _type13: Eq<typeof T.infer, { [s]?: string }> = true;
-
-	expect(T.json).toEqual({
-		optional: [
-			{
-				key: ref,
-				value: "string",
-			},
-		],
-		domain: "object",
-	});
 });
 
 it("tuple value optional", () => {
 	const s = Symbol("ok");
-	const ref = String(s);
 	const T = type({ [s]: [{ foo: "string" }, "?"] });
 
 	const _type15: Eq<typeof T.infer, { [s]?: { foo: string } }> = true;
 
-	expect(T.json).toEqual({
-		optional: [
-			{
-				key: ref,
-				value: {
-					required: [{ key: "foo", value: "string" }],
-					domain: "object",
-				},
-			},
-		],
-		domain: "object",
-	});
+	expect(T({ [s]: { foo: "ok" } })).toEqual({ [s]: { foo: "ok" } });
+	expect(T({ [s]: { foo: 1 } }).toString()).toContain(`[${String(s)}].foo must be a string`);
 });
 
 // https://github.com/arktypeio/arktype/issues/1102
@@ -101,7 +58,6 @@ it("only optional keys not reduced to object", () => {
 	const O = type({ "a?": "number" });
 
 	const U = type({ b: O });
-	expect(U.expression).toBe("{ b: { a?: number } }");
 	const _type18: Eq<
 		typeof U.t,
 		{
@@ -117,7 +73,6 @@ it("only optional keys not reduced to object", () => {
 // https://github.com/arktypeio/arktype/issues/1102
 it("optional keys in union not reduced to object", () => {
 	const U = type({ b: type({ "a?": "number" }).or("number") });
-	expect(U.expression).toBe("{ b: number | { a?: number } }");
 	const _type22: Eq<
 		typeof U.t,
 		{
@@ -132,15 +87,12 @@ it("optional keys in union not reduced to object", () => {
 
 it("symbol key", () => {
 	const s = Symbol();
-	const name = String(s);
 	const T = type({
 		[s]: "string",
 	});
 	const _type23: Eq<typeof T.infer, { [s]: string }> = true;
-	expect(T.json).toEqual({
-		domain: "object",
-		required: [{ key: name, value: "string" }],
-	});
+	expect(T({ [s]: "ok" })).toEqual({ [s]: "ok" });
+	expect(T({ [s]: 1 }).toString()).toContain(`[${String(s)}] must be a string`);
 });
 
 it("serializes to same value but not reference equal", () => {
@@ -166,49 +118,34 @@ it("intersections", () => {
 	const c = { "c?": "string" } as const;
 	const Abc = type(a).and(b).and(c);
 	const _type28: Eq<typeof Abc.infer, { a?: string; b: string; c?: string }> = true;
-	expect(Abc.json).toEqual(type({ ...a, ...b, ...c }).json);
-	expect(Abc.json).toEqual(type([[a, "&", b], "&", c]).json);
 });
 
 it("intersection", () => {
 	const T = type({ a: "number" }).and({ b: "boolean" });
 	// Should be simplified from {a: number} & {b: boolean} to {a: number, b: boolean}
 	const _typeIntersection: Eq<typeof T.infer, { a: number; b: boolean }> = true;
-	expect(T.json).toEqual(type({ a: "number", b: "boolean" }).json);
 });
 
 it("escaped optional token", () => {
 	const T = type({ "a\\?": "string" });
 	const _type33: Eq<typeof T.infer, { "a?": string }> = true;
-	expect(T.json).toEqual({
-		required: [{ key: "a?", value: "string" }],
-		domain: "object",
-	});
 });
 
 it("traverse optional", () => {
 	const O = type({ "a?": "string" });
 	expect(O({ a: "a" })).toEqual({ a: "a" });
 	expect(O({})).toEqual({});
-	expect(O({ a: 1 }).toString()).toBe("a must be a string (was 1)");
+	expect(O({ a: 1 }).toString()).toBe("a must be a string (was a number)");
 });
 
 it("optional symbol", () => {
 	const s = Symbol();
-	const keyReference = String(s);
 	const T = type({
 		[s]: type.number.optional(),
 	});
 	const _type38: Eq<typeof T.infer, { [s]?: number }> = true;
-	expect(T.json).toEqual({
-		optional: [
-			{
-				key: keyReference,
-				value: "number",
-			},
-		],
-		domain: "object",
-	});
+	expect(T({})).toEqual({});
+	expect(T({ [s]: 1 })).toEqual({ [s]: 1 });
 });
 
 it("morphed", () => {

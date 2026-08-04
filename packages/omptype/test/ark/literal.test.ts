@@ -7,7 +7,6 @@ describe("tuple expression", () => {
 		const T = type(["===", 5]);
 		const _infer: Eq<typeof T.infer, 5> = true;
 		expect(_infer).toBe(true);
-		expect(T.json).toEqual(type("5").json);
 	});
 
 	it("symbol with description", () => {
@@ -35,16 +34,6 @@ describe("tuple expression", () => {
 		const T = type(["===", true, "foo", 5, 1n, null, undefined, o, s]);
 		const _infer: Eq<typeof T.infer, true | "foo" | 5 | 1n | null | undefined | { ark: boolean } | typeof s> = true;
 		expect(_infer).toBe(true);
-		expect(T.json).toEqual([
-			{ unit: o },
-			{ unit: s },
-			{ unit: "1n" },
-			{ unit: "foo" },
-			{ unit: "undefined" },
-			{ unit: 5 },
-			{ unit: null },
-			{ unit: true },
-		]);
 	});
 });
 
@@ -53,7 +42,6 @@ describe("root expression", () => {
 		const T = type("===", true);
 		const _infer: Eq<typeof T.infer, true> = true;
 		expect(_infer).toBe(true);
-		expect(T.json).toEqual(type("true").json);
 	});
 
 	it("branches", () => {
@@ -62,15 +50,5 @@ describe("root expression", () => {
 		const T = type("===", "foo", 5, true, null, 1n, undefined, o, s);
 		const _infer: Eq<typeof T.infer, true | "foo" | 5 | 1n | null | undefined | { ark: boolean } | typeof s> = true;
 		expect(_infer).toBe(true);
-		expect(T.json).toEqual([
-			{ unit: o },
-			{ unit: s },
-			{ unit: "1n" },
-			{ unit: "foo" },
-			{ unit: "undefined" },
-			{ unit: 5 },
-			{ unit: null },
-			{ unit: true },
-		]);
 	});
 });

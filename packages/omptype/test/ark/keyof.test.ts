@@ -80,6 +80,6 @@ describe("scoped", () => {
 	it("union precedence", () => {
 		const T = $.type("keyof ab | bc");
 		const _7: Eq<typeof T.t, "a" | "b" | { b: 1; c?: 1 }> = true;
-		expect(T.expression).toEqual('{ b: 1, c?: 1 } | "a" | "b"');
+		expect(T.expression).toEqual('"a" | "b" | { b: 1, c?: 1 }');
 	});
 });

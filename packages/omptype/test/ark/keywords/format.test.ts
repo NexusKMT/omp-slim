@@ -4,13 +4,13 @@ import { type } from "@oh-my-pi/omptype/ark";
 it("trim", () => {
 	const trim = type("string.trim");
 	expect(trim("  foo  ")).toEqual("foo");
-	expect(String(trim(5))).toBe("must be a string (was 5)");
+	expect(String(trim(5))).toBe("must be a string (was a number)");
 });
 
 it("lower", () => {
 	const lower = type("string.lower");
 	expect(lower("FOO")).toEqual("foo");
-	expect(String(lower(5))).toBe("must be a string (was 5)");
+	expect(String(lower(5))).toBe("must be a string (was a number)");
 });
 
 it("lower.preformatted", () => {
@@ -22,7 +22,7 @@ it("lower.preformatted", () => {
 it("upper", () => {
 	const upper = type("string.upper");
 	expect(upper("foo")).toEqual("FOO");
-	expect(String(upper(5))).toBe("must be a string (was 5)");
+	expect(String(upper(5))).toBe("must be a string (was a number)");
 });
 
 it("upper.preformatted", () => {
@@ -35,7 +35,7 @@ it("upper.preformatted", () => {
 it("capitalize", () => {
 	const capitalize = type("string.capitalize");
 	expect(capitalize("foo")).toEqual("Foo");
-	expect(String(capitalize(5))).toBe("must be a string (was 5)");
+	expect(String(capitalize(5))).toBe("must be a string (was a number)");
 });
 
 it("capitalize.preformatted", () => {
@@ -49,5 +49,5 @@ it("normalize", () => {
 	expect(normalize("\u00F1")).toEqual("ñ");
 	expect(normalize("\u006E\u0303")).toEqual("ñ");
 	expect(normalize("\u00F1")).toEqual(normalize("\u006E\u0303"));
-	expect(String(normalize(5))).toBe("must be a string (was 5)");
+	expect(String(normalize(5))).toBe("must be a string (was a number)");
 });

@@ -39,21 +39,25 @@ describe("root expression", () => {
 	it("=== branches", () => {
 		const T = type("===", "foo", "bar", "baz");
 		const _3: Eq<typeof T.infer, "foo" | "bar" | "baz"> = true;
-		expect(T.json).toEqual([{ unit: "bar" }, { unit: "baz" }, { unit: "foo" }]);
+		expect(T.json).toEqual([{ unit: "foo" }, { unit: "bar" }, { unit: "baz" }]);
 	});
 
 	it("instanceof single", () => {
 		const T = type("instanceof", RegExp);
 		const _4: Eq<typeof T.infer, RegExp> = true;
-		const Expected = rootSchema(RegExp);
-		expect(T.json).toEqual(Expected.json);
+		const value = /omptype/;
+		expect(T(value)).toBe(value);
+		expect(T.allows({})).toBe(false);
 	});
 
 	it("instanceof branches", () => {
 		const T = type("instanceof", Array, Date);
 		const _5: Eq<typeof T.infer, unknown[] | Date> = true;
-		const Expected = rootSchema([Array, Date]);
-		expect(T.json).toEqual(Expected.json);
+		const date = new Date();
+		const array: unknown[] = [];
+		expect(T(date)).toBe(date);
+		expect(T(array)).toBe(array);
+		expect(T.allows(/not-a-branch/)).toBe(false);
 	});
 
 	it("postfix", () => {

@@ -33,6 +33,6 @@ it("formData", () => {
 	data.append("tags", file);
 
 	expect(String(parseUserForm(data))).toBe(`email must be an email address (was "david")
-file must be a File instance (was string)
-tags[2] must be a string (was an object)`);
+file must be a File instance (was a string)
+tags[2] must be a string (was Blob)`);
 });

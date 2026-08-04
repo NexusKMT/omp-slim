@@ -1,5 +1,5 @@
 import { expect, it } from "bun:test";
-import { type } from "@oh-my-pi/omptype/ark";
+import { declare, type } from "@oh-my-pi/omptype/ark";
 import type { Eq } from "../type-assert";
 
 it("identity", () => {
@@ -273,7 +273,6 @@ it("infer method output", () => {
 	});
 
 	const _type5: Eq<typeof mapped.t, typeof Expected.t> = true;
-	expect(mapped.json).toEqual(Expected.json);
 });
 
 it("filter and split values", () => {
@@ -344,11 +343,8 @@ it("modify default", () => {
 		"bar?": "number",
 	});
 
-	const _type11: Eq<{
-		foo: Default<string, "foo">;
-		bar?: number;
-	}> = true;
-	expect(Original.expression).toBe('{ foo: string = "foo", bar?: number }');
+	const _type11: Eq<typeof Original.infer, { foo: string; bar?: number }> = true;
+	expect(Original({})).toEqual({ foo: "foo" });
 
 	const T = Original.map(prop => {
 		if (prop.key === "foo") {
@@ -360,9 +356,6 @@ it("modify default", () => {
 		return prop;
 	});
 
-	const _type13: Eq<{
-		bar?: number;
-		foo: Default<string, "foot">;
-	}> = true;
-	expect(T.expression).toBe('{ foo: string = "foot", bar?: number }');
+	const _type13: Eq<typeof T.infer, { bar?: number; foo: string }> = true;
+	expect(T({})).toEqual({ foo: "foot" });
 });

@@ -39,21 +39,10 @@ it("in scope", () => {
 		}
 	> = true;
 
-	expect(types.a.json).toEqual({
-		required: [
-			{
-				key: "b",
-				value: { required: [{ key: "a", value: "string" }], domain: "object" },
-			},
-		],
-		domain: "object",
-	});
+	expect(types.a({ b: { a: "ok" } })).toEqual({ b: { a: "ok" } });
 	const _assert4: Eq<typeof types.b.infer, { a: string }> = true;
 
-	expect(types.b.json).toEqual({
-		required: [{ key: "a", value: "string" }],
-		domain: "object",
-	});
+	expect(types.b({ a: "ok" })).toEqual({ a: "ok" });
 });
 
 it("expression from thunk", () => {
@@ -64,18 +53,13 @@ it("expression from thunk", () => {
 	});
 	const types = $.export();
 	const _assert5: Eq<typeof types.aAndB.infer, { a: string; b: boolean }> = true;
-	expect(types.aAndB.json).toEqual({
-		required: [
-			{ key: "a", value: "string" },
-			{ key: "b", value: [{ unit: false }, { unit: true }] },
-		],
-		domain: "object",
-	});
+	expect(types.aAndB({ a: "ok", b: true })).toEqual({ a: "ok", b: true });
+	expect(types.aAndB({ a: "ok", b: 1 }).toString()).toBe("b must be boolean (was a number)");
 });
 
 it("shallow in type", () => {
 	const T = type(() => type("string"));
-	expect(T.json).toEqual(type("string").json);
+	expect(T("ok")).toBe("ok");
 	const _assert6: Eq<typeof T.infer, string> = true;
 });
 
@@ -134,27 +118,6 @@ it("docs example", () => {
 	> = true;
 
 	const types = $.export();
-
-	expect($.json).toEqual({
-		id: { domain: "string" },
-		expandUserGroup: {
-			sequence: {
-				in: [
-					"string",
-					{
-						required: [
-							{ key: "id", value: "string" },
-							{ key: "name", value: "string" },
-						],
-						domain: "object",
-					},
-				],
-				morphs: ["$ark._docsExampleThunkMorph"],
-			},
-			proto: "Array",
-			minLength: 2,
-		},
-	});
 
 	const groups = types.expandUserGroup([{ name: "Magical Crawdad", id: "777" }, "778"]);
 

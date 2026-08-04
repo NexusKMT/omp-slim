@@ -1,16 +1,9 @@
 import { expect, it } from "bun:test";
-import { registeredReference } from "@ark/schema";
 import { scope, type } from "@oh-my-pi/omptype/ark";
 
 it("2 literal branches", () => {
 	// should not use a switch with <=2 branches to avoid needless convolution
 	const T = type("'a'|'b'");
-	expect(T.json).toEqual([{ unit: "a" }, { unit: "b" }]);
-	expect(T.internal.assertHasKind("union").discriminantJson).toEqual({
-		kind: "unit",
-		path: [],
-		cases: { '"a"': true, '"b"': true },
-	});
 	expect(T.allows("a")).toEqual(true);
 	expect(T.allows("b")).toEqual(true);
 	expect(T.allows("c")).toEqual(false);
@@ -18,12 +11,6 @@ it("2 literal branches", () => {
 
 it(">2 literal branches", () => {
 	const T = type("'a'|'b'|'c'");
-	expect(T.json).toEqual([{ unit: "a" }, { unit: "b" }, { unit: "c" }]);
-	expect(T.internal.assertHasKind("union").discriminantJson).toEqual({
-		kind: "unit",
-		path: [],
-		cases: { '"a"': true, '"b"': true, '"c"': true },
-	});
 	expect(T.allows("a")).toEqual(true);
 	expect(T.allows("b")).toEqual(true);
 	expect(T.allows("c")).toEqual(true);
@@ -32,12 +19,6 @@ it(">2 literal branches", () => {
 
 it(">2 domain branches", () => {
 	const T = type("string|bigint|number");
-	expect(T.json).toEqual(["bigint", "number", "string"]);
-	expect(T.internal.assertHasKind("union").discriminantJson).toEqual({
-		kind: "domain",
-		path: [],
-		cases: { '"bigint"': true, '"number"': true, '"string"': true },
-	});
 	expect(T.allows("foo")).toEqual(true);
 	expect(T.allows(5n)).toEqual(true);
 	expect(T.allows(5)).toEqual(true);
@@ -46,12 +27,6 @@ it(">2 domain branches", () => {
 
 it("literals can be included in domain branches", () => {
 	const T = type("string|bigint|true");
-	expect(T.json).toEqual(["bigint", "string", { unit: true }]);
-	expect(T.internal.assertHasKind("union").discriminantJson).toEqual({
-		kind: "domain",
-		path: [],
-		cases: { '"bigint"': true, '"string"': true, '"boolean"': { unit: true } },
-	});
 	expect(T.allows("foo")).toEqual(true);
 	expect(T.allows(5n)).toEqual(true);
 	expect(T.allows(true)).toEqual(true);
@@ -85,34 +60,7 @@ it("nested", () => {
 		color: "blue",
 	});
 
-	expect(twoMissingKeys.toString()).toBe('climate must be "dry" or "wet" (was undefined)');
-
-	expect(climate.internal.assertHasKind("union").discriminantJson).toEqual({
-		kind: "unit",
-		path: ["color"],
-		cases: {
-			'"blue"': {
-				kind: "unit",
-				path: ["climate"],
-				cases: {
-					'"dry"': { required: [{ key: "isSky", value: { unit: true } }] },
-					'"wet"': { required: [{ key: "isOcean", value: { unit: true } }] },
-				},
-			},
-			'"brown"': {
-				required: [
-					{ key: "climate", value: { unit: "dry" } },
-					{ key: "isDesert", value: { unit: true } },
-				],
-			},
-			'"green"': {
-				required: [
-					{ key: "climate", value: { unit: "wet" } },
-					{ key: "isRainForest", value: { unit: true } },
-				],
-			},
-		},
-	});
+	expect(twoMissingKeys.toString()).toBe('climate must be "wet" or "dry" (was undefined)');
 });
 
 it("indiscriminable", () => {
@@ -126,7 +74,15 @@ it("indiscriminable", () => {
 		},
 	]);
 
-	expect(T.internal.assertHasKind("union").discriminantJson).toEqual(null);
+	expect(T.allows({ climate: "wet", color: "blue", isOcean: true })).toBe(true);
+	expect(
+		T.allows({
+			climate: "wet",
+			color: "blue",
+			indistinguishableFrom: { climate: "wet", color: "blue", isOcean: true },
+		}),
+	).toBe(true);
+	expect(T.allows({ climate: "wet", color: "green" })).toBe(false);
 });
 
 it("discriminate optional key", () => {
@@ -138,109 +94,46 @@ it("discriminate optional key", () => {
 		operator: "'to'",
 	});
 
-	expect(T.internal.assertHasKind("union").discriminantJson).toEqual(null);
+	expect(T.allows({ direction: "forward" })).toBe(true);
+	expect(T.allows({ direction: "backward", operator: "by" })).toBe(true);
+	expect(T.allows({ duration: "min", operator: "to" })).toBe(true);
+	expect(T.allows({ duration: "min", operator: "by" })).toBe(false);
 });
 
 it("overlapping default case", () => {
 	const T = getPlaces().type(["ocean|rainForest", "|", { temperature: "'hot'" }]);
 
-	expect(T.internal.assertHasKind("union").discriminantJson).toEqual({
-		kind: "unit",
-		path: ["color"],
-		cases: {
-			'"blue"': [
-				{
-					required: [
-						{ key: "climate", value: { unit: "wet" } },
-						{ key: "isOcean", value: { unit: true } },
-					],
-				},
-				{ required: [{ key: "temperature", value: { unit: "hot" } }] },
-			],
-			'"green"': [
-				{
-					required: [
-						{ key: "climate", value: { unit: "wet" } },
-						{ key: "isRainForest", value: { unit: true } },
-					],
-				},
-				{ required: [{ key: "temperature", value: { unit: "hot" } }] },
-			],
-			default: {
-				required: [{ key: "temperature", value: { unit: "hot" } }],
-				domain: "object",
-			},
-		},
-	});
+	expect(T.allows({ climate: "wet", color: "blue", isOcean: true })).toBe(true);
+	expect(T.allows({ climate: "wet", color: "green", isRainForest: true })).toBe(true);
+	expect(T.allows({ temperature: "hot" })).toBe(true);
+	expect(T.allows({ temperature: "cold" })).toBe(false);
 });
 
 it("discriminable default", () => {
 	const T = getPlaces().type([{ temperature: "'cold'" }, "|", ["ocean|rainForest", "|", { temperature: "'hot'" }]]);
 
-	expect(T.internal.assertHasKind("union").discriminantJson).toEqual({
-		kind: "unit",
-		path: ["color"],
-		cases: {
-			'"blue"': {
-				kind: "unit",
-				path: ["temperature"],
-				cases: {
-					'"cold"': true,
-					'"hot"': true,
-					default: {
-						required: [
-							{ key: "climate", value: { unit: "wet" } },
-							{ key: "isOcean", value: { unit: true } },
-						],
-					},
-				},
-			},
-			'"green"': {
-				kind: "unit",
-				path: ["temperature"],
-				cases: {
-					'"cold"': true,
-					'"hot"': true,
-					default: {
-						required: [
-							{ key: "climate", value: { unit: "wet" } },
-							{ key: "isRainForest", value: { unit: true } },
-						],
-					},
-				},
-			},
-			default: {
-				kind: "unit",
-				path: ["temperature"],
-				cases: { '"cold"': true, '"hot"': true },
-			},
-		},
-	});
+	expect(T.allows({ temperature: "cold" })).toBe(true);
+	expect(T.allows({ temperature: "hot" })).toBe(true);
+	expect(T.allows({ climate: "wet", color: "blue", isOcean: true })).toBe(true);
+	expect(T.allows({ temperature: "warm" })).toBe(false);
 });
 
 it("won't discriminate between possibly empty arrays", () => {
 	const T = type("string[]|boolean[]");
-	expect(T.internal.assertHasKind("union").discriminantJson).toEqual(null);
+	expect(T.allows([])).toBe(true);
+	expect(T.allows(["value"])).toBe(true);
+	expect(T.allows([false])).toBe(true);
+	expect(T.allows([1])).toBe(false);
 });
 
 it("discriminant path including symbol", () => {
 	const s = Symbol("lobmyS");
-	const sRef = registeredReference(s);
 	const T = type({ [s]: "0" }).or({ [s]: "1" });
-	expect(T.internal.assertHasKind("union").discriminantJson).toEqual({
-		kind: "unit",
-		path: [sRef],
-		cases: {
-			"0": true,
-			"1": true,
-		},
-	});
-
 	expect(T.allows({ [s]: 0 })).toEqual(true);
 	expect(T.allows({ [s]: -1 })).toEqual(false);
 
 	expect(T({ [s]: 1 })).toEqual({ [s]: 1 });
-	expect(T({ [s]: 2 }).toString()).toBe("value at [Symbol(lobmyS)] must be 0 or 1 (was 2)");
+	expect(T({ [s]: 2 }).toString()).toBe("[Symbol(lobmyS)] must be 0 or 1 (was 2)");
 });
 
 // https://github.com/arktypeio/arktype/issues/1100
@@ -252,7 +145,7 @@ it("discriminated null + object", () => {
 	expect(Company(null)).toEqual(null);
 	expect(Company({ id: 1 })).toEqual({ id: 1 });
 	expect(Company("foo")).toEqual("foo");
-	expect(String(Company(5))).toBe("must be an object or a string or null (was 5)");
+	expect(String(Company(5))).toBe("must be { id: a number }, a string or null (was a number)");
 });
 
 it("differing inner discriminated paths", () => {
@@ -272,28 +165,12 @@ it("differing inner discriminated paths", () => {
 		.or({ innerA: { id: "2" } })
 		.or({ innerB: { id: "2" } });
 
-	const Union = Discriminated.internal.assertHasKind("union");
+	expect(Discriminated({ innerA: { id: 1 } })).toEqual({ innerA: { id: 1 } });
+	expect(Discriminated({ innerB: { id: 1 } })).toEqual({ innerB: { id: 1 } });
+	expect(Discriminated({ innerA: { id: 2 } })).toEqual({ innerA: { id: 2 } });
+	expect(Discriminated({ innerB: { id: 2 } })).toEqual({ innerB: { id: 2 } });
 
-	expect(Union.discriminantJson).toEqual({
-		kind: "unit",
-		path: ["innerA", "id"],
-		cases: {
-			"1": true,
-			"2": true,
-			default: {
-				kind: "unit",
-				path: ["innerB", "id"],
-				cases: { "1": true, "2": true },
-			},
-		},
-	});
-
-	expect(Union({ innerA: { id: 1 } })).toEqual({ innerA: { id: 1 } });
-	expect(Union({ innerB: { id: 1 } })).toEqual({ innerB: { id: 1 } });
-	expect(Union({ innerA: { id: 2 } })).toEqual({ innerA: { id: 2 } });
-	expect(Union({ innerB: { id: 2 } })).toEqual({ innerB: { id: 2 } });
-
-	expect(Union({})?.toString()).toBe("innerB.id must be 1 or 2 (was undefined)");
+	expect(Discriminated({})?.toString()).toBe("innerB.id must be 1 or 2 (was undefined)");
 });
 
 it("allows strict discriminated keys", () => {
@@ -305,16 +182,9 @@ it("allows strict discriminated keys", () => {
 		})
 		.onUndeclaredKey("reject");
 
-	expect(AorB.internal.assertHasKind("union").discriminantJson).toEqual({
-		kind: "unit",
-		path: ["type"],
-		cases: {
-			'"A"': { undeclared: "reject", required: [{ key: "type", value: {} }] },
-			'"B"': { undeclared: "reject", required: [{ key: "type", value: {} }] },
-		},
-	});
-
 	expect(AorB({ type: "A" })).toEqual({ type: "A" });
+	expect(AorB.allows({ type: "B" })).toBe(true);
+	expect(AorB.allows({ type: "A", extra: true })).toBe(false);
 });
 
 it("can discriminated objects with disjoint strict keys", () => {
@@ -327,25 +197,9 @@ it("can discriminated objects with disjoint strict keys", () => {
 		somethingelse: "number",
 	});
 
-	expect(AorB.internal.assertHasKind("union").discriminantJson).toEqual({
-		kind: "unit",
-		path: ["something"],
-		cases: {
-			'"A"': {
-				undeclared: "reject",
-				required: [{ key: "something", value: {} }],
-			},
-			'"B"': {
-				undeclared: "reject",
-				required: [
-					{ key: "something", value: {} },
-					{ key: "somethingelse", value: "number" },
-				],
-			},
-		},
-	});
-
 	expect(AorB({ something: "A" })).toEqual({ something: "A" });
+	expect(AorB({ something: "B", somethingelse: 1 })).toEqual({ something: "B", somethingelse: 1 });
+	expect(AorB.allows({ something: "B" })).toBe(false);
 });
 
 it("includes non-disjoint branches in corresponding cases", () => {
@@ -357,19 +211,6 @@ it("includes non-disjoint branches in corresponding cases", () => {
 		.or({
 			name: "string",
 		});
-
-	expect(T.internal.assertHasKind("union").discriminantJson).toEqual({
-		kind: "unit",
-		path: ["id"],
-		cases: {
-			"0": [{ required: [{ key: "k1", value: "number" }] }, { required: [{ key: "name", value: "string" }] }],
-			"1": [{ required: [{ key: "k1", value: "number" }] }, { required: [{ key: "name", value: "string" }] }],
-			default: {
-				required: [{ key: "name", value: "string" }],
-				domain: "object",
-			},
-		},
-	});
 
 	// should hit the case discriminated for id: 1,
 	// but still resolve correctly via the { name: string } branch
@@ -387,20 +228,6 @@ it("correctly dsicriminated onDeclaredKey: reject in the above scenario", () => 
 			name: "string",
 		});
 
-	expect(T.internal.assertHasKind("union").discriminantJson).toEqual({
-		kind: "unit",
-		path: ["id"],
-		cases: {
-			"0": { required: [{ key: "k1", value: "number" }] },
-			"1": { required: [{ key: "k1", value: "number" }] },
-			default: {
-				undeclared: "reject",
-				required: [{ key: "name", value: "string" }],
-				domain: "object",
-			},
-		},
-	});
-
 	// now that we are rejecting undeclared keys, all branches fail
 	expect(T({ name: "foo", id: 1 }).toString()).toBe("k1 must be a number (was missing)");
 });
@@ -408,56 +235,22 @@ it("correctly dsicriminated onDeclaredKey: reject in the above scenario", () => 
 it("discriminate array and tuple", () => {
 	const T = type("null[] | false").or([type.undefined]);
 
-	const { discriminantJson } = T.select({
-		kind: "union",
-		method: "assertFind",
-	});
-
-	expect(discriminantJson).toEqual({
-		kind: "domain",
-		path: [],
-		cases: {
-			'"object"': [
-				{
-					sequence: { prefix: [{ unit: "undefined" }] },
-					proto: "Array",
-					exactLength: 1,
-				},
-				{ sequence: { unit: null }, proto: "Array" },
-			],
-			'"boolean"': { unit: false },
-		},
-	});
+	expect(T.allows(false)).toBe(true);
+	expect(T.allows([null, null])).toBe(true);
+	expect(T.allows([undefined])).toBe(true);
+	expect(T.allows(true)).toBe(false);
+	expect(T.allows([undefined, undefined])).toBe(false);
 });
 
 it("discriminate bounded array and tuple", () => {
 	const T = type("3 <= null[] <= 10 | false").or([type.undefined]);
 
-	const { discriminantJson } = T.select({
-		kind: "union",
-		method: "assertFind",
-	});
-
-	expect(discriminantJson).toEqual({
-		kind: "domain",
-		path: [],
-		cases: {
-			'"object"': [
-				{
-					sequence: { prefix: [{ unit: "undefined" }] },
-					proto: "Array",
-					exactLength: 1,
-				},
-				{
-					sequence: { unit: null },
-					proto: "Array",
-					maxLength: 10,
-					minLength: 3,
-				},
-			],
-			'"boolean"': { unit: false },
-		},
-	});
+	expect(T.allows(false)).toBe(true);
+	expect(T.allows([null, null, null])).toBe(true);
+	expect(T.allows(new Array(10).fill(null))).toBe(true);
+	expect(T.allows([undefined])).toBe(true);
+	expect(T.allows([null, null])).toBe(false);
+	expect(T.allows(new Array(11).fill(null))).toBe(false);
 });
 
 it("dimscrinate literal undefined value", () => {
@@ -481,60 +274,11 @@ it("discriminates cyclic union on nested path", () => {
 
 	const Thing = s.type("AParent | BParent");
 
-	expect(Thing.internal.assertHasKind("union").discriminantJson).toEqual({
-		kind: "unit",
-		path: ["type"],
-		cases: {
-			'"BParent"': {
-				required: [
-					{
-						key: "children",
-						value: {
-							sequence: {
-								required: [
-									{ key: "children", value: "Array" },
-									{ key: "type", value: { unit: "BChild" } },
-								],
-								domain: "object",
-							},
-							proto: "Array",
-							minLength: 1,
-						},
-					},
-					{ key: "layout", value: { sequence: "number", proto: "Array" } },
-				],
-			},
-			'"AParent"': {
-				required: [
-					{
-						key: "children",
-						value: {
-							sequence: {
-								required: [
-									{
-										key: "children",
-										value: {
-											sequence: "$AParent",
-											proto: "Array",
-											minLength: 1,
-										},
-									},
-									{ key: "type", value: { unit: "AChild" } },
-								],
-								domain: "object",
-							},
-							proto: "Array",
-							minLength: 1,
-						},
-					},
-				],
-			},
-		},
-	});
-
-	expect(Thing({
+	expect(
+		Thing({
 			type: "BParent",
 			layout: "",
 			children: [{ type: "BChild", children: [] }],
-		}).toString()).toBe("layout must be an array (was string)");
+		}).toString(),
+	).toBe("layout must be an array (was a string)");
 });

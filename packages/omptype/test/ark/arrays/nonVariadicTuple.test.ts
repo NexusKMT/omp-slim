@@ -5,8 +5,6 @@ import type { Eq } from "../type-assert";
 it("empty", () => {
 	const T = type([]);
 	const _0: Eq<typeof T.infer, []> = true;
-	expect(T.expression).toBe("[]");
-	expect(T.json).toEqual({ proto: "Array", exactLength: 0 });
 	expect(T([])).toEqual([]);
 	expect(String(T([1]))).toBe("must be an array of at most length 0 (was an array)");
 });
@@ -17,9 +15,10 @@ it("shallow", () => {
 	expect(T.allows(["", 0])).toBe(true);
 	expect(T(["", 0])).toEqual(["", 0]);
 	expect(T.allows([true, 0])).toBe(false);
-	expect(String(T([true, 0]))).toBe("0 must be a string (was true)");
+	expect(String(T([true, 0]))).toBe("[0] must be a string (was boolean)");
 	expect(T.allows([0, false])).toBe(false);
-	expect(String(T([0, false]))).toBe("0 must be a string (was 0)");
+	expect(String(T([0, false]))).toBe(`[0] must be a string (was a number)
+[1] must be a number (was boolean)`);
 	// too short
 	expect(T.allows([""])).toBe(false);
 	expect(String(T([""]))).toBe("must be an array of at least length 2 (was an array)");
@@ -64,7 +63,7 @@ it("nested", () => {
 	expect(T(valid)).toEqual(valid);
 	const invalid = [["", 0], [{ a: 0n, b: [undefined] }]];
 	expect(T.allows(invalid)).toBe(false);
-	expect(String(T(invalid))).toBe("1.0.b.0 must be null (was undefined)");
+	expect(String(T(invalid))).toBe("[1][0].b[0] must be null (was undefined)");
 });
 
 it("optional tuple", () => {
@@ -72,7 +71,7 @@ it("optional tuple", () => {
 	const _0: Eq<typeof T.infer, [string?]> = true;
 	expect(T([])).toEqual([]);
 	expect(T(["foo"])).toEqual(["foo"]);
-	expect(String(T([5]))).toBe("0 must be a string (was 5)");
+	expect(String(T([5]))).toBe("[0] must be a string (was a number)");
 	expect(String(T(["foo", "bar"]))).toBe("must be an array of at most length 1 (was an array)");
 });
 
@@ -81,7 +80,8 @@ it("optional string-embedded tuple", () => {
 
 	const Expected = type([["string", "?"]]);
 	const _0: Eq<typeof T, typeof Expected> = true;
-	expect(T.expression).toEqual(Expected.expression);
+	expect(T([])).toEqual([]);
+	expect(T(["foo"])).toEqual(["foo"]);
 });
 
 it("optional object tuple", () => {
@@ -95,7 +95,8 @@ it("optional object tuple", () => {
 			string?,
 		]
 	> = true;
-	expect(T.expression).toBe("[{ foo: string }?, string?]");
+	expect(T([])).toEqual([]);
+	expect(T([{ foo: "bar" }])).toEqual([{ foo: "bar" }]);
 });
 
 it("optional nested object tuple", () => {
@@ -111,5 +112,6 @@ it("optional nested object tuple", () => {
 			string?,
 		]
 	> = true;
-	expect(T.expression).toBe("[[{ foo: string }?], string?]");
+	expect(T([[{ foo: "bar" }]])).toEqual([[{ foo: "bar" }]]);
+	expect(T([[{ foo: "bar" }], "baz"])).toEqual([[{ foo: "bar" }], "baz"]);
 });

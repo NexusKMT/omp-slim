@@ -94,24 +94,43 @@ it("prefix and postfix", () => {
 		]);
 
 	const lrResult = L.and(R);
-	expect(lrResult.json).toEqual(Expected.json);
 	const rlResult = R.and(L);
-	expect(rlResult.json).toEqual(Expected.json);
+	const validLong = [
+		{ a: 0, x: 0 },
+		{ a: 0, y: 0 },
+		{ b: 0, z: 0 },
+		{ c: 0, z: 0 },
+	];
+	const validFixed = [
+		{ a: 0, x: 0 },
+		{ b: 0, y: 0 },
+		{ c: 0, z: 0 },
+	];
+	const validShort = [
+		{ b: 0, x: 0 },
+		{ c: 0, y: 0 },
+	];
+	const invalid = [
+		{ a: 0, x: 0 },
+		{ c: 0, y: 0 },
+	];
+	for (const schema of [lrResult, rlResult, Expected]) {
+		expect(schema.allows(validLong)).toBe(true);
+		expect(schema.allows(validFixed)).toBe(true);
+		expect(schema.allows(validShort)).toBe(true);
+		expect(schema.allows(invalid)).toBe(false);
+	}
 });
 
 it("reduces minLength", () => {
 	const T = type(["number", "number", "...", "number[]", "number"]);
-	const Expected = type("number[]>=3");
-	expect(T.json).toEqual(Expected.json);
+	expect(T.allows([1, 2, 3])).toBe(true);
+	expect(T.allows([1, 2])).toBe(false);
+	expect(T.allows([1, 2, "3"])).toBe(false);
 });
 
 it("array with props", () => {
 	const T = type("Array").and({ name: "string" });
-
-	expect(T.json).toEqual({
-		required: [{ key: "name", value: "string" }],
-		proto: "Array",
-	});
 
 	const _0: Eq<
 		typeof T.t,
@@ -120,7 +139,7 @@ it("array with props", () => {
 		}
 	> = true;
 
-	expect(String(T({ name: "foo" }))).toBe("must be an array (was object)");
+	expect(String(T({ name: "foo" }))).toBe("must be an array (was an object)");
 	const arrayWithProps = Object.assign([], { name: "foo" });
 	expect(T(arrayWithProps)).toEqual(arrayWithProps);
 });
@@ -217,7 +236,30 @@ it("prefix and postfix", () => {
 		]);
 
 	const LrResult = L.and(R);
-	expect(LrResult.json).toEqual(Expected.json);
 	const RlResult = R.and(L);
-	expect(RlResult.json).toEqual(Expected.json);
+	const validLong = [
+		{ a: 0, x: 0 },
+		{ a: 0, y: 0 },
+		{ b: 0, z: 0 },
+		{ c: 0, z: 0 },
+	];
+	const validFixed = [
+		{ a: 0, x: 0 },
+		{ b: 0, y: 0 },
+		{ c: 0, z: 0 },
+	];
+	const validShort = [
+		{ b: 0, x: 0 },
+		{ c: 0, y: 0 },
+	];
+	const invalid = [
+		{ a: 0, x: 0 },
+		{ c: 0, y: 0 },
+	];
+	for (const schema of [LrResult, RlResult, Expected]) {
+		expect(schema.allows(validLong)).toBe(true);
+		expect(schema.allows(validFixed)).toBe(true);
+		expect(schema.allows(validShort)).toBe(true);
+		expect(schema.allows(invalid)).toBe(false);
+	}
 });

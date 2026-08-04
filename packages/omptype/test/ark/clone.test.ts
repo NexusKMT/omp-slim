@@ -16,7 +16,7 @@ it("clones by default before morphing", () => {
 
 it("default clone implementation preserves prototypes", () => {
 	const T = type(["Date", "=>", d => d.toISOString()]);
-	expect(T.from(new Date(2000, 1))).toEqual("2000-02-01T05:00:00.000Z");
+	expect(T.from(new Date(Date.UTC(2000, 1, 1)))).toEqual("2000-02-01T00:00:00.000Z");
 });
 
 it("can be configured to mutate", () => {
@@ -44,8 +44,8 @@ it("can be configured to use a custom clone implementation", () => {
 });
 
 it("can clone process.env", () => {
-	const Env = type({ "+": "delete", TZ: "'America/New_York'" });
+	const Env = type({ "+": "delete", PATH: type.unit(process.env.PATH) });
 	const originalEnv = { ...process.env };
-	expect(Env(process.env)).toEqual({ TZ: "America/New_York" });
+	expect(Env(process.env)).toEqual({ PATH: process.env.PATH });
 	expect({ ...process.env }).toEqual(originalEnv);
 });

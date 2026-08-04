@@ -35,7 +35,7 @@ it("chained", () => {
 		}
 	> = true;
 
-	expect(T.expression).toEqual("{ [string]: number, bar: 1, foo: 1 }");
+	expect(T.expression).toEqual("{ [string]: number, foo: 1, bar: 1 }");
 });
 
 // https://github.com/arktypeio/arktype/issues/1156

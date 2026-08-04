@@ -45,7 +45,7 @@ describe("threeSixtyNoScope", () => {
 		const exports = imported.export();
 
 		expect(Object.keys(exports)).toEqual(["a"]);
-		expect(exports.a.expression).toBe('"no" | "yes" | 3 | 60 | true');
+		expect(exports.a.expression).toBe('3 | 60 | "no" | "yes" | true');
 
 		const _assert2: Eq<typeof exports, Module<{ a: 3 | 60 | "no" | "yes" | true }>> = true;
 	});
@@ -64,7 +64,7 @@ describe("threeSixtyNoScope", () => {
 
 		expect(Object.keys(types)).toEqual(["hasCrept", "public"]);
 
-		expect(types.public.json).toEqual(type("3|'no'|string.uuid|true").json);
+		expect(types.public.json).toEqual(type("true|3|'no'|string.uuid").json);
 
 		// have to snapshot the module since TypeScript treats it as bivariant
 		void types;
@@ -103,7 +103,7 @@ it("docs example", () => {
 	> = true;
 	const _assert4: Eq<typeof partialShape.$, typeof shapeScope> = true;
 
-	expect(partialShape.expression).toBe("{ area?: number, perimeter?: number }");
+	expect(partialShape.expression).toBe("{ perimeter?: number, area?: number }");
 
 	// when the scope is exported to a Module, they will not be included
 	// hover to see the Scope's exports
@@ -180,7 +180,7 @@ it("binds destructured exports", () => {
 			}
 		>
 	> = true;
-	expect(T.expression).toBe("{ bar: 1, baz: 1, foo: 1 } | 1");
+	expect(T.expression).toBe("1 | { foo: 1, bar: 1, baz: 1 }");
 	expect(T.$.json).toEqual({
 		foo: { unit: 1 },
 		bar: { unit: 1 },

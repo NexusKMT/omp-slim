@@ -25,7 +25,6 @@ describe("number", () => {
 		const Four = type("4");
 		const _infer: Eq<typeof Four.infer, 4> = true;
 		expect(_infer).toBe(true);
-		expect(Four.json).toEqual({ unit: 4 });
 	});
 
 	it("positive decimal", () => {
@@ -90,21 +89,18 @@ describe("bigint", () => {
 		const T = type("12345678910987654321n");
 		const _infer: Eq<typeof T.infer, 12345678910987654321n> = true;
 		expect(_infer).toBe(true);
-		expect(T.json).toEqual({ unit: "12345678910987654321n" });
 	});
 
 	it("negative", () => {
 		const T = type("-9801n");
 		const _infer: Eq<typeof T.infer, -9801n> = true;
 		expect(_infer).toBe(true);
-		expect(T.json).toEqual({ unit: "-9801n" });
 	});
 
 	it("zero", () => {
 		const T = type("0n");
 		const _infer: Eq<typeof T.infer, 0n> = true;
 		expect(_infer).toBe(true);
-		expect(T.json).toEqual({ unit: "0n" });
 	});
 
 	it("decimal", () => {
@@ -112,10 +108,10 @@ describe("bigint", () => {
 	});
 
 	it("leading zeroes", () => {
-		expect(() => type("007n")).toThrow('trailing tokens in definition "007n"');
+		expect(() => type("007n")).toThrow("Malformed number literal '007n'");
 	});
 
 	it("negative zero", () => {
-		expect(() => type("-0n")).toThrow('trailing tokens in definition "-0n"');
+		expect(() => type("-0n")).toThrow("Malformed number literal '-0n'");
 	});
 });

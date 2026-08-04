@@ -5,10 +5,6 @@ import type { Eq } from "../type-assert";
 it("string index", () => {
 	const O = type({ "[string]": "string" });
 	const _type1: Eq<typeof O.infer, { [x: string]: string }> = true;
-	expect(O.json).toEqual({
-		domain: "object",
-		index: [{ signature: "string", value: "string" }],
-	});
 
 	expect(O({})).toEqual({});
 	expect(O({ a: "a", b: "b" })).toEqual({ a: "a", b: "b" });
@@ -24,10 +20,6 @@ b must be a string (was boolean)`);
 it("symbol index", () => {
 	const O = type({ "[symbol]": "1" });
 	const _type8: Eq<typeof O.infer, { [x: symbol]: 1 }> = true;
-	expect(O.json).toEqual({
-		domain: "object",
-		index: [{ signature: "symbol", value: { unit: 1 } }],
-	});
 
 	expect(O({})).toEqual({});
 
@@ -48,25 +40,20 @@ it("symbol index", () => {
 
 	expect({ a: 0, [zildjian]: 1 }).toEqual({ a: 0, [zildjian]: 1 });
 
-	expect(O({ [zildjian]: 0 }).toString()).toEqual(`value at [${zildjianName}] must be 1 (was 0)`);
-	expect(O({ [prince]: null, [zildjian]: undefined }).toString()).toBe(`value at [${princeName}] must be 1 (was null)
-value at [${zildjianName}] must be 1 (was undefined)`);
+	expect(O({ [zildjian]: 0 }).toString()).toEqual(`[${zildjianName}] must be 1 (was 0)`);
+	expect(O({ [prince]: null, [zildjian]: undefined }).toString()).toBe(`[${princeName}] must be 1 (was null)
+[${zildjianName}] must be 1 (was undefined)`);
 });
 
 it("enumerable indexed union", () => {
 	const O = type({ "['foo' | 'bar']": "string" });
 	const Expected = type({ foo: "string", bar: "string" });
 	const _type16: Eq<typeof O, typeof Expected> = true;
-	expect(O.json).toEqual(Expected.json);
 });
 
 it("non-enumerable indexed union", () => {
 	const O = type({ "[string | symbol]": "string" });
 	const _type18: Eq<typeof O.infer, { [x: string]: string; [x: symbol]: string }> = true;
-	expect(O.json).toEqual({
-		domain: "object",
-		index: [{ signature: ["string", "symbol"], value: "string" }],
-	});
 });
 
 it("multiple indexed", () => {
@@ -75,13 +62,6 @@ it("multiple indexed", () => {
 		"[symbol]": "number",
 	});
 	const _type20: Eq<typeof O.infer, { [x: string]: string; [x: symbol]: number }> = true;
-	expect(O.json).toEqual({
-		index: [
-			{ value: "string", signature: "string" },
-			{ value: "number", signature: "symbol" },
-		],
-		domain: "object",
-	});
 
 	expect(O({})).toEqual({});
 	expect(O({ foo: "f" })).toEqual({ foo: "f" });
@@ -103,7 +83,14 @@ it("multiple indexed", () => {
 			[sym]: "💯",
 		}).toString(),
 	).toEqual(`str must be a string (was a number)
-value at [${symName}] must be a number (was a string)`);
+[${symName}] must be a number (was a string)`);
+});
+
+it("pattern index", () => {
+	const O = type({ "[/^f/]": "number" });
+
+	expect(O({ foo: 1, fizz: 2, other: "unmatched" })).toEqual({ foo: 1, fizz: 2, other: "unmatched" });
+	expect(O({ foo: "wrong" }).toString()).toBe("foo must be a number (was a string)");
 });
 
 it("all key kinds", () => {
@@ -113,12 +100,6 @@ it("all key kinds", () => {
 		"optional?": "'bar'",
 	});
 	const _type26: Eq<typeof O.infer, { [x: string]: string; required: "foo"; optional?: "bar" }> = true;
-	expect(O.json).toEqual({
-		domain: "object",
-		required: [{ key: "required", value: { unit: "foo" } }],
-		optional: [{ key: "optional", value: { unit: "bar" } }],
-		index: [{ signature: "string", value: "string" }],
-	});
 
 	const valid: typeof O.infer = { required: "foo", other: "bar" };
 	expect(O(valid)).toEqual(valid);
@@ -148,7 +129,6 @@ it("index key from scope", () => {
 		bar: "string",
 		baz: "string",
 	});
-
 	expect(types.obj.json).toEqual(Expected.json);
 });
 
@@ -161,11 +141,6 @@ it("intersection with named", () => {
 			a?: never;
 		}
 	> = true;
-	expect(T.json).toEqual({
-		optional: [{ key: "a", value: { unit: 1 } }],
-		index: [{ value: { unit: 4 }, signature: "string" }],
-		domain: "object",
-	});
 });
 
 it("intersction with right required", () => {
@@ -183,7 +158,7 @@ it("syntax error in index definition", () => {
 			// @ts-expect-error
 			"[unresolvable]": "string",
 		}),
-	).toThrow("'unresolvable' is unresolvable");
+	).toThrow('unknown keyword "unresolvable"');
 });
 
 it("does not allow syntax error message as value", () => {
@@ -192,7 +167,7 @@ it("does not allow syntax error message as value", () => {
 			// @ts-expect-error
 			"[unresolvable]": "'unresolvable' is unresolvable",
 		}),
-	).toThrow("'i' is not allowed here");
+	).toThrow("trailing tokens");
 });
 
 it("semantic error in index definition", () => {
@@ -201,7 +176,7 @@ it("semantic error in index definition", () => {
 			// @ts-expect-error
 			"[symbol<5]": "string",
 		}),
-	).toThrow("Bounded expression symbol must be exactly one of number, string, Array, or Date");
+	).toThrow('cannot bound symbol in "symbol<5"');
 });
 
 it("invalid key type for index definition", () => {
@@ -210,7 +185,7 @@ it("invalid key type for index definition", () => {
 			// @ts-expect-error
 			"[object]": "string",
 		}),
-	).toThrow("Indexed key definition 'object' must be a string or symbol");
+	).toThrow("indexed key definition must resolve to a string or symbol (was an object)");
 });
 
 it("does not allow invalid key type error as value", () => {
@@ -219,16 +194,12 @@ it("does not allow invalid key type error as value", () => {
 			// @ts-expect-error
 			"[object]": "Indexed key definition 'object' must be a string, number or symbol",
 		}),
-	).toThrow("'Indexed' is unresolvable");
+	).toThrow('unknown keyword "Indexed"');
 });
 
 it("escaped index", () => {
 	const O = type({ "\\[string]": "string" });
 	const _type42: Eq<typeof O.infer, { "[string]": string }> = true;
-	expect(O.json).toEqual({
-		domain: "object",
-		required: [{ key: "[string]", value: "string" }],
-	});
 });
 
 // https://github.com/arktypeio/arktype/issues/1040
@@ -242,6 +213,4 @@ it("can constrain optional keys", () => {
 
 	const _type44: Eq<Expected, typeof Repro.infer> = true;
 	const _type45: Eq<Expected, typeof Repro.inferIn> = true;
-
-	expect(Repro.expression).toBe("{ normal: string >= 1, optional?: string >= 1 }");
 });

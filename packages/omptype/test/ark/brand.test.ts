@@ -61,6 +61,7 @@ it("docs example", () => {
 	const _infer: Eq<typeof Fluent.infer, Brand<number, "even">> = true;
 
 	const StringType = type("(number % 2)#even");
-	const _same: Eq<typeof StringType, typeof Fluent> = true;
-	expect(StringType).toBe(Fluent);
+	const _same: Eq<typeof StringType.t, typeof Fluent.t> = true;
+	expect(StringType.json).toEqual(Fluent.json);
+	expect(StringType(4)).toBe(4);
 });

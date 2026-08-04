@@ -5,6 +5,7 @@ import type { Eq } from "../type-assert";
 it("Function", () => {
 	// should not be treated as a morph
 	const fnType = type("Function");
+	// biome-ignore lint/complexity/noBannedTypes: built-in Function keyword test
 	const _0: Eq<typeof fnType.infer, Function> = true;
 });
 
@@ -23,7 +24,9 @@ describe("json", () => {
 		expect(Json({})).toEqual({});
 		expect(Json([])).toEqual([]);
 		expect(String(Json(5))).toBe("must be an object (was a number)");
-		expect(String(Json({ foo: [5n] }))).toBe('foo["0"] must be an object (was a bigint)');
+		expect(String(Json({ foo: [5n] }))).toBe(
+			"foo[0] must be an object, a number, a string, false, null or true (was a bigint)",
+		);
 	});
 
 	it("stringify", () => {
@@ -34,7 +37,9 @@ describe("json", () => {
 		expect(out).toBe('{"foo":"bar"}');
 
 		// this error kind of sucks, should have more discriminant context
-		expect(String(stringify({ foo: undefined }))).toBe("foo must be an object (was undefined)");
+		expect(String(stringify({ foo: undefined }))).toBe(
+			"foo must be an object, a number, a string, false, null or true (was undefined)",
+		);
 
 		// has declared out
 		const _3: Eq<typeof stringify.out.infer, string> = true;
@@ -49,7 +54,7 @@ describe("liftArray", () => {
 		expect(liftNumberArray(5)).toEqual([5]);
 		expect(liftNumberArray([5])).toEqual([5]);
 		expect(String(liftNumberArray("five"))).toBe("must be a number or an object (was a string)");
-		expect(String(liftNumberArray(["five"]))).toBe("value at [0] must be a number (was a string)");
+		expect(String(liftNumberArray(["five"]))).toBe("[0] must be a number (was a string)");
 	});
 
 	it("invoked", () => {

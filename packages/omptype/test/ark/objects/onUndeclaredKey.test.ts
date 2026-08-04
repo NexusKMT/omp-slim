@@ -4,8 +4,9 @@ import type { Eq } from "../type-assert";
 
 it("can parse an undeclared restriction", () => {
 	const T = type({ "+": "reject" });
+	// biome-ignore lint/complexity/noBannedTypes: empty object type test
 	const _type1: Eq<typeof T.infer, {}> = true;
-	expect(T.json).toEqual({ undeclared: "reject", domain: "object" });
+	expect(T({ extra: true }).toString()).toBe("extra must be removed");
 });
 
 it("fails on type definition for undeclared", () => {
@@ -16,10 +17,7 @@ it("fails on type definition for undeclared", () => {
 it("can escape undeclared meta key", () => {
 	const T = type({ "\\+": "string" });
 	const _type4: Eq<typeof T.infer, { "+": string }> = true;
-	expect(T.json).toEqual({
-		required: [{ key: "+", value: "string" }],
-		domain: "object",
-	});
+	expect(T({ "+": "ok" })).toEqual({ "+": "ok" });
 });
 
 describe("traversal", () => {
@@ -29,8 +27,6 @@ describe("traversal", () => {
 		const T = type({
 			a: "string",
 		});
-
-		expect(T.json).toEqual(T.onUndeclaredKey("ignore").json);
 
 		const dataWithExtraneousB = getExtraneousB();
 		expect(T(dataWithExtraneousB)).toEqual(dataWithExtraneousB);
@@ -68,8 +64,6 @@ describe("traversal", () => {
 			},
 		}).onDeepUndeclaredKey("delete");
 
-		expect(T.expression).toBe("{ a: string, nested: { a: string, + (undeclared): delete }, + (undeclared): delete }");
-
 		expect(
 			T({
 				...getExtraneousB(),
@@ -85,7 +79,7 @@ describe("traversal", () => {
 		// can distill to second branch
 		expect(O({ a: true, b: true, c: false })).toEqual({ a: true, b: true });
 		// can handle missing keys
-		expect(O({ a: true }).toString()).toBe("a must be a string (was boolean) or b must be true (was missing)");
+		expect(O({ a: true }).toString()).toBe("a must be a string (was true) or b must be true (was missing)");
 	});
 
 	it("fails on delete indiscriminable union key", () => {

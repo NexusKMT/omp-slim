@@ -88,50 +88,50 @@ describe("union", () => {
 	it("10-ary", () => {
 		const T = $.type.or("a", "b", "c", "d", "e", "f", "g", "h", "i", "j");
 		const _11: Eq<typeof T.t, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10> = true;
-		expect(T.expression).toEqual("10 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9");
+		expect(T.expression).toEqual("1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10");
 	});
 
 	it("11-ary", () => {
 		const T = $.type.or("a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k");
 		const _12: Eq<typeof T.t, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11> = true;
-		expect(T.expression).toEqual("10 | 11 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9");
+		expect(T.expression).toEqual("1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11");
 	});
 
 	it("12-ary", () => {
 		const T = $.type.or("a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l");
 		const _13: Eq<typeof T.t, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12> = true;
-		expect(T.expression).toEqual("10 | 11 | 12 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9");
+		expect(T.expression).toEqual("1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12");
 	});
 
 	it("13-ary", () => {
 		const T = $.type.or("a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m");
 		const _14: Eq<typeof T.t, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13> = true;
-		expect(T.expression).toEqual("10 | 11 | 12 | 13 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9");
+		expect(T.expression).toEqual("1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13");
 	});
 
 	it("14-ary", () => {
 		const T = $.type.or("a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n");
 		const _15: Eq<typeof T.t, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14> = true;
-		expect(T.expression).toEqual("10 | 11 | 12 | 13 | 14 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9");
+		expect(T.expression).toEqual("1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14");
 	});
 
 	it("15-ary", () => {
 		const T = $.type.or("a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o");
 		const _16: Eq<typeof T.t, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15> = true;
-		expect(T.expression).toEqual("10 | 11 | 12 | 13 | 14 | 15 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9");
+		expect(T.expression).toEqual("1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15");
 	});
 
 	it("16-ary", () => {
 		const T = $.type.or("a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p");
 		const _17: Eq<typeof T.t, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16> = true;
-		expect(T.expression).toEqual("10 | 11 | 12 | 13 | 14 | 15 | 16 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9");
+		expect(T.expression).toEqual("1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16");
 	});
 
 	it("n-ary", () => {
 		const T = $.type.or("a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q");
 
 		const _18: Eq<typeof T.t, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17> = true;
-		expect(T.expression).toEqual("10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9");
+		expect(T.expression).toEqual("1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17");
 	});
 
 	it.todo("completions");
@@ -223,7 +223,6 @@ describe("intersection", () => {
 		> = true;
 		expect(T.expression).toEqual("{ a1: 1, a2: 2, a3: 3, a4: 4, a5: 5 }");
 	});
-
 
 	it.todo("completions");
 
@@ -372,13 +371,12 @@ describe("merge", () => {
 		> = true;
 
 		expect(T.expression).toEqual(
-			"{ a1: 1, a10: 10, a11: 11, a12: 12, a13: 13, a14: 14, a15: 15, a16: 16, a17: 17, a2: 2, a3: 3, a4: 4, a5: 5, a6: 6, a7: 7, a8: 8, a9: 9 }",
+			"{ a1: 1, a2: 2, a3: 3, a4: 4, a5: 5, a6: 6, a7: 7, a8: 8, a9: 9, a10: 10, a11: 11, a12: 12, a13: 13, a14: 14, a15: 15, a16: 16, a17: 17 }",
 		);
 	});
 
 	// type-perf currently blows up here, investigation:
 	// https://github.com/arktypeio/arktype/issues/1394
-
 
 	it.todo("completions");
 
@@ -387,6 +385,7 @@ describe("merge", () => {
 
 		const T = type.merge(...types);
 
+		// biome-ignore lint/complexity/noBannedTypes: empty object type assertion test
 		const _36: Eq<typeof T.t, {}> = true;
 		expect(T.expression).toEqual("object");
 	});

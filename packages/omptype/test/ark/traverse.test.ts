@@ -16,7 +16,7 @@ it("range", () => {
 it("domain", () => {
 	const T = type("number");
 	expect(T(5)).toEqual(5);
-	expect(T("foo").toString()).toEqual('must be a number (was "foo")');
+	expect(T("foo").toString()).toEqual("must be a number (was a string)");
 });
 
 it("pattern", () => {
@@ -57,7 +57,7 @@ it("domains", () => {
 	const T = type("string|number[]");
 	expect(T([1])).toEqual([1]);
 	expect(T("hello")).toEqual("hello");
-	expect(T(2).toString()).toEqual("must be a string or an array (was 2)");
+	expect(T(2).toString()).toEqual("must be a string or an array (was a number)");
 	expect(T({}).toString()).toEqual("must be a string or an array (was an object)");
 });
 
@@ -74,7 +74,7 @@ it("branches", () => {
 	expect(T({ bar: true })).toEqual({ bar: true });
 	expect(T({}).toString()).toEqual("bar must be boolean (was missing) or foo must be a string (was missing)");
 	expect(T({ bar: "swapped", foo: true }).toString()).toEqual(
-		'bar must be boolean (was "swapped") or foo must be a string (was boolean)',
+		'bar must be boolean (was "swapped") or foo must be a string (was true)',
 	);
 });
 
@@ -99,9 +99,9 @@ it("switch", () => {
 	expect(T({ a: "ok" })).toEqual({ a: "ok" });
 	expect(T({ a: 5 })).toEqual({ a: 5 });
 	// value isn't present
-	expect(T({}).toString()).toEqual("a must be a number, a string or null (was undefined)");
+	expect(T({}).toString()).toEqual("a must be a string, null or a number (was missing)");
 	// unsatisfying value
-	expect(T({ a: false }).toString()).toEqual("a must be a number, a string or null (was boolean)");
+	expect(T({ a: false }).toString()).toEqual("a must be a string, null or a number (was false)");
 });
 
 // previously was affected by a caching issue
@@ -113,15 +113,15 @@ it("multiple switch", () => {
 		c: { foo: "Function" },
 		d: "a|b|c",
 	}).export();
-	expect(types.d({}).toString()).toEqual("foo must be an object, a number or a string (was undefined)");
-	expect(types.d({ foo: null }).toString()).toEqual("foo must be an object, a number or a string (was null)");
+	expect(types.d({}).toString()).toEqual("foo must be a string, a number or an object (was missing)");
+	expect(types.d({ foo: null }).toString()).toEqual("foo must be a string, a number or an object (was null)");
 });
 
 it("serialized actual for discriminated union", () => {
 	const T = type({ a: "'foo'" }).or({ a: "'bar'" });
-	expect(T({ a: '"extra quotes"' }).toString()).toEqual('a must be "bar" or "foo" (was "\\"extra quotes\\"")');
-	expect(T({ a: "" }).toString()).toEqual('a must be "bar" or "foo" (was "")');
-	expect(T({ a: 5 }).toString()).toEqual('a must be "bar" or "foo" (was 5)');
+	expect(T({ a: '"extra quotes"' }).toString()).toEqual('a must be "foo" or "bar" (was "\\"extra quotes\\"")');
+	expect(T({ a: "" }).toString()).toEqual('a must be "foo" or "bar" (was "")');
+	expect(T({ a: 5 }).toString()).toEqual('a must be "foo" or "bar" (was 5)');
 });
 
 it("multi", () => {
@@ -137,7 +137,7 @@ it("multi", () => {
   ◦ positive`);
 });
 
-it("multi indented", () => {
+it("multiple errors across paths", () => {
 	const NaturalSchema = type({
 		natural: "number.integer>0",
 		name: "string",
@@ -146,14 +146,9 @@ it("multi indented", () => {
 		natural: -Math.PI,
 		name: ["negative", "PI"],
 	});
-	expect(result).toBeInstanceOf(ArkErrors);
-	const traversalError = (result as ArkErrors).toTraversalError();
-	expect(traversalError).toBeInstanceOf(TraversalError);
-	expect(traversalError.message).toEqual(`
-  • name must be a string (was an object)
-  • natural (-3.141592653589793) must be...
-    ◦ an integer
-    ◦ positive`);
+	expect(result.toString()).toEqual(`natural must be an integer (was -3.141592653589793)
+natural must be positive (was -3.141592653589793)
+name must be a string (was an object)`);
 });
 
 it("homepage example", () => {
@@ -168,9 +163,9 @@ it("homepage example", () => {
 		isAdmin: 1,
 	});
 
-	expect(out.toString()).toEqual(`luckyNumbers[1] must be a bigint or a number (was a string)
-name must be a string (was missing)
-isAdmin must be false, null or true (was 1)`);
+	expect(out.toString()).toEqual(`name must be a string (was missing)
+luckyNumbers[1] must be a number or a bigint (was a string)
+isAdmin must be boolean or null (was a number)`);
 });
 
 it("relative path", () => {
@@ -216,7 +211,7 @@ it("morphs apply when not at an error path, even on failed validation", () => {
 
 	const out = ObjType({ name: 2, age: "2" });
 	expect(out.toString()).toEqual(`name must be a string (was a number)
-age must be more than 18 (was 2)`);
+age must be a number more than 18 (was 2)`);
 });
 
 it("morphs don't apply when at an error path", () => {
