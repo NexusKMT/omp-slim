@@ -2191,6 +2191,7 @@ providers:
 						data: [
 							{ id: "high", object: "model", input: ["text", "image"] },
 							{ id: "leftover", object: "model", architecture: { input_modalities: ["text", "image"] } },
+							{ id: "synthetic-tier", object: "model", input_modalities: ["text", "image"] },
 							{ id: "low", object: "model", input: ["text"] },
 							{ id: "medium", object: "model" },
 						],
@@ -2202,10 +2203,11 @@ providers:
 		};
 		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
 		await registry.refresh();
-		// Direct `input` array and OpenRouter-style `architecture.input_modalities`
-		// both surface vision support.
+		// Direct `input`, top-level `input_modalities`, and OpenRouter-style
+		// `architecture.input_modalities` all surface vision support.
 		expect(registry.find("openai-test", "high")?.input).toEqual(["text", "image"]);
 		expect(registry.find("openai-test", "leftover")?.input).toEqual(["text", "image"]);
+		expect(registry.find("openai-test", "synthetic-tier")?.input).toEqual(["text", "image"]);
 		// Server explicitly reports text-only; no image support invented.
 		expect(registry.find("openai-test", "low")?.input).toEqual(["text"]);
 		// Silent server → default text-only fallback.

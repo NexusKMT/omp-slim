@@ -726,13 +726,13 @@ export async function discoverLlamaCppModelRuntimeMetadata(
 
 /**
  * Read image-input support from an OpenAI-compatible `/v1/models` row. Handles
- * the direct `input: ["text","image"]` array thin proxies emit and the
- * OpenRouter-style `architecture.input_modalities` array; returns undefined when
- * neither is present so the bundled reference (or the `["text"]` default) can
- * take over.
+ * direct `input` arrays, Synthetic-style top-level `input_modalities`, and
+ * OpenRouter-style `architecture.input_modalities`; returns undefined when none
+ * is present so the bundled reference (or the `["text"]` default) can take over.
  */
 function extractOpenAIModelsListInputCapabilities(item: {
 	input?: unknown;
+	input_modalities?: unknown;
 	architecture?: unknown;
 }): ("text" | "image")[] | undefined {
 	const modalities = new Set<string>();
@@ -743,6 +743,7 @@ function extractOpenAIModelsListInputCapabilities(item: {
 		}
 	};
 	collect(item.input);
+	collect(item.input_modalities);
 	if (isRecord(item.architecture)) collect(item.architecture.input_modalities);
 	if (modalities.size === 0) return undefined;
 	return modalities.has("image") ? ["text", "image"] : ["text"];
@@ -781,6 +782,7 @@ export async function discoverOpenAIModelsList(
 						max_model_len?: unknown;
 						context_length?: unknown;
 						input?: unknown;
+						input_modalities?: unknown;
 						architecture?: unknown;
 					}>;
 				};
