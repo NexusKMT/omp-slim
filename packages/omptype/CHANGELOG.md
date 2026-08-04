@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.8] - 2026-08-04
+
 ### Added
 
 - Added `io: 'input'` and `io: 'output'` options to `toJsonSchema()`, supporting input validation shapes and piped `.to()` target types
