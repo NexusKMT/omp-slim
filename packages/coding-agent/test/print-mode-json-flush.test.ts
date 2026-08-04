@@ -127,7 +127,9 @@ describe("print-mode JSON flush (#7635)", () => {
 		// them all. The pre-fix fire-and-forget path settles and disposes here;
 		// the fix must still be blocked on the undrained agent_end write.
 		await agentEndWriteIssued;
-		await new Promise<void>(resolve => setImmediate(resolve));
+		const { promise: nextTask, resolve: resolveNextTask } = Promise.withResolvers<void>();
+		setImmediate(resolveNextTask);
+		await nextTask;
 		expect(releaseAgentEnd).toBeDefined();
 		expect(settled).toBe(false);
 		expect(harness.disposed()).toBe(false);

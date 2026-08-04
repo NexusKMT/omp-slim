@@ -99,15 +99,14 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 	// tail before dispose/exit. Same truncation class as issue #5309 (issue #7635).
 	let stdoutTail: Promise<void> = Promise.resolve();
 	const writeStdoutLine = (text: string): void => {
-		stdoutTail = stdoutTail.then(
-			() =>
-				new Promise<void>(resolve => {
-					process.stdout.write(text, err => {
-						if (err) logger.warn("print-mode stdout write failed", { error: err.message });
-						resolve();
-					});
-				}),
-		);
+		stdoutTail = stdoutTail.then(() => {
+			const { promise, resolve, reject } = Promise.withResolvers<void>();
+			process.stdout.write(text, err => {
+				if (err) reject(err);
+				else resolve();
+			});
+			return promise;
+		});
 	};
 
 	// Emit session header for JSON mode
