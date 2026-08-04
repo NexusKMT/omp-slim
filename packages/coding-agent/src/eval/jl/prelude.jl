@@ -542,6 +542,9 @@ function agent(prompt::String; agent="task", label=nothing, schema=nothing, sche
     if merge !== nothing
         args_dict["merge"] = Bool(merge)
     end
+    if haskey(kwargs, :model)
+        error("agent() no longer accepts a per-call model override; the selected agent's frontmatter model is used")
+    end
     handle_result = handle
     for (k, v) in kwargs
         args_dict[string(k)] = v
