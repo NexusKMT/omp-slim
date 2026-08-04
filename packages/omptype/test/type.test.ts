@@ -475,4 +475,19 @@ describe("Standard Schema V1", () => {
 		expect(failed.issues[0].path).toEqual(["name"]);
 		expect(failed.issues[0].message).toContain("a string");
 	});
+
+	it("materializes root defaults for undefined input at the standard boundary", () => {
+		const staticDefault = type.string.default("dev");
+		expect(staticDefault["~standard"].validate(undefined)).toEqual({ value: "dev" });
+		expect(staticDefault(undefined)).toBe("dev");
+		expect(staticDefault("prod")).toBe("prod");
+		expect(staticDefault(5)).toBeInstanceOf(OmpErrors);
+
+		// Factory defaults run per call — distinct instances each time.
+		const factoryDefault = type("string[]").default(() => []);
+		const first = factoryDefault(undefined);
+		const second = factoryDefault(undefined);
+		expect(first).toEqual([]);
+		expect(first).not.toBe(second);
+	});
 });

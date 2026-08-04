@@ -13,20 +13,42 @@ type Trim<s extends string> = TrimLeft<TrimRight<s>>;
  * `never` is intentionally absent: the parser rejects it and the fallback in
  * `InferMember` treats a missing entry as "not a primitive".
  */
+type ArkAny = ReturnType<typeof JSON.parse>;
+
 interface PrimitiveMap {
 	string: string;
 	"string.url": string;
 	number: number;
 	"number.integer": number;
+	"number.epoch": number;
+	"number.safe": number;
+	"number.NaN": number;
+	"number.Infinity": number;
+	"number.NegativeInfinity": number;
 	boolean: boolean;
 	null: null;
 	undefined: undefined;
 	unknown: unknown;
+	"unknown.any": ArkAny;
 	any: unknown;
 	object: object;
 	bigint: bigint;
 	symbol: symbol;
+	Key: PropertyKey;
 	Date: Date;
+	Array: unknown[];
+	// biome-ignore lint/complexity/noBannedTypes: built-in Function keyword
+	Function: Function;
+	RegExp: RegExp;
+	File: File;
+	Error: Error;
+	Set: Set<unknown>;
+	Map: Map<unknown, unknown>;
+	WeakSet: WeakSet<WeakKey>;
+	WeakMap: WeakMap<WeakKey, unknown>;
+	Promise: Promise<unknown>;
+	FormData: FormData;
+	"object.json": unknown;
 	true: true;
 	false: false;
 }
@@ -39,7 +61,7 @@ type Merge<left, right> = left extends object
 
 type InferUtility<s extends string> = s extends `Record<${string},${infer value}>`
 	? Record<string, InferString<value>>
-	: s extends `Array<${infer element}>`
+	: s extends `Array<${infer element}>` | `Array.liftFrom<${infer element}>`
 		? InferString<element>[]
 		: s extends `Partial<${infer value}>`
 			? Partial<InferString<value>>
@@ -66,11 +88,15 @@ type InferParse<s extends string> = s extends
 			? URL
 			: s extends "string.json.parse" | "parse.json"
 				? unknown
-				: s extends "parse.boolean"
-					? boolean
-					: s extends "parse.bigint"
-						? bigint
-						: never;
+				: s extends "object.json.stringify"
+					? string
+					: s extends "FormData.parse"
+						? Record<string, Bun.FormDataEntryValue | Bun.FormDataEntryValue[]>
+						: s extends "parse.boolean"
+							? boolean
+							: s extends "parse.bigint"
+								? bigint
+								: never;
 
 /**
  * Member inference as a flat false-branch chain: TypeScript tail-evaluates
@@ -259,11 +285,21 @@ type InferObjectIn<def extends object> = "[string]" extends keyof def
 /** Object-literal inference used by fluent composition overloads. */
 export type InferObjectDef<def extends object> = InferObject<def>;
 
-type InferLiteralDef<def> = def extends string
-	? InferString<def>
-	: def extends object
-		? InferObjectLiteral<def>
-		: unknown;
+type InferLiteralDef<def> = def extends { readonly infer: infer output }
+	? output
+	: def extends string
+		? InferString<def>
+		: def extends object
+			? InferObjectLiteral<def>
+			: unknown;
+
+type InferLiteralDefIn<def> = def extends { readonly inferIn: infer input }
+	? input
+	: def extends string
+		? InferStringIn<def>
+		: def extends object
+			? InferObjectLiteralIn<def>
+			: unknown;
 
 type LiteralRequired<def extends object> = {
 	-readonly [key in DefinitionKeys<def> as IsOptionalProp<key, def[key]> extends true
@@ -281,8 +317,27 @@ type LiteralOptional<def extends object> = {
 		: never]?: InferLiteralDef<UnwrapProperty<def[key]>>;
 };
 
-/** Object-literal-only inference that does not inspect embedded schema internals. */
+type LiteralRequiredIn<def extends object> = {
+	-readonly [key in DefinitionKeys<def> as IsOptionalProp<key, def[key]> extends true
+		? never
+		: HasDefault<def[key]> extends true
+			? never
+			: PropName<key>]-?: InferLiteralDefIn<UnwrapProperty<def[key]>>;
+};
+
+type LiteralOptionalIn<def extends object> = {
+	-readonly [key in DefinitionKeys<def> as IsOptionalProp<key, def[key]> extends true
+		? PropName<key>
+		: HasDefault<def[key]> extends true
+			? PropName<key>
+			: never]?: InferLiteralDefIn<UnwrapProperty<def[key]>>;
+};
+
+/** Object-literal inference that unwraps embedded schema values one level deep. */
 export type InferObjectLiteral<def extends object> = Simplify<LiteralRequired<def> & LiteralOptional<def>>;
+
+/** Input-side object-literal inference (embedded schemas contribute `inferIn`). */
+export type InferObjectLiteralIn<def extends object> = Simplify<LiteralRequiredIn<def> & LiteralOptionalIn<def>>;
 
 type InstanceOf<ctor> = ctor extends abstract new (...args: never[]) => infer instance ? instance : never;
 type SpreadOutput<def> = InferDef<def> extends readonly (infer element)[] ? element[] : never[];

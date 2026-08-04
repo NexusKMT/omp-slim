@@ -3,7 +3,7 @@ import type { IR, PropIR } from "./ir";
 export interface JsonSchemaOptions {
 	description?: string;
 	target?: string;
-	dialect?: string;
+	dialect?: string | null;
 	/**
 	 * Which side of morphs and defaults to describe:
 	 * - `'input'` — accepted payloads: morphs emit their input shape, defaulted
@@ -32,7 +32,7 @@ export function irToJsonSchema(ir: IR, options?: JsonSchemaOptions): JsonSchema 
 	let schema = emit(ir, ctx);
 	if (ctx.defs.size > 0) schema.$defs = Object.fromEntries(ctx.defs);
 	if (options?.target === "draft-07") schema = toDraft7(schema);
-	const dialect = options?.dialect ?? dialectFor(options?.target);
+	const dialect = options?.dialect === null ? undefined : (options?.dialect ?? dialectFor(options?.target));
 	if (dialect !== undefined) schema.$schema = dialect;
 	if (options?.description !== undefined) schema.description = options.description;
 	return schema;
@@ -41,7 +41,7 @@ export function irToJsonSchema(ir: IR, options?: JsonSchemaOptions): JsonSchema 
 function dialectFor(target: string | undefined): string | undefined {
 	if (target === "draft-2020-12") return "https://json-schema.org/draft/2020-12/schema";
 	if (target === "draft-07") return "http://json-schema.org/draft-07/schema#";
-	return target?.startsWith("http://") || target?.startsWith("https://") ? target : undefined;
+	return target !== undefined && (target.startsWith("http://") || target.startsWith("https://")) ? target : undefined;
 }
 
 function fallback(schema: JsonSchema, ctx: EmitCtx): JsonSchema {
@@ -140,7 +140,6 @@ function emit(ir: IR, ctx: EmitCtx): JsonSchema {
 			);
 			schema = { type: "array", prefixItems, minItems: required };
 			if (ir.variadic === undefined) {
-				schema.maxItems = ir.prefix.length + ir.postfix.length;
 				schema.items = false;
 			} else {
 				schema.items = emit(ir.variadic, ctx);
@@ -185,10 +184,13 @@ function emit(ir: IR, ctx: EmitCtx): JsonSchema {
 			} else {
 				schema = ir.schema.hasSteps ? fallback(emit(ir.schema.ir, ctx), ctx) : emit(ir.schema.ir, ctx);
 			}
-			if (ir.schema.description !== undefined) schema.description = ir.schema.description;
+			if (ir.schema.ir.desc !== undefined) schema.description = ir.schema.ir.desc;
+			else if (ir.schema.description !== undefined && ir.descAuto !== true) {
+				schema.description = ir.schema.description;
+			}
 			break;
 	}
-	if (ir.desc !== undefined) schema.description = ir.desc;
+	if (ir.desc !== undefined && ir.descAuto !== true) schema.description = ir.desc;
 	return schema;
 }
 
@@ -270,17 +272,16 @@ function emitObject(
 ): JsonSchema {
 	const properties: Record<string, unknown> = {};
 	const required: string[] = [];
-	// ArkType emits required properties first (each group in declaration
-	// order); downstream wire consumers rely on that stable ordering.
 	const filled = (prop: PropIR): boolean => !prop.opt && (ctx.options?.io === "output" || !prop.hasDefault);
-	const ordered = [...props.filter(filled), ...props.filter(prop => !filled(prop))];
-	for (const prop of ordered) {
+	for (const prop of props) {
+		if (typeof prop.key === "symbol") throw new TypeError("Cannot convert a symbol to a string");
+		const key = String(prop.key);
 		const propertySchema = emit(prop.val, ctx);
 		if (prop.hasDefault) {
 			propertySchema.default = prop.defFactory ? (prop.def as () => unknown)() : prop.def;
 		}
-		properties[prop.key] = propertySchema;
-		if (filled(prop)) required.push(prop.key);
+		properties[key] = propertySchema;
+		if (filled(prop)) required.push(key);
 	}
 	const schema: JsonSchema = { type: "object", properties };
 	if (required.length > 0) schema.required = required;
