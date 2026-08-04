@@ -66,6 +66,7 @@
 
 ### Fixed
 
+- Fixed Agent Hub opening and selection becoming O(all rows) on large rosters: row rendering is now lazy around the selected viewport, and observer lookup is O(1) by id instead of copy-sorting every session per row.
 - Fixed extension slash commands appearing as user prompts after being handled locally.
 - Preserved explicit session titles when branching from an earlier conversation turn.
 - Fixed an issue where unhandled JavaScript rejections in the browser guest could crash the main process and active sessions, converting them into tool errors instead.
