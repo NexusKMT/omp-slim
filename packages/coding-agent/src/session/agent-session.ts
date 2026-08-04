@@ -485,6 +485,7 @@ export class AgentSession {
 
 	// Retry state
 	readonly #recovery: TurnRecovery;
+	#textOutputCommitted = true;
 	#planModeReminderCount = 0;
 	#planModeReminderAwaitingProgress = false;
 	readonly #todo: TodoTracker;
@@ -1025,6 +1026,7 @@ export class AgentSession {
 			modelRegistry: this.#modelRegistry,
 			configWarnings: this.configWarnings,
 			model: () => this.model,
+			textOutputCommitted: () => this.#textOutputCommitted,
 			thinkingLevel: () => this.thinkingLevel,
 			configuredThinkingLevel: () => this.configuredThinkingLevel(),
 			setThinkingLevel: level => this.setThinkingLevel(level),
@@ -4182,6 +4184,11 @@ export class AgentSession {
 	/** Current effective system prompt blocks (includes any per-turn extension modifications) */
 	get systemPrompt(): string[] {
 		return this.agent.state.systemPrompt;
+	}
+
+	/** Marks streamed text as committed or buffered for turn-recovery replay decisions. */
+	setTextOutputCommitted(committed: boolean): void {
+		this.#textOutputCommitted = committed;
 	}
 
 	/** Current retry attempt (0 if not retrying) */
