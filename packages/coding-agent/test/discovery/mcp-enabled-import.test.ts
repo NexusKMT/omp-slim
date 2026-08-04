@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -65,23 +65,33 @@ const FIXTURES: Fixture[] = [
 ];
 
 describe("translated MCP importers propagate enabled: false", () => {
-	let tempDir = "";
+	let tempCwd = "";
+	let tempHome = "";
+	let originalHome: string | undefined;
 
 	beforeEach(async () => {
-		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-mcp-enabled-"));
+		originalHome = process.env.HOME;
+		tempCwd = await fs.mkdtemp(path.join(os.tmpdir(), "omp-mcp-enabled-cwd-"));
+		tempHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-mcp-enabled-home-"));
+		process.env.HOME = tempHome;
+		vi.spyOn(os, "homedir").mockReturnValue(tempHome);
 	});
 
 	afterEach(async () => {
-		await removeWithRetries(tempDir);
+		vi.restoreAllMocks();
+		if (originalHome === undefined) delete process.env.HOME;
+		else process.env.HOME = originalHome;
+		await removeWithRetries(tempCwd);
+		await removeWithRetries(tempHome);
 	});
 
 	for (const { provider, file, content } of FIXTURES) {
 		test(`${provider} carries enabled: false`, async () => {
-			const filePath = path.join(tempDir, file);
+			const filePath = path.join(tempCwd, file);
 			await fs.mkdir(path.dirname(filePath), { recursive: true });
 			await fs.writeFile(filePath, content);
 
-			const servers = await loadMcp(tempDir, provider);
+			const servers = await loadMcp(tempCwd, provider);
 			const server = servers.find(item => item.name === "markitdown");
 
 			expect(server).toBeDefined();
