@@ -6,6 +6,10 @@
 
 - Added a public `compareVersions` utility (`@oh-my-pi/pi-utils`) that compares two version strings with SemVer-2.0 prerelease ordering, build-metadata stripping, and numeric segment comparison without float overflow; never throws.
 
+### Fixed
+
+- Honor the current process `PATH` when caching executable lookups, preventing stale tool paths after environment reloads.
+
 ## [17.2.6] - 2026-08-03
 
 ### Added
@@ -21,9 +25,6 @@
 ### Changed
 
 - Updated the lightweight CLI runner to support static command metadata, allowing root help to render without importing full command implementations.
-### Fixed
-
-- Honor the current process `PATH` when caching executable lookups, preventing stale tool paths after environment reloads.
 
 ## [17.2.4] - 2026-08-01
 
