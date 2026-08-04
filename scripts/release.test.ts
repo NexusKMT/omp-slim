@@ -1,36 +1,38 @@
 import { describe, expect, test } from "bun:test";
-import { isValidExplicitVersion } from "./release";
+import { validateExplicitVersion } from "./release";
 
-describe("isValidExplicitVersion", () => {
+describe("validateExplicitVersion", () => {
 	test("rejects malformed versions", () => {
-		expect(isValidExplicitVersion("999.bad")).toBe(false);
-		expect(isValidExplicitVersion("17")).toBe(false);
-		expect(isValidExplicitVersion("17.2")).toBe(false);
-		expect(isValidExplicitVersion("17.2.8.9")).toBe(false);
-		expect(isValidExplicitVersion("v17.2.8.9")).toBe(false);
-		expect(isValidExplicitVersion("abc")).toBe(false);
-		expect(isValidExplicitVersion("")).toBe(false);
-		expect(isValidExplicitVersion("v")).toBe(false);
-		expect(isValidExplicitVersion("17.2.8-")).toBe(false);
+		expect(validateExplicitVersion("999.bad")).toBe(null);
+		expect(validateExplicitVersion("17")).toBe(null);
+		expect(validateExplicitVersion("17.2")).toBe(null);
+		expect(validateExplicitVersion("17.2.8.9")).toBe(null);
+		expect(validateExplicitVersion("v17.2.8.9")).toBe(null);
+		expect(validateExplicitVersion("abc")).toBe(null);
+		expect(validateExplicitVersion("")).toBe(null);
+		expect(validateExplicitVersion("v")).toBe(null);
+		expect(validateExplicitVersion("17.2.8-")).toBe(null);
 	});
 
-	test("accepts valid three-segment numeric versions", () => {
-		expect(isValidExplicitVersion("17.2.8")).toBe(true);
-		expect(isValidExplicitVersion("0.0.0")).toBe(true);
-		expect(isValidExplicitVersion("1.0.0")).toBe(true);
+	test("rejects prerelease suffixes (not supported by this release path)", () => {
+		// Prereleases would be published as npm `latest` because the downstream
+		// publish runs `npm publish` with no `--tag`.
+		expect(validateExplicitVersion("17.2.8-rc.1")).toBe(null);
+		expect(validateExplicitVersion("v17.2.8-beta")).toBe(null);
+		expect(validateExplicitVersion("1.0.0-alpha")).toBe(null);
+		expect(validateExplicitVersion("1.0.0-alpha.1.2")).toBe(null);
+		expect(validateExplicitVersion("1.0.0-0.3.7")).toBe(null);
+		expect(validateExplicitVersion("1.0.0-x.7.z.92")).toBe(null);
 	});
 
-	test("accepts leading v prefix", () => {
-		expect(isValidExplicitVersion("v17.2.8")).toBe(true);
-		expect(isValidExplicitVersion("V17.2.8")).toBe(false);
+	test("accepts bare three-segment numeric versions and returns them unchanged", () => {
+		expect(validateExplicitVersion("17.2.8")).toBe("17.2.8");
+		expect(validateExplicitVersion("0.0.0")).toBe("0.0.0");
+		expect(validateExplicitVersion("1.0.0")).toBe("1.0.0");
 	});
 
-	test("accepts prerelease suffixes", () => {
-		expect(isValidExplicitVersion("17.2.8-rc.1")).toBe(true);
-		expect(isValidExplicitVersion("v17.2.8-rc.1")).toBe(true);
-		expect(isValidExplicitVersion("1.0.0-beta")).toBe(true);
-		expect(isValidExplicitVersion("1.0.0-alpha.1.2")).toBe(true);
-		expect(isValidExplicitVersion("1.0.0-0.3.7")).toBe(true);
-		expect(isValidExplicitVersion("1.0.0-x.7.z.92")).toBe(true);
+	test("accepts leading v prefix and normalizes to the bare version", () => {
+		expect(validateExplicitVersion("v17.2.8")).toBe("17.2.8");
+		expect(validateExplicitVersion("V17.2.8")).toBe(null);
 	});
 });

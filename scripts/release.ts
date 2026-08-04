@@ -16,12 +16,22 @@ const changelogGlob = new Glob("packages/*/CHANGELOG.md");
 const packageJsonGlob = new Glob("packages/*/package.json");
 const cargoTomlGlob = new Glob("crates/*/Cargo.toml");
 /**
- * Strict explicit-version guard: three numeric dot-segments, optional leading
- * `v`, optional SemVer-2.0 prerelease suffix. Bump keywords (major/minor/patch)
- * are handled separately and must not be routed through this check.
+ * Strict explicit-version guard: three numeric dot-segments with an optional
+ * leading `v` and NO prerelease suffix. Prereleases are rejected because the
+ * downstream publish (`scripts/ci-release-publish.ts`) runs `npm publish` with
+ * no `--tag`, which would promote a prerelease to the npm `latest` dist-tag —
+ * hitting every unqualified install and the `/latest` endpoint `omp update`
+ * reads. Bump keywords (major/minor/patch) are handled separately and must not
+ * be routed through this check.
+ *
+ * Returns the normalized bare version (leading `v` stripped) when accepted, or
+ * `null` when rejected. Callers must use the returned value for all writes so
+ * no downstream manifest (package.json, Cargo.toml, tag) ever sees a `v`
+ * prefix — Cargo rejects `version = "v17.2.8"`.
  */
-export function isValidExplicitVersion(version: string): boolean {
-	return /^v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version);
+export function validateExplicitVersion(version: string): string | null {
+	const match = /^v?(\d+\.\d+\.\d+)$/.exec(version);
+	return match ? match[1] : null;
 }
 
 function git(args: readonly string[]) {
@@ -199,14 +209,18 @@ async function cmdRelease(versionOrBump: string): Promise<void> {
 	console.log("\n=== Release Script ===\n");
 	// Validate explicit versions before any compare: the shared compareVersions
 	// never throws, so without this guard garbage like "999.bad" would be
-	// accepted and written into every package.json / Cargo.toml / tag.
+	// accepted and written into every package.json / Cargo.toml / tag. The
+	// validator also normalizes a leading `v` to the bare version so every
+	// downstream write (manifests, Cargo.toml, tag) uses `17.2.8`, not `v17.2.8`.
 	if (versionOrBump !== "major" && versionOrBump !== "minor" && versionOrBump !== "patch") {
-		if (!isValidExplicitVersion(versionOrBump)) {
+		const normalized = validateExplicitVersion(versionOrBump);
+		if (normalized === null) {
 			console.error(
-				`Error: Invalid version "${versionOrBump}". Expected a semver like 17.2.8 or v17.2.8-rc.1, or a bump keyword (major/minor/patch).`,
+				`Error: Invalid version "${versionOrBump}". Expected a semver like 17.2.8 or v17.2.8 (prereleases such as 17.2.8-rc.1 are not supported by this release path), or a bump keyword (major/minor/patch).`,
 			);
 			process.exit(1);
 		}
+		versionOrBump = normalized;
 	}
 
 	// 1. Pre-flight checks
@@ -421,7 +435,7 @@ if (import.meta.main) {
 
 	if (arg === "watch") {
 		await cmdWatch();
-	} else if (arg === "major" || arg === "minor" || arg === "patch" || isValidExplicitVersion(arg)) {
+	} else if (arg === "major" || arg === "minor" || arg === "patch" || validateExplicitVersion(arg) !== null) {
 		await cmdRelease(arg);
 	} else {
 		console.error(`Unknown command or invalid version: ${arg}`);
