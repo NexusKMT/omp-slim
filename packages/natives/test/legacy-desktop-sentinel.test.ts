@@ -29,18 +29,33 @@ class LegacyDesktopSession {
 	close() {}
 }
 
-describe("legacy DesktopSession addon loading", () => {
-	it("accepts a legacy desktop ABI from disk without a matching sentinel", async () => {
+const legacyCoreBindings = {
+	countTokens() {},
+	executeShell() {},
+	visibleWidth() {},
+};
+
+describe("legacy native addon loading", () => {
+	it("accepts a compatible pre-sentinel addon from disk", async () => {
 		const ctx = ctxFor("17.2.8");
-		const bindings = { DesktopSession: LegacyDesktopSession };
+		const bindings = { ...legacyCoreBindings, DesktopSession: LegacyDesktopSession };
 		await withCandidate("legacy native addon", candidate => {
 			expect(() => validateLoadedBindings(ctx, bindings, candidate)).not.toThrow();
 		});
 	});
 
+	it("rejects a pre-sentinel addon without the compatible core ABI", async () => {
+		const ctx = ctxFor("17.2.8");
+		await withCandidate("legacy native addon", candidate => {
+			expect(() => validateLoadedBindings(ctx, { DesktopSession: LegacyDesktopSession }, candidate)).toThrow(
+				"reinstall to re-sync",
+			);
+		});
+	});
+
 	it("keeps resident old addons restart-only", async () => {
 		const ctx = ctxFor("17.2.8");
-		const bindings = { __piNativesV17_2_7: () => {}, DesktopSession: LegacyDesktopSession };
+		const bindings = { __piNativesV17_2_7: () => {}, ...legacyCoreBindings, DesktopSession: LegacyDesktopSession };
 		await withCandidate("__piNativesV17_2_8", candidate => {
 			expect(() => validateLoadedBindings(ctx, bindings, candidate)).toThrow("restart omp");
 		});
