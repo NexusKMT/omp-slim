@@ -35,8 +35,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { $ } from "bun";
-import { compareVersions } from "../packages/utils/src/version.ts";
 import { LEAF_TARGETS } from "../packages/natives/scripts/gen-npm-packages.ts";
+import { compareVersions } from "../packages/utils/src/version.ts";
 import { packages } from "./ci-release-publish.ts";
 
 const repoRoot = path.join(import.meta.dir, "..");

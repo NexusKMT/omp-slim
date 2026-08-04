@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-import { compareVersions } from "../packages/utils/src/version.ts";
 /**
  * Release script for pi-mono
  *
@@ -10,6 +9,7 @@ import { compareVersions } from "../packages/utils/src/version.ts";
  * Example: bun scripts/release.ts minor
  */
 import { $, Glob } from "bun";
+import { compareVersions } from "../packages/utils/src/version.ts";
 import { runChangelogFixer } from "./fix-changelogs";
 
 const changelogGlob = new Glob("packages/*/CHANGELOG.md");
