@@ -14,6 +14,7 @@ import type {
 	Effort,
 	Model,
 	TextContent,
+	ThinkingContent,
 	ToolChoice,
 } from "@oh-my-pi/pi-ai";
 import { calculateRateLimitBackoffMs, parseRateLimitReason } from "@oh-my-pi/pi-ai";
@@ -593,11 +594,19 @@ export class TurnRecovery {
 			return false;
 		}
 
-		const text = assistantMessage.content
+		let text = assistantMessage.content
 			.filter((content): content is TextContent => content.type === "text")
 			.map(content => content.text)
 			.join("\n");
-		if (!/\S/.test(text)) {
+		// Thinking-only stops carry their signal in the thinking block (a trapped
+		// response or a truncated fragment); classify on that when there is no text.
+		if (!hasNonWhitespace(text)) {
+			text = assistantMessage.content
+				.filter((content): content is ThinkingContent => content.type === "thinking")
+				.map(content => content.thinking)
+				.join("\n");
+		}
+		if (!hasNonWhitespace(text)) {
 			this.#unexpectedStopRetryCount = 0;
 			return false;
 		}
