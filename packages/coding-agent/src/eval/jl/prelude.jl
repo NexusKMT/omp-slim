@@ -519,13 +519,10 @@ function completion(prompt::String; model="default", system=nothing, schema=noth
     return schema === nothing ? text : Main.json_parse(string(text))
 end
 
-function agent(prompt::String; agent="task", model=nothing, label=nothing, schema=nothing, schema_mode=nothing, isolated=nothing, apply=nothing, merge=nothing, handle=false, kwargs...)
+function agent(prompt::String; agent="task", label=nothing, schema=nothing, schema_mode=nothing, isolated=nothing, apply=nothing, merge=nothing, handle=false, kwargs...)
     args_dict = Dict{String, Any}("prompt" => prompt)
     if agent !== nothing
         args_dict["agent"] = agent
-    end
-    if model !== nothing
-        args_dict["model"] = model
     end
     if label !== nothing
         args_dict["label"] = label
