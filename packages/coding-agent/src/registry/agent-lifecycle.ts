@@ -20,17 +20,27 @@
  * a superseded revive) can never clobber a newer same-id ref.
  */
 
+import * as fs from "node:fs/promises";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { AgentSession } from "../session/agent-session";
 import {
 	type AgentRef,
 	type AgentRefExpectation,
 	AgentRegistry,
+	getAgentTombstonePath,
 	MAIN_AGENT_ID,
 	type RegistryEvent,
 } from "./agent-registry";
 
 export type AgentReviver = (expected: AgentRef) => Promise<AgentSession>;
+
+async function persistAgentTombstone(sessionFile: string): Promise<void> {
+	try {
+		await fs.writeFile(getAgentTombstonePath(sessionFile), "", { encoding: "utf8", flag: "wx", mode: 0o600 });
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+	}
+}
 
 /**
  * Builds a reviver for a `parked` ref restored from disk (Agent Hub scan,
@@ -379,13 +389,10 @@ export class AgentLifecycleManager {
 		}
 
 		if (options?.tombstone) {
-			// Explicit kill: mark the ref terminal `aborted` and detach the session
-			// BEFORE disposing. aborted refs must satisfy the AgentRef invariant
-			// (session === null) so ensureLive / hub focus can never route into a
-			// disposed session; setting the terminal status first also makes
-			// createAgentSession's dispose wrapper (unregisterUnlessParked) preserve
-			// the ref instead of removing it, so a later persisted-subagent rescan
-			// skips it. The transcript file is left intact (history://<id>).
+			// Persist the terminal decision before detaching the session. The
+			// sidecar prevents a later discovery pass from reviving this transcript
+			// as a fresh parked ref.
+			if (ref.sessionFile) await persistAgentTombstone(ref.sessionFile);
 			this.#registry.setStatus(id, "aborted", ref);
 		}
 		const live = this.#registry.get(id) === ref ? ref.session : null;

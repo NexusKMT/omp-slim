@@ -15,6 +15,7 @@ import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { visitEntriesFromFileStream } from "@oh-my-pi/pi-coding-agent/session/session-loader";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { getBundledAgent } from "@oh-my-pi/pi-coding-agent/task/agents";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -296,62 +297,43 @@ describe("Agent hub Enter activation", () => {
 		expect(Bun.stripANSI(hub.render(120).join("\n"))).toContain("Read-only · 0 LoC");
 		hub.dispose();
 	});
-	it("avoids multi-second event-loop stalls while discovering agents from a large session", async () => {
+	it("yields to a macrotask while streaming a large session", async () => {
+		vi.useFakeTimers();
 		using tempDir = TempDir.createSync("@omp-agent-hub-responsive-");
-		const sessionFile = path.join(tempDir.path(), "main.jsonl");
-		const header = JSON.stringify({
-			type: "session",
-			version: 3,
-			id: "responsive-test",
-			timestamp: new Date().toISOString(),
-			cwd: tempDir.path(),
-		});
-		const payload = "x".repeat(250_000);
-		const message = JSON.stringify({
+		const sessionFile = path.join(tempDir.path(), "session.jsonl");
+		const entry = JSON.stringify({
 			type: "message",
-			id: "large-message",
+			id: "entry",
 			parentId: null,
-			timestamp: new Date().toISOString(),
-			message: {
-				role: "user",
-				content: [{ type: "text", text: payload }],
-				timestamp: Date.now(),
-			},
+			timestamp: "2026-07-30T01:13:30.000Z",
+			message: { role: "user", content: [{ type: "text", text: "small" }] },
 		});
-		await Bun.write(sessionFile, `${header}\n${Array.from({ length: 600 }, () => message).join("\n")}\n`);
-		Bun.gc(true);
-
-		const agents = new AgentRegistry();
-		const hub = new AgentHubOverlayComponent({
-			settings: Settings.isolated(),
-			observers: new SessionObserverRegistry(),
-			hubKeys: [],
-			onDone: () => {},
-			requestRender: () => {},
-			registry: agents,
-			irc: new IrcBus(agents),
-			focusAgent: async () => {},
+		await Bun.write(sessionFile, `${entry}\n`.repeat(8_193));
+		let complete = false;
+		let yieldedBeforeComplete = false;
+		let visited = 0;
+		const visit = visitEntriesFromFileStream(
 			sessionFile,
+			() => {
+				visited++;
+				if (visited !== 8_192) return;
+				setTimeout(() => {
+					if (!complete) yieldedBeforeComplete = true;
+				}, 0);
+			},
+			{ yieldEveryBytes: 0, yieldEveryEntries: 8_192 },
+		).finally(() => {
+			complete = true;
 		});
-
-		let maxLagMs = 0;
-		let previous = performance.now();
-		const timer = setInterval(() => {
-			const now = performance.now();
-			maxLagMs = Math.max(maxLagMs, now - previous - 2);
-			previous = now;
-		}, 2);
 		try {
-			await hub.persistedSubagentsReady;
-			await Bun.sleep(10);
+			for (let i = 0; i < 20_000 && visited < 8_192 && !complete; i++) await Promise.resolve();
+			expect(visited).toBeGreaterThanOrEqual(8_192);
+			vi.runOnlyPendingTimers();
+			await visit;
+			expect(yieldedBeforeComplete).toBe(true);
 		} finally {
-			clearInterval(timer);
-			hub.dispose();
+			vi.useRealTimers();
 		}
-
-		// Guard the original seconds-long freeze without treating shared-runner
-		// scheduling jitter as an Agent Hub regression.
-		expect(maxLagMs).toBeLessThan(500);
 	});
 
 	it("does not generically revive active or tombstoned Vibe children copied by a post-exit fork", async () => {
@@ -767,12 +749,53 @@ describe("Agent hub data refresh coalescing", () => {
 			const refreshed = Bun.stripANSI(hub.render(120).join("\n"));
 			expect(refreshed).toContain("450 tok");
 			expect(refreshed).toContain("2 req");
-			expect(refreshed).toContain("1/1 measured");
+			expect(refreshed).toContain("1/1");
+			expect(refreshed).toContain("measured");
 			hub.render(120);
 			expect(getSessionStats).toHaveBeenCalledTimes(2);
 		} finally {
 			hub.dispose();
 			vi.useRealTimers();
+		}
+	});
+
+	it("counts shared fallback session usage once across parent and descendant rows", () => {
+		const agents = new AgentRegistry();
+		const getSessionStats = vi.fn(() => ({
+			tokens: { input: 100, output: 40, cacheRead: 10, cacheWrite: 10, total: 160 },
+			assistantMessages: 1,
+			toolCalls: 2,
+			cost: 0.1,
+			contextUsage: undefined,
+		}));
+		const session = { getSessionStats } as unknown as AgentSession;
+		agents.register({ id: "Parent", displayName: "Parent", kind: "sub", session, status: "idle" });
+		agents.register({
+			id: "Child",
+			displayName: "Child",
+			kind: "sub",
+			parentId: "Parent",
+			session,
+			status: "idle",
+		});
+		const hub = new AgentHubOverlayComponent({
+			settings: Settings.isolated(),
+			observers: new SessionObserverRegistry(),
+			hubKeys: [],
+			onDone: () => {},
+			requestRender: () => {},
+			registry: agents,
+			irc: new IrcBus(agents),
+			focusAgent: async () => {},
+		});
+		try {
+			const rendered = Bun.stripANSI(hub.render(120).join("\n"));
+			expect(rendered).toContain("150 tok");
+			expect(rendered).toContain("1/2");
+			expect(rendered).toContain("measured");
+			expect(getSessionStats).toHaveBeenCalledTimes(1);
+		} finally {
+			hub.dispose();
 		}
 	});
 });

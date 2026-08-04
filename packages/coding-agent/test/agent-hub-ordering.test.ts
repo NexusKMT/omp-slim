@@ -176,17 +176,18 @@ describe("Agent hub row ordering", () => {
 
 			hub = makeHub(agents);
 			expect(renderedAgentIds(hub)).toEqual(["C", "B", "A"]);
-
-			// Bump A's lastActivity far ahead of the others. The hub is already open,
-			// so the captured order must not change.
+			// Bump A's lastActivity far ahead of the others; captured order wins.
 			setSystemTime(4000);
 			agents.setActivity("A", "still running");
 
-			// Registering a new agent schedules a coalesced row refresh; the
-			// existing rows must stay put once the scheduled refresh runs.
+			// Status changes must not reorder the captured roster either.
+			agents.setStatus("B", "idle");
+
+			// Registering a new agent schedules a coalesced row refresh; even a
+			// different status is appended after all rows captured on open.
 			setSystemTime(5000);
 			const sessionD = {} as AgentSession;
-			agents.register({ id: "D", displayName: "Delta", kind: "sub", session: sessionD });
+			agents.register({ id: "D", displayName: "Delta", kind: "sub", session: sessionD, status: "parked" });
 
 			expect(renderedAgentIds(hub)).toEqual(["C", "B", "A"]);
 			vi.advanceTimersByTime(100);
@@ -204,7 +205,7 @@ describe("Agent hub row ordering", () => {
 		const sessionA = {} as AgentSession;
 		agents.register({
 			id: "RevAgentStream",
-			displayName: "Agent runtime + compaction reviewer",
+			displayName: "Agent runtime + compaction reviewer\u0007",
 			kind: "sub",
 			session: sessionA,
 		});
@@ -218,12 +219,17 @@ describe("Agent hub row ordering", () => {
 				status: "active",
 				description: "Complete the assignment below, thoroughly:\n- check performance\n- check leaks",
 				lastUpdate: Date.now(),
+				progress: {
+					currentTool: "bash",
+					currentToolArgs: "\x1b[2Jdangerous args",
+				} as never,
 			},
 		]);
 
 		const hub = makeHub(agents, { observers });
 
 		const lines = hub.render(80);
+		expect(lines.join("\n")).not.toContain("\u0007");
 		for (const line of lines) {
 			const cleanLine = Bun.stripANSI(line);
 			expect(cleanLine.includes("\n")).toBe(false);
@@ -231,6 +237,10 @@ describe("Agent hub row ordering", () => {
 			const width = visibleWidth(line);
 			expect(width).toBeLessThanOrEqual(80);
 		}
+		hub.handleInput("\t");
+		const details = hub.render(80).join("\n");
+		expect(details).not.toContain("\x1b[2J");
+		expect(details).toContain("dangerous args");
 
 		hub.dispose();
 	});
@@ -287,14 +297,12 @@ describe("Agent hub row ordering", () => {
 			const frame = hub.render(120);
 			const alphaRow = frame.findIndex(line => /^│ {3}\S+ Alpha/u.test(Bun.stripANSI(line)));
 			expect(alphaRow).toBeGreaterThanOrEqual(0);
-			hub.handleInput(leftClick(alphaRow + 1));
-			expect(selectedAgentId(hub)).toBe("Alpha");
+			hub.handleInput(`\x1b[<0;110;${alphaRow + 1}M`);
+			expect(selectedAgentId(hub)).toBe("Beta");
 			expect(focused).toEqual([]);
-
-			const selectedFrame = hub.render(120);
-			const selectedAlphaRow = selectedFrame.findIndex(line => /^│ ❯ \S+ Alpha/u.test(Bun.stripANSI(line)));
-			hub.handleInput(leftClick(selectedAlphaRow + 1));
+			hub.handleInput(leftClick(alphaRow + 1));
 			await Promise.resolve();
+			expect(selectedAgentId(hub)).toBe("Alpha");
 			expect(focused).toEqual(["Alpha"]);
 			expect(done).toHaveBeenCalledTimes(1);
 		} finally {
@@ -468,7 +476,7 @@ describe("Agent hub row ordering", () => {
 			expect(rendered).toContain("1 running");
 			expect(rendered).toContain("Flat");
 			expect(rendered).toContain("By parent");
-			expect(rendered).toContain("$0.213 · 2m14s · 12 req · 27 tools · 18K tok");
+			expect(rendered).toContain("$0.213 · 2m14s active · 12 req · 27 tools · 18K tok");
 			expect(rendered).toContain("Security Reviewer");
 			expect(rendered).toContain("read · src/session/agent-session.ts");
 			expect(rendered).toContain("31K/128K 24%");
@@ -548,7 +556,7 @@ describe("Agent hub row ordering", () => {
 			expect(rendered).toContain("3.7K tok");
 			expect(rendered).toContain("8 req");
 			expect(rendered).toContain("12 tools");
-			expect(rendered).toContain("2m11s agent time");
+			expect(rendered).toContain("2m11s active agent time");
 
 			const running = renderedRosterEntry(hub, "Running", 160);
 			expect(running).toContain("$0.123");
@@ -774,9 +782,25 @@ describe("Agent hub row ordering", () => {
 		}
 	});
 
+	it("keeps cyclic parent links renderable in tree mode", () => {
+		const agents = new AgentRegistry();
+		agents.register({ id: "CycleA", displayName: "Cycle A", kind: "sub", parentId: "CycleB", session: null });
+		agents.register({ id: "CycleB", displayName: "Cycle B", kind: "sub", parentId: "CycleA", session: null });
+		const hub = makeHub(agents);
+
+		try {
+			hub.handleInput("t");
+			const rendered = Bun.stripANSI(hub.render(120).join("\n"));
+			expect(rendered).toContain("CycleA");
+			expect(rendered).toContain("CycleB");
+		} finally {
+			hub.dispose();
+		}
+	});
+
 	it("opens the selected-agent inspector as a narrow-terminal fallback", () => {
 		geometry = stubStdoutGeometry(80);
-		geometry.setRows(28);
+		geometry.setRows(12);
 		const agents = new AgentRegistry();
 		agents.register({ id: "NarrowAgent", displayName: "Narrow Agent", kind: "sub", session: null });
 		const observers = new SessionObserverRegistry();
@@ -812,8 +836,10 @@ describe("Agent hub row ordering", () => {
 			const details = Bun.stripANSI(hub.render(80).join("\n"));
 			expect(details).toContain("Agent Hub · NarrowAgent");
 			expect(details).toContain("Usage");
-			expect(details).toContain("$0.0000 · 2.0s · 2 req · 3 tools · 900 tok");
+			expect(details).toContain("$0.0000 · 2.0s active · 2 req · 3 tools · 900 tok");
 			expect(details).toContain("Tab:roster");
+			hub.handleInput("\x1b[6~");
+			expect(Bun.stripANSI(hub.render(80).join("\n"))).toContain("Changes");
 			for (const line of hub.render(80)) expect(visibleWidth(line)).toBeLessThanOrEqual(80);
 
 			hub.handleInput("\x1b");

@@ -14,6 +14,13 @@ import { oneLineLabel } from "../task/types";
 
 export const MAIN_AGENT_ID = "Main";
 
+/** Sidecar marker retained beside a child transcript after an explicit kill. */
+export const AGENT_TOMBSTONE_SUFFIX = ".tombstone";
+
+export function getAgentTombstonePath(sessionFile: string): string {
+	return `${sessionFile}${AGENT_TOMBSTONE_SUFFIX}`;
+}
+
 /**
  * - `running`: a turn is in flight.
  * - `idle`: live AgentSession in memory, awaiting work. Finished agents are
@@ -22,6 +29,8 @@ export const MAIN_AGENT_ID = "Main";
  * - `aborted`: hard-killed, terminal.
  */
 export type AgentStatus = "running" | "idle" | "parked" | "aborted";
+/** Provenance of a displayed duration: active runtime, transcript span, or unavailable. */
+export type AgentDurationKind = "active" | "span" | "unknown";
 /**
  * - `main`/`sub`: the user-facing agent tree (driving agent + task subagents).
  * - `advisor`: a passive review transcript persisted like a subagent for usage
@@ -37,6 +46,7 @@ export interface AgentMetricsSummary {
 	tools: number;
 	cost: number;
 	durationMs: number;
+	durationKind?: AgentDurationKind;
 	contextTokens?: number;
 	contextWindow?: number;
 }
@@ -46,6 +56,8 @@ export interface AgentHistorySummary {
 	agent?: string;
 	modelRole?: string;
 	resolvedModel?: string;
+	/** Whether the last resolved model was selected by retry fallback routing. */
+	resolvedModelIsFallback?: boolean;
 	metrics?: AgentMetricsSummary;
 	readOnly?: boolean;
 }
@@ -153,7 +165,10 @@ export class AgentRegistry {
 	setHistory(id: string, history: AgentHistorySummary, expectedSessionFile?: string): boolean {
 		const ref = this.#refs.get(id);
 		if (!ref || (expectedSessionFile !== undefined && ref.sessionFile !== expectedSessionFile)) return false;
-		ref.history = { ...ref.history, ...history };
+		const definedHistory = Object.fromEntries(
+			Object.entries(history).filter(([, value]) => value !== undefined),
+		) as AgentHistorySummary;
+		ref.history = { ...ref.history, ...definedHistory };
 		this.#emit({ type: "metadata_changed", ref });
 		return true;
 	}

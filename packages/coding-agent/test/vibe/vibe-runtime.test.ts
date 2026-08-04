@@ -1952,6 +1952,41 @@ describe("vibe session registry", () => {
 		}
 	});
 
+	it("finalizer persists a hard-abort tombstone before disposing the live ref", async () => {
+		const parentManager = await createPersistedParent();
+		await parentManager.ensureOnDisk();
+		const parentSessionFile = parentManager.getSessionFile();
+		if (!parentSessionFile) throw new Error("Expected a persisted parent session file");
+		const workerId = "finalizer-hard-abort";
+		const workerSessionFile = path.join(parentSessionFile.slice(0, -6), `${workerId}.jsonl`);
+		await Bun.write(workerSessionFile, "");
+		const worker = createFakeWorkerSession();
+		const ref = AgentRegistry.global().register({
+			id: workerId,
+			displayName: workerId,
+			kind: "sub",
+			parentId: "Main",
+			session: worker.session,
+			sessionFile: workerSessionFile,
+			status: "running",
+		});
+
+		await executorModule.finalizeSubagentLifecycle({
+			id: workerId,
+			session: worker.session,
+			aborted: true,
+			keepAlive: true,
+			isolated: false,
+			agentIdleTtlMs: 0,
+			reviveSession: null,
+		});
+
+		expect(worker.isDisposed()).toBe(true);
+		expect(AgentRegistry.global().get(workerId)).toMatchObject({ status: "aborted", session: null });
+		expect(AgentRegistry.global().get(workerId)).toBe(ref);
+		expect(await fileExists(`${workerSessionFile}.tombstone`)).toBe(true);
+	});
+
 	it("keeps a persisted in-flight kill terminal when the old executor finalizes late", async () => {
 		let worker: ReturnType<typeof createFakeWorkerSession> | undefined;
 		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {

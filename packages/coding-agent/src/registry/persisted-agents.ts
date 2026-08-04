@@ -1,23 +1,21 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { readLines } from "@oh-my-pi/pi-utils";
 import { ADVISOR_TRANSCRIPT_FILENAME, isAdvisorTranscriptName } from "../advisor/transcript-recorder";
 import { resolveExplicitModelRole } from "../config/model-resolver";
+import { EPHEMERAL_MODEL_CHANGE_ROLE } from "../session/session-entries";
+import { visitEntriesFromFileStream } from "../session/session-loader";
 import { loadBundledAgents } from "../task/agents";
+import { isReadOnlyAgent } from "../task/read-only-policy";
 import { persistedVibeChildIds } from "../vibe/runtime";
 import {
 	type AgentHistorySummary,
 	type AgentMetricsSummary,
 	type AgentRegistry,
+	getAgentTombstonePath,
 	MAIN_AGENT_ID,
 } from "./agent-registry";
 
-/**
- * Child ids owned by the Vibe roster persisted in this session file. Vibe
- * workers are revived through the Vibe registry's own journal, so the generic
- * persisted-subagent scan must not register them as plain `sub` refs.
- */
-const VIBE_LIFECYCLE_MARKER = Buffer.from('"vibe-session-lifecycle"');
+/** Maximum prefix entries inspected for task metadata. */
 const MAX_METADATA_LINES = 64;
 
 interface PersistedAgentMetadata {
@@ -61,15 +59,6 @@ function summarizePersistedTask(task: string): string | undefined {
 	return summary ? summary.slice(0, 1_000) : undefined;
 }
 
-const READ_ONLY_AGENT_TOOLS: Record<string, true> = {
-	read: true,
-	grep: true,
-	glob: true,
-	web_search: true,
-	ast_grep: true,
-	yield: true,
-};
-
 function finiteNumber(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
@@ -86,7 +75,7 @@ function inferBundledAgent(systemPrompt: string): { agent?: string; modelRole?: 
 	return {
 		agent: agent.name,
 		modelRole: resolveExplicitModelRole(agent.model),
-		readOnly: !!agent.tools?.length && agent.tools.every(tool => READ_ONLY_AGENT_TOOLS[tool] === true),
+		readOnly: isReadOnlyAgent(agent),
 	};
 }
 
@@ -121,29 +110,32 @@ function assistantMetrics(message: Record<string, unknown>): AssistantMetrics {
 async function readPersistedAgentHistory(transcript: PersistedTranscript): Promise<AgentHistorySummary> {
 	const parents = new Map<string, string | undefined>();
 	const assistantById = new Map<string, AssistantMetrics>();
+	const modelChangeById = new Map<string, { model: string; role?: string; resolvedModelIsFallback: boolean }>();
 	let leafId: string | undefined;
 	let leafTimestamp: number | undefined;
 	try {
-		for await (const bytes of readLines(Bun.file(transcript.sessionFile).stream())) {
-			const line = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-			const prefix = line.subarray(0, Math.min(line.byteLength, 512)).toString("utf8");
-			const id = /"id":"([^"]+)"/.exec(prefix)?.[1];
-			if (!id) continue;
-			const parentMatch = /"parentId":(?:"([^"]+)"|null)/.exec(prefix);
-			parents.set(id, parentMatch?.[1]);
+		await visitEntriesFromFileStream(transcript.sessionFile, entry => {
+			const record = recordOf(entry);
+			if (!record) return;
+			const id = typeof record.id === "string" ? record.id : undefined;
+			if (!id) return;
+			const parentId = typeof record.parentId === "string" ? record.parentId : undefined;
+			parents.set(id, parentId);
 			leafId = id;
-			const entryTimestamp = /"timestamp":"([^"]+)"/.exec(prefix)?.[1];
-			const parsedTimestamp = timestampOf(entryTimestamp);
+			const parsedTimestamp = timestampOf(record.timestamp);
 			if (parsedTimestamp !== undefined) leafTimestamp = parsedTimestamp;
-			if (!prefix.includes('"type":"message"') || !line.includes(Buffer.from('"role":"assistant"'))) continue;
-			try {
-				const entry = recordOf(JSON.parse(line.toString("utf8")));
-				const message = recordOf(entry?.message);
-				if (message?.role === "assistant") assistantById.set(id, assistantMetrics(message));
-			} catch {
-				// One malformed historical entry must not erase valid totals.
+			if (record.type === "model_change" && typeof record.model === "string") {
+				modelChangeById.set(id, {
+					model: record.model,
+					role: typeof record.role === "string" ? record.role : undefined,
+					resolvedModelIsFallback: record.resolvedModelIsFallback === true,
+				});
+				return;
 			}
-		}
+			if (record.type !== "message") return;
+			const message = recordOf(record.message);
+			if (message?.role === "assistant") assistantById.set(id, assistantMetrics(message));
+		});
 	} catch {
 		return {};
 	}
@@ -158,23 +150,42 @@ async function readPersistedAgentHistory(transcript: PersistedTranscript): Promi
 			(leafTimestamp ?? transcript.lastActivity ?? transcript.createdAt ?? 0) -
 				(transcript.createdAt ?? leafTimestamp ?? 0),
 		),
+		durationKind: "span",
 	};
 	let resolvedModel: string | undefined;
+	let resolvedModelIsFallback: boolean | undefined;
+	let modelRole: string | undefined;
 	let contextTokens: number | undefined;
+	let modelChangeFound = false;
 	const visited = new Set<string>();
 	for (let id = leafId; id && !visited.has(id); id = parents.get(id)) {
 		visited.add(id);
+		const modelChange = modelChangeById.get(id);
+		if (modelChange && !modelChangeFound) {
+			modelChangeFound = true;
+			resolvedModel = modelChange.model;
+			resolvedModelIsFallback = modelChange.resolvedModelIsFallback;
+			if (modelChange.role && modelChange.role !== EPHEMERAL_MODEL_CHANGE_ROLE) {
+				modelRole = modelChange.role;
+			}
+		}
 		const assistant = assistantById.get(id);
 		if (!assistant) continue;
+		if (!modelChangeFound && resolvedModel === undefined && assistant.resolvedModel) {
+			resolvedModel = assistant.resolvedModel;
+		}
 		metrics.requests++;
 		metrics.tokens += assistant.tokens;
 		metrics.tools += assistant.tools;
 		metrics.cost += assistant.cost;
 		contextTokens ??= assistant.contextTokens;
-		resolvedModel ??= assistant.resolvedModel;
 	}
-	metrics.contextTokens = contextTokens;
-	return { metrics: metrics.requests > 0 ? metrics : undefined, resolvedModel };
+	if (contextTokens !== undefined) metrics.contextTokens = contextTokens;
+	return {
+		...(metrics.requests > 0 ? { metrics } : {}),
+		...(resolvedModel ? { resolvedModel, resolvedModelIsFallback } : {}),
+		...(modelRole ? { modelRole } : {}),
+	};
 }
 
 /**
@@ -188,43 +199,42 @@ async function readPersistedAgentMetadata(sessionFile: string): Promise<Persiste
 	let activity: string | undefined;
 	let history: AgentHistorySummary = {};
 	try {
-		let linesRead = 0;
-		for await (const bytes of readLines(Bun.file(sessionFile).stream())) {
-			if (linesRead++ >= MAX_METADATA_LINES) break;
-			const line = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-			let entry: Record<string, unknown> | undefined;
-			try {
-				entry = recordOf(JSON.parse(line.toString("utf8")));
-			} catch {
-				continue;
-			}
-			if (entry?.type === "session") {
-				createdAt ??= timestampOf(entry.timestamp);
-				continue;
-			}
-			if (entry?.type === "model_change") {
-				if (typeof entry.model === "string") history.resolvedModel = entry.model;
-				if (typeof entry.role === "string") history.modelRole = entry.role;
-				continue;
-			}
-			if (entry?.type !== "session_init") continue;
-			createdAt ??= timestampOf(entry.timestamp);
-			if (typeof entry.task === "string") activity = summarizePersistedTask(entry.task);
-			const inferred =
-				typeof entry.systemPrompt === "string"
-					? inferBundledAgent(entry.systemPrompt)
-					: ({} satisfies AgentHistorySummary);
-			history = {
-				...history,
-				...inferred,
-				agent: typeof entry.agent === "string" ? entry.agent : inferred.agent,
-				modelRole:
-					typeof entry.modelRole === "string" ? entry.modelRole : (history.modelRole ?? inferred.modelRole),
-				resolvedModel: typeof entry.resolvedModel === "string" ? entry.resolvedModel : history.resolvedModel,
-				readOnly: typeof entry.readOnly === "boolean" ? entry.readOnly : inferred.readOnly,
-			};
-			break;
-		}
+		await visitEntriesFromFileStream(
+			sessionFile,
+			entry => {
+				const record = recordOf(entry);
+				if (!record) return;
+				if (record.type === "session") {
+					createdAt ??= timestampOf(record.timestamp);
+					return;
+				}
+				if (record.type === "model_change") {
+					if (typeof record.model === "string") history.resolvedModel = record.model;
+					if (typeof record.role === "string" && record.role !== EPHEMERAL_MODEL_CHANGE_ROLE) {
+						history.modelRole = record.role;
+					}
+					if (typeof record.resolvedModelIsFallback === "boolean") {
+						history.resolvedModelIsFallback = record.resolvedModelIsFallback;
+					}
+					return;
+				}
+				if (record.type !== "session_init") return;
+				createdAt ??= timestampOf(record.timestamp);
+				if (typeof record.task === "string") activity = summarizePersistedTask(record.task);
+				const inferred = typeof record.systemPrompt === "string" ? inferBundledAgent(record.systemPrompt) : {};
+				history = {
+					...history,
+					...inferred,
+					agent: typeof record.agent === "string" ? record.agent : inferred.agent,
+					modelRole:
+						typeof record.modelRole === "string" ? record.modelRole : (history.modelRole ?? inferred.modelRole),
+					resolvedModel: typeof record.resolvedModel === "string" ? record.resolvedModel : history.resolvedModel,
+					readOnly: typeof record.readOnly === "boolean" ? record.readOnly : inferred.readOnly,
+				};
+				return false;
+			},
+			{ maxRecords: MAX_METADATA_LINES },
+		);
 	} catch {
 		// A readable transcript is still useful even when its optional metadata
 		// prefix is malformed.
@@ -241,17 +251,9 @@ async function readPersistedAgentMetadata(sessionFile: string): Promise<Persiste
 async function readPersistedVibeChildIds(sessionFile: string): Promise<Set<string>> {
 	const ids = new Set<string>();
 	try {
-		for await (const bytes of readLines(Bun.file(sessionFile).stream())) {
-			const line = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-			if (line.indexOf(VIBE_LIFECYCLE_MARKER) === -1) continue;
-			try {
-				const entry: unknown = JSON.parse(line.toString("utf8"));
-				for (const id of persistedVibeChildIds([entry])) ids.add(id);
-			} catch {
-				// Match lenient session loading: one malformed line must not hide
-				// valid lifecycle entries later in the transcript.
-			}
-		}
+		await visitEntriesFromFileStream(sessionFile, entry => {
+			for (const id of persistedVibeChildIds([entry])) ids.add(id);
+		});
 		return ids;
 	} catch {
 		return new Set();
@@ -294,7 +296,12 @@ async function registerPersistedSubagentsFromDir(
 	} catch {
 		return;
 	}
+	let entriesSinceYield = 0;
 	for (const entry of entries) {
+		if (++entriesSinceYield >= 16) {
+			entriesSinceYield = 0;
+			await Bun.sleep(0);
+		}
 		if (!entry.isFile() || !entry.name.endsWith(".jsonl") || entry.name.includes(".bak")) continue;
 		const sessionFile = path.join(dir, entry.name);
 		// The advisor transcript is observability-only: register it as a non-peer
@@ -340,6 +347,13 @@ async function registerPersistedSubagentsFromDir(
 		}
 		const id = entry.name.slice(0, -6);
 		if (vibeOwnedIds.has(id) && registry.get(id)?.sessionFile !== sessionFile) continue;
+		let tombstoned = false;
+		try {
+			await fs.promises.access(getAgentTombstonePath(sessionFile));
+			tombstoned = true;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") continue;
+		}
 		if (!registry.get(id)) {
 			const metadata = await readPersistedAgentMetadata(sessionFile);
 			registry.register({
@@ -353,7 +367,7 @@ async function registerPersistedSubagentsFromDir(
 				createdAt: metadata.createdAt,
 				lastActivity: metadata.lastActivity,
 				history: metadata.history,
-				status: "parked",
+				status: tombstoned ? "aborted" : "parked",
 			});
 			const ref = registry.get(id);
 			transcripts.push({

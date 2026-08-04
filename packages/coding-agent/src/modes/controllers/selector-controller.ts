@@ -2009,7 +2009,9 @@ export class SelectorController {
 			closed = true;
 			hub.dispose();
 			overlayHandle?.hide();
-			this.focusActiveEditorArea();
+			// A gated empty Hub may never have been mounted. Restoring editor
+			// focus in that case would steal focus from a menu opened meanwhile.
+			if (overlayHandle) this.focusActiveEditorArea();
 			this.ctx.ui.requestRender();
 		};
 

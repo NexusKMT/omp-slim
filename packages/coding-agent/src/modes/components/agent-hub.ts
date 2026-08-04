@@ -13,10 +13,9 @@
  *
  * Replaces the old SessionObserverOverlayComponent (ctrl+s observer).
  */
-import { type AgentTool, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import {
 	Container,
-	Ellipsis,
 	matchesKey,
 	type OverlayHandle,
 	padding,
@@ -27,27 +26,43 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@oh-my-pi/pi-tui";
-import { formatAge, formatDuration, formatNumber, getProjectDir, logger } from "@oh-my-pi/pi-utils";
+import { formatAge, formatNumber, getProjectDir, logger } from "@oh-my-pi/pi-utils";
 import type { KeyId } from "../../config/keybindings";
-import { getRoleInfo } from "../../config/model-roles";
 import type { Settings } from "../../config/settings";
 import type { MessageRenderer } from "../../extensibility/extensions/types";
 import { IrcBus } from "../../irc/bus";
 import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
-import {
-	type AgentMetricsSummary,
-	type AgentRef,
-	AgentRegistry,
-	type AgentStatus,
-	MAIN_AGENT_ID,
-} from "../../registry/agent-registry";
+import { type AgentRef, AgentRegistry, type AgentStatus, MAIN_AGENT_ID } from "../../registry/agent-registry";
 import { registerPersistedSubagents } from "../../registry/persisted-agents";
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
-import { parseThinkingLevel } from "../../thinking";
-import { replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "../../tools/render-utils";
+import { truncateToWidth } from "../../tools/render-utils";
 import type { ObservableSession, SessionObserverRegistry } from "../session-observer-registry";
 import { theme } from "../theme/theme";
 import { matchesSelectDown, matchesSelectUp } from "../utils/keybinding-matchers";
+import {
+	type AgentMetrics,
+	type AggregateMetrics,
+	aggregateMetrics,
+	progressMetrics,
+	projectAgentTree,
+	STATUS_ORDER,
+} from "./agent-hub-projection";
+import {
+	clampHubLine,
+	contextGauge,
+	formatChildIds,
+	formatCost,
+	formatMetricDuration,
+	formatMetrics,
+	formatRoleBadge,
+	modelBadge,
+	type RosterRender,
+	sanitizeDisplayText,
+	sanitizeLine,
+	statusGlyph,
+	statusText,
+	treeBranch,
+} from "./agent-hub-renderer";
 import { AgentTranscriptViewer } from "./agent-transcript-viewer";
 import {
 	bottomBorder,
@@ -60,207 +75,18 @@ import {
 	topBorderSplit,
 } from "./overlay-box";
 
-/** Two-pane mode needs a useful roster and a readable inspector. */
-const SPLIT_MIN_WIDTH = 96;
-const DETAIL_MIN_WIDTH = 34;
-const ROSTER_MIN_WIDTH = 48;
-
 type HubViewMode = "roster" | "tree";
 
-type AgentMetrics = AgentMetricsSummary;
-
-interface AggregateMetrics extends AgentMetrics {
-	reportedAgents: number;
-}
-
-interface RosterRender {
-	lines: string[];
-	hitRows: Array<number | undefined>;
-}
-
-/** Legacy progress snapshots may omit counters; snapshot absence remains distinct. */
-function metricNumber(value: number | undefined): number {
-	return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-/** Refresh cadence for the relative-time column */
+/** Refresh cadence for the relative-time column. */
 const AGE_TICK_MS = 5_000;
 const DATA_CHANGE_RENDER_COALESCE_MS = 100;
 /** Double-tap window for the table's left-left "close hub" gesture. */
 const LEFT_TAP_WINDOW_MS = 500;
 
-/** Compute the max content width for the current terminal, accounting for chrome. */
-function contentWidth(): number {
-	return Math.max(TRUNCATE_LENGTHS.SHORT, (process.stdout.columns || 80) - 6);
-}
-
-/** Sanitize a line for TUI display: replace tabs, then truncate to viewport width. */
-function sanitizeLine(text: string, maxWidth?: number): string {
-	const singleLine = replaceTabs(text).replace(/[\r\n]+/g, " ");
-	return truncateToWidth(singleLine, maxWidth ?? contentWidth());
-}
-
-function clampHubLine(line: string, width: number): string {
-	return truncateToWidth(line.replace(/[\r\n]+/g, " "), Math.max(1, width), Ellipsis.Omit);
-}
-
-const STATUS_ORDER: Record<AgentStatus, number> = { running: 0, idle: 1, parked: 2, aborted: 3 };
-
-/** Status glyph, colored per theme status conventions. The title-line counts spell out the words. */
-function statusGlyph(status: AgentStatus): string {
-	switch (status) {
-		case "running":
-			return theme.fg("accent", theme.status.running);
-		case "idle":
-			return theme.fg("success", theme.status.enabled);
-		case "parked":
-			return theme.fg("muted", theme.status.shadowed);
-		case "aborted":
-			return theme.fg("error", theme.status.aborted);
-	}
-}
-
-function statusText(status: AgentStatus, text: string): string {
-	switch (status) {
-		case "running":
-			return theme.fg("accent", text);
-		case "idle":
-			return theme.fg("success", text);
-		case "parked":
-			return theme.fg("muted", text);
-		case "aborted":
-			return theme.fg("error", text);
-	}
-}
-
-/** Model id + thinking level (`sonnet-4-6 ◒ high`), level colored per theme. */
-function formatModelBadge(modelId: string, level: ThinkingLevel | undefined): string {
-	const model = theme.fg("muted", replaceTabs(modelId));
-	if (!level || level === ThinkingLevel.Off || level === ThinkingLevel.Inherit) return model;
-	const display = theme.thinking[level as keyof typeof theme.thinking] ?? level;
-	return `${model} ${theme.getThinkingBorderColor(level)(display)}`;
-}
-/** Textual model-role tag; color reinforces (but never replaces) the label. */
-function formatRoleBadge(role: string, settings: Settings): string {
-	const info = getRoleInfo(role, settings);
-	return theme.fg(info.color ?? "muted", replaceTabs(info.tag ?? info.name ?? role));
-}
-
-/** Format a resolved selector, preserving provider identity when requested. */
-function formatResolvedModelBadge(resolved: string, preserveProvider = false, fallbackLevel?: ThinkingLevel): string {
-	// Model ids may themselves contain colons (`qwen3:14b`), so only treat the
-	// suffix as a thinking level when it parses as one.
-	const colon = resolved.lastIndexOf(":");
-	const explicitLevel = colon >= 0 ? parseThinkingLevel(resolved.slice(colon + 1)) : undefined;
-	const selector = explicitLevel !== undefined ? resolved.slice(0, colon) : resolved;
-	const label = preserveProvider ? selector : selector.slice(selector.indexOf("/") + 1);
-	return formatModelBadge(label, explicitLevel ?? fallbackLevel);
-}
-
-/**
- * Resolved model + reasoning level for a hub row. Exact executor progress is
- * authoritative (and survives completion); direct live sessions are the
- * fallback for agents without an observer snapshot. Active retry fallbacks
- * retain provider identity and carry an explicit marker.
- */
-function modelBadge(ref: AgentRef, observed: ObservableSession | undefined): string | undefined {
-	const progress = observed?.progress;
-	const liveThinkingLevel = ref.session?.thinkingLevel;
-	// The executor fallback flag also covers retries that do not populate the
-	// live session's retryFallbackModel (for example Fireworks Fast → base).
-	const fallbackSelector =
-		ref.session?.retryFallbackModel ?? (progress?.resolvedModelIsFallback ? progress.resolvedModel : undefined);
-	if (fallbackSelector) {
-		return `${theme.fg("warning", "fallback →")} ${formatResolvedModelBadge(fallbackSelector, true, liveThinkingLevel)}`;
-	}
-	const resolvedModel = progress?.resolvedModel ?? ref.history?.resolvedModel;
-	if (resolvedModel) {
-		return formatResolvedModelBadge(resolvedModel, false, liveThinkingLevel);
-	}
-	const model = ref.session?.model;
-	if (!model) return undefined;
-	const level = model.thinking ? liveThinkingLevel : undefined;
-	return formatModelBadge(model.id, level);
-}
-
-/** Exact observer usage for one roster entry. */
-function progressMetrics(observed: ObservableSession | undefined): AgentMetrics | undefined {
-	const progress = observed?.progress;
-	if (!progress) return undefined;
-	const { tokens, requests, toolCount: tools, cost, durationMs } = progress;
-	if (
-		typeof tokens !== "number" ||
-		!Number.isFinite(tokens) ||
-		typeof requests !== "number" ||
-		!Number.isFinite(requests) ||
-		typeof tools !== "number" ||
-		!Number.isFinite(tools) ||
-		typeof cost !== "number" ||
-		!Number.isFinite(cost) ||
-		typeof durationMs !== "number" ||
-		!Number.isFinite(durationMs)
-	) {
-		return undefined;
-	}
-	return {
-		tokens,
-		requests,
-		tools,
-		cost,
-		durationMs,
-		contextTokens:
-			typeof progress.contextTokens === "number" && Number.isFinite(progress.contextTokens)
-				? progress.contextTokens
-				: undefined,
-		contextWindow:
-			typeof progress.contextWindow === "number" && Number.isFinite(progress.contextWindow)
-				? progress.contextWindow
-				: undefined,
-	};
-}
-
-function formatCost(cost: number): string {
-	const amount = metricNumber(cost);
-	if (amount < 0.01) return `$${amount.toFixed(4)}`;
-	if (amount < 1) return `$${amount.toFixed(3)}`;
-	return `$${amount.toFixed(2)}`;
-}
-function formatMetrics(metrics: AgentMetrics): string {
-	return [
-		formatCost(metrics.cost),
-		formatDuration(metrics.durationMs),
-		`${formatNumber(metrics.requests)} req`,
-		`${formatNumber(metrics.tools)} tools`,
-		`${formatNumber(metrics.tokens)} tok`,
-	].join(theme.sep.dot);
-}
-
-function contextGauge(tokens: number, window: number): string {
-	const ratio = Math.max(0, Math.min(1, tokens / window));
-	const filled = Math.round(ratio * 10);
-	return `${theme.fg("accent", "━".repeat(filled))}${theme.fg("dim", "─".repeat(10 - filled))} ${formatNumber(tokens)}/${formatNumber(window)} ${Math.round(ratio * 100)}%`;
-}
-/** Fit a child-id preview without joining an arbitrarily large child set. */
-function formatChildIds(children: readonly AgentRef[], width: number): string {
-	const max = Math.max(1, width);
-	let shown = 0;
-	let text = "";
-	while (shown < children.length) {
-		const id = sanitizeLine(children[shown].id, max);
-		const candidate = text ? `${text}, ${id}` : id;
-		const remaining = children.length - shown - 1;
-		const suffix = remaining > 0 ? `, … +${remaining}` : "";
-		if (visibleWidth(candidate + suffix) > max) {
-			const includesCurrent = text.length === 0;
-			const omitted = children.length - shown - Number(includesCurrent);
-			return truncateToWidth(`${includesCurrent ? id : text}${omitted > 0 ? `, … +${omitted}` : ""}`, max);
-		}
-		text = candidate;
-		shown++;
-	}
-	return text;
-}
-
+/** Two-pane mode needs a useful roster and a readable inspector. */
+const SPLIT_MIN_WIDTH = 96;
+const DETAIL_MIN_WIDTH = 34;
+const ROSTER_MIN_WIDTH = 48;
 /** Result of one host-backed transcript read for the Agent Hub viewer. */
 export interface AgentHubRemoteTranscript {
 	text: string;
@@ -343,6 +169,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	#notice: string | undefined;
 	/** Captured row order from the first refresh; keeps the hub stable while open. */
 	#rowOrder: Map<string, number> | undefined;
+	#nextRowOrder = 0;
 	/** Double-tap window state for the table's left-left "close hub" gesture. */
 	#lastLeftTap = 0;
 	/** Operational ordering by default; tree mode groups descendants under their spawner. */
@@ -358,7 +185,9 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		tools: 0,
 		cost: 0,
 		durationMs: 0,
+		durationKind: "active",
 		reportedAgents: 0,
+		activeDurationAgents: 0,
 	};
 	#statusCounts: Record<AgentStatus, number> = { running: 0, idle: 0, parked: 0, aborted: 0 };
 	#childrenByParent = new Map<string, AgentRef[]>();
@@ -369,6 +198,10 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	/** On narrow terminals Tab replaces the roster with the selected-agent inspector. */
 	#narrowDetailsOpen = false;
 	#lastRenderWasSplit = false;
+	#lastSplitRosterWidth: number | undefined;
+	/** Scroll offset for the selected-agent inspector when its content overflows. */
+	#detailScrollOffset = 0;
+	#detailAgentId: string | undefined;
 
 	// Transcript-viewer launch deps (passed through to AgentTranscriptViewer).
 	#ui: TUI;
@@ -416,7 +249,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		this.#unsubscribers.push(this.#observers.onChange(() => this.#scheduleDataChange()));
 		this.#ageTimer = setInterval(() => {
 			if (this.#hasFallbackLiveSessions) {
-				this.#aggregate = this.#aggregateMetrics(this.#observedById, true);
+				this.#refreshAggregate(true);
 			}
 			this.#requestRender();
 		}, AGE_TICK_MS);
@@ -476,7 +309,15 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	}
 
 	handleInput(keyData: string): void {
-		if (routeSgrMouseInput(keyData, event => routeSelectListMouse(this, event, event.row))) return;
+		if (
+			routeSgrMouseInput(keyData, event => {
+				const split = this.#lastSplitRosterWidth;
+				if (split !== undefined && event.wheel === null && event.col > split + 2) return false;
+				return routeSelectListMouse(this, event, event.row);
+			})
+		) {
+			return;
+		}
 
 		// The hub/observe keys always close the overlay (toggle semantics)
 		for (const key of this.#hubKeys) {
@@ -508,11 +349,12 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	 * restored when the viewer closes. No-op without a real TUI (render-only test stub).
 	 */
 	openChat(id: string): void {
-		if (!this.#registry.get(id)) return;
+		if (this.#disposed || !this.#registry.get(id)) return;
 		if (typeof this.#ui.showOverlay !== "function") return;
 		this.#closeTranscriptOverlay();
 		this.#notice = undefined;
-		const viewer = new AgentTranscriptViewer({
+		let viewer: AgentTranscriptViewer;
+		viewer = new AgentTranscriptViewer({
 			agentId: id,
 			registry: this.#registry,
 			remote: this.#remote,
@@ -527,10 +369,11 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			expandKeys: this.#expandKeys,
 			hubKeys: this.#hubKeys,
 			requestRender: this.#requestRender,
-			onClose: () => this.#closeTranscriptOverlay(),
+			onClose: () => this.#closeTranscriptOverlay(viewer),
 			onHubClose: () => {
-				this.#closeTranscriptOverlay();
-				this.#onDone();
+				if (this.#disposed) return;
+				this.#closeTranscriptOverlay(viewer);
+				if (!this.#disposed) this.#onDone();
 			},
 		});
 		this.#transcriptViewer = viewer;
@@ -540,13 +383,19 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	}
 
 	/** Close and dispose the transcript overlay, restoring focus to the hub table. */
-	#closeTranscriptOverlay(): void {
-		this.#transcriptOverlay?.hide();
+	#closeTranscriptOverlay(expectedViewer?: AgentTranscriptViewer): void {
+		if (expectedViewer && this.#transcriptViewer !== expectedViewer) return;
+		const overlay = this.#transcriptOverlay;
+		const viewer = this.#transcriptViewer;
+		if (!overlay && !viewer) return;
+		overlay?.hide();
 		this.#transcriptOverlay = undefined;
-		this.#transcriptViewer?.dispose();
+		viewer?.dispose();
 		this.#transcriptViewer = undefined;
-		if (typeof this.#ui.setFocus === "function") this.#ui.setFocus(this);
-		this.#requestRender();
+		if (!this.#disposed) {
+			if (typeof this.#ui.setFocus === "function") this.#ui.setFocus(this);
+			this.#requestRender();
+		}
 	}
 
 	// ========================================================================
@@ -572,37 +421,45 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		const refs = this.#registry.list().filter(ref => ref.id !== MAIN_AGENT_ID);
 		this.#observedById = new Map();
 		for (const session of this.#observers.getSessions()) this.#observedById.set(session.id, session);
-
 		const rowOrder = this.#rowOrder;
 		let rosterRows: AgentRef[];
 		if (!rowOrder) {
-			// First refresh (usually the constructor): order by status, then recency.
 			rosterRows = refs.sort(
-				(a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || b.lastActivity - a.lastActivity,
+				(a, b) =>
+					STATUS_ORDER[a.status] - STATUS_ORDER[b.status] ||
+					b.lastActivity - a.lastActivity ||
+					a.id.localeCompare(b.id),
 			);
 			this.#rowOrder = new Map();
-			for (let i = 0; i < rosterRows.length; i++) this.#rowOrder.set(rosterRows[i].id, i);
+			for (const ref of rosterRows) this.#rowOrder.set(ref.id, this.#nextRowOrder++);
 		} else {
-			// After the hub is open, freeze relative order within each lifecycle
-			// group. New agents append instead of moving the user's selection.
-			rosterRows = refs.sort((a, b) => {
-				const statusDiff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
-				if (statusDiff !== 0) return statusDiff;
-				return (rowOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rowOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER);
-			});
+			rosterRows = refs.sort(
+				(a, b) => (rowOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rowOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+			);
 			for (const ref of rosterRows) {
-				if (!rowOrder.has(ref.id)) rowOrder.set(ref.id, rowOrder.size);
+				if (!rowOrder.has(ref.id)) rowOrder.set(ref.id, this.#nextRowOrder++);
 			}
 		}
 
-		this.#rows = this.#viewMode === "tree" ? this.#orderAsTree(rosterRows) : rosterRows;
-		if (this.#viewMode === "roster") {
+		if (this.#viewMode === "tree") {
+			const tree = projectAgentTree(rosterRows);
+			this.#rows = tree.rows;
+			this.#treeDepthById = tree.depthById;
+			this.#treeParentById = tree.parentById;
+			this.#treeLastSiblingById = tree.lastSiblingById;
+		} else {
+			this.#rows = rosterRows;
 			this.#treeDepthById.clear();
 			this.#treeParentById.clear();
 			this.#treeLastSiblingById.clear();
 		}
 		const keptIndex = selectedId ? this.#rows.findIndex(ref => ref.id === selectedId) : -1;
 		this.#selectedRow = keptIndex >= 0 ? keptIndex : Math.min(this.#selectedRow, Math.max(0, this.#rows.length - 1));
+		const detailAgentId = this.#rows[this.#selectedRow]?.id;
+		if (detailAgentId !== this.#detailAgentId) {
+			this.#detailAgentId = detailAgentId;
+			this.#detailScrollOffset = 0;
+		}
 
 		this.#childrenByParent.clear();
 		for (const ref of rosterRows) {
@@ -613,12 +470,10 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		}
 		this.#statusCounts = { running: 0, idle: 0, parked: 0, aborted: 0 };
 		for (const ref of rosterRows) this.#statusCounts[ref.status]++;
-		this.#aggregate = this.#aggregateMetrics(this.#observedById);
+		this.#refreshAggregate();
 	}
 
 	#metricsFor(ref: AgentRef, observed: ObservableSession | undefined): AgentMetrics | undefined {
-		// An observer snapshot is authoritative. Legacy/incomplete snapshots remain
-		// unknown rather than being silently replaced by unrelated transcript stats.
 		if (observed?.progress) return progressMetrics(observed);
 		if (ref.history?.metrics) return ref.history.metrics;
 		const session = this.#fallbackStatsSession(ref, observed);
@@ -634,140 +489,6 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		return session && typeof session.getSessionStats === "function" ? session : undefined;
 	}
 
-	#readSessionMetrics(session: NonNullable<AgentRef["session"]>): AgentMetrics | undefined {
-		try {
-			const stats = session.getSessionStats();
-			return {
-				// Match AgentProgress lifetime billing volume: cache reads are
-				// deliberately excluded because every turn rereads cached context.
-				tokens: stats.tokens.input + stats.tokens.output + stats.tokens.cacheWrite,
-				requests: stats.assistantMessages,
-				tools: stats.toolCalls,
-				cost: stats.cost,
-				durationMs: 0,
-				contextTokens: stats.contextUsage?.tokens,
-				contextWindow: stats.contextUsage?.contextWindow,
-			};
-		} catch {
-			// Render-only doubles and sessions being torn down may not expose a
-			// complete statistics host. Missing metrics are preferable to a broken hub.
-			return undefined;
-		}
-	}
-
-	/** Parent-before-child projection preserving the roster's stable sibling order. */
-	#orderAsTree(refs: AgentRef[]): AgentRef[] {
-		this.#treeParentById.clear();
-		this.#treeLastSiblingById.clear();
-		const ids = new Set<string>();
-		const operationalIndex = new Map<string, number>();
-		for (let i = 0; i < refs.length; i++) {
-			ids.add(refs[i].id);
-			operationalIndex.set(refs[i].id, i);
-		}
-
-		const children = new Map<string, AgentRef[]>();
-		for (const ref of refs) {
-			const parent =
-				ref.parentId && ref.parentId !== MAIN_AGENT_ID && ids.has(ref.parentId) ? ref.parentId : MAIN_AGENT_ID;
-			this.#treeParentById.set(ref.id, parent);
-			const siblings = children.get(parent);
-			if (siblings) siblings.push(ref);
-			else children.set(parent, [ref]);
-		}
-
-		// A tree group occupies the position of its earliest operational row.
-		// Otherwise a recent child could leave its older parent group below an
-		// unrelated peer (`child, peer, parent` → `peer, parent, child`).
-		// Compute subtree minima iteratively so even pathological lineage depth
-		// remains stack-safe.
-		const subtreeOrder = new Map<string, number>();
-		const visiting = new Set<string>();
-		const ranked = new Set<string>();
-		for (const start of refs) {
-			if (ranked.has(start.id)) continue;
-			const stack: Array<{ ref: AgentRef; expanded: boolean }> = [{ ref: start, expanded: false }];
-			while (stack.length > 0) {
-				const current = stack.pop();
-				if (!current) continue;
-				if (current.expanded) {
-					let order = operationalIndex.get(current.ref.id) ?? Number.MAX_SAFE_INTEGER;
-					for (const child of children.get(current.ref.id) ?? []) {
-						order = Math.min(order, subtreeOrder.get(child.id) ?? Number.MAX_SAFE_INTEGER);
-					}
-					subtreeOrder.set(current.ref.id, order);
-					visiting.delete(current.ref.id);
-					ranked.add(current.ref.id);
-					continue;
-				}
-				if (ranked.has(current.ref.id) || visiting.has(current.ref.id)) continue;
-				visiting.add(current.ref.id);
-				stack.push({ ref: current.ref, expanded: true });
-				const descendants = children.get(current.ref.id);
-				if (!descendants) continue;
-				for (let i = descendants.length - 1; i >= 0; i--) {
-					const child = descendants[i];
-					if (!ranked.has(child.id) && !visiting.has(child.id)) {
-						stack.push({ ref: child, expanded: false });
-					}
-				}
-			}
-		}
-		for (const siblings of children.values()) {
-			siblings.sort(
-				(a, b) =>
-					(subtreeOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
-						(subtreeOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER) ||
-					(operationalIndex.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
-						(operationalIndex.get(b.id) ?? Number.MAX_SAFE_INTEGER),
-			);
-		}
-		for (const siblings of children.values()) {
-			for (let i = 0; i < siblings.length; i++) {
-				this.#treeLastSiblingById.set(siblings[i].id, i === siblings.length - 1);
-			}
-		}
-
-		const ordered: AgentRef[] = [];
-		const visited = new Set<string>();
-		this.#treeDepthById.clear();
-		const visit = (root: AgentRef, rootDepth: number): void => {
-			const stack: Array<{ ref: AgentRef; depth: number }> = [{ ref: root, depth: rootDepth }];
-			while (stack.length > 0) {
-				const current = stack.pop();
-				if (!current || visited.has(current.ref.id)) continue;
-				visited.add(current.ref.id);
-				this.#treeDepthById.set(current.ref.id, current.depth);
-				ordered.push(current.ref);
-				const descendants = children.get(current.ref.id);
-				if (!descendants) continue;
-				for (let i = descendants.length - 1; i >= 0; i--) {
-					stack.push({ ref: descendants[i], depth: current.depth + 1 });
-				}
-			}
-		};
-		for (const root of children.get(MAIN_AGENT_ID) ?? []) visit(root, 0);
-		// Corrupt persisted parent cycles remain visible as roots instead of
-		// disappearing from the operational surface.
-		for (const ref of refs) visit(ref, 0);
-		return ordered;
-	}
-
-	/** Bash `tree`-style ancestry prefix, clipped from the left on pathological depth. */
-	#treeBranch(ref: AgentRef, maxWidth: number): string {
-		if ((this.#treeDepthById.get(ref.id) ?? 0) === 0) return "";
-		const segments: string[] = [this.#treeLastSiblingById.get(ref.id) ? "└── " : "├── "];
-		let parent = this.#treeParentById.get(ref.id);
-		while (parent && this.#treeParentById.get(parent) !== MAIN_AGENT_ID) {
-			segments.push(this.#treeLastSiblingById.get(parent) ? "    " : "│   ");
-			parent = this.#treeParentById.get(parent);
-		}
-		const maxSegments = Math.max(1, Math.floor(Math.max(4, maxWidth - 2) / 4));
-		const omitted = Math.max(0, segments.length - maxSegments);
-		const prefix = segments.slice(0, maxSegments).reverse().join("");
-		return theme.fg("dim", `${omitted > 0 ? "… " : ""}${prefix}`);
-	}
-
 	// ========================================================================
 	// Table view
 	// ========================================================================
@@ -778,6 +499,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		const observedById = this.#observedById;
 		const split = this.#splitRosterWidth(width);
 		this.#lastRenderWasSplit = split !== undefined;
+		this.#lastSplitRosterWidth = split;
 		const selected = this.#rows[this.#selectedRow];
 		const lines: string[] = [];
 
@@ -826,12 +548,15 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	#footer(showingNarrowDetails: boolean, availableWidth: number): string {
 		const nextView = this.#viewMode === "roster" ? "by parent" : "flat";
 		if (showingNarrowDetails) {
-			return theme.fg("dim", `Tab:roster  Enter:open  t:${nextView}  Esc:roster`);
+			return theme.fg("dim", `Tab:roster  PgUp/PgDn:scroll  Enter:open  t:${nextView}  Esc:roster`);
 		}
 		if (availableWidth < 96) {
 			return theme.fg("dim", `j/k:select  Enter:open  t:${nextView}  Tab:details  r/x:manage  Esc:close`);
 		}
-		return theme.fg("dim", `j/k/wheel:select  Enter/click:open  t:${nextView}  r:revive  x:kill  Esc:close`);
+		return theme.fg(
+			"dim",
+			`j/k/wheel:select  PgUp/PgDn:details  Enter/click:open  t:${nextView}  r:revive  x:kill  Esc:close`,
+		);
 	}
 
 	#renderRosterPanel(width: number, rows: number, observedById: ReadonlyMap<string, ObservableSession>): RosterRender {
@@ -986,12 +711,14 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			);
 			return lines;
 		}
+		const activeTime = formatMetricDuration(metrics);
 		const usage = [
 			theme.fg("statusLineCost", formatCost(metrics.cost)),
-			theme.fg("dim", `${formatDuration(metrics.durationMs)} agent time`),
+			theme.fg("dim", activeTime ? `${activeTime} agent time` : "agent time —"),
 			theme.fg("dim", `${formatNumber(metrics.requests)} req`),
 			theme.fg("dim", `${formatNumber(metrics.tools)} tools`),
 			theme.fg("dim", `${formatNumber(metrics.tokens)} tok`),
+			theme.fg("dim", `${metrics.activeDurationAgents}/${metrics.reportedAgents} timed`),
 			theme.fg("dim", `${metrics.reportedAgents}/${this.#rows.length} measured`),
 		].join(theme.fg("dim", theme.sep.dot));
 		lines.push(...wrapTextWithAnsi(usage, Math.max(1, width)));
@@ -1007,36 +734,17 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		return parts.join(theme.sep.dot);
 	}
 
-	#aggregateMetrics(observedById: ReadonlyMap<string, ObservableSession>, refreshFallback = false): AggregateMetrics {
-		const total: AggregateMetrics = {
-			tokens: 0,
-			requests: 0,
-			tools: 0,
-			cost: 0,
-			durationMs: 0,
-			reportedAgents: 0,
-		};
-		let hasFallbackLiveSessions = false;
-		for (const ref of this.#rows) {
-			const observed = observedById.get(ref.id);
-			const fallbackSession = this.#fallbackStatsSession(ref, observed);
-			if (fallbackSession) {
-				hasFallbackLiveSessions = true;
-				if (refreshFallback || !this.#sessionMetrics.has(fallbackSession)) {
-					this.#sessionMetrics.set(fallbackSession, { metrics: this.#readSessionMetrics(fallbackSession) });
-				}
-			}
-			const metrics = this.#metricsFor(ref, observed);
-			if (!metrics) continue;
-			total.reportedAgents++;
-			total.tokens += metrics.tokens;
-			total.requests += metrics.requests;
-			total.tools += metrics.tools;
-			total.cost += metrics.cost;
-			total.durationMs += metrics.durationMs;
-		}
-		this.#hasFallbackLiveSessions = hasFallbackLiveSessions;
-		return total;
+	#refreshAggregate(refreshFallback = false): void {
+		const result = aggregateMetrics({
+			rows: this.#rows,
+			observedById: this.#observedById,
+			metricsFor: (ref, observed) => this.#metricsFor(ref, observed),
+			fallbackStatsSession: (ref, observed) => this.#fallbackStatsSession(ref, observed),
+			sessionMetrics: this.#sessionMetrics,
+			refreshFallback,
+		});
+		this.#aggregate = result.metrics;
+		this.#hasFallbackLiveSessions = result.hasFallbackLiveSessions;
 	}
 
 	#renderDetailPanel(
@@ -1052,20 +760,20 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		const children = this.#childrenByParent.get(ref.id) ?? [];
 		const lines: string[] = [];
 		const add = (line = ""): void => {
-			if (lines.length < rows) lines.push(truncateToWidth(line, width));
+			lines.push(truncateToWidth(line, width));
 		};
 		const addWrapped = (text: string, maxRows = 2): void => {
 			for (const wrapped of wrapTextWithAnsi(sanitizeLine(text), Math.max(1, width)).slice(0, maxRows)) add(wrapped);
 		};
-		const section = (label: string): void => {
-			if (lines.length > 0) add();
+		const section = (label: string, contentRows = 0): void => {
+			if (lines.length > 0 && lines.length + 1 + contentRows < rows) add();
 			add(theme.bold(theme.fg("accent", label)));
 		};
 
-		add(`${statusGlyph(ref.status)} ${theme.bold(replaceTabs(ref.displayName || ref.id))}`);
-		if (ref.displayName && ref.displayName !== ref.id) add(theme.fg("dim", ref.id));
+		add(`${statusGlyph(ref.status)} ${theme.bold(sanitizeDisplayText(ref.displayName || ref.id))}`);
+		if (ref.displayName && ref.displayName !== ref.id) add(theme.fg("dim", sanitizeDisplayText(ref.id)));
 		const lifecycleDetails = [
-			metrics?.durationMs ? formatDuration(metrics.durationMs) : undefined,
+			metrics ? formatMetricDuration(metrics) : undefined,
 			`active ${formatAge(Math.max(1, Math.round((Date.now() - ref.lastActivity) / 1000)))}`,
 		].filter(Boolean);
 		add(
@@ -1095,7 +803,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			}
 		}
 
-		section("Usage");
+		section("Usage", 1);
 		if (metrics) {
 			addWrapped(formatMetrics(metrics), 3);
 			if (metrics.contextTokens !== undefined && metrics.contextWindow) {
@@ -1107,7 +815,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 
 		section("Lineage");
 		add(
-			`Spawned by ${replaceTabs(ref.parentId ?? MAIN_AGENT_ID)}${children.length > 0 ? ` · ${children.length} children` : ""}`,
+			`Spawned by ${sanitizeDisplayText(ref.parentId ?? MAIN_AGENT_ID)}${children.length > 0 ? ` · ${children.length} children` : ""}`,
 		);
 		if (children.length > 0) add(theme.fg("dim", formatChildIds(children, width)));
 		add(theme.fg("dim", `Registered ${new Date(ref.createdAt).toISOString().slice(0, 16).replace("T", " ")}Z`));
@@ -1122,8 +830,11 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			),
 		);
 
-		while (lines.length < rows) lines.push("");
-		return lines.slice(0, rows);
+		const maxScroll = Math.max(0, lines.length - rows);
+		this.#detailScrollOffset = Math.min(this.#detailScrollOffset, maxScroll);
+		const visible = lines.slice(this.#detailScrollOffset, this.#detailScrollOffset + rows);
+		while (visible.length < rows) visible.push("");
+		return visible;
 	}
 
 	/**
@@ -1141,15 +852,18 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		const max = Math.max(1, width);
 		const cursor = selected ? theme.fg("accent", theme.nav.cursor) : " ";
 		const depth = this.#viewMode === "tree" ? (this.#treeDepthById.get(ref.id) ?? 0) : 0;
-		const branch = this.#viewMode === "tree" ? this.#treeBranch(ref, max) : "";
-		const id = replaceTabs(ref.id);
+		const branch =
+			this.#viewMode === "tree"
+				? treeBranch(ref, max, this.#treeDepthById, this.#treeParentById, this.#treeLastSiblingById)
+				: "";
+		const id = sanitizeDisplayText(ref.id);
 		const styledId = selected ? theme.bold(theme.fg("accent", id)) : theme.bold(id);
 		const fields: string[] = [`${cursor} ${statusGlyph(ref.status)} ${branch}${styledId}`];
 		if (ref.displayName && ref.displayName !== ref.id) {
-			fields.push(theme.fg("dim", replaceTabs(ref.displayName)));
+			fields.push(theme.fg("dim", sanitizeDisplayText(ref.displayName)));
 		}
 		if (this.#viewMode === "roster" && ref.parentId && ref.parentId !== MAIN_AGENT_ID) {
-			fields.push(theme.fg("dim", `↳ ${replaceTabs(ref.parentId)}`));
+			fields.push(theme.fg("dim", `↳ ${sanitizeDisplayText(ref.parentId)}`));
 		}
 		if (ref.kind === "advisor") {
 			fields.push(theme.fg("warning", "read-only"));
@@ -1198,10 +912,23 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		});
 	}
 
+	#scrollDetails(direction: -1 | 1): void {
+		this.#detailScrollOffset = Math.max(0, this.#detailScrollOffset + direction * 5);
+		this.#requestRender();
+	}
+
+	#selectRow(index: number): void {
+		if (index !== this.#selectedRow) {
+			this.#detailScrollOffset = 0;
+			this.#detailAgentId = this.#rows[index]?.id;
+		}
+		this.#selectedRow = index;
+	}
+
 	handleWheel(delta: -1 | 1): void {
 		this.#hoveredRow = null;
 		if (this.#rows.length > 0) {
-			this.#selectedRow = Math.max(0, Math.min(this.#selectedRow + delta, this.#rows.length - 1));
+			this.#selectRow(Math.max(0, Math.min(this.#selectedRow + delta, this.#rows.length - 1)));
 		}
 		this.#requestRender();
 	}
@@ -1217,14 +944,12 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	}
 
 	clickItem(index: number): void {
+		const selected = this.#rows[index];
+		if (!selected) return;
 		this.#hoveredRow = index;
-		if (index === this.#selectedRow) {
-			const selected = this.#rows[index];
-			if (selected) this.#activateAgent(selected);
-			return;
-		}
-		this.#selectedRow = index;
+		this.#selectRow(index);
 		this.#requestRender();
+		this.#activateAgent(selected);
 	}
 
 	#handleTableInput(keyData: string): void {
@@ -1241,6 +966,16 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			if (this.#rows.length > 0) this.#narrowDetailsOpen = !this.#narrowDetailsOpen;
 			this.#requestRender();
 			return;
+		}
+		if (this.#lastRenderWasSplit || this.#narrowDetailsOpen) {
+			if (matchesKey(keyData, "pageUp")) {
+				this.#scrollDetails(-1);
+				return;
+			}
+			if (matchesKey(keyData, "pageDown")) {
+				this.#scrollDetails(1);
+				return;
+			}
 		}
 		if (keyData === "t") {
 			this.#hoveredRow = null;
@@ -1267,14 +1002,14 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		this.#hoveredRow = null;
 		if (matchesKey(keyData, "j") || matchesSelectDown(keyData)) {
 			if (this.#rows.length > 0) {
-				this.#selectedRow = Math.min(this.#selectedRow + 1, this.#rows.length - 1);
+				this.#selectRow(Math.min(this.#selectedRow + 1, this.#rows.length - 1));
 			}
 			this.#requestRender();
 			return;
 		}
 		if (matchesKey(keyData, "k") || matchesSelectUp(keyData)) {
 			if (this.#rows.length > 0) {
-				this.#selectedRow = Math.max(this.#selectedRow - 1, 0);
+				this.#selectRow(Math.max(this.#selectedRow - 1, 0));
 			}
 			this.#requestRender();
 			return;

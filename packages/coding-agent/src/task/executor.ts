@@ -59,6 +59,7 @@ import { buildNamedToolChoice } from "../utils/tool-choice";
 import type { WorkspaceTree } from "../workspace-tree";
 import { generateTaskLabel } from "./label";
 import { resolveAgentPrewalkDefault } from "./prewalk";
+import { isReadOnlyAgent } from "./read-only-policy";
 import { subprocessToolRegistry } from "./subprocess-tool-registry";
 import {
 	type AgentDefinition,
@@ -2378,14 +2379,20 @@ export async function finalizeSubagentLifecycle(args: {
 		args.abortKind === "budget" && args.keepAlive && !args.isolated && args.reviveSession !== null;
 	if (args.aborted && !resumableAbort) {
 		if (ref && ownsRef) {
-			// Terminal hard kill: mark `aborted` and detach the session before
-			// disposing so the ref satisfies the AgentRef invariant (session null
-			// when aborted) — ensureLive/hub focus must treat it as terminal, never
-			// route into the disposed session.
-			registry.setStatus(args.id, "aborted", ref);
-			registry.detachSession(args.id, ref);
+			// Route hard kills through the lifecycle owner so the terminal
+			// decision is durable and a restart cannot rediscover the transcript
+			// as a revivable parked agent.
+			try {
+				await AgentLifecycleManager.global().release(args.id, ref, { tombstone: true });
+			} catch (error) {
+				logger.warn("runSubagent: failed to persist kill tombstone", { id: args.id, error: String(error) });
+				registry.setStatus(args.id, "aborted", ref);
+				registry.detachSession(args.id, ref);
+				await disposeSession();
+			}
+		} else {
+			await disposeSession();
 		}
-		await disposeSession();
 		return;
 	}
 
@@ -3094,8 +3101,9 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				task,
 				tools: session.getActiveToolNames(),
 				agent: agent.name,
-				modelRole: modelRole ?? resolveExplicitModelRole(agent.model),
+				modelRole: modelRole ?? resolveExplicitModelRole(agent.model, subagentSettings),
 				resolvedModel: progress.resolvedModel,
+				readOnly: isReadOnlyAgent(agent),
 				spawns: spawnsEnv,
 				readSummarize: agent.readSummarize,
 				outputSchema,

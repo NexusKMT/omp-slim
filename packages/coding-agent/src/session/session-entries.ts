@@ -84,6 +84,8 @@ export interface ModelChangeEntry extends SessionEntryBase {
 	model: string;
 	/** Role: "default", "smol", "slow", etc. Undefined treated as "default" */
 	role?: string;
+	/** True when this transition selected a retry-fallback model rather than the configured model. */
+	resolvedModelIsFallback?: boolean;
 }
 
 export interface ServiceTierChangeEntry extends SessionEntryBase {
