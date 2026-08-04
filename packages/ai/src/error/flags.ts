@@ -493,7 +493,9 @@ function providerErrorCode(error: object): string | undefined {
 export function isCopilotTransientModelError(error: unknown): boolean {
 	if (!error || typeof error !== "object" || status(error) !== 400) return false;
 	const code = providerErrorCode(error);
-	if (code !== undefined && COPILOT_TRANSIENT_MODEL_CODES[code]) return true;
+	// `Object.hasOwn`, not a bare index: `code` is provider-controlled, and a
+	// prototype key (`__proto__`, `toString`, …) would otherwise read truthy.
+	if (code !== undefined && Object.hasOwn(COPILOT_TRANSIENT_MODEL_CODES, code)) return true;
 	const message: unknown = "message" in error ? error.message : undefined;
 	return typeof message === "string" && COPILOT_MODEL_UNAVAILABLE_PATTERN.test(message);
 }

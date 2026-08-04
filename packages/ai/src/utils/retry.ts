@@ -15,6 +15,9 @@ export { isCopilotTransientModelError };
 // delay keep the residual near 5% at p=0.7 and under 1% at p=0.5, bounded at
 // ~2.8s of dead time in the pathological case.
 const COPILOT_MODEL_RETRY_MAX_ATTEMPTS = 8;
+// Transport blips and status-bearing failures keep the pre-flap budget: they are
+// not coin flips, so a longer ramp only delays surfacing a persistent fault.
+const COPILOT_GENERIC_RETRY_MAX_ATTEMPTS = 3;
 const COPILOT_MODEL_RETRY_BASE_DELAY_MS = 400;
 /** Longest server-requested backoff we are willing to sit out before giving up. */
 const COPILOT_RETRY_AFTER_MAX_WAIT_MS = 30_000;
@@ -46,7 +49,12 @@ export async function callWithCopilotModelRetry<T>(
 			if (options.signal?.aborted) throw error;
 			const transientModelError = isCopilotTransientModelError(error);
 			if (!transientModelError && !isRetryableError(error)) throw error;
-			if (attempt === COPILOT_MODEL_RETRY_MAX_ATTEMPTS - 1) break;
+			// Budget is per failure kind, counted over attempts already spent: the
+			// eight-attempt allowance only covers the cheap model-availability reroll.
+			const maxAttempts = transientModelError
+				? COPILOT_MODEL_RETRY_MAX_ATTEMPTS
+				: COPILOT_GENERIC_RETRY_MAX_ATTEMPTS;
+			if (attempt >= maxAttempts - 1) break;
 			// Reroll the model flap on a flat delay: a ramp only adds dead time to a
 			// coin flip the next attempt is equally likely to win. Generic retryable
 			// failures (429/5xx/transport) keep the linear backoff below.
