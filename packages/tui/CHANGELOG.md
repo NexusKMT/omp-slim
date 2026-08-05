@@ -3,17 +3,15 @@
 ## [Unreleased]
 
 ### Changed
+
 - Replaced `marked`, `lru-cache`, and dev `chalk` with `@oh-my-pi/pi-utils` modules (`marked`, `lru`, `chalk`)
 
 ### Fixed
 
 - Fixed startup aborting with an EIO error when a multiplexer or SSH session leaves `stdin.isTTY` true after revoking its pty, by taking the existing terminal-disconnect path instead of failing to enable raw mode.
-### Fixed
-
 - Fixed prompt autocomplete never triggering for Windows drive-absolute paths (`C:/Users/...`, `C:\Users\...`); only `/`, `./`, `../`, and `~/` prefixes were recognized.
-### Fixed
-
 - hasLinuxDesktopSession() now also treats the session as reachable via the systemd user-bus socket `$XDG_RUNTIME_DIR/bus` when `DBUS_SESSION_BUS_ADDRESS` is unset, so BEL-only terminals in systemd/tmux/SSH-attached graphical sessions get desktop notifications again.
+- Fixed Shift+letter and shifted symbol input (capital letters, `?`, `!`, etc.) being silently dropped on Windows and WSL terminals using ConPTY (e.g. WezTerm stable) by avoiding Kitty keyboard protocol flag 4 in that context.
 
 ## [17.2.9] - 2026-08-05
 
@@ -21,9 +19,6 @@
 
 - Fixed table borders (and adjacent cells) inheriting an open inline-code color when a cell's content wraps mid-code-span, by terminating each wrapped cell line's SGR state before the border glyphs ([#7575](https://github.com/can1357/oh-my-pi/issues/7575)).
 - Fixed inline images not rendering under WSL + Windows Terminal: the SIXEL capability probe gated on `process.platform === "win32"`, but WSL reports `linux`, so the probe never ran and images fell back to the text placeholder even on Sixel-capable Windows Terminal. The probe now runs on any ConPTY host (native win32 or WSL) ([#6009](https://github.com/can1357/oh-my-pi/issues/6009)).
-### Fixed
-
-- Fixed Shift+letter and shifted symbol input (capital letters, `?`, `!`, etc.) being silently dropped on Windows and WSL terminals using ConPTY (e.g. WezTerm stable) by avoiding Kitty keyboard protocol flag 4 in that context.
 
 ## [17.2.5] - 2026-08-03
 

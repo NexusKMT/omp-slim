@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Changed
+
 - Replaced `date-fns` with `@oh-my-pi/pi-utils/dates` and the `linkedom` test dependency with `@oh-my-pi/pi-utils/dom`
 
 ## [17.2.9] - 2026-08-05

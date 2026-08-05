@@ -3,49 +3,30 @@
 ## [Unreleased]
 
 ### Breaking Changes
+
 - Replaced the re-exported zod API with the omptype-backed zod-compat facade (`@oh-my-pi/omptype/zod`); plugins keep the zod-style builder surface while real-zod-specific APIs are gone
 
 ### Changed
+
 - Replaced external dependencies with `@oh-my-pi/pi-utils` modules: `@agentclientprotocol/sdk` -> `acp` (also drops the package patch), `@mozilla/readability` -> `readability`, `@puppeteer/browsers` -> `browsers`, `@xterm/headless` -> `vterm`, `chalk` -> `chalk`, `fast-xml-parser` -> `xml`, `header-generator` -> `headers`, `linkedom` -> `dom`, `lru-cache` -> `lru`, `mammoth` -> `docx`, `turndown` and `turndown-plugin-gfm` -> `turndown`, and dev `marked` -> `marked`
 
 ### Fixed
 
 - Fixed `/usage`, `/advisor status`, and every other panel command looking dead mid-turn. `presentCommandOutput` defers panels while the agent streams so a growing turn cannot bury them, but said nothing, and on a long multi-subagent turn the panel is minutes away. The deferral is now acknowledged in the status line. A non-terminal settle also flushes the queue: `isStreaming` is already false by then, so a command issued after an async fan-out settles used to mount ahead of the panels queued before it.
-### Fixed
-
 - Fixed the bundled `ts-no-tiny-functions` TTSR rule never firing on one-line arrow functions in real files: the second alternative's `$` anchor only matched at the absolute end of input, so the trailing newline present in every real file suppressed the match. The condition now opens with the `(?m)` inline flag so the arrow body matches to the line end ([#6890](https://github.com/can1357/oh-my-pi/issues/6890)).
-
-### Fixed
-
 - Fixed an advisor refusal skipping the model fallback chain. `AdvisorRuntime` treated a classifier refusal as terminal once its one stripped-reasoning resend failed, returning before the `onTurnError` hook that owns fallback (`#recoverAdvisorTurn`), so a `Refusal (cyber)` on one model disabled the advisor even with a configured chain. The refusal path now takes the same fallback pass the primary turn-recovery path already allows, and only reports the advisor unavailable when the host declines to switch.
 - Bounded advisor refusal recovery to one attempt per model. The cascade walks the fallback chain to exhaustion, but a model switch re-arms `#includeThinking` via `#syncModelIdentity`, so a chain whose keys point back at each other (A→B, B→A) would strip-and-resend against the same pair forever. Each cascade now visits a model at most once; a successful turn or a reset starts a fresh walk.
-### Fixed
-
 - Fixed repeated `/mcp reauth` commands getting stuck behind the previous unfinished MCP OAuth login; a new reauthorization now cancels and cleans up the prior flow before starting its replacement.
-### Fixed
-
 - WSL host-home resolution now builds `/mnt/<drive>/...` fallback paths with POSIX semantics regardless of the host platform, instead of the platform-dependent `path` module ([#3779](https://github.com/can1357/oh-my-pi/issues/3779)).
-### Fixed
-
 - Fixed Python eval shell helpers (`!cmd`, `%%bash`, `%pip`) letting child processes inherit the runner's stdin — the host's NDJSON control channel — which could steal protocol frames and deadlocked nested interpreters on Windows; children now get `stdin=DEVNULL`. `%%bash` also resolves Git Bash on Windows instead of hardcoding `/bin/bash`.
-### Fixed
-
 - Fixed subagents spawned through a model-role alias (e.g. the bundled `scout`'s `model: "@smol"`) falling back onto the `default` role's `retry.fallbackChains` entry instead of their own role's chain: the child is pinned to a `subagent:<id>` role whose chain shadows every configured role chain, and that pin inherited `default` unconditionally, so a `@smol` scout retried on the default chain's first model instead of the smol chain's.
-### Fixed
-
 - Fixed Linux/X11 clipboard reads failing when `xclip` is unavailable but `xsel` is installed.
-### Fixed
-
 - Hardened Linux Chromium executable detection to reject non-executable files, non-browser wrappers, and candidates that hang during the version probe.
-### Fixed
-
 - Fixed Bash command previews crashing when malformed tool arguments contain non-string environment values.
-### Fixed
-
 - Fixed `nerd`-preset role chips overhanging into the label and swallowing its first character (`efault` instead of `default`) by inserting a separator after the status glyph in the model browser and model hub ([#7664](https://github.com/can1357/oh-my-pi/issues/7664)).
-### Fixed
-
 - Fixed Codex web search sending GPT-5.6 models a Responses-Lite request shape that the hosted `web_search` tool ignores. ([#7666](https://github.com/can1357/oh-my-pi/issues/7666))
+- Fixed resumed or rebuilt sessions auto-applying a new checkpoint with a stale rewind report from an earlier completed checkpoint cycle ([#7739](https://github.com/can1357/oh-my-pi/issues/7739)).
+- Fixed `read` treating semicolon-delimited internal URLs, such as batched `skill://` resources, as one invalid resource.
 
 ## [17.2.9] - 2026-08-05
 
@@ -65,7 +46,6 @@
 
 ### Fixed
 
-- Fixed resumed or rebuilt sessions auto-applying a new checkpoint with a stale rewind report from an earlier completed checkpoint cycle ([#7739](https://github.com/can1357/oh-my-pi/issues/7739)).
 - Retried concurrent-request caps with a short backoff without deleting valid Copilot credentials or rotating through sibling accounts.
 - Fixed the default `textVerbosity` setting being forwarded to OpenAI Codex requests unless the user explicitly configures it, preserving Codex's native response-control defaults. ([#4949](https://github.com/can1357/oh-my-pi/issues/4949))
 - Reduced streaming CPU usage by coalescing the cumulative `message_update` deltas of a turn at the event-controller dispatch boundary: at most one streaming-state rebuild runs per ~33ms window instead of one per token, cutting the per-token handler work that dominated the CPU profile of streaming sessions (especially at high token rates) while preserving per-delta speech output. Subscriber dispatch is serialized so a rapid stream tail (`message_update` → `message_end` → `agent_end`) cannot overtake the coalesced flush. ([#7443](https://github.com/can1357/oh-my-pi/issues/7443))
@@ -99,10 +79,6 @@
 - Fixed `omp setup python` to validate the same configured or discovered interpreter used by the Python eval runtime.
 - Fixed self-update misclassifying glibc Linux hosts with an installed musl loader as musl hosts, which could download an unusable musl binary instead of the glibc release.
 - Fixed a crash where opening the Agent Hub after a resume and moving the selection triggered an unbounded `ExtensionExitError` unhandled-rejection storm and exit 129. The postmortem module bound the native hard-exit at first evaluation; when the bundler deferred that evaluation into a `withHostGuard` window it froze the guard's throwing replacement, poisoning every later signal/fatal exit. The native exit is now resolved per call, and the guard stamps its replacement with the native primitive it shadows so mid-guard signals still exit ([#7393](https://github.com/can1357/oh-my-pi/issues/7393)).
-
-### Fixed
-
-- Fixed `read` treating semicolon-delimited internal URLs, such as batched `skill://` resources, as one invalid resource.
 
 ## [17.2.8] - 2026-08-04
 
@@ -163,6 +139,7 @@
 - Added a configurable per-request web search timeout via providers.webSearchTimeoutSeconds.
 - Added turn-aware /tree navigation shortcuts (Alt+Up/Alt+Down, Home/End, PageUp/PageDown) to traverse user and assistant turns.
 - Added display.hideToolActivity and a Ctrl+Shift+O shortcut to toggle the visibility of model-initiated tool calls and results.
+- Added resumable session details to fatal crash output, including an `omp --resume <session-id>` command for every persisted live agent session.
 
 ### Changed
 
@@ -195,12 +172,6 @@
 - Fixed heavily branched conversation trees shifting linear continuations into disconnected columns.
 - Fixed plugin installation validation failures for legacy compatibility shims.
 - Removed hard-coded references to disabled or absent agents in system and tool prompts.
-### Added
-
-- Added resumable session details to fatal crash output, including an `omp --resume <session-id>` command for every persisted live agent session.
-
-### Fixed
-
 - Fixed unobserved promise continuations from browser helpers such as `tab.waitForResponse()` wedging or killing the tab worker when they reject; browser facade promises now retain native promise behavior while observing every `then`, `catch`, and `finally` continuation, and late user continuation errors are logged instead of dropped after the run ends.
 
 ## [17.2.4] - 2026-08-01

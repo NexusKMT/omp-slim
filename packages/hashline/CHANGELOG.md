@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Changed
+
 - Replaced `lru-cache` with `@oh-my-pi/pi-utils/lru`, adding an `@oh-my-pi/pi-utils` dependency
 
 ## [17.2.2] - 2026-07-31

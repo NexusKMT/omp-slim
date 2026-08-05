@@ -3,16 +3,20 @@
 ## [Unreleased]
 
 ### Added
+
 - Added zero-dependency in-house modules replacing external packages, each importable as `@oh-my-pi/pi-utils/<module>`: `acp` (Agent Client Protocol), `browsers` (Chrome for Testing discovery/install), `chalk` (ANSI styling), `dates` (date formatting), `dom` (HTML parser + WHATWG DOM subset + CSS selectors), `docx` (DOCX to HTML), `headers` (browser header generation), `lru` (LRU cache), `marked` (GFM markdown lexer/parser), `readability` (article extraction), `template` (Handlebars-compatible templating), `turndown` (HTML to Markdown), `vterm` (headless terminal emulator), `xml` (XML parser)
 
 ### Changed
+
 - Rewrote the logger file backend in-house with identical line format, daily rotation, and pruning
 
-### Removed
-- Removed `handlebars`, `winston`, and `winston-daily-rotate-file` dependencies
 ### Fixed
 
 - Support PowerShell (`powershell.exe` / `pwsh`) as a custom `shellPath`: spawn paths now pass `-NoLogo -Command` (plus `-NoProfile` under `PI_BASH_NO_LOGIN`) instead of the POSIX `-l -c` pair, which PowerShell rejected with `The term '-l' is not recognized`.
+
+### Removed
+
+- Removed `handlebars`, `winston`, and `winston-daily-rotate-file` dependencies
 
 ## [17.2.9] - 2026-08-05
 
@@ -36,13 +40,11 @@
 ### Added
 
 - Added utility functions `parseFlag()`, `getBrowserRelayDir()`, and `getGlobalDaemonRuntimeDir()` to support browser relay mode and global daemon runtime directory resolution.
+- Added postmortem fatal recovery hint providers so applications can print actionable recovery commands before cleanup starts.
 
 ### Changed
 
 - Updated the lightweight CLI runner to support static command metadata, allowing root help to render without importing full command implementations.
-### Added
-
-- Added postmortem fatal recovery hint providers so applications can print actionable recovery commands before cleanup starts.
 
 ## [17.2.4] - 2026-08-01
 
