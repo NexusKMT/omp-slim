@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed prompt autocomplete never triggering for Windows drive-absolute paths (`C:/Users/...`, `C:\Users\...`); only `/`, `./`, `../`, and `~/` prefixes were recognized.
+
 ## [17.2.9] - 2026-08-05
 
 ### Fixed

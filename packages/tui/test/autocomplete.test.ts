@@ -105,19 +105,23 @@ describe("CombinedAutocompleteProvider", () => {
 			expect(result).toBeNull();
 		});
 
-		it("falls back to path suggestions for an unmatched mid-prompt slash token", async () => {
-			const provider = new CombinedAutocompleteProvider(
-				[{ name: "skill:security-scan", description: "Security scan" }],
-				"/tmp",
-			);
-			const line = "see /tmp";
+		// Requires a real `/tmp` directory at the filesystem root.
+		it.skipIf(process.platform === "win32")(
+			"falls back to path suggestions for an unmatched mid-prompt slash token",
+			async () => {
+				const provider = new CombinedAutocompleteProvider(
+					[{ name: "skill:security-scan", description: "Security scan" }],
+					"/tmp",
+				);
+				const line = "see /tmp";
 
-			const result = await provider.getSuggestions([line], 0, line.length);
+				const result = await provider.getSuggestions([line], 0, line.length);
 
-			expect(result).not.toBeNull();
-			expect(result?.prefix).toBe("/tmp");
-			expect(result?.items.map(item => item.value)).toContain("/tmp/");
-		});
+				expect(result).not.toBeNull();
+				expect(result?.prefix).toBe("/tmp");
+				expect(result?.items.map(item => item.value)).toContain("/tmp/");
+			},
+		);
 
 		it("returns nothing for a prose token that only fuzzy-matches skill text", async () => {
 			const provider = new CombinedAutocompleteProvider(
