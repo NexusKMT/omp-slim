@@ -5,6 +5,9 @@
 ### Changed
 - Replaced `marked`, `lru-cache`, and dev `chalk` with `@oh-my-pi/pi-utils` modules (`marked`, `lru`, `chalk`)
 
+### Fixed
+
+- Fixed startup aborting with an EIO error when a multiplexer or SSH session leaves `stdin.isTTY` true after revoking its pty, by taking the existing terminal-disconnect path instead of failing to enable raw mode.
 ## [17.2.9] - 2026-08-05
 
 ### Fixed

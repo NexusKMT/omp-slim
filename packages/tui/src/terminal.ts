@@ -717,10 +717,17 @@ export class ProcessTerminal implements Terminal {
 		// stderr-guard in pi-utils (mirrors openai/codex#24459).
 		suppressTerminalStderr();
 
-		// Save previous state and enable raw mode
+		// A multiplexer or SSH disconnect can leave isTTY true after its pty has
+		// been revoked. Raw mode is then impossible, so take the normal terminal
+		// disconnect path rather than letting Bun abort startup with EIO.
 		this.#wasRaw = process.stdin.isRaw || false;
 		if (process.stdin.setRawMode) {
-			process.stdin.setRawMode(true);
+			try {
+				process.stdin.setRawMode(true);
+			} catch (err) {
+				this.#markTerminalDisconnected("stdin raw mode setup failed", err);
+				return;
+			}
 		}
 		process.stdin.setEncoding("utf8");
 		process.stdin.on("end", this.#stdinEndHandler);
