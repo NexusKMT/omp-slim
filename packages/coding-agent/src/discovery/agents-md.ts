@@ -58,7 +58,7 @@ export async function loadAgentsMd(ctx: LoadContext): Promise<LoadResult<Context
 	const scanToHome = repoRoot !== null && cwdIsUnderHome && repoIsUnderHome;
 	const boundary = scanToHome ? home : (repoRoot ?? (cwdIsUnderHome ? home : filesystemRoot));
 	const includeBoundary = repoRoot === null ? cwdIsUnderHome : !samePath(boundary, home);
-	const excludeHome = repoRoot !== null && cwdIsUnderHome;
+	const excludeHome = scanToHome;
 
 	let current = cwd;
 	while (true) {

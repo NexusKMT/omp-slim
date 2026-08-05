@@ -62,7 +62,7 @@ describe("standalone AGENTS.md discovery", () => {
 		expect(result.items.map(file => file.path)).toEqual([cwdAgents, intermediateAgents, homeAgents]);
 	});
 
-	test("excludes home context when the repository root is above home", async () => {
+	test("includes home context when the repository root is above home", async () => {
 		const workspaceRoot = path.join(tempDir, "workspace");
 		const home = path.join(workspaceRoot, "user");
 		const repoRoot = workspaceRoot;
@@ -77,7 +77,7 @@ describe("standalone AGENTS.md discovery", () => {
 		const context: LoadContext = { cwd, home, repoRoot };
 		const result = await loadAgentsMd(context);
 
-		expect(result.items.map(file => file.path)).toEqual([repoAgents]);
+		expect(result.items.map(file => file.path)).toEqual([homeAgents, repoAgents]);
 	});
 
 	test("keeps the repository root boundary when the repository is outside home", async () => {
