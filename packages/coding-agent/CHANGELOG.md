@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Shift-Tab thinking mode rendering the `off` state as a missing status-line label, making it appear that reasoning could not be disabled ([#7668](https://github.com/can1357/oh-my-pi/issues/7668)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
