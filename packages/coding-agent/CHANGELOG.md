@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Linux/X11 clipboard reads failing when `xclip` is unavailable but `xsel` is installed.
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
