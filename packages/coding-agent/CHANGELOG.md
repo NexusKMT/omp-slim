@@ -27,29 +27,13 @@
 - Fixed Codex web search sending GPT-5.6 models a Responses-Lite request shape that the hosted `web_search` tool ignores. ([#7666](https://github.com/can1357/oh-my-pi/issues/7666))
 - Fixed resumed or rebuilt sessions auto-applying a new checkpoint with a stale rewind report from an earlier completed checkpoint cycle ([#7739](https://github.com/can1357/oh-my-pi/issues/7739)).
 - Fixed `read` treating semicolon-delimited internal URLs, such as batched `skill://` resources, as one invalid resource.
-### Fixed
-
 - Fixed `pi.getAllTools()` returning bare tool-name strings instead of `ToolInfo[]`, which crashed extensions authored against the upstream `@earendil-works/pi-coding-agent` contract (e.g. gentle-pi's startup banner: `undefined is not an object (evaluating 't.sourceInfo.source')`). The ExtensionAPI now returns `{ name, description, parameters, promptGuidelines, sourceInfo }` objects with `sourceInfo.source` classifying each tool as `builtin`/`sdk`/`mcp`/`extension` ([#7732](https://github.com/can1357/oh-my-pi/issues/7732)).
-### Fixed
-
 - Fixed legacy Pi extensions failing to install/load in compiled binaries when they resolve a bundled dependency through the `createRequire(base)(spec)` factory form (e.g. `gentle-pi` loading `@heyhuynhgiabuu/pi-pretty`): the shim only rewrote static `require()`/`import` specifiers, so the `createRequire` argument stayed bare and fell through to native `node_modules` resolution, which is unavailable under `--compile`. The load-time rewriter now pins the invoked bare dependency to an absolute path like a plain `require()` ([#7728](https://github.com/can1357/oh-my-pi/issues/7728)).
-### Fixed
-
 - Reported Wayland per-window native input and window activation as unavailable instead of advertising a foreground-delivery path that compositors reject. ([#7702](https://github.com/can1357/oh-my-pi/issues/7702))
-### Fixed
-
 - Fixed approved plans hiding live execution progress: after the fullscreen Plan Review closed, the conversation view stayed blank/stale while the plan executed. The propose write's `tool_execution_end` handler ran inside the event-controller's serialized dispatch chain and awaited `handlePlanApproval`, which awaits `session.prompt` for the entire execution turn — so every later `agent_start`/`message_start`/tool/`message_update` event queued behind it until the run finished. The approval dispatch is now detached from the dispatch chain, so the turn's events render live ([#7684](https://github.com/can1357/oh-my-pi/issues/7684)).
-### Fixed
-
 - Fixed `omp -r` current-folder scope missing sessions written under the short-lived hashed project-directory scheme (17.2.5-17.2.8): the 17.2.9 revert restored the legacy path-based names but dropped all migration, stranding those sessions. `computeDefaultSessionDir` now performs a one-way migration of the hashed dir back into its legacy name ([#7677](https://github.com/can1357/oh-my-pi/issues/7677)).
-### Fixed
-
 - Stopped the Read tool from advertising or resolving `memory://` when `memory.backend` is `off`, preventing agents from probing a disabled subsystem ([#7673](https://github.com/can1357/oh-my-pi/issues/7673)).
-### Fixed
-
 - Fixed Shift-Tab thinking mode rendering the `off` state as a missing status-line label, making it appear that reasoning could not be disabled ([#7668](https://github.com/can1357/oh-my-pi/issues/7668)).
-### Fixed
-
 - Fixed POSIX `$EDITOR` commands with quoted arguments or executable paths containing spaces being parsed incorrectly.
 
 ## [17.2.9] - 2026-08-05
