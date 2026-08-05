@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Codex web search sending GPT-5.6 models a Responses-Lite request shape that the hosted `web_search` tool ignores. ([#7666](https://github.com/can1357/oh-my-pi/issues/7666))
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
