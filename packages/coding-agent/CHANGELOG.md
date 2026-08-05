@@ -19,6 +19,10 @@
 
 - Fixed an advisor refusal skipping the model fallback chain. `AdvisorRuntime` treated a classifier refusal as terminal once its one stripped-reasoning resend failed, returning before the `onTurnError` hook that owns fallback (`#recoverAdvisorTurn`), so a `Refusal (cyber)` on one model disabled the advisor even with a configured chain. The refusal path now takes the same fallback pass the primary turn-recovery path already allows, and only reports the advisor unavailable when the host declines to switch.
 - Bounded advisor refusal recovery to one attempt per model. The cascade walks the fallback chain to exhaustion, but a model switch re-arms `#includeThinking` via `#syncModelIdentity`, so a chain whose keys point back at each other (A→B, B→A) would strip-and-resend against the same pair forever. Each cascade now visits a model at most once; a successful turn or a reset starts a fresh walk.
+### Fixed
+
+- Fixed repeated `/mcp reauth` commands getting stuck behind the previous unfinished MCP OAuth login; a new reauthorization now cancels and cleans up the prior flow before starting its replacement.
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
