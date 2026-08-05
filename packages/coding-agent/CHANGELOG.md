@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `pi.getAllTools()` returning bare tool-name strings instead of `ToolInfo[]`, which crashed extensions authored against the upstream `@earendil-works/pi-coding-agent` contract (e.g. gentle-pi's startup banner: `undefined is not an object (evaluating 't.sourceInfo.source')`). The ExtensionAPI now returns `{ name, description, parameters, promptGuidelines, sourceInfo }` objects with `sourceInfo.source` classifying each tool as `builtin`/`sdk`/`mcp`/`extension` ([#7732](https://github.com/can1357/oh-my-pi/issues/7732)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
