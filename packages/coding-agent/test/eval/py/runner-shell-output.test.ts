@@ -148,6 +148,26 @@ describe("Python runner shell output streaming", () => {
 		expect(stdout).not.toContain("capturedChars=1048593");
 	});
 
+	it("isolates !cmd children from the runner's stdin control channel", async () => {
+		// The runner's stdin carries the host's NDJSON frames. A child that
+		// inherits it can steal frames or block forever waiting for input;
+		// with stdin=DEVNULL a stdin-reading child sees immediate EOF instead.
+		const child = ["import sys", "data = sys.stdin.read()", "print('read=' + repr(data))"].join(";");
+		const frames = await runCell(
+			[
+				`result = !${pythonPath} -c ${shellQuote(child)}`,
+				"print('return=' + str(result.returncode) + ' lines=' + repr(list(result)))",
+			].join("\n"),
+		);
+		const stdout = frames
+			.filter(frame => frame.type === "stdout")
+			.map(frame => frame.data)
+			.join("");
+
+		expect(stdout).toContain("read=''");
+		expect(stdout).toContain("return=0");
+	});
+
 	it("streams newline-free %%bash output without waiting for EOF", async () => {
 		const child = [
 			"import sys,time",

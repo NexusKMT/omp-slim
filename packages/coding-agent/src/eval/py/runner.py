@@ -759,7 +759,13 @@ def _resolve_bash() -> str:
     found = shutil.which("bash")
     if found and "system32" not in found.lower():
         return found
-    return "bash"
+    # WSL's System32 bash.exe runs in a separate Linux environment, so
+    # silently falling back to it would execute the cell somewhere the user
+    # did not intend; fail loudly instead.
+    raise RuntimeError(
+        "%%bash requires a POSIX bash, but none was found. "
+        "Install Git for Windows or add a non-WSL bash to PATH."
+    )
 
 
 @cell_magic("bash")
