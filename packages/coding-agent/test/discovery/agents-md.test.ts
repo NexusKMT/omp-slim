@@ -59,7 +59,25 @@ describe("standalone AGENTS.md discovery", () => {
 		const context: LoadContext = { cwd, home, repoRoot: null };
 		const result = await loadAgentsMd(context);
 
-		expect(result.items.map(file => file.path)).toEqual([cwdAgents, intermediateAgents]);
+		expect(result.items.map(file => file.path)).toEqual([cwdAgents, intermediateAgents, homeAgents]);
+	});
+
+	test("excludes home context when the repository root is above home", async () => {
+		const workspaceRoot = path.join(tempDir, "workspace");
+		const home = path.join(workspaceRoot, "user");
+		const repoRoot = workspaceRoot;
+		const cwd = path.join(home, "project");
+		fs.mkdirSync(cwd, { recursive: true });
+
+		const repoAgents = path.join(repoRoot, "AGENTS.md");
+		const homeAgents = path.join(home, "AGENTS.md");
+		writeAgents(repoAgents, "repo context");
+		writeAgents(homeAgents, "home context");
+
+		const context: LoadContext = { cwd, home, repoRoot };
+		const result = await loadAgentsMd(context);
+
+		expect(result.items.map(file => file.path)).toEqual([repoAgents]);
 	});
 
 	test("keeps the repository root boundary when the repository is outside home", async () => {

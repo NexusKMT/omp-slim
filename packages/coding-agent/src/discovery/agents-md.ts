@@ -55,15 +55,16 @@ export async function loadAgentsMd(ctx: LoadContext): Promise<LoadResult<Context
 	const filesystemRoot = path.parse(cwd).root;
 	const cwdIsUnderHome = isWithin(home, cwd);
 	const repoIsUnderHome = repoRoot !== null && isWithin(home, repoRoot);
-	const scanToHome = cwdIsUnderHome && (repoRoot === null || repoIsUnderHome);
-	const boundary = scanToHome ? home : (repoRoot ?? filesystemRoot);
-	const includeBoundary = !samePath(boundary, home) && !(repoRoot === null && !cwdIsUnderHome);
+	const scanToHome = repoRoot !== null && cwdIsUnderHome && repoIsUnderHome;
+	const boundary = scanToHome ? home : (repoRoot ?? (cwdIsUnderHome ? home : filesystemRoot));
+	const includeBoundary = repoRoot === null ? cwdIsUnderHome : !samePath(boundary, home);
+	const excludeHome = repoRoot !== null && cwdIsUnderHome;
 
 	let current = cwd;
 	while (true) {
 		const atBoundary = samePath(current, boundary);
-		const atHome = samePath(current, home);
-		if (!atHome && !(atBoundary && !includeBoundary)) {
+		const atHome = excludeHome && samePath(current, home);
+		if (!(atHome || (atBoundary && !includeBoundary))) {
 			const candidate = path.join(current, "AGENTS.md");
 			const content = await readFile(candidate);
 
