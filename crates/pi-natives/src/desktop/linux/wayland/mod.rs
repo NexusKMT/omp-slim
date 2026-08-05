@@ -42,25 +42,19 @@ impl WaylandBackend {
 		Self { display, ax, ax_error, input, input_error, displays: Vec::new() }
 	}
 
-	fn background_error(target: &Target, kind: &str) -> CoreResult<()> {
+	fn window_input_error(target: &Target, kind: &str) -> CoreResult<()> {
 		if let Target::Window(id) = target {
 			return Err(DesktopError::background_unavailable(format!(
-				"window {id} wayland-compositor-focus-only: Wayland cannot target a non-focused \
-				 window for {kind}; use ax actions or delivery:\"foreground\""
+				"window {id} wayland-compositor-focus-only: Wayland cannot programmatically activate \
+				 a non-focused window for {kind}; only the currently focused surface is reachable; \
+				 use ax actions or desktop input"
 			)));
 		}
 		Ok(())
 	}
 
-	fn prepare_input(&mut self, target: &Target, mode: DeliveryMode, kind: &str) -> CoreResult<()> {
-		if mode == DeliveryMode::Background {
-			Self::background_error(target, kind)?;
-		}
-		if mode == DeliveryMode::Foreground
-			&& let Target::Window(id) = target
-		{
-			self.raise_window(id)?;
-		}
+	fn prepare_input(&self, target: &Target, kind: &str) -> CoreResult<()> {
+		Self::window_input_error(target, kind)?;
 		if self.input.is_none() {
 			return Err(self.input_error.clone().unwrap_or_else(|| {
 				DesktopError::permission_denied(
@@ -110,7 +104,7 @@ impl Backend for WaylandBackend {
 			input: self.input.is_some(),
 			ax: self.ax.is_some(),
 			background_window_input: false,
-			delivery_modes: vec!["foreground".to_string(), "background".to_string()],
+			delivery_modes: vec!["background".to_string()],
 			capture_permission: "prompt-or-granted".to_string(),
 			input_permission: if self.input.is_some() {
 				"granted".to_string()
@@ -200,9 +194,9 @@ impl Backend for WaylandBackend {
 		target: &Target,
 		ev: PointerEvent,
 		_frame: &FrameGeometry,
-		mode: DeliveryMode,
+		_mode: DeliveryMode,
 	) -> CoreResult<()> {
-		self.prepare_input(target, mode, "pointer input")?;
+		self.prepare_input(target, "pointer input")?;
 		self
 			.input
 			.as_mut()
@@ -210,8 +204,8 @@ impl Backend for WaylandBackend {
 			.pointer(ev)
 	}
 
-	fn type_text(&mut self, target: &Target, text: &str, mode: DeliveryMode) -> CoreResult<()> {
-		self.prepare_input(target, mode, "keyboard input")?;
+	fn type_text(&mut self, target: &Target, text: &str, _mode: DeliveryMode) -> CoreResult<()> {
+		self.prepare_input(target, "keyboard input")?;
 		self
 			.input
 			.as_mut()
@@ -223,9 +217,9 @@ impl Backend for WaylandBackend {
 		&mut self,
 		target: &Target,
 		keys: &[KeyName],
-		mode: DeliveryMode,
+		_mode: DeliveryMode,
 	) -> CoreResult<()> {
-		self.prepare_input(target, mode, "keyboard input")?;
+		self.prepare_input(target, "keyboard input")?;
 		self
 			.input
 			.as_mut()
@@ -234,16 +228,10 @@ impl Backend for WaylandBackend {
 	}
 
 	fn raise_window(&mut self, id: &str) -> CoreResult<()> {
-		self
-			.ax
-			.as_mut()
-			.ok_or_else(|| {
-				self
-					.ax_error
-					.clone()
-					.unwrap_or_else(DesktopError::ax_unsupported)
-			})?
-			.raise_window(id)
+		Err(DesktopError::background_unavailable(format!(
+			"window {id} wayland-compositor-focus-only: Wayland cannot programmatically activate a \
+			 non-focused window; only the currently focused surface is reachable"
+		)))
 	}
 
 	fn ax(&mut self) -> Option<&mut dyn AxBackend> {
@@ -255,12 +243,50 @@ impl Backend for WaylandBackend {
 mod tests {
 	use super::*;
 
+	fn backend_without_services() -> WaylandBackend {
+		WaylandBackend {
+			display:     DisplaySelector::All,
+			ax:          None,
+			ax_error:    None,
+			input:       None,
+			input_error: None,
+			displays:    Vec::new(),
+		}
+	}
+
 	#[test]
-	fn window_background_delivery_is_structurally_rejected() {
+	fn window_foreground_delivery_reports_compositor_constraint() {
+		let mut backend = backend_without_services();
 		let target = Target::Window("w1".to_string());
-		let err = WaylandBackend::background_error(&target, "pointer input")
-			.expect_err("window background input must fail");
+		let err = backend
+			.type_text(&target, "hello", DeliveryMode::Foreground)
+			.expect_err("window foreground input must fail");
 		assert_eq!(err.code.as_str(), "BackgroundUnavailable");
-		assert!(err.message.contains("wayland-compositor-focus-only"));
+		assert_eq!(
+			err.message,
+			"window w1 wayland-compositor-focus-only: Wayland cannot programmatically activate a \
+			 non-focused window for keyboard input; only the currently focused surface is reachable; \
+			 use ax actions or desktop input"
+		);
+	}
+
+	#[test]
+	fn window_raise_reports_compositor_constraint() {
+		let mut backend = backend_without_services();
+		let err = backend
+			.raise_window("w1")
+			.expect_err("Wayland window raise must fail");
+		assert_eq!(err.code.as_str(), "BackgroundUnavailable");
+		assert_eq!(
+			err.message,
+			"window w1 wayland-compositor-focus-only: Wayland cannot programmatically activate a \
+			 non-focused window; only the currently focused surface is reachable"
+		);
+	}
+
+	#[test]
+	fn capabilities_do_not_advertise_foreground_delivery() {
+		let mut backend = backend_without_services();
+		assert_eq!(backend.capabilities().delivery_modes, ["background"]);
 	}
 }

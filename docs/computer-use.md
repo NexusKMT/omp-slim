@@ -89,7 +89,7 @@ The `desktop` object exposes the same screenshot and input surface for the all-d
 
 Pixel coordinates always belong to the most recent screenshot of the same target. Coordinate input before that capture is rejected. A resized/closed target or changed display layout invalidates the frame; capture again instead of guessing. Screenshots display automatically and are also saved at the captured resolution, subject to `computer.maxWidth` / `computer.maxHeight` and any effective model-transport cap. When a capture is scaled, the tool reports both the saved capture dimensions and the native source dimensions. `{ silent: true }` suppresses display in loops.
 
-Input defaults to `delivery: "background"`, which avoids changing the user's focus, pointer, or window order. If the OS or application cannot target that event safely, the call throws `BackgroundUnavailable`. Use AX, or explicitly retry with `delivery: "foreground"`, which briefly activates the target and restores focus afterward. macOS keyboard delivery to one of several windows in the same app and all Wayland per-window native input require this fallback.
+Input defaults to `delivery: "background"`, which avoids changing the user's focus, pointer, or window order. If the OS or application cannot target that event safely, the call throws `BackgroundUnavailable`. On macOS, use AX or explicitly retry with `delivery: "foreground"`, which briefly activates the target and restores focus afterward. Wayland compositors accept native input only for the currently focused surface and do not permit omp to activate an arbitrary window, so per-window native input and `raise()` are unavailable; use AX actions, or desktop input after focusing the target yourself.
 
 ## Accessibility-first automation
 

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Reported Wayland per-window native input and window activation as unavailable instead of advertising a foreground-delivery path that compositors reject. ([#7702](https://github.com/can1357/oh-my-pi/issues/7702))
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
