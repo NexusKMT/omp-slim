@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Wayland `desktop.capabilities()` reporting `capture: true` on builds compiled without the `wayland-pipewire` feature (all released binaries), where every capture call hard-fails with `CaptureFailed`. The `capture` flag and `capture_permission` now reflect the compiled-in feature ([#7700](https://github.com/can1357/oh-my-pi/issues/7700)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Changed
