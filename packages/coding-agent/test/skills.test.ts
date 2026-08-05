@@ -247,6 +247,8 @@ describe("skills", () => {
 			const previousWslDistroName = process.env.WSL_DISTRO_NAME;
 			const previousWslInterop = process.env.WSL_INTEROP;
 			const previousUserProfile = process.env.USERPROFILE;
+			const previousPlatform = process.platform;
+			Object.defineProperty(process, "platform", { value: "linux" });
 			process.env.WSL_DISTRO_NAME = "Ubuntu";
 			delete process.env.WSL_INTEROP;
 			process.env.USERPROFILE = tempHostHome;
@@ -269,6 +271,7 @@ describe("skills", () => {
 				else process.env.WSL_INTEROP = previousWslInterop;
 				if (previousUserProfile === undefined) delete process.env.USERPROFILE;
 				else process.env.USERPROFILE = previousUserProfile;
+				Object.defineProperty(process, "platform", { value: previousPlatform });
 				await removeWithRetries(tempHostHome);
 				await removeWithRetries(tempCwd);
 			}
@@ -282,6 +285,17 @@ describe("skills", () => {
 			});
 
 			expect(resolved).toBe(path.join("/mnt", "c", "Users", "alice"));
+		});
+
+		it("resolves the Windows profile through interop when USERPROFILE is not exported (#3779)", () => {
+			const resolved = getWslWindowsHomeCandidate({
+				platform: "linux",
+				env: { WSL_DISTRO_NAME: "Ubuntu" },
+				windowsUserProfile: () => "C:\\Users\\alice",
+				wslPath: () => "/mnt/c/Users/alice",
+			});
+
+			expect(resolved).toBe("/mnt/c/Users/alice");
 		});
 
 		it("respects an explicit enableAgentsUser: false (#2401)", async () => {

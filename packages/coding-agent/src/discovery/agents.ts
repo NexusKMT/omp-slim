@@ -31,6 +31,7 @@ const AGENT_DIR_CANDIDATES = [".agent", ".agents"] as const;
 interface UserPathCandidateOptions {
 	platform?: NodeJS.Platform;
 	env?: NodeJS.ProcessEnv;
+	windowsUserProfile?: () => string | undefined;
 	wslPath?: (windowsPath: string) => string | undefined;
 }
 
@@ -62,12 +63,26 @@ function resolveWithWslPath(windowsPath: string): string | undefined {
 	}
 }
 
+function resolveWindowsUserProfile(): string | undefined {
+	try {
+		const result = Bun.spawnSync(["cmd.exe", "/d", "/c", "echo", "%USERPROFILE%"], {
+			stdout: "pipe",
+			stderr: "ignore",
+		});
+		if (result.exitCode !== 0) return undefined;
+		const resolved = result.stdout.toString().trim();
+		return resolved.length > 0 && resolved !== "%USERPROFILE%" ? resolved : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /** Resolve the Windows host profile home exposed to WSL, if available. */
 export function getWslWindowsHomeCandidate(options: UserPathCandidateOptions = {}): string | undefined {
 	const platform = options.platform ?? process.platform;
 	const env = options.env ?? process.env;
 	if (!isWsl(platform, env)) return undefined;
-	const userProfile = env.USERPROFILE;
+	const userProfile = env.USERPROFILE ?? (options.windowsUserProfile ?? resolveWindowsUserProfile)();
 	if (!userProfile) return undefined;
 	return (options.wslPath ?? resolveWithWslPath)(userProfile) ?? convertWindowsPathToDefaultWslMount(userProfile);
 }
