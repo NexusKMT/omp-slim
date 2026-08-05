@@ -1790,7 +1790,14 @@ export class SessionAdvisors {
 		}
 		if (stats.advisors.length <= 1) {
 			const s = stats.advisors[0];
-			if (s && s.status === "no_model") {
+			if (!s) {
+				// A rebuild clears #advisorStatuses before repopulating it, so a status
+				// call landing in that window sees live advisors with an empty roster.
+				// Reporting a status must never throw — this used to fall through to
+				// `s.contextWindow`.
+				return stats.active ? "Advisor is starting up." : "Advisor is disabled.";
+			}
+			if (s.status === "no_model") {
 				return stats.configured
 					? "Advisor setting is enabled, but no model is assigned to the 'advisor' role."
 					: "Advisor is disabled.";
