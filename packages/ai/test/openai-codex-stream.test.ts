@@ -19,6 +19,7 @@ import type {
 } from "@oh-my-pi/pi-ai/types";
 import { __resetProxyCache } from "@oh-my-pi/pi-ai/utils/proxy";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import * as piUtils from "@oh-my-pi/pi-utils";
 import { withEnv } from "./helpers";
 
@@ -519,7 +520,7 @@ describe("openai-codex streaming", () => {
 		const result = await streamSimple(model, context, {
 			apiKey: token,
 			fetch: fetchMock,
-			reasoning: "medium",
+			reasoning: Effort.Medium,
 		}).result();
 
 		expect(result.stopReason).toBe("stop");

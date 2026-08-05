@@ -68,6 +68,8 @@ const TURN_TRACE_CAP = 40;
 const TRACE_LINE_MAX = 120;
 /** Default `vibe_wait` window when no timeout was given (ms). */
 const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
+/** Response text cap inside a delivered turn result; full output stays at agent://<id>. */
+const RESPONSE_PREVIEW_MAX = 6000;
 /** Grace period for Vibe cancellation/release cleanup before teardown detaches (ms). */
 const VIBE_TEARDOWN_GRACE_MS = 5_000;
 

@@ -163,8 +163,8 @@ fn path_depth(path: &str) -> usize {
 ///
 /// The ordering is the exact inverse of the final result comparator (score
 /// descending, then `path_depth` ascending, then `path` ascending), so the
-/// greatest element of a `BinaryHeap<RankedMatch>` is the candidate that must be
-/// evicted first, and `into_sorted_vec` yields the final best-first order.
+/// greatest element of a `BinaryHeap<RankedMatch>` is the candidate that must
+/// be evicted first, and `into_sorted_vec` yields the final best-first order.
 struct RankedMatch {
 	depth: usize,
 	entry: FuzzyFindMatch,
@@ -234,14 +234,15 @@ impl TopMatches {
 	}
 
 	/// Exact number of scoring hits, clamped to the `u32` wire type.
-	fn total_matches(&self) -> u32 {
+	const fn total_matches(&self) -> u32 {
 		crate::utils::clamp_u32(self.total)
 	}
 
 	/// Retained matches ordered by score descending, then shallower paths, then
 	/// path ascending.
 	fn into_sorted_matches(self) -> Vec<FuzzyFindMatch> {
-		self.heap
+		self
+			.heap
 			.into_sorted_vec()
 			.into_iter()
 			.map(|ranked| ranked.entry)
