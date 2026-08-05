@@ -199,6 +199,9 @@ function isExecutableFile(p: string): boolean {
 	}
 }
 
+/** Flatpak application id published by the Ungoogled Chromium project. */
+const UNGOOGLED_CHROMIUM_FLATPAK_ID = "io.github.ungoogled_software.ungoogled_chromium";
+
 function systemChromiumCandidates(): string[] {
 	const home = os.homedir();
 	const candidates: string[] = [];
@@ -217,7 +220,15 @@ function systemChromiumCandidates(): string[] {
 			break;
 		}
 		case "linux": {
-			const names = ["google-chrome-stable", "google-chrome", "chromium", "chromium-browser", "chrome"];
+			const names = [
+				"google-chrome-stable",
+				"google-chrome",
+				"chromium",
+				"chromium-browser",
+				"chrome",
+				"ungoogled-chromium",
+				"ungoogled-chromium-browser",
+			];
 			for (const name of names) {
 				const found = $which(name);
 				if (found) candidates.push(found);
@@ -230,6 +241,13 @@ function systemChromiumCandidates(): string[] {
 				"/snap/bin/chromium",
 				"/var/lib/flatpak/exports/bin/com.google.Chrome",
 				"/var/lib/flatpak/exports/bin/org.chromium.Chromium",
+				// Ungoogled Chromium. Distro and AUR packages that keep the plain
+				// `chromium` name are already covered above; these are the paths
+				// unique to it, including the system and per-user Flatpak shims.
+				"/usr/bin/ungoogled-chromium",
+				"/usr/bin/ungoogled-chromium-browser",
+				`/var/lib/flatpak/exports/bin/${UNGOOGLED_CHROMIUM_FLATPAK_ID}`,
+				path.join(home, ".local/share/flatpak/exports/bin", UNGOOGLED_CHROMIUM_FLATPAK_ID),
 			);
 			let onNixos = false;
 			try {
@@ -864,6 +882,11 @@ export async function applyStealthPatches(
 	await configureUserAgentTargets(browser, targetState);
 	state.browserSession = targetState.browserSession;
 	await injectStealthScripts(page);
+}
+
+/** Exposes the resolved executable candidate list for detection tests. */
+export function systemChromiumCandidatesForTest(): string[] {
+	return systemChromiumCandidates();
 }
 
 export function stealthIgnoreDefaultArgsForTest(executablePath: string | undefined): string[] {
