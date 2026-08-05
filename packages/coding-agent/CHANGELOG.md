@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed repeated `/mcp reauth` commands getting stuck behind the previous unfinished MCP OAuth login; a new reauthorization now cancels and cleans up the prior flow before starting its replacement.
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
