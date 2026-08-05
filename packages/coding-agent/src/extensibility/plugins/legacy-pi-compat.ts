@@ -423,6 +423,26 @@ function isGlobalRequireCall(node: StructuralAstNode | null, scope: BindingScope
 	);
 }
 
+/**
+ * Whether `node` is a `createRequire(...)` factory call — either the bare
+ * `createRequire` identifier (as imported from `node:module`) or a
+ * `<ns>.createRequire(...)` member call. The invoked result is a CommonJS
+ * `require`, so `createRequire(base)(spec)` must be rewritten like a plain
+ * `require(spec)`: a compiled binary cannot resolve runtime `node_modules`
+ * from the returned require (see file header), so the specifier is pinned to
+ * an absolute path at load time. Not shadow-tracked — the legitimate
+ * `import { createRequire }` binds the name, so treating that as a shadow
+ * would defeat the detection.
+ */
+function isCreateRequireInvocation(node: StructuralAstNode | null): boolean {
+	if (node?.type !== "CallExpression") return false;
+	const callee = asAstNode(node.callee);
+	return (
+		isIdentifier(callee, "createRequire") ||
+		(callee?.type === "MemberExpression" && staticMemberPropertyName(callee) === "createRequire")
+	);
+}
+
 function staticMemberPropertyName(node: StructuralAstNode): string | null {
 	const property = asAstNode(node.property);
 	if (node.computed !== true && property?.type === "Identifier" && typeof property.name === "string") {
@@ -478,6 +498,18 @@ function collectExtensionSpecifierReferences(
 				record("import", nodeArgument(node, 0));
 			} else if (isIdentifier(callee, "require") && !scopeHasBinding(scope, REQUIRE_BINDING)) {
 				record("require", nodeArgument(node, 0));
+			} else if (isCreateRequireInvocation(callee)) {
+				// `createRequire(base)(spec)` — pin the invoked bare dependency so it
+				// loads without a runtime `node_modules` lookup. Relative specifiers
+				// resolve against `base`, which is not rewritten, so restrict to bare.
+				const argument = nodeArgument(node, 0);
+				if (
+					argument?.type === "StringLiteral" &&
+					typeof argument.value === "string" &&
+					isBareExtensionDependencySpecifier(argument.value)
+				) {
+					record("require", argument);
+				}
 			}
 		}
 	}

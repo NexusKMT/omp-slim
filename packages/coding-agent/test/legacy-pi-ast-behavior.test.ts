@@ -241,6 +241,24 @@ const rewriteCases: RewriteCase[] = [
 				`require(${JSON.stringify(requirePath)});`,
 			].join("\n"),
 	},
+	{
+		name: "createRequire factory invocation pins its bare dependency, leaving relative and non-createRequire calls alone",
+		source: [
+			'import { createRequire } from "node:module";',
+			'const direct = createRequire(import.meta.url)("tracked-dep");',
+			'const viaModule = module.createRequire("./anchor")("tracked-dep");',
+			'const relative = createRequire(import.meta.url)("./sibling");',
+			'const other = makeRequire(import.meta.url)("tracked-dep");',
+		].join("\n"),
+		expected: (_importPath, requirePath) =>
+			[
+				'import { createRequire } from "node:module";',
+				`const direct = createRequire(import.meta.url)(${JSON.stringify(requirePath)});`,
+				`const viaModule = module.createRequire("./anchor")(${JSON.stringify(requirePath)});`,
+				'const relative = createRequire(import.meta.url)("./sibling");',
+				'const other = makeRequire(import.meta.url)("tracked-dep");',
+			].join("\n"),
+	},
 ];
 
 async function loadCommonJsCase(testCase: CommonJsCase): Promise<{ keys: string[]; named: Record<string, unknown> }> {
