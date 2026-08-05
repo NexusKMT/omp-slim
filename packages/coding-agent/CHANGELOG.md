@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Hardened Linux Chromium executable detection to reject non-executable files, non-browser wrappers, and candidates that hang during the version probe.
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes

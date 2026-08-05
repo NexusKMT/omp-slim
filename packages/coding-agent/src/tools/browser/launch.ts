@@ -205,11 +205,19 @@ function isExecutableFile(p: string): boolean {
 async function isChromiumExecutable(p: string): Promise<boolean> {
 	if (!isExecutableFile(p)) return false;
 	try {
+		const probeTimeoutMs = 3000;
 		const proc = Bun.spawn([p, "--version"], {
 			stdout: "pipe",
 			stderr: "ignore",
+			signal: AbortSignal.timeout(probeTimeoutMs),
+			killSignal: "SIGKILL",
 		});
-		const stdout = await new Response(proc.stdout).text();
+		const stdout = await Promise.race([
+			new Response(proc.stdout).text(),
+			proc.exited.then(() => null),
+			Bun.sleep(probeTimeoutMs).then(() => null),
+		]);
+		if (stdout === null) return false;
 		await proc.exited;
 		return proc.exitCode === 0 && /Chrom|Edg/i.test(stdout);
 	} catch {
