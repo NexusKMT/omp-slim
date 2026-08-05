@@ -394,7 +394,6 @@ function mergeTrace(turn: VibeTurn, progress: AgentProgress): void {
 /** Thrown from a turn job body so the job manager marks the job failed while carrying the formatted result. */
 export class VibeTurnError extends Error {}
 
-
 /**
  * Process-global registry of vibe worker sessions, scoped by both owner agent
  * id and stable parent session id. Persisted lifecycle events rebuild idle

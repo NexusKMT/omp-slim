@@ -765,11 +765,10 @@ describe("openai-codex concurrent reasoning summaries", () => {
 
 	it("sends stream_options only when a summary is requested and supported", async () => {
 		const terra = createCodexModel("gpt-5.6-terra");
-		const withSummary = await transformRequestBody(
-			{ model: terra.id },
-			terra,
-			{ reasoningEffort: "medium", reasoningSummary: "detailed" },
-		);
+		const withSummary = await transformRequestBody({ model: terra.id }, terra, {
+			reasoningEffort: "medium",
+			reasoningSummary: "detailed",
+		});
 		expect(withSummary.stream_options).toEqual({ reasoning_summary_delivery: "sequential_cutoff" });
 		expect(withSummary.reasoning?.summary).toBe("detailed");
 
@@ -783,11 +782,10 @@ describe("openai-codex concurrent reasoning summaries", () => {
 		expect(noReasoning.stream_options).toBeUndefined();
 
 		const legacy = createCodexModel("gpt-5.1-codex");
-		const unsupported = await transformRequestBody(
-			{ model: legacy.id },
-			legacy,
-			{ reasoningEffort: "medium", reasoningSummary: "detailed" },
-		);
+		const unsupported = await transformRequestBody({ model: legacy.id }, legacy, {
+			reasoningEffort: "medium",
+			reasoningSummary: "detailed",
+		});
 		expect(unsupported.stream_options).toBeUndefined();
 	});
 

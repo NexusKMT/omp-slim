@@ -6,6 +6,10 @@
 
 - Bounded fuzzy-find scored-match retention to the top-K results (worst-first heap) instead of collecting and fully sorting every hit; ranking and totals are unchanged ([#7415](https://github.com/can1357/oh-my-pi/issues/7415)).
 
+### Fixed
+
+- Fixed newer OMP versions deleting a freshly created older native addon cache directory during concurrent startup, which could interrupt extraction with `ENOENT`.
+
 ## [17.2.7] - 2026-08-03
 
 ### Added
@@ -35,9 +39,6 @@
 - Fixed accessibility snapshots incorrectly marking a window root as focused based on its app-local AXFocused attribute when another application held global focus; the root annotation now correctly reflects the global window-roster focus flag.
 - Improved coordinate-frame error messages for pointer input before capture, out-of-frame coordinates, and between-display points to clearly explain the capture-frame contract and remedy instead of throwing a generic bounds check.
 - Fixed duplicated characters in AppKit targets on macOS caused by background keyboard events being posted through both CoreGraphics and SkyLight; events are now delivered once via the authenticated SkyLight route.
-### Fixed
-
-- Fixed newer OMP versions deleting a freshly created older native addon cache directory during concurrent startup, which could interrupt extraction with `ENOENT`.
 
 ## [17.2.2] - 2026-07-31
 
