@@ -348,7 +348,7 @@ async function commandsForMode(mode: Mode): Promise<TestCommand[]> {
 			];
 		// `local-ts` is the full local TypeScript run that root `bun run test:ts`
 		// drives: every package the old `--workspaces` fan-out covered (the CI
-		// `all` set PLUS mnemopi and robomp-web, which CI omits), routed through
+		// `all` set plus robomp-web, which CI omits), routed through
 		// this one quiet runner so the whole suite shares one progress stream and
 		// one failure report. Repo script tests remain available via `test:scripts`.
 		case "local-ts":
