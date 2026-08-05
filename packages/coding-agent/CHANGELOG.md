@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `omp -r` current-folder scope missing sessions written under the short-lived hashed project-directory scheme (17.2.5-17.2.8): the 17.2.9 revert restored the legacy path-based names but dropped all migration, stranding those sessions. `computeDefaultSessionDir` now performs a one-way migration of the hashed dir back into its legacy name ([#7677](https://github.com/can1357/oh-my-pi/issues/7677)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
