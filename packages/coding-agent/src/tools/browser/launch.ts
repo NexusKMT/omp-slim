@@ -214,8 +214,7 @@ async function isChromiumExecutable(p: string): Promise<boolean> {
 		});
 		const stdout = await Promise.race([
 			new Response(proc.stdout).text(),
-			proc.exited.then(() => null),
-			Bun.sleep(probeTimeoutMs).then(() => null),
+			Bun.sleep(probeTimeoutMs + 500).then(() => null),
 		]);
 		if (stdout === null) return false;
 		await proc.exited;
