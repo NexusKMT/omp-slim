@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a per-turn `before_agent_start` system prompt override being silently dropped when a base-prompt rebuild fired between the hook and the provider request. The override lived only on the agent state, so `refreshBaseSystemPrompt`/`applyActiveToolsByName` re-pushing the rebuilt base (context-overflow compaction/promotion, memory promotion, MCP/RPC tool refresh, or the fire-and-forget hindsight MM-TTL refresh) clobbered it. The tools controller now tracks the active override and re-applies it on every base rebuild during the turn, clearing it when the turn ends ([#7755](https://github.com/can1357/oh-my-pi/issues/7755)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes

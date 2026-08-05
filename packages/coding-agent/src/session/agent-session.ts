@@ -5267,11 +5267,13 @@ export class AgentSession {
 
 				if (result?.systemPrompt !== undefined) {
 					baseXdevCatalogDelivered = false;
-					this.agent.setSystemPrompt(result.systemPrompt);
+					this.#tools.setTurnSystemPromptOverride(result.systemPrompt);
 				} else {
+					this.#tools.clearTurnSystemPromptOverride();
 					this.agent.setSystemPrompt(beforeAgentStartSystemPrompt);
 				}
 			} else {
+				this.#tools.clearTurnSystemPromptOverride();
 				this.agent.setSystemPrompt(beforeAgentStartSystemPrompt);
 			}
 
@@ -5336,6 +5338,8 @@ export class AgentSession {
 				await this.#waitForPostPromptRecovery(generation);
 			}
 		} finally {
+			// The per-turn before_agent_start override lives only for this turn.
+			this.#tools.clearTurnSystemPromptOverride();
 			this.#usagePreflightReadyForNextModelCall = false;
 			this.#endInFlight();
 		}
