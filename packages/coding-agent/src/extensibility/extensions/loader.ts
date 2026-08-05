@@ -46,6 +46,7 @@ import type {
 	ProviderConfig,
 	RegisteredCommand,
 	ToolDefinition,
+	ToolInfo,
 } from "./types";
 
 installLegacyPiSpecifierShim();
@@ -92,7 +93,7 @@ export class ExtensionRuntime implements IExtensionRuntime {
 		throw new ExtensionRuntimeNotInitializedError();
 	}
 
-	getAllTools(): string[] {
+	getAllTools(): ToolInfo[] {
 		throw new ExtensionRuntimeNotInitializedError();
 	}
 
@@ -245,7 +246,7 @@ class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
 		return this.runtime.getActiveTools();
 	}
 
-	getAllTools(): string[] {
+	getAllTools(): ToolInfo[] {
 		return this.runtime.getAllTools();
 	}
 

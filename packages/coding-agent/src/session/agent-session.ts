@@ -127,6 +127,7 @@ import type {
 	ToolExecutionEndEvent,
 	ToolExecutionStartEvent,
 	ToolExecutionUpdateEvent,
+	ToolInfo,
 	TreePreparation,
 	TurnEndEvent,
 	TurnStartEvent,
@@ -4179,6 +4180,11 @@ export class AgentSession {
 	/** Names of every registered tool. */
 	getAllToolNames(): string[] {
 		return this.#tools.getAllToolNames();
+	}
+
+	/** Full metadata for every registered tool, including source provenance (backs `getAllTools()`). */
+	getAllToolInfos(): ToolInfo[] {
+		return this.#tools.getAllToolInfos();
 	}
 
 	/** Installs and activates the ephemeral vibe tool set. */

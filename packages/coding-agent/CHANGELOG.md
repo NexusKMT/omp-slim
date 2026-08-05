@@ -27,6 +27,9 @@
 - Fixed Codex web search sending GPT-5.6 models a Responses-Lite request shape that the hosted `web_search` tool ignores. ([#7666](https://github.com/can1357/oh-my-pi/issues/7666))
 - Fixed resumed or rebuilt sessions auto-applying a new checkpoint with a stale rewind report from an earlier completed checkpoint cycle ([#7739](https://github.com/can1357/oh-my-pi/issues/7739)).
 - Fixed `read` treating semicolon-delimited internal URLs, such as batched `skill://` resources, as one invalid resource.
+### Fixed
+
+- Fixed `pi.getAllTools()` returning bare tool-name strings instead of `ToolInfo[]`, which crashed extensions authored against the upstream `@earendil-works/pi-coding-agent` contract (e.g. gentle-pi's startup banner: `undefined is not an object (evaluating 't.sourceInfo.source')`). The ExtensionAPI now returns `{ name, description, parameters, promptGuidelines, sourceInfo }` objects with `sourceInfo.source` classifying each tool as `builtin`/`sdk`/`mcp`/`extension` ([#7732](https://github.com/can1357/oh-my-pi/issues/7732)).
 
 ## [17.2.9] - 2026-08-05
 

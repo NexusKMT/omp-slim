@@ -596,6 +596,36 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	) => Component;
 }
 
+/** Whether a tool's source is scoped to the user, the project, or a transient runtime session. */
+export type SourceScope = "user" | "project" | "temporary";
+
+/** Whether a tool's source came from an installed package or a top-level (loose) file. */
+export type SourceOrigin = "package" | "top-level";
+
+/**
+ * Provenance metadata describing where a registered tool came from. Mirrors the
+ * `@earendil-works/pi-coding-agent` `SourceInfo` contract so extensions authored
+ * against upstream pi (e.g. gentle-pi) can read `sourceInfo.source` unchanged.
+ */
+export interface SourceInfo {
+	/** Synthetic or on-disk identifier for the tool's origin (e.g. `<builtin:read>`). */
+	path: string;
+	/** Origin class: `"builtin"`, `"sdk"`, `"mcp"`, or `"extension"`. */
+	source: string;
+	scope: SourceScope;
+	origin: SourceOrigin;
+	baseDir?: string;
+}
+
+/** Tool metadata returned by {@link ExtensionAPI.getAllTools}: identity, schema, and source provenance. */
+export interface ToolInfo {
+	name: string;
+	description: string;
+	parameters: TSchema;
+	promptGuidelines?: string[];
+	sourceInfo: SourceInfo;
+}
+
 // ============================================================================
 // Resource Events
 // ============================================================================
@@ -1268,8 +1298,8 @@ export interface ExtensionAPI {
 	/** Get the list of currently active tool names. */
 	getActiveTools(): string[];
 
-	/** Get all configured tools (built-in + extension tools). */
-	getAllTools(): string[];
+	/** Get all configured tools (built-in + extension tools) with schema and source metadata. */
+	getAllTools(): ToolInfo[];
 
 	/** Set the active tools by name. */
 	setActiveTools(toolNames: string[]): Promise<void>;
@@ -1465,7 +1495,7 @@ export type AppendEntryHandler = <T = unknown>(customType: string, data?: T) => 
 
 export type GetActiveToolsHandler = () => string[];
 
-export type GetAllToolsHandler = () => string[];
+export type GetAllToolsHandler = () => ToolInfo[];
 
 export type GetCommandsHandler = () => SlashCommandInfo[];
 
