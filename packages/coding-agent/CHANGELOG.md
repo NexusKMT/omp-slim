@@ -11,6 +11,10 @@
 ### Fixed
 
 - Fixed `/usage`, `/advisor status`, and every other panel command looking dead mid-turn. `presentCommandOutput` defers panels while the agent streams so a growing turn cannot bury them, but said nothing, and on a long multi-subagent turn the panel is minutes away. The deferral is now acknowledged in the status line. A non-terminal settle also flushes the queue: `isStreaming` is already false by then, so a command issued after an async fan-out settles used to mount ahead of the panels queued before it.
+### Fixed
+
+- Fixed the bundled `ts-no-tiny-functions` TTSR rule never firing on one-line arrow functions in real files: the second alternative's `$` anchor only matched at the absolute end of input, so the trailing newline present in every real file suppressed the match. The condition now opens with the `(?m)` inline flag so the arrow body matches to the line end ([#6890](https://github.com/can1357/oh-my-pi/issues/6890)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
