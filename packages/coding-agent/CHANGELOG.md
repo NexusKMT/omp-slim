@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `nerd`-preset role chips overhanging into the label and swallowing its first character (`efault` instead of `default`) by inserting a separator after the status glyph in the model browser and model hub ([#7664](https://github.com/can1357/oh-my-pi/issues/7664)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
