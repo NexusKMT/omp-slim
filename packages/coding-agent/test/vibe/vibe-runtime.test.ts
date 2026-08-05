@@ -2168,4 +2168,49 @@ describe("vibe session registry", () => {
 		expect(AgentRegistry.global().get("One")).toBeUndefined();
 		expect(AgentRegistry.global().get("Two")).toBeUndefined();
 	});
+	it("bounds suspension when worker disposal does not settle", async () => {
+		const disposeGate = deferred();
+		const worker = createFakeWorkerSession({ onDispose: () => disposeGate.promise });
+		const ref = AgentRegistry.global().register({
+			id: "bounded-suspend",
+			displayName: "bounded-suspend",
+			kind: "sub",
+			parentId: "Main",
+			session: worker.session,
+			status: "idle",
+		});
+		AgentLifecycleManager.global().adopt(ref.id, {
+			idleTtlMs: 0,
+			revive: async () => worker.session,
+		});
+		const registry = VibeSessionRegistry.global();
+		registry.registerRecordForTests({ id: ref.id, ownerId: "Main", state: "idle" });
+		registry.setTeardownGraceForTesting(20);
+
+		vi.useFakeTimers();
+		let settled = false;
+		const suspension = registry
+			.suspendScope({
+				ownerId: "Main",
+				parentSessionId: "test-parent-session",
+				parentSessionFile: null,
+			})
+			.finally(() => {
+				settled = true;
+			});
+		try {
+			await flushMicrotasks();
+			vi.advanceTimersByTime(19);
+			await flushMicrotasks();
+			expect(settled).toBe(false);
+			vi.advanceTimersByTime(1);
+			await flushMicrotasks();
+			expect(settled).toBe(true);
+			expect(AgentRegistry.global().get(ref.id)).toBeUndefined();
+			expect(await suspension).toBe(1);
+		} finally {
+			disposeGate.resolve();
+			vi.useRealTimers();
+		}
+	});
 });
