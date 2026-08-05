@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed subagents spawned through a model-role alias (e.g. the bundled `scout`'s `model: "@smol"`) falling back onto the `default` role's `retry.fallbackChains` entry instead of their own role's chain: the child is pinned to a `subagent:<id>` role whose chain shadows every configured role chain, and that pin inherited `default` unconditionally, so a `@smol` scout retried on the default chain's first model instead of the smol chain's.
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
