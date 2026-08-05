@@ -1138,7 +1138,8 @@ mod capture_tests {
 			match target {
 				Target::Window(id) if id == &self.window.id => {
 					let image = RgbaImage::new(self.window.width, self.window.height);
-					let geometry = FrameGeometry::for_window(&self.window, image.width(), image.height());
+					let geometry =
+						FrameGeometry::for_window(&self.window, image.width(), image.height());
 					Ok((image, geometry))
 				},
 				Target::Window(id) => {
