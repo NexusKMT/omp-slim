@@ -8,6 +8,9 @@
 ### Fixed
 
 - Fixed startup aborting with an EIO error when a multiplexer or SSH session leaves `stdin.isTTY` true after revoking its pty, by taking the existing terminal-disconnect path instead of failing to enable raw mode.
+### Fixed
+
+- Fixed prompt autocomplete never triggering for Windows drive-absolute paths (`C:/Users/...`, `C:\Users\...`); only `/`, `./`, `../`, and `~/` prefixes were recognized.
 
 ## [17.2.9] - 2026-08-05
 
