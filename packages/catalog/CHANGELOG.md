@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `deepseek-v4-flash` exposing only the `high`/`max` thinking-effort tiers instead of the `low`/`high`/`max` ladder its API accepts; `deepseek-v4-pro` correctly stays on `high`/`max` ([#7668](https://github.com/can1357/oh-my-pi/issues/7668)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Fixed
