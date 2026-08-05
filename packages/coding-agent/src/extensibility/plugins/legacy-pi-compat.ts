@@ -479,7 +479,7 @@ function collectExtensionSpecifierReferences(
 	};
 	const createRequireBindings = new Set<string>();
 	const moduleNamespaceBindings = new Set<string>();
-	for (const { node } of collectScopedAstNodes(ast, (candidate) => candidate.type === "ImportDeclaration")) {
+	for (const { node } of collectScopedAstNodes(ast, candidate => candidate.type === "ImportDeclaration")) {
 		const source = asAstNode(node.source);
 		if (source?.type !== "StringLiteral" || (source.value !== "node:module" && source.value !== "module")) continue;
 		for (const value of Array.isArray(node.specifiers) ? node.specifiers : []) {
