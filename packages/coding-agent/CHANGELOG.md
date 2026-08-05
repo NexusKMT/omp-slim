@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Python eval shell helpers (`!cmd`, `%%bash`, `%pip`) letting child processes inherit the runner's stdin — the host's NDJSON control channel — which could steal protocol frames and deadlocked nested interpreters on Windows; children now get `stdin=DEVNULL`. `%%bash` also resolves Git Bash on Windows instead of hardcoding `/bin/bash`.
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
