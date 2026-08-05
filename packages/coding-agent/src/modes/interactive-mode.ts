@@ -4141,7 +4141,14 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.requestRender();
 	}
 
-	/** Defer transcript command panels until the active turn can no longer grow above them. */
+	/**
+	 * Defer transcript command panels while the agent is streaming, then mount
+	 * them at the next settle, terminal or not. A non-terminal settle is only a
+	 * scheduling pause, so resumed streaming can still land below a panel
+	 * flushed there. That is preferred over leaving it queued behind a command
+	 * the user runs during the pause, which mounts immediately and would put the
+	 * older panel out of order.
+	 */
 	presentCommandOutput(content: Component | readonly Component[]): void {
 		if (!this.session.isStreaming) {
 			this.present(content);
@@ -4158,7 +4165,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		// away on a long turn, so say where it went. "Pauses" rather than
 		// "finishes" because an async fan-out settles without ending the run,
 		// and the queue flushes at that settle too.
-		this.showStatus("Command output queued until the agent pauses.", { dim: true });
+		this.showStatus("Command output queued until the agent pauses.");
 	}
 
 	/** Mount every command panel queued for the current session while the agent was streaming. */
