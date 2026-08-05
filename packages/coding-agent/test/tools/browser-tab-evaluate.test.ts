@@ -458,7 +458,10 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser tab evaluation", () => {
 	}, 30_000);
 
 	it("logs a user continuation rejection after its browser run ends", async () => {
-		const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+		const warningLogged = Promise.withResolvers<void>();
+		const warn = vi.spyOn(logger, "warn").mockImplementation(message => {
+			if (message === "Unhandled rejection after browser run ended") warningLogged.resolve();
+		});
 		const tool = new BrowserTool(makeSession());
 		const name = `late-continuation-rejection-${process.pid}`;
 
@@ -484,7 +487,7 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser tab evaluation", () => {
 			});
 			expect(result.content).toEqual([{ type: "text", text: "completed" }]);
 
-			await Bun.sleep(150);
+			await warningLogged.promise;
 			expect(warn).toHaveBeenCalledWith("Unhandled rejection after browser run ended", {
 				runId: expect.any(String),
 				error: "late continuation failed",

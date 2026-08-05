@@ -306,7 +306,10 @@ describe("browser tab-supervisor — cmux tab close mid-run (#4499)", () => {
 				}
 			},
 		);
-		const warn = spyOn(logger, "warn").mockImplementation(() => {});
+		const warningLogged = Promise.withResolvers<void>();
+		const warn = spyOn(logger, "warn").mockImplementation(message => {
+			if (message === "Unhandled rejection after browser run ended") warningLogged.resolve();
+		});
 		const browser = await acquireBrowser(makeKind("late-rejection"), { cwd: "/tmp" });
 		await acquireTab("late-rejection", browser, {
 			timeoutMs: 5_000,
@@ -329,7 +332,7 @@ describe("browser tab-supervisor — cmux tab close mid-run (#4499)", () => {
 		});
 		expect(result.returnValue).toBe("completed");
 
-		await Bun.sleep(150);
+		await warningLogged.promise;
 		expect(warn).toHaveBeenCalledWith("Unhandled rejection after browser run ended", {
 			runId: expect.any(String),
 			error: "late cmux continuation failed",
