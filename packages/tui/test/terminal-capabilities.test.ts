@@ -165,8 +165,11 @@ console.log(JSON.stringify({ id: TERMINAL_ID, imageProtocol: TERMINAL.imageProto
 
 	it("is Kitty-capable with true color but no OSC 8 hyperlinks", () => {
 		const warp = getTerminalInfo("warp");
-		// Warp for Windows lacks Kitty graphics support.
-		expect(warp.imageProtocol).toBe(process.platform === "win32" ? null : ImageProtocol.Kitty);
+		// Warp lacks Kitty graphics on Windows hosts, including WSL.
+		const windowsHost =
+			process.platform === "win32" ||
+			(process.platform === "linux" && Boolean(Bun.env.WSL_DISTRO_NAME || Bun.env.WSL_INTEROP));
+		expect(warp.imageProtocol).toBe(windowsHost ? null : ImageProtocol.Kitty);
 		expect(warp.trueColor).toBe(true);
 		expect(warp.hyperlinks).toBe(false);
 		expect(warp.notifyProtocol).toBe(NotifyProtocol.Osc9);
