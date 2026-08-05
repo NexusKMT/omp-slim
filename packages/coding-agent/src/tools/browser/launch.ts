@@ -133,7 +133,7 @@ let chromiumExecutablePromise: Promise<string | undefined> | undefined;
 export async function ensureChromiumExecutable(): Promise<string | undefined> {
 	const envPath = process.env.PUPPETEER_EXECUTABLE_PATH;
 	if (envPath) return envPath;
-	const sysChrome = resolveSystemChromium();
+	const sysChrome = await resolveSystemChromium();
 	if (sysChrome) return sysChrome;
 	if (chromiumExecutablePromise) return chromiumExecutablePromise;
 
@@ -193,7 +193,25 @@ let resolvedChromium: string | null | undefined; // undefined = unchecked; null 
 function isExecutableFile(p: string): boolean {
 	try {
 		const st = fs.statSync(p);
-		return st.isFile();
+		if (!st.isFile()) return false;
+		if (process.platform === "win32") return true;
+		fs.accessSync(p, fs.constants.X_OK);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function isChromiumExecutable(p: string): Promise<boolean> {
+	if (!isExecutableFile(p)) return false;
+	try {
+		const proc = Bun.spawn([p, "--version"], {
+			stdout: "pipe",
+			stderr: "ignore",
+		});
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		return proc.exitCode === 0 && /Chrom|Edg/i.test(stdout);
 	} catch {
 		return false;
 	}
@@ -278,13 +296,13 @@ function systemChromiumCandidates(
 	return candidates;
 }
 
-function resolveSystemChromium(): string | undefined {
+async function resolveSystemChromium(): Promise<string | undefined> {
 	if (resolvedChromium !== undefined) return resolvedChromium ?? undefined;
 	const seen = new Set<string>();
 	for (const candidate of systemChromiumCandidates()) {
 		if (!candidate || seen.has(candidate)) continue;
 		seen.add(candidate);
-		if (isExecutableFile(candidate)) {
+		if (await isChromiumExecutable(candidate)) {
 			resolvedChromium = candidate;
 			logger.debug("Using system Chrome/Chromium", { path: candidate });
 			return candidate;
@@ -892,6 +910,10 @@ export function systemChromiumCandidatesForTest(
 	which?: (name: string) => string | null | undefined,
 ): string[] {
 	return systemChromiumCandidates(platform, home, which);
+}
+
+export async function chromiumExecutableProbeForTest(executablePath: string): Promise<boolean> {
+	return isChromiumExecutable(executablePath);
 }
 
 export function stealthIgnoreDefaultArgsForTest(executablePath: string | undefined): string[] {
