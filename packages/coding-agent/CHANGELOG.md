@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Stopped the Read tool from advertising or resolving `memory://` when `memory.backend` is `off`, preventing agents from probing a disabled subsystem ([#7673](https://github.com/can1357/oh-my-pi/issues/7673)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
