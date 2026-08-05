@@ -105,8 +105,8 @@ describe("central logger runtime closure", () => {
 			await fs.readFile(path.resolve(import.meta.dir, "../../..", "package.json"), "utf8"),
 		) as { workspaces?: { catalog?: Record<string, string> } };
 		expect(rootPackage.workspaces?.catalog?.["winston-daily-rotate-file"]).toBe("5.0.0");
-		expect(Bun.resolveSync("winston-daily-rotate-file/daily-rotate-file.js", import.meta.dir)).toEndWith(
-			"/winston-daily-rotate-file/daily-rotate-file.js",
-		);
+		expect(
+			Bun.resolveSync("winston-daily-rotate-file/daily-rotate-file.js", import.meta.dir).replaceAll("\\", "/"),
+		).toEndWith("/winston-daily-rotate-file/daily-rotate-file.js");
 	});
 });

@@ -159,12 +159,14 @@ console.log(JSON.stringify({ id: TERMINAL_ID, imageProtocol: TERMINAL.imageProto
 		expect(exitCode).toBe(0);
 		const resolved = JSON.parse(stdout) as { id: string; imageProtocol: string | null; expected: string };
 		expect(resolved.id).toBe("warp");
-		expect(resolved.imageProtocol).toBe(resolved.expected);
+		// Warp for Windows lacks Kitty graphics support.
+		expect(resolved.imageProtocol).toBe(process.platform === "win32" ? null : resolved.expected);
 	});
 
 	it("is Kitty-capable with true color but no OSC 8 hyperlinks", () => {
 		const warp = getTerminalInfo("warp");
-		expect(warp.imageProtocol).toBe(ImageProtocol.Kitty);
+		// Warp for Windows lacks Kitty graphics support.
+		expect(warp.imageProtocol).toBe(process.platform === "win32" ? null : ImageProtocol.Kitty);
 		expect(warp.trueColor).toBe(true);
 		expect(warp.hyperlinks).toBe(false);
 		expect(warp.notifyProtocol).toBe(NotifyProtocol.Osc9);
