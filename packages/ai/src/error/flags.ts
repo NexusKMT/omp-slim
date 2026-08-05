@@ -430,7 +430,10 @@ export function classify(error: unknown, api?: Api): number {
 			if (code === "overloaded_error" || code === "rate_limit_error") {
 				linkKinds |= Flag.Transient;
 			}
-			if (codeStatus === 401 || codeStatus === 403) {
+			if (
+				(codeStatus === 401 || codeStatus === 403) &&
+				!(codeStatus === 403 && parseRateLimitReason(link.message) === "CONCURRENT_LIMIT")
+			) {
 				linkKinds |= Flag.AuthFailed;
 			} else if (codeStatus === 429) {
 				if ((linkKinds & Flag.UsageLimit) === 0) {

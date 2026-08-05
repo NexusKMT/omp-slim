@@ -65,6 +65,8 @@ describe("parseRateLimitReason", () => {
 		expect(parseRateLimitReason("concurrent_limit_exceeded")).toBe("CONCURRENT_LIMIT");
 		expect(parseRateLimitReason("concurrent_requests_limit_reached")).toBe("CONCURRENT_LIMIT");
 		expect(parseRateLimitReason("concurrency_quota_exceeded")).toBe("CONCURRENT_LIMIT");
+		expect(parseRateLimitReason("Too many concurrent requests")).toBe("CONCURRENT_LIMIT");
+		expect(parseRateLimitReason("Too many concurrent invocations")).toBe("CONCURRENT_LIMIT");
 		expect(parseRateLimitReason("Rate limit reached for gpt-4o")).toBe("RATE_LIMIT_EXCEEDED");
 		expect(parseRateLimitReason("Your quota will reset at 07-28")).toBe("QUOTA_EXHAUSTED");
 	});
@@ -351,6 +353,9 @@ describe("isUsageLimitOutcome", () => {
 		expect(isConcurrencyCapExclusion(undefined, message)).toBe(true);
 		expect(isConcurrencyCapExclusion(402, message)).toBe(false);
 		expect(isConcurrencyCapExclusion(403, "Forbidden")).toBe(false);
+		const classified = classify(new ProviderHttpError(message, 403));
+		expect(is(classified, Flag.AuthFailed)).toBe(false);
+		expect(is(classified, Flag.Transient)).toBe(true);
 	});
 
 	// The same bare concurrency wording can reach turn recovery without a

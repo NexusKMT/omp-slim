@@ -29,13 +29,10 @@ const OPENROUTER_DAILY_FREE_LIMIT_PATTERN = /\bfree[-_ ]models[-_ ]per[-_ ]day\b
 // model capacity, while quota/rate-limit/server wording remains authoritative.
 const RESOURCE_EXHAUSTED_PATTERN = /resource.?exhausted/gi;
 const CONCURRENT_LIMIT_PATTERN =
-	// Require an actual cap signal (limit/quota/exceeded/reached) near "concurrent".
-	// The first two alternatives rely on `\b`, which treats `_` as a word char, so
-	// structured snake_case codes ("concurrent_limit_exceeded",
-	// "concurrent_requests_limit_reached", "concurrency_quota_exceeded") need the
-	// third alternative. Bare space-separated concurrency feature rejections stay
-	// excluded because they neither use `[-_]` nor carry a cap keyword.
-	/\bconcurren\w*\b[^\n]{0,60}\b(?:limit|quota|exceed\w*|reach\w*)\b|\b(?:limit|quota|exceed\w*|reach\w*)\b[^\n]{0,60}\bconcurren\w*\b|\bconcurren[a-z]*[-_](?:[a-z]+[_-])*(?:limit|quota|exceed\w*|reach\w*)/i;
+	// Require an actual cap signal near "concurrent". "Too many concurrent
+	// requests" is itself a cap signal; bare feature rejections such as
+	// "concurrent invocation is not supported" remain excluded.
+	/\btoo many\s+concurren\w*\s+(?:requests?|invocations?)\b|\bconcurren\w*\b[^\n]{0,60}\b(?:limit|quota|exceed\w*|reach\w*)\b|\b(?:limit|quota|exceed\w*|reach\w*)\b[^\n]{0,60}\bconcurren\w*\b|\bconcurren[a-z]*[-_](?:[a-z]+[_-])*(?:limit|quota|exceed\w*|reach\w*)/i;
 const ACCOUNT_SCOPED_403_PATTERN =
 	// The bare "limit will reset" / "will reset in" phrasing also appears on
 	// statusless per-minute transients ("Rate limit will reset in 30 seconds"),

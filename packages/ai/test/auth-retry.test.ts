@@ -275,7 +275,7 @@ describe("withAuth", () => {
 		expect(contexts.map(ctx => ctx.lastChance)).toEqual([false, true, true, true]);
 	});
 
-	it("does not directly rotate through every sibling on a 403 concurrency cap", async () => {
+	it("leaves a 403 concurrency cap to the transient retry layer", async () => {
 		const keys: string[] = [];
 		const contexts: ApiKeyResolveContext[] = [];
 		const pool = ["k0", "k1", "k2", "k3"];
@@ -295,10 +295,10 @@ describe("withAuth", () => {
 			),
 		).rejects.toBe(concurrencyCap);
 
-		// The concurrency classification takes precedence over plain-403 direct
-		// rotation: refresh once, then take only the legacy sibling switch.
-		expect(keys).toEqual(["k0", "k1", "k2"]);
-		expect(contexts.map(ctx => ctx.lastChance)).toEqual([false, false, true]);
+		// The outer transient retry/backoff layer owns concurrency caps. The auth
+		// retry layer must not refresh or select a sibling credential.
+		expect(keys).toEqual(["k0"]);
+		expect(contexts.map(ctx => ctx.lastChance)).toEqual([false]);
 	});
 
 	it("surfaces the last 403 when every sibling is denied", async () => {
