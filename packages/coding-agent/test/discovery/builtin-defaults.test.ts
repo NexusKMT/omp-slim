@@ -6,7 +6,12 @@
  */
 import { describe, expect, it } from "bun:test";
 import { getCapability } from "@oh-my-pi/pi-coding-agent/capability";
-import { BUILTIN_DEFAULTS_PROVIDER_ID, type Rule, ruleCapability } from "@oh-my-pi/pi-coding-agent/capability/rule";
+import {
+	BUILTIN_DEFAULTS_PROVIDER_ID,
+	compileRuleCondition,
+	type Rule,
+	ruleCapability,
+} from "@oh-my-pi/pi-coding-agent/capability/rule";
 import type { LoadContext } from "@oh-my-pi/pi-coding-agent/capability/types";
 // Register all discovery providers as a side effect.
 import "@oh-my-pi/pi-coding-agent/discovery";
@@ -181,20 +186,20 @@ describe("builtin-defaults rule provider", () => {
 			}),
 		).toEqual([]);
 	});
-	it("opens every bundled regex condition that uses a bare line anchor with a translatable inline flag", async () => {
-		// Without the (?m)/(?s) inline flags a bare ^ or $ anchors to the
-		// absolute start/end of input, so a rule whose condition is anchored to
-		// a line silently stops matching in real files (see #6890). Enforce the
-		// pairing at load time so the failure class stays closed.
+	it("opens every bundled regex condition that uses a bare line anchor with the multiline inline flag", async () => {
+		// Without the (?m) inline flag a bare ^ or $ anchors to the absolute
+		// start/end of input, so a rule whose condition is anchored to a line
+		// silently stops matching in real files (see #6890). Enforce the pairing
+		// at load time so the failure class stays closed.
 		const rules = await loadBuiltinRules();
 		for (const rule of rules) {
 			for (const condition of rule.condition ?? []) {
 				const outsideCharClasses = condition.replace(/\[[^\]]*\]/g, "");
 				const hasBareAnchor = /(^|[^\\])[\^$]/.test(outsideCharClasses);
-				const opensWithTranslatableFlag = /^\(\?[ims]+\)/.test(condition);
+				const hasMultilineSemantics = compileRuleCondition(condition).multiline;
 				expect(
-					hasBareAnchor ? opensWithTranslatableFlag : true,
-					`${rule.name}: a condition with a bare ^ or $ anchor must open with a translatable inline flag`,
+					hasBareAnchor ? hasMultilineSemantics : true,
+					`${rule.name}: a condition with a bare ^ or $ anchor must open with the multiline inline flag`,
 				).toBe(true);
 			}
 		}
