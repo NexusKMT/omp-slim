@@ -36,6 +36,9 @@
 ### Fixed
 
 - Reported Wayland per-window native input and window activation as unavailable instead of advertising a foreground-delivery path that compositors reject. ([#7702](https://github.com/can1357/oh-my-pi/issues/7702))
+### Fixed
+
+- Fixed approved plans hiding live execution progress: after the fullscreen Plan Review closed, the conversation view stayed blank/stale while the plan executed. The propose write's `tool_execution_end` handler ran inside the event-controller's serialized dispatch chain and awaited `handlePlanApproval`, which awaits `session.prompt` for the entire execution turn — so every later `agent_start`/`message_start`/tool/`message_update` event queued behind it until the run finished. The approval dispatch is now detached from the dispatch chain, so the turn's events render live ([#7684](https://github.com/can1357/oh-my-pi/issues/7684)).
 
 ## [17.2.9] - 2026-08-05
 

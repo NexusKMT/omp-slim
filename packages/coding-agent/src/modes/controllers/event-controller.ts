@@ -1605,11 +1605,29 @@ export class EventController {
 				typeof details.title === "string" &&
 				typeof details.planExists === "boolean"
 			) {
-				await this.ctx.handlePlanApproval({
-					planFilePath: details.planFilePath,
-					title: details.title,
-					planExists: details.planExists,
-				});
+				// Dispatch the approval WITHOUT blocking the serialized event
+				// dispatch chain. `handlePlanApproval` -> `#approvePlan` awaits
+				// `session.prompt` for the ENTIRE approved-execution turn; awaiting
+				// it here (this handler runs inside `#runSerialized`) would hold the
+				// single dispatch link for the whole run, so the run's own
+				// agent_start / message_start / tool / coalesced message_update
+				// events queue behind it on `#dispatchTail` and the chat stays blank
+				// until execution finishes (issue #7684, follow-up to #5688 which
+				// only closed the overlay). Detaching frees the link the moment this
+				// handler returns; the approval overlay and the turn's live events
+				// then render. The approval flow surfaces its own failures via
+				// `showError`, so only an unexpected rejection is logged here.
+				void this.ctx
+					.handlePlanApproval({
+						planFilePath: details.planFilePath,
+						title: details.title,
+						planExists: details.planExists,
+					})
+					.catch(err => {
+						logger.warn("Plan approval dispatch failed", {
+							error: err instanceof Error ? err.message : String(err),
+						});
+					});
 			}
 		}
 	}
