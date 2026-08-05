@@ -3127,7 +3127,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				task,
 				tools: session.getActiveToolNames(),
 				agent: agent.name,
-				modelRole: modelRole ?? resolveExplicitModelRole(agent.model, subagentSettings),
+				modelRole: modelRole ?? resolveExplicitModelRole(modelOverride ?? agent.model, subagentSettings),
 				resolvedModel: progress.resolvedModel,
 				readOnly: isReadOnlyAgent(agent),
 				spawns: spawnsEnv,
