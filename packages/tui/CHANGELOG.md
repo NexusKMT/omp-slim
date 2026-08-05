@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.9] - 2026-08-05
+
 ### Fixed
 
 - Fixed table borders (and adjacent cells) inheriting an open inline-code color when a cell's content wraps mid-code-span, by terminating each wrapped cell line's SGR state before the border glyphs ([#7575](https://github.com/can1357/oh-my-pi/issues/7575)).

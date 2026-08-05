@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.9] - 2026-08-05
+
 ### Added
 
 - Added a public `compareVersions` utility (`@oh-my-pi/pi-utils`) that compares two version strings with SemVer-2.0 prerelease ordering, build-metadata stripping, and numeric segment comparison without float overflow; never throws.
