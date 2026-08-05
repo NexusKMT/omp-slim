@@ -424,23 +424,22 @@ function isGlobalRequireCall(node: StructuralAstNode | null, scope: BindingScope
 }
 
 /**
- * Whether `node` is a `createRequire(...)` factory call — either the bare
- * `createRequire` identifier (as imported from `node:module`) or a
- * `<ns>.createRequire(...)` member call. The invoked result is a CommonJS
- * `require`, so `createRequire(base)(spec)` must be rewritten like a plain
- * `require(spec)`: a compiled binary cannot resolve runtime `node_modules`
- * from the returned require (see file header), so the specifier is pinned to
- * an absolute path at load time. Not shadow-tracked — the legitimate
- * `import { createRequire }` binds the name, so treating that as a shadow
- * would defeat the detection.
+ * Whether `node` is a `createRequire(...)` factory call imported from
+ * `node:module` (or its `module` alias).
  */
-function isCreateRequireInvocation(node: StructuralAstNode | null): boolean {
+function isCreateRequireInvocation(
+	node: StructuralAstNode | null,
+	createRequireBindings: ReadonlySet<string>,
+	moduleNamespaceBindings: ReadonlySet<string>,
+): boolean {
 	if (node?.type !== "CallExpression") return false;
 	const callee = asAstNode(node.callee);
-	return (
-		isIdentifier(callee, "createRequire") ||
-		(callee?.type === "MemberExpression" && staticMemberPropertyName(callee) === "createRequire")
-	);
+	if (callee?.type === "Identifier" && typeof callee.name === "string") {
+		return createRequireBindings.has(callee.name);
+	}
+	if (callee?.type !== "MemberExpression" || staticMemberPropertyName(callee) !== "createRequire") return false;
+	const object = asAstNode(callee.object);
+	return object?.type === "Identifier" && typeof object.name === "string" && moduleNamespaceBindings.has(object.name);
 }
 
 function staticMemberPropertyName(node: StructuralAstNode): string | null {
@@ -478,6 +477,28 @@ function collectExtensionSpecifierReferences(
 			references.push({ kind, specifier: node.value, start: node.start, end: node.end });
 		}
 	};
+	const createRequireBindings = new Set<string>();
+	const moduleNamespaceBindings = new Set<string>();
+	for (const { node } of collectScopedAstNodes(ast, (candidate) => candidate.type === "ImportDeclaration")) {
+		const source = asAstNode(node.source);
+		if (source?.type !== "StringLiteral" || (source.value !== "node:module" && source.value !== "module")) continue;
+		for (const value of Array.isArray(node.specifiers) ? node.specifiers : []) {
+			const specifier = asAstNode(value);
+			const local = asAstNode(specifier?.local);
+			if (local?.type !== "Identifier" || typeof local.name !== "string") continue;
+			if (specifier?.type === "ImportNamespaceSpecifier") {
+				moduleNamespaceBindings.add(local.name);
+			} else if (specifier?.type === "ImportSpecifier") {
+				const imported = asAstNode(specifier.imported);
+				if (
+					(imported?.type === "Identifier" && imported.name === "createRequire") ||
+					(imported?.type === "StringLiteral" && imported.value === "createRequire")
+				) {
+					createRequireBindings.add(local.name);
+				}
+			}
+		}
+	}
 	for (const { node, scope } of collectScopedAstNodes(ast, isSpecifierReferenceNode)) {
 		if (
 			node.type === "ImportDeclaration" ||
@@ -498,7 +519,7 @@ function collectExtensionSpecifierReferences(
 				record("import", nodeArgument(node, 0));
 			} else if (isIdentifier(callee, "require") && !scopeHasBinding(scope, REQUIRE_BINDING)) {
 				record("require", nodeArgument(node, 0));
-			} else if (isCreateRequireInvocation(callee)) {
+			} else if (isCreateRequireInvocation(callee, createRequireBindings, moduleNamespaceBindings)) {
 				// `createRequire(base)(spec)` — pin the invoked bare dependency so it
 				// loads without a runtime `node_modules` lookup. Relative specifiers
 				// resolve against `base`, which is not rewritten, so restrict to bare.
