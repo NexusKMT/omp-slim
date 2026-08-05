@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- Replaced `marked` with `@oh-my-pi/pi-utils/marked`
+
 ## [17.2.2] - 2026-07-31
 
 ### Fixed

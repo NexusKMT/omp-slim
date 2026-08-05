@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { $which, getPuppeteerDir, logger, removeWithRetries } from "@oh-my-pi/pi-utils";
-import type * as BrowsersNs from "@puppeteer/browsers";
+import type * as BrowsersNs from "@oh-my-pi/pi-utils/browsers";
 import type { Browser, CDPSession, Page, default as Puppeteer, Target } from "puppeteer-core";
 import stealthTamperingScript from "../puppeteer/00_stealth_tampering.txt" with { type: "text" };
 import stealthActivityScript from "../puppeteer/01_stealth_activity.txt" with { type: "text" };
@@ -115,7 +115,7 @@ export async function loadPuppeteerInWorker(safeDir: string): Promise<typeof Pup
 let browsersModule: typeof BrowsersNs | undefined;
 async function loadBrowsers(): Promise<typeof BrowsersNs> {
 	if (!browsersModule) {
-		browsersModule = await import("@puppeteer/browsers");
+		browsersModule = await import("@oh-my-pi/pi-utils/browsers");
 	}
 	return browsersModule;
 }
@@ -166,13 +166,13 @@ export async function ensureChromiumExecutable(): Promise<string | undefined> {
 			buildId,
 			cacheDir,
 			platform,
-			downloadProgressCallback: (downloaded, total) => {
-				if (total <= 0) return;
-				const pct = Math.floor((downloaded / total) * 100);
-				if (pct >= lastReportedPercent + 10 || downloaded === total) {
+			downloadProgressCallback: ({ downloadedBytes, totalBytes }) => {
+				if (totalBytes <= 0) return;
+				const pct = Math.floor((downloadedBytes / totalBytes) * 100);
+				if (pct >= lastReportedPercent + 10 || downloadedBytes === totalBytes) {
 					lastReportedPercent = pct;
 					logger.debug(
-						`Chromium download: ${pct}% (${Math.round(downloaded / 1_000_000)} / ${Math.round(total / 1_000_000)} MB)`,
+						`Chromium download: ${pct}% (${Math.round(downloadedBytes / 1_000_000)} / ${Math.round(totalBytes / 1_000_000)} MB)`,
 					);
 				}
 			},

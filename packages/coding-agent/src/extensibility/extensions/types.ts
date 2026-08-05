@@ -8,7 +8,7 @@
  * - Interact with the user via UI primitives
  */
 
-import type { Type as arktype } from "@oh-my-pi/omptype";
+import type { type as ArkType } from "@oh-my-pi/omptype";
 import type * as TypeBox from "@oh-my-pi/omptype/typebox";
 import type * as zod from "@oh-my-pi/omptype/zod";
 import type {
@@ -1109,12 +1109,13 @@ export interface ExtensionAPI {
 	/** File logger for error/warning/debug messages */
 	logger: typeof PiLogger;
 
-	/** Injected zod-backed typebox shim for legacy `Type.Object(...)` parameter authoring. */
+	/** Injected TypeBox shim for legacy `Type.Object(...)` parameter authoring. */
 	typebox: typeof TypeBox;
 
-	/** Injected arktype module for arktype-authored extension tools (canonical going forward). */
-	arktype: typeof arktype;
-	/** Injected omptype-backed zod facade for extension tool parameter schemas. */
+	/** Injected omptype schema builder for extension tools. */
+	arktype: typeof ArkType;
+
+	/** Injected Zod-compatible omptype builder for extension tools. */
 	zod: typeof zod;
 
 	/** Injected pi-coding-agent exports for accessing SDK utilities */

@@ -26,7 +26,7 @@ import {
 	readImageMetadata,
 	untilAborted,
 } from "@oh-my-pi/pi-utils";
-import { LRUCache } from "lru-cache/raw";
+import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import {
 	canonicalSnapshotKey,
 	getFileSnapshotStore,

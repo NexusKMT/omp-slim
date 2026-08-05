@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+- Added zero-dependency in-house modules replacing external packages, each importable as `@oh-my-pi/pi-utils/<module>`: `acp` (Agent Client Protocol), `browsers` (Chrome for Testing discovery/install), `chalk` (ANSI styling), `dates` (date formatting), `dom` (HTML parser + WHATWG DOM subset + CSS selectors), `docx` (DOCX to HTML), `headers` (browser header generation), `lru` (LRU cache), `marked` (GFM markdown lexer/parser), `readability` (article extraction), `template` (Handlebars-compatible templating), `turndown` (HTML to Markdown), `vterm` (headless terminal emulator), `xml` (XML parser)
+
+### Changed
+- Rewrote the logger file backend in-house with identical line format, daily rotation, and pruning
+
+### Removed
+- Removed `handlebars`, `winston`, and `winston-daily-rotate-file` dependencies
+
 ## [17.2.9] - 2026-08-05
 
 ### Added

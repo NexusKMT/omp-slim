@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- Replaced `marked`, `lru-cache`, and dev `chalk` with `@oh-my-pi/pi-utils` modules (`marked`, `lru`, `chalk`)
+
 ## [17.2.9] - 2026-08-05
 
 ### Fixed

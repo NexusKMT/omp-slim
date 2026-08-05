@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- Migrated GitLab Duo Workflow discovery schemas from zod to omptype and removed the `zod` dependency
+
 ## [17.2.9] - 2026-08-05
 
 ### Fixed

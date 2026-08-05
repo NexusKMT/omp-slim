@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
+import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Message, ThinkingContent } from "@oh-my-pi/pi-ai";
-import { z } from "@oh-my-pi/pi-ai";
 import { createMockModel, type MockContent, type MockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -16,10 +16,10 @@ import { RewindTool, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
-const checkpointSchema = z.object({ goal: z.string() });
-const rewindSchema = z.object({ report: z.string() });
+const checkpointSchema = type({ goal: type("string") });
+const rewindSchema = type({ report: type("string") });
 
-const xdevWriteSchema = z.object({ path: z.string(), content: z.string() });
+const xdevWriteSchema = type({ path: type("string"), content: type("string") });
 
 const xdevWriteTool: AgentTool<typeof xdevWriteSchema, unknown> = {
 	name: "write",

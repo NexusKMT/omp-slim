@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+- Replaced the re-exported zod API with the omptype-backed zod-compat facade (`@oh-my-pi/omptype/zod`); plugins keep the zod-style builder surface while real-zod-specific APIs are gone
+
+### Changed
+- Replaced external dependencies with `@oh-my-pi/pi-utils` modules: `@agentclientprotocol/sdk` -> `acp` (also drops the package patch), `@mozilla/readability` -> `readability`, `@puppeteer/browsers` -> `browsers`, `@xterm/headless` -> `vterm`, `chalk` -> `chalk`, `fast-xml-parser` -> `xml`, `header-generator` -> `headers`, `linkedom` -> `dom`, `lru-cache` -> `lru`, `mammoth` -> `docx`, `turndown` and `turndown-plugin-gfm` -> `turndown`, and dev `marked` -> `marked`
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
