@@ -30,6 +30,9 @@
 ### Fixed
 
 - Fixed `pi.getAllTools()` returning bare tool-name strings instead of `ToolInfo[]`, which crashed extensions authored against the upstream `@earendil-works/pi-coding-agent` contract (e.g. gentle-pi's startup banner: `undefined is not an object (evaluating 't.sourceInfo.source')`). The ExtensionAPI now returns `{ name, description, parameters, promptGuidelines, sourceInfo }` objects with `sourceInfo.source` classifying each tool as `builtin`/`sdk`/`mcp`/`extension` ([#7732](https://github.com/can1357/oh-my-pi/issues/7732)).
+### Fixed
+
+- Fixed legacy Pi extensions failing to install/load in compiled binaries when they resolve a bundled dependency through the `createRequire(base)(spec)` factory form (e.g. `gentle-pi` loading `@heyhuynhgiabuu/pi-pretty`): the shim only rewrote static `require()`/`import` specifiers, so the `createRequire` argument stayed bare and fell through to native `node_modules` resolution, which is unavailable under `--compile`. The load-time rewriter now pins the invoked bare dependency to an absolute path like a plain `require()` ([#7728](https://github.com/can1357/oh-my-pi/issues/7728)).
 
 ## [17.2.9] - 2026-08-05
 
