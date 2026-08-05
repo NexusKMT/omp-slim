@@ -25,6 +25,9 @@
 ### Fixed
 
 - WSL host-home resolution now builds `/mnt/<drive>/...` fallback paths with POSIX semantics regardless of the host platform, instead of the platform-dependent `path` module ([#3779](https://github.com/can1357/oh-my-pi/issues/3779)).
+### Fixed
+
+- Fixed Python eval shell helpers (`!cmd`, `%%bash`, `%pip`) letting child processes inherit the runner's stdin — the host's NDJSON control channel — which could steal protocol frames and deadlocked nested interpreters on Windows; children now get `stdin=DEVNULL`. `%%bash` also resolves Git Bash on Windows instead of hardcoding `/bin/bash`.
 
 ## [17.2.9] - 2026-08-05
 
