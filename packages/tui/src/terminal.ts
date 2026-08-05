@@ -1107,7 +1107,13 @@ export class ProcessTerminal implements Terminal {
 				const reportedFlags = parseInt(match[1]!, 10);
 				this.#kittyProtocolActive = true;
 				setKittyProtocolActive(true);
-				if ((reportedFlags & 2) !== 0) {
+				if (isConPTYHosted()) {
+					// ConPTY (native Windows and WSL) drops Shift+letter keypresses
+					// entirely when flag 4 (report alternate keys) is set. Use flag 1
+					// (disambiguate only), preserving flag 2 if already active.
+					this.#kittyEnableSeq = (reportedFlags & 2) !== 0 ? "\x1b[>3u" : "\x1b[>1u";
+					this.#safeWrite(this.#kittyEnableSeq);
+				} else if ((reportedFlags & 2) !== 0) {
 					// Preserve event-type reporting already enabled by a parent app.
 					// Push level-2 to keep its shortcuts reporting consistently.
 					this.#kittyEnableSeq = "\x1b[>7u";
