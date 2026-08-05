@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed Linux desktop notifications being disabled when `DBUS_SESSION_BUS_ADDRESS` is unset but the systemd user bus is available at `$XDG_RUNTIME_DIR/bus`.
+- hasLinuxDesktopSession() now also treats the session as reachable via the systemd user-bus socket `$XDG_RUNTIME_DIR/bus` when `DBUS_SESSION_BUS_ADDRESS` is unset, so BEL-only terminals in systemd/tmux/SSH-attached graphical sessions get desktop notifications again.
 
 ## [17.2.9] - 2026-08-05
 

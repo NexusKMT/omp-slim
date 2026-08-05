@@ -39,7 +39,7 @@ export interface DesktopNotifier {
 /**
  * Whether the current process can reach a freedesktop notification daemon:
  * Linux platform plus either a session bus address in env or the
- * `$XDG_RUNTIME_DIR/bus` user bus socket. Caller is still responsible for
+ * systemd user-bus socket at `$XDG_RUNTIME_DIR/bus`. Caller is still responsible for
  * resolving a delivery binary via {@link resolveDesktopNotifier}.
  */
 export function hasLinuxDesktopSession(
