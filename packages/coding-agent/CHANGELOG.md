@@ -34,6 +34,9 @@
 ### Fixed
 
 - Fixed Linux/X11 clipboard reads failing when `xclip` is unavailable but `xsel` is installed.
+### Fixed
+
+- Hardened Linux Chromium executable detection to reject non-executable files, non-browser wrappers, and candidates that hang during the version probe.
 
 ## [17.2.9] - 2026-08-05
 
