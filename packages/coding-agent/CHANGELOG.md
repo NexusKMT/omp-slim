@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- WSL host-home resolution now builds `/mnt/<drive>/...` fallback paths with POSIX semantics regardless of the host platform, instead of the platform-dependent `path` module ([#3779](https://github.com/can1357/oh-my-pi/issues/3779)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
