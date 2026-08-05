@@ -32,3 +32,26 @@ test("buildSessionOptions retains explicit extensions and hooks under --no-exten
 	expect(options.disableExtensionDiscovery).toBe(true);
 	expect(options.additionalExtensionPaths).toEqual([extensionPath, hookPath]);
 });
+
+test("buildSessionOptions uses trusted extensions as the exact module allowlist", async () => {
+	const trustedPath = tempDir.join("trusted.ts");
+	await Bun.write(trustedPath, "export default function () {}");
+	const parsed = parseArgs(["--trusted-extension", trustedPath]);
+	const settings = Settings.isolated();
+	const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
+
+	const options = await buildSessionOptions(parsed, [], SessionManager.inMemory(), modelRegistry, settings);
+
+	expect(options.disableExtensionDiscovery).toBe(true);
+	expect(options.additionalExtensionPaths).toEqual([trustedPath]);
+});
+
+test("buildSessionOptions rejects trusted extension directories", async () => {
+	const parsed = parseArgs(["--trusted-extension", tempDir.path()]);
+	const settings = Settings.isolated();
+	const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
+
+	await expect(buildSessionOptions(parsed, [], SessionManager.inMemory(), modelRegistry, settings)).rejects.toThrow(
+		/module file, not a directory/,
+	);
+});
