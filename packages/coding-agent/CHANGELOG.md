@@ -39,6 +39,9 @@
 ### Fixed
 
 - Fixed approved plans hiding live execution progress: after the fullscreen Plan Review closed, the conversation view stayed blank/stale while the plan executed. The propose write's `tool_execution_end` handler ran inside the event-controller's serialized dispatch chain and awaited `handlePlanApproval`, which awaits `session.prompt` for the entire execution turn — so every later `agent_start`/`message_start`/tool/`message_update` event queued behind it until the run finished. The approval dispatch is now detached from the dispatch chain, so the turn's events render live ([#7684](https://github.com/can1357/oh-my-pi/issues/7684)).
+### Fixed
+
+- Fixed `omp -r` current-folder scope missing sessions written under the short-lived hashed project-directory scheme (17.2.5-17.2.8): the 17.2.9 revert restored the legacy path-based names but dropped all migration, stranding those sessions. `computeDefaultSessionDir` now performs a one-way migration of the hashed dir back into its legacy name ([#7677](https://github.com/can1357/oh-my-pi/issues/7677)).
 
 ## [17.2.9] - 2026-08-05
 
