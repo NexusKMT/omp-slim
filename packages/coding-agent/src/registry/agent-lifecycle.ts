@@ -21,8 +21,9 @@
  */
 
 import * as fs from "node:fs/promises";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger, untilAborted } from "@oh-my-pi/pi-utils";
 import type { AgentSession } from "../session/agent-session";
+import { trackLateCleanup } from "../utils/late-cleanup";
 import {
 	type AgentRef,
 	type AgentRefExpectation,
@@ -33,6 +34,8 @@ import {
 } from "./agent-registry";
 
 export type AgentReviver = (expected: AgentRef) => Promise<AgentSession>;
+
+const AGENT_RELEASE_GRACE_MS = 5000;
 
 async function persistAgentTombstone(sessionFile: string): Promise<void> {
 	try {
@@ -409,11 +412,26 @@ export class AgentLifecycleManager {
 	}
 
 	/** Teardown everything (process exit / main session dispose). */
-	async dispose(): Promise<void> {
+	async dispose(deadlineAt: number = Date.now() + AGENT_RELEASE_GRACE_MS): Promise<void> {
 		this.#unsubscribe?.();
 		this.#unsubscribe = undefined;
 		const ids = [...new Set([...this.#adopted.keys(), ...this.#parks.keys()])];
-		await Promise.all(ids.map(id => this.release(id)));
+		await Promise.all(
+			ids.map(async id => {
+				const release = this.release(id).then(() => {});
+				try {
+					await untilAborted(AbortSignal.timeout(Math.max(0, deadlineAt - Date.now())), () => release);
+				} catch (error) {
+					if (Date.now() >= deadlineAt) {
+						trackLateCleanup(release, { id, resource: "adopted-agent" });
+					}
+					logger.warn("Agent cleanup exceeded its deadline", {
+						id,
+						error: error instanceof Error ? error.message : String(error),
+					});
+				}
+			}),
+		);
 		this.#revivals.clear();
 		this.#parks.clear();
 		this.#persistedReviverFactory = undefined;

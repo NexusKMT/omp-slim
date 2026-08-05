@@ -162,6 +162,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 
 	// Table state
 	#rows: AgentRef[] = [];
+	#statusCounts: Record<AgentStatus, number> = { running: 0, idle: 0, parked: 0, aborted: 0 };
 	#selectedRow = 0;
 	#hoveredRow: number | null = null;
 	/** Per-render screen-line to agent-row map, shared by click and hover routing. */
@@ -189,7 +190,6 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		reportedAgents: 0,
 		activeDurationAgents: 0,
 	};
-	#statusCounts: Record<AgentStatus, number> = { running: 0, idle: 0, parked: 0, aborted: 0 };
 	#childrenByParent = new Map<string, AgentRef[]>();
 	/** Transcript-derived fallback stats are sampled only on the bounded age cadence. */
 	#sessionMetrics = new WeakMap<object, { metrics: AgentMetrics | undefined }>();
@@ -283,7 +283,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	}
 
 	/** Tear down every subscription and timer. Called by the overlay owner on close. */
-	dispose(): void {
+	override dispose(): void {
 		if (this.#disposed) return;
 		this.#disposed = true;
 		for (const unsubscribe of this.#unsubscribers.splice(0)) unsubscribe();
@@ -607,7 +607,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	#renderRosterWindow(
 		width: number,
 		budget: number,
-		observedById: ReadonlyMap<string, ObservableSession>,
+		_observedById: ReadonlyMap<string, ObservableSession>,
 	): RosterRender {
 		const lines: string[] = [];
 		const hitRows: Array<number | undefined> = [];
@@ -619,7 +619,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 				this.#rows[index],
 				index === this.#selectedRow,
 				width,
-				observedById.get(this.#rows[index].id),
+				this.#observableFor(this.#rows[index].id),
 				index === this.#hoveredRow,
 			);
 			rendered.set(index, entry);
@@ -749,14 +749,18 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		this.#hasFallbackLiveSessions = result.hasFallbackLiveSessions;
 	}
 
+	#observableFor(id: string): ObservableSession | undefined {
+		return this.#observedById.get(id) ?? this.#observers.getSession(id);
+	}
+
 	#renderDetailPanel(
 		ref: AgentRef | undefined,
 		width: number,
 		rows: number,
-		observedById: ReadonlyMap<string, ObservableSession>,
+		_observedById: ReadonlyMap<string, ObservableSession>,
 	): string[] {
 		if (!ref) return [theme.fg("dim", "Select an agent to inspect"), ...Array.from({ length: rows - 1 }, () => "")];
-		const observed = observedById.get(ref.id);
+		const observed = this.#observableFor(ref.id);
 		const progress = observed?.progress;
 		const metrics = this.#metricsFor(ref, observed);
 		const children = this.#childrenByParent.get(ref.id) ?? [];

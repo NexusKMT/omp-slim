@@ -199,6 +199,109 @@ describe("Agent hub row ordering", () => {
 		}
 	});
 
+	it("bounds observer lookups and entry rendering to the viewport on large rosters", () => {
+		geometry = stubStdoutGeometry(120);
+		geometry.setRows(12);
+		const agents = new AgentRegistry();
+		for (let i = 0; i < 10_000; i++) {
+			const id = `Agent-${i.toString().padStart(5, "0")}`;
+			agents.register({ id, displayName: id, kind: "sub", session: null, status: "parked" });
+		}
+
+		const observers = new SessionObserverRegistry();
+		const getSessions = vi.spyOn(observers, "getSessions");
+		const getSession = vi.spyOn(observers, "getSession");
+		const hub = new AgentHubOverlayComponent({
+			observers,
+			hubKeys: [],
+			onDone: () => {},
+			requestRender: () => {},
+			registry: agents,
+			irc: new IrcBus(agents),
+			focusAgent: async () => {},
+		});
+
+		try {
+			getSessions.mockClear();
+			getSession.mockClear();
+			const visibleIds = renderedAgentIds(hub);
+			// rows=12 → line budget 5; unknown usage is an explicit second line,
+			// so two complete entries fit while rendering remains viewport-bounded.
+			expect(visibleIds).toHaveLength(2);
+			expect(getSessions).not.toHaveBeenCalled();
+			expect(getSession.mock.calls.length).toBeLessThanOrEqual(8);
+			expect(getSession.mock.calls.length).toBeGreaterThan(0);
+
+			const text = Bun.stripANSI(hub.render(120).join("\n"));
+			expect(text).toContain("10000 parked");
+			expect(text).toMatch(/… \d+ more/);
+
+			// Moving selection re-renders only the new viewport, not the whole roster.
+			getSessions.mockClear();
+			getSession.mockClear();
+			hub.handleInput("j");
+			const afterMove = renderedAgentIds(hub);
+			expect(afterMove.length).toBeGreaterThan(0);
+			expect(afterMove.length).toBeLessThanOrEqual(2);
+			expect(afterMove).toContain(visibleIds[1]!);
+			expect(getSessions).not.toHaveBeenCalled();
+			expect(getSession.mock.calls.length).toBeLessThanOrEqual(8);
+		} finally {
+			hub.dispose();
+		}
+	});
+
+	it("sizes the lazy viewport by real entry height when rows have a task line", () => {
+		geometry = stubStdoutGeometry(120);
+		geometry.setRows(12);
+		const agents = new AgentRegistry();
+		for (let i = 0; i < 100; i++) {
+			const id = `TaskAgent-${i.toString().padStart(3, "0")}`;
+			agents.register({
+				id,
+				displayName: id,
+				kind: "sub",
+				session: null,
+				status: "parked",
+			});
+		}
+
+		const observers = new SessionObserverRegistry();
+		const getSession = vi.spyOn(observers, "getSession");
+		const hub = new AgentHubOverlayComponent({
+			observers,
+			hubKeys: [],
+			onDone: () => {},
+			requestRender: () => {},
+			registry: agents,
+			irc: new IrcBus(agents),
+			focusAgent: async () => {},
+		});
+
+		try {
+			// Force a second task line via observer metadata so entry height is 2.
+			getSession.mockImplementation((id: string) => ({
+				id,
+				kind: "subagent",
+				label: "Subagent",
+				status: "active",
+				description: `task for ${id}`,
+				lastUpdate: Date.now(),
+			}));
+			getSession.mockClear();
+			const visibleIds = renderedAgentIds(hub);
+			// Each entry is 2 lines; budget 5 → at most 2 full entries + probes.
+			expect(visibleIds.length).toBeGreaterThan(0);
+			expect(visibleIds.length).toBeLessThanOrEqual(3);
+			expect(getSession.mock.calls.length).toBeLessThanOrEqual(6);
+			const text = Bun.stripANSI(hub.render(120).join("\n"));
+			expect(text).toContain("task for");
+			expect(text).toContain(visibleIds[0]!);
+		} finally {
+			hub.dispose();
+		}
+	});
+
 	it("truncates lines and sanitizes newlines to prevent terminal wrapping", () => {
 		geometry = stubStdoutGeometry(80);
 		const agents = new AgentRegistry();
@@ -318,19 +421,17 @@ describe("Agent hub row ordering", () => {
 		agents.register({ id: "GuestAgent", displayName: "Guest Agent", kind: "sub", session: null });
 
 		const observers = new SessionObserverRegistry();
-		vi.spyOn(observers, "getSessions").mockReturnValue([
-			{
-				id: "GuestAgent",
-				kind: "subagent",
-				label: "Subagent",
-				status: "active",
-				lastUpdate: Date.now(),
-				progress: {
-					resolvedModel: "openai/gpt-4o",
-					resolvedModelIsFallback: true,
-				} as never,
-			},
-		]);
+		vi.spyOn(observers, "getSession").mockReturnValue({
+			id: "GuestAgent",
+			kind: "subagent",
+			label: "Subagent",
+			status: "active",
+			lastUpdate: Date.now(),
+			progress: {
+				resolvedModel: "openai/gpt-4o",
+				resolvedModelIsFallback: true,
+			} as never,
+		});
 
 		const hub = makeHub(agents, { observers });
 
@@ -352,19 +453,17 @@ describe("Agent hub row ordering", () => {
 		agents.register({ id: "FastAgent", displayName: "Fast Agent", kind: "sub", session });
 
 		const observers = new SessionObserverRegistry();
-		vi.spyOn(observers, "getSessions").mockReturnValue([
-			{
-				id: "FastAgent",
-				kind: "subagent",
-				label: "Subagent",
-				status: "active",
-				lastUpdate: Date.now(),
-				progress: {
-					resolvedModel: "fireworks/kimi-k2",
-					resolvedModelIsFallback: true,
-				} as never,
-			},
-		]);
+		vi.spyOn(observers, "getSession").mockReturnValue({
+			id: "FastAgent",
+			kind: "subagent",
+			label: "Subagent",
+			status: "active",
+			lastUpdate: Date.now(),
+			progress: {
+				resolvedModel: "fireworks/kimi-k2",
+				resolvedModelIsFallback: true,
+			} as never,
+		});
 
 		const hub = makeHub(agents, { observers });
 

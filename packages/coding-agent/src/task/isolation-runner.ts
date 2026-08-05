@@ -24,6 +24,7 @@ import { AgentRegistry } from "../registry/agent-registry";
 import type { ToolSession } from "../tools";
 import { generateCommitMessage } from "../utils/commit-message-generator";
 import * as git from "../utils/git";
+import { trackLateCleanup } from "../utils/late-cleanup";
 import type { ExecutorOptions } from "./executor";
 import { runSubprocess } from "./executor";
 import type { SingleResult } from "./types";
@@ -156,6 +157,7 @@ async function writeIsolationPatch(
  */
 export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<SingleResult> {
 	let handle: IsolationHandle | undefined;
+	let deferredCleanup: Promise<void> | undefined;
 	try {
 		const taskBaseline = structuredClone(opts.context.baseline);
 		handle = await ensureIsolation(opts.context.repoRoot, opts.agentId, opts.preferredBackend);
@@ -165,7 +167,12 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 			worktree: isolationDir,
 			preloadedExtensionPaths: undefined,
 			preloadedCustomToolPaths: undefined,
+			onCleanupDeferred: completion => {
+				deferredCleanup = completion;
+				opts.baseOptions.onCleanupDeferred?.(completion);
+			},
 		});
+		if (deferredCleanup) return result;
 		if (opts.mergeMode === "branch" && result.exitCode === 0) {
 			try {
 				const commitResult = await commitToBranch(
@@ -226,7 +233,18 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 		return rememberAgentArtifacts(opts.buildFailureResult(err));
 	} finally {
 		if (handle) {
-			await cleanupIsolation(handle);
+			const isolationHandle = handle;
+			if (deferredCleanup) {
+				trackLateCleanup(
+					deferredCleanup.then(() => cleanupIsolation(isolationHandle)),
+					{
+						agentId: opts.agentId,
+						resource: "isolation",
+					},
+				);
+			} else {
+				await cleanupIsolation(isolationHandle);
+			}
 		}
 	}
 }
