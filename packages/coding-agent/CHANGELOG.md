@@ -5,6 +5,13 @@
 ### Changed
 
 - Reworked the Ctrl+S Agent Hub into a responsive fullscreen roster and selected-agent inspector with aggregate status/usage, per-agent task/model/activity/usage/lineage details, roster and spawn-tree views, stable ordering, bounded large-roster rendering, asynchronous persisted-session discovery, restored task/timestamp metadata for historical agents, and consistent keyboard and mouse navigation.
+- Restored the legacy project-scoped session directory naming scheme and removed its automatic migration ([#7646](https://github.com/can1357/oh-my-pi/issues/7646)).
+
+## [17.2.8] - 2026-08-04
+
+### Changed
+
+- Upgraded the bundled omptype schema engine: intersection and pipe operators, bigint and RegExp literals in the string DSL, Standard Schema V1 interop, JSON Schema import via fromJsonSchema(), and richer union/collection error reporting.
 
 ## [17.2.7] - 2026-08-03
 
@@ -91,6 +98,16 @@
 - Fixed heavily branched conversation trees shifting linear continuations into disconnected columns.
 - Fixed plugin installation validation failures for legacy compatibility shims.
 - Removed hard-coded references to disabled or absent agents in system and tool prompts.
+- Fixed `omp setup python` to validate the same configured or discovered interpreter used by the Python eval runtime.
+
+
+### Fixed
+
+- Fixed self-update misclassifying glibc Linux hosts with an installed musl loader as musl hosts, which could download an unusable musl binary instead of the glibc release.
+
+### Fixed
+
+- Fixed a crash where opening the Agent Hub after a resume and moving the selection triggered an unbounded `ExtensionExitError` unhandled-rejection storm and exit 129. The postmortem module bound the native hard-exit at first evaluation; when the bundler deferred that evaluation into a `withHostGuard` window it froze the guard's throwing replacement, poisoning every later signal/fatal exit. The native exit is now resolved per call, and the guard stamps its replacement with the native primitive it shadows so mid-guard signals still exit ([#7393](https://github.com/can1357/oh-my-pi/issues/7393)).
 
 ## [17.2.4] - 2026-08-01
 
