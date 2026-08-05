@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed POSIX `$EDITOR` commands with quoted arguments or executable paths containing spaces being parsed incorrectly.
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
