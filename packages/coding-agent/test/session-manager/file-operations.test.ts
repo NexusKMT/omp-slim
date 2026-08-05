@@ -6,7 +6,14 @@ import type { FileEntry, SessionHeader } from "@oh-my-pi/pi-coding-agent/session
 import { findMostRecentSession, resolveResumableSession } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { loadEntriesFromFile } from "@oh-my-pi/pi-coding-agent/session/session-loader";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { getConfigRootDir, getSessionsDir, removeSyncWithRetries, Snowflake, setAgentDir } from "@oh-my-pi/pi-utils";
+import {
+	getConfigRootDir,
+	getSessionsDir,
+	removeSyncWithRetries,
+	resolveEquivalentPath,
+	Snowflake,
+	setAgentDir,
+} from "@oh-my-pi/pi-utils";
 
 describe("loadEntriesFromFile", () => {
 	let tempDir: string;
@@ -223,7 +230,7 @@ describe("SessionManager temp cwd session dirs", () => {
 		fs.mkdirSync(tempCwd, { recursive: true });
 
 		// Reconstruct the 17.2.5-17.2.8 hashed dir name (reverted PR #7397).
-		const canonicalCwd = path.resolve(tempCwd);
+		const canonicalCwd = resolveEquivalentPath(path.resolve(tempCwd));
 		const normalized = canonicalCwd.replaceAll("\\", "/");
 		const readable = path
 			.basename(canonicalCwd)
