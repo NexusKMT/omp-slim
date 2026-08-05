@@ -3698,7 +3698,7 @@ export class AuthStorage {
 	}
 
 	#isUsageLimitExhausted(limit: UsageLimit): boolean {
-		if (limit.status === "exhausted") return true;
+		if (limit.status !== undefined && limit.status !== "unknown") return limit.status === "exhausted";
 		const amount = limit.amount;
 		if (amount.usedFraction !== undefined && amount.usedFraction >= 1) return true;
 		if (amount.remainingFraction !== undefined && amount.remainingFraction <= 0) return true;
