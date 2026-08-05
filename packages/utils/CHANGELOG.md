@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Support PowerShell (`powershell.exe` / `pwsh`) as a custom `shellPath`: spawn paths now pass `-NoLogo -Command` (plus `-NoProfile` under `PI_BASH_NO_LOGIN`) instead of the POSIX `-l -c` pair, which PowerShell rejected with `The term '-l' is not recognized`.
+
 ## [17.2.9] - 2026-08-05
 
 ### Added
