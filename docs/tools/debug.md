@@ -330,7 +330,16 @@ Example `.omp/dap.json`:
 
 ## Notes
 - `packages/coding-agent/src/prompts/tools/debug.md` tells the model only one active root session is supported. Adapter-requested child sessions belong to that root tree.
-- The default JavaScript/TypeScript adapter runs vscode-js-debug’s `dapDebugServer.js` over TCP. Install it with Mason or set `JS_DEBUG_DAP_SERVER` to a release-tarball server path.
+- The default JavaScript/TypeScript adapter runs vscode-js-debug's `dapDebugServer.js` over TCP. It is **not** an npm package — `npm i -g js-debug-adapter` 404s (`js-debug-adapter` is the omp adapter id, not an installable package). Install `dapDebugServer.js` (requires `node` on `PATH`) one of these ways; the first two are auto-discovered by `resolveJsDebugServerPath()` in `packages/coding-agent/src/dap/config.ts`:
+  - Mason (`:MasonInstall js-debug-adapter`) → discovered at `~/.local/share/nvim/mason/packages/js-debug-adapter/js-debug/src/dapDebugServer.js`.
+  - Standalone release tarball, extracted so `dapDebugServer.js` lands at `~/.local/opt/js-debug/src/dapDebugServer.js`:
+    ```sh
+    curl -sL -o js-debug-dap.tar.gz \
+      https://github.com/microsoft/vscode-js-debug/releases/download/v1.117.0/js-debug-dap-v1.117.0.tar.gz
+    mkdir -p ~/.local/opt && tar -xzf js-debug-dap.tar.gz -C ~/.local/opt
+    ```
+    Replace `v1.117.0` with the latest tag from the [releases page](https://github.com/microsoft/vscode-js-debug/releases).
+  - Any other location via `JS_DEBUG_DAP_SERVER=<path-to-dapDebugServer.js>`.
 - `configurationDone` is sent automatically during root and child launch/attach handshakes and lazily before later requests if the initial handshake did not complete.
 - `startDebugging` reverse requests create recursive child sessions on the same TCP server; a stopped child becomes the target for thread-level actions.
 - `output` exposes the active session’s merged `output` event stream only; the tool does not distinguish stdout, stderr, and console categories.

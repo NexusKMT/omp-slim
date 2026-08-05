@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Clarified the JavaScript/TypeScript debug adapter install path: `js-debug-adapter` is the omp adapter id, not an npm package, so `npm i -g js-debug-adapter` 404s. The docs and the "adapter not available" message now point to the supported installs — Mason, the standalone release tarball extracted to `~/.local/opt/js-debug/` (auto-discovered), or `JS_DEBUG_DAP_SERVER` ([#7757](https://github.com/can1357/oh-my-pi/issues/7757)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
