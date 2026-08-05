@@ -8,6 +8,9 @@
 ### Changed
 - Replaced external dependencies with `@oh-my-pi/pi-utils` modules: `@agentclientprotocol/sdk` -> `acp` (also drops the package patch), `@mozilla/readability` -> `readability`, `@puppeteer/browsers` -> `browsers`, `@xterm/headless` -> `vterm`, `chalk` -> `chalk`, `fast-xml-parser` -> `xml`, `header-generator` -> `headers`, `linkedom` -> `dom`, `lru-cache` -> `lru`, `mammoth` -> `docx`, `turndown` and `turndown-plugin-gfm` -> `turndown`, and dev `marked` -> `marked`
 
+### Fixed
+
+- Fixed `/usage`, `/advisor status`, and every other panel command looking dead mid-turn. `presentCommandOutput` defers panels while the agent streams so a growing turn cannot bury them, but said nothing, and on a long multi-subagent turn the panel is minutes away. The deferral is now acknowledged in the status line. A non-terminal settle also flushes the queue: `isStreaming` is already false by then, so a command issued after an async fan-out settles used to mount ahead of the panels queued before it.
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
