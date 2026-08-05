@@ -181,9 +181,9 @@ console.log(JSON.stringify({ id: TERMINAL_ID, imageProtocol: TERMINAL.imageProto
 		const linux = getTerminalInfo("warp", "linux", {});
 		const windows = getTerminalInfo("warp", "win32", {});
 
-		expect(resolveWarpImageProtocol("darwin")).toBe(ImageProtocol.Kitty);
-		expect(resolveWarpImageProtocol("linux")).toBe(ImageProtocol.Kitty);
-		expect(resolveWarpImageProtocol("win32")).toBeNull();
+		expect(resolveWarpImageProtocol("darwin", {})).toBe(ImageProtocol.Kitty);
+		expect(resolveWarpImageProtocol("linux", {})).toBe(ImageProtocol.Kitty);
+		expect(resolveWarpImageProtocol("win32", {})).toBeNull();
 		expect(mac.imageProtocol).toBe(ImageProtocol.Kitty);
 		expect(linux.imageProtocol).toBe(ImageProtocol.Kitty);
 		expect(windows.imageProtocol).toBeNull();
