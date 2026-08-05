@@ -48,6 +48,9 @@
 ### Fixed
 
 - Fixed Shift-Tab thinking mode rendering the `off` state as a missing status-line label, making it appear that reasoning could not be disabled ([#7668](https://github.com/can1357/oh-my-pi/issues/7668)).
+### Fixed
+
+- Fixed POSIX `$EDITOR` commands with quoted arguments or executable paths containing spaces being parsed incorrectly.
 
 ## [17.2.9] - 2026-08-05
 
