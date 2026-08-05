@@ -1,6 +1,5 @@
 import { describe, expect, it } from "bun:test";
 
-
 import * as path from "node:path";
 import {
 	stealthIgnoreDefaultArgsForTest,
@@ -55,9 +54,7 @@ describe("system Chromium candidates", () => {
 		expect(candidates).toContain("/usr/bin/ungoogled-chromium");
 		expect(candidates).toContain("/usr/bin/ungoogled-chromium-browser");
 		expect(candidates).toContain(`/var/lib/flatpak/exports/bin/${UNGOOGLED_CHROMIUM_FLATPAK_ID}`);
-		expect(candidates).toContain(
-			`/home/test/.local/share/flatpak/exports/bin/${UNGOOGLED_CHROMIUM_FLATPAK_ID}`,
-		);
+		expect(candidates).toContain(`/home/test/.local/share/flatpak/exports/bin/${UNGOOGLED_CHROMIUM_FLATPAK_ID}`);
 	});
 
 	it("keeps the previously supported Linux executables", () => {
