@@ -100,12 +100,19 @@ impl Backend for WaylandBackend {
 		DesktopCapabilities {
 			backend: "wayland".to_string(),
 			display_server: Some("wayland".to_string()),
-			capture: true,
+			// The PipeWire screencast path is compiled in only under the
+			// wayland-pipewire feature; without it capture() hard-errors, so the
+			// capability report must not advertise a capture the binary cannot do.
+			capture: cfg!(feature = "wayland-pipewire"),
 			input: self.input.is_some(),
 			ax: self.ax.is_some(),
 			background_window_input: false,
 			delivery_modes: vec!["background".to_string()],
-			capture_permission: "prompt-or-granted".to_string(),
+			capture_permission: if cfg!(feature = "wayland-pipewire") {
+				"prompt-or-granted".to_string()
+			} else {
+				"unavailable".to_string()
+			},
 			input_permission: if self.input.is_some() {
 				"granted".to_string()
 			} else {
@@ -288,5 +295,27 @@ mod tests {
 	fn capabilities_do_not_advertise_foreground_delivery() {
 		let mut backend = backend_without_services();
 		assert_eq!(backend.capabilities().delivery_modes, ["background"]);
+	}
+
+	#[test]
+	#[cfg(not(feature = "wayland-pipewire"))]
+	fn capabilities_report_no_capture_without_pipewire_feature() {
+		let mut backend = WaylandBackend {
+			display:     DisplaySelector::All,
+			ax:          None,
+			ax_error:    None,
+			input:       None,
+			input_error: None,
+			displays:    Vec::new(),
+		};
+		let caps = backend.capabilities();
+		// Shipped builds compile without wayland-pipewire, so the capture path is
+		// absent; capabilities() must not advertise capture the binary cannot do.
+		assert!(!caps.capture, "capture must be false when the pipewire feature is off");
+		assert_eq!(caps.capture_permission, "unavailable");
+		let err = backend
+			.capture(&Target::Desktop, &CaptureCaps::default())
+			.expect_err("capture must fail without the pipewire feature");
+		assert_eq!(err.code.as_str(), "CaptureFailed");
 	}
 }

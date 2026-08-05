@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed per-window capture always failing on Wayland with `InvalidTarget` for window ids that omp's own `desktop.windows()` minted. The shared capture request path pre-parsed every window id as a `u64` before consulting the backend, which no composite AT-SPI Wayland id (e.g. `atspi::1.31:/org/a11y/atspi/accessible/1`) could satisfy; id validation now belongs to the backend that minted the id, matching X11/Win32/macOS behavior ([#7701](https://github.com/can1357/oh-my-pi/issues/7701)).
+- Fixed Wayland `desktop.capabilities()` reporting `capture: true` on builds compiled without the `wayland-pipewire` feature (all released binaries), where every capture call hard-fails with `CaptureFailed`. The `capture` flag and `capture_permission` now reflect the compiled-in feature ([#7700](https://github.com/can1357/oh-my-pi/issues/7700)).
 
 ## [17.2.9] - 2026-08-05
 
