@@ -437,6 +437,11 @@ describe("Agent hub row ordering", () => {
 			kind: "sub",
 			parentId: "Main",
 			session: null,
+			history: {
+				outputPath: "/tmp/Reviewer.md",
+				patchPath: "/tmp/Reviewer.patch",
+				branchName: "omp/task/Reviewer",
+			},
 		});
 		const observers = new SessionObserverRegistry();
 		vi.spyOn(observers, "getSessions").mockReturnValue([
@@ -482,6 +487,10 @@ describe("Agent hub row ordering", () => {
 			expect(rendered).toContain("31K/128K 24%");
 			expect(rendered).toContain("Registered ");
 			expect(rendered).toContain("Shared workspace · per-agent LoC not attributable");
+			expect(rendered).toContain("Output /tmp/Reviewer.md");
+			expect(rendered).toContain("Patch /tmp/Reviewer.patch");
+			hub.handleInput("\x1b[6~");
+			expect(Bun.stripANSI(hub.render(140).join("\n"))).toContain("Worktree branch omp/task/Reviewer");
 		} finally {
 			hub.dispose();
 		}

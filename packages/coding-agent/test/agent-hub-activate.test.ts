@@ -144,6 +144,28 @@ describe("Agent hub Enter activation", () => {
 		hub.dispose();
 	});
 
+	it("stops persisted discovery when the Hub is disposed", async () => {
+		using tempDir = TempDir.createSync("@omp-agent-hub-disposed-scan-");
+		const sessionFile = path.join(tempDir.path(), "main.jsonl");
+		await Bun.write(sessionFile, "");
+		await Bun.write(path.join(tempDir.path(), "main", "Worker.jsonl"), "");
+		const agents = new AgentRegistry();
+		const hub = new AgentHubOverlayComponent({
+			settings: Settings.isolated(),
+			observers: new SessionObserverRegistry(),
+			hubKeys: [],
+			onDone: () => {},
+			requestRender: () => {},
+			registry: agents,
+			irc: new IrcBus(agents),
+			sessionFile,
+		});
+
+		hub.dispose();
+		await hub.persistedSubagentsReady;
+
+		expect(agents.get("Worker")).toBeUndefined();
+	});
 	it("restores nested parent lineage after restart", async () => {
 		using tempDir = TempDir.createSync("@omp-agent-hub-persisted-tree-");
 		const sessionFile = path.join(tempDir.path(), "main.jsonl");

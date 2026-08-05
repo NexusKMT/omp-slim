@@ -107,35 +107,42 @@ function assistantMetrics(message: Record<string, unknown>): AssistantMetrics {
 	};
 }
 
-async function readPersistedAgentHistory(transcript: PersistedTranscript): Promise<AgentHistorySummary> {
+async function readPersistedAgentHistory(
+	transcript: PersistedTranscript,
+	shouldContinue: () => boolean,
+): Promise<AgentHistorySummary> {
 	const parents = new Map<string, string | undefined>();
 	const assistantById = new Map<string, AssistantMetrics>();
 	const modelChangeById = new Map<string, { model: string; role?: string; resolvedModelIsFallback: boolean }>();
 	let leafId: string | undefined;
 	let leafTimestamp: number | undefined;
 	try {
-		await visitEntriesFromFileStream(transcript.sessionFile, entry => {
-			const record = recordOf(entry);
-			if (!record) return;
-			const id = typeof record.id === "string" ? record.id : undefined;
-			if (!id) return;
-			const parentId = typeof record.parentId === "string" ? record.parentId : undefined;
-			parents.set(id, parentId);
-			leafId = id;
-			const parsedTimestamp = timestampOf(record.timestamp);
-			if (parsedTimestamp !== undefined) leafTimestamp = parsedTimestamp;
-			if (record.type === "model_change" && typeof record.model === "string") {
-				modelChangeById.set(id, {
-					model: record.model,
-					role: typeof record.role === "string" ? record.role : undefined,
-					resolvedModelIsFallback: record.resolvedModelIsFallback === true,
-				});
-				return;
-			}
-			if (record.type !== "message") return;
-			const message = recordOf(record.message);
-			if (message?.role === "assistant") assistantById.set(id, assistantMetrics(message));
-		});
+		await visitEntriesFromFileStream(
+			transcript.sessionFile,
+			entry => {
+				const record = recordOf(entry);
+				if (!record) return;
+				const id = typeof record.id === "string" ? record.id : undefined;
+				if (!id) return;
+				const parentId = typeof record.parentId === "string" ? record.parentId : undefined;
+				parents.set(id, parentId);
+				leafId = id;
+				const parsedTimestamp = timestampOf(record.timestamp);
+				if (parsedTimestamp !== undefined) leafTimestamp = parsedTimestamp;
+				if (record.type === "model_change" && typeof record.model === "string") {
+					modelChangeById.set(id, {
+						model: record.model,
+						role: typeof record.role === "string" ? record.role : undefined,
+						resolvedModelIsFallback: record.resolvedModelIsFallback === true,
+					});
+					return;
+				}
+				if (record.type !== "message") return;
+				const message = recordOf(record.message);
+				if (message?.role === "assistant") assistantById.set(id, assistantMetrics(message));
+			},
+			{ shouldContinue },
+		);
 	} catch {
 		return {};
 	}
@@ -195,6 +202,10 @@ async function readPersistedAgentHistory(transcript: PersistedTranscript): Promi
  */
 async function readPersistedAgentMetadata(sessionFile: string): Promise<PersistedAgentMetadata> {
 	const stat = fs.promises.stat(sessionFile).catch(() => undefined);
+	const artifactBase = sessionFile.slice(0, -".jsonl".length);
+	const outputPath = `${artifactBase}.md`;
+	const patchPath = `${artifactBase}.patch`;
+	const artifactFiles = Promise.all([Bun.file(outputPath).exists(), Bun.file(patchPath).exists()]);
 	let createdAt: number | undefined;
 	let activity: string | undefined;
 	let history: AgentHistorySummary = {};
@@ -239,21 +250,29 @@ async function readPersistedAgentMetadata(sessionFile: string): Promise<Persiste
 		// A readable transcript is still useful even when its optional metadata
 		// prefix is malformed.
 	}
-	const file = await stat;
+	const [file, [hasOutput, hasPatch]] = await Promise.all([stat, artifactFiles]);
 	return {
 		activity,
 		createdAt: createdAt ?? file?.birthtimeMs,
 		lastActivity: file?.mtimeMs,
-		history,
+		history: {
+			...history,
+			...(hasOutput ? { outputPath } : {}),
+			...(hasPatch ? { patchPath } : {}),
+		},
 	};
 }
 
-async function readPersistedVibeChildIds(sessionFile: string): Promise<Set<string>> {
+async function readPersistedVibeChildIds(sessionFile: string, shouldContinue: () => boolean): Promise<Set<string>> {
 	const ids = new Set<string>();
 	try {
-		await visitEntriesFromFileStream(sessionFile, entry => {
-			for (const id of persistedVibeChildIds([entry])) ids.add(id);
-		});
+		await visitEntriesFromFileStream(
+			sessionFile,
+			entry => {
+				for (const id of persistedVibeChildIds([entry])) ids.add(id);
+			},
+			{ shouldContinue },
+		);
 		return ids;
 	} catch {
 		return new Set();
@@ -264,19 +283,26 @@ async function readPersistedVibeChildIds(sessionFile: string): Promise<Set<strin
 export async function registerPersistedSubagents(
 	registry: AgentRegistry,
 	sessionFile: string | null | undefined,
+	options: { shouldContinue?: () => boolean } = {},
 ): Promise<void> {
 	if (!sessionFile?.endsWith(".jsonl")) return;
-	const vibeOwnedIds = await readPersistedVibeChildIds(sessionFile);
+	const shouldContinue = options.shouldContinue ?? (() => true);
+	if (!shouldContinue()) return;
+	const vibeOwnedIds = await readPersistedVibeChildIds(sessionFile, shouldContinue);
+	if (!shouldContinue()) return;
 	const root = sessionFile.slice(0, -6);
 	const transcripts: PersistedTranscript[] = [];
-	await registerPersistedSubagentsFromDir(registry, root, undefined, vibeOwnedIds, transcripts);
+	await registerPersistedSubagentsFromDir(registry, root, undefined, vibeOwnedIds, transcripts, shouldContinue);
+	if (!shouldContinue()) return;
 	let nextTranscript = 0;
 	const workers = Array.from({ length: Math.min(4, transcripts.length) }, async () => {
 		for (;;) {
+			if (!shouldContinue()) return;
 			const index = nextTranscript++;
 			const transcript = transcripts[index];
 			if (!transcript) return;
-			const history = await readPersistedAgentHistory(transcript);
+			const history = await readPersistedAgentHistory(transcript, shouldContinue);
+			if (!shouldContinue()) return;
 			registry.setHistory(transcript.id, history, transcript.sessionFile);
 		}
 	});
@@ -289,19 +315,24 @@ async function registerPersistedSubagentsFromDir(
 	parentId: string | undefined,
 	vibeOwnedIds: ReadonlySet<string>,
 	transcripts: PersistedTranscript[],
+	shouldContinue: () => boolean,
 ): Promise<void> {
+	if (!shouldContinue()) return;
 	let entries: fs.Dirent[];
 	try {
 		entries = await fs.promises.readdir(dir, { withFileTypes: true });
 	} catch {
 		return;
 	}
+	if (!shouldContinue()) return;
 	let entriesSinceYield = 0;
 	for (const entry of entries) {
+		if (!shouldContinue()) return;
 		if (++entriesSinceYield >= 16) {
 			entriesSinceYield = 0;
 			await Bun.sleep(0);
 		}
+		if (!shouldContinue()) return;
 		if (!entry.isFile() || !entry.name.endsWith(".jsonl") || entry.name.includes(".bak")) continue;
 		const sessionFile = path.join(dir, entry.name);
 		// The advisor transcript is observability-only: register it as a non-peer
@@ -320,9 +351,10 @@ async function registerPersistedSubagentsFromDir(
 			// user task literally named `<owner>/advisor`): leave it, skip the advisor.
 			if (existing && existing.kind !== "advisor") continue;
 			if (existing?.sessionFile !== sessionFile) {
+				const metadata = await readPersistedAgentMetadata(sessionFile);
+				if (!shouldContinue()) return;
 				// The id is reused across `/new`; refresh it to the current session's file.
 				if (existing) registry.unregister(advisorId);
-				const metadata = await readPersistedAgentMetadata(sessionFile);
 				registry.register({
 					id: advisorId,
 					displayName,
@@ -354,8 +386,10 @@ async function registerPersistedSubagentsFromDir(
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") continue;
 		}
+		if (!shouldContinue()) return;
 		if (!registry.get(id)) {
 			const metadata = await readPersistedAgentMetadata(sessionFile);
+			if (!shouldContinue()) return;
 			registry.register({
 				id,
 				displayName: id,
@@ -377,6 +411,13 @@ async function registerPersistedSubagentsFromDir(
 				lastActivity: ref?.lastActivity,
 			});
 		}
-		await registerPersistedSubagentsFromDir(registry, path.join(dir, id), id, vibeOwnedIds, transcripts);
+		await registerPersistedSubagentsFromDir(
+			registry,
+			path.join(dir, id),
+			id,
+			vibeOwnedIds,
+			transcripts,
+			shouldContinue,
+		);
 	}
 }

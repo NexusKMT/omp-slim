@@ -60,6 +60,12 @@ export interface AgentHistorySummary {
 	resolvedModelIsFallback?: boolean;
 	metrics?: AgentMetricsSummary;
 	readOnly?: boolean;
+	/** Durable task output artifact, when the executor wrote one. */
+	outputPath?: string;
+	/** Captured isolated-worktree patch, when patch capture succeeded. */
+	patchPath?: string;
+	/** Isolated branch identity, when branch-mode capture succeeded. */
+	branchName?: string;
 }
 
 export interface AgentRef {

@@ -35,7 +35,7 @@ import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
 import { type AgentRef, AgentRegistry, type AgentStatus, MAIN_AGENT_ID } from "../../registry/agent-registry";
 import { registerPersistedSubagents } from "../../registry/persisted-agents";
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
-import { truncateToWidth } from "../../tools/render-utils";
+import { shortenPath, truncateToWidth } from "../../tools/render-utils";
 import type { ObservableSession, SessionObserverRegistry } from "../session-observer-registry";
 import { theme } from "../theme/theme";
 import { matchesSelectDown, matchesSelectUp } from "../utils/keybinding-matchers";
@@ -257,7 +257,9 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 
 		this.persistedSubagentsReady = this.#remote
 			? Promise.resolve()
-			: registerPersistedSubagents(this.#registry, deps.sessionFile)
+			: registerPersistedSubagents(this.#registry, deps.sessionFile, {
+					shouldContinue: () => !this.#disposed,
+				})
 					.then(() => {
 						if (!this.#disposed) this.#refreshRows();
 					})
@@ -829,6 +831,10 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 					: "Shared workspace · per-agent LoC not attributable",
 			),
 		);
+		const artifacts = ref.history;
+		if (artifacts?.outputPath) addWrapped(`Output ${shortenPath(artifacts.outputPath)}`);
+		if (artifacts?.patchPath) addWrapped(`Patch ${shortenPath(artifacts.patchPath)}`);
+		if (artifacts?.branchName) addWrapped(`Worktree branch ${artifacts.branchName}`);
 
 		const maxScroll = Math.max(0, lines.length - rows);
 		this.#detailScrollOffset = Math.min(this.#detailScrollOffset, maxScroll);
