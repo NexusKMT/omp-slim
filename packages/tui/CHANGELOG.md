@@ -11,6 +11,9 @@
 ### Fixed
 
 - Fixed prompt autocomplete never triggering for Windows drive-absolute paths (`C:/Users/...`, `C:\Users\...`); only `/`, `./`, `../`, and `~/` prefixes were recognized.
+### Fixed
+
+- hasLinuxDesktopSession() now also treats the session as reachable via the systemd user-bus socket `$XDG_RUNTIME_DIR/bus` when `DBUS_SESSION_BUS_ADDRESS` is unset, so BEL-only terminals in systemd/tmux/SSH-attached graphical sessions get desktop notifications again.
 
 ## [17.2.9] - 2026-08-05
 
