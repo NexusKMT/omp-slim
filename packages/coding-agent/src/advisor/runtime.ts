@@ -300,8 +300,8 @@ export class AdvisorRuntime {
 	 * Model identities this refusal cascade has already tried. The cascade walks
 	 * the fallback chain to exhaustion — that is what the chain is for — but
 	 * visits each model at most once, so a chain whose keys point back at each
-	 * other (A→B, B→A) cannot ping-pong forever. Cleared by a successful turn or
-	 * a reset, so a later refusal starts a fresh walk.
+	 * other (A→B, B→A) cannot ping-pong forever. Cleared when a successful or
+	 * terminal turn ends the cascade, or on reset, so a later refusal starts fresh.
 	 */
 	readonly #refusalModelsTried = new Set<string>();
 	/** Whether primary reasoning is included in advisor deltas for the current model. */
@@ -1046,6 +1046,9 @@ export class AdvisorRuntime {
 							logger.debug("advisor refusal recovered by model fallback");
 							continue;
 						}
+						// The batch is terminal, so the next primary update is a new
+						// refusal cascade and must be allowed to try the chain again.
+						this.#refusalModelsTried.clear();
 						this.#notifyFailureOnce(err);
 						this.#clearSeenContext();
 						this.#backlog = Math.max(0, this.#backlog - finalTurns);

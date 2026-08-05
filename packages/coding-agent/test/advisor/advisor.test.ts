@@ -3690,9 +3690,10 @@ describe("advisor", () => {
 			expect(failures).toEqual([]);
 		});
 
-		it("surfaces the refusal when the host declines to switch models", async () => {
+		it("starts a fresh fallback cascade after the host declines to switch models", async () => {
 			const promptInputs: string[] = [];
 			const failures: unknown[] = [];
+			let fallbackCalls = 0;
 			const state: { messages: AgentMessage[]; error?: string } = { messages: [] };
 			const agent: AdvisorAgent = {
 				prompt: async input => {
@@ -3731,7 +3732,10 @@ describe("advisor", () => {
 					snapshotMessages: () => messages,
 					enqueueAdvice: () => {},
 					notifyFailure: error => failures.push(error),
-					onTurnError: async () => false,
+					onTurnError: async () => {
+						fallbackCalls++;
+						return false;
+					},
 				},
 				0,
 			);
@@ -3740,6 +3744,20 @@ describe("advisor", () => {
 			await settleUntil(() => failures.length === 1 && runtime.backlog === 0);
 
 			expect(promptInputs).toHaveLength(2);
+			expect(fallbackCalls).toBe(1);
+			expect(failures).toHaveLength(1);
+
+			messages.push({
+				role: "assistant",
+				content: [{ type: "text", text: "a later primary update" }],
+				timestamp: 2,
+			} as AgentMessage);
+			runtime.onTurnEnd(messages);
+			await settleUntil(() => fallbackCalls === 2 && runtime.backlog === 0);
+
+			// The earlier terminal cascade must not suppress fallback for a new batch.
+			expect(promptInputs).toHaveLength(3);
+			expect(fallbackCalls).toBe(2);
 			expect(failures).toHaveLength(1);
 		});
 
