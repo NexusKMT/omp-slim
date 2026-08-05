@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed remote OpenAI Responses compaction replay sending output-only `status` fields back as input, including persisted native history and prior V1/V2 replacement history. ([#7742](https://github.com/can1357/oh-my-pi/issues/7742))
+
 ## [17.2.9] - 2026-08-05
 
 ### Fixed
