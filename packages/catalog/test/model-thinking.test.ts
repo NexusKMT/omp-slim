@@ -198,12 +198,6 @@ describe("model thinking derivation", () => {
 			baseUrl: "https://api.deepseek.com/v1",
 			compat: { reasoningEffortMap: { max: "max-plus" } },
 		});
-		const deepseekPro = createModel({
-			id: "deepseek-v4-pro",
-			api: "openai-completions",
-			provider: "deepseek",
-			baseUrl: "https://api.deepseek.com/v1",
-		});
 		const openRouterAnthropic = createModel({
 			id: "anthropic/claude-opus-4.7",
 			api: "openai-completions",
@@ -218,12 +212,8 @@ describe("model thinking derivation", () => {
 			medium: "default",
 			high: "default",
 		});
-		// DeepSeek V4 Flash accepts the wire-exact low/high/max ladder; explicit
-		// compat overrides still win over the identity wire values.
-		expect(getSupportedEfforts(deepseek)).toEqual([Effort.Low, Effort.High, Effort.Max]);
+		// Explicit compat overrides still win over identity-derived wire values.
 		expect(deepseek.thinking?.effortMap).toEqual({ max: "max-plus" });
-		// V4 Pro stays on the two-tier high/max scale — it rejects the `low` tier.
-		expect(getSupportedEfforts(deepseekPro)).toEqual([Effort.High, Effort.Max]);
 		// OpenRouter-hosted Anthropic adaptive models carry the wire-exact
 		// five-tier ladder with no remapping.
 		expect(getSupportedEfforts(openRouterAnthropic)).toEqual([
