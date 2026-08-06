@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `vault://<name>?op=...` commands targeting the focused/most-recently-active vault instead of the named one. The `vault=<name>` argument was appended after the Obsidian CLI subcommand (`obsidian bases vault=Work`), but the CLI only honors it as a top-level option before the subcommand (`obsidian vault=Work bases`); it is now prepended so the named vault is queried (and opened) regardless of window focus ([#7771](https://github.com/can1357/oh-my-pi/issues/7771)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
