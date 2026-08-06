@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Normalized resolved file paths in `read` summary recovery selectors, PDF image handles, and notebook errors so suffix-matched input does not teach agents malformed follow-up paths ([#7788](https://github.com/can1357/oh-my-pi/issues/7788)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
