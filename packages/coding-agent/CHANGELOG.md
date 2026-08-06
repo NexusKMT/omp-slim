@@ -4,37 +4,44 @@
 
 ### Breaking Changes
 
-- Replaced the re-exported zod API with the omptype-backed zod-compat facade (`@oh-my-pi/omptype/zod`); plugins keep the zod-style builder surface while real-zod-specific APIs are gone
+- Replaced the re-exported `zod` API with an `omptype`-backed compatibility facade (`@oh-my-pi/omptype/zod`). Plugins retain the standard Zod-style builder interface, but real Zod-specific APIs are no longer available.
+
+### Added
+
+- Added a `--trusted-extension <absolute-path>` CLI flag to load an exact extension-module allowlist, bypassing ambient extension discovery.
+- Added resumable session details to fatal crash outputs, including a suggested `omp --resume <session-id>` command to quickly resume persisted live agent sessions.
 
 ### Changed
 
-- Replaced external dependencies with `@oh-my-pi/pi-utils` modules: `@agentclientprotocol/sdk` -> `acp` (also drops the package patch), `@mozilla/readability` -> `readability`, `@puppeteer/browsers` -> `browsers`, `@xterm/headless` -> `vterm`, `chalk` -> `chalk`, `fast-xml-parser` -> `xml`, `header-generator` -> `headers`, `linkedom` -> `dom`, `lru-cache` -> `lru`, `mammoth` -> `docx`, `turndown` and `turndown-plugin-gfm` -> `turndown`, and dev `marked` -> `marked`
+- Reworked the Ctrl+S Agent Hub into a responsive fullscreen roster and selected-agent inspector, featuring aggregate status/usage metrics, detailed per-agent views (task, model, activity, usage, lineage), roster and spawn-tree views, stable ordering, asynchronous persisted-session discovery, restored historical metadata, and improved keyboard and mouse navigation.
+- Replaced `arktype` with `@oh-my-pi/omptype` for all tool parameter and configuration schemas, resulting in significantly faster startup times. Configuration schema errors are now reported via `OmpErrors` entries using the standard `path`/`problem` format.
 
 ### Fixed
 
-- Fixed `/usage`, `/advisor status`, and every other panel command looking dead mid-turn. `presentCommandOutput` defers panels while the agent streams so a growing turn cannot bury them, but said nothing, and on a long multi-subagent turn the panel is minutes away. The deferral is now acknowledged in the status line. A non-terminal settle also flushes the queue: `isStreaming` is already false by then, so a command issued after an async fan-out settles used to mount ahead of the panels queued before it.
-- Fixed the bundled `ts-no-tiny-functions` TTSR rule never firing on one-line arrow functions in real files: the second alternative's `$` anchor only matched at the absolute end of input, so the trailing newline present in every real file suppressed the match. The condition now opens with the `(?m)` inline flag so the arrow body matches to the line end ([#6890](https://github.com/can1357/oh-my-pi/issues/6890)).
-- Fixed an advisor refusal skipping the model fallback chain. `AdvisorRuntime` treated a classifier refusal as terminal once its one stripped-reasoning resend failed, returning before the `onTurnError` hook that owns fallback (`#recoverAdvisorTurn`), so a `Refusal (cyber)` on one model disabled the advisor even with a configured chain. The refusal path now takes the same fallback pass the primary turn-recovery path already allows, and only reports the advisor unavailable when the host declines to switch.
-- Bounded advisor refusal recovery to one attempt per model. The cascade walks the fallback chain to exhaustion, but a model switch re-arms `#includeThinking` via `#syncModelIdentity`, so a chain whose keys point back at each other (A→B, B→A) would strip-and-resend against the same pair forever. Each cascade now visits a model at most once; a successful turn or a reset starts a fresh walk.
-- Fixed repeated `/mcp reauth` commands getting stuck behind the previous unfinished MCP OAuth login; a new reauthorization now cancels and cleans up the prior flow before starting its replacement.
-- WSL host-home resolution now builds `/mnt/<drive>/...` fallback paths with POSIX semantics regardless of the host platform, instead of the platform-dependent `path` module ([#3779](https://github.com/can1357/oh-my-pi/issues/3779)).
-- Fixed Python eval shell helpers (`!cmd`, `%%bash`, `%pip`) letting child processes inherit the runner's stdin — the host's NDJSON control channel — which could steal protocol frames and deadlocked nested interpreters on Windows; children now get `stdin=DEVNULL`. `%%bash` also resolves Git Bash on Windows instead of hardcoding `/bin/bash`.
-- Fixed subagents spawned through a model-role alias (e.g. the bundled `scout`'s `model: "@smol"`) falling back onto the `default` role's `retry.fallbackChains` entry instead of their own role's chain: the child is pinned to a `subagent:<id>` role whose chain shadows every configured role chain, and that pin inherited `default` unconditionally, so a `@smol` scout retried on the default chain's first model instead of the smol chain's.
-- Fixed Linux/X11 clipboard reads failing when `xclip` is unavailable but `xsel` is installed.
-- Hardened Linux Chromium executable detection to reject non-executable files, non-browser wrappers, and candidates that hang during the version probe.
-- Fixed Bash command previews crashing when malformed tool arguments contain non-string environment values.
-- Fixed `nerd`-preset role chips overhanging into the label and swallowing its first character (`efault` instead of `default`) by inserting a separator after the status glyph in the model browser and model hub ([#7664](https://github.com/can1357/oh-my-pi/issues/7664)).
-- Fixed Codex web search sending GPT-5.6 models a Responses-Lite request shape that the hosted `web_search` tool ignores. ([#7666](https://github.com/can1357/oh-my-pi/issues/7666))
-- Fixed resumed or rebuilt sessions auto-applying a new checkpoint with a stale rewind report from an earlier completed checkpoint cycle ([#7739](https://github.com/can1357/oh-my-pi/issues/7739)).
-- Fixed `read` treating semicolon-delimited internal URLs, such as batched `skill://` resources, as one invalid resource.
-- Fixed `pi.getAllTools()` returning bare tool-name strings instead of `ToolInfo[]`, which crashed extensions authored against the upstream `@earendil-works/pi-coding-agent` contract (e.g. gentle-pi's startup banner: `undefined is not an object (evaluating 't.sourceInfo.source')`). The ExtensionAPI now returns `{ name, description, parameters, promptGuidelines, sourceInfo }` objects with `sourceInfo.source` classifying each tool as `builtin`/`sdk`/`mcp`/`extension` ([#7732](https://github.com/can1357/oh-my-pi/issues/7732)).
-- Fixed legacy Pi extensions failing to install/load in compiled binaries when they resolve a bundled dependency through the `createRequire(base)(spec)` factory form (e.g. `gentle-pi` loading `@heyhuynhgiabuu/pi-pretty`): the shim only rewrote static `require()`/`import` specifiers, so the `createRequire` argument stayed bare and fell through to native `node_modules` resolution, which is unavailable under `--compile`. The load-time rewriter now pins the invoked bare dependency to an absolute path like a plain `require()` ([#7728](https://github.com/can1357/oh-my-pi/issues/7728)).
-- Reported Wayland per-window native input and window activation as unavailable instead of advertising a foreground-delivery path that compositors reject. ([#7702](https://github.com/can1357/oh-my-pi/issues/7702))
-- Fixed approved plans hiding live execution progress: after the fullscreen Plan Review closed, the conversation view stayed blank/stale while the plan executed. The propose write's `tool_execution_end` handler ran inside the event-controller's serialized dispatch chain and awaited `handlePlanApproval`, which awaits `session.prompt` for the entire execution turn — so every later `agent_start`/`message_start`/tool/`message_update` event queued behind it until the run finished. The approval dispatch is now detached from the dispatch chain, so the turn's events render live ([#7684](https://github.com/can1357/oh-my-pi/issues/7684)).
-- Fixed `omp -r` current-folder scope missing sessions written under the short-lived hashed project-directory scheme (17.2.5-17.2.8): the 17.2.9 revert restored the legacy path-based names but dropped all migration, stranding those sessions. `computeDefaultSessionDir` now performs a one-way migration of the hashed dir back into its legacy name ([#7677](https://github.com/can1357/oh-my-pi/issues/7677)).
-- Stopped the Read tool from advertising or resolving `memory://` when `memory.backend` is `off`, preventing agents from probing a disabled subsystem ([#7673](https://github.com/can1357/oh-my-pi/issues/7673)).
-- Fixed Shift-Tab thinking mode rendering the `off` state as a missing status-line label, making it appear that reasoning could not be disabled ([#7668](https://github.com/can1357/oh-my-pi/issues/7668)).
-- Fixed POSIX `$EDITOR` commands with quoted arguments or executable paths containing spaces being parsed incorrectly.
+- Fixed panel commands (such as `/usage` and `/advisor status`) appearing unresponsive during active turns by acknowledging deferrals in the status line and flushing the queue upon non-terminal settling.
+- Fixed the bundled `ts-no-tiny-functions` rule failing to match one-line arrow functions in files with trailing newlines.
+- Fixed advisor refusals skipping the model fallback chain, and bounded refusal recovery to a single attempt per model to prevent infinite fallback loops.
+- Fixed repeated `/mcp reauth` commands getting stuck by ensuring new reauthorization requests cancel and clean up any pending MCP OAuth login flows.
+- Fixed WSL host-home resolution to build `/mnt/<drive>/...` fallback paths using POSIX semantics regardless of the host platform.
+- Fixed Python evaluation shell helpers (`!cmd`, `%%bash`, `%pip`) letting child processes inherit the runner's stdin, which previously caused deadlocks on Windows. Additionally, `%%bash` now correctly resolves Git Bash on Windows.
+- Fixed subagents spawned via model-role aliases incorrectly falling back to the `default` role's retry chain instead of their own configured role chain.
+- Fixed Linux/X11 clipboard reads failing when `xclip` is missing but `xsel` is available.
+- Hardened Linux Chromium executable detection to filter out non-executable files, invalid wrappers, and candidates that hang during version probes.
+- Fixed Bash command preview crashes caused by malformed tool arguments containing non-string environment values.
+- Fixed UI rendering in the model browser and model hub where `nerd`-preset role chips would overlap and obscure the first character of labels.
+- Fixed Codex web search sending incompatible request shapes to certain models, which caused the hosted `web_search` tool to ignore them.
+- Fixed resumed or rebuilt sessions incorrectly applying stale rewind reports from previous checkpoint cycles to new checkpoints.
+- Fixed the `read` tool incorrectly parsing semicolon-delimited internal URLs (such as batched `skill://` resources) as a single invalid resource.
+- Fixed `pi.getAllTools()` returning bare strings instead of `ToolInfo[]` objects, restoring compatibility with extensions built against the upstream contract.
+- Fixed legacy extensions failing to load in compiled binaries when resolving bundled dependencies via dynamic `createRequire` factories.
+- Fixed Wayland window activation and native input handling by correctly reporting them as unavailable rather than attempting unsupported foreground-delivery paths.
+- Fixed live execution progress being hidden in the conversation view after approving a plan in the fullscreen Plan Review.
+- Fixed `omp -r` failing to discover sessions created under the temporary hashed project-directory scheme by adding a one-way migration back to legacy path-based names.
+- Prevented the `read` tool from advertising or resolving `memory://` URIs when the memory backend is disabled.
+- Fixed the Shift-Tab thinking mode UI rendering the `off` state as a blank label, which made it appear that reasoning could not be disabled.
+- Fixed parsing of POSIX `$EDITOR` commands that contain quoted arguments or executable paths with spaces.
+- Fixed persisted Agent Hub rows losing the explicit caller model role when a subagent used a model override, preserving role provenance across restarts.
+- Fixed unobserved promise rejections in browser helpers (such as `tab.waitForResponse()`) causing tab workers to hang or crash.
 
 ## [17.2.9] - 2026-08-05
 
@@ -45,11 +52,9 @@
 ### Added
 
 - Added automatic detection of common Ungoogled Chromium Linux installations for the browser tool.
-- Added `--trusted-extension <absolute-path>` for loading an exact extension-module allowlist without ambient extension discovery.
 
 ### Changed
 
-- Reworked the Ctrl+S Agent Hub into a responsive fullscreen roster and selected-agent inspector with aggregate status/usage, per-agent task/model/activity/usage/lineage details, roster and spawn-tree views, stable ordering, bounded large-roster rendering, asynchronous persisted-session discovery, restored task/timestamp metadata for historical agents, and consistent keyboard and mouse navigation.
 - Restored the legacy project-scoped session directory naming scheme and removed its automatic migration ([#7646](https://github.com/can1357/oh-my-pi/issues/7646)).
 - Routed Bun install-cache pruning in `update-cli` through the shared `compareVersions` utility (`@oh-my-pi/pi-utils`), removing a duplicate local comparator that rounded large numeric version identifiers via `Number`.
 
@@ -77,7 +82,6 @@
 - Fixed Herdr rejecting the macOS development launcher because its foreground process was reported as `bun` instead of `omp`.
 - Completed usage-aware model fallback across startup, queued turns, same-turn tool continuations, ACP/TUI confirmation cancellation, eligible account reselection, cooldown restoration, and isolated subagent settings so low-usage handoffs remain lossless and cannot consume cancelled queued work.
 - Fixed Agent Hub opening and selection becoming O(all rows) on large rosters: row rendering is now lazy around the selected viewport, and observer lookup is O(1) by id instead of copy-sorting every session per row.
-- Fixed persisted Agent Hub rows dropping an explicit caller model role when a subagent used a model override, preserving role provenance after restart.
 - Fixed the bash interceptor blocking `grep`/`cat`/`find` used as a downstream pipeline stage (e.g. `printf 'x\n' | grep x`); a stage consuming piped stdin cannot be replaced by a path-based dedicated tool, so it is no longer matched, while standalone and first-stage searches stay intercepted ([#7496](https://github.com/can1357/oh-my-pi/issues/7496)).
 - Fixed floating rejections from cmux browser guest JavaScript terminating the main process and every active session; attributable rejections now fail the browser run as tool errors while unrelated process rejections retain the fatal path ([#7365](https://github.com/can1357/oh-my-pi/issues/7365)).
 - Fixed the Windows bash tool silently taking down the whole omp process when a command blocked until its timeout: cancelling a timed-out run walked the spawned child's descendant tree from raw `th32ParentProcessID` links, and a recycled pid matching the harness's stale recorded parent pid could enumerate omp as a false descendant and `TerminateProcess` it, killing the session with no `session_exit` record. Run-cancellation sweeps now refuse to signal the harness or any process collected beneath it, while still reaping the timed-out target when it owns a recycled ancestor pid ([#7452](https://github.com/can1357/oh-my-pi/issues/7452)).
@@ -100,7 +104,6 @@
 ### Changed
 
 - Replaced arktype with @oh-my-pi/omptype for tool parameter and config schemas, significantly improving startup performance with ~100x faster schema construction. Config schema errors are now reported via OmpErrors using the same path/problem structure.
-- Replaced arktype with `@oh-my-pi/omptype` across all tool parameter and config schemas: ~100x faster schema construction removes the arktype startup tax (the `scope({}, { jitless: true })` workarounds are gone). Config schema errors now report via `OmpErrors` entries with the same `path`/`problem` shape.
 
 ### Fixed
 
@@ -148,7 +151,6 @@
 - Added a configurable per-request web search timeout via providers.webSearchTimeoutSeconds.
 - Added turn-aware /tree navigation shortcuts (Alt+Up/Alt+Down, Home/End, PageUp/PageDown) to traverse user and assistant turns.
 - Added display.hideToolActivity and a Ctrl+Shift+O shortcut to toggle the visibility of model-initiated tool calls and results.
-- Added resumable session details to fatal crash output, including an `omp --resume <session-id>` command for every persisted live agent session.
 
 ### Changed
 
@@ -181,7 +183,6 @@
 - Fixed heavily branched conversation trees shifting linear continuations into disconnected columns.
 - Fixed plugin installation validation failures for legacy compatibility shims.
 - Removed hard-coded references to disabled or absent agents in system and tool prompts.
-- Fixed unobserved promise continuations from browser helpers such as `tab.waitForResponse()` wedging or killing the tab worker when they reject; browser facade promises now retain native promise behavior while observing every `then`, `catch`, and `finally` continuation, and late user continuation errors are logged instead of dropped after the run ends.
 
 ## [17.2.4] - 2026-08-01
 

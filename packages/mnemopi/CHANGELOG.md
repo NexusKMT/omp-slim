@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Replaced `lru-cache` with `@oh-my-pi/pi-utils/lru`
+- Updated internal LRU cache implementation.
 
 ## [17.2.6] - 2026-08-03
 

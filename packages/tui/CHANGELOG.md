@@ -2,16 +2,12 @@
 
 ## [Unreleased]
 
-### Changed
-
-- Replaced `marked`, `lru-cache`, and dev `chalk` with `@oh-my-pi/pi-utils` modules (`marked`, `lru`, `chalk`)
-
 ### Fixed
 
-- Fixed startup aborting with an EIO error when a multiplexer or SSH session leaves `stdin.isTTY` true after revoking its pty, by taking the existing terminal-disconnect path instead of failing to enable raw mode.
-- Fixed prompt autocomplete never triggering for Windows drive-absolute paths (`C:/Users/...`, `C:\Users\...`); only `/`, `./`, `../`, and `~/` prefixes were recognized.
-- hasLinuxDesktopSession() now also treats the session as reachable via the systemd user-bus socket `$XDG_RUNTIME_DIR/bus` when `DBUS_SESSION_BUS_ADDRESS` is unset, so BEL-only terminals in systemd/tmux/SSH-attached graphical sessions get desktop notifications again.
-- Fixed Shift+letter and shifted symbol input (capital letters, `?`, `!`, etc.) being silently dropped on Windows and WSL terminals using ConPTY (e.g. WezTerm stable) by avoiding Kitty keyboard protocol flag 4 in that context.
+- Fixed a startup crash (EIO error) in multiplexer or SSH sessions when a revoked pty leaves stdin.isTTY active.
+- Fixed prompt autocomplete to support Windows drive-absolute paths (e.g., C:/ or C:\).
+- Fixed desktop notifications in systemd, tmux, or SSH-attached Linux sessions when DBUS_SESSION_BUS_ADDRESS is unset.
+- Fixed an issue where Shift+letter and shifted symbol inputs (such as capital letters, ?, and !) were silently dropped on Windows and WSL terminals using ConPTY (e.g., WezTerm).
 
 ## [17.2.9] - 2026-08-05
 

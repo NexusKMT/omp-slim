@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Reimplemented the zod-compat facade (`@oh-my-pi/omptype/zod`) purely on omptype internals; removed the `zod` devDependency and benchmark arm
+- Reimplemented the Zod compatibility facade (`@oh-my-pi/omptype/zod`) to run purely on internal mechanics, removing the dependency on `zod`.
 
 ## [17.2.9] - 2026-08-05
 

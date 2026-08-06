@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Replaced `date-fns` with `@oh-my-pi/pi-utils/dates` and the `linkedom` test dependency with `@oh-my-pi/pi-utils/dom`
+- Optimized package dependencies by replacing `date-fns` with `@oh-my-pi/pi-utils/dates` and removing unused test dependencies.
 
 ## [17.2.9] - 2026-08-05
 

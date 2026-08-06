@@ -1,6 +1,6 @@
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { realpathSync } from "node:fs";
 import { symlink, unlink } from "node:fs/promises";
-import { afterEach, beforeEach, expect, test } from "bun:test";
 import { AuthStorage } from "@oh-my-pi/pi-ai";
 import { parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";

@@ -4,11 +4,11 @@
 
 ### Changed
 
-- Migrated GitLab Duo Workflow discovery schemas from zod to omptype and removed the `zod` dependency
+- Removed the zod dependency by migrating GitLab Duo Workflow discovery schemas to omptype.
 
 ### Fixed
 
-- Fixed `deepseek-v4-flash` exposing only the `high`/`max` thinking-effort tiers instead of the `low`/`high`/`max` ladder its API accepts; `deepseek-v4-pro` correctly stays on `high`/`max` ([#7668](https://github.com/can1357/oh-my-pi/issues/7668)).
+- Corrected thinking-effort tiers for deepseek-v4-flash to include the low tier alongside high and max.
 
 ## [17.2.9] - 2026-08-05
 

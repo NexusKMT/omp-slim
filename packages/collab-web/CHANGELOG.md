@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Replaced `marked` with `@oh-my-pi/pi-utils/marked`
+- Updated the Markdown parsing implementation to use @oh-my-pi/pi-utils.
 
 ## [17.2.2] - 2026-07-31
 

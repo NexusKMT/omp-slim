@@ -4,7 +4,7 @@
 
 ### Breaking Changes
 
-- Removed the `zod` dependency and the `z`/`ZodType` re-exports; tool schemas are omptype `type()` schemas, with zod-style authoring still available via `@oh-my-pi/omptype/zod`
+- Removed the `zod` dependency and `z`/`ZodType` re-exports. Tool schemas now use `omptype` `type()` schemas, with Zod-style authoring still available via `@oh-my-pi/omptype/zod`.
 
 ## [17.2.9] - 2026-08-05
 

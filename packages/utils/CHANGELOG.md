@@ -4,19 +4,20 @@
 
 ### Added
 
-- Added zero-dependency in-house modules replacing external packages, each importable as `@oh-my-pi/pi-utils/<module>`: `acp` (Agent Client Protocol), `browsers` (Chrome for Testing discovery/install), `chalk` (ANSI styling), `dates` (date formatting), `dom` (HTML parser + WHATWG DOM subset + CSS selectors), `docx` (DOCX to HTML), `headers` (browser header generation), `lru` (LRU cache), `marked` (GFM markdown lexer/parser), `readability` (article extraction), `template` (Handlebars-compatible templating), `turndown` (HTML to Markdown), `vterm` (headless terminal emulator), `xml` (XML parser)
+- Introduced zero-dependency in-house modules replacing external packages, importable via `@oh-my-pi/pi-utils/<module>`: `acp` (Agent Client Protocol), `browsers` (Chrome for Testing discovery/install), `chalk` (ANSI styling), `dates` (date formatting), `dom` (HTML parser, WHATWG DOM subset, and CSS selectors), `docx` (DOCX to HTML), `headers` (browser header generation), `lru` (LRU cache), `marked` (GFM markdown lexer/parser), `readability` (article extraction), `template` (Handlebars-compatible templating), `turndown` (HTML to Markdown), `vterm` (headless terminal emulator), and `xml` (XML parser).
+- Added postmortem fatal recovery hint providers to allow applications to print actionable recovery commands before cleanup starts.
 
 ### Changed
 
-- Rewrote the logger file backend in-house with identical line format, daily rotation, and pruning
+- Rewrote the logger file backend in-house, maintaining the identical line format, daily rotation, and pruning behavior without external dependencies.
 
 ### Fixed
 
-- Support PowerShell (`powershell.exe` / `pwsh`) as a custom `shellPath`: spawn paths now pass `-NoLogo -Command` (plus `-NoProfile` under `PI_BASH_NO_LOGIN`) instead of the POSIX `-l -c` pair, which PowerShell rejected with `The term '-l' is not recognized`.
+- Fixed PowerShell (`powershell.exe` / `pwsh`) support when used as a custom `shellPath` by correctly passing `-NoLogo -Command` (and `-NoProfile` under `PI_BASH_NO_LOGIN`) instead of POSIX flags.
 
 ### Removed
 
-- Removed `handlebars`, `winston`, and `winston-daily-rotate-file` dependencies
+- Removed external dependencies on `handlebars`, `winston`, and `winston-daily-rotate-file`.
 
 ## [17.2.9] - 2026-08-05
 
@@ -40,7 +41,6 @@
 ### Added
 
 - Added utility functions `parseFlag()`, `getBrowserRelayDir()`, and `getGlobalDaemonRuntimeDir()` to support browser relay mode and global daemon runtime directory resolution.
-- Added postmortem fatal recovery hint providers so applications can print actionable recovery commands before cleanup starts.
 
 ### Changed
 
