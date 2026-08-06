@@ -45,6 +45,8 @@
 ### Added
 
 - Added automatic detection of common Ungoogled Chromium Linux installations for the browser tool.
+- Added turn-aware `/tree` navigation: Alt+Up/Alt+Down traverses previous/next user or assistant turns while skipping tool and bookkeeping entries, Home/End jumps to the first/last visible item, and PageUp/PageDown moves by a visible page.
+- Added `--trusted-extension <absolute-path>` for loading an exact extension-module allowlist without ambient extension discovery.
 
 ### Changed
 

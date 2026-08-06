@@ -74,6 +74,90 @@ describe("createAcpSessionFactory MCP isolation (issue #1234)", () => {
 			}
 		}
 	});
+
+	it("shares the trusted extension EventBus with the ACP session", async () => {
+		const tempDir = TempDir.createSync("@pi-acp-trusted-extension-");
+		let authStorage: AuthStorage | undefined;
+		try {
+			authStorage = await AuthStorage.create(tempDir.join("auth.db"));
+			const modelRegistry = new ModelRegistry(authStorage);
+			const settings = Settings.isolated({});
+			const trustedPath = tempDir.join("trusted.ts");
+			await Bun.write(trustedPath, 'export default function (pi) { pi.on("agent_start", async () => {}); }');
+			let captured: CreateAgentSessionOptions | undefined;
+			const fakeSession = {} as AgentSession;
+			const factory = createAcpSessionFactory({
+				baseOptions: {
+					disableExtensionDiscovery: true,
+					additionalExtensionPaths: [trustedPath],
+				} as CreateAgentSessionOptions,
+				settings,
+				sessionDir: tempDir.join("sessions"),
+				authStorage,
+				modelRegistry,
+				parsedArgs: { trustedExtensions: [trustedPath] },
+				rawArgs: [],
+				createSession: async options => {
+					captured = options;
+					return {
+						session: fakeSession,
+						extensionsResult: options.preloadedExtensions,
+						setToolUIContext: () => {},
+						eventBus: options.eventBus,
+					} as CreateAgentSessionResult;
+				},
+			});
+
+			await factory(tempDir.path());
+
+			expect(captured?.eventBus).toBeDefined();
+			expect(captured?.preloadedExtensions?.extensions).toHaveLength(1);
+		} finally {
+			try {
+				authStorage?.close();
+			} finally {
+				await tempDir.remove();
+			}
+		}
+	});
+
+	it("fails before ACP session creation when a trusted extension cannot load", async () => {
+		const tempDir = TempDir.createSync("@pi-acp-trusted-extension-failure-");
+		let authStorage: AuthStorage | undefined;
+		try {
+			authStorage = await AuthStorage.create(tempDir.join("auth.db"));
+			const modelRegistry = new ModelRegistry(authStorage);
+			const settings = Settings.isolated({});
+			const trustedPath = tempDir.join("throwing.ts");
+			await Bun.write(trustedPath, 'throw new Error("trusted extension fixture");');
+			let createCalls = 0;
+			const factory = createAcpSessionFactory({
+				baseOptions: {
+					disableExtensionDiscovery: true,
+					additionalExtensionPaths: [trustedPath],
+				} as CreateAgentSessionOptions,
+				settings,
+				sessionDir: tempDir.join("sessions"),
+				authStorage,
+				modelRegistry,
+				parsedArgs: { trustedExtensions: [trustedPath] },
+				rawArgs: [],
+				createSession: async () => {
+					createCalls++;
+					throw new Error("must not create ACP session");
+				},
+			});
+
+			await expect(factory(tempDir.path())).rejects.toThrow(/Trusted extension failed to load.*fixture/);
+			expect(createCalls).toBe(0);
+		} finally {
+			try {
+				authStorage?.close();
+			} finally {
+				await tempDir.remove();
+			}
+		}
+	});
 });
 
 describe("createAcpSessionFactory TITLE_SYSTEM.md per-cwd resolution (PR #3736)", () => {
