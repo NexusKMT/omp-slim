@@ -5,7 +5,7 @@
 import { postmortem } from "@oh-my-pi/pi-utils";
 import { Command, Flags } from "@oh-my-pi/pi-utils/cli";
 import { commitHelp as commandHelp } from "../cli/command-help";
-import { runCommitCommand } from "../commit";
+import { CommitAbortedError, runCommitCommand } from "../commit";
 import type { CommitCommandArgs } from "../commit/types";
 import { initTheme } from "../modes/theme/theme";
 
@@ -41,7 +41,15 @@ export default class Commit extends Command {
 		// is already written. Mirror the `runPrintMode` exit pattern from
 		// `main.ts` so the CLI returns to the shell instead of stranding the user
 		// on Ctrl+C (issue #1041).
-		await runCommitCommand(cmd);
-		await postmortem.quit(0);
+		let exitCode = 0;
+		try {
+			await runCommitCommand(cmd);
+		} catch (error) {
+			if (!(error instanceof CommitAbortedError)) throw error;
+			// Failure already reported with a readable message; exit non-zero
+			// without letting the runtime dump a stack/minified-source blob.
+			exitCode = 1;
+		}
+		await postmortem.quit(exitCode);
 	}
 }

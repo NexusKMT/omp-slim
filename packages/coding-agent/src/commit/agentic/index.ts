@@ -11,6 +11,7 @@ import { ModelRegistry } from "../../config/model-registry";
 import { Settings } from "../../config/settings";
 import { discoverAuthStorage, discoverContextFiles, loadCliExtensionProviders } from "../../sdk";
 import * as git from "../../utils/git";
+import { abortOnGitFailure, pushOrAbort } from "../execute";
 import { type ExistingChangelogEntries, runCommitAgentSession } from "./agent";
 import { generateFallbackProposal } from "./fallback";
 import { assignLockFilesToPlan } from "./lock-files";
@@ -56,6 +57,11 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<void> {
 	);
 
 	if (stagedFiles.length === 0) {
+		if (args.push) {
+			process.stdout.write("No changes to commit; pushing existing commits...\n");
+			await pushOrAbort(cwd);
+			return;
+		}
 		process.stderr.write("No changes to commit.\n");
 		return;
 	}
@@ -238,12 +244,14 @@ async function runSingleCommit(proposal: CommitProposal, ctx: CommitExecutionCon
 		return;
 	}
 	process.stdout.write("● Creating commit...\n");
-	await git.commit(ctx.cwd, commitMessage);
-	process.stdout.write("Commit created.\n");
-	if (ctx.push) {
-		await git.push(ctx.cwd);
-		process.stdout.write("Pushed to remote.\n");
+	try {
+		await git.commit(ctx.cwd, commitMessage);
+	} catch (error) {
+		if (error instanceof git.GitCommandError) abortOnGitFailure("Commit failed", error);
+		throw error;
 	}
+	process.stdout.write("Commit created.\n");
+	if (ctx.push) await pushOrAbort(ctx.cwd);
 }
 
 async function runSplitCommit(
@@ -296,7 +304,7 @@ async function runSplitCommit(
 	process.stdout.write("● Creating split commits...\n");
 	const stagedDiff = await git.diff(ctx.cwd, { cached: true, binary: true });
 	await git.stage.reset(ctx.cwd);
-	for (const commitIndex of order) {
+	for (const [position, commitIndex] of order.entries()) {
 		const commit = plan.commits[commitIndex];
 		await git.stage.hunks(ctx.cwd, commit.changes, { rawDiff: stagedDiff, diffCached: true });
 		const analysis: ConventionalAnalysis = {
@@ -306,14 +314,23 @@ async function runSplitCommit(
 			issueRefs: commit.issueRefs,
 		};
 		const message = formatCommitMessage(analysis, commit.summary);
-		await git.commit(ctx.cwd, message);
+		try {
+			await git.commit(ctx.cwd, message);
+		} catch (error) {
+			if (error instanceof git.GitCommandError) {
+				const stagedNow = await git.diff.changedFiles(ctx.cwd, { cached: true });
+				abortOnGitFailure(
+					`Commit ${position + 1} of ${order.length} failed`,
+					error,
+					`${position} of ${order.length} commits created; ${stagedNow.length} file(s) remain staged. No changes were lost.`,
+				);
+			}
+			throw error;
+		}
 		await git.stage.reset(ctx.cwd);
 	}
 	process.stdout.write("Split commits created.\n");
-	if (ctx.push) {
-		await git.push(ctx.cwd);
-		process.stdout.write("Pushed to remote.\n");
-	}
+	if (ctx.push) await pushOrAbort(ctx.cwd);
 }
 
 function appendFilesToLastCommit(plan: SplitCommitPlan, files: string[]): void {
