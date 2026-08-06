@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.10] - 2026-08-06
+
 ### Fixed
 
 - Fixed a startup crash (EIO error) in multiplexer or SSH sessions when a revoked pty leaves stdin.isTTY active.

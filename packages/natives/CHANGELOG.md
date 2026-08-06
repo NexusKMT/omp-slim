@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.10] - 2026-08-06
+
 ### Fixed
 
 - Fixed per-window capture failing on Wayland with `InvalidTarget` errors for window IDs returned by `desktop.windows()`.

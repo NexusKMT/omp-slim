@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.10] - 2026-08-06
+
 ### Breaking Changes
 
 - Replaced the re-exported `zod` API with an `omptype`-backed compatibility facade (`@oh-my-pi/omptype/zod`). Plugins retain the standard Zod-style builder interface, but real Zod-specific APIs are no longer available.

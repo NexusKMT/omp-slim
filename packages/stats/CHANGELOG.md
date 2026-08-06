@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.10] - 2026-08-06
+
 ### Changed
 
 - Optimized package dependencies by replacing `date-fns` with `@oh-my-pi/pi-utils/dates` and removing unused test dependencies.

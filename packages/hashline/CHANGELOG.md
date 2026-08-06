@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.10] - 2026-08-06
+
 ### Changed
 
 - Updated internal caching dependency to use `@oh-my-pi/pi-utils/lru`.

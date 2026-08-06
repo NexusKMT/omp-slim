@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.10] - 2026-08-06
+
 ### Changed
 
 - Reimplemented the Zod compatibility facade (`@oh-my-pi/omptype/zod`) to run purely on internal mechanics, removing the dependency on `zod`.
