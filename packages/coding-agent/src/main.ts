@@ -52,6 +52,7 @@ import {
 } from "./discovery/helpers";
 import { injectOmpExtensionCliRoots } from "./discovery/omp-extension-roots";
 import { formatExtensionLoadNotifications } from "./extensibility/extensions/load-errors";
+import { loadExtensions } from "./extensibility/extensions/loader";
 import { ExtensionRunner } from "./extensibility/extensions/runner";
 import type { ExtensionUIContext } from "./extensibility/extensions/types";
 import { scheduleMarketplaceAutoUpdate } from "./extensibility/plugins/marketplace-auto-update";
@@ -363,6 +364,26 @@ export interface AcpSessionFactoryOptions {
 	createSession: (options: CreateAgentSessionOptions) => Promise<CreateAgentSessionResult>;
 }
 
+async function loadTrustedSessionExtensions(
+	options: Pick<CreateAgentSessionOptions, "additionalExtensionPaths">,
+	cwd: string,
+	eventBus: EventBus,
+) {
+	const paths = options.additionalExtensionPaths ?? [];
+	for (const trustedPath of paths) {
+		let stat: fsSync.Stats;
+		try {
+			stat = fsSync.statSync(trustedPath);
+		} catch {
+			throw new Error(`Trusted extension must be an existing module file: ${trustedPath}`);
+		}
+		if (!stat.isFile()) {
+			throw new Error(`Trusted extension must be a module file, not a directory: ${trustedPath}`);
+		}
+	}
+	return loadExtensions(paths, cwd, eventBus);
+}
+
 /**
  * Build the per-`session/new` factory used by ACP mode.
  *
@@ -388,7 +409,7 @@ export function createAcpSessionFactory(args: AcpSessionFactoryOptions): AcpSess
 		const eventBus = new EventBus();
 		const trustedExtensions =
 			args.parsedArgs.trustedExtensions && args.parsedArgs.trustedExtensions.length > 0
-				? await loadSessionExtensions(args.baseOptions, cwd, nextSettings, eventBus)
+				? await loadTrustedSessionExtensions(args.baseOptions, cwd, eventBus)
 				: undefined;
 		if (trustedExtensions && trustedExtensions.errors.length > 0) {
 			throw new Error(
@@ -1128,19 +1149,22 @@ export async function buildSessionOptions(
 
 	// Trusted extension paths are an exact allowlist for extension modules.
 	if (parsed.trustedExtensions && parsed.trustedExtensions.length > 0) {
-		for (const trustedPath of parsed.trustedExtensions) {
+		const trustedPaths = parsed.trustedExtensions.map(trustedPath => {
+			let resolvedPath: string;
 			let stat: fsSync.Stats;
 			try {
-				stat = fsSync.statSync(trustedPath);
+				resolvedPath = fsSync.realpathSync.native(trustedPath);
+				stat = fsSync.statSync(resolvedPath);
 			} catch {
 				throw new Error(`Trusted extension must be an existing module file: ${trustedPath}`);
 			}
 			if (!stat.isFile()) {
 				throw new Error(`Trusted extension must be a module file, not a directory: ${trustedPath}`);
 			}
-		}
+			return resolvedPath;
+		});
 		options.disableExtensionDiscovery = true;
-		options.additionalExtensionPaths = parsed.trustedExtensions;
+		options.additionalExtensionPaths = trustedPaths;
 	} else {
 		// Additional extension paths from CLI
 		const cliExtensionPaths = [...(parsed.extensions ?? []), ...(parsed.hooks ?? [])];
@@ -1580,7 +1604,9 @@ export async function runRootCommand(
 		}
 
 		const eventBus = new EventBus();
-		const extensionsResult = await loadSessionExtensions(sessionOptions, cwd, settingsInstance, eventBus);
+		const extensionsResult = parsedArgs.trustedExtensions?.length
+			? await loadTrustedSessionExtensions(sessionOptions, cwd, eventBus)
+			: await loadSessionExtensions(sessionOptions, cwd, settingsInstance, eventBus);
 		const extensionFlagSink: ExtensionFlagSink = {
 			getFlags: () => ExtensionRunner.aggregateFlags(extensionsResult.extensions),
 			setFlagValue: (name, value) => {

@@ -1,10 +1,14 @@
+import { realpathSync } from "node:fs";
+import { symlink, unlink } from "node:fs/promises";
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { AuthStorage } from "@oh-my-pi/pi-ai";
 import { parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { buildSessionOptions } from "@oh-my-pi/pi-coding-agent/main";
+import { loadSessionExtensions } from "@oh-my-pi/pi-coding-agent/sdk";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 let tempDir: TempDir;
@@ -43,7 +47,28 @@ test("buildSessionOptions uses trusted extensions as the exact module allowlist"
 	const options = await buildSessionOptions(parsed, [], SessionManager.inMemory(), modelRegistry, settings);
 
 	expect(options.disableExtensionDiscovery).toBe(true);
-	expect(options.additionalExtensionPaths).toEqual([trustedPath]);
+	expect(options.additionalExtensionPaths).toEqual([realpathSync.native(trustedPath)]);
+});
+
+test("trusted file symlinks cannot be retargeted to expand a directory", async () => {
+	const trustedTarget = tempDir.join("trusted-target.ts");
+	const replacementDir = tempDir.join("replacement");
+	const trustedLink = tempDir.join("trusted.ts");
+	await Bun.write(trustedTarget, "export default function () {}");
+	await Bun.write(`${replacementDir}/ambient.ts`, "export default function () {}");
+	await symlink(trustedTarget, trustedLink);
+
+	const parsed = parseArgs(["--trusted-extension", trustedLink]);
+	const settings = Settings.isolated();
+	const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
+	const options = await buildSessionOptions(parsed, [], SessionManager.inMemory(), modelRegistry, settings);
+
+	await unlink(trustedLink);
+	await symlink(replacementDir, trustedLink);
+	const result = await loadSessionExtensions(options, tempDir.path(), settings, new EventBus());
+
+	expect(result.errors).toEqual([]);
+	expect(result.extensions.map(extension => extension.resolvedPath)).toEqual([realpathSync.native(trustedTarget)]);
 });
 
 test("buildSessionOptions rejects trusted extension directories", async () => {

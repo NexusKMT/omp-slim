@@ -83,7 +83,16 @@ describe("createAcpSessionFactory MCP isolation (issue #1234)", () => {
 			const modelRegistry = new ModelRegistry(authStorage);
 			const settings = Settings.isolated({});
 			const trustedPath = tempDir.join("trusted.ts");
-			await Bun.write(trustedPath, 'export default function (pi) { pi.on("agent_start", async () => {}); }');
+			const firedPath = tempDir.join("trusted-event-fired");
+			const ambientFiredPath = tempDir.join("ambient-extension-loaded");
+			await Bun.write(
+				tempDir.join(".omp/extensions/ambient.ts"),
+				`import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(ambientFiredPath)}, "loaded"); export default function () {}`,
+			);
+			await Bun.write(
+				trustedPath,
+				`import { writeFileSync } from "node:fs"; export default function (pi) { pi.events.on("acp-session-live", () => writeFileSync(${JSON.stringify(firedPath)}, "fired")); }`,
+			);
 			let captured: CreateAgentSessionOptions | undefined;
 			const fakeSession = {} as AgentSession;
 			const factory = createAcpSessionFactory({
@@ -99,6 +108,7 @@ describe("createAcpSessionFactory MCP isolation (issue #1234)", () => {
 				rawArgs: [],
 				createSession: async options => {
 					captured = options;
+					options.eventBus?.emit("acp-session-live", undefined);
 					return {
 						session: fakeSession,
 						extensionsResult: options.preloadedExtensions,
@@ -112,6 +122,8 @@ describe("createAcpSessionFactory MCP isolation (issue #1234)", () => {
 
 			expect(captured?.eventBus).toBeDefined();
 			expect(captured?.preloadedExtensions?.extensions).toHaveLength(1);
+			expect(await Bun.file(firedPath).text()).toBe("fired");
+			expect(await Bun.file(ambientFiredPath).exists()).toBe(false);
 		} finally {
 			try {
 				authStorage?.close();
