@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { jtdToJsonSchema } from "@oh-my-pi/pi-coding-agent/tools/jtd-to-json-schema";
+import { isJTDSchema, jtdToJsonSchema } from "@oh-my-pi/pi-coding-agent/tools/jtd-to-json-schema";
 
 describe("jtdToJsonSchema", () => {
 	it("converts JTD elements and int32 primitives into JSON Schema", () => {
@@ -33,6 +33,8 @@ describe("jtdToJsonSchema", () => {
 			required: ["results"],
 			additionalProperties: false,
 		});
+		expect(jtdToJsonSchema({ type: "int32" })).toEqual({ type: "integer" });
+		expect(isJTDSchema({ type: "int32" })).toBe(true);
 	});
 
 	it("normalizes nested JTD fragments inside JSON Schema nodes", () => {

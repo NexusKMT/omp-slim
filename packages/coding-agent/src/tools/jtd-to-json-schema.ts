@@ -135,6 +135,18 @@ function convertSchema(schema: unknown): unknown {
 	return {};
 }
 
+const jtdOnlyPrimitiveTypes: Record<string, true> = {
+	timestamp: true,
+	float32: true,
+	float64: true,
+	int8: true,
+	uint8: true,
+	int16: true,
+	uint16: true,
+	int32: true,
+	uint32: true,
+};
+
 /**
  * Detect if a schema is JTD format (vs JSON Schema).
  *
@@ -156,11 +168,8 @@ export function isJTDSchema(schema: unknown): boolean {
 	if ("ref" in obj) return true;
 
 	// JTD type primitives (JSON Schema doesn't have int32, float64, etc.)
-	if ("type" in obj) {
-		const jtdPrimitives = ["timestamp", "float32", "float64", "int8", "uint8", "int16", "uint16", "int32", "uint32"];
-		if (jtdPrimitives.includes(obj.type as string)) {
-			return true;
-		}
+	if (typeof obj.type === "string" && Object.hasOwn(jtdOnlyPrimitiveTypes, obj.type)) {
+		return true;
 	}
 
 	// JTD properties form without type: "object" (JSON Schema requires it)
@@ -170,18 +179,6 @@ export function isJTDSchema(schema: unknown): boolean {
 
 	return false;
 }
-
-const jtdOnlyPrimitiveTypes: Record<string, true> = {
-	timestamp: true,
-	float32: true,
-	float64: true,
-	int8: true,
-	uint8: true,
-	int16: true,
-	uint16: true,
-	int32: true,
-	uint32: true,
-};
 
 function isUnambiguousJTDSchema(schema: unknown): boolean {
 	if (!isRecord(schema)) return false;
