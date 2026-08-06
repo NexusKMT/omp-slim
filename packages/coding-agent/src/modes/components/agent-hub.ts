@@ -733,7 +733,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	#footer(showingNarrowDetails: boolean, availableWidth: number): string {
 		const nextView = this.#viewMode === "roster" ? "by parent" : "flat";
 		if (showingNarrowDetails) {
-+		return theme.fg("dim", `1:agents  2:activity  Tab:roster  PgUp/PgDn:scroll  Enter:open  t:${nextView}  Esc:roster`);
+		return theme.fg("dim", `1:agents  2:activity  Tab:roster  PgUp/PgDn:scroll  Enter:open  t:${nextView}  Esc:roster`);
 		}
 		if (availableWidth < 96) {
 			return theme.fg("dim", `j/k:select  Enter:open  t:${nextView}  Tab:details  r/x:manage  Esc:close`);
@@ -1007,7 +1007,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			`Spawned by ${sanitizeDisplayText(ref.parentId ?? MAIN_AGENT_ID)}${children.length > 0 ? ` · ${children.length} children` : ""}`,
 		);
 		if (children.length > 0) add(theme.fg("dim", formatChildIds(children, width)));
-+		add(theme.fg("dim", `Registered ${formatLocalDateTimeWithOffset(new Date(ref.createdAt))}`));
+		add(theme.fg("dim", `Registered ${formatLocalDateTimeWithOffset(new Date(ref.createdAt))}`));
 
 		section("Changes");
 		add(
@@ -1157,22 +1157,23 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	}
 
 	clickItem(index: number): void {
-+		if (this.#section === "activity") {
-+			if (index === this.#selectedActivityRow) {
-+				const activity = this.#activityRows[index];
-+				if (activity) this.openChat(activity.agentId, activity.entryId);
-+				return;
-+			}
-+			this.#activityFollow = false;
-+			this.#selectedActivityRow = index;
-+			this.#requestRender();
-+			return;
-+		}
-+		const selected = this.#rows[index];
-+		if (!selected) return;
+		if (this.#section === "activity") {
+			if (index === this.#selectedActivityRow) {
+				const activity = this.#activityRows[index];
+				if (activity) this.openChat(activity.agentId, activity.entryId);
+				return;
+			}
+			this.#activityFollow = false;
+			this.#selectedActivityRow = index;
+			this.#requestRender();
+			return;
+		}
+		const selected = this.#rows[index];
+		if (!selected) return;
 		this.#hoveredRow = index;
 		this.#selectRow(index);
 		this.#requestRender();
+		this.#activateAgent(selected);
 	}
 
 	#handleTableInput(keyData: string): void {
