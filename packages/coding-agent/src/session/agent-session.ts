@@ -304,7 +304,7 @@ import {
 	USER_INTERRUPT_LABEL,
 } from "./messages";
 import { ModelControls, type ModelControlsHost } from "./model-controls";
-import { PrewalkCoordinator, type PrewalkCoordinatorHost } from "./prewalk";
+import { isPrewalkPlanNudge, PrewalkCoordinator, type PrewalkCoordinatorHost } from "./prewalk";
 import {
 	isAdvisorCard,
 	isDisplayableQueuedMessage,
@@ -881,8 +881,8 @@ export class AgentSession {
 	/**
 	 * Arm prewalk outside the normal startup path so an explicit slash command starts immediately.
 	 */
-	armPrewalk(target: Model, thinkingLevel?: ConfiguredThinkingLevel): void {
-		this.#prewalk.arm(target, thinkingLevel);
+	armPrewalk(target: Model, thinkingLevel?: ConfiguredThinkingLevel): boolean {
+		return this.#prewalk.arm(target, thinkingLevel);
 	}
 
 	/** Validate the active plan artifact and shape an `xd://propose` result for review-mode hosts. */
@@ -2489,14 +2489,17 @@ export class AgentSession {
 			const persistMessageEnd = () => {
 				// Check if this is a hook/custom message
 				if (event.message.role === "hookMessage" || event.message.role === "custom") {
-					// Persist as CustomMessageEntry
-					this.sessionManager.appendCustomMessageEntry(
-						event.message.customType,
-						event.message.content,
-						event.message.display,
-						event.message.details,
-						event.message.attribution ?? "agent",
-					);
+					// Prewalk's plan nudge is a one-run steering instruction. Persisting it would
+					// resurrect the consumed prompt on resume, fork, or any context rebuild.
+					if (!isPrewalkPlanNudge(event.message)) {
+						this.sessionManager.appendCustomMessageEntry(
+							event.message.customType,
+							event.message.content,
+							event.message.display,
+							event.message.details,
+							event.message.attribution ?? "agent",
+						);
+					}
 					if (event.message.role === "custom" && event.message.customType === "ttsr-injection") {
 						this.#ttsr.markInjectedFromDetails(event.message.details);
 					}

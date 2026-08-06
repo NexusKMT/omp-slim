@@ -8,6 +8,7 @@ import {
 	INTERRUPTED_THINKING_MESSAGE_TYPE,
 	isCustomMessageContent,
 	normalizeCustomMessagePayload,
+	PREWALK_PLAN_MESSAGE_TYPE,
 } from "./messages";
 import { type CompactionEntry, EPHEMERAL_MODEL_CHANGE_ROLE, type SessionEntry } from "./session-entries";
 
@@ -341,6 +342,7 @@ export function buildSessionContext(
 			}
 			pushMessage(entry.message);
 		} else if (entry.type === "custom_message") {
+			if (!options?.transcript && entry.customType === PREWALK_PLAN_MESSAGE_TYPE) return;
 			if (!isCustomMessageContent(entry.content)) return;
 			const normalized = normalizeCustomMessagePayload(entry);
 			const attribution = entry.attribution === undefined ? undefined : normalized.attribution;

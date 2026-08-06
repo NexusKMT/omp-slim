@@ -644,6 +644,14 @@ describe("AgentSession prewalk", () => {
 		const primary = modelOrThrow("claude-sonnet-4-5");
 		const target = modelOrThrow("claude-sonnet-4-6");
 		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
+		const sessionManager = SessionManager.inMemory();
+		sessionManager.appendCustomMessageEntry(
+			"prewalk-plan",
+			"legacy plan nudge written by an older OMP version",
+			false,
+			undefined,
+			"agent",
+		);
 
 		// No `prewalk` in the session config — this simulates a session that
 		// was NOT started with --prewalk, forced on via the slash command.
@@ -666,15 +674,15 @@ describe("AgentSession prewalk", () => {
 		});
 		session = new AgentSession({
 			agent,
-			sessionManager: SessionManager.inMemory(),
+			sessionManager,
 			settings: Settings.isolated({ "compaction.enabled": false }),
 			modelRegistry,
 			toolRegistry: new Map([[writeTool.name, writeTool as AgentTool]]),
 		});
 
 		// Arming twice back-to-back must stay a single, idempotent arm.
-		session.armPrewalk(target);
-		session.armPrewalk(target);
+		expect(session.armPrewalk(target)).toBe(true);
+		expect(session.armPrewalk(target)).toBe(true);
 
 		await session.prompt("do the task");
 
@@ -682,6 +690,113 @@ describe("AgentSession prewalk", () => {
 		// immediately — no second primary-model turn needed.
 		expect(requested).toEqual([`${primary.provider}/${primary.id}`, `${target.provider}/${target.id}`]);
 		expect(session.model?.id).toBe(target.id);
+		expect(
+			sessionManager
+				.buildSessionContext()
+				.messages.some(message => message.role === "custom" && message.customType === "prewalk-plan"),
+		).toBe(false);
+		expect(
+			sessionManager
+				.buildSessionContext({ transcript: true })
+				.messages.some(message => message.role === "custom" && message.customType === "prewalk-plan"),
+		).toBe(true);
+	});
+
+	it("armPrewalk rejects a same-model same-effort no-op before injecting the plan nudge", async () => {
+		const model = modelOrThrow("claude-sonnet-4-5");
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
+		const planMarker = "complete plan in your NEXT reply";
+		const mock = createMockModel({ responses: [{ content: ["status only"] }] });
+		const calls: Array<{ hasNudge: boolean }> = [];
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: {
+				model,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [],
+				thinkingLevel: Effort.Medium,
+			},
+			convertToLlm,
+			streamFn: (streamModel, context, options) => {
+				calls.push({ hasNudge: contextMessagesHaveMarker(context.messages, planMarker) });
+				return mock.stream(streamModel, context, options);
+			},
+		});
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated({ "compaction.enabled": false }),
+			modelRegistry,
+			toolRegistry,
+			thinkingLevel: Effort.Medium,
+		});
+		const notices: string[] = [];
+		session.subscribe(event => {
+			if (event.type === "notice" && event.source === "prewalk") notices.push(event.message);
+		});
+
+		expect(session.armPrewalk(model, Effort.Medium)).toBe(false);
+		await session.prompt("report current status");
+
+		expect(calls).toEqual([{ hasNudge: false }]);
+		expect(notices.some(message => message.includes("nothing to switch"))).toBe(true);
+	});
+
+	it("requires a fresh todo before a later explicit prewalk can hand off", async () => {
+		const primary = modelOrThrow("claude-sonnet-4-5");
+		const target = modelOrThrow("claude-sonnet-4-6");
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
+		const mock = createMockModel({
+			responses: [
+				toolCall("first-todo", "todo"),
+				toolCall("first-write", "write"),
+				{ content: ["first done"] },
+				toolCall("second-write-before-todo", "write"),
+				toolCall("second-todo", "todo"),
+				toolCall("second-write-after-todo", "write"),
+				{ content: ["second done"] },
+			],
+		});
+		const requested: string[] = [];
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: {
+				model: primary,
+				systemPrompt: ["Test"],
+				tools: [todoTool as AgentTool, writeTool as AgentTool],
+				messages: [],
+				thinkingLevel: Effort.Medium,
+			},
+			convertToLlm,
+			streamFn: (model, context, options) => {
+				requested.push(`${model.provider}/${model.id}`);
+				return mock.stream(model, context, options);
+			},
+		});
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated({ "compaction.enabled": false }),
+			modelRegistry,
+			toolRegistry,
+			prewalk: { target },
+		});
+
+		await session.prompt("first task");
+		const firstRunCallCount = requested.length;
+		expect(session.model?.id).toBe(target.id);
+
+		session.armPrewalk(primary);
+		await session.prompt("second task");
+
+		expect(requested.slice(firstRunCallCount)).toEqual([
+			`${target.provider}/${target.id}`,
+			`${target.provider}/${target.id}`,
+			`${target.provider}/${target.id}`,
+			`${primary.provider}/${primary.id}`,
+		]);
+		expect(session.model?.id).toBe(primary.id);
 	});
 
 	it("effort-only prewalk on the same model downgrades the thinking level instead of silently skipping", async () => {
@@ -744,12 +859,13 @@ describe("AgentSession prewalk", () => {
 		// the post-switch checklist.
 		const model = modelOrThrow("claude-sonnet-4-5");
 		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
+		const planMarker = "complete plan in your NEXT reply";
 		const checklistMarker = "grep for every other call site";
 
 		const mock = createMockModel({
 			responses: [toolCall("t1", "record"), toolCall("t2", "write"), { content: ["done"] }],
 		});
-		const calls: Array<{ hasChecklist: boolean }> = [];
+		const calls: Array<{ hasNudge: boolean; hasChecklist: boolean }> = [];
 		const agent = new Agent({
 			getApiKey: () => "test-key",
 			initialState: {
@@ -761,7 +877,10 @@ describe("AgentSession prewalk", () => {
 			},
 			convertToLlm,
 			streamFn: (streamModel, context, options) => {
-				calls.push({ hasChecklist: contextMessagesHaveMarker(context.messages, checklistMarker) });
+				calls.push({
+					hasNudge: contextMessagesHaveMarker(context.messages, planMarker),
+					hasChecklist: contextMessagesHaveMarker(context.messages, checklistMarker),
+				});
 				return mock.stream(streamModel, context, options);
 			},
 		});
@@ -786,6 +905,8 @@ describe("AgentSession prewalk", () => {
 		// The no-op is announced, not silent.
 		expect(notices.some(message => message.includes("nothing to switch"))).toBe(true);
 		// The checklist steer only fires on a real switch.
+		// A genuine no-op must be rejected before the disruptive plan nudge is injected.
+		expect(calls.every(call => !call.hasNudge)).toBe(true);
 		expect(calls.every(call => !call.hasChecklist)).toBe(true);
 	});
 
