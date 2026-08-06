@@ -84,10 +84,26 @@ const DATA_CHANGE_RENDER_COALESCE_MS = 100;
 /** Double-tap window for the table's left-left "close hub" gesture. */
 const LEFT_TAP_WINDOW_MS = 500;
 
-/** Two-pane mode needs a useful roster and a readable inspector. */
-const SPLIT_MIN_WIDTH = 96;
-const DETAIL_MIN_WIDTH = 34;
-const ROSTER_MIN_WIDTH = 48;
+
+function activityGlyph(row: AgentActivityRow): string {
+	if (row.status === "error") return theme.fg("error", theme.status.error);
+	if (row.status === "aborted") return theme.fg("warning", theme.status.aborted);
+	if (row.status === "pending") return theme.fg("accent", theme.status.running);
+	switch (row.kind) {
+		case "response":
+			return theme.fg("success", "◆");
+		case "tool":
+			return theme.fg("success", theme.status.success);
+		case "irc":
+			return theme.fg("accent", "→");
+		case "lifecycle":
+			return theme.fg("muted", "○");
+	}
+}
+
+function activityClock(timestamp: number): string {
+	return new Date(timestamp).toISOString().slice(11, 19);
+}
 /** Result of one host-backed transcript read for the Agent Hub viewer. */
 export interface AgentHubRemoteTranscript {
 	text: string;
@@ -943,7 +959,19 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 
 	handleWheel(delta: -1 | 1): void {
 		this.#hoveredRow = null;
+<<<<<<< HEAD
 		if (this.#rows.length > 0) {
+=======
+		if (this.#section === "activity") {
+			if (this.#activityRows.length > 0) {
+				this.#activityFollow = false;
+				this.#selectedActivityRow = Math.max(
+					0,
+					Math.min(this.#selectedActivityRow + delta, this.#activityRows.length - 1),
+				);
+			}
+		} else if (this.#rows.length > 0) {
+>>>>>>> 3c47d2238 (fix(coding-agent): resolve upstream Agent Hub merge)
 			this.#selectRow(Math.max(0, Math.min(this.#selectedRow + delta, this.#rows.length - 1)));
 		}
 		this.#requestRender();
