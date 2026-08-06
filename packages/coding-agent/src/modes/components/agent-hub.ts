@@ -1173,7 +1173,6 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		this.#hoveredRow = index;
 		this.#selectRow(index);
 		this.#requestRender();
-		this.#activateAgent(selected);
 	}
 
 	#handleTableInput(keyData: string): void {
