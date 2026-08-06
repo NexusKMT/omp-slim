@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed extension and custom tools inheriting a same-named built-in TUI renderer, which could replace successful result content with incorrect built-in status text ([#7770](https://github.com/can1357/oh-my-pi/issues/7770)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
