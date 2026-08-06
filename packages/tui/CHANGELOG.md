@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed explicit display resets inside tmux retaining the stale attach-time light/dark palette: after the passthrough OSC 11 probe updates tmux's background cache, OMP now reads that refreshed cache and consumes both probe replies instead of leaving terminal escape data in the editor.
+- Fixed explicit display resets inside tmux retaining the stale attach-time light/dark palette and leaking terminal capability bytes into the editor. OMP now lets the passthrough OSC 11 probe update tmux's background cache without sending a passthrough DA1 sentinel, then reads that refreshed cache directly.
 
 ## [17.2.9] - 2026-08-05
 

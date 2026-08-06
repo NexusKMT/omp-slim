@@ -372,12 +372,13 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		for (let i = 0; i < 7; i++) process.stdin.emit("data", "\x1b[?1;2c");
 		terminal.refreshAppearance?.();
 
-		expect(writes).toContain("\x1bPtmux;\x1b\x1b]11;?\x07\x1b\x1b[c\x1b\\");
+		expect(writes).toContain("\x1bPtmux;\x1b\x1b]11;?\x07\x1b\\");
 
 		terminal.stop();
 	});
 
-	it("re-queries tmux after passthrough refresh updates its background cache", () => {
+	it("reads tmux's refreshed cache without passing a DA1 reply through tmux", () => {
+		vi.useFakeTimers();
 		Bun.env.TMUX = "/tmp/tmux-1000/default,1234,0";
 		const { terminal, received, queryCount } = setupTerminal();
 
@@ -391,10 +392,12 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		terminal.refreshAppearance?.(token);
 		expect(queryCount()).toBe(beforeRefresh);
 
-		// tmux consumes the outer terminal's OSC 11 response to refresh its own
-		// cache, but forwards the passthrough DA1 response to the pane. That
-		// ordered barrier must trigger a direct query against the refreshed cache.
-		process.stdin.emit("data", "\x1b[?1;2c");
+		// A fragmented outer DA1 reply can be decoded by tmux as an Alt+[ key
+		// followed by printable capability bytes. Wait for the OSC 11 response to
+		// reach tmux's cache, then query that cache directly with a local sentinel.
+		vi.advanceTimersByTime(99);
+		expect(queryCount()).toBe(beforeRefresh);
+		vi.advanceTimersByTime(1);
 		expect(queryCount()).toBe(beforeRefresh + 1);
 
 		process.stdin.emit("data", "\x1b]11;rgb:ffff/ffff/ffff\x07");
