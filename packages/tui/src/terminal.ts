@@ -459,12 +459,13 @@ export interface Terminal {
 		callback: (appearance: TerminalAppearance, requestToken?: TerminalAppearanceRequestToken) => void,
 	): (() => void) | void;
 	/**
-	 * Issue a single OSC 11 background-color re-query, driving the appearance
+	 * Start a bounded OSC 11 background-color refresh cycle, driving appearance
 	 * callbacks through the same parse/dedup pipeline used at startup and on Mode
-	 * 2031 notifications. Bounded: one probe per call, no timers. Invoked on the
-	 * user's explicit display-reset gesture so terminals that cannot
-	 * deliver end-to-end Mode 2031 notifications still pick up a light/dark switch
-	 * without a restart.
+	 * 2031 notifications. Direct terminals need one query; tmux needs a
+	 * passthrough query to update its cache followed by one direct cache read.
+	 * Invoked on the user's explicit display-reset gesture so terminals without
+	 * end-to-end Mode 2031 notifications pick up a light/dark switch without a
+	 * restart. No timers or periodic probes are armed.
 	 *
 	 * A caller-provided token must be propagated unchanged to callbacks and
 	 * returned when the request is accepted. This lets callers establish ownership
@@ -500,7 +501,7 @@ export function isConPTYHosted(): boolean {
 /** Discriminated owner of an outstanding DA1 sentinel in the unified probe FIFO. */
 type Da1SentinelOwner =
 	| { kind: "keyboard" }
-	| { kind: "osc11" }
+	| { kind: "osc11"; route: Osc11QueryRoute; token?: TerminalAppearanceRequestToken }
 	| { kind: "privateMode"; mode: number }
 	| { kind: "osc99Probe"; id: string };
 
@@ -671,13 +672,13 @@ export class ProcessTerminal implements Terminal {
 	}
 
 	/**
-	 * Re-query the terminal background via a single OSC 11 probe. Reuses the
-	 * startup DA1-sentinel FIFO, pending/queued gating, parsing, dedup, and
-	 * appearance callbacks. Inside tmux, only this explicit path wraps the query
-	 * and sentinel together for passthrough to the outer terminal; startup and
-	 * Mode 2031 probes remain direct. Bounded to one probe per call; no timers are
-	 * armed. Suppressed while inactive, headless, or after the terminal is torn
-	 * down.
+	 * Re-query the terminal background through the startup DA1-sentinel FIFO,
+	 * pending/queued gating, parsing, dedup, and appearance callbacks. Inside
+	 * tmux, only this explicit path first passes a query and sentinel to the outer
+	 * terminal. tmux consumes the color response to refresh its cache and forwards
+	 * the sentinel; that ordered barrier starts one direct query to read the new
+	 * cached value. Startup and Mode 2031 probes remain direct. No timers are
+	 * armed. Suppressed while inactive, headless, or after terminal teardown.
 	 */
 	refreshAppearance(requestToken?: TerminalAppearanceRequestToken): TerminalAppearanceRequestToken | void {
 		if (!this.#active || this.#headless || this.#dead) return;
@@ -1033,11 +1034,20 @@ export class ProcessTerminal implements Terminal {
 				const owner = this.#da1SentinelOwners.shift()!;
 				switch (owner.kind) {
 					case "osc11": {
+						const needsTmuxCacheRead = owner.route === "tmux" && this.#osc11Pending;
 						if (this.#osc11Pending) {
-							// DA1 arrived before the OSC 11 reply: terminal does not support OSC 11.
+							// DA1 reached the pane before an OSC 11 reply. End this
+							// stage; a tmux passthrough may have cached the reply.
 							this.#osc11Pending = false;
 							this.#osc11ActiveToken = undefined;
 							this.#osc11ResponseBuffer = "";
+						}
+						if (needsTmuxCacheRead && !this.#dead) {
+							// tmux consumes the outer terminal's OSC 11 response to
+							// refresh its cache, but forwards the passthrough DA1 reply.
+							// Use that ordered barrier to query the refreshed cache.
+							this.#startOsc11Query("direct", owner.token);
+							break;
 						}
 						// Start a queued OSC 11 query once the prior cycle is fully drained.
 						if (
@@ -1208,7 +1218,7 @@ export class ProcessTerminal implements Terminal {
 		this.#osc11Pending = true;
 		this.#osc11ActiveToken = token;
 		this.#osc11ResponseBuffer = "";
-		this.#da1SentinelOwners.push({ kind: "osc11" });
+		this.#da1SentinelOwners.push({ kind: "osc11", route, token });
 		if (route === "tmux") {
 			this.#safeWrite(wrapTmuxPassthrough("\x1b]11;?\x07\x1b[c"));
 			return;

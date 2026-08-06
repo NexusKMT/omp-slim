@@ -47,6 +47,7 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
 		Object.defineProperty(process.stdin, "setRawMode", { value: vi.fn(), configurable: true });
 		previousHeadless = setTerminalHeadless(false);
+		delete Bun.env.TMUX;
 	});
 
 	afterEach(() => {
@@ -374,6 +375,36 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		expect(writes).toContain("\x1bPtmux;\x1b\x1b]11;?\x07\x1b\x1b[c\x1b\\");
 
 		terminal.stop();
+	});
+
+	it("re-queries tmux after passthrough refresh updates its background cache", () => {
+		Bun.env.TMUX = "/tmp/tmux-1000/default,1234,0";
+		const { terminal, received, queryCount } = setupTerminal();
+
+		process.stdin.emit("data", "\x1b]11;rgb:0000/0000/0000\x07");
+		for (let i = 0; i < 7; i++) process.stdin.emit("data", "\x1b[?1;2c");
+		const reports: Array<{ appearance: string; token: number | undefined }> = [];
+		terminal.onAppearanceReport?.((appearance, token) => reports.push({ appearance, token }));
+		const beforeRefresh = queryCount();
+
+		const token = 42;
+		terminal.refreshAppearance?.(token);
+		expect(queryCount()).toBe(beforeRefresh);
+
+		// tmux consumes the outer terminal's OSC 11 response to refresh its own
+		// cache, but forwards the passthrough DA1 response to the pane. That
+		// ordered barrier must trigger a direct query against the refreshed cache.
+		process.stdin.emit("data", "\x1b[?1;2c");
+		expect(queryCount()).toBe(beforeRefresh + 1);
+
+		process.stdin.emit("data", "\x1b]11;rgb:ffff/ffff/ffff\x07");
+		process.stdin.emit("data", "\x1b[?1;2c");
+		const detected = terminal.appearance;
+		terminal.stop();
+
+		expect(detected).toBe("light");
+		expect(reports).toEqual([{ appearance: "light", token }]);
+		expect(received).toEqual([]);
 	});
 
 	it("refreshAppearance() re-evaluates a changed background through the callback pipeline", () => {
