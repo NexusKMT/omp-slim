@@ -286,12 +286,20 @@ class TreeList implements Component {
 
 			// Apply filter mode
 			let passesFilter = true;
-			// Entry types hidden in default view (settings/bookkeeping)
+			// Entry types hidden in default view (settings/bookkeeping). These carry
+			// no conversation content, so the tree only shows them in "all" mode.
 			const isSettingsEntry =
 				entry.type === "label" ||
 				entry.type === "custom" ||
 				entry.type === "model_change" ||
-				entry.type === "thinking_level_change";
+				entry.type === "thinking_level_change" ||
+				entry.type === "service_tier_change" ||
+				entry.type === "title_change" ||
+				entry.type === "credential_pin" ||
+				entry.type === "session_init" ||
+				entry.type === "ttsr_injection" ||
+				entry.type === "mode_change" ||
+				entry.type === "reset_boundary";
 
 			switch (this.#filterMode) {
 				case "user-only":
@@ -658,8 +666,31 @@ class TreeList implements Component {
 			case "label":
 				result = theme.fg("dim", `[label: ${entry.label ?? "(cleared)"}]`);
 				break;
+			case "service_tier_change": {
+				// Per-family map, or null when the session went back to the default.
+				const tiers = entry.serviceTier
+					? Object.entries(entry.serviceTier)
+							.map(([family, tier]) => `${family}:${tier}`)
+							.join(" ")
+					: "(default)";
+				result = theme.fg("dim", `[service tier: ${tiers}]`);
+				break;
+			}
+			case "title_change":
+				result = theme.fg("dim", `[title: ${normalize(entry.title)}]`);
+				break;
+			case "mode_change":
+				result = theme.fg("dim", `[mode: ${entry.mode}]`);
+				break;
+			case "credential_pin":
+				result = theme.fg("dim", `[credential pin: ${entry.provider}]`);
+				break;
 			default:
-				result = "";
+				// Bookkeeping entries with nothing worth spelling out still get their
+				// type. A row that renders to the empty string is worse than a
+				// useless one: it draws as a bare bullet with no way to tell what it
+				// is or why the tree has a gap in it.
+				result = theme.fg("dim", `[${entry.type.replaceAll("_", " ")}]`);
 		}
 
 		return isSelected ? theme.bold(result) : result;
