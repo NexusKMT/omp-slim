@@ -64,7 +64,6 @@ export namespace Tokens {
 	/** A custom extension token. */
 	export interface Generic {
 		// Upstream marked deliberately permits arbitrary extension-token fields.
-		// biome-ignore lint/suspicious/noExplicitAny: This is marked's public open-token contract.
 		[key: string]: any;
 		type: string;
 		raw: string;
