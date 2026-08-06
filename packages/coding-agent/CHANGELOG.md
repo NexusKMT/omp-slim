@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed strict output schemas being rejected when native JSON Schema definition maps contain `ref` or applicator branches use `properties` without `type`.
+
 ## [17.2.10] - 2026-08-06
 
 ### Breaking Changes
