@@ -698,6 +698,8 @@ describe("AgentSession prewalk", () => {
 				.buildSessionContext()
 				.messages.some(message => message.role === "custom" && message.customType === "prewalk-plan"),
 		).toBe(false);
+		// The seeded legacy entry must remain the only transcript copy; persisting
+		// the current arm's transient nudge would make this count two.
 		expect(
 			sessionManager
 				.buildSessionContext({ transcript: true })
