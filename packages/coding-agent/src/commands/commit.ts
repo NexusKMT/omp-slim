@@ -41,7 +41,11 @@ export default class Commit extends Command {
 		// is already written. Mirror the `runPrintMode` exit pattern from
 		// `main.ts` so the CLI returns to the shell instead of stranding the user
 		// on Ctrl+C (issue #1041).
-		await runCommitCommand(cmd);
-		await postmortem.quit(0);
+		const { usedFallback } = await runCommitCommand(cmd);
+		// A commit written by the mechanical fallback is a degraded outcome:
+		// the agent did not do the work it was asked to do, so the command
+		// reports non-zero so callers can distinguish it from a real
+		// single-commit decision (issue #7835).
+		await postmortem.quit(usedFallback ? 1 : 0);
 	}
 }
