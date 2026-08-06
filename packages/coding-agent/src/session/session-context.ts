@@ -332,11 +332,7 @@ export function buildSessionContext(
 	const appendMessage = (entry: SessionEntry) => {
 		handleEntryResetTracking(entry);
 		if (entry.type === "message") {
-			if (
-				!options?.transcript &&
-				entry.message.role === "assistant" &&
-				entry.message.retryRecovery?.status === "recovered"
-			) {
+			if (!options?.transcript && entry.message.role === "assistant" && entry.message.retryRecovery) {
 				return;
 			}
 			pushMessage(entry.message);

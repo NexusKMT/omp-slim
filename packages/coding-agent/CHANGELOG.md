@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Applied reason-specific backoff to transient rate-limit retries and collapsed exhausted retry sagas into one terminal error naming the spent budget ([#7767](https://github.com/can1357/oh-my-pi/issues/7767)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes

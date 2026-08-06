@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Classified subscription/plan-cap 429 responses as credential-rotatable usage limits instead of transient per-minute throttles ([#7767](https://github.com/can1357/oh-my-pi/issues/7767)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Fixed

@@ -257,6 +257,19 @@ describe("isUsageLimitOutcome", () => {
 		expect(isUsageLimitOutcome(429, "Please retry in 5s")).toBe(false);
 	});
 
+	it("rotates on subscription caps without treating generic rate limits as usage exhaustion", () => {
+		const subscriptionCap =
+			"429 You've exceeded your subscription rate limits. Upgrade, or try again later. You can view your usage at https://api.synthetic.new/usage";
+		expect(parseRateLimitReason(subscriptionCap)).toBe("QUOTA_EXHAUSTED");
+		expect(isUsageLimitOutcome(429, subscriptionCap)).toBe(true);
+		expect(isUsageLimit(Object.assign(new Error(subscriptionCap), { status: 429 }))).toBe(true);
+
+		const transient = "429 Rate limit exceeded, too many requests";
+		expect(parseRateLimitReason(transient)).toBe("RATE_LIMIT_EXCEEDED");
+		expect(isUsageLimitOutcome(429, transient)).toBe(false);
+		expect(isUsageLimit(Object.assign(new Error(transient), { status: 429 }))).toBe(false);
+	});
+
 	it("still rotates on 429 with explicit account rate-limit framing", () => {
 		expect(
 			isUsageLimitOutcome(
