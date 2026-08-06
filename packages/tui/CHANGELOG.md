@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Herdr panes losing native scrollback when TUI transcript replacement or resize redraws emitted destructive terminal-history clears.
+
 ## [17.2.9] - 2026-08-05
 
 ### Fixed
