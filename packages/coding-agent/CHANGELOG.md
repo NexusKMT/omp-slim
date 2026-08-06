@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a slash command run mid-turn looking like it did nothing. `/usage`, `/advisor status`, and every other panel command already queued their output until the agent settled, but the deferral was silent, so on a long turn the command was indistinguishable from a dead one. The queue is now acknowledged above the editor (`N command outputs queued — shown when the agent pauses`) in an anchored container that is cleared and rebuilt in place, so it never mounts into the transcript and cannot duplicate rows in native scrollback (issues #4806/#6767).
+
 ## [17.2.10] - 2026-08-06
 
 ### Breaking Changes

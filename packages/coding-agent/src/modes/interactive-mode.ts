@@ -450,6 +450,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	omfgContainer: Container;
 	errorBannerContainer: Container;
 	modelCycleContainer: Container;
+	deferredCommandContainer: Container;
 	editor: CustomEditor;
 	editorContainer: Container;
 	hookWidgetContainerAbove: Container;
@@ -556,6 +557,8 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	#pendingCommandOutput: Component[] = [];
 	#pendingCommandOutputSessionId: string | undefined;
+	/** Commands (not components) queued while streaming, for the deferral hint. */
+	#pendingCommandOutputCommands = 0;
 	#pendingSlashCommands: SlashCommand[] = [];
 	/** Built-in editor autocomplete provider, before extension wrapping. */
 	#baseAutocompleteProvider: AutocompleteProvider | undefined;
@@ -643,6 +646,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.pendingMessagesContainer.disposeChildren();
 		this.#cancelModelCycleClearTimer();
 		this.modelCycleContainer.disposeChildren();
+		this.deferredCommandContainer.disposeChildren();
+		this.#pendingCommandOutputCommands = 0;
 		this.compactionQueuedMessages = [];
 		this.streamingComponent = undefined;
 		this.streamingMessage = undefined;
@@ -729,6 +734,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.omfgContainer = new AnchoredLiveContainer();
 		this.errorBannerContainer = new AnchoredLiveContainer();
 		this.modelCycleContainer = new AnchoredLiveContainer();
+		this.deferredCommandContainer = new AnchoredLiveContainer();
 		this.editor = new CustomEditor(getEditorTheme());
 		this.ui.enableScopedInputRender(this.editor);
 		this.editor.setUseTerminalCursor(this.ui.getShowHardwareCursor());
@@ -983,6 +989,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.addChild(this.omfgContainer);
 		this.ui.addChild(this.errorBannerContainer);
 		this.ui.addChild(this.modelCycleContainer);
+		this.ui.addChild(this.deferredCommandContainer);
 		// Working loader / transient status sits below the sticky todo + subagent
 		// HUDs, just above the editor's hook-widget top margin — so it reads next to
 		// the prompt while keeping the one-line gap above the editor.
@@ -4148,6 +4155,14 @@ export class InteractiveMode implements InteractiveModeContext {
 	 * flushed there. That is preferred over leaving it queued behind a command
 	 * the user runs during the pause, which mounts immediately and would put the
 	 * older panel out of order.
+	 *
+	 * The deferral is acknowledged in {@link deferredCommandContainer}, an
+	 * anchored container above the editor. Nothing is mounted into the
+	 * transcript: a mid-turn transcript mount re-renders rows below the growing
+	 * live block and duplicates them in native scrollback (issues #4806/#6767),
+	 * which is why the earlier `showStatus` acknowledgment was reverted. An
+	 * anchored container is cleared and rebuilt in place, so it costs no
+	 * scrollback rows — the same reason the ctrl+p role-cycle track lives there.
 	 */
 	presentCommandOutput(content: Component | readonly Component[]): void {
 		if (!this.session.isStreaming) {
@@ -4157,14 +4172,29 @@ export class InteractiveMode implements InteractiveModeContext {
 		const sessionId = this.sessionManager.getSessionId();
 		if (this.#pendingCommandOutput.length > 0 && this.#pendingCommandOutputSessionId !== sessionId) {
 			this.#pendingCommandOutput = [];
+			this.#pendingCommandOutputCommands = 0;
 		}
 		this.#pendingCommandOutputSessionId = sessionId;
 		const items = Array.isArray(content) ? content : [content as Component];
 		this.#pendingCommandOutput.push(...items);
-		// No feedback here on purpose: mounting anything into the transcript
-		// mid-turn (even a status line) re-renders rows below the growing live
-		// block and duplicates them in native scrollback — the exact regression
-		// issues #4806/#6767 pin. The queue flushes at the next settle.
+		this.#pendingCommandOutputCommands += 1;
+		this.#renderDeferredCommandNotice();
+		this.ui.requestRender();
+	}
+
+	/**
+	 * Show or clear the queued-output hint above the editor. Counts commands, not
+	 * components: one command can queue several (a spacer plus its panel).
+	 */
+	#renderDeferredCommandNotice(): void {
+		this.deferredCommandContainer.clear();
+		if (this.#pendingCommandOutputCommands === 0) return;
+		const label =
+			this.#pendingCommandOutputCommands === 1
+				? "1 command output queued"
+				: `${this.#pendingCommandOutputCommands} command outputs queued`;
+		this.deferredCommandContainer.addChild(new Spacer(1));
+		this.deferredCommandContainer.addChild(new Text(theme.fg("dim", `${label} — shown when the agent pauses`), 1, 0));
 	}
 
 	/** Mount every command panel queued for the current session while the agent was streaming. */
@@ -4174,6 +4204,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		const pendingSessionId = this.#pendingCommandOutputSessionId;
 		this.#pendingCommandOutput = [];
 		this.#pendingCommandOutputSessionId = undefined;
+		this.#pendingCommandOutputCommands = 0;
+		this.#renderDeferredCommandNotice();
 		if (pendingSessionId !== this.sessionManager.getSessionId()) return;
 		this.present(pending);
 	}
