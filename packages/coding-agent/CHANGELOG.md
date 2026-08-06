@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Consolidated Exa web-search enablement on `exa.enabled`; legacy `exa.enableSearch` values migrate automatically, and the obsolete Researcher and Websets settings have been removed.
+- Removed stale `computer.backend` values during config migration.
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
