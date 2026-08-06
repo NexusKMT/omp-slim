@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
@@ -7,10 +7,13 @@ import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mo
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
+import type { TuiSlashCommandRuntime } from "@oh-my-pi/pi-coding-agent/slash-commands/types";
 import { AUTO_THINKING } from "@oh-my-pi/pi-coding-agent/thinking";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
@@ -698,8 +701,8 @@ describe("AgentSession prewalk", () => {
 		expect(
 			sessionManager
 				.buildSessionContext({ transcript: true })
-				.messages.some(message => message.role === "custom" && message.customType === "prewalk-plan"),
-		).toBe(true);
+				.messages.filter(message => message.role === "custom" && message.customType === "prewalk-plan"),
+		).toHaveLength(1);
 	});
 
 	it("armPrewalk rejects a same-model same-effort no-op before injecting the plan nudge", async () => {
@@ -741,6 +744,55 @@ describe("AgentSession prewalk", () => {
 
 		expect(calls).toEqual([{ hasNudge: false }]);
 		expect(notices.some(message => message.includes("nothing to switch"))).toBe(true);
+	});
+
+	it("/prewalk reports success only when the requested arm remains active", async () => {
+		const primary = modelOrThrow("claude-sonnet-4-5");
+		const target = modelOrThrow("claude-sonnet-4-6");
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
+		const settings = Settings.isolated({ "compaction.enabled": false });
+		const sessionManager = SessionManager.inMemory();
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: {
+				model: primary,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [],
+				thinkingLevel: Effort.Medium,
+			},
+			convertToLlm,
+		});
+		session = new AgentSession({
+			agent,
+			sessionManager,
+			settings,
+			modelRegistry,
+			toolRegistry,
+			thinkingLevel: Effort.Medium,
+		});
+		const showStatus = vi.fn();
+		const ctx = {
+			session,
+			sessionManager,
+			settings,
+			collabGuest: false,
+			showStatus,
+			editor: { setText: vi.fn() },
+			refreshSlashCommandState: vi.fn(),
+		} as unknown as InteractiveModeContext;
+		const runtime = { ctx } satisfies TuiSlashCommandRuntime;
+
+		settings.setModelRole("smol", `${primary.provider}/${primary.id}:medium`);
+		expect(await executeBuiltinSlashCommand("/prewalk", runtime)).toBe(true);
+		expect(showStatus).not.toHaveBeenCalled();
+
+		settings.setModelRole("smol", `${target.provider}/${target.id}:medium`);
+		expect(await executeBuiltinSlashCommand("/prewalk", runtime)).toBe(true);
+		expect(showStatus).toHaveBeenCalledTimes(1);
+		expect(showStatus).toHaveBeenCalledWith(
+			`Prewalk on: switching to ${target.provider}/${target.id} at the next edit/write (todo-gated).`,
+		);
 	});
 
 	it("requires a fresh todo before a later explicit prewalk can hand off", async () => {

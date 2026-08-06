@@ -44,6 +44,9 @@
 - Fixed parsing of POSIX `$EDITOR` commands that contain quoted arguments or executable paths with spaces.
 - Fixed persisted Agent Hub rows losing the explicit caller model role when a subagent used a model override, preserving role provenance across restarts.
 - Fixed unobserved promise rejections in browser helpers (such as `tab.waitForResponse()`) causing tab workers to hang or crash.
+### Fixed
+
+- Fixed prewalk lifecycle handling so same-model/same-effort arms reject without plan injection or false success output, consumed plan nudges do not return after context rebuilds, explicit re-arms require a fresh TODO, and settings-enabled prewalk does not implicitly re-arm restored sessions.
 
 ## [17.2.9] - 2026-08-05
 
@@ -100,9 +103,6 @@
 ### Changed
 
 - Upgraded the bundled omptype schema engine: intersection and pipe operators, bigint and RegExp literals in the string DSL, Standard Schema V1 interop, JSON Schema import via fromJsonSchema(), and richer union/collection error reporting.
-### Fixed
-
-- Fixed prewalk lifecycle handling so same-model/same-effort arms reject without plan injection or false success output, consumed plan nudges do not return after context rebuilds, explicit re-arms require a fresh TODO, and settings-enabled prewalk does not implicitly re-arm restored sessions.
 
 ## [17.2.7] - 2026-08-03
 
