@@ -72,22 +72,22 @@ afterEach(() => {
 	resetSettingsForTest();
 });
 
-describe("InteractiveMode deferred command notice", () => {
-	it("acknowledges a command deferred mid-turn without touching the transcript", async () => {
+describe("InteractiveMode deferred command preview", () => {
+	it("shows the panel immediately mid-turn without touching the transcript", async () => {
 		const { mode, setStreaming } = await createHarness();
 		setStreaming(true);
 		const transcriptBefore = transcriptRowCount(mode);
 
-		mode.presentCommandOutput(new Text("usage panel", 1, 0));
+		mode.presentCommandOutput(new Text("Claude 5 Hour: 62% used", 1, 0));
 
-		// The whole point of the anchored container: a mid-turn transcript mount
-		// re-renders rows below the growing live block and duplicates them in
-		// native scrollback (issues #4806/#6767). Assert on content as well as row
-		// count, since a bare Spacer can leak without changing the count.
+		// The answer is visible right away, which is the whole point: before this,
+		// a command run mid-turn was indistinguishable from a dead one.
+		expect(noticeText(mode)).toContain("Claude 5 Hour: 62% used");
+		// But never via the transcript: a mid-turn transcript mount re-renders rows
+		// below the growing live block and duplicates them in native scrollback
+		// (issues #4806/#6767), which is what deferral was introduced to stop.
 		expect(transcriptRowCount(mode)).toBe(transcriptBefore);
-		expect(transcriptText(mode)).not.toContain("queued");
-		expect(noticeText(mode)).toContain("1 command output queued");
-		expect(noticeText(mode)).toContain("shown when the agent pauses");
+		expect(transcriptText(mode)).not.toContain("Claude 5 Hour");
 	});
 
 	it("counts commands rather than the components each one queues", async () => {
@@ -97,13 +97,28 @@ describe("InteractiveMode deferred command notice", () => {
 		// One command commonly queues a spacer plus its panel; that is still one
 		// command from the user's point of view.
 		mode.presentCommandOutput([new Text("spacer", 1, 0), new Text("usage panel", 1, 0)]);
-		expect(noticeText(mode)).toContain("1 command output queued");
+		expect(noticeText(mode)).toContain("1 command output");
 
 		mode.presentCommandOutput(new Text("advisor panel", 1, 0));
-		expect(noticeText(mode)).toContain("2 command outputs queued");
+		expect(noticeText(mode)).toContain("2 command outputs");
 	});
 
-	it("clears the notice and mounts the panels once the turn settles", async () => {
+	it("caps a tall panel so the prompt stays on screen", async () => {
+		const { mode, setStreaming } = await createHarness();
+		setStreaming(true);
+		const tall = Array.from({ length: 200 }, (_, i) => `row ${i}`).join("\n");
+
+		mode.presentCommandOutput(new Text(tall, 1, 0));
+
+		const rows = mode.deferredCommandContainer.render(120);
+		expect(rows.length).toBeLessThan(60);
+		expect(rows.join("\n")).toContain("row 0");
+		expect(rows.join("\n")).toContain("more rows");
+		// The tail is not silently dropped: it arrives in full at the settle.
+		expect(rows.join("\n")).not.toContain("row 199");
+	});
+
+	it("clears the preview and mounts the panels once the turn settles", async () => {
 		const { mode, setStreaming } = await createHarness();
 		setStreaming(true);
 		mode.presentCommandOutput(new Text("usage panel", 1, 0));
@@ -113,19 +128,19 @@ describe("InteractiveMode deferred command notice", () => {
 		mode.flushPendingCommandOutput();
 
 		expect(noticeText(mode)).toBe("");
-		expect(mode.chatContainer.render(120).join("\n")).toContain("usage panel");
+		expect(transcriptText(mode)).toContain("usage panel");
 	});
 
-	it("shows no notice when the agent is idle, since output mounts immediately", async () => {
+	it("shows no preview when the agent is idle, since output mounts immediately", async () => {
 		const { mode } = await createHarness();
 
 		mode.presentCommandOutput(new Text("usage panel", 1, 0));
 
 		expect(noticeText(mode)).toBe("");
-		expect(mode.chatContainer.render(120).join("\n")).toContain("usage panel");
+		expect(transcriptText(mode)).toContain("usage panel");
 	});
 
-	it("drops a stale notice when the session is reset while output is queued", async () => {
+	it("drops a stale preview when the session is reset while output is queued", async () => {
 		const { mode, setStreaming } = await createHarness();
 		setStreaming(true);
 		mode.presentCommandOutput(new Text("usage panel", 1, 0));

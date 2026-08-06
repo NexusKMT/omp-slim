@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed a slash command run mid-turn looking like it did nothing. `/usage`, `/advisor status`, and every other panel command already queued their output until the agent settled, but the deferral was silent, so on a long turn the command was indistinguishable from a dead one. The queue is now acknowledged above the editor (`N command outputs queued — shown when the agent pauses`) in an anchored container that is cleared and rebuilt in place, so it never mounts into the transcript and cannot duplicate rows in native scrollback (issues #4806/#6767).
+- Fixed `/usage`, `/advisor status`, and every other panel command answering only after the agent stopped working. Since `17.0.1` their output was queued until the turn settled (to stop mid-turn transcript mounts duplicating rows in native scrollback, issues #4806/#6767), and the deferral was silent, so on a long turn the command was indistinguishable from a dead one. The panel now renders immediately above the editor in an anchored container that is cleared and rebuilt in place, never entering the transcript, and the full output still lands in the transcript at the next settle. The preview is capped to 40% of the viewport (minimum 6 rows) so a tall report cannot push the prompt off screen.
 
 ## [17.2.10] - 2026-08-06
 
