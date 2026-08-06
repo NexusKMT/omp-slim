@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed ACP `session/load` and `session/resume` failing with `ACP session not found` for sessions created under the legacy/hashed project-directory scheme (17.2.5+, reverted in #7656): the lookup only scanned the directory re-derived from `cwd`, so sessions stored under a differently-named directory were unreachable. It now falls back to a global by-id scan (the same one the fork path already uses) when the cwd-scoped lookup misses ([#7779](https://github.com/can1357/oh-my-pi/issues/7779)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
