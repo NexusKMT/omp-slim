@@ -29,6 +29,10 @@ use super::{
 pub(super) struct MacInput {
 	source: CGEventSource,
 }
+#[allow(
+	clippy::non_send_fields_in_send_ty,
+	reason = "CGEventSource is an immutable CF object; `&mut self` receivers serialize all posting"
+)]
 // SAFETY: Core Graphics event sources are immutable CF objects after setup,
 // and all access through `MacInput` requires `&mut self`, so events are posted
 // serially after ownership moves between threads.
@@ -39,6 +43,10 @@ impl MacInput {
 		Ok(Self { source: source()? })
 	}
 
+	#[allow(
+		clippy::needless_pass_by_ref_mut,
+		reason = "`&mut self` exclusivity backs the `Send` safety argument for the CF event source"
+	)]
 	pub(super) fn pointer(
 		&mut self,
 		target: &Target,
@@ -67,6 +75,10 @@ impl MacInput {
 		}
 	}
 
+	#[allow(
+		clippy::needless_pass_by_ref_mut,
+		reason = "`&mut self` exclusivity backs the `Send` safety argument for the CF event source"
+	)]
 	pub(super) fn type_text(
 		&mut self,
 		target: &Target,
@@ -94,6 +106,10 @@ impl MacInput {
 		}
 	}
 
+	#[allow(
+		clippy::needless_pass_by_ref_mut,
+		reason = "`&mut self` exclusivity backs the `Send` safety argument for the CF event source"
+	)]
 	pub(super) fn key_chord(
 		&mut self,
 		target: &Target,
@@ -943,6 +959,11 @@ fn post_global_mouse(
 	post_global(&event)
 }
 
+#[allow(
+	clippy::unnecessary_wraps,
+	reason = "matches the fallible `FnMut(&CGEvent) -> CoreResult<()>` post callback used by \
+	          background posting"
+)]
 fn post_global(event: &CGEvent) -> CoreResult<()> {
 	event.post(CGEventTapLocation::HID);
 	Ok(())
