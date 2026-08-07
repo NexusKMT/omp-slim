@@ -43,8 +43,16 @@ impl Drop for Libei {
 		let Some(portal) = self.portal_session.take() else {
 			return;
 		};
-		let _ = portal.runtime.block_on(portal.session.close());
+		close_session(portal.runtime, &portal.session);
 	}
+}
+
+/// Closes a RemoteDesktop portal session, bounded by `CLOSE_TIMEOUT` so an
+/// unresponsive `xdg-desktop-portal` cannot hang teardown indefinitely.
+fn close_session(runtime: &tokio::runtime::Runtime, session: &RemoteDesktopSession) {
+	let _ = runtime.block_on(async {
+		tokio::time::timeout(crate::desktop::CLOSE_TIMEOUT, session.close()).await
+	});
 }
 
 impl Libei {
@@ -114,8 +122,13 @@ impl Libei {
 				}
 			})
 			.map_err(DesktopError::permission_denied)?;
-		let context = ei::Context::new(UnixStream::from(fd))
-			.map_err(|err| DesktopError::input_failed(format!("libei portal socket: {err}")))?;
+		let context = match ei::Context::new(UnixStream::from(fd)) {
+			Ok(context) => context,
+			Err(err) => {
+				close_session(runtime, &session);
+				return Err(DesktopError::input_failed(format!("libei portal socket: {err}")));
+			},
+		};
 		Ok((context, PortalSession { runtime, session }))
 	}
 
