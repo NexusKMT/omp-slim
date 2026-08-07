@@ -173,6 +173,15 @@ const KIMI_K3_REASONING_EFFORT_MAP: NonNullable<OpenAICompat["reasoningEffortMap
 	max: "max",
 };
 
+const CLINEPASS_REASONING_EFFORT_MAP: NonNullable<OpenAICompat["reasoningEffortMap"]> = {
+	minimal: "none",
+	low: "low",
+	medium: "medium",
+	high: "high",
+	xhigh: "xhigh",
+	max: "max",
+};
+
 const MIMO_REASONING_EFFORT_MAP: NonNullable<OpenAICompat["reasoningEffortMap"]> = {
 	minimal: "low",
 	xhigh: "high",
@@ -435,16 +444,20 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 	// namespace (`accounts/fireworks/routers/<id>-fast`), like Fire Pass, rather
 	// than the `models/` namespace the rest of the `fireworks` provider uses.
 	const isFireworksFastRouter = provider === "fireworks" && isFireworksFastModelId(spec.id);
+	const isClinePass = provider === "cline-pass";
 	const wireModelIdMode: ResolvedOpenAISharedCompat["wireModelIdMode"] =
 		provider === "firepass" || isFireworksFastRouter
 			? "firepass"
 			: provider === "fireworks"
 				? "fireworks"
-				: isOpenRouter
-					? "openrouter"
-					: "raw";
-	const thinkingFormat: ResolvedOpenAISharedCompat["thinkingFormat"] =
-		(isMoonshotKimi && !isMoonshotKimiK3) || isZai || isZhipu || isXiaomiMimo
+				: isClinePass
+					? "cline-pass"
+					: isOpenRouter
+						? "openrouter"
+						: "raw";
+	const thinkingFormat: ResolvedOpenAISharedCompat["thinkingFormat"] = isClinePass
+		? "openai"
+		: (isMoonshotKimi && !isMoonshotKimiK3) || isZai || isZhipu || isXiaomiMimo
 			? "zai"
 			: isOpenRouter
 				? "openrouter"
@@ -472,7 +485,7 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 		// OpenAI proprietary reasoning models (o-series, gpt-5+) reject explicit
 		// temperature/top_p/… with a 400 on every serving host (#5606).
 		supportsSamplingParams: !isOpenAISamplingRestrictedModelId(spec.id),
-		reasoningEffortMap: {},
+		reasoningEffortMap: isClinePass ? CLINEPASS_REASONING_EFFORT_MAP : {},
 		supportsUsageInStreaming: !isCerebras,
 		// pi-ai's thinking-loop guard is gemini-only; default the flag from the
 		// family classifier so OpenAI-compat proxies serving Gemini are covered.
@@ -488,9 +501,9 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 		// Native Kimi K3 always reasons through `reasoning_effort` (never the
 		// K2.x binary `thinking` block that #827's forced-tool-choice conflict is
 		// about), so suppressing its effort would leave K3 in an unsupported mode.
-		disableReasoningOnForcedToolChoice: (isKimiModel && !isMoonshotKimiK3) || isAnthropicModel,
-		disableReasoningOnToolChoice: isDeepseekFamily && Boolean(spec.reasoning) && !isOpenRouter,
-		supportsToolChoice: !isDirectDeepseekReasoning,
+		disableReasoningOnForcedToolChoice: !isClinePass && ((isKimiModel && !isMoonshotKimiK3) || isAnthropicModel),
+		disableReasoningOnToolChoice: !isClinePass && isDeepseekFamily && Boolean(spec.reasoning) && !isOpenRouter,
+		supportsToolChoice: isClinePass || !isDirectDeepseekReasoning,
 		// DeepSeek reasoning models on OpenCode Zen/Go 400 with
 		// "Thinking mode does not support this tool_choice" when a specific
 		// function is forced while the gateway's default thinking mode is active.
@@ -513,14 +526,15 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 		// (issue #2299).
 		thinkingFormat,
 		kimiApiFormat: undefined,
-		reasoningDisableMode: resolveReasoningDisableMode(thinkingFormat),
+		reasoningDisableMode: isClinePass ? "reasoning-effort-none" : resolveReasoningDisableMode(thinkingFormat),
 		omitReasoningEffort: false,
 		includeEncryptedReasoning: true,
 		filterReasoningHistory: isOpenRouter && isAnthropicModel,
 		thinkingKeep: usesMoonshotKimiPreservedThinking ? "all" : undefined,
-		reasoningContentField: "reasoning_content",
-		// Backends that 400 follow-up requests when prior assistant tool-call turns lack `reasoning_content`:
-		//   - Kimi: documented invariant on its native API.
+		reasoningContentField: isClinePass ? "reasoning" : "reasoning_content",
+		// Backends that reject follow-up requests when prior assistant tool-call
+		// turns lack their reasoning replay field:
+		//   - ClinePass streams `reasoning`; native Kimi uses `reasoning_content`.
 		//   - DeepSeek-family reasoning models, including aliased OpenCode Zen models
 		//     like `big-pickle`, validate exact thinking-mode replay.
 		//   - Xiaomi MiMo models require exact `reasoning_content` replay on
@@ -617,11 +631,13 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 		compat.extraBody = Object.keys(extraBody).length > 0 ? extraBody : undefined;
 	}
 	if (spec.compat?.reasoningDisableMode === undefined) {
-		compat.reasoningDisableMode = requiresEnabledThinking
-			? "omit"
-			: isDirectDeepseekReasoning
-				? "zai-thinking-disabled"
-				: resolveReasoningDisableMode(compat.thinkingFormat);
+		compat.reasoningDisableMode = isClinePass
+			? "reasoning-effort-none"
+			: requiresEnabledThinking
+				? "omit"
+				: isDirectDeepseekReasoning
+					? "zai-thinking-disabled"
+					: resolveReasoningDisableMode(compat.thinkingFormat);
 	}
 	if (spec.compat?.omitReasoningEffort === undefined && !compat.supportsReasoningEffort) {
 		compat.omitReasoningEffort = true;

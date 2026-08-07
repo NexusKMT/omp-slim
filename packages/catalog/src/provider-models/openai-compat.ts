@@ -1,5 +1,6 @@
 import { VERSION } from "@oh-my-pi/pi-utils";
 import * as logger from "@oh-my-pi/pi-utils/logger";
+import { toClinePassPublicModelId } from "../cline-pass-model-id";
 import {
 	fetchOpenAICompatibleModels,
 	type OpenAICompatibleModelMapperContext,
@@ -65,6 +66,7 @@ export interface ModelsDevModel {
 	name?: string;
 	tool_call?: boolean;
 	reasoning?: boolean;
+	reasoning_options?: Array<{ type?: string; values?: string[] }>;
 	limit?: {
 		context?: number;
 		output?: number;
@@ -2142,6 +2144,72 @@ export function firepassModelManagerOptions(
 ): ModelManagerOptions<"openai-completions"> {
 	return {
 		providerId: "firepass",
+	};
+}
+
+const CLINEPASS_API_BASE_URL = "https://api.cline.bot/api/v1";
+const CLINEPASS_MODELS_URL = "https://api.cline.bot/api/v1/ai/cline/recommended-models";
+const CLINEPASS_FALLBACK_CONTEXT_WINDOW = 128_000;
+const CLINEPASS_FALLBACK_MAX_TOKENS = 8_192;
+
+function buildClinePassFallbackModel(id: string): ModelSpec<"openai-completions"> {
+	return {
+		id,
+		name: id,
+		api: "openai-completions",
+		provider: "cline-pass",
+		baseUrl: CLINEPASS_API_BASE_URL,
+		reasoning: true,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: CLINEPASS_FALLBACK_CONTEXT_WINDOW,
+		maxTokens: CLINEPASS_FALLBACK_MAX_TOKENS,
+		thinking: buildClinePassThinking({}),
+	};
+}
+
+async function fetchClinePassModels(
+	fetchImpl: FetchImpl,
+	references: ReadonlyMap<string, ModelSpec<"openai-completions">>,
+): Promise<ModelSpec<"openai-completions">[]> {
+	const response = await withCatalogDiscoveryTimeout(5_000, signal => fetchImpl(CLINEPASS_MODELS_URL, { signal }));
+	if (!response.ok) {
+		throw new Error(`Failed to fetch ClinePass models: HTTP ${response.status}`);
+	}
+	const payload: unknown = await response.json();
+	if (!isRecord(payload) || !Array.isArray(payload.clinePass)) {
+		throw new Error("ClinePass model catalog response is missing clinePass");
+	}
+
+	const models = new Map<string, ModelSpec<"openai-completions">>();
+	for (const entry of payload.clinePass) {
+		if (!isRecord(entry) || typeof entry.id !== "string" || !entry.id.startsWith("cline-pass/")) {
+			continue;
+		}
+		const id = toClinePassPublicModelId(entry.id);
+		models.set(id, references.get(id) ?? buildClinePassFallbackModel(id));
+	}
+	if (models.size === 0) {
+		throw new Error("ClinePass model catalog contains no valid model IDs");
+	}
+	return [...models.values()];
+}
+
+/**
+ * Cline's OpenAI-compatible `/models` route is absent, but its public
+ * recommended-models endpoint is the authoritative ClinePass roster. Bundled
+ * metadata enriches known ids; conservative defaults keep newly added ids
+ * usable immediately and the bundled catalog remains the offline fallback.
+ */
+export function clinePassModelManagerOptions(config?: ModelManagerConfig): ModelManagerOptions<"openai-completions"> {
+	const references = new Map(
+		(getBundledModels("cline-pass") as Model<"openai-completions">[]).map(model => [model.id, toModelSpec(model)]),
+	);
+	const fetchImpl = discoveryFetch(config?.fetch);
+	return {
+		providerId: "cline-pass",
+		dynamicModelsAuthoritative: true,
+		fetchDynamicModels: () => fetchClinePassModels(fetchImpl, references),
 	};
 }
 
@@ -5635,6 +5703,40 @@ const MODELS_DEV_PROVIDER_DESCRIPTORS_BEDROCK: readonly ModelsDevProviderDescrip
 	},
 ];
 
+const CLINEPASS_DEFAULT_EFFORTS: readonly Effort[] = [
+	Effort.Minimal,
+	Effort.Low,
+	Effort.Medium,
+	Effort.High,
+	Effort.XHigh,
+	Effort.Max,
+];
+
+const CLINEPASS_WIRE_EFFORT: Readonly<Record<Effort, string>> = {
+	[Effort.Minimal]: "none",
+	[Effort.Low]: "low",
+	[Effort.Medium]: "medium",
+	[Effort.High]: "high",
+	[Effort.XHigh]: "xhigh",
+	[Effort.Max]: "max",
+};
+
+function resolveClinePassEfforts(raw: ModelsDevModel): Effort[] {
+	const wireValues = raw.reasoning_options?.find(option => option.type === "effort")?.values;
+	if (!wireValues) return [...CLINEPASS_DEFAULT_EFFORTS];
+	const efforts = CLINEPASS_DEFAULT_EFFORTS.filter(effort => wireValues.includes(CLINEPASS_WIRE_EFFORT[effort]));
+	return efforts.length > 0 ? efforts : [...CLINEPASS_DEFAULT_EFFORTS];
+}
+
+function buildClinePassThinking(raw: ModelsDevModel): ThinkingConfig {
+	const efforts = resolveClinePassEfforts(raw);
+	return {
+		mode: "effort",
+		efforts,
+		effortMap: Object.fromEntries(efforts.map(effort => [effort, CLINEPASS_WIRE_EFFORT[effort]])),
+	};
+}
+
 const MODELS_DEV_PROVIDER_DESCRIPTORS_CORE: readonly ModelsDevProviderDescriptor[] = [
 	// --- Anthropic ---
 	anthropicMessagesDescriptor("anthropic", "anthropic", "https://api.anthropic.com", {
@@ -5663,6 +5765,17 @@ const MODELS_DEV_PROVIDER_DESCRIPTORS_CORE: readonly ModelsDevProviderDescriptor
 	openAiCompletionsDescriptor("groq", "groq", "https://api.groq.com/openai/v1"),
 	// --- Cerebras ---
 	openAiCompletionsDescriptor("cerebras", "cerebras", "https://api.cerebras.ai/v1"),
+	// --- ClinePass ---
+	openAiCompletionsDescriptor("cline-pass", "cline-pass", "https://api.cline.bot/api/v1", {
+		transformModel: (model, modelId, raw) => ({
+			...model,
+			id: toClinePassPublicModelId(modelId),
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			...(model.reasoning && {
+				thinking: buildClinePassThinking(raw),
+			}),
+		}),
+	}),
 	// --- Together ---
 	openAiCompletionsDescriptor("togetherai", "together", "https://api.together.xyz/v1"),
 	// --- CoreWeave Serverless Inference ---
