@@ -882,7 +882,7 @@ describe("DebugTool launch validation", () => {
 				const tool = new DebugTool(session);
 
 				await expect(tool.execute("call", { action: "launch", program: "main.js" })).rejects.toThrow(
-					/Mason.*release tarball.*JS_DEBUG_DAP_SERVER/,
+					/download.*github\.com\/microsoft\/vscode-js-debug/,
 				);
 			} finally {
 				await removeWithRetries(cwd);
