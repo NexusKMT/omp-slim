@@ -14,6 +14,9 @@
 ### Fixed
 
 - Fixed Ctrl+O (`app.tools.expand`) not expanding truncated tool output while a tool-approval prompt or other selection dialog held keyboard focus, by promoting the shortcut to a global input listener that fires regardless of focus (it still defers to fullscreen overlays and the tree selector's own Ctrl+O filter cycle) ([#7837](https://github.com/can1357/oh-my-pi/issues/7837)).
+### Fixed
+
+- Fixed `omp commit` exiting 0 when the commit agent failed and the mechanical fallback wrote the commit: the command now exits non-zero when the fallback was used, so callers can distinguish a degraded numstat commit from a legitimate single-commit decision ([#7835](https://github.com/can1357/oh-my-pi/issues/7835)).
 
 ## [17.2.10] - 2026-08-06
 
