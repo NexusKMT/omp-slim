@@ -29,6 +29,10 @@ use super::{
 pub(super) struct MacInput {
 	source: CGEventSource,
 }
+// SAFETY: Core Graphics event sources are immutable CF objects after setup,
+// and all access through `MacInput` requires `&mut self`, so events are posted
+// serially after ownership moves between threads.
+unsafe impl Send for MacInput {}
 
 impl MacInput {
 	pub(super) fn new() -> CoreResult<Self> {
