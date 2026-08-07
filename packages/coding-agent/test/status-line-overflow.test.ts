@@ -157,10 +157,9 @@ describe("status line session accent", () => {
 		const border = buildComponent(false).getTopBorder(80).content;
 		// Positive: gap is rendered with the theme border color.
 		expect(border).toContain(`${theme.getFgAnsi("border")}${theme.boxRound.horizontal}`);
-		// Negative: the gap-painting pattern (accent ANSI directly followed by a horizontal
-		// glyph) must not appear. The session_name segment may still emit the accent ANSI
-		// for its own text — we only care that the gap is not accent-painted.
-		expect(border).not.toContain(`${ansi}${theme.boxRound.horizontal}`);
+		// Negative: neither the gap nor the session-name segment may emit the
+		// hash-derived session accent when the effective setting is disabled.
+		expect(border).not.toContain(ansi);
 	});
 
 	it("renders the session name with the theme accent color when the accent is disabled", () => {
