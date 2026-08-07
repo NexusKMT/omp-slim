@@ -15,6 +15,11 @@ describe("extractLeadingCdTarget", () => {
 		expect(extractLeadingCdTarget("cd /a\\ b && ls")).toEqual({ path: "/a b", rest: "ls" });
 	});
 
+	it("leaves escaped newlines to the shell", () => {
+		expect(extractLeadingCdTarget("cd /tmp\\\n&& echo ok")).toBeNull();
+		expect(extractLeadingCdTarget('cd "/tmp\\\n" && echo ok')).toBeNull();
+	});
+
 	it("preserves ~ so resolveToCwd can expand it", () => {
 		expect(extractLeadingCdTarget("cd ~/proj && make")).toEqual({ path: "~/proj", rest: "make" });
 	});

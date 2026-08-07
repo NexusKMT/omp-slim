@@ -263,6 +263,9 @@ export function extractLeadingCdTarget(command: string): { path: string; rest: s
 		if (inDouble) {
 			if (ch === "\\" && i + 1 < command.length) {
 				const next = command[i + 1];
+				// A line continuation crosses the first physical line. Leave it to
+				// the shell rather than turning the escaped newline into cwd text.
+				if (next === "\n" || next === "\r") return null;
 				if (next === '"' || next === "\\" || next === "$" || next === "`") {
 					path += next;
 					i++;
@@ -285,6 +288,8 @@ export function extractLeadingCdTarget(command: string): { path: string; rest: s
 			continue;
 		}
 		if (ch === "\\" && i + 1 < command.length) {
+			// Preserve shell line-continuation semantics by declining extraction.
+			if (command[i + 1] === "\n" || command[i + 1] === "\r") return null;
 			path += command[i + 1];
 			i++;
 			continue;
