@@ -17,6 +17,7 @@
 ### Fixed
 
 - Fixed Simplified Chinese quota-exhaustion errors (e.g. Zhipu Coding Plan's `429 已达到 5 小时的使用上限。您的限额将在 … 重置。`) being classified as `UNKNOWN`, which left multi-key sessions pinned to the exhausted api_key credential instead of rotating to a sibling key. Simplified Chinese quota phrasing (`达到…使用上限`, `额度已用完`, `配额已耗尽`, `限额 … 重置`, `余额不足`) now classifies as `QUOTA_EXHAUSTED`, and a 429 body carrying classifier-recognized Simplified Chinese phrasing (quota or throttle) is treated as informative rather than opaque, so a plain Chinese throttle (e.g. `已达到速率限制`) defers to the classifier and stays in the backoff lane instead of over-rotating credentials.
+- Classified subscription/plan-cap 429 responses as credential-rotatable usage limits instead of transient per-minute throttles ([#7767](https://github.com/can1357/oh-my-pi/issues/7767)).
 
 ## [17.2.9] - 2026-08-05
 
