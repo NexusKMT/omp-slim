@@ -178,7 +178,8 @@ describe("subagent runtime model resolution", () => {
 			return { session: createYieldingSession(), extensionsResult: {}, setToolUIContext: () => {} } as never;
 		});
 
-		// Mirrors the bundled scout agent (`model: "@smol"`).
+		// Mirrors what the spawn path hands the executor for the bundled scout
+		// (`model: "@smol"`): patterns already expanded, role carried beside them.
 		const agent: AgentDefinition = {
 			name: "scout",
 			description: "test",
@@ -192,6 +193,8 @@ describe("subagent runtime model resolution", () => {
 			task: "work",
 			index: 0,
 			id: "role-alias-chain",
+			modelOverride: ["fast/hy3"],
+			modelRole: "smol",
 			settings: Settings.isolated({
 				modelRoles: { default: "slow/opus", smol: "fast/hy3" },
 				"retry.fallbackChains": {
@@ -210,6 +213,53 @@ describe("subagent runtime model resolution", () => {
 		expect(childModelRole).toBe("fast/hy3");
 		expect(childFallbackChains?.["subagent:role-alias-chain"]).toEqual(["fast/composer"]);
 		expect(childFallbackChains?.default).toEqual(["slow/opus-backup"]);
+	});
+
+	it("inherits the aliased role's chain when the spawn path pre-expands the alias", async () => {
+		// The real task flow (structured-subagent) resolves `@task` to a concrete
+		// selector before calling the executor and carries the role identity in
+		// `modelRole`. Re-deriving the role from the expanded patterns yields
+		// nothing, so the child must route off `modelRole`, not `default`.
+		const roleModel = model("task-provider", "sonnet");
+		const defaultModel = model("default-provider", "opus");
+		let childFallbackChains: Record<string, string[]> | undefined;
+		vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async options => {
+			if (!options) throw new Error("Expected createAgentSession options");
+			childFallbackChains = options.settings?.get("retry.fallbackChains") as Record<string, string[]> | undefined;
+			return { session: createYieldingSession(), extensionsResult: {}, setToolUIContext: () => {} } as never;
+		});
+
+		const agent: AgentDefinition = {
+			name: "task",
+			description: "test",
+			systemPrompt: "test",
+			source: "bundled",
+			model: ["@task"],
+		};
+		await runSubprocess({
+			cwd: "/tmp",
+			agent,
+			task: "work",
+			index: 0,
+			id: "pre-expanded-role",
+			modelOverride: ["task-provider/sonnet"],
+			modelRole: "task",
+			settings: Settings.isolated({
+				modelRoles: { default: "default-provider/opus", task: "task-provider/sonnet" },
+				"retry.fallbackChains": {
+					default: ["task-provider/sonnet", "default-provider/sol"],
+					task: ["task-provider/sonnet"],
+				},
+			}),
+			modelRegistry: {
+				refresh: async () => {},
+				getAvailable: () => [roleModel, defaultModel],
+				getApiKey: async () => "test-key",
+			} as never,
+			enableLsp: false,
+		});
+
+		expect(childFallbackChains?.["subagent:pre-expanded-role"]).toEqual(["task-provider/sonnet"]);
 	});
 
 	it("inherits the default chain for a role alias whose role configures no chain", async () => {
@@ -235,6 +285,8 @@ describe("subagent runtime model resolution", () => {
 			task: "work",
 			index: 0,
 			id: "role-alias-default-chain",
+			modelOverride: ["fast/hy3"],
+			modelRole: "smol",
 			settings: Settings.isolated({
 				modelRoles: { default: "slow/opus", smol: "fast/hy3" },
 				"retry.fallbackChains": { default: ["slow/opus-backup"] },
