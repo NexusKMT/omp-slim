@@ -25,7 +25,7 @@ interface CommitExecutionContext {
 	push: boolean;
 }
 
-export async function runAgenticCommit(args: CommitCommandArgs): Promise<void> {
+export async function runAgenticCommit(args: CommitCommandArgs): Promise<{ usedFallback: boolean }> {
 	const cwd = getProjectDir();
 	const [settings, authStorage] = await Promise.all([Settings.init({ cwd }), discoverAuthStorage()]);
 
@@ -57,7 +57,7 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<void> {
 
 	if (stagedFiles.length === 0) {
 		process.stderr.write("No changes to commit.\n");
-		return;
+		return { usedFallback: false };
 	}
 
 	if (!args.noChangelog) {
@@ -94,7 +94,7 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<void> {
 		process.stdout.write("● Forcing fallback commit generation...\n");
 		const fallbackProposal = generateFallbackProposal(numstat);
 		await runSingleCommit(fallbackProposal, { cwd, dryRun: args.dryRun, push: args.push });
-		return;
+		return { usedFallback: true };
 	}
 
 	const trivialChange = detectTrivialChange(diff);
@@ -111,7 +111,7 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<void> {
 			warnings: [],
 		};
 		await runSingleCommit(trivialProposal, { cwd, dryRun: args.dryRun, push: args.push });
-		return;
+		return { usedFallback: false };
 	}
 
 	let existingChangelogEntries: ExistingChangelogEntries[] | undefined;
@@ -124,6 +124,7 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<void> {
 
 	process.stdout.write("● Starting commit agent...\n");
 	let agentSessionCompleted = false;
+	let usedFallback = false;
 
 	try {
 		await runCommitAgentSession({
@@ -141,7 +142,7 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<void> {
 			existingChangelogEntries,
 			onComplete: async commitState => {
 				agentSessionCompleted = true;
-				await completeAgentCommitState(commitState, {
+				usedFallback = await completeAgentCommitState(commitState, {
 					cwd,
 					dryRun: args.dryRun,
 					push: args.push,
@@ -151,7 +152,7 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<void> {
 				});
 			},
 		});
-		return;
+		return { usedFallback };
 	} catch (error) {
 		if (agentSessionCompleted) {
 			throw error;
@@ -164,7 +165,7 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<void> {
 		process.stdout.write("● Using fallback commit generation...\n");
 		const fallbackProposal = generateFallbackProposal(numstat);
 		await runSingleCommit(fallbackProposal, { cwd, dryRun: args.dryRun, push: args.push });
-		return;
+		return { usedFallback: true };
 	}
 }
 
@@ -175,7 +176,7 @@ async function completeAgentCommitState(
 		changelogTargets: string[];
 		numstat: NumstatEntry[];
 	},
-): Promise<void> {
+): Promise<boolean> {
 	let usedFallback = false;
 	if (!commitState.proposal && !commitState.splitProposal) {
 		if ($env.PI_COMMIT_NO_FALLBACK?.toLowerCase() !== "true") {
@@ -211,7 +212,7 @@ async function completeAgentCommitState(
 
 	if (commitState.proposal) {
 		await runSingleCommit(commitState.proposal, ctx);
-		return;
+		return usedFallback;
 	}
 
 	if (commitState.splitProposal) {
@@ -221,7 +222,7 @@ async function completeAgentCommitState(
 			push: ctx.push,
 			additionalFiles: updatedChangelogFiles,
 		});
-		return;
+		return usedFallback;
 	}
 
 	throw new Error("Commit agent did not provide a proposal.");
