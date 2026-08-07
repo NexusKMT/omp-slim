@@ -46,6 +46,9 @@ describe("ModelRegistry default custom models config", () => {
 			supportsLongPromptCacheRetention: false,
 			promptCacheMinimumTokens: 1024,
 			promptCacheMaximumCheckpoints: 4,
+			// Reasoning-tier Bedrock stream-stall watchdog widening applies to
+			// overrides too (model compat generation).
+			streamIdleTimeoutMs: 900000,
 		});
 	});
 

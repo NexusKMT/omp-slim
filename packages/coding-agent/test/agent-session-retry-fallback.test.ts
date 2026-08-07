@@ -2393,14 +2393,22 @@ describe("AgentSession retry fallback", () => {
 				role: "default",
 			},
 		]);
-		expect(retryEndEvents).toEqual([
-			{
-				type: "auto_retry_end",
-				success: false,
-				attempt: 1,
-				finalError: refusalMessage,
-			},
-		]);
+		expect(retryEndEvents).toHaveLength(1);
+		expect(retryEndEvents[0]).toMatchObject({
+			type: "auto_retry_end",
+			success: false,
+			attempt: 1,
+			finalError: refusalMessage,
+		});
+		// The superseded first attempt is aggregated onto the terminal event so
+		// the transcript renders one budget-labeled error, not per-attempt rows.
+		expect(retryEndEvents[0]?.retryErrors).toHaveLength(1);
+		expect(retryEndEvents[0]?.retryErrors?.[0]?.retryRecovery).toMatchObject({
+			kind: "auto-retry",
+			recovery: "model",
+			status: "superseded",
+			attempt: 1,
+		});
 	});
 
 	it("emits auto_retry_end when a mid-saga classifier refusal has no fallback to switch to", async () => {

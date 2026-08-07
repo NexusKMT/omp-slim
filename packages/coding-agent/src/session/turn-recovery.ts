@@ -1611,10 +1611,13 @@ export class TurnRecovery {
 		// Transient rate/concurrency caps stay on the same credential, but must
 		// honor their reason-specific windows. The default exponential base
 		// (≈500ms, capped at 8s) otherwise re-hits the cap and burns the retry
-		// budget before either window can clear.
+		// budget before either window can clear. An explicit provider
+		// retry-after is authoritative in both directions, so the heuristic
+		// window only applies when the error carries no parsed timing.
 		if (
 			!staleOpenAIResponsesReplayError &&
 			!AIError.is(id, AIError.Flag.UsageLimit) &&
+			parsedRetryAfterMs === undefined &&
 			(rateLimitReason === "CONCURRENT_LIMIT" || rateLimitReason === "RATE_LIMIT_EXCEEDED")
 		) {
 			const reasonBackoffMs = calculateRateLimitBackoffMs(rateLimitReason);
