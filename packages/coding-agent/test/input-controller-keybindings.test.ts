@@ -239,6 +239,9 @@ async function createContext() {
 		setOverlayVisible(visible: boolean) {
 			overlayVisible = visible;
 		},
+		setKeybinding(action: string, keys: KeyId[]) {
+			keyMap[action] = keys;
+		},
 		spies: {
 			setActionKeys,
 			showModelSelector,
@@ -730,5 +733,23 @@ describe("InputController global tool-output expand (ctrl+o)", () => {
 
 		expect(dispatchInput(listeners, CTRL_O)).toBeUndefined();
 		expect(ctx.toolOutputExpanded).toBe(false);
+	});
+
+	it("honors a remapped expand key while the tree selector has focus", async () => {
+		const context = await createContext();
+		context.setKeybinding("app.tools.expand", ["ctrl+x"]);
+		const controller = new context.InputController(context.ctx);
+		controller.setupKeyHandlers();
+		const listeners = registeredInputListeners(context.spies.addInputListener);
+		const tree = [
+			{
+				entry: { id: "root", type: "message", parentId: null, message: { role: "user", content: "hi" } },
+				children: [],
+			},
+		] as unknown as SessionTreeNode[];
+		context.setFocused(new TreeSelectorComponent(tree, "root", 20, () => {}, () => {}));
+
+		expect(dispatchInput(listeners, "\x18")).toEqual({ consume: true });
+		expect(context.ctx.toolOutputExpanded).toBe(true);
 	});
 });

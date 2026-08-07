@@ -292,7 +292,7 @@ export class InputController {
 			this.ctx.ui.addInputListener(data => {
 				if (!this.ctx.keybindings.matches(data, "app.tools.expand")) return undefined;
 				if (this.ctx.ui.hasOverlay()) return undefined;
-				if (this.ctx.ui.getFocused() instanceof TreeSelectorComponent) return undefined;
+				if (this.ctx.ui.getFocused() instanceof TreeSelectorComponent && matchesKey(data, "ctrl+o")) return undefined;
 				this.toggleToolOutputExpansion();
 				return { consume: true };
 			});
