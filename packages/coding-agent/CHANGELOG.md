@@ -79,6 +79,9 @@
 ### Fixed
 
 - Fixed the todo completion reminder still firing while the agent was waiting on a user question asked in a non-English language. The `isAwaitingUserAnswer` guard only recognized English question words and pronouns, so a `？`/`?`-terminated Chinese, Japanese, Korean, or Spanish prompt (e.g. `我应该继续吗？`) went undetected and the `<system-reminder>` interrupted the pause — which the model then misread as the user's answer and acted on. A trailing question mark plus any non-ASCII character in the line now counts as a pending question ([#7803](https://github.com/can1357/oh-my-pi/issues/7803)).
+### Fixed
+
+- Normalized resolved file paths in `read` summary recovery selectors, PDF image handles, and notebook errors so suffix-matched input does not teach agents malformed follow-up paths ([#7788](https://github.com/can1357/oh-my-pi/issues/7788)).
 
 ## [17.2.9] - 2026-08-05
 
