@@ -16,6 +16,7 @@ import {
 	validateSummary,
 } from "./analysis";
 import { runChangelogFlow } from "./changelog";
+import { abortOnGitFailure, pushOrAbort } from "./execute";
 import { runMapReduceAnalysis, shouldUseMapReduce } from "./map-reduce";
 import { formatCommitMessage } from "./message";
 import { resolvePrimaryModel, resolveSmolModel } from "./model-selection";
@@ -70,6 +71,11 @@ async function runLegacyCommitCommand(args: CommitCommandArgs): Promise<void> {
 		stagedFiles = await git.diff.changedFiles(cwd, { cached: true });
 	}
 	if (stagedFiles.length === 0) {
+		if (args.push) {
+			process.stdout.write("No changes to commit; pushing existing commits...\n");
+			await pushOrAbort(cwd);
+			return;
+		}
 		process.stderr.write("No changes to commit.\n");
 		return;
 	}
@@ -135,12 +141,14 @@ async function runLegacyCommitCommand(args: CommitCommandArgs): Promise<void> {
 		return;
 	}
 
-	await git.commit(cwd, commitMessage);
-	process.stdout.write("Commit created.\n");
-	if (args.push) {
-		await git.push(cwd);
-		process.stdout.write("Pushed to remote.\n");
+	try {
+		await git.commit(cwd, commitMessage);
+	} catch (error) {
+		if (error instanceof git.GitCommandError) abortOnGitFailure("Commit failed", error);
+		throw error;
 	}
+	process.stdout.write("Commit created.\n");
+	if (args.push) await pushOrAbort(cwd);
 }
 
 async function generateAnalysis(input: {

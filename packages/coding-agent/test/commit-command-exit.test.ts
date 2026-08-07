@@ -70,4 +70,22 @@ describe("omp commit command lifecycle (issue #1041)", () => {
 		expect(runCommitSpy).toHaveBeenCalledTimes(1);
 		expect(quitSpy).not.toHaveBeenCalled();
 	});
+
+	it("maps CommitAbortedError to exit code 1 without rethrowing (issue #7834)", async () => {
+		vi.spyOn(themeModule, "initTheme").mockResolvedValue(undefined);
+		vi.spyOn(commitModule, "runCommitCommand").mockRejectedValue(new commitModule.CommitAbortedError());
+		const quitSpy = vi.spyOn(postmortem, "quit").mockResolvedValue(undefined);
+
+		const command = new CommitCommand([], {
+			bin: "omp",
+			version: "0.0.0-test",
+			commands: new Map(),
+		});
+
+		// A hook refusal is already reported with a readable message; the command
+		// must exit non-zero rather than let the runtime dump the error.
+		await command.run();
+
+		expect(quitSpy).toHaveBeenCalledWith(1);
+	});
 });
