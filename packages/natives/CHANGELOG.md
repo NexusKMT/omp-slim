@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed read-only Wayland `computer` calls acquiring persistent keyboard and pointer control; RemoteDesktop input permission is now requested only on first input, is not persisted, and closes with the desktop session ([#7884](https://github.com/can1357/oh-my-pi/issues/7884)).
+
 ## [17.2.10] - 2026-08-06
 
 ### Fixed

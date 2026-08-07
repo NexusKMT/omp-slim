@@ -1,7 +1,5 @@
 use std::{fs, path::PathBuf};
 
-pub(super) const REMOTE_DESKTOP_TOKEN: &str = "remote-desktop-token";
-
 fn token_path(name: &str) -> Option<PathBuf> {
 	let base = std::env::var_os("XDG_STATE_HOME")
 		.map(PathBuf::from)
