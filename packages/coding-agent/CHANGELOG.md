@@ -37,6 +37,10 @@
 - Fixed `vault://<name>?op=...` commands targeting the focused/most-recently-active vault instead of the named one. The `vault=<name>` argument was appended after the Obsidian CLI subcommand (`obsidian bases vault=Work`), but the CLI only honors it as a top-level option before the subcommand (`obsidian vault=Work bases`); it is now prepended so the named vault is queried (and opened) regardless of window focus ([#7771](https://github.com/can1357/oh-my-pi/issues/7771)).
 - The status-line `session_name` segment now honors the `statusLine.sessionAccent` setting: when disabled, the rendered session name falls back to the theme `accent` color instead of emitting the hash-derived session accent, matching the gap-fill divider behavior ([#7867](https://github.com/can1357/oh-my-pi/pull/7867)).
 
+### Fixed
+
+- Fixed `/handoff` reporting "Handoff cancelled" for real generation failures. A provider error named `AbortError` (e.g. a stalled/idle-timed-out stream) no longer masquerades as a user cancellation; the actual error now surfaces unless the handoff was genuinely aborted ([#7903](https://github.com/can1357/oh-my-pi/issues/7903)).
+
 ## [17.2.10] - 2026-08-06
 
 ### Breaking Changes
