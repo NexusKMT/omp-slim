@@ -115,7 +115,7 @@ type DevinTierRoutes = Partial<Record<"off" | "minimal" | "low" | "medium" | "hi
 
 /** Devin families with a `-max` sibling: five wire tiers, `low` floor. */
 const DEVIN_FIVE_TIER_EFFORTS: readonly Effort[] = [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max];
-/** Devin families topping out at `-xhigh` (pre-5.6 GPT, 5.6 fast lanes). */
+/** Pre-5.6 Devin GPT families top out at `-xhigh`: four wire tiers, `low` floor. */
 const DEVIN_FOUR_TIER_EFFORTS: readonly Effort[] = [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh];
 
 function devinTierFamily(
