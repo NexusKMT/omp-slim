@@ -155,6 +155,7 @@ export type OpenAIReasoningFormat = "openai" | "openrouter" | "zai" | "kimi" | "
 export type OpenAIReasoningDisableMode =
 	| "omit"
 	| "lowest-effort"
+	| "reasoning-effort-none"
 	| "openrouter-enabled-false"
 	| "zai-thinking-disabled"
 	| "qwen-enable-thinking-false"
@@ -618,7 +619,7 @@ export interface ResolvedOpenAISharedCompat {
 	enableGeminiThinkingLoopGuard?: boolean;
 	openRouterRouting?: OpenAICompat["openRouterRouting"];
 	/** Provider-specific wire model-id transform applied to the base id. */
-	wireModelIdMode: "raw" | "firepass" | "fireworks" | "openrouter";
+	wireModelIdMode: "raw" | "cline-pass" | "firepass" | "fireworks" | "openrouter";
 	/** See {@link OpenAICompat.toolSchemaFlavor}. Read by both wire paths when converting tools. */
 	toolSchemaFlavor?: OpenAICompat["toolSchemaFlavor"];
 }
