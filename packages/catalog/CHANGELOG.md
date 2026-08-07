@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed current Devin model families, including SWE-1.7, Claude 5, Gemini 3.6 Flash, Kimi K3, Grok 4.5, and Inkling, appearing as separate wire variants instead of logical models with reasoning-effort routing.
+
 ## [17.2.10] - 2026-08-06
 
 ### Changed
