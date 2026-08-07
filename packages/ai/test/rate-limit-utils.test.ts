@@ -324,6 +324,11 @@ describe("isUsageLimitOutcome", () => {
 		expect(parseRateLimitReason(transient)).toBe("RATE_LIMIT_EXCEEDED");
 		expect(isUsageLimitOutcome(429, transient)).toBe(false);
 		expect(isUsageLimit(Object.assign(new Error(transient), { status: 429 }))).toBe(false);
+
+		const planPerMinuteLimit = "429 Your plan has a rate limit of 60 requests per minute";
+		expect(parseRateLimitReason(planPerMinuteLimit)).toBe("RATE_LIMIT_EXCEEDED");
+		expect(isUsageLimitOutcome(429, planPerMinuteLimit)).toBe(false);
+		expect(isUsageLimit(Object.assign(new Error(planPerMinuteLimit), { status: 429 }))).toBe(false);
 	});
 
 	it("still rotates on 429 with explicit account rate-limit framing", () => {
