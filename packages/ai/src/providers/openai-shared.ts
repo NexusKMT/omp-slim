@@ -1,3 +1,4 @@
+import { toClinePassWireModelId } from "@oh-my-pi/pi-catalog/cline-pass-model-id";
 import type { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { toFirepassWireModelId, toFireworksWireModelId } from "@oh-my-pi/pi-catalog/fireworks-model-id";
 import { isGlm52ReasoningEffortModelId, isKimiK3ModelId } from "@oh-my-pi/pi-catalog/identity";
@@ -552,6 +553,8 @@ export function applyWireModelIdTransform(
 	openrouterVariant?: string,
 ): string {
 	switch (mode) {
+		case "cline-pass":
+			return toClinePassWireModelId(baseId);
 		case "firepass":
 			return toFirepassWireModelId(baseId);
 		case "fireworks":
@@ -954,6 +957,9 @@ function encodeChatCompletionsDisabledReasoning(
 ): void {
 	delete params.reasoning_effort;
 	switch (disableMode) {
+		case "reasoning-effort-none":
+			params.reasoning_effort = "none";
+			break;
 		case "zai-thinking-disabled":
 			params.thinking = { type: "disabled" };
 			break;
@@ -1117,14 +1123,17 @@ function isZaiReasoningEffortDialect(model: Model<"openai-completions">, compat:
  * Provider-specific Chat Completions output clamp.
  *
  * Most OpenAI-compatible endpoints retain the conservative 64k ceiling from
- * {@link resolveOpenAIOutputTokenParam}. Z.AI/GLM-5.2 reasoning and native
- * Moonshot K3 explicitly accept their full advertised model caps, so those
- * routes clamp to `model.maxTokens` instead.
+ * {@link resolveOpenAIOutputTokenParam}. ClinePass, Z.AI/GLM-5.2 reasoning,
+ * and native Moonshot K3 explicitly accept their full advertised model caps,
+ * so those routes clamp to `model.maxTokens` instead.
  */
 export function resolveOpenAICompletionsOutputClamp(
 	model: Model<"openai-completions">,
 	compat: ResolvedOpenAICompat,
 ): number | undefined {
+	if (model.provider === "cline-pass") {
+		return model.maxTokens ?? OPENAI_MAX_OUTPUT_TOKENS;
+	}
 	if (isZaiReasoningEffortDialect(model, compat)) {
 		return model.maxTokens ?? OPENAI_MAX_OUTPUT_TOKENS;
 	}
