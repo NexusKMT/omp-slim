@@ -28,7 +28,7 @@ use tokio::{sync::Mutex as TokioMutex, time};
 use tokio_util::sync::CancellationToken;
 
 #[cfg(windows)]
-use crate::windows::configure_windows_path;
+use crate::windows::{canonicalize_for_compare, configure_windows_path};
 use crate::{
 	cancel::{AbortReason, AbortToken, CancelToken},
 	minimizer, process,
@@ -70,7 +70,18 @@ fn shell_working_dir_matches(shell: &BrushShell, cwd: &str) -> bool {
 		return false;
 	}
 	let current = shell.working_dir();
-	current == requested
+	#[cfg(windows)]
+	{
+		// Compare by filesystem identity, not spelling: the host may hand us
+		// a working dir in 8.3 short-name form while the requested cwd is the
+		// long form (or vice-versa). Both canonicalize to the same path, so
+		// avoid a redundant set_working_dir / PWD churn for the same dir.
+		canonicalize_for_compare(current) == canonicalize_for_compare(requested)
+	}
+	#[cfg(not(windows))]
+	{
+		current == requested
+	}
 }
 
 fn set_shell_working_dir_if_changed(shell: &mut BrushShell, cwd: &str) -> Result<()> {
@@ -1929,6 +1940,43 @@ mod tests {
 	use tokio::process::Command;
 
 	use super::*;
+
+	/// On Windows with an 8.3-spelled host cwd/TEMP, the shell's initial
+	/// working_dir is expanded to the long form (ADMINI~1 -> Administrator)
+	/// via GetLongPathNameW, without introducing an `\\?\` extended prefix or
+	/// resolving symlinks. Non-Windows has no short names.
+	#[cfg(windows)]
+	#[tokio::test]
+	async fn working_dir_initializes_to_long_form() {
+		let short = std::env::temp_dir(); // os-level TEMP, short-spelled on 8.3 hosts
+		let mut shell = BrushShell::builder()
+			.do_not_inherit_env(true)
+			.profile(ProfileLoadBehavior::Skip)
+			.rc(RcLoadBehavior::Skip)
+			.working_dir(short.clone())
+			.build()
+			.await
+			.expect("build shell");
+
+		let got = shell.working_dir();
+		// No 8.3 short-name segment (`~` + digits, e.g. ADMINI~1) survives
+		// expansion, and the result is the same physical directory.
+		let short_name_segment = |seg: std::path::Component<'_>| {
+			let s = seg.as_os_str().to_string_lossy();
+			if let Some(tilde) = s.find('~') {
+				let after = &s[tilde + 1..];
+				!after.is_empty() && after.chars().all(|c| c.is_ascii_digit())
+			} else {
+				false
+			}
+		};
+		assert!(
+			!got.components().any(short_name_segment),
+			"working_dir still contains an 8.3 short segment: {}",
+			got.display()
+		);
+		assert_eq!(got.canonicalize().unwrap(), short.canonicalize().unwrap());
+	}
 
 	#[cfg(unix)]
 	async fn kill_test_context() -> (ShellSessionCore, ExecutionParameters) {

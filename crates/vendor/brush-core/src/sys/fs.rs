@@ -5,6 +5,11 @@ use std::{
 	path::{Path, PathBuf},
 };
 
+#[cfg(windows)]
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::GetLongPathNameW;
+
 /// Normalizes shell-facing path aliases before `std::fs` sees them.
 #[allow(clippy::missing_const_for_fn, reason = "Windows implementation allocates")]
 pub fn normalize_shell_path(path: &Path) -> Cow<'_, Path> {
@@ -16,6 +21,46 @@ pub fn normalize_shell_path(path: &Path) -> Cow<'_, Path> {
 	{
 		Cow::Borrowed(path)
 	}
+}
+
+/// Expand 8.3 short-name components (e.g. `ADMINI~1`) in `path` to their long
+/// form, leaving the path otherwise unchanged.
+#[cfg(windows)]
+pub fn expand_to_long_path(path: &Path) -> PathBuf {
+	expand_to_long_path_impl(path)
+}
+
+/// Non-Windows: no 8.3 short names, return unchanged.
+#[cfg(not(windows))]
+pub fn expand_to_long_path(path: &Path) -> PathBuf {
+	path.to_path_buf()
+}
+
+/// Windows implementation using `GetLongPathNameW`, which resolves short-name
+/// aliases but — unlike `std::fs::canonicalize` — does **not** resolve symlinks
+/// or junctions, so `cd` into a symlink keeps the symlink spelling (the
+/// shell's existing behavior). A path with no short names is returned
+/// unchanged; on failure the input is returned as-is.
+#[cfg(windows)]
+fn expand_to_long_path_impl(path: &Path) -> PathBuf {
+	let Some(narrow) = path.as_os_str().to_str() else {
+		return path.to_path_buf();
+	};
+	let wide: Vec<u16> = std::ffi::OsStr::new(narrow).encode_wide().chain(Some(0)).collect();
+
+	// First call with a null buffer returns the required buffer size; second
+	// fills it. GetLongPathNameW returns 0 on failure (e.g. nonexistent path).
+	let needed = unsafe { GetLongPathNameW(wide.as_ptr(), std::ptr::null_mut(), 0) };
+	if needed == 0 {
+		return path.to_path_buf();
+	}
+	let mut buf = vec![0u16; needed as usize];
+	let written = unsafe { GetLongPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) };
+	if written == 0 {
+		return path.to_path_buf();
+	}
+	buf.truncate(written as usize);
+	PathBuf::from(std::ffi::OsString::from_wide(&buf))
 }
 
 /// Returns a Windows drive root for a shell pattern that starts with an MSYS/WSL drive alias.
