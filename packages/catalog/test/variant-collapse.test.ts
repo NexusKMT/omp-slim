@@ -586,14 +586,13 @@ describe("Devin tier routing", () => {
 		expect(sol.routing[Effort.Low]).toBe("gpt-5-6-sol-low");
 		expect(sol.routing.off).toBe("gpt-5-6-sol-none");
 		expect(sol.routing[Effort.Minimal]).toBeUndefined();
+
+		const solFast = family("gpt-5-6-sol-fast");
+		expect(solFast.routing[Effort.Max]).toBe("gpt-5-6-sol-max-priority");
+		expect(solFast.thinking.efforts).toEqual([Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max]);
 	});
 
-	it("keeps families without a -max sibling on the xhigh ceiling", () => {
-		const solFast = family("gpt-5-6-sol-fast");
-		expect(solFast.thinking.efforts).toEqual([Effort.Low, Effort.Medium, Effort.High, Effort.XHigh]);
-		expect(solFast.routing[Effort.Max]).toBeUndefined();
-		expect(solFast.routing[Effort.XHigh]).toBe("gpt-5-6-sol-xhigh-priority");
-
+	it("keeps pre-5.6 families without a -max sibling on the xhigh ceiling", () => {
 		const gpt55 = family("gpt-5-5");
 		expect(gpt55.thinking.efforts).toEqual([Effort.Low, Effort.Medium, Effort.High, Effort.XHigh]);
 		expect(gpt55.routing[Effort.Minimal]).toBeUndefined();

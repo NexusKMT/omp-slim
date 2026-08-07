@@ -172,8 +172,7 @@ function devinTierFamily(
 
 /**
  * GPT-5.6 (Luna/Sol/Terra) serves per-tier siblings for the full five-tier
- * `low..max` wire scale; user efforts route 1:1 onto them. Devin serves no
- * `-max-priority` sibling, so the fast family tops out at `xhigh`.
+ * `low..max` wire scale in both standard and fast lanes.
  */
 function devinGpt56Families(variant: "luna" | "sol" | "terra", name: string): readonly EffortVariantFamily[] {
 	const base = `gpt-5-6-${variant}`;
@@ -200,8 +199,9 @@ function devinGpt56Families(variant: "luna" | "sol" | "terra", name: string): re
 				medium: `${base}-medium-priority`,
 				high: `${base}-high-priority`,
 				xhigh: `${base}-xhigh-priority`,
+				max: `${base}-max-priority`,
 			},
-			DEVIN_FOUR_TIER_EFFORTS,
+			DEVIN_FIVE_TIER_EFFORTS,
 		),
 	];
 }
