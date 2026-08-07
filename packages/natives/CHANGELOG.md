@@ -12,6 +12,9 @@
 - Fixed `bun run build:bindings` failing on Windows: the `node_modules/.bin` entry is a `napi.exe` launcher there, which Bun tried to parse as JavaScript. The CLI's JS entry is now resolved from the `@napi-rs/cli` manifest.
 - Fixed the local (non-Bazel) addon build always producing the `baseline` variant on Windows — `scripts/host-detect.ts` shared the broken PowerShell AVX2 probe.
 - Fixed a rustc ICE building `maudio` for `x86_64-pc-windows-msvc` under the pinned rustup nightly by capping that package at `opt-level = 1`; MIR const-folding turned `MaybeUninit<ma_fence>` into an `Uninit` operand that codegen rejects for a ScalarPair argument.
+### Fixed
+
+- Fixed synthesized macOS keyboard and pointer events suppressing the user's physical input.
 
 ## [17.2.10] - 2026-08-06
 
