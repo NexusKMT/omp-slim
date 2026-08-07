@@ -150,4 +150,21 @@ describe("InteractiveMode deferred command preview", () => {
 
 		expect(noticeText(mode)).toBe("");
 	});
+
+	it("starts the queue over after a reset, so a later command previews alone", async () => {
+		const { mode, setStreaming } = await createHarness();
+		setStreaming(true);
+		mode.presentCommandOutput(new Text("stale panel", 1, 0));
+
+		// The reset keeps the same session id here, so nothing downstream can
+		// recognise the leftover queue as stale; it has to be dropped at the reset.
+		mode.clearTransientSessionUi();
+		mode.presentCommandOutput(new Text("fresh panel", 1, 0));
+
+		const notice = noticeText(mode);
+		expect(notice).toContain("fresh panel");
+		expect(notice).not.toContain("stale panel");
+		expect(notice).toContain("1 command output");
+		expect(notice).not.toContain("2 command outputs");
+	});
 });
