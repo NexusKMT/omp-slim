@@ -624,6 +624,41 @@ describe("cursor usage provider", () => {
 			expect(report?.metadata).toEqual({ email: "fallback@example.com" });
 		});
 
+		it("does not send the session cookie outside the default Cursor origin", async () => {
+			const accessToken = createCursorAccessToken("auth0|user_123");
+			const requests: Array<{ url: string; headers: Headers }> = [];
+			const mockFetch = (async (input: string | URL, init?: RequestInit): Promise<Response> => {
+				requests.push({
+					url: typeof input === "string" ? input : input.toString(),
+					headers: new Headers(init?.headers),
+				});
+				return Response.json({
+					"gpt-4": {
+						numRequests: 10,
+						maxRequestUsage: 100,
+					},
+				});
+			}) as unknown as typeof fetch;
+
+			const report = await cursorUsageProvider.fetchUsage(
+				{
+					provider: "cursor",
+					baseUrl: "https://cursor-proxy.example.com",
+					credential: {
+						type: "oauth",
+						accessToken,
+					},
+				},
+				{ fetch: mockFetch },
+			);
+
+			expect(requests).toHaveLength(1);
+			expect(requests[0]?.url).toBe("https://cursor-proxy.example.com/auth/usage");
+			expect(requests[0]?.headers.get("Authorization")).toBe(`Bearer ${accessToken}`);
+			expect(requests[0]?.headers.has("Cookie")).toBe(false);
+			expect(report?.limits.map(limit => limit.id)).toEqual(["cursor:requests:gpt-4"]);
+		});
+
 		it("returns null on non-2xx response", async () => {
 			const mockFetch = (async () => new Response("Error", { status: 403 })) as unknown as typeof fetch;
 			const ctx: UsageFetchContext = {
