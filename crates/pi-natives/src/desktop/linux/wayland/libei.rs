@@ -52,12 +52,7 @@ impl Libei {
 	}
 
 	fn portal_context() -> CoreResult<ei::Context> {
-		let runtime = tokio::runtime::Builder::new_current_thread()
-			.enable_all()
-			.build()
-			.map_err(|err| {
-				DesktopError::input_failed(format!("RemoteDesktop portal runtime: {err}"))
-			})?;
+		let runtime = super::portal::portal_runtime()?;
 		let fd = runtime
 			.block_on(async {
 				let portal = RemoteDesktop::new()

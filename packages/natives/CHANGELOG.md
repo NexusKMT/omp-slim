@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Wayland `libei` input initialization poisoning PipeWire screen capture: both paths now share one long-lived Tokio runtime so `ashpd`'s process-global D-Bus connection is never orphaned by a dropped runtime ([#7886](https://github.com/can1357/oh-my-pi/issues/7886)).
+
 ## [17.2.10] - 2026-08-06
 
 ### Fixed
