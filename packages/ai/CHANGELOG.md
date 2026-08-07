@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `ANTHROPIC_BASE_URL` being ignored for Anthropic chat requests, which sent gateway-scoped keys to `api.anthropic.com` (401 `invalid x-api-key`, and a credential disclosure) instead of the configured host. Chat now resolves the base URL to `ANTHROPIC_BASE_URL` (after Foundry, ahead of the official default) and forwards `ANTHROPIC_CUSTOM_HEADERS` to non-official gateways, matching the documented behavior and the web-search fix from #1693 ([#7874](https://github.com/can1357/oh-my-pi/issues/7874)).
+
 ## [17.2.10] - 2026-08-06
 
 ### Breaking Changes
