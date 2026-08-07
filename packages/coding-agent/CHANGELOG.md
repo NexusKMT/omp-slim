@@ -33,6 +33,10 @@
 
 - Fixed the leading `cd <path> && ...` extraction absorbing shell syntax into the structured `cwd`, so `cd /tmp 2>/dev/null && echo ok` died with "Working directory does not exist: /tmp 2>/dev/null" before the shell ran. Extraction now captures a single path token via a quote-aware scanner and defers to the shell when anything else (redirects, extra arguments, shell expansion) precedes the top-level `&&` ([#7883](https://github.com/can1357/oh-my-pi/issues/7883)).
 
+### Added
+
+- Added `AGENT=1` to coding-agent child-process environments so downstream tools can detect agent-driven execution ([#7847](https://github.com/can1357/oh-my-pi/issues/7847)).
+
 ## [17.2.10] - 2026-08-06
 
 ### Breaking Changes
