@@ -285,6 +285,7 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 	const provider = spec.provider;
 	const baseUrl = spec.baseUrl;
 	const hostModel = { provider, baseUrl };
+	const isClinePass = provider === "cline-pass";
 
 	const isCerebras = modelMatchesHost(hostModel, "cerebras");
 	const isZai = modelMatchesHost(hostModel, "zai");
@@ -444,7 +445,6 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 	// namespace (`accounts/fireworks/routers/<id>-fast`), like Fire Pass, rather
 	// than the `models/` namespace the rest of the `fireworks` provider uses.
 	const isFireworksFastRouter = provider === "fireworks" && isFireworksFastModelId(spec.id);
-	const isClinePass = provider === "cline-pass";
 	const wireModelIdMode: ResolvedOpenAISharedCompat["wireModelIdMode"] =
 		provider === "firepass" || isFireworksFastRouter
 			? "firepass"
@@ -504,12 +504,12 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 		disableReasoningOnForcedToolChoice: !isClinePass && ((isKimiModel && !isMoonshotKimiK3) || isAnthropicModel),
 		disableReasoningOnToolChoice: !isClinePass && isDeepseekFamily && Boolean(spec.reasoning) && !isOpenRouter,
 		supportsToolChoice: isClinePass || !isDirectDeepseekReasoning,
-		// DeepSeek reasoning models on OpenCode Zen/Go 400 with
-		// "Thinking mode does not support this tool_choice" when a specific
-		// function is forced while the gateway's default thinking mode is active.
-		// Downgrade only on those gateways: other hosts can turn thinking off via
-		// disableReasoningOnToolChoice and must retain hard tool selection.
-		supportsForcedToolChoice: !requiresEnabledThinking && !(isOpenCodeHost && isDeepseekReasoning),
+		// DeepSeek reasoning models on OpenCode Zen/Go and Qwen models on
+		// ClinePass reject a specific function choice while the gateway's
+		// default thinking mode is active. Downgrade only on those gateways:
+		// other hosts can turn thinking off and retain hard tool selection.
+		supportsForcedToolChoice:
+			!requiresEnabledThinking && !(isOpenCodeHost && isDeepseekReasoning) && !(isClinePass && isQwen),
 		supportsNamedToolChoice: STRING_ONLY_NAMED_TOOL_CHOICE_PROVIDERS[provider] !== true,
 		maxTokensField: useMaxTokens ? "max_tokens" : "max_completion_tokens",
 		requiresToolResultName: isMistral,
@@ -534,9 +534,9 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 		reasoningContentField: isClinePass ? "reasoning" : "reasoning_content",
 		// Backends that reject follow-up requests when prior assistant tool-call
 		// turns lack their reasoning replay field:
-		//   - ClinePass streams `reasoning`; native Kimi uses `reasoning_content`.
+		//   - ClinePass names the field `reasoning`; only the family predicates
+		//     below decide whether a Cline-hosted model requires replay.
 		//   - DeepSeek-family reasoning models, including aliased OpenCode Zen models
-		//     like `big-pickle`, validate exact thinking-mode replay.
 		//   - Xiaomi MiMo models require exact `reasoning_content` replay on
 		//     thinking-mode tool-call continuations across standard and Token Plan hosts.
 		//   - Any reasoning-capable model reached through OpenRouter can enforce this

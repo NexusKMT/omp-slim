@@ -154,7 +154,7 @@ routing, model ids, or usage accounting.
 
 - Catalog IDs omit the gateway's `cline-pass/` namespace; Chat Completions adds it on the wire.
 - The OpenAI-compatible `/models` route is absent. Discover the authoritative roster from Cline's public `recommended-models` endpoint, with the generated catalog as an offline metadata fallback.
-- Output limits use `max_completion_tokens`. Reasoning uses `reasoning_effort` (`none` through `max`) and streams through `delta.reasoning`; tool-call continuations must replay that field.
+- Output limits use `max_completion_tokens`. Reasoning uses `reasoning_effort` (`none` through `max`) and streams through `delta.reasoning`; continuations replay it only for model families whose compatibility policy requires reasoning history.
 - The dashboard's `/users/me/plan/usage-limits` route accepts the inference API key and returns five-hour, weekly, and monthly utilization with reset times; `/users/me` supplies the account email label. Usage reporting does not require account OAuth.
 
 ### Fireworks and Firepass

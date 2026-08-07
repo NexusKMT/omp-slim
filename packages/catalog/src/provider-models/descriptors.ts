@@ -171,7 +171,6 @@ export const CATALOG_PROVIDERS = [
 		defaultModel: "kimi-k3",
 		envVars: ["CLINE_API_KEY"],
 		createModelManagerOptions: (config: ModelManagerConfig) => clinePassModelManagerOptions(config),
-		allowUnauthenticated: true,
 		dynamicModelsAuthoritative: true,
 		catalogDiscovery: { label: "ClinePass", allowUnauthenticated: true },
 	},

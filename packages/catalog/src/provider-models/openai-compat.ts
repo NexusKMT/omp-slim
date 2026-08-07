@@ -2183,10 +2183,17 @@ async function fetchClinePassModels(
 
 	const models = new Map<string, ModelSpec<"openai-completions">>();
 	for (const entry of payload.clinePass) {
-		if (!isRecord(entry) || typeof entry.id !== "string" || !entry.id.startsWith("cline-pass/")) {
+		if (!isRecord(entry) || typeof entry.id !== "string") {
 			continue;
 		}
-		const id = toClinePassPublicModelId(entry.id);
+		const wireId = entry.id.trim();
+		if (!wireId.startsWith("cline-pass/")) {
+			continue;
+		}
+		const id = toClinePassPublicModelId(wireId).trim();
+		if (!id) {
+			continue;
+		}
 		models.set(id, references.get(id) ?? buildClinePassFallbackModel(id));
 	}
 	if (models.size === 0) {
