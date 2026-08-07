@@ -96,6 +96,19 @@ describe("tree selector entry labels", () => {
 		expect(rows).toContain("[session init]");
 	});
 
+	it("searches bookkeeping entries by their rendered content", () => {
+		for (const [query, expected] of [
+			["fork", "[title: fork cleanup]"],
+			["anthropic", "[credential pin: anthropic]"],
+			["priority", "[service tier: claude:priority]"],
+		]) {
+			const selector = selectorFor([userEntry, ...bookkeeping]);
+			selector.handleInput(ALT_A);
+			selector.handleInput(query);
+			expect(visibleRows(selector).join("\n")).toContain(expected);
+		}
+	});
+
 	it("hides bookkeeping entries in the default view", () => {
 		const selector = selectorFor([userEntry, ...bookkeeping]);
 		const rows = visibleRows(selector).join("\n");

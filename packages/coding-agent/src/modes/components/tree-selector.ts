@@ -398,6 +398,34 @@ class TreeList implements Component {
 			case "label":
 				parts.push("label", entry.label ?? "");
 				break;
+			case "service_tier_change":
+				parts.push("service tier");
+				if (entry.serviceTier) {
+					const serviceTier = entry.serviceTier;
+					for (const family in serviceTier) {
+						const tier = serviceTier[family as keyof typeof serviceTier];
+						if (tier) parts.push(family, tier);
+					}
+				}
+				break;
+			case "title_change":
+				parts.push("title", entry.title);
+				break;
+			case "mode_change":
+				parts.push("mode", entry.mode);
+				break;
+			case "credential_pin":
+				parts.push("credential pin", entry.provider);
+				break;
+			case "ttsr_injection":
+				parts.push("ttsr injection", ...entry.injectedRules);
+				break;
+			case "reset_boundary":
+				parts.push("reset boundary");
+				break;
+			case "session_init":
+				parts.push("session init");
+				break;
 		}
 
 		return parts.join(" ");
