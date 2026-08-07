@@ -60,7 +60,7 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<{ usedF
 		if (args.push) {
 			process.stdout.write("No changes to commit; pushing existing commits...\n");
 			await pushOrAbort(cwd);
-			return;
+			return { usedFallback: false };
 		}
 		process.stderr.write("No changes to commit.\n");
 		return { usedFallback: false };
