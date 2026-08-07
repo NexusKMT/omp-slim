@@ -150,6 +150,13 @@ routing, model ids, or usage accounting.
 - The OpenAI-compatible path needs common Kimi headers.
 - It also participates in the OpenAI/Anthropic dual-surface shim.
 
+### ClinePass
+
+- Catalog IDs omit the gateway's `cline-pass/` namespace; Chat Completions adds it on the wire.
+- The OpenAI-compatible `/models` route is absent. Discover the authoritative roster from Cline's public `recommended-models` endpoint, with the generated catalog as an offline metadata fallback.
+- Output limits use `max_completion_tokens`. Reasoning uses `reasoning_effort` (`none` through `max`) and streams through `delta.reasoning`; tool-call continuations must replay that field.
+- The dashboard's `/users/me/plan/usage-limits` route accepts the inference API key and returns five-hour, weekly, and monthly utilization with reset times; `/users/me` supplies the account email label. Usage reporting does not require account OAuth.
+
 ### Fireworks and Firepass
 
 - Wire model ids need provider-specific mapping.
@@ -161,8 +168,8 @@ routing, model ids, or usage accounting.
 Check these before adding or forwarding a field:
 
 - **Model id.** Some models resolve a wire id from reasoning effort.
-  Firepass/Fireworks transform ids. OpenRouter suffix handling is path-segment
-  aware.
+  ClinePass, Firepass, and Fireworks transform ids. OpenRouter suffix handling
+  is path-segment aware.
 - **Max output tokens.** Kimi-family models may require a max-token field even
   when the caller did not set one. OpenRouter should omit catalog defaults unless
   explicit. Codex drops caller caps. Responses uses `max_output_tokens`; Chat

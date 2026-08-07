@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the native `cline-pass` provider with live roster discovery, generated offline metadata, concise public model IDs, and verified output-token and reasoning-effort request shaping. ([#3833](https://github.com/can1357/oh-my-pi/issues/3833))
+
 ## [17.2.10] - 2026-08-06
 
 ### Changed
