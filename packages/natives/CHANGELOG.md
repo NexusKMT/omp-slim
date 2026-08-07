@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- `bun run build` (`scripts/bazel-natives.ts`) now supports Windows hosts: the `host` pseudo-target delegates to the local napi build against VS Build Tools (the bazel msvc cross toolchain remains linux/mac-only), and other targets fail fast with guidance instead of dying deep inside a bazel repo rule. The local build also auto-appends VS Build Tools' bundled CMake/Ninja to `PATH` via vswhere, so it works outside a vcvars prompt.
+
+### Fixed
+
+- Fixed the native addon loader selecting the `baseline` CPU variant on every Windows host whose `powershell.exe` is Windows PowerShell 5.1: `[System.Runtime.Intrinsics.X86.Avx2]` only exists on .NET Core, so the probe never reported AVX2. Detection now calls `IsProcessorFeaturePresent` through `bun:ffi`, which is both correct and ~270 ms cheaper at startup (the PowerShell spawn is gone); Node embeds fall back to `pwsh` before `powershell.exe`.
+- Fixed `bun run build:bindings` failing on Windows: the `node_modules/.bin` entry is a `napi.exe` launcher there, which Bun tried to parse as JavaScript. The CLI's JS entry is now resolved from the `@napi-rs/cli` manifest.
+- Fixed the local (non-Bazel) addon build always producing the `baseline` variant on Windows — `scripts/host-detect.ts` shared the broken PowerShell AVX2 probe.
+- Fixed a rustc ICE building `maudio` for `x86_64-pc-windows-msvc` under the pinned rustup nightly by capping that package at `opt-level = 1`; MIR const-folding turned `MaybeUninit<ma_fence>` into an `Uninit` operand that codegen rejects for a ScalarPair argument.
+
 ## [17.2.10] - 2026-08-06
 
 ### Fixed
