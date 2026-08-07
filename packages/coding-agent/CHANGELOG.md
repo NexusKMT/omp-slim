@@ -8,6 +8,10 @@
 - Remote MCP transports now enforce header precedence and origin policy: client-generated HTTP/MCP/authorization headers win over configured headers case-insensitively, and Agent Plugins servers never forward configured headers across a redirect to a different origin (method-changing redirects of JSON-RPC POSTs are refused). Agent Plugins stdio `env` values and remote `headers` are likewise exempt from config-value resolution (no ambient env-name lookup, no `!command` execution, empty values preserved).
 - Added `omp share <session>`: share a saved session by id prefix or `.jsonl` path without launching the agent — same encrypted upload, store selection, and `share.redactSecrets` handling as the `/share` slash command.
 
+### Fixed
+
+- Fixed `/handoff` reporting "Handoff cancelled" for real generation failures. A provider error named `AbortError` (e.g. a stalled/idle-timed-out stream) no longer masquerades as a user cancellation; the actual error now surfaces unless the handoff was genuinely aborted ([#7903](https://github.com/can1357/oh-my-pi/issues/7903)).
+
 ## [17.2.10] - 2026-08-06
 
 ### Breaking Changes
