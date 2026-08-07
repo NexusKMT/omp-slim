@@ -115,6 +115,10 @@
 
 - Fixed `vault://<name>?op=...` commands targeting the focused/most-recently-active vault instead of the named one. The `vault=<name>` argument was appended after the Obsidian CLI subcommand (`obsidian bases vault=Work`), but the CLI only honors it as a top-level option before the subcommand (`obsidian vault=Work bases`); it is now prepended so the named vault is queried (and opened) regardless of window focus ([#7771](https://github.com/can1357/oh-my-pi/issues/7771)).
 
+### Changed
+
+- Clarified the JavaScript/TypeScript debug adapter install path: `js-debug-adapter` is the omp adapter id, not an npm package, so `npm i -g js-debug-adapter` 404s. The docs and the "adapter not available" message now point to the supported installs — Mason, the standalone release tarball extracted under `~/.local/opt` (auto-discovered), or `JS_DEBUG_DAP_SERVER`. The docs also note the adapter runs under `node` if available, else the omp Bun host ([#7757](https://github.com/can1357/oh-my-pi/issues/7757)).
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
