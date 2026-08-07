@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed `ANTHROPIC_BASE_URL` being ignored for Anthropic chat requests, which sent gateway-scoped keys to `api.anthropic.com` (401 `invalid x-api-key`, and a credential disclosure) instead of the configured host. Chat now resolves the base URL to `ANTHROPIC_BASE_URL` (after Foundry, ahead of the official default) and forwards `ANTHROPIC_CUSTOM_HEADERS` to non-official gateways, matching the documented behavior and the web-search fix from #1693 ([#7874](https://github.com/can1357/oh-my-pi/issues/7874)).
+- Fixed a pre-org OAuth tombstone (`email:<e>`) surviving a later org-scoped login of the same account (`email:<e>|org:<ws>`) for `openai-codex` and `anthropic`, leaving a permanent red row in `omp usage` that re-login could not clear. `#purgeSupersededDisabledRows` now reuses the `matchesReplacementCredential` semantics of the active-replacement path instead of exact identity-key equality, so an org-scoped login claims and hard-deletes its pre-org legacy tombstone ([#7876](https://github.com/can1357/oh-my-pi/issues/7876)).
 
 ## [17.2.10] - 2026-08-06
 
