@@ -205,13 +205,18 @@ export class PrewalkCoordinator {
 
 	/** Arms a prewalk immediately for an explicit slash-command request. */
 	arm(target: Model, thinkingLevel?: ConfiguredThinkingLevel): boolean {
-		if (this.#prewalk) {
+		const active = this.#prewalk;
+		if (active) {
 			this.#host.emitNotice(
 				"info",
-				`Prewalk: already armed for ${this.#prewalk.target.provider}/${this.#prewalk.target.id}, waiting for the first edit/write.`,
+				`Prewalk: already armed for ${active.target.provider}/${active.target.id}, waiting for the first edit/write.`,
 				"prewalk",
 			);
-			return true;
+			return (
+				active.target.provider === target.provider &&
+				active.target.id === target.id &&
+				active.thinkingLevel === thinkingLevel
+			);
 		}
 		const candidate = { target, thinkingLevel };
 		if (this.#isNoop(candidate)) {

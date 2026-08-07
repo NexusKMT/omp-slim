@@ -795,6 +795,11 @@ describe("AgentSession prewalk", () => {
 		expect(showStatus).toHaveBeenCalledWith(
 			`Prewalk on: switching to ${target.provider}/${target.id} at the next edit/write (todo-gated).`,
 		);
+
+		// A different request cannot report success while the prior target remains armed.
+		settings.setModelRole("smol", `${primary.provider}/${primary.id}:medium`);
+		expect(await executeBuiltinSlashCommand("/prewalk", runtime)).toBe(true);
+		expect(showStatus).toHaveBeenCalledTimes(1);
 	});
 
 	it("requires a fresh todo before a later explicit prewalk can hand off", async () => {
