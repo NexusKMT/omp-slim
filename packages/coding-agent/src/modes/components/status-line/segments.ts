@@ -592,7 +592,7 @@ const sessionNameSegment: StatusLineSegment = {
 		const name = sessionManager?.getSessionName();
 		if (!name) return { content: "", visible: false };
 
-		const accentEnabled = ctx.session.settings.get("statusLine.sessionAccent") !== false;
+		const accentEnabled = ctx.sessionAccent !== false;
 		const ansi = accentEnabled
 			? (getSessionAccentAnsi(
 					getSessionAccentHex(name, theme.getMajorThemeColorHexes(), theme.accentSurfaceLuminance),

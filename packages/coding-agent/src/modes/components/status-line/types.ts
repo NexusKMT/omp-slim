@@ -52,6 +52,8 @@ export interface SegmentContext {
 	session: AgentSession;
 	/** Focused subagent id while the view is proxied at its session, undefined otherwise. */
 	focusedAgentId?: string | undefined;
+	/** Resolved `statusLine.sessionAccent` from the component's effective settings; undefined/false disables hash-derived accent colors. */
+	sessionAccent?: boolean;
 	activeRepo: ActiveRepoContext | null;
 	width: number;
 	options: StatusLineSegmentOptions;
