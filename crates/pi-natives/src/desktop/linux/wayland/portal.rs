@@ -19,7 +19,7 @@ static PORTAL_RUNTIME: LazyLock<Result<Runtime, String>> = LazyLock::new(|| {
 		.map_err(|err| err.to_string())
 });
 
-/// Borrows the process-wide runtime used by Wayland portal input and capture.
+/// Borrow the shared portal runtime, surfacing a one-time build failure.
 pub(super) fn portal_runtime() -> CoreResult<&'static Runtime> {
 	PORTAL_RUNTIME
 		.as_ref()
@@ -59,10 +59,16 @@ pub(super) fn store_token(name: &str, token: Option<&str>) {
 mod tests {
 	use super::*;
 
+	/// Every portal caller (libei input init and PipeWire capture) must borrow
+	/// one persistent runtime; a regression to per-call runtimes would return
+	/// distinct instances and re-open the orphaned-connection bug (#7886).
 	#[test]
 	fn portal_runtime_is_shared_across_calls() {
 		let first = portal_runtime().expect("portal runtime builds");
 		let second = portal_runtime().expect("portal runtime builds");
-		assert!(std::ptr::eq(first, second), "portal callers must share one long-lived runtime");
+		assert!(
+			std::ptr::eq(first, second),
+			"portal_runtime must hand back one long-lived runtime, not a fresh per-call instance"
+		);
 	}
 }

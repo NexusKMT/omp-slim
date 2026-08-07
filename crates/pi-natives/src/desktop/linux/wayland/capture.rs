@@ -245,10 +245,7 @@ fn grab_pipewire_frame(node: u32, fd: OwnedFd) -> Result<RgbaImage, String> {
 }
 
 pub(super) fn capture() -> CoreResult<RgbaImage> {
-	let runtime = tokio::runtime::Builder::new_current_thread()
-		.enable_all()
-		.build()
-		.map_err(|err| DesktopError::capture_failed(format!("wayland screencast runtime: {err}")))?;
+	let runtime = super::portal::portal_runtime()?;
 	let (node, fd) = runtime.block_on(open_screencast()).map_err(|err| {
 		DesktopError::capture_failed(format!("wayland screencast unavailable: {err}"))
 	})?;
