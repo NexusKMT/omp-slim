@@ -28,7 +28,7 @@ pub(super) fn portal_runtime() -> CoreResult<&'static Runtime> {
 		.map_err(|err| DesktopError::internal(format!("xdg-desktop-portal runtime: {err}")))
 }
 
-/// File name of the RemoteDesktop restore token that pre-#7884 builds wrote
+/// File name of the `RemoteDesktop` restore token that pre-#7884 builds wrote
 /// (world-readable) during read-only `computer` calls. Nothing reads it after
 /// #7884 dropped the restore-token path.
 const ORPHANED_REMOTE_DESKTOP_TOKEN: &str = "remote-desktop-token";
@@ -46,9 +46,9 @@ fn remove_token_in(dir: &Path) {
 	let _ = fs::remove_file(dir.join(ORPHANED_REMOTE_DESKTOP_TOKEN));
 }
 
-/// Best-effort removal of the orphaned RemoteDesktop restore token left behind
-/// by pre-#7884 builds. Runs on Wayland backend construction; a missing file
-/// is success, so it is safe to call on every session.
+/// Best-effort removal of the orphaned `RemoteDesktop` restore token left
+/// behind by pre-#7884 builds. Runs on Wayland backend construction; a missing
+/// file is success, so it is safe to call on every session.
 pub(super) fn remove_orphaned_remote_desktop_token() {
 	if let Some(dir) = omp_state_dir() {
 		remove_token_in(&dir);
