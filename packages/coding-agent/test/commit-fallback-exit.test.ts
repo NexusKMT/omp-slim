@@ -3,25 +3,20 @@
  * callers so a degraded numstat commit is distinguishable from a legitimate
  * single-commit decision (issue #7835).
  */
+import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it, vi } from "bun:test";
+import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { runAgenticCommit } from "@oh-my-pi/pi-coding-agent/commit/agentic";
 import * as agentModule from "@oh-my-pi/pi-coding-agent/commit/agentic/agent";
 import * as modelSelection from "@oh-my-pi/pi-coding-agent/commit/model-selection";
+import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
 import * as gitModule from "@oh-my-pi/pi-coding-agent/utils/git";
 
 const NUMSTAT = [{ path: "src/a.ts", additions: 1, deletions: 0 }];
-
-// ModelRegistry's constructor performs provider discovery and storage access;
-// the commit pipeline only needs a registry that resolves no models.
-vi.mock("@oh-my-pi/pi-coding-agent/config/model-registry", () => ({
-	ModelRegistry: class MockModelRegistry {
-		constructor(_authStorage: never) {}
-		async refresh() {}
-	},
-}));
+let authStorage: AuthStorage | undefined;
 
 function mockModelResolution() {
 	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
@@ -40,10 +35,11 @@ function mockModelResolution() {
 }
 
 async function setupRepoMocks() {
+	authStorage = new AuthStorage(new SqliteAuthCredentialStore(new Database(":memory:")));
+	await authStorage.reload();
 	vi.spyOn(Settings, "init").mockResolvedValue(Settings.isolated());
-	vi.spyOn(sdkModule, "discoverAuthStorage").mockResolvedValue({
-		setFallbackResolver: () => {},
-	} as never);
+	vi.spyOn(ModelRegistry.prototype, "refresh").mockResolvedValue(undefined);
+	vi.spyOn(sdkModule, "discoverAuthStorage").mockResolvedValue(authStorage);
 	vi.spyOn(sdkModule, "discoverContextFiles").mockResolvedValue([]);
 	vi.spyOn(gitModule.diff, "changedFiles").mockResolvedValue(["src/a.ts"]);
 	vi.spyOn(gitModule.diff, "numstat").mockResolvedValue(NUMSTAT);
@@ -51,6 +47,8 @@ async function setupRepoMocks() {
 }
 
 afterEach(() => {
+	authStorage?.close();
+	authStorage = undefined;
 	vi.restoreAllMocks();
 	delete process.env.PI_COMMIT_TEST_FALLBACK;
 });
