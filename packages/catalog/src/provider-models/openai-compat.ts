@@ -2946,7 +2946,8 @@ export function alibabaTokenPlanModelManagerOptions(
 								baseUrl: defaults.baseUrl,
 							};
 						}
-						const limits = ALIBABA_TOKEN_PLAN_DISCOVERED_MODEL_LIMITS[defaults.id.trim().toLowerCase()];
+						const normalizedId = defaults.id.trim().toLowerCase();
+						const limits = ALIBABA_TOKEN_PLAN_DISCOVERED_MODEL_LIMITS[normalizedId];
 						const enriched = limits
 							? {
 									...defaults,
@@ -2955,7 +2956,7 @@ export function alibabaTokenPlanModelManagerOptions(
 								}
 							: defaults;
 
-						if (defaults.id.trim().toLowerCase().startsWith("deepseek-v4")) {
+						if (normalizedId.startsWith("deepseek-v4")) {
 							return {
 								...enriched,
 								reasoning: true,
