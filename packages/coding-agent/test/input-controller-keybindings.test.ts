@@ -747,7 +747,15 @@ describe("InputController global tool-output expand (ctrl+o)", () => {
 				children: [],
 			},
 		] as unknown as SessionTreeNode[];
-		context.setFocused(new TreeSelectorComponent(tree, "root", 20, () => {}, () => {}));
+		context.setFocused(
+			new TreeSelectorComponent(
+				tree,
+				"root",
+				20,
+				() => {},
+				() => {},
+			),
+		);
 
 		expect(dispatchInput(listeners, "\x18")).toEqual({ consume: true });
 		expect(context.ctx.toolOutputExpanded).toBe(true);

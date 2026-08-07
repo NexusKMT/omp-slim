@@ -27,9 +27,7 @@ const SUBSCRIPTION_CAP_PATTERN =
 const TRANSIENT_INTERVAL_RATE_LIMIT_PATTERN = /\bper\s+(?:second|minute)\b/i;
 
 function matchesSubscriptionCapText(errorMessage: string): boolean {
-	return (
-		SUBSCRIPTION_CAP_PATTERN.test(errorMessage) && !TRANSIENT_INTERVAL_RATE_LIMIT_PATTERN.test(errorMessage)
-	);
+	return SUBSCRIPTION_CAP_PATTERN.test(errorMessage) && !TRANSIENT_INTERVAL_RATE_LIMIT_PATTERN.test(errorMessage);
 }
 const OPENROUTER_DAILY_FREE_LIMIT_PATTERN = /\bfree[-_ ]models[-_ ]per[-_ ]day\b/i;
 // gRPC/Connect end-streams carry the status as its name (`resource_exhausted`),
@@ -67,8 +65,7 @@ const CN_TRANSIENT_CAP_PATTERN =
 // Common Simplified Chinese throttle phrasing. Consulted by
 // isOpaqueStatusBody so CN transients stay in the provider backoff lane instead
 // of rotating through the opaque-429 fallback.
-const CN_THROTTLE_PATTERN =
-	/速率(?:限制|过快)|频率(?:过高|过快)|过于频繁|稍后[重再]试/;
+const CN_THROTTLE_PATTERN = /速率(?:限制|过快)|频率(?:过高|过快)|过于频繁|稍后[重再]试/;
 
 /**
  * Classify a rate-limit error message into a reason category.

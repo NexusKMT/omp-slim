@@ -26,7 +26,12 @@ afterAll(() => {
 });
 
 /** Minimal SegmentContext factory — only path/git fields matter for these tests. */
-function createCtx(overrides?: { pathMaxLength?: number; branch?: string | null; sessionName?: string; sessionAccent?: boolean }): SegmentContext {
+function createCtx(overrides?: {
+	pathMaxLength?: number;
+	branch?: string | null;
+	sessionName?: string;
+	sessionAccent?: boolean;
+}): SegmentContext {
 	const hasName = overrides?.sessionName !== undefined;
 	return {
 		session: {
