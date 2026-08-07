@@ -66,6 +66,7 @@ describe("QwenCloud Token Plan provider", () => {
 						{ id: "deepseek-v4-flash-0731", owned_by: "qwencloud" },
 						{ id: "kimi-k2.7-code", owned_by: "qwencloud" },
 						{ id: "MiniMax-M2.5", owned_by: "qwencloud" },
+						{ id: "future-chat-model", owned_by: "qwencloud" },
 						{ id: "fun-asr", owned_by: "qwencloud" },
 						{ id: "qwen-image-2.0-pro", owned_by: "qwencloud" },
 						{ id: "qwen-audio-3.0-tts-plus", owned_by: "qwencloud" },
@@ -86,11 +87,14 @@ describe("QwenCloud Token Plan provider", () => {
 		expect(models?.map(model => model.id)).toEqual([
 			"deepseek-v4-flash",
 			"deepseek-v4-flash-0731",
+			"future-chat-model",
 			"kimi-k2.7-code",
 			"MiniMax-M2.5",
 			"qwen3.7-plus",
 		]);
 		expect(models?.find(model => model.id === "deepseek-v4-flash")).toMatchObject({
+			contextWindow: 1_000_000,
+			maxTokens: 384_000,
 			reasoning: true,
 			thinking: {
 				mode: "effort",
@@ -98,11 +102,26 @@ describe("QwenCloud Token Plan provider", () => {
 			},
 		});
 		expect(models?.find(model => model.id === "deepseek-v4-flash-0731")).toMatchObject({
+			contextWindow: 1_000_000,
+			maxTokens: 384_000,
 			reasoning: true,
 			thinking: {
 				mode: "effort",
 				efforts: ["high", "max"],
 			},
+		});
+		expect(models?.find(model => model.id === "kimi-k2.7-code")).toMatchObject({
+			contextWindow: 262_144,
+			maxTokens: 262_144,
+		});
+		expect(models?.find(model => model.id === "MiniMax-M2.5")).toMatchObject({
+			contextWindow: 196_608,
+			maxTokens: 32_768,
+		});
+		expect(models?.find(model => model.id === "future-chat-model")).toMatchObject({
+			id: "future-chat-model",
+			contextWindow: null,
+			maxTokens: null,
 		});
 		expect(models?.find(model => model.id === "qwen3.7-plus")).toMatchObject({
 			id: "qwen3.7-plus",
