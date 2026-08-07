@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed synthesized macOS keyboard and pointer events suppressing the user's physical input.
+
 ## [17.2.10] - 2026-08-06
 
 ### Fixed
