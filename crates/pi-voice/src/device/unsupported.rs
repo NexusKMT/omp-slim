@@ -5,7 +5,7 @@ use crate::VoiceResult;
 
 const UNSUPPORTED: &str = "Native audio is not supported on this platform";
 
-pub(crate) struct PlaybackDevice;
+pub struct PlaybackDevice;
 
 impl PlaybackDevice {
 	pub fn start(_config: DeviceConfig, _fill: PlaybackFill) -> VoiceResult<Self> {
@@ -17,7 +17,7 @@ impl PlaybackDevice {
 	}
 }
 
-pub(crate) struct CaptureDevice;
+pub struct CaptureDevice;
 
 impl CaptureDevice {
 	pub fn start(_config: DeviceConfig, _sink: CaptureSink) -> VoiceResult<Self> {

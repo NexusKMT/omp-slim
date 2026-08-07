@@ -264,7 +264,7 @@ unsafe extern "C" fn capture_callback(
 }
 
 /// Running `CoreAudio` default-speaker queue.
-pub(crate) struct PlaybackDevice {
+pub struct PlaybackDevice {
 	queue:           Option<QueueHandle>,
 	context:         Option<Box<PlaybackContext>>,
 	stopped:         Arc<AtomicBool>,
@@ -374,7 +374,7 @@ impl Drop for PlaybackDevice {
 }
 
 /// Running `CoreAudio` default-microphone queue.
-pub(crate) struct CaptureDevice {
+pub struct CaptureDevice {
 	queue:           Option<QueueHandle>,
 	context:         Option<Box<CaptureContext>>,
 	stopped:         Arc<AtomicBool>,

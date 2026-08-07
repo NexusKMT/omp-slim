@@ -719,7 +719,7 @@ fn finish(
 }
 
 /// Running `PulseAudio` or ALSA playback worker.
-pub(crate) struct PlaybackDevice {
+pub struct PlaybackDevice {
 	device: Arc<RunningDevice>,
 	thread: Option<JoinHandle<()>>,
 	done:   Option<mpsc::Receiver<()>>,
@@ -819,7 +819,7 @@ impl Drop for PlaybackDevice {
 }
 
 /// Running `PulseAudio` or ALSA capture worker.
-pub(crate) struct CaptureDevice {
+pub struct CaptureDevice {
 	device: Arc<RunningDevice>,
 	thread: Option<JoinHandle<()>>,
 	done:   Option<mpsc::Receiver<()>>,

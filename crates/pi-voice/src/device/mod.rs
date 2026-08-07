@@ -48,14 +48,14 @@ use unsupported as imp;
 use crate::VoiceResult;
 
 /// Render callback: fill the whole output buffer with mono `f32` samples.
-pub(crate) type PlaybackFill = Box<dyn FnMut(&mut [f32]) + Send + 'static>;
+pub type PlaybackFill = Box<dyn FnMut(&mut [f32]) + Send + 'static>;
 
 /// Capture callback: consume a non-empty chunk of mono `f32` samples.
-pub(crate) type CaptureSink = Box<dyn FnMut(&[f32]) + Send + 'static>;
+pub type CaptureSink = Box<dyn FnMut(&[f32]) + Send + 'static>;
 
 /// Stream parameters shared by both device directions.
 #[derive(Clone, Copy)]
-pub(crate) struct DeviceConfig {
+pub struct DeviceConfig {
 	/// Logical client-side sample rate in Hz; the OS converts to hardware.
 	pub sample_rate: u32,
 	/// Target callback period in milliseconds.
@@ -70,7 +70,7 @@ impl DeviceConfig {
 }
 
 /// Running default-speaker playback stream driven by a fill callback.
-pub(crate) struct PlaybackDevice {
+pub struct PlaybackDevice {
 	inner: imp::PlaybackDevice,
 }
 
@@ -88,7 +88,7 @@ impl PlaybackDevice {
 }
 
 /// Running default-microphone capture stream driven by a sink callback.
-pub(crate) struct CaptureDevice {
+pub struct CaptureDevice {
 	inner: imp::CaptureDevice,
 }
 

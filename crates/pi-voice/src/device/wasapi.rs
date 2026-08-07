@@ -493,7 +493,7 @@ impl Drop for CaptureStream {
 	}
 }
 
-pub(crate) struct PlaybackDevice {
+pub struct PlaybackDevice {
 	stop:   Arc<AtomicBool>,
 	event:  Arc<OwnedEvent>,
 	thread: Option<JoinHandle<VoiceResult<()>>>,
@@ -536,7 +536,7 @@ impl Drop for PlaybackDevice {
 	}
 }
 
-pub(crate) struct CaptureDevice {
+pub struct CaptureDevice {
 	stop:   Arc<AtomicBool>,
 	event:  Arc<OwnedEvent>,
 	thread: Option<JoinHandle<VoiceResult<()>>>,
