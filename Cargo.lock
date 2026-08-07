@@ -576,8 +576,6 @@ dependencies = [
  "cexpr",
  "clang-sys",
  "itertools 0.13.0",
- "log",
- "prettyplease",
  "proc-macro2",
  "quote",
  "regex",
@@ -3727,25 +3725,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "maudio"
-version = "0.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab8050247e9de440204a366e45b93068a5772a7e5be1c9dcc33ee5366214ecd0"
-dependencies = [
- "maudio-sys",
-]
-
-[[package]]
-name = "maudio-sys"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06b3b2d00f3a690dfea26eed932022c3f0366a9cb15785f2bf84717de8277d35"
-dependencies = [
- "bindgen",
- "cc",
-]
-
-[[package]]
 name = "md-5"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5144,11 +5123,12 @@ dependencies = [
  "audiopus_sys",
  "bytes",
  "flume",
- "maudio",
+ "libc",
  "opus",
  "parking_lot",
  "tokio",
  "webrtc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
