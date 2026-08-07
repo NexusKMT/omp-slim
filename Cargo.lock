@@ -5047,6 +5047,7 @@ dependencies = [
  "xcap",
  "xkeysym",
  "xxhash-rust",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -9744,6 +9745,9 @@ name = "zune-core"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb8a0807f7c01457d0379ba880ba6322660448ddebc890ce29bb64da71fb40f9"
+dependencies = [
+ "log",
+]
 
 [[package]]
 name = "zune-jpeg"
