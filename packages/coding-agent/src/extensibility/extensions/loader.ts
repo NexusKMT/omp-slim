@@ -311,6 +311,26 @@ function createExtension(extensionPath: string, resolvedPath: string): Extension
 	};
 }
 
+/**
+ * Runs an extension factory with provider registration rollback on failure.
+ * Records the number of pending provider registrations before the factory runs,
+ * and restores that checkpoint if the factory throws.
+ */
+async function runExtensionFactory(
+	factory: ExtensionFactory,
+	api: ExtensionAPI,
+	runtime: IExtensionRuntime,
+): Promise<void> {
+	const providerRegistrationCheckpoint = runtime.pendingProviderRegistrations.length;
+
+	try {
+		await factory(api);
+	} catch (error) {
+		runtime.pendingProviderRegistrations.length = providerRegistrationCheckpoint;
+		throw error;
+	}
+}
+
 async function loadExtension(
 	extensionPath: string,
 	cwd: string,
@@ -331,9 +351,7 @@ async function loadExtension(
 
 		const extension = createExtension(extensionPath, resolvedPath);
 		const api = new ConcreteExtensionAPI(PiCodingAgent, extension, runtime, cwd, eventBus);
-		await withHostGuard(async () => {
-			await factory(api);
-		});
+		await withHostGuard(() => runExtensionFactory(factory, api, runtime));
 
 		return { extension, error: null };
 	} catch (err) {
@@ -354,7 +372,7 @@ export async function loadExtensionFromFactory(
 ): Promise<Extension> {
 	const extension = createExtension(name, name);
 	const api = new ConcreteExtensionAPI(PiCodingAgent, extension, runtime, cwd, eventBus);
-	await factory(api);
+	await runExtensionFactory(factory, api, runtime);
 	return extension;
 }
 
