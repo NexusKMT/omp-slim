@@ -1,7 +1,6 @@
 #[cfg(feature = "wayland-pipewire")]
 mod capture;
 mod libei;
-#[cfg(feature = "wayland-pipewire")]
 mod portal;
 
 use image::RgbaImage;

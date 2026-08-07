@@ -26,7 +26,7 @@ struct EiDevice {
 type RemoteDesktopSession = Session<'static, RemoteDesktop<'static>>;
 
 struct PortalSession {
-	runtime: tokio::runtime::Runtime,
+	runtime: &'static tokio::runtime::Runtime,
 	session: RemoteDesktopSession,
 }
 
@@ -73,12 +73,7 @@ impl Libei {
 	}
 
 	fn portal_context() -> CoreResult<(ei::Context, PortalSession)> {
-		let runtime = tokio::runtime::Builder::new_current_thread()
-			.enable_all()
-			.build()
-			.map_err(|err| {
-				DesktopError::input_failed(format!("RemoteDesktop portal runtime: {err}"))
-			})?;
+		let runtime = super::portal::portal_runtime()?;
 		let (fd, session) = runtime
 			.block_on(async {
 				let portal = RemoteDesktop::new()
