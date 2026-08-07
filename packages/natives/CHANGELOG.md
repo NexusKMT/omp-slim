@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.11] - 2026-08-07
+
 ### Added
 
 - Added support for Windows hosts in `bun run build`, enabling local N-API builds against VS Build Tools without requiring a pre-configured vcvars prompt.

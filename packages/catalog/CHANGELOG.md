@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.11] - 2026-08-07
+
 ### Fixed
 
 - Increased the default stream idle-timeout floor on Amazon Bedrock to 900 seconds for reasoning and adaptive-thinking models (such as Claude) to prevent premature watchdog timeouts during long reasoning stretches.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.11] - 2026-08-07
+
 ### Breaking Changes
 
 - Fixed handling of GitHub Copilot's model_not_available_for_integrator error to prevent unnecessary retries, preserving the actionable available models list.

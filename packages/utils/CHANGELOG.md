@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.11] - 2026-08-07
+
 ### Added
 
 - Added `repair` and `rawKeys` options to `parseFrontmatter` to support spec-conformant loading (disabling lenient recovery and preserving keys verbatim), and exported `normalizeFrontmatterKeys` for manual key normalization.

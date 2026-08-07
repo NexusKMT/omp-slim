@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.11] - 2026-08-07
+
 ### Changed
 
 - Pasting an empty named register (`PUT … @name` with no matching capture) now surfaces a warning listing available registers and removes the span target instead of throwing an error.
