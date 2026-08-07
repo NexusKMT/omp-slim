@@ -63,6 +63,9 @@
 ### Fixed
 
 - Fixed session-tree rows rendering as bare bullets: bookkeeping entries (title changes, credential pins, mode and service-tier changes, TTSR injections, reset boundaries, session init) had no display text at all, so they drew as empty rows. They are now hidden in the default view like other settings entries, and labelled with what they recorded in `all` mode.
+### Fixed
+
+- Fixed extension and custom tools inheriting a same-named built-in TUI renderer, which could replace successful result content with incorrect built-in status text ([#7770](https://github.com/can1357/oh-my-pi/issues/7770)).
 
 ## [17.2.9] - 2026-08-05
 
