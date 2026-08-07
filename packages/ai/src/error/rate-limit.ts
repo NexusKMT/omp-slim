@@ -51,12 +51,15 @@ const ACCOUNT_SCOPED_403_PATTERN =
 // healthy sibling credential as a false quota. "速率限制" is absent for the
 // same reason.
 const CN_QUOTA_EXHAUSTED_PATTERN = /使用.{0,30}?上限|(?:额度|配额)已?(?:用|耗)(?:完|尽)|限额.{0,30}重置|余额不足/;
-// Common Simplified Chinese throttle phrasing. Consulted by isOpaqueStatusBody
-// so a plain CN rate-limit body is treated as informative and deferred to the
-// classifier (which returns UNKNOWN, i.e. back off) instead of rotating via the
-// opaque-429 fallback. Kept separate from CN_QUOTA_EXHAUSTED_PATTERN because
-// throttles must NOT rotate.
-const CN_THROTTLE_PATTERN = /速率(?:限制|过快)|频率(?:过高|过快)|过于频繁|稍后[重再]试/;
+// Simplified Chinese rate/concurrency caps can contain both 使用 and 上限, but
+// remain transient rather than account quota exhaustion.
+const CN_TRANSIENT_CAP_PATTERN =
+	/速率.{0,30}上限|频率.{0,30}上限|每分钟.{0,30}上限|并发.{0,30}上限|使用.{0,30}(?:速率|频率|每分钟|并发).{0,30}上限/;
+// Common Simplified Chinese throttle phrasing. Consulted by
+// isOpaqueStatusBody so CN transients stay in the provider backoff lane instead
+// of rotating through the opaque-429 fallback.
+const CN_THROTTLE_PATTERN =
+	/速率(?:限制|过快)|频率(?:过高|过快)|过于频繁|稍后[重再]试/;
 
 /**
  * Classify a rate-limit error message into a reason category.
@@ -84,7 +87,7 @@ export function parseRateLimitReason(errorMessage: string): RateLimitReason {
 	// Simplified Chinese quota-exhaustion phrasing (Zhipu Coding Plan and other
 	// CN providers). Must precede the MODEL_CAPACITY / RATE_LIMIT branches so an
 	// account-local cap rotates instead of backing off as a transient.
-	if (CN_QUOTA_EXHAUSTED_PATTERN.test(errorMessage)) {
+	if (CN_QUOTA_EXHAUSTED_PATTERN.test(errorMessage) && !CN_TRANSIENT_CAP_PATTERN.test(errorMessage)) {
 		return "QUOTA_EXHAUSTED";
 	}
 
@@ -245,7 +248,10 @@ export function isOpaqueStatusBody(message: string): boolean {
 	// opaque-429 fallback still rotates. This keeps the exception scoped to
 	// text we actually classify, rather than to any Han ideograph.
 	return (
-		!/[a-z\d]{3,}/i.test(cleaned) && !CN_QUOTA_EXHAUSTED_PATTERN.test(cleaned) && !CN_THROTTLE_PATTERN.test(cleaned)
+		!/[a-z\d]{3,}/i.test(cleaned) &&
+		!CN_QUOTA_EXHAUSTED_PATTERN.test(cleaned) &&
+		!CN_TRANSIENT_CAP_PATTERN.test(cleaned) &&
+		!CN_THROTTLE_PATTERN.test(cleaned)
 	);
 }
 
@@ -258,7 +264,7 @@ export function isOpaqueStatusBody(message: string): boolean {
 export function matchesUsageLimitText(errorMessage: string): boolean {
 	return (
 		USAGE_LIMIT_PATTERN.test(errorMessage) ||
-		CN_QUOTA_EXHAUSTED_PATTERN.test(errorMessage) ||
+		(CN_QUOTA_EXHAUSTED_PATTERN.test(errorMessage) && !CN_TRANSIENT_CAP_PATTERN.test(errorMessage)) ||
 		SPEND_LIMIT_PATTERN.test(errorMessage) ||
 		ACCOUNT_RATE_LIMIT_PATTERN.test(errorMessage) ||
 		OPENROUTER_DAILY_FREE_LIMIT_PATTERN.test(errorMessage)

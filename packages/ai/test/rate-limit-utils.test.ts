@@ -127,6 +127,7 @@ describe("parseRateLimitReason", () => {
 		// quota — must not rotate. Without this guard it burned a sibling credential.
 		expect(parseRateLimitReason("每分钟请求数已达上限，请稍后重试")).toBe("UNKNOWN");
 		expect(parseRateLimitReason("并发请求数已达上限，请稍后重试")).toBe("UNKNOWN");
+		expect(parseRateLimitReason("API 使用频率已达上限")).toBe("UNKNOWN");
 	});
 
 	it("classifies Codex usage limit error as QUOTA_EXHAUSTED", () => {
@@ -253,6 +254,7 @@ describe("isUsageLimit", () => {
 	it("does not treat Simplified Chinese throttling as a usage limit", () => {
 		expect(isUsageLimit("429 已达到速率限制")).toBe(false);
 		expect(isUsageLimit("请求过于频繁，请稍后重试")).toBe(false);
+		expect(isUsageLimit("API 使用频率已达上限")).toBe(false);
 	});
 
 	it("detects xAI Grok SuperGrok credit exhaustion as a credential-rotatable usage limit", () => {
@@ -343,6 +345,9 @@ describe("isUsageLimitOutcome", () => {
 	it("keeps Simplified Chinese throttling in the upstream-backoff lane", () => {
 		expect(isUsageLimitOutcome(429, "已达到速率限制")).toBe(false);
 		expect(isUsageLimitOutcome(429, "请求过于频繁，请稍后重试")).toBe(false);
+		expect(isUsageLimitOutcome(429, "并发请求达到上限")).toBe(false);
+		expect(isUsageLimitOutcome(429, "每分钟使用次数已达上限")).toBe(false);
+		expect(isUsageLimitOutcome(429, "API 使用频率已达上限")).toBe(false);
 	});
 
 	it("treats Simplified Chinese error bodies the classifier can read as informative", () => {
