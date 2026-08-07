@@ -8,7 +8,7 @@ use std::{
 #[cfg(windows)]
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 #[cfg(windows)]
-use windows_sys::Win32::Storage::FileSystem::GetLongPathNameW;
+use windows_sys::Win32::Storage::FileSystem::{GetLongPathNameW, GetShortPathNameW};
 
 /// Normalizes shell-facing path aliases before `std::fs` sees them.
 #[allow(clippy::missing_const_for_fn, reason = "Windows implementation allocates")]
@@ -43,23 +43,39 @@ pub fn expand_to_long_path(path: &Path) -> PathBuf {
 /// unchanged; on failure the input is returned as-is.
 #[cfg(windows)]
 fn expand_to_long_path_impl(path: &Path) -> PathBuf {
-	let Some(narrow) = path.as_os_str().to_str() else {
-		return path.to_path_buf();
-	};
-	let wide: Vec<u16> = std::ffi::OsStr::new(narrow).encode_wide().chain(Some(0)).collect();
+	// Encode straight from the wide form: Windows `OsStr` is UTF-16 and may
+	// not round-trip through UTF-8, so a `to_str()` detour would silently skip
+	// expansion for those paths — exactly the identity split this function
+	// exists to avoid.
+	let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
 
-	// First call with a null buffer returns the required buffer size; second
-	// fills it. GetLongPathNameW returns 0 on failure (e.g. nonexistent path).
+	// First call with a null buffer returns the required size (including the
+	// terminating NUL); the fill call returns the length excluding the NUL.
+	// GetLongPathNameW returns 0 on failure (e.g. nonexistent path), in which
+	// case the input is returned unchanged.
 	let needed = unsafe { GetLongPathNameW(wide.as_ptr(), std::ptr::null_mut(), 0) };
 	if needed == 0 {
 		return path.to_path_buf();
 	}
 	let mut buf = vec![0u16; needed as usize];
-	let written = unsafe { GetLongPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) };
-	if written == 0 {
-		return path.to_path_buf();
+	loop {
+		let written =
+			unsafe { GetLongPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) };
+		if written == 0 {
+			return path.to_path_buf();
+		}
+		let written = written as usize;
+		if written <= buf.len() {
+			// `written` excludes the NUL; drop any trailing padding so
+			// `from_wide` (which does not stop at a NUL) sees only the path.
+			buf.truncate(written);
+			break;
+		}
+		// The long form grew between the sizing call and the fill call:
+		// `written` is the new required size (including the NUL). Grow and
+		// retry rather than returning partial/zero-padded garbage.
+		buf = vec![0u16; written];
 	}
-	buf.truncate(written as usize);
 	PathBuf::from(std::ffi::OsString::from_wide(&buf))
 }
 
@@ -207,6 +223,48 @@ pub trait PathExt {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// `GetShortPathNameW` is the deterministic inverse of
+	/// `GetLongPathNameW`: compute the short form of the temp dir, feed it in,
+	/// and assert the long form comes back. This actually exercises 8.3
+	/// expansion (and fails if the expansion is reverted) on any host, even
+	/// one whose own paths are already long-form.
+	#[cfg(windows)]
+	#[test]
+	fn expand_to_long_path_resolves_short_names() {
+		let long = std::env::temp_dir();
+		let wide: Vec<u16> = long.as_os_str().encode_wide().chain(Some(0)).collect();
+		let needed = unsafe { GetShortPathNameW(wide.as_ptr(), std::ptr::null_mut(), 0) };
+		assert!(needed > 0, "GetShortPathNameW failed for {}", long.display());
+		let mut buf = vec![0u16; needed as usize];
+		let written = unsafe { GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) };
+		assert!(written > 0, "GetShortPathNameW fill failed for {}", long.display());
+		buf.truncate(written as usize);
+		let short = PathBuf::from(std::ffi::OsString::from_wide(&buf));
+
+		// Both spellings must collapse to the identical long-form string;
+		// `canonicalize` is deliberately avoided here because it adds a
+		// `\\?\` extended prefix and resolves symlinks — neither is part of
+		// the identity this function stores.
+		let expanded = expand_to_long_path(&short);
+		assert_eq!(expand_to_long_path(&long), expanded);
+
+		let short_name_segment = |seg: std::path::Component<'_>| {
+			let s = seg.as_os_str().to_string_lossy();
+			if let Some(tilde) = s.find('~') {
+				let after = &s[tilde + 1..];
+				!after.is_empty() && after.chars().all(|c| c.is_ascii_digit())
+			} else {
+				false
+			}
+		};
+		assert!(
+			!expanded.components().any(short_name_segment),
+			"expand_to_long_path left an 8.3 short segment: {} -> {}",
+			short.display(),
+			expanded.display()
+		);
+	}
 
 	#[test]
 	fn unix_drive_aliases_translate_to_windows_roots() {

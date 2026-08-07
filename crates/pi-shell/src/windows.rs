@@ -281,19 +281,6 @@ fn is_windows_style_path(value: &str) -> bool {
 	value.starts_with("\\\\")
 }
 
-/// Compare two paths by filesystem identity rather than spelling.
-///
-/// On Windows, `std::path::Path::canonicalize` resolves 8.3 short names
-/// (e.g. `ADMINI~1` -> `Administrator`) to their long form, so two spellings
-/// of the same directory compare equal. This is deliberately identity-based:
-/// it never rewrites the shell's stored working directory — callers use the
-/// result only to decide whether the current cwd already matches the
-/// requested one, avoiding redundant `set_working_dir` calls when the host
-/// handed us an 8.3-spelled path.
-pub fn canonicalize_for_compare(path: &Path) -> PathBuf {
-	path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
