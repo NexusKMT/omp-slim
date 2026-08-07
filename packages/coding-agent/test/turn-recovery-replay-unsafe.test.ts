@@ -492,6 +492,16 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 			expect(recoveryFor(message, []).isRetryableError(message)).toBe(false);
 		});
 
+		it("does not retry a refusal when one call is synthetic-paired and another has no result", () => {
+			// Reachable in practice: the agent loop skips Cursor server-resolved calls
+			// when pairing synthetic results, so a turn can carry one accounted-for
+			// call beside one it never paired. Accounting for only some of them is
+			// not proof that none ran.
+			const message = makeRefusal([toolCall("call-1"), toolCall("call-2")]);
+			const recovery = recoveryFor(message, [syntheticResult("call-1")]);
+			expect(recovery.isRetryableError(message)).toBe(false);
+		});
+
 		it("keeps a refusal with no tool calls retriable (baseline)", () => {
 			const message = makeRefusal([{ type: "thinking", thinking: "reasoning before refusal" }]);
 			expect(recoveryFor(message, []).isRetryableError(message)).toBe(true);
