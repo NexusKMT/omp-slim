@@ -76,6 +76,9 @@
 - Fixed the bundled `ts-no-tiny-functions` TTSR rule never firing on one-line arrow functions in real files: the second alternative's `$` anchor only matched at the absolute end of input, so the trailing newline present in every real file suppressed the match. The condition now opens with the `(?m)` inline flag so the arrow body matches to the line end ([#6890](https://github.com/can1357/oh-my-pi/issues/6890)).
 - Fixed `omp commit` exiting 0 when the commit agent failed and the mechanical fallback wrote the commit: the command now exits non-zero when the fallback was used, so callers can distinguish a degraded numstat commit from a legitimate single-commit decision ([#7835](https://github.com/can1357/oh-my-pi/issues/7835)).
 - Fixed prewalk lifecycle handling so same-model/same-effort arms reject without plan injection or false success output, consumed plan nudges do not return after context rebuilds, explicit re-arms require a fresh TODO, and settings-enabled prewalk does not implicitly re-arm restored sessions.
+### Fixed
+
+- Fixed the todo completion reminder still firing while the agent was waiting on a user question asked in a non-English language. The `isAwaitingUserAnswer` guard only recognized English question words and pronouns, so a `？`/`?`-terminated Chinese, Japanese, Korean, or Spanish prompt (e.g. `我应该继续吗？`) went undetected and the `<system-reminder>` interrupted the pause — which the model then misread as the user's answer and acted on. A trailing question mark plus any non-ASCII character in the line now counts as a pending question ([#7803](https://github.com/can1357/oh-my-pi/issues/7803)).
 
 ## [17.2.9] - 2026-08-05
 
