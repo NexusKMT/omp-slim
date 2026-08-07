@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Remote MCP transports now enforce header precedence and origin policy: client-generated HTTP/MCP/authorization headers win over configured headers case-insensitively, and Agent Plugins servers never forward configured headers across a redirect to a different origin (method-changing redirects of JSON-RPC POSTs are refused). Agent Plugins stdio `env` values and remote `headers` are likewise exempt from config-value resolution (no ambient env-name lookup, no `!command` execution, empty values preserved).
+
 ## [17.2.10] - 2026-08-06
 
 ### Breaking Changes
