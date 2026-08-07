@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Made episodic gist participant extraction Unicode-aware so proper nouns in non-Latin cased scripts (Greek, Cyrillic, …) are captured; the previous ASCII-only `[A-Z][a-z]+`/`\b` regex extracted zero participants from any non-English memory. ([#7918](https://github.com/can1357/oh-my-pi/issues/7918))
+
 ## [17.2.10] - 2026-08-06
 
 ### Changed
