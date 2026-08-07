@@ -29,6 +29,10 @@
 
 - Fixed strict output schemas being rejected when native JSON Schema definition maps contain `ref` or applicator branches use `properties` without `type`.
 
+### Fixed
+
+- Fixed the leading `cd <path> && ...` extraction absorbing shell syntax into the structured `cwd`, so `cd /tmp 2>/dev/null && echo ok` died with "Working directory does not exist: /tmp 2>/dev/null" before the shell ran. Extraction now captures a single path token via a quote-aware scanner and defers to the shell when anything else (redirects, extra arguments, shell expansion) precedes the top-level `&&` ([#7883](https://github.com/can1357/oh-my-pi/issues/7883)).
+
 ## [17.2.10] - 2026-08-06
 
 ### Breaking Changes
