@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the `wayland-pipewire` Cargo feature failing to compile: the PipeWire capture path still used the removed 0.8 `MainLoop::new` / `Context::new` / `connect_fd` constructors instead of the 0.9 `MainLoopRc` / `ContextRc` / `connect_fd_rc` handle API ([#7885](https://github.com/can1357/oh-my-pi/issues/7885)).
+
 ## [17.2.10] - 2026-08-06
 
 ### Fixed
