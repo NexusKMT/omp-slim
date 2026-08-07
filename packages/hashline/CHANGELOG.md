@@ -6,6 +6,10 @@
 
 - Pasting an empty named register (`PUT … @name` with no matching capture) no longer errors — it pastes nothing (a span target is still removed) and surfaces a warning naming the available registers
 
+### Fixed
+
+- Recovered pipe-numbered `read`/`search` rows copied into top-level and bare-body patch payloads ([#7905](https://github.com/can1357/oh-my-pi/issues/7905))
+
 ## [17.2.10] - 2026-08-06
 
 ### Changed
