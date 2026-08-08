@@ -2011,6 +2011,24 @@ describe("AgentSession handoff", () => {
 		expect(generateHandoffSpy.mock.calls[0]?.[2]?.streamOptions?.signal?.aborted).toBe(true);
 	});
 
+	it("surfaces the reason when the harness aborts an in-flight handoff", async () => {
+		const started = Promise.withResolvers<void>();
+		const cancelled = Promise.withResolvers<string>();
+		vi.spyOn(compactionModule, "generateHandoffFromContext").mockImplementation((_context, _model, options) => {
+			started.resolve();
+			options.streamOptions.signal?.addEventListener("abort", () => cancelled.reject(new Error("request aborted")), {
+				once: true,
+			});
+			return cancelled.promise;
+		});
+
+		const handoffPromise = session.handoff();
+		await started.promise;
+		await session.abort({ reason: "Harness stopped the session" });
+
+		await expect(handoffPromise).rejects.toThrow("Harness stopped the session");
+	});
+
 	it("surfaces the real error when generation fails without a user abort", async () => {
 		// Providers throw name==="AbortError" errors on non-user conditions (stalls,
 		// nested resolution failures). The handoff signal is never aborted here, so the
