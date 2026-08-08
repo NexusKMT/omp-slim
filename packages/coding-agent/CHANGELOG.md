@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `/handoff` reporting "Handoff cancelled" for an empty or whitespace-only generation; a user-initiated handoff now surfaces "Handoff failed: Handoff generation produced no content" and logs the failure, while auto-handoff still falls back to context-full compaction ([#7993](https://github.com/can1357/oh-my-pi/issues/7993)).
+
 ## [17.2.11] - 2026-08-07
 
 ### Added

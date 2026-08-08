@@ -2025,4 +2025,25 @@ describe("AgentSession handoff", () => {
 		expect(generateHandoffSpy).toHaveBeenCalledTimes(1);
 		expect(session.isGeneratingHandoff).toBe(false);
 	});
+
+	it("surfaces empty handoff generation as a failure, not a false cancel", async () => {
+		// Regression for #7993: the #7904 fix stopped masking provider errors as
+		// "Handoff cancelled", but an empty/whitespace-only generation still returned
+		// undefined, which the /handoff caller reported as "Handoff cancelled" with no
+		// detail. Empty output is a real failure and must surface as one.
+		const generateHandoffSpy = vi.spyOn(compactionModule, "generateHandoffFromContext").mockResolvedValue("   \n  ");
+
+		await expect(session.handoff()).rejects.toThrow("Handoff generation produced no content");
+		expect(generateHandoffSpy).toHaveBeenCalledTimes(1);
+		expect(session.isGeneratingHandoff).toBe(false);
+	});
+
+	it("auto-triggered handoff returns undefined on empty generation for context-full fallback", async () => {
+		// Auto-handoff is best-effort: an empty document must NOT throw so maintenance
+		// can fall back to context-full compaction (see runAutoCompaction).
+		vi.spyOn(compactionModule, "generateHandoffFromContext").mockResolvedValue("");
+
+		const result = await session.handoff(undefined, { autoTriggered: true });
+		expect(result).toBeUndefined();
+	});
 });

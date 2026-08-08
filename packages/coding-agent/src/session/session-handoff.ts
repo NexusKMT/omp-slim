@@ -211,8 +211,22 @@ export class SessionHandoff {
 			if (handoffSignal.aborted) {
 				throw new Error("Handoff cancelled");
 			}
-			if (!handoffText) {
-				return undefined;
+			if (!handoffText || handoffText.trim().length === 0) {
+				// Empty/whitespace-only generation is a real failure, not a user
+				// cancellation. #7904 stopped masking provider errors as "Handoff
+				// cancelled"; an empty document is the remaining path that produced the
+				// same misleading, undebuggable message (#7993).
+				logger.warn("Handoff generation produced no content", {
+					sessionId: this.#host.sessionId(),
+					autoTriggered: options?.autoTriggered ?? false,
+				});
+				// Auto-handoff is best-effort: returning undefined lets maintenance fall
+				// back to context-full compaction. A user-initiated handoff must surface
+				// the failure instead of a silent, misleading "cancelled".
+				if (options?.autoTriggered) {
+					return undefined;
+				}
+				throw new Error("Handoff generation produced no content");
 			}
 
 			// Start a new session
