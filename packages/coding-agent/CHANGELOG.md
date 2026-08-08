@@ -7,6 +7,7 @@
 - Fixed shell minimization replacing meaningful `rustc --print` output with `OK`.
 - Fixed shell minimization altering outputs shorter than 1,000 characters; these now pass through unchanged.
 - Fixed primary and advisor Codex sessions falling back to another provider before trying sibling accounts when an account lacks Trusted Access for Cyber approval.
+- Fixed task subagent assistant turns being omitted from the per-model TPS/TTFT aggregates shown by `/models`. ([#8022](https://github.com/can1357/oh-my-pi/issues/8022))
 
 ## [17.2.11] - 2026-08-07
 
