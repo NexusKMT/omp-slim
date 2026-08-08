@@ -504,15 +504,29 @@ function hasText(content: { text?: unknown }): boolean {
 	return typeof content.text === "string" && content.text.trim().length > 0;
 }
 
-/** A block a consumer can act on: a call, real text, or provider-signed thinking. */
+/**
+ * A block that is real output from the model.
+ *
+ * Everything the assistant can emit counts except two: unsigned thinking, which
+ * is not provider-authenticated and not actionable, and Anthropic's `fallback`
+ * marker, which records that the request was routed elsewhere rather than
+ * carrying any output. A native image response often arrives with no text and
+ * no tool call at all, so recognising only those would call it nothing.
+ */
 function isActionableContent(content: AssistantMessage["content"][number] | undefined): boolean {
-	if (!content) return false;
-	if (content.type === "toolCall") return true;
-	if (content.type === "text") return hasText(content);
-	// Unsigned thinking is not actionable; a signature is provider-authenticated.
-	return content.type === "thinking" && typeof content.thinkingSignature === "string"
-		? content.thinkingSignature.trim().length > 0
-		: false;
+	switch (content?.type) {
+		case "toolCall":
+		case "image":
+		case "redactedThinking":
+		case "anthropicServerTool":
+			return true;
+		case "text":
+			return hasText(content);
+		case "thinking":
+			return typeof content.thinkingSignature === "string" && content.thinkingSignature.trim().length > 0;
+		default:
+			return false;
+	}
 }
 
 /** A `stop`/`toolUse` turn that produced nothing actionable. Any other stop

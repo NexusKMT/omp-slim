@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import path from "node:path";
+import * as path from "node:path";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { registerPersistedSubagents } from "@oh-my-pi/pi-coding-agent/registry/persisted-agents";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -124,6 +124,24 @@ describe("persisted agent model attribution", () => {
 		const history = registry.get("EmptyStop")?.history;
 		expect(history?.resolvedModel).toBe("anthropic/claude-sonnet-5");
 		expect(history?.resolvedModelIsFallback).toBe(false);
+	});
+
+	it("credits a turn whose only output is an image", async () => {
+		using tempDir = TempDir.createSync("@omp-attribution-image-");
+		// A native image response can arrive with no text and no tool call at all.
+		// Recognising only those would call it nothing and leave the run credited
+		// to whichever model spoke before it.
+		const registry = await historyFor(tempDir.path(), "Painter", [
+			...transcriptHead(),
+			assistant("a1", "si", SONNET, "stop", [{ type: "text", text: "sonnet did the work" }]),
+			assistant("e1", "a1", SONNET, "error", []),
+			modelChange("m2", "e1", "openai-codex/gpt-5.6-sol", "fallback", true),
+			assistant("a2", "m2", SOL, "stop", [{ type: "image", data: "aGk=", mimeType: "image/png" }]),
+		]);
+
+		const history = registry.get("Painter")?.history;
+		expect(history?.resolvedModel).toBe("openai-codex/gpt-5.6-sol");
+		expect(history?.resolvedModelIsFallback).toBe(true);
 	});
 
 	it("treats a budget-exhausted length stop with nothing usable as unserved", async () => {
