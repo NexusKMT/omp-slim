@@ -1300,14 +1300,13 @@ function parseExpr(src: string, ctx: Ctx = ROOT_CTX): Box {
 }
 
 /**
- * Count the `{…}` arguments still owed at the end of `seg` — non-zero when the
- * row ends mid-construct (`\frac{a}` awaiting its denominator, or `\frac`/`x^`
- * awaiting any argument). Pending arities form a stack: an unbraced nested
- * command consumes one outer argument, then retains its own pending arguments
- * without discarding the outer command's remaining arity. Used to keep a
- * command joined to an argument written on the next source line while still
- * treating a row that merely opens with a braced group (`a\n{b+c}`) as a real
- * row break.
+ * Count the command arguments still owed at the end of `seg` — non-zero when
+ * the row ends mid-construct (`\frac{a}` awaiting its denominator, or
+ * `\frac`/`x^` awaiting any argument). Pending arities form a stack: an
+ * unbraced nested command consumes one outer argument, then retains its own
+ * pending arguments without discarding the outer command's remaining arity.
+ * Used to keep a command joined to an argument written on the next source line
+ * while still treating an ordinary next row (`a\n{b+c}`) as a real row break.
  */
 function bracesOwed(seg: string): number {
 	const pending: number[] = [];
@@ -1412,14 +1411,12 @@ function splitLines(src: string): string[] {
 		else if (c === "}") braceDepth--;
 		else if (c === "\n" && braceDepth === 0 && envDepth === 0) {
 			// A top-level newline is a row break UNLESS the current row ends with a
-			// command still awaiting a brace argument that the next row opens (e.g.
-			// `\frac{num}\n{den}`, `\frac\n{a}{b}`, `x^\n{2}`). Splitting there would
-			// sever the command from its argument, so keep both in one segment;
-			// latexToBlock collapses the interior newline to a space before parsing.
-			// A row that merely opens with a braced group (`a\n{b+c}`) stays a break.
-			let k = i + 1;
-			while (k < src.length && (src[k] === " " || src[k] === "\t" || src[k] === "\n")) k++;
-			if (src[k] !== "{" || bracesOwed(src.slice(last, i)) === 0) {
+			// command still awaiting an argument (e.g. `\frac{num}\n{den}`,
+			// `\frac{num}\n\sqrt{x}`, or `x^\n2`). Splitting there would sever the
+			// command from its argument, so keep both in one segment; latexToBlock
+			// collapses the interior newline to a space before parsing. A row that
+			// merely opens with a braced group (`a\n{b+c}`) stays a break.
+			if (bracesOwed(src.slice(last, i)) === 0) {
 				lines.push(src.slice(last, i));
 				last = i + 1;
 			}

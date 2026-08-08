@@ -265,6 +265,9 @@ describe("latexToBlock (2-D layout)", () => {
 		// single bar between numerator and denominator (issue #7996).
 		expect(latexToBlock("\\frac{a}\n{b}")).toEqual([" a ", "───", " b "]);
 		expect(latexToBlock("\\frac\n{a}{b}")).toEqual([" a ", "───", " b "]);
+		expect(latexToBlock("\\frac{a}\n\\sqrt{b}")).toEqual(latexToBlock("\\frac{a}\\sqrt{b}"));
+		expect(latexToBlock("\\frac\na\nb")).toEqual([" a ", "───", " b "]);
+		expect(latexToBlock("x^\n\\alpha")).toEqual(["xᵅ"]);
 	});
 
 	it("preserves outer arity when an unbraced command is itself an argument", () => {
