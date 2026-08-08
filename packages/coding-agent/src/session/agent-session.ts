@@ -2683,7 +2683,7 @@ export class AgentSession {
 				// here after maintenance routing, tagged isTerminal so subscribers can
 				// tell final settles from scheduled continuations.
 				await this.#emitSessionEvent({ ...event, isTerminal: !options?.willContinue });
-				void this.#emitAgentEndNotification(activeMessages, options).catch(err => {
+				void this.#emitAgentEndNotification([...activeMessages], options).catch(err => {
 					logger.error("Agent end extension notification failed", { err });
 				});
 			};
@@ -3870,8 +3870,6 @@ export class AgentSession {
 		this.#releasePowerAssertion();
 		await cleanupEmptyMoveSession(this.sessionManager, this.#movedFromEmptySessionFile);
 		this.#movedFromEmptySessionFile = undefined;
-		// All teardown branches that can append session entries have settled.
-		await this.sessionManager.close();
 		this.#closeAllProviderSessions("dispose");
 		this.setHindsightSessionState(undefined);
 		hindsightState?.dispose();
@@ -3910,6 +3908,10 @@ export class AgentSession {
 		} catch (error) {
 			logger.warn("Active agent run still settling at dispose deadline", { error: String(error) });
 		}
+
+		// Event handlers can reopen the append writer while they persist their
+		// terminal message. Close only after that pipeline has drained.
+		await this.sessionManager.close();
 
 		// Release retained conversation memory. dispose() is terminal, and every
 		// revival path reopens the transcript from disk (AgentLifecycleManager

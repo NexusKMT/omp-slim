@@ -246,6 +246,7 @@ describe("AgentSession dispose releases retained memory", () => {
 			reachedSettle.resolve();
 		});
 		const releaseSpy = vi.spyOn(current.sessionManager, "releaseRetainedEntries");
+		const closeSpy = vi.spyOn(current.sessionManager, "close");
 
 		const disposeP = current.dispose();
 		await reachedSettle.promise;
@@ -253,6 +254,7 @@ describe("AgentSession dispose releases retained memory", () => {
 
 		// Blocked draining the in-flight handler: memory release has not run.
 		expect(releaseSpy).not.toHaveBeenCalled();
+		expect(closeSpy).not.toHaveBeenCalled();
 
 		release.resolve();
 		await disposeP;
@@ -261,7 +263,86 @@ describe("AgentSession dispose releases retained memory", () => {
 		// The late persist landed during the drain and was then cleared, so the
 		// disposed session retains neither the entry nor the message.
 		expect(releaseSpy).toHaveBeenCalledTimes(1);
+		expect(closeSpy).toHaveBeenCalledTimes(1);
 		expect(current.sessionManager.getEntries()).toHaveLength(0);
 		expect(current.agent.state.messages).toHaveLength(0);
+	});
+
+	it("preserves the agent_end transcript for an asynchronous extension during dispose", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!model) throw new Error("expected bundled model");
+		const mock = createMockModel({ handler: () => ({ content: ["ok"] }) });
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["test"], tools: [] },
+			streamFn: mock.stream,
+		});
+		const sessionManager = SessionManager.inMemory(tempDir.path());
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
+		const reached = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		const notificationDone = Promise.withResolvers<void>();
+		let observedMessageCount = -1;
+		const runtime = new ExtensionRuntime();
+		const extension = await loadExtensionFromFactory(
+			pi => {
+				pi.on("agent_end", async event => {
+					reached.resolve();
+					await release.promise;
+					observedMessageCount = event.messages.length;
+					notificationDone.resolve();
+				});
+			},
+			tempDir.path(),
+			new EventBus(),
+			runtime,
+			"block-agent-end",
+		);
+		const extensionRunner = new ExtensionRunner([extension], runtime, tempDir.path(), sessionManager, modelRegistry);
+		const current = new AgentSession({
+			agent,
+			sessionManager,
+			settings: Settings.isolated(),
+			modelRegistry,
+			agentId: "Main",
+			extensionRunner,
+		});
+		session = current;
+		const message: AssistantMessage = {
+			role: "assistant",
+			content: [{ type: "text", text: "terminal transcript" }],
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: Date.now(),
+		};
+		agent.replaceMessages([message]);
+		agent.emitExternalEvent({ type: "agent_end", messages: agent.state.messages });
+		await reached.promise;
+
+		const resetDone = Promise.withResolvers<void>();
+		const reset = agent.reset.bind(agent);
+		vi.spyOn(agent, "reset").mockImplementation(() => {
+			reset();
+			resetDone.resolve();
+		});
+		const disposeP = current.dispose();
+		await resetDone.promise;
+		expect(agent.state.messages).toHaveLength(0);
+
+		release.resolve();
+		await notificationDone.promise;
+		await disposeP;
+		session = undefined;
+		expect(observedMessageCount).toBe(1);
 	});
 });
