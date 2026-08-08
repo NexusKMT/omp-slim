@@ -468,6 +468,8 @@ export class SessionManager {
 
 	/** The single open append writer; the manager only ever writes one file at a time. */
 	#writer: SessionStorageWriter | undefined;
+	/** Sealed by {@link releaseRetainedEntries}: every later append/title/rewrite is a dropped no-op. */
+	#released = false;
 	/** Serializes async disk work (flush/close/atomic rewrite). Appends are synchronous and bypass it. */
 	#diskTail: Promise<void> = Promise.resolve();
 	#diskFailure: Error | undefined;
@@ -791,6 +793,7 @@ export class SessionManager {
 	 * concurrent completed entries are durable without recreating a vacated source.
 	 */
 	#rewriteSynchronously(): void {
+		if (this.#released) return;
 		if (!this.#persist || !this.#shouldHaveSessionFile()) return;
 		const targetPath = this.#liveRelocationWritePath() ?? this.#sessionFile;
 		if (!targetPath) return;
@@ -833,6 +836,7 @@ export class SessionManager {
 	 */
 	async #rewriteAtomically(): Promise<void> {
 		if (!this.#persist || !this.#sessionFile) return;
+		if (this.#released) return;
 
 		const startEpoch = this.#diskEpoch;
 		await this.#scheduleDiskWork(
@@ -884,7 +888,7 @@ export class SessionManager {
 	}
 
 	#appendToSessionFile(entry: SessionEntry): void {
-		if (!this.#persist || !this.#sessionFile) return;
+		if (this.#released || !this.#persist || !this.#sessionFile) return;
 		if (this.#atomicEntryBatch) {
 			this.#fileIsCurrent = false;
 			this.#rewriteRequired = true;
@@ -1093,6 +1097,10 @@ export class SessionManager {
 	}
 
 	#recordEntry(entry: SessionEntry): void {
+		if (this.#released) {
+			logger.warn("Dropped session entry appended after terminal release", { type: entry.type });
+			return;
+		}
 		this.#entries.push(entry);
 		this.#index.insert(entry);
 		const batch = this.#atomicEntryBatch;
@@ -1708,17 +1716,25 @@ export class SessionManager {
 	}
 
 	/**
-	 * Drop the in-memory transcript after a terminal {@link close}. The entry
-	 * journal and its index mirror the agent's message array (tool results,
-	 * file contents, base64 frame images); on a disposed session — e.g. a
-	 * parked subagent still referenced by the lifecycle adoption record — they
-	 * would otherwise stay pinned for the process lifetime. Reads after this
-	 * point reopen from disk (revival, `history://`), so releasing the
-	 * in-memory copy is safe. Only call once, from session dispose.
+	 * Terminal release: drop the in-memory transcript and SEAL the manager.
+	 * The entry journal and its index mirror the agent's message array (tool
+	 * results, file contents, base64 frame images); on a disposed session —
+	 * e.g. a parked subagent still referenced by the lifecycle adoption
+	 * record — they would otherwise stay pinned for the process lifetime.
+	 *
+	 * Sealing closes the append writer and turns every later append, title
+	 * change, and rewrite into a dropped no-op. A revival may reopen the same
+	 * JSONL through a NEW manager the moment dispose returns; a late event
+	 * handler resuming on THIS manager must never race that writer — and a
+	 * post-release rewrite would persist the now-empty entry list, truncating
+	 * the transcript. Reads after this point reopen from disk (revival,
+	 * `history://`). Only call from session dispose; idempotent.
 	 */
 	releaseRetainedEntries(): void {
+		this.#released = true;
 		this.#entries = [];
 		this.#index.clear();
+		this.#closeWriterEventually();
 	}
 
 	getCwd(): string {
@@ -1938,6 +1954,7 @@ export class SessionManager {
 	 *   Auto titles are ignored once the user has set a name.
 	 */
 	async setSessionName(name: string, source: SessionTitleSource = "auto", trigger?: string): Promise<boolean> {
+		if (this.#released) return false;
 		if (this.#titleSource === "user" && source === "auto") return false;
 
 		const title = SessionManager.#cleanTitle(name);

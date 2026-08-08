@@ -3924,16 +3924,17 @@ export class AgentSession {
 		this.#releaseRetainedSessionMemory();
 
 		// The deadline does not cancel the drain: a handler parked in a slow
-		// extension hook resumes afterwards, reopens the append writer for its
-		// late persist, and repopulates exactly the state released above. Redo
-		// the final close + release once the pipeline genuinely settles — the
-		// extension runner bounds hook runtime, so this deferred pass is not
-		// unbounded.
+		// extension hook resumes afterwards and would repopulate exactly the
+		// state released above. Its disk writes are already dead — the release
+		// SEALED the session manager (a revival may reopen the same JSONL
+		// through a new manager the moment dispose returns, and this manager
+		// must never race that writer) — so re-run only the in-memory reset
+		// once the pipeline genuinely settles. The extension runner bounds hook
+		// runtime, so this deferred pass is not unbounded.
 		if (!drained) {
 			void (async () => {
 				await this.agent.waitForIdle();
 				await this.#drainInFlightEventHandlers();
-				await this.sessionManager.close();
 				this.#releaseRetainedSessionMemory();
 			})().catch(error => logger.warn("Deferred dispose finalization failed", { error: String(error) }));
 		}

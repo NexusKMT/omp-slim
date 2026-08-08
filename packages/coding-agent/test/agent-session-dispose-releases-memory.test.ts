@@ -352,6 +352,106 @@ describe("AgentSession dispose releases retained memory", () => {
 		expect(current.agent.state.messages).toHaveLength(0);
 	});
 
+	it("seals the session file at release so an immediate revival owns it exclusively", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!model) throw new Error("expected bundled model");
+		const mock = createMockModel({ handler: () => ({ content: ["ok"] }) });
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["test"], tools: [] },
+			streamFn: mock.stream,
+		});
+		// File-backed: AgentLifecycleManager.park() resolves as soon as dispose()
+		// returns, and ensureLive() may reopen this exact JSONL through a NEW
+		// manager immediately — while the timed-out handler is still parked in
+		// the extension hook holding the OLD manager.
+		const sessionManager = SessionManager.create(tempDir.path(), tempDir.path());
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
+		const reached = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		const runtime = new ExtensionRuntime();
+		const extension = await loadExtensionFromFactory(
+			pi => {
+				pi.on("message_end", async () => {
+					reached.resolve();
+					await release.promise;
+				});
+			},
+			tempDir.path(),
+			new EventBus(),
+			runtime,
+			"slow-message-end-file",
+		);
+		const extensionRunner = new ExtensionRunner([extension], runtime, tempDir.path(), sessionManager, modelRegistry);
+		const current = new AgentSession({
+			agent,
+			sessionManager,
+			settings: Settings.isolated(),
+			modelRegistry,
+			agentId: "Main",
+			extensionRunner,
+		});
+		session = current;
+
+		sessionManager.appendMessage({ role: "user", content: "seed", timestamp: Date.now() });
+		await sessionManager.ensureOnDisk();
+		const sessionFile = sessionManager.getSessionFile();
+		if (!sessionFile) throw new Error("Expected a persisted session file");
+
+		const message: AssistantMessage = {
+			role: "assistant",
+			content: [{ type: "text", text: "late persist" }],
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: Date.now(),
+		};
+		current.agent.emitExternalEvent({ type: "message_end", message });
+		await reached.promise;
+
+		let releaseCalls = 0;
+		const secondRelease = Promise.withResolvers<void>();
+		const realRelease = current.sessionManager.releaseRetainedEntries.bind(current.sessionManager);
+		vi.spyOn(current.sessionManager, "releaseRetainedEntries").mockImplementation(() => {
+			realRelease();
+			releaseCalls++;
+			if (releaseCalls === 2) secondRelease.resolve();
+		});
+		await current.dispose({ drainTimeoutMs: 20 });
+		session = undefined;
+		const bytesAfterDispose = await Bun.file(sessionFile).text();
+
+		// Immediate revival: a new manager reopens the same JSONL.
+		const revived = await SessionManager.open(sessionFile, tempDir.path());
+		const revivedCount = revived.getEntries().length;
+		expect(revivedCount).toBeGreaterThan(0);
+
+		// Unpark the hook: the resumed handler's late persist must be dropped by
+		// the sealed manager, never written under the revival writer.
+		release.resolve();
+		await secondRelease.promise;
+		expect(current.sessionManager.getEntries()).toHaveLength(0);
+		expect(await Bun.file(sessionFile).text()).toBe(bytesAfterDispose);
+
+		// The revival writer still owns the file: its append lands cleanly and
+		// round-trips without interleaved or truncated lines.
+		revived.appendMessage({ role: "user", content: "post-revive", timestamp: Date.now() });
+		await revived.flush();
+		await revived.close();
+		const reread = await SessionManager.open(sessionFile, tempDir.path());
+		expect(reread.getEntries()).toHaveLength(revivedCount + 1);
+		await reread.close();
+	});
+
 	it("preserves the agent_end transcript for an asynchronous extension during dispose", async () => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) throw new Error("expected bundled model");
