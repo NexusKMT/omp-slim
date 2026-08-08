@@ -1356,9 +1356,20 @@ async function isCommonJsModulePath(
 	// Under 'unambiguous', sourceType is 'script' for any file without static
 	// import/export — including empty files, dynamic-import shims, and
 	// side-effect-only modules that inheritedKind was designed to disambiguate.
+	//
+	// NOTE: An AST-based check for unshadowed require/module/exports would be
+	// more accurate, but regex with comment stripping is sufficient here.
+	// Comments are stripped before matching to avoid false positives from
+	// commented-out code. False positives from string literals are expected
+	// to be rare — side-effect-only .js files with no import/export that
+	// contain CJS patterns only in strings are uncommon, and the CJS bridge
+	// hook serves synthetic ESM which works for most files.
 	if (parsedSourceType === "script") {
 		const content = await Bun.file(modulePath).text();
-		if (/require\s*\(/.test(content) || /\bmodule\.exports\b/.test(content) || /\bexports\./.test(content)) {
+		// Strip comments before checking for CJS patterns to avoid false positives
+		// from commented-out code like "// module.exports = ..."
+		const stripped = content.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+		if (/\brequire\s*\(/.test(stripped) || /\bmodule\.exports\b/.test(stripped) || /\bexports\./.test(stripped)) {
 			return true;
 		}
 	}
