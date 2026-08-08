@@ -3851,6 +3851,16 @@ export class AgentSession {
 		}
 		this.#eventListeners = [];
 		this.#sessionChangeCallbacks.clear();
+
+		// Release retained conversation memory. dispose() is terminal, and every
+		// revival path reopens the transcript from disk (AgentLifecycleManager
+		// reviver / persisted-revive / `history://`), so the in-memory copy is
+		// dead weight from here on. Dropping it lets a parked subagent's session
+		// graph shed its heavy payloads even while the lifecycle adoption record's
+		// reviver closure still references the session object. Fixes #8003.
+		this.agent.reset();
+		this.rawSseDebugBuffer.clear();
+		this.sessionManager.releaseRetainedEntries();
 	}
 
 	#closeAllProviderSessions(reason: string): void {
