@@ -74,27 +74,9 @@ function deriveResetsAt(payload: Record<string, unknown>): number | undefined {
 }
 
 /**
- * Cursor's `/api/usage-summary` has shipped two personal-bucket shapes:
- * - Enterprise/team dashboards historically exposed `individualUsage.overall`
- * - Current Pro / Pro+ / Ultra dashboards expose `individualUsage.plan`
- *   (plus optional `onDemand`)
- *
- * Prefer `overall` when present so older fixtures keep working, then fall
- * back to `plan`. Optionally emit a second on-demand meter when Cursor
- * reports one with a positive limit.
+ * Parse a Cursor cents bucket (`used`/`limit`/`remaining` in USD cents).
+ * Returns null for disabled or non-positive / malformed buckets.
  */
-function pickCursorIndividualBucket(
-	individualUsage: Record<string, unknown>,
-): { key: "overall" | "plan"; bucket: Record<string, unknown> } | null {
-	if (isRecord(individualUsage.overall)) {
-		return { key: "overall", bucket: individualUsage.overall };
-	}
-	if (isRecord(individualUsage.plan)) {
-		return { key: "plan", bucket: individualUsage.plan };
-	}
-	return null;
-}
-
 function parseCursorCentsBucket(bucket: Record<string, unknown>): UsageAmount | null {
 	if (bucket.enabled === false) return null;
 
@@ -144,6 +126,8 @@ function parseCursorPlanDashboardAmounts(bucket: Record<string, unknown>): {
 	api?: UsageAmount;
 	fallback?: UsageAmount;
 } {
+	if (bucket.enabled === false) return {};
+
 	const limitCents = toNumber(bucket.limit);
 	const limitUsd = limitCents !== undefined && limitCents > 0 ? limitCents / 100 : undefined;
 	const autoPct = toNumber(bucket.autoPercentUsed);
@@ -180,12 +164,57 @@ function parseCursorPlanDashboardAmounts(bucket: Record<string, unknown>): {
 	return result;
 }
 
+function pushCursorPlanRails(limits: UsageLimit[], bucket: Record<string, unknown>, window: UsageWindow): void {
+	const rails = parseCursorPlanDashboardAmounts(bucket);
+	if (rails.auto) {
+		limits.push({
+			id: "cursor:usd:individual-auto",
+			label: "Cursor Models",
+			scope: { provider: "cursor", windowId: window.id },
+			window,
+			amount: rails.auto,
+			...(rails.auto.usedFraction !== undefined ? { status: usageStatus(rails.auto.usedFraction) } : {}),
+		});
+	}
+	if (rails.api) {
+		limits.push({
+			id: "cursor:usd:individual-api",
+			label: "Other Models",
+			scope: { provider: "cursor", windowId: window.id },
+			window,
+			amount: rails.api,
+			...(rails.api.usedFraction !== undefined ? { status: usageStatus(rails.api.usedFraction) } : {}),
+		});
+	}
+	if (rails.fallback) {
+		limits.push({
+			id: "cursor:usd:individual-plan",
+			label: "Personal Usage",
+			scope: { provider: "cursor", windowId: window.id },
+			window,
+			amount: rails.fallback,
+			...(rails.fallback.usedFraction !== undefined
+				? { status: usageStatus(rails.fallback.usedFraction) }
+				: {}),
+		});
+	}
+}
+
+/**
+ * Cursor's `/api/usage-summary` has shipped two personal-bucket shapes:
+ * - Enterprise/team dashboards historically exposed `individualUsage.overall`
+ * - Current Pro / Pro+ / Ultra dashboards expose `individualUsage.plan`
+ *   (plus optional `onDemand`)
+ *
+ * Prefer a *usable* overall bucket; if overall is absent/disabled/malformed,
+ * fall through to plan rails (`autoPercentUsed` / `apiPercentUsed`). Always
+ * consider on-demand afterward so a valid on-demand meter is not dropped when
+ * the included plan bucket is empty.
+ */
 export function parseCursorIndividualUsage(payload: unknown, fetchedAt = Date.now()): UsageReport | null {
 	if (!isRecord(payload) || !isRecord(payload.individualUsage)) {
 		return null;
 	}
-	const picked = pickCursorIndividualBucket(payload.individualUsage);
-	if (!picked) return null;
 
 	const resetsAt = deriveResetsAt(payload);
 	const window: UsageWindow = {
@@ -195,57 +224,30 @@ export function parseCursorIndividualUsage(payload: unknown, fetchedAt = Date.no
 	};
 	const limits: UsageLimit[] = [];
 
-	if (picked.key === "plan") {
-		const rails = parseCursorPlanDashboardAmounts(picked.bucket);
-		if (rails.auto) {
+	const overall = isRecord(payload.individualUsage.overall) ? payload.individualUsage.overall : null;
+	const plan = isRecord(payload.individualUsage.plan) ? payload.individualUsage.plan : null;
+
+	// Prefer a usable overall bucket; if it is disabled/malformed, fall through to plan.
+	let usedOverall = false;
+	if (overall) {
+		const amount = parseCursorCentsBucket(overall);
+		if (amount) {
+			usedOverall = true;
 			limits.push({
-				id: "cursor:usd:individual-auto",
-				label: "Cursor Models",
-				scope: { provider: "cursor", windowId: window.id },
-				window,
-				amount: rails.auto,
-				...(rails.auto.usedFraction !== undefined
-					? { status: usageStatus(rails.auto.usedFraction) }
-					: {}),
-			});
-		}
-		if (rails.api) {
-			limits.push({
-				id: "cursor:usd:individual-api",
-				label: "Other Models",
-				scope: { provider: "cursor", windowId: window.id },
-				window,
-				amount: rails.api,
-				...(rails.api.usedFraction !== undefined ? { status: usageStatus(rails.api.usedFraction) } : {}),
-			});
-		}
-		if (rails.fallback) {
-			limits.push({
-				id: "cursor:usd:individual-plan",
+				id: "cursor:usd:individual-overall",
 				label: "Personal Usage",
 				scope: { provider: "cursor", windowId: window.id },
 				window,
-				amount: rails.fallback,
-				...(rails.fallback.usedFraction !== undefined
-					? { status: usageStatus(rails.fallback.usedFraction) }
-					: {}),
+				amount,
+				...(amount.usedFraction !== undefined ? { status: usageStatus(amount.usedFraction) } : {}),
 			});
 		}
-	} else {
-		const amount = parseCursorCentsBucket(picked.bucket);
-		if (!amount) return null;
-		limits.push({
-			id: `cursor:usd:individual-${picked.key}`,
-			label: "Personal Usage",
-			scope: { provider: "cursor", windowId: window.id },
-			window,
-			amount,
-			...(amount.usedFraction !== undefined ? { status: usageStatus(amount.usedFraction) } : {}),
-		});
+	}
+	if (!usedOverall && plan) {
+		pushCursorPlanRails(limits, plan, window);
 	}
 
-	if (limits.length === 0) return null;
-
+	// Keep on-demand even when the included plan/overall bucket is absent or unusable.
 	if (isRecord(payload.individualUsage.onDemand)) {
 		const onDemandAmount = parseCursorCentsBucket(payload.individualUsage.onDemand);
 		if (onDemandAmount && onDemandAmount.limit !== undefined && onDemandAmount.limit > 0) {
@@ -261,6 +263,8 @@ export function parseCursorIndividualUsage(payload: unknown, fetchedAt = Date.no
 			});
 		}
 	}
+
+	if (limits.length === 0) return null;
 
 	return {
 		provider: "cursor",

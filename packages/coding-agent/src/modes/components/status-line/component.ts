@@ -1382,7 +1382,16 @@ export class StatusLineComponent implements Component {
 		let fiveHourTier: string | undefined;
 		let sevenDayTier: string | undefined;
 		let monthlyTier: string | undefined;
+		let monthlyPriority = Number.POSITIVE_INFINITY;
 		const now = Date.now();
+		const cursorMonthlyPriority = (limitId: unknown): number => {
+			// When /auth/usage and /api/usage-summary are merged, prefer the personal
+			// dashboard rails over legacy per-model request fractions.
+			if (limitId === "cursor:usd:individual-auto") return 0;
+			if (limitId === "cursor:usd:individual-plan" || limitId === "cursor:usd:individual-overall") return 1;
+			if (typeof limitId === "string" && limitId.startsWith("cursor:usd:individual-")) return 2;
+			return 3;
+		};
 		for (const report of reports) {
 			if (!report || typeof report !== "object") continue;
 			const provider = (report as { provider?: unknown }).provider;
@@ -1396,6 +1405,7 @@ export class StatusLineComponent implements Component {
 					continue;
 				}
 				const l = limit as {
+					id?: string;
 					scope?: { windowId?: string; tier?: string };
 					window?: { resetsAt?: number };
 					amount?: { usedFraction?: number };
@@ -1423,16 +1433,29 @@ export class StatusLineComponent implements Component {
 					};
 					sevenDayTier = tier || undefined;
 				}
+				// Conservatively gate monthly status-line rendering to Cursor for now —
+				// Copilot/OpenCode also emit monthly windows, but their multi-bucket
+				// shape needs a dedicated selector before we surface `mo N%` for them.
 				if (
-					(windowId === "monthly" || windowId === "30d") &&
-					(!monthly || (monthlyTier !== undefined && !tier))
+					activeProvider === "cursor" &&
+					(windowId === "monthly" || windowId === "30d")
 				) {
-					monthly = {
-						percent: fraction * 100,
-						resetHours:
-							typeof resetsAt === "number" ? Math.max(0, Math.round((resetsAt - now) / 3_600_000)) : undefined,
-					};
-					monthlyTier = tier || undefined;
+					const priority = cursorMonthlyPriority(l.id);
+					const shouldReplace =
+						!monthly ||
+						priority < monthlyPriority ||
+						(priority === monthlyPriority && monthlyTier !== undefined && !tier);
+					if (shouldReplace) {
+						monthly = {
+							percent: fraction * 100,
+							resetHours:
+								typeof resetsAt === "number"
+									? Math.max(0, Math.round((resetsAt - now) / 3_600_000))
+									: undefined,
+						};
+						monthlyTier = tier || undefined;
+						monthlyPriority = priority;
+					}
 				}
 			}
 		}

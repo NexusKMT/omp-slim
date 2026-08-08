@@ -369,6 +369,56 @@ describe("usage status-line segment", () => {
 		expect(content).toContain("13%");
 	});
 
+	it("prefers Cursor personal dashboard rails over legacy monthly request limits", async () => {
+		const component = makeComponent(
+			[
+				{
+					provider: "cursor",
+					limits: [
+						{
+							id: "cursor:requests:gpt-4",
+							scope: { windowId: "monthly" },
+							amount: { usedFraction: 0.9 },
+						},
+						{
+							id: "cursor:usd:individual-auto",
+							scope: { windowId: "monthly" },
+							amount: { usedFraction: 0.0185 },
+						},
+					],
+				},
+			],
+			{ provider: "cursor" },
+		);
+
+		component.refreshUsageInBackground();
+		await flushUsageRefresh();
+		const content = stripVTControlCharacters(component.getTopBorder(200).content);
+
+		expect(content).toContain("mo");
+		expect(content).toContain("1%");
+		expect(content).not.toContain("90%");
+	});
+
+	it("does not render monthly usage for non-Cursor providers", async () => {
+		const component = makeComponent(
+			[
+				{
+					provider: "opencode-go",
+					limits: [{ id: "opencode-go:usd:monthly", scope: { windowId: "monthly" }, amount: { usedFraction: 0.42 } }],
+				},
+			],
+			{ provider: "opencode-go" },
+		);
+
+		component.refreshUsageInBackground();
+		await flushUsageRefresh();
+		const content = stripVTControlCharacters(component.getTopBorder(200).content);
+
+		expect(content).not.toContain("mo");
+		expect(content).not.toContain("42%");
+	});
+
 	it("uses a distinct error color at the eighty-percent threshold", () => {
 		const high = renderSegment("usage", { usage: { fiveHour: { percent: 80 } } } as unknown as SegmentContext);
 		const low = renderSegment("usage", { usage: { fiveHour: { percent: 24 } } } as unknown as SegmentContext);

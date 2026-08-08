@@ -260,6 +260,52 @@ describe("cursor usage provider", () => {
 			expect(report?.limits.map(limit => limit.id)).toEqual(["cursor:usd:individual-overall"]);
 		});
 
+		it("falls back to plan when overall is present but disabled", () => {
+			const report = parseCursorIndividualUsage({
+				individualUsage: {
+					overall: { enabled: false, used: 100, limit: 1000, remaining: 900 },
+					plan: {
+						enabled: true,
+						used: 1504,
+						limit: 7000,
+						remaining: 5496,
+						autoPercentUsed: 1.85,
+						apiPercentUsed: 0,
+					},
+				},
+			});
+			expect(report?.limits.map(limit => limit.id)).toEqual([
+				"cursor:usd:individual-auto",
+				"cursor:usd:individual-api",
+			]);
+		});
+
+		it("rejects disabled plan buckets even when stale percent fields remain", () => {
+			expect(
+				parseCursorIndividualUsage({
+					individualUsage: {
+						plan: {
+							enabled: false,
+							used: 1504,
+							limit: 7000,
+							autoPercentUsed: 1.85,
+							apiPercentUsed: 0,
+						},
+					},
+				}),
+			).toBeNull();
+		});
+
+		it("keeps on-demand when the included plan bucket is unusable", () => {
+			const report = parseCursorIndividualUsage({
+				individualUsage: {
+					plan: { enabled: false, used: 1504, limit: 7000, autoPercentUsed: 1.85 },
+					onDemand: { enabled: true, used: 0, limit: 2000, remaining: 2000 },
+				},
+			});
+			expect(report?.limits.map(limit => limit.id)).toEqual(["cursor:usd:individual-ondemand"]);
+		});
+
 	it("rejects disabled, malformed, and non-positive personal usage buckets", () => {
 			expect(
 				parseCursorIndividualUsage({

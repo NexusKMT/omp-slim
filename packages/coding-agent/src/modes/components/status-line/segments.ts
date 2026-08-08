@@ -667,6 +667,7 @@ const usageSegment: StatusLineSegment = {
 		}
 		if (u.monthly) {
 			const pct = u.monthly.percent;
+			// Cursor-only today (normalize gates monthly to provider === "cursor").
 			// Cursor's web dashboard floors included-usage percents (1.88 → "1% used").
 			const pctText = theme.fg(pickUsageColor(pct), `${Math.floor(pct)}%`);
 			const reset =
