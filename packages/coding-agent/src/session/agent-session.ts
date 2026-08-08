@@ -6291,6 +6291,9 @@ export class AgentSession {
 			this.abortRetry();
 			this.#promptGeneration++;
 			this.#scheduledHiddenNextTurnGeneration = undefined;
+			// Abort the handoff first so generic compaction cancellation cannot replace
+			// the harness reason with an unreasoned "Handoff cancelled".
+			this.#handoff.abortHandoff(new Error(options?.reason ?? "Handoff aborted by session"));
 			if (options?.preserveCompaction) {
 				// Manual `/compact` installed its own #compactionAbortController before
 				// this internal abort and must keep it alive (that marker is what makes
@@ -6302,7 +6305,6 @@ export class AgentSession {
 			} else {
 				this.abortCompaction();
 			}
-			this.abortHandoff();
 			this.abortBash();
 			this.abortEval();
 			const postPromptDrain = this.#cancelPostPromptTasks();
