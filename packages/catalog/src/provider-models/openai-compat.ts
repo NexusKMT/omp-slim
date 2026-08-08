@@ -5530,7 +5530,14 @@ const OPENCODE_ZEN_API_RESOLUTION = createOpenCodeApiResolution("https://opencod
 // anthropic-style requests to /v1/messages and the gateway would return its
 // `Page Not Found` HTML (issue #887 for the qwen/m2.7 entries; minimax-m3
 // and minimax-m3-free added under #1617 for the same root cause).
+//
+// deepseek-v4-flash is the inverse case: it falls through to
+// openai-completions by default, but the Go gateway's
+// /zen/go/v1/chat/completions route does not work for this model while
+// /zen/go/v1/responses does (user-verified against the live gateway,
+// 2026-08-08; Flash only — deepseek-v4-pro serves fine on chat completions).
 const OPENCODE_GO_API_RESOLUTION = createOpenCodeApiResolution("https://opencode.ai/zen/go", {
+	"deepseek-v4-flash": "openai-responses",
 	"minimax-m2.7": "openai-completions",
 	"minimax-m3": "openai-completions",
 	"minimax-m3-free": "openai-completions",
