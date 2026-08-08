@@ -12,6 +12,7 @@ import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensi
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
@@ -370,11 +371,17 @@ describe("AgentSession dispose releases retained memory", () => {
 		const reached = Promise.withResolvers<void>();
 		const release = Promise.withResolvers<void>();
 		const runtime = new ExtensionRuntime();
+		let lateTitleAccepted: boolean | undefined;
 		const extension = await loadExtensionFromFactory(
 			pi => {
 				pi.on("message_end", async () => {
 					reached.resolve();
 					await release.promise;
+					// Resumes after dispose returned and the revival opened the
+					// file: the sealed manager must reject the title write (its
+					// own async disk path) and drop the custom entry.
+					lateTitleAccepted = await sessionManager.setSessionName("late-title", "user");
+					sessionManager.appendCustomEntry("late-custom", { note: "dropped" });
 				});
 			},
 			tempDir.path(),
@@ -458,8 +465,71 @@ describe("AgentSession dispose releases retained memory", () => {
 			.filter(entry => entry.type === "message")
 			.map(entry => JSON.stringify(entry.message));
 		expect(rereadTexts).toEqual([expect.stringContaining("seed"), expect.stringContaining("post-revive")]);
-		expect(JSON.stringify(reread.getEntries())).not.toContain("late persist");
+		const rereadSerialized = JSON.stringify(reread.getEntries());
+		expect(rereadSerialized).not.toContain("late persist");
+		expect(rereadSerialized).not.toContain("late-title");
+		expect(rereadSerialized).not.toContain("late-custom");
+		expect(lateTitleAccepted).toBe(false);
+		expect(reread.getSessionName()).not.toBe("late-title");
 		await reread.close();
+	});
+
+	it("skips the authoritative repair rewrite once sealed so a failed batch cannot truncate the file", async () => {
+		// The atomic-batch recovery path resets the disk tail itself, escaping
+		// the close() serialization: a batch whose fenced rewrite fails across
+		// the terminal seal would otherwise atomically publish the now-empty
+		// entry list over a file a revival may already own.
+		const gate = Promise.withResolvers<void>();
+		const reachedAtomic = Promise.withResolvers<void>();
+		let armed = false;
+		let atomicWrites = 0;
+		class FailingAtomicStorage extends FileSessionStorage {
+			override async writeTextAtomic(
+				filePath: string,
+				body: string,
+				options?: { commitGuard?: () => boolean },
+			): Promise<void> {
+				if (!armed) return super.writeTextAtomic(filePath, body, options);
+				atomicWrites++;
+				reachedAtomic.resolve();
+				await gate.promise;
+				throw new Error("injected atomic write failure");
+			}
+		}
+		const sessionManager = SessionManager.create(tempDir.path(), tempDir.path(), new FailingAtomicStorage());
+		sessionManager.appendMessage({ role: "user", content: "seed", timestamp: Date.now() });
+		await sessionManager.ensureOnDisk();
+		const sessionFile = sessionManager.getSessionFile();
+		if (!sessionFile) throw new Error("Expected a persisted session file");
+		const bytesBeforeBatch = await Bun.file(sessionFile).text();
+
+		armed = true;
+		const batch = sessionManager.appendEntriesAtomically(() => {
+			sessionManager.appendCustomEntry("batch-entry", { note: "never durable" });
+		});
+		const settled = batch.catch((error: unknown) => error);
+		// The fenced rewrite is parked inside storage; the terminal seal +
+		// release land mid-flight, exactly as a dispose during the batch would.
+		await reachedAtomic.promise;
+		sessionManager.seal();
+		sessionManager.releaseRetainedEntries();
+		gate.resolve();
+
+		// The batch surfaces the injected failure; the sealed repair path must
+		// not attempt a second atomic publish of the emptied entry list.
+		expect(String(await settled)).toContain("injected atomic write failure");
+		expect(atomicWrites).toBe(1);
+		expect(await Bun.file(sessionFile).text()).toBe(bytesBeforeBatch);
+
+		// The transcript survives for revival.
+		const reopened = await SessionManager.open(sessionFile, tempDir.path());
+		const reopenedTexts = reopened
+			.getEntries()
+			.filter(entry => entry.type === "message")
+			.map(entry => JSON.stringify(entry.message));
+		expect(reopenedTexts).toEqual([expect.stringContaining("seed")]);
+		expect(JSON.stringify(reopened.getEntries())).not.toContain("never durable");
+		await reopened.close();
 	});
 
 	it("preserves the agent_end transcript for an asynchronous extension during dispose", async () => {

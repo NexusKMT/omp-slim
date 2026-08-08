@@ -643,6 +643,16 @@ export class SessionManager {
 	}
 
 	async #authoritativelyRewriteCurrentStateLocked(operationError: Error): Promise<void> {
+		if (this.#released) {
+			// Terminal seal: repair would reset the disk tail (escaping the
+			// close() serialization) and atomically publish #fileBody() — after
+			// release that truncates, and a revival may already own the file.
+			// The original operation error still propagates to the caller.
+			logger.warn("Skipped authoritative session repair after terminal release", {
+				error: String(operationError),
+			});
+			return;
+		}
 		if (!this.#persist || !this.#sessionFile) return;
 		const previousDiskTail = this.#diskTail;
 		const writer = this.#writer;
@@ -689,7 +699,7 @@ export class SessionManager {
 				const body = this.#fileBody();
 				try {
 					await this.#storage.writeTextAtomic(sessionFile, body, {
-						commitGuard: () => this.#diskEpoch === epoch,
+						commitGuard: () => !this.#released && this.#diskEpoch === epoch,
 					});
 				} catch (error) {
 					const recoveryErrors = [toError(error)];
@@ -862,6 +872,7 @@ export class SessionManager {
 	 * their post-publish state updates.
 	 */
 	async #runFencedAtomicRewrite(epoch: number): Promise<boolean> {
+		if (this.#released) return false;
 		this.#atomicRewriteFenceEpoch = epoch;
 		try {
 			do {
@@ -871,7 +882,7 @@ export class SessionManager {
 				if (!sessionFile) return false;
 				if (this.#diskEpoch !== epoch) return false;
 				await this.#storage.writeTextAtomic(sessionFile, this.#fileBody(), {
-					commitGuard: () => this.#diskEpoch === epoch,
+					commitGuard: () => !this.#released && this.#diskEpoch === epoch,
 				});
 				if (this.#diskEpoch !== epoch) return false;
 			} while (this.#atomicRewriteDirty);
@@ -983,6 +994,7 @@ export class SessionManager {
 		const line = this.#lineFor(entry);
 		await this.#scheduleDiskWork(
 			async () => {
+				if (this.#released) return;
 				const sessionFile = this.#sessionFile;
 				if (!sessionFile) return;
 				try {
@@ -1716,22 +1728,43 @@ export class SessionManager {
 	}
 
 	/**
-	 * Terminal release: drop the in-memory transcript and SEAL the manager.
-	 * The entry journal and its index mirror the agent's message array (tool
-	 * results, file contents, base64 frame images); on a disposed session —
-	 * e.g. a parked subagent still referenced by the lifecycle adoption
-	 * record — they would otherwise stay pinned for the process lifetime.
+	 * Raise the terminal write barrier ahead of the final {@link close}. Once
+	 * sealed:
+	 * - every later append, title change, and rewrite is a dropped no-op —
+	 *   including work an event handler tries to enqueue while dispose is
+	 *   awaiting `close()` on the disk tail;
+	 * - the disk epoch is bumped, so queued-but-unexecuted tail work is
+	 *   superseded and an ALREADY-RUNNING fenced/repair rewrite (awaiting the
+	 *   tail, drain, writer close, or the atomic stage) fails its commit guard
+	 *   at the rename fence instead of publishing over a revived file.
+	 * The final `close()` itself is scheduled after the bump and still runs;
+	 * pre-seal hot-path appends are already in the page cache. Idempotent;
+	 * terminal.
+	 */
+	seal(): void {
+		if (this.#released) return;
+		this.#released = true;
+		this.#diskEpoch++;
+	}
+
+	/**
+	 * Terminal release: drop the in-memory transcript and complete the
+	 * {@link seal}. The entry journal and its index mirror the agent's message
+	 * array (tool results, file contents, base64 frame images); on a disposed
+	 * session — e.g. a parked subagent still referenced by the lifecycle
+	 * adoption record — they would otherwise stay pinned for the process
+	 * lifetime.
 	 *
-	 * Sealing closes the append writer and turns every later append, title
-	 * change, and rewrite into a dropped no-op. A revival may reopen the same
-	 * JSONL through a NEW manager the moment dispose returns; a late event
-	 * handler resuming on THIS manager must never race that writer — and a
-	 * post-release rewrite would persist the now-empty entry list, truncating
-	 * the transcript. Reads after this point reopen from disk (revival,
-	 * `history://`). Only call from session dispose; idempotent.
+	 * Closes the append writer; with the seal up, nothing can reopen it. A
+	 * revival may reopen the same JSONL through a NEW manager the moment
+	 * dispose returns; a late event handler resuming on THIS manager must
+	 * never race that writer — and a post-release rewrite would persist the
+	 * now-empty entry list, truncating the transcript. Reads after this point
+	 * reopen from disk (revival, `history://`). Only call from session
+	 * dispose, after the final `close()`; idempotent.
 	 */
 	releaseRetainedEntries(): void {
-		this.#released = true;
+		this.seal();
 		this.#entries = [];
 		this.#index.clear();
 		this.#closeWriterEventually();

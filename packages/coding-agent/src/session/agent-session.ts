@@ -3912,7 +3912,16 @@ export class AgentSession {
 		}
 
 		// Event handlers can reopen the append writer while they persist their
-		// terminal message. Close only after that pipeline has drained.
+		// terminal message; that pipeline has drained (or hit the deadline).
+		// Raise the write barrier BEFORE the final close: a handler that
+		// outlived the deadline could otherwise enqueue disk work behind the
+		// closing tail while we await it, and that work would run against the
+		// file after a revival reopens it. The seal also bumps the disk epoch,
+		// superseding queued tail work and fencing already-running atomic
+		// rewrites at their commit guard; hot-path appends drained above are
+		// already durable, and close() (scheduled post-seal) still flushes and
+		// closes the writer.
+		this.sessionManager.seal();
 		await this.sessionManager.close();
 
 		// Release retained conversation memory. dispose() is terminal, and every
