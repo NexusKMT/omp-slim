@@ -26,10 +26,6 @@ async function writePackage(files: Record<string, string>): Promise<string> {
 
 describe("isCommonJsModulePath CJS classification (inheritedKind override fix)", () => {
 	it("classifies a CJS file imported from an ESM sibling as CJS, not ESM", async () => {
-		// Reproduces the bug: ESM index.mjs imports CJS helper.cjs via
-		// `import './helper.cjs'`. The graph walk passes inheritedKind='esm'
-		// which previously overrode the source-type detection, causing the
-		// CJS bridge hook to not be installed.
 		const dir = await writePackage({
 			"package.json": JSON.stringify({ name: "cjs-esm-sibling", version: "1.0.0" }),
 			"helper.cjs": ["const value = 42;", "module.exports = { value };"].join("\n"),
@@ -37,12 +33,11 @@ describe("isCommonJsModulePath CJS classification (inheritedKind override fix)",
 		});
 
 		const entry = path.join(dir, "index.mjs");
-		const mod = await loadLegacyPiModule(entry);
-		expect((mod as any).result).toBe(42);
+		const mod = (await loadLegacyPiModule(entry)) as { result: number };
+		expect(mod.result).toBe(42);
 	});
 
 	it("classifies a CJS file with require() imported from ESM as CJS", async () => {
-		// CJS file uses require() — should be detected by the CJS syntax check
 		const dir = await writePackage({
 			"package.json": JSON.stringify({ name: "cjs-require-esm", version: "1.0.0" }),
 			"dep.js": ["const greeting = require('./greeting.js');", "module.exports = { greeting };"].join("\n"),
@@ -51,13 +46,11 @@ describe("isCommonJsModulePath CJS classification (inheritedKind override fix)",
 		});
 
 		const entry = path.join(dir, "index.mjs");
-		const mod = await loadLegacyPiModule(entry);
-		expect((mod as any).greeting).toBe("hello");
+		const mod = (await loadLegacyPiModule(entry)) as { greeting: string };
+		expect(mod.greeting).toBe("hello");
 	});
 
 	it("allows ambiguous files to use inheritedKind fallback", async () => {
-		// An ambiguous .js file (no import/export, no require/module.exports)
-		// should fall through to inheritedKind for classification.
 		const dir = await writePackage({
 			"package.json": JSON.stringify({ name: "cjs-ambiguous", version: "1.0.0" }),
 			"shim.js": [
@@ -68,14 +61,11 @@ describe("isCommonJsModulePath CJS classification (inheritedKind override fix)",
 		});
 
 		const entry = path.join(dir, "index.mjs");
-		// Should not throw — the ambiguous file should be classified
-		// via inheritedKind without crashing
-		const mod = await loadLegacyPiModule(entry);
-		expect((mod as any).ok).toBe(true);
+		const mod = (await loadLegacyPiModule(entry)) as { ok: boolean };
+		expect(mod.ok).toBe(true);
 	});
 
 	it("correctly loads a CJS package with exports field (playwright-core pattern)", async () => {
-		// Simulates the playwright-core pattern: ESM wrapper re-exports from CJS entry
 		const dir = await writePackage({
 			"package.json": JSON.stringify({
 				name: "dual-entry-pkg",
@@ -97,7 +87,6 @@ describe("isCommonJsModulePath CJS classification (inheritedKind override fix)",
 			"consumer.mjs": ["import pkg from 'dual-entry-pkg';", "export const result = pkg.launch();"].join("\n"),
 		});
 
-		// Install the package in node_modules so the bare import resolves
 		const nodeModules = path.join(dir, "node_modules", "dual-entry-pkg");
 		await fs.mkdir(nodeModules, { recursive: true });
 		await fs.copyFile(path.join(dir, "package.json"), path.join(nodeModules, "package.json"));
@@ -106,7 +95,43 @@ describe("isCommonJsModulePath CJS classification (inheritedKind override fix)",
 		await fs.copyFile(path.join(dir, "core.js"), path.join(nodeModules, "core.js"));
 
 		const entry = path.join(dir, "consumer.mjs");
-		const mod = await loadLegacyPiModule(entry);
-		expect((mod as any).result).toBe("launched");
+		const mod = (await loadLegacyPiModule(entry)) as { result: string };
+		expect(mod.result).toBe("launched");
+	});
+
+	it("does not false-positive on CJS patterns in comments", async () => {
+		// A file with CJS patterns only in comments should be classified
+		// via inheritedKind, not as CJS
+		const dir = await writePackage({
+			"package.json": JSON.stringify({ name: "cjs-comment-fp", version: "1.0.0" }),
+			"shim.js": [
+				"// module.exports = { value: 999 };",
+				"/* require('ignored') */",
+				"export const value = 42;",
+			].join("\n"),
+			"index.mjs": ["import { value } from './shim.js';", "export const result = value;"].join("\n"),
+		});
+
+		const entry = path.join(dir, "index.mjs");
+		const mod = (await loadLegacyPiModule(entry)) as { result: number };
+		expect(mod.result).toBe(42);
+	});
+
+	it("detects CJS patterns outside comments", async () => {
+		// A file with CJS patterns in actual code should be classified as CJS
+		const dir = await writePackage({
+			"package.json": JSON.stringify({ name: "cjs-real-code", version: "1.0.0" }),
+			"dep.js": [
+				"// This is just a comment",
+				"const value = require('./value.js');",
+				"module.exports = { value };",
+			].join("\n"),
+			"value.js": ["module.exports = 99;"].join("\n"),
+			"index.mjs": ["import dep from './dep.js';", "export const result = dep.value;"].join("\n"),
+		});
+
+		const entry = path.join(dir, "index.mjs");
+		const mod = (await loadLegacyPiModule(entry)) as { result: number };
+		expect(mod.result).toBe(99);
 	});
 });
