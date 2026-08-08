@@ -302,4 +302,27 @@ describe("OpenAI-family mid-stream socket-close retry", () => {
 		expect(result.stopReason).toBe("error");
 		expect(result.content.find(block => block.type === "text")?.text).toBe("partial");
 	});
+
+	it("does not retry Codex SSE after thinking output commits", async () => {
+		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
+		let requests = 0;
+		const fetchMock: FetchImpl = vi.fn(async () => {
+			requests++;
+			// A reasoning delta already reached the consumer as thinking_delta;
+			// replaying would duplicate it, so the socket close must surface.
+			return createSocketCloseResponse([
+				{ type: "response.output_item.added", item: { type: "reasoning", id: "rs_partial", summary: [] } },
+				{ type: "response.reasoning_text.delta", item_id: "rs_partial", delta: "deliberating" },
+			]);
+		});
+
+		const result = await streamOpenAICodexResponses(codexModel, context, {
+			apiKey: "test-key",
+			fetch: fetchMock,
+		}).result();
+
+		expect(requests).toBe(1);
+		expect(result.stopReason).toBe("error");
+		expect(result.content.find(block => block.type === "thinking")?.thinking).toBe("deliberating");
+	});
 });

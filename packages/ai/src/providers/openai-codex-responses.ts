@@ -2727,13 +2727,18 @@ class CodexStreamProcessor {
 			error instanceof CodexProviderStreamError
 				? error.retryable
 				: AIError.isProviderRetryableError(error, { provider: this.model.provider });
+		// A leading `response.output_item.added` opens an empty block and emits only
+		// a `*_start` before any delta; that is replay-safe. But once a visible
+		// text/tool block or any non-empty thinking delta has streamed, replaying
+		// would duplicate/reorder those already-delivered events (and drop the
+		// streamed thinking from the reset message), so treat that as committed.
+		const streamedThinking = this.output.content.some(
+			block => block.type === "thinking" && block.thinking.length > 0,
+		);
 		if (
 			!retryable ||
-			// A leading `response.output_item.added` opens an empty block and emits
-			// only a `*_start` before any delta; that is replay-safe. Gate on
-			// actually-committed visible output, not an open-but-empty block, or a
-			// pre-delta socket close would be misclassified as committed.
 			hasVisibleAssistantContent(this.output) ||
+			streamedThinking ||
 			!this.runtime.canSafelyReplayWebsocketOverSse ||
 			this.runtime.providerRetryAttempt >= CODEX_MAX_RETRIES ||
 			this.options?.signal?.aborted
