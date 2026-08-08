@@ -397,6 +397,7 @@ export class StatusLineComponent implements Component {
 		tier?: string;
 		fiveHour?: { percent: number; resetMinutes?: number };
 		sevenDay?: { percent: number; resetHours?: number };
+		monthly?: { percent: number; resetHours?: number };
 	} | null = null;
 	#cachedUsageContextKey: string | null = null;
 	#usageFetchedAt = 0;
@@ -1368,12 +1369,15 @@ export class StatusLineComponent implements Component {
 		tier?: string;
 		fiveHour?: { percent: number; resetMinutes?: number };
 		sevenDay?: { percent: number; resetHours?: number };
+		monthly?: { percent: number; resetHours?: number };
 	} | null {
 		if (!Array.isArray(reports)) return null;
 		let fiveHour: { percent: number; resetMinutes?: number } | undefined;
 		let sevenDay: { percent: number; resetHours?: number } | undefined;
+		let monthly: { percent: number; resetHours?: number } | undefined;
 		let fiveHourTier: string | undefined;
 		let sevenDayTier: string | undefined;
+		let monthlyTier: string | undefined;
 		const now = Date.now();
 		for (const report of reports) {
 			if (!report || typeof report !== "object") continue;
@@ -1415,12 +1419,23 @@ export class StatusLineComponent implements Component {
 					};
 					sevenDayTier = tier || undefined;
 				}
+				if (
+					(windowId === "monthly" || windowId === "30d") &&
+					(!monthly || (monthlyTier !== undefined && !tier))
+				) {
+					monthly = {
+						percent: fraction * 100,
+						resetHours:
+							typeof resetsAt === "number" ? Math.max(0, Math.round((resetsAt - now) / 3_600_000)) : undefined,
+					};
+					monthlyTier = tier || undefined;
+				}
 			}
 		}
-		if (!fiveHour && !sevenDay) return null;
+		if (!fiveHour && !sevenDay && !monthly) return null;
 		// Single compact label; prefer the five-hour tier if displayed windows ever disagree.
-		const effectiveTier = fiveHourTier ?? sevenDayTier;
-		return { tier: effectiveTier, fiveHour, sevenDay };
+		const effectiveTier = fiveHourTier ?? sevenDayTier ?? monthlyTier;
+		return { tier: effectiveTier, fiveHour, sevenDay, monthly };
 	}
 
 	/**

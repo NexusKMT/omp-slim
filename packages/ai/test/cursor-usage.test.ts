@@ -196,7 +196,85 @@ describe("cursor usage provider", () => {
 			});
 		});
 
-		it("rejects disabled, malformed, and non-positive personal usage buckets", () => {
+		it("falls back to individualUsage.plan for current Pro/Pro+/Ultra payloads", () => {
+			const payload = {
+				individualUsage: {
+					plan: {
+						enabled: true,
+						used: 924,
+						limit: 7000,
+						remaining: 6076,
+					},
+					onDemand: {
+						enabled: true,
+						used: 0,
+						limit: 2000,
+						remaining: 2000,
+					},
+				},
+				billingCycleEnd: "2026-09-08T08:00:31.000Z",
+			};
+
+			const report = parseCursorIndividualUsage(payload, 123);
+			expect(report?.limits).toEqual([
+				{
+					id: "cursor:usd:individual-plan",
+					label: "Personal Usage",
+					scope: {
+						provider: "cursor",
+						windowId: "monthly",
+					},
+					window: {
+						id: "monthly",
+						label: "Monthly",
+						resetsAt: Date.parse("2026-09-08T08:00:31.000Z"),
+					},
+					amount: {
+						used: 9.24,
+						limit: 70,
+						remaining: 60.76,
+						usedFraction: 0.132,
+						remainingFraction: 0.868,
+						unit: "usd",
+					},
+					status: "ok",
+				},
+				{
+					id: "cursor:usd:individual-ondemand",
+					label: "On-Demand Usage",
+					scope: {
+						provider: "cursor",
+						windowId: "monthly",
+					},
+					window: {
+						id: "monthly",
+						label: "Monthly",
+						resetsAt: Date.parse("2026-09-08T08:00:31.000Z"),
+					},
+					amount: {
+						used: 0,
+						limit: 20,
+						remaining: 20,
+						usedFraction: 0,
+						remainingFraction: 1,
+						unit: "usd",
+					},
+					status: "ok",
+				},
+			]);
+		});
+
+		it("prefers individualUsage.overall when both overall and plan exist", () => {
+			const report = parseCursorIndividualUsage({
+				individualUsage: {
+					overall: { enabled: true, used: 100, limit: 1000, remaining: 900 },
+					plan: { enabled: true, used: 924, limit: 7000, remaining: 6076 },
+				},
+			});
+			expect(report?.limits.map(limit => limit.id)).toEqual(["cursor:usd:individual-overall"]);
+		});
+
+	it("rejects disabled, malformed, and non-positive personal usage buckets", () => {
 			expect(
 				parseCursorIndividualUsage({
 					individualUsage: { overall: { enabled: false, used: 100, limit: 1000, remaining: 900 } },

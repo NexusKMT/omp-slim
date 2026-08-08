@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Cursor personal usage reporting for current Pro / Pro+ / Ultra `/api/usage-summary` payloads that expose `individualUsage.plan` (and optional `onDemand`) instead of the older `individualUsage.overall` bucket.
+
+
 ## [17.2.11] - 2026-08-07
 
 ### Breaking Changes

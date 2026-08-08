@@ -73,45 +73,73 @@ function deriveResetsAt(payload: Record<string, unknown>): number | undefined {
 	return undefined;
 }
 
-export function parseCursorIndividualUsage(payload: unknown, fetchedAt = Date.now()): UsageReport | null {
-	if (!isRecord(payload) || !isRecord(payload.individualUsage) || !isRecord(payload.individualUsage.overall)) {
-		return null;
+/**
+ * Cursor's `/api/usage-summary` has shipped two personal-bucket shapes:
+ * - Enterprise/team dashboards historically exposed `individualUsage.overall`
+ * - Current Pro / Pro+ / Ultra dashboards expose `individualUsage.plan`
+ *   (plus optional `onDemand`)
+ *
+ * Prefer `overall` when present so older fixtures keep working, then fall
+ * back to `plan`. Optionally emit a second on-demand meter when Cursor
+ * reports one with a positive limit.
+ */
+function pickCursorIndividualBucket(
+	individualUsage: Record<string, unknown>,
+): { key: "overall" | "plan"; bucket: Record<string, unknown> } | null {
+	if (isRecord(individualUsage.overall)) {
+		return { key: "overall", bucket: individualUsage.overall };
 	}
-	const individual = payload.individualUsage.overall;
-	if (individual.enabled === false) return null;
+	if (isRecord(individualUsage.plan)) {
+		return { key: "plan", bucket: individualUsage.plan };
+	}
+	return null;
+}
 
-	const reportedUsed = toNumber(individual.used);
-	const reportedRemaining = toNumber(individual.remaining);
+function parseCursorCentsBucket(bucket: Record<string, unknown>): UsageAmount | null {
+	if (bucket.enabled === false) return null;
+
+	const reportedUsed = toNumber(bucket.used);
+	const reportedRemaining = toNumber(bucket.remaining);
 	const hasValidUsed = reportedUsed !== undefined && reportedUsed >= 0;
 	const hasValidRemaining = reportedRemaining !== undefined && reportedRemaining >= 0;
-	const limit = toNumber(individual.limit);
+	const limit = toNumber(bucket.limit);
 
-	let amount: UsageAmount;
-	if (individual.limit === null || individual.limit === undefined) {
+	if (bucket.limit === null || bucket.limit === undefined) {
 		if (!hasValidUsed) return null;
-		amount = { used: reportedUsed / 100, unit: "usd" };
-	} else {
-		if (limit === undefined || limit <= 0) return null;
-		let used: number;
-		if (reportedUsed !== undefined && reportedUsed > 0) {
-			used = reportedUsed;
-		} else if (hasValidRemaining && reportedRemaining < limit) {
-			used = Math.max(0, limit - reportedRemaining);
-		} else if (hasValidUsed) {
-			used = reportedUsed;
-		} else {
-			return null;
-		}
-		const remaining = Math.max(0, limit - used);
-		amount = {
-			used: used / 100,
-			limit: limit / 100,
-			remaining: remaining / 100,
-			usedFraction: used / limit,
-			remainingFraction: remaining / limit,
-			unit: "usd",
-		};
+		return { used: reportedUsed / 100, unit: "usd" };
 	}
+
+	if (limit === undefined || limit <= 0) return null;
+	let used: number;
+	if (reportedUsed !== undefined && reportedUsed > 0) {
+		used = reportedUsed;
+	} else if (hasValidRemaining && reportedRemaining < limit) {
+		used = Math.max(0, limit - reportedRemaining);
+	} else if (hasValidUsed) {
+		used = reportedUsed;
+	} else {
+		return null;
+	}
+	const remaining = Math.max(0, limit - used);
+	return {
+		used: used / 100,
+		limit: limit / 100,
+		remaining: remaining / 100,
+		usedFraction: used / limit,
+		remainingFraction: remaining / limit,
+		unit: "usd",
+	};
+}
+
+export function parseCursorIndividualUsage(payload: unknown, fetchedAt = Date.now()): UsageReport | null {
+	if (!isRecord(payload) || !isRecord(payload.individualUsage)) {
+		return null;
+	}
+	const picked = pickCursorIndividualBucket(payload.individualUsage);
+	if (!picked) return null;
+
+	const amount = parseCursorCentsBucket(picked.bucket);
+	if (!amount) return null;
 
 	const resetsAt = deriveResetsAt(payload);
 	const window: UsageWindow = {
@@ -119,21 +147,43 @@ export function parseCursorIndividualUsage(payload: unknown, fetchedAt = Date.no
 		label: "Monthly",
 		...(resetsAt !== undefined ? { resetsAt } : {}),
 	};
-	const limitEntry: UsageLimit = {
-		id: "cursor:usd:individual-overall",
-		label: "Personal Usage",
-		scope: {
-			provider: "cursor",
-			windowId: window.id,
+	const limits: UsageLimit[] = [
+		{
+			id: `cursor:usd:individual-${picked.key}`,
+			label: "Personal Usage",
+			scope: {
+				provider: "cursor",
+				windowId: window.id,
+			},
+			window,
+			amount,
+			...(amount.usedFraction !== undefined ? { status: usageStatus(amount.usedFraction) } : {}),
 		},
-		window,
-		amount,
-		...(amount.usedFraction !== undefined ? { status: usageStatus(amount.usedFraction) } : {}),
-	};
+	];
+
+	if (isRecord(payload.individualUsage.onDemand)) {
+		const onDemandAmount = parseCursorCentsBucket(payload.individualUsage.onDemand);
+		if (onDemandAmount && onDemandAmount.limit !== undefined && onDemandAmount.limit > 0) {
+			limits.push({
+				id: "cursor:usd:individual-ondemand",
+				label: "On-Demand Usage",
+				scope: {
+					provider: "cursor",
+					windowId: window.id,
+				},
+				window,
+				amount: onDemandAmount,
+				...(onDemandAmount.usedFraction !== undefined
+					? { status: usageStatus(onDemandAmount.usedFraction) }
+					: {}),
+			});
+		}
+	}
+
 	return {
 		provider: "cursor",
 		fetchedAt,
-		limits: [limitEntry],
+		limits,
 		raw: payload,
 	};
 }

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Status-line `usage` now renders monthly Cursor quotas (`mo N%`) in addition to the existing `5h` / `7d` windows.
+
+
 ## [17.2.11] - 2026-08-07
 
 ### Added
