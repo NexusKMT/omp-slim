@@ -6,6 +6,7 @@
 
 - Fixed shell minimization replacing meaningful `rustc --print` output with `OK`.
 - Fixed shell minimization altering outputs shorter than 1,000 characters; these now pass through unchanged.
+- Fixed primary and advisor Codex sessions falling back to another provider before trying sibling accounts when an account lacks Trusted Access for Cyber approval.
 
 ## [17.2.11] - 2026-08-07
 
