@@ -1308,8 +1308,17 @@ function splitLines(src: string): string[] {
 		if (c === "{") braceDepth++;
 		else if (c === "}") braceDepth--;
 		else if (c === "\n" && braceDepth === 0 && envDepth === 0) {
-			lines.push(src.slice(last, i));
-			last = i + 1;
+			// A top-level newline is a row break UNLESS the next non-space token
+			// opens a `{…}` argument group (e.g. `\frac{num}\n{den}` or a command
+			// whose braces are written on the following line). Splitting there
+			// would sever a command from a pending argument, so keep both in the
+			// same segment; latexToBlock collapses the interior newline to a space.
+			let k = i + 1;
+			while (k < src.length && (src[k] === " " || src[k] === "\t" || src[k] === "\n")) k++;
+			if (src[k] !== "{") {
+				lines.push(src.slice(last, i));
+				last = i + 1;
+			}
 		}
 		i++;
 	}
@@ -1327,7 +1336,7 @@ function splitLines(src: string): string[] {
 export function latexToBlock(src: string): string[] {
 	if (typeof src !== "string" || src.trim() === "") return [];
 	const rows = splitLines(src.trim())
-		.map(line => line.trim())
+		.map(line => line.replace(/[ \t]*\n[ \t]*/g, " ").trim())
 		.filter(line => line !== "")
 		.map(line => parseExpr(line));
 	if (rows.length === 0) return [];

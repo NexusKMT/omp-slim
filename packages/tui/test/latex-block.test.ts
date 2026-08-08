@@ -259,6 +259,21 @@ describe("latexToBlock (2-D layout)", () => {
 		expect(latexToBlock("a \\\\ b")).toEqual(["a", "b"]);
 	});
 
+	it("keeps a \\frac intact when numerator and denominator are on separate source lines", () => {
+		// A top-level newline between `\frac{num}` and `{den}` is an argument
+		// continuation, not a row break — the fraction must stay stacked with a
+		// single bar between numerator and denominator (issue #7996).
+		expect(latexToBlock("\\frac{a}\n{b}")).toEqual([" a ", "───", " b "]);
+		expect(latexToBlock("\\frac\n{a}{b}")).toEqual([" a ", "───", " b "]);
+	});
+
+	it("still treats a top-level newline as a row break when it is not an argument continuation", () => {
+		// `lhs =` on its own source line stays a row above its block; two fractions
+		// on separate lines each start with `\frac`, so they stack as two rows.
+		expect(latexToBlock("y =\n\\frac{1}{2}")).toEqual(["y =", " 1 ", "───", " 2 "]);
+		expect(latexToBlock("\\frac{a}{b}\n\\frac{c}{d}")).toEqual([" a ", "───", " b ", " c ", "───", " d "]);
+	});
+
 	it("keeps \\color scope across a stacked fraction, painting the bar", () => {
 		Object.assign(TERMINAL, { trueColor: true });
 		const lines = latexToBlock("\\color{red} x + \\frac{a}{b}");
