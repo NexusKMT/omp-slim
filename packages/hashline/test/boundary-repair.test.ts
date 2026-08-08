@@ -1,8 +1,25 @@
 import { describe, expect, it } from "bun:test";
 import { applyEdits, InMemorySnapshotStore, parsePatch, Recovery } from "@oh-my-pi/hashline";
 
+/**
+ * Applies with a code path, so the tree-sitter probe can judge whether an
+ * authored range boundary broke the file — the shape every production call
+ * site (patcher, recovery, section apply, preview) supplies.
+ */
 function apply(text: string, diff: string): { text: string; warnings: string[] } {
-	const result = applyEdits(text, parsePatch(diff).edits);
+	const result = applyEdits(text, parsePatch(diff).edits, { path: "fixture.ts" });
+	return { text: result.text, warnings: result.warnings ?? [] };
+}
+
+/** Applies with a Rust path, for Rust-shaped fixtures. */
+function applyRust(text: string, diff: string): { text: string; warnings: string[] } {
+	const result = applyEdits(text, parsePatch(diff).edits, { path: "fixture.rs" });
+	return { text: result.text, warnings: result.warnings ?? [] };
+}
+
+/** Applies with a Markdown path: braces there are prose, not syntax. */
+function applyProse(text: string, diff: string): { text: string; warnings: string[] } {
+	const result = applyEdits(text, parsePatch(diff).edits, { path: "fixture.md" });
 	return { text: result.text, warnings: result.warnings ?? [] };
 }
 
@@ -637,6 +654,181 @@ describe("boundary-balance repair", () => {
 		const { text, warnings } = apply(file, diff);
 		expect(text).toBe(["const log = createLog(`", "prefix", "`);", "const obj = {", "\ta: 2", "};"].join("\n"));
 		expect(warnings.filter(warning => /structural closing line/.test(warning))).toHaveLength(1);
+	});
+	// The neon.rs incident: the range starts one line early, on the lone `}`
+	// closing the `if` above, and the payload (sibling-depth statements) never
+	// restates it. The closer is spared and the payload lands after it.
+	it("spares a leading closer the range swallowed when the payload claims sibling depth", () => {
+		const file = [
+			"fn f() {",
+			"\tif a {",
+			"\t\treturn;",
+			"\t}",
+			"\tlet lead = old1();",
+			"\tlet t4 = old2();",
+			"\tlet done = old3();",
+			"}",
+		].join("\n");
+		const diff = ["PUT 4-6:", "+\tlet mask = new1();", "+\tlet lead = new2();", "+\tlet t4 = new3();"].join("\n");
+		const { text, warnings } = applyRust(file, diff);
+		expect(text).toBe(
+			[
+				"fn f() {",
+				"\tif a {",
+				"\t\treturn;",
+				"\t}",
+				"\tlet mask = new1();",
+				"\tlet lead = new2();",
+				"\tlet t4 = new3();",
+				"\tlet done = old3();",
+				"}",
+			].join("\n"),
+		);
+		expect(warnings.filter(warning => /leading structural closing line/.test(warning))).toHaveLength(1);
+	});
+
+	// A payload indented deeper than the swallowed closer claims the inside of
+	// the block the closer just terminated — before vs after is a coin flip,
+	// so the edit is rejected instead of guessed.
+	it("rejects a swallowed leading closer when the payload claims the block interior", () => {
+		const file = ["fn f() {", "\tif a {", "\t\treturn;", "\t}", "\tlet lead = old1();", "}"].join("\n");
+		const diff = ["PUT 4-5:", "+\t\tcompute();", "+\t\tstore();"].join("\n");
+		expect(() => applyRust(file, diff)).toThrow(/starts by deleting the closing-delimiter/);
+	});
+
+	// Deliberate two-hunk unwrap: another hunk deletes the matching `if` opener,
+	// so the whole-patch residual is clean and the leading closer stays deleted.
+	it("does not spare a leading closer whose opener another hunk removes", () => {
+		const file = ["fn f() {", "\tif a {", "\t\treturn;", "\t}", "\tlet lead = old1();", "}"].join("\n");
+		const diff = ["PUT 2-2:", "+\tguard();", "PUT 4-5:", "+\tlet lead = new1();"].join("\n");
+		const { text, warnings } = applyRust(file, diff);
+		expect(text).toBe(["fn f() {", "\tguard();", "\t\treturn;", "\tlet lead = new1();", "}"].join("\n"));
+		expect(warnings.filter(warning => /leading structural closing line/.test(warning))).toHaveLength(0);
+	});
+
+	// The "complete new function over a head-only range" incident: the payload
+	// is a fully balanced construct but the range ends mid-block, which would
+	// orphan the old body's closers below. The edit applies as authored (text
+	// shape cannot prove a syntactic block) but warns with the block-op remedy.
+	it("warns when a balanced payload's range ends mid-block", () => {
+		const file = [
+			"fn old(a: u32) -> bool {",
+			"\tlet x = a + 1;",
+			"\tlet y = x * 2;",
+			"\tlet z = y - 3;",
+			"\tz > 0",
+			"}",
+		].join("\n");
+		const diff = ["PUT 1-3:", "+fn new(a: u32) -> bool {", "+\tlet x = a + 2;", "+\tx > 0", "+}"].join("\n");
+		const { text, warnings } = applyRust(file, diff);
+		expect(text).toBe(
+			["fn new(a: u32) -> bool {", "\tlet x = a + 2;", "\tx > 0", "}", "\tlet z = y - 3;", "\tz > 0", "}"].join(
+				"\n",
+			),
+		);
+		expect(warnings.filter(warning => /ended mid-block/.test(warning))).toHaveLength(1);
+	});
+
+	// The applier is language-agnostic: in Markdown these braces are literal
+	// prose, so the edit must apply verbatim — never be rejected. The advisory
+	// warning still fires (shape witnesses pass); the author ignores it.
+	it("applies a prose edit that deletes a literal opening brace in Markdown", () => {
+		const file = ["Intro {", "body", "}"].join("\n");
+		const diff = ["PUT 1-2:", "+Revised"].join("\n");
+		const { text } = apply(file, diff);
+		expect(text).toBe(["Revised", "}"].join("\n"));
+	});
+
+	// Repairing an already-broken file by appending closers is deliberate
+	// net-closing content — never a mid-block mistake.
+	it("does not warn for a net-closing payload that repairs a broken file", () => {
+		const file = ["fn f() {", "\tif a {", "\t\treturn;", "\tdone();", "}"].join("\n");
+		const diff = ["PUT 3-3:", "+\t\treturn;", "+\t}"].join("\n");
+		const { text, warnings } = applyRust(file, diff);
+		expect(text).toBe(["fn f() {", "\tif a {", "\t\treturn;", "\t}", "\tdone();", "}"].join("\n"));
+		expect(warnings.filter(warning => /mid-block/.test(warning))).toHaveLength(0);
+	});
+	// Symmetric invalid→valid repair: the file already carries a surplus
+	// opener, so replacing that opener line with a plain statement rebalances
+	// the file — the surviving `}` below pairs with `fn f() {`, not with the
+	// deleted `if a {`. Must apply without a mid-block warning.
+	it("does not warn when deleting a surplus opener from an already-broken file", () => {
+		const file = ["fn f() {", "\tif a {", "\t\twork();", "}"].join("\n");
+		const diff = ["PUT 2-2:", "+\tprepare();"].join("\n");
+		const { text, warnings } = applyRust(file, diff);
+		expect(text).toBe(["fn f() {", "\tprepare();", "\t\twork();", "}"].join("\n"));
+		expect(warnings.filter(warning => /mid-block/.test(warning))).toHaveLength(0);
+	});
+	// The balance scanner counts regex-literal braces naively; that miscount
+	// may only ever suppress, never trigger the mid-block warning. Replacing
+	// the `/{/` line is valid JS before and after — no deleted line ends with
+	// a raw `{` and no lone closer line survives below.
+	it("does not warn when replacing a regex literal whose braces fooled the balance scanner", () => {
+		const file = ["const open = /{/;", "const close = /}/;"].join("\n");
+		const diff = ["PUT 1-1:", "+const open = /x/;"].join("\n");
+		const { text, warnings } = apply(file, diff);
+		expect(text).toBe(["const open = /x/;", "const close = /}/;"].join("\n"));
+		expect(warnings.filter(warning => /mid-block/.test(warning))).toHaveLength(0);
+	});
+
+	// Same regex pair embedded in a real function: the enclosing `}` below is
+	// a genuine lone closer, so the closer witness alone is satisfied — the
+	// opener-shape witness (`const open = /{/;` ends with `;`, not `{`) must
+	// still suppress the warning.
+	it("does not warn for a regex-literal replacement inside a real block", () => {
+		const file = ["function setup() {", "\tconst open = /{/;", "\tconst close = /}/;", "}"].join("\n");
+		const diff = ["PUT 2-2:", "+\tconst open = /x/;"].join("\n");
+		const { text, warnings } = apply(file, diff);
+		expect(text).toBe(["function setup() {", "\tconst open = /x/;", "\tconst close = /}/;", "}"].join("\n"));
+		expect(warnings.filter(warning => /mid-block/.test(warning))).toHaveLength(0);
+	});
+	// The parser's veto in prose: Markdown parses with or without the literal
+	// `}`, so the leading-closer spare must not fire and — since nothing is
+	// wrong — must not even warn. (The advisory counterexample: the authored
+	// intent is `Intro {` + `Revised`, not a resurrected brace.)
+	it("applies a prose edit verbatim when the range deletes a literal leading brace", () => {
+		const file = ["Intro {", "}", "old"].join("\n");
+		const diff = ["PUT 2-3:", "+Revised"].join("\n");
+		const { text, warnings } = applyProse(file, diff);
+		expect(text).toBe(["Intro {", "Revised"].join("\n"));
+		expect(warnings).toHaveLength(0);
+	});
+
+	// Mirror for the trailing edge: the long-shipped suffix spare is vetoed by
+	// the same parse.
+	it("applies a prose edit verbatim when the range deletes a literal trailing brace", () => {
+		const file = ["old", "}", "Outro"].join("\n");
+		const diff = ["PUT 1-2:", "+Revised"].join("\n");
+		const { text, warnings } = applyProse(file, diff);
+		expect(text).toBe(["Revised", "Outro"].join("\n"));
+		expect(warnings).toHaveLength(0);
+	});
+
+	// Same leading-closer shape in real code: no veto is available (the authored
+	// result does not parse), so the spare fires and the file stays valid.
+	it("spares the swallowed leading closer when the authored edit does not parse", () => {
+		const file = ["fn f() {", "\tif a {", "\t\treturn;", "\t}", "\tlet lead = old1();", "}"].join("\n");
+		const diff = ["PUT 4-5:", "+\tlet lead = new1();"].join("\n");
+		const { text, warnings } = applyRust(file, diff);
+		expect(text).toBe(["fn f() {", "\tif a {", "\t\treturn;", "\t}", "\tlet lead = new1();", "}"].join("\n"));
+		expect(warnings.filter(warning => /leading structural closing line/.test(warning))).toHaveLength(1);
+	});
+	// The veto needs a language to reason about: with no path the probe abstains
+	// and the delimiter heuristics remain the only available evidence.
+	it("falls back to delimiter heuristics when no path is supplied", () => {
+		const file = ["fn f() {", "\tif a {", "\t\treturn;", "\t}", "\tlet lead = old1();", "}"].join("\n");
+		const { text } = applyEdits(file, parsePatch(["PUT 4-5:", "+\tlet lead = new1();"].join("\n")).edits);
+		expect(text).toBe(["fn f() {", "\tif a {", "\t\treturn;", "\t}", "\tlet lead = new1();", "}"].join("\n"));
+	});
+
+	// An unparseable *authored* result is what unlocks the repair, so a file in
+	// a language tree-sitter does not know behaves like the pathless case.
+	it("falls back to delimiter heuristics for a language the parser does not know", () => {
+		const file = ["fn f() {", "\tif a {", "\t\treturn;", "\t}", "\tlet lead = old1();", "}"].join("\n");
+		const result = applyEdits(file, parsePatch(["PUT 4-5:", "+\tlet lead = new1();"].join("\n")).edits, {
+			path: "fixture.unknownlang",
+		});
+		expect(result.text).toBe(["fn f() {", "\tif a {", "\t\treturn;", "\t}", "\tlet lead = new1();", "}"].join("\n"));
 	});
 });
 

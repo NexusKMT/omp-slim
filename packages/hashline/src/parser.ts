@@ -24,6 +24,7 @@ import {
 	REGISTER_PUT_TAKES_NO_BODY,
 	REM_TAKES_NO_BODY,
 	REPLACE_PAIR_COALESCED_WARNING,
+	repeatedSnapshotRowMessage,
 	SNAPSHOT_ROWS_AUTO_PUT_WARNING,
 } from "./messages";
 import { isReadMetadataLine, stripOneLeadingHashlinePrefix } from "./prefixes";
@@ -210,6 +211,8 @@ export class Executor {
 	#fileOp: FileOp | undefined;
 	#terminated = false;
 	#skippableComments: PendingComment[] = [];
+	/** Source lines already recovered from top-level `N:TEXT` rows in this section. */
+	#recoveredSnapshotLines = new Set<number>();
 
 	#discardPendingSkippableComments(): void {
 		this.#skippableComments = [];
@@ -513,6 +516,14 @@ export class Executor {
 		}
 		const snapshotRow = parseTopLevelSnapshotRow(text);
 		if (snapshotRow !== null) {
+			// Each recovered row becomes a single-line replacement, so a repeated
+			// line number is never a set of replacements — it is a body written as
+			// consecutive lines under one number. Collapsing it would silently keep
+			// only the last row and drop the rest.
+			if (this.#recoveredSnapshotLines.has(snapshotRow.line)) {
+				throw new Error(`line ${lineNum}: ${repeatedSnapshotRowMessage(snapshotRow.line)}`);
+			}
+			this.#recoveredSnapshotLines.add(snapshotRow.line);
 			const range = { start: { line: snapshotRow.line }, end: { line: snapshotRow.line } };
 			validateRange(range, lineNum, "replace");
 			this.#pushInsert(
