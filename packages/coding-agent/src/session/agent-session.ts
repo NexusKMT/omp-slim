@@ -3859,6 +3859,7 @@ export class AgentSession {
 		// graph shed its heavy payloads even while the lifecycle adoption record's
 		// reviver closure still references the session object. Fixes #8003.
 		this.agent.reset();
+		this.agent.setAppendOnlyContext(undefined);
 		this.rawSseDebugBuffer.clear();
 		this.sessionManager.releaseRetainedEntries();
 	}

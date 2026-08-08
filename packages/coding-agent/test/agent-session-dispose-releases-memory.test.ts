@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
-import { Agent, type AgentMessage } from "@oh-my-pi/pi-agent-core";
+import { Agent, type AgentMessage, AppendOnlyContextManager } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
@@ -14,10 +14,10 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 // Regression: a keep-alive subagent's AgentSession is disposed at park() but
 // stays reachable through the lifecycle adoption record's reviver closure
 // (which shares the runSubagent lexical environment that captured the live
-// session). Before the fix, dispose() left the message array, session-manager
-// entries, and the raw-SSE debug buffer intact, so every completed subagent
-// pinned its full transcript + captured wire frames for the process lifetime.
-// dispose() must now shed that heavy state so the pinned graph is only a husk.
+// session). Before the fix, dispose() left the message array, append-only
+// provider transcript, session-manager entries, and the raw-SSE debug buffer
+// intact, so every completed subagent pinned duplicate transcripts and captured
+// wire frames. dispose() must shed that heavy state so the pinned graph is only a husk.
 // See issue #8003.
 describe("AgentSession dispose releases retained memory", () => {
 	let tempDir: TempDir;
@@ -59,7 +59,7 @@ describe("AgentSession dispose releases retained memory", () => {
 		return session;
 	}
 
-	it("clears messages, session entries, and the raw-SSE buffer on dispose", async () => {
+	it("releases all in-memory transcript copies and the raw-SSE buffer on dispose", async () => {
 		const current = createSession();
 		const bulk = "x".repeat(4096);
 
@@ -67,6 +67,9 @@ describe("AgentSession dispose releases retained memory", () => {
 			{ role: "user", content: [{ type: "text", text: bulk }], timestamp: Date.now() },
 		];
 		current.agent.replaceMessages(messages);
+		const appendOnlyContext = new AppendOnlyContextManager();
+		appendOnlyContext.syncMessages([{ role: "user", content: bulk }]);
+		current.agent.setAppendOnlyContext(appendOnlyContext);
 		current.sessionManager.appendMessage({ role: "user", content: bulk, timestamp: Date.now() });
 		current.rawSseDebugBuffer.recordEvent(
 			{
@@ -79,6 +82,8 @@ describe("AgentSession dispose releases retained memory", () => {
 
 		// Precondition: the heavy state is actually present before dispose.
 		expect(current.agent.state.messages.length).toBeGreaterThan(0);
+		expect(current.agent.appendOnlyContext).toBe(appendOnlyContext);
+		expect(appendOnlyContext.log.length).toBeGreaterThan(0);
 		expect(current.sessionManager.getEntries().length).toBeGreaterThan(0);
 		expect(current.rawSseDebugBuffer.toRawText().length).toBeGreaterThan(0);
 
@@ -88,6 +93,7 @@ describe("AgentSession dispose releases retained memory", () => {
 		expect(current.agent.state.messages).toHaveLength(0);
 		expect(current.sessionManager.getEntries()).toHaveLength(0);
 		expect(current.rawSseDebugBuffer.toRawText()).toBe("");
+		expect(current.agent.appendOnlyContext).toBeUndefined();
 		expect(current.rawSseDebugBuffer.snapshot().records).toHaveLength(0);
 	});
 });
