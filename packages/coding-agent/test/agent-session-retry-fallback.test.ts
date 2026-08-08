@@ -4296,6 +4296,44 @@ describe("AgentSession retry fallback", () => {
 		});
 	});
 
+	it("carries attribution across a fork, which continues the conversation under a new id", async () => {
+		using tempDir = TempDir.createSync("@omp-fallback-fork-");
+		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
+		if (!primaryModel || !fallbackModel) {
+			throw new Error("Expected bundled test models to exist");
+		}
+
+		const requestedModels: string[] = [];
+		const agent = createFallbackAgent(primaryModel, requestedModels);
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 5,
+			"retry.fallbackChains": { default: [`${fallbackModel.provider}/${fallbackModel.id}`] },
+		});
+		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
+
+		const sessionManager = SessionManager.create(tempDir.path(), tempDir.path());
+		session = new AgentSession({ agent, sessionManager, settings, modelRegistry });
+
+		await session.prompt("Fail over to the fallback");
+		await session.waitForIdle();
+		const served = {
+			selector: `${fallbackModel.provider}/${fallbackModel.id}`,
+			isFallback: true,
+		};
+		expect(session.servingModel).toEqual(served);
+
+		const sessionIdBeforeFork = sessionManager.getSessionId();
+		expect(await session.fork()).toBe(true);
+		expect(sessionManager.getSessionId()).not.toBe(sessionIdBeforeFork);
+
+		// A fork clones the transcript and keeps running the same session, so the
+		// work the fallback produced is still this session's — unlike a switch to
+		// an unrelated transcript, which expires it.
+		expect(session.servingModel).toEqual(served);
+	});
+
 	it("keeps attribution on a served fallback while the next candidate is unproven", async () => {
 		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
 		const firstFallback = getBundledModel("openai", "gpt-4o-mini");

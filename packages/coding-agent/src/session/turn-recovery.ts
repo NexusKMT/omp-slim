@@ -284,6 +284,29 @@ export class TurnRecovery {
 		return value;
 	}
 
+	/**
+	 * Carries attribution onto a new session id that continues this conversation.
+	 *
+	 * The session-id anchor assumes a new id means an unrelated transcript, which
+	 * holds for `/new` and for resuming something else. A fork breaks that
+	 * assumption on purpose: it clones the transcript and keeps running the same
+	 * recovery state under a fresh id. Dropping attribution there would bootstrap
+	 * an unproven fallback as the primary and re-credit it with the work the
+	 * previous model did — the very bug the anchor exists to prevent.
+	 *
+	 * Only state belonging to `previousSessionId` moves, so an id left behind by
+	 * an earlier switch stays expired.
+	 */
+	reanchorServedAttribution(previousSessionId: string): void {
+		const sessionId = this.#host.sessionManager.getSessionId();
+		if (this.#lastServed?.sessionId === previousSessionId) {
+			this.#lastServed = { ...this.#lastServed, sessionId };
+		}
+		if (this.#fallbackRoutedFor === previousSessionId) {
+			this.#fallbackRoutedFor = sessionId;
+		}
+	}
+
 	/** Resets per-prompt recovery counters and terminal-stop acceptance. */
 	resetForNewPrompt(): void {
 		this.#emptyStopRetryCount = 0;
