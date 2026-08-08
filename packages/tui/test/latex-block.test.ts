@@ -268,11 +268,16 @@ describe("latexToBlock (2-D layout)", () => {
 	});
 
 	it("preserves outer arity when an unbraced command is itself an argument", () => {
-		// `readArg` accepts a command plus its attached arguments as one outer
-		// argument. Completing `\sqrt{a}` must therefore leave `\frac` waiting for
-		// its denominator on the next source line, rather than resetting its arity.
-		expect(latexToBlock("\\frac\\sqrt{a}\n{b}")).toEqual(["  ┌── ", " ╲│ a ", "──────", "  b   "]);
+		// `readArg` accepts a command plus its arguments as one outer argument.
+		// Whitespace introduced by preserved source newlines must stay inside the
+		// nested command rather than turning its first argument into the outer
+		// denominator.
+		const sqrtFraction = ["  ┌── ", " ╲│ a ", "──────", "  b   "];
+		expect(latexToBlock("\\frac\\sqrt{a}{b}")).toEqual(sqrtFraction);
+		expect(latexToBlock("\\frac\\sqrt {a} {b}")).toEqual(sqrtFraction);
+		expect(latexToBlock("\\frac\\sqrt\n{a}\n{b}")).toEqual(sqrtFraction);
 		expect(latexToBlock("\\frac\\frac{a}{b}\n{c}")).toEqual(["  a  ", " ─── ", "  b  ", "─────", "  c  "]);
+		expect(latexToBlock("\\frac\\frac\n{a}\n{b}\n{c}")).toEqual(["  a  ", " ─── ", "  b  ", "─────", "  c  "]);
 		expect(latexToBlock("\\frac\\hat{a}\n{b}")).toEqual([" â ", "───", " b "]);
 	});
 

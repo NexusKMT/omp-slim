@@ -146,6 +146,16 @@ const HBRACE_COMMANDS: Record<string, HBraceSpec> = {
 	underparen: { left: "╰", mid: "─", center: "─", right: "╯", over: false },
 };
 
+/**
+ * Number of required arguments each display command consumes. Shared by
+ * {@link readArg} and {@link splitLines} so nested command atoms consume exactly
+ * their own arguments while preserving any outer command's pending arity.
+ */
+const COMMAND_ARITY: Record<string, number> = { overset: 2, underset: 2, stackrel: 2, sqrt: 1 };
+for (const name in FRAC_COMMANDS) COMMAND_ARITY[name] = 2;
+for (const name in BINOM_COMMANDS) COMMAND_ARITY[name] = 2;
+for (const name in HBRACE_COMMANDS) COMMAND_ARITY[name] = 1;
+
 // Vertical delimiter piece characters: `only` for single-line content, then
 // top/mid/bot columns for stretched forms; `axis` replaces `mid` at the
 // baseline row (the brace point).
@@ -516,11 +526,13 @@ function readBraceGroup(src: string, i: number): Span {
 
 /**
  * Read one command argument: a `{…}` group, a single char, or a `\command`
- * together with its attached `[…]`/`{…}` arguments (or whole `\begin…\end`
- * block), so e.g. `\frac\sqrt{a}{b}` reads `\sqrt{a}` as the numerator.
+ * together with its arguments (or whole `\begin…\end` block). Commands whose
+ * arity is known consume exactly that many arguments, including across source
+ * whitespace, so `\frac\sqrt {a} {b}` reads `\sqrt {a}` as the numerator and
+ * leaves `{b}` for the denominator.
  */
 function readArg(src: string, i: number): Span {
-	while (src[i] === " ") i++;
+	while (src[i] === " " || src[i] === "\t" || src[i] === "\n") i++;
 	if (i >= src.length) return { text: "", end: i };
 	if (src[i] === "{") return readBraceGroup(src, i);
 	if (src[i] !== "\\") return { text: src[i], end: i + 1 };
@@ -535,6 +547,22 @@ function readArg(src: string, i: number): Span {
 		if (env) return env;
 	}
 	if (!name) return { text: src.slice(i, i + 2), end: i + 2 }; // non-letter command (\,, \{, …)
+
+	const arity = COMMAND_ARITY[name];
+	if (arity !== undefined) {
+		let end = j;
+		// Optional command arguments (e.g. the degree in `\sqrt[3]{x}`) do not
+		// consume a required-argument slot.
+		for (;;) {
+			while (src[end] === " " || src[end] === "\t" || src[end] === "\n") end++;
+			if (src[end] !== "[") break;
+			const close = src.indexOf("]", end);
+			end = close === -1 ? src.length : close + 1;
+		}
+		for (let arg = 0; arg < arity; arg++) end = readArg(src, end).end;
+		return { text: src.slice(i, end), end };
+	}
+
 	let end = j;
 	while (src[end] === "[" || src[end] === "{") {
 		if (src[end] === "{") end = readBraceGroup(src, end).end;
@@ -1270,17 +1298,6 @@ function parseExpr(src: string, ctx: Ctx = ROOT_CTX): Box {
 	if (boxes.length === 0) return textBox("");
 	return hconcat(boxes);
 }
-
-/**
- * Number of `{…}` arguments each display command consumes, used to tell an
- * argument continuation from a genuine row break in {@link splitLines}. Only
- * commands whose arguments this engine reads with {@link readArg} appear here;
- * anything else contributes no pending argument.
- */
-const COMMAND_ARITY: Record<string, number> = { overset: 2, underset: 2, stackrel: 2, sqrt: 1 };
-for (const name in FRAC_COMMANDS) COMMAND_ARITY[name] = 2;
-for (const name in BINOM_COMMANDS) COMMAND_ARITY[name] = 2;
-for (const name in HBRACE_COMMANDS) COMMAND_ARITY[name] = 1;
 
 /**
  * Count the `{…}` arguments still owed at the end of `seg` — non-zero when the
