@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.12] - 2026-08-08
+
 ### Fixed
 
 - Fixed shell minimization replacing meaningful `rustc --print` output with `OK`.

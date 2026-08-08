@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.12] - 2026-08-08
+
 ### Breaking Changes
 
 - `PUT N.=M @name` over a *span* now throws when `@name` was never captured, instead of warning and deleting the range. Pasting a never-captured register over a span wrote nothing back, so a mistyped or hallucinated register name silently destroyed content. Gap pastes (`PUT >N @name`) keep the warned no-op behaviour from 17.2.11.
