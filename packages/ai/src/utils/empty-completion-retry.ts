@@ -98,7 +98,6 @@ export function withReplaySafeStreamRetry<M, O extends StreamRetryOptions>(
 		let emptyRetries = 0;
 		let providerErrorRetries = 0;
 		while (true) {
-			const inner = attempt(model, context, options);
 			const buffered: AssistantMessageEvent[] = [];
 			let committed = false;
 			let terminal: AssistantMessageEvent | undefined;
@@ -106,7 +105,12 @@ export function withReplaySafeStreamRetry<M, O extends StreamRetryOptions>(
 				for (const event of buffered) outer.push(event);
 				buffered.length = 0;
 			};
+			let inner: AssistantMessageEventStream;
 			try {
+				// The attempt factory can throw synchronously (e.g. a config error
+				// raised before it creates its stream); surface it on the outer stream
+				// rather than leaking an unhandled rejection that never settles.
+				inner = attempt(model, context, options);
 				for await (const event of inner) {
 					if (event.type === "done" || event.type === "error") {
 						terminal = event;

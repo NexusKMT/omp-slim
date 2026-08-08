@@ -373,4 +373,19 @@ describe("withReplaySafeStreamRetry", () => {
 		expect(result.stopReason).toBe("error");
 		expect(result.content).toEqual([{ type: "text", text: "partial" }]);
 	});
+
+	it("settles the outer stream when the attempt factory throws synchronously", async () => {
+		const configError = new Error("explicit prompt caching is unsupported");
+		const stream = withReplaySafeStreamRetry(
+			{},
+			CTX,
+			{ providerRetryWait: async () => {} },
+			() => {
+				throw configError;
+			},
+			{ retryProviderErrors: true, maxProviderErrorRetries: 1 },
+		);
+
+		await expect(stream.result()).rejects.toBe(configError);
+	});
 });
