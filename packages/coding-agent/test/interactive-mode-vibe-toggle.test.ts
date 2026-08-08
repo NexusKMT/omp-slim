@@ -245,6 +245,83 @@ describe("InteractiveMode vibe mode toggle", () => {
 		expect(vibeModeEntryCount(session.sessionManager)).toBe(1);
 	});
 
+	it("restores the target's pre-vibe toolset when switching from one vibe session into another", async () => {
+		const model = session.model;
+		if (!model) throw new Error("Expected active model");
+		// The shared fixture's pre-vibe active set is empty, which cannot
+		// distinguish a restored snapshot from a lost one. Use sessions whose
+		// pre-vibe toolset contains a tool vibe strips (`bash`).
+		const openFixture = () => {
+			const opened = new AgentSession({
+				agent: new Agent({
+					initialState: {
+						model,
+						systemPrompt: ["Test"],
+						tools: [],
+						messages: [],
+					},
+				}),
+				sessionManager: SessionManager.create(tempDir.path(), tempDir.path()),
+				settings: Settings.isolated({}),
+				modelRegistry,
+				toolRegistry: new Map(["read", "todo", "bash"].map(name => [name, stubTool(name)])),
+				builtInToolNames: ["read", "todo", "bash"],
+				createVibeTools: () => VIBE_TOOL_NAMES.map(stubTool),
+			});
+			return {
+				session: opened,
+				mode: new InteractiveMode(opened, "test", undefined, undefined, undefined, undefined, new EventBus()),
+			};
+		};
+
+		// Target session: left in vibe mode on disk.
+		const { session: targetSession, mode: targetMode } = openFixture();
+		let targetFile: string;
+		try {
+			await targetMode.init({ suppressWelcomeIntro: true });
+			await targetSession.setActiveToolsByName(["read", "todo", "bash"]);
+			await targetMode.handleVibeModeCommand();
+			expect(targetSession.getActiveToolNames()).not.toContain("bash");
+			await targetSession.sessionManager.ensureOnDisk();
+			const file = targetSession.sessionFile;
+			if (!file) throw new Error("Expected persisted session file");
+			targetFile = file;
+		} finally {
+			targetMode.stop();
+			await targetSession.dispose();
+		}
+
+		// Source session, also in vibe mode, switches into the target. Because the
+		// source is in vibe, `#clearTransientModeState` takes the
+		// `removeVibeToolsPreservingActive` path: it deliberately keeps the live
+		// active set rather than applying the source's own snapshot. That live set
+		// is the reduced vibe set, so the re-entry driven by reconciliation must
+		// take its snapshot from the target's persisted mode_change entry rather
+		// than from re-reading the live toolset.
+		//
+		// Switching in from a non-vibe session is unaffected: the teardown path
+		// does not run, so the live toolset is still the source's full set. Neither
+		// is a cold start, where the process builds the full toolset before
+		// reconciliation runs.
+		const { session: sourceSession, mode: sourceMode } = openFixture();
+		try {
+			await sourceMode.init({ suppressWelcomeIntro: true });
+			await sourceSession.setActiveToolsByName(["read", "todo", "bash"]);
+			await sourceMode.handleVibeModeCommand();
+			expect(sourceMode.vibeModeEnabled).toBe(true);
+
+			expect(await sourceSession.switchSession(targetFile)).toBe(true);
+			expect(sourceMode.vibeModeEnabled).toBe(true);
+
+			await sourceMode.handleVibeModeCommand();
+			expect(sourceMode.vibeModeEnabled).toBe(false);
+			expect(sourceSession.getActiveToolNames().toSorted()).toEqual(["bash", "read", "todo"]);
+		} finally {
+			sourceMode.stop();
+			await sourceSession.dispose();
+		}
+	});
+
 	it("passes the session's active model into vibe rehydration on resume", async () => {
 		await mode.init({ suppressWelcomeIntro: true });
 		await mode.handleVibeModeCommand();
