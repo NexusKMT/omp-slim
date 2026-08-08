@@ -174,8 +174,8 @@ import {
 	deobfuscateSessionContext,
 	deobfuscateToolArguments,
 	obfuscateProviderContext,
-	type SecretObfuscator,
-} from "../secrets/obfuscator";
+} from "../secrets/message-transform";
+import type { SecretObfuscator } from "../secrets/obfuscator";
 import {
 	AUTO_THINKING,
 	type ConfiguredThinkingLevel,
