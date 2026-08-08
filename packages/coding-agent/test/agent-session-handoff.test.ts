@@ -178,6 +178,13 @@ describe("AgentSession handoff", () => {
 	});
 
 	it("emits handoff lifecycle hooks on the outgoing and replacement sessions", async () => {
+		// dispose() is terminal: it closes the manager and releases its in-memory
+		// transcript. Reopen the persisted session file for the replacement
+		// session, as production revival paths do.
+		await session.dispose();
+		const sessionFile = sessionManager.getSessionFile();
+		if (!sessionFile) throw new Error("Expected a persisted session file");
+		sessionManager = await SessionManager.open(sessionFile, tempDir.path());
 		const extensionsResult = await loadExtensions([], tempDir.path());
 		const extensionRunner = new ExtensionRunner(
 			extensionsResult.extensions,
@@ -212,7 +219,6 @@ describe("AgentSession handoff", () => {
 			return emit(event);
 		});
 
-		await session.dispose();
 		session = new AgentSession({
 			agent: new Agent({
 				initialState: {
@@ -292,6 +298,9 @@ describe("AgentSession handoff", () => {
 			return stream;
 		};
 		await session.dispose();
+		const sessionFile = sessionManager.getSessionFile();
+		if (!sessionFile) throw new Error("Expected a persisted session file");
+		sessionManager = await SessionManager.open(sessionFile, tempDir.path());
 		session = new AgentSession({
 			agent: new Agent({
 				initialState: {
@@ -1740,6 +1749,12 @@ describe("AgentSession handoff", () => {
 			throw new Error("Expected model to be set");
 		}
 
+		// See "emits handoff lifecycle hooks": reopen the persisted transcript
+		// after the terminal dispose before wiring the replacement session.
+		await session.dispose();
+		const sessionFile = sessionManager.getSessionFile();
+		if (!sessionFile) throw new Error("Expected a persisted session file");
+		sessionManager = await SessionManager.open(sessionFile, tempDir.path());
 		const extensionsResult = await loadExtensions([], tempDir.path());
 		const extensionRunner = new ExtensionRunner(
 			extensionsResult.extensions,
@@ -1753,7 +1768,6 @@ describe("AgentSession handoff", () => {
 			cancel: true,
 		})) as ExtensionRunner["emit"]);
 
-		await session.dispose();
 		session = new AgentSession({
 			agent: new Agent({
 				initialState: {
