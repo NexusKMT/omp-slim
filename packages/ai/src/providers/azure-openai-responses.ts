@@ -13,6 +13,7 @@ import type {
 } from "../types";
 import { resolveCacheRetention } from "../utils";
 import { createAbortSourceTracker } from "../utils/abort";
+import { withReplaySafeStreamRetry } from "../utils/empty-completion-retry";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import type { RawHttpRequestDump } from "../utils/http-inspector";
 import {
@@ -75,10 +76,8 @@ type AzureOpenAIResponsesSamplingParams = ResponseCreateParamsStreaming & {
 	repetition_penalty?: number;
 };
 
-/**
- * Generate function for Azure OpenAI Responses API
- */
-export const streamAzureOpenAIResponses: StreamFunction<"azure-openai-responses"> = (
+/** Runs one Azure OpenAI Responses request and decodes its event stream. */
+const streamAzureOpenAIResponsesOnce = (
 	model: Model<"azure-openai-responses">,
 	context: Context,
 	options?: AzureOpenAIResponsesOptions,
@@ -263,6 +262,13 @@ export const streamAzureOpenAIResponses: StreamFunction<"azure-openai-responses"
 
 	return stream;
 };
+
+/** Retries transient Azure stream failures only before assistant output commits the attempt. */
+export const streamAzureOpenAIResponses: StreamFunction<"azure-openai-responses"> = (model, context, options) =>
+	withReplaySafeStreamRetry(model, context, options, streamAzureOpenAIResponsesOnce, {
+		retryProviderErrors: true,
+		maxProviderErrorRetries: 1,
+	});
 
 function resolveAzureConfig(
 	model: Model<"azure-openai-responses">,

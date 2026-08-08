@@ -2722,8 +2722,12 @@ class CodexStreamProcessor {
 	}
 
 	async #tryRetryProviderError(error: unknown): Promise<boolean> {
+		const retryable =
+			error instanceof CodexProviderStreamError
+				? error.retryable
+				: AIError.isProviderRetryableError(error, { provider: this.model.provider });
 		if (
-			!(error instanceof CodexProviderStreamError && error.retryable) ||
+			!retryable ||
 			this.output.content.length > 0 ||
 			this.runtime.providerRetryAttempt >= CODEX_MAX_RETRIES ||
 			this.options?.signal?.aborted

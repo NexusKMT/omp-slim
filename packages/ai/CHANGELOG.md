@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Retried transient mid-stream socket closures for OpenAI Responses, Chat Completions, Azure OpenAI Responses, and Codex SSE when no replay-unsafe output was emitted ([#7979](https://github.com/can1357/oh-my-pi/issues/7979)).
+
 ## [17.2.11] - 2026-08-07
 
 ### Breaking Changes
