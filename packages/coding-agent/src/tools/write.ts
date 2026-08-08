@@ -1397,6 +1397,68 @@ function normalizeDisplayText(text: unknown): string {
  */
 const WRITE_GUTTER_MIN_WIDTH = 3;
 
+/**
+ * Per-component streaming line index for {@link formatStreamingContent}.
+ * Keyed on the ToolExecutionComponent's persistent render-state object (the
+ * `options` argument renderers receive on every rebuild), so the entry lives
+ * exactly as long as the component and never leaks across tool calls.
+ *
+ * Why: streamed write content is append-only, but the formatter used to
+ * normalize + `split("\n")` the ENTIRE accumulated payload on every reveal
+ * tick — O(n) per tick, O(n²) per stream, which was a measurable main-thread
+ * stall on long writes (and multiplied across concurrent subagent writes).
+ * Tracking the newline count incrementally and extracting only the tail
+ * window makes each tick O(delta + preview lines).
+ */
+interface WriteStreamingLineIndex {
+	/** Full content string as of the last scan. */
+	content: string;
+	/** `1 + count("\n")` over {@link content}. */
+	lineCount: number;
+}
+
+const writeStreamingLineIndex = new WeakMap<object, WriteStreamingLineIndex>();
+
+/** Total logical line count of `content`, resuming from the cached prefix scan when append-only. */
+function streamingTotalLines(streamKey: object | undefined, content: string): number {
+	if (streamKey === undefined) {
+		let lines = 1;
+		for (let i = 0; i < content.length; i++) if (content.charCodeAt(i) === 10) lines++;
+		return lines;
+	}
+	let entry = writeStreamingLineIndex.get(streamKey);
+	if (entry !== undefined && content.startsWith(entry.content)) {
+		let lines = entry.lineCount;
+		for (let i = entry.content.length; i < content.length; i++) if (content.charCodeAt(i) === 10) lines++;
+		entry.content = content;
+		entry.lineCount = lines;
+		return lines;
+	}
+	let lines = 1;
+	for (let i = 0; i < content.length; i++) if (content.charCodeAt(i) === 10) lines++;
+	entry = { content, lineCount: lines };
+	writeStreamingLineIndex.set(streamKey, entry);
+	return lines;
+}
+
+/**
+ * Raw offset just after the (totalLines - previewLines)-th newline — i.e. the
+ * start of the last `previewLines` logical lines — scanning back from the end.
+ * Returns 0 when the whole content fits in the window. Equivalent to
+ * `content.split("\n").slice(-previewLines).join("\n")` without materializing
+ * the full line array.
+ */
+function tailWindowStart(content: string, previewLines: number): number {
+	let newlinesSeen = 0;
+	for (let i = content.length - 1; i >= 0; i--) {
+		if (content.charCodeAt(i) === 10) {
+			newlinesSeen++;
+			if (newlinesSeen === previewLines) return i + 1;
+		}
+	}
+	return 0;
+}
+
 function formatStreamingContent(
 	content: string,
 	expanded: boolean,
@@ -1404,19 +1466,31 @@ function formatStreamingContent(
 	uiTheme: Theme,
 	spinnerFrame?: number,
 	cache?: RenderedStringCache,
+	streamKey?: object,
 ): string {
 	if (!content) return "";
 	const bodyText = cachedRenderedString(cache, uiTheme, expanded, language ?? "", content, () => {
-		const lines = normalizeDisplayText(content).split("\n");
-		const totalLines = lines.length;
 		// Collapsed: follow the streaming edge with a bounded tail window so the box
 		// stays short enough not to strand its scrolled-off head above the viewport
 		// while the block is volatile. `Ctrl+O` (expanded) lifts the cap for a
 		// deliberate full view — matching the eval streaming preview.
-		const startIndex = expanded ? 0 : Math.max(0, totalLines - WRITE_STREAMING_PREVIEW_LINES);
-		const visibleLines = lines.slice(startIndex);
+		let totalLines: number;
+		let startIndex: number;
+		let visibleText: string;
+		if (expanded) {
+			visibleText = normalizeDisplayText(content);
+			totalLines = 1;
+			for (let i = 0; i < visibleText.length; i++) if (visibleText.charCodeAt(i) === 10) totalLines++;
+			startIndex = 0;
+		} else {
+			totalLines = streamingTotalLines(streamKey, content);
+			startIndex = Math.max(0, totalLines - WRITE_STREAMING_PREVIEW_LINES);
+			const tail =
+				startIndex === 0 ? content : content.slice(tailWindowStart(content, WRITE_STREAMING_PREVIEW_LINES));
+			visibleText = tail.replace(/\r/g, "");
+		}
 		const hidden = startIndex;
-		const highlighted = highlightCode(visibleLines.join("\n"), language);
+		const highlighted = highlightCode(visibleText, language);
 		const lineNumberWidth = Math.max(WRITE_GUTTER_MIN_WIDTH, String(totalLines).length);
 
 		let text = "\n\n";
@@ -1514,7 +1588,12 @@ export const writeToolRenderer = {
 			},
 			uiTheme,
 		);
-		const content = normalizeDisplayText(args.content);
+		// Raw content, not normalizeDisplayText(args.content): the collapsed
+		// streaming path normalizes only its tail window, so a full-payload
+		// normalize on every reveal tick would re-introduce the O(n²) streaming
+		// cost formatStreamingContent avoids. Non-string content still falls
+		// back to the normalizing stringify.
+		const content = typeof args.content === "string" ? args.content : normalizeDisplayText(args.content);
 		const streamingCache = createRenderedStringCache();
 		return framedBlock(uiTheme, width => {
 			const body = content
@@ -1525,6 +1604,10 @@ export const writeToolRenderer = {
 						uiTheme,
 						options?.spinnerFrame,
 						streamingCache,
+						// `options` is the ToolExecutionComponent's persistent
+						// render-state object — a stable identity across reveal ticks
+						// that keys the incremental line index.
+						options,
 					)
 				: "";
 			const bodyLines = body ? body.split("\n") : [];
