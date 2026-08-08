@@ -1367,8 +1367,19 @@ async function isCommonJsModulePath(
 	if (parsedSourceType === "script") {
 		const content = await Bun.file(modulePath).text();
 		// Strip comments before checking for CJS patterns to avoid false positives
-		// from commented-out code like "// module.exports = ..."
-		const stripped = content.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+		// from commented-out code like "// module.exports = ...".
+		//
+		// Heuristics applied:
+		// 1. Skip stripping for minified code (avg line length > 2000) — minified
+		//    files typically have 1-5 lines with 10,000+ chars each, and naive
+		//    stripping could delete CJS markers inside string literals.
+		// 2. Use (?<!:) lookbehind to avoid matching "//" in URL schemes (://)
+		//    like "https://example.com" where "//"" is part of the string, not
+		//    a comment.
+		const lines = content.split("\n");
+		const avgLineLength = content.length / Math.max(lines.length, 1);
+		const stripped =
+			avgLineLength > 2000 ? content : content.replace(/(?<!:)\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
 		if (/\brequire\s*\(/.test(stripped) || /\bmodule\.exports\b/.test(stripped) || /\bexports\./.test(stripped)) {
 			return true;
 		}

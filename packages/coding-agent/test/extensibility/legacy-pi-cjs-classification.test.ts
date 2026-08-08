@@ -135,3 +135,38 @@ describe("isCommonJsModulePath CJS classification (inheritedKind override fix)",
 		expect(mod.result).toBe(99);
 	});
 });
+
+describe("comment stripping heuristics", () => {
+	it("does not false-positive on double-slash inside URL strings", async () => {
+		const dir = await writePackage({
+			"package.json": JSON.stringify({ name: "cjs-url-fp", version: "1.0.0" }),
+			"dep.js": [
+				'const api = "https://api.example.com/v1";',
+				'const backup = "http://backup.example.com";',
+				"module.exports = { api, backup };",
+			].join("\n"),
+			"index.mjs": ["import dep from './dep.js';", "export const api = dep.api;"].join("\n"),
+		});
+
+		const entry = path.join(dir, "index.mjs");
+		const mod = (await loadLegacyPiModule(entry)) as { api: string };
+		expect(mod.api).toBe("https://api.example.com/v1");
+	});
+
+	it("does not false-positive on double-slash in ftp/file/ssh URL strings", async () => {
+		const dir = await writePackage({
+			"package.json": JSON.stringify({ name: "cjs-url-proto", version: "1.0.0" }),
+			"dep.js": [
+				'const ftp = "ftp://files.example.com/data";',
+				'const file = "file:///local/path";',
+				'const ssh = "ssh://server.example.com";',
+				"module.exports = { ftp, file, ssh };",
+			].join("\n"),
+			"index.mjs": ["import dep from './dep.js';", "export const ftp = dep.ftp;"].join("\n"),
+		});
+
+		const entry = path.join(dir, "index.mjs");
+		const mod = (await loadLegacyPiModule(entry)) as { ftp: string };
+		expect(mod.ftp).toBe("ftp://files.example.com/data");
+	});
+});
