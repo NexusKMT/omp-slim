@@ -1352,6 +1352,14 @@ async function isCommonJsModulePath(
 	if (parsedSourceType === "module") {
 		return false;
 	}
+	// When source is unambiguously CJS (uses require/module.exports), trust the
+	// source content over inheritedKind. An ESM importer (e.g. index.mjs doing
+	// `import from './index.js'`) passes inheritedKind="esm" which previously
+	// overrode the source-type detection, causing CJS files to be classified as
+	// ESM — skipping the CJS bridge hook and producing "Missing 'default' export".
+	if (parsedSourceType === "script") {
+		return true;
+	}
 	if (inheritedKind) {
 		return inheritedKind === "commonjs";
 	}
