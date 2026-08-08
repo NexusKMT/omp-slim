@@ -58,6 +58,7 @@ import {
 	type RetryFallbackRevertPolicy,
 	type RetryFallbackSelector,
 	resolveRetryFallbackChainKey,
+	type ServingModel,
 	validateRetryFallbackChains,
 } from "./retry-fallback-chains";
 import { getLatestCompactionEntry } from "./session-context";
@@ -204,11 +205,14 @@ export class TurnRecovery {
 	 */
 	#lastServed: { attribution: ServingModel; sessionId: string } | undefined;
 	/**
-	 * Whether the current model was reached by fallback routing rather than by
-	 * the configured primary. Tracked separately from {@link #activeRetryFallback}
-	 * because the Fireworks Fast degrade swaps models without arming a chain.
+	 * Session whose current model was reached by fallback routing rather than by
+	 * the configured primary, or `undefined` when it was not. Tracked separately
+	 * from {@link #activeRetryFallback} because the Fireworks Fast degrade swaps
+	 * models without arming a chain, and anchored like {@link #lastServed}:
+	 * switching transcripts in place must not describe a fresh session's model
+	 * with how the previous one was routed.
 	 */
-	#fallbackRouted = false;
+	#fallbackRoutedFor: string | undefined;
 	/** Memoized bootstrap answer, for the window before anything has served. */
 	#bootstrapCache:
 		| { model: Model; level: ThinkingLevel | undefined; routed: boolean; value: ServingModel }
@@ -222,7 +226,7 @@ export class TurnRecovery {
 				lastAppliedFallbackThinkingLevel: host.configuredThinkingLevel(),
 				pinned: options.initialRetryFallback.pinned ?? false,
 			};
-			this.#fallbackRouted = true;
+			this.#markFallbackRouted();
 		}
 		this.#validateRetryFallbackChains();
 	}
@@ -235,6 +239,17 @@ export class TurnRecovery {
 	/** Promise settled when the active retry saga finishes. */
 	get retryPromise(): Promise<void> | undefined {
 		return this.#retryPromise;
+	}
+
+	/** Whether the CURRENT session's model was reached by fallback routing. */
+	get #fallbackRouted(): boolean {
+		return (
+			this.#fallbackRoutedFor !== undefined && this.#fallbackRoutedFor === this.#host.sessionManager.getSessionId()
+		);
+	}
+
+	#markFallbackRouted(): void {
+		this.#fallbackRoutedFor = this.#host.sessionManager.getSessionId();
 	}
 
 	/**
@@ -1114,7 +1129,7 @@ export class TurnRecovery {
 	/** Clears fallback ownership after an explicit model change or a restore. */
 	clearActiveRetryFallback(): void {
 		this.#activeRetryFallback = undefined;
-		this.#fallbackRouted = false;
+		this.#fallbackRoutedFor = undefined;
 	}
 
 	/** Checks whether a fallback selector remains in cooldown. */
@@ -1360,13 +1375,13 @@ export class TurnRecovery {
 		// listener reading attribution in that window must already see the incoming
 		// candidate as fallback-routed. Attribution itself is safe regardless — it
 		// names the last model that served, which this swap has not changed.
-		const routedBeforeSwap = this.#fallbackRouted;
+		const routedBeforeSwap = this.#fallbackRoutedFor;
 		const servedBeforeSwap = this.#activeRetryFallback?.served;
-		this.#fallbackRouted = true;
+		this.#markFallbackRouted();
 		if (this.#activeRetryFallback) this.#activeRetryFallback.served = false;
 		await this.#host.setModelWithProviderSessionReset(candidate);
 		if (options?.signal?.aborted) {
-			this.#fallbackRouted = routedBeforeSwap;
+			this.#fallbackRoutedFor = routedBeforeSwap;
 			if (this.#activeRetryFallback) this.#activeRetryFallback.served = servedBeforeSwap;
 			if (previousModel && this.#host.model() === candidate) {
 				await this.#host.setModelWithProviderSessionReset(previousModel);
@@ -1374,7 +1389,7 @@ export class TurnRecovery {
 			return false;
 		}
 		if (this.#host.model() !== candidate) {
-			this.#fallbackRouted = routedBeforeSwap;
+			this.#fallbackRoutedFor = routedBeforeSwap;
 			if (this.#activeRetryFallback) this.#activeRetryFallback.served = servedBeforeSwap;
 			return false;
 		}
@@ -1499,7 +1514,7 @@ export class TurnRecovery {
 		const baseSelector = formatModelStringWithRouting(baseModel);
 		// A capability degrade is fallback routing too, even though it arms no
 		// chain: the base model must not be reported as the configured primary.
-		this.#fallbackRouted = true;
+		this.#markFallbackRouted();
 		await this.#host.setModelWithProviderSessionReset(baseModel);
 		this.#host.sessionManager.appendModelChange(baseSelector, EPHEMERAL_MODEL_CHANGE_ROLE, true);
 		this.#host.settings.getStorage()?.recordModelUsage(baseSelector);

@@ -1253,11 +1253,12 @@ describe("AgentSession retry fallback", () => {
 			isFallback: true,
 		});
 
-		let servingAtSwap: ServingModel | undefined | "unset" = "unset";
-		session.subscribe(event => {
+		const swapProbe: Array<ServingModel | undefined> = [];
+		const observed = session;
+		observed.subscribe(event => {
 			if (event.type === "retry_fallback_applied") {
 				fallbackAppliedEvents.push(event);
-				servingAtSwap = session.servingModel;
+				swapProbe.push(observed.servingModel);
 			}
 		});
 
@@ -1281,10 +1282,7 @@ describe("AgentSession retry fallback", () => {
 		// Nothing had served when the chain advanced, so there was no earlier work
 		// to miscredit and the candidate being attempted is the only answer — but
 		// it is still reported as fallback-routed.
-		expect(servingAtSwap).toEqual({
-			selector: `${secondFallback.provider}/${secondFallback.id}`,
-			isFallback: true,
-		});
+		expect(swapProbe).toEqual([{ selector: `${secondFallback.provider}/${secondFallback.id}`, isFallback: true }]);
 		expect(session.servingModel).toEqual({
 			selector: `${secondFallback.provider}/${secondFallback.id}`,
 			isFallback: true,
@@ -3486,8 +3484,9 @@ describe("AgentSession retry fallback", () => {
 		// Capture attribution inside the restore's synchronous `model_changed`
 		// fan-out, which is the window the restore path reopens.
 		const servingDuringSwaps: Array<ServingModel | undefined> = [];
-		session.subscribe(event => {
-			if (event.type === "model_changed") servingDuringSwaps.push(session.servingModel);
+		const restoring = session;
+		restoring.subscribe(event => {
+			if (event.type === "model_changed") servingDuringSwaps.push(restoring.servingModel);
 		});
 
 		now += 240;
@@ -3541,6 +3540,12 @@ describe("AgentSession retry fallback", () => {
 		// still fallback routing — a bare model badge would hide that.
 		expect(requestedModels).toEqual([`${fastModel.provider}/${fastModel.id}`, `fireworks/${baseId}`]);
 		expect(session.servingModel).toEqual({ selector: `fireworks/${baseId}`, isFallback: true });
+
+		// How the previous transcript was routed says nothing about a freshly
+		// loaded one: switching sessions in place must not describe the new
+		// session's model as fallback-routed.
+		vi.spyOn(session.sessionManager, "getSessionId").mockReturnValue("some-other-session");
+		expect(session.servingModel).toEqual({ selector: `fireworks/${baseId}`, isFallback: false });
 	});
 
 	it("re-checks context before a cooldown-expiry revert onto a smaller-window model in the auto-continue path", async () => {
@@ -4241,14 +4246,15 @@ describe("AgentSession retry fallback", () => {
 			selector: `${primaryModel.provider}/${primaryModel.id}`,
 			isFallback: false,
 		});
-		// Attribution belongs to the session it was earned in. Every real switch
-		// mints a new session id — including for an unpersisted session, which has
-		// no file to compare — so the stale value drops itself, leaving only what
-		// this session currently points at.
+		// Both attribution and how the model was routed belong to the session they
+		// were earned in. Every real switch mints a new session id — including for
+		// an unpersisted session, which has no file to compare — so both drop
+		// themselves, leaving only the model this session currently points at,
+		// described without a claim about how it got there.
 		vi.spyOn(session.sessionManager, "getSessionId").mockReturnValue("some-other-session");
 		expect(session.servingModel).toEqual({
 			selector: `${fallbackModel.provider}/${fallbackModel.id}`,
-			isFallback: true,
+			isFallback: false,
 		});
 	});
 
@@ -4346,8 +4352,9 @@ describe("AgentSession retry fallback", () => {
 		// `model_changed` fans out synchronously from inside the swap, which is the
 		// window where the incoming candidate could inherit the previous one's proof.
 		const servingAtModelChange: Array<ServingModel | undefined> = [];
-		session.subscribe(event => {
-			if (event.type === "model_changed") servingAtModelChange.push(session.servingModel);
+		const advancing = session;
+		advancing.subscribe(event => {
+			if (event.type === "model_changed") servingAtModelChange.push(advancing.servingModel);
 		});
 		await session.prompt("Advance to candidate B and die there");
 		await session.waitForIdle();

@@ -111,6 +111,7 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		host.model = () => activeModel;
 		host.sessionManager = {
 			appendModelChange: (selector: string) => modelChanges.push(selector),
+			getSessionId: () => "replay-unsafe-session",
 		} as never;
 		host.setModelWithProviderSessionReset = async nextModel => {
 			activeModel = nextModel;
@@ -161,6 +162,7 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		host.model = () => activeModel;
 		host.sessionManager = {
 			appendModelChange: (selector: string) => modelChanges.push(selector),
+			getSessionId: () => "replay-unsafe-session",
 		} as never;
 		host.setThinkingLevel = level => thinkingChanges.push(level);
 		host.setModelWithProviderSessionReset = async nextModel => {
@@ -208,6 +210,7 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		host.model = () => activeModel;
 		host.sessionManager = {
 			appendModelChange: (selector: string) => modelChanges.push(selector),
+			getSessionId: () => "replay-unsafe-session",
 		} as never;
 		host.setModelWithProviderSessionReset = async nextModel => {
 			activeModel = nextModel;
