@@ -111,8 +111,8 @@ pub(crate) fn run<SE: brush_core::ShellExtensions>(
 				return Ok(ExecutionExitCode::Interrupted.into());
 			}
 
-			let processes = match select_processes(&mut options) {
-				Ok(processes) => processes,
+			let (processes, host) = match select_processes(&mut options) {
+				Ok(selected) => selected,
 				Err(message) => {
 					writeln!(context.stderr(), "{command_name}: {message}")?;
 					return Ok(ExecutionResult::new(2));
@@ -182,6 +182,21 @@ pub(crate) fn run<SE: brush_core::ShellExtensions>(
 						}
 						if context.is_cancelled() {
 							return Ok(ExecutionExitCode::Interrupted.into());
+						}
+						// Selection may legitimately include an ancestor — `pgrep`
+						// should still list the terminal — but signalling one would
+						// tear down the session this shell runs in. Refuse late, at
+						// delivery, so only the destructive mode is affected.
+						if host.pids.contains(&process.pid()) {
+							if !options.quiet {
+								writeln!(
+									context.stderr(),
+									"{command_name}: refusing to signal pid {} (this shell or one of its \
+									 ancestors)",
+									process.pid()
+								)?;
+							}
+							continue;
 						}
 						if !process.signal(options.signal, options.queue) {
 							if !options.quiet {
@@ -607,10 +622,17 @@ fn has_proc_selectors(options: &ProcMatchOptions) -> bool {
 		|| !options.states.is_empty()
 }
 
+/// Selects the processes matching `options`, and resolves the host chain from the
+/// same process-table snapshot.
+///
+/// Both come from one `ProcInfo::all()`: `pkill` needs the chain to decide what it
+/// may signal, and taking a second snapshot for it would walk the whole table
+/// again.
 fn select_processes(
 	options: &mut ProcMatchOptions,
-) -> std::result::Result<Vec<proc_snapshot::ProcInfo>, String> {
+) -> std::result::Result<(Vec<proc_snapshot::ProcInfo>, proc_snapshot::HostProcesses), String> {
 	let all = proc_snapshot::ProcInfo::all();
+	let host = proc_snapshot::HostProcesses::resolve_in(&all);
 	let host_pid = std::process::id() as i32;
 	let host_group = all
 		.iter()
@@ -726,7 +748,7 @@ fn select_processes(
 	} else if options.oldest {
 		selected.truncate(1);
 	}
-	Ok(selected)
+	Ok((selected, host))
 }
 
 fn parse_i32_list(value: &str, target: &mut Vec<i32>) -> std::result::Result<(), (u8, String)> {

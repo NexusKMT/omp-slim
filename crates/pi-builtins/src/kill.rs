@@ -7,6 +7,8 @@ use brush_core::{
 };
 use clap::Parser;
 
+use crate::proc_snapshot::HostProcesses;
+
 #[cfg(not(unix))]
 use crate::proc_snapshot::{ProcInfo, ProcessStatus};
 
@@ -121,6 +123,34 @@ impl builtins::Command for KillCommand {
 			return Ok(ExecutionExitCode::InvalidUsage.into());
 		}
 
+		// One process-table walk for the whole invocation, and only when a signal
+		// will actually be delivered: `-l` and the signal-0 probe touch nothing.
+		// Every guard below reads this same resolved chain.
+		let host = signal.sends_signal().then(HostProcesses::resolve);
+		let blocks = |target: i32| host.as_ref().is_some_and(|host| blocks_target(host, target));
+
+		// `kill -0` asks only whether a target exists. Unix answers per target with
+		// one syscall; elsewhere there is no such call, so the table is walked once
+		// here and every target is answered from that snapshot rather than from a
+		// fresh walk apiece.
+		#[cfg(not(unix))]
+		let running: Vec<i32> = if signal.sends_signal() {
+			Vec::new()
+		} else {
+			ProcInfo::all()
+				.into_iter()
+				.filter(|process| process.status() == ProcessStatus::Running)
+				.map(ProcInfo::pid)
+				.collect()
+		};
+		#[cfg(unix)]
+		let exists = |target: i32| {
+			// SAFETY: signal 0 only checks target existence and permission.
+			unsafe { libc::kill(target, 0) == 0 }
+		};
+		#[cfg(not(unix))]
+		let exists = |target: i32| target > 0 && running.contains(&target);
+
 		let mut had_failure = false;
 		for operand in operands {
 			if context.is_cancelled() {
@@ -149,7 +179,7 @@ impl builtins::Command for KillCommand {
 					}
 					targets.sort_unstable();
 					targets.dedup();
-					if signal.sends_signal() && targets.iter().copied().any(kill_target_includes_host) {
+					if targets.iter().copied().any(&blocks) {
 						writeln!(
 							context.stderr(),
 							"{}: {}: refusing to signal the shell process",
@@ -160,7 +190,7 @@ impl builtins::Command for KillCommand {
 						continue;
 					}
 					let succeeded = match signal {
-						KillSignal::Probe => targets.iter().copied().any(probe_kill_target),
+						KillSignal::Probe => targets.iter().copied().any(&exists),
 						KillSignal::Signal(signal) => {
 							let mut succeeded = false;
 							for target in targets {
@@ -185,8 +215,7 @@ impl builtins::Command for KillCommand {
 				{
 					let job_group = job.process_group_id();
 					if signal.sends_signal()
-						&& (job_group.is_some_and(kill_job_group_includes_host)
-							|| job.process_ids().any(kill_pid_is_host))
+						&& (job_group.is_some_and(&blocks) || job.process_ids().any(&blocks))
 					{
 						writeln!(
 							context.stderr(),
@@ -226,8 +255,7 @@ impl builtins::Command for KillCommand {
 					let job_group = job.process_group_id();
 					let representative = job.representative_pid();
 					if signal.sends_signal()
-						&& (job_group.is_some_and(kill_job_group_includes_host)
-							|| representative.is_some_and(kill_pid_is_host))
+						&& (job_group.is_some_and(&blocks) || representative.is_some_and(&blocks))
 					{
 						writeln!(
 							context.stderr(),
@@ -240,7 +268,7 @@ impl builtins::Command for KillCommand {
 					}
 					match signal {
 						KillSignal::Probe => {
-							if !representative.is_some_and(probe_kill_target) {
+							if !representative.is_some_and(&exists) {
 								writeln!(
 									context.stderr(),
 									"{}: {}: failed to send signal",
@@ -275,7 +303,7 @@ impl builtins::Command for KillCommand {
 					continue;
 				},
 			};
-			if signal.sends_signal() && kill_target_includes_host(pid) {
+			if blocks(pid) {
 				writeln!(
 					context.stderr(),
 					"{}: {}: refusing to signal the shell process",
@@ -287,7 +315,7 @@ impl builtins::Command for KillCommand {
 			}
 			match signal {
 				KillSignal::Probe => {
-					if !probe_kill_target(pid) {
+					if !exists(pid) {
 						writeln!(
 							context.stderr(),
 							"{}: {}: failed to send signal",
@@ -314,42 +342,23 @@ impl builtins::Command for KillCommand {
 	}
 }
 
-fn kill_pid_is_host(pid: i32) -> bool {
-	i32::try_from(std::process::id()).ok() == Some(pid)
-}
-
-#[cfg(not(unix))]
-fn kill_job_group_includes_host(pgid: i32) -> bool {
-	kill_pid_is_host(pgid)
-}
-
-fn kill_target_includes_host(target: i32) -> bool {
-	if target == -1 || target == 0 || kill_pid_is_host(target) {
+/// Whether signalling `target` would reach the shell or one of its ancestors.
+///
+/// `target` follows `kill(2)`: a positive value is a pid, `0` is the caller's own
+/// process group, `-1` is every process the caller may signal, and any other
+/// negative value is the process group `-target`. The caller's own group needs no
+/// special case — it is in `host.pgids` by construction.
+///
+/// Takes the already-resolved chain rather than resolving one, so a loop over
+/// operands walks the process table once, not once per operand.
+fn blocks_target(host: &HostProcesses, target: i32) -> bool {
+	if target == -1 || target == 0 {
 		return true;
 	}
-	#[cfg(unix)]
-	{
-		// SAFETY: getpgrp has no arguments or memory access.
-		target.checked_neg() == Some(unsafe { libc::getpgrp() })
+	match target.checked_neg() {
+		Some(pgid) if pgid > 0 => host.pgids.contains(&pgid),
+		_ => host.pids.contains(&target),
 	}
-	#[cfg(not(unix))]
-	{
-		false
-	}
-}
-
-#[cfg(unix)]
-fn probe_kill_target(target: i32) -> bool {
-	// SAFETY: signal 0 only checks target existence and permission.
-	unsafe { libc::kill(target, 0) == 0 }
-}
-
-#[cfg(not(unix))]
-fn probe_kill_target(target: i32) -> bool {
-	target > 0
-		&& ProcInfo::all().into_iter().any(|process| {
-			process.pid() == target && process.status() == ProcessStatus::Running
-		})
 }
 
 fn print_kill_signals<'a>(

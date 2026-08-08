@@ -2853,6 +2853,39 @@ mod tests {
 		assert!(output.contains("survived"), "{output:?}");
 	}
 
+	/// An agent that runs `kill <terminal pid>` or `pkill <terminal>` must not
+	/// be able to take down the terminal the session lives in. Self-kill was
+	/// already refused, but an ancestor is a different process in a different
+	/// process group and session, so it slipped straight through.
+	///
+	/// Uses `CONT` rather than a lethal signal: the guard runs for any real
+	/// signal (only `-0` is exempt), so `CONT` exercises exactly the same code
+	/// path while staying harmless if the guard ever regresses. A lethal signal
+	/// here could terminate the test harness. `TERM` appears once, aimed only
+	/// at a child this test spawned, to prove the guard has not over-blocked
+	/// into uselessness.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn kill_builtin_refuses_ancestors_but_not_unrelated_processes() {
+		let (result, output) = execute_captured(
+			"parent=$(ps -o ppid= -p $$ | tr -d ' ')\nkill -CONT \"$parent\"; printf \
+			 'ancestor=%s\\n' \"$?\"\n/bin/sleep 30 &\nchild=$!\nkill -TERM \"$child\"; printf \
+			 'child=%s\\n' \"$?\"\nprintf 'survived\\n'"
+				.to_string(),
+		)
+		.await;
+		assert_eq!(result.exit_code, Some(0), "the shell must survive: {output:?}");
+		assert!(output.contains("survived"), "{output:?}");
+		assert!(
+			output.contains("refusing to signal the shell process"),
+			"signalling an ancestor must be refused: {output:?}"
+		);
+		assert!(output.contains("ancestor=1"), "the ancestor kill must report failure: {output:?}");
+		// The same guard must leave a process outside our ancestry alone, or `kill`
+		// would be useless.
+		assert!(output.contains("child=0"), "an unrelated child must remain signallable: {output:?}");
+	}
+
 	/// `pkill` removes the shell PID from the candidate set before sending the
 	/// selected signal, even when that PID is requested explicitly.
 	#[tokio::test(flavor = "multi_thread")]

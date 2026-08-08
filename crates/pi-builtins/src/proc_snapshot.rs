@@ -1082,3 +1082,318 @@ mod proc_snapshot {
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub use proc_snapshot::ProcInfo;
+
+/// The processes a signal must never reach: this one and its ancestors.
+///
+/// Resolve once per command, then read the fields. Self-kill was always refused,
+/// but an ancestor is a different process — and usually a different process group
+/// and session — so nothing stopped `kill <terminal pid>` or `pkill <terminal>`
+/// from taking down the terminal the whole session lives in, harness included.
+/// Everything above us in the tree is load-bearing for our own existence.
+///
+/// Two properties are deliberate:
+///
+/// * **Resolved, not cached.** A parent that detaches us and then exits frees its
+///   pid for the OS to recycle; a remembered chain would go on refusing that pid
+///   and quietly protect whatever unrelated process inherited it. Each resolve
+///   reflects the tree as it is now.
+/// * **Inline, not hashed.** A parent chain is four or five numbers, so it lives
+///   in stack-inline storage that callers scan directly. There is no per-target
+///   query entry point here, because one invites re-resolving per target — which
+///   is a full process-table walk each time.
+///
+/// Listing is unaffected: `pgrep` still reports ancestors and `ps` still shows
+/// them. Only signalling consults this.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+pub(crate) struct HostProcesses {
+	/// This process and its ancestors, nearest first.
+	pub pids:  smallvec::SmallVec<[i32; 16]>,
+	/// The process groups those processes belong to.
+	pub pgids: smallvec::SmallVec<[i32; 16]>,
+}
+
+/// One process as the chain walk sees it.
+///
+/// Keeping the walk over this rather than over [`ProcInfo`] lets the recycling
+/// cases — which are otherwise only reachable by winning a race against the OS —
+/// be tested with a synthetic tree.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+#[derive(Clone, Copy)]
+struct ChainNode {
+	ppid:  Option<i32>,
+	pgid:  Option<i32>,
+	/// Platform start time. Monotonic on all three supported platforms, so a
+	/// larger value means the process started later.
+	start: u64,
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+impl HostProcesses {
+	/// Walks the parent chain from the current process, taking one process-table
+	/// snapshot.
+	pub fn resolve() -> Self {
+		Self::resolve_in(&ProcInfo::all())
+	}
+
+	/// [`Self::resolve`] against a snapshot the caller already holds.
+	///
+	/// `pkill` snapshots the table to select its targets; this spares it a second.
+	pub fn resolve_in(all: &[ProcInfo]) -> Self {
+		let Ok(self_pid) = i32::try_from(std::process::id()) else {
+			return Self { pids: smallvec::SmallVec::new(), pgids: smallvec::SmallVec::new() };
+		};
+		Self::walk(self_pid, |pid| {
+			all
+				.iter()
+				.find(|process| process.pid() == pid)
+				.map(|process| ChainNode {
+					ppid:  process.ppid(),
+					pgid:  process.group_id(),
+					start: process.start_time(),
+				})
+		})
+	}
+
+	/// Walks from `self_pid` up through `lookup`, collecting the chain.
+	///
+	/// A recorded parent pid is followed only when the process holding it is both
+	/// **present** and **no younger than its child**. Presence alone is not enough:
+	/// an entry can name a parent that already exited, and once that number is
+	/// recycled the replacement *is* present — protecting it would hand our
+	/// immunity to an unrelated process. A real parent cannot have started after
+	/// its child, so a later start time identifies the impostor. Equal start times
+	/// are accepted, since a `fork` within one clock tick is indistinguishable at
+	/// this resolution.
+	fn walk(self_pid: i32, lookup: impl Fn(i32) -> Option<ChainNode>) -> Self {
+		let mut pids = smallvec::SmallVec::new();
+		let mut pgids = smallvec::SmallVec::new();
+
+		// We always protect ourselves, whether or not the snapshot lists us.
+		pids.push(self_pid);
+		let mut node = lookup(self_pid);
+		while let Some(current) = node {
+			if let Some(pgid) = current.pgid
+				&& !pgids.contains(&pgid)
+			{
+				pgids.push(pgid);
+			}
+			let Some(parent) = current.ppid else {
+				break;
+			};
+			// pid 0 is not a signallable process on any supported platform, and a
+			// repeat means the parent chain looped back on itself.
+			if parent == 0 || pids.contains(&parent) {
+				break;
+			}
+			let Some(found) = lookup(parent) else {
+				break;
+			};
+			if found.start > current.start {
+				break;
+			}
+			pids.push(parent);
+			node = Some(found);
+		}
+		Self { pids, pgids }
+	}
+}
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+mod tests {
+	use super::{HostProcesses, ProcInfo};
+
+	use super::ChainNode;
+
+	/// Builds a lookup over a synthetic `(pid, ppid, pgid, start)` tree.
+	fn tree(nodes: &[(i32, Option<i32>, Option<i32>, u64)]) -> impl Fn(i32) -> Option<ChainNode> + '_ {
+		|pid| {
+			nodes
+				.iter()
+				.find(|(candidate, ..)| *candidate == pid)
+				.map(|(_, ppid, pgid, start)| ChainNode { ppid: *ppid, pgid: *pgid, start: *start })
+		}
+	}
+
+	/// The case presence alone cannot catch: our recorded parent exited and its pid
+	/// was reused, so the number *is* in the table — held by a process that started
+	/// after us. Following it would hand our immunity to an unrelated process, and
+	/// on a long-lived shell that is a silent `kill` failure against a real target.
+	#[test]
+	fn a_recycled_parent_pid_is_not_followed() {
+		// 100 is us, started at t=50; our recorded parent 42 is now a process that
+		// started at t=90, i.e. after us, so it cannot be our parent.
+		let host = HostProcesses::walk(
+			100,
+			tree(&[(100, Some(42), Some(7), 50), (42, Some(1), Some(9), 90)]),
+		);
+		assert_eq!(host.pids.as_slice(), [100], "a younger impostor must not join the chain");
+		assert!(!host.pgids.contains(&9), "the impostor's group must not be protected either");
+	}
+
+	/// The mirror of the above: a genuine parent started before its child and must
+	/// be followed, or the guard protects nothing but ourselves.
+	#[test]
+	fn an_older_parent_is_followed() {
+		let host = HostProcesses::walk(
+			100,
+			tree(&[(100, Some(42), Some(7), 50), (42, Some(1), Some(9), 10), (1, None, Some(1), 0)]),
+		);
+		assert_eq!(host.pids.as_slice(), [100, 42, 1], "the real chain must be walked to the root");
+		assert!(host.pgids.contains(&9), "an ancestor's group must be protected");
+	}
+
+	/// A `fork` inside one clock tick gives parent and child the same start time, so
+	/// equality must be accepted — rejecting it would drop real parents on Linux,
+	/// where start time is measured in jiffies.
+	#[test]
+	fn a_same_tick_parent_is_followed() {
+		let host = HostProcesses::walk(
+			100,
+			tree(&[(100, Some(42), Some(7), 50), (42, None, Some(7), 50)]),
+		);
+		assert_eq!(host.pids.as_slice(), [100, 42], "same-tick parent must still be an ancestor");
+	}
+
+	/// A parent absent from the table has exited and its number may already be
+	/// reused; the walk stops rather than protecting it.
+	#[test]
+	fn a_departed_parent_stops_the_walk() {
+		let host = HostProcesses::walk(100, tree(&[(100, Some(42), Some(7), 50)]));
+		assert_eq!(host.pids.as_slice(), [100], "an unobserved parent must not join the chain");
+	}
+
+	/// A cycle in the recorded parent links must not spin forever.
+	#[test]
+	fn a_cyclic_parent_chain_terminates() {
+		let host = HostProcesses::walk(
+			100,
+			tree(&[(100, Some(42), Some(7), 50), (42, Some(100), Some(7), 10)]),
+		);
+		assert_eq!(host.pids.as_slice(), [100, 42], "the cycle must close the walk");
+	}
+
+	/// The resolved chain must be a real, contiguous parent walk over the snapshot:
+	/// it starts at us, every later entry is the recorded parent of the one before
+	/// it, and every entry after the first was actually observed.
+	///
+	/// Asserted as an invariant rather than against a second hand-rolled walk,
+	/// because the naive walk is what gets this wrong: a recorded parent pid can
+	/// name a process that has already exited (observed in practice on macOS, where
+	/// a detached `zsh` kept reporting a departed parent), and following it blindly
+	/// is the pid-recycling hazard this type exists to avoid.
+	#[test]
+	fn chain_is_a_contiguous_parent_walk_over_observed_processes() {
+		let all = ProcInfo::all();
+		let host = HostProcesses::resolve_in(&all);
+		let self_pid = i32::try_from(std::process::id()).expect("pid fits in i32");
+
+		assert_eq!(host.pids.first(), Some(&self_pid), "the chain must start at us");
+		for pair in host.pids.windows(2) {
+			let [child, parent] = [pair[0], pair[1]];
+			let entry = all
+				.iter()
+				.find(|process| process.pid() == child)
+				.unwrap_or_else(|| panic!("chain entry {child} was never observed"));
+			assert_eq!(
+				entry.ppid(),
+				Some(parent),
+				"{parent} is in the chain but is not the recorded parent of {child}"
+			);
+			assert!(
+				all.iter().any(|process| process.pid() == parent),
+				"ancestor {parent} is in the chain but was never observed"
+			);
+		}
+	}
+
+	/// The walk must not stop early: it continues while the next parent is a
+	/// distinct, observed process that is no younger than its child. Stopping one
+	/// link short is what would leave the terminal signallable, since a terminal
+	/// sits two or more levels up (terminal -> shell -> harness).
+	///
+	/// The three legitimate stop reasons are enumerated so a real machine with a
+	/// stale or recycled parent link does not make this flaky.
+	#[test]
+	fn chain_extends_until_a_stop_condition_is_reached() {
+		let all = ProcInfo::all();
+		let host = HostProcesses::resolve_in(&all);
+		let last = *host.pids.last().expect("chain is never empty");
+		let last_entry = all.iter().find(|process| process.pid() == last);
+		let Some(next) = last_entry.and_then(ProcInfo::ppid) else {
+			return; // No recorded parent: nothing left to walk.
+		};
+		let candidate = all.iter().find(|process| process.pid() == next);
+		let younger = match (last_entry, candidate) {
+			(Some(child), Some(parent)) => parent.start_time() > child.start_time(),
+			_ => false,
+		};
+		assert!(
+			next == 0 || host.pids.contains(&next) || candidate.is_none() || younger,
+			"the walk stopped at {last} while {next} was still a valid, unseen parent"
+		);
+	}
+
+	/// A pid outside our ancestry must stay signallable, or `kill` becomes useless.
+	/// Guards against over-broad protection (a whole session, say).
+	#[test]
+	fn leaves_unrelated_processes_out_of_the_chain() {
+		let host = HostProcesses::resolve();
+		assert!(
+			ProcInfo::all()
+				.iter()
+				.map(ProcInfo::pid)
+				.any(|pid| !host.pids.contains(&pid)),
+			"every visible process is in the chain, which cannot be right"
+		);
+	}
+
+	/// Regression guard for the pid-recycling hazard: the chain comes from the
+	/// snapshot handed in, so a parent absent from it — exited, and its number free
+	/// for reuse — is never carried forward.
+	#[test]
+	fn a_departed_parent_leaves_no_stale_pid() {
+		let self_pid = i32::try_from(std::process::id()).expect("pid fits in i32");
+		let all = ProcInfo::all();
+		let recorded_parent = all
+			.iter()
+			.find(|process| process.pid() == self_pid)
+			.and_then(ProcInfo::ppid);
+		let without_parent: Vec<ProcInfo> = all
+			.into_iter()
+			.filter(|process| process.pid() == self_pid)
+			.collect();
+
+		let host = HostProcesses::resolve_in(&without_parent);
+		assert_eq!(host.pids.as_slice(), [self_pid], "only observed processes belong in the chain");
+		if let Some(parent) = recorded_parent {
+			assert!(
+				!host.pids.contains(&parent),
+				"pid {parent} was carried forward despite being absent from the snapshot"
+			);
+		}
+	}
+
+	/// Our own process group is recorded without being special-cased, which is what
+	/// lets `kill -<pgid>` be refused by a plain membership test.
+	#[cfg(unix)]
+	#[test]
+	fn records_our_own_process_group() {
+		let host = HostProcesses::resolve();
+		// SAFETY: getpgrp takes no arguments and touches no memory.
+		let pgid = unsafe { libc::getpgrp() };
+		assert!(host.pgids.contains(&pgid), "own process group {pgid} missing");
+	}
+
+	/// The chain is a handful of numbers; keeping it in inline storage is the whole
+	/// reason this is not a hashed set.
+	#[test]
+	fn chain_stays_in_inline_storage() {
+		let host = HostProcesses::resolve();
+		assert!(
+			!host.pids.spilled() && !host.pgids.spilled(),
+			"chain spilled to the heap: {} pids, {} pgids",
+			host.pids.len(),
+			host.pgids.len()
+		);
+	}
+}

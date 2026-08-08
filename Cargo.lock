@@ -4910,6 +4910,7 @@ dependencies = [
  "self_cell",
  "serde_json",
  "similar 3.1.2",
+ "smallvec",
  "strum",
  "strum_macros",
  "tempfile",
