@@ -11,7 +11,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/discovery/helpers";
 import { loadSlashCommands } from "@oh-my-pi/pi-coding-agent/extensibility/slash-commands";
 import { discoverAgents } from "@oh-my-pi/pi-coding-agent/task/discovery";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { getConfigRootDir, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
 import "@oh-my-pi/pi-coding-agent/discovery/claude-plugins";
 import { type MCPServer, mcpCapability } from "@oh-my-pi/pi-coding-agent/capability/mcp";
 import type { Skill } from "@oh-my-pi/pi-coding-agent/capability/skill";
@@ -62,27 +62,41 @@ describe("parseClaudePluginsRegistry", () => {
 
 describe("listClaudePluginRoots", () => {
 	let tempDir: string;
+	let testAgentDir: string;
 	let originalHome: string | undefined;
+	const originalAgentDirEnv = process.env.PI_CODING_AGENT_DIR;
+	const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
 
 	beforeEach(async () => {
 		clearClaudePluginRootsCache();
 		clearFsCache();
 		originalHome = process.env.HOME;
 		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-plugins-test-"));
+		testAgentDir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-plugins-test-agent-"));
 		process.env.HOME = tempDir;
 		vi.spyOn(os, "homedir").mockReturnValue(tempDir);
+		// Point the agent dir at a temp dir so user-scope discovery (native MCP
+		// config, skills, etc.) cannot read the real ~/.omp/agent profile.
+		setAgentDir(testAgentDir);
 	});
 
 	afterEach(async () => {
 		clearClaudePluginRootsCache();
 		clearFsCache();
 		vi.restoreAllMocks();
+		if (originalAgentDirEnv) {
+			setAgentDir(originalAgentDirEnv);
+		} else {
+			setAgentDir(fallbackAgentDir);
+			delete process.env.PI_CODING_AGENT_DIR;
+		}
 		if (originalHome === undefined) {
 			delete process.env.HOME;
 		} else {
 			process.env.HOME = originalHome;
 		}
 		await removeWithRetries(tempDir);
+		await removeWithRetries(testAgentDir);
 	});
 
 	test("returns empty roots when no registry file exists", async () => {
