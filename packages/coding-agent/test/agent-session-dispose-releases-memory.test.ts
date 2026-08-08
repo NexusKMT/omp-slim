@@ -1,14 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import { Agent, type AgentMessage, AppendOnlyContextManager } from "@oh-my-pi/pi-agent-core";
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
+import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 // Regression: a keep-alive subagent's AgentSession is disposed at park() but
@@ -164,5 +168,100 @@ describe("AgentSession dispose releases retained memory", () => {
 		expect(order.indexOf("reset")).toBeGreaterThan(order.indexOf("waitForIdle:end"));
 		expect(current.agent.state.messages).toHaveLength(0);
 		expect(current.rawSseDebugBuffer.snapshot().records).toHaveLength(0);
+	});
+
+	it("drains in-flight event handlers so a late persist cannot repopulate a disposed session", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!model) throw new Error("expected bundled model");
+		const mock = createMockModel({ handler: () => ({ content: ["ok"] }) });
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["test"], tools: [] },
+			streamFn: mock.stream,
+		});
+		const sessionManager = SessionManager.inMemory(tempDir.path());
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
+
+		// A real extension whose message_end hook blocks. This models the exact
+		// gap the fix closes: agent-core dispatches the session's event handler
+		// fire-and-forget, and that handler awaits extension work BEFORE it
+		// persists the finished message — so agent.waitForIdle() alone is not
+		// enough to know the session is quiescent.
+		const reached = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		const runtime = new ExtensionRuntime();
+		const extension = await loadExtensionFromFactory(
+			pi => {
+				pi.on("message_end", async () => {
+					reached.resolve();
+					await release.promise;
+				});
+			},
+			tempDir.path(),
+			new EventBus(),
+			runtime,
+			"block-message-end",
+		);
+		const extensionRunner = new ExtensionRunner([extension], runtime, tempDir.path(), sessionManager, modelRegistry);
+
+		const current = new AgentSession({
+			agent,
+			sessionManager,
+			settings: Settings.isolated(),
+			modelRegistry,
+			agentId: "Main",
+			extensionRunner,
+		});
+		session = current;
+
+		const message: AssistantMessage = {
+			role: "assistant",
+			content: [{ type: "text", text: "x".repeat(4096) }],
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: Date.now(),
+		};
+
+		// Dispatch a real message_end: the session handler runs fire-and-forget
+		// and parks in the extension hook before it can persist the entry.
+		current.agent.emitExternalEvent({ type: "message_end", message });
+		await reached.promise;
+		expect(current.sessionManager.getEntries()).toHaveLength(0); // persist not reached yet
+
+		// Dispose must not release memory until that in-flight handler settles.
+		const reachedSettle = Promise.withResolvers<void>();
+		const detach = current.agent.setProviderResponseInterceptor.bind(current.agent);
+		vi.spyOn(current.agent, "setProviderResponseInterceptor").mockImplementation(fn => {
+			detach(fn);
+			reachedSettle.resolve();
+		});
+		const releaseSpy = vi.spyOn(current.sessionManager, "releaseRetainedEntries");
+
+		const disposeP = current.dispose();
+		await reachedSettle.promise;
+		for (let i = 0; i < 10; i++) await Promise.resolve();
+
+		// Blocked draining the in-flight handler: memory release has not run.
+		expect(releaseSpy).not.toHaveBeenCalled();
+
+		release.resolve();
+		await disposeP;
+		session = undefined;
+
+		// The late persist landed during the drain and was then cleared, so the
+		// disposed session retains neither the entry nor the message.
+		expect(releaseSpy).toHaveBeenCalledTimes(1);
+		expect(current.sessionManager.getEntries()).toHaveLength(0);
+		expect(current.agent.state.messages).toHaveLength(0);
 	});
 });
