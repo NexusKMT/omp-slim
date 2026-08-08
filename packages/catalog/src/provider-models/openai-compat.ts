@@ -2689,6 +2689,13 @@ const ALIBABA_TOKEN_PLAN_REASONING: ThinkingConfig = {
 	mode: "effort",
 	efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
 };
+// Qwen3.8-Max uses the OpenAI `reasoning_effort` dialect; the generic Qwen
+// dialect emits only the legacy binary `enable_thinking` toggle.
+const ALIBABA_TOKEN_PLAN_QWEN_EFFORT_COMPAT: OpenAICompat = {
+	...ALIBABA_TOKEN_PLAN_COMPAT,
+	supportsReasoningEffort: true,
+	thinkingFormat: "openai",
+};
 
 export const ALIBABA_TOKEN_PLAN_STATIC_MODELS: readonly ModelSpec<"openai-completions">[] = [
 	{
@@ -2711,6 +2718,24 @@ export const ALIBABA_TOKEN_PLAN_STATIC_MODELS: readonly ModelSpec<"openai-comple
 			...ALIBABA_TOKEN_PLAN_COMPAT,
 			supportsReasoningEffort: true,
 		},
+	},
+	{
+		id: "qwen3.8-max",
+		name: "Qwen3.8 Max",
+		api: "openai-completions",
+		provider: "alibaba-token-plan",
+		baseUrl: ALIBABA_TOKEN_PLAN_BASE_URL,
+		reasoning: true,
+		input: ["text", "image"],
+		cost: ALIBABA_TOKEN_PLAN_COST,
+		contextWindow: 1_000_000,
+		maxTokens: 131_072,
+		thinking: {
+			mode: "effort",
+			efforts: [Effort.Low, Effort.Medium, Effort.XHigh],
+			defaultLevel: Effort.XHigh,
+		},
+		compat: ALIBABA_TOKEN_PLAN_QWEN_EFFORT_COMPAT,
 	},
 	{
 		id: "qwen3.7-max",
