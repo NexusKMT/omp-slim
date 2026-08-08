@@ -9,6 +9,7 @@ import {
 import type { Model, ModelSpec, OpenAICompat } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 
 function chatModel(compat: OpenAICompat): Model<"openai-completions"> {
 	return buildModel({
@@ -159,5 +160,19 @@ describe("OpenAI compat policy", () => {
 		expect(responsesPolicy.tools.toolCallIdKind).toBe("mistral-9-alnum");
 		expect(chatPolicy.stream.reasoningDeltasMayBeCumulative).toBe(true);
 		expect(responsesPolicy.stream.reasoningDeltasMayBeCumulative).toBe(true);
+	});
+
+	it("routes Token Plan qwen3.8-max effort selections onto the wire", () => {
+		const model = getBundledModel<"openai-completions">("alibaba-token-plan", "qwen3.8-max");
+		for (const effort of [Effort.Low, Effort.Medium, Effort.XHigh]) {
+			const params = chatParams();
+			applyChatCompletionsCompatPolicy(
+				params,
+				resolveOpenAICompatPolicy(model, { endpoint: "chat-completions", reasoning: effort }),
+			);
+			expect(params.reasoning_effort).toBe(effort);
+			expect(params.enable_thinking).toBeUndefined();
+			expect(params.chat_template_kwargs).toBeUndefined();
+		}
 	});
 });

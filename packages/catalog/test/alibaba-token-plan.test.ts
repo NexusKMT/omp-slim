@@ -13,6 +13,7 @@ describe("QwenCloud Token Plan provider", () => {
 	test("ships the documented Individual text-model allowlist", () => {
 		expect(ALIBABA_TOKEN_PLAN_STATIC_MODELS.map(model => model.id)).toEqual([
 			"qwen3.8-max-preview",
+			"qwen3.8-max",
 			"qwen3.7-max",
 			"qwen3.7-plus",
 			"qwen3.6-flash",
@@ -142,6 +143,23 @@ describe("QwenCloud Token Plan provider", () => {
 			name: "Qwen3.7 Plus",
 			contextWindow: 1_000_000,
 			maxTokens: 64_000,
+		});
+		expect(models?.find(model => model.id === "qwen3.8-max")).toMatchObject({
+			id: "qwen3.8-max",
+			provider: "alibaba-token-plan",
+			reasoning: true,
+			input: ["text", "image"],
+			contextWindow: 1_000_000,
+			maxTokens: 131_072,
+			thinking: {
+				mode: "effort",
+				efforts: [Effort.Low, Effort.Medium, Effort.XHigh],
+				defaultLevel: Effort.XHigh,
+			},
+			compat: {
+				supportsReasoningEffort: true,
+				thinkingFormat: "openai",
+			},
 		});
 		expect(options.dynamicModelsAuthoritative).toBe(true);
 	});
