@@ -430,10 +430,14 @@ describe("AgentSession dispose releases retained memory", () => {
 		session = undefined;
 		const bytesAfterDispose = await Bun.file(sessionFile).text();
 
-		// Immediate revival: a new manager reopens the same JSONL.
+		// Immediate revival: a new manager reopens the same JSONL and sees the
+		// seed transcript — and nothing from the still-parked handler.
 		const revived = await SessionManager.open(sessionFile, tempDir.path());
-		const revivedCount = revived.getEntries().length;
-		expect(revivedCount).toBeGreaterThan(0);
+		const revivedTexts = revived
+			.getEntries()
+			.filter(entry => entry.type === "message")
+			.map(entry => JSON.stringify(entry.message));
+		expect(revivedTexts).toEqual([expect.stringContaining("seed")]);
 
 		// Unpark the hook: the resumed handler's late persist must be dropped by
 		// the sealed manager, never written under the revival writer.
@@ -442,13 +446,19 @@ describe("AgentSession dispose releases retained memory", () => {
 		expect(current.sessionManager.getEntries()).toHaveLength(0);
 		expect(await Bun.file(sessionFile).text()).toBe(bytesAfterDispose);
 
-		// The revival writer still owns the file: its append lands cleanly and
-		// round-trips without interleaved or truncated lines.
+		// The revival writer still owns the file: its append lands cleanly, and
+		// the reopened transcript holds exactly the seed + post-revive messages —
+		// the sealed manager's late persist never reached the file.
 		revived.appendMessage({ role: "user", content: "post-revive", timestamp: Date.now() });
 		await revived.flush();
 		await revived.close();
 		const reread = await SessionManager.open(sessionFile, tempDir.path());
-		expect(reread.getEntries()).toHaveLength(revivedCount + 1);
+		const rereadTexts = reread
+			.getEntries()
+			.filter(entry => entry.type === "message")
+			.map(entry => JSON.stringify(entry.message));
+		expect(rereadTexts).toEqual([expect.stringContaining("seed"), expect.stringContaining("post-revive")]);
+		expect(JSON.stringify(reread.getEntries())).not.toContain("late persist");
 		await reread.close();
 	});
 
