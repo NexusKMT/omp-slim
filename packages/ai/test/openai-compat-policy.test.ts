@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { ResponseCreateParamsStreaming } from "@oh-my-pi/pi-ai/providers/openai-responses-wire";
 import {
 	applyChatCompletionsCompatPolicy,
+	applyOpenAIExtraBody,
 	applyResponsesCompatPolicy,
 	type OpenAICompletionsParams,
 	resolveOpenAICompatPolicy,
@@ -166,14 +167,23 @@ describe("OpenAI compat policy", () => {
 		const model = getBundledModel<"openai-completions">("alibaba-token-plan", "qwen3.8-max");
 		for (const effort of [Effort.Low, Effort.Medium, Effort.XHigh]) {
 			const params = chatParams();
-			applyChatCompletionsCompatPolicy(
-				params,
-				resolveOpenAICompatPolicy(model, { endpoint: "chat-completions", reasoning: effort }),
-			);
+			const policy = resolveOpenAICompatPolicy(model, { endpoint: "chat-completions", reasoning: effort });
+			applyChatCompletionsCompatPolicy(params, policy);
+			applyOpenAIExtraBody(params, policy.compat.extraBody);
 			expect(params.reasoning_effort).toBe(effort);
-			expect(params.enable_thinking).toBeUndefined();
+			expect(params.enable_thinking).toBe(true);
 			expect(params.chat_template_kwargs).toBeUndefined();
 		}
+
+		const disabledParams = chatParams();
+		const disabledPolicy = resolveOpenAICompatPolicy(model, {
+			endpoint: "chat-completions",
+			disableReasoning: true,
+		});
+		applyChatCompletionsCompatPolicy(disabledParams, disabledPolicy);
+		applyOpenAIExtraBody(disabledParams, disabledPolicy.compat.extraBody);
+		expect(disabledParams.reasoning_effort).toBeUndefined();
+		expect(disabledParams.enable_thinking).toBe(false);
 	});
 
 	it("keeps Token Plan qwen3.8-max-preview on the enable_thinking dialect", () => {

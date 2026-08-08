@@ -168,7 +168,10 @@ describe("QwenCloud Token Plan provider", () => {
 			},
 			compat: {
 				supportsReasoningEffort: true,
-				thinkingFormat: "openai",
+				whenThinking: {
+					thinkingFormat: "openai",
+					extraBody: { enable_thinking: true },
+				},
 			},
 		});
 		expect(options.dynamicModelsAuthoritative).toBe(true);

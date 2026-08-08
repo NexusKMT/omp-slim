@@ -2689,12 +2689,16 @@ const ALIBABA_TOKEN_PLAN_REASONING: ThinkingConfig = {
 	mode: "effort",
 	efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
 };
-// Qwen3.8-Max uses the OpenAI `reasoning_effort` dialect; the generic Qwen
-// dialect emits only the legacy binary `enable_thinking` toggle.
+// Qwen3.8-Max combines Qwen's binary thinking toggle with OpenAI-style
+// `reasoning_effort`. The base Qwen view encodes disabled turns; reasoning
+// requests swap to the OpenAI effort dialect and explicitly enable thinking.
 const ALIBABA_TOKEN_PLAN_QWEN_EFFORT_COMPAT: OpenAICompat = {
 	...ALIBABA_TOKEN_PLAN_COMPAT,
 	supportsReasoningEffort: true,
-	thinkingFormat: "openai",
+	whenThinking: {
+		thinkingFormat: "openai",
+		extraBody: { enable_thinking: true },
+	},
 };
 
 export const ALIBABA_TOKEN_PLAN_STATIC_MODELS: readonly ModelSpec<"openai-completions">[] = [
