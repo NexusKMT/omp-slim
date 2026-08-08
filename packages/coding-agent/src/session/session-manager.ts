@@ -1707,6 +1707,20 @@ export class SessionManager {
 		if (this.#diskFailure) throw this.#diskFailure;
 	}
 
+	/**
+	 * Drop the in-memory transcript after a terminal {@link close}. The entry
+	 * journal and its index mirror the agent's message array (tool results,
+	 * file contents, base64 frame images); on a disposed session — e.g. a
+	 * parked subagent still referenced by the lifecycle adoption record — they
+	 * would otherwise stay pinned for the process lifetime. Reads after this
+	 * point reopen from disk (revival, `history://`), so releasing the
+	 * in-memory copy is safe. Only call once, from session dispose.
+	 */
+	releaseRetainedEntries(): void {
+		this.#entries = [];
+		this.#index.clear();
+	}
+
 	getCwd(): string {
 		return this.#cwd;
 	}
