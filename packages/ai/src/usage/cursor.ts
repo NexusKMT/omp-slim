@@ -133,10 +133,10 @@ function parseCursorCentsBucket(bucket: Record<string, unknown>): UsageAmount | 
 
 /**
  * Cursor's dashboard does not treat plan.used / plan.limit as the visible %.
- * Pro+ shows separate rails:
+ * Pro+ shows separate quota pools (not one shared percent):
  * - Cursor Models  ← autoPercentUsed
  *   (includes Cursor Grok 4.5 and Composer 2.5)
- * - Other Models   ← apiPercentUsed (against the included $ pool)
+ * - Other Models   ← apiPercentUsed (separate included-$ pool; different quota)
  * Prefer those fractions when present; fall back to cents only for older overall buckets.
  */
 function parseCursorPlanDashboardAmounts(bucket: Record<string, unknown>): {
