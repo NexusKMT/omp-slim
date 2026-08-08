@@ -175,4 +175,18 @@ describe("OpenAI compat policy", () => {
 			expect(params.chat_template_kwargs).toBeUndefined();
 		}
 	});
+
+	it("keeps Token Plan qwen3.8-max-preview on the enable_thinking dialect", () => {
+		// The preview rides Alibaba's binary enable_thinking toggle, not the
+		// OpenAI reasoning_effort control, so effort selections must not leak an
+		// unsupported reasoning_effort onto the wire.
+		const model = getBundledModel<"openai-completions">("alibaba-token-plan", "qwen3.8-max-preview");
+		const params = chatParams();
+		applyChatCompletionsCompatPolicy(
+			params,
+			resolveOpenAICompatPolicy(model, { endpoint: "chat-completions", reasoning: Effort.High }),
+		);
+		expect(params.enable_thinking).toBe(true);
+		expect(params.reasoning_effort).toBeUndefined();
+	});
 });

@@ -2714,7 +2714,10 @@ export const ALIBABA_TOKEN_PLAN_STATIC_MODELS: readonly ModelSpec<"openai-comple
 			efforts: [Effort.Low, Effort.High, Effort.XHigh],
 			requiresEffort: true,
 		},
-		compat: ALIBABA_TOKEN_PLAN_QWEN_EFFORT_COMPAT,
+		compat: {
+			...ALIBABA_TOKEN_PLAN_COMPAT,
+			supportsReasoningEffort: true,
+		},
 	},
 	{
 		id: "qwen3.8-max",
