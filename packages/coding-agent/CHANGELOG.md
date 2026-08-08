@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `import numpy` (and other native-extension imports) hanging indefinitely in the Python eval tool on Windows by reading the runner's stdin control channel serially on the event loop instead of from an always-on background reader thread ([#7985](https://github.com/can1357/oh-my-pi/issues/7985)).
+
 ## [17.2.11] - 2026-08-07
 
 ### Added

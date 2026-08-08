@@ -1347,26 +1347,25 @@ def _emit_error(rid: str, exc: BaseException) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _read_stdin(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue, stdin) -> None:
-    for raw_line in stdin:
-        line = raw_line.strip()
-        if not line:
-            continue
-        try:
-            req = json.loads(line)
-        except json.JSONDecodeError as exc:
-            _emit(
-                {
-                    "type": "error",
-                    "id": "",
-                    "ename": "ProtocolError",
-                    "evalue": f"Invalid JSON request: {exc}",
-                    "traceback": [],
-                }
-            )
-            continue
-        loop.call_soon_threadsafe(queue.put_nowait, req)
-    loop.call_soon_threadsafe(queue.put_nowait, {"type": "exit"})
+def _parse_request(line: str) -> dict | None:
+    """Parse one NDJSON control line, or ``None`` when it should be skipped.
+
+    Emits a ``ProtocolError`` frame for malformed JSON so the host sees the
+    same diagnostic the previous reader thread produced.
+    """
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError as exc:
+        _emit(
+            {
+                "type": "error",
+                "id": "",
+                "ename": "ProtocolError",
+                "evalue": f"Invalid JSON request: {exc}",
+                "traceback": [],
+            }
+        )
+        return None
 
 
 async def _main_async() -> None:
@@ -1382,39 +1381,34 @@ async def _main_async() -> None:
 
     loop = asyncio.get_running_loop()
     _STATE.loop = loop
-    queue: asyncio.Queue = asyncio.Queue()
-    reader = threading.Thread(
-        target=_read_stdin,
-        args=(loop, queue, stdin),
-        name="omp-stdin-reader",
-        daemon=True,
-    )
-    reader.start()
 
-    tasks: set[asyncio.Task] = set()
-
-    def _task_done(task: asyncio.Task) -> None:
-        tasks.discard(task)
+    # Read the control channel one line at a time on the event loop rather than
+    # from an always-on reader thread. A thread perpetually parked in a
+    # blocking ``sys.stdin`` read deadlocks native-extension imports (NumPy in
+    # particular) under a pipe-backed subprocess on Windows: the native DLL
+    # load and the concurrent stdin read wedge each other (numpy#24290).
+    # Reading via ``run_in_executor`` confines the stdin read to the gap
+    # *between* requests -- once a line arrives the reader returns, so no
+    # thread is reading stdin while the cell (and its imports) run. Per-kernel
+    # execution is serial anyway (shared namespace + process-global
+    # cwd/sys.path), so handling requests one at a time changes no observable
+    # behavior.
+    while True:
+        raw_line = await loop.run_in_executor(None, stdin.readline)
+        if not raw_line:
+            break  # EOF: the host closed the control channel.
+        line = raw_line.strip()
+        if not line:
+            continue
+        req = _parse_request(line)
+        if req is None:
+            continue
+        if req.get("type") == "exit":
+            break
         try:
-            exc = task.exception()
-        except asyncio.CancelledError:
-            return
-        if exc is not None:
-            _emit_error("", exc)
-
-    try:
-        while True:
-            req = await queue.get()
-            if req.get("type") == "exit":
-                break
-            task = asyncio.create_task(_handle_request_async(req))
-            tasks.add(task)
-            task.add_done_callback(_task_done)
-    finally:
-        for task in tasks:
-            task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            await _handle_request_async(req)
+        except BaseException as exc:  # noqa: BLE001 - one bad request must not wedge the loop
+            _emit_error(str(req.get("id", "")), exc)
 
 
 def main() -> None:
