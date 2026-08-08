@@ -272,6 +272,11 @@ describe("latexToBlock (2-D layout)", () => {
 		// on separate lines each start with `\frac`, so they stack as two rows.
 		expect(latexToBlock("y =\n\\frac{1}{2}")).toEqual(["y =", " 1 ", "───", " 2 "]);
 		expect(latexToBlock("\\frac{a}{b}\n\\frac{c}{d}")).toEqual([" a ", "───", " b ", " c ", "───", " d "]);
+		// A row that merely *opens* with a braced group is a real row break: no
+		// preceding command owes it an argument, so it must not fold into the row
+		// above (regression for PR #7997 review).
+		expect(latexToBlock("a\n{b+c}")).toEqual(["a  ", "b+c"]);
+		expect(latexToBlock("x+1\n{y+2}")).toEqual(["x+1", "y+2"]);
 	});
 
 	it("keeps \\color scope across a stacked fraction, painting the bar", () => {

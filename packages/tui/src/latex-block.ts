@@ -1271,6 +1271,59 @@ function parseExpr(src: string, ctx: Ctx = ROOT_CTX): Box {
 	return hconcat(boxes);
 }
 
+/**
+ * Number of `{…}` arguments each display command consumes, used to tell an
+ * argument continuation from a genuine row break in {@link splitLines}. Only
+ * commands whose arguments this engine reads with {@link readArg} appear here;
+ * anything else contributes no pending argument.
+ */
+const COMMAND_ARITY: Record<string, number> = { overset: 2, underset: 2, stackrel: 2, sqrt: 1 };
+for (const name in FRAC_COMMANDS) COMMAND_ARITY[name] = 2;
+for (const name in BINOM_COMMANDS) COMMAND_ARITY[name] = 2;
+for (const name in HBRACE_COMMANDS) COMMAND_ARITY[name] = 1;
+
+/**
+ * Count the `{…}` arguments still owed at the end of `seg` — non-zero when the
+ * row ends mid-construct (`\frac{a}` awaiting its denominator, or `\frac`/`x^`
+ * awaiting any argument). Nested commands and their braces are consumed as whole
+ * units, so only the outermost pending count is reported. Used to keep a command
+ * joined to an argument written on the next source line while still treating a
+ * row that merely opens with a braced group (`a\n{b+c}`) as a real row break.
+ */
+function bracesOwed(seg: string): number {
+	let owed = 0;
+	let i = 0;
+	while (i < seg.length) {
+		const c = seg[i];
+		if (c === "\\") {
+			let j = i + 1;
+			let name = "";
+			while (j < seg.length && /[A-Za-z]/.test(seg[j])) name += seg[j++];
+			if (name) owed = COMMAND_ARITY[name] ?? 0;
+			else j = i + 2; // escaped char (`\{`, `\,`) — takes no argument
+			i = j;
+			continue;
+		}
+		if (c === "{") {
+			i = readBraceGroup(seg, i).end;
+			if (owed > 0) owed--;
+			continue;
+		}
+		if (c === "^" || c === "_") {
+			owed += 1;
+			i++;
+			continue;
+		}
+		if (c === " " || c === "\t" || c === "\n") {
+			i++;
+			continue;
+		}
+		if (owed > 0) owed--; // a bare atom satisfies one pending argument
+		i++;
+	}
+	return owed;
+}
+
 /** Split on top-level `\n` and `\\` row separators (outside braces and environments). */
 function splitLines(src: string): string[] {
 	const lines: string[] = [];
@@ -1308,14 +1361,15 @@ function splitLines(src: string): string[] {
 		if (c === "{") braceDepth++;
 		else if (c === "}") braceDepth--;
 		else if (c === "\n" && braceDepth === 0 && envDepth === 0) {
-			// A top-level newline is a row break UNLESS the next non-space token
-			// opens a `{…}` argument group (e.g. `\frac{num}\n{den}` or a command
-			// whose braces are written on the following line). Splitting there
-			// would sever a command from a pending argument, so keep both in the
-			// same segment; latexToBlock collapses the interior newline to a space.
+			// A top-level newline is a row break UNLESS the current row ends with a
+			// command still awaiting a brace argument that the next row opens (e.g.
+			// `\frac{num}\n{den}`, `\frac\n{a}{b}`, `x^\n{2}`). Splitting there would
+			// sever the command from its argument, so keep both in one segment;
+			// latexToBlock collapses the interior newline to a space before parsing.
+			// A row that merely opens with a braced group (`a\n{b+c}`) stays a break.
 			let k = i + 1;
 			while (k < src.length && (src[k] === " " || src[k] === "\t" || src[k] === "\n")) k++;
-			if (src[k] !== "{") {
+			if (src[k] !== "{" || bracesOwed(src.slice(last, i)) === 0) {
 				lines.push(src.slice(last, i));
 				last = i + 1;
 			}
