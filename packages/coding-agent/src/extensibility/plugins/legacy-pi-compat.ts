@@ -1352,13 +1352,15 @@ async function isCommonJsModulePath(
 	if (parsedSourceType === "module") {
 		return false;
 	}
-	// When source is unambiguously CJS (uses require/module.exports), trust the
-	// source content over inheritedKind. An ESM importer (e.g. index.mjs doing
-	// `import from './index.js'`) passes inheritedKind="esm" which previously
-	// overrode the source-type detection, causing CJS files to be classified as
-	// ESM — skipping the CJS bridge hook and producing "Missing 'default' export".
+	// Trust source-type detection only when the source contains CJS syntax.
+	// Under 'unambiguous', sourceType is 'script' for any file without static
+	// import/export — including empty files, dynamic-import shims, and
+	// side-effect-only modules that inheritedKind was designed to disambiguate.
 	if (parsedSourceType === "script") {
-		return true;
+		const content = await Bun.file(modulePath).text();
+		if (/require\s*\(/.test(content) || /\bmodule\.exports\b/.test(content) || /\bexports\./.test(content)) {
+			return true;
+		}
 	}
 	if (inheritedKind) {
 		return inheritedKind === "commonjs";
