@@ -3852,6 +3852,25 @@ export class AgentSession {
 		this.#eventListeners = [];
 		this.#sessionChangeCallbacks.clear();
 
+		// A dispose triggered mid-turn (Ctrl-C / timeout / hard-killed subagent)
+		// only *signals* the agent loop via the earlier abort(); the loop still
+		// unwinds asynchronously. Detach the response/SSE interceptors so a late
+		// frame cannot re-record into rawSseDebugBuffer, then wait (bounded) for
+		// the run to settle so its terminal message lands before — not after — the
+		// release below. Without this the clear races the unwind and a disposed
+		// session is repopulated with exactly the state we are trying to drop.
+		this.agent.setProviderResponseInterceptor(undefined);
+		this.agent.setRawSseEventInterceptor(undefined);
+		try {
+			await withTimeout(
+				this.agent.waitForIdle(),
+				POST_PROMPT_DRAIN_TIMEOUT_MS,
+				"Timed out waiting for the active agent run to settle during dispose",
+			);
+		} catch (error) {
+			logger.warn("Active agent run still settling at dispose deadline", { error: String(error) });
+		}
+
 		// Release retained conversation memory. dispose() is terminal, and every
 		// revival path reopens the transcript from disk (AgentLifecycleManager
 		// reviver / persisted-revive / `history://`), so the in-memory copy is

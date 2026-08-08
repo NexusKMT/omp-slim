@@ -96,4 +96,73 @@ describe("AgentSession dispose releases retained memory", () => {
 		expect(current.agent.appendOnlyContext).toBeUndefined();
 		expect(current.rawSseDebugBuffer.snapshot().records).toHaveLength(0);
 	});
+
+	it("waits for the active turn to settle before releasing memory", async () => {
+		const current = createSession();
+		const bulk = "y".repeat(4096);
+
+		// Seed a captured frame that dispose must ultimately drop.
+		current.rawSseDebugBuffer.recordEvent(
+			{
+				event: "content_block_delta",
+				data: `data: ${bulk}`,
+				raw: ["event: content_block_delta", `data: ${bulk}`],
+			},
+			current.agent.state.model,
+		);
+
+		const order: string[] = [];
+		const reachedSettle = Promise.withResolvers<void>();
+		const settle = Promise.withResolvers<void>();
+		vi.spyOn(current.agent, "waitForIdle").mockImplementation(async () => {
+			order.push("waitForIdle:start");
+			reachedSettle.resolve();
+			await settle.promise;
+			// The aborted loop unwinds during the settle window: it appends its
+			// terminal message just before dispose clears the transcript.
+			current.agent.appendMessage({
+				role: "assistant",
+				content: [{ type: "text", text: bulk }],
+				timestamp: Date.now(),
+			} as AgentMessage);
+			order.push("waitForIdle:end");
+		});
+		const detachResp = current.agent.setProviderResponseInterceptor.bind(current.agent);
+		vi.spyOn(current.agent, "setProviderResponseInterceptor").mockImplementation(fn => {
+			order.push(`detach:resp:${fn === undefined ? "off" : "on"}`);
+			detachResp(fn);
+		});
+		const reset = current.agent.reset.bind(current.agent);
+		vi.spyOn(current.agent, "reset").mockImplementation(() => {
+			order.push("reset");
+			reset();
+		});
+
+		const disposeP = current.dispose();
+
+		// dispose must block on the still-running turn: reaching the settle await
+		// wins the race against dispose resolving. If dispose ever finished first
+		// it would have cleared the transcript mid-turn (the bug under test).
+		const winner = await Promise.race([
+			reachedSettle.promise.then(() => "reached" as const),
+			disposeP.then(() => "disposed" as const),
+		]);
+		expect(winner).toBe("reached");
+
+		// The response interceptor was detached before the wait, and nothing has
+		// been cleared yet.
+		expect(order).toContain("detach:resp:off");
+		expect(order.indexOf("detach:resp:off")).toBeLessThan(order.indexOf("waitForIdle:start"));
+		expect(order).not.toContain("reset");
+
+		settle.resolve();
+		await disposeP;
+		session = undefined;
+
+		// reset ran only after the turn settled; the terminal message appended
+		// during the unwind and the seeded frame were both dropped.
+		expect(order.indexOf("reset")).toBeGreaterThan(order.indexOf("waitForIdle:end"));
+		expect(current.agent.state.messages).toHaveLength(0);
+		expect(current.rawSseDebugBuffer.snapshot().records).toHaveLength(0);
+	});
 });
