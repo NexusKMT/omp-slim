@@ -98,6 +98,7 @@ rust_library(
         "util.nproc",
         "util.paste",
         "util.printenv",
+        "util.procs",
         "util.readlink",
         "util.realpath",
         "util.rm",

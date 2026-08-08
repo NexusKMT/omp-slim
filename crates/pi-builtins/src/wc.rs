@@ -19,6 +19,9 @@ mod count_fast {
 	const FILE_ATTRIBUTE_NORMAL: u32 = 128;
 	
 	#[cfg(any(target_os = "linux", target_os = "android"))]
+	use std::os::fd::AsFd;
+	
+	#[cfg(any(target_os = "linux", target_os = "android"))]
 	use libc::S_IFIFO;
 	#[cfg(any(target_os = "linux", target_os = "android"))]
 	use uucore::pipes::{MAX_ROOTLESS_PIPE_SIZE, pipe, splice, splice_exact};
