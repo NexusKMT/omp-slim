@@ -3896,15 +3896,17 @@ export class AgentSession {
 		// is repopulated with exactly the state we are trying to drop.
 		this.agent.setProviderResponseInterceptor(undefined);
 		this.agent.setRawSseEventInterceptor(undefined);
+		let drained = false;
 		try {
 			await withTimeout(
 				(async () => {
 					await this.agent.waitForIdle();
 					await this.#drainInFlightEventHandlers();
 				})(),
-				POST_PROMPT_DRAIN_TIMEOUT_MS,
+				options.drainTimeoutMs ?? POST_PROMPT_DRAIN_TIMEOUT_MS,
 				"Timed out waiting for the active agent run to settle during dispose",
 			);
+			drained = true;
 		} catch (error) {
 			logger.warn("Active agent run still settling at dispose deadline", { error: String(error) });
 		}
@@ -3919,6 +3921,26 @@ export class AgentSession {
 		// dead weight from here on. Dropping it lets a parked subagent's session
 		// graph shed its heavy payloads even while the lifecycle adoption record's
 		// reviver closure still references the session object. Fixes #8003.
+		this.#releaseRetainedSessionMemory();
+
+		// The deadline does not cancel the drain: a handler parked in a slow
+		// extension hook resumes afterwards, reopens the append writer for its
+		// late persist, and repopulates exactly the state released above. Redo
+		// the final close + release once the pipeline genuinely settles — the
+		// extension runner bounds hook runtime, so this deferred pass is not
+		// unbounded.
+		if (!drained) {
+			void (async () => {
+				await this.agent.waitForIdle();
+				await this.#drainInFlightEventHandlers();
+				await this.sessionManager.close();
+				this.#releaseRetainedSessionMemory();
+			})().catch(error => logger.warn("Deferred dispose finalization failed", { error: String(error) }));
+		}
+	}
+
+	/** Drop the in-memory conversation state after the terminal dispose flush. */
+	#releaseRetainedSessionMemory(): void {
 		this.agent.reset();
 		this.agent.setAppendOnlyContext(undefined);
 		this.rawSseDebugBuffer.clear();

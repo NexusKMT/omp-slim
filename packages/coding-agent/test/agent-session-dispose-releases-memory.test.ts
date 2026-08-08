@@ -268,6 +268,90 @@ describe("AgentSession dispose releases retained memory", () => {
 		expect(current.agent.state.messages).toHaveLength(0);
 	});
 
+	it("re-finalizes after the drain deadline so a late persist cannot repopulate the session", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!model) throw new Error("expected bundled model");
+		const mock = createMockModel({ handler: () => ({ content: ["ok"] }) });
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["test"], tools: [] },
+			streamFn: mock.stream,
+		});
+		const sessionManager = SessionManager.inMemory(tempDir.path());
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
+
+		// A message_end hook that outlives the dispose drain deadline: dispose
+		// must resolve at the deadline, and the handler's late persist must not
+		// leave the released session repopulated.
+		const reached = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		const runtime = new ExtensionRuntime();
+		const extension = await loadExtensionFromFactory(
+			pi => {
+				pi.on("message_end", async () => {
+					reached.resolve();
+					await release.promise;
+				});
+			},
+			tempDir.path(),
+			new EventBus(),
+			runtime,
+			"slow-message-end",
+		);
+		const extensionRunner = new ExtensionRunner([extension], runtime, tempDir.path(), sessionManager, modelRegistry);
+		const current = new AgentSession({
+			agent,
+			sessionManager,
+			settings: Settings.isolated(),
+			modelRegistry,
+			agentId: "Main",
+			extensionRunner,
+		});
+		session = current;
+
+		const message: AssistantMessage = {
+			role: "assistant",
+			content: [{ type: "text", text: "z".repeat(4096) }],
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: Date.now(),
+		};
+		current.agent.emitExternalEvent({ type: "message_end", message });
+		await reached.promise;
+
+		let releaseCalls = 0;
+		const secondRelease = Promise.withResolvers<void>();
+		const realRelease = current.sessionManager.releaseRetainedEntries.bind(current.sessionManager);
+		vi.spyOn(current.sessionManager, "releaseRetainedEntries").mockImplementation(() => {
+			realRelease();
+			releaseCalls++;
+			if (releaseCalls === 2) secondRelease.resolve();
+		});
+		await current.dispose({ drainTimeoutMs: 20 });
+		session = undefined;
+
+		// The deadline elapsed with the handler still parked: memory was
+		// released once and dispose did not block on the hook.
+		expect(releaseCalls).toBe(1);
+
+		// Unpark the hook: the handler resumes and persists its entry, then the
+		// deferred finalize closes and releases again.
+		release.resolve();
+		await secondRelease.promise;
+		expect(current.sessionManager.getEntries()).toHaveLength(0);
+		expect(current.agent.state.messages).toHaveLength(0);
+	});
+
 	it("preserves the agent_end transcript for an asynchronous extension during dispose", async () => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) throw new Error("expected bundled model");
