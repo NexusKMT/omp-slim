@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed CJS modules being misclassified as ESM when imported from an ESM parent module. The extension loader's `isCommonJsModulePath` function now trusts Babel's source-type detection when the source contains actual CJS syntax (`require(`, `module.exports`, `exports.`), instead of deferring to the `inheritedKind` parameter from the importer. This resolves `SyntaxError: Missing 'default' export` for packages with conditional exports (e.g. playwright-core) where an ESM wrapper re-exports from a CJS entry. Ambiguous files (no import/export, no require/module.exports) continue to use the `inheritedKind` fallback.
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
