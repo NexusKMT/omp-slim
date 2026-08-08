@@ -267,6 +267,15 @@ describe("latexToBlock (2-D layout)", () => {
 		expect(latexToBlock("\\frac\n{a}{b}")).toEqual([" a ", "───", " b "]);
 	});
 
+	it("preserves outer arity when an unbraced command is itself an argument", () => {
+		// `readArg` accepts a command plus its attached arguments as one outer
+		// argument. Completing `\sqrt{a}` must therefore leave `\frac` waiting for
+		// its denominator on the next source line, rather than resetting its arity.
+		expect(latexToBlock("\\frac\\sqrt{a}\n{b}")).toEqual(["  ┌── ", " ╲│ a ", "──────", "  b   "]);
+		expect(latexToBlock("\\frac\\frac{a}{b}\n{c}")).toEqual(["  a  ", " ─── ", "  b  ", "─────", "  c  "]);
+		expect(latexToBlock("\\frac\\hat{a}\n{b}")).toEqual([" â ", "───", " b "]);
+	});
+
 	it("still treats a top-level newline as a row break when it is not an argument continuation", () => {
 		// `lhs =` on its own source line stays a row above its block; two fractions
 		// on separate lines each start with `\frac`, so they stack as two rows.

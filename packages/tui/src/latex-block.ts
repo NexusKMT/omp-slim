@@ -1285,13 +1285,22 @@ for (const name in HBRACE_COMMANDS) COMMAND_ARITY[name] = 1;
 /**
  * Count the `{…}` arguments still owed at the end of `seg` — non-zero when the
  * row ends mid-construct (`\frac{a}` awaiting its denominator, or `\frac`/`x^`
- * awaiting any argument). Nested commands and their braces are consumed as whole
- * units, so only the outermost pending count is reported. Used to keep a command
- * joined to an argument written on the next source line while still treating a
- * row that merely opens with a braced group (`a\n{b+c}`) as a real row break.
+ * awaiting any argument). Pending arities form a stack: an unbraced nested
+ * command consumes one outer argument, then retains its own pending arguments
+ * without discarding the outer command's remaining arity. Used to keep a
+ * command joined to an argument written on the next source line while still
+ * treating a row that merely opens with a braced group (`a\n{b+c}`) as a real
+ * row break.
  */
 function bracesOwed(seg: string): number {
-	let owed = 0;
+	const pending: number[] = [];
+	const consumeArg = (): void => {
+		const top = pending.length - 1;
+		if (top < 0) return;
+		if (pending[top] === 1) pending.pop();
+		else pending[top]--;
+	};
+
 	let i = 0;
 	while (i < seg.length) {
 		const c = seg[i];
@@ -1299,18 +1308,39 @@ function bracesOwed(seg: string): number {
 			let j = i + 1;
 			let name = "";
 			while (j < seg.length && /[A-Za-z]/.test(seg[j])) name += seg[j++];
-			if (name) owed = COMMAND_ARITY[name] ?? 0;
-			else j = i + 2; // escaped char (`\{`, `\,`) — takes no argument
+			// A command plus its immediately attached `[…]`/`{…}` groups is one
+			// atom for an enclosing argument, matching readArg. Consume that outer
+			// argument first, then retain only the command's own missing arguments
+			// in a nested frame. Attached groups beyond the known arity still stay
+			// part of the atom and cannot consume another outer argument.
+			consumeArg();
+			const arity = name ? (COMMAND_ARITY[name] ?? 0) : 0;
+			let attached = 0;
+			if (name) {
+				while (seg[j] === "[" || seg[j] === "{") {
+					if (seg[j] === "{") {
+						j = readBraceGroup(seg, j).end;
+						if (attached < arity) attached++;
+					} else {
+						const close = seg.indexOf("]", j);
+						j = close === -1 ? seg.length : close + 1;
+					}
+				}
+			} else {
+				j = i + 2; // non-letter command (`\,`, `\{`, …)
+			}
+			const missing = arity - attached;
+			if (missing > 0) pending.push(missing);
 			i = j;
 			continue;
 		}
 		if (c === "{") {
 			i = readBraceGroup(seg, i).end;
-			if (owed > 0) owed--;
+			consumeArg();
 			continue;
 		}
 		if (c === "^" || c === "_") {
-			owed += 1;
+			pending.push(1);
 			i++;
 			continue;
 		}
@@ -1318,9 +1348,12 @@ function bracesOwed(seg: string): number {
 			i++;
 			continue;
 		}
-		if (owed > 0) owed--; // a bare atom satisfies one pending argument
+		consumeArg(); // a bare atom satisfies one pending argument
 		i++;
 	}
+
+	let owed = 0;
+	for (const remaining of pending) owed += remaining;
 	return owed;
 }
 
