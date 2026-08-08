@@ -196,14 +196,17 @@ describe("cursor usage provider", () => {
 			});
 		});
 
-		it("falls back to individualUsage.plan for current Pro/Pro+/Ultra payloads", () => {
+		it("maps plan.auto/api percent rails to Cursor Models / Other Models", () => {
 			const payload = {
 				individualUsage: {
 					plan: {
 						enabled: true,
-						used: 924,
+						used: 1504,
 						limit: 7000,
-						remaining: 6076,
+						remaining: 5496,
+						autoPercentUsed: 1.85,
+						apiPercentUsed: 0,
+						totalPercentUsed: 1.63,
 					},
 					onDemand: {
 						enabled: true,
@@ -216,52 +219,35 @@ describe("cursor usage provider", () => {
 			};
 
 			const report = parseCursorIndividualUsage(payload, 123);
-			expect(report?.limits).toEqual([
-				{
-					id: "cursor:usd:individual-plan",
-					label: "Personal Usage",
-					scope: {
-						provider: "cursor",
-						windowId: "monthly",
-					},
-					window: {
-						id: "monthly",
-						label: "Monthly",
-						resetsAt: Date.parse("2026-09-08T08:00:31.000Z"),
-					},
-					amount: {
-						used: 9.24,
-						limit: 70,
-						remaining: 60.76,
-						usedFraction: 0.132,
-						remainingFraction: 0.868,
-						unit: "usd",
-					},
-					status: "ok",
-				},
-				{
-					id: "cursor:usd:individual-ondemand",
-					label: "On-Demand Usage",
-					scope: {
-						provider: "cursor",
-						windowId: "monthly",
-					},
-					window: {
-						id: "monthly",
-						label: "Monthly",
-						resetsAt: Date.parse("2026-09-08T08:00:31.000Z"),
-					},
-					amount: {
-						used: 0,
-						limit: 20,
-						remaining: 20,
-						usedFraction: 0,
-						remainingFraction: 1,
-						unit: "usd",
-					},
-					status: "ok",
-				},
+			expect(report?.limits.map(limit => ({ id: limit.id, label: limit.label }))).toEqual([
+				{ id: "cursor:usd:individual-auto", label: "Cursor Models" },
+				{ id: "cursor:usd:individual-api", label: "Other Models" },
+				{ id: "cursor:usd:individual-ondemand", label: "On-Demand Usage" },
 			]);
+			const auto = report?.limits[0]?.amount;
+			const api = report?.limits[1]?.amount;
+			const onDemand = report?.limits[2]?.amount;
+			expect(auto?.unit).toBe("percent");
+			expect(auto?.used).toBeCloseTo(1.85);
+			expect(auto?.usedFraction).toBeCloseTo(0.0185);
+			// Critically: do NOT trust plan.used/limit cents as the dashboard %.
+			expect(auto?.usedFraction).not.toBeCloseTo(1504 / 7000);
+			expect(api).toEqual({
+				used: 0,
+				limit: 70,
+				remaining: 70,
+				usedFraction: 0,
+				remainingFraction: 1,
+				unit: "usd",
+			});
+			expect(onDemand).toEqual({
+				used: 0,
+				limit: 20,
+				remaining: 20,
+				usedFraction: 0,
+				remainingFraction: 1,
+				unit: "usd",
+			});
 		});
 
 		it("prefers individualUsage.overall when both overall and plan exist", () => {

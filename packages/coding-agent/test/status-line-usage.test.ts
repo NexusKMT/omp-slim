@@ -329,13 +329,15 @@ describe("usage status-line segment", () => {
 
 	it("renders monthly Cursor usage when five-hour and seven-day windows are absent", () => {
 		const result = renderSegment("usage", {
-			usage: { monthly: { percent: 13.2, resetHours: 743 } },
+			usage: { monthly: { percent: 1.88, resetHours: 743 } },
 		} as unknown as SegmentContext);
 		const content = stripVTControlCharacters(result.content);
 
 		expect(result.visible).toBe(true);
 		expect(content).toContain("mo");
-		expect(content).toContain("13%");
+		// Match Cursor web dashboard flooring (1.88 → 1%), not Math.round → 2%.
+		expect(content).toContain("1%");
+		expect(content).not.toContain("2%");
 		expect(content).toContain("30d 23h");
 		expect(content).not.toContain("5h");
 		expect(content).not.toContain("7d");

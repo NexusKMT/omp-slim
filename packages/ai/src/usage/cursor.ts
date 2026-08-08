@@ -131,6 +131,54 @@ function parseCursorCentsBucket(bucket: Record<string, unknown>): UsageAmount | 
 	};
 }
 
+/**
+ * Cursor's dashboard does not treat plan.used / plan.limit as the visible %.
+ * Pro+ shows separate rails:
+ * - Cursor Models  ← autoPercentUsed
+ * - Other Models   ← apiPercentUsed (against the included $ pool)
+ * Prefer those fractions when present; fall back to cents only for older overall buckets.
+ */
+function parseCursorPlanDashboardAmounts(bucket: Record<string, unknown>): {
+	auto?: UsageAmount;
+	api?: UsageAmount;
+	fallback?: UsageAmount;
+} {
+	const limitCents = toNumber(bucket.limit);
+	const limitUsd = limitCents !== undefined && limitCents > 0 ? limitCents / 100 : undefined;
+	const autoPct = toNumber(bucket.autoPercentUsed);
+	const apiPct = toNumber(bucket.apiPercentUsed);
+	const totalPct = toNumber(bucket.totalPercentUsed);
+
+	const fromPercent = (pct: number, withLimit: boolean): UsageAmount => {
+		const usedFraction = Math.max(0, pct) / 100;
+		if (withLimit && limitUsd !== undefined) {
+			const used = limitUsd * usedFraction;
+			return {
+				used,
+				limit: limitUsd,
+				remaining: Math.max(0, limitUsd - used),
+				usedFraction,
+				remainingFraction: Math.max(0, 1 - usedFraction),
+				unit: "usd",
+			};
+		}
+		return { used: usedFraction * 100, usedFraction, unit: "percent" };
+	};
+
+	const result: { auto?: UsageAmount; api?: UsageAmount; fallback?: UsageAmount } = {};
+	if (autoPct !== undefined) result.auto = fromPercent(autoPct, false);
+	if (apiPct !== undefined) result.api = fromPercent(apiPct, true);
+	if (!result.auto && !result.api) {
+		if (totalPct !== undefined) {
+			result.fallback = fromPercent(totalPct, true);
+		} else {
+			const cents = parseCursorCentsBucket(bucket);
+			if (cents) result.fallback = cents;
+		}
+	}
+	return result;
+}
+
 export function parseCursorIndividualUsage(payload: unknown, fetchedAt = Date.now()): UsageReport | null {
 	if (!isRecord(payload) || !isRecord(payload.individualUsage)) {
 		return null;
@@ -138,28 +186,64 @@ export function parseCursorIndividualUsage(payload: unknown, fetchedAt = Date.no
 	const picked = pickCursorIndividualBucket(payload.individualUsage);
 	if (!picked) return null;
 
-	const amount = parseCursorCentsBucket(picked.bucket);
-	if (!amount) return null;
-
 	const resetsAt = deriveResetsAt(payload);
 	const window: UsageWindow = {
 		id: "monthly",
 		label: "Monthly",
 		...(resetsAt !== undefined ? { resetsAt } : {}),
 	};
-	const limits: UsageLimit[] = [
-		{
+	const limits: UsageLimit[] = [];
+
+	if (picked.key === "plan") {
+		const rails = parseCursorPlanDashboardAmounts(picked.bucket);
+		if (rails.auto) {
+			limits.push({
+				id: "cursor:usd:individual-auto",
+				label: "Cursor Models",
+				scope: { provider: "cursor", windowId: window.id },
+				window,
+				amount: rails.auto,
+				...(rails.auto.usedFraction !== undefined
+					? { status: usageStatus(rails.auto.usedFraction) }
+					: {}),
+			});
+		}
+		if (rails.api) {
+			limits.push({
+				id: "cursor:usd:individual-api",
+				label: "Other Models",
+				scope: { provider: "cursor", windowId: window.id },
+				window,
+				amount: rails.api,
+				...(rails.api.usedFraction !== undefined ? { status: usageStatus(rails.api.usedFraction) } : {}),
+			});
+		}
+		if (rails.fallback) {
+			limits.push({
+				id: "cursor:usd:individual-plan",
+				label: "Personal Usage",
+				scope: { provider: "cursor", windowId: window.id },
+				window,
+				amount: rails.fallback,
+				...(rails.fallback.usedFraction !== undefined
+					? { status: usageStatus(rails.fallback.usedFraction) }
+					: {}),
+			});
+		}
+	} else {
+		const amount = parseCursorCentsBucket(picked.bucket);
+		if (!amount) return null;
+		limits.push({
 			id: `cursor:usd:individual-${picked.key}`,
 			label: "Personal Usage",
-			scope: {
-				provider: "cursor",
-				windowId: window.id,
-			},
+			scope: { provider: "cursor", windowId: window.id },
 			window,
 			amount,
 			...(amount.usedFraction !== undefined ? { status: usageStatus(amount.usedFraction) } : {}),
-		},
-	];
+		});
+	}
+
+	if (limits.length === 0) return null;
 
 	if (isRecord(payload.individualUsage.onDemand)) {
 		const onDemandAmount = parseCursorCentsBucket(payload.individualUsage.onDemand);
@@ -167,10 +251,7 @@ export function parseCursorIndividualUsage(payload: unknown, fetchedAt = Date.no
 			limits.push({
 				id: "cursor:usd:individual-ondemand",
 				label: "On-Demand Usage",
-				scope: {
-					provider: "cursor",
-					windowId: window.id,
-				},
+				scope: { provider: "cursor", windowId: window.id },
 				window,
 				amount: onDemandAmount,
 				...(onDemandAmount.usedFraction !== undefined

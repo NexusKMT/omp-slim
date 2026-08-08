@@ -1259,8 +1259,12 @@ export class StatusLineComponent implements Component {
 		const normalized = this.#normalizeUsageReports(reports, activeProvider, activeIdentity);
 		const resetSnapshot =
 			activeProvider === "openai-codex" ? this.#normalizeCodexResetSnapshot(reports, activeIdentity) : null;
+		const usageChanged = this.#cachedUsage !== normalized;
 		this.#cachedUsage = normalized;
 		this.#usageFetchedAt = Date.now();
+		// Usage fetch is async; without a repaint the top border stays blank until
+		// some unrelated event (git resolve, keystroke, …) rebuilds it.
+		if (usageChanged) this.#onBranchChange?.();
 		if (!resetSnapshot) return;
 		const contextKey = this.#formatUsageContextKey(activeProvider, activeIdentity);
 		const previous = this.#codexResetSnapshots.get(contextKey);
