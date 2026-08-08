@@ -1,6 +1,13 @@
 /** Centralized error/warning text for the hashline parser, applier, and patcher. */
 
-import { formatNumberedLine, HL_FILE_HASH_SEP, HL_FILE_PREFIX, HL_FILE_SUFFIX, HL_RANGE_SEP } from "./format";
+import {
+	formatNumberedLine,
+	HL_FILE_HASH_SEP,
+	HL_FILE_PREFIX,
+	HL_FILE_SUFFIX,
+	HL_PAYLOAD_REPLACE,
+	HL_RANGE_SEP,
+} from "./format";
 import type { BlockSpan } from "./types";
 
 /** Lines of context shown either side of a hash mismatch. */
@@ -131,6 +138,19 @@ export function repeatedSnapshotRowMessage(line: number): string {
 		`number would keep only the last row and drop the rest. Write the hunk explicitly: one ` +
 		`\`PUT ${line}${HL_RANGE_SEP}M:\` header covering exactly the lines that change, followed by \`+TEXT\` body ` +
 		`rows holding their complete final content.`
+	);
+}
+/**
+ * A `+` body row whose text is itself a valid hunk header — the op was written
+ * with the payload prefix, so it is inserted into the file as literal text
+ * instead of executing. Warned rather than rejected: a literal `CUT …` line is
+ * legitimate content in documentation and test fixtures.
+ */
+export function literalOpRowWarning(line: number, text: string): string {
+	return (
+		`line ${line}: body row \`${HL_PAYLOAD_REPLACE}${text}\` is itself a valid hunk header, so it was inserted ` +
+		`into the file as literal text rather than executed. Ops are never \`${HL_PAYLOAD_REPLACE}\`-prefixed — drop ` +
+		`the \`${HL_PAYLOAD_REPLACE}\` to run it, and re-issue if this line landed in the file by mistake.`
 	);
 }
 /** Bare range header recovered as an implicit replacement hunk. */

@@ -7,9 +7,10 @@
 
 ### Added
 
-- `applyEdits` now takes a `path` and uses the native tree-sitter parser as a veto over every boundary repair that depends on delimiter *semantics*: the edits are materialized as authored first, and if that result parses, no repair or advisory may touch it. A `}` inside a regex literal, a string, or Markdown prose is therefore never mistaken for a block closer. Wired through the patcher, recovery, section apply, and the edit tool's preview.
-- Auto-repair for replacement ranges that start one line early on a structural closer (the `}` of the construct above): the closer is spared and the payload lands after it. Fires only when the authored edit does not parse, so it fixes the off-by-one that leaves an unclosed delimiter without touching prose.
-- Warning for balanced payloads over ranges that end mid-block (deleting opener(s) whose closer(s) survive below), pointing at the block-op remedy (`PUT N*:`). Also gated behind the parser veto, so it stays silent whenever the authored edit is sound.
+- `applyEdits` now takes a `path` and uses the native tree-sitter parser to decide every boundary repair that depends on delimiter *semantics*. The authored edits are materialized first: if that result parses, it is returned untouched, so a `}` inside a regex literal, a string, or Markdown prose is never mistaken for a block closer. A closer-spare repair lands only when the repaired result is *shown* to parse — never on delimiter arithmetic alone — so an unrecognized language or an unprovable candidate leaves the edit exactly as authored. Wired through the patcher, recovery, section apply, and the edit tool's preview.
+- Auto-repair for replacement ranges that start one line early on a structural closer (the `}` of the construct above): the closer is spared and the payload lands after it, gated on the same parse proof.
+- Warning for balanced payloads over ranges that end mid-block (deleting opener(s) whose closer(s) survive below), pointing at the block-op remedy (`PUT N*:`). Raised only when the baseline parsed and the authored result does not, so it cannot fire on prose or an unknown language.
+- Warning when a `+` body row is itself a valid hunk header (`+CUT 5.=9`). Such a row is literal content by definition and is inserted into the file as text; naming it at the moment it happens turns a silent source-file corruption into an actionable diagnostic.
 
 ### Fixed
 

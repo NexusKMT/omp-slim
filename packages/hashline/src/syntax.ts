@@ -20,11 +20,13 @@ const PARSE_CACHE_MAX = 256;
  * `true` when `text` parses without a syntax error under the language inferred
  * from `path`. `false` covers "does not parse" and "cannot tell" alike — no
  * path, an unrecognized language, or a native failure — because both mean the
- * probe has no veto to cast.
+ * probe has nothing to prove with. Callers must therefore never treat `false`
+ * as evidence *about the edit*: it only withholds permission to rewrite.
  *
  * Uses `enclosingBlockBoundaries` over a whole-file window: no node can cross
  * that window, so the boundary walk is trivial and the tree-sitter parse is the
- * only real cost. It returns `null` precisely when the source does not parse.
+ * only real cost. It returns `null` for an unrecognized language and for a
+ * source that fails to parse, which this predicate deliberately conflates.
  */
 export function parsesCleanly(path: string | undefined, text: string): boolean {
 	if (path === undefined) return false;

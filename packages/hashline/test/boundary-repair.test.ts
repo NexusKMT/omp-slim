@@ -408,13 +408,13 @@ describe("boundary-balance repair", () => {
 			"    auto* handle = payloadFor<PyThreadHandle>(self);",
 			"    if (!handle)",
 			'        return threadError(globalObject, "thread not started");',
-			"    handle->setDone();",
+			"    handle.setDone();",
 			"}",
 		].join("\n");
 		const diff = [
 			"PUT 3-4:",
 			"+    auto* handle = payloadFor<PyThreadHandle>(self);",
-			"+    if (!handle || !handle->isStarted())",
+			"+    if (!handle || !handle.isStarted())",
 		].join("\n");
 		expect(() => apply(file, diff)).toThrow(/rejected: the body opens by restating/);
 	});
@@ -435,10 +435,10 @@ describe("boundary-balance repair", () => {
 	it("rejects sparing a deleted closer when the payload claims no position inside the block", () => {
 		const file = [
 			"        if (!global) {",
-			"            handle->setDone();",
+			"            handle.setDone();",
 			"            return;",
 			"        }",
-			"        handle->setIdent(currentIdent());",
+			"        handle.setIdent(currentIdent());",
 		].join("\n");
 		const diff = ["PUT 4-4:", "+        after();"].join("\n");
 		expect(() => apply(file, diff)).toThrow(/before or after the closer is ambiguous/);
@@ -480,9 +480,9 @@ describe("boundary-balance repair", () => {
 	// the net deleted-prefix balance is zero, so the closer is correctly kept.
 	it("keeps the closer when the matching opener is replaced rather than removed", () => {
 		const file = ["if (a) {", "\told();", "}"].join("\n");
-		const diff = ["PUT 1-1:", "+if (b) {", "PUT 2-3:", "+\tnew();"].join("\n");
+		const diff = ["PUT 1-1:", "+if (b) {", "PUT 2-3:", "+\tfresh();"].join("\n");
 		const { text, warnings } = apply(file, diff);
-		expect(text).toBe(["if (b) {", "\tnew();", "}"].join("\n"));
+		expect(text).toBe(["if (b) {", "\tfresh();", "}"].join("\n"));
 		expect(warnings.filter(warning => /structural closing line/.test(warning))).toHaveLength(1);
 	});
 
@@ -526,9 +526,9 @@ describe("boundary-balance repair", () => {
 
 	it("ignores non-contiguously deleted openers when choosing which closer to keep", () => {
 		const file = ["if (a) {", "\told();", "\tmore();", "}", "const obj = {", "\ta: 1,", "};"].join("\n");
-		const diff = ["CUT 1", "PUT 3-4:", "+\tnew();", "PUT 7-7:", "+\tb: 2,"].join("\n");
+		const diff = ["CUT 1", "PUT 3-4:", "+\tfresh();", "PUT 7-7:", "+\tb: 2,"].join("\n");
 		const { text, warnings } = apply(file, diff);
-		expect(text).toBe(["\told();", "\tnew();", "const obj = {", "\ta: 1,", "\tb: 2,", "};"].join("\n"));
+		expect(text).toBe(["\told();", "\tfresh();", "const obj = {", "\ta: 1,", "\tb: 2,", "};"].join("\n"));
 		expect(warnings.filter(warning => /structural closing line/.test(warning))).toHaveLength(1);
 	});
 
@@ -543,7 +543,7 @@ describe("boundary-balance repair", () => {
 		].join("\n");
 		const diff = [
 			"PUT 2-3:",
-			"+\tnew();",
+			"+\tfresh();",
 			"PUT 4-6:",
 			"+function supportsDevinThinking(config: ClientModelConfig): boolean {",
 			"+\treturn config.supportsThinking === true;",
@@ -553,7 +553,7 @@ describe("boundary-balance repair", () => {
 		expect(text).toBe(
 			[
 				"if (a) {",
-				"\tnew();",
+				"\tfresh();",
 				"}",
 				"function supportsDevinThinking(config: ClientModelConfig): boolean {",
 				"\treturn config.supportsThinking === true;",
@@ -565,51 +565,51 @@ describe("boundary-balance repair", () => {
 
 	it("does not let an earlier kept closer cover a later orphan closer", () => {
 		const file = ["if (a) {", "\told();", "}", "}"].join("\n");
-		const diff = ["PUT 2-3:", "+\tnew();", "PUT 4-4:", "+after();"].join("\n");
+		const diff = ["PUT 2-3:", "+\tfresh();", "PUT 4-4:", "+after();"].join("\n");
 		const { text, warnings } = apply(file, diff);
-		expect(text).toBe(["if (a) {", "\tnew();", "}", "after();"].join("\n"));
+		expect(text).toBe(["if (a) {", "\tfresh();", "}", "after();"].join("\n"));
 		expect(warnings.filter(warning => /structural closing line/.test(warning))).toHaveLength(1);
 	});
 
 	it("does not keep a deleted outer closer when one survives below the range", () => {
 		const file = ["class C {", "\tmethod() {", "\t\told();", "\t}", "}", "}"].join("\n");
-		const diff = ["PUT 2-5:", "+\tmethod() {", "+\t\tnew();", "+\t}"].join("\n");
+		const diff = ["PUT 2-5:", "+\tmethod() {", "+\t\tfresh();", "+\t}"].join("\n");
 		const { text, warnings } = apply(file, diff);
-		expect(text).toBe(["class C {", "\tmethod() {", "\t\tnew();", "\t}", "}"].join("\n"));
+		expect(text).toBe(["class C {", "\tmethod() {", "\t\tfresh();", "\t}", "}"].join("\n"));
 		expect(warnings.filter(warning => /structural closing line/.test(warning))).toHaveLength(0);
 	});
 
 	it("keeps an omitted inner closer when the outer closer survives below", () => {
 		const file = ["class C {", "\tmethod() {", "\t\told();", "\t}", "}", "}"].join("\n");
-		const diff = ["PUT 2-5:", "+\tmethod() {", "+\t\tnew();"].join("\n");
+		const diff = ["PUT 2-5:", "+\tmethod() {", "+\t\tfresh();"].join("\n");
 		const { text, warnings } = apply(file, diff);
-		expect(text).toBe(["class C {", "\tmethod() {", "\t\tnew();", "\t}", "}"].join("\n"));
+		expect(text).toBe(["class C {", "\tmethod() {", "\t\tfresh();", "\t}", "}"].join("\n"));
 		expect(warnings.filter(warning => /structural closing line/.test(warning))).toHaveLength(1);
 	});
 
 	it("counts head insertions before replacement payloads in original coordinates", () => {
 		const file = ["\told();", "}"].join("\n");
-		const diff = ["PUT <1:", "+if (a) {", "PUT 1-2:", "+\tnew();"].join("\n");
+		const diff = ["PUT <1:", "+if (a) {", "PUT 1-2:", "+\tfresh();"].join("\n");
 		const { text, warnings } = apply(file, diff);
-		expect(text).toBe(["if (a) {", "\tnew();", "}"].join("\n"));
+		expect(text).toBe(["if (a) {", "\tfresh();", "}"].join("\n"));
 		expect(warnings.some(warning => /kept 1 structural closing line/.test(warning))).toBe(true);
 	});
 
 	it("counts a separately inserted closer immediately below the range", () => {
 		const file = ["class C {", "\told();", "}", "after();", "const obj = {", "\ta: 1,", "};"].join("\n");
-		const diff = ["PUT 2-3:", "+\tnew();", "PUT <4:", "+}", "PUT 7-7:", "+\tb: 2,"].join("\n");
+		const diff = ["PUT 2-3:", "+\tfresh();", "PUT <4:", "+}", "PUT 7-7:", "+\tb: 2,"].join("\n");
 		const { text, warnings } = apply(file, diff);
 		expect(text).toBe(
-			["class C {", "\tnew();", "}", "after();", "const obj = {", "\ta: 1,", "\tb: 2,", "};"].join("\n"),
+			["class C {", "\tfresh();", "}", "after();", "const obj = {", "\ta: 1,", "\tb: 2,", "};"].join("\n"),
 		);
 		expect(warnings.filter(warning => /structural closing line/.test(warning))).toHaveLength(1);
 	});
 
 	it("keeps an omitted outer closer even when the payload restates an inner closer", () => {
 		const file = ["if (a) {", "\tif (b) {", "\t\told();", "\t}", "}", "after();"].join("\n");
-		const diff = ["PUT 1-5:", "+if (a) {", "+\tif (c) {", "+\t\tnew();", "+\t}"].join("\n");
+		const diff = ["PUT 1-5:", "+if (a) {", "+\tif (c) {", "+\t\tfresh();", "+\t}"].join("\n");
 		const { text, warnings } = apply(file, diff);
-		expect(text).toBe(["if (a) {", "\tif (c) {", "\t\tnew();", "\t}", "}", "after();"].join("\n"));
+		expect(text).toBe(["if (a) {", "\tif (c) {", "\t\tfresh();", "\t}", "}", "after();"].join("\n"));
 		expect(warnings.filter(warning => /structural closing line/.test(warning))).toHaveLength(1);
 	});
 
@@ -813,22 +813,38 @@ describe("boundary-balance repair", () => {
 		expect(text).toBe(["fn f() {", "\tif a {", "\t\treturn;", "\t}", "\tlet lead = new1();", "}"].join("\n"));
 		expect(warnings.filter(warning => /leading structural closing line/.test(warning))).toHaveLength(1);
 	});
-	// The veto needs a language to reason about: with no path the probe abstains
-	// and the delimiter heuristics remain the only available evidence.
-	it("falls back to delimiter heuristics when no path is supplied", () => {
+	// No proof, no mutation. Without a path the probe cannot judge anything, so
+	// the closer-spare must not fire: the edit lands exactly as authored, even
+	// though the delimiter heuristics alone would have "repaired" it.
+	it("applies as authored when no path is supplied, since no repair can be proven", () => {
 		const file = ["fn f() {", "\tif a {", "\t\treturn;", "\t}", "\tlet lead = old1();", "}"].join("\n");
-		const { text } = applyEdits(file, parsePatch(["PUT 4-5:", "+\tlet lead = new1();"].join("\n")).edits);
-		expect(text).toBe(["fn f() {", "\tif a {", "\t\treturn;", "\t}", "\tlet lead = new1();", "}"].join("\n"));
+		const { text } = applyEdits(file, parsePatch(["PUT 4-5:", "+\tlet lead = fresh1();"].join("\n")).edits);
+		expect(text).toBe(["fn f() {", "\tif a {", "\t\treturn;", "\tlet lead = fresh1();", "}"].join("\n"));
 	});
 
-	// An unparseable *authored* result is what unlocks the repair, so a file in
-	// a language tree-sitter does not know behaves like the pathless case.
-	it("falls back to delimiter heuristics for a language the parser does not know", () => {
+	// Same for a language tree-sitter does not know: nothing can be proven, so
+	// nothing is rewritten and no advisory is invented.
+	it("applies as authored for a language the parser does not know", () => {
 		const file = ["fn f() {", "\tif a {", "\t\treturn;", "\t}", "\tlet lead = old1();", "}"].join("\n");
-		const result = applyEdits(file, parsePatch(["PUT 4-5:", "+\tlet lead = new1();"].join("\n")).edits, {
+		const result = applyEdits(file, parsePatch(["PUT 4-5:", "+\tlet lead = fresh1();"].join("\n")).edits, {
 			path: "fixture.unknownlang",
 		});
-		expect(result.text).toBe(["fn f() {", "\tif a {", "\t\treturn;", "\t}", "\tlet lead = new1();", "}"].join("\n"));
+		expect(result.text).toBe(["fn f() {", "\tif a {", "\t\treturn;", "\tlet lead = fresh1();", "}"].join("\n"));
+		expect(result.warnings ?? []).toHaveLength(0);
+	});
+	// The one-sided boundary echo is proven by exact line equality, not by
+	// delimiter semantics, so the parser has no say over it. It must reject even
+	// on a language the probe cannot read — otherwise suppressing the
+	// closer-spare verdict would also let this unsafe edit through, deleting
+	// range lines the body never restates.
+	it("still rejects a too-short one-sided echo on a language the parser cannot read", () => {
+		const file = ["alpha", "beta", "gamma", "delta", "eps"].join("\n");
+		const diff = ["PUT 2-4:", "+alpha", "+fresh1"].join("\n");
+		for (const path of [undefined, "fixture.unknownlang", "fixture.ts"]) {
+			expect(() => applyEdits(file, parsePatch(diff).edits, path === undefined ? {} : { path })).toThrow(
+				/too short to be the full final content/,
+			);
+		}
 	});
 });
 

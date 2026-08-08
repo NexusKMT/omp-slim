@@ -17,6 +17,7 @@ import {
 	EMPTY_INSERT,
 	EMPTY_PUT_AUTO_CUT_WARNING,
 	invalidAbsoluteRangeMessage,
+	literalOpRowWarning,
 	MINUS_BULLET_AUTO_PIPED_WARNING,
 	MINUS_ROW_REJECTED,
 	MOVE_TAKES_NO_BODY,
@@ -28,7 +29,7 @@ import {
 	SNAPSHOT_ROWS_AUTO_PUT_WARNING,
 } from "./messages";
 import { isReadMetadataLine, stripOneLeadingHashlinePrefix } from "./prefixes";
-import { type BlockTarget, cloneCursor, type ParsedRange, type Token, Tokenizer } from "./tokenizer";
+import { type BlockTarget, cloneCursor, isHunkHeaderText, type ParsedRange, type Token, Tokenizer } from "./tokenizer";
 import type { Anchor, BlockSpan, Cursor, Edit, FileOp, PasteTarget } from "./types";
 
 /** Bounds parser amplification before the target file's line count is available. */
@@ -461,6 +462,10 @@ export class Executor {
 		const noBodyOnLiteral = bodylessTargetMessage(pending.target, pending.hadColon);
 		if (noBodyOnLiteral !== null) throw new Error(`line ${lineNum}: ${noBodyOnLiteral}`);
 		this.#commitDeferredBlanks(pending);
+		// An op written with the payload prefix is inserted as literal text. That
+		// is the correct reading of `+TEXT`, but it silently plants a `CUT …` line
+		// in the file, so name it at the moment it happens.
+		if (isHunkHeaderText(text)) this.#warnings.push(literalOpRowWarning(lineNum, text));
 		pending.payloads.push({ kind: "literal", text, lineNum });
 	}
 

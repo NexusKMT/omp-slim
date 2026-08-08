@@ -123,6 +123,19 @@ function bucketAnchorEditsByLine(edits: IndexedEdit[]): Map<number, IndexedEdit[
 	}
 	return byLine;
 }
+/**
+ * A closer-spare repair could not tell which side of a spared delimiter the
+ * payload belongs on. Distinct from the evidence-complete textual rejections
+ * (a one-sided boundary echo) so {@link applyEdits} can withhold *only* this
+ * delimiter-semantics verdict on a file the parser cannot vouch for, while
+ * every other rejection propagates unconditionally.
+ */
+class CloserSpareAmbiguityError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "CloserSpareAmbiguityError";
+	}
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Replacement-boundary repair
@@ -1157,7 +1170,7 @@ function repairReplacementBoundaries(
 				balanceNegate(droppedClosers.balance),
 			);
 			if (!payloadOpens && !(payloadIndent !== undefined && isIndentDeeper(payloadIndent, keptIndent))) {
-				throw new Error(
+				throw new CloserSpareAmbiguityError(
 					ambiguousCloserSpareMessage(
 						slot.group.startLine,
 						slot.group.endLine,
@@ -1213,7 +1226,7 @@ function repairReplacementBoundaries(
 			const payloadIndent = bodyTargetIndent(slot.group.payload);
 			if (payloadIndent !== undefined) {
 				if (!closerIndent.startsWith(payloadIndent)) {
-					throw new Error(
+					throw new CloserSpareAmbiguityError(
 						ambiguousLeadingCloserSpareMessage(slot.group.startLine, slot.group.endLine, droppedPrefix.count),
 					);
 				}
@@ -1628,17 +1641,34 @@ export function applyEdits(text: string, edits: readonly Edit[], options: ApplyE
 	};
 	const authoredWarnings = [...leading, ...authored.warnings];
 	if (!authored.suspicious) return finish(materializeEdits(fileLines, authored.edits), authoredWarnings);
-
 	const authoredResult = materializeEdits(fileLines, authored.edits);
-	// The parser's veto: the edit as authored is syntactically sound, so no
-	// delimiter heuristic may second-guess its boundaries and no advisory is
-	// warranted. This is what keeps a `}` in prose, in a string, or in a regex
-	// literal from ever being mistaken for a block closer.
+	// The authored edit keeps the file parsing, so no delimiter heuristic may
+	// second-guess its boundaries. This is what keeps a `}` in prose, in a
+	// string, or in a regex literal from ever being mistaken for a block closer.
 	if (parsesCleanly(options.path, authoredResult.text)) return finish(authoredResult, authoredWarnings);
-	if (!authored.sparesProposed) return finish(authoredResult, [...authoredWarnings, ...authored.advisories]);
 
-	// No veto: the authored result does not parse (or the language is not one
-	// the parser knows), and a swallowed block closer explains the damage.
-	const spared = repairReplacementBoundaries(targetEdits, fileLines, true);
-	return finish(materializeEdits(fileLines, spared.edits), [...leading, ...spared.warnings, ...spared.advisories]);
+	// The authored result does not parse — or the parser does not know this
+	// language, in which case nothing below can be proven and nothing is
+	// rewritten. A repair lands only when it is *shown* to restore a parsing
+	// file, never on delimiter arithmetic alone.
+	const baselineParses = parsesCleanly(options.path, text);
+	if (authored.sparesProposed) {
+		try {
+			const spared = repairReplacementBoundaries(targetEdits, fileLines, true);
+			const sparedResult = materializeEdits(fileLines, spared.edits);
+			if (parsesCleanly(options.path, sparedResult.text)) {
+				return finish(sparedResult, [...leading, ...spared.warnings, ...spared.advisories]);
+			}
+		} catch (error) {
+			// Only the closer-spare verdict is the parser's business, and only on
+			// a file it can vouch for. Every other rejection — notably the
+			// evidence-complete one-sided boundary echo, which is proven by exact
+			// line equality and would otherwise delete range lines the body never
+			// restates — propagates regardless of what the parser knows.
+			if (baselineParses || !(error instanceof CloserSpareAmbiguityError)) throw error;
+		}
+	}
+	// Nothing proven: leave the authored edit exactly as written. Report the
+	// damage only when the baseline parsed, so this edit demonstrably caused it.
+	return finish(authoredResult, baselineParses ? [...authoredWarnings, ...authored.advisories] : authoredWarnings);
 }

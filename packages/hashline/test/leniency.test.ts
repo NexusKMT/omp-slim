@@ -97,6 +97,15 @@ describe("hashline core — verb header forms", () => {
 		expect(() => parsePatch("2:B\n4:first\n4:second")).toThrow(/name line 4/);
 		expect(() => parsePatch("2:B\n4:first\n4:second")).toThrow(/keep only the last row/);
 	});
+	// The xutf `native.rs` incident: `+CUT 1266.=1277` inside a `PUT` body is a
+	// literal row by spec, so it was inserted into the Rust file as text. That
+	// reading is correct, but it must be named — the agent that hit this filed a
+	// bug against the tool instead of repairing the line it had just planted.
+	it("warns when a body row is itself a hunk header written with the payload prefix", () => {
+		const result = parsePatch("PUT >1:\n+inserted();\n+CUT 1266.=1277");
+		expect(applyEdits(FILE, result.edits).text).toBe("a\ninserted();\nCUT 1266.=1277\nb\nc\nd\ne");
+		expect(result.warnings.some(w => /is itself a valid hunk header/.test(w))).toBe(true);
+	});
 
 	it("recovers a bare range header as an implicit PUT", () => {
 		const result = parsePatch("2.=3:\n+X");
