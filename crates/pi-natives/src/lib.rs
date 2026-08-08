@@ -202,12 +202,12 @@ fn configure_rayon_pool() {
 			.num_threads(threads)
 			.build_global(),
 		RayonPoolPlan::SkipGlobalPool => {
-			pi_uutils_ctx::set_rayon_global_pool_available(false);
+			pi_shell::set_rayon_global_pool_available(false);
 			return;
 		},
 	};
 	if result.is_ok() {
-		pi_uutils_ctx::set_rayon_global_pool_available(true);
+		pi_shell::set_rayon_global_pool_available(true);
 	}
 }
 
