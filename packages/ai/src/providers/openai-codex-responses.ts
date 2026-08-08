@@ -54,6 +54,7 @@ import {
 	stripOpenAIResponsesComputerLinkedReasoningIdsForReplay,
 } from "../utils";
 import { clearStreamingPartialJson, kStreamingLastParseLen, kStreamingPartialJson } from "../utils/block-symbols";
+import { hasVisibleAssistantContent } from "../utils/empty-completion-retry";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import { escapeHarmonyControlTokens, isHarmonyDialectModel } from "../utils/harmony-leak";
 import type { RawHttpRequestDump } from "../utils/http-inspector";
@@ -2728,7 +2729,12 @@ class CodexStreamProcessor {
 				: AIError.isProviderRetryableError(error, { provider: this.model.provider });
 		if (
 			!retryable ||
-			this.output.content.length > 0 ||
+			// A leading `response.output_item.added` opens an empty block and emits
+			// only a `*_start` before any delta; that is replay-safe. Gate on
+			// actually-committed visible output, not an open-but-empty block, or a
+			// pre-delta socket close would be misclassified as committed.
+			hasVisibleAssistantContent(this.output) ||
+			!this.runtime.canSafelyReplayWebsocketOverSse ||
 			this.runtime.providerRetryAttempt >= CODEX_MAX_RETRIES ||
 			this.options?.signal?.aborted
 		) {

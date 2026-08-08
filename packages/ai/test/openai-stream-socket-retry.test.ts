@@ -250,6 +250,34 @@ describe("OpenAI-family mid-stream socket-close retry", () => {
 		expect(result.content.find(block => block.type === "text")?.text).toBe("codex recovered");
 	});
 
+	it("retries Codex SSE when a socket close follows an empty opened block", async () => {
+		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
+		let requests = 0;
+		const fetchMock: FetchImpl = vi.fn(async () => {
+			requests++;
+			// First attempt opens a message block (emits text_start) but closes the
+			// socket before any output_text delta — replay-safe, must retry.
+			return requests === 1
+				? createSocketCloseResponse([
+						{
+							type: "response.output_item.added",
+							item: { type: "message", id: "msg_empty", role: "assistant", status: "in_progress", content: [] },
+						},
+						{ type: "response.content_part.added", part: { type: "output_text", text: "" } },
+					])
+				: completedCodexSse("codex recovered after empty block");
+		});
+
+		const result = await streamOpenAICodexResponses(codexModel, context, {
+			apiKey: "test-key",
+			fetch: fetchMock,
+		}).result();
+
+		expect(requests).toBe(2);
+		expect(result.stopReason).toBe("stop");
+		expect(result.content.find(block => block.type === "text")?.text).toBe("codex recovered after empty block");
+	});
+
 	it("does not retry Codex SSE after text output commits", async () => {
 		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
 		let requests = 0;
