@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed shell minimization replacing meaningful `rustc --print` output with `OK`.
+- Fixed shell minimization altering outputs shorter than 1,000 characters; these now pass through unchanged.
 
 ## [17.2.11] - 2026-08-07
 

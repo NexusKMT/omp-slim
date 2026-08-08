@@ -4499,20 +4499,17 @@ replace = [{ pattern = "hello", replacement = "HI" }]
 	async fn segmented_false_semicolon_printf_continues_and_returns_last_code() {
 		let root = unique_temp_dir("false-semi");
 		let minimizer = printf_minimizer(&root.join("minimizer.toml"), None);
-		let (result, output) = run_command_capture(
-			"false ; printf 'hello\n'",
-			None,
-			Some(minimizer),
-			CancelToken::default(),
-		)
-		.await;
+		let expected = "hello\n".repeat(200);
+		let command = format!("false ; printf '{}'", "hello\\n".repeat(200));
+		let (result, output) =
+			run_command_capture(&command, None, Some(minimizer), CancelToken::default()).await;
 		let _ = std::fs::remove_dir_all(&root);
-		let minimized = result.minimized.expect("minimized result");
+		let minimized = result.minimized.expect("long output should be minimized");
 		assert_eq!(result.exit_code, Some(0));
-		assert_eq!(output, "hello\n");
+		assert_eq!(output, expected);
 		assert_eq!(minimized.filter, "chain");
-		assert_eq!(minimized.original_text, "hello\n");
-		assert_eq!(minimized.text, "HI\n");
+		assert_eq!(minimized.original_text, expected);
+		assert_eq!(minimized.text, "HI\n".repeat(200));
 	}
 
 	#[cfg(unix)]
@@ -4544,12 +4541,9 @@ replace = [{ pattern = "^.+$", replacement = "PWD" }]
 			run_command_capture("cd tmp && pwd", Some(&root), Some(minimizer), CancelToken::default())
 				.await;
 		let _ = std::fs::remove_dir_all(&root);
-		let minimized = result.minimized.expect("minimized result");
+		assert!(result.minimized.is_none(), "short pwd output must not be minimized");
 		assert_eq!(result.exit_code, Some(0));
 		assert_eq!(output, expected);
-		assert_eq!(minimized.filter, "chain");
-		assert_eq!(minimized.text, "PWD\n");
-		assert_eq!(minimized.original_text, expected);
 	}
 
 	#[cfg(unix)]
@@ -4575,22 +4569,21 @@ replace = [{ pattern = "^.+$", replacement = "PWD" }]
 	async fn segmented_printf_chain_preserves_raw_original_text() {
 		let root = unique_temp_dir("minimizer");
 		let minimizer = printf_minimizer(&root.join("minimizer.toml"), None);
-		let (result, output) = run_command_capture(
-			"printf 'hello\n' ; printf 'world\n'",
-			None,
-			Some(minimizer),
-			CancelToken::default(),
-		)
-		.await;
+		let hello = "hello\n".repeat(200);
+		let world = "world\n".repeat(200);
+		let command =
+			format!("printf '{}' ; printf '{}'", "hello\\n".repeat(200), "world\\n".repeat(200));
+		let (result, output) =
+			run_command_capture(&command, None, Some(minimizer), CancelToken::default()).await;
 		let _ = std::fs::remove_dir_all(&root);
-		let minimized = result.minimized.expect("minimized result");
+		let minimized = result.minimized.expect("long output should be minimized");
 		assert_eq!(result.exit_code, Some(0));
-		assert_eq!(output, "hello\nworld\n");
+		assert_eq!(output, format!("{hello}{world}"));
 		assert_eq!(minimized.filter, "chain");
-		assert_eq!(minimized.original_text, "hello\nworld\n");
-		assert_eq!(minimized.text, "HI\nworld\n");
-		assert_eq!(minimized.input_bytes, 12);
-		assert_eq!(minimized.output_bytes, 9);
+		assert_eq!(minimized.original_text, format!("{hello}{world}"));
+		assert_eq!(minimized.text, format!("{}{}", "HI\n".repeat(200), world));
+		assert_eq!(minimized.input_bytes, (hello.len() + world.len()) as u32);
+		assert_eq!(minimized.output_bytes, ("HI\n".repeat(200).len() + world.len()) as u32);
 	}
 
 	/// Regression: a quoted here-doc followed by another command must execute
@@ -4659,24 +4652,19 @@ replace = [{ pattern = "^.+$", replacement = "PWD" }]
 	async fn segmented_chain_with_redirect_executes_correctly() {
 		let root = unique_temp_dir("redirect-chain");
 		let minimizer = printf_minimizer(&root.join("minimizer.toml"), None);
-		let (result, output) = run_command_capture(
-			"echo hidden >/dev/null && printf 'hello\\n'",
-			None,
-			Some(minimizer),
-			CancelToken::default(),
-		)
-		.await;
+		let expected = "hello\n".repeat(200);
+		let command = format!("echo hidden >/dev/null && printf '{}'", "hello\\n".repeat(200));
+		let (result, output) =
+			run_command_capture(&command, None, Some(minimizer), CancelToken::default()).await;
 		let _ = std::fs::remove_dir_all(&root);
 		assert_eq!(result.exit_code, Some(0));
 		// The redirect survived reconstruction: segment 1's stdout went to
 		// /dev/null, so only segment 2's output is captured.
 		assert!(!output.contains("hidden"), "redirect must suppress segment-1 stdout");
-		assert_eq!(output, "hello\n");
-		let minimized = result
-			.minimized
-			.expect("redirect chain should be minimized");
-		assert_eq!(minimized.original_text, "hello\n");
-		assert_eq!(minimized.text, "HI\n");
+		assert_eq!(output, expected);
+		let minimized = result.minimized.expect("long output should be minimized");
+		assert_eq!(minimized.original_text, expected);
+		assert_eq!(minimized.text, "HI\n".repeat(200));
 		assert!(!output.contains("syntax error"));
 	}
 
