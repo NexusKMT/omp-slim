@@ -28,6 +28,7 @@ describe("OpenCode MCP discovery", () => {
 
 	beforeEach(async () => {
 		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-opencode-mcp-"));
+		vi.spyOn(os, "homedir").mockReturnValue(tempDir);
 	});
 
 	afterEach(async () => {
@@ -40,7 +41,6 @@ describe("OpenCode MCP discovery", () => {
 		const userConfigDir = path.join(tempDir, ".config", "opencode");
 		await fs.mkdir(projectDir);
 		await fs.mkdir(userConfigDir, { recursive: true });
-		vi.spyOn(os, "homedir").mockReturnValue(tempDir);
 
 		await fs.writeFile(
 			path.join(userConfigDir, "opencode.jsonc"),
