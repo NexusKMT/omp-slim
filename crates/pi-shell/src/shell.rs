@@ -1,5 +1,7 @@
 //! Runtime-agnostic brush shell execution.
 
+#[cfg(windows)]
+use std::collections::HashSet;
 use std::{
 	collections::HashMap,
 	fs,

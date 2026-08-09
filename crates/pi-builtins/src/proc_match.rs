@@ -20,9 +20,9 @@ use std::{
 	time::Duration,
 };
 
-use brush_core::{
-	ExecutionContext, ExecutionExitCode, ExecutionResult, openfiles::OpenFiles,
-};
+use brush_core::{ExecutionContext, ExecutionExitCode, ExecutionResult};
+#[cfg(unix)]
+use brush_core::openfiles::OpenFiles;
 use tokio_util::sync::CancellationToken;
 
 use crate::{kill::signal_number, proc_snapshot};
