@@ -498,7 +498,8 @@ export class MCPManager {
 					}
 
 					if (this.#epoch !== connectionEpoch || this.#pendingConnections.get(name) !== connectionPromise) {
-						await this.#discardConnection(name, connection).catch(() => {});
+						this.#detachConnection(name, connection);
+						void disconnectServer(connection).catch(() => {});
 						throw new Error(`Server "${name}" was disconnected during initial connection`);
 					}
 
@@ -546,7 +547,13 @@ export class MCPManager {
 					const serverTools = await listTools(connection);
 					return { connection, serverTools };
 				} catch (error) {
-					await this.#discardConnection(name, connection).catch(() => {});
+					// Detach and delete synchronously, then close in the background:
+					// awaiting a slow HTTP close (session DELETE) here would keep
+					// toolsPromise pending past the startup race, so connectServers
+					// would return with no error while #pendingToolLoads stayed set
+					// and future connects for this server were skipped.
+					this.#detachConnection(name, connection);
+					void disconnectServer(connection).catch(() => {});
 					throw error;
 				}
 			});
@@ -864,11 +871,31 @@ export class MCPManager {
 		);
 	}
 
-	async #discardConnection(name: string, connection: MCPServerConnection): Promise<void> {
+	/**
+	 * Drop a connection from the active map and detach its lifecycle hooks.
+	 *
+	 * Synchronous and identity-guarded: only removes the entry when it is still
+	 * the connection registered under `name`, so a stale cleanup never evicts a
+	 * newer connection for the same server. Detaching `onClose` first prevents
+	 * the transport's own `close()` from re-arming reconnect.
+	 */
+	#detachConnection(name: string, connection: MCPServerConnection): void {
 		connection.transport.onClose = undefined;
 		if (this.#connections.get(name) === connection) {
 			this.#connections.delete(name);
 		}
+	}
+
+	/**
+	 * Detach a connection and await its transport close.
+	 *
+	 * Use only where blocking on the close is acceptable (owned disconnects,
+	 * dispose). On reject-fast paths detach synchronously and close in the
+	 * background so a slow `close()` (HTTP session DELETE) cannot delay the
+	 * rejection — see the `tools/list` failure handler in `connectServers`.
+	 */
+	async #discardConnection(name: string, connection: MCPServerConnection): Promise<void> {
+		this.#detachConnection(name, connection);
 		await disconnectServer(connection);
 	}
 
@@ -1103,7 +1130,8 @@ export class MCPManager {
 		// Bail out if the server was disconnected or the manager was reset
 		// while we were connecting (e.g. /mcp reload called disconnectAll).
 		if (!this.#serverConfigs.has(name) || this.#epoch !== reconnectEpoch) {
-			await this.#discardConnection(name, connection).catch(() => {});
+			this.#detachConnection(name, connection);
+			void disconnectServer(connection).catch(() => {});
 			throw new Error(`Server "${name}" was disconnected during reconnection`);
 		}
 
@@ -1134,8 +1162,10 @@ export class MCPManager {
 			void this.#loadServerResourcesAndPrompts(name, connection);
 			return connection;
 		} catch (error) {
-			// Clean up the connection to avoid zombie transports
-			await this.#discardConnection(name, connection).catch(() => {});
+			// Detach synchronously and close in the background so a slow close
+			// cannot delay the rejection (and the retry backoff that follows).
+			this.#detachConnection(name, connection);
+			void disconnectServer(connection).catch(() => {});
 			throw error;
 		}
 	}

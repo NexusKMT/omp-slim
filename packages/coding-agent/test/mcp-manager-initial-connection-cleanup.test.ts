@@ -12,6 +12,12 @@ class FakeTransport implements MCPTransport {
 	connected = true;
 	closeCalls = 0;
 	onClose?: () => void;
+	#closeGate?: Promise<void>;
+
+	/** Make `close()` hang on the given gate to simulate a slow HTTP session DELETE. */
+	gateClose(gate: Promise<void>): void {
+		this.#closeGate = gate;
+	}
 
 	request<T>(): Promise<T> {
 		throw new Error("Unexpected transport request");
@@ -22,6 +28,7 @@ class FakeTransport implements MCPTransport {
 	async close(): Promise<void> {
 		this.closeCalls += 1;
 		this.connected = false;
+		if (this.#closeGate) await this.#closeGate;
 	}
 }
 
@@ -112,5 +119,30 @@ describe("MCPManager initial connection ownership", () => {
 		expect(current.transport.closeCalls).toBe(0);
 		expect(manager.getConnectedServers()).toEqual(["server"]);
 		await manager.disconnectAll();
+	});
+
+	it("reports a tools/list failure and re-enables connects even when close hangs", async () => {
+		const manager = new MCPManager(process.cwd());
+		const failed = fakeConnection("server");
+		const stuckClose = Promise.withResolvers<void>();
+		failed.transport.gateClose(stuckClose.promise);
+		const connectSpy = vi
+			.spyOn(mcpClient, "connectToServer")
+			.mockResolvedValueOnce(failed.connection)
+			.mockRejectedValue(new Error("second connect refused"));
+		vi.spyOn(mcpClient, "listTools").mockRejectedValueOnce(new Error("initial tools/list failed"));
+
+		// close() never settles, but the failure must still surface and clear
+		// pending state so the server is not silently skipped forever.
+		const result = await manager.connectServers({ server: CONFIG }, {});
+		expect(result.errors.get("server")).toBe("initial tools/list failed");
+		expect(failed.transport.closeCalls).toBe(1);
+		expect(manager.getConnectedServers()).toEqual([]);
+
+		// A subsequent connect is attempted rather than skipped on stale pending state.
+		await manager.connectServers({ server: CONFIG }, {});
+		expect(connectSpy).toHaveBeenCalledTimes(2);
+
+		stuckClose.resolve();
 	});
 });
