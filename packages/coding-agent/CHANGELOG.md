@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a cold persisted-agent revival racing with lifecycle teardown: a revive whose reviver factory or session resolved after `AgentLifecycleManager.dispose()` could attach a live session and arm a TTL on the disposed manager, leaking a session graph and timers past teardown. Late revivals now reject deterministically and dispose any session they built ([#8114](https://github.com/can1357/oh-my-pi/issues/8114)).
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed
