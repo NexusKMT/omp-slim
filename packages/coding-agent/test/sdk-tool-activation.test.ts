@@ -954,6 +954,84 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		}
 	});
 
+	it("times out detached activations without blocking later registrations", async () => {
+		const tempDir = makeTempDir();
+		const releaseStalledRegistration = Promise.withResolvers<void>();
+		const releaseRecoveredRegistration = Promise.withResolvers<void>();
+		const detachedRegistrationExtension: ExtensionFactory = pi => {
+			pi.on("session_start", () => {
+				void releaseStalledRegistration.promise.then(() => {
+					pi.registerTool({
+						name: "stalled_detached_tool",
+						label: "Stalled Detached Tool",
+						description: "Detached registration whose activation stalls.",
+						parameters: type({}),
+						loadMode: "essential",
+						async execute() {
+							return { content: [{ type: "text", text: "stalled" }] };
+						},
+					});
+				});
+				void releaseRecoveredRegistration.promise.then(() => {
+					pi.registerTool({
+						name: "recovered_detached_tool",
+						label: "Recovered Detached Tool",
+						description: "Detached registration that follows the timeout.",
+						parameters: type({}),
+						loadMode: "essential",
+						async execute() {
+							return { content: [{ type: "text", text: "recovered" }] };
+						},
+					});
+				});
+			});
+		};
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [detachedRegistrationExtension],
+		});
+
+		try {
+			await initializeExtensions(session, {
+				reportSendError: vi.fn(),
+				reportRuntimeError: vi.fn(),
+			});
+			const runner = session.extensionRunner;
+			if (!runner) throw new Error("expected extension runner");
+			const detachedFailure = Promise.withResolvers<{ event: string; error: string }>();
+			runner.onError(error => {
+				if (error.event === "tool_registration") {
+					detachedFailure.resolve({ event: error.event, error: error.error });
+				}
+			});
+			const recoveredActivation = Promise.withResolvers<void>();
+			const originalSetPresentation = session.setActiveToolPresentation.bind(session);
+			vi.spyOn(session, "setActiveToolPresentation")
+				.mockImplementationOnce((_toolNames, _mountedToolNames, _forcePromptRefresh, signal) =>
+					untilAborted(signal, Promise.withResolvers<void>().promise),
+				)
+				.mockImplementation(async (toolNames, mountedToolNames, forcePromptRefresh, signal) => {
+					await originalSetPresentation(toolNames, mountedToolNames, forcePromptRefresh, signal);
+					if (toolNames.includes("recovered_detached_tool")) recoveredActivation.resolve();
+				});
+			testSetExtensionHandlerTimeoutMs(10);
+
+			releaseStalledRegistration.resolve();
+			const failure = await detachedFailure.promise;
+			releaseRecoveredRegistration.resolve();
+			await recoveredActivation.promise;
+
+			expect(failure.event).toBe("tool_registration");
+			expect(failure.error).toContain("timed out");
+			expect(session.getToolByName("stalled_detached_tool")).toBeUndefined();
+			expect(session.getToolByName("recovered_detached_tool")?.label).toBe("Recovered Detached Tool");
+		} finally {
+			releaseStalledRegistration.resolve();
+			releaseRecoveredRegistration.resolve();
+			await session.dispose();
+		}
+	});
+
 	it("forwards built-in and external xd:// devices to Cursor provider contexts", async () => {
 		const tempDir = makeTempDir();
 		const cursorModel = getBundledModel("cursor", "composer-1.5");

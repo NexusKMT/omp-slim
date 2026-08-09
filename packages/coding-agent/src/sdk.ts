@@ -93,6 +93,7 @@ import type { CustomTool, CustomToolContext, CustomToolSessionEvent } from "./ex
 import {
 	discoverAndLoadExtensions,
 	discoverExtensionPaths,
+	EXTENSION_HANDLER_TIMEOUT_MS,
 	type ExtensionContext,
 	type ExtensionFactory,
 	ExtensionRunner,
@@ -3455,6 +3456,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		const scheduleToolRegistration = (registered: RegisteredTool, signal?: AbortSignal): Promise<void> => {
 			if (scheduledToolRegistrations.has(registered)) return dynamicToolRegistrationChain;
 			scheduledToolRegistrations.add(registered);
+			const activationSignal = signal ?? AbortSignal.timeout(EXTENSION_HANDLER_TIMEOUT_MS);
 
 			const [wrapped] = wrapRegisteredTools([registered], extensionRunner);
 			if (!wrapped) return dynamicToolRegistrationChain;
@@ -3464,7 +3466,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// A later same-name registration may replace the extension map before serialized activation runs.
 			const isEffectiveRegistrant = extensionRunner.getRegisteredTool(name) === registered;
 			const serializedActivation = dynamicToolRegistrationChain.then(async () => {
-				signal?.throwIfAborted();
+				activationSignal.throwIfAborted();
 				const existingTool = toolRegistry.get(name);
 				if (existingTool) {
 					// SDK custom tools are installed after extension tools during startup, so they
@@ -3497,7 +3499,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 							enabled.filter(enabledName => enabledName !== name),
 							mounted.filter(mountedName => mountedName !== name),
 							existingTool !== undefined,
-							signal,
+							activationSignal,
 						);
 						return;
 					}
@@ -3521,7 +3523,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						alreadyEnabled ? enabled : [...enabled, name],
 						nextMounted,
 						existingTool !== undefined,
-						signal,
+						activationSignal,
 					);
 				} catch (error) {
 					if (existingTool) {
@@ -3534,7 +3536,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					throw error;
 				}
 			});
-			const activation = untilAborted(signal, serializedActivation);
+			const activation = untilAborted(activationSignal, serializedActivation);
 			dynamicToolRegistrationChain = activation.catch(() => {});
 			return activation;
 		};

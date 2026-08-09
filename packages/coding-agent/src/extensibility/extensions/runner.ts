@@ -736,7 +736,10 @@ export class ExtensionRunner {
 				const tool = extension.tools.get(toolName);
 				if (!tool) return;
 				try {
-					const pending = listener(tool, this.#toolRegistrationScope.getStore()?.signal);
+					const scope = this.#toolRegistrationScope.getStore();
+					const registrationSignal =
+						scope && !scope.closed ? scope.signal : AbortSignal.timeout(extensionHandlerTimeoutMs);
+					const pending = listener(tool, registrationSignal);
 					if (pending) trackRegistration(pending);
 				} catch (error) {
 					trackRegistration(Promise.reject(error));
