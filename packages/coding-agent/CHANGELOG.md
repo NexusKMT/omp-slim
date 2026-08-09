@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed retry-fallback selection switching a live session from a large-context primary onto a smaller-context fallback and immediately sending a predictably oversized request; candidate selection now skips any fallback whose usable window cannot hold the current context and advances to the first configured candidate that fits ([#8065](https://github.com/can1357/oh-my-pi/issues/8065)).
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed

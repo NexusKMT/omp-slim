@@ -1817,30 +1817,26 @@ export class SessionMaintenance {
 	}
 
 	/**
-	 * Retry-side counterpart to {@link #compactionCreatedHeadroom}. An
-	 * overflow/incomplete recovery only needs the rebuilt prompt to *fit* the
-	 * window again — it does not have to land under the compaction threshold, let
-	 * alone the stricter `COMPACTION_RECOVERY_BAND × threshold` hysteresis the
-	 * auto-continue thrash guard uses. Reusing the band here turned recoverable
-	 * overflows into manual dead-ends: a 200k-window prompt compacted from
-	 * overflow down to ~150k is comfortably retryable, but sits above
-	 * `0.8 × 170k = 136k` and was wrongly refused (PR #3412 review).
+	 * Whether the current stored context fits `model`'s usable window
+	 * (`contextWindow - reserve`), using the same reserve resolution as
+	 * compaction. This is deliberately independent of `compaction.enabled`: an
+	 * oversized request overflows the provider whether or not compaction would
+	 * have run, so a fit check must judge the raw budget.
 	 *
-	 * Measures residual context against the usable budget (`contextWindow - reserve`).
 	 * The default absolute reserve can exceed bundled small-context windows, or
 	 * nearly consume a 16k-class window; those known-impossible defaults fall
 	 * back to the proportional 15% reserve. Explicit valid reserves still define
-	 * the usable prompt budget so retries do not enter headroom the user
-	 * intentionally reserved. Callers MUST
-	 * invoke this AFTER dropping the failed assistant from `this.#host.messages()`, so
-	 * the just-failed turn (which the retry prompt will not include) is excluded
-	 * from the estimate.
+	 * the usable prompt budget so callers do not enter headroom the user
+	 * intentionally reserved.
 	 *
-	 * When the model/window is unknown we cannot evaluate the budget, so we
-	 * optimistically allow the retry (preserving prior behavior).
+	 * Used by the retry-fallback selector to skip a candidate whose window cannot
+	 * hold the live context before switching onto it, and (via
+	 * {@link #compactionCreatedRetryFit}) to decide whether an overflow recovery
+	 * produced a retryable prompt. When the window is unknown we cannot evaluate
+	 * the budget, so we optimistically report a fit (preserving prior behavior).
 	 */
-	#compactionCreatedRetryFit(): boolean {
-		const contextWindow = this.#model?.contextWindow ?? 0;
+	contextFitsModel(model: Model): boolean {
+		const contextWindow = model.contextWindow ?? 0;
 		if (contextWindow <= 0) return true;
 		const compactionSettings = this.#host.settings.getGroup("compaction");
 		const residualTokens = compactionContextTokens(
@@ -1849,6 +1845,20 @@ export class SessionMaintenance {
 		);
 		const fitBudget = Math.max(0, contextWindow - resolveBudgetReserveTokens(contextWindow, compactionSettings));
 		return residualTokens <= fitBudget;
+	}
+
+	/**
+	 * Retry-side check: whether an overflow/incomplete recovery rebuilt a prompt
+	 * that fits the active model's window again. Callers MUST invoke this AFTER
+	 * dropping the failed assistant from `this.#host.messages()` so the just-failed
+	 * turn (absent from the retry prompt) is excluded from the estimate. Unlike
+	 * the `COMPACTION_RECOVERY_BAND × threshold` hysteresis the auto-continue
+	 * thrash guard uses, a retry only needs to *fit* — a 200k-window prompt
+	 * compacted from overflow down to ~150k is retryable even though it sits above
+	 * `0.8 × 170k` (PR #3412 review).
+	 */
+	#compactionCreatedRetryFit(): boolean {
+		return this.#model ? this.contextFitsModel(this.#model) : true;
 	}
 
 	/**
