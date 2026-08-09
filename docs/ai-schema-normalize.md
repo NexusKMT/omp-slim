@@ -44,24 +44,25 @@ Removed in the unified-flow refactor:
 - `strict-mode.ts` (merged into `normalize.ts`).
 - `sanitize-google.ts` and `normalize-cca.ts` (replaced by
   `normalizeSchemaFor*` dispatchers).
-- `StringEnum` helper — use `z.enum([...])` directly; Zod's emitted JSON
-  Schema is already wire-compatible with Google and other providers.
+- `StringEnum` helper — use `type.enumerated(...)`; omptype emits
+  provider-compatible JSON Schema.
 - `sanitizeSchemaFor{Google,CCA,MCP}` / `prepareSchemaForCCA` — renamed to
   `normalizeSchemaFor{Google,CCA,MCP}`.
 
 ## Dispatcher mapping
 
-| Provider transport(s)                                              | Dispatcher                                                              |
-| ------------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| `openai-completions`, `openai-responses`, `openai-codex-responses` | `adaptSchemaForStrict` (sanitize + enforce when strict mode is enabled) |
-| OpenAI Responses family                                            | `normalizeSchemaForOpenAIResponses` before strict-mode adaptation       |
-| Moonshot/Kimi native hosts using MFJS                              | `normalizeSchemaForMoonshot`                                            |
-| Grammar-flavored OpenAI-compatible hosts                           | `sanitizeSchemaForGrammar`                                              |
-| `ollama`                                                           | `sanitizeSchemaForOllama`                                               |
-| `google-generative-ai`, `google-vertex`, Gemini CLI                | `normalizeSchemaForGoogle`                                              |
-| Cloud Code Assist Claude (Antigravity + GCA, `claude-*` model ids) | `normalizeSchemaForCCA`                                                 |
-| MCP `inputSchema` ingestion                                        | `normalizeSchemaForMCP`                                                 |
-| `anthropic-messages` (native, not CCA)                             | per-provider whitelist in `anthropic.ts`                                |
+| Provider transport(s)                                              | Dispatcher                                                                   |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `openai-completions`                                               | `adaptSchemaForStrict` (sanitize + enforce when strict mode is enabled)      |
+| `openai-responses`, `openai-codex-responses`                       | `sanitizeSchemaForOpenAIResponses` before strict-mode adaptation             |
+| `azure-openai-responses`                                           | `sanitizeSchemaForOpenAIResponses`; emits `strict: false` without adaptation |
+| Moonshot/Kimi native hosts using MFJS                              | `normalizeSchemaForMoonshot`                                                 |
+| Grammar-flavored OpenAI-compatible hosts                           | `sanitizeSchemaForGrammar`                                                   |
+| `ollama`                                                           | `sanitizeSchemaForOllama`                                                    |
+| `google-generative-ai`, `google-vertex`, Gemini CLI                | `normalizeSchemaForGoogle`                                                   |
+| Cloud Code Assist Claude (Antigravity + GCA, `claude-*` model ids) | `normalizeSchemaForCCA`                                                      |
+| MCP `inputSchema` ingestion                                        | `normalizeSchemaForMCP`                                                      |
+| `anthropic-messages` (native, not CCA)                             | per-provider whitelist in `anthropic.ts`                                     |
 
 Gemini CLI / Antigravity CCA MUST run the full `normalizeSchemaForCCA`
 pipeline (not just the first keyword-stripping pass) to keep parity with the
@@ -69,9 +70,8 @@ shared Google Claude path.
 
 ## Walk semantics
 
-`normalizeSchema` first detoxifies serialized Zod-instance-shaped inputs, upgrades them to
-JSON Schema 2020-12, dereferences the tree, then walks it with the option set
-pinned by the dispatcher. Each node:
+`normalizeSchema` upgrades inputs to JSON Schema 2020-12, dereferences the tree,
+then walks it with the option set pinned by the dispatcher. Each node:
 
 1. Renames `snake_case` combinator/property keys to camelCase
    (`any_of` → `anyOf`, etc.; collisions follow python-genai

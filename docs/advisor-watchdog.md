@@ -178,6 +178,22 @@ Practical interpretation:
 
 Advisor failures do not permanently stall the primary. The host first attempts its credential/fallback recovery. Retriable failures are attempted up to three times before that backlog is dropped; three dropped-backlog cycles halt the runtime until an explicit reset, and a permanent request rejection can halt it after one cycle. A quota/usage-limit failure pauses the advisor with its batch retained until `/advisor` rebuilds it, configuration is reloaded, a new session starts, or the process restarts. Catch-up waiters are released as soon as an advisor is failing.
 
+Unsafe Advisor output follows a separate quarantine path rather than that
+three-attempt request-retry policy. Before tool dispatch, the runtime
+quarantines a turn that requests non-bridge tools unavailable to the Advisor.
+It also quarantines generated text/advice when an output-only destructive-shell
+directive is detected, or when at least three output-only hazard classes match
+among destructive shell, instruction override, denial instruction, and
+account-deletion claim. A new instruction override paired with a destructive
+command quoted in the input also qualifies. The entire Advisor turn, including
+any advice in it, is discarded before dispatch.
+
+The first consecutive quarantine silently resets and re-primes the Advisor with
+the latest pending context. A second consecutive quarantine emits one
+deduplicated host warning, drops the affected batch, and resets the Advisor
+context to break the loop. Any successful Advisor turn resets the quarantine
+counter.
+
 ## WATCHDOG.md
 
 `WATCHDOG.md` is advisor-only guidance. It is appended to the advisor system prompt; it is not injected into the primary agent's normal context and does not behave like `AGENTS.md`, `RULES.md`, or other context files.
@@ -310,8 +326,8 @@ Paths derive from the owning session file (not the shared artifacts root), so ea
 Why a file:
 
 - **Usage attribution.** `omp stats` scans each session folder recursively, so advisor assistant turns (with their usage/cost) are attributed to the same project/session like any other subagent. Advisor "session update" prompts are persisted as `synthetic`, agent-attributed user messages so they never inflate user-message metrics.
-- **Observability.** The Agent Hub discovers legacy and named `__advisor*.jsonl` files on open and shows each as a read-only `advisor`-kind transcript under its owning session.
+- **Observability.** [Agent Hub](./agent-hub.md) discovers legacy and named `__advisor*.jsonl` files on open and shows each as a read-only `advisor`-kind transcript under its owning session.
 
 The file follows session switches: on `/new`, resume/switch, and branch the recorder reopens at the new session's path on the next advisor turn; before a `/drop` deletes the old artifacts dir the recorder feed is detached and drained so a queued write cannot recreate the deleted file. The on-disk log is append-only and independent of the in-memory context — re-primes and compaction never truncate it.
 
-The advisor is never a peer. The `advisor`-kind registry ref is excluded from every agent-facing surface — the `hub` peer roster and broadcast targets, the subagent peer prompt, and the `history://` index/lookup/completions — and cannot be messaged (`hub` send and collab chat refuse it) or revived/killed from the Agent Hub or collab. It is not addressable as a peer, regardless of what tools it has been granted.
+The advisor is never a peer. The `advisor`-kind registry ref is excluded from every agent-facing surface — the `hub` peer roster and broadcast targets, the subagent peer prompt, and the `history://` index/lookup/completions — and cannot be messaged (`hub` send and collab chat refuse it) or [revived or killed from Agent Hub](./agent-hub.md#persisted-agents-and-advisors) or collab. It is not addressable as a peer, regardless of what tools it has been granted.

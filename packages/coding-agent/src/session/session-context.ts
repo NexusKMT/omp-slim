@@ -8,6 +8,7 @@ import {
 	INTERRUPTED_THINKING_MESSAGE_TYPE,
 	isCustomMessageContent,
 	normalizeCustomMessagePayload,
+	PREWALK_PLAN_MESSAGE_TYPE,
 } from "./messages";
 import { type CompactionEntry, EPHEMERAL_MODEL_CHANGE_ROLE, type SessionEntry } from "./session-entries";
 
@@ -284,7 +285,7 @@ export function buildSessionContext(
 
 	const injectedTtsrRules = Array.from(injectedTtsrRulesSet);
 
-	// Index on the path of the latest `/reset` boundary, or -1 when none. The
+	// Index on the path of the latest `/clear` boundary, or -1 when none. The
 	// collapsed live transcript and the model-context rebuild start emission
 	// after it (see the emission branch below); the full-history export path
 	// ignores it.
@@ -332,15 +333,12 @@ export function buildSessionContext(
 	const appendMessage = (entry: SessionEntry) => {
 		handleEntryResetTracking(entry);
 		if (entry.type === "message") {
-			if (
-				!options?.transcript &&
-				entry.message.role === "assistant" &&
-				entry.message.retryRecovery?.status === "recovered"
-			) {
+			if (!options?.transcript && entry.message.role === "assistant" && entry.message.retryRecovery) {
 				return;
 			}
 			pushMessage(entry.message);
 		} else if (entry.type === "custom_message") {
+			if (!options?.transcript && entry.customType === PREWALK_PLAN_MESSAGE_TYPE) return;
 			if (!isCustomMessageContent(entry.content)) return;
 			const normalized = normalizeCustomMessagePayload(entry);
 			const attribution = entry.attribution === undefined ? undefined : normalized.attribution;
@@ -389,12 +387,12 @@ export function buildSessionContext(
 		resetBoundaryIdx >= 0 &&
 		resetBoundaryIdx > (compaction ? path.findIndex(e => e.type === "compaction" && e.id === compaction.id) : -1)
 	) {
-		// A `/reset` boundary durably starts emission after it — for BOTH the
+		// A `/clear` boundary durably starts emission after it — for BOTH the
 		// collapsed live transcript AND the model context (non-transcript) rebuild
 		// that feeds agent.replaceMessages (resume, /shake, reload, image drop).
 		// Without honoring it here, those model-context rebuilds walk the full
 		// persisted branch and put the pre-reset turns back into the LLM context
-		// even though `/reset` reported it empty. The full-history export path
+		// even though `/clear` reported it empty. The full-history export path
 		// (`transcript && !collapseCompactedHistory`) is handled by the first
 		// branch above and left untouched, so on-disk history stays recoverable.
 		// When a compaction and a reset boundary interact, the later one on the
