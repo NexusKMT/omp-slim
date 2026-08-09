@@ -240,6 +240,54 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		}
 	});
 
+	it("keeps the stable MCP tool-name collision winner during late registration", async () => {
+		const tempDir = makeTempDir();
+		const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+		const lateMcpCollisionExtension: ExtensionFactory = pi => {
+			pi.on("session_start", async () => {
+				await Promise.resolve();
+				for (const [serverName, label] of [
+					["foo.bar", "foo.bar/lookup"],
+					["foo_bar", "foo_bar/lookup"],
+				] as const) {
+					pi.registerTool({
+						name: "mcp__foo_bar_lookup",
+						label,
+						description: `Lookup from ${serverName}`,
+						parameters: type({}),
+						mcpServerName: serverName,
+						mcpToolName: "lookup",
+						async execute() {
+							return { content: [{ type: "text", text: serverName }] };
+						},
+					});
+				}
+			});
+		};
+
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [lateMcpCollisionExtension],
+		});
+
+		try {
+			const runner = session.extensionRunner;
+			if (!runner) throw new Error("expected extension runner");
+			await runner.emit({ type: "session_start" });
+
+			expect(session.getToolByName("mcp__foo_bar_lookup")?.label).toBe("foo.bar/lookup");
+			expect(warn).toHaveBeenCalledWith("MCP tool name collision; keeping stable winner", {
+				name: "mcp__foo_bar_lookup",
+				keptServer: "foo.bar",
+				keptTool: "lookup",
+				ignoredServer: "foo_bar",
+				ignoredTool: "lookup",
+			});
+		} finally {
+			await session.dispose();
+		}
+	});
+
 	it("forwards built-in and external xd:// devices to Cursor provider contexts", async () => {
 		const tempDir = makeTempDir();
 		const cursorModel = getBundledModel("cursor", "composer-1.5");
