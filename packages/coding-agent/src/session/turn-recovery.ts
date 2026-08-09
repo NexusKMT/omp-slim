@@ -1099,8 +1099,14 @@ export class TurnRecovery {
 	resolveRetryFallbackRole(
 		currentSelector: string,
 		currentModel: Model | null | undefined = this.#host.model(),
+		roleHint?: string,
 	): string | undefined {
-		return resolveRetryFallbackChainKey(this.#getRetryFallbackResolutionContext(), currentSelector, currentModel);
+		return resolveRetryFallbackChainKey(
+			this.#getRetryFallbackResolutionContext(),
+			currentSelector,
+			currentModel,
+			roleHint,
+		);
 	}
 
 	/** Finds fallback candidates that follow the active selector. */

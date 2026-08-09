@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed advisor recovery selecting another role's fallback chain when both roles use the same model. ([#8075](https://github.com/can1357/oh-my-pi/issues/8075))
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed

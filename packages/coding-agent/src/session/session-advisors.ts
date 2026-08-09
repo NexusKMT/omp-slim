@@ -263,7 +263,11 @@ export interface SessionAdvisorsHost {
 		signal: AbortSignal,
 	): Promise<Model | undefined>;
 	resolveCompactionModelCandidates(preferredModel: Model | null | undefined, availableModels: Model[]): Model[];
-	resolveRetryFallbackRole(currentSelector: string, currentModel?: Model | null): string | undefined;
+	resolveRetryFallbackRole(
+		currentSelector: string,
+		currentModel?: Model | null,
+		roleHint?: string,
+	): string | undefined;
 	findRetryFallbackCandidates(
 		role: string,
 		currentSelector: string,
@@ -1221,7 +1225,8 @@ export class SessionAdvisors {
 
 		const retrySettings = this.#host.settings.getGroup("retry");
 		if (!retrySettings.enabled || !retrySettings.modelFallback) return false;
-		const role = advisor.retryFallback?.role ?? this.#host.resolveRetryFallbackRole(currentSelector, currentModel);
+		const role =
+			advisor.retryFallback?.role ?? this.#host.resolveRetryFallbackRole(currentSelector, currentModel, "advisor");
 		if (!role || this.#host.findRetryFallbackCandidates(role, currentSelector, currentModel).length === 0)
 			return false;
 
