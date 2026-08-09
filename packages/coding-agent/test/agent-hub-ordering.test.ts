@@ -586,16 +586,24 @@ describe("Agent hub row ordering", () => {
 			expect(rendered).toContain("Security Reviewer");
 			expect(rendered).toContain("read · src/session/agent-session.ts");
 			expect(rendered).toContain("31K/128K 24%");
-			expect(rendered).toContain(
-				`Registered ${new Date(createdAt).toLocaleString(undefined, {
-					year: "numeric",
-					month: "short",
-					day: "2-digit",
-					hour: "2-digit",
-					minute: "2-digit",
-					timeZoneName: "short",
-				})}`,
-			);
+			const createdDate = new Date(createdAt);
+			const localDateTime = createdDate.toLocaleString("sv-SE", {
+				year: "numeric",
+				month: "2-digit",
+				day: "2-digit",
+				hour: "2-digit",
+				minute: "2-digit",
+			});
+			const offsetMinutes = -createdDate.getTimezoneOffset();
+			const offsetSign = offsetMinutes >= 0 ? "+" : "-";
+			const absoluteOffset = Math.abs(offsetMinutes);
+			const offset = `${offsetSign}${String(Math.floor(absoluteOffset / 60)).padStart(2, "0")}:${String(
+				absoluteOffset % 60,
+			).padStart(2, "0")}`;
+			const registeredLine = `Registered ${localDateTime} ${offset}`;
+			expect(rendered).toContain(registeredLine);
+			expect(rendered).not.toMatch(/Registered \d{4}-\d{2}-\d{2} \d{2}:\d{2}Z/u);
+			expect(Bun.stripANSI(hub.render(96).join("\n"))).toContain(registeredLine);
 			expect(rendered).toContain("Shared workspace · per-agent LoC not attributable");
 			expect(rendered).toContain("Output /tmp/Reviewer.md");
 			expect(rendered).toContain("Patch /tmp/Reviewer.patch");
