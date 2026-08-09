@@ -384,6 +384,163 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		}
 	});
 
+	it("refreshes an earlier extension's stable MCP winner instead of the later colliding registrant", async () => {
+		const tempDir = makeTempDir();
+		const stableWinnerExtension: ExtensionFactory = pi => {
+			pi.registerTool({
+				name: "mcp__foo_bar_refresh",
+				label: "foo.bar/refresh connected",
+				description: "Initial stable MCP winner.",
+				parameters: type({}),
+				mcpServerName: "foo.bar",
+				mcpToolName: "refresh",
+				async execute() {
+					return { content: [{ type: "text", text: "connected" }] };
+				},
+			});
+			pi.on("session_start", async () => {
+				await Promise.resolve();
+				pi.registerTool({
+					name: "mcp__foo_bar_refresh",
+					label: "foo.bar/refresh reconnected",
+					description: "Reconnected stable MCP winner.",
+					parameters: type({}),
+					mcpServerName: "foo.bar",
+					mcpToolName: "refresh",
+					async execute() {
+						return { content: [{ type: "text", text: "reconnected" }] };
+					},
+				});
+			});
+		};
+		const collidingLoserExtension: ExtensionFactory = pi => {
+			pi.registerTool({
+				name: "mcp__foo_bar_refresh",
+				label: "foo_bar/refresh",
+				description: "Later extension with the losing MCP origin.",
+				parameters: type({}),
+				mcpServerName: "foo_bar",
+				mcpToolName: "refresh",
+				async execute() {
+					return { content: [{ type: "text", text: "loser" }] };
+				},
+			});
+		};
+
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [stableWinnerExtension, collidingLoserExtension],
+		});
+
+		try {
+			expect(session.getToolByName("mcp__foo_bar_refresh")?.label).toBe("foo.bar/refresh connected");
+			const runner = session.extensionRunner;
+			if (!runner) throw new Error("expected extension runner");
+			await runner.emit({ type: "session_start" });
+			expect(session.getToolByName("mcp__foo_bar_refresh")?.label).toBe("foo.bar/refresh reconnected");
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	it("retains later-extension precedence when an earlier non-MCP registrant updates", async () => {
+		const tempDir = makeTempDir();
+		const earlierExtension: ExtensionFactory = pi => {
+			pi.registerTool({
+				name: "shared_lifecycle_tool",
+				label: "Earlier Tool",
+				description: "Earlier extension tool.",
+				parameters: type({}),
+				async execute() {
+					return { content: [{ type: "text", text: "earlier" }] };
+				},
+			});
+			pi.on("session_start", async () => {
+				await Promise.resolve();
+				pi.registerTool({
+					name: "shared_lifecycle_tool",
+					label: "Updated Earlier Tool",
+					description: "Updated earlier extension tool.",
+					parameters: type({}),
+					async execute() {
+						return { content: [{ type: "text", text: "updated earlier" }] };
+					},
+				});
+			});
+		};
+		const laterExtension: ExtensionFactory = pi => {
+			pi.registerTool({
+				name: "shared_lifecycle_tool",
+				label: "Later Tool",
+				description: "Later extension winner.",
+				parameters: type({}),
+				async execute() {
+					return { content: [{ type: "text", text: "later" }] };
+				},
+			});
+		};
+
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [earlierExtension, laterExtension],
+		});
+
+		try {
+			expect(session.getToolByName("shared_lifecycle_tool")?.label).toBe("Later Tool");
+			const runner = session.extensionRunner;
+			if (!runner) throw new Error("expected extension runner");
+			await runner.emit({ type: "session_start" });
+			expect(session.getToolByName("shared_lifecycle_tool")?.label).toBe("Later Tool");
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	it("reclassifies late replacements when their load modes change", async () => {
+		const tempDir = makeTempDir();
+		const loadModeReplacementExtension: ExtensionFactory = pi => {
+			const registerTransitionTool = (name: string, label: string, loadMode: "essential" | "discoverable"): void => {
+				pi.registerTool({
+					name,
+					label,
+					description: `${label} extension tool.`,
+					parameters: type({}),
+					loadMode,
+					async execute() {
+						return { content: [{ type: "text", text: label }] };
+					},
+				});
+			};
+			registerTransitionTool("late_becomes_discoverable", "Initially Essential", "essential");
+			registerTransitionTool("late_becomes_essential", "Initially Discoverable", "discoverable");
+			pi.on("session_start", async () => {
+				await Promise.resolve();
+				registerTransitionTool("late_becomes_discoverable", "Now Discoverable", "discoverable");
+				registerTransitionTool("late_becomes_essential", "Now Essential", "essential");
+			});
+		};
+
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [loadModeReplacementExtension],
+		});
+
+		try {
+			expect(session.getActiveToolNames()).toContain("late_becomes_discoverable");
+			expect(session.getMountedXdevToolNames()).toContain("late_becomes_essential");
+			const runner = session.extensionRunner;
+			if (!runner) throw new Error("expected extension runner");
+			await runner.emit({ type: "session_start" });
+
+			expect(session.getActiveToolNames()).not.toContain("late_becomes_discoverable");
+			expect(session.getMountedXdevToolNames()).toContain("late_becomes_discoverable");
+			expect(session.getActiveToolNames()).toContain("late_becomes_essential");
+			expect(session.getMountedXdevToolNames()).not.toContain("late_becomes_essential");
+		} finally {
+			await session.dispose();
+		}
+	});
+
 	it("forwards built-in and external xd:// devices to Cursor provider contexts", async () => {
 		const tempDir = makeTempDir();
 		const cursorModel = getBundledModel("cursor", "composer-1.5");

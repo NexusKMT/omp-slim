@@ -690,28 +690,34 @@ export class ExtensionRunner {
 	 * promises are drained before the lifecycle handler that registered them
 	 * completes, keeping the model tool snapshot and system prompt coherent.
 	 */
-	onToolRegistered(listener: (toolName: string) => void | Promise<void>): () => void {
-		const wrapped: ToolRegistrationListener = toolName => {
-			try {
-				const pending = listener(toolName);
-				if (!pending) return;
-				this.#pendingToolRegistrations.add(pending);
-				void pending.then(
-					() => this.#pendingToolRegistrations.delete(pending),
-					() => this.#pendingToolRegistrations.delete(pending),
-				);
-			} catch (error) {
-				const pending = Promise.reject(error);
-				this.#pendingToolRegistrations.add(pending);
-				void pending.catch(() => this.#pendingToolRegistrations.delete(pending));
-			}
-		};
+	onToolRegistered(listener: (tool: RegisteredTool) => void | Promise<void>): () => void {
+		const subscriptions: Array<{ extension: Extension; listener: ToolRegistrationListener }> = [];
 		for (const extension of this.extensions) {
+			const wrapped: ToolRegistrationListener = toolName => {
+				const tool = extension.tools.get(toolName);
+				if (!tool) return;
+				try {
+					const pending = listener(tool);
+					if (!pending) return;
+					this.#pendingToolRegistrations.add(pending);
+					void pending.then(
+						() => this.#pendingToolRegistrations.delete(pending),
+						() => this.#pendingToolRegistrations.delete(pending),
+					);
+				} catch (error) {
+					const pending = Promise.reject(error);
+					this.#pendingToolRegistrations.add(pending);
+					void pending.catch(() => this.#pendingToolRegistrations.delete(pending));
+				}
+			};
 			extension.toolRegistrationListeners ??= new Set();
 			extension.toolRegistrationListeners.add(wrapped);
+			subscriptions.push({ extension, listener: wrapped });
 		}
 		return () => {
-			for (const extension of this.extensions) extension.toolRegistrationListeners?.delete(wrapped);
+			for (const subscription of subscriptions) {
+				subscription.extension.toolRegistrationListeners?.delete(subscription.listener);
+			}
 		};
 	}
 

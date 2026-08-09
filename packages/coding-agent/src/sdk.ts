@@ -2585,7 +2585,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		const nativeToolsByName = new Map<string, Tool>(toolSession.xdev?.tools ?? undefined);
 
 		const registeredTools = restrictToolNames ? [] : extensionRunner.getAllRegisteredTools();
-		const initialRegisteredToolsByName = new Map(registeredTools.map(tool => [tool.definition.name, tool] as const));
+		const initialRegisteredTools = new WeakSet(registeredTools);
 		const sdkCustomTools =
 			restrictToolNames && options.allowRestrictedCustomTools !== true
 				? []
@@ -3441,9 +3441,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// registry and serialize activation so no update can overwrite a sibling.
 		let dynamicToolRegistrationChain = Promise.resolve();
 		const scheduledToolRegistrations = new WeakSet<RegisteredTool>();
-		const scheduleToolRegistration = (toolName: string): Promise<void> => {
-			const registered = extensionRunner.getRegisteredTool(toolName);
-			if (!registered) return dynamicToolRegistrationChain;
+		const scheduleToolRegistration = (registered: RegisteredTool): Promise<void> => {
 			if (scheduledToolRegistrations.has(registered)) return dynamicToolRegistrationChain;
 			scheduledToolRegistrations.add(registered);
 
@@ -3452,11 +3450,18 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			const name = registered.definition.name;
 			const liveTool = new ExtensionToolWrapper(wrapToolWithMetaNotice(wrapped), extensionRunner);
 			const existingTool = toolRegistry.get(name);
+			const isEffectiveRegistrant = extensionRunner.getRegisteredTool(name) === registered;
 			if (existingTool) {
-				// Put the replacement first so same-origin MCP re-registration keeps it; distinct origins still use
-				// the startup path's stable winner, while non-MCP replacements remain last-registration-wins.
+				// Put the replacement first so same-origin MCP re-registration keeps it. Distinct MCP origins still
+				// use the stable winner; ordinary tool collisions retain the extension runner's last-wins precedence.
 				const competingTools = deduplicateMCPToolsByName([liveTool, existingTool]);
-				if (competingTools.length === 1 && competingTools[0] !== liveTool) return dynamicToolRegistrationChain;
+				if (competingTools.length === 1) {
+					if (competingTools[0] !== liveTool) return dynamicToolRegistrationChain;
+				} else if (!isEffectiveRegistrant) {
+					return dynamicToolRegistrationChain;
+				}
+			} else if (!isEffectiveRegistrant) {
+				return dynamicToolRegistrationChain;
 			}
 			toolRegistry.set(name, liveTool);
 			builtInRegistryToolNames.delete(name);
@@ -3475,7 +3480,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					return;
 				}
 				const shouldMount =
-					!alreadyEnabled &&
 					!explicitlyRequested &&
 					toolSession.xdev !== undefined &&
 					builtInRegistryToolNames.has("read") &&
@@ -3483,10 +3487,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					enabled.includes("read") &&
 					enabled.includes("write") &&
 					isMountableUnderXdev(liveTool);
-				await session.setActiveToolPresentation(
-					alreadyEnabled ? enabled : [...enabled, name],
-					shouldMount ? [...mounted, name] : mounted,
-				);
+				const nextMounted = shouldMount
+					? mounted.includes(name)
+						? mounted
+						: [...mounted, name]
+					: mounted.filter(mountedName => mountedName !== name);
+				await session.setActiveToolPresentation(alreadyEnabled ? enabled : [...enabled, name], nextMounted);
 			});
 			dynamicToolRegistrationChain = activation.catch(() => {});
 			return activation;
@@ -3497,8 +3503,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// Close the construction race: a background registration can land after
 		// the initial snapshot but before the live listener above is attached.
 		for (const registered of extensionRunner.getAllRegisteredTools()) {
-			if (initialRegisteredToolsByName.get(registered.definition.name) !== registered) {
-				await scheduleToolRegistration(registered.definition.name);
+			if (!initialRegisteredTools.has(registered)) {
+				await scheduleToolRegistration(registered);
 			}
 		}
 		session.yieldQueue.register<McpNotificationEntry>("mcp-notification", {
