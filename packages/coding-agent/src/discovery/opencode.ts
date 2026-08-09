@@ -75,6 +75,16 @@ async function loadJsonConfig(
 	return parsed;
 }
 
+/**
+ * OpenCode config sources in ascending effective precedence (lowest first):
+ * user `opencode.json` → user `opencode.jsonc` → project `opencode.json` →
+ * project `opencode.jsonc`. This matches how OpenCode merges configs — project
+ * overrides user, and within a scope `opencode.jsonc` overrides `opencode.json`.
+ *
+ * Settings consumers deep-merge in item order (last wins), so this order is
+ * used as-is. MCP discovery dedupes by name first-wins, so `loadMCPServers`
+ * iterates these in reverse (highest precedence first).
+ */
 function getConfigSources(ctx: LoadContext): OpenCodeConfigSource[] {
 	const sources: OpenCodeConfigSource[] = [];
 	for (const filename of CONFIG_FILENAMES) {
@@ -172,7 +182,10 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 	const items: MCPServer[] = [];
 	const warnings: string[] = [];
 
-	for (const source of getConfigSources(ctx)) {
+	// Emit highest precedence first so the name-keyed first-wins dedupe in
+	// mcpCapability keeps the server OpenCode would actually use (project over
+	// user, opencode.jsonc over opencode.json).
+	for (const source of getConfigSources(ctx).reverse()) {
 		const config = await loadJsonConfig(source.path, configPath => {
 			logger.warn("Failed to parse OpenCode config", { path: configPath });
 		});

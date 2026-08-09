@@ -88,6 +88,39 @@ describe("OpenCode MCP discovery", () => {
 		);
 	});
 
+	test("resolves same-named MCP servers by OpenCode precedence", async () => {
+		const projectDir = path.join(tempDir, "project");
+		const userConfigDir = path.join(tempDir, ".config", "opencode");
+		await fs.mkdir(projectDir);
+		await fs.mkdir(userConfigDir, { recursive: true });
+
+		// Lower precedence: user scope enables "shared" with the user command.
+		await fs.writeFile(
+			path.join(userConfigDir, "opencode.json"),
+			JSON.stringify({
+				mcp: { shared: { type: "local", command: ["user-server"], enabled: true } },
+			}),
+		);
+		// Higher precedence: project opencode.json disables it with a different command.
+		await fs.writeFile(
+			path.join(projectDir, "opencode.json"),
+			JSON.stringify({
+				mcp: { shared: { type: "local", command: ["project-json-server"], enabled: false } },
+			}),
+		);
+		// Highest precedence within the project scope: opencode.jsonc wins outright.
+		await fs.writeFile(
+			path.join(projectDir, "opencode.jsonc"),
+			`{ "mcp": { "shared": { "type": "local", "command": ["project-jsonc-server"], "enabled": false } } }`,
+		);
+
+		const servers = await loadOpenCodeMcpConfig(projectDir);
+		const shared = servers.filter(server => server.name === "shared");
+
+		expect(shared).toHaveLength(1);
+		expect(shared[0]).toMatchObject({ command: "project-jsonc-server", enabled: false });
+	});
+
 	test("parses comments in opencode.json", async () => {
 		await fs.writeFile(
 			path.join(tempDir, "opencode.json"),
