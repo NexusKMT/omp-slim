@@ -28,17 +28,7 @@ import {
 } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
 import { FALLBACK_DIALECT, preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import type { Component } from "@oh-my-pi/pi-tui";
-import {
-	$env,
-	$flag,
-	getAgentDir,
-	getProjectDir,
-	logger,
-	postmortem,
-	prompt,
-	Snowflake,
-	untilAborted,
-} from "@oh-my-pi/pi-utils";
+import { $env, $flag, getAgentDir, getProjectDir, logger, postmortem, prompt, Snowflake } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import {
 	discoverAdvisorConfigs,
@@ -3451,27 +3441,26 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// but Pi-compatible extensions may discover them asynchronously from a
 		// session_start handler. Install those late registrations into the live
 		// registry and serialize activation so no update can overwrite a sibling.
-		let dynamicToolRegistrationChain = Promise.resolve();
-		const scheduledToolRegistrations = new WeakSet<RegisteredTool>();
+		const scheduledToolRegistrations = new WeakMap<RegisteredTool, Promise<void>>();
 		const scheduleToolRegistration = (registered: RegisteredTool, signal?: AbortSignal): Promise<void> => {
-			if (scheduledToolRegistrations.has(registered)) return dynamicToolRegistrationChain;
-			scheduledToolRegistrations.add(registered);
+			const scheduled = scheduledToolRegistrations.get(registered);
+			if (scheduled) return scheduled;
 			const activationSignal = signal ?? AbortSignal.timeout(EXTENSION_HANDLER_TIMEOUT_MS);
 
 			const [wrapped] = wrapRegisteredTools([registered], extensionRunner);
-			if (!wrapped) return dynamicToolRegistrationChain;
+			if (!wrapped) return Promise.resolve();
 			const name = registered.definition.name;
 			const liveTool = new ExtensionToolWrapper(wrapToolWithMetaNotice(wrapped), extensionRunner);
 			// Capture ordinary extension precedence while the listener observes this exact registration.
 			// A later same-name registration may replace the extension map before serialized activation runs.
 			const isEffectiveRegistrant = extensionRunner.getRegisteredTool(name) === registered;
-			const serializedActivation = dynamicToolRegistrationChain.then(async () => {
+			const activation = session.runToolRegistryMutation(async () => {
 				activationSignal.throwIfAborted();
 				const existingTool = toolRegistry.get(name);
 				if (existingTool) {
-					// SDK custom tools are installed after extension tools during startup, so they
-					// retain the same precedence when an extension registers the name later.
-					if (sdkCustomToolNames.has(name)) return;
+					// RPC host tools and SDK custom tools retain their startup precedence when an
+					// extension registers the same name later.
+					if (session.hasRpcHostTool(name) || sdkCustomToolNames.has(name)) return;
 					// Put the replacement first so same-origin MCP re-registration keeps it. Distinct MCP origins still
 					// use the stable winner; ordinary tool collisions retain the extension runner's last-wins precedence.
 					const competingTools = deduplicateMCPToolsByName([liveTool, existingTool]);
@@ -3535,9 +3524,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					session.setToolBuiltIn(name, wasBuiltIn);
 					throw error;
 				}
-			});
-			const activation = untilAborted(activationSignal, serializedActivation);
-			dynamicToolRegistrationChain = activation.catch(() => {});
+			}, activationSignal);
+			scheduledToolRegistrations.set(registered, activation);
 			return activation;
 		};
 		if (!restrictToolNames) {

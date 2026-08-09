@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { Agent, AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { isRecord, logger, prompt, stringProperty, untilAborted } from "@oh-my-pi/pi-utils";
@@ -216,7 +217,8 @@ export class SessionTools {
 	 * prompt carries no catalog (no mounts, or a custom prompt that omits the section).
 	 */
 	#basePromptXdevNames: ReadonlySet<string> = new Set();
-	#mcpRefreshTail: Promise<void> = Promise.resolve();
+	#toolRegistryMutationScope = new AsyncLocalStorage<boolean>();
+	#toolRegistryMutationTail: Promise<void> = Promise.resolve();
 	#promptModelKey: string | undefined;
 	#rebuildSystemPrompt: SessionToolsOptions["rebuildSystemPrompt"];
 	#getLocalCalendarDate: () => string;
@@ -369,6 +371,26 @@ export class SessionTools {
 		} else {
 			this.#builtInToolNames.delete(name);
 		}
+	}
+
+	/** Whether the live registry entry is owned by the RPC host. */
+	hasRpcHostTool(name: string): boolean {
+		return this.#rpcHostToolNames.has(name);
+	}
+
+	/** Serializes every registry and presentation mutation for this session. */
+	runToolRegistryMutation<T>(mutation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+		if (this.#toolRegistryMutationScope.getStore()) return untilAborted(signal, mutation);
+		const serialized = this.#toolRegistryMutationTail.then(() => {
+			signal?.throwIfAborted();
+			return this.#toolRegistryMutationScope.run(true, mutation);
+		});
+		const operation = untilAborted(signal, serialized);
+		this.#toolRegistryMutationTail = operation.then(
+			() => undefined,
+			() => undefined,
+		);
+		return operation;
 	}
 
 	/** Names of every registered tool. */
@@ -642,7 +664,14 @@ export class SessionTools {
 	}
 
 	/** Applies an enabled tool set and reconciles its `xd://` partition. */
-	async applyActiveToolsByName(toolNames: string[], forcePromptRefresh = false, signal?: AbortSignal): Promise<void> {
+	applyActiveToolsByName(toolNames: string[], forcePromptRefresh = false, signal?: AbortSignal): Promise<void> {
+		return this.runToolRegistryMutation(
+			() => this.#applyActiveToolsByName(toolNames, forcePromptRefresh, signal),
+			signal,
+		);
+	}
+
+	async #applyActiveToolsByName(toolNames: string[], forcePromptRefresh = false, signal?: AbortSignal): Promise<void> {
 		signal?.throwIfAborted();
 		toolNames = normalizeToolNames(toolNames);
 		let builtInWriteAvailable = this.#builtInToolNames.has("write");
@@ -930,15 +959,17 @@ export class SessionTools {
 	}
 
 	/** Selects enabled tools, ignoring names absent from the registry. */
-	async setActiveToolsByName(toolNames: string[]): Promise<void> {
-		const normalized = normalizeToolNames(toolNames);
-		// Transport-write eligibility keys off the *current* active set: an ordinary
-		// selection change should not demote `write` unless it is already active.
-		await this.#applyToolPresentation(
-			normalized,
-			this.#xdev?.mountedNames ?? new Set(),
-			this.getActiveToolNames().includes("write"),
-		);
+	setActiveToolsByName(toolNames: string[]): Promise<void> {
+		return this.runToolRegistryMutation(async () => {
+			const normalized = normalizeToolNames(toolNames);
+			// Transport-write eligibility keys off the *current* active set: an ordinary
+			// selection change should not demote `write` unless it is already active.
+			await this.#applyToolPresentation(
+				normalized,
+				this.#xdev?.mountedNames ?? new Set(),
+				this.getActiveToolNames().includes("write"),
+			);
+		});
 	}
 
 	/**
@@ -958,22 +989,24 @@ export class SessionTools {
 	 * Delegates the actual apply through {@link applyActiveToolsByName} and restores
 	 * the prior runtime selection if that apply throws.
 	 */
-	async setActiveToolPresentation(
+	setActiveToolPresentation(
 		toolNames: string[],
 		mountedToolNames: string[],
 		forcePromptRefresh = false,
 		signal?: AbortSignal,
 	): Promise<void> {
-		const normalized = normalizeToolNames(toolNames);
-		// Restoration targets a snapshot, so write eligibility comes from the
-		// *target* set rather than whatever happens to be active mid-rollback.
-		await this.#applyToolPresentation(
-			normalized,
-			new Set(normalizeToolNames(mountedToolNames)),
-			normalized.includes("write"),
-			forcePromptRefresh,
-			signal,
-		);
+		return this.runToolRegistryMutation(async () => {
+			const normalized = normalizeToolNames(toolNames);
+			// Restoration targets a snapshot, so write eligibility comes from the
+			// *target* set rather than whatever happens to be active mid-rollback.
+			await this.#applyToolPresentation(
+				normalized,
+				new Set(normalizeToolNames(mountedToolNames)),
+				normalized.includes("write"),
+				forcePromptRefresh,
+				signal,
+			);
+		}, signal);
 	}
 
 	/**
@@ -999,7 +1032,7 @@ export class SessionTools {
 			normalized.filter(name => !mounted.has(name) && !(name === "write" && transportWriteActive)),
 		);
 		try {
-			await this.applyActiveToolsByName(normalized, forcePromptRefresh, signal);
+			await this.#applyActiveToolsByName(normalized, forcePromptRefresh, signal);
 		} catch (error) {
 			this.#runtimeSelectedToolNames = previousRuntimeSelectedToolNames;
 			throw error;
@@ -1324,11 +1357,9 @@ export class SessionTools {
 	 */
 	refreshMCPTools(mcpTools: CustomTool[]): Promise<void> {
 		const snapshot = [...mcpTools];
-		const refresh = this.#mcpRefreshTail.then(() =>
-			this.#host.isDisposed() ? undefined : this.#applyMCPToolRefresh(snapshot),
+		return this.runToolRegistryMutation(() =>
+			this.#host.isDisposed() ? Promise.resolve() : this.#applyMCPToolRefresh(snapshot),
 		);
-		this.#mcpRefreshTail = refresh.catch(() => {});
-		return refresh;
 	}
 
 	async #applyMCPToolRefresh(mcpTools: CustomTool[]): Promise<void> {
@@ -1378,7 +1409,7 @@ export class SessionTools {
 		// presentation pins and write-transport activation/removal.
 		const nextActive = [...new Set([...this.#getActiveNonMCPToolNames(), ...uniqueMcpTools.map(tool => tool.name)])];
 		try {
-			await this.applyActiveToolsByName(nextActive);
+			await this.#applyActiveToolsByName(nextActive);
 			if (this.#host.isDisposed()) restorePreviousMcpTools();
 		} catch (error) {
 			restorePreviousMcpTools();
@@ -1387,7 +1418,12 @@ export class SessionTools {
 	}
 
 	/** Replaces RPC host-owned tools and refreshes the active set before the next model call. */
-	async refreshRpcHostTools(rpcTools: AgentTool[]): Promise<void> {
+	refreshRpcHostTools(rpcTools: AgentTool[]): Promise<void> {
+		const snapshot = [...rpcTools];
+		return this.runToolRegistryMutation(() => this.#applyRpcHostToolRefresh(snapshot));
+	}
+
+	async #applyRpcHostToolRefresh(rpcTools: AgentTool[]): Promise<void> {
 		const nextToolNames = rpcTools.map(tool => tool.name);
 		const uniqueToolNames = new Set(nextToolNames);
 		if (uniqueToolNames.size !== nextToolNames.length) {
@@ -1431,7 +1467,7 @@ export class SessionTools {
 			.filter(tool => !tool.hidden && !previousRpcHostToolNames.has(tool.name))
 			.map(tool => tool.name);
 		try {
-			await this.applyActiveToolsByName(
+			await this.#applyActiveToolsByName(
 				Array.from(new Set([...activeNonRpcToolNames, ...preservedRpcToolNames, ...autoActivatedRpcToolNames])),
 			);
 		} catch (error) {

@@ -4301,6 +4301,16 @@ export class AgentSession {
 		this.#tools.setToolBuiltIn(name, builtIn);
 	}
 
+	/** Whether the live registry entry is owned by the RPC host. */
+	hasRpcHostTool(name: string): boolean {
+		return this.#tools.hasRpcHostTool(name);
+	}
+
+	/** Runs a registry/presentation mutation in this session's shared queue. */
+	runToolRegistryMutation<T>(mutation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+		return this.#tools.runToolRegistryMutation(mutation, signal);
+	}
+
 	/** Names of every registered tool. */
 	getAllToolNames(): string[] {
 		return this.#tools.getAllToolNames();

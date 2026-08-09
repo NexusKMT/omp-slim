@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
-import type { StreamFn } from "@oh-my-pi/pi-agent-core";
+import type { AgentTool, StreamFn } from "@oh-my-pi/pi-agent-core";
 import type { Model, ToolResultMessage } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -533,6 +533,109 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			await runner.emit({ type: "session_start" });
 			expect(session.getToolByName(sdkCustomTool.name)?.label).toBe(sdkCustomTool.label);
 		} finally {
+			await session.dispose();
+		}
+	});
+
+	it("preserves RPC host-tool precedence when an extension registers the same name later", async () => {
+		const tempDir = makeTempDir();
+		const rpcHostTool = {
+			name: "rpc_host_collision",
+			label: "RPC Host Tool",
+			description: "Host-owned RPC tool.",
+			parameters: type({}),
+			async execute() {
+				return { content: [{ type: "text", text: "rpc host" }] };
+			},
+		} satisfies AgentTool;
+		const lateCollisionExtension: ExtensionFactory = pi => {
+			pi.on("session_start", async () => {
+				await Promise.resolve();
+				pi.registerTool({
+					name: rpcHostTool.name,
+					label: "Late Extension Collision",
+					description: "Extension tool that must not replace the RPC host tool.",
+					parameters: type({}),
+					async execute() {
+						return { content: [{ type: "text", text: "late extension" }] };
+					},
+				});
+			});
+		};
+
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [lateCollisionExtension],
+		});
+
+		try {
+			await session.refreshRpcHostTools([rpcHostTool]);
+			const runner = session.extensionRunner;
+			if (!runner) throw new Error("expected extension runner");
+			await runner.emit({ type: "session_start" });
+			expect(session.getToolByName(rpcHostTool.name)?.label).toBe(rpcHostTool.label);
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	it("serializes late extension activation with MCP refreshes", async () => {
+		const tempDir = makeTempDir();
+		const activationEntered = Promise.withResolvers<void>();
+		const releaseActivation = Promise.withResolvers<void>();
+		const lateRegistrationExtension: ExtensionFactory = pi => {
+			pi.on("session_start", async () => {
+				await Promise.resolve();
+				pi.registerTool({
+					name: "serialized_lifecycle_tool",
+					label: "Serialized Lifecycle Tool",
+					description: "Lifecycle tool activated before an MCP refresh.",
+					parameters: type({}),
+					async execute() {
+						return { content: [{ type: "text", text: "lifecycle" }] };
+					},
+				});
+			});
+		};
+		const mcpTool = {
+			name: "mcp__serialized_refresh_lookup",
+			label: "serialized/refresh lookup",
+			description: "MCP tool refreshed during lifecycle activation.",
+			parameters: type({}),
+			mcpServerName: "serialized",
+			mcpToolName: "refresh_lookup",
+			async execute() {
+				return { content: [{ type: "text", text: "mcp" }] };
+			},
+		} satisfies CustomTool;
+
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [lateRegistrationExtension],
+		});
+		const originalSetActiveToolPresentation = session.setActiveToolPresentation.bind(session);
+		vi.spyOn(session, "setActiveToolPresentation").mockImplementation(async (...args) => {
+			activationEntered.resolve();
+			await releaseActivation.promise;
+			return originalSetActiveToolPresentation(...args);
+		});
+
+		try {
+			const runner = session.extensionRunner;
+			if (!runner) throw new Error("expected extension runner");
+			const emission = runner.emit({ type: "session_start" });
+			await activationEntered.promise;
+			const mcpRefresh = session.refreshMCPTools([mcpTool]);
+			await Promise.resolve();
+			expect(session.getToolByName(mcpTool.name)).toBeUndefined();
+
+			releaseActivation.resolve();
+			await Promise.all([emission, mcpRefresh]);
+			expect(session.getEnabledToolNames()).toEqual(
+				expect.arrayContaining(["serialized_lifecycle_tool", mcpTool.name]),
+			);
+		} finally {
+			releaseActivation.resolve();
 			await session.dispose();
 		}
 	});
