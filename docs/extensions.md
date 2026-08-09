@@ -396,10 +396,23 @@ Handlers run in registration order; the first one to resolve `true` counts as th
 bytes being durably on disk, and the native tool continues exactly as if its own
 write had succeeded — including recording its file snapshot under the real
 destination path, so a later hashline `edit` on that path keeps working. A
-throwing handler is logged and skipped in favor of the next one; if every handler
+throwing handler is logged and skipped in favor of the next one — per handler, so a
+later handler registered by the same extension still runs; if every handler
 returns `false` (or none are registered), the original error is rethrown
 unchanged. Intended for a host that embeds the agent inside a sandbox denying
 direct filesystem writes but exposing a privileged write channel.
+
+`req.dst` is the **symlink-resolved** destination, not the path the tool was given.
+The kernel follows every component above the last, so `ws/link/file` under a
+`ws/link -> /elsewhere` link lands outside `ws` while still looking in-workspace, and
+a prefix allowlist in your handler would pass on that innocent-looking path. For a
+write the final component is followed too, so it is resolved as well; for a delete it
+is not, because `unlink` removes a link rather than what it points at (so a delete
+`req.dst` may itself name a link). Treat `req.dst` as authoritative and do not
+re-derive the target from anything else. When the real destination cannot be
+established — a dangling final link, or an ancestor this process may not resolve — no
+handler is consulted at all and the original error is rethrown, because there is no
+destination to hand a privileged writer.
 
 Two details matter when the destination is outside what the host allows:
 
@@ -455,8 +468,10 @@ succeed, and nothing happens at all when no handler is registered. Two differenc
   the target's own metadata sits behind the same boundary that denied the unlink —
   the common sandbox case — that check cannot be resolved, and `req.dst` may then be a
   directory. `req.confirmedFile` is `true` only when the seam positively established
-  the target is not one. A privileged helper that recursively removes `req.dst` would
-  delete a whole tree on behalf of a tool that only ever removes one file.
+  the target is a plain regular file; a symlink reports `false` too, since unlinking a
+  link is fine but resolving it acts on something else entirely. A privileged helper
+  that recursively removes `req.dst`, or realpaths it first, would act far outside
+  what a tool that only ever removes one file asked for.
 
 **Registering for deletes is deliberately separate from registering for writes.** A
 write handler brokers `req.content` to `req.dst`; if a delete request reached it, the
@@ -470,9 +485,16 @@ Two lifecycle constraints, which apply to both seams:
   an extension that registered nothing by then is skipped entirely, so a first
   registration made later never takes effect.
 - **The registries are process-wide.** A process can host several sessions (a subagent
-  gets its own runner), and `req` carries no session identity, so a handler may be
-  consulted for a denied write or delete from any session in the process — not only
-  the one whose extension registered it. Handlers are removed on `session_shutdown`.
+  gets its own runner), so a handler may be consulted for a denied write or delete
+  from any session in the process — not only the one whose extension registered it.
+  This is deliberate: a subagent spawned with restricted tools loads no extensions of
+  its own, and a host that registers once in its top-level session still expects its
+  subagents' writes brokered. `req.sessionId` names the session that issued the
+  mutation (`undefined` when it did not come from a tool call), and
+  `ctx.sessionManager.getSessionId()` names the handler's own — compare them to make
+  the decision per session. It matters most before prompting: `ctx.ui` belongs to the
+  handler's session, not necessarily to the one being asked about. Handlers are
+  removed on `session_shutdown`.
 
 With nothing registered none of this engages: the primitive runs exactly as it did
 before and performs no extra syscalls.

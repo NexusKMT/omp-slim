@@ -88,9 +88,13 @@ describe("registerFileWriteFallback end-to-end (real extension, real session)", 
 	let registryAuthDir: string;
 
 	const makeTempDir = (): string => {
-		const tempDir = path.join(os.tmpdir(), `pi-file-write-fallback-e2e-${Snowflake.next()}`);
+		const created = path.join(os.tmpdir(), `pi-file-write-fallback-e2e-${Snowflake.next()}`);
+		fs.mkdirSync(created, { recursive: true });
+		// The seam brokers a symlink-RESOLVED path, and `os.tmpdir()` sits under `/var`
+		// — itself a link — on macOS. Canonicalizing the fixture up front keeps a
+		// handler's `req.dst` comparable to the path a test built.
+		const tempDir = fs.realpathSync.native(created);
 		tempDirs.push(tempDir);
-		fs.mkdirSync(tempDir, { recursive: true });
 		return tempDir;
 	};
 
@@ -163,9 +167,11 @@ describe("registerFileWriteFallback end-to-end (real extension, real session)", 
 			lock(lockedDir, 0o500); // no write bit: creating a file here needs dir-write
 
 			const received: FileWriteFallbackRequest[] = [];
+			const ownSessionIds: string[] = [];
 			const factory: ExtensionFactory = pi => {
-				pi.registerFileWriteFallback(async req => {
+				pi.registerFileWriteFallback(async (req, ctx) => {
 					received.push(req);
+					ownSessionIds.push(ctx.sessionManager.getSessionId());
 					// Stand-in for an out-of-process privileged broker: this test's own
 					// user cannot write into `lockedDir`, so relax the permission bit
 					// just long enough to place the exact bytes the tool intended, then
@@ -199,6 +205,12 @@ describe("registerFileWriteFallback end-to-end (real extension, real session)", 
 				expect(received).toHaveLength(1);
 				expect(received[0]?.dst).toBe(targetPath);
 				expect(received[0]?.content).toBe(content);
+				// (ii-b) and it can tell WHOSE write it was: the registry is process-wide, so
+				// the request names the issuing session and `ctx` names the handler's own.
+				// Both defined and equal here, which only holds if the tool-execution scope
+				// that carries the session id is actually entered.
+				expect(ownSessionIds[0]).toMatch(/./);
+				expect(received[0]?.sessionId).toBe(ownSessionIds[0]);
 				expect(fs.readFileSync(targetPath, "utf8")).toBe(content);
 
 				const headerLine = resultText(writeResult).split("\n")[0] ?? "";
@@ -407,6 +419,57 @@ describe("registerFileWriteFallback end-to-end (real extension, real session)", 
 			expect(deleted).toEqual([targetPath]);
 			expect(writeCalls).toEqual([]);
 			expect(fs.existsSync(targetPath)).toBe(false);
+		} finally {
+			fs.chmodSync(lockedDir, 0o700);
+			await session.dispose();
+		}
+	});
+
+	itDenied("write: a throwing handler does not skip later handlers from the SAME extension", async () => {
+		// The registry sees ONE trampoline per extension, so per-handler isolation has to
+		// live inside that trampoline. Without it, a throw from the first handler escapes
+		// to the registry, which advances to the next EXTENSION — so every later handler
+		// this extension registered is skipped, breaking both the documented "a throwing
+		// handler is skipped" rule and registration order for a backup-handler setup.
+		const tempDir = makeTempDir();
+		const lockedDir = path.join(tempDir, "locked-order");
+		fs.mkdirSync(lockedDir, { recursive: true });
+		lock(lockedDir, 0o500);
+
+		const order: string[] = [];
+		const factory: ExtensionFactory = pi => {
+			pi.registerFileWriteFallback(async () => {
+				order.push("throws");
+				throw new Error("first handler blew up");
+			});
+			pi.registerFileWriteFallback(async () => {
+				order.push("declines");
+				return false;
+			});
+			pi.registerFileWriteFallback(async req => {
+				order.push("brokers");
+				fs.chmodSync(lockedDir, 0o700);
+				try {
+					fs.writeFileSync(req.dst, req.content);
+				} finally {
+					fs.chmodSync(lockedDir, 0o500);
+				}
+				return true;
+			});
+		};
+
+		const { session } = await createAgentSession(baseOptions(tempDir, [factory]));
+		initializeRunnerForTest(session.extensionRunner);
+
+		try {
+			const targetPath = path.join(lockedDir, "ordered.txt");
+			const content = "export const value = 3;\n";
+			const writeTool = session.getToolByName("write") as AgentTool | undefined;
+			const writeResult = await writeTool!.execute("call-write-order", { path: targetPath, content });
+
+			expect(writeResult.isError).not.toBe(true);
+			expect(order).toEqual(["throws", "declines", "brokers"]);
+			expect(fs.readFileSync(targetPath, "utf8")).toBe(content);
 		} finally {
 			fs.chmodSync(lockedDir, 0o700);
 			await session.dispose();

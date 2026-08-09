@@ -8,6 +8,7 @@ import {
 	addFileWriteFallback,
 	deleteFileWithFallback,
 	isPermissionDeniedError,
+	withFileMutationSession,
 	writeFileWithFallback,
 } from "@oh-my-pi/pi-coding-agent/tools/file-write-fallback";
 
@@ -77,6 +78,29 @@ describe("writeFileWithFallback", () => {
 		await writeFileWithFallback("/denied/path.txt", "payload", denyingFile(fsError("EACCES")) as never);
 
 		expect(seen).toEqual([{ dst: "/denied/path.txt", content: "payload" }]);
+	});
+
+	it("names the session that issued the write, and reports none outside a tool call", async () => {
+		// The registry is process-wide, so a handler can be asked about a write from a
+		// session other than its own. Without this it cannot tell the difference, which
+		// is what makes a per-session decision (or a prompt through the right session's
+		// UI) impossible.
+		const seen: Array<string | undefined> = [];
+		disposers.push(
+			addFileWriteFallback(async req => {
+				seen.push(req.sessionId);
+				return true;
+			}),
+		);
+
+		await withFileMutationSession("session-a", () =>
+			writeFileWithFallback("/denied/path.txt", "payload", denyingFile(fsError("EACCES")) as never),
+		);
+		// No scope: an external `applyPatch` caller is not attributable to a session,
+		// and inventing one would be worse than saying so.
+		await writeFileWithFallback("/denied/path.txt", "payload", denyingFile(fsError("EACCES")) as never);
+
+		expect(seen).toEqual(["session-a", undefined]);
 	});
 
 	it("rethrows a non-permission error without consulting any handler", async () => {
@@ -221,7 +245,11 @@ describe("writeFileWithFallback", () => {
 		let root = "";
 
 		beforeEach(async () => {
-			root = await fs.mkdtemp(path.join(os.tmpdir(), "fallback-kernel-"));
+			// Canonical from the start: the seam hands handlers a symlink-resolved path,
+			// and `os.tmpdir()` is under `/var` — itself a link — on macOS, so a lexical
+			// fixture path would differ from the brokered one for a reason unrelated to
+			// what these tests are about.
+			root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "fallback-kernel-")));
 		});
 		afterEach(async () => {
 			// Restore the mode first: a 0o500 directory cannot be emptied.
@@ -301,13 +329,13 @@ describe("writeFileWithFallback", () => {
 			expect(called).toBe(false);
 		});
 
-		it("refuses to broker a denied write reached through a symlink", async () => {
-			// The escape this blocks: the agent creates a link inside a directory the
+		it("brokers the RESOLVED target for a write through a symlink", async () => {
+			// The escape this closes: the agent creates a link inside a directory the
 			// sandbox permits, pointing at a target it does not. The in-process write
-			// follows the link and the kernel denies the TARGET, so the failure looks
-			// like any other denial — but a privileged helper handed `dst` would follow
-			// the same link and land the bytes outside the sandbox. A helper-side prefix
-			// allowlist cannot catch it, because the link is inside the allowed root.
+			// follows the link, so the kernel denied the TARGET — but a handler given
+			// the LINK would pass its own prefix allowlist, because the link sits inside
+			// the allowed root while its target does not. The handler is told where the
+			// bytes would really land, so its allowlist judges the real destination.
 			const secretDir = path.join(root, "off-limits");
 			await fs.mkdir(secretDir);
 			const secret = path.join(secretDir, "authorized_keys");
@@ -318,6 +346,95 @@ describe("writeFileWithFallback", () => {
 			const link = path.join(root, "innocent-link");
 			await fs.symlink(secret, link);
 
+			const seen: string[] = [];
+			disposers.push(
+				addFileWriteFallback(async req => {
+					seen.push(req.dst);
+					// Declining stands in for the allowlist refusal a real helper makes.
+					return false;
+				}),
+			);
+
+			try {
+				await expect(writeFileWithFallback(link, "pwned\n")).rejects.toMatchObject({
+					code: expect.stringMatching(/^(EACCES|EPERM)$/),
+				});
+				expect(seen).toEqual([secret]);
+				expect(await Bun.file(secret).text()).toBe("original\n");
+			} finally {
+				await fs.chmod(secretDir, 0o700);
+				await fs.chmod(secret, 0o600);
+			}
+		});
+
+		it("resolves a symlinked ANCESTOR, not just a link at the last component", async () => {
+			// `lstat(dst)` alone judges only the final component, so `ws/link/file` under
+			// a `ws/link -> /outside` link is a lexically innocent path whose bytes land
+			// outside. Every component above the last is followed by the kernel, so the
+			// handler has to be told the resolved path for this shape too.
+			const outside = path.join(root, "off-limits");
+			await fs.mkdir(outside);
+			const victim = path.join(outside, "secret.txt");
+			await Bun.write(victim, "original\n");
+			await fs.chmod(victim, 0o400);
+			await fs.chmod(outside, 0o500);
+
+			const linkDir = path.join(root, "innocent-dir");
+			await fs.symlink(outside, linkDir);
+
+			const seen: string[] = [];
+			disposers.push(
+				addFileWriteFallback(async req => {
+					seen.push(req.dst);
+					return false;
+				}),
+			);
+
+			try {
+				await expect(writeFileWithFallback(path.join(linkDir, "secret.txt"), "pwned\n")).rejects.toMatchObject({
+					code: expect.stringMatching(/^(EACCES|EPERM)$/),
+				});
+				expect(seen).toEqual([victim]);
+				expect(await Bun.file(victim).text()).toBe("original\n");
+			} finally {
+				await fs.chmod(outside, 0o700);
+				await fs.chmod(victim, 0o600);
+			}
+		});
+
+		it("refuses to broker a write through a dangling symlink", async () => {
+			// `realpath` cannot name where a dangling link points, and the write follows
+			// it, so there is no destination to hand a privileged writer. Refusing is the
+			// only honest answer, and it is the one `confineToWorkspace` already gives.
+			const dir = path.join(root, "locked");
+			await fs.mkdir(dir);
+			const dangling = path.join(dir, "dangling");
+			await fs.symlink(path.join(dir, "nowhere"), dangling);
+			await fs.chmod(dir, 0o500);
+
+			let called = false;
+			disposers.push(
+				addFileWriteFallback(async () => {
+					called = true;
+					return true;
+				}),
+			);
+
+			await expect(writeFileWithFallback(dangling, "payload")).rejects.toMatchObject({
+				code: expect.stringMatching(/^(EACCES|EPERM)$/),
+			});
+			expect(called).toBe(false);
+		});
+
+		it("refuses to broker a write whose own metadata is behind the boundary", async () => {
+			// A sandbox that denies the write often hides the target's metadata too, so
+			// the final component cannot be shown to be a plain name rather than a link —
+			// and `open` follows a link there. The delete seam keeps working in this shape
+			// because `unlink` never follows the last component; a write cannot.
+			const opaque = path.join(root, "opaque");
+			await fs.mkdir(opaque);
+			await fs.chmod(opaque, 0o000);
+
 			let called = false;
 			disposers.push(
 				addFileWriteFallback(async () => {
@@ -327,14 +444,12 @@ describe("writeFileWithFallback", () => {
 			);
 
 			try {
-				await expect(writeFileWithFallback(link, "pwned\n")).rejects.toMatchObject({
+				await expect(writeFileWithFallback(path.join(opaque, "new.txt"), "payload")).rejects.toMatchObject({
 					code: expect.stringMatching(/^(EACCES|EPERM)$/),
 				});
 				expect(called).toBe(false);
-				expect(await Bun.file(secret).text()).toBe("original\n");
 			} finally {
-				await fs.chmod(secretDir, 0o700);
-				await fs.chmod(secret, 0o600);
+				await fs.chmod(opaque, 0o700);
 			}
 		});
 	});
@@ -346,7 +461,7 @@ describe("writeFileWithFallback", () => {
 		let locked = "";
 
 		beforeEach(async () => {
-			root = await fs.mkdtemp(path.join(os.tmpdir(), "fallback-patch-"));
+			root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "fallback-patch-")));
 			locked = path.join(root, "locked");
 			await fs.mkdir(locked);
 			await fs.chmod(locked, 0o500);
@@ -423,7 +538,8 @@ describe("deleteFileWithFallback", () => {
 		let locked = "";
 
 		beforeEach(async () => {
-			root = await fs.mkdtemp(path.join(os.tmpdir(), "fallback-del-"));
+			// Canonical from the start; see the write-side note above.
+			root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "fallback-del-")));
 			locked = path.join(root, "locked");
 			await fs.mkdir(locked);
 		});
@@ -440,19 +556,21 @@ describe("deleteFileWithFallback", () => {
 			return target;
 		}
 
-		it("diverts a real denied unlink to a registered handler", async () => {
+		it("diverts a real denied unlink to a registered handler, naming its session", async () => {
 			const target = await lockedFile();
-			const seen: Array<{ dst: string; code: unknown }> = [];
+			const seen: Array<{ dst: string; code: unknown; sessionId: string | undefined }> = [];
 			disposers.push(
 				addFileDeleteFallback(async req => {
-					seen.push({ dst: req.dst, code: (req.cause as NodeJS.ErrnoException).code });
+					seen.push({ dst: req.dst, code: (req.cause as NodeJS.ErrnoException).code, sessionId: req.sessionId });
 					return true;
 				}),
 			);
 
-			await deleteFileWithFallback(target);
+			await withFileMutationSession("session-del", () => deleteFileWithFallback(target));
 
-			expect(seen).toEqual([{ dst: target, code: expect.stringMatching(/^(EACCES|EPERM)$/) }]);
+			expect(seen).toEqual([
+				{ dst: target, code: expect.stringMatching(/^(EACCES|EPERM)$/), sessionId: "session-del" },
+			]);
 		});
 
 		it("rethrows the ORIGINAL error when the handler declines", async () => {
@@ -537,11 +655,45 @@ describe("deleteFileWithFallback", () => {
 			expect(called).toBe(false);
 		});
 
-		it("reports confirmedFile false for a symlink, so a handler cannot safely resolve it", async () => {
-			// Unlinking a symlink is a legitimate file removal, so this still diverts. But
-			// a handler that realpaths `dst` for auditing, or removes it recursively,
-			// would act on the link's TARGET — a directory tree, here. `confirmedFile`
-			// must therefore be false even though `lstat` succeeded.
+		it("resolves a symlinked ANCESTOR before brokering a delete", async () => {
+			// `unlink` follows every component above the last, so a link in the path
+			// removes a file outside the allowed root while the lexical path still looks
+			// contained. The handler must be told which file actually disappears.
+			const outside = path.join(root, "off-limits");
+			await fs.mkdir(outside);
+			const victim = path.join(outside, "keep.txt");
+			await Bun.write(victim, "keep me");
+			await fs.chmod(outside, 0o500);
+
+			const linkDir = path.join(root, "innocent-dir");
+			await fs.symlink(outside, linkDir);
+
+			const seen: Array<{ dst: string; confirmedFile: boolean }> = [];
+			disposers.push(
+				addFileDeleteFallback(async req => {
+					seen.push({ dst: req.dst, confirmedFile: req.confirmedFile });
+					return false;
+				}),
+			);
+
+			try {
+				await expect(deleteFileWithFallback(path.join(linkDir, "keep.txt"))).rejects.toMatchObject({
+					code: expect.stringMatching(/^(EACCES|EPERM)$/),
+				});
+				expect(seen).toEqual([{ dst: victim, confirmedFile: true }]);
+				expect(await Bun.file(victim).text()).toBe("keep me");
+			} finally {
+				await fs.chmod(outside, 0o700);
+			}
+		});
+
+		it("leaves the LAST component unresolved, reporting confirmedFile false for a link", async () => {
+			// `unlink` removes the link itself, so resolving the final component would
+			// name the wrong file. Diverting is still right — unlinking a link is a
+			// legitimate file removal — but a handler that realpaths `dst` for auditing,
+			// or removes it recursively, would act on the link's TARGET, a directory tree
+			// here. So the link is brokered as itself, and `confirmedFile` is false even
+			// though `lstat` succeeded.
 			const targetDir = path.join(root, "link-target-dir");
 			await fs.mkdir(targetDir);
 			await Bun.write(path.join(targetDir, "keep.txt"), "keep me");
@@ -549,17 +701,17 @@ describe("deleteFileWithFallback", () => {
 			await fs.symlink(targetDir, link);
 			await fs.chmod(locked, 0o500);
 
-			const seen: boolean[] = [];
+			const seen: Array<{ dst: string; confirmedFile: boolean }> = [];
 			disposers.push(
 				addFileDeleteFallback(async req => {
-					seen.push(req.confirmedFile);
+					seen.push({ dst: req.dst, confirmedFile: req.confirmedFile });
 					return true;
 				}),
 			);
 
 			await deleteFileWithFallback(link);
 
-			expect(seen).toEqual([false]);
+			expect(seen).toEqual([{ dst: link, confirmedFile: false }]);
 			// The target must be untouched: the seam only ever asked for the link.
 			expect(await Bun.file(path.join(targetDir, "keep.txt")).text()).toBe("keep me");
 		});

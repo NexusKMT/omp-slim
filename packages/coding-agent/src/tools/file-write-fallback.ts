@@ -71,26 +71,81 @@
  * it did before, a failure rethrows from the same place, and no extra syscalls
  * are performed.
  *
+ * ## The path a handler is given
+ *
+ * A handler is more privileged than the syscall that just failed, so it is never
+ * handed the lexical path the tool used. A lexical path is not a destination: the
+ * kernel follows every component above the last, so `ws/link/file` under a
+ * `ws/link -> /elsewhere` link lands outside `ws` while still looking
+ * in-workspace. That defeats the defence a helper author reaches for first, since
+ * a prefix allowlist passes on the link's own path — and for writes the final
+ * component is followed too, so a plain `ws/link` is enough.
+ *
+ * `req.dst` is therefore resolved through {@link resolveSyscallTarget} to the path
+ * the failed syscall itself acted on: fully for a write, and up to the last
+ * component for a delete, since `unlink` removes a link rather than following it.
+ * Resolving rather than refusing also closes the TOCTOU window, because the
+ * handler no longer traverses a link the agent could re-point after the check.
+ *
+ * A path that cannot be canonicalized — a dangling final link, or an ancestor
+ * whose own resolution is denied — is not brokered at all. "Where would this
+ * land" has no answer there, and a privileged writer is the wrong place to guess.
+ * That narrows the seam for a sandbox that also hides the ancestors of a denied
+ * path, which is the honest cost of not handing over an unverifiable target.
+ *
  * ## Scope of the registry
  *
  * Handlers live in one process-wide list, and a process can host several sessions
  * (a subagent gets its own `ExtensionRunner`). A handler is therefore consulted
- * for denied writes from ANY session in the process, not only the one whose
- * extension registered it, and `FileWriteFallbackRequest` carries no session
- * identity to distinguish them. A handler whose policy depends on which session
- * asked must not assume its own; brokering the bytes is session-independent and
- * is the intended use.
+ * for denied mutations from ANY session in the process, not only the one whose
+ * extension registered it. Filtering by session here would be wrong: a subagent
+ * spawned with `restrictToolNames` loads no extensions of its own, so scoping
+ * would leave its denied writes with nothing to broker them, and a host that
+ * registers once in its top-level session expects subagent writes covered.
+ *
+ * So the request names its origin instead, and the policy stays with the party
+ * that owns it. `req.sessionId` is the session that issued the mutation (see
+ * {@link withFileMutationSession}); a handler compares it with
+ * `ctx.sessionManager.getSessionId()` to decide. That matters most for a handler
+ * that prompts: `ctx.ui` belongs to the session whose extension registered the
+ * handler, which is not necessarily the session being asked about.
+ *
+ * Each list is iterated over a snapshot, because a concurrent session shutdown
+ * splices the live array and a `for` over it would skip whichever handler shifted
+ * into the hole.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { isEnoent, isFsError, logger } from "@oh-my-pi/pi-utils";
 import type { BunFile } from "bun";
 import type { ExtensionContext } from "../extensibility/extensions/types";
+import { resolveSyscallTarget } from "./path-utils";
 
 /** A denied write, captured for a registered fallback to retry through a privileged channel. */
 export interface FileWriteFallbackRequest {
-	/** Absolute destination path the write was denied for. */
+	/**
+	 * Absolute, symlink-resolved path to write the bytes to.
+	 *
+	 * This is where the failed in-process write would itself have landed, which is
+	 * not necessarily the path the tool was given: `open` follows every component,
+	 * so a link anywhere in that path redirects the bytes. Resolving it here is
+	 * what lets a handler's allowlist see the real destination instead of a
+	 * lexically innocent path, so a handler MUST treat this as authoritative and
+	 * MUST NOT re-derive the target from anything else.
+	 */
 	dst: string;
+	/**
+	 * Session the denied write was issued from, or `undefined` when the mutation
+	 * did not happen inside a tool call (an external `applyPatch` caller, a test).
+	 *
+	 * The registry is process-wide, so a handler can be consulted for a write from
+	 * a session other than the one whose extension registered it. Compare this with
+	 * `ctx.sessionManager.getSessionId()` to tell the two apart — a handler that
+	 * prompts through `ctx.ui` needs to, since that UI belongs to ITS session and
+	 * not necessarily to the one being asked about.
+	 */
+	sessionId: string | undefined;
 	/** The exact bytes the tool intended to write. */
 	content: string;
 	/**
@@ -110,7 +165,14 @@ type BoundFileWriteFallbackHandler = (req: FileWriteFallbackRequest) => Promise<
 
 /** A denied unlink, captured for a registered fallback to perform through a privileged channel. */
 export interface FileDeleteFallbackRequest {
-	/** Absolute path the unlink was denied for. */
+	/**
+	 * Absolute, symlink-resolved path the unlink was denied for.
+	 *
+	 * Every component ABOVE the last is resolved, so a handler cannot be walked
+	 * outside its allowed roots through a link in the path. The last component is
+	 * deliberately NOT resolved, because `unlink` removes a link itself rather
+	 * than its target — which is also why this may still name a symlink.
+	 */
 	dst: string;
 	/** The `EPERM`/`EACCES`/`EROFS` that proves the unlink hit a permission boundary. */
 	cause: unknown;
@@ -128,6 +190,8 @@ export interface FileDeleteFallbackRequest {
 	 * points at instead of the link.
 	 */
 	confirmedFile: boolean;
+	/** See {@link FileWriteFallbackRequest.sessionId}. */
+	sessionId: string | undefined;
 }
 
 /** Extension-authored handler. Return `true` once `dst` is gone from disk. */
@@ -192,6 +256,34 @@ export function addFileDeleteFallback(handler: BoundFileDeleteFallbackHandler): 
 	};
 }
 
+const mutationSessionStorage = new AsyncLocalStorage<string>();
+
+/**
+ * Name the session whose tool call is about to run, so a denied mutation inside it
+ * can tell a handler where the request came from.
+ *
+ * Entered once per tool call by `ExtensionToolWrapper` (`extensibility/extensions/
+ * wrapper.ts`), which `sdk.ts` puts around the whole tool registry whenever an
+ * `ExtensionRunner` exists — so the component that owns the handlers is the one
+ * naming its own session, and no caller has to thread an `AgentToolContext`
+ * through for attribution to work.
+ *
+ * That covers the deferred LSP write batch too: a batch id belongs to one
+ * assistant turn of one session, and its flush is awaited inside a tool call of
+ * that same session, so a write performed during a later call of the group is
+ * still attributed to the session that issued it.
+ *
+ * Deliberately NOT a general "current session" accessor: nothing else enters this
+ * scope, so outside a tool call it is empty by design — an external `applyPatch`
+ * caller reports `undefined` rather than borrowing someone else's identity.
+ */
+export function withFileMutationSession<T>(sessionId: string | undefined, fn: () => T): T {
+	// With nothing registered no scope is entered, keeping the seam's inertness
+	// promise: a stock host pays one length check per tool call and no more.
+	if (sessionId === undefined || (fallbackHandlers.length === 0 && deleteFallbackHandlers.length === 0)) return fn();
+	return mutationSessionStorage.run(sessionId, fn);
+}
+
 /**
  * Remove a file, consulting registered delete fallbacks when the unlink is denied.
  *
@@ -208,6 +300,14 @@ export async function deleteFileWithFallback(dst: string, file?: BunFile): Promi
 		}
 	} catch (error) {
 		if (deleteFallbackHandlers.length === 0 || !isPermissionDeniedError(error)) throw error;
+		// A handler is more privileged than the unlink that just failed, so it is told
+		// which path really gets removed, not the lexical one the tool used. `unlink`
+		// follows every component ABOVE the last, so `ws/link/victim` under a
+		// `ws/link -> /elsewhere` link removes a file outside `ws` while a helper's
+		// prefix allowlist still passes. The final component is deliberately left
+		// unresolved: `unlink` removes the link itself, never its target.
+		const target = await resolveSyscallTarget(dst, false);
+		if (target === null) throw error;
 		// `unlink` on a directory reports EPERM on Darwin (EISDIR on Linux), which is
 		// indistinguishable from a sandbox denial by code alone, so check the target
 		// before diverting: asking a privileged deleter to remove a DIRECTORY on
@@ -215,7 +315,7 @@ export async function deleteFileWithFallback(dst: string, file?: BunFile): Promi
 		// intent. `lstat` rather than `stat`, so the link itself is judged — removing
 		// a symlink is a legitimate file removal, and following it here would ask the
 		// wrong question.
-		const stat = await fs.lstat(dst).catch((statError: unknown) => {
+		const stat = await fs.lstat(target).catch((statError: unknown) => {
 			// A sandbox that denies the unlink usually denies the target's metadata
 			// too, so a denied `lstat` is expected here and must still divert — it
 			// just leaves the question unresolved, which `confirmedFile` reports.
@@ -228,16 +328,23 @@ export async function deleteFileWithFallback(dst: string, file?: BunFile): Promi
 		// realpaths `dst` for auditing, or removes it recursively, would act on the
 		// link's target instead. Only a plain regular file is a confirmed file.
 		const confirmedFile = stat?.isFile() ?? false;
-		for (const handler of deleteFallbackHandlers) {
+		// The process-wide registry can hand this to a handler from another session,
+		// so the request names the one that issued it.
+		const sessionId = mutationSessionStorage.getStore();
+		// Snapshot: a concurrent session shutdown splices the live array, and
+		// iterating it directly would skip whichever handler shifted into the hole.
+		for (const handler of [...deleteFallbackHandlers]) {
 			try {
-				if (await handler({ dst, cause: error, confirmedFile })) return;
+				if (await handler({ dst: target, cause: error, confirmedFile, sessionId })) return;
 			} catch (handlerError) {
 				logger.warn("File delete fallback handler threw; trying next handler", {
-					dst,
+					dst: target,
 					error: handlerError instanceof Error ? handlerError.message : String(handlerError),
 				});
 			}
 		}
+		// Always the ORIGINAL error, never a handler's, so behaviour matches a host
+		// with no fallback registered.
 		throw error;
 	}
 }
@@ -306,32 +413,29 @@ export async function writeFileWithFallback(dst: string, content: string, file?:
 						: ({ kind: "rethrow" } as const);
 			if (failure.kind === "retry") continue;
 			if (failure.kind === "denied") {
-				// A denial reached through a SYMLINK is never brokered. The in-process
-				// write follows the link, so the kernel denied the link's TARGET — but a
-				// handler receives `dst`, and a privileged helper opening it with ordinary
-				// follow semantics lands these bytes wherever the link points. That also
-				// defeats the obvious helper-side defence: a prefix allowlist passes,
-				// because the LINK sits inside the allowed root while its target does not.
-				// omp cannot vouch for the destination, so it refuses rather than hand the
-				// ambiguity to a privileged writer — the same answer, for the same reason,
-				// that `confineToWorkspace` gives an unresolvable link
-				// (`tools/path-utils.ts`).
-				//
-				// An unreadable `lstat` cannot prove a link, and the dangerous shape (a
-				// link inside a directory the profile allows) always has readable
-				// metadata, so an undecidable check never blocks the case this seam
-				// exists for.
-				const viaSymlink = await fs.lstat(dst).then(
-					stat => stat.isSymbolicLink(),
-					() => false,
-				);
-				if (!viaSymlink) {
-					for (const handler of fallbackHandlers) {
+				// A handler is more privileged than the write that just failed, so it is
+				// told where the bytes would REALLY have landed rather than the lexical
+				// path the tool used. `open` follows EVERY component, so `ws/link/file`
+				// under a `ws/link -> /elsewhere` link writes outside `ws` while still
+				// looking in-workspace — which defeats the defence a helper author
+				// reaches for first, since a prefix allowlist passes on the link's own
+				// path. Resolving closes that, and closes the TOCTOU window with it: the
+				// helper no longer traverses a link the agent could re-point after the
+				// check. A path that cannot be canonicalized is not brokered at all,
+				// because "where would this land" then has no answer to hand over.
+				const target = await resolveSyscallTarget(dst, true);
+				// Snapshot: a concurrent session shutdown splices the live array, and
+				// iterating it directly would skip whichever handler shifted into the hole.
+				if (target !== null) {
+					// The process-wide registry can hand this to a handler from another
+					// session, so the request names the one that issued it.
+					const sessionId = mutationSessionStorage.getStore();
+					for (const handler of [...fallbackHandlers]) {
 						try {
-							if (await handler({ dst, content, cause: failure.cause })) return;
+							if (await handler({ dst: target, content, cause: failure.cause, sessionId })) return;
 						} catch (handlerError) {
 							logger.warn("File write fallback handler threw; trying next handler", {
-								dst,
+								dst: target,
 								error: handlerError instanceof Error ? handlerError.message : String(handlerError),
 							});
 						}

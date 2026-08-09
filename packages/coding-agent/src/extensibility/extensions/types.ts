@@ -1269,12 +1269,21 @@ export interface ExtensionAPI {
 	 * may not create — also diverts here, with `req.dst`'s parent absent and the
 	 * handler responsible for creating it.
 	 *
+	 * `req.dst` is symlink-RESOLVED: the path the failed write itself acted on, not
+	 * the one the tool was given. A link anywhere in a lexical path redirects the
+	 * bytes while still passing a prefix allowlist, so treat `req.dst` as
+	 * authoritative. A destination that cannot be resolved is never brokered.
+	 *
 	 * Call this during extension load, like the other `register*` methods: handlers
 	 * are installed when the runner initializes, so an extension that has registered
 	 * none by then is skipped and a first registration made later never takes effect.
-	 * The underlying registry is process-wide and `req` carries no session identity,
-	 * so a handler may be consulted for a denied write from any session in the
-	 * process, not only its own. See `docs/extensions.md`.
+	 *
+	 * The underlying registry is process-wide, so a handler may be consulted for a
+	 * denied write from any session in the process, not only its own.
+	 * `req.sessionId` names the session that issued the write and
+	 * `ctx.sessionManager.getSessionId()` names the handler's own; compare them
+	 * before prompting, because `ctx.ui` belongs to the latter. See
+	 * `docs/extensions.md`.
 	 */
 	registerFileWriteFallback(handler: FileWriteFallbackHandler): void;
 
@@ -1290,6 +1299,10 @@ export interface ExtensionAPI {
 	 * the same boundary that denied the unlink, which is the common sandbox case, that
 	 * check cannot be resolved and `dst` may be a directory. `req.confirmedFile` says
 	 * which situation the handler is in.
+	 *
+	 * `req.dst` resolves every component ABOVE the last, for the same reason the
+	 * write seam resolves all of them; the last is left alone because `unlink`
+	 * removes a link rather than its target, so `req.dst` may name a link.
 	 *
 	 * Separate from {@link registerFileWriteFallback} on purpose. A write handler
 	 * brokers `req.content` to `req.dst`, so a delete request reaching it with no

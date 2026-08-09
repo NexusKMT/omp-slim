@@ -543,6 +543,18 @@ export class ExtensionRunner {
 		return this.sessionManager.getCwd();
 	}
 
+	/**
+	 * Stable id of the session this runner serves. Read through `sessionManager`
+	 * for the same reason as {@link cwd}: it is this session's own, never a
+	 * process-global, so a subagent runner reports itself and not its parent.
+	 *
+	 * Used to attribute a denied file write or delete to the session that issued
+	 * it, since the fallback registry those handlers live in is process-wide.
+	 */
+	get sessionId(): string {
+		return this.sessionManager.getSessionId();
+	}
+
 	initialize(
 		actions: ExtensionActions,
 		contextActions: ExtensionContextActions,
@@ -616,11 +628,23 @@ export class ExtensionRunner {
 			// and `createContext()` takes no extension argument so a single context per
 			// extension is all any of its handlers would have received anyway.
 			const ctx = this.createContext();
+			// Isolation is per HANDLER, not per extension. The registry only sees one
+			// trampoline per extension, so a throw escaping this loop would advance the
+			// registry to the NEXT extension and skip every later handler this one
+			// registered — breaking both the documented "a throwing handler is skipped"
+			// contract and registration order for a backup-handler setup.
 			if (ext.fileWriteFallbackHandlers.length > 0) {
 				this.#fileFallbackDisposers.push(
 					addFileWriteFallback(async req => {
 						for (const handler of ext.fileWriteFallbackHandlers) {
-							if (await handler(req, ctx)) return true;
+							try {
+								if (await handler(req, ctx)) return true;
+							} catch (error) {
+								logger.warn("Extension file write fallback handler threw; trying next handler", {
+									extension: ext.path,
+									error: error instanceof Error ? error.message : String(error),
+								});
+							}
 						}
 						return false;
 					}),
@@ -630,7 +654,14 @@ export class ExtensionRunner {
 				this.#fileFallbackDisposers.push(
 					addFileDeleteFallback(async req => {
 						for (const handler of ext.fileDeleteFallbackHandlers) {
-							if (await handler(req, ctx)) return true;
+							try {
+								if (await handler(req, ctx)) return true;
+							} catch (error) {
+								logger.warn("Extension file delete fallback handler threw; trying next handler", {
+									extension: ext.path,
+									error: error instanceof Error ? error.message : String(error),
+								});
+							}
 						}
 						return false;
 					}),
