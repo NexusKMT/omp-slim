@@ -1153,10 +1153,25 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			getServerInstructions: () => new Map([["private-server", "must not reach restricted child"]]),
 		} as unknown as MCPManager;
 
+		const restrictedLateExtension: ExtensionFactory = pi => {
+			pi.on("session_start", async () => {
+				await Promise.resolve();
+				pi.registerTool({
+					name: "restricted_late_extension_tool",
+					label: "Restricted Late Extension Tool",
+					description: "Must not enter a caller-restricted session.",
+					parameters: type({}),
+					async execute() {
+						return { content: [{ type: "text", text: "restricted late" }] };
+					},
+				});
+			});
+		};
+
 		const { session: restricted } = await createAgentSession({
 			...baseOptions(restrictedDir),
 			settings: configuredSettings(),
-			extensions: [toolActivationExtension],
+			extensions: [toolActivationExtension, restrictedLateExtension],
 			customTools: [sdkCustomTool],
 			toolNames: ["read", "lsp", "hub"],
 			requireYieldTool: true,
@@ -1168,6 +1183,10 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		});
 
 		try {
+			await initializeExtensions(restricted, {
+				reportSendError: vi.fn(),
+				reportRuntimeError: vi.fn(),
+			});
 			expect(restricted.getAllToolNames()).toEqual(["read", "lsp", "yield"]);
 			expect(restricted.getActiveToolNames()).toEqual(["read", "lsp", "yield"]);
 			for (const name of [
@@ -1181,6 +1200,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 				"default_active_tool",
 				"default_inactive_tool",
 				"sdk_custom_tool",
+				"restricted_late_extension_tool",
 				"hub",
 			]) {
 				expect(restricted.getToolByName(name)).toBeUndefined();

@@ -3517,14 +3517,16 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			dynamicToolRegistrationChain = activation.catch(() => {});
 			return activation;
 		};
-		const unsubscribeToolRegistrations = extensionRunner.onToolRegistered(scheduleToolRegistration);
-		disposeCallbacks.add(unsubscribeToolRegistrations);
+		if (!restrictToolNames) {
+			const unsubscribeToolRegistrations = extensionRunner.onToolRegistered(scheduleToolRegistration);
+			disposeCallbacks.add(unsubscribeToolRegistrations);
 
-		// Close the construction race: a background registration can land after
-		// the initial snapshot but before the live listener above is attached.
-		for (const registered of extensionRunner.getAllRegisteredTools()) {
-			if (!initialRegisteredTools.has(registered)) {
-				await scheduleToolRegistration(registered);
+			// Close the construction race: a background registration can land after
+			// the initial snapshot but before the live listener above is attached.
+			for (const registered of extensionRunner.getAllRegisteredTools()) {
+				if (!initialRegisteredTools.has(registered)) {
+					await scheduleToolRegistration(registered);
+				}
 			}
 		}
 		session.yieldQueue.register<McpNotificationEntry>("mcp-notification", {
