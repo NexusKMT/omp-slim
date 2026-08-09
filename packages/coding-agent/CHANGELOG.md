@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `retry_fallback_applied` and `retry_fallback_succeeded` not being forwarded to extensions: `AgentSession.#emitExtensionEvent` had no branch for either event and `ExtensionAPI.on(...)` lacked overloads, so extension handlers could not observe model/advisor fallback transitions or successes that the TUI and RPC paths already received ([#8079](https://github.com/can1357/oh-my-pi/issues/8079)).
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed
