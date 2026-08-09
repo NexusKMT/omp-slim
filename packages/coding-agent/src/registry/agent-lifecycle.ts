@@ -421,7 +421,7 @@ export class AgentLifecycleManager {
 		return true;
 	}
 
-	/** Teardown everything (process exit / main session dispose). */
+	/** Teardown everything; disposing the global manager makes its next owner a fresh instance. */
 	async dispose(deadlineAt: number = Date.now() + AGENT_RELEASE_GRACE_MS): Promise<void> {
 		this.#unsubscribe?.();
 		this.#disposed = true;
@@ -446,6 +446,7 @@ export class AgentLifecycleManager {
 		this.#revivals.clear();
 		this.#parks.clear();
 		this.#persistedReviverFactory = undefined;
+		if (AgentLifecycleManager.#global === this) AgentLifecycleManager.#global = undefined;
 	}
 
 	async #revive(id: string, revive: AgentReviver, ref: AgentRef, adopted: AdoptedAgent): Promise<AgentSession> {

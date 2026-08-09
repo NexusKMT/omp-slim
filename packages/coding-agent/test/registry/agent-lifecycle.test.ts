@@ -693,4 +693,24 @@ describe("AgentLifecycleManager", () => {
 		expect(lifecycle.has("Cold-SessionRace")).toBe(false);
 		expect(registry.get("Cold-SessionRace")?.session ?? null).toBeNull();
 	});
+
+	it("a new top-level owner can cold-revive after the previous global lifecycle was disposed", async () => {
+		await lifecycle.dispose(Date.now());
+		const revived = makeSessionStub();
+		registry.register({
+			id: "Next-Owner",
+			displayName: "task",
+			kind: "sub",
+			session: null,
+			sessionFile: "/tmp/Next-Owner.jsonl",
+			status: "parked",
+		});
+
+		const nextLifecycle = AgentLifecycleManager.global();
+		nextLifecycle.setPersistedSubagentReviverFactory(async () => async () => revived.session, 0);
+
+		await expect(nextLifecycle.ensureLive("Next-Owner")).resolves.toBe(revived.session);
+		expect(registry.get("Next-Owner")).toMatchObject({ status: "idle", session: revived.session });
+		expect(revived.disposeCalls()).toBe(0);
+	});
 });
