@@ -14,7 +14,9 @@ import { discoverAndLoadExtensions, ExtensionRuntime } from "@oh-my-pi/pi-coding
 import {
 	EXTENSION_HANDLER_TIMEOUT_MS,
 	ExtensionRunner,
+	SESSION_SHUTDOWN_HANDLER_TIMEOUT_MS,
 	testSetExtensionHandlerTimeoutMs,
+	testSetSessionShutdownHandlerTimeoutMs,
 } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
 import type {
 	ExtensionError,
@@ -58,6 +60,7 @@ describe("ExtensionRunner", () => {
 
 	afterEach(() => {
 		testSetExtensionHandlerTimeoutMs(EXTENSION_HANDLER_TIMEOUT_MS);
+		testSetSessionShutdownHandlerTimeoutMs(SESSION_SHUTDOWN_HANDLER_TIMEOUT_MS);
 		tempDir.removeSync();
 	});
 
@@ -1265,6 +1268,54 @@ describe("ExtensionRunner", () => {
 			]);
 
 			warnSpy.mockRestore();
+		});
+
+		it("keeps a stalled registration inside the session_shutdown deadline", async () => {
+			const extensionPath = path.join(tempDir.path(), "shutdown-registration.ts");
+			fs.writeFileSync(
+				extensionPath,
+				`
+					export default function(pi) {
+						pi.on("session_shutdown", () => {
+							const { Type } = pi.typebox;
+							pi.registerTool({
+								name: "shutdown_tool",
+								label: "Shutdown Tool",
+								description: "Registered while shutting down.",
+								parameters: Type.Object({}),
+								execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
+							});
+						});
+					}
+				`,
+			);
+
+			const result = await loadTestExtensions([extensionPath]);
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			runner.onToolRegistered(() => Promise.withResolvers<void>().promise);
+			const errors: ExtensionError[] = [];
+			runner.onError(error => {
+				errors.push(error);
+			});
+			testSetSessionShutdownHandlerTimeoutMs(10);
+
+			const startedAt = performance.now();
+			await runner.emit({ type: "session_shutdown" });
+			const elapsedMs = performance.now() - startedAt;
+
+			expect(elapsedMs).toBeGreaterThanOrEqual(8);
+			expect(elapsedMs).toBeLessThan(150);
+			expect(errors).toContainEqual({
+				extensionPath,
+				event: "session_shutdown",
+				error: "handler timed out after 10ms",
+			});
 		});
 
 		it("times out tool_call handlers with fail-closed policy so a hung extension cannot indefinitely block tool execution (#3948)", async () => {

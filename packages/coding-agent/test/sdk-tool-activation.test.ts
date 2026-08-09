@@ -498,6 +498,95 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		}
 	});
 
+	it("preserves SDK custom-tool precedence when an extension registers the same name later", async () => {
+		const tempDir = makeTempDir();
+		const lateCollisionExtension: ExtensionFactory = pi => {
+			pi.on("session_start", async () => {
+				await Promise.resolve();
+				pi.registerTool({
+					name: sdkCustomTool.name,
+					label: "Late Extension Collision",
+					description: "Extension tool that must not replace the SDK custom tool.",
+					parameters: type({}),
+					async execute() {
+						return { content: [{ type: "text", text: "late extension" }] };
+					},
+				});
+			});
+		};
+
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [lateCollisionExtension],
+			customTools: [sdkCustomTool],
+		});
+
+		try {
+			expect(session.getToolByName(sdkCustomTool.name)?.label).toBe(sdkCustomTool.label);
+			const runner = session.extensionRunner;
+			if (!runner) throw new Error("expected extension runner");
+			await runner.emit({ type: "session_start" });
+			expect(session.getToolByName(sdkCustomTool.name)?.label).toBe(sdkCustomTool.label);
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	it("keeps an explicitly disabled tool disabled when its extension re-registers it", async () => {
+		const tempDir = makeTempDir();
+		const disabledReplacementExtension: ExtensionFactory = pi => {
+			pi.registerTool({
+				name: "disabled_replacement_tool",
+				label: "Initial Enabled Tool",
+				description: "Initially enabled extension tool.",
+				parameters: type({}),
+				loadMode: "essential",
+				async execute() {
+					return { content: [{ type: "text", text: "initial" }] };
+				},
+			});
+			pi.on("session_start", async () => {
+				await pi.setActiveTools(["read"]);
+				pi.registerTool({
+					name: "disabled_replacement_tool",
+					label: "Disabled Replacement Tool",
+					description: "Replacement that must retain the disabled state.",
+					parameters: type({}),
+					loadMode: "essential",
+					async execute() {
+						return { content: [{ type: "text", text: "replacement" }] };
+					},
+				});
+			});
+		};
+
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [disabledReplacementExtension],
+		});
+
+		try {
+			expect(session.getEnabledToolNames()).toContain("disabled_replacement_tool");
+			const runner = session.extensionRunner;
+			if (!runner) throw new Error("expected extension runner");
+			const errors: string[] = [];
+			const unsubscribe = runner.onError(error => {
+				errors.push(error.error);
+			});
+			await initializeExtensions(session, {
+				reportSendError: vi.fn(),
+				reportRuntimeError: vi.fn(),
+			});
+			unsubscribe();
+			expect(errors).toEqual([]);
+
+			expect(session.getToolByName("disabled_replacement_tool")?.label).toBe("Disabled Replacement Tool");
+			expect(session.getEnabledToolNames()).not.toContain("disabled_replacement_tool");
+		} finally {
+			await session.dispose();
+		}
+	});
+
 	it("reclassifies late replacements when their load modes change", async () => {
 		const tempDir = makeTempDir();
 		const loadModeReplacementExtension: ExtensionFactory = pi => {

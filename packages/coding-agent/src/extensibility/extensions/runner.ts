@@ -1031,10 +1031,31 @@ export class ExtensionRunner {
 		let handlerFailure: { error: unknown } | undefined;
 		try {
 			handlerResult = await raceHandlerWithTimeout(
-				handlerSignal =>
-					this.#toolRegistrationScope.run(registrationScope, () =>
-						handler(event, createHandlerContext(ctx, handlerSignal)),
-					),
+				async handlerSignal => {
+					let result: TResult | undefined;
+					try {
+						result = await this.#toolRegistrationScope.run(registrationScope, () =>
+							handler(event, createHandlerContext(ctx, handlerSignal)),
+						);
+					} catch (error) {
+						handlerFailure = { error };
+					} finally {
+						registrationScope.closed = true;
+					}
+					try {
+						await this.#flushToolRegistrations(registrationScope.pending);
+					} catch (error) {
+						handlerFailure ??= { error };
+					}
+					const registrationBarrier = this.#toolRegistrationBarrier;
+					if (registrationBarrier) {
+						// Also wait for detached registrations that were scheduled before this
+						// handler completed. Their failures are reported at registration time,
+						// not attributed to this unrelated handler.
+						await registrationBarrier;
+					}
+					return result;
+				},
 				timeoutMs,
 				signal,
 			);
@@ -1042,30 +1063,6 @@ export class ExtensionRunner {
 			handlerFailure = { error };
 		} finally {
 			registrationScope.closed = true;
-		}
-		try {
-			await this.#flushToolRegistrations(registrationScope.pending);
-		} catch (error) {
-			handlerFailure ??= { error };
-		}
-		const registrationBarrier = this.#toolRegistrationBarrier;
-		if (registrationBarrier) {
-			// Also wait for detached registrations that were scheduled before this
-			// handler completed. Their failures are reported at registration time,
-			// not attributed to this unrelated handler.
-			await registrationBarrier;
-		}
-		if (handlerFailure) {
-			const message =
-				handlerFailure.error instanceof Error ? handlerFailure.error.message : String(handlerFailure.error);
-			const stack = handlerFailure.error instanceof Error ? handlerFailure.error.stack : undefined;
-			this.emitError({
-				extensionPath: ext.path,
-				event: event.type,
-				error: message,
-				stack,
-			});
-			return undefined;
 		}
 		if (handlerResult === EXTENSION_HANDLER_ABORTED) return undefined;
 		if (handlerResult === EXTENSION_HANDLER_TIMEOUT) {
@@ -1079,6 +1076,18 @@ export class ExtensionRunner {
 				extensionPath: ext.path,
 				event: event.type,
 				error,
+			});
+			return undefined;
+		}
+		if (handlerFailure) {
+			const message =
+				handlerFailure.error instanceof Error ? handlerFailure.error.message : String(handlerFailure.error);
+			const stack = handlerFailure.error instanceof Error ? handlerFailure.error.stack : undefined;
+			this.emitError({
+				extensionPath: ext.path,
+				event: event.type,
+				error: message,
+				stack,
 			});
 			return undefined;
 		}

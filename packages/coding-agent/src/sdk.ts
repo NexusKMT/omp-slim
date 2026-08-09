@@ -2590,6 +2590,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			restrictToolNames && options.allowRestrictedCustomTools !== true
 				? []
 				: (options.customTools?.filter(tool => !isLegacyBuiltinToolDefinition(tool)) ?? []);
+		const sdkCustomToolNames = new Set(sdkCustomTools.map(tool => tool.name));
 		const allCustomTools = [
 			...registeredTools,
 			...sdkCustomTools.map(tool => {
@@ -3455,6 +3456,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			const activation = dynamicToolRegistrationChain.then(async () => {
 				const existingTool = toolRegistry.get(name);
 				if (existingTool) {
+					// SDK custom tools are installed after extension tools during startup, so they
+					// retain the same precedence when an extension registers the name later.
+					if (sdkCustomToolNames.has(name)) return;
 					// Put the replacement first so same-origin MCP re-registration keeps it. Distinct MCP origins still
 					// use the stable winner; ordinary tool collisions retain the extension runner's last-wins precedence.
 					const competingTools = deduplicateMCPToolsByName([liveTool, existingTool]);
@@ -3485,6 +3489,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						);
 						return;
 					}
+					// Re-registration refreshes the implementation, but it must not reverse an
+					// explicit setActiveTools() decision that disabled the previous definition.
+					if (existingTool && !alreadyEnabled) return;
 					const shouldMount =
 						!explicitlyRequested &&
 						toolSession.xdev !== undefined &&
