@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed stale or unhealthy initial MCP connections leaving child processes or sockets open after `disconnectAll()` or a failed `tools/list` request. ([#8112](https://github.com/can1357/oh-my-pi/issues/8112))
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed
