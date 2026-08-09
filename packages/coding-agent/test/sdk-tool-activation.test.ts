@@ -618,6 +618,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			expect(originalTool).toBeDefined();
 			expect(session.hasBuiltInTool("bash")).toBe(true);
 			const runner = session.extensionRunner;
+			if (!runner) throw new Error("expected extension runner");
 			const errors: string[] = [];
 			const unsubscribe = runner.onError(error => {
 				errors.push(error.error);
