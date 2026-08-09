@@ -192,8 +192,49 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			expect(session.getAllToolNames()).toEqual(expect.arrayContaining(["late_active_tool", "late_inactive_tool"]));
 			expect(session.getEnabledToolNames()).toContain("late_active_tool");
 			expect(session.getEnabledToolNames()).not.toContain("late_inactive_tool");
+			expect(session.getXdevToolEntries().map(entry => entry.name)).toContain("late_active_tool");
+			expect(session.getActiveToolNames()).not.toContain("late_active_tool");
 			expect(session.systemPrompt.join("\n")).toContain("late_active_tool");
 			expect(session.systemPrompt.join("\n")).not.toContain("late_inactive_tool");
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	it("activates explicitly requested defaultInactive tools registered during session startup", async () => {
+		const tempDir = makeTempDir();
+		const lateRequestedExtension: ExtensionFactory = pi => {
+			pi.on("session_start", async () => {
+				await Promise.resolve();
+				pi.registerTool({
+					name: "late_requested_tool",
+					label: "Late Requested Tool",
+					description: "Registered asynchronously after being explicitly requested.",
+					parameters: type({}),
+					defaultInactive: true,
+					async execute() {
+						return { content: [{ type: "text", text: "late requested" }] };
+					},
+				});
+			});
+		};
+
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [lateRequestedExtension],
+			toolNames: ["read", "write", "late_requested_tool"],
+		});
+
+		try {
+			const runner = session.extensionRunner;
+			if (!runner) throw new Error("expected extension runner");
+			await runner.emit({ type: "session_start" });
+
+			expect(session.getAllToolNames()).toContain("late_requested_tool");
+			expect(session.getEnabledToolNames()).toContain("late_requested_tool");
+			expect(session.getActiveToolNames()).toContain("late_requested_tool");
+			expect(session.getXdevToolEntries().map(entry => entry.name)).not.toContain("late_requested_tool");
+			expect(session.systemPrompt.join("\n")).toContain("late_requested_tool");
 		} finally {
 			await session.dispose();
 		}

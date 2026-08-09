@@ -3450,14 +3450,30 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			const [wrapped] = wrapRegisteredTools([registered], extensionRunner);
 			if (!wrapped) return dynamicToolRegistrationChain;
 			const name = registered.definition.name;
-			toolRegistry.set(name, new ExtensionToolWrapper(wrapToolWithMetaNotice(wrapped), extensionRunner));
+			const liveTool = new ExtensionToolWrapper(wrapToolWithMetaNotice(wrapped), extensionRunner);
+			toolRegistry.set(name, liveTool);
 			builtInRegistryToolNames.delete(name);
 
 			const activation = dynamicToolRegistrationChain.then(async () => {
 				const enabled = session.getEnabledToolNames();
 				const alreadyEnabled = enabled.includes(name);
-				if (!alreadyEnabled && registered.definition.defaultInactive) return;
-				await session.setActiveToolsByName(alreadyEnabled ? enabled : [...enabled, name]);
+				const explicitlyRequested = explicitlyRequestedToolNameSet?.has(name) === true;
+				if (!alreadyEnabled && registered.definition.defaultInactive && !explicitlyRequested) return;
+
+				const mounted = session.getMountedXdevToolNames();
+				const shouldMount =
+					!alreadyEnabled &&
+					!explicitlyRequested &&
+					toolSession.xdev !== undefined &&
+					builtInRegistryToolNames.has("read") &&
+					builtInRegistryToolNames.has("write") &&
+					enabled.includes("read") &&
+					enabled.includes("write") &&
+					isMountableUnderXdev(liveTool);
+				await session.setActiveToolPresentation(
+					alreadyEnabled ? enabled : [...enabled, name],
+					shouldMount ? [...mounted, name] : mounted,
+				);
 			});
 			dynamicToolRegistrationChain = activation.catch(() => {});
 			return activation;
@@ -3477,6 +3493,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		});
 		session.yieldQueue.register<DeferredDiagnosticsEntry>(LSP_LATE_DIAGNOSTIC_MESSAGE_TYPE, {
 			build: buildLateDiagnosticsBatchMessage,
+			isStale: entry => entry.isStale(),
 		});
 
 		// Attach the live session to the pre-registered ref so peers can route IRC
