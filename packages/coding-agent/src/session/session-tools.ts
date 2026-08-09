@@ -432,40 +432,46 @@ export class SessionTools {
 	}
 
 	/** Installs and activates the ephemeral vibe tool set. */
-	async activateVibeTools(baseToolNames: string[]): Promise<void> {
-		const createVibeTools = this.#createVibeTools;
-		if (!createVibeTools) {
-			throw new Error("Vibe tools are unavailable in this session.");
-		}
+	activateVibeTools(baseToolNames: string[]): Promise<void> {
+		return this.runToolRegistryMutation(async () => {
+			const createVibeTools = this.#createVibeTools;
+			if (!createVibeTools) {
+				throw new Error("Vibe tools are unavailable in this session.");
+			}
 
-		const tools = createVibeTools();
-		const vibeToolNames = tools.map(tool => tool.name);
-		if (new Set(vibeToolNames).size !== vibeToolNames.length) {
-			throw new Error("Vibe tool names must be unique.");
-		}
+			const tools = createVibeTools();
+			const vibeToolNames = tools.map(tool => tool.name);
+			if (new Set(vibeToolNames).size !== vibeToolNames.length) {
+				throw new Error("Vibe tool names must be unique.");
+			}
 
-		for (const tool of tools) {
-			if (this.#toolRegistry.has(tool.name)) continue;
-			this.#toolRegistry.set(tool.name, this.#wrapRuntimeTool(tool));
-			this.#builtInToolNames.add(tool.name);
-			this.#installedVibeToolNames.add(tool.name);
-		}
+			for (const tool of tools) {
+				if (this.#toolRegistry.has(tool.name)) continue;
+				this.#toolRegistry.set(tool.name, this.#wrapRuntimeTool(tool));
+				this.#builtInToolNames.add(tool.name);
+				this.#installedVibeToolNames.add(tool.name);
+			}
 
-		await this.applyActiveToolsByName([...new Set([...baseToolNames, ...vibeToolNames])]);
+			await this.#applyActiveToolsByName([...new Set([...baseToolNames, ...vibeToolNames])]);
+		});
 	}
 
 	/** Uninstalls vibe tools and activates the replacement set. */
-	async deactivateVibeTools(nextToolNames: string[]): Promise<void> {
-		this.#uninstallVibeTools();
-		await this.applyActiveToolsByName(nextToolNames);
+	deactivateVibeTools(nextToolNames: string[]): Promise<void> {
+		return this.runToolRegistryMutation(async () => {
+			this.#uninstallVibeTools();
+			await this.#applyActiveToolsByName(nextToolNames);
+		});
 	}
 
 	/** Removes vibe tools without restoring a source-session snapshot. */
-	async removeVibeToolsPreservingActive(): Promise<void> {
-		const removed = new Set(this.#installedVibeToolNames);
-		this.#uninstallVibeTools();
-		const nextActive = this.getActiveToolNames().filter(name => !removed.has(name));
-		await this.applyActiveToolsByName(nextActive);
+	removeVibeToolsPreservingActive(): Promise<void> {
+		return this.runToolRegistryMutation(async () => {
+			const removed = new Set(this.#installedVibeToolNames);
+			this.#uninstallVibeTools();
+			const nextActive = this.getActiveToolNames().filter(name => !removed.has(name));
+			await this.#applyActiveToolsByName(nextActive);
+		});
 	}
 
 	#uninstallVibeTools(): void {
@@ -1040,24 +1046,26 @@ export class SessionTools {
 	}
 
 	/** Replaces memory-backend tools while preserving unrelated selections. */
-	async replaceMemoryTools(tools: AgentTool[]): Promise<void> {
-		const removed = new Set<string>(MEMORY_BACKEND_TOOL_NAMES.filter(name => this.#builtInToolNames.has(name)));
-		const nextActive = this.getEnabledToolNames().filter(name => !removed.has(name));
-		for (const name of removed) {
-			this.#toolRegistry.delete(name);
-			this.#builtInToolNames.delete(name);
-		}
-
-		for (const tool of tools) {
-			if (!MEMORY_BACKEND_TOOL_NAMES.some(name => name === tool.name) || this.#toolRegistry.has(tool.name)) {
-				continue;
+	replaceMemoryTools(tools: AgentTool[]): Promise<void> {
+		return this.runToolRegistryMutation(async () => {
+			const removed = new Set<string>(MEMORY_BACKEND_TOOL_NAMES.filter(name => this.#builtInToolNames.has(name)));
+			const nextActive = this.getEnabledToolNames().filter(name => !removed.has(name));
+			for (const name of removed) {
+				this.#toolRegistry.delete(name);
+				this.#builtInToolNames.delete(name);
 			}
-			const wrapped = this.#wrapRuntimeTool(tool);
-			this.#toolRegistry.set(wrapped.name, wrapped);
-			this.#builtInToolNames.add(wrapped.name);
-			nextActive.push(wrapped.name);
-		}
-		await this.applyActiveToolsByName([...new Set(nextActive)]);
+
+			for (const tool of tools) {
+				if (!MEMORY_BACKEND_TOOL_NAMES.some(name => name === tool.name) || this.#toolRegistry.has(tool.name)) {
+					continue;
+				}
+				const wrapped = this.#wrapRuntimeTool(tool);
+				this.#toolRegistry.set(wrapped.name, wrapped);
+				this.#builtInToolNames.add(wrapped.name);
+				nextActive.push(wrapped.name);
+			}
+			await this.#applyActiveToolsByName([...new Set(nextActive)]);
+		});
 	}
 
 	/**
@@ -1073,34 +1081,36 @@ export class SessionTools {
 	 * @returns false when enabling was requested but this session cannot build the
 	 * tool (e.g. restricted child sessions have no factory).
 	 */
-	async setComputerToolEnabled(enabled: boolean): Promise<boolean> {
-		const logState = (): void => this.#logComputerState("Computer tool state changed", enabled);
-		const active = this.getEnabledToolNames();
-		if (!enabled) {
-			if (active.includes("computer")) {
-				await this.applyActiveToolsByName(active.filter(name => name !== "computer"));
+	setComputerToolEnabled(enabled: boolean): Promise<boolean> {
+		return this.runToolRegistryMutation(async () => {
+			const logState = (): void => this.#logComputerState("Computer tool state changed", enabled);
+			const active = this.getEnabledToolNames();
+			if (!enabled) {
+				if (active.includes("computer")) {
+					await this.#applyActiveToolsByName(active.filter(name => name !== "computer"));
+				}
+				logState();
+				return true;
+			}
+			if (!this.#toolRegistry.has("computer")) {
+				const tool = await this.#createComputerTool?.();
+				if (tool?.name !== "computer") {
+					const model = this.#host.model();
+					logger.warn("Computer tool could not be created", {
+						model: model ? formatModelString(model) : undefined,
+					});
+					return false;
+				}
+				const wrapped = this.#wrapRuntimeTool(tool);
+				this.#toolRegistry.set(wrapped.name, wrapped);
+				this.#builtInToolNames.add(wrapped.name);
+			}
+			if (!active.includes("computer")) {
+				await this.#applyActiveToolsByName([...active, "computer"]);
 			}
 			logState();
 			return true;
-		}
-		if (!this.#toolRegistry.has("computer")) {
-			const tool = await this.#createComputerTool?.();
-			if (tool?.name !== "computer") {
-				const model = this.#host.model();
-				logger.warn("Computer tool could not be created", {
-					model: model ? formatModelString(model) : undefined,
-				});
-				return false;
-			}
-			const wrapped = this.#wrapRuntimeTool(tool);
-			this.#toolRegistry.set(wrapped.name, wrapped);
-			this.#builtInToolNames.add(wrapped.name);
-		}
-		if (!active.includes("computer")) {
-			await this.applyActiveToolsByName([...active, "computer"]);
-		}
-		logState();
-		return true;
+		});
 	}
 
 	/** Current effective inspect_image state for `/vision status`. */
@@ -1123,48 +1133,50 @@ export class SessionTools {
 	 * @returns false when the tool should be active but this session cannot
 	 *   build it (e.g. restricted child sessions have no factory).
 	 */
-	async reconcileInspectImageTool(): Promise<boolean> {
-		const expected = isInspectImageToolActive({
-			settings: this.#host.settings,
-			getActiveModel: () => this.#host.model(),
-			getInspectImageModeOverride: () => this.#host.getInspectImageModeOverride(),
-		});
-		// Keep the read tool's advertised description in sync BEFORE any prompt
-		// rebuild below, passing the post-change availability so the prompt never
-		// lags a flip in either direction. Per-read lazy sync is the backstop.
-		const syncReadDescription = (available: boolean): void => {
-			const readTool = this.#toolRegistry.get("read") as
-				| { syncInspectImageState?: (available?: boolean) => boolean }
-				| undefined;
-			readTool?.syncInspectImageState?.(available);
-		};
-		const active = this.getEnabledToolNames();
-		const isActive = active.includes("inspect_image");
-		if (expected === isActive) {
-			syncReadDescription(isActive);
-			return true;
-		}
-		if (!expected) {
-			syncReadDescription(false);
-			await this.applyActiveToolsByName(active.filter(name => name !== "inspect_image"));
-			return true;
-		}
-		if (!this.#toolRegistry.has("inspect_image")) {
-			const tool = await this.#createInspectImageTool?.();
-			if (tool?.name !== "inspect_image") {
-				logger.warn("inspect_image tool could not be created", {
-					model: this.#host.model()?.id,
-				});
-				syncReadDescription(false);
-				return false;
+	reconcileInspectImageTool(): Promise<boolean> {
+		return this.runToolRegistryMutation(async () => {
+			const expected = isInspectImageToolActive({
+				settings: this.#host.settings,
+				getActiveModel: () => this.#host.model(),
+				getInspectImageModeOverride: () => this.#host.getInspectImageModeOverride(),
+			});
+			// Keep the read tool's advertised description in sync BEFORE any prompt
+			// rebuild below, passing the post-change availability so the prompt never
+			// lags a flip in either direction. Per-read lazy sync is the backstop.
+			const syncReadDescription = (available: boolean): void => {
+				const readTool = this.#toolRegistry.get("read") as
+					| { syncInspectImageState?: (available?: boolean) => boolean }
+					| undefined;
+				readTool?.syncInspectImageState?.(available);
+			};
+			const active = this.getEnabledToolNames();
+			const isActive = active.includes("inspect_image");
+			if (expected === isActive) {
+				syncReadDescription(isActive);
+				return true;
 			}
-			const wrapped = this.#wrapRuntimeTool(tool);
-			this.#toolRegistry.set(wrapped.name, wrapped);
-			this.#builtInToolNames.add(wrapped.name);
-		}
-		syncReadDescription(true);
-		await this.applyActiveToolsByName([...active, "inspect_image"]);
-		return true;
+			if (!expected) {
+				syncReadDescription(false);
+				await this.#applyActiveToolsByName(active.filter(name => name !== "inspect_image"));
+				return true;
+			}
+			if (!this.#toolRegistry.has("inspect_image")) {
+				const tool = await this.#createInspectImageTool?.();
+				if (tool?.name !== "inspect_image") {
+					logger.warn("inspect_image tool could not be created", {
+						model: this.#host.model()?.id,
+					});
+					syncReadDescription(false);
+					return false;
+				}
+				const wrapped = this.#wrapRuntimeTool(tool);
+				this.#toolRegistry.set(wrapped.name, wrapped);
+				this.#builtInToolNames.add(wrapped.name);
+			}
+			syncReadDescription(true);
+			await this.#applyActiveToolsByName([...active, "inspect_image"]);
+			return true;
+		});
 	}
 
 	/**
@@ -1173,20 +1185,20 @@ export class SessionTools {
 	 * path — including retry-fallback switches that bypass
 	 * {@link syncAfterModelChange}.
 	 */
-	async reconcileInspectImageAfterModelChange(): Promise<void> {
-		const before = this.getEnabledToolNames().includes("inspect_image");
-		const reconciled = await this.reconcileInspectImageTool();
-		const after = this.getEnabledToolNames().includes("inspect_image");
-		if (!reconciled || before === after) return;
-		const model = this.#host.model();
-		const modelName = model ? formatModelString(model) : "the current model";
-		this.#host.emitNotice(
-			"info",
-			after
-				? `inspect_image is now available: ${modelName} has no native image input.`
-				: `inspect_image is now hidden: ${modelName} supports image input natively. Override with /vision on.`,
-			"vision",
-		);
+	reconcileInspectImageAfterModelChange(): Promise<void> {
+		return this.runToolRegistryMutation(async () => {
+			const before = this.getEnabledToolNames().includes("inspect_image");
+			const reconciled = await this.reconcileInspectImageTool();
+			const after = this.getEnabledToolNames().includes("inspect_image");
+			if (!reconciled || before === after) return;
+			this.#host.emitNotice(
+				"info",
+				after
+					? "inspect_image is now active for the selected model."
+					: "inspect_image is unavailable for the selected model.",
+				"inspect_image",
+			);
+		});
 	}
 
 	/**
@@ -1197,16 +1209,22 @@ export class SessionTools {
 	 *
 	 * @returns false when `on` was requested but the tool cannot be built here.
 	 */
-	async setInspectImageMode(mode: InspectImageMode): Promise<boolean> {
-		this.#host.setInspectImageModeOverride(mode === "auto" ? undefined : mode);
-		const applied = await this.reconcileInspectImageTool();
-		const { active, model } = this.inspectImageState();
-		logger.debug("inspect_image mode changed", { mode, active, model });
-		return applied;
+	setInspectImageMode(mode: InspectImageMode): Promise<boolean> {
+		return this.runToolRegistryMutation(async () => {
+			this.#host.setInspectImageModeOverride(mode === "auto" ? undefined : mode);
+			const applied = await this.reconcileInspectImageTool();
+			const { active, model } = this.inspectImageState();
+			logger.debug("inspect_image mode changed", { mode, active, model });
+			return applied;
+		});
 	}
 
 	/** Rebuilds the stable base prompt for the current tools and model. */
-	async refreshBaseSystemPrompt(): Promise<void> {
+	refreshBaseSystemPrompt(): Promise<void> {
+		return this.runToolRegistryMutation(() => this.#refreshBaseSystemPrompt());
+	}
+
+	async #refreshBaseSystemPrompt(): Promise<void> {
 		if (this.#host.isDisposed() || !this.#rebuildSystemPrompt) return;
 		const activeToolNames = this.getActiveToolNames();
 		this.#setActiveToolNames?.(activeToolNames);

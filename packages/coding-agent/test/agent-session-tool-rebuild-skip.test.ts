@@ -266,6 +266,34 @@ describe("AgentSession refreshMCPTools rebuild skipping", () => {
 		expect(session.systemPrompt).toEqual(["tools:read,mcp__nucleus_search,mcp__nucleus_fetch"]);
 	});
 
+	it("serializes explicit prompt refreshes with registry mutations", async () => {
+		const mutationEntered = Promise.withResolvers<void>();
+		const releaseMutation = Promise.withResolvers<void>();
+		const releaseStaleRefresh = Promise.withResolvers<void>();
+		const lateTool = createBasicTool("late_prompt_tool", "Late Prompt Tool");
+		const { session, toolRegistry } = newSession(async toolNames => {
+			if (!toolNames.includes(lateTool.name)) await releaseStaleRefresh.promise;
+			return `tools:${toolNames.join(",")}`;
+		});
+
+		const mutation = session.runToolRegistryMutation(async () => {
+			mutationEntered.resolve();
+			await releaseMutation.promise;
+			toolRegistry.set(lateTool.name, lateTool);
+			await session.setActiveToolsByName([...session.getEnabledToolNames(), lateTool.name]);
+		});
+		await mutationEntered.promise;
+		const explicitRefresh = session.refreshBaseSystemPrompt();
+		await Promise.resolve();
+
+		releaseMutation.resolve();
+		await mutation;
+		releaseStaleRefresh.resolve();
+		await explicitRefresh;
+
+		expect(session.systemPrompt).toEqual(["tools:read,mcp__nucleus_search,late_prompt_tool"]);
+	});
+
 	it("drops queued and in-flight MCP prompt commits when disposal begins", async () => {
 		const firstRebuildStarted = Promise.withResolvers<void>();
 		const releaseFirstRebuild = Promise.withResolvers<void>();
