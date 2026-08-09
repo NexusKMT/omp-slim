@@ -45,6 +45,14 @@ class MutableLinesComponent implements Component {
 	}
 }
 
+class WidthLabelComponent implements Component {
+	invalidate(): void {}
+
+	render(width: number): string[] {
+		return [width < 30 ? "narrow layout" : "wide layout"];
+	}
+}
+
 class CommittedMutableLinesComponent implements Component, NativeScrollbackCommittedRows {
 	readonly receivedCommittedRows: number[] = [];
 	#lines: string[];
@@ -332,6 +340,28 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 		});
 	});
 
+	it("repaints a cursorless width-dependent component after resize", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 3, 1000);
+			const tui = new TUI(term);
+			tui.addChild(new WidthLabelComponent());
+
+			try {
+				tui.start();
+				await settle(term);
+				expect(visible(term)).toEqual(["wide layout", "", ""]);
+
+				term.resize(17, 3);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				expect(visible(term)).toEqual(["narrow layout", "", ""]);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
 	it("paints the viewport immediately on resize outside a multiplexer, then replays on settle", async () => {
 		await withEnvPatch(NO_MULTIPLEXER_ENV, async () => {
 			const term = new VirtualTerminal(40, 10, 1000);
@@ -456,6 +486,40 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
 				await settle(term);
 				expect(visible(term).at(-1)).toBe("line-11 updated during resize");
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("retains rows appended inside the multiplexer settle window", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const initial = Array.from({ length: 12 }, (_value, index) => `initial-${index}`);
+			const appended = Array.from({ length: 8 }, (_value, index) => `settle-${index}`);
+			const component = new MutableLinesComponent(initial);
+			const term = new VirtualTerminal(40, 6, 1000);
+			const tui = new TUI(term);
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+
+				term.resize(17, 6);
+				component.setLines([...initial, ...appended]);
+				tui.requestRender();
+
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (const line of [...initial, ...appended]) {
+					expect(
+						buffer.filter(bufferLine => bufferLine === line),
+						line,
+					).toHaveLength(1);
+				}
+				expect(visible(term)).toEqual(appended.slice(-6));
 			} finally {
 				tui.stop();
 			}

@@ -1651,10 +1651,12 @@ export class TUI extends Container {
 					this.#requestResizeViewportPaint();
 					return;
 				}
-				this.#armMultiplexerResizeTimer(
-					false,
-					this.#multiplexerResizeTimer === undefined && (this.#renderRequested || this.#renderTimer !== undefined),
-				);
+				this.#armMultiplexerResizeTimer({
+					clearScrollback: false,
+					hasPendingRender:
+						this.#multiplexerResizeTimer === undefined &&
+						(this.#renderRequested || this.#renderTimer !== undefined),
+				});
 			},
 			() => this.stop(),
 		);
@@ -1935,7 +1937,7 @@ export class TUI extends Container {
 		// the same `#prepareForcedRender(!isMultiplexerSession())` path via
 		// `requestRender(true)`, so the clear-scrollback intent is preserved.
 		if (this.#multiplexerResizeTimer) {
-			this.#armMultiplexerResizeTimer(!isMultiplexerSession(), true);
+			this.#armMultiplexerResizeTimer({ clearScrollback: !isMultiplexerSession() });
 			return;
 		}
 		this.#prepareForcedRender(!isMultiplexerSession());
@@ -1958,7 +1960,9 @@ export class TUI extends Container {
 			// so this guard only catches external callers — the deferred render
 			// itself proceeds straight to `#prepareForcedRender`.
 			if (this.#multiplexerResizeTimer) {
-				this.#armMultiplexerResizeTimer(options?.clearScrollback === true, true);
+				this.#armMultiplexerResizeTimer({
+					clearScrollback: options?.clearScrollback === true,
+				});
 				return;
 			}
 			// A forced render preempts the post-full-paint ConPTY settle: it owns
@@ -2274,9 +2278,9 @@ export class TUI extends Container {
 	 * intent into `#deferredForcedClearScrollback` — the timer's callback
 	 * consumes that flag exactly once when it re-enters `requestRender(true)`.
 	 */
-	#armMultiplexerResizeTimer(clearScrollback: boolean, hasPendingRender = false): void {
-		this.#deferredForcedClearScrollback ||= clearScrollback;
-		this.#multiplexerResizeHasPendingRender ||= hasPendingRender;
+	#armMultiplexerResizeTimer(options: { clearScrollback: boolean; hasPendingRender?: boolean }): void {
+		this.#deferredForcedClearScrollback ||= options.clearScrollback;
+		this.#multiplexerResizeHasPendingRender ||= options.hasPendingRender === true;
 		if (this.#renderTimer) {
 			this.#renderTimer.cancel();
 			this.#renderTimer = undefined;
@@ -3173,12 +3177,19 @@ export class TUI extends Container {
 		} else if (widthEpochReset) {
 			// A terminal width change ends the physical-row coordinate epoch.
 			// Multiplexer history keeps its old wrap, so old committed rows are
-			// opaque. Preserve the native commit ledger, leave the host-reflowed
-			// viewport in place, and record a separate current-width frame
-			// baseline. A resize alone commits and publishes nothing.
-			this.#widthEpochBaselineRows = frameLength;
+			// opaque. Preserve the native commit ledger and establish a separate
+			// current-width baseline. Content queued during the settle window did
+			// not reach the terminal: retain its growth relative to the last
+			// emitted frame so the baseline emitter moves every displaced row into
+			// history before repainting the current viewport.
+			this.#widthEpochBaselineRows = resizeHadPendingRender
+				? Math.min(frameLength, this.#previousFrameLength)
+				: frameLength;
 			windowTop = Math.max(0, frameLength - height);
 			chunkTo = this.#committedRows;
+			widthEpochAppendFrom = this.#widthEpochBaselineRows;
+			const appendBoundary = liveRegionPinned ? finalBoundary : frameLength;
+			widthEpochAppendTo = hasVisibleOverlay ? widthEpochAppendFrom : Math.max(widthEpochAppendFrom, appendBoundary);
 		} else if (this.#widthEpochBaselineRows !== undefined) {
 			// Only rows physically appended after the width epoch may drive the
 			// terminal forward. Keep the native commit count independent of this
@@ -3330,40 +3341,6 @@ export class TUI extends Container {
 			this.#widthEpochBaselineRows = undefined;
 			this.#publishCommittedRows();
 			if (!firstPaint && frameLength > height) this.#armPostFullPaintSettle();
-			return;
-		}
-		if (widthEpochReset) {
-			// The multiplexer has already reflowed the old-width screen. Keep
-			// finalized viewport bytes intact, repaint only the cursor-owning root
-			// component, and establish a current-width ledger baseline.
-			let repaintFromScreenRow = height;
-			if (resizeHadPendingRender) {
-				repaintFromScreenRow = 0;
-			} else if (cursorPos) {
-				const cursorSegmentIndex = this.#frameSegments.findIndex(
-					segment => segment.start <= cursorPos.row && cursorPos.row < segment.start + segment.rowCount,
-				);
-				let liveRootStart =
-					cursorSegmentIndex >= 0 ? this.#frameSegments[cursorSegmentIndex]!.start : cursorPos.row;
-				for (let index = cursorSegmentIndex - 1; index >= 0; index--) {
-					const segment = this.#frameSegments[index]!;
-					if (segment.start < windowTop) break;
-					liveRootStart = segment.start;
-				}
-				repaintFromScreenRow = Math.max(0, Math.min(height, liveRootStart - windowTop));
-			}
-			this.#emitWidthEpochBaseline(frame, window, width, height, cursorPos, purgeSequence, imageTransmitBuffer, {
-				repaintFromScreenRow,
-				commitFrom: 0,
-				commitTo: 0,
-				windowTop,
-				cursorTrackingLineCount,
-				leadingSequence: deferredAltExit,
-			});
-			this.#pendingAltExit = "";
-			this.#windowTopRow = windowTop;
-			this.#clearScrollbackOnNextRender = false;
-			this.#hasEverRendered = true;
 			return;
 		}
 		if (this.#widthEpochBaselineRows !== undefined) {
