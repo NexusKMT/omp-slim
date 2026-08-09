@@ -251,6 +251,11 @@ const CURSOR_RESERVED_HEADERS = new Set([
 	"x-cursor-client-version",
 	"x-cursor-client-type",
 	"x-request-id",
+	// Transport-owned even though this request never sets it: node's http2 client
+	// suppresses the `:authority` it derives from the URL when a plain `host`
+	// header is present, so a caller value here silently retargets the request at
+	// a different virtual host.
+	"host",
 ]);
 
 /**
@@ -262,10 +267,8 @@ const CURSOR_RESERVED_HEADERS = new Set([
  * `ERR_HTTP2_HEADER_SINGLE_VALUE` before the request goes out. Same for a `TE`
  * that is not `trailers`. Node throws on all three classes here rather than
  * ignoring them, so a miss turns a harmless header into a dead request.
- *
- * Exported for tests.
  */
-export function sanitizeCursorCallerHeaders(headers: Record<string, string> | undefined): Record<string, string> {
+function sanitizeCursorCallerHeaders(headers: Record<string, string> | undefined): Record<string, string> {
 	const sanitized: Record<string, string> = {};
 	for (const [name, value] of Object.entries(headers ?? {})) {
 		const field = name.toLowerCase();
