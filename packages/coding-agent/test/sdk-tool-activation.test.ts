@@ -1083,6 +1083,17 @@ describe("createAgentSession defaultInactive tool activation", () => {
 
 		const { session } = await createAgentSession({
 			...baseOptions(tempDir),
+			settings: Settings.isolated({
+				"bashInterceptor.enabled": true,
+				"bashInterceptor.patterns": [
+					{
+						pattern: "^\\s*printf\\s+",
+						tool: "detached_registration_tool",
+						message: "Use the detached registration tool.",
+					},
+				],
+			}),
+			autoApprove: true,
 			extensions: [detachedRegistrationExtension],
 			systemPrompt: defaultPrompt => {
 				if (rejectDetachedPrompt) throw new Error("expected detached registration failure");
@@ -1107,6 +1118,33 @@ describe("createAgentSession defaultInactive tool activation", () => {
 				error: "expected detached registration failure",
 			});
 			expect(session.getToolByName("detached_registration_tool")).toBeUndefined();
+			rejectDetachedPrompt = false;
+			const toolCallId = "detached-rollback-bash";
+			const mock = createMockModel({
+				responses: [
+					{
+						content: [
+							{
+								type: "toolCall",
+								id: toolCallId,
+								name: "bash",
+								arguments: { command: "printf rollback-ok" },
+							},
+						],
+					},
+					{ content: [{ type: "text", text: "done" }] },
+				],
+			});
+			vi.spyOn(session.agent, "streamFn").mockImplementation(mock.stream);
+			await withProviderAuth(["openai"], async () => {
+				await session.prompt("verify rollback context");
+				const bashResult = session.messages.find(
+					(message): message is ToolResultMessage =>
+						message.role === "toolResult" && message.toolCallId === toolCallId,
+				);
+				expect(bashResult?.isError).toBe(false);
+				expect(JSON.stringify(bashResult?.content)).toContain("rollback-ok");
+			});
 		} finally {
 			releaseDetachedRegistration.resolve();
 			await session.dispose();

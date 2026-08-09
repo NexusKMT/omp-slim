@@ -2576,6 +2576,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			autoApprove: options.autoApprove ?? false,
 		});
 		const toolContextStore = new ToolContextStore(getSessionContext);
+		const setSessionActiveToolNames = (names: Iterable<string>): void => {
+			const snapshot = Array.from(names);
+			setActiveToolNames(snapshot);
+			toolContextStore.setToolNames(snapshot);
+		};
 		// Native built-in implementations backing same-tool `ctx.invokeTool`, so a tool that
 		// re-registers a built-in (e.g. wrapping `write`) can delegate to the original — reaching the
 		// unwrapped native execute, which inherits the caller's already-granted approval rather than
@@ -2789,7 +2794,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			toolNames: string[],
 			tools: Map<string, AgentTool>,
 		): Promise<BuildSystemPromptResult> => {
-			toolContextStore.setToolNames(toolNames);
 			const promptCwd = sessionManager.getCwd();
 			const activeRepoContext = hasSession
 				? await logger.time("resolveActiveRepoContext", resolveRepoContext, promptCwd)
@@ -3042,7 +3046,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			if (mountedNames.length > 0 && !initialToolNames.includes("write")) initialToolNames.push("write");
 		}
 
-		setActiveToolNames(initialToolNames);
+		setSessionActiveToolNames(initialToolNames);
 		const { systemPrompt } = await logger.time(
 			"buildSystemPrompt",
 			rebuildSystemPrompt,
@@ -3395,7 +3399,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			getXdevToolEntries: () => (toolSession.xdev ? xdevEntries(toolSession.xdev) : []),
 			xdev: toolSession.xdev,
 			presentationPinnedToolNames: explicitlyRequestedToolNameSet,
-			setActiveToolNames,
+			setActiveToolNames: setSessionActiveToolNames,
 			ensureWriteRegistered,
 			getMcpServerInstructions: mcpManager
 				? () => {

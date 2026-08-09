@@ -1191,12 +1191,14 @@ export class SessionTools {
 			const reconciled = await this.reconcileInspectImageTool();
 			const after = this.getEnabledToolNames().includes("inspect_image");
 			if (!reconciled || before === after) return;
+			const model = this.#host.model();
+			const modelName = model ? formatModelString(model) : "the current model";
 			this.#host.emitNotice(
 				"info",
 				after
-					? "inspect_image is now active for the selected model."
-					: "inspect_image is unavailable for the selected model.",
-				"inspect_image",
+					? `inspect_image is now available: ${modelName} has no native image input.`
+					: `inspect_image is now hidden: ${modelName} supports image input natively. Override with /vision on.`,
+				"vision",
 			);
 		});
 	}
