@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the DAP `runInTerminal` reverse request leaving the spawned debuggee's stdout undrained: the child was spawned with a piped stdout that was never consumed, so a chatty debuggee's output buffered unboundedly in the omp process (toward OOM) and was lost from the session output. Its stdout is now continuously drained into the session output buffer. ([#8111](https://github.com/can1357/oh-my-pi/issues/8111))
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed
