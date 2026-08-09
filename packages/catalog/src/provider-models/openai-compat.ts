@@ -1259,7 +1259,14 @@ export interface XaiModelManagerConfig {
 
 export function xaiModelManagerOptions(config?: XaiModelManagerConfig): ModelManagerOptions<"openai-responses"> {
 	return {
-		...createSimpleOpenAIResponsesOptions("xai", "https://api.x.ai/v1", config),
+		...createOpenAICompatibleModelManagerOptions({
+			api: "openai-responses",
+			providerId: "xai",
+			defaultBaseUrl: "https://api.x.ai/v1",
+			config,
+			requireApiKey: true,
+			mapModel: mapWithBundledReference,
+		}),
 		// Completions → Responses migration: a fresh authoritative cache written
 		// by the old resolver stores `api: "openai-completions"` for these ids.
 		// Without a drop list, `online-if-uncached` skips the network and
