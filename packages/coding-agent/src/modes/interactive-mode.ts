@@ -2513,6 +2513,14 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.#vibeModeOwnerScope?.ownerId === targetVibeScope.ownerId &&
 			this.#vibeModeOwnerScope.parentSessionId === targetVibeScope.parentSessionId &&
 			this.#vibeModeOwnerScope.parentSessionFile === targetVibeScope.parentSessionFile;
+		// #clearTransientModeState below keeps the live active set instead of
+		// applying a snapshot, so for a vibe -> vibe switch the live toolset is
+		// already the reduced vibe set and cannot serve as the pre-vibe snapshot.
+		// That is the only case the persisted snapshot is for: a cold resume or a
+		// switch in from a non-vibe session built its toolset from the current CLI
+		// flags and settings, and that set — not a historical one — is what exiting
+		// vibe must restore.
+		const vibeToolsetLostToTeardown = this.vibeModeEnabled && !preserveVibe;
 		await this.#clearTransientModeState({ preserveVibe, vibeScopeAlreadySuspended });
 		await VibeSessionRegistry.global().rehydrate(vibeSession);
 		const goalEnabled = this.session.settings.get("goal.enabled");
@@ -2552,7 +2560,9 @@ export class InteractiveMode implements InteractiveModeContext {
 			if (!preserveVibe) {
 				await this.#enterVibeMode({
 					persistModeChange: false,
-					previousTools: readPersistedToolNames(sessionContext.modeData?.previousTools),
+					previousTools: vibeToolsetLostToTeardown
+						? readPersistedToolNames(sessionContext.modeData?.previousTools)
+						: undefined,
 				});
 			}
 			return;
