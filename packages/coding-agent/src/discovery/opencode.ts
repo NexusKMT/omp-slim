@@ -81,9 +81,9 @@ async function loadJsonConfig(
  * project `opencode.jsonc`. This matches how OpenCode merges configs — project
  * overrides user, and within a scope `opencode.jsonc` overrides `opencode.json`.
  *
- * Settings consumers deep-merge in item order (last wins), so this order is
- * used as-is. MCP discovery dedupes by name first-wins, so `loadMCPServers`
- * iterates these in reverse (highest precedence first).
+ * Both consumers apply this order low-to-high: settings deep-merge in item
+ * order (last wins) and `loadMCPServers` deep-merges each server across layers
+ * (later overrides earlier), so higher-precedence sources win in both.
  */
 function getConfigSources(ctx: LoadContext): OpenCodeConfigSource[] {
 	const sources: OpenCodeConfigSource[] = [];
@@ -179,78 +179,84 @@ function normalizeCommand(
 }
 
 async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> {
-	const items: MCPServer[] = [];
 	const warnings: string[] = [];
 
-	// Emit highest precedence first so the name-keyed first-wins dedupe in
-	// mcpCapability keeps the server OpenCode would actually use (project over
-	// user, opencode.jsonc over opencode.json).
-	for (const source of getConfigSources(ctx).reverse()) {
+	// Deep-merge each server across config layers in ascending precedence, the
+	// way OpenCode itself merges configs, so a partial higher-precedence override
+	// (e.g. project opencode.jsonc setting only mcp.<name>.timeout) inherits the
+	// command/url from lower-precedence layers instead of shadowing the complete
+	// definition and being rejected by mcpCapability.validate.
+	const mergedByName = new Map<string, Record<string, unknown>>();
+	const sourceByName = new Map<string, OpenCodeConfigSource>();
+
+	for (const source of getConfigSources(ctx)) {
 		const config = await loadJsonConfig(source.path, configPath => {
 			logger.warn("Failed to parse OpenCode config", { path: configPath });
 		});
-		if (!config) continue;
+		if (!config || !isRecord(config.mcp)) continue;
 
-		const result = extractMCPServers(config, source.path, source.level);
-		items.push(...result.items);
-		if (result.warnings) warnings.push(...result.warnings);
+		for (const name in config.mcp) {
+			const raw = config.mcp[name];
+			if (!isRecord(raw)) {
+				warnings.push(`Invalid MCP config for "${name}" in ${source.path}`);
+				continue;
+			}
+			const previous = mergedByName.get(name);
+			mergedByName.set(name, previous ? mergeConfigRecords(previous, raw) : raw);
+			sourceByName.set(name, source);
+		}
+	}
+
+	const items: MCPServer[] = [];
+	for (const [name, config] of mergedByName) {
+		const serverConfig = expandEnvVarsDeep(config) as OpenCodeMCPConfig;
+		const source = sourceByName.get(name)!;
+		items.push(buildMCPServer(name, serverConfig, source));
 	}
 
 	return { items, warnings };
 }
 
-function extractMCPServers(
-	config: Record<string, unknown>,
-	configPath: string,
-	level: "user" | "project",
-): LoadResult<MCPServer> {
-	const items: MCPServer[] = [];
-	const warnings: string[] = [];
+/** Deep-merge two OpenCode config records; `override` wins, nested records recurse. */
+function mergeConfigRecords(base: Record<string, unknown>, override: Record<string, unknown>): Record<string, unknown> {
+	const result: Record<string, unknown> = { ...base };
+	for (const key in override) {
+		const value = override[key];
+		const existing = result[key];
+		result[key] = isRecord(existing) && isRecord(value) ? mergeConfigRecords(existing, value) : value;
+	}
+	return result;
+}
 
-	if (!config.mcp || typeof config.mcp !== "object") {
-		return { items, warnings };
+/** Translate one merged OpenCode MCP entry into the canonical MCPServer shape. */
+function buildMCPServer(name: string, serverConfig: OpenCodeMCPConfig, source: OpenCodeConfigSource): MCPServer {
+	// Determine transport from OpenCode's "type" field
+	let transport: "stdio" | "sse" | "http" | undefined;
+	if (serverConfig.type === "local") {
+		transport = "stdio";
+	} else if (serverConfig.type === "remote") {
+		transport = "http";
+	} else if (serverConfig.url) {
+		transport = "http";
+	} else if (serverConfig.command) {
+		transport = "stdio";
 	}
 
-	const servers = expandEnvVarsDeep(config.mcp as Record<string, unknown>);
+	const command = normalizeCommand(serverConfig.command, serverConfig.args);
+	const env = stringRecord(serverConfig.environment) ?? stringRecord(serverConfig.env);
 
-	for (const [name, raw] of Object.entries(servers)) {
-		if (!raw || typeof raw !== "object") {
-			warnings.push(`Invalid MCP config for "${name}" in ${configPath}`);
-			continue;
-		}
-
-		const serverConfig = raw as OpenCodeMCPConfig;
-
-		// Determine transport from OpenCode's "type" field
-		let transport: "stdio" | "sse" | "http" | undefined;
-		if (serverConfig.type === "local") {
-			transport = "stdio";
-		} else if (serverConfig.type === "remote") {
-			transport = "http";
-		} else if (serverConfig.url) {
-			transport = "http";
-		} else if (serverConfig.command) {
-			transport = "stdio";
-		}
-
-		const command = normalizeCommand(serverConfig.command, serverConfig.args);
-		const env = stringRecord(serverConfig.environment) ?? stringRecord(serverConfig.env);
-
-		items.push({
-			name,
-			command: command.command,
-			args: command.args,
-			env,
-			url: typeof serverConfig.url === "string" ? serverConfig.url : undefined,
-			headers: serverConfig.headers && typeof serverConfig.headers === "object" ? serverConfig.headers : undefined,
-			enabled: serverConfig.enabled,
-			timeout: typeof serverConfig.timeout === "number" ? serverConfig.timeout : undefined,
-			transport,
-			_source: createSourceMeta(PROVIDER_ID, configPath, level),
-		});
-	}
-
-	return { items, warnings };
+	return {
+		name,
+		command: command.command,
+		args: command.args,
+		env,
+		url: typeof serverConfig.url === "string" ? serverConfig.url : undefined,
+		headers: serverConfig.headers && typeof serverConfig.headers === "object" ? serverConfig.headers : undefined,
+		enabled: serverConfig.enabled,
+		timeout: typeof serverConfig.timeout === "number" ? serverConfig.timeout : undefined,
+		transport,
+		_source: createSourceMeta(PROVIDER_ID, source.path, source.level),
+	};
 }
 
 // =============================================================================

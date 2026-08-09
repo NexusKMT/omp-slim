@@ -121,6 +121,43 @@ describe("OpenCode MCP discovery", () => {
 		expect(shared[0]).toMatchObject({ command: "project-jsonc-server", enabled: false });
 	});
 
+	test("inherits lower-precedence fields on partial overrides", async () => {
+		const projectDir = path.join(tempDir, "project");
+		const userConfigDir = path.join(tempDir, ".config", "opencode");
+		await fs.mkdir(projectDir);
+		await fs.mkdir(userConfigDir, { recursive: true });
+
+		// User scope carries the full definition.
+		await fs.writeFile(
+			path.join(userConfigDir, "opencode.json"),
+			JSON.stringify({
+				mcp: {
+					github: {
+						type: "local",
+						command: ["gh-server"],
+						environment: { TOKEN: "user-token" },
+					},
+				},
+			}),
+		);
+		// Project scope overrides only a single field; command/env must survive.
+		await fs.writeFile(
+			path.join(projectDir, "opencode.jsonc"),
+			`{ "mcp": { "github": { "timeout": 5000, "environment": { "REGION": "eu" } } } }`,
+		);
+
+		const servers = await loadOpenCodeMcpConfig(projectDir);
+		const github = servers.filter(server => server.name === "github");
+
+		expect(github).toHaveLength(1);
+		expect(github[0]).toMatchObject({
+			command: "gh-server",
+			transport: "stdio",
+			timeout: 5000,
+			env: { TOKEN: "user-token", REGION: "eu" },
+		});
+	});
+
 	test("parses comments in opencode.json", async () => {
 		await fs.writeFile(
 			path.join(tempDir, "opencode.json"),
