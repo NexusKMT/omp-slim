@@ -483,7 +483,10 @@ Two lifecycle constraints, which apply to both seams:
 - **Register during extension load** (from the default factory), like other
   `register*` calls. Handlers are installed when `ExtensionRunner.initialize` runs;
   an extension that registered nothing by then is skipped entirely, so a first
-  registration made later never takes effect.
+  registration made later never takes effect. The `ctx` a handler receives is built
+  per invocation, not captured at install time, so `ctx.cwd` and `ctx.hasUI` describe
+  the session as it is when the mutation is denied — a workspace change (`/move`) is
+  reflected in the next request rather than pinned to load time.
 - **The registries are process-wide.** A process can host several sessions (a subagent
   gets its own runner), so a handler may be consulted for a denied write or delete
   from any session in the process — not only the one whose extension registered it.

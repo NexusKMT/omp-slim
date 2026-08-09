@@ -16,7 +16,7 @@
  *   *directory* alone does NOT block it (verified empirically) — only a
  *   locked *file* does.
  */
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -471,6 +471,58 @@ describe("registerFileWriteFallback end-to-end (real extension, real session)", 
 			expect(order).toEqual(["throws", "declines", "brokers"]);
 			expect(fs.readFileSync(targetPath, "utf8")).toBe(content);
 		} finally {
+			fs.chmodSync(lockedDir, 0o700);
+			await session.dispose();
+		}
+	});
+
+	itDenied("write: a handler sees the session's CURRENT cwd, not the one captured at init", async () => {
+		// Handlers are installed once, at `ExtensionRunner.initialize`, but every other
+		// extension dispatch builds its `ExtensionContext` per call — and `createContext`
+		// materializes `cwd` as a value. A trampoline holding one context for the life of
+		// the session would keep reporting the workspace it initialized in, so a handler
+		// that scopes or prompts against `ctx.cwd` would allow the old workspace and deny
+		// the new one after a `/move`.
+		const tempDir = makeTempDir();
+		const lockedDir = path.join(tempDir, "locked-cwd");
+		fs.mkdirSync(lockedDir, { recursive: true });
+		lock(lockedDir, 0o500);
+
+		const seenCwds: string[] = [];
+		const factory: ExtensionFactory = pi => {
+			pi.registerFileWriteFallback(async (req, ctx) => {
+				seenCwds.push(ctx.cwd);
+				fs.chmodSync(lockedDir, 0o700);
+				try {
+					fs.writeFileSync(req.dst, req.content);
+				} finally {
+					fs.chmodSync(lockedDir, 0o500);
+				}
+				return true;
+			});
+		};
+
+		const { session } = await createAgentSession(baseOptions(tempDir, [factory]));
+		initializeRunnerForTest(session.extensionRunner);
+
+		// Stands in for `SessionManager.moveTo()` without relocating real session files:
+		// `getCwd()` is the session's own source of truth for its workspace, and it is
+		// what `ExtensionRunner.cwd` reads.
+		const moved = path.join(tempDir, "moved-workspace");
+		fs.mkdirSync(moved, { recursive: true });
+		const cwdSpy = spyOn(session.sessionManager, "getCwd").mockReturnValue(moved);
+
+		try {
+			const writeTool = session.getToolByName("write") as AgentTool | undefined;
+			const writeResult = await writeTool!.execute("call-write-cwd", {
+				path: path.join(lockedDir, "after-move.txt"),
+				content: "export const value = 4;\n",
+			});
+
+			expect(writeResult.isError).not.toBe(true);
+			expect(seenCwds).toEqual([moved]);
+		} finally {
+			cwdSpy.mockRestore();
 			fs.chmodSync(lockedDir, 0o700);
 			await session.dispose();
 		}

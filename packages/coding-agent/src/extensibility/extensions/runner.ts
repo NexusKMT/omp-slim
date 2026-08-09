@@ -613,8 +613,8 @@ export class ExtensionRunner {
 		this.#initialized = true;
 
 		// Re-initialize (e.g. a mode switch rewiring UI/runtime actions) must not
-		// accumulate duplicate global registrations — drop the prior generation
-		// before installing trampolines bound to the freshly wired context.
+		// accumulate duplicate global registrations — drop the prior generation before
+		// installing this one's trampolines.
 		this.disposeFileFallbacks();
 		for (const ext of this.extensions) {
 			// Nothing registered by this extension means no trampoline, so a host with
@@ -624,10 +624,20 @@ export class ExtensionRunner {
 			// extension that only brokers writes never appears in the delete registry.
 			if (ext.fileWriteFallbackHandlers.length === 0 && ext.fileDeleteFallbackHandlers.length === 0) continue;
 			// One trampoline per extension per seam, not per handler: the list is walked
-			// at write time so a handler this extension adds later still takes effect,
-			// and `createContext()` takes no extension argument so a single context per
-			// extension is all any of its handlers would have received anyway.
-			const ctx = this.createContext();
+			// at mutation time so a handler this extension adds later still takes effect,
+			// and `createContext()` takes no extension argument, so within one invocation
+			// a single context is all any of this extension's handlers would have
+			// received anyway.
+			//
+			// The context is built PER INVOCATION rather than captured here, matching
+			// every other dispatch site. `createContext()` materializes `cwd` and
+			// `hasUI` as values, so a trampoline holding one context for the life of the
+			// session would keep handing handlers the workspace this runner initialized
+			// in — wrong the moment `SessionManager.moveTo()` relocates the session
+			// (`/move`), and a handler that scopes or prompts against `ctx.cwd` would
+			// then allow the old workspace and deny the new one. A denied mutation is a
+			// rare path, so the extra object costs nothing that matters.
+			//
 			// Isolation is per HANDLER, not per extension. The registry only sees one
 			// trampoline per extension, so a throw escaping this loop would advance the
 			// registry to the NEXT extension and skip every later handler this one
@@ -636,6 +646,7 @@ export class ExtensionRunner {
 			if (ext.fileWriteFallbackHandlers.length > 0) {
 				this.#fileFallbackDisposers.push(
 					addFileWriteFallback(async req => {
+						const ctx = this.createContext();
 						for (const handler of ext.fileWriteFallbackHandlers) {
 							try {
 								if (await handler(req, ctx)) return true;
@@ -653,6 +664,7 @@ export class ExtensionRunner {
 			if (ext.fileDeleteFallbackHandlers.length > 0) {
 				this.#fileFallbackDisposers.push(
 					addFileDeleteFallback(async req => {
+						const ctx = this.createContext();
 						for (const handler of ext.fileDeleteFallbackHandlers) {
 							try {
 								if (await handler(req, ctx)) return true;
