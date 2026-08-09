@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
-import type { Model } from "@oh-my-pi/pi-ai";
+import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { GoalTool } from "@oh-my-pi/pi-coding-agent/goals/tools/goal-tool";
@@ -134,15 +134,19 @@ async function waitForMicrotasks(): Promise<void> {
 async function armInputWaiter(mode: InteractiveMode): Promise<{
 	inputPromise: Promise<void>;
 	getResolvedText: () => string | undefined;
+	getResolvedImages: () => ImageContent[] | undefined;
 }> {
 	let resolvedText: string | undefined;
+	let resolvedImages: ImageContent[] | undefined;
 	const inputPromise = mode.getUserInput().then(input => {
 		resolvedText = input.text;
+		resolvedImages = input.images;
 	});
 	await waitForMicrotasks();
 	return {
 		inputPromise,
 		getResolvedText: () => resolvedText,
+		getResolvedImages: () => resolvedImages,
 	};
 }
 
@@ -239,6 +243,39 @@ describe("InteractiveMode goal mode integration", () => {
 		streaming = false;
 		harness.mode.onInputCallback?.(harness.mode.startPendingSubmission({ text: "cleanup" }));
 		await waiter.inputPromise;
+	});
+
+	it("carries composer images into the initial goal objective submission", async () => {
+		// Regression: `/goal <objective>` built its submission from the draft text
+		// alone, so the objective kept its positional `[Image #1]` marker while the
+		// payload stayed behind on the editor and leaked into the next message.
+		const image: ImageContent = { type: "image", data: "aW1hZ2U=", mimeType: "image/png" };
+		harness.mode.editor.pendingImages = [image];
+		harness.mode.editor.pendingImageLinks = ["file:///shot.png"];
+		const waiter = await armInputWaiter(harness.mode);
+
+		await harness.mode.handleGoalModeCommand("[Image #1, 10x10] fix this");
+		await waiter.inputPromise;
+
+		expect(waiter.getResolvedText()).toBe("[Image #1, 10x10] fix this");
+		expect(waiter.getResolvedImages()).toEqual([image]);
+		expect(harness.mode.editor.pendingImages).toEqual([]);
+		expect(harness.mode.editor.pendingImageLinks).toEqual([]);
+	});
+
+	it("carries composer images into the replacement goal objective submission", async () => {
+		await harness.mode.handleGoalModeCommand("Ship the release");
+		const image: ImageContent = { type: "image", data: "cmVwbGFjZQ==", mimeType: "image/png" };
+		harness.mode.editor.pendingImages = [image];
+		harness.mode.editor.pendingImageLinks = [undefined];
+		const waiter = await armInputWaiter(harness.mode);
+
+		await harness.mode.handleGoalModeCommand("set [Image #1, 10x10] replace this");
+		await waiter.inputPromise;
+
+		expect(waiter.getResolvedText()).toBe("[Image #1, 10x10] replace this");
+		expect(waiter.getResolvedImages()).toEqual([image]);
+		expect(harness.mode.editor.pendingImages).toEqual([]);
 	});
 
 	it("includes escaped live todo state in hidden goal context during continuations", async () => {

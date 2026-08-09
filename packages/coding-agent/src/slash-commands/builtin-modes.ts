@@ -183,7 +183,7 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		},
 		handleTui: async (command, runtime) => {
 			await runtime.ctx.handlePlanModeCommand(command.args || undefined);
-			runtime.ctx.editor.setText("");
+			runtime.ctx.editor.clearDraft();
 		},
 	},
 	{
@@ -209,7 +209,7 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		},
 		handleTui: async (command, runtime) => {
 			await runtime.ctx.handleVibeModeCommand(command.args || undefined);
-			runtime.ctx.editor.setText("");
+			runtime.ctx.editor.clearDraft();
 		},
 	},
 	{
@@ -233,7 +233,7 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		},
 		handleTui: async (command, runtime) => {
 			await runtime.ctx.handleGoalModeCommand(command.args || undefined);
-			runtime.ctx.editor.setText("");
+			runtime.ctx.editor.clearDraft();
 		},
 	},
 	{
@@ -245,7 +245,7 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			// Clear the slash draft BEFORE the await: the handler blocks for the
 			// whole kickoff turn, and a post-await clear would wipe an answer the
 			// user starts typing while the first interview question streams.
-			runtime.ctx.editor.setText("");
+			runtime.ctx.editor.clearDraft();
 			await runtime.ctx.handleGuidedGoalCommand(command.args || undefined);
 		},
 	},

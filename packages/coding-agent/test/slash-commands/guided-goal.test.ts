@@ -4,13 +4,13 @@ import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-comm
 
 function createRuntime(handler: () => Promise<void>) {
 	const handleGuidedGoalCommand = vi.fn(handler);
-	const setText = vi.fn();
+	const clearDraft = vi.fn();
 	return {
 		handleGuidedGoalCommand,
-		setText,
+		clearDraft,
 		runtime: {
 			ctx: {
-				editor: { setText } as unknown as InteractiveModeContext["editor"],
+				editor: { clearDraft } as unknown as InteractiveModeContext["editor"],
 				handleGuidedGoalCommand,
 			} as unknown as InteractiveModeContext,
 		},
@@ -29,12 +29,12 @@ describe("/guided-goal slash command", () => {
 
 		// The command text must be gone before the turn resolves, so an answer
 		// typed while the first question streams is never wiped.
-		expect(harness.setText).toHaveBeenCalledWith("");
-		harness.setText.mockClear();
+		expect(harness.clearDraft).toHaveBeenCalled();
+		harness.clearDraft.mockClear();
 
 		resolve();
 		expect(await dispatched).toBe(true);
-		expect(harness.setText).not.toHaveBeenCalled();
+		expect(harness.clearDraft).not.toHaveBeenCalled();
 		expect(harness.handleGuidedGoalCommand).toHaveBeenCalledWith("ship the release");
 	});
 

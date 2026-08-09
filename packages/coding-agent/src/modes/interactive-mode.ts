@@ -1584,6 +1584,22 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.addMessageToChat(message, options);
 	}
 
+	/** Detach the composer's pending images so they ride along with the submission
+	 *  that consumes the draft. Mode commands that promote the draft into a turn
+	 *  (`/goal`, `/plan`, `/vibe`) build their submission from the draft *text*
+	 *  only; without this the positional `[Image #N]` markers survive into the
+	 *  message while every payload is dropped, and the orphaned images leak into
+	 *  whatever the user sends next. Mirrors the editor-submit path in
+	 *  `InputController`. `cancelPendingSubmission` restores them on cancel. */
+	#takeDraftImages(): { images?: ImageContent[]; imageLinks?: (string | undefined)[] } {
+		if (this.editor.pendingImages.length === 0) return {};
+		const images = [...this.editor.pendingImages];
+		const imageLinks = this.editor.pendingImageLinks.length > 0 ? [...this.editor.pendingImageLinks] : undefined;
+		this.editor.pendingImages = [];
+		this.editor.pendingImageLinks = [];
+		return { images, imageLinks };
+	}
+
 	startPendingSubmission(input: {
 		text: string;
 		images?: ImageContent[];
@@ -3321,7 +3337,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		await this.#enterPlanMode();
 		if (initialPrompt && this.onInputCallback) {
-			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt }));
+			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt, ...this.#takeDraftImages() }));
 		}
 	}
 
@@ -3347,7 +3363,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		await this.#enterVibeMode();
 		if (initialPrompt && this.onInputCallback) {
-			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt }));
+			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt, ...this.#takeDraftImages() }));
 		}
 	}
 
@@ -3669,7 +3685,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		await this.#enterGoalMode({ objective, silent: true });
 		this.#resetGoalContinuationSuppression();
 		if (!this.session.isStreaming && this.onInputCallback) {
-			this.onInputCallback(this.startPendingSubmission({ text: objective }));
+			this.onInputCallback(this.startPendingSubmission({ text: objective, ...this.#takeDraftImages() }));
 		}
 	}
 
@@ -3684,7 +3700,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			await this.session.sendGoalModeContext({ deliverAs: "steer" });
 		}
 		if (!this.session.isStreaming && this.onInputCallback) {
-			this.onInputCallback(this.startPendingSubmission({ text: objective }));
+			this.onInputCallback(this.startPendingSubmission({ text: objective, ...this.#takeDraftImages() }));
 		}
 	}
 
