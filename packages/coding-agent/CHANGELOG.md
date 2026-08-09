@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the CLI crashing at startup with a raw uncaught `AuthBrokerError` when a configured auth broker (`auth.broker.url` / `OMP_AUTH_BROKER_URL`) is unreachable and no fresh cached snapshot exists. Startup auth discovery now fails with an actionable message naming the broker URL and the recovery options (`omp auth-broker serve`, or resetting `auth.broker.url` / `auth.broker.token`) and exits non-zero, instead of dumping a stack trace ([#8096](https://github.com/can1357/oh-my-pi/issues/8096)).
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed
