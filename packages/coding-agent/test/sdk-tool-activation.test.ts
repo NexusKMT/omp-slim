@@ -178,6 +178,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			});
 			pi.on("input", async () => {
 				await startupPromise;
+				await pi.setActiveTools([...pi.getActiveTools(), "late_active_tool"]);
 			});
 		};
 
@@ -190,10 +191,19 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			expect(session.getAllToolNames()).not.toContain("late_active_tool");
 			const runner = session.extensionRunner;
 			if (!runner) throw new Error("expected extension runner");
-			await runner.emit({ type: "session_start" });
+			const errors: string[] = [];
+			const unsubscribe = runner.onError(error => {
+				errors.push(error.error);
+			});
+			await initializeExtensions(session, {
+				reportSendError: vi.fn(),
+				reportRuntimeError: vi.fn(),
+			});
 			expect(session.getAllToolNames()).not.toContain("late_active_tool");
 			startupGate.resolve();
 			await runner.emitInput("probe", undefined, "interactive");
+			unsubscribe();
+			expect(errors).toEqual([]);
 
 			expect(session.getAllToolNames()).toEqual(expect.arrayContaining(["late_active_tool", "late_inactive_tool"]));
 			expect(session.getEnabledToolNames()).toContain("late_active_tool");

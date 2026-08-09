@@ -386,7 +386,7 @@ export class SessionTools {
 			return this.#toolRegistryMutationScope.run(true, mutation);
 		});
 		const operation = untilAborted(signal, serialized);
-		this.#toolRegistryMutationTail = operation.then(
+		this.#toolRegistryMutationTail = serialized.then(
 			() => undefined,
 			() => undefined,
 		);

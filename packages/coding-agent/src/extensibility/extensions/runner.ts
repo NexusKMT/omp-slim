@@ -1053,13 +1053,6 @@ export class ExtensionRunner {
 					} catch (error) {
 						handlerFailure ??= { error };
 					}
-					const registrationBarrier = this.#toolRegistrationBarrier;
-					if (registrationBarrier) {
-						// Also wait for detached registrations that were scheduled before this
-						// handler completed. Their failures are reported at registration time,
-						// not attributed to this unrelated handler.
-						await registrationBarrier;
-					}
 					return result;
 				},
 				timeoutMs,

@@ -1448,6 +1448,56 @@ describe("ExtensionRunner", () => {
 			});
 		});
 
+		it("does not charge detached registrations to unrelated tool-call handlers", async () => {
+			const extensionPath = path.join(tempDir.path(), "detached-registration-barrier.ts");
+			fs.writeFileSync(
+				extensionPath,
+				`
+					export default function(pi) {
+						const { Type } = pi.typebox;
+						pi.registerTool({
+							name: "detached_source_tool",
+							label: "Detached Source Tool",
+							description: "Provides a registration event for the detached barrier test.",
+							parameters: Type.Object({}),
+							execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
+						});
+						pi.on("tool_call", () => undefined);
+					}
+				`,
+			);
+
+			const loaded = await loadTestExtensions([extensionPath]);
+			const runner = new ExtensionRunner(
+				loaded.extensions,
+				loaded.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			runner.onToolRegistered(() => Promise.withResolvers<void>().promise);
+			const extension = loaded.extensions[0];
+			const registrationListener = extension?.toolRegistrationListeners?.values().next().value;
+			if (!registrationListener) throw new Error("expected registration listener");
+			registrationListener("detached_source_tool");
+
+			const errors: ExtensionError[] = [];
+			runner.onError(error => {
+				errors.push(error);
+			});
+			testSetExtensionHandlerTimeoutMs(10);
+
+			const result = await runner.emitToolCall({
+				type: "tool_call",
+				toolName: "unrelated",
+				toolCallId: "unrelated-call",
+				input: {},
+			});
+
+			expect(result).toBeUndefined();
+			expect(errors).toEqual([]);
+		});
+
 		it("aborts a tool_call handler's confirmation before returning its timeout block", async () => {
 			const extensionPath = path.join(tempDir.path(), "confirm-tool-call.ts");
 			const markerPath = path.join(tempDir.path(), "confirm-settled.txt");

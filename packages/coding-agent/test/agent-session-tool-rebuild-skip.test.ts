@@ -294,6 +294,37 @@ describe("AgentSession refreshMCPTools rebuild skipping", () => {
 		expect(session.systemPrompt).toEqual(["tools:read,mcp__nucleus_search,late_prompt_tool"]);
 	});
 
+	it("keeps queued mutations serialized when a waiting caller aborts", async () => {
+		const firstMutationEntered = Promise.withResolvers<void>();
+		const releaseFirstMutation = Promise.withResolvers<void>();
+		const { session } = newSession(async toolNames => `tools:${toolNames.join(",")}`);
+		const firstMutation = session.runToolRegistryMutation(async () => {
+			firstMutationEntered.resolve();
+			await releaseFirstMutation.promise;
+		});
+		await firstMutationEntered.promise;
+
+		const controller = new AbortController();
+		let abortedMutationRan = false;
+		const abortedMutation = session.runToolRegistryMutation(async () => {
+			abortedMutationRan = true;
+		}, controller.signal);
+		controller.abort(new Error("cancel queued mutation"));
+		await expect(abortedMutation).rejects.toThrow("cancel queued mutation");
+
+		let thirdMutationRan = false;
+		const thirdMutation = session.runToolRegistryMutation(async () => {
+			thirdMutationRan = true;
+		});
+		await Promise.resolve();
+		expect(thirdMutationRan).toBe(false);
+
+		releaseFirstMutation.resolve();
+		await Promise.all([firstMutation, thirdMutation]);
+		expect(abortedMutationRan).toBe(false);
+		expect(thirdMutationRan).toBe(true);
+	});
+
 	it("drops queued and in-flight MCP prompt commits when disposal begins", async () => {
 		const firstRebuildStarted = Promise.withResolvers<void>();
 		const releaseFirstRebuild = Promise.withResolvers<void>();
