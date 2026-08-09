@@ -585,6 +585,8 @@ describe("createAgentSession defaultInactive tool activation", () => {
 
 	it("restores a built-in tool and its provenance when a replacement prompt rebuild fails", async () => {
 		let rejectReplacementPrompt = false;
+		const releaseHandler = Promise.withResolvers<void>();
+		const replacementRefreshAttempted = Promise.withResolvers<void>();
 		const tempDir = makeTempDir();
 		const replacementExtension: ExtensionFactory = pi => {
 			pi.on("session_start", async () => {
@@ -598,6 +600,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 						return { content: [{ type: "text", text: "rejected" }] };
 					},
 				});
+				await releaseHandler.promise;
 			});
 		};
 
@@ -605,10 +608,14 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			...baseOptions(tempDir),
 			extensions: [replacementExtension],
 			systemPrompt: defaultPrompt => {
-				if (rejectReplacementPrompt) throw new Error("expected replacement prompt failure");
+				if (rejectReplacementPrompt) {
+					replacementRefreshAttempted.resolve();
+					throw new Error("expected replacement prompt failure");
+				}
 				return defaultPrompt;
 			},
 		});
+		let emission: Promise<unknown> | undefined;
 
 		try {
 			const enabledBefore = session.getEnabledToolNames();
@@ -624,7 +631,11 @@ describe("createAgentSession defaultInactive tool activation", () => {
 				errors.push(error.error);
 			});
 			rejectReplacementPrompt = true;
-			await runner.emit({ type: "session_start" });
+			emission = runner.emit({ type: "session_start" });
+			await replacementRefreshAttempted.promise;
+			expect(errors).not.toContain("expected replacement prompt failure");
+			releaseHandler.resolve();
+			await emission;
 			unsubscribe();
 
 			expect(errors).toContain("expected replacement prompt failure");
@@ -634,6 +645,8 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			expect(session.getMountedXdevToolNames()).toEqual(mountedBefore);
 			expect(session.systemPrompt).toEqual(promptBefore);
 		} finally {
+			releaseHandler.resolve();
+			await emission;
 			await session.dispose();
 		}
 	});

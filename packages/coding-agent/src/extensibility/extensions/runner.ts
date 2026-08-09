@@ -702,12 +702,12 @@ export class ExtensionRunner {
 					this.#pendingToolRegistrations.add(pending);
 					void pending.then(
 						() => this.#pendingToolRegistrations.delete(pending),
-						() => this.#pendingToolRegistrations.delete(pending),
+						() => {},
 					);
 				} catch (error) {
 					const pending = Promise.reject(error);
 					this.#pendingToolRegistrations.add(pending);
-					void pending.catch(() => this.#pendingToolRegistrations.delete(pending));
+					void pending.catch(() => {});
 				}
 			};
 			extension.toolRegistrationListeners ??= new Set();
@@ -724,9 +724,12 @@ export class ExtensionRunner {
 	async #flushToolRegistrations(): Promise<void> {
 		let firstFailure: PromiseRejectedResult | undefined;
 		while (this.#pendingToolRegistrations.size > 0) {
-			const settled = await Promise.allSettled(this.#pendingToolRegistrations);
-			for (const result of settled) {
-				if (!firstFailure && result.status === "rejected") firstFailure = result;
+			const pending = Array.from(this.#pendingToolRegistrations);
+			const settled = await Promise.allSettled(pending);
+			for (let index = 0; index < settled.length; index += 1) {
+				this.#pendingToolRegistrations.delete(pending[index]);
+				const result = settled[index];
+				if (!firstFailure && result?.status === "rejected") firstFailure = result;
 			}
 		}
 		if (firstFailure) throw firstFailure.reason;
