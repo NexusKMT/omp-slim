@@ -981,32 +981,26 @@ export class ExtensionRunner {
 				? event.signal
 				: undefined;
 		if (signal?.aborted) return undefined;
+		let handlerResult: TResult | typeof EXTENSION_HANDLER_TIMEOUT | typeof EXTENSION_HANDLER_ABORTED | undefined;
+		let handlerFailure: { error: unknown } | undefined;
 		try {
-			const handlerResult = await raceHandlerWithTimeout(
+			handlerResult = await raceHandlerWithTimeout(
 				handlerSignal => handler(event, createHandlerContext(ctx, handlerSignal)),
 				timeoutMs,
 				signal,
 			);
+		} catch (error) {
+			handlerFailure = { error };
+		}
+		try {
 			await this.#flushToolRegistrations();
-			if (handlerResult === EXTENSION_HANDLER_ABORTED) return undefined;
-			if (handlerResult === EXTENSION_HANDLER_TIMEOUT) {
-				const error = `handler timed out after ${timeoutMs}ms`;
-				logger.warn("Extension handler timed out", {
-					extensionPath: ext.path,
-					event: event.type,
-					timeoutMs,
-				});
-				this.emitError({
-					extensionPath: ext.path,
-					event: event.type,
-					error,
-				});
-				return undefined;
-			}
-			return handlerResult as TResult | undefined;
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			const stack = err instanceof Error ? err.stack : undefined;
+		} catch (error) {
+			handlerFailure ??= { error };
+		}
+		if (handlerFailure) {
+			const message =
+				handlerFailure.error instanceof Error ? handlerFailure.error.message : String(handlerFailure.error);
+			const stack = handlerFailure.error instanceof Error ? handlerFailure.error.stack : undefined;
 			this.emitError({
 				extensionPath: ext.path,
 				event: event.type,
@@ -1015,6 +1009,22 @@ export class ExtensionRunner {
 			});
 			return undefined;
 		}
+		if (handlerResult === EXTENSION_HANDLER_ABORTED) return undefined;
+		if (handlerResult === EXTENSION_HANDLER_TIMEOUT) {
+			const error = `handler timed out after ${timeoutMs}ms`;
+			logger.warn("Extension handler timed out", {
+				extensionPath: ext.path,
+				event: event.type,
+				timeoutMs,
+			});
+			this.emitError({
+				extensionPath: ext.path,
+				event: event.type,
+				error,
+			});
+			return undefined;
+		}
+		return handlerResult as TResult | undefined;
 	}
 
 	async emit<TEvent extends RunnerEmitEvent>(event: TEvent): Promise<RunnerEmitResult<TEvent>> {

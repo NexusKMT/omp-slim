@@ -3465,9 +3465,15 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				const enabled = session.getEnabledToolNames();
 				const alreadyEnabled = enabled.includes(name);
 				const explicitlyRequested = explicitlyRequestedToolNameSet?.has(name) === true;
-				if (!alreadyEnabled && registered.definition.defaultInactive && !explicitlyRequested) return;
-
 				const mounted = session.getMountedXdevToolNames();
+				if (registered.definition.defaultInactive && !explicitlyRequested) {
+					if (!alreadyEnabled) return;
+					await session.setActiveToolPresentation(
+						enabled.filter(enabledName => enabledName !== name),
+						mounted.filter(mountedName => mountedName !== name),
+					);
+					return;
+				}
 				const shouldMount =
 					!alreadyEnabled &&
 					!explicitlyRequested &&

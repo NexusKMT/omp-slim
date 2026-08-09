@@ -240,6 +240,102 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		}
 	});
 
+	it("deactivates an enabled tool when a late replacement is default-inactive", async () => {
+		const tempDir = makeTempDir();
+		const lateInactiveReplacement: ExtensionFactory = pi => {
+			pi.on("session_start", async () => {
+				await Promise.resolve();
+				pi.registerTool({
+					name: "bash",
+					label: "Late Inactive Bash",
+					description: "A late replacement that must remain disabled by default.",
+					parameters: type({}),
+					defaultInactive: true,
+					async execute() {
+						return { content: [{ type: "text", text: "late inactive bash" }] };
+					},
+				});
+			});
+		};
+
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [lateInactiveReplacement],
+		});
+
+		try {
+			expect(session.getEnabledToolNames()).toContain("bash");
+			const runner = session.extensionRunner;
+			if (!runner) throw new Error("expected extension runner");
+			await runner.emit({ type: "session_start" });
+
+			expect(session.getToolByName("bash")?.label).toBe("Late Inactive Bash");
+			expect(session.getEnabledToolNames()).not.toContain("bash");
+			expect(session.getActiveToolNames()).not.toContain("bash");
+			expect(session.getMountedXdevToolNames()).not.toContain("bash");
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	it("publishes late tools before returning from a failing lifecycle handler", async () => {
+		const tempDir = makeTempDir();
+		const activationEntered = Promise.withResolvers<void>();
+		const releaseActivation = Promise.withResolvers<void>();
+		const failingRegistrationExtension: ExtensionFactory = pi => {
+			pi.on("session_start", async () => {
+				await Promise.resolve();
+				pi.registerTool({
+					name: "late_tool_before_failure",
+					label: "Late Tool Before Failure",
+					description: "Registered before its lifecycle handler fails.",
+					parameters: type({}),
+					async execute() {
+						return { content: [{ type: "text", text: "late tool before failure" }] };
+					},
+				});
+				throw new Error("expected lifecycle failure");
+			});
+		};
+
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [failingRegistrationExtension],
+		});
+		const originalSetPresentation = session.setActiveToolPresentation.bind(session);
+		vi.spyOn(session, "setActiveToolPresentation").mockImplementation(async (toolNames, mountedToolNames) => {
+			activationEntered.resolve();
+			await releaseActivation.promise;
+			await originalSetPresentation(toolNames, mountedToolNames);
+		});
+		const runner = session.extensionRunner;
+		if (!runner) throw new Error("expected extension runner");
+		let emissionCompleted = false;
+		const emission = runner.emit({ type: "session_start" }).finally(() => {
+			emissionCompleted = true;
+		});
+
+		try {
+			await activationEntered.promise;
+			// Drain the handler rejection and outer emit continuations without releasing the registration apply.
+			await Promise.resolve();
+			await Promise.resolve();
+			await Promise.resolve();
+			await Promise.resolve();
+			expect(emissionCompleted).toBe(false);
+
+			releaseActivation.resolve();
+			await emission;
+			expect(session.getAllToolNames()).toContain("late_tool_before_failure");
+			expect(session.getEnabledToolNames()).toContain("late_tool_before_failure");
+			expect(session.systemPrompt.join("\n")).toContain("late_tool_before_failure");
+		} finally {
+			releaseActivation.resolve();
+			await emission;
+			await session.dispose();
+		}
+	});
+
 	it("keeps the stable MCP tool-name collision winner during late registration", async () => {
 		const tempDir = makeTempDir();
 		const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
