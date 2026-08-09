@@ -1020,6 +1020,7 @@ export class ExtensionRunner {
 		ctx: ExtensionContext,
 		ext: Extension,
 		timeoutMs: number,
+		onFailure?: (kind: "timeout" | "error", message: string) => TResult,
 	): Promise<TResult | undefined> {
 		const signal =
 			event.type === "session_stop" && "signal" in event && event.signal instanceof AbortSignal
@@ -1077,7 +1078,7 @@ export class ExtensionRunner {
 				event: event.type,
 				error,
 			});
-			return undefined;
+			return onFailure?.("timeout", error);
 		}
 		if (handlerFailure) {
 			const message =
@@ -1089,7 +1090,7 @@ export class ExtensionRunner {
 				error: message,
 				stack,
 			});
-			return undefined;
+			return onFailure?.("error", message);
 		}
 		return handlerResult as TResult | undefined;
 	}
@@ -1225,46 +1226,26 @@ export class ExtensionRunner {
 			if (!handlers || handlers.length === 0) continue;
 
 			for (const handler of handlers) {
-				try {
-					const handlerResult = await raceHandlerWithTimeout(
-						handlerSignal => handler(event, createHandlerContext(ctx, handlerSignal)),
-						timeoutMs,
-					);
+				const handlerResult = await this.#runHandlerWithTimeout(
+					handler,
+					event,
+					ctx,
+					ext,
+					timeoutMs,
+					(kind, message) => ({
+						block: true,
+						reason:
+							kind === "timeout"
+								? `Extension ${ext.path} timed out after ${timeoutMs}ms`
+								: `Extension ${ext.path} failed: ${message}`,
+					}),
+				);
 
-					if (handlerResult === EXTENSION_HANDLER_TIMEOUT) {
-						const error = `handler timed out after ${timeoutMs}ms`;
-						logger.warn("Extension handler timed out", {
-							extensionPath: ext.path,
-							event: "tool_call",
-							timeoutMs,
-						});
-						this.emitError({
-							extensionPath: ext.path,
-							event: "tool_call",
-							error,
-						});
-						return {
-							block: true,
-							reason: `Extension ${ext.path} timed out after ${timeoutMs}ms`,
-						};
+				if (handlerResult) {
+					result = handlerResult;
+					if (result.block) {
+						return result;
 					}
-
-					if (handlerResult) {
-						result = handlerResult as ToolCallEventResult;
-						if (result.block) {
-							return result;
-						}
-					}
-				} catch (err) {
-					const message = err instanceof Error ? err.message : String(err);
-					const stack = err instanceof Error ? err.stack : undefined;
-					this.emitError({
-						extensionPath: ext.path,
-						event: "tool_call",
-						error: message,
-						stack,
-					});
-					return { block: true, reason: `Extension ${ext.path} failed: ${message}` };
 				}
 			}
 		}

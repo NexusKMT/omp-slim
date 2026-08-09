@@ -1386,6 +1386,68 @@ describe("ExtensionRunner", () => {
 			warnSpy.mockRestore();
 		});
 
+		it("fails closed when a tool_call handler registration cannot activate", async () => {
+			const extensionPath = path.join(tempDir.path(), "tool-call-registration.ts");
+			fs.writeFileSync(
+				extensionPath,
+				`
+					export default function(pi) {
+						pi.on("tool_call", () => {
+							const { Type } = pi.typebox;
+							pi.registerTool({
+								name: "tool_call_registered",
+								label: "Tool Call Registered",
+								description: "Registered from a tool-call hook.",
+								parameters: Type.Object({}),
+								execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
+							});
+						});
+					}
+				`,
+			);
+
+			const result = await loadTestExtensions([extensionPath]);
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			runner.onToolRegistered(async () => {
+				throw new Error("expected tool-call registration failure");
+			});
+			const errors: ExtensionError[] = [];
+			runner.onError(error => {
+				errors.push(error);
+			});
+			const executeCalls: unknown[] = [];
+			const wrapped = new ExtensionToolWrapper(
+				{
+					name: "gated",
+					label: "Gated",
+					description: "Must not execute after a gate registration fails.",
+					parameters: Type.Object({}),
+					execute: async (_id, params) => {
+						executeCalls.push(params);
+						return { content: [{ type: "text", text: "ran" }] };
+					},
+				},
+				runner,
+			);
+
+			await expect(wrapped.execute("tool-call-id", {})).rejects.toThrow(
+				`Extension ${extensionPath} failed: expected tool-call registration failure`,
+			);
+			expect(executeCalls).toEqual([]);
+			expect(errors).toContainEqual({
+				extensionPath,
+				event: "tool_call",
+				error: "expected tool-call registration failure",
+				stack: expect.any(String),
+			});
+		});
+
 		it("aborts a tool_call handler's confirmation before returning its timeout block", async () => {
 			const extensionPath = path.join(tempDir.path(), "confirm-tool-call.ts");
 			const markerPath = path.join(tempDir.path(), "confirm-settled.txt");
