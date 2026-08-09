@@ -1,13 +1,22 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type MCPServer, mcpCapability } from "@oh-my-pi/pi-coding-agent/capability/mcp";
+import { type Settings, settingsCapability } from "@oh-my-pi/pi-coding-agent/capability/settings";
 import { loadCapability } from "@oh-my-pi/pi-coding-agent/discovery";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 async function loadOpenCodeMcpConfig(cwd: string): Promise<MCPServer[]> {
 	const result = await loadCapability<MCPServer>(mcpCapability.id, {
+		cwd,
+		providers: ["opencode"],
+	});
+	return result.items;
+}
+
+async function loadOpenCodeSettings(cwd: string): Promise<Settings[]> {
+	const result = await loadCapability<Settings>(settingsCapability.id, {
 		cwd,
 		providers: ["opencode"],
 	});
@@ -22,9 +31,86 @@ describe("OpenCode MCP discovery", () => {
 	});
 
 	afterEach(async () => {
+		vi.restoreAllMocks();
 		await removeWithRetries(tempDir);
 	});
 
+	test("discovers commented JSONC config at user and project scopes", async () => {
+		const projectDir = path.join(tempDir, "project");
+		const userConfigDir = path.join(tempDir, ".config", "opencode");
+		await fs.mkdir(projectDir);
+		await fs.mkdir(userConfigDir, { recursive: true });
+		vi.spyOn(os, "homedir").mockReturnValue(tempDir);
+
+		await fs.writeFile(
+			path.join(userConfigDir, "opencode.jsonc"),
+			`{
+				// User-level OpenCode config
+				"model": "user-model",
+				"mcp": {
+					"user-jsonc": {
+						"type": "local",
+						"command": ["user-server"]
+					}
+				}
+			}`,
+		);
+		await fs.writeFile(
+			path.join(projectDir, "opencode.jsonc"),
+			`{
+				// Project-level OpenCode config
+				"model": "project-model",
+				"mcp": {
+					"project-jsonc": {
+						"type": "local",
+						"command": ["project-server"]
+					}
+				}
+			}`,
+		);
+
+		const [servers, discoveredSettings] = await Promise.all([
+			loadOpenCodeMcpConfig(projectDir),
+			loadOpenCodeSettings(projectDir),
+		]);
+
+		expect(servers).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ name: "user-jsonc", command: "user-server" }),
+				expect.objectContaining({ name: "project-jsonc", command: "project-server" }),
+			]),
+		);
+		expect(discoveredSettings).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ level: "user", data: expect.objectContaining({ model: "user-model" }) }),
+				expect.objectContaining({ level: "project", data: expect.objectContaining({ model: "project-model" }) }),
+			]),
+		);
+	});
+
+	test("parses comments in opencode.json", async () => {
+		await fs.writeFile(
+			path.join(tempDir, "opencode.json"),
+			`{
+				// OpenCode parses either extension as JSONC.
+				"mcp": {
+					"commented-json": {
+						"type": "local",
+						"command": ["commented-server"]
+					}
+				}
+			}`,
+		);
+
+		const servers = await loadOpenCodeMcpConfig(tempDir);
+
+		expect(servers).toEqual([
+			expect.objectContaining({
+				name: "commented-json",
+				command: "commented-server",
+			}),
+		]);
+	});
 	test("normalizes array commands and OpenCode environment fields", async () => {
 		await fs.writeFile(
 			path.join(tempDir, "opencode.json"),

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed OpenCode discovery ignoring `opencode.jsonc` files and rejecting comments in `opencode.json`, which omitted imported settings and MCP servers. ([#8104](https://github.com/can1357/oh-my-pi/issues/8104))
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed

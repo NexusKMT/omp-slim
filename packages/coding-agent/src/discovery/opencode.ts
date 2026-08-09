@@ -3,12 +3,12 @@
  *
  * Loads configuration from OpenCode's config directories:
  * - User: ~/.config/opencode/
- * - Project: .opencode/ (cwd) and opencode.json (project root)
+ * - Project: .opencode/ (cwd) and opencode.json/opencode.jsonc (project root)
  *
  * Capabilities:
  * - context-files: AGENTS.md (user-level only at ~/.config/opencode/AGENTS.md)
- * - mcps: From opencode.json "mcp" key
- * - settings: From opencode.json
+ * - mcps: From opencode.json and opencode.jsonc "mcp" keys
+ * - settings: From opencode.json and opencode.jsonc
  * - skills: From skills/ subdirectories
  * - slash-commands: From commands/ subdirectories
  * - extension-modules: From plugins/ subdirectories
@@ -16,7 +16,8 @@
  * Priority: 55 (tool-specific provider)
  */
 import * as path from "node:path";
-import { logger, parseFrontmatter, tryParseJson } from "@oh-my-pi/pi-utils";
+import { isRecord, logger, parseFrontmatter } from "@oh-my-pi/pi-utils";
+import { JSONC } from "bun";
 import { registerProvider } from "../capability";
 import { type ContextFile, contextFileCapability } from "../capability/context-file";
 import { type ExtensionModule, extensionModuleCapability } from "../capability/extension-module";
@@ -42,21 +43,48 @@ import {
 const PROVIDER_ID = "opencode";
 const DISPLAY_NAME = "OpenCode";
 const PRIORITY = 55;
+const CONFIG_FILENAMES = ["opencode.json", "opencode.jsonc"] as const;
+
+interface OpenCodeConfigSource {
+	path: string;
+	level: "user" | "project";
+}
 
 // =============================================================================
 // JSON Config Loading
 // =============================================================================
 
-async function loadJsonConfig(configPath: string): Promise<Record<string, unknown> | null> {
+async function loadJsonConfig(
+	configPath: string,
+	onInvalid: (configPath: string) => void,
+): Promise<Record<string, unknown> | null> {
 	const content = await readFile(configPath);
 	if (!content) return null;
 
-	const parsed = tryParseJson<Record<string, unknown>>(content);
-	if (!parsed) {
-		logger.warn("Failed to parse OpenCode JSON config", { path: configPath });
+	let parsed: unknown;
+	try {
+		parsed = JSONC.parse(content);
+	} catch {
+		onInvalid(configPath);
+		return null;
+	}
+	if (!isRecord(parsed)) {
+		onInvalid(configPath);
 		return null;
 	}
 	return parsed;
+}
+
+function getConfigSources(ctx: LoadContext): OpenCodeConfigSource[] {
+	const sources: OpenCodeConfigSource[] = [];
+	for (const filename of CONFIG_FILENAMES) {
+		const configPath = getUserPath(ctx, "opencode", filename);
+		if (configPath) sources.push({ path: configPath, level: "user" });
+	}
+	for (const filename of CONFIG_FILENAMES) {
+		sources.push({ path: path.join(ctx.cwd, filename), level: "project" });
+	}
+	return sources;
 }
 
 // =============================================================================
@@ -85,10 +113,10 @@ async function loadContextFiles(ctx: LoadContext): Promise<LoadResult<ContextFil
 }
 
 // =============================================================================
-// MCP Servers (opencode.json → mcp)
+// MCP Servers (opencode.json/opencode.jsonc → mcp)
 // =============================================================================
 
-/** OpenCode MCP server config (from opencode.json "mcp" key) */
+/** OpenCode MCP server config (from the "mcp" key) */
 interface OpenCodeMCPConfig {
 	type?: "local" | "remote";
 	command?: string | string[];
@@ -144,22 +172,13 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 	const items: MCPServer[] = [];
 	const warnings: string[] = [];
 
-	// User-level: ~/.config/opencode/opencode.json
-	const userConfigPath = getUserPath(ctx, "opencode", "opencode.json");
-	if (userConfigPath) {
-		const config = await loadJsonConfig(userConfigPath);
-		if (config) {
-			const result = extractMCPServers(config, userConfigPath, "user");
-			items.push(...result.items);
-			if (result.warnings) warnings.push(...result.warnings);
-		}
-	}
+	for (const source of getConfigSources(ctx)) {
+		const config = await loadJsonConfig(source.path, configPath => {
+			logger.warn("Failed to parse OpenCode config", { path: configPath });
+		});
+		if (!config) continue;
 
-	// Project-level: opencode.json in project root
-	const projectConfigPath = path.join(ctx.cwd, "opencode.json");
-	const projectConfig = await loadJsonConfig(projectConfigPath);
-	if (projectConfig) {
-		const result = extractMCPServers(projectConfig, projectConfigPath, "project");
+		const result = extractMCPServers(config, source.path, source.level);
 		items.push(...result.items);
 		if (result.warnings) warnings.push(...result.warnings);
 	}
@@ -342,47 +361,25 @@ async function loadSlashCommands(ctx: LoadContext): Promise<LoadResult<SlashComm
 }
 
 // =============================================================================
-// Settings (opencode.json)
+// Settings (opencode.json/opencode.jsonc)
 // =============================================================================
 
 async function loadSettings(ctx: LoadContext): Promise<LoadResult<Settings>> {
 	const items: Settings[] = [];
 	const warnings: string[] = [];
 
-	// User-level: ~/.config/opencode/opencode.json
-	const userConfigPath = getUserPath(ctx, "opencode", "opencode.json");
-	if (userConfigPath) {
-		const content = await readFile(userConfigPath);
-		if (content) {
-			const parsed = tryParseJson<Record<string, unknown>>(content);
-			if (parsed) {
-				items.push({
-					path: userConfigPath,
-					data: parsed,
-					level: "user",
-					_source: createSourceMeta(PROVIDER_ID, userConfigPath, "user"),
-				});
-			} else {
-				warnings.push(`Invalid JSON in ${userConfigPath}`);
-			}
-		}
-	}
+	for (const source of getConfigSources(ctx)) {
+		const parsed = await loadJsonConfig(source.path, configPath => {
+			warnings.push(`Invalid JSON in ${configPath}`);
+		});
+		if (!parsed) continue;
 
-	// Project-level: opencode.json in project root
-	const projectConfigPath = path.join(ctx.cwd, "opencode.json");
-	const content = await readFile(projectConfigPath);
-	if (content) {
-		const parsed = tryParseJson<Record<string, unknown>>(content);
-		if (parsed) {
-			items.push({
-				path: projectConfigPath,
-				data: parsed,
-				level: "project",
-				_source: createSourceMeta(PROVIDER_ID, projectConfigPath, "project"),
-			});
-		} else {
-			warnings.push(`Invalid JSON in ${projectConfigPath}`);
-		}
+		items.push({
+			path: source.path,
+			data: parsed,
+			level: source.level,
+			_source: createSourceMeta(PROVIDER_ID, source.path, source.level),
+		});
 	}
 
 	return { items, warnings };
