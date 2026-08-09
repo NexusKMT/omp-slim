@@ -722,9 +722,14 @@ export class ExtensionRunner {
 	}
 
 	async #flushToolRegistrations(): Promise<void> {
+		let firstFailure: PromiseRejectedResult | undefined;
 		while (this.#pendingToolRegistrations.size > 0) {
-			await Promise.all(this.#pendingToolRegistrations);
+			const settled = await Promise.allSettled(this.#pendingToolRegistrations);
+			for (const result of settled) {
+				if (!firstFailure && result.status === "rejected") firstFailure = result;
+			}
 		}
+		if (firstFailure) throw firstFailure.reason;
 	}
 
 	/**

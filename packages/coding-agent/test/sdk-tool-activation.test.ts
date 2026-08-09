@@ -270,6 +270,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			await runner.emit({ type: "session_start" });
 
 			expect(session.getToolByName("bash")?.label).toBe("Late Inactive Bash");
+			expect(session.hasBuiltInTool("bash")).toBe(false);
 			expect(session.getEnabledToolNames()).not.toContain("bash");
 			expect(session.getActiveToolNames()).not.toContain("bash");
 			expect(session.getMountedXdevToolNames()).not.toContain("bash");
@@ -537,6 +538,168 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			expect(session.getActiveToolNames()).toContain("late_becomes_essential");
 			expect(session.getMountedXdevToolNames()).not.toContain("late_becomes_essential");
 		} finally {
+			await session.dispose();
+		}
+	});
+
+	it("refreshes prompt-visible metadata when a lifecycle registration replaces an enabled tool", async () => {
+		const tempDir = makeTempDir();
+		const replacementExtension: ExtensionFactory = pi => {
+			const register = (label: string, description: string): void => {
+				pi.registerTool({
+					name: "prompt_refresh_tool",
+					label,
+					description,
+					parameters: type({}),
+					async execute() {
+						return { content: [{ type: "text", text: label }] };
+					},
+				});
+			};
+			register("Original Prompt Tool", "Original prompt-visible lifecycle description.");
+			pi.on("session_start", async () => {
+				await Promise.resolve();
+				register("Replacement Prompt Tool", "Replacement prompt-visible lifecycle description.");
+			});
+		};
+
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [replacementExtension],
+		});
+
+		try {
+			expect(session.systemPrompt.join("\n")).toContain("Original prompt-visible lifecycle description.");
+			const runner = session.extensionRunner;
+			if (!runner) throw new Error("expected extension runner");
+			await runner.emit({ type: "session_start" });
+
+			const prompt = session.systemPrompt.join("\n");
+			expect(session.getToolByName("prompt_refresh_tool")?.label).toBe("Replacement Prompt Tool");
+			expect(prompt).toContain("Replacement prompt-visible lifecycle description.");
+			expect(prompt).not.toContain("Original prompt-visible lifecycle description.");
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	it("restores a built-in tool and its provenance when a replacement prompt rebuild fails", async () => {
+		let rejectReplacementPrompt = false;
+		const tempDir = makeTempDir();
+		const replacementExtension: ExtensionFactory = pi => {
+			pi.on("session_start", async () => {
+				await Promise.resolve();
+				pi.registerTool({
+					name: "bash",
+					label: "Rejected Rollback Bash",
+					description: "Rejected rollback lifecycle description.",
+					parameters: type({ changed: type.string }),
+					async execute() {
+						return { content: [{ type: "text", text: "rejected" }] };
+					},
+				});
+			});
+		};
+
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [replacementExtension],
+			systemPrompt: defaultPrompt => {
+				if (rejectReplacementPrompt) throw new Error("expected replacement prompt failure");
+				return defaultPrompt;
+			},
+		});
+
+		try {
+			const enabledBefore = session.getEnabledToolNames();
+			const mountedBefore = session.getMountedXdevToolNames();
+			const promptBefore = session.systemPrompt;
+			const originalTool = session.getToolByName("bash");
+			expect(originalTool).toBeDefined();
+			expect(session.hasBuiltInTool("bash")).toBe(true);
+			const runner = session.extensionRunner;
+			const errors: string[] = [];
+			const unsubscribe = runner.onError(error => {
+				errors.push(error.error);
+			});
+			rejectReplacementPrompt = true;
+			await runner.emit({ type: "session_start" });
+			unsubscribe();
+
+			expect(errors).toContain("expected replacement prompt failure");
+			expect(session.getToolByName("bash")).toBe(originalTool);
+			expect(session.hasBuiltInTool("bash")).toBe(true);
+			expect(session.getEnabledToolNames()).toEqual(enabledBefore);
+			expect(session.getMountedXdevToolNames()).toEqual(mountedBefore);
+			expect(session.systemPrompt).toEqual(promptBefore);
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	it("waits for later registrations after an earlier activation fails", async () => {
+		const tempDir = makeTempDir();
+		const releaseLaterActivation = Promise.withResolvers<void>();
+		const laterActivationEntered = Promise.withResolvers<void>();
+		const registrationExtension: ExtensionFactory = pi => {
+			pi.on("session_start", async () => {
+				await Promise.resolve();
+				for (const name of ["failed_registration_tool", "drained_registration_tool"]) {
+					pi.registerTool({
+						name,
+						label: name,
+						description: `${name} lifecycle description.`,
+						parameters: type({}),
+						async execute() {
+							return { content: [{ type: "text", text: name }] };
+						},
+					});
+				}
+			});
+		};
+
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [registrationExtension],
+		});
+		const originalSetPresentation = session.setActiveToolPresentation.bind(session);
+		vi.spyOn(session, "setActiveToolPresentation").mockImplementation(
+			async (toolNames, mountedToolNames, forcePromptRefresh) => {
+				if (toolNames.includes("failed_registration_tool")) throw new Error("expected activation failure");
+				if (toolNames.includes("drained_registration_tool")) {
+					laterActivationEntered.resolve();
+					await releaseLaterActivation.promise;
+				}
+				await originalSetPresentation(toolNames, mountedToolNames, forcePromptRefresh);
+			},
+		);
+		const runner = session.extensionRunner;
+		if (!runner) throw new Error("expected extension runner");
+		const errors: string[] = [];
+		runner.onError(error => {
+			errors.push(error.error);
+		});
+		let emissionCompleted = false;
+		const emission = runner.emit({ type: "session_start" }).finally(() => {
+			emissionCompleted = true;
+		});
+
+		try {
+			await laterActivationEntered.promise;
+			await Promise.resolve();
+			await Promise.resolve();
+			expect(emissionCompleted).toBe(false);
+			expect(errors).toEqual([]);
+
+			releaseLaterActivation.resolve();
+			await emission;
+			expect(errors).toContain("expected activation failure");
+			expect(session.getToolByName("failed_registration_tool")).toBeUndefined();
+			expect(session.getToolByName("drained_registration_tool")).toBeDefined();
+			expect(session.systemPrompt.join("\n")).toContain("drained_registration_tool");
+		} finally {
+			releaseLaterActivation.resolve();
+			await emission;
 			await session.dispose();
 		}
 	});

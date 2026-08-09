@@ -4296,6 +4296,11 @@ export class AgentSession {
 		return this.#tools.hasBuiltInTool(name);
 	}
 
+	/** Updates source provenance when a live registry entry is replaced or restored. */
+	setToolBuiltIn(name: string, builtIn: boolean): void {
+		this.#tools.setToolBuiltIn(name, builtIn);
+	}
+
 	/** Names of every registered tool. */
 	getAllToolNames(): string[] {
 		return this.#tools.getAllToolNames();

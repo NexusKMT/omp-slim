@@ -3449,50 +3449,70 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			if (!wrapped) return dynamicToolRegistrationChain;
 			const name = registered.definition.name;
 			const liveTool = new ExtensionToolWrapper(wrapToolWithMetaNotice(wrapped), extensionRunner);
-			const existingTool = toolRegistry.get(name);
+			// Capture ordinary extension precedence while the listener observes this exact registration.
+			// A later same-name registration may replace the extension map before serialized activation runs.
 			const isEffectiveRegistrant = extensionRunner.getRegisteredTool(name) === registered;
-			if (existingTool) {
-				// Put the replacement first so same-origin MCP re-registration keeps it. Distinct MCP origins still
-				// use the stable winner; ordinary tool collisions retain the extension runner's last-wins precedence.
-				const competingTools = deduplicateMCPToolsByName([liveTool, existingTool]);
-				if (competingTools.length === 1) {
-					if (competingTools[0] !== liveTool) return dynamicToolRegistrationChain;
-				} else if (!isEffectiveRegistrant) {
-					return dynamicToolRegistrationChain;
-				}
-			} else if (!isEffectiveRegistrant) {
-				return dynamicToolRegistrationChain;
-			}
-			toolRegistry.set(name, liveTool);
-			builtInRegistryToolNames.delete(name);
-
 			const activation = dynamicToolRegistrationChain.then(async () => {
+				const existingTool = toolRegistry.get(name);
+				if (existingTool) {
+					// Put the replacement first so same-origin MCP re-registration keeps it. Distinct MCP origins still
+					// use the stable winner; ordinary tool collisions retain the extension runner's last-wins precedence.
+					const competingTools = deduplicateMCPToolsByName([liveTool, existingTool]);
+					if (competingTools.length === 1) {
+						if (competingTools[0] !== liveTool) return;
+					} else if (!isEffectiveRegistrant) {
+						return;
+					}
+				} else if (!isEffectiveRegistrant) {
+					return;
+				}
+
 				const enabled = session.getEnabledToolNames();
 				const alreadyEnabled = enabled.includes(name);
 				const explicitlyRequested = explicitlyRequestedToolNameSet?.has(name) === true;
 				const mounted = session.getMountedXdevToolNames();
-				if (registered.definition.defaultInactive && !explicitlyRequested) {
-					if (!alreadyEnabled) return;
+				const wasBuiltIn = builtInRegistryToolNames.has(name);
+				toolRegistry.set(name, liveTool);
+				builtInRegistryToolNames.delete(name);
+				session.setToolBuiltIn(name, false);
+				try {
+					if (registered.definition.defaultInactive && !explicitlyRequested) {
+						if (!alreadyEnabled) return;
+						await session.setActiveToolPresentation(
+							enabled.filter(enabledName => enabledName !== name),
+							mounted.filter(mountedName => mountedName !== name),
+							existingTool !== undefined,
+						);
+						return;
+					}
+					const shouldMount =
+						!explicitlyRequested &&
+						toolSession.xdev !== undefined &&
+						builtInRegistryToolNames.has("read") &&
+						builtInRegistryToolNames.has("write") &&
+						enabled.includes("read") &&
+						enabled.includes("write") &&
+						isMountableUnderXdev(liveTool);
+					const nextMounted = shouldMount
+						? mounted.includes(name)
+							? mounted
+							: [...mounted, name]
+						: mounted.filter(mountedName => mountedName !== name);
 					await session.setActiveToolPresentation(
-						enabled.filter(enabledName => enabledName !== name),
-						mounted.filter(mountedName => mountedName !== name),
+						alreadyEnabled ? enabled : [...enabled, name],
+						nextMounted,
+						existingTool !== undefined,
 					);
-					return;
+				} catch (error) {
+					if (existingTool) {
+						toolRegistry.set(name, existingTool);
+					} else {
+						toolRegistry.delete(name);
+					}
+					if (wasBuiltIn) builtInRegistryToolNames.add(name);
+					session.setToolBuiltIn(name, wasBuiltIn);
+					throw error;
 				}
-				const shouldMount =
-					!explicitlyRequested &&
-					toolSession.xdev !== undefined &&
-					builtInRegistryToolNames.has("read") &&
-					builtInRegistryToolNames.has("write") &&
-					enabled.includes("read") &&
-					enabled.includes("write") &&
-					isMountableUnderXdev(liveTool);
-				const nextMounted = shouldMount
-					? mounted.includes(name)
-						? mounted
-						: [...mounted, name]
-					: mounted.filter(mountedName => mountedName !== name);
-				await session.setActiveToolPresentation(alreadyEnabled ? enabled : [...enabled, name], nextMounted);
 			});
 			dynamicToolRegistrationChain = activation.catch(() => {});
 			return activation;

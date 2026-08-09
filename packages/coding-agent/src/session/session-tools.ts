@@ -362,6 +362,15 @@ export class SessionTools {
 		return this.#builtInToolNames.has(name);
 	}
 
+	/** Updates source provenance when a live registry entry is replaced or restored. */
+	setToolBuiltIn(name: string, builtIn: boolean): void {
+		if (builtIn) {
+			this.#builtInToolNames.add(name);
+		} else {
+			this.#builtInToolNames.delete(name);
+		}
+	}
+
 	/** Names of every registered tool. */
 	getAllToolNames(): string[] {
 		return Array.from(this.#toolRegistry.keys());
@@ -633,7 +642,7 @@ export class SessionTools {
 	}
 
 	/** Applies an enabled tool set and reconciles its `xd://` partition. */
-	async applyActiveToolsByName(toolNames: string[]): Promise<void> {
+	async applyActiveToolsByName(toolNames: string[], forcePromptRefresh = false): Promise<void> {
 		toolNames = normalizeToolNames(toolNames);
 		let builtInWriteAvailable = this.#builtInToolNames.has("write");
 		if (toolNames.includes("write") && !builtInWriteAvailable) {
@@ -699,7 +708,7 @@ export class SessionTools {
 		try {
 			if (this.#rebuildSystemPrompt) {
 				const signature = this.#computeAppliedToolSignature(validToolNames, tools);
-				if (signature !== this.#lastAppliedToolSignature) {
+				if (forcePromptRefresh || signature !== this.#lastAppliedToolSignature) {
 					const built = await this.#rebuildSystemPrompt(validToolNames, this.#toolRegistry);
 					rebuiltSystemPrompt = built.systemPrompt;
 					rebuiltSignature = signature;
@@ -938,11 +947,18 @@ export class SessionTools {
 	 * `xd://` remain mount-eligible, even when the live mount set has drifted.
 	 *
 	 * Names outside `mountedToolNames` are pinned top-level for this application;
-	 * names in the mounted subset remain eligible for xdev mounting. Delegates the
-	 * actual apply through {@link applyActiveToolsByName} and restores the prior runtime
-	 * selection if that apply throws.
+	 * names in the mounted subset remain eligible for xdev mounting. Set
+	 * `forcePromptRefresh` when an enabled tool's schema or prompt-visible metadata
+	 * changed without changing its name or presentation.
+	 *
+	 * Delegates the actual apply through {@link applyActiveToolsByName} and restores
+	 * the prior runtime selection if that apply throws.
 	 */
-	async setActiveToolPresentation(toolNames: string[], mountedToolNames: string[]): Promise<void> {
+	async setActiveToolPresentation(
+		toolNames: string[],
+		mountedToolNames: string[],
+		forcePromptRefresh = false,
+	): Promise<void> {
 		const normalized = normalizeToolNames(toolNames);
 		// Restoration targets a snapshot, so write eligibility comes from the
 		// *target* set rather than whatever happens to be active mid-rollback.
@@ -950,6 +966,7 @@ export class SessionTools {
 			normalized,
 			new Set(normalizeToolNames(mountedToolNames)),
 			normalized.includes("write"),
+			forcePromptRefresh,
 		);
 	}
 
@@ -962,6 +979,7 @@ export class SessionTools {
 		normalized: string[],
 		mounted: ReadonlySet<string>,
 		writeSelected: boolean,
+		forcePromptRefresh = false,
 	): Promise<void> {
 		const transportWriteActive =
 			writeSelected &&
@@ -974,7 +992,7 @@ export class SessionTools {
 			normalized.filter(name => !mounted.has(name) && !(name === "write" && transportWriteActive)),
 		);
 		try {
-			await this.applyActiveToolsByName(normalized);
+			await this.applyActiveToolsByName(normalized, forcePromptRefresh);
 		} catch (error) {
 			this.#runtimeSelectedToolNames = previousRuntimeSelectedToolNames;
 			throw error;
