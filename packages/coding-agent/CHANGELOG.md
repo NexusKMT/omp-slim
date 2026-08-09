@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the launch broker staying alive indefinitely after its last persistent daemon exited with no clients connected: the idle-shutdown timer that fired while the daemon was still live returned without rearming, and terminal settlement never scheduled another idle check, so the broker process, endpoint, timers, and record maps leaked. Terminal settlement now rearms idle shutdown, which re-checks clients, remaining live persistent daemons, and detached project presence before exiting ([#8110](https://github.com/can1357/oh-my-pi/issues/8110)).
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed
