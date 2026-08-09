@@ -18,11 +18,6 @@ import { generateEnumExports } from "./gen-enums";
 // static build so the local addon never retains host Homebrew paths.
 process.env.PCRE2_SYS_STATIC ??= "1";
 
-// audiopus_sys builds its bundled opus via CMake; that opus tree declares a
-// cmake_minimum_required below 3.5, which CMake 4.x refuses without this
-// policy override.
-process.env.CMAKE_POLICY_VERSION_MINIMUM ??= "3.5";
-
 // Windows: cc-rs and rustc auto-locate cl.exe/link.exe through the VS
 // registry, but the cmake crate (audiopus_sys' bundled opus) needs cmake —
 // and its Ninja generator needs ninja — on PATH. VS Build Tools ships both
