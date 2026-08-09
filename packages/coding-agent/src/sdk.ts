@@ -91,6 +91,7 @@ import {
 	type LoadExtensionsResult,
 	loadExtensionFromFactory,
 	loadExtensions,
+	type RegisteredTool,
 	type ToolDefinition,
 	wrapRegisteredTools,
 } from "./extensibility/extensions";
@@ -2584,6 +2585,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		const nativeToolsByName = new Map<string, Tool>(toolSession.xdev?.tools ?? undefined);
 
 		const registeredTools = restrictToolNames ? [] : extensionRunner.getAllRegisteredTools();
+		const initialRegisteredToolsByName = new Map(registeredTools.map(tool => [tool.definition.name, tool] as const));
 		const sdkCustomTools =
 			restrictToolNames && options.allowRestrictedCustomTools !== true
 				? []
@@ -3433,11 +3435,47 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			titleSystemPrompt: options.titleSystemPrompt,
 		});
 		hasSession = true;
+		// Extension factories normally register tools before session construction,
+		// but Pi-compatible extensions may discover them asynchronously from a
+		// session_start handler. Install those late registrations into the live
+		// registry and serialize activation so no update can overwrite a sibling.
+		let dynamicToolRegistrationChain = Promise.resolve();
+		const scheduledToolRegistrations = new WeakSet<RegisteredTool>();
+		const scheduleToolRegistration = (toolName: string): Promise<void> => {
+			const registered = extensionRunner.getRegisteredTool(toolName);
+			if (!registered) return dynamicToolRegistrationChain;
+			if (scheduledToolRegistrations.has(registered)) return dynamicToolRegistrationChain;
+			scheduledToolRegistrations.add(registered);
+
+			const [wrapped] = wrapRegisteredTools([registered], extensionRunner);
+			if (!wrapped) return dynamicToolRegistrationChain;
+			const name = registered.definition.name;
+			toolRegistry.set(name, new ExtensionToolWrapper(wrapToolWithMetaNotice(wrapped), extensionRunner));
+			builtInRegistryToolNames.delete(name);
+
+			const activation = dynamicToolRegistrationChain.then(async () => {
+				const enabled = session.getEnabledToolNames();
+				const alreadyEnabled = enabled.includes(name);
+				if (!alreadyEnabled && registered.definition.defaultInactive) return;
+				await session.setActiveToolsByName(alreadyEnabled ? enabled : [...enabled, name]);
+			});
+			dynamicToolRegistrationChain = activation.catch(() => {});
+			return activation;
+		};
+		const unsubscribeToolRegistrations = extensionRunner.onToolRegistered(scheduleToolRegistration);
+		disposeCallbacks.add(unsubscribeToolRegistrations);
+
+		// Close the construction race: a background registration can land after
+		// the initial snapshot but before the live listener above is attached.
+		for (const registered of extensionRunner.getAllRegisteredTools()) {
+			if (initialRegisteredToolsByName.get(registered.definition.name) !== registered) {
+				await scheduleToolRegistration(registered.definition.name);
+			}
+		}
 		session.yieldQueue.register<McpNotificationEntry>("mcp-notification", {
 			build: buildMcpNotificationBatchMessage,
 		});
 		session.yieldQueue.register<DeferredDiagnosticsEntry>(LSP_LATE_DIAGNOSTIC_MESSAGE_TYPE, {
-			isStale: entry => entry.isStale(),
 			build: buildLateDiagnosticsBatchMessage,
 		});
 

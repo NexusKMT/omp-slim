@@ -141,6 +141,64 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		}
 	});
 
+	it("publishes tools from lazy session startup before the input lifecycle completes", async () => {
+		const tempDir = makeTempDir();
+		const startupGate = Promise.withResolvers<void>();
+		const lateRegistrationExtension: ExtensionFactory = pi => {
+			let startupPromise: Promise<void> | undefined;
+			pi.on("session_start", () => {
+				startupPromise = (async () => {
+					await startupGate.promise;
+					pi.registerTool({
+						name: "late_active_tool",
+						label: "Late Active Tool",
+						description: "Registered after asynchronous session initialization.",
+						parameters: type({}),
+						async execute() {
+							return { content: [{ type: "text", text: "late active" }] };
+						},
+					});
+					pi.registerTool({
+						name: "late_inactive_tool",
+						label: "Late Inactive Tool",
+						description: "Registered late but left disabled by default.",
+						parameters: type({}),
+						defaultInactive: true,
+						async execute() {
+							return { content: [{ type: "text", text: "late inactive" }] };
+						},
+					});
+				})();
+			});
+			pi.on("input", async () => {
+				await startupPromise;
+			});
+		};
+
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [lateRegistrationExtension],
+		});
+
+		try {
+			expect(session.getAllToolNames()).not.toContain("late_active_tool");
+			const runner = session.extensionRunner;
+			if (!runner) throw new Error("expected extension runner");
+			await runner.emit({ type: "session_start" });
+			expect(session.getAllToolNames()).not.toContain("late_active_tool");
+			startupGate.resolve();
+			await runner.emitInput("probe", undefined, "interactive");
+
+			expect(session.getAllToolNames()).toEqual(expect.arrayContaining(["late_active_tool", "late_inactive_tool"]));
+			expect(session.getEnabledToolNames()).toContain("late_active_tool");
+			expect(session.getEnabledToolNames()).not.toContain("late_inactive_tool");
+			expect(session.systemPrompt.join("\n")).toContain("late_active_tool");
+			expect(session.systemPrompt.join("\n")).not.toContain("late_inactive_tool");
+		} finally {
+			await session.dispose();
+		}
+	});
+
 	it("forwards built-in and external xd:// devices to Cursor provider contexts", async () => {
 		const tempDir = makeTempDir();
 		const cursorModel = getBundledModel("cursor", "composer-1.5");

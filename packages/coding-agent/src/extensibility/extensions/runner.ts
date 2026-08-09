@@ -62,6 +62,7 @@ import type {
 	SessionStopEventResult,
 	ToolCallEvent,
 	ToolCallEventResult,
+	ToolRegistrationListener,
 	ToolResultEvent,
 	ToolResultEventResult,
 	UserBashEvent,
@@ -352,6 +353,7 @@ export class ExtensionRunner {
 	#shutdownHandler: ShutdownHandler = () => {};
 	#getMemoryFn?: () => MemoryRuntimeContext | undefined;
 	#commandDiagnostics: Array<{ type: string; message: string; path: string }> = [];
+	#pendingToolRegistrations = new Set<Promise<void>>();
 	#initialized = false;
 	/**
 	 * Buffer for `credential_disabled` events received via {@link emitCredentialDisabled}
@@ -674,6 +676,51 @@ export class ExtensionRunner {
 		return tools;
 	}
 
+	/** Get the effective registered tool for a name using normal last-extension-wins precedence. */
+	getRegisteredTool(name: string): RegisteredTool | undefined {
+		for (let index = this.extensions.length - 1; index >= 0; index -= 1) {
+			const tool = this.extensions[index]?.tools.get(name);
+			if (tool) return tool;
+		}
+		return undefined;
+	}
+
+	/**
+	 * Observe tools registered after extension factories have loaded. Listener
+	 * promises are drained before the lifecycle handler that registered them
+	 * completes, keeping the model tool snapshot and system prompt coherent.
+	 */
+	onToolRegistered(listener: (toolName: string) => void | Promise<void>): () => void {
+		const wrapped: ToolRegistrationListener = toolName => {
+			try {
+				const pending = listener(toolName);
+				if (!pending) return;
+				this.#pendingToolRegistrations.add(pending);
+				void pending.then(
+					() => this.#pendingToolRegistrations.delete(pending),
+					() => this.#pendingToolRegistrations.delete(pending),
+				);
+			} catch (error) {
+				const pending = Promise.reject(error);
+				this.#pendingToolRegistrations.add(pending);
+				void pending.catch(() => this.#pendingToolRegistrations.delete(pending));
+			}
+		};
+		for (const extension of this.extensions) {
+			extension.toolRegistrationListeners ??= new Set();
+			extension.toolRegistrationListeners.add(wrapped);
+		}
+		return () => {
+			for (const extension of this.extensions) extension.toolRegistrationListeners?.delete(wrapped);
+		};
+	}
+
+	async #flushToolRegistrations(): Promise<void> {
+		while (this.#pendingToolRegistrations.size > 0) {
+			await Promise.all(this.#pendingToolRegistrations);
+		}
+	}
+
 	/**
 	 * Aggregate the registered CLI flags across a set of extensions (last write
 	 * wins on name collision). Static so callers that need the flag set before a
@@ -940,6 +987,7 @@ export class ExtensionRunner {
 				timeoutMs,
 				signal,
 			);
+			await this.#flushToolRegistrations();
 			if (handlerResult === EXTENSION_HANDLER_ABORTED) return undefined;
 			if (handlerResult === EXTENSION_HANDLER_TIMEOUT) {
 				const error = `handler timed out after ${timeoutMs}ms`;
