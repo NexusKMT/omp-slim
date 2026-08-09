@@ -1,6 +1,7 @@
 /**
  * Extension runner - executes extensions and manages their lifecycle.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import type {
 	AgentMessage,
 	AgentTool,
@@ -333,6 +334,11 @@ const noOpUIContext: ExtensionUIContext = {
 	setToolsExpanded: () => {},
 };
 
+interface ToolRegistrationScope {
+	pending: Set<Promise<void>>;
+	closed: boolean;
+}
+
 export class ExtensionRunner {
 	#uiContext: ExtensionUIContext;
 	#errorListeners: Set<ExtensionErrorListener> = new Set();
@@ -353,7 +359,8 @@ export class ExtensionRunner {
 	#shutdownHandler: ShutdownHandler = () => {};
 	#getMemoryFn?: () => MemoryRuntimeContext | undefined;
 	#commandDiagnostics: Array<{ type: string; message: string; path: string }> = [];
-	#pendingToolRegistrations = new Set<Promise<void>>();
+	#toolRegistrationScope = new AsyncLocalStorage<ToolRegistrationScope>();
+	#toolRegistrationBarrier: Promise<void> = Promise.resolve();
 	#initialized = false;
 	/**
 	 * Buffer for `credential_disabled` events received via {@link emitCredentialDisabled}
@@ -523,7 +530,10 @@ export class ExtensionRunner {
 		this.runtime.appendEntry = actions.appendEntry;
 		this.runtime.getActiveTools = actions.getActiveTools;
 		this.runtime.getAllTools = actions.getAllTools;
-		this.runtime.setActiveTools = actions.setActiveTools;
+		this.runtime.setActiveTools = async toolNames => {
+			await this.#toolRegistrationBarrier;
+			await actions.setActiveTools(toolNames);
+		};
 		this.runtime.getCommands = actions.getCommands;
 		this.runtime.setModel = actions.setModel;
 		this.runtime.getThinkingLevel = actions.getThinkingLevel;
@@ -693,21 +703,37 @@ export class ExtensionRunner {
 	onToolRegistered(listener: (tool: RegisteredTool) => void | Promise<void>): () => void {
 		const subscriptions: Array<{ extension: Extension; listener: ToolRegistrationListener }> = [];
 		for (const extension of this.extensions) {
+			const trackRegistration = (pending: Promise<void>): void => {
+				this.#toolRegistrationBarrier = pending.then(
+					() => undefined,
+					() => undefined,
+				);
+				const scope = this.#toolRegistrationScope.getStore();
+				if (scope && !scope.closed) {
+					scope.pending.add(pending);
+					void pending.then(
+						() => scope.pending.delete(pending),
+						() => {},
+					);
+					return;
+				}
+				void pending.catch(error => {
+					this.emitError({
+						extensionPath: extension.path,
+						event: "tool_registration",
+						error: error instanceof Error ? error.message : String(error),
+						stack: error instanceof Error ? error.stack : undefined,
+					});
+				});
+			};
 			const wrapped: ToolRegistrationListener = toolName => {
 				const tool = extension.tools.get(toolName);
 				if (!tool) return;
 				try {
 					const pending = listener(tool);
-					if (!pending) return;
-					this.#pendingToolRegistrations.add(pending);
-					void pending.then(
-						() => this.#pendingToolRegistrations.delete(pending),
-						() => {},
-					);
+					if (pending) trackRegistration(pending);
 				} catch (error) {
-					const pending = Promise.reject(error);
-					this.#pendingToolRegistrations.add(pending);
-					void pending.catch(() => {});
+					trackRegistration(Promise.reject(error));
 				}
 			};
 			extension.toolRegistrationListeners ??= new Set();
@@ -721,13 +747,13 @@ export class ExtensionRunner {
 		};
 	}
 
-	async #flushToolRegistrations(): Promise<void> {
+	async #flushToolRegistrations(pendingRegistrations: Set<Promise<void>>): Promise<void> {
 		let firstFailure: PromiseRejectedResult | undefined;
-		while (this.#pendingToolRegistrations.size > 0) {
-			const pending = Array.from(this.#pendingToolRegistrations);
+		while (pendingRegistrations.size > 0) {
+			const pending = Array.from(pendingRegistrations);
 			const settled = await Promise.allSettled(pending);
 			for (let index = 0; index < settled.length; index += 1) {
-				this.#pendingToolRegistrations.delete(pending[index]);
+				pendingRegistrations.delete(pending[index]);
 				const result = settled[index];
 				if (!firstFailure && result?.status === "rejected") firstFailure = result;
 			}
@@ -995,22 +1021,32 @@ export class ExtensionRunner {
 				? event.signal
 				: undefined;
 		if (signal?.aborted) return undefined;
+		const registrationScope: ToolRegistrationScope = { pending: new Set(), closed: false };
 		let handlerResult: TResult | typeof EXTENSION_HANDLER_TIMEOUT | typeof EXTENSION_HANDLER_ABORTED | undefined;
 		let handlerFailure: { error: unknown } | undefined;
 		try {
 			handlerResult = await raceHandlerWithTimeout(
-				handlerSignal => handler(event, createHandlerContext(ctx, handlerSignal)),
+				handlerSignal =>
+					this.#toolRegistrationScope.run(registrationScope, () =>
+						handler(event, createHandlerContext(ctx, handlerSignal)),
+					),
 				timeoutMs,
 				signal,
 			);
 		} catch (error) {
 			handlerFailure = { error };
+		} finally {
+			registrationScope.closed = true;
 		}
 		try {
-			await this.#flushToolRegistrations();
+			await this.#flushToolRegistrations(registrationScope.pending);
 		} catch (error) {
 			handlerFailure ??= { error };
 		}
+		// Also wait for detached registrations that were scheduled before this handler
+		// completed. Their failures are reported at registration time, not attributed
+		// to this unrelated handler.
+		await this.#toolRegistrationBarrier;
 		if (handlerFailure) {
 			const message =
 				handlerFailure.error instanceof Error ? handlerFailure.error.message : String(handlerFailure.error);

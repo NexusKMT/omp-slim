@@ -11,6 +11,7 @@ import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { CursorExecHandlers } from "@oh-my-pi/pi-coding-agent/cursor";
 import type { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";
+import { initializeExtensions } from "@oh-my-pi/pi-coding-agent/modes/runtime-init";
 import {
 	type CreateAgentSessionOptions,
 	type CustomTool,
@@ -714,6 +715,96 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		} finally {
 			releaseLaterActivation.resolve();
 			await emission;
+			await session.dispose();
+		}
+	});
+
+	it("applies explicit tool selection after preceding lifecycle registrations", async () => {
+		const tempDir = makeTempDir();
+		const registrationExtension: ExtensionFactory = pi => {
+			pi.on("session_start", async () => {
+				pi.registerTool({
+					name: "register_then_select_tool",
+					label: "Register Then Select Tool",
+					description: "Must not overwrite the explicit selection that follows registration.",
+					parameters: type({}),
+					async execute() {
+						return { content: [{ type: "text", text: "registered" }] };
+					},
+				});
+				await pi.setActiveTools(["read"]);
+			});
+		};
+
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [registrationExtension],
+		});
+
+		try {
+			await initializeExtensions(session, {
+				reportSendError: vi.fn(),
+				reportRuntimeError: vi.fn(),
+			});
+
+			expect(session.getAllToolNames()).toContain("register_then_select_tool");
+			expect(session.getEnabledToolNames()).toContain("read");
+			expect(session.getEnabledToolNames()).not.toContain("register_then_select_tool");
+			expect(session.getMountedXdevToolNames()).not.toContain("register_then_select_tool");
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	it("attributes detached registration failures without waiting for another lifecycle handler", async () => {
+		const tempDir = makeTempDir();
+		const releaseDetachedRegistration = Promise.withResolvers<void>();
+		const registrationFailure = Promise.withResolvers<{ event: string; error: string }>();
+		let rejectDetachedPrompt = false;
+		const detachedRegistrationExtension: ExtensionFactory = pi => {
+			pi.on("session_start", () => {
+				void releaseDetachedRegistration.promise.then(() => {
+					pi.registerTool({
+						name: "detached_registration_tool",
+						label: "Detached Registration Tool",
+						description: "Detached tool whose activation intentionally fails.",
+						parameters: type({}),
+						async execute() {
+							return { content: [{ type: "text", text: "detached" }] };
+						},
+					});
+				});
+			});
+		};
+
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [detachedRegistrationExtension],
+			systemPrompt: defaultPrompt => {
+				if (rejectDetachedPrompt) throw new Error("expected detached registration failure");
+				return defaultPrompt;
+			},
+		});
+
+		try {
+			await initializeExtensions(session, {
+				reportSendError: vi.fn(),
+				reportRuntimeError: error => {
+					if (error.error === "expected detached registration failure") {
+						registrationFailure.resolve({ event: error.event, error: error.error });
+					}
+				},
+			});
+			rejectDetachedPrompt = true;
+			releaseDetachedRegistration.resolve();
+
+			expect(await registrationFailure.promise).toEqual({
+				event: "tool_registration",
+				error: "expected detached registration failure",
+			});
+			expect(session.getToolByName("detached_registration_tool")).toBeUndefined();
+		} finally {
+			releaseDetachedRegistration.resolve();
 			await session.dispose();
 		}
 	});
