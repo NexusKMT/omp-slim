@@ -256,6 +256,10 @@ const CURSOR_RESERVED_HEADERS = new Set([
 	// header is present, so a caller value here silently retargets the request at
 	// a different virtual host.
 	"host",
+	// The Connect body is streamed after the headers (initial frame, heartbeats,
+	// tool responses), so no caller-supplied length can describe it and an HTTP/2
+	// peer resets the stream once the body diverges.
+	"content-length",
 ]);
 
 /**

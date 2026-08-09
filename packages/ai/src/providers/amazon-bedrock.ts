@@ -55,7 +55,10 @@ import { transformMessages } from "./transform-messages";
 const SIGNER_OWNED_HEADERS = new Set(["host", "x-amz-date", "x-amz-content-sha256", "x-amz-security-token"]);
 
 /** Headers the Bedrock request sets itself; a caller copy in any casing duplicates them. */
-const BEDROCK_RESERVED_HEADERS = new Set(["content-type", "accept", "authorization"]);
+// `content-length` included: the fetch layer recomputes it from the serialized
+// body, so a caller value would be signed but not sent, and AWS rejects the
+// mismatch.
+const BEDROCK_RESERVED_HEADERS = new Set(["content-type", "accept", "authorization", "content-length"]);
 
 export type BedrockThinkingDisplay = "summarized" | "omitted";
 

@@ -156,6 +156,9 @@ describe("Bedrock caller headers", () => {
 					"Content-Type": "text/plain",
 					Accept: "text/plain",
 					Host: "evil.example.com",
+					// Recomputed by the fetch layer from the serialized body, so a caller
+					// value would be signed but never sent.
+					"Content-Length": "999",
 					"X-Trace": "kept",
 				},
 			});
@@ -165,7 +168,7 @@ describe("Bedrock caller headers", () => {
 		const headers = seen.headers ?? {};
 		const names = Object.keys(headers).map(name => name.toLowerCase());
 		// Each field appears exactly once, whatever casing the caller used.
-		for (const field of ["content-type", "accept", "host"]) {
+		for (const field of ["content-type", "accept", "host", "content-length"]) {
 			expect(names.filter(name => name === field).length).toBeLessThanOrEqual(1);
 		}
 		expect(headers["content-type"]).toBe("application/json");

@@ -164,12 +164,16 @@ describe("Cursor caller headers reach the wire", () => {
 			"Content-Type": "text/plain",
 			TE: "gzip",
 			"X-Request-Id": "forged",
+			// The Connect body is streamed after the headers, so no caller length can
+			// describe it; an HTTP/2 peer resets the stream once the body diverges.
+			"Content-Length": "999",
 			"x-trace": "kept",
 		});
 		expect(sent.authorization).toBe("Bearer test-token");
 		expect(sent["content-type"]).toBe("application/connect+proto");
 		expect(sent.te).toBe("trailers");
 		expect(sent["x-request-id"]).not.toBe("forged");
+		expect(sent["content-length"]).toBeUndefined();
 		expect(sent["x-trace"]).toBe("kept");
 	});
 
