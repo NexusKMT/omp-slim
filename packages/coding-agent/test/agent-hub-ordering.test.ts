@@ -529,6 +529,7 @@ describe("Agent hub row ordering", () => {
 	it("renders aggregate usage and a selected-agent inspector without inventing change attribution", () => {
 		geometry = stubStdoutGeometry(140);
 		geometry.setRows(28);
+		const createdAt = Date.parse("2026-08-09T20:15:00Z");
 		const agents = new AgentRegistry();
 		agents.register({
 			id: "Reviewer",
@@ -541,6 +542,7 @@ describe("Agent hub row ordering", () => {
 				patchPath: "/tmp/Reviewer.patch",
 				branchName: "omp/task/Reviewer",
 			},
+			createdAt,
 		});
 		const observers = new SessionObserverRegistry();
 		vi.spyOn(observers, "getSessions").mockReturnValue([
@@ -584,7 +586,16 @@ describe("Agent hub row ordering", () => {
 			expect(rendered).toContain("Security Reviewer");
 			expect(rendered).toContain("read · src/session/agent-session.ts");
 			expect(rendered).toContain("31K/128K 24%");
-			expect(rendered).toContain("Registered ");
+			expect(rendered).toContain(
+				`Registered ${new Date(createdAt).toLocaleString(undefined, {
+					year: "numeric",
+					month: "short",
+					day: "2-digit",
+					hour: "2-digit",
+					minute: "2-digit",
+					timeZoneName: "short",
+				})}`,
+			);
 			expect(rendered).toContain("Shared workspace · per-agent LoC not attributable");
 			expect(rendered).toContain("Output /tmp/Reviewer.md");
 			expect(rendered).toContain("Patch /tmp/Reviewer.patch");

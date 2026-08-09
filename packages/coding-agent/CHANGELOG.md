@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Agent Hub lineage registration timestamps displaying in UTC instead of the user's local timezone.
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed

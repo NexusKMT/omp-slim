@@ -829,7 +829,19 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			`Spawned by ${sanitizeDisplayText(ref.parentId ?? MAIN_AGENT_ID)}${children.length > 0 ? ` · ${children.length} children` : ""}`,
 		);
 		if (children.length > 0) add(theme.fg("dim", formatChildIds(children, width)));
-		add(theme.fg("dim", `Registered ${new Date(ref.createdAt).toISOString().slice(0, 16).replace("T", " ")}Z`));
+		add(
+			theme.fg(
+				"dim",
+				`Registered ${new Date(ref.createdAt).toLocaleString(undefined, {
+					year: "numeric",
+					month: "short",
+					day: "2-digit",
+					hour: "2-digit",
+					minute: "2-digit",
+					timeZoneName: "short",
+				})}`,
+			),
+		);
 
 		section("Changes");
 		add(
