@@ -3451,18 +3451,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			if (!wrapped) return dynamicToolRegistrationChain;
 			const name = registered.definition.name;
 			const liveTool = new ExtensionToolWrapper(wrapToolWithMetaNotice(wrapped), extensionRunner);
-			// Distinct MCP origins use the startup path's stable winner; re-registering the same origin still replaces it.
 			const existingTool = toolRegistry.get(name);
-			if (
-				existingTool &&
-				typeof existingTool.mcpServerName === "string" &&
-				typeof existingTool.mcpToolName === "string" &&
-				typeof liveTool.mcpServerName === "string" &&
-				typeof liveTool.mcpToolName === "string" &&
-				(existingTool.mcpServerName !== liveTool.mcpServerName || existingTool.mcpToolName !== liveTool.mcpToolName)
-			) {
-				const [winner] = deduplicateMCPToolsByName([existingTool, liveTool]);
-				if (winner !== liveTool) return dynamicToolRegistrationChain;
+			if (existingTool) {
+				// Put the replacement first so same-origin MCP re-registration keeps it; distinct origins still use
+				// the startup path's stable winner, while non-MCP replacements remain last-registration-wins.
+				const competingTools = deduplicateMCPToolsByName([liveTool, existingTool]);
+				if (competingTools.length === 1 && competingTools[0] !== liveTool) return dynamicToolRegistrationChain;
 			}
 			toolRegistry.set(name, liveTool);
 			builtInRegistryToolNames.delete(name);
