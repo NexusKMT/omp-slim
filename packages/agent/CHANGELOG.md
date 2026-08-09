@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Manual `/shake` now keeps a small recent tail of tool results instead of stripping every eligible result, so the agent does not lose the context it is currently working from ([#7776](https://github.com/can1357/oh-my-pi/issues/7776)).
+
 ## [17.2.10] - 2026-08-06
 
 ### Fixed

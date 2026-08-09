@@ -52,11 +52,13 @@ export const DEFAULT_SHAKE_CONFIG: ShakeConfig = {
 };
 
 /**
- * Manual `/shake`: aggressive — drops every eligible region across history,
- * artifact recovery reads included (the user's full escape hatch).
+ * Manual `/shake`: aggressive — no savings threshold and drops eligible
+ * regions across history, artifact recovery reads included (the user's full
+ * escape hatch). Still keeps a small recent tail so it cannot strip the tool
+ * results the agent is currently working from (#7776).
  */
 export const AGGRESSIVE_SHAKE_CONFIG: ShakeConfig = {
-	protectTokens: 0,
+	protectTokens: 4_000,
 	minSavings: 0,
 	protectedTools: ["skill", isSkillReadToolResult],
 	fenceMinTokens: 400,

@@ -204,10 +204,21 @@ describe("applyShakeRegions — multi-region ordering", () => {
 });
 
 describe("shake config presets", () => {
-	test("aggressive preset protects skill and drops everything else", () => {
-		expect(AGGRESSIVE_SHAKE_CONFIG.protectTokens).toBe(0);
+	test("aggressive preset protects skill and keeps a small recent tail", () => {
+		expect(AGGRESSIVE_SHAKE_CONFIG.protectTokens).toBeGreaterThan(0);
 		expect(AGGRESSIVE_SHAKE_CONFIG.minSavings).toBe(0);
 		expect(AGGRESSIVE_SHAKE_CONFIG.protectedTools).toContain("skill");
+	});
+
+	test("manual shake preserves the recent tool-result tail instead of stripping everything", () => {
+		const older = messageEntry(toolResultMessage("bash", "old-result ".repeat(300)));
+		const recent = messageEntry(toolResultMessage("bash", "recent-result ".repeat(3000)));
+		const regions = collectShakeRegions([older, recent], AGGRESSIVE_SHAKE_CONFIG);
+
+		// The recent result sits inside the preserved tail; the older one is
+		// still shaken aggressively.
+		expect(regions).toHaveLength(1);
+		expect(regions[0].entry).toBe(older);
 	});
 
 	test("default preset keeps a protect window", () => {
