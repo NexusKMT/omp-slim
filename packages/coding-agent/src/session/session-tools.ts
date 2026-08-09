@@ -1,6 +1,6 @@
 import type { Agent, AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
-import { isRecord, logger, prompt, stringProperty } from "@oh-my-pi/pi-utils";
+import { isRecord, logger, prompt, stringProperty, untilAborted } from "@oh-my-pi/pi-utils";
 import { reset as resetCapabilities } from "../capability";
 import type { ModelRegistry } from "../config/model-registry";
 import { formatModelString } from "../config/model-resolver";
@@ -642,11 +642,13 @@ export class SessionTools {
 	}
 
 	/** Applies an enabled tool set and reconciles its `xd://` partition. */
-	async applyActiveToolsByName(toolNames: string[], forcePromptRefresh = false): Promise<void> {
+	async applyActiveToolsByName(toolNames: string[], forcePromptRefresh = false, signal?: AbortSignal): Promise<void> {
+		signal?.throwIfAborted();
 		toolNames = normalizeToolNames(toolNames);
 		let builtInWriteAvailable = this.#builtInToolNames.has("write");
 		if (toolNames.includes("write") && !builtInWriteAvailable) {
-			builtInWriteAvailable = (await this.#ensureWriteRegistered?.()) === true;
+			const writeRegistration = this.#ensureWriteRegistered?.();
+			builtInWriteAvailable = writeRegistration ? (await untilAborted(signal, writeRegistration)) === true : false;
 			if (builtInWriteAvailable) this.#builtInToolNames.add("write");
 		}
 		const selectedTools = toolNames.flatMap(name => {
@@ -678,7 +680,8 @@ export class SessionTools {
 		const activeDeferrableTool = tools.some(tool => tool.deferrable === true);
 		const transportNeeded = mountNames.size > 0 || activeDeferrableTool || this.#host.planModeEnabled();
 		if (transportNeeded && !builtInWriteAvailable) {
-			builtInWriteAvailable = (await this.#ensureWriteRegistered?.()) === true;
+			const writeRegistration = this.#ensureWriteRegistered?.();
+			builtInWriteAvailable = writeRegistration ? (await untilAborted(signal, writeRegistration)) === true : false;
 			if (builtInWriteAvailable) this.#builtInToolNames.add("write");
 		}
 		if (transportNeeded && builtInWriteAvailable) {
@@ -709,12 +712,13 @@ export class SessionTools {
 			if (this.#rebuildSystemPrompt) {
 				const signature = this.#computeAppliedToolSignature(validToolNames, tools);
 				if (forcePromptRefresh || signature !== this.#lastAppliedToolSignature) {
-					const built = await this.#rebuildSystemPrompt(validToolNames, this.#toolRegistry);
+					const built = await untilAborted(signal, this.#rebuildSystemPrompt(validToolNames, this.#toolRegistry));
 					rebuiltSystemPrompt = built.systemPrompt;
 					rebuiltSignature = signature;
 					rebuiltXdevCatalogNames = built.xdevCatalogNames;
 				}
 			}
+			signal?.throwIfAborted();
 		} catch (error) {
 			this.#setMountedNames(previousMounted);
 			this.#setActiveToolNames?.(previousActiveToolNames);
@@ -958,6 +962,7 @@ export class SessionTools {
 		toolNames: string[],
 		mountedToolNames: string[],
 		forcePromptRefresh = false,
+		signal?: AbortSignal,
 	): Promise<void> {
 		const normalized = normalizeToolNames(toolNames);
 		// Restoration targets a snapshot, so write eligibility comes from the
@@ -967,6 +972,7 @@ export class SessionTools {
 			new Set(normalizeToolNames(mountedToolNames)),
 			normalized.includes("write"),
 			forcePromptRefresh,
+			signal,
 		);
 	}
 
@@ -980,6 +986,7 @@ export class SessionTools {
 		mounted: ReadonlySet<string>,
 		writeSelected: boolean,
 		forcePromptRefresh = false,
+		signal?: AbortSignal,
 	): Promise<void> {
 		const transportWriteActive =
 			writeSelected &&
@@ -992,7 +999,7 @@ export class SessionTools {
 			normalized.filter(name => !mounted.has(name) && !(name === "write" && transportWriteActive)),
 		);
 		try {
-			await this.applyActiveToolsByName(normalized, forcePromptRefresh);
+			await this.applyActiveToolsByName(normalized, forcePromptRefresh, signal);
 		} catch (error) {
 			this.#runtimeSelectedToolNames = previousRuntimeSelectedToolNames;
 			throw error;

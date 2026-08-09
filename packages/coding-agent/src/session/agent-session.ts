@@ -4358,8 +4358,9 @@ export class AgentSession {
 		toolNames: string[],
 		mountedToolNames: string[],
 		forcePromptRefresh = false,
+		signal?: AbortSignal,
 	): Promise<void> {
-		return this.#tools.setActiveToolPresentation(toolNames, mountedToolNames, forcePromptRefresh);
+		return this.#tools.setActiveToolPresentation(toolNames, mountedToolNames, forcePromptRefresh, signal);
 	}
 
 	/**

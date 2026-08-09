@@ -28,7 +28,17 @@ import {
 } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
 import { FALLBACK_DIALECT, preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import type { Component } from "@oh-my-pi/pi-tui";
-import { $env, $flag, getAgentDir, getProjectDir, logger, postmortem, prompt, Snowflake } from "@oh-my-pi/pi-utils";
+import {
+	$env,
+	$flag,
+	getAgentDir,
+	getProjectDir,
+	logger,
+	postmortem,
+	prompt,
+	Snowflake,
+	untilAborted,
+} from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import {
 	discoverAdvisorConfigs,
@@ -3442,7 +3452,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// registry and serialize activation so no update can overwrite a sibling.
 		let dynamicToolRegistrationChain = Promise.resolve();
 		const scheduledToolRegistrations = new WeakSet<RegisteredTool>();
-		const scheduleToolRegistration = (registered: RegisteredTool): Promise<void> => {
+		const scheduleToolRegistration = (registered: RegisteredTool, signal?: AbortSignal): Promise<void> => {
 			if (scheduledToolRegistrations.has(registered)) return dynamicToolRegistrationChain;
 			scheduledToolRegistrations.add(registered);
 
@@ -3453,7 +3463,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// Capture ordinary extension precedence while the listener observes this exact registration.
 			// A later same-name registration may replace the extension map before serialized activation runs.
 			const isEffectiveRegistrant = extensionRunner.getRegisteredTool(name) === registered;
-			const activation = dynamicToolRegistrationChain.then(async () => {
+			const serializedActivation = dynamicToolRegistrationChain.then(async () => {
+				signal?.throwIfAborted();
 				const existingTool = toolRegistry.get(name);
 				if (existingTool) {
 					// SDK custom tools are installed after extension tools during startup, so they
@@ -3486,6 +3497,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 							enabled.filter(enabledName => enabledName !== name),
 							mounted.filter(mountedName => mountedName !== name),
 							existingTool !== undefined,
+							signal,
 						);
 						return;
 					}
@@ -3509,6 +3521,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						alreadyEnabled ? enabled : [...enabled, name],
 						nextMounted,
 						existingTool !== undefined,
+						signal,
 					);
 				} catch (error) {
 					if (existingTool) {
@@ -3521,6 +3534,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					throw error;
 				}
 			});
+			const activation = untilAborted(signal, serializedActivation);
 			dynamicToolRegistrationChain = activation.catch(() => {});
 			return activation;
 		};

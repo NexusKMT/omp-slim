@@ -336,6 +336,7 @@ const noOpUIContext: ExtensionUIContext = {
 
 interface ToolRegistrationScope {
 	pending: Set<Promise<void>>;
+	signal?: AbortSignal;
 	closed: boolean;
 }
 
@@ -701,7 +702,7 @@ export class ExtensionRunner {
 	 * promises are drained before the lifecycle handler that registered them
 	 * completes, keeping the model tool snapshot and system prompt coherent.
 	 */
-	onToolRegistered(listener: (tool: RegisteredTool) => void | Promise<void>): () => void {
+	onToolRegistered(listener: (tool: RegisteredTool, signal?: AbortSignal) => void | Promise<void>): () => void {
 		const subscriptions: Array<{ extension: Extension; listener: ToolRegistrationListener }> = [];
 		for (const extension of this.extensions) {
 			const trackRegistration = (pending: Promise<void>): void => {
@@ -735,7 +736,7 @@ export class ExtensionRunner {
 				const tool = extension.tools.get(toolName);
 				if (!tool) return;
 				try {
-					const pending = listener(tool);
+					const pending = listener(tool, this.#toolRegistrationScope.getStore()?.signal);
 					if (pending) trackRegistration(pending);
 				} catch (error) {
 					trackRegistration(Promise.reject(error));
@@ -1033,6 +1034,7 @@ export class ExtensionRunner {
 		try {
 			handlerResult = await raceHandlerWithTimeout(
 				async handlerSignal => {
+					registrationScope.signal = handlerSignal;
 					let result: TResult | undefined;
 					try {
 						result = await this.#toolRegistrationScope.run(registrationScope, () =>

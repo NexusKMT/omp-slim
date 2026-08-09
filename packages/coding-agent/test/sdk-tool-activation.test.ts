@@ -10,6 +10,10 @@ import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { CursorExecHandlers } from "@oh-my-pi/pi-coding-agent/cursor";
+import {
+	EXTENSION_HANDLER_TIMEOUT_MS,
+	testSetExtensionHandlerTimeoutMs,
+} from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
 import type { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";
 import { initializeExtensions } from "@oh-my-pi/pi-coding-agent/modes/runtime-init";
 import {
@@ -22,7 +26,7 @@ import {
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { VIBE_TOOL_NAMES } from "@oh-my-pi/pi-coding-agent/tools/vibe";
-import { logger, removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
+import { logger, removeSyncWithRetries, Snowflake, untilAborted } from "@oh-my-pi/pi-utils";
 
 const toolActivationExtension: ExtensionFactory = pi => {
 	pi.registerTool({
@@ -111,6 +115,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		}
 
 		vi.restoreAllMocks();
+		testSetExtensionHandlerTimeoutMs(EXTENSION_HANDLER_TIMEOUT_MS);
 	});
 
 	afterAll(() => {
@@ -804,6 +809,57 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		} finally {
 			releaseLaterActivation.resolve();
 			await emission;
+			await session.dispose();
+		}
+	});
+
+	it("releases a timed-out activation so later lifecycle registrations can proceed", async () => {
+		const tempDir = makeTempDir();
+		const registrationExtension: ExtensionFactory = pi => {
+			for (const name of ["stalled_registration_tool", "recovered_registration_tool"]) {
+				pi.on("session_start", async () => {
+					await Promise.resolve();
+					pi.registerTool({
+						name,
+						label: name,
+						description: `${name} lifecycle tool.`,
+						parameters: type({}),
+						loadMode: "essential",
+						async execute() {
+							return { content: [{ type: "text", text: name }] };
+						},
+					});
+				});
+			}
+		};
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [registrationExtension],
+		});
+
+		try {
+			const originalSetPresentation = session.setActiveToolPresentation.bind(session);
+			vi.spyOn(session, "setActiveToolPresentation")
+				.mockImplementationOnce((_toolNames, _mountedToolNames, _forcePromptRefresh, signal) =>
+					untilAborted(signal, Promise.withResolvers<void>().promise),
+				)
+				.mockImplementation(originalSetPresentation);
+			const runner = session.extensionRunner;
+			if (!runner) throw new Error("expected extension runner");
+			const errors: string[] = [];
+			const unsubscribe = runner.onError(error => {
+				errors.push(error.error);
+			});
+			testSetExtensionHandlerTimeoutMs(10);
+
+			await runner.emit({ type: "session_start" });
+			unsubscribe();
+
+			expect(errors).toContain("handler timed out after 10ms");
+			expect(session.getToolByName("stalled_registration_tool")).toBeUndefined();
+			expect(session.getToolByName("recovered_registration_tool")?.label).toBe("recovered_registration_tool");
+			expect(session.getEnabledToolNames()).toContain("recovered_registration_tool");
+		} finally {
 			await session.dispose();
 		}
 	});
