@@ -66,8 +66,16 @@ needs to know whether the user has scrolled away from the tail.
 - A component tree that reports **no seam** gets shell semantics: whatever
   scrolls off is final. Shrinking such a frame into its committed prefix
   re-anchors the window and leaves the stale copy in history (§3).
-- Inside multiplexers, a resize leaves the pane history wrapped at the old
-  width (same as any shell output).
+- Inside multiplexers, a width change terminates the physical-row coordinate
+  epoch. Pane history remains immutable at its authored wrap; the renderer
+  leaves the host-reflowed viewport in place and establishes a separate
+  complete-frame baseline without publishing those viewport rows as native
+  commits. Later frame growth writes the exact current-width rows newly crossing
+  the scrollback seam, followed by a bounded viewport repaint; only that real
+  content advances the native commit count. Visible overlays freeze the seam
+  ledger as well as emission. Pinned live regions clip epoch advancement at
+  their final boundary, keeping mutable growth viewport-only until finalization.
+  Height-only resizes retain the existing ledger.
 
 ---
 
@@ -81,7 +89,9 @@ needs to know whether the user has scrolled away from the tail.
    geometry frames). The detector samples the prefix tail (up to 8 non-blank
    rows in the last 24, SGR-stripped). A single in-place mismatch is accepted
    as stale history; a structural shift re-anchors at the first changed row,
-   favoring duplication over content loss.
+   favoring duplication over content loss. An in-place width change does not
+   audit or re-slice the prior epoch's physical coordinate; it replaces that
+   opaque coordinate with a current-width final-prefix baseline.
 3. Classify the frame as a gesture-driven full paint, an opt-in divergence
    rebuild, or an ordinary update and calculate the window/commit chunk.
    Overlays freeze commits. A pinned live region clips its offscreen mutable
@@ -95,7 +105,7 @@ needs to know whether the user has scrolled away from the tail.
 | `#emitFullPaint`             | home + committed chunk + window rows; optional ED3 | initial paint, explicit geometry/session/reset gestures, or rebuild |
 | `#emitUpdate` scroll-append  | new bottom rows plus changed-row range             | rows leaving the screen are exactly the commit chunk                |
 | `#emitUpdate` in-window diff | relative move plus changed-row rewrite             | nothing scrolls or commits                                          |
-| `#emitUpdate` seam rewrite   | commit chunk plus full window rewrite              | commit/window re-anchor, hidden-gap backfill, or mux resize         |
+| `#emitUpdate` seam rewrite   | commit chunk plus full window rewrite              | commit/window re-anchor or hidden-gap backfill                      |
 
 **ED3 (`CSI 3 J`) is emitted in exactly one place** —
 `#emitFullPaint({ clearScrollback: true })`. The normal callers are explicit
@@ -164,22 +174,35 @@ contract, not a terminal-specific optimization.
    deliberate exception: it clears and replays the complete current frame.
 3. **Commits are exactly the chunk.** Any byte shape that scrolls the screen
    must scroll only rows accounted for by the commit advance.
-4. **NEVER probe the viewport position or fork on platform in the update
+4. **A multiplexer width resize NEVER advances history.** The old committed
+   physical-row coordinate is opaque after reflow. The resize leaves the
+   host-reflowed viewport in place and establishes a complete-frame baseline
+   independent of the native commit count. Subsequent growth writes the exact
+   current-width rows newly crossing the seam—not blank scroll commands—then
+   repaints the bounded viewport; only that slice advances commits. Visible
+   overlays advance neither the baseline nor the seam ledger; overlay exit
+   backfills the exact hidden slice. Pinned live regions advance only through
+   their final boundary; finalization releases the deferred mutable slice.
+   During a height shrink, only occupied old-frame rows actually moved into
+   history by the host are excluded from the append-owned seam; empty viewport
+   rows do not consume content-driven movement.
+   Height-only resizes do not terminate the epoch.
+5. **NEVER probe the viewport position or fork on platform in the update
    path.** win32 behaves like POSIX. The probe APIs are gone; do not
    reintroduce them.
-5. **Only declare rows exact when their bytes are stable.** Mutable transcript
+6. **Only declare rows exact when their bytes are stable.** Mutable transcript
    content may commit as an unpinned frozen snapshot, but rows before the seam
    remain under the exact-prefix audit.
-6. **Park the hardware cursor at real content bottom**, not the padded window
+7. **Park the hardware cursor at real content bottom**, not the padded window
    bottom, or height shrinks scroll live rows into history and duplicate them
    per resize step.
-7. **Cursor writes live inside the synchronized-output frame**, before ESU —
+8. **Cursor writes live inside the synchronized-output frame**, before ESU —
    never as a second frame after it.
-8. **NEVER throw in the render hot path.** Clamp over-wide lines
+9. **NEVER throw in the render hot path.** Clamp over-wide lines
    (`truncateToWidth`); a width mismatch is cosmetic, not fatal.
-9. **Multiplexers get no destructive clear and no history rewrap on resize** —
-   repaint the window in place; pane history keeps its old wrap.
-10. **Any change to the ledger math, the emitters, or the seam must be
+10. **Multiplexers get no destructive clear and no history rewrap on resize** —
+    repaint the window in place; pane history keeps its old wrap.
+11. **Any change to the ledger math, the emitters, or the seam must be
     validated by the stress harness (§6)** across its full scenario matrix,
     not by a single-terminal smoke test.
 

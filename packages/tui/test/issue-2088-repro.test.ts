@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import { type Component, TUI } from "@oh-my-pi/pi-tui";
+import {
+	type Component,
+	type NativeScrollbackCommittedRows,
+	type NativeScrollbackLiveRegion,
+	type RenderScheduler,
+	type RenderTimer,
+	TUI,
+} from "@oh-my-pi/pi-tui";
 import { VirtualTerminal } from "./virtual-terminal";
 
 // Regression test for https://github.com/can1357/oh-my-pi/issues/2088
@@ -35,6 +42,145 @@ class MutableLinesComponent implements Component {
 
 	render(width: number): string[] {
 		return this.#lines.map(line => line.slice(0, width));
+	}
+}
+
+class CommittedMutableLinesComponent implements Component, NativeScrollbackCommittedRows {
+	readonly receivedCommittedRows: number[] = [];
+	#lines: string[];
+
+	constructor(lines: string[]) {
+		this.#lines = [...lines];
+	}
+
+	append(lines: string[]): void {
+		this.#lines.push(...lines);
+	}
+
+	setLines(lines: string[]): void {
+		this.#lines = [...lines];
+	}
+
+	setNativeScrollbackCommittedRows(rows: number): void {
+		this.receivedCommittedRows.push(rows);
+	}
+
+	invalidate(): void {}
+
+	render(width: number): string[] {
+		return this.#lines.map(line => line.slice(0, width));
+	}
+}
+
+class WrappingStreamComponent implements Component, NativeScrollbackLiveRegion {
+	#records: string[] = [];
+	#stream = "";
+	#liveStart = 0;
+
+	append(record: string): void {
+		this.#records.push(record);
+	}
+
+	appendToLive(suffix: string): void {
+		this.#stream += suffix;
+	}
+
+	render(width: number): string[] {
+		const rows: string[] = [];
+		const chunkWidth = Math.max(1, width);
+		for (const record of this.#records) {
+			for (let offset = 0; offset < record.length; offset += chunkWidth) {
+				rows.push(record.slice(offset, offset + chunkWidth));
+			}
+			rows.push("");
+		}
+		this.#liveStart = rows.length;
+		for (let offset = 0; offset < this.#stream.length; offset += chunkWidth) {
+			rows.push(this.#stream.slice(offset, offset + chunkWidth));
+		}
+		rows.push("");
+		return rows;
+	}
+
+	getNativeScrollbackLiveRegionStart(): number | undefined {
+		return this.#liveStart;
+	}
+}
+
+class PinnedMutableLinesComponent implements Component, NativeScrollbackLiveRegion {
+	#lines: string[];
+	#pinned = true;
+
+	constructor(lines: string[]) {
+		this.#lines = [...lines];
+	}
+
+	setLines(lines: string[]): void {
+		this.#lines = [...lines];
+	}
+
+	finalize(): void {
+		this.#pinned = false;
+	}
+
+	invalidate(): void {}
+
+	render(width: number): string[] {
+		return this.#lines.map(line => line.slice(0, width));
+	}
+
+	getNativeScrollbackLiveRegionStart(): number | undefined {
+		return this.#pinned ? 0 : undefined;
+	}
+
+	isNativeScrollbackLiveRegionPinned(): boolean {
+		return this.#pinned;
+	}
+}
+
+class ManualRenderScheduler implements RenderScheduler {
+	#now = 0;
+	#immediates: (() => void)[] = [];
+	#timers: { at: number; callback: () => void; canceled: boolean }[] = [];
+
+	now(): number {
+		return this.#now;
+	}
+
+	scheduleImmediate(callback: () => void): void {
+		this.#immediates.push(callback);
+	}
+
+	scheduleRender(callback: () => void, delayMs: number): RenderTimer {
+		const timer = { at: this.#now + Math.max(0, delayMs), callback, canceled: false };
+		this.#timers.push(timer);
+		return {
+			cancel: () => {
+				timer.canceled = true;
+			},
+		};
+	}
+
+	async flush(term: VirtualTerminal): Promise<void> {
+		while (this.#immediates.length > 0) {
+			const callbacks = this.#immediates.splice(0);
+			for (const callback of callbacks) callback();
+		}
+		await term.flush();
+	}
+
+	async advanceBy(ms: number, term: VirtualTerminal): Promise<void> {
+		await this.flush(term);
+		this.#now += ms;
+		while (true) {
+			const due = this.#timers.filter(timer => !timer.canceled && timer.at <= this.#now);
+			if (due.length === 0) break;
+			for (const timer of due) {
+				timer.canceled = true;
+				timer.callback();
+			}
+			await this.flush(term);
+		}
 	}
 }
 
@@ -285,6 +431,72 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 		});
 	});
 
+	it("retains an ordinary render requested inside the multiplexer settle window", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 1000);
+			const lines = Array.from({ length: 12 }, (_value, index) => `line-${index}`);
+			const component = new MutableLinesComponent(lines);
+			const tui = new TUI(term);
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				const writes = captureWrites(term);
+
+				term.resize(80, 6);
+				await Bun.sleep(10);
+				lines[11] = "line-11 updated during resize";
+				component.setLines(lines);
+				tui.requestRender();
+
+				await Bun.sleep(20);
+				expect(writes).toHaveLength(0);
+
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+				expect(visible(term).at(-1)).toBe("line-11 updated during resize");
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("does not let ordinary renders postpone the multiplexer settle deadline", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 1000);
+			const lines = Array.from({ length: 12 }, (_value, index) => `line-${index}`);
+			const component = new MutableLinesComponent(lines);
+			const scheduler = new ManualRenderScheduler();
+			const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await scheduler.advanceBy(0, term);
+				const baselineRedraws = tui.fullRedraws;
+				const writes = captureWrites(term);
+
+				term.resize(80, 6);
+				for (let tick = 1; tick <= 4; tick++) {
+					await scheduler.advanceBy(10, term);
+					lines[11] = `line-11 stream-${tick}`;
+					component.setLines(lines);
+					tui.requestRender();
+				}
+				expect(writes).toHaveLength(0);
+
+				// Ordinary spinner/stream frames only mark the settled paint as
+				// content-bearing. They must not move the original 50 ms deadline.
+				await scheduler.advanceBy(10, term);
+				expect(tui.fullRedraws - baselineRedraws).toBe(1);
+				expect(visible(term).at(-1)).toBe("line-11 stream-4");
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
 	it("defers a forced repaint that lands inside the multiplexer settle window", async () => {
 		await withEnvPatch(TMUX_ENV, async () => {
 			const term = new VirtualTerminal(40, 10, 1000);
@@ -352,6 +564,388 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 				await settle(term);
 				expect(tui.fullRedraws - baselineRedraws).toBe(1);
 				expect(visible(term)).toEqual(Array.from({ length: 10 }, (_v, i) => `line-${i + 10}`));
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("freezes committed coordinates across repeated Herdr width epochs", async () => {
+		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const component = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				component.append(
+					`record-${index.toString().padStart(2, "0")} ${String.fromCharCode(65 + index).repeat(46)}`,
+				);
+			}
+			component.appendToLive(`stream-seed ${"S".repeat(80)}`);
+			tui.addChild(component);
+
+			const assertFrame = (width: number, recordCount: number, checkRetainedRecords = true): void => {
+				const rendered = component.render(width);
+				const expected = rendered.slice(Math.max(0, rendered.length - term.rows)).map(line => line.trimEnd());
+				while (expected.length < term.rows) expected.push("");
+				const current = visible(term);
+				if (checkRetainedRecords) {
+					expect(current).toEqual(expected);
+				} else {
+					expect(current.some(line => line.length > 0)).toBeTrue();
+					expect(current.every(line => line.length <= width)).toBeTrue();
+					expect(current.at(-1)).toBe("");
+				}
+				if (checkRetainedRecords) {
+					const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+					for (let index = 0; index < recordCount; index++) {
+						const marker = `record-${index.toString().padStart(2, "0")}`;
+						expect(
+							buffer.filter(line => line.includes(marker)),
+							marker,
+						).toHaveLength(1);
+					}
+				}
+			};
+
+			try {
+				tui.start();
+				await settle(term);
+				assertFrame(40, 8);
+
+				const baselineViewportPaints = tui.resizeViewportPaints;
+				let baselineRedraws = tui.fullRedraws;
+				const writes = captureWrites(term);
+				const widths = [17, 40, 17];
+				for (let epoch = 0; epoch < widths.length; epoch++) {
+					const width = widths[epoch]!;
+					term.resize(width, 6);
+					if (epoch === 0) {
+						await Bun.sleep(10);
+						tui.requestRender(true);
+						await Bun.sleep(20);
+						expect(writes).toHaveLength(0);
+						expect(tui.fullRedraws).toBe(baselineRedraws);
+					}
+					await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+					await settle(term);
+
+					expect(tui.fullRedraws - baselineRedraws).toBe(1);
+					expect(tui.resizeViewportPaints).toBe(baselineViewportPaints);
+					assertFrame(width, 8, false);
+					baselineRedraws = tui.fullRedraws;
+
+					component.appendToLive(` stream-${epoch} ${String.fromCharCode(73 + epoch).repeat(23)}`);
+					tui.requestRender(true);
+					await settle(term);
+					assertFrame(width, 8);
+					baselineRedraws = tui.fullRedraws;
+				}
+
+				const output = writes.join("");
+				expect(output).not.toContain("\x1b[3J");
+				expect(output).not.toContain("\x1b[?1049h");
+				expect(output).not.toContain("\x1b[?1049l");
+				expect(output).not.toContain("\x1b[2J");
+				expect(output).not.toContain("\x1b[22J");
+				assertFrame(17, 8);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("keeps the native commit count separate and retains bulk post-epoch output", async () => {
+		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+			const initial = Array.from({ length: 20 }, (_value, index) => `initial-${index.toString().padStart(2, "0")}`);
+			const appended = Array.from(
+				{ length: 20 },
+				(_value, index) => `post-epoch-${index.toString().padStart(2, "0")}`,
+			);
+			const continued = ["post-epoch-20", "post-epoch-21"];
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const component = new CommittedMutableLinesComponent(initial);
+			const editor = new MutableLinesComponent(["editor"]);
+			const tui = new TUI(term);
+			tui.addChild(component);
+			tui.addChild(editor);
+
+			try {
+				tui.start();
+				await settle(term);
+				const committedBeforeResize = component.receivedCommittedRows.at(-1);
+				expect(committedBeforeResize).toBe(15);
+
+				term.resize(17, 6);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+				expect(component.receivedCommittedRows.at(-1)).toBe(committedBeforeResize);
+
+				const writes = captureWrites(term);
+				component.append(appended);
+				tui.requestRender(true);
+				await settle(term);
+
+				expect(writes.join("")).toContain("post-epoch-00");
+				expect(component.receivedCommittedRows.at(-1)).toBe(committedBeforeResize);
+				expect(visible(term)).toEqual([...appended.slice(-5), "editor"]);
+
+				component.append(continued);
+				tui.requestRender(true);
+				await settle(term);
+				expect(component.receivedCommittedRows.at(-1)).toBe(committedBeforeResize);
+				expect(visible(term)).toEqual([...appended.slice(-3), ...continued, "editor"]);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (const line of [...initial, ...appended, ...continued, "editor"]) {
+					expect(
+						buffer.filter(bufferLine => bufferLine === line),
+						line,
+					).toHaveLength(1);
+				}
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("separates height-shrink movement from post-epoch append movement", async () => {
+		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+			const initial = Array.from({ length: 100 }, (_value, index) => `mixed-${index.toString().padStart(3, "0")}`);
+			const appended = Array.from(
+				{ length: 5 },
+				(_value, index) => `mixed-${(100 + index).toString().padStart(3, "0")}`,
+			);
+			const term = new VirtualTerminal(40, 10, 10_000);
+			const component = new CommittedMutableLinesComponent(initial);
+			const tui = new TUI(term);
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 10);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				term.resize(17, 5);
+				component.append(appended);
+				tui.requestRender();
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				expect(visible(term)).toEqual(appended);
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (const line of [...initial, ...appended]) {
+					expect(
+						buffer.filter(bufferLine => bufferLine === line),
+						line,
+					).toHaveLength(1);
+				}
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("does not attribute sparse-frame append movement to a height shrink", async () => {
+		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+			const initial = ["sparse-0", "sparse-1", "sparse-2"];
+			const appended = ["sparse-3", "sparse-4", "sparse-5", "sparse-6", "sparse-7"];
+			const term = new VirtualTerminal(40, 10, 10_000);
+			const component = new CommittedMutableLinesComponent(initial);
+			const tui = new TUI(term);
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 10);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				term.resize(17, 5);
+				component.append(appended);
+				tui.requestRender();
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				expect(visible(term)).toEqual(appended);
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				expect(buffer.slice(0, -5)).toEqual(initial);
+				for (const line of [...initial, ...appended]) {
+					expect(
+						buffer.filter(bufferLine => bufferLine === line),
+						line,
+					).toHaveLength(1);
+				}
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("backfills post-epoch rows appended behind an overlay", async () => {
+		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+			const initial = Array.from({ length: 12 }, (_value, index) => `initial-${index.toString().padStart(2, "0")}`);
+			const appended = Array.from({ length: 12 }, (_value, index) => `hidden-${index.toString().padStart(2, "0")}`);
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const component = new MutableLinesComponent(initial);
+			const editor = new MutableLinesComponent(["editor"]);
+			const tui = new TUI(term);
+			tui.addChild(component);
+			tui.addChild(editor);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 6);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const overlay = tui.showOverlay(new MutableLinesComponent(["overlay"]), {
+					anchor: "top-left",
+					row: 1,
+					col: 1,
+				});
+				await settle(term);
+				component.setLines([...initial, ...appended]);
+				tui.requestRender(true);
+				await settle(term);
+				overlay.hide();
+				tui.requestRender(true);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (const line of [...initial, ...appended, "editor"]) {
+					expect(
+						buffer.filter(bufferLine => bufferLine === line),
+						line,
+					).toHaveLength(1);
+				}
+				expect(visible(term)).toEqual([...appended.slice(-5), "editor"]);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("defers pinned live-region growth until width-epoch finalization", async () => {
+		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+			const initial = ["pinned-00", "pinned-01"];
+			const final = Array.from({ length: 10 }, (_value, index) => `pinned-${index.toString().padStart(2, "0")}`);
+			const term = new VirtualTerminal(40, 4, 1000);
+			const component = new PinnedMutableLinesComponent(initial);
+			const tui = new TUI(term);
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 4);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				component.setLines(final);
+				tui.requestRender(true);
+				await settle(term);
+				expect(term.getBufferPosition().baseY).toBe(0);
+				expect(visible(term)).toEqual(final.slice(-4));
+
+				component.finalize();
+				tui.requestRender(true);
+				await settle(term);
+				expect(term.getBufferPosition().baseY).toBe(6);
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (const line of final) {
+					expect(
+						buffer.filter(bufferLine => bufferLine === line),
+						line,
+					).toHaveLength(1);
+				}
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("parks a short no-cursor width epoch at the real content bottom", async () => {
+		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+			const term = new VirtualTerminal(40, 6, 1000);
+			const header = new MutableLinesComponent(["short-0", "short-1"]);
+			const loader = new MutableLinesComponent(["loader-0"]);
+			const tui = new TUI(term);
+			tui.addChild(header);
+			tui.addChild(loader);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 6);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				loader.setLines(["loader-1"]);
+				tui.requestDirectWrite(loader);
+				await term.flush();
+				expect(visible(term).slice(0, 3)).toEqual(["short-0", "short-1", "loader-1"]);
+
+				term.resize(17, 2);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (const line of ["short-0", "short-1", "loader-1"]) {
+					expect(
+						buffer.filter(bufferLine => bufferLine === line),
+						line,
+					).toHaveLength(1);
+				}
+				expect(visible(term)).toEqual(["short-1", "loader-1"]);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("keeps Herdr height-only resize accounting unchanged", async () => {
+		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const lines = Array.from(
+				{ length: 12 },
+				(_value, index) => `height-record-${index.toString().padStart(2, "0")}`,
+			);
+			const component = new MutableLinesComponent(lines);
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				const writes = captureWrites(term);
+
+				for (const height of [4, 6]) {
+					term.resize(40, height);
+					await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+					await settle(term);
+					expect(visible(term)).toEqual(lines.slice(-height));
+				}
+
+				lines.push("height-record-12");
+				component.setLines(lines);
+				tui.requestRender(true);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (const line of lines) {
+					expect(
+						buffer.filter(row => row === line),
+						line,
+					).toHaveLength(1);
+				}
+				const output = writes.join("");
+				expect(output).not.toContain("\x1b[3J");
+				expect(output).not.toContain("\x1b[?1049h");
+				expect(output).not.toContain("\x1b[?1049l");
+				expect(visible(term)).toEqual(lines.slice(-6));
 			} finally {
 				tui.stop();
 			}

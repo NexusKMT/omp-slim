@@ -1041,6 +1041,10 @@ export class TUI extends Container {
 	// snapshot (duplication, never loss). Re-based on full paints / shrinks /
 	// geometry frames.
 	#committedPrefixAuditRows = 0;
+	// Width reflow terminates the meaning of the old committed physical-row
+	// index in an in-place resize session. This is the current-width frame
+	// baseline; only later physical-row growth may advance the append ledger.
+	#widthEpochBaselineRows: number | undefined;
 	// Frame row currently mapped to screen row 0. Monotonic between full
 	// paints: a shrink never re-exposes scrolled-off rows (they cannot be
 	// un-scrolled without rewriting history); live rows repaint at fixed
@@ -1083,6 +1087,7 @@ export class TUI extends Container {
 	// flag below so the settled paint still honours every caller's request.
 	#multiplexerResizeTimer: RenderTimer | undefined;
 	#deferredForcedClearScrollback = false;
+	#multiplexerResizeHasPendingRender = false;
 	// True from the first SIGWINCH of a non-multiplexer drag until the settle
 	// timer fires. While set, every `#doRender` short-circuits to the viewport
 	// fast path (`#renderResizeViewport`) instead of an authoritative full
@@ -1192,6 +1197,13 @@ export class TUI extends Container {
 		const children = this.children;
 		const previousSegments = this.#frameSegments;
 		const segments: FrameSegment[] = new Array(children.length);
+		// A multiplexer width epoch makes the renderer's native commit count
+		// intentionally unmappable to current-width component rows. Do not feed
+		// that opaque count into snapshot/sealing logic; components retain their
+		// last valid claim until a full replay establishes a new coordinate tape.
+		const committedCoordinatesOpaque =
+			this.#widthEpochBaselineRows !== undefined ||
+			(this.#composeWidth > 0 && this.#composeWidth !== width && this.#resizeRepaintsInPlace());
 		// A width change re-renders every child; nothing carries over.
 		let chainStable = this.#composeWidth === width;
 		this.#composeWidth = width;
@@ -1226,7 +1238,12 @@ export class TUI extends Container {
 				// own future rows being pre-committed.
 				const prevRows = previous !== undefined && previous.component === child ? previous.rowCount : 0;
 				const prevStart = previous !== undefined && previous.component === child ? previous.start : offset;
-				setNativeScrollbackCommittedRows(child, Math.min(prevRows, Math.max(0, this.#committedRows - prevStart)));
+				if (!committedCoordinatesOpaque) {
+					setNativeScrollbackCommittedRows(
+						child,
+						Math.min(prevRows, Math.max(0, this.#committedRows - prevStart)),
+					);
+				}
 				childLines = child.render(width);
 				const liveRegionStart = getNativeScrollbackLiveRegionStart(child);
 				if (liveRegionStart !== undefined) {
@@ -1634,7 +1651,10 @@ export class TUI extends Container {
 					this.#requestResizeViewportPaint();
 					return;
 				}
-				this.#armMultiplexerResizeTimer(false);
+				this.#armMultiplexerResizeTimer(
+					false,
+					this.#multiplexerResizeTimer === undefined && (this.#renderRequested || this.#renderTimer !== undefined),
+				);
 			},
 			() => this.stop(),
 		);
@@ -1915,7 +1935,7 @@ export class TUI extends Container {
 		// the same `#prepareForcedRender(!isMultiplexerSession())` path via
 		// `requestRender(true)`, so the clear-scrollback intent is preserved.
 		if (this.#multiplexerResizeTimer) {
-			this.#armMultiplexerResizeTimer(!isMultiplexerSession());
+			this.#armMultiplexerResizeTimer(!isMultiplexerSession(), true);
 			return;
 		}
 		this.#prepareForcedRender(!isMultiplexerSession());
@@ -1938,7 +1958,7 @@ export class TUI extends Container {
 			// so this guard only catches external callers — the deferred render
 			// itself proceeds straight to `#prepareForcedRender`.
 			if (this.#multiplexerResizeTimer) {
-				this.#armMultiplexerResizeTimer(options?.clearScrollback === true);
+				this.#armMultiplexerResizeTimer(options?.clearScrollback === true, true);
 				return;
 			}
 			// A forced render preempts the post-full-paint ConPTY settle: it owns
@@ -2167,6 +2187,10 @@ export class TUI extends Container {
 
 	/** Ordinary (non-forced) scheduling shared by full and component-scoped requests. */
 	#requestOrdinaryRender(): void {
+		if (this.#multiplexerResizeTimer) {
+			this.#multiplexerResizeHasPendingRender = true;
+			return;
+		}
 		// Coalesce non-forced renders inside the post-full-paint ConPTY settle
 		// window into one trailing render. Spinner/blink/streaming components
 		// otherwise fire `requestRender(false)` at 30 Hz while the host is still
@@ -2250,8 +2274,9 @@ export class TUI extends Container {
 	 * intent into `#deferredForcedClearScrollback` — the timer's callback
 	 * consumes that flag exactly once when it re-enters `requestRender(true)`.
 	 */
-	#armMultiplexerResizeTimer(clearScrollback: boolean): void {
+	#armMultiplexerResizeTimer(clearScrollback: boolean, hasPendingRender = false): void {
 		this.#deferredForcedClearScrollback ||= clearScrollback;
+		this.#multiplexerResizeHasPendingRender ||= hasPendingRender;
 		if (this.#renderTimer) {
 			this.#renderTimer.cancel();
 			this.#renderTimer = undefined;
@@ -3022,6 +3047,8 @@ export class TUI extends Container {
 		const prevHardwareCursorRow = this.#hardwareCursorRow;
 		const resizeEventOccurred = this.#resizeEventPending;
 		this.#resizeEventPending = false;
+		const resizeHadPendingRender = this.#multiplexerResizeHasPendingRender;
+		this.#multiplexerResizeHasPendingRender = false;
 		if (resizeEventOccurred) this.#forgetHardwareCursorState();
 		const widthChanged = this.#previousWidth > 0 && this.#previousWidth !== width;
 		// A resize event with net-unchanged dimensions still reflowed the
@@ -3031,6 +3058,7 @@ export class TUI extends Container {
 			(this.#previousHeight > 0 && this.#previousHeight !== height) ||
 			(resizeEventOccurred && this.#previousHeight > 0);
 		const geometryChanged = widthChanged || heightChanged;
+		const widthEpochReset = widthChanged && this.#resizeRepaintsInPlace();
 
 		// Committed-prefix audit. Rows below the audit mark are hard-verified
 		// exact bytes; rows between the mark and the current exactness boundary
@@ -3058,6 +3086,7 @@ export class TUI extends Container {
 		const auditRan =
 			this.#hasEverRendered &&
 			!geometryChanged &&
+			this.#widthEpochBaselineRows === undefined &&
 			!this.#clearScrollbackOnNextRender &&
 			(this.#renderStablePrefixRows < this.#committedPrefixAuditRows ||
 				newlyFinalEnd > this.#committedPrefixAuditRows);
@@ -3073,7 +3102,12 @@ export class TUI extends Container {
 		// record and the frame part ways — so the surviving exact prefix stays
 		// recognized and is never re-shown or re-committed. Only genuinely new
 		// content repaints below it.
-		if (!geometryChanged && !this.#clearScrollbackOnNextRender && frameLength < this.#committedRows) {
+		if (
+			this.#widthEpochBaselineRows === undefined &&
+			!geometryChanged &&
+			!this.#clearScrollbackOnNextRender &&
+			frameLength < this.#committedRows
+		) {
 			const limit = Math.min(this.#committedRows, frameLength);
 			let diverged = limit;
 			for (let i = 0; i < limit; i++) {
@@ -3130,10 +3164,32 @@ export class TUI extends Container {
 		const fullPaint = firstPaint || replaceRequested || geometryRebuild || divergenceRebuild;
 		let windowTop: number;
 		let chunkTo: number;
+		let widthEpochAppendFrom = 0;
+		let widthEpochAppendTo = 0;
 		if (fullPaint) {
 			committedPrefixResliced = true;
 			windowTop = Math.max(0, frameLength - height);
 			chunkTo = liveRegionPinned ? Math.min(windowTop, finalBoundary) : windowTop;
+		} else if (widthEpochReset) {
+			// A terminal width change ends the physical-row coordinate epoch.
+			// Multiplexer history keeps its old wrap, so old committed rows are
+			// opaque. Preserve the native commit ledger, leave the host-reflowed
+			// viewport in place, and record a separate current-width frame
+			// baseline. A resize alone commits and publishes nothing.
+			this.#widthEpochBaselineRows = frameLength;
+			windowTop = Math.max(0, frameLength - height);
+			chunkTo = this.#committedRows;
+		} else if (this.#widthEpochBaselineRows !== undefined) {
+			// Only rows physically appended after the width epoch may drive the
+			// terminal forward. Keep the native commit count independent of this
+			// frame-coordinate baseline. Overlays defer all emission; a pinned
+			// live region clips advancement to its exact final boundary so mutable
+			// rows remain viewport-only until finalization.
+			windowTop = Math.max(0, frameLength - height);
+			chunkTo = this.#committedRows;
+			widthEpochAppendFrom = this.#widthEpochBaselineRows;
+			const appendBoundary = liveRegionPinned ? finalBoundary : frameLength;
+			widthEpochAppendTo = hasVisibleOverlay ? widthEpochAppendFrom : Math.max(widthEpochAppendFrom, appendBoundary);
 		} else if (
 			frameLength <= this.#committedRows ||
 			(committedRowsResynced &&
@@ -3264,29 +3320,103 @@ export class TUI extends Container {
 				cursorTrackingLineCount,
 				boundConptyPaint: !unboundedConptyPaint,
 				leadingSequence: deferredAltExit,
+				copyScreenToScrollback: true,
 			});
 			this.#pendingAltExit = "";
 			this.#committedPrefix = rawFrame.slice(0, chunkTo);
 			this.#committedPrefixAuditRows = Math.min(chunkTo, finalBoundary);
 			this.#clearScrollbackOnNextRender = false;
 			this.#hasEverRendered = true;
+			this.#widthEpochBaselineRows = undefined;
 			this.#publishCommittedRows();
 			if (!firstPaint && frameLength > height) this.#armPostFullPaintSettle();
 			return;
 		}
-		if (imageTransmitBuffer.length > 0) {
-			this.terminal.write(imageTransmitBuffer);
+		if (widthEpochReset) {
+			// The multiplexer has already reflowed the old-width screen. Keep
+			// finalized viewport bytes intact, repaint only the cursor-owning root
+			// component, and establish a current-width ledger baseline.
+			let repaintFromScreenRow = height;
+			if (resizeHadPendingRender) {
+				repaintFromScreenRow = 0;
+			} else if (cursorPos) {
+				const cursorSegmentIndex = this.#frameSegments.findIndex(
+					segment => segment.start <= cursorPos.row && cursorPos.row < segment.start + segment.rowCount,
+				);
+				let liveRootStart =
+					cursorSegmentIndex >= 0 ? this.#frameSegments[cursorSegmentIndex]!.start : cursorPos.row;
+				for (let index = cursorSegmentIndex - 1; index >= 0; index--) {
+					const segment = this.#frameSegments[index]!;
+					if (segment.start < windowTop) break;
+					liveRootStart = segment.start;
+				}
+				repaintFromScreenRow = Math.max(0, Math.min(height, liveRootStart - windowTop));
+			}
+			this.#emitWidthEpochBaseline(frame, window, width, height, cursorPos, purgeSequence, imageTransmitBuffer, {
+				repaintFromScreenRow,
+				commitFrom: 0,
+				commitTo: 0,
+				windowTop,
+				cursorTrackingLineCount,
+				leadingSequence: deferredAltExit,
+			});
+			this.#pendingAltExit = "";
+			this.#windowTopRow = windowTop;
+			this.#clearScrollbackOnNextRender = false;
+			this.#hasEverRendered = true;
+			return;
 		}
-		this.#emitUpdate(frame, window, width, height, cursorPos, purgeSequence, {
-			chunkTo,
-			windowTop,
-			prevWindowTop,
-			prevHardwareCursorRow,
-			forceWindowRewrite:
-				this.#forceViewportRepaintOnNextRender || (geometryChanged && this.#resizeRepaintsInPlace()),
-			repaintVirtualScrollInPlace: hasVisibleOverlay,
-			cursorTrackingLineCount,
-		});
+		if (this.#widthEpochBaselineRows !== undefined) {
+			const windowMovement = Math.max(0, windowTop - prevWindowTop);
+			// A height shrink moves only occupied rows past the old seam. Empty
+			// viewport rows disappear without entering pane history, so the raw
+			// height delta would steal append-owned movement from a sparse frame.
+			const previousViewportRows = Math.min(
+				this.#previousHeight,
+				Math.max(0, this.#previousFrameLength - prevWindowTop),
+			);
+			const hostHeightShrinkRows = Math.min(windowMovement, Math.max(0, previousViewportRows - height));
+			const appendWindowMovement = windowMovement - hostHeightShrinkRows;
+			const epochGrowthRows = Math.max(0, widthEpochAppendTo - widthEpochAppendFrom);
+			const scrollRows = Math.min(appendWindowMovement, epochGrowthRows);
+			const commitFrom = prevWindowTop + hostHeightShrinkRows;
+			this.#emitWidthEpochBaseline(frame, window, width, height, cursorPos, purgeSequence, imageTransmitBuffer, {
+				repaintFromScreenRow: 0,
+				commitFrom,
+				commitTo: commitFrom + scrollRows,
+				windowTop,
+				cursorTrackingLineCount,
+				leadingSequence: deferredAltExit,
+			});
+			this.#pendingAltExit = "";
+			if (!hasVisibleOverlay) {
+				if (liveRegionPinned) {
+					this.#widthEpochBaselineRows = widthEpochAppendTo;
+					this.#windowTopRow = prevWindowTop + scrollRows;
+				} else {
+					this.#widthEpochBaselineRows = frameLength;
+					this.#windowTopRow = windowTop;
+				}
+				this.#committedRows += scrollRows;
+			}
+			this.#clearScrollbackOnNextRender = false;
+			this.#hasEverRendered = true;
+			return;
+		} else {
+			if (imageTransmitBuffer.length > 0) {
+				this.terminal.write(imageTransmitBuffer);
+			}
+			this.#emitUpdate(frame, window, width, height, cursorPos, purgeSequence, {
+				chunkTo,
+				windowTop,
+				prevWindowTop,
+				prevHardwareCursorRow,
+				forceWindowRewrite:
+					this.#forceViewportRepaintOnNextRender || (geometryChanged && this.#resizeRepaintsInPlace()),
+				repaintVirtualScrollInPlace: hasVisibleOverlay,
+				cursorTrackingLineCount,
+			});
+		}
 		for (let i = this.#committedPrefix.length; i < chunkTo; i++) {
 			this.#committedPrefix.push(rawFrame[i] ?? "");
 		}
@@ -3646,6 +3776,72 @@ export class TUI extends Container {
 		);
 	}
 
+	#emitWidthEpochBaseline(
+		frame: readonly string[],
+		window: string[],
+		width: number,
+		height: number,
+		cursorPos: { row: number; col: number } | null,
+		purgeSequence: string,
+		imageTransmitBuffer: string,
+		options: {
+			repaintFromScreenRow: number;
+			commitFrom: number;
+			commitTo: number;
+			windowTop: number;
+			cursorTrackingLineCount: number;
+			leadingSequence: string;
+		},
+	): void {
+		this.#fullRedrawCount += 1;
+		let buffer = this.#paintBeginSequence + purgeSequence + options.leadingSequence + imageTransmitBuffer;
+		if (options.commitTo > options.commitFrom) {
+			// Rebuild the current-width seam with real rows. Writing the exact
+			// newly offscreen slice followed by the viewport makes only that
+			// slice enter native history; mutable editor/live rows stay on-grid.
+			buffer += "\x1b[1;1H";
+			let wroteLine = false;
+			for (let row = options.commitFrom; row < options.commitTo; row++) {
+				if (wroteLine) buffer += "\r\n";
+				buffer += this.#lineRewriteSequence(frame[row] ?? "", width);
+				wroteLine = true;
+			}
+			for (let screenRow = 0; screenRow < height; screenRow++) {
+				if (wroteLine) buffer += "\r\n";
+				buffer += this.#lineRewriteSequence(window[screenRow] ?? "", width);
+				wroteLine = true;
+			}
+		} else {
+			for (let screenRow = options.repaintFromScreenRow; screenRow < height; screenRow++) {
+				buffer += `\x1b[${screenRow + 1};1H`;
+				buffer += this.#lineRewriteSequence(window[screenRow] ?? "", width);
+			}
+		}
+		// An exact-width bottom row leaves DEC autowrap pending. Clear it before
+		// the cursor CUP so a resize repaint can never turn that pending wrap
+		// into an unaccounted native-history scroll.
+		buffer += "\r";
+		const contentRows = Math.max(1, Math.min(height, frame.length - options.windowTop));
+		const contentBottomRow = options.windowTop + contentRows - 1;
+		const target = this.#targetHardwareCursorState(cursorPos, options.cursorTrackingLineCount);
+		if (target) {
+			const screenRow = Math.max(0, Math.min(height - 1, target.row - options.windowTop));
+			buffer += `\x1b[${screenRow + 1};${target.col + 1}H`;
+			buffer += target.visible ? "\x1b[?25h" : "\x1b[?25l";
+		} else {
+			// Keep direct-write deltas anchored to the real content bottom.
+			// Viewport padding is not content and must not become cursor state.
+			buffer += `\x1b[${contentRows};1H\x1b[?25l`;
+		}
+		buffer += this.#paintEndSequence;
+		this.terminal.write(buffer);
+
+		this.#commit(frame, window, width, height, {
+			toRow: target?.row ?? contentBottomRow,
+			state: target,
+			visible: target?.visible ?? false,
+		});
+	}
 	/**
 	 * Replay the frame from home, optionally clearing native scrollback first:
 	 * committed prefix `[0, chunkTo)` followed by the visible window. ED3
@@ -3677,6 +3873,7 @@ export class TUI extends Container {
 			 */
 			boundConptyPaint: boolean;
 			leadingSequence: string;
+			copyScreenToScrollback: boolean;
 		},
 	): void {
 		this.#fullRedrawCount += 1;
@@ -3734,12 +3931,11 @@ export class TUI extends Container {
 				}
 			}
 		} else {
-			// Best-effort: push the pre-paint screen into scrollback on
-			// terminals that implement kitty's ED 22
-			// (copy-screen-to-scrollback-then-erase). Always follow with ED 2 so
-			// the viewport is cleared regardless; on real kitty, ED 2 over the
-			// now-blank screen is a no-op and does not push a second copy.
-			if (TERMINAL.supportsScreenToScrollback) buffer += "\x1b[22J";
+			// ED2 clears only the viewport. Initial/non-destructive replays may
+			// first ask supporting terminals to preserve the prior screen, but a
+			// width-epoch repaint MUST NOT copy that invalidated viewport into
+			// native history.
+			if (options.copyScreenToScrollback && TERMINAL.supportsScreenToScrollback) buffer += "\x1b[22J";
 			buffer += "\x1b[2J\x1b[H";
 		}
 		if (imageTransmitBuffer.length > 0) buffer += imageTransmitBuffer;
