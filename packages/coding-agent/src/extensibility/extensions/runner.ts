@@ -360,7 +360,7 @@ export class ExtensionRunner {
 	#getMemoryFn?: () => MemoryRuntimeContext | undefined;
 	#commandDiagnostics: Array<{ type: string; message: string; path: string }> = [];
 	#toolRegistrationScope = new AsyncLocalStorage<ToolRegistrationScope>();
-	#toolRegistrationBarrier: Promise<void> = Promise.resolve();
+	#toolRegistrationBarrier: Promise<void> | undefined;
 	#initialized = false;
 	/**
 	 * Buffer for `credential_disabled` events received via {@link emitCredentialDisabled}
@@ -531,7 +531,8 @@ export class ExtensionRunner {
 		this.runtime.getActiveTools = actions.getActiveTools;
 		this.runtime.getAllTools = actions.getAllTools;
 		this.runtime.setActiveTools = async toolNames => {
-			await this.#toolRegistrationBarrier;
+			const registrationBarrier = this.#toolRegistrationBarrier;
+			if (registrationBarrier) await registrationBarrier;
 			await actions.setActiveTools(toolNames);
 		};
 		this.runtime.getCommands = actions.getCommands;
@@ -704,10 +705,14 @@ export class ExtensionRunner {
 		const subscriptions: Array<{ extension: Extension; listener: ToolRegistrationListener }> = [];
 		for (const extension of this.extensions) {
 			const trackRegistration = (pending: Promise<void>): void => {
-				this.#toolRegistrationBarrier = pending.then(
+				const registrationBarrier = pending.then(
 					() => undefined,
 					() => undefined,
 				);
+				this.#toolRegistrationBarrier = registrationBarrier;
+				void registrationBarrier.then(() => {
+					if (this.#toolRegistrationBarrier === registrationBarrier) this.#toolRegistrationBarrier = undefined;
+				});
 				const scope = this.#toolRegistrationScope.getStore();
 				if (scope && !scope.closed) {
 					scope.pending.add(pending);
@@ -1043,10 +1048,13 @@ export class ExtensionRunner {
 		} catch (error) {
 			handlerFailure ??= { error };
 		}
-		// Also wait for detached registrations that were scheduled before this handler
-		// completed. Their failures are reported at registration time, not attributed
-		// to this unrelated handler.
-		await this.#toolRegistrationBarrier;
+		const registrationBarrier = this.#toolRegistrationBarrier;
+		if (registrationBarrier) {
+			// Also wait for detached registrations that were scheduled before this
+			// handler completed. Their failures are reported at registration time,
+			// not attributed to this unrelated handler.
+			await registrationBarrier;
+		}
 		if (handlerFailure) {
 			const message =
 				handlerFailure.error instanceof Error ? handlerFailure.error.message : String(handlerFailure.error);
