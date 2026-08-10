@@ -2680,8 +2680,10 @@ export class AuthStorage {
 	}
 
 	/**
-	 * Check if any form of auth is configured for a provider.
-	 * Unlike getApiKey(), this doesn't refresh OAuth tokens.
+	 * Dedicated auth for default-model availability (picker / `getAvailable`).
+	 * Unlike {@link getApiKey}, this does not refresh OAuth tokens, and unlike
+	 * {@link hasResolvableAuth} it ignores cross-provider env aliases so
+	 * `XAI_API_KEY` does not auto-select SuperGrok (`xai-oauth`).
 	 */
 	hasAuth(provider: string): boolean {
 		if (this.#runtimeOverrides.has(provider)) return true;
@@ -2690,6 +2692,18 @@ export class AuthStorage {
 		if (this.#hasDedicatedEnvAuth(provider)) return true;
 		if (this.#fallbackResolver?.(provider)) return true;
 		return false;
+	}
+
+	/**
+	 * Whether a request could resolve a key for this provider, including
+	 * cross-provider env aliases (`xai-oauth` borrowing `XAI_API_KEY`).
+	 * Use this for explicit model preflight (`xai-oauth/grok-4.5`); use
+	 * {@link hasAuth} for auto-availability so the default picker stays on
+	 * paid `xai` when only `XAI_API_KEY` is set.
+	 */
+	hasResolvableAuth(provider: string): boolean {
+		if (this.hasAuth(provider)) return true;
+		return Boolean(getEnvApiKey(provider));
 	}
 
 	/**

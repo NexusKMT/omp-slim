@@ -39,6 +39,9 @@ describe("xAI API login wiring", () => {
 		try {
 			expect(storage.hasAuth("xai")).toBe(true);
 			expect(storage.hasAuth("xai-oauth")).toBe(false);
+			expect(storage.hasResolvableAuth("xai")).toBe(true);
+			expect(storage.hasResolvableAuth("xai-oauth")).toBe(true);
+			expect(getEnvApiKey("xai-oauth")).toBe("xai-env-key");
 			expect(storage.getCredentialOrigin("xai")).toEqual({ kind: "env", envVar: "XAI_API_KEY" });
 			expect(storage.getCredentialOrigin("xai-oauth")).toBeUndefined();
 		} finally {
