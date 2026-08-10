@@ -242,6 +242,7 @@ Both the paid API-key provider (`xai` / `XAI_API_KEY`) and SuperGrok OAuth
 
 - omit `reasoning.effort` unless the model is on the Grok effort-capable allowlist
 - omit `reasoning.summary` (the host rejects it; do not fall back to `"auto"`)
+- omit presence/frequency penalties (`/v1/responses` rejects them for every Grok model)
 - include `reasoning.encrypted_content` on the request
 - replay encrypted reasoning items on later turns
 

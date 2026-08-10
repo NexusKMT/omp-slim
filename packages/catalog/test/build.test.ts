@@ -272,12 +272,14 @@ describe("xAI Responses reasoning-effort suppression", () => {
 		expect(oauth.supportsReasoningSummary).toBe(false);
 	});
 
-	it("keeps penalty and stop params on non-reasoning paid xAI models", () => {
-		const compat = buildOpenAIResponsesCompat({
-			...grokResponsesSpec("grok-4-fast-non-reasoning", "xai"),
+	it("suppresses penalty params on every first-party xAI Responses model", () => {
+		const reasoning = buildOpenAIResponsesCompat(grokResponsesSpec("grok-4.5", "xai"));
+		const nonReasoning = buildOpenAIResponsesCompat({
+			...grokResponsesSpec("grok-2", "xai"),
 			reasoning: false,
 		});
-		expect(compat.supportsPenaltyAndStopParams).toBe(true);
+		expect(reasoning.supportsPenaltyAndStopParams).toBe(false);
+		expect(nonReasoning.supportsPenaltyAndStopParams).toBe(false);
 	});
 
 	it("omits effort for paid xai models off the Grok allowlist", () => {

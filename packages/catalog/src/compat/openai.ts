@@ -722,9 +722,9 @@ export function buildOpenAIResponsesCompat(spec: OpenAIResponsesSpecLike): Resol
 		// OpenAI proprietary reasoning models (o-series, gpt-5+) reject explicit
 		// temperature/top_p/… with a 400 on every serving host (#5606).
 		supportsSamplingParams: !isOpenAISamplingRestrictedModelId(id),
-		// xAI reasoning models 400 on presence/frequency penalties and stop
-		// (https://docs.x.ai/developers/model-capabilities/text/reasoning).
-		supportsPenaltyAndStopParams: !(isXaiHost && reasoningCapable),
+		// xAI `/v1/responses` rejects presence/frequency penalties for every
+		// model, not only reasoners (https://docs.x.ai/developers/rest-api-reference/inference/chat).
+		supportsPenaltyAndStopParams: !isXaiHost,
 		thinkingFormat,
 		reasoningDisableMode: resolveReasoningDisableMode(thinkingFormat),
 		omitReasoningEffort: false,

@@ -365,8 +365,9 @@ export interface OpenAICompat {
 	supportsSamplingParams?: boolean;
 	/**
 	 * Whether presence/frequency penalties and stop sequences may be sent.
-	 * xAI reasoning models reject `presencePenalty`, `frequencyPenalty`, and
-	 * `stop` with a 400. When unset, auto-detected. Default: true.
+	 * First-party xAI `/v1/responses` rejects penalty fields for every model.
+	 * xAI reasoning models also reject them (and `stop`) on chat completions.
+	 * When unset, auto-detected. Default: true.
 	 */
 	supportsPenaltyAndStopParams?: boolean;
 	/** Always send a max-token field when the caller did not provide one. Default: auto-detected (Kimi-family models derive TPM limits from max_tokens). */

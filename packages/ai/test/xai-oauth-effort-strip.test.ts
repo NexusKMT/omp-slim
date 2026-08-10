@@ -121,6 +121,16 @@ describe("xAI OAuth Responses reasoning payload (regression)", () => {
 		expect(params.temperature).toBe(0.2);
 	});
 
+	test("paid xai/grok-2 omits presence_penalty on non-reasoning Responses models", () => {
+		const grok2 = getBundledModel<"openai-responses">("xai", "grok-2");
+		if (!grok2) throw new Error("xai/grok-2 must be in bundled models.json");
+
+		const { params } = buildParams(grok2, singleUserContext, { presencePenalty: 0.4, temperature: 0.2 }, undefined);
+
+		expect(params).not.toHaveProperty("presence_penalty");
+		expect(params.temperature).toBe(0.2);
+	});
+
 	test("paid xai/grok-4.5 clamps minimal reasoning effort to low", () => {
 		const grok45 = getBundledModel<"openai-responses">("xai", "grok-4.5");
 		if (!grok45) throw new Error("xai/grok-4.5 must be in bundled models.json");

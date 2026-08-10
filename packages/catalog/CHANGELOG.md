@@ -19,6 +19,7 @@
 - Marked first-party xAI Responses hosts (`xai` and `xai-oauth`) as not supporting `reasoning.summary`, so paid `xai/grok-4.5` effort requests omit the unsupported field instead of sending `summary: "auto"`.
 - Removed unsupported `xhigh` (and `max`) thinking tiers from first-party Grok Responses catalog rows; leftover `xhigh`/`max` requests clamp to `high`.
 - Stopped baking `reasoningEffortMap` on first-party xAI catalog rows that omit `reasoning.effort` (`omitReasoningEffort: true`).
+- Suppressed presence/frequency penalties on every first-party xAI Responses model, including non-reasoning ids such as `grok-2`; xAI's `/v1/responses` marks those fields unsupported.
 
 ## [17.3.4] - 2026-08-14
 
