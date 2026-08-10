@@ -89,6 +89,7 @@
   "files": [
     "src",
     "dist/cli.js",
+    "dist/docs-index.generated.txt",
     "dist/CHANGELOG-*.md",
     "dist/*.node",
     "dist/template-*.css",

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `omp://` throwing `ENOENT` for npm/SDK consumers: `@oh-my-pi/pi-coding-agent`'s `exports` resolve to TypeScript source where the build-time `PI_DOCS_EMBED` is empty, and the dev-tree fallback pointed at an unreachable `node_modules/docs`, so `OmpProtocolHandler.complete()`/`.resolve()` crashed for any consumer importing the package from npm. `gen:bundle` now also ships the docs corpus as `dist/docs-index.generated.txt`, the source path reads it when the env embed is empty and the on-disk `docs/` is absent, and a missing corpus degrades to an empty index (with a warning) instead of propagating `ENOENT` ([#8134](https://github.com/can1357/oh-my-pi/issues/8134)).
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed
