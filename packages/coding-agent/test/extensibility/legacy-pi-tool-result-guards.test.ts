@@ -2,7 +2,9 @@ import { describe, expect, it } from "bun:test";
 import {
 	isBashToolResult,
 	isEditToolResult,
+	isFindToolResult,
 	isGrepToolResult,
+	isLsToolResult,
 	isReadToolResult,
 	isWriteToolResult,
 	type ToolResultEvent,
@@ -33,6 +35,8 @@ describe("legacy shim tool-result guards", () => {
 		expect(typeof isEditToolResult).toBe("function");
 		expect(typeof isWriteToolResult).toBe("function");
 		expect(typeof isGrepToolResult).toBe("function");
+		expect(typeof isFindToolResult).toBe("function");
+		expect(typeof isLsToolResult).toBe("function");
 	});
 
 	it("narrows a tool_result event by tool name", () => {
@@ -45,6 +49,10 @@ describe("legacy shim tool-result guards", () => {
 		expect(isBashToolResult(resultEvent("bash"))).toBe(true);
 		expect(isReadToolResult(resultEvent("read"))).toBe(true);
 		expect(isGrepToolResult(resultEvent("grep"))).toBe(true);
+		expect(isFindToolResult(resultEvent("find"))).toBe(true);
+		expect(isLsToolResult(resultEvent("ls"))).toBe(true);
+		expect(isFindToolResult(resultEvent("ls"))).toBe(false);
+		expect(isLsToolResult(resultEvent("find"))).toBe(false);
 
 		expect(isBashToolResult(resultEvent("read"))).toBe(false);
 	});

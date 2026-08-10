@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed `omp install` failing extension validation for pi extensions that import the `is<Tool>ToolResult` event guards from `@earendil-works/pi-coding-agent` (e.g. `pi-lean-ctx@3.9.18`, which uses `isEditToolResult`/`isWriteToolResult`). The legacy shim's `export * from "../index"` never forwarded the guard family (dropped from the public API in 10.2.3), so a named import threw Bun's static "Export named 'isEditToolResult' not found" error. Restored `isBashToolResult`, `isReadToolResult`, `isEditToolResult`, `isWriteToolResult`, and `isGrepToolResult` on the shim to match the upstream pi surface ([#8161](https://github.com/can1357/oh-my-pi/issues/8161)).
+- Fixed `omp install` failing extension validation for pi extensions that import the `is<Tool>ToolResult` event guards from `@earendil-works/pi-coding-agent` (e.g. `pi-lean-ctx@3.9.18`, which uses `isEditToolResult`/`isWriteToolResult`). The legacy shim's `export * from "../index"` never forwarded the guard family (dropped from the public API in 10.2.3), so a named import threw Bun's static "Export named 'isEditToolResult' not found" error. Restored `isBashToolResult`, `isReadToolResult`, `isEditToolResult`, `isWriteToolResult`, `isGrepToolResult`, `isFindToolResult`, and `isLsToolResult` on the shim to match the upstream pi surface ([#8161](https://github.com/can1357/oh-my-pi/issues/8161)).
 
 ## [17.2.12] - 2026-08-08
 

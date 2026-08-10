@@ -1474,9 +1474,9 @@ export { Type } from "./legacy-typebox";
 // does not forward them, so legacy extensions importing them (e.g.
 // `pi-lean-ctx@3.9.18`, which uses `isEditToolResult`/`isWriteToolResult` to
 // invalidate its read cache after a native edit/write) fail Bun's static export
-// check during validation (issue #8161). Restore the guards for the tools omp
-// still surfaces as tool-result events; upstream's `isFindToolResult`/`isLsToolResult`
-// have no omp counterpart and are intentionally absent.
+// check during validation (issue #8161). Restore the full guard family; legacy
+// `find`/`ls` tool results arrive through omp's custom-event branch, so those
+// guards narrow the tool name while leaving their details unknown.
 
 /** Narrow a `tool_result` event to the `bash` tool. */
 export function isBashToolResult(e: ToolResultEvent): e is BashToolResultEvent {
@@ -1501,4 +1501,20 @@ export function isWriteToolResult(e: ToolResultEvent): e is WriteToolResultEvent
 /** Narrow a `tool_result` event to the `grep` tool. */
 export function isGrepToolResult(e: ToolResultEvent): e is GrepToolResultEvent {
 	return e.toolName === "grep";
+}
+
+/** Legacy `find` result event represented by omp's custom-event branch. */
+export type FindToolResultEvent = ToolResultEvent & { toolName: "find" };
+
+/** Narrow a `tool_result` event to the legacy `find` tool. */
+export function isFindToolResult(e: ToolResultEvent): e is FindToolResultEvent {
+	return e.toolName === "find";
+}
+
+/** Legacy `ls` result event represented by omp's custom-event branch. */
+export type LsToolResultEvent = ToolResultEvent & { toolName: "ls" };
+
+/** Narrow a `tool_result` event to the legacy `ls` tool. */
+export function isLsToolResult(e: ToolResultEvent): e is LsToolResultEvent {
+	return e.toolName === "ls";
 }
