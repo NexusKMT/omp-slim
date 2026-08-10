@@ -3524,7 +3524,6 @@ describe("ty python lsp", () => {
 		vi.spyOn(piUtils, "$which").mockImplementation(() => null);
 		try {
 			await Bun.write(path.join(tempDir.path(), "ty.toml"), "[configuration]\n");
-			fs.mkdirSync(path.dirname(resolvedTy), { recursive: true });
 			await Bun.write(resolvedTy, '#!/bin/sh\nexec ty "$@"\n');
 			const config = loadConfig(tempDir.path());
 			expect(config.servers.ty?.resolvedCommand).toBe(resolvedTy);
