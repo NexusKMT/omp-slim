@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Perplexity email-OTP login dropping the session cookies required to verify the code ([#8156](https://github.com/can1357/oh-my-pi/issues/8156)).
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed
