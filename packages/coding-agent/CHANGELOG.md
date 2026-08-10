@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed large-session restore and `/tree` navigation blocking input while rebuilding the transcript by chunking idle rebuilds and terminal paints across event-loop turns ([#8133](https://github.com/can1357/oh-my-pi/issues/8133)).
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed

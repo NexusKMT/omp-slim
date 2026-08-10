@@ -10,7 +10,7 @@ import type {
 } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import { ExtensionUiController } from "@oh-my-pi/pi-coding-agent/modes/controllers/extension-ui-controller";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import type { InteractiveModeContext, RenderSessionContextOptions } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { UiHelpers } from "@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers";
 import { buildSessionContext, type SessionContext } from "@oh-my-pi/pi-coding-agent/session/session-context";
 import type { CustomMessageEntry, SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
@@ -144,8 +144,13 @@ function createHarness(): Harness {
 			handleInput: vi.fn(),
 			getText: () => "",
 		},
-		renderSessionContext: (c: SessionContext, o?: { updateFooter?: boolean; populateHistory?: boolean }) =>
-			helpers.renderSessionContext(c, o),
+		renderSessionContext: (context: SessionContext, options?: RenderSessionContextOptions) =>
+			helpers.renderSessionContext(context, options),
+		renderSessionContextIncrementally: (
+			context: SessionContext,
+			options: RenderSessionContextOptions,
+			renderChunk?: () => void,
+		) => helpers.renderSessionContextIncrementally(context, options, renderChunk),
 		addMessageToChat: (m: AgentMessage) => helpers.addMessageToChat(m),
 		rebuildChatFromMessages: () => {
 			ctx.chatContainer.clear();
@@ -212,7 +217,7 @@ describe("issue #1955 — sendMessage(display:true) during session_start", () =>
 
 		// Mirror main.ts: after `mode.init()` returns, the host renders the
 		// initial transcript while preserving anything previously added to chat.
-		harness.helpers.renderInitialMessages({ preserveExistingChat: true });
+		await harness.helpers.renderInitialMessages({ preserveExistingChat: true });
 
 		const rendered = Bun.stripANSI(harness.ctx.chatContainer.render(120).join("\n"));
 		const occurrences = countOccurrences(rendered, marker);
@@ -226,7 +231,7 @@ describe("issue #1955 — sendMessage(display:true) during session_start", () =>
 
 		// Establish the initial render — the host's `renderInitialMessages`
 		// flips `initialChatRendered` so subsequent extension sends can rebuild.
-		harness.helpers.renderInitialMessages({ preserveExistingChat: true });
+		await harness.helpers.renderInitialMessages({ preserveExistingChat: true });
 
 		const actions = harness.getActions();
 		actions!.sendMessage(

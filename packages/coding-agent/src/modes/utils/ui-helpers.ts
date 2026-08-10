@@ -68,6 +68,15 @@ interface RenderInitialMessagesOptions {
 	clearTerminalHistory?: boolean;
 }
 
+const TRANSCRIPT_RENDER_CHUNK_MESSAGES = 32;
+const TRANSCRIPT_RENDER_CHUNK_MS = 8;
+
+function waitForImmediate(): Promise<void> {
+	const { promise, resolve } = Promise.withResolvers<void>();
+	setImmediate(resolve);
+	return promise;
+}
+
 type QueuedMessages = {
 	steering: string[];
 	followUp: string[];
@@ -299,6 +308,38 @@ export class UiHelpers {
 	 * @param options.populateHistory Add user messages to editor history
 	 */
 	renderSessionContext(sessionContext: SessionContext, options: RenderSessionContextOptions = {}): void {
+		const steps = this.#renderSessionContextSteps(sessionContext, options);
+		while (!steps.next().done) {}
+	}
+
+	/** Render a session context in bounded chunks so terminal input runs between transcript paints. */
+	async renderSessionContextIncrementally(
+		sessionContext: SessionContext,
+		options: RenderSessionContextOptions,
+		renderChunk?: () => void,
+	): Promise<void> {
+		const steps = this.#renderSessionContextSteps(sessionContext, options);
+		let messagesSinceYield = 0;
+		let chunkStartedAt = performance.now();
+		while (!steps.next().done) {
+			messagesSinceYield++;
+			if (
+				messagesSinceYield < TRANSCRIPT_RENDER_CHUNK_MESSAGES &&
+				performance.now() - chunkStartedAt < TRANSCRIPT_RENDER_CHUNK_MS
+			) {
+				continue;
+			}
+			renderChunk?.();
+			await waitForImmediate();
+			messagesSinceYield = 0;
+			chunkStartedAt = performance.now();
+		}
+	}
+
+	*#renderSessionContextSteps(
+		sessionContext: SessionContext,
+		options: RenderSessionContextOptions = {},
+	): Generator<void, void, void> {
 		// Preserved: message_start handler owns this lifecycle (see #783)
 		this.ctx.pendingTools.clear();
 		// Reseed the cache-invalidation baseline: this rebuild re-derives every
@@ -623,6 +664,7 @@ export class UiHelpers {
 				// All other messages use standard rendering
 				this.ctx.addMessageToChat(message, options);
 			}
+			yield;
 		}
 		flushPendingUsage();
 
@@ -670,7 +712,7 @@ export class UiHelpers {
 		this.ctx.ui.requestRender();
 	}
 
-	renderInitialMessages(options: RenderInitialMessagesOptions = {}): void {
+	async renderInitialMessages(options: RenderInitialMessagesOptions = {}): Promise<void> {
 		// This path is used to rebuild the visible chat transcript (e.g. after custom/debug UI).
 		// Clear existing rendered chat first to avoid duplicating the full session in the container.
 		// On a non-preserving rebuild the existing blocks are discarded for good, so
@@ -693,14 +735,30 @@ export class UiHelpers {
 		// (focus attach/unfocus while a tool executes) keep dangling toolCalls so
 		// the in-flight call re-renders as pending instead of vanishing;
 		// renderSessionContext then keeps it in `pendingTools` for live routing.
+		let terminalHistoryCleared = false;
+		const renderChunk = options.clearTerminalHistory
+			? () => {
+					this.ctx.ui.requestRender(true, { clearScrollback: !terminalHistoryCleared });
+					terminalHistoryCleared = true;
+				}
+			: undefined;
 		const context = this.ctx.viewSession.buildTranscriptSessionContext({
 			collapseCompactedHistory: settings.get("display.collapseCompacted"),
 			keepDanglingToolCalls: this.ctx.viewSession.isStreaming,
 		});
-		this.ctx.renderSessionContext(context, {
+		const renderOptions = {
 			updateFooter: true,
 			populateHistory: !this.ctx.focusedAgentId,
-		});
+		};
+		if (this.ctx.viewSession.isStreaming) {
+			// Live events mutate the same component maps; keep their replay atomic so
+			// a delta cannot land halfway through rebuilding its pending tool block.
+			this.ctx.renderSessionContext(context, renderOptions);
+		} else if (renderChunk) {
+			await this.ctx.renderSessionContextIncrementally(context, renderOptions, renderChunk);
+		} else {
+			await this.ctx.renderSessionContextIncrementally(context, renderOptions);
+		}
 
 		// Show compaction info if session was compacted
 		const allEntries = this.ctx.viewSession.sessionManager.getEntries();
@@ -715,7 +773,7 @@ export class UiHelpers {
 			this.ctx.showStatus(`Session compacted ${times}`);
 		}
 		if (options.clearTerminalHistory) {
-			this.ctx.ui.requestRender(true, { clearScrollback: true });
+			this.ctx.ui.requestRender(true, { clearScrollback: !terminalHistoryCleared });
 		}
 		if (preservedChatChildren && preservedChatChildren.length > 0) {
 			for (const child of preservedChatChildren) {
