@@ -9,9 +9,10 @@
  * never inflates the blob; the bodies are gunzipped off the event loop (via the
  * async `node:zlib` threadpool) lazily, once, on the first actual read. When the
  * placeholder is empty (running from TypeScript source), the index falls back to
- * the repo `docs/` directory on disk (monorepo checkout), then the embed file
- * shipped in the npm package (`dist/docs-index.generated.txt`, written by
- * `gen:bundle`), so `@oh-my-pi/pi-coding-agent/*` SDK consumers resolve docs too.
+ * the embed file shipped in the npm package (`dist/docs-index.generated.txt`,
+ * written by `gen:bundle`) — so `@oh-my-pi/pi-coding-agent/*` SDK consumers
+ * resolve docs and never probe the consumer's `node_modules/docs` — and then to
+ * the repo `docs/` directory on disk for a monorepo checkout.
  */
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
@@ -133,11 +134,15 @@ function getIndex(): DocsIndex {
 		index = decoded;
 		return index;
 	}
-	// No build-time embed → running from TypeScript source. Prefer the on-disk
-	// docs corpus (monorepo checkout), then the embed file shipped in the npm
-	// package (dist/), and finally degrade to an empty index so a missing corpus
-	// never propagates ENOENT through omp:// callers.
-	index = readDocsFromDisk() ?? readShippedEmbed() ?? emptyIndex();
+	// No build-time embed → running from TypeScript source. Prefer the shipped
+	// embed file (`dist/docs-index.generated.txt`): it exists only in the packaged
+	// npm tarball (or a dev tree that ran `gen:bundle`), so it authoritatively
+	// identifies an installed package and avoids probing the consumer's
+	// `node_modules/docs`, which `readDocsFromDisk()` would otherwise resolve to
+	// and where a stray `docs` dir/package could shadow the real corpus. Fall back
+	// to the on-disk `docs/` corpus for a genuine monorepo checkout, then degrade
+	// to an empty index so a missing corpus never propagates ENOENT to callers.
+	index = readShippedEmbed() ?? readDocsFromDisk() ?? emptyIndex();
 	return index;
 }
 
