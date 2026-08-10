@@ -110,6 +110,7 @@ import { LSP_STARTUP_EVENT_CHANNEL, type LspStartupEvent } from "./lsp/startup-e
 import {
 	deduplicateMCPToolsByName,
 	discoverAndLoadMCPTools,
+	getMCPToolOriginKey,
 	type MCPLoadResult,
 	MCPManager,
 	MCPToolCache,
@@ -2615,12 +2616,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		);
 		const initialMcpManagerToolNames = new Set<string>();
 		for (const tool of wrappedExtensionTools) {
-			const matchesManagerOrigin = initialMcpManagerTools.some(
-				managerTool =>
-					managerTool.name === tool.name &&
-					managerTool.mcpServerName === tool.mcpServerName &&
-					managerTool.mcpToolName === tool.mcpToolName,
-			);
+			const originKey = getMCPToolOriginKey(tool);
+			const matchesManagerOrigin =
+				originKey !== undefined &&
+				initialMcpManagerTools.some(
+					managerTool => managerTool.name === tool.name && getMCPToolOriginKey(managerTool) === originKey,
+				);
 			if (matchesManagerOrigin) initialMcpManagerToolNames.add(tool.name);
 		}
 
@@ -2656,6 +2657,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			for (const name of collectPendingMCPToolNames(options.toolNames)) {
 				if (!toolRegistry.has(name)) {
 					toolRegistry.set(name, createPendingMCPTool(name));
+					initialMcpManagerToolNames.add(name);
 				}
 			}
 		}
