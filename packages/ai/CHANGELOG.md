@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Cursor exec-bridge bash/grep calls failing ArkType validation when the server omitted optional frame fields: synthesized and executed tool args now drop `undefined` keys (`cwd`, `case`, `skip`, `timeout`) instead of writing `optional: value || undefined`.
+- Fixed Cursor sessions double-executing settled tools when `tools.format` is an owned dialect (e.g. `gemini`): `wrapInbandToolStream` rebuilt toolCall blocks without copying `kCursorExecResolved`, so agent-loop re-ran bash/grep/todo and appended a second result for the same call id.
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed

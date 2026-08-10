@@ -1537,9 +1537,9 @@ describe("CursorExecHandlers Pi frame translation", () => {
 
 		expect(calls).toEqual([
 			{ pattern: "x", path: ".", case: false },
-			// Case-sensitive is the local default, so `false` maps to "unset",
-			// not to `case: true`.
-			{ pattern: "x", path: ".", case: undefined },
+			// Case-sensitive is the local default, so `false` maps to unset —
+			// the key is omitted rather than written as `case: undefined`.
+			{ pattern: "x", path: "." },
 		]);
 	});
 
