@@ -68,10 +68,16 @@ describe("legacy-pi TypeBox remap", () => {
 		};
 
 		expect(loaded.probe).toBe(TypeBoxShimType);
-		expect(toolWireSchema({ name: "fixture", description: "", parameters: loaded.schema })).toEqual({
+		// `Type.Unsafe` is now a first-class omptype schema (so `Type.Optional`/
+		// `Type.Object` can compose it), so a top-level Unsafe tool param takes the
+		// omptype wire path and is closed like every other tool param. Compare the
+		// JSON-serialized wire — internal memoization stamps are non-serialized.
+		const wire = toolWireSchema({ name: "fixture", description: "", parameters: loaded.schema });
+		expect(JSON.parse(JSON.stringify(wire))).toEqual({
 			type: "object",
 			properties: { path: { type: "string" } },
 			required: ["path"],
+			additionalProperties: false,
 		});
 	});
 

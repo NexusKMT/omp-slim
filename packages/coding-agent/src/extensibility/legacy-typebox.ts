@@ -1,4 +1,4 @@
-import { fromJsonSchema } from "@oh-my-pi/omptype";
+import { type } from "@oh-my-pi/omptype";
 import { Type as OmpType, type TypeBuilder as OmpTypeBuilder, type TUnsafe } from "@oh-my-pi/omptype/typebox";
 import { upgradeJsonSchemaTo202012, validateJsonSchemaValue } from "@oh-my-pi/pi-ai/utils/schema";
 
@@ -39,8 +39,13 @@ function defineHidden(target: object, key: PropertyKey, value: unknown): void {
 }
 
 function unsafe<T = unknown>(jsonSchema: Record<string, unknown> = {}): LegacyUnsafeSchema<T> {
-	const document = { ...jsonSchema };
-	const upgradedSchema = upgradeJsonSchemaTo202012(document);
+	// `document` is the verbatim wire schema; keep it isolated from the validator.
+	// `upgradeJsonSchemaTo202012` returns its input untouched when no upgrade is
+	// needed, and `validateJsonSchemaValue` then annotates that object with JIT
+	// epoch metadata and normalized keywords — which would leak into emission if
+	// the two shared a reference.
+	const document = structuredClone(jsonSchema);
+	const upgradedSchema = upgradeJsonSchemaTo202012(structuredClone(jsonSchema));
 	const validate = (data: unknown): T | ValidationFailure => {
 		const result = validateJsonSchemaValue(upgradedSchema, data);
 		if (result.success) return data as T;
@@ -53,11 +58,17 @@ function unsafe<T = unknown>(jsonSchema: Record<string, unknown> = {}): LegacyUn
 		defineHidden(failure, VALIDATION_FAILURE, true);
 		return failure;
 	};
-	const schema = fromJsonSchema(upgradedSchema).narrow((data, ctx) => {
+	// Validate through the authoritative JSON Schema validator, not
+	// `fromJsonSchema`: lowering `additionalProperties: false` while dropping the
+	// keywords it cannot model (e.g. `patternProperties`) would reject values the
+	// raw document accepts. `type.withJsonSchema` then emits the raw document
+	// verbatim so nested composition (`Type.Object`, `Type.Optional`) keeps every
+	// keyword in the wire schema, not just at the top level.
+	const runtime = type.unknown.narrow((data, ctx) => {
 		const result = validate(data);
 		return isValidationFailure(result) ? ctx.mustBe(result.message) : true;
-	}) as unknown as LegacyUnsafeSchema<T>;
-	defineHidden(schema, "toJsonSchema", () => document);
+	});
+	const schema = type.withJsonSchema(runtime, document) as unknown as LegacyUnsafeSchema<T>;
 	defineHidden(schema, "__validator", validate);
 	defineHidden(schema, "safeParse", (input: unknown): SafeParseSuccess<T> | SafeParseFailure => {
 		const result = validate(input);

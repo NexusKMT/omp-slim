@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `type.withJsonSchema(schema, json)`, wrapping a schema so JSON Schema emission yields `json` verbatim even when embedded in objects, arrays, or unions — a `.toJsonSchema()` method override is dropped at nested positions because parents emit a child's IR directly.
+
 ## [17.2.10] - 2026-08-06
 
 ### Changed

@@ -3675,6 +3675,33 @@ export namespace type {
 	export function raw(def: unknown): BaseType {
 		return makeType(parseDef(def), [], {}) as unknown as BaseType;
 	}
+
+	/**
+	 * Return a schema that validates exactly like `schema` but emits `json`
+	 * verbatim as its JSON Schema — even when embedded in an object, array, or
+	 * union.
+	 *
+	 * A `.toJsonSchema()` method override cannot survive nesting: a parent schema
+	 * emits each child's IR directly and never calls the child's method, so the
+	 * override silently disappears from the wire schema. This stores the override
+	 * on the IR instead, so structural composition keeps it.
+	 */
+	export function withJsonSchema<t, i = t>(schema: Type<t, i>, json: Record<string, unknown>): Type<t, i> {
+		return makeType<t, i>(
+			{
+				k: "refine",
+				base: { k: "unknown" },
+				pred: value => {
+					const result = schema(value);
+					return result instanceof OmpErrors ? result : true;
+				},
+				expected: schema.expression,
+				json: { ...json },
+			},
+			[],
+			{},
+		) as unknown as Type<t, i>;
+	}
 }
 
 // Reserved words cannot be declared as namespace bindings, but ArkType exposes

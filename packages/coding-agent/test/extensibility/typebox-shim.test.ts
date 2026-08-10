@@ -78,6 +78,34 @@ describe("pi.typebox compatibility shim", () => {
 		expect(schema.safeParse({ kind: "question", mode: "other" }).success).toBe(false);
 	});
 
+	it("preserves nested Type.Unsafe keywords fromJsonSchema cannot lower", () => {
+		const raw = Type.Unsafe({
+			type: "object",
+			properties: { a: { type: "string" } },
+			patternProperties: { "^x-": { type: "number" } },
+			additionalProperties: false,
+		});
+		const nested = {
+			type: "object",
+			properties: { a: { type: "string" } },
+			patternProperties: { "^x-": { type: "number" } },
+			additionalProperties: false,
+		};
+
+		// The wire schema must keep patternProperties even when the Unsafe schema
+		// is embedded inside Type.Object / Type.Optional — a `.toJsonSchema`
+		// method override would vanish at these nested positions.
+		expect((Type.Object({ cfg: raw }).toJsonSchema().properties as Record<string, unknown>).cfg).toEqual(nested);
+		expect(
+			(Type.Object({ cfg: Type.Optional(raw) }).toJsonSchema().properties as Record<string, unknown>).cfg,
+		).toEqual(nested);
+
+		// Runtime validation still enforces the nested keyword.
+		const object = Type.Object({ cfg: raw });
+		expect(object.safeParse({ cfg: { a: "ok", "x-n": 3 } }).success).toBe(true);
+		expect(object.safeParse({ cfg: { a: "ok", "x-n": "bad" } }).success).toBe(false);
+	});
+
 	it("validates Type.Unsafe draft-07 documents like the wire path", () => {
 		const schema = Type.Unsafe({
 			type: "object",

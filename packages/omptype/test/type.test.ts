@@ -491,3 +491,26 @@ describe("Standard Schema V1", () => {
 		expect(first).not.toBe(second);
 	});
 });
+
+describe("type.withJsonSchema", () => {
+	it("emits the override verbatim even when embedded, and still validates", () => {
+		const raw = { type: "string", enum: ["a", "b"], "x-vendor": true };
+		const inner = type.withJsonSchema(
+			type.unknown.narrow(v => v === "a" || v === "b"),
+			raw,
+		);
+
+		// Top-level emission is the override.
+		expect(inner.toJsonSchema()).toEqual(raw);
+		// Nested inside an object, the override survives (a `.toJsonSchema`
+		// method override would be dropped by the parent emitter here).
+		const object = type({ mode: inner });
+		expect((object.toJsonSchema().properties as Record<string, unknown>).mode).toEqual(raw);
+
+		// Runtime validation is delegated to the wrapped schema.
+		expect(inner("a")).toBe("a");
+		expect(inner("c")).toBeInstanceOf(OmpErrors);
+		expect(object({ mode: "b" })).toEqual({ mode: "b" });
+		expect(object({ mode: "c" })).toBeInstanceOf(OmpErrors);
+	});
+});
