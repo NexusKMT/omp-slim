@@ -482,7 +482,7 @@ async function handleUninstall(
 		if (flags.dryRun) {
 			if (viaMarketplace) {
 				try {
-					await mktMgr.uninstallPlugin(name, { scope: flags.scope, dryRun: true });
+					await mktMgr.uninstallPlugin(name, flags.scope, { dryRun: true });
 				} catch (err) {
 					console.error(chalk.red(`${theme.status.error} Failed to uninstall ${name}: ${err}`));
 					process.exit(1);
@@ -508,7 +508,7 @@ async function handleUninstall(
 		if (viaMarketplace) {
 			// Exact match against installed marketplace plugin IDs (name@marketplace)
 			try {
-				await mktMgr.uninstallPlugin(name, { scope: flags.scope });
+				await mktMgr.uninstallPlugin(name, flags.scope);
 				console.log(chalk.green(`${theme.status.success} Uninstalled ${name}`));
 			} catch (err) {
 				console.error(chalk.red(`${theme.status.error} Failed to uninstall ${name}: ${err}`));

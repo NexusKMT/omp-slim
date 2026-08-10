@@ -721,10 +721,10 @@ describe("MarketplaceManager", () => {
 		await ctx.manager.installPlugin("hello-plugin", "test-marketplace", { scope: "user" });
 		await ctx.manager.installPlugin("hello-plugin", "test-marketplace", { scope: "project" });
 
-		await expect(ctx.manager.uninstallPlugin("hello-plugin@test-marketplace", { dryRun: true })).rejects.toThrow(
-			/both user and project scope/,
-		);
-		await ctx.manager.uninstallPlugin("hello-plugin@test-marketplace", { scope: "user", dryRun: true });
+		await expect(
+			ctx.manager.uninstallPlugin("hello-plugin@test-marketplace", undefined, { dryRun: true }),
+		).rejects.toThrow(/both user and project scope/);
+		await ctx.manager.uninstallPlugin("hello-plugin@test-marketplace", "user", { dryRun: true });
 
 		const userReg = await readInstalledPluginsRegistry(path.join(ctx.tmpDir, "installed_plugins.json"));
 		const projectReg = await readInstalledPluginsRegistry(path.join(ctx.tmpDir, "project_installed_plugins.json"));
@@ -737,7 +737,7 @@ describe("MarketplaceManager", () => {
 		await ctx.manager.installPlugin("hello-plugin", "test-marketplace", { scope: "project" });
 
 		await expect(
-			ctx.manager.uninstallPlugin("hello-plugin@test-marketplace", { scope: "user", dryRun: true }),
+			ctx.manager.uninstallPlugin("hello-plugin@test-marketplace", "user", { dryRun: true }),
 		).rejects.toThrow(/not installed in user scope/);
 
 		const projectReg = await readInstalledPluginsRegistry(path.join(ctx.tmpDir, "project_installed_plugins.json"));
@@ -749,7 +749,7 @@ describe("MarketplaceManager", () => {
 		await ctx.manager.installPlugin("hello-plugin", "test-marketplace", { scope: "user" });
 		await ctx.manager.installPlugin("hello-plugin", "test-marketplace", { scope: "project" });
 
-		await ctx.manager.uninstallPlugin("hello-plugin@test-marketplace", { scope: "user" });
+		await ctx.manager.uninstallPlugin("hello-plugin@test-marketplace", "user");
 
 		const userReg = await readInstalledPluginsRegistry(path.join(ctx.tmpDir, "installed_plugins.json"));
 		expect(userReg.plugins["hello-plugin@test-marketplace"]).toBeUndefined();
@@ -767,7 +767,7 @@ describe("MarketplaceManager", () => {
 		// Same plugin+version → same cache path for the project-scope install.
 		await ctx.manager.installPlugin("hello-plugin", "test-marketplace", { scope: "project" });
 
-		await ctx.manager.uninstallPlugin("hello-plugin@test-marketplace", { scope: "user" });
+		await ctx.manager.uninstallPlugin("hello-plugin@test-marketplace", "user");
 
 		// Cache must still exist — project scope still references it.
 		expect(fs.existsSync(userEntry.installPath)).toBe(true);

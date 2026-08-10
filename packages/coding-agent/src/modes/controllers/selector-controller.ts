@@ -1077,7 +1077,7 @@ export class SelectorController {
 						this.ctx.showStatus(`Uninstalling ${pluginId}...`);
 						this.ctx.ui.requestRender();
 						try {
-							await mgr.uninstallPlugin(pluginId, { scope });
+							await mgr.uninstallPlugin(pluginId, scope);
 							this.ctx.showStatus(`Uninstalled ${pluginId}`);
 						} catch (err) {
 							this.ctx.showStatus(`Uninstall failed: ${err}`);

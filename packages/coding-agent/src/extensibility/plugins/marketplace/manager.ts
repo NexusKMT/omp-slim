@@ -441,15 +441,13 @@ export class MarketplaceManager {
 	}
 
 	/** Validates and removes a marketplace plugin, or only validates when `dryRun` is set. */
-	async uninstallPlugin(pluginId: string, options?: { scope?: "user" | "project"; dryRun?: boolean }): Promise<void> {
+	async uninstallPlugin(pluginId: string, scope?: "user" | "project", options?: { dryRun?: boolean }): Promise<void> {
 		const parsed = parsePluginId(pluginId);
 		if (!parsed) {
 			throw new Error(`Invalid plugin ID format: "${pluginId}". Expected "name@marketplace".`);
 		}
 
-		const scope = options?.scope;
 		const { userEntries, projectEntries, userReg, projectReg } = await this.#findInBothRegistries(pluginId);
-
 		const inUser = userEntries && userEntries.length > 0;
 		const inProject = projectEntries && projectEntries.length > 0;
 

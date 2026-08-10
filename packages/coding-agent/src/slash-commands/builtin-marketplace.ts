@@ -182,7 +182,7 @@ export const BUILTIN_MARKETPLACE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec>
 							"Usage: /marketplace uninstall [--scope user|project] <name@marketplace>",
 						);
 						if ("error" in parsed) return usage(parsed.error, runtime);
-						await manager.uninstallPlugin(parsed.pluginId, { scope: parsed.scope });
+						await manager.uninstallPlugin(parsed.pluginId, parsed.scope);
 						await runtime.reloadPlugins();
 						await runtime.output(`Uninstalled ${parsed.pluginId}`);
 						return commandConsumed();
@@ -337,7 +337,7 @@ export const BUILTIN_MARKETPLACE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec>
 							runtime.ctx.showStatus(uninstArgs.error);
 							return;
 						}
-						await mgr.uninstallPlugin(uninstArgs.pluginId, { scope: uninstArgs.scope });
+						await mgr.uninstallPlugin(uninstArgs.pluginId, uninstArgs.scope);
 						runtime.ctx.showStatus(`Uninstalled ${uninstArgs.pluginId}`);
 						break;
 					}

@@ -60,7 +60,7 @@ describe("runPluginCommand({ action: 'uninstall', flags: { dryRun } })", () => {
 		try {
 			await runPluginCommand({ action: "uninstall", args: ["hello@local"], flags: { dryRun: true, json: true } });
 			expect(mktUninstall).toHaveBeenCalledTimes(1);
-			expect(mktUninstall.mock.calls[0]).toEqual(["hello@local", { scope: undefined, dryRun: true }]);
+			expect(mktUninstall.mock.calls[0]).toEqual(["hello@local", undefined, { dryRun: true }]);
 			expect(npmUninstall).not.toHaveBeenCalled();
 		} finally {
 			npmUninstall.mockRestore();
