@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Clarified that the production collab relay source and binaries are not currently published, and documented the source-available local protocol relay ([#8165](https://github.com/can1357/oh-my-pi/issues/8165)).
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed
