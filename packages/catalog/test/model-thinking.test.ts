@@ -884,6 +884,25 @@ describe("model thinking runtime helpers", () => {
 		expect(() => requireSupportedEffort(opus46, Effort.XHigh)).toThrow(/not supported/);
 	});
 
+	it("does not expose xhigh on first-party xAI Grok Responses models", () => {
+		const paid = createModel({
+			id: "grok-4.5",
+			api: "openai-responses",
+			provider: "xai",
+			baseUrl: "https://api.x.ai/v1",
+		});
+		const oauth = createModel({
+			id: "grok-4.5",
+			api: "openai-responses",
+			provider: "xai-oauth",
+			baseUrl: "https://api.x.ai/v1",
+		});
+
+		expect(paid.thinking?.efforts).toEqual([Effort.Minimal, Effort.Low, Effort.Medium, Effort.High]);
+		expect(oauth.thinking?.efforts).toEqual([Effort.Minimal, Effort.Low, Effort.Medium, Effort.High]);
+		expect(() => requireSupportedEffort(paid, Effort.XHigh)).toThrow(/not supported/);
+	});
+
 	it("rejects effort requests against un-built reasoning specs", () => {
 		const spec = {
 			id: "broken-reasoner",

@@ -1375,13 +1375,10 @@ function withXaiOAuthCompatDefaults(model: ModelSpec<"openai-responses">): Model
 	return { ...model, compat };
 }
 
-// Hermes-agent parity: only the `minimal -> low` clamp is applied (see
-// hermes-agent/agent/transports/codex.py:92 `_effort_clamp = {"minimal":
-// "low"}`). Hermes sends `xhigh` to xAI verbatim and we match that contract
-// — let xAI decide if the level is valid for the specific Grok model.
-// `resolveModelThinking` folds this into `model.thinking.effortMap`, downstream
-// of the omitReasoningEffort gate in pi-ai's stream.ts.
-const XAI_REASONING_EFFORT_MAP = { minimal: "low" } as const;
+// Hermes-agent parity for `minimal -> low` (see hermes-agent/agent/transports/
+// codex.py:92). api.x.ai also rejects `xhigh`/`max`, so those clamp to `high`.
+// `resolveModelThinking` folds this into `model.thinking.effortMap`.
+const XAI_REASONING_EFFORT_MAP = { minimal: "low", xhigh: "high", max: "high" } as const;
 
 /**
  * Bake first-party xAI Responses effort-dial metadata onto a catalog spec.

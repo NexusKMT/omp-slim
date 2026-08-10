@@ -395,6 +395,12 @@ function getModelDefinedEfforts<TApi extends Api>(
 		// Baseten's gpt-oss router mirrors its GLM route: high/max only.
 		return HIGH_MAX_REASONING_EFFORTS;
 	}
+	// api.x.ai accepts `low|medium|high` (and clamps `minimal` → `low`). It
+	// rejects `xhigh`/`max`, so first-party Grok Responses rows must not
+	// advertise those tiers.
+	if (modelMatchesHost({ provider: spec.provider, baseUrl: spec.baseUrl ?? "" }, "xai")) {
+		return DEFAULT_REASONING_EFFORTS;
+	}
 	return isOpenAICompatReasoningApi(spec.api) &&
 		(isMinimaxM2FamilyModelId(spec.id) ||
 			isOpenAIGptOssModelId(spec.id) ||

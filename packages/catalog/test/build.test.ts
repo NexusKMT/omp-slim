@@ -264,8 +264,8 @@ describe("xAI Responses reasoning-effort suppression", () => {
 		expect(oauth.supportsImageDetailOriginal).toBe(false);
 		expect(paid.supportsReasoningEffort).toBe(true);
 		expect(oauth.supportsReasoningEffort).toBe(true);
-		expect(paid.reasoningEffortMap).toEqual({ minimal: "low" });
-		expect(oauth.reasoningEffortMap).toEqual({ minimal: "low" });
+		expect(paid.reasoningEffortMap).toEqual({ minimal: "low", xhigh: "high", max: "high" });
+		expect(oauth.reasoningEffortMap).toEqual({ minimal: "low", xhigh: "high", max: "high" });
 		expect(paid.supportsPenaltyAndStopParams).toBe(false);
 		expect(oauth.supportsPenaltyAndStopParams).toBe(false);
 		expect(paid.supportsReasoningSummary).toBe(false);

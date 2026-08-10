@@ -177,9 +177,11 @@ const MIMO_REASONING_EFFORT_MAP: NonNullable<OpenAICompat["reasoningEffortMap"]>
 	xhigh: "high",
 };
 
-/** xAI `/v1/responses` accepts `low|medium|high` (and `xhigh` on some SKUs), not `minimal`. */
+/** xAI `/v1/responses` accepts `low|medium|high`, not `minimal`/`xhigh`/`max`. */
 const XAI_RESPONSES_REASONING_EFFORT_MAP: NonNullable<OpenAICompat["reasoningEffortMap"]> = {
 	minimal: "low",
+	xhigh: "high",
+	max: "high",
 };
 
 function mergeModelReasoningEffortMap(

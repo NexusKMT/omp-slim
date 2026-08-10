@@ -16,6 +16,8 @@
 - Clamped paid xAI Responses `minimal` reasoning effort to `low` (same wire map as SuperGrok) so `xai/grok-4.5` does not 400.
 - Suppressed presence/frequency penalties and stop sequences on xAI reasoning models so a configured `presencePenalty` does not 400 after the `grok-4.5` default change.
 - Stopped emitting stale `thinking.efforts` dials on paid xAI Responses catalog rows that reject `reasoning.effort` (`grok-code-fast-1`, `grok-build-0.1`, `grok-4.20-0309-reasoning`, and other off-allowlist reasoners).
+- Marked first-party xAI Responses hosts (`xai` and `xai-oauth`) as not supporting `reasoning.summary`, so paid `xai/grok-4.5` effort requests omit the unsupported field instead of sending `summary: "auto"`.
+- Removed unsupported `xhigh` (and `max`) thinking tiers from first-party Grok Responses catalog rows; leftover `xhigh`/`max` requests clamp to `high`.
 
 ## [17.3.4] - 2026-08-14
 
@@ -93,7 +95,6 @@
 
 - Marked `meta/muse-spark-1.2` and `muse-spark-1.2-contributor` as image-capable (`input: ["text", "image"]`) with the same Responses reasoning, thinking, and cost metadata as `muse-spark-1.1` (contributor uses its discounted 0.1/0.2 pricing), so `omp models` no longer lists them as text-only.
 - Fixed GLM-5.2 thinking levels across Baseten, CoreWeave, HuggingFace, and other uppercase-ID resellers, which were getting the generic `xhigh` effort ladder instead of the GLM-5.2-specific tiers. Also added Baseten `zai-org/GLM-5.2-Fast` and Fireworks `glm-5.2-fast` as reasoning models ([#8200](https://github.com/can1357/oh-my-pi/pull/8200) by [@jcfrancisco](https://github.com/jcfrancisco)).
-- Marked first-party xAI Responses hosts (`xai` and `xai-oauth`) as not supporting `reasoning.summary`, so paid `xai/grok-4.5` effort requests omit the unsupported field instead of sending `summary: "auto"`.
 
 ## [17.2.12] - 2026-08-08
 
