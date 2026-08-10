@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the legacy TypeBox facade rejecting `Type.Optional(Type.Unsafe(...))`, losing optional object properties when raw schemas were present, and plugin installs accepting extension factories that fail during initialization ([#8143](https://github.com/can1357/oh-my-pi/issues/8143)).
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed

@@ -59,6 +59,25 @@ describe("pi.typebox compatibility shim", () => {
 		).toThrow('Validation failed for tool "unsafe-schema"');
 	});
 
+	it("composes optional Type.Unsafe schemas without making sibling properties required", () => {
+		const schema = Type.Object({
+			kind: Type.Unsafe({ type: "string", enum: ["question"] }),
+			mode: Type.Optional(Type.Unsafe({ type: "string", enum: ["overlay", "inline"] })),
+			label: Type.Optional(Type.String()),
+		});
+
+		const document = schema.toJsonSchema();
+		expect(document.required).toEqual(["kind"]);
+		expect(document).toMatchObject({
+			properties: {
+				mode: { type: "string", enum: ["overlay", "inline"] },
+				label: { type: "string" },
+			},
+		});
+		expect(schema.safeParse({ kind: "question", mode: "overlay" }).success).toBe(true);
+		expect(schema.safeParse({ kind: "question", mode: "other" }).success).toBe(false);
+	});
+
 	it("validates Type.Unsafe draft-07 documents like the wire path", () => {
 		const schema = Type.Unsafe({
 			type: "object",
