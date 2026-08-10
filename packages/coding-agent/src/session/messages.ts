@@ -1081,17 +1081,16 @@ const convertCache = new WeakMap<AgentMessage, ConvertMemoEntry>();
 // The tail-identity guard on exact-repeat catches the streaming snapshot swap
 // (partial → trailing is a fresh identity), so a settled tail is never served
 // from a stale mid-stream fragment.
+interface ConvertArrayMemo {
+	generation: number;
+	length: number;
+	output: Message[];
+	tail: AgentMessage | undefined;
+	prefixOutputLen: number;
+}
+
 let convertGeneration = 0;
-let lastConvertInput: AgentMessage[] | undefined;
-let lastConvertLength = 0;
-let lastConvertOutput: Message[] | undefined;
-let lastConvertGeneration = -1;
-let lastConvertTail: AgentMessage | undefined;
-// Output-message count contributed by messages[0 .. lastConvertLength-1), i.e.
-// every message except the last. The last message is neighbor-sensitive (its LLM
-// view drops the trailing thinking run only while an interrupted-thinking marker
-// follows), so growth reconverts it rather than reusing its old fragment.
-let lastConvertPrefixOutputLen = 0;
+const convertArrayCache = new WeakMap<AgentMessage[], ConvertArrayMemo>();
 
 registerMessageCacheInvalidator(message => {
 	convertCache.delete(message);
@@ -1246,15 +1245,16 @@ function convertOneCached(m: AgentMessage, interruptedNext: boolean): Message[] 
  */
 export function convertToLlm(messages: AgentMessage[]): Message[] {
 	const len = messages.length;
-	const sameArray = messages === lastConvertInput && lastConvertGeneration === convertGeneration;
+	const memo = convertArrayCache.get(messages);
+	const sameGeneration = memo !== undefined && memo.generation === convertGeneration;
 	const tail = len > 0 ? messages[len - 1] : undefined;
 
 	// Exact-repeat: same array, same length, same trailing identity → reuse the
 	// outer array. The tail-identity check rejects the streaming snapshot swap
 	// (partial → settled trailing keeps array identity/length but mints a fresh
 	// tail), so a settled tail never reads a stale mid-stream fragment.
-	if (sameArray && lastConvertOutput !== undefined && len === lastConvertLength && tail === lastConvertTail) {
-		return lastConvertOutput;
+	if (sameGeneration && memo.length === len && tail === memo.tail) {
+		return memo.output;
 	}
 
 	// Slice-on-growth: same array grew by append. Every interior message is
@@ -1267,15 +1267,14 @@ export function convertToLlm(messages: AgentMessage[]): Message[] {
 	let out: Message[];
 	let start: number;
 	if (
-		sameArray &&
-		lastConvertOutput !== undefined &&
-		len > lastConvertLength &&
-		lastConvertLength > 0 &&
-		messages[lastConvertLength - 1] === lastConvertTail &&
-		lastConvertPrefixOutputLen <= lastConvertOutput.length
+		sameGeneration &&
+		len > memo.length &&
+		memo.length > 0 &&
+		messages[memo.length - 1] === memo.tail &&
+		memo.prefixOutputLen <= memo.output.length
 	) {
-		out = lastConvertOutput.slice(0, lastConvertPrefixOutputLen);
-		start = lastConvertLength - 1;
+		out = memo.output.slice(0, memo.prefixOutputLen);
+		start = memo.length - 1;
 	} else {
 		out = [];
 		start = 0;
@@ -1294,12 +1293,13 @@ export function convertToLlm(messages: AgentMessage[]): Message[] {
 	if (len === 0) prefixOutputLen = 0;
 
 	// Record for the next call's shortcuts. `out` is a fresh array (slice or new),
-	// so a prior caller holding the previous `lastConvertOutput` never sees it grow.
-	lastConvertInput = messages;
-	lastConvertLength = len;
-	lastConvertOutput = out;
-	lastConvertGeneration = convertGeneration;
-	lastConvertTail = tail;
-	lastConvertPrefixOutputLen = prefixOutputLen;
+	// so a prior caller holding the previous memo output never sees it grow.
+	convertArrayCache.set(messages, {
+		generation: convertGeneration,
+		length: len,
+		output: out,
+		tail,
+		prefixOutputLen,
+	});
 	return out;
 }
