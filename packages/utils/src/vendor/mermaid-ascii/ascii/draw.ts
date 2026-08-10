@@ -1225,15 +1225,18 @@ function fillRolesFromCanvases(
 
 /**
  * Special handling for node boxes: border chars get 'border' role, text gets 'text' role.
- * Detects text by checking if character is alphanumeric or common punctuation.
+ * Common final-state border characters (`#` and `=`) count only on the outer edge,
+ * so identical characters inside ordinary node labels retain the text role.
  */
 function fillRolesForNodeBox(
   roleCanvas: RoleCanvas,
   canvas: Canvas,
   offset: DrawingCoord,
 ): void {
-  const isBorderChar = (c: string) => /^[┌┐└┘├┤┬┴┼│─╭╮╰╯╔╗╚╝═║+\-|.':#=‖]$/.test(c)
-
+  const isBorderChar = (c: string) => /^[┌┐└┘├┤┬┴┼│─╭╮╰╯+\-|.':]$/.test(c)
+  const isStateEndBorderChar = (c: string) => /^[╔╗╚╝═║#=‖]$/.test(c)
+  const maxX = canvas.length - 1
+  const maxY = (canvas[0]?.length ?? 1) - 1
   for (let x = 0; x < canvas.length; x++) {
     for (let y = 0; y < (canvas[0]?.length ?? 0); y++) {
       const char = canvas[x]?.[y]
@@ -1242,7 +1245,9 @@ function fillRolesForNodeBox(
         const ry = y + offset.y
         // Use setRole which auto-expands the role canvas if needed
         if (rx >= 0 && ry >= 0) {
-          setRole(roleCanvas, rx, ry, isBorderChar(char) ? 'border' : 'text')
+          const isOuterEdge = x === 0 || x === maxX || y === 0 || y === maxY
+          const role = isBorderChar(char) || (isOuterEdge && isStateEndBorderChar(char)) ? 'border' : 'text'
+          setRole(roleCanvas, rx, ry, role)
         }
       }
     }

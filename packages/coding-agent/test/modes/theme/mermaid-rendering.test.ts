@@ -76,6 +76,10 @@ describe("Mermaid rendering setting", () => {
 			expect(rendered).not.toMatch(/\x1b\[38;2;229;229;231m[╔═╗║╚╝]/);
 			expect(rendered).not.toContain("\x1b[38;2;42;48;56m");
 			expect(rendered).not.toContain("\x1b[38;2;31;37;45m");
+			const labels = renderer("flowchart TD\n  A[x=y]\n  B[status=#1]", 80);
+			const text = "\x1b[38;2;229;229;231m";
+			expect(labels).toContain(`${text}x=y`);
+			expect(labels).toContain(`${text}status=#1`);
 		} finally {
 			setThemeInstance(dark);
 		}
