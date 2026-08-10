@@ -117,6 +117,7 @@ function createHarness(): Harness {
 		transcriptMessageComponents: new WeakMap(),
 		pendingTools: new Map(),
 		ui: { requestRender: vi.fn() },
+		resetTranscript: () => ctx.chatContainer.clear(),
 		isBackgrounded: false,
 		initialChatRendered: false,
 		statusLine: { invalidate: vi.fn() },
@@ -247,5 +248,40 @@ describe("issue #1955 — sendMessage(display:true) during session_start", () =>
 
 		const rendered = Bun.stripANSI(harness.ctx.chatContainer.render(120).join("\n"));
 		expect(countOccurrences(rendered, marker)).toBe(1);
+	});
+
+	test("defers display rebuilds that arrive during the incremental initial replay", async () => {
+		const initialMarker = "INITIAL_ENTRY_127_END";
+		const lateMarker = "LATE_EXTENSION_MESSAGE_END";
+		const harness = createHarness();
+		for (let index = 0; index < 128; index++) {
+			harness.entries.push(
+				makeCustomEntry(index + 1, `INITIAL_ENTRY_${index}_END`, index === 0 ? null : `entry-${index}`),
+			);
+		}
+		await harness.controller.initHooksAndCustomTools();
+		const actions = harness.getActions();
+		expect(actions).toBeDefined();
+
+		const initialReplay = harness.helpers.renderInitialMessages({
+			preserveExistingChat: true,
+			clearTerminalHistory: true,
+		});
+		expect(harness.ctx.initialChatRendered).toBe(false);
+		actions!.sendMessage(
+			{
+				customType: "issue-1955-probe",
+				content: [{ type: "text", text: lateMarker }],
+				display: true,
+				attribution: "agent",
+			},
+			{ deliverAs: "nextTurn" },
+		);
+		await initialReplay;
+
+		const rendered = Bun.stripANSI(harness.ctx.chatContainer.render(120).join("\n"));
+		expect(countOccurrences(rendered, initialMarker)).toBe(1);
+		expect(countOccurrences(rendered, lateMarker)).toBe(1);
+		expect(rendered.indexOf(initialMarker)).toBeLessThan(rendered.indexOf(lateMarker));
 	});
 });
