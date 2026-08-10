@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the `/ssh add` inline hint omitting the `--scope project|user` option.
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed
