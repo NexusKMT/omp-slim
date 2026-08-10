@@ -430,6 +430,14 @@ export class UiHelpers {
 		const messages = sessionContext.messages;
 		const count = messages.length;
 		for (let i = 0; i < count; i++) {
+			// Yield BEFORE each message (except the first) rather than after: the
+			// per-message body has several early `continue` paths (preserved live
+			// results, image-only and grouped `read` results), and a trailing yield
+			// is skipped by all of them. A large parallel-read batch is entirely
+			// such results, so an after-body yield never trips the chunk counter and
+			// the whole batch replays in one event-loop turn. Yielding at the top of
+			// the next iteration is reached no matter how the prior message exited.
+			if (i > 0) yield;
 			const message = messages[i]!;
 			if (message.role !== "toolResult") flushPendingUsage();
 			// Assistant messages need special handling for tool calls
@@ -664,7 +672,6 @@ export class UiHelpers {
 				// All other messages use standard rendering
 				this.ctx.addMessageToChat(message, options);
 			}
-			yield;
 		}
 		flushPendingUsage();
 

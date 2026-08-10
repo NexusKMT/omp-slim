@@ -251,37 +251,72 @@ describe("UiHelpers.renderInitialMessages — clearTerminalHistory", () => {
 });
 
 describe("UiHelpers.renderInitialMessages — responsiveness", () => {
-	it("yields to a macrotask while rebuilding a large transcript", async () => {
-		vi.useFakeTimers();
-		try {
-			const messages: AgentMessage[] = [];
-			for (let index = 0; index < 256; index++) {
-				messages.push({
-					role: "user",
-					content: `message ${index}`,
-					timestamp: index,
-				});
-			}
-			const { ctx } = makeRenderCtx(transcriptWith(messages));
-			let complete = false;
-			let yieldedBeforeComplete = false;
-			setTimeout(() => {
-				if (!complete) yieldedBeforeComplete = true;
-			}, 0);
+	// Count the chunk boundaries an idle rebuild produces: each boundary calls
+	// `renderChunk` and then awaits a macrotask, so a positive count proves the
+	// rebuild handed control back to the event loop mid-replay instead of
+	// running as one uninterruptible turn. Drives `renderSessionContextIncrementally`
+	// directly (the layer that owns the chunk counter) so the assertion is
+	// deterministic and never races a timer.
+	async function countRebuildChunks(messages: AgentMessage[]): Promise<number> {
+		const transcript = transcriptWith(messages);
+		const { ctx } = makeRenderCtx(transcript);
+		let chunks = 0;
+		await new UiHelpers(ctx).renderSessionContextIncrementally(
+			transcript,
+			{ updateFooter: true, populateHistory: true },
+			() => {
+				chunks++;
+			},
+		);
+		return chunks;
+	}
 
-			const render = new UiHelpers(ctx).renderInitialMessages({ clearTerminalHistory: true }).finally(() => {
-				complete = true;
+	it("splits a large plain transcript rebuild across event-loop turns", async () => {
+		await Settings.init({ inMemory: true });
+		const messages: AgentMessage[] = Array.from({ length: 256 }, (_, index) => ({
+			role: "user",
+			content: `message ${index}`,
+			timestamp: index,
+		}));
+		expect(await countRebuildChunks(messages)).toBeGreaterThan(0);
+	});
+
+	it("yields across a large parallel read-result batch", async () => {
+		// Regression: a single assistant turn whose results are all grouped `read`
+		// toolResults replays entirely through the `isReadGroupResult` early
+		// `continue`. A trailing per-message yield is skipped by every one of
+		// those results, so the whole batch would rebuild in one uninterruptible
+		// event-loop turn and the chunk counter would never trip (zero chunks).
+		// The top-of-loop yield must still hand control back between results.
+		await Settings.init({ inMemory: true });
+		const readCalls = Array.from({ length: 128 }, (_, index) => ({
+			type: "toolCall" as const,
+			id: `read-${index}`,
+			name: "read",
+			arguments: { path: `src/file-${index}.ts` },
+		}));
+		const assistant: AssistantMessage = {
+			role: "assistant",
+			content: readCalls,
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet",
+			usage: emptyUsage,
+			stopReason: "toolUse",
+			timestamp: 1,
+		};
+		const messages: AgentMessage[] = [assistant];
+		for (let index = 0; index < 128; index++) {
+			messages.push({
+				role: "toolResult",
+				toolCallId: `read-${index}`,
+				toolName: "read",
+				content: [{ type: "text", text: `contents ${index}` }],
+				isError: false,
+				timestamp: index + 2,
 			});
-			for (let index = 0; index < 1_000 && !complete; index++) {
-				vi.runOnlyPendingTimers();
-				await Promise.resolve();
-			}
-			await render;
-
-			expect(yieldedBeforeComplete).toBe(true);
-		} finally {
-			vi.useRealTimers();
 		}
+		expect(await countRebuildChunks(messages)).toBeGreaterThan(0);
 	});
 });
 
