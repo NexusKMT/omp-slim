@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a `/skill:<name>` token embedded in a `/plan` or `/vibe` inline prompt being sent to the agent as literal text instead of loading the skill; mode-command inline prompts now dispatch skill invocations through the same custom-message path as the editor submit flow ([#8137](https://github.com/can1357/oh-my-pi/issues/8137)).
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed

@@ -196,6 +196,7 @@ import {
 import { createSessionTeardown, type SessionTeardown } from "./session-teardown";
 import { runProviderSetupWizard } from "./setup-wizard/lazy";
 import { interruptHint } from "./shared";
+import { invokeSkillCommandFromText, isKnownSkillCommand } from "./skill-command";
 import { clearMermaidCache } from "./theme/mermaid-cache";
 import { type ShimmerPalette, shimmerEnabled, shimmerSegments, shimmerText } from "./theme/shimmer";
 import type { Theme } from "./theme/theme";
@@ -3320,9 +3321,26 @@ export class InteractiveMode implements InteractiveModeContext {
 			return;
 		}
 		await this.#enterPlanMode();
-		if (initialPrompt && this.onInputCallback) {
-			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt }));
+		if (initialPrompt) {
+			await this.#submitModeInitialPrompt(initialPrompt);
 		}
+	}
+
+	/**
+	 * Submit a mode command's inline `[prompt]` (`/plan`, `/vibe`) as the first
+	 * turn after entering the mode. A prompt that invokes a registered skill —
+	 * `/skill:<name>` at the start or embedded mid-prompt — is dispatched through
+	 * the skill custom-message path (mirroring the editor submit flow in
+	 * `InputController`); otherwise the raw text is submitted as a normal prompt.
+	 * Without this the skill token reached the agent as literal text (issue #8137).
+	 */
+	async #submitModeInitialPrompt(initialPrompt: string): Promise<void> {
+		if (!this.onInputCallback) return;
+		if (isKnownSkillCommand(this, initialPrompt)) {
+			await invokeSkillCommandFromText(this, initialPrompt, "steer");
+			return;
+		}
+		this.onInputCallback(this.startPendingSubmission({ text: initialPrompt }));
 	}
 
 	/**
@@ -3346,8 +3364,8 @@ export class InteractiveMode implements InteractiveModeContext {
 			return;
 		}
 		await this.#enterVibeMode();
-		if (initialPrompt && this.onInputCallback) {
-			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt }));
+		if (initialPrompt) {
+			await this.#submitModeInitialPrompt(initialPrompt);
 		}
 	}
 
