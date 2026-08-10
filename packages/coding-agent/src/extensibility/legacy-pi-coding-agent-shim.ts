@@ -57,7 +57,16 @@ import { EventBus } from "../utils/event-bus";
 import { convertImageToPng } from "../utils/image-loading";
 import { discoverExtensionPaths, loadExtensionFromFactory, loadExtensions } from "./extensions";
 import { ExtensionRuntime } from "./extensions/loader";
-import type { ExtensionFactory, ToolDefinition } from "./extensions/types";
+import type {
+	BashToolResultEvent,
+	EditToolResultEvent,
+	ExtensionFactory,
+	GrepToolResultEvent,
+	ReadToolResultEvent,
+	ToolDefinition,
+	ToolResultEvent,
+	WriteToolResultEvent,
+} from "./extensions/types";
 import { Type } from "./legacy-typebox";
 import { getEnabledPlugins, resolvePluginExtensionPaths, type ScopedInstalledPlugin } from "./plugins/loader";
 import type { Skill } from "./skills";
@@ -1458,3 +1467,38 @@ export * from "../index";
 export { formatBytes as formatSize } from "../tools/render-utils";
 export { copyToClipboard } from "../utils/clipboard";
 export { Type } from "./legacy-typebox";
+
+// Legacy pi's `@earendil-works/pi-coding-agent` root exported an `is<Tool>ToolResult`
+// family of type guards that narrow a `tool_result` event (`ToolResultEvent`) by
+// tool name. omp removed them from the public API in 10.2.3, and the barrel above
+// does not forward them, so legacy extensions importing them (e.g.
+// `pi-lean-ctx@3.9.18`, which uses `isEditToolResult`/`isWriteToolResult` to
+// invalidate its read cache after a native edit/write) fail Bun's static export
+// check during validation (issue #8161). Restore the guards for the tools omp
+// still surfaces as tool-result events; upstream's `isFindToolResult`/`isLsToolResult`
+// have no omp counterpart and are intentionally absent.
+
+/** Narrow a `tool_result` event to the `bash` tool. */
+export function isBashToolResult(e: ToolResultEvent): e is BashToolResultEvent {
+	return e.toolName === "bash";
+}
+
+/** Narrow a `tool_result` event to the `read` tool. */
+export function isReadToolResult(e: ToolResultEvent): e is ReadToolResultEvent {
+	return e.toolName === "read";
+}
+
+/** Narrow a `tool_result` event to the `edit` tool. */
+export function isEditToolResult(e: ToolResultEvent): e is EditToolResultEvent {
+	return e.toolName === "edit";
+}
+
+/** Narrow a `tool_result` event to the `write` tool. */
+export function isWriteToolResult(e: ToolResultEvent): e is WriteToolResultEvent {
+	return e.toolName === "write";
+}
+
+/** Narrow a `tool_result` event to the `grep` tool. */
+export function isGrepToolResult(e: ToolResultEvent): e is GrepToolResultEvent {
+	return e.toolName === "grep";
+}
