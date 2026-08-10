@@ -906,7 +906,7 @@ export class SessionMaintenance {
 				firstKeptEntryId,
 				tokensBefore,
 				details,
-				preserveData,
+				preserveData: snapcompact.stripPreservedArchive(preserveData),
 			};
 			options?.onComplete?.(compactionResult);
 			return compactionResult;
