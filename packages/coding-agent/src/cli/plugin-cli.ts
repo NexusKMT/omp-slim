@@ -480,7 +480,16 @@ async function handleUninstall(
 		const viaMarketplace = installedPlugins.has(name);
 
 		if (flags.dryRun) {
-			// Dry-run is non-mutating: report the resolved removal without touching state.
+			if (viaMarketplace) {
+				try {
+					await mktMgr.uninstallPlugin(name, { scope: flags.scope, dryRun: true });
+				} catch (err) {
+					console.error(chalk.red(`${theme.status.error} Failed to uninstall ${name}: ${err}`));
+					process.exit(1);
+				}
+			}
+
+			// Marketplace dry-runs validate the requested scope before reporting.
 			if (flags.json) {
 				console.log(
 					JSON.stringify({
@@ -499,7 +508,7 @@ async function handleUninstall(
 		if (viaMarketplace) {
 			// Exact match against installed marketplace plugin IDs (name@marketplace)
 			try {
-				await mktMgr.uninstallPlugin(name, flags.scope);
+				await mktMgr.uninstallPlugin(name, { scope: flags.scope });
 				console.log(chalk.green(`${theme.status.success} Uninstalled ${name}`));
 			} catch (err) {
 				console.error(chalk.red(`${theme.status.error} Failed to uninstall ${name}: ${err}`));

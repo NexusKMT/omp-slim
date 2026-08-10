@@ -440,12 +440,14 @@ export class MarketplaceManager {
 		return "0.0.0";
 	}
 
-	async uninstallPlugin(pluginId: string, scope?: "user" | "project"): Promise<void> {
+	/** Validates and removes a marketplace plugin, or only validates when `dryRun` is set. */
+	async uninstallPlugin(pluginId: string, options?: { scope?: "user" | "project"; dryRun?: boolean }): Promise<void> {
 		const parsed = parsePluginId(pluginId);
 		if (!parsed) {
 			throw new Error(`Invalid plugin ID format: "${pluginId}". Expected "name@marketplace".`);
 		}
 
+		const scope = options?.scope;
 		const { userEntries, projectEntries, userReg, projectReg } = await this.#findInBothRegistries(pluginId);
 
 		const inUser = userEntries && userEntries.length > 0;
@@ -480,6 +482,10 @@ export class MarketplaceManager {
 		const targetReg = targetScope === "project" ? projectReg : userReg;
 		const registryPath = this.#registryPath(targetScope);
 		const packageNames = await this.#resolveInstalledPackageNames(targetEntries, parsed.name);
+
+		if (options?.dryRun) {
+			return;
+		}
 
 		const updatedReg = removeInstalledPlugin(targetReg, pluginId);
 		await writeInstalledPluginsRegistry(registryPath, updatedReg);

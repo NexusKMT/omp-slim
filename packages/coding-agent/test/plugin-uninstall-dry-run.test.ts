@@ -40,7 +40,7 @@ describe("runPluginCommand({ action: 'uninstall', flags: { dryRun } })", () => {
 		}
 	});
 
-	test("marketplace route: --dry-run never calls MarketplaceManager.uninstallPlugin", async () => {
+	test("marketplace route: --dry-run delegates scope validation without npm removal", async () => {
 		const installed: InstalledPluginSummary = {
 			id: "hello@local",
 			scope: "user",
@@ -59,7 +59,8 @@ describe("runPluginCommand({ action: 'uninstall', flags: { dryRun } })", () => {
 		const mktUninstall = spyOn(MarketplaceManager.prototype, "uninstallPlugin").mockResolvedValue(undefined);
 		try {
 			await runPluginCommand({ action: "uninstall", args: ["hello@local"], flags: { dryRun: true, json: true } });
-			expect(mktUninstall).not.toHaveBeenCalled();
+			expect(mktUninstall).toHaveBeenCalledTimes(1);
+			expect(mktUninstall.mock.calls[0]).toEqual(["hello@local", { scope: undefined, dryRun: true }]);
 			expect(npmUninstall).not.toHaveBeenCalled();
 		} finally {
 			npmUninstall.mockRestore();
