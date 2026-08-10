@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed RPC v1 manual snapcompact compaction reporting a transport failure after the compaction had already persisted by omitting the redundant frame archive from the response ([#8168](https://github.com/can1357/oh-my-pi/issues/8168)).
+- Fixed snapcompact compaction shipping its redundant frame archive out of `SessionMaintenance.compact()` on both the manual RPC response (which hard-failed protocol v1 with a transport error after the compaction had already persisted) and the `auto_compaction_end` event payload (which forced the shrink ladder on every unattended pass); the archive is now stripped from both exits while the persisted compaction entry keeps it ([#8168](https://github.com/can1357/oh-my-pi/issues/8168)).
 
 ## [17.2.12] - 2026-08-08
 

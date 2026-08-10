@@ -2390,7 +2390,10 @@ export class SessionMaintenance {
 					await this.#host.emitSessionEvent({
 						type: "auto_compaction_end",
 						action,
-						result: frameRescueResult,
+						result: frameRescueResult && {
+							...frameRescueResult,
+							preserveData: snapcompact.stripPreservedArchive(frameRescueResult.preserveData),
+						},
 						aborted: false,
 						willRetry: false,
 						skipped: frameRescueResult === undefined,
@@ -2790,7 +2793,7 @@ export class SessionMaintenance {
 				firstKeptEntryId,
 				tokensBefore,
 				details,
-				preserveData,
+				preserveData: snapcompact.stripPreservedArchive(preserveData),
 			};
 			// Post-maintenance progress guard — evaluated BEFORE emitting
 			// auto_compaction_end so the TUI rebuild triggered by that event

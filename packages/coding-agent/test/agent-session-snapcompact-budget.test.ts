@@ -27,7 +27,7 @@ import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { encodeRpcFrame, MAX_RPC_FRAME_BYTES } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-frame";
 import { computeNonMessageTokens } from "@oh-my-pi/pi-coding-agent/modes/utils/context-usage";
-import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -321,6 +321,43 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 
 		expect(response).toMatchObject({ success: true });
 		expect(result.preserveData).toEqual({ extensionState: "keep-me" });
+		const compactionEntry = sessionManager.getEntries().find(entry => entry.type === "compaction");
+		if (compactionEntry?.type !== "compaction") throw new Error("Expected persisted compaction entry");
+		expect(compactionEntry.preserveData).toEqual({
+			extensionState: "keep-me",
+			[snapcompact.PRESERVE_KEY]: archive,
+		});
+	});
+
+	it("keeps the frame archive out of the auto_compaction_end event after persisting it", async () => {
+		const branchEntries = sessionManager.getBranch();
+		const lastEntry = branchEntries[branchEntries.length - 1];
+		if (!lastEntry?.id) throw new Error("Expected branch entry with id");
+		// A zero-frame archive clears the payload/projection gates on the auto
+		// path while still carrying PRESERVE_KEY, so the strip is what removes it.
+		const archive = { frames: [], totalChars: 1000, truncatedChars: 0 };
+		vi.spyOn(snapcompact, "compact").mockResolvedValue({
+			summary: "stubbed snapcompact",
+			shortSummary: "stub",
+			firstKeptEntryId: lastEntry.id,
+			tokensBefore: 100_000,
+			details: { readFiles: [], modifiedFiles: [] },
+			preserveData: {
+				extensionState: "keep-me",
+				[snapcompact.PRESERVE_KEY]: archive,
+			},
+		});
+		const events: AgentSessionEvent[] = [];
+		session.subscribe(event => events.push(event));
+
+		await session.runIdleCompaction();
+
+		const endEvent = events.find(
+			(event): event is Extract<AgentSessionEvent, { type: "auto_compaction_end" }> =>
+				event.type === "auto_compaction_end" && event.result !== undefined,
+		);
+		if (!endEvent?.result) throw new Error("Expected a result-carrying auto_compaction_end event");
+		expect(endEvent.result.preserveData).toEqual({ extensionState: "keep-me" });
 		const compactionEntry = sessionManager.getEntries().find(entry => entry.type === "compaction");
 		if (compactionEntry?.type !== "compaction") throw new Error("Expected persisted compaction entry");
 		expect(compactionEntry.preserveData).toEqual({
