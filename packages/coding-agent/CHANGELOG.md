@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the edit tool showing no diff preview in `apply_patch` mode: the built-in `edit` tool presents on the wire as `apply_patch`, but the renderer-provenance gate did not resolve that alias to its built-in owner, so the edit renderer was skipped ([#8184](https://github.com/can1357/oh-my-pi/issues/8184)).
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed
