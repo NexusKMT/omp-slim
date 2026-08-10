@@ -93,6 +93,17 @@
  * That narrows the seam for a sandbox that also hides the ancestors of a denied
  * path, which is the honest cost of not handing over an unverifiable target.
  *
+ * That refusal is load-bearing for more than symlink safety, and relaxing it needs
+ * care. `apply_patch`'s `create` and rename-destination refuse to overwrite, and
+ * they decide that with `Bun.file(dst).exists()`, which reports `false` when the
+ * parent hides the target's metadata rather than distinguishing "absent" from
+ * "unknown". The non-overwrite contract holds today only because the same denied
+ * `lstat` that fools that check also stops this seam from brokering — a privileged
+ * writer, the one party that could enforce exclusivity itself, is never handed the
+ * path. Broker an unverifiable destination and a `create` starts clobbering a
+ * protected file it was told not to touch; a request field carrying explicit
+ * exclusive-create intent would be the prerequisite for that change.
+ *
  * ## Scope of the registry
  *
  * Handlers live in one process-wide list, and a process can host several sessions

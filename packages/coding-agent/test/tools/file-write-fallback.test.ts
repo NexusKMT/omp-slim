@@ -495,6 +495,46 @@ describe("writeFileWithFallback", () => {
 				},
 			);
 		});
+
+		it("never brokers an exclusive create whose destination cannot be proven absent", async () => {
+			// `apply_patch`'s `create` refuses to overwrite, and it decides that with
+			// `Bun.file(dst).exists()`, which reports `false` when the parent hides the
+			// target's metadata instead of distinguishing "absent" from "unknown". The
+			// non-overwrite contract survives regardless, because the same denied `lstat`
+			// that fools the existence check also stops the seam from brokering: a
+			// privileged writer is never handed a destination whose identity is unproven,
+			// and it is the only party that could have enforced exclusivity itself.
+			//
+			// Those are two independent guards in two files, so this pins the pair. If the
+			// seam is ever relaxed to broker an unverifiable path, a `create` would start
+			// silently clobbering a protected file it was told not to touch.
+			const opaque = path.join(root, "opaque");
+			await fs.mkdir(opaque);
+			const victim = path.join(opaque, "victim.txt");
+			await Bun.write(victim, "original\n");
+			await fs.chmod(opaque, 0o000);
+
+			let called = false;
+			disposers.push(
+				addFileWriteFallback(async () => {
+					called = true;
+					return true;
+				}),
+			);
+
+			try {
+				// The premise: the existence check cannot see the file it must not clobber.
+				expect(await Bun.file(victim).exists()).toBe(false);
+
+				await expect(
+					applyPatch({ path: victim, op: "create", diff: "clobbered\n" }, { cwd: root }),
+				).rejects.toMatchObject({ code: expect.stringMatching(/^(EACCES|EPERM)$/) });
+				expect(called).toBe(false);
+			} finally {
+				await fs.chmod(opaque, 0o700);
+			}
+			expect(await Bun.file(victim).text()).toBe("original\n");
+		});
 	});
 });
 
