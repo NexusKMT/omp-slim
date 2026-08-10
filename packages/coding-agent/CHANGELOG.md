@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `searxng.safesearch` setting option for SearXNG searches
+- Added support for Cloudflare AI Gateway routing for Gemini search
+- Added support for Exa MCP search provider
+- Added domain inclusion/exclusion filtering and URL deduplication for TinyFish search
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed
