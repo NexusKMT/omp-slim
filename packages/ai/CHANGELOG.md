@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Antigravity Flash turns hanging after successful response headers when the endpoint never emitted an SSE event; the provider now cancels the stalled body and fails over after 60 seconds while retaining the longer allowance for Pro reasoning starts.
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed
