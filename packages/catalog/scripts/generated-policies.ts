@@ -354,7 +354,7 @@ export function applyOllamaCloudOutputCap(models: ModelSpec<Api>[]): void {
 }
 
 function applyGeneratedModelPolicy(model: ModelSpec<Api>): void {
-	if (model.provider === "xai" && model.api === "openai-responses") {
+	if ((model.provider === "xai" || model.provider === "xai-oauth") && model.api === "openai-responses") {
 		const updated = applyXaiResponsesThinkingPolicy(model as ModelSpec<"openai-responses">);
 		model.compat = updated.compat;
 	}

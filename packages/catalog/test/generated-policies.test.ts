@@ -496,8 +496,8 @@ describe("generated model policies", () => {
 		expect(models[0]?.compat).toMatchObject({
 			supportsReasoningEffort: false,
 			omitReasoningEffort: true,
-			reasoningEffortMap: { minimal: "low" },
 		});
+		expect(models[0]?.compat).not.toHaveProperty("reasoningEffortMap");
 		expect(models[1]?.thinking?.efforts).toEqual([Effort.Minimal, Effort.Low, Effort.Medium, Effort.High]);
 		expect(models[1]?.compat?.supportsReasoningEffort).toBe(true);
 		// Non-xAI hosts are outside this policy — no baked no-dial compat.

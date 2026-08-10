@@ -1396,18 +1396,20 @@ const XAI_REASONING_EFFORT_MAP = { minimal: "low", xhigh: "high", max: "high" } 
  */
 export function applyXaiResponsesThinkingPolicy(model: ModelSpec<"openai-responses">): ModelSpec<"openai-responses"> {
 	const effortCapable = model.compat?.supportsReasoningEffort ?? isGrokReasoningEffortCapable(model.id);
-	return {
-		...model,
-		compat: {
-			...(model.compat ?? {}),
-			reasoningEffortMap: {
-				...XAI_REASONING_EFFORT_MAP,
-				...(model.compat?.reasoningEffortMap ?? {}),
-			},
-			supportsReasoningEffort: effortCapable,
-			omitReasoningEffort: model.compat?.omitReasoningEffort ?? !effortCapable,
-		},
+	const compat = {
+		...(model.compat ?? {}),
+		supportsReasoningEffort: effortCapable,
+		omitReasoningEffort: model.compat?.omitReasoningEffort ?? !effortCapable,
 	};
+	if (effortCapable) {
+		compat.reasoningEffortMap = {
+			...XAI_REASONING_EFFORT_MAP,
+			...(model.compat?.reasoningEffortMap ?? {}),
+		};
+	} else {
+		delete compat.reasoningEffortMap;
+	}
+	return { ...model, compat };
 }
 
 // xai-oauth's /v1/models exposes no per-request output limit on the OAuth
@@ -1423,9 +1425,9 @@ export function applyXaiResponsesThinkingPolicy(model: ModelSpec<"openai-respons
 // reasoning metadata and fetchOpenAICompatibleModels defaults reasoning to
 // false). Caller supplies a `base` Model (either a freshly synthesised seed
 // or a dynamic-fetched entry); the helper layers curated fields on top.
-// The `minimal -> low` effort clamp (XAI_REASONING_EFFORT_MAP) is always
-// merged in so dynamic-fetched models — which arrive without curated
-// compat keys — still get the clamp applyResponsesReasoningParams expects.
+// The `minimal -> low` effort clamp (XAI_REASONING_EFFORT_MAP) is merged
+// only onto effort-capable rows. Off-allowlist reasoners omit the wire
+// param, so a map on those specs is dead weight.
 // The effort-dial pair (`supportsReasoningEffort`/`omitReasoningEffort`) is
 // authoritative: a stale flag on `base` (previous snapshot or dynamic fetch)
 // must not outlive an allowlist change in identity/family.ts.
@@ -1436,13 +1438,17 @@ function mergeCuratedIntoModel(
 	const effortCapable = curated.supportsReasoningEffort ?? isGrokReasoningEffortCapable(curated.id);
 	const compat = {
 		...(base.compat ?? {}),
-		reasoningEffortMap: { ...XAI_REASONING_EFFORT_MAP, ...(base.compat?.reasoningEffortMap ?? {}) },
 		includeEncryptedReasoning: base.compat?.includeEncryptedReasoning ?? true,
 		filterReasoningHistory: false,
 		supportsImageDetailOriginal: base.compat?.supportsImageDetailOriginal ?? false,
 		omitReasoningEffort: !effortCapable,
 		supportsReasoningEffort: effortCapable,
 	};
+	if (effortCapable) {
+		compat.reasoningEffortMap = { ...XAI_REASONING_EFFORT_MAP, ...(base.compat?.reasoningEffortMap ?? {}) };
+	} else {
+		delete compat.reasoningEffortMap;
+	}
 	return {
 		...base,
 		contextWindow: curated.contextWindow,

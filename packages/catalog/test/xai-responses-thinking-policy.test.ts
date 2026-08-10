@@ -73,13 +73,14 @@ describe("paid xAI Responses thinking policy", () => {
 			expect(byId[id]?.compat, id).toMatchObject({
 				supportsReasoningEffort: false,
 				omitReasoningEffort: true,
-				reasoningEffortMap: { minimal: "low" },
 			});
+			expect(byId[id]?.compat, id).not.toHaveProperty("reasoningEffortMap");
 		}
 		expect(byId["grok-2"]?.compat).toMatchObject({
 			supportsReasoningEffort: false,
 			omitReasoningEffort: true,
 		});
+		expect(byId["grok-2"]?.compat).not.toHaveProperty("reasoningEffortMap");
 	});
 
 	it("strips stale thinking dials from off-allowlist paid xAI reasoners during generation", () => {
