@@ -416,6 +416,49 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		}
 	});
 
+	it("keeps an inactive extension MCP winner disabled when a manager collision loses", async () => {
+		const tempDir = makeTempDir();
+		const inactiveMcpExtension: ExtensionFactory = pi => {
+			pi.registerTool({
+				name: "mcp__foo_bar_inactive",
+				label: "Inactive extension winner",
+				description: "Stable extension winner that starts disabled.",
+				parameters: type({}),
+				mcpServerName: "foo.bar",
+				mcpToolName: "inactive",
+				defaultInactive: true,
+				async execute() {
+					return { content: [{ type: "text", text: "extension" }] };
+				},
+			});
+		};
+		const { session } = await createAgentSession({
+			...baseOptions(tempDir),
+			extensions: [inactiveMcpExtension],
+		});
+
+		try {
+			expect(session.getEnabledToolNames()).not.toContain("mcp__foo_bar_inactive");
+			await session.refreshMCPTools([
+				{
+					name: "mcp__foo_bar_inactive",
+					label: "Losing manager collision",
+					description: "Manager origin loses stable deduplication.",
+					parameters: type({}),
+					mcpServerName: "foo_bar",
+					mcpToolName: "inactive",
+					async execute() {
+						return { content: [{ type: "text", text: "manager" }] };
+					},
+				} satisfies CustomTool,
+			]);
+			expect(session.getToolByName("mcp__foo_bar_inactive")?.label).toBe("Inactive extension winner");
+			expect(session.getEnabledToolNames()).not.toContain("mcp__foo_bar_inactive");
+		} finally {
+			await session.dispose();
+		}
+	});
+
 	it("refreshes an earlier extension's stable MCP winner instead of the later colliding registrant", async () => {
 		const tempDir = makeTempDir();
 		const stableWinnerExtension: ExtensionFactory = pi => {

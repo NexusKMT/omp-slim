@@ -1480,7 +1480,7 @@ export class SessionTools {
 		const nextActive = [
 			...new Set([
 				...this.#getActiveNonMCPToolNames(),
-				...managerTools.map(tool => tool.name),
+				...this.#mcpManagerToolNames,
 				...retainedActiveExtensionToolNames,
 			]),
 		];
