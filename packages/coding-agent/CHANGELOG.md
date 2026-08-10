@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Astral `ty` as a built-in Python primary LSP server (`ty server`), ordered behind `pyright`/`basedpyright`/`pylsp` so it becomes the primary Python LSP only when the existing servers are unavailable. `ruff` remains the Python linter and coexists alongside `ty` ([#4617](https://github.com/can1357/oh-my-pi/issues/4617)).
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed
@@ -1718,9 +1722,6 @@
 - Fixed session titles occasionally showing raw `{"title": "..."}` JSON. Online title generation now always uses the `<title>...</title>` marker prompt instead of a forced `set_title` tool call — hosts that ignored or rejected forced `tool_choice` echoed the prompt's JSON example verbatim as the title — and JSON-shaped responses (bare, code-fenced, marker-wrapped, or truncated) are unwrapped to the bare title.
 - Fixed Linux startup prompt construction to read the CPU model from `/proc/cpuinfo` instead of `os.cpus()`, avoiding per-core sysfs frequency probes on many-core hosts ([#4712](https://github.com/can1357/oh-my-pi/issues/4712)).
 - Fixed llama.cpp model discovery to honor per-model `architecture.input_modalities` from `/v1/models`, so router presets that advertise image input are no longer treated as text-only ([#4719](https://github.com/can1357/oh-my-pi/issues/4719)).
-### Added
-
-- Added Astral `ty` as a built-in Python primary LSP server (`ty server`), ordered behind `pyright`/`basedpyright`/`pylsp` so it becomes the primary Python LSP only when the existing servers are unavailable. `ruff` remains the Python linter and coexists alongside `ty` ([#4617](https://github.com/can1357/oh-my-pi/issues/4617)).
 
 ## [16.3.10] - 2026-07-06
 

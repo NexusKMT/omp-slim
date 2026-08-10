@@ -3512,4 +3512,26 @@ describe("ty python lsp", () => {
 			tempDir.removeSync();
 		}
 	});
+
+	it("auto-detects ty in a ty.toml-only project, resolving via project-local venv bin", async () => {
+		// Astral documents ty.toml as a first-class project config file; a project
+		// that opts into ty with only that file (no pyproject/setup/requirements)
+		// must still pass the root-marker gate AND resolve the local venv binary.
+		const tempDir = TempDir.createSync("@omp-lsp-ty-toml-");
+		const venvBin = process.platform === "win32" ? ".venv/Scripts" : ".venv/bin";
+		const resolvedTy = path.join(tempDir.path(), venvBin, "ty");
+		// $which never succeeds: only LOCAL_BIN_PATHS resolution can find ty.
+		vi.spyOn(piUtils, "$which").mockImplementation(() => null);
+		try {
+			await Bun.write(path.join(tempDir.path(), "ty.toml"), "[configuration]\n");
+			fs.mkdirSync(path.dirname(resolvedTy), { recursive: true });
+			await Bun.write(resolvedTy, '#!/bin/sh\nexec ty "$@"\n');
+			const config = loadConfig(tempDir.path());
+			expect(config.servers.ty?.resolvedCommand).toBe(resolvedTy);
+			expect(config.servers.ty?.command).toBe("ty");
+			expect(config.servers.ty?.args).toEqual(["server"]);
+		} finally {
+			tempDir.removeSync();
+		}
+	});
 });
