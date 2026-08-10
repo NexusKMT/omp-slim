@@ -1826,6 +1826,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		toolSession.enableMCP = enableMCP;
 		const deferMCPDiscoveryForUI = enableMCP && !mcpManager && options.hasUI === true;
 		const customTools: CustomTool[] = [];
+		const initialMcpManagerTools: CustomTool[] = [];
 		let startDeferredMCPDiscovery: ((liveSession: AgentSession) => void) | undefined;
 		const startupQuiet = settings.get("startup.quiet");
 		const onMCPStatus = (event: McpConnectionStatusEvent) => {
@@ -1897,10 +1898,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					logger.error("MCP tool load failed", { path, error });
 				}
 
-				if (mcpResult.tools.length > 0) {
-					// MCP tools are LoadedCustomTool, extract the tool property
-					customTools.push(...mcpResult.tools.map(loaded => loaded.tool));
-				}
+				// MCP tools are LoadedCustomTool, extract the tool property while
+				// retaining their origins for initial registry ownership.
+				const loadedMcpTools = mcpResult.tools.map(loaded => loaded.tool);
+				customTools.push(...loadedMcpTools);
+				initialMcpManagerTools.push(...loadedMcpTools);
 			}
 		}
 		// Only top-level sessions own the global MCPManager. Subagents already
@@ -2611,6 +2613,16 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		const wrappedExtensionTools: Tool[] = deduplicateMCPToolsByName(
 			wrapRegisteredTools(allCustomTools, extensionRunner).map(wrapToolWithMetaNotice),
 		);
+		const initialMcpManagerToolNames = new Set<string>();
+		for (const tool of wrappedExtensionTools) {
+			const matchesManagerOrigin = initialMcpManagerTools.some(
+				managerTool =>
+					managerTool.name === tool.name &&
+					managerTool.mcpServerName === tool.mcpServerName &&
+					managerTool.mcpToolName === tool.mcpToolName,
+			);
+			if (matchesManagerOrigin) initialMcpManagerToolNames.add(tool.name);
+		}
 
 		// All built-in tools are active (conditional tools like git/ask return null from factory if disabled)
 		const builtInRegistryToolNames = toolSession.xdev?.builtInNames ?? new Set(toolRegistry.keys());
@@ -3387,6 +3399,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					? () => createVibeTools(toolSession)
 					: undefined,
 			builtInToolNames: builtInRegistryToolNames,
+			mcpManagerToolNames: initialMcpManagerToolNames,
 			transformContext,
 			transformProviderContext,
 			onPayload,
@@ -3461,6 +3474,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			const activation = session.runToolRegistryMutation(async () => {
 				activationSignal.throwIfAborted();
 				const existingTool = toolRegistry.get(name);
+				const previousExtensionMcpTool = session.getExtensionMCPTool(name);
+				const wasMcpManagerTool = session.hasMCPManagerTool(name);
 				if (existingTool) {
 					// RPC host tools and SDK custom tools retain their startup precedence when an
 					// extension registers the same name later.
@@ -3485,6 +3500,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				toolRegistry.set(name, liveTool);
 				builtInRegistryToolNames.delete(name);
 				session.setToolBuiltIn(name, false);
+				session.setExtensionMCPTool(name, liveTool);
 				try {
 					if (registered.definition.defaultInactive && !explicitlyRequested) {
 						if (!alreadyEnabled) return;
@@ -3526,6 +3542,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					}
 					if (wasBuiltIn) builtInRegistryToolNames.add(name);
 					session.setToolBuiltIn(name, wasBuiltIn);
+					session.setExtensionMCPTool(name, previousExtensionMcpTool);
+					session.setMCPManagerTool(name, wasMcpManagerTool);
 					throw error;
 				}
 			}, activationSignal);

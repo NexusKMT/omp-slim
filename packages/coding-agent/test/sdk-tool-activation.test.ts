@@ -389,6 +389,21 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			await runner.emit({ type: "session_start" });
 
 			expect(session.getToolByName("mcp__foo_bar_lookup")?.label).toBe("foo.bar/lookup");
+			await session.refreshMCPTools([
+				{
+					name: "mcp__foo_bar_lookup",
+					label: "foo_bar/lookup manager",
+					description: "Colliding manager tool with the losing stable origin.",
+					parameters: type({}),
+					mcpServerName: "foo_bar",
+					mcpToolName: "lookup",
+					async execute() {
+						return { content: [{ type: "text", text: "manager" }] };
+					},
+				} satisfies CustomTool,
+			]);
+			expect(session.getToolByName("mcp__foo_bar_lookup")?.label).toBe("foo.bar/lookup");
+			expect(session.getEnabledToolNames()).toContain("mcp__foo_bar_lookup");
 			expect(warn).toHaveBeenCalledWith("MCP tool name collision; keeping stable winner", {
 				name: "mcp__foo_bar_lookup",
 				keptServer: "foo.bar",

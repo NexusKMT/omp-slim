@@ -72,6 +72,8 @@ interface SessionToolsOptions {
 	createInspectImageTool?: () => Promise<AgentTool | null>;
 	builtInToolNames?: Iterable<string>;
 	presentationPinnedToolNames?: ReadonlySet<string>;
+	/** MCP tool names whose current registry entries came from the manager snapshot. */
+	mcpManagerToolNames?: Iterable<string>;
 	ensureWriteRegistered?: () => Promise<boolean>;
 	rebuildSystemPrompt?: (
 		toolNames: string[],
@@ -186,6 +188,8 @@ export class SessionTools {
 	#installedVibeToolNames = new Set<string>();
 	#builtInToolNames: Set<string>;
 	#rpcHostToolNames = new Set<string>();
+	#mcpManagerToolNames = new Set<string>();
+	#extensionMcpTools = new Map<string, AgentTool>();
 	#xdev: XdevState | undefined;
 	#pendingXdevMountDelta: { added: Set<string>; removed: Set<string> } | undefined;
 	/**
@@ -239,6 +243,17 @@ export class SessionTools {
 		this.#createComputerTool = options.createComputerTool;
 		this.#createInspectImageTool = options.createInspectImageTool;
 		this.#builtInToolNames = new Set(options.builtInToolNames ?? []);
+		this.#mcpManagerToolNames = new Set(options.mcpManagerToolNames ?? []);
+		if (options.mcpManagerToolNames === undefined) {
+			for (const name of this.#toolRegistry.keys()) {
+				if (isMCPToolName(name)) this.#mcpManagerToolNames.add(name);
+			}
+		}
+		for (const [name, tool] of this.#toolRegistry) {
+			if (isMCPToolName(name) && !this.#mcpManagerToolNames.has(name)) {
+				this.#extensionMcpTools.set(name, tool);
+			}
+		}
 		this.#presentationPinnedToolNames = options.presentationPinnedToolNames;
 		this.#ensureWriteRegistered = options.ensureWriteRegistered;
 		this.#rebuildSystemPrompt = options.rebuildSystemPrompt;
@@ -376,6 +391,36 @@ export class SessionTools {
 	/** Whether the live registry entry is owned by the RPC host. */
 	hasRpcHostTool(name: string): boolean {
 		return this.#rpcHostToolNames.has(name);
+	}
+
+	/** Whether the current MCP entry came from the manager snapshot. */
+	hasMCPManagerTool(name: string): boolean {
+		return this.#mcpManagerToolNames.has(name);
+	}
+
+	/** Restores manager ownership after a lifecycle registration rollback. */
+	setMCPManagerTool(name: string, managerOwned: boolean): void {
+		if (managerOwned) {
+			this.#mcpManagerToolNames.add(name);
+		} else {
+			this.#mcpManagerToolNames.delete(name);
+		}
+	}
+
+	/** Current extension-owned MCP entry retained across manager refreshes. */
+	getExtensionMCPTool(name: string): AgentTool | undefined {
+		return this.#extensionMcpTools.get(name);
+	}
+
+	/** Updates extension ownership when a lifecycle registration commits or rolls back. */
+	setExtensionMCPTool(name: string, tool: AgentTool | undefined): void {
+		if (!isMCPToolName(name)) return;
+		if (tool) {
+			this.#extensionMcpTools.set(name, tool);
+			this.#mcpManagerToolNames.delete(name);
+		} else {
+			this.#extensionMcpTools.delete(name);
+		}
 	}
 
 	/** Serializes every registry and presentation mutation for this session. */
@@ -1383,24 +1428,19 @@ export class SessionTools {
 	}
 
 	async #applyMCPToolRefresh(mcpTools: CustomTool[]): Promise<void> {
-		const existingNames = Array.from(this.#toolRegistry.keys());
-		const previousMcpTools = new Map(
-			existingNames.flatMap(name => {
-				const tool = this.#toolRegistry.get(name);
-				return isMCPToolName(name) && tool ? [[name, tool] as const] : [];
-			}),
-		);
+		const previousMcpTools = new Map<string, AgentTool>();
+		for (const [name, tool] of this.#toolRegistry) {
+			if (isMCPToolName(name)) previousMcpTools.set(name, tool);
+		}
+		const previousMcpManagerToolNames = new Set(this.#mcpManagerToolNames);
+		const previousActiveMcpToolNames = this.getEnabledToolNames().filter(isMCPToolName);
 		const restorePreviousMcpTools = () => {
 			for (const name of this.#toolRegistry.keys()) {
 				if (isMCPToolName(name)) this.#toolRegistry.delete(name);
 			}
 			for (const [name, tool] of previousMcpTools) this.#toolRegistry.set(name, tool);
+			this.#mcpManagerToolNames = previousMcpManagerToolNames;
 		};
-		for (const name of existingNames) {
-			if (isMCPToolName(name)) {
-				this.#toolRegistry.delete(name);
-			}
-		}
 
 		const getCustomToolContext = (): CustomToolContext => ({
 			sessionManager: this.#host.sessionManager,
@@ -1416,18 +1456,34 @@ export class SessionTools {
 		});
 
 		const extensionRunner = this.#host.extensionRunner();
-		const uniqueMcpTools = deduplicateMCPToolsByName(mcpTools);
-		for (const customTool of uniqueMcpTools) {
+		const managerTools = deduplicateMCPToolsByName(mcpTools).map(customTool => {
 			const wrapped = wrapToolWithMetaNotice(CustomToolAdapter.wrap(customTool, getCustomToolContext) as AgentTool);
-			const finalTool = (
-				extensionRunner ? new ExtensionToolWrapper(wrapped, extensionRunner) : wrapped
-			) as AgentTool;
-			this.#toolRegistry.set(finalTool.name, finalTool);
+			return (extensionRunner ? new ExtensionToolWrapper(wrapped, extensionRunner) : wrapped) as AgentTool;
+		});
+		const managerToolSet = new Set(managerTools);
+		const reconciledTools = deduplicateMCPToolsByName([...this.#extensionMcpTools.values(), ...managerTools]);
+
+		for (const name of this.#toolRegistry.keys()) {
+			if (isMCPToolName(name)) this.#toolRegistry.delete(name);
+		}
+		this.#mcpManagerToolNames.clear();
+		for (const tool of reconciledTools) {
+			this.#toolRegistry.set(tool.name, tool);
+			if (managerToolSet.has(tool)) this.#mcpManagerToolNames.add(tool.name);
 		}
 
-		// Every connected MCP tool is selected; centralized repartitioning owns
-		// presentation pins and write-transport activation/removal.
-		const nextActive = [...new Set([...this.#getActiveNonMCPToolNames(), ...uniqueMcpTools.map(tool => tool.name)])];
+		// Connected manager tools become active immediately. Extension-owned MCP
+		// tools retain their prior selection while both sets share one registry.
+		const retainedActiveExtensionToolNames = previousActiveMcpToolNames.filter(
+			name => this.#extensionMcpTools.has(name) && this.#toolRegistry.has(name),
+		);
+		const nextActive = [
+			...new Set([
+				...this.#getActiveNonMCPToolNames(),
+				...managerTools.map(tool => tool.name),
+				...retainedActiveExtensionToolNames,
+			]),
+		];
 		try {
 			await this.#applyActiveToolsByName(nextActive);
 			if (this.#host.isDisposed()) restorePreviousMcpTools();

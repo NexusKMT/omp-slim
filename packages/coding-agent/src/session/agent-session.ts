@@ -1242,6 +1242,7 @@ export class AgentSession {
 			createComputerTool: config.createComputerTool,
 			createInspectImageTool: config.createInspectImageTool,
 			builtInToolNames: config.builtInToolNames,
+			mcpManagerToolNames: config.mcpManagerToolNames,
 			presentationPinnedToolNames: config.presentationPinnedToolNames,
 			ensureWriteRegistered: config.ensureWriteRegistered,
 			rebuildSystemPrompt: config.rebuildSystemPrompt,
@@ -4304,6 +4305,26 @@ export class AgentSession {
 	/** Whether the live registry entry is owned by the RPC host. */
 	hasRpcHostTool(name: string): boolean {
 		return this.#tools.hasRpcHostTool(name);
+	}
+
+	/** Whether the current MCP entry came from the manager snapshot. */
+	hasMCPManagerTool(name: string): boolean {
+		return this.#tools.hasMCPManagerTool(name);
+	}
+
+	/** Restores manager ownership after a lifecycle registration rollback. */
+	setMCPManagerTool(name: string, managerOwned: boolean): void {
+		this.#tools.setMCPManagerTool(name, managerOwned);
+	}
+
+	/** Current extension-owned MCP entry retained across manager refreshes. */
+	getExtensionMCPTool(name: string): AgentTool | undefined {
+		return this.#tools.getExtensionMCPTool(name);
+	}
+
+	/** Updates extension MCP ownership after a lifecycle registration commit or rollback. */
+	setExtensionMCPTool(name: string, tool: AgentTool | undefined): void {
+		this.#tools.setExtensionMCPTool(name, tool);
 	}
 
 	/** Runs a registry/presentation mutation in this session's shared queue. */
