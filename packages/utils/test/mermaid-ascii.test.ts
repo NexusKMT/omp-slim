@@ -13,29 +13,28 @@ describe("renderMermaidAscii", () => {
 		expect(rendered).not.toContain("──A─");
 	});
 
-	it("renders state pseudostates with their UML markers", () => {
-		const rendered = renderMermaidAscii(["stateDiagram-v2", "  [*] --> Created", "  Created --> [*]"].join("\n"), {
-			colorMode: "none",
-		});
+	it("renders Unicode and ASCII state pseudostates with distinct UML markers", () => {
+		const source = ["stateDiagram-v2", "  [*] --> Created", "  Created --> [*]"].join("\n");
+		const unicode = renderMermaidAscii(source, { colorMode: "none" });
+		const ascii = renderMermaidAscii(source, { colorMode: "none", useAscii: true });
 
-		expect(rendered).toMatch(/│\s+●\s+│/);
-		expect(rendered).toMatch(/║\s+◎\s+║/);
+		expect(unicode).toMatch(/│\s+●\s+│/);
+		expect(unicode).toMatch(/║\s+◎\s+║/);
+		expect(ascii).toMatch(/\|\s+\*\s+\|/);
+		expect(ascii).toMatch(/‖\s+\*\s+‖/);
+		expect(ascii).toMatch(/#=+#/);
 	});
 
-	it("keeps dense transition labels intact above connector lines", () => {
-		const rendered = renderMermaidAscii(
-			[
-				"stateDiagram-v2",
-				"  Working --> Working: sessions die and respawn freely",
-				"  Working --> Archived: cheap exit, branches kept",
-				"  Archived --> Working: resume rebuilds substrate",
-			].join("\n"),
-			{ colorMode: "none" },
-		);
+	it("keeps rounded pseudostate corners upright in bottom-to-top diagrams", () => {
+		const rendered = renderMermaidAscii(["stateDiagram-v2", "  direction BT", "  [*] --> Created"].join("\n"), {
+			colorMode: "none",
+		});
+		const rows = rendered.split("\n");
+		const markerRow = rows.findIndex(row => row.includes("●"));
 
-		expect(rendered).toContain("sessions die and respawn freely");
-		expect(rendered).toContain("cheap exit, branches kept");
-		expect(rendered).toContain("resume rebuilds substrate");
+		expect(markerRow).toBeGreaterThan(0);
+		expect(rows[markerRow - 1]).toMatch(/╭─+╮/);
+		expect(rows[markerRow + 1]).toMatch(/╰─+╯/);
 	});
 
 	it("returns a bounded fallback for declaration orders that make a clean route unreachable", () => {

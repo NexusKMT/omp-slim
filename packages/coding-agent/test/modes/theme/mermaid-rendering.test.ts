@@ -67,9 +67,13 @@ describe("Mermaid rendering setting", () => {
 			setThemeInstance(createTheme(titaniumJson, { mode: "truecolor" }));
 			const renderer = getMarkdownTheme().resolveMermaidAscii;
 			if (!renderer) throw new Error("Mermaid renderer unavailable");
-			const rendered = renderer("flowchart TD\n  A[Capture] --> B[Act]", 80);
+			const rendered = renderer("stateDiagram-v2\n  [*] --> Capture\n  Capture --> [*]", 80);
+			const muted = "\x1b[38;2;156;163;176m";
 
-			expect(rendered).toContain("\x1b[38;2;156;163;176m");
+			expect(rendered).toContain(`${muted}╔`);
+			expect(rendered).toContain(`${muted}║`);
+			expect(rendered).toContain(`${muted}╚`);
+			expect(rendered).not.toMatch(/\x1b\[38;2;229;229;231m[╔═╗║╚╝]/);
 			expect(rendered).not.toContain("\x1b[38;2;42;48;56m");
 			expect(rendered).not.toContain("\x1b[38;2;31;37;45m");
 		} finally {

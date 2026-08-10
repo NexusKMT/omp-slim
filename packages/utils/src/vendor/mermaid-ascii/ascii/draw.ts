@@ -14,7 +14,7 @@ import {
   Up, Down, Left, Right, UpperLeft, UpperRight, LowerLeft, LowerRight, Middle,
   drawingCoordEquals,
 } from './types'
-import { mkCanvas, copyCanvas, getCanvasSize, mergeCanvases, drawText, drawLabelText, mkRoleCanvas, setRole, mergeRoleCanvases } from './canvas'
+import { mkCanvas, copyCanvas, getCanvasSize, mergeCanvases, drawText, mkRoleCanvas, setRole, mergeRoleCanvases } from './canvas'
 import type { RoleCanvas, CharRole } from './types'
 import { determineDirection, dirEquals } from './edge-routing'
 import { gridToDrawingCoord, lineToDrawing } from './grid'
@@ -82,7 +82,7 @@ function drawBoxWithGridDimensions(node: AsciiNode, graph: AsciiGraph): Canvas {
   const vChar = useAscii ? (isStateEnd ? '‖' : '|') : (isStateEnd ? '║' : '│')
 
   const stateStartCorners = useAscii
-    ? { tl: '.', tr: '.', bl: "'", br: "'" }
+    ? { tl: '+', tr: '+', bl: '+', br: '+' }
     : { tl: '╭', tr: '╮', bl: '╰', br: '╯' }
   const stateEndCorners = useAscii
     ? { tl: '#', tr: '#', bl: '#', br: '#' }
@@ -679,7 +679,7 @@ function drawTextOnLine(canvas: Canvas, line: DrawingCoord[], label: string, isU
   for (let i = 0; i < lines.length; i++) {
     const lineText = lines[i]!
     const startX = middleX - Math.floor(displayWidth(lineText) / 2)
-    drawLabelText(canvas, { x: startX, y: startY + i }, lineText)
+    drawText(canvas, { x: startX, y: startY + i }, lineText)
   }
 }
 
@@ -1232,7 +1232,7 @@ function fillRolesForNodeBox(
   canvas: Canvas,
   offset: DrawingCoord,
 ): void {
-  const isBorderChar = (c: string) => /^[┌┐└┘├┤┬┴┼│─╭╮╰╯+\-|.':]$/.test(c)
+  const isBorderChar = (c: string) => /^[┌┐└┘├┤┬┴┼│─╭╮╰╯╔╗╚╝═║+\-|.':#=‖]$/.test(c)
 
   for (let x = 0; x < canvas.length; x++) {
     for (let y = 0; y < (canvas[0]?.length ?? 0); y++) {
