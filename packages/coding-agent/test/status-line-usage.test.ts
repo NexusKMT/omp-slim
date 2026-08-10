@@ -338,4 +338,80 @@ describe("usage status-line segment", () => {
 		expect(stripVTControlCharacters(highWithoutValue)).toBe(stripVTControlCharacters(lowWithoutValue));
 		expect(highWithoutValue).not.toBe(lowWithoutValue);
 	});
+
+	it("maps non-canonical window ids onto subscription windows by reported span", async () => {
+		// Kimi-shaped rows: the burst window reports duration/timeUnit instead
+		// of a canonical id, and rows written before canonicalization keep the
+		// old id. The reported span still identifies the window.
+		const now = Date.now();
+		const component = makeComponent([
+			{
+				limits: [
+					{
+						scope: { windowId: "300time_unit_minute" },
+						window: { durationMs: 5 * 3_600_000, resetsAt: now + 30 * 60_000 },
+						amount: { usedFraction: 0.24 },
+					},
+					{
+						scope: { windowId: "weekly" },
+						window: { durationMs: 7 * 86_400_000, resetsAt: now + 141 * 3_600_000 },
+						amount: { usedFraction: 0.08 },
+					},
+				],
+			},
+		]);
+
+		component.refreshUsageInBackground();
+		await flushUsageRefresh();
+		const content = stripVTControlCharacters(component.getTopBorder(200).content);
+
+		expect(content).toContain("5h");
+		expect(content).toContain("24%");
+		expect(content).toContain("7d");
+		expect(content).toContain("8%");
+	});
+
+	it("ignores non-canonical windows without a reported span", async () => {
+		const component = makeComponent([
+			{
+				limits: [
+					{ scope: { windowId: "default" }, window: {}, amount: { usedFraction: 0.24 } },
+					{
+						scope: { windowId: "monthly" },
+						window: { durationMs: 30 * 86_400_000 },
+						amount: { usedFraction: 0.5 },
+					},
+				],
+			},
+		]);
+
+		component.refreshUsageInBackground();
+		await flushUsageRefresh();
+		const content = stripVTControlCharacters(component.getTopBorder(200).content);
+
+		expect(content).not.toContain("24%");
+		expect(content).not.toContain("50%");
+	});
+
+	it("prefers canonical window ids over a conflicting reported span", async () => {
+		const component = makeComponent([
+			{
+				limits: [
+					{
+						scope: { windowId: "5h" },
+						window: { durationMs: 7 * 86_400_000 },
+						amount: { usedFraction: 0.24 },
+					},
+				],
+			},
+		]);
+
+		component.refreshUsageInBackground();
+		await flushUsageRefresh();
+		const content = stripVTControlCharacters(component.getTopBorder(200).content);
+
+		expect(content).toContain("5h");
+		expect(content).toContain("24%");
+		expect(content).not.toContain("7d");
+	});
 });

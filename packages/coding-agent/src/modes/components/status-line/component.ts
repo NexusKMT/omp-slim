@@ -1389,7 +1389,7 @@ export class StatusLineComponent implements Component {
 				}
 				const l = limit as {
 					scope?: { windowId?: string; tier?: string };
-					window?: { resetsAt?: number };
+					window?: { resetsAt?: number; durationMs?: number };
 					amount?: { usedFraction?: number };
 				};
 				const fraction = l.amount?.usedFraction;
@@ -1397,9 +1397,22 @@ export class StatusLineComponent implements Component {
 				const windowId = l.scope?.windowId;
 				const tier = l.scope?.tier;
 				const resetsAt = l.window?.resetsAt;
+				// Canonical window ids win. Fall back to the reported span (same
+				// tolerance as the 5h priority-boost check) so providers that emit
+				// non-canonical ids, and cache rows written before a provider was
+				// canonicalized, still map onto the two subscription windows.
+				const durationMs = l.window?.durationMs;
+				const windowClass =
+					windowId === "5h" || windowId === "7d"
+						? windowId
+						: durationMs !== undefined && Math.abs(durationMs - 5 * 3_600_000) <= 60_000
+							? "5h"
+							: durationMs !== undefined && Math.abs(durationMs - 7 * 86_400_000) <= 60_000
+								? "7d"
+								: undefined;
 				// Accept tiered limits, but prefer untiered (backward compat with Anthropic).
 				// An untiered limit always replaces a tiered one; among same-tieredness, first wins.
-				if (windowId === "5h" && (!fiveHour || (fiveHourTier !== undefined && !tier))) {
+				if (windowClass === "5h" && (!fiveHour || (fiveHourTier !== undefined && !tier))) {
 					fiveHour = {
 						percent: fraction * 100,
 						resetMinutes:
@@ -1407,7 +1420,7 @@ export class StatusLineComponent implements Component {
 					};
 					fiveHourTier = tier || undefined;
 				}
-				if (windowId === "7d" && (!sevenDay || (sevenDayTier !== undefined && !tier))) {
+				if (windowClass === "7d" && (!sevenDay || (sevenDayTier !== undefined && !tier))) {
 					sevenDay = {
 						percent: fraction * 100,
 						resetHours:
