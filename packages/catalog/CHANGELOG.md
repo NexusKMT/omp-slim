@@ -17,7 +17,7 @@
 - Suppressed presence/frequency penalties and stop sequences on xAI reasoning models so a configured `presencePenalty` does not 400 after the `grok-4.5` default change.
 - Stopped emitting stale `thinking.efforts` dials on paid xAI Responses catalog rows that reject `reasoning.effort` (`grok-code-fast-1`, `grok-build-0.1`, `grok-4.20-0309-reasoning`, and other off-allowlist reasoners).
 - Marked first-party xAI Responses hosts (`xai` and `xai-oauth`) as not supporting `reasoning.summary`, so paid `xai/grok-4.5` effort requests omit the unsupported field instead of sending `summary: "auto"`.
-- Removed unsupported `xhigh` (and `max`) thinking tiers from first-party Grok Responses catalog rows; leftover `xhigh`/`max` requests clamp to `high`.
+- Removed unsupported `xhigh` (and `max`) thinking tiers from first-party Grok 4.5 / 4.3 / 3-mini Responses rows; leftover `xhigh`/`max` requests clamp to `high`. `grok-4.20-multi-agent*` still advertises unmapped `xhigh` (16-agent mode).
 - Stopped baking `reasoningEffortMap` on first-party xAI catalog rows that omit `reasoning.effort` (`omitReasoningEffort: true`).
 - Suppressed presence/frequency penalties on every first-party xAI Responses model, including non-reasoning ids such as `grok-2`; xAI's `/v1/responses` marks those fields unsupported.
 

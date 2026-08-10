@@ -1,5 +1,6 @@
 import { USER_AGENT } from "@oh-my-pi/pi-utils";
 import * as logger from "@oh-my-pi/pi-utils/logger";
+import { xaiResponsesReasoningEffortMap } from "../compat/openai";
 import {
 	DEFAULT_OPENAI_COMPATIBLE_DISCOVERY_TIMEOUT_MS,
 	fetchOpenAICompatibleModels,
@@ -1376,9 +1377,9 @@ function withXaiOAuthCompatDefaults(model: ModelSpec<"openai-responses">): Model
 }
 
 // Hermes-agent parity for `minimal -> low` (see hermes-agent/agent/transports/
-// codex.py:92). api.x.ai also rejects `xhigh`/`max`, so those clamp to `high`.
+// codex.py:92). Multi-agent Grok keeps `xhigh` unmapped (agent-count mode);
+// other first-party SKUs clamp leftover `xhigh`/`max` to `high`.
 // `resolveModelThinking` folds this into `model.thinking.effortMap`.
-const XAI_REASONING_EFFORT_MAP = { minimal: "low", xhigh: "high", max: "high" } as const;
 
 /**
  * Bake first-party xAI Responses effort-dial metadata onto a catalog spec.
@@ -1402,10 +1403,7 @@ export function applyXaiResponsesThinkingPolicy(model: ModelSpec<"openai-respons
 		omitReasoningEffort: model.compat?.omitReasoningEffort ?? !effortCapable,
 	};
 	if (effortCapable) {
-		compat.reasoningEffortMap = {
-			...XAI_REASONING_EFFORT_MAP,
-			...(model.compat?.reasoningEffortMap ?? {}),
-		};
+		compat.reasoningEffortMap = { ...xaiResponsesReasoningEffortMap(model.id) };
 	} else {
 		delete compat.reasoningEffortMap;
 	}
@@ -1425,7 +1423,7 @@ export function applyXaiResponsesThinkingPolicy(model: ModelSpec<"openai-respons
 // reasoning metadata and fetchOpenAICompatibleModels defaults reasoning to
 // false). Caller supplies a `base` Model (either a freshly synthesised seed
 // or a dynamic-fetched entry); the helper layers curated fields on top.
-// The `minimal -> low` effort clamp (XAI_REASONING_EFFORT_MAP) is merged
+// The effort remap from {@link xaiResponsesReasoningEffortMap} is merged
 // only onto effort-capable rows. Off-allowlist reasoners omit the wire
 // param, so a map on those specs is dead weight.
 // The effort-dial pair (`supportsReasoningEffort`/`omitReasoningEffort`) is
@@ -1445,7 +1443,7 @@ function mergeCuratedIntoModel(
 		supportsReasoningEffort: effortCapable,
 	};
 	if (effortCapable) {
-		compat.reasoningEffortMap = { ...XAI_REASONING_EFFORT_MAP, ...(base.compat?.reasoningEffortMap ?? {}) };
+		compat.reasoningEffortMap = { ...xaiResponsesReasoningEffortMap(curated.id) };
 	} else {
 		delete compat.reasoningEffortMap;
 	}
@@ -1550,7 +1548,7 @@ export function buildXaiOAuthStaticSeed(baseUrl?: string): ModelSpec<"openai-res
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 			contextWindow: curated.contextWindow,
 			maxTokens: curated.contextWindow,
-			compat: { reasoningEffortMap: XAI_REASONING_EFFORT_MAP },
+			compat: { reasoningEffortMap: xaiResponsesReasoningEffortMap(curated.id) },
 		};
 		return mergeCuratedIntoModel(base, curated);
 	});

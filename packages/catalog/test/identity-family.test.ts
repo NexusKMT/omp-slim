@@ -5,6 +5,7 @@ import {
 	isGeminiModelId,
 	isGlmVisionModelId,
 	isGrokModelId,
+	isGrokMultiAgentModelId,
 	isGrokReasoningEffortCapable,
 	isKimiK26ModelId,
 	isKimiModelId,
@@ -347,5 +348,19 @@ describe("isGrokReasoningEffortCapable", () => {
 		expect(isGrokReasoningEffortCapable("grok-4.20-0309-reasoning")).toBe(false);
 		expect(isGrokReasoningEffortCapable("gpt-5")).toBe(false);
 		expect(isGrokReasoningEffortCapable("")).toBe(false);
+	});
+});
+
+describe("isGrokMultiAgentModelId", () => {
+	test("matches grok-4.20-multi-agent SKUs across namespaces", () => {
+		expect(isGrokMultiAgentModelId("grok-4.20-multi-agent")).toBe(true);
+		expect(isGrokMultiAgentModelId("grok-4.20-multi-agent-0309")).toBe(true);
+		expect(isGrokMultiAgentModelId("xai/grok-4.20-multi-agent-beta-latest")).toBe(true);
+	});
+
+	test("rejects other Grok ids", () => {
+		expect(isGrokMultiAgentModelId("grok-4.5")).toBe(false);
+		expect(isGrokMultiAgentModelId("grok-4.20-0309-reasoning")).toBe(false);
+		expect(isGrokMultiAgentModelId("")).toBe(false);
 	});
 });

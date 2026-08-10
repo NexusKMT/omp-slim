@@ -124,6 +124,15 @@ export const isGrokReasoningEffortCapable = memo((modelId: string): boolean => {
 });
 
 /**
+ * `grok-4.20-multi-agent*` uses `reasoning.effort` to pick agent count
+ * (`xhigh` is the 16-agent mode). Other first-party Grok effort SKUs stay on
+ * `low|medium|high` (https://docs.x.ai/developers/model-capabilities/text/reasoning).
+ */
+export const isGrokMultiAgentModelId = memo((modelId: string): boolean => {
+	return bareModelId(modelId).trim().toLowerCase().startsWith("grok-4.20-multi-agent");
+});
+
+/**
  * MiniMax M2-generation family (M2, M2.1, M2.5, M2.7, including `-highspeed`/
  * `-lightning`/`-her`/`-turbo` variants, dotless aliases like `minimax-m21`,
  * and short `minimax/m2-…` ids on aggregator hosts). Underlying model accepts

@@ -15,6 +15,7 @@ import {
 	isClaudeModelId,
 	isDeepseekModelIdOrName,
 	isGlm52ReasoningEffortModelId,
+	isGrokMultiAgentModelId,
 	isGrokReasoningEffortCapable,
 	isKimiK3ModelId,
 	isKimiK26ModelId,
@@ -177,12 +178,21 @@ const MIMO_REASONING_EFFORT_MAP: NonNullable<OpenAICompat["reasoningEffortMap"]>
 	xhigh: "high",
 };
 
-/** xAI `/v1/responses` accepts `low|medium|high`, not `minimal`/`xhigh`/`max`. */
-const XAI_RESPONSES_REASONING_EFFORT_MAP: NonNullable<OpenAICompat["reasoningEffortMap"]> = {
+/** Shared `minimal → low` clamp. Multi-agent Grok keeps `xhigh` unmapped. */
+const XAI_RESPONSES_MINIMAL_EFFORT_MAP: NonNullable<OpenAICompat["reasoningEffortMap"]> = {
+	minimal: "low",
+};
+/** Non-multi-agent Grok: leftover `xhigh`/`max` clamp to `high` (4.5 has no 16-agent mode). */
+const XAI_RESPONSES_CLAMPED_EFFORT_MAP: NonNullable<OpenAICompat["reasoningEffortMap"]> = {
 	minimal: "low",
 	xhigh: "high",
 	max: "high",
 };
+
+/** Wire effort remap for first-party xAI Responses. */
+export function xaiResponsesReasoningEffortMap(modelId: string): NonNullable<OpenAICompat["reasoningEffortMap"]> {
+	return isGrokMultiAgentModelId(modelId) ? XAI_RESPONSES_MINIMAL_EFFORT_MAP : XAI_RESPONSES_CLAMPED_EFFORT_MAP;
+}
 
 function mergeModelReasoningEffortMap(
 	compat: ResolvedOpenAISharedCompat,
@@ -717,7 +727,7 @@ export function buildOpenAIResponsesCompat(spec: OpenAIResponsesSpecLike): Resol
 			!isXaiHost && !modelMatchesHost({ provider: spec.provider, baseUrl }, "githubCopilot"),
 		// api.x.ai rejects `reasoning.summary` (SuperGrok and paid key alike).
 		supportsReasoningSummary: !isXaiHost,
-		reasoningEffortMap: isXaiHost ? { ...XAI_RESPONSES_REASONING_EFFORT_MAP } : {},
+		reasoningEffortMap: isXaiHost ? { ...xaiResponsesReasoningEffortMap(id) } : {},
 		supportsReasoningParams: true,
 		// OpenAI proprietary reasoning models (o-series, gpt-5+) reject explicit
 		// temperature/top_p/… with a 400 on every serving host (#5606).
@@ -781,7 +791,15 @@ export function buildOpenAIResponsesCompat(spec: OpenAIResponsesSpecLike): Resol
 	};
 	applyCompatOverrides(compat, spec.compat);
 	if (isXaiHost) {
-		compat.reasoningEffortMap = { ...XAI_RESPONSES_REASONING_EFFORT_MAP, ...compat.reasoningEffortMap };
+		const canonical = xaiResponsesReasoningEffortMap(id);
+		compat.reasoningEffortMap = { ...compat.reasoningEffortMap, ...canonical };
+		// Multi-agent Grok advertises unmapped `xhigh`; drop a stale clamp from
+		// previous snapshots so 16-agent mode is not rewritten to `high`.
+		for (const key of ["xhigh", "max"] as const) {
+			if (!(key in canonical)) {
+				delete compat.reasoningEffortMap[key];
+			}
+		}
 	}
 	if (spec.compat?.reasoningDisableMode === undefined) {
 		compat.reasoningDisableMode = resolveReasoningDisableMode(compat.thinkingFormat);

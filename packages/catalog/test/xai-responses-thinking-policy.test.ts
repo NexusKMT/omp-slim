@@ -51,6 +51,14 @@ const XAI_MODELS_DEV_FIXTURE = {
 				limit: { context: 131_072, output: 8192 },
 				cost: { input: 2, output: 10 },
 			},
+			"grok-4.20-multi-agent-beta-latest": {
+				name: "Grok 4.20 (Multi-Agent)",
+				tool_call: true,
+				reasoning: true,
+				modalities: { input: ["text"] },
+				limit: { context: 2_000_000, output: 64_000 },
+				cost: { input: 2, output: 6 },
+			},
 		},
 	},
 };
@@ -101,6 +109,18 @@ describe("paid xAI Responses thinking policy", () => {
 			efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
 			effortMap: { minimal: "low" },
 		});
+		expect(byId["grok-4.20-multi-agent-beta-latest"]?.thinking).toEqual({
+			mode: "effort",
+			efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
+			effortMap: { minimal: "low" },
+		});
+		expect(byId["grok-4.20-multi-agent-beta-latest"]?.compat).toMatchObject({
+			supportsReasoningEffort: true,
+			reasoningEffortMap: { minimal: "low" },
+		});
+		expect(byId["grok-4.20-multi-agent-beta-latest"]?.compat).not.toMatchObject({
+			reasoningEffortMap: { xhigh: "high" },
+		});
 		for (const id of ["grok-code-fast-1", "grok-build-0.1", "grok-4.20-0309-reasoning"] as const) {
 			expect(byId[id]?.reasoning, id).toBe(true);
 			expect(byId[id]?.thinking, id).toBeUndefined();
@@ -120,5 +140,9 @@ describe("paid xAI Responses thinking policy", () => {
 		expect(bundled["grok-4.5"]?.thinking?.efforts).toEqual([Effort.Minimal, Effort.Low, Effort.Medium, Effort.High]);
 		expect(bundled["grok-4.5"]?.thinking?.efforts).not.toContain(Effort.XHigh);
 		expect(bundled["grok-4.5"]?.compat?.supportsReasoningEffort).toBe(true);
+		expect(bundled["grok-4.20-multi-agent-beta-latest"]?.thinking?.efforts).toContain(Effort.XHigh);
+		expect(bundled["grok-4.20-multi-agent-beta-latest"]?.compat).not.toMatchObject({
+			reasoningEffortMap: { xhigh: "high" },
+		});
 	});
 });

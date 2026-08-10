@@ -266,6 +266,9 @@ describe("xAI Responses reasoning-effort suppression", () => {
 		expect(oauth.supportsReasoningEffort).toBe(true);
 		expect(paid.reasoningEffortMap).toEqual({ minimal: "low", xhigh: "high", max: "high" });
 		expect(oauth.reasoningEffortMap).toEqual({ minimal: "low", xhigh: "high", max: "high" });
+		expect(
+			buildOpenAIResponsesCompat(grokResponsesSpec("grok-4.20-multi-agent-0309", "xai")).reasoningEffortMap,
+		).toEqual({ minimal: "low" });
 		expect(paid.supportsPenaltyAndStopParams).toBe(false);
 		expect(oauth.supportsPenaltyAndStopParams).toBe(false);
 		expect(paid.supportsReasoningSummary).toBe(false);
