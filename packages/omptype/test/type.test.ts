@@ -513,4 +513,16 @@ describe("type.withJsonSchema", () => {
 		expect(object({ mode: "b" })).toEqual({ mode: "b" });
 		expect(object({ mode: "c" })).toBeInstanceOf(OmpErrors);
 	});
+
+	it("rejects defaults and output-changing morphs", () => {
+		expect(() => type.withJsonSchema(type.string.default("fallback"), { type: "string" })).toThrow(
+			"cannot wrap schemas with defaults or output-changing morphs",
+		);
+		expect(() =>
+			type.withJsonSchema(type("string.integer.parse"), {
+				type: "string",
+				pattern: "^[0-9]+$",
+			}),
+		).toThrow("cannot wrap schemas with defaults or output-changing morphs");
+	});
 });
