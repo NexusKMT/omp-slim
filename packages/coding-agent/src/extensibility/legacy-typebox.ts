@@ -1,5 +1,11 @@
 import { type } from "@oh-my-pi/omptype";
-import { Type as OmpType, type TypeBuilder as OmpTypeBuilder, type TUnsafe } from "@oh-my-pi/omptype/typebox";
+import {
+	type AnySchema,
+	type ObjectOpts,
+	Type as OmpType,
+	type TypeBuilder as OmpTypeBuilder,
+	type TUnsafe,
+} from "@oh-my-pi/omptype/typebox";
 import { upgradeJsonSchemaTo202012, validateJsonSchemaValue } from "@oh-my-pi/pi-ai/utils/schema";
 
 export * from "@oh-my-pi/omptype/typebox";
@@ -28,6 +34,10 @@ type LegacyUnsafeSchema<T> = TUnsafe<T> & {
 
 function isValidationFailure<T>(result: T | ValidationFailure): result is ValidationFailure {
 	return typeof result === "object" && result !== null && VALIDATION_FAILURE in result;
+}
+
+function isRuntimeSchema(value: unknown): value is AnySchema {
+	return typeof value === "function";
 }
 
 function defineHidden(target: object, key: PropertyKey, value: unknown): void {
@@ -77,7 +87,40 @@ function unsafe<T = unknown>(jsonSchema: Record<string, unknown> = {}): LegacyUn
 	return schema;
 }
 
-export const Type = { ...OmpType, Unsafe: unsafe } as unknown as OmpTypeBuilder;
+const object = ((properties: Record<string, unknown>, opts?: ObjectOpts) => {
+	let normalizedOpts = opts;
+	const additionalProperties: unknown = opts?.additionalProperties;
+	if (
+		additionalProperties !== undefined &&
+		typeof additionalProperties !== "boolean" &&
+		!isRuntimeSchema(additionalProperties)
+	) {
+		normalizedOpts = {
+			...opts,
+			additionalProperties: unsafe(additionalProperties as Record<string, unknown>),
+		};
+	}
+
+	let hasRawProperty = false;
+	for (const key in properties) {
+		if (!isRuntimeSchema(properties[key])) {
+			hasRawProperty = true;
+			break;
+		}
+	}
+	if (!hasRawProperty) {
+		return OmpType.Object(properties as Record<string, AnySchema>, normalizedOpts);
+	}
+
+	const normalizedProperties: Record<string, AnySchema> = {};
+	for (const key in properties) {
+		const property = properties[key];
+		normalizedProperties[key] = isRuntimeSchema(property) ? property : unsafe(property as Record<string, unknown>);
+	}
+	return OmpType.Object(normalizedProperties, normalizedOpts);
+}) as typeof OmpType.Object;
+
+export const Type = { ...OmpType, Object: object, Unsafe: unsafe } as unknown as OmpTypeBuilder;
 export type TypeBuilder = OmpTypeBuilder;
 
 const legacyTypeBox: { Type: OmpTypeBuilder } = { Type };

@@ -81,6 +81,33 @@ describe("legacy-pi TypeBox remap", () => {
 		});
 	});
 
+	it("preserves raw JSON Schema properties passed directly to Type.Object", async () => {
+		const entry = await writeFixtureExtension(
+			[
+				'import { Type } from "typebox";',
+				"export const schema = Type.Object({ cfg: { type: 'string', pattern: '^ok' }, label: Type.Optional(Type.String()) });",
+			].join("\n"),
+		);
+
+		const loaded = (await loadLegacyPiModule(entry)) as {
+			schema: Record<string, unknown> & { safeParse(input: unknown): { success: boolean } };
+		};
+
+		expect(loaded.schema.safeParse({ cfg: "okay" }).success).toBe(true);
+		expect(loaded.schema.safeParse({ cfg: "bad" }).success).toBe(false);
+		expect(loaded.schema.safeParse({ cfg: { type: "string" } }).success).toBe(false);
+		const wire = toolWireSchema({ name: "fixture", description: "", parameters: loaded.schema });
+		expect(JSON.parse(JSON.stringify(wire))).toEqual({
+			type: "object",
+			properties: {
+				cfg: { type: "string", pattern: "^ok" },
+				label: { type: "string" },
+			},
+			required: ["cfg"],
+			additionalProperties: false,
+		});
+	});
+
 	it("redirects minified bare typebox imports without whitespace around from", async () => {
 		const entry = await writeFixtureExtension(
 			'import{Type}from"typebox";export const schema=Type.Object({name:Type.String()});',
