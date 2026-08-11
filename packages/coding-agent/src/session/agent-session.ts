@@ -1243,6 +1243,7 @@ export class AgentSession {
 			createComputerTool: config.createComputerTool,
 			createInspectImageTool: config.createInspectImageTool,
 			builtInToolNames: config.builtInToolNames,
+			mcpManagerToolNames: config.mcpManagerToolNames,
 			presentationPinnedToolNames: config.presentationPinnedToolNames,
 			ensureWriteRegistered: config.ensureWriteRegistered,
 			rebuildSystemPrompt: config.rebuildSystemPrompt,
@@ -4307,6 +4308,41 @@ export class AgentSession {
 		return this.#tools.hasBuiltInTool(name);
 	}
 
+	/** Updates source provenance when a live registry entry is replaced or restored. */
+	setToolBuiltIn(name: string, builtIn: boolean): void {
+		this.#tools.setToolBuiltIn(name, builtIn);
+	}
+
+	/** Whether the live registry entry is owned by the RPC host. */
+	hasRpcHostTool(name: string): boolean {
+		return this.#tools.hasRpcHostTool(name);
+	}
+
+	/** Whether the current MCP entry came from the manager snapshot. */
+	hasMCPManagerTool(name: string): boolean {
+		return this.#tools.hasMCPManagerTool(name);
+	}
+
+	/** Restores manager ownership after a lifecycle registration rollback. */
+	setMCPManagerTool(name: string, managerOwned: boolean): void {
+		this.#tools.setMCPManagerTool(name, managerOwned);
+	}
+
+	/** Current extension-owned MCP entry retained across manager refreshes. */
+	getExtensionMCPTool(name: string): AgentTool | undefined {
+		return this.#tools.getExtensionMCPTool(name);
+	}
+
+	/** Updates extension MCP ownership after a lifecycle registration commit or rollback. */
+	setExtensionMCPTool(name: string, tool: AgentTool | undefined): void {
+		this.#tools.setExtensionMCPTool(name, tool);
+	}
+
+	/** Runs a registry/presentation mutation in this session's shared queue. */
+	runToolRegistryMutation<T>(mutation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+		return this.#tools.runToolRegistryMutation(mutation, signal);
+	}
+
 	/** Names of every registered tool. */
 	getAllToolNames(): string[] {
 		return this.#tools.getAllToolNames();
@@ -4360,8 +4396,13 @@ export class AgentSession {
 	}
 
 	/** Restores an exact top-level versus `xd://` tool partition. */
-	setActiveToolPresentation(toolNames: string[], mountedToolNames: string[]): Promise<void> {
-		return this.#tools.setActiveToolPresentation(toolNames, mountedToolNames);
+	setActiveToolPresentation(
+		toolNames: string[],
+		mountedToolNames: string[],
+		forcePromptRefresh = false,
+		signal?: AbortSignal,
+	): Promise<void> {
+		return this.#tools.setActiveToolPresentation(toolNames, mountedToolNames, forcePromptRefresh, signal);
 	}
 
 	/**

@@ -14,7 +14,9 @@ import { discoverAndLoadExtensions, ExtensionRuntime } from "@oh-my-pi/pi-coding
 import {
 	EXTENSION_HANDLER_TIMEOUT_MS,
 	ExtensionRunner,
+	SESSION_SHUTDOWN_HANDLER_TIMEOUT_MS,
 	testSetExtensionHandlerTimeoutMs,
+	testSetSessionShutdownHandlerTimeoutMs,
 } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
 import type {
 	Extension,
@@ -61,6 +63,7 @@ describe("ExtensionRunner", () => {
 
 	afterEach(() => {
 		testSetExtensionHandlerTimeoutMs(EXTENSION_HANDLER_TIMEOUT_MS);
+		testSetSessionShutdownHandlerTimeoutMs(SESSION_SHUTDOWN_HANDLER_TIMEOUT_MS);
 		tempDir.removeSync();
 	});
 
@@ -1270,6 +1273,54 @@ describe("ExtensionRunner", () => {
 			warnSpy.mockRestore();
 		});
 
+		it("keeps a stalled registration inside the session_shutdown deadline", async () => {
+			const extensionPath = path.join(tempDir.path(), "shutdown-registration.ts");
+			fs.writeFileSync(
+				extensionPath,
+				`
+					export default function(pi) {
+						pi.on("session_shutdown", () => {
+							const { Type } = pi.typebox;
+							pi.registerTool({
+								name: "shutdown_tool",
+								label: "Shutdown Tool",
+								description: "Registered while shutting down.",
+								parameters: Type.Object({}),
+								execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
+							});
+						});
+					}
+				`,
+			);
+
+			const result = await loadTestExtensions([extensionPath]);
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			runner.onToolRegistered(() => Promise.withResolvers<void>().promise);
+			const errors: ExtensionError[] = [];
+			runner.onError(error => {
+				errors.push(error);
+			});
+			testSetSessionShutdownHandlerTimeoutMs(10);
+
+			const startedAt = performance.now();
+			await runner.emit({ type: "session_shutdown" });
+			const elapsedMs = performance.now() - startedAt;
+
+			expect(elapsedMs).toBeGreaterThanOrEqual(8);
+			expect(elapsedMs).toBeLessThan(150);
+			expect(errors).toContainEqual({
+				extensionPath,
+				event: "session_shutdown",
+				error: "handler timed out after 10ms",
+			});
+		});
+
 		it("times out tool_call handlers with fail-closed policy so a hung extension cannot indefinitely block tool execution (#3948)", async () => {
 			const hangExtensionPath = path.join(tempDir.path(), "hang-tool-call.ts");
 			fs.writeFileSync(
@@ -1336,6 +1387,118 @@ describe("ExtensionRunner", () => {
 			]);
 
 			warnSpy.mockRestore();
+		});
+
+		it("fails closed when a tool_call handler registration cannot activate", async () => {
+			const extensionPath = path.join(tempDir.path(), "tool-call-registration.ts");
+			fs.writeFileSync(
+				extensionPath,
+				`
+					export default function(pi) {
+						pi.on("tool_call", () => {
+							const { Type } = pi.typebox;
+							pi.registerTool({
+								name: "tool_call_registered",
+								label: "Tool Call Registered",
+								description: "Registered from a tool-call hook.",
+								parameters: Type.Object({}),
+								execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
+							});
+						});
+					}
+				`,
+			);
+
+			const result = await loadTestExtensions([extensionPath]);
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			runner.onToolRegistered(async () => {
+				throw new Error("expected tool-call registration failure");
+			});
+			const errors: ExtensionError[] = [];
+			runner.onError(error => {
+				errors.push(error);
+			});
+			const executeCalls: unknown[] = [];
+			const wrapped = new ExtensionToolWrapper(
+				{
+					name: "gated",
+					label: "Gated",
+					description: "Must not execute after a gate registration fails.",
+					parameters: Type.Object({}),
+					execute: async (_id, params) => {
+						executeCalls.push(params);
+						return { content: [{ type: "text", text: "ran" }] };
+					},
+				},
+				runner,
+			);
+
+			await expect(wrapped.execute("tool-call-id", {})).rejects.toThrow(
+				`Extension ${extensionPath} failed: expected tool-call registration failure`,
+			);
+			expect(executeCalls).toEqual([]);
+			expect(errors).toContainEqual({
+				extensionPath,
+				event: "tool_call",
+				error: "expected tool-call registration failure",
+				stack: expect.any(String),
+			});
+		});
+
+		it("does not charge detached registrations to unrelated tool-call handlers", async () => {
+			const extensionPath = path.join(tempDir.path(), "detached-registration-barrier.ts");
+			fs.writeFileSync(
+				extensionPath,
+				`
+					export default function(pi) {
+						const { Type } = pi.typebox;
+						pi.registerTool({
+							name: "detached_source_tool",
+							label: "Detached Source Tool",
+							description: "Provides a registration event for the detached barrier test.",
+							parameters: Type.Object({}),
+							execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
+						});
+						pi.on("tool_call", () => undefined);
+					}
+				`,
+			);
+
+			const loaded = await loadTestExtensions([extensionPath]);
+			const runner = new ExtensionRunner(
+				loaded.extensions,
+				loaded.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			runner.onToolRegistered(() => Promise.withResolvers<void>().promise);
+			const extension = loaded.extensions[0];
+			const registrationListener = extension?.toolRegistrationListeners?.values().next().value;
+			if (!registrationListener) throw new Error("expected registration listener");
+			registrationListener("detached_source_tool");
+
+			const errors: ExtensionError[] = [];
+			runner.onError(error => {
+				errors.push(error);
+			});
+			testSetExtensionHandlerTimeoutMs(10);
+
+			const result = await runner.emitToolCall({
+				type: "tool_call",
+				toolName: "unrelated",
+				toolCallId: "unrelated-call",
+				input: {},
+			});
+
+			expect(result).toBeUndefined();
+			expect(errors).toEqual([]);
 		});
 
 		it("aborts a tool_call handler's confirmation before returning its timeout block", async () => {
