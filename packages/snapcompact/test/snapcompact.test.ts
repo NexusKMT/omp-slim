@@ -303,6 +303,14 @@ describe("shape resolution", () => {
 			1932,
 		);
 		expect(snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-opus-4-10" }).frameSize).toBe(1932);
+		// Versionless Fable/Mythos aliases (bundled `claude-fable-latest`) never
+		// parse a numeric version but still read the high-res tier by name (#8257).
+		expect(
+			snapcompact.resolveShape({ api: "openai-completions", id: "anthropic/claude-fable-latest" }).frameSize,
+		).toBe(1932);
+		expect(
+			snapcompact.resolveShape({ api: "openai-completions", id: "~anthropic/claude-fable-latest" }).frameSize,
+		).toBe(1932);
 		// Opus 5+ shares the Anthropic visual-token cap, so it stays on the
 		// high-res tier rather than falling back to the 1568px default (#8256).
 		expect(snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-opus-5" }).frameSize).toBe(1932);

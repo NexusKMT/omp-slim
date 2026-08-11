@@ -344,6 +344,10 @@ export interface IdealShape {
  *  back to the API family's winner at the standard 1568px frame. */
 const HIGH_RES_ANTHROPIC_VARIANT = { variant: "11on16-bw", frameSize: 1932 } as const satisfies IdealShape;
 const MODEL_VARIANTS: readonly (readonly [RegExp, IdealShape])[] = [
+	// Versionless Fable/Mythos aliases (e.g. `claude-fable-latest`) never parse
+	// a numeric version, so keep them on the high-res tier by name — every
+	// Fable/Mythos line reads it natively.
+	[/claude.*(fable|mythos)/i, HIGH_RES_ANTHROPIC_VARIANT],
 	// Older Claude lines downscale past 1568px — keep the safe size.
 	[/claude/i, { variant: "11on16-bw" }],
 	// Gemini 3.x bills a fixed 1,120-token budget per image regardless of
