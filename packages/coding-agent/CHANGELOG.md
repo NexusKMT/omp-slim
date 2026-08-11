@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the MCP Streamable HTTP transport never sending the `MCP-Protocol-Version` header and negotiating the stale `2025-03-26` revision, which made spec-current servers (e.g. AWS Bedrock AgentCore Gateway with an outbound per-user OAuth target) reject every `tools/call` with a generic internal error. The client now negotiates `2025-11-25` and echoes the negotiated version in the `MCP-Protocol-Version` header on every request ([#8264](https://github.com/can1357/oh-my-pi/issues/8264)).
+
 ## [17.2.13] - 2026-08-11
 
 ### Added

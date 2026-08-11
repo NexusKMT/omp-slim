@@ -2,7 +2,8 @@
  * MCP HTTP transport (Streamable HTTP).
  *
  * Implements JSON-RPC 2.0 over HTTP POST with optional SSE streaming.
- * Based on MCP spec 2025-03-26.
+ * The negotiated protocol revision is carried in the `MCP-Protocol-Version`
+ * header on every request (see `MCP_PROTOCOL_VERSION`).
  */
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { logger, readSseJson } from "@oh-my-pi/pi-utils";
@@ -16,7 +17,7 @@ import type {
 	MCPSseServerConfig,
 	MCPTransport,
 } from "../../mcp/types";
-import { toJsonRpcError } from "../../mcp/types";
+import { MCP_PROTOCOL_VERSION, toJsonRpcError } from "../../mcp/types";
 import { RequestIdAllocator } from "../request-id";
 import { createMCPTimeout, getNeverAbortSignal, isMCPTimeoutEnabled, resolveMCPTimeoutMs } from "../timeout";
 import { type MCPFetchInit, mcpFetch } from "./header-policy";
@@ -45,6 +46,12 @@ export class HttpTransport implements MCPTransport {
 	#sessionId: string | null = null;
 	#sseConnection: AbortController | null = null;
 	readonly #requestIds = new RequestIdAllocator();
+	/**
+	 * Protocol version echoed in the `MCP-Protocol-Version` header on every
+	 * request. Starts at the version this client requests and is replaced with
+	 * the value the server negotiates via {@link setProtocolVersion}.
+	 */
+	#protocolVersion = MCP_PROTOCOL_VERSION;
 
 	onClose?: () => void;
 	onError?: (error: Error) => void;
@@ -55,14 +62,31 @@ export class HttpTransport implements MCPTransport {
 
 	constructor(private config: MCPHttpServerConfig | MCPSseServerConfig) {}
 
-	/** Fetch the configured endpoint with header precedence and origin policy. */
+	/**
+	 * Fetch the configured endpoint with header precedence and origin policy.
+	 *
+	 * Every request carries `MCP-Protocol-Version`. The MCP Streamable HTTP spec
+	 * requires it on all requests after `initialize`; sending it on `initialize`
+	 * too is harmless and keeps this a single choke point. It is placed under
+	 * `generated` so the merge policy lets a caller-supplied header win only when
+	 * one isn't generated here, and so an explicitly generated value (none today)
+	 * would take precedence.
+	 */
 	#fetch(init: MCPFetchInit, generated: Record<string, string>): Promise<Response> {
 		return mcpFetch(
 			this.config.url,
 			init,
-			{ generated, configured: this.config.headers },
+			{
+				generated: { "MCP-Protocol-Version": this.#protocolVersion, ...generated },
+				configured: this.config.headers,
+			},
 			this.config.headerPolicy === "origin-locked",
 		);
+	}
+
+	/** Record the protocol version negotiated during `initialize`. */
+	setProtocolVersion(version: string): void {
+		this.#protocolVersion = version;
 	}
 
 	get connected(): boolean {
