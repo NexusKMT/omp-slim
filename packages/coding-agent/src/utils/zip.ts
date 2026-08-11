@@ -47,9 +47,9 @@ export function unzip(bytes: Uint8Array): Unzipped {
 }
 
 /**
- * Cap on the on-disk size of tar/tar.gz archives, which are loaded fully into
- * memory (and decompressed by `Bun.Archive`) just to index entries. ZIP is
- * exempt: it is read via ranged central-directory access.
+ * Cap on tar/tar.gz archives loaded fully into memory for in-process indexing
+ * (gzip input is bounded to this decompressed size). ZIP is exempt: it is read
+ * via ranged central-directory access.
  */
 const MAX_TAR_ARCHIVE_BYTES = 256 * 1024 * 1024;
 /**
@@ -604,6 +604,8 @@ const TAR_MTIME_LENGTH = 12;
 const TAR_CHECKSUM_OFFSET = 148;
 const TAR_CHECKSUM_LENGTH = 8;
 const TAR_TYPEFLAG_OFFSET = 156;
+const TAR_LINKNAME_OFFSET = 157;
+const TAR_LINKNAME_LENGTH = 100;
 const TAR_PREFIX_OFFSET = 345;
 const TAR_PREFIX_LENGTH = 155;
 const GZIP_MAGIC_0 = 0x1f;
@@ -711,11 +713,12 @@ function paxDeclaresSparse(pax: Map<string, string> | undefined): boolean {
 /**
  * Index a tar (optionally gzip-compressed) archive entirely in TypeScript.
  * Handles ustar/GNU/pax layouts, `./`-prefixed and `prefix`-split names, GNU
- * `@LongLink` long names, and pax `path`/`size` overrides. This deliberately
- * avoids `Bun.Archive`/libarchive, whose internal allocation-failure path calls
- * `abort()` and takes down the whole process on a crafted or oversized member
- * (#4774). Sparse members are indexed but flagged; reading their bytes throws a
- * catchable `ToolError` rather than returning a misassembled payload.
+ * `@LongLink` names/link targets, pax `path`/`linkpath`/`size` overrides, and
+ * hard links. This deliberately avoids `Bun.Archive`/libarchive, whose
+ * internal allocation-failure path calls `abort()` and takes down the whole
+ * process on a crafted or oversized member (#4774). Sparse members are
+ * indexed but flagged; reading their bytes throws a catchable `ToolError`
+ * rather than returning a misassembled payload.
  */
 function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 	let buffer: Uint8Array;
@@ -728,7 +731,9 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 	const entries: ArchiveIndexEntry[] = [];
 	let offset = 0;
 	let longName: string | undefined;
+	let longLink: string | undefined;
 	let pax: Map<string, string> | undefined;
+	const hardLinks = new Map<ArchiveIndexEntry, string>();
 	// A valid tar ends with a zero block. Track whether we reach one so an empty
 	// index can be distinguished from a payload that is not a tar at all.
 	let sawTerminator = false;
@@ -747,6 +752,7 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 		let name = readTarString(buffer, offset + TAR_NAME_OFFSET, TAR_NAME_LENGTH);
 		const prefix = readTarString(buffer, offset + TAR_PREFIX_OFFSET, TAR_PREFIX_LENGTH);
 		if (prefix) name = `${prefix}/${name}`;
+		let linkName = readTarString(buffer, offset + TAR_LINKNAME_OFFSET, TAR_LINKNAME_LENGTH);
 		const mtime = readTarNumeric(buffer, offset + TAR_MTIME_OFFSET, TAR_MTIME_LENGTH);
 
 		offset += TAR_BLOCK_SIZE;
@@ -760,6 +766,7 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 			continue;
 		}
 		if (typeFlag === "K") {
+			longLink = readTarString(buffer, offset, size);
 			offset += dataBlocks;
 			continue;
 		}
@@ -774,8 +781,11 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 		}
 
 		if (longName !== undefined) name = longName;
+		if (longLink !== undefined) linkName = longLink;
 		const paxPath = pax?.get("path");
 		if (paxPath !== undefined) name = paxPath;
+		const paxLinkPath = pax?.get("linkpath");
+		if (paxLinkPath !== undefined) linkName = paxLinkPath;
 		const paxSize = pax?.get("size");
 		if (paxSize !== undefined) {
 			const parsed = Number.parseInt(paxSize, 10);
@@ -786,6 +796,7 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 		const memberDataBlocks = Math.ceil(size / TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE;
 		offset += memberDataBlocks;
 		longName = undefined;
+		longLink = undefined;
 		pax = undefined;
 
 		const isDirectory = typeFlag === "5" || name.endsWith("/");
@@ -795,6 +806,21 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 
 		if (isDirectory) {
 			entries.push({ path: normalizedPath, isDirectory: true, size: 0, mtimeMs });
+			continue;
+		}
+		if (typeFlag === "1") {
+			const targetPath = normalizeArchiveEntryPath(linkName);
+			if (!targetPath) {
+				throw new ToolError(`Archive hard link '${normalizedPath}' has an invalid target`);
+			}
+			const entry: ArchiveIndexEntry = {
+				path: normalizedPath,
+				isDirectory: false,
+				size: 0,
+				mtimeMs,
+			};
+			entries.push(entry);
+			hardLinks.set(entry, targetPath);
 			continue;
 		}
 		// Only regular-file typeflags carry inline data we can slice.
@@ -813,6 +839,37 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 			mtimeMs,
 			storage: { type: "tar", buffer, dataOffset, sparse },
 		});
+	}
+
+	// Hard-link records carry no data. Resolve them after all headers are
+	// indexed so links may point forward or form chains; missing/cyclic targets
+	// are archive errors rather than silently omitted paths.
+	if (hardLinks.size > 0) {
+		const entriesByPath = new Map<string, ArchiveIndexEntry>();
+		for (const entry of entries) entriesByPath.set(entry.path, entry);
+
+		let remaining = hardLinks.size;
+		while (remaining > 0) {
+			let resolved = 0;
+			for (const [entry, targetPath] of hardLinks) {
+				if (entry.storage) continue;
+				const target = entriesByPath.get(targetPath);
+				if (!target) {
+					throw new ToolError(`Archive hard link '${entry.path}' targets missing member '${targetPath}'`);
+				}
+				if (target.isDirectory) {
+					throw new ToolError(`Archive hard link '${entry.path}' targets directory '${targetPath}'`);
+				}
+				if (!target.storage) continue;
+				entry.size = target.size;
+				entry.storage = target.storage;
+				remaining--;
+				resolved++;
+			}
+			if (resolved === 0) {
+				throw new ToolError("Archive contains cyclic or unsupported hard links");
+			}
+		}
 	}
 
 	// No entries and no terminating zero block means the decompressed payload
@@ -882,7 +939,7 @@ export function parseArchivePathCandidates(filePath: string): ArchivePathCandida
 /**
  * An indexed, read-only view over a single archive. ZIP archives are indexed
  * from the central directory and members are inflated on demand; tar archives
- * are fully materialized by `Bun.Archive` up front.
+ * are parsed from one in-memory buffer and members are sliced on demand.
  */
 export class ArchiveReader {
 	readonly format: ArchiveFormat;

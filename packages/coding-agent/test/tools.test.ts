@@ -16,7 +16,7 @@ import { wrapToolWithMetaNotice } from "@oh-my-pi/pi-coding-agent/tools/output-m
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
 import * as toolTimeouts from "@oh-my-pi/pi-coding-agent/tools/tool-timeouts";
 import { WriteTool } from "@oh-my-pi/pi-coding-agent/tools/write";
-import { unzip } from "@oh-my-pi/pi-coding-agent/utils/zip";
+import { readArchiveEntries, unzip } from "@oh-my-pi/pi-coding-agent/utils/zip";
 import { $which, removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
 import { GlobTool } from "../src/tools/glob";
 import { DEFAULT_FILE_LIMIT, GrepTool, MULTI_FILE_PER_FILE_MATCHES } from "../src/tools/grep";
@@ -65,6 +65,8 @@ interface ArchiveFixtureEntry {
 	path: string;
 	content: string;
 	prefix?: string;
+	typeFlag?: "0" | "1";
+	linkName?: string;
 }
 
 function writeTarString(buffer: Buffer, offset: number, length: number, value: string): void {
@@ -87,13 +89,14 @@ function createTarArchive(entries: ArchiveFixtureEntry[]): Buffer {
 
 		writeTarString(header, 0, 100, entry.path);
 		if (entry.prefix) writeTarString(header, 345, 155, entry.prefix);
+		if (entry.linkName) writeTarString(header, 157, 100, entry.linkName);
 		writeTarOctal(header, 100, 8, 0o644);
 		writeTarOctal(header, 108, 8, 0);
 		writeTarOctal(header, 116, 8, 0);
 		writeTarOctal(header, 124, 12, content.length);
 		writeTarOctal(header, 136, 12, Math.floor(Date.now() / 1000));
 		header.fill(0x20, 148, 156);
-		header[156] = "0".charCodeAt(0);
+		header[156] = (entry.typeFlag ?? "0").charCodeAt(0);
 		writeTarString(header, 257, 6, "ustar");
 		writeTarString(header, 263, 2, "00");
 
@@ -705,6 +708,32 @@ describe("Coding Agent Tools", () => {
 				path: `${archivePath}:${memberPath}`,
 			});
 			expect(getTextOutput(memberResult)).toContain('{ "type": "module" }');
+		});
+
+		it("should preserve tar hard-link members", async () => {
+			const archivePath = path.join(testDir, "hard-link.tar");
+			fs.writeFileSync(
+				archivePath,
+				createTarArchive([
+					{ path: "pkg/original.txt", content: "shared content\n" },
+					{ path: "pkg/linked.txt", content: "", typeFlag: "1", linkName: "pkg/original.txt" },
+				]),
+			);
+
+			const rootResult = await readTool.execute("test-call-tar-hard-link-root", { path: `${archivePath}:pkg` });
+			expect(getTextOutput(rootResult)).toContain("linked.txt");
+
+			const linkedResult = await readTool.execute("test-call-tar-hard-link-member", {
+				path: `${archivePath}:pkg/linked.txt`,
+			});
+			expect(getTextOutput(linkedResult)).toContain("shared content");
+
+			const entries = await readArchiveEntries(archivePath);
+			const linkedContent = entries.get("pkg/linked.txt");
+			if (!(linkedContent instanceof Uint8Array)) {
+				throw new Error("Expected hard-link content to materialize as bytes");
+			}
+			expect(new TextDecoder().decode(linkedContent)).toBe("shared content\n");
 		});
 
 		it("should reject a truncated tar member while indexing", async () => {
