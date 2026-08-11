@@ -152,6 +152,11 @@ interface TarStorage {
 	sparse: boolean;
 }
 
+interface TarLinkStorage {
+	type: "tar-link";
+	targetPath: string;
+}
+
 interface ZipStorage {
 	type: "zip";
 	source: ByteSource;
@@ -161,7 +166,7 @@ interface ZipStorage {
 	localHeaderOffset: number;
 }
 
-type EntryStorage = TarStorage | ZipStorage;
+type EntryStorage = TarStorage | TarLinkStorage | ZipStorage;
 
 interface ArchiveIndexEntry extends ArchiveNode {
 	storage?: EntryStorage;
@@ -733,9 +738,9 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 	let longName: string | undefined;
 	let longLink: string | undefined;
 	let pax: Map<string, string> | undefined;
-	const hardLinks = new Map<ArchiveIndexEntry, string>();
-	// A valid tar ends with a zero block. Track whether we reach one so an empty
-	// index can be distinguished from a payload that is not a tar at all.
+	const pendingLinks = new Map<ArchiveIndexEntry, { kind: "hard link" | "symlink"; targetPath: string }>();
+	// A valid tar ends with a zero block. Track whether the fully buffered input
+	// reaches one so truncated archives never expose a partial index.
 	let sawTerminator = false;
 
 	while (offset + TAR_BLOCK_SIZE <= buffer.length) {
@@ -808,19 +813,31 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 			entries.push({ path: normalizedPath, isDirectory: true, size: 0, mtimeMs });
 			continue;
 		}
-		if (typeFlag === "1") {
-			const targetPath = normalizeArchiveEntryPath(linkName);
-			if (!targetPath) {
-				throw new ToolError(`Archive hard link '${normalizedPath}' has an invalid target`);
-			}
+		if (typeFlag === "1" || typeFlag === "2") {
+			const kind = typeFlag === "1" ? "hard link" : "symlink";
+			const portableLinkName = linkName.replace(/\\/g, "/");
+			const targetPath =
+				typeFlag === "1"
+					? normalizeArchiveEntryPath(portableLinkName)
+					: path.posix.isAbsolute(portableLinkName)
+						? undefined
+						: normalizeArchiveEntryPath(path.posix.join(path.posix.dirname(normalizedPath), portableLinkName));
 			const entry: ArchiveIndexEntry = {
 				path: normalizedPath,
 				isDirectory: false,
 				size: 0,
 				mtimeMs,
 			};
+			if (!targetPath) {
+				if (kind === "hard link") {
+					throw new ToolError(`Archive hard link '${normalizedPath}' has an invalid target`);
+				}
+				entry.storage = { type: "tar-link", targetPath: portableLinkName };
+				entries.push(entry);
+				continue;
+			}
 			entries.push(entry);
-			hardLinks.set(entry, targetPath);
+			pendingLinks.set(entry, { kind, targetPath });
 			continue;
 		}
 		// Only regular-file typeflags carry inline data we can slice.
@@ -841,44 +858,83 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 		});
 	}
 
-	// Hard-link records carry no data. Resolve them after all headers are
-	// indexed so links may point forward or form chains; missing/cyclic targets
-	// are archive errors rather than silently omitted paths.
-	if (hardLinks.size > 0) {
+	// Fully buffered tar reads must reach an end-of-archive zero block. Without
+	// one, even complete entries form only a partial listing: later members may
+	// have been cut off by a truncated download. For gzip-shaped non-tar input,
+	// this also gives fetch a catchable error so it can fall back to binary.
+	if (!sawTerminator) {
+		throw new ToolError("Not a valid tar archive: missing terminating zero block");
+	}
+
+	// Link records carry no data. Resolve them after all headers are indexed so
+	// hard links and safe relative symlinks may point forward or form chains.
+	// Directory symlinks materialize the resolved target subtree at the alias
+	// path, keeping extraction/rewrite behavior useful without writing symlinks
+	// that could escape the destination.
+	if (pendingLinks.size > 0) {
 		const entriesByPath = new Map<string, ArchiveIndexEntry>();
 		for (const entry of entries) entriesByPath.set(entry.path, entry);
+		const unresolved = new Set(pendingLinks.keys());
 
-		let remaining = hardLinks.size;
-		while (remaining > 0) {
+		while (unresolved.size > 0) {
 			let resolved = 0;
-			for (const [entry, targetPath] of hardLinks) {
-				if (entry.storage) continue;
-				const target = entriesByPath.get(targetPath);
-				if (!target) {
-					throw new ToolError(`Archive hard link '${entry.path}' targets missing member '${targetPath}'`);
+			for (const entry of unresolved) {
+				const pending = pendingLinks.get(entry)!;
+				const target = entriesByPath.get(pending.targetPath);
+				if (target?.storage) {
+					entry.size = target.size;
+					entry.storage = target.storage;
+					unresolved.delete(entry);
+					resolved++;
+					continue;
 				}
-				if (target.isDirectory) {
-					throw new ToolError(`Archive hard link '${entry.path}' targets directory '${targetPath}'`);
+				if (target && unresolved.has(target)) continue;
+
+				const targetPrefix = `${pending.targetPath}/`;
+				const targetIsDirectory =
+					target?.isDirectory === true || entries.some(candidate => candidate.path.startsWith(targetPrefix));
+				if (!targetIsDirectory) {
+					if (pending.kind === "symlink") {
+						entry.storage = { type: "tar-link", targetPath: pending.targetPath };
+						unresolved.delete(entry);
+						resolved++;
+						continue;
+					}
+					const reason = target ? "unreadable member" : "missing member";
+					throw new ToolError(`Archive hard link '${entry.path}' targets ${reason} '${pending.targetPath}'`);
 				}
-				if (!target.storage) continue;
-				entry.size = target.size;
-				entry.storage = target.storage;
-				remaining--;
+				if (pending.kind === "hard link") {
+					throw new ToolError(`Archive hard link '${entry.path}' targets directory '${pending.targetPath}'`);
+				}
+
+				let hasUnresolvedDescendant = false;
+				for (const candidate of unresolved) {
+					if (candidate.path.startsWith(targetPrefix)) {
+						hasUnresolvedDescendant = true;
+						break;
+					}
+				}
+				if (hasUnresolvedDescendant) continue;
+
+				entry.isDirectory = true;
+				const aliasPrefix = `${entry.path}/`;
+				const sourceCount = entries.length;
+				for (let index = 0; index < sourceCount; index++) {
+					const descendant = entries[index]!;
+					if (!descendant.path.startsWith(targetPrefix)) continue;
+					const aliasPath = `${aliasPrefix}${descendant.path.slice(targetPrefix.length)}`;
+					if (entriesByPath.has(aliasPath)) continue;
+					const alias: ArchiveIndexEntry = { ...descendant, path: aliasPath };
+					entries.push(alias);
+					entriesByPath.set(aliasPath, alias);
+				}
+				unresolved.delete(entry);
 				resolved++;
 			}
 			if (resolved === 0) {
-				throw new ToolError("Archive contains cyclic or unsupported hard links");
+				throw new ToolError("Archive contains cyclic or unsupported links");
 			}
 		}
-	}
-
-	// No entries and no terminating zero block means the decompressed payload
-	// never presented a complete tar header (e.g. a `.txt.gz`, or a `.tar(.gz)`
-	// truncated before the first header/terminator). `sniffArchiveFormat` routes
-	// every gzip magic here, so raise a catchable error instead of rendering it
-	// as an empty archive directory — callers (fetch) then fall back to binary.
-	if (entries.length === 0 && !sawTerminator) {
-		throw new ToolError("Not a valid tar archive: no complete header or terminating block");
 	}
 
 	return entries;
@@ -898,6 +954,12 @@ function extractTarMember(storage: TarStorage, size: number, memberPath: string)
 		throw new ToolError(`Archive member '${memberPath}' is truncated`);
 	}
 	return storage.buffer.subarray(storage.dataOffset, end);
+}
+
+function throwUnreadableTarLink(storage: TarLinkStorage, memberPath: string): never {
+	throw new ToolError(
+		`Archive symlink '${memberPath}' cannot be materialized because target '${storage.targetPath}' is unavailable`,
+	);
 }
 
 async function readZipEntries(source: ByteSource): Promise<ArchiveIndexEntry[]> {
@@ -1039,11 +1101,14 @@ export class ArchiveReader {
 			);
 		}
 
-		const bytes =
-			entry.storage.type === "tar"
-				? extractTarMember(entry.storage, entry.size, normalizedPath)
-				: await readZipFileBytes(entry.storage, entry.size);
-
+		let bytes: Uint8Array;
+		if (entry.storage.type === "tar") {
+			bytes = extractTarMember(entry.storage, entry.size, normalizedPath);
+		} else if (entry.storage.type === "tar-link") {
+			throwUnreadableTarLink(entry.storage, normalizedPath);
+		} else {
+			bytes = await readZipFileBytes(entry.storage, entry.size);
+		}
 		return {
 			path: entry.path,
 			isDirectory: false,
@@ -1136,7 +1201,16 @@ export async function readArchiveEntries(source: ArchiveSource): Promise<Map<str
 		return entries;
 	}
 	for (const entry of readTarEntries(bytes)) {
-		if (entry.isDirectory || entry.storage?.type !== "tar") continue;
+		if (entry.isDirectory) continue;
+		if (!entry.storage) {
+			throw new ToolError(`Archive file '${entry.path}' has no readable storage`);
+		}
+		if (entry.storage.type === "tar-link") {
+			throwUnreadableTarLink(entry.storage, entry.path);
+		}
+		if (entry.storage.type !== "tar") {
+			throw new ToolError(`Archive file '${entry.path}' has invalid tar storage`);
+		}
 		entries.set(entry.path, extractTarMember(entry.storage, entry.size, entry.path));
 	}
 	return entries;

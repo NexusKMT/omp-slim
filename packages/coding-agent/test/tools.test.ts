@@ -65,7 +65,7 @@ interface ArchiveFixtureEntry {
 	path: string;
 	content: string;
 	prefix?: string;
-	typeFlag?: "0" | "1";
+	typeFlag?: "0" | "1" | "2";
 	linkName?: string;
 }
 
@@ -736,6 +736,59 @@ describe("Coding Agent Tools", () => {
 			expect(new TextDecoder().decode(linkedContent)).toBe("shared content\n");
 		});
 
+		it("should preserve safe relative tar symlink members", async () => {
+			const archivePath = path.join(testDir, "symlink.tar");
+			fs.writeFileSync(
+				archivePath,
+				createTarArchive([
+					{ path: "pkg/lib/tool.js", content: "export const linked = true;\n" },
+					{ path: "pkg/bin/tool", content: "", typeFlag: "2", linkName: "../lib/tool.js" },
+					{ path: "pkg/current", content: "", typeFlag: "2", linkName: "lib" },
+				]),
+			);
+
+			const linkedResult = await readTool.execute("test-call-tar-symlink-member", {
+				path: `${archivePath}:pkg/bin/tool`,
+			});
+			expect(getTextOutput(linkedResult)).toContain("export const linked = true");
+
+			const directoryLinkedResult = await readTool.execute("test-call-tar-directory-symlink-member", {
+				path: `${archivePath}:pkg/current/tool.js`,
+			});
+			expect(getTextOutput(directoryLinkedResult)).toContain("export const linked = true");
+
+			const entries = await readArchiveEntries(archivePath);
+			const linkedContent = entries.get("pkg/bin/tool");
+			if (!(linkedContent instanceof Uint8Array)) {
+				throw new Error("Expected symlink content to materialize as bytes");
+			}
+			expect(new TextDecoder().decode(linkedContent)).toBe("export const linked = true;\n");
+			const directoryLinkedContent = entries.get("pkg/current/tool.js");
+			if (!(directoryLinkedContent instanceof Uint8Array)) {
+				throw new Error("Expected directory-symlink content to materialize as bytes");
+			}
+			expect(new TextDecoder().decode(directoryLinkedContent)).toBe("export const linked = true;\n");
+		});
+
+		it("should list dangling tar symlinks but reject their materialization", async () => {
+			const archivePath = path.join(testDir, "dangling-symlink.tar");
+			fs.writeFileSync(
+				archivePath,
+				createTarArchive([{ path: "pkg/dangling", content: "", typeFlag: "2", linkName: "missing-target" }]),
+			);
+
+			const rootResult = await readTool.execute("test-call-tar-dangling-symlink-root", {
+				path: `${archivePath}:pkg`,
+			});
+			expect(getTextOutput(rootResult)).toContain("dangling");
+			await expect(
+				readTool.execute("test-call-tar-dangling-symlink-member", {
+					path: `${archivePath}:pkg/dangling`,
+				}),
+			).rejects.toThrow(/cannot be materialized/);
+			await expect(readArchiveEntries(archivePath)).rejects.toThrow(/cannot be materialized/);
+		});
+
 		it("should reject a truncated tar member while indexing", async () => {
 			const archivePath = path.join(testDir, "truncated.tar");
 			// A full, valid archive declares 2048 bytes for `big.txt`; slicing the
@@ -744,6 +797,16 @@ describe("Coding Agent Tools", () => {
 			fs.writeFileSync(archivePath, complete.subarray(0, 512 + 256));
 
 			await expect(readTool.execute("test-call-tar-truncated", { path: archivePath })).rejects.toThrow(/truncated/);
+		});
+
+		it("should reject a tar truncated before its terminating zero block", async () => {
+			const archivePath = path.join(testDir, "unterminated.tar");
+			const complete = createTarArchive([{ path: "complete.txt", content: "complete member\n" }]);
+			fs.writeFileSync(archivePath, complete.subarray(0, complete.length - 1024));
+
+			await expect(readTool.execute("test-call-tar-unterminated", { path: archivePath })).rejects.toThrow(
+				/missing terminating zero block/,
+			);
 		});
 
 		it("should reject a gzip payload that is not a tar archive", async () => {
