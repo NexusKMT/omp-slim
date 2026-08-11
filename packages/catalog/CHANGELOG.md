@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `opencode-go/deepseek-v4-flash` Responses requests sending forced named `tool_choice` selectors that Console Go rejects while thinking mode is active.
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed

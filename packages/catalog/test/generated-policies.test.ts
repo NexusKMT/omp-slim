@@ -319,11 +319,11 @@ describe("generated model policies", () => {
 		expect(models[0]?.compat?.supportsToolChoice).toBe(false);
 	});
 
-	it("sets OpenCode Go DeepSeek V4 tool-call request compat", () => {
-		const models: ModelSpec<"openai-completions">[] = [
+	it("sets OpenCode Go DeepSeek V4 tool-call request compat for both OpenAI APIs", () => {
+		const models: ModelSpec<Api>[] = [
 			createSpec({
 				id: "deepseek-v4-flash",
-				api: "openai-completions",
+				api: "openai-responses",
 				provider: "opencode-go",
 			}),
 			createSpec({
