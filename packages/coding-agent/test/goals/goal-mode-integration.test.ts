@@ -234,12 +234,38 @@ describe("InteractiveMode goal mode integration", () => {
 		expect(sendGoalModeContext).toHaveBeenCalledWith({ deliverAs: "steer" });
 		expect(promptSpy).toHaveBeenCalledWith(objective, { streamingBehavior: "steer", images });
 	});
+	it("steers plan prompt attachments while streaming", async () => {
+		Object.defineProperty(harness.session, "isStreaming", { configurable: true, get: () => true });
+		const sendPlanModeContext = vi.spyOn(harness.session, "sendPlanModeContext").mockResolvedValue();
+		const promptSpy = vi.spyOn(harness.session, "prompt").mockResolvedValue(true);
+		const images: ImageContent[] = [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }];
+		const text = "[Image #1, 10x10] Plan this";
+
+		expect(await harness.mode.handlePlanModeCommand(text, { images, imageLinks: ["file:///shot.png"] })).toBe(true);
+
+		expect(sendPlanModeContext).toHaveBeenCalledWith({ deliverAs: "steer" });
+		expect(promptSpy).toHaveBeenCalledWith(text, { streamingBehavior: "steer", images });
+	});
+
+	it("steers vibe prompt attachments while streaming", async () => {
+		vi.spyOn(harness.session, "activateVibeTools").mockResolvedValue();
+		Object.defineProperty(harness.session, "isStreaming", { configurable: true, get: () => true });
+		const sendVibeModeContext = vi.spyOn(harness.session, "sendVibeModeContext").mockResolvedValue();
+		const promptSpy = vi.spyOn(harness.session, "prompt").mockResolvedValue(true);
+		const images: ImageContent[] = [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }];
+		const text = "[Image #1, 10x10] Delegate this";
+
+		expect(await harness.mode.handleVibeModeCommand(text, { images, imageLinks: ["file:///shot.png"] })).toBe(true);
+
+		expect(sendVibeModeContext).toHaveBeenCalledWith({ deliverAs: "steer" });
+		expect(promptSpy).toHaveBeenCalledWith(text, { streamingBehavior: "steer", images });
+	});
 
 	const attachmentCases: Array<{
 		name: string;
 		text: string;
-		prepare?: (mode: InteractiveMode) => Promise<void>;
-		submit: (mode: InteractiveMode, input: Pick<SubmittedUserInput, "images" | "imageLinks">) => Promise<void>;
+		prepare?: (mode: InteractiveMode) => Promise<boolean | void>;
+		submit: (mode: InteractiveMode, input: Pick<SubmittedUserInput, "images" | "imageLinks">) => Promise<boolean>;
 	}> = [
 		{
 			name: "/goal",
@@ -297,12 +323,10 @@ describe("InteractiveMode goal mode integration", () => {
 		vi.spyOn(harness.session.goalRuntime, "createGoal").mockRejectedValueOnce(new Error("goal setup failed"));
 		const showError = vi.spyOn(harness.mode, "showError");
 
-		await expect(
-			executeBuiltinSlashCommand(commandText, {
-				ctx: harness.mode,
-				input: { images, imageLinks },
-			}),
-		).rejects.toThrow("goal setup failed");
+		await executeBuiltinSlashCommand(commandText, {
+			ctx: harness.mode,
+			input: { images, imageLinks },
+		});
 
 		expect(showError).toHaveBeenCalledWith("goal setup failed");
 		expect(harness.mode.editor.getText()).toBe(commandText);

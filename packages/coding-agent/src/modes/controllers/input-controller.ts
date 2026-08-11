@@ -679,14 +679,12 @@ export class InputController {
 			let inputImageLinks =
 				this.ctx.editor.pendingImageLinks.length > 0 ? [...this.ctx.editor.pendingImageLinks] : undefined;
 			let hasInputImages = (inputImages?.length ?? 0) > 0;
-			const submittedMode = parseSlashCommand(text)?.name;
-			const draftDetached = submittedMode === "plan" || submittedMode === "vibe" || submittedMode === "goal";
-			if (draftDetached) this.ctx.editor.clearDraft();
+			const submittedImages = inputImages;
 
 			if (runner?.hasHandlers("input")) {
 				const result = await runner.emitInput(text, inputImages, "interactive");
 				if (result?.handled) {
-					if (!draftDetached) this.ctx.editor.clearDraft();
+					this.ctx.editor.clearDraft();
 					return;
 				}
 				if (result?.text !== undefined) {
@@ -700,6 +698,22 @@ export class InputController {
 					);
 				}
 				hasInputImages = (inputImages?.length ?? 0) > 0;
+			}
+			const submittedMode = parseSlashCommand(text)?.name;
+			const draftDetached =
+				submittedMode === "plan" ||
+				submittedMode === "vibe" ||
+				submittedMode === "goal" ||
+				submittedMode === "guided-goal";
+			if (
+				draftDetached &&
+				submittedImages?.length &&
+				submittedImages.every((image, index) => this.ctx.editor.pendingImages[index] === image)
+			) {
+				this.ctx.editor.pendingImages.splice(0, submittedImages.length);
+				this.ctx.editor.pendingImageLinks.splice(0, submittedImages.length);
+				this.ctx.editor.imageLinks =
+					this.ctx.editor.pendingImageLinks.length > 0 ? this.ctx.editor.pendingImageLinks : undefined;
 			}
 
 			if (!text && !hasInputImages) return;

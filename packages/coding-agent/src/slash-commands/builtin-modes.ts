@@ -24,12 +24,20 @@ export function refreshStatusLine(ctx: InteractiveModeContext): void {
 async function runWithDetachedModeDraft(
 	command: ParsedSlashCommand,
 	runtime: TuiSlashCommandRuntime,
-	run: () => Promise<void>,
+	run: () => Promise<boolean>,
 ): Promise<void> {
 	const { editor } = runtime.ctx;
 	if (!runtime.draftDetached) editor.clearDraft();
 	try {
-		await run();
+		const submitted = await run();
+		if (!submitted && ((runtime.input?.images?.length ?? 0) > 0 || (runtime.input?.imageLinks?.length ?? 0) > 0)) {
+			editor.pendingImages = [...(runtime.input?.images ?? []), ...editor.pendingImages];
+			editor.pendingImageLinks = [
+				...(runtime.input?.imageLinks ?? runtime.input?.images?.map(() => undefined) ?? []),
+				...editor.pendingImageLinks,
+			];
+			editor.imageLinks = editor.pendingImageLinks.length > 0 ? editor.pendingImageLinks : undefined;
+		}
 	} catch (error) {
 		if (!editor.getText() && editor.pendingImages.length === 0) {
 			editor.setText(command.text);
@@ -37,7 +45,7 @@ async function runWithDetachedModeDraft(
 			editor.pendingImageLinks = runtime.input?.imageLinks ? [...runtime.input.imageLinks] : [];
 			editor.imageLinks = editor.pendingImageLinks.length > 0 ? editor.pendingImageLinks : undefined;
 		}
-		throw error;
+		runtime.ctx.showError(error instanceof Error ? error.message : String(error));
 	}
 }
 
@@ -265,11 +273,9 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		inlineHint: "[rough objective]",
 		allowArgs: true,
 		handleTui: async (command, runtime) => {
-			// Clear the slash draft BEFORE the await: the handler blocks for the
-			// whole kickoff turn, and a post-await clear would wipe an answer the
-			// user starts typing while the first interview question streams.
-			runtime.ctx.editor.clearDraft();
-			await runtime.ctx.handleGuidedGoalCommand(command.args || undefined);
+			await runWithDetachedModeDraft(command, runtime, () =>
+				runtime.ctx.handleGuidedGoalCommand(command.args || undefined, runtime.input),
+			);
 		},
 	},
 	{

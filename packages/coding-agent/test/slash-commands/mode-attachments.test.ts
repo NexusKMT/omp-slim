@@ -5,11 +5,14 @@ import type { InteractiveModeContext, SubmittedUserInput } from "@oh-my-pi/pi-co
 
 type Attachments = Pick<SubmittedUserInput, "images" | "imageLinks">;
 
-function createHarness(inputResult: { images?: ImageContent[] } | Promise<{ images?: ImageContent[] }>) {
+function createHarness(
+	inputResult: { images?: ImageContent[]; text?: string } | Promise<{ images?: ImageContent[]; text?: string }>,
+) {
 	const oldImage: ImageContent = { type: "image", data: "b2xk", mimeType: "image/png" };
-	const handlePlanModeCommand = vi.fn(async (_prompt?: string, _input?: Attachments) => {});
-	const handleVibeModeCommand = vi.fn(async (_prompt?: string, _input?: Attachments) => {});
-	const handleGoalModeCommand = vi.fn(async (_prompt?: string, _input?: Attachments) => {});
+	const handlePlanModeCommand = vi.fn(async (_prompt?: string, _input?: Attachments) => true);
+	const handleVibeModeCommand = vi.fn(async (_prompt?: string, _input?: Attachments) => true);
+	const handleGoalModeCommand = vi.fn(async (_prompt?: string, _input?: Attachments) => true);
+	const handleGuidedGoalCommand = vi.fn(async (_prompt?: string, _input?: Attachments) => true);
 	let editorText = "";
 	const editor = {
 		onSubmit: undefined as undefined | ((text: string) => Promise<void>),
@@ -28,6 +31,7 @@ function createHarness(inputResult: { images?: ImageContent[] } | Promise<{ imag
 			this.imageLinks = undefined;
 		},
 	};
+	const showError = vi.fn();
 	const ctx = {
 		editor,
 		planModeEnabled: false,
@@ -55,14 +59,22 @@ function createHarness(inputResult: { images?: ImageContent[] } | Promise<{ imag
 		updatePendingMessagesDisplay: vi.fn(),
 		showStatus: vi.fn(),
 		showWarning: vi.fn(),
-		showError: vi.fn(),
+		showError,
 		handlePlanModeCommand,
 		handleVibeModeCommand,
 		handleGoalModeCommand,
+		handleGuidedGoalCommand,
 	} as unknown as InteractiveModeContext;
 	const controller = new InputController(ctx);
 	controller.setupEditorSubmitHandler();
-	return { editor, handlePlanModeCommand, handleVibeModeCommand, handleGoalModeCommand };
+	return {
+		editor,
+		showError,
+		handlePlanModeCommand,
+		handleVibeModeCommand,
+		handleGoalModeCommand,
+		handleGuidedGoalCommand,
+	};
 }
 
 describe("mode command attachments", () => {
@@ -101,21 +113,48 @@ describe("mode command attachments", () => {
 		expect(harness.editor.pendingImages).toEqual([]);
 		expect(harness.editor.pendingImageLinks).toEqual([]);
 	});
+	it("restores attachments when a mode command does not submit", async () => {
+		const harness = createHarness({});
+		harness.handleGoalModeCommand.mockResolvedValueOnce(false);
+
+		await harness.editor.onSubmit?.("/goal show");
+
+		expect(harness.editor.pendingImages).toHaveLength(1);
+		expect(harness.editor.pendingImageLinks).toEqual(["file:///old.png"]);
+	});
+
 	it("detaches submitted images before awaiting input extensions", async () => {
 		const inputResult = Promise.withResolvers<{ images?: ImageContent[] }>();
 		const harness = createHarness(inputResult.promise);
 		const submission = harness.editor.onSubmit?.("/plan inspect this");
 		if (!submission) throw new Error("expected editor submit handler");
 
-		expect(harness.editor.pendingImages).toEqual([]);
 		const laterImage: ImageContent = { type: "image", data: "bmV3", mimeType: "image/png" };
 		harness.editor.setText("later draft");
-		harness.editor.pendingImages = [laterImage];
-		harness.editor.pendingImageLinks = ["file:///later.png"];
+		harness.editor.pendingImages.push(laterImage);
+		harness.editor.pendingImageLinks.push("file:///later.png");
 		inputResult.resolve({});
 		await submission;
 
 		expect(harness.handlePlanModeCommand.mock.calls[0]?.[1]?.images).toHaveLength(1);
+		expect(harness.editor.getText()).toBe("later draft");
+		expect(harness.editor.pendingImages).toEqual([laterImage]);
+		expect(harness.editor.pendingImageLinks).toEqual(["file:///later.png"]);
+	});
+	it("preserves later images when an extension rewrites input into a mode command", async () => {
+		const inputResult = Promise.withResolvers<{ images?: ImageContent[]; text?: string }>();
+		const harness = createHarness(inputResult.promise);
+		const submission = harness.editor.onSubmit?.("inspect this");
+		if (!submission) throw new Error("expected editor submit handler");
+
+		const laterImage: ImageContent = { type: "image", data: "bmV3", mimeType: "image/png" };
+		harness.editor.setText("later draft");
+		harness.editor.pendingImages.push(laterImage);
+		harness.editor.pendingImageLinks.push("file:///later.png");
+		inputResult.resolve({ text: "/plan inspect this" });
+		await submission;
+
+		expect(harness.handlePlanModeCommand).toHaveBeenCalled();
 		expect(harness.editor.getText()).toBe("later draft");
 		expect(harness.editor.pendingImages).toEqual([laterImage]);
 		expect(harness.editor.pendingImageLinks).toEqual(["file:///later.png"]);
@@ -127,10 +166,11 @@ describe("mode command attachments", () => {
 		const planSubmission = failedPlan.editor.onSubmit?.("/plan inspect this");
 		if (!planSubmission) throw new Error("expected editor submit handler");
 
-		await expect(planSubmission).rejects.toThrow("plan setup failed");
+		await planSubmission;
 		expect(failedPlan.editor.getText()).toBe("/plan inspect this");
 		expect(failedPlan.editor.pendingImages).toHaveLength(1);
 		expect(failedPlan.editor.pendingImageLinks).toEqual(["file:///old.png"]);
+		expect(failedPlan.showError).toHaveBeenCalledWith("plan setup failed");
 
 		const failedVibe = createHarness({});
 		const laterImage: ImageContent = { type: "image", data: "bmV3", mimeType: "image/png" };
@@ -143,9 +183,10 @@ describe("mode command attachments", () => {
 		const vibeSubmission = failedVibe.editor.onSubmit?.("/vibe inspect this");
 		if (!vibeSubmission) throw new Error("expected editor submit handler");
 
-		await expect(vibeSubmission).rejects.toThrow("vibe setup failed");
+		await vibeSubmission;
 		expect(failedVibe.editor.getText()).toBe("later draft");
 		expect(failedVibe.editor.pendingImages).toEqual([laterImage]);
 		expect(failedVibe.editor.pendingImageLinks).toEqual(["file:///later.png"]);
+		expect(failedVibe.showError).toHaveBeenCalledWith("vibe setup failed");
 	});
 });

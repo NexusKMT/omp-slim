@@ -3295,14 +3295,14 @@ export class InteractiveMode implements InteractiveModeContext {
 	async handlePlanModeCommand(
 		initialPrompt?: string,
 		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
-	): Promise<void> {
+	): Promise<boolean> {
 		if (this.goalModeEnabled || this.goalModePaused) {
 			this.showWarning("Exit goal mode first.");
-			return;
+			return false;
 		}
 		if (this.vibeModeEnabled) {
 			this.showWarning("Exit vibe mode first.");
-			return;
+			return false;
 		}
 		if (this.planModeEnabled) {
 			const planFilePath = this.planModePlanFilePath ?? (await this.#getPlanFilePath());
@@ -3311,10 +3311,10 @@ export class InteractiveMode implements InteractiveModeContext {
 					"Exit plan mode?",
 					"This exits plan mode without approving a plan.",
 				);
-				if (!confirmed) return;
+				if (!confirmed) return false;
 			}
 			await this.#exitPlanMode({ paused: true });
-			return;
+			return false;
 		}
 		if (this.planModePaused && !initialPrompt) {
 			// No-arg third toggle: paused → off. Tools, model, and plan state were
@@ -3327,16 +3327,28 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.#updatePlanModeStatus();
 			this.sessionManager.appendModeChange("none");
 			this.showStatus("Plan mode disabled.");
-			return;
+			return false;
 		}
 		if (!this.session.settings.get("plan.enabled")) {
 			this.showWarning("Plan mode is disabled. Enable it in settings (plan.enabled).");
-			return;
+			return false;
 		}
 		await this.#enterPlanMode();
-		if (initialPrompt && this.onInputCallback) {
-			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt, ...input }, { preserveDraft: true }));
+		if (!initialPrompt) return false;
+		if (this.session.isStreaming) {
+			const images = input?.images?.length ? input.images : undefined;
+			await this.withLocalSubmission(
+				initialPrompt,
+				() => this.session.prompt(initialPrompt, { streamingBehavior: "steer", images }),
+				{ imageCount: images?.length ?? 0 },
+			);
+			return true;
 		}
+		if (this.onInputCallback) {
+			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt, ...input }, { preserveDraft: true }));
+			return true;
+		}
+		return false;
 	}
 
 	/**
@@ -3349,23 +3361,35 @@ export class InteractiveMode implements InteractiveModeContext {
 	async handleVibeModeCommand(
 		initialPrompt?: string,
 		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
-	): Promise<void> {
+	): Promise<boolean> {
 		if (this.vibeModeEnabled) {
 			await this.#exitVibeMode();
-			return;
+			return false;
 		}
 		if (this.planModeEnabled || this.planModePaused) {
 			this.showWarning("Exit plan mode first.");
-			return;
+			return false;
 		}
 		if (this.goalModeEnabled || this.goalModePaused) {
 			this.showWarning("Exit goal mode first.");
-			return;
+			return false;
 		}
 		await this.#enterVibeMode();
-		if (initialPrompt && this.onInputCallback) {
-			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt, ...input }, { preserveDraft: true }));
+		if (!initialPrompt) return false;
+		if (this.session.isStreaming) {
+			const images = input?.images?.length ? input.images : undefined;
+			await this.withLocalSubmission(
+				initialPrompt,
+				() => this.session.prompt(initialPrompt, { streamingBehavior: "steer", images }),
+				{ imageCount: images?.length ?? 0 },
+			);
+			return true;
 		}
+		if (this.onInputCallback) {
+			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt, ...input }, { preserveDraft: true }));
+			return true;
+		}
+		return false;
 	}
 
 	async #enterVibeMode(options?: { persistModeChange?: boolean }): Promise<void> {
@@ -3454,77 +3478,73 @@ export class InteractiveMode implements InteractiveModeContext {
 	async handleGoalModeCommand(
 		rest?: string,
 		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
-	): Promise<void> {
+	): Promise<boolean> {
 		try {
 			if (this.planModeEnabled || this.planModePaused) {
 				this.showWarning("Exit plan mode first.");
-				return;
+				return false;
 			}
 			if (this.vibeModeEnabled) {
 				this.showWarning("Exit vibe mode first.");
-				return;
+				return false;
 			}
 			if (!this.session.settings.get("goal.enabled")) {
 				this.showWarning("Goal mode is disabled. Enable it in settings (goal.enabled).");
-				return;
+				return false;
 			}
 			const { sub, rest: subRest } = parseGoalSubcommand(rest ?? "");
-			if (sub) {
-				await this.#dispatchGoalSubcommand(sub, subRest, input);
-				return;
-			}
+			if (sub) return await this.#dispatchGoalSubcommand(sub, subRest, input);
 			if (this.goalModeEnabled) {
 				if (subRest) {
 					this.showStatus("Goal mode is already active. Use /goal to manage it, or /goal drop to start over.");
-					return;
+					return false;
 				}
 				await this.#openGoalMenu("active");
-				return;
+				return false;
 			}
 			const pausedState = this.#getPausedGoalState();
 			if (pausedState) {
 				if (subRest) {
 					this.showWarning("Resume the current goal first, or drop it before setting a new objective.");
-					return;
+					return false;
 				}
 				await this.#openGoalMenu("paused");
-				return;
+				return false;
 			}
-			if (subRest) {
-				await this.#startGoalFromObjective(subRest, input);
-				return;
-			}
+			if (subRest) return await this.#startGoalFromObjective(subRest, input);
 			const objective = (
 				await this.showHookEditor("Goal objective", undefined, undefined, { promptStyle: true })
 			)?.trim();
-			if (!objective) return;
-			await this.#startGoalFromObjective(objective, input);
+			if (!objective) return false;
+			return await this.#startGoalFromObjective(objective, input);
 		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
 			throw error;
 		}
 	}
-	async handleGuidedGoalCommand(rest?: string): Promise<void> {
+	async handleGuidedGoalCommand(
+		rest?: string,
+		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
+	): Promise<boolean> {
 		try {
 			if (this.planModeEnabled || this.planModePaused) {
 				this.showWarning("Exit plan mode first.");
-				return;
+				return false;
 			}
 			if (this.vibeModeEnabled) {
 				this.showWarning("Exit vibe mode first.");
-				return;
+				return false;
 			}
 			if (!this.session.settings.get("goal.enabled")) {
 				this.showWarning("Goal mode is disabled. Enable it in settings (goal.enabled).");
-				return;
+				return false;
 			}
 			if (this.goalModeEnabled) {
 				this.showStatus("Goal mode is already active. Use /goal to manage it, or /goal drop to start over.");
-				return;
+				return false;
 			}
 			if (this.#getPausedGoalState()) {
 				this.showWarning("Resume the current goal first, or drop it before setting a new objective.");
-				return;
+				return false;
 			}
 
 			// Expose the goal tool for the interview so the agent can finish by
@@ -3542,18 +3562,21 @@ export class InteractiveMode implements InteractiveModeContext {
 			// assistant turns, and the user answers in the ordinary editor. Queue
 			// behind an in-flight run instead of aborting it.
 			const kickoff = prompt.render(guidedGoalInterviewPrompt, { initial: rest?.trim() || undefined });
+			const images = input?.images?.length ? input.images : undefined;
 			if (this.session.isStreaming) {
-				await this.session.followUp(kickoff, undefined, { synthetic: true });
+				await this.session.followUp(kickoff, images, { synthetic: true });
 			} else {
 				try {
-					await this.session.prompt(kickoff, { synthetic: true });
+					await this.session.prompt(kickoff, images ? { synthetic: true, images } : { synthetic: true });
 				} catch (error) {
 					if (!(error instanceof AgentBusyError)) throw error;
-					await this.session.followUp(kickoff, undefined, { synthetic: true });
+					await this.session.followUp(kickoff, images, { synthetic: true });
 				}
 			}
+			return true;
 		} catch (error) {
 			this.showError(error instanceof Error ? error.message : String(error));
+			return false;
 		}
 	}
 
@@ -3561,36 +3584,35 @@ export class InteractiveMode implements InteractiveModeContext {
 		sub: GoalSubcommand,
 		rest: string,
 		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
-	): Promise<void> {
+	): Promise<boolean> {
 		switch (sub) {
 			case "set":
-				await this.#handleGoalSetSubcommand(rest, input);
-				return;
+				return await this.#handleGoalSetSubcommand(rest, input);
 			case "show":
 				this.#showGoalDetails();
-				return;
+				return false;
 			case "pause":
 				await this.#pauseGoalAction();
-				return;
+				return false;
 			case "resume":
 				await this.#resumeGoalAction();
-				return;
+				return false;
 			case "drop":
 				await this.#confirmAndDropGoal();
-				return;
+				return false;
 			case "budget":
 				if (!this.goalModeEnabled) {
 					this.showWarning(
 						this.#getPausedGoalState() ? "Resume the goal before adjusting the budget." : "No active goal.",
 					);
-					return;
+					return false;
 				}
 				if (!rest) {
 					await this.#promptGoalBudgetEdit();
-					return;
+					return false;
 				}
 				await this.#handleGoalBudgetCommand(rest);
-				return;
+				return false;
 		}
 	}
 
@@ -3693,7 +3715,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	async #startGoalFromObjective(
 		objective: string,
 		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
-	): Promise<void> {
+	): Promise<boolean> {
 		await this.#enterGoalMode({ objective, silent: true });
 		this.#resetGoalContinuationSuppression();
 		if (this.session.isStreaming) {
@@ -3703,17 +3725,19 @@ export class InteractiveMode implements InteractiveModeContext {
 				() => this.session.prompt(objective, { streamingBehavior: "steer", images }),
 				{ imageCount: images?.length ?? 0 },
 			);
-			return;
+			return true;
 		}
 		if (this.onInputCallback) {
 			this.onInputCallback(this.startPendingSubmission({ text: objective, ...input }, { preserveDraft: true }));
+			return true;
 		}
+		return false;
 	}
 
 	async #replaceGoalFromObjective(
 		objective: string,
 		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
-	): Promise<void> {
+	): Promise<boolean> {
 		const state = await this.session.goalRuntime.replaceGoal({ objective });
 		this.session.setGoalModeState(state);
 		this.goalModeEnabled = true;
@@ -3728,30 +3752,29 @@ export class InteractiveMode implements InteractiveModeContext {
 				() => this.session.prompt(objective, { streamingBehavior: "steer", images }),
 				{ imageCount: images?.length ?? 0 },
 			);
-			return;
+			return true;
 		}
 		if (this.onInputCallback) {
 			this.onInputCallback(this.startPendingSubmission({ text: objective, ...input }, { preserveDraft: true }));
+			return true;
 		}
+		return false;
 	}
 
 	async #handleGoalSetSubcommand(
 		rest: string,
 		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
-	): Promise<void> {
+	): Promise<boolean> {
 		if (!this.goalModeEnabled && this.#getPausedGoalState()) {
 			this.showWarning("Resume the current goal first, or drop it before setting a new objective.");
-			return;
+			return false;
 		}
 		const objective = rest.trim()
 			? rest.trim()
 			: (await this.showHookEditor("Goal objective", undefined, undefined, { promptStyle: true }))?.trim();
-		if (!objective) return;
-		if (this.goalModeEnabled) {
-			await this.#replaceGoalFromObjective(objective, input);
-			return;
-		}
-		await this.#startGoalFromObjective(objective, input);
+		if (!objective) return false;
+		if (this.goalModeEnabled) return await this.#replaceGoalFromObjective(objective, input);
+		return await this.#startGoalFromObjective(objective, input);
 	}
 
 	/** Manually (re-)open the plan-review overlay — bound to `/plan-review`. Lets

@@ -57,9 +57,9 @@ function createContext(opts: {
 	const requestRender = vi.fn();
 	const showError = vi.fn();
 
-	const handleGoalModeCommand = vi.fn(async (_prompt?: string, _input?: unknown) => {});
-	const handlePlanModeCommand = vi.fn(async (_prompt?: string, _input?: unknown) => {});
-	const handleVibeModeCommand = vi.fn(async (_prompt?: string, _input?: unknown) => {});
+	const handleGoalModeCommand = vi.fn(async (_prompt?: string, _input?: unknown) => true);
+	const handlePlanModeCommand = vi.fn(async (_prompt?: string, _input?: unknown) => true);
+	const handleVibeModeCommand = vi.fn(async (_prompt?: string, _input?: unknown) => true);
 	const ctx = {
 		editor,
 		ui: { requestRender },
