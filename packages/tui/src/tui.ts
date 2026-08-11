@@ -3492,8 +3492,11 @@ export class TUI extends Container {
 			let commitTo: number;
 			if (logicalAppend) {
 				commitFrom = widthEpochSourceBoundary;
-				commitTo = Math.max(commitFrom, widthEpochCurrentRows);
-				scrollRows = commitTo - commitFrom;
+				const logicalSuffixRows = Math.max(0, widthEpochCurrentRows - commitFrom);
+				const sourceWindowTop = Math.max(0, commitFrom - height);
+				const appendWindowMovement = Math.max(0, windowTop - sourceWindowTop);
+				scrollRows = Math.min(logicalSuffixRows, appendWindowMovement);
+				commitTo = commitFrom + scrollRows;
 			} else {
 				const windowMovement = Math.max(0, windowTop - prevWindowTop);
 				const previousViewportRows = Math.min(

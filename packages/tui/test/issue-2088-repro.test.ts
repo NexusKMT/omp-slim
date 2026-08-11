@@ -786,6 +786,42 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 		});
 	});
 
+	it("does not commit a logical suffix while the settled frame still fits the viewport", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 8, 10_000);
+			const tui = new TUI(term);
+			const component = new WrappingStreamComponent();
+			component.append("short-initial-00");
+			component.append("short-initial-01");
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				const historyBeforeResize = term.getScrollBuffer();
+				const scrollbackRowsBeforeResize = term.getBufferPosition().baseY;
+				component.append("short-queued-00");
+				tui.requestRender();
+				term.resize(17, 8);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				expect(term.getBufferPosition().baseY).toBe(scrollbackRowsBeforeResize);
+				const history = term.getScrollBuffer();
+				for (const marker of ["short-initial-00", "short-initial-01"]) {
+					const occurrencesBeforeResize = historyBeforeResize.filter(line => line.includes(marker)).length;
+					expect(
+						history.filter(line => line.includes(marker)),
+						marker,
+					).toHaveLength(occurrencesBeforeResize);
+				}
+				expect(history.filter(line => line.includes("short-queued-00"))).toHaveLength(1);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
 	it("retains forced output appended after SIGWINCH without cross-width row arithmetic", async () => {
 		await withEnvPatch(TMUX_ENV, async () => {
 			const term = new VirtualTerminal(40, 6, 10_000);
