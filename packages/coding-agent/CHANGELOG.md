@@ -13,6 +13,8 @@
 - Added domain inclusion/exclusion filtering and URL deduplication for TinyFish search
 
 - Fixed `/vibe` mode losing the pre-vibe toolset when a session already in vibe mode switches into another session that is also in vibe mode, which left `bash`, `edit`, `write`, `grep`, `glob`, `task`, and `hub` silently unavailable after exiting the mode; the pre-vibe toolset is now recorded on the `mode_change` entry and restored from there.
+- Preserved extension-filtered pasted image payloads and source links when `/goal`, `/plan`, or `/vibe` submits the composer draft.
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed
