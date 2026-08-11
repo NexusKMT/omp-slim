@@ -2,15 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `display.hideToolActivity` leaving TTSR rules, todo reminders, late diagnostics, launch completions, async completions, and the duplicate todo-failure warning visible; all activity blocks now hide and reappear without discarding their mounted state.
+
 ## [17.2.14] - 2026-08-11
 
 ### Added
 
 - Added `externalThinking` setting for private scratchpad reasoning via the new `think` tool
-### Fixed
-
-- Fixed `display.hideToolActivity` leaving TTSR rules, todo reminders, late diagnostics, launch completions, async completions, and tool warnings visible; all activity blocks now hide and reappear without discarding their mounted state.
-
 ## [17.2.13] - 2026-08-11
 
 ### Added
