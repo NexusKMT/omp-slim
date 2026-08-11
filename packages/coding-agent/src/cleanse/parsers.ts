@@ -488,14 +488,14 @@ function parseTy(input: CleanseParserInput): CleanseDiagnostic[] {
 	const diagnostics: CleanseDiagnostic[] = [];
 	const text = sanitizeText(`${input.stdout}\n${input.stderr}`);
 	for (const line of text.split("\n")) {
-		const match = /^(error|warning|info)\[([^\]]+)\]\s+(.+?):(\d+):(\d+):\s+(.*)$/.exec(line.trim());
+		const match = /^(.+?):(\d+):(\d+):\s+(error|warning|info)\[([^\]]+)\]\s+(.*)$/.exec(line.trim());
 		if (!match) continue;
 		addDiagnostic(diagnostics, input, {
-			file: match[3],
-			line: Number.parseInt(match[4], 10),
-			column: Number.parseInt(match[5], 10),
-			code: match[2],
-			severity: match[1],
+			file: match[1],
+			line: Number.parseInt(match[2], 10),
+			column: Number.parseInt(match[3], 10),
+			code: match[5],
+			severity: match[4],
 			message: match[6],
 		});
 	}

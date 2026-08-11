@@ -362,9 +362,23 @@ describe("cleanse alternative-tooling parsers", () => {
 	});
 
 	test("parses ty concise output", () => {
-		const diagnostics = parse("ty", "error[unresolved-import] src/main.py:1:8: Cannot resolve imported module\n");
-		expect(diagnostics).toMatchObject([
-			{ file: "src/main.py", line: 1, column: 8, code: "unresolved-import", severity: "error" },
+		const diagnostics = parse(
+			"ty",
+			"src/main.py:1:8: error[unresolved-import] Cannot resolve imported module `foo`\nFound 1 diagnostic\n",
+		);
+		expect(diagnostics).toEqual([
+			{
+				checker: "checker",
+				file: "src/main.py",
+				line: 1,
+				column: 8,
+				endLine: undefined,
+				endColumn: undefined,
+				code: "unresolved-import",
+				severity: "error",
+				message: "Cannot resolve imported module `foo`",
+				suggestion: undefined,
+			},
 		]);
 	});
 
