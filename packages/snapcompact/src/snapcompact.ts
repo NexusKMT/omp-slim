@@ -46,6 +46,7 @@
  */
 
 import type { Api, ImageContent, Message, TextContent } from "@oh-my-pi/pi-ai";
+import { isFableOrMythos, parseAnthropicModel, semverGte } from "@oh-my-pi/pi-catalog/identity";
 import { renderSnapcompactPng, snapcompactSupportedChars } from "@oh-my-pi/pi-natives";
 import { formatGroupedPaths, prompt } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
@@ -336,21 +337,13 @@ export interface IdealShape {
 	frameSize?: number;
 }
 
-/** Eval-winning format per model line, matched against the model id. The
- *  wire API only identifies the gateway — a Claude served through Vertex or
- *  OpenRouter still reads best with its own shape. Patterns cover the model
- *  lines the mono evals measured; everything else falls back to the API
- *  family's winner at the standard 1568px frame. First match wins. */
+/** Eval-winning format per model line. The wire API only identifies the
+ *  gateway — a Claude served through Vertex or OpenRouter still reads best
+ *  with its own shape. Classified Anthropic models use the shared catalog
+ *  identity parser; remaining model lines use first-match regex rules and fall
+ *  back to the API family's winner at the standard 1568px frame. */
+const HIGH_RES_ANTHROPIC_VARIANT = { variant: "11on16-bw", frameSize: 1932 } as const satisfies IdealShape;
 const MODEL_VARIANTS: readonly (readonly [RegExp, IdealShape])[] = [
-	// Opus 4.7+ and Fable/Mythos read high-res natively: same recall and cost as
-	// 1568, a third fewer frames. 1932 is the largest *square* not downscaled
-	// under Anthropic's 4,784 visual-token cap ((1932/28)² = 69² = 4,761 ≤ 4,784
-	// 28px patches), and staying below 2000px keeps frames clear of the stricter
-	// ≤2000px per-image dimension limit that applies once a request carries more
-	// than 20 image blocks. The cap is a family-wide Anthropic billing property,
-	// so every Opus line from 4.7 up (5.x and later included) belongs on this tier.
-	[/claude.*(fable|mythos)/i, { variant: "11on16-bw", frameSize: 1932 }],
-	[/claude-?opus-?(4[.-][7-9]|[5-9])/i, { variant: "11on16-bw", frameSize: 1932 }],
 	// Older Claude lines downscale past 1568px — keep the safe size.
 	[/claude/i, { variant: "11on16-bw" }],
 	// Gemini 3.x bills a fixed 1,120-token budget per image regardless of
@@ -367,6 +360,18 @@ const MODEL_VARIANTS: readonly (readonly [RegExp, IdealShape])[] = [
 
 /** Eval-ideal format for a model id, or undefined when unmeasured. */
 export function idealShapeVariant(modelId: string): IdealShape | undefined {
+	const anthropic = parseAnthropicModel(modelId);
+	if (
+		anthropic &&
+		(isFableOrMythos(anthropic.kind) || (anthropic.kind === "opus" && semverGte(anthropic.version, "4.7")))
+	) {
+		// Opus 4.7+ and Fable/Mythos read high-res natively: same recall and
+		// cost as 1568, a third fewer frames. 1932 is the largest *square* not
+		// downscaled under Anthropic's 4,784 visual-token cap ((1932/28)² =
+		// 69² = 4,761 ≤ 4,784 28px patches), and staying below 2000px clears
+		// the stricter ≤2000px limit for requests with more than 20 images.
+		return HIGH_RES_ANTHROPIC_VARIANT;
+	}
 	return MODEL_VARIANTS.find(([pattern]) => pattern.test(modelId))?.[1];
 }
 
