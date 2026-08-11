@@ -8,12 +8,12 @@ import * as cleanseCheckers from "@oh-my-pi/pi-coding-agent/cleanse/checkers";
 import { runCleanseCommand } from "@oh-my-pi/pi-coding-agent/cleanse/index";
 import { runCleanseLoop } from "@oh-my-pi/pi-coding-agent/cleanse/loop";
 import { parseCleanseDiagnostics } from "@oh-my-pi/pi-coding-agent/cleanse/parsers";
-import { createCleanseProgressReporter } from "@oh-my-pi/pi-coding-agent/cleanse/progress";
 import type {
 	CleanseAgentOutcome,
 	CleanseDiagnostic,
 	CleanseDiagnosticReport,
 } from "@oh-my-pi/pi-coding-agent/cleanse/types";
+import { createProgressReporter } from "@oh-my-pi/pi-coding-agent/cli/progress-reporter";
 import { resolveCliArgv } from "@oh-my-pi/pi-coding-agent/cli-commands";
 
 afterEach(() => {
@@ -132,7 +132,7 @@ describe("cleanse diagnostics", () => {
 describe("cleanse progress", () => {
 	test("updates an interactive completion bar as workers finish", () => {
 		const writes: string[] = [];
-		const progress = createCleanseProgressReporter({
+		const progress = createProgressReporter("Repairing", {
 			isTTY: true,
 			write(text) {
 				writes.push(text);
@@ -214,7 +214,7 @@ describe("cleanse progress", () => {
 
 	test("stays silent for non-TTY output", () => {
 		const writes: string[] = [];
-		const progress = createCleanseProgressReporter({
+		const progress = createProgressReporter("Repairing", {
 			isTTY: false,
 			write(text) {
 				writes.push(text);

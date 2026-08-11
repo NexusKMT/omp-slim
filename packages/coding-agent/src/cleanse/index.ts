@@ -1,10 +1,10 @@
 import { getProjectDir, sanitizeText } from "@oh-my-pi/pi-utils";
+import { createProgressReporter } from "../cli/progress-reporter";
 import { shortenPath } from "../tools/render-utils";
 import { type CleanseAgentRuntime, createCleanseAgentRuntime } from "./agent";
 import { groupDiagnosticsByFile } from "./balance";
 import { discoverCleanseDiagnosticSuite } from "./checkers";
 import { runCleanseLoop } from "./loop";
-import { createCleanseProgressReporter } from "./progress";
 import type { CleanseAgentOutcome, CleanseAssignment, CleanseDiagnosticReport, CleanseLoopResult } from "./types";
 
 const DEFAULT_MODEL = "@smol";
@@ -37,7 +37,7 @@ export async function runCleanseCommand(options: CleanseCommandOptions = {}): Pr
 	process.once("SIGTERM", abort);
 	let runtime: CleanseAgentRuntime | undefined;
 	let loopResult: CleanseLoopResult | undefined;
-	const progress = createCleanseProgressReporter();
+	const progress = createProgressReporter("Repairing");
 	const interactiveFailures: CleanseAgentOutcome[] = [];
 	let interactiveFailuresPrinted = false;
 	const printInteractiveFailures = (): void => {

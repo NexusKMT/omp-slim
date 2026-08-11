@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `omp compress`, a command that rewrites a text file into the dense prompt register through a two-tool agent loop: the agent submits a draft with `rewrite` plus every loss it accepted, the command replies with the measured size and that loss list and asks for a verdict, and only an `approve` on a reviewed draft is written. Reports go to stderr and the approved text to stdout, so `omp compress f.md > out.md` yields just the compressed text; `-o` writes a file, `-i` rewrites in place. The session is deliberately sealed — the default system prompt is replaced rather than appended, and skills, rules, `AGENTS.md` context files, prompt templates, slash commands, extensions, MCP, IRC, and LSP are all disabled — and the source document is quoted as nonce-delimited inert data so the directives it contains are compressed instead of obeyed.
+- `omp compress` accepts multiple files and glob patterns, compresses up to `-n` of them concurrently (default 4, one isolated session each), and renders the same TTY completion bar as `omp cleanse`; multi-file runs require `-i` since one `--out` cannot hold many files, and a file that fails is reported without cancelling its peers. The bar itself moved to `src/cli/progress-reporter.ts` and is now shared with `omp cleanse` instead of duplicated.
+
 ## [17.2.14] - 2026-08-11
 
 ### Added
