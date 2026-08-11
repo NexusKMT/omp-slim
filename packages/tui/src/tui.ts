@@ -229,6 +229,8 @@ export interface NativeScrollbackWidthEpoch {
 	captureNativeScrollbackWidthEpoch(): unknown;
 	resolveNativeScrollbackWidthEpoch(boundary: unknown): number | undefined;
 	getNativeScrollbackWidthEpochRows(): number | undefined;
+	/** Changes when child structure mutates independently of width reflow. */
+	getNativeScrollbackWidthEpochRevision?(): number;
 }
 
 /**
@@ -348,6 +350,7 @@ export interface RenderRequestOptions {
 	/** Clear terminal scrollback for intentional transcript replacement. */
 	clearScrollback?: boolean;
 }
+
 /** Type guard to check if a component implements Focusable */
 export function isFocusable(component: Component | null): component is Component & Focusable {
 	return component !== null && "focused" in component;
@@ -544,6 +547,7 @@ export class Container
 	// may append children after the last emitted render but before SIGWINCH.
 	#memoChildren: Component[] = [];
 	#widthEpochBoundaries = new WeakMap<object, { component: Component; childBoundary: unknown }>();
+	#widthEpochRevision = 0;
 
 	#ignoreTight = false;
 
@@ -558,6 +562,7 @@ export class Container
 
 	addChild(component: Component): void {
 		this.children.push(component);
+		this.#widthEpochRevision++;
 		if (this.#ignoreTight) {
 			component.setIgnoreTight?.(true);
 		}
@@ -568,11 +573,13 @@ export class Container
 		const index = this.children.indexOf(component);
 		if (index !== -1) {
 			this.children.splice(index, 1);
+			this.#widthEpochRevision++;
 			this.#memoLines = undefined;
 		}
 	}
 
 	clear(): void {
+		if (this.children.length > 0) this.#widthEpochRevision++;
 		this.children = [];
 		this.#memoLines = undefined;
 	}
@@ -673,6 +680,10 @@ export class Container
 		return undefined;
 	}
 
+	getNativeScrollbackWidthEpochRevision(): number {
+		return this.#widthEpochRevision;
+	}
+
 	render(width: number): readonly string[] {
 		width = Math.max(1, width);
 		const children = this.children;
@@ -746,6 +757,7 @@ interface FrameSegment {
 	lines: readonly string[];
 	start: number;
 	rowCount: number;
+	widthEpochRevision?: number;
 	liveLocalStart?: number;
 	liveRegionPinned: boolean;
 }
@@ -1236,7 +1248,14 @@ export class TUI extends Container {
 	// Per-root-child segment ledger backing the stable-prefix computation.
 	#frameSegments: FrameSegment[] = [];
 	#composeWidth = -1;
-	#rootWidthEpochBoundaries = new WeakMap<object, { component: Component; childBoundary: unknown }>();
+	#rootWidthEpochBoundaries = new WeakMap<
+		object,
+		{
+			component: Component;
+			childBoundary: unknown;
+			trailingRevisions: Map<Component, number | undefined>;
+		}
+	>();
 
 	// Cursor markers stripped at ingestion, ascending by frame row.
 	#frameCursorMarkers: { row: number; col: number }[] = [];
@@ -1288,13 +1307,26 @@ export class TUI extends Container {
 	}
 
 	override captureNativeScrollbackWidthEpoch(): unknown {
-		for (let index = this.#frameSegments.length - 1; index >= 0; index--) {
+		const liveSource = this.#frameSegments.findIndex(segment => segment.liveLocalStart !== undefined);
+		const indices = Array.from({ length: this.#frameSegments.length }, (_value, index) => index)
+			.reverse()
+			.filter(index => index !== liveSource);
+		if (liveSource >= 0) indices.unshift(liveSource);
+		for (const index of indices) {
 			const segment = this.#frameSegments[index]!;
 			const source = getNativeScrollbackWidthEpoch(segment.component);
 			const childBoundary = source?.captureNativeScrollbackWidthEpoch();
 			if (childBoundary === undefined) continue;
 			const marker = {};
-			this.#rootWidthEpochBoundaries.set(marker, { component: segment.component, childBoundary });
+			this.#rootWidthEpochBoundaries.set(marker, {
+				component: segment.component,
+				childBoundary,
+				trailingRevisions: new Map(
+					this.#frameSegments
+						.slice(index + 1)
+						.map(candidate => [candidate.component, candidate.widthEpochRevision]),
+				),
+			});
 			return marker;
 		}
 		return undefined;
@@ -1309,14 +1341,45 @@ export class TUI extends Container {
 		const childRows = getNativeScrollbackWidthEpoch(marker.component)?.resolveNativeScrollbackWidthEpoch(
 			marker.childBoundary,
 		);
-		return childRows === undefined ? undefined : segment.start + childRows;
+		if (childRows === undefined) return undefined;
+		let rows = segment.start + childRows;
+		for (const [component, capturedRevision] of marker.trailingRevisions) {
+			const candidate = this.#frameSegments.find(current => current.component === component);
+			const revision = getNativeScrollbackWidthEpoch(component)?.getNativeScrollbackWidthEpochRevision?.();
+			// Changed/removed tails are not cross-width comparable. Treat their
+			// entire settled contribution as new in the current boundary: this can
+			// conservatively duplicate rows, but cannot omit displaced transcript.
+			if (candidate !== undefined && revision === capturedRevision) rows += candidate.rowCount;
+		}
+		return rows;
+	}
+
+	#getNativeScrollbackWidthEpochCurrentRows(boundary: unknown): number | undefined {
+		if (typeof boundary !== "object" || boundary === null) return undefined;
+		const marker = this.#rootWidthEpochBoundaries.get(boundary);
+		if (!marker) return undefined;
+		const index = this.#frameSegments.findIndex(candidate => candidate.component === marker.component);
+		if (index < 0) return undefined;
+		const sourceRows = getNativeScrollbackWidthEpoch(marker.component)?.getNativeScrollbackWidthEpochRows();
+		if (sourceRows === undefined) return undefined;
+		let rows = this.#frameSegments[index]!.start + sourceRows;
+		for (let trailing = index + 1; trailing < this.#frameSegments.length; trailing++) {
+			rows += this.#frameSegments[trailing]!.rowCount;
+		}
+		return rows;
 	}
 
 	override getNativeScrollbackWidthEpochRows(): number | undefined {
 		for (let index = this.#frameSegments.length - 1; index >= 0; index--) {
 			const segment = this.#frameSegments[index]!;
 			const rows = getNativeScrollbackWidthEpoch(segment.component)?.getNativeScrollbackWidthEpochRows();
-			if (rows !== undefined) return segment.start + rows;
+			if (rows !== undefined) {
+				let boundary = segment.start + rows;
+				for (let trailing = index + 1; trailing < this.#frameSegments.length; trailing++) {
+					boundary += this.#frameSegments[trailing]!.rowCount;
+				}
+				return boundary;
+			}
 		}
 		return undefined;
 	}
@@ -1354,11 +1417,13 @@ export class TUI extends Container {
 			let childLines: readonly string[];
 			let liveLocalStart: number | undefined;
 			let liveRegionPinned = false;
+			let widthEpochRevision: number | undefined;
 			let reported: number | undefined;
 			if (reuse) {
 				childLines = previous.lines;
 				liveLocalStart = previous.liveLocalStart;
 				liveRegionPinned = previous.liveRegionPinned;
+				widthEpochRevision = previous.widthEpochRevision;
 			} else {
 				// Feed the engine's committed-row claim (from the previous frame's
 				// emit) before rendering so the child can skip re-deriving blocks
@@ -1377,6 +1442,7 @@ export class TUI extends Container {
 					);
 				}
 				childLines = child.render(width);
+				widthEpochRevision = getNativeScrollbackWidthEpoch(child)?.getNativeScrollbackWidthEpochRevision?.();
 				const liveRegionStart = getNativeScrollbackLiveRegionStart(child);
 				if (liveRegionStart !== undefined) {
 					liveLocalStart = Number.isFinite(liveRegionStart)
@@ -1432,6 +1498,7 @@ export class TUI extends Container {
 				lines: childLines,
 				start: offset,
 				rowCount: childLines.length,
+				widthEpochRevision,
 				liveLocalStart,
 				liveRegionPinned,
 			};
@@ -3193,7 +3260,9 @@ export class TUI extends Container {
 		const widthEpochSourceBoundary = widthChanged
 			? this.resolveNativeScrollbackWidthEpoch(this.#multiplexerWidthEpochBoundary)
 			: undefined;
-		const widthEpochCurrentRows = widthChanged ? this.getNativeScrollbackWidthEpochRows() : undefined;
+		const widthEpochCurrentRows = widthChanged
+			? this.#getNativeScrollbackWidthEpochCurrentRows(this.#multiplexerWidthEpochBoundary)
+			: undefined;
 		if (resizeEventOccurred) this.#multiplexerWidthEpochBoundary = undefined;
 		// A resize event with net-unchanged dimensions still reflowed the
 		// terminal buffer; classify it as a height change so geometry handling

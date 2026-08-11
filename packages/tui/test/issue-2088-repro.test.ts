@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import {
 	type Component,
+	Container,
 	type NativeScrollbackCommittedRows,
 	type NativeScrollbackLiveRegion,
 	type NativeScrollbackWidthEpoch,
@@ -797,6 +798,120 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 					"queued-00",
 					"queued-01",
 				]) {
+					expect(
+						buffer.filter(line => line.includes(marker)),
+						marker,
+					).toHaveLength(1);
+				}
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("retains transcript rows displaced by a trailing root that grows during resize settlement", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const transcript = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				transcript.append(`tail-${index.toString().padStart(2, "0")} ${"I".repeat(46)}`);
+			}
+			const pendingMessages = new Container();
+			pendingMessages.addChild(new MutableLinesComponent(["editor"]));
+			tui.addChild(transcript);
+			tui.addChild(pendingMessages);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 6);
+				await Bun.sleep(10);
+				pendingMessages.clear();
+				pendingMessages.addChild(new MutableLinesComponent(["pending-00", "pending-01", "pending-02", "editor"]));
+				tui.requestComponentRender(pendingMessages);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (let index = 0; index < 8; index++) {
+					const marker = `tail-${index.toString().padStart(2, "0")}`;
+					expect(
+						buffer.filter(line => line.includes(marker)),
+						marker,
+					).toHaveLength(1);
+				}
+				expect(visible(term).slice(-4)).toEqual(["pending-00", "pending-01", "pending-02", "editor"]);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("captures trailing-root growth queued immediately before SIGWINCH", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const transcript = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				transcript.append(`pre-resize-${index.toString().padStart(2, "0")} ${"I".repeat(46)}`);
+			}
+			const pendingMessages = new Container();
+			pendingMessages.addChild(new MutableLinesComponent(["editor"]));
+			tui.addChild(transcript);
+			tui.addChild(pendingMessages);
+
+			try {
+				tui.start();
+				await settle(term);
+				pendingMessages.clear();
+				pendingMessages.addChild(new MutableLinesComponent(["queued-00", "queued-01", "queued-02", "editor"]));
+				tui.requestComponentRender(pendingMessages);
+				term.resize(17, 6);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (let index = 0; index < 8; index++) {
+					const marker = `pre-resize-${index.toString().padStart(2, "0")}`;
+					expect(
+						buffer.filter(line => line.includes(marker)),
+						marker,
+					).toHaveLength(1);
+				}
+				expect(visible(term).slice(-4)).toEqual(["queued-00", "queued-01", "queued-02", "editor"]);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("does not treat paint-only reflow in a trailing root as appended output", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const transcript = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				transcript.append(`paint-${index.toString().padStart(2, "0")} ${"P".repeat(46)}`);
+			}
+			const wrappingHud = new WrappingLinesComponent([`hud ${"H".repeat(40)}`]);
+			const trailingRoot = new Container();
+			trailingRoot.addChild(wrappingHud);
+			tui.addChild(transcript);
+			tui.addChild(trailingRoot);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 6);
+				await Bun.sleep(10);
+				tui.requestComponentRender(wrappingHud);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (let index = 0; index < 8; index++) {
+					const marker = `paint-${index.toString().padStart(2, "0")}`;
 					expect(
 						buffer.filter(line => line.includes(marker)),
 						marker,
