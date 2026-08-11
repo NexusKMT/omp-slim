@@ -1370,7 +1370,7 @@ export class AgentSession {
 		// Pre-scheduling tool_call wiring: extension handlers run at arg-prep
 		// time so a block/revision lands before concurrency resolution,
 		// tool_execution_start, and the wrapper's approval gate.
-		this.agent.beforeToolCall = ctx => this.#beforeToolCall(ctx);
+		this.agent.beforeToolCall = (ctx, signal) => this.#beforeToolCall(ctx, signal);
 		this.agent.providerSessionState = this.#providerSessionState;
 		this.#syncAgentSessionId();
 		this.#todo.syncFromBranch();
@@ -3276,7 +3276,7 @@ export class AgentSession {
 	 * emit a second event (nested xd:// device dispatches and direct non-loop
 	 * execution still emit there).
 	 */
-	async #beforeToolCall(ctx: BeforeToolCallContext): Promise<BeforeToolCallResult | undefined> {
+	async #beforeToolCall(ctx: BeforeToolCallContext, signal?: AbortSignal): Promise<BeforeToolCallResult | undefined> {
 		const runner = this.#extensionRunner;
 		if (!runner?.hasHandlers("tool_call")) return undefined;
 		const metadata = ctx.toolCall.providerMetadata;
@@ -3294,12 +3294,15 @@ export class AgentSession {
 			? { actions: computer.actions, pendingSafetyChecks: computer.pendingSafetyChecks }
 			: ctx.args;
 		runner.markToolCallEmitted(ctx.toolCall.id, ctx.tool.name);
-		const callResult = await runner.emitToolCall({
-			type: "tool_call",
-			toolName: ctx.tool.name,
-			toolCallId: ctx.toolCall.id,
-			input: normalizeToolEventInput(ctx.tool.name, resolveToolEventInput(ctx.tool, eventArgs)),
-		});
+		const callResult = await runner.emitToolCall(
+			{
+				type: "tool_call",
+				toolName: ctx.tool.name,
+				toolCallId: ctx.toolCall.id,
+				input: normalizeToolEventInput(ctx.tool.name, resolveToolEventInput(ctx.tool, eventArgs)),
+			},
+			signal,
+		);
 		if (callResult?.block) {
 			return { block: true, reason: callResult.reason || "Tool execution was blocked by an extension" };
 		}

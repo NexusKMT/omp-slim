@@ -10,6 +10,7 @@ import type { AgentMessage, AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { discoverAndLoadExtensions, ExtensionRuntime } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import {
 	EXTENSION_HANDLER_TIMEOUT_MS,
@@ -1301,7 +1302,7 @@ describe("ExtensionRunner", () => {
 			});
 		});
 
-		it("times out tool_call handlers with fail-closed policy so a hung extension cannot indefinitely block tool execution (#3948)", async () => {
+		it("uses the configured tool_call timeout and fails closed so a hung extension cannot block execution (#3948)", async () => {
 			const hangExtensionPath = path.join(tempDir.path(), "hang-tool-call.ts");
 			fs.writeFileSync(
 				hangExtensionPath,
@@ -1321,14 +1322,14 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				undefined,
+				Settings.isolated({ "extensionHandlers.toolCallTimeoutMs": 10 }),
 			);
 			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
 			const errors: Array<{ extensionPath: string; event: string; error: string }> = [];
 			runner.onError(err => {
 				errors.push(err);
 			});
-			testSetExtensionHandlerTimeoutMs(10);
-
 			const executeCalls: unknown[] = [];
 			const tool: AgentTool = {
 				name: "sleepy",
@@ -1481,7 +1482,7 @@ describe("ExtensionRunner", () => {
 			expect(errors).toEqual([]);
 		});
 
-		it("aborts a tool_call handler's confirmation before returning its timeout block", async () => {
+		it("pauses a tool_call handler timeout during standard and custom dialogs, then resumes its budget", async () => {
 			const extensionPath = path.join(tempDir.path(), "confirm-tool-call.ts");
 			const markerPath = path.join(tempDir.path(), "confirm-settled.txt");
 			fs.writeFileSync(
@@ -1492,8 +1493,11 @@ describe("ExtensionRunner", () => {
 					export default function(pi) {
 						pi.on("tool_call", async (_event, ctx) => {
 							ctx.ui.notify("Waiting for confirmation");
+							await new Promise(resolve => setTimeout(resolve, 8));
 							await ctx.ui.confirm("High-risk command", "Allow this command?");
+							await ctx.ui.custom(() => ({}));
 							fs.writeFileSync(${JSON.stringify(markerPath)}, "settled");
+							await Promise.withResolvers().promise;
 						});
 					}
 				`,
@@ -1515,8 +1519,16 @@ describe("ExtensionRunner", () => {
 				dialogSignal?.addEventListener("abort", () => dialog.resolve(false), { once: true });
 				return await dialog.promise;
 			};
+			const customDialog = Promise.withResolvers<void>();
+			let customPending = false;
+			const custom: ExtensionUIContext["custom"] = async <T>() => {
+				customPending = true;
+				await customDialog.promise;
+				return undefined as T;
+			};
 			const uiPrototype = Object.create(runner.getUIContext(), {
 				confirm: { value: confirm },
+				custom: { value: custom },
 				notify: { value: notify },
 			});
 			const uiContext: ExtensionUIContext = Object.create(uiPrototype);
@@ -1549,25 +1561,159 @@ describe("ExtensionRunner", () => {
 				undefined,
 				uiContext,
 			);
-			testSetExtensionHandlerTimeoutMs(10);
+			vi.useFakeTimers();
+			let now = 0;
+			const performanceNow = vi.spyOn(performance, "now").mockImplementation(() => now);
+			try {
+				testSetExtensionHandlerTimeoutMs(25);
+
+				const tool: AgentTool = {
+					name: "guarded",
+					label: "Guarded",
+					description: "must not execute after the extension gate times out",
+					parameters: Type.Object({}),
+					strict: true,
+					execute: async () => ({ content: [{ type: "text", text: "ran" }] }),
+				};
+				const wrapped = new ExtensionToolWrapper(tool, runner);
+				const flush = async () => {
+					for (let attempts = 0; attempts < 10; attempts++) await Promise.resolve();
+				};
+
+				const execution = wrapped.execute("tool-call-id", {});
+				await flush();
+				expect(notify).toHaveBeenCalledWith("Waiting for confirmation");
+				expect(dialogSignal).toBeUndefined();
+
+				now = 8;
+				vi.advanceTimersByTime(8);
+				await flush();
+				expect(dialogSignal).toBeDefined();
+
+				now = 108;
+				vi.advanceTimersByTime(100);
+				await flush();
+				expect(dialogSignal?.aborted).toBe(false);
+
+				dialog.resolve(true);
+				await flush();
+				expect(customPending).toBe(true);
+				expect(fs.existsSync(markerPath)).toBe(false);
+
+				now = 208;
+				vi.advanceTimersByTime(100);
+				await flush();
+				expect(dialogSignal?.aborted).toBe(false);
+				expect(fs.existsSync(markerPath)).toBe(false);
+
+				customDialog.resolve();
+				await flush();
+				expect(fs.readFileSync(markerPath, "utf8")).toBe("settled");
+
+				now = 225;
+				vi.advanceTimersByTime(17);
+				await flush();
+				vi.advanceTimersByTime(0);
+				await flush();
+				await expect(execution).rejects.toThrow(`Extension ${extensionPath} timed out after 25ms`);
+			} finally {
+				performanceNow.mockRestore();
+				vi.useRealTimers();
+			}
+		});
+
+		it("cancels a pending confirmation and blocks tool execution when the outer dispatch aborts (#4223)", async () => {
+			const extensionPath = path.join(tempDir.path(), "confirm-abort-tool-call.ts");
+			const recordPath = path.join(tempDir.path(), "confirm-abort-executed.jsonl");
+			fs.writeFileSync(
+				extensionPath,
+				`
+					export default function(pi) {
+						pi.on("tool_call", async (_event, ctx) => {
+							await ctx.ui.confirm("High-risk command", "Allow this command?");
+						});
+					}
+				`,
+			);
+
+			const result = await loadTestExtensions([extensionPath]);
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			let dialogSignal: AbortSignal | undefined;
+			const dialog = Promise.withResolvers<boolean>();
+			const confirm: ExtensionUIContext["confirm"] = async (_title, _message, dialogOptions) => {
+				dialogSignal = dialogOptions?.signal;
+				dialogSignal?.addEventListener("abort", () => dialog.resolve(false), { once: true });
+				return await dialog.promise;
+			};
+			const uiPrototype = Object.create(runner.getUIContext(), {
+				confirm: { value: confirm },
+			});
+			const uiContext: ExtensionUIContext = Object.create(uiPrototype);
+			runner.initialize(
+				{
+					sendMessage: () => {},
+					sendUserMessage: () => {},
+					appendEntry: () => {},
+					setLabel: () => {},
+					getActiveTools: () => [],
+					getAllTools: () => [],
+					setActiveTools: async () => {},
+					getCommands: () => [],
+					setModel: async () => false,
+					getThinkingLevel: () => undefined,
+					setThinkingLevel: () => {},
+					getSessionName: () => undefined,
+					setSessionName: async () => {},
+				},
+				{
+					getModel: () => undefined,
+					isIdle: () => true,
+					abort: () => {},
+					hasPendingMessages: () => false,
+					shutdown: () => {},
+					getContextUsage: () => undefined,
+					compact: async () => {},
+					getSystemPrompt: () => [],
+				},
+				undefined,
+				uiContext,
+			);
 
 			const tool: AgentTool = {
 				name: "guarded",
 				label: "Guarded",
-				description: "must not execute after the extension gate times out",
+				description: "must not execute after the dispatch aborts",
 				parameters: Type.Object({}),
 				strict: true,
-				execute: async () => ({ content: [{ type: "text", text: "ran" }] }),
+				execute: async () => {
+					fs.appendFileSync(recordPath, "ran\n");
+					return { content: [{ type: "text", text: "ran" }] };
+				},
 			};
 			const wrapped = new ExtensionToolWrapper(tool, runner);
+			const flush = async () => {
+				for (let attempts = 0; attempts < 10; attempts++) await Promise.resolve();
+			};
 
-			await expect(wrapped.execute("tool-call-id", {})).rejects.toThrow(
-				`Extension ${extensionPath} timed out after 10ms`,
-			);
-			expect(notify).toHaveBeenCalledWith("Waiting for confirmation");
+			const controller = new AbortController();
+			const execution = wrapped.execute("tool-call-id", {} as never, controller.signal);
+			await flush();
+
+			expect(dialogSignal).toBeDefined();
+			expect(dialogSignal?.aborted).toBe(false);
+
+			controller.abort();
+			await flush();
 
 			expect(dialogSignal?.aborted).toBe(true);
-			expect(fs.readFileSync(markerPath, "utf8")).toBe("settled");
+			await expect(execution).rejects.toThrow();
+			expect(fs.existsSync(recordPath)).toBe(false);
 		});
 	});
 
