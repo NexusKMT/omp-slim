@@ -830,19 +830,23 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 		if (typeFlag === "1" || typeFlag === "2") {
 			const kind = typeFlag === "1" ? "hard link" : "symlink";
 			const portableLinkName = linkName.replace(/\\/g, "/");
+			// Symlinks resolve relative to their own directory; a target that
+			// stays inside the archive normalizes to a member path or "" (the
+			// archive root, e.g. `current -> .`). `undefined` means the target
+			// escapes the root (or is absolute) and is kept as a dangling link.
 			const targetPath =
 				typeFlag === "1"
 					? normalizeArchiveEntryPath(portableLinkName)
 					: path.posix.isAbsolute(portableLinkName)
 						? undefined
-						: normalizeArchiveEntryPath(path.posix.join(path.posix.dirname(normalizedPath), portableLinkName));
+						: normalizeArchiveLookupPath(path.posix.join(path.posix.dirname(normalizedPath), portableLinkName));
 			const entry: ArchiveIndexEntry = {
 				path: normalizedPath,
 				isDirectory: false,
 				size: 0,
 				mtimeMs,
 			};
-			if (!targetPath) {
+			if (targetPath === undefined) {
 				if (kind === "hard link") {
 					throw new ToolError(`Archive hard link '${normalizedPath}' has an invalid target`);
 				}
@@ -903,9 +907,12 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 				}
 				if (target && unresolved.has(target)) continue;
 
+				// An empty target is the archive root, which is always a directory.
 				const targetPrefix = `${pending.targetPath}/`;
 				const targetIsDirectory =
-					target?.isDirectory === true || entries.some(candidate => candidate.path.startsWith(targetPrefix));
+					pending.targetPath === "" ||
+					target?.isDirectory === true ||
+					entries.some(candidate => candidate.path.startsWith(targetPrefix));
 				if (!targetIsDirectory) {
 					if (pending.kind === "symlink") {
 						entry.storage = { type: "tar-link", targetPath: pending.targetPath };
@@ -1024,7 +1031,11 @@ export class ArchiveReader {
 				const entry = this.#entries.get(prefix);
 				if (!entry?.isDirectory || entry.storage?.type !== "tar-link") continue;
 				const suffix = parts.slice(end).join("/");
-				replacement = suffix ? `${entry.storage.targetPath}/${suffix}` : entry.storage.targetPath;
+				replacement = suffix
+					? entry.storage.targetPath
+						? `${entry.storage.targetPath}/${suffix}`
+						: suffix
+					: entry.storage.targetPath;
 				break;
 			}
 			if (replacement === undefined) return resolvedPath;
@@ -1040,6 +1051,9 @@ export class ArchiveReader {
 		}
 
 		const resolvedPath = this.#resolveDirectoryAliases(normalizedPath);
+		if (resolvedPath === "") {
+			return { path: normalizedPath, isDirectory: true, size: 0 };
+		}
 		const entry = this.#entries.get(resolvedPath);
 		if (!entry) return undefined;
 		return {
@@ -1057,7 +1071,7 @@ export class ArchiveReader {
 		}
 
 		const resolvedPath = normalizedPath ? this.#resolveDirectoryAliases(normalizedPath) : "";
-		if (normalizedPath) {
+		if (normalizedPath && resolvedPath !== "") {
 			const entry = this.#entries.get(resolvedPath);
 			if (!entry) {
 				throw new ToolError(`Archive path '${normalizedPath}' not found`);
@@ -1106,6 +1120,9 @@ export class ArchiveReader {
 		}
 
 		const resolvedPath = this.#resolveDirectoryAliases(normalizedPath);
+		if (resolvedPath === "") {
+			throw new ToolError(`Archive path '${normalizedPath}' is a directory`);
+		}
 		const entry = this.#entries.get(resolvedPath);
 		if (!entry) {
 			throw new ToolError(`Archive file '${normalizedPath}' not found`);

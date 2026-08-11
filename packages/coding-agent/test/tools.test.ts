@@ -846,6 +846,30 @@ describe("Coding Agent Tools", () => {
 			await expect(readArchiveEntries(archivePath)).rejects.toThrow(/cannot be materialized/);
 		});
 
+		it("should resolve tar symlinks whose target is the archive root", async () => {
+			const archivePath = path.join(testDir, "root-symlinks.tar");
+			fs.writeFileSync(
+				archivePath,
+				createTarArchive([
+					{ path: "top.txt", content: "top level\n" },
+					{ path: "dir/inner.txt", content: "inner\n" },
+					// `current -> .` and `dir/up -> ..` both normalize to the archive root.
+					{ path: "current", content: "", typeFlag: "2", linkName: "." },
+					{ path: "dir/up", content: "", typeFlag: "2", linkName: ".." },
+				]),
+			);
+
+			const currentNode = await readTool.execute("test-call-tar-root-symlink-current", {
+				path: `${archivePath}:current/top.txt`,
+			});
+			expect(getTextOutput(currentNode)).toContain("top level");
+
+			const upNode = await readTool.execute("test-call-tar-root-symlink-up", {
+				path: `${archivePath}:dir/up/top.txt`,
+			});
+			expect(getTextOutput(upNode)).toContain("top level");
+		});
+
 		it("should list dangling tar symlinks but reject their materialization", async () => {
 			const archivePath = path.join(testDir, "dangling-symlink.tar");
 			fs.writeFileSync(
