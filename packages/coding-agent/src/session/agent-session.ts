@@ -313,6 +313,7 @@ import {
 	queueChipText,
 	toRestoredQueuedMessage,
 } from "./queued-messages";
+import type { ServingModel } from "./retry-fallback-chains";
 import { type AdvisorStats, SessionAdvisors, type SessionAdvisorsHost } from "./session-advisors";
 import type { BuildSessionContextOptions, SessionContext } from "./session-context";
 import { getRestorableSessionModels } from "./session-context";
@@ -4097,9 +4098,13 @@ export class AgentSession {
 		return this.agent.state.model;
 	}
 
-	/** Resolved selector while retry routing is using a fallback model. */
-	get retryFallbackModel(): string | undefined {
-		return this.#recovery.retryFallbackModel;
+	/**
+	 * Model this session's produced work is attributed to. Holds the last model
+	 * that actually served while a fallback is armed but unproven, so observers
+	 * never credit a run to a candidate that produced nothing.
+	 */
+	get servingModel(): ServingModel | undefined {
+		return this.#recovery.servingModel;
 	}
 
 	/** Install the interactive decision surface for reserve-triggered model changes. */
@@ -6497,6 +6502,7 @@ export class AgentSession {
 	async fork(): Promise<boolean> {
 		this.#assertVibeSessionTransitionAllowed("fork the session");
 		const previousSessionFile = this.sessionFile;
+		const previousSessionId = this.sessionManager.getSessionId();
 
 		// Emit session_before_switch event with reason "fork" (can be cancelled)
 		if (this.#extensionRunner?.hasHandlers("session_before_switch")) {
@@ -6535,6 +6541,9 @@ export class AgentSession {
 			}
 			this.#bash.markSessionTransition(bashTransition);
 			this.#bash.finishSessionTransition(bashTransition, true);
+			// The fork clones the transcript and keeps this recovery state running
+			// under a fresh id, so the work already produced is still this session's.
+			this.#recovery.reanchorServedAttribution(previousSessionId);
 
 			// Copy artifacts directory if it exists
 			const oldArtifactDir = forkResult.oldSessionFile.slice(0, -6);
