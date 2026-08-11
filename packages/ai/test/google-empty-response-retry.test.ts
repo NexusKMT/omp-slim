@@ -134,6 +134,25 @@ describe("Google empty-response retry (public + Vertex path)", () => {
 		expect(result.errorMessage).toContain("empty response");
 	});
 
+	it("accepts an empty STOP when silence is a valid caller result", async () => {
+		let calls = 0;
+		const fetchMock: FetchImpl = async () => {
+			calls += 1;
+			return sse(genaiChunk(""));
+		};
+
+		const stream = streamGoogle(genaiModel, context, {
+			apiKey: "k",
+			fetch: fetchMock,
+			acceptEmptyResponse: true,
+		});
+		const result = await stream.result();
+
+		expect(calls).toBe(1);
+		expect(result.stopReason).toBe("stop");
+		expect(result.errorMessage).toBeUndefined();
+	});
+
 	it("filters out empty text parts at stream end but preserves terminal thought signatures", async () => {
 		const chunks = [
 			{ candidates: [{ content: { parts: [{ text: "Hello" }] } }] },
@@ -252,6 +271,25 @@ describe("Google empty-response retry (Cloud Code Assist path)", () => {
 		expect(result.stopReason).toBe("stop");
 		expect(textOf(result)).toBe("Done.");
 		void events;
+	});
+
+	it("accepts an empty STOP when silence is a valid caller result", async () => {
+		let calls = 0;
+		const fetchMock: FetchImpl = async () => {
+			calls += 1;
+			return sse(ccaChunk(""));
+		};
+
+		const stream = streamGoogleGeminiCli(cliModel, context, {
+			apiKey: JSON.stringify({ token: "token", projectId: "proj-123" }),
+			fetch: fetchMock,
+			acceptEmptyResponse: true,
+		});
+		const result = await stream.result();
+
+		expect(calls).toBe(1);
+		expect(result.stopReason).toBe("stop");
+		expect(result.errorMessage).toBeUndefined();
 	});
 
 	it("retries after discarding a planning leak and delivers one structured function call", async () => {

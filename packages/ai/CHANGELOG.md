@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Allowed passive Google callers to accept empty or thinking-only `STOP` responses as successful silence instead of exhausting the provider's empty-response retry budget. ([#8223](https://github.com/can1357/oh-my-pi/issues/8223))
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed

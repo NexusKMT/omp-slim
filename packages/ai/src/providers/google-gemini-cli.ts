@@ -998,8 +998,8 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 						}
 
 						const streamed = await streamResponse(currentResponse);
-						if (output.stopReason !== "stop" || streamed) {
-							receivedContent = streamed;
+						if (output.stopReason !== "stop" || streamed || options?.acceptEmptyResponse === true) {
+							receivedContent = streamed || options?.acceptEmptyResponse === true;
 							break;
 						}
 
