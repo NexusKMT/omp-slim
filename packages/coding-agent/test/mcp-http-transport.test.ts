@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { HttpTransport } from "@oh-my-pi/pi-coding-agent/mcp/transports/http";
-import { MCP_PROTOCOL_VERSION } from "@oh-my-pi/pi-coding-agent/mcp/types";
 
 const encoder = new TextEncoder();
 const REQUEST_TIMEOUT_MS = 50;
@@ -104,19 +103,23 @@ describe("MCP Streamable HTTP transport timeouts", () => {
 });
 
 describe("MCP Streamable HTTP protocol version header", () => {
-	it("sends MCP-Protocol-Version on requests, defaulting to the client's revision", async () => {
-		const seen: { version: string | null } = { version: null };
+	it("omits MCP-Protocol-Version until the version is negotiated", async () => {
+		const seen: { version: string | null; present: boolean } = { version: null, present: true };
 		server = Bun.serve({
 			port: 0,
 			fetch(req) {
+				seen.present = req.headers.has("MCP-Protocol-Version");
 				seen.version = req.headers.get("MCP-Protocol-Version");
 				return Response.json({ jsonrpc: "2.0", id: 1, result: {} });
 			},
 		});
 		const transport = await connectedTransport();
 
-		await withPendingGuard(transport.request("tools/list"), "request");
-		expect(seen.version).toBe(MCP_PROTOCOL_VERSION);
+		// No setProtocolVersion yet: this stands in for the initialize request,
+		// which must not carry the header before negotiation completes.
+		await withPendingGuard(transport.request("initialize"), "request");
+		expect(seen.present).toBe(false);
+		expect(seen.version).toBeNull();
 	});
 
 	it("echoes the negotiated version on requests after setProtocolVersion", async () => {

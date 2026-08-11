@@ -17,7 +17,7 @@ import type {
 	MCPSseServerConfig,
 	MCPTransport,
 } from "../../mcp/types";
-import { MCP_PROTOCOL_VERSION, toJsonRpcError } from "../../mcp/types";
+import { toJsonRpcError } from "../../mcp/types";
 import { RequestIdAllocator } from "../request-id";
 import { createMCPTimeout, getNeverAbortSignal, isMCPTimeoutEnabled, resolveMCPTimeoutMs } from "../timeout";
 import { type MCPFetchInit, mcpFetch } from "./header-policy";
@@ -47,11 +47,13 @@ export class HttpTransport implements MCPTransport {
 	#sseConnection: AbortController | null = null;
 	readonly #requestIds = new RequestIdAllocator();
 	/**
-	 * Protocol version echoed in the `MCP-Protocol-Version` header on every
-	 * request. Starts at the version this client requests and is replaced with
-	 * the value the server negotiates via {@link setProtocolVersion}.
+	 * Protocol version echoed in the `MCP-Protocol-Version` header. `null` until
+	 * the `initialize` response is negotiated (via {@link setProtocolVersion}):
+	 * the MCP spec requires the header only on requests *after* `initialize`, and
+	 * a server that supports only an older revision may reject a header carrying
+	 * a newer version sent before negotiation completes.
 	 */
-	#protocolVersion = MCP_PROTOCOL_VERSION;
+	#protocolVersion: string | null = null;
 
 	onClose?: () => void;
 	onError?: (error: Error) => void;
@@ -65,21 +67,18 @@ export class HttpTransport implements MCPTransport {
 	/**
 	 * Fetch the configured endpoint with header precedence and origin policy.
 	 *
-	 * Every request carries `MCP-Protocol-Version`. The MCP Streamable HTTP spec
-	 * requires it on all requests after `initialize`; sending it on `initialize`
-	 * too is harmless and keeps this a single choke point. It is placed under
-	 * `generated` so the merge policy lets a caller-supplied header win only when
-	 * one isn't generated here, and so an explicitly generated value (none today)
-	 * would take precedence.
+	 * Once a version is negotiated, every request carries `MCP-Protocol-Version`
+	 * (required by the MCP Streamable HTTP spec after `initialize`). It rides
+	 * under `generated` so it wins over a same-named configured header. Before
+	 * negotiation (the `initialize` request itself) the header is omitted.
 	 */
 	#fetch(init: MCPFetchInit, generated: Record<string, string>): Promise<Response> {
+		const withVersion =
+			this.#protocolVersion === null ? generated : { "MCP-Protocol-Version": this.#protocolVersion, ...generated };
 		return mcpFetch(
 			this.config.url,
 			init,
-			{
-				generated: { "MCP-Protocol-Version": this.#protocolVersion, ...generated },
-				configured: this.config.headers,
-			},
+			{ generated: withVersion, configured: this.config.headers },
 			this.config.headerPolicy === "origin-locked",
 		);
 	}
