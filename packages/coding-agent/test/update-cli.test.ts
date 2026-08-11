@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, spyOn, vi } from "bun:test";
+import { afterEach, describe, expect, it, type Mock, spyOn, vi } from "bun:test";
 import { createHash } from "node:crypto";
 import * as nodeFs from "node:fs";
 import * as fs from "node:fs/promises";
@@ -783,32 +783,33 @@ describe("update-cli script-shim takeover", () => {
 	const version = "18.0.0";
 	const binaryName = "omp-windows-x64.exe";
 	const url = `https://github.com/can1357/oh-my-pi/releases/download/v${version}/${binaryName}`;
-	const content = "native release binary";
-	const digest = `sha256:${createHash("sha256").update(content).digest("hex")}`;
 
-	const fetchImpl = async (input: string | URL | Request): Promise<Response> => {
-		const requestUrl = String(input);
-		if (requestUrl.startsWith("https://api.github.com/")) {
-			return new Response(
-				JSON.stringify({
-					tag_name: `v${version}`,
-					draft: false,
-					prerelease: false,
-					assets: [
-						{
-							name: binaryName,
-							state: "uploaded",
-							size: Buffer.byteLength(content),
-							digest,
-							browser_download_url: url,
-						},
-					],
-				}),
-			);
-		}
-		if (requestUrl === url) return new Response(content);
-		throw new Error(`Unexpected request: ${requestUrl}`);
-	};
+	function makeFetch(content: string): (input: string | URL | Request) => Promise<Response> {
+		const digest = `sha256:${createHash("sha256").update(content).digest("hex")}`;
+		return async (input: string | URL | Request): Promise<Response> => {
+			const requestUrl = String(input);
+			if (requestUrl.startsWith("https://api.github.com/")) {
+				return new Response(
+					JSON.stringify({
+						tag_name: `v${version}`,
+						draft: false,
+						prerelease: false,
+						assets: [
+							{
+								name: binaryName,
+								state: "uploaded",
+								size: Buffer.byteLength(content),
+								digest,
+								browser_download_url: url,
+							},
+						],
+					}),
+				);
+			}
+			if (requestUrl === url) return new Response(content);
+			throw new Error(`Unexpected request: ${requestUrl}`);
+		};
+	}
 
 	const shims: Record<string, string> = {
 		omp: "#!/bin/sh\nnode omp.js\n",
@@ -825,15 +826,18 @@ describe("update-cli script-shim takeover", () => {
 	it("installs omp.exe beside the shims and retires them", async () => {
 		const dir = await makeTempDir();
 		await writeShims(dir);
+		// Real executable, no injected verifier: the takeover must verify the
+		// exe by explicit path — $which cached the shim path before it was
+		// renamed away, so a PATH re-resolution would fail here.
+		const exe = `#!/bin/sh\necho omp/${version}\n`;
 
 		await updateViaShimTakeover(path.join(dir, "omp.cmd"), version, {
 			binaryName,
-			fetchImpl,
+			fetchImpl: makeFetch(exe),
 			githubToken: "test-token",
-			verifyInstalledVersion: async () => ({ ok: true, actual: version, path: path.join(dir, "omp.exe") }),
 		});
 
-		expect(await Bun.file(path.join(dir, "omp.exe")).text()).toBe(content);
+		expect(await Bun.file(path.join(dir, "omp.exe")).text()).toBe(exe);
 		for (const name in shims) {
 			expect(await Bun.file(path.join(dir, name)).exists()).toBe(false);
 		}
@@ -841,18 +845,19 @@ describe("update-cli script-shim takeover", () => {
 		expect(residue).toEqual([]);
 	});
 
-	it("restores the shims and removes the exe when verification fails", async () => {
+	it("restores the shims and removes the exe when the exe reports the wrong version", async () => {
 		const dir = await makeTempDir();
 		await writeShims(dir);
+		// Executable runs but reports the previous version -> full rollback.
+		const exe = "#!/bin/sh\necho omp/17.2.12\n";
 
 		await expect(
 			updateViaShimTakeover(path.join(dir, "omp.cmd"), version, {
 				binaryName,
-				fetchImpl,
+				fetchImpl: makeFetch(exe),
 				githubToken: "test-token",
-				verifyInstalledVersion: async () => ({ ok: false, actual: "17.2.12", path: path.join(dir, "omp.cmd") }),
 			}),
-		).rejects.toThrow("restored previous omp launcher");
+		).rejects.toThrow(/still reports 17\.2\.12 \(expected 18\.0\.0\); restored previous omp launcher/);
 
 		expect(await Bun.file(path.join(dir, "omp.exe")).exists()).toBe(false);
 		for (const name in shims) {
@@ -860,5 +865,61 @@ describe("update-cli script-shim takeover", () => {
 		}
 		const residue = (await fs.readdir(dir)).filter(name => name.endsWith(".bak") || name.endsWith(".new"));
 		expect(residue).toEqual([]);
+	});
+
+	function renameLockingPs1(): Mock<typeof nodeFs.promises.rename> {
+		const realRename = nodeFs.promises.rename;
+		return spyOn(nodeFs.promises, "rename").mockImplementation(async (from, to) => {
+			if (path.basename(String(from)) === "omp.ps1") {
+				throw Object.assign(new Error("EPERM: file is locked"), { code: "EPERM" });
+			}
+			return await realRename(from, to);
+		});
+	}
+
+	it("rewrites an immovable precedence-winning shim as a forwarder to the exe", async () => {
+		const dir = await makeTempDir();
+		await writeShims(dir);
+		const exe = `#!/bin/sh\necho omp/${version}\n`;
+		const renameSpy = renameLockingPs1();
+		try {
+			await updateViaShimTakeover(path.join(dir, "omp.cmd"), version, {
+				binaryName,
+				fetchImpl: makeFetch(exe),
+				githubToken: "test-token",
+			});
+		} finally {
+			renameSpy.mockRestore();
+		}
+
+		expect(await Bun.file(path.join(dir, "omp.exe")).text()).toBe(exe);
+		expect(await Bun.file(path.join(dir, "omp")).exists()).toBe(false);
+		expect(await Bun.file(path.join(dir, "omp.cmd")).exists()).toBe(false);
+		// PowerShell resolves .ps1 before .exe: the locked shim must now exec
+		// the new binary instead of keeping its old body.
+		expect(await Bun.file(path.join(dir, "omp.ps1")).text()).toContain('& "$PSScriptRoot\\omp.exe" @args');
+	});
+
+	it("restores a forwarded shim's original body when verification fails", async () => {
+		const dir = await makeTempDir();
+		await writeShims(dir);
+		const exe = "#!/bin/sh\necho omp/17.2.12\n";
+		const renameSpy = renameLockingPs1();
+		try {
+			await expect(
+				updateViaShimTakeover(path.join(dir, "omp.cmd"), version, {
+					binaryName,
+					fetchImpl: makeFetch(exe),
+					githubToken: "test-token",
+				}),
+			).rejects.toThrow("restored previous omp launcher");
+		} finally {
+			renameSpy.mockRestore();
+		}
+
+		expect(await Bun.file(path.join(dir, "omp.exe")).exists()).toBe(false);
+		for (const name in shims) {
+			expect(await Bun.file(path.join(dir, name)).text()).toBe(shims[name]);
+		}
 	});
 });

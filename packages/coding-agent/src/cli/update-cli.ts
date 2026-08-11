@@ -849,22 +849,29 @@ function resolveOmpPath(): string | undefined {
 }
 
 /**
- * Run the resolved omp binary and check if it reports the expected version.
+ * Run a specific binary and check if it reports the expected version.
  */
-async function verifyInstalledVersion(expectedVersion: string): Promise<InstalledVersionVerification> {
-	const ompPath = resolveOmpPath();
-	if (!ompPath) return { ok: false };
+async function verifyBinaryAtPath(binaryPath: string, expectedVersion: string): Promise<InstalledVersionVerification> {
 	try {
-		const result = await $`${ompPath} --version`.quiet().nothrow();
-		if (result.exitCode !== 0) return { ok: false, path: ompPath };
+		const result = await $`${binaryPath} --version`.quiet().nothrow();
+		if (result.exitCode !== 0) return { ok: false, path: binaryPath };
 		const output = result.text().trim();
 		// Output format: "omp/X.Y.Z"
 		const match = output.match(/\/(\d+\.\d+\.\d+)/);
 		const actual = match?.[1];
-		return { ok: actual === expectedVersion, actual, path: ompPath };
+		return { ok: actual === expectedVersion, actual, path: binaryPath };
 	} catch {
-		return { ok: false, path: ompPath };
+		return { ok: false, path: binaryPath };
 	}
+}
+
+/**
+ * Run the PATH-resolved omp binary and check if it reports the expected version.
+ */
+async function verifyInstalledVersion(expectedVersion: string): Promise<InstalledVersionVerification> {
+	const ompPath = resolveOmpPath();
+	if (!ompPath) return { ok: false };
+	return await verifyBinaryAtPath(ompPath, expectedVersion);
 }
 
 function printVerifiedVersion(expectedVersion: string): void {
@@ -1170,6 +1177,21 @@ export async function updateViaBinaryAt(
 }
 
 /**
+ * In-place forwarder bodies, by shim extension, for launchers that cannot be
+ * renamed aside during a script-shim takeover; each execs the sibling
+ * `omp.exe`. Rewriting matters for the shims that outrank `.exe` at command
+ * resolution: PowerShell prefers `.ps1` and Git Bash resolves the
+ * extensionless sh shim first, so leaving the old body behind would keep
+ * launching the replaced install.
+ */
+const SHIM_FORWARDERS: Record<string, string> = {
+	"": `#!/bin/sh\nexec "$(dirname "$0")/${APP_NAME}.exe" "$@"\n`,
+	".cmd": `@"%~dp0${APP_NAME}.exe" %*\r\n`,
+	".bat": `@"%~dp0${APP_NAME}.exe" %*\r\n`,
+	".ps1": `& "$PSScriptRoot\\${APP_NAME}.exe" @args\nexit $LASTEXITCODE\n`,
+};
+
+/**
  * Take over a Windows script-launcher install for a binary-only release.
  *
  * npm-managed Windows installs are launched through script shims
@@ -1180,7 +1202,8 @@ export async function updateViaBinaryAt(
  * once the shims are out of the way. A working launcher exists at every
  * step — the exe lands before any shim moves, a shim that refuses to move
  * (a running `.cmd` can be renamed but may be held open some other way) is
- * skipped, and a failed version verification moves everything back.
+ * rewritten in place as a forwarder to the exe, and a failed version
+ * verification moves everything back.
  */
 export async function updateViaShimTakeover(
 	shimPath: string,
@@ -1189,7 +1212,7 @@ export async function updateViaShimTakeover(
 		binaryName?: string;
 		fetchImpl?: Fetch;
 		githubToken?: string;
-		verifyInstalledVersion?: typeof verifyInstalledVersion;
+		verifyBinary?: typeof verifyBinaryAtPath;
 	} = {},
 ): Promise<void> {
 	const binaryName = options.binaryName ?? getBinaryName();
@@ -1211,26 +1234,46 @@ export async function updateViaShimTakeover(
 	await fs.promises.rename(tempPath, exePath);
 	// Retire the shims so PATH resolution lands on the new exe. Renamed, not
 	// deleted: restorable on verification failure, and Windows permits
-	// renaming a batch file that is still executing.
+	// renaming a batch file that is still executing. A shim that cannot be
+	// renamed (held open without delete sharing) is rewritten in place as a
+	// forwarder to the exe — write and rename take different Windows locks,
+	// so one can succeed where the other fails.
 	const backupSuffix = `${Date.now()}.${process.pid}.bak`;
 	const retired: Array<{ launcher: string; backup: string }> = [];
+	const forwarded: Array<{ launcher: string; original: string }> = [];
+	const stuck: string[] = [];
 	for (const ext of ["", ".cmd", ".ps1", ".bat"]) {
 		const launcher = path.join(launcherDir, `${APP_NAME}${ext}`);
 		const backup = `${launcher}.${backupSuffix}`;
 		try {
 			await fs.promises.rename(launcher, backup);
 			retired.push({ launcher, backup });
-		} catch {
-			// Shim absent or immovable; .exe still outranks .cmd/.bat in PATHEXT.
+		} catch (err) {
+			if (isEnoent(err)) continue;
+			try {
+				const original = await Bun.file(launcher).text();
+				await Bun.write(launcher, SHIM_FORWARDERS[ext]);
+				forwarded.push({ launcher, original });
+			} catch {
+				stuck.push(launcher);
+			}
 		}
 	}
 
-	const verify = options.verifyInstalledVersion ?? verifyInstalledVersion;
-	const verification = await verify(expectedVersion);
+	// Verify the exe by its explicit path: $which cached the shim path when
+	// the update target was resolved, and the shim was just renamed away, so
+	// a PATH re-resolution here would test a file that no longer exists.
+	const verify = options.verifyBinary ?? verifyBinaryAtPath;
+	const verification = await verify(exePath, expectedVersion);
 	if (!verification.ok) {
 		for (const { launcher, backup } of retired) {
 			try {
 				await fs.promises.rename(backup, launcher);
+			} catch {}
+		}
+		for (const { launcher, original } of forwarded) {
+			try {
+				await Bun.write(launcher, original);
 			} catch {}
 		}
 		await unlinkIfExists(exePath);
@@ -1244,6 +1287,16 @@ export async function updateViaShimTakeover(
 	// Reclaim exe backups and retired-shim leftovers from earlier attempts.
 	for (const ext of [".exe", "", ".cmd", ".ps1", ".bat"]) {
 		await sweepStaleBackups(path.join(launcherDir, `${APP_NAME}${ext}`));
+	}
+	for (const { launcher } of forwarded) {
+		console.log(chalk.dim(`Converted ${launcher} to a forwarder (it could not be removed).`));
+	}
+	for (const launcher of stuck) {
+		console.log(
+			chalk.yellow(
+				`Could not retire ${launcher}; shells that prefer it may keep launching the old version until it is deleted manually.`,
+			),
+		);
 	}
 	printVerifiedVersion(expectedVersion);
 	console.log(chalk.dim(`Restart ${APP_NAME} to use the new version`));
