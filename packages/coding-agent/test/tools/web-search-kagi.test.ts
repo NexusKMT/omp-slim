@@ -70,9 +70,9 @@ describe("Kagi web search error handling", () => {
 		await expect(searchWithKagi("invalid json", { fetch: invalidJsonFetch }, fakeAuthStorage)).rejects.toThrow(
 			"Kagi API returned an invalid response: invalid JSON",
 		);
-		await expect(searchWithKagi("invalid envelope", { fetch: invalidEnvelopeFetch }, fakeAuthStorage)).rejects.toThrow(
-			"Kagi API returned an invalid response: expected an object envelope",
-		);
+		await expect(
+			searchWithKagi("invalid envelope", { fetch: invalidEnvelopeFetch }, fakeAuthStorage),
+		).rejects.toThrow("Kagi API returned an invalid response: expected an object envelope");
 	});
 
 	it("recognizes errors plural in a successful HTTP envelope", async () => {

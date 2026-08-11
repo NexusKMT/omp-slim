@@ -306,7 +306,7 @@ describe("cursor usage provider", () => {
 			expect(report?.limits.map(limit => limit.id)).toEqual(["cursor:usd:individual-ondemand"]);
 		});
 
-	it("rejects disabled, malformed, and non-positive personal usage buckets", () => {
+		it("rejects disabled, malformed, and non-positive personal usage buckets", () => {
 			expect(
 				parseCursorIndividualUsage({
 					individualUsage: { overall: { enabled: false, used: 100, limit: 1000, remaining: 900 } },

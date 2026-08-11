@@ -576,8 +576,7 @@ describe("searchExa", () => {
 		expect(capturedRequestBody?.params).toEqual({
 			name: "web_search_exa",
 			arguments: {
-				query:
-					"vector databases site:qdrant.tech -site:spam.example after:2024-01-01 before:2025-01-01",
+				query: "vector databases site:qdrant.tech -site:spam.example after:2024-01-01 before:2025-01-01",
 				numResults: 4,
 			},
 		});

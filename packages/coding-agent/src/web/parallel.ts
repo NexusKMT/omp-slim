@@ -146,10 +146,7 @@ export function parseParallelErrorResponse(statusCode: number, responseText: str
 	}
 }
 
-export async function parseParallelJsonResponse(
-	response: Response,
-	operation: "search" | "extract",
-): Promise<unknown> {
+export async function parseParallelJsonResponse(response: Response, operation: "search" | "extract"): Promise<unknown> {
 	try {
 		return await response.json();
 	} catch (err) {

@@ -580,9 +580,7 @@ describe("searchCodex model selection", () => {
 			"",
 		].join("\n");
 
-		const result = await searchCodex(
-			makeSearchParams("action sources", mockCodexFetch("gpt-5.4", sse)),
-		);
+		const result = await searchCodex(makeSearchParams("action sources", mockCodexFetch("gpt-5.4", sse)));
 
 		expect(capturedRequest?.body?.include).toEqual(["web_search_call.action.sources"]);
 		expect(result.requestId).toBe("resp_created_id");

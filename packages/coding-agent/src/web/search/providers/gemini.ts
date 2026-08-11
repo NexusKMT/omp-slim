@@ -320,13 +320,11 @@ async function parseGeminiSearchStream(
 	};
 }
 
-
 function isGroundingRedirectUrl(url: string): boolean {
 	try {
 		const parsed = new URL(url);
 		return (
-			parsed.hostname === "vertexaisearch.cloud.google.com" &&
-			parsed.pathname.includes("/grounding-api-redirect")
+			parsed.hostname === "vertexaisearch.cloud.google.com" && parsed.pathname.includes("/grounding-api-redirect")
 		);
 	} catch {
 		return false;
@@ -524,9 +522,7 @@ async function callGeminiSearch(
 
 	if (!response?.ok) {
 		const rawErrorText = response ? await response.text() : "Network error";
-		const errorText = auth.accessToken
-			? rawErrorText.split(auth.accessToken).join("[redacted]")
-			: rawErrorText;
+		const errorText = auth.accessToken ? rawErrorText.split(auth.accessToken).join("[redacted]") : rawErrorText;
 		const status = response?.status ?? 502;
 		const classified = classifyProviderHttpError("gemini", status, errorText);
 		if (classified) throw classified;
@@ -580,25 +576,22 @@ async function callGeminiDeveloperSearch(
 		requestBody.generationConfig = generationConfig;
 	}
 
-	const response = await fetchWithRetry(
-		() => `${endpoint.url}/models/${model}:streamGenerateContent?alt=sse`,
-		{
-			method: "POST",
-			headers: {
-				...(endpoint.isCloudflareGateway
-					? { "cf-aig-authorization": `Bearer ${apiKey}` }
-					: { "x-goog-api-key": apiKey }),
-				"Content-Type": "application/json",
-				Accept: "text/event-stream",
-			},
-			body: JSON.stringify(requestBody),
-			signal: withHardTimeout(signal, timeoutMs),
-			fetch: fetchImpl,
-			maxAttempts: MAX_RETRIES + 1,
-			defaultDelayMs: attempt => BASE_DELAY_MS * 2 ** attempt,
-			maxDelayMs: RATE_LIMIT_BUDGET_MS,
+	const response = await fetchWithRetry(() => `${endpoint.url}/models/${model}:streamGenerateContent?alt=sse`, {
+		method: "POST",
+		headers: {
+			...(endpoint.isCloudflareGateway
+				? { "cf-aig-authorization": `Bearer ${apiKey}` }
+				: { "x-goog-api-key": apiKey }),
+			"Content-Type": "application/json",
+			Accept: "text/event-stream",
 		},
-	);
+		body: JSON.stringify(requestBody),
+		signal: withHardTimeout(signal, timeoutMs),
+		fetch: fetchImpl,
+		maxAttempts: MAX_RETRIES + 1,
+		defaultDelayMs: attempt => BASE_DELAY_MS * 2 ** attempt,
+		maxDelayMs: RATE_LIMIT_BUDGET_MS,
+	});
 
 	if (!response.ok) {
 		const rawErrorText = await response.text();
@@ -674,7 +667,7 @@ export async function searchGemini(params: GeminiSearchParams): Promise<SearchRe
 		if (!apiKey) {
 			throw new Error(
 				endpoint.isCloudflareGateway
-					? "No Cloudflare AI Gateway credential found. Configure provider \"cloudflare-ai-gateway\" or set CLOUDFLARE_AI_GATEWAY_API_KEY."
+					? 'No Cloudflare AI Gateway credential found. Configure provider "cloudflare-ai-gateway" or set CLOUDFLARE_AI_GATEWAY_API_KEY.'
 					: "No Gemini credentials found. Set GEMINI_API_KEY, configure an API key for provider \"google\", or login with 'omp /login google-gemini-cli' / 'omp /login google-antigravity' to enable Gemini web search.",
 			);
 		}

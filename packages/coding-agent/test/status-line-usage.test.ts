@@ -405,7 +405,9 @@ describe("usage status-line segment", () => {
 			[
 				{
 					provider: "opencode-go",
-					limits: [{ id: "opencode-go:usd:monthly", scope: { windowId: "monthly" }, amount: { usedFraction: 0.42 } }],
+					limits: [
+						{ id: "opencode-go:usd:monthly", scope: { windowId: "monthly" }, amount: { usedFraction: 0.42 } },
+					],
 				},
 			],
 			{ provider: "opencode-go" },

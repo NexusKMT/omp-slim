@@ -24,7 +24,12 @@ describe("buildFireworksFastSeed", () => {
 	const byId = new Map(seed.map(model => [model.id, model]));
 
 	it("emits one fireworks fast variant per curated base", () => {
-		expect([...byId.keys()].sort()).toEqual(["glm-5.1-fast", "glm-5.2-fast", "kimi-k2.6-fast", "kimi-k2.7-code-fast"]);
+		expect([...byId.keys()].sort()).toEqual([
+			"glm-5.1-fast",
+			"glm-5.2-fast",
+			"kimi-k2.6-fast",
+			"kimi-k2.7-code-fast",
+		]);
 		for (const model of seed) {
 			expect(model.provider).toBe("fireworks");
 			expect(isFireworksFastModelId(model.id)).toBe(true);

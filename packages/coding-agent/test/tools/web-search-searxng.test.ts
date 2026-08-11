@@ -126,13 +126,9 @@ describe("SearXNG web search provider", () => {
 		try {
 			await Bun.write(
 				path.join(agentDir, "config.yml"),
-				[
-					"searxng:",
-					"  endpoint: https://searx.example.org",
-					"  categories: news",
-					"  safesearch: 2",
-					"",
-				].join("\n"),
+				["searxng:", "  endpoint: https://searx.example.org", "  categories: news", "  safesearch: 2", ""].join(
+					"\n",
+				),
 			);
 			await Settings.init({ agentDir });
 

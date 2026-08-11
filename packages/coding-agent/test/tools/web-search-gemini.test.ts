@@ -118,8 +118,7 @@ describe("searchGemini tools serialization", () => {
 	});
 
 	it("routes Cloudflare AI Gateway auth through AuthStorage without leaking a Google API key", async () => {
-		Bun.env.GOOGLE_GEMINI_BASE_URL =
-			"https://gateway.ai.cloudflare.com/v1/account/gateway/google-ai-studio";
+		Bun.env.GOOGLE_GEMINI_BASE_URL = "https://gateway.ai.cloudflare.com/v1/account/gateway/google-ai-studio";
 		const gatewayAuthStorage = {
 			async getOAuthAccess() {
 				return undefined;
@@ -284,8 +283,7 @@ describe("searchGemini tools serialization", () => {
 	});
 
 	it("resolves Google grounding proxy URLs in both sources and citations", async () => {
-		const proxyUrl =
-			"https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc";
+		const proxyUrl = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc";
 		const responseText = `data: ${JSON.stringify({
 			candidates: [
 				{

@@ -584,11 +584,7 @@ function parseJinaReaderContent(responseBody: string): string | null {
 	if (markerStart < 0) return null;
 
 	const content = responseBody.slice(markerStart + JINA_MARKDOWN_MARKER.length).trim();
-	if (
-		content.length < 100 ||
-		content.startsWith("Loading...") ||
-		content.startsWith("Please enable JavaScript")
-	) {
+	if (content.length < 100 || content.startsWith("Loading...") || content.startsWith("Please enable JavaScript")) {
 		return null;
 	}
 	return content;

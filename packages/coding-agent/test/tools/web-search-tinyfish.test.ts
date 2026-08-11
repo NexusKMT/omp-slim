@@ -87,13 +87,7 @@ describe("TinyFish web search provider", () => {
 		expect(captured[0].searchParams.get("query")).toBe('"error handling" rust filetype:pdf');
 		expect(captured[0].searchParams.get("include_domains")).toBe("github.com");
 		expect(captured[0].searchParams.get("exclude_domains")).toBe("gitlab.com");
-		expectTinyFishParams(captured[0], [
-			"query",
-			"num_results",
-			"page",
-			"include_domains",
-			"exclude_domains",
-		]);
+		expectTinyFishParams(captured[0], ["query", "num_results", "page", "include_domains", "exclude_domains"]);
 	});
 
 	it("sends directive-free queries verbatim", async () => {

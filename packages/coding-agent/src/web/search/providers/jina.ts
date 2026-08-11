@@ -100,19 +100,10 @@ export async function searchJina(params: JinaSearchParams): Promise<SearchRespon
 	const response = await withAuth(
 		keyOrResolver,
 		apiKey =>
-			callJinaSearch(
-				apiKey,
-				params.query,
-				numResults,
-				params.site,
-				params.signal,
-				params.fetch,
-				params.timeoutMs,
-			),
+			callJinaSearch(apiKey, params.query, numResults, params.site, params.signal, params.fetch, params.timeoutMs),
 		{
 			signal: params.signal,
-			missingKeyMessage:
-				'Jina credentials not found. Set JINA_API_KEY or configure an API key for provider "jina".',
+			missingKeyMessage: 'Jina credentials not found. Set JINA_API_KEY or configure an API key for provider "jina".',
 		},
 	);
 	const sources: SearchSource[] = [];

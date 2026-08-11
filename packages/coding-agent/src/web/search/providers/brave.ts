@@ -66,7 +66,6 @@ export interface BraveSearchParams {
 	fetch?: FetchImpl;
 }
 
-
 interface BraveSearchResponse {
 	web?: unknown;
 }
@@ -206,8 +205,7 @@ export async function searchBrave(params: BraveSearchParams): Promise<SearchResp
 	});
 	const { response, requestId } = await withAuth(keyOrResolver, key => callBraveSearch(key, params), {
 		signal: params.signal,
-		missingKeyMessage:
-			'Brave credentials not found. Set BRAVE_API_KEY or configure an API key for provider "brave".',
+		missingKeyMessage: 'Brave credentials not found. Set BRAVE_API_KEY or configure an API key for provider "brave".',
 	});
 	const sources: SearchSource[] = [];
 

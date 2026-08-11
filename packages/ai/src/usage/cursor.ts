@@ -193,9 +193,7 @@ function pushCursorPlanRails(limits: UsageLimit[], bucket: Record<string, unknow
 			scope: { provider: "cursor", windowId: window.id },
 			window,
 			amount: rails.fallback,
-			...(rails.fallback.usedFraction !== undefined
-				? { status: usageStatus(rails.fallback.usedFraction) }
-				: {}),
+			...(rails.fallback.usedFraction !== undefined ? { status: usageStatus(rails.fallback.usedFraction) } : {}),
 		});
 	}
 }
@@ -257,9 +255,7 @@ export function parseCursorIndividualUsage(payload: unknown, fetchedAt = Date.no
 				scope: { provider: "cursor", windowId: window.id },
 				window,
 				amount: onDemandAmount,
-				...(onDemandAmount.usedFraction !== undefined
-					? { status: usageStatus(onDemandAmount.usedFraction) }
-					: {}),
+				...(onDemandAmount.usedFraction !== undefined ? { status: usageStatus(onDemandAmount.usedFraction) } : {}),
 			});
 		}
 	}

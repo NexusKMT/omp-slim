@@ -323,13 +323,7 @@ function parseResponse(response: XAIResponsesResponse, resultCap: number): Searc
 		const content = Array.isArray(item.content) ? item.content : [];
 		for (const part of content) {
 			if (!part || typeof part !== "object") continue;
-			collectAnnotationSources(
-				part.annotations,
-				sources,
-				citations,
-				seenUrls,
-				part.output_text ?? part.text,
-			);
+			collectAnnotationSources(part.annotations, sources, citations, seenUrls, part.output_text ?? part.text);
 		}
 	}
 	for (const item of output) {
