@@ -1634,7 +1634,7 @@ export class EventController {
 			const detail = textContent ? previewLine(sanitizeText(textContent), TRUNCATE_LENGTHS.LINE) : "";
 			this.ctx.showWarning(
 				`Todo update failed${detail ? `: ${detail}` : ". Progress may be stale until todo succeeds."}`,
-				{ toolActivity: true },
+				{ hideWithToolActivity: true },
 			);
 		}
 		// Plan approval rides a `write` to xd://propose: the dispatch metadata on

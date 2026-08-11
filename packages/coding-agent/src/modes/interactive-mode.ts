@@ -4403,7 +4403,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.requestRender();
 	}
 
-	showWarning(message: string, options?: { toolActivity?: boolean }): void {
+	showWarning(message: string, options?: { hideWithToolActivity?: boolean }): void {
 		this.#uiHelpers.showWarning(message, options);
 	}
 
