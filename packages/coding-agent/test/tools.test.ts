@@ -707,6 +707,16 @@ describe("Coding Agent Tools", () => {
 			expect(getTextOutput(memberResult)).toContain('{ "type": "module" }');
 		});
 
+		it("should reject a truncated tar member while indexing", async () => {
+			const archivePath = path.join(testDir, "truncated.tar");
+			// A full, valid archive declares 2048 bytes for `big.txt`; slicing the
+			// payload mid-member leaves the header's declared size pointing past EOF.
+			const complete = createTarArchive([{ path: "big.txt", content: "A".repeat(2048) }]);
+			fs.writeFileSync(archivePath, complete.subarray(0, 512 + 256));
+
+			await expect(readTool.execute("test-call-tar-truncated", { path: archivePath })).rejects.toThrow(/truncated/);
+		});
+
 		it("should list archive subdirectories", async () => {
 			const archivePath = path.join(testDir, "fixture.zip");
 			fs.writeFileSync(

@@ -793,6 +793,13 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 		}
 		// Only regular-file typeflags carry inline data we can slice.
 		if (typeFlag !== "0" && typeFlag !== "\0" && typeFlag !== "7" && typeFlag !== "S") continue;
+		// A declared payload that runs past the buffer means the archive was
+		// truncated mid-member (e.g. a partial download). Reject it while
+		// indexing so a root listing does not present a truncated archive as a
+		// valid directory, with the failure only surfacing on a later member read.
+		if (dataOffset + memberDataBlocks > buffer.length) {
+			throw new ToolError(`Archive member '${normalizedPath}' is truncated`);
+		}
 		entries.push({
 			path: normalizedPath,
 			isDirectory: false,
