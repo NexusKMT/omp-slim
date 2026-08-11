@@ -332,6 +332,39 @@ describe("TranscriptContainer", () => {
 		expect(currentRows).toBeGreaterThan(previousRows!);
 	});
 
+	it("keeps a width epoch anchored to a live source above a finalized notice", () => {
+		const container = new TranscriptContainer();
+		const assistant = new AssistantMessageComponent();
+		assistant.updateContent(
+			makeAssistantMessage({ content: [{ type: "text", text: "A streaming answer with a stable prefix." }] }),
+			{ transient: true },
+		);
+		container.addChild(assistant);
+		container.addChild(new Text("Finalized notice", 0, 0));
+		container.render(40);
+		const boundary = container.captureNativeScrollbackWidthEpoch();
+
+		assistant.updateContent(
+			makeAssistantMessage({
+				content: [
+					{
+						type: "text",
+						text: "A streaming answer with a stable prefix. More output arrived while the pane resized.",
+					},
+				],
+			}),
+			{ transient: true },
+		);
+		const rendered = container.render(17);
+		const previousRows = container.resolveNativeScrollbackWidthEpoch(boundary);
+		const currentRows = container.getNativeScrollbackWidthEpochRows();
+
+		expect(previousRows).toBeGreaterThan(0);
+		expect(currentRows).toBe(rendered.length);
+		expect(currentRows).toBeGreaterThan(previousRows!);
+		expect(rendered.slice(previousRows!).join("\n")).toContain("Finalized notice");
+	});
+
 	it("starts the live region at the earliest of several unfinalized blocks", () => {
 		const container = new TranscriptContainer();
 		const sealed = new StreamingBlock(["done"], true);

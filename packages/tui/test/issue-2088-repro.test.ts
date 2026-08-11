@@ -128,6 +128,42 @@ class CommittedMutableLinesComponent implements Component, NativeScrollbackCommi
 	}
 }
 
+class WidthEpochAuditLinesComponent implements Component, NativeScrollbackLiveRegion {
+	#lines: string[];
+	#liveStart: number | undefined;
+
+	constructor(lines: string[], liveStart: number) {
+		this.#lines = [...lines];
+		this.#liveStart = liveStart;
+	}
+
+	append(lines: string[]): void {
+		this.#lines.push(...lines);
+	}
+
+	setLine(index: number, line: string): void {
+		this.#lines[index] = line;
+	}
+
+	setLiveStart(row: number): void {
+		this.#liveStart = row;
+	}
+
+	finalize(): void {
+		this.#liveStart = undefined;
+	}
+
+	getNativeScrollbackLiveRegionStart(): number | undefined {
+		return this.#liveStart;
+	}
+
+	invalidate(): void {}
+
+	render(width: number): string[] {
+		return this.#lines.map(line => line.slice(0, width));
+	}
+}
+
 class WrappingStreamComponent implements Component, NativeScrollbackLiveRegion, NativeScrollbackWidthEpoch {
 	#records: string[] = [];
 	#stream = "";
@@ -1317,6 +1353,67 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 						line,
 					).toHaveLength(1);
 				}
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("recommits a post-width-epoch mutable snapshot once when it finalizes", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const initial = Array.from({ length: 12 }, (_value, index) => `row-${index.toString().padStart(2, "0")}`);
+			const component = new WidthEpochAuditLinesComponent(initial, 8);
+			const term = new VirtualTerminal(40, 4, 1000);
+			const tui = new TUI(term);
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 4);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				component.append(["row-12", "row-13", "row-14", "row-15"]);
+				tui.requestRender(true);
+				await settle(term);
+				const committedAtNewWidth = term.getBufferPosition().baseY;
+
+				component.setLine(9, "preview-changed");
+				tui.requestRender(true);
+				await settle(term);
+				expect(term.getBufferPosition().baseY).toBe(committedAtNewWidth);
+
+				component.setLine(9, "final-row-09");
+				component.finalize();
+				tui.requestRender(true);
+				await settle(term);
+				expect(term.getBufferPosition().baseY).toBe(committedAtNewWidth + 3);
+				let buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				expect(buffer.filter(line => line === "final-row-09")).toHaveLength(1);
+
+				tui.requestRender(true);
+				await settle(term);
+				expect(term.getBufferPosition().baseY).toBe(committedAtNewWidth + 3);
+				buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				expect(buffer.filter(line => line === "final-row-09")).toHaveLength(1);
+
+				// A height grow exposes tracked rows. If they scroll off again, their
+				// fresh snapshots replace (rather than duplicate) the logical ledger.
+				term.resize(17, 8);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+				component.setLiveStart(8);
+				component.setLine(9, "reexposed-preview");
+				component.append(["row-16", "row-17", "row-18", "row-19"]);
+				tui.requestRender(true);
+				await settle(term);
+				const recommittedAfterHeightGrow = term.getBufferPosition().baseY;
+
+				component.finalize();
+				tui.requestRender(true);
+				await settle(term);
+				expect(term.getBufferPosition().baseY).toBe(recommittedAfterHeightGrow);
 			} finally {
 				tui.stop();
 			}

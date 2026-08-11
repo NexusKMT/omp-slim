@@ -615,6 +615,10 @@ export class Editor implements Component, Focusable {
 		const newMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
 		if (this.#autocompleteMaxVisible !== newMaxVisible) {
 			this.#autocompleteMaxVisible = newMaxVisible;
+			if (this.#autocompleteState !== null) {
+				this.#autocompleteList?.setMaxVisible(newMaxVisible);
+				this.#widthEpochRevision++;
+			}
 		}
 	}
 
@@ -1242,6 +1246,7 @@ export class Editor implements Component, Focusable {
 					kb.matchesCanonical(canonical, "tui.select.pageDown")
 				) {
 					this.#autocompleteList.handleInput(data);
+					this.#widthEpochRevision++;
 					this.onAutocompleteUpdate?.();
 					return;
 				}
@@ -3160,6 +3165,7 @@ export class Editor implements Component, Focusable {
 			this.#autocompletePrefix = suggestions.prefix;
 			this.#autocompleteList = this.#createAutocompleteList(suggestions.prefix, suggestions.items);
 			this.#autocompleteState = "regular";
+			this.#widthEpochRevision++;
 			this.onAutocompleteUpdate?.();
 		} else {
 			this.#cancelAutocomplete();
@@ -3218,6 +3224,7 @@ export class Editor implements Component, Focusable {
 			this.#autocompletePrefix = suggestions.prefix;
 			this.#autocompleteList = this.#createAutocompleteList(suggestions.prefix, suggestions.items);
 			this.#autocompleteState = "force";
+			this.#widthEpochRevision++;
 			this.onAutocompleteUpdate?.();
 		} else {
 			this.#cancelAutocomplete();
@@ -3232,6 +3239,7 @@ export class Editor implements Component, Focusable {
 		this.#autocompleteState = null;
 		this.#autocompleteList = undefined;
 		this.#autocompletePrefix = "";
+		if (wasAutocompleting) this.#widthEpochRevision++;
 		if (notifyCancel && wasAutocompleting) {
 			this.onAutocompleteCancel?.();
 		}
@@ -3263,6 +3271,7 @@ export class Editor implements Component, Focusable {
 			this.#autocompletePrefix = suggestions.prefix;
 			// Always create new SelectList to ensure update
 			this.#autocompleteList = this.#createAutocompleteList(suggestions.prefix, suggestions.items);
+			this.#widthEpochRevision++;
 			this.onAutocompleteUpdate?.();
 		} else {
 			this.#cancelAutocomplete();

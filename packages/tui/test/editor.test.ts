@@ -27,6 +27,51 @@ describe("Editor component", () => {
 		expect(editor.getNativeScrollbackWidthEpochRevision()).toBe(changed);
 	});
 
+	it("advances its width-epoch revision when autocomplete changes without changing text", async () => {
+		const editor = new Editor(defaultEditorTheme);
+		const { promise: autocompleteUpdated, resolve: resolveAutocompleteUpdated } = Promise.withResolvers<void>();
+		editor.setAutocompleteProvider({
+			async getSuggestions() {
+				return {
+					items: Array.from({ length: 8 }, (_value, index) => ({
+						label: `/item-${index}`,
+						value: `/item-${index}`,
+						description:
+							index === 1
+								? "A deliberately long description that wraps across several narrow popup rows."
+								: "Short",
+					})),
+					prefix: "/",
+				};
+			},
+			applyCompletion(lines, cursorLine, cursorCol) {
+				return { lines, cursorLine, cursorCol };
+			},
+		});
+		editor.onAutocompleteUpdate = resolveAutocompleteUpdated;
+		editor.handleInput("/");
+		const textRevision = editor.getNativeScrollbackWidthEpochRevision();
+
+		await autocompleteUpdated;
+		const popupRevision = editor.getNativeScrollbackWidthEpochRevision();
+		expect(editor.getText()).toBe("/");
+		expect(popupRevision).toBeGreaterThan(textRevision);
+		const initialPopupRows = editor.render(30).length;
+
+		editor.handleInput("\x1b[B");
+		const selectedRevision = editor.getNativeScrollbackWidthEpochRevision();
+		expect(selectedRevision).toBeGreaterThan(popupRevision);
+
+		editor.setAutocompleteMaxVisible(8);
+		const resizedRevision = editor.getNativeScrollbackWidthEpochRevision();
+		expect(resizedRevision).toBeGreaterThan(selectedRevision);
+		expect(editor.render(30).length).toBeGreaterThan(initialPopupRows);
+
+		editor.handleInput("\x1b");
+		expect(editor.isShowingAutocomplete()).toBe(false);
+		expect(editor.getNativeScrollbackWidthEpochRevision()).toBeGreaterThan(resizedRevision);
+	});
+
 	describe("Word delete keybindings", () => {
 		it("honors a keybindings.yml remap of deleteWordBackward in the multi-line editor", () => {
 			setKeybindings(new KeybindingsManager(TUI_KEYBINDINGS, { "tui.editor.deleteWordBackward": "alt+g" }));

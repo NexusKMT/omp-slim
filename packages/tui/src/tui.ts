@@ -1161,6 +1161,16 @@ export class TUI extends Container {
 	// index in an in-place resize session. This is the current-width frame
 	// baseline; only later physical-row growth may advance the append ledger.
 	#widthEpochBaselineRows: number | undefined;
+	// Same-width snapshots physically appended after a width transition. The
+	// ordinary committed prefix includes opaque old-width native rows and can
+	// no longer be indexed against the reflowed frame; this local ledger lets
+	// newly-final post-epoch rows retain the one-time strict audit contract.
+	#widthEpochCommittedPrefix?: {
+		nativeBaseRows: number;
+		frameRows: number[];
+		prefix: string[];
+		auditRows: number;
+	};
 	// Logical source boundary captured from the last emitted frame at the first
 	// SIGWINCH in a multiplexer resize burst. Unlike physical row counts, the
 	// opaque marker survives width reflow and resolves after the settled render.
@@ -3263,7 +3273,7 @@ export class TUI extends Container {
 		const finalBoundary = Math.max(0, Math.min(frameLength, liveRegionStart ?? frameLength));
 
 		// 2. Transition state captured before any emitter runs.
-		const prevWindowTop = this.#windowTopRow;
+		let prevWindowTop = this.#windowTopRow;
 		const prevHardwareCursorRow = this.#hardwareCursorRow;
 		const resizeEventOccurred = this.#resizeEventPending;
 		this.#resizeEventPending = false;
@@ -3286,6 +3296,7 @@ export class TUI extends Container {
 			(resizeEventOccurred && this.#previousHeight > 0);
 		const geometryChanged = widthChanged || heightChanged;
 		const widthEpochReset = widthChanged && this.#resizeRepaintsInPlace();
+		if (widthEpochReset) this.#widthEpochCommittedPrefix = undefined;
 
 		// Committed-prefix audit. Rows below the audit mark are hard-verified
 		// exact bytes; rows between the mark and the current exactness boundary
@@ -3300,6 +3311,56 @@ export class TUI extends Container {
 		// every row), and skipped when the composed frame's stable prefix
 		// covers every verified row and no rows newly became final.
 		let committedRowsResynced = false;
+		const widthEpochPrefix = this.#widthEpochCommittedPrefix;
+		if (widthEpochPrefix && !geometryChanged && !this.#clearScrollbackOnNextRender) {
+			let newlyFinalRows = 0;
+			while (
+				newlyFinalRows < widthEpochPrefix.frameRows.length &&
+				widthEpochPrefix.frameRows[newlyFinalRows]! < finalBoundary
+			) {
+				newlyFinalRows++;
+			}
+			widthEpochPrefix.auditRows = Math.min(widthEpochPrefix.auditRows, newlyFinalRows);
+			const verifiedTailRow = widthEpochPrefix.frameRows[widthEpochPrefix.auditRows - 1];
+			const shouldAudit =
+				newlyFinalRows > widthEpochPrefix.auditRows ||
+				(verifiedTailRow !== undefined && this.#renderStablePrefixRows <= verifiedTailRow);
+			let resyncTo = -1;
+			const firstMissing = widthEpochPrefix.frameRows.findIndex(row => row >= frameLength);
+			if (firstMissing >= 0) {
+				const surviving = widthEpochPrefix.frameRows.slice(0, firstMissing).map(row => rawFrame[row]!);
+				for (let i = 0; i < surviving.length; i++) {
+					if (!rowsEquivalent(surviving[i]!, widthEpochPrefix.prefix[i]!)) {
+						resyncTo = i;
+						break;
+					}
+				}
+				if (resyncTo < 0) resyncTo = firstMissing;
+			} else if (shouldAudit) {
+				const current = widthEpochPrefix.frameRows.map(row => rawFrame[row]!);
+				resyncTo = findCommittedPrefixResync(
+					current,
+					widthEpochPrefix.prefix,
+					widthEpochPrefix.auditRows,
+					newlyFinalRows,
+				);
+				if (resyncTo < 0) widthEpochPrefix.auditRows = newlyFinalRows;
+			}
+			if (resyncTo >= 0) {
+				const recoveryRow = Math.min(frameLength, widthEpochPrefix.frameRows[resyncTo] ?? frameLength);
+				widthEpochPrefix.frameRows.length = resyncTo;
+				widthEpochPrefix.prefix.length = resyncTo;
+				widthEpochPrefix.auditRows = Math.min(widthEpochPrefix.auditRows, resyncTo);
+				this.#committedRows = widthEpochPrefix.nativeBaseRows + resyncTo;
+				this.#widthEpochBaselineRows = recoveryRow;
+				this.#windowTopRow = recoveryRow;
+				prevWindowTop = recoveryRow;
+				if ($flag("PI_DEBUG_REDRAW")) {
+					const msg = `[${new Date().toISOString()}] width epoch commit resync: local prefix diverged at row ${recoveryRow}; recommitting\n`;
+					fs.appendFileSync(getDebugLogPath(), msg);
+				}
+			}
+		}
 		const newlyFinalEnd = Math.min(this.#committedRows, finalBoundary);
 		// The exactness boundary can RETREAT (a markdown rewind, a mermaid fence
 		// appearing, a fast-path reset re-opening a block): rows verified under
@@ -3307,7 +3368,7 @@ export class TUI extends Container {
 		// snapshots instead of auditing content that is expected to change —
 		// their committed bytes stay as the visual record, and the next boundary
 		// rise strict-verifies them once like any other frozen row.
-		if (this.#committedPrefixAuditRows > newlyFinalEnd) {
+		if (this.#widthEpochBaselineRows === undefined && this.#committedPrefixAuditRows > newlyFinalEnd) {
 			this.#committedPrefixAuditRows = newlyFinalEnd;
 		}
 		const auditRan =
@@ -3565,6 +3626,7 @@ export class TUI extends Container {
 			this.#clearScrollbackOnNextRender = false;
 			this.#hasEverRendered = true;
 			this.#widthEpochBaselineRows = undefined;
+			this.#widthEpochCommittedPrefix = undefined;
 			this.#publishCommittedRows();
 			if (!firstPaint && frameLength > height) this.#armPostFullPaintSettle();
 			return;
@@ -3613,11 +3675,42 @@ export class TUI extends Container {
 					this.#windowTopRow = windowTop;
 				}
 				this.#committedRows += scrollRows;
+				if (!widthEpochReset && this.#widthEpochCommittedPrefix) {
+					const epochPrefix = this.#widthEpochCommittedPrefix;
+					// A height grow can expose tracked rows and let them scroll off
+					// again. Retire that superseded logical suffix into the opaque
+					// native base before recording its fresh same-width snapshot.
+					const overlap = epochPrefix.frameRows.findIndex(row => row >= commitFrom);
+					if (overlap >= 0) {
+						epochPrefix.nativeBaseRows += epochPrefix.frameRows.length - overlap;
+						epochPrefix.frameRows.length = overlap;
+						epochPrefix.prefix.length = overlap;
+						epochPrefix.auditRows = Math.min(epochPrefix.auditRows, overlap);
+					}
+					for (let row = commitFrom; row < commitTo; row++) {
+						epochPrefix.frameRows.push(row);
+						epochPrefix.prefix.push(rawFrame[row]!);
+					}
+					while (
+						epochPrefix.auditRows < epochPrefix.frameRows.length &&
+						epochPrefix.frameRows[epochPrefix.auditRows]! < finalBoundary
+					) {
+						epochPrefix.auditRows++;
+					}
+				}
 			} else if (widthEpochReset) {
 				// The overlay freezes commits and subsequent hidden-growth movement,
 				// but the resize itself changed physical-row coordinates. Rebase the
 				// window reference once so growth backfills from the settled width.
 				this.#windowTopRow = windowTop;
+			}
+			if (widthEpochReset) {
+				this.#widthEpochCommittedPrefix = {
+					nativeBaseRows: this.#committedRows,
+					frameRows: [],
+					prefix: [],
+					auditRows: 0,
+				};
 			}
 			this.#clearScrollbackOnNextRender = false;
 			this.#hasEverRendered = true;

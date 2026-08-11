@@ -248,7 +248,12 @@ export class TranscriptContainer
 	}
 
 	override captureNativeScrollbackWidthEpoch(): unknown {
-		const segment = this.#segments.at(-1);
+		// A finalized notice may be appended below a still-streaming block. The
+		// epoch must stay tied to the earliest live source; resolving the final
+		// segment would let growth above it move both boundaries and disappear
+		// from the logical suffix. The current-row query below still uses the
+		// assembled tail so trailing segments remain part of current output.
+		const segment = this.#segments.find(candidate => !candidate.finalized) ?? this.#segments.at(-1);
 		if (!segment) return undefined;
 		const child = segment.component as Component & Partial<NativeScrollbackWidthEpoch>;
 		const childHasBoundary =
