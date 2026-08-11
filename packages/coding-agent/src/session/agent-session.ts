@@ -98,7 +98,7 @@ import {
 	withTimeout,
 } from "@oh-my-pi/pi-utils";
 import { type AdvisorConfig, type AdvisorRuntimeStatus, loadAdvisorTranscriptCosts } from "../advisor";
-import { type AsyncJob, AsyncJobManager } from "../async";
+import { ASYNC_JOB_MANAGER_SHUTDOWN_REASON, type AsyncJob, AsyncJobManager } from "../async";
 import { shouldEnableAppendOnlyContext } from "../config/append-only-context-mode";
 import type { ModelRegistry } from "../config/model-registry";
 import type { ResolvedModelRoleValue } from "../config/model-resolver";
@@ -1783,10 +1783,10 @@ export class AgentSession {
 	 *
 	 * No-op when no manager is reachable or this session has no agent id.
 	 */
-	#cancelOwnAsyncJobs(): void {
+	#cancelOwnAsyncJobs(reason?: unknown): void {
 		if (!this.#agentId) return;
 		const manager = this.#asyncJobManager;
-		manager?.cancelAll({ ownerId: this.#agentId });
+		manager?.cancelAll({ ownerId: this.#agentId }, reason);
 		manager?.evictCompletedJobs({ ownerId: this.#agentId });
 		// Invalidate this owner's in-flight/drained deliveries against the new
 		// generation, then drop any async-result follow-up already queued, so a
@@ -3743,7 +3743,9 @@ export class AgentSession {
 		// dead-letter rather than enqueue a follow-up into a disposing session.
 		this.#unregisterAsyncDeliverySink?.();
 		this.#unregisterAsyncDeliverySink = undefined;
-		this.#cancelOwnAsyncJobs();
+		// Process shutdown, not an explicit kill: tag owned jobs so the task
+		// executor parks (rather than tombstones) any subagent interrupted here.
+		this.#cancelOwnAsyncJobs(ASYNC_JOB_MANAGER_SHUTDOWN_REASON);
 		const manager = this.#ownedAsyncJobManager;
 		if (!manager) return;
 

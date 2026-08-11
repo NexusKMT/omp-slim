@@ -61,24 +61,33 @@ describe("AgentSession concurrent disposal", () => {
 		return session;
 	}
 
-	it("marks owned async job cancellation as manager shutdown", async () => {
+	it("tags an owner's jobs with the shutdown reason before disposing the manager", async () => {
+		// Regression: `#disposeOwnedAsyncJobs` pre-cancels the owner's jobs via
+		// `#cancelOwnAsyncJobs` BEFORE `manager.dispose()`. If that pre-cancel
+		// dropped the shutdown reason, the owned subagent job saw a generic
+		// caller signal and was tombstoned instead of parked.
 		const owned = new AsyncJobManager({ maxRunningJobs: 1 });
 		const started = Promise.withResolvers<void>();
 		let abortReason: unknown;
-		owned.register("task", "running subagent", async ({ signal }) => {
-			const aborted = Promise.withResolvers<void>();
-			signal.addEventListener(
-				"abort",
-				() => {
-					abortReason = signal.reason;
-					aborted.resolve();
-				},
-				{ once: true },
-			);
-			started.resolve();
-			await aborted.promise;
-			return "stopped";
-		});
+		owned.register(
+			"task",
+			"running subagent",
+			async ({ signal }) => {
+				const aborted = Promise.withResolvers<void>();
+				signal.addEventListener(
+					"abort",
+					() => {
+						abortReason = signal.reason;
+						aborted.resolve();
+					},
+					{ once: true },
+				);
+				started.resolve();
+				await aborted.promise;
+				return "stopped";
+			},
+			{ ownerId: "Main", agentId: "Sub" },
+		);
 		const current = createSession(owned);
 
 		await started.promise;

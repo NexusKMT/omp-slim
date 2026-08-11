@@ -416,9 +416,14 @@ export class AsyncJobManager {
 	 * Cancel running jobs. With `filter.ownerId` set, cancels only jobs the
 	 * matching agent registered; with no filter, cancels every running job
 	 * (used by `dispose()` to nuke the manager's state).
+	 *
+	 * `reason` is forwarded to each job's `AbortController.abort`, so a session
+	 * teardown can tag its owned jobs with {@link ASYNC_JOB_MANAGER_SHUTDOWN_REASON}
+	 * before `dispose()` runs — the task executor reads it to park (not
+	 * tombstone) a subagent interrupted purely by process shutdown.
 	 */
-	cancelAll(filter?: AsyncJobFilter): void {
-		this.#cancelJobs(filter);
+	cancelAll(filter?: AsyncJobFilter, reason?: unknown): void {
+		this.#cancelJobs(filter, reason);
 	}
 
 	#cancelJobs(filter?: AsyncJobFilter, reason?: unknown): void {
