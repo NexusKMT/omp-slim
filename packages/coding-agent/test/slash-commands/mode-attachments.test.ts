@@ -5,7 +5,7 @@ import type { InteractiveModeContext, SubmittedUserInput } from "@oh-my-pi/pi-co
 
 type Attachments = Pick<SubmittedUserInput, "images" | "imageLinks">;
 
-function createHarness(inputResult: { images?: ImageContent[] }) {
+function createHarness(inputResult: { images?: ImageContent[] } | Promise<{ images?: ImageContent[] }>) {
 	const oldImage: ImageContent = { type: "image", data: "b2xk", mimeType: "image/png" };
 	const handlePlanModeCommand = vi.fn(async (_prompt?: string, _input?: Attachments) => {});
 	const handleVibeModeCommand = vi.fn(async (_prompt?: string, _input?: Attachments) => {});
@@ -100,6 +100,25 @@ describe("mode command attachments", () => {
 		);
 		expect(harness.editor.pendingImages).toEqual([]);
 		expect(harness.editor.pendingImageLinks).toEqual([]);
+	});
+	it("detaches submitted images before awaiting input extensions", async () => {
+		const inputResult = Promise.withResolvers<{ images?: ImageContent[] }>();
+		const harness = createHarness(inputResult.promise);
+		const submission = harness.editor.onSubmit?.("/plan inspect this");
+		if (!submission) throw new Error("expected editor submit handler");
+
+		expect(harness.editor.pendingImages).toEqual([]);
+		const laterImage: ImageContent = { type: "image", data: "bmV3", mimeType: "image/png" };
+		harness.editor.setText("later draft");
+		harness.editor.pendingImages = [laterImage];
+		harness.editor.pendingImageLinks = ["file:///later.png"];
+		inputResult.resolve({});
+		await submission;
+
+		expect(harness.handlePlanModeCommand.mock.calls[0]?.[1]?.images).toHaveLength(1);
+		expect(harness.editor.getText()).toBe("later draft");
+		expect(harness.editor.pendingImages).toEqual([laterImage]);
+		expect(harness.editor.pendingImageLinks).toEqual(["file:///later.png"]);
 	});
 
 	it("restores a failed mode command without overwriting a later draft", async () => {

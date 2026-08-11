@@ -3501,6 +3501,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			await this.#startGoalFromObjective(objective, input);
 		} catch (error) {
 			this.showError(error instanceof Error ? error.message : String(error));
+			throw error;
 		}
 	}
 	async handleGuidedGoalCommand(rest?: string): Promise<void> {
@@ -3695,7 +3696,16 @@ export class InteractiveMode implements InteractiveModeContext {
 	): Promise<void> {
 		await this.#enterGoalMode({ objective, silent: true });
 		this.#resetGoalContinuationSuppression();
-		if (!this.session.isStreaming && this.onInputCallback) {
+		if (this.session.isStreaming) {
+			const images = input?.images?.length ? input.images : undefined;
+			await this.withLocalSubmission(
+				objective,
+				() => this.session.prompt(objective, { streamingBehavior: "steer", images }),
+				{ imageCount: images?.length ?? 0 },
+			);
+			return;
+		}
+		if (this.onInputCallback) {
 			this.onInputCallback(this.startPendingSubmission({ text: objective, ...input }, { preserveDraft: true }));
 		}
 	}
@@ -3712,8 +3722,15 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#updateGoalModeStatus();
 		if (this.session.isStreaming) {
 			await this.session.sendGoalModeContext({ deliverAs: "steer" });
+			const images = input?.images?.length ? input.images : undefined;
+			await this.withLocalSubmission(
+				objective,
+				() => this.session.prompt(objective, { streamingBehavior: "steer", images }),
+				{ imageCount: images?.length ?? 0 },
+			);
+			return;
 		}
-		if (!this.session.isStreaming && this.onInputCallback) {
+		if (this.onInputCallback) {
 			this.onInputCallback(this.startPendingSubmission({ text: objective, ...input }, { preserveDraft: true }));
 		}
 	}

@@ -23,6 +23,7 @@ import type { InteractiveModeContext } from "../../modes/types";
 import manualContinuePrompt from "../../prompts/system/manual-continue.md" with { type: "text" };
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
 import { executeBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
+import { parseSlashCommand } from "../../slash-commands/helpers/parse";
 import { isTinyTitleLocalModelKey } from "../../tiny/models";
 import { tinyTitleClient } from "../../tiny/title-client";
 import type { TinyTitleProgressEvent } from "../../tiny/title-protocol";
@@ -678,11 +679,14 @@ export class InputController {
 			let inputImageLinks =
 				this.ctx.editor.pendingImageLinks.length > 0 ? [...this.ctx.editor.pendingImageLinks] : undefined;
 			let hasInputImages = (inputImages?.length ?? 0) > 0;
+			const submittedMode = parseSlashCommand(text)?.name;
+			const draftDetached = submittedMode === "plan" || submittedMode === "vibe" || submittedMode === "goal";
+			if (draftDetached) this.ctx.editor.clearDraft();
 
 			if (runner?.hasHandlers("input")) {
 				const result = await runner.emitInput(text, inputImages, "interactive");
 				if (result?.handled) {
-					this.ctx.editor.clearDraft();
+					if (!draftDetached) this.ctx.editor.clearDraft();
 					return;
 				}
 				if (result?.text !== undefined) {
@@ -716,7 +720,7 @@ export class InputController {
 					(inputImages?.length ?? 0) > 0 || (inputImageLinks?.length ?? 0) > 0
 						? { images: inputImages, imageLinks: inputImageLinks }
 						: undefined;
-				const slashResult = await executeBuiltinSlashCommand(text, { ctx: this.ctx, input });
+				const slashResult = await executeBuiltinSlashCommand(text, { ctx: this.ctx, input, draftDetached });
 				if (slashResult === true) {
 					if (!shouldSkipHistory(text)) this.ctx.editor.addToHistory(text);
 					return;

@@ -27,7 +27,7 @@ async function runWithDetachedModeDraft(
 	run: () => Promise<void>,
 ): Promise<void> {
 	const { editor } = runtime.ctx;
-	editor.clearDraft();
+	if (!runtime.draftDetached) editor.clearDraft();
 	try {
 		await run();
 	} catch (error) {
@@ -254,8 +254,9 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			return state ? `Goal: ${state.goal.status} (${shortDetail(state.goal.objective)})` : "Goal: off";
 		},
 		handleTui: async (command, runtime) => {
-			runtime.ctx.editor.clearDraft();
-			await runtime.ctx.handleGoalModeCommand(command.args || undefined, runtime.input);
+			await runWithDetachedModeDraft(command, runtime, () =>
+				runtime.ctx.handleGoalModeCommand(command.args || undefined, runtime.input),
+			);
 		},
 	},
 	{

@@ -85,6 +85,8 @@ export interface TuiSlashCommandRuntime {
 	ctx: InteractiveModeContext;
 	/** Post-extension-hook attachments belonging to the submitted slash draft. */
 	input?: Pick<SubmittedUserInput, "images" | "imageLinks">;
+	/** The editor snapshot was cleared before asynchronous input hooks ran. */
+	draftDetached?: boolean;
 }
 
 /** Unified slash-command spec consumed by both TUI and ACP dispatchers. */
