@@ -98,7 +98,7 @@ import { renderSegmentTrack } from "../components/segment-track";
 import { SessionAccountSelectorComponent } from "../components/session-account-selector";
 import { SessionSelectorComponent, type SessionSelectorOptions } from "../components/session-selector";
 import { SettingsSelectorComponent } from "../components/settings-selector";
-import { StrippedToolCallsPlaceholder } from "../components/stripped-tool-calls-placeholder";
+import { isToolActivityComponent } from "../components/tool-activity";
 import { ToolExecutionComponent } from "../components/tool-execution";
 import { TranscriptBlock } from "../components/transcript-container";
 import { TreeSelectorComponent } from "../components/tree-selector";
@@ -495,13 +495,13 @@ export class SelectorController {
 				this.ctx.hideToolActivity = hidden;
 				if (!hidden) this.ctx.toolOutputExpanded = false;
 				for (const child of this.ctx.chatContainer.children) {
-					if (child instanceof ToolExecutionComponent || child instanceof ReadToolGroupComponent) {
-						if (!hidden) child.setExpanded(false);
+					if (isToolActivityComponent(child)) {
+						if (!hidden && (child instanceof ToolExecutionComponent || child instanceof ReadToolGroupComponent)) {
+							child.setExpanded(false);
+						}
 						child.setToolActivityVisible(!hidden);
 					} else if (child instanceof AssistantMessageComponent) {
 						child.setToolResultImagesVisible(!hidden);
-					} else if (child instanceof StrippedToolCallsPlaceholder) {
-						child.setToolActivityVisible(!hidden);
 					}
 				}
 				if (hidden) this.ctx.ui.clearInlineImages();

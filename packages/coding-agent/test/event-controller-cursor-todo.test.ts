@@ -19,13 +19,13 @@ afterAll(() => {
 interface Fixture {
 	ctx: InteractiveModeContext;
 	controller: EventController;
-	showWarning: Mock<InteractiveModeContext["showWarning"]>;
+	showToolActivityWarning: Mock<InteractiveModeContext["showToolActivityWarning"]>;
 	/** Components the controller committed to the transcript, in order. */
 	blocks: unknown[];
 }
 
 function createFixture(): Fixture {
-	const showWarning = vi.fn();
+	const showToolActivityWarning = vi.fn();
 	const blocks: unknown[] = [];
 	const ctx = {
 		isInitialized: true,
@@ -55,9 +55,9 @@ function createFixture(): Fixture {
 		toolOutputExpanded: false,
 		setTodos: vi.fn(),
 		present: vi.fn(),
-		showWarning,
+		showToolActivityWarning,
 	} as unknown as InteractiveModeContext;
-	return { ctx, controller: new EventController(ctx), showWarning, blocks };
+	return { ctx, controller: new EventController(ctx), showToolActivityWarning, blocks };
 }
 
 /** A cumulative `message_update` whose content carries the streamed todo toolCall block. */
@@ -106,8 +106,8 @@ describe("EventController + Cursor todo bridge", () => {
 			todoFailure(`\u001b[31mrejected:\u001b[0m\tid 4\r\n\tconflicts with ${"x".repeat(400)}`),
 		);
 
-		expect(f.showWarning).toHaveBeenCalledTimes(1);
-		const message = f.showWarning.mock.calls[0]![0] as string;
+		expect(f.showToolActivityWarning).toHaveBeenCalledTimes(1);
+		const message = f.showToolActivityWarning.mock.calls[0]![0] as string;
 		expect(message).not.toContain("\t");
 		expect(message).not.toContain("\n");
 		// ANSI and other C0/C1 controls reach the terminal verbatim through
@@ -126,7 +126,9 @@ describe("EventController + Cursor todo bridge", () => {
 
 		await f.controller.handleEvent(todoFailure(""));
 
-		expect(f.showWarning).toHaveBeenCalledWith("Todo update failed. Progress may be stale until todo succeeds.");
+		expect(f.showToolActivityWarning).toHaveBeenCalledWith(
+			"Todo update failed. Progress may be stale until todo succeeds.",
+		);
 	});
 
 	it("settles a card whose completion arrived before the streamed block created it", async () => {
@@ -163,13 +165,13 @@ describe("EventController + Cursor todo bridge", () => {
 		const f = createFixture();
 
 		await f.controller.handleEvent(todoFailure("boom"));
-		expect(f.showWarning).toHaveBeenCalledTimes(1);
+		expect(f.showToolActivityWarning).toHaveBeenCalledTimes(1);
 
 		await f.controller.handleEvent(streamedTodoBlock("todo-1"));
 
 		expect(f.blocks).toHaveLength(1);
 		expect(f.ctx.pendingTools.size).toBe(0);
-		expect(f.showWarning).toHaveBeenCalledTimes(1);
+		expect(f.showToolActivityWarning).toHaveBeenCalledTimes(1);
 	});
 
 	it("refreshes the panel exactly once when a successful completion is replayed", async () => {

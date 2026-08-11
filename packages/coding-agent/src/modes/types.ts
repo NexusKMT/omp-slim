@@ -272,6 +272,7 @@ export interface InteractiveModeContext {
 	showPinnedError(message: string): void;
 	clearPinnedError(): void;
 	showWarning(message: string): void;
+	showToolActivityWarning(message: string): void;
 	showNewVersionNotification(newVersion: string): void;
 	clearEditor(): void;
 	updatePendingMessagesDisplay(): void;

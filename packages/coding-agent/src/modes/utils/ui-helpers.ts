@@ -32,6 +32,8 @@ import {
 } from "../../modes/components/read-tool-group";
 import { SkillMessageComponent } from "../../modes/components/skill-message";
 import { StrippedToolCallsPlaceholder } from "../../modes/components/stripped-tool-calls-placeholder";
+import { ToolActivityContainer } from "../../modes/components/tool-activity-container";
+import { ToolActivityWarningComponent } from "../../modes/components/tool-activity-warning";
 import { ToolExecutionComponent } from "../../modes/components/tool-execution";
 import { TranscriptBlock } from "../../modes/components/transcript-container";
 import { createUsageRowBlock } from "../../modes/components/usage-row";
@@ -40,6 +42,7 @@ import { decodeStreamedToolArgs, streamingStringKeysForTool } from "../../modes/
 import { materializeImageReferenceLinksSync } from "../../modes/image-references";
 import { theme } from "../../modes/theme/theme";
 import type { CompactionQueuedMessage, InteractiveModeContext, RenderSessionContextOptions } from "../../modes/types";
+import { LAUNCH_COMPLETION_MESSAGE_TYPE } from "../../session/launch-completion";
 import {
 	BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE,
 	type CustomMessage,
@@ -160,7 +163,9 @@ export class UiHelpers {
 			case "custom": {
 				if (message.display) {
 					if (message.customType === "async-result") {
-						this.ctx.chatContainer.addChild(buildAsyncResultBlock(message));
+						const component = buildAsyncResultBlock(message);
+						component.setToolActivityVisible(!this.ctx.hideToolActivity);
+						this.ctx.chatContainer.addChild(component);
 						break;
 					}
 					if (message.customType === LSP_LATE_DIAGNOSTIC_MESSAGE_TYPE) {
@@ -171,6 +176,18 @@ export class UiHelpers {
 						).details;
 						const component = new LateDiagnosticsMessageComponent(details?.files ?? []);
 						component.setExpanded(this.ctx.toolOutputExpanded);
+						component.setToolActivityVisible(!this.ctx.hideToolActivity);
+						this.ctx.chatContainer.addChild(component);
+						break;
+					}
+					if (message.customType === LAUNCH_COMPLETION_MESSAGE_TYPE) {
+						const messageComponent = new CustomMessageComponent(
+							message as CustomMessage<unknown>,
+							this.ctx.viewSession.extensionRunner?.getMessageRenderer(message.customType),
+						);
+						messageComponent.setExpanded(this.ctx.toolOutputExpanded);
+						const component = new ToolActivityContainer(messageComponent);
+						component.setToolActivityVisible(!this.ctx.hideToolActivity);
 						this.ctx.chatContainer.addChild(component);
 						break;
 					}
@@ -738,6 +755,12 @@ export class UiHelpers {
 	showWarning(warningMessage: string): void {
 		const text = new Text(`Warning: ${warningMessage}`, 1, 0).setStyleFn(t => theme.fg("warning", t));
 		this.ctx.present([new Spacer(1), text]);
+	}
+	showToolActivityWarning(warningMessage: string): void {
+		const text = new ToolActivityWarningComponent(`Warning: ${warningMessage}`).setStyleFn(t =>
+			theme.fg("warning", t),
+		);
+		this.ctx.present(new ToolActivityContainer([new Spacer(1), text]));
 	}
 
 	showNewVersionNotification(newVersion: string): void {

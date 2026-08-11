@@ -4406,6 +4406,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#uiHelpers.showWarning(message);
 	}
 
+	showToolActivityWarning(message: string): void {
+		this.#uiHelpers.showToolActivityWarning(message);
+	}
+
 	#handleLspStartupEvent(event: LspStartupEvent): void {
 		this.#updateWelcomeLspServers();
 

@@ -18,6 +18,7 @@ import type { AdvisorMessageDetails } from "../../advisor";
 import { COLLAB_PROMPT_MESSAGE_TYPE, type CollabPromptDetails } from "../../collab/protocol";
 import { settings } from "../../config/settings";
 import type { MessageRenderer } from "../../extensibility/extensions/types";
+import { LAUNCH_COMPLETION_MESSAGE_TYPE } from "../../session/launch-completion";
 import {
 	BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE,
 	type CustomMessage,
@@ -53,6 +54,7 @@ import { EvalExecutionComponent } from "./eval-execution";
 import { type LateDiagnosticsFile, LateDiagnosticsMessageComponent } from "./late-diagnostics-message";
 import { groupedReadUsageCallIds, ReadToolGroupComponent, readArgsCollapseIntoGroup } from "./read-tool-group";
 import { SkillMessageComponent } from "./skill-message";
+import { ToolActivityContainer } from "./tool-activity-container";
 import { ToolExecutionComponent } from "./tool-execution";
 import { TranscriptContainer } from "./transcript-container";
 import { createUsageRowBlock } from "./usage-row";
@@ -464,16 +466,18 @@ export class ChatTranscriptBuilder {
 			this.#todoSnapshot = pending;
 		}
 	}
-
 	#appendCustomMessage(message: Extract<AgentMessage, { role: "custom" | "hookMessage" }>): void {
 		if (!message.display) return;
 		if (message.customType === "async-result") {
-			this.container.addChild(buildAsyncResultBlock(message));
+			const component = buildAsyncResultBlock(message);
+			component.setToolActivityVisible(!settings.get("display.hideToolActivity"));
+			this.container.addChild(component);
 			return;
 		}
 		if (message.customType === LSP_LATE_DIAGNOSTIC_MESSAGE_TYPE) {
 			const details = (message as CustomMessage<{ files?: LateDiagnosticsFile[] }>).details;
 			const component = new LateDiagnosticsMessageComponent(details?.files ?? []);
+			component.setToolActivityVisible(!settings.get("display.hideToolActivity"));
 			this.#trackExpandable(component);
 			this.container.addChild(component);
 			return;
@@ -499,6 +503,17 @@ export class ChatTranscriptBuilder {
 		if (message.customType === "advisor") {
 			const details = (message as CustomMessage<AdvisorMessageDetails>).details;
 			this.container.addChild(createAdvisorMessageCard(details, () => this.#expanded, theme));
+			return;
+		}
+		if (message.customType === LAUNCH_COMPLETION_MESSAGE_TYPE) {
+			const messageComponent = new CustomMessageComponent(
+				message as CustomMessage<unknown>,
+				this.deps.getMessageRenderer?.(message.customType),
+			);
+			this.#trackExpandable(messageComponent);
+			const component = new ToolActivityContainer(messageComponent);
+			component.setToolActivityVisible(!settings.get("display.hideToolActivity"));
+			this.container.addChild(component);
 			return;
 		}
 		if (message.customType === BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE) {

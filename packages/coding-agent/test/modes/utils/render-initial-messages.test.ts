@@ -436,6 +436,57 @@ describe("UiHelpers.renderInitialMessages — hidden tool activity", () => {
 		expect(visibleRender).toContain(toolResultMarker);
 	});
 
+	it("hides and restores persisted internal activity blocks", () => {
+		const transcript = transcriptWith([
+			{
+				role: "custom",
+				customType: "async-result",
+				content: "",
+				display: true,
+				details: { jobId: "ASYNC_JOB_MARKER", type: "bash", label: "async marker" },
+				timestamp: 1,
+			},
+			{
+				role: "custom",
+				customType: "lsp-late-diagnostic",
+				content: "",
+				display: true,
+				details: {
+					files: [
+						{
+							path: "/tmp/internal.ts",
+							summary: "1 error(s)",
+							errored: true,
+							messages: ["internal.ts:1:1 [error] [typescript] LATE_DIAGNOSTIC_MARKER (2322)"],
+						},
+					],
+				},
+				timestamp: 2,
+			},
+			{
+				role: "custom",
+				customType: "launch-completion",
+				content: "LAUNCH_COMPLETION_MARKER",
+				display: true,
+				timestamp: 3,
+			},
+		]);
+
+		const hidden = makeRenderCtx(transcript, true, true);
+		new UiHelpers(hidden.ctx).renderInitialMessages();
+		const hiddenRender = Bun.stripANSI(hidden.chatContainer.render(120).join("\n"));
+		expect(hiddenRender).not.toContain("ASYNC_JOB_MARKER");
+		expect(hiddenRender).not.toContain("LATE_DIAGNOSTIC_MARKER");
+		expect(hiddenRender).not.toContain("LAUNCH_COMPLETION_MARKER");
+
+		const visible = makeRenderCtx(transcript, true, false);
+		new UiHelpers(visible.ctx).renderInitialMessages();
+		const visibleRender = Bun.stripANSI(visible.chatContainer.render(120).join("\n"));
+		expect(visibleRender).toContain("ASYNC_JOB_MARKER");
+		expect(visibleRender).toContain("LATE_DIAGNOSTIC_MARKER");
+		expect(visibleRender).toContain("LAUNCH_COMPLETION_MARKER");
+	});
+
 	it("hides the stripped-tool-calls placeholder with tool activity and restores it on reveal", () => {
 		const strippedAssistant: AgentMessage & StrippedToolCallsMarker = {
 			role: "assistant",
