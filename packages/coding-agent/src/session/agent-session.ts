@@ -3743,10 +3743,14 @@ export class AgentSession {
 		// dead-letter rather than enqueue a follow-up into a disposing session.
 		this.#unregisterAsyncDeliverySink?.();
 		this.#unregisterAsyncDeliverySink = undefined;
-		// Process shutdown, not an explicit kill: tag owned jobs so the task
-		// executor parks (rather than tombstones) any subagent interrupted here.
-		this.#cancelOwnAsyncJobs(ASYNC_JOB_MANAGER_SHUTDOWN_REASON);
 		const manager = this.#ownedAsyncJobManager;
+		// The shutdown reason is reserved for the top-level session that OWNS the
+		// manager — the genuine process/handled-shutdown path — so the task
+		// executor parks (rather than tombstones) interrupted subagents. A
+		// subagent session dispose (e.g. `release({ tombstone: true })` during an
+		// explicit hard kill) leaves `#ownedAsyncJobManager` undefined and must
+		// propagate a generic cancellation so its nested children stay terminal.
+		this.#cancelOwnAsyncJobs(manager ? ASYNC_JOB_MANAGER_SHUTDOWN_REASON : undefined);
 		if (!manager) return;
 
 		try {

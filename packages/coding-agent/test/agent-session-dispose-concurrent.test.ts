@@ -41,7 +41,10 @@ describe("AgentSession concurrent disposal", () => {
 		tempDir.removeSync();
 	});
 
-	function createSession(ownedAsyncJobManager?: AsyncJobManager): AgentSession {
+	function createSession(
+		ownedAsyncJobManager?: AsyncJobManager,
+		options?: { agentId?: string; asyncJobManager?: AsyncJobManager },
+	): AgentSession {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) throw new Error("expected bundled model");
 		const mock = createMockModel({ handler: () => ({ content: ["ok"] }) });
@@ -56,7 +59,8 @@ describe("AgentSession concurrent disposal", () => {
 			settings: Settings.isolated(),
 			modelRegistry: new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml")),
 			ownedAsyncJobManager,
-			agentId: "Main",
+			asyncJobManager: options?.asyncJobManager,
+			agentId: options?.agentId ?? "Main",
 		});
 		return session;
 	}
@@ -95,6 +99,44 @@ describe("AgentSession concurrent disposal", () => {
 		session = undefined;
 
 		expect(abortReason).toBe(ASYNC_JOB_MANAGER_SHUTDOWN_REASON);
+	});
+
+	it("propagates a generic cancellation for a subagent dispose so nested children stay terminal", async () => {
+		// A subagent session leaves `ownedAsyncJobManager` undefined and inherits
+		// the shared manager. Its dispose (e.g. `release({ tombstone: true })`
+		// during an explicit hard kill) must NOT tag its owned jobs as shutdown,
+		// or nested children would be rediscovered as parked instead of terminal.
+		const shared = new AsyncJobManager({ maxRunningJobs: 1 });
+		const started = Promise.withResolvers<void>();
+		let abortReason: unknown;
+		shared.register(
+			"task",
+			"nested child",
+			async ({ signal }) => {
+				const aborted = Promise.withResolvers<void>();
+				signal.addEventListener(
+					"abort",
+					() => {
+						abortReason = signal.reason;
+						aborted.resolve();
+					},
+					{ once: true },
+				);
+				started.resolve();
+				await aborted.promise;
+				return "stopped";
+			},
+			{ ownerId: "Sub", agentId: "NestedChild" },
+		);
+		const current = createSession(undefined, { agentId: "Sub", asyncJobManager: shared });
+
+		await started.promise;
+		await current.dispose();
+		session = undefined;
+
+		expect(abortReason).not.toBe(ASYNC_JOB_MANAGER_SHUTDOWN_REASON);
+		expect(abortReason).toBeInstanceOf(DOMException);
+		await shared.dispose({ timeoutMs: 1_000 });
 	});
 
 	it("starts independent writers together and closes persistence after their barrier", async () => {
