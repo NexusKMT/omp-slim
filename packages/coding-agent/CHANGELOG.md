@@ -13,24 +13,20 @@
 ### Changed
 
 - `omp cleanse` default subagent cap raised from 8 to 32 (`--agents`/`-n` still overrides).
+
 ### Fixed
 
 - Fixed `plan.defaultOnStartup: true` making headless `omp -p` runs hang until `--max-time` with no output. Print mode armed an interactive plan-review flow whose only headless exit was the model emitting a valid `xd://propose` execute-dispatch, so any turn that did not stranded to the deadline. Print mode no longer honors the startup default (it has no surface to review, approve, or exit a plan); `--plan-yolo` remains the supported headless plan flow ([#8272](https://github.com/can1357/oh-my-pi/issues/8272)).
-### Fixed
-
 - Fixed `display.hideToolActivity` leaving TTSR rules, todo reminders, late diagnostics, launch completions, async completions, and the duplicate todo-failure warning visible; all activity blocks now hide and reappear without discarding their mounted state.
+- Fixed the MCP Streamable HTTP transport never sending the `MCP-Protocol-Version` header and negotiating the stale `2025-03-26` revision, which made spec-current servers (e.g. AWS Bedrock AgentCore Gateway with an outbound per-user OAuth target) reject every `tools/call` with a generic internal error. The client now negotiates `2025-11-25`, echoes the negotiated version on every request after `initialize`, and resumes server-closed POST response streams with `Last-Event-ID` after the requested SSE retry interval ([#8264](https://github.com/can1357/oh-my-pi/issues/8264)).
+- Fixed `/handoff` losing the previous session's `local://` artifacts (plans, scratch files, research notes): the handoff document referenced files that became unreadable because the new session's `local/` root was empty. Local artifacts are now copied across the handoff session boundary, mirroring the plan approve-and-execute path ([#8261](https://github.com/can1357/oh-my-pi/issues/8261)).
+- Fixed valid `.tar` and `.tar.gz` archive reads terminating omp through libarchive by parsing tar members in-process ([#4774](https://github.com/can1357/oh-my-pi/issues/4774)).
 
 ## [17.2.14] - 2026-08-11
 
 ### Added
 
 - Added `externalThinking` setting for private scratchpad reasoning via the new `think` tool
-### Fixed
-
-- Fixed the MCP Streamable HTTP transport never sending the `MCP-Protocol-Version` header and negotiating the stale `2025-03-26` revision, which made spec-current servers (e.g. AWS Bedrock AgentCore Gateway with an outbound per-user OAuth target) reject every `tools/call` with a generic internal error. The client now negotiates `2025-11-25`, echoes the negotiated version on every request after `initialize`, and resumes server-closed POST response streams with `Last-Event-ID` after the requested SSE retry interval ([#8264](https://github.com/can1357/oh-my-pi/issues/8264)).
-### Fixed
-
-- Fixed `/handoff` losing the previous session's `local://` artifacts (plans, scratch files, research notes): the handoff document referenced files that became unreadable because the new session's `local/` root was empty. Local artifacts are now copied across the handoff session boundary, mirroring the plan approve-and-execute path ([#8261](https://github.com/can1357/oh-my-pi/issues/8261)).
 
 ## [17.2.13] - 2026-08-11
 
@@ -1793,9 +1789,6 @@
 - Fixed retry fallback model recovery by exposing `retry.fallbackChains` in `/settings`, adding a `/model` action to assign the selected default fallback model, and clearing a selected model's retry cooldown marker on manual model switches. ([#4533](https://github.com/can1357/oh-my-pi/issues/4533))
 - Fixed `/handoff` and auto-handoff skipping extension lifecycle hooks by emitting cancellable `session_before_switch` hooks and a `session_switch` with `reason: "handoff"` after the replacement session is ready ([#4434](https://github.com/can1357/oh-my-pi/issues/4434)).
 - Fixed TTSR stream interrupts so only the tool call whose stream matched a rule receives the rule-named abort result; sibling tool-call placeholders now use a neutral abort reason ([#2783](https://github.com/can1357/oh-my-pi/issues/2783)).
-### Fixed
-
-- Fixed valid `.tar` and `.tar.gz` archive reads terminating omp through libarchive by parsing tar members in-process ([#4774](https://github.com/can1357/oh-my-pi/issues/4774)).
 
 ## [16.3.11] - 2026-07-06
 
