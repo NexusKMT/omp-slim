@@ -93,6 +93,34 @@ class WrappingLinesComponent implements Component {
 	}
 }
 
+class RecoveringWrappingLinesComponent extends WrappingLinesComponent implements NativeScrollbackWidthEpoch {
+	#resolveAttempts = 0;
+	#lastRows = 0;
+
+	override render(width: number): string[] {
+		const rows = super.render(width);
+		this.#lastRows = rows.length;
+		return rows;
+	}
+
+	captureNativeScrollbackWidthEpoch(): unknown {
+		return {};
+	}
+
+	resolveNativeScrollbackWidthEpoch(): number | undefined {
+		this.#resolveAttempts++;
+		return this.#resolveAttempts === 1 ? undefined : this.#lastRows;
+	}
+
+	getNativeScrollbackWidthEpochRows(): number {
+		return this.#lastRows;
+	}
+
+	isNativeScrollbackWidthEpochAppendOnly(): boolean {
+		return true;
+	}
+}
+
 class WidthLabelComponent implements Component {
 	invalidate(): void {}
 
@@ -1403,6 +1431,74 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 				tui.requestRender(true);
 				await settle(term);
 
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (const line of appended) {
+					const marker = line.slice(0, line.indexOf(" "));
+					expect(
+						buffer.filter(bufferLine => bufferLine.includes(marker)),
+						marker,
+					).toHaveLength(1);
+				}
+				expect(visible(term)).toEqual(appended.slice(-6));
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("backfills unresolved growth queued behind an overlay during width settlement", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const initial = Array.from(
+				{ length: 8 },
+				(_value, index) => `initial-${index.toString().padStart(2, "0")} ${"I".repeat(20)}`,
+			);
+			const appended = Array.from(
+				{ length: 8 },
+				(_value, index) => `hidden-${index.toString().padStart(2, "0")} ${"H".repeat(20)}`,
+			);
+			const term = new VirtualTerminal(17, 6, 10_000);
+			const component = new RecoveringWrappingLinesComponent(initial);
+			const tui = new TUI(term);
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				const overlay = tui.showOverlay(new MutableLinesComponent(["overlay"]), {
+					anchor: "top-left",
+					row: 1,
+					col: 1,
+				});
+				await settle(term);
+
+				const writes = captureWrites(term);
+				term.resize(40, 6);
+				component.setLines([...initial, ...appended]);
+				tui.requestRender(true);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				expect(writes.join("")).not.toContain("\r\n");
+				const coveredBaseY = term.getBufferPosition().baseY;
+				writes.length = 0;
+
+				// A later pure width reset under the same overlay must retain the
+				// conservative replay debt established by the growth frame.
+				term.resize(50, 6);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+				expect(term.getBufferPosition().baseY).toBe(coveredBaseY);
+				expect(writes.join("")).not.toContain("\r\n");
+
+				writes.length = 0;
+				overlay.hide();
+				term.resize(60, 6);
+				tui.requestRender(true);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				expect(term.getBufferPosition().baseY).toBeGreaterThan(coveredBaseY);
+				expect(writes.join("")).toContain("\r\n");
 				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
 				for (const line of appended) {
 					const marker = line.slice(0, line.indexOf(" "));
