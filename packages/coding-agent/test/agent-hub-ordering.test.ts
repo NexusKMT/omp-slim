@@ -579,6 +579,7 @@ describe("Agent hub row ordering", () => {
 	it("renders aggregate usage and a selected-agent inspector without inventing change attribution", () => {
 		geometry = stubStdoutGeometry(140);
 		geometry.setRows(28);
+		const createdAt = Date.parse("2026-08-09T20:15:00Z");
 		const agents = new AgentRegistry();
 		agents.register({
 			id: "Reviewer",
@@ -591,6 +592,7 @@ describe("Agent hub row ordering", () => {
 				patchPath: "/tmp/Reviewer.patch",
 				branchName: "omp/task/Reviewer",
 			},
+			createdAt,
 		});
 		const observers = new SessionObserverRegistry();
 		vi.spyOn(observers, "getSessions").mockReturnValue([
@@ -634,7 +636,24 @@ describe("Agent hub row ordering", () => {
 			expect(rendered).toContain("Security Reviewer");
 			expect(rendered).toContain("read · src/session/agent-session.ts");
 			expect(rendered).toContain("31K/128K 24%");
-			expect(rendered).toContain("Registered ");
+			const createdDate = new Date(createdAt);
+			const localDateTime = createdDate.toLocaleString("sv-SE", {
+				year: "numeric",
+				month: "2-digit",
+				day: "2-digit",
+				hour: "2-digit",
+				minute: "2-digit",
+			});
+			const offsetMinutes = -createdDate.getTimezoneOffset();
+			const offsetSign = offsetMinutes >= 0 ? "+" : "-";
+			const absoluteOffset = Math.abs(offsetMinutes);
+			const offset = `${offsetSign}${String(Math.floor(absoluteOffset / 60)).padStart(2, "0")}:${String(
+				absoluteOffset % 60,
+			).padStart(2, "0")}`;
+			const registeredLine = `Registered ${localDateTime} ${offset}`;
+			expect(rendered).toContain(registeredLine);
+			expect(rendered).not.toMatch(/Registered \d{4}-\d{2}-\d{2} \d{2}:\d{2}Z/u);
+			expect(Bun.stripANSI(hub.render(96).join("\n"))).toContain(registeredLine);
 			expect(rendered).toContain("Shared workspace · per-agent LoC not attributable");
 			expect(rendered).toContain("Output /tmp/Reviewer.md");
 			expect(rendered).toContain("Patch /tmp/Reviewer.patch");
