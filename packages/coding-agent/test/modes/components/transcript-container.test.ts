@@ -6,7 +6,7 @@ import { AssistantMessageComponent } from "@oh-my-pi/pi-coding-agent/modes/compo
 import { TranscriptContainer } from "@oh-my-pi/pi-coding-agent/modes/components/transcript-container";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
-import { type Component, Text } from "@oh-my-pi/pi-tui";
+import { type Component, Container, Text } from "@oh-my-pi/pi-tui";
 
 // Models a transcript block that re-lays-out (tool preview collapsing, assistant
 // message finalizing, late async result) after newer blocks were appended below
@@ -343,6 +343,10 @@ describe("TranscriptContainer", () => {
 		container.addChild(new Text("Finalized notice", 0, 0));
 		container.render(40);
 		const boundary = container.captureNativeScrollbackWidthEpoch();
+		expect(container.isNativeScrollbackWidthEpochAppendOnly(boundary)).toBe(false);
+		container.render(17);
+		const settledPreviousRows = container.resolveNativeScrollbackWidthEpoch(boundary);
+		expect(container.getNativeScrollbackWidthEpochRows()).toBe(settledPreviousRows);
 
 		assistant.updateContent(
 			makeAssistantMessage({
@@ -360,9 +364,49 @@ describe("TranscriptContainer", () => {
 		const currentRows = container.getNativeScrollbackWidthEpochRows();
 
 		expect(previousRows).toBeGreaterThan(0);
-		expect(currentRows).toBe(rendered.length);
+		expect(currentRows).toBeLessThan(rendered.length);
 		expect(currentRows).toBeGreaterThan(previousRows!);
-		expect(rendered.slice(previousRows!).join("\n")).toContain("Finalized notice");
+		expect(rendered.at(-1)).toContain("Finalized notice");
+	});
+
+	it("rejects a captured live tail that mutates while finalizing", () => {
+		const container = new TranscriptContainer();
+		const assistant = new AssistantMessageComponent();
+		assistant.updateContent(makeAssistantMessage({ content: [{ type: "text", text: "Stable source marker." }] }), {
+			transient: true,
+		});
+		const trailing = new StreamingBlock(["pending-tail"]);
+		container.addChild(assistant);
+		container.addChild(trailing);
+		container.render(40);
+		const boundary = container.captureNativeScrollbackWidthEpoch();
+
+		trailing.finalize(["final-tail", "additional-final-row"]);
+		container.render(17);
+
+		expect(container.resolveNativeScrollbackWidthEpoch(boundary)).toBeUndefined();
+	});
+
+	it("propagates a nested child's non-prefix width transition", () => {
+		const container = new TranscriptContainer();
+		const nested = new Container();
+		const assistant = new AssistantMessageComponent();
+		assistant.updateContent(makeAssistantMessage({ content: [{ type: "text", text: "Nested live source." }] }), {
+			transient: true,
+		});
+		nested.addChild(assistant);
+		nested.addChild(new Text("Nested finalized notice", 0, 0));
+		container.addChild(nested);
+		container.render(40);
+		const boundary = container.captureNativeScrollbackWidthEpoch();
+
+		assistant.updateContent(
+			makeAssistantMessage({ content: [{ type: "text", text: `Nested live source. ${"growth ".repeat(20)}` }] }),
+			{ transient: true },
+		);
+		container.render(17);
+
+		expect(container.isNativeScrollbackWidthEpochAppendOnly(boundary)).toBe(false);
 	});
 
 	it("starts the live region at the earliest of several unfinalized blocks", () => {

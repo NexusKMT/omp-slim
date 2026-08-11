@@ -167,12 +167,13 @@ class WidthEpochAuditLinesComponent implements Component, NativeScrollbackLiveRe
 class WrappingStreamComponent implements Component, NativeScrollbackLiveRegion, NativeScrollbackWidthEpoch {
 	#records: string[] = [];
 	#stream = "";
+	#trailingTail: string[] = [];
 	#liveStart = 0;
 	#lastRenderedRecords: string[] = [];
 	#lastRenderedStream = "";
 	#lastWidth = 0;
 	#lastRows: string[] = [];
-	#widthEpochBoundaries = new WeakMap<object, { records: string[]; stream: string }>();
+	#widthEpochBoundaries = new WeakMap<object, { records: string[]; stream: string; trailingTail: string[] }>();
 
 	append(record: string): void {
 		this.#records.push(record);
@@ -180,6 +181,10 @@ class WrappingStreamComponent implements Component, NativeScrollbackLiveRegion, 
 
 	appendToLive(suffix: string): void {
 		this.#stream += suffix;
+	}
+
+	setTrailingTail(lines: string[]): void {
+		this.#trailingTail = [...lines];
 	}
 
 	render(width: number): string[] {
@@ -196,6 +201,10 @@ class WrappingStreamComponent implements Component, NativeScrollbackLiveRegion, 
 			rows.push(this.#stream.slice(offset, offset + chunkWidth));
 		}
 		rows.push("");
+		for (const line of this.#trailingTail) {
+			for (let offset = 0; offset < line.length; offset += chunkWidth)
+				rows.push(line.slice(offset, offset + chunkWidth));
+		}
 		this.#lastRenderedRecords = this.#records.slice();
 		this.#lastRenderedStream = this.#stream;
 		this.#lastWidth = chunkWidth;
@@ -208,6 +217,7 @@ class WrappingStreamComponent implements Component, NativeScrollbackLiveRegion, 
 		this.#widthEpochBoundaries.set(marker, {
 			records: this.#lastRenderedRecords.slice(),
 			stream: this.#lastRenderedStream,
+			trailingTail: this.#trailingTail.slice(),
 		});
 		return marker;
 	}
@@ -218,11 +228,18 @@ class WrappingStreamComponent implements Component, NativeScrollbackLiveRegion, 
 		if (!source) return undefined;
 		let rows = 0;
 		for (const record of source.records) rows += Math.ceil(record.length / this.#lastWidth) + 1;
-		return rows + Math.ceil(source.stream.length / this.#lastWidth);
+		rows += Math.ceil(source.stream.length / this.#lastWidth);
+		for (const line of source.trailingTail) rows += Math.ceil(line.length / this.#lastWidth);
+		return rows;
 	}
 
 	getNativeScrollbackWidthEpochRows(): number | undefined {
 		return Math.max(0, this.#lastRows.length - 1);
+	}
+
+	isNativeScrollbackWidthEpochAppendOnly(boundary: unknown): boolean {
+		if (typeof boundary !== "object" || boundary === null) return true;
+		return (this.#widthEpochBoundaries.get(boundary)?.trailingTail.length ?? 0) === 0;
 	}
 
 	getNativeScrollbackLiveRegionStart(): number | undefined {
@@ -863,6 +880,87 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 						marker,
 					).toHaveLength(1);
 				}
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("does not duplicate a finalized tail below live growth during width settlement", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const component = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				component.append(`history-${index.toString().padStart(2, "0")} ${"H".repeat(46)}`);
+			}
+			component.appendToLive("live-seed");
+			component.setTrailingTail(["finalized-notice"]);
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 6);
+				await Bun.sleep(10);
+				component.appendToLive(` ${"G".repeat(120)}`);
+				tui.requestRender(true);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				expect(buffer.filter(line => line === "finalized-notice")).toHaveLength(1);
+				for (let index = 0; index < 8; index++) {
+					const marker = `history-${index.toString().padStart(2, "0")}`;
+					expect(
+						buffer.filter(line => line.includes(marker)),
+						marker,
+					).toHaveLength(1);
+				}
+				expect(visible(term).at(-1)).toBe("finalized-notice");
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("freezes logical resize appends while a normal-buffer overlay is visible", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const component = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				component.append(`overlay-base-${index.toString().padStart(2, "0")} ${"B".repeat(46)}`);
+			}
+			component.appendToLive("live-seed");
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				const overlay = tui.showOverlay(new MutableLinesComponent(["overlay-marker"]), {
+					anchor: "top-left",
+					row: 0,
+					col: 0,
+				});
+				await settle(term);
+
+				const writes = captureWrites(term);
+				term.resize(17, 6);
+				await Bun.sleep(10);
+				component.appendToLive(` ${"Q".repeat(120)}`);
+				tui.requestRender(true);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+				expect(writes.join("")).not.toContain("\r\n");
+				const coveredBaseY = term.getBufferPosition().baseY;
+
+				writes.length = 0;
+				overlay.hide();
+				tui.requestRender(true);
+				await settle(term);
+				expect(term.getBufferPosition().baseY).toBeGreaterThan(coveredBaseY);
+				expect(writes.join("")).toContain("\r\n");
 			} finally {
 				tui.stop();
 			}

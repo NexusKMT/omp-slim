@@ -187,7 +187,12 @@ export class TranscriptContainer
 	#committedRows = 0;
 	#widthEpochBoundaries = new WeakMap<
 		object,
-		{ segment: BlockSegment; childBoundary: unknown; childHasBoundary: boolean }
+		{
+			segment: BlockSegment;
+			childBoundary: unknown;
+			childHasBoundary: boolean;
+			trailingSegments: BlockSegment[];
+		}
 	>();
 
 	// Stable-prefix floor accumulated across renders since the last
@@ -265,6 +270,7 @@ export class TranscriptContainer
 			segment,
 			childBoundary: childHasBoundary ? child.captureNativeScrollbackWidthEpoch?.() : undefined,
 			childHasBoundary,
+			trailingSegments: this.#segments.slice(this.#segments.indexOf(segment) + 1),
 		});
 		return marker;
 	}
@@ -284,7 +290,13 @@ export class TranscriptContainer
 		const child = current.component as Component & NativeScrollbackWidthEpoch;
 		const rawRows = child.resolveNativeScrollbackWidthEpoch(marker.childBoundary);
 		if (rawRows === undefined) return undefined;
-		return this.#mapNativeScrollbackWidthEpochRows(current, rawRows);
+		let rows = this.#mapNativeScrollbackWidthEpochRows(current, rawRows);
+		for (const captured of marker.trailingSegments) {
+			const trailing = this.#segments.find(segment => segment.component === captured.component);
+			if (!captured.finalized || !trailing?.finalized || trailing.version !== captured.version) return undefined;
+			rows += trailing.rowCount;
+		}
+		return rows;
 	}
 
 	#mapNativeScrollbackWidthEpochRows(segment: BlockSegment, rawRows: number): number {
@@ -297,12 +309,24 @@ export class TranscriptContainer
 	}
 
 	override getNativeScrollbackWidthEpochRows(): number | undefined {
-		const segment = this.#segments.at(-1);
+		const segment = this.#segments.find(candidate => !candidate.finalized) ?? this.#segments.at(-1);
 		if (!segment) return undefined;
 		const child = segment.component as Component & Partial<NativeScrollbackWidthEpoch>;
 		if (typeof child.getNativeScrollbackWidthEpochRows !== "function") return this.#lines.length;
 		const rawRows = child.getNativeScrollbackWidthEpochRows();
-		return rawRows === undefined ? undefined : this.#mapNativeScrollbackWidthEpochRows(segment, rawRows);
+		if (rawRows === undefined) return undefined;
+		let rows = this.#mapNativeScrollbackWidthEpochRows(segment, rawRows);
+		for (const trailing of this.#segments.slice(this.#segments.indexOf(segment) + 1)) rows += trailing.rowCount;
+		return rows;
+	}
+
+	override isNativeScrollbackWidthEpochAppendOnly(boundary: unknown): boolean {
+		if (typeof boundary !== "object" || boundary === null) return true;
+		const marker = this.#widthEpochBoundaries.get(boundary);
+		if (!marker) return true;
+		const child = marker.segment.component as Component & Partial<NativeScrollbackWidthEpoch>;
+		if (child.isNativeScrollbackWidthEpochAppendOnly?.(marker.childBoundary) === false) return false;
+		return !marker.trailingSegments.some(segment => segment.rowCount > 0);
 	}
 
 	getRenderStablePrefixRows(): number {
