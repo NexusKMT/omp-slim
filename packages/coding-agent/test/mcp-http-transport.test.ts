@@ -170,3 +170,47 @@ describe("MCP Streamable HTTP protocol version header", () => {
 		expect(seen.post).toBe("2025-11-25");
 	});
 });
+
+describe("MCP Streamable HTTP POST response resumption", () => {
+	it("resumes a closed response stream with Last-Event-ID after the requested retry delay", async () => {
+		const observed: {
+			lastEventId: string | null;
+			protocolVersion: string | null;
+			postClosedAt: number;
+			resumedAt: number;
+		} = { lastEventId: null, protocolVersion: null, postClosedAt: 0, resumedAt: 0 };
+		server = Bun.serve({
+			port: 0,
+			fetch(req) {
+				if (req.method === "POST") {
+					observed.postClosedAt = performance.now();
+					return new Response("id: stream-1\nretry: 20\ndata:\n\n", {
+						headers: { "Content-Type": "text/event-stream" },
+					});
+				}
+				observed.resumedAt = performance.now();
+				observed.lastEventId = req.headers.get("Last-Event-ID");
+				observed.protocolVersion = req.headers.get("MCP-Protocol-Version");
+				return new Response(
+					'id: stream-2\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"resumed","inputSchema":{"type":"object"}}]}}\n\n',
+					{ headers: { "Content-Type": "text/event-stream" } },
+				);
+			},
+		});
+		if (!server) throw new Error("Test server was not started");
+		const transport = new HttpTransport({
+			type: "http",
+			url: `http://127.0.0.1:${server.port}/mcp`,
+			timeout: GUARD_TIMEOUT_MS,
+		});
+		await transport.connect();
+		transport.setProtocolVersion("2025-11-25");
+
+		await expect(withPendingGuard(transport.request<ToolList>("tools/list"), "request")).resolves.toEqual({
+			tools: [{ name: "resumed", inputSchema: { type: "object" } }],
+		});
+		expect(observed.lastEventId).toBe("stream-1");
+		expect(observed.protocolVersion).toBe("2025-11-25");
+		expect(observed.resumedAt - observed.postClosedAt).toBeGreaterThanOrEqual(15);
+	});
+});
