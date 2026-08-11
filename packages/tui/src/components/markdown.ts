@@ -1578,11 +1578,15 @@ export class Markdown
 		);
 		snapshot.#ignoreTight = this.#ignoreTight;
 		snapshot.#transientRenderCache = this.#transientRenderCache;
-		return snapshot.render(this.#cachedWidth).length;
+		return this.#widthEpochRows(snapshot.render(this.#cachedWidth).length);
 	}
 
 	getNativeScrollbackWidthEpochRows(): number | undefined {
-		return this.#cachedLines?.length;
+		return this.#cachedLines === undefined ? undefined : this.#widthEpochRows(this.#cachedLines.length);
+	}
+
+	#widthEpochRows(renderedRows: number): number {
+		return Math.max(0, renderedRows - this.#paddingY - (this.#transientRenderCache ? 1 : 0));
 	}
 
 	/**

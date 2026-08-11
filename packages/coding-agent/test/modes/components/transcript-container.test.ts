@@ -310,6 +310,8 @@ describe("TranscriptContainer", () => {
 		container.addChild(assistant);
 		container.render(40);
 		const boundary = container.captureNativeScrollbackWidthEpoch();
+		const settledRows = container.resolveNativeScrollbackWidthEpoch(boundary);
+		expect(container.getNativeScrollbackWidthEpochRows()).toBe(settledRows);
 
 		assistant.updateContent(
 			makeAssistantMessage({

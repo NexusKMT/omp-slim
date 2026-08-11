@@ -13,6 +13,24 @@ function renderCold(text: string, theme: MarkdownTheme): readonly string[] {
 }
 
 describe("Markdown streaming prefix render cache", () => {
+	it("keeps the mutable trailing row in the width-epoch suffix", () => {
+		const initialText = "A streaming paragraph whose final row will receive more text";
+		const md = new Markdown(initialText, 0, 1, defaultMarkdownTheme);
+		md.transientRenderCache = true;
+		md.render(40);
+		const boundary = md.captureNativeScrollbackWidthEpoch();
+
+		const settledBoundary = md.resolveNativeScrollbackWidthEpoch(boundary);
+		const settledCurrent = md.getNativeScrollbackWidthEpochRows();
+		const snapshotRows = new Markdown(initialText, 0, 1, defaultMarkdownTheme).render(40).length;
+		expect(settledBoundary).toBe(snapshotRows - 2);
+		expect(settledCurrent).toBe(settledBoundary);
+
+		md.setText(`${initialText} followed by enough appended words to create additional physical rows`);
+		md.render(40);
+		expect(md.getNativeScrollbackWidthEpochRows()).toBeGreaterThan(settledBoundary!);
+	});
+
 	it("reuses rendered frozen prefix lines during transient append renders", () => {
 		let codeBlockCalls = 0;
 		let codeBlockBorderCalls = 0;
