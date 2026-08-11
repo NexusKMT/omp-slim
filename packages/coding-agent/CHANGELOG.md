@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed command-backed provider API keys (`!command`) staying pinned to their process-cached value after HTTP 401; auth retry now reruns the command, updates live authorization headers, and retries with the refreshed bearer.
+
+
 ## [17.2.15] - 2026-08-12
 
 ### Added
