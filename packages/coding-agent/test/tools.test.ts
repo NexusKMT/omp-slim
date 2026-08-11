@@ -717,6 +717,18 @@ describe("Coding Agent Tools", () => {
 			await expect(readTool.execute("test-call-tar-truncated", { path: archivePath })).rejects.toThrow(/truncated/);
 		});
 
+		it("should reject a gzip payload that is not a tar archive", async () => {
+			// `sniffArchiveFormat` classifies any gzip magic as tar.gz, so a plain
+			// `.txt.gz` (decompressed payload shorter than one 512-byte tar block)
+			// must raise a catchable error instead of listing an empty directory.
+			const archivePath = path.join(testDir, "note.tar.gz");
+			fs.writeFileSync(archivePath, zlib.gzipSync(Buffer.from("hello world\n")));
+
+			await expect(readTool.execute("test-call-gzip-non-tar", { path: archivePath })).rejects.toThrow(
+				/not a valid tar archive/i,
+			);
+		});
+
 		it("should list archive subdirectories", async () => {
 			const archivePath = path.join(testDir, "fixture.zip");
 			fs.writeFileSync(

@@ -729,9 +729,15 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 	let offset = 0;
 	let longName: string | undefined;
 	let pax: Map<string, string> | undefined;
+	// A valid tar ends with a zero block. Track whether we reach one so an empty
+	// index can be distinguished from a payload that is not a tar at all.
+	let sawTerminator = false;
 
 	while (offset + TAR_BLOCK_SIZE <= buffer.length) {
-		if (isTarZeroBlock(buffer, offset)) break;
+		if (isTarZeroBlock(buffer, offset)) {
+			sawTerminator = true;
+			break;
+		}
 		if (!tarChecksumMatches(buffer, offset)) {
 			throw new ToolError("Invalid or corrupt tar archive header");
 		}
@@ -807,6 +813,15 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 			mtimeMs,
 			storage: { type: "tar", buffer, dataOffset, sparse },
 		});
+	}
+
+	// No entries and no terminating zero block means the decompressed payload
+	// never presented a complete tar header (e.g. a `.txt.gz`, or a `.tar(.gz)`
+	// truncated before the first header/terminator). `sniffArchiveFormat` routes
+	// every gzip magic here, so raise a catchable error instead of rendering it
+	// as an empty archive directory — callers (fetch) then fall back to binary.
+	if (entries.length === 0 && !sawTerminator) {
+		throw new ToolError("Not a valid tar archive: no complete header or terminating block");
 	}
 
 	return entries;
