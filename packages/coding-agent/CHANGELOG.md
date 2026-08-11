@@ -13,6 +13,9 @@
 ### Changed
 
 - `omp cleanse` default subagent cap raised from 8 to 32 (`--agents`/`-n` still overrides).
+### Fixed
+
+- Fixed `plan.defaultOnStartup: true` making headless `omp -p` runs hang until `--max-time` with no output. Print mode armed an interactive plan-review flow whose only headless exit was the model emitting a valid `xd://propose` execute-dispatch, so any turn that did not stranded to the deadline. Print mode no longer honors the startup default (it has no surface to review, approve, or exit a plan); `--plan-yolo` remains the supported headless plan flow ([#8272](https://github.com/can1357/oh-my-pi/issues/8272)).
 
 ## [17.2.14] - 2026-08-11
 
