@@ -118,6 +118,67 @@ function createTarArchive(entries: ArchiveFixtureEntry[]): Buffer {
 	return Buffer.concat(parts);
 }
 
+function tarChecksum(header: Buffer): void {
+	header.fill(0x20, 148, 156);
+	let checksum = 0;
+	for (const byte of header) checksum += byte;
+	header.write(checksum.toString(8).padStart(6, "0"), 148, 6, "ascii");
+	header[154] = 0;
+	header[155] = 0x20;
+}
+
+function paxRecord(key: string, value: string): Buffer {
+	const suffix = ` ${key}=${value}\n`;
+	let length = suffix.length;
+	while (`${length}`.length + suffix.length !== length) {
+		length = `${length}`.length + suffix.length;
+	}
+	return Buffer.from(`${length}${suffix}`, "utf-8");
+}
+
+/**
+ * Build a GNU 1.0 sparse PAX archive: an `x` extended header carrying the
+ * user-visible `GNU.sparse.name`/`GNU.sparse.realsize`, followed by a regular
+ * file header using the internal `GNUSparseFile.NNN` path.
+ */
+function createSparsePaxTarArchive(realName: string, realSize: number, storedData: Buffer): Buffer {
+	const paxBody = Buffer.concat([
+		paxRecord("GNU.sparse.major", "1"),
+		paxRecord("GNU.sparse.minor", "0"),
+		paxRecord("GNU.sparse.name", realName),
+		paxRecord("GNU.sparse.realsize", `${realSize}`),
+		paxRecord("size", `${storedData.length}`),
+	]);
+	const paxHeader = Buffer.alloc(512, 0);
+	writeTarString(paxHeader, 0, 100, "./PaxHeaders/sparse");
+	writeTarOctal(paxHeader, 100, 8, 0o644);
+	writeTarOctal(paxHeader, 124, 12, paxBody.length);
+	writeTarOctal(paxHeader, 136, 12, Math.floor(Date.now() / 1000));
+	paxHeader[156] = "x".charCodeAt(0);
+	writeTarString(paxHeader, 257, 6, "ustar");
+	writeTarString(paxHeader, 263, 2, "00");
+	tarChecksum(paxHeader);
+
+	const fileHeader = Buffer.alloc(512, 0);
+	writeTarString(fileHeader, 0, 100, "./GNUSparseFile.0/sparse.bin");
+	writeTarOctal(fileHeader, 100, 8, 0o644);
+	writeTarOctal(fileHeader, 124, 12, storedData.length);
+	writeTarOctal(fileHeader, 136, 12, Math.floor(Date.now() / 1000));
+	fileHeader[156] = "0".charCodeAt(0);
+	writeTarString(fileHeader, 257, 6, "ustar");
+	writeTarString(fileHeader, 263, 2, "00");
+	tarChecksum(fileHeader);
+
+	const parts: Buffer[] = [paxHeader];
+	const paxRemainder = paxBody.length % 512;
+	parts.push(paxBody, paxRemainder === 0 ? Buffer.alloc(0) : Buffer.alloc(512 - paxRemainder, 0));
+	parts.push(fileHeader, storedData);
+	const dataRemainder = storedData.length % 512;
+	if (dataRemainder !== 0) parts.push(Buffer.alloc(512 - dataRemainder, 0));
+	parts.push(Buffer.alloc(1024, 0));
+	return Buffer.concat(parts);
+}
+
 const CRC32_TABLE = (() => {
 	const table = new Uint32Array(256);
 	for (let index = 0; index < 256; index++) {
@@ -802,6 +863,26 @@ describe("Coding Agent Tools", () => {
 				}),
 			).rejects.toThrow(/cannot be materialized/);
 			await expect(readArchiveEntries(archivePath)).rejects.toThrow(/cannot be materialized/);
+		});
+
+		it("should surface GNU sparse PAX names and reject sparse reads", async () => {
+			const archivePath = path.join(testDir, "sparse-pax.tar");
+			fs.writeFileSync(
+				archivePath,
+				createSparsePaxTarArchive("data/sparse.bin", 1048576, Buffer.from("sparse-map\n")),
+			);
+
+			// The listing must show the real GNU.sparse.name, not the internal
+			// GNUSparseFile.NNN path.
+			const rootResult = await readTool.execute("test-call-tar-sparse-root", { path: `${archivePath}:data` });
+			expect(getTextOutput(rootResult)).toContain("sparse.bin");
+			expect(getTextOutput(rootResult)).not.toContain("GNUSparseFile");
+
+			// Reading the real member name resolves the entry and rejects it as
+			// sparse (a catchable error), rather than reporting it missing.
+			await expect(
+				readTool.execute("test-call-tar-sparse-member", { path: `${archivePath}:data/sparse.bin` }),
+			).rejects.toThrow(/sparse file and cannot be read/);
 		});
 
 		it("should reject a truncated tar member while indexing", async () => {

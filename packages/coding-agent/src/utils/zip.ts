@@ -796,6 +796,20 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 			const parsed = Number.parseInt(paxSize, 10);
 			if (Number.isFinite(parsed) && parsed >= 0) size = parsed;
 		}
+		// GNU 1.0 sparse PAX stores the user-visible path in a dedicated record
+		// while the file header carries an internal `GNUSparseFile.NNN` name.
+		// Surface the real name so listings and `read <archive>:<name>` resolve
+		// the member (its bytes are still rejected as sparse below). The header
+		// `size` remains the on-disk stored length that drives offset advance
+		// and truncation; `GNU.sparse.realsize` is display-only.
+		const paxSparseName = pax?.get("GNU.sparse.name");
+		if (paxSparseName !== undefined) name = paxSparseName;
+		let displaySize = size;
+		const paxSparseRealSize = pax?.get("GNU.sparse.realsize");
+		if (paxSparseRealSize !== undefined) {
+			const parsed = Number.parseInt(paxSparseRealSize, 10);
+			if (Number.isFinite(parsed) && parsed >= 0) displaySize = parsed;
+		}
 		const sparse = typeFlag === "S" || paxDeclaresSparse(pax);
 		const dataOffset = offset;
 		const memberDataBlocks = Math.ceil(size / TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE;
@@ -852,7 +866,7 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 		entries.push({
 			path: normalizedPath,
 			isDirectory: false,
-			size,
+			size: displaySize,
 			mtimeMs,
 			storage: { type: "tar", buffer, dataOffset, sparse },
 		});
