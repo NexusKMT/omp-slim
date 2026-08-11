@@ -120,6 +120,7 @@ export function withEmptyCompletionRetry<M, O extends EmptyCompletionRetryOption
 				!committed &&
 				message !== undefined &&
 				message.stopReason === "stop" &&
+				message.stopDetails?.type !== "pause_turn" &&
 				!message.errorMessage &&
 				(message.usage?.output ?? 0) <= 1 &&
 				!hasVisibleAssistantContent(message);
