@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the system prompt unconditionally requiring browser verification for UI changes even when the `browser` tool is unavailable; verification now follows the actual UI surface and available tools, with a behavioral/smoke-test fallback when no runtime tool exists ([#8139](https://github.com/can1357/oh-my-pi/issues/8139)).
+- Fixed agent-facing prompts mentioning tools that may be absent from the session catalog: `todo`/`grep` workflow guidance in the system prompt, `glob`/`read`/`edit` drill-in hints in the project prompt, `ask` directives in plan mode, and the orchestrate notice's `task`/`edit`/`write`/`lsp`/`bash`/`todo` budget are now gated on tool availability.
+
 ## [17.2.12] - 2026-08-08
 
 ### Fixed

@@ -683,4 +683,67 @@ describe("system prompt tool inventory", () => {
 		expect(withScout).toContain("a single read-only scout while you keep working is fine");
 		expect(withoutScout).not.toContain("read-only scout");
 	});
+
+	it("does not require browser verification when the browser tool is absent (issue #8139)", async () => {
+		const opts = {
+			cwd: tempDir,
+			contextFiles: [],
+			skills: [],
+			rules: [],
+			workspaceTree: { ...EMPTY_TREE, rootPath: tempDir },
+		};
+		const tools = new Map(TOOLS);
+		const withoutBrowser = (
+			await buildSystemPrompt({
+				...opts,
+				toolNames: ["read", "bash"],
+				tools,
+				nativeTools: true,
+				inlineToolDescriptors: false,
+			})
+		).systemPrompt.join("\n\n");
+
+		expect(withoutBrowser).not.toContain("drive it in `browser`");
+		expect(withoutBrowser).not.toContain("drive it in browser");
+		expect(withoutBrowser).toContain("TUI/CLI");
+		expect(withoutBrowser).toContain("behavioral test or smoke test");
+
+		tools.set("browser", {
+			label: "Browser",
+			description: "Drives a real Chromium tab.",
+			parameters: { type: "object", properties: {} },
+		});
+		const withBrowser = (
+			await buildSystemPrompt({
+				...opts,
+				toolNames: ["read", "bash", "browser"],
+				tools,
+				nativeTools: true,
+				inlineToolDescriptors: false,
+			})
+		).systemPrompt.join("\n\n");
+
+		expect(withBrowser).toContain("drive it in `browser`");
+	});
+
+	it("omits todo workflow guidance when the todo tool is absent", async () => {
+		const opts = {
+			cwd: tempDir,
+			contextFiles: [],
+			skills: [],
+			rules: [],
+			workspaceTree: { ...EMPTY_TREE, rootPath: tempDir },
+			tools: TOOLS,
+			nativeTools: true,
+			inlineToolDescriptors: false,
+		};
+		const withoutTodo = (await buildSystemPrompt({ ...opts, toolNames: ["read", "bash"] })).systemPrompt.join("\n\n");
+		expect(withoutTodo).not.toContain("Todo calls NEVER travel alone");
+		expect(withoutTodo).not.toContain("batch every todo op");
+
+		const withTodo = (await buildSystemPrompt({ ...opts, toolNames: ["read", "bash", "todo"] })).systemPrompt.join(
+			"\n\n",
+		);
+		expect(withTodo).toContain("Todo calls NEVER travel alone");
+	});
 });

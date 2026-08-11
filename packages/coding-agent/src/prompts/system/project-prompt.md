@@ -35,14 +35,14 @@ The context files above are loaded automatically. You NEVER `grep`/`glob` for `A
 Working directory layout (sorted by mtime, recent first; depth ≤ 3):
 {{workspaceTree.rendered}}
 {{#if workspaceTree.truncated}}
-(some entries elided to keep the tree short — use `glob`/`read` to drill in)
+{{#has tools "glob"}}{{#has tools "read"}}(some entries elided to keep the tree short — use `{{toolRefs.glob}}`/`{{toolRefs.read}}` to drill in){{/has}}{{/has}}
 {{/if}}
 </workspace-tree>
 {{/if}}
 {{/if}}
 {{#if additionalWorkspaceRoots.length}}
 <workspace-roots>
-This session also spans the additional directories below. This list is the CURRENT workspace state and supersedes any workspace change mentioned earlier in the conversation. Use absolute paths under these roots to `read`/`grep`/`glob`/`edit` them. Manage the set with `/add-dir` and `/remove-dir`; `/dirs` lists them.
+This session also spans the additional directories below. This list is the CURRENT workspace state and supersedes any workspace change mentioned earlier in the conversation. {{#ifAny (includes tools "read") (includes tools "grep") (includes tools "glob") (includes tools "edit")}}Use absolute paths under these roots to {{#has tools "read"}}`{{toolRefs.read}}`{{/has}}{{#has tools "grep"}}{{#ifAny (includes tools "read")}}/{{/ifAny}}`{{toolRefs.grep}}`{{/has}}{{#has tools "glob"}}{{#ifAny (includes tools "read") (includes tools "grep")}}/{{/ifAny}}`{{toolRefs.glob}}`{{/has}}{{#has tools "edit"}}{{#ifAny (includes tools "read") (includes tools "grep") (includes tools "glob")}}/{{/ifAny}}`{{toolRefs.edit}}`{{/has}} them.{{/ifAny}} Manage the set with `/add-dir` and `/remove-dir`; `/dirs` lists them.
 {{#each additionalWorkspaceRoots}}
 - {{this}}
 {{/each}}
