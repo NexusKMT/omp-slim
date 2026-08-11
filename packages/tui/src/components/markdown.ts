@@ -11,7 +11,12 @@ import { latexToBlock } from "../latex-block";
 import { inlineMathSpanEnd, isBareMathEnvironment, latexToUnicode } from "../latex-to-unicode";
 import type { SymbolTheme } from "../symbols";
 import { TERMINAL } from "../terminal-capabilities";
-import type { Component, NativeScrollbackCommittedRows, NativeScrollbackReplay } from "../tui";
+import type {
+	Component,
+	NativeScrollbackCommittedRows,
+	NativeScrollbackReplay,
+	NativeScrollbackWidthEpoch,
+} from "../tui";
 import {
 	applyBackgroundToLine,
 	Ellipsis,
@@ -1412,7 +1417,9 @@ interface RenderedTableLayout extends TableLayoutLock {
 	endRow: number;
 }
 
-export class Markdown implements Component, NativeScrollbackCommittedRows, NativeScrollbackReplay {
+export class Markdown
+	implements Component, NativeScrollbackCommittedRows, NativeScrollbackReplay, NativeScrollbackWidthEpoch
+{
 	#text: string;
 	#paddingX: number; // Left/right padding
 	#paddingY: number; // Top/bottom padding
@@ -1450,6 +1457,11 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 	// exposure to 0 and re-earns it — the exposure is hard-monotone within a
 	// text lineage.
 	#settledExposedText?: string;
+	// Semantic source state that produced the most recent render. Unlike #text,
+	// it does not advance when streaming updates arrive before the next paint.
+	#lastRenderedText?: string;
+	#widthEpochBoundaries = new WeakMap<object, string>();
+
 	// True while #renderStreamingContentLines renders the frozen token range:
 	// frozen code blocks highlight even in transient mode so their bytes match
 	// the finalized render (they render once into the prefix line cache, so
@@ -1543,6 +1555,34 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 	 */
 	getLastRenderSettledRows(): number {
 		return this.#lastRenderSettledRows;
+	}
+
+	captureNativeScrollbackWidthEpoch(): unknown {
+		if (this.#lastRenderedText === undefined) return undefined;
+		const marker = {};
+		this.#widthEpochBoundaries.set(marker, this.#lastRenderedText);
+		return marker;
+	}
+
+	resolveNativeScrollbackWidthEpoch(boundary: unknown): number | undefined {
+		if (typeof boundary !== "object" || boundary === null || this.#cachedWidth === undefined) return undefined;
+		const text = this.#widthEpochBoundaries.get(boundary);
+		if (text === undefined) return undefined;
+		const snapshot = new Markdown(
+			text,
+			this.#paddingX,
+			this.#paddingY,
+			this.#theme,
+			this.#defaultTextStyle,
+			this.#codeBlockIndent,
+		);
+		snapshot.#ignoreTight = this.#ignoreTight;
+		snapshot.#transientRenderCache = this.#transientRenderCache;
+		return snapshot.render(this.#cachedWidth).length;
+	}
+
+	getNativeScrollbackWidthEpochRows(): number | undefined {
+		return this.#cachedLines?.length;
 	}
 
 	/**
@@ -1644,6 +1684,7 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 		// Returning the cached reference is load-bearing: parents memoize their
 		// concatenation on reference equality.
 		if (this.#cachedLines && this.#cachedText === this.#text && this.#cachedWidth === width) {
+			this.#lastRenderedText = this.#text;
 			return this.#cachedLines;
 		}
 
@@ -1660,6 +1701,7 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 			this.#cachedText = this.#text;
 			this.#cachedWidth = width;
 			this.#cachedLines = EMPTY_RENDER_LINES;
+			this.#lastRenderedText = this.#text;
 			return EMPTY_RENDER_LINES;
 		}
 
@@ -1695,6 +1737,7 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 				this.#cachedText = this.#text;
 				this.#cachedWidth = width;
 				this.#cachedLines = cached.lines;
+				this.#lastRenderedText = this.#text;
 				return cached.lines;
 			}
 		}
@@ -1738,6 +1781,7 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 				})),
 			});
 		}
+		this.#lastRenderedText = this.#text;
 
 		return result;
 	}

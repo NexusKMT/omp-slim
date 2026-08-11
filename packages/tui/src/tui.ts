@@ -220,6 +220,18 @@ export interface NativeScrollbackCommittedRows {
 }
 
 /**
+ * Width-independent source boundary for multiplexer resize epochs. Capture
+ * reads the last rendered source state; resolve maps that same logical boundary
+ * into the most recent render's physical rows at its new width. The current
+ * boundary identifies the source tail after updates queued during the resize.
+ */
+export interface NativeScrollbackWidthEpoch {
+	captureNativeScrollbackWidthEpoch(): unknown;
+	resolveNativeScrollbackWidthEpoch(boundary: unknown): number | undefined;
+	getNativeScrollbackWidthEpochRows(): number | undefined;
+}
+
+/**
  * A component that discards rows after they enter native scrollback implements
  * this hook so a destructive full replay can rehydrate its complete frame.
  */
@@ -233,6 +245,15 @@ function prepareNativeScrollbackReplay(component: Component): void {
 
 function setNativeScrollbackCommittedRows(component: Component, rows: number): void {
 	(component as Component & Partial<NativeScrollbackCommittedRows>).setNativeScrollbackCommittedRows?.(rows);
+}
+
+function getNativeScrollbackWidthEpoch(component: Component): NativeScrollbackWidthEpoch | undefined {
+	const candidate = component as Component & Partial<NativeScrollbackWidthEpoch>;
+	return candidate.captureNativeScrollbackWidthEpoch &&
+		candidate.resolveNativeScrollbackWidthEpoch &&
+		candidate.getNativeScrollbackWidthEpochRows
+		? (candidate as NativeScrollbackWidthEpoch)
+		: undefined;
 }
 
 function isOverlayFocusTarget(owner: Component, component: Component | null): boolean {
@@ -381,9 +402,27 @@ function parseSizeValue(value: SizeValue | undefined, referenceSize: number): nu
 	return undefined;
 }
 
-/** Detect terminal multiplexers where scrollback clearing and height-change redraws are hostile. */
+/**
+ * Detect sessions where ED3 cannot safely rebuild scrollback. A direct HerdR
+ * pane is deliberately excluded: HerdR's Ghostty core implements ED3, so the
+ * source-owned replay used by direct terminals is both supported and the only
+ * way to avoid hardening host-reflowed soft wraps. Nested multiplexers remain
+ * unsafe because the inner tmux/screen/Zellij layer still owns its history.
+ */
 function isMultiplexerSession(): boolean {
-	return isInsideTerminalMultiplexer();
+	if (!isInsideTerminalMultiplexer()) return false;
+	if (Bun.env.HERDR_ENV !== "1") return true;
+	const term = Bun.env.TERM?.toLowerCase() ?? "";
+	return Boolean(
+		Bun.env.TMUX ||
+			Bun.env.STY ||
+			Bun.env.ZELLIJ ||
+			Bun.env.CMUX_WORKSPACE_ID ||
+			Bun.env.CMUX_SURFACE_ID ||
+			Bun.env.CMUX_REMOTE_TRANSPORT ||
+			term.startsWith("tmux") ||
+			term.startsWith("screen"),
+	);
 }
 
 /**
@@ -486,7 +525,9 @@ export interface OverlayHandle {
 /**
  * Container - a component that contains other components
  */
-export class Container implements Component, NativeScrollbackCommittedRows, NativeScrollbackReplay {
+export class Container
+	implements Component, NativeScrollbackCommittedRows, NativeScrollbackReplay, NativeScrollbackWidthEpoch
+{
 	children: Component[] = [];
 
 	// Memoized concatenation of the children's latest renders. Children are
@@ -499,6 +540,10 @@ export class Container implements Component, NativeScrollbackCommittedRows, Nati
 	#memoLines: string[] | undefined;
 	#memoChildLines: (readonly string[])[] = [];
 	#memoWidth = -1;
+	// Child identities matching #memoChildLines. Kept separately because callers
+	// may append children after the last emitted render but before SIGWINCH.
+	#memoChildren: Component[] = [];
+	#widthEpochBoundaries = new WeakMap<object, { component: Component; childBoundary: unknown }>();
 
 	#ignoreTight = false;
 
@@ -584,6 +629,50 @@ export class Container implements Component, NativeScrollbackCommittedRows, Nati
 		for (const child of this.children) prepareNativeScrollbackReplay(child);
 	}
 
+	captureNativeScrollbackWidthEpoch(): unknown {
+		const refs = this.#memoChildLines;
+		const children = this.#memoChildren;
+		if (this.#memoLines === undefined || refs.length !== children.length) return undefined;
+		for (let index = children.length - 1; index >= 0; index--) {
+			const component = children[index]!;
+			const source = getNativeScrollbackWidthEpoch(component);
+			const childBoundary = source?.captureNativeScrollbackWidthEpoch();
+			if (childBoundary === undefined) continue;
+			const marker = {};
+			this.#widthEpochBoundaries.set(marker, { component, childBoundary });
+			return marker;
+		}
+		return undefined;
+	}
+
+	resolveNativeScrollbackWidthEpoch(boundary: unknown): number | undefined {
+		if (typeof boundary !== "object" || boundary === null) return undefined;
+		const marker = this.#widthEpochBoundaries.get(boundary);
+		if (!marker) return undefined;
+		const index = this.#memoChildren.indexOf(marker.component);
+		if (index < 0 || this.#memoLines === undefined || this.#memoChildLines.length !== this.#memoChildren.length) {
+			return undefined;
+		}
+		const childRows = getNativeScrollbackWidthEpoch(marker.component)?.resolveNativeScrollbackWidthEpoch(
+			marker.childBoundary,
+		);
+		if (childRows === undefined) return undefined;
+		let rows = childRows;
+		for (let i = 0; i < index; i++) rows += this.#memoChildLines[i]!.length;
+		return rows;
+	}
+
+	getNativeScrollbackWidthEpochRows(): number | undefined {
+		if (this.#memoLines === undefined || this.#memoChildLines.length !== this.#memoChildren.length) return undefined;
+		let offset = this.#memoLines.length;
+		for (let index = this.#memoChildren.length - 1; index >= 0; index--) {
+			offset -= this.#memoChildLines[index]!.length;
+			const rows = getNativeScrollbackWidthEpoch(this.#memoChildren[index]!)?.getNativeScrollbackWidthEpochRows();
+			if (rows !== undefined) return offset + rows;
+		}
+		return undefined;
+	}
+
 	render(width: number): readonly string[] {
 		width = Math.max(1, width);
 		const children = this.children;
@@ -601,6 +690,7 @@ export class Container implements Component, NativeScrollbackCommittedRows, Nati
 				refs[i] = childLines;
 			}
 		}
+		this.#memoChildren = children.slice();
 		this.#memoWidth = width;
 		if (unchanged) return this.#memoLines!;
 		const lines: string[] = [];
@@ -1045,6 +1135,11 @@ export class TUI extends Container {
 	// index in an in-place resize session. This is the current-width frame
 	// baseline; only later physical-row growth may advance the append ledger.
 	#widthEpochBaselineRows: number | undefined;
+	// Logical source boundary captured from the last emitted frame at the first
+	// SIGWINCH in a multiplexer resize burst. Unlike physical row counts, the
+	// opaque marker survives width reflow and resolves after the settled render.
+	#multiplexerWidthEpochBoundary: unknown;
+
 	// Frame row currently mapped to screen row 0. Monotonic between full
 	// paints: a shrink never re-exposes scrolled-off rows (they cannot be
 	// un-scrolled without rewriting history); live rows repaint at fixed
@@ -1141,6 +1236,8 @@ export class TUI extends Container {
 	// Per-root-child segment ledger backing the stable-prefix computation.
 	#frameSegments: FrameSegment[] = [];
 	#composeWidth = -1;
+	#rootWidthEpochBoundaries = new WeakMap<object, { component: Component; childBoundary: unknown }>();
+
 	// Cursor markers stripped at ingestion, ascending by frame row.
 	#frameCursorMarkers: { row: number; col: number }[] = [];
 	// Leading rows of #composedFrame byte-identical to the previous compose.
@@ -1188,6 +1285,40 @@ export class TUI extends Container {
 		this.#renderScheduler = options?.renderScheduler ?? DEFAULT_RENDER_SCHEDULER;
 		this.#showHardwareCursor = showHardwareCursor === undefined ? this.#showHardwareCursor : showHardwareCursor;
 		this.#watchdog = new LoopWatchdog();
+	}
+
+	override captureNativeScrollbackWidthEpoch(): unknown {
+		for (let index = this.#frameSegments.length - 1; index >= 0; index--) {
+			const segment = this.#frameSegments[index]!;
+			const source = getNativeScrollbackWidthEpoch(segment.component);
+			const childBoundary = source?.captureNativeScrollbackWidthEpoch();
+			if (childBoundary === undefined) continue;
+			const marker = {};
+			this.#rootWidthEpochBoundaries.set(marker, { component: segment.component, childBoundary });
+			return marker;
+		}
+		return undefined;
+	}
+
+	override resolveNativeScrollbackWidthEpoch(boundary: unknown): number | undefined {
+		if (typeof boundary !== "object" || boundary === null) return undefined;
+		const marker = this.#rootWidthEpochBoundaries.get(boundary);
+		if (!marker) return undefined;
+		const segment = this.#frameSegments.find(candidate => candidate.component === marker.component);
+		if (!segment) return undefined;
+		const childRows = getNativeScrollbackWidthEpoch(marker.component)?.resolveNativeScrollbackWidthEpoch(
+			marker.childBoundary,
+		);
+		return childRows === undefined ? undefined : segment.start + childRows;
+	}
+
+	override getNativeScrollbackWidthEpochRows(): number | undefined {
+		for (let index = this.#frameSegments.length - 1; index >= 0; index--) {
+			const segment = this.#frameSegments[index]!;
+			const rows = getNativeScrollbackWidthEpoch(segment.component)?.getNativeScrollbackWidthEpochRows();
+			if (rows !== undefined) return segment.start + rows;
+		}
+		return undefined;
 	}
 
 	override render(width: number): readonly string[] {
@@ -1650,6 +1781,9 @@ export class TUI extends Container {
 					this.#beginResizeViewport();
 					this.#requestResizeViewportPaint();
 					return;
+				}
+				if (this.#multiplexerWidthEpochBoundary === undefined) {
+					this.#multiplexerWidthEpochBoundary = this.captureNativeScrollbackWidthEpoch();
 				}
 				this.#armMultiplexerResizeTimer({
 					clearScrollback: false,
@@ -3055,6 +3189,11 @@ export class TUI extends Container {
 		this.#multiplexerResizeHasPendingRender = false;
 		if (resizeEventOccurred) this.#forgetHardwareCursorState();
 		const widthChanged = this.#previousWidth > 0 && this.#previousWidth !== width;
+		const widthEpochSourceBoundary = widthChanged
+			? this.resolveNativeScrollbackWidthEpoch(this.#multiplexerWidthEpochBoundary)
+			: undefined;
+		const widthEpochCurrentRows = widthChanged ? this.getNativeScrollbackWidthEpochRows() : undefined;
+		if (resizeEventOccurred) this.#multiplexerWidthEpochBoundary = undefined;
 		// A resize event with net-unchanged dimensions still reflowed the
 		// terminal buffer; classify it as a height change so geometry handling
 		// repaints instead of diffing against a screen that no longer exists.
@@ -3176,20 +3315,23 @@ export class TUI extends Container {
 			chunkTo = liveRegionPinned ? Math.min(windowTop, finalBoundary) : windowTop;
 		} else if (widthEpochReset) {
 			// A terminal width change ends the physical-row coordinate epoch.
-			// Multiplexer history keeps its old wrap, so old committed rows are
-			// opaque. Preserve the native commit ledger and establish a separate
-			// current-width baseline. Content queued during the settle window did
-			// not reach the terminal: retain its growth relative to the last
-			// emitted frame so the baseline emitter moves every displaced row into
-			// history before repainting the current viewport.
-			this.#widthEpochBaselineRows = resizeHadPendingRender
-				? Math.min(frameLength, this.#previousFrameLength)
-				: frameLength;
+			// Resolve the last emitted logical source boundary at the new width;
+			// updates queued during debounce are the current-boundary suffix.
+			// Components without the source contract retain the conservative
+			// legacy fallback, but never compare cross-width counts when a marker
+			// resolved successfully.
+			this.#widthEpochBaselineRows =
+				widthEpochSourceBoundary ??
+				(resizeHadPendingRender ? Math.min(frameLength, this.#previousFrameLength) : frameLength);
 			windowTop = Math.max(0, frameLength - height);
 			chunkTo = this.#committedRows;
 			widthEpochAppendFrom = this.#widthEpochBaselineRows;
-			const appendBoundary = liveRegionPinned ? finalBoundary : frameLength;
-			widthEpochAppendTo = hasVisibleOverlay ? widthEpochAppendFrom : Math.max(widthEpochAppendFrom, appendBoundary);
+			widthEpochAppendTo =
+				hasVisibleOverlay || widthEpochCurrentRows === undefined
+					? hasVisibleOverlay
+						? widthEpochAppendFrom
+						: Math.max(widthEpochAppendFrom, liveRegionPinned ? finalBoundary : frameLength)
+					: Math.max(widthEpochAppendFrom, widthEpochCurrentRows);
 		} else if (this.#widthEpochBaselineRows !== undefined) {
 			// Only rows physically appended after the width epoch may drive the
 			// terminal forward. Keep the native commit count independent of this
@@ -3344,23 +3486,32 @@ export class TUI extends Container {
 			return;
 		}
 		if (this.#widthEpochBaselineRows !== undefined) {
-			const windowMovement = Math.max(0, windowTop - prevWindowTop);
-			// A height shrink moves only occupied rows past the old seam. Empty
-			// viewport rows disappear without entering pane history, so the raw
-			// height delta would steal append-owned movement from a sparse frame.
-			const previousViewportRows = Math.min(
-				this.#previousHeight,
-				Math.max(0, this.#previousFrameLength - prevWindowTop),
-			);
-			const hostHeightShrinkRows = Math.min(windowMovement, Math.max(0, previousViewportRows - height));
-			const appendWindowMovement = windowMovement - hostHeightShrinkRows;
-			const epochGrowthRows = Math.max(0, widthEpochAppendTo - widthEpochAppendFrom);
-			const scrollRows = Math.min(appendWindowMovement, epochGrowthRows);
-			const commitFrom = prevWindowTop + hostHeightShrinkRows;
+			const logicalAppend = widthEpochSourceBoundary !== undefined && widthEpochCurrentRows !== undefined;
+			let scrollRows: number;
+			let commitFrom: number;
+			let commitTo: number;
+			if (logicalAppend) {
+				commitFrom = widthEpochSourceBoundary;
+				commitTo = Math.max(commitFrom, widthEpochCurrentRows);
+				scrollRows = commitTo - commitFrom;
+			} else {
+				const windowMovement = Math.max(0, windowTop - prevWindowTop);
+				const previousViewportRows = Math.min(
+					this.#previousHeight,
+					Math.max(0, this.#previousFrameLength - prevWindowTop),
+				);
+				const hostHeightShrinkRows = Math.min(windowMovement, Math.max(0, previousViewportRows - height));
+				const appendWindowMovement = windowMovement - hostHeightShrinkRows;
+				const epochGrowthRows = Math.max(0, widthEpochAppendTo - widthEpochAppendFrom);
+				scrollRows = Math.min(appendWindowMovement, epochGrowthRows);
+				commitFrom = prevWindowTop + hostHeightShrinkRows;
+				commitTo = commitFrom + scrollRows;
+			}
 			this.#emitWidthEpochBaseline(frame, window, width, height, cursorPos, purgeSequence, imageTransmitBuffer, {
 				repaintFromScreenRow: 0,
 				commitFrom,
-				commitTo: commitFrom + scrollRows,
+				commitTo,
+				appendOnly: logicalAppend,
 				windowTop,
 				cursorTrackingLineCount,
 				leadingSequence: deferredAltExit,
@@ -3369,7 +3520,7 @@ export class TUI extends Container {
 			if (!hasVisibleOverlay) {
 				if (liveRegionPinned) {
 					this.#widthEpochBaselineRows = widthEpochAppendTo;
-					this.#windowTopRow = prevWindowTop + scrollRows;
+					this.#windowTopRow = logicalAppend ? windowTop : prevWindowTop + scrollRows;
 				} else {
 					this.#widthEpochBaselineRows = frameLength;
 					this.#windowTopRow = windowTop;
@@ -3379,21 +3530,20 @@ export class TUI extends Container {
 			this.#clearScrollbackOnNextRender = false;
 			this.#hasEverRendered = true;
 			return;
-		} else {
-			if (imageTransmitBuffer.length > 0) {
-				this.terminal.write(imageTransmitBuffer);
-			}
-			this.#emitUpdate(frame, window, width, height, cursorPos, purgeSequence, {
-				chunkTo,
-				windowTop,
-				prevWindowTop,
-				prevHardwareCursorRow,
-				forceWindowRewrite:
-					this.#forceViewportRepaintOnNextRender || (geometryChanged && this.#resizeRepaintsInPlace()),
-				repaintVirtualScrollInPlace: hasVisibleOverlay,
-				cursorTrackingLineCount,
-			});
 		}
+		if (imageTransmitBuffer.length > 0) {
+			this.terminal.write(imageTransmitBuffer);
+		}
+		this.#emitUpdate(frame, window, width, height, cursorPos, purgeSequence, {
+			chunkTo,
+			windowTop,
+			prevWindowTop,
+			prevHardwareCursorRow,
+			forceWindowRewrite:
+				this.#forceViewportRepaintOnNextRender || (geometryChanged && this.#resizeRepaintsInPlace()),
+			repaintVirtualScrollInPlace: hasVisibleOverlay,
+			cursorTrackingLineCount,
+		});
 		for (let i = this.#committedPrefix.length; i < chunkTo; i++) {
 			this.#committedPrefix.push(rawFrame[i] ?? "");
 		}
@@ -3765,6 +3915,7 @@ export class TUI extends Container {
 			repaintFromScreenRow: number;
 			commitFrom: number;
 			commitTo: number;
+			appendOnly: boolean;
 			windowTop: number;
 			cursorTrackingLineCount: number;
 			leadingSequence: string;
@@ -3773,20 +3924,29 @@ export class TUI extends Container {
 		this.#fullRedrawCount += 1;
 		let buffer = this.#paintBeginSequence + purgeSequence + options.leadingSequence + imageTransmitBuffer;
 		if (options.commitTo > options.commitFrom) {
-			// Rebuild the current-width seam with real rows. Writing the exact
-			// newly offscreen slice followed by the viewport makes only that
-			// slice enter native history; mutable editor/live rows stay on-grid.
-			buffer += "\x1b[1;1H";
-			let wroteLine = false;
-			for (let row = options.commitFrom; row < options.commitTo; row++) {
-				if (wroteLine) buffer += "\r\n";
-				buffer += this.#lineRewriteSequence(frame[row] ?? "", width);
-				wroteLine = true;
-			}
-			for (let screenRow = 0; screenRow < height; screenRow++) {
-				if (wroteLine) buffer += "\r\n";
-				buffer += this.#lineRewriteSequence(window[screenRow] ?? "", width);
-				wroteLine = true;
+			if (options.appendOnly) {
+				buffer += `\x1b[${height};1H`;
+				for (let row = options.commitFrom; row < options.commitTo; row++) {
+					buffer += "\r\n";
+					buffer += this.#lineRewriteSequence(frame[row] ?? "", width);
+				}
+				for (let screenRow = 0; screenRow < height; screenRow++) {
+					buffer += `\x1b[${screenRow + 1};1H`;
+					buffer += this.#lineRewriteSequence(window[screenRow] ?? "", width);
+				}
+			} else {
+				buffer += "\x1b[1;1H";
+				let wroteLine = false;
+				for (let row = options.commitFrom; row < options.commitTo; row++) {
+					if (wroteLine) buffer += "\r\n";
+					buffer += this.#lineRewriteSequence(frame[row] ?? "", width);
+					wroteLine = true;
+				}
+				for (let screenRow = 0; screenRow < height; screenRow++) {
+					if (wroteLine) buffer += "\r\n";
+					buffer += this.#lineRewriteSequence(window[screenRow] ?? "", width);
+					wroteLine = true;
+				}
 			}
 		} else {
 			for (let screenRow = options.repaintFromScreenRow; screenRow < height; screenRow++) {
@@ -3794,9 +3954,6 @@ export class TUI extends Container {
 				buffer += this.#lineRewriteSequence(window[screenRow] ?? "", width);
 			}
 		}
-		// An exact-width bottom row leaves DEC autowrap pending. Clear it before
-		// the cursor CUP so a resize repaint can never turn that pending wrap
-		// into an unaccounted native-history scroll.
 		buffer += "\r";
 		const contentRows = Math.max(1, Math.min(height, frame.length - options.windowTop));
 		const contentBottomRow = options.windowTop + contentRows - 1;
@@ -3806,8 +3963,6 @@ export class TUI extends Container {
 			buffer += `\x1b[${screenRow + 1};${target.col + 1}H`;
 			buffer += target.visible ? "\x1b[?25h" : "\x1b[?25l";
 		} else {
-			// Keep direct-write deltas anchored to the real content bottom.
-			// Viewport padding is not content and must not become cursor state.
 			buffer += `\x1b[${contentRows};1H\x1b[?25l`;
 		}
 		buffer += this.#paintEndSequence;

@@ -3,6 +3,7 @@ import {
 	type Component,
 	type NativeScrollbackCommittedRows,
 	type NativeScrollbackLiveRegion,
+	type NativeScrollbackWidthEpoch,
 	type RenderScheduler,
 	type RenderTimer,
 	TUI,
@@ -80,10 +81,15 @@ class CommittedMutableLinesComponent implements Component, NativeScrollbackCommi
 	}
 }
 
-class WrappingStreamComponent implements Component, NativeScrollbackLiveRegion {
+class WrappingStreamComponent implements Component, NativeScrollbackLiveRegion, NativeScrollbackWidthEpoch {
 	#records: string[] = [];
 	#stream = "";
 	#liveStart = 0;
+	#lastRenderedRecords: string[] = [];
+	#lastRenderedStream = "";
+	#lastWidth = 0;
+	#lastRows: string[] = [];
+	#widthEpochBoundaries = new WeakMap<object, { records: string[]; stream: string }>();
 
 	append(record: string): void {
 		this.#records.push(record);
@@ -107,7 +113,33 @@ class WrappingStreamComponent implements Component, NativeScrollbackLiveRegion {
 			rows.push(this.#stream.slice(offset, offset + chunkWidth));
 		}
 		rows.push("");
+		this.#lastRenderedRecords = this.#records.slice();
+		this.#lastRenderedStream = this.#stream;
+		this.#lastWidth = chunkWidth;
+		this.#lastRows = rows;
 		return rows;
+	}
+
+	captureNativeScrollbackWidthEpoch(): unknown {
+		const marker = {};
+		this.#widthEpochBoundaries.set(marker, {
+			records: this.#lastRenderedRecords.slice(),
+			stream: this.#lastRenderedStream,
+		});
+		return marker;
+	}
+
+	resolveNativeScrollbackWidthEpoch(boundary: unknown): number | undefined {
+		if (typeof boundary !== "object" || boundary === null || this.#lastWidth <= 0) return undefined;
+		const source = this.#widthEpochBoundaries.get(boundary);
+		if (!source) return undefined;
+		let rows = 0;
+		for (const record of source.records) rows += Math.ceil(record.length / this.#lastWidth) + 1;
+		return rows + Math.ceil(source.stream.length / this.#lastWidth);
+	}
+
+	getNativeScrollbackWidthEpochRows(): number | undefined {
+		return Math.max(0, this.#lastRows.length - 1);
 	}
 
 	getNativeScrollbackLiveRegionStart(): number | undefined {
@@ -269,7 +301,6 @@ const TMUX_ENV: Record<string, string | undefined> = { ...NO_MULTIPLEXER_ENV, TM
 const MULTIPLEXER_ENV_CASES: Array<[string, Record<string, string | undefined>]> = [
 	["CMUX_WORKSPACE_ID", { ...NO_MULTIPLEXER_ENV, TERM: "dumb", CMUX_WORKSPACE_ID: "workspace:cmux-2088" }],
 	["CMUX_SURFACE_ID", { ...NO_MULTIPLEXER_ENV, TERM: "dumb", CMUX_SURFACE_ID: "surface:cmux-2088" }],
-	["HERDR_ENV", { ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }],
 ];
 const CMUX_SOCKET_ONLY_ENV: Record<string, string | undefined> = {
 	...NO_MULTIPLEXER_ENV,
@@ -634,8 +665,8 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 		});
 	});
 
-	it("freezes committed coordinates across repeated Herdr width epochs", async () => {
-		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+	it("freezes committed coordinates across repeated multiplexer width epochs", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
 			const term = new VirtualTerminal(40, 6, 10_000);
 			const tui = new TUI(term);
 			const component = new WrappingStreamComponent();
@@ -718,8 +749,82 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 		});
 	});
 
+	it("maps a queued append through the settled width using its logical boundary", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const component = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				component.append(`initial-${index.toString().padStart(2, "0")} ${"I".repeat(46)}`);
+			}
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				component.append(`queued-00 ${"Q".repeat(46)}`);
+				component.append(`queued-01 ${"R".repeat(46)}`);
+				tui.requestRender();
+				term.resize(17, 6);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (const marker of [
+					...Array.from({ length: 8 }, (_value, index) => `initial-${index.toString().padStart(2, "0")}`),
+					"queued-00",
+					"queued-01",
+				]) {
+					expect(
+						buffer.filter(line => line.includes(marker)),
+						marker,
+					).toHaveLength(1);
+				}
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("retains forced output appended after SIGWINCH without cross-width row arithmetic", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const component = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				component.append(`forced-initial-${index.toString().padStart(2, "0")} ${"I".repeat(46)}`);
+			}
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 6);
+				component.append(`forced-final-00 ${"F".repeat(46)}`);
+				component.append(`forced-final-01 ${"G".repeat(46)}`);
+				tui.requestRender(true);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (const marker of [
+					...Array.from({ length: 8 }, (_value, index) => `forced-initial-${index.toString().padStart(2, "0")}`),
+					"forced-final-00",
+					"forced-final-01",
+				]) {
+					expect(
+						buffer.filter(line => line.includes(marker)),
+						marker,
+					).toHaveLength(1);
+				}
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
 	it("keeps the native commit count separate and retains bulk post-epoch output", async () => {
-		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
 			const initial = Array.from({ length: 20 }, (_value, index) => `initial-${index.toString().padStart(2, "0")}`);
 			const appended = Array.from(
 				{ length: 20 },
@@ -773,7 +878,7 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 	});
 
 	it("separates height-shrink movement from post-epoch append movement", async () => {
-		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
 			const initial = Array.from({ length: 100 }, (_value, index) => `mixed-${index.toString().padStart(3, "0")}`);
 			const appended = Array.from(
 				{ length: 5 },
@@ -812,7 +917,7 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 	});
 
 	it("does not attribute sparse-frame append movement to a height shrink", async () => {
-		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
 			const initial = ["sparse-0", "sparse-1", "sparse-2"];
 			const appended = ["sparse-3", "sparse-4", "sparse-5", "sparse-6", "sparse-7"];
 			const term = new VirtualTerminal(40, 10, 10_000);
@@ -849,7 +954,7 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 	});
 
 	it("backfills post-epoch rows appended behind an overlay", async () => {
-		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
 			const initial = Array.from({ length: 12 }, (_value, index) => `initial-${index.toString().padStart(2, "0")}`);
 			const appended = Array.from({ length: 12 }, (_value, index) => `hidden-${index.toString().padStart(2, "0")}`);
 			const term = new VirtualTerminal(40, 6, 10_000);
@@ -894,7 +999,7 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 	});
 
 	it("defers pinned live-region growth until width-epoch finalization", async () => {
-		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
 			const initial = ["pinned-00", "pinned-01"];
 			const final = Array.from({ length: 10 }, (_value, index) => `pinned-${index.toString().padStart(2, "0")}`);
 			const term = new VirtualTerminal(40, 4, 1000);
@@ -933,7 +1038,7 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 	});
 
 	it("parks a short no-cursor width epoch at the real content bottom", async () => {
-		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
 			const term = new VirtualTerminal(40, 6, 1000);
 			const header = new MutableLinesComponent(["short-0", "short-1"]);
 			const loader = new MutableLinesComponent(["loader-0"]);
@@ -970,8 +1075,8 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 		});
 	});
 
-	it("keeps Herdr height-only resize accounting unchanged", async () => {
-		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+	it("keeps multiplexer height-only resize accounting unchanged", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
 			const term = new VirtualTerminal(40, 6, 10_000);
 			const tui = new TUI(term);
 			const lines = Array.from(
@@ -1118,6 +1223,57 @@ describe("multiplexer detection gates ED3 on resize", () => {
 			});
 		});
 	}
+
+	it("rebuilds direct HerdR scrollback from source across repeated widths", async () => {
+		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+			const term = new VirtualTerminal(40, 10, 1000);
+			const tui = new TUI(term);
+			tui.addChild(new MutableLinesComponent(Array.from({ length: 20 }, (_value, index) => `line-${index}`)));
+
+			try {
+				tui.start();
+				await settle(term);
+				const writes = captureWrites(term);
+
+				for (const width of [80, 40, 80]) {
+					term.resize(width, 10);
+					await settleResize(term);
+					expect(visible(term)).toEqual(Array.from({ length: 10 }, (_value, index) => `line-${index + 10}`));
+					const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+					for (let index = 0; index < 20; index++) {
+						expect(
+							buffer.filter(line => line === `line-${index}`),
+							`line-${index}`,
+						).toHaveLength(1);
+					}
+				}
+
+				expect(writes.join("")).toContain(ED3);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("keeps nested tmux inside HerdR on the ED3-unsafe path", async () => {
+		await withEnvPatch({ ...TMUX_ENV, TERM: "tmux-256color", HERDR_ENV: "1" }, async () => {
+			const term = new VirtualTerminal(40, 10, 1000);
+			const tui = new TUI(term);
+			tui.addChild(new MutableLinesComponent(Array.from({ length: 20 }, (_value, index) => `line-${index}`)));
+
+			try {
+				tui.start();
+				await settle(term);
+				const writes = captureWrites(term);
+				term.resize(80, 10);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+				expect(writes.join("")).not.toContain(ED3);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
 
 	it("does not treat CMUX_SOCKET_PATH alone as a multiplexer session marker", async () => {
 		await withEnvPatch(CMUX_SOCKET_ONLY_ENV, async () => {

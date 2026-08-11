@@ -3,6 +3,7 @@ import {
 	Container,
 	type NativeScrollbackCommittedRows,
 	type NativeScrollbackLiveRegion,
+	type NativeScrollbackWidthEpoch,
 	type RenderStablePrefix,
 	type ViewportTailProvider,
 } from "@oh-my-pi/pi-tui";
@@ -159,7 +160,12 @@ const EMPTY_TAIL: readonly string[] = [];
  */
 export class TranscriptContainer
 	extends Container
-	implements NativeScrollbackLiveRegion, NativeScrollbackCommittedRows, RenderStablePrefix, ViewportTailProvider
+	implements
+		NativeScrollbackLiveRegion,
+		NativeScrollbackCommittedRows,
+		NativeScrollbackWidthEpoch,
+		RenderStablePrefix,
+		ViewportTailProvider
 {
 	#toolActivityVisible = true;
 	// Bumped to retire every block segment at once (theme change / clear); a
@@ -179,6 +185,11 @@ export class TranscriptContainer
 	// Finalized blocks wholly before this boundary are immutable on-screen history;
 	// their previous contribution can be replayed without calling render().
 	#committedRows = 0;
+	#widthEpochBoundaries = new WeakMap<
+		object,
+		{ segment: BlockSegment; childBoundary: unknown; childHasBoundary: boolean }
+	>();
+
 	// Stable-prefix floor accumulated across renders since the last
 	// getRenderStablePrefixRows() read (see RenderStablePrefix: reading
 	// consumes the report and re-bases the baseline). Out-of-band renders
@@ -234,6 +245,49 @@ export class TranscriptContainer
 			}
 			setBlockCommittedRows(child, Math.min(segment.rawRef.length, leadingTrimmedRows + committedContribution));
 		}
+	}
+
+	override captureNativeScrollbackWidthEpoch(): unknown {
+		const segment = this.#segments.at(-1);
+		if (!segment) return undefined;
+		const child = segment.component as Component & Partial<NativeScrollbackWidthEpoch>;
+		const childHasBoundary =
+			typeof child.captureNativeScrollbackWidthEpoch === "function" &&
+			typeof child.resolveNativeScrollbackWidthEpoch === "function" &&
+			typeof child.getNativeScrollbackWidthEpochRows === "function";
+		const marker = {};
+		this.#widthEpochBoundaries.set(marker, {
+			segment,
+			childBoundary: childHasBoundary ? child.captureNativeScrollbackWidthEpoch?.() : undefined,
+			childHasBoundary,
+		});
+		return marker;
+	}
+
+	override resolveNativeScrollbackWidthEpoch(boundary: unknown): number | undefined {
+		if (typeof boundary !== "object" || boundary === null) return undefined;
+		const marker = this.#widthEpochBoundaries.get(boundary);
+		if (!marker) return undefined;
+		const current = this.#segments.find(segment => segment.component === marker.segment.component);
+		if (!current) return undefined;
+		if (!marker.childHasBoundary) {
+			if (marker.segment.rowCount === 0 || !marker.segment.finalized) return current.startRow;
+			if (marker.segment.version !== current.version) return undefined;
+			return current.startRow + current.rowCount;
+		}
+		const child = current.component as Component & NativeScrollbackWidthEpoch;
+		const rawRows = child.resolveNativeScrollbackWidthEpoch(marker.childBoundary);
+		if (rawRows === undefined) return undefined;
+		let leadingTrimmedRows = 0;
+		while (leadingTrimmedRows < current.rawRef.length && isPlainBlank(current.rawRef[leadingTrimmedRows]!)) {
+			leadingTrimmedRows++;
+		}
+		const contributionRows = Math.max(0, Math.min(current.contribution.length, rawRows - leadingTrimmedRows));
+		return current.startRow + current.sep + contributionRows;
+	}
+
+	override getNativeScrollbackWidthEpochRows(): number | undefined {
+		return this.#segments === EMPTY_SEGMENTS ? undefined : this.#lines.length;
 	}
 
 	getRenderStablePrefixRows(): number {

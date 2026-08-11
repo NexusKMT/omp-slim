@@ -66,16 +66,22 @@ needs to know whether the user has scrolled away from the tail.
 - A component tree that reports **no seam** gets shell semantics: whatever
   scrolls off is final. Shrinking such a frame into its committed prefix
   re-anchors the window and leaves the stale copy in history (§3).
-- Inside multiplexers, a width change terminates the physical-row coordinate
-  epoch. Pane history remains immutable at its authored wrap; the renderer
-  leaves the host-reflowed viewport in place and establishes a separate
-  complete-frame baseline without publishing those viewport rows as native
-  commits. Later frame growth writes the exact current-width rows newly crossing
-  the scrollback seam, followed by a bounded viewport repaint; only that real
-  content advances the native commit count. Visible overlays freeze the seam
-  ledger as well as emission. Pinned live regions clip epoch advancement at
-  their final boundary, keeping mutable growth viewport-only until finalization.
-  Height-only resizes retain the existing ledger.
+- Inside ED3-unsafe multiplexers, a width change terminates the physical-row
+  coordinate epoch. The renderer captures an opaque
+  `NativeScrollbackWidthEpoch` marker from the last emitted source state before
+  `SIGWINCH`, then resolves that same logical boundary after the settled-width
+  render. Host-reflowed history stays immutable. Output queued during
+  settlement is emitted only from the resolved old boundary to the current
+  source boundary at the terminal-owned viewport bottom; the settled viewport
+  then repaints in place. No old-width and new-width row counts are compared,
+  and no old viewport row is recommitted. Components without the source
+  contract retain the conservative physical-row fallback. Visible overlays
+  freeze the seam and pinned live regions clip advancement at their final
+  boundary. Height-only resizes retain the existing ledger.
+- Direct HerdR panes are not in that category. HerdR's Ghostty core implements
+  ED3, so OMP clears and replays its source-owned transcript after settlement,
+  matching direct terminals. Repainting host-reflowed rows in place would
+  harden soft wraps and leave residual rows after a later width reversal.
 
 ---
 
@@ -90,8 +96,8 @@ needs to know whether the user has scrolled away from the tail.
    rows in the last 24, SGR-stripped). A single in-place mismatch is accepted
    as stale history; a structural shift re-anchors at the first changed row,
    favoring duplication over content loss. An in-place width change does not
-   audit or re-slice the prior epoch's physical coordinate; it replaces that
-   opaque coordinate with a current-width final-prefix baseline.
+   audit or re-slice the prior epoch's physical coordinates; it resolves the
+   captured logical source marker in the settled-width frame.
 3. Classify the frame as a gesture-driven full paint, an opt-in divergence
    rebuild, or an ordinary update and calculate the window/commit chunk.
    Overlays freeze commits. A pinned live region clips its offscreen mutable
@@ -145,6 +151,14 @@ commits are prefix-only. `NativeScrollbackCommittedRows` lets containers pass
 the committed count down to children, and `NativeScrollbackReplay` lets
 components release layout locks before a destructive replay.
 
+`NativeScrollbackWidthEpoch` is the cross-width source contract. Capture reads
+only state that produced the last emitted frame. Resolve projects that source
+boundary into the newly rendered width, while the current-boundary method
+identifies the logical suffix queued during settlement. Containers propagate
+the marker through nested sources; Markdown snapshots its last rendered source
+text, so a streaming update received before `SIGWINCH` cannot masquerade as
+already-emitted output.
+
 `TranscriptContainer` implements the application seam. It scans for the first
 unfinalized transcript block. Finalized blocks before it are exact; that live
 block may extend the exact boundary through
@@ -174,19 +188,20 @@ contract, not a terminal-specific optimization.
    deliberate exception: it clears and replays the complete current frame.
 3. **Commits are exactly the chunk.** Any byte shape that scrolls the screen
    must scroll only rows accounted for by the commit advance.
-4. **A multiplexer width resize NEVER advances history.** The old committed
-   physical-row coordinate is opaque after reflow. The resize leaves the
-   host-reflowed viewport in place and establishes a complete-frame baseline
-   independent of the native commit count. Subsequent growth writes the exact
-   current-width rows newly crossing the seam—not blank scroll commands—then
-   repaints the bounded viewport; only that slice advances commits. Visible
-   overlays advance neither the baseline nor the seam ledger; overlay exit
-   backfills the exact hidden slice. Pinned live regions advance only through
-   their final boundary; finalization releases the deferred mutable slice.
-   During a height shrink, only occupied old-frame rows actually moved into
-   history by the host are excluded from the append-owned seam; empty viewport
-   rows do not consume content-driven movement.
-   Height-only resizes do not terminate the epoch.
+4. **An ED3-unsafe multiplexer width resize NEVER advances history.** The old
+   committed physical-row coordinate is opaque after reflow. The resize leaves
+   the host-reflowed viewport in place and establishes a complete-frame
+   baseline independent of the native commit count. Subsequent growth writes
+   the exact current-width rows newly crossing the seam—not blank scroll
+   commands—then repaints the bounded viewport; only that slice advances
+   commits. Visible overlays advance neither the baseline nor the seam ledger;
+   overlay exit backfills the exact hidden slice. Pinned live regions advance
+   only through their final boundary; finalization releases the deferred
+   mutable slice. During a height shrink, only occupied old-frame rows actually
+   moved into history by the host are excluded from the append-owned seam;
+   empty viewport rows do not consume content-driven movement. Height-only
+   resizes do not terminate the epoch. Direct HerdR uses ED3 source replay
+   instead.
 5. **NEVER probe the viewport position or fork on platform in the update
    path.** win32 behaves like POSIX. The probe APIs are gone; do not
    reintroduce them.

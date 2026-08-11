@@ -571,7 +571,7 @@ function assertNever(value: never): never {
 
 function terminalStressTraits(scenario: Scenario): TerminalStressTraits {
 	return {
-		preservesPaneHistory: scenario.envMode === "tmux" || scenario.envMode === "herdr",
+		preservesPaneHistory: scenario.envMode === "tmux",
 		strictNativeScrollback: scenario.strictScrollback,
 		syncOutputDisabled: scenario.envMode === "vteNoSync",
 		viewportProbe: scenario.terminalMode === "normal" ? "known" : scenario.terminalMode,
@@ -3726,10 +3726,9 @@ function coreTemplates(): ScenarioTemplate[] {
 			heightChoices: [3, 4, 6],
 		},
 		{
-			// True multiplexer width epochs preserve canonical pane history at
-			// its authored wrap. The renderer may repaint the viewport, but a
-			// width change itself must not advance the append-only shadow tape;
-			// only later finalized streaming output may do so.
+			// Direct HerdR implements ED3, so a settled width change clears and
+			// replays the source-owned transcript at its new wrap. Streaming
+			// updates may race the resize but must survive that replay exactly once.
 			name: "darwin-normal-herdr-reflow-stream-small",
 			platform: "darwin",
 			terminalMode: "normal",
@@ -4112,8 +4111,9 @@ export async function runStressScenario(scenario: Scenario, options?: { patchEnv
 }
 
 export async function runWidthEpochOverlayReplayRegression(): Promise<void> {
-	const template = coreTemplates().find(candidate => candidate.name === "darwin-normal-herdr-reflow-stream-small");
-	if (template === undefined) throw new Error("Missing HerdR width-epoch stress template");
+	const base = coreTemplates().find(candidate => candidate.name === "darwin-normal-herdr-reflow-stream-small");
+	if (base === undefined) throw new Error("Missing reflow-stream stress template");
+	const template: ScenarioTemplate = { ...base, name: "darwin-normal-tmux-reflow-stream-small", envMode: "tmux" };
 	const operations: readonly OperationKind[] = ["resizeWidth", "showOverlay", "streamOne", "streamOne", "hideOverlay"];
 	const scenario = materializeScenario(
 		template,
@@ -4128,8 +4128,9 @@ export async function runWidthEpochOverlayReplayRegression(): Promise<void> {
 }
 
 export async function runWidthEpochHeightAppendReplayRegression(): Promise<void> {
-	const base = coreTemplates().find(candidate => candidate.name === "darwin-normal-herdr-reflow-stream-small");
-	if (base === undefined) throw new Error("Missing HerdR width-epoch stress template");
+	const source = coreTemplates().find(candidate => candidate.name === "darwin-normal-herdr-reflow-stream-small");
+	if (source === undefined) throw new Error("Missing reflow-stream stress template");
+	const base: ScenarioTemplate = { ...source, name: "darwin-normal-tmux-reflow-stream-small", envMode: "tmux" };
 	const template: ScenarioTemplate = {
 		...base,
 		columns: 40,

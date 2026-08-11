@@ -265,6 +265,53 @@ describe("TranscriptContainer", () => {
 		expect(container.getNativeScrollbackLiveRegionStart()).toBeUndefined();
 	});
 
+	it("resolves a finalized transcript tail at the settled width before appended blocks", () => {
+		const container = new TranscriptContainer();
+		container.addChild(new Text("first block with enough words to wrap after the pane narrows", 0, 0));
+		container.render(80);
+		const boundary = container.captureNativeScrollbackWidthEpoch();
+
+		container.addChild(new Text("new block queued during resize", 0, 0));
+		container.render(24);
+		const previousRows = container.resolveNativeScrollbackWidthEpoch(boundary);
+		const currentRows = container.getNativeScrollbackWidthEpochRows();
+
+		expect(previousRows).toBeGreaterThan(0);
+		expect(currentRows).toBeGreaterThan(previousRows!);
+	});
+
+	it("maps a streaming Markdown source prefix without rendering the assistant twice", () => {
+		const container = new TranscriptContainer();
+		const assistant = new AssistantMessageComponent();
+		assistant.updateContent(
+			makeAssistantMessage({
+				content: [{ type: "text", text: "A streaming answer with a stable source prefix." }],
+			}),
+			{ transient: true },
+		);
+		container.addChild(assistant);
+		container.render(40);
+		const boundary = container.captureNativeScrollbackWidthEpoch();
+
+		assistant.updateContent(
+			makeAssistantMessage({
+				content: [
+					{
+						type: "text",
+						text: "A streaming answer with a stable source prefix. More output arrived while the pane resized.",
+					},
+				],
+			}),
+			{ transient: true },
+		);
+		container.render(17);
+		const previousRows = container.resolveNativeScrollbackWidthEpoch(boundary);
+		const currentRows = container.getNativeScrollbackWidthEpochRows();
+
+		expect(previousRows).toBeGreaterThan(0);
+		expect(currentRows).toBeGreaterThan(previousRows!);
+	});
+
 	it("starts the live region at the earliest of several unfinalized blocks", () => {
 		const container = new TranscriptContainer();
 		const sealed = new StreamingBlock(["done"], true);
