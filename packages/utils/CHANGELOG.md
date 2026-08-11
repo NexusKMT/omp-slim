@@ -2,12 +2,13 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Fixed Mermaid ASCII state pseudostates rendering empty boxes, miscoloring final-state borders, and inverting rounded corners in bottom-to-top diagrams.
 ### Changed
 
 - Changed stale process-log retention from the newest five files globally to one newest file per completed process and day within the current and previous four local calendar days. This preserves bounded daily diagnostic coverage while continuing to remove one-use audit files.
+
+### Fixed
+
+- Fixed Mermaid ASCII state pseudostates rendering empty boxes, miscoloring final-state borders, and inverting rounded corners in bottom-to-top diagrams.
 
 ## [17.2.11] - 2026-08-07
 
