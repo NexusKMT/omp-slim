@@ -269,6 +269,9 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		});
 		const model = getBundledModel("openai", "gpt-5");
 		if (!model) throw new Error("Expected gpt-5 model to exist");
+		// The prompt preflight validates the key through the registry (not the
+		// per-request `getApiKey` override), so seed it for keyless CI runners.
+		modelRegistry.authStorage.setRuntimeApiKey("openai", "test-key");
 		const { session } = await createAgentSession({
 			...baseOptions(tempDir),
 			settings,
@@ -284,7 +287,8 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			expect(requestTexts).toHaveLength(2);
 			expect(JSON.parse(firstRequest)).toEqual(
 				expect.objectContaining({
-					reasoning: { effort: "off" },
+					// "none" is the only disable level the Responses wire accepts ("off" 400s).
+					reasoning: { effort: "none" },
 					tool_choice: expect.objectContaining({ name: "think" }),
 				}),
 			);
