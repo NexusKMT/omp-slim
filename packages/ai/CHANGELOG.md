@@ -7,6 +7,10 @@
 ### Fixed
 
 - Fixed account-scoped Codex cyber-policy denials bypassing sibling credential rotation; replay-safe requests now try every configured account before surfacing the error.
+### Fixed
+
+- Fixed Cursor personal usage reporting for current Pro / Pro+ / Ultra `/api/usage-summary` payloads that expose `individualUsage.plan` (and optional `onDemand`) instead of the older `individualUsage.overall` bucket ([#7998](https://github.com/can1357/oh-my-pi/pull/7998) by [@dnth](https://github.com/dnth)).
+
 
 ## [17.2.11] - 2026-08-07
 
