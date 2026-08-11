@@ -838,6 +838,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.editor.setTopBorderProvider(availableWidth => this.statusLine.getTopBorder(availableWidth));
 
 		this.hideToolActivity = settings.get("display.hideToolActivity");
+		this.chatContainer.setToolActivityVisible(!this.hideToolActivity);
 		this.hideThinkingBlock = settings.get("hideThinkingBlock");
 		this.proseOnlyThinking = settings.get("proseOnlyThinking");
 
@@ -4366,8 +4367,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.requestRender();
 	}
 
-	showWarning(message: string): void {
-		this.#uiHelpers.showWarning(message);
+	showWarning(message: string, options?: { hideWithToolActivity?: boolean }): void {
+		this.#uiHelpers.showWarning(message, options);
 	}
 
 	#handleLspStartupEvent(event: LspStartupEvent): void {
