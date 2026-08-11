@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `/handoff` losing the previous session's `local://` artifacts (plans, scratch files, research notes): the handoff document referenced files that became unreadable because the new session's `local/` root was empty. Local artifacts are now copied across the handoff session boundary, mirroring the plan approve-and-execute path ([#8261](https://github.com/can1357/oh-my-pi/issues/8261)).
+
 ## [17.2.13] - 2026-08-11
 
 ### Added
