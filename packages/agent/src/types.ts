@@ -738,7 +738,7 @@ export type ToolApprovalDecision =
 			 *  tool (e.g. `write` for an `xd://` device call) scope user allow/deny/
 			 *  prompt policies to the tool it dispatches into. */
 			policyKey?: string;
-	  };
+		};
 export type ToolApproval = ToolApprovalDecision | ((args: unknown) => ToolApprovalDecision);
 
 /**
