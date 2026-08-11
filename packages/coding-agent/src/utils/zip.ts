@@ -866,11 +866,10 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 		throw new ToolError("Not a valid tar archive: missing terminating zero block");
 	}
 
-	// Link records carry no data. Resolve them after all headers are indexed so
-	// hard links and safe relative symlinks may point forward or form chains.
-	// Directory symlinks materialize the resolved target subtree at the alias
-	// path, keeping extraction/rewrite behavior useful without writing symlinks
-	// that could escape the destination.
+	// Link records carry no data. Resolve file targets after all headers are
+	// indexed; directory symlinks remain one alias node and are traversed lazily
+	// by ArchiveReader so N files behind M aliases never inflate the index to
+	// N×M entries during a root listing.
 	if (pendingLinks.size > 0) {
 		const entriesByPath = new Map<string, ArchiveIndexEntry>();
 		for (const entry of entries) entriesByPath.set(entry.path, entry);
@@ -881,7 +880,7 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 			for (const entry of unresolved) {
 				const pending = pendingLinks.get(entry)!;
 				const target = entriesByPath.get(pending.targetPath);
-				if (target?.storage) {
+				if (target?.storage && !target.isDirectory) {
 					entry.size = target.size;
 					entry.storage = target.storage;
 					unresolved.delete(entry);
@@ -907,27 +906,8 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 					throw new ToolError(`Archive hard link '${entry.path}' targets directory '${pending.targetPath}'`);
 				}
 
-				let hasUnresolvedDescendant = false;
-				for (const candidate of unresolved) {
-					if (candidate.path.startsWith(targetPrefix)) {
-						hasUnresolvedDescendant = true;
-						break;
-					}
-				}
-				if (hasUnresolvedDescendant) continue;
-
 				entry.isDirectory = true;
-				const aliasPrefix = `${entry.path}/`;
-				const sourceCount = entries.length;
-				for (let index = 0; index < sourceCount; index++) {
-					const descendant = entries[index]!;
-					if (!descendant.path.startsWith(targetPrefix)) continue;
-					const aliasPath = `${aliasPrefix}${descendant.path.slice(targetPrefix.length)}`;
-					if (entriesByPath.has(aliasPath)) continue;
-					const alias: ArchiveIndexEntry = { ...descendant, path: aliasPath };
-					entries.push(alias);
-					entriesByPath.set(aliasPath, alias);
-				}
+				entry.storage = { type: "tar-link", targetPath: pending.targetPath };
 				unresolved.delete(entry);
 				resolved++;
 			}
@@ -957,9 +937,7 @@ function extractTarMember(storage: TarStorage, size: number, memberPath: string)
 }
 
 function throwUnreadableTarLink(storage: TarLinkStorage, memberPath: string): never {
-	throw new ToolError(
-		`Archive symlink '${memberPath}' cannot be materialized because target '${storage.targetPath}' is unavailable`,
-	);
+	throw new ToolError(`Archive symlink '${memberPath}' cannot be materialized from target '${storage.targetPath}'`);
 }
 
 async function readZipEntries(source: ByteSource): Promise<ArchiveIndexEntry[]> {
@@ -1001,7 +979,8 @@ export function parseArchivePathCandidates(filePath: string): ArchivePathCandida
 /**
  * An indexed, read-only view over a single archive. ZIP archives are indexed
  * from the central directory and members are inflated on demand; tar archives
- * are parsed from one in-memory buffer and members are sliced on demand.
+ * are parsed from one in-memory buffer, members are sliced on demand, and
+ * directory symlink aliases are traversed lazily.
  */
 export class ArchiveReader {
 	readonly format: ArchiveFormat;
@@ -1015,6 +994,30 @@ export class ArchiveReader {
 		ensureParentDirectories(this.#entries);
 	}
 
+	#resolveDirectoryAliases(archivePath: string): string {
+		let resolvedPath = archivePath;
+		const seen = new Set<string>();
+		while (true) {
+			if (seen.has(resolvedPath)) {
+				throw new ToolError(`Archive path '${archivePath}' crosses a cyclic symlink`);
+			}
+			seen.add(resolvedPath);
+
+			const parts = resolvedPath.split("/");
+			let replacement: string | undefined;
+			for (let end = parts.length; end > 0; end--) {
+				const prefix = parts.slice(0, end).join("/");
+				const entry = this.#entries.get(prefix);
+				if (!entry?.isDirectory || entry.storage?.type !== "tar-link") continue;
+				const suffix = parts.slice(end).join("/");
+				replacement = suffix ? `${entry.storage.targetPath}/${suffix}` : entry.storage.targetPath;
+				break;
+			}
+			if (replacement === undefined) return resolvedPath;
+			resolvedPath = replacement;
+		}
+	}
+
 	getNode(subPath?: string): ArchiveNode | undefined {
 		const normalizedPath = normalizeArchiveLookupPath(subPath);
 		if (normalizedPath === undefined) return undefined;
@@ -1022,10 +1025,11 @@ export class ArchiveReader {
 			return { path: "", isDirectory: true, size: 0 };
 		}
 
-		const entry = this.#entries.get(normalizedPath);
+		const resolvedPath = this.#resolveDirectoryAliases(normalizedPath);
+		const entry = this.#entries.get(resolvedPath);
 		if (!entry) return undefined;
 		return {
-			path: entry.path,
+			path: normalizedPath,
 			isDirectory: entry.isDirectory,
 			size: entry.size,
 			mtimeMs: entry.mtimeMs,
@@ -1038,8 +1042,9 @@ export class ArchiveReader {
 			throw new ToolError("Archive path cannot contain '..'");
 		}
 
+		const resolvedPath = normalizedPath ? this.#resolveDirectoryAliases(normalizedPath) : "";
 		if (normalizedPath) {
-			const entry = this.#entries.get(normalizedPath);
+			const entry = this.#entries.get(resolvedPath);
 			if (!entry) {
 				throw new ToolError(`Archive path '${normalizedPath}' not found`);
 			}
@@ -1048,22 +1053,23 @@ export class ArchiveReader {
 			}
 		}
 
-		const prefix = normalizedPath ? `${normalizedPath}/` : "";
+		const sourcePrefix = resolvedPath ? `${resolvedPath}/` : "";
 		const children = new Map<string, ArchiveDirectoryEntry>();
 
 		for (const entry of this.#entries.values()) {
-			if (normalizedPath) {
-				if (!entry.path.startsWith(prefix) || entry.path === normalizedPath) continue;
+			if (resolvedPath) {
+				if (!entry.path.startsWith(sourcePrefix) || entry.path === resolvedPath) continue;
 			}
 
-			const relativePath = normalizedPath ? entry.path.slice(prefix.length) : entry.path;
+			const relativePath = resolvedPath ? entry.path.slice(sourcePrefix.length) : entry.path;
 			const nextSegment = relativePath.split("/")[0];
 			if (!nextSegment) continue;
 
 			const childPath = normalizedPath ? `${normalizedPath}/${nextSegment}` : nextSegment;
 			if (children.has(childPath)) continue;
 
-			const childEntry = this.#entries.get(childPath);
+			const sourceChildPath = resolvedPath ? `${resolvedPath}/${nextSegment}` : nextSegment;
+			const childEntry = this.#entries.get(sourceChildPath);
 			const isDirectory = childEntry?.isDirectory ?? relativePath.includes("/");
 			children.set(childPath, {
 				name: nextSegment,
@@ -1085,7 +1091,8 @@ export class ArchiveReader {
 			throw new ToolError("Archive file path is required");
 		}
 
-		const entry = this.#entries.get(normalizedPath);
+		const resolvedPath = this.#resolveDirectoryAliases(normalizedPath);
+		const entry = this.#entries.get(resolvedPath);
 		if (!entry) {
 			throw new ToolError(`Archive file '${normalizedPath}' not found`);
 		}
@@ -1110,7 +1117,7 @@ export class ArchiveReader {
 			bytes = await readZipFileBytes(entry.storage, entry.size);
 		}
 		return {
-			path: entry.path,
+			path: normalizedPath,
 			isDirectory: false,
 			size: entry.size,
 			mtimeMs: entry.mtimeMs,
@@ -1201,7 +1208,12 @@ export async function readArchiveEntries(source: ArchiveSource): Promise<Map<str
 		return entries;
 	}
 	for (const entry of readTarEntries(bytes)) {
-		if (entry.isDirectory) continue;
+		if (entry.isDirectory) {
+			if (entry.storage?.type === "tar-link") {
+				throwUnreadableTarLink(entry.storage, entry.path);
+			}
+			continue;
+		}
 		if (!entry.storage) {
 			throw new ToolError(`Archive file '${entry.path}' has no readable storage`);
 		}

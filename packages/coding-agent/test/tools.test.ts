@@ -736,14 +736,13 @@ describe("Coding Agent Tools", () => {
 			expect(new TextDecoder().decode(linkedContent)).toBe("shared content\n");
 		});
 
-		it("should preserve safe relative tar symlink members", async () => {
-			const archivePath = path.join(testDir, "symlink.tar");
+		it("should preserve safe relative tar file symlinks", async () => {
+			const archivePath = path.join(testDir, "file-symlink.tar");
 			fs.writeFileSync(
 				archivePath,
 				createTarArchive([
 					{ path: "pkg/lib/tool.js", content: "export const linked = true;\n" },
 					{ path: "pkg/bin/tool", content: "", typeFlag: "2", linkName: "../lib/tool.js" },
-					{ path: "pkg/current", content: "", typeFlag: "2", linkName: "lib" },
 				]),
 			);
 
@@ -752,22 +751,38 @@ describe("Coding Agent Tools", () => {
 			});
 			expect(getTextOutput(linkedResult)).toContain("export const linked = true");
 
-			const directoryLinkedResult = await readTool.execute("test-call-tar-directory-symlink-member", {
-				path: `${archivePath}:pkg/current/tool.js`,
-			});
-			expect(getTextOutput(directoryLinkedResult)).toContain("export const linked = true");
-
 			const entries = await readArchiveEntries(archivePath);
 			const linkedContent = entries.get("pkg/bin/tool");
 			if (!(linkedContent instanceof Uint8Array)) {
 				throw new Error("Expected symlink content to materialize as bytes");
 			}
 			expect(new TextDecoder().decode(linkedContent)).toBe("export const linked = true;\n");
-			const directoryLinkedContent = entries.get("pkg/current/tool.js");
-			if (!(directoryLinkedContent instanceof Uint8Array)) {
-				throw new Error("Expected directory-symlink content to materialize as bytes");
-			}
-			expect(new TextDecoder().decode(directoryLinkedContent)).toBe("export const linked = true;\n");
+		});
+
+		it("should resolve directory symlinks lazily without materializing subtrees", async () => {
+			const archivePath = path.join(testDir, "directory-symlinks.tar");
+			fs.writeFileSync(
+				archivePath,
+				createTarArchive([
+					{ path: "pkg/lib/tool.js", content: "export const linked = true;\n" },
+					{ path: "pkg/lib/extra.js", content: "export const extra = true;\n" },
+					{ path: "pkg/current-a", content: "", typeFlag: "2", linkName: "lib" },
+					{ path: "pkg/current-b", content: "", typeFlag: "2", linkName: "lib" },
+					{ path: "pkg/current-c", content: "", typeFlag: "2", linkName: "lib" },
+				]),
+			);
+
+			const linkedResult = await readTool.execute("test-call-tar-directory-symlink-member", {
+				path: `${archivePath}:pkg/current-a/tool.js`,
+			});
+			expect(getTextOutput(linkedResult)).toContain("export const linked = true");
+
+			const directoryResult = await readTool.execute("test-call-tar-directory-symlink-directory", {
+				path: `${archivePath}:pkg/current-b`,
+			});
+			expect(getTextOutput(directoryResult)).toContain("extra.js");
+
+			await expect(readArchiveEntries(archivePath)).rejects.toThrow(/cannot be materialized/);
 		});
 
 		it("should list dangling tar symlinks but reject their materialization", async () => {
