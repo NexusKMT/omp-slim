@@ -24,6 +24,7 @@ import {
 	shouldForceBinaryUpdate,
 	sweepStaleBackups,
 	updateViaBinaryAt,
+	updateViaShimTakeover,
 } from "@oh-my-pi/pi-coding-agent/cli/update-cli";
 import Update from "@oh-my-pi/pi-coding-agent/commands/update";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
@@ -775,5 +776,89 @@ describe("update-cli binary-only release gating", () => {
 	it("keeps package-manager updates within the same major and on downgrades", () => {
 		expect(shouldForceBinaryUpdate({ version: "1.10.0" }, "1.9.0")).toBe(false);
 		expect(shouldForceBinaryUpdate({ version: "1.0.0" }, "2.0.0")).toBe(false);
+	});
+});
+
+describe("update-cli script-shim takeover", () => {
+	const version = "18.0.0";
+	const binaryName = "omp-windows-x64.exe";
+	const url = `https://github.com/can1357/oh-my-pi/releases/download/v${version}/${binaryName}`;
+	const content = "native release binary";
+	const digest = `sha256:${createHash("sha256").update(content).digest("hex")}`;
+
+	const fetchImpl = async (input: string | URL | Request): Promise<Response> => {
+		const requestUrl = String(input);
+		if (requestUrl.startsWith("https://api.github.com/")) {
+			return new Response(
+				JSON.stringify({
+					tag_name: `v${version}`,
+					draft: false,
+					prerelease: false,
+					assets: [
+						{
+							name: binaryName,
+							state: "uploaded",
+							size: Buffer.byteLength(content),
+							digest,
+							browser_download_url: url,
+						},
+					],
+				}),
+			);
+		}
+		if (requestUrl === url) return new Response(content);
+		throw new Error(`Unexpected request: ${requestUrl}`);
+	};
+
+	const shims: Record<string, string> = {
+		omp: "#!/bin/sh\nnode omp.js\n",
+		"omp.cmd": "@node omp.js %*\n",
+		"omp.ps1": "node omp.js @args\n",
+	};
+
+	async function writeShims(dir: string): Promise<void> {
+		for (const name in shims) {
+			await Bun.write(path.join(dir, name), shims[name]);
+		}
+	}
+
+	it("installs omp.exe beside the shims and retires them", async () => {
+		const dir = await makeTempDir();
+		await writeShims(dir);
+
+		await updateViaShimTakeover(path.join(dir, "omp.cmd"), version, {
+			binaryName,
+			fetchImpl,
+			githubToken: "test-token",
+			verifyInstalledVersion: async () => ({ ok: true, actual: version, path: path.join(dir, "omp.exe") }),
+		});
+
+		expect(await Bun.file(path.join(dir, "omp.exe")).text()).toBe(content);
+		for (const name in shims) {
+			expect(await Bun.file(path.join(dir, name)).exists()).toBe(false);
+		}
+		const residue = (await fs.readdir(dir)).filter(name => name.endsWith(".bak") || name.endsWith(".new"));
+		expect(residue).toEqual([]);
+	});
+
+	it("restores the shims and removes the exe when verification fails", async () => {
+		const dir = await makeTempDir();
+		await writeShims(dir);
+
+		await expect(
+			updateViaShimTakeover(path.join(dir, "omp.cmd"), version, {
+				binaryName,
+				fetchImpl,
+				githubToken: "test-token",
+				verifyInstalledVersion: async () => ({ ok: false, actual: "17.2.12", path: path.join(dir, "omp.cmd") }),
+			}),
+		).rejects.toThrow("restored previous omp launcher");
+
+		expect(await Bun.file(path.join(dir, "omp.exe")).exists()).toBe(false);
+		for (const name in shims) {
+			expect(await Bun.file(path.join(dir, name)).text()).toBe(shims[name]);
+		}
+		const residue = (await fs.readdir(dir)).filter(name => name.endsWith(".bak") || name.endsWith(".new"));
+		expect(residue).toEqual([]);
 	});
 });
