@@ -271,7 +271,8 @@ export class TranscriptContainer
 		const current = this.#segments.find(segment => segment.component === marker.segment.component);
 		if (!current) return undefined;
 		if (!marker.childHasBoundary) {
-			if (marker.segment.rowCount === 0 || !marker.segment.finalized) return current.startRow;
+			if (marker.segment.rowCount === 0) return current.startRow;
+			if (!marker.segment.finalized) return undefined;
 			if (marker.segment.version !== current.version) return undefined;
 			return current.startRow + current.rowCount;
 		}

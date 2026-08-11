@@ -53,6 +53,12 @@ class StreamingBlock implements Component {
 	}
 }
 
+class UnfinalizedText extends Text {
+	isTranscriptBlockFinalized(): boolean {
+		return false;
+	}
+}
+
 // A still-live block that can declare a byte-stable rendered prefix. The
 // transcript container may commit only those declared rows before finalization.
 class DeclaredSettledStreamingBlock extends StreamingBlock {
@@ -278,6 +284,18 @@ describe("TranscriptContainer", () => {
 
 		expect(previousRows).toBeGreaterThan(0);
 		expect(currentRows).toBeGreaterThan(previousRows!);
+	});
+
+	it("does not invent a width-epoch boundary for an unfinalized block without a source watermark", () => {
+		const container = new TranscriptContainer();
+		container.addChild(new UnfinalizedText("width-dependent content that wraps after the pane narrows", 0, 0));
+		const oldRows = container.render(40).length;
+		const boundary = container.captureNativeScrollbackWidthEpoch();
+
+		const newRows = container.render(17).length;
+
+		expect(newRows).toBeGreaterThan(oldRows);
+		expect(container.resolveNativeScrollbackWidthEpoch(boundary)).toBeUndefined();
 	});
 
 	it("maps a streaming Markdown source prefix without rendering the assistant twice", () => {
