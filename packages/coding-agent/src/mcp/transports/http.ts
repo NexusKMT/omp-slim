@@ -20,7 +20,7 @@ import type {
 import { toJsonRpcError } from "../../mcp/types";
 import { RequestIdAllocator } from "../request-id";
 import { createMCPTimeout, getNeverAbortSignal, isMCPTimeoutEnabled, resolveMCPTimeoutMs } from "../timeout";
-import { type MCPFetchInit, mcpFetch } from "./header-policy";
+import { type MCPFetchInit, mcpFetch, withoutHeader } from "./header-policy";
 
 const HTTP_SSE_CONNECT_TIMEOUT_MS = 1_000;
 /**
@@ -67,18 +67,20 @@ export class HttpTransport implements MCPTransport {
 	/**
 	 * Fetch the configured endpoint with header precedence and origin policy.
 	 *
-	 * Once a version is negotiated, every request carries `MCP-Protocol-Version`
-	 * (required by the MCP Streamable HTTP spec after `initialize`). It rides
-	 * under `generated` so it wins over a same-named configured header. Before
-	 * negotiation (the `initialize` request itself) the header is omitted.
+	 * The transport fully owns `MCP-Protocol-Version`: it is stripped from
+	 * configured headers so a user's `mcp.json` can never inject it, and added
+	 * only once a version is negotiated (required by the MCP Streamable HTTP spec
+	 * after `initialize`). Before negotiation — the `initialize` request itself —
+	 * no protocol-version header is sent from either source.
 	 */
 	#fetch(init: MCPFetchInit, generated: Record<string, string>): Promise<Response> {
+		const configured = withoutHeader(this.config.headers, "MCP-Protocol-Version");
 		const withVersion =
 			this.#protocolVersion === null ? generated : { "MCP-Protocol-Version": this.#protocolVersion, ...generated };
 		return mcpFetch(
 			this.config.url,
 			init,
-			{ generated: withVersion, configured: this.config.headers },
+			{ generated: withVersion, configured },
 			this.config.headerPolicy === "origin-locked",
 		);
 	}

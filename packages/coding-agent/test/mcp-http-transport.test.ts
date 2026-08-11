@@ -137,4 +137,36 @@ describe("MCP Streamable HTTP protocol version header", () => {
 		await withPendingGuard(transport.request("tools/list"), "request");
 		expect(seen.version).toBe("2025-06-18");
 	});
+
+	it("never lets a configured MCP-Protocol-Version reach the server", async () => {
+		const seen: { pre: string | null; post: string | null } = { pre: null, post: null };
+		server = Bun.serve({
+			port: 0,
+			fetch(req) {
+				const body = req.headers.get("MCP-Protocol-Version");
+				return Response.json({ jsonrpc: "2.0", id: 1, result: { seen: body } });
+			},
+		});
+		if (!server) throw new Error("Test server was not started");
+		const transport = new HttpTransport({
+			type: "http",
+			url: `http://127.0.0.1:${server.port}/mcp`,
+			timeout: REQUEST_TIMEOUT_MS,
+			headers: { "MCP-Protocol-Version": "1999-01-01" },
+		});
+		await transport.connect();
+
+		// Pre-negotiation: configured header must be stripped, not leaked.
+		seen.pre = await withPendingGuard(transport.request<{ seen: string | null }>("initialize"), "request").then(
+			r => r.seen,
+		);
+		// Post-negotiation: the negotiated version wins over the configured one.
+		transport.setProtocolVersion("2025-11-25");
+		seen.post = await withPendingGuard(transport.request<{ seen: string | null }>("tools/list"), "request").then(
+			r => r.seen,
+		);
+
+		expect(seen.pre).toBeNull();
+		expect(seen.post).toBe("2025-11-25");
+	});
 });
