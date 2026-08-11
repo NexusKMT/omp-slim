@@ -4021,30 +4021,54 @@ export class TUI extends Container {
 				buffer += `\x1b[${height};1H`;
 				for (let row = options.commitFrom; row < options.commitTo; row++) {
 					buffer += "\r\n";
-					buffer += this.#lineRewriteSequence(frame[row] ?? "", width);
+					buffer += this.#lineRewriteSequence(frame[row] ?? "", width, height - 1, row, options.commitTo);
 				}
 				for (let screenRow = 0; screenRow < height; screenRow++) {
 					buffer += `\x1b[${screenRow + 1};1H`;
-					buffer += this.#lineRewriteSequence(window[screenRow] ?? "", width);
+					buffer += this.#lineRewriteSequence(
+						window[screenRow] ?? "",
+						width,
+						screenRow,
+						options.windowTop + screenRow,
+						options.commitTo,
+					);
 				}
 			} else {
 				buffer += "\x1b[1;1H";
 				let wroteLine = false;
 				for (let row = options.commitFrom; row < options.commitTo; row++) {
 					if (wroteLine) buffer += "\r\n";
-					buffer += this.#lineRewriteSequence(frame[row] ?? "", width);
+					buffer += this.#lineRewriteSequence(
+						frame[row] ?? "",
+						width,
+						Math.min(row - options.commitFrom, height - 1),
+						row,
+						options.commitTo,
+					);
 					wroteLine = true;
 				}
 				for (let screenRow = 0; screenRow < height; screenRow++) {
 					if (wroteLine) buffer += "\r\n";
-					buffer += this.#lineRewriteSequence(window[screenRow] ?? "", width);
+					buffer += this.#lineRewriteSequence(
+						window[screenRow] ?? "",
+						width,
+						Math.min(options.commitTo - options.commitFrom + screenRow, height - 1),
+						options.windowTop + screenRow,
+						options.commitTo,
+					);
 					wroteLine = true;
 				}
 			}
 		} else {
 			for (let screenRow = options.repaintFromScreenRow; screenRow < height; screenRow++) {
 				buffer += `\x1b[${screenRow + 1};1H`;
-				buffer += this.#lineRewriteSequence(window[screenRow] ?? "", width);
+				buffer += this.#lineRewriteSequence(
+					window[screenRow] ?? "",
+					width,
+					screenRow,
+					options.windowTop + screenRow,
+					options.commitTo,
+				);
 			}
 		}
 		buffer += "\r";

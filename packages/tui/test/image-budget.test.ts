@@ -640,6 +640,49 @@ describe("TUI inline-image budget", () => {
 		}
 	});
 
+	it("clips a direct Kitty placement during an in-place width repaint", async () => {
+		const originalGraphics = { ...getKittyGraphics() };
+		const originalResizeMode = Bun.env.PI_TUI_RESIZE_IN_PLACE;
+		const term = new VirtualTerminal(40, 6);
+		const writes: string[] = [];
+		const realWrite = term.write.bind(term);
+		vi.spyOn(term, "write").mockImplementation((data: string) => {
+			writes.push(data);
+			realWrite(data);
+		});
+
+		setKittyGraphics({ unicodePlaceholders: false });
+		Bun.env.PI_TUI_RESIZE_IN_PLACE = "1";
+		const tui = new TUI(term);
+		tui.addChild(
+			new Image(
+				BASE64_ONE_PIXEL_PNG,
+				"image/png",
+				{ fallbackColor: t => t },
+				{ maxWidthCells: 4, maxHeightCells: 4, budget: tui.imageBudget, imageKey: "resize-direct" },
+				{ widthPx: 40, heightPx: 40 },
+			),
+		);
+		tui.addChild(new Text("after-0\nafter-1\nafter-2", 0, 0));
+
+		try {
+			tui.start();
+			await settle(term);
+			writes.length = 0;
+			term.resize(30, 6);
+			await settle(term);
+
+			const output = writes.join("");
+			expect(output).toContain("a=p,q=2,C=1");
+			expect(output).toContain("c=4,r=3,y=10,h=30");
+		} finally {
+			tui.stop();
+			setKittyGraphics(originalGraphics);
+			if (originalResizeMode === undefined) delete Bun.env.PI_TUI_RESIZE_IN_PLACE;
+			else Bun.env.PI_TUI_RESIZE_IN_PLACE = originalResizeMode;
+		}
+	});
+
 	it("purges demoted image graphics and repaints the fallback without a destructive replay", async () => {
 		const term = new VirtualTerminal(40, 12);
 		const writes: string[] = [];
