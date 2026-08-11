@@ -2613,8 +2613,24 @@ describe("advisor", () => {
 			const state: { messages: AgentMessage[]; error?: string } = { messages: [] };
 			let promptCalls = 0;
 			const agent: AdvisorAgent = {
-				prompt: async () => {
+				prompt: async input => {
 					promptCalls++;
+					const content =
+						typeof input === "string"
+							? input
+							: input
+									.map(message => {
+										if (!("content" in message)) return "";
+										if (typeof message.content === "string") return message.content;
+										const textParts: string[] = [];
+										for (const block of message.content) {
+											if (block.type === "text") textParts.push(block.text);
+										}
+										return textParts.join("");
+									})
+									.filter(Boolean)
+									.join("\n\n");
+					state.messages.push({ role: "user", content, timestamp: Date.now() } as AgentMessage);
 					if (promptCalls === 2) {
 						firstOverflowPromptStarted.resolve();
 						await releaseOverflowPrompt.promise;
