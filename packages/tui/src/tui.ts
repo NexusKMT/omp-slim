@@ -3334,6 +3334,10 @@ export class TUI extends Container {
 			(resizeEventOccurred && this.#previousHeight > 0);
 		const geometryChanged = widthChanged || heightChanged;
 		const widthEpochReset = widthChanged && this.#resizeRepaintsInPlace();
+		// A later width reset cannot use the opaque native ledger against
+		// attachment rows from the current-width placement epoch. Capture that
+		// epoch's seam before reset classification replaces its baseline.
+		const placementEpochWatermark = this.#widthEpochBaselineRows === undefined ? this.#committedRows : prevWindowTop;
 		if (widthEpochReset) this.#widthEpochCommittedPrefix = undefined;
 
 		// Committed-prefix audit. Rows below the audit mark are hard-verified
@@ -3643,9 +3647,15 @@ export class TUI extends Container {
 		// Feed this frame's commit target to the placement-epoch tracker before
 		// any placement resolves against it — an epoch whose rows commit during
 		// frames that never rewrite its line must still advance on the next
-		// re-emission, and the raw per-frame value keeps the check correct
-		// across committed-ledger rewinds.
-		this.#imageBudget.observeCommitWatermark(chunkTo);
+		// re-emission. Width epochs retain an opaque native-row ledger, so close
+		// the old placement-coordinate epoch with its captured seam on reset and
+		// use the current-width commit seam calculated below thereafter.
+		if (widthEpochReset) {
+			this.#imageBudget.observeCommitWatermark(placementEpochWatermark);
+			this.#imageBudget.beginPlacementCoordinateEpoch();
+		} else if (intent.kind === "fullPaint" || this.#widthEpochBaselineRows === undefined) {
+			this.#imageBudget.observeCommitWatermark(chunkTo);
+		}
 
 		// 6. Emit.
 		if (intent.kind === "fullPaint") {
@@ -3706,6 +3716,7 @@ export class TUI extends Container {
 				scrollRows = 0;
 				commitTo = commitFrom;
 			}
+			this.#imageBudget.observeCommitWatermark(commitTo);
 			this.#emitWidthEpochBaseline(frame, window, width, height, cursorPos, purgeSequence, imageTransmitBuffer, {
 				repaintFromScreenRow: 0,
 				commitFrom,
