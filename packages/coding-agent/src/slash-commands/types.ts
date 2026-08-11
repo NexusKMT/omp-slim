@@ -1,5 +1,5 @@
 import type { Settings } from "../config/settings";
-import type { InteractiveModeContext } from "../modes/types";
+import type { InteractiveModeContext, SubmittedUserInput } from "../modes/types";
 import type { AgentSession } from "../session/agent-session";
 import type { SessionManager } from "../session/session-manager";
 
@@ -83,6 +83,8 @@ export interface SlashCommandRuntime {
  */
 export interface TuiSlashCommandRuntime {
 	ctx: InteractiveModeContext;
+	/** Post-extension-hook attachments belonging to the submitted slash draft. */
+	input?: Pick<SubmittedUserInput, "images" | "imageLinks">;
 }
 
 /** Unified slash-command spec consumed by both TUI and ACP dispatchers. */

@@ -712,9 +712,11 @@ export class InputController {
 
 			// Handle built-in slash commands
 			if (text) {
-				const slashResult = await executeBuiltinSlashCommand(text, {
-					ctx: this.ctx,
-				});
+				const input =
+					(inputImages?.length ?? 0) > 0 || (inputImageLinks?.length ?? 0) > 0
+						? { images: inputImages, imageLinks: inputImageLinks }
+						: undefined;
+				const slashResult = await executeBuiltinSlashCommand(text, { ctx: this.ctx, input });
 				if (slashResult === true) {
 					if (!shouldSkipHistory(text)) this.ctx.editor.addToHistory(text);
 					return;
@@ -1330,9 +1332,8 @@ export class InputController {
 		}
 
 		if (text) {
-			const slashResult = await executeBuiltinSlashCommand(text, {
-				ctx: this.ctx,
-			});
+			const input = (images?.length ?? 0) > 0 || (imageLinks?.length ?? 0) > 0 ? { images, imageLinks } : undefined;
+			const slashResult = await executeBuiltinSlashCommand(text, { ctx: this.ctx, input });
 			if (slashResult === true) {
 				if (!shouldSkipHistory(text)) this.ctx.editor.addToHistory(text);
 				return;

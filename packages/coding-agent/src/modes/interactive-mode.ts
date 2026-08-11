@@ -531,6 +531,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	locallySubmittedUserSignatures: Set<string> = new Set();
 	#pendingSubmittedInput: SubmittedUserInput | undefined;
 	#pendingSubmissionDispose: (() => void) | undefined;
+	#pendingSubmissionPreservesDraft = false;
 	#optimisticUserMessageComponents: Component[] = [];
 	lastSigintTime = 0;
 	lastEscapeTime = 0;
@@ -1584,30 +1585,17 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.addMessageToChat(message, options);
 	}
 
-	/** Detach the composer's pending images so they ride along with the submission
-	 *  that consumes the draft. Mode commands that promote the draft into a turn
-	 *  (`/goal`, `/plan`, `/vibe`) build their submission from the draft *text*
-	 *  only; without this the positional `[Image #N]` markers survive into the
-	 *  message while every payload is dropped, and the orphaned images leak into
-	 *  whatever the user sends next. Mirrors the editor-submit path in
-	 *  `InputController`. `cancelPendingSubmission` restores them on cancel. */
-	#takeDraftImages(): { images?: ImageContent[]; imageLinks?: (string | undefined)[] } {
-		if (this.editor.pendingImages.length === 0) return {};
-		const images = [...this.editor.pendingImages];
-		const imageLinks = this.editor.pendingImageLinks.length > 0 ? [...this.editor.pendingImageLinks] : undefined;
-		this.editor.pendingImages = [];
-		this.editor.pendingImageLinks = [];
-		return { images, imageLinks };
-	}
-
-	startPendingSubmission(input: {
-		text: string;
-		images?: ImageContent[];
-		imageLinks?: (string | undefined)[];
-		customType?: string;
-		display?: boolean;
-		streamingBehavior?: "steer" | "followUp";
-	}): SubmittedUserInput {
+	startPendingSubmission(
+		input: {
+			text: string;
+			images?: ImageContent[];
+			imageLinks?: (string | undefined)[];
+			customType?: string;
+			display?: boolean;
+			streamingBehavior?: "steer" | "followUp";
+		},
+		options?: { preserveDraft?: boolean },
+	): SubmittedUserInput {
 		const submission: SubmittedUserInput = {
 			text: input.text,
 			images: input.images,
@@ -1619,6 +1607,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			started: false,
 		};
 		this.#pendingSubmittedInput = submission;
+		this.#pendingSubmissionPreservesDraft = options?.preserveDraft === true;
 		if (!submission.customType) {
 			this.#resetGoalContinuationSuppression();
 			const imageCount = submission.images?.length ?? 0;
@@ -1638,8 +1627,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		} else {
 			this.clearOptimisticUserMessage();
 		}
-		this.editor.setText("");
-		this.editor.imageLinks = undefined;
+		if (!options?.preserveDraft) {
+			this.editor.setText("");
+			this.editor.imageLinks = undefined;
+		}
 		this.ensureLoadingAnimation();
 		this.ui.requestRender();
 		return submission;
@@ -1650,9 +1641,11 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (!submission || submission.started) {
 			return false;
 		}
+		const preserveDraft = this.#pendingSubmissionPreservesDraft;
 
 		submission.cancelled = true;
 		this.#pendingSubmittedInput = undefined;
+		this.#pendingSubmissionPreservesDraft = false;
 		this.clearOptimisticUserMessage();
 		this.#pendingWorkingMessage = undefined;
 		if (submission.customType === "goal-continuation") {
@@ -1661,7 +1654,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (this.loadingAnimation) {
 			this.#stopLoadingAnimation(true);
 		}
-		if (!submission.customType) {
+		if (!submission.customType && !preserveDraft) {
 			this.editor.pendingImages = submission.images ? [...submission.images] : [];
 			this.editor.pendingImageLinks = submission.imageLinks ? [...submission.imageLinks] : [];
 			this.editor.imageLinks = this.editor.pendingImageLinks;
@@ -1678,6 +1671,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			return false;
 		}
 		input.started = true;
+		this.#pendingSubmissionPreservesDraft = false;
 		const annotationStateKey = this.#planReviewAnnotationStateBySubmission.get(input);
 		if (annotationStateKey) {
 			this.#planReviewAnnotationStateBySubmission.delete(input);
@@ -1692,6 +1686,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (wasPendingSubmission) {
 			this.#pendingSubmittedInput = undefined;
 			this.#pendingSubmissionDispose = undefined;
+			this.#pendingSubmissionPreservesDraft = false;
 		}
 		if (input.customType === "goal-continuation") {
 			this.#goalContinuationTurnInFlight = false;
@@ -3297,7 +3292,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 	}
 
-	async handlePlanModeCommand(initialPrompt?: string): Promise<void> {
+	async handlePlanModeCommand(
+		initialPrompt?: string,
+		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
+	): Promise<void> {
 		if (this.goalModeEnabled || this.goalModePaused) {
 			this.showWarning("Exit goal mode first.");
 			return;
@@ -3337,7 +3335,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		await this.#enterPlanMode();
 		if (initialPrompt && this.onInputCallback) {
-			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt, ...this.#takeDraftImages() }));
+			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt, ...input }, { preserveDraft: true }));
 		}
 	}
 
@@ -3348,7 +3346,10 @@ export class InteractiveMode implements InteractiveModeContext {
 	 * the previous toolset, and kills every worker session so workers cannot
 	 * outlive the mode that directs them.
 	 */
-	async handleVibeModeCommand(initialPrompt?: string): Promise<void> {
+	async handleVibeModeCommand(
+		initialPrompt?: string,
+		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
+	): Promise<void> {
 		if (this.vibeModeEnabled) {
 			await this.#exitVibeMode();
 			return;
@@ -3363,7 +3364,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		await this.#enterVibeMode();
 		if (initialPrompt && this.onInputCallback) {
-			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt, ...this.#takeDraftImages() }));
+			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt, ...input }, { preserveDraft: true }));
 		}
 	}
 
@@ -3450,7 +3451,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.showStatus(nextBudget === undefined ? "Goal budget cleared." : `Goal budget set to ${nextBudget}.`);
 	}
 
-	async handleGoalModeCommand(rest?: string): Promise<void> {
+	async handleGoalModeCommand(
+		rest?: string,
+		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
+	): Promise<void> {
 		try {
 			if (this.planModeEnabled || this.planModePaused) {
 				this.showWarning("Exit plan mode first.");
@@ -3466,7 +3470,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			}
 			const { sub, rest: subRest } = parseGoalSubcommand(rest ?? "");
 			if (sub) {
-				await this.#dispatchGoalSubcommand(sub, subRest);
+				await this.#dispatchGoalSubcommand(sub, subRest, input);
 				return;
 			}
 			if (this.goalModeEnabled) {
@@ -3487,14 +3491,14 @@ export class InteractiveMode implements InteractiveModeContext {
 				return;
 			}
 			if (subRest) {
-				await this.#startGoalFromObjective(subRest);
+				await this.#startGoalFromObjective(subRest, input);
 				return;
 			}
 			const objective = (
 				await this.showHookEditor("Goal objective", undefined, undefined, { promptStyle: true })
 			)?.trim();
 			if (!objective) return;
-			await this.#startGoalFromObjective(objective);
+			await this.#startGoalFromObjective(objective, input);
 		} catch (error) {
 			this.showError(error instanceof Error ? error.message : String(error));
 		}
@@ -3552,10 +3556,14 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 	}
 
-	async #dispatchGoalSubcommand(sub: GoalSubcommand, rest: string): Promise<void> {
+	async #dispatchGoalSubcommand(
+		sub: GoalSubcommand,
+		rest: string,
+		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
+	): Promise<void> {
 		switch (sub) {
 			case "set":
-				await this.#handleGoalSetSubcommand(rest);
+				await this.#handleGoalSetSubcommand(rest, input);
 				return;
 			case "show":
 				this.#showGoalDetails();
@@ -3681,15 +3689,21 @@ export class InteractiveMode implements InteractiveModeContext {
 		await this.#exitGoalMode({ reason: "dropped" });
 	}
 
-	async #startGoalFromObjective(objective: string): Promise<void> {
+	async #startGoalFromObjective(
+		objective: string,
+		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
+	): Promise<void> {
 		await this.#enterGoalMode({ objective, silent: true });
 		this.#resetGoalContinuationSuppression();
 		if (!this.session.isStreaming && this.onInputCallback) {
-			this.onInputCallback(this.startPendingSubmission({ text: objective, ...this.#takeDraftImages() }));
+			this.onInputCallback(this.startPendingSubmission({ text: objective, ...input }, { preserveDraft: true }));
 		}
 	}
 
-	async #replaceGoalFromObjective(objective: string): Promise<void> {
+	async #replaceGoalFromObjective(
+		objective: string,
+		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
+	): Promise<void> {
 		const state = await this.session.goalRuntime.replaceGoal({ objective });
 		this.session.setGoalModeState(state);
 		this.goalModeEnabled = true;
@@ -3700,11 +3714,14 @@ export class InteractiveMode implements InteractiveModeContext {
 			await this.session.sendGoalModeContext({ deliverAs: "steer" });
 		}
 		if (!this.session.isStreaming && this.onInputCallback) {
-			this.onInputCallback(this.startPendingSubmission({ text: objective, ...this.#takeDraftImages() }));
+			this.onInputCallback(this.startPendingSubmission({ text: objective, ...input }, { preserveDraft: true }));
 		}
 	}
 
-	async #handleGoalSetSubcommand(rest: string): Promise<void> {
+	async #handleGoalSetSubcommand(
+		rest: string,
+		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
+	): Promise<void> {
 		if (!this.goalModeEnabled && this.#getPausedGoalState()) {
 			this.showWarning("Resume the current goal first, or drop it before setting a new objective.");
 			return;
@@ -3714,10 +3731,10 @@ export class InteractiveMode implements InteractiveModeContext {
 			: (await this.showHookEditor("Goal objective", undefined, undefined, { promptStyle: true }))?.trim();
 		if (!objective) return;
 		if (this.goalModeEnabled) {
-			await this.#replaceGoalFromObjective(objective);
+			await this.#replaceGoalFromObjective(objective, input);
 			return;
 		}
-		await this.#startGoalFromObjective(objective);
+		await this.#startGoalFromObjective(objective, input);
 	}
 
 	/** Manually (re-)open the plan-review overlay — bound to `/plan-review`. Lets
@@ -4211,6 +4228,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	showError(message: string): void {
 		this.#pendingSubmittedInput = undefined;
+		this.#pendingSubmissionPreservesDraft = false;
 		this.clearOptimisticUserMessage();
 		this.#pendingWorkingMessage = undefined;
 		if (this.loadingAnimation) {

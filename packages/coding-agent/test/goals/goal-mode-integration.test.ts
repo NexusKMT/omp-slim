@@ -7,10 +7,12 @@ import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config
 import { GoalTool } from "@oh-my-pi/pi-coding-agent/goals/tools/goal-tool";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import type { SubmittedUserInput } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { normalizeCustomMessagePayload } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import { createTools, type Tool, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import type { TodoPhase } from "@oh-my-pi/pi-coding-agent/tools/todo";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -133,20 +135,16 @@ async function waitForMicrotasks(): Promise<void> {
 
 async function armInputWaiter(mode: InteractiveMode): Promise<{
 	inputPromise: Promise<void>;
-	getResolvedText: () => string | undefined;
-	getResolvedImages: () => ImageContent[] | undefined;
+	getResolvedInput: () => SubmittedUserInput | undefined;
 }> {
-	let resolvedText: string | undefined;
-	let resolvedImages: ImageContent[] | undefined;
+	let resolvedInput: SubmittedUserInput | undefined;
 	const inputPromise = mode.getUserInput().then(input => {
-		resolvedText = input.text;
-		resolvedImages = input.images;
+		resolvedInput = input;
 	});
 	await waitForMicrotasks();
 	return {
 		inputPromise,
-		getResolvedText: () => resolvedText,
-		getResolvedImages: () => resolvedImages,
+		getResolvedInput: () => resolvedInput,
 	};
 }
 
@@ -219,7 +217,7 @@ describe("InteractiveMode goal mode integration", () => {
 
 		expect(harness.session.getGoalModeState()?.goal.objective).toBe("Ship the release");
 		expect(sendGoalModeContext).toHaveBeenCalledWith({ deliverAs: "steer" });
-		expect(waiter.getResolvedText()).toBeUndefined();
+		expect(waiter.getResolvedInput()).toBeUndefined();
 
 		streaming = false;
 		harness.mode.onInputCallback?.(harness.mode.startPendingSubmission({ text: "cleanup" }));
@@ -238,44 +236,114 @@ describe("InteractiveMode goal mode integration", () => {
 
 		expect(harness.session.getGoalModeState()?.goal.objective).toBe("Replace the objective");
 		expect(sendGoalModeContext).toHaveBeenCalledWith({ deliverAs: "steer" });
-		expect(waiter.getResolvedText()).toBeUndefined();
+		expect(waiter.getResolvedInput()).toBeUndefined();
 
 		streaming = false;
 		harness.mode.onInputCallback?.(harness.mode.startPendingSubmission({ text: "cleanup" }));
 		await waiter.inputPromise;
 	});
 
-	it("carries composer images into the initial goal objective submission", async () => {
-		// Regression: `/goal <objective>` built its submission from the draft text
-		// alone, so the objective kept its positional `[Image #1]` marker while the
-		// payload stayed behind on the editor and leaked into the next message.
-		const image: ImageContent = { type: "image", data: "aW1hZ2U=", mimeType: "image/png" };
-		harness.mode.editor.pendingImages = [image];
-		harness.mode.editor.pendingImageLinks = ["file:///shot.png"];
-		const waiter = await armInputWaiter(harness.mode);
+	const attachmentCases: Array<{
+		name: string;
+		text: string;
+		prepare?: (mode: InteractiveMode) => Promise<void>;
+		submit: (mode: InteractiveMode, input: Pick<SubmittedUserInput, "images" | "imageLinks">) => Promise<void>;
+	}> = [
+		{
+			name: "/goal",
+			text: "[Image #1, 10x10] fix this",
+			submit: (mode: InteractiveMode, input: Pick<SubmittedUserInput, "images" | "imageLinks">) =>
+				mode.handleGoalModeCommand("[Image #1, 10x10] fix this", input),
+		},
+		{
+			name: "/goal set",
+			text: "[Image #1, 10x10] replace this",
+			prepare: (mode: InteractiveMode) => mode.handleGoalModeCommand("Ship the release"),
+			submit: (mode: InteractiveMode, input: Pick<SubmittedUserInput, "images" | "imageLinks">) =>
+				mode.handleGoalModeCommand("set [Image #1, 10x10] replace this", input),
+		},
+		{
+			name: "/plan",
+			text: "[Image #1, 10x10] plan this",
+			submit: (mode: InteractiveMode, input: Pick<SubmittedUserInput, "images" | "imageLinks">) =>
+				mode.handlePlanModeCommand("[Image #1, 10x10] plan this", input),
+		},
+		{
+			name: "/vibe",
+			text: "[Image #1, 10x10] delegate this",
+			prepare: async mode => {
+				vi.spyOn(mode.session, "activateVibeTools").mockResolvedValue();
+			},
+			submit: (mode: InteractiveMode, input: Pick<SubmittedUserInput, "images" | "imageLinks">) =>
+				mode.handleVibeModeCommand("[Image #1, 10x10] delegate this", input),
+		},
+	];
 
-		await harness.mode.handleGoalModeCommand("[Image #1, 10x10] fix this");
+	for (const testCase of attachmentCases) {
+		it(`carries the submitted attachment snapshot through ${testCase.name}`, async () => {
+			await testCase.prepare?.(harness.mode);
+			const images: ImageContent[] = [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }];
+			const imageLinks = ["file:///shot.png"];
+			const waiter = await armInputWaiter(harness.mode);
+
+			await testCase.submit(harness.mode, { images, imageLinks });
+			await waiter.inputPromise;
+
+			const input = waiter.getResolvedInput();
+			expect(input?.text).toBe(testCase.text);
+			expect(input?.images).toBe(images);
+			expect(input?.imageLinks).toBe(imageLinks);
+		});
+	}
+
+	it("keeps images pasted while delayed plan setup completes in the later draft", async () => {
+		const submittedImages: ImageContent[] = [{ type: "image", data: "b2xk", mimeType: "image/png" }];
+		const submittedLinks = ["file:///submitted.png"];
+		harness.mode.editor.pendingImages = submittedImages;
+		harness.mode.editor.pendingImageLinks = submittedLinks;
+		const waiter = await armInputWaiter(harness.mode);
+		const setupStarted = Promise.withResolvers<void>();
+		const continueSetup = Promise.withResolvers<void>();
+		const setActiveTools = harness.session.setActiveToolsByName.bind(harness.session);
+		vi.spyOn(harness.session, "setActiveToolsByName").mockImplementationOnce(async toolNames => {
+			setupStarted.resolve();
+			await continueSetup.promise;
+			await setActiveTools(toolNames);
+		});
+
+		const command = executeBuiltinSlashCommand("/plan [Image #1, 10x10] plan this", {
+			ctx: harness.mode,
+			input: { images: submittedImages, imageLinks: submittedLinks },
+		});
+		await setupStarted.promise;
+		const laterImage: ImageContent = { type: "image", data: "bmV3", mimeType: "image/png" };
+		harness.mode.editor.pendingImages = [laterImage];
+		harness.mode.editor.pendingImageLinks = ["file:///later.png"];
+		continueSetup.resolve();
+		await command;
 		await waiter.inputPromise;
 
-		expect(waiter.getResolvedText()).toBe("[Image #1, 10x10] fix this");
-		expect(waiter.getResolvedImages()).toEqual([image]);
-		expect(harness.mode.editor.pendingImages).toEqual([]);
-		expect(harness.mode.editor.pendingImageLinks).toEqual([]);
+		expect(waiter.getResolvedInput()?.images).toBe(submittedImages);
+		expect(harness.mode.editor.pendingImages).toEqual([laterImage]);
+		expect(harness.mode.editor.pendingImageLinks).toEqual(["file:///later.png"]);
 	});
 
-	it("carries composer images into the replacement goal objective submission", async () => {
-		await harness.mode.handleGoalModeCommand("Ship the release");
-		const image: ImageContent = { type: "image", data: "cmVwbGFjZQ==", mimeType: "image/png" };
-		harness.mode.editor.pendingImages = [image];
-		harness.mode.editor.pendingImageLinks = [undefined];
-		const waiter = await armInputWaiter(harness.mode);
+	it("keeps a later draft when a preserve-draft submission is cancelled", () => {
+		const submittedImage: ImageContent = { type: "image", data: "b2xk", mimeType: "image/png" };
+		const laterImage: ImageContent = { type: "image", data: "bmV3", mimeType: "image/png" };
+		harness.mode.editor.setText("later draft");
+		harness.mode.editor.pendingImages = [laterImage];
+		harness.mode.editor.pendingImageLinks = ["file:///later.png"];
 
-		await harness.mode.handleGoalModeCommand("set [Image #1, 10x10] replace this");
-		await waiter.inputPromise;
+		harness.mode.startPendingSubmission(
+			{ text: "submitted draft", images: [submittedImage], imageLinks: ["file:///submitted.png"] },
+			{ preserveDraft: true },
+		);
 
-		expect(waiter.getResolvedText()).toBe("[Image #1, 10x10] replace this");
-		expect(waiter.getResolvedImages()).toEqual([image]);
-		expect(harness.mode.editor.pendingImages).toEqual([]);
+		expect(harness.mode.cancelPendingSubmission()).toBe(true);
+		expect(harness.mode.editor.getText()).toBe("later draft");
+		expect(harness.mode.editor.pendingImages).toEqual([laterImage]);
+		expect(harness.mode.editor.pendingImageLinks).toEqual(["file:///later.png"]);
 	});
 
 	it("includes escaped live todo state in hidden goal context during continuations", async () => {
@@ -381,7 +449,7 @@ describe("InteractiveMode goal mode integration", () => {
 		vi.advanceTimersByTime(800);
 		await waitForMicrotasks();
 
-		expect(waiter.getResolvedText()).toBeUndefined();
+		expect(waiter.getResolvedInput()).toBeUndefined();
 
 		streaming = false;
 		harness.mode.onInputCallback?.(harness.mode.startPendingSubmission({ text: "cleanup" }));

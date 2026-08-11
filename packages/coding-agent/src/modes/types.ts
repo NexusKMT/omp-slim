@@ -438,9 +438,15 @@ export interface InteractiveModeContext {
 	toggleThinkingBlockVisibility(): void;
 	openExternalEditor(): void;
 	registerExtensionShortcuts(): void;
-	handlePlanModeCommand(initialPrompt?: string): Promise<void>;
-	handleVibeModeCommand(initialPrompt?: string): Promise<void>;
-	handleGoalModeCommand(rest?: string): Promise<void>;
+	handlePlanModeCommand(
+		initialPrompt?: string,
+		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
+	): Promise<void>;
+	handleVibeModeCommand(
+		initialPrompt?: string,
+		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
+	): Promise<void>;
+	handleGoalModeCommand(rest?: string, input?: Pick<SubmittedUserInput, "images" | "imageLinks">): Promise<void>;
 	handleGuidedGoalCommand(rest?: string): Promise<void>;
 	handleLoopCommand(args?: string): Promise<string | undefined>;
 	setLoopPrompt(prompt: string): void;

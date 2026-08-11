@@ -14,11 +14,31 @@ import { computerExposureMode } from "../tools/computer/exposure";
 import type { InspectImageMode } from "../utils/inspect-image-mode";
 import { commandConsumed, errorMessage, usage } from "./helpers/parse";
 import { handleSecurityCommand } from "./helpers/security";
-import type { SlashCommandSpec } from "./types";
+import type { ParsedSlashCommand, SlashCommandSpec, TuiSlashCommandRuntime } from "./types";
 
 export function refreshStatusLine(ctx: InteractiveModeContext): void {
 	ctx.statusLine.invalidate();
 	ctx.ui.requestRender();
+}
+
+async function runWithDetachedModeDraft(
+	command: ParsedSlashCommand,
+	runtime: TuiSlashCommandRuntime,
+	run: () => Promise<void>,
+): Promise<void> {
+	const { editor } = runtime.ctx;
+	editor.clearDraft();
+	try {
+		await run();
+	} catch (error) {
+		if (!editor.getText() && editor.pendingImages.length === 0) {
+			editor.setText(command.text);
+			editor.pendingImages = runtime.input?.images ? [...runtime.input.images] : [];
+			editor.pendingImageLinks = runtime.input?.imageLinks ? [...runtime.input.imageLinks] : [];
+			editor.imageLinks = editor.pendingImageLinks.length > 0 ? editor.pendingImageLinks : undefined;
+		}
+		throw error;
+	}
 }
 
 /** `/fast status` label for the active model: "on" when its family is priority, else "off". */
@@ -182,8 +202,9 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			return "Plan: off";
 		},
 		handleTui: async (command, runtime) => {
-			await runtime.ctx.handlePlanModeCommand(command.args || undefined);
-			runtime.ctx.editor.clearDraft();
+			await runWithDetachedModeDraft(command, runtime, () =>
+				runtime.ctx.handlePlanModeCommand(command.args || undefined, runtime.input),
+			);
 		},
 	},
 	{
@@ -208,8 +229,9 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			return "Vibe: off";
 		},
 		handleTui: async (command, runtime) => {
-			await runtime.ctx.handleVibeModeCommand(command.args || undefined);
-			runtime.ctx.editor.clearDraft();
+			await runWithDetachedModeDraft(command, runtime, () =>
+				runtime.ctx.handleVibeModeCommand(command.args || undefined, runtime.input),
+			);
 		},
 	},
 	{
@@ -232,8 +254,8 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			return state ? `Goal: ${state.goal.status} (${shortDetail(state.goal.objective)})` : "Goal: off";
 		},
 		handleTui: async (command, runtime) => {
-			await runtime.ctx.handleGoalModeCommand(command.args || undefined);
 			runtime.ctx.editor.clearDraft();
+			await runtime.ctx.handleGoalModeCommand(command.args || undefined, runtime.input);
 		},
 	},
 	{
