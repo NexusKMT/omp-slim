@@ -292,7 +292,7 @@ describe("Google empty-response retry (Cloud Code Assist path)", () => {
 		expect(result.errorMessage).toBeUndefined();
 	});
 
-	it("retries after discarding a planning leak and delivers one structured function call", async () => {
+	it("retries a stripped planning leak when empty STOPs are accepted", async () => {
 		let calls = 0;
 		const fetchMock: FetchImpl = async () => {
 			calls += 1;
@@ -318,6 +318,7 @@ describe("Google empty-response retry (Cloud Code Assist path)", () => {
 		const stream = streamGoogleGeminiCli(cliModel, context, {
 			apiKey: JSON.stringify({ token: "token", projectId: "proj-123" }),
 			fetch: fetchMock,
+			acceptEmptyResponse: true,
 		});
 		const { events, starts } = await drain(stream);
 		const result = await stream.result();
