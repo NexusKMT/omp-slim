@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.13] - 2026-08-11
+
 ### Fixed
 
 - Fixed Cursor sessions re-executing settled tools when an owned dialect projector rebuilds toolCall blocks: `snapshotAssistantContentBlock` now copies `kCursorExecResolved` explicitly so agent-loop still skips already-settled calls.

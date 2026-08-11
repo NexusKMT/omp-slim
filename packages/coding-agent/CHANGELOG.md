@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.13] - 2026-08-11
+
 ### Added
 
 - Added `searxng.safesearch` setting option for SearXNG searches

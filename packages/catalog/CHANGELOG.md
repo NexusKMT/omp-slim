@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.13] - 2026-08-11
+
 ### Changed
 
 - Standardized catalog discovery User-Agent headers on `omp/<version>` via the shared `USER_AGENT` utility.

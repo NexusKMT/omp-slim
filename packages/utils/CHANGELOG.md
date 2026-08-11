@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.13] - 2026-08-11
+
 ### Changed
 
 - Changed stale process-log retention from the newest five files globally to one newest file per completed process and day within the current and previous four local calendar days. This preserves bounded daily diagnostic coverage while continuing to remove one-use audit files.
