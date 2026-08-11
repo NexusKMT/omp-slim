@@ -4403,12 +4403,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.requestRender();
 	}
 
-	showWarning(message: string): void {
-		this.#uiHelpers.showWarning(message);
-	}
-
-	showToolActivityWarning(message: string): void {
-		this.#uiHelpers.showToolActivityWarning(message);
+	showWarning(message: string, options?: { toolActivity?: boolean }): void {
+		this.#uiHelpers.showWarning(message, options);
 	}
 
 	#handleLspStartupEvent(event: LspStartupEvent): void {

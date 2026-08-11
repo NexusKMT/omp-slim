@@ -492,13 +492,17 @@ describe("UiHelpers.renderInitialMessages — hidden tool activity", () => {
 		expect(visibleRender).toContain("LAUNCH_COMPLETION_MARKER");
 	});
 
-	it("hides tool-originated warnings when activity is hidden", () => {
+	it("keeps normal warnings visible and hides warnings tagged as tool activity", () => {
 		const hidden = makeRenderCtx(makeEmptyContext(), true, true);
-		new UiHelpers(hidden.ctx).showToolActivityWarning("TODO_WARNING_MARKER");
-		expect(Bun.stripANSI(hidden.chatContainer.render(120).join("\n"))).not.toContain("TODO_WARNING_MARKER");
+		const hiddenHelpers = new UiHelpers(hidden.ctx);
+		hiddenHelpers.showWarning("NORMAL_WARNING_MARKER");
+		hiddenHelpers.showWarning("TODO_WARNING_MARKER", { toolActivity: true });
+		const hiddenRender = Bun.stripANSI(hidden.chatContainer.render(120).join("\n"));
+		expect(hiddenRender).toContain("NORMAL_WARNING_MARKER");
+		expect(hiddenRender).not.toContain("TODO_WARNING_MARKER");
 
 		const visible = makeRenderCtx(makeEmptyContext(), true, false);
-		new UiHelpers(visible.ctx).showToolActivityWarning("TODO_WARNING_MARKER");
+		new UiHelpers(visible.ctx).showWarning("TODO_WARNING_MARKER", { toolActivity: true });
 		expect(Bun.stripANSI(visible.chatContainer.render(120).join("\n"))).toContain("TODO_WARNING_MARKER");
 	});
 

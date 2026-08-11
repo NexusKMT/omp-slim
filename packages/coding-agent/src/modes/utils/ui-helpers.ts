@@ -744,13 +744,10 @@ export class UiHelpers {
 		this.ctx.present([new Spacer(1), text]);
 	}
 
-	showWarning(warningMessage: string): void {
+	showWarning(warningMessage: string, options?: { toolActivity?: boolean }): void {
 		const text = new Text(`Warning: ${warningMessage}`, 1, 0).setStyleFn(t => theme.fg("warning", t));
-		this.ctx.present([new Spacer(1), text]);
-	}
-	showToolActivityWarning(warningMessage: string): void {
-		const text = new Text(`Warning: ${warningMessage}`, 1, 0).setStyleFn(t => theme.fg("warning", t));
-		this.ctx.present(new ToolActivityContainer([new Spacer(1), text]));
+		const content = [new Spacer(1), text];
+		this.ctx.present(options?.toolActivity ? new ToolActivityContainer(content) : content);
 	}
 
 	showNewVersionNotification(newVersion: string): void {

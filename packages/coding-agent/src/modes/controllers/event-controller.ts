@@ -1621,8 +1621,8 @@ export class EventController {
 			// This text can be a provider error copied verbatim off the wire (the
 			// Cursor todo bridge forwards the server's string), so it may carry
 			// ANSI escapes, other C0/C1 controls, tabs, newlines, or a line far
-			// wider than the terminal. `showToolActivityWarning` renders through a
-			// plain `Text`, which strips none of that — an escape reaches the terminal
+			// wider than the terminal. `showWarning` renders through a plain `Text`,
+			// which strips none of that — an escape reaches the terminal
 			// and can repaint outside the row. `sanitizeText` drops the control
 			// sequences (and returns the same reference when there are none),
 			// then `previewLine` collapses the remaining whitespace and bounds
@@ -1632,8 +1632,9 @@ export class EventController {
 			// This is the render boundary, not the persisted result: the stored
 			// error stays full-fidelity for the transcript and for replays.
 			const detail = textContent ? previewLine(sanitizeText(textContent), TRUNCATE_LENGTHS.LINE) : "";
-			this.ctx.showToolActivityWarning(
+			this.ctx.showWarning(
 				`Todo update failed${detail ? `: ${detail}` : ". Progress may be stale until todo succeeds."}`,
+				{ toolActivity: true },
 			);
 		}
 		// Plan approval rides a `write` to xd://propose: the dispatch metadata on
