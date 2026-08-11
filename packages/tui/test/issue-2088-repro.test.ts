@@ -46,6 +46,28 @@ class MutableLinesComponent implements Component {
 	}
 }
 
+class WrappingLinesComponent implements Component {
+	#lines: string[];
+
+	constructor(lines: string[]) {
+		this.#lines = [...lines];
+	}
+
+	setLines(lines: string[]): void {
+		this.#lines = [...lines];
+	}
+
+	invalidate(): void {}
+
+	render(width: number): string[] {
+		const rows: string[] = [];
+		for (const line of this.#lines) {
+			for (let offset = 0; offset < line.length; offset += width) rows.push(line.slice(offset, offset + width));
+		}
+		return rows;
+	}
+}
+
 class WidthLabelComponent implements Component {
 	invalidate(): void {}
 
@@ -1028,6 +1050,56 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 					).toHaveLength(1);
 				}
 				expect(visible(term)).toEqual([...appended.slice(-5), "editor"]);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("rebases hidden-growth accounting when an overlay spans a widening width epoch", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const initial = Array.from(
+				{ length: 8 },
+				(_value, index) => `initial-${index.toString().padStart(2, "0")} ${"I".repeat(20)}`,
+			);
+			const appended = Array.from(
+				{ length: 8 },
+				(_value, index) => `hidden-${index.toString().padStart(2, "0")} ${"H".repeat(20)}`,
+			);
+			const term = new VirtualTerminal(17, 6, 10_000);
+			const component = new WrappingLinesComponent(initial);
+			const tui = new TUI(term);
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				const overlay = tui.showOverlay(new MutableLinesComponent(["overlay"]), {
+					anchor: "top-left",
+					row: 1,
+					col: 1,
+				});
+				await settle(term);
+
+				term.resize(40, 6);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+				component.setLines([...initial, ...appended]);
+				tui.requestRender(true);
+				await settle(term);
+				overlay.hide();
+				tui.requestRender(true);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (const line of appended) {
+					const marker = line.slice(0, line.indexOf(" "));
+					expect(
+						buffer.filter(bufferLine => bufferLine.includes(marker)),
+						marker,
+					).toHaveLength(1);
+				}
+				expect(visible(term)).toEqual(appended.slice(-6));
 			} finally {
 				tui.stop();
 			}

@@ -3529,6 +3529,11 @@ export class TUI extends Container {
 					this.#windowTopRow = windowTop;
 				}
 				this.#committedRows += scrollRows;
+			} else if (widthEpochReset) {
+				// The overlay freezes commits and subsequent hidden-growth movement,
+				// but the resize itself changed physical-row coordinates. Rebase the
+				// window reference once so growth backfills from the settled width.
+				this.#windowTopRow = windowTop;
 			}
 			this.#clearScrollbackOnNextRender = false;
 			this.#hasEverRendered = true;
