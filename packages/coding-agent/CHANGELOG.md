@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed valid `.tar` and `.tar.gz` archive reads terminating omp through libarchive by parsing tar members in-process ([#4774](https://github.com/can1357/oh-my-pi/issues/4774)).
+
 ## [16.3.11] - 2026-07-06
 
 ### Changed

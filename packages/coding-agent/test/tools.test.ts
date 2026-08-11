@@ -64,6 +64,7 @@ function createFifoOrSkip(fifoPath: string): boolean {
 interface ArchiveFixtureEntry {
 	path: string;
 	content: string;
+	prefix?: string;
 }
 
 function writeTarString(buffer: Buffer, offset: number, length: number, value: string): void {
@@ -85,6 +86,7 @@ function createTarArchive(entries: ArchiveFixtureEntry[]): Buffer {
 		const content = Buffer.from(entry.content, "utf-8");
 
 		writeTarString(header, 0, 100, entry.path);
+		if (entry.prefix) writeTarString(header, 345, 155, entry.prefix);
 		writeTarOctal(header, 100, 8, 0o644);
 		writeTarOctal(header, 108, 8, 0);
 		writeTarOctal(header, 116, 8, 0);
@@ -676,6 +678,33 @@ describe("Coding Agent Tools", () => {
 			expect(output).toContain("pkg/");
 			expect(output).toContain("top.txt");
 			expect(result.details?.isDirectory).toBe(true);
+		});
+
+		it("should read tar.gz members with UTF-8 ustar prefixes", async () => {
+			const archivePath = path.join(testDir, "unicode-prefix.tar.gz");
+			const prefix = "bun-da3851e57ae130c5594d0e208a5da5ba8c13edfb/test/js/node/test/fixtures/copy/utf/新建文件夹";
+			const memberPath = `${prefix}/experimental.json`;
+			fs.writeFileSync(
+				archivePath,
+				zlib.gzipSync(
+					createTarArchive([
+						{
+							path: "experimental.json",
+							prefix,
+							content: '{ "type": "module" }',
+						},
+					]),
+				),
+			);
+
+			const rootResult = await readTool.execute("test-call-tar-unicode-prefix-root", { path: archivePath });
+			expect(getTextOutput(rootResult)).toContain("bun-da3851e57ae130c5594d0e208a5da5ba8c13edfb/");
+			expect(rootResult.details?.isDirectory).toBe(true);
+
+			const memberResult = await readTool.execute("test-call-tar-unicode-prefix-member", {
+				path: `${archivePath}:${memberPath}`,
+			});
+			expect(getTextOutput(memberResult)).toContain('{ "type": "module" }');
 		});
 
 		it("should list archive subdirectories", async () => {
