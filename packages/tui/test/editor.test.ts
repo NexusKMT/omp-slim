@@ -17,6 +17,16 @@ describe("Editor component", () => {
 		setKeybindings(new KeybindingsManager(TUI_KEYBINDINGS));
 	});
 
+	it("advances its width-epoch revision for text changes but not cursor movement", () => {
+		const editor = new Editor(defaultEditorTheme);
+		const initial = editor.getNativeScrollbackWidthEpochRevision();
+		editor.setText("draft");
+		const changed = editor.getNativeScrollbackWidthEpochRevision();
+		expect(changed).toBeGreaterThan(initial);
+		editor.moveToLineStart();
+		expect(editor.getNativeScrollbackWidthEpochRevision()).toBe(changed);
+	});
+
 	describe("Word delete keybindings", () => {
 		it("honors a keybindings.yml remap of deleteWordBackward in the multi-line editor", () => {
 			setKeybindings(new KeybindingsManager(TUI_KEYBINDINGS, { "tui.editor.deleteWordBackward": "alt+g" }));

@@ -47,6 +47,30 @@ class MutableLinesComponent implements Component {
 	}
 }
 
+class RevisionMutableLinesComponent implements Component {
+	#lines: string[];
+	#revision = 0;
+
+	constructor(lines: string[]) {
+		this.#lines = [...lines];
+	}
+
+	setLines(lines: string[]): void {
+		this.#lines = [...lines];
+		this.#revision++;
+	}
+
+	getNativeScrollbackWidthEpochRevision(): number {
+		return this.#revision;
+	}
+
+	invalidate(): void {}
+
+	render(width: number): string[] {
+		return this.#lines.map(line => line.slice(0, width));
+	}
+}
+
 class WrappingLinesComponent implements Component {
 	#lines: string[];
 
@@ -880,6 +904,45 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 					).toHaveLength(1);
 				}
 				expect(visible(term).slice(-4)).toEqual(["queued-00", "queued-01", "queued-02", "editor"]);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("retains rows when a stable trailing child changes rendered height during settlement", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const transcript = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				transcript.append(`content-${index.toString().padStart(2, "0")} ${"C".repeat(46)}`);
+			}
+			const editor = new RevisionMutableLinesComponent(["editor"]);
+			const editorRoot = new Container();
+			editorRoot.addChild(editor);
+			tui.addChild(transcript);
+			tui.addChild(editorRoot);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 6);
+				await Bun.sleep(10);
+				editor.setLines(["draft-00", "draft-01", "draft-02", "editor"]);
+				tui.requestComponentRender(editor);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (let index = 0; index < 8; index++) {
+					const marker = `content-${index.toString().padStart(2, "0")}`;
+					expect(
+						buffer.filter(line => line.includes(marker)),
+						marker,
+					).toHaveLength(1);
+				}
+				expect(visible(term).slice(-4)).toEqual(["draft-00", "draft-01", "draft-02", "editor"]);
 			} finally {
 				tui.stop();
 			}

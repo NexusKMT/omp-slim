@@ -258,6 +258,10 @@ function getNativeScrollbackWidthEpoch(component: Component): NativeScrollbackWi
 		: undefined;
 }
 
+function getNativeScrollbackWidthEpochRevision(component: Component): number | undefined {
+	return (component as Component & Partial<NativeScrollbackWidthEpoch>).getNativeScrollbackWidthEpochRevision?.();
+}
+
 function isOverlayFocusTarget(owner: Component, component: Component | null): boolean {
 	if (component === owner) return true;
 	if (!component) return false;
@@ -548,6 +552,7 @@ export class Container
 	#memoChildren: Component[] = [];
 	#widthEpochBoundaries = new WeakMap<object, { component: Component; childBoundary: unknown }>();
 	#widthEpochRevision = 0;
+	#widthEpochChildRevisions = new WeakMap<Component, number | undefined>();
 
 	#ignoreTight = false;
 
@@ -681,6 +686,15 @@ export class Container
 	}
 
 	getNativeScrollbackWidthEpochRevision(): number {
+		for (const child of this.children) {
+			const revision = getNativeScrollbackWidthEpochRevision(child);
+			if (!this.#widthEpochChildRevisions.has(child)) {
+				this.#widthEpochChildRevisions.set(child, revision);
+			} else if (this.#widthEpochChildRevisions.get(child) !== revision) {
+				this.#widthEpochChildRevisions.set(child, revision);
+				this.#widthEpochRevision++;
+			}
+		}
 		return this.#widthEpochRevision;
 	}
 
@@ -1345,7 +1359,7 @@ export class TUI extends Container {
 		let rows = segment.start + childRows;
 		for (const [component, capturedRevision] of marker.trailingRevisions) {
 			const candidate = this.#frameSegments.find(current => current.component === component);
-			const revision = getNativeScrollbackWidthEpoch(component)?.getNativeScrollbackWidthEpochRevision?.();
+			const revision = getNativeScrollbackWidthEpochRevision(component);
 			// Changed/removed tails are not cross-width comparable. Treat their
 			// entire settled contribution as new in the current boundary: this can
 			// conservatively duplicate rows, but cannot omit displaced transcript.
@@ -1442,7 +1456,7 @@ export class TUI extends Container {
 					);
 				}
 				childLines = child.render(width);
-				widthEpochRevision = getNativeScrollbackWidthEpoch(child)?.getNativeScrollbackWidthEpochRevision?.();
+				widthEpochRevision = getNativeScrollbackWidthEpochRevision(child);
 				const liveRegionStart = getNativeScrollbackLiveRegionStart(child);
 				if (liveRegionStart !== undefined) {
 					liveLocalStart = Number.isFinite(liveRegionStart)

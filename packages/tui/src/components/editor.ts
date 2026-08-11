@@ -410,6 +410,8 @@ export class Editor implements Component, Focusable {
 		cursorLine: 0,
 		cursorCol: 0,
 	};
+	#widthEpochText = "";
+	#widthEpochRevision = 0;
 
 	/** Focusable interface - set by TUI when focus changes */
 	focused: boolean = false;
@@ -1668,6 +1670,15 @@ export class Editor implements Component, Focusable {
 
 	getText(): string {
 		return this.#state.lines.join("\n");
+	}
+
+	getNativeScrollbackWidthEpochRevision(): number {
+		const text = this.getText();
+		if (text !== this.#widthEpochText) {
+			this.#widthEpochText = text;
+			this.#widthEpochRevision++;
+		}
+		return this.#widthEpochRevision;
 	}
 
 	/** Whether the buffer text equals `value`, without `getText()`'s full join —
