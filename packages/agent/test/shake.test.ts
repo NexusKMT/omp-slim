@@ -8,6 +8,7 @@ import {
 	collectShakeRegions,
 	DEFAULT_SHAKE_CONFIG,
 	estimateTokens,
+	RESCUE_SHAKE_CONFIG,
 } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, TextContent, ToolCall, ToolResultMessage } from "@oh-my-pi/pi-ai";
 
@@ -224,6 +225,13 @@ describe("shake config presets", () => {
 	test("default preset keeps a protect window", () => {
 		expect(DEFAULT_SHAKE_CONFIG.protectTokens).toBeGreaterThan(0);
 		expect(DEFAULT_SHAKE_CONFIG.protectedTools).toContain("skill");
+	});
+
+	test("rescue preset overrides the manual tail so it can elide the newest result", () => {
+		const recent = messageEntry(toolResultMessage("bash", "oversized-result ".repeat(2000)));
+		const regions = collectShakeRegions([recent], RESCUE_SHAKE_CONFIG);
+		expect(regions).toHaveLength(1);
+		expect(regions[0].entry).toBe(recent);
 	});
 
 	test("empty branch yields no regions", () => {

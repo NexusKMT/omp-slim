@@ -67,6 +67,10 @@ export const AGGRESSIVE_SHAKE_CONFIG: ShakeConfig = {
 /** Compaction dead-end rescue: aggressive reach, but artifact recovery reads stay protected. */
 export const RESCUE_SHAKE_CONFIG: ShakeConfig = {
 	...AGGRESSIVE_SHAKE_CONFIG,
+	// Rescue must be able to elide the newest oversized result even inside the
+	// manual preset's recent-tail window (#7776) — a dead-end recovery that
+	// cannot drop its blocker is not a recovery.
+	protectTokens: 0,
 	protectedTools: [...AGGRESSIVE_SHAKE_CONFIG.protectedTools, isArtifactRecoveryToolResult],
 };
 
