@@ -926,7 +926,8 @@ function getModelRoleAlias(value: string, settings?: ModelRoleLookup): string | 
 	return undefined;
 }
 
-function normalizeModelPatternList(value: string | string[] | undefined): string[] {
+/** Normalize comma-separated or array model selectors into an ordered pattern list. */
+export function normalizeModelPatternList(value: string | string[] | undefined): string[] {
 	if (!value) return [];
 	const patterns = Array.isArray(value) ? value.flatMap(pattern => pattern.split(",")) : value.split(",");
 	return patterns.map(pattern => pattern.trim()).filter(Boolean);

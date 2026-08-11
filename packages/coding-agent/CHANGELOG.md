@@ -1,6 +1,10 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+
+- Fixed Agent Control Center failing to open when an agent model override is configured as a YAML array. ([#8201](https://github.com/can1357/oh-my-pi/issues/8201))
+
 
 ## [17.2.12] - 2026-08-08
 

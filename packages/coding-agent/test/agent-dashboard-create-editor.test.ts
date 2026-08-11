@@ -237,6 +237,28 @@ describe("AgentDashboard tab navigation", () => {
 	});
 });
 
+describe("AgentDashboard model overrides", () => {
+	test("opens with an array model chain from settings", async () => {
+		await initTheme(false);
+		vi.spyOn(discovery, "discoverAgents").mockResolvedValue({
+			projectAgentsDir: null,
+			agents: [{ name: "dev", description: "Development agent", systemPrompt: "", source: "project" }],
+		});
+		const settings = Settings.isolated({
+			"task.agentModelOverrides": {
+				dev: ["opencode-go/deepseek:high", "bailian/deepseek:high"],
+			},
+		});
+
+		const dashboard = await AgentDashboard.create(await makeTempCwd(), settings, 24, {});
+		const rendered = dashboard.render(120).join("\n").replace(ANSI_PATTERN, "");
+
+		expect(rendered).toContain("dev");
+		expect(rendered).toContain("Override: opencode-go/deepseek:high,bailian/deepseek:high");
+		expect(rendered).not.toContain("Failed to load agents");
+	});
+});
+
 describe("AgentDashboard prewalk", () => {
 	test("shows the bundled task prewalk default when task.prewalk is enabled", async () => {
 		await initTheme(false);

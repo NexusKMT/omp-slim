@@ -385,6 +385,8 @@ export const DEFAULT_BASH_INTERCEPTOR_RULES: BashInterceptorRule[] = [
 	},
 ];
 
+const DEFAULT_AGENT_MODEL_OVERRIDES: Record<string, string | string[]> = {};
+
 export const SETTINGS_SCHEMA = {
 	// ────────────────────────────────────────────────────────────────────────
 	// General settings (no UI)
@@ -4724,7 +4726,7 @@ export const SETTINGS_SCHEMA = {
 
 	"task.agentModelOverrides": {
 		type: "record",
-		default: {} as Record<string, string>,
+		default: DEFAULT_AGENT_MODEL_OVERRIDES,
 	},
 	"task.agentPrewalk": {
 		type: "record",
