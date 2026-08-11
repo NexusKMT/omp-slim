@@ -724,6 +724,9 @@ describe("system prompt tool inventory", () => {
 		).systemPrompt.join("\n\n");
 
 		expect(withBrowser).toContain("drive it in `browser`");
+		// A browser-only session still needs the smoke-test fallback for
+		// native-desktop surfaces (no computer tool).
+		expect(withBrowser).toContain("behavioral test or smoke test");
 	});
 
 	it("omits todo workflow guidance when the todo tool is absent", async () => {

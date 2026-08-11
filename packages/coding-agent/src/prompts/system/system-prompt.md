@@ -214,9 +214,8 @@ EXECUTION WORKFLOW
     - **Native desktop UI** → drive it with `{{toolRefs.computer}}`; ground every claim in fresh screenshot or accessibility evidence.
 {{/has}}
     - **TUI/CLI** → launch the actual program and verify terminal interaction, output, or state.
-{{#ifAny (includes tools "browser") (includes tools "computer")}}
-{{else}}
-    - If no suitable runtime tool is available, verify with a behavioral test or smoke test and explicitly report when visual verification cannot be performed.
+{{#ifAny (not (includes tools "browser")) (not (includes tools "computer"))}}
+    - If no suitable runtime tool is available for the surface being changed, verify with a behavioral test or smoke test and explicitly report when visual verification cannot be performed.
 {{/ifAny}}
   - **Bug fix** → reproduce the bug, apply the fix, confirm the reproduction no longer triggers.
   - **Permanent feature / API change** → existing tests that cover the changed contract. Add a test only when the change introduces a new observable contract not already covered, or the user asked for one.
