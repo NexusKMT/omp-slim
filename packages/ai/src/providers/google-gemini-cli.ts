@@ -14,6 +14,7 @@ import {
 	getGeminiCliHeaders,
 } from "@oh-my-pi/pi-catalog/wire/gemini-headers";
 import { extractHttpStatusFromError, fetchWithRetry, readSseJson } from "@oh-my-pi/pi-utils";
+import forcedToolDirective from "./google-antigravity-forced-tool.md" with { type: "text" };
 import * as AIError from "../error";
 import type {
 	Api,
@@ -1346,6 +1347,13 @@ export function buildRequest(
 						allowedFunctionNames: [...choice.allowedFunctionNames],
 					},
 				};
+			}
+			// Cloud Code Assist drops `toolConfig` on Antigravity's Gemini routes:
+			// the backend answers in text under `mode: "ANY"` and still emits calls
+			// under `"NONE"`. Claude routes implement it, so only Gemini needs the
+			// forced choice restated in the transcript.
+			if (isAntigravity && !isClaudeModel(model.id) && request.toolConfig?.functionCallingConfig.mode === "ANY") {
+				contents.push({ role: "user", parts: [{ text: forcedToolDirective }] });
 			}
 		}
 		// Antigravity's default tool mode is VALIDATED (verified for Gemini and
