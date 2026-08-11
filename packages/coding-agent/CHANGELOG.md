@@ -19,6 +19,9 @@
 ### Added
 
 - Added `externalThinking` setting for private scratchpad reasoning via the new `think` tool
+### Fixed
+
+- Fixed the MCP Streamable HTTP transport never sending the `MCP-Protocol-Version` header and negotiating the stale `2025-03-26` revision, which made spec-current servers (e.g. AWS Bedrock AgentCore Gateway with an outbound per-user OAuth target) reject every `tools/call` with a generic internal error. The client now negotiates `2025-11-25`, echoes the negotiated version on every request after `initialize`, and resumes server-closed POST response streams with `Last-Event-ID` after the requested SSE retry interval ([#8264](https://github.com/can1357/oh-my-pi/issues/8264)).
 
 ## [17.2.13] - 2026-08-11
 

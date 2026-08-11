@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Extended parsed Server-Sent Events with optional `id` and `retry` fields, including control-only events, so reconnecting transports can retain stream cursors and server-requested retry intervals.
+
 ## [17.2.13] - 2026-08-11
 
 ### Changed
