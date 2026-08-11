@@ -913,13 +913,13 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 				await settle(term);
 
 				expect(writes.join("")).toContain("post-epoch-00");
-				expect(component.receivedCommittedRows.at(-1)).toBe(committedBeforeResize);
+				expect(component.receivedCommittedRows.at(-1)).toBe(35);
 				expect(visible(term)).toEqual([...appended.slice(-5), "editor"]);
 
 				component.append(continued);
 				tui.requestRender(true);
 				await settle(term);
-				expect(component.receivedCommittedRows.at(-1)).toBe(committedBeforeResize);
+				expect(component.receivedCommittedRows.at(-1)).toBe(37);
 				expect(visible(term)).toEqual([...appended.slice(-3), ...continued, "editor"]);
 
 				const buffer = term.getScrollBuffer().map(line => line.trimEnd());

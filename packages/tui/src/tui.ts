@@ -1328,13 +1328,14 @@ export class TUI extends Container {
 		const children = this.children;
 		const previousSegments = this.#frameSegments;
 		const segments: FrameSegment[] = new Array(children.length);
-		// A multiplexer width epoch makes the renderer's native commit count
-		// intentionally unmappable to current-width component rows. Do not feed
-		// that opaque count into snapshot/sealing logic; components retain their
-		// last valid claim until a full replay establishes a new coordinate tape.
+		// The transition frame cannot map the old-width native commit count into
+		// current-width component rows. Once the epoch baseline exists,
+		// #windowTopRow is the current-width commit seam while #committedRows
+		// remains the opaque native ledger.
 		const committedCoordinatesOpaque =
-			this.#widthEpochBaselineRows !== undefined ||
-			(this.#composeWidth > 0 && this.#composeWidth !== width && this.#resizeRepaintsInPlace());
+			this.#composeWidth > 0 && this.#composeWidth !== width && this.#resizeRepaintsInPlace();
+		const componentCommittedRows =
+			this.#widthEpochBaselineRows === undefined ? this.#committedRows : this.#windowTopRow;
 		// A width change re-renders every child; nothing carries over.
 		let chainStable = this.#composeWidth === width;
 		this.#composeWidth = width;
@@ -1372,7 +1373,7 @@ export class TUI extends Container {
 				if (!committedCoordinatesOpaque) {
 					setNativeScrollbackCommittedRows(
 						child,
-						Math.min(prevRows, Math.max(0, this.#committedRows - prevStart)),
+						Math.min(prevRows, Math.max(0, componentCommittedRows - prevStart)),
 					);
 				}
 				childLines = child.render(width);
@@ -3537,6 +3538,7 @@ export class TUI extends Container {
 			}
 			this.#clearScrollbackOnNextRender = false;
 			this.#hasEverRendered = true;
+			this.#publishCommittedRows(this.#windowTopRow);
 			return;
 		}
 		if (imageTransmitBuffer.length > 0) {
@@ -3599,11 +3601,11 @@ export class TUI extends Container {
 	 * rows that just entered immutable native scrollback, stranding an
 	 * orphaned copy above the repainted block.
 	 */
-	#publishCommittedRows(): void {
+	#publishCommittedRows(committedRows = this.#committedRows): void {
 		for (const segment of this.#frameSegments) {
 			setNativeScrollbackCommittedRows(
 				segment.component,
-				Math.min(segment.rowCount, Math.max(0, this.#committedRows - segment.start)),
+				Math.min(segment.rowCount, Math.max(0, committedRows - segment.start)),
 			);
 		}
 	}
