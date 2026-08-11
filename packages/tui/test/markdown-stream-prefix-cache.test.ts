@@ -25,10 +25,29 @@ describe("Markdown streaming prefix render cache", () => {
 		const snapshotRows = new Markdown(initialText, 0, 1, defaultMarkdownTheme).render(40).length;
 		expect(settledBoundary).toBe(snapshotRows - 2);
 		expect(settledCurrent).toBe(settledBoundary);
+		expect(md.isNativeScrollbackWidthEpochAppendOnly(boundary)).toBe(false);
 
 		md.setText(`${initialText} followed by enough appended words to create additional physical rows`);
 		md.render(40);
 		expect(md.getNativeScrollbackWidthEpochRows()).toBeGreaterThan(settledBoundary!);
+
+		md.transientRenderCache = false;
+		expect(md.isNativeScrollbackWidthEpochAppendOnly(md.captureNativeScrollbackWidthEpoch())).toBe(false);
+		md.render(40);
+		expect(md.resolveNativeScrollbackWidthEpoch(boundary)).toBe(settledBoundary);
+		expect(md.isNativeScrollbackWidthEpochAppendOnly(boundary)).toBe(false);
+
+		const settled = new Markdown(initialText, 0, 1, defaultMarkdownTheme);
+		settled.render(40);
+		const settledCapture = settled.captureNativeScrollbackWidthEpoch();
+		expect(settled.isNativeScrollbackWidthEpochAppendOnly(settledCapture)).toBe(true);
+
+		const whitespace = new Markdown("   ", 0, 1, defaultMarkdownTheme);
+		whitespace.transientRenderCache = true;
+		whitespace.render(40);
+		expect(whitespace.isNativeScrollbackWidthEpochAppendOnly(whitespace.captureNativeScrollbackWidthEpoch())).toBe(
+			true,
+		);
 	});
 
 	it("reuses rendered frozen prefix lines during transient append renders", () => {

@@ -548,14 +548,27 @@ export class Container
 	// on invalidate().
 	#memoLines: string[] | undefined;
 	#memoChildLines: (readonly string[])[] = [];
+	#memoChildWidthEpochRevisions: Array<number | undefined> = [];
 	#memoWidth = -1;
 	// Child identities matching #memoChildLines. Kept separately because callers
 	// may append children after the last emitted render but before SIGWINCH.
 	#memoChildren: Component[] = [];
 	#widthEpochBoundaries = new WeakMap<
 		object,
-		{ component: Component; childBoundary: unknown; hasTrailingRows: boolean }
+		{
+			component: Component;
+			childBoundary: unknown;
+			sourceIndex: number;
+			leading: ReadonlyArray<{ component: Component; revision: number | undefined; rowCount: number }>;
+			trailing: ReadonlyArray<{
+				component: Component;
+				revision: number | undefined;
+				rowCount: number;
+				hadRows: boolean;
+			}>;
+		}
 	>();
+	#activeWidthEpochBoundary: object | undefined;
 	#widthEpochRevision = 0;
 	#widthEpochChildRevisions = new WeakMap<Component, number | undefined>();
 
@@ -656,10 +669,22 @@ export class Container
 			const childBoundary = source?.captureNativeScrollbackWidthEpoch();
 			if (childBoundary === undefined) continue;
 			const marker = {};
+			this.#activeWidthEpochBoundary = marker;
 			this.#widthEpochBoundaries.set(marker, {
 				component,
 				childBoundary,
-				hasTrailingRows: refs.slice(index + 1).some(rows => rows.length > 0),
+				sourceIndex: index,
+				leading: children.slice(0, index).map((child, leadingIndex) => ({
+					component: child,
+					revision: this.#memoChildWidthEpochRevisions[leadingIndex],
+					rowCount: refs[leadingIndex]!.length,
+				})),
+				trailing: children.slice(index + 1).map((child, trailingIndex) => ({
+					component: child,
+					revision: this.#memoChildWidthEpochRevisions[index + 1 + trailingIndex],
+					rowCount: refs[index + 1 + trailingIndex]!.length,
+					hadRows: refs[index + 1 + trailingIndex]!.length > 0,
+				})),
 			});
 			return marker;
 		}
@@ -670,9 +695,25 @@ export class Container
 		if (typeof boundary !== "object" || boundary === null) return undefined;
 		const marker = this.#widthEpochBoundaries.get(boundary);
 		if (!marker) return undefined;
-		const index = this.#memoChildren.indexOf(marker.component);
-		if (index < 0 || this.#memoLines === undefined || this.#memoChildLines.length !== this.#memoChildren.length) {
+		const index = marker.sourceIndex;
+		if (
+			this.#memoChildren[index] !== marker.component ||
+			this.#memoLines === undefined ||
+			this.#memoChildLines.length !== this.#memoChildren.length
+		) {
 			return undefined;
+		}
+		for (let leadingIndex = 0; leadingIndex < marker.leading.length; leadingIndex++) {
+			const captured = marker.leading[leadingIndex]!;
+			const currentRows = this.#memoChildLines[leadingIndex]!;
+			if (
+				this.#memoChildren[leadingIndex] !== captured.component ||
+				(captured.revision === undefined
+					? currentRows.length !== captured.rowCount
+					: getNativeScrollbackWidthEpochRevision(captured.component) !== captured.revision)
+			) {
+				return undefined;
+			}
 		}
 		const childRows = getNativeScrollbackWidthEpoch(marker.component)?.resolveNativeScrollbackWidthEpoch(
 			marker.childBoundary,
@@ -680,16 +721,53 @@ export class Container
 		if (childRows === undefined) return undefined;
 		let rows = childRows;
 		for (let i = 0; i < index; i++) rows += this.#memoChildLines[i]!.length;
+		for (let trailingIndex = 0; trailingIndex < marker.trailing.length; trailingIndex++) {
+			const captured = marker.trailing[trailingIndex]!;
+			const currentIndex = index + 1 + trailingIndex;
+			const currentRows = this.#memoChildLines[currentIndex];
+			if (
+				this.#memoChildren[currentIndex] !== captured.component ||
+				currentRows === undefined ||
+				(captured.revision === undefined
+					? currentRows.length !== captured.rowCount
+					: getNativeScrollbackWidthEpochRevision(captured.component) !== captured.revision)
+			) {
+				break;
+			}
+			rows += currentRows.length;
+		}
 		return rows;
 	}
 
 	getNativeScrollbackWidthEpochRows(): number | undefined {
 		if (this.#memoLines === undefined || this.#memoChildLines.length !== this.#memoChildren.length) return undefined;
+		const marker =
+			this.#activeWidthEpochBoundary === undefined
+				? undefined
+				: this.#widthEpochBoundaries.get(this.#activeWidthEpochBoundary);
+		if (marker !== undefined) {
+			const index = marker.sourceIndex;
+			if (this.#memoChildren[index] !== marker.component) return undefined;
+			const rows = getNativeScrollbackWidthEpoch(marker.component)?.getNativeScrollbackWidthEpochRows();
+			if (rows === undefined) return undefined;
+			let boundary = rows;
+			for (let leading = 0; leading < index; leading++) boundary += this.#memoChildLines[leading]!.length;
+			for (let trailing = index + 1; trailing < this.#memoChildLines.length; trailing++) {
+				boundary += this.#memoChildLines[trailing]!.length;
+			}
+			return boundary;
+		}
 		let offset = this.#memoLines.length;
 		for (let index = this.#memoChildren.length - 1; index >= 0; index--) {
 			offset -= this.#memoChildLines[index]!.length;
 			const rows = getNativeScrollbackWidthEpoch(this.#memoChildren[index]!)?.getNativeScrollbackWidthEpochRows();
-			if (rows !== undefined) return offset + rows;
+			if (rows !== undefined) {
+				let boundary = offset + rows;
+				for (let trailing = index + 1; trailing < this.#memoChildLines.length; trailing++) {
+					boundary += this.#memoChildLines[trailing]!.length;
+				}
+				return boundary;
+			}
 		}
 		return undefined;
 	}
@@ -700,7 +778,7 @@ export class Container
 		if (!marker) return true;
 		const source = getNativeScrollbackWidthEpoch(marker.component);
 		if (source?.isNativeScrollbackWidthEpochAppendOnly?.(marker.childBoundary) === false) return false;
-		if (!marker.hasTrailingRows) return true;
+		if (!marker.trailing.some(child => child.hadRows)) return true;
 		const previousRows = source?.resolveNativeScrollbackWidthEpoch(marker.childBoundary);
 		const currentRows = source?.getNativeScrollbackWidthEpochRows();
 		return previousRows === undefined || currentRows === undefined || currentRows <= previousRows;
@@ -724,13 +802,17 @@ export class Container
 		const children = this.children;
 		const count = children.length;
 		let refs = this.#memoChildLines;
+		let revisions = this.#memoChildWidthEpochRevisions;
 		let unchanged = this.#memoLines !== undefined && this.#memoWidth === width && refs.length === count;
 		if (refs.length !== count) {
 			refs = new Array(count);
 			this.#memoChildLines = refs;
+			revisions = new Array(count);
+			this.#memoChildWidthEpochRevisions = revisions;
 		}
 		for (let i = 0; i < count; i++) {
 			const childLines = children[i]!.render(width);
+			revisions[i] = getNativeScrollbackWidthEpochRevision(children[i]!);
 			if (refs[i] !== childLines) {
 				unchanged = false;
 				refs[i] = childLines;

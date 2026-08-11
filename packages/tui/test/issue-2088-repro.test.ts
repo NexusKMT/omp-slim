@@ -1111,6 +1111,89 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 		});
 	});
 
+	it("retains rows when a nested trailing child grows during settlement", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const transcript = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				transcript.append(`nested-${index.toString().padStart(2, "0")} ${"N".repeat(46)}`);
+			}
+			const editor = new MutableLinesComponent(["editor"]);
+			const root = new Container();
+			root.addChild(transcript);
+			root.addChild(editor);
+			tui.addChild(root);
+
+			try {
+				tui.start();
+				await settle(term);
+				const beforeResizeBaseY = term.getBufferPosition().baseY;
+				term.resize(17, 6);
+				await Bun.sleep(10);
+				editor.setLines(["draft-00", "draft-01", "draft-02", "editor"]);
+				tui.requestComponentRender(editor);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				expect(term.getBufferPosition().baseY).toBeGreaterThan(beforeResizeBaseY);
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (let index = 0; index < 8; index++) {
+					const marker = `nested-${index.toString().padStart(2, "0")}`;
+					expect(
+						buffer.filter(line => line.includes(marker)),
+						marker,
+					).toHaveLength(1);
+				}
+				expect(visible(term).slice(-4)).toEqual(["draft-00", "draft-01", "draft-02", "editor"]);
+
+				const settledBaseY = term.getBufferPosition().baseY;
+				tui.requestRender(true);
+				await settle(term);
+				expect(term.getBufferPosition().baseY).toBe(settledBaseY);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("captures nested trailing growth queued immediately before resize", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const transcript = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				transcript.append(`queued-nested-${index.toString().padStart(2, "0")} ${"Q".repeat(46)}`);
+			}
+			const editor = new RevisionMutableLinesComponent(["editor"]);
+			const root = new Container();
+			root.addChild(transcript);
+			root.addChild(editor);
+			tui.addChild(root);
+
+			try {
+				tui.start();
+				await settle(term);
+				editor.setLines(["queued-00", "queued-01", "queued-02", "editor"]);
+				term.resize(17, 6);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (let index = 0; index < 8; index++) {
+					const marker = `queued-nested-${index.toString().padStart(2, "0")}`;
+					expect(
+						buffer.filter(line => line.includes(marker)),
+						marker,
+					).toHaveLength(1);
+				}
+				expect(visible(term).slice(-4)).toEqual(["queued-00", "queued-01", "queued-02", "editor"]);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
 	it("does not treat paint-only reflow in a trailing root as appended output", async () => {
 		await withEnvPatch(TMUX_ENV, async () => {
 			const term = new VirtualTerminal(40, 6, 10_000);

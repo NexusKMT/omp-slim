@@ -1460,7 +1460,12 @@ export class Markdown
 	// Semantic source state that produced the most recent render. Unlike #text,
 	// it does not advance when streaming updates arrive before the next paint.
 	#lastRenderedText?: string;
-	#widthEpochBoundaries = new WeakMap<object, string>();
+	#lastRenderedTransientRenderCache = false;
+	#lastRenderedHasMutableTrailingRow = false;
+	#widthEpochBoundaries = new WeakMap<
+		object,
+		{ text: string; transientRenderCache: boolean; hasMutableTrailingRow: boolean }
+	>();
 
 	// True while #renderStreamingContentLines renders the frozen token range:
 	// frozen code blocks highlight even in transient mode so their bytes match
@@ -1560,16 +1565,20 @@ export class Markdown
 	captureNativeScrollbackWidthEpoch(): unknown {
 		if (this.#lastRenderedText === undefined) return undefined;
 		const marker = {};
-		this.#widthEpochBoundaries.set(marker, this.#lastRenderedText);
+		this.#widthEpochBoundaries.set(marker, {
+			text: this.#lastRenderedText,
+			transientRenderCache: this.#lastRenderedTransientRenderCache,
+			hasMutableTrailingRow: this.#lastRenderedHasMutableTrailingRow,
+		});
 		return marker;
 	}
 
 	resolveNativeScrollbackWidthEpoch(boundary: unknown): number | undefined {
 		if (typeof boundary !== "object" || boundary === null || this.#cachedWidth === undefined) return undefined;
-		const text = this.#widthEpochBoundaries.get(boundary);
-		if (text === undefined) return undefined;
+		const captured = this.#widthEpochBoundaries.get(boundary);
+		if (captured === undefined) return undefined;
 		const snapshot = new Markdown(
-			text,
+			captured.text,
 			this.#paddingX,
 			this.#paddingY,
 			this.#theme,
@@ -1577,16 +1586,30 @@ export class Markdown
 			this.#codeBlockIndent,
 		);
 		snapshot.#ignoreTight = this.#ignoreTight;
-		snapshot.#transientRenderCache = this.#transientRenderCache;
-		return this.#widthEpochRows(snapshot.render(this.#cachedWidth).length);
+		snapshot.#transientRenderCache = captured.transientRenderCache;
+		return Math.max(
+			0,
+			snapshot.render(this.#cachedWidth).length - this.#paddingY - (captured.hasMutableTrailingRow ? 1 : 0),
+		);
 	}
 
 	getNativeScrollbackWidthEpochRows(): number | undefined {
 		return this.#cachedLines === undefined ? undefined : this.#widthEpochRows(this.#cachedLines.length);
 	}
 
+	isNativeScrollbackWidthEpochAppendOnly(boundary: unknown): boolean {
+		if (typeof boundary !== "object" || boundary === null) return true;
+		return this.#widthEpochBoundaries.get(boundary)?.hasMutableTrailingRow !== true;
+	}
+
 	#widthEpochRows(renderedRows: number): number {
 		return Math.max(0, renderedRows - this.#paddingY - (this.#transientRenderCache ? 1 : 0));
+	}
+
+	#recordLastRenderedState(hasContentRows: boolean): void {
+		this.#lastRenderedText = this.#text;
+		this.#lastRenderedTransientRenderCache = this.#transientRenderCache;
+		this.#lastRenderedHasMutableTrailingRow = this.#transientRenderCache && hasContentRows;
 	}
 
 	/**
@@ -1688,7 +1711,7 @@ export class Markdown
 		// Returning the cached reference is load-bearing: parents memoize their
 		// concatenation on reference equality.
 		if (this.#cachedLines && this.#cachedText === this.#text && this.#cachedWidth === width) {
-			this.#lastRenderedText = this.#text;
+			this.#recordLastRenderedState(this.#cachedLines.length > 0);
 			return this.#cachedLines;
 		}
 
@@ -1705,7 +1728,7 @@ export class Markdown
 			this.#cachedText = this.#text;
 			this.#cachedWidth = width;
 			this.#cachedLines = EMPTY_RENDER_LINES;
-			this.#lastRenderedText = this.#text;
+			this.#recordLastRenderedState(false);
 			return EMPTY_RENDER_LINES;
 		}
 
@@ -1741,7 +1764,7 @@ export class Markdown
 				this.#cachedText = this.#text;
 				this.#cachedWidth = width;
 				this.#cachedLines = cached.lines;
-				this.#lastRenderedText = this.#text;
+				this.#recordLastRenderedState(cached.lines.length > 0);
 				return cached.lines;
 			}
 		}
@@ -1785,7 +1808,7 @@ export class Markdown
 				})),
 			});
 		}
-		this.#lastRenderedText = this.#text;
+		this.#recordLastRenderedState(contentLines.length > 0);
 
 		return result;
 	}
