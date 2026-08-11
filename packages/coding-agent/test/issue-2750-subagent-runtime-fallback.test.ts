@@ -178,8 +178,7 @@ describe("subagent runtime model resolution", () => {
 			return { session: createYieldingSession(), extensionsResult: {}, setToolUIContext: () => {} } as never;
 		});
 
-		// Mirrors what the spawn path hands the executor for the bundled scout
-		// (`model: "@smol"`): patterns already expanded, role carried beside them.
+		// Direct executor callers may still pass an unexpanded agent role alias.
 		const agent: AgentDefinition = {
 			name: "scout",
 			description: "test",
@@ -193,8 +192,6 @@ describe("subagent runtime model resolution", () => {
 			task: "work",
 			index: 0,
 			id: "role-alias-chain",
-			modelOverride: ["fast/hy3"],
-			modelRole: "smol",
 			settings: Settings.isolated({
 				modelRoles: { default: "slow/opus", smol: "fast/hy3" },
 				"retry.fallbackChains": {
@@ -285,8 +282,6 @@ describe("subagent runtime model resolution", () => {
 			task: "work",
 			index: 0,
 			id: "role-alias-default-chain",
-			modelOverride: ["fast/hy3"],
-			modelRole: "smol",
 			settings: Settings.isolated({
 				modelRoles: { default: "slow/opus", smol: "fast/hy3" },
 				"retry.fallbackChains": { default: ["slow/opus-backup"] },

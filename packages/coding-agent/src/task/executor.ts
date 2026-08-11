@@ -196,11 +196,10 @@ function resolveSubagentRetryFallbackCandidates(
  * identity, and a role that happens to be assigned the same model must not
  * capture the child's fallback routing.
  *
- * `modelRole` is the sole witness of that identity. Callers hand
- * `runSubprocess` the model patterns already expanded by
- * `resolveAgentModelSelection`, so `@task` never survives into them — the role
- * has to travel beside the patterns, and re-deriving it from them yields
- * `undefined` every time.
+ * Spawn paths preserve the pre-expansion alias as `modelRole` because their
+ * model patterns are already expanded. Direct callers may still supply an
+ * unexpanded alias through `modelOverride` or `agent.model`; retain that
+ * existing path by deriving the role only when no preserved role was supplied.
  */
 function resolveSubagentInheritedRetryFallbackChain(
 	settings: Settings,
@@ -2844,7 +2843,11 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			const configuredModelPatterns = resolveConfiguredModelPatterns(modelPatterns, settings);
 			const inheritedRetryFallbackChain =
 				configuredModelPatterns.length === 1
-					? resolveSubagentInheritedRetryFallbackChain(subagentSettings, modelRegistry, modelRole)
+					? resolveSubagentInheritedRetryFallbackChain(
+							subagentSettings,
+							modelRegistry,
+							modelRole ?? resolveExplicitModelRole(modelPatterns, subagentSettings),
+						)
 					: undefined;
 			const {
 				model,
