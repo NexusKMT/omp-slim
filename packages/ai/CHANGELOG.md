@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `forceReasoningOff` and `disableReasoning` options to disable reasoning in OpenAI and Azure OpenAI models
+
 ## [17.2.13] - 2026-08-11
 
 ### Changed
