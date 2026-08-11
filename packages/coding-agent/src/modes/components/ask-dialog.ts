@@ -602,7 +602,7 @@ export class AskDialogComponent implements Component {
 			return `Enter submit · ↑/↓ scroll ·${scroll} ${cancel}`;
 		}
 		const question = this.#questions[this.#currentQuestionIndex()];
-		const action = question?.multi ? "Space/Enter toggle · n note" : "Enter select · n note";
+		const action = question?.multi ? "Space toggle · Enter submit" : "Enter select · n note";
 		const tabs = this.#hasSubmitTab() ? " · Tab/←/→" : "";
 		if (this.#questionCanPage && indicator) {
 			return `${action} · ↑/↓${tabs} · ${cancel} · ${pageKeysLabel()} ${indicator}`;
@@ -680,8 +680,14 @@ export class AskDialogComponent implements Component {
 		const option = question.options[rowItem.optionIndex ?? -1];
 		if (!option) return;
 		if (question.multi) {
-			// Multi is toggle-only: Enter and Space both toggle, and the
-			// answer is confirmed from the Submit tab.
+			if (isEnter) {
+				// Enter confirms the current selection without toggling the
+				// focused option; Space toggles. Matches single-select
+				// Enter-to-submit so the multi dialog never dead-ends on an
+				// undiscoverable Submit tab (#8252).
+				this.#finishSubmit();
+				return;
+			}
 			if (state.selectedOptions.has(option.label)) {
 				state.selectedOptions.delete(option.label);
 				clearNoteIfRow(state, rowItem.key);
