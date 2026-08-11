@@ -82,6 +82,15 @@ import {
 	topBorderSplit,
 } from "./overlay-box";
 
+/** Two-pane mode needs a useful roster and a readable inspector. */
+const SPLIT_MIN_WIDTH = 96;
+const DETAIL_MIN_WIDTH = 34;
+const ROSTER_MIN_WIDTH = 48;
+
+export type AgentHubSection = "agents" | "activity";
+type ActivityFilter = "all" | "errors" | "responses" | "tools";
+type ActivityScope = "all" | "agent" | "subtree";
+
 type HubViewMode = "roster" | "tree";
 
 /** Refresh cadence for the relative-time column. */
@@ -107,7 +116,12 @@ function activityGlyph(row: AgentActivityRow): string {
 }
 
 function activityClock(timestamp: number): string {
-	return new Date(timestamp).toISOString().slice(11, 19);
+	return new Date(timestamp).toLocaleTimeString(undefined, {
+		hour: "2-digit",
+		minute: "2-digit",
+		second: "2-digit",
+		hour12: false,
+	});
 }
 /** Result of one host-backed transcript read for the Agent Hub viewer. */
 export interface AgentHubRemoteTranscript {
@@ -160,6 +174,10 @@ export interface AgentHubDeps {
 	focusAgent?: (id: string) => Promise<void>;
 	/** Current main session file; used to seed parked historical subagents after restart. */
 	sessionFile?: string | null;
+	/** Initial top-level projection; slash commands deep-link into this surface. */
+	initialSection?: AgentHubSection;
+	/** Injectable unified activity source; production creates one from local or remote transcripts. */
+	activity?: AgentActivityIndex;
 
 	/** Collab guest: route actions/transcripts to the host instead of local sessions. */
 	remote?: AgentHubRemote;
@@ -183,6 +201,18 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	readonly persistedSubagentsReady: Promise<void>;
 	/** Prevent the async persisted-session scan from flashing a false empty state. */
 	#loadingPersistedSubagents = false;
+	#section: AgentHubSection;
+	#activity: AgentActivityIndex;
+	#manageActivityLive: boolean;
+	#activityRows: AgentActivityRow[] = [];
+	#selectedActivityRow = 0;
+	#activityFilter: ActivityFilter = "all";
+	#activityScope: ActivityScope = "all";
+	#activitySearch = "";
+	#activitySearchEditing = false;
+	#activityFollow = true;
+	#activitySyncGeneration = 0;
+	#activitySyncStamp = new Map<string, string>();
 
 	// Table state
 	#rows: AgentRef[] = [];
@@ -244,6 +274,9 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 
 	constructor(deps: AgentHubDeps) {
 		super();
+		this.#section = deps.initialSection ?? "agents";
+		this.#activity = deps.activity ?? new AgentActivityIndex({ remote: deps.remote });
+		this.#manageActivityLive = !deps.activity;
 		this.#registry = deps.registry ?? AgentRegistry.global();
 		this.#observers = deps.observers;
 		this.#settings = deps.settings;
@@ -326,7 +359,11 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 
 	override render(width: number): readonly string[] {
 		const termHeight = this.#ui.terminal?.rows || process.stdout.rows || 40;
-		const frame = this.#renderTable(width, termHeight).map(line => clampHubLine(line, width));
+		const frame = (
+			this.#section === "activity"
+				? this.#renderActivityTable(width, termHeight)
+				: this.#renderTable(width, termHeight)
+		).map(line => clampHubLine(line, width));
 		if (frame.length <= termHeight) return frame;
 
 		// A tiny terminal can leave less room than the fixed chrome needs. Keep
@@ -354,7 +391,20 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 				return;
 			}
 		}
-		this.#handleTableInput(keyData);
+		if (this.#section === "activity" && this.#activitySearchEditing) {
+			this.#handleActivitySearchInput(keyData);
+			return;
+		}
+		if (keyData === "1") {
+			this.#switchSection("agents");
+			return;
+		}
+		if (keyData === "2") {
+			this.#switchSection("activity");
+			return;
+		}
+		if (this.#section === "activity") this.#handleActivityInput(keyData);
+		else this.#handleTableInput(keyData);
 	}
 
 	/**
@@ -384,6 +434,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		let viewer: AgentTranscriptViewer;
 		viewer = new AgentTranscriptViewer({
 			agentId: id,
+			initialEntryId: entryId,
 			registry: this.#registry,
 			remote: this.#remote,
 			observers: this.#observers,
@@ -529,11 +580,15 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			pending.push(this.#activity.sync(ref.id, ref.sessionFile));
 		}
 		if (pending.length === 0) return;
-		void Promise.all(pending).then(() => {
-			if (this.#disposed || generation !== this.#activitySyncGeneration) return;
-			this.#refreshActivityRows();
-			this.#requestRender();
-		});
+		void Promise.all(pending)
+			.then(() => {
+				if (this.#disposed || generation !== this.#activitySyncGeneration) return;
+				this.#refreshActivityRows();
+				this.#requestRender();
+			})
+			.catch(() => {
+				// Individual sync paths already guard I/O failures; keep the hub render loop alive.
+			});
 	}
 
 	#activityAgentIds(): ReadonlySet<string> | undefined {
@@ -733,7 +788,10 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	#footer(showingNarrowDetails: boolean, availableWidth: number): string {
 		const nextView = this.#viewMode === "roster" ? "by parent" : "flat";
 		if (showingNarrowDetails) {
-		return theme.fg("dim", `1:agents  2:activity  Tab:roster  PgUp/PgDn:scroll  Enter:open  t:${nextView}  Esc:roster`);
+			return theme.fg(
+				"dim",
+				`1:agents  2:activity  Tab:roster  PgUp/PgDn:scroll  Enter:open  t:${nextView}  Esc:roster`,
+			);
 		}
 		if (availableWidth < 96) {
 			return theme.fg("dim", `j/k:select  Enter:open  t:${nextView}  Tab:details  r/x:manage  Esc:close`);
@@ -1174,6 +1232,93 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		this.#selectRow(index);
 		this.#requestRender();
 		this.#activateAgent(selected);
+	}
+
+	#switchSection(section: AgentHubSection): void {
+		if (this.#section === section) return;
+		this.#section = section;
+		this.#hoveredRow = null;
+		this.#narrowDetailsOpen = false;
+		if (section === "activity") this.#refreshActivityRows();
+		this.#requestRender();
+	}
+
+	#handleActivitySearchInput(keyData: string): void {
+		if (matchesKey(keyData, "escape") || matchesKey(keyData, "enter") || keyData === "\r" || keyData === "\n") {
+			this.#activitySearchEditing = false;
+		} else if (matchesKey(keyData, "backspace")) {
+			this.#activitySearch = this.#activitySearch.slice(0, -1);
+		} else if (keyData.length === 1 && keyData >= " " && keyData !== "\u007f") {
+			this.#activitySearch += keyData;
+		} else {
+			return;
+		}
+		this.#refreshActivityRows();
+		this.#requestRender();
+	}
+
+	#handleActivityInput(keyData: string): void {
+		if (matchesKey(keyData, "escape")) {
+			if (this.#activitySearch) {
+				this.#activitySearch = "";
+				this.#refreshActivityRows();
+				this.#requestRender();
+			} else {
+				this.#onDone();
+			}
+			return;
+		}
+		if (matchesKey(keyData, "left")) {
+			this.#switchSection("agents");
+			return;
+		}
+		if (keyData === "/") {
+			this.#activitySearchEditing = true;
+			this.#requestRender();
+			return;
+		}
+		if (keyData === " ") {
+			this.#activityFollow = !this.#activityFollow;
+			if (this.#activityFollow && this.#activityRows.length > 0) {
+				this.#selectedActivityRow = this.#activityRows.length - 1;
+			}
+			this.#requestRender();
+			return;
+		}
+		if (keyData === "f") {
+			const filters: ActivityFilter[] = ["all", "errors", "responses", "tools"];
+			this.#activityFilter = filters[(filters.indexOf(this.#activityFilter) + 1) % filters.length]!;
+			this.#refreshActivityRows();
+			this.#requestRender();
+			return;
+		}
+		if (keyData === "s") {
+			const scopes: ActivityScope[] = ["all", "agent", "subtree"];
+			this.#activityScope = scopes[(scopes.indexOf(this.#activityScope) + 1) % scopes.length]!;
+			this.#refreshActivityRows();
+			this.#requestRender();
+			return;
+		}
+		if (matchesKey(keyData, "j") || matchesSelectDown(keyData)) {
+			if (this.#activityRows.length > 0) {
+				this.#activityFollow = false;
+				this.#selectedActivityRow = Math.min(this.#selectedActivityRow + 1, this.#activityRows.length - 1);
+			}
+			this.#requestRender();
+			return;
+		}
+		if (matchesKey(keyData, "k") || matchesSelectUp(keyData)) {
+			if (this.#activityRows.length > 0) {
+				this.#activityFollow = false;
+				this.#selectedActivityRow = Math.max(this.#selectedActivityRow - 1, 0);
+			}
+			this.#requestRender();
+			return;
+		}
+		if (matchesKey(keyData, "enter") || keyData === "\r" || keyData === "\n") {
+			const activity = this.#activityRows[this.#selectedActivityRow];
+			if (activity) this.openChat(activity.agentId, activity.entryId);
+		}
 	}
 
 	#handleTableInput(keyData: string): void {
