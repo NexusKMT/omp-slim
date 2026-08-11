@@ -706,11 +706,12 @@ describe("CursorExecHandlers error results", () => {
 		// present-undefined and ArkType rejects the bash call.
 		const events: AgentEvent[] = [];
 		const executeArgs: Record<string, unknown>[] = [];
-		const bashTool: AgentTool = {
+		const bashSchema = type({ command: "string", "cwd?": "string", "timeout?": "number" });
+		const bashTool: AgentTool<typeof bashSchema> = {
 			name: "bash",
 			label: "bash",
 			description: "records args",
-			parameters: type({ command: "string", "cwd?": "string", "timeout?": "number" }),
+			parameters: bashSchema,
 			execute: async (_id, args) => {
 				executeArgs.push({ ...args });
 				return { content: [{ type: "text", text: "ok" }], details: {} };

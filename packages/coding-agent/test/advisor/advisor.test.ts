@@ -3837,7 +3837,7 @@ describe("advisor", () => {
 		});
 
 		it("asks the host to switch models when a refusal outlives the stripped resend", async () => {
-			const promptInputs: string[] = [];
+			const promptInputs: Array<string | AgentMessage[]> = [];
 			const failures: unknown[] = [];
 			const state: { messages: AgentMessage[]; error?: string } = { messages: [] };
 			// The first model refuses every time; the host's fallback hook swaps in a
@@ -3910,7 +3910,7 @@ describe("advisor", () => {
 		});
 
 		it("starts a fresh fallback cascade after the host declines to switch models", async () => {
-			const promptInputs: string[] = [];
+			const promptInputs: Array<string | AgentMessage[]> = [];
 			const failures: unknown[] = [];
 			let fallbackCalls = 0;
 			const state: { messages: AgentMessage[]; error?: string } = { messages: [] };
@@ -3983,7 +3983,7 @@ describe("advisor", () => {
 		it("walks the whole fallback chain before reporting a refusal", async () => {
 			// Every model refuses. The cascade must reach the last chain entry, then
 			// stop once the host runs out of candidates.
-			const promptInputs: string[] = [];
+			const promptInputs: Array<string | AgentMessage[]> = [];
 			const failures: unknown[] = [];
 			const state: { messages: AgentMessage[]; error?: string } = { messages: [] };
 			let identity = "anthropic/claude-fable-5";
@@ -4046,7 +4046,7 @@ describe("advisor", () => {
 		});
 
 		it("stops a refusal walk that a cyclic chain would loop forever", async () => {
-			const promptInputs: string[] = [];
+			const promptInputs: Array<string | AgentMessage[]> = [];
 			const failures: unknown[] = [];
 			const state: { messages: AgentMessage[]; error?: string } = { messages: [] };
 			// A chain configured A -> B -> A: the host never runs out of candidates,
