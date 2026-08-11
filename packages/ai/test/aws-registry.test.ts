@@ -139,6 +139,57 @@ describe("AWS provider availability", () => {
 		}
 	});
 
+	test("gates role profile credential_source by source readiness", async () => {
+		const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "aws-registry-credential-source-"));
+		try {
+			const credentialsPath = path.join(tmp, "credentials");
+			const configPath = path.join(tmp, "config");
+			await Bun.write(credentialsPath, "");
+			const baseEnv = {
+				...EMPTY_AWS_ENV,
+				AWS_PROFILE: "default",
+				AWS_SHARED_CREDENTIALS_FILE: credentialsPath,
+				AWS_CONFIG_FILE: configPath,
+				AWS_EC2_METADATA_DISABLED: "true",
+			};
+
+			for (const credentialSource of ["Environment", "EcsContainer", "Ec2InstanceMetadata", "Unknown"]) {
+				await Bun.write(
+					configPath,
+					`[default]\nrole_arn = arn:aws:iam::111122223333:role/user\ncredential_source = ${credentialSource}\n`,
+				);
+				await withEnv(baseEnv, async () => expect(getEnvApiKey("bedrock-mantle")).toBeUndefined());
+			}
+
+			await Bun.write(
+				configPath,
+				"[default]\nrole_arn = arn:aws:iam::111122223333:role/user\ncredential_source = Environment\n",
+			);
+			await withEnv(
+				{ ...baseEnv, AWS_ACCESS_KEY_ID: "AKIAREADY", AWS_SECRET_ACCESS_KEY: "ready-secret" },
+				async () => expect(getEnvApiKey("bedrock-mantle")).toBeDefined(),
+			);
+
+			await Bun.write(
+				configPath,
+				"[default]\nrole_arn = arn:aws:iam::111122223333:role/user\ncredential_source = EcsContainer\n",
+			);
+			await withEnv({ ...baseEnv, AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/test" }, async () =>
+				expect(getEnvApiKey("bedrock-mantle")).toBeDefined(),
+			);
+
+			await Bun.write(
+				configPath,
+				"[default]\nrole_arn = arn:aws:iam::111122223333:role/user\ncredential_source = Ec2InstanceMetadata\n",
+			);
+			await withEnv({ ...baseEnv, AWS_EC2_METADATA_DISABLED: "false" }, async () =>
+				expect(getEnvApiKey("bedrock-mantle")).toBeDefined(),
+			);
+		} finally {
+			await removeWithRetries(tmp);
+		}
+	});
+
 	test("recognizes an explicitly configured EC2 metadata endpoint", async () => {
 		await withEnv(
 			{

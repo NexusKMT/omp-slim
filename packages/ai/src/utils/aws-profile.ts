@@ -101,7 +101,18 @@ function profileHasCredentialSource(
 	if (merged.role_arn) {
 		if (merged.web_identity_token_file) return true;
 		if (merged.mfa_serial) return false;
-		if (merged.credential_source) return true;
+		if (merged.credential_source) {
+			switch (merged.credential_source) {
+				case "Environment":
+					return !!($env.AWS_ACCESS_KEY_ID && $env.AWS_SECRET_ACCESS_KEY);
+				case "EcsContainer":
+					return !!($env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI || $env.AWS_CONTAINER_CREDENTIALS_FULL_URI);
+				case "Ec2InstanceMetadata":
+					return $env.AWS_EC2_METADATA_DISABLED?.toLowerCase() !== "true";
+				default:
+					return false;
+			}
+		}
 		if (merged.source_profile)
 			return profileHasCredentialSource(merged.source_profile, credentialsIni, configIni, seen);
 		return false;
