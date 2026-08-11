@@ -104,6 +104,19 @@ describe("orchestrate notice", () => {
 		expect(notice).not.toContain("via `bash`");
 		expect(notice).not.toContain("`todo` for tracking");
 	});
+
+	it("does not name edit when only write is available", () => {
+		const writeOnly = renderOrchestrateNotice({ tools: ["read", "write"] });
+		expect(writeOnly).toContain("with `write`");
+		expect(writeOnly).not.toContain("`edit`/`write`");
+		expect(writeOnly).not.toContain("with `edit`");
+	});
+
+	it("does not name write when only edit is available", () => {
+		const editOnly = renderOrchestrateNotice({ tools: ["read", "edit"] });
+		expect(editOnly).toContain("with `edit`");
+		expect(editOnly).not.toContain("`edit`/`write`");
+	});
 });
 
 describe("orchestrate slash command removal", () => {

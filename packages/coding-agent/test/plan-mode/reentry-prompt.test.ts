@@ -41,13 +41,18 @@ describe("plan-mode-active tool availability", () => {
 		expect(withAsk).toContain("use `ask` for preferences and tradeoffs");
 	});
 
-	it("provides a prose fallback for preference collection when ask is unavailable", () => {
+	it("records preferences as assumptions when ask is unavailable", () => {
 		const iterativeWithoutAsk = render({ askAvailable: false, iterative: true });
-		expect(iterativeWithoutAsk).toContain("present the candidates with a recommendation in prose");
+		expect(iterativeWithoutAsk).toContain("Record them as Assumptions with a recommended default");
+		expect(iterativeWithoutAsk).toContain("record preferences and tradeoffs as Assumptions");
 		expect(iterativeWithoutAsk).not.toContain("`ask` for preferences and tradeoffs only");
 
 		const parallelWithoutAsk = render({ askAvailable: false, iterative: false });
-		expect(parallelWithoutAsk).toContain("surface any remaining preference questions with a recommendation in prose");
+		expect(parallelWithoutAsk).toContain(
+			"record any remaining preference questions as Assumptions with a recommended default",
+		);
+		// A prose question cannot end the turn in plan mode — no prose-terminal option.
+		expect(parallelWithoutAsk).not.toContain("Presenting a choice between approaches");
 	});
 
 	it("omits scout-via-task dispatch when the task tool is unavailable", () => {
